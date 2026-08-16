@@ -1,0 +1,156 @@
+<!--
+  pick_scene —— 拾取与描边（07）。
+
+  守的性质：**小、细、互相遮挡**——拾取只有在这三种情况下才会出问题。
+
+  - **小**：`ball_00..ball_15` 半径 0.03～0.05，在默认机位上只有十几个像素。
+    ID buffer 若与颜色缓冲分辨率不一致、或 MSAA 解析时把 id 平均了，先在这里坏。
+  - **细**：`rod_*` 半径 0.006 的杆，屏幕上不到 2 px。**光标正对着它却选不中**是最典型的
+    拾取缺陷，而它在大方块上永远复现不出来。
+  - **互相遮挡**：`stack_*` 三个球沿视线方向排成一列，屏幕上几乎重合。点中的必须是
+    **最前面**那个——深度取错的表现是"点了前面选中了后面"，画面上完全看不出来。
+
+  另外一件事只有多 geom 的 body 能守：`cluster` 这个 body 里有 5 个 geom，`pair` 里有 2 个，
+  它们**必须共用一个 object_id**（04 §4.1），描边画出来是**整节连杆一条外轮廓**，
+  不是 5 个 geom 各描一圈。少了这一条画面上是一团网格线，而每个 geom 单看都"描对了"。
+
+  **每一个可拾取的东西都挂在自己的 `<body>` 上，一个关节都不带。** 构建器按 body 填
+  `object_id`，世界 body 是 0，而 0 的语义是"没点中"（07 §7.2）——挂在 worldbody 上的
+  geom 点不中。没有关节的 body 焊在世界上，不动，但各有 id。**只有地板留在 worldbody
+  上**：它是背景，点它就该等于没点中。
+
+  编号写在 body 与 geom 名字里（`ball_07` 这种），拾取结果能直接对着名字念，
+  不必再去数第几个。
+-->
+<mujoco model="pick_scene">
+  <compiler angle="degree" autolimits="true"/>
+
+  <visual>
+    <headlight ambient="0.28 0.28 0.28" diffuse="0.45 0.45 0.45" specular="0.4 0.4 0.4"/>
+    <quality shadowsize="2048" numslices="28" numstacks="16"/>
+    <map znear="0.01" zfar="30"/>
+  </visual>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.17 0.19 0.23" rgb2="0.27 0.30 0.35"/>
+    <material name="grid" texture="grid" texrepeat="1 1" texuniform="true"/>
+    <material name="ball" rgba="0.85 0.55 0.20 1" specular="0.6" shininess="0.7"/>
+    <material name="ball_alt" rgba="0.30 0.65 0.85 1" specular="0.6" shininess="0.7"/>
+    <material name="rod" rgba="0.88 0.88 0.90 1" specular="0.8" shininess="0.9"/>
+    <material name="cluster" rgba="0.45 0.75 0.45 1" specular="0.3" shininess="0.4"/>
+    <material name="slab" rgba="0.55 0.45 0.65 1" specular="0.2" shininess="0.3"/>
+  </asset>
+
+  <worldbody>
+    <light name="sun" type="directional" pos="1.5 -2 4" dir="-0.3 0.4 -1"
+           diffuse="0.65 0.65 0.65" specular="0.25 0.25 0.25" castshadow="true"/>
+
+    <!-- 地板是背景：留在 worldbody 上，object_id = 0，点它等于没点中 -->
+    <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
+
+    <!-- 16 个带编号的小球，4×4 排开，半径在 0.03～0.05 之间递增。各占一个 body -->
+    <body name="ball_00" pos="-0.45 -0.45 0.030">
+      <geom name="ball_00" type="sphere" size="0.030" material="ball"/>
+    </body>
+    <body name="ball_01" pos="-0.15 -0.45 0.033">
+      <geom name="ball_01" type="sphere" size="0.033" material="ball_alt"/>
+    </body>
+    <body name="ball_02" pos="0.15 -0.45 0.036">
+      <geom name="ball_02" type="sphere" size="0.036" material="ball"/>
+    </body>
+    <body name="ball_03" pos="0.45 -0.45 0.039">
+      <geom name="ball_03" type="sphere" size="0.039" material="ball_alt"/>
+    </body>
+    <body name="ball_04" pos="-0.45 -0.15 0.032">
+      <geom name="ball_04" type="sphere" size="0.032" material="ball_alt"/>
+    </body>
+    <body name="ball_05" pos="-0.15 -0.15 0.035">
+      <geom name="ball_05" type="sphere" size="0.035" material="ball"/>
+    </body>
+    <body name="ball_06" pos="0.15 -0.15 0.038">
+      <geom name="ball_06" type="sphere" size="0.038" material="ball_alt"/>
+    </body>
+    <body name="ball_07" pos="0.45 -0.15 0.041">
+      <geom name="ball_07" type="sphere" size="0.041" material="ball"/>
+    </body>
+    <body name="ball_08" pos="-0.45 0.15 0.034">
+      <geom name="ball_08" type="sphere" size="0.034" material="ball"/>
+    </body>
+    <body name="ball_09" pos="-0.15 0.15 0.037">
+      <geom name="ball_09" type="sphere" size="0.037" material="ball_alt"/>
+    </body>
+    <body name="ball_10" pos="0.15 0.15 0.040">
+      <geom name="ball_10" type="sphere" size="0.040" material="ball"/>
+    </body>
+    <body name="ball_11" pos="0.45 0.15 0.043">
+      <geom name="ball_11" type="sphere" size="0.043" material="ball_alt"/>
+    </body>
+    <body name="ball_12" pos="-0.45 0.45 0.036">
+      <geom name="ball_12" type="sphere" size="0.036" material="ball_alt"/>
+    </body>
+    <body name="ball_13" pos="-0.15 0.45 0.039">
+      <geom name="ball_13" type="sphere" size="0.039" material="ball"/>
+    </body>
+    <body name="ball_14" pos="0.15 0.45 0.042">
+      <geom name="ball_14" type="sphere" size="0.042" material="ball_alt"/>
+    </body>
+    <body name="ball_15" pos="0.45 0.45 0.045">
+      <geom name="ball_15" type="sphere" size="0.045" material="ball"/>
+    </body>
+
+    <!-- 细杆：半径 0.006，默认机位上不到 2 px 宽 -->
+    <body name="rod_x">
+      <geom name="rod_x" type="capsule" fromto="-0.7 0.75 0.35 0.7 0.75 0.35" size="0.006"
+            material="rod"/>
+    </body>
+    <body name="rod_y">
+      <geom name="rod_y" type="capsule" fromto="0.85 -0.7 0.35 0.85 0.7 0.35" size="0.006"
+            material="rod"/>
+    </body>
+    <body name="rod_diag">
+      <geom name="rod_diag" type="capsule" fromto="-0.65 -0.7 0.10 0.60 0.65 0.62" size="0.006"
+            material="rod"/>
+    </body>
+    <body name="rod_up">
+      <geom name="rod_up" type="capsule" fromto="-0.85 0.0 0.0 -0.85 0.0 0.75" size="0.008"
+            material="rod"/>
+    </body>
+
+    <!-- 沿默认视线方向排成一列：屏幕上几乎重合，只有深度能分开它们 -->
+    <body name="stack_near" pos="0.30 -0.90 0.62">
+      <geom name="stack_near" type="sphere" size="0.075" material="ball"/>
+    </body>
+    <body name="stack_mid" pos="0.05 -0.62 0.72">
+      <geom name="stack_mid" type="sphere" size="0.075" material="ball_alt"/>
+    </body>
+    <body name="stack_far" pos="-0.20 -0.34 0.82">
+      <geom name="stack_far" type="sphere" size="0.075" material="ball"/>
+    </body>
+
+    <!-- 一个挡板，把一部分小球压在后面 -->
+    <body name="slab" pos="0.0 -0.78 0.22">
+      <geom name="slab" type="box" size="0.55 0.02 0.22" material="slab"/>
+    </body>
+
+    <!-- 两个 geom 的 body：最小的"一条外轮廓"用例，比 5 个的更容易读 -->
+    <body name="pair" pos="0.95 0.85 0.20">
+      <geom name="pair_a" type="box" size="0.20 0.12 0.20" material="cluster"/>
+      <geom name="pair_b" type="sphere" pos="0.20 0 0.14" size="0.14" material="cluster"/>
+    </body>
+
+    <!-- 多 geom 的 body：描边必须是一条外轮廓，不是 5 圈 -->
+    <body name="cluster" pos="-0.95 0.85 0.28">
+      <geom name="cluster_core" type="box" size="0.14 0.14 0.14" material="cluster"/>
+      <geom name="cluster_arm_x" type="capsule" fromto="0 0 0 0.30 0 0" size="0.045"
+            material="cluster"/>
+      <geom name="cluster_arm_y" type="capsule" fromto="0 0 0 0 0.30 0" size="0.045"
+            material="cluster"/>
+      <geom name="cluster_arm_z" type="capsule" fromto="0 0 0 0 0 0.26" size="0.045"
+            material="cluster"/>
+      <geom name="cluster_tip" type="sphere" pos="0.30 0 0" size="0.075" material="cluster"/>
+    </body>
+
+    <camera name="pick" pos="1.35 -1.65 1.05" xyaxes="0.77 0.64 0 -0.28 0.34 0.90"/>
+  </worldbody>
+</mujoco>

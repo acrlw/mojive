@@ -1,0 +1,395 @@
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from ..log import get_logger
+from . import fonts
+from . import theme as theme_mod
+
+log = get_logger("window")
+
+
+_live_windows = 0
+
+
+glfw: Any = None
+gl: Any = None
+imgui: Any = None
+GlfwRenderer: Any = None
+
+
+def _load_gl_deps() -> None:
+    global glfw, gl, imgui, GlfwRenderer
+    if glfw is not None:
+        return
+    import glfw as _glfw
+    from imgui_bundle import imgui as _imgui
+    from imgui_bundle.python_backends.glfw_backend import GlfwRenderer as _GlfwRenderer
+    from OpenGL import GL as _gl
+
+    glfw, gl, imgui, GlfwRenderer = _glfw, _gl, _imgui, _GlfwRenderer
+
+
+@dataclass
+class ResizeLatch:
+    settle_seconds: float = 0.6
+    warmup_frames: int = 30
+
+    _committed: tuple[int, int] | None = field(default=None, init=False)
+    _pending: tuple[int, int] | None = field(default=None, init=False)
+    _pending_since: float = field(default=0.0, init=False)
+    _frames: int = field(default=0, init=False)
+    _rebuilds: int = field(default=0, init=False)
+
+    @property
+    def committed(self) -> tuple[int, int] | None:
+
+        return self._committed
+
+    @property
+    def frames(self) -> int:
+        return self._frames
+
+    @property
+    def rebuilds(self) -> int:
+
+        return self._rebuilds
+
+    def update(self, size: tuple[int, int], now: float) -> tuple[int, int] | None:
+
+        self._frames += 1
+        w, h = (max(1, int(size[0])), max(1, int(size[1])))
+        target = (w, h)
+
+        if target == self._committed:
+            self._pending = None
+            return None
+
+        if self._frames <= self.warmup_frames:
+            return self._commit(target)
+
+        if target != self._pending:
+            self._pending = target
+            self._pending_since = now
+            return None
+
+        if now - self._pending_since >= self.settle_seconds:
+            return self._commit(target)
+        return None
+
+    def reset(self) -> None:
+
+        self._committed = None
+        self._pending = None
+
+    def _commit(self, size: tuple[int, int]) -> tuple[int, int]:
+        self._committed = size
+        self._pending = None
+        self._rebuilds += 1
+        return size
+
+
+@dataclass(frozen=True)
+class WindowConfig:
+    title: str = "forge-viewer"
+    width: int = 1600
+    height: int = 900
+    vsync: bool = True
+
+    gl_major: int = 3
+    gl_minor: int = 3
+    samples: int = 0
+
+    docking: bool = True
+    ini_path: str | None = "imgui.ini"
+
+    clear_color: tuple[float, float, float, float] = (0.09, 0.10, 0.11, 1.0)
+    font_size_pt: float = 14.0
+
+
+class Window:
+    def __init__(self, config: WindowConfig | None = None) -> None:
+        _load_gl_deps()
+        self.config = config or WindowConfig()
+        if not glfw.init():
+            raise RuntimeError("GLFW initialization failed")
+        global _live_windows
+        _live_windows += 1
+
+        glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, self.config.gl_major)
+        glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, self.config.gl_minor)
+        glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+        glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, glfw.TRUE)
+        glfw.window_hint(glfw.SAMPLES, self.config.samples)
+        glfw.window_hint(glfw.DOUBLEBUFFER, glfw.TRUE)
+
+        glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
+
+        glfw.window_hint(glfw.FOCUS_ON_SHOW, glfw.FALSE)
+
+        handle = glfw.create_window(
+            self.config.width, self.config.height, self.config.title, None, None
+        )
+        if not handle:
+            glfw.terminate()
+            raise RuntimeError(
+                f"Failed to create an OpenGL {self.config.gl_major}.{self.config.gl_minor} core context"
+            )
+        self._window = handle
+        self._shown = False
+        self._destroyed = False
+        self._frame_index = 0
+        self._readback: np.ndarray | None = None
+
+        glfw.make_context_current(self._window)
+        self.set_vsync(self.config.vsync)
+
+        self._ui_scale = 1.0
+        self._pixel_scale = 1.0
+        self._refresh_scales()
+
+        imgui.create_context()
+        io = imgui.get_io()
+        if self.config.docking:
+            io.config_flags |= imgui.ConfigFlags_.docking_enable
+        io.config_flags |= imgui.ConfigFlags_.nav_enable_keyboard
+
+        ini = self.config.ini_path or ""
+        self._ini_existed = bool(ini) and Path(ini).exists()
+        io.set_ini_filename(ini)
+
+        self._impl = GlfwRenderer(self._window)
+
+        self._impl.process_inputs()
+        fb_w, _ = self.size_pixels
+        pt_w, _ = self.size_points
+        display_w = float(imgui.get_io().display_size.x) or float(pt_w)
+        self._style_scale = self._ui_scale if abs(display_w - fb_w) < abs(display_w - pt_w) else 1.0
+        theme_mod.apply(imgui, ui_scale=self._style_scale)
+
+        imgui.get_style().font_scale_dpi = self._style_scale
+        self._load_fonts(io)
+
+        self.dockspace_id = 0
+        self._layout_done = False
+        self.latch = ResizeLatch()
+
+    def _load_fonts(self, io) -> None:
+
+        self.font_report = fonts.load(imgui, io, size_pt=self.config.font_size_pt)
+        for note in self.font_report.notes:
+            log.warning("Font fallback: {}", note)
+
+    @property
+    def gl_context(self) -> Any:
+
+        return self._window
+
+    def make_current(self) -> None:
+
+        glfw.make_context_current(self._window)
+
+    @property
+    def gl_version(self) -> str:
+        return gl.glGetString(gl.GL_VERSION).decode()
+
+    @property
+    def renderer_name(self) -> str:
+        return gl.glGetString(gl.GL_RENDERER).decode()
+
+    # ------------------------------------------------------------ HiDPI
+    #
+
+    @property
+    def ui_scale(self) -> float:
+
+        return self._ui_scale
+
+    @property
+    def style_scale(self) -> float:
+
+        return self._style_scale
+
+    @property
+    def pixel_scale(self) -> float:
+
+        return self._pixel_scale
+
+    def points_to_pixels(self, value: Any) -> Any:
+
+        s = self._pixel_scale
+        if isinstance(value, (int, float)):
+            return float(value) * s
+        return tuple(float(v) * s for v in value)
+
+    def pixels_to_points(self, value: Any) -> Any:
+
+        s = self._pixel_scale
+        if isinstance(value, (int, float)):
+            return float(value) / s
+        return tuple(float(v) / s for v in value)
+
+    @property
+    def size_points(self) -> tuple[int, int]:
+        w, h = glfw.get_window_size(self._window)
+        return int(w), int(h)
+
+    @property
+    def size_pixels(self) -> tuple[int, int]:
+        w, h = glfw.get_framebuffer_size(self._window)
+        return int(w), int(h)
+
+    def _refresh_scales(self) -> None:
+        try:
+            sx, _sy = glfw.get_window_content_scale(self._window)
+            self._ui_scale = float(sx) or 1.0
+        except Exception:
+            self._ui_scale = 1.0
+        win_w, _ = self.size_points
+        fb_w, _ = self.size_pixels
+        self._pixel_scale = (fb_w / win_w) if win_w > 0 else 1.0
+
+    def poll_render_size(
+        self, viewport_points: tuple[float, float], now: float | None = None
+    ) -> tuple[int, int] | None:
+
+        px = self.points_to_pixels(viewport_points)
+        return self.latch.update(
+            (int(px[0]), int(px[1])), time.perf_counter() if now is None else now
+        )
+
+    def show(self) -> None:
+
+        glfw.show_window(self._window)
+        self._shown = True
+
+    @property
+    def shown(self) -> bool:
+        return self._shown
+
+    def should_close(self) -> bool:
+        return bool(glfw.window_should_close(self._window))
+
+    def request_close(self) -> None:
+        glfw.set_window_should_close(self._window, True)
+
+    def set_vsync(self, on: bool) -> None:
+
+        glfw.swap_interval(1 if on else 0)
+
+    def set_title(self, title: str) -> None:
+        glfw.set_window_title(self._window, title)
+
+    def begin_frame(self) -> None:
+
+        glfw.poll_events()
+        self._refresh_scales()
+        self._impl.process_inputs()
+        imgui.new_frame()
+        if self.config.docking:
+            self.dockspace_id = imgui.dock_space_over_viewport(
+                0,
+                imgui.get_main_viewport(),
+                imgui.DockNodeFlags_.passthru_central_node,
+            )
+            self._build_default_layout()
+
+    #
+
+    _LAYOUT_LEFT = ("Hierarchy", "Inspector")
+    _LAYOUT_RIGHT = ("Control", "Joints", "Camera", "Settings", "Sensors")
+    _LAYOUT_BOTTOM = ("Stats", "Plot", "Help", "Info")
+
+    def _build_default_layout(self) -> None:
+
+        if self._layout_done:
+            return
+        self._layout_done = True
+        if self._ini_existed:
+            return
+
+        try:
+            ii = imgui.internal
+            root = self.dockspace_id
+            ii.dock_builder_remove_node(root)
+
+            ii.dock_builder_add_node(root, imgui.internal.DockNodeFlagsPrivate_.dock_space)
+            ii.dock_builder_set_node_size(root, imgui.get_main_viewport().size)
+
+            _, left, rest = ii.dock_builder_split_node_py(root, imgui.Dir.left, 0.22)
+            _, right, rest = ii.dock_builder_split_node_py(rest, imgui.Dir.right, 0.30)
+            _, bottom, center = ii.dock_builder_split_node_py(rest, imgui.Dir.down, 0.26)
+
+            ii.dock_builder_dock_window("Viewport", center)
+            for name in self._LAYOUT_LEFT:
+                ii.dock_builder_dock_window(name, left)
+            for name in self._LAYOUT_RIGHT:
+                ii.dock_builder_dock_window(name, right)
+            for name in self._LAYOUT_BOTTOM:
+                ii.dock_builder_dock_window(name, bottom)
+            ii.dock_builder_finish(root)
+        except Exception as e:
+            log.error("Default dock layout failed; panels will float: {}", e)
+
+    def end_frame(self, *, readback: bool = False) -> np.ndarray | None:
+
+        imgui.render()
+        fb_w, fb_h = self.size_pixels
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+        gl.glViewport(0, 0, fb_w, fb_h)
+
+        gl.glDisable(gl.GL_SCISSOR_TEST)
+        gl.glDepthMask(gl.GL_TRUE)
+        gl.glClearColor(*self.config.clear_color)
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+        self._impl.render(imgui.get_draw_data())
+
+        frame = self.read_frame() if readback else None
+        glfw.swap_buffers(self._window)
+        self._frame_index += 1
+        return frame
+
+    @property
+    def frame_index(self) -> int:
+        return self._frame_index
+
+    def read_frame(self) -> np.ndarray:
+
+        w, h = self.size_pixels
+        if self._readback is None or self._readback.shape[:2] != (h, w):
+            self._readback = np.empty((h, w, 3), np.uint8)
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+        gl.glReadBuffer(gl.GL_BACK)
+        gl.glPixelStorei(gl.GL_PACK_ALIGNMENT, 1)
+        gl.glReadPixels(0, 0, w, h, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, self._readback)
+        return self._readback
+
+    def close(self) -> None:
+
+        if self._destroyed:
+            return
+        self._destroyed = True
+        global _live_windows
+
+        try:
+            glfw.make_context_current(self._window)
+        except Exception as e:
+            log.debug("Failed to activate the GL context before shutdown: {}", e)
+        try:
+            self._impl.shutdown()
+        finally:
+            glfw.destroy_window(self._window)
+            _live_windows = max(0, _live_windows - 1)
+            if _live_windows == 0:
+                glfw.terminate()
+
+    def __enter__(self) -> Window:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()

@@ -1,0 +1,141 @@
+<?xml version="1.0"?>
+<!--
+  test_scene.urdf —— test_scene.xml 的 URDF 版。
+
+  守的性质：**URDF 加载路径本身**。同一个场景两种格式，画出来必须是同一幅画——
+  两边不一致时差异只可能在加载器里，不必再猜是不是场景写得不一样。
+
+  URDF 与 MJCF 的三处不得不改（不是随手改的，改动本身就是这份文件的信息）：
+  1. **没有 plane**：地板换成 4 m × 4 m × 0.02 m 的薄盒，顶面仍然在 z=0；
+  2. **没有 capsule**：坐标架的三根杆与地标胶囊换成 cylinder；
+  3. **没有程序化贴图**：地板只能是纯色。棋盘格是 MJCF 那份的事。
+  其余尺寸、位置、颜色与 MJCF 版逐个对齐。
+
+  所有连杆用 fixed 关节挂在 base_link 上——理由和 MJCF 版一样：**默认场景里不能有
+  会自行运动的东西**。
+-->
+<robot name="test_scene">
+
+  <!--
+    URDF 加载器默认 `discardvisual=true`（URDF 的 visual 通常是给 rviz 用的高模，
+    仿真只要 collision）。这份场景反过来：它的内容全在 visual 里，不显式关掉的话
+    整个场景只剩地板一个 geom——**而且不报错**，加载成功、画面几乎空白。
+  -->
+  <mujoco>
+    <compiler discardvisual="false" balanceinertia="true"/>
+  </mujoco>
+
+  <material name="floor"><color rgba="0.24 0.26 0.30 1"/></material>
+  <material name="axis_x"><color rgba="0.85 0.20 0.20 1"/></material>
+  <material name="axis_y"><color rgba="0.20 0.75 0.25 1"/></material>
+  <material name="axis_z"><color rgba="0.25 0.40 0.90 1"/></material>
+  <material name="mark_a"><color rgba="0.90 0.65 0.20 1"/></material>
+  <material name="mark_b"><color rgba="0.35 0.70 0.80 1"/></material>
+  <material name="mark_c"><color rgba="0.75 0.75 0.78 1"/></material>
+  <material name="mark_d"><color rgba="0.65 0.35 0.75 1"/></material>
+
+  <link name="base_link"/>
+
+  <link name="floor">
+    <visual>
+      <origin xyz="0 0 -0.01"/>
+      <geometry><box size="8 8 0.02"/></geometry>
+      <material name="floor"/>
+    </visual>
+    <!-- 不写 <collision>：它会在同一个位置生成第二个 geom，两片共面的板 z-fighting -->
+  </link>
+  <joint name="floor_fix" type="fixed">
+    <parent link="base_link"/><child link="floor"/><origin xyz="0 0 0"/>
+  </joint>
+
+  <!-- 坐标架：三条 0.5 m 的杆，圆柱的 origin 在中点、轴沿局部 Z，所以要各转一次 -->
+  <link name="axis_x">
+    <visual>
+      <origin xyz="0.25 0 0.02" rpy="0 1.5707963 0"/>
+      <geometry><cylinder radius="0.015" length="0.5"/></geometry>
+      <material name="axis_x"/>
+    </visual>
+  </link>
+  <joint name="axis_x_fix" type="fixed">
+    <parent link="base_link"/><child link="axis_x"/><origin xyz="0 0 0"/>
+  </joint>
+
+  <link name="axis_y">
+    <visual>
+      <origin xyz="0 0.25 0.02" rpy="-1.5707963 0 0"/>
+      <geometry><cylinder radius="0.015" length="0.5"/></geometry>
+      <material name="axis_y"/>
+    </visual>
+  </link>
+  <joint name="axis_y_fix" type="fixed">
+    <parent link="base_link"/><child link="axis_y"/><origin xyz="0 0 0"/>
+  </joint>
+
+  <link name="axis_z">
+    <visual>
+      <origin xyz="0 0 0.27"/>
+      <geometry><cylinder radius="0.015" length="0.5"/></geometry>
+      <material name="axis_z"/>
+    </visual>
+  </link>
+  <joint name="axis_z_fix" type="fixed">
+    <parent link="base_link"/><child link="axis_z"/><origin xyz="0 0 0"/>
+  </joint>
+
+  <link name="axis_origin">
+    <visual>
+      <origin xyz="0 0 0.02"/>
+      <geometry><sphere radius="0.03"/></geometry>
+      <material name="mark_c"/>
+    </visual>
+  </link>
+  <joint name="axis_origin_fix" type="fixed">
+    <parent link="base_link"/><child link="axis_origin"/><origin xyz="0 0 0"/>
+  </joint>
+
+  <!-- 四个地标，与 MJCF 版同位同尺寸 -->
+  <link name="mark_sphere">
+    <visual>
+      <origin xyz="1 0 0.15"/>
+      <geometry><sphere radius="0.15"/></geometry>
+      <material name="mark_a"/>
+    </visual>
+  </link>
+  <joint name="mark_sphere_fix" type="fixed">
+    <parent link="base_link"/><child link="mark_sphere"/><origin xyz="0 0 0"/>
+  </joint>
+
+  <link name="mark_box">
+    <visual>
+      <origin xyz="0 1 0.15"/>
+      <geometry><box size="0.3 0.3 0.3"/></geometry>
+      <material name="mark_b"/>
+    </visual>
+  </link>
+  <joint name="mark_box_fix" type="fixed">
+    <parent link="base_link"/><child link="mark_box"/><origin xyz="0 0 0"/>
+  </joint>
+
+  <link name="mark_cylinder">
+    <visual>
+      <origin xyz="-1 0 0.2"/>
+      <geometry><cylinder radius="0.12" length="0.4"/></geometry>
+      <material name="mark_c"/>
+    </visual>
+  </link>
+  <joint name="mark_cylinder_fix" type="fixed">
+    <parent link="base_link"/><child link="mark_cylinder"/><origin xyz="0 0 0"/>
+  </joint>
+
+  <link name="mark_capsule">
+    <visual>
+      <origin xyz="0 -1 0.225" rpy="0 0.87605805 0"/>
+      <geometry><cylinder radius="0.09" length="0.39"/></geometry>
+      <material name="mark_d"/>
+    </visual>
+  </link>
+  <joint name="mark_capsule_fix" type="fixed">
+    <parent link="base_link"/><child link="mark_capsule"/><origin xyz="0 0 0"/>
+  </joint>
+
+</robot>

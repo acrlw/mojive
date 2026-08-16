@@ -1,0 +1,90 @@
+<!--
+  material_matrix —— 材质三档（05 §5.1）。
+
+  守的性质：**一次只动一个标量**。
+
+  三行，每行五档，`rgba` 十五个球完全一样：
+  - `spec_*`：specular 0 / 0.25 / 0.5 / 0.75 / 1，shininess 固定 0.5；
+  - `shin_*`：shininess 0 / 0.25 / 0.5 / 0.75 / 1，specular 固定 1（不固定成 1 的话
+    高光太弱，指数的变化读不出来）。着色器里 Phong 指数 = shininess × 128，与 `mjr_` 同式；
+  - `emit_*`：emission 0 / 0.25 / 0.5 / 0.75 / 1，specular 固定 0.2。
+
+  为什么必须这么摆：材质这一块的缺陷全是"某一项没接上"或"接到了别的项上"。
+  三项混在一个球上时，画面偏亮偏暗都能自圆其说；分成三行、每行只有一个变量在动，
+  **单调性本身就是判据**——第三个球比第二个亮、第四个比第三个亮，断在哪一档一眼看得见。
+  这与 05 §5.2 里"先把漫反射单独隔离出来对拍"是同一个方法。
+
+  球而不是方块：高光是一个有大小的光斑，只有曲面能同时给出光斑的**位置**（specular）
+  与**大小**（shininess）。方块的平面上高光要么整面亮要么整面不亮。
+
+  emission 那一行下面垫了一块暗板：自发光的判据是"**不受光照影响**"，
+  放在阴影里才看得出来它自己在发光，摆在亮处与漫反射分不开。
+
+  头灯关到最低、只留一盏方向光：头灯跟着相机走，高光位置会随视角变，
+  截图之间不可比。
+-->
+<mujoco model="material_matrix">
+  <compiler angle="degree" autolimits="true"/>
+
+  <visual>
+    <headlight ambient="0.10 0.10 0.10" diffuse="0.05 0.05 0.05" specular="0.0 0.0 0.0"/>
+    <quality shadowsize="2048" numslices="32" numstacks="16"/>
+    <map znear="0.02" zfar="30"/>
+  </visual>
+
+  <asset>
+    <material name="ground" rgba="0.30 0.31 0.33 1" specular="0.05" shininess="0.1"/>
+    <material name="shade" rgba="0.10 0.10 0.11 1" specular="0.0" shininess="0.0"/>
+
+    <!-- 第一行：只有 specular 在动 -->
+    <material name="spec_0" rgba="0.55 0.55 0.60 1" specular="0.00" shininess="0.5"/>
+    <material name="spec_1" rgba="0.55 0.55 0.60 1" specular="0.25" shininess="0.5"/>
+    <material name="spec_2" rgba="0.55 0.55 0.60 1" specular="0.50" shininess="0.5"/>
+    <material name="spec_3" rgba="0.55 0.55 0.60 1" specular="0.75" shininess="0.5"/>
+    <material name="spec_4" rgba="0.55 0.55 0.60 1" specular="1.00" shininess="0.5"/>
+
+    <!-- 第二行：只有 shininess 在动 -->
+    <material name="shin_0" rgba="0.55 0.55 0.60 1" specular="1.0" shininess="0.00"/>
+    <material name="shin_1" rgba="0.55 0.55 0.60 1" specular="1.0" shininess="0.25"/>
+    <material name="shin_2" rgba="0.55 0.55 0.60 1" specular="1.0" shininess="0.50"/>
+    <material name="shin_3" rgba="0.55 0.55 0.60 1" specular="1.0" shininess="0.75"/>
+    <material name="shin_4" rgba="0.55 0.55 0.60 1" specular="1.0" shininess="1.00"/>
+
+    <!-- 第三行：只有 emission 在动 -->
+    <material name="emit_0" rgba="0.55 0.55 0.60 1" specular="0.2" shininess="0.5" emission="0.00"/>
+    <material name="emit_1" rgba="0.55 0.55 0.60 1" specular="0.2" shininess="0.5" emission="0.25"/>
+    <material name="emit_2" rgba="0.55 0.55 0.60 1" specular="0.2" shininess="0.5" emission="0.50"/>
+    <material name="emit_3" rgba="0.55 0.55 0.60 1" specular="0.2" shininess="0.5" emission="0.75"/>
+    <material name="emit_4" rgba="0.55 0.55 0.60 1" specular="0.2" shininess="0.5" emission="1.00"/>
+  </asset>
+
+  <worldbody>
+    <light name="key" type="directional" pos="0 -2.5 3" dir="0 0.55 -1"
+           diffuse="0.65 0.65 0.65" specular="0.9 0.9 0.9" castshadow="false"/>
+
+    <geom name="floor" type="plane" size="0 0 0.05" material="ground"/>
+
+    <!-- 行距 0.7、列距 0.6，半径 0.22：球之间不互相遮挡，高光互不干扰 -->
+    <geom name="spec_0" type="sphere" pos="-1.2 0.7 0.22" size="0.22" material="spec_0"/>
+    <geom name="spec_1" type="sphere" pos="-0.6 0.7 0.22" size="0.22" material="spec_1"/>
+    <geom name="spec_2" type="sphere" pos=" 0.0 0.7 0.22" size="0.22" material="spec_2"/>
+    <geom name="spec_3" type="sphere" pos=" 0.6 0.7 0.22" size="0.22" material="spec_3"/>
+    <geom name="spec_4" type="sphere" pos=" 1.2 0.7 0.22" size="0.22" material="spec_4"/>
+
+    <geom name="shin_0" type="sphere" pos="-1.2 0.0 0.22" size="0.22" material="shin_0"/>
+    <geom name="shin_1" type="sphere" pos="-0.6 0.0 0.22" size="0.22" material="shin_1"/>
+    <geom name="shin_2" type="sphere" pos=" 0.0 0.0 0.22" size="0.22" material="shin_2"/>
+    <geom name="shin_3" type="sphere" pos=" 0.6 0.0 0.22" size="0.22" material="shin_3"/>
+    <geom name="shin_4" type="sphere" pos=" 1.2 0.0 0.22" size="0.22" material="shin_4"/>
+
+    <!-- 暗板：自发光那一行放在暗处，才和漫反射分得开 -->
+    <geom name="shade_board" type="box" pos="0 -0.7 0.004" size="1.5 0.3 0.004" material="shade"/>
+    <geom name="emit_0" type="sphere" pos="-1.2 -0.7 0.22" size="0.22" material="emit_0"/>
+    <geom name="emit_1" type="sphere" pos="-0.6 -0.7 0.22" size="0.22" material="emit_1"/>
+    <geom name="emit_2" type="sphere" pos=" 0.0 -0.7 0.22" size="0.22" material="emit_2"/>
+    <geom name="emit_3" type="sphere" pos=" 0.6 -0.7 0.22" size="0.22" material="emit_3"/>
+    <geom name="emit_4" type="sphere" pos=" 1.2 -0.7 0.22" size="0.22" material="emit_4"/>
+
+    <camera name="matrix" pos="0 -2.55 1.70" xyaxes="1 0 0 0 0.55 0.84"/>
+  </worldbody>
+</mujoco>

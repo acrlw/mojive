@@ -1,0 +1,462 @@
+<!--
+  many_objects —— 规模（13）。
+
+  守的性质：**几何数涨上去之后绘制次数不涨**。
+
+  401 个 geom（20×20 的阵列 + 地板），forge 的内建网格档数下约
+  **21.2 万三角形**（212402 个）。四种形状 × 四种材质 = 16 个桶，
+  加上地板一共 **17 次绘制**——不是 401 次。这正是 04 §4.2 的实测参照：
+  "一个 401 geom 的场景 6 次绘制画 20.4 万三角形"（那份用的材质更少）。
+
+  逐项：
+    sphere   100 ×  960 =  96000
+    box      100 ×   12 =   1200
+    cylinder 100 ×  128 =  12800
+    capsule  100 × 1024 = 102400   (柱段 64 + 两个端帽 2×480)
+
+  **尺寸故意每个都不同**（size 在 0.10～0.25 之间循环）：尺寸不进桶键，缩放烘在实例
+  变换里（04 §4.2）。如果哪天有人把 size 加进桶键，桶数会从 16 炸到几百，这份场景的
+  绘制次数立刻爆掉——**这是它最主要的看门作用**。
+
+  形状下标取 `(x+y) mod 4`、材质下标取 `(x+2y) mod 4`。**这两条不能随便挑**：
+  映射矩阵 [[1,1],[1,2]] 在 mod 4 下行列式为 1、可逆，16 种 (形状, 材质) 组合才**每种
+  各出现 25 次**。第一版取的是 `(3x+5y) mod 4`，行列式 2、mod 4 不可逆——实际只出现了
+  **8 种**组合，桶数悄悄少了一半，而场景看上去毫无异样。桶数是这份场景的判据，
+  它错了整条判据就白立。
+
+  全部静态：这份场景是量帧耗时的，物理在跑的话每帧数字都不一样。
+
+  **400 个 geom 全挂在 worldbody 上是故意的**，不是漏了。这份场景量的是批处理与
+  帧耗时；拆到 400 个 body 上会让每帧多一遍 body 变换，混进要量的数里。
+  拾取与描边（那件事需要每个 geom 有自己的 object_id）在 `pick_scene.xml` 上守。
+-->
+<mujoco model="many_objects">
+  <compiler angle="degree" autolimits="true"/>
+
+  <visual>
+    <headlight ambient="0.25 0.25 0.25" diffuse="0.4 0.4 0.4" specular="0.4 0.4 0.4"/>
+    <quality shadowsize="4096" numslices="28" numstacks="16"/>
+    <map znear="0.05" zfar="80" shadowclip="1.5" shadowscale="0.6"/>
+  </visual>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.18 0.20 0.24" rgb2="0.27 0.30 0.35"/>
+    <material name="grid" texture="grid" texrepeat="1 1" texuniform="true"/>
+    <material name="m0" rgba="0.82 0.35 0.28 1" specular="0.4" shininess="0.5"/>
+    <material name="m1" rgba="0.35 0.68 0.82 1" specular="0.4" shininess="0.5"/>
+    <material name="m2" rgba="0.45 0.78 0.45 1" specular="0.4" shininess="0.5"/>
+    <material name="m3" rgba="0.85 0.75 0.35 1" specular="0.4" shininess="0.5"/>
+  </asset>
+
+  <worldbody>
+    <light name="sun" type="directional" pos="6 -8 10" dir="-0.4 0.55 -1"
+           diffuse="0.7 0.7 0.7" specular="0.25 0.25 0.25" castshadow="true"/>
+
+    <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
+
+    <geom name="g_00_00" type="sphere" pos="-4.75 -4.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_00_01" type="box" pos="-4.25 -4.75 0.250" size="0.250 0.250 0.250" euler="0 0 13" material="m1"/>
+    <geom name="g_00_02" type="cylinder" pos="-3.75 -4.75 0.180" size="0.160 0.180" material="m2"/>
+    <geom name="g_00_03" type="capsule" fromto="-3.25 -4.75 0.150 -3.25 -4.75 0.360" size="0.090" material="m3"/>
+    <geom name="g_00_04" type="sphere" pos="-2.75 -4.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_00_05" type="box" pos="-2.25 -4.75 0.250" size="0.250 0.250 0.250" euler="0 0 65" material="m1"/>
+    <geom name="g_00_06" type="cylinder" pos="-1.75 -4.75 0.150" size="0.160 0.150" material="m2"/>
+    <geom name="g_00_07" type="capsule" fromto="-1.25 -4.75 0.150 -1.25 -4.75 0.330" size="0.090" material="m3"/>
+    <geom name="g_00_08" type="sphere" pos="-0.75 -4.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_00_09" type="box" pos="-0.25 -4.75 0.250" size="0.250 0.250 0.250" euler="0 0 27" material="m1"/>
+    <geom name="g_00_10" type="cylinder" pos="0.25 -4.75 0.120" size="0.160 0.120" material="m2"/>
+    <geom name="g_00_11" type="capsule" fromto="0.75 -4.75 0.150 0.75 -4.75 0.300" size="0.090" material="m3"/>
+    <geom name="g_00_12" type="sphere" pos="1.25 -4.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_00_13" type="box" pos="1.75 -4.75 0.250" size="0.250 0.250 0.250" euler="0 0 79" material="m1"/>
+    <geom name="g_00_14" type="cylinder" pos="2.25 -4.75 0.240" size="0.160 0.240" material="m2"/>
+    <geom name="g_00_15" type="capsule" fromto="2.75 -4.75 0.150 2.75 -4.75 0.270" size="0.090" material="m3"/>
+    <geom name="g_00_16" type="sphere" pos="3.25 -4.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_00_17" type="box" pos="3.75 -4.75 0.250" size="0.250 0.250 0.250" euler="0 0 41" material="m1"/>
+    <geom name="g_00_18" type="cylinder" pos="4.25 -4.75 0.210" size="0.160 0.210" material="m2"/>
+    <geom name="g_00_19" type="capsule" fromto="4.75 -4.75 0.150 4.75 -4.75 0.390" size="0.090" material="m3"/>
+    <geom name="g_01_00" type="box" pos="-4.75 -4.25 0.250" size="0.250 0.250 0.250" euler="0 0 7" material="m2"/>
+    <geom name="g_01_01" type="cylinder" pos="-4.25 -4.25 0.210" size="0.160 0.210" material="m3"/>
+    <geom name="g_01_02" type="capsule" fromto="-3.75 -4.25 0.150 -3.75 -4.25 0.390" size="0.090" material="m0"/>
+    <geom name="g_01_03" type="sphere" pos="-3.25 -4.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_01_04" type="box" pos="-2.75 -4.25 0.250" size="0.250 0.250 0.250" euler="0 0 59" material="m2"/>
+    <geom name="g_01_05" type="cylinder" pos="-2.25 -4.25 0.180" size="0.160 0.180" material="m3"/>
+    <geom name="g_01_06" type="capsule" fromto="-1.75 -4.25 0.150 -1.75 -4.25 0.360" size="0.090" material="m0"/>
+    <geom name="g_01_07" type="sphere" pos="-1.25 -4.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_01_08" type="box" pos="-0.75 -4.25 0.250" size="0.250 0.250 0.250" euler="0 0 21" material="m2"/>
+    <geom name="g_01_09" type="cylinder" pos="-0.25 -4.25 0.150" size="0.160 0.150" material="m3"/>
+    <geom name="g_01_10" type="capsule" fromto="0.25 -4.25 0.150 0.25 -4.25 0.330" size="0.090" material="m0"/>
+    <geom name="g_01_11" type="sphere" pos="0.75 -4.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_01_12" type="box" pos="1.25 -4.25 0.250" size="0.250 0.250 0.250" euler="0 0 73" material="m2"/>
+    <geom name="g_01_13" type="cylinder" pos="1.75 -4.25 0.120" size="0.160 0.120" material="m3"/>
+    <geom name="g_01_14" type="capsule" fromto="2.25 -4.25 0.150 2.25 -4.25 0.300" size="0.090" material="m0"/>
+    <geom name="g_01_15" type="sphere" pos="2.75 -4.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_01_16" type="box" pos="3.25 -4.25 0.250" size="0.250 0.250 0.250" euler="0 0 35" material="m2"/>
+    <geom name="g_01_17" type="cylinder" pos="3.75 -4.25 0.240" size="0.160 0.240" material="m3"/>
+    <geom name="g_01_18" type="capsule" fromto="4.25 -4.25 0.150 4.25 -4.25 0.270" size="0.090" material="m0"/>
+    <geom name="g_01_19" type="sphere" pos="4.75 -4.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_02_00" type="cylinder" pos="-4.75 -3.75 0.240" size="0.160 0.240" material="m0"/>
+    <geom name="g_02_01" type="capsule" fromto="-4.25 -3.75 0.150 -4.25 -3.75 0.270" size="0.090" material="m1"/>
+    <geom name="g_02_02" type="sphere" pos="-3.75 -3.75 0.100" size="0.100" material="m2"/>
+    <geom name="g_02_03" type="box" pos="-3.25 -3.75 0.250" size="0.250 0.250 0.250" euler="0 0 53" material="m3"/>
+    <geom name="g_02_04" type="cylinder" pos="-2.75 -3.75 0.210" size="0.160 0.210" material="m0"/>
+    <geom name="g_02_05" type="capsule" fromto="-2.25 -3.75 0.150 -2.25 -3.75 0.390" size="0.090" material="m1"/>
+    <geom name="g_02_06" type="sphere" pos="-1.75 -3.75 0.100" size="0.100" material="m2"/>
+    <geom name="g_02_07" type="box" pos="-1.25 -3.75 0.250" size="0.250 0.250 0.250" euler="0 0 15" material="m3"/>
+    <geom name="g_02_08" type="cylinder" pos="-0.75 -3.75 0.180" size="0.160 0.180" material="m0"/>
+    <geom name="g_02_09" type="capsule" fromto="-0.25 -3.75 0.150 -0.25 -3.75 0.360" size="0.090" material="m1"/>
+    <geom name="g_02_10" type="sphere" pos="0.25 -3.75 0.100" size="0.100" material="m2"/>
+    <geom name="g_02_11" type="box" pos="0.75 -3.75 0.250" size="0.250 0.250 0.250" euler="0 0 67" material="m3"/>
+    <geom name="g_02_12" type="cylinder" pos="1.25 -3.75 0.150" size="0.160 0.150" material="m0"/>
+    <geom name="g_02_13" type="capsule" fromto="1.75 -3.75 0.150 1.75 -3.75 0.330" size="0.090" material="m1"/>
+    <geom name="g_02_14" type="sphere" pos="2.25 -3.75 0.100" size="0.100" material="m2"/>
+    <geom name="g_02_15" type="box" pos="2.75 -3.75 0.250" size="0.250 0.250 0.250" euler="0 0 29" material="m3"/>
+    <geom name="g_02_16" type="cylinder" pos="3.25 -3.75 0.120" size="0.160 0.120" material="m0"/>
+    <geom name="g_02_17" type="capsule" fromto="3.75 -3.75 0.150 3.75 -3.75 0.300" size="0.090" material="m1"/>
+    <geom name="g_02_18" type="sphere" pos="4.25 -3.75 0.100" size="0.100" material="m2"/>
+    <geom name="g_02_19" type="box" pos="4.75 -3.75 0.250" size="0.250 0.250 0.250" euler="0 0 81" material="m3"/>
+    <geom name="g_03_00" type="capsule" fromto="-4.75 -3.25 0.150 -4.75 -3.25 0.300" size="0.090" material="m2"/>
+    <geom name="g_03_01" type="sphere" pos="-4.25 -3.25 0.100" size="0.100" material="m3"/>
+    <geom name="g_03_02" type="box" pos="-3.75 -3.25 0.250" size="0.250 0.250 0.250" euler="0 0 47" material="m0"/>
+    <geom name="g_03_03" type="cylinder" pos="-3.25 -3.25 0.240" size="0.160 0.240" material="m1"/>
+    <geom name="g_03_04" type="capsule" fromto="-2.75 -3.25 0.150 -2.75 -3.25 0.270" size="0.090" material="m2"/>
+    <geom name="g_03_05" type="sphere" pos="-2.25 -3.25 0.100" size="0.100" material="m3"/>
+    <geom name="g_03_06" type="box" pos="-1.75 -3.25 0.250" size="0.250 0.250 0.250" euler="0 0 9" material="m0"/>
+    <geom name="g_03_07" type="cylinder" pos="-1.25 -3.25 0.210" size="0.160 0.210" material="m1"/>
+    <geom name="g_03_08" type="capsule" fromto="-0.75 -3.25 0.150 -0.75 -3.25 0.390" size="0.090" material="m2"/>
+    <geom name="g_03_09" type="sphere" pos="-0.25 -3.25 0.100" size="0.100" material="m3"/>
+    <geom name="g_03_10" type="box" pos="0.25 -3.25 0.250" size="0.250 0.250 0.250" euler="0 0 61" material="m0"/>
+    <geom name="g_03_11" type="cylinder" pos="0.75 -3.25 0.180" size="0.160 0.180" material="m1"/>
+    <geom name="g_03_12" type="capsule" fromto="1.25 -3.25 0.150 1.25 -3.25 0.360" size="0.090" material="m2"/>
+    <geom name="g_03_13" type="sphere" pos="1.75 -3.25 0.100" size="0.100" material="m3"/>
+    <geom name="g_03_14" type="box" pos="2.25 -3.25 0.250" size="0.250 0.250 0.250" euler="0 0 23" material="m0"/>
+    <geom name="g_03_15" type="cylinder" pos="2.75 -3.25 0.150" size="0.160 0.150" material="m1"/>
+    <geom name="g_03_16" type="capsule" fromto="3.25 -3.25 0.150 3.25 -3.25 0.330" size="0.090" material="m2"/>
+    <geom name="g_03_17" type="sphere" pos="3.75 -3.25 0.100" size="0.100" material="m3"/>
+    <geom name="g_03_18" type="box" pos="4.25 -3.25 0.250" size="0.250 0.250 0.250" euler="0 0 75" material="m0"/>
+    <geom name="g_03_19" type="cylinder" pos="4.75 -3.25 0.120" size="0.160 0.120" material="m1"/>
+    <geom name="g_04_00" type="sphere" pos="-4.75 -2.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_04_01" type="box" pos="-4.25 -2.75 0.250" size="0.250 0.250 0.250" euler="0 0 41" material="m1"/>
+    <geom name="g_04_02" type="cylinder" pos="-3.75 -2.75 0.120" size="0.160 0.120" material="m2"/>
+    <geom name="g_04_03" type="capsule" fromto="-3.25 -2.75 0.150 -3.25 -2.75 0.300" size="0.090" material="m3"/>
+    <geom name="g_04_04" type="sphere" pos="-2.75 -2.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_04_05" type="box" pos="-2.25 -2.75 0.250" size="0.250 0.250 0.250" euler="0 0 3" material="m1"/>
+    <geom name="g_04_06" type="cylinder" pos="-1.75 -2.75 0.240" size="0.160 0.240" material="m2"/>
+    <geom name="g_04_07" type="capsule" fromto="-1.25 -2.75 0.150 -1.25 -2.75 0.270" size="0.090" material="m3"/>
+    <geom name="g_04_08" type="sphere" pos="-0.75 -2.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_04_09" type="box" pos="-0.25 -2.75 0.250" size="0.250 0.250 0.250" euler="0 0 55" material="m1"/>
+    <geom name="g_04_10" type="cylinder" pos="0.25 -2.75 0.210" size="0.160 0.210" material="m2"/>
+    <geom name="g_04_11" type="capsule" fromto="0.75 -2.75 0.150 0.75 -2.75 0.390" size="0.090" material="m3"/>
+    <geom name="g_04_12" type="sphere" pos="1.25 -2.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_04_13" type="box" pos="1.75 -2.75 0.250" size="0.250 0.250 0.250" euler="0 0 17" material="m1"/>
+    <geom name="g_04_14" type="cylinder" pos="2.25 -2.75 0.180" size="0.160 0.180" material="m2"/>
+    <geom name="g_04_15" type="capsule" fromto="2.75 -2.75 0.150 2.75 -2.75 0.360" size="0.090" material="m3"/>
+    <geom name="g_04_16" type="sphere" pos="3.25 -2.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_04_17" type="box" pos="3.75 -2.75 0.250" size="0.250 0.250 0.250" euler="0 0 69" material="m1"/>
+    <geom name="g_04_18" type="cylinder" pos="4.25 -2.75 0.150" size="0.160 0.150" material="m2"/>
+    <geom name="g_04_19" type="capsule" fromto="4.75 -2.75 0.150 4.75 -2.75 0.330" size="0.090" material="m3"/>
+    <geom name="g_05_00" type="box" pos="-4.75 -2.25 0.250" size="0.250 0.250 0.250" euler="0 0 35" material="m2"/>
+    <geom name="g_05_01" type="cylinder" pos="-4.25 -2.25 0.150" size="0.160 0.150" material="m3"/>
+    <geom name="g_05_02" type="capsule" fromto="-3.75 -2.25 0.150 -3.75 -2.25 0.330" size="0.090" material="m0"/>
+    <geom name="g_05_03" type="sphere" pos="-3.25 -2.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_05_04" type="box" pos="-2.75 -2.25 0.250" size="0.250 0.250 0.250" euler="0 0 87" material="m2"/>
+    <geom name="g_05_05" type="cylinder" pos="-2.25 -2.25 0.120" size="0.160 0.120" material="m3"/>
+    <geom name="g_05_06" type="capsule" fromto="-1.75 -2.25 0.150 -1.75 -2.25 0.300" size="0.090" material="m0"/>
+    <geom name="g_05_07" type="sphere" pos="-1.25 -2.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_05_08" type="box" pos="-0.75 -2.25 0.250" size="0.250 0.250 0.250" euler="0 0 49" material="m2"/>
+    <geom name="g_05_09" type="cylinder" pos="-0.25 -2.25 0.240" size="0.160 0.240" material="m3"/>
+    <geom name="g_05_10" type="capsule" fromto="0.25 -2.25 0.150 0.25 -2.25 0.270" size="0.090" material="m0"/>
+    <geom name="g_05_11" type="sphere" pos="0.75 -2.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_05_12" type="box" pos="1.25 -2.25 0.250" size="0.250 0.250 0.250" euler="0 0 11" material="m2"/>
+    <geom name="g_05_13" type="cylinder" pos="1.75 -2.25 0.210" size="0.160 0.210" material="m3"/>
+    <geom name="g_05_14" type="capsule" fromto="2.25 -2.25 0.150 2.25 -2.25 0.390" size="0.090" material="m0"/>
+    <geom name="g_05_15" type="sphere" pos="2.75 -2.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_05_16" type="box" pos="3.25 -2.25 0.250" size="0.250 0.250 0.250" euler="0 0 63" material="m2"/>
+    <geom name="g_05_17" type="cylinder" pos="3.75 -2.25 0.180" size="0.160 0.180" material="m3"/>
+    <geom name="g_05_18" type="capsule" fromto="4.25 -2.25 0.150 4.25 -2.25 0.360" size="0.090" material="m0"/>
+    <geom name="g_05_19" type="sphere" pos="4.75 -2.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_06_00" type="cylinder" pos="-4.75 -1.75 0.180" size="0.160 0.180" material="m0"/>
+    <geom name="g_06_01" type="capsule" fromto="-4.25 -1.75 0.150 -4.25 -1.75 0.360" size="0.090" material="m1"/>
+    <geom name="g_06_02" type="sphere" pos="-3.75 -1.75 0.100" size="0.100" material="m2"/>
+    <geom name="g_06_03" type="box" pos="-3.25 -1.75 0.250" size="0.250 0.250 0.250" euler="0 0 81" material="m3"/>
+    <geom name="g_06_04" type="cylinder" pos="-2.75 -1.75 0.150" size="0.160 0.150" material="m0"/>
+    <geom name="g_06_05" type="capsule" fromto="-2.25 -1.75 0.150 -2.25 -1.75 0.330" size="0.090" material="m1"/>
+    <geom name="g_06_06" type="sphere" pos="-1.75 -1.75 0.100" size="0.100" material="m2"/>
+    <geom name="g_06_07" type="box" pos="-1.25 -1.75 0.250" size="0.250 0.250 0.250" euler="0 0 43" material="m3"/>
+    <geom name="g_06_08" type="cylinder" pos="-0.75 -1.75 0.120" size="0.160 0.120" material="m0"/>
+    <geom name="g_06_09" type="capsule" fromto="-0.25 -1.75 0.150 -0.25 -1.75 0.300" size="0.090" material="m1"/>
+    <geom name="g_06_10" type="sphere" pos="0.25 -1.75 0.100" size="0.100" material="m2"/>
+    <geom name="g_06_11" type="box" pos="0.75 -1.75 0.250" size="0.250 0.250 0.250" euler="0 0 5" material="m3"/>
+    <geom name="g_06_12" type="cylinder" pos="1.25 -1.75 0.240" size="0.160 0.240" material="m0"/>
+    <geom name="g_06_13" type="capsule" fromto="1.75 -1.75 0.150 1.75 -1.75 0.270" size="0.090" material="m1"/>
+    <geom name="g_06_14" type="sphere" pos="2.25 -1.75 0.100" size="0.100" material="m2"/>
+    <geom name="g_06_15" type="box" pos="2.75 -1.75 0.250" size="0.250 0.250 0.250" euler="0 0 57" material="m3"/>
+    <geom name="g_06_16" type="cylinder" pos="3.25 -1.75 0.210" size="0.160 0.210" material="m0"/>
+    <geom name="g_06_17" type="capsule" fromto="3.75 -1.75 0.150 3.75 -1.75 0.390" size="0.090" material="m1"/>
+    <geom name="g_06_18" type="sphere" pos="4.25 -1.75 0.100" size="0.100" material="m2"/>
+    <geom name="g_06_19" type="box" pos="4.75 -1.75 0.250" size="0.250 0.250 0.250" euler="0 0 19" material="m3"/>
+    <geom name="g_07_00" type="capsule" fromto="-4.75 -1.25 0.150 -4.75 -1.25 0.390" size="0.090" material="m2"/>
+    <geom name="g_07_01" type="sphere" pos="-4.25 -1.25 0.100" size="0.100" material="m3"/>
+    <geom name="g_07_02" type="box" pos="-3.75 -1.25 0.250" size="0.250 0.250 0.250" euler="0 0 75" material="m0"/>
+    <geom name="g_07_03" type="cylinder" pos="-3.25 -1.25 0.180" size="0.160 0.180" material="m1"/>
+    <geom name="g_07_04" type="capsule" fromto="-2.75 -1.25 0.150 -2.75 -1.25 0.360" size="0.090" material="m2"/>
+    <geom name="g_07_05" type="sphere" pos="-2.25 -1.25 0.100" size="0.100" material="m3"/>
+    <geom name="g_07_06" type="box" pos="-1.75 -1.25 0.250" size="0.250 0.250 0.250" euler="0 0 37" material="m0"/>
+    <geom name="g_07_07" type="cylinder" pos="-1.25 -1.25 0.150" size="0.160 0.150" material="m1"/>
+    <geom name="g_07_08" type="capsule" fromto="-0.75 -1.25 0.150 -0.75 -1.25 0.330" size="0.090" material="m2"/>
+    <geom name="g_07_09" type="sphere" pos="-0.25 -1.25 0.100" size="0.100" material="m3"/>
+    <geom name="g_07_10" type="box" pos="0.25 -1.25 0.250" size="0.250 0.250 0.250" euler="0 0 89" material="m0"/>
+    <geom name="g_07_11" type="cylinder" pos="0.75 -1.25 0.120" size="0.160 0.120" material="m1"/>
+    <geom name="g_07_12" type="capsule" fromto="1.25 -1.25 0.150 1.25 -1.25 0.300" size="0.090" material="m2"/>
+    <geom name="g_07_13" type="sphere" pos="1.75 -1.25 0.100" size="0.100" material="m3"/>
+    <geom name="g_07_14" type="box" pos="2.25 -1.25 0.250" size="0.250 0.250 0.250" euler="0 0 51" material="m0"/>
+    <geom name="g_07_15" type="cylinder" pos="2.75 -1.25 0.240" size="0.160 0.240" material="m1"/>
+    <geom name="g_07_16" type="capsule" fromto="3.25 -1.25 0.150 3.25 -1.25 0.270" size="0.090" material="m2"/>
+    <geom name="g_07_17" type="sphere" pos="3.75 -1.25 0.100" size="0.100" material="m3"/>
+    <geom name="g_07_18" type="box" pos="4.25 -1.25 0.250" size="0.250 0.250 0.250" euler="0 0 13" material="m0"/>
+    <geom name="g_07_19" type="cylinder" pos="4.75 -1.25 0.210" size="0.160 0.210" material="m1"/>
+    <geom name="g_08_00" type="sphere" pos="-4.75 -0.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_08_01" type="box" pos="-4.25 -0.75 0.250" size="0.250 0.250 0.250" euler="0 0 69" material="m1"/>
+    <geom name="g_08_02" type="cylinder" pos="-3.75 -0.75 0.210" size="0.160 0.210" material="m2"/>
+    <geom name="g_08_03" type="capsule" fromto="-3.25 -0.75 0.150 -3.25 -0.75 0.390" size="0.090" material="m3"/>
+    <geom name="g_08_04" type="sphere" pos="-2.75 -0.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_08_05" type="box" pos="-2.25 -0.75 0.250" size="0.250 0.250 0.250" euler="0 0 31" material="m1"/>
+    <geom name="g_08_06" type="cylinder" pos="-1.75 -0.75 0.180" size="0.160 0.180" material="m2"/>
+    <geom name="g_08_07" type="capsule" fromto="-1.25 -0.75 0.150 -1.25 -0.75 0.360" size="0.090" material="m3"/>
+    <geom name="g_08_08" type="sphere" pos="-0.75 -0.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_08_09" type="box" pos="-0.25 -0.75 0.250" size="0.250 0.250 0.250" euler="0 0 83" material="m1"/>
+    <geom name="g_08_10" type="cylinder" pos="0.25 -0.75 0.150" size="0.160 0.150" material="m2"/>
+    <geom name="g_08_11" type="capsule" fromto="0.75 -0.75 0.150 0.75 -0.75 0.330" size="0.090" material="m3"/>
+    <geom name="g_08_12" type="sphere" pos="1.25 -0.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_08_13" type="box" pos="1.75 -0.75 0.250" size="0.250 0.250 0.250" euler="0 0 45" material="m1"/>
+    <geom name="g_08_14" type="cylinder" pos="2.25 -0.75 0.120" size="0.160 0.120" material="m2"/>
+    <geom name="g_08_15" type="capsule" fromto="2.75 -0.75 0.150 2.75 -0.75 0.300" size="0.090" material="m3"/>
+    <geom name="g_08_16" type="sphere" pos="3.25 -0.75 0.100" size="0.100" material="m0"/>
+    <geom name="g_08_17" type="box" pos="3.75 -0.75 0.250" size="0.250 0.250 0.250" euler="0 0 7" material="m1"/>
+    <geom name="g_08_18" type="cylinder" pos="4.25 -0.75 0.240" size="0.160 0.240" material="m2"/>
+    <geom name="g_08_19" type="capsule" fromto="4.75 -0.75 0.150 4.75 -0.75 0.270" size="0.090" material="m3"/>
+    <geom name="g_09_00" type="box" pos="-4.75 -0.25 0.250" size="0.250 0.250 0.250" euler="0 0 63" material="m2"/>
+    <geom name="g_09_01" type="cylinder" pos="-4.25 -0.25 0.240" size="0.160 0.240" material="m3"/>
+    <geom name="g_09_02" type="capsule" fromto="-3.75 -0.25 0.150 -3.75 -0.25 0.270" size="0.090" material="m0"/>
+    <geom name="g_09_03" type="sphere" pos="-3.25 -0.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_09_04" type="box" pos="-2.75 -0.25 0.250" size="0.250 0.250 0.250" euler="0 0 25" material="m2"/>
+    <geom name="g_09_05" type="cylinder" pos="-2.25 -0.25 0.210" size="0.160 0.210" material="m3"/>
+    <geom name="g_09_06" type="capsule" fromto="-1.75 -0.25 0.150 -1.75 -0.25 0.390" size="0.090" material="m0"/>
+    <geom name="g_09_07" type="sphere" pos="-1.25 -0.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_09_08" type="box" pos="-0.75 -0.25 0.250" size="0.250 0.250 0.250" euler="0 0 77" material="m2"/>
+    <geom name="g_09_09" type="cylinder" pos="-0.25 -0.25 0.180" size="0.160 0.180" material="m3"/>
+    <geom name="g_09_10" type="capsule" fromto="0.25 -0.25 0.150 0.25 -0.25 0.360" size="0.090" material="m0"/>
+    <geom name="g_09_11" type="sphere" pos="0.75 -0.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_09_12" type="box" pos="1.25 -0.25 0.250" size="0.250 0.250 0.250" euler="0 0 39" material="m2"/>
+    <geom name="g_09_13" type="cylinder" pos="1.75 -0.25 0.150" size="0.160 0.150" material="m3"/>
+    <geom name="g_09_14" type="capsule" fromto="2.25 -0.25 0.150 2.25 -0.25 0.330" size="0.090" material="m0"/>
+    <geom name="g_09_15" type="sphere" pos="2.75 -0.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_09_16" type="box" pos="3.25 -0.25 0.250" size="0.250 0.250 0.250" euler="0 0 1" material="m2"/>
+    <geom name="g_09_17" type="cylinder" pos="3.75 -0.25 0.120" size="0.160 0.120" material="m3"/>
+    <geom name="g_09_18" type="capsule" fromto="4.25 -0.25 0.150 4.25 -0.25 0.300" size="0.090" material="m0"/>
+    <geom name="g_09_19" type="sphere" pos="4.75 -0.25 0.100" size="0.100" material="m1"/>
+    <geom name="g_10_00" type="cylinder" pos="-4.75 0.25 0.120" size="0.160 0.120" material="m0"/>
+    <geom name="g_10_01" type="capsule" fromto="-4.25 0.25 0.150 -4.25 0.25 0.300" size="0.090" material="m1"/>
+    <geom name="g_10_02" type="sphere" pos="-3.75 0.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_10_03" type="box" pos="-3.25 0.25 0.250" size="0.250 0.250 0.250" euler="0 0 19" material="m3"/>
+    <geom name="g_10_04" type="cylinder" pos="-2.75 0.25 0.240" size="0.160 0.240" material="m0"/>
+    <geom name="g_10_05" type="capsule" fromto="-2.25 0.25 0.150 -2.25 0.25 0.270" size="0.090" material="m1"/>
+    <geom name="g_10_06" type="sphere" pos="-1.75 0.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_10_07" type="box" pos="-1.25 0.25 0.250" size="0.250 0.250 0.250" euler="0 0 71" material="m3"/>
+    <geom name="g_10_08" type="cylinder" pos="-0.75 0.25 0.210" size="0.160 0.210" material="m0"/>
+    <geom name="g_10_09" type="capsule" fromto="-0.25 0.25 0.150 -0.25 0.25 0.390" size="0.090" material="m1"/>
+    <geom name="g_10_10" type="sphere" pos="0.25 0.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_10_11" type="box" pos="0.75 0.25 0.250" size="0.250 0.250 0.250" euler="0 0 33" material="m3"/>
+    <geom name="g_10_12" type="cylinder" pos="1.25 0.25 0.180" size="0.160 0.180" material="m0"/>
+    <geom name="g_10_13" type="capsule" fromto="1.75 0.25 0.150 1.75 0.25 0.360" size="0.090" material="m1"/>
+    <geom name="g_10_14" type="sphere" pos="2.25 0.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_10_15" type="box" pos="2.75 0.25 0.250" size="0.250 0.250 0.250" euler="0 0 85" material="m3"/>
+    <geom name="g_10_16" type="cylinder" pos="3.25 0.25 0.150" size="0.160 0.150" material="m0"/>
+    <geom name="g_10_17" type="capsule" fromto="3.75 0.25 0.150 3.75 0.25 0.330" size="0.090" material="m1"/>
+    <geom name="g_10_18" type="sphere" pos="4.25 0.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_10_19" type="box" pos="4.75 0.25 0.250" size="0.250 0.250 0.250" euler="0 0 47" material="m3"/>
+    <geom name="g_11_00" type="capsule" fromto="-4.75 0.75 0.150 -4.75 0.75 0.330" size="0.090" material="m2"/>
+    <geom name="g_11_01" type="sphere" pos="-4.25 0.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_11_02" type="box" pos="-3.75 0.75 0.250" size="0.250 0.250 0.250" euler="0 0 13" material="m0"/>
+    <geom name="g_11_03" type="cylinder" pos="-3.25 0.75 0.120" size="0.160 0.120" material="m1"/>
+    <geom name="g_11_04" type="capsule" fromto="-2.75 0.75 0.150 -2.75 0.75 0.300" size="0.090" material="m2"/>
+    <geom name="g_11_05" type="sphere" pos="-2.25 0.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_11_06" type="box" pos="-1.75 0.75 0.250" size="0.250 0.250 0.250" euler="0 0 65" material="m0"/>
+    <geom name="g_11_07" type="cylinder" pos="-1.25 0.75 0.240" size="0.160 0.240" material="m1"/>
+    <geom name="g_11_08" type="capsule" fromto="-0.75 0.75 0.150 -0.75 0.75 0.270" size="0.090" material="m2"/>
+    <geom name="g_11_09" type="sphere" pos="-0.25 0.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_11_10" type="box" pos="0.25 0.75 0.250" size="0.250 0.250 0.250" euler="0 0 27" material="m0"/>
+    <geom name="g_11_11" type="cylinder" pos="0.75 0.75 0.210" size="0.160 0.210" material="m1"/>
+    <geom name="g_11_12" type="capsule" fromto="1.25 0.75 0.150 1.25 0.75 0.390" size="0.090" material="m2"/>
+    <geom name="g_11_13" type="sphere" pos="1.75 0.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_11_14" type="box" pos="2.25 0.75 0.250" size="0.250 0.250 0.250" euler="0 0 79" material="m0"/>
+    <geom name="g_11_15" type="cylinder" pos="2.75 0.75 0.180" size="0.160 0.180" material="m1"/>
+    <geom name="g_11_16" type="capsule" fromto="3.25 0.75 0.150 3.25 0.75 0.360" size="0.090" material="m2"/>
+    <geom name="g_11_17" type="sphere" pos="3.75 0.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_11_18" type="box" pos="4.25 0.75 0.250" size="0.250 0.250 0.250" euler="0 0 41" material="m0"/>
+    <geom name="g_11_19" type="cylinder" pos="4.75 0.75 0.150" size="0.160 0.150" material="m1"/>
+    <geom name="g_12_00" type="sphere" pos="-4.75 1.25 0.100" size="0.100" material="m0"/>
+    <geom name="g_12_01" type="box" pos="-4.25 1.25 0.250" size="0.250 0.250 0.250" euler="0 0 7" material="m1"/>
+    <geom name="g_12_02" type="cylinder" pos="-3.75 1.25 0.150" size="0.160 0.150" material="m2"/>
+    <geom name="g_12_03" type="capsule" fromto="-3.25 1.25 0.150 -3.25 1.25 0.330" size="0.090" material="m3"/>
+    <geom name="g_12_04" type="sphere" pos="-2.75 1.25 0.100" size="0.100" material="m0"/>
+    <geom name="g_12_05" type="box" pos="-2.25 1.25 0.250" size="0.250 0.250 0.250" euler="0 0 59" material="m1"/>
+    <geom name="g_12_06" type="cylinder" pos="-1.75 1.25 0.120" size="0.160 0.120" material="m2"/>
+    <geom name="g_12_07" type="capsule" fromto="-1.25 1.25 0.150 -1.25 1.25 0.300" size="0.090" material="m3"/>
+    <geom name="g_12_08" type="sphere" pos="-0.75 1.25 0.100" size="0.100" material="m0"/>
+    <geom name="g_12_09" type="box" pos="-0.25 1.25 0.250" size="0.250 0.250 0.250" euler="0 0 21" material="m1"/>
+    <geom name="g_12_10" type="cylinder" pos="0.25 1.25 0.240" size="0.160 0.240" material="m2"/>
+    <geom name="g_12_11" type="capsule" fromto="0.75 1.25 0.150 0.75 1.25 0.270" size="0.090" material="m3"/>
+    <geom name="g_12_12" type="sphere" pos="1.25 1.25 0.100" size="0.100" material="m0"/>
+    <geom name="g_12_13" type="box" pos="1.75 1.25 0.250" size="0.250 0.250 0.250" euler="0 0 73" material="m1"/>
+    <geom name="g_12_14" type="cylinder" pos="2.25 1.25 0.210" size="0.160 0.210" material="m2"/>
+    <geom name="g_12_15" type="capsule" fromto="2.75 1.25 0.150 2.75 1.25 0.390" size="0.090" material="m3"/>
+    <geom name="g_12_16" type="sphere" pos="3.25 1.25 0.100" size="0.100" material="m0"/>
+    <geom name="g_12_17" type="box" pos="3.75 1.25 0.250" size="0.250 0.250 0.250" euler="0 0 35" material="m1"/>
+    <geom name="g_12_18" type="cylinder" pos="4.25 1.25 0.180" size="0.160 0.180" material="m2"/>
+    <geom name="g_12_19" type="capsule" fromto="4.75 1.25 0.150 4.75 1.25 0.360" size="0.090" material="m3"/>
+    <geom name="g_13_00" type="box" pos="-4.75 1.75 0.250" size="0.250 0.250 0.250" euler="0 0 1" material="m2"/>
+    <geom name="g_13_01" type="cylinder" pos="-4.25 1.75 0.180" size="0.160 0.180" material="m3"/>
+    <geom name="g_13_02" type="capsule" fromto="-3.75 1.75 0.150 -3.75 1.75 0.360" size="0.090" material="m0"/>
+    <geom name="g_13_03" type="sphere" pos="-3.25 1.75 0.100" size="0.100" material="m1"/>
+    <geom name="g_13_04" type="box" pos="-2.75 1.75 0.250" size="0.250 0.250 0.250" euler="0 0 53" material="m2"/>
+    <geom name="g_13_05" type="cylinder" pos="-2.25 1.75 0.150" size="0.160 0.150" material="m3"/>
+    <geom name="g_13_06" type="capsule" fromto="-1.75 1.75 0.150 -1.75 1.75 0.330" size="0.090" material="m0"/>
+    <geom name="g_13_07" type="sphere" pos="-1.25 1.75 0.100" size="0.100" material="m1"/>
+    <geom name="g_13_08" type="box" pos="-0.75 1.75 0.250" size="0.250 0.250 0.250" euler="0 0 15" material="m2"/>
+    <geom name="g_13_09" type="cylinder" pos="-0.25 1.75 0.120" size="0.160 0.120" material="m3"/>
+    <geom name="g_13_10" type="capsule" fromto="0.25 1.75 0.150 0.25 1.75 0.300" size="0.090" material="m0"/>
+    <geom name="g_13_11" type="sphere" pos="0.75 1.75 0.100" size="0.100" material="m1"/>
+    <geom name="g_13_12" type="box" pos="1.25 1.75 0.250" size="0.250 0.250 0.250" euler="0 0 67" material="m2"/>
+    <geom name="g_13_13" type="cylinder" pos="1.75 1.75 0.240" size="0.160 0.240" material="m3"/>
+    <geom name="g_13_14" type="capsule" fromto="2.25 1.75 0.150 2.25 1.75 0.270" size="0.090" material="m0"/>
+    <geom name="g_13_15" type="sphere" pos="2.75 1.75 0.100" size="0.100" material="m1"/>
+    <geom name="g_13_16" type="box" pos="3.25 1.75 0.250" size="0.250 0.250 0.250" euler="0 0 29" material="m2"/>
+    <geom name="g_13_17" type="cylinder" pos="3.75 1.75 0.210" size="0.160 0.210" material="m3"/>
+    <geom name="g_13_18" type="capsule" fromto="4.25 1.75 0.150 4.25 1.75 0.390" size="0.090" material="m0"/>
+    <geom name="g_13_19" type="sphere" pos="4.75 1.75 0.100" size="0.100" material="m1"/>
+    <geom name="g_14_00" type="cylinder" pos="-4.75 2.25 0.210" size="0.160 0.210" material="m0"/>
+    <geom name="g_14_01" type="capsule" fromto="-4.25 2.25 0.150 -4.25 2.25 0.390" size="0.090" material="m1"/>
+    <geom name="g_14_02" type="sphere" pos="-3.75 2.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_14_03" type="box" pos="-3.25 2.25 0.250" size="0.250 0.250 0.250" euler="0 0 47" material="m3"/>
+    <geom name="g_14_04" type="cylinder" pos="-2.75 2.25 0.180" size="0.160 0.180" material="m0"/>
+    <geom name="g_14_05" type="capsule" fromto="-2.25 2.25 0.150 -2.25 2.25 0.360" size="0.090" material="m1"/>
+    <geom name="g_14_06" type="sphere" pos="-1.75 2.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_14_07" type="box" pos="-1.25 2.25 0.250" size="0.250 0.250 0.250" euler="0 0 9" material="m3"/>
+    <geom name="g_14_08" type="cylinder" pos="-0.75 2.25 0.150" size="0.160 0.150" material="m0"/>
+    <geom name="g_14_09" type="capsule" fromto="-0.25 2.25 0.150 -0.25 2.25 0.330" size="0.090" material="m1"/>
+    <geom name="g_14_10" type="sphere" pos="0.25 2.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_14_11" type="box" pos="0.75 2.25 0.250" size="0.250 0.250 0.250" euler="0 0 61" material="m3"/>
+    <geom name="g_14_12" type="cylinder" pos="1.25 2.25 0.120" size="0.160 0.120" material="m0"/>
+    <geom name="g_14_13" type="capsule" fromto="1.75 2.25 0.150 1.75 2.25 0.300" size="0.090" material="m1"/>
+    <geom name="g_14_14" type="sphere" pos="2.25 2.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_14_15" type="box" pos="2.75 2.25 0.250" size="0.250 0.250 0.250" euler="0 0 23" material="m3"/>
+    <geom name="g_14_16" type="cylinder" pos="3.25 2.25 0.240" size="0.160 0.240" material="m0"/>
+    <geom name="g_14_17" type="capsule" fromto="3.75 2.25 0.150 3.75 2.25 0.270" size="0.090" material="m1"/>
+    <geom name="g_14_18" type="sphere" pos="4.25 2.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_14_19" type="box" pos="4.75 2.25 0.250" size="0.250 0.250 0.250" euler="0 0 75" material="m3"/>
+    <geom name="g_15_00" type="capsule" fromto="-4.75 2.75 0.150 -4.75 2.75 0.270" size="0.090" material="m2"/>
+    <geom name="g_15_01" type="sphere" pos="-4.25 2.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_15_02" type="box" pos="-3.75 2.75 0.250" size="0.250 0.250 0.250" euler="0 0 41" material="m0"/>
+    <geom name="g_15_03" type="cylinder" pos="-3.25 2.75 0.210" size="0.160 0.210" material="m1"/>
+    <geom name="g_15_04" type="capsule" fromto="-2.75 2.75 0.150 -2.75 2.75 0.390" size="0.090" material="m2"/>
+    <geom name="g_15_05" type="sphere" pos="-2.25 2.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_15_06" type="box" pos="-1.75 2.75 0.250" size="0.250 0.250 0.250" euler="0 0 3" material="m0"/>
+    <geom name="g_15_07" type="cylinder" pos="-1.25 2.75 0.180" size="0.160 0.180" material="m1"/>
+    <geom name="g_15_08" type="capsule" fromto="-0.75 2.75 0.150 -0.75 2.75 0.360" size="0.090" material="m2"/>
+    <geom name="g_15_09" type="sphere" pos="-0.25 2.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_15_10" type="box" pos="0.25 2.75 0.250" size="0.250 0.250 0.250" euler="0 0 55" material="m0"/>
+    <geom name="g_15_11" type="cylinder" pos="0.75 2.75 0.150" size="0.160 0.150" material="m1"/>
+    <geom name="g_15_12" type="capsule" fromto="1.25 2.75 0.150 1.25 2.75 0.330" size="0.090" material="m2"/>
+    <geom name="g_15_13" type="sphere" pos="1.75 2.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_15_14" type="box" pos="2.25 2.75 0.250" size="0.250 0.250 0.250" euler="0 0 17" material="m0"/>
+    <geom name="g_15_15" type="cylinder" pos="2.75 2.75 0.120" size="0.160 0.120" material="m1"/>
+    <geom name="g_15_16" type="capsule" fromto="3.25 2.75 0.150 3.25 2.75 0.300" size="0.090" material="m2"/>
+    <geom name="g_15_17" type="sphere" pos="3.75 2.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_15_18" type="box" pos="4.25 2.75 0.250" size="0.250 0.250 0.250" euler="0 0 69" material="m0"/>
+    <geom name="g_15_19" type="cylinder" pos="4.75 2.75 0.240" size="0.160 0.240" material="m1"/>
+    <geom name="g_16_00" type="sphere" pos="-4.75 3.25 0.100" size="0.100" material="m0"/>
+    <geom name="g_16_01" type="box" pos="-4.25 3.25 0.250" size="0.250 0.250 0.250" euler="0 0 35" material="m1"/>
+    <geom name="g_16_02" type="cylinder" pos="-3.75 3.25 0.240" size="0.160 0.240" material="m2"/>
+    <geom name="g_16_03" type="capsule" fromto="-3.25 3.25 0.150 -3.25 3.25 0.270" size="0.090" material="m3"/>
+    <geom name="g_16_04" type="sphere" pos="-2.75 3.25 0.100" size="0.100" material="m0"/>
+    <geom name="g_16_05" type="box" pos="-2.25 3.25 0.250" size="0.250 0.250 0.250" euler="0 0 87" material="m1"/>
+    <geom name="g_16_06" type="cylinder" pos="-1.75 3.25 0.210" size="0.160 0.210" material="m2"/>
+    <geom name="g_16_07" type="capsule" fromto="-1.25 3.25 0.150 -1.25 3.25 0.390" size="0.090" material="m3"/>
+    <geom name="g_16_08" type="sphere" pos="-0.75 3.25 0.100" size="0.100" material="m0"/>
+    <geom name="g_16_09" type="box" pos="-0.25 3.25 0.250" size="0.250 0.250 0.250" euler="0 0 49" material="m1"/>
+    <geom name="g_16_10" type="cylinder" pos="0.25 3.25 0.180" size="0.160 0.180" material="m2"/>
+    <geom name="g_16_11" type="capsule" fromto="0.75 3.25 0.150 0.75 3.25 0.360" size="0.090" material="m3"/>
+    <geom name="g_16_12" type="sphere" pos="1.25 3.25 0.100" size="0.100" material="m0"/>
+    <geom name="g_16_13" type="box" pos="1.75 3.25 0.250" size="0.250 0.250 0.250" euler="0 0 11" material="m1"/>
+    <geom name="g_16_14" type="cylinder" pos="2.25 3.25 0.150" size="0.160 0.150" material="m2"/>
+    <geom name="g_16_15" type="capsule" fromto="2.75 3.25 0.150 2.75 3.25 0.330" size="0.090" material="m3"/>
+    <geom name="g_16_16" type="sphere" pos="3.25 3.25 0.100" size="0.100" material="m0"/>
+    <geom name="g_16_17" type="box" pos="3.75 3.25 0.250" size="0.250 0.250 0.250" euler="0 0 63" material="m1"/>
+    <geom name="g_16_18" type="cylinder" pos="4.25 3.25 0.120" size="0.160 0.120" material="m2"/>
+    <geom name="g_16_19" type="capsule" fromto="4.75 3.25 0.150 4.75 3.25 0.300" size="0.090" material="m3"/>
+    <geom name="g_17_00" type="box" pos="-4.75 3.75 0.250" size="0.250 0.250 0.250" euler="0 0 29" material="m2"/>
+    <geom name="g_17_01" type="cylinder" pos="-4.25 3.75 0.120" size="0.160 0.120" material="m3"/>
+    <geom name="g_17_02" type="capsule" fromto="-3.75 3.75 0.150 -3.75 3.75 0.300" size="0.090" material="m0"/>
+    <geom name="g_17_03" type="sphere" pos="-3.25 3.75 0.100" size="0.100" material="m1"/>
+    <geom name="g_17_04" type="box" pos="-2.75 3.75 0.250" size="0.250 0.250 0.250" euler="0 0 81" material="m2"/>
+    <geom name="g_17_05" type="cylinder" pos="-2.25 3.75 0.240" size="0.160 0.240" material="m3"/>
+    <geom name="g_17_06" type="capsule" fromto="-1.75 3.75 0.150 -1.75 3.75 0.270" size="0.090" material="m0"/>
+    <geom name="g_17_07" type="sphere" pos="-1.25 3.75 0.100" size="0.100" material="m1"/>
+    <geom name="g_17_08" type="box" pos="-0.75 3.75 0.250" size="0.250 0.250 0.250" euler="0 0 43" material="m2"/>
+    <geom name="g_17_09" type="cylinder" pos="-0.25 3.75 0.210" size="0.160 0.210" material="m3"/>
+    <geom name="g_17_10" type="capsule" fromto="0.25 3.75 0.150 0.25 3.75 0.390" size="0.090" material="m0"/>
+    <geom name="g_17_11" type="sphere" pos="0.75 3.75 0.100" size="0.100" material="m1"/>
+    <geom name="g_17_12" type="box" pos="1.25 3.75 0.250" size="0.250 0.250 0.250" euler="0 0 5" material="m2"/>
+    <geom name="g_17_13" type="cylinder" pos="1.75 3.75 0.180" size="0.160 0.180" material="m3"/>
+    <geom name="g_17_14" type="capsule" fromto="2.25 3.75 0.150 2.25 3.75 0.360" size="0.090" material="m0"/>
+    <geom name="g_17_15" type="sphere" pos="2.75 3.75 0.100" size="0.100" material="m1"/>
+    <geom name="g_17_16" type="box" pos="3.25 3.75 0.250" size="0.250 0.250 0.250" euler="0 0 57" material="m2"/>
+    <geom name="g_17_17" type="cylinder" pos="3.75 3.75 0.150" size="0.160 0.150" material="m3"/>
+    <geom name="g_17_18" type="capsule" fromto="4.25 3.75 0.150 4.25 3.75 0.330" size="0.090" material="m0"/>
+    <geom name="g_17_19" type="sphere" pos="4.75 3.75 0.100" size="0.100" material="m1"/>
+    <geom name="g_18_00" type="cylinder" pos="-4.75 4.25 0.150" size="0.160 0.150" material="m0"/>
+    <geom name="g_18_01" type="capsule" fromto="-4.25 4.25 0.150 -4.25 4.25 0.330" size="0.090" material="m1"/>
+    <geom name="g_18_02" type="sphere" pos="-3.75 4.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_18_03" type="box" pos="-3.25 4.25 0.250" size="0.250 0.250 0.250" euler="0 0 75" material="m3"/>
+    <geom name="g_18_04" type="cylinder" pos="-2.75 4.25 0.120" size="0.160 0.120" material="m0"/>
+    <geom name="g_18_05" type="capsule" fromto="-2.25 4.25 0.150 -2.25 4.25 0.300" size="0.090" material="m1"/>
+    <geom name="g_18_06" type="sphere" pos="-1.75 4.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_18_07" type="box" pos="-1.25 4.25 0.250" size="0.250 0.250 0.250" euler="0 0 37" material="m3"/>
+    <geom name="g_18_08" type="cylinder" pos="-0.75 4.25 0.240" size="0.160 0.240" material="m0"/>
+    <geom name="g_18_09" type="capsule" fromto="-0.25 4.25 0.150 -0.25 4.25 0.270" size="0.090" material="m1"/>
+    <geom name="g_18_10" type="sphere" pos="0.25 4.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_18_11" type="box" pos="0.75 4.25 0.250" size="0.250 0.250 0.250" euler="0 0 89" material="m3"/>
+    <geom name="g_18_12" type="cylinder" pos="1.25 4.25 0.210" size="0.160 0.210" material="m0"/>
+    <geom name="g_18_13" type="capsule" fromto="1.75 4.25 0.150 1.75 4.25 0.390" size="0.090" material="m1"/>
+    <geom name="g_18_14" type="sphere" pos="2.25 4.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_18_15" type="box" pos="2.75 4.25 0.250" size="0.250 0.250 0.250" euler="0 0 51" material="m3"/>
+    <geom name="g_18_16" type="cylinder" pos="3.25 4.25 0.180" size="0.160 0.180" material="m0"/>
+    <geom name="g_18_17" type="capsule" fromto="3.75 4.25 0.150 3.75 4.25 0.360" size="0.090" material="m1"/>
+    <geom name="g_18_18" type="sphere" pos="4.25 4.25 0.100" size="0.100" material="m2"/>
+    <geom name="g_18_19" type="box" pos="4.75 4.25 0.250" size="0.250 0.250 0.250" euler="0 0 13" material="m3"/>
+    <geom name="g_19_00" type="capsule" fromto="-4.75 4.75 0.150 -4.75 4.75 0.360" size="0.090" material="m2"/>
+    <geom name="g_19_01" type="sphere" pos="-4.25 4.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_19_02" type="box" pos="-3.75 4.75 0.250" size="0.250 0.250 0.250" euler="0 0 69" material="m0"/>
+    <geom name="g_19_03" type="cylinder" pos="-3.25 4.75 0.150" size="0.160 0.150" material="m1"/>
+    <geom name="g_19_04" type="capsule" fromto="-2.75 4.75 0.150 -2.75 4.75 0.330" size="0.090" material="m2"/>
+    <geom name="g_19_05" type="sphere" pos="-2.25 4.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_19_06" type="box" pos="-1.75 4.75 0.250" size="0.250 0.250 0.250" euler="0 0 31" material="m0"/>
+    <geom name="g_19_07" type="cylinder" pos="-1.25 4.75 0.120" size="0.160 0.120" material="m1"/>
+    <geom name="g_19_08" type="capsule" fromto="-0.75 4.75 0.150 -0.75 4.75 0.300" size="0.090" material="m2"/>
+    <geom name="g_19_09" type="sphere" pos="-0.25 4.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_19_10" type="box" pos="0.25 4.75 0.250" size="0.250 0.250 0.250" euler="0 0 83" material="m0"/>
+    <geom name="g_19_11" type="cylinder" pos="0.75 4.75 0.240" size="0.160 0.240" material="m1"/>
+    <geom name="g_19_12" type="capsule" fromto="1.25 4.75 0.150 1.25 4.75 0.270" size="0.090" material="m2"/>
+    <geom name="g_19_13" type="sphere" pos="1.75 4.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_19_14" type="box" pos="2.25 4.75 0.250" size="0.250 0.250 0.250" euler="0 0 45" material="m0"/>
+    <geom name="g_19_15" type="cylinder" pos="2.75 4.75 0.210" size="0.160 0.210" material="m1"/>
+    <geom name="g_19_16" type="capsule" fromto="3.25 4.75 0.150 3.25 4.75 0.390" size="0.090" material="m2"/>
+    <geom name="g_19_17" type="sphere" pos="3.75 4.75 0.100" size="0.100" material="m3"/>
+    <geom name="g_19_18" type="box" pos="4.25 4.75 0.250" size="0.250 0.250 0.250" euler="0 0 7" material="m0"/>
+    <geom name="g_19_19" type="cylinder" pos="4.75 4.75 0.180" size="0.160 0.180" material="m1"/>
+
+    <camera name="bulk" pos="0 -9.5 6.0" xyaxes="1 0 0 0 0.62 0.79"/>
+    <camera name="bulk_low" pos="-7.2 -7.6 1.2" xyaxes="0.71 0.71 0 -0.12 0.12 0.98"/>
+  </worldbody>
+</mujoco>

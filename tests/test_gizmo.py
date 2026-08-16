@@ -1,0 +1,483 @@
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from forge_viewer import commands as cmd
+from forge_viewer.adapters.static import StaticSceneAdapter
+from forge_viewer.gizmo import (
+    AXIS_START,
+    CENTER_RADIUS,
+    CENTER_SHELL_RADIUS,
+    PLANE_INNER,
+    RING_RADIUS,
+    RING_SEGMENTS,
+    SCREEN_RING_RADIUS,
+    SIZE_PT,
+    GizmoFrame,
+    GizmoHandle,
+    GizmoMode,
+    GizmoSpace,
+    axis_handle_alpha,
+    axis_rotation,
+    display_handles,
+    hit_test,
+    plane_handle_alpha,
+    project,
+    rotation_ring,
+    rotation_ring_alpha,
+    world_scale,
+)
+from forge_viewer.render.backend import BackendCaps
+from forge_viewer.scene import Scene
+from forge_viewer.session import Session
+from forge_viewer.types import CameraView
+from forge_viewer.ui.gizmo import (
+    ObjectGizmo,
+    _clip_line_to_rect,
+    _masked_axis_start,
+    _rotation_fill_alpha,
+    _rotation_sweep,
+)
+
+RECT = (0.0, 0.0, 800.0, 600.0)
+
+
+@pytest.mark.parametrize(
+    ("degrees", "sweep"),
+    (
+        (181.0, 181.0),
+        (359.0, 359.0),
+        (359.96, 0.0),
+        (360.0, 0.0),
+        (405.0, 45.0),
+        (720.0, 0.0),
+        (-405.0, -45.0),
+    ),
+)
+def test_rotation_guide_wraps_only_after_a_full_turn(degrees: float, sweep: float) -> None:
+    assert np.degrees(_rotation_sweep(np.radians(degrees))) == pytest.approx(sweep)
+
+
+@pytest.mark.parametrize(
+    ("degrees", "alpha"),
+    ((90.0, 0.28), (120.0, 0.28), (150.0, 0.14), (180.0, 0.0), (247.0, 0.0)),
+)
+def test_large_rotation_sweeps_stop_filling_the_scene(degrees: float, alpha: float) -> None:
+    assert _rotation_fill_alpha(np.radians(degrees)) == pytest.approx(alpha)
+    assert _rotation_fill_alpha(np.radians(-degrees)) == pytest.approx(alpha)
+
+
+def camera(*, orthographic: bool = False) -> CameraView:
+    return CameraView(
+        eye=np.array((4.0, -6.0, 3.0), np.float32),
+        target=np.zeros(3, np.float32),
+        up=np.array((0.0, 0.0, 1.0), np.float32),
+        aspect=RECT[2] / RECT[3],
+        orthographic=orthographic,
+        ortho_height=5.0,
+    )
+
+
+def session_at(position=(0.0, 0.0, 0.0), rotation=None) -> tuple[Session, object]:
+    scene = Scene()
+    obj = scene.box(name="editable", position=position, rotation=rotation)
+    session = Session(StaticSceneAdapter(scene))
+    session.submit(cmd.Select(obj.object_id))
+    return session, session.selected_node
+
+
+@pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
+def test_gizmo_keeps_the_same_screen_size_at_different_depths(orthographic: bool) -> None:
+
+    cam = CameraView(
+        eye=np.array((0.0, -5.0, 0.0), np.float32),
+        target=np.zeros(3, np.float32),
+        up=np.array((0.0, 0.0, 1.0), np.float32),
+        aspect=RECT[2] / RECT[3],
+        orthographic=orthographic,
+        ortho_height=5.0,
+    )
+    for origin in (np.zeros(3), np.array((0.0, 5.0, 0.0))):
+        scale = world_scale(cam, origin, RECT[3])
+        screen = project(cam, (origin, origin + np.array((0.0, 0.0, scale))), RECT)
+        assert np.linalg.norm(screen[1, :2] - screen[0, :2]) == pytest.approx(SIZE_PT)
+
+
+def test_center_and_axis_hit_use_the_same_projected_geometry() -> None:
+    cam = camera()
+    origin = np.zeros(3)
+    rotation = np.eye(3)
+    center = project(cam, (origin,), RECT)[0, :2]
+    assert hit_test(cam, origin, rotation, RECT, center, GizmoMode.TRANSLATE)[0] is (
+        GizmoHandle.SCREEN
+    )
+
+    scale = world_scale(cam, origin, RECT[3])
+    x_axis = project(cam, (origin + np.array((0.58 * scale, 0.0, 0.0)),), RECT)[0, :2]
+    assert hit_test(cam, origin, rotation, RECT, x_axis, GizmoMode.TRANSLATE)[0] is GizmoHandle.X
+
+
+def test_translation_center_shell_masks_continuous_axes_but_not_planes() -> None:
+    from forge_viewer.gizmo import CONTRAST_EDGE_PT, SIZE_PT
+
+    visible_radius = CENTER_RADIUS + CONTRAST_EDGE_PT / SIZE_PT
+    assert AXIS_START < CENTER_RADIUS < visible_radius < CENTER_SHELL_RADIUS < PLANE_INNER
+    assert np.allclose(_masked_axis_start(np.zeros(2), np.array((20.0, 0.0)), 7.0), (7, 0))
+
+
+def test_rotation_idle_uses_front_half_rings_and_an_interactive_outer_ring() -> None:
+    cam = camera()
+    origin = np.zeros(3)
+    rotation = np.eye(3)
+    scale = world_scale(cam, origin, RECT[3])
+    ring = rotation_ring(cam, origin, rotation, scale, 2, full=False)
+    to_eye = cam.eye - origin
+    assert np.min((ring - origin) @ to_eye) >= -1e-8
+    full_ring = rotation_ring(cam, origin, rotation, scale, 2, full=True)
+    assert len(full_ring) == RING_SEGMENTS
+    assert not np.allclose(full_ring[0], full_ring[-1])
+
+    center = project(cam, (origin,), RECT)[0, :2]
+    outer = center + np.array((SCREEN_RING_RADIUS * SIZE_PT, 0.0))
+    assert hit_test(cam, origin, rotation, RECT, outer, GizmoMode.ROTATE)[0] is (
+        GizmoHandle.ROTATE_SCREEN
+    )
+
+    edge_cam = CameraView(
+        eye=np.array((4.0, -6.0, 0.0)),
+        target=origin,
+        up=np.array((0.0, 0.0, 1.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    assert rotation_ring_alpha(edge_cam, origin, rotation[:, 2]) == 0.0
+
+
+def test_translation_axes_and_planes_fade_when_their_projection_degenerates() -> None:
+    cam = CameraView(
+        eye=np.array((5.0, 0.0, 0.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 0.0, 1.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    assert axis_handle_alpha(cam, np.zeros(3), np.array((1.0, 0.0, 0.0))) == 0.0
+    assert plane_handle_alpha(cam, np.zeros(3), np.array((0.0, 1.0, 0.0))) == 0.0
+
+
+def test_axis_rotation_maps_mesh_z_to_each_object_axis_without_mirroring() -> None:
+    rotation = np.array(((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)))
+    for axis in range(3):
+        mapped = axis_rotation(rotation, axis)
+        assert mapped[:, 2] == pytest.approx(rotation[:, axis])
+        assert np.linalg.det(mapped) == pytest.approx(1.0)
+
+
+class CaptureBackend:
+    caps = BackendCaps(name="capture", gizmo=True)
+
+    def __init__(self) -> None:
+        self.frame = None
+
+    def set_gizmo(self, frame) -> bool:
+        self.frame = frame
+        return frame is not None
+
+
+def test_hidpi_only_scales_the_gpu_size_not_ui_hit_space() -> None:
+    session, _ = session_at()
+    gizmo = ObjectGizmo()
+    gizmo.set_style("3d")
+    backend = CaptureBackend()
+    cam = camera()
+    center = tuple(project(cam, (np.zeros(3),), RECT)[0, :2])
+
+    assert gizmo.update_hover(session, cam, RECT, center) is GizmoHandle.SCREEN
+    assert gizmo.publish(
+        backend,
+        session,
+        cam,
+        RECT,
+        pixel_scale=2.0,
+        yielding=False,
+        interactive=True,
+    )
+    assert backend.frame.size_px == 2.0 * SIZE_PT
+
+
+def test_body_and_world_space_publish_the_same_basis_used_for_interaction() -> None:
+    rotation = np.array(((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)))
+    session, _ = session_at(rotation=rotation)
+    gizmo = ObjectGizmo()
+    gizmo.set_style("3d")
+    backend = CaptureBackend()
+    cam = camera()
+
+    gizmo.publish(backend, session, cam, RECT, pixel_scale=1.0, yielding=False, interactive=True)
+    assert backend.frame.space is GizmoSpace.BODY
+    assert backend.frame.rotation == pytest.approx(rotation)
+
+    gizmo.set_space("world")
+    gizmo.publish(backend, session, cam, RECT, pixel_scale=1.0, yielding=False, interactive=True)
+    assert backend.frame.space is GizmoSpace.WORLD
+    assert backend.frame.rotation == pytest.approx(np.eye(3))
+
+
+def test_flat_is_default_and_active_handle_hides_the_rest() -> None:
+    gizmo = ObjectGizmo()
+    assert gizmo.style == "2d"
+    gizmo.set_style("3d")
+    assert gizmo.style == "3d"
+
+    frame = GizmoFrame()
+    assert set(display_handles(frame)) == {
+        GizmoHandle.X,
+        GizmoHandle.Y,
+        GizmoHandle.Z,
+        GizmoHandle.YZ,
+        GizmoHandle.ZX,
+        GizmoHandle.XY,
+        GizmoHandle.SCREEN,
+    }
+    frame.active = GizmoHandle.X
+    assert display_handles(frame) == (GizmoHandle.X,)
+    frame.mode = GizmoMode.ROTATE
+    frame.active = GizmoHandle.NONE
+    assert set(display_handles(frame)) == {
+        GizmoHandle.ROTATE_X,
+        GizmoHandle.ROTATE_Y,
+        GizmoHandle.ROTATE_Z,
+        GizmoHandle.ROTATE_SCREEN,
+    }
+    frame.active = GizmoHandle.ROTATE_Z
+    assert display_handles(frame) == (GizmoHandle.ROTATE_Z,)
+
+
+def test_axis_drag_moves_the_body_but_not_across_other_local_axes() -> None:
+    session, node = session_at()
+    gizmo = ObjectGizmo()
+    cam = camera()
+    origin = np.zeros(3)
+    scale = world_scale(cam, origin, RECT[3])
+    start = project(cam, (origin + np.array((0.55 * scale, 0.0, 0.0)),), RECT)[0, :2]
+
+    assert gizmo.update_hover(session, cam, RECT, tuple(start)) is GizmoHandle.X
+    gizmo.interact(session, cam, RECT, tuple(start), claimed=True, left_down=True, released=False)
+    assert gizmo.using
+    axis_screen = project(cam, (origin, origin + np.array((scale, 0.0, 0.0))), RECT)[:, :2]
+    direction = axis_screen[1] - axis_screen[0]
+    direction /= np.linalg.norm(direction)
+    end = start + direction * 36.0
+    assert gizmo.interact(
+        session, cam, RECT, tuple(end), claimed=True, left_down=True, released=False
+    )
+
+    position = session.frame.body_xpos[node.body_index]
+    assert position[0] > 0.1
+    assert position[1:] == pytest.approx((0.0, 0.0), abs=1e-7)
+    assert gizmo.value_label.startswith("X +") and gizmo.value_label.endswith(" m")
+
+
+def test_screen_translation_reports_all_xyz_components() -> None:
+    session, _node = session_at()
+    gizmo = ObjectGizmo()
+    cam = camera()
+    center = project(cam, (np.zeros(3),), RECT)[0, :2]
+
+    assert gizmo.update_hover(session, cam, RECT, tuple(center)) is GizmoHandle.SCREEN
+    gizmo.interact(session, cam, RECT, tuple(center), claimed=True, left_down=True, released=False)
+    assert gizmo.interact(
+        session,
+        cam,
+        RECT,
+        tuple(center + np.array((32.0, -18.0))),
+        claimed=True,
+        left_down=True,
+        released=False,
+    )
+
+    label = gizmo.value_label
+    assert label.startswith("X ") and "  Y " in label and "  Z " in label
+    assert "delta" not in label.lower() and "distance" not in label.lower()
+
+
+def test_keyboard_axis_moves_without_hitting_or_clicking_the_arrow() -> None:
+    session, node = session_at()
+    gizmo = ObjectGizmo()
+    cam = camera()
+    start = np.array((143.0, 411.0))
+    axis = project(cam, (np.zeros(3), np.array((1.0, 0.0, 0.0))), RECT)[:, :2]
+    direction = axis[1] - axis[0]
+    direction /= np.linalg.norm(direction)
+
+    assert gizmo.keyboard_interact(session, cam, RECT, tuple(start), 0)
+    assert gizmo.keyboard_using and gizmo.active_handle is GizmoHandle.X
+    assert gizmo.keyboard_interact(session, cam, RECT, tuple(start + direction * 36.0), 0)
+    position = np.asarray(session.frame.body_xpos[node.body_index])
+    assert position[0] > 0.1
+    assert position[1:] == pytest.approx((0.0, 0.0), abs=1e-7)
+
+    gizmo.keyboard_interact(session, cam, RECT, tuple(start), -1)
+    assert not gizmo.using and not gizmo.keyboard_using
+
+
+def test_keyboard_axis_rotates_without_hitting_or_clicking_the_ring() -> None:
+    session, node = session_at()
+    gizmo = ObjectGizmo("rotate")
+    cam = camera()
+    world = np.array(((0.48, 0.37, 0.0), (0.21, 0.56, 0.0)))
+    start, end = project(cam, world, RECT)[:, :2]
+
+    assert gizmo.keyboard_interact(session, cam, RECT, tuple(start), 2)
+    assert gizmo.keyboard_using and gizmo.active_handle is GizmoHandle.ROTATE_Z
+    assert gizmo.keyboard_interact(session, cam, RECT, tuple(end), 2)
+    rotation = np.asarray(session.frame.body_xmat[node.body_index]).reshape(3, 3)
+    assert not np.allclose(rotation, np.eye(3))
+    assert gizmo.value_label.startswith("Z ") and gizmo.value_label.endswith("°")
+
+
+def test_keyboard_constraint_line_keeps_the_exact_projected_axis_direction() -> None:
+    segment = _clip_line_to_rect((50.0, 50.0), (2.0, 1.0), (0.0, 0.0, 100.0, 100.0))
+    assert segment is not None
+    start, end = segment
+    assert start == pytest.approx((0.0, 25.0))
+    assert end == pytest.approx((100.0, 75.0))
+    delta = end - start
+    assert delta[0] - 2.0 * delta[1] == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize(
+    ("space", "style", "axis"),
+    (
+        ("body", "2d", np.array((0.0, 1.0, 0.0))),
+        ("world", "3d", np.array((1.0, 0.0, 0.0))),
+    ),
+)
+def test_axis_drag_uses_the_selected_body_or_world_frame(space, style, axis) -> None:
+    rotation = np.array(((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)))
+    session, node = session_at(rotation=rotation)
+    gizmo = ObjectGizmo()
+    gizmo.set_space(space)
+    gizmo.set_style(style)
+    cam = camera()
+    scale = world_scale(cam, np.zeros(3), RECT[3])
+    start = project(cam, (axis * scale * 0.55,), RECT)[0, :2]
+
+    assert gizmo.update_hover(session, cam, RECT, tuple(start)) is GizmoHandle.X
+    gizmo.interact(session, cam, RECT, tuple(start), claimed=True, left_down=True, released=False)
+    screen_axis = project(cam, (np.zeros(3), axis * scale), RECT)[:, :2]
+    direction = screen_axis[1] - screen_axis[0]
+    direction /= np.linalg.norm(direction)
+    end = start + direction * 36.0
+    assert gizmo.interact(
+        session, cam, RECT, tuple(end), claimed=True, left_down=True, released=False
+    )
+
+    position = np.asarray(session.frame.body_xpos[node.body_index])
+    assert np.dot(position, axis) > 0.1
+    assert np.linalg.norm(position - axis * np.dot(position, axis)) < 1e-6
+
+
+def test_plane_drag_stays_in_the_selected_local_plane() -> None:
+    session, node = session_at()
+    gizmo = ObjectGizmo()
+    cam = camera()
+    origin = np.zeros(3)
+    scale = world_scale(cam, origin, RECT[3])
+    world_start = scale * np.array((0.31, 0.31, 0.0))
+    world_end = world_start + np.array((0.24, -0.13, 0.0))
+    start, end = project(cam, (world_start, world_end), RECT)[:, :2]
+
+    assert gizmo.update_hover(session, cam, RECT, tuple(start)) is GizmoHandle.XY
+    gizmo.interact(session, cam, RECT, tuple(start), claimed=True, left_down=True, released=False)
+    assert gizmo.interact(
+        session, cam, RECT, tuple(end), claimed=True, left_down=True, released=False
+    )
+
+    assert session.frame.body_xpos[node.body_index] == pytest.approx((0.24, -0.13, 0.0), abs=1e-6)
+
+
+def test_rotation_drag_preserves_position_and_a_rigid_rotation() -> None:
+    session, node = session_at()
+    gizmo = ObjectGizmo("rotate")
+    cam = camera()
+    origin = np.zeros(3)
+    scale = world_scale(cam, origin, RECT[3])
+
+    samples = np.linspace(0.0, 2.0 * np.pi, 48, endpoint=False)
+    start_angle = next(
+        angle
+        for angle in samples
+        if hit_test(
+            cam,
+            origin,
+            np.eye(3),
+            RECT,
+            tuple(
+                project(
+                    cam,
+                    ((RING_RADIUS * scale * np.array((np.cos(angle), np.sin(angle), 0.0))),),
+                    RECT,
+                )[0, :2]
+            ),
+            GizmoMode.ROTATE,
+        )[0]
+        is GizmoHandle.ROTATE_Z
+    )
+    world_start = RING_RADIUS * scale * np.array((np.cos(start_angle), np.sin(start_angle), 0.0))
+    world_end = (
+        RING_RADIUS
+        * scale
+        * np.array((np.cos(start_angle + 0.35), np.sin(start_angle + 0.35), 0.0))
+    )
+    start, end = project(cam, (world_start, world_end), RECT)[:, :2]
+
+    assert gizmo.update_hover(session, cam, RECT, tuple(start)) is GizmoHandle.ROTATE_Z
+    gizmo.interact(session, cam, RECT, tuple(start), claimed=True, left_down=True, released=False)
+    assert gizmo.using
+    assert gizmo.interact(
+        session, cam, RECT, tuple(end), claimed=True, left_down=True, released=False
+    )
+
+    position = session.frame.body_xpos[node.body_index]
+    rotation = session.frame.body_xmat[node.body_index]
+    assert position == pytest.approx((0.0, 0.0, 0.0), abs=1e-7)
+    assert rotation @ rotation.T == pytest.approx(np.eye(3), abs=1e-6)
+    assert np.linalg.det(rotation) == pytest.approx(1.0, abs=1e-6)
+    assert not np.allclose(rotation, np.eye(3))
+    assert gizmo.value_label.startswith("Z +") and gizmo.value_label.endswith("°")
+
+    for angle in np.linspace(0.35, 0.35 - 10.5 * np.pi, 190)[1:]:
+        world = (
+            RING_RADIUS
+            * scale
+            * np.array((np.cos(start_angle + angle), np.sin(start_angle + angle), 0.0))
+        )
+        cursor = project(cam, (world,), RECT)[0, :2]
+        assert gizmo.interact(
+            session, cam, RECT, tuple(cursor), claimed=True, left_down=True, released=False
+        )
+    shown_degrees = float(gizmo.value_label.split()[1][:-1])
+    assert shown_degrees == pytest.approx(np.degrees(0.35 - 10.5 * np.pi), abs=1.0)
+    assert gizmo.value_label.endswith("· 5×360°")
+
+
+def test_outer_ring_rotates_around_the_camera_axis() -> None:
+    session, node = session_at()
+    gizmo = ObjectGizmo("rotate")
+    cam = camera()
+    center = project(cam, (np.zeros(3),), RECT)[0, :2]
+    radius = SCREEN_RING_RADIUS * SIZE_PT
+    start = center + np.array((radius, 0.0))
+    end = center + np.array((0.0, radius))
+
+    assert gizmo.update_hover(session, cam, RECT, tuple(start)) is GizmoHandle.ROTATE_SCREEN
+    gizmo.interact(session, cam, RECT, tuple(start), claimed=True, left_down=True, released=False)
+    assert gizmo.interact(
+        session, cam, RECT, tuple(end), claimed=True, left_down=True, released=False
+    )
+
+    rotation = np.asarray(session.frame.body_xmat[node.body_index]).reshape(3, 3)
+    view_axis = -cam.forward()
+    assert rotation @ view_axis == pytest.approx(view_axis, abs=1e-6)
+    assert not np.allclose(rotation, np.eye(3))
+    assert gizmo.value_label.startswith("Screen ")

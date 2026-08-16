@@ -1,0 +1,92 @@
+<!--
+  scale_extremes —— 极端尺度。
+
+  守的性质：**1.6 m 到 0.03 m 同屏还都看得清**。跨度 53 倍。
+
+  这是机器人场景的常态：一节大臂 1.6 m，一颗螺丝 0.03 m，它们在同一帧里。四档不是随手
+  取的，对应的是四类真实零件——底座 / 连杆 / 夹爪指节 / 螺栓。
+
+  它一次性守住四件互相纠缠的事：
+
+  1. **尺寸不进桶键**（04 §4.2）。四档球是**同一个网格**、四种缩放，必须落进同一个桶。
+     哪天有人按尺寸分桶，这份场景的绘制次数会翻四倍——而画面一模一样，只有统计面板看得出来。
+  2. **深度精度**。0.03 m 的东西与 1.6 m 的东西同屏时相机 near 面得压得很低，
+     远处再有几十米的东西，深度就开始不够用了。所以远端故意放了 `far_wall`（30 m 外）：
+     **近处的小球与远处的墙必须同时不闪**。
+  3. **阴影级联**。0.03 m 的螺栓要有影子，就得有一级足够细的级联；1.6 m 的柱子又要
+     完整地投出来。一张阴影图做不到这两件事，这正是级联存在的理由（06）。
+  4. **细分档数够不够**。0.03 m 的球在屏幕上只有几个像素，32 段绰绰有余；
+     1.6 m 的球贴到眼前时 32 段的折线要还看不出来（`render/mesh.py` 的 CIRCLE_SEGMENTS 就是
+     照这一条定的）。**近处放了一个 1.6 m 的球正是为了让这条能被推翻。**
+
+  四档并排、逐档缩小 4 倍，中间没有断档——只放最大和最小两档的话，"中间某一档开始糊"
+  这种缺陷会被漏掉。
+-->
+<mujoco model="scale_extremes">
+  <compiler angle="degree" autolimits="true"/>
+
+  <visual>
+    <headlight ambient="0.25 0.25 0.25" diffuse="0.4 0.4 0.4" specular="0.4 0.4 0.4"/>
+    <quality shadowsize="4096" numslices="28" numstacks="16"/>
+    <!-- near 压到 5 mm：不压的话 0.03 m 的东西凑近看会被裁掉一半 -->
+    <map znear="0.005" zfar="120" shadowclip="1.5" shadowscale="0.5"/>
+  </visual>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.19 0.21 0.25" rgb2="0.29 0.32 0.37"/>
+    <material name="grid" texture="grid" texrepeat="1 1" texuniform="true"/>
+    <material name="s_huge" rgba="0.80 0.35 0.28 1" specular="0.5" shininess="0.6"/>
+    <material name="s_big" rgba="0.85 0.65 0.25 1" specular="0.5" shininess="0.6"/>
+    <material name="s_small" rgba="0.35 0.72 0.45 1" specular="0.5" shininess="0.6"/>
+    <material name="s_tiny" rgba="0.35 0.60 0.90 1" specular="0.7" shininess="0.8"/>
+    <material name="far" rgba="0.45 0.46 0.50 1" specular="0.1" shininess="0.2"/>
+  </asset>
+
+  <worldbody>
+    <light name="sun" type="directional" pos="3 -4 6" dir="-0.35 0.45 -1"
+           diffuse="0.7 0.7 0.7" specular="0.3 0.3 0.3" castshadow="true"/>
+
+    <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
+
+    <!-- 第一档 1.6 m -->
+    <body name="huge" pos="-1.30 0 0">
+      <geom name="huge_ball" type="sphere" pos="0 0 0.80" size="0.80" material="s_huge"/>
+      <geom name="huge_post" type="cylinder" pos="0 1.10 0.80" size="0.16 0.80" material="s_huge"/>
+    </body>
+
+    <!-- 第二档 0.4 m（1/4） -->
+    <body name="big" pos="0.35 0 0">
+      <geom name="big_ball" type="sphere" pos="0 0 0.20" size="0.20" material="s_big"/>
+      <geom name="big_box" type="box" pos="0 0.55 0.20" size="0.20 0.20 0.20" material="s_big"/>
+    </body>
+
+    <!-- 第三档 0.10 m（再 1/4） -->
+    <body name="small" pos="0.95 0 0">
+      <geom name="small_ball" type="sphere" pos="0 0 0.05" size="0.05" material="s_small"/>
+      <geom name="small_box" type="box" pos="0 0.18 0.05" size="0.05 0.05 0.05" material="s_small"/>
+    </body>
+
+    <!-- 第四档 0.03 m（再 1/3.3）。摆在大球脚下，两档必须同时在焦点区里 -->
+    <body name="tiny" pos="1.22 0 0">
+      <geom name="tiny_ball" type="sphere" pos="0 0 0.015" size="0.015" material="s_tiny"/>
+      <geom name="tiny_box" type="box" pos="0 0.06 0.015" size="0.015 0.015 0.015"
+            material="s_tiny"/>
+      <geom name="tiny_pin" type="capsule" fromto="0 -0.06 0 0 -0.06 0.03" size="0.006"
+            material="s_tiny"/>
+    </body>
+
+    <!-- 贴在 1.6 m 球脚边的一颗 0.03 m 螺栓：两个极端在同一块像素区里 -->
+    <body name="tiny_on_huge" pos="-1.30 -0.86 0">
+      <geom name="tiny_bolt" type="sphere" pos="0 0 0.015" size="0.015" material="s_tiny"/>
+    </body>
+
+    <!-- 30 m 外的墙：深度精度的另一端 -->
+    <body name="far_wall" pos="0 32 3">
+      <geom name="far_wall" type="box" size="8 0.4 3" material="far"/>
+    </body>
+
+    <camera name="scales" pos="0.55 -2.35 0.95" xyaxes="0.94 0.34 0 -0.10 0.28 0.95"/>
+    <camera name="scales_micro" pos="1.24 -0.16 0.05" xyaxes="1 0 0 0 0.25 0.97"/>
+  </worldbody>
+</mujoco>

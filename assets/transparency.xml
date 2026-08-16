@@ -1,0 +1,83 @@
+<!--
+  transparency —— 透明（04 §4.4 / §4.5）。
+
+  守的性质：**混合顺序**。
+
+  五片半透板沿视线方向叠着，颜色两两不同、alpha 都是 0.35。
+  `SRC_ALPHA, ONE_MINUS_SRC_ALPHA` 的混合**不满足交换律**：由远到近画和由近到远画，
+  重叠区的最终颜色是两个不同的值。所以"顺序反了"在这里是一块**读得出数的色差**，
+  而不是"看着差不多"。五片而不是两片：两片时反序的色差小到可以赖给别的原因。
+
+  其余四条，每条对着一种画不出来的缺陷：
+  - `opaque_slab` 是一片**不透明**板，夹在半透板中间。透明桶画在不透明之前的话，
+    它会把已经混好的颜色整片盖掉；
+  - `rod_diag` 是一根斜穿五片板的不透明杆。它在每一片上都留下一段交线，
+    深度测试关掉（而不是只关深度写）时这些交线会消失；
+  - `far_ball` 在最远处，且**只能透过五片板看到**。透明片写了深度的话它整个不见；
+  - `glass_ball` 是半透明球：**同一个物体的正面与背面**都要参与混合。面剔除设错时
+    它会变成一个没有厚度的壳。
+
+  另外，forge 明确**不让透明物体投影**（12 §12.5 登记表里的"我们更好"：单通道深度图
+  表达不了半透阴影，参照渲染器投的是实心影）。`sun` 打开投影正是为了让这条能被看见：
+  地上应当只有杆和不透明板的影子。
+-->
+<mujoco model="transparency">
+  <compiler angle="degree" autolimits="true"/>
+
+  <visual>
+    <headlight ambient="0.25 0.25 0.25" diffuse="0.35 0.35 0.35" specular="0.3 0.3 0.3"/>
+    <quality shadowsize="2048" numslices="32" numstacks="16"/>
+    <map znear="0.02" zfar="40" shadowclip="1.2" shadowscale="0.7"/>
+  </visual>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.20 0.22 0.26" rgb2="0.30 0.33 0.38"/>
+    <material name="grid" texture="grid" texrepeat="1 1" texuniform="true"/>
+
+    <!-- 五片半透板：色相两两远离，重叠区的复合色才能反推出叠放顺序 -->
+    <material name="pane_0" rgba="0.90 0.20 0.20 0.35" specular="0.4" shininess="0.6"/>
+    <material name="pane_1" rgba="0.95 0.65 0.15 0.35" specular="0.4" shininess="0.6"/>
+    <material name="pane_2" rgba="0.20 0.80 0.30 0.35" specular="0.4" shininess="0.6"/>
+    <material name="pane_3" rgba="0.20 0.55 0.95 0.35" specular="0.4" shininess="0.6"/>
+    <material name="pane_4" rgba="0.75 0.25 0.90 0.35" specular="0.4" shininess="0.6"/>
+
+    <material name="glass" rgba="0.55 0.85 0.90 0.30" specular="0.9" shininess="0.9"/>
+    <material name="solid" rgba="0.85 0.85 0.88 1" specular="0.7" shininess="0.8"/>
+    <material name="slab" rgba="0.45 0.45 0.50 1" specular="0.2" shininess="0.3"/>
+    <material name="far" rgba="0.95 0.80 0.30 1" specular="0.5" shininess="0.6"/>
+  </asset>
+
+  <worldbody>
+    <light name="sun" type="directional" pos="2 -3 4" dir="-0.35 0.5 -1"
+           diffuse="0.7 0.7 0.7" specular="0.3 0.3 0.3" castshadow="true"/>
+
+    <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
+
+    <!-- 五片板，间距 0.22 m，法线朝 −Y（默认机位在 −Y 方向） -->
+    <geom name="pane_0" type="box" pos="0 -0.44 0.60" size="0.60 0.008 0.45" material="pane_0"/>
+    <geom name="pane_1" type="box" pos="0 -0.22 0.60" size="0.60 0.008 0.45" material="pane_1"/>
+    <geom name="pane_2" type="box" pos="0  0.00 0.60" size="0.60 0.008 0.45" material="pane_2"/>
+    <geom name="pane_3" type="box" pos="0  0.22 0.60" size="0.60 0.008 0.45" material="pane_3"/>
+    <geom name="pane_4" type="box" pos="0  0.44 0.60" size="0.60 0.008 0.45" material="pane_4"/>
+
+    <!-- 夹在半透板中间的不透明板 -->
+    <geom name="opaque_slab" type="box" pos="0.42 0.11 0.30" size="0.14 0.30 0.30" material="slab"/>
+
+    <!-- 斜穿五片板的不透明杆 -->
+    <geom name="rod_diag" type="capsule" fromto="-0.75 -0.70 0.18 0.75 0.70 1.02" size="0.028"
+          material="solid"/>
+
+    <!-- 半透明球：正面背面都要混合 -->
+    <geom name="glass_ball" type="sphere" pos="-0.55 0.05 0.34" size="0.34" material="glass"/>
+
+    <!-- 最远处的不透明球，只能透过五片板看到 -->
+    <geom name="far_ball" type="sphere" pos="0.05 1.55 0.55" size="0.38" material="far"/>
+
+    <!-- 同距离的两片：桶级排序在这里退化成"谁先加入"，是逐桶排序的已知代价（04 §4.4） -->
+    <geom name="tie_a" type="box" pos="-1.15 0.30 0.35" size="0.02 0.30 0.35" material="pane_0"/>
+    <geom name="tie_b" type="box" pos="-1.15 0.30 0.35" size="0.30 0.02 0.35" material="pane_3"/>
+
+    <camera name="transparency" pos="0.15 -2.40 1.10" xyaxes="1 0 0 0 0.35 0.94"/>
+  </worldbody>
+</mujoco>

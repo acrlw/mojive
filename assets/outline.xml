@@ -1,0 +1,71 @@
+<!--
+  outline —— 选中描边的展示与判据场景（07 §7）。
+
+  这份场景是**按描边的三条性质反过来摆的**，每一件几何都在守一条：
+
+  - **跨几何整节连杆一条外轮廓**：`arm` 是四节连在一起的（一个 box 躯干 + 两个胶囊手臂
+    + 一个球头），点躯干任何一块，描边必须**包住整只手臂**，不是只包你点到的那一块。
+    这条守的是 `SceneNode.object_id` 的约定（04 §4.1 / 07 §7.4）——同一 body 的多个 geom
+    共用一个 id，描边才是一条外轮廓。
+  - **被遮挡时整条仍然实心**（X 光）：`behind` 那只在墙后面露一半，点它，
+    被挡住的那半条轮廓照样要画出来。这是跟 `segment` 视图的分界——segment 是按可见面着色，
+    描边是**整条**。
+  - **正负**：`aside` 与 `behind` 排成一列，点前者时后者不能有一圈——
+    否则就成了"整个屏幕都描边"。
+
+  **描边开关默认开**（`RenderFlag.OUTLINE` 出厂就是开的）。这份场景的读法是：
+  打开之后**先什么都不点**——没有选中项时画面上不该有任何描边；然后依次点三个东西看。
+-->
+<mujoco model="outline">
+  <compiler angle="degree" autolimits="true"/>
+
+  <visual>
+    <headlight ambient="0.22 0.22 0.24" diffuse="0.45 0.45 0.45" specular="0.35 0.35 0.35"/>
+    <quality shadowsize="4096" numslices="28" numstacks="16"/>
+    <map znear="0.02" zfar="60" shadowclip="1.5" shadowscale="0.7"/>
+  </visual>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.14 0.16 0.19" rgb2="0.26 0.29 0.34"/>
+    <material name="floor" texture="grid" texrepeat="1 1" texuniform="true" reflectance="0.1"/>
+
+    <material name="arm"    rgba="0.30 0.55 0.85 1" specular="0.3" shininess="0.4"/>
+    <material name="flesh"  rgba="0.88 0.62 0.40 1" specular="0.2" shininess="0.3"/>
+    <material name="eye"    rgba="0.12 0.12 0.14 1" specular="0.6" shininess="0.8"/>
+    <material name="wall"   rgba="0.52 0.52 0.56 1" specular="0.1" shininess="0.2"/>
+    <material name="aside"  rgba="0.85 0.30 0.22 1" specular="0.25" shininess="0.4"/>
+    <material name="behind" rgba="0.25 0.75 0.45 1" specular="0.25" shininess="0.4"/>
+  </asset>
+
+  <worldbody>
+    <light name="sun" type="directional" pos="2.0 -3.0 5" dir="-0.3 0.45 -1"
+           diffuse="0.75 0.75 0.72" specular="0.3 0.3 0.3" castshadow="true"/>
+    <light name="fill" type="directional" pos="-3 1 3" dir="0.5 -0.2 -0.5"
+           diffuse="0.15 0.15 0.18" specular="0 0 0" castshadow="false"/>
+
+    <geom name="floor" type="plane" size="0 0 0.05" material="floor"/>
+
+    <!-- 躯干（一个 body，四个 geom）：点任何一块，整节都要描 -->
+    <body name="arm" pos="-0.9 0.0 0.0">
+      <geom name="arm_torso" type="box" size="0.30 0.22 0.45" pos="0 0 0.50" material="arm"/>
+      <geom name="arm_arm_l" type="capsule" size="0.09 0.30" pos="0.34 0 0.72" euler="0 90 0" material="flesh"/>
+      <geom name="arm_arm_r" type="capsule" size="0.09 0.30" pos="-0.34 0 0.72" euler="0 90 0" material="flesh"/>
+      <geom name="arm_head"  type="sphere"  size="0.20"        pos="0 0 1.10"             material="flesh"/>
+      <geom name="arm_eye"   type="sphere"  size="0.05"        pos="0.10 -0.19 1.16"      material="eye"/>
+      <geom name="arm_eye2"  type="sphere"  size="0.05"        pos="-0.10 -0.19 1.16"     material="eye"/>
+    </body>
+
+    <!-- 墙 + 躲在后面的那只：点它时被挡住的那半条轮廓照样要画出来。
+         可选中的 id 按 body 分配；直接挂在 worldbody 下的 geom 属于 world、id=0，不能选。 -->
+    <geom name="wall" type="box" size="0.03 0.6 0.6" pos="0.55 -0.4 0.6" material="wall"/>
+    <body name="behind_link" pos="0.95 -0.4 0.35">
+      <geom name="behind" type="sphere" size="0.30" material="behind"/>
+    </body>
+
+    <!-- 旁边那只：点它的作用是**反**——点它时别的不许描 -->
+    <body name="aside_link" pos="1.6 0.8 0.22">
+      <geom name="aside" type="box" size="0.22 0.22 0.22" material="aside"/>
+    </body>
+  </worldbody>
+</mujoco>

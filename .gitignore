@@ -1,0 +1,17 @@
+# 门禁的产物：只出图、不判对错的那几条（gallery / showcase / bench / parity）都写这里。
+# **基准图不在这里**——`tests/golden/` 要进版本库，它是回归的参照物（12 §12.4）。
+out/
+output/
+MUJOCO_LOG.TXT
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+.DS_Store
+imgui.ini
