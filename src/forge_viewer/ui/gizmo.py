@@ -61,6 +61,8 @@ if TYPE_CHECKING:
 REASON_NO_SELECTION = "nothing selected"
 DRAG_LAYER = "ui.gizmo.drag"
 _WORLD_BASIS = np.eye(3, dtype=np.float64)
+DEFAULT_TRANSLATION_SNAP_M = 0.5
+DEFAULT_ROTATION_SNAP_DEG = 5.0
 
 
 @dataclass(frozen=True)
@@ -106,8 +108,12 @@ class ObjectGizmo:
         self._plane_start = np.zeros(3, np.float64)
         self._rotation_start_vec = np.zeros(3, np.float64)
         self._last_rot_vec = np.zeros(3, np.float64)
+        self._rotation_raw_angle = 0.0
         self._rotation_angle = 0.0
+        self._snapping = False
         self._label = ""
+        self.translation_snap_m = DEFAULT_TRANSLATION_SNAP_M
+        self.rotation_snap_deg = DEFAULT_ROTATION_SNAP_DEG
 
     @property
     def mode(self) -> str:
@@ -157,6 +163,10 @@ class ObjectGizmo:
     def value_label(self) -> str:
         return self._label
 
+    @property
+    def snapping(self) -> bool:
+        return self._snapping
+
     def set_mode(self, mode: str) -> None:
         if mode in (GizmoMode.TRANSLATE.value, GizmoMode.ROTATE.value) and not self._using:
             self._mode = GizmoMode(mode)
@@ -204,6 +214,7 @@ class ObjectGizmo:
         claimed: bool,
         left_down: bool,
         released: bool,
+        snap: bool = False,
     ) -> bool:
 
         if not claimed:
@@ -216,9 +227,11 @@ class ObjectGizmo:
         if self._active is GizmoHandle.NONE and not self._begin(session, cam, rect, cursor):
             return False
         self._using = True
-        return self._drag(session, cam, rect, cursor)
+        return self._drag(session, cam, rect, cursor, snap=snap)
 
-    def keyboard_interact(self, session, cam, rect, cursor, axis: int) -> bool:
+    def keyboard_interact(
+        self, session, cam, rect, cursor, axis: int, *, snap: bool = False
+    ) -> bool:
 
         if axis not in (0, 1, 2):
             if self._keyboard:
@@ -236,7 +249,7 @@ class ObjectGizmo:
                 return False
             self._keyboard = self._using = True
             return True
-        return self._drag(session, cam, rect, cursor)
+        return self._drag(session, cam, rect, cursor, snap=snap)
 
     def publish(
         self,
@@ -294,11 +307,15 @@ class ObjectGizmo:
         from imgui_bundle import imgui
 
         dl = imgui.get_window_draw_list()
-        if self._keyboard:
+        if self._keyboard and not self._snapping:
             self._draw_axis_constraint(imgui, dl, cam, rect, style_scale)
         if self._style is GizmoStyle.FLAT:
             self._draw_flat(imgui, dl, cam, rect, style_scale)
             self._drawn = True
+        if self._using and self._snapping and self._active in AXIS_HANDLES:
+            self._draw_translation_snap_ruler(imgui, dl, cam, rect, style_scale)
+        if self._using and self._snapping and self._active in ROTATE_HANDLES:
+            self._draw_rotation_snap_ticks(imgui, dl, cam, rect, style_scale)
         if self._using and self._active not in ROTATE_HANDLES and not self._guide_gpu:
             self._draw_translation_guide(imgui, dl, cam, rect, style_scale)
         if self._using and self._active in ROTATE_HANDLES:
@@ -450,6 +467,143 @@ class ObjectGizmo:
             1.5 * style_scale,
         )
 
+    def _draw_translation_snap_ruler(self, imgui, dl, cam, rect, style_scale: float) -> None:
+        axis_index = _axis_of(self._active)
+        if axis_index < 0:
+            return
+        axis = self._start_basis[:, axis_index]
+        projected = project(cam, (self._start_pos, self._start_pos + axis), rect)
+        if np.any(projected[:, 2] <= 0.0):
+            return
+        origin = projected[0, :2]
+        direction = projected[1, :2] - origin
+        pixels_per_meter = float(np.linalg.norm(direction))
+        if pixels_per_meter < 1e-6:
+            return
+        direction /= pixels_per_meter
+        segment = _clip_line_to_rect(origin, direction, rect)
+        if segment is None:
+            return
+
+        u32 = imgui.color_convert_float4_to_u32
+        axis_color = AXIS_COLORS[axis_index]
+        edge_color = u32(imgui.ImVec4(*CONTRAST_EDGE_COLOR))
+        line_color = u32(
+            imgui.ImVec4(float(axis_color[0]), float(axis_color[1]), float(axis_color[2]), 0.72)
+        )
+        dl.add_line(
+            imgui.ImVec2(*segment[0]),
+            imgui.ImVec2(*segment[1]),
+            edge_color,
+            2.5 * style_scale,
+        )
+        dl.add_line(
+            imgui.ImVec2(*segment[0]),
+            imgui.ImVec2(*segment[1]),
+            line_color,
+            1.2 * style_scale,
+        )
+
+        step = float(self.translation_snap_m)
+        along = np.array(
+            (
+                np.dot(segment[0] - origin, direction),
+                np.dot(segment[1] - origin, direction),
+            )
+        )
+        lo = int(np.ceil(min(along) / (pixels_per_meter * step)))
+        hi = int(np.floor(max(along) / (pixels_per_meter * step)))
+        stride = max(1, int(np.ceil(5.0 * style_scale / (pixels_per_meter * step))))
+        normal = np.array((-direction[1], direction[0]))
+        first = int(np.ceil(lo / stride)) * stride
+        for index in range(first, hi + 1, stride):
+            distance = index * step
+            world = self._start_pos + axis * distance
+            point = project(cam, (world,), rect)[0]
+            if point[2] <= 0.0:
+                continue
+            major = abs(distance - round(distance)) < 1e-6
+            half_length = (7.0 if major else 3.5) * style_scale
+            a = point[:2] - normal * half_length
+            b = point[:2] + normal * half_length
+            dl.add_line(imgui.ImVec2(*a), imgui.ImVec2(*b), edge_color, 2.5 * style_scale)
+            dl.add_line(imgui.ImVec2(*a), imgui.ImVec2(*b), line_color, 1.2 * style_scale)
+
+    def _draw_rotation_snap_ticks(self, imgui, dl, cam, rect, style_scale: float) -> None:
+        ring_radius = (
+            SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
+        )
+        scale = world_scale(cam, self._start_pos, rect[3])
+        if scale <= 0.0:
+            return
+        tangent = np.cross(self._axis, self._rotation_start_vec)
+        step = float(self.rotation_snap_deg)
+        u32 = imgui.color_convert_float4_to_u32
+        edge = u32(imgui.ImVec4(*CONTRAST_EDGE_COLOR))
+        core = u32(imgui.ImVec4(*GUIDE_CORE_COLOR))
+        active = u32(imgui.ImVec4(*HOVER_COLOR))
+
+        def radial(angle: float) -> np.ndarray:
+            cosine = np.cos(angle)
+            return (
+                cosine * self._rotation_start_vec
+                + np.sin(angle) * tangent
+                + (1.0 - cosine) * np.dot(self._axis, self._rotation_start_vec) * self._axis
+            )
+
+        for degrees in np.arange(0.0, 360.0, step):
+            rounded = round(float(degrees))
+            if abs(degrees - rounded) < 1e-6 and rounded % 90 == 0:
+                length_pt = 9.0
+            elif abs(degrees / 45.0 - round(degrees / 45.0)) < 1e-6:
+                length_pt = 7.0
+            elif abs(degrees / 15.0 - round(degrees / 15.0)) < 1e-6:
+                length_pt = 5.0
+            else:
+                length_pt = 3.0
+            angle = np.radians(degrees)
+            direction = radial(angle)
+            inner = ring_radius + 4.0 * style_scale / SIZE_PT
+            outer = inner + length_pt * style_scale / SIZE_PT
+            points = project(
+                cam,
+                (
+                    self._start_pos + scale * inner * direction,
+                    self._start_pos + scale * outer * direction,
+                ),
+                rect,
+            )
+            if np.any(points[:, 2] <= 0.0):
+                continue
+            a, b = (imgui.ImVec2(*point[:2]) for point in points)
+            dl.add_line(a, b, edge, 2.5 * style_scale)
+            dl.add_line(a, b, core, 1.1 * style_scale)
+
+        direction = radial(self._rotation_angle)
+        inner = ring_radius + 2.0 * style_scale / SIZE_PT
+        outer = ring_radius + 15.0 * style_scale / SIZE_PT
+        points = project(
+            cam,
+            (
+                self._start_pos + scale * inner * direction,
+                self._start_pos + scale * outer * direction,
+            ),
+            rect,
+        )
+        if np.all(points[:, 2] > 0.0):
+            dl.add_line(
+                imgui.ImVec2(*points[0, :2]),
+                imgui.ImVec2(*points[1, :2]),
+                edge,
+                4.0 * style_scale,
+            )
+            dl.add_line(
+                imgui.ImVec2(*points[0, :2]),
+                imgui.ImVec2(*points[1, :2]),
+                active,
+                2.2 * style_scale,
+            )
+
     def _draw_translation_guide(self, imgui, dl, cam, rect, style_scale: float) -> None:
         screen = project(cam, (self._start_pos, self._frame.position), rect)
         if np.any(screen[:, 2] <= 0.0):
@@ -571,8 +725,17 @@ class ObjectGizmo:
             ring_radius = (
                 SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
             )
-            radius = world_scale(cam, self._start_pos, rect[3]) * ring_radius
-            anchor_world = self._start_pos + self._rotation_start_vec * radius
+            tangent = np.cross(self._axis, self._rotation_start_vec)
+            cosine = np.cos(self._rotation_angle)
+            direction = (
+                cosine * self._rotation_start_vec
+                + np.sin(self._rotation_angle) * tangent
+                + (1.0 - cosine) * np.dot(self._axis, self._rotation_start_vec) * self._axis
+            )
+            radius = world_scale(cam, self._start_pos, rect[3]) * (
+                ring_radius + 14.0 * style_scale / SIZE_PT
+            )
+            anchor_world = self._start_pos + direction * radius
         anchor = project(cam, (anchor_world,), rect)[0]
         if anchor[2] <= 0.0:
             return
@@ -607,7 +770,9 @@ class ObjectGizmo:
         np.copyto(self._start_basis, self._basis(mat))
         np.copyto(self._current_mat, mat)
         self._start_cursor[:] = cursor
+        self._rotation_raw_angle = 0.0
         self._rotation_angle = 0.0
+        self._snapping = False
         self._label = self._format_value(self._start_pos)
 
         axis = _axis_of(self._active)
@@ -648,8 +813,9 @@ class ObjectGizmo:
             self._plane_start[:] = hit
         return True
 
-    def _drag(self, session, cam, rect, cursor) -> bool:
+    def _drag(self, session, cam, rect, cursor, *, snap: bool) -> bool:
         handle = self._active
+        self._snapping = bool(snap)
         pos = self._start_pos.copy()
         mat = self._start_mat
         if handle in (GizmoHandle.X, GizmoHandle.Y, GizmoHandle.Z):
@@ -675,13 +841,22 @@ class ObjectGizmo:
                     np.dot(self._last_rot_vec, v),
                 )
             )
-            if abs(angle) < 1e-9:
-                return False
-            delta = math3d.rotvec_to_mat3(self._axis * angle)
-            self._current_mat[:] = delta @ self._current_mat
-            self._last_rot_vec[:] = v
-            self._rotation_angle += angle
+            if abs(angle) >= 1e-9:
+                self._last_rot_vec[:] = v
+                self._rotation_raw_angle += angle
+            self._rotation_angle = (
+                _snap_value(self._rotation_raw_angle, np.radians(self.rotation_snap_deg))
+                if snap
+                else self._rotation_raw_angle
+            )
+            delta = math3d.rotvec_to_mat3(self._axis * self._rotation_angle)
+            self._current_mat[:] = delta @ self._start_mat
             mat = self._current_mat
+
+        if snap and handle not in ROTATE_HANDLES:
+            delta = self._start_basis.T @ (pos - self._start_pos)
+            delta = _snap_translation(delta, handle, self.translation_snap_m)
+            pos = self._start_pos + self._start_basis @ delta
 
         node = session.selected_node
         if node is None:
@@ -712,11 +887,13 @@ class ObjectGizmo:
             degrees = round(float(np.degrees(self._rotation_angle)), 1)
             turns = int(abs(degrees) // 360.0)
             suffix = f" · {turns}×360°" if turns else ""
-            return f"{name} {degrees:+.1f}°{suffix}"
+            snap = f" · SNAP {_format_step(self.rotation_snap_deg)}°" if self._snapping else ""
+            return f"{name} {degrees:+.1f}°{suffix}{snap}"
         delta = np.asarray(position, np.float64) - self._start_pos
         local = self._start_basis.T @ delta
         if self._active in AXIS_HANDLES:
-            return f"{name} {local[axis]:+.3f} m"
+            value = f"{name} {local[axis]:+.3f} m"
+            return self._with_translation_snap(value)
         plane_axes = {
             GizmoHandle.YZ: (1, 2),
             GizmoHandle.ZX: (2, 0),
@@ -724,8 +901,15 @@ class ObjectGizmo:
         }.get(self._active)
         if plane_axes is not None:
             a, b = plane_axes
-            return f"{'XYZ'[a]} {local[a]:+.3f}  {'XYZ'[b]} {local[b]:+.3f} m"
-        return f"X {local[0]:+.3f}  Y {local[1]:+.3f}  Z {local[2]:+.3f} m"
+            value = f"{'XYZ'[a]} {local[a]:+.3f}  {'XYZ'[b]} {local[b]:+.3f} m"
+            return self._with_translation_snap(value)
+        value = f"X {local[0]:+.3f}  Y {local[1]:+.3f}  Z {local[2]:+.3f} m"
+        return self._with_translation_snap(value)
+
+    def _with_translation_snap(self, value: str) -> str:
+        if not self._snapping:
+            return value
+        return f"{value} · SNAP {_format_step(self.translation_snap_m)} m"
 
     def _basis(self, rotation) -> np.ndarray:
         if self._space is GizmoSpace.BODY:
@@ -735,6 +919,7 @@ class ObjectGizmo:
     def _end(self) -> None:
         self._using = False
         self._keyboard = False
+        self._snapping = False
         self._active = GizmoHandle.NONE
         self._label = ""
 
@@ -751,6 +936,29 @@ def _axis_of(handle: GizmoHandle) -> int:
         GizmoHandle.ROTATE_Y: 1,
         GizmoHandle.ROTATE_Z: 2,
     }.get(handle, -1)
+
+
+def _snap_value(value: float, step: float) -> float:
+    return float(np.round(float(value) / float(step)) * float(step))
+
+
+def _snap_translation(delta: np.ndarray, handle: GizmoHandle, step: float) -> np.ndarray:
+    snapped = np.asarray(delta, np.float64).copy()
+    axes = {
+        GizmoHandle.X: (0,),
+        GizmoHandle.Y: (1,),
+        GizmoHandle.Z: (2,),
+        GizmoHandle.YZ: (1, 2),
+        GizmoHandle.ZX: (2, 0),
+        GizmoHandle.XY: (0, 1),
+        GizmoHandle.SCREEN: (0, 1, 2),
+    }[handle]
+    snapped[list(axes)] = np.round(snapped[list(axes)] / step) * step
+    return snapped
+
+
+def _format_step(value: float) -> str:
+    return f"{float(value):g}"
 
 
 def _rotation_sweep(angle: float) -> float:

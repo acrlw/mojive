@@ -59,6 +59,14 @@ def _position(viewer, node, style: str, output: Path) -> None:
     io.add_mouse_pos_event(*(cursor + direction * 42.0))
     viewer.sync()
     _save(viewer, node, output / f"position-drag-{style}.png")
+    viewer.app.gizmo.translation_snap_m = 0.5
+    io.add_key_event(imgui.Key.mod_shift, True)
+    io.add_mouse_pos_event(*(cursor + direction * 57.0))
+    viewer.sync()
+    if not viewer.app.gizmo.snapping:
+        raise RuntimeError("position snap input was not applied")
+    _save(viewer, node, output / f"position-snap-{style}.png")
+    io.add_key_event(imgui.Key.mod_shift, False)
     io.add_mouse_button_event(0, False)
     viewer.sync()
     viewer.session.submit(cmd.Reset())
@@ -101,6 +109,22 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
     io.add_mouse_pos_event(*end)
     viewer.sync()
     _save(viewer, node, output / f"rotation-drag-{style}.png")
+    viewer.app.gizmo.rotation_snap_deg = 5.0
+    io.add_key_event(imgui.Key.mod_shift, True)
+    snapped = project(camera, (ring_point(start_angle + np.radians(49.0)),), rect)[0, :2]
+    io.add_mouse_pos_event(*snapped)
+    viewer.sync()
+    if not viewer.app.gizmo.snapping:
+        raise RuntimeError(
+            "rotation snap input was not applied: "
+            f"using={viewer.app.gizmo.using}, "
+            f"active={viewer.app.gizmo.active_handle.name}, "
+            f"label={viewer.app.gizmo.value_label!r}, "
+            f"cursor=({io.mouse_pos.x:.1f}, {io.mouse_pos.y:.1f}), "
+            f"target=({snapped[0]:.1f}, {snapped[1]:.1f})"
+        )
+    _save(viewer, node, output / f"rotation-snap-{style}.png")
+    io.add_key_event(imgui.Key.mod_shift, False)
     io.add_mouse_button_event(0, False)
     viewer.sync()
     viewer.session.submit(cmd.Reset())

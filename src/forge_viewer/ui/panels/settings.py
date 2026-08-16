@@ -5,6 +5,7 @@ from imgui_bundle import imgui
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds
 from ...render.backend import DebugView, RenderFlag
+from ..gizmo import DEFAULT_ROTATION_SNAP_DEG, DEFAULT_TRANSLATION_SNAP_M
 from ..perturb import OUTLINE_CORNER_RADIUS_PT
 from . import Panel, PanelContext
 
@@ -75,6 +76,46 @@ class SettingsPanel(Panel):
             changed, world = imgui.checkbox("World frame (T)", world)
             if changed:
                 ctx.gizmo.set_space("world" if world else "body")
+
+            imgui.align_text_to_frame_padding()
+            imgui.text("position snap (Shift)")
+            imgui.same_line()
+            imgui.set_next_item_width(-1.0)
+            changed, step = imgui.drag_float(
+                "##position_snap",
+                float(ctx.gizmo.translation_snap_m),
+                0.01,
+                0.01,
+                100.0,
+                "%.3f m",
+            )
+            hovered = imgui.is_item_hovered()
+            if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                changed, step = True, DEFAULT_TRANSLATION_SNAP_M
+            if hovered:
+                imgui.set_tooltip("drag: adjust · double-click: enter value · right-click: reset")
+            if changed:
+                ctx.gizmo.translation_snap_m = step
+
+            imgui.align_text_to_frame_padding()
+            imgui.text("rotation snap (Shift)")
+            imgui.same_line()
+            imgui.set_next_item_width(-1.0)
+            changed, step = imgui.drag_float(
+                "##rotation_snap",
+                float(ctx.gizmo.rotation_snap_deg),
+                0.1,
+                0.5,
+                180.0,
+                "%.1f deg",
+            )
+            hovered = imgui.is_item_hovered()
+            if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                changed, step = True, DEFAULT_ROTATION_SNAP_DEG
+            if hovered:
+                imgui.set_tooltip("drag: adjust · double-click: enter value · right-click: reset")
+            if changed:
+                ctx.gizmo.rotation_snap_deg = step
 
         if ctx.perturb is not None:
             imgui.align_text_to_frame_padding()

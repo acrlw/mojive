@@ -33,6 +33,8 @@ from forge_viewer.scene import Scene
 from forge_viewer.session import Session
 from forge_viewer.types import CameraView
 from forge_viewer.ui.gizmo import (
+    DEFAULT_ROTATION_SNAP_DEG,
+    DEFAULT_TRANSLATION_SNAP_M,
     ObjectGizmo,
     _clip_line_to_rect,
     _masked_axis_start,
@@ -275,6 +277,114 @@ def test_axis_drag_moves_the_body_but_not_across_other_local_axes() -> None:
     assert position[0] > 0.1
     assert position[1:] == pytest.approx((0.0, 0.0), abs=1e-7)
     assert gizmo.value_label.startswith("X +") and gizmo.value_label.endswith(" m")
+
+
+def test_shift_snaps_axis_translation_to_the_configured_increment() -> None:
+    session, node = session_at()
+    gizmo = ObjectGizmo()
+    gizmo.translation_snap_m = 0.25
+    cam = camera()
+    origin = np.zeros(3)
+    scale = world_scale(cam, origin, RECT[3])
+    screen_axis = project(cam, (origin, origin + np.array((scale, 0.0, 0.0))), RECT)[:, :2]
+    direction = screen_axis[1] - screen_axis[0]
+    direction /= np.linalg.norm(direction)
+    start = project(cam, (origin + np.array((0.55 * scale, 0.0, 0.0)),), RECT)[0, :2]
+
+    assert gizmo.update_hover(session, cam, RECT, tuple(start)) is GizmoHandle.X
+    gizmo.interact(
+        session, cam, RECT, tuple(start), claimed=True, left_down=True, released=False, snap=True
+    )
+    gizmo.interact(
+        session,
+        cam,
+        RECT,
+        tuple(start + direction * 57.0),
+        claimed=True,
+        left_down=True,
+        released=False,
+        snap=True,
+    )
+
+    position = np.asarray(session.frame.body_xpos[node.body_index])
+    assert position[0] / 0.25 == pytest.approx(round(position[0] / 0.25), abs=1e-6)
+    assert position[1:] == pytest.approx((0.0, 0.0), abs=1e-7)
+    assert gizmo.snapping
+    assert gizmo.value_label.endswith("· SNAP 0.25 m")
+
+
+def test_shift_snaps_rotation_from_the_drag_origin() -> None:
+    session, node = session_at()
+    gizmo = ObjectGizmo("rotate")
+    gizmo.rotation_snap_deg = 15.0
+    cam = camera()
+    origin = np.zeros(3)
+    scale = world_scale(cam, origin, RECT[3])
+    start_angle = next(
+        angle
+        for angle in np.linspace(0.0, 2.0 * np.pi, 48, endpoint=False)
+        if hit_test(
+            cam,
+            origin,
+            np.eye(3),
+            RECT,
+            tuple(
+                project(
+                    cam,
+                    (RING_RADIUS * scale * np.array((np.cos(angle), np.sin(angle), 0.0)),),
+                    RECT,
+                )[0, :2]
+            ),
+            GizmoMode.ROTATE,
+        )[0]
+        is GizmoHandle.ROTATE_Z
+    )
+    points = [
+        RING_RADIUS
+        * scale
+        * np.array((np.cos(start_angle + angle), np.sin(start_angle + angle), 0.0))
+        for angle in (0.0, np.radians(22.0))
+    ]
+    start, end = project(cam, points, RECT)[:, :2]
+
+    gizmo.update_hover(session, cam, RECT, tuple(start))
+    gizmo.interact(session, cam, RECT, tuple(start), claimed=True, left_down=True, released=False)
+    assert gizmo.interact(
+        session,
+        cam,
+        RECT,
+        tuple(end),
+        claimed=True,
+        left_down=True,
+        released=False,
+    )
+    assert gizmo.interact(
+        session,
+        cam,
+        RECT,
+        tuple(end),
+        claimed=True,
+        left_down=True,
+        released=False,
+        snap=True,
+    )
+
+    rotation = np.asarray(session.frame.body_xmat[node.body_index]).reshape(3, 3)
+    expected = np.array(
+        (
+            (np.cos(np.radians(15.0)), -np.sin(np.radians(15.0)), 0.0),
+            (np.sin(np.radians(15.0)), np.cos(np.radians(15.0)), 0.0),
+            (0.0, 0.0, 1.0),
+        )
+    )
+    assert rotation == pytest.approx(expected, abs=1e-6)
+    assert gizmo.value_label.endswith("· SNAP 15°")
+
+
+def test_gizmo_snap_defaults_match_the_settings_resets() -> None:
+    gizmo = ObjectGizmo()
+    assert gizmo.translation_snap_m == DEFAULT_TRANSLATION_SNAP_M == 0.5
+    assert gizmo.rotation_snap_deg == DEFAULT_ROTATION_SNAP_DEG == 5.0
 
 
 def test_screen_translation_reports_all_xyz_components() -> None:

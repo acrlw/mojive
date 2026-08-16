@@ -1178,7 +1178,7 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style):
     imgui.get_window_draw_list = spy
     try:
         v.sync()
-        v.app.gizmo._rotation_angle += 2.0 * np.pi
+        v.app.gizmo._rotation_raw_angle += 2.0 * np.pi
         v.sync()
         after_pos = np.asarray(v.session.frame.body_xpos[node.body_index]).copy()
         after_mat = np.asarray(v.session.frame.body_xmat[node.body_index]).reshape(3, 3).copy()

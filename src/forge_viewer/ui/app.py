@@ -238,7 +238,12 @@ class ViewerApp:
             axis = -1
         if keyboard_was_active or axis >= 0:
             self.gizmo.keyboard_interact(
-                self.session, self._camera_view(), self._viewport_rect, state.cursor, axis
+                self.session,
+                self._camera_view(),
+                self._viewport_rect,
+                state.cursor,
+                axis,
+                snap=state.shift,
             )
             return
         self.gizmo.interact(
@@ -249,6 +254,7 @@ class ViewerApp:
             claimed=self.router.wants_gizmo(),
             left_down=state.left,
             released=self.router.released,
+            snap=state.shift,
         )
 
     def _publish_gizmo(self) -> None:
