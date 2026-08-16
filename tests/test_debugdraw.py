@@ -236,8 +236,10 @@ def test_vertex_counts_match_the_spec_table():
         Prim.SECTOR: 3,
         Prim.STROKE: 3,
         Prim.DRAG_LINK: 2,
+        Prim.SOLID_ARROW: 1,
+        Prim.SOLID_DOUBLE_ARROW: 1,
     }
-    assert len(VERTEX_COUNT) == 9, "加一种图元就要改重排、压缩、上传三处——先来改这条"
+    assert len(VERTEX_COUNT) == 11, "加一种图元就要改重排、压缩、上传三处——先来改这条"
 
 
 def test_closed_polyline_packs_shared_neighbors_for_continuous_joins():
@@ -307,10 +309,12 @@ def test_solid_primitives_reuse_the_builtin_meshes():
     m[:3, 3] = (1.0, 0.0, 0.0)
     layer.box("b", m, RED)
     layer.sphere("s", m, RED)
+    layer.solid_arrow("a", m, RED)
+    layer.solid_double_arrow("d", m, RED)
 
     frame = dd.build()
     solids = [b for b in frame.active() if b.path is DrawPath.SOLID]
-    assert {str(b.mesh) for b in solids} == {"box", "sphere"}
+    assert {str(b.mesh) for b in solids} == {"box", "sphere", "arrow", "double_arrow"}
     assert all(b.count == 1 for b in solids)
 
     rec = frame.stream(DrawPath.SOLID)[0]

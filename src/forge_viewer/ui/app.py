@@ -500,6 +500,10 @@ class ViewerApp:
         )
         needs.actuator = self.backend.get_flag(RenderFlag.ACTUATOR)
         needs.deformables = bool(self.session.source and self.session.source.dynamic_meshes)
+        needs.diagnostics = any(
+            self.backend.get_flag(flag)
+            for flag in (RenderFlag.JOINT, RenderFlag.COM, RenderFlag.INERTIA)
+        )
         return needs
 
     def _sync_structure(self) -> None:

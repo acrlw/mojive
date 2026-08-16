@@ -139,10 +139,21 @@ def test_mujoco_visuals_reach_the_gpu_pipeline(gl):
             RenderFlag.ACTIVATION,
             RenderFlag.CONTACTPOINT,
             RenderFlag.CONTACTFORCE,
+            RenderFlag.JOINT,
+            RenderFlag.COM,
+            RenderFlag.INERTIA,
         ):
             assert backend.set_flag(flag, True)
         adapter.step(400)
-        frame = adapter.frame(FrameNeeds(poses=True, contacts=True, tendons=True, actuator=True))
+        frame = adapter.frame(
+            FrameNeeds(
+                poses=True,
+                contacts=True,
+                tendons=True,
+                actuator=True,
+                diagnostics=True,
+            )
+        )
         assert frame.contacts is not None and len(frame.contacts) > 0
         backend.update(frame)
         assert backend.render(frame) is not None
@@ -151,6 +162,11 @@ def test_mujoco_visuals_reach_the_gpu_pipeline(gl):
         assert backend._passes["tendon"].capsule_count >= 2
         assert backend.debug.layer("physics.contact.points").count_of(Prim.POINT) >= 1
         assert backend.debug.layer("physics.contact.forces").count_of(Prim.ARROW) >= 1
+        joints = backend.debug.layer("physics.joints")
+        assert joints.count_of(Prim.BOX) == 1
+        assert joints.count_of(Prim.SOLID_ARROW) == 1
+        assert backend.debug.layer("physics.com").count_of(Prim.SPHERE) == 2
+        assert backend.debug.layer("physics.inertia").count_of(Prim.BOX) == 2
         assert float(backend.target.read_color()[..., :3].std()) > 8.0
     finally:
         backend.release()

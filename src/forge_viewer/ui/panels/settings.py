@@ -34,6 +34,8 @@ _VIS_FLAGS: tuple[RenderFlag, ...] = (
     RenderFlag.TENDON,
     RenderFlag.TRANSPARENT,
     RenderFlag.COM,
+    RenderFlag.INERTIA,
+    RenderFlag.SCLINERTIA,
 )
 
 

@@ -155,6 +155,18 @@ def _apply_sphere(layer: Layer, m: dict) -> None:
     layer.sphere(m["id"], m["transform"], m.get("color", _WHITE), float(m.get("duration", NEVER)))
 
 
+def _apply_solid_arrow(layer: Layer, m: dict) -> None:
+    layer.solid_arrow(
+        m["id"], m["transform"], m.get("color", _WHITE), float(m.get("duration", NEVER))
+    )
+
+
+def _apply_solid_double_arrow(layer: Layer, m: dict) -> None:
+    layer.solid_double_arrow(
+        m["id"], m["transform"], m.get("color", _WHITE), float(m.get("duration", NEVER))
+    )
+
+
 def _apply_sector(layer: Layer, m: dict) -> None:
     layer.sector(
         m["id"],
@@ -197,6 +209,8 @@ OPS = {
     "frame": _apply_frame,
     "box": _apply_box,
     "sphere": _apply_sphere,
+    "solid_arrow": _apply_solid_arrow,
+    "solid_double_arrow": _apply_solid_double_arrow,
     "sector": _apply_sector,
     "text": _apply_text,
     "clear": _apply_clear,

@@ -7,7 +7,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from forge_viewer.adapters.base import FrameNeeds, NodeKind
+from forge_viewer.adapters.base import FrameNeeds, JointVisualKind, NodeKind
 
 pytestmark = pytest.mark.physics
 
@@ -285,6 +285,41 @@ def test_frame_produces_only_what_is_needed(adapter):
 
     f = adapter.frame(FrameNeeds.none())
     assert f.geom_xpos is None, "连位姿都没申报时不该去取"
+
+
+def test_diagnostic_metadata_and_frame_match_mujoco(adapter):
+    source = adapter.scene_source().diagnostics
+    model, data = adapter.model, adapter.data
+    expected_kinds = np.asarray(
+        [
+            JointVisualKind.FREE,
+            JointVisualKind.HINGE,
+            JointVisualKind.HINGE,
+        ],
+        np.uint8,
+    )
+    assert source.joint_kinds == pytest.approx(expected_kinds)
+    assert source.joint_visible.tolist() == [True] * model.njnt
+    assert source.joint_length == pytest.approx(model.stat.meansize * model.vis.scale.jointlength)
+    assert source.joint_width == pytest.approx(model.stat.meansize * model.vis.scale.jointwidth)
+    assert source.joint_rgba == pytest.approx(model.vis.rgba.joint)
+
+    expected_com = np.flatnonzero(np.asarray(model.body_parentid[1:]) == 0) + 1
+    assert source.com_bodies == pytest.approx(expected_com)
+    assert source.com_radius == pytest.approx(model.stat.meansize * model.vis.scale.com)
+
+    moving = np.flatnonzero(np.asarray(model.body_dofnum) > 0)
+    assert source.inertia_bodies == pytest.approx(moving)
+    mass = np.asarray(model.body_mass[moving])
+    assert 8.0 * np.prod(source.scaled_inertia_sizes, axis=1) == pytest.approx(mass / 1000.0)
+
+    assert adapter.frame(FrameNeeds.none()).diagnostics is None
+    frame = adapter.frame(FrameNeeds(poses=False, diagnostics=True)).diagnostics
+    assert frame.joint_xpos == pytest.approx(data.xanchor)
+    assert frame.joint_xaxis == pytest.approx(data.xaxis)
+    assert frame.subtree_com == pytest.approx(data.subtree_com)
+    assert frame.body_xipos == pytest.approx(data.xipos)
+    assert frame.body_ximat == pytest.approx(data.ximat.reshape(model.nbody, 3, 3))
 
 
 def test_pose_fetch_allocates_nothing(adapter):

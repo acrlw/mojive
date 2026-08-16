@@ -310,6 +310,77 @@ def _make_arrow_head() -> MeshData:
     )
 
 
+_SOLID_ARROW_HEAD_BASE = 0.65
+_SOLID_ARROW_SHAFT_RADIUS = 0.5
+_SOLID_ARROW_HEAD_RADIUS = 1.0
+
+
+def _solid_arrow_head():
+    cone = _scale_xy(
+        _cone_side(_SOLID_ARROW_HEAD_BASE, 1.0, ARROW_SEGMENTS),
+        _SOLID_ARROW_HEAD_RADIUS,
+    )
+    positions, normals, uvs, indices = cone
+    radial = normals[:, :2]
+    radial /= np.linalg.norm(radial, axis=1, keepdims=True)
+    slope = _SOLID_ARROW_HEAD_RADIUS / (1.0 - _SOLID_ARROW_HEAD_BASE)
+    normals[:] = np.column_stack((radial, np.full(len(radial), slope)))
+    normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+    return _merge(
+        _annulus(
+            _SOLID_ARROW_HEAD_BASE,
+            _SOLID_ARROW_SHAFT_RADIUS,
+            _SOLID_ARROW_HEAD_RADIUS,
+            ARROW_SEGMENTS,
+            up=False,
+        ),
+        (positions, normals, uvs, indices),
+    )
+
+
+def _mirror_z(part):
+    positions, normals, uvs, indices = part
+    positions = positions.copy()
+    normals = normals.copy()
+    positions[:, 2] *= -1.0
+    normals[:, 2] *= -1.0
+    indices = indices.reshape(-1, 3)[:, ::-1].reshape(-1)
+    return positions, normals, uvs, indices
+
+
+def _make_solid_arrow() -> MeshData:
+    return _finish(
+        *_merge(
+            _scale_xy(
+                _cylinder_side(0.0, _SOLID_ARROW_HEAD_BASE, ARROW_SEGMENTS, 0.0, 1.0),
+                _SOLID_ARROW_SHAFT_RADIUS,
+            ),
+            _scale_xy(_cap_disk(0.0, ARROW_SEGMENTS, up=False), _SOLID_ARROW_SHAFT_RADIUS),
+            _solid_arrow_head(),
+        )
+    )
+
+
+def _make_solid_double_arrow() -> MeshData:
+    positive_head = _solid_arrow_head()
+    return _finish(
+        *_merge(
+            _scale_xy(
+                _cylinder_side(
+                    -_SOLID_ARROW_HEAD_BASE,
+                    _SOLID_ARROW_HEAD_BASE,
+                    ARROW_SEGMENTS,
+                    0.0,
+                    1.0,
+                ),
+                _SOLID_ARROW_SHAFT_RADIUS,
+            ),
+            positive_head,
+            _mirror_z(positive_head),
+        )
+    )
+
+
 def _scale_xy(part, radius: float):
     p, n, uv, idx = part
     p = np.asarray(p).copy()
@@ -418,6 +489,8 @@ _GENERATORS = {
     MeshShape.CAPSULE_CAP: _make_capsule_cap,
     MeshShape.ARROW_SHAFT: _make_arrow_shaft,
     MeshShape.ARROW_HEAD: _make_arrow_head,
+    MeshShape.ARROW: _make_solid_arrow,
+    MeshShape.DOUBLE_ARROW: _make_solid_double_arrow,
 }
 
 

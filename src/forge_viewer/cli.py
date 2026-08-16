@@ -316,6 +316,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         actuator=True,
         sensors=True,
         deformables=True,
+        diagnostics=True,
     )
     period = 1.0 / max(float(args.hz), 1.0)
     previous = time.perf_counter()

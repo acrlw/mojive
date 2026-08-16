@@ -103,6 +103,8 @@ class MeshShape(enum.StrEnum):
     CAPSULE_CAP = "capsule_cap"
     ARROW_SHAFT = "arrow_shaft"
     ARROW_HEAD = "arrow_head"
+    ARROW = "arrow"
+    DOUBLE_ARROW = "double_arrow"
     HEIGHTFIELD = "heightfield"
     FLEX = "flex"
     SKIN = "skin"

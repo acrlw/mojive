@@ -38,6 +38,8 @@ class RenderFlag(enum.StrEnum):
     TENDON = "tendon"
     TRANSPARENT = "transparent"
     COM = "com"
+    INERTIA = "inertia"
+    SCLINERTIA = "scaled_inertia"
 
     OUTLINE = "outline"
     ALBEDO = "albedo"

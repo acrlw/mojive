@@ -42,7 +42,7 @@ _RND_COVERAGE = (
 _VIS_COVERAGE = (
     Coverage("mjVIS_CONVEXHULL", "unsupported", "no separate convex-hull overlay"),
     Coverage("mjVIS_TEXTURE", "supported", "2D color textures and skyboxes"),
-    Coverage("mjVIS_JOINT", "unsupported", "joint icons are not drawn"),
+    Coverage("mjVIS_JOINT", "supported", "solid free, ball, slide and hinge markers"),
     Coverage(
         "mjVIS_CAMERA",
         "degraded",
@@ -66,8 +66,8 @@ _VIS_COVERAGE = (
     Coverage("mjVIS_TENDON", "supported", "dynamic tendon paths"),
     Coverage("mjVIS_RANGEFINDER", "unsupported", "rangefinder rays are not drawn"),
     Coverage("mjVIS_CONSTRAINT", "unsupported", "constraint overlays are not drawn"),
-    Coverage("mjVIS_INERTIA", "unsupported", "inertia boxes are not drawn"),
-    Coverage("mjVIS_SCLINERTIA", "unsupported", "scaled-inertia boxes are not drawn"),
+    Coverage("mjVIS_INERTIA", "supported", "body inertia boxes"),
+    Coverage("mjVIS_SCLINERTIA", "supported", "constant-density inertia boxes"),
     Coverage("mjVIS_PERTFORCE", "degraded", "forge-native perturbation feedback"),
     Coverage("mjVIS_PERTOBJ", "degraded", "forge-native perturbation feedback"),
     Coverage("mjVIS_CONTACTPOINT", "supported", "contact point debug layer"),
@@ -76,7 +76,7 @@ _VIS_COVERAGE = (
     Coverage("mjVIS_CONTACTSPLIT", "unsupported", "split contact components are not drawn"),
     Coverage("mjVIS_TRANSPARENT", "supported", "transparent material pass and flag"),
     Coverage("mjVIS_AUTOCONNECT", "unsupported", "auto-connect lines are not drawn"),
-    Coverage("mjVIS_COM", "unsupported", "center-of-mass markers are not drawn"),
+    Coverage("mjVIS_COM", "supported", "root subtree center-of-mass markers"),
     Coverage("mjVIS_SELECT", "degraded", "GPU picking and forge outline replace MuJoCo select"),
     Coverage("mjVIS_STATIC", "degraded", "static bodies render, but have no separate filter flag"),
     Coverage("mjVIS_SKIN", "supported", "dynamic skinned meshes"),

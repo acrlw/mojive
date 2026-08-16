@@ -25,8 +25,11 @@ from .base import (
     ActuatorInfo,
     AdapterCaps,
     CameraInfo,
+    DiagnosticFrame,
+    DiagnosticSource,
     FrameNeeds,
     JointInfo,
+    JointVisualKind,
     KeyframeInfo,
     NodeKind,
     SceneFrame,
@@ -93,6 +96,7 @@ class MuJoCoAdapter:
         self._site_xmat_buf = np.zeros((0, 3, 3), np.float32)
         self._body_xpos_buf = np.zeros((0, 3), np.float32)
         self._body_xmat_buf = np.zeros((0, 3, 3), np.float32)
+        self._diagnostic_frame = DiagnosticFrame()
         self._qpos_buf = np.zeros(0, np.float32)
         self._qvel_buf = np.zeros(0, np.float32)
         self._ctrl_buf = np.zeros(0, np.float32)
@@ -170,6 +174,13 @@ class MuJoCoAdapter:
         self._site_xmat_buf = np.zeros((model.nsite, 3, 3), np.float32)
         self._body_xpos_buf = np.zeros((b, 3), np.float32)
         self._body_xmat_buf = np.zeros((b, 3, 3), np.float32)
+        self._diagnostic_frame = DiagnosticFrame(
+            joint_xpos=np.zeros((model.njnt, 3), np.float32),
+            joint_xaxis=np.zeros((model.njnt, 3), np.float32),
+            subtree_com=np.zeros((b, 3), np.float32),
+            body_xipos=np.zeros((b, 3), np.float32),
+            body_ximat=np.zeros((b, 3, 3), np.float32),
+        )
         self._qpos_buf = np.zeros(model.nq, np.float32)
         self._qvel_buf = np.zeros(model.nv, np.float32)
         self._ctrl_buf = np.zeros(model.nu, np.float32)
@@ -349,6 +360,21 @@ class MuJoCoAdapter:
         else:
             f.mesh_updates = None
 
+        if needs.diagnostics:
+            diagnostics = self._diagnostic_frame
+            np.copyto(diagnostics.joint_xpos, d.xanchor, casting="unsafe")
+            np.copyto(diagnostics.joint_xaxis, d.xaxis, casting="unsafe")
+            np.copyto(diagnostics.subtree_com, d.subtree_com, casting="unsafe")
+            np.copyto(diagnostics.body_xipos, d.xipos, casting="unsafe")
+            np.copyto(
+                diagnostics.body_ximat,
+                d.ximat.reshape(self._m.nbody, 3, 3),
+                casting="unsafe",
+            )
+            f.diagnostics = diagnostics
+        else:
+            f.diagnostics = None
+
         f.lights = self._dynamic_lights() if self._lights_dynamic or self._lights_edited else None
         return f
 
@@ -410,6 +436,7 @@ class MuJoCoAdapter:
         m = self._m
         src = SceneSource()
         src.nodes = self.nodes()
+        src.diagnostics = self._build_diagnostic_source()
         trn_tendon = np.asarray(m.actuator_trntype) == int(mujoco.mjtTrn.mjTRN_TENDON)
         src.actuator_tendon = np.where(trn_tendon, m.actuator_trnid[:, 0], -1).astype(np.int32)
         src.actuator_visible = self._group_visibility(m.actuator_group, "actuator")
@@ -656,6 +683,55 @@ class MuJoCoAdapter:
                 self._notes.append(note)
             self.caps = replace(self.caps, notes=tuple(self._notes))
         return src
+
+    def _build_diagnostic_source(self) -> DiagnosticSource:
+        m = self._m
+        joint_kinds = np.empty(m.njnt, np.uint8)
+        joint_kind_map = {
+            int(mujoco.mjtJoint.mjJNT_FREE): JointVisualKind.FREE,
+            int(mujoco.mjtJoint.mjJNT_BALL): JointVisualKind.BALL,
+            int(mujoco.mjtJoint.mjJNT_SLIDE): JointVisualKind.SLIDE,
+            int(mujoco.mjtJoint.mjJNT_HINGE): JointVisualKind.HINGE,
+        }
+        for source_kind, visual_kind in joint_kind_map.items():
+            joint_kinds[np.asarray(m.jnt_type) == source_kind] = int(visual_kind)
+
+        meansize = float(m.stat.meansize)
+        com_bodies = np.flatnonzero(np.asarray(m.body_parentid[1:]) == 0).astype(np.int32) + 1
+        inertia_bodies = np.flatnonzero(np.asarray(m.body_dofnum) > 0).astype(np.int32)
+        inertia = np.asarray(m.body_inertia[inertia_bodies], np.float64)
+        mass = np.asarray(m.body_mass[inertia_bodies], np.float64)
+        inertia_sizes = np.sqrt(
+            np.maximum(
+                1.5
+                * np.column_stack(
+                    (
+                        inertia[:, 1] + inertia[:, 2] - inertia[:, 0],
+                        inertia[:, 0] + inertia[:, 2] - inertia[:, 1],
+                        inertia[:, 0] + inertia[:, 1] - inertia[:, 2],
+                    )
+                )
+                / mass[:, None],
+                0.0,
+            )
+        )
+        volume_scale = np.cbrt(mass / (8000.0 * np.prod(inertia_sizes, axis=1)))
+        scaled_inertia_sizes = inertia_sizes * volume_scale[:, None]
+
+        return DiagnosticSource(
+            joint_kinds=joint_kinds,
+            joint_visible=self._group_visibility(m.jnt_group, "joint"),
+            joint_length=meansize * float(m.vis.scale.jointlength),
+            joint_width=meansize * float(m.vis.scale.jointwidth),
+            joint_rgba=np.asarray(m.vis.rgba.joint, np.float32).copy(),
+            com_bodies=com_bodies,
+            com_radius=meansize * float(m.vis.scale.com),
+            com_rgba=np.asarray(m.vis.rgba.com, np.float32).copy(),
+            inertia_bodies=inertia_bodies,
+            inertia_sizes=np.asarray(inertia_sizes, np.float32),
+            scaled_inertia_sizes=np.asarray(scaled_inertia_sizes, np.float32),
+            inertia_rgba=np.asarray(m.vis.rgba.inertia, np.float32).copy(),
+        )
 
     def _site_rgba(self, si: int, matid: int) -> np.ndarray:
         rgba = np.asarray(self._m.site_rgba[si], np.float32)

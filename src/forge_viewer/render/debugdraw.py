@@ -35,6 +35,8 @@ class Prim(enum.IntEnum):
     SECTOR = 6
     STROKE = 7
     DRAG_LINK = 8
+    SOLID_ARROW = 9
+    SOLID_DOUBLE_ARROW = 10
 
 
 VERTEX_COUNT: dict[Prim, int] = {
@@ -47,6 +49,8 @@ VERTEX_COUNT: dict[Prim, int] = {
     Prim.SECTOR: 3,
     Prim.STROKE: 3,
     Prim.DRAG_LINK: 2,
+    Prim.SOLID_ARROW: 1,
+    Prim.SOLID_DOUBLE_ARROW: 1,
 }
 
 
@@ -72,11 +76,15 @@ PRIM_PATH: dict[Prim, Path] = {
     Prim.SECTOR: Path.SECTOR,
     Prim.STROKE: Path.STROKE,
     Prim.DRAG_LINK: Path.DRAG_LINK,
+    Prim.SOLID_ARROW: Path.SOLID,
+    Prim.SOLID_DOUBLE_ARROW: Path.SOLID,
 }
 
 PRIM_MESH: dict[Prim, MeshKey] = {
     Prim.BOX: MeshKey(MeshShape.BOX),
     Prim.SPHERE: MeshKey(MeshShape.SPHERE),
+    Prim.SOLID_ARROW: MeshKey(MeshShape.ARROW),
+    Prim.SOLID_DOUBLE_ARROW: MeshKey(MeshShape.DOUBLE_ARROW),
 }
 
 
@@ -489,6 +497,12 @@ class Layer:
     def sphere(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
 
         self._solid(Prim.SPHERE, ident, transform4x4, color, duration)
+
+    def solid_arrow(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
+        self._solid(Prim.SOLID_ARROW, ident, transform4x4, color, duration)
+
+    def solid_double_arrow(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
+        self._solid(Prim.SOLID_DOUBLE_ARROW, ident, transform4x4, color, duration)
 
     def _solid(self, kind: Prim, ident: str, transform4x4, color, duration: float) -> None:
         i = self._alloc(kind, ident, 1, duration)

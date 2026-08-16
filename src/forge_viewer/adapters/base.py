@@ -119,6 +119,44 @@ class AdapterCaps:
     notes: tuple[str, ...] = ()
 
 
+class JointVisualKind(enum.IntEnum):
+    FREE = 0
+    BALL = 1
+    SLIDE = 2
+    HINGE = 3
+
+
+@dataclass(frozen=True)
+class DiagnosticSource:
+    joint_kinds: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
+    joint_visible: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
+    joint_length: float = 0.0
+    joint_width: float = 0.0
+    joint_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([0.2, 0.6, 0.8, 1.0], np.float32)
+    )
+
+    com_bodies: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
+    com_radius: float = 0.0
+    com_rgba: np.ndarray = field(default_factory=lambda: np.array([0.9, 0.9, 0.9, 1.0], np.float32))
+
+    inertia_bodies: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
+    inertia_sizes: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    scaled_inertia_sizes: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    inertia_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([0.8, 0.2, 0.2, 0.6], np.float32)
+    )
+
+
+@dataclass
+class DiagnosticFrame:
+    joint_xpos: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    joint_xaxis: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    subtree_com: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    body_xipos: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    body_ximat: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3), np.float32))
+
+
 @dataclass
 class FrameNeeds:
     poses: bool = True
@@ -129,6 +167,7 @@ class FrameNeeds:
     actuator: bool = False
     sensors: bool = False
     deformables: bool = False
+    diagnostics: bool = False
 
     def merge(self, other: FrameNeeds) -> FrameNeeds:
         return FrameNeeds(
@@ -140,6 +179,7 @@ class FrameNeeds:
             actuator=self.actuator or other.actuator,
             sensors=self.sensors or other.sensors,
             deformables=self.deformables or other.deformables,
+            diagnostics=self.diagnostics or other.diagnostics,
         )
 
     @staticmethod
@@ -171,6 +211,7 @@ class SceneFrame:
     tendon_widths: np.ndarray | None = None
     sensors: np.ndarray | None = None
     mesh_updates: dict[MeshKey, MeshUpdate] | None = None
+    diagnostics: DiagnosticFrame | None = None
 
     debug_commands: tuple[dict, ...] | None = None
 
@@ -225,6 +266,8 @@ class SceneSource:
             np.float32,
         )
     )
+
+    diagnostics: DiagnosticSource = field(default_factory=DiagnosticSource)
 
     lights: LightSet = field(default_factory=LightSet)
     skybox: str | None = None

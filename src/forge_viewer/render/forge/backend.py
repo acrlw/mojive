@@ -7,7 +7,8 @@ from pathlib import Path
 import moderngl
 import numpy as np
 
-from ...adapters.base import SceneFrame, SceneSource
+from ... import math3d
+from ...adapters.base import JointVisualKind, SceneFrame, SceneSource
 from ...gizmo import GizmoFrame
 from ...log import get_logger
 from ...types import CameraView, MeshKey, ViewportImage
@@ -82,6 +83,10 @@ class ForgeBackend:
         self._flags[RenderFlag.CONTACTFORCE] = False
         self._flags[RenderFlag.ACTUATOR] = False
         self._flags[RenderFlag.ACTIVATION] = False
+        self._flags[RenderFlag.JOINT] = False
+        self._flags[RenderFlag.COM] = False
+        self._flags[RenderFlag.INERTIA] = False
+        self._flags[RenderFlag.SCLINERTIA] = False
         # MuJoCo mjv_defaultOption() enables tendon paths by default.
         self._flags[RenderFlag.TENDON] = True
         self._contact_ends = np.zeros((0, 3), np.float32)
@@ -128,6 +133,10 @@ class ForgeBackend:
                 RenderFlag.TENDON,
                 RenderFlag.ACTUATOR,
                 RenderFlag.ACTIVATION,
+                RenderFlag.JOINT,
+                RenderFlag.COM,
+                RenderFlag.INERTIA,
+                RenderFlag.SCLINERTIA,
             }
         return frozenset(flags)
 
@@ -188,6 +197,10 @@ class ForgeBackend:
         self._builder = SceneSourceBuilder()
         self._builder.set_source(source, self._camera)
         self._structure_generation = -1
+        if self.debug is not None:
+            self.debug.layer("physics.joints").clear()
+            self.debug.layer("physics.com").clear()
+            self.debug.layer("physics.inertia").clear()
 
     def set_render_scene(self, scene: RenderScene) -> None:
 
@@ -221,6 +234,7 @@ class ForgeBackend:
         self._publish_tendons(frame)
         if self.debug is None:
             return
+        self._publish_diagnostics(frame)
         contacts = frame.contacts
         points = self.debug.layer("physics.contact.points", Occlusion.ALWAYS)
         forces = self.debug.layer("physics.contact.forces", Occlusion.GHOST)
@@ -258,6 +272,92 @@ class ForgeBackend:
                 )
             else:
                 forces.erase("forces")
+
+    def _publish_diagnostics(self, frame: SceneFrame) -> None:
+        joints = self.debug.layer("physics.joints", Occlusion.DEPTH)
+        com = self.debug.layer("physics.com", Occlusion.DEPTH)
+        inertia = self.debug.layer("physics.inertia", Occlusion.DEPTH)
+        dynamic = frame.diagnostics
+        source = self._source.diagnostics
+        if dynamic is None:
+            joints.clear()
+            com.clear()
+            inertia.clear()
+            return
+
+        if self.get_flag(RenderFlag.JOINT):
+            joint_radius = 3.0 * source.joint_width
+            identity = np.eye(3, dtype=np.float32)
+            for joint in np.flatnonzero(source.joint_visible):
+                position = dynamic.joint_xpos[joint]
+                kind = JointVisualKind(int(source.joint_kinds[joint]))
+                if kind is JointVisualKind.FREE:
+                    joints.box(
+                        f"free:{joint}",
+                        math3d.compose(position, identity, np.full(3, joint_radius)),
+                        source.joint_rgba,
+                    )
+                elif kind is JointVisualKind.BALL:
+                    joints.sphere(
+                        f"ball:{joint}",
+                        math3d.compose(position, identity, np.full(3, joint_radius)),
+                        source.joint_rgba,
+                    )
+                else:
+                    transform = math3d.compose(
+                        position,
+                        self._axis_rotation(dynamic.joint_xaxis[joint]),
+                        (2.0 * source.joint_width, 2.0 * source.joint_width, source.joint_length),
+                    )
+                    if kind is JointVisualKind.SLIDE:
+                        joints.solid_double_arrow(f"slide:{joint}", transform, source.joint_rgba)
+                    else:
+                        joints.solid_arrow(f"hinge:{joint}", transform, source.joint_rgba)
+        else:
+            joints.clear()
+
+        if self.get_flag(RenderFlag.COM):
+            for body in source.com_bodies:
+                com.sphere(
+                    f"body:{body}",
+                    math3d.compose(
+                        dynamic.subtree_com[body],
+                        np.eye(3, dtype=np.float32),
+                        np.full(3, source.com_radius),
+                    ),
+                    source.com_rgba,
+                )
+        else:
+            com.clear()
+
+        if self.get_flag(RenderFlag.INERTIA):
+            sizes = (
+                source.scaled_inertia_sizes
+                if self.get_flag(RenderFlag.SCLINERTIA)
+                else source.inertia_sizes
+            )
+            for index, body in enumerate(source.inertia_bodies):
+                inertia.box(
+                    f"body:{body}",
+                    math3d.compose(
+                        dynamic.body_xipos[body], dynamic.body_ximat[body], sizes[index]
+                    ),
+                    source.inertia_rgba,
+                )
+        else:
+            inertia.clear()
+
+    @staticmethod
+    def _axis_rotation(axis: np.ndarray) -> np.ndarray:
+        z = np.asarray(axis, np.float32)
+        z /= np.linalg.norm(z)
+        reference = np.array([1.0, 0.0, 0.0], np.float32)
+        if abs(float(z[0])) > 0.9:
+            reference = np.array([0.0, 1.0, 0.0], np.float32)
+        x = np.cross(reference, z)
+        x /= np.linalg.norm(x)
+        y = np.cross(z, x)
+        return np.column_stack((x, y, z)).astype(np.float32)
 
     def _publish_tendons(self, frame: SceneFrame) -> None:
         tendon_pass = self._passes.get("tendon")

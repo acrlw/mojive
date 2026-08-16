@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals musculoskeletal musculoskeletal-video musculoskeletal-check cameras geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug musculoskeletal musculoskeletal-video musculoskeletal-check cameras geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -16,6 +16,7 @@ help:
 		'  make perturb           MuJoCo 平移/扭转扰动' \
 		'  make text-overlay      GPU 世界空间文字' \
 		'  make mujoco-visuals    hfield/site/tendon/contact' \
+		'  make mujoco-debug      joint/COM/inertia debug visuals' \
 		'  make musculoskeletal   人体肌骨模型 + tendon/keyframe' \
 		'  make musculoskeletal-video  300 keyframes → 60 fps MP4' \
 		'  make deformables       flex/skin 动态网格' \
@@ -221,6 +222,11 @@ mujoco-audit:
 mujoco-visuals:
 	$(PY) -m forge_viewer.cli view mujoco_visuals \
 		--enable-render tendon --enable-render contactpoint --enable-render contactforce $(ARGS)
+
+## MuJoCo joint markers, root subtree COM and body inertia boxes.
+mujoco-debug:
+	$(PY) -m forge_viewer.cli view joint_types --paused \
+		--enable-render joint --enable-render com --enable-render inertia $(ARGS)
 
 MYO_SCENE ?= ../lowerlimb-refactor/lowerlimb-main/assets/models/myo_sim_latest/myo_sim/body/fullbody_kit_9_10_walk_forward_60.xml
 MYO_VIDEO ?= output/musculoskeletal-keyframes-60fps.mp4
