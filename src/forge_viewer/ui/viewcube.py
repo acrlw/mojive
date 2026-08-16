@@ -317,8 +317,8 @@ def _centered_label(imgui, dl, text: str, pos, radius: float, color: int) -> Non
 
     #
 
-    pen_x = pos.x - (box[0] + box[2]) * 0.5
-    pen_y = pos.y - (box[1] + box[3]) * 0.5
+    pen_x = round(pos.x - (box[0] + box[2]) * 0.5)
+    pen_y = round(pos.y - (box[1] + box[3]) * 0.5)
     baked = font.get_font_baked(size)
     tex = imgui.get_io().fonts.tex_data.get_tex_ref()
     for ch in text:
