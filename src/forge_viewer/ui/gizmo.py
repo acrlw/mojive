@@ -489,7 +489,7 @@ class ObjectGizmo:
         axis_color = AXIS_COLORS[axis_index]
         edge_color = u32(imgui.ImVec4(*CONTRAST_EDGE_COLOR))
         line_color = u32(
-            imgui.ImVec4(float(axis_color[0]), float(axis_color[1]), float(axis_color[2]), 0.72)
+            imgui.ImVec4(float(axis_color[0]), float(axis_color[1]), float(axis_color[2]), 0.92)
         )
         dl.add_line(
             imgui.ImVec2(*segment[0]),
@@ -513,10 +513,17 @@ class ObjectGizmo:
         )
         lo = int(np.ceil(min(along) / (pixels_per_meter * step)))
         hi = int(np.floor(max(along) / (pixels_per_meter * step)))
-        stride = max(1, int(np.ceil(5.0 * style_scale / (pixels_per_meter * step))))
+        stride = max(1, int(np.ceil(6.0 * style_scale / (pixels_per_meter * step))))
         normal = np.array((-direction[1], direction[0]))
         first = int(np.ceil(lo / stride)) * stride
-        for index in range(first, hi + 1, stride):
+        visible_indices = set(range(first, hi + 1, stride))
+        if hi - lo <= 4096:
+            visible_indices.update(
+                index
+                for index in range(lo, hi + 1)
+                if abs(index * step - round(index * step)) < 1e-6
+            )
+        for index in sorted(visible_indices):
             distance = index * step
             world = self._start_pos + axis * distance
             point = project(cam, (world,), rect)[0]
@@ -528,6 +535,16 @@ class ObjectGizmo:
             b = point[:2] + normal * half_length
             dl.add_line(imgui.ImVec2(*a), imgui.ImVec2(*b), edge_color, 2.5 * style_scale)
             dl.add_line(imgui.ImVec2(*a), imgui.ImVec2(*b), line_color, 1.2 * style_scale)
+
+        current_distance = float(np.dot(self._frame.position - self._start_pos, axis))
+        current = project(cam, (self._start_pos + axis * current_distance,), rect)[0]
+        if current[2] > 0.0:
+            half_length = 9.0 * style_scale
+            a = current[:2] - normal * half_length
+            b = current[:2] + normal * half_length
+            active = u32(imgui.ImVec4(*HOVER_COLOR))
+            dl.add_line(imgui.ImVec2(*a), imgui.ImVec2(*b), edge_color, 4.0 * style_scale)
+            dl.add_line(imgui.ImVec2(*a), imgui.ImVec2(*b), active, 2.2 * style_scale)
 
     def _draw_rotation_snap_ticks(self, imgui, dl, cam, rect, style_scale: float) -> None:
         ring_radius = (
@@ -551,6 +568,26 @@ class ObjectGizmo:
                 + (1.0 - cosine) * np.dot(self._axis, self._rotation_start_vec) * self._axis
             )
 
+        tick_base = ring_radius + 4.0 * style_scale / SIZE_PT
+        ring_angles = np.linspace(
+            0.0,
+            2.0 * np.pi,
+            max(RING_SEGMENTS, int(np.ceil(360.0 / step))),
+            endpoint=False,
+        )
+        ring = project(
+            cam,
+            np.asarray(
+                [self._start_pos + scale * tick_base * radial(angle) for angle in ring_angles]
+            ),
+            rect,
+        )
+        if np.all(ring[:, 2] > 0.0):
+            points = [imgui.ImVec2(*point[:2]) for point in ring]
+            closed = imgui.ImDrawFlags_.closed.value
+            dl.add_polyline(points, edge, 2.5 * style_scale, closed)
+            dl.add_polyline(points, core, 1.1 * style_scale, closed)
+
         for degrees in np.arange(0.0, 360.0, step):
             rounded = round(float(degrees))
             if abs(degrees - rounded) < 1e-6 and rounded % 90 == 0:
@@ -563,7 +600,7 @@ class ObjectGizmo:
                 length_pt = 3.0
             angle = np.radians(degrees)
             direction = radial(angle)
-            inner = ring_radius + 4.0 * style_scale / SIZE_PT
+            inner = tick_base
             outer = inner + length_pt * style_scale / SIZE_PT
             points = project(
                 cam,
