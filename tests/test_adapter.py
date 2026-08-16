@@ -754,7 +754,7 @@ def test_mujoco_model_cameras_follow_forward_kinematics():
     a = MuJoCoAdapter(resolve("mujoco_visuals"))
     try:
         cameras = {c.name: c.camera_id for c in a.cameras()}
-        assert set(cameras) == {"overview", "ball_camera"}
+        assert set(cameras) == {"overview", "calibrated_shift", "ball_camera"}
         fixed = a.camera_view(cameras["overview"])
         mounted = a.camera_view(cameras["ball_camera"])
         assert fixed is not None and mounted is not None
@@ -768,6 +768,35 @@ def test_mujoco_model_cameras_follow_forward_kinematics():
         assert moved is not None
         assert moved.eye - mounted.eye == pytest.approx(delta)
         assert a.camera_view(999) is None
+    finally:
+        a.release()
+
+
+def test_mujoco_camera_intrinsics_preserve_principal_point(tmp_path):
+    from forge_viewer.mujoco_audit import audit_model
+
+    path = tmp_path / "intrinsic_camera.xml"
+    path.write_text(
+        """<mujoco><worldbody>
+  <camera name="calibrated" sensorsize=".036 .024" focal=".05 .04"
+          principal=".003 -.002" resolution="1920 1080"/>
+</worldbody></mujoco>"""
+    )
+    a = MuJoCoAdapter(path)
+    try:
+        view = a.camera_view(0)
+        assert view.uses_intrinsics()
+        assert view.focal_length == pytest.approx([0.05, 0.04])
+        assert view.sensor_size == pytest.approx([0.036, 0.024])
+        assert view.principal_offset == pytest.approx([0.003, -0.002])
+        projection = view.proj_matrix()
+        assert projection[0, 2] == pytest.approx(1.0 / 6.0)
+        assert projection[1, 2] == pytest.approx(1.0 / 6.0)
+        report = audit_model(a.model)
+        finding = next(
+            item for item in report["findings"] if item["feature"] == "camera principal point"
+        )
+        assert finding["status"] == "supported"
     finally:
         a.release()
 

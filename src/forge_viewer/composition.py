@@ -285,6 +285,7 @@ def capture(
     size: tuple[int, int] | None = None,
     settle_frames: int = 30,
     render_flags: tuple[str, ...] = (),
+    camera_name: str = "",
 ) -> bool:
 
     viewer: Viewer | None = None
@@ -295,6 +296,13 @@ def capture(
 
         for name in render_flags:
             viewer.backend.set_flag(RenderFlag(name), True)
+        if camera_name:
+            camera = next(
+                (item for item in viewer.session.cameras if item.name == camera_name), None
+            )
+            if camera is None:
+                raise ValueError(f"model camera {camera_name!r} is unavailable")
+            viewer.app.select_model_camera(camera.camera_id)
         for _ in range(max(1, settle_frames)):
             viewer.sync()
 

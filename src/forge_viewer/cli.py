@@ -530,6 +530,7 @@ def cmd_capture(args: argparse.Namespace) -> int:
         include_ui=args.include_ui,
         size=size,
         render_flags=tuple(args.enable_render),
+        camera_name=args.camera,
     )
     if not ok:
         print("Capture failed", file=sys.stderr)
@@ -714,6 +715,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--include-ui", action="store_true", help="Include panels and gizmos")
     sp.add_argument("--width", type=int, default=0, help="Output width, such as 3840 for 4K")
     sp.add_argument("--height", type=int, default=0)
+    sp.add_argument("--camera", default="", help="capture through a named model camera")
     sp.set_defaults(func=cmd_capture, json=False)
 
     sp = with_render_flags(with_asset(sub.add_parser("record", help="Record viewport video")))

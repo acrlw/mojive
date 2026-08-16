@@ -181,6 +181,16 @@ def test_camera_snapshot_contains_exact_projection_values():
     assert "far=320" in text
     assert "viewport=(+12, +24, +800, +600)" in text
 
+    intrinsic = CameraView(
+        focal_length=np.array([0.05, 0.04], np.float32),
+        sensor_size=np.array([0.036, 0.024], np.float32),
+        principal_offset=np.array([0.003, -0.002], np.float32),
+    )
+    text = camera_snapshot(intrinsic, (0.0, 0.0, 800.0, 600.0))
+    assert "focal_length=(+0.050" in text
+    assert "sensor_size=(+0.035" in text
+    assert "principal_offset=(+0.003" in text and ", -0.002" in text
+
 
 def test_reproduction_snapshot_combines_scene_qpos_and_camera():
     from types import SimpleNamespace

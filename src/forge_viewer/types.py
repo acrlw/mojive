@@ -19,6 +19,9 @@ class CameraView:
     aspect: float = 1.0
     orthographic: bool = False
     ortho_height: float = 4.0
+    focal_length: np.ndarray = field(default_factory=lambda: np.zeros(2, np.float32))
+    sensor_size: np.ndarray = field(default_factory=lambda: np.zeros(2, np.float32))
+    principal_offset: np.ndarray = field(default_factory=lambda: np.zeros(2, np.float32))
 
     def view_matrix(self) -> np.ndarray:
         return math3d.look_at(self.eye, self.target, self.up)
@@ -26,7 +29,20 @@ class CameraView:
     def proj_matrix(self) -> np.ndarray:
         if self.orthographic:
             return math3d.orthographic(self.ortho_height, self.aspect, self.near, self.far)
+        if self.uses_intrinsics():
+            return math3d.perspective_intrinsics(
+                self.focal_length,
+                self.sensor_size,
+                self.principal_offset,
+                self.near,
+                self.far,
+            )
         return math3d.perspective(self.fov_y, self.aspect, self.near, self.far)
+
+    def uses_intrinsics(self) -> bool:
+        return bool(np.all(np.asarray(self.focal_length) > 0.0)) and bool(
+            np.all(np.asarray(self.sensor_size) > 0.0)
+        )
 
     def forward(self) -> np.ndarray:
         return math3d.normalize(np.asarray(self.target) - np.asarray(self.eye))

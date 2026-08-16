@@ -1217,6 +1217,8 @@ class MuJoCoAdapter:
             and int(projection[i]) == int(mujoco.mjtProjection.mjPROJ_ORTHOGRAPHIC)
         )
         fovy = float(m.cam_fovy[i])
+        intrinsics = np.asarray(m.cam_intrinsic[i], np.float32)
+        sensor_size = np.asarray(m.cam_sensorsize[i], np.float32)
         return CameraView(
             eye=eye,
             target=(eye - rot[:, 2] * distance).astype(np.float32),
@@ -1226,6 +1228,9 @@ class MuJoCoAdapter:
             far=max(float(m.vis.map.zfar) * distance, distance),
             orthographic=orthographic,
             ortho_height=fovy if orthographic else 2.0 * distance * np.tan(np.deg2rad(fovy) * 0.5),
+            focal_length=intrinsics[:2].copy(),
+            sensor_size=sensor_size.copy(),
+            principal_offset=intrinsics[2:4].copy(),
         )
 
     def visual_groups(self) -> tuple[VisualGroupInfo, ...]:

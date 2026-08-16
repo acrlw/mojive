@@ -175,9 +175,9 @@ def audit_model(model) -> dict:
             findings.append(
                 Finding(
                     "camera principal point",
-                    "degraded",
+                    "supported",
                     shifted,
-                    "off-center projection is rendered on the centered forge projection",
+                    "physical camera intrinsics drive an off-center projection",
                 )
             )
     if model.nkey:

@@ -55,6 +55,23 @@ def perspective(fov_y: float, aspect: float, near: float, far: float) -> Mat4:
     return m.astype(np.float32)
 
 
+def perspective_intrinsics(
+    focal_length, sensor_size, principal_offset, near: float, far: float
+) -> Mat4:
+    focal = np.asarray(focal_length, np.float64).reshape(2)
+    sensor = np.asarray(sensor_size, np.float64).reshape(2)
+    principal = np.asarray(principal_offset, np.float64).reshape(2)
+    m = np.zeros((4, 4), dtype=np.float64)
+    m[0, 0] = 2.0 * focal[0] / sensor[0]
+    m[1, 1] = 2.0 * focal[1] / sensor[1]
+    m[0, 2] = 2.0 * principal[0] / sensor[0]
+    m[1, 2] = -2.0 * principal[1] / sensor[1]
+    m[2, 2] = (far + near) / (near - far)
+    m[2, 3] = (2.0 * far * near) / (near - far)
+    m[3, 2] = -1.0
+    return m.astype(np.float32)
+
+
 def orthographic(height: float, aspect: float, near: float, far: float) -> Mat4:
 
     h = max(height, 1e-6) * 0.5

@@ -65,6 +65,23 @@ def inside_frustum(view, pts) -> bool:
     )
 
 
+def test_camera_intrinsics_create_an_off_center_projection():
+    view = CameraView(
+        near=0.02,
+        far=100.0,
+        focal_length=np.array([0.05, 0.04], np.float32),
+        sensor_size=np.array([0.036, 0.024], np.float32),
+        principal_offset=np.array([0.003, -0.002], np.float32),
+    )
+    projection = view.proj_matrix()
+    assert view.uses_intrinsics()
+    assert projection[0, 0] == pytest.approx(2.0 * 0.05 / 0.036)
+    assert projection[1, 1] == pytest.approx(2.0 * 0.04 / 0.024)
+    assert projection[0, 2] == pytest.approx(2.0 * 0.003 / 0.036)
+    assert projection[1, 2] == pytest.approx(-2.0 * -0.002 / 0.024)
+    assert view.with_aspect(3.0).proj_matrix() == pytest.approx(projection)
+
+
 def test_orbit_keeps_the_distance_to_the_pivot():
 
     cam = OrbitCamera(pivot=np.array([1.0, -2.0, 0.5]), distance=3.7)

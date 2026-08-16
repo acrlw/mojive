@@ -12,6 +12,9 @@
   <worldbody>
     <light name="sun" directional="true" pos="0 -2 5" dir="0 .3 -1" castshadow="true"/>
     <camera name="overview" pos="4 -4 3" zaxis="4 -4 2.2" fovy="42"/>
+    <camera name="calibrated_shift" pos="4 -4 3" zaxis="4 -4 2.2"
+            sensorsize=".036 .024" focal=".04 .04" principal=".003 -.002"
+            resolution="1920 1080"/>
     <geom name="terrain" type="hfield" hfield="terrain" material="ground"/>
     <body name="pendulum" pos="0 0 1.4">
       <joint name="hinge" type="hinge" axis="0 1 0" damping="0.08"/>

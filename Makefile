@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug musculoskeletal musculoskeletal-video musculoskeletal-check cameras geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -244,9 +244,13 @@ musculoskeletal-check:
 	$(PY) -m forge_viewer.cli conformance mujoco --asset "$(MYO_SCENE)"
 	$(PY) -m forge_viewer.cli audit "$(MYO_SCENE)" --strict
 
-## F6 打开 Camera 面板，在 free / overview / ball_camera 之间切换；ball_camera 随自由体运动。
+## Open Camera with F6; calibrated_shift demonstrates an off-center principal point.
 cameras:
 	$(PY) -m forge_viewer.cli view mujoco_visuals $(ARGS)
+
+camera-intrinsics:
+	$(PY) -m forge_viewer.cli capture mujoco_visuals --camera calibrated_shift \
+		--width 1600 --height 1000 -o output/cameras/calibrated-shift.png $(ARGS)
 
 ## F9 打开 Settings，MuJoCo visual groups 的 3 号开关控制粉色 collision_debug 几何；拾取同步过滤。
 geom-groups:

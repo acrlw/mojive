@@ -9,9 +9,6 @@ from ...adapters.base import FrameNeeds
 from ...types import CameraView
 from . import Panel, PanelContext, begin_kv_table, labeled, value_slider
 
-#
-
-
 PRESETS: tuple[tuple[str, float, float], ...] = (
     ("front", -90.0, 0.0),
     ("back", 90.0, 0.0),
@@ -176,6 +173,13 @@ class CameraPanel(Panel):
             labeled("fov y", f"{view.fov_y:.8f} rad / {math.degrees(view.fov_y):.5f} deg")
             labeled("near / far", f"{view.near:.8g} / {view.far:.8g}")
             labeled("aspect", f"{view.aspect:.8f}")
+            if view.uses_intrinsics():
+                labeled("focal length", "  ".join(f"{v:.8g}" for v in view.focal_length))
+                labeled("sensor size", "  ".join(f"{v:.8g}" for v in view.sensor_size))
+                labeled(
+                    "principal offset",
+                    "  ".join(f"{v:+.8g}" for v in view.principal_offset),
+                )
             labeled("viewport", "  ".join(f"{v:.1f}" for v in ctx.viewport_rect))
             labeled("projection", "orthographic" if view.orthographic else "perspective")
             imgui.end_table()
@@ -211,6 +215,14 @@ def camera_snapshot(
             "viewport=" + vec(viewport_rect),
         )
     )
+    if view.uses_intrinsics():
+        lines.extend(
+            (
+                f"focal_length={vec(view.focal_length)}",
+                f"sensor_size={vec(view.sensor_size)}",
+                f"principal_offset={vec(view.principal_offset)}",
+            )
+        )
     return "\n".join(lines)
 
 
