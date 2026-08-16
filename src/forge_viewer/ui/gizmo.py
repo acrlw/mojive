@@ -485,6 +485,16 @@ class ObjectGizmo:
         if segment is None:
             return
 
+        bounds = _projected_line_parameters(
+            cam,
+            self._start_pos,
+            axis,
+            segment,
+            rect,
+        )
+        if bounds is None:
+            return
+
         u32 = imgui.color_convert_float4_to_u32
         axis_color = AXIS_COLORS[axis_index]
         edge_color = u32(imgui.ImVec4(*CONTRAST_EDGE_COLOR))
@@ -505,14 +515,8 @@ class ObjectGizmo:
         )
 
         step = float(self.translation_snap_m)
-        along = np.array(
-            (
-                np.dot(segment[0] - origin, direction),
-                np.dot(segment[1] - origin, direction),
-            )
-        )
-        lo = int(np.ceil(min(along) / (pixels_per_meter * step)))
-        hi = int(np.floor(max(along) / (pixels_per_meter * step)))
+        lo = int(np.ceil(min(bounds) / step))
+        hi = int(np.floor(max(bounds) / step))
         stride = max(1, int(np.ceil(6.0 * style_scale / (pixels_per_meter * step))))
         normal = np.array((-direction[1], direction[0]))
         first = int(np.ceil(lo / stride)) * stride
@@ -568,22 +572,19 @@ class ObjectGizmo:
                 + (1.0 - cosine) * np.dot(self._axis, self._rotation_start_vec) * self._axis
             )
 
-        tick_base = ring_radius + 4.0 * style_scale / SIZE_PT
-        ring_angles = np.linspace(
-            0.0,
-            2.0 * np.pi,
-            max(RING_SEGMENTS, int(np.ceil(360.0 / step))),
-            endpoint=False,
-        )
+        center = project(cam, (self._start_pos,), rect)[0]
+        ring_angles = np.linspace(0.0, 2.0 * np.pi, RING_SEGMENTS, endpoint=False)
         ring = project(
             cam,
             np.asarray(
-                [self._start_pos + scale * tick_base * radial(angle) for angle in ring_angles]
+                [self._start_pos + scale * ring_radius * radial(angle) for angle in ring_angles]
             ),
             rect,
         )
         if np.all(ring[:, 2] > 0.0):
-            points = [imgui.ImVec2(*point[:2]) for point in ring]
+            normals = _outward_normals(ring[:, :2], center[:2])
+            trace = ring[:, :2] + normals * (4.0 * style_scale)
+            points = [imgui.ImVec2(*point) for point in trace]
             closed = imgui.ImDrawFlags_.closed.value
             dl.add_polyline(points, edge, 2.5 * style_scale, closed)
             dl.add_polyline(points, core, 1.1 * style_scale, closed)
@@ -600,43 +601,47 @@ class ObjectGizmo:
                 length_pt = 3.0
             angle = np.radians(degrees)
             direction = radial(angle)
-            inner = tick_base
-            outer = inner + length_pt * style_scale / SIZE_PT
             points = project(
                 cam,
                 (
-                    self._start_pos + scale * inner * direction,
-                    self._start_pos + scale * outer * direction,
+                    self._start_pos + scale * ring_radius * radial(angle - 1e-3),
+                    self._start_pos + scale * ring_radius * direction,
+                    self._start_pos + scale * ring_radius * radial(angle + 1e-3),
                 ),
                 rect,
             )
             if np.any(points[:, 2] <= 0.0):
                 continue
-            a, b = (imgui.ImVec2(*point[:2]) for point in points)
+            normal = _outward_normals(points[:, :2], center[:2])[1]
+            inner = points[1, :2] + normal * (4.0 * style_scale)
+            outer = inner + normal * (length_pt * style_scale)
+            a, b = imgui.ImVec2(*inner), imgui.ImVec2(*outer)
             dl.add_line(a, b, edge, 2.5 * style_scale)
             dl.add_line(a, b, core, 1.1 * style_scale)
 
         direction = radial(self._rotation_angle)
-        inner = ring_radius + 2.0 * style_scale / SIZE_PT
-        outer = ring_radius + 15.0 * style_scale / SIZE_PT
         points = project(
             cam,
             (
-                self._start_pos + scale * inner * direction,
-                self._start_pos + scale * outer * direction,
+                self._start_pos + scale * ring_radius * radial(self._rotation_angle - 1e-3),
+                self._start_pos + scale * ring_radius * direction,
+                self._start_pos + scale * ring_radius * radial(self._rotation_angle + 1e-3),
             ),
             rect,
         )
         if np.all(points[:, 2] > 0.0):
+            normal = _outward_normals(points[:, :2], center[:2])[1]
+            inner = points[1, :2] + normal * (2.0 * style_scale)
+            outer = points[1, :2] + normal * (15.0 * style_scale)
             dl.add_line(
-                imgui.ImVec2(*points[0, :2]),
-                imgui.ImVec2(*points[1, :2]),
+                imgui.ImVec2(*inner),
+                imgui.ImVec2(*outer),
                 edge,
                 4.0 * style_scale,
             )
             dl.add_line(
-                imgui.ImVec2(*points[0, :2]),
-                imgui.ImVec2(*points[1, :2]),
+                imgui.ImVec2(*inner),
+                imgui.ImVec2(*outer),
                 active,
                 2.2 * style_scale,
             )
@@ -1029,6 +1034,43 @@ def _clip_line_to_rect(origin, direction, rect) -> tuple[np.ndarray, np.ndarray]
     if lo > hi:
         return None
     return origin + lo * direction, origin + hi * direction
+
+
+def _projected_line_parameters(cam, origin, axis, segment, rect) -> tuple[float, float] | None:
+    mvp = np.asarray(cam.proj_matrix(), np.float64) @ np.asarray(cam.view_matrix(), np.float64)
+    clip_origin = mvp @ np.append(np.asarray(origin, np.float64), 1.0)
+    clip_axis = mvp @ np.append(np.asarray(axis, np.float64), 0.0)
+    x, y, width, height = rect
+    values = []
+    for point in segment:
+        ndc = np.array(
+            (
+                2.0 * (float(point[0]) - x) / width - 1.0,
+                1.0 - 2.0 * (float(point[1]) - y) / height,
+            )
+        )
+        denominator = clip_axis[:2] - ndc * clip_axis[3]
+        component = int(np.argmax(np.abs(denominator)))
+        if abs(denominator[component]) < 1e-10:
+            return None
+        numerator = ndc[component] * clip_origin[3] - clip_origin[component]
+        values.append(float(numerator / denominator[component]))
+    return values[0], values[1]
+
+
+def _outward_normals(points: np.ndarray, center: np.ndarray) -> np.ndarray:
+    points = np.asarray(points, np.float64)
+    tangents = np.roll(points, -1, axis=0) - np.roll(points, 1, axis=0)
+    normals = np.column_stack((-tangents[:, 1], tangents[:, 0]))
+    lengths = np.linalg.norm(normals, axis=1)
+    radial = points - np.asarray(center, np.float64)
+    degenerate = lengths < 1e-9
+    normals[degenerate] = radial[degenerate]
+    lengths[degenerate] = np.linalg.norm(normals[degenerate], axis=1)
+    normals /= np.maximum(lengths[:, None], 1e-9)
+    inward = np.sum(normals * radial, axis=1) < 0.0
+    normals[inward] *= -1.0
+    return normals
 
 
 def _flat_arrow(start: np.ndarray, end: np.ndarray, style_scale: float) -> list[np.ndarray]:

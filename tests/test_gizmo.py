@@ -38,6 +38,7 @@ from forge_viewer.ui.gizmo import (
     ObjectGizmo,
     _clip_line_to_rect,
     _masked_axis_start,
+    _projected_line_parameters,
     _rotation_fill_alpha,
     _rotation_sweep,
 )
@@ -453,6 +454,19 @@ def test_keyboard_constraint_line_keeps_the_exact_projected_axis_direction() -> 
     assert end == pytest.approx((100.0, 75.0))
     delta = end - start
     assert delta[0] - 2.0 * delta[1] == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("orthographic", [False, True])
+def test_snap_ruler_recovers_world_distance_from_projected_points(orthographic: bool) -> None:
+    cam = camera(orthographic=orthographic)
+    origin = np.array((0.2, -0.1, 0.3))
+    axis = np.array((0.6, 0.3, 0.74161985))
+    expected = (-0.75, 1.25)
+    segment = project(cam, tuple(origin + axis * value for value in expected), RECT)[:, :2]
+
+    parameters = _projected_line_parameters(cam, origin, axis, segment, RECT)
+
+    assert parameters == pytest.approx(expected)
 
 
 @pytest.mark.parametrize(
