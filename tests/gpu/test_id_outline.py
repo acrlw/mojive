@@ -123,7 +123,7 @@ class Rig:
         for p in (self.id_pass, self.outline):
             if p.prepare(ctx):
                 p.execute(ctx)
-        assert G.native().drain_errors() == 0, "这一帧留下了 GL 错误"
+        assert G.native().drain_errors() == 0
         return ctx
 
     def _reference_color(self, ctx: PassContext) -> None:
@@ -256,13 +256,13 @@ def _check_id_matches_picture(rig) -> None:
         owner[np.all(img == np.array(u8(color), np.uint8), axis=-1)] = oid
 
     known = owner >= 0
-    assert known.mean() > 0.9, f"能判的像素只有 {known.mean():.1%}，这条判据快空了"
-    assert np.count_nonzero(owner == ROD_ID) > 300, "细杆没画出来"
-    assert np.count_nonzero(owner == SPHERE_ID) > 1500, "球没画出来"
-    assert set(np.unique(ids).tolist()) == {0, ROD_ID, SPHERE_ID}, "ID buffer 里的 id 不对"
+    assert known.mean() > 0.9
+    assert np.count_nonzero(owner == ROD_ID) > 300
+    assert np.count_nonzero(owner == SPHERE_ID) > 1500
+    assert set(np.unique(ids).tolist()) == {0, ROD_ID, SPHERE_ID}
 
     bad = np.count_nonzero(ids[known] != owner[known])
-    assert bad == 0, f"{bad} 个像素上 ID buffer 与画面对不上"
+    assert bad == 0
 
 
 def test_id_buffer_works_with_the_per_bucket_fallback(rig):
@@ -286,7 +286,7 @@ def test_object_id_is_exact_beyond_2_to_the_24(rig):
     row = int(world_to_row(0.0))
     for x, oid in zip(xs, ids, strict=True):
         col = int(world_to_col(float(x)))
-        assert rig.target.read_id(col, row) == oid, f"({col}, {row}) 上的 id 不是 {oid}"
+        assert rig.target.read_id(col, row) == oid
 
 
 def test_transparent_geometry_does_not_write_ids(rig):
@@ -295,14 +295,14 @@ def test_transparent_geometry_does_not_write_ids(rig):
     s.add(MeshShape.BOX, (0.0, 0.0, -0.4), (0.3, 0.3, 0.1), (0.2, 0.2, 0.9, 1.0), 5)
     s.add(MeshShape.BOX, (0.0, 0.0, 0.4), (0.5, 0.5, 0.1), (0.9, 0.9, 0.2, 0.4), 6)
     scene = s.build()
-    assert scene.transparent_buckets, "这个场景本该有一个透明桶"
+    assert scene.transparent_buckets
     rig.set_scene(scene)
     rig.frame()
 
     ids = rig.ids()
-    assert 6 not in set(np.unique(ids).tolist()), "半透明几何把 id 写进去了"
+    assert 6 not in set(np.unique(ids).tolist())
     center = int(world_to_row(0.0)), int(world_to_col(0.0))
-    assert ids[center] == 5, "玻璃后面那个不透明物体的 id 应当如实报出来"
+    assert ids[center] == 5
 
 
 SEL = 7
@@ -328,9 +328,9 @@ def test_outline_is_solid_through_an_occluder(rig):
     behind = int(rig.outline_mask().sum())
 
     center = int(world_to_row(0.0)), int(world_to_col(0.0))
-    assert occluded_ids[center] == 8, "遮挡物没挡在前面，这条判据白跑了"
-    assert alone > 200, f"轮廓本身太少（{alone}），判据快空了"
-    assert abs(alone - behind) <= 2, f"被挡住之后轮廓从 {alone} 个像素变成了 {behind} 个"
+    assert occluded_ids[center] == 8
+    assert alone > 200
+    assert abs(alone - behind) <= 2
 
 
 def test_one_outline_per_link(rig):
@@ -350,13 +350,13 @@ def test_one_outline_per_link(rig):
     rig.set_scene(build(SEL))
     rig.frame(selected=SEL)
     together = rig.outline_mask()
-    assert together.sum() > 200, "轮廓整个没画出来"
-    assert together[rows, strip].sum() == 0, "同一个 id 的两个 geom，接缝上不该有轮廓"
+    assert together.sum() > 200
+    assert together[rows, strip].sum() == 0
 
     rig.set_scene(build(8))
     rig.frame(selected=SEL)
     split = rig.outline_mask()
-    assert split[rows, strip].sum() > 0, "换成两个 id 之后接缝上必须描出边——不然上半句是空的"
+    assert split[rows, strip].sum() > 0
 
 
 def test_corner_is_round_not_square(rig):
@@ -368,10 +368,10 @@ def test_corner_is_round_not_square(rig):
     r1, c1 = int(rows.max()), int(cols.max())
 
     r = OUTLINE_RADIUS
-    assert out[r1, c1 + r], "正右方 r 个像素处应当是轮廓"
-    assert out[r1 + r, c1], "正上方 r 个像素处应当是轮廓"
-    assert out[r1 + 2, c1 + 2], "斜 (2, 2) 处离得是 2.83，圆形邻域够得着"
-    assert not out[r1 + r, c1 + r], "斜 (3, 3) 处离得是 4.24——圆形邻域够不着，方形才够得着"
+    assert out[r1, c1 + r]
+    assert out[r1 + r, c1]
+    assert out[r1 + 2, c1 + 2]
+    assert not out[r1 + r, c1 + r]
 
 
 def test_outline_outer_edge_is_antialiased(rig):
@@ -403,8 +403,8 @@ def test_outline_mask_keeps_subpixel_triangle_coverage(rig):
 
     coverage = rig.outline_coverage()
     partial = coverage[(coverage > 0.0) & (coverage < 1.0)]
-    assert len(partial) > 50, f"斜边只有 {len(partial)} 个亚像素覆盖率像素"
-    assert len(np.unique(partial)) >= 3, "mask 没保留 MSAA 的多个覆盖率等级"
+    assert len(partial) > 50
+    assert len(np.unique(partial)) >= 3
 
 
 def test_outline_works_for_a_huge_object_id(rig):
@@ -422,9 +422,9 @@ def test_no_outline_smeared_along_the_viewport_border(rig):
     rig.set_scene(_selected_box(half=(0.3, 0.3, 0.1)))
     rig.frame(selected=SEL)
     out = rig.outline_mask()
-    assert out.sum() > 200, "轮廓整个没画出来"
-    assert out[0].sum() == 0 and out[-1].sum() == 0, "上下两条视口边上糊出了轮廓"
-    assert out[:, 0].sum() == 0 and out[:, -1].sum() == 0, "左右两条视口边上糊出了轮廓"
+    assert out.sum() > 200
+    assert out[0].sum() == 0 and out[-1].sum() == 0
+    assert out[:, 0].sum() == 0 and out[:, -1].sum() == 0
 
 
 def test_outline_hugs_the_viewport_edge_when_clipped(rig):
@@ -432,13 +432,13 @@ def test_outline_hugs_the_viewport_edge_when_clipped(rig):
     rig.set_scene(_selected_box(center_x=-1.1, half=(0.5, 0.4, 0.1)))
     rig.frame(selected=SEL)
     ids, out = rig.ids(), rig.outline_mask()
-    assert (ids[:, 0] == SEL).any(), "物体没有真的被视口左边切断，这条判据白跑了"
+    assert (ids[:, 0] == SEL).any()
 
     rows = np.nonzero((ids == SEL).any(axis=1))[0]
     inner = rows[OUTLINE_RADIUS:-OUTLINE_RADIUS]
     band = out[:, :OUTLINE_RADIUS].any(axis=1)
     missing = [int(r) for r in inner if not band[r]]
-    assert not missing, f"{len(missing)} 行在视口边上断了（比如第 {missing[:5]} 行）"
+    assert not missing
 
 
 def test_object_near_the_border_still_gets_an_outer_outline(rig):
@@ -449,11 +449,11 @@ def test_object_near_the_border_still_gets_an_outer_outline(rig):
     rig.frame(selected=SEL)
     ids, out = rig.ids(), rig.outline_mask()
 
-    assert (ids[:, 2] == SEL).any(), "物体没落在预期的列上，这条判据白跑了"
+    assert (ids[:, 2] == SEL).any()
     assert not (ids[:, 0] == SEL).any() and not (ids[:, 1] == SEL).any()
-    assert out[:, :2].sum() > 50, "那两列背景上应当照画外轮廓"
+    assert out[:, :2].sum() > 50
     inside = int((out & (ids == SEL)).sum())
-    assert inside == 0, f"选中区域内部出现了 {inside} 个轮廓像素——内侧轮廓不该在这时候出现"
+    assert inside == 0
 
 
 def test_outline_pass_is_skipped_when_there_is_nothing_to_outline(rig):
@@ -464,8 +464,8 @@ def test_outline_pass_is_skipped_when_there_is_nothing_to_outline(rig):
     rig.set_scene(s.build())
     assert rig.outline.prepare(rig.context(selected=0)) is False
     assert rig.outline.prepare(rig.context(selected=SEL, outline=False)) is False
-    assert rig.outline.prepare(rig.context(selected=999)) is False, "选中的东西不在场景里"
+    assert rig.outline.prepare(rig.context(selected=999)) is False
     assert rig.outline.prepare(rig.context(selected=SEL)) is True
 
     rig.frame(selected=0)
-    assert rig.outline_mask().sum() == 0, "没有选中却画出了轮廓"
+    assert rig.outline_mask().sum() == 0

@@ -33,7 +33,7 @@ from forge_viewer.types import (  # noqa: E402
 @pytest.fixture(scope="module")
 def gl():
     if not glfw.init():
-        pytest.skip("glfw 起不来")
+        pytest.skip("GLFW initialization failed")
     for k, v in (
         (glfw.CONTEXT_VERSION_MAJOR, 3),
         (glfw.CONTEXT_VERSION_MINOR, 3),
@@ -45,7 +45,7 @@ def gl():
     win = glfw.create_window(256, 192, "forge tests", None, None)
     if not win:
         glfw.terminate()
-        pytest.skip("建不出 3.3 core 上下文")
+        pytest.skip("OpenGL 3.3 core context unavailable")
     glfw.make_context_current(win)
     ctx = moderngl.create_context()
     G.native().drain_errors()
@@ -72,7 +72,7 @@ def test_state_guard_restores_every_item(gl):
 
     guard = GLStateGuard()
     if not guard.available:
-        pytest.skip("拿不到原生 glGet*")
+        pytest.skip("native glGet* entry points unavailable")
     n = G.native()
 
     gl.enable(moderngl.BLEND)
@@ -87,7 +87,7 @@ def test_state_guard_restores_every_item(gl):
     n.depth_mask(False)
 
     before = guard.snapshot()
-    assert len(before) == 15, "守的项数不对——规格 §2.3 要求约 15 项"
+    assert len(before) == 15
 
     with guard:
         gl.enable(moderngl.DEPTH_TEST | moderngl.CULL_FACE)
@@ -106,8 +106,8 @@ def test_state_guard_restores_every_item(gl):
 
     after = guard.snapshot()
     diff = {k: (before[k], after[k]) for k in before if before[k] != after[k]}
-    assert not diff, f"这些项没还回去：{diff}"
-    assert n.drain_errors() == 0, "留下了 GL 错误"
+    assert not diff
+    assert n.drain_errors() == 0
 
 
 def test_bind_default_framebuffer_does_not_touch_viewport(gl):
@@ -117,8 +117,8 @@ def test_bind_default_framebuffer_does_not_touch_viewport(gl):
     gl.viewport = (7, 11, 64, 48)
     before = gl.viewport
     bind_default_framebuffer(gl)
-    assert gl.viewport == before, f"解绑动了视口：{before} → {gl.viewport}"
-    assert gl.fbo is gl.screen, "默认帧缓冲没绑回去——调用方接下来每一步都会打在我们的 FBO 上"
+    assert gl.viewport == before
+    assert gl.fbo is gl.screen
     fbo.release()
 
 
@@ -134,9 +134,7 @@ def test_integer_attachment_clear_is_exact(gl):
             fbo_i.clear(0.13, 0.13, 0.13, 1.0)
             got = int(np.frombuffer(fbo_i.read(components=1, dtype="u4"), np.uint32)[0])
             n.drain_errors()
-            assert got == int(np.float32(0.13).view(np.uint32)), (
-                "库的整数清屏缺陷不复现了——那规避还有必要吗？先量再改"
-            )
+            assert got == int(np.float32(0.13).view(np.uint32))
         finally:
             tgt.use_main()
             fbo_i.release()
@@ -147,7 +145,7 @@ def test_integer_attachment_clear_is_exact(gl):
             tgt.clear_main((0.1, 0.1, 0.1, 1.0))
             tgt.clear_id(value)
             uniq = np.unique(tgt.read_ids())
-            assert len(uniq) == 1 and uniq[0] == value, f"clear_id({value}) 读回 {uniq}"
+            assert len(uniq) == 1 and uniq[0] == value
         assert n.drain_errors() == 0
     finally:
         tgt.release()
@@ -159,14 +157,12 @@ def test_samples_one_is_normalised_to_no_msaa(gl):
     for requested in (0, 1):
         tgt = RenderTarget(gl, 64, 48, samples=requested)
         try:
-            assert tgt.samples == 0, f"samples={requested} 应当归一成 0，实为 {tgt.samples}"
+            assert tgt.samples == 0
             tgt.clear_main((0.2, 0.3, 0.4, 1.0))
             tgt.clear_id(9)
             tgt.resolve()
             px = tgt.read_color(flip=False)[10, 10]
-            assert abs(int(px[0]) - 51) <= 2 and abs(int(px[2]) - 102) <= 2, (
-                f"回读的颜色不是刚清进去的：{list(px[:3])}"
-            )
+            assert abs(int(px[0]) - 51) <= 2 and abs(int(px[2]) - 102) <= 2
             assert list(np.unique(tgt.read_ids())) == [9]
             assert n.drain_errors() == 0
         finally:
@@ -183,12 +179,12 @@ def test_id_layout_is_probed_not_assumed(gl):
         try:
             assert tgt.id_layout is layout
             if layout is IdLayout.SHARED:
-                assert tgt.id_fbo is tgt.fbo, "SHARED 下 id 就该是主 FBO 的附件"
+                assert tgt.id_fbo is tgt.fbo
 
                 assert tgt.id_samples == tgt.samples
             else:
-                assert tgt.id_fbo is not tgt.fbo, "SPLIT 下 id 必须是独立目标"
-                assert tgt.id_samples == 0, "SPLIT 的 id 目标是 1×，才能被 glReadPixels 读"
+                assert tgt.id_fbo is not tgt.fbo
+                assert tgt.id_samples == 0
             tgt.clear_main((0, 0, 0, 1))
             tgt.clear_id(0)
         finally:
@@ -219,7 +215,7 @@ def test_depth_mask_replay_is_defused(gl):
 
         tgt.resolve()
         px = tgt.read_color(flip=False)[24, 32]
-        assert px[1] > 200, f"第二次绘制没写进去，深度没被清（像素 {px}）"
+        assert px[1] > 200
     finally:
         tgt.release()
 
@@ -315,7 +311,7 @@ def test_both_instance_strategies_draw_the_same_thing(gl, strategy):
     inst = InstanceStore(gl)
     inst.strategy = strategy
     if strategy is Strategy.SHARED and not G.native().has_attrib_pointer:
-        pytest.skip("拿不到原生 glVertexAttribPointer")
+        pytest.skip("native glVertexAttribPointer unavailable")
     try:
         inst.rebuild(scene, prog, bucket_meshes, generation=0)
         inst.upload(scene)
@@ -327,9 +323,9 @@ def test_both_instance_strategies_draw_the_same_thing(gl, strategy):
 
         seen = {tuple(int(v) for v in c) for c in img.reshape(-1, 3)} - {(0, 0, 0)}
         expect = {tuple(round(v * 255) for v in c) for c in _COLORS}
-        assert drawn == 9, f"实例数不对：{drawn}"
-        assert inst.draw_calls == 4, f"绘制次数不对：{inst.draw_calls}（4 个桶就该 4 次）"
-        assert seen == expect, f"少了这些实例的颜色：{sorted(expect - seen)}"
+        assert drawn == 9
+        assert inst.draw_calls == 4
+        assert seen == expect
         assert G.native().drain_errors() == 0
     finally:
         inst.release()
@@ -342,12 +338,12 @@ def test_capacity_grows_by_doubling(gl):
     inst = InstanceStore(gl)
     try:
         inst._ensure_capacity(10)
-        assert inst.capacity == 64, "起步容量应当是 64"
+        assert inst.capacity == 64
         first = inst.buffer
         inst._ensure_capacity(50)
-        assert inst.buffer is first, "还装得下就不该重开缓冲"
+        assert inst.buffer is first
         inst._ensure_capacity(65)
-        assert inst.capacity == 128, f"应当翻倍到 128，实为 {inst.capacity}"
+        assert inst.capacity == 128
     finally:
         inst.release()
 
@@ -363,7 +359,7 @@ def test_object_id_survives_packing_as_an_exact_uint32(gl):
     inst._ensure_capacity(scene.count)
     raw = inst.pack(scene)
     assert raw.dtype == np.uint32
-    assert np.array_equal(raw[:, 28], scene.object_id), "id 在打包途中被改了值"
+    assert np.array_equal(raw[:, 28], scene.object_id)
     inst.release()
 
 
@@ -397,10 +393,8 @@ layout(location = 0) out uint o_id;
 void main() { o_id = v_id; }
 """,
     )
-    assert "in_object_id" in prog, "着色器里没有 in_object_id，这条判据就白跑了"
-    assert any(a[0] == "in_object_id" and a[5] != 0x1406 for a in INSTANCE_ATTRIBUTES), (
-        "in_object_id 的 GL 类型必须是整数，不能是 GL_FLOAT"
-    )
+    assert "in_object_id" in prog
+    assert any(a[0] == "in_object_id" and a[5] != 0x1406 for a in INSTANCE_ATTRIBUTES)
     prog["u_view_proj"].value = tuple(
         M.to_gl(scene.camera.proj_matrix() @ scene.camera.view_matrix()).ravel()
     )
@@ -410,7 +404,7 @@ void main() { o_id = v_id; }
     inst = InstanceStore(gl)
     inst.strategy = strategy
     if strategy is Strategy.SHARED and not G.native().has_attrib_pointer:
-        pytest.skip("拿不到原生 glVertexAttribPointer")
+        pytest.skip("native glVertexAttribPointer unavailable")
     id_tex = gl.texture((256, 256), 1, dtype="u4")
     fbo = gl.framebuffer([id_tex])
     try:
@@ -425,9 +419,7 @@ void main() { o_id = v_id; }
             inst.draw(b)
         got = np.frombuffer(fbo.read(components=1, dtype="u4"), np.uint32)
         seen = set(np.unique(got).tolist()) - {0}
-        assert seen == set(ids.tolist()), (
-            f"读回的 id 与写进去的不符：少了 {set(ids.tolist()) - seen}"
-        )
+        assert seen == set(ids.tolist())
         assert G.native().drain_errors() == 0
     finally:
         inst.release()
@@ -445,7 +437,7 @@ def test_pack_transposes_row_major_to_column_major(gl):
     packed = inst.pack(scene).view(np.float32)
     for i in range(scene.count):
         expect = M.to_gl(scene.transforms[i]).ravel()
-        assert np.allclose(packed[i, :16], expect), f"第 {i} 个实例的变换没转置对"
+        assert np.allclose(packed[i, :16], expect)
 
     assert np.allclose(packed[:, 12], scene.transforms[:, 0, 3])
     inst.release()
@@ -463,17 +455,17 @@ def test_shader_compile_failure_keeps_last_good_program(gl, tmp_path):
     import time
 
     time.sleep(0.01)
-    (tmp_path / "a.frag").write_text("#version 330 core\n这不是 GLSL")
+    (tmp_path / "a.frag").write_text("#version 330 core\nthis is not GLSL")
     changed = cache.reload_changed()
-    assert changed == [], "坏源码不该被当成换掉了"
-    assert cache.get(spec) is good, "编译失败之后必须保留上一份"
-    assert cache.generation == gen, "没换成功就不该动 generation（否则 VAO 白重建）"
-    assert cache.last_error, "失败要留下错误原文，不能静默"
+    assert changed == []
+    assert cache.get(spec) is good
+    assert cache.generation == gen
+    assert cache.last_error
 
     time.sleep(0.01)
     (tmp_path / "a.frag").write_text("#version 330 core\nout vec4 c;void main(){c=vec4(0.5);}")
     assert cache.reload_changed() == ["t"]
-    assert cache.generation == gen + 1, "真的换掉了才 +1——VAO 靠它决定要不要重建"
+    assert cache.generation == gen + 1
     cache.release()
 
 
@@ -501,7 +493,7 @@ def test_uniform_cache_skips_unchanged_writes(gl):
     cache._program = type("P", (), {"__getitem__": lambda _s, _k: Counting()})()
     for _ in range(10):
         cache.set("u_a", 1.0)
-    assert writes == 1, f"同一个值写了 {writes} 次"
+    assert writes == 1
     cache.set("u_a", 2.0)
     assert writes == 2
     cache.set("u_nonexistent", 1.0)
@@ -514,11 +506,11 @@ def test_gpu_timing_degrades_to_empty_table(gl):
     with t.scope("opaque"):
         gl.clear()
     t.collect()
-    assert "opaque" in t.cpu_table(), "CPU 那一列永远该有"
+    assert "opaque" in t.cpu_table()
     if t.gpu_available:
         assert "opaque" in t.gpu_table()
     else:
-        assert t.gpu_table() == {}, "不可用时必须是空表，不是 0 或 None"
+        assert t.gpu_table() == {}
 
     off = FrameTiming(gl, enabled=False)
     with off.scope("opaque"):

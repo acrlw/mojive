@@ -327,10 +327,10 @@ def test_easing_is_ease_out_not_ease_in_out():
     from forge_viewer.ui.camera import _ease_out_quad as ease
 
     assert ease(0.0) == 0.0 and ease(1.0) == 1.0
-    assert ease(0.3) > 0.45, f"t=0.3 才走了 {ease(0.3):.3f}，起步太肉"
+    assert ease(0.3) > 0.45
 
     steps = [ease((i + 1) / 20.0) - ease(i / 20.0) for i in range(20)]
-    assert all(b <= a + 1e-9 for a, b in itertools.pairwise(steps)), "增量不是单调不增——中间在加速"
+    assert all(b <= a + 1e-9 for a, b in itertools.pairwise(steps))
 
 
 def test_look_from_can_be_retargeted_mid_flight():
@@ -341,15 +341,13 @@ def test_look_from_can_be_retargeted_mid_flight():
     for _ in range(3):
         cam.advance(0.05, sink)
     midway = cam.yaw
-    assert 0.0 < midway < 90.0, "第一段缓动就没动"
+    assert 0.0 < midway < 90.0
 
     cam.look_from(-60.0, -20.0, sink, animate=True)
-    assert abs(cam.yaw - midway) < 1e-6, "重新定向时把相机弹回了别处"
+    assert abs(cam.yaw - midway) < 1e-6
     for _ in range(40):
         cam.advance(0.05, sink)
-    assert abs(cam.yaw - (-60.0)) < 0.5 and abs(cam.pitch - (-20.0)) < 0.5, (
-        f"重新定向之后停在 yaw={cam.yaw:.1f} pitch={cam.pitch:.1f}"
-    )
+    assert abs(cam.yaw - (-60.0)) < 0.5 and abs(cam.pitch - (-20.0)) < 0.5
 
 
 def test_every_public_setter_marks_dirty_and_publishes():
@@ -359,9 +357,7 @@ def test_every_public_setter_marks_dirty_and_publishes():
         for name, attr in vars(OrbitCamera).items()
         if isinstance(attr, property) and attr.fset is not None
     ]
-    assert {"pivot", "yaw", "pitch", "distance"} <= set(writable), (
-        f"这些可写属性不见了，判据要跟着改：{writable}"
-    )
+    assert {"pivot", "yaw", "pitch", "distance"} <= set(writable)
 
     samples = {
         "pivot": np.array([1.0, 2.0, 3.0]),
@@ -382,4 +378,4 @@ def test_every_public_setter_marks_dirty_and_publishes():
         before = len(sink.views)
         setattr(cam, name, samples[name])
         cam.advance(0.0, sink)
-        assert len(sink.views) == before + 1, f"写 {name} 之后没有下发——改了不生效且不报错"
+        assert len(sink.views) == before + 1

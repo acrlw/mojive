@@ -1,33 +1,4 @@
-<!--
-  dense_mesh —— 密集网格 + 实例化。
 
-  守的性质：**轮廓光滑无折线**，以及**同一份网格的 N 个实例只发一次绘制**。
-
-  == 为什么必须有一份真的网格资产 ==
-
-  MJCF 的 `<visual><quality numslices>` 只管参照渲染器；forge 的内建球锥柱是自己按
-  `render/mesh.py` 的档数生成的，改 MJCF 改不动它。所以"密集网格"这件事只能由一份真的
-  三角网格来守——`torus` 是 48×24 的圆环面，2304 个三角形，
-  顶点表**内联在 XML 里**（11 开篇：不依赖任何外部资源库）。
-
-  圆环面而不是又一个球：它的**内外两条轮廓线**都是曲的，法线在环内侧会翻向，
-  背面剔除、法线朝向、平滑着色任何一处出错都会在那个洞上显出来。球的洞是没有的。
-
-  == 判据为什么是"并排比" ==
-
-  "轮廓光滑"单看一个物体判不了——多细算光滑没有绝对标准。所以旁边并排放了一行
-  **20 面的正二十面体**（`facet_*`）：同样的尺寸、同样的材质，**它的轮廓能一眼数出
-  折线，圆环与球的数不出来**。两行一起看，判据就落在"能数出来 / 数不出来"这个二值上，
-  而不是某个说不清的光滑度。
-
-  == 实例化 ==
-
-  `ring_00..ring_11` 是**同一份网格的十二个实例**，只有变换不同（位置、绕自身的倾角、
-  缩放级别）。它们必须落进同一个桶、一次实例化绘制画完（04 §4.2）。尺寸不进桶键，
-  所以大小不同也不拆桶。九个 `smooth_*` 球同理。
-
-  三角形总数：2304 × 12 = 27648（圆环）+ 球与二十面体。
--->
 <mujoco model="dense_mesh">
   <compiler angle="degree" autolimits="true"/>
 
@@ -41,7 +12,7 @@
     <texture name="grid" type="2d" builtin="checker" width="512" height="512"
              rgb1="0.18 0.20 0.24" rgb2="0.28 0.31 0.36"/>
     <material name="grid" texture="grid" texrepeat="1 1" texuniform="true"/>
-    <!-- 高光很亮：折线在高光的走向上比在轮廓上还早一步显形 -->
+
     <material name="chrome" rgba="0.78 0.80 0.84 1" specular="0.95" shininess="0.92"/>
     <material name="brass" rgba="0.85 0.68 0.30 1" specular="0.9" shininess="0.85"/>
 
@@ -485,7 +456,6 @@
 
     <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
 
-    <!-- 十二个圆环面实例：同一份网格，只有变换不同 -->
     <geom name="ring_00" type="mesh" mesh="torus" material="chrome"
           pos="1.0500 0.0000 0.4200" euler="60 0 0.0"
           contype="0" conaffinity="0"/>
@@ -523,7 +493,6 @@
           pos="0.9093 -0.5250 0.2600" euler="170 0 330.0"
           contype="0" conaffinity="0"/>
 
-    <!-- 光滑参照行 -->
     <geom name="smooth_0" type="sphere" pos="-1.60 -1.75 0.100" size="0.100" material="chrome"/>
     <geom name="smooth_1" type="sphere" pos="-1.20 -1.75 0.120" size="0.120" material="chrome"/>
     <geom name="smooth_2" type="sphere" pos="-0.80 -1.75 0.140" size="0.140" material="chrome"/>
@@ -534,7 +503,6 @@
     <geom name="smooth_7" type="sphere" pos="1.20 -1.75 0.240" size="0.240" material="chrome"/>
     <geom name="smooth_8" type="sphere" pos="1.60 -1.75 0.260" size="0.260" material="chrome"/>
 
-    <!-- 折线参照行：同尺寸同材质，轮廓上能数出 20 个面 -->
     <geom name="facet_0" type="mesh" mesh="ico" pos="-1.60 -2.35 0.22" euler="0 0 0" contype="0" conaffinity="0" material="brass"/>
     <geom name="facet_1" type="mesh" mesh="ico" pos="-1.20 -2.35 0.22" euler="17 11 0" contype="0" conaffinity="0" material="brass"/>
     <geom name="facet_2" type="mesh" mesh="ico" pos="-0.80 -2.35 0.22" euler="34 22 0" contype="0" conaffinity="0" material="brass"/>

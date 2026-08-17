@@ -56,7 +56,7 @@ def test_registered_panels(panels: PanelSet):
 def test_every_panel_declares_a_shortcut(panels: PanelSet):
 
     for p in panels:
-        assert isinstance(p.shortcut, str), f"{p.name} 没有申报 shortcut"
+        assert isinstance(p.shortcut, str)
         assert isinstance(p.aliases, tuple)
 
 
@@ -64,7 +64,7 @@ def test_closed_by_default_panels_have_a_key(panels: PanelSet):
 
     for p in panels:
         if not p.default_open:
-            assert p.shortcut, f"{p.name} 默认关着却没有键，关掉之后就再也打不开"
+            assert p.shortcut
 
 
 def test_shortcuts_are_unique(panels: PanelSet):
@@ -72,7 +72,7 @@ def test_shortcuts_are_unique(panels: PanelSet):
     keys: list[str] = []
     for p in panels:
         keys.extend(k for k in (p.shortcut, *p.aliases) if k)
-    assert len(keys) == len(set(keys)), f"快捷键重复：{sorted(keys)}"
+    assert len(keys) == len(set(keys))
 
 
 def test_validate_catches_a_keyless_closed_panel():
@@ -103,9 +103,9 @@ def test_help_lists_every_panel_key(panels: PanelSet):
 
     table = panels.shortcut_table()
     assert {name for _key, name, _open in table} == EXPECTED_PANELS
-    for key, name, default_open in table:
+    for key, _name, default_open in table:
         if not default_open:
-            assert key, f"{name} 在帮助表里没有键"
+            assert key
 
 
 def test_aggregate_needs_follow_the_plot_panel(panels: PanelSet):
@@ -114,10 +114,10 @@ def test_aggregate_needs_follow_the_plot_panel(panels: PanelSet):
     assert plot is not None and not plot.default_open
 
     plot.open = False
-    assert panels.frame_needs().qvel is False, "Plot 关着却仍在申报 qvel"
+    assert panels.frame_needs().qvel is False
 
     plot.open = True
-    assert panels.frame_needs().qvel is True, "Plot 开着却没申报 qvel"
+    assert panels.frame_needs().qvel is True
 
 
 def test_needs_follow_the_series_toggle_not_just_the_panel(panels: PanelSet):
@@ -129,7 +129,7 @@ def test_needs_follow_the_series_toggle_not_just_the_panel(panels: PanelSet):
     needs = panels.frame_needs()
     assert needs.qvel is False
     assert needs.contacts is False
-    assert needs.qpos is True, "关节角那条还开着，qpos 不该被一起关掉"
+    assert needs.qpos is True
 
 
 def test_inspector_velocity_section_drives_qvel(panels: PanelSet):
@@ -254,7 +254,7 @@ def test_stats_scale_is_quantized_and_holds_after_a_spike():
 
     for _ in range(120):
         panel._update_scale(16.0)
-    assert panel._scale_ms == 50.0, "尖峰后的量程不该每帧往回跳"
+    assert panel._scale_ms == 50.0
 
 
 def test_closed_panels_ask_for_nothing(panels: PanelSet):
@@ -322,7 +322,7 @@ def test_latch_rebuilds_immediately_during_startup():
     latch = ResizeLatch()
     for i in range(WARMUP_FRAMES):
         size = (100 + i, 100)
-        assert latch.update(size, now=0.0) == size, f"第 {i} 帧没有立刻重建"
+        assert latch.update(size, now=0.0) == size
     assert latch.rebuilds == WARMUP_FRAMES
 
     assert latch.update((900, 700), now=0.0) is None
@@ -348,8 +348,8 @@ def test_latch_coalesces_changes_within_a_drag():
             committed = out
         t += FRAME_DT
 
-    assert latch.rebuilds - before == 1, "一次拖动触发了多次重建"
-    assert committed == last, "迟滞走完之后重建的不是最后那个尺寸"
+    assert latch.rebuilds - before == 1
+    assert committed == last
 
 
 def test_latch_survives_a_human_pause_between_drags():
@@ -368,10 +368,7 @@ def test_latch_survives_a_human_pause_between_drags():
             latch.update(size, now=t)
             t += FRAME_DT
 
-    assert latch.rebuilds - before == 0, (
-        f"{HUMAN_PAUSE} 秒的手停顿就触发了 {latch.rebuilds - before} 次重建："
-        "迟滞短于人手的停顿，一次拖动会重建好几次"
-    )
+    assert latch.rebuilds - before == 0
 
     committed = None
     stop = t + SETTLE_SECONDS * 2

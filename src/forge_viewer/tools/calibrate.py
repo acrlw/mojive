@@ -86,7 +86,7 @@ def _reference_image(path: Path, out: Path, camera: str) -> np.ndarray:
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300)
     if proc.returncode != 0:
-        raise RuntimeError(f"参照渲染器失败：{proc.stderr}")
+        raise RuntimeError(f"Reference renderer failed: {proc.stderr}")
     return np.load(str(out) if str(out).endswith(".npy") else str(out) + ".npy")
 
 
@@ -110,7 +110,7 @@ def _reference_center(path: Path) -> tuple[float, float, float]:
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300)
     if proc.returncode != 0:
-        raise RuntimeError(f"参照渲染器失败：{proc.stderr}")
+        raise RuntimeError(f"Reference renderer failed: {proc.stderr}")
     return tuple(json.loads(proc.stdout))  # type: ignore[return-value]
 
 
@@ -147,15 +147,16 @@ def sweep(name: str, cases: list[dict], tmp: Path) -> list[tuple]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="calibrate", description="拿参照渲染器裁决环境光来源")
+    ap = argparse.ArgumentParser(
+        prog="calibrate", description="Calibrate forge lighting against MuJoCo"
+    )
     ap.parse_args(argv)
 
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
 
-        print("\n=== 一、漫反射隔离（环境光全零，单向光，albedo 0.8）===")
-        print("   规格 §5.2：这一趟应当逐档对上。对不上就别去看环境光。")
-        print(f"   {'light diffuse':>14}{'参照 R':>10}{'forge R':>10}{'比值':>8}")
+        print("\n=== 1. Directional diffuse: ambient=0, albedo=0.8 ===")
+        print(f"   {'light diffuse':>14}{'reference R':>12}{'forge R':>10}{'ratio':>8}")
         diffuse_cases = [
             {"ha": 0.0, "hd": 0.0, "ld": d, "la": 0.0, "alb": 0.8} for d in (0.2, 0.4, 0.6, 0.8)
         ]
@@ -163,11 +164,11 @@ def main(argv: list[str] | None = None) -> int:
             r = got[0] / ref[0] if ref[0] > 1e-6 else float("nan")
             print(f"   {kw['ld']:>14.2f}{ref[0]:>10.1f}{got[0]:>10.1f}{r:>8.3f}")
 
-        print("\n=== 二、环境光扫描（漫反射全零，albedo 0.95）===")
-        print("   规格 §5.2 的实测口径：纯色面 rgba=0.95、diffuse=0，ambient 0.5 → 输出 241")
-        print("   （= 2 × 0.5 × 0.95 × 255）。下面看这条等式在本机成不成立。")
+        print("\n=== 2. Ambient sweep: diffuse=0, albedo=0.95 ===")
+        print("   Reference relation: output = 2 × ambient × albedo × 255.")
         print(
-            f"   {'headlight amb':>14}{'light amb':>11}{'参照 R':>10}{'forge R':>10}{'比值':>8}{'2·a·rgba·255':>14}"
+            f"   {'headlight amb':>14}{'light amb':>11}{'reference R':>12}"
+            f"{'forge R':>10}{'ratio':>8}{'prediction':>14}"
         )
         amb_cases = [
             {"ha": a, "hd": 0.0, "ld": 0.0, "la": 0.0, "alb": 0.95} for a in (0.1, 0.2, 0.35, 0.5)
@@ -180,9 +181,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"{r:>8.3f}{pred:>14.1f}"
             )
 
-        print("\n=== 三、头灯漫反射隔离（只开 headlight.diffuse）===")
-        print("   §5.2 的方法换一项来做：头灯与太阳光是两条不同的路径，各验各的。")
-        print(f"   {'headlight diffuse':>18}{'参照 R':>10}{'forge R':>10}{'比值':>8}")
+        print("\n=== 3. Headlight diffuse ===")
+        print(f"   {'headlight diffuse':>18}{'reference R':>12}{'forge R':>10}{'ratio':>8}")
         hd_cases = [
             {"ha": 0.0, "hd": h, "ld": 0.0, "la": 0.0, "alb": 0.8} for h in (0.2, 0.4, 0.6, 0.8)
         ]
@@ -190,10 +190,10 @@ def main(argv: list[str] | None = None) -> int:
             r = got[0] / ref[0] if ref[0] > 1e-6 else float("nan")
             print(f"   {kw['hd']:>18.2f}{ref[0]:>10.1f}{got[0]:>10.1f}{r:>8.3f}")
 
-        print("\n=== 四、贴图面到底受不受光 ===")
-        print("   规格 12 §12.5 把这条列为「一处还没决定的」，说参照对贴图面**完全不着色**")
-        print("   （环境光 0.5 与 1.0 两档输出相同）。下面直接问参照渲染器。")
-        print(f"   {'ambient':>10}{'参照 R':>10}{'forge R':>10}{'比值':>8}{'a·texel·255':>13}")
+        print("\n=== 4. Textured surface lighting ===")
+        print(
+            f"   {'ambient':>10}{'reference R':>12}{'forge R':>10}{'ratio':>8}{'a×texel×255':>13}"
+        )
         for a in (0.25, 0.5, 1.0):
             path = tmp / f"tex_{a}.xml"
             path.write_text(TEXTURED.format(a=a, g=0.6), encoding="utf-8")
@@ -202,14 +202,13 @@ def main(argv: list[str] | None = None) -> int:
             r = got[0] / ref[0] if ref[0] > 1e-6 else float("nan")
             print(f"   {a:>10.2f}{ref[0]:>10.1f}{got[0]:>10.1f}{r:>8.3f}{a * 0.6 * 255:>13.1f}")
 
-        print("\n=== 五、环境光来自哪一处（headlight vs 逐灯）===")
-        print("   同一个总量，一次挂在 headlight 上、一次挂在灯上，看参照渲染器认哪个。")
-        print(f"   {'配置':>28}{'参照 R':>10}{'forge R':>10}")
+        print("\n=== 5. Ambient source: headlight and scene light ===")
+        print(f"   {'configuration':>28}{'reference R':>12}{'forge R':>10}")
         where_cases = [
             ({"ha": 0.4, "hd": 0.0, "ld": 0.0, "la": 0.0, "alb": 0.95}, "headlight.ambient=0.4"),
             ({"ha": 0.0, "hd": 0.0, "ld": 0.0, "la": 0.4, "alb": 0.95}, "light.ambient=0.4"),
-            ({"ha": 0.4, "hd": 0.0, "ld": 0.0, "la": 0.4, "alb": 0.95}, "两处都是 0.4"),
-            ({"ha": 0.0, "hd": 0.0, "ld": 0.0, "la": 0.0, "alb": 0.95}, "两处都是 0"),
+            ({"ha": 0.4, "hd": 0.0, "ld": 0.0, "la": 0.4, "alb": 0.95}, "both=0.4"),
+            ({"ha": 0.0, "hd": 0.0, "ld": 0.0, "la": 0.0, "alb": 0.95}, "both=0"),
         ]
         for kw, label in where_cases:
             path = tmp / f"where_{label}.xml".replace(" ", "_")
@@ -218,11 +217,8 @@ def main(argv: list[str] | None = None) -> int:
             got = _forge_center(path)
             print(f"   {label:>28}{ref[0]:>10.1f}{got[0]:>10.1f}")
 
-        print("\n=== 六、平面反射的混合律（14 §M5.2）===")
-        print("   反射斑处的像素 = 地板 + r × 被反射物？还是 mix(地板, 反射, r)？")
-        print("   两者在有东西可反射的地方都随 r 线性变化，**分界在没有东西可反射的地方**：")
-        print("   mix 会把那片地板往黑里拉，加法则一动不动。所以两处都要采。")
-        print(f"   {'reflectance':>12}{'反射斑':>22}{'远处地板':>22}{'地板+r×盒子':>20}")
+        print("\n=== 6. Planar reflection composition ===")
+        print(f"   {'reflectance':>12}{'reflection':>22}{'far floor':>22}{'floor+r×box':>20}")
 
         shots = {}
         for i, r in enumerate((0.0, 0.25, 0.5, 0.75, 1.0)):
@@ -245,13 +241,10 @@ def main(argv: list[str] | None = None) -> int:
                 f"   {r:>12.2f}{spot.astype(int)!s:>22}{far.astype(int)!s:>22}"
                 f"{np.minimum(pred, 255).astype(int)!s:>20}"
             )
-        print("   实测：反射斑逐档等于「地板 + r×盒子」，远处地板**四档完全不变**")
-        print("   → **加法**。写进 shaders/scene_body.glsl，判据在 tests/gpu/test_reflection.py")
+        print("   Result: additive floor + reflectance × reflected color.")
+        print("   Implementation: shaders/scene_body.glsl; gate: tests/gpu/test_reflection.py")
 
-    print(
-        "\n  结论写进 docs/DECISIONS.md §三.1。**补在差异所在的那一项上，"
-        "\n  不要用全局曝光去补**——补错地方会牵连别处（05 §5.2）。"
-    )
+    print("\n  Calibration decisions are documented in docs/DECISIONS.md.")
     return 0
 
 

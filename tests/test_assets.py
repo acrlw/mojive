@@ -111,7 +111,7 @@ def test_every_scene_loads(name: str) -> None:
 
     mujoco = pytest.importorskip("mujoco")
     model = mujoco.MjModel.from_xml_path(str(resolve(name)))
-    assert model.ngeom > 0, f"{name} 加载成功但一个 geom 都没有"
+    assert model.ngeom > 0
 
 
 @pytest.mark.physics
@@ -149,12 +149,12 @@ def test_interaction_scenes_are_selectable(name: str, min_selectable: int) -> No
         gname = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, i) or f"geom[{i}]"
         body = int(model.geom_bodyid[i])
         if gname in BACKGROUND_GEOMS:
-            assert body == 0, f"{name} 的背景 geom {gname} 挂在 body {body} 上——它会变得能选中"
+            assert body == 0
             continue
-        assert body != 0, f"{name} 的 {gname} 挂在 worldbody 上，object_id 是 0，点不中"
+        assert body != 0
         selectable += 1
 
-    assert selectable >= min_selectable, f"{name} 只有 {selectable} 个可选中的 geom"
+    assert selectable >= min_selectable
 
 
 @pytest.mark.physics
@@ -167,7 +167,7 @@ def test_pick_scene_has_a_multi_geom_body() -> None:
         if int(body) != 0:
             counts[int(body)] = counts.get(int(body), 0) + 1
     multi = [b for b, n in counts.items() if n >= 2]
-    assert len(multi) >= 2, "pick_scene 里没有两个以上的多 geom body"
+    assert len(multi) >= 2
     assert max(counts.values()) >= 3
 
 
@@ -183,7 +183,7 @@ def test_joint_types_covers_every_kind() -> None:
         mujoco.mjtJoint.mjJNT_SLIDE,
         mujoco.mjtJoint.mjJNT_HINGE,
     ):
-        assert int(want) in kinds, f"joint_types 里没有 {want}"
+        assert int(want) in kinds
 
     limited = {bool(x) for x in model.jnt_limited}
     assert limited == {True, False}
@@ -196,7 +196,7 @@ def test_many_lights_has_many_lights() -> None:
     model = mujoco.MjModel.from_xml_path(str(resolve("many_lights.xml")))
     assert model.nlight >= 6
     kinds = {int(t) for t in model.light_type}
-    assert len(kinds) >= 3, f"八盏灯只有 {len(kinds)} 种类型"
+    assert len(kinds) >= 3
 
 
 @pytest.mark.physics
@@ -210,8 +210,8 @@ def test_transparency_scene_has_both_kinds() -> None:
         else float(model.geom_rgba[i, 3])
         for i in range(model.ngeom)
     ]
-    assert sum(a < 1.0 for a in alpha) >= 5, "半透 geom 少于五片"
-    assert sum(a >= 1.0 for a in alpha) >= 3, "没有不透明 geom 当参照"
+    assert sum(a < 1.0 for a in alpha) >= 5
+    assert sum(a >= 1.0 for a in alpha) >= 3
 
 
 @pytest.mark.physics
@@ -220,7 +220,7 @@ def test_dense_mesh_has_a_real_mesh_asset() -> None:
     mujoco = pytest.importorskip("mujoco")
     model = mujoco.MjModel.from_xml_path(str(resolve("dense_mesh.xml")))
     assert model.nmesh >= 1
-    assert int(model.mesh_facenum.max()) >= 1000, "最密的一份网格还不到一千个三角形"
+    assert int(model.mesh_facenum.max()) >= 1000
 
 
 @pytest.mark.physics

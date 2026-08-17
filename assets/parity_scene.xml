@@ -1,19 +1,4 @@
-<!--
-  parity_scene —— 对拍关卡的固定场景（12 §12.5）。
 
-  守的性质：**逐帧完全一样**。对拍是"同机位跑两条后端、逐项比对"，任何一处随时间变的
-  东西都会把差异图变成噪声，三个指标（边缘 IoU、分块亮度差、贴图内容正确性）就全都
-  失去意义。所以：**没有关节、没有自由体、没有执行器**，`mj_forward` 之后一切不动。
-
-  内容按三个指标反过来挑：
-  - **边缘 IoU**（几何位置对不对）：六种几何、互相遮挡、有细杆也有大面，边缘密度足够；
-  - **分块亮度差**（明暗分布对不对）：一盏能投影的方向光 + 一面接影的地板 + 一堵墙，
-    画面里同时有全亮、半影、全影三档；
-  - **贴图内容正确性**：地板的棋盘格（相位目标）。四色格在 `parity_texture.xml`。
-
-  **五个机位写死在文件里**（12 §12.5 的"固定的 5 个机位"）。写在场景里而不是脚本里，
-  是因为机位是这份关卡的一部分：换一个机位，历史数字就不可比了。
--->
 <mujoco model="parity_scene">
   <compiler angle="degree" autolimits="true"/>
 
@@ -37,16 +22,14 @@
   </asset>
 
   <worldbody>
-    <!-- 唯一的场景光。方向写死，因为影子的位置本身就是被对拍的量 -->
+
     <light name="sun" type="directional" pos="2.5 -3.5 5" dir="-0.4 0.55 -1"
            diffuse="0.75 0.75 0.72" specular="0.3 0.3 0.3" castshadow="true"/>
 
     <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
 
-    <!-- 挡光墙：让画面里同时有全亮、半影、全影三档 -->
     <geom name="wall" type="box" pos="-0.9 0.9 0.6" size="0.05 0.9 0.6" material="wall"/>
 
-    <!-- 六种几何，尺度从 0.5 m 到 0.06 m。互相遮挡是故意的：边缘 IoU 要的正是重叠边 -->
     <geom name="sphere_matte" type="sphere" pos="0.0 0.0 0.25" size="0.25" material="matte"/>
     <geom name="sphere_glossy" type="sphere" pos="0.55 0.30 0.18" size="0.18" material="glossy"/>
     <geom name="box_mid" type="box" pos="-0.55 -0.20 0.20" size="0.20 0.20 0.20" material="mid"/>
@@ -61,7 +44,6 @@
           material="matte"/>
     <geom name="grain" type="sphere" pos="0.75 0.05 0.06" size="0.06" material="mid"/>
 
-    <!-- 五个机位。远近、俯仰、正侧各占一档，覆盖不同的透视强度与遮挡关系 -->
     <camera name="p0_overview" pos="2.20 -2.40 1.70" xyaxes="0.74 0.68 0 -0.30 0.32 0.90"/>
     <camera name="p1_close" pos="0.95 -1.05 0.55" xyaxes="0.74 0.68 0 -0.13 0.14 0.98"/>
     <camera name="p2_low" pos="1.80 -0.20 0.16" xyaxes="0.11 0.99 0 -0.05 0.01 1.00"/>

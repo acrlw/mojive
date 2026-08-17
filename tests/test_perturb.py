@@ -652,10 +652,8 @@ def test_startup_is_the_only_place_that_shows_the_window():
     assert showing == ["_startup"]
 
     for entry in ("run", "sync"):
-        assert "_startup" in calls[entry], f"{entry} 必须转调 _startup"
-        assert not ({"show", "set_scene", "_frame_scene"} & calls[entry]), (
-            f"{entry} 里出现了启动步骤——启动流程被抄了第二遍"
-        )
+        assert "_startup" in calls[entry]
+        assert not ({"show", "set_scene", "_frame_scene"} & calls[entry])
 
 
 def test_run_and_sync_go_through_the_same_startup(monkeypatch):
@@ -701,6 +699,6 @@ def test_frame_publishes_marks_between_tick_and_render():
     seq = [name for _, name in sorted(order)]
 
     for consumer in ("_poll_camera", "_poll_perturb", "_poll_pick"):
-        assert seq.index("_claim_gesture") < seq.index(consumer), f"{consumer} 排在归属前面了"
+        assert seq.index("_claim_gesture") < seq.index(consumer)
 
     assert seq.index("tick") < seq.index("_publish_perturb_marks") < seq.index("render")

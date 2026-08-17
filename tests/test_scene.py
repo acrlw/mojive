@@ -86,7 +86,7 @@ def test_scale_does_not_enter_the_bucket_key():
     for s in (0.1, 1.0, 17.0):
         b.add(MeshKey(MeshShape.BOX), m, M.compose([0, 0, 0], np.eye(3), [s, s, s]), OPAQUE, MAT, 1)
     scene = b.build(CameraView(), LightSet(), 1.0, np.zeros(3))
-    assert scene.bucket_count() == 1, "不同缩放被分进了不同的桶"
+    assert scene.bucket_count() == 1
     assert scene.bucket_ranges == ((0, 3),)
 
 
@@ -139,7 +139,7 @@ def test_transparent_buckets_draw_far_to_near():
         float(np.linalg.norm(scene.transforms[scene.bucket_ranges[bk][0], :3, 3] - cam.eye))
         for bk in order
     ]
-    assert dists == sorted(dists, reverse=True), f"不是由远到近：{dists}"
+    assert dists == sorted(dists, reverse=True)
 
 
 def test_write_index_is_a_permutation_computed_once():
@@ -155,7 +155,7 @@ def test_write_index_is_a_permutation_computed_once():
     )
     wi = b.write_index
     assert len(wi) == scene.count
-    assert sorted(wi.tolist()) == list(range(scene.count)), "写入索引不是置换"
+    assert sorted(wi.tolist()) == list(range(scene.count))
 
 
 def test_write_index_actually_places_each_instance_in_its_bucket():
@@ -176,10 +176,10 @@ def test_write_index_actually_places_each_instance_in_its_bucket():
     scene = b.build(CameraView(), LightSet(), 1.0, np.zeros(3))
     for src, oid in enumerate(ids):
         dst = int(b.write_index[src])
-        assert int(scene.object_id[dst]) == oid, "写入索引把实例放错了行"
+        assert int(scene.object_id[dst]) == oid
         bkt = int(scene.bucket[dst])
         start, stop = scene.bucket_ranges[bkt]
-        assert start <= dst < stop, "实例没落在自己那个桶的区间里"
+        assert start <= dst < stop
 
 
 def test_refilling_transforms_does_not_change_bucketing():
@@ -221,7 +221,7 @@ def test_scatter_refill_does_not_allocate():
     snap = tracemalloc.take_snapshot()
     tracemalloc.stop()
     grown = sum(d.size_diff for d in snap.compare_to(base, "lineno"))
-    assert grown < 20_000, f"200 帧净增长 {grown} 字节——热路径在分配"
+    assert grown < 20_000
 
 
 def test_instance_float_count_matches_the_documented_layout():

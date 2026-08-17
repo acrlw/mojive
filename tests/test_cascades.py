@@ -40,15 +40,13 @@ def test_cascades_are_concentric():
         for j in range(3):
             slack = max(float(s.texel_world[i]), float(s.texel_world[j]))
             delta = float(np.max(np.abs(s.centers[i] - s.centers[j])))
-            assert delta <= slack + 1e-5, f"第 {i} 级与第 {j} 级不同心：差 {delta} > {slack}"
+            assert delta <= slack + 1e-5
 
 
 def test_center_snaps_to_whole_texels():
 
     down = np.array([0.0, 0.0, -1.0], np.float32)
-    assert C.light_basis(down) == pytest.approx(np.eye(3), abs=1e-6), (
-        "前提：正下方的光空间即世界空间"
-    )
+    assert C.light_basis(down) == pytest.approx(np.eye(3), abs=1e-6)
 
     a = _set(focus=(0.0, 0.0, 0.0), extent=9.0, direction=down)
     texels = a.texel_world.copy()
@@ -62,12 +60,10 @@ def test_center_snaps_to_whole_texels():
         t = float(texels[i])
         delta = (b.centers[i] - centers_a[i]).astype(np.float64)
         quotient = delta / t
-        assert quotient == pytest.approx(np.round(quotient), abs=1e-3), (
-            f"第 {i} 级的中心移动了 {delta}，不是纹素 {t} 的整数倍——吸附没生效"
-        )
+        assert quotient == pytest.approx(np.round(quotient), abs=1e-3)
         moved_any = moved_any or float(np.max(np.abs(delta))) > 0.0
 
-    assert moved_any, "平移了一整个第 0 级纹素还没有任何一级动过，判据在空转"
+    assert moved_any
 
 
 def test_snap_is_stable_under_sub_texel_jitter():
@@ -111,7 +107,7 @@ def test_cascade_tiles_do_not_overlap():
         for j in range(i + 1, 3):
             a, b = s.tile_uv[i], s.tile_uv[j]
             disjoint = a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1]
-            assert disjoint, f"第 {i} 级与第 {j} 级的瓦片重叠了"
+            assert disjoint
 
 
 def test_fourth_slot_is_free_and_addressable():
@@ -125,7 +121,7 @@ def test_fourth_slot_is_free_and_addressable():
     for i in range(s.count):
         a = s.tile_uv[i]
         disjoint = a[2] <= free[0] or free[2] <= a[0] or a[3] <= free[1] or free[3] <= a[1]
-        assert disjoint, f"第 {i} 级占到了留给下一盏灯的那一块"
+        assert disjoint
 
     with pytest.raises(ValueError):
         C.slot_pixels(4)
@@ -167,7 +163,7 @@ def test_depth_range_covers_the_whole_scene():
         for t in (-extent, -0.5 * extent, 0.5 * extent, extent):
             p = s.centers[i].astype(np.float64) + light * t
             z = (m @ np.array([p[0], p[1], p[2], 1.0]))[2]
-            assert -1.0 <= z <= 1.0, f"第 {i} 级的深度范围盖不住光轴上 {t} 处的遮挡者"
+            assert -1.0 <= z <= 1.0
 
 
 _SHADER = Path(C.__file__).parent / "shaders" / "shadow_sample.glsl"
@@ -177,7 +173,7 @@ def test_glsl_pcf_radius_matches_python():
 
     src = _SHADER.read_text(encoding="utf-8")
     m = re.search(r"#define\s+SHADOW_PCF_RADIUS\s+(\d+)", src)
-    assert m, "shadow_sample.glsl 里找不到 SHADOW_PCF_RADIUS"
+    assert m
     assert int(m.group(1)) == C.PCF_RADIUS
 
 
@@ -187,5 +183,5 @@ def test_glsl_bias_default_matches_python():
 
     src = _SHADER.read_text(encoding="utf-8")
     m = re.search(r"FORGE_SHADOW_BIAS\s*=\s*vec2\(\s*([\d.]+)\s*,\s*([\d.]+)\s*\)", src)
-    assert m, "shadow_sample.glsl 里找不到 FORGE_SHADOW_BIAS"
+    assert m
     assert (float(m.group(1)), float(m.group(2))) == pytest.approx(S.SHADOW_BIAS)

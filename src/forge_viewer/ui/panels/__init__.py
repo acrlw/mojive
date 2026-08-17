@@ -76,9 +76,6 @@ class Panel:
         return f"<{type(self).__name__} {self.name!r} open={self.open}>"
 
 
-#
-
-
 _EXPANDED: set[str] = set()
 
 

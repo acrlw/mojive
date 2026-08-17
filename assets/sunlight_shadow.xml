@@ -1,23 +1,4 @@
-<!--
-  sunlight_shadow —— 方向光阴影（06）。
 
-  守的性质：**影子的形状能被独立读出来**。
-
-  拱门（两柱一梁）投在地上的影子中间有一个**亮的门洞**。这一块亮斑是整份场景的核心判据：
-  - 阴影贴图根本没接上 → 地上一片全亮，没有影子；
-  - 接上了但采样偏了 → 门洞的位置或大小不对；
-  - 深度比较反了 → 亮暗整个翻过来，门洞变成暗块。
-  三种缺陷在"地上有没有暗块"这种笼统的判据下**全都是绿的**，只有门洞能分开它们。
-
-  **自阴影**由两处守：横梁投在两根立柱的内侧面上；`step_*` 三级台阶自己挡自己。
-  自阴影是 bias 的试金石——bias 小了长阴影痤疮（表面上一道道暗纹），大了影子从物体
-  脚下脱开（peter-panning）。两种都只在自阴影上显形，在"物体投到地面"上看不出来。
-
-  `pole_*` 四根细杆专门守 bias 的另一面：细长物体的影子最容易被 bias 推没。
-
-  物体从相机前 1 m 一直排到 18 m 外，**横跨全部三级级联**（06）。级联切换处的缝隙
-  与分辨率跳变只在这种纵深上才显形。
--->
 <mujoco model="sunlight_shadow">
   <compiler angle="degree" autolimits="true"/>
 
@@ -37,23 +18,20 @@
   </asset>
 
   <worldbody>
-    <!-- 低角度太阳：影子拉长，门洞在地上铺得开，读数最容易 -->
+
     <light name="sun" type="directional" pos="4 -6 5" dir="-0.45 0.65 -0.62"
            diffuse="0.85 0.82 0.75" specular="0.35 0.35 0.35" castshadow="true"/>
 
     <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
 
-    <!-- 拱门：两柱一梁。柱心距 1.6 m，门洞净宽 1.2 m、净高 1.6 m -->
     <geom name="pillar_left" type="box" pos="-0.80 0 0.80" size="0.20 0.20 0.80" material="stone"/>
     <geom name="pillar_right" type="box" pos="0.80 0 0.80" size="0.20 0.20 0.80" material="stone"/>
     <geom name="lintel" type="box" pos="0 0 1.75" size="1.10 0.22 0.15" material="stone_dark"/>
 
-    <!-- 三级台阶：自己挡自己，bias 一大一小两种毛病都在这里显形 -->
     <geom name="step_0" type="box" pos="-2.30 0.90 0.10" size="0.55 0.55 0.10" material="stone"/>
     <geom name="step_1" type="box" pos="-2.30 0.90 0.30" size="0.38 0.38 0.10" material="stone"/>
     <geom name="step_2" type="box" pos="-2.30 0.90 0.50" size="0.22 0.22 0.10" material="stone"/>
 
-    <!-- 细杆：影子最容易被 bias 推没的一类 -->
     <geom name="pole_0" type="capsule" fromto="1.90 -0.60 0 1.90 -0.60 1.20" size="0.020"
           material="metal"/>
     <geom name="pole_1" type="capsule" fromto="2.15 -0.60 0 2.15 -0.60 1.00" size="0.015"
@@ -63,7 +41,6 @@
     <geom name="pole_3" type="capsule" fromto="2.65 -0.60 0 2.65 -0.60 0.60" size="0.007"
           material="metal"/>
 
-    <!-- 纵深：1 m 到 18 m，横跨三级级联 -->
     <geom name="depth_00" type="sphere" pos="0.00 -1.60 0.25" size="0.25" material="metal"/>
     <geom name="depth_01" type="box" pos="0.60 2.40 0.35" size="0.35 0.35 0.35" material="stone"/>
     <geom name="depth_02" type="cylinder" pos="-1.20 5.50 0.60" size="0.35 0.60"

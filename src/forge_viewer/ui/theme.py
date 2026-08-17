@@ -9,9 +9,6 @@ from ..adapters.base import NodeKind
 RGBA = tuple[float, float, float, float]
 
 
-#
-
-
 def _to_linear(c: float) -> float:
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
@@ -86,9 +83,6 @@ def pack_u32(color: RGBA) -> int:
     return r | (g << 8) | (b << 16) | (a << 24)
 
 
-#
-
-
 PRIMARY: RGBA = rgb8(159, 174, 137)
 PRIMARY_BRIGHT: RGBA = rgb8(184, 198, 163)
 PRIMARY_DIM: RGBA = rgb8(104, 116, 88)
@@ -107,14 +101,6 @@ BG_HEADER: RGBA = rgb8(48, 53, 58)
 BORDER: RGBA = rgb8(58, 63, 69)
 TEXT: RGBA = rgb8(220, 223, 227)
 TEXT_DISABLED: RGBA = rgb8(123, 129, 137)
-
-
-#
-
-#
-
-
-#
 
 
 NODE_COLORS: dict[NodeKind, RGBA] = {
@@ -137,12 +123,6 @@ def node_color(kind: NodeKind | str) -> RGBA:
         return NODE_COLORS[NodeKind(kind)]
     except (KeyError, ValueError):
         return rgb8(140, 145, 150)
-
-
-#
-
-
-#
 
 
 AXIS_COLORS: dict[str, RGBA] = {

@@ -13,9 +13,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from forge_viewer.adapters.base import NodeKind
 from forge_viewer.ui import theme
 
-#
-
-
 MAX_NODE_SATURATION = 0.40
 
 
@@ -88,7 +85,7 @@ def test_independent_color_math_agrees_with_theme():
 def test_every_node_kind_has_a_color():
 
     missing = [k for k in NodeKind if k not in theme.NODE_COLORS]
-    assert not missing, f"这些节点类型没有颜色：{missing}"
+    assert not missing
     assert len(theme.NODE_COLORS) == len(list(NodeKind))
 
 
@@ -98,40 +95,37 @@ def test_node_colors_are_desaturated(kind: NodeKind):
     color = theme.NODE_COLORS[kind]
     sat = _hsl_saturation(color)
     chroma = _chroma(color)
-    assert sat < MAX_NODE_SATURATION, f"{kind} 饱和度 {sat:.3f} 太高，它会开始像装饰"
-    assert chroma < MAX_NODE_CHROMA, f"{kind} 彩度 C*={chroma:.1f} 太高"
+    assert sat < MAX_NODE_SATURATION
+    assert chroma < MAX_NODE_CHROMA
 
 
 def test_node_colors_are_separated_by_lightness():
 
     items = [(k, _lstar(c)) for k, c in theme.NODE_COLORS.items()]
     worst = min((abs(a[1] - b[1]), a[0], b[0]) for i, a in enumerate(items) for b in items[i + 1 :])
-    gap, ka, kb = worst
-    assert gap >= MIN_NODE_LSTAR_GAP, (
-        f"{ka} 与 {kb} 的 L* 只差 {gap:.2f}（下限 {MIN_NODE_LSTAR_GAP}）："
-        "整幅界面转成灰度之后这两种节点就分不开了"
-    )
+    gap, _ka, _kb = worst
+    assert gap >= MIN_NODE_LSTAR_GAP
 
 
 def test_node_colors_are_not_the_axis_colors():
 
     axis = set(theme.AXIS_COLORS.values())
     clash = [k for k, c in theme.NODE_COLORS.items() if c in axis]
-    assert not clash, f"这些节点色直接用了轴色：{clash}"
+    assert not clash
 
 
 def test_primary_is_desaturated():
 
     sat = _hsl_saturation(theme.PRIMARY)
     hue = _hue_deg(theme.PRIMARY)
-    assert sat < 0.25, f"主色饱和度 {sat:.3f}：它会开始跟视口抢注意力"
-    assert 70.0 <= hue <= 100.0, f"主色色相 {hue:.1f}°，不再是那一档莫兰蒂灰绿"
+    assert sat < 0.25
+    assert 70.0 <= hue <= 100.0
 
 
 def test_danger_is_orange_red_not_pure_red():
 
     hue = _hue_deg(theme.DANGER)
-    assert 8.0 <= hue <= 30.0, f"危险色色相 {hue:.1f}°：不再是偏橙红"
+    assert 8.0 <= hue <= 30.0
 
 
 def test_danger_primary_luma_gap():
@@ -139,10 +133,7 @@ def test_danger_primary_luma_gap():
     danger = _luma601(theme.DANGER)
     primary = _luma601(theme.PRIMARY)
     gap = primary - danger
-    assert gap >= MIN_DANGER_PRIMARY_LUMA_GAP, (
-        f"危险色 {danger:.1f} / 主色 {primary:.1f}，亮度差只剩 {gap:.1f}"
-        f"（下限 {MIN_DANGER_PRIMARY_LUMA_GAP}）：红绿色盲从此分不出这两个"
-    )
+    assert gap >= MIN_DANGER_PRIMARY_LUMA_GAP
 
     assert danger == pytest.approx(130.0, abs=6.0)
     assert primary == pytest.approx(165.0, abs=6.0)
@@ -153,7 +144,7 @@ def test_axis_colors_are_luminance_balanced():
     ls = {k: _lstar(c) for k, c in theme.AXIS_COLORS.items()}
     assert set(ls) == {"x", "y", "z"}
     spread = max(ls.values()) - min(ls.values())
-    assert spread <= MAX_AXIS_LSTAR_SPREAD, f"三根轴的 L* 极差 {spread:.2f}：亮度没配平 {ls}"
+    assert spread <= MAX_AXIS_LSTAR_SPREAD
 
 
 def test_native_gizmo_uses_theme_axis_colors():
@@ -168,8 +159,8 @@ def test_native_gizmo_uses_theme_axis_colors():
 def test_derived_colors_are_axis_colors_not_lookalikes():
 
     axis = list(theme.AXIS_COLORS.values())
-    assert theme.PERTURB_COMMANDED in axis, "扰动的命令色另调了一档，不是轴色里的"
-    assert theme.PERTURB_ACTUAL in axis, "扰动的实际色另调了一档，不是轴色里的"
+    assert theme.PERTURB_COMMANDED in axis
+    assert theme.PERTURB_ACTUAL in axis
     assert theme.PERTURB_COMMANDED != theme.PERTURB_ACTUAL
 
 
@@ -223,5 +214,5 @@ def test_apply_does_not_need_imgui_imported_at_module_level():
             return _FakeImgui._style
 
     theme.apply(_FakeImgui, ui_scale=2.0)
-    assert calls, "apply() 一个颜色都没设"
-    assert (-1, (2.0,)) in calls, "ui_scale 没有传给 scale_all_sizes：高 DPI 下控件会偏细"
+    assert calls
+    assert (-1, (2.0,)) in calls

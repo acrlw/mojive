@@ -1,37 +1,4 @@
-<!--
-  joint_types —— 各类关节，验关节面板与手柄的 `posable` 判定（09 §9.4 / 10）。
 
-  守的性质：**`posable` 是"位姿本身就是状态"，不是"这东西会动"**。
-
-  这两件事在直觉上是一回事，在实现上完全不是——而这份场景就是为了把它们分开：
-
-  | body | 有什么 | 会动吗 | posable |
-  |---|---|---|---|
-  | `free_body` | free joint | 会 | **是**（位姿就是 qpos，写它就是写状态） |
-  | `ball_body` | ball joint | 会 | **否**（位姿由关节算出来，写它没有落点） |
-  | `slide_body` | slide joint | 会 | 否 |
-  | `hinge_body` | hinge joint | 会 | 否 |
-  | `chain_*` | 三节 hinge 链 | 会 | 否（根焊在世界上） |
-  | `free_chain` | free joint + 两节 hinge | 会 | **根是**，子节点不是 |
-  | `welded` | 什么都没有 | 不会 | 否 |
-
-  **`ball_body` 与 `free_body` 是关键的一对**：两个都会动、看起来都"能拖"，
-  但只有前者拖了之后没地方存。把 `posable` 写成"有没有关节"的话两个都判成真，
-  手柄会出现在 `ball_body` 上、拖了却什么都不发生——**不报错、不打日志**，
-  用户只会觉得手柄坏了。UI 要做的是**禁用控件并显示理由**（铁律 4），
-  Inspector 上应当写"this link is driven by joints; use the Joints panel"。
-
-  关节面板还要验两件事，各有一对：
-  - **限位**：`hinge_body` 带 range、`hinge_free` 不带。滑条对前者有端点，对后者没有；
-  - **多自由度**：ball 是 3 个 qpos 位（四元数 4 个）、free 是 7 个、hinge/slide 各 1 个。
-    面板按 `qpos_adr` 取值，一个都不能错位。
-
-  两个执行器是故意留的：执行器列表空着的时候，"没有执行器"与"执行器读错了"看起来
-  一模一样。
-
-  **重力关掉。** 这份场景要判的是"哪个节点 posable、面板列出了什么"，不是动力学；
-  开着重力的话自由体会掉出画面，每次截图里的东西都在别的位置，判据要先追着它跑。
--->
 <mujoco model="joint_types">
   <compiler angle="degree" autolimits="true"/>
   <option gravity="0 0 0"/>
@@ -61,7 +28,6 @@
 
     <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
 
-    <!-- free：唯一 posable 的自由体。手柄只对它出现 -->
     <body name="free_body" pos="-1.60 0 0.55">
       <freejoint name="free"/>
       <geom name="free_box" type="box" size="0.18 0.18 0.18" material="free"/>
@@ -69,7 +35,6 @@
             material="free"/>
     </body>
 
-    <!-- ball：会动，但位姿不是状态。手柄不该出现 -->
     <body name="ball_anchor" pos="-0.80 0 0.90">
       <geom name="ball_anchor" type="box" size="0.06 0.06 0.06" material="anchor"/>
       <body name="ball_body" pos="0 0 -0.28">
@@ -80,7 +45,6 @@
       </body>
     </body>
 
-    <!-- slide：带限位，滑条有端点 -->
     <body name="slide_rail" pos="0 0 0.55">
       <geom name="slide_rail" type="capsule" fromto="0 -0.45 0 0 0.45 0" size="0.02"
             material="anchor"/>
@@ -90,7 +54,6 @@
       </body>
     </body>
 
-    <!-- hinge 两个：一个带限位一个不带。滑条的端点必须跟着变 -->
     <body name="hinge_anchor" pos="0.85 0 0.55">
       <geom name="hinge_anchor" type="cylinder" pos="0 0 0" size="0.05 0.10" euler="90 0 0"
             material="anchor"/>
@@ -110,7 +73,6 @@
       </body>
     </body>
 
-    <!-- 三节链：根焊在世界上，整条都不 posable -->
     <body name="chain_root" pos="1.90 -0.60 0.20">
       <geom name="chain_base" type="box" size="0.10 0.10 0.10" material="anchor"/>
       <body name="chain_0" pos="0 0 0.10">
@@ -129,7 +91,6 @@
       </body>
     </body>
 
-    <!-- articulation 的根带 free joint：**根 posable，子节点不 posable** -->
     <body name="free_chain" pos="-1.60 1.10 0.60">
       <freejoint name="free_chain"/>
       <geom name="free_chain_base" type="box" size="0.12 0.12 0.08" material="free"/>
@@ -145,7 +106,6 @@
       </body>
     </body>
 
-    <!-- 焊死的 body：有 object_id，选得中，但既不会动也不 posable -->
     <body name="welded" pos="1.90 0.75 0.18">
       <geom name="welded" type="box" size="0.18 0.18 0.18" material="fixed"/>
     </body>
@@ -153,7 +113,6 @@
     <camera name="joints" pos="0.15 -3.20 1.75" xyaxes="1 0 0 0 0.42 0.91"/>
   </worldbody>
 
-  <!-- 执行器列表空着时，"没有执行器"与"执行器读错了"看起来一样 -->
   <actuator>
     <position name="hinge_pos" joint="hinge_limited" kp="8" ctrlrange="-1.05 1.05"/>
     <position name="slide_pos" joint="slide" kp="20" ctrlrange="-0.35 0.35"/>

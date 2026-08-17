@@ -57,7 +57,7 @@ POINT_POS = np.array([2.5, -3.0, 4.0], np.float32)
 @pytest.fixture(scope="module")
 def gl():
     if not glfw.init():
-        pytest.skip("glfw 起不来")
+        pytest.skip("GLFW initialization failed")
     for k, v in (
         (glfw.CONTEXT_VERSION_MAJOR, 3),
         (glfw.CONTEXT_VERSION_MINOR, 3),
@@ -69,7 +69,7 @@ def gl():
     win = glfw.create_window(W, H, "forge shadows", None, None)
     if not win:
         glfw.terminate()
-        pytest.skip("建不出 3.3 core 上下文")
+        pytest.skip("OpenGL 3.3 core context unavailable")
     glfw.make_context_current(win)
     ctx = moderngl.create_context()
     G.native().drain_errors()
@@ -228,11 +228,11 @@ def backend(gl):
 
     _passes.load_all()
     if "shadow" not in registered():
-        pytest.skip(f"shadow pass 没装上：{_passes.failed().get('shadow', '没登记')}")
+        pytest.skip(f"shadow pass unavailable: {_passes.failed().get('shadow', 'unregistered')}")
     be = ForgeBackend(gl, W, H, samples=4)
     if not be.caps.shadows:
         be.release()
-        pytest.skip("这个后端申报不支持阴影")
+        pytest.skip("backend does not support shadows")
     be.meshes.sync({GROUND: builtin_mesh(GROUND), BOX: builtin_mesh(BOX)})
     be.textures.sync({}, None)
     yield be
@@ -311,8 +311,8 @@ def test_shadow_pass_actually_ran(backend):
 
     _render(backend, shadow=True)
     order = list(backend.stats.cpu_ms)
-    assert "shadow" in order, f"逐 pass 计时里没有 shadow：{order}"
-    assert order.index("shadow") < order.index("opaque"), "shadow 必须排在 opaque 之前"
+    assert "shadow" in order
+    assert order.index("shadow") < order.index("opaque")
 
 
 def test_ground_darkens_where_the_light_points(backend):
@@ -320,16 +320,14 @@ def test_ground_darkens_where_the_light_points(backend):
     lit = _render(backend, shadow=False)
     shadowed = _render(backend, shadow=True)
     mask = _darkened(lit, shadowed)
-    assert mask.sum() > 500, f"地面上没出现暗区（只有 {int(mask.sum())} 个像素）"
+    assert mask.sum() > 500
 
     d = SUN / np.linalg.norm(SUN)
     hit = BOX_CENTER + d * (BOX_CENTER[2] / -d[2])
     px, py = _to_pixel(VIEW, hit)
     ys, xs = np.nonzero(mask)
     dist = float(np.hypot(xs.mean() - px, ys.mean() - py))
-    assert dist < 8.0, (
-        f"暗区质心 ({xs.mean():.1f}, {ys.mean():.1f}) 与光照方向指的 ({px:.1f}, {py:.1f}) 差 {dist:.1f} px"
-    )
+    assert dist < 8.0
 
     assert int(((shadowed - lit).sum(axis=2) > 12).sum()) == 0
 
@@ -339,11 +337,11 @@ def test_no_acne_at_grazing_incidence(backend):
     img = _render(backend, camera=GRAZE_VIEW, sun_dir=GRAZE_SUN, shadow=True)
     y = _luma(img)
     bottom, top = y[H // 2 :], y[: H // 2]
-    assert bottom.mean() > 2.0 * top.mean(), "前提不成立：画面下半部不是被照亮的地面"
-    assert bottom.std() < 0.5 * bottom.mean(), "前提不成立：下半部不是一块连续的地面"
+    assert bottom.mean() > 2.0 * top.mean()
+    assert bottom.std() < 0.5 * bottom.mean()
 
     energy = _high_frequency(bottom)
-    assert energy < 0.05, f"下半部高频能量 {energy:.4f} ≥ 0.05——掠射处出了 acne"
+    assert energy < 0.05
 
 
 def test_cast_shadow_false_removes_the_shadow_and_nothing_else(backend):
@@ -352,8 +350,8 @@ def test_cast_shadow_false_removes_the_shadow_and_nothing_else(backend):
     with_shadow = _render(backend, shadow=True)
     no_cast = _render(backend, shadow=True, cast=False)
 
-    assert _darkened(no_flag, with_shadow).sum() > 500, "基线里本来就没有影子，判据在空转"
-    assert np.array_equal(no_cast, no_flag), "castshadow=false 之后画面与「没有阴影」不逐像素相同"
+    assert _darkened(no_flag, with_shadow).sum() > 500
+    assert np.array_equal(no_cast, no_flag)
 
 
 def test_shadow_flag_is_pixel_reversible(backend):
@@ -361,20 +359,20 @@ def test_shadow_flag_is_pixel_reversible(backend):
     before = _render(backend, shadow=False)
     during = _render(backend, shadow=True)
     after = _render(backend, shadow=False)
-    assert not np.array_equal(before, during), "开着阴影和关着阴影画出来一样，判据在空转"
-    assert np.array_equal(before, after), "关掉总开关之后画面没有逐像素回到原样"
+    assert not np.array_equal(before, during)
+    assert np.array_equal(before, after)
 
 
 def test_transparent_geometry_does_not_cast(backend):
 
     opaque_lit = _render(backend, shadow=False)
     opaque_shadowed = _render(backend, shadow=True)
-    assert _darkened(opaque_lit, opaque_shadowed).sum() > 500, "不透明的那一档就没影子，判据在空转"
+    assert _darkened(opaque_lit, opaque_shadowed).sum() > 500
 
     glass_lit = _render(backend, shadow=False, box_alpha=0.5)
     glass_shadowed = _render(backend, shadow=True, box_alpha=0.5)
     dark = int(_darkened(glass_lit, glass_shadowed).sum())
-    assert dark == 0, f"半透明方块投出了影子（{dark} 个像素变暗）"
+    assert dark == 0
 
 
 def test_every_cascade_addresses_its_own_tile_and_texel(backend):
@@ -384,20 +382,18 @@ def test_every_cascade_addresses_its_own_tile_and_texel(backend):
     px, py = _to_pixel(VIEW, hit)
 
     areas = []
-    for extent, cascade in ((10.0, 2), (30.0, 1), (90.0, 0)):
+    for extent in (10.0, 30.0, 90.0):
         lit = _render(backend, shadow=False, extent=extent)
         shadowed = _render(backend, shadow=True, extent=extent)
         mask = _darkened(lit, shadowed)
-        assert mask.sum() > 500, f"第 {cascade} 级下没有影子"
+        assert mask.sum() > 500
         ys, xs = np.nonzero(mask)
         dist = float(np.hypot(xs.mean() - px, ys.mean() - py))
-        assert dist < 8.0, (
-            f"第 {cascade} 级的影子落在 ({xs.mean():.1f}, {ys.mean():.1f})，期望 ({px:.1f}, {py:.1f})"
-        )
+        assert dist < 8.0
         areas.append(int(mask.sum()))
 
     spread = (max(areas) - min(areas)) / max(min(areas), 1)
-    assert spread < 0.05, f"三级的影子面积差了 {spread:.1%}（{areas}）——bias 没跟着级联走"
+    assert spread < 0.05
 
 
 def test_render_leaves_no_gl_error(backend):
@@ -414,7 +410,7 @@ def test_spot_shadow_uses_its_perspective_distance_map(backend):
     no_cast = _render_spot(backend, shadow=True, cast=False)
     mask = _darkened(lit, shadowed)
 
-    assert mask.sum() > 250, f"spot 没投出影子（只有 {int(mask.sum())} 个暗像素）"
+    assert mask.sum() > 250
     assert np.array_equal(no_cast, lit)
 
     direction = SPOT_DIR / np.linalg.norm(SPOT_DIR)
@@ -431,7 +427,7 @@ def test_point_shadow_uses_all_six_cube_faces(backend):
     no_cast = _render_point(backend, shadow=True, cast=False)
     mask = _darkened(lit, shadowed)
 
-    assert mask.sum() > 250, f"点光没投出影子（只有 {int(mask.sum())} 个暗像素）"
+    assert mask.sum() > 250
     assert np.array_equal(no_cast, lit)
 
     direction = BOX_CENTER - POINT_POS

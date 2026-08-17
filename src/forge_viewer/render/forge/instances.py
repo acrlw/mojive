@@ -8,9 +8,6 @@ import numpy as np
 from ..scene import INSTANCE_FLOATS, RenderScene
 from . import gl_native as G
 
-#
-
-
 INSTANCE_ATTRIBUTES: tuple[tuple[str, str, int, int, int, int], ...] = (
     ("in_model0", "4f", 16, 4, 0, G.GL_FLOAT),
     ("in_model1", "4f", 16, 4, 16, G.GL_FLOAT),

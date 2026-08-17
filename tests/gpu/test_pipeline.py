@@ -27,7 +27,7 @@ WIDTH, HEIGHT = 480, 360
 @pytest.fixture(scope="module")
 def gl():
     if not glfw.init():
-        pytest.skip("glfw 起不来")
+        pytest.skip("GLFW initialization failed")
     for k, v in (
         (glfw.CONTEXT_VERSION_MAJOR, 3),
         (glfw.CONTEXT_VERSION_MINOR, 3),
@@ -39,7 +39,7 @@ def gl():
     win = glfw.create_window(WIDTH, HEIGHT, "pipeline", None, None)
     if not win:
         glfw.terminate()
-        pytest.skip("建不出 3.3 core 上下文")
+        pytest.skip("OpenGL 3.3 core context unavailable")
     glfw.make_context_current(win)
     ctx = moderngl.create_context()
     G.native().drain_errors()
@@ -53,7 +53,7 @@ def rendered(gl):
     try:
         path = resolve("pick_scene")
     except FileNotFoundError:
-        pytest.skip("pick_scene 还没落地")
+        pytest.skip("pick_scene asset unavailable")
 
     adapter = make_adapter("mujoco", path)
     backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
@@ -123,7 +123,7 @@ def _require(*names: str) -> None:
     _passes.load_all()
     missing = [n for n in names if n not in registered()]
     if missing:
-        pytest.skip(f"这几条 pass 还没登记：{missing}（装齐之后这条判据才有意义）")
+        pytest.skip(f"required render passes unavailable: {missing}")
 
 
 def test_mujoco_visuals_reach_the_gpu_pipeline(gl):
@@ -158,7 +158,7 @@ def test_mujoco_visuals_reach_the_gpu_pipeline(gl):
         backend.update(frame)
         assert backend.render(frame) is not None
 
-        assert backend.stats.instances > adapter.model.ngeom, "site 没进普通实例链路"
+        assert backend.stats.instances > adapter.model.ngeom
         assert backend._passes["tendon"].capsule_count >= 2
         assert backend.debug.layer("physics.contact.points").count_of(Prim.POINT) >= 1
         assert backend.debug.layer("physics.contact.forces").count_of(Prim.ARROW) >= 1
@@ -316,9 +316,9 @@ def test_deformable_vertices_update_without_rebuilding_the_scene(gl):
         backend.update(frame)
         after = gpu_mesh.vbo.read()
 
-        assert before != after, "skin 顶点没有上传到原 VBO"
-        assert backend.meshes.get(key) is gpu_mesh, "逐帧更新不该换 GPU mesh"
-        assert backend._scene.bucket_ranges == ranges, "逐帧更新不该重新分桶"
+        assert before != after
+        assert backend.meshes.get(key) is gpu_mesh
+        assert backend._scene.bucket_ranges == ranges
         assert backend.render(frame) is not None
         assert float(backend.target.read_color()[..., :3].std()) > 8.0
     finally:
@@ -424,7 +424,7 @@ def test_world_text_is_rendered_into_the_forge_target_without_imgui(gl):
 
 def test_render_returns_an_image(rendered):
     img = rendered["image"]
-    assert img is not None, "render() 返回 None——画不出来"
+    assert img is not None
     assert (img.width, img.height) == (WIDTH, HEIGHT)
     assert img.texture_id > 0
 
@@ -436,14 +436,14 @@ def test_flip_y_is_declared_and_true_for_gl(rendered):
 
 def test_global_gl_state_is_unchanged_and_no_errors(rendered):
 
-    assert rendered["err_before"] == 0, "渲染之前就有 GL 错误残留"
+    assert rendered["err_before"] == 0
     diff = {
         k: (rendered["before"][k], rendered["after"][k])
         for k in rendered["before"]
         if rendered["before"][k] != rendered["after"][k]
     }
-    assert not diff, f"这些状态没还回去：{diff}"
-    assert rendered["err_after"] == 0, "整条管线跑完留下了 GL 错误"
+    assert not diff
+    assert rendered["err_after"] == 0
 
 
 def test_every_registered_pass_actually_ran(rendered):
@@ -452,8 +452,8 @@ def test_every_registered_pass_actually_ran(rendered):
     ran = set(stats.cpu_ms)
     expected = {n for n in PASS_ORDER if n in registered() or n == "present"}
 
-    assert "present" in ran, "present 没跑——画面根本没交出来"
-    assert ran <= expected, f"计时表里有没登记的 pass：{ran - expected}"
+    assert "present" in ran
+    assert ran <= expected
 
 
 def test_the_picture_is_not_blank(rendered):
@@ -461,8 +461,8 @@ def test_the_picture_is_not_blank(rendered):
     _require("opaque")
     img = rendered["backend"].target.read_color(flip=True)[..., :3]
     colors = np.unique(img.reshape(-1, 3), axis=0)
-    assert len(colors) > 8, f"画面只有 {len(colors)} 种颜色，像是没画几何"
-    assert img.std() > 4.0, "画面几乎是纯色"
+    assert len(colors) > 8
+    assert img.std() > 4.0
 
 
 def test_id_buffer_agrees_with_the_picture(rendered):
@@ -474,11 +474,11 @@ def test_id_buffer_agrees_with_the_picture(rendered):
     bg = np.array(img[0, 0], np.int16)
     covered = ids != 0
     if not covered.any():
-        pytest.skip("这一帧 ID buffer 全零——先让构建器填上 object_id")
-    差 = np.abs(img - bg).sum(axis=2)
-    hit_but_background = covered & (差 < 6)
+        pytest.skip("ID buffer contains only background ids")
+    color_delta = np.abs(img - bg).sum(axis=2)
+    hit_but_background = covered & (color_delta < 6)
     ratio = hit_but_background.sum() / max(covered.sum(), 1)
-    assert ratio < 0.05, f"{ratio:.1%} 的像素 ID buffer 说有东西、画面上却是背景色"
+    assert ratio < 0.05
 
 
 def test_picking_reads_a_single_pixel_and_matches(rendered):
@@ -488,10 +488,10 @@ def test_picking_reads_a_single_pixel_and_matches(rendered):
     ids = backend.target.read_ids()
     ys, xs = np.nonzero(ids)
     if len(ys) == 0:
-        pytest.skip("这一帧 ID buffer 全零")
+        pytest.skip("ID buffer contains only background ids")
     for i in np.linspace(0, len(ys) - 1, 8).astype(int):
         y, x = int(ys[i]), int(xs[i])
-        assert backend.pick(x, y) == int(ids[y, x]), f"({x},{y}) 拾取与 ID buffer 不符"
+        assert backend.pick(x, y) == int(ids[y, x])
 
 
 def test_batching_actually_happened(rendered):
@@ -500,13 +500,9 @@ def test_batching_actually_happened(rendered):
     s = rendered["backend"].stats
     assert s.instances > 0
     assert s.triangles > 0
-    assert s.draw_calls <= s.buckets * 2 + 4, (
-        f"绘制次数 {s.draw_calls} 比桶数 {s.buckets} 多太多——合批没生效"
-    )
+    assert s.draw_calls <= s.buckets * 2 + 4
     if s.instances >= 8:
-        assert s.draw_calls < s.instances, (
-            f"绘制次数 {s.draw_calls} ≥ 实例数 {s.instances}——退化成逐 geom 绘制了"
-        )
+        assert s.draw_calls < s.instances
 
 
 def test_shadow_toggle_is_reversible(rendered):
@@ -514,7 +510,7 @@ def test_shadow_toggle_is_reversible(rendered):
     _require("opaque", "shadow")
     backend = rendered["backend"]
     if not backend.caps.supports(RenderFlag.SHADOW):
-        pytest.skip("后端不申报 SHADOW")
+        pytest.skip("backend does not support shadows")
 
     def shot() -> np.ndarray:
         backend.render(None)
@@ -527,8 +523,8 @@ def test_shadow_toggle_is_reversible(rendered):
     backend.set_flag(RenderFlag.SHADOW, False)
     off_b = shot()
 
-    assert np.array_equal(off_a, off_b), "关→开→关之后画面没回到原样"
-    assert not np.array_equal(on, off_a), "开关阴影画面完全没变——开关没接上"
+    assert np.array_equal(off_a, off_b)
+    assert not np.array_equal(on, off_a)
 
 
 def test_unsupported_flags_are_refused_not_silently_ignored(rendered):
@@ -536,6 +532,4 @@ def test_unsupported_flags_are_refused_not_silently_ignored(rendered):
     backend = rendered["backend"]
     for flag in RenderFlag:
         ok = backend.set_flag(flag, True)
-        assert ok == (flag in backend.caps.render_flags), (
-            f"{flag} 的 set_flag 返回 {ok}，与 caps 申报的不一致"
-        )
+        assert ok == (flag in backend.caps.render_flags)

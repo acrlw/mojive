@@ -95,14 +95,14 @@ def _describe(name: str, physics_label: str, renderer: str, role: str) -> Backen
 
     if renderer == "newton-gl" and not reasons:
         reasons.append("adapter is not implemented")
-        return BackendInfo(name, physics_label, renderer, False, "；".join(reasons), role)
+        return BackendInfo(name, physics_label, renderer, False, "; ".join(reasons), role)
 
     return BackendInfo(
         name=name,
         physics=physics_label,
         renderer=renderer,
         available=not reasons,
-        reason="；".join(reasons),
+        reason="; ".join(reasons),
         role=role,
     )
 

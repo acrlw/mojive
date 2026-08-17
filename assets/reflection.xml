@@ -1,23 +1,4 @@
-<!--
-  reflection —— 平面反射的展示与判据场景（14 §M5.2）。
 
-  这份场景是**按判据反过来设计的**，每一件几何都在守一条：
-
-  - `mirror` 地板的 `reflectance="0.35"`：比真实场景（0.1～0.15）夸张，
-    是为了让"倒影在不在"这件事离噪声足够远。判据要的是信噪比，不是好看。
-  - `high` / `low` 两个球一高一低：倒影的位置随高度变，**位置错了这两个会一起错**，
-    而只放一个的话"倒影贴在物体脚下"这种错法看不出来。
-  - `buried` 埋在地板下面（z = −0.6，静态几何，不受重力）：它**不许出现在倒影里**。
-    这一条守的是**斜裁剪面**——没有它的话，镜像之后地板下方的东西会翻到上方来，
-    画面上是"倒影里多了个不存在的球"。
-  - `shell` 是个只有正面的开口盒子（用四块板拼的）：**手性翻转**的判据。
-    镜像把绕向翻过来了，不跟着把 `front_face` 从 ccw 改成 cw 的话，
-    倒影里剩下的是背面——外形恰好还对得上，只有明暗反了，最难看出来。
-  - 灯只有一盏方向光 + 头灯，`castshadow="true"`：影子和倒影会叠在一起，
-    正好检查两者没有互相吃掉。
-
-  **没有关节、没有自由体**：判据要逐帧完全一样（同 `parity_scene`）。
--->
 <mujoco model="reflection">
   <compiler angle="degree" autolimits="true"/>
 
@@ -30,7 +11,7 @@
   <asset>
     <texture name="grid" type="2d" builtin="checker" width="512" height="512"
              rgb1="0.14 0.16 0.19" rgb2="0.26 0.29 0.34"/>
-    <!-- 反射系数**故意开大**：0.35 下倒影的贡献远高于测量噪声 -->
+
     <material name="mirror" texture="grid" texrepeat="1 1" texuniform="true"
               reflectance="0.35"/>
 
@@ -46,15 +27,11 @@
 
     <geom name="floor" type="plane" size="0 0 0.05" material="mirror"/>
 
-    <!-- 一高一低：倒影的位置跟着高度走 -->
     <geom name="high" type="sphere" size="0.28" pos="-0.8 0.0 1.30" material="hot"/>
     <geom name="low"  type="sphere" size="0.28" pos="0.8 0.0 0.35" material="cool"/>
 
-    <!-- 埋在地板下面。**斜裁剪面的判据**：它不许出现在倒影里 -->
     <geom name="buried" type="sphere" size="0.45" pos="0.0 1.6 -0.60" material="deep"/>
 
-    <!-- 开口盒子（四块板，没有顶也没有底）。**手性翻转的判据**：
-         绕向不翻的话倒影里只剩背面 -->
     <geom name="shell_a" type="box" size="0.45 0.03 0.35" pos="0.0 -1.15 0.35" material="pale"/>
     <geom name="shell_b" type="box" size="0.45 0.03 0.35" pos="0.0 -2.05 0.35" material="pale"/>
     <geom name="shell_c" type="box" size="0.03 0.45 0.35" pos="-0.45 -1.60 0.35" material="pale"/>

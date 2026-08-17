@@ -93,7 +93,7 @@ class Rig:
         )
         self.backend.highlight(selected)
         self.backend.set_render_scene(scene)
-        assert self.backend.render(None) is not None, "render() 返回 None——画不出来"
+        assert self.backend.render(None) is not None
         return self.backend.target.read_color(flip=True)
 
     @staticmethod
@@ -142,14 +142,12 @@ def test_flat_ambient_matches_the_cpu_implementation(rig, srgb, ambient):
     want = color.shade_flat(albedo, np.full(3, ambient)).astype(np.int32)
 
     assert np.abs(got[:3] - want).max() <= 1, f"GPU {got[:3]} vs CPU {want}"
-    assert got[3] == 255, "alpha 被动过——它不该参与色调映射与 gamma（05 §5.4）"
+    assert got[3] == 255
 
     wrong = color.to_u8(
         color.finish(2.0 * color.srgb_to_linear(np.full(3, ambient)) * albedo)
     ).astype(np.int32)
-    assert np.abs(got[:3] - wrong).max() >= 5, (
-        f"输出 {got[:3]} 与域错误那一版 {wrong} 分不开——判据钉不住 05 §5.2"
-    )
+    assert np.abs(got[:3] - wrong).max() >= 5
 
 
 def test_diffuse_alone_is_monotone_and_matches_the_cpu(rig):
@@ -165,10 +163,10 @@ def test_diffuse_alone_is_monotone_and_matches_the_cpu(rig):
         got = Rig.center(img)[:3]
 
         want = color.to_u8(color.finish(color.srgb_to_linear(level) * albedo)).astype(np.int32)
-        assert np.abs(got - want).max() <= 1, f"diffuse={level}：GPU {got} vs CPU {want}"
+        assert np.abs(got - want).max() <= 1, f"diffuse={level}: GPU {got} vs CPU {want}"
         seen.append(int(got[0]))
-    assert seen == sorted(seen) and seen[0] < seen[-1], f"四档不单调：{seen}"
-    assert seen[0] > 0, "最低那一档全黑——光根本没进来"
+    assert seen == sorted(seen) and seen[0] < seen[-1]
+    assert seen[0] > 0
 
 
 def test_light_color_is_decoded_from_the_display_domain(rig):
@@ -181,7 +179,7 @@ def test_light_color_is_decoded_from_the_display_domain(rig):
         rig.draw([(np.append(albedo, 1.0), (0.0, 0.0, 0.5), 2.0, 0.0)], lights=[_dir_light(0.5)])
     )
     ratio = half[0] / max(full[0], 1)
-    assert ratio == pytest.approx(0.5, abs=0.03), f"半亮灯的画面比是 {ratio:.3f}"
+    assert ratio == pytest.approx(0.5, abs=0.03)
 
 
 def test_transparent_leaves_depth_mask_on(rig):
@@ -192,12 +190,12 @@ def test_transparent_leaves_depth_mask_on(rig):
     shots = []
     for _ in range(3):
         img = rig.draw([opaque_quad, glass], ambient=[0.3] * 3)
-        assert rig.backend.target.fbo.depth_mask is True, "透明段没把深度写还回去"
+        assert rig.backend.target.fbo.depth_mask is True
 
-        assert Rig.corner(img)[:3].max() > 60, f"角落是 {Rig.corner(img)}——不透明几何没画出来"
+        assert Rig.corner(img)[:3].max() > 60
         shots.append(img.copy())
-    assert np.array_equal(shots[0], shots[2]), "同一个静态场景连着三帧画面不一样"
-    assert rig.backend.stats.draw_calls == 2, "两个桶应当各一次绘制"
+    assert np.array_equal(shots[0], shots[2])
+    assert rig.backend.stats.draw_calls == 2
 
 
 def test_a_bucket_change_after_the_first_frame_still_draws(rig):
@@ -206,9 +204,9 @@ def test_a_bucket_change_after_the_first_frame_still_draws(rig):
     glass = (np.array([0.9, 0.2, 0.2, 0.4], np.float32), (0.0, 0.0, 0.5), 1.0, -0.5)
     first = Rig.center(rig.draw([quad], ambient=[0.3] * 3))
     second = Rig.corner(rig.draw([quad, glass], ambient=[0.3] * 3))
-    assert first[:3].max() > 60, f"第一帧就没画出来：{first}"
-    assert np.abs(second - first).max() <= 2, f"加了一个桶之后角落变成 {second}"
-    assert rig.backend.stats.triangles == 4, "统计说画了 4 个三角形——画面必须跟得上"
+    assert first[:3].max() > 60
+    assert np.abs(second - first).max() <= 2
+    assert rig.backend.stats.triangles == 4
 
 
 def test_blending_happens_after_gamma(rig):
@@ -234,7 +232,7 @@ def test_blending_happens_after_gamma(rig):
         np.int32
     )
     want = back_only[:3] * (1.0 - alpha) + front_solid * alpha
-    assert np.abs(both[:3] - want).max() <= 2, f"混合结果 {both[:3]} vs 显示域期望 {want}"
+    assert np.abs(both[:3] - want).max() <= 2
 
 
 def test_skybox_only_shows_up_when_it_is_on(gl_ctx):
@@ -258,8 +256,8 @@ def test_skybox_only_shows_up_when_it_is_on(gl_ctx):
         on = Rig.corner(rig.draw([quad], ambient=[0.3] * 3))
 
         clear = np.array([round(c * 255) for c in backend._make_context(backend._scene).background])
-        assert np.abs(off - clear).max() <= 1, f"关掉天空盒之后角落不是清屏色：{off}"
-        assert np.abs(on - off).max() > 20, f"开着天空盒角落还是清屏色：{on}"
+        assert np.abs(off - clear).max() <= 1
+        assert np.abs(on - off).max() > 20
 
         assert not np.array_equal(Rig.center(rig.draw([quad], ambient=[0.3] * 3)), on)
     finally:
@@ -292,8 +290,8 @@ def test_normals_survive_non_uniform_scale(gl_ctx):
         want = np.rint((right * 0.5 + 0.5) * 255).astype(int)
         bad = np.rint((wrong * 0.5 + 0.5) * 255).astype(int)
 
-        assert np.abs(got[:3] - want).max() <= 2, f"法线读出来是 {got[:3]}，期望 {want}"
-        assert np.abs(got[:3] - bad).max() > 20, f"与 mat3(model) 那一版 {bad} 分不开"
+        assert np.abs(got[:3] - want).max() <= 2
+        assert np.abs(got[:3] - bad).max() > 20
     finally:
         backend.release()
 
@@ -306,7 +304,7 @@ def test_shared_id_layout_is_not_polluted_by_shading_passes(gl_ctx):
         from forge_viewer.render.forge.targets import IdLayout
 
         if backend.target.id_layout is not IdLayout.SHARED:
-            pytest.skip("这台机器连非 MSAA 的整数附件都进不了 FBO")
+            pytest.skip("integer attachments are unavailable even without MSAA")
         rig = Rig(backend)
         img = rig.draw(
             [
@@ -316,8 +314,8 @@ def test_shared_id_layout_is_not_polluted_by_shading_passes(gl_ctx):
             ambient=[0.3] * 3,
         )
         ids = backend.target.read_ids()
-        assert int(ids[HEIGHT // 2, WIDTH // 2]) == 1, "半透明盖住的地方 id 被涂坏了"
-        assert Rig.center(img)[:3].max() > 20, "画面本身没画出来"
+        assert int(ids[HEIGHT // 2, WIDTH // 2]) == 1
+        assert Rig.center(img)[:3].max() > 20
     finally:
         backend.release()
 
@@ -333,10 +331,8 @@ def test_highlight_needs_the_emission_term(rig, monkeypatch):
     monkeypatch.setattr(opaque_pass, "HIGHLIGHT_EMISSION", 0.0)
     mix_only = float(Rig.center(rig.draw([quad], ambient=dark, selected=1))[:3].mean())
 
-    assert lit - plain > 40.0, f"选中之后只亮了 {lit - plain:.1f}——暗场景里读不出来"
-    assert (lit - plain) > 4.0 * abs(mix_only - plain), (
-        f"混色 {mix_only - plain:+.1f}、混色+自发光 {lit - plain:+.1f}——两者分不开"
-    )
+    assert lit - plain > 40.0
+    assert (lit - plain) > 4.0 * abs(mix_only - plain)
 
 
 def test_albedo_view_is_the_unlit_base_color(rig):
@@ -347,7 +343,7 @@ def test_albedo_view_is_the_unlit_base_color(rig):
         rig.draw([(np.append(rgb, 1.0), (0.0, 0.0, 0.5), 2.0, 0.0)], ambient=[0.9] * 3)
     )
     want = color.to_u8(color.gamma_encode(rgb)).astype(np.int32)
-    assert np.abs(got[:3] - want).max() <= 1, f"ALBEDO 视图 {got[:3]} vs {want}"
+    assert np.abs(got[:3] - want).max() <= 1
 
 
 def test_overdraw_clears_to_zero_and_counts_layers(rig):
@@ -360,11 +356,9 @@ def test_overdraw_clears_to_zero_and_counts_layers(rig):
         ],
         ambient=[0.3] * 3,
     )
-    assert Rig.corner(img)[0] == 0, f"没有几何的角落读到 {Rig.corner(img)[0]}，清屏没清成 0"
+    assert Rig.corner(img)[0] == 0
 
-    assert round(int(Rig.center(img)[0]) / 16) == 2, (
-        f"两层叠加处读到 {Rig.center(img)[0]}，换算不出 2 层"
-    )
+    assert round(int(Rig.center(img)[0]) / 16) == 2
 
 
 def test_wireframe_is_another_program_and_still_shades(rig):
@@ -378,14 +372,10 @@ def test_wireframe_is_another_program_and_still_shades(rig):
     rig.backend.set_debug_view(DebugView.SHADED)
     back = rig.draw([quad], ambient=[0.35] * 3)
 
-    assert np.array_equal(Rig.center(shaded), Rig.center(back)), "切回 SHADED 之后画面没回来"
-    assert np.abs(wire[inside].astype(int) - shaded[inside].astype(int)).max() <= 2, (
-        "线框视图里面内的颜色变了——那就不只是多了几条线，是着色本身走岔了"
-    )
+    assert np.array_equal(Rig.center(shaded), Rig.center(back))
+    assert np.abs(wire[inside].astype(int) - shaded[inside].astype(int)).max() <= 2
 
     face = int(Rig.center(shaded)[0])
     line = int(Rig.center(wire)[0])
-    assert face > 20, f"面内太暗（{face}），这条判据失去了分辨力——把场景调亮些"
-    assert line < face * 0.75, (
-        f"两个三角形的公共边上没有线——几何阶段没接上（面内 {face}、边上 {line}）"
-    )
+    assert face > 20
+    assert line < face * 0.75

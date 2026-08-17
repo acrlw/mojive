@@ -23,7 +23,7 @@ def row(name: str, value, note: str = "") -> None:
 
 def main() -> int:
     if not glfw.init():
-        print("glfw 起不来")
+        print("GLFW initialization failed")
         return 1
     for k, v in (
         (glfw.CONTEXT_VERSION_MAJOR, 3),
@@ -35,7 +35,7 @@ def main() -> int:
         glfw.window_hint(k, v)
     win = glfw.create_window(320, 240, "forge probe", None, None)
     if not win:
-        print("建不出 3.3 core 上下文——这台机器达不到本项目的下限（02 §2.2）")
+        print("OpenGL 3.3 core context creation failed")
         glfw.terminate()
         return 1
     glfw.make_context_current(win)
@@ -43,50 +43,50 @@ def main() -> int:
     caps = probe(ctx)
     native = G.native()
 
-    print("\n=== 上下文 ===")
+    print("\n=== Context ===")
     row("GL_VERSION", caps.version)
     row("GL_RENDERER", caps.renderer)
     row("GL_VENDOR", caps.vendor)
     row("core profile", caps.core_profile)
-    row("version_code", caps.version_code, "下限 330（02 §2.2）")
+    row("version_code", caps.version_code, "minimum 330")
     row("GL_MAX_SAMPLES", caps.max_samples)
-    row("GL_MAX_VERTEX_ATTRIBS", caps.max_vertex_attribs, "网格 3 + 实例 7 = 10")
+    row("GL_MAX_VERTEX_ATTRIBS", caps.max_vertex_attribs, "mesh 3 + instance 7 = 10")
     row("GL_MAX_TEXTURE_IMAGE_UNITS", caps.max_texture_units)
     row("GL_MAX_TEXTURE_SIZE", caps.max_texture_size)
 
-    print("\n=== 规格点名的四条硬约束（02 §2.2） ===")
+    print("\n=== Required capabilities ===")
     row(
-        "① BaseInstance（GL 4.2）",
-        f"{BAD} 不可用" if caps.version_code < 420 else "可用",
-        "每桶一个 VAO + 字节偏移" if caps.version_code < 420 else "",
+        "BaseInstance (GL 4.2)",
+        f"{BAD} unavailable" if caps.version_code < 420 else "available",
+        "one VAO and byte offset per bucket" if caps.version_code < 420 else "",
     )
     row(
-        "② SSBO（GL 4.3）",
-        f"{BAD} 不可用" if caps.version_code < 430 else "可用",
-        "逐实例数据只能走顶点属性" if caps.version_code < 430 else "",
+        "SSBO (GL 4.3)",
+        f"{BAD} unavailable" if caps.version_code < 430 else "available",
+        "instance data uses vertex attributes" if caps.version_code < 430 else "",
     )
-    row("③ 计算着色器", f"{BAD} 不可用" if caps.version_code < 430 else "可用")
+    row("compute shader", f"{BAD} unavailable" if caps.version_code < 430 else "available")
     _lo, hi = native.line_width_range()
     row(
-        "④ glLineWidth 上限",
+        "glLineWidth maximum",
         f"{hi:g}",
-        "粗线只能展开成三角形带" if hi <= 1.0 else "驱动允许粗线，但规格仍走三角形带",
+        "wide lines use triangle strips" if hi <= 1.0 else "driver supports wide lines",
     )
 
-    print("\n=== 扩展与原生符号 ===")
+    print("\n=== Extensions and native entry points ===")
     row("GL_ARB_timer_query", OK if "GL_ARB_timer_query" in caps.extensions else BAD)
     row(
-        "GPU 计时实际可用",
+        "GPU timing",
         f"{OK} {caps.timer_query}" if caps.timer_query != "none" else f"{BAD} none",
-        "报了扩展不等于真能用，探测要包一次真的绘制",
+        "verified with a draw call",
     )
-    row("GL_KHR_debug", OK if caps.khr_debug else f"{BAD}（pass 标签退化成空操作）")
-    row("原生 glGet*（状态守卫）", OK if native.has_state else BAD)
-    row("原生 glClearBufferuiv", OK if native.has_clear_buffer_uiv else BAD)
-    row("原生 glVertexAttribPointer", OK if native.has_attrib_pointer else BAD)
-    row("原生 glClear（只清深度）", OK if native.has_clear_depth else BAD)
+    row("GL_KHR_debug", OK if caps.khr_debug else BAD)
+    row("native glGet*", OK if native.has_state else BAD)
+    row("native glClearBufferuiv", OK if native.has_clear_buffer_uiv else BAD)
+    row("native glVertexAttribPointer", OK if native.has_attrib_pointer else BAD)
+    row("native depth clear", OK if native.has_clear_depth else BAD)
 
-    print("\n=== 几何着色器 ===")
+    print("\n=== Geometry shader ===")
     try:
         p = ctx.program(
             vertex_shader="#version 330 core\nvoid main(){gl_Position=vec4(0);}",
@@ -99,28 +99,30 @@ def main() -> int:
             fragment_shader="#version 330 core\nout vec4 c;void main(){c=vec4(1);}",
         )
         p.release()
-        row("几何着色器", f"{OK} 可用", "WIREFRAME 的重心坐标路径")
+        row("geometry shader", f"{OK} available", "wireframe barycentric path")
     except Exception as e:
-        row("几何着色器", f"{BAD} {e}")
+        row("geometry shader", f"{BAD} {e}")
 
-    print("\n=== ID buffer 布局（docs/PLATFORM.md §1） ===")
+    print("\n=== ID buffer layout ===")
     for s in (1, 2, 4, 8):
         if s > max(caps.max_samples, 1):
             continue
         layout = probe_id_layout(ctx, s)
-        note = "整数附件进不了 MSAA FBO" if layout is IdLayout.SPLIT else "规格原样"
+        note = (
+            "integer attachment uses a separate FBO" if layout is IdLayout.SPLIT else "shared FBO"
+        )
         row(f"samples={s}", layout, note)
 
-    print("\n=== moderngl 的已知缺陷（02 §2.4） ===")
+    print("\n=== ModernGL compatibility checks ===")
     fbo_i = ctx.framebuffer([ctx.texture((16, 16), 1, dtype="u4")])
     fbo_i.use()
     fbo_i.clear(0.13, 0.13, 0.13, 1.0)
     got = int(np.frombuffer(fbo_i.read(components=1, dtype="u4"), np.uint32)[0])
     bits = int(np.float32(0.13).view(np.uint32))
     row(
-        "clear() 打整数附件",
-        f"读回 {got}",
-        f"{'复现' if got == bits else '本机不复现'}：0.13f 的位模式是 {bits}",
+        "integer attachment clear()",
+        f"read {got}",
+        f"{'reproduced' if got == bits else 'not reproduced'}; float bits={bits}",
     )
     native.drain_errors()
 
@@ -131,9 +133,9 @@ def main() -> int:
         tgt.clear_id(v)
         ok_clear &= int(np.unique(tgt.read_ids())[0]) == v
     row(
-        "forge 的整数清屏",
-        f"{OK} 三档值精确" if ok_clear else f"{BAD} 不精确",
-        "含 4e9，证明 R32UI 不像 RGB8 那样 16M 溢出",
+        "forge integer clear",
+        f"{OK} exact" if ok_clear else f"{BAD} inexact",
+        "verified with 0, 77, and 4e9",
     )
 
     col = ctx.texture((32, 32), 4, dtype="f1")
@@ -157,12 +159,12 @@ def main() -> int:
     vao.render()
     px = np.frombuffer(f2.read(components=3), np.uint8)[:3]
     row(
-        "深度写掩码重放",
-        f"{'复现' if px[1] < 100 else '本机不复现'}",
-        "上一帧关深度写 → 这一帧 clear 不清深度 → 整批几何一个片元都不写",
+        "depth-mask replay",
+        f"{'reproduced' if px[1] < 100 else 'not reproduced'}",
+        "clear must enable depth writes before clearing",
     )
 
-    print("\n=== GLStateGuard（02 §2.3） ===")
+    print("\n=== GLStateGuard ===")
     guard = GLStateGuard()
     ctx.enable(moderngl.BLEND)
     ctx.disable(moderngl.DEPTH_TEST)
@@ -177,23 +179,23 @@ def main() -> int:
         ctx.multisample = True
     after = guard.snapshot()
     diff = {k: (before[k], after[k]) for k in before if before[k] != after[k]}
-    row("守住的项数", len(before))
-    row("逐项不变", f"{OK} 是" if not diff else f"{BAD} {diff}")
+    row("state entries", len(before))
+    row("restored", f"{OK} yes" if not diff else f"{BAD} {diff}")
 
     import timeit
 
     t = timeit.timeit(lambda: (guard.capture(), guard.restore()), number=3000) / 3000 * 1000
-    row("capture + restore", f"{t:.4f} ms/帧", "规格参照 0.036")
+    row("capture + restore", f"{t:.4f} ms/frame", "reference 0.036")
 
-    print("\n=== HiDPI（10 §10.4） ===")
+    print("\n=== HiDPI ===")
     w, h = glfw.get_window_size(win)
     fw, fh = glfw.get_framebuffer_size(win)
     sx, _ = glfw.get_window_content_scale(win)
-    row("窗口 / 帧缓冲", f"{w}×{h} / {fw}×{fh}")
-    row("content_scale", f"{sx:g}", "视口矩形是 UI 点、渲染目标是物理像素，两者不是 1:1")
+    row("window / framebuffer", f"{w}×{h} / {fw}×{fh}")
+    row("content_scale", f"{sx:g}", "UI points to framebuffer pixels")
 
     err = native.drain_errors()
-    print(f"\n收尾 glGetError = {err} {'（干净）' if err == 0 else '（有残留，要查）'}")
+    print(f"\nfinal glGetError = {err} {'clean' if err == 0 else 'pending errors'}")
     for n in caps.notes:
         print(f"  · {n}")
     glfw.terminate()

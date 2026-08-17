@@ -28,9 +28,6 @@ class CameraOut:
             self.session.submit(SetCamera(camera))
 
 
-#
-
-
 PITCH_LIMIT = 89.9
 MIN_DISTANCE = 1e-3
 MIN_NEAR = 1e-4

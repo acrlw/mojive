@@ -54,37 +54,31 @@ def face_normals(md: MeshData) -> np.ndarray:
 def test_builtin_mesh_is_well_formed(shape: MeshShape) -> None:
     md = _mesh(shape)
 
-    assert md.triangle_count > 0, f"{shape} 一个三角形都没有"
-    assert len(md.indices) % 3 == 0, f"{shape} 的索引数不是 3 的倍数"
-    assert int(md.indices.max()) < len(md.positions), f"{shape} 的索引越界"
+    assert md.triangle_count > 0
+    assert len(md.indices) % 3 == 0
+    assert int(md.indices.max()) < len(md.positions)
     assert md.indices.dtype == np.uint32
 
     norms = np.linalg.norm(md.normals.astype(np.float64), axis=1)
-    assert np.allclose(norms, 1.0, atol=1e-5), (
-        f"{shape} 有非单位长的法线，最大偏差 {np.abs(norms - 1.0).max():.2e}"
-    )
+    assert np.allclose(norms, 1.0, atol=1e-5)
 
-    assert np.abs(md.positions).max() <= 1.0 + 1e-5, (
-        f"{shape} 的顶点超出单位尺寸，最远 {np.abs(md.positions).max():.4f}"
-    )
+    assert np.abs(md.positions).max() <= 1.0 + 1e-5
 
-    assert md.uvs.min() >= -1e-6 and md.uvs.max() <= 1.0 + 1e-6, (
-        f"{shape} 的 UV 跑出 [0,1]：[{md.uvs.min():.4f}, {md.uvs.max():.4f}]"
-    )
+    assert md.uvs.min() >= -1e-6 and md.uvs.max() <= 1.0 + 1e-6
 
 
 @pytest.mark.parametrize("shape", BUILTIN_SHAPES, ids=lambda s: s.value)
 def test_no_degenerate_triangles(shape: MeshShape) -> None:
 
-    p = _triangles(shape_md := _mesh(shape))
+    p = _triangles(_mesh(shape))
     area2 = np.linalg.norm(np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0]), axis=1)
-    assert area2.min() > 1e-9, f"{shape} 有零面积三角形（共 {shape_md.triangle_count} 个）"
+    assert area2.min() > 1e-9
 
 
 @pytest.mark.parametrize("shape", sorted(CLOSED_VOLUME, key=str), ids=lambda s: s.value)
 def test_closed_mesh_has_positive_volume(shape: MeshShape) -> None:
 
-    assert signed_volume(_mesh(shape)) > 0.0, f"{shape} 的有向体积为负——绕向反了"
+    assert signed_volume(_mesh(shape)) > 0.0
 
 
 @pytest.mark.parametrize("shape", sorted(CLOSED_VOLUME, key=str), ids=lambda s: s.value)
@@ -92,7 +86,7 @@ def test_closed_mesh_volume_matches_analytic(shape: MeshShape) -> None:
 
     v = signed_volume(_mesh(shape))
     ratio = v / CLOSED_VOLUME[shape]
-    assert 0.95 <= ratio <= 1.0 + 1e-6, f"{shape} 体积 {v:.5f}，解析值的 {ratio:.4f} 倍"
+    assert 0.95 <= ratio <= 1.0 + 1e-6
 
 
 @pytest.mark.parametrize("shape", BUILTIN_SHAPES, ids=lambda s: s.value)
@@ -102,7 +96,7 @@ def test_vertex_normals_agree_with_winding(shape: MeshShape) -> None:
     vn = md.normals[md.indices.reshape(-1, 3)].astype(np.float64).mean(axis=1)
     vn /= np.linalg.norm(vn, axis=1, keepdims=True)
     dots = np.einsum("ij,ij->i", face_normals(md), vn)
-    assert dots.min() > 0.9, f"{shape} 有 {int((dots <= 0.9).sum())} 个三角形的法线与绕向不一致"
+    assert dots.min() > 0.9
 
 
 def test_sphere_normals_are_analytic() -> None:
@@ -119,9 +113,7 @@ def test_cone_normals_are_analytic() -> None:
     n = md.normals.astype(np.float64)
     side = n[:, 2] > 0.0
     assert side.sum() > 0
-    assert np.allclose(n[side, 2], 1.0 / math.sqrt(5.0), atol=1e-5), (
-        f"锥面法线的 z 分量不是 1/√5：范围 [{n[side, 2].min():.5f}, {n[side, 2].max():.5f}]"
-    )
+    assert np.allclose(n[side, 2], 1.0 / math.sqrt(5.0), atol=1e-5)
     horizontal = np.linalg.norm(n[side, :2], axis=1)
     assert np.allclose(horizontal, 2.0 / math.sqrt(5.0), atol=1e-5)
 
@@ -134,17 +126,15 @@ def test_capsule_is_two_meshes() -> None:
     assert shaft.triangle_count > 0 and cap.triangle_count > 0
 
     r = np.linalg.norm(shaft.positions[:, :2], axis=1)
-    assert np.allclose(r, 1.0, atol=1e-5), "柱段带了端盖——那会在端帽下面多画一层"
+    assert np.allclose(r, 1.0, atol=1e-5)
 
 
 def test_capsule_cap_is_a_hemisphere() -> None:
 
     cap = _mesh(MeshShape.CAPSULE_CAP)
-    assert cap.positions[:, 2].min() >= -1e-6, "端帽越过了赤道，不是半球"
+    assert cap.positions[:, 2].min() >= -1e-6
     radii = np.linalg.norm(cap.positions.astype(np.float64), axis=1)
-    assert np.allclose(radii, 1.0, atol=1e-5), (
-        f"端帽不是正球：半径范围 [{radii.min():.6f}, {radii.max():.6f}]"
-    )
+    assert np.allclose(radii, 1.0, atol=1e-5)
 
 
 def test_capsule_uv_seam_is_continuous() -> None:
@@ -158,14 +148,12 @@ def test_plane_uv_matches_the_calibration() -> None:
 
     md = _mesh(MeshShape.PLANE)
     assert md.triangle_count == 2
-    assert np.allclose(md.positions[:, 2], 0.0), "平面不在 XY 平面上"
-    assert np.allclose(md.normals, [0.0, 0.0, 1.0]), "平面法线不是 +Z"
+    assert np.allclose(md.positions[:, 2], 0.0)
+    assert np.allclose(md.normals, [0.0, 0.0, 1.0])
 
     for (x, y, _), uv in zip(md.positions, md.uvs, strict=True):
         s, t = 0.5 * x, 0.5 * y
-        assert uv == pytest.approx((0.5 + s, 0.5 - t), abs=1e-6), (
-            f"角点 ({x:+.0f}, {y:+.0f}) 的 uv 是 {tuple(uv)}，应为 {(0.5 + s, 0.5 - t)}"
-        )
+        assert uv == pytest.approx((0.5 + s, 0.5 - t), abs=1e-6)
 
 
 def test_builtin_mesh_is_generated_once() -> None:
@@ -180,7 +168,7 @@ def test_builtin_mesh_is_generated_once() -> None:
 def test_nothing_is_generated_at_import_time() -> None:
 
     importlib.reload(mesh_mod)
-    assert mesh_mod._CACHE == {}, "import 时就把网格算出来了"
+    assert mesh_mod._CACHE == {}
 
 
 def test_all_builtin_covers_every_shape() -> None:

@@ -25,7 +25,7 @@ def test_mirror_reflects_points_across_the_plane(point, normal, src, want):
 
     m = math3d.mirror(point, normal)
     got = (m @ np.array([*src, 1.0]))[:3]
-    assert np.allclose(got, want, atol=1e-5), f"{src} 镜像到 {got}，应为 {want}"
+    assert np.allclose(got, want, atol=1e-5)
 
 
 def test_mirror_keeps_points_on_the_plane_put():
@@ -33,7 +33,7 @@ def test_mirror_keeps_points_on_the_plane_put():
     m = math3d.mirror((0, 0, 1.5), (0, 0, 1))
     for p in ((0, 0, 1.5), (3, -2, 1.5), (-1, 7, 1.5)):
         got = (m @ np.array([*p, 1.0]))[:3]
-        assert np.allclose(got, p, atol=1e-5), f"平面上的 {p} 被挪到了 {got}"
+        assert np.allclose(got, p, atol=1e-5)
 
 
 def test_mirror_flips_handedness():
@@ -112,10 +112,8 @@ def test_normal_uses_the_inverse_transpose_not_the_third_column():
     want = want / np.linalg.norm(want)
     third = basis @ np.array([0.0, 0.0, 1.0])
     third = third / np.linalg.norm(third)
-    assert not np.allclose(want, third, atol=1e-3), "这个变换分不开两种算法，判据要换一个"
-    assert np.allclose(plane[:3], want, atol=1e-5), (
-        f"法线算成了 {plane[:3]}，应为 {want}——多半直接取了模型矩阵的第三列"
-    )
+    assert not np.allclose(want, third, atol=1e-3)
+    assert np.allclose(plane[:3], want, atol=1e-5)
 
 
 def test_the_strongest_reflector_wins():

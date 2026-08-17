@@ -203,7 +203,6 @@ class Window:
         return gl.glGetString(gl.GL_RENDERER).decode()
 
     # ------------------------------------------------------------ HiDPI
-    #
 
     @property
     def ui_scale(self) -> float:
@@ -298,8 +297,6 @@ class Window:
                 imgui.DockNodeFlags_.passthru_central_node,
             )
             self._build_default_layout()
-
-    #
 
     _LAYOUT_LEFT = ("Hierarchy", "Inspector")
     _LAYOUT_RIGHT = ("Control", "Joints", "Camera", "Settings", "Sensors")

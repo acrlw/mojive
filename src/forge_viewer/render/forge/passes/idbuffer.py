@@ -188,8 +188,6 @@ class IdBufferPass(BasePass):
 
     def prepare(self, ctx: PassContext) -> bool:
 
-        #
-
         ctx.target.clear_id(0)
         if not self._geom.ensure(ctx, ctx.target.id_draw_buffer):
             return False
@@ -223,9 +221,6 @@ class IdBufferPass(BasePass):
         self._geom.release()
 
 
-#
-
-
-# `ImportError: cannot import name 'register_pass' from partially initialized module`**，
+# Importing through the package here would create a register_pass initialization cycle.
 
 register_pass("id", IdBufferPass)

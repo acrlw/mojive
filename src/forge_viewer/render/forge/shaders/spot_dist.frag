@@ -1,6 +1,4 @@
 #version 330 core
-//
-//
 in vec3 v_world;
 uniform vec3 u_light_pos;
 uniform float u_light_range;

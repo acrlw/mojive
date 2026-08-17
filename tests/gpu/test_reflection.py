@@ -58,17 +58,17 @@ def test_the_flag_actually_turns_reflection_on_and_off(rig, pair):
 
     on, off = pair
     changed = int((np.abs(on - off).sum(axis=2) > 4).sum())
-    assert changed > 5000, f"打开反射只改变了 {changed} 个像素——倒影根本没画出来"
+    assert changed > 5000
 
     again = shot(rig, reflection=False)
-    assert np.array_equal(again, off), "关着反射的两次渲染结果不一致，说明开关没关干净"
+    assert np.array_equal(again, off)
 
 
 def test_reflection_only_touches_the_reflective_plane(pair):
 
     on, off = pair
     sky = np.abs(on[:120] - off[:120]).max()
-    assert sky == 0, f"地平线以上的天空被倒影改了（最大差 {sky}）"
+    assert sky == 0
 
 
 def test_reflection_is_added_not_mixed(pair):
@@ -76,13 +76,13 @@ def test_reflection_is_added_not_mixed(pair):
     on, off = pair
     far = (slice(H - 60, H - 20), slice(W - 80, W - 20))
     diff = np.abs(on[far] - off[far]).max()
-    assert diff == 0, f"远处地板被反射改了 {diff}——多半写成了 mix 而不是加法"
+    assert diff == 0
 
 
 def test_reflection_scales_with_reflectance(tmp_path):
 
     text = resolve("reflection").read_text(encoding="utf-8")
-    assert 'reflectance="0.35"' in text, "场景里的反射系数改了，这条判据要跟着改"
+    assert 'reflectance="0.35"' in text
 
     def increment(value: str) -> float:
         path = tmp_path / f"refl_{value}.xml"
@@ -100,9 +100,9 @@ def test_reflection_scales_with_reflectance(tmp_path):
     low = increment("0.35")
     high = increment("0.70")
 
-    assert low > 0.004, f"倒影的贡献只有 {low:.4f}，太弱，量不出比例"
+    assert low > 0.004
     ratio = high / low
-    assert 1.7 < ratio < 2.3, f"reflectance 翻倍，倒影只变成 {ratio:.2f} 倍——系数没乘进去"
+    assert 1.7 < ratio < 2.3
 
 
 def test_geometry_below_the_plane_stays_out_of_the_reflection(pair):
@@ -111,19 +111,13 @@ def test_geometry_below_the_plane_stays_out_of_the_reflection(pair):
     delta = on - off
     green_excess = delta[..., 1] - np.maximum(delta[..., 0], delta[..., 2])
     leaked = int((green_excess > 3).sum())
-    assert leaked == 0, (
-        f"倒影里漏进了 {leaked} 个绿色像素（最大超出 {int(green_excess.max())}）"
-        "——地板底下那个球翻上来了，斜裁剪面没生效"
-    )
+    assert leaked == 0
 
 
 def test_reflection_shows_outer_faces_not_the_inside(pair):
 
     on, off = pair
     mask = np.abs(on - off).sum(axis=2) > 4
-    assert mask.sum() > 5000, "倒影区太小，判据没有意义"
+    assert mask.sum() > 5000
     mean = float(on[mask].mean())
-    assert mean > 65.0, (
-        f"倒影区平均亮度只有 {mean:.1f}（关反射时 {float(off[mask].mean()):.1f}）"
-        "——多半看到的是背面，绕向没翻"
-    )
+    assert mean > 65.0

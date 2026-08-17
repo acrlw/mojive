@@ -1276,7 +1276,7 @@ class MuJoCoAdapter:
         m = self._m
         ltype = int(m.light_type[i])
 
-        #   mjLIGHT_DIRECTIONAL=1、mjLIGHT_POINT=2、mjLIGHT_SPOT=0、mjLIGHT_IMAGE=3。
+        # MuJoCo values: spot=0, directional=1, point=2, image=3.
 
         if ltype == mujoco.mjtLightType.mjLIGHT_DIRECTIONAL:
             kind = LightKind.DIRECTIONAL

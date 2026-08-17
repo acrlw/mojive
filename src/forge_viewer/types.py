@@ -185,7 +185,7 @@ class TextureKind(enum.StrEnum):
 class TextureData:
     name: str
     kind: TextureKind
-    pixels: np.ndarray  # 2d: (H, W, C) u8；cube/skybox: (6, S, S, C) u8
+    pixels: np.ndarray  # 2D: (H, W, C) u8; cube/skybox: (6, S, S, C) u8
     srgb: bool = True
 
     @property

@@ -313,10 +313,6 @@ def _centered_label(imgui, dl, text: str, pos, radius: float, color: int) -> Non
         size *= limit / width
         box = _ink_box(font, size, text) or box
 
-    #
-
-    #
-
     pen_x = round(pos.x - (box[0] + box[2]) * 0.5)
     pen_y = round(pos.y - (box[1] + box[3]) * 0.5)
     baked = font.get_font_baked(size)

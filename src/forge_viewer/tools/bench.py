@@ -9,7 +9,7 @@ from ._harness import OffscreenHarness
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="bench", description="逐 pass 量 CPU 与 GPU 耗时")
+    ap = argparse.ArgumentParser(prog="bench", description="Measure per-pass CPU and GPU time")
     ap.add_argument("scene", nargs="?", default="many_objects")
     ap.add_argument("-n", "--frames", type=int, default=200)
     ap.add_argument("--warmup", type=int, default=8)
@@ -36,13 +36,13 @@ def main(argv: list[str] | None = None) -> int:
                 gpu.setdefault(k, []).append(v)
 
         s = h.stats()
-        print(f"\n{path.stem}   {args.width}×{args.height}   {args.samples}× MSAA   vsync 关")
+        print(f"\n{path.stem}   {args.width}×{args.height}   {args.samples}× MSAA   vsync=off")
         print(h.backend.describe())
         print(
-            f"\n  绘制次数 {s.draw_calls} · 实例 {s.instances} · "
-            f"三角形 {s.triangles} · 桶 {s.buckets}"
+            f"\n  draws {s.draw_calls} · instances {s.instances} · "
+            f"triangles {s.triangles} · buckets {s.buckets}"
         )
-        print(f"  整帧 CPU 中位数  {statistics.median(frame_ms):7.3f} ms   ({args.frames} 帧)")
+        print(f"  median frame CPU  {statistics.median(frame_ms):7.3f} ms   ({args.frames} frames)")
 
         keys = list(dict.fromkeys([*cpu, *gpu]))
         if keys:
@@ -53,17 +53,18 @@ def main(argv: list[str] | None = None) -> int:
                 gs = f"{g:10.3f}" if g is not None else f"{'—':>10}"
                 print(f"  {k:<12}{c:10.3f}{gs}")
         if not gpu:
-            print("\n  （本机没有 GPU 计时查询，GPU 那一列为空——见 docs/PLATFORM.md）")
+            print("\n  GPU timing queries are unavailable; see docs/PLATFORM.md.")
         else:
             zeros = [k for k in keys if gpu.get(k) and statistics.median(gpu[k]) == 0.0]
             if zeros and any(gpu.get(k) and statistics.median(gpu[k]) > 0 for k in keys):
                 print(
-                    f"\n  ⚠ 这几条 pass 的 GPU 计为 0：{zeros}。**不是它们不花时间**——"
-                    "\n    分块延迟渲染（TBDR）把工作攒到 tile flush 才执行，谁的查询还开着就算给谁，"
-                    "\n    于是它们的时间被并进了前面某一条。整帧合计仍然可信，逐条分摊不可信。"
-                    "\n    见 docs/PLATFORM.md §3。"
+                    f"\n  Zero GPU samples: {zeros}. Tile-based deferred rendering may charge "
+                    "their work to another open query. Use aggregate GPU time on these devices; "
+                    "see docs/PLATFORM.md."
                 )
-        print("\n  CPU 与 GPU 两列不该相加：一列是发命令，一列是执行。谁大谁是瓶颈。")
+        print(
+            "\n  CPU and GPU columns overlap in time; the larger value identifies the bottleneck."
+        )
     return 0
 
 

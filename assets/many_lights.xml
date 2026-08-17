@@ -1,28 +1,9 @@
-<!--
-  many_lights —— 多光源（05 §5.1）。
 
-  守的性质：**每一盏灯的贡献都能被单独读出来**。
-
-  八盏灯全用白光、位置又互相重叠的话，漏掉第五盏的表现只是"整体暗了一点"——那种画面
-  没人能判。这里每盏灯**颜色不同、照亮的区域基本不重叠**，于是"哪一盏没接上"变成
-  "哪一块色斑不见了"，一眼就能指出来。
-
-  八盏分三类，各守一件事：
-  - **方向光** `sun`：基础照明，兼验多光源里只有它投影（`castshadow`）——投影灯与非投影
-    灯混在一起时，"哪几盏该进 shadow pass"这件事最容易漏；
-  - **点光** `point_r/g/b`：三原色摆成三角，验漫反射与镜面的叠加是加法；
-    `point_falloff` 单独把二次衰减开到很大，验衰减项真的在算（不算的话它和别的点光一样亮）；
-  - **聚光** `spot_narrow` / `spot_wide`：cutoff 15° 与 55° 两档，验锥角与 exponent 边缘
-    软硬。两个光斑落在同一块白板上，边缘对比直接可读。
-
-  地面与柱子都是中性灰白：**有色的东西会把光的颜色搅进去**，读不出是灯的问题还是材质的
-  问题。这条和"隔离出漫反射那一项单独对拍"是同一个方法（05 §5.2）。
--->
 <mujoco model="many_lights">
   <compiler angle="degree" autolimits="true"/>
 
   <visual>
-    <!-- 头灯几乎关掉：它跟着相机走，会把八盏灯的色斑冲淡 -->
+
     <headlight ambient="0.06 0.06 0.06" diffuse="0.05 0.05 0.05" specular="0.05 0.05 0.05"/>
     <quality shadowsize="4096" numslices="28" numstacks="16"/>
     <map znear="0.02" zfar="40" shadowclip="1.2" shadowscale="0.7"/>
@@ -35,11 +16,10 @@
   </asset>
 
   <worldbody>
-    <!-- 1) 方向光，全场唯一投影的一盏 -->
+
     <light name="sun" type="directional" pos="0 -4 5" dir="0.15 0.5 -1"
            diffuse="0.30 0.30 0.32" specular="0.15 0.15 0.15" castshadow="true"/>
 
-    <!-- 2) 三原色点光，摆成三角，光斑不重叠 -->
     <light name="point_r" type="point" pos="-1.30 -0.75 0.80" diffuse="0.90 0.10 0.10"
            specular="0.5 0.1 0.1" attenuation="1 0 0.35" castshadow="false"/>
     <light name="point_g" type="point" pos=" 1.30 -0.75 0.80" diffuse="0.10 0.90 0.15"
@@ -47,11 +27,9 @@
     <light name="point_b" type="point" pos=" 0.00  1.50 0.80" diffuse="0.15 0.20 0.95"
            specular="0.1 0.1 0.5" attenuation="1 0 0.35" castshadow="false"/>
 
-    <!-- 3) 衰减档：同样的亮度、同样的高度，二次项大一个量级。它必须明显更小一圈 -->
     <light name="point_falloff" type="point" pos="-2.40 1.60 0.55" diffuse="0.95 0.55 0.10"
            specular="0.3 0.2 0.05" attenuation="1 0 4.0" castshadow="false"/>
 
-    <!-- 4) 两档锥角，光斑并排落在同一块白板上 -->
     <light name="spot_narrow" type="spot" pos="-0.55 -2.30 1.80" dir="0 0.35 -1"
            diffuse="0.95 0.90 0.30" specular="0.4 0.4 0.15"
            cutoff="15" exponent="30" attenuation="1 0 0.05" castshadow="false"/>
@@ -59,16 +37,13 @@
            diffuse="0.20 0.85 0.95" specular="0.1 0.4 0.4"
            cutoff="55" exponent="2" attenuation="1 0 0.05" castshadow="false"/>
 
-    <!-- 5) 紫色点光贴着地面：验掠射角下的漫反射（cos 项接近 0 的那一段） -->
     <light name="point_grazing" type="point" pos="2.30 1.70 0.12" diffuse="0.70 0.15 0.85"
            specular="0.3 0.1 0.35" attenuation="1 0 0.6" castshadow="false"/>
 
     <geom name="floor" type="plane" size="0 0 0.05" material="ground"/>
 
-    <!-- 接光斑的白板 -->
     <geom name="board" type="box" pos="0 -1.15 0.005" size="1.6 0.9 0.005" material="pale"/>
 
-    <!-- 中性灰白的柱子与球：受光才有形状，本身不带颜色 -->
     <geom name="col_0" type="cylinder" pos="-1.30 -0.10 0.45" size="0.12 0.45" material="pale"/>
     <geom name="col_1" type="cylinder" pos=" 1.30 -0.10 0.45" size="0.12 0.45" material="pale"/>
     <geom name="col_2" type="cylinder" pos=" 0.00  0.85 0.45" size="0.12 0.45" material="pale"/>

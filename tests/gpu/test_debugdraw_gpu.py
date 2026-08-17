@@ -134,7 +134,7 @@ def rig(gl_ctx):
     r = Rig(gl_ctx)
     yield r
     r.release()
-    assert G.native().drain_errors() == 0, "这条用例留下了 GL 错误，下一条会红在莫名其妙的地方"
+    assert G.native().drain_errors() == 0
 
 
 def _rgb(px: np.ndarray, x: int, y: int) -> np.ndarray:
@@ -163,20 +163,20 @@ def test_three_occlusion_modes(rig, occlusion):
     wall_only = _rgb(px, left, HEIGHT // 6)
     background = _rgb(px, right, HEIGHT // 6)
 
-    assert wall_only.sum() > 0, "墙没画上，这条判据什么都没判"
-    assert background.sum() == 0, "右半屏上方应当还是清屏色"
-    assert visible[0] > 200, "露在外面的那一段必须是实线色"
+    assert wall_only.sum() > 0
+    assert background.sum() == 0
+    assert visible[0] > 200
 
     if occlusion is Occlusion.DEPTH:
-        assert np.allclose(hidden, wall_only), "DEPTH 档被挡住就该看不见"
+        assert np.allclose(hidden, wall_only)
     elif occlusion is Occlusion.ALWAYS:
-        assert np.allclose(hidden, visible), "ALWAYS 档永远画在最上面"
+        assert np.allclose(hidden, visible)
     else:
         t = _mix_fraction(hidden, wall_only, visible)
-        print(f"\n[数字] GHOST 被挡住那一段的混合比例 t = {t:.3f}")
-        assert not np.allclose(hidden, wall_only), "GHOST 档被挡住的那一段也要画出来"
-        assert not np.allclose(hidden, visible), "被挡住的那一段必须比露出来的那一段暗"
-        assert 0.05 < t < 0.6, f"被挡住那一段要介于墙色与实线之间，实测 t={t:.3f}"
+        print(f"\n[metric] ghost occlusion blend t={t:.3f}")
+        assert not np.allclose(hidden, wall_only)
+        assert not np.allclose(hidden, visible)
+        assert 0.05 < t < 0.6
 
 
 def test_ghost_draws_twice_and_depth_stays_untouched(rig):
@@ -184,7 +184,7 @@ def test_ghost_draws_twice_and_depth_stays_untouched(rig):
     layer = rig.draw.layer("ray", Occlusion.GHOST)
     layer.line("ray", (-2.0, 0.0, 0.0), (2.0, 0.0, 0.0), LINE_RGBA, 9.0)
     rig.render(wall=(-3.0, 0.0))
-    assert rig.pass_.draw_calls == 2, "GHOST 必须是两趟"
+    assert rig.pass_.draw_calls == 2
 
     rig.draw.layer("ray", Occlusion.GHOST).line(
         "ray", (-2.0, 0.0, 0.0), (2.0, 0.0, 0.0), LINE_RGBA, 9.0
@@ -197,7 +197,7 @@ def test_ghost_draws_twice_and_depth_stays_untouched(rig):
     rig._draw_wall(ctx, -3.0, 3.0, depth=1.0)
     px = rig.pixels()
     wall_after = _rgb(px, WIDTH // 2, HEIGHT // 2)
-    assert np.allclose(wall_after, np.array(WALL_RGBA[:3]) * 255, atol=2), "标注不许写深度"
+    assert np.allclose(wall_after, np.array(WALL_RGBA[:3]) * 255, atol=2)
 
 
 @pytest.mark.parametrize("width_px", [3.0, 9.0])
@@ -211,16 +211,16 @@ def test_line_width_is_constant_on_screen_across_depths(rig, width_px):
 
     column = px[:, WIDTH // 2, 0] > 60
     runs = _runs(column)
-    assert len(runs) == 2, f"竖直中线上应当只切到两条线，实测 {len(runs)} 段"
+    assert len(runs) == 2
     near_len, far_len = (
         sorted(runs, key=lambda r: -r[0])[0][1],
         sorted(runs, key=lambda r: -r[0])[1][1],
     )
-    print(f"\n[数字] 宽度 {width_px:g} px：近处 {near_len} 像素，远处 {far_len} 像素")
+    print(f"\n[metric] width {width_px:g} px: near={near_len}, far={far_len}")
 
-    for name, got in (("近", near_len), ("远", far_len)):
-        assert abs(got - width_px) <= 1.0, f"{name}处那条线画出来 {got} 像素，要的是 {width_px:g}"
-    assert abs(near_len - far_len) <= 1.0, "同一条线在两个深度下的像素宽度必须相同"
+    for got in (near_len, far_len):
+        assert abs(got - width_px) <= 1.0
+    assert abs(near_len - far_len) <= 1.0
 
 
 def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
@@ -251,11 +251,11 @@ def test_closed_stroke_has_one_continuous_core_and_outer_outline(rig):
     ndc = clip[:, :2] / clip[:, 3:4]
     screen = np.column_stack(((ndc[:, 0] * 0.5 + 0.5) * WIDTH, (ndc[:, 1] * 0.5 + 0.5) * HEIGHT))
     for x, y in np.rint(screen).astype(int):
-        assert pixels[y, x, :3].min() > 240, "闭合 stroke 的 join 中心不能出现断点或接缝色"
+        assert pixels[y, x, :3].min() > 240
 
     top_mid = np.rint((screen[2] + screen[3]) * 0.5).astype(int)
     gray = pixels[top_mid[1] + 3, top_mid[0], :3]
-    assert 100 < gray.min() < 220, "白色内线之外应当只露出连续的淡灰外轮廓"
+    assert 100 < gray.min() < 220
 
 
 def test_drag_link_is_one_compound_shape(rig):
@@ -310,7 +310,7 @@ def test_arrow_head_shape_is_identical_when_depth_direction_is_reversed(rig):
     half_h = 18
     rows = [int(HEIGHT * (0.5 + y * 0.5)) for y in (-0.35, 0.35)]
     shapes = [mask[row - half_h : row + half_h + 1, x0:x1] for row in rows]
-    assert np.array_equal(shapes[0], shapes[1]), "箭头的屏幕形状不应受深度方向影响"
+    assert np.array_equal(shapes[0], shapes[1])
 
 
 def test_faded_arrow_is_one_continuous_silhouette(rig):
@@ -329,8 +329,8 @@ def test_faded_arrow_is_one_continuous_silhouette(rig):
     x0, x1 = np.rint(screen[:, 0]).astype(int)
     y = round(float(screen[0, 1]))
     core = pixels[y, x0 + 3 : x1 - 3, 0]
-    assert core.min() > 70, "杆与头之间不能漏出背景"
-    assert int(core.max()) - int(core.min()) <= 3, "交界处不能因为重复覆盖而变深"
+    assert core.min() > 70
+    assert int(core.max()) - int(core.min()) <= 3
 
 
 def test_invisible_center_shell_masks_only_the_axis(rig):
@@ -341,9 +341,9 @@ def test_invisible_center_shell_masks_only_the_axis(rig):
     pixels = rig.pixels()
     x, y = WIDTH // 2, HEIGHT // 2
 
-    assert pixels[y, x, :3].min() > 240, "白色中心点必须保留"
-    assert pixels[y, x + 8, :3].max() == 0, "中心点外、透明壳内应露出原场景"
-    assert pixels[y, x + 12, 0] > 200, "透明壳只裁起点，外面的轴必须继续绘制"
+    assert pixels[y, x, :3].min() > 240
+    assert pixels[y, x + 8, :3].max() == 0
+    assert pixels[y, x + 12, 0] > 200
 
 
 def test_ten_thousand_lines_hold_the_frame_budget(rig):
@@ -365,10 +365,10 @@ def test_ten_thousand_lines_hold_the_frame_budget(rig):
     rig.ctx.finish()
     ms = (time.perf_counter() - t0) * 1000.0 / frames
 
-    print(f"\n[数字] 一万条线：{ms:.3f} ms/帧（{frames} 帧均值，含 finish）")
+    print(f"\n[metric] 10k lines: {ms:.3f} ms/frame ({frames} frames, including finish)")
     assert rig.draw.stats().primitives == n
-    assert rig.pass_.draw_calls == 1, "一万条线只该发一次绘制命令"
-    assert ms < 16.6, f"一万条线 {ms:.3f} ms/帧，掉帧了"
+    assert rig.pass_.draw_calls == 1
+    assert ms < 16.6
 
 
 def test_hundred_frames_grow_neither_primitives_nor_draw_calls(rig):
@@ -382,7 +382,7 @@ def test_hundred_frames_grow_neither_primitives_nor_draw_calls(rig):
             )
         rig.render()
         seen.add((rig.draw.stats().primitives, rig.pass_.draw_calls))
-    assert seen == {(3, 1)}, f"100 帧里出现过 {sorted(seen)}"
+    assert seen == {(3, 1)}
 
 
 def test_every_primitive_kind_reaches_the_screen(rig):
@@ -406,9 +406,9 @@ def test_every_primitive_kind_reaches_the_screen(rig):
     rig.render()
     px = rig.pixels()
     lit = int(np.count_nonzero(px[:, :, :3].max(axis=2) > 20))
-    print(f"\n[数字] 七种图元共点亮 {lit} 个像素")
-    assert rig.draw.stats().dropped == 0, "有图元被丢了——别让它静默"
-    assert lit > 2000, "七种图元加起来该在画面上占一大片"
+    print(f"\n[metric] seven primitive kinds cover {lit} pixels")
+    assert rig.draw.stats().dropped == 0
+    assert lit > 2000
 
     assert rig.pass_.draw_calls == 5
 
@@ -438,7 +438,7 @@ def test_the_no_native_symbol_fallback_draws_the_same_picture(rig):
     native = rig.pixels().copy()
     wall_px = np.array(WALL_RGBA[:3]) * 255
     marked = int(np.count_nonzero(np.abs(native[:, :, :3] - wall_px).max(axis=2) > 4))
-    assert marked > 500, "标注一个都没画到墙上，这条判据什么都没判"
+    assert marked > 500
 
     saved, rig.pass_._gl = rig.pass_._gl, _NoAttribPointer()
     try:
@@ -449,4 +449,4 @@ def test_the_no_native_symbol_fallback_draws_the_same_picture(rig):
         rig.pass_._gl = saved
 
     diff = int(np.count_nonzero(np.abs(native.astype(int) - fallback.astype(int)).max(axis=2) > 1))
-    assert diff == 0, f"两条上传路径画出来差了 {diff} 个像素"
+    assert diff == 0

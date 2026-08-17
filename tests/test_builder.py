@@ -231,7 +231,7 @@ def test_flipped_capsule_cap_flips_v():
     rows = b.write_index
     top = scene.tex_coef[rows[2]]
     bottom = scene.tex_coef[rows[3]]
-    assert top[1] > 0 and bottom[1] < 0, "只有下端帽该翻"
+    assert top[1] > 0 and bottom[1] < 0
 
     def mapped(coef, v):
         return coef[1] * v + coef[3]
@@ -292,7 +292,7 @@ def test_hot_path_does_not_allocate():
     current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
-    assert peak - start < budget, f"热路径峰值 {peak - start} B，预算 {budget} B"
+    assert peak - start < budget
     assert current - start < 64 * 1024
 
 
@@ -315,10 +315,10 @@ def test_infinite_plane_grows_with_camera():
     b.update(frame, far_cam)
     ((hx1, hy1),) = b.infinite_plane_half_extents()
 
-    assert hx1 > hx0 * 5 and hy1 > hy0 * 5, "远裁剪面涨了 10 倍，平面没跟上"
+    assert hx1 > hx0 * 5 and hy1 > hy0 * 5
     for h in (hx0, hy0, hx1, hy1):
         assert h >= 50.0
-        assert abs(h / period - round(h / period)) < 1e-6, f"半边长 {h} 不是周期 {period} 的整数倍"
+        assert abs(h / period - round(h / period)) < 1e-6
 
     row = b.scene.infinite_planes[0]
     assert b.scene.transforms[row][0, 0] == pytest.approx(hx1, rel=1e-5)
@@ -340,7 +340,7 @@ def test_infinite_plane_phase_is_stable():
         half = b.infinite_plane_half_extents()[0][0]
         repeats = b.scene.tex_coef[row][0]
         periods.append(2.0 * half / repeats)
-    assert np.allclose(periods, periods[0], rtol=1e-6), f"格子被拉长了：{periods}"
+    assert np.allclose(periods, periods[0], rtol=1e-6)
 
 
 @pytest.mark.parametrize(("repeat", "expect"), [(1.0, 0.5), (2.0, 1.0), (4.0, 2.0)])
@@ -391,17 +391,17 @@ def test_set_visible_rebuilds_and_drops_instances():
 
     cap_node = next(n for n in src.nodes if n.name == "cap1")
     assert b.set_visible(cap_node.node_id, False)
-    assert b.scene.count == n0 - 3, "胶囊的三条实例共用一个节点，要一起消失"
+    assert b.scene.count == n0 - 3
     b.scene.validate()
     assert b.stats().hidden == 3
 
     link = next(n for n in src.nodes if n.name == "link2")
     assert b.set_visible(link.node_id, False)
-    assert b.scene.count == n0 - 3 - 4, "藏掉 link 要连它的 geom 子树一起藏"
+    assert b.scene.count == n0 - 3 - 4
 
     assert b.set_visible(cap_node.node_id, True)
     assert b.scene.count == n0 - 4
-    assert not b.set_visible(9999, False), "不存在的节点要如实报失败，不能静默"
+    assert not b.set_visible(9999, False)
 
     assert b.set_visible(1, False)  # node 1 = floor
     assert b.scene.infinite_planes == ()
@@ -448,14 +448,14 @@ def test_visual_options_filter_static_skin_and_flex_instances():
 
 def test_stats_reports_batching_numbers():
 
-    mesh = pytest.importorskip("forge_viewer.render.mesh", reason="内建网格还没落地")
+    mesh = pytest.importorskip("forge_viewer.render.mesh", reason="built-in meshes are unavailable")
     src = make_source(bodies=10)
     b = SceneSourceBuilder()
     scene = b.set_source(src, CameraView())
     stats = b.stats()
     assert stats.instances == scene.count
     assert stats.buckets == scene.bucket_count()
-    assert not stats.notes, f"统计有说不清的地方：{stats.notes}"
+    assert not stats.notes
 
     expect = 0
     for bucket, (start, stop) in enumerate(scene.bucket_ranges):

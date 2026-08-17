@@ -18,19 +18,10 @@ except ImportError:
     builtin_mesh = None
 
 
-#
-
-
-#
-
-
-#
-
 # |---|---|---|---|
 # | 1 | 0.5 | 0.5 | 1.0 |
 # | 2 | 1.0 | 1.0 | 2.0 |
 # | 4 | 2.0 | 2.0 | 4.0 |
-#
 
 
 TEXUNIFORM_SCALE = 0.5
@@ -72,7 +63,7 @@ class _InfinitePlane:
 
 
 class SceneSourceBuilder:
-    """`SceneSource` + `SceneFrame` → `RenderScene`。"""
+    """Build a RenderScene from stable source data and the current frame."""
 
     def __init__(self) -> None:
         self._source: SceneSource | None = None
@@ -345,7 +336,7 @@ class SceneSourceBuilder:
     def _tex_coef(
         self, mat, size: np.ndarray, infinite: bool, key: MeshKey, local: np.ndarray
     ) -> np.ndarray:
-        """(u_scale, v_scale, u_offset, v_offset)。"""
+        """Return texture scale and offset as (u_scale, v_scale, u_offset, v_offset)."""
         if mat.texture is None:
             coef = np.array([1.0, 1.0, 0.0, 0.0], np.float32)
         elif not mat.tex_uniform and not infinite:

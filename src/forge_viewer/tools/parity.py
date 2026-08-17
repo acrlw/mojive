@@ -71,7 +71,7 @@ def texture_cell_agreement(
 
     palette = np.array([g["rgba"][:3] for g in geoms], np.float32)
     if len(palette) == 0:
-        return 0, 0, "没有可判的格子"
+        return 0, 0, "no samples"
 
     def classify(img: np.ndarray, px: int, py: int) -> int | None:
         patch = img[max(py - 2, 0) : py + 3, max(px - 2, 0) : px + 3, :3].astype(np.float32)
@@ -100,7 +100,7 @@ def texture_cell_agreement(
             continue
         total += 1
         agree += int(ca == cb)
-    note = f"{agree}/{total}" if total else "无可判点"
+    note = f"{agree}/{total}" if total else "no samples"
     return agree, total, note
 
 
@@ -143,7 +143,9 @@ def run_reference(scene: Path, out_dir: Path, width: int, height: int) -> dict:
         timeout=600,
     )
     if proc.returncode != 0:
-        raise RuntimeError(f"参照渲染器子进程失败（退出码 {proc.returncode}）：\n{proc.stderr}")
+        raise RuntimeError(
+            f"Reference renderer failed with exit code {proc.returncode}:\n{proc.stderr}"
+        )
     return json.loads(proc.stdout)
 
 
@@ -180,7 +182,7 @@ def render_forge(scene: Path, doc: dict, out_dir: Path) -> dict[str, np.ndarray]
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="parity", description="与参照渲染器同机位对拍")
+    ap = argparse.ArgumentParser(prog="parity", description="Compare forge and MuJoCo renders")
     ap.add_argument("scene", nargs="?", default="parity_scene")
     ap.add_argument("-o", "--out", default=str(OUT))
     ap.add_argument("--width", type=int, default=960)
@@ -217,20 +219,19 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
 
-    print(f"\n{scene.stem}   {doc['width']}×{doc['height']}   参照 = {doc['renderer']}（子进程）")
-    print(f"  {'机位':<10}{'边缘 IoU':>10}{'分块亮度差':>12}{'采到哪一格':>12}")
+    print(f"\n{scene.stem}   {doc['width']}×{doc['height']}   reference={doc['renderer']}")
+    print(f"  {'view':<10}{'edge IoU':>10}{'block luma':>12}{'cells':>12}")
     for s in scores:
         print(f"  {s.name:<10}{s.edge_iou:>10.3f}{s.block_diff:>12.1f}{s.cells:>12}")
     iou = float(np.mean([s.edge_iou for s in scores]))
     blk = float(np.mean([s.block_diff for s in scores]))
     agree_n = sum(int(s.cells.split("/")[0]) for s in scores if "/" in s.cells)
     agree_d = sum(int(s.cells.split("/")[1]) for s in scores if "/" in s.cells)
-    print(f"  {'均值':<10}{iou:>10.3f}{blk:>12.1f}{f'{agree_n}/{agree_d}':>12}")
-    print(f"\n  三联图（forge | 参照 | 差异）：{out_dir.resolve()}")
+    print(f"  {'mean':<10}{iou:>10.3f}{blk:>12.1f}{f'{agree_n}/{agree_d}':>12}")
+    print(f"\n  Triptychs (forge | reference | difference): {out_dir.resolve()}")
     print(
-        "\n  **判据不是「块差越小越好」**：参照渲染器是 2010 年前后的固定管线，"
-        "\n  相当一部分行为是当年的实现约束、不是设计。每一处差异只能落进"
-        "\n  「我们错了」（修）或「我们更好」（登记进 docs/RENDERER.md，接受数字变差）两类。"
+        "\n  Interpret metrics with docs/RENDERER.md. Fixed-function reference behavior "
+        "and intentional forge improvements can increase pixel differences."
     )
     return 0
 

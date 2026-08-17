@@ -100,7 +100,7 @@ def item_rect(v, function_name, label):
         v.sync()
     finally:
         setattr(imgui, function_name, original)
-    assert found, f"没有画出 {function_name}({label!r})"
+    assert found
     return found[-1]
 
 
@@ -108,8 +108,8 @@ def test_viewport_gets_real_estate(viewer):
 
     _x, _y, w, h = viewer.app._viewport_rect
     pw, ph = viewer.window.size_points
-    assert w > 200 and h > 200, f"视口只有 {w}×{h} 点，手势进不去"
-    assert (w * h) / (pw * ph) > 0.20, f"视口只占窗口 {(w * h) / (pw * ph):.1%}"
+    assert w > 200 and h > 200
+    assert (w * h) / (pw * ph) > 0.20
 
 
 def test_all_panels_docked_not_stacked(viewer):
@@ -118,7 +118,7 @@ def test_all_panels_docked_not_stacked(viewer):
 
     laid_out = set(Window._LAYOUT_LEFT + Window._LAYOUT_RIGHT + Window._LAYOUT_BOTTOM)
     declared = {p.name for p in viewer.app.panels.panels}
-    assert declared <= laid_out, f"这些面板没有出厂位置，会摞在左上角：{declared - laid_out}"
+    assert declared <= laid_out
 
 
 def test_hierarchy_visibility_toggle_does_not_select_the_row(viewer):
@@ -135,11 +135,11 @@ def test_hierarchy_visibility_toggle_does_not_select_the_row(viewer):
     point = item_rect(viewer, "invisible_button", f"##vis{target.node_id}")
 
     click(viewer, imgui.get_io(), point)
-    assert not target.visible, "点了可见性圆点，节点仍然可见"
-    assert viewer.session.selected == other.object_id, "可见性按钮同时把这一行选中了"
+    assert not target.visible
+    assert viewer.session.selected == other.object_id
 
     click(viewer, imgui.get_io(), point)
-    assert target.visible, "第二次点击没有把节点恢复显示"
+    assert target.visible
     viewer.session.submit(cmd.Select(selected_before))
 
 
@@ -154,9 +154,9 @@ def test_orbit_moves_camera_and_picture(viewer):
 
     drag(viewer, io, cx, cy, 144, -36)
 
-    assert abs(viewer.app.camera.yaw - before_yaw) > 5.0, "拖了 144 点，相机方位角没动"
+    assert abs(viewer.app.camera.yaw - before_yaw) > 5.0
     diff = np.abs(snap(viewer).astype(np.int16) - a.astype(np.int16)).mean()
-    assert diff > 1.0, f"相机转了但画面没跟着重画（平均像素差 {diff:.2f}）"
+    assert diff > 1.0
 
 
 def test_wheel_dollies(viewer):
@@ -174,11 +174,9 @@ def test_wheel_dollies(viewer):
         io.add_mouse_wheel_event(0.0, -1.0)
         viewer.sync()
 
-    assert viewer.app.camera.distance > before * 1.05, (
-        f"滚了 6 格，视距从 {before:.3f} 变成 {viewer.app.camera.distance:.3f}"
-    )
+    assert viewer.app.camera.distance > before * 1.05
     diff = np.abs(snap(viewer).astype(np.int16) - a.astype(np.int16)).mean()
-    assert diff > 0.5, f"视距变了但画面没变（{diff:.2f}）"
+    assert diff > 0.5
 
 
 def test_floating_panel_over_the_viewport_blocks_camera_input(viewer):
@@ -242,7 +240,7 @@ def test_click_picks_the_object_actually_under_the_cursor(viewer):
 
     cam = viewer.app.camera.view()
     frame = viewer.session.frame
-    assert frame.body_xpos is not None, "这个后端没有申报 body_xpos，这条判据换个场景写"
+    assert frame.body_xpos is not None
     rect = viewer.app._viewport_rect
     _x, y, _w, h = rect
     mid_y = y + h * 0.5
@@ -255,7 +253,7 @@ def test_click_picks_the_object_actually_under_the_cursor(viewer):
         pt = _project(cam, world, rect)
         if pt is not None:
             projected.append((float(np.linalg.norm(world - np.asarray(cam.eye))), node, pt))
-    assert projected, "取景之后一个连杆都没落进视口"
+    assert projected
 
     CLEAR_PT = 30.0
     candidates = []
@@ -270,7 +268,7 @@ def test_click_picks_the_object_actually_under_the_cursor(viewer):
         ):
             continue
         candidates.append((dist, node, (px, py)))
-    assert candidates, "这个机位下找不到镜像点为空的目标，换个场景或机位写这条判据"
+    assert candidates
     _dist, target, (px, py) = min(candidates, key=lambda t: t[0])
 
     io.add_mouse_pos_event(px, py)
@@ -282,19 +280,14 @@ def test_click_picks_the_object_actually_under_the_cursor(viewer):
     viewer.sync()
 
     got = viewer.session.selected_node
-    assert got is not None, f"在 {target.name} 的投影位置 ({px:.0f},{py:.0f}) 点击，什么都没选中"
-    assert got.object_id == target.object_id, (
-        f"点的是 {target.name} 的位置，选中的却是 {got.name}——光标到像素的换算错了"
-    )
+    assert got is not None
+    assert got.object_id == target.object_id
 
     img = viewer.app._viewport_image
     assert img is not None
     hit = img.pixel_from_viewport_point((px, py), rect)
-    assert hit is not None, "光标明明在视口里，换算却说不在"
-    assert int(viewer.backend.pick(*hit)) == target.object_id, (
-        f"GPU 拾取那一级读到的是 {viewer.backend.pick(*hit)}，该是 {target.name} 的 "
-        f"{target.object_id}——光标到像素的换算（多半是 Y 翻转）错了"
-    )
+    assert hit is not None
+    assert int(viewer.backend.pick(*hit)) == target.object_id
 
 
 def test_selection_reaches_the_outline_in_the_window(viewer):
@@ -316,15 +309,13 @@ def test_selection_reaches_the_outline_in_the_window(viewer):
     color = np.array([255, 161, 51], np.int16)
     before_count = np.all(np.abs(before.astype(np.int16) - color) <= 3, axis=-1).sum()
     after_count = np.all(np.abs(after.astype(np.int16) - color) <= 3, axis=-1).sum()
-    assert after_count > before_count + 20, (
-        f"窗口里的描边像素没有增加：{before_count} → {after_count}"
-    )
+    assert after_count > before_count + 20
 
 
 def test_view_gizmo_fits_the_corner(viewer):
 
     balls = viewer.app.view_cube.balls
-    assert balls, "这一帧根本没排出轴球"
+    assert balls
     xs = [b.screen[0] for b in balls]
     ys = [b.screen[1] for b in balls]
     r = max(b.radius for b in balls)
@@ -332,13 +323,11 @@ def test_view_gizmo_fits_the_corner(viewer):
     top, bottom = min(ys) - r, max(ys) + r
 
     x, y, w, h = viewer.app._viewport_rect
-    assert x <= left and right <= x + w, (
-        f"轴球横向出了视口：{left:.0f}..{right:.0f} vs {x}..{x + w}"
-    )
-    assert y <= top and bottom <= y + h, f"轴球纵向出了视口：{top:.0f}..{bottom:.0f}"
+    assert x <= left and right <= x + w
+    assert y <= top and bottom <= y + h
     share = ((right - left) * (bottom - top)) / (w * h)
 
-    assert share < 0.05, f"轴球占了视口 {share:.1%}——点空间的尺寸大概又乘了一次 DPI"
+    assert share < 0.05
 
 
 @pytest.mark.parametrize(
@@ -358,9 +347,7 @@ def test_view_gizmo_click_snaps_to_that_axis(viewer, axis, sign, yaw, pitch):
     viewer.sync()
 
     hit = viewer.app.view_cube.hovered
-    assert hit is not None and (hit.axis, hit.sign) == (axis, sign), (
-        f"光标就在 {'XYZ'[axis]}{'+' if sign > 0 else '-'} 的球心上，命中的却是 {hit}"
-    )
+    assert hit is not None and (hit.axis, hit.sign) == (axis, sign)
     io.add_mouse_button_event(0, True)
     viewer.sync()
     io.add_mouse_button_event(0, False)
@@ -369,7 +356,7 @@ def test_view_gizmo_click_snaps_to_that_axis(viewer, axis, sign, yaw, pitch):
         viewer.sync()
 
     got_yaw = viewer.app.camera.yaw % 360.0
-    assert abs((got_yaw - yaw + 180.0) % 360.0 - 180.0) < 1.0, f"yaw 落在 {got_yaw:.1f}，要 {yaw}"
+    assert abs((got_yaw - yaw + 180.0) % 360.0 - 180.0) < 1.0
     assert abs(viewer.app.camera.pitch - pitch) < 1.0
 
 
@@ -387,9 +374,9 @@ def test_view_gizmo_axis_points_at_you_when_you_look_down_it(viewer):
     for b in viewer.app.view_cube.balls:
         d = float(np.hypot(b.screen[0] - cx, b.screen[1] - cy))
         if b.axis == 0:
-            assert d < reach * 0.1, f"看 +X 时 X 轴的球该在正中，却离中心 {d:.1f} 点"
+            assert d < reach * 0.1
         else:
-            assert d > reach * 0.9, f"{'XYZ'[b.axis]} 轴的球该撑在外圈，却离中心 {d:.1f} 点"
+            assert d > reach * 0.9
 
 
 def _ball_and_ink(frame, ball, scale):
@@ -447,10 +434,10 @@ def test_gizmo_label_sits_in_the_middle_of_its_ball(viewer):
             dxs.append(ix - bx)
             dys.append(iy - by)
 
-    assert len(dxs) >= 12, f"只量到 {len(dxs)} 个样本，判据没有统计意义"
+    assert len(dxs) >= 12
     mx, my = float(np.mean(dxs)), float(np.mean(dys))
-    assert abs(mx) < 0.6, f"字整体偏左/右 {mx:+.2f} 物理像素（{len(dxs)} 个样本）"
-    assert abs(my) < 0.6, f"字整体偏上/下 {my:+.2f} 物理像素（{len(dxs)} 个样本）"
+    assert abs(mx) < 0.6
+    assert abs(my) < 0.6
 
 
 class _RecordingDrawList:
@@ -530,7 +517,7 @@ def test_gizmo_draws_each_axis_as_one_unit(viewer):
         imgui.get_window_draw_list = real
 
     calls = [c for dl in rec for c in dl.calls]
-    assert calls, "一次绘制调用都没记到——代理没接上"
+    assert calls
 
     span: dict[int, tuple[int, int]] = {}
     for pos, (_kind, idx) in enumerate(calls):
@@ -540,20 +527,15 @@ def test_gizmo_draws_each_axis_as_one_unit(viewer):
     for i in sorted(span):
         for j in sorted(span):
             if i < j:
-                assert span[i][1] < span[j][0], (
-                    f"{'XYZ'[balls[i].axis]}{'+' if balls[i].positive else '-'}（更远，深度"
-                    f"{balls[i].depth:+.2f}）的绘制与 {'XYZ'[balls[j].axis]}"
-                    f"{'+' if balls[j].positive else '-'}（更近）的交错了——"
-                    "这就是远处的字浮在近处球上的成因"
-                )
+                assert span[i][1] < span[j][0]
 
     for idx, (lo, hi) in span.items():
         kinds = [k for k, i in calls[lo : hi + 1] if i == idx]
         if balls[idx].positive:
-            assert kinds.count("lollipop") == 1, "正向轴没有作为一个棒棒糖图元绘制"
+            assert kinds.count("lollipop") == 1
         if "label" in kinds:
             body = "lollipop" if balls[idx].positive else "disc"
-            assert kinds.index(body) < kinds.index("label"), "字画在自己的轴单元之前，会被盖掉"
+            assert kinds.index(body) < kinds.index("label")
 
 
 def test_negative_balls_are_dark_and_opaque(viewer):
@@ -586,10 +568,7 @@ def test_negative_balls_are_dark_and_opaque(viewer):
         pos = a[(axis, True)][0]
         neg = a[(axis, False)][0]
 
-        assert neg[axis] < pos[axis] * 0.6, (
-            f"{'XYZ'[axis]} 负向球的 {'RGB'[axis]} 通道 {neg[axis]:.0f}、"
-            f"正向 {pos[axis]:.0f}——负向没压暗"
-        )
+        assert neg[axis] < pos[axis] * 0.6
 
     moved_bg = 0
     for key in a:
@@ -600,11 +579,8 @@ def test_negative_balls_are_dark_and_opaque(viewer):
         if float(np.abs(bg_a - bg_b).max()) < 8.0:
             continue
         moved_bg += 1
-        assert float(np.abs(fill_a - fill_b).max()) < 6.0, (
-            f"{'XYZ'[key[0]]} 负向球：底色从 {bg_a.astype(int)} 换成 {bg_b.astype(int)} 之后，"
-            f"球的颜色也从 {fill_a.astype(int)} 变成了 {fill_b.astype(int)}——它是半透明的"
-        )
-    assert moved_bg >= 1, "两个机位下没有一个负向球换了底色，这条判据什么都没验到"
+        assert float(np.abs(fill_a - fill_b).max()) < 6.0
+    assert moved_bg >= 1
 
 
 def test_hover_does_not_resize_the_ball(viewer):
@@ -623,13 +599,11 @@ def test_hover_does_not_resize_the_ball(viewer):
     io.add_mouse_pos_event(*target.screen)
     for _ in range(3):
         viewer.sync()
-    assert viewer.app.view_cube.hovered is not None, "光标在球心上却没命中"
+    assert viewer.app.view_cube.hovered is not None
     hovered = _ball_and_ink(snap(viewer), target, s)
 
     assert plain is not None and hovered is not None
-    assert abs(hovered[2] - plain[2]) <= 1, (
-        f"悬停后球从 {plain[2]} 像素变成 {hovered[2]} 像素——悬停不该改大小"
-    )
+    assert abs(hovered[2] - plain[2]) <= 1
 
 
 def test_top_view_is_canonical_x_right_y_up(viewer):
@@ -641,8 +615,8 @@ def test_top_view_is_canonical_x_right_y_up(viewer):
     viewer.app.camera.look_from(yaw, pitch, viewer.app.camera_out, animate=False)
     viewer.sync()
     right, up, _fwd = camera_basis(viewer.app.camera.view())
-    assert right[0] > 0.99, f"俯视时世界 +X 应该指向屏幕右（right·X={right[0]:+.3f}）"
-    assert up[1] > 0.99, f"俯视时世界 +Y 应该指向屏幕上（up·Y={up[1]:+.3f}）"
+    assert right[0] > 0.99
+    assert up[1] > 0.99
 
 
 def test_clicking_during_a_transition_does_not_strand_the_camera(viewer):
@@ -662,7 +636,7 @@ def test_clicking_during_a_transition_does_not_strand_the_camera(viewer):
     viewer.sync()
     io.add_mouse_button_event(0, False)
     viewer.sync()
-    assert viewer.app.camera.animating, "点了 +Z 却没起缓动，这条判据下面的部分就没意义了"
+    assert viewer.app.camera.animating
 
     cx, cy = center(viewer)
     io.add_mouse_pos_event(cx, cy)
@@ -678,10 +652,7 @@ def test_clicking_during_a_transition_does_not_strand_the_camera(viewer):
         viewer.sync()
 
     assert not viewer.app.camera.animating
-    assert abs(viewer.app.camera.pitch - vc.PITCH_LIMIT) < 0.5, (
-        f"过渡途中点了一下，相机停在 pitch={viewer.app.camera.pitch:.1f}"
-        f"（该到 {vc.PITCH_LIMIT}）——缓动被掐死在半路"
-    )
+    assert abs(viewer.app.camera.pitch - vc.PITCH_LIMIT) < 0.5
     assert abs((viewer.app.camera.yaw - vc.TOP_YAW + 180.0) % 360.0 - 180.0) < 0.5
 
 
@@ -690,9 +661,7 @@ def test_font_is_monospace(viewer):
     from imgui_bundle import imgui
 
     widths = {c: imgui.calc_text_size(c).x for c in "iWml.0X"}
-    assert len(set(widths.values())) == 1, (
-        f"字面不等宽：{widths}（用的是 {viewer.window.font_report.mono}）"
-    )
+    assert len(set(widths.values())) == 1
 
 
 def test_cjk_glyphs_present(viewer):
@@ -700,12 +669,13 @@ def test_cjk_glyphs_present(viewer):
     from imgui_bundle import imgui
 
     if not viewer.window.font_report.cjk:
-        pytest.skip(f"本机没有 CJK 字体：{viewer.window.font_report.notes}")
+        pytest.skip(f"CJK font unavailable: {viewer.window.font_report.notes}")
     font = imgui.get_io().fonts.fonts[0]
-    missing = [c for c in "没有画面后端这一帧画不出来" if not font.is_glyph_in_font(ord(c))]
-    assert not missing, f"缺字形：{missing}（CJK 用的是 {viewer.window.font_report.cjk}）"
+    sample = "\u6ca1\u6709\u753b\u9762\u540e\u7aef\u8fd9\u4e00\u5e27\u753b\u4e0d\u51fa\u6765"
+    missing = [c for c in sample if not font.is_glyph_in_font(ord(c))]
+    assert not missing
 
-    assert not font.is_glyph_in_font(0x10FFFD), "is_glyph_in_font 对任何码位都返回真，判据无效"
+    assert not font.is_glyph_in_font(0x10FFFD)
 
 
 def test_font_size_is_in_layout_space(viewer):
@@ -714,11 +684,7 @@ def test_font_size_is_in_layout_space(viewer):
 
     want = viewer.window.config.font_size_pt * viewer.window.style_scale
     got = imgui.get_font_size()
-    assert abs(got - want) < 0.5, (
-        f"imgui 用的字号是 {got:.1f} 点，按配置该是 {want:.1f} 点"
-        f"（font_scale_dpi={imgui.get_style().font_scale_dpi}，"
-        f"style_scale={viewer.window.style_scale}）——字号和布局不在同一个空间里"
-    )
+    assert abs(got - want) < 0.5
 
     style = imgui.get_style()
     button_h = imgui.get_frame_height()
@@ -823,7 +789,7 @@ def test_inspector_drag_stays_ui_owned_after_crossing_into_viewport(free_body_vi
         v.sync()
 
         moved = np.asarray(v.session.frame.body_xpos[node.body_index], np.float64)
-        assert abs(moved[0] - old_pos[0]) > 0.1, "Inspector 数值没有被拖动"
+        assert abs(moved[0] - old_pos[0]) > 0.1
         assert (v.app.camera.yaw, v.app.camera.pitch) == pytest.approx(camera_before, abs=1e-9)
     finally:
         io.add_mouse_button_event(0, False)
@@ -868,7 +834,7 @@ def test_inspector_rotation_y_drags_continuously_past_gimbal_lock(free_body_view
         v.sync()
 
         assert min(samples) < -100.0
-        assert np.max(np.diff(samples)) < 1.0, f"Y 在 -90° 附近折返了：{samples}"
+        assert np.max(np.diff(samples)) < 1.0
         displayed = np.asarray(panel._rotation_euler, np.float64)
         actual = np.asarray(v.session.frame.body_xmat[node.body_index]).reshape(3, 3)
         assert actual == pytest.approx(math3d.euler_xyz_to_mat3(np.radians(displayed)), abs=2e-5)
@@ -891,7 +857,7 @@ def test_gizmo_is_live_for_a_free_body(free_body_viewer):
     v.session.submit(cmd.Select(node.object_id))
     for _ in range(4):
         v.sync()
-    assert v.app.gizmo.last_verdict.ok, f"判定说不该出现：{v.app.gizmo.last_verdict.reason}"
+    assert v.app.gizmo.last_verdict.ok
 
     cam = v.app.camera.view()
     x, y, w, h = v.app._viewport_rect
@@ -904,12 +870,12 @@ def test_gizmo_is_live_for_a_free_body(free_body_viewer):
     io.add_mouse_pos_event(px, py)
     for _ in range(2):
         v.sync()
-    assert v.app.gizmo.hovered, "光标就在物体中心（手柄的屏幕移动手柄上），却报没悬停"
+    assert v.app.gizmo.hovered
 
     io.add_mouse_pos_event(x + 12.0, y + h - 12.0)
     for _ in range(2):
         v.sync()
-    assert not v.app.gizmo.hovered, "光标已经挪开了，还报悬停"
+    assert not v.app.gizmo.hovered
 
 
 def test_gizmo_disappears_without_a_free_body(free_body_viewer):
@@ -928,8 +894,8 @@ def test_gizmo_disappears_without_a_free_body(free_body_viewer):
         v.sync()
 
     assert not v.app.gizmo.last_verdict.ok
-    assert v.app.gizmo.last_verdict.reason, "拒绝了却没给理由（铁律 4）"
-    assert not v.app.gizmo.hovered, "手柄不该出现，却还在报悬停"
+    assert v.app.gizmo.last_verdict.reason
+    assert not v.app.gizmo.hovered
 
 
 def test_dragging_the_gizmo_moves_the_object_not_the_camera(free_body_viewer):
@@ -958,7 +924,7 @@ def test_dragging_the_gizmo_moves_the_object_not_the_camera(free_body_viewer):
     io.add_mouse_pos_event(px, py - 55.0)
     for _ in range(2):
         v.sync()
-    assert v.app.gizmo.hovered, "光标在 Z 箭头上，原生命中却说没被悬停"
+    assert v.app.gizmo.hovered
 
     before_z = float(v.session.frame.body_xpos[node.body_index][2])
     before_yaw = v.app.camera.yaw
@@ -972,8 +938,8 @@ def test_dragging_the_gizmo_moves_the_object_not_the_camera(free_body_viewer):
         v.sync()
 
     after_z = float(v.session.frame.body_xpos[node.body_index][2])
-    assert after_z - before_z > 0.1, f"拖了 Z 箭头，物体只走了 {after_z - before_z:+.3f}"
-    assert abs(v.app.camera.yaw - before_yaw) < 1e-6, "拖手柄的时候相机跟着转了"
+    assert after_z - before_z > 0.1
+    assert abs(v.app.camera.yaw - before_yaw) < 1e-6
 
 
 @pytest.mark.parametrize(("style", "arrow_count"), (("2d", 1), ("3d", 0)))
@@ -1190,13 +1156,11 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style):
         v.sync()
 
     gizmo_draw = recorders[0]
-    assert gizmo_draw.sectors == 1, f"{style} gizmo 没画旋转角扇"
-    assert gizmo_draw.open_arcs == 1, f"{style} gizmo 的小角度圆弧仍是尖角闭合线"
-    assert max(draw.closed_arcs for draw in recorders[1:]) == gizmo_draw.closed_arcs + 1, (
-        f"{style} gizmo 跨过 360° 后没有留下已完成的一整圈"
-    )
-    assert gizmo_draw.radials == 2, f"{style} gizmo 没有拆开两条径向线"
-    assert gizmo_draw.center_dots == 0, f"{style} gizmo 又画出了旋转中心圆点"
+    assert gizmo_draw.sectors == 1
+    assert gizmo_draw.open_arcs == 1
+    assert max(draw.closed_arcs for draw in recorders[1:]) == gizmo_draw.closed_arcs + 1
+    assert gizmo_draw.radials == 2
+    assert gizmo_draw.center_dots == 0
     assert any(text.startswith("Z ") and text.endswith("°") for text in gizmo_draw.texts)
     assert after_pos == pytest.approx(before_pos, abs=1e-5)
     assert np.linalg.norm(after_mat - before_mat) > 0.05
@@ -1231,12 +1195,8 @@ def test_gizmo_stays_drawn_while_the_camera_is_being_dragged(free_body_viewer):
     io.add_mouse_button_event(0, False)
     v.sync()
 
-    assert all(drawn for drawn, _ in seen_drawn_while_dragging), (
-        f"转视角途中手柄断过：{seen_drawn_while_dragging}"
-    )
-    assert not any(inter for _, inter in seen_drawn_while_dragging), (
-        "转视角途中手柄还在收输入——两个手势会打架"
-    )
+    assert all(drawn for drawn, _ in seen_drawn_while_dragging)
+    assert not any(inter for _, inter in seen_drawn_while_dragging)
 
 
 def test_holding_axis_key_uses_the_exact_gizmo_axis_without_a_mouse_click(free_body_viewer):
@@ -1305,10 +1265,8 @@ def test_holding_axis_key_uses_the_exact_gizmo_axis_without_a_mouse_click(free_b
     axis_dir = axis[1] - axis[0]
     line_dir /= np.linalg.norm(line_dir)
     axis_dir /= np.linalg.norm(axis_dir)
-    assert abs(float(np.dot(line_dir, axis_dir))) > 0.9999, (
-        "按 X 后的无限线没有沿 body-frame X 箭头方向"
-    )
-    assert np.linalg.norm(line[1] - line[0]) > min(rect[2], rect[3]), "约束线没有贯穿 viewport"
+    assert abs(float(np.dot(line_dir, axis_dir))) > 0.9999
+    assert np.linalg.norm(line[1] - line[0]) > min(rect[2], rect[3])
 
     before = np.asarray(v.session.frame.body_xpos[node.body_index]).copy()
     io.add_mouse_pos_event(*(cursor + axis_dir * 36.0))
@@ -1336,7 +1294,7 @@ def test_the_keyboard_shortcuts_are_not_swallowed(free_body_viewer):
     v.session.submit(cmd.Select(node.object_id))
     for _ in range(3):
         v.sync()
-    assert not io.want_text_input, "没有输入框获得焦点，这一位就该是假的"
+    assert not io.want_text_input
 
     def press(key):
         io.add_key_event(key, True)
@@ -1346,18 +1304,18 @@ def test_the_keyboard_shortcuts_are_not_swallowed(free_body_viewer):
 
     v.app.gizmo.set_mode("translate")
     press(imgui.Key.r)
-    assert v.app.gizmo.mode == "rotate", "按 R 没切到旋转手柄"
+    assert v.app.gizmo.mode == "rotate"
     press(imgui.Key.g)
-    assert v.app.gizmo.mode == "translate", "按 G 没切回平移手柄"
+    assert v.app.gizmo.mode == "translate"
     v.app.gizmo.set_space("body")
     press(imgui.Key.t)
-    assert v.app.gizmo.space == "world", "按 T 没切到 world frame"
+    assert v.app.gizmo.space == "world"
     press(imgui.Key.t)
-    assert v.app.gizmo.space == "body", "再按 T 没切回 body frame"
+    assert v.app.gizmo.space == "body"
 
     paused = v.session.paused
     press(imgui.Key.space)
-    assert v.session.paused is not paused, "按空格没切换暂停"
+    assert v.session.paused is not paused
     press(imgui.Key.space)
     assert v.session.paused is paused
 
@@ -1367,7 +1325,7 @@ def test_the_keyboard_shortcuts_are_not_swallowed(free_body_viewer):
     press(imgui.Key.f)
     for _ in range(120):
         v.sync()
-    assert v.app.camera.distance < 50.0, f"按 F 没取景，视距还是 {v.app.camera.distance:.1f}"
+    assert v.app.camera.distance < 50.0
 
 
 def test_g_and_r_switch_modes_and_there_is_no_scale(free_body_viewer):
@@ -1379,7 +1337,7 @@ def test_g_and_r_switch_modes_and_there_is_no_scale(free_body_viewer):
     g.set_mode("translate")
     assert g.mode == "translate"
     g.set_mode("scale")
-    assert g.mode == "translate", "居然接受了 scale 档"
+    assert g.mode == "translate"
 
 
 def test_closing_one_window_leaves_glfw_alive_for_the_other():

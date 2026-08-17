@@ -264,7 +264,7 @@ class SceneFrame:
     ctrl: np.ndarray | None = None
     actuator_activation: np.ndarray | None = None
 
-    contacts: np.ndarray | None = None  # (C, 7)：pos(3) + normal(3) + force
+    contacts: np.ndarray | None = None  # (C, 7): position(3), normal(3), force
     tendon_segments: np.ndarray | None = None  # (W, 2, 3) f32
     tendon_ids: np.ndarray | None = None
     tendon_widths: np.ndarray | None = None

@@ -1,6 +1,5 @@
 #version 330 core
 
-//
 
 in vec3 in_position;
 in vec4 in_model0;

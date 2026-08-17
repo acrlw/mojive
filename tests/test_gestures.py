@@ -170,8 +170,8 @@ def test_help_panel_lists_every_key_the_main_loop_polls():
     documented: set[str] = set()
     for keys, _text in KEYS:
         documented.update(t.lower() for t in re.split(r"[^A-Za-z0-9]+", keys) if t)
-    assert polled, "扫不到任何键——`_poll_keys` 的写法变了，这条判据先失效了"
-    assert polled <= documented, f"这些键没写进 Help 面板：{sorted(polled - documented)}"
+    assert polled
+    assert polled <= documented
 
 
 def test_travel_separates_a_click_from_a_drag():

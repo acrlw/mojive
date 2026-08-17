@@ -52,7 +52,7 @@ def test_ambient_wrong_domain_is_off_by_a_factor_of_two():
     table = {0.2: 2.007, 0.25: 2.104, 0.3: 2.175, 0.4: 2.272, 0.5: 2.336}
     for a, expected in table.items():
         ratio = float(color.ambient_linear(a, gain=2.0) / _wrong_ambient_in_linear_domain(a))
-        assert ratio == pytest.approx(expected, abs=0.01), f"A={a} 的比值变了"
+        assert ratio == pytest.approx(expected, abs=0.01)
 
     a = np.array([0.15, 0.25, 0.35, 0.45])
     assert not np.allclose(color.ambient_linear(a, gain=2.0), _wrong_ambient_in_linear_domain(a))
@@ -80,7 +80,7 @@ def test_tonemap_preserves_hue():
     before = rgb[0] / rgb[2]
 
     ok = np.clip(color.tonemap(rgb), 0.0, 1.0)
-    assert ok.max() <= 1.0, "峰值仍然溢出，说明滚降没生效"
+    assert ok.max() <= 1.0
     assert ok[0] / ok[2] == pytest.approx(before, abs=1e-5)
 
     bad = np.clip(_wrong_tonemap_on_luma(rgb), 0.0, 1.0)
@@ -114,8 +114,8 @@ def test_exposure_one_saturates_far_less_than_two():
 
     one, two = saturated(1.0), saturated(2.0)
     assert color.EXPOSURE == 1.0
-    assert two > 10 * one, f"曝光 1.0 饱和 {one} 个、2.0 饱和 {two} 个——差距不够"
-    assert one < hdr.size * 0.0005, f"曝光 1.0 就已经饱和了 {one} 个"
+    assert two > 10 * one
+    assert one < hdr.size * 0.0005
 
 
 def test_flat_ambient_shading_matches_the_measured_reference():
@@ -126,20 +126,16 @@ def test_flat_ambient_shading_matches_the_measured_reference():
     tolerance = {0.10: 7, 0.20: 4, 0.35: 2, 0.50: 2}
     for ambient, reference in measured.items():
         got = int(color.shade_flat(color.srgb_to_linear(rgba), ambient)[0])
-        assert abs(got - reference) <= tolerance[ambient], (
-            f"ambient={ambient}：forge {got} vs 参照实测 {reference}"
-        )
+        assert abs(got - reference) <= tolerance[ambient]
 
 
 def test_ambient_gain_is_what_the_reference_actually_does():
 
-    assert pytest.approx(1.0) == color.AMBIENT_GAIN, (
-        "系数变了。改之前先跑 make calibrate 看参照给的是多少——规格里的 2.0 出自更早的 MuJoCo"
-    )
+    assert pytest.approx(1.0) == color.AMBIENT_GAIN
 
     got = int(color.shade_flat(color.srgb_to_linear(0.95), 0.5)[0])
-    assert abs(got - 121) <= 2, f"{got}，参照实测是 121"
-    assert abs(got - 242) > 100, "落在了 2× 那一档上"
+    assert abs(got - 121) <= 2
+    assert abs(got - 242) > 100
 
 
 def test_tonemap_only_bites_above_the_knee():
@@ -150,5 +146,5 @@ def test_tonemap_only_bites_above_the_knee():
     bright = np.full(3, 1.60)
     with_knee = int(color.to_u8(color.finish(bright, tonemap_on=True))[0])
     without = int(color.to_u8(color.finish(bright, tonemap_on=False))[0])
-    assert without == 255, "关掉色调映射时高亮就该硬裁到死白"
-    assert with_knee < 255, "开着色调映射还是死白——膝点没起作用"
+    assert without == 255
+    assert with_knee < 255

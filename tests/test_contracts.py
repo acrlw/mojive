@@ -68,16 +68,12 @@ def test_camera_preset_tables_agree_on_which_way_is_up():
     from forge_viewer.ui.panels.camera import PRESETS as PANEL
 
     panel = {name: (yaw, pitch) for name, yaw, pitch in PANEL}
-    assert set(panel) == set(CAM), f"两张表的机位名对不上：{set(panel) ^ set(CAM)}"
+    assert set(panel) == set(CAM)
     for name, (yaw, pitch) in panel.items():
         cam_yaw, cam_pitch = CAM[name]
-        assert np.sign(pitch) == np.sign(cam_pitch), (
-            f"机位 {name} 的 pitch 符号相反：面板 {pitch} vs 相机 {cam_pitch}"
-        )
-        assert abs(pitch - cam_pitch) < 1.0, f"机位 {name} 的 pitch 差太多：{pitch} vs {cam_pitch}"
-        assert abs(((yaw - cam_yaw + 180) % 360) - 180) < 1.0, (
-            f"机位 {name} 的 yaw 对不上：面板 {yaw} vs 相机 {cam_yaw}"
-        )
+        assert np.sign(pitch) == np.sign(cam_pitch)
+        assert abs(pitch - cam_pitch) < 1.0
+        assert abs(((yaw - cam_yaw + 180) % 360) - 180) < 1.0
 
 
 def test_pitch_slider_reset_keeps_the_camera_above_ground():
@@ -87,11 +83,9 @@ def test_pitch_slider_reset_keeps_the_camera_above_ground():
 
     initial = {attr: init for attr, _lo, _hi, _fmt, init in PARAM_SLIDERS}
     pitch0 = initial.get("pitch")
-    assert pitch0 is not None, "找不到 pitch 滑条的初值——判据本身失效了"
-    assert pitch0 > 0, f"pitch 初值 {pitch0} 会把相机复位到地面以下"
-    assert any(abs(p - pitch0) < 1.0 for _n, _y, p in PANEL), (
-        "pitch 初值不对应任何一个机位预设——那它是从哪来的？"
-    )
+    assert pitch0 is not None
+    assert pitch0 > 0
+    assert any(abs(p - pitch0) < 1.0 for _n, _y, p in PANEL)
 
 
 def test_the_two_picking_coordinate_paths_agree():
@@ -112,7 +106,7 @@ def test_the_two_picking_coordinate_paths_agree():
     for p in probes:
         mine = img.pixel_from_viewport_point(p, rect)
         theirs = viewport_point_to_target_pixel(p, rect, (img.width, img.height))
-        assert mine == theirs, f"点 {p}：共同实现给 {mine}，渲染层给 {theirs}"
+        assert mine == theirs
 
 
 def test_picking_flips_y_and_uses_the_target_over_rect_ratio():
@@ -125,11 +119,11 @@ def test_picking_flips_y_and_uses_the_target_over_rect_ratio():
     top = img.pixel_from_viewport_point((200.0, 0.0), rect)
     bottom = img.pixel_from_viewport_point((200.0, 299.9), rect)
     assert top is not None and bottom is not None
-    assert top[1] == img.height - 1, f"视口顶端应当落到最后一行，实为 {top[1]}"
-    assert bottom[1] == 0, f"视口底端应当落到第 0 行，实为 {bottom[1]}"
+    assert top[1] == img.height - 1
+    assert bottom[1] == 0
 
     mid = img.pixel_from_viewport_point((100.0, 150.0), rect)
-    assert mid is not None and mid[0] == 200, f"x 换算不对：{mid[0]}，应为 200"
+    assert mid is not None and mid[0] == 200
 
     assert img.pixel_from_viewport_point((-1.0, 10.0), rect) is None
     assert img.pixel_from_viewport_point((10.0, 400.0), rect) is None
@@ -145,15 +139,15 @@ def test_instance_layout_matches_the_documented_stride():
     from forge_viewer.render.scene import INSTANCE_FLOATS, INSTANCE_STRIDE
 
     assert INSTANCE_FLOATS == 28, "transform 16 + color 4 + material 4 + tex_coef 4"
-    assert INSTANCE_WORDS == 29, "28 个浮点 + 1 个 uint32"
+    assert INSTANCE_WORDS == 29
     assert INSTANCE_BYTES == 116
-    assert INSTANCE_STRIDE == INSTANCE_BYTES, "scene.py 与 instances.py 对 stride 的说法不一致"
+    assert INSTANCE_STRIDE == INSTANCE_BYTES
 
     cursor = 0
-    for name, _fmt, nbytes, _comps, off, _t in INSTANCE_ATTRIBUTES:
-        assert off == cursor, f"属性 {name} 的偏移 {off} 与上一项的末尾 {cursor} 不接"
+    for _name, _fmt, nbytes, _comps, off, _t in INSTANCE_ATTRIBUTES:
+        assert off == cursor
         cursor += nbytes
-    assert cursor == INSTANCE_BYTES, f"属性覆盖到 {cursor}，但 stride 是 {INSTANCE_BYTES}"
+    assert cursor == INSTANCE_BYTES
 
 
 def test_object_id_attribute_is_an_integer_type():
@@ -162,10 +156,10 @@ def test_object_id_attribute_is_an_integer_type():
     from forge_viewer.render.forge.instances import INSTANCE_ATTRIBUTES
 
     ids = [a for a in INSTANCE_ATTRIBUTES if a[0] == "in_object_id"]
-    assert len(ids) == 1, "in_object_id 不见了或重复了"
+    assert len(ids) == 1
     _name, fmt, nbytes, comps, _off, gl_type = ids[0]
-    assert gl_type == G.GL_UNSIGNED_INT, "in_object_id 的 GL 类型必须是无符号整数"
-    assert fmt == "1u", f"moderngl 格式串应为 '1u'，实为 {fmt!r}"
+    assert gl_type == G.GL_UNSIGNED_INT
+    assert fmt == "1u"
     assert (nbytes, comps) == (4, 1)
 
 
@@ -175,14 +169,14 @@ def test_shadow_clip_survives_the_whole_pathway():
     from forge_viewer.render.forge.cascades import DEFAULT_SHADOW_CLIP, cascade_radii
     from forge_viewer.render.scene import RenderScene
 
-    assert hasattr(SceneSource(), "shadow_clip"), "SceneSource 少了 shadow_clip"
-    assert hasattr(RenderScene(), "shadow_clip"), "RenderScene 少了 shadow_clip"
+    assert hasattr(SceneSource(), "shadow_clip")
+    assert hasattr(RenderScene(), "shadow_clip")
     assert SceneSource().shadow_clip == DEFAULT_SHADOW_CLIP == 1.0
 
     r1 = cascade_radii(10.0, 1.0)
     r2 = cascade_radii(10.0, 1.5)
     assert np.allclose(r1, [10.0 / 9.0, 10.0 / 3.0, 10.0])
-    assert np.allclose(r2, r1 * 1.5), "shadow_clip 没有等比作用在三级半径上"
+    assert np.allclose(r2, r1 * 1.5)
 
 
 def test_pass_order_is_the_one_the_spec_pins():
@@ -240,7 +234,7 @@ def test_render_flags_cover_the_reference_renderers_vocabulary():
         "com",
         "convexhull",
     ):
-        assert required in names, f"少了 mjtRndFlag/mjtVisFlag 里的 {required}"
+        assert required in names
 
 
 def test_debug_view_combo_lists_every_enum_member():
@@ -254,12 +248,9 @@ def test_debug_view_combo_lists_every_enum_member():
     src = textwrap.dedent(inspect.getsource(settings_panel.SettingsPanel._debug_view))
     tree = ast.parse(src)
     loops = [n for n in ast.walk(tree) if isinstance(n, ast.For)]
-    assert loops, "找不到列举调试视图的循环——判据本身失效了"
+    assert loops
     iterated = {ast.unparse(n.iter) for n in loops}
-    assert "DebugView" in iterated, (
-        f"下拉遍历的是 {iterated}，不是整个 DebugView 枚举——"
-        "不支持的档位会从界面上消失，用户会以为没做"
-    )
+    assert "DebugView" in iterated
 
 
 def test_settings_panel_reads_the_debug_view_from_the_backend():
@@ -270,9 +261,9 @@ def test_settings_panel_reads_the_debug_view_from_the_backend():
     panel = SettingsPanel()
     backend = NullBackend()
     backend._view = DebugView.NORMAL
-    assert panel.current_view(backend) is DebugView.NORMAL, "面板没读后端，读的是自己那份"
+    assert panel.current_view(backend) is DebugView.NORMAL
 
     class NoGetter:
         pass
 
-    assert panel.current_view(NoGetter()) is DebugView.SHADED, "没有 getter 时也要有退路"
+    assert panel.current_view(NoGetter()) is DebugView.SHADED

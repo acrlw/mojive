@@ -81,8 +81,6 @@ class OutlinePass(BasePass):
         assert self._mask_tex is not None
         assert self._prog is not None and self._vao is not None and self._uniforms is not None
 
-        #
-
         self._mask_ms_fbo.use()
         gl.viewport = (0, 0, self._mask_w, self._mask_h)
         gl.enable_only(moderngl.NOTHING)

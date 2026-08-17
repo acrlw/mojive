@@ -1,25 +1,4 @@
-<!--
-  test_scene —— 默认场景。
 
-  守的性质：**尺度已知、形状简单**。
-  调交互（相机、拾取、手柄、扰动）时需要一个能一眼读出距离的参照系：地板是 1 m 棋盘格，
-  地标摆在整米坐标上，尺寸全是 0.1 / 0.15 / 0.2 这类整数。"那个球看着有多大"这种问题
-  在这里有确定答案，在一个随便捡来的机器人模型上没有。
-
-  **这里没有任何会自行运动的东西**（一个关节都没有）。拿 18 自由度的机械臂当默认场景
-  试过：它在重力下每帧都在垮，判断"是我拖动了它还是它自己在动"要先等它躺平——干扰的
-  正是这个场景唯一的用途。
-
-  但"不动"不等于"全挂在 worldbody 上"。构建器按 body 填 `object_id`，世界 body 是 0，
-  而 0 的语义是"**没点中**"（04 §4.1 / 07 §7.2）。全挂在 worldbody 上的话这个场景里
-  一件东西都选不中——它的定位偏偏是"调相机、**拾取**、手柄、扰动时的参照系"。
-  **两全的做法是：地标各自挂在自己的 `<body>` 上，但都不带关节。** 没有关节的 body 焊在
-  世界上，照样不动；而它们各有 body id，于是各有 object_id。只有地板这类背景几何留在
-  worldbody 上——那正是"点它等于没点中"要的。
-
-  地板贴图：内建 checker 是 2×2 格；`texrepeat="1 1" texuniform="true"` 下一张图铺满
-  2 m（TEXUNIFORM_SCALE 实测 0.5，见 05 §5.5），所以**一格正好 1 m**。
--->
 <mujoco model="test_scene">
   <compiler angle="degree" autolimits="true"/>
 
@@ -34,7 +13,6 @@
              rgb1="0.19 0.21 0.25" rgb2="0.28 0.31 0.36"/>
     <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance="0.15"/>
 
-    <!-- 坐标架三色照 MuJoCo/ROS 的 XYZ = 红绿蓝，换一套配色会让所有截图都要重新解释 -->
     <material name="axis_x" rgba="0.85 0.20 0.20 1" specular="0.4" shininess="0.4"/>
     <material name="axis_y" rgba="0.20 0.75 0.25 1" specular="0.4" shininess="0.4"/>
     <material name="axis_z" rgba="0.25 0.40 0.90 1" specular="0.4" shininess="0.4"/>
@@ -49,13 +27,8 @@
     <light name="sun" type="directional" pos="3 -4 6" dir="-0.35 0.45 -1"
            diffuse="0.7 0.7 0.7" specular="0.25 0.25 0.25" castshadow="true"/>
 
-    <!-- 地板留在 worldbody 上：它的 object_id 是 0，"点它等于没点中"（07 §7.2）。
-         地面没有可拖的位姿，选中它只会让手柄挂在原点。 -->
     <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
 
-    <!-- 坐标架：三条 0.5 m 的杆从原点伸出，半径 0.015。长度本身就是一把尺。
-         四个 geom 在**同一个 body** 上，于是共用一个 object_id——描边画出来是
-         整个坐标架一条外轮廓，不是四圈（04 §4.1）。 -->
     <body name="frame">
       <geom name="axis_x" type="capsule" fromto="0 0 0.02 0.5 0 0.02" size="0.015"
             material="axis_x"/>
@@ -66,13 +39,6 @@
       <geom name="axis_origin" type="sphere" pos="0 0 0.02" size="0.03" material="mark_c"/>
     </body>
 
-    <!-- 四个地标，各占一个整米格：球 / 方块 / 圆柱 / 胶囊，四种内建形状各一个。
-
-         **各自挂在自己的 body 上，但一个关节都不带。** 没有关节的 body 在 MuJoCo 里
-         焊在世界上，一样不会自行运动（这份场景的第一条性质保住了）；但它们各有 body id,
-         于是各有自己的 `object_id`，**点得中**。全挂在 worldbody 上的话 id 全是 0，
-         而 0 的语义是"没点中"——那样这个场景就守不住"调拾取时的参照系"这条定位。
-         没有 free joint，`posable` 自然是假，手柄不该出现（09 §9.4）。 -->
     <body name="mark_sphere" pos="1 0 0.15">
       <geom name="mark_sphere" type="sphere" size="0.15" material="mark_a"/>
     </body>

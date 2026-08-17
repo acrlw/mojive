@@ -104,7 +104,7 @@ def render_all(scene: Path, out_dir: Path, width: int, height: int) -> dict:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) != 4:
-        print("用法：parity_worker <场景> <输出目录> <宽> <高>", file=sys.stderr)
+        print("usage: parity_worker <scene> <output-dir> <width> <height>", file=sys.stderr)
         return 2
     scene, out_dir, width, height = Path(argv[0]), Path(argv[1]), int(argv[2]), int(argv[3])
     doc = render_all(scene, out_dir, width, height)

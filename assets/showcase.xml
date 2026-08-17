@@ -1,27 +1,4 @@
-<!--
-  showcase —— 一屏看全部已落地的渲染能力（11 §11.1）。
 
-  **它的定位是只出图、不判对错。** 门禁全是数字与红绿，答不了"现在到底画成什么样"
-  （12 §12.4）。所以这份场景不属于任何一条判据，它属于人眼。正因为不判对错，
-  它也就没有"为了让它变绿而改画面"的压力。
-
-  八块分区，一条命令看全（`make showcase`）：
-
-      Y=+3.4          [A] 七种内建几何一字排开
-      Y=+0.6   [B] 材质三档 | [C] cube 贴图 | [D] 密集网格
-      Y=-2.0   [E] 阴影拱门 | [F] 透明五件  | [G] X 光遮挡
-      Y=-4.3          [H] 极端尺度
-
-  分区名写在 geom 名字的前缀里（`a_` ～ `h_`），截图上开了标签就能对着念。
-
-  为什么是这个排法：**要投影的东西（[E]）与要透光的东西（[F]）在同一行**，
-  太阳从右后方来，两者的影子朝同一个方向铺开，一眼能看出"透明的没投影、实心的投了"
-  ——这正是登记表里那条"forge 不让透明物体投影"（12 §12.5）。
-  [H] 单独占最后一行，因为它跨 53 倍尺度，混在别的分区里会把整块的构图压垮。
-
-  配套脚本再叠四层 debug draw，覆盖三档遮挡策略（08 §8.2）——那部分不在这份文件里，
-  这里只准备**能把三档区分开的几何**：[G] 的墙后面藏着东西。
--->
 <mujoco model="showcase">
   <compiler angle="degree" autolimits="true"/>
 
@@ -36,7 +13,6 @@
              rgb1="0.17 0.19 0.23" rgb2="0.26 0.29 0.34"/>
     <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance="0.1"/>
 
-    <!-- cube 贴图：六个面各自铺满一次，边缘描一圈第三色，翻面时接缝立刻看得见 -->
     <texture name="cubetex" type="cube" builtin="checker" width="256" height="256"
              rgb1="0.85 0.35 0.25" rgb2="0.20 0.45 0.75" mark="edge" markrgb="0.95 0.95 0.95"/>
     <material name="cube_mat" texture="cubetex" texuniform="false" specular="0.4"
@@ -52,7 +28,6 @@
     <material name="wall" rgba="0.58 0.58 0.62 1" specular="0.15" shininess="0.25"/>
     <material name="hidden" rgba="0.95 0.55 0.15 1" specular="0.6" shininess="0.7"/>
 
-    <!-- [B] 材质三档：每行只有一个标量在动 -->
     <material name="b_spec_0" rgba="0.55 0.55 0.60 1" specular="0.0" shininess="0.5"/>
     <material name="b_spec_1" rgba="0.55 0.55 0.60 1" specular="0.5" shininess="0.5"/>
     <material name="b_spec_2" rgba="0.55 0.55 0.60 1" specular="1.0" shininess="0.5"/>
@@ -63,7 +38,6 @@
     <material name="b_emit_1" rgba="0.55 0.55 0.60 1" specular="0.2" emission="0.5"/>
     <material name="b_emit_2" rgba="0.55 0.55 0.60 1" specular="0.2" emission="1.0"/>
 
-    <!-- [F] 透明五件 -->
     <material name="f_0" rgba="0.90 0.20 0.20 0.35" specular="0.4" shininess="0.6"/>
     <material name="f_1" rgba="0.95 0.65 0.15 0.35" specular="0.4" shininess="0.6"/>
     <material name="f_2" rgba="0.20 0.80 0.30 0.35" specular="0.4" shininess="0.6"/>
@@ -71,7 +45,6 @@
     <material name="f_4" rgba="0.75 0.25 0.90 0.35" specular="0.4" shininess="0.6"/>
     <material name="f_solid" rgba="0.95 0.85 0.35 1" specular="0.5" shininess="0.6"/>
 
-    <!-- [H] 极端尺度 -->
     <material name="h_0" rgba="0.80 0.35 0.28 1" specular="0.5" shininess="0.6"/>
     <material name="h_1" rgba="0.85 0.65 0.25 1" specular="0.5" shininess="0.6"/>
     <material name="h_2" rgba="0.35 0.72 0.45 1" specular="0.5" shininess="0.6"/>
@@ -275,7 +248,7 @@
   </asset>
 
   <worldbody>
-    <!-- 太阳从右后方来：[E] 与 [F] 的影子朝同一个方向铺，两者一比就看出谁没投影 -->
+
     <light name="sun" type="directional" pos="5 -6 8" dir="-0.45 0.55 -1"
            diffuse="0.72 0.72 0.70" specular="0.3 0.3 0.3" castshadow="true"/>
     <light name="fill" type="point" pos="-4 -5 3" diffuse="0.20 0.22 0.30"
@@ -283,7 +256,6 @@
 
     <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
 
-    <!-- ============ [A] 七种内建几何一字排开（Y=+3.4） ============ -->
     <body name="a_plane" pos="-3.60 3.40 0.02">
       <geom name="a_plane" type="plane" size="0.40 0.40 0.10" material="flat2d"/>
     </body>
@@ -307,7 +279,6 @@
       <geom name="a_mesh" type="mesh" mesh="ico" material="chrome" contype="0" conaffinity="0"/>
     </body>
 
-    <!-- ============ [B] 材质三档（Y=+0.6, X=-3.6） ============ -->
     <body name="b_matrix" pos="-3.60 0.60 0">
       <geom name="b_spec_0" type="sphere" pos="-0.55 0.55 0.22" size="0.22" material="b_spec_0"/>
       <geom name="b_spec_1" type="sphere" pos="0 0.55 0.22" size="0.22" material="b_spec_1"/>
@@ -320,7 +291,6 @@
       <geom name="b_emit_2" type="sphere" pos="0.55 -0.55 0.22" size="0.22" material="b_emit_2"/>
     </body>
 
-    <!-- ============ [C] cube 贴图（Y=+0.6, X=0） ============ -->
     <body name="c_cube" pos="-0.45 0.60 0.40">
       <geom name="c_cube" type="box" size="0.40 0.40 0.40" material="cube_mat"/>
     </body>
@@ -331,7 +301,6 @@
       <geom name="c_sphere" type="sphere" size="0.30" material="flat2d"/>
     </body>
 
-    <!-- ============ [D] 密集网格（Y=+0.6, X=+3.6） ============ -->
     <body name="d_dense" pos="3.60 0.60 0">
       <geom name="d_ring_0" type="mesh" mesh="torus" material="chrome"
             pos="-0.75 0.00 0.45"
@@ -349,7 +318,6 @@
             contype="0" conaffinity="0"/>
     </body>
 
-    <!-- ============ [E] 阴影拱门（Y=-2.0, X=-3.6） ============ -->
     <body name="e_arch" pos="-3.60 -2.00 0">
       <geom name="e_pillar_l" type="box" pos="-0.62 0 0.62" size="0.16 0.16 0.62"
             material="stone"/>
@@ -361,7 +329,6 @@
       <geom name="e_step_1" type="box" pos="0 0.95 0.27" size="0.26 0.26 0.09" material="stone"/>
     </body>
 
-    <!-- ============ [F] 透明五件（Y=-2.0, X=0） ============ -->
     <body name="f_panes" pos="0 -2.00 0">
       <geom name="f_0" type="box" pos="0 -0.36 0.50" size="0.50 0.008 0.38" material="f_0"/>
       <geom name="f_1" type="box" pos="0 -0.18 0.50" size="0.50 0.008 0.38" material="f_1"/>
@@ -371,13 +338,12 @@
       <geom name="f_solid" type="sphere" pos="0 0.95 0.32" size="0.32" material="f_solid"/>
     </body>
 
-    <!-- ============ [G] X 光遮挡（Y=-2.0, X=+3.6） ============ -->
     <body name="g_wall" pos="3.60 -2.00 0">
       <geom name="g_wall_l" type="box" pos="-0.55 0 0.55" size="0.35 0.06 0.55" material="wall"/>
       <geom name="g_wall_r" type="box" pos="0.55 0 0.55" size="0.35 0.06 0.55" material="wall"/>
       <geom name="g_wall_top" type="box" pos="0 0 1.20" size="0.90 0.06 0.10" material="wall"/>
     </body>
-    <!-- 藏在墙后：选中它时轮廓必须穿墙画出来（07） -->
+
     <body name="g_hidden" pos="3.60 -1.60 0.30">
       <geom name="g_hidden" type="sphere" size="0.30" material="hidden"/>
     </body>
@@ -386,7 +352,6 @@
             material="hidden"/>
     </body>
 
-    <!-- ============ [H] 极端尺度（Y=-4.3） ============ -->
     <body name="h_1600" pos="-1.60 -4.30 0.80">
       <geom name="h_1600" type="sphere" size="0.80" material="h_0"/>
     </body>
@@ -399,12 +364,11 @@
     <body name="h_030" pos="1.05 -4.30 0.015">
       <geom name="h_030" type="sphere" size="0.015" material="h_3"/>
     </body>
-    <!-- 贴着 1.6 m 球脚边的 0.03 m 球：两个极端落在同一块像素区里 -->
+
     <body name="h_030_pair" pos="-0.72 -4.30 0.015">
       <geom name="h_030_pair" type="sphere" size="0.015" material="h_3"/>
     </body>
 
-    <!-- 一屏看全：整块场地 X∈[-5,5]、Y∈[-5,4.5]，从 -Y 高处俯下来 -->
     <camera name="showcase" pos="0 -13.5 8.2" xyaxes="1 0 0 0 0.49 0.87"/>
     <camera name="showcase_flat" pos="0 -11.0 3.2" xyaxes="1 0 0 0 0.22 0.98"/>
   </worldbody>

@@ -63,7 +63,7 @@ def test_render_layer_does_not_import_ui():
         hit = _hits(_imports(path), "forge_viewer.ui")
         if hit:
             bad[str(path.relative_to(SRC))] = sorted(hit)
-    assert not bad, f"渲染层 import 了 UI 层：{bad}"
+    assert not bad
 
 
 def test_ui_layer_does_not_import_concrete_backend():
@@ -77,7 +77,7 @@ def test_ui_layer_does_not_import_concrete_backend():
         hit = {h for h in hit if h != "forge_viewer.render"}
         if hit:
             bad[str(path.relative_to(SRC))] = sorted(hit)
-    assert not bad, f"UI 层 import 了具体后端：{bad}"
+    assert not bad
 
 
 def test_render_layer_does_not_import_physics():
@@ -88,7 +88,7 @@ def test_render_layer_does_not_import_physics():
         hit = {i for i in _imports(path) for p in physics if i == p or i.startswith(p + ".")}
         if hit:
             bad[str(path.relative_to(SRC))] = sorted(hit)
-    assert not bad, f"渲染层 import 了物理库：{bad}"
+    assert not bad
 
 
 def test_shared_vocabulary_is_dependency_free():
@@ -109,7 +109,7 @@ def test_shared_vocabulary_is_dependency_free():
         hit = {i for i in _imports(path) for f in forbidden if i == f or i.startswith(f + ".")}
         if hit:
             bad[name] = sorted(hit)
-    assert not bad, f"共同词汇表依赖了具体层：{bad}"
+    assert not bad
 
 
 def test_adapters_do_not_import_render_internals():
@@ -119,20 +119,20 @@ def test_adapters_do_not_import_render_internals():
         hit = _hits(_imports(path), "forge_viewer.render.forge")
         if hit:
             bad[str(path.relative_to(SRC))] = sorted(hit)
-    assert not bad, f"适配器 import 了渲染器内部：{bad}"
+    assert not bad
 
 
 def test_this_scan_needs_no_gpu_and_no_optional_deps():
 
     hit = _imports(Path(__file__))
     external = {i.split(".")[0] for i in hit} - {"ast", "pathlib", "pytest", "__future__"}
-    assert not external, f"分层扫描引入了额外依赖：{sorted(external)}"
+    assert not external
 
 
 @pytest.mark.parametrize("pkg", ["render", "ui", "adapters"])
 def test_every_package_has_docstring(pkg: str):
 
     init = SRC / pkg / "__init__.py"
-    assert init.exists(), f"{pkg} 缺 __init__.py"
+    assert init.exists()
     tree = ast.parse(init.read_text(encoding="utf-8"))
-    assert ast.get_docstring(tree), f"{pkg}/__init__.py 没有 docstring"
+    assert ast.get_docstring(tree)

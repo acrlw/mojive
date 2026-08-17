@@ -54,11 +54,11 @@ def test_same_id_redrawn_every_frame_does_not_grow():
 
     seen = _draw_frames(dd, 100, lambda i: layer.line("drag.line", A, B + i, RED, 2.0))
 
-    assert [s.primitives for s in seen] == [1] * 100, "同一个 id 每帧重画，图元数不该涨"
+    assert [s.primitives for s in seen] == [1] * 100
     assert dd.stats().primitives == 1
-    assert dd.primitives == dd.stats().primitives, "跑账与逐层实数对不上"
+    assert dd.primitives == dd.stats().primitives
 
-    assert dd.stats().moves == 0, "覆盖是原地重写，不是删了再追加"
+    assert dd.stats().moves == 0
 
     assert layer.positions_of(Prim.LINE)[0, 1] == pytest.approx([100.0, 99.0, 99.0], abs=1e-3)
 
@@ -167,7 +167,7 @@ def test_world_text_expires_and_can_replace_a_geometric_id():
 @pytest.mark.parametrize(
     ("duration", "expect_moves", "expect_expiring"),
     [(-1.0, 0, 0), (0.0, 100, 1)],
-    ids=["duration=-1 永不过期", "duration=0 每帧删了再追加"],
+    ids=["persistent", "one-frame"],
 )
 def test_never_expiring_primitives_never_move(duration, expect_moves, expect_expiring):
 
@@ -176,12 +176,10 @@ def test_never_expiring_primitives_never_move(duration, expect_moves, expect_exp
 
     seen = _draw_frames(dd, 100, lambda i: layer.point("grab", A, RED, 4.0, duration))
 
-    assert [s.primitives for s in seen] == [1] * 100, "不管哪一档，画出来的那一帧都该有它"
+    assert [s.primitives for s in seen] == [1] * 100
     assert dd.stats().moves == expect_moves
 
-    assert [s.expiring for s in seen] == [expect_expiring] * 100, (
-        "`duration=-1` 的 id 根本不该进过期队列"
-    )
+    assert [s.expiring for s in seen] == [expect_expiring] * 100
 
 
 def test_expire_only_walks_the_finite_lifetime_ids():
@@ -199,7 +197,7 @@ def test_expire_only_walks_the_finite_lifetime_ids():
 
     assert dd.stats().moves == 0
     assert dd.stats().primitives == 10_000
-    print(f"\n[数字] 一万条永久线：100 次 expire() 共 {ms:.3f} ms")
+    print(f"\n[metric] 10k persistent lines: 100 expire() calls in {ms:.3f} ms")
 
 
 def test_expire_runs_after_drawing_not_before():
@@ -211,8 +209,8 @@ def test_expire_runs_after_drawing_not_before():
 
     drawn: list[int] = []
     dd.render_frame(lambda _f: drawn.append(dd.stats().primitives), now=1.0)
-    assert drawn == [1], "寿命一帧的图元必须在下一次绘制时还在"
-    assert dd.stats().primitives == 0, "画完之后才该被清掉"
+    assert drawn == [1]
+    assert dd.stats().primitives == 0
 
     dd2 = DebugDraw()
     layer2 = dd2.layer("once", Occlusion.ALWAYS)
@@ -221,7 +219,7 @@ def test_expire_runs_after_drawing_not_before():
     dd2.expire(1.0)
     drawn2: list[int] = []
     dd2.render_frame(lambda _f: drawn2.append(dd2.stats().primitives), now=1.0)
-    assert drawn2 == [0], "这一半是反向验：清理排在开头时图元根本没被画到"
+    assert drawn2 == [0]
 
 
 def test_vertex_counts_match_the_spec_table():
@@ -240,7 +238,7 @@ def test_vertex_counts_match_the_spec_table():
         Prim.SOLID_DOUBLE_ARROW: 1,
         Prim.CYLINDER: 1,
     }
-    assert len(VERTEX_COUNT) == 12, "加一种图元就要改重排、压缩、上传三处——先来改这条"
+    assert len(VERTEX_COUNT) == 12
 
 
 def test_closed_polyline_packs_shared_neighbors_for_continuous_joins():
@@ -266,27 +264,27 @@ def test_frame_is_three_independent_segments_on_the_arrow_path():
     layer.frame("f", m, axis_len=0.5)
 
     pos = layer.positions_of(Prim.FRAME)
-    assert pos.shape == (1, 6, 3), "坐标架必须是 6 个顶点 = 三条独立线段"
+    assert pos.shape == (1, 6, 3)
     for k in range(3):
         start, end = pos[0, 2 * k], pos[0, 2 * k + 1]
-        assert start == pytest.approx([1.0, 2.0, 3.0]), "三条线段各自带着自己的起点"
-        assert np.linalg.norm(end - start) == pytest.approx(0.5), "轴长是实体域的世界长度"
+        assert start == pytest.approx([1.0, 2.0, 3.0])
+        assert np.linalg.norm(end - start) == pytest.approx(0.5)
 
     layer.arrow("a", A, B, RED, 2.0)
     frame = dd.build()
     segs = [b for b in frame.active() if b.path is DrawPath.SEGMENT]
     assert PRIM_PATH[Prim.FRAME] is PRIM_PATH[Prim.ARROW] is DrawPath.SEGMENT
-    assert len(segs) == 1, "坐标架与箭必须落在同一个批里"
-    assert segs[0].count == 4, "三条轴 + 一支箭 = 4 条线段记录"
+    assert len(segs) == 1
+    assert segs[0].count == 4
 
     stream = frame.stream(DrawPath.SEGMENT)
-    assert stream.shape[1] == 13, "两种图元逐字同一段记录布局"
+    assert stream.shape[1] == 13
 
     heads = stream[:, 11]
-    assert int(np.count_nonzero(heads > 0.0)) == 1, "箭的头部长度按线宽算，跟着杆一起走"
+    assert int(np.count_nonzero(heads > 0.0)) == 1
     axes = stream[heads == 0.0]
     for k in range(3):
-        assert axes[k, 6:10] == pytest.approx(AXIS_COLORS[k]), "XYZ 三色"
+        assert axes[k, 6:10] == pytest.approx(AXIS_COLORS[k])
 
 
 def test_axis_length_ignores_scale_baked_into_the_transform():
@@ -320,9 +318,7 @@ def test_solid_primitives_reuse_the_builtin_meshes():
 
     rec = frame.stream(DrawPath.SOLID)[0]
     assert rec[12:15] == pytest.approx([1.0, 0.0, 0.0])
-    assert layer.positions_of(Prim.BOX)[0, 0] == pytest.approx([1.0, 0.0, 0.0]), (
-        "顶点数 1 = 那一个点"
-    )
+    assert layer.positions_of(Prim.BOX)[0, 0] == pytest.approx([1.0, 0.0, 0.0])
 
 
 def test_sector_swept_angle_is_the_rotation_vector_norm():
@@ -335,7 +331,7 @@ def test_sector_swept_angle_is_the_rotation_vector_norm():
     layer.sector("j0", center, center + axis * angle, center + np.array([1.0, 0.0, 0.0]), RED)
 
     pos = layer.positions_of(Prim.SECTOR)
-    assert pos.shape == (1, 3, 3), "三个顶点全是世界坐标里的点"
+    assert pos.shape == (1, 3, 3)
     assert sector_angle(pos[0, 0], pos[0, 1]) == pytest.approx(angle, abs=1e-6)
 
 
@@ -349,7 +345,7 @@ def test_sector_is_unambiguous_beyond_180_degrees():
 
     end_270 = sector_points(center, turn_270, ref, segments=4)[-1]
     end_neg = sector_points(center, turn_neg_90, ref, segments=4)[-1]
-    assert end_270 == pytest.approx(end_neg, abs=1e-9), "终止方向相同——这就是那个歧义"
+    assert end_270 == pytest.approx(end_neg, abs=1e-9)
 
     assert sector_angle(center, turn_270) == pytest.approx(1.5 * np.pi)
     assert sector_angle(center, turn_neg_90) == pytest.approx(0.5 * np.pi)
@@ -394,11 +390,11 @@ def test_ten_thousand_lines_pack_fast_and_without_allocating():
     grew = after - before
 
     print(
-        f"\n[数字] 一万条线：lines() 提交 {submit_ms:.3f} ms，"
-        f"打包 {pack_ms:.3f} ms/帧，{rounds} 次打包净增长 {grew} 字节"
+        f"\n[metric] 10k lines: submit {submit_ms:.3f} ms, "
+        f"pack {pack_ms:.3f} ms/frame, allocation growth {grew} bytes over {rounds} packs"
     )
-    assert pack_ms < 5.0, f"一万条线的打包 {pack_ms:.3f} ms/帧，太慢"
-    assert grew < 64 * 1024, f"打包过程分配了 {grew} 字节——热路径不分配（04 §4.3 纪律 3）"
+    assert pack_ms < 5.0
+    assert grew < 64 * 1024
 
     stream = dd.build().stream(DrawPath.SEGMENT)
     assert stream.shape == (n, 13)
@@ -418,7 +414,7 @@ def test_batches_are_grouped_by_occlusion_then_path():
     assert kinds == [
         (Occlusion.ALWAYS, DrawPath.POINT, 1),
         (Occlusion.GHOST, DrawPath.SEGMENT, 3),
-    ], "三层 GHOST 的线合成一个批；遮挡档是分批的边界，层不是"
+    ]
 
 
 def test_interaction_axes_and_points_are_drawn_after_the_closed_outline():
@@ -451,8 +447,8 @@ def test_layers_share_one_px_scale():
     frame = dd.build()
     widths = [frame.stream(DrawPath.SEGMENT)[i, 10] for i in range(2)]
 
-    assert set(inspect.signature(DebugDraw.build).parameters) == {"self"}, "打包不许碰相机"
-    assert widths == [4.0, 4.0], "打包出来的仍是像素值——换算在着色器里"
+    assert set(inspect.signature(DebugDraw.build).parameters) == {"self"}
+    assert widths == [4.0, 4.0]
 
     proj = perspective(np.deg2rad(45.0), 16 / 9, 0.1, 100.0)
     fake = SimpleNamespace(proj=proj, target=SimpleNamespace(height=720))
@@ -473,7 +469,7 @@ def test_entity_sized_things_do_not_go_through_the_pixel_domain():
     m[:3, :3] *= 0.3
     layer.box("b", m, RED)
     rec = dd.build().stream(DrawPath.SOLID)[0]
-    assert rec[0] == pytest.approx(0.3), "尺寸烘在变换里，跟着透视缩放"
+    assert rec[0] == pytest.approx(0.3)
 
 
 def test_over_the_limit_is_counted_not_silently_dropped():
@@ -503,15 +499,15 @@ class _Backend:
 
 def test_bridge_counts_dropped_on_a_backend_without_debug_draw():
 
-    br = DebugBridge(NullBackend("测试用"))
+    br = DebugBridge(NullBackend("test"))
     assert br.available is False
 
     painted = []
     ok = br.publish("script.ray", Occlusion.GHOST, lambda layer: painted.append(layer))
 
-    assert ok is False and painted == [], "画不上就是画不上"
-    assert br.stats.dropped == 1, "不支持必须计入 dropped"
-    assert br.stats.notes and "debug draw" in br.stats.notes[-1], "必须有一句人话"
+    assert ok is False and painted == []
+    assert br.stats.dropped == 1
+    assert br.stats.notes and "debug draw" in br.stats.notes[-1]
     assert br.layer("script.ray", Occlusion.GHOST) is None
 
 
@@ -574,7 +570,7 @@ def test_pass_is_registered_and_hands_its_draw_to_the_backend():
     passes.load_all()
     assert "debug" not in passes.failed(), passes.failed().get("debug")
     factory = registered().get("debug")
-    assert factory is not None, "debug pass 没登记进 PASS_ORDER"
+    assert factory is not None
     assert isinstance(factory().draw, DebugDraw)
 
 
@@ -605,9 +601,9 @@ def test_perturbation_feedback_lands_on_the_layers_it_asks_for():
     )
     mark = dd.layer("ui.perturb.mark")
     assert mark.occlusion is Occlusion.ALWAYS
-    assert mark.count_of(Prim.BOX) == 0, "扭转标记不再画半透明实体方块"
-    assert mark.count_of(Prim.ARROW) == 3, "与 position gizmo 一致的 XYZ 三支箭头"
-    assert mark.count_of(Prim.STROKE) > 0, "扭转剪影必须走有共享 join 的闭合 stroke"
+    assert mark.count_of(Prim.BOX) == 0
+    assert mark.count_of(Prim.ARROW) == 3
+    assert mark.count_of(Prim.STROKE) > 0
 
     before = dd.stats().primitives
     for _ in range(100):
@@ -627,7 +623,7 @@ def test_socket_path_is_pid_named_and_falls_back_to_tempdir(monkeypatch):
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
     mine = socket_path()
     assert mine.parent == Path(tempfile.gettempdir()) / APP
-    assert mine.name == f"{os.getpid()}.sock", "用 pid 命名：退出后文件的归属是明确的"
+    assert mine.name == f"{os.getpid()}.sock"
 
 
 @pytest.fixture
@@ -674,7 +670,7 @@ def test_external_json_lines_are_received_off_thread_and_applied_on_the_main_thr
             deadline = time.time() + 3.0
             applied = 0
             while applied < 2 and time.time() < deadline:
-                assert backend.debug.stats().primitives == applied, "没 pump 之前 SoA 里不该有东西"
+                assert backend.debug.stats().primitives == applied
                 applied += br.pump()
                 time.sleep(0.01)
 
@@ -686,7 +682,7 @@ def test_external_json_lines_are_received_off_thread_and_applied_on_the_main_thr
         assert layer.positions_of(Prim.POINT)[0, 0] == pytest.approx([1.0, 2.0, 3.0])
     finally:
         br.close()
-    assert not path.exists(), "关掉之后套接字文件要清掉"
+    assert not path.exists()
 
 
 def test_external_bad_line_does_not_take_the_connection_down(short_dir):
@@ -708,6 +704,6 @@ def test_external_bad_line_does_not_take_the_connection_down(short_dir):
                 br.pump()
                 time.sleep(0.01)
         assert backend.debug.stats().primitives == 1
-        assert br.stats.invalid == 1, "坏行要计数，不是当没看见"
+        assert br.stats.invalid == 1
     finally:
         br.close()

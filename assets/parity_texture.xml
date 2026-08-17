@@ -1,52 +1,4 @@
-<!--
-  parity_texture —— 贴图内容正确性（12 §12.5 的第三项，现值 16/16）。
 
-  守的性质：**图案无对称**。
-
-  这条是踩出来的（05 §5.5）：棋盘格相位对不上（与参照的一致率 3.2%），第一次排查用
-  一张四象限贴图，得出"u 被镜像了"；改完 u 对了、v 又错了。**根因是排查方法本身**——
-  四象限图案与棋盘格都是 2 折对称的，对它们而言**镜像 ≡ 半格平移**，两种完全不同的
-  缺陷给出**完全相同的画面**。改用无对称图案分别标定两个轴之后，一致率 3.2% → 97.8%。
-
-  所以判据问的是"**采到哪一格**"而不是"颜色差多少"：格的身份必须由采样值唯一确定，
-  且任何一个对称操作都不能把图案变回它自己。
-
-  == 为什么四色格是 16 块方砖，不是一张贴图 ==
-
-  MJCF 的程序化贴图只有 checker / gradient / flat 三种（实测：checker 是 2×2 格；
-  gradient 是径向的；mark 只能加 edge / cross / random 一层）。**前两种全是 2 折对称的**,
-  拼不出无对称的四色格，而这份场景不许依赖外部图片文件。
-  于是四色格做成 16 块共面方砖，每块再贴一层灰阶 checker：
-  - "采到哪一格"由**砖的颜色**答（16 块 → 16 个采样点 → 16/16）；
-  - "格内贴图对不对"由砖上的 checker 答。
-  唯一能从 MJCF 里做出来的无对称贴图是 `mark="random"`，单独放了一块板（见下）。
-
-  == 四种颜色为什么按"方向"挑 ==
-
-  判据做的是**方向归一化的分类**：把采样 RGB 归一化再分类。明暗差一档的两种颜色归一化
-  之后是同一个方向，会被判成同一格——所以四种颜色的**色相**必须两两远离，不能靠亮度分。
-  砖上的灰阶 checker 只改亮度不改色相，正是为了不破坏这一点。
-
-  == 排布是搜出来并逐个校验过的 ==
-
-      0 2 1 2        0=红 1=绿 2=蓝 3=黄
-      0 3 0 1        r=0 在 y=-0.75，c=0 在 x=-0.75
-      1 3 3 0
-      3 1 2 2
-
-  校验条件：8 个二面体操作 × 16 个循环平移 × 24 种换色，**没有一个非恒等组合能把它变回
-  自己**。带换色这一条是关键——棋盘格失效正是因为"镜像后再换个色"就等于原图。
-
-  == 另外三块板 ==
-
-  - **四色竖条纹 / 四色横条纹**：复刻 05 §5.5 定下 `u = 0.5 + s`、`v = 0.5 - t` 的那张
-    标定图。四条颜色互不相同（红绿蓝黄，反过来读是黄蓝绿红），沿各自的轴无对称，
-    两个轴分开标——一次只动一个变量，才不会出现"改完 u 对了 v 又错了"。
-  - **随机点板**：MJCF 唯一的无对称程序化贴图。它的确定性实测过：同一份 XML 在两个
-    进程里编译，贴图字节的 SHA1 相同——不确定的图案不能进对拍。
-  - **地板**：无限平面 + 棋盘。它是**相位**目标，只能判"格子偏了多少"；判不了方向，
-    理由见上。
--->
 <mujoco model="parity_texture">
   <compiler angle="degree" autolimits="true"/>
 
@@ -61,7 +13,6 @@
              rgb1="0.20 0.22 0.26" rgb2="0.32 0.35 0.40"/>
     <material name="grid" texture="grid" texrepeat="1 1" texuniform="true"/>
 
-    <!-- 灰阶 checker：只改亮度、不改色相，方向归一化的分类才不会被它带偏 -->
     <texture name="cell" type="2d" builtin="checker" width="256" height="256"
              rgb1="0.60 0.60 0.60" rgb2="1.00 1.00 1.00"/>
     <material name="c0" texture="cell" texrepeat="2 2" rgba="0.88 0.16 0.14 1" specular="0.1"/>
@@ -69,7 +20,6 @@
     <material name="c2" texture="cell" texrepeat="2 2" rgba="0.18 0.34 0.88 1" specular="0.1"/>
     <material name="c3" texture="cell" texrepeat="2 2" rgba="0.90 0.78 0.14 1" specular="0.1"/>
 
-    <!-- 条纹板用纯色：标定轴向时不希望再多一层图案参与判断 -->
     <material name="s0" rgba="0.88 0.16 0.14 1" specular="0.05"/>
     <material name="s1" rgba="0.14 0.76 0.26 1" specular="0.05"/>
     <material name="s2" rgba="0.18 0.34 0.88 1" specular="0.05"/>
@@ -86,7 +36,6 @@
 
     <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
 
-    <!-- 四色格：4×4 块 0.5 m 方砖，砖面在 z=0.01 -->
     <geom name="cell_r0c0" type="box" pos="-0.75 -0.75 0.005" size="0.25 0.25 0.005" material="c0"/>
     <geom name="cell_r0c1" type="box" pos="-0.25 -0.75 0.005" size="0.25 0.25 0.005" material="c2"/>
     <geom name="cell_r0c2" type="box" pos=" 0.25 -0.75 0.005" size="0.25 0.25 0.005" material="c1"/>
@@ -107,27 +56,22 @@
     <geom name="cell_r3c2" type="box" pos=" 0.25  0.75 0.005" size="0.25 0.25 0.005" material="c2"/>
     <geom name="cell_r3c3" type="box" pos=" 0.75  0.75 0.005" size="0.25 0.25 0.005" material="c2"/>
 
-    <!-- 竖条纹：只沿 +X 变，标 u 轴。颜色序 红绿蓝黄，倒过来读不一样 -->
     <geom name="stripe_u0" type="box" pos="-0.75 1.75 0.005" size="0.25 0.35 0.005" material="s0"/>
     <geom name="stripe_u1" type="box" pos="-0.25 1.75 0.005" size="0.25 0.35 0.005" material="s1"/>
     <geom name="stripe_u2" type="box" pos=" 0.25 1.75 0.005" size="0.25 0.35 0.005" material="s2"/>
     <geom name="stripe_u3" type="box" pos=" 0.75 1.75 0.005" size="0.25 0.35 0.005" material="s3"/>
 
-    <!-- 横条纹：只沿 +Y 变，标 v 轴 -->
     <geom name="stripe_v0" type="box" pos="1.75 -0.75 0.005" size="0.35 0.25 0.005" material="s0"/>
     <geom name="stripe_v1" type="box" pos="1.75 -0.25 0.005" size="0.35 0.25 0.005" material="s1"/>
     <geom name="stripe_v2" type="box" pos="1.75  0.25 0.005" size="0.35 0.25 0.005" material="s2"/>
     <geom name="stripe_v3" type="box" pos="1.75  0.75 0.005" size="0.35 0.25 0.005" material="s3"/>
 
-    <!-- 随机点板：唯一无对称的程序化贴图 -->
     <geom name="speckle_board" type="box" pos="-1.85 0 0.005" size="0.6 0.6 0.005"
           material="speckle"/>
 
-    <!-- 一个球和一个方块，验曲面与平面上的 UV（曲面 UV 由几何生成器给，05 §5.5） -->
     <geom name="tex_sphere" type="sphere" pos="0 -2.0 0.35" size="0.35" material="c2"/>
     <geom name="tex_box" type="box" pos="1.1 -1.9 0.3" size="0.3 0.3 0.3" material="c3"/>
 
-    <!-- 正上方俯视：四色格在画面里是正方形，采样点落哪一格没有透视歧义 -->
     <camera name="t0_top" pos="0.35 0.15 4.2" xyaxes="1 0 0 0 1 0"/>
     <camera name="t1_oblique" pos="2.6 -2.9 2.2" xyaxes="0.74 0.68 0 -0.34 0.37 0.87"/>
   </worldbody>

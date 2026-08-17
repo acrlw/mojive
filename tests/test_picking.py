@@ -18,14 +18,14 @@ def test_viewport_point_to_target_pixel_at_2x_dpi_with_letterbox():
 
     x, y, w, h = RECT
     cases = {
-        "左上": ((x, y), (0, 799)),
-        "右上": ((x + w, y), (1599, 799)),
-        "左下": ((x, y + h), (0, 0)),
-        "右下": ((x + w, y + h), (1599, 0)),
-        "正中": ((x + w / 2, y + h / 2), (800, 399)),
+        "top left": ((x, y), (0, 799)),
+        "top right": ((x + w, y), (1599, 799)),
+        "bottom left": ((x, y + h), (0, 0)),
+        "bottom right": ((x + w, y + h), (1599, 0)),
+        "center": ((x + w / 2, y + h / 2), (800, 399)),
     }
-    for name, (point, expect) in cases.items():
-        assert viewport_point_to_target_pixel(point, RECT, TARGET) == expect, f"{name} 换算错了"
+    for point, expect in cases.values():
+        assert viewport_point_to_target_pixel(point, RECT, TARGET) == expect
 
 
 def test_target_pixel_flips_y():
@@ -34,7 +34,7 @@ def test_target_pixel_flips_y():
     top = viewport_point_to_target_pixel((x + w / 2, y + 1.0), RECT, TARGET)
     bottom = viewport_point_to_target_pixel((x + w / 2, y + h - 1.0), RECT, TARGET)
     assert top is not None and bottom is not None
-    assert top[1] > bottom[1], "画面上方的点必须落在更大的行号上（GL 原点在左下）"
+    assert top[1] > bottom[1]
 
     assert top[1] == 797, top
     assert bottom[1] == 1, bottom
@@ -76,9 +76,9 @@ def test_level_one_hit_stops_there():
     r = pick((x + w / 2, y + h / 2), RECT, TARGET, gpu, ray, near)
 
     assert (r.object_id, r.level) == (42, 1)
-    assert gpu.calls == 1, "第 1 级只读一个像素，只该问一次"
-    assert (ray.calls, near.calls) == (0, 0), "第 1 级已经与画面逐像素一致了，后面不该再问"
-    assert gpu.args == [(800, 399)], "第 1 级拿到的必须是换算过的目标像素，不是窗口坐标"
+    assert gpu.calls == 1
+    assert (ray.calls, near.calls) == (0, 0)
+    assert gpu.args == [(800, 399)]
 
 
 def test_falls_through_in_order():
@@ -88,13 +88,13 @@ def test_falls_through_in_order():
 
     ray, near = _Counter(7), _Counter(9)
     r = pick(center, RECT, TARGET, _Counter(0), ray, near)
-    assert (r.object_id, r.level) == (7, 2), "ID buffer 空的时候该落到射线那一级"
+    assert (r.object_id, r.level) == (7, 2)
     assert (ray.calls, near.calls) == (1, 0)
-    assert ray.args == [(0.0, 0.0)], "射线那一级吃的是 NDC，中心点就是 (0, 0)"
+    assert ray.args == [(0.0, 0.0)]
 
     ray, near = _Counter(0), _Counter(9)
     r = pick(center, RECT, TARGET, _Counter(0), ray, near)
-    assert (r.object_id, r.level) == (9, 3), "前两级都空才轮到兜底"
+    assert (r.object_id, r.level) == (9, 3)
     assert (ray.calls, near.calls) == (1, 1)
 
     r = pick(center, RECT, TARGET, _Counter(0), _Counter(0), _Counter(0))
@@ -121,9 +121,9 @@ def test_root_node_counts_as_a_miss():
     ray, near = _Counter(7), _Counter(9)
     x, y, w, h = RECT
     r = pick((x + w / 2, y + h / 2), RECT, TARGET, _Counter(1), ray, near, root_id=1)
-    assert (r.object_id, r.hit) == (0, False), "点到地面必须是没点中"
-    assert r.level == 1, "作出结论的是第 1 级"
-    assert (ray.calls, near.calls) == (0, 0), "第 1 级已经作了结论，后两级不该再问"
+    assert (r.object_id, r.hit) == (0, False)
+    assert r.level == 1
+    assert (ray.calls, near.calls) == (0, 0)
 
     r = pick((x + w / 2, y + h / 2), RECT, TARGET, _Counter(5), ray, near, root_id=1)
     assert r.object_id == 5
@@ -140,9 +140,9 @@ def test_root_filter_applies_to_every_level():
 def test_neighborhood_is_circular_not_square():
 
     offsets = circular_offsets(3)
-    assert len(offsets) == 29, f"圆形邻域应当是 29 个像素，实为 {len(offsets)}"
-    assert len(set(offsets)) == len(offsets), "偏移表里有重复"
-    assert len(list(range(-3, 4))) ** 2 == 49, "方形邻域是 49——这是被换掉的那个方案"
+    assert len(offsets) == 29
+    assert len(set(offsets)) == len(offsets)
+    assert len(list(range(-3, 4))) ** 2 == 49
 
     assert (3, 0) in offsets and (2, 2) in offsets
     assert (3, 1) not in offsets and (3, 3) not in offsets

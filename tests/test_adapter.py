@@ -11,7 +11,7 @@ from forge_viewer.adapters.base import ActuatorVisualKind, FrameNeeds, JointVisu
 
 pytestmark = pytest.mark.physics
 
-mujoco = pytest.importorskip("mujoco", reason="需要装 mujoco 才能建真实世界")
+mujoco = pytest.importorskip("mujoco", reason="MuJoCo is required")
 
 from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter  # noqa: E402
 
@@ -31,12 +31,10 @@ FIXTURE_XML = """
     <light name="sun" directional="true" pos="0 0 3" dir="0 0 -1"/>
     <geom name="floor" type="plane" size="0 0 .05" material="grid"/>
     <geom name="wall" type="box" pos="2 0 .5" size=".1 1 .5"/>
-    <!-- 不带关节的地标：MuJoCo 眼里它是"静态"（焊在世界上），但它**不是世界 body**，
-         有自己的 object_id，点得中它。射线那条路的判据就落在这里 -->
+    <!-- A jointless landmark welded to the world with its own pickable object id. -->
     <body name="post" pos="-2 0 .5">
       <geom name="post_box" type="box" size=".2 .2 .5"/>
-      <!-- 组 3 的包络球：画不出来，也不该挡住射线（它比 post_box 高 0.3 m，
-           挡住了的话命中距离会短 0.3） -->
+      <!-- Group 3 collision envelope; hidden geoms do not participate in visual raycasts. -->
       <geom name="post_hull" type="sphere" size=".8" group="3"/>
     </body>
     <body name="free_body" pos="0 0 1">
@@ -93,7 +91,7 @@ def test_scene_source_arrays_agree(adapter):
         "geom_local",
         "geom_infinite_plane",
     ):
-        assert len(getattr(src, name)) == n, f"{name} 长度 {len(getattr(src, name))} != {n}"
+        assert len(getattr(src, name)) == n
     assert src.geom_size.shape == (n, 3)
     assert src.geom_rgba.shape == (n, 4)
     assert src.geom_local.shape == (n, 4, 4)
@@ -104,14 +102,16 @@ def test_scene_source_arrays_agree(adapter):
 
 def test_bundled_test_scene_loads(fixture_path):
 
-    resolve = pytest.importorskip("forge_viewer.assets", reason="assets 模块还没落地").resolve
+    resolve = pytest.importorskip(
+        "forge_viewer.assets", reason="asset registry unavailable"
+    ).resolve
     a = MuJoCoAdapter(resolve("test_scene"))
     src = a.scene_source()
     n = src.instance_count
     assert n > 0
     for name in ("geom_material", "geom_size", "geom_rgba", "geom_object_id", "geom_source"):
         assert len(getattr(src, name)) == n
-    assert src.geom_infinite_plane.any(), "test_scene 的地板是无限平面"
+    assert src.geom_infinite_plane.any()
     a.release()
 
 
@@ -139,7 +139,7 @@ def test_capsule_splits_into_three_instances(adapter):
     lo = next(i for i in caps if src.geom_local[i][2, 3] < 0)
     hi = next(i for i in caps if src.geom_local[i][2, 3] > 0)
     assert src.geom_local[hi][2, 2] > 0
-    assert src.geom_local[lo][2, 2] < 0, "下端帽没翻过来"
+    assert src.geom_local[lo][2, 2] < 0
 
     assert np.linalg.det(src.geom_local[lo][:3, :3]) > 0
 
@@ -156,11 +156,11 @@ def test_object_id_is_per_body(adapter):
     def ids(geom_name):
         return set(src.geom_object_id[src.geom_source == by_name[geom_name]].tolist())
 
-    assert ids("floor") == {0}, "地板属于世界 body"
+    assert ids("floor") == {0}
     assert ids("wall") == {0}
-    assert ids("cap") == ids("head"), "同一个 body 的两个 geom 必须同 id"
+    assert ids("cap") == ids("head")
     assert ids("cap") != {0}
-    assert ids("cap") != ids("lower"), "不同 body 必须不同 id"
+    assert ids("cap") != ids("lower")
 
     nodes = adapter.nodes()
     body_ids = {n.object_id for n in nodes if n.kind in (NodeKind.LINK, NodeKind.ROBOT)}
@@ -206,7 +206,7 @@ def test_textures_are_srgb_and_cube_is_six_faces(adapter):
     assert all(t.srgb for t in src.textures.values())
     assert src.skybox == "sky"
     sky = src.textures["sky"]
-    assert sky.pixels.ndim == 4 and sky.pixels.shape[0] == 6, "cube/skybox 是 6 张面"
+    assert sky.pixels.ndim == 4 and sky.pixels.shape[0] == 6
     assert src.textures["grid"].pixels.ndim == 3
 
 
@@ -263,7 +263,7 @@ def test_initial_values_come_from_the_model(adapter):
     m = adapter.model
     expect = np.asarray(m.qpos0, np.float32).copy()
     adapter.step(200)
-    assert not np.allclose(adapter.data.qpos, expect), "跑了 200 步还没动，判据挡不住东西"
+    assert not np.allclose(adapter.data.qpos, expect)
     src = adapter.scene_source()
     assert src.initial_qpos == pytest.approx(expect)
     assert len(src.initial_ctrl) == m.nu
@@ -284,7 +284,7 @@ def test_frame_produces_only_what_is_needed(adapter):
     assert f.qpos is not None and len(f.qpos) == adapter.model.nq
 
     f = adapter.frame(FrameNeeds.none())
-    assert f.geom_xpos is None, "连位姿都没申报时不该去取"
+    assert f.geom_xpos is None
 
 
 def test_diagnostic_metadata_and_frame_match_mujoco(adapter):
@@ -352,14 +352,14 @@ def test_pose_fetch_allocates_nothing(adapter):
     current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
-    assert len(buf_ids) == 2, "暂存数组被换过对象——那就是每帧在分配"
-    assert peak - start < 16 * 1024, f"取姿态峰值 {peak - start} B"
+    assert len(buf_ids) == 2
+    assert peak - start < 16 * 1024
     assert current - start < 8 * 1024
 
 
 def test_slow_path_agrees_with_fast_path(adapter):
 
-    assert adapter.fast_pose, "本机应当走整段拷贝那条"
+    assert adapter.fast_pose
     adapter.step(20)
     fast = adapter.frame(FrameNeeds())
     fast_pos, fast_mat = fast.geom_xpos.copy(), fast.geom_xmat.copy()
@@ -389,22 +389,24 @@ def test_set_qpos_takes_a_qpos_address(adapter):
 
     assert adapter.set_qpos(1, 0.5)
     qpos = adapter.data.qpos
-    assert qpos[1] == pytest.approx(0.5), "写的应当是 qpos[1]"
-    assert qpos[7] == pytest.approx(0.0), "第 1 个关节（h1）不该被碰到"
+    assert qpos[1] == pytest.approx(0.5)
+    assert qpos[7] == pytest.approx(0.0)
 
     assert adapter.set_qpos(joints["h1"].qpos_adr, 0.3)
     assert adapter.data.qpos[7] == pytest.approx(0.3)
-    assert not adapter.set_qpos(9999, 0.0), "越界要如实报失败，不能静默"
+    assert not adapter.set_qpos(9999, 0.0)
 
 
 def test_set_qpos_on_joint_types_scene():
 
-    resolve = pytest.importorskip("forge_viewer.assets", reason="assets 模块还没落地").resolve
+    resolve = pytest.importorskip(
+        "forge_viewer.assets", reason="asset registry unavailable"
+    ).resolve
     a = MuJoCoAdapter(resolve("joint_types"))
     joints = {j.name: j for j in a.joints()}
     assert joints["free"].qpos_adr == 0 and joints["free"].dof == 6
     ball = joints["ball"]
-    assert ball.qpos_adr == 7, "free joint 占 7 个 qpos，ball 从第 7 个开始"
+    assert ball.qpos_adr == 7
 
     before = a.data.qpos.copy()
     assert a.set_qpos(2, 0.75)
@@ -418,13 +420,13 @@ def test_set_qpos_on_joint_types_scene():
     assert nodes["free_body"].posable
     assert nodes["free_chain"].posable
     for name in ("ball_body", "slide_body", "hinge_body", "chain_root", "chain_0"):
-        assert not nodes[name].posable, f"{name} 是被关节驱动的，手柄不该对它出现"
+        assert not nodes[name].posable
     a.release()
 
 
 def test_set_ctrl_clips_to_range(adapter):
     assert adapter.set_ctrl(0, 5.0)
-    assert adapter.data.ctrl[0] == pytest.approx(1.0), "超出 ctrlrange 要夹住"
+    assert adapter.data.ctrl[0] == pytest.approx(1.0)
     assert not adapter.set_ctrl(7, 0.0)
 
 
@@ -516,8 +518,8 @@ def test_raycast_treats_the_world_body_as_a_miss(adapter):
     assert dist == float("inf")
 
     obj, dist = adapter.raycast(np.array([-2.0, 0.0, 3.0]), np.array([0.0, 0.0, -1.0]))
-    assert obj == nodes["post"].object_id != 0, "不带关节的 body 也该点得中"
-    assert dist == pytest.approx(2.0, abs=1e-6), "被没画出来的碰撞几何挡住了"
+    assert obj == nodes["post"].object_id != 0
+    assert dist == pytest.approx(2.0, abs=1e-6)
 
     obj_a, dist_a = adapter.raycast(np.array([0.0, 0.0, 3.0]), np.array([0.0, 0.0, -1.0]))
     obj_b, dist_b = adapter.raycast(np.array([0.0, 0.0, 3.0]), np.array([0.0, 0.0, -7.0]))
@@ -589,7 +591,7 @@ def test_load_failure_keeps_the_original_message(tmp_path):
         MuJoCoAdapter(bad)
     text = str(err.value)
     assert "bad.xml" in text
-    assert "nonsense" in text, f"MuJoCo 的原文被吞掉了：{text}"
+    assert "nonsense" in text
 
     missing = tmp_path / "nope.xml"
     with pytest.raises(RuntimeError):
@@ -608,15 +610,13 @@ def test_reload_and_reset(adapter, fixture_path):
     assert adapter.model is not old_model
     assert adapter.scene_source().instance_count > 0
 
-    #
-
     assert len(adapter._geom_xpos_buf) == adapter.model.ngeom
     assert adapter._mj_geom_xpos is adapter.data.geom_xpos
     assert adapter._mj_geom_xmat3.base is adapter.data.geom_xmat
     adapter.step(50)
     f = adapter.frame(FrameNeeds())
     assert np.allclose(f.geom_xpos, adapter.data.geom_xpos, atol=1e-6)
-    assert np.linalg.norm(f.geom_xpos - adapter.model.geom_pos) > 1e-4, "50 步之后该动了"
+    assert np.linalg.norm(f.geom_xpos - adapter.model.geom_pos) > 1e-4
 
 
 def test_camera_hint_frames_the_scene(adapter):

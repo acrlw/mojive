@@ -32,14 +32,14 @@ def test_layout_is_sorted_far_to_near():
 
     balls = balls_from((4.0, -4.0, 3.0))
     depths = [b.depth for b in balls]
-    assert depths == sorted(depths, reverse=True), f"没有从远到近排：{depths}"
+    assert depths == sorted(depths, reverse=True)
 
 
 def test_all_balls_are_the_same_size():
 
     balls = balls_from((4.0, -4.0, 3.0))
     radii = {round(b.radius, 9) for b in balls}
-    assert len(radii) == 1, f"球不等大：{sorted(radii)}"
+    assert len(radii) == 1
 
 
 def test_layout_is_orthographic_not_perspective():
@@ -141,8 +141,8 @@ def test_top_view_is_right_handed_x_right_y_up():
     y, p = np.radians(yaw), np.radians(pitch)
     direction = np.array([np.cos(p) * np.cos(y), np.cos(p) * np.sin(y), np.sin(p)])
     right, up, _f = camera_basis(cam(direction * 5.0))
-    assert right[0] > 0.99, f"+X 没在屏幕右（right·X={right[0]:+.3f}）"
-    assert up[1] > 0.99, f"+Y 没在屏幕上（up·Y={up[1]:+.3f}）"
+    assert right[0] > 0.99
+    assert up[1] > 0.99
 
 
 def test_widget_sits_inside_the_viewport_corner():

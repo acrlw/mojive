@@ -148,7 +148,7 @@ def rotvec_to_mat3(rotvec) -> np.ndarray:
 
 
 def mat3_to_quat(m) -> np.ndarray:
-    """3×3 → (w, x, y, z)。"""
+    """Convert a 3x3 rotation matrix to a (w, x, y, z) quaternion."""
     m = np.asarray(m, dtype=np.float64).reshape(3, 3)
     t = np.trace(m)
     if t > 0.0:

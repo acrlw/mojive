@@ -1,7 +1,7 @@
 [project]
 name = "forge-viewer"
 version = "0.1.0"
-description = "机器人仿真场景查看器，核心是自研现代 OpenGL 渲染器 forge"
+description = "Interactive 3D viewer and OpenGL renderer for robotics and simulation"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
@@ -11,9 +11,7 @@ dependencies = [
     "pillow>=10.0",
     "imageio-ffmpeg>=0.6",
     "loguru>=0.7",
-    # 窗口层用它读默认帧缓冲（`window.read_frame()`，12 §12.2 的窗口路径）。
-    # 它目前是 imgui-bundle 的传递依赖——**显式写出来**：靠传递依赖等于把别人的
-    # 依赖表当成自己的契约，对方哪天不装了，坏的是我们这条"判画面对不对"的路径。
+    # window.read_frame() reads the default framebuffer through PyOpenGL.
     "pyopengl>=3.1",
 ]
 
@@ -42,9 +40,9 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
 ignore = [
-    "E501",    # 行宽交给 formatter
+    "E501",    # Formatter controls line length.
     "B008",
-    "RUF001",  # 中文注释里的全角标点不是笔误
+    "RUF001",  # Intentional Unicode UI glyphs and symbols.
     "RUF002",
     "RUF003",
     "SIM108",
@@ -58,11 +56,11 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# GPU / 真实物理世界的用例默认不收集（见 12-verification.md §12.6）
+# The default suite excludes real GPU and physics worlds.
 addopts = "-m 'not gpu and not physics' --strict-markers"
 markers = [
-    "gpu: 需要能创建 GL 上下文的机器",
-    "physics: 需要装了物理库并能建真实世界",
-    "golden: 基准图回归",
-    "slow: 慢用例",
+    "gpu: requires a real OpenGL context",
+    "physics: requires an installed physics engine and a live world",
+    "golden: compares rendered output with reviewed reference images",
+    "slow: runs an extended workload",
 ]
