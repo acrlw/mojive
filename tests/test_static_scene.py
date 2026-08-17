@@ -10,7 +10,15 @@ from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.render.builder import SceneSourceBuilder
 from forge_viewer.scene import Scene
 from forge_viewer.session import Session
-from forge_viewer.types import CameraView, Environment, Light, LightKind, LightSet, MeshData
+from forge_viewer.types import (
+    CameraView,
+    Environment,
+    Light,
+    LightKind,
+    LightSet,
+    Material,
+    MeshData,
+)
 
 
 def test_static_scene_builds_without_a_physics_package():
@@ -131,6 +139,44 @@ def test_environment_is_editable_without_a_physics_backend():
     scene.box(name="new body")
     session.tick(FrameNeeds())
     assert session.source.lights.fog_end == environment.fog_end
+
+
+def test_material_components_support_shared_and_instance_edits():
+    shared = Material(name="shared", specular=0.2)
+    scene = Scene()
+    first = scene.box(name="first", material=shared)
+    scene.box(name="second", material=shared)
+    session = Session(StaticSceneAdapter(scene))
+    first_node = session.node_by_object_id(first.object_id)
+    geometry_node = next(
+        node
+        for node in session.nodes
+        if node.parent == first_node.node_id and node.kind is NodeKind.GEOM
+    )
+    material_id = int(session.source.geom_material[0])
+
+    edited = replace(shared, specular=0.8, shininess=0.9)
+    assert session.submit(cmd.SetMaterial(material_id, edited))
+    assert session.source.materials[material_id] is edited
+    assert scene.source.geom_material == [material_id, material_id]
+
+    rgba = np.array([0.2, 0.4, 0.8, 0.7], np.float32)
+    assert session.submit(cmd.SetGeometryColor(geometry_node.node_id, rgba))
+    assert np.allclose(session.source.geom_rgba[0], rgba)
+    assert not np.allclose(session.source.geom_rgba[1], rgba)
+
+    scene.sphere(name="third")
+    session.tick(FrameNeeds())
+    assert np.allclose(session.source.geom_rgba[0], rgba)
+    assert session.source.materials[session.source.geom_material[0]].specular == 0.8
+
+    object_color = np.array([0.8, 0.3, 0.2, 1.0], np.float32)
+    first.set_color(object_color)
+    first.set_material(Material(name="unique", emission=0.3))
+    session.tick(FrameNeeds())
+    assert np.allclose(session.source.geom_rgba[0], object_color)
+    assert session.source.materials[session.source.geom_material[0]].emission == 0.3
+    assert session.source.materials[session.source.geom_material[1]].specular == 0.8
 
 
 def test_cameras_are_editable_forge_entities_without_physics():

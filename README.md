@@ -77,7 +77,7 @@ Every user-facing feature has a reproducible Make target.
 | `make deformables` | Flex and skin dynamic meshes |
 | `make musculoskeletal` | Full musculoskeletal model with tendons and keyframes |
 | `make robot` | Download and open a MuJoCo Menagerie robot |
-| `make canvas` | Standalone scene authoring with Forge entities |
+| `make canvas` | Standalone scene authoring with editable transforms, materials, and Forge entities |
 | `make toy-physics` | Minimal physics backend independent of MuJoCo |
 | `make pvd` | One physics publisher and two independent viewers |
 | `make capture` | Write a PNG under `output/` |

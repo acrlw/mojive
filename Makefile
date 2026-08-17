@@ -45,7 +45,7 @@ help:
 		'  make showcase          render feature overview' \
 		'' \
 		'Backends and remote viewing:' \
-		'  make canvas            standalone 3D canvas' \
+		'  make canvas            standalone scene and material editor' \
 		'  make toy-physics       minimal independent physics backend' \
 		'  make pvd               one physics process and two viewers' \
 		'  make snapshot-record   record remote scene snapshots' \

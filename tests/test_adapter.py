@@ -228,6 +228,32 @@ def test_material_and_lights(adapter):
     assert grid.tex_uniform is True
     assert grid.tex_repeat == pytest.approx([2.0, 2.0])
 
+    material_id = src.materials.index(grid)
+    edited_material = replace(
+        grid,
+        emission=0.35,
+        specular=0.65,
+        shininess=0.75,
+        reflectance=0.45,
+        texture=None,
+        tex_repeat=np.array([3.0, 4.0], np.float32),
+        tex_uniform=False,
+    )
+    assert adapter.set_material(material_id, edited_material)
+    assert adapter.model.mat_emission[material_id] == pytest.approx(0.35)
+    assert adapter.model.mat_specular[material_id] == pytest.approx(0.65)
+    assert adapter.model.mat_shininess[material_id] == pytest.approx(0.75)
+    assert adapter.model.mat_reflectance[material_id] == pytest.approx(0.45)
+    assert adapter.model.mat_texrepeat[material_id] == pytest.approx([3.0, 4.0])
+    assert adapter.model.mat_texid[material_id, 1] == -1
+
+    instance = next(i for i, value in enumerate(src.geom_node) if value >= 0)
+    node_id = int(src.geom_node[instance])
+    color = np.array([0.15, 0.3, 0.6, 0.75], np.float32)
+    assert adapter.set_geometry_color(node_id, color)
+    geom_id = int(src.geom_source[instance])
+    assert adapter.model.geom_rgba[geom_id] == pytest.approx(color)
+
     lights = src.lights
     assert len(lights.lights) == 1
     assert lights.headlight is not None

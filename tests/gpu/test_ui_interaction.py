@@ -164,6 +164,28 @@ def test_environment_inspector_controls_render_flags(viewer):
     viewer.session.submit(cmd.Select(selected_before))
 
 
+def test_material_inspector_exposes_instance_and_shared_controls(viewer):
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+    from forge_viewer.adapters.base import NodeKind
+
+    selected_before = viewer.session.selected
+    target = next(
+        node
+        for node in viewer.session.nodes
+        if node.kind is NodeKind.LINK and node.name == "ball_00"
+    )
+    viewer.session.submit(cmd.Select(target.object_id))
+    activate_panel(viewer, "Inspector")
+    header = item_rect(viewer, "collapsing_header", "material")
+    click(viewer, imgui.get_io(), header)
+
+    item_rect(viewer, "color_edit4", "instance color")
+    item_rect(viewer, "drag_float", "specular")
+    viewer.session.submit(cmd.Select(selected_before))
+
+
 def test_orbit_moves_camera_and_picture(viewer):
 
     from imgui_bundle import imgui

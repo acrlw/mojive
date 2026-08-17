@@ -535,6 +535,22 @@ class SceneAdapterBase:
         source.lights = source.lights.with_environment(environment)
         return True
 
+    def set_material(self, material_id: int, material: Material) -> bool:
+        source = self.scene_source()
+        i = int(material_id)
+        if not 0 <= i < len(source.materials):
+            return False
+        source.materials[i] = material
+        return True
+
+    def set_geometry_color(self, node_id: int, rgba: np.ndarray) -> bool:
+        source = self.scene_source()
+        instances = np.flatnonzero(source.geom_node == int(node_id))
+        if not len(instances):
+            return False
+        source.geom_rgba[instances] = np.asarray(rgba, np.float32)
+        return True
+
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
         return False
 
@@ -588,6 +604,8 @@ class SceneAdapter(Protocol):
     def set_pose(self, node_id: int, position, rotation) -> bool: ...
     def set_light(self, light_id: int, light) -> bool: ...
     def set_environment(self, environment: Environment) -> bool: ...
+    def set_material(self, material_id: int, material: Material) -> bool: ...
+    def set_geometry_color(self, node_id: int, rgba: np.ndarray) -> bool: ...
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool: ...
     def apply_perturb(
         self, node_id: int, target_position: np.ndarray, target_rotation: np.ndarray, mode: str

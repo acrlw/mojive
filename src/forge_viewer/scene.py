@@ -35,6 +35,12 @@ class SceneObject:
     def set_pose(self, position, rotation=None) -> None:
         self.scene.set_pose(self.object_id, position, rotation)
 
+    def set_material(self, material: Material) -> None:
+        self.scene.set_object_material(self.object_id, material)
+
+    def set_color(self, rgba) -> None:
+        self.scene.set_object_color(self.object_id, rgba)
+
     def remove(self) -> None:
         self.scene.remove(self.object_id)
 
@@ -80,6 +86,7 @@ class Scene:
         self._frame = SceneFrame()
         self._oid_to_index: dict[int, int] = {}
         self._node_to_oid: dict[int, int] = {}
+        self._geom_node_to_oid: dict[int, int] = {}
 
     @property
     def structure_revision(self) -> int:
@@ -206,6 +213,15 @@ class Scene:
         self.set_pose(oid, position, rotation)
         return True
 
+    def set_object_material(self, object_id: int, material: Material) -> None:
+        self._item(object_id).material = material
+        self._revision += 1
+
+    def set_object_color(self, object_id: int, rgba) -> None:
+        item = self._item(object_id)
+        item.color[:] = np.asarray(rgba, np.float32).reshape(4)
+        self._revision += 1
+
     def set_light(self, light_id: int, light) -> bool:
         i = int(light_id)
         if not 0 <= i < len(self.lights.lights):
@@ -221,6 +237,28 @@ class Scene:
         self.lights = self.lights.with_environment(environment)
         if self._built_revision == self._revision:
             self._source.lights = self.lights
+        return True
+
+    def set_material(self, material_id: int, material: Material) -> bool:
+        self._rebuild()
+        i = int(material_id)
+        if not 0 <= i < len(self._source.materials):
+            return False
+        current = self._source.materials[i]
+        for item in self._items:
+            if item.material is current:
+                item.material = material
+        self._source.materials[i] = material
+        return True
+
+    def set_geometry_color(self, node_id: int, rgba) -> bool:
+        object_id = self._geom_node_to_oid.get(int(node_id))
+        if object_id is None:
+            return False
+        item = self._item(object_id)
+        item.color[:] = np.asarray(rgba, np.float32).reshape(4)
+        if self._built_revision == self._revision:
+            self._source.geom_rgba[self._oid_to_index[object_id]] = item.color
         return True
 
     def remove(self, object_id: int) -> None:
@@ -253,6 +291,7 @@ class Scene:
         geom_material: list[int] = []
         self._oid_to_index = {}
         self._node_to_oid = {}
+        self._geom_node_to_oid = {}
 
         for i, item in enumerate(self._items):
             token = id(item.material)
@@ -287,6 +326,7 @@ class Scene:
             nodes[0].children.append(link_id)
             self._oid_to_index[item.object_id] = i
             self._node_to_oid[link_id] = item.object_id
+            self._geom_node_to_oid[geom_id] = item.object_id
 
         for i, light in enumerate(self.lights.lights):
             node_id = len(nodes)

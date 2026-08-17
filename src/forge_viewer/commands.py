@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .types import CameraView, Environment, Light
+from .types import CameraView, Environment, Light, Material
 
 
 @dataclass(frozen=True)
@@ -87,6 +87,18 @@ class SetLight(Command):
 @dataclass(frozen=True)
 class SetEnvironment(Command):
     environment: Environment
+
+
+@dataclass(frozen=True)
+class SetMaterial(Command):
+    material_id: int
+    material: Material
+
+
+@dataclass(frozen=True)
+class SetGeometryColor(Command):
+    node_id: int
+    rgba: np.ndarray
 
 
 @dataclass(frozen=True)

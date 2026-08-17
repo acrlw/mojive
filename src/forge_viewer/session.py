@@ -417,6 +417,28 @@ class Session:
             message = "" if writeback else "edited in Forge; backend write-back is unavailable"
             return CommandResult.good(message)
 
+        if isinstance(c, cmd.SetMaterial):
+            if self._source is None or not 0 <= c.material_id < len(self._source.materials):
+                return CommandResult.bad(f"material {c.material_id} is unavailable")
+            writeback = self._adapter.set_material(c.material_id, c.material)
+            self._source.materials[c.material_id] = c.material
+            self._structure_generation += 1
+            message = "" if writeback else "edited in Forge; backend write-back is unavailable"
+            return CommandResult.good(message)
+
+        if isinstance(c, cmd.SetGeometryColor):
+            if self._source is None:
+                return CommandResult.bad("geometry is unavailable")
+            instances = np.flatnonzero(self._source.geom_node == int(c.node_id))
+            if not len(instances):
+                return CommandResult.bad(f"geometry node {c.node_id} is unavailable")
+            rgba = np.asarray(c.rgba, np.float32).reshape(4).copy()
+            writeback = self._adapter.set_geometry_color(c.node_id, rgba)
+            self._source.geom_rgba[instances] = rgba
+            self._structure_generation += 1
+            message = "" if writeback else "edited in Forge; backend write-back is unavailable"
+            return CommandResult.good(message)
+
         if isinstance(c, cmd.SetSceneCamera):
             camera_id = int(c.camera_id)
             slot = self._camera_slot(camera_id)

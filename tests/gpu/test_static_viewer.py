@@ -15,6 +15,7 @@ from forge_viewer import commands as cmd  # noqa: E402
 from forge_viewer.bridge import DebugClient  # noqa: E402
 from forge_viewer.composition import build_scene  # noqa: E402
 from forge_viewer.demos import canvas_scene  # noqa: E402
+from forge_viewer.types import DEFAULT_MATERIAL, Material  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -68,6 +69,24 @@ def test_canvas_pose_update_changes_the_window(canvas):
 
     diff = np.max(np.abs(after.astype(np.int16) - before.astype(np.int16)), axis=-1)
     assert np.count_nonzero(diff > 10) > 500
+
+
+def test_canvas_material_edits_change_the_window(canvas):
+    viewer, scene = canvas
+    before = snap(viewer)
+    crate = scene.object("crate")
+    crate.set_color((0.1, 0.8, 0.9, 1.0))
+    crate.set_material(Material(name="emissive", emission=0.65, specular=0.1))
+    viewer.sync()
+    viewer.sync()
+    after = snap(viewer)
+
+    diff = np.max(np.abs(after.astype(np.int16) - before.astype(np.int16)), axis=-1)
+    assert np.count_nonzero(diff > 10) > 1000
+
+    crate.set_color((0.92, 0.42, 0.18, 1.0))
+    crate.set_material(DEFAULT_MATERIAL)
+    viewer.sync()
 
 
 def test_canvas_detects_dynamic_structure_changes(canvas):

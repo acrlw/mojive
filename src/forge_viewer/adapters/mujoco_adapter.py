@@ -2282,6 +2282,48 @@ class MuJoCoAdapter:
             self._source.lights = self._build_lights()
         return True
 
+    def set_material(self, material_id: int, material: Material) -> bool:
+        i = int(material_id)
+        if not 0 <= i < self._m.nmat:
+            return False
+        m = self._m
+        m.mat_rgba[i] = material.rgba
+        m.mat_emission[i] = material.emission
+        m.mat_specular[i] = material.specular
+        m.mat_shininess[i] = material.shininess
+        m.mat_reflectance[i] = material.reflectance
+        m.mat_texrepeat[i] = material.tex_repeat
+        m.mat_texuniform[i] = material.tex_uniform
+        m.mat_texid[i, _TEXROLE_RGB] = (
+            mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_TEXTURE, material.texture)
+            if material.texture
+            else -1
+        )
+        m.mat_texid[i, _TEXROLE_RGBA] = -1
+        return True
+
+    def set_geometry_color(self, node_id: int, rgba: np.ndarray) -> bool:
+        source = self.scene_source()
+        instances = np.flatnonzero(source.geom_node == int(node_id))
+        if not len(instances):
+            return False
+        color = np.asarray(rgba, np.float32).reshape(4)
+        for instance in instances:
+            pose_source = InstancePoseSource(int(source.geom_pose_source[instance]))
+            source_id = int(source.geom_source[instance])
+            if pose_source is InstancePoseSource.GEOM:
+                self._m.geom_rgba[source_id] = color
+            elif pose_source is InstancePoseSource.SITE:
+                self._m.site_rgba[source_id] = color
+            else:
+                mesh = source.geom_mesh[instance]
+                if mesh.shape in (MeshShape.FLEX, MeshShape.FLEX_FACE):
+                    self._m.flex_rgba[mesh.index] = color
+                elif mesh.shape is MeshShape.SKIN:
+                    self._m.skin_rgba[mesh.index] = color
+        source.geom_rgba[instances] = color
+        return True
+
     def set_pose(self, node_id: int, position, rotation) -> bool:
         body = self._node_body.get(int(node_id), -1)
         if body < 0 or not self._is_posable_body(body):

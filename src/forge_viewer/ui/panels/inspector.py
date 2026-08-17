@@ -239,25 +239,94 @@ class InspectorPanel(Panel):
         if src is None or node.body_index < 0 or len(src.geom_body) == 0:
             imgui.text_disabled("no geometry")
             return
-        idx = np.flatnonzero(np.asarray(src.geom_body) == node.body_index)
-        if len(idx) == 0:
+        instances = np.flatnonzero(np.asarray(src.geom_body) == node.body_index)
+        if len(instances) == 0:
             imgui.text_disabled("no geometry on this body")
             return
-        imgui.text_disabled(f"{len(idx)} geom instance(s)")
-        if not begin_kv_table("insp_mat"):
+        groups: dict[int, list[int]] = {}
+        for instance in instances:
+            node_id = int(src.geom_node[instance]) if instance < len(src.geom_node) else -1
+            groups.setdefault(node_id, []).append(int(instance))
+        imgui.text_disabled(f"{len(groups)} geometry component(s)")
+        for node_id, group in list(groups.items())[:8]:
+            self._geometry_material(ctx, node_id, group)
+
+    def _geometry_material(self, ctx: PanelContext, node_id: int, instances: list[int]) -> None:
+        src = ctx.session.source
+        assert src is not None
+        first = instances[0]
+        material_id = src.geom_material[first] if first < len(src.geom_material) else -1
+        if not 0 <= material_id < len(src.materials):
+            imgui.text_disabled("material data is unavailable")
             return
-        for i in idx[:8]:
-            mi = src.geom_material[i] if i < len(src.geom_material) else -1
-            mat = src.materials[mi] if 0 <= mi < len(src.materials) else None
-            rgba = src.geom_rgba[i] if i < len(src.geom_rgba) else None
-            name = mat.name if mat is not None else "—"
-            tail = (
-                f"  rgba {rgba[0]:.2f} {rgba[1]:.2f} {rgba[2]:.2f} {rgba[3]:.2f}"
-                if rgba is not None
-                else ""
+        material = src.materials[material_id]
+        scene_node = ctx.session.node(node_id)
+        label = scene_node.name if scene_node is not None else f"geometry {node_id}"
+        imgui.push_id(node_id)
+        opened = imgui.collapsing_header(
+            f"{label}##component", imgui.TreeNodeFlags_.default_open if len(instances) == 1 else 0
+        )
+        if not opened:
+            imgui.pop_id()
+            return
+
+        color_changed, rgba = imgui.color_edit4("instance color", src.geom_rgba[first])
+        if color_changed and node_id >= 0:
+            ctx.submit(cmd.SetGeometryColor(node_id, np.asarray(rgba, np.float32)))
+
+        imgui.text_disabled(f"shared material: {material.name or material_id}")
+        emission_changed, emission = imgui.drag_float(
+            "emission", material.emission, 0.01, 0.0, 10.0, "%.2f"
+        )
+        specular_changed, specular = imgui.drag_float(
+            "specular", material.specular, 0.01, 0.0, 1.0, "%.2f"
+        )
+        shininess_changed, shininess = imgui.drag_float(
+            "shininess", material.shininess, 0.01, 0.0, 1.0, "%.2f"
+        )
+        reflectance_changed, reflectance = imgui.drag_float(
+            "reflectance", material.reflectance, 0.01, 0.0, 1.0, "%.2f"
+        )
+        texture = material.texture
+        texture_changed = False
+        if imgui.begin_combo("texture", texture or "none"):
+            for candidate in (None, *src.textures):
+                selected, _ = imgui.selectable(candidate or "none", candidate == texture)
+                if selected:
+                    texture = candidate
+                    texture_changed = True
+            imgui.end_combo()
+        repeat_changed, tex_repeat = imgui.drag_float2(
+            "texture repeat", material.tex_repeat, 0.05, 0.01, 1000.0, "%.2f"
+        )
+        uniform_changed, tex_uniform = imgui.checkbox("uniform texture scale", material.tex_uniform)
+        if any(
+            (
+                emission_changed,
+                specular_changed,
+                shininess_changed,
+                reflectance_changed,
+                texture_changed,
+                repeat_changed,
+                uniform_changed,
             )
-            labeled(str(src.geom_mesh[i]) if i < len(src.geom_mesh) else f"geom{i}", name + tail)
-        imgui.end_table()
+        ):
+            ctx.submit(
+                cmd.SetMaterial(
+                    material_id,
+                    replace(
+                        material,
+                        emission=float(emission),
+                        specular=float(specular),
+                        shininess=float(shininess),
+                        reflectance=float(reflectance),
+                        texture=texture,
+                        tex_repeat=np.asarray(tex_repeat, np.float32),
+                        tex_uniform=bool(tex_uniform),
+                    ),
+                )
+            )
+        imgui.pop_id()
 
     def _light(self, ctx: PanelContext, node: SceneNode) -> None:
         source = ctx.session.source

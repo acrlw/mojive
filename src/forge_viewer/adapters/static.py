@@ -46,6 +46,12 @@ class StaticSceneAdapter(SceneAdapterBase):
     def set_environment(self, environment) -> bool:
         return self.scene.set_environment(environment)
 
+    def set_material(self, material_id, material) -> bool:
+        return self.scene.set_material(material_id, material)
+
+    def set_geometry_color(self, node_id, rgba) -> bool:
+        return self.scene.set_geometry_color(node_id, rgba)
+
     def cameras(self) -> list[CameraInfo]:
         return self.scene.camera_infos()
 
