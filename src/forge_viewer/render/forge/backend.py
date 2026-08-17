@@ -83,6 +83,8 @@ class ForgeBackend:
         self._flags[RenderFlag.HAZE] = False
         self._flags[RenderFlag.CONTACTPOINT] = False
         self._flags[RenderFlag.CONTACTFORCE] = False
+        self._flags[RenderFlag.CONTACTSPLIT] = False
+        self._flags[RenderFlag.AUTOCONNECT] = False
         self._flags[RenderFlag.ACTUATOR] = False
         self._flags[RenderFlag.ACTIVATION] = False
         self._flags[RenderFlag.JOINT] = False
@@ -98,7 +100,6 @@ class ForgeBackend:
         # MuJoCo mjv_defaultOption() enables tendon paths by default.
         self._flags[RenderFlag.TENDON] = True
         self._contact_ends = np.zeros((0, 3), np.float32)
-        self._contact_lengths = np.zeros(0, np.float32)
         self._actuator_palette = np.zeros((0, 4), np.float32)
         self._tendon_actuator = np.zeros(0, np.int32)
         self._capsule_segments = np.zeros((0, 2, 3), np.float32)
@@ -142,6 +143,8 @@ class ForgeBackend:
             flags |= {
                 RenderFlag.CONTACTPOINT,
                 RenderFlag.CONTACTFORCE,
+                RenderFlag.CONTACTSPLIT,
+                RenderFlag.AUTOCONNECT,
                 RenderFlag.TENDON,
                 RenderFlag.ACTUATOR,
                 RenderFlag.ACTIVATION,
@@ -266,42 +269,67 @@ class ForgeBackend:
         self._publish_labels(frame)
         self._publish_frames(frame)
         contacts = frame.contacts
+        contact_source = self._source.diagnostics
         points = self.debug.layer("physics.contact.points", Occlusion.ALWAYS)
         forces = self.debug.layer("physics.contact.forces", Occlusion.GHOST)
         if contacts is None or not len(contacts):
             points.erase("contacts")
-            forces.erase("forces")
+            forces.clear()
         else:
             if self.get_flag(RenderFlag.CONTACTPOINT):
-                points.points("contacts", contacts[:, :3], (1.0, 0.65, 0.12, 1.0), 4.0)
+                points.points("contacts", contacts[:, :3], contact_source.contact_point_rgba, 4.0)
             else:
                 points.erase("contacts")
             if self.get_flag(RenderFlag.CONTACTFORCE):
                 n = len(contacts)
-                if n > len(self._contact_ends):
-                    cap = max(n, 2 * len(self._contact_ends), 64)
+                needed = 2 * n if self.get_flag(RenderFlag.CONTACTSPLIT) else n
+                if needed > len(self._contact_ends):
+                    cap = max(needed, 2 * len(self._contact_ends), 64)
                     self._contact_ends = np.zeros((cap, 3), np.float32)
-                    self._contact_lengths = np.zeros(cap, np.float32)
-                np.log1p(contacts[:, 6], out=self._contact_lengths[:n])
-                self._contact_lengths[:n] *= max(float(self._source.scene_extent), 1e-3) * 0.04
-                np.minimum(
-                    self._contact_lengths[:n],
-                    max(float(self._source.scene_extent), 1e-3) * 0.3,
-                    out=self._contact_lengths[:n],
-                )
-                np.multiply(
-                    contacts[:, 3:6], self._contact_lengths[:n, None], out=self._contact_ends[:n]
-                )
-                self._contact_ends[:n] += contacts[:, :3]
-                forces.arrows(
-                    "forces",
-                    contacts[:, :3],
-                    self._contact_ends[:n],
-                    (1.0, 0.42, 0.08, 1.0),
-                    2.0,
-                )
+                forces.clear()
+                components = frame.contact_forces
+                if components is None:
+                    self._contact_ends[:n] = contacts[:, :3]
+                    self._contact_ends[:n] += (
+                        contacts[:, 3:6] * contacts[:, 6:7] * contact_source.contact_force_scale
+                    )
+                    forces.arrows(
+                        "forces",
+                        contacts[:, :3],
+                        self._contact_ends[:n],
+                        contact_source.contact_force_rgba,
+                        2.0,
+                    )
+                elif self.get_flag(RenderFlag.CONTACTSPLIT):
+                    scale = contact_source.contact_force_scale
+                    self._contact_ends[:n] = contacts[:, :3] + components[:, 0] * scale
+                    self._contact_ends[n : 2 * n] = contacts[:, :3] + components[:, 1] * scale
+                    forces.arrows(
+                        "normal",
+                        contacts[:, :3],
+                        self._contact_ends[:n],
+                        contact_source.contact_force_rgba,
+                        2.0,
+                    )
+                    forces.arrows(
+                        "friction",
+                        contacts[:, :3],
+                        self._contact_ends[n : 2 * n],
+                        contact_source.contact_friction_rgba,
+                        2.0,
+                    )
+                else:
+                    scale = contact_source.contact_force_scale
+                    self._contact_ends[:n] = contacts[:, :3] + components.sum(axis=1) * scale
+                    forces.arrows(
+                        "forces",
+                        contacts[:, :3],
+                        self._contact_ends[:n],
+                        contact_source.contact_force_rgba,
+                        2.0,
+                    )
             else:
-                forces.erase("forces")
+                forces.clear()
 
     def _publish_flex_debug(self, frame: SceneFrame) -> None:
         vertices = frame.flex_vertices
@@ -463,6 +491,7 @@ class ForgeBackend:
         actuators = self.debug.layer("physics.actuators", Occlusion.DEPTH)
         rangefinders = self.debug.layer("physics.rangefinders", Occlusion.GHOST)
         constraints = self.debug.layer("physics.constraints", Occlusion.DEPTH)
+        autoconnect = self.debug.layer("physics.autoconnect", Occlusion.DEPTH)
         dynamic = frame.diagnostics
         source = self._source.diagnostics
         if dynamic is None:
@@ -472,6 +501,7 @@ class ForgeBackend:
             actuators.clear()
             rangefinders.clear()
             constraints.clear()
+            autoconnect.clear()
             return
 
         if self.get_flag(RenderFlag.JOINT):
@@ -539,6 +569,18 @@ class ForgeBackend:
         self._publish_actuator_visuals(frame, actuators)
         self._publish_rangefinders(frame, rangefinders)
         self._publish_constraints(frame, constraints)
+        if self.get_flag(RenderFlag.AUTOCONNECT):
+            for index, segment in enumerate(dynamic.autoconnect_segments):
+                self._draw_capsule_between(
+                    autoconnect,
+                    f"segment:{index}",
+                    segment[0],
+                    segment[1],
+                    source.autoconnect_width,
+                    source.autoconnect_rgba,
+                )
+        else:
+            autoconnect.clear()
 
     def _publish_constraints(self, frame: SceneFrame, layer) -> None:
         dynamic = frame.diagnostics
@@ -766,7 +808,9 @@ class ForgeBackend:
         start = np.asarray(start, np.float32)
         end = np.asarray(end, np.float32)
         delta = end - start
-        return (start + end) * 0.5, cls._axis_rotation(delta), float(np.linalg.norm(delta) * 0.5)
+        length = float(np.linalg.norm(delta))
+        rotation = cls._axis_rotation(delta) if length else np.eye(3, dtype=np.float32)
+        return (start + end) * 0.5, rotation, length * 0.5
 
     @staticmethod
     def _axis_rotation(axis: np.ndarray) -> np.ndarray:

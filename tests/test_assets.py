@@ -34,6 +34,7 @@ EXPECTED_ASSETS = (
     "scale_extremes.xml",
     "showcase.xml",
     "slider_crank.xml",
+    "solver_diagnostics.xml",
     "sunlight_shadow.xml",
     "test_scene.urdf",
     "test_scene.xml",

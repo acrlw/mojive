@@ -39,6 +39,8 @@ _VIS_FLAGS: tuple[RenderFlag, ...] = (
     RenderFlag.FLEXEDGE,
     RenderFlag.CONTACTPOINT,
     RenderFlag.CONTACTFORCE,
+    RenderFlag.CONTACTSPLIT,
+    RenderFlag.AUTOCONNECT,
     RenderFlag.TENDON,
     RenderFlag.TRANSPARENT,
     RenderFlag.COM,

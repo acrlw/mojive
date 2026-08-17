@@ -202,6 +202,20 @@ class DiagnosticSource:
     constraint_rgba: np.ndarray = field(
         default_factory=lambda: np.array([0.9, 0.0, 0.0, 1.0], np.float32)
     )
+    contact_point_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([1.0, 0.3, 0.1, 1.0], np.float32)
+    )
+    contact_force_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([0.7, 0.9, 0.3, 1.0], np.float32)
+    )
+    contact_friction_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([0.9, 0.5, 0.1, 1.0], np.float32)
+    )
+    contact_force_scale: float = 1.0
+    autoconnect_width: float = 0.0
+    autoconnect_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([0.2, 0.2, 0.8, 1.0], np.float32)
+    )
 
 
 @dataclass
@@ -215,6 +229,9 @@ class DiagnosticFrame:
     actuator_xmat: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3), np.float32))
     slider_crank_points: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3), np.float32))
     slider_crank_broken: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
+    autoconnect_segments: np.ndarray = field(
+        default_factory=lambda: np.zeros((0, 2, 3), np.float32)
+    )
     rangefinder_starts: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     rangefinder_ends: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     rangefinder_normals: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
@@ -274,7 +291,8 @@ class SceneFrame:
     ctrl: np.ndarray | None = None
     actuator_activation: np.ndarray | None = None
 
-    contacts: np.ndarray | None = None  # (C, 7): position(3), normal(3), force
+    contacts: np.ndarray | None = None  # (C, 7): position(3), normal(3), force magnitude
+    contact_forces: np.ndarray | None = None  # (C, 2, 3): normal and friction force
     tendon_segments: np.ndarray | None = None  # (W, 2, 3) f32
     tendon_ids: np.ndarray | None = None
     tendon_widths: np.ndarray | None = None

@@ -526,6 +526,7 @@ class ViewerApp:
                     RenderFlag.LIGHT,
                     RenderFlag.RANGEFINDER,
                     RenderFlag.CONSTRAINT,
+                    RenderFlag.AUTOCONNECT,
                 )
             )
             or label_mode

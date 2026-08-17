@@ -43,6 +43,8 @@ class RenderFlag(enum.StrEnum):
     FLEXEDGE = "flex_edge"
     CONTACTPOINT = "contactpoint"
     CONTACTFORCE = "contactforce"
+    CONTACTSPLIT = "contactsplit"
+    AUTOCONNECT = "autoconnect"
     TENDON = "tendon"
     TRANSPARENT = "transparent"
     COM = "com"

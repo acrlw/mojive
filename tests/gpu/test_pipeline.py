@@ -312,6 +312,40 @@ def test_slider_crank_visuals_reach_the_gpu_pipeline(gl):
         adapter.release()
 
 
+def test_contact_split_and_autoconnect_reach_the_gpu_pipeline(gl):
+    contacts = make_adapter("mujoco", resolve("mujoco_visuals"))
+    chain = make_adapter("mujoco", resolve("joint_types"))
+    contact_backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    chain_backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    try:
+        contact_backend.set_scene(contacts.scene_source())
+        contact_backend.set_camera(contacts.camera_hint())
+        contact_backend.set_flag(RenderFlag.CONTACTFORCE, True)
+        contact_backend.set_flag(RenderFlag.CONTACTSPLIT, True)
+        contacts.step(400)
+        frame = contacts.frame(FrameNeeds(poses=True, contacts=True, diagnostics=True))
+        contact_backend.update(frame)
+        force_layer = contact_backend.debug.layer("physics.contact.forces")
+        assert force_layer.count_of(Prim.ARROW) == 2 * len(frame.contacts)
+        assert contact_backend.render(frame) is not None
+
+        chain_backend.set_scene(chain.scene_source())
+        camera = next(item for item in chain.cameras() if item.name == "joints")
+        chain_backend.set_camera(chain.camera_view(camera.camera_id))
+        chain_backend.set_flag(RenderFlag.AUTOCONNECT, True)
+        frame = chain.frame(FrameNeeds(poses=True, diagnostics=True))
+        chain_backend.update(frame)
+        autoconnect = chain_backend.debug.layer("physics.autoconnect")
+        assert autoconnect.count_of(Prim.CYLINDER) == len(frame.diagnostics.autoconnect_segments)
+        assert autoconnect.count_of(Prim.SPHERE) == 2 * len(frame.diagnostics.autoconnect_segments)
+        assert chain_backend.render(frame) is not None
+    finally:
+        contact_backend.release()
+        chain_backend.release()
+        contacts.release()
+        chain.release()
+
+
 def test_deformable_vertices_update_without_rebuilding_the_scene(gl):
 
     import mujoco

@@ -232,6 +232,8 @@ def test_render_flags_cover_the_reference_renderers_vocabulary():
         "light",
         "contactpoint",
         "contactforce",
+        "contactsplit",
+        "autoconnect",
         "transparent",
         "com",
         "convexhull",

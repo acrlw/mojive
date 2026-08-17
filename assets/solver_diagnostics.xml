@@ -1,0 +1,42 @@
+<mujoco model="solver_diagnostics">
+  <compiler angle="degree" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+
+  <visual>
+    <scale connect="0.025"/>
+    <map force="0.008"/>
+    <rgba connect="0.10 0.78 1.00 1" contactpoint="1.00 0.55 0.10 1"
+          contactforce="1.00 0.30 0.15 1" contactfriction="0.95 0.85 0.15 1"/>
+  </visual>
+
+  <worldbody>
+    <geom type="plane" size="0 0 0.05" rgba="0.18 0.22 0.27 1" friction="1 0.1 0.1"/>
+    <light type="directional" pos="1 -2 4" dir="-0.2 0.3 -1"/>
+    <camera name="overview" pos="2.2 -3.4 1.7" xyaxes="0.85 0.52 0 -0.25 0.41 0.88"/>
+
+    <body name="chain_root" pos="-0.9 0 0.55">
+      <geom type="sphere" size="0.10" group="1" rgba="0.35 0.55 0.85 1"/>
+      <body name="link_0" pos="0.25 0 0">
+        <joint name="joint_0" type="hinge" axis="0 1 0"/>
+        <geom type="capsule" fromto="0 0 0 0.42 0 0.18" size="0.06" group="1"
+              rgba="0.35 0.68 0.85 1"/>
+        <body name="link_1" pos="0.48 0 0.20">
+          <joint name="joint_1" type="hinge" axis="0 1 0"/>
+          <geom type="capsule" fromto="0 0 0 0.35 0 0.25" size="0.055" group="1"
+                rgba="0.45 0.78 0.55 1"/>
+          <body name="link_2" pos="0.40 0 0.30">
+            <joint name="joint_2" type="hinge" axis="1 0 0"/>
+            <geom type="box" pos="0.22 0 0.15" size="0.20 0.08 0.07" group="1"
+                  rgba="0.78 0.55 0.30 1"/>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <body name="slider" pos="0.65 0 0.28">
+      <freejoint/>
+      <geom type="sphere" size="0.22" mass="2" rgba="0.85 0.45 0.18 1"
+            friction="1 0.1 0.1"/>
+    </body>
+  </worldbody>
+</mujoco>

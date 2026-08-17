@@ -142,6 +142,8 @@ class MuJoCoAdapter:
         self._contact_buf = np.zeros((0, 7), np.float32)
         self._contact_force = np.zeros(6, np.float64)
         self._contact_view = self._contact_buf
+        self._contact_force_buf = np.zeros((0, 2, 3), np.float32)
+        self._contact_force_view = self._contact_force_buf
         self._tendon_segments = np.zeros((0, 2, 3), np.float32)
         self._tendon_ids = np.zeros(0, np.int32)
         self._tendon_widths = np.zeros(0, np.float32)
@@ -254,6 +256,8 @@ class MuJoCoAdapter:
         self._flex_vertices_buf = np.zeros((model.nflexvert, 3), np.float32)
         self._contact_buf = np.zeros((max(model.ngeom, 64), 7), np.float32)
         self._contact_view = self._contact_buf[:0]
+        self._contact_force_buf = np.zeros((len(self._contact_buf), 2, 3), np.float32)
+        self._contact_force_view = self._contact_force_buf[:0]
         d = self._d
         wrap_capacity = d.wrap_xpos.size // 3
         self._tendon_segments = np.zeros((wrap_capacity, 2, 3), np.float32)
@@ -416,7 +420,12 @@ class MuJoCoAdapter:
         np.copyto(self._equality_enabled_buf, d.eq_active, casting="unsafe")
         f.equality_enabled = self._equality_enabled_buf
 
-        f.contacts = self._fill_contacts() if needs.contacts else None
+        if needs.contacts:
+            f.contacts = self._fill_contacts()
+            f.contact_forces = self._contact_force_view
+        else:
+            f.contacts = None
+            f.contact_forces = None
         if needs.tendons:
             f.tendon_segments, f.tendon_ids, f.tendon_widths = self._fill_tendons()
         else:
@@ -443,6 +452,7 @@ class MuJoCoAdapter:
             )
             self._fill_actuator_visual_poses(diagnostics)
             self._fill_slider_crank_visuals(diagnostics)
+            self._fill_autoconnect_visuals(diagnostics)
             self._fill_rangefinder_visuals(diagnostics)
             self._fill_constraint_visuals(diagnostics)
             f.diagnostics = diagnostics
@@ -486,16 +496,30 @@ class MuJoCoAdapter:
         d, m = self._d, self._m
         n = int(d.ncon)
         if n > len(self._contact_buf):
-            self._contact_buf = np.zeros((max(n, 2 * len(self._contact_buf)), 7), np.float32)
+            capacity = max(n, 2 * len(self._contact_buf))
+            self._contact_buf = np.zeros((capacity, 7), np.float32)
+            self._contact_force_buf = np.zeros((capacity, 2, 3), np.float32)
             self._contact_view = self._contact_buf[:0]
+            self._contact_force_view = self._contact_force_buf[:0]
         for i in range(n):
             c = d.contact[i]
             self._contact_buf[i, 0:3] = c.pos
             self._contact_buf[i, 3:6] = c.frame[0:3]
             mujoco.mj_contactForce(m, d, i, self._contact_force)
-            self._contact_buf[i, 6] = self._contact_force[0]
+            local = self._contact_force[:3].copy()
+            if int(c.dim) < 3:
+                local[int(c.dim) :] = 0.0
+            rotation = np.asarray(c.frame, np.float64).reshape(3, 3).T
+            self._contact_force_buf[i, 0] = rotation[:, 0] * local[0]
+            self._contact_force_buf[i, 1] = rotation[:, 1:] @ local[1:]
+            first = int(m.geom_bodyid[c.geom[0]]) if c.geom[0] >= 0 else m.nbody + int(c.flex[0])
+            second = int(m.geom_bodyid[c.geom[1]]) if c.geom[1] >= 0 else m.nbody + int(c.flex[1])
+            if first > second:
+                self._contact_force_buf[i] *= -1.0
+            self._contact_buf[i, 6] = np.linalg.norm(local)
         if len(self._contact_view) != n:
             self._contact_view = self._contact_buf[:n]
+            self._contact_force_view = self._contact_force_buf[:n]
         return self._contact_view
 
     def scene_source(self) -> SceneSource:
@@ -955,6 +979,14 @@ class MuJoCoAdapter:
             (slider_crank_count, 3, 3), np.float32
         )
         self._diagnostic_frame.slider_crank_broken = np.zeros(slider_crank_count, bool)
+        autoconnect_count = sum(
+            1 + int(m.body_jntnum[body])
+            for body in range(1, m.nbody)
+            if int(m.body_parentid[body]) != 0
+        )
+        self._diagnostic_frame.autoconnect_segments = np.zeros(
+            (autoconnect_count, 2, 3), np.float32
+        )
 
         return DiagnosticSource(
             joint_kinds=joint_kinds,
@@ -985,6 +1017,12 @@ class MuJoCoAdapter:
             constraint_radius=meansize * float(m.vis.scale.constraint),
             constraint_connect_rgba=np.asarray(m.vis.rgba.connect, np.float32).copy(),
             constraint_rgba=np.asarray(m.vis.rgba.constraint, np.float32).copy(),
+            contact_point_rgba=np.asarray(m.vis.rgba.contactpoint, np.float32).copy(),
+            contact_force_rgba=np.asarray(m.vis.rgba.contactforce, np.float32).copy(),
+            contact_friction_rgba=np.asarray(m.vis.rgba.contactfriction, np.float32).copy(),
+            contact_force_scale=float(m.vis.map.force) / float(m.stat.meanmass),
+            autoconnect_width=meansize * float(m.vis.scale.connect),
+            autoconnect_rgba=np.asarray(m.vis.rgba.connect, np.float32).copy(),
         )
 
     def _fill_constraint_visuals(self, diagnostics: DiagnosticFrame) -> None:
@@ -1161,6 +1199,22 @@ class MuJoCoAdapter:
             points[0] = d.site_xpos[slider_site]
             points[1] = points[0] + axis * slider_length
             points[2] = d.site_xpos[crank_site]
+
+    def _fill_autoconnect_visuals(self, diagnostics: DiagnosticFrame) -> None:
+        m, d = self._m, self._d
+        record = 0
+        for body in range(1, m.nbody):
+            parent = int(m.body_parentid[body])
+            if parent == 0:
+                continue
+            current = d.xipos[body]
+            start = int(m.body_jntadr[body])
+            for joint in range(start + int(m.body_jntnum[body]) - 1, start - 1, -1):
+                diagnostics.autoconnect_segments[record] = current, d.xanchor[joint]
+                current = d.xanchor[joint]
+                record += 1
+            diagnostics.autoconnect_segments[record] = current, d.xipos[parent]
+            record += 1
 
     @staticmethod
     def _axis_rotation(axis) -> np.ndarray:

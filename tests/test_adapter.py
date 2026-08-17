@@ -730,6 +730,37 @@ def test_slider_crank_visuals_match_mujoco_linkage_geometry():
         a.release()
 
 
+def test_contact_force_components_and_autoconnect_segments_match_mujoco():
+    from forge_viewer.assets import resolve
+
+    contacts = MuJoCoAdapter(resolve("mujoco_visuals"))
+    chain = MuJoCoAdapter(resolve("joint_types"))
+    try:
+        contacts.scene_source()
+        contacts.step(400)
+        frame = contacts.frame(FrameNeeds(poses=True, contacts=True, diagnostics=True))
+        assert len(frame.contacts) > 0
+        assert frame.contact_forces.shape == (len(frame.contacts), 2, 3)
+        combined = np.linalg.norm(frame.contact_forces.sum(axis=1), axis=1)
+        assert combined == pytest.approx(frame.contacts[:, 6])
+        assert np.linalg.norm(frame.contact_forces[:, 1], axis=1).max() > 0.0
+
+        source = chain.scene_source().diagnostics
+        chain_frame = chain.frame(FrameNeeds(poses=True, diagnostics=True)).diagnostics
+        expected = sum(
+            1 + int(chain.model.body_jntnum[body])
+            for body in range(1, chain.model.nbody)
+            if int(chain.model.body_parentid[body]) != 0
+        )
+        assert len(chain_frame.autoconnect_segments) == expected
+        assert source.autoconnect_width == pytest.approx(
+            chain.model.stat.meansize * chain.model.vis.scale.connect
+        )
+    finally:
+        contacts.release()
+        chain.release()
+
+
 def test_tendon_material_matches_mujocos_final_color_and_scalars(tmp_path):
     path = tmp_path / "tendon_material.xml"
     path.write_text(
