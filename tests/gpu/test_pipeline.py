@@ -373,6 +373,33 @@ def test_bvh_boxes_reach_the_gpu_pipeline(gl):
         adapter.release()
 
 
+def test_interpolated_flex_control_cage_reaches_the_gpu_pipeline(gl):
+    from forge_viewer.adapters.base import BvhKind
+
+    adapter = make_adapter("mujoco", resolve("interpolated_flex"))
+    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=1)
+    try:
+        source = adapter.scene_source()
+        backend.set_scene(source)
+        backend.set_camera(adapter.camera_hint())
+        assert backend.set_flag(RenderFlag.MESHBVH, True)
+        assert backend.set_bvh_depth(0)
+
+        frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True, bvh=True))
+        backend.update(frame)
+        boxes = np.count_nonzero(
+            (source.diagnostics.bvh_kind != int(BvhKind.BODY))
+            & (source.diagnostics.bvh_depth == 0)
+        )
+        layer = backend.debug.layer("physics.bvh")
+        assert source.diagnostics.bvh_control_count == 12
+        assert layer.count_of(Prim.LINE) == 12 * boxes + 12
+        assert backend.render(frame) is not None
+    finally:
+        backend.release()
+        adapter.release()
+
+
 def test_deformable_vertices_update_without_rebuilding_the_scene(gl):
 
     import mujoco

@@ -51,6 +51,20 @@ def main(argv: list[str] | None = None) -> int:
         harness.step_and_render(1)
         harness.save_png(output / "flex.png")
 
+    with OffscreenHarness(resolve("interpolated_flex"), args.width, args.height) as harness:
+        camera = next(item for item in harness.adapter.cameras() if item.name == "overview")
+        harness.backend.set_camera(harness.adapter.camera_view(camera.camera_id))
+        harness.needs = FrameNeeds(poses=True, deformables=True, diagnostics=True, bvh=True)
+        harness.backend.set_flag(RenderFlag.MESHBVH, True)
+        harness.backend.set_flag(RenderFlag.FLEXSKIN, False)
+        harness.backend.set_flag(RenderFlag.FLEXFACE, False)
+        harness.backend.set_flag(RenderFlag.FLEXEDGE, False)
+        harness.backend.set_bvh_depth(0)
+        for index, value in enumerate((-0.12, 0.08, 0.18)):
+            harness.adapter.set_qpos(index, value)
+        harness.step_and_render(0)
+        harness.save_png(output / "interpolated-flex.png")
+
     for path in sorted(output.glob("*.png")):
         print(path.resolve())
     return 0

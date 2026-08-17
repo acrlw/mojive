@@ -18,6 +18,7 @@ EXPECTED_ASSETS = (
     "deformables.xml",
     "dense_mesh.xml",
     "gizmo.xml",
+    "interpolated_flex.xml",
     "joint_types.xml",
     "many_lights.xml",
     "many_objects.xml",

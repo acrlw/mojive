@@ -1,0 +1,26 @@
+<mujoco model="interpolated_flex">
+  <option gravity="0 0 0"/>
+
+  <visual>
+    <headlight ambient="0.25 0.25 0.25" diffuse="0.65 0.65 0.65"/>
+  </visual>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" width="256" height="256"
+             rgb1="0.11 0.17 0.22" rgb2="0.18 0.27 0.34"/>
+    <material name="floor" texture="grid" texrepeat="2 2" texuniform="true"/>
+    <material name="soft" rgba="0.25 0.70 0.90 1" specular="0.3" shininess="0.4"/>
+  </asset>
+
+  <worldbody>
+    <geom type="plane" size="0 0 0.05" material="floor"/>
+    <light type="directional" pos="1 -2 4" dir="-0.2 0.3 -1"/>
+    <camera name="overview" pos="1.7 -2.7 1.8" xyaxes="0.85 0.53 0 -0.25 0.40 0.88"/>
+
+    <flexcomp name="soft" type="grid" dim="3" count="5 4 3" spacing=".16 .16 .16"
+              pos="-.32 -.24 .75" radius=".006" mass="1" material="soft" dof="trilinear">
+      <contact selfcollide="none"/>
+      <edge equality="true"/>
+    </flexcomp>
+  </worldbody>
+</mujoco>

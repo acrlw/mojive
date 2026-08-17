@@ -80,6 +80,14 @@ _ACTUATOR_POSE_SITE = 2
 _ACTUATOR_POSE_GEOM = 3
 
 
+def _grid_node(start: int, ny: int, nz: int, i: int, j: int, k: int) -> int:
+    return start + i * ny * nz + j * nz + k
+
+
+def _grid_boundary(nx: int, ny: int, nz: int, i: int, j: int, k: int) -> bool:
+    return i in (0, nx - 1) or j in (0, ny - 1) or k in (0, nz - 1)
+
+
 _RAY_FIELD_WIDTHS = (1, 3, 3, 3, 3, 1)
 _RAY_DIST = 1 << 0
 _RAY_DIR = 1 << 1
@@ -167,6 +175,8 @@ class MuJoCoAdapter:
         self._bvh_global_index = np.zeros(0, np.int32)
         self._bvh_local_center = np.zeros((0, 3), np.float32)
         self._bvh_local_size = np.zeros((0, 3), np.float32)
+        self._bvh_control_body = np.zeros((0, 2), np.int32)
+        self._bvh_control_local = np.zeros((0, 2, 3), np.float32)
         self._rangefinder_specs: tuple[_RangefinderSpec, ...] = ()
 
         self._mj_geom_xpos = None
@@ -289,6 +299,13 @@ class MuJoCoAdapter:
         self._actuator_visual_pose_kinds = np.zeros(0, np.uint8)
         self._actuator_visual_pose_indices = np.zeros(0, np.int32)
         self._slider_crank_actuators = np.zeros(0, np.int32)
+        self._bvh_pose_kind = np.zeros(0, np.uint8)
+        self._bvh_pose_source = np.zeros(0, np.int32)
+        self._bvh_global_index = np.zeros(0, np.int32)
+        self._bvh_local_center = np.zeros((0, 3), np.float32)
+        self._bvh_local_size = np.zeros((0, 3), np.float32)
+        self._bvh_control_body = np.zeros((0, 2), np.int32)
+        self._bvh_control_local = np.zeros((0, 2, 3), np.float32)
         self._mj_geom_xpos = d.geom_xpos
         self._mj_geom_xmat3 = d.geom_xmat.reshape(g, 3, 3)
         self._mj_site_xmat3 = d.site_xmat.reshape(model.nsite, 3, 3)
@@ -1110,9 +1127,49 @@ class MuJoCoAdapter:
         self._bvh_local_size = np.stack(sizes) if sizes else np.zeros((0, 3), np.float32)
         return np.asarray(kinds, np.uint8), np.asarray(depths, np.int32), np.asarray(leaves, bool)
 
+    def _build_bvh_control_cages(self) -> int:
+        m = self._m
+        edges: list[tuple[int, int]] = []
+        centered = np.zeros(len(m.flex_nodebodyid), bool)
+        for flex in range(m.nflex):
+            order = abs(int(m.flex_interp[flex]))
+            if not order:
+                continue
+            start = int(m.flex_nodeadr[flex])
+            centered[start : start + int(m.flex_nodenum[flex])] = bool(m.flex_centered[flex])
+            nx, ny, nz = np.asarray(m.flex_cellnum[flex], np.int32) * order + 1
+            shell = int(m.flex_interp[flex]) < 0
+
+            for i in range(nx):
+                for j in range(ny):
+                    for k in range(nz):
+                        current = _grid_node(start, ny, nz, i, j, k)
+                        if not m.body_jntnum[m.flex_nodebodyid[current]] or (
+                            shell and not _grid_boundary(nx, ny, nz, i, j, k)
+                        ):
+                            continue
+                        for neighbor in (
+                            _grid_node(start, ny, nz, i + 1, j, k) if i + 1 < nx else -1,
+                            _grid_node(start, ny, nz, i, j + 1, k) if j + 1 < ny else -1,
+                            _grid_node(start, ny, nz, i, j, k + 1) if k + 1 < nz else -1,
+                        ):
+                            if neighbor >= 0 and m.body_jntnum[m.flex_nodebodyid[neighbor]]:
+                                local = neighbor - start
+                                ni, rem = divmod(local, ny * nz)
+                                nj, nk = divmod(rem, nz)
+                                if not shell or _grid_boundary(nx, ny, nz, ni, nj, nk):
+                                    edges.append((current, neighbor))
+
+        nodes = np.asarray(edges, np.int32).reshape(-1, 2)
+        self._bvh_control_body = np.asarray(m.flex_nodebodyid[nodes], np.int32)
+        self._bvh_control_local = np.asarray(m.flex_node[nodes], np.float32).copy()
+        self._bvh_control_local[centered[nodes]] = 0.0
+        return len(nodes)
+
     def _build_diagnostic_source(self) -> DiagnosticSource:
         m = self._m
         bvh_kind, bvh_depth, bvh_leaf = self._build_bvh_records()
+        bvh_control_count = self._build_bvh_control_cages()
         bvh_rgba = np.asarray(m.vis.rgba.bv, np.float32)
         if bvh_rgba.shape != (4,):
             bvh_rgba = np.array([0.0, 1.0, 0.0, 0.5], np.float32)
@@ -1261,6 +1318,9 @@ class MuJoCoAdapter:
         self._diagnostic_frame.bvh_matrices = np.zeros((bvh_count, 3, 3), np.float32)
         self._diagnostic_frame.bvh_sizes = self._bvh_local_size.copy()
         self._diagnostic_frame.bvh_active = np.zeros(bvh_count, bool)
+        self._diagnostic_frame.bvh_control_segments = np.zeros(
+            (bvh_control_count, 2, 3), np.float32
+        )
 
         return DiagnosticSource(
             joint_kinds=joint_kinds,
@@ -1303,6 +1363,7 @@ class MuJoCoAdapter:
             bvh_active_highlight=bool(m.vis.global_.bvactive),
             bvh_rgba=bvh_rgba.copy(),
             bvh_active_rgba=bvh_active_rgba.copy(),
+            bvh_control_count=bvh_control_count,
         )
 
     def _fill_constraint_visuals(self, diagnostics: DiagnosticFrame) -> None:
@@ -1336,7 +1397,7 @@ class MuJoCoAdapter:
             visible[equality] = True
 
     def _fill_bvh_visuals(self, diagnostics: DiagnosticFrame) -> None:
-        if not len(self._bvh_pose_kind):
+        if not len(self._bvh_pose_kind) and not len(self._bvh_control_body):
             return
         m, d = self._m, self._d
         centers = diagnostics.bvh_centers
@@ -1372,6 +1433,13 @@ class MuJoCoAdapter:
         diagnostics.bvh_active.fill(False)
         indexed = self._bvh_global_index >= 0
         diagnostics.bvh_active[indexed] = d.bvh_active[self._bvh_global_index[indexed]]
+
+        body = self._bvh_control_body
+        if len(body):
+            rotation = d.xmat[body].reshape(-1, 2, 3, 3)
+            diagnostics.bvh_control_segments[:] = d.xpos[body] + np.einsum(
+                "...ij,...j->...i", rotation, self._bvh_control_local
+            )
 
     @staticmethod
     def _build_rangefinder_specs(model) -> tuple[_RangefinderSpec, ...]:

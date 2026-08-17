@@ -660,19 +660,26 @@ class ForgeBackend:
         if source.bvh_active_highlight:
             selected &= ~((kind == int(BvhKind.MESH)) & ~dynamic.bvh_active)
         records = np.flatnonzero(selected)
-        if not len(records):
-            layer.clear()
-            return
-
-        local = dynamic.bvh_sizes[records, None, :] * _BOX_CORNERS[None, :, :]
-        corners = dynamic.bvh_centers[records, None, :] + np.einsum(
-            "nij,nkj->nki", dynamic.bvh_matrices[records], local
-        )
-        starts = corners[:, _BOX_EDGES[:, 0]].reshape(-1, 3)
-        ends = corners[:, _BOX_EDGES[:, 1]].reshape(-1, 3)
-        colors = np.repeat(source.bvh_rgba[None], len(records), axis=0)
-        colors[dynamic.bvh_active[records]] = source.bvh_active_rgba
-        layer.lines("boxes", starts, ends, np.repeat(colors, len(_BOX_EDGES), axis=0), 1.5)
+        layer.clear()
+        if len(records):
+            local = dynamic.bvh_sizes[records, None, :] * _BOX_CORNERS[None, :, :]
+            corners = dynamic.bvh_centers[records, None, :] + np.einsum(
+                "nij,nkj->nki", dynamic.bvh_matrices[records], local
+            )
+            starts = corners[:, _BOX_EDGES[:, 0]].reshape(-1, 3)
+            ends = corners[:, _BOX_EDGES[:, 1]].reshape(-1, 3)
+            colors = np.repeat(source.bvh_rgba[None], len(records), axis=0)
+            colors[dynamic.bvh_active[records]] = source.bvh_active_rgba
+            layer.lines("boxes", starts, ends, np.repeat(colors, len(_BOX_EDGES), axis=0), 1.5)
+        if show_mesh and len(dynamic.bvh_control_segments):
+            segments = dynamic.bvh_control_segments
+            layer.lines(
+                "control_cages",
+                segments[:, 0],
+                segments[:, 1],
+                source.bvh_control_rgba,
+                3.0,
+            )
 
     def _publish_constraints(self, frame: SceneFrame, layer) -> None:
         dynamic = frame.diagnostics

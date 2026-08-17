@@ -107,8 +107,8 @@ _VIS_COVERAGE = (
     Coverage("mjVIS_BODYBVH", "supported", "body BVH boxes with depth and active-node colors"),
     Coverage(
         "mjVIS_MESHBVH",
-        "degraded",
-        "mesh, octree and flex BVH boxes; interpolated-flex control cages are pending",
+        "supported",
+        "mesh, octree and flex BVH boxes plus interpolated-flex control cages",
     ),
     Coverage("mjVIS_SDFITER", "unsupported", "SDF iteration overlays are not drawn"),
 )

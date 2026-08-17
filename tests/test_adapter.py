@@ -880,6 +880,56 @@ def test_bvh_boxes_match_mujocos_visualizer(asset, flag, kind, depth, show_inact
         adapter.release()
 
 
+def test_interpolated_flex_control_cage_matches_mujocos_visualizer(tmp_path):
+    path = tmp_path / "interpolated_flex.xml"
+    path.write_text(
+        """<mujoco>
+  <option gravity="0 0 0"/>
+  <worldbody>
+    <flexcomp name="soft" type="grid" dim="3" count="5 4 3" spacing=".1 .1 .1"
+              pos="0 0 1" radius=".005" mass="1" dof="trilinear">
+      <contact selfcollide="none"/>
+      <elasticity young="100" poisson=".3"/>
+    </flexcomp>
+  </worldbody>
+</mujoco>"""
+    )
+    adapter = MuJoCoAdapter(path)
+    try:
+        source = adapter.scene_source().diagnostics
+        frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True, bvh=True)).diagnostics
+
+        option = mujoco.MjvOption()
+        option.flags[:] = 0
+        option.flags[mujoco.mjtVisFlag.mjVIS_MESHBVH] = True
+        reference = mujoco.MjvScene(adapter.model, maxgeom=256)
+        mujoco.mjv_updateScene(
+            adapter.model,
+            adapter.data,
+            option,
+            None,
+            mujoco.MjvCamera(),
+            mujoco.mjtCatBit.mjCAT_ALL,
+            reference,
+        )
+        lines = [
+            geom
+            for geom in reference.geoms[: reference.ngeom]
+            if int(geom.type) == int(mujoco.mjtGeom.mjGEOM_LINE)
+        ]
+        starts = np.asarray([geom.pos for geom in lines])
+        ends = np.asarray(
+            [geom.pos + geom.mat.reshape(3, 3)[:, 2] * geom.size[2] for geom in lines]
+        )
+
+        assert source.bvh_control_count == len(lines) == 12
+        assert frame.bvh_control_segments[:, 0] == pytest.approx(starts, abs=2e-6)
+        assert frame.bvh_control_segments[:, 1] == pytest.approx(ends, abs=2e-6)
+        assert source.bvh_control_rgba == pytest.approx(lines[0].rgba, abs=2e-6)
+    finally:
+        adapter.release()
+
+
 def test_tendon_material_matches_mujocos_final_color_and_scalars(tmp_path):
     path = tmp_path / "tendon_material.xml"
     path.write_text(

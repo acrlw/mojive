@@ -231,6 +231,10 @@ class DiagnosticSource:
     bvh_active_rgba: np.ndarray = field(
         default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.5], np.float32)
     )
+    bvh_control_count: int = 0
+    bvh_control_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([0.5, 0.5, 0.5, 1.0], np.float32)
+    )
 
 
 @dataclass
@@ -260,6 +264,9 @@ class DiagnosticFrame:
     bvh_matrices: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3), np.float32))
     bvh_sizes: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     bvh_active: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
+    bvh_control_segments: np.ndarray = field(
+        default_factory=lambda: np.zeros((0, 2, 3), np.float32)
+    )
 
 
 @dataclass
