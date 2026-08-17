@@ -177,6 +177,14 @@ class DiagnosticSource:
     actuator_visual_kinds: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
     actuator_visual_actuators: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
     actuator_visual_sizes: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    slider_crank_actuators: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
+    slider_crank_width: float = 0.0
+    slider_crank_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([0.5, 0.4, 0.8, 1.0], np.float32)
+    )
+    slider_crank_broken_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([1.0, 0.0, 0.0, 1.0], np.float32)
+    )
     camera_rgba: np.ndarray = field(
         default_factory=lambda: np.array([0.45, 0.8, 1.0, 1.0], np.float32)
     )
@@ -205,6 +213,8 @@ class DiagnosticFrame:
     body_ximat: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3), np.float32))
     actuator_xpos: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     actuator_xmat: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3), np.float32))
+    slider_crank_points: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3), np.float32))
+    slider_crank_broken: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
     rangefinder_starts: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     rangefinder_ends: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     rangefinder_normals: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))

@@ -147,6 +147,7 @@ class MuJoCoAdapter:
         self._tendon_widths = np.zeros(0, np.float32)
         self._actuator_visual_pose_kinds = np.zeros(0, np.uint8)
         self._actuator_visual_pose_indices = np.zeros(0, np.int32)
+        self._slider_crank_actuators = np.zeros(0, np.int32)
         self._rangefinder_specs: tuple[_RangefinderSpec, ...] = ()
 
         self._mj_geom_xpos = None
@@ -260,6 +261,7 @@ class MuJoCoAdapter:
         self._tendon_widths = np.zeros(wrap_capacity, np.float32)
         self._actuator_visual_pose_kinds = np.zeros(0, np.uint8)
         self._actuator_visual_pose_indices = np.zeros(0, np.int32)
+        self._slider_crank_actuators = np.zeros(0, np.int32)
         self._mj_geom_xpos = d.geom_xpos
         self._mj_geom_xmat3 = d.geom_xmat.reshape(g, 3, 3)
         self._mj_site_xmat3 = d.site_xmat.reshape(model.nsite, 3, 3)
@@ -440,6 +442,7 @@ class MuJoCoAdapter:
                 casting="unsafe",
             )
             self._fill_actuator_visual_poses(diagnostics)
+            self._fill_slider_crank_visuals(diagnostics)
             self._fill_rangefinder_visuals(diagnostics)
             self._fill_constraint_visuals(diagnostics)
             f.diagnostics = diagnostics
@@ -860,6 +863,7 @@ class MuJoCoAdapter:
         visual_sizes: list[np.ndarray] = []
         pose_kinds: list[int] = []
         pose_indices: list[int] = []
+        slider_crank_actuators: list[int] = []
         primitive_kinds = {
             int(mujoco.mjtGeom.mjGEOM_SPHERE): ActuatorVisualKind.SPHERE,
             int(mujoco.mjtGeom.mjGEOM_ELLIPSOID): ActuatorVisualKind.ELLIPSOID,
@@ -937,12 +941,20 @@ class MuJoCoAdapter:
                         _ACTUATOR_POSE_GEOM,
                         geom,
                     )
+            elif transmission == int(mujoco.mjtTrn.mjTRN_SLIDERCRANK):
+                slider_crank_actuators.append(actuator)
 
         count = len(visual_kinds)
         self._actuator_visual_pose_kinds = np.asarray(pose_kinds, np.uint8)
         self._actuator_visual_pose_indices = np.asarray(pose_indices, np.int32)
+        self._slider_crank_actuators = np.asarray(slider_crank_actuators, np.int32)
         self._diagnostic_frame.actuator_xpos = np.zeros((count, 3), np.float32)
         self._diagnostic_frame.actuator_xmat = np.zeros((count, 3, 3), np.float32)
+        slider_crank_count = len(slider_crank_actuators)
+        self._diagnostic_frame.slider_crank_points = np.zeros(
+            (slider_crank_count, 3, 3), np.float32
+        )
+        self._diagnostic_frame.slider_crank_broken = np.zeros(slider_crank_count, bool)
 
         return DiagnosticSource(
             joint_kinds=joint_kinds,
@@ -962,6 +974,10 @@ class MuJoCoAdapter:
             actuator_visual_sizes=(
                 np.stack(visual_sizes) if count else np.zeros((0, 3), np.float32)
             ),
+            slider_crank_actuators=self._slider_crank_actuators.copy(),
+            slider_crank_width=meansize * float(m.vis.scale.slidercrank),
+            slider_crank_rgba=np.asarray(m.vis.rgba.slidercrank, np.float32).copy(),
+            slider_crank_broken_rgba=np.asarray(m.vis.rgba.crankbroken, np.float32).copy(),
             camera_rgba=np.asarray(m.vis.rgba.camera, np.float32).copy(),
             light_rgba=np.asarray(m.vis.rgba.light, np.float32).copy(),
             rangefinder_rgba=np.asarray(m.vis.rgba.rangefinder, np.float32).copy(),
@@ -1128,6 +1144,23 @@ class MuJoCoAdapter:
             else:
                 diagnostics.actuator_xpos[record] = d.geom_xpos[source]
                 diagnostics.actuator_xmat[record] = d.geom_xmat[source].reshape(3, 3)
+
+    def _fill_slider_crank_visuals(self, diagnostics: DiagnosticFrame) -> None:
+        m, d = self._m, self._d
+        for record, actuator in enumerate(self._slider_crank_actuators):
+            actuator = int(actuator)
+            crank_site, slider_site = map(int, m.actuator_trnid[actuator])
+            axis = d.site_xmat[slider_site].reshape(3, 3)[:, 2]
+            offset = d.site_xpos[crank_site] - d.site_xpos[slider_site]
+            axial = float(np.dot(offset, axis))
+            rod = float(m.actuator_cranklength[actuator])
+            determinant = axial * axial + rod * rod - float(np.dot(offset, offset))
+            diagnostics.slider_crank_broken[record] = determinant < 0.0
+            slider_length = axial - np.sqrt(max(determinant, 0.0))
+            points = diagnostics.slider_crank_points[record]
+            points[0] = d.site_xpos[slider_site]
+            points[1] = points[0] + axis * slider_length
+            points[2] = d.site_xpos[crank_site]
 
     @staticmethod
     def _axis_rotation(axis) -> np.ndarray:

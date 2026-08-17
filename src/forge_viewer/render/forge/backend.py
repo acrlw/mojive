@@ -628,6 +628,32 @@ class ForgeBackend:
             else:
                 self._draw_capsule(layer, ident, position, rotation, size, color)
 
+        for record, actuator in enumerate(source.slider_crank_actuators):
+            actuator = int(actuator)
+            if not self._source.actuator_visible[actuator]:
+                continue
+            slider, joint, crank = dynamic.slider_crank_points[record]
+            color = source.slider_crank_rgba
+            self._draw_cylinder_between(
+                layer,
+                f"slider-crank:{record}:slider",
+                slider,
+                joint,
+                source.slider_crank_width,
+                color,
+            )
+            rod_color = (
+                source.slider_crank_broken_rgba if dynamic.slider_crank_broken[record] else color
+            )
+            self._draw_capsule_between(
+                layer,
+                f"slider-crank:{record}:rod",
+                joint,
+                crank,
+                source.slider_crank_width * 0.5,
+                rod_color,
+            )
+
     def _publish_scene_icons(self, frame: SceneFrame) -> None:
         cameras = self.debug.layer("scene.cameras", Occlusion.GHOST)
         lights = self.debug.layer("scene.lights", Occlusion.GHOST)
@@ -720,6 +746,27 @@ class ForgeBackend:
             math3d.compose(position + offset, rotation, sphere_scale),
             color,
         )
+
+    @classmethod
+    def _draw_cylinder_between(cls, layer, ident, start, end, radius, color) -> None:
+        position, rotation, half_length = cls._connector_pose(start, end)
+        layer.cylinder(
+            ident,
+            math3d.compose(position, rotation, (radius, radius, half_length)),
+            color,
+        )
+
+    @classmethod
+    def _draw_capsule_between(cls, layer, ident, start, end, radius, color) -> None:
+        position, rotation, half_length = cls._connector_pose(start, end)
+        cls._draw_capsule(layer, ident, position, rotation, (radius, radius, half_length), color)
+
+    @classmethod
+    def _connector_pose(cls, start, end) -> tuple[np.ndarray, np.ndarray, float]:
+        start = np.asarray(start, np.float32)
+        end = np.asarray(end, np.float32)
+        delta = end - start
+        return (start + end) * 0.5, cls._axis_rotation(delta), float(np.linalg.norm(delta) * 0.5)
 
     @staticmethod
     def _axis_rotation(axis: np.ndarray) -> np.ndarray:

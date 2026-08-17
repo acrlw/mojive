@@ -50,8 +50,8 @@ _VIS_COVERAGE = (
     ),
     Coverage(
         "mjVIS_ACTUATOR",
-        "degraded",
-        "joint, joint-in-parent, site, body and spatial-tendon visuals; slider-crank pending",
+        "supported",
+        "joint, joint-in-parent, site, body, tendon and slider-crank visuals",
     ),
     Coverage(
         "mjVIS_ACTIVATION",
@@ -276,9 +276,9 @@ def audit_model(model) -> dict:
             findings.append(
                 Finding(
                     "slider-crank visualization",
-                    "degraded",
+                    "supported",
                     slider_crank,
-                    "the slider and connecting rod overlay is not drawn",
+                    "slider cylinder, connecting rod and broken-crank color follow MuJoCo",
                 )
             )
     if model.nflex:

@@ -706,6 +706,30 @@ def test_actuator_visual_metadata_and_controls_follow_mujoco_addresses():
         a.release()
 
 
+def test_slider_crank_visuals_match_mujoco_linkage_geometry():
+    from forge_viewer.assets import resolve
+
+    a = MuJoCoAdapter(resolve("slider_crank"))
+    try:
+        source = a.scene_source().diagnostics
+        frame = a.frame(FrameNeeds(poses=True, actuator=True, diagnostics=True)).diagnostics
+        assert source.slider_crank_actuators.tolist() == [0, 1]
+        assert source.slider_crank_width == pytest.approx(
+            a.model.stat.meansize * a.model.vis.scale.slidercrank
+        )
+        assert frame.slider_crank_broken.tolist() == [False, True]
+        valid_rod = np.linalg.norm(
+            frame.slider_crank_points[0, 2] - frame.slider_crank_points[0, 1]
+        )
+        assert valid_rod == pytest.approx(a.model.actuator_cranklength[0])
+        broken_rod = np.linalg.norm(
+            frame.slider_crank_points[1, 2] - frame.slider_crank_points[1, 1]
+        )
+        assert broken_rod > a.model.actuator_cranklength[1]
+    finally:
+        a.release()
+
+
 def test_tendon_material_matches_mujocos_final_color_and_scalars(tmp_path):
     path = tmp_path / "tendon_material.xml"
     path.write_text(

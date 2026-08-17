@@ -1,0 +1,40 @@
+<mujoco model="slider_crank">
+  <compiler angle="degree" autolimits="true"/>
+  <option gravity="0 0 0"/>
+
+  <visual>
+    <scale slidercrank="0.08"/>
+    <rgba slidercrank="0.55 0.40 0.85 1" crankbroken="1 0.16 0.10 1"/>
+  </visual>
+
+  <worldbody>
+    <geom type="plane" size="0 0 0.05" rgba="0.18 0.22 0.27 1"/>
+    <light name="key" type="directional" pos="1 -2 4" dir="-0.2 0.3 -1"/>
+    <camera name="overview" pos="1.7 -3.2 2.0" xyaxes="0.88 0.47 0 -0.25 0.46 0.85"/>
+
+    <site name="slider" type="cylinder" pos="-0.25 -0.35 0.5" zaxis="1 0 0"
+          size="0.07 0.12" rgba="0.85 0.25 0.20 1"/>
+    <site name="slider_broken" type="cylinder" pos="-0.25 0.45 0.5" zaxis="1 0 0"
+          size="0.07 0.12" rgba="0.85 0.25 0.20 1"/>
+
+    <body name="arm" pos="0 -0.35 0.5">
+      <joint name="hinge" type="hinge" axis="0 0 1" damping="0.1"/>
+      <geom type="capsule" fromto="0 0 0 0.45 0 0" size="0.045"
+            rgba="0.35 0.68 0.85 1"/>
+      <site name="crank" pos="0.40 0 0" size="0.065" rgba="0.20 0.45 1 1"/>
+    </body>
+
+    <body name="broken_arm" pos="0 0.45 0.5">
+      <joint name="broken_hinge" type="hinge" axis="0 0 1" damping="0.1"/>
+      <geom type="capsule" fromto="0 0 0 0.45 0.30 0" size="0.045"
+            rgba="0.35 0.68 0.85 1"/>
+      <site name="crank_broken" pos="0.40 0.30 0" size="0.065" rgba="0.20 0.45 1 1"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="valid" cranksite="crank" slidersite="slider" cranklength="0.18" kp="20"/>
+    <position name="broken" cranksite="crank_broken" slidersite="slider_broken"
+              cranklength="0.10" kp="20"/>
+  </actuator>
+</mujoco>

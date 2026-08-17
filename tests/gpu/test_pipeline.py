@@ -289,6 +289,29 @@ def test_joint_site_and_body_actuator_visuals_reach_the_gpu_pipeline(gl):
         adapter.release()
 
 
+def test_slider_crank_visuals_reach_the_gpu_pipeline(gl):
+    adapter = make_adapter("mujoco", resolve("slider_crank"))
+    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    try:
+        source = adapter.scene_source()
+        backend.set_scene(source)
+        camera = next(item for item in adapter.cameras() if item.name == "overview")
+        backend.set_camera(adapter.camera_view(camera.camera_id))
+        assert backend.set_flag(RenderFlag.ACTUATOR, True)
+
+        frame = adapter.frame(FrameNeeds(poses=True, actuator=True, diagnostics=True))
+        backend.update(frame)
+        layer = backend.debug.layer("physics.actuators")
+
+        assert layer.count_of(Prim.CYLINDER) == 4
+        assert layer.count_of(Prim.SPHERE) == 4
+        assert backend.render(frame) is not None
+        assert float(backend.target.read_color()[..., :3].std()) > 8.0
+    finally:
+        backend.release()
+        adapter.release()
+
+
 def test_deformable_vertices_update_without_rebuilding_the_scene(gl):
 
     import mujoco

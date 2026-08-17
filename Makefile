@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -18,6 +18,7 @@ help:
 		'  make mujoco-visuals    hfield/site/tendon/contact' \
 		'  make mujoco-debug      joint/COM/inertia debug visuals' \
 		'  make mujoco-actuators  joint/site/body actuator visuals' \
+		'  make mujoco-slider-crank  slider-crank linkage reference image' \
 		'  make mujoco-rangefinder site/camera rays, hits, and normals' \
 		'  make mujoco-constraints  equality constraint endpoint markers' \
 		'  make mujoco-editing     mocap pose and equality controls' \
@@ -228,6 +229,9 @@ mujoco-debug:
 mujoco-actuators:
 	$(PY) -m forge_viewer.cli view actuator_visuals --paused \
 		--camera overview --enable-render actuator --enable-render activation $(ARGS)
+
+mujoco-slider-crank:
+	$(PY) -m forge_viewer.tools.mujoco_slider_crank
 
 mujoco-rangefinder:
 	$(PY) -m forge_viewer.cli view rangefinder --paused \
