@@ -53,7 +53,7 @@ class VideoRecorder:
 
 
 class SnapshotWriter:
-    """Append-only stream of the same RemoteStructure/RemoteFrame packets used by PVD."""
+    """Append-only stream of remote structure and frame packets."""
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)

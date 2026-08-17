@@ -9,10 +9,12 @@ import numpy as np
 from ..types import (
     CameraView,
     Environment,
+    Light,
     LightSet,
     Material,
     MeshData,
     MeshKey,
+    MeshShape,
     MeshUpdate,
     TextureData,
 )
@@ -143,6 +145,7 @@ class AdapterCaps:
     equality_constraints: bool = False
     visual_groups: bool = False
     reload: bool = False
+    scene_authoring: bool = False
     notes: tuple[str, ...] = ()
 
 
@@ -554,6 +557,33 @@ class SceneAdapterBase:
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
         return False
 
+    def add_scene_object(
+        self,
+        shape: MeshShape | MeshKey,
+        name: str,
+        size,
+        position,
+        rotation,
+        color,
+        material: Material,
+    ) -> int:
+        return -1
+
+    def remove_scene_object(self, object_id: int) -> bool:
+        return False
+
+    def add_scene_light(self, name: str, light: Light) -> int:
+        return -1
+
+    def remove_scene_light(self, light_id: int) -> bool:
+        return False
+
+    def add_scene_camera(self, name: str, camera: CameraView) -> int:
+        return -1
+
+    def remove_scene_camera(self, camera_id: int) -> bool:
+        return False
+
     def apply_perturb(
         self, node_id: int, target_position: np.ndarray, target_rotation: np.ndarray, mode: str
     ) -> bool:
@@ -607,6 +637,21 @@ class SceneAdapter(Protocol):
     def set_material(self, material_id: int, material: Material) -> bool: ...
     def set_geometry_color(self, node_id: int, rgba: np.ndarray) -> bool: ...
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool: ...
+    def add_scene_object(
+        self,
+        shape: MeshShape | MeshKey,
+        name: str,
+        size,
+        position,
+        rotation,
+        color,
+        material: Material,
+    ) -> int: ...
+    def remove_scene_object(self, object_id: int) -> bool: ...
+    def add_scene_light(self, name: str, light: Light) -> int: ...
+    def remove_scene_light(self, light_id: int) -> bool: ...
+    def add_scene_camera(self, name: str, camera: CameraView) -> int: ...
+    def remove_scene_camera(self, camera_id: int) -> bool: ...
     def apply_perturb(
         self, node_id: int, target_position: np.ndarray, target_rotation: np.ndarray, mode: str
     ) -> bool: ...

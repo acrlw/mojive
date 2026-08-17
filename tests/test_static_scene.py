@@ -24,6 +24,7 @@ from forge_viewer.types import (
     LightSet,
     Material,
     MeshData,
+    MeshShape,
 )
 
 
@@ -71,6 +72,37 @@ def test_session_detects_programmatic_add_and_remove():
     session.tick(FrameNeeds())
     assert session.node_by_object_id(first.object_id) is None
     assert session.node_by_object_id(second.object_id).name == "second"
+
+
+def test_scene_authoring_commands_return_stable_entity_ids():
+    scene = Scene()
+    session = Session(StaticSceneAdapter(scene))
+
+    added = session.submit(
+        cmd.AddSceneObject(
+            MeshShape.BOX,
+            "remote box",
+            position=(1.0, 2.0, 3.0),
+            color=(0.2, 0.4, 0.8, 1.0),
+        )
+    )
+    assert added.ok and added.entity_id > 0
+    assert session.node_by_object_id(added.entity_id).name == "remote box"
+
+    light = session.submit(cmd.AddSceneLight("remote light", Light(kind=LightKind.POINT)))
+    camera = session.submit(cmd.AddSceneCamera("remote camera", CameraView()))
+    assert light.ok and camera.ok
+    assert session.node_by_object_id(LIGHT_OBJECT_BASE + light.entity_id).name == "remote light"
+    assert next(info for info in session.cameras if info.camera_id == camera.entity_id).name == (
+        "remote camera"
+    )
+
+    assert session.submit(cmd.RemoveSceneObject(added.entity_id))
+    assert session.submit(cmd.RemoveSceneLight(light.entity_id))
+    assert session.submit(cmd.RemoveSceneCamera(camera.entity_id))
+    assert session.node_by_object_id(added.entity_id) is None
+    assert session.node_by_object_id(LIGHT_OBJECT_BASE + light.entity_id) is None
+    assert all(info.camera_id != camera.entity_id for info in session.cameras)
 
 
 def test_static_session_has_pose_editing_but_no_fake_playback():

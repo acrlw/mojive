@@ -634,9 +634,14 @@ class ViewerApp:
         source = self.session.source
         empty = source is not None and source.instance_count == 0
         notice = self._model_drop_notice if time.monotonic() < self._model_drop_notice_until else ""
-        if not empty and not notice:
+        dragging = self.window.file_drag_active and self.session.adapter.caps.asset_loading
+        if not empty and not notice and not dragging:
             return
-        message = notice or "Drop an MJCF or URDF model here\nFile > Open Model..."
+        message = (
+            "Release to load this model"
+            if dragging
+            else notice or "Drop an MJCF or URDF model here\nFile > Open Model..."
+        )
         lines = message.splitlines()
         sizes = [imgui.calc_text_size(line) for line in lines]
         scale = self.window.style_scale
@@ -648,6 +653,15 @@ class ViewerApp:
         top = y + (h - height) * 0.5
         dl = imgui.get_window_draw_list()
         color = imgui.color_convert_float4_to_u32
+        if dragging:
+            dl.add_rect(
+                imgui.ImVec2(x + 3.0 * scale, y + 3.0 * scale),
+                imgui.ImVec2(x + w - 3.0 * scale, y + h - 3.0 * scale),
+                color(imgui.ImVec4(0.95, 0.68, 0.24, 0.95)),
+                8.0 * scale,
+                2.0 * scale,
+                0,
+            )
         dl.add_rect_filled(
             imgui.ImVec2(left, top),
             imgui.ImVec2(left + width, top + height),

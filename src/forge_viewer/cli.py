@@ -677,7 +677,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_conformance)
 
-    sp = with_asset(sub.add_parser("serve", help="Run physics and publish PVD snapshots"))
+    sp = with_asset(sub.add_parser("serve", help="Run physics and publish live snapshots"))
     sp.add_argument("--host", default="127.0.0.1")
     sp.add_argument("--port", type=int, default=47650)
     sp.add_argument("--hz", type=float, default=120.0, help="snapshot publish rate")
@@ -685,7 +685,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--record-snapshot", metavar="FILE", help="append the published stream")
     sp.set_defaults(func=cmd_serve, json=False)
 
-    sp = sub.add_parser("attach", help="Open a viewer connected to PVD snapshots")
+    sp = sub.add_parser("attach", help="Open a viewer connected to live snapshots")
     sp.add_argument("--host", default="127.0.0.1")
     sp.add_argument("--port", type=int, default=47650)
     sp.add_argument("--title", default="forge remote")
@@ -697,7 +697,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-vsync", action="store_true")
     sp.set_defaults(func=cmd_attach, json=False)
 
-    sp = sub.add_parser("replay", help="Replay PVD snapshots")
+    sp = sub.add_parser("replay", help="Replay recorded snapshots")
     sp.add_argument("snapshot")
     sp.add_argument("--host", default="127.0.0.1")
     sp.add_argument("--port", type=int, default=47650)

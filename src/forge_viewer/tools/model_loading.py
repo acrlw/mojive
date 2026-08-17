@@ -18,6 +18,8 @@ def main(argv: list[str] | None = None) -> int:
     viewer = build(resolve("empty"), paused=True, vsync=False, width=1400, height=900)
     try:
         _capture(viewer, args.output / "empty.png")
+        viewer.window._file_drag_active = True
+        _capture(viewer, args.output / "drop-hover.png")
         viewer.window._on_file_drop(None, [str(resolve("test_scene.xml"))])
         _capture(viewer, args.output / "mjcf.png")
         for name, output_name in (("test_scene.urdf", "urdf.png"),):
@@ -28,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         viewer.release()
 
-    for name in ("empty.png", "mjcf.png", "urdf.png"):
+    for name in ("empty.png", "drop-hover.png", "mjcf.png", "urdf.png"):
         path = args.output / name
         print(path.resolve())
     return 0

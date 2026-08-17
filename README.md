@@ -41,9 +41,10 @@ forge-viewer audit <asset> [--json] [--strict]
 
 JSON commands reserve stdout for the JSON document and send logs to stderr.
 
-The main menu and window file drop open MJCF, XML, and URDF models at runtime. `File > Reload
-Model` recompiles the current file. Loading replaces the session structure, clears selection and
-interaction state, rebuilds GPU scene resources, and frames the new model.
+The main menu and window file drop open MJCF, XML, and URDF models at runtime. On macOS the
+viewport highlights when a model enters the window. `File > Reload Model` recompiles the current
+file. Loading replaces the session structure, clears selection and interaction state, rebuilds GPU
+scene resources, and frames the new model.
 
 ## Visual acceptance
 
@@ -81,7 +82,7 @@ Every user-facing feature has a reproducible Make target.
 | `make canvas` | Standalone scene authoring with editable transforms, materials, and Forge entities |
 | `make scene-io` | Save, reload, and capture a `.forge.json` scene |
 | `make toy-physics` | Minimal physics backend independent of MuJoCo |
-| `make pvd` | One physics publisher and two independent viewers |
+| `make live-view` | One publisher and two independent remote viewers |
 | `make capture` | Write a PNG under `output/` |
 | `make record` | Stream an MP4 under `output/` |
 
@@ -163,21 +164,33 @@ used by MuJoCo.
 
 ## Remote viewing and replay
 
-`make pvd` starts one headless simulation publisher and two viewer processes. Each viewer owns
+`make live-view` starts one headless simulation publisher and two viewer processes. Each viewer owns
 its window, camera, layout, and rendering context. Structure revisions are delivered reliably;
 frame transport keeps the latest state. Camera, light, environment, material, geometry color,
-physics, and perturbation commands use a separate request and response channel.
+physics, perturbation, and scene-authoring commands use a separate request and response channel.
 
 ```bash
-make serve PVD_SCENE=deformables
+make serve LIVE_SCENE=deformables
 make attach ARGS="--title effect"
 make attach ARGS="--title normals --debug-view normal"
+make remote-authoring
+```
+
+Runtime creation returns the stable object, light, or camera ID:
+
+```python
+from forge_viewer import MeshShape, commands as cmd
+
+result = viewer.session.submit(
+    cmd.AddSceneObject(MeshShape.BOX, "tool marker", position=(1.0, 0.0, 0.5))
+)
+viewer.session.submit(cmd.RemoveSceneObject(result.entity_id))
 ```
 
 Snapshot recording stores structure, frames, and debug commands in `.fvs` files:
 
 ```bash
-make snapshot-record PVD_SCENE=gizmo SNAPSHOT=output/bug.fvs
+make snapshot-record LIVE_SCENE=gizmo SNAPSHOT=output/bug.fvs
 make snapshot-replay SNAPSHOT=output/bug.fvs
 ```
 

@@ -1,4 +1,4 @@
-"""PVD-style scene snapshots: reliable structure, latest-only frames, separate commands."""
+"""Remote scene snapshots with reliable structure, latest-only frames, and commands."""
 
 from __future__ import annotations
 
@@ -458,6 +458,43 @@ class RemoteSceneAdapter(SceneAdapterBase):
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
         return self._ok(self._send("scene_camera", camera_id=int(camera_id), camera=camera))
 
+    def _send_structure_edit(self, op: str, **args) -> CommandResult:
+        revision = self.structure_revision
+        result = self._send(op, **args)
+        if isinstance(result, CommandResult) and result.ok:
+            self._wait(lambda: self.structure_revision != revision, 8.0, "scene structure update")
+        return result
+
+    def add_scene_object(self, shape, name, size, position, rotation, color, material) -> int:
+        result = self._send_structure_edit(
+            "add_scene_object",
+            shape=shape,
+            name=str(name),
+            size=tuple(size),
+            position=tuple(position),
+            rotation=np.asarray(rotation, np.float32),
+            color=tuple(color),
+            material=material,
+        )
+        return result.entity_id if result.ok else -1
+
+    def remove_scene_object(self, object_id: int) -> bool:
+        return self._ok(self._send_structure_edit("remove_scene_object", object_id=int(object_id)))
+
+    def add_scene_light(self, name: str, light: Light) -> int:
+        result = self._send_structure_edit("add_scene_light", name=str(name), light=light)
+        return result.entity_id if result.ok else -1
+
+    def remove_scene_light(self, light_id: int) -> bool:
+        return self._ok(self._send_structure_edit("remove_scene_light", light_id=int(light_id)))
+
+    def add_scene_camera(self, name: str, camera: CameraView) -> int:
+        result = self._send_structure_edit("add_scene_camera", name=str(name), camera=camera)
+        return result.entity_id if result.ok else -1
+
+    def remove_scene_camera(self, camera_id: int) -> bool:
+        return self._ok(self._send_structure_edit("remove_scene_camera", camera_id=int(camera_id)))
+
     def apply_perturb(self, node_id: int, target_position, target_rotation, mode: str) -> bool:
         return self._ok(
             self._send(
@@ -509,6 +546,20 @@ def handle_session_command(session, message: dict):
         "material": lambda: cmd.SetMaterial(message["material_id"], message["material"]),
         "geometry_color": lambda: cmd.SetGeometryColor(message["node_id"], message["rgba"]),
         "scene_camera": lambda: cmd.SetSceneCamera(message["camera_id"], message["camera"]),
+        "add_scene_object": lambda: cmd.AddSceneObject(
+            message["shape"],
+            message["name"],
+            message["size"],
+            message["position"],
+            message["rotation"],
+            message["color"],
+            message["material"],
+        ),
+        "remove_scene_object": lambda: cmd.RemoveSceneObject(message["object_id"]),
+        "add_scene_light": lambda: cmd.AddSceneLight(message["name"], message["light"]),
+        "remove_scene_light": lambda: cmd.RemoveSceneLight(message["light_id"]),
+        "add_scene_camera": lambda: cmd.AddSceneCamera(message["name"], message["camera"]),
+        "remove_scene_camera": lambda: cmd.RemoveSceneCamera(message["camera_id"]),
         "perturb": lambda: cmd.Perturb(
             message["node_id"],
             message["target_position"],

@@ -67,7 +67,9 @@ def test_runtime_model_loading_rebuilds_gpu_scene(viewer):
     viewer.sync()
     assert viewer.backend.stats.instances == 0
 
+    viewer.window._file_drag_active = True
     viewer.window._on_file_drop(None, [str(resolve("test_scene.xml"))])
+    assert not viewer.window.file_drag_active
     viewer.sync()
     assert viewer.session.asset_path == resolve("test_scene.xml")
 

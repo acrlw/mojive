@@ -456,6 +456,62 @@ class Session:
             message = "" if writeback else "edited in Forge; backend write-back is unavailable"
             return CommandResult.good(message)
 
+        if isinstance(c, cmd.AddSceneObject):
+            if not caps.scene_authoring:
+                return CommandResult.bad(f"{caps.name} does not support scene authoring")
+            object_id = self._adapter.add_scene_object(
+                c.shape, c.name, c.size, c.position, c.rotation, c.color, c.material
+            )
+            if object_id < 0:
+                return CommandResult.bad("Object creation failed")
+            self._refresh_structure()
+            return CommandResult.good(f"Added {c.name}", object_id)
+
+        if isinstance(c, cmd.RemoveSceneObject):
+            if not caps.scene_authoring:
+                return CommandResult.bad(f"{caps.name} does not support scene authoring")
+            if not self._adapter.remove_scene_object(c.object_id):
+                return CommandResult.bad(f"object {c.object_id} is unavailable")
+            if self._selected == c.object_id:
+                self._selected = 0
+            self._refresh_structure()
+            return CommandResult.good("Object removed", c.object_id)
+
+        if isinstance(c, cmd.AddSceneLight):
+            if not caps.scene_authoring:
+                return CommandResult.bad(f"{caps.name} does not support scene authoring")
+            light_id = self._adapter.add_scene_light(c.name, c.light)
+            if light_id < 0:
+                return CommandResult.bad("Light creation failed")
+            self._refresh_structure()
+            return CommandResult.good(f"Added {c.name}", light_id)
+
+        if isinstance(c, cmd.RemoveSceneLight):
+            if not caps.scene_authoring:
+                return CommandResult.bad(f"{caps.name} does not support scene authoring")
+            if not self._adapter.remove_scene_light(c.light_id):
+                return CommandResult.bad(f"light {c.light_id} is unavailable")
+            self._refresh_structure()
+            return CommandResult.good("Light removed", c.light_id)
+
+        if isinstance(c, cmd.AddSceneCamera):
+            if not caps.scene_authoring:
+                return CommandResult.bad(f"{caps.name} does not support scene authoring")
+            camera_id = self._adapter.add_scene_camera(c.name, c.camera)
+            if camera_id < 0:
+                return CommandResult.bad("Camera creation failed")
+            self._refresh_structure()
+            return CommandResult.good(f"Added {c.name}", camera_id)
+
+        if isinstance(c, cmd.RemoveSceneCamera):
+            if not caps.scene_authoring:
+                return CommandResult.bad(f"{caps.name} does not support scene authoring")
+            if not self._adapter.remove_scene_camera(c.camera_id):
+                return CommandResult.bad(f"camera {c.camera_id} is unavailable")
+            self._camera_overrides.pop(c.camera_id, None)
+            self._refresh_structure()
+            return CommandResult.good("Camera removed", c.camera_id)
+
         if isinstance(c, cmd.SetSpeed):
             if not caps.simulation:
                 return CommandResult.bad(f"{caps.name} has no simulation speed")

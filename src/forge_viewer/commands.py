@@ -5,20 +5,21 @@ from pathlib import Path
 
 import numpy as np
 
-from .types import CameraView, Environment, Light, Material
+from .types import DEFAULT_MATERIAL, CameraView, Environment, Light, Material, MeshKey, MeshShape
 
 
 @dataclass(frozen=True)
 class CommandResult:
     ok: bool
     message: str = ""
+    entity_id: int = -1
 
     def __bool__(self) -> bool:
         return self.ok
 
     @staticmethod
-    def good(message: str = "") -> CommandResult:
-        return CommandResult(True, message)
+    def good(message: str = "", entity_id: int = -1) -> CommandResult:
+        return CommandResult(True, message, int(entity_id))
 
     @staticmethod
     def bad(message: str) -> CommandResult:
@@ -105,6 +106,44 @@ class SetGeometryColor(Command):
 class SetSceneCamera(Command):
     camera_id: int
     camera: CameraView
+
+
+@dataclass(frozen=True)
+class AddSceneObject(Command):
+    shape: MeshShape | MeshKey
+    name: str = "object"
+    size: tuple[float, float, float] = (0.5, 0.5, 0.5)
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    rotation: np.ndarray = field(default_factory=lambda: np.eye(3, dtype=np.float32))
+    color: tuple[float, float, float, float] = (0.65, 0.68, 0.72, 1.0)
+    material: Material = DEFAULT_MATERIAL
+
+
+@dataclass(frozen=True)
+class RemoveSceneObject(Command):
+    object_id: int
+
+
+@dataclass(frozen=True)
+class AddSceneLight(Command):
+    name: str
+    light: Light
+
+
+@dataclass(frozen=True)
+class RemoveSceneLight(Command):
+    light_id: int
+
+
+@dataclass(frozen=True)
+class AddSceneCamera(Command):
+    name: str
+    camera: CameraView
+
+
+@dataclass(frozen=True)
+class RemoveSceneCamera(Command):
+    camera_id: int
 
 
 @dataclass(frozen=True)

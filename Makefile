@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io additive bench showcase probe reverse viewer empty canvas lighting image-light many-lights scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer empty canvas lighting image-light many-lights scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -49,7 +49,8 @@ help:
 		'  make canvas            standalone scene and material editor' \
 		'  make scene-io          save, load, and capture a Forge scene' \
 		'  make toy-physics       minimal independent physics backend' \
-		'  make pvd               one physics process and two viewers' \
+		'  make live-view         one publisher and two remote viewers' \
+		'  make remote-authoring  runtime entity creation over Live View' \
 		'  make snapshot-record   record remote scene snapshots' \
 		'  make snapshot-replay   replay recorded snapshots' \
 		'' \
@@ -112,6 +113,9 @@ model-loading:
 
 scene-io:
 	$(PY) -m forge_viewer.tools.scene_io $(ARGS)
+
+remote-authoring:
+	$(PY) -m forge_viewer.tools.remote_authoring $(ARGS)
 
 additive:
 	$(PY) -m forge_viewer.tools.additive $(ARGS)
@@ -183,35 +187,35 @@ capture:
 record:
 	$(PY) -m forge_viewer.cli record $(SCENE) -o $(OUTPUT) $(ARGS)
 
-PVD_HOST ?= 127.0.0.1
-PVD_PORT ?= 47650
-PVD_SCENE ?= gizmo
+LIVE_HOST ?= 127.0.0.1
+LIVE_PORT ?= 47650
+LIVE_SCENE ?= gizmo
 ## Run physics headlessly and publish the latest snapshot.
 serve:
-	$(PY) -m forge_viewer.cli serve $(PVD_SCENE) --host $(PVD_HOST) --port $(PVD_PORT) $(ARGS)
+	$(PY) -m forge_viewer.cli serve $(LIVE_SCENE) --host $(LIVE_HOST) --port $(LIVE_PORT) $(ARGS)
 
 ## Open an independent remote viewer.
 attach:
-	$(PY) -m forge_viewer.cli attach --host $(PVD_HOST) --port $(PVD_PORT) $(ARGS)
+	$(PY) -m forge_viewer.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) $(ARGS)
 
 ## Start one physics publisher, one effect viewer, and one normal-debug viewer.
-pvd:
-	@$(PY) -m forge_viewer.cli serve $(PVD_SCENE) --host $(PVD_HOST) --port $(PVD_PORT) $(ARGS) & server=$$!; \
-	$(PY) -m forge_viewer.cli attach --host $(PVD_HOST) --port $(PVD_PORT) --title "forge effect" & effect=$$!; \
-	$(PY) -m forge_viewer.cli attach --host $(PVD_HOST) --port $(PVD_PORT) --title "forge debug" --debug-view normal & debug=$$!; \
+live-view:
+	@$(PY) -m forge_viewer.cli serve $(LIVE_SCENE) --host $(LIVE_HOST) --port $(LIVE_PORT) $(ARGS) & server=$$!; \
+	$(PY) -m forge_viewer.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) --title "forge effect" & effect=$$!; \
+	$(PY) -m forge_viewer.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) --title "forge debug" --debug-view normal & debug=$$!; \
 	trap 'kill $$effect $$debug $$server 2>/dev/null || true' EXIT INT TERM; \
 	wait $$effect; wait $$debug
 
 SNAPSHOT ?= out/session.fvs
 ## Record structure revisions, physics frames, and debug commands.
 snapshot-record:
-	$(PY) -m forge_viewer.cli serve $(PVD_SCENE) --host $(PVD_HOST) --port $(PVD_PORT) --record-snapshot $(SNAPSHOT) $(ARGS)
+	$(PY) -m forge_viewer.cli serve $(LIVE_SCENE) --host $(LIVE_HOST) --port $(LIVE_PORT) --record-snapshot $(SNAPSHOT) $(ARGS)
 
 ## Replay a snapshot loop through the remote protocol.
 snapshot-replay:
-	@$(PY) -m forge_viewer.cli replay $(SNAPSHOT) --host $(PVD_HOST) --port $(PVD_PORT) --loop & server=$$!; \
+	@$(PY) -m forge_viewer.cli replay $(SNAPSHOT) --host $(LIVE_HOST) --port $(LIVE_PORT) --loop & server=$$!; \
 	trap 'kill $$server 2>/dev/null || true' EXIT INT TERM; \
-	$(PY) -m forge_viewer.cli attach --host $(PVD_HOST) --port $(PVD_PORT) --title "forge replay" $(ARGS)
+	$(PY) -m forge_viewer.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) --title "forge replay" $(ARGS)
 
 ## Native gizmo acceptance: G position, R rotation, T frame, F9 settings.
 gizmo:

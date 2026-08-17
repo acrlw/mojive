@@ -1,4 +1,4 @@
-"""PVD-style remote snapshots keep physics independent from viewer frame rate."""
+"""Remote snapshots keep physics independent from viewer frame rate."""
 
 from __future__ import annotations
 
@@ -11,7 +11,13 @@ import numpy as np
 import pytest
 
 from forge_viewer import commands as cmd
-from forge_viewer.adapters.base import AdapterCaps, FrameNeeds, SceneAdapterBase
+from forge_viewer.adapters.base import (
+    CAMERA_OBJECT_BASE,
+    LIGHT_OBJECT_BASE,
+    AdapterCaps,
+    FrameNeeds,
+    SceneAdapterBase,
+)
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.commands import CommandResult
 from forge_viewer.remote import (
@@ -22,7 +28,7 @@ from forge_viewer.remote import (
 )
 from forge_viewer.scene import Scene
 from forge_viewer.session import Session
-from forge_viewer.types import CameraView, Environment, Light, Material
+from forge_viewer.types import CameraView, Environment, Light, Material, MeshShape
 
 
 def _port_pair() -> int:
@@ -174,6 +180,73 @@ def test_scene_entity_commands_keep_their_typed_remote_boundary():
     assert isinstance(command, cmd.SetGeometryColor)
     assert command.node_id == 9
     assert np.array_equal(command.rgba, color)
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "add_scene_object",
+            "shape": MeshShape.BOX,
+            "name": "box",
+            "size": (0.5, 0.5, 0.5),
+            "position": (1.0, 2.0, 3.0),
+            "rotation": np.eye(3, dtype=np.float32),
+            "color": (0.2, 0.4, 0.8, 1.0),
+            "material": material,
+        },
+    )
+    assert isinstance(command, cmd.AddSceneObject)
+    assert command.shape is MeshShape.BOX
+    assert command.name == "box"
+
+
+def test_remote_scene_authoring_publishes_structure_updates():
+    scene = Scene()
+    source = Session(StaticSceneAdapter(scene))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source))
+    publisher.publish_frame(source.frame)
+    remote = Session(RemoteSceneAdapter(port=port))
+    stop = threading.Event()
+
+    def pump():
+        generation = source.structure_generation
+        while not stop.is_set():
+            publisher.pump_commands(lambda message: handle_session_command(source, message))
+            if source.structure_generation != generation:
+                generation = source.structure_generation
+                publisher.publish_structure(snapshot_structure(source))
+                publisher.publish_frame(source.frame)
+            stop.wait(0.002)
+
+    worker = threading.Thread(target=pump)
+    worker.start()
+    try:
+        added = remote.submit(
+            cmd.AddSceneObject(MeshShape.SPHERE, "live sphere", position=(0.0, 0.0, 1.0))
+        )
+        assert added.ok and added.entity_id > 0
+        assert remote.node_by_object_id(added.entity_id).name == "live sphere"
+        assert source.node_by_object_id(added.entity_id).name == "live sphere"
+
+        light = remote.submit(cmd.AddSceneLight("live light", Light()))
+        camera = remote.submit(cmd.AddSceneCamera("live camera", CameraView()))
+        assert remote.node_by_object_id(LIGHT_OBJECT_BASE + light.entity_id).name == "live light"
+        assert remote.node_by_object_id(CAMERA_OBJECT_BASE + camera.entity_id).name == "live camera"
+
+        assert remote.submit(cmd.RemoveSceneObject(added.entity_id))
+        assert remote.submit(cmd.RemoveSceneLight(light.entity_id))
+        assert remote.submit(cmd.RemoveSceneCamera(camera.entity_id))
+        assert remote.node_by_object_id(added.entity_id) is None
+        assert remote.node_by_object_id(LIGHT_OBJECT_BASE + light.entity_id) is None
+        assert remote.node_by_object_id(CAMERA_OBJECT_BASE + camera.entity_id) is None
+        assert source.node_by_object_id(added.entity_id) is None
+    finally:
+        stop.set()
+        worker.join()
+        remote.release()
+        publisher.close()
+        source.release()
 
 
 def test_equality_command_keeps_its_typed_remote_boundary():

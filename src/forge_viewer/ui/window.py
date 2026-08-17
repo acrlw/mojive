@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from ..log import get_logger
-from . import fonts
+from . import fonts, native_drop
 from . import theme as theme_mod
 
 log = get_logger("window")
@@ -146,6 +146,8 @@ class Window:
         self._frame_index = 0
         self._readback: np.ndarray | None = None
         self._file_drops: list[Path] = []
+        self._file_drag_active = False
+        self._native_drop_token = 0
 
         glfw.make_context_current(self._window)
         self.set_vsync(self.config.vsync)
@@ -166,6 +168,7 @@ class Window:
 
         self._impl = GlfwRenderer(self._window)
         glfw.set_drop_callback(self._window, self._on_file_drop)
+        self._native_drop_token = native_drop.install(glfw, self._window, self)
 
         self._impl.process_inputs()
         fb_w, _ = self.size_pixels
@@ -284,7 +287,12 @@ class Window:
         self._file_drops.clear()
         return paths
 
+    @property
+    def file_drag_active(self) -> bool:
+        return self._file_drag_active
+
     def _on_file_drop(self, _window: Any, paths: list[str]) -> None:
+        self._file_drag_active = False
         self._file_drops.extend(Path(path).expanduser().resolve() for path in paths)
 
     def set_vsync(self, on: bool) -> None:
@@ -383,6 +391,7 @@ class Window:
         if self._destroyed:
             return
         self._destroyed = True
+        native_drop.uninstall(self._native_drop_token)
         global _live_windows
 
         try:

@@ -15,7 +15,7 @@ from .base import (
 
 
 class StaticSceneAdapter(SceneAdapterBase):
-    caps = AdapterCaps(name="static", simulation=False, write_pose=True)
+    caps = AdapterCaps(name="static", simulation=False, write_pose=True, scene_authoring=True)
 
     def __init__(self, scene: Scene) -> None:
         self.scene = scene
@@ -60,6 +60,44 @@ class StaticSceneAdapter(SceneAdapterBase):
 
     def set_camera_view(self, camera_id: int, camera) -> bool:
         return self.scene.set_camera(camera_id, camera)
+
+    def add_scene_object(self, shape, name, size, position, rotation, color, material) -> int:
+        return self.scene.add(
+            shape,
+            name=name,
+            size=size,
+            position=position,
+            rotation=rotation,
+            color=color,
+            material=material,
+        ).object_id
+
+    def remove_scene_object(self, object_id: int) -> bool:
+        try:
+            self.scene.remove(object_id)
+        except KeyError:
+            return False
+        return True
+
+    def add_scene_light(self, name: str, light) -> int:
+        return self.scene.add_light(name, light).light_id
+
+    def remove_scene_light(self, light_id: int) -> bool:
+        try:
+            self.scene.remove_light(light_id)
+        except KeyError:
+            return False
+        return True
+
+    def add_scene_camera(self, name: str, camera) -> int:
+        return self.scene.add_camera(name, camera)
+
+    def remove_scene_camera(self, camera_id: int) -> bool:
+        try:
+            self.scene.remove_camera(camera_id)
+        except KeyError:
+            return False
+        return True
 
     def camera_hint(self):
         return self.scene.camera
