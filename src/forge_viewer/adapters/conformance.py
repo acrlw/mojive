@@ -28,7 +28,7 @@ class ConformanceReport:
 
 
 def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
-    """Exercise structure and one full-data frame without assuming a physics library."""
+    """Exercise adapter structure and one full-data frame."""
     revision = adapter.structure_revision
     source = adapter.scene_source()
     frame = adapter.frame(

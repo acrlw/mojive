@@ -1,4 +1,4 @@
-"""A tiny dependency-free physics backend used to prove forge is not MuJoCo-bound."""
+"""Minimal dependency-free physics adapter for Forge."""
 
 from __future__ import annotations
 

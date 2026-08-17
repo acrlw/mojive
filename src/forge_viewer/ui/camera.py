@@ -227,7 +227,7 @@ class OrbitCamera:
         return self.look_from(yaw, pitch, self._require_out())
 
     def adopt(self, view: CameraView) -> None:
-        """Seed the free orbit camera from an arbitrary scene camera without publishing it."""
+        """Seed the free orbit camera from a scene camera."""
         eye = np.asarray(view.eye, np.float64)
         target = np.asarray(view.target, np.float64)
         delta = eye - target

@@ -1,4 +1,4 @@
-"""Stream rendered video or transport snapshots without retaining the full recording."""
+"""Stream rendered video and snapshot packets incrementally."""
 
 from __future__ import annotations
 

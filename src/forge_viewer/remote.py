@@ -135,7 +135,7 @@ class _CommandRequest:
 
 
 class SnapshotPublisher:
-    """Network transport for a generic snapshot stream; publishing never waits for a viewer."""
+    """Transport reliable scene structure and latest-only frames."""
 
     def __init__(self, host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> None:
         self.host, self.port = host, int(port)

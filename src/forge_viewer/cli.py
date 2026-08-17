@@ -299,7 +299,7 @@ def cmd_view(args: argparse.Namespace) -> int:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
-    """Run physics and publish snapshots without creating a window or GL context."""
+    """Publish simulation snapshots from a headless physics process."""
     import time
 
     from . import commands as cmd
@@ -485,7 +485,7 @@ def cmd_toy(args: argparse.Namespace) -> int:
 
 
 def cmd_conformance(args: argparse.Namespace) -> int:
-    """Run the same adapter contract checks without importing a renderer or opening a window."""
+    """Run adapter contract checks in a headless process."""
     from .adapters.conformance import check_adapter
     from .backends import make_adapter
 

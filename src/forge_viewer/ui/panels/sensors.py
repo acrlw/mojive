@@ -1,4 +1,4 @@
-"""Live MuJoCo sensor values without owning a second copy of their state."""
+"""Live MuJoCo sensor values sourced from Session."""
 
 from __future__ import annotations
 
