@@ -187,6 +187,13 @@ class DiagnosticSource:
         default_factory=lambda: np.array([1.0, 0.4, 0.2, 1.0], np.float32)
     )
     rangefinder_normal_length: float = 0.0
+    constraint_radius: float = 0.0
+    constraint_connect_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([0.2, 0.2, 0.8, 1.0], np.float32)
+    )
+    constraint_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([0.9, 0.0, 0.0, 1.0], np.float32)
+    )
 
 
 @dataclass
@@ -204,6 +211,9 @@ class DiagnosticFrame:
     rangefinder_lines: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
     rangefinder_points: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
     rangefinder_normal_arrows: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
+    constraint_starts: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    constraint_ends: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    constraint_visible: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
 
 
 @dataclass

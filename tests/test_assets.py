@@ -14,6 +14,7 @@ from forge_viewer.assets import (
 
 EXPECTED_ASSETS = (
     "actuator_visuals.xml",
+    "constraints.xml",
     "deformables.xml",
     "dense_mesh.xml",
     "gizmo.xml",

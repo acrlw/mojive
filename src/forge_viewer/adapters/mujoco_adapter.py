@@ -222,6 +222,9 @@ class MuJoCoAdapter:
             rangefinder_lines=np.zeros(rangefinder_count, bool),
             rangefinder_points=np.zeros(rangefinder_count, bool),
             rangefinder_normal_arrows=np.zeros(rangefinder_count, bool),
+            constraint_starts=np.zeros((model.neq, 3), np.float32),
+            constraint_ends=np.zeros((model.neq, 3), np.float32),
+            constraint_visible=np.zeros(model.neq, bool),
         )
         self._qpos_buf = np.zeros(model.nq, np.float32)
         self._qvel_buf = np.zeros(model.nv, np.float32)
@@ -427,6 +430,7 @@ class MuJoCoAdapter:
             )
             self._fill_actuator_visual_poses(diagnostics)
             self._fill_rangefinder_visuals(diagnostics)
+            self._fill_constraint_visuals(diagnostics)
             f.diagnostics = diagnostics
             f.cameras = tuple(self.camera_view(i) for i in range(self._m.ncam))
         else:
@@ -892,7 +896,40 @@ class MuJoCoAdapter:
             light_rgba=np.asarray(m.vis.rgba.light, np.float32).copy(),
             rangefinder_rgba=np.asarray(m.vis.rgba.rangefinder, np.float32).copy(),
             rangefinder_normal_length=meansize * 0.25,
+            constraint_radius=meansize * float(m.vis.scale.constraint),
+            constraint_connect_rgba=np.asarray(m.vis.rgba.connect, np.float32).copy(),
+            constraint_rgba=np.asarray(m.vis.rgba.constraint, np.float32).copy(),
         )
+
+    def _fill_constraint_visuals(self, diagnostics: DiagnosticFrame) -> None:
+        m, d = self._m, self._d
+        visible = diagnostics.constraint_visible
+        visible.fill(False)
+        connect = int(mujoco.mjtEq.mjEQ_CONNECT)
+        weld = int(mujoco.mjtEq.mjEQ_WELD)
+        site = int(mujoco.mjtObj.mjOBJ_SITE)
+        for equality in np.flatnonzero(np.asarray(d.eq_active)):
+            kind = int(m.eq_type[equality])
+            if kind not in (connect, weld):
+                continue
+            first = int(m.eq_obj1id[equality])
+            second = int(m.eq_obj2id[equality])
+            if int(m.eq_objtype[equality]) == site:
+                diagnostics.constraint_starts[equality] = d.site_xpos[first]
+                diagnostics.constraint_ends[equality] = d.site_xpos[second]
+            else:
+                data = m.eq_data[equality]
+                start_offset = 3 if kind == weld else 0
+                end_offset = 0 if kind == weld else 3
+                diagnostics.constraint_starts[equality] = (
+                    d.xpos[first]
+                    + d.xmat[first].reshape(3, 3) @ data[start_offset : start_offset + 3]
+                )
+                diagnostics.constraint_ends[equality] = (
+                    d.xpos[second]
+                    + d.xmat[second].reshape(3, 3) @ data[end_offset : end_offset + 3]
+                )
+            visible[equality] = True
 
     @staticmethod
     def _build_rangefinder_specs(model) -> tuple[_RangefinderSpec, ...]:

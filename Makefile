@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-rangefinder mujoco-editing musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-rangefinder mujoco-constraints mujoco-editing musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -19,6 +19,7 @@ help:
 		'  make mujoco-debug      joint/COM/inertia debug visuals' \
 		'  make mujoco-actuators  joint/site/body actuator visuals' \
 		'  make mujoco-rangefinder site/camera rays, hits, and normals' \
+		'  make mujoco-constraints  equality constraint endpoint markers' \
 		'  make mujoco-editing     mocap pose and equality controls' \
 		'  make musculoskeletal   人体肌骨模型 + tendon/keyframe' \
 		'  make musculoskeletal-video  300 keyframes → 60 fps MP4' \
@@ -243,6 +244,10 @@ mujoco-actuators:
 mujoco-rangefinder:
 	$(PY) -m forge_viewer.cli view rangefinder --paused \
 		--enable-render rangefinder $(ARGS)
+
+mujoco-constraints:
+	$(PY) -m forge_viewer.cli view constraints --paused \
+		--camera overview --enable-render constraint $(ARGS)
 
 mujoco-editing:
 	$(PY) -m forge_viewer.cli view mocap_equality --paused $(ARGS)

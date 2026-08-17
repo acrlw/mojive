@@ -90,6 +90,7 @@ class ForgeBackend:
         self._flags[RenderFlag.CAMERA] = False
         self._flags[RenderFlag.LIGHT] = False
         self._flags[RenderFlag.RANGEFINDER] = False
+        self._flags[RenderFlag.CONSTRAINT] = False
         # MuJoCo mjv_defaultOption() enables tendon paths by default.
         self._flags[RenderFlag.TENDON] = True
         self._contact_ends = np.zeros((0, 3), np.float32)
@@ -143,6 +144,7 @@ class ForgeBackend:
                 RenderFlag.CAMERA,
                 RenderFlag.LIGHT,
                 RenderFlag.RANGEFINDER,
+                RenderFlag.CONSTRAINT,
             }
         return frozenset(flags)
 
@@ -211,6 +213,7 @@ class ForgeBackend:
             self.debug.layer("scene.cameras", Occlusion.GHOST).clear()
             self.debug.layer("scene.lights", Occlusion.GHOST).clear()
             self.debug.layer("physics.rangefinders", Occlusion.GHOST).clear()
+            self.debug.layer("physics.constraints", Occlusion.DEPTH).clear()
 
     def set_render_scene(self, scene: RenderScene) -> None:
 
@@ -290,6 +293,7 @@ class ForgeBackend:
         inertia = self.debug.layer("physics.inertia", Occlusion.DEPTH)
         actuators = self.debug.layer("physics.actuators", Occlusion.DEPTH)
         rangefinders = self.debug.layer("physics.rangefinders", Occlusion.GHOST)
+        constraints = self.debug.layer("physics.constraints", Occlusion.DEPTH)
         dynamic = frame.diagnostics
         source = self._source.diagnostics
         if dynamic is None:
@@ -298,6 +302,7 @@ class ForgeBackend:
             inertia.clear()
             actuators.clear()
             rangefinders.clear()
+            constraints.clear()
             return
 
         if self.get_flag(RenderFlag.JOINT):
@@ -364,6 +369,28 @@ class ForgeBackend:
 
         self._publish_actuator_visuals(frame, actuators)
         self._publish_rangefinders(frame, rangefinders)
+        self._publish_constraints(frame, constraints)
+
+    def _publish_constraints(self, frame: SceneFrame, layer) -> None:
+        dynamic = frame.diagnostics
+        if not self.get_flag(RenderFlag.CONSTRAINT) or dynamic is None:
+            layer.clear()
+            return
+        layer.clear()
+        source = self._source.diagnostics
+        identity = np.eye(3, dtype=np.float32)
+        scale = np.full(3, source.constraint_radius, np.float32)
+        for equality in np.flatnonzero(dynamic.constraint_visible):
+            layer.sphere(
+                f"connect:{equality}",
+                math3d.compose(dynamic.constraint_starts[equality], identity, scale),
+                source.constraint_connect_rgba,
+            )
+            layer.sphere(
+                f"constraint:{equality}",
+                math3d.compose(dynamic.constraint_ends[equality], identity, scale),
+                source.constraint_rgba,
+            )
 
     def _publish_rangefinders(self, frame: SceneFrame, layer) -> None:
         dynamic = frame.diagnostics

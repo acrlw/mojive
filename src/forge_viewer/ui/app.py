@@ -510,6 +510,7 @@ class ViewerApp:
                 RenderFlag.CAMERA,
                 RenderFlag.LIGHT,
                 RenderFlag.RANGEFINDER,
+                RenderFlag.CONSTRAINT,
             )
         )
         return needs

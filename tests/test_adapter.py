@@ -928,6 +928,37 @@ def test_site_and_camera_rangefinders_publish_generic_diagnostics():
         a.release()
 
 
+def test_connect_and_weld_constraints_publish_mujoco_endpoint_markers():
+    from forge_viewer.assets import resolve
+
+    a = MuJoCoAdapter(resolve("constraints"))
+    try:
+        source = a.scene_source().diagnostics
+        frame = a.frame(FrameNeeds(poses=True, diagnostics=True)).diagnostics
+        assert frame is not None
+        assert source.constraint_radius == pytest.approx(
+            a.model.stat.meansize * a.model.vis.scale.constraint
+        )
+        assert source.constraint_connect_rgba == pytest.approx(a.model.vis.rgba.connect)
+        assert source.constraint_rgba == pytest.approx(a.model.vis.rgba.constraint)
+        assert frame.constraint_visible.tolist() == [True, True]
+        assert frame.constraint_starts[0] == pytest.approx(a.data.site_xpos[0])
+        assert frame.constraint_ends[0] == pytest.approx(a.data.site_xpos[1])
+        first, second = a.model.eq_obj1id[1], a.model.eq_obj2id[1]
+        assert frame.constraint_starts[1] == pytest.approx(
+            a.data.xpos[first] + a.data.xmat[first].reshape(3, 3) @ a.model.eq_data[1, 3:6]
+        )
+        assert frame.constraint_ends[1] == pytest.approx(
+            a.data.xpos[second] + a.data.xmat[second].reshape(3, 3) @ a.model.eq_data[1, :3]
+        )
+
+        assert a.set_equality_enabled(0, False)
+        frame = a.frame(FrameNeeds(poses=True, diagnostics=True)).diagnostics
+        assert frame.constraint_visible.tolist() == [False, True]
+    finally:
+        a.release()
+
+
 def test_mujoco_geom_groups_rebuild_scene_nodes_and_raycast_mask():
     from forge_viewer.assets import resolve
 

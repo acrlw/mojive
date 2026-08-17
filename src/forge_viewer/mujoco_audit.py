@@ -69,7 +69,11 @@ _VIS_COVERAGE = (
         "supported",
         "site and camera rays, hit points and surface normals",
     ),
-    Coverage("mjVIS_CONSTRAINT", "unsupported", "constraint overlays are not drawn"),
+    Coverage(
+        "mjVIS_CONSTRAINT",
+        "supported",
+        "connect and weld equality endpoint markers",
+    ),
     Coverage("mjVIS_INERTIA", "supported", "body inertia boxes"),
     Coverage("mjVIS_SCLINERTIA", "supported", "constant-density inertia boxes"),
     Coverage("mjVIS_PERTFORCE", "degraded", "forge-native perturbation feedback"),

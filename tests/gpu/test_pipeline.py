@@ -228,6 +228,33 @@ def test_rangefinder_rays_hits_and_normals_reach_the_debug_pass(gl):
         adapter.release()
 
 
+def test_equality_constraint_endpoints_reach_the_debug_pass(gl):
+    adapter = make_adapter("mujoco", resolve("constraints"))
+    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    try:
+        backend.set_scene(adapter.scene_source())
+        backend.set_camera(adapter.camera_hint())
+        assert backend.set_flag(RenderFlag.CONSTRAINT, True)
+        frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True))
+        backend.update(frame)
+
+        layer = backend.debug.layer("physics.constraints")
+        assert layer.count_of(Prim.SPHERE) == 4
+        assert backend.render(frame) is not None
+
+        assert adapter.set_equality_enabled(0, False)
+        frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True))
+        backend.update(frame)
+        assert layer.count_of(Prim.SPHERE) == 2
+
+        assert backend.set_flag(RenderFlag.CONSTRAINT, False)
+        backend.update(frame)
+        assert layer.primitives == 0
+    finally:
+        backend.release()
+        adapter.release()
+
+
 def test_joint_site_and_body_actuator_visuals_reach_the_gpu_pipeline(gl):
     adapter = make_adapter("mujoco", resolve("actuator_visuals"))
     backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)

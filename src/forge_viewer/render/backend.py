@@ -34,6 +34,7 @@ class RenderFlag(enum.StrEnum):
     CAMERA = "camera"
     LIGHT = "light"
     RANGEFINDER = "rangefinder"
+    CONSTRAINT = "constraint"
     CONTACTPOINT = "contactpoint"
     CONTACTFORCE = "contactforce"
     TENDON = "tendon"

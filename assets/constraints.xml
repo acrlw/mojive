@@ -1,0 +1,35 @@
+<mujoco model="equality constraint markers">
+  <option gravity="0 0 0"/>
+  <statistic center="0 .25 .8" extent="1.1"/>
+  <visual>
+    <global azimuth="135" elevation="-22" fovy="42"/>
+    <scale constraint="0.12"/>
+  </visual>
+  <worldbody>
+    <light directional="true" pos="0 -3 5" dir="0 .4 -1"/>
+    <camera name="overview" pos="0 -3.2 2.1" xyaxes="1 0 0 0 .4 .92"/>
+    <geom type="plane" size="2 2 .05" rgba=".22 .28 .34 1"/>
+    <body name="connect_a" pos="-.55 0 .8">
+      <freejoint/>
+      <geom type="box" size=".18 .18 .18" rgba=".25 .7 .95 1"/>
+      <site name="connect_site_a" pos=".22 0 .4" size=".025"/>
+    </body>
+    <body name="connect_b" pos=".15 0 .8">
+      <freejoint/>
+      <geom type="sphere" size=".2" rgba=".95 .6 .2 1"/>
+      <site name="connect_site_b" pos="-.22 0 .4" size=".025"/>
+    </body>
+    <body name="weld_a" pos="-.4 .65 .8">
+      <freejoint/>
+      <geom type="capsule" size=".12 .22" rgba=".4 .85 .45 1"/>
+    </body>
+    <body name="weld_b" pos=".4 .65 .8">
+      <freejoint/>
+      <geom type="cylinder" size=".15 .2" rgba=".75 .45 .9 1"/>
+    </body>
+  </worldbody>
+  <equality>
+    <connect name="site_connect" site1="connect_site_a" site2="connect_site_b"/>
+    <weld name="body_weld" body1="weld_a" body2="weld_b" relpose="0 0 .5 1 0 0 0"/>
+  </equality>
+</mujoco>
