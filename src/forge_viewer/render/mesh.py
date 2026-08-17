@@ -39,7 +39,14 @@ CAPSULE_CAP_V0, CAPSULE_CAP_V1 = 0.75, 1.0
 BUILTIN_SHAPES: tuple[MeshShape, ...] = tuple(
     s
     for s in MeshShape
-    if s not in (MeshShape.ASSET, MeshShape.HEIGHTFIELD, MeshShape.FLEX, MeshShape.SKIN)
+    if s
+    not in (
+        MeshShape.ASSET,
+        MeshShape.HEIGHTFIELD,
+        MeshShape.FLEX,
+        MeshShape.FLEX_FACE,
+        MeshShape.SKIN,
+    )
 )
 
 

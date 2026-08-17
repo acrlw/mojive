@@ -62,6 +62,8 @@ def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
         "geom_body",
         "geom_source",
         "geom_pose_source",
+        "geom_visual",
+        "geom_static",
         "geom_node",
         "geom_local",
         "geom_infinite_plane",

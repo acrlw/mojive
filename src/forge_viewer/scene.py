@@ -349,6 +349,8 @@ class Scene:
             geom_body=np.arange(1, n + 1, dtype=np.int32),
             geom_source=np.arange(n, dtype=np.int32),
             geom_pose_source=np.zeros(n, np.uint8),
+            geom_visual=np.zeros(n, np.uint8),
+            geom_static=np.zeros(n, bool),
             geom_node=np.arange(2, 2 * n + 1, 2, dtype=np.int32),
             geom_local=np.repeat(np.eye(4, dtype=np.float32)[None], n, axis=0),
             geom_infinite_plane=np.zeros(n, bool),

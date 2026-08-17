@@ -91,6 +91,7 @@ class ForgeBackend:
         self._flags[RenderFlag.LIGHT] = False
         self._flags[RenderFlag.RANGEFINDER] = False
         self._flags[RenderFlag.CONSTRAINT] = False
+        self._flags[RenderFlag.FLEXFACE] = False
         # MuJoCo mjv_defaultOption() enables tendon paths by default.
         self._flags[RenderFlag.TENDON] = True
         self._contact_ends = np.zeros((0, 3), np.float32)
@@ -121,6 +122,10 @@ class ForgeBackend:
             RenderFlag.WIREFRAME,
             RenderFlag.FOG,
             RenderFlag.HAZE,
+            RenderFlag.STATIC,
+            RenderFlag.SKIN,
+            RenderFlag.FLEXFACE,
+            RenderFlag.FLEXSKIN,
         }
         if "shadow" in self._passes:
             flags.add(RenderFlag.SHADOW)
@@ -204,6 +209,7 @@ class ForgeBackend:
         self.textures.sync(source.textures, source.skybox)
         self._builder = SceneSourceBuilder()
         self._builder.set_source(source, self._camera)
+        self._sync_instance_visibility()
         self._structure_generation = -1
         if self.debug is not None:
             self.debug.layer("physics.joints").clear()
@@ -851,7 +857,26 @@ class ForgeBackend:
         if flag not in self.caps.render_flags:
             return False
         self._flags[flag] = bool(value)
+        if flag in {
+            RenderFlag.STATIC,
+            RenderFlag.SKIN,
+            RenderFlag.FLEXFACE,
+            RenderFlag.FLEXSKIN,
+        }:
+            self._sync_instance_visibility()
         return True
+
+    def _sync_instance_visibility(self) -> None:
+        if self._builder is None:
+            return
+        changed = self._builder.set_visual_options(
+            static=self.get_flag(RenderFlag.STATIC),
+            skin=self.get_flag(RenderFlag.SKIN),
+            flex_face=self.get_flag(RenderFlag.FLEXFACE),
+            flex_skin=self.get_flag(RenderFlag.FLEXSKIN),
+        )
+        if changed:
+            self.set_render_scene(self._builder.scene)
 
     def get_flag(self, flag: RenderFlag) -> bool:
         return self._flags.get(flag, False)

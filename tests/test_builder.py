@@ -10,7 +10,7 @@ import pytest
 from forge_viewer.adapters.base import NodeKind as NK
 from forge_viewer.adapters.base import SceneFrame, SceneNode, SceneSource
 from forge_viewer.render.builder import SceneSourceBuilder
-from forge_viewer.types import CameraView, Material, MeshKey, MeshShape
+from forge_viewer.types import CameraView, InstanceVisual, Material, MeshKey, MeshShape
 
 
 def _grid_material(repeat: float = 1.0, uniform: bool = True) -> Material:
@@ -408,6 +408,42 @@ def test_set_visible_rebuilds_and_drops_instances():
     assert b.infinite_plane_half_extents() == ()
     b.update(make_frame(src, seed=0), CameraView())
     b.scene.validate()
+
+
+def test_visual_options_filter_static_skin_and_flex_instances():
+    src = make_source(bodies=1)
+    src.geom_static = np.array([True, False, False, False, False])
+    src.geom_visual = np.array(
+        [
+            InstanceVisual.DEFAULT,
+            InstanceVisual.SKIN,
+            InstanceVisual.FLEX_SKIN,
+            InstanceVisual.FLEX_FACE,
+            InstanceVisual.FLEX_EDGE,
+        ],
+        np.uint8,
+    )
+    builder = SceneSourceBuilder()
+    scene = builder.set_source(src, CameraView())
+
+    assert scene.count == 4
+
+    assert builder.set_visual_options(
+        static=True,
+        skin=True,
+        flex_face=True,
+        flex_skin=False,
+    )
+    assert builder.scene.count == 4
+
+    builder.set_visual_options(static=True, skin=True, flex_face=False, flex_skin=False)
+    assert builder.scene.count == 3
+
+    builder.set_visual_options(static=False, skin=True, flex_face=False, flex_skin=True)
+    assert builder.scene.count == 3
+
+    builder.set_visual_options(static=True, skin=False, flex_face=False, flex_skin=True)
+    assert builder.scene.count == 3
 
 
 def test_stats_reports_batching_numbers():

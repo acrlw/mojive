@@ -123,6 +123,7 @@ class MeshShape(enum.StrEnum):
     DOUBLE_ARROW = "double_arrow"
     HEIGHTFIELD = "heightfield"
     FLEX = "flex"
+    FLEX_FACE = "flex_face"
     SKIN = "skin"
     ASSET = "asset"
 
@@ -131,6 +132,14 @@ class InstancePoseSource(enum.IntEnum):
     GEOM = 0
     SITE = 1
     WORLD = 2
+
+
+class InstanceVisual(enum.IntEnum):
+    DEFAULT = 0
+    FLEX_EDGE = 1
+    FLEX_FACE = 2
+    FLEX_SKIN = 3
+    SKIN = 4
 
 
 @dataclass(frozen=True)

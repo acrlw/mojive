@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .. import math3d
-from ..types import MeshData, MeshKey, MeshShape, MeshUpdate
+from ..types import InstanceVisual, MeshData, MeshKey, MeshShape, MeshUpdate
 
 _CABLE_SIDES = 10
 
@@ -39,13 +39,14 @@ class DeformableMesh:
     group: int
     matid: int
     rgba: np.ndarray
+    visual: InstanceVisual
 
     def update(self, data) -> None:
         raise NotImplementedError
 
 
 class _SurfaceFlex(DeformableMesh):
-    def __init__(self, model, data, flex_id: int) -> None:
+    def __init__(self, model, data, flex_id: int, *, smooth: bool) -> None:
         self.flex_id = flex_id
         dim = int(model.flex_dim[flex_id])
         self._dim = dim
@@ -63,7 +64,8 @@ class _SurfaceFlex(DeformableMesh):
         self._shells = np.ascontiguousarray(shells, np.int32)
         self._nelem = nelem
 
-        if dim == 2:
+        self._smooth = smooth
+        if dim == 2 and smooth:
             top = elements[:, :3]
             bottom = top[:, (0, 2, 1)]
             side_a = np.stack([shells[:, 0], shells[:, 1], shells[:, 1]], axis=1)
@@ -85,8 +87,29 @@ class _SurfaceFlex(DeformableMesh):
                 ]
             )
             normal_faces = top
-        else:
+        elif dim == 3 and smooth:
             faces = shells[:, :3]
+            signs = np.ones_like(faces, np.float32)
+            normal_faces = faces
+        elif dim == 2:
+            top = elements[:, :3]
+            bottom = top[:, (0, 2, 1)]
+            faces = np.stack((top, bottom), axis=1).reshape(-1, 3)
+            signs = np.ones_like(faces, np.float32)
+            normal_faces = faces
+        else:
+            elem_adr = int(model.flex_elemadr[flex_id])
+            layers = np.asarray(model.flex_elemlayer[elem_adr : elem_adr + nelem])
+            tetra = elements[layers == 0]
+            faces = np.stack(
+                (
+                    tetra[:, (0, 1, 2)],
+                    tetra[:, (0, 2, 3)],
+                    tetra[:, (0, 3, 1)],
+                    tetra[:, (1, 3, 2)],
+                ),
+                axis=1,
+            ).reshape(-1, 3)
             signs = np.ones_like(faces, np.float32)
             normal_faces = faces
 
@@ -123,12 +146,13 @@ class _SurfaceFlex(DeformableMesh):
         uvs = self._uvs(model, flex_id, elements, shells, dim)
         mesh = MeshData(positions, normals, uvs, np.arange(ncorner, dtype=np.uint32))
         super().__init__(
-            key=MeshKey(MeshShape.FLEX, flex_id),
+            key=MeshKey(MeshShape.FLEX if smooth else MeshShape.FLEX_FACE, flex_id),
             mesh=mesh,
             update_data=MeshUpdate(positions, normals),
             group=int(model.flex_group[flex_id]),
             matid=int(model.flex_matid[flex_id]),
             rgba=np.asarray(model.flex_rgba[flex_id], np.float32).copy(),
+            visual=InstanceVisual.FLEX_SKIN if smooth else InstanceVisual.FLEX_FACE,
         )
         self.update(data)
 
@@ -145,6 +169,9 @@ class _SurfaceFlex(DeformableMesh):
             model.flex_elemtexcoord[eadr : eadr + len(elements) * 3], np.int32
         ).reshape(-1, 3)
         bottom = tids[:, (0, 2, 1)]
+        if not self._smooth:
+            ids = np.stack((tids, bottom), axis=1).reshape(-1)
+            return np.ascontiguousarray(tex[ids], np.float32)
         side_a = np.stack([shells[:, 0], shells[:, 1], shells[:, 1]], axis=1)
         side_b = np.stack([shells[:, 1], shells[:, 0], shells[:, 0]], axis=1)
         ids = np.concatenate(
@@ -167,6 +194,13 @@ class _SurfaceFlex(DeformableMesh):
         self._normal_e2 -= self._normal_p0
         _cross_rows(self._normal_e1, self._normal_e2, self._normal_cross, self._normal_p0)
         _normalize_rows(self._normal_cross, self._normal_scratch, self._normal_lengths)
+        if not self._smooth:
+            np.take(self._base, self._corner_ids, axis=0, out=self.mesh.positions)
+            self._tri_normals[:] = self._normal_cross[:, None, :]
+            if self._radius:
+                np.multiply(self.mesh.normals, self._radius, out=self._corner_scratch)
+                np.add(self.mesh.positions, self._corner_scratch, out=self.mesh.positions)
+            return
         for corner in range(3):
             np.add.at(self._vertex_normals, tri[:, corner], self._normal_cross)
         _normalize_rows(self._vertex_normals, self._vertex_scratch, self._vertex_lengths)
@@ -250,6 +284,7 @@ class _CableFlex(DeformableMesh):
             group=int(model.flex_group[flex_id]),
             matid=int(model.flex_matid[flex_id]),
             rgba=np.asarray(model.flex_rgba[flex_id], np.float32).copy(),
+            visual=InstanceVisual.FLEX_EDGE,
         )
         self.update(data)
 
@@ -333,6 +368,7 @@ class _Skin(DeformableMesh):
             group=int(model.skin_group[skin_id]),
             matid=int(model.skin_matid[skin_id]),
             rgba=np.asarray(model.skin_rgba[skin_id], np.float32).copy(),
+            visual=InstanceVisual.SKIN,
         )
         self.update(data)
 
@@ -377,7 +413,8 @@ def build_deformables(
         if int(model.flex_dim[flex_id]) == 1:
             result.append(_CableFlex(model, data, flex_id))
         else:
-            result.append(_SurfaceFlex(model, data, flex_id))
+            result.append(_SurfaceFlex(model, data, flex_id, smooth=True))
+            result.append(_SurfaceFlex(model, data, flex_id, smooth=False))
     for skin_id in range(model.nskin):
         if int(model.skin_group[skin_id]) in visible_skin_groups:
             result.append(_Skin(model, data, skin_id))

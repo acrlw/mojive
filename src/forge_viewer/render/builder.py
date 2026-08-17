@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..types import DEFAULT_MATERIAL, InstancePoseSource, MeshKey, MeshShape
+from ..types import DEFAULT_MATERIAL, InstancePoseSource, InstanceVisual, MeshKey, MeshShape
 from .scene import RenderScene, SceneBuilder
 
 if TYPE_CHECKING:
@@ -81,6 +81,10 @@ class SceneSourceBuilder:
         self._src_geom = np.zeros(0, np.intp)
 
         self._overrides: dict[int, bool] = {}
+        self._show_static = True
+        self._show_skin = True
+        self._show_flex_face = False
+        self._show_flex_skin = True
         self._planes: list[_InfinitePlane] = []
         self._tri_counts: dict[MeshKey, int] = {}
         self._notes: tuple[str, ...] = ()
@@ -136,6 +140,27 @@ class SceneSourceBuilder:
 
     def rebuild(self, camera: CameraView | None = None) -> RenderScene:
         return self._build(camera if camera is not None else self._scene.camera)
+
+    def set_visual_options(
+        self, *, static: bool, skin: bool, flex_face: bool, flex_skin: bool
+    ) -> bool:
+        options = bool(static), bool(skin), bool(flex_face), bool(flex_skin)
+        current = (
+            self._show_static,
+            self._show_skin,
+            self._show_flex_face,
+            self._show_flex_skin,
+        )
+        if options == current:
+            return False
+        (
+            self._show_static,
+            self._show_skin,
+            self._show_flex_face,
+            self._show_flex_skin,
+        ) = options
+        self.rebuild()
+        return True
 
     def _build(self, camera: CameraView | None) -> RenderScene:
         src = self._source
@@ -267,6 +292,14 @@ class SceneSourceBuilder:
         src = self._source
         n = src.instance_count
         keep = np.ones(n, bool)
+        if len(src.geom_static) == n and not self._show_static:
+            keep &= ~src.geom_static
+        if len(src.geom_visual) == n:
+            visual = src.geom_visual
+            keep &= (visual != int(InstanceVisual.SKIN)) | self._show_skin
+            keep &= (visual != int(InstanceVisual.FLEX_SKIN)) | self._show_flex_skin
+            show_face = self._show_flex_face and not self._show_flex_skin
+            keep &= (visual != int(InstanceVisual.FLEX_FACE)) | show_face
         if not src.nodes or n == 0:
             return keep
 
@@ -294,7 +327,7 @@ class SceneSourceBuilder:
         order: dict[int, dict[int, int]] = {}
         for i in range(n):
             if len(src.geom_node) > i and int(src.geom_node[i]) >= 0:
-                keep[i] = effective(int(src.geom_node[i]))
+                keep[i] &= effective(int(src.geom_node[i]))
                 continue
             body = int(src.geom_body[i]) if len(src.geom_body) > i else -1
             gsrc = int(src.geom_source[i]) if len(src.geom_source) > i else i
@@ -304,9 +337,9 @@ class SceneSourceBuilder:
             k = seen[gsrc]
             candidates = geom_nodes.get(body, ())
             if k < len(candidates):
-                keep[i] = effective(candidates[k])
+                keep[i] &= effective(candidates[k])
             elif body in body_nodes:
-                keep[i] = effective(body_nodes[body])
+                keep[i] &= effective(body_nodes[body])
         return keep
 
     def _tex_coef(

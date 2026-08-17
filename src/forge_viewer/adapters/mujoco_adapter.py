@@ -11,6 +11,7 @@ from ..types import (
     DEFAULT_HEADLIGHT,
     CameraView,
     InstancePoseSource,
+    InstanceVisual,
     Light,
     LightKind,
     LightSet,
@@ -532,6 +533,8 @@ class MuJoCoAdapter:
         bodies: list[int] = []
         sources: list[int] = []
         pose_sources: list[int] = []
+        visuals: list[int] = []
+        statics: list[bool] = []
         node_ids: list[int] = []
         locals_: list[np.ndarray] = []
         infinite: list[bool] = []
@@ -552,6 +555,8 @@ class MuJoCoAdapter:
             node_id: int,
             object_id: int,
             is_infinite: bool = False,
+            visual: InstanceVisual = InstanceVisual.DEFAULT,
+            is_static: bool = False,
         ) -> None:
             for key, scale, cap_offset in parts:
                 if key.shape is not MeshShape.ASSET and key not in meshes:
@@ -564,6 +569,8 @@ class MuJoCoAdapter:
                 bodies.append(body)
                 sources.append(source)
                 pose_sources.append(int(pose_source))
+                visuals.append(int(visual))
+                statics.append(is_static)
                 node_ids.append(node_id)
                 local = np.eye(4, dtype=np.float32)
                 if cap_offset is not None:
@@ -640,6 +647,7 @@ class MuJoCoAdapter:
                 node_id=self._geom_nodes.get(gi, -1),
                 object_id=body,
                 is_infinite=is_infinite,
+                is_static=int(m.body_weldid[body]) == 0,
             )
 
         for si in range(m.nsite):
@@ -678,6 +686,7 @@ class MuJoCoAdapter:
                 pose_source=InstancePoseSource.SITE,
                 node_id=self._site_nodes.get(si, -1),
                 object_id=0,
+                is_static=int(m.body_weldid[body]) == 0,
             )
 
         self._deformables = build_deformables(m, self._d, flex_groups, skin_groups)
@@ -688,16 +697,13 @@ class MuJoCoAdapter:
             rgba = spec.rgba
             if spec.matid >= 0 and np.array_equal(rgba, _GEOM_RGBA_DEFAULT):
                 rgba = np.asarray(m.mat_rgba[spec.matid], np.float32)
+            is_flex = spec.key.shape in (MeshShape.FLEX, MeshShape.FLEX_FACE)
             node_id = (
                 self._flex_nodes.get(spec.key.index, -1)
-                if spec.key.shape is MeshShape.FLEX
+                if is_flex
                 else self._skin_nodes.get(spec.key.index, -1)
             )
-            object_id = (
-                m.nbody + spec.key.index
-                if spec.key.shape is MeshShape.FLEX
-                else m.nbody + m.nflex + spec.key.index
-            )
+            object_id = m.nbody + spec.key.index if is_flex else m.nbody + m.nflex + spec.key.index
             append_parts(
                 [(spec.key, np.ones(3), None)],
                 mat_index=mat_index,
@@ -707,6 +713,7 @@ class MuJoCoAdapter:
                 pose_source=InstancePoseSource.WORLD,
                 node_id=node_id,
                 object_id=object_id,
+                visual=spec.visual,
             )
 
         src.meshes = {k: v for k, v in meshes.items() if v is not None}
@@ -720,6 +727,8 @@ class MuJoCoAdapter:
         src.geom_body = np.array(bodies, np.int32)
         src.geom_source = np.array(sources, np.int32)
         src.geom_pose_source = np.array(pose_sources, np.uint8)
+        src.geom_visual = np.array(visuals, np.uint8)
+        src.geom_static = np.array(statics, bool)
         src.geom_node = np.array(node_ids, np.int32)
         src.geom_local = np.stack(locals_) if n else np.zeros((0, 4, 4), np.float32)
         src.geom_infinite_plane = np.array(infinite, bool)

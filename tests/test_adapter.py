@@ -746,14 +746,15 @@ def test_deformables_match_mujocos_abstract_visualization():
     from forge_viewer.assets import resolve
     from forge_viewer.mujoco_audit import audit_model
     from forge_viewer.render.builder import SceneSourceBuilder
-    from forge_viewer.types import InstancePoseSource, MeshKey, MeshShape
+    from forge_viewer.types import InstancePoseSource, InstanceVisual, MeshKey, MeshShape
 
     a = MuJoCoAdapter(resolve("deformables"))
     try:
         src = a.scene_source()
-        assert len(src.dynamic_meshes) == a.model.nflex + a.model.nskin == 4
+        surface_count = sum(int(a.model.flex_dim[i]) > 1 for i in range(a.model.nflex))
+        assert len(src.dynamic_meshes) == a.model.nflex + a.model.nskin + surface_count == 6
         assert audit_model(a.model)["unsupported"] == 0
-        assert sum(src.geom_pose_source == int(InstancePoseSource.WORLD)) == 4
+        assert sum(src.geom_pose_source == int(InstancePoseSource.WORLD)) == 6
         deformable_nodes = [
             node for node in a.nodes() if node.kind in (NodeKind.FLEX, NodeKind.SKIN)
         ]
@@ -762,6 +763,14 @@ def test_deformables_match_mujocos_abstract_visualization():
         assert 0 not in deformable_ids
         world_instances = src.geom_pose_source == int(InstancePoseSource.WORLD)
         assert set(src.geom_object_id[world_instances].tolist()) == deformable_ids
+        assert sum(src.geom_visual == int(InstanceVisual.FLEX_FACE)) == surface_count
+        assert sum(src.geom_visual == int(InstanceVisual.FLEX_SKIN)) == surface_count
+        assert sum(src.geom_visual == int(InstanceVisual.FLEX_EDGE)) == 1
+        assert sum(src.geom_visual == int(InstanceVisual.SKIN)) == a.model.nskin
+        expected_static = np.zeros(src.instance_count, bool)
+        posed = src.geom_pose_source != int(InstancePoseSource.WORLD)
+        expected_static[posed] = a.model.body_weldid[src.geom_body[posed]] == 0
+        assert np.array_equal(src.geom_static, expected_static)
 
         hinge = mujoco.mj_name2id(a.model, mujoco.mjtObj.mjOBJ_JOINT, "skin_tip_hinge")
         assert a.set_qpos(int(a.model.jnt_qposadr[hinge]), np.deg2rad(35.0))
@@ -797,6 +806,28 @@ def test_deformables_match_mujocos_abstract_visualization():
             assert update.positions == pytest.approx(positions, abs=2e-6)
             assert update.normals == pytest.approx(normals, abs=2e-6)
 
+        option.flags[mujoco.mjtVisFlag.mjVIS_FLEXSKIN] = False
+        option.flags[mujoco.mjtVisFlag.mjVIS_FLEXFACE] = True
+        mujoco.mjv_updateScene(
+            a.model,
+            a.data,
+            option,
+            None,
+            camera,
+            mujoco.mjtCatBit.mjCAT_ALL,
+            ref,
+        )
+        for flex_id in range(a.model.nflex):
+            if int(a.model.flex_dim[flex_id]) == 1:
+                continue
+            update = updates[MeshKey(MeshShape.FLEX_FACE, flex_id)]
+            face_adr = int(ref.flexfaceadr[flex_id])
+            face_num = int(ref.flexfaceused[flex_id])
+            positions = ref.flexface[9 * face_adr : 9 * (face_adr + face_num)].reshape(-1, 3)
+            normals = ref.flexnormal[9 * face_adr : 9 * (face_adr + face_num)].reshape(-1, 3)
+            assert update.positions == pytest.approx(positions, abs=2e-6)
+            assert update.normals == pytest.approx(normals, abs=2e-6)
+
         skin = frame.mesh_updates[MeshKey(MeshShape.SKIN, 0)]
         adr, count = int(ref.skinvertadr[0]), int(ref.skinvertnum[0])
         assert skin.positions == pytest.approx(
@@ -808,10 +839,20 @@ def test_deformables_match_mujocos_abstract_visualization():
 
         builder = SceneSourceBuilder()
         scene = builder.set_source(src)
+        assert scene.count == src.instance_count - surface_count
         builder.update(frame)
-        for i, pose_source in enumerate(src.geom_pose_source):
-            if pose_source == int(InstancePoseSource.WORLD):
-                assert scene.transforms[builder.write_index[i]] == pytest.approx(np.eye(4))
+        dynamic_rows = np.flatnonzero(np.isin(scene.object_id, list(deformable_ids)))
+        assert len(dynamic_rows) == a.model.nflex + a.model.nskin
+        for row in dynamic_rows:
+            assert scene.transforms[row] == pytest.approx(np.eye(4))
+
+        assert builder.set_visual_options(
+            static=True,
+            skin=True,
+            flex_face=True,
+            flex_skin=False,
+        )
+        assert builder.scene.count == scene.count
 
         assert a.frame(FrameNeeds.none()).mesh_updates is None
         assert a.frame(FrameNeeds(deformables=True)).mesh_updates is updates

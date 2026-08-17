@@ -296,6 +296,8 @@ class SceneSource:
     geom_source: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
 
     geom_pose_source: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
+    geom_visual: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
+    geom_static: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
 
     geom_node: np.ndarray = field(default_factory=lambda: np.full(0, -1, np.int32))
 

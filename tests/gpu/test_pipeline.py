@@ -359,6 +359,44 @@ def test_deformables_are_pickable_and_use_the_normal_outline_pass(gl):
         adapter.release()
 
 
+def test_deformable_visibility_flags_rebuild_the_scene(gl):
+    from forge_viewer.render.backend import RenderFlag
+    from forge_viewer.types import InstanceVisual
+
+    adapter = make_adapter("mujoco", resolve("deformables"))
+    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=1)
+    try:
+        source = adapter.scene_source()
+        backend.set_camera(adapter.camera_hint())
+        backend.set_scene(source)
+        frame = adapter.frame(FrameNeeds(poses=True, deformables=True))
+        backend.update(frame)
+
+        visual = source.geom_visual
+        flex_face = int(InstanceVisual.FLEX_FACE)
+        flex_skin = int(InstanceVisual.FLEX_SKIN)
+        skin = int(InstanceVisual.SKIN)
+        default_count = int(np.count_nonzero(visual != flex_face))
+        assert backend._scene.count == default_count
+
+        assert backend.set_flag(RenderFlag.FLEXSKIN, False)
+        assert backend._scene.count == default_count - int(np.count_nonzero(visual == flex_skin))
+
+        assert backend.set_flag(RenderFlag.FLEXFACE, True)
+        assert backend._scene.count == default_count
+
+        assert backend.set_flag(RenderFlag.SKIN, False)
+        assert backend._scene.count == default_count - int(np.count_nonzero(visual == skin))
+
+        before_static = backend._scene.count
+        assert backend.set_flag(RenderFlag.STATIC, False)
+        assert backend._scene.count == before_static - int(np.count_nonzero(source.geom_static))
+        assert backend.render(frame) is not None
+    finally:
+        backend.release()
+        adapter.release()
+
+
 def test_world_text_is_rendered_into_the_forge_target_without_imgui(gl):
     adapter = make_adapter("mujoco", resolve("pick_scene"))
     backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=1)
