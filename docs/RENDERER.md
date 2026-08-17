@@ -1,140 +1,105 @@
-# forge 与参照渲染器的差异登记表
+# Renderer design
 
-参照渲染器是 MuJoCo 自带的 `mjr_`（OpenGL 1.5 固定管线）。它存在的**唯一理由**是它是
-forge 的参照系（01 §1.4）——它不是备选方案，也不该被优化。
+Forge is an OpenGL 4.1 renderer for simulation inspection and tooling. It uses a linear-light
+pipeline, bucketed instancing, backend-neutral scene data, and explicit diagnostic passes.
 
-## 为什么必须有这张表
+## Frame pipeline
 
-**判据不是"块差越小越好"**（12 §12.5）。参照渲染器是 2010 年前后的固定管线，相当一部分
-行为是**当年的实现约束，不是设计**。照抄等于把别人的技术债搬进新代码。
+```text
+shadow
+reflect
+opaque
+id
+skybox
+tendon
+transparent
+present
+outline
+debug
+gizmo
+```
 
-**每一处差异只能落进两类，不允许含混：**
+The ID pass shares scene visibility with opaque rendering and supplies picking, segmentation,
+and selection outlines. Debug and gizmo passes consume generic commands and UI state.
 
-| 类 | 处理 |
+## Color pipeline
+
+Texture sampling uses sRGB formats. Lighting, reflection, fog, haze, emission, and selection
+highlight combine in linear light. Tone mapping applies a soft knee at 0.8 before display
+encoding.
+
+MuJoCo's classic fixed-function renderer combines lighting in display space. The difference is
+measurable in scenes with multiple light contributions. On the parity floor, Forge/reference
+brightness measures about 0.774. Isolated diffuse, ambient, headlight, and texture calibration
+remain aligned.
+
+`make calibrate` measures individual terms. `make parity` evaluates the complete scene.
+
+## Reference-aligned behavior
+
+- Shininess maps to a Phong exponent through `shininess * 128`.
+- Default headlight terms are diffuse 0.4, specular 0.5, and ambient 0.1.
+- Headlight and active scene-light ambient terms add together.
+- MuJoCo render and visualization flags retain their public names.
+- Texture surfaces receive lighting.
+- Tendons use their model material, RGBA, width, texture, and transparency.
+
+## Forge diagnostics
+
+| Feature | Implementation |
 |---|---|
-| **我们错了** | 修。修完对拍数字应当变好 |
-| **我们更好** | 写进本表，说明理由与代价，**接受对拍数字变差** |
+| Selection highlight | Linear-light tint plus emission |
+| Selection outline | ID edge detection with x-ray visibility |
+| Picking | `R32UI` object IDs |
+| Instancing | Mesh/material/transparency buckets |
+| Shadows | Three-cascade directional atlas and local-light shadows |
+| Reflections | Mirrored camera, oblique clipping, and surface sampling |
+| Wide lines | Screen-space triangle strips |
+| Text | GPU glyph atlas shared with UI font configuration |
+| Timing | CPU and GPU measurements per named pass |
 
-没有这张表，对拍指标会反过来把改进推回去。
+## Transparency
 
-## 对拍指标现值（`make parity`，MuJoCo 3.11.0 / Apple M5）
+Opaque and transparent instances use separate buckets. Transparent objects skip the shadow map,
+blend in the transparent pass, and preserve depth testing. Tendons follow the same material and
+transparency model.
 
-| 指标 | 规格给的目标 | **本机实测** | 说明 |
-|---|---|---|---|
-| 边缘 IoU | 0.64～0.80 | **0.247** | 几何位置对不对 |
-| 分块亮度差 | 均值 10～13 | **17.7** | 明暗分布对不对 |
-| 贴图内容正确性 | 16/16 | **28/29** | 判"采到哪一格"，不是"颜色差多少" |
+## Dynamic geometry
 
-**几何是对的**：物体质心逐机位偏移 0.1～4 px、面积比 0.92～1.01；边缘诊断图上物体轮廓
-**全是白的**（两边重合）。IoU 低的地方全在地板——远景棋盘格的锯齿噪声，以及下面那一条
-结构性的亮度差。**不要拿这两个数去追规格那两个数**，先读下一节。
+`SceneSource` owns stable topology. `MeshUpdate` provides frame-local positions and normals.
+This supports flex surfaces, skinned meshes, and custom deformable backends while preserving the
+static mesh upload path.
 
-## 最大的一处"我们更好"：线性域求和 vs 显示域求和
+MuJoCo flex modes map to independent instance filters:
 
-**`mjr_` 的全部光照运算都在显示（sRGB）域做，完全不线性化**——它是固定管线，
-没有 gamma 概念。forge 按 05 §5.4 内部全线性、末端统一 gamma。
+- flex face: flat element surfaces
+- flex skin: smooth shell surfaces
+- skin: skinned meshes
+- static: world-welded geometry
 
-后果被量化了（`parity_scene` 地板，texel 均值 66/255）：
+## Debug draw
 
-| | 算式 | 结果 |
-|---|---|---|
-| 参照 | `texel × (amb + sun·N·L + head·N·L)` 全在显示域 | 65.5 |
-| forge | `lin(texel) × (lin(amb) + lin(sun)·N·L + lin(head)·N·L)`，末端 gamma | 50.7 |
-| 比值 | | **0.774** |
+Debug primitives use world anchors and screen-space widths. Supported commands include points,
+lines, arrows, frames, boxes, spheres, sectors, polylines, and text. Occlusion modes select depth,
+ghost, or always-visible presentation. Batches support local scripts, socket clients, remote
+viewers, and snapshot replay.
 
-实测近处/中景/远处地板比值 **0.774 / 0.763 / 0.774**——模型与实测逐值吻合。
+## Transform gizmos
 
-**为什么"逐项隔离"找不到它**（这条值得单记）：规格 §5.2 教的排查法是把每一项单独拎出来
-对拍。**单个乘积几乎恰好往返**——`lin` 近似 2.2 次幂，末端编码把它抵消掉了，所以
-漫反射、头灯、环境光、纯色贴图面**逐档全中**（见 `make calibrate` 的四张表）。
-但**求和不行**：`lin(0.2) + lin(0.75) = 0.556`，而 `lin(0.95) = 0.890`，**差 37.6%**。
-一项一项验永远碰不到那个和。**只有整场景对拍才看得见。**
+Native 2D and 3D gizmos share interaction state, colors, sizing, snapping, labels, and drag
+feedback. Their pixel footprint remains stable with camera distance. Axis depth ordering follows
+camera-space depth.
 
-分类：**我们更好**。线性域相加是物理上正确的做法；显示域相加是当年没有 gamma 概念的
-产物。代价就是上面那两个对拍数字——**接受它**。
+Position snapping uses a projected axis ruler. Rotation snapping uses an outer tick ring. The
+default increments are 0.5 m and 5 degrees.
 
-**不许用别的项去补这个差。** 试过的错法：把环境光系数调回 ×2，整场景亮度确实更接近参照，
-但那让环境光在**单独测量时**错一倍（见下）。规格 §5.2 的原话就是这条纪律：
-**补在差异所在的那一项上，不要用全局曝光去补**——反过来也一样，
-不要用环境光去补一个求和域的差。
+## Measurement commands
 
-贴图内容那一项用**无对称的四色格**，并且**做方向归一化的分类 + 歧义点过滤**——
-落在格子边界上的采样点亮暗都有，那种点没有唯一答案，拿它当判据只会随亮度变动随机翻边。
-（方向归一化尤其要紧：两边的明暗本来就不同，拿绝对亮度分类会把光照差异误判成"采错了格"。）
-
-## 已登记：我们更好（接受对拍数字变差）
-
-| 项 | 参照的问题 | forge | 代价 |
-|---|---|---|---|
-| **色调映射** | 不做，硬裁，高光过 1.0 就是死白 | 膝点软滚降（knee=0.8，作用在**峰值通道**上），正常范围逐值相同 | 高光段与参照有差 |
-| **选中高亮** | 纯混色，暗场景几乎读不出（实测 +5.0，某例甚至 **−4.8 变暗了**） | 混色 + 自发光，同条件 **+82.1** | 色差变大 |
-| **选中轮廓** | 没有。整体发亮，多 geom 的连杆分不出边界 | ID buffer + 边缘检测，**X 光**（被遮挡时整条仍然实心） | 多一条 pass |
-| **实例化** | 没有。几百个 geom 就是几百次绘制 | 分桶实例化（401 geom → 6 次绘制） | 无 |
-| **阴影** | 一张 shadow map，多光源靠重复 pass | 3 级 CSM + 图集，bias 在采样端按斜度 | 级联边界有一条可见接缝 |
-| **拾取** | id 打包进 RGB8，**>16M 对象溢出**（`mjRND_IDCOLOR`） | `R32UI`，不溢出，与描边/分割图共用一份数据 | 本机要多一趟 id pass，见下 |
-| **透明物体投影** | 投**实心**影 | **不投**（单通道深度图表达不了半透阴影；投实心影比不投更错） | 半透物体下方没有影子 |
-| **线宽** | 依赖 `glLineWidth`，很多驱动上就是 1 像素 | 顶点着色器展开成三角形带，屏幕像素恒定 | 无 |
-| **平面反射的求和空间** | 在**显示域**把倒影加到地板上（它没有线性工作流） | 在**线性辐射度**上加，总量再一起过色调映射 | 与上面"线性域求和"同源的那 0.774 |
-
-### 平面反射（14 §M5.2）——**这一条是"我们错了 → 修了"**
-
-登记它是因为它是规格点名的那处差：地板材质写着 `reflectance`，参照会在物体下方映出
-倒影，forge 一片空白。修完之后分块亮度差 17.9 → **17.7**，边缘 IoU 0.251 → **0.247**
-（倒影带来新的边缘，IoU 略降是意料之中的）。
-
-**混合律是量出来的，不是猜的**（`make calibrate` 第六趟）：
-
-| reflectance | 参照的反射斑 | `地板 + r × 盒子` | 参照的远处地板 |
-|---|---|---|---|
-| 0.25 | `[108 53 51]` | `[107 53 51]` | `[46 46 46]` |
-| 0.50 | `[169 61 56]` | `[169 61 56]` | `[46 46 46]` |
-| 0.75 | `[231 68 61]` | `[230 68 61]` | `[46 46 46]` |
-| 1.00 | `[255 76 66]` | 截断前 `[292 76 66]` | `[46 46 46]` |
-
-远处地板**四档完全不变** → 是**加法**，不是 `mix`。`mix` 会把没有东西可反射的地板
-往黑里拉，整块压暗一档。
-
-## 已推翻：规格里两条"实测"在 MuJoCo 3.11.0 上不成立
-
-拿参照渲染器逐档扫过（`make calibrate`）之后，规格 05/12 里有两条断言必须改：
-
-| 规格的说法 | 本机实测 | 处理 |
-|---|---|---|
-| §5.2「环境光算两遍」，`ambient 0.5 → 241 = 2×0.5×0.95×255` | **121**，即 `1×`。四档 24/48/85/121 全是 1× | `AMBIENT_GAIN` 由 2.0 改成 **1.0**。它是具名常量，老版 MuJoCo 上改回去即可 |
-| §12.5「参照对贴图面完全不着色（环境光 0.5 与 1.0 输出相同）」 | **受光**：0.25/0.5/1.0 → 38/77/153，**线性缩放** | forge 本来就着色，**这一条不用改**，`DECISIONS §三.3` 由此结案 |
-
-×2 那一条尤其要说清楚：它的**全部理由**是"复现参照，因为模型是照着它调的"。
-参照不翻倍，这个理由就不成立了。而且当时钉它的判据是**自证**的——
-`expect = 2 × ambient × rgba × 255` 与被测代码用的是同一个常量，
-把系数改成任何值它都绿（12 §12.1 例 2）。现在的判据钉的是**实测值** 24/48/85/121。
-
-顺带修掉的第三个真缺陷：**逐灯 `light_ambient` 整个没接**。参照对
-`headlight.ambient` 与逐灯 ambient 是**相加**的（各 0.4 → 97/97，同时给 → 194），
-而 forge 只认头灯那份，只靠灯 ambient 打底的场景在 forge 里是全黑的。
-
-## 已登记：照抄它（理由都是"模型是照着它调出来的"）
-
-| 项 | 内容 |
-|---|---|
-| **`shininess × 128`** | Phong 指数映射与 `mjr_` 的 `GL_SHININESS` 同式 |
-| **头灯出厂默认值** | diffuse 0.4 / specular 0.5 / ambient 0.1 |
-| **`mjtVisFlag` 的全部语义** | 两条后端切换时面板不该换一套名字 |
-
-## 平台差异（不是与参照的差异，是与规格的差异）
-
-规格写在 NVIDIA RTX 5090 / GL 4.3 上。本机是 macOS / Apple M5 / GL 4.1。
-逐条实测见 [`PLATFORM.md`](PLATFORM.md)。落到画面上的只有一条：
-
-| 项 | 规格 | 本机 | 影响 |
-|---|---|---|---|
-| ID buffer 布局 | `opaque` 的第二个颜色附件，与主目标同 4× MSAA | **整数附件进不了 MSAA FBO**，id 走独立的 1× 目标 + 一趟廉价 pass | 画面无差别；多一趟只有位置与 id 的几何，量级与 shadow pass 相当。逐 pass 计时里 `id` 单独列出，**不藏进 `opaque` 的数字里** |
-
-## `mujoco-classic` 在 macOS 上起不来
-
-`mjr_` 是 GL 1.5 固定管线，macOS 的 compat profile 封顶 2.1 且与 core profile 互斥
-（01 §1.4 说这两条路径只能进程级二选一，在 macOS 上这条更硬）。
-
-**但这不影响 `make parity`**：对拍把参照渲染器放在**子进程**里（规格 §12.5 的原话），
-子进程建自己的 legacy 上下文，`mujoco.Renderer` 离屏出图正常。曾经把"后端不能同进程共存"
-误读成"这台机器上跑不了对拍"，白白搁置了整个关卡。`forge-viewer backends` 报的是
-**那条后端**起不来，不是对拍跑不了。
+```bash
+make bench
+make parity
+make calibrate
+make showcase
+make gallery
+make gizmo-gallery
+```
