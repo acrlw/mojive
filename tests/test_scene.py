@@ -142,6 +142,25 @@ def test_transparent_buckets_draw_far_to_near():
     assert dists == sorted(dists, reverse=True)
 
 
+def test_transparent_order_accepts_a_reflected_eye():
+    b = SceneBuilder()
+    m = b.material_id(Material(name="a"))
+    for shape, x in ((MeshShape.BOX, -2.0), (MeshShape.SPHERE, 3.0)):
+        b.add(
+            MeshKey(shape),
+            m,
+            M.compose([x, 0, 0], np.eye(3), [1, 1, 1]),
+            GLASS,
+            MAT,
+            1,
+        )
+    scene = b.build(CameraView(), LightSet(), 1.0, np.zeros(3))
+    eye = np.array([10.0, 0.0, 0.0], np.float32)
+    order = scene.transparent_draw_order(eye)
+    centers = [scene.transforms[scene.bucket_ranges[bucket][0], 0, 3] for bucket in order]
+    assert centers == [-2.0, 3.0]
+
+
 def test_write_index_is_a_permutation_computed_once():
 
     b, scene = build(

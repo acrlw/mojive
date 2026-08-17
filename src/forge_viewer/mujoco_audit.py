@@ -29,7 +29,7 @@ _RND_COVERAGE = (
     Coverage("mjRND_SHADOW", "supported", "forge shadow passes"),
     Coverage("mjRND_WIREFRAME", "supported", "render flag and wireframe debug view"),
     Coverage("mjRND_REFLECTION", "supported", "planar reflections"),
-    Coverage("mjRND_ADDITIVE", "unsupported", "no additive visualization pass"),
+    Coverage("mjRND_ADDITIVE", "supported", "additive transparent geometry and tendon paths"),
     Coverage("mjRND_SKYBOX", "supported", "skybox texture pass"),
     Coverage("mjRND_FOG", "supported", "independent linear fog flag"),
     Coverage("mjRND_HAZE", "supported", "independent exponential haze flag"),

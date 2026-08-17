@@ -130,10 +130,13 @@ def state_opaque(ctx: moderngl.Context) -> None:
     ctx.wireframe = False
 
 
-def state_transparent(ctx: moderngl.Context) -> None:
+def state_transparent(ctx: moderngl.Context, *, additive: bool = False) -> None:
     ctx.enable_only(moderngl.DEPTH_TEST | moderngl.CULL_FACE | moderngl.BLEND)
     ctx.depth_func = "<"
-    ctx.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)
+    ctx.blend_func = (
+        moderngl.SRC_ALPHA,
+        moderngl.ONE if additive else moderngl.ONE_MINUS_SRC_ALPHA,
+    )
     ctx.front_face = "ccw"
     ctx.cull_face = "back"
 

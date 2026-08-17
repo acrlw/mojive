@@ -235,6 +235,33 @@ def test_blending_happens_after_gamma(rig):
     assert np.abs(both[:3] - want).max() <= 2
 
 
+def test_additive_transparency_matches_mujoco_blending(rig):
+    ambient = [0.3] * 3
+    back_rgb = np.array([0.2, 0.5, 0.3], np.float32)
+    front_rgb = np.array([0.7, 0.2, 0.1], np.float32)
+    alpha = 0.4
+    quads = [
+        (np.append(back_rgb, 1.0), (0.0, 0.0, 0.5), 2.0, 0.5),
+        (np.append(front_rgb, alpha), (0.0, 0.0, 0.5), 1.0, -0.5),
+    ]
+    back_only = Rig.center(rig.draw(quads[:1], ambient=ambient))
+    front_solid = color.to_u8(color.finish(color.ambient_linear(ambient) * front_rgb)).astype(
+        np.int32
+    )
+
+    rig.backend.set_flag(RenderFlag.ADDITIVE, False)
+    standard = Rig.center(rig.draw(quads, ambient=ambient))
+    rig.backend.set_flag(RenderFlag.ADDITIVE, True)
+    additive = Rig.center(rig.draw(quads, ambient=ambient))
+    rig.backend.set_flag(RenderFlag.ADDITIVE, False)
+    restored = Rig.center(rig.draw(quads, ambient=ambient))
+
+    assert np.array_equal(restored, standard)
+    assert np.all(additive[:3] >= standard[:3])
+    want = np.clip(back_only[:3] + front_solid * alpha, 0, 255)
+    assert np.abs(additive[:3] - want).max() <= 2
+
+
 def test_skybox_only_shows_up_when_it_is_on(gl_ctx):
 
     passes.load_all()

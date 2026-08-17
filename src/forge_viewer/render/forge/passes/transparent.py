@@ -38,7 +38,7 @@ class TransparentPass(BasePass):
         if ctx.debug_view is DebugView.OVERDRAW:
             state_overdraw(gl)
         else:
-            state_transparent(gl)
+            state_transparent(gl, additive=ctx.flag(RenderFlag.ADDITIVE, False))
         if not ctx.flag(RenderFlag.CULL_FACE):
             gl.disable(moderngl.CULL_FACE)
         gl.multisample = bool(ctx.flag(RenderFlag.MSAA))

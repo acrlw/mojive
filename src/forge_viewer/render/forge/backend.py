@@ -111,6 +111,7 @@ class ForgeBackend:
         self._frame_mode = FrameMode.NONE
         self._flags: dict[RenderFlag, bool] = dict.fromkeys(self._supported_flags(), True)
         self._flags[RenderFlag.WIREFRAME] = False
+        self._flags[RenderFlag.ADDITIVE] = False
         self._flags[RenderFlag.FOG] = False
         self._flags[RenderFlag.HAZE] = False
         self._flags[RenderFlag.CONTACTPOINT] = False
@@ -157,6 +158,7 @@ class ForgeBackend:
             RenderFlag.CULL_FACE,
             RenderFlag.TEXTURE,
             RenderFlag.TRANSPARENT,
+            RenderFlag.ADDITIVE,
             RenderFlag.MSAA,
             RenderFlag.TONEMAP,
             RenderFlag.WIREFRAME,

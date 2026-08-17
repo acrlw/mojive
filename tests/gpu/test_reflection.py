@@ -121,3 +121,37 @@ def test_reflection_shows_outer_faces_not_the_inside(pair):
     assert mask.sum() > 5000
     mean = float(on[mask].mean())
     assert mean > 65.0
+
+
+def test_transparent_geometry_appears_in_reflections(tmp_path):
+    scene = tmp_path / "transparent_reflection.xml"
+    scene.write_text(
+        """
+<mujoco>
+  <visual>
+    <headlight ambient="0.3 0.3 0.3" diffuse="0.7 0.7 0.7"/>
+  </visual>
+  <asset>
+    <material name="mirror" rgba="0.15 0.17 0.20 1" reflectance="0.7"/>
+    <material name="glass" rgba="0.95 0.15 0.10 0.45"/>
+  </asset>
+  <worldbody>
+    <geom type="plane" size="0 0 0.05" material="mirror"/>
+    <geom type="sphere" pos="0 0 0.8" size="0.35" material="glass"/>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    with OffscreenHarness(scene, W, H) as harness:
+        harness.camera = CAMERA
+        harness.backend.set_camera(CAMERA)
+        harness.backend.set_flag(RenderFlag.REFLECTION, True)
+        harness.step_and_render(0)
+        reflected = harness.backend.target.read_color(flip=True)[..., :3].astype(np.int16)
+        harness.backend.set_flag(RenderFlag.REFLECTION, False)
+        harness.step_and_render(0)
+        direct = harness.backend.target.read_color(flip=True)[..., :3].astype(np.int16)
+
+    changed = np.abs(reflected - direct).sum(axis=2) > 6
+    assert int(changed.sum()) > 500

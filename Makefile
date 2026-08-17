@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading bench showcase probe reverse viewer empty canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading additive bench showcase probe reverse viewer empty canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -36,6 +36,7 @@ help:
 		'  make lighting          editable spot/point/area lights, fog, and haze' \
 		'  make scene-icons       camera and light scene icons' \
 		'  make reflect           planar reflection' \
+		'  make additive          standard and additive transparency images' \
 		'  make cameras           free, named, and orthographic cameras' \
 		'  make capture           write PNG' \
 		'  make record            stream MP4' \
@@ -104,6 +105,9 @@ gizmo-gallery:
 
 model-loading:
 	$(PY) -m forge_viewer.tools.model_loading $(ARGS)
+
+additive:
+	$(PY) -m forge_viewer.tools.additive $(ARGS)
 
 bench:
 	$(PY) -m forge_viewer.tools.bench

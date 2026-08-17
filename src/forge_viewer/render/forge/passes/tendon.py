@@ -169,7 +169,10 @@ class TendonPass(BasePass):
         ctx.target.fbo.depth_mask = True
         self._draw(ctx, self._scene.opaque_buckets)
         if self._scene.transparent_buckets and ctx.flag(RenderFlag.TRANSPARENT):
-            state_transparent(ctx.ctx)
+            state_transparent(
+                ctx.ctx,
+                additive=ctx.flag(RenderFlag.ADDITIVE, False),
+            )
             if not ctx.flag(RenderFlag.CULL_FACE):
                 ctx.ctx.disable(moderngl.CULL_FACE)
             ctx.target.fbo.depth_mask = False

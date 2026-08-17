@@ -93,11 +93,11 @@ class RenderScene:
                 raise ValueError(f"material id {matid} exceeds table size {len(self.materials)}")
 
     # ------------------------------------------------------------------
-    def transparent_draw_order(self) -> tuple[int, ...]:
+    def transparent_draw_order(self, eye: np.ndarray | None = None) -> tuple[int, ...]:
 
         if not self.transparent_buckets:
             return ()
-        eye = np.asarray(self.camera.eye, np.float32)
+        eye = np.asarray(self.camera.eye if eye is None else eye, np.float32)
         keyed = []
         for b in self.transparent_buckets:
             start, stop = self.bucket_ranges[b]

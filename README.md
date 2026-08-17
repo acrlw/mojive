@@ -62,6 +62,7 @@ Every user-facing feature has a reproducible Make target.
 | `make lighting` | Editable point, spot, and area lights with fog and haze |
 | `make scene-icons` | Camera and light scene icons |
 | `make reflect` | Planar reflections |
+| `make additive` | Standard and additive transparency reference images |
 | `make cameras` | Free, named, and orthographic cameras |
 | `make mujoco-visuals` | Height fields, sites, tendons, and contacts |
 | `make mujoco-debug` | Joint, center-of-mass, and inertia overlays |

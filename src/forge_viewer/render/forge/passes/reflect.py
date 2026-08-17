@@ -8,7 +8,7 @@ from ....log import get_logger
 from ....types import MeshShape
 from ...backend import RenderFlag
 from ..registry import register_pass
-from .base import PassContext, state_opaque
+from .base import PassContext, state_opaque, state_transparent
 from .opaque import OpaquePass, draw_buckets
 
 log = get_logger("reflect")
@@ -136,7 +136,17 @@ class ReflectPass(OpaquePass):
         try:
             buckets = tuple(b for b in ctx.scene.opaque_buckets if b != self._skip_bucket)
             draw_buckets(ctx, buckets)
+            if ctx.scene.transparent_buckets and ctx.flag(RenderFlag.TRANSPARENT):
+                state_transparent(gl, additive=ctx.flag(RenderFlag.ADDITIVE, False))
+                gl.front_face = "cw"
+                gl.enable_direct(GL_CLIP_DISTANCE0)
+                self.fbo.depth_mask = False
+                transparent = tuple(
+                    b for b in ctx.scene.transparent_draw_order(self._eye) if b != self._skip_bucket
+                )
+                draw_buckets(ctx, transparent)
         finally:
+            self.fbo.depth_mask = True
             gl.disable_direct(GL_CLIP_DISTANCE0)
             gl.front_face = "ccw"
         ctx.reflection = self.color
