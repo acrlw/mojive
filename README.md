@@ -78,6 +78,7 @@ Every user-facing feature has a reproducible Make target.
 | `make musculoskeletal` | Full musculoskeletal model with tendons and keyframes |
 | `make robot` | Download and open a MuJoCo Menagerie robot |
 | `make canvas` | Standalone scene authoring with editable transforms, materials, and Forge entities |
+| `make scene-io` | Save, reload, and capture a `.forge.json` scene |
 | `make toy-physics` | Minimal physics backend independent of MuJoCo |
 | `make pvd` | One physics publisher and two independent viewers |
 | `make capture` | Write a PNG under `output/` |

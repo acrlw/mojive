@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 import numpy as np
 
@@ -119,6 +120,17 @@ class Scene:
     @property
     def structure_revision(self) -> int:
         return self._revision
+
+    def save(self, path: str | Path) -> Path:
+        from .scene_io import save_scene
+
+        return save_scene(self, path)
+
+    @classmethod
+    def load(cls, path: str | Path) -> Scene:
+        from .scene_io import load_scene
+
+        return load_scene(path)
 
     @property
     def source(self) -> SceneSource:
