@@ -3,14 +3,16 @@
 
 #include "common.glsl"
 
-#define FORGE_MAX_LIGHTS 16
+#define FORGE_MAX_LIGHTS 100
 
 uniform int  u_light_count;
-uniform vec4 u_light_pos[FORGE_MAX_LIGHTS];       // xyz position, w type
-uniform vec4 u_light_dir[FORGE_MAX_LIGHTS];       // xyz ray direction, w cutoff cosine
-uniform vec4 u_light_diffuse[FORGE_MAX_LIGHTS];   // rgb linear, w spot exponent
-uniform vec4 u_light_specular[FORGE_MAX_LIGHTS];
-uniform vec4 u_light_atten[FORGE_MAX_LIGHTS];     // constant, linear, quadratic, range
+layout(std140) uniform ForgeLights {
+    vec4 u_light_pos[FORGE_MAX_LIGHTS];       // xyz position, w type
+    vec4 u_light_dir[FORGE_MAX_LIGHTS];       // xyz ray direction, w cutoff cosine
+    vec4 u_light_diffuse[FORGE_MAX_LIGHTS];   // rgb linear, w spot exponent
+    vec4 u_light_specular[FORGE_MAX_LIGHTS];
+    vec4 u_light_atten[FORGE_MAX_LIGHTS];     // constant, linear, quadratic, range
+};
 
 uniform vec3 u_ambient;
 uniform vec4 u_headlight_diffuse;       // rgb diffuse, w enabled

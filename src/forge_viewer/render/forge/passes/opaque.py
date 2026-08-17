@@ -10,11 +10,11 @@ from .. import color
 from ..programs import ProgramSpec, UniformCache
 from ..registry import register_pass
 from ..targets import IdLayout
-from .base import BasePass, PassContext, state_opaque, state_overdraw
+from .base import MAX_SCENE_LIGHTS, BasePass, PassContext, state_opaque, state_overdraw
 
 log = get_logger("opaque")
 
-MAX_LIGHTS = 16
+LIGHT_BLOCK_BINDING = 0
 
 
 DEBUG_DEFINE = {
@@ -76,14 +76,11 @@ class OpaquePass(BasePass):
         self._vao_program: moderngl.Program | None = None
         self._shadow_include: bool | None = None
         self._shadow_checked = -1
+        self._light_buffer: moderngl.Buffer | None = None
 
         self._m = np.zeros((4, 4), np.float32)
         self._m2 = np.zeros((4, 4), np.float32)
-        self._lpos = np.zeros((MAX_LIGHTS, 4), np.float32)
-        self._ldir = np.zeros((MAX_LIGHTS, 4), np.float32)
-        self._ldiff = np.zeros((MAX_LIGHTS, 4), np.float32)
-        self._lspec = np.zeros((MAX_LIGHTS, 4), np.float32)
-        self._latten = np.zeros((MAX_LIGHTS, 4), np.float32)
+        self._light_block = np.zeros((5, MAX_SCENE_LIGHTS, 4), np.float32)
 
     # ------------------------------------------------------------------ program
     def scene_program(self, backend) -> moderngl.Program | None:
@@ -157,9 +154,19 @@ class OpaquePass(BasePass):
             self._uniforms.rebind(prog, ctx.programs.generation)
 
         self._ensure_vaos(ctx, prog)
+        self._bind_light_block(ctx, prog)
         self._frame_uniforms(ctx, prog, wireframe, use_shadow)
 
         return True
+
+    def _bind_light_block(self, ctx: PassContext, prog: moderngl.Program) -> None:
+        block = prog.get("ForgeLights", None)
+        if block is None:
+            return
+        if self._light_buffer is None:
+            self._light_buffer = ctx.ctx.buffer(reserve=self._light_block.nbytes)
+        block.binding = LIGHT_BLOCK_BINDING
+        self._light_buffer.bind_to_uniform_block(LIGHT_BLOCK_BINDING)
 
     def _ensure_vaos(self, ctx: PassContext, prog: moderngl.Program) -> None:
 
@@ -243,16 +250,10 @@ class OpaquePass(BasePass):
         self, ctx: PassContext, prog: moderngl.Program, u: UniformCache, lights: LightSet
     ) -> None:
 
-        pos, dirs, diff, spec, atten = (
-            self._lpos,
-            self._ldir,
-            self._ldiff,
-            self._lspec,
-            self._latten,
-        )
+        pos, dirs, diff, spec, atten = self._light_block
         n = 0
         for light in lights.lights:
-            if n >= MAX_LIGHTS:
+            if n >= MAX_SCENE_LIGHTS:
                 break
             if not light.active:
                 continue
@@ -271,12 +272,8 @@ class OpaquePass(BasePass):
             n += 1
 
         u.set("u_light_count", n)
-        if n:
-            self._write_array(prog, "u_light_pos", pos)
-            self._write_array(prog, "u_light_dir", dirs)
-            self._write_array(prog, "u_light_diffuse", diff)
-            self._write_array(prog, "u_light_specular", spec)
-            self._write_array(prog, "u_light_atten", atten)
+        if n and self._light_buffer is not None:
+            self._light_buffer.write(self._light_block)
 
         u.set("u_ambient", tuple(float(v) for v in lights.ambient))
 
@@ -319,14 +316,6 @@ class OpaquePass(BasePass):
         u.set("u_haze_color", tuple(float(v) for v in lights.haze_color))
 
     @staticmethod
-    def _write_array(prog: moderngl.Program, name: str, data: np.ndarray) -> None:
-
-        if name not in prog:
-            return
-        slots = max(int(prog[name].array_length), 1)
-        prog[name].write(data[:slots])
-
-    @staticmethod
     def _shadow_uniforms(ctx: PassContext, u: UniformCache) -> None:
 
         from .shadow import bind_shadow_uniforms
@@ -360,6 +349,9 @@ class OpaquePass(BasePass):
 
     def release(self) -> None:
 
+        if self._light_buffer is not None:
+            self._light_buffer.release()
+        self._light_buffer = None
         self.program = None
         self._spec_used = None
         self._uniforms = None

@@ -114,7 +114,11 @@ _VIS_COVERAGE = (
         "supported",
         "mesh, octree and flex BVH boxes plus interpolated-flex control cages",
     ),
-    Coverage("mjVIS_SDFITER", "unsupported", "SDF iteration overlays are not drawn"),
+    Coverage(
+        "mjVIS_SDFITER",
+        "degraded",
+        "MuJoCo exposes no iteration trace through mjvScene",
+    ),
 )
 
 

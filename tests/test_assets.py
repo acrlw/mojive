@@ -206,7 +206,7 @@ def test_many_lights_has_many_lights() -> None:
 
     mujoco = pytest.importorskip("mujoco")
     model = mujoco.MjModel.from_xml_path(str(resolve("many_lights.xml")))
-    assert model.nlight >= 6
+    assert model.nlight == 24
     kinds = {int(t) for t in model.light_type}
     assert len(kinds) >= 3
 

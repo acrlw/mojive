@@ -13,6 +13,7 @@ from forge_viewer.render.backend import DebugView, RenderFlag  # noqa: E402
 from forge_viewer.render.forge import color, passes  # noqa: E402
 from forge_viewer.render.forge.backend import ForgeBackend  # noqa: E402
 from forge_viewer.render.forge.passes import opaque as opaque_pass  # noqa: E402
+from forge_viewer.render.forge.passes.base import MAX_SCENE_LIGHTS  # noqa: E402
 from forge_viewer.render.scene import SceneBuilder  # noqa: E402
 from forge_viewer.types import (  # noqa: E402
     CameraView,
@@ -180,6 +181,30 @@ def test_light_color_is_decoded_from_the_display_domain(rig):
     )
     ratio = half[0] / max(full[0], 1)
     assert ratio == pytest.approx(0.5, abs=0.03)
+
+
+@pytest.mark.parametrize("count", (17, MAX_SCENE_LIGHTS))
+def test_all_mujoco_scene_light_slots_reach_the_shader(rig, count):
+    dark = [_dir_light(0.0) for _ in range(count - 1)]
+    marker = Light(
+        kind=LightKind.DIRECTIONAL,
+        direction=np.array([0.0, 1.0, 0.0], np.float32),
+        diffuse=np.array([0.55, 0.0, 0.0], np.float32),
+        specular=np.zeros(3, np.float32),
+        ambient=np.zeros(3, np.float32),
+        cast_shadow=False,
+    )
+    albedo = color.srgb_to_linear(np.ones(3))
+    center = Rig.center(
+        rig.draw(
+            [(np.append(albedo, 1.0), (0.0, 0.0, 0.5), 2.0, 0.0)],
+            lights=[*dark, marker],
+        )
+    )
+
+    assert center[0] > 80
+    assert center[1] < 3
+    assert center[2] < 3
 
 
 def test_transparent_leaves_depth_mask_on(rig):

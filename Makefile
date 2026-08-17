@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading additive bench showcase probe reverse viewer empty canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading additive bench showcase probe reverse viewer empty canvas lighting many-lights scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -35,6 +35,7 @@ help:
 		'' \
 		'Rendering and output:' \
 		'  make lighting          editable spot/point/area lights, fog, and haze' \
+		'  make many-lights       16-light and 24-light reference images' \
 		'  make scene-icons       camera and light scene icons' \
 		'  make reflect           planar reflection' \
 		'  make additive          standard and additive transparency images' \
@@ -152,6 +153,9 @@ adapter-conformance:
 ## Editable spot, point, and area lights with fog and haze.
 lighting:
 	$(PY) -m forge_viewer.cli canvas --demo lighting $(ARGS)
+
+many-lights:
+	$(PY) -m forge_viewer.tools.mujoco_many_lights $(ARGS)
 
 scene-icons:
 	$(PY) -m forge_viewer.cli canvas --demo lighting \

@@ -18,7 +18,14 @@ from ..cascades import (
 )
 from ..programs import ProgramSpec
 from ..registry import register_pass
-from .base import LOCAL_SHADOW_SLOTS, BasePass, PassContext, ShadowResult, state_opaque
+from .base import (
+    LOCAL_SHADOW_SLOTS,
+    MAX_SCENE_LIGHTS,
+    BasePass,
+    PassContext,
+    ShadowResult,
+    state_opaque,
+)
 from .idbuffer import IdGeometry
 
 log = get_logger("shadow")
@@ -443,7 +450,7 @@ def _write_uniform_array(prog: moderngl.Program, name: str, data: np.ndarray) ->
 
 
 _GL_LOCAL_MATRICES = np.zeros((LOCAL_SHADOW_SLOTS, 4, 4), np.float32)
-_LOCAL_SLOT_BY_LIGHT = np.full(16, -1, np.int32)
+_LOCAL_SLOT_BY_LIGHT = np.full(MAX_SCENE_LIGHTS, -1, np.int32)
 
 
 register_pass("shadow", ShadowPass)

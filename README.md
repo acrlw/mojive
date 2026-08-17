@@ -60,6 +60,7 @@ Every user-facing feature has a reproducible Make target.
 | `make perturb` | MuJoCo translation and rotation perturbation |
 | `make text-overlay` | GPU world-space text |
 | `make lighting` | Editable point, spot, and area lights with fog and haze |
+| `make many-lights` | 16-light and 24-light MuJoCo reference images |
 | `make scene-icons` | Camera and light scene icons |
 | `make reflect` | Planar reflections |
 | `make additive` | Standard and additive transparency reference images |

@@ -10,6 +10,7 @@ from ...backend import DebugView, RenderFlag
 from ...scene import RenderScene
 
 LOCAL_SHADOW_SLOTS = 8
+MAX_SCENE_LIGHTS = 100
 
 if TYPE_CHECKING:
     from ....gizmo import GizmoFrame
