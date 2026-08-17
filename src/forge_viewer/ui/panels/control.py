@@ -78,6 +78,17 @@ class ControlPanel(Panel):
                 f"{key.name} · {selected + 1}/{len(s.keyframes)} · t={key.time:g} s"
             )
 
+        if s.equality_constraints and imgui.collapsing_header("equality constraints"):
+            for constraint in s.equality_constraints:
+                changed, enabled = imgui.checkbox(
+                    f"{constraint.name}##equality-{constraint.constraint_id}",
+                    constraint.enabled,
+                )
+                if changed:
+                    ctx.submit(cmd.SetEqualityEnabled(constraint.constraint_id, enabled))
+                imgui.same_line()
+                imgui.text_disabled(constraint.kind)
+
         frame = s.frame
         if begin_kv_table("control_kv"):
             labeled("sim time", f"{frame.time:.3f} s")

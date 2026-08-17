@@ -97,6 +97,14 @@ class SensorInfo:
 
 
 @dataclass(frozen=True)
+class EqualityConstraintInfo:
+    constraint_id: int
+    name: str
+    kind: str
+    enabled: bool
+
+
+@dataclass(frozen=True)
 class VisualGroupInfo:
     """One independently switchable family of numbered visibility groups."""
 
@@ -120,6 +128,7 @@ class AdapterCaps:
     model_cameras: bool = False
     keyframes: bool = False
     sensors: bool = False
+    equality_constraints: bool = False
     visual_groups: bool = False
     reload: bool = False
     notes: tuple[str, ...] = ()
@@ -250,6 +259,7 @@ class SceneFrame:
     tendon_ids: np.ndarray | None = None
     tendon_widths: np.ndarray | None = None
     sensors: np.ndarray | None = None
+    equality_enabled: np.ndarray | None = None
     mesh_updates: dict[MeshKey, MeshUpdate] | None = None
     diagnostics: DiagnosticFrame | None = None
 
@@ -368,6 +378,9 @@ class SceneAdapterBase:
     def sensors(self) -> list[SensorInfo]:
         return []
 
+    def equality_constraints(self) -> list[EqualityConstraintInfo]:
+        return []
+
     def load_keyframe(self, keyframe_id: int) -> bool:
         return False
 
@@ -381,6 +394,9 @@ class SceneAdapterBase:
         return False
 
     def set_qpos(self, index: int, value: float) -> bool:
+        return False
+
+    def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool:
         return False
 
     def set_ctrl(self, index: int, value: float) -> bool:
@@ -447,11 +463,13 @@ class SceneAdapter(Protocol):
     def cameras(self) -> list[CameraInfo]: ...
     def keyframes(self) -> list[KeyframeInfo]: ...
     def sensors(self) -> list[SensorInfo]: ...
+    def equality_constraints(self) -> list[EqualityConstraintInfo]: ...
     def load_keyframe(self, keyframe_id: int) -> bool: ...
     def camera_view(self, camera_id: int) -> CameraView | None: ...
     def visual_groups(self) -> tuple[VisualGroupInfo, ...]: ...
     def set_visual_group(self, category: str, group: int, visible: bool) -> bool: ...
     def set_qpos(self, index: int, value: float) -> bool: ...
+    def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool: ...
     def set_ctrl(self, index: int, value: float) -> bool: ...
     def set_pose(self, node_id: int, position, rotation) -> bool: ...
     def set_light(self, light_id: int, light) -> bool: ...

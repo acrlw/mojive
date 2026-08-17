@@ -30,6 +30,7 @@ from .base import (
     CameraInfo,
     DiagnosticFrame,
     DiagnosticSource,
+    EqualityConstraintInfo,
     FrameNeeds,
     JointInfo,
     JointVisualKind,
@@ -109,6 +110,7 @@ class MuJoCoAdapter:
             model_cameras=True,
             keyframes=True,
             sensors=True,
+            equality_constraints=True,
             visual_groups=True,
             reload=True,
         )
@@ -128,6 +130,7 @@ class MuJoCoAdapter:
         self._qpos_buf = np.zeros(0, np.float32)
         self._qvel_buf = np.zeros(0, np.float32)
         self._ctrl_buf = np.zeros(0, np.float32)
+        self._equality_enabled_buf = np.zeros(0, bool)
         self._sensor_buf = np.zeros(0, np.float32)
         self._contact_buf = np.zeros((0, 7), np.float32)
         self._contact_force = np.zeros(6, np.float64)
@@ -223,6 +226,7 @@ class MuJoCoAdapter:
         self._qpos_buf = np.zeros(model.nq, np.float32)
         self._qvel_buf = np.zeros(model.nv, np.float32)
         self._ctrl_buf = np.zeros(model.nu, np.float32)
+        self._equality_enabled_buf = np.zeros(model.neq, bool)
         self._activation_buf = np.zeros(model.nactuator, np.float32)
         self._actuator_ctrl_address = np.asarray(model.actuator_ctrladr, np.int32).copy()
         self._ctrl_actuator = np.full(model.nu, -1, np.int32)
@@ -395,6 +399,9 @@ class MuJoCoAdapter:
             f.sensors = self._sensor_buf
         else:
             f.sensors = None
+
+        np.copyto(self._equality_enabled_buf, d.eq_active, casting="unsafe")
+        f.equality_enabled = self._equality_enabled_buf
 
         f.contacts = self._fill_contacts() if needs.contacts else None
         if needs.tendons:
@@ -1339,7 +1346,7 @@ class MuJoCoAdapter:
                 body_node[parent],
                 b,
                 object_id=b,
-                posable=self._is_free_body(b),
+                posable=self._is_posable_body(b),
             )
 
         for b in range(m.nbody):
@@ -1409,6 +1416,9 @@ class MuJoCoAdapter:
         m = self._m
         adr, num = int(m.body_jntadr[body]), int(m.body_jntnum[body])
         return num == 1 and int(m.jnt_type[adr]) == mujoco.mjtJoint.mjJNT_FREE
+
+    def _is_posable_body(self, body: int) -> bool:
+        return int(self._m.body_mocapid[body]) >= 0 or self._is_free_body(body)
 
     def joints(self) -> list[JointInfo]:
         m = self._m
@@ -1499,6 +1509,18 @@ class MuJoCoAdapter:
             for i in range(m.nsensor)
         ]
 
+    def equality_constraints(self) -> list[EqualityConstraintInfo]:
+        m = self._m
+        return [
+            EqualityConstraintInfo(
+                constraint_id=i,
+                name=mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_EQUALITY, i) or f"equality{i}",
+                kind=str(mujoco.mjtEq(int(m.eq_type[i]))).split(".")[-1],
+                enabled=bool(self._d.eq_active[i]),
+            )
+            for i in range(m.neq)
+        ]
+
     def load_keyframe(self, keyframe_id: int) -> bool:
         i = int(keyframe_id)
         if not 0 <= i < self._m.nkey:
@@ -1573,6 +1595,14 @@ class MuJoCoAdapter:
         mujoco.mj_forward(self._m, self._d)
         return True
 
+    def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool:
+        i = int(constraint_id)
+        if not 0 <= i < self._m.neq:
+            return False
+        self._d.eq_active[i] = bool(enabled)
+        mujoco.mj_forward(self._m, self._d)
+        return True
+
     def set_ctrl(self, index: int, value: float) -> bool:
         m, i = self._m, int(index)
         if not 0 <= i < m.nu:
@@ -1623,8 +1653,14 @@ class MuJoCoAdapter:
 
     def set_pose(self, node_id: int, position, rotation) -> bool:
         body = self._node_body.get(int(node_id), -1)
-        if body < 0 or not self._is_free_body(body):
+        if body < 0 or not self._is_posable_body(body):
             return False
+        mocap = int(self._m.body_mocapid[body])
+        if mocap >= 0:
+            self._d.mocap_pos[mocap] = np.asarray(position, np.float64).reshape(3)
+            self._d.mocap_quat[mocap] = math3d.mat3_to_quat(rotation)
+            mujoco.mj_forward(self._m, self._d)
+            return True
         adr = int(self._m.jnt_qposadr[int(self._m.body_jntadr[body])])
         self._d.qpos[adr : adr + 3] = np.asarray(position, np.float64).reshape(3)
         self._d.qpos[adr + 3 : adr + 7] = math3d.mat3_to_quat(rotation)

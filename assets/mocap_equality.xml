@@ -1,0 +1,21 @@
+<mujoco model="mocap and equality editing">
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+  <statistic center="0 0 1" extent="1.5"/>
+  <visual>
+    <global azimuth="135" elevation="-22" fovy="42"/>
+  </visual>
+  <worldbody>
+    <light directional="true" pos="0 -3 5" dir="0 .4 -1"/>
+    <geom name="floor" type="plane" size="1.5 1.5 .05" rgba=".22 .28 .34 1"/>
+    <body name="mocap_target" mocap="true" pos="0 0 1.2">
+      <geom type="box" size=".18 .18 .18" rgba=".2 .75 .95 .45" contype="0" conaffinity="0"/>
+    </body>
+    <body name="payload" pos="0 0 1.2">
+      <freejoint/>
+      <geom type="sphere" size=".22" mass="2" rgba=".95 .55 .2 1"/>
+    </body>
+  </worldbody>
+  <equality>
+    <weld name="mocap_weld" body1="mocap_target" body2="payload"/>
+  </equality>
+</mujoco>

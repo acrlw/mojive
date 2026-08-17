@@ -447,6 +447,47 @@ def test_set_pose_only_on_free_bodies(adapter):
     assert not adapter.set_pose(nodes["arm"].node_id, np.zeros(3), np.eye(3))
 
 
+def test_mocap_bodies_use_the_shared_pose_editing_contract():
+    from forge_viewer.assets import resolve
+
+    adapter = MuJoCoAdapter(resolve("mocap_equality"))
+    try:
+        target = next(node for node in adapter.nodes() if node.name == "mocap_target")
+        assert target.posable
+
+        position = np.array([0.4, -0.25, 1.6])
+        rotation = np.array(((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)))
+        assert adapter.set_pose(target.node_id, position, rotation)
+        assert adapter.data.mocap_pos[0] == pytest.approx(position)
+        assert adapter.data.xpos[target.body_index] == pytest.approx(position)
+        assert adapter.data.xmat[target.body_index].reshape(3, 3) == pytest.approx(rotation)
+    finally:
+        adapter.release()
+
+
+def test_equality_constraints_are_listed_and_switchable():
+    from forge_viewer import commands as cmd
+    from forge_viewer.assets import resolve
+    from forge_viewer.session import Session
+
+    adapter = MuJoCoAdapter(resolve("mocap_equality"))
+    session = Session(adapter)
+    try:
+        constraints = session.equality_constraints
+        assert [(item.name, item.kind, item.enabled) for item in constraints] == [
+            ("mocap_weld", "mjEQ_WELD", True)
+        ]
+        assert session.submit(cmd.SetEqualityEnabled(0, False))
+        assert not adapter.data.eq_active[0]
+        assert not session.equality_constraints[0].enabled
+        assert session.submit(cmd.Reset())
+        assert adapter.data.eq_active[0]
+        assert session.equality_constraints[0].enabled
+        assert not session.submit(cmd.SetEqualityEnabled(2, True))
+    finally:
+        session.release()
+
+
 def test_perturb_uses_mujoco_viewer_mass_scaled_spring(adapter):
 
     nodes = {n.name: n for n in adapter.nodes()}
@@ -497,6 +538,7 @@ def test_caps_report_what_is_not_there(adapter):
         and caps.reload
         and caps.keyframes
         and caps.sensors
+        and caps.equality_constraints
     )
     assert adapter.set_paused(True)
 

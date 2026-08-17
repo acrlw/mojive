@@ -19,6 +19,7 @@ from .adapters.base import (
     ActuatorInfo,
     AdapterCaps,
     CameraInfo,
+    EqualityConstraintInfo,
     FrameNeeds,
     JointInfo,
     KeyframeInfo,
@@ -47,6 +48,7 @@ class RemoteStructure:
     cameras: list[CameraInfo]
     keyframes: list[KeyframeInfo]
     sensors: list[SensorInfo]
+    equality_constraints: list[EqualityConstraintInfo]
     camera_hint: CameraView | None
     timestep: float
     visual_groups: tuple[VisualGroupInfo, ...] = ()
@@ -70,6 +72,7 @@ def snapshot_structure(session) -> RemoteStructure:
         session.cameras,
         session.keyframes,
         session.sensor_infos,
+        session.equality_constraints,
         session.camera_hint(),
         session.adapter.timestep(),
         session.visual_groups(),
@@ -360,6 +363,9 @@ class RemoteSceneAdapter(SceneAdapterBase):
     def sensors(self) -> list[SensorInfo]:
         return self._structure.sensors
 
+    def equality_constraints(self) -> list[EqualityConstraintInfo]:
+        return self._structure.equality_constraints
+
     def load_keyframe(self, keyframe_id: int) -> bool:
         return self._ok(self._send("keyframe", keyframe_id=int(keyframe_id)))
 
@@ -408,6 +414,15 @@ class RemoteSceneAdapter(SceneAdapterBase):
 
     def set_qpos(self, index: int, value: float) -> bool:
         return self._ok(self._send("qpos", index=int(index), value=float(value)))
+
+    def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool:
+        return self._ok(
+            self._send(
+                "equality",
+                constraint_id=int(constraint_id),
+                enabled=bool(enabled),
+            )
+        )
 
     def set_ctrl(self, index: int, value: float) -> bool:
         return self._ok(self._send("ctrl", index=int(index), value=float(value)))
@@ -468,6 +483,7 @@ def handle_session_command(session, message: dict):
             message["category"], message["group"], message["visible"]
         ),
         "qpos": lambda: cmd.SetQpos(message["index"], message["value"]),
+        "equality": lambda: cmd.SetEqualityEnabled(message["constraint_id"], message["enabled"]),
         "ctrl": lambda: cmd.SetCtrl(message["index"], message["value"]),
         "pose": lambda: cmd.SetPose(message["node_id"], message["position"], message["rotation"]),
         "scene_camera": lambda: cmd.SetSceneCamera(message["camera_id"], message["camera"]),

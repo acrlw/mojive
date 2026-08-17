@@ -182,6 +182,15 @@ def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
     keyframes_ok = not adapter.caps.keyframes or len(key_ids) == len(set(key_ids))
     add("keyframe metadata", keyframes_ok, f"{len(keyframes)} keyframes")
 
+    equalities = adapter.equality_constraints()
+    equality_ids = [constraint.constraint_id for constraint in equalities]
+    equalities_ok = not adapter.caps.equality_constraints or (
+        frame.equality_enabled is not None
+        and len(frame.equality_enabled) == len(equalities)
+        and len(equality_ids) == len(set(equality_ids))
+    )
+    add("equality constraints", equalities_ok, f"{len(equalities)} constraints")
+
     actuators = adapter.actuators()
     controls_ok = not actuators or (
         frame.ctrl is not None

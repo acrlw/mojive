@@ -9,6 +9,7 @@ from . import commands as cmd
 from .adapters.base import (
     ActuatorInfo,
     CameraInfo,
+    EqualityConstraintInfo,
     FrameNeeds,
     JointInfo,
     KeyframeInfo,
@@ -59,6 +60,7 @@ class Session:
         self._cameras: list[CameraInfo] = []
         self._keyframes: list[KeyframeInfo] = []
         self._sensor_infos: list[SensorInfo] = []
+        self._equality_constraints: list[EqualityConstraintInfo] = []
         self._active_keyframe = -1
         self._perturb = PerturbState()
         self._camera = CameraView()
@@ -125,6 +127,10 @@ class Session:
         return self._sensor_infos
 
     @property
+    def equality_constraints(self) -> list[EqualityConstraintInfo]:
+        return self._equality_constraints
+
+    @property
     def perturb(self) -> PerturbState:
         return self._perturb
 
@@ -177,6 +183,7 @@ class Session:
             self._refresh_structure()
 
         self._frame = self._adapter.frame(needs)
+        self._sync_equality_state()
         self._compose_lights()
         self._compose_cameras()
         if self._adapter.caps.external_clock:
@@ -232,6 +239,9 @@ class Session:
             self._sim_time_credit = 0.0
             self._perturb = PerturbState()
             self._active_keyframe = -1
+            self._equality_constraints = (
+                self._adapter.equality_constraints() if caps.equality_constraints else []
+            )
 
             return CommandResult.good("Scene reset")
 
@@ -325,6 +335,19 @@ class Session:
                 if ok
                 else CommandResult.bad(f"Joint {c.index} update failed")
             )
+
+        if isinstance(c, cmd.SetEqualityEnabled):
+            if not caps.equality_constraints:
+                return CommandResult.bad(f"{caps.name} does not expose equality constraints")
+            i = int(c.constraint_id)
+            if not 0 <= i < len(self._equality_constraints):
+                return CommandResult.bad(f"equality constraint {i} is unavailable")
+            if not self._adapter.set_equality_enabled(i, c.enabled):
+                return CommandResult.bad(f"equality constraint {i} update failed")
+            self._equality_constraints[i] = replace(
+                self._equality_constraints[i], enabled=bool(c.enabled)
+            )
+            return CommandResult.good("")
 
         if isinstance(c, cmd.SetCtrl):
             ok = self._adapter.set_ctrl(c.index, c.value)
@@ -471,12 +494,16 @@ class Session:
             self._source.cameras = tuple(cameras)
         self._keyframes = self._adapter.keyframes() if self._adapter.caps.keyframes else []
         self._sensor_infos = self._adapter.sensors() if self._adapter.caps.sensors else []
+        self._equality_constraints = (
+            self._adapter.equality_constraints() if self._adapter.caps.equality_constraints else []
+        )
         if self._active_keyframe >= len(self._keyframes):
             self._active_keyframe = -1
         self._by_object_id = {n.object_id: n for n in self._nodes if n.object_id}
         self._adapter_revision = self._adapter.structure_revision
         self._structure_generation += 1
         self._frame = self._adapter.frame(FrameNeeds())
+        self._sync_equality_state()
         self._compose_lights()
         self._compose_cameras()
 
@@ -499,6 +526,16 @@ class Session:
             for light, dynamic in zip(authored.lights, driven.lights, strict=True)
         )
         self._frame.lights = replace(authored, lights=lights)
+
+    def _sync_equality_state(self) -> None:
+        values = self._frame.equality_enabled
+        if values is None or len(values) != len(self._equality_constraints):
+            return
+        for i, enabled in enumerate(values):
+            if self._equality_constraints[i].enabled != bool(enabled):
+                self._equality_constraints[i] = replace(
+                    self._equality_constraints[i], enabled=bool(enabled)
+                )
 
     def _compose_cameras(self) -> None:
         if self._source is None:

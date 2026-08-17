@@ -141,6 +141,17 @@ def test_scene_camera_command_keeps_its_typed_remote_boundary():
     assert command == cmd.SetSceneCamera(7, camera)
 
 
+def test_equality_command_keeps_its_typed_remote_boundary():
+    class Sink:
+        def submit(self, command):
+            return command
+
+    command = handle_session_command(
+        Sink(), {"op": "equality", "constraint_id": 3, "enabled": False}
+    )
+    assert command == cmd.SetEqualityEnabled(3, False)
+
+
 def test_remote_camera_metadata_and_edits_use_the_shared_scene_contract():
     scene = Scene(camera=CameraView())
     source_session = Session(StaticSceneAdapter(scene))

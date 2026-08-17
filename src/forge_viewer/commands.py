@@ -97,6 +97,12 @@ class SetQpos(Command):
 
 
 @dataclass(frozen=True)
+class SetEqualityEnabled(Command):
+    constraint_id: int
+    enabled: bool
+
+
+@dataclass(frozen=True)
 class SetCtrl(Command):
     index: int
     value: float

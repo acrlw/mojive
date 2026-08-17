@@ -21,6 +21,7 @@ EXPECTED_ASSETS = (
     "many_lights.xml",
     "many_objects.xml",
     "material_matrix.xml",
+    "mocap_equality.xml",
     "mujoco_visuals.xml",
     "outline.xml",
     "parity_scene.xml",

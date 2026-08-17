@@ -411,6 +411,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
                         write_qpos=False,
                         perturb=False,
                         raycast=False,
+                        equality_constraints=False,
                         model_cameras=bool(packet.cameras),
                         visual_groups=False,
                         reload=False,

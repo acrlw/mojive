@@ -193,6 +193,24 @@ def audit_model(model) -> dict:
                 "listed and loadable from the Control panel while paused",
             )
         )
+    if model.nmocap:
+        findings.append(
+            Finding(
+                "mocap body",
+                "supported",
+                model.nmocap,
+                "editable through the shared transform inspector and gizmo",
+            )
+        )
+    if model.neq:
+        findings.append(
+            Finding(
+                "equality constraint",
+                "supported",
+                model.neq,
+                "runtime enable state is editable in the Control panel",
+            )
+        )
     if model.nsensor:
         findings.append(
             Finding(
@@ -308,6 +326,8 @@ def audit_model(model) -> dict:
             "tendon": int(model.ntendon),
             "camera": int(model.ncam),
             "keyframe": int(model.nkey),
+            "mocap": int(model.nmocap),
+            "equality": int(model.neq),
             "sensor": int(model.nsensor),
             "actuator": int(model.nactuator),
             "light": int(model.nlight),
