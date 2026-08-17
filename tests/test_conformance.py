@@ -68,3 +68,16 @@ def test_conformance_requires_every_light_to_be_an_entity():
 
     failed = {check.name for check in report.checks if not check.ok}
     assert "light entities" in failed
+
+
+def test_conformance_requires_every_camera_to_be_an_entity():
+    from forge_viewer.types import CameraView
+
+    scene = Scene(camera=CameraView())
+    source = scene.source
+    source.nodes = [node for node in source.nodes if node.camera_index < 0]
+
+    report = check_adapter(StaticSceneAdapter(scene))
+
+    failed = {check.name for check in report.checks if not check.ok}
+    assert "camera entities" in failed

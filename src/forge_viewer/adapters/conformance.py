@@ -87,6 +87,15 @@ def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
         "light entities", lights_ok, f"{len(source.lights.lights)} lights, {len(light_nodes)} nodes"
     )
 
+    cameras = adapter.cameras() if adapter.caps.model_cameras else []
+    camera_nodes = {node.camera_index for node in source.nodes if node.camera_index >= 0}
+    cameras_ok = camera_nodes == set(range(len(source.cameras)))
+    cameras_ok &= len(cameras) == len(source.cameras)
+    cameras_ok &= len({camera.camera_id for camera in cameras}) == len(cameras)
+    if frame.cameras is not None:
+        cameras_ok &= len(frame.cameras) == len(source.cameras)
+    add("camera entities", cameras_ok, f"{len(source.cameras)} cameras, {len(camera_nodes)} nodes")
+
     mesh_ok = True
     mesh_detail = []
     for key in source.geom_mesh:

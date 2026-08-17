@@ -262,7 +262,7 @@ class RemoteSceneAdapter(SceneAdapterBase):
             caps,
             name=f"remote:{caps.name}",
             external_clock=True,
-            model_cameras=False,
+            model_cameras=bool(self._structure.cameras),
             notes=(*caps.notes, f"attached to {host}:{port}"),
         )
 
@@ -333,7 +333,26 @@ class RemoteSceneAdapter(SceneAdapterBase):
         return self._structure.actuators
 
     def cameras(self) -> list[CameraInfo]:
-        return []
+        return self._structure.cameras
+
+    def camera_view(self, camera_id: int) -> CameraView | None:
+        slot = next(
+            (
+                slot
+                for slot, camera in enumerate(self._structure.cameras)
+                if camera.camera_id == int(camera_id)
+            ),
+            -1,
+        )
+        if slot < 0:
+            return None
+        with self._lock:
+            frame = self._latest.frame if self._latest is not None else None
+            cameras = frame.cameras if frame is not None else None
+            if cameras is not None and slot < len(cameras):
+                return cameras[slot]
+            source_cameras = self._structure.source.cameras
+            return source_cameras[slot] if slot < len(source_cameras) else None
 
     def keyframes(self) -> list[KeyframeInfo]:
         return self._structure.keyframes
@@ -403,6 +422,9 @@ class RemoteSceneAdapter(SceneAdapterBase):
             )
         )
 
+    def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
+        return self._ok(self._send("scene_camera", camera_id=int(camera_id), camera=camera))
+
     def apply_perturb(self, node_id: int, target_position, target_rotation, mode: str) -> bool:
         return self._ok(
             self._send(
@@ -448,6 +470,7 @@ def handle_session_command(session, message: dict):
         "qpos": lambda: cmd.SetQpos(message["index"], message["value"]),
         "ctrl": lambda: cmd.SetCtrl(message["index"], message["value"]),
         "pose": lambda: cmd.SetPose(message["node_id"], message["position"], message["rotation"]),
+        "scene_camera": lambda: cmd.SetSceneCamera(message["camera_id"], message["camera"]),
         "perturb": lambda: cmd.Perturb(
             message["node_id"],
             message["target_position"],

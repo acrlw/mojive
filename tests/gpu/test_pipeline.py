@@ -173,6 +173,37 @@ def test_mujoco_visuals_reach_the_gpu_pipeline(gl):
         adapter.release()
 
 
+def test_camera_and_light_entities_reach_the_debug_pass(gl):
+    adapter = make_adapter("mujoco", resolve("mujoco_visuals"))
+    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    try:
+        source = adapter.scene_source()
+        backend.set_scene(source)
+        backend.set_camera(adapter.camera_hint())
+        assert backend.set_flag(RenderFlag.CAMERA, True)
+        assert backend.set_flag(RenderFlag.LIGHT, True)
+
+        frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True))
+        backend.update(frame)
+
+        assert backend.debug.layer("scene.cameras").count_of(Prim.LINE) == 8 * len(source.cameras)
+        light_set = frame.lights if frame.lights is not None else source.lights
+        active_lights = [light for light in light_set.lights if light.active]
+        directional_lights = [light for light in active_lights if light.kind.value != "point"]
+        assert backend.debug.layer("scene.lights").count_of(Prim.POINT) == len(active_lights)
+        assert backend.debug.layer("scene.lights").count_of(Prim.ARROW) == len(directional_lights)
+        assert backend.render(frame) is not None
+
+        assert backend.set_flag(RenderFlag.CAMERA, False)
+        assert backend.set_flag(RenderFlag.LIGHT, False)
+        backend.update(frame)
+        assert backend.debug.layer("scene.cameras").primitives == 0
+        assert backend.debug.layer("scene.lights").primitives == 0
+    finally:
+        backend.release()
+        adapter.release()
+
+
 def test_joint_site_and_body_actuator_visuals_reach_the_gpu_pipeline(gl):
     adapter = make_adapter("mujoco", resolve("actuator_visuals"))
     backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)

@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -24,6 +24,7 @@ help:
 		'' \
 		'M5/M6 渲染与输出：' \
 		'  make lighting          无物理场景的可编辑 spot/point/area 灯光与雾霾' \
+		'  make scene-icons       无物理 camera/light 场景图标' \
 		'  make reflect           平面反射' \
 		'  make cameras           free/named/正交相机' \
 		'  make capture           输出 PNG' \
@@ -136,6 +137,10 @@ adapter-conformance:
 ## spot / point / area 三种投影光与雾霾；Hierarchy 选灯后在 Inspector 编辑。
 lighting:
 	$(PY) -m forge_viewer.cli canvas --demo lighting $(ARGS)
+
+scene-icons:
+	$(PY) -m forge_viewer.cli canvas --demo lighting \
+		--enable-render camera --enable-render light $(ARGS)
 
 ## 世界锚点 + 屏幕偏移/对齐 + depth/always；字体与 ImGui 共用同一份文件和字号。
 text-overlay:

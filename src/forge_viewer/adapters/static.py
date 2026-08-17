@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ..scene import Scene
-from .base import AdapterCaps, FrameNeeds, SceneAdapterBase, SceneFrame, SceneNode, SceneSource
+from .base import (
+    AdapterCaps,
+    CameraInfo,
+    FrameNeeds,
+    SceneAdapterBase,
+    SceneFrame,
+    SceneNode,
+    SceneSource,
+)
 
 
 class StaticSceneAdapter(SceneAdapterBase):
@@ -9,6 +19,7 @@ class StaticSceneAdapter(SceneAdapterBase):
 
     def __init__(self, scene: Scene) -> None:
         self.scene = scene
+        self.caps = replace(self.caps, model_cameras=bool(scene.camera_infos()))
 
     @property
     def structure_revision(self) -> int:
@@ -31,6 +42,15 @@ class StaticSceneAdapter(SceneAdapterBase):
 
     def set_light(self, light_id: int, light) -> bool:
         return self.scene.set_light(light_id, light)
+
+    def cameras(self) -> list[CameraInfo]:
+        return self.scene.camera_infos()
+
+    def camera_view(self, camera_id: int):
+        return self.scene.camera_view(camera_id)
+
+    def set_camera_view(self, camera_id: int, camera) -> bool:
+        return self.scene.set_camera(camera_id, camera)
 
     def camera_hint(self):
         return self.scene.camera

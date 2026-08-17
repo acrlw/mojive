@@ -507,6 +507,8 @@ class ViewerApp:
                 RenderFlag.JOINT,
                 RenderFlag.COM,
                 RenderFlag.INERTIA,
+                RenderFlag.CAMERA,
+                RenderFlag.LIGHT,
             )
         )
         return needs

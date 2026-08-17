@@ -411,7 +411,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
                         write_qpos=False,
                         perturb=False,
                         raycast=False,
-                        model_cameras=False,
+                        model_cameras=bool(packet.cameras),
                         visual_groups=False,
                         reload=False,
                     )
@@ -440,6 +440,8 @@ def cmd_canvas(args: argparse.Namespace) -> int:
     scene = lighting_scene() if args.demo == "lighting" else canvas_scene()
     viewer = build_scene(scene, vsync=not args.no_vsync, title=f"forge {args.demo}")
     try:
+        for name in args.enable_render:
+            viewer.backend.set_flag(RenderFlag(name), True)
         if args.demo == "lighting":
             viewer.backend.set_flag(RenderFlag.FOG, True)
             viewer.backend.set_flag(RenderFlag.HAZE, True)
@@ -659,7 +661,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-vsync", action="store_true")
     sp.set_defaults(func=cmd_view, json=False)
 
-    sp = sub.add_parser("canvas", help="Open a procedural 3D canvas")
+    sp = with_render_flags(sub.add_parser("canvas", help="Open a procedural 3D canvas"))
     sp.add_argument("--demo", choices=("canvas", "lighting", "text"), default="canvas")
     sp.add_argument("--no-vsync", action="store_true")
     sp.set_defaults(func=cmd_canvas, json=False)

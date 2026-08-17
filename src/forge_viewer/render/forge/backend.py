@@ -11,7 +11,7 @@ from ... import math3d
 from ...adapters.base import ActuatorVisualKind, JointVisualKind, SceneFrame, SceneSource
 from ...gizmo import GizmoFrame
 from ...log import get_logger
-from ...types import CameraView, MeshKey, ViewportImage
+from ...types import CameraView, LightKind, MeshKey, ViewportImage
 from ..backend import BackendCaps, DebugView, RenderFlag, RenderStats
 from ..debugdraw import Occlusion
 from ..scene import RenderScene
@@ -87,6 +87,8 @@ class ForgeBackend:
         self._flags[RenderFlag.COM] = False
         self._flags[RenderFlag.INERTIA] = False
         self._flags[RenderFlag.SCLINERTIA] = False
+        self._flags[RenderFlag.CAMERA] = False
+        self._flags[RenderFlag.LIGHT] = False
         # MuJoCo mjv_defaultOption() enables tendon paths by default.
         self._flags[RenderFlag.TENDON] = True
         self._contact_ends = np.zeros((0, 3), np.float32)
@@ -137,6 +139,8 @@ class ForgeBackend:
                 RenderFlag.COM,
                 RenderFlag.INERTIA,
                 RenderFlag.SCLINERTIA,
+                RenderFlag.CAMERA,
+                RenderFlag.LIGHT,
             }
         return frozenset(flags)
 
@@ -202,6 +206,8 @@ class ForgeBackend:
             self.debug.layer("physics.com").clear()
             self.debug.layer("physics.inertia").clear()
             self.debug.layer("physics.actuators").clear()
+            self.debug.layer("scene.cameras", Occlusion.GHOST).clear()
+            self.debug.layer("scene.lights", Occlusion.GHOST).clear()
 
     def set_render_scene(self, scene: RenderScene) -> None:
 
@@ -236,6 +242,7 @@ class ForgeBackend:
         if self.debug is None:
             return
         self._publish_diagnostics(frame)
+        self._publish_scene_icons(frame)
         contacts = frame.contacts
         points = self.debug.layer("physics.contact.points", Occlusion.ALWAYS)
         forces = self.debug.layer("physics.contact.forces", Occlusion.GHOST)
@@ -387,6 +394,78 @@ class ForgeBackend:
                 layer.cylinder(ident, transform, color)
             else:
                 self._draw_capsule(layer, ident, position, rotation, size, color)
+
+    def _publish_scene_icons(self, frame: SceneFrame) -> None:
+        cameras = self.debug.layer("scene.cameras", Occlusion.GHOST)
+        lights = self.debug.layer("scene.lights", Occlusion.GHOST)
+        source = self._source
+
+        if self.get_flag(RenderFlag.CAMERA):
+            views = frame.cameras if frame.cameras is not None else source.cameras
+            for index, view in enumerate(views):
+                self._draw_camera_icon(cameras, index, view, source.diagnostics.camera_rgba)
+        else:
+            cameras.clear()
+
+        if self.get_flag(RenderFlag.LIGHT):
+            light_set = frame.lights if frame.lights is not None else source.lights
+            for index, light in enumerate(light_set.lights):
+                if light.active:
+                    self._draw_light_icon(lights, index, light, source.diagnostics.light_rgba)
+                else:
+                    lights.erase(f"light:{index}:point")
+                    lights.erase(f"light:{index}:direction")
+        else:
+            lights.clear()
+
+    def _draw_camera_icon(self, layer, index: int, view: CameraView, color) -> None:
+        eye = np.asarray(view.eye, np.float32)
+        forward = math3d.normalize(np.asarray(view.target, np.float32) - eye)
+        right = math3d.normalize(np.cross(forward, np.asarray(view.up, np.float32)))
+        up = math3d.normalize(np.cross(right, forward))
+        length = self._icon_world_size(eye, 26.0)
+        center = eye + forward * length
+        half_height = length * 0.45
+        half_width = half_height * min(max(float(view.aspect), 0.75), 1.8)
+        corners = np.stack(
+            (
+                center - right * half_width - up * half_height,
+                center + right * half_width - up * half_height,
+                center + right * half_width + up * half_height,
+                center - right * half_width + up * half_height,
+            )
+        )
+        starts = np.concatenate((np.repeat(eye[None], 4, axis=0), corners), axis=0)
+        ends = np.concatenate((corners, np.roll(corners, -1, axis=0)), axis=0)
+        layer.lines(f"camera:{index}", starts, ends, color, 1.8)
+
+    def _draw_light_icon(self, layer, index: int, light, color) -> None:
+        position = np.asarray(light.position, np.float32)
+        layer.point(f"light:{index}:point", position, color, 6.0)
+        if light.kind is LightKind.POINT:
+            layer.erase(f"light:{index}:direction")
+            return
+        direction = math3d.normalize(np.asarray(light.direction, np.float32))
+        length = self._icon_world_size(position, 30.0)
+        layer.arrow(
+            f"light:{index}:direction",
+            position,
+            position + direction * length,
+            color,
+            2.0,
+            start_mask_px=7.0,
+        )
+
+    def _icon_world_size(self, position: np.ndarray, pixels: float) -> float:
+        camera = self._camera
+        if camera.orthographic:
+            return float(camera.ortho_height) * float(pixels) / max(self.target.height, 1)
+        depth = abs(float(np.dot(position - camera.eye, camera.forward())))
+        depth = max(depth, float(camera.near), 1e-4)
+        world_per_pixel = (
+            2.0 * depth * np.tan(float(camera.fov_y) * 0.5) / max(self.target.height, 1)
+        )
+        return float(world_per_pixel * pixels)
 
     @staticmethod
     def _draw_capsule(layer, ident, position, rotation, size, color) -> None:

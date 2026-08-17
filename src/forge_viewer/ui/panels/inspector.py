@@ -62,6 +62,9 @@ class InspectorPanel(Panel):
         if node.kind is NodeKind.LIGHT:
             self._light(ctx, node)
             return
+        if node.kind is NodeKind.CAMERA:
+            self._camera(ctx, node)
+            return
         self._transform(ctx, node)
         self._gizmo_reason(ctx, node)
         self._velocity(ctx, node)
@@ -337,6 +340,67 @@ class InspectorPanel(Panel):
                         cutoff=float(cutoff),
                         exponent=float(exponent),
                         cast_shadow=cast_shadow,
+                    ),
+                )
+            )
+
+    def _camera(self, ctx: PanelContext, node: SceneNode) -> None:
+        index = node.camera_index
+        if not 0 <= index < len(ctx.session.cameras):
+            imgui.text_disabled("camera data is unavailable")
+            return
+        info = ctx.session.cameras[index]
+        view = ctx.session.camera_view(info.camera_id)
+        if view is None:
+            imgui.text_disabled("camera view is unavailable")
+            return
+
+        if ctx.select_model_camera is not None and imgui.button("view through camera"):
+            ctx.select_model_camera(info.camera_id)
+
+        eye_changed, eye = imgui.drag_float3("position", view.eye, 0.01, 0.0, 0.0, "%.4f")
+        target_changed, target = imgui.drag_float3("target", view.target, 0.01, 0.0, 0.0, "%.4f")
+        up_changed, up = imgui.drag_float3("up", view.up, 0.01, 0.0, 0.0, "%.4f")
+        fov_changed, fov = imgui.drag_float(
+            "vertical fov", float(np.degrees(view.fov_y)), 0.1, 1.0, 179.0, "%.2f deg"
+        )
+        near_changed, near = imgui.drag_float(
+            "near", float(view.near), 0.001, 1e-5, float(view.far), "%.6f"
+        )
+        far_changed, far = imgui.drag_float("far", float(view.far), 0.1, float(near), 1e7, "%.3f")
+        ortho_changed, orthographic = imgui.checkbox("orthographic", view.orthographic)
+        height_changed = False
+        ortho_height = view.ortho_height
+        if orthographic:
+            height_changed, ortho_height = imgui.drag_float(
+                "ortho height", float(view.ortho_height), 0.01, 1e-4, 1e6, "%.4f"
+            )
+
+        if any(
+            (
+                eye_changed,
+                target_changed,
+                up_changed,
+                fov_changed,
+                near_changed,
+                far_changed,
+                ortho_changed,
+                height_changed,
+            )
+        ):
+            ctx.submit(
+                cmd.SetSceneCamera(
+                    info.camera_id,
+                    replace(
+                        view,
+                        eye=np.asarray(eye, np.float32),
+                        target=np.asarray(target, np.float32),
+                        up=np.asarray(up, np.float32),
+                        fov_y=float(np.radians(fov)),
+                        near=float(near),
+                        far=max(float(far), float(near) + 1e-5),
+                        orthographic=orthographic,
+                        ortho_height=float(ortho_height),
                     ),
                 )
             )

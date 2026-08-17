@@ -51,6 +51,7 @@ class Session:
         self._frame = SceneFrame()
         self._source: SceneSource | None = None
         self._light_overrides: dict[int, Light] = {}
+        self._camera_overrides: dict[int, CameraView] = {}
         self._nodes: list[SceneNode] = []
         self._by_object_id: dict[int, SceneNode] = {}
         self._joints: list[JointInfo] = []
@@ -177,6 +178,7 @@ class Session:
 
         self._frame = self._adapter.frame(needs)
         self._compose_lights()
+        self._compose_cameras()
         if self._adapter.caps.external_clock:
             self._paused = bool(self._frame.paused)
         else:
@@ -242,6 +244,7 @@ class Session:
             self._perturb = PerturbState()
             self._active_keyframe = -1
             self._light_overrides.clear()
+            self._camera_overrides.clear()
             self._refresh_structure()
             return CommandResult.good("Scene reloaded")
 
@@ -254,6 +257,7 @@ class Session:
             self._perturb = PerturbState()
             self._active_keyframe = -1
             self._light_overrides.clear()
+            self._camera_overrides.clear()
             self._refresh_structure()
             return CommandResult.good(f"Loaded {c.path.name}")
 
@@ -359,6 +363,20 @@ class Session:
             message = "" if writeback else "edited in Forge; backend write-back is unavailable"
             return CommandResult.good(message)
 
+        if isinstance(c, cmd.SetSceneCamera):
+            camera_id = int(c.camera_id)
+            slot = self._camera_slot(camera_id)
+            if self._source is None or slot < 0 or slot >= len(self._source.cameras):
+                return CommandResult.bad(f"camera {camera_id} is unavailable")
+            writeback = self._adapter.set_camera_view(camera_id, c.camera)
+            cameras = list(self._source.cameras)
+            cameras[slot] = c.camera
+            self._source.cameras = tuple(cameras)
+            self._camera_overrides[camera_id] = c.camera
+            self._compose_cameras()
+            message = "" if writeback else "edited in Forge; backend write-back is unavailable"
+            return CommandResult.good(message)
+
         if isinstance(c, cmd.SetSpeed):
             if not caps.simulation:
                 return CommandResult.bad(f"{caps.name} has no simulation speed")
@@ -421,7 +439,10 @@ class Session:
         return self._adapter.camera_hint()
 
     def camera_view(self, camera_id: int) -> CameraView | None:
-        return self._adapter.camera_view(camera_id) if self._adapter.caps.model_cameras else None
+        i = int(camera_id)
+        if i in self._camera_overrides:
+            return self._camera_overrides[i]
+        return self._adapter.camera_view(i) if self._adapter.caps.model_cameras else None
 
     def visual_groups(self):
         return self._adapter.visual_groups() if self._adapter.caps.visual_groups else ()
@@ -441,6 +462,13 @@ class Session:
         self._joints = self._adapter.joints()
         self._actuators = self._adapter.actuators()
         self._cameras = self._adapter.cameras() if self._adapter.caps.model_cameras else []
+        if self._camera_overrides:
+            cameras = list(self._source.cameras)
+            for camera_id, camera in self._camera_overrides.items():
+                slot = self._camera_slot(camera_id)
+                if 0 <= slot < len(cameras):
+                    cameras[slot] = camera
+            self._source.cameras = tuple(cameras)
         self._keyframes = self._adapter.keyframes() if self._adapter.caps.keyframes else []
         self._sensor_infos = self._adapter.sensors() if self._adapter.caps.sensors else []
         if self._active_keyframe >= len(self._keyframes):
@@ -450,6 +478,7 @@ class Session:
         self._structure_generation += 1
         self._frame = self._adapter.frame(FrameNeeds())
         self._compose_lights()
+        self._compose_cameras()
 
     def _compose_lights(self) -> None:
         """Combine Forge-authored light settings with backend-driven transforms.
@@ -470,6 +499,25 @@ class Session:
             for light, dynamic in zip(authored.lights, driven.lights, strict=True)
         )
         self._frame.lights = replace(authored, lights=lights)
+
+    def _compose_cameras(self) -> None:
+        if self._source is None:
+            return
+        driven = self._frame.cameras
+        cameras = list(driven if driven is not None else self._source.cameras)
+        if len(cameras) != len(self._source.cameras):
+            cameras = list(self._source.cameras)
+        for camera_id, camera in self._camera_overrides.items():
+            slot = self._camera_slot(camera_id)
+            if 0 <= slot < len(cameras):
+                cameras[slot] = camera
+        self._frame.cameras = tuple(cameras)
+
+    def _camera_slot(self, camera_id: int) -> int:
+        return next(
+            (slot for slot, camera in enumerate(self._cameras) if camera.camera_id == camera_id),
+            -1,
+        )
 
     def release(self) -> None:
         self._adapter.release()

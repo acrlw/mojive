@@ -45,8 +45,8 @@ _VIS_COVERAGE = (
     Coverage("mjVIS_JOINT", "supported", "solid free, ball, slide and hinge markers"),
     Coverage(
         "mjVIS_CAMERA",
-        "degraded",
-        "named cameras drive the viewport; camera icons are not drawn",
+        "supported",
+        "named cameras, editable scene entities and viewport frustum icons",
     ),
     Coverage(
         "mjVIS_ACTUATOR",
@@ -60,8 +60,8 @@ _VIS_COVERAGE = (
     ),
     Coverage(
         "mjVIS_LIGHT",
-        "degraded",
-        "lights are editable Forge entities; viewport icons are not drawn",
+        "supported",
+        "editable scene entities with point and direction viewport icons",
     ),
     Coverage("mjVIS_TENDON", "supported", "dynamic tendon paths"),
     Coverage("mjVIS_RANGEFINDER", "unsupported", "rangefinder rays are not drawn"),
@@ -166,7 +166,7 @@ def audit_model(model) -> dict:
                 "model camera",
                 "supported",
                 model.ncam,
-                "named perspective and orthographic cameras can drive the viewport",
+                "named perspective and orthographic cameras are editable viewport entities",
             )
         )
         intrinsic = np.asarray(getattr(model, "cam_intrinsic", np.zeros((model.ncam, 4))))
@@ -267,7 +267,7 @@ def audit_model(model) -> dict:
                 "light entity",
                 "supported",
                 model.nlight,
-                "selectable in Hierarchy and editable in Inspector; body attachment stays dynamic",
+                "selectable, editable and visible as a viewport icon; body attachment stays dynamic",
             )
         )
     if image_kind is not None:

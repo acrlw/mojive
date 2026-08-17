@@ -12,6 +12,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+LIGHT_OBJECT_BASE = 0x70000000
+CAMERA_OBJECT_BASE = 0x71000000
+
+
 class NodeKind(enum.StrEnum):
     WORLD = "world"
     ROBOT = "robot"
@@ -39,6 +43,7 @@ class SceneNode:
     visible: bool = True
     body_index: int = -1
     light_index: int = -1
+    camera_index: int = -1
 
 
 @dataclass
@@ -68,10 +73,9 @@ class ActuatorInfo:
 
 @dataclass(frozen=True)
 class CameraInfo:
-    """A named camera supplied by the scene source."""
-
     camera_id: int
     name: str
+    object_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -164,6 +168,12 @@ class DiagnosticSource:
     actuator_visual_kinds: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
     actuator_visual_actuators: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
     actuator_visual_sizes: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    camera_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([0.45, 0.8, 1.0, 1.0], np.float32)
+    )
+    light_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([1.0, 0.85, 0.3, 1.0], np.float32)
+    )
 
 
 @dataclass
@@ -236,6 +246,7 @@ class SceneFrame:
     debug_commands: tuple[dict, ...] | None = None
 
     lights: LightSet | None = None
+    cameras: tuple[CameraView, ...] | None = None
 
 
 @dataclass
@@ -291,6 +302,7 @@ class SceneSource:
     diagnostics: DiagnosticSource = field(default_factory=DiagnosticSource)
 
     lights: LightSet = field(default_factory=LightSet)
+    cameras: tuple[CameraView, ...] = ()
     skybox: str | None = None
     shadow_clip: float = 1.0
 
@@ -383,6 +395,9 @@ class SceneAdapterBase:
         source.lights = replace(source.lights, lights=tuple(lights))
         return True
 
+    def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
+        return False
+
     def apply_perturb(
         self, node_id: int, target_position: np.ndarray, target_rotation: np.ndarray, mode: str
     ) -> bool:
@@ -430,6 +445,7 @@ class SceneAdapter(Protocol):
     def set_ctrl(self, index: int, value: float) -> bool: ...
     def set_pose(self, node_id: int, position, rotation) -> bool: ...
     def set_light(self, light_id: int, light) -> bool: ...
+    def set_camera_view(self, camera_id: int, camera: CameraView) -> bool: ...
     def apply_perturb(
         self, node_id: int, target_position: np.ndarray, target_rotation: np.ndarray, mode: str
     ) -> bool: ...

@@ -6,7 +6,7 @@ import numpy as np
 
 from ..scene import Scene
 from ..types import CameraView, Light, LightKind, LightSet
-from .base import AdapterCaps, FrameNeeds, SceneAdapterBase, SceneFrame, SceneSource
+from .base import AdapterCaps, CameraInfo, FrameNeeds, SceneAdapterBase, SceneFrame, SceneSource
 
 
 class ToyPhysicsAdapter(SceneAdapterBase):
@@ -16,6 +16,7 @@ class ToyPhysicsAdapter(SceneAdapterBase):
         name="toy",
         simulation=True,
         write_pose=True,
+        model_cameras=True,
         notes=("dependency-free reference adapter",),
     )
 
@@ -133,6 +134,15 @@ class ToyPhysicsAdapter(SceneAdapterBase):
 
     def camera_hint(self) -> CameraView | None:
         return self.scene.camera
+
+    def cameras(self) -> list[CameraInfo]:
+        return self.scene.camera_infos()
+
+    def camera_view(self, camera_id: int) -> CameraView | None:
+        return self.scene.camera_view(camera_id)
+
+    def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
+        return self.scene.set_camera(camera_id, camera)
 
     def _sync_scene(self) -> None:
         for obj, position in zip(self._objects, self._positions, strict=True):

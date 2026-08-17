@@ -800,6 +800,14 @@ def test_mujoco_model_cameras_follow_forward_kinematics():
     try:
         cameras = {c.name: c.camera_id for c in a.cameras()}
         assert set(cameras) == {"overview", "calibrated_shift", "ball_camera"}
+        camera_nodes = [node for node in a.nodes() if node.kind is NodeKind.CAMERA]
+        assert [node.camera_index for node in camera_nodes] == [0, 1, 2]
+        assert [node.object_id for node in camera_nodes] == [
+            camera.object_id for camera in a.cameras()
+        ]
+        diagnostic_frame = a.frame(FrameNeeds(poses=True, diagnostics=True))
+        assert diagnostic_frame.cameras is not None
+        assert len(diagnostic_frame.cameras) == a.model.ncam
         fixed = a.camera_view(cameras["overview"])
         mounted = a.camera_view(cameras["ball_camera"])
         assert fixed is not None and mounted is not None

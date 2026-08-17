@@ -85,6 +85,12 @@ class SetLight(Command):
 
 
 @dataclass(frozen=True)
+class SetSceneCamera(Command):
+    camera_id: int
+    camera: CameraView
+
+
+@dataclass(frozen=True)
 class SetQpos(Command):
     index: int
     value: float

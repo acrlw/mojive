@@ -7,6 +7,9 @@ import threading
 import time
 from dataclasses import replace
 
+import numpy as np
+import pytest
+
 from forge_viewer import commands as cmd
 from forge_viewer.adapters.base import AdapterCaps, FrameNeeds, SceneAdapterBase
 from forge_viewer.adapters.static import StaticSceneAdapter
@@ -19,6 +22,7 @@ from forge_viewer.remote import (
 )
 from forge_viewer.scene import Scene
 from forge_viewer.session import Session
+from forge_viewer.types import CameraView
 
 
 def _port_pair() -> int:
@@ -123,6 +127,51 @@ def test_keyframe_command_keeps_its_typed_remote_boundary():
 
     command = handle_session_command(Sink(), {"op": "keyframe", "keyframe_id": 17})
     assert command == cmd.LoadKeyframe(17)
+
+
+def test_scene_camera_command_keeps_its_typed_remote_boundary():
+    class Sink:
+        def submit(self, command):
+            return command
+
+    camera = CameraView()
+    command = handle_session_command(
+        Sink(), {"op": "scene_camera", "camera_id": 7, "camera": camera}
+    )
+    assert command == cmd.SetSceneCamera(7, camera)
+
+
+def test_remote_camera_metadata_and_edits_use_the_shared_scene_contract():
+    scene = Scene(camera=CameraView())
+    source_session = Session(StaticSceneAdapter(scene))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(source_session.frame)
+    remote = Session(RemoteSceneAdapter(port=port))
+    stop = threading.Event()
+
+    def pump():
+        while not stop.is_set():
+            publisher.pump_commands(lambda message: handle_session_command(source_session, message))
+            stop.wait(0.002)
+
+    worker = threading.Thread(target=pump)
+    worker.start()
+    try:
+        assert remote.adapter.caps.model_cameras
+        info = remote.cameras[0]
+        assert remote.camera_view(info.camera_id) is not None
+        edited = CameraView(eye=np.array([4.0, -3.0, 2.0], np.float32))
+        assert remote.submit(cmd.SetSceneCamera(info.camera_id, edited))
+        assert source_session.camera_view(info.camera_id).eye == pytest.approx(edited.eye)
+        assert remote.frame.cameras == (edited,)
+    finally:
+        stop.set()
+        worker.join()
+        remote.release()
+        publisher.close()
+        source_session.release()
 
 
 def test_two_viewers_receive_the_same_latest_frame_independently():

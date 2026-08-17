@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from forge_viewer import commands as cmd
-from forge_viewer.adapters.base import AdapterCaps, FrameNeeds, SceneAdapterBase
+from forge_viewer.adapters.base import AdapterCaps, FrameNeeds, NodeKind, SceneAdapterBase
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.render.builder import SceneSourceBuilder
 from forge_viewer.scene import Scene
 from forge_viewer.session import Session
-from forge_viewer.types import Light, LightKind, LightSet, MeshData
+from forge_viewer.types import CameraView, Light, LightKind, LightSet, MeshData
 
 
 def test_static_scene_builds_without_a_physics_package():
@@ -91,6 +93,31 @@ def test_lights_are_editable_forge_entities_without_physics():
     assert not node.visible
 
 
+def test_cameras_are_editable_forge_entities_without_physics():
+    initial = CameraView(
+        eye=np.array([2.0, -4.0, 3.0], np.float32),
+        target=np.array([0.0, 0.0, 0.5], np.float32),
+    )
+    scene = Scene(camera=initial)
+    session = Session(StaticSceneAdapter(scene))
+
+    info = session.cameras[0]
+    node = next(node for node in session.nodes if node.camera_index == 0)
+    assert node.kind is NodeKind.CAMERA
+    assert node.object_id == info.object_id
+    assert session.frame.cameras == (initial,)
+
+    edited = CameraView(
+        eye=np.array([-3.0, 2.0, 1.5], np.float32),
+        target=np.array([0.0, 0.0, 0.0], np.float32),
+        fov_y=np.deg2rad(60.0),
+    )
+    assert session.submit(cmd.SetSceneCamera(info.camera_id, edited))
+    assert scene.camera_view(info.camera_id) is edited
+    assert session.source.cameras == (edited,)
+    assert session.frame.cameras == (edited,)
+
+
 def test_backend_cannot_veto_a_forge_light_edit():
     class ReadOnlyLights(ToyPhysics):
         def __init__(self):
@@ -112,6 +139,27 @@ def test_backend_cannot_veto_a_forge_light_edit():
     session.adapter.scene.box(name="new body")
     session.tick(FrameNeeds())
     assert session.source.lights.lights[0].kind is LightKind.AREA
+
+
+def test_camera_ids_are_resolved_independently_from_source_slots():
+    class SparseCameraAdapter(StaticSceneAdapter):
+        def cameras(self):
+            info = super().cameras()[0]
+            return [replace(info, camera_id=42)]
+
+        def camera_view(self, camera_id):
+            return self.scene.camera_view(0) if camera_id == 42 else None
+
+        def set_camera_view(self, camera_id, camera):
+            return camera_id == 42 and self.scene.set_camera(0, camera)
+
+    scene = Scene(camera=CameraView())
+    session = Session(SparseCameraAdapter(scene))
+    edited = CameraView(eye=np.array([1.0, 2.0, 3.0], np.float32))
+
+    assert session.submit(cmd.SetSceneCamera(42, edited))
+    assert scene.camera_view(0) is edited
+    assert session.frame.cameras == (edited,)
 
 
 def test_custom_mesh_enters_the_same_scene_contract():

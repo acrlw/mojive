@@ -22,6 +22,8 @@ from ..types import (
     TextureKind,
 )
 from .base import (
+    CAMERA_OBJECT_BASE,
+    LIGHT_OBJECT_BASE,
     ActuatorInfo,
     ActuatorVisualKind,
     AdapterCaps,
@@ -390,8 +392,10 @@ class MuJoCoAdapter:
             )
             self._fill_actuator_visual_poses(diagnostics)
             f.diagnostics = diagnostics
+            f.cameras = tuple(self.camera_view(i) for i in range(self._m.ncam))
         else:
             f.diagnostics = None
+            f.cameras = None
 
         f.lights = self._dynamic_lights() if self._lights_dynamic or self._lights_edited else None
         return f
@@ -680,6 +684,7 @@ class MuJoCoAdapter:
         src.geom_local = np.stack(locals_) if n else np.zeros((0, 4, 4), np.float32)
         src.geom_infinite_plane = np.array(infinite, bool)
         src.lights = self._build_lights()
+        src.cameras = tuple(self.camera_view(i) for i in range(m.ncam))
         src.scene_extent = float(m.stat.extent)
 
         src.shadow_clip = float(m.vis.map.shadowclip) or 1.0
@@ -847,6 +852,8 @@ class MuJoCoAdapter:
             actuator_visual_sizes=(
                 np.stack(visual_sizes) if count else np.zeros((0, 3), np.float32)
             ),
+            camera_rgba=np.asarray(m.vis.rgba.camera, np.float32).copy(),
+            light_rgba=np.asarray(m.vis.rgba.light, np.float32).copy(),
         )
 
     def _fill_actuator_visual_poses(self, diagnostics: DiagnosticFrame) -> None:
@@ -1218,14 +1225,21 @@ class MuJoCoAdapter:
                 NodeKind.LIGHT,
                 body_node[b],
                 b,
-                object_id=m.nbody + m.nflex + m.nskin + li,
+                object_id=LIGHT_OBJECT_BASE + li,
                 visible=bool(m.light_active[li]),
                 light_index=li,
             )
         for ci in range(m.ncam):
             b = int(m.cam_bodyid[ci])
             name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_CAMERA, ci) or f"camera{ci}"
-            add(name, NodeKind.CAMERA, body_node[b], b)
+            add(
+                name,
+                NodeKind.CAMERA,
+                body_node[b],
+                b,
+                object_id=CAMERA_OBJECT_BASE + ci,
+                camera_index=ci,
+            )
         for si in range(m.nsite):
             if not self._visual_groups["site"][int(m.site_group[si])]:
                 continue
@@ -1316,6 +1330,7 @@ class MuJoCoAdapter:
             CameraInfo(
                 camera_id=i,
                 name=mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_CAMERA, i) or f"camera{i}",
+                object_id=CAMERA_OBJECT_BASE + i,
             )
             for i in range(m.ncam)
         ]

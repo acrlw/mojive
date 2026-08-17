@@ -4,7 +4,15 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-from .adapters.base import NodeKind, SceneFrame, SceneNode, SceneSource
+from .adapters.base import (
+    CAMERA_OBJECT_BASE,
+    LIGHT_OBJECT_BASE,
+    CameraInfo,
+    NodeKind,
+    SceneFrame,
+    SceneNode,
+    SceneSource,
+)
 from .types import (
     DEFAULT_HEADLIGHT,
     DEFAULT_MATERIAL,
@@ -44,6 +52,14 @@ class _Item:
     initial_rotation: np.ndarray
 
 
+@dataclass
+class _CameraItem:
+    camera_id: int
+    object_id: int
+    name: str
+    view: CameraView
+
+
 class Scene:
     def __init__(self, *, camera: CameraView | None = None, lights: LightSet | None = None) -> None:
         self.camera = camera
@@ -53,7 +69,11 @@ class Scene:
         self._meshes: dict[MeshKey, MeshData] = {}
         self._next_object_id = 1
         self._next_mesh_id = 0
+        self._next_camera_id = 0
+        self._cameras: list[_CameraItem] = []
         self._revision = 0
+        if camera is not None:
+            self.add_camera("camera", camera)
         self._built_revision = -1
         self._source = SceneSource()
         self._frame = SceneFrame()
@@ -128,6 +148,41 @@ class Scene:
     def add_texture(self, texture: TextureData) -> None:
         self.textures[texture.name] = texture
         self._revision += 1
+
+    def add_camera(self, name: str, view: CameraView) -> int:
+        camera_id = self._next_camera_id
+        self._next_camera_id += 1
+        self._cameras.append(
+            _CameraItem(
+                camera_id=camera_id,
+                object_id=CAMERA_OBJECT_BASE + camera_id,
+                name=str(name),
+                view=view,
+            )
+        )
+        if self.camera is None:
+            self.camera = view
+        self._revision += 1
+        return camera_id
+
+    def set_camera(self, camera_id: int, view: CameraView) -> bool:
+        item = next((item for item in self._cameras if item.camera_id == int(camera_id)), None)
+        if item is None:
+            return False
+        item.view = view
+        if item.camera_id == 0:
+            self.camera = view
+        if self._built_revision == self._revision:
+            self._source.cameras = tuple(camera.view for camera in self._cameras)
+            self._frame.cameras = self._source.cameras
+        return True
+
+    def camera_view(self, camera_id: int) -> CameraView | None:
+        item = next((item for item in self._cameras if item.camera_id == int(camera_id)), None)
+        return item.view if item is not None else None
+
+    def camera_infos(self) -> list[CameraInfo]:
+        return [CameraInfo(item.camera_id, item.name, item.object_id) for item in self._cameras]
 
     def object(self, name: str) -> SceneObject:
         item = next((x for x in self._items if x.name == name), None)
@@ -226,9 +281,6 @@ class Scene:
             self._oid_to_index[item.object_id] = i
             self._node_to_oid[link_id] = item.object_id
 
-        # Lights are Forge scene entities too.  They remain selectable and
-        # editable without a physics backend; their high object ids cannot
-        # collide with programmatic geometry handles.
         for i, light in enumerate(self.lights.lights):
             node_id = len(nodes)
             nodes.append(
@@ -237,10 +289,25 @@ class Scene:
                     f"{light.kind.name.lower()} light {i}",
                     NodeKind.LIGHT,
                     parent=0,
-                    object_id=0x70000000 + i,
+                    object_id=LIGHT_OBJECT_BASE + i,
                     visible=light.active,
                     body_index=0,
                     light_index=i,
+                )
+            )
+            nodes[0].children.append(node_id)
+
+        for camera_index, camera in enumerate(self._cameras):
+            node_id = len(nodes)
+            nodes.append(
+                SceneNode(
+                    node_id,
+                    camera.name,
+                    NodeKind.CAMERA,
+                    parent=0,
+                    object_id=camera.object_id,
+                    body_index=0,
+                    camera_index=camera_index,
                 )
             )
             nodes[0].children.append(node_id)
@@ -254,6 +321,7 @@ class Scene:
             geom_xmat=rotations,
             body_xpos=body_positions,
             body_xmat=body_rotations,
+            cameras=tuple(camera.view for camera in self._cameras),
         )
 
         for i, item in enumerate(self._items):
@@ -285,6 +353,7 @@ class Scene:
             geom_local=np.repeat(np.eye(4, dtype=np.float32)[None], n, axis=0),
             geom_infinite_plane=np.zeros(n, bool),
             lights=self.lights,
+            cameras=tuple(camera.view for camera in self._cameras),
             scene_extent=extent,
             scene_center=center,
             nodes=nodes,
