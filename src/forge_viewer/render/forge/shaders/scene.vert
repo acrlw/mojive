@@ -39,6 +39,9 @@ void main() {
     v.color = in_color;
     v.material = in_material.xyz;
     v.reflect = in_material.w;
+    if (v.reflect < 0.0 && mod(-v.reflect, 4.0) >= 2.0 && in_normal.z < 0.5) {
+        v.reflect = 0.0;
+    }
     v.view_depth = -(u_view * world).z;
 
     v.selected = (u_selected_id != 0u && in_object_id == u_selected_id) ? 1.0 : 0.0;

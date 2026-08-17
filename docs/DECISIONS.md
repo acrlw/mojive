@@ -76,7 +76,7 @@ orientation widgets, and scene frames. The native gizmo implementation owns the 
 The reflection pass renders a mirrored camera into an offscreen texture. Reflective fragments
 sample that texture in screen space. Oblique clipping removes geometry behind the plane and
 winding reversal preserves front faces. Coplanar surfaces share a target; up to four distinct
-planes receive independent mirrored views.
+planes receive independent mirrored views. Reflective boxes use their local positive-Z face.
 
 ## Reference calibration
 

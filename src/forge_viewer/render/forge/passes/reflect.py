@@ -73,16 +73,16 @@ class ReflectPass(OpaquePass):
         if scene.count == 0 or len(scene.material) == 0 or not scene.bucket_keys:
             return None
         refl = np.asarray(scene.material[:, 3])
-        planes = np.fromiter(
+        planar = np.fromiter(
             (
                 0 <= int(bucket) < len(scene.bucket_keys)
-                and scene.bucket_keys[int(bucket)][0].shape is MeshShape.PLANE
+                and scene.bucket_keys[int(bucket)][0].shape in (MeshShape.PLANE, MeshShape.BOX)
                 for bucket in scene.bucket
             ),
             dtype=bool,
             count=scene.count,
         )
-        candidates = np.flatnonzero(planes & (refl > 0.0))
+        candidates = np.flatnonzero(planar & (refl > 0.0))
         if not len(candidates):
             return None
         idx = int(candidates[np.argmax(refl[candidates])])
@@ -99,7 +99,8 @@ class ReflectPass(OpaquePass):
             for index in np.argsort(-reflectance)
             if reflectance[index] > 0.0
             and 0 <= int(scene.bucket[index]) < len(scene.bucket_keys)
-            and scene.bucket_keys[int(scene.bucket[index])][0].shape is MeshShape.PLANE
+            and scene.bucket_keys[int(scene.bucket[index])][0].shape
+            in (MeshShape.PLANE, MeshShape.BOX)
         ]
         groups: list[_PlaneGroup] = []
         for index in candidates:
@@ -133,7 +134,11 @@ class ReflectPass(OpaquePass):
         if length < 1e-9:
             return None
         normal /= length
-        d = -float(np.dot(normal, transform[:3, 3]))
+        shape = scene.bucket_keys[int(scene.bucket[index])][0].shape
+        point = transform[:3, 3]
+        if shape is MeshShape.BOX:
+            point = point + transform[:3, 2]
+        d = -float(np.dot(normal, point))
         return (float(normal[0]), float(normal[1]), float(normal[2]), d)
 
     def _restore_reflectance(self, scene) -> None:
@@ -149,8 +154,10 @@ class ReflectPass(OpaquePass):
         for layer, group in enumerate(groups):
             for index in group.indices:
                 value = float(scene.material[index, 3])
+                shape = scene.bucket_keys[int(scene.bucket[index])][0].shape
+                top_face = 1.0 if shape is MeshShape.BOX else 0.0
                 self._encoded_reflectance[index] = value
-                scene.material[index, 3] = -(2.0 * layer + value)
+                scene.material[index, 3] = -(4.0 * layer + 2.0 * top_face + value)
 
     def _set_plane(self, ctx: PassContext, plane) -> None:
         eye = np.asarray(ctx.camera.eye, np.float64)

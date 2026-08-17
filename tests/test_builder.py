@@ -176,7 +176,7 @@ def test_build_validates():
     assert scene.bucket_count() < scene.count
 
 
-def test_planar_reflection_is_limited_to_plane_instances():
+def test_planar_reflection_is_limited_to_planes_and_box_top_faces():
     src = make_source(bodies=1)
     src.materials[0] = replace(src.materials[0], reflectance=0.3)
     src.materials[1] = replace(src.materials[1], reflectance=0.8)
@@ -184,7 +184,8 @@ def test_planar_reflection_is_limited_to_plane_instances():
     scene = builder.set_source(src, CameraView())
 
     assert scene.material[builder.write_index[0], 3] == pytest.approx(0.3)
-    assert np.all(scene.material[builder.write_index[1:], 3] == 0.0)
+    assert scene.material[builder.write_index[1], 3] == pytest.approx(0.8)
+    assert np.all(scene.material[builder.write_index[2:], 3] == 0.0)
 
 
 def test_transforms_match_naive():

@@ -238,7 +238,7 @@ class SceneSourceBuilder:
                         mat.emission,
                         mat.specular,
                         mat.shininess,
-                        mat.reflectance if key.shape is MeshShape.PLANE else 0.0,
+                        (mat.reflectance if key.shape in (MeshShape.PLANE, MeshShape.BOX) else 0.0),
                     ],
                     np.float32,
                 ),

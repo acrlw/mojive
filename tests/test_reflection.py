@@ -138,6 +138,17 @@ def test_distinct_reflection_planes_keep_separate_layers():
     assert groups[1].plane[3] == pytest.approx(0.0)
 
 
+def test_box_reflection_uses_the_positive_z_face():
+    transform = flat(z=1.5, scale=2.0)
+    transform[2, 2] = 0.4
+    scene = make_scene([(transform, 0.6)], [MeshShape.BOX])
+
+    groups = ReflectPass.find_planes(scene)
+
+    assert len(groups) == 1
+    assert groups[0].plane[3] == pytest.approx(-1.9)
+
+
 def test_nonplanar_reflective_material_does_not_replace_the_floor():
     found = ReflectPass.find_plane(
         make_scene(

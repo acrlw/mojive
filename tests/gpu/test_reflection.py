@@ -10,7 +10,7 @@ pytest.importorskip("moderngl")
 pytest.importorskip("mujoco")
 
 from forge_viewer.assets import resolve  # noqa: E402
-from forge_viewer.render.backend import RenderFlag  # noqa: E402
+from forge_viewer.render.backend import DebugView, RenderFlag  # noqa: E402
 from forge_viewer.tools._harness import OffscreenHarness  # noqa: E402
 from forge_viewer.types import CameraView  # noqa: E402
 
@@ -202,3 +202,61 @@ def test_distinct_planes_receive_their_own_reflection(tmp_path):
     blue = (delta[..., 2] - delta[..., 0] > 8) & (delta.sum(axis=2) > 10)
     assert int(red.sum()) > 100
     assert int(blue.sum()) > 100
+
+
+def test_box_reflection_is_confined_to_the_positive_z_face(tmp_path):
+    scene = tmp_path / "box_reflection.xml"
+    scene.write_text(
+        """
+<mujoco>
+  <visual>
+    <headlight ambient="0.35 0.35 0.35" diffuse="0.8 0.8 0.8"/>
+  </visual>
+  <asset>
+    <material name="mirror" rgba="0.08 0.09 0.11 1" reflectance="0.85"/>
+    <material name="red" rgba="0.95 0.08 0.04 1"/>
+  </asset>
+  <worldbody>
+    <body name="mirror">
+      <geom type="box" pos="0 0 0.35" size="1 1 0.35" material="mirror"/>
+    </body>
+    <body name="ball">
+      <geom type="sphere" pos="0 0 1.35" size="0.32" material="red"/>
+    </body>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    camera = CameraView(
+        eye=np.array([3.2, -4.2, 2.5], np.float32),
+        target=np.array([0.0, 0.0, 0.55], np.float32),
+        near=0.05,
+        far=30.0,
+        aspect=W / H,
+    )
+    with OffscreenHarness(scene, W, H) as harness:
+        harness.camera = camera
+        harness.backend.set_camera(camera)
+        harness.backend.set_debug_view(DebugView.NORMAL)
+        harness.step_and_render(0)
+        normals = harness.backend.target.read_color(flip=True)[..., :3]
+        ids = harness.backend.target.read_ids()[::-1]
+
+        harness.backend.set_debug_view(DebugView.SHADED)
+        harness.backend.set_flag(RenderFlag.REFLECTION, True)
+        harness.step_and_render(0)
+        reflected = harness.backend.target.read_color(flip=True)[..., :3].astype(np.int16)
+        harness.backend.set_flag(RenderFlag.REFLECTION, False)
+        harness.step_and_render(0)
+        direct = harness.backend.target.read_color(flip=True)[..., :3].astype(np.int16)
+
+    box = ids == 1
+    top = box & (normals[..., 2] > 220)
+    sides = box & (normals[..., 2] < 145)
+    changed = np.abs(reflected - direct).sum(axis=2) > 6
+
+    assert int(top.sum()) > 1000
+    assert int(sides.sum()) > 1000
+    assert int((changed & top).sum()) > 200
+    assert int((changed & sides).sum()) == 0
