@@ -672,6 +672,34 @@ def test_shadow_toggle_is_reversible(rendered):
     assert not np.array_equal(on, off_a)
 
 
+def test_convex_hull_flag_switches_the_gpu_mesh(gl):
+    adapter = make_adapter("mujoco", resolve("convex_hull"))
+    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    try:
+        source = adapter.scene_source()
+        backend.set_scene(source)
+        backend.set_camera(adapter.camera_hint())
+        frame = adapter.frame(FrameNeeds(poses=True))
+        backend.update(frame)
+
+        backend.render(frame)
+        mesh = backend.target.read_color(flip=True).copy()
+        mesh_triangles = backend.stats.triangles
+
+        assert backend.set_flag(RenderFlag.CONVEXHULL, True)
+        backend.render(frame)
+        hull = backend.target.read_color(flip=True).copy()
+        assert backend.stats.triangles < mesh_triangles
+        assert not np.array_equal(hull, mesh)
+
+        assert backend.set_flag(RenderFlag.CONVEXHULL, False)
+        backend.render(frame)
+        assert backend.stats.triangles == mesh_triangles
+    finally:
+        backend.release()
+        adapter.release()
+
+
 def test_unsupported_flags_are_refused_not_silently_ignored(rendered):
 
     backend = rendered["backend"]

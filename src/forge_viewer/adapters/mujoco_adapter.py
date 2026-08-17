@@ -716,6 +716,7 @@ class MuJoCoAdapter:
 
         meshes: dict[MeshKey, MeshData] = {}
         mesh_keys: list[MeshKey] = []
+        convex_mesh_keys: list[MeshKey] = []
         mats: list[int] = []
         sizes: list[np.ndarray] = []
         rgbas: list[np.ndarray] = []
@@ -749,11 +750,13 @@ class MuJoCoAdapter:
             visual: InstanceVisual = InstanceVisual.DEFAULT,
             is_static: bool = False,
             island_body: int = -1,
+            convex_mesh: MeshKey | None = None,
         ) -> None:
             for key, scale, cap_offset in parts:
-                if key.shape is not MeshShape.ASSET and key not in meshes:
+                if key.shape not in (MeshShape.ASSET, MeshShape.CONVEX_HULL) and key not in meshes:
                     meshes[key] = None
                 mesh_keys.append(key)
+                convex_mesh_keys.append(convex_mesh or key)
                 mats.append(mat_index)
                 sizes.append(np.asarray(scale, np.float32))
                 rgbas.append(rgba)
@@ -784,6 +787,7 @@ class MuJoCoAdapter:
             rgba = self._geom_rgba(gi, matid)
             mat_index = mat_of_matid[matid] if matid >= 0 else mat_of_matid[-1]
             is_infinite = False
+            hull_key = None
 
             if gtype == mujoco.mjtGeom.mjGEOM_PLANE:
                 key = MeshKey(MeshShape.PLANE)
@@ -824,8 +828,13 @@ class MuJoCoAdapter:
                 key = MeshKey(MeshShape.ASSET, data_id)
                 if key not in meshes:
                     meshes[key] = self._build_mesh(data_id)
-
                 parts = [(key, np.ones(3), None)]
+                if int(m.mesh_graphadr[data_id]) >= 0 and (
+                    int(m.geom_contype[gi]) or int(m.geom_conaffinity[gi])
+                ):
+                    hull_key = MeshKey(MeshShape.CONVEX_HULL, data_id)
+                    if hull_key not in meshes:
+                        meshes[hull_key] = self._build_convex_hull(data_id)
             else:
                 skipped.add(gtype)
                 continue
@@ -842,6 +851,7 @@ class MuJoCoAdapter:
                 is_infinite=is_infinite,
                 is_static=int(m.body_weldid[body]) == 0,
                 island_body=body if int(m.body_dofnum[int(m.body_weldid[body])]) else -1,
+                convex_mesh=hull_key,
             )
 
         for si in range(m.nsite):
@@ -914,6 +924,7 @@ class MuJoCoAdapter:
         src.meshes = {k: v for k, v in meshes.items() if v is not None}
         src.dynamic_meshes = frozenset(spec.key for spec in self._deformables)
         src.geom_mesh = mesh_keys
+        src.geom_convex_mesh = convex_mesh_keys
         src.geom_material = mats
         n = len(mesh_keys)
         src.geom_size = np.stack(sizes) if n else np.zeros((0, 3), np.float32)
@@ -1673,6 +1684,45 @@ class MuJoCoAdapter:
             positions=np.ascontiguousarray(positions, np.float32),
             normals=np.ascontiguousarray(normals, np.float32),
             uvs=np.ascontiguousarray(uvs, np.float32),
+            indices=np.arange(len(positions), dtype=np.uint32),
+        )
+
+    def _build_convex_hull(self, mesh_id: int) -> MeshData:
+        m = self._m
+        graph_adr = int(m.mesh_graphadr[mesh_id])
+        vertex_count = int(m.mesh_graph[graph_adr])
+        face_count = int(m.mesh_graph[graph_adr + 1])
+        face_adr = graph_adr + 2 + 3 * vertex_count + 3 * face_count
+        faces = np.asarray(m.mesh_graph[face_adr : face_adr + 3 * face_count], np.int32).reshape(
+            -1, 3
+        )
+
+        vertex_adr = int(m.mesh_vertadr[mesh_id])
+        vertices = np.asarray(
+            m.mesh_vert[vertex_adr : vertex_adr + int(m.mesh_vertnum[mesh_id])], np.float32
+        )
+        triangles = vertices[faces]
+        face_normals = np.cross(
+            triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+        )
+        lengths = np.linalg.norm(face_normals, axis=1, keepdims=True)
+        face_normals /= np.maximum(lengths, 1e-12)
+
+        texcoord_adr = int(m.mesh_texcoordadr[mesh_id])
+        texcoord_count = int(m.mesh_texcoordnum[mesh_id])
+        if texcoord_adr >= 0 and texcoord_count > int(faces.max(initial=-1)):
+            texcoords = np.asarray(
+                m.mesh_texcoord[texcoord_adr : texcoord_adr + texcoord_count], np.float32
+            )[faces]
+        else:
+            texcoords = np.zeros((face_count, 3, 2), np.float32)
+
+        positions = triangles.reshape(-1, 3)
+        normals = np.repeat(face_normals[:, None, :], 3, axis=1).reshape(-1, 3)
+        return MeshData(
+            positions=np.ascontiguousarray(positions, np.float32),
+            normals=np.ascontiguousarray(normals, np.float32),
+            uvs=np.ascontiguousarray(texcoords.reshape(-1, 2), np.float32),
             indices=np.arange(len(positions), dtype=np.uint32),
         )
 

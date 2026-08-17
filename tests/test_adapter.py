@@ -710,6 +710,25 @@ def test_mujoco_visuals_cover_heightfield_sites_and_tendon():
         a.release()
 
 
+def test_collision_mesh_exposes_mujoco_compiled_convex_hull():
+    from forge_viewer.assets import resolve
+    from forge_viewer.types import MeshShape
+
+    adapter = MuJoCoAdapter(resolve("convex_hull"))
+    try:
+        source = adapter.scene_source()
+        assert len(source.geom_convex_mesh) == source.instance_count == 1
+        original = source.geom_mesh[0]
+        hull = source.geom_convex_mesh[0]
+        assert original.shape is MeshShape.ASSET
+        assert hull.shape is MeshShape.CONVEX_HULL
+        assert original in source.meshes and hull in source.meshes
+        assert source.meshes[original].triangle_count == 20
+        assert source.meshes[hull].triangle_count == 16
+    finally:
+        adapter.release()
+
+
 def test_actuator_visual_metadata_and_controls_follow_mujoco_addresses():
     from forge_viewer.assets import resolve
     from forge_viewer.mujoco_audit import audit_model

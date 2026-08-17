@@ -118,6 +118,7 @@ class ForgeBackend:
         self._flags[RenderFlag.CONTACTFORCE] = False
         self._flags[RenderFlag.CONTACTSPLIT] = False
         self._flags[RenderFlag.ISLAND] = False
+        self._flags[RenderFlag.CONVEXHULL] = False
         self._flags[RenderFlag.AUTOCONNECT] = False
         self._flags[RenderFlag.ACTUATOR] = False
         self._flags[RenderFlag.ACTIVATION] = False
@@ -169,6 +170,7 @@ class ForgeBackend:
             RenderFlag.FLEXFACE,
             RenderFlag.FLEXSKIN,
             RenderFlag.ISLAND,
+            RenderFlag.CONVEXHULL,
         }
         if "shadow" in self._passes:
             flags.add(RenderFlag.SHADOW)
@@ -1226,6 +1228,7 @@ class ForgeBackend:
             RenderFlag.FLEXFACE,
             RenderFlag.FLEXSKIN,
             RenderFlag.ISLAND,
+            RenderFlag.CONVEXHULL,
         }:
             self._sync_instance_visibility()
         return True
@@ -1239,6 +1242,7 @@ class ForgeBackend:
             flex_face=self.get_flag(RenderFlag.FLEXFACE),
             flex_skin=self.get_flag(RenderFlag.FLEXSKIN),
             island=self.get_flag(RenderFlag.ISLAND),
+            convex_hull=self.get_flag(RenderFlag.CONVEXHULL),
         )
         if changed:
             self.set_render_scene(self._builder.scene)

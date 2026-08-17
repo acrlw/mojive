@@ -446,6 +446,28 @@ def test_visual_options_filter_static_skin_and_flex_instances():
     assert builder.scene.count == 3
 
 
+def test_convex_hull_option_switches_mesh_keys():
+    src = make_source(bodies=1, with_plane=False)
+    original = src.geom_mesh[0]
+    hull = MeshKey(MeshShape.CONVEX_HULL, 7)
+    src.geom_convex_mesh = src.geom_mesh.copy()
+    src.geom_convex_mesh[0] = hull
+    builder = SceneSourceBuilder()
+    builder.set_source(src, CameraView())
+
+    assert original in {key for key, _ in builder.scene.bucket_keys}
+    assert hull not in {key for key, _ in builder.scene.bucket_keys}
+    assert builder.set_visual_options(
+        static=True,
+        skin=True,
+        flex_face=False,
+        flex_skin=True,
+        convex_hull=True,
+    )
+    assert hull in {key for key, _ in builder.scene.bucket_keys}
+    assert original not in {key for key, _ in builder.scene.bucket_keys}
+
+
 def test_island_colors_replace_dynamic_instance_color_and_texture():
     src = make_source(bodies=1)
     src.materials[1] = _grid_material()

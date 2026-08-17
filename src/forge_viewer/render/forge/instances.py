@@ -95,6 +95,7 @@ class InstanceStore:
         self._program: moderngl.Program | None = None
         self._generation = -1
         self._meshes: list[GpuMesh | None] = []
+        self._keys = ()
 
         self._raw = np.zeros((0, INSTANCE_WORDS), np.uint32)
         self._staging = self._raw.view(np.float32)
@@ -127,6 +128,7 @@ class InstanceStore:
         self._program = program
         self._generation = generation
         self._meshes = meshes
+        self._keys = scene.bucket_keys
         self._ranges = scene.bucket_ranges
 
         assert self.buffer is not None
@@ -250,6 +252,7 @@ class InstanceStore:
     def needs_rebuild(self, scene: RenderScene, generation: int) -> bool:
         return (
             generation != self._generation
+            or scene.bucket_keys != self._keys
             or scene.bucket_ranges != self._ranges
             or scene.count > self.capacity
         )

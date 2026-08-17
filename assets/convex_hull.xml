@@ -1,0 +1,20 @@
+<mujoco model="convex hull">
+  <compiler angle="degree"/>
+  <option gravity="0 0 0"/>
+
+  <asset>
+    <mesh name="concave_l"
+          vertex="-1 -1 -0.25  1 -1 -0.25  1 0 -0.25  0 0 -0.25  0 1 -0.25  -1 1 -0.25
+                  -1 -1  0.25  1 -1  0.25  1 0  0.25  0 0  0.25  0 1  0.25  -1 1  0.25"
+          face="6 7 8  6 8 9  6 9 10  6 10 11
+                0 2 1  0 3 2  0 4 3  0 5 4
+                0 1 7  0 7 6  1 2 8  1 8 7  2 3 9  2 9 8
+                3 4 10  3 10 9  4 5 11  4 11 10  5 0 6  5 6 11"/>
+  </asset>
+
+  <worldbody>
+    <light pos="3 -4 6" dir="-0.4 0.5 -1" diffuse="0.9 0.9 0.9"/>
+    <geom name="concave_collision_mesh" type="mesh" mesh="concave_l"
+          rgba="0.22 0.58 0.92 1"/>
+  </worldbody>
+</mujoco>

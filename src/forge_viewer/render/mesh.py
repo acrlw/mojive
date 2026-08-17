@@ -46,6 +46,7 @@ BUILTIN_SHAPES: tuple[MeshShape, ...] = tuple(
         MeshShape.FLEX,
         MeshShape.FLEX_FACE,
         MeshShape.SKIN,
+        MeshShape.CONVEX_HULL,
     )
 )
 

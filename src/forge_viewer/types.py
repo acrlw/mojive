@@ -126,6 +126,7 @@ class MeshShape(enum.StrEnum):
     FLEX_FACE = "flex_face"
     SKIN = "skin"
     ASSET = "asset"
+    CONVEX_HULL = "convex_hull"
 
 
 class InstancePoseSource(enum.IntEnum):

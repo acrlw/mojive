@@ -352,6 +352,7 @@ class SceneSource:
     materials: list[Material] = field(default_factory=list)
 
     geom_mesh: list[MeshKey] = field(default_factory=list)
+    geom_convex_mesh: list[MeshKey] = field(default_factory=list)
     geom_material: list[int] = field(default_factory=list)
     geom_size: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     geom_rgba: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))

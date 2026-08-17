@@ -81,6 +81,7 @@ class SceneSourceBuilder:
         self._show_flex_face = False
         self._show_flex_skin = True
         self._show_island = False
+        self._show_convex_hull = False
         self._planes: list[_InfinitePlane] = []
         self._tri_counts: dict[MeshKey, int] = {}
         self._notes: tuple[str, ...] = ()
@@ -138,15 +139,30 @@ class SceneSourceBuilder:
         return self._build(camera if camera is not None else self._scene.camera)
 
     def set_visual_options(
-        self, *, static: bool, skin: bool, flex_face: bool, flex_skin: bool, island: bool = False
+        self,
+        *,
+        static: bool,
+        skin: bool,
+        flex_face: bool,
+        flex_skin: bool,
+        island: bool = False,
+        convex_hull: bool = False,
     ) -> bool:
-        options = bool(static), bool(skin), bool(flex_face), bool(flex_skin), bool(island)
+        options = (
+            bool(static),
+            bool(skin),
+            bool(flex_face),
+            bool(flex_skin),
+            bool(island),
+            bool(convex_hull),
+        )
         current = (
             self._show_static,
             self._show_skin,
             self._show_flex_face,
             self._show_flex_skin,
             self._show_island,
+            self._show_convex_hull,
         )
         if options == current:
             return False
@@ -156,6 +172,7 @@ class SceneSourceBuilder:
             self._show_flex_face,
             self._show_flex_skin,
             self._show_island,
+            self._show_convex_hull,
         ) = options
         self.rebuild()
         return True
@@ -194,7 +211,11 @@ class SceneSourceBuilder:
                 rgba[3] = 1.0
             matid = sb.material_id(mat)
             size = np.asarray(src.geom_size[i], np.float32)
-            key: MeshKey = src.geom_mesh[i]
+            key: MeshKey = (
+                src.geom_convex_mesh[i]
+                if self._show_convex_hull and len(src.geom_convex_mesh) == src.instance_count
+                else src.geom_mesh[i]
+            )
             infinite = bool(src.geom_infinite_plane[i]) if len(src.geom_infinite_plane) else False
 
             local = (

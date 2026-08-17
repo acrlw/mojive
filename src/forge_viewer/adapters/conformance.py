@@ -101,8 +101,14 @@ def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
 
     mesh_ok = True
     mesh_detail = []
-    for key in source.geom_mesh:
-        if key.shape in (MeshShape.ASSET, MeshShape.HEIGHTFIELD, MeshShape.FLEX, MeshShape.SKIN):
+    for key in (*source.geom_mesh, *source.geom_convex_mesh):
+        if key.shape in (
+            MeshShape.ASSET,
+            MeshShape.CONVEX_HULL,
+            MeshShape.HEIGHTFIELD,
+            MeshShape.FLEX,
+            MeshShape.SKIN,
+        ):
             present = key in source.meshes
             mesh_ok &= present
             if not present:

@@ -40,7 +40,11 @@ _RND_COVERAGE = (
 )
 
 _VIS_COVERAGE = (
-    Coverage("mjVIS_CONVEXHULL", "unsupported", "no separate convex-hull overlay"),
+    Coverage(
+        "mjVIS_CONVEXHULL",
+        "supported",
+        "collision mesh and SDF geoms switch to MuJoCo compiled convex hulls",
+    ),
     Coverage("mjVIS_TEXTURE", "supported", "2D color textures and skyboxes"),
     Coverage("mjVIS_JOINT", "supported", "solid free, ball, slide and hinge markers"),
     Coverage(
