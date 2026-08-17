@@ -111,6 +111,7 @@ NODE_COLORS: dict[NodeKind, RGBA] = {
     NodeKind.GEOM: rgb8(172, 125, 101),
     NodeKind.LINK: rgb8(154, 150, 198),
     NodeKind.CAMERA: rgb8(138, 183, 192),
+    NodeKind.ENVIRONMENT: rgb8(35, 71, 80),
     NodeKind.LIGHT: rgb8(202, 198, 152),
     NodeKind.ROBOT: rgb8(197, 222, 212),
     NodeKind.SKIN: rgb8(239, 243, 241),

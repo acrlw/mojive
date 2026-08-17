@@ -143,6 +143,27 @@ def test_hierarchy_visibility_toggle_does_not_select_the_row(viewer):
     viewer.session.submit(cmd.Select(selected_before))
 
 
+def test_environment_inspector_controls_render_flags(viewer):
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+    from forge_viewer.adapters.base import NodeKind
+    from forge_viewer.render.backend import RenderFlag
+
+    selected_before = viewer.session.selected
+    environment = next(n for n in viewer.session.nodes if n.kind is NodeKind.ENVIRONMENT)
+    viewer.session.submit(cmd.Select(environment.object_id))
+    activate_panel(viewer, "Inspector")
+    point = item_rect(viewer, "checkbox", "enabled##fog")
+    before = viewer.backend.get_flag(RenderFlag.FOG)
+
+    click(viewer, imgui.get_io(), point)
+    assert viewer.backend.get_flag(RenderFlag.FOG) is not before
+
+    click(viewer, imgui.get_io(), point)
+    viewer.session.submit(cmd.Select(selected_before))
+
+
 def test_orbit_moves_camera_and_picture(viewer):
 
     from imgui_bundle import imgui

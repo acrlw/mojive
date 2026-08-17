@@ -7,12 +7,14 @@ import numpy as np
 
 from . import commands as cmd
 from .adapters.base import (
+    ENVIRONMENT_OBJECT_ID,
     ActuatorInfo,
     CameraInfo,
     EqualityConstraintInfo,
     FrameNeeds,
     JointInfo,
     KeyframeInfo,
+    NodeKind,
     SceneAdapter,
     SceneFrame,
     SceneNode,
@@ -20,7 +22,7 @@ from .adapters.base import (
     SensorInfo,
 )
 from .commands import Command, CommandResult, Query
-from .types import CameraView, Light
+from .types import CameraView, Environment, Light
 
 
 @dataclass
@@ -52,6 +54,7 @@ class Session:
         self._frame = SceneFrame()
         self._source: SceneSource | None = None
         self._light_overrides: dict[int, Light] = {}
+        self._environment_override: Environment | None = None
         self._camera_overrides: dict[int, CameraView] = {}
         self._nodes: list[SceneNode] = []
         self._by_object_id: dict[int, SceneNode] = {}
@@ -257,6 +260,7 @@ class Session:
             self._perturb = PerturbState()
             self._active_keyframe = -1
             self._light_overrides.clear()
+            self._environment_override = None
             self._camera_overrides.clear()
             self._refresh_structure()
             return CommandResult.good("Scene reloaded")
@@ -277,6 +281,7 @@ class Session:
             self._perturb = PerturbState()
             self._active_keyframe = -1
             self._light_overrides.clear()
+            self._environment_override = None
             self._camera_overrides.clear()
             self._refresh_structure()
             return CommandResult.good(f"Loaded {c.path.name}")
@@ -310,6 +315,12 @@ class Session:
             if node is None:
                 return CommandResult.bad(f"Unknown node_id={c.node_id}")
             node.visible = c.visible
+            if self._source is not None:
+                source_node = next(
+                    (item for item in self._source.nodes if item.node_id == c.node_id), None
+                )
+                if source_node is not None:
+                    source_node.visible = c.visible
             self._structure_generation += 1
             return CommandResult.good("")
 
@@ -392,6 +403,16 @@ class Session:
                 if node.light_index == c.light_id:
                     node.visible = c.light.active
                     break
+            self._compose_lights()
+            message = "" if writeback else "edited in Forge; backend write-back is unavailable"
+            return CommandResult.good(message)
+
+        if isinstance(c, cmd.SetEnvironment):
+            if self._source is None:
+                return CommandResult.bad("environment is unavailable")
+            writeback = self._adapter.set_environment(c.environment)
+            self._source.lights = self._source.lights.with_environment(c.environment)
+            self._environment_override = c.environment
             self._compose_lights()
             message = "" if writeback else "edited in Forge; backend write-back is unavailable"
             return CommandResult.good(message)
@@ -482,13 +503,33 @@ class Session:
 
     def _refresh_structure(self) -> None:
         self._source = self._adapter.scene_source()
+        if self._environment_override is not None:
+            self._source.lights = self._source.lights.with_environment(self._environment_override)
         if self._light_overrides:
             lights = list(self._source.lights.lights)
             for i, light in self._light_overrides.items():
                 if i < len(lights):
                     lights[i] = light
             self._source.lights = replace(self._source.lights, lights=tuple(lights))
-        self._nodes = self._adapter.nodes()
+        self._nodes = [
+            replace(node, children=list(node.children)) for node in self._adapter.nodes()
+        ]
+        if not any(node.kind is NodeKind.ENVIRONMENT for node in self._nodes):
+            parent = next(
+                (node for node in self._nodes if node.kind is NodeKind.WORLD and node.parent < 0),
+                None,
+            )
+            node_id = max((node.node_id for node in self._nodes), default=-1) + 1
+            environment = SceneNode(
+                node_id,
+                "environment",
+                NodeKind.ENVIRONMENT,
+                parent=parent.node_id if parent is not None else -1,
+                object_id=ENVIRONMENT_OBJECT_ID,
+            )
+            self._nodes.append(environment)
+            if parent is not None:
+                parent.children.append(node_id)
         for node in self._nodes:
             if 0 <= node.light_index < len(self._source.lights.lights):
                 node.visible = self._source.lights.lights[node.light_index].active

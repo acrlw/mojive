@@ -34,7 +34,7 @@ help:
 		'  make deformables       flex/skin dynamic meshes' \
 		'' \
 		'Rendering and output:' \
-		'  make lighting          editable spot/point/area lights, fog, and haze' \
+		'  make lighting          editable lights and environment' \
 		'  make many-lights       16-light and 24-light reference images' \
 		'  make scene-icons       camera and light scene icons' \
 		'  make reflect           planar reflection' \
@@ -150,7 +150,7 @@ CONFORMANCE_ASSET ?=
 adapter-conformance:
 	$(PY) -m forge_viewer.cli conformance $(ADAPTER) $(if $(CONFORMANCE_ASSET),--asset $(CONFORMANCE_ASSET),) $(ARGS)
 
-## Editable spot, point, and area lights with fog and haze.
+## Editable lights and Environment controls for ambient light, fog, haze, and headlight.
 lighting:
 	$(PY) -m forge_viewer.cli canvas --demo lighting $(ARGS)
 

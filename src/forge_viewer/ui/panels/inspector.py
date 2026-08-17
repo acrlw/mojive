@@ -8,7 +8,8 @@ from imgui_bundle import imgui
 from ... import commands as cmd
 from ... import math3d
 from ...adapters.base import FrameNeeds, NodeKind, SceneNode
-from ...types import LightKind
+from ...render.backend import RenderFlag
+from ...types import DEFAULT_HEADLIGHT, Environment, LightKind
 from . import Panel, PanelContext, begin_kv_table, labeled
 
 GIZMO_REFUSAL_RUNNING = "physics is running; pause to move things"
@@ -64,6 +65,9 @@ class InspectorPanel(Panel):
             return
         if node.kind is NodeKind.CAMERA:
             self._camera(ctx, node)
+            return
+        if node.kind is NodeKind.ENVIRONMENT:
+            self._environment(ctx)
             return
         self._transform(ctx, node)
         self._gizmo_reason(ctx, node)
@@ -343,6 +347,93 @@ class InspectorPanel(Panel):
                     ),
                 )
             )
+
+    def _environment(self, ctx: PanelContext) -> None:
+        source = ctx.session.source
+        if source is None:
+            imgui.text_disabled("environment data is unavailable")
+            return
+        environment = source.lights.environment()
+        changed = False
+
+        imgui.text_disabled("ambient light")
+        ambient_changed, ambient = imgui.color_edit3("color##ambient", environment.ambient)
+        changed |= ambient_changed
+
+        imgui.separator()
+        imgui.text_disabled("headlight")
+        headlight_enabled = environment.headlight is not None
+        enabled_changed, headlight_enabled = imgui.checkbox("enabled##headlight", headlight_enabled)
+        changed |= enabled_changed
+        headlight = environment.headlight or DEFAULT_HEADLIGHT
+        intensity = float(np.max(headlight.diffuse))
+        color = headlight.diffuse / intensity if intensity > 0.0 else np.ones(3, np.float32)
+        color_changed, color = imgui.color_edit3("color##headlight", color)
+        intensity_changed, intensity = imgui.drag_float(
+            "intensity##headlight", intensity, 0.01, 0.0, 10.0, "%.2f"
+        )
+        specular_changed, specular = imgui.color_edit3("specular##headlight", headlight.specular)
+        headlight_ambient_changed, headlight_ambient = imgui.color_edit3(
+            "ambient##headlight", headlight.ambient
+        )
+        changed |= (
+            color_changed or intensity_changed or specular_changed or headlight_ambient_changed
+        )
+
+        imgui.separator()
+        imgui.text_disabled("fog")
+        self._render_flag(ctx, RenderFlag.FOG, "enabled##fog")
+        fog_color_changed, fog_color = imgui.color_edit3("color##fog", environment.fog_color)
+        fog_start_changed, fog_start = imgui.drag_float(
+            "start", environment.fog_start, 0.05, 0.0, 1e6, "%.2f m"
+        )
+        fog_end_changed, fog_end = imgui.drag_float(
+            "end", environment.fog_end, 0.05, 0.0, 1e6, "%.2f m"
+        )
+        changed |= fog_color_changed or fog_start_changed or fog_end_changed
+
+        imgui.separator()
+        imgui.text_disabled("haze")
+        self._render_flag(ctx, RenderFlag.HAZE, "enabled##haze")
+        haze_color_changed, haze_color = imgui.color_edit3("color##haze", environment.haze_color)
+        haze_density_changed, haze_density = imgui.drag_float(
+            "density", environment.haze_density, 0.001, 0.0, 100.0, "%.4f / m"
+        )
+        changed |= haze_color_changed or haze_density_changed
+
+        if changed:
+            ctx.submit(
+                cmd.SetEnvironment(
+                    Environment(
+                        headlight=(
+                            replace(
+                                headlight,
+                                diffuse=np.asarray(color, np.float32) * float(intensity),
+                                specular=np.asarray(specular, np.float32),
+                                ambient=np.asarray(headlight_ambient, np.float32),
+                                active=True,
+                            )
+                            if headlight_enabled
+                            else None
+                        ),
+                        ambient=np.asarray(ambient, np.float32),
+                        fog_color=np.asarray(fog_color, np.float32),
+                        fog_start=float(fog_start),
+                        fog_end=float(fog_end),
+                        haze_color=np.asarray(haze_color, np.float32),
+                        haze_density=float(haze_density),
+                    )
+                )
+            )
+
+    @staticmethod
+    def _render_flag(ctx: PanelContext, flag: RenderFlag, label: str) -> None:
+        supported = ctx.backend.caps.supports(flag)
+        imgui.begin_disabled(not supported)
+        changed, value = imgui.checkbox(label, ctx.backend.get_flag(flag))
+        imgui.end_disabled()
+        if changed:
+            ctx.backend.set_flag(flag, value)
 
     def _camera(self, ctx: PanelContext, node: SceneNode) -> None:
         index = node.camera_index

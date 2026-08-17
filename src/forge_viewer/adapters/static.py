@@ -43,6 +43,9 @@ class StaticSceneAdapter(SceneAdapterBase):
     def set_light(self, light_id: int, light) -> bool:
         return self.scene.set_light(light_id, light)
 
+    def set_environment(self, environment) -> bool:
+        return self.scene.set_environment(environment)
+
     def cameras(self) -> list[CameraInfo]:
         return self.scene.camera_infos()
 

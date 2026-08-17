@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .types import CameraView, Light
+from .types import CameraView, Environment, Light
 
 
 @dataclass(frozen=True)
@@ -82,6 +82,11 @@ class SetPose(Command):
 class SetLight(Command):
     light_id: int
     light: Light
+
+
+@dataclass(frozen=True)
+class SetEnvironment(Command):
+    environment: Environment
 
 
 @dataclass(frozen=True)

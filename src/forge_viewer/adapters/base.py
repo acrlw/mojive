@@ -6,7 +6,16 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 
-from ..types import CameraView, LightSet, Material, MeshData, MeshKey, MeshUpdate, TextureData
+from ..types import (
+    CameraView,
+    Environment,
+    LightSet,
+    Material,
+    MeshData,
+    MeshKey,
+    MeshUpdate,
+    TextureData,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -14,6 +23,7 @@ if TYPE_CHECKING:
 
 LIGHT_OBJECT_BASE = 0x70000000
 CAMERA_OBJECT_BASE = 0x71000000
+ENVIRONMENT_OBJECT_ID = 0x72000000
 
 
 class NodeKind(enum.StrEnum):
@@ -24,6 +34,7 @@ class NodeKind(enum.StrEnum):
     JOINT = "joint"
     LIGHT = "light"
     CAMERA = "camera"
+    ENVIRONMENT = "environment"
     SITE = "site"
     FLEX = "flex"
     SKIN = "skin"
@@ -519,6 +530,11 @@ class SceneAdapterBase:
         source.lights = replace(source.lights, lights=tuple(lights))
         return True
 
+    def set_environment(self, environment: Environment) -> bool:
+        source = self.scene_source()
+        source.lights = source.lights.with_environment(environment)
+        return True
+
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
         return False
 
@@ -571,6 +587,7 @@ class SceneAdapter(Protocol):
     def set_ctrl(self, index: int, value: float) -> bool: ...
     def set_pose(self, node_id: int, position, rotation) -> bool: ...
     def set_light(self, light_id: int, light) -> bool: ...
+    def set_environment(self, environment: Environment) -> bool: ...
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool: ...
     def apply_perturb(
         self, node_id: int, target_position: np.ndarray, target_rotation: np.ndarray, mode: str

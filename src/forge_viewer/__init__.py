@@ -32,6 +32,7 @@ from .render.debugdraw import DebugDraw, Layer, Occlusion
 from .scene import Scene, SceneObject
 from .types import (
     CameraView,
+    Environment,
     Light,
     LightKind,
     LightSet,
@@ -74,6 +75,7 @@ __all__ = [
     "DebugView",
     "DiagnosticFrame",
     "DiagnosticSource",
+    "Environment",
     "EqualityConstraintInfo",
     "FrameMode",
     "FrameNeeds",

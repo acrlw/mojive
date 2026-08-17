@@ -115,6 +115,8 @@ class HierarchyPanel(Panel):
 
     @staticmethod
     def _visibility_toggle(ctx: PanelContext, node: SceneNode) -> None:
+        if node.kind is NodeKind.ENVIRONMENT:
+            return
         size = imgui.get_frame_height()
         avail = imgui.get_content_region_avail().x
         imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, (avail - size) * 0.5))

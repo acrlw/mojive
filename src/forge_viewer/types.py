@@ -83,6 +83,17 @@ class Light:
 
 
 @dataclass(frozen=True)
+class Environment:
+    headlight: Light | None = None
+    ambient: np.ndarray = field(default_factory=lambda: np.full(3, 0.2, np.float32))
+    fog_color: np.ndarray = field(default_factory=lambda: np.zeros(3, np.float32))
+    fog_start: float = 0.0
+    fog_end: float = 0.0
+    haze_color: np.ndarray = field(default_factory=lambda: np.ones(3, np.float32))
+    haze_density: float = 0.0
+
+
+@dataclass(frozen=True)
 class LightSet:
     lights: tuple[Light, ...] = ()
     headlight: Light | None = None
@@ -96,6 +107,29 @@ class LightSet:
 
     def shadow_casters(self) -> tuple[Light, ...]:
         return tuple(x for x in self.lights if x.active and x.cast_shadow)
+
+    def environment(self) -> Environment:
+        return Environment(
+            headlight=self.headlight,
+            ambient=self.ambient,
+            fog_color=self.fog_color,
+            fog_start=self.fog_start,
+            fog_end=self.fog_end,
+            haze_color=self.haze_color,
+            haze_density=self.haze_density,
+        )
+
+    def with_environment(self, environment: Environment) -> LightSet:
+        return replace(
+            self,
+            headlight=environment.headlight,
+            ambient=environment.ambient,
+            fog_color=environment.fog_color,
+            fog_start=environment.fog_start,
+            fog_end=environment.fog_end,
+            haze_color=environment.haze_color,
+            haze_density=environment.haze_density,
+        )
 
 
 DEFAULT_HEADLIGHT = Light(

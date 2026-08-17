@@ -17,6 +17,7 @@ from .types import (
     DEFAULT_HEADLIGHT,
     DEFAULT_MATERIAL,
     CameraView,
+    Environment,
     LightSet,
     Material,
     MeshData,
@@ -212,6 +213,12 @@ class Scene:
         lights = list(self.lights.lights)
         lights[i] = light
         self.lights = replace(self.lights, lights=tuple(lights))
+        if self._built_revision == self._revision:
+            self._source.lights = self.lights
+        return True
+
+    def set_environment(self, environment: Environment) -> bool:
+        self.lights = self.lights.with_environment(environment)
         if self._built_revision == self._revision:
             self._source.lights = self.lights
         return True

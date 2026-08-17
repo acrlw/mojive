@@ -59,7 +59,7 @@ Every user-facing feature has a reproducible Make target.
 | `make gizmo-gallery` | Enlarged position, rotation, and snap reference images |
 | `make perturb` | MuJoCo translation and rotation perturbation |
 | `make text-overlay` | GPU world-space text |
-| `make lighting` | Editable point, spot, and area lights with fog and haze |
+| `make lighting` | Editable lights and Environment controls for ambient light, fog, haze, and headlight |
 | `make many-lights` | 16-light and 24-light MuJoCo reference images |
 | `make scene-icons` | Camera and light scene icons |
 | `make reflect` | Planar reflections |

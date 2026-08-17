@@ -17,6 +17,7 @@ def test_adapter_and_render_extension_types_are_public():
         "DebugDraw",
         "DiagnosticFrame",
         "DiagnosticSource",
+        "Environment",
         "FrameNeeds",
         "FrameMode",
         "JointInfo",

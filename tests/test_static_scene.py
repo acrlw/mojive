@@ -10,7 +10,7 @@ from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.render.builder import SceneSourceBuilder
 from forge_viewer.scene import Scene
 from forge_viewer.session import Session
-from forge_viewer.types import CameraView, Light, LightKind, LightSet, MeshData
+from forge_viewer.types import CameraView, Environment, Light, LightKind, LightSet, MeshData
 
 
 def test_static_scene_builds_without_a_physics_package():
@@ -72,6 +72,18 @@ def test_static_session_has_pose_editing_but_no_fake_playback():
     assert np.allclose(scene.frame.geom_xpos[0], 1.0)
 
 
+def test_visibility_edits_reach_the_render_source():
+    scene = Scene()
+    obj = scene.box(name="visible")
+    session = Session(StaticSceneAdapter(scene))
+    node = session.node_by_object_id(obj.object_id)
+
+    assert session.submit(cmd.SetVisible(node.node_id, False))
+    source_node = next(item for item in session.source.nodes if item.node_id == node.node_id)
+    assert not node.visible
+    assert not source_node.visible
+
+
 def test_lights_are_editable_forge_entities_without_physics():
     light = Light(kind=LightKind.POINT, position=np.array([1.0, 2.0, 3.0], np.float32))
     scene = Scene(lights=LightSet(lights=(light,)))
@@ -91,6 +103,34 @@ def test_lights_are_editable_forge_entities_without_physics():
     assert session.source.lights.lights[0] is edited
     assert np.allclose(session.frame.lights.lights[0].diffuse, [0.2, 0.4, 0.8])
     assert not node.visible
+
+
+def test_environment_is_editable_without_a_physics_backend():
+    scene = Scene()
+    session = Session(StaticSceneAdapter(scene))
+    node = next(node for node in session.nodes if node.kind is NodeKind.ENVIRONMENT)
+
+    assert node.object_id
+    assert session.submit(cmd.Select(node.object_id))
+    assert session.selected_node is node
+
+    environment = Environment(
+        headlight=None,
+        ambient=np.array([0.1, 0.2, 0.3], np.float32),
+        fog_color=np.array([0.3, 0.4, 0.5], np.float32),
+        fog_start=2.0,
+        fog_end=12.0,
+        haze_color=np.array([0.8, 0.7, 0.6], np.float32),
+        haze_density=0.04,
+    )
+    assert session.submit(cmd.SetEnvironment(environment))
+    assert np.allclose(scene.lights.ambient, environment.ambient)
+    assert np.allclose(session.source.lights.fog_color, environment.fog_color)
+    assert session.frame.lights.haze_density == environment.haze_density
+
+    scene.box(name="new body")
+    session.tick(FrameNeeds())
+    assert session.source.lights.fog_end == environment.fog_end
 
 
 def test_cameras_are_editable_forge_entities_without_physics():
