@@ -1,14 +1,24 @@
 from typing import TYPE_CHECKING
 
 from .adapters.base import (
+    ActuatorInfo,
+    ActuatorVisualKind,
     AdapterCaps,
     CameraInfo,
+    DiagnosticFrame,
+    DiagnosticSource,
     FrameNeeds,
+    JointInfo,
+    JointVisualKind,
+    KeyframeInfo,
     NodeKind,
+    SceneAdapter,
     SceneAdapterBase,
     SceneFrame,
     SceneNode,
     SceneSource,
+    SensorInfo,
+    VisualGroupInfo,
 )
 from .adapters.conformance import ConformanceCheck, ConformanceReport, check_adapter
 from .adapters.toy import ToyPhysicsAdapter
@@ -52,6 +62,8 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "ActuatorInfo",
+    "ActuatorVisualKind",
     "AdapterCaps",
     "CameraInfo",
     "CameraView",
@@ -59,7 +71,12 @@ __all__ = [
     "ConformanceReport",
     "DebugDraw",
     "DebugView",
+    "DiagnosticFrame",
+    "DiagnosticSource",
     "FrameNeeds",
+    "JointInfo",
+    "JointVisualKind",
+    "KeyframeInfo",
     "Layer",
     "Light",
     "LightKind",
@@ -75,15 +92,18 @@ __all__ = [
     "RemoteSceneAdapter",
     "RenderFlag",
     "Scene",
+    "SceneAdapter",
     "SceneAdapterBase",
     "SceneFrame",
     "SceneNode",
     "SceneObject",
     "SceneSource",
+    "SensorInfo",
     "SnapshotPublisher",
     "SnapshotWriter",
     "ToyPhysicsAdapter",
     "VideoRecorder",
+    "VisualGroupInfo",
     "audit_model",
     "build_from_adapter",
     "build_scene",

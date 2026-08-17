@@ -153,7 +153,13 @@ def cmd_inspect(args: argparse.Namespace) -> int:
                 for j in joints
             ],
             "actuators": [
-                {"id": a.actuator_id, "name": a.name, "range": list(a.ctrl_range)}
+                {
+                    "id": a.actuator_id,
+                    "name": a.name,
+                    "range": list(a.ctrl_range),
+                    "ctrl_address": a.ctrl_address,
+                    "ctrl_count": a.ctrl_count,
+                }
                 for a in actuators
             ],
             "keyframes": [{"id": k.keyframe_id, "name": k.name, "time": k.time} for k in keyframes],
@@ -190,7 +196,9 @@ def cmd_inspect(args: argparse.Namespace) -> int:
             print("\nActuators:")
             for a in actuators:
                 print(
-                    f"  {a.actuator_id:>3}  {a.name:<24} [{a.ctrl_range[0]:.3g}, {a.ctrl_range[1]:.3g}]"
+                    f"  {a.actuator_id:>3}  {a.name:<24} ctrl[{a.ctrl_address}:"
+                    f"{a.ctrl_address + a.ctrl_count}]  "
+                    f"[{a.ctrl_range[0]:.3g}, {a.ctrl_range[1]:.3g}]"
                 )
         return 0
     finally:

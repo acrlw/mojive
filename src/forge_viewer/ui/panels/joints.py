@@ -95,23 +95,28 @@ class JointsPanel(Panel):
 
     def _actuator_row(self, ctx: PanelContext, a: ActuatorInfo, prefix: str = "") -> None:
         ctrl = ctx.session.frame.ctrl
-        if ctrl is None or a.actuator_id >= len(ctrl):
+        if ctrl is None:
             return
         lo, hi = a.ctrl_range if a.ctrl_limited else (-1.0, 1.0)
         if hi <= lo:
             lo, hi = -1.0, 1.0
-        label = f"{prefix}{a.name or f'act{a.actuator_id}'}##c{a.actuator_id}"
-        edit = value_slider(
-            label,
-            float(ctrl[a.actuator_id]),
-            lo,
-            hi,
-            initial=self._initial_ctrl.get(a.actuator_id, 0.0),
-            fmt="%.4f",
-            more_hint="none",
-        )
-        if edit.changed:
-            ctx.submit(cmd.SetCtrl(a.actuator_id, edit.value))
+        name = a.name or f"act{a.actuator_id}"
+        for component in range(a.ctrl_count):
+            address = a.ctrl_address + component
+            if address >= len(ctrl):
+                continue
+            suffix = f"[{component}]" if a.ctrl_count > 1 else ""
+            edit = value_slider(
+                f"{prefix}{name}{suffix}##c{address}",
+                float(ctrl[address]),
+                lo,
+                hi,
+                initial=self._initial_ctrl.get(address, 0.0),
+                fmt="%.4f",
+                more_hint="none",
+            )
+            if edit.changed:
+                ctx.submit(cmd.SetCtrl(address, edit.value))
 
     def _snapshot(self, ctx: PanelContext) -> None:
 
@@ -129,9 +134,10 @@ class JointsPanel(Panel):
             self._snapshot_generation = gen
         if frame.ctrl is not None and not self._initial_ctrl:
             self._initial_ctrl = {
-                a.actuator_id: float(frame.ctrl[a.actuator_id])
+                address: float(frame.ctrl[address])
                 for a in ctx.session.actuators
-                if a.actuator_id < len(frame.ctrl)
+                for address in range(a.ctrl_address, a.ctrl_address + a.ctrl_count)
+                if address < len(frame.ctrl)
             }
 
 

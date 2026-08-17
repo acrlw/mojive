@@ -130,6 +130,9 @@ def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
             )
         )
         and len(source.actuator_visible) == len(source.actuator_tendon)
+        and len(source.actuator_ctrl_address) == len(source.actuator_visible)
+        and len(source.actuator_ctrl_limited) == len(source.actuator_visible)
+        and len(source.actuator_ctrl_range) == len(source.actuator_visible)
     )
     add("tendon metadata", tendon_meta_ok, f"{tendon_count} tendons")
 
@@ -174,7 +177,8 @@ def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
     controls_ok = not actuators or (
         frame.ctrl is not None
         and frame.actuator_activation is not None
-        and max(a.actuator_id for a in actuators) < len(frame.ctrl)
+        and all(a.ctrl_address + a.ctrl_count <= len(frame.ctrl) for a in actuators)
+        and len(frame.actuator_activation) == len(actuators)
     )
     add("actuator frame", controls_ok, f"{len(actuators)} actuators")
 

@@ -502,7 +502,12 @@ class ViewerApp:
         needs.deformables = bool(self.session.source and self.session.source.dynamic_meshes)
         needs.diagnostics = any(
             self.backend.get_flag(flag)
-            for flag in (RenderFlag.JOINT, RenderFlag.COM, RenderFlag.INERTIA)
+            for flag in (
+                RenderFlag.ACTUATOR,
+                RenderFlag.JOINT,
+                RenderFlag.COM,
+                RenderFlag.INERTIA,
+            )
         )
         return needs
 

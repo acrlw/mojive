@@ -238,8 +238,9 @@ def test_vertex_counts_match_the_spec_table():
         Prim.DRAG_LINK: 2,
         Prim.SOLID_ARROW: 1,
         Prim.SOLID_DOUBLE_ARROW: 1,
+        Prim.CYLINDER: 1,
     }
-    assert len(VERTEX_COUNT) == 11, "加一种图元就要改重排、压缩、上传三处——先来改这条"
+    assert len(VERTEX_COUNT) == 12, "加一种图元就要改重排、压缩、上传三处——先来改这条"
 
 
 def test_closed_polyline_packs_shared_neighbors_for_continuous_joins():

@@ -60,6 +60,8 @@ class ActuatorInfo:
     name: str
     ctrl_range: tuple[float, float]
     ctrl_limited: bool
+    ctrl_address: int = 0
+    ctrl_count: int = 1
     gain: float = 1.0
     joint: int = -1
 
@@ -126,6 +128,18 @@ class JointVisualKind(enum.IntEnum):
     HINGE = 3
 
 
+class ActuatorVisualKind(enum.IntEnum):
+    SLIDE = 0
+    HINGE = 1
+    BALL = 2
+    FREE = 3
+    SPHERE = 4
+    ELLIPSOID = 5
+    CAPSULE = 6
+    CYLINDER = 7
+    BOX = 8
+
+
 @dataclass(frozen=True)
 class DiagnosticSource:
     joint_kinds: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
@@ -147,6 +161,10 @@ class DiagnosticSource:
         default_factory=lambda: np.array([0.8, 0.2, 0.2, 0.6], np.float32)
     )
 
+    actuator_visual_kinds: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
+    actuator_visual_actuators: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
+    actuator_visual_sizes: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+
 
 @dataclass
 class DiagnosticFrame:
@@ -155,6 +173,8 @@ class DiagnosticFrame:
     subtree_com: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     body_xipos: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     body_ximat: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3), np.float32))
+    actuator_xpos: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    actuator_xmat: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3), np.float32))
 
 
 @dataclass
@@ -255,6 +275,7 @@ class SceneSource:
     actuator_tendon: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
 
     actuator_visible: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
+    actuator_ctrl_address: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
     actuator_ctrl_limited: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
     actuator_ctrl_range: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), np.float32))
     actuator_act_limited: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))

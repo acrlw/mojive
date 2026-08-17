@@ -1,0 +1,51 @@
+<mujoco model="actuator_visuals">
+  <compiler angle="degree" autolimits="true"/>
+  <option gravity="0 0 0"/>
+
+  <visual>
+    <headlight ambient="0.25 0.25 0.25" diffuse="0.55 0.55 0.55" specular="0.35 0.35 0.35"/>
+    <rgba actuatornegative="0.20 0.08 0.08 1" actuator="0.75 0.42 0.42 1"
+          actuatorpositive="1 0.05 0.05 1"/>
+  </visual>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="0 0 0.05" rgba="0.18 0.22 0.27 1"/>
+    <light name="key" type="directional" pos="2 -3 5" dir="-0.3 0.4 -1"/>
+    <camera name="overview" pos="3.4 -4.5 2.8" xyaxes="0.80 0.60 0 -0.27 0.36 0.89"/>
+
+    <body name="body_target" pos="-1.2 0 0.45">
+      <freejoint/>
+      <geom name="body_box" type="box" size="0.22 0.18 0.15" rgba="0.75 0.50 0.25 1"/>
+      <geom name="body_capsule" type="capsule" pos="0 0 0.28" size="0.07 0.14"
+            rgba="0.75 0.50 0.25 1"/>
+    </body>
+
+    <body name="hinge_anchor" pos="-0.25 0 0.55">
+      <geom type="box" size="0.08 0.08 0.08" rgba="0.35 0.38 0.42 1"/>
+      <body name="hinge_target">
+        <joint name="hinge" type="hinge" axis="0 1 0" range="-70 70"/>
+        <geom type="capsule" fromto="0 0 0 0 0 0.55" size="0.06" rgba="0.35 0.68 0.85 1"/>
+      </body>
+    </body>
+
+    <body name="slide_target" pos="0.75 0 0.45">
+      <joint name="slide" type="slide" axis="1 0 0" range="-0.3 0.3"/>
+      <geom type="box" size="0.16 0.12 0.12" rgba="0.35 0.75 0.42 1"/>
+    </body>
+
+    <body name="site_target" pos="1.6 0 0.45">
+      <freejoint/>
+      <geom type="sphere" size="0.17" rgba="0.65 0.45 0.82 1"/>
+      <site name="drive_site" type="cylinder" pos="0 0 0.28" size="0.10 0.08"
+            rgba="0.65 0.45 0.82 1"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <adhesion name="body_drive" body="body_target" gain="1" ctrlrange="0 1"/>
+    <motor name="hinge_drive" joint="hinge" ctrlrange="-1 1"/>
+    <general name="slide_drive" joint="slide" ctrlrange="-1 1" dyntype="filter"
+             dynprm="0.15" actrange="-1 1"/>
+    <motor name="site_drive" site="drive_site" gear="1 0 0 0 0 0" ctrlrange="-1 1"/>
+  </actuator>
+</mujoco>

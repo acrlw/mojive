@@ -8,7 +8,7 @@ import moderngl
 import numpy as np
 
 from ... import math3d
-from ...adapters.base import JointVisualKind, SceneFrame, SceneSource
+from ...adapters.base import ActuatorVisualKind, JointVisualKind, SceneFrame, SceneSource
 from ...gizmo import GizmoFrame
 from ...log import get_logger
 from ...types import CameraView, MeshKey, ViewportImage
@@ -201,6 +201,7 @@ class ForgeBackend:
             self.debug.layer("physics.joints").clear()
             self.debug.layer("physics.com").clear()
             self.debug.layer("physics.inertia").clear()
+            self.debug.layer("physics.actuators").clear()
 
     def set_render_scene(self, scene: RenderScene) -> None:
 
@@ -277,12 +278,14 @@ class ForgeBackend:
         joints = self.debug.layer("physics.joints", Occlusion.DEPTH)
         com = self.debug.layer("physics.com", Occlusion.DEPTH)
         inertia = self.debug.layer("physics.inertia", Occlusion.DEPTH)
+        actuators = self.debug.layer("physics.actuators", Occlusion.DEPTH)
         dynamic = frame.diagnostics
         source = self._source.diagnostics
         if dynamic is None:
             joints.clear()
             com.clear()
             inertia.clear()
+            actuators.clear()
             return
 
         if self.get_flag(RenderFlag.JOINT):
@@ -346,6 +349,65 @@ class ForgeBackend:
                 )
         else:
             inertia.clear()
+
+        self._publish_actuator_visuals(frame, actuators)
+
+    def _publish_actuator_visuals(self, frame: SceneFrame, layer) -> None:
+        source = self._source.diagnostics
+        dynamic = frame.diagnostics
+        if not self.get_flag(RenderFlag.ACTUATOR) or frame.ctrl is None or dynamic is None:
+            layer.clear()
+            return
+
+        self._fill_actuator_palette(frame)
+        for record, actuator in enumerate(source.actuator_visual_actuators):
+            actuator = int(actuator)
+            if not self._source.actuator_visible[actuator]:
+                continue
+            kind = ActuatorVisualKind(int(source.actuator_visual_kinds[record]))
+            position = dynamic.actuator_xpos[record]
+            rotation = dynamic.actuator_xmat[record]
+            size = source.actuator_visual_sizes[record]
+            color = self._actuator_palette[actuator]
+            transform = math3d.compose(position, rotation, size)
+            ident = f"actuator:{record}"
+            if kind is ActuatorVisualKind.SLIDE:
+                layer.solid_double_arrow(ident, transform, color)
+            elif kind is ActuatorVisualKind.HINGE:
+                layer.solid_arrow(ident, transform, color)
+            elif kind in (
+                ActuatorVisualKind.BALL,
+                ActuatorVisualKind.SPHERE,
+                ActuatorVisualKind.ELLIPSOID,
+            ):
+                layer.sphere(ident, transform, color)
+            elif kind in (ActuatorVisualKind.FREE, ActuatorVisualKind.BOX):
+                layer.box(ident, transform, color)
+            elif kind is ActuatorVisualKind.CYLINDER:
+                layer.cylinder(ident, transform, color)
+            else:
+                self._draw_capsule(layer, ident, position, rotation, size, color)
+
+    @staticmethod
+    def _draw_capsule(layer, ident, position, rotation, size, color) -> None:
+        radius, half_length = float(size[0]), float(size[2])
+        layer.cylinder(
+            f"{ident}:shaft",
+            math3d.compose(position, rotation, (radius, radius, half_length)),
+            color,
+        )
+        offset = rotation[:, 2] * half_length
+        sphere_scale = np.full(3, radius, np.float32)
+        layer.sphere(
+            f"{ident}:cap-",
+            math3d.compose(position - offset, rotation, sphere_scale),
+            color,
+        )
+        layer.sphere(
+            f"{ident}:cap+",
+            math3d.compose(position + offset, rotation, sphere_scale),
+            color,
+        )
 
     @staticmethod
     def _axis_rotation(axis: np.ndarray) -> np.ndarray:
@@ -485,7 +547,7 @@ class ForgeBackend:
                 low, middle, high = float(rmin), float(rmax), 1.0
             else:
                 low, middle, high = float(rmin), 0.0, float(rmax)
-            value = float(frame.ctrl[i])
+            value = float(frame.ctrl[source.actuator_ctrl_address[i]])
             if (
                 use_activation
                 and source.actuator_dynamic[i]

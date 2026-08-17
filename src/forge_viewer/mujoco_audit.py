@@ -51,12 +51,12 @@ _VIS_COVERAGE = (
     Coverage(
         "mjVIS_ACTUATOR",
         "degraded",
-        "spatial-tendon transmission paths; joint/site/body icons are not drawn",
+        "joint, joint-in-parent, site, body and spatial-tendon visuals; slider-crank pending",
     ),
     Coverage(
         "mjVIS_ACTIVATION",
         "degraded",
-        "MuJoCo range and color interpolation on spatial-tendon actuator paths",
+        "control and activation range colors on implemented actuator visuals",
     ),
     Coverage(
         "mjVIS_LIGHT",
@@ -198,34 +198,48 @@ def audit_model(model) -> dict:
                 "metadata and live values are available in the Sensors panel (F11)",
             )
         )
-    if model.nu:
+    if model.nactuator:
         findings.append(
             Finding(
                 "actuator control",
                 "supported",
-                model.nu,
+                model.nactuator,
                 "live control values and model ranges are available in the Joints panel",
             )
         )
-        tendon_actuators = int(
-            np.count_nonzero(np.asarray(model.actuator_trntype) == int(mujoco.mjtTrn.mjTRN_TENDON))
+        visual_transmissions = {
+            int(mujoco.mjtTrn.mjTRN_JOINT),
+            int(mujoco.mjtTrn.mjTRN_JOINTINPARENT),
+            int(mujoco.mjtTrn.mjTRN_TENDON),
+            int(mujoco.mjtTrn.mjTRN_SITE),
+            int(mujoco.mjtTrn.mjTRN_BODY),
+        }
+        visualized = int(
+            np.count_nonzero(
+                np.isin(np.asarray(model.actuator_trntype, np.int32), tuple(visual_transmissions))
+            )
         )
-        if tendon_actuators:
+        if visualized:
             findings.append(
                 Finding(
                     "actuator visualization",
                     "supported",
-                    tendon_actuators,
-                    "spatial tendon path with ctrl/activation color interpolation",
+                    visualized,
+                    "joint, site, body and tendon transmissions use ctrl/activation colors",
                 )
             )
-        if tendon_actuators < model.nu:
+        slider_crank = int(
+            np.count_nonzero(
+                np.asarray(model.actuator_trntype) == int(mujoco.mjtTrn.mjTRN_SLIDERCRANK)
+            )
+        )
+        if slider_crank:
             findings.append(
                 Finding(
-                    "actuator visualization",
+                    "slider-crank visualization",
                     "degraded",
-                    model.nu - tendon_actuators,
-                    "joint/site/body transmission icons are not drawn",
+                    slider_crank,
+                    "the slider and connecting rod overlay is not drawn",
                 )
             )
     if model.nflex:
@@ -278,7 +292,7 @@ def audit_model(model) -> dict:
             "camera": int(model.ncam),
             "keyframe": int(model.nkey),
             "sensor": int(model.nsensor),
-            "actuator": int(model.nu),
+            "actuator": int(model.nactuator),
             "light": int(model.nlight),
             "heightfield": int(model.nhfield),
             "flex": int(model.nflex),

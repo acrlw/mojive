@@ -23,6 +23,7 @@ from ..types import (
 )
 from .base import (
     ActuatorInfo,
+    ActuatorVisualKind,
     AdapterCaps,
     CameraInfo,
     DiagnosticFrame,
@@ -61,6 +62,12 @@ _GEOM_RGBA_DEFAULT = np.array([0.5, 0.5, 0.5, 1.0], np.float32)
 
 _TEXROLE_RGB = 1
 _TEXROLE_RGBA = 8
+
+
+_ACTUATOR_POSE_JOINT_AXIS = 0
+_ACTUATOR_POSE_JOINT_BODY = 1
+_ACTUATOR_POSE_SITE = 2
+_ACTUATOR_POSE_GEOM = 3
 
 
 class MuJoCoAdapter:
@@ -107,6 +114,8 @@ class MuJoCoAdapter:
         self._tendon_segments = np.zeros((0, 2, 3), np.float32)
         self._tendon_ids = np.zeros(0, np.int32)
         self._tendon_widths = np.zeros(0, np.float32)
+        self._actuator_visual_pose_kinds = np.zeros(0, np.uint8)
+        self._actuator_visual_pose_indices = np.zeros(0, np.int32)
 
         self._mj_geom_xpos = None
         self._mj_geom_xmat3 = None
@@ -184,7 +193,13 @@ class MuJoCoAdapter:
         self._qpos_buf = np.zeros(model.nq, np.float32)
         self._qvel_buf = np.zeros(model.nv, np.float32)
         self._ctrl_buf = np.zeros(model.nu, np.float32)
-        self._activation_buf = np.zeros(model.nu, np.float32)
+        self._activation_buf = np.zeros(model.nactuator, np.float32)
+        self._actuator_ctrl_address = np.asarray(model.actuator_ctrladr, np.int32).copy()
+        self._ctrl_actuator = np.full(model.nu, -1, np.int32)
+        for actuator, (address, count) in enumerate(
+            zip(model.actuator_ctrladr, model.actuator_ctrlnum, strict=True)
+        ):
+            self._ctrl_actuator[int(address) : int(address) + int(count)] = actuator
         self._actuator_act_index = np.where(
             np.asarray(model.actuator_dyntype) != 0,
             np.asarray(model.actuator_actadr) + np.asarray(model.actuator_actnum) - 1,
@@ -198,6 +213,8 @@ class MuJoCoAdapter:
         self._tendon_segments = np.zeros((wrap_capacity, 2, 3), np.float32)
         self._tendon_ids = np.zeros(wrap_capacity, np.int32)
         self._tendon_widths = np.zeros(wrap_capacity, np.float32)
+        self._actuator_visual_pose_kinds = np.zeros(0, np.uint8)
+        self._actuator_visual_pose_indices = np.zeros(0, np.int32)
         self._mj_geom_xpos = d.geom_xpos
         self._mj_geom_xmat3 = d.geom_xmat.reshape(g, 3, 3)
         self._mj_site_xmat3 = d.site_xmat.reshape(model.nsite, 3, 3)
@@ -335,7 +352,7 @@ class MuJoCoAdapter:
         if needs.actuator:
             np.copyto(self._ctrl_buf, d.ctrl, casting="unsafe")
             f.ctrl = self._ctrl_buf
-            np.copyto(self._activation_buf, d.ctrl, casting="unsafe")
+            np.take(d.ctrl, self._actuator_ctrl_address, out=self._activation_buf)
             active = self._actuator_act_index >= 0
             self._activation_buf[active] = d.act[self._actuator_act_index[active]]
             f.actuator_activation = self._activation_buf
@@ -371,6 +388,7 @@ class MuJoCoAdapter:
                 d.ximat.reshape(self._m.nbody, 3, 3),
                 casting="unsafe",
             )
+            self._fill_actuator_visual_poses(diagnostics)
             f.diagnostics = diagnostics
         else:
             f.diagnostics = None
@@ -440,6 +458,10 @@ class MuJoCoAdapter:
         trn_tendon = np.asarray(m.actuator_trntype) == int(mujoco.mjtTrn.mjTRN_TENDON)
         src.actuator_tendon = np.where(trn_tendon, m.actuator_trnid[:, 0], -1).astype(np.int32)
         src.actuator_visible = self._group_visibility(m.actuator_group, "actuator")
+        disabled_groups = int(m.opt.disableactuator)
+        groups = np.clip(np.asarray(m.actuator_group, np.int32), 0, 30)
+        src.actuator_visible &= (disabled_groups & (1 << groups)) == 0
+        src.actuator_ctrl_address = self._actuator_ctrl_address.copy()
         src.actuator_ctrl_limited = np.asarray(m.actuator_ctrllimited, bool).copy()
         src.actuator_ctrl_range = np.asarray(m.actuator_ctrlrange, np.float32).copy()
         src.actuator_act_limited = np.asarray(m.actuator_actlimited, bool).copy()
@@ -718,6 +740,95 @@ class MuJoCoAdapter:
         volume_scale = np.cbrt(mass / (8000.0 * np.prod(inertia_sizes, axis=1)))
         scaled_inertia_sizes = inertia_sizes * volume_scale[:, None]
 
+        visual_kinds: list[int] = []
+        visual_actuators: list[int] = []
+        visual_sizes: list[np.ndarray] = []
+        pose_kinds: list[int] = []
+        pose_indices: list[int] = []
+        primitive_kinds = {
+            int(mujoco.mjtGeom.mjGEOM_SPHERE): ActuatorVisualKind.SPHERE,
+            int(mujoco.mjtGeom.mjGEOM_ELLIPSOID): ActuatorVisualKind.ELLIPSOID,
+            int(mujoco.mjtGeom.mjGEOM_CAPSULE): ActuatorVisualKind.CAPSULE,
+            int(mujoco.mjtGeom.mjGEOM_CYLINDER): ActuatorVisualKind.CYLINDER,
+            int(mujoco.mjtGeom.mjGEOM_BOX): ActuatorVisualKind.BOX,
+        }
+
+        def append_primitive(actuator: int, geom_type: int, size, pose_kind: int, source: int):
+            kind = primitive_kinds.get(int(geom_type))
+            if kind is None:
+                return
+            raw = np.asarray(size, np.float32)
+            if kind is ActuatorVisualKind.SPHERE:
+                normalized = np.full(3, raw[0], np.float32)
+            elif kind in (ActuatorVisualKind.CAPSULE, ActuatorVisualKind.CYLINDER):
+                normalized = np.array((raw[0], raw[0], raw[1]), np.float32)
+            else:
+                normalized = raw[:3].copy()
+            visual_kinds.append(int(kind))
+            visual_actuators.append(actuator)
+            visual_sizes.append(1.05 * normalized)
+            pose_kinds.append(pose_kind)
+            pose_indices.append(source)
+
+        joint_transmissions = {
+            int(mujoco.mjtTrn.mjTRN_JOINT),
+            int(mujoco.mjtTrn.mjTRN_JOINTINPARENT),
+        }
+        for actuator, transmission in enumerate(np.asarray(m.actuator_trntype)):
+            source = int(m.actuator_trnid[actuator, 0])
+            transmission = int(transmission)
+            if transmission in joint_transmissions:
+                joint_type = int(m.jnt_type[source])
+                if joint_type == int(mujoco.mjtJoint.mjJNT_SLIDE):
+                    kind = ActuatorVisualKind.SLIDE
+                elif joint_type == int(mujoco.mjtJoint.mjJNT_HINGE):
+                    kind = ActuatorVisualKind.HINGE
+                elif joint_type == int(mujoco.mjtJoint.mjJNT_BALL):
+                    kind = ActuatorVisualKind.BALL
+                else:
+                    kind = ActuatorVisualKind.FREE
+                if kind in (ActuatorVisualKind.SLIDE, ActuatorVisualKind.HINGE):
+                    size = (
+                        meansize * float(m.vis.scale.actuatorwidth),
+                        meansize * float(m.vis.scale.actuatorwidth),
+                        meansize * float(m.vis.scale.actuatorlength),
+                    )
+                    pose_kind = _ACTUATOR_POSE_JOINT_AXIS
+                else:
+                    radius = meansize * float(m.vis.scale.jointlength) * 0.33
+                    size = (radius, radius, radius)
+                    pose_kind = _ACTUATOR_POSE_JOINT_BODY
+                visual_kinds.append(int(kind))
+                visual_actuators.append(actuator)
+                visual_sizes.append(np.asarray(size, np.float32))
+                pose_kinds.append(pose_kind)
+                pose_indices.append(source)
+            elif transmission == int(mujoco.mjtTrn.mjTRN_SITE):
+                append_primitive(
+                    actuator,
+                    int(m.site_type[source]),
+                    m.site_size[source],
+                    _ACTUATOR_POSE_SITE,
+                    source,
+                )
+            elif transmission == int(mujoco.mjtTrn.mjTRN_BODY):
+                start = int(m.body_geomadr[source])
+                stop = start + int(m.body_geomnum[source])
+                for geom in range(start, stop):
+                    append_primitive(
+                        actuator,
+                        int(m.geom_type[geom]),
+                        m.geom_size[geom],
+                        _ACTUATOR_POSE_GEOM,
+                        geom,
+                    )
+
+        count = len(visual_kinds)
+        self._actuator_visual_pose_kinds = np.asarray(pose_kinds, np.uint8)
+        self._actuator_visual_pose_indices = np.asarray(pose_indices, np.int32)
+        self._diagnostic_frame.actuator_xpos = np.zeros((count, 3), np.float32)
+        self._diagnostic_frame.actuator_xmat = np.zeros((count, 3, 3), np.float32)
+
         return DiagnosticSource(
             joint_kinds=joint_kinds,
             joint_visible=self._group_visibility(m.jnt_group, "joint"),
@@ -731,7 +842,42 @@ class MuJoCoAdapter:
             inertia_sizes=np.asarray(inertia_sizes, np.float32),
             scaled_inertia_sizes=np.asarray(scaled_inertia_sizes, np.float32),
             inertia_rgba=np.asarray(m.vis.rgba.inertia, np.float32).copy(),
+            actuator_visual_kinds=np.asarray(visual_kinds, np.uint8),
+            actuator_visual_actuators=np.asarray(visual_actuators, np.int32),
+            actuator_visual_sizes=(
+                np.stack(visual_sizes) if count else np.zeros((0, 3), np.float32)
+            ),
         )
+
+    def _fill_actuator_visual_poses(self, diagnostics: DiagnosticFrame) -> None:
+        d, m = self._d, self._m
+        for record, (pose_kind, source) in enumerate(
+            zip(self._actuator_visual_pose_kinds, self._actuator_visual_pose_indices, strict=True)
+        ):
+            source = int(source)
+            if pose_kind == _ACTUATOR_POSE_JOINT_AXIS:
+                diagnostics.actuator_xpos[record] = d.xanchor[source]
+                diagnostics.actuator_xmat[record] = self._axis_rotation(d.xaxis[source])
+            elif pose_kind == _ACTUATOR_POSE_JOINT_BODY:
+                diagnostics.actuator_xpos[record] = d.xanchor[source]
+                diagnostics.actuator_xmat[record] = d.xmat[int(m.jnt_bodyid[source])].reshape(3, 3)
+            elif pose_kind == _ACTUATOR_POSE_SITE:
+                diagnostics.actuator_xpos[record] = d.site_xpos[source]
+                diagnostics.actuator_xmat[record] = d.site_xmat[source].reshape(3, 3)
+            else:
+                diagnostics.actuator_xpos[record] = d.geom_xpos[source]
+                diagnostics.actuator_xmat[record] = d.geom_xmat[source].reshape(3, 3)
+
+    @staticmethod
+    def _axis_rotation(axis) -> np.ndarray:
+        z = np.asarray(axis, np.float32)
+        z = z / np.linalg.norm(z)
+        reference = np.array((1.0, 0.0, 0.0), np.float32)
+        if abs(float(z[0])) > 0.9:
+            reference = np.array((0.0, 1.0, 0.0), np.float32)
+        x = np.cross(reference, z)
+        x /= np.linalg.norm(x)
+        return np.column_stack((x, np.cross(z, x), z)).astype(np.float32)
 
     def _site_rgba(self, si: int, matid: int) -> np.ndarray:
         rgba = np.asarray(self._m.site_rgba[si], np.float32)
@@ -1140,9 +1286,12 @@ class MuJoCoAdapter:
     def actuators(self) -> list[ActuatorInfo]:
         m = self._m
         out = []
-        for ai in range(m.nu):
+        for ai in range(m.nactuator):
             joint = -1
-            if int(m.actuator_trntype[ai]) == int(mujoco.mjtTrn.mjTRN_JOINT):
+            if int(m.actuator_trntype[ai]) in (
+                int(mujoco.mjtTrn.mjTRN_JOINT),
+                int(mujoco.mjtTrn.mjTRN_JOINTINPARENT),
+            ):
                 joint = int(m.actuator_trnid[ai][0])
             out.append(
                 ActuatorInfo(
@@ -1153,6 +1302,8 @@ class MuJoCoAdapter:
                         float(m.actuator_ctrlrange[ai][1]),
                     ),
                     ctrl_limited=bool(m.actuator_ctrllimited[ai]),
+                    ctrl_address=int(m.actuator_ctrladr[ai]),
+                    ctrl_count=int(m.actuator_ctrlnum[ai]),
                     gain=float(m.actuator_gainprm[ai][0]),
                     joint=joint,
                 )
@@ -1272,8 +1423,9 @@ class MuJoCoAdapter:
         if not 0 <= i < m.nu:
             return False
         v = float(value)
-        if bool(m.actuator_ctrllimited[i]):
-            lo, hi = m.actuator_ctrlrange[i]
+        actuator = int(self._ctrl_actuator[i])
+        if actuator >= 0 and bool(m.actuator_ctrllimited[actuator]):
+            lo, hi = m.actuator_ctrlrange[actuator]
             v = float(np.clip(v, lo, hi))
         self._d.ctrl[i] = v
         return True

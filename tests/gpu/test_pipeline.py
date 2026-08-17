@@ -173,6 +173,40 @@ def test_mujoco_visuals_reach_the_gpu_pipeline(gl):
         adapter.release()
 
 
+def test_joint_site_and_body_actuator_visuals_reach_the_gpu_pipeline(gl):
+    adapter = make_adapter("mujoco", resolve("actuator_visuals"))
+    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    try:
+        backend.set_scene(adapter.scene_source())
+        camera = next(item for item in adapter.cameras() if item.name == "overview")
+        backend.set_camera(adapter.camera_view(camera.camera_id))
+        assert backend.set_flag(RenderFlag.ACTUATOR, True)
+        assert backend.set_flag(RenderFlag.ACTIVATION, True)
+
+        adapter.data.ctrl[1] = -1.0
+        frame = adapter.frame(FrameNeeds(poses=True, actuator=True, diagnostics=True))
+        backend.update(frame)
+        negative = backend._actuator_palette[1].copy()
+
+        adapter.data.ctrl[1] = 1.0
+        frame = adapter.frame(FrameNeeds(poses=True, actuator=True, diagnostics=True))
+        backend.update(frame)
+        positive = backend._actuator_palette[1].copy()
+        layer = backend.debug.layer("physics.actuators")
+
+        assert not np.allclose(negative, positive)
+        assert layer.count_of(Prim.SOLID_ARROW) == 1
+        assert layer.count_of(Prim.SOLID_DOUBLE_ARROW) == 1
+        assert layer.count_of(Prim.BOX) == 1
+        assert layer.count_of(Prim.CYLINDER) == 2
+        assert layer.count_of(Prim.SPHERE) == 2
+        assert backend.render(frame) is not None
+        assert float(backend.target.read_color()[..., :3].std()) > 8.0
+    finally:
+        backend.release()
+        adapter.release()
+
+
 def test_deformable_vertices_update_without_rebuilding_the_scene(gl):
 
     import mujoco

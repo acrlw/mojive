@@ -7,7 +7,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from forge_viewer.adapters.base import FrameNeeds, JointVisualKind, NodeKind
+from forge_viewer.adapters.base import ActuatorVisualKind, FrameNeeds, JointVisualKind, NodeKind
 
 pytestmark = pytest.mark.physics
 
@@ -313,6 +313,16 @@ def test_diagnostic_metadata_and_frame_match_mujoco(adapter):
     mass = np.asarray(model.body_mass[moving])
     assert 8.0 * np.prod(source.scaled_inertia_sizes, axis=1) == pytest.approx(mass / 1000.0)
 
+    assert source.actuator_visual_kinds.tolist() == [ActuatorVisualKind.HINGE]
+    assert source.actuator_visual_actuators.tolist() == [0]
+    assert source.actuator_visual_sizes[0] == pytest.approx(
+        (
+            model.stat.meansize * model.vis.scale.actuatorwidth,
+            model.stat.meansize * model.vis.scale.actuatorwidth,
+            model.stat.meansize * model.vis.scale.actuatorlength,
+        )
+    )
+
     assert adapter.frame(FrameNeeds.none()).diagnostics is None
     frame = adapter.frame(FrameNeeds(poses=False, diagnostics=True)).diagnostics
     assert frame.joint_xpos == pytest.approx(data.xanchor)
@@ -320,6 +330,9 @@ def test_diagnostic_metadata_and_frame_match_mujoco(adapter):
     assert frame.subtree_com == pytest.approx(data.subtree_com)
     assert frame.body_xipos == pytest.approx(data.xipos)
     assert frame.body_ximat == pytest.approx(data.ximat.reshape(model.nbody, 3, 3))
+    joint = int(model.actuator_trnid[0, 0])
+    assert frame.actuator_xpos[0] == pytest.approx(data.xanchor[joint])
+    assert frame.actuator_xmat[0, :, 2] == pytest.approx(data.xaxis[joint])
 
 
 def test_pose_fetch_allocates_nothing(adapter):
@@ -615,6 +628,38 @@ def test_mujoco_visuals_cover_heightfield_sites_and_tendon():
         rendered = scene.transforms[builder.write_index[row]][:3, 3]
         source_site = int(src.geom_source[row])
         assert rendered == pytest.approx(frame.site_xpos[source_site])
+    finally:
+        a.release()
+
+
+def test_actuator_visual_metadata_and_controls_follow_mujoco_addresses():
+    from forge_viewer.assets import resolve
+    from forge_viewer.mujoco_audit import audit_model
+
+    a = MuJoCoAdapter(resolve("actuator_visuals"))
+    try:
+        model = a.model
+        actuators = a.actuators()
+        source = a.scene_source()
+        assert len(actuators) == model.nactuator == 4
+        assert [item.ctrl_address for item in actuators] == model.actuator_ctrladr.tolist()
+        assert [item.ctrl_count for item in actuators] == model.actuator_ctrlnum.tolist()
+        assert source.actuator_ctrl_address.tolist() == model.actuator_ctrladr.tolist()
+        assert source.actuator_ctrl_range == pytest.approx(model.actuator_ctrlrange)
+
+        frame = a.frame(FrameNeeds(poses=False, actuator=True, diagnostics=True))
+        assert frame.actuator_activation.shape == (model.nactuator,)
+        assert frame.diagnostics.actuator_xpos.shape[0] == len(
+            source.diagnostics.actuator_visual_kinds
+        )
+
+        address = actuators[1].ctrl_address
+        assert a.set_ctrl(address, 5.0)
+        assert a.data.ctrl[address] == pytest.approx(actuators[1].ctrl_range[1])
+        findings = audit_model(model)["findings"]
+        visual = next(item for item in findings if item["feature"] == "actuator visualization")
+        assert visual["status"] == "supported"
+        assert visual["count"] == model.nactuator
     finally:
         a.release()
 
