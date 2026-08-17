@@ -126,6 +126,18 @@ def test_the_strongest_reflector_wins():
     assert found[1][3] == pytest.approx(-3.0)
 
 
+def test_distinct_reflection_planes_keep_separate_layers():
+    scene = make_scene([(flat(z=0.0), 0.4), (flat(z=2.0), 0.7), (flat(z=0.0), 0.2)])
+
+    groups = ReflectPass.find_planes(scene)
+
+    assert len(groups) == 2
+    assert groups[0].indices == [1]
+    assert groups[1].indices == [0, 2]
+    assert groups[0].plane[3] == pytest.approx(-2.0)
+    assert groups[1].plane[3] == pytest.approx(0.0)
+
+
 def test_nonplanar_reflective_material_does_not_replace_the_floor():
     found = ReflectPass.find_plane(
         make_scene(

@@ -34,6 +34,7 @@ EXPECTED_ASSETS = (
     "pick_scene.xml",
     "rangefinder.xml",
     "reflection.xml",
+    "reflection_multiple.xml",
     "scale_extremes.xml",
     "showcase.xml",
     "slider_crank.xml",

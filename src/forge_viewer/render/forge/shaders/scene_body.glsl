@@ -33,7 +33,10 @@ uniform vec2 u_depth_range;        // near, far
 uniform vec3 u_highlight_color;
 uniform vec2 u_highlight;          // blend, emission
 
-uniform sampler2D u_reflection;
+uniform sampler2D u_reflection0;
+uniform sampler2D u_reflection1;
+uniform sampler2D u_reflection2;
+uniform sampler2D u_reflection3;
 uniform vec2 u_reflection_size;
 uniform int u_linear_out;
 uniform vec4 u_fog;              // start, end, fog enabled, haze density
@@ -66,8 +69,22 @@ void main() {
         emission, v.material.y, v.material.z, v.view_depth
     );
 
-    if (v.reflect > 0.0 && u_reflection_size.x > 0.0) {
-        lit += v.reflect * texture(u_reflection, gl_FragCoord.xy / u_reflection_size).rgb;
+    if (v.reflect < 0.0 && u_reflection_size.x > 0.0) {
+        float code = -v.reflect;
+        int layer = int(floor(code * 0.5));
+        float reflectance = code - float(layer * 2);
+        vec2 reflection_uv = gl_FragCoord.xy / u_reflection_size;
+        vec3 reflected;
+        if (layer == 0) {
+            reflected = texture(u_reflection0, reflection_uv).rgb;
+        } else if (layer == 1) {
+            reflected = texture(u_reflection1, reflection_uv).rgb;
+        } else if (layer == 2) {
+            reflected = texture(u_reflection2, reflection_uv).rgb;
+        } else {
+            reflected = texture(u_reflection3, reflection_uv).rgb;
+        }
+        lit += reflectance * reflected;
     }
 
     float fog = u_fog.z * smoothstep(u_fog.x, max(u_fog.y, u_fog.x + 1e-6), v.view_depth);

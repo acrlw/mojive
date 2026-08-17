@@ -14,6 +14,14 @@ from .opaque import OpaquePass, draw_buckets
 log = get_logger("reflect")
 
 GL_CLIP_DISTANCE0 = 0x3000
+MAX_REFLECTION_PLANES = 4
+
+
+class _PlaneGroup:
+    def __init__(self, plane, indices, buckets) -> None:
+        self.plane = plane
+        self.indices = indices
+        self.buckets = buckets
 
 
 class ReflectPass(OpaquePass):
@@ -22,16 +30,18 @@ class ReflectPass(OpaquePass):
 
     def __init__(self) -> None:
         super().__init__()
-        self.color: moderngl.Texture | None = None
+        self.colors: list[moderngl.Texture] = []
         self.depth: moderngl.Texture | None = None
-        self.fbo: moderngl.Framebuffer | None = None
+        self.fbos: list[moderngl.Framebuffer] = []
         self._size: tuple[int, int] = (0, 0)
         self._mirror = np.eye(4, dtype=np.float32)
         self._view = np.eye(4, dtype=np.float32)
         self._view_proj = np.eye(4, dtype=np.float32)
         self._eye = np.zeros(3, np.float32)
         self._plane = (0.0, 0.0, 1.0, 0.0)
-        self._skip_bucket = -1
+        self._groups: tuple[_PlaneGroup, ...] = ()
+        self._encoded_scene = None
+        self._encoded_reflectance: dict[int, float] = {}
 
     def view_matrices(self, ctx: PassContext):
         return self._view, self._view_proj, self._eye
@@ -39,26 +49,27 @@ class ReflectPass(OpaquePass):
     def clip_plane(self, ctx: PassContext) -> tuple[float, float, float, float]:
         return self._plane
 
-    def _ensure_target(self, ctx: PassContext) -> bool:
+    def _ensure_target(self, ctx: PassContext, count: int) -> bool:
         w, h = int(ctx.target.width), int(ctx.target.height)
         if w <= 0 or h <= 0:
             return False
-        if self._size == (w, h) and self.fbo is not None:
+        if self._size == (w, h) and len(self.fbos) == count:
             return True
         self.release()
         gl = ctx.ctx
 
-        self.color = gl.texture((w, h), 3, dtype="f2")
-        self.color.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        self.color.repeat_x = self.color.repeat_y = False
         self.depth = gl.depth_texture((w, h))
-        self.fbo = gl.framebuffer([self.color], self.depth)
+        for _ in range(count):
+            color = gl.texture((w, h), 3, dtype="f2")
+            color.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            color.repeat_x = color.repeat_y = False
+            self.colors.append(color)
+            self.fbos.append(gl.framebuffer([color], self.depth))
         self._size = (w, h)
         return True
 
     @staticmethod
     def find_plane(scene) -> tuple[int, tuple[float, float, float, float]] | None:
-
         if scene.count == 0 or len(scene.material) == 0 or not scene.bucket_keys:
             return None
         refl = np.asarray(scene.material[:, 3])
@@ -75,92 +86,155 @@ class ReflectPass(OpaquePass):
         if not len(candidates):
             return None
         idx = int(candidates[np.argmax(refl[candidates])])
-        m = np.asarray(scene.transforms[idx], np.float64)
-        basis = m[:3, :3]
+        plane = ReflectPass._plane_equation(scene, idx)
+        return (idx, plane) if plane is not None else None
+
+    @classmethod
+    def find_planes(cls, scene) -> tuple[_PlaneGroup, ...]:
+        if scene.count == 0 or len(scene.material) == 0 or not scene.bucket_keys:
+            return ()
+        reflectance = np.asarray(scene.material[:, 3])
+        candidates = [
+            int(index)
+            for index in np.argsort(-reflectance)
+            if reflectance[index] > 0.0
+            and 0 <= int(scene.bucket[index]) < len(scene.bucket_keys)
+            and scene.bucket_keys[int(scene.bucket[index])][0].shape is MeshShape.PLANE
+        ]
+        groups: list[_PlaneGroup] = []
+        for index in candidates:
+            plane = cls._plane_equation(scene, index)
+            if plane is None:
+                continue
+            group = next(
+                (
+                    item
+                    for item in groups
+                    if np.allclose(item.plane, plane, atol=1e-5)
+                    or np.allclose(item.plane, -np.asarray(plane), atol=1e-5)
+                ),
+                None,
+            )
+            if group is not None:
+                group.indices.append(index)
+                group.buckets.add(int(scene.bucket[index]))
+            elif len(groups) < MAX_REFLECTION_PLANES:
+                groups.append(_PlaneGroup(plane, [index], {int(scene.bucket[index])}))
+        return tuple(groups)
+
+    @staticmethod
+    def _plane_equation(scene, index: int) -> tuple[float, float, float, float] | None:
+        transform = np.asarray(scene.transforms[index], np.float64)
         try:
-            normal = np.linalg.inv(basis).T @ np.array([0.0, 0.0, 1.0])
+            normal = np.linalg.inv(transform[:3, :3]).T @ np.array([0.0, 0.0, 1.0])
         except np.linalg.LinAlgError:
             return None
         length = float(np.linalg.norm(normal))
         if length < 1e-9:
             return None
-        normal = normal / length
-        point = m[:3, 3]
-        d = -float(np.dot(normal, point))
-        return idx, (float(normal[0]), float(normal[1]), float(normal[2]), d)
+        normal /= length
+        d = -float(np.dot(normal, transform[:3, 3]))
+        return (float(normal[0]), float(normal[1]), float(normal[2]), d)
 
-    def prepare(self, ctx: PassContext) -> bool:
-        ctx.reflection = None
-        if not ctx.flag(RenderFlag.REFLECTION):
-            return False
-        found = self.find_plane(ctx.scene)
-        if found is None:
-            return False
-        index, plane = found
-        if not self._ensure_target(ctx):
-            return False
+    def _restore_reflectance(self, scene) -> None:
+        if self._encoded_scene is scene:
+            for index, value in self._encoded_reflectance.items():
+                if index < len(scene.material):
+                    scene.material[index, 3] = value
+        self._encoded_scene = None
+        self._encoded_reflectance.clear()
 
+    def _encode_reflectance(self, scene, groups: tuple[_PlaneGroup, ...]) -> None:
+        self._encoded_scene = scene
+        for layer, group in enumerate(groups):
+            for index in group.indices:
+                value = float(scene.material[index, 3])
+                self._encoded_reflectance[index] = value
+                scene.material[index, 3] = -(2.0 * layer + value)
+
+    def _set_plane(self, ctx: PassContext, plane) -> None:
         eye = np.asarray(ctx.camera.eye, np.float64)
-        if float(np.dot(plane[:3], eye) + plane[3]) <= 1e-4:
-            return False
-
-        n = np.array(plane[:3], np.float64)
-        point = -np.array(plane[:3], np.float64) * plane[3]
-        self._mirror = math3d.mirror(point, n)
-
+        normal = np.array(plane[:3], np.float64)
+        point = -normal * plane[3]
+        self._mirror = math3d.mirror(point, normal)
         self._view = (np.asarray(ctx.view, np.float64) @ self._mirror).astype(np.float32)
         self._view_proj = (np.asarray(ctx.proj, np.float64) @ self._view).astype(np.float32)
         self._eye = (self._mirror @ np.append(eye, 1.0))[:3].astype(np.float32)
         self._plane = plane
 
-        self._skip_bucket = int(ctx.scene.bucket[index]) if index < len(ctx.scene.bucket) else -1
-
+    def prepare(self, ctx: PassContext) -> bool:
+        ctx.reflection = ()
+        self._restore_reflectance(ctx.scene)
+        if not ctx.flag(RenderFlag.REFLECTION):
+            return False
+        eye = np.asarray(ctx.camera.eye, np.float64)
+        groups = tuple(
+            group
+            for group in self.find_planes(ctx.scene)
+            if float(np.dot(group.plane[:3], eye) + group.plane[3]) > 1e-4
+        )
+        if not groups:
+            return False
+        if not self._ensure_target(ctx, len(groups)):
+            return False
+        self._groups = groups
+        self._encode_reflectance(ctx.scene, groups)
+        self._set_plane(ctx, groups[0].plane)
         if not super().prepare(ctx):
+            self._restore_reflectance(ctx.scene)
             return False
 
         ctx.scene_program = None
         return True
 
     def execute(self, ctx: PassContext) -> None:
-        if self.fbo is None:
+        if not self.fbos or self.program is None:
             return
         gl = ctx.ctx
-        self.fbo.use()
-
-        self.fbo.clear(0.0, 0.0, 0.0, 1.0)
-
-        state_opaque(gl)
-
-        gl.front_face = "cw"
-        gl.enable_direct(GL_CLIP_DISTANCE0)
-        try:
-            buckets = tuple(b for b in ctx.scene.opaque_buckets if b != self._skip_bucket)
-            draw_buckets(ctx, buckets)
-            if ctx.scene.transparent_buckets and ctx.flag(RenderFlag.TRANSPARENT):
-                state_transparent(gl, additive=ctx.flag(RenderFlag.ADDITIVE, False))
-                gl.front_face = "cw"
-                gl.enable_direct(GL_CLIP_DISTANCE0)
-                self.fbo.depth_mask = False
-                transparent = tuple(
-                    b for b in ctx.scene.transparent_draw_order(self._eye) if b != self._skip_bucket
-                )
-                draw_buckets(ctx, transparent)
-        finally:
-            self.fbo.depth_mask = True
-            gl.disable_direct(GL_CLIP_DISTANCE0)
-            gl.front_face = "ccw"
-        ctx.reflection = self.color
+        excluded = set().union(*(group.buckets for group in self._groups))
+        use_shadow = bool(self._spec_used and self._spec_used.defines.get("USE_SHADOW"))
+        for fbo, group in zip(self.fbos, self._groups, strict=True):
+            self._set_plane(ctx, group.plane)
+            self._frame_uniforms(ctx, self.program, False, use_shadow)
+            fbo.use()
+            fbo.clear(0.0, 0.0, 0.0, 1.0)
+            state_opaque(gl)
+            gl.front_face = "cw"
+            gl.enable_direct(GL_CLIP_DISTANCE0)
+            try:
+                draw_buckets(ctx, tuple(b for b in ctx.scene.opaque_buckets if b not in excluded))
+                if ctx.scene.transparent_buckets and ctx.flag(RenderFlag.TRANSPARENT):
+                    state_transparent(gl, additive=ctx.flag(RenderFlag.ADDITIVE, False))
+                    gl.front_face = "cw"
+                    gl.enable_direct(GL_CLIP_DISTANCE0)
+                    fbo.depth_mask = False
+                    draw_buckets(
+                        ctx,
+                        tuple(
+                            b
+                            for b in ctx.scene.transparent_draw_order(self._eye)
+                            if b not in excluded
+                        ),
+                    )
+            finally:
+                fbo.depth_mask = True
+                gl.disable_direct(GL_CLIP_DISTANCE0)
+                gl.front_face = "ccw"
+        ctx.reflection = tuple(self.colors)
 
     def release(self) -> None:
         super().release()
-        for obj in (self.fbo, self.color, self.depth):
+        for obj in (*self.fbos, *self.colors, self.depth):
             try:
                 if obj is not None:
                     obj.release()
             except Exception as e:
                 log.debug("Failed to release reflection targets: {}", e)
-        self.fbo = self.color = self.depth = None
+        self.fbos.clear()
+        self.colors.clear()
+        self.depth = None
         self._size = (0, 0)
+        self._groups = ()
 
 
 register_pass("reflect", ReflectPass)

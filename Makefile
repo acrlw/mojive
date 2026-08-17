@@ -37,7 +37,7 @@ help:
 		'  make lighting          editable lights and environment' \
 		'  make many-lights       16-light and 24-light reference images' \
 		'  make scene-icons       camera and light scene icons' \
-		'  make reflect           planar reflection' \
+		'  make reflect           multiple planar reflections' \
 		'  make additive          standard and additive transparency images' \
 		'  make cameras           free, named, and orthographic cameras' \
 		'  make capture           write PNG' \
@@ -221,9 +221,9 @@ perturb:
 outline:
 	$(PY) -m forge_viewer.cli view outline --paused
 
-## Planar reflection acceptance for height, clipping, and winding.
+## Multiple planar reflection acceptance for height, clipping, and winding.
 reflect:
-	$(PY) -m forge_viewer.cli view reflection --paused
+	$(PY) -m forge_viewer.cli view reflection_multiple --paused
 
 ## Sparse checkout of one Google DeepMind MuJoCo Menagerie model.
 ROBOT ?= unitree_go2

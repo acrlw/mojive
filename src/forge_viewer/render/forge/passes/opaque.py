@@ -39,7 +39,7 @@ WIRE_COLOR = (0.10, 0.10, 0.12)
 WIRE_WIDTH = 1.2
 
 TEX_ALBEDO = 0
-TEX_REFLECTION = 2
+TEX_REFLECTIONS = (2, 4, 5, 6)
 
 NO_CLIP = (0.0, 0.0, 0.0, 1.0)
 
@@ -223,15 +223,13 @@ class OpaquePass(BasePass):
 
     def reflection_uniforms(self, ctx: PassContext, prog: moderngl.Program) -> None:
 
-        tex = None if self.linear_out else ctx.reflection
-        if tex is None:
-            ctx.textures.white.use(TEX_REFLECTION)
-            self._set_direct(prog, "u_reflection", TEX_REFLECTION)
-            self._set_direct(prog, "u_reflection_size", (0.0, 0.0))
-            return
-        tex.use(TEX_REFLECTION)
-        self._set_direct(prog, "u_reflection", TEX_REFLECTION)
-        self._set_direct(prog, "u_reflection_size", (float(tex.width), float(tex.height)))
+        textures = () if self.linear_out else tuple(ctx.reflection or ())
+        for index, unit in enumerate(TEX_REFLECTIONS):
+            texture = textures[index] if index < len(textures) else ctx.textures.white
+            texture.use(unit)
+            self._set_direct(prog, f"u_reflection{index}", unit)
+        size = (float(textures[0].width), float(textures[0].height)) if textures else (0.0, 0.0)
+        self._set_direct(prog, "u_reflection_size", size)
 
     @staticmethod
     def _set_direct(prog: moderngl.Program, name: str, value) -> None:

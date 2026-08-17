@@ -155,3 +155,50 @@ def test_transparent_geometry_appears_in_reflections(tmp_path):
 
     changed = np.abs(reflected - direct).sum(axis=2) > 6
     assert int(changed.sum()) > 500
+
+
+def test_distinct_planes_receive_their_own_reflection(tmp_path):
+    scene = tmp_path / "multiple_reflections.xml"
+    scene.write_text(
+        """
+<mujoco>
+  <visual>
+    <headlight ambient="0.35 0.35 0.35" diffuse="0.8 0.8 0.8"/>
+  </visual>
+  <asset>
+    <material name="mirror" rgba="0.08 0.09 0.11 1" reflectance="0.85"/>
+    <material name="red" rgba="0.95 0.08 0.04 1"/>
+    <material name="blue" rgba="0.04 0.15 0.95 1"/>
+  </asset>
+  <worldbody>
+    <geom type="plane" pos="-1.4 0 0" size="1.1 1.1 0.05" material="mirror"/>
+    <geom type="plane" pos="1.4 0 0.6" size="1.1 1.1 0.05" material="mirror"/>
+    <geom type="sphere" pos="-1.4 0 0.65" size="0.32" material="red"/>
+    <geom type="sphere" pos="1.4 0 1.25" size="0.32" material="blue"/>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    camera = CameraView(
+        eye=np.array([4.8, -6.5, 3.8], np.float32),
+        target=np.array([0.0, 0.0, 0.45], np.float32),
+        near=0.05,
+        far=40.0,
+        aspect=W / H,
+    )
+    with OffscreenHarness(scene, W, H) as harness:
+        harness.camera = camera
+        harness.backend.set_camera(camera)
+        harness.backend.set_flag(RenderFlag.REFLECTION, True)
+        harness.warmup(3)
+        reflected = harness.backend.target.read_color(flip=True)[..., :3].astype(np.int16)
+        harness.backend.set_flag(RenderFlag.REFLECTION, False)
+        harness.step_and_render(0)
+        direct = harness.backend.target.read_color(flip=True)[..., :3].astype(np.int16)
+
+    delta = reflected - direct
+    red = (delta[..., 0] - delta[..., 2] > 8) & (delta.sum(axis=2) > 10)
+    blue = (delta[..., 2] - delta[..., 0] > 8) & (delta.sum(axis=2) > 10)
+    assert int(red.sum()) > 100
+    assert int(blue.sum()) > 100

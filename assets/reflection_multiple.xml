@@ -1,0 +1,18 @@
+<mujoco model="multiple reflections">
+  <visual>
+    <headlight ambient="0.35 0.35 0.35" diffuse="0.8 0.8 0.8"/>
+  </visual>
+  <asset>
+    <material name="mirror" rgba="0.08 0.09 0.11 1" reflectance="0.85"/>
+    <material name="red" rgba="0.95 0.08 0.04 1"/>
+    <material name="blue" rgba="0.04 0.15 0.95 1"/>
+  </asset>
+  <worldbody>
+    <geom name="lower mirror" type="plane" pos="-1.4 0 0" size="1.1 1.1 0.05"
+          material="mirror"/>
+    <geom name="upper mirror" type="plane" pos="1.4 0 0.6" size="1.1 1.1 0.05"
+          material="mirror"/>
+    <geom name="red sphere" type="sphere" pos="-1.4 0 0.65" size="0.32" material="red"/>
+    <geom name="blue sphere" type="sphere" pos="1.4 0 1.25" size="0.32" material="blue"/>
+  </worldbody>
+</mujoco>
