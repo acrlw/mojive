@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-rangefinder mujoco-constraints mujoco-editing musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -21,6 +21,7 @@ help:
 		'  make mujoco-rangefinder site/camera rays, hits, and normals' \
 		'  make mujoco-constraints  equality constraint endpoint markers' \
 		'  make mujoco-editing     mocap pose and equality controls' \
+		'  make mujoco-overlays    flex edges/vertices, labels, and frames' \
 		'  make musculoskeletal   musculoskeletal model, tendons, and keyframes' \
 		'  make musculoskeletal-video  300 keyframes → 60 fps MP4' \
 		'  make deformables       flex/skin dynamic meshes' \
@@ -270,6 +271,10 @@ geom-groups:
 ## Inspect 1D, 2D, and 3D flex geometry plus skinned meshes.
 deformables:
 	$(PY) -m forge_viewer.cli view deformables --paused $(ARGS)
+
+## Capture flex topology, scene labels, and coordinate-frame overlays.
+mujoco-overlays:
+	$(PY) -m forge_viewer.tools.mujoco_overlays $(ARGS)
 
 ## List assets, free-body metadata, and optional dependency status.
 assets:

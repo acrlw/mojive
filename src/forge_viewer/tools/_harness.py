@@ -97,8 +97,7 @@ class OffscreenHarness:
         if steps:
             self.adapter.step(steps)
         frame = self.adapter.frame(self.needs)
-        scene = self.builder.update(frame, self.camera)
-        self.backend.set_render_scene(scene)
+        self.backend.update(frame)
         return self.backend.render(frame)
 
     def warmup(self, frames: int = 4) -> None:

@@ -27,7 +27,7 @@ from .backends import make_adapter
 from .composition import build_from_adapter, build_scene
 from .recording import SnapshotWriter, VideoRecorder, read_snapshots
 from .remote import RemoteSceneAdapter, SnapshotPublisher
-from .render.backend import DebugView, RenderFlag
+from .render.backend import DebugView, FrameMode, LabelMode, RenderFlag
 from .render.debugdraw import DebugDraw, Layer, Occlusion
 from .scene import Scene, SceneObject
 from .types import (
@@ -75,10 +75,12 @@ __all__ = [
     "DiagnosticFrame",
     "DiagnosticSource",
     "EqualityConstraintInfo",
+    "FrameMode",
     "FrameNeeds",
     "JointInfo",
     "JointVisualKind",
     "KeyframeInfo",
+    "LabelMode",
     "Layer",
     "Light",
     "LightKind",

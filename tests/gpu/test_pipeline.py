@@ -397,6 +397,41 @@ def test_deformable_visibility_flags_rebuild_the_scene(gl):
         adapter.release()
 
 
+def test_mujoco_flex_labels_and_frames_use_gpu_debug_layers(gl):
+    from forge_viewer.render.backend import FrameMode, LabelMode, RenderFlag
+
+    adapter = make_adapter("mujoco", resolve("deformables"))
+    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=1)
+    try:
+        source = adapter.scene_source()
+        backend.set_camera(adapter.camera_hint())
+        backend.set_scene(source)
+        frame = adapter.frame(FrameNeeds(poses=True, deformables=True))
+
+        assert backend.set_flag(RenderFlag.FLEXEDGE, True)
+        assert backend.set_flag(RenderFlag.FLEXVERT, True)
+        assert backend.set_label_mode(LabelMode.GEOM)
+        assert backend.set_frame_mode(FrameMode.GEOM)
+        backend.update(frame)
+
+        draw = backend.debug
+        edge_entry = draw.layer("deformable.flex.edges")._index["edges"]
+        vertex_entry = draw.layer("deformable.flex.vertices")._index["vertices"]
+        assert edge_entry.count == len(source.flex_edges)
+        assert vertex_entry.count == len(source.flex_vertex_indices)
+        assert len(draw.layer("scene.labels")._texts) == len(source.geom_names)
+        assert len(draw.layer("scene.frames")._index) == len(source.geom_names)
+
+        backend.set_label_mode(LabelMode.NONE)
+        backend.set_frame_mode(FrameMode.NONE)
+        backend.update(frame)
+        assert not draw.layer("scene.labels")._texts
+        assert not draw.layer("scene.frames")._index
+    finally:
+        backend.release()
+        adapter.release()
+
+
 def test_world_text_is_rendered_into_the_forge_target_without_imgui(gl):
     adapter = make_adapter("mujoco", resolve("pick_scene"))
     backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=1)

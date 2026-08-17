@@ -88,8 +88,8 @@ _VIS_COVERAGE = (
     Coverage("mjVIS_SELECT", "degraded", "GPU picking and forge outline replace MuJoCo select"),
     Coverage("mjVIS_STATIC", "supported", "independent static-body filter"),
     Coverage("mjVIS_SKIN", "supported", "dynamic skinned meshes with an independent flag"),
-    Coverage("mjVIS_FLEXVERT", "unsupported", "flex vertex markers are not drawn"),
-    Coverage("mjVIS_FLEXEDGE", "unsupported", "flex edge debug overlays are not drawn"),
+    Coverage("mjVIS_FLEXVERT", "supported", "GPU point overlay follows dynamic flex vertices"),
+    Coverage("mjVIS_FLEXEDGE", "supported", "GPU line overlay follows dynamic flex topology"),
     Coverage("mjVIS_FLEXFACE", "supported", "flat element faces selected independently"),
     Coverage("mjVIS_FLEXSKIN", "supported", "smooth shell surfaces selected independently"),
     Coverage("mjVIS_BODYBVH", "unsupported", "body BVH overlays are not drawn"),
@@ -287,7 +287,7 @@ def audit_model(model) -> dict:
                 "flex",
                 "supported",
                 model.nflex,
-                "1D cables and 2D/3D surfaces update through the generic dynamic-mesh contract",
+                "1D cables, 2D/3D surfaces, vertices, and edges update through generic scene data",
             )
         )
     if model.nskin:

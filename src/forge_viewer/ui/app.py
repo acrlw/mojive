@@ -9,7 +9,7 @@ from imgui_bundle import imgui
 
 from .. import commands as cmd
 from ..adapters.base import FrameNeeds, NodeKind
-from ..render.backend import RenderFlag
+from ..render.backend import FrameMode, LabelMode, RenderFlag
 from ..types import ViewportImage
 from . import gestures as gs
 from .camera import CameraOut, OrbitCamera, ndc_from_viewport, unproject
@@ -492,26 +492,51 @@ class ViewerApp:
     def frame_needs(self) -> FrameNeeds:
 
         needs = FrameNeeds(poses=True).merge(self.panels.frame_needs())
-        needs.contacts = self.backend.get_flag(RenderFlag.CONTACTPOINT) or self.backend.get_flag(
-            RenderFlag.CONTACTFORCE
+        label_mode = self.backend.get_label_mode()
+        frame_mode = self.backend.get_frame_mode()
+        needs.contacts = (
+            self.backend.get_flag(RenderFlag.CONTACTPOINT)
+            or self.backend.get_flag(RenderFlag.CONTACTFORCE)
+            or label_mode in (LabelMode.CONTACT_POINT, LabelMode.CONTACT_FORCE)
+            or frame_mode is FrameMode.CONTACT
         )
-        needs.tendons = self.backend.get_flag(RenderFlag.TENDON) or self.backend.get_flag(
-            RenderFlag.ACTUATOR
+        needs.tendons = (
+            self.backend.get_flag(RenderFlag.TENDON)
+            or self.backend.get_flag(RenderFlag.ACTUATOR)
+            or label_mode is LabelMode.TENDON
         )
-        needs.actuator = self.backend.get_flag(RenderFlag.ACTUATOR)
-        needs.deformables = bool(self.session.source and self.session.source.dynamic_meshes)
-        needs.diagnostics = any(
-            self.backend.get_flag(flag)
-            for flag in (
-                RenderFlag.ACTUATOR,
-                RenderFlag.JOINT,
-                RenderFlag.COM,
-                RenderFlag.INERTIA,
-                RenderFlag.CAMERA,
-                RenderFlag.LIGHT,
-                RenderFlag.RANGEFINDER,
-                RenderFlag.CONSTRAINT,
+        needs.actuator = (
+            self.backend.get_flag(RenderFlag.ACTUATOR) or label_mode is LabelMode.ACTUATOR
+        )
+        needs.deformables = bool(
+            (self.session.source and self.session.source.dynamic_meshes)
+            or self.backend.get_flag(RenderFlag.FLEXVERT)
+            or self.backend.get_flag(RenderFlag.FLEXEDGE)
+            or label_mode is LabelMode.FLEX
+        )
+        needs.diagnostics = (
+            any(
+                self.backend.get_flag(flag)
+                for flag in (
+                    RenderFlag.ACTUATOR,
+                    RenderFlag.JOINT,
+                    RenderFlag.COM,
+                    RenderFlag.INERTIA,
+                    RenderFlag.CAMERA,
+                    RenderFlag.LIGHT,
+                    RenderFlag.RANGEFINDER,
+                    RenderFlag.CONSTRAINT,
+                )
             )
+            or label_mode
+            in (
+                LabelMode.JOINT,
+                LabelMode.ACTUATOR,
+                LabelMode.CONSTRAINT,
+                LabelMode.CAMERA,
+                LabelMode.LIGHT,
+            )
+            or frame_mode in (FrameMode.CAMERA, FrameMode.LIGHT)
         )
         return needs
 

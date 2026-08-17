@@ -4,7 +4,7 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds
-from ...render.backend import DebugView, RenderFlag
+from ...render.backend import DebugView, FrameMode, LabelMode, RenderFlag
 from ..gizmo import DEFAULT_ROTATION_SNAP_DEG, DEFAULT_TRANSLATION_SNAP_M
 from ..perturb import OUTLINE_CORNER_RADIUS_PT
 from . import Panel, PanelContext
@@ -35,6 +35,8 @@ _VIS_FLAGS: tuple[RenderFlag, ...] = (
     RenderFlag.SKIN,
     RenderFlag.FLEXFACE,
     RenderFlag.FLEXSKIN,
+    RenderFlag.FLEXVERT,
+    RenderFlag.FLEXEDGE,
     RenderFlag.CONTACTPOINT,
     RenderFlag.CONTACTFORCE,
     RenderFlag.TENDON,
@@ -148,6 +150,7 @@ class SettingsPanel(Panel):
                 ctx.perturb.outline_corner_radius_pt = radius
 
         self._debug_view(ctx)
+        self._overlay_modes(ctx)
         imgui.separator()
 
         self._visual_groups(ctx)
@@ -217,3 +220,29 @@ class SettingsPanel(Panel):
                 else:
                     self._message = f"debug view '{view.value}' refused by {caps.name}"
         imgui.end_combo()
+
+    def _overlay_modes(self, ctx: PanelContext) -> None:
+        backend = ctx.backend
+        label = backend.get_label_mode()
+        imgui.set_next_item_width(-1)
+        if imgui.begin_combo("##label_mode", f"labels: {label.value}"):
+            for mode in LabelMode:
+                supported = mode in backend.caps.label_modes
+                imgui.begin_disabled(not supported)
+                selected, _ = imgui.selectable(mode.value, mode is label)
+                imgui.end_disabled()
+                if selected and supported:
+                    backend.set_label_mode(mode)
+            imgui.end_combo()
+
+        frame = backend.get_frame_mode()
+        imgui.set_next_item_width(-1)
+        if imgui.begin_combo("##frame_mode", f"frames: {frame.value}"):
+            for mode in FrameMode:
+                supported = mode in backend.caps.frame_modes
+                imgui.begin_disabled(not supported)
+                selected, _ = imgui.selectable(mode.value, mode is frame)
+                imgui.end_disabled()
+                if selected and supported:
+                    backend.set_frame_mode(mode)
+            imgui.end_combo()

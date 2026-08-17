@@ -82,6 +82,12 @@ _RAY_POINT = 1 << 3
 _RAY_NORMAL = 1 << 4
 
 
+def _object_names(model, object_type, count: int, prefix: str) -> tuple[str, ...]:
+    return tuple(
+        mujoco.mj_id2name(model, object_type, index) or f"{prefix}{index}" for index in range(count)
+    )
+
+
 @dataclass(frozen=True)
 class _RangefinderSpec:
     sensor: int
@@ -244,6 +250,7 @@ class MuJoCoAdapter:
             -1,
         ).astype(np.int32)
         self._sensor_buf = np.zeros(model.nsensordata, np.float32)
+        self._flex_vertices_buf = np.zeros((model.nflexvert, 3), np.float32)
         self._contact_buf = np.zeros((max(model.ngeom, 64), 7), np.float32)
         self._contact_view = self._contact_buf[:0]
         d = self._d
@@ -415,8 +422,11 @@ class MuJoCoAdapter:
         if needs.deformables:
             update_deformables(self._deformables, d)
             f.mesh_updates = self._mesh_updates
+            np.copyto(self._flex_vertices_buf, d.flexvert_xpos, casting="unsafe")
+            f.flex_vertices = self._flex_vertices_buf
         else:
             f.mesh_updates = None
+            f.flex_vertices = None
 
         if needs.diagnostics:
             diagnostics = self._diagnostic_frame
@@ -732,12 +742,24 @@ class MuJoCoAdapter:
         src.geom_node = np.array(node_ids, np.int32)
         src.geom_local = np.stack(locals_) if n else np.zeros((0, 4, 4), np.float32)
         src.geom_infinite_plane = np.array(infinite, bool)
+        src.body_names = _object_names(m, mujoco.mjtObj.mjOBJ_BODY, m.nbody, "body")
+        src.joint_names = _object_names(m, mujoco.mjtObj.mjOBJ_JOINT, m.njnt, "joint")
+        src.geom_names = _object_names(m, mujoco.mjtObj.mjOBJ_GEOM, m.ngeom, "geom")
+        src.site_names = _object_names(m, mujoco.mjtObj.mjOBJ_SITE, m.nsite, "site")
+        src.camera_names = _object_names(m, mujoco.mjtObj.mjOBJ_CAMERA, m.ncam, "camera")
+        src.light_names = _object_names(m, mujoco.mjtObj.mjOBJ_LIGHT, m.nlight, "light")
+        src.tendon_names = _object_names(m, mujoco.mjtObj.mjOBJ_TENDON, m.ntendon, "tendon")
+        src.actuator_names = _object_names(m, mujoco.mjtObj.mjOBJ_ACTUATOR, m.nu, "actuator")
+        src.constraint_names = _object_names(m, mujoco.mjtObj.mjOBJ_EQUALITY, m.neq, "constraint")
+        src.flex_names = _object_names(m, mujoco.mjtObj.mjOBJ_FLEX, m.nflex, "flex")
+        self._build_flex_debug_source(src)
         src.lights = self._build_lights()
         src.cameras = tuple(self.camera_view(i) for i in range(m.ncam))
         src.scene_extent = float(m.stat.extent)
 
         src.shadow_clip = float(m.vis.map.shadowclip) or 1.0
         src.scene_center = np.asarray(m.stat.center, np.float32)
+        src.debug_frame_length = float(m.stat.meansize) * float(m.vis.scale.framelength)
 
         src.initial_qpos = np.asarray(m.qpos0, np.float32).copy()
 
@@ -759,6 +781,45 @@ class MuJoCoAdapter:
                 self._notes.append(note)
             self.caps = replace(self.caps, notes=tuple(self._notes))
         return src
+
+    def _build_flex_debug_source(self, source: SceneSource) -> None:
+        model = self._m
+        vertex_indices: list[np.ndarray] = []
+        edges: list[np.ndarray] = []
+        vertex_colors: list[np.ndarray] = []
+        edge_colors: list[np.ndarray] = []
+        ranges = np.zeros((model.nflex, 2), np.int32)
+        for flex in range(model.nflex):
+            if not self._visual_groups["flex"][int(model.flex_group[flex])]:
+                continue
+            vertex_address = int(model.flex_vertadr[flex])
+            vertex_count = int(model.flex_vertnum[flex])
+            edge_address = int(model.flex_edgeadr[flex])
+            edge_count = int(model.flex_edgenum[flex])
+            ranges[flex] = (vertex_address, vertex_count)
+            color = np.asarray(model.flex_rgba[flex], np.float32).copy()
+            material = int(model.flex_matid[flex])
+            if material >= 0 and np.array_equal(color, _GEOM_RGBA_DEFAULT):
+                color = np.asarray(model.mat_rgba[material], np.float32).copy()
+            vertex_indices.append(
+                np.arange(vertex_address, vertex_address + vertex_count, dtype=np.int32)
+            )
+            edges.append(
+                np.asarray(model.flex_edge[edge_address : edge_address + edge_count], np.int32)
+            )
+            vertex_colors.append(np.repeat(color[None], vertex_count, axis=0))
+            edge_colors.append(np.repeat(color[None], edge_count, axis=0))
+        source.flex_vertex_indices = (
+            np.concatenate(vertex_indices) if vertex_indices else np.zeros(0, np.int32)
+        )
+        source.flex_edges = np.concatenate(edges, axis=0) if edges else np.zeros((0, 2), np.int32)
+        source.flex_vertex_rgba = (
+            np.concatenate(vertex_colors, axis=0) if vertex_colors else np.zeros((0, 4), np.float32)
+        )
+        source.flex_edge_rgba = (
+            np.concatenate(edge_colors, axis=0) if edge_colors else np.zeros((0, 4), np.float32)
+        )
+        source.flex_vertex_ranges = ranges
 
     def _build_diagnostic_source(self) -> DiagnosticSource:
         m = self._m

@@ -39,6 +39,8 @@ class RenderFlag(enum.StrEnum):
     SKIN = "skin"
     FLEXFACE = "flex_face"
     FLEXSKIN = "flex_skin"
+    FLEXVERT = "flex_vertex"
+    FLEXEDGE = "flex_edge"
     CONTACTPOINT = "contactpoint"
     CONTACTFORCE = "contactforce"
     TENDON = "tendon"
@@ -67,6 +69,34 @@ class DebugView(enum.StrEnum):
     WIREFRAME = "wireframe"
 
 
+class LabelMode(enum.StrEnum):
+    NONE = "none"
+    BODY = "body"
+    JOINT = "joint"
+    GEOM = "geom"
+    SITE = "site"
+    CAMERA = "camera"
+    LIGHT = "light"
+    TENDON = "tendon"
+    ACTUATOR = "actuator"
+    CONSTRAINT = "constraint"
+    FLEX = "flex"
+    CONTACT_POINT = "contact point"
+    CONTACT_FORCE = "contact force"
+    SELECTION = "selection"
+
+
+class FrameMode(enum.StrEnum):
+    NONE = "none"
+    BODY = "body"
+    GEOM = "geom"
+    SITE = "site"
+    CAMERA = "camera"
+    LIGHT = "light"
+    CONTACT = "contact"
+    WORLD = "world"
+
+
 @dataclass(frozen=True)
 class BackendCaps:
     name: str = "?"
@@ -74,6 +104,8 @@ class BackendCaps:
     debug_draw: bool = False
     render_flags: frozenset[RenderFlag] = frozenset()
     debug_views: frozenset[DebugView] = frozenset()
+    label_modes: frozenset[LabelMode] = frozenset()
+    frame_modes: frozenset[FrameMode] = frozenset()
     capture: bool = False
     orthographic: bool = False
     shadows: bool = False
@@ -136,6 +168,14 @@ class RenderBackend(Protocol):
 
     def get_debug_view(self) -> DebugView: ...
 
+    def set_label_mode(self, mode: LabelMode) -> bool: ...
+
+    def get_label_mode(self) -> LabelMode: ...
+
+    def set_frame_mode(self, mode: FrameMode) -> bool: ...
+
+    def get_frame_mode(self) -> FrameMode: ...
+
     def render_options(self) -> tuple[RenderFlag, ...]: ...
 
     def release(self) -> None: ...
@@ -149,6 +189,8 @@ class NullBackend:
         self.stats = RenderStats()
         self._flags: dict[RenderFlag, bool] = {}
         self._view = DebugView.SHADED
+        self._label_mode = LabelMode.NONE
+        self._frame_mode = FrameMode.NONE
 
     def set_scene(self, source) -> None: ...
     def update(self, frame) -> None: ...
@@ -178,6 +220,18 @@ class NullBackend:
 
     def get_debug_view(self) -> DebugView:
         return self._view
+
+    def set_label_mode(self, mode: LabelMode) -> bool:
+        return False
+
+    def get_label_mode(self) -> LabelMode:
+        return self._label_mode
+
+    def set_frame_mode(self, mode: FrameMode) -> bool:
+        return False
+
+    def get_frame_mode(self) -> FrameMode:
+        return self._frame_mode
 
     def render_options(self) -> tuple[RenderFlag, ...]:
         return ()

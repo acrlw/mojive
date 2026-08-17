@@ -12,7 +12,7 @@ from ...adapters.base import ActuatorVisualKind, JointVisualKind, SceneFrame, Sc
 from ...gizmo import GizmoFrame
 from ...log import get_logger
 from ...types import CameraView, LightKind, MeshKey, ViewportImage
-from ..backend import BackendCaps, DebugView, RenderFlag, RenderStats
+from ..backend import BackendCaps, DebugView, FrameMode, LabelMode, RenderFlag, RenderStats
 from ..debugdraw import Occlusion
 from ..scene import RenderScene
 from .context import ContextCaps, attach
@@ -75,6 +75,8 @@ class ForgeBackend:
         self._selected = 0
         self._gizmo: GizmoFrame | None = None
         self._debug_view = DebugView.SHADED
+        self._label_mode = LabelMode.NONE
+        self._frame_mode = FrameMode.NONE
         self._flags: dict[RenderFlag, bool] = dict.fromkeys(self._supported_flags(), True)
         self._flags[RenderFlag.WIREFRAME] = False
         self._flags[RenderFlag.FOG] = False
@@ -92,6 +94,7 @@ class ForgeBackend:
         self._flags[RenderFlag.RANGEFINDER] = False
         self._flags[RenderFlag.CONSTRAINT] = False
         self._flags[RenderFlag.FLEXFACE] = False
+        self._flags[RenderFlag.FLEXVERT] = False
         # MuJoCo mjv_defaultOption() enables tendon paths by default.
         self._flags[RenderFlag.TENDON] = True
         self._contact_ends = np.zeros((0, 3), np.float32)
@@ -150,6 +153,8 @@ class ForgeBackend:
                 RenderFlag.LIGHT,
                 RenderFlag.RANGEFINDER,
                 RenderFlag.CONSTRAINT,
+                RenderFlag.FLEXVERT,
+                RenderFlag.FLEXEDGE,
             }
         return frozenset(flags)
 
@@ -169,6 +174,8 @@ class ForgeBackend:
             debug_draw=self.debug is not None,
             render_flags=self._supported_flags(),
             debug_views=frozenset(views),
+            label_modes=frozenset(LabelMode),
+            frame_modes=frozenset(FrameMode),
             capture=True,
             orthographic=True,
             shadows="shadow" in self._passes,
@@ -255,6 +262,9 @@ class ForgeBackend:
             return
         self._publish_diagnostics(frame)
         self._publish_scene_icons(frame)
+        self._publish_flex_debug(frame)
+        self._publish_labels(frame)
+        self._publish_frames(frame)
         contacts = frame.contacts
         points = self.debug.layer("physics.contact.points", Occlusion.ALWAYS)
         forces = self.debug.layer("physics.contact.forces", Occlusion.GHOST)
@@ -292,6 +302,159 @@ class ForgeBackend:
                 )
             else:
                 forces.erase("forces")
+
+    def _publish_flex_debug(self, frame: SceneFrame) -> None:
+        vertices = frame.flex_vertices
+        points = self.debug.layer("deformable.flex.vertices", Occlusion.ALWAYS)
+        edges = self.debug.layer("deformable.flex.edges", Occlusion.ALWAYS)
+        if vertices is None:
+            points.clear()
+            edges.clear()
+            return
+        source = self._source
+        if self.get_flag(RenderFlag.FLEXVERT) and len(source.flex_vertex_indices):
+            indices = source.flex_vertex_indices
+            points.points("vertices", vertices[indices], source.flex_vertex_rgba, 3.5)
+        else:
+            points.clear()
+        if self.get_flag(RenderFlag.FLEXEDGE) and len(source.flex_edges):
+            topology = source.flex_edges
+            edges.lines(
+                "edges",
+                vertices[topology[:, 0]],
+                vertices[topology[:, 1]],
+                source.flex_edge_rgba,
+                1.4,
+            )
+        else:
+            edges.clear()
+
+    def _publish_labels(self, frame: SceneFrame) -> None:
+        layer = self.debug.layer("scene.labels", Occlusion.GHOST)
+        layer.clear()
+        mode = self._label_mode
+        source = self._source
+        if mode is LabelMode.NONE:
+            return
+        if mode is LabelMode.BODY and frame.body_xpos is not None:
+            self._draw_labels(layer, mode, source.body_names, frame.body_xpos)
+        elif mode is LabelMode.JOINT and frame.diagnostics is not None:
+            self._draw_labels(layer, mode, source.joint_names, frame.diagnostics.joint_xpos)
+        elif mode is LabelMode.GEOM and frame.geom_xpos is not None:
+            self._draw_labels(layer, mode, source.geom_names, frame.geom_xpos)
+        elif mode is LabelMode.SITE and frame.site_xpos is not None:
+            self._draw_labels(layer, mode, source.site_names, frame.site_xpos)
+        elif mode is LabelMode.CAMERA:
+            cameras = frame.cameras if frame.cameras is not None else source.cameras
+            self._draw_labels(layer, mode, source.camera_names, [view.eye for view in cameras])
+        elif mode is LabelMode.LIGHT:
+            lights = frame.lights if frame.lights is not None else source.lights
+            self._draw_labels(
+                layer, mode, source.light_names, [light.position for light in lights.lights]
+            )
+        elif mode is LabelMode.TENDON:
+            self._draw_tendon_labels(layer, frame)
+        elif mode is LabelMode.ACTUATOR and frame.diagnostics is not None:
+            seen: set[int] = set()
+            for record, actuator in enumerate(source.diagnostics.actuator_visual_actuators):
+                actuator = int(actuator)
+                if actuator in seen or actuator >= len(source.actuator_names):
+                    continue
+                seen.add(actuator)
+                layer.text(
+                    f"{mode.value}:{actuator}",
+                    frame.diagnostics.actuator_xpos[record],
+                    source.actuator_names[actuator],
+                )
+        elif mode is LabelMode.CONSTRAINT and frame.diagnostics is not None:
+            dynamic = frame.diagnostics
+            for index in np.flatnonzero(dynamic.constraint_visible):
+                if index < len(source.constraint_names):
+                    anchor = 0.5 * (
+                        dynamic.constraint_starts[index] + dynamic.constraint_ends[index]
+                    )
+                    layer.text(f"{mode.value}:{index}", anchor, source.constraint_names[index])
+        elif mode is LabelMode.FLEX and frame.flex_vertices is not None:
+            for index, (start, count) in enumerate(source.flex_vertex_ranges):
+                if count and index < len(source.flex_names):
+                    anchor = frame.flex_vertices[start : start + count].mean(axis=0)
+                    layer.text(f"{mode.value}:{index}", anchor, source.flex_names[index])
+        elif mode in (LabelMode.CONTACT_POINT, LabelMode.CONTACT_FORCE):
+            contacts = frame.contacts
+            if contacts is not None:
+                for index, contact in enumerate(contacts):
+                    text = str(index)
+                    if mode is LabelMode.CONTACT_FORCE:
+                        text = f"{contact[6]:.3g} N"
+                    layer.text(f"{mode.value}:{index}", contact[:3], text)
+        elif mode is LabelMode.SELECTION and self._selected:
+            node = next((node for node in source.nodes if node.object_id == self._selected), None)
+            if node is not None and frame.body_xpos is not None and node.body_index >= 0:
+                layer.text("selection", frame.body_xpos[node.body_index], node.name)
+
+    @staticmethod
+    def _draw_labels(layer, mode: LabelMode, names, positions) -> None:
+        for index, (name, position) in enumerate(zip(names, positions, strict=False)):
+            layer.text(f"{mode.value}:{index}", position, name)
+
+    def _draw_tendon_labels(self, layer, frame: SceneFrame) -> None:
+        source = self._source
+        if frame.tendon_segments is None or frame.tendon_ids is None:
+            return
+        for tendon, name in enumerate(source.tendon_names):
+            matches = frame.tendon_ids == tendon
+            if np.any(matches):
+                anchor = frame.tendon_segments[matches].mean(axis=(0, 1))
+                layer.text(f"tendon:{tendon}", anchor, name)
+
+    def _publish_frames(self, frame: SceneFrame) -> None:
+        layer = self.debug.layer("scene.frames", Occlusion.GHOST)
+        layer.clear()
+        mode = self._frame_mode
+        source = self._source
+        length = source.debug_frame_length
+        if mode is FrameMode.NONE:
+            return
+        if mode is FrameMode.WORLD:
+            layer.frame("world", np.eye(4, dtype=np.float32), length)
+        elif mode is FrameMode.BODY and frame.body_xpos is not None:
+            self._draw_frames(layer, mode, frame.body_xpos, frame.body_xmat, length)
+        elif mode is FrameMode.GEOM and frame.geom_xpos is not None:
+            self._draw_frames(layer, mode, frame.geom_xpos, frame.geom_xmat, length)
+        elif mode is FrameMode.SITE and frame.site_xpos is not None:
+            self._draw_frames(layer, mode, frame.site_xpos, frame.site_xmat, length)
+        elif mode is FrameMode.CAMERA:
+            cameras = frame.cameras if frame.cameras is not None else source.cameras
+            for index, view in enumerate(cameras):
+                forward = math3d.normalize(np.asarray(view.target) - np.asarray(view.eye))
+                right = math3d.normalize(np.cross(forward, np.asarray(view.up)))
+                up = math3d.normalize(np.cross(right, forward))
+                rotation = np.column_stack((right, up, -forward)).astype(np.float32)
+                layer.frame(
+                    f"{mode.value}:{index}", math3d.compose(view.eye, rotation, 1.0), length
+                )
+        elif mode is FrameMode.LIGHT:
+            lights = frame.lights if frame.lights is not None else source.lights
+            for index, light in enumerate(lights.lights):
+                layer.frame(
+                    f"{mode.value}:{index}",
+                    math3d.compose(light.position, self._axis_rotation(light.direction), 1.0),
+                    length,
+                )
+        elif mode is FrameMode.CONTACT and frame.contacts is not None:
+            for index, contact in enumerate(frame.contacts):
+                layer.frame(
+                    f"{mode.value}:{index}",
+                    math3d.compose(contact[:3], self._axis_rotation(contact[3:6]), 1.0),
+                    length,
+                )
+
+    @staticmethod
+    def _draw_frames(layer, mode: FrameMode, positions, rotations, length: float) -> None:
+        if rotations is None:
+            return
+        for index, (position, rotation) in enumerate(zip(positions, rotations, strict=False)):
+            layer.frame(f"{mode.value}:{index}", math3d.compose(position, rotation, 1.0), length)
 
     def _publish_diagnostics(self, frame: SceneFrame) -> None:
         joints = self.debug.layer("physics.joints", Occlusion.DEPTH)
@@ -890,6 +1053,24 @@ class ForgeBackend:
     def get_debug_view(self) -> DebugView:
 
         return self._debug_view
+
+    def set_label_mode(self, mode: LabelMode) -> bool:
+        if mode not in self.caps.label_modes:
+            return False
+        self._label_mode = mode
+        return True
+
+    def get_label_mode(self) -> LabelMode:
+        return self._label_mode
+
+    def set_frame_mode(self, mode: FrameMode) -> bool:
+        if mode not in self.caps.frame_modes:
+            return False
+        self._frame_mode = mode
+        return True
+
+    def get_frame_mode(self) -> FrameMode:
+        return self._frame_mode
 
     @property
     def debug_view(self) -> DebugView:

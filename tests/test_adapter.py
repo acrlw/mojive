@@ -767,6 +767,11 @@ def test_deformables_match_mujocos_abstract_visualization():
         assert sum(src.geom_visual == int(InstanceVisual.FLEX_SKIN)) == surface_count
         assert sum(src.geom_visual == int(InstanceVisual.FLEX_EDGE)) == 1
         assert sum(src.geom_visual == int(InstanceVisual.SKIN)) == a.model.nskin
+        assert len(src.flex_vertex_indices) == a.model.nflexvert
+        assert len(src.flex_edges) == a.model.nflexedge
+        assert src.flex_vertex_rgba.shape == (a.model.nflexvert, 4)
+        assert src.flex_edge_rgba.shape == (a.model.nflexedge, 4)
+        assert src.flex_vertex_ranges.shape == (a.model.nflex, 2)
         expected_static = np.zeros(src.instance_count, bool)
         posed = src.geom_pose_source != int(InstancePoseSource.WORLD)
         expected_static[posed] = a.model.body_weldid[src.geom_body[posed]] == 0
@@ -777,6 +782,7 @@ def test_deformables_match_mujocos_abstract_visualization():
         a.step(2)
         frame = a.frame(FrameNeeds(poses=True, deformables=True))
         assert frame.mesh_updates is not None
+        assert frame.flex_vertices == pytest.approx(a.data.flexvert_xpos, abs=1e-6)
         updates = frame.mesh_updates
 
         ref = mujoco.MjvScene(a.model, maxgeom=64)
@@ -854,7 +860,9 @@ def test_deformables_match_mujocos_abstract_visualization():
         )
         assert builder.scene.count == scene.count
 
-        assert a.frame(FrameNeeds.none()).mesh_updates is None
+        empty = a.frame(FrameNeeds.none())
+        assert empty.mesh_updates is None
+        assert empty.flex_vertices is None
         assert a.frame(FrameNeeds(deformables=True)).mesh_updates is updates
     finally:
         a.release()

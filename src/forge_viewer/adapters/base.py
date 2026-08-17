@@ -271,6 +271,7 @@ class SceneFrame:
     sensors: np.ndarray | None = None
     equality_enabled: np.ndarray | None = None
     mesh_updates: dict[MeshKey, MeshUpdate] | None = None
+    flex_vertices: np.ndarray | None = None
     diagnostics: DiagnosticFrame | None = None
 
     debug_commands: tuple[dict, ...] | None = None
@@ -304,6 +305,24 @@ class SceneSource:
     geom_local: np.ndarray = field(default_factory=lambda: np.zeros((0, 4, 4), np.float32))
 
     geom_infinite_plane: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
+
+    body_names: tuple[str, ...] = ()
+    joint_names: tuple[str, ...] = ()
+    geom_names: tuple[str, ...] = ()
+    site_names: tuple[str, ...] = ()
+    camera_names: tuple[str, ...] = ()
+    light_names: tuple[str, ...] = ()
+    tendon_names: tuple[str, ...] = ()
+    actuator_names: tuple[str, ...] = ()
+    constraint_names: tuple[str, ...] = ()
+    flex_names: tuple[str, ...] = ()
+
+    flex_vertex_indices: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
+    flex_edges: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), np.int32))
+    flex_vertex_rgba: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
+    flex_edge_rgba: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
+    flex_vertex_ranges: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), np.int32))
+    debug_frame_length: float = 0.1
 
     initial_qpos: np.ndarray = field(default_factory=lambda: np.zeros(0, np.float32))
 
