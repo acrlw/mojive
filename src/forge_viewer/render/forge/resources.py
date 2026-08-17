@@ -78,6 +78,7 @@ class TextureStore:
         self._textures: dict[str, moderngl.Texture | moderngl.TextureCube] = {}
         self._skybox_name: str | None = None
         self._white: moderngl.Texture | None = None
+        self._black_cube: moderngl.TextureCube | None = None
 
     @property
     def white(self) -> moderngl.Texture:
@@ -85,6 +86,12 @@ class TextureStore:
         if self._white is None:
             self._white = self.ctx.texture((1, 1), 4, b"\xff\xff\xff\xff")
         return self._white
+
+    @property
+    def black_cube(self) -> moderngl.TextureCube:
+        if self._black_cube is None:
+            self._black_cube = self.ctx.texture_cube((1, 1), 3, bytes(18))
+        return self._black_cube
 
     def sync(self, textures: dict[str, TextureData], skybox: str | None = None) -> None:
         for name, data in textures.items():
@@ -107,7 +114,8 @@ class TextureStore:
             else:
                 size = pixels.shape[1]
                 tex = self._make_cube(size, comps, pixels, fmt)
-                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+                tex.build_mipmaps()
+                tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
             self._textures[name] = tex
         for name in [k for k in self._textures if k not in textures]:
             self._textures.pop(name).release()
@@ -148,3 +156,6 @@ class TextureStore:
         if self._white is not None:
             self._white.release()
             self._white = None
+        if self._black_cube is not None:
+            self._black_cube.release()
+            self._black_cube = None

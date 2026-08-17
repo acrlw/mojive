@@ -316,6 +316,39 @@ def test_skybox_only_shows_up_when_it_is_on(gl_ctx):
         backend.release()
 
 
+def test_image_light_uses_cube_radiance_and_mujoco_intensity_scale(gl_ctx):
+    passes.load_all()
+    value = 128
+    cube = np.full((6, 8, 8, 3), value, np.uint8)
+    backend = ForgeBackend(gl_ctx, WIDTH, HEIGHT, samples=4)
+    try:
+        rig = Rig(
+            backend,
+            textures={"studio": TextureData("studio", TextureKind.CUBE, cube)},
+        )
+        surface = [(np.ones(4, np.float32), (0.0, 0.0, 0.5), 2.0, 0.0)]
+        off = Rig.center(rig.draw(surface))
+        on = Rig.center(
+            rig.draw(
+                surface,
+                lights=[
+                    Light(
+                        kind=LightKind.IMAGE,
+                        texture="studio",
+                        intensity=opaque_pass.IMAGE_LIGHT_REFERENCE_INTENSITY,
+                    )
+                ],
+            )
+        )
+
+        radiance = color.srgb_to_linear(value / 255.0)
+        expected = color.to_u8(color.finish(np.full(3, radiance))).astype(np.int32)
+        assert np.max(np.abs(on[:3] - expected)) <= 2
+        assert np.max(off[:3]) == 0
+    finally:
+        backend.release()
+
+
 def test_normals_survive_non_uniform_scale(gl_ctx):
 
     passes.load_all()

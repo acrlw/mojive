@@ -1870,7 +1870,9 @@ class MuJoCoAdapter:
         elif ltype == mujoco.mjtLightType.mjLIGHT_SPOT:
             kind = LightKind.SPOT
         else:
-            kind = LightKind.DIRECTIONAL
+            kind = LightKind.IMAGE
+        texid = int(m.light_texid[i])
+        texture = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_TEXTURE, texid) if texid >= 0 else None
         return Light(
             kind=kind,
             position=np.asarray(pos, np.float32).copy(),
@@ -1882,6 +1884,8 @@ class MuJoCoAdapter:
             range=float(m.light_range[i]),
             cutoff=float(m.light_cutoff[i]),
             exponent=float(m.light_exponent[i]),
+            texture=texture,
+            intensity=float(m.light_intensity[i]),
             cast_shadow=bool(m.light_castshadow[i]),
             active=bool(m.light_active[i]),
         )
@@ -2254,6 +2258,7 @@ class MuJoCoAdapter:
             LightKind.DIRECTIONAL: mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
             LightKind.POINT: mujoco.mjtLightType.mjLIGHT_POINT,
             LightKind.SPOT: mujoco.mjtLightType.mjLIGHT_SPOT,
+            LightKind.IMAGE: mujoco.mjtLightType.mjLIGHT_IMAGE,
             # AREA is a Forge render extension.  MuJoCo keeps its local pose as
             # a point light; Session restores the authored AREA kind afterwards.
             LightKind.AREA: mujoco.mjtLightType.mjLIGHT_POINT,
@@ -2261,6 +2266,15 @@ class MuJoCoAdapter:
         if light.kind not in kinds:
             return False
         m = self._m
+        texture_id = -1
+        if light.kind is LightKind.IMAGE:
+            texture_id = (
+                mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_TEXTURE, light.texture)
+                if light.texture
+                else -1
+            )
+            if texture_id < 0:
+                return False
         m.light_type[i] = int(kinds[light.kind])
         m.light_pos[i] = light.position
         direction = np.asarray(light.direction, np.float64)
@@ -2274,6 +2288,9 @@ class MuJoCoAdapter:
         m.light_range[i] = light.range
         m.light_cutoff[i] = light.cutoff
         m.light_exponent[i] = light.exponent
+        if light.kind is LightKind.IMAGE:
+            m.light_texid[i] = texture_id
+            m.light_intensity[i] = light.intensity
         m.light_castshadow[i] = light.cast_shadow
         m.light_active[i] = light.active
         mujoco.mj_forward(m, self._d)

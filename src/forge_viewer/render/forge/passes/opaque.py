@@ -40,6 +40,8 @@ WIRE_WIDTH = 1.2
 
 TEX_ALBEDO = 0
 TEX_REFLECTIONS = (2, 4, 5, 6)
+TEX_IMAGE_LIGHT = 7
+IMAGE_LIGHT_REFERENCE_INTENSITY = 5000.0
 
 NO_CLIP = (0.0, 0.0, 0.0, 1.0)
 
@@ -255,6 +257,8 @@ class OpaquePass(BasePass):
                 break
             if not light.active:
                 continue
+            if light.kind is LightKind.IMAGE:
+                continue
             d = np.asarray(light.direction, np.float64)
             norm = float(np.linalg.norm(d))
             pos[n, :3] = light.position
@@ -274,6 +278,28 @@ class OpaquePass(BasePass):
             self._light_buffer.write(self._light_block)
 
         u.set("u_ambient", tuple(float(v) for v in lights.ambient))
+        image_light = next(
+            (
+                light
+                for light in reversed(lights.lights)
+                if light.active and light.kind is LightKind.IMAGE
+            ),
+            None,
+        )
+        image_texture = ctx.textures.get(image_light.texture) if image_light is not None else None
+        if not isinstance(image_texture, moderngl.TextureCube):
+            image_texture = ctx.textures.black_cube
+        image_texture.use(TEX_IMAGE_LIGHT)
+        u.set("u_image_light_texture", TEX_IMAGE_LIGHT)
+        u.set(
+            "u_image_light",
+            (
+                max(float(image_light.intensity), 0.0) / IMAGE_LIGHT_REFERENCE_INTENSITY
+                if image_light is not None
+                else 0.0,
+                float(np.floor(np.log2(max(image_texture.size[0], 1)))),
+            ),
+        )
 
         hl = lights.headlight
         if hl is not None and hl.active:
@@ -291,6 +317,8 @@ class OpaquePass(BasePass):
         n = 0
         for light in lights.lights:
             if not light.active:
+                continue
+            if light.kind is LightKind.IMAGE:
                 continue
             if light.cast_shadow and light.kind is LightKind.DIRECTIONAL:
                 return n

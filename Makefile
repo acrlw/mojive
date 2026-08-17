@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io additive bench showcase probe reverse viewer empty canvas lighting many-lights scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io additive bench showcase probe reverse viewer empty canvas lighting image-light many-lights scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -35,6 +35,7 @@ help:
 		'' \
 		'Rendering and output:' \
 		'  make lighting          editable lights and environment' \
+		'  make image-light       MuJoCo cube-map environment light' \
 		'  make many-lights       16-light and 24-light reference images' \
 		'  make scene-icons       camera and light scene icons' \
 		'  make reflect           multiple planar reflections' \
@@ -157,6 +158,9 @@ adapter-conformance:
 ## Editable lights and Environment controls for ambient light, fog, haze, and headlight.
 lighting:
 	$(PY) -m forge_viewer.cli canvas --demo lighting $(ARGS)
+
+image-light:
+	$(PY) -m forge_viewer.cli view assets/image_light.xml --paused $(ARGS)
 
 many-lights:
 	$(PY) -m forge_viewer.tools.mujoco_many_lights $(ARGS)

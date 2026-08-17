@@ -20,6 +20,7 @@ EXPECTED_ASSETS = (
     "dense_mesh.xml",
     "empty.xml",
     "gizmo.xml",
+    "image_light.xml",
     "interpolated_flex.xml",
     "joint_types.xml",
     "many_lights.xml",

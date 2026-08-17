@@ -1,0 +1,20 @@
+<mujoco model="image_light">
+  <visual>
+    <headlight active="0"/>
+    <rgba haze="0.08 0.10 0.13 1"/>
+  </visual>
+  <asset>
+    <texture name="studio" type="cube" builtin="gradient" width="64" height="384"
+             rgb1="1.0 0.32 0.08" rgb2="0.04 0.20 0.80"/>
+    <material name="matte" rgba="0.62 0.66 0.72 1" specular="0.15" shininess="0.2"/>
+    <material name="gloss" rgba="0.38 0.42 0.48 1" specular="0.9" shininess="0.9"/>
+    <material name="orange" rgba="0.72 0.30 0.14 1" specular=".45" shininess=".55"/>
+  </asset>
+  <worldbody>
+    <light name="studio_environment" type="image" texture="studio" intensity="5000"/>
+    <geom name="ground" type="plane" size="4 4 .05" material="matte"/>
+    <geom name="matte_sphere" type="sphere" pos="-1 0 .75" size=".75" material="matte"/>
+    <geom name="gloss_sphere" type="sphere" pos="1 0 .75" size=".75" material="gloss"/>
+    <geom name="box" type="box" pos="0 1.8 .65" size=".65 .65 .65" material="orange"/>
+  </worldbody>
+</mujoco>

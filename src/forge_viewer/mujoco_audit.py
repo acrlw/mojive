@@ -339,9 +339,9 @@ def audit_model(model) -> dict:
             findings.append(
                 Finding(
                     "image light",
-                    "degraded",
+                    "supported",
                     images,
-                    "directional fallback; image-based lighting is pending",
+                    "cube-map diffuse and roughness-aware specular environment lighting",
                 )
             )
 

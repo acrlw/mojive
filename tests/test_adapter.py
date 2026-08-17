@@ -290,6 +290,39 @@ def test_forge_area_light_survives_mujoco_writeback(adapter, fixture_path):
     assert frame.lights.lights[0].position == pytest.approx(adapter.data.light_xpos[0])
 
 
+def test_image_light_preserves_its_cube_texture_and_intensity(tmp_path):
+    from forge_viewer.types import LightKind
+
+    path = tmp_path / "image_light.xml"
+    path.write_text(
+        """
+        <mujoco>
+          <asset>
+            <texture name="studio" type="cube" builtin="gradient" width="8" height="48"
+                     rgb1="1 .4 .1" rgb2=".1 .3 1"/>
+          </asset>
+          <worldbody>
+            <light name="environment" type="image" texture="studio" intensity="7500"/>
+            <geom type="sphere" size=".2"/>
+          </worldbody>
+        </mujoco>
+        """
+    )
+    image_adapter = MuJoCoAdapter(path)
+    try:
+        light = image_adapter.scene_source().lights.lights[0]
+        assert light.kind is LightKind.IMAGE
+        assert light.texture == "studio"
+        assert light.intensity == pytest.approx(7500.0)
+
+        edited = replace(light, intensity=3200.0)
+        assert image_adapter.set_light(0, edited)
+        assert image_adapter.model.light_intensity[0] == pytest.approx(3200.0)
+        assert image_adapter.frame(FrameNeeds()).lights.lights[0].intensity == pytest.approx(3200.0)
+    finally:
+        image_adapter.release()
+
+
 def test_initial_values_come_from_the_model(adapter):
 
     m = adapter.model

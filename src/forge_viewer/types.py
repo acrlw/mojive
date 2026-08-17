@@ -63,6 +63,7 @@ class LightKind(enum.IntEnum):
     POINT = 1
     SPOT = 2
     AREA = 3
+    IMAGE = 4
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,8 @@ class Light:
     area_radius: float = 0.0
     cutoff: float = 45.0
     exponent: float = 10.0
+    texture: str | None = None
+    intensity: float = 1.0
     cast_shadow: bool = True
     active: bool = True
 
@@ -106,7 +109,11 @@ class LightSet:
     haze_density: float = 0.0
 
     def shadow_casters(self) -> tuple[Light, ...]:
-        return tuple(x for x in self.lights if x.active and x.cast_shadow)
+        return tuple(
+            light
+            for light in self.lights
+            if light.active and light.cast_shadow and light.kind is not LightKind.IMAGE
+        )
 
     def environment(self) -> Environment:
         return Environment(

@@ -50,6 +50,8 @@ def test_forge_scene_round_trip_preserves_authored_content(tmp_path):
             kind=LightKind.POINT,
             position=np.array([2.0, -1.0, 4.0], np.float32),
             diffuse=np.array([0.3, 0.5, 0.9], np.float32),
+            texture="checker",
+            intensity=4.5,
         ),
     )
     removed_light.remove()
@@ -77,6 +79,8 @@ def test_forge_scene_round_trip_preserves_authored_content(tmp_path):
     assert np.array_equal(restored.textures["checker"].pixels, scene.textures["checker"].pixels)
     assert np.array_equal(next(iter(restored.source.meshes.values())).indices, mesh.indices)
     assert restored.light("fill").light_id == fill.light_id
+    assert restored.light("fill").value.texture == "checker"
+    assert restored.light("fill").value.intensity == 4.5
     light_node = next(node for node in source.nodes if node.name == "fill")
     assert light_node.object_id == LIGHT_OBJECT_BASE + fill.light_id
     assert np.allclose(source.lights.fog_color, [0.4, 0.5, 0.6])

@@ -214,6 +214,8 @@ class ShadowPass(BasePass):
         for light in ctx.scene.lights.lights:
             if not light.active:
                 continue
+            if light.kind is LightKind.IMAGE:
+                continue
             if (
                 light.cast_shadow
                 and light.kind in (LightKind.SPOT, LightKind.POINT, LightKind.AREA)

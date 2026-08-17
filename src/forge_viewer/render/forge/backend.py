@@ -846,7 +846,7 @@ class ForgeBackend:
     def _draw_light_icon(self, layer, index: int, light, color) -> None:
         position = np.asarray(light.position, np.float32)
         layer.point(f"light:{index}:point", position, color, 6.0)
-        if light.kind is LightKind.POINT:
+        if light.kind in (LightKind.POINT, LightKind.IMAGE):
             layer.erase(f"light:{index}:direction")
             return
         direction = math3d.normalize(np.asarray(light.direction, np.float32))

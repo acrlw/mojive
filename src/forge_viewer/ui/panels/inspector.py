@@ -9,7 +9,7 @@ from ... import commands as cmd
 from ... import math3d
 from ...adapters.base import FrameNeeds, NodeKind, SceneNode
 from ...render.backend import RenderFlag
-from ...types import DEFAULT_HEADLIGHT, Environment, LightKind
+from ...types import DEFAULT_HEADLIGHT, Environment, LightKind, TextureKind
 from . import Panel, PanelContext, begin_kv_table, labeled
 
 GIZMO_REFUSAL_RUNNING = "physics is running; pause to move things"
@@ -338,35 +338,61 @@ class InspectorPanel(Panel):
 
         changed, active = imgui.checkbox("enabled", light.active)
         kind_changed, kind_index = imgui.combo(
-            "type", int(light.kind), ["directional", "point", "spot", "area"]
+            "type", int(light.kind), ["directional", "point", "spot", "area", "image"]
         )
         changed |= kind_changed
+        kind = LightKind(kind_index)
 
-        intensity = float(np.max(light.diffuse))
-        color = light.diffuse / intensity if intensity > 0.0 else np.ones(3, np.float32)
-        color_changed, color = imgui.color_edit3("color", color)
-        intensity_changed, intensity = imgui.drag_float(
-            "intensity", intensity, 0.01, 0.0, 10.0, "%.2f"
-        )
-        changed |= color_changed or intensity_changed
-        diffuse = np.asarray(color, np.float32) * intensity
+        diffuse = light.diffuse
+        specular = light.specular
+        ambient = light.ambient
+        position = light.position
+        direction = light.direction
+        image_intensity = light.intensity
+        texture = light.texture
 
-        specular_changed, specular = imgui.color_edit3("specular", light.specular)
-        ambient_changed, ambient = imgui.color_edit3("ambient", light.ambient)
-        pos_changed, position = imgui.drag_float3(
-            "position (local)", light.position, 0.01, 0.0, 0.0, "%.3f"
-        )
-        dir_changed, direction = imgui.drag_float3(
-            "direction (local)", light.direction, 0.01, 0.0, 0.0, "%.3f"
-        )
-        changed |= specular_changed or ambient_changed or pos_changed or dir_changed
+        if kind is LightKind.IMAGE:
+            intensity_changed, image_intensity = imgui.drag_float(
+                "intensity", light.intensity, 50.0, 0.0, 100000.0, "%.0f"
+            )
+            textures = [
+                name
+                for name, item in source.textures.items()
+                if item.kind in (TextureKind.CUBE, TextureKind.SKYBOX)
+            ]
+            texture_index = textures.index(light.texture) if light.texture in textures else 0
+            texture_changed = False
+            if textures:
+                texture_changed, texture_index = imgui.combo("texture", texture_index, textures)
+                texture = textures[texture_index]
+            else:
+                imgui.text_disabled("add a cube texture to illuminate the scene")
+            changed |= intensity_changed or texture_changed
+        else:
+            intensity = float(np.max(light.diffuse))
+            color = light.diffuse / intensity if intensity > 0.0 else np.ones(3, np.float32)
+            color_changed, color = imgui.color_edit3("color", color)
+            intensity_changed, intensity = imgui.drag_float(
+                "intensity", intensity, 0.01, 0.0, 10.0, "%.2f"
+            )
+            changed |= color_changed or intensity_changed
+            diffuse = np.asarray(color, np.float32) * intensity
+
+            specular_changed, specular = imgui.color_edit3("specular", light.specular)
+            ambient_changed, ambient = imgui.color_edit3("ambient", light.ambient)
+            pos_changed, position = imgui.drag_float3(
+                "position (local)", light.position, 0.01, 0.0, 0.0, "%.3f"
+            )
+            dir_changed, direction = imgui.drag_float3(
+                "direction (local)", light.direction, 0.01, 0.0, 0.0, "%.3f"
+            )
+            changed |= specular_changed or ambient_changed or pos_changed or dir_changed
 
         range_changed = cutoff_changed = exponent_changed = attenuation_changed = False
         area_changed = False
         light_range, cutoff, exponent = light.range, light.cutoff, light.exponent
         area_radius = light.area_radius
         attenuation = light.attenuation
-        kind = LightKind(kind_index)
         if kind in (LightKind.POINT, LightKind.SPOT, LightKind.AREA):
             range_changed, light_range = imgui.drag_float(
                 "range (0 = unlimited)", light.range, 0.05, 0.0, 10000.0, "%.2f"
@@ -385,7 +411,10 @@ class InspectorPanel(Panel):
             area_changed, area_radius = imgui.drag_float(
                 "source radius", light.area_radius, 0.01, 0.0, 1000.0, "%.3f"
             )
-        shadow_changed, cast_shadow = imgui.checkbox("cast shadow", light.cast_shadow)
+        shadow_changed = False
+        cast_shadow = light.cast_shadow
+        if kind is not LightKind.IMAGE:
+            shadow_changed, cast_shadow = imgui.checkbox("cast shadow", light.cast_shadow)
         changed |= (
             range_changed
             or cutoff_changed
@@ -412,6 +441,8 @@ class InspectorPanel(Panel):
                         area_radius=float(area_radius),
                         cutoff=float(cutoff),
                         exponent=float(exponent),
+                        texture=texture,
+                        intensity=float(image_intensity),
                         cast_shadow=cast_shadow,
                     ),
                 )

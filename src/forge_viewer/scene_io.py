@@ -170,6 +170,8 @@ def _light_document(light: Light | None) -> dict | None:
         "area_radius": light.area_radius,
         "cutoff": light.cutoff,
         "exponent": light.exponent,
+        "texture": light.texture,
+        "intensity": light.intensity,
         "cast_shadow": light.cast_shadow,
         "active": light.active,
     }
@@ -190,6 +192,8 @@ def _light_from_document(item: dict | None) -> Light | None:
         area_radius=float(item["area_radius"]),
         cutoff=float(item["cutoff"]),
         exponent=float(item["exponent"]),
+        texture=item.get("texture"),
+        intensity=float(item.get("intensity", 1.0)),
         cast_shadow=bool(item["cast_shadow"]),
         active=bool(item["active"]),
     )

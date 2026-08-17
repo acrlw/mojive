@@ -42,6 +42,8 @@ remain aligned.
 - Headlight and active scene-light ambient terms add together.
 - MuJoCo render and visualization flags retain their public names.
 - Texture surfaces receive lighting.
+- Image lights sample cube-map diffuse radiance and roughness-aware specular mip levels. An
+  intensity of 5000 maps to unit radiance in the Forge lighting model.
 - Tendons use their model material, RGBA, width, texture, and transparency.
 
 ## Forge diagnostics

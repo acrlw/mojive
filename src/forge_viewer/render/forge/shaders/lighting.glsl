@@ -19,6 +19,8 @@ uniform vec4 u_headlight_diffuse;       // rgb diffuse, w enabled
 uniform vec3 u_headlight_specular;
 uniform vec3 u_camera_pos;
 uniform vec3 u_camera_dir;
+uniform samplerCube u_image_light_texture;
+uniform vec2 u_image_light;  // intensity gain, maximum mip level
 
 uniform int u_shadow_light;
 
@@ -45,6 +47,18 @@ vec3 shade(
     vec3 view_dir = normalize(u_camera_pos - world_pos);
 
     vec3 color = ambient_linear(u_ambient) * albedo;
+
+    if (u_image_light.x > 0.0) {
+        vec3 cube_n = vec3(n.x, n.z, -n.y);
+        vec3 reflected = reflect(-view_dir, n);
+        vec3 cube_r = vec3(reflected.x, reflected.z, -reflected.y);
+        vec3 diffuse_ibl = textureLod(u_image_light_texture, cube_n, u_image_light.y).rgb;
+        float roughness = 1.0 - clamp(shininess, 0.0, 1.0);
+        vec3 specular_ibl = textureLod(
+            u_image_light_texture, cube_r, roughness * u_image_light.y
+        ).rgb;
+        color += u_image_light.x * (diffuse_ibl * albedo + specular * specular_ibl);
+    }
 
     for (int i = 0; i < FORGE_MAX_LIGHTS; ++i) {
         if (i >= u_light_count) break;
