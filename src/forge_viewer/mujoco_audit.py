@@ -104,8 +104,12 @@ _VIS_COVERAGE = (
     Coverage("mjVIS_FLEXEDGE", "supported", "GPU line overlay follows dynamic flex topology"),
     Coverage("mjVIS_FLEXFACE", "supported", "flat element faces selected independently"),
     Coverage("mjVIS_FLEXSKIN", "supported", "smooth shell surfaces selected independently"),
-    Coverage("mjVIS_BODYBVH", "unsupported", "body BVH overlays are not drawn"),
-    Coverage("mjVIS_MESHBVH", "unsupported", "mesh BVH overlays are not drawn"),
+    Coverage("mjVIS_BODYBVH", "supported", "body BVH boxes with depth and active-node colors"),
+    Coverage(
+        "mjVIS_MESHBVH",
+        "degraded",
+        "mesh, octree and flex BVH boxes; interpolated-flex control cages are pending",
+    ),
     Coverage("mjVIS_SDFITER", "unsupported", "SDF iteration overlays are not drawn"),
 )
 

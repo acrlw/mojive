@@ -515,8 +515,12 @@ class ViewerApp:
             or label_mode is LabelMode.FLEX
         )
         needs.islands = self.backend.get_flag(RenderFlag.ISLAND)
+        needs.bvh = self.backend.get_flag(RenderFlag.BODYBVH) or self.backend.get_flag(
+            RenderFlag.MESHBVH
+        )
         needs.diagnostics = (
-            any(
+            needs.bvh
+            or any(
                 self.backend.get_flag(flag)
                 for flag in (
                     RenderFlag.ACTUATOR,

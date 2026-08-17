@@ -51,6 +51,8 @@ class RenderFlag(enum.StrEnum):
     COM = "com"
     INERTIA = "inertia"
     SCLINERTIA = "scaled_inertia"
+    BODYBVH = "body_bvh"
+    MESHBVH = "mesh_bvh"
 
     OUTLINE = "outline"
     ALBEDO = "albedo"
@@ -179,6 +181,10 @@ class RenderBackend(Protocol):
 
     def get_frame_mode(self) -> FrameMode: ...
 
+    def set_bvh_depth(self, depth: int) -> bool: ...
+
+    def get_bvh_depth(self) -> int: ...
+
     def render_options(self) -> tuple[RenderFlag, ...]: ...
 
     def release(self) -> None: ...
@@ -235,6 +241,12 @@ class NullBackend:
 
     def get_frame_mode(self) -> FrameMode:
         return self._frame_mode
+
+    def set_bvh_depth(self, depth: int) -> bool:
+        return False
+
+    def get_bvh_depth(self) -> int:
+        return 0
 
     def render_options(self) -> tuple[RenderFlag, ...]:
         return ()

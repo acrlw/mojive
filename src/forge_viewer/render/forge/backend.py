@@ -9,7 +9,7 @@ import moderngl
 import numpy as np
 
 from ... import math3d
-from ...adapters.base import ActuatorVisualKind, JointVisualKind, SceneFrame, SceneSource
+from ...adapters.base import ActuatorVisualKind, BvhKind, JointVisualKind, SceneFrame, SceneSource
 from ...gizmo import GizmoFrame
 from ...log import get_logger
 from ...types import CameraView, LightKind, MeshKey, ViewportImage
@@ -31,6 +31,37 @@ log = get_logger("backend")
 
 
 PassFactory = Callable[[], RenderPass]
+
+_BOX_CORNERS = np.array(
+    [
+        (-1, -1, -1),
+        (1, -1, -1),
+        (-1, 1, -1),
+        (1, 1, -1),
+        (-1, -1, 1),
+        (1, -1, 1),
+        (-1, 1, 1),
+        (1, 1, 1),
+    ],
+    np.float32,
+)
+_BOX_EDGES = np.array(
+    (
+        (0, 1),
+        (0, 2),
+        (1, 3),
+        (2, 3),
+        (4, 5),
+        (4, 6),
+        (5, 7),
+        (6, 7),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
+    ),
+    np.intp,
+)
 
 
 class ForgeBackend:
@@ -93,6 +124,8 @@ class ForgeBackend:
         self._flags[RenderFlag.COM] = False
         self._flags[RenderFlag.INERTIA] = False
         self._flags[RenderFlag.SCLINERTIA] = False
+        self._flags[RenderFlag.BODYBVH] = False
+        self._flags[RenderFlag.MESHBVH] = False
         self._flags[RenderFlag.CAMERA] = False
         self._flags[RenderFlag.LIGHT] = False
         self._flags[RenderFlag.RANGEFINDER] = False
@@ -111,6 +144,7 @@ class ForgeBackend:
         self._capsule_material_ids = np.zeros(0, np.int32)
         self._capsule_transparent = np.zeros(0, bool)
         self._bucket_meshes: list = []
+        self._bvh_depth = 0
         self._structure_generation = -1
         self._program_generation = -1
         self.caps = self._build_caps()
@@ -161,6 +195,8 @@ class ForgeBackend:
                 RenderFlag.CONSTRAINT,
                 RenderFlag.FLEXVERT,
                 RenderFlag.FLEXEDGE,
+                RenderFlag.BODYBVH,
+                RenderFlag.MESHBVH,
             }
         return frozenset(flags)
 
@@ -198,7 +234,6 @@ class ForgeBackend:
 
     # ------------------------------------------------------------------
     def set_scene(self, source: SceneSource) -> None:
-
         from ..builder import SceneSourceBuilder
         from ..mesh import all_builtin
 
@@ -236,6 +271,7 @@ class ForgeBackend:
             self.debug.layer("scene.lights", Occlusion.GHOST).clear()
             self.debug.layer("physics.rangefinders", Occlusion.GHOST).clear()
             self.debug.layer("physics.constraints", Occlusion.DEPTH).clear()
+            self.debug.layer("physics.bvh", Occlusion.DEPTH).clear()
 
     def set_render_scene(self, scene: RenderScene) -> None:
 
@@ -510,6 +546,7 @@ class ForgeBackend:
         rangefinders = self.debug.layer("physics.rangefinders", Occlusion.GHOST)
         constraints = self.debug.layer("physics.constraints", Occlusion.DEPTH)
         autoconnect = self.debug.layer("physics.autoconnect", Occlusion.DEPTH)
+        bvh = self.debug.layer("physics.bvh", Occlusion.DEPTH)
         dynamic = frame.diagnostics
         source = self._source.diagnostics
         if dynamic is None:
@@ -520,6 +557,7 @@ class ForgeBackend:
             rangefinders.clear()
             constraints.clear()
             autoconnect.clear()
+            bvh.clear()
             return
 
         if self.get_flag(RenderFlag.JOINT):
@@ -587,6 +625,7 @@ class ForgeBackend:
         self._publish_actuator_visuals(frame, actuators)
         self._publish_rangefinders(frame, rangefinders)
         self._publish_constraints(frame, constraints)
+        self._publish_bvh(frame, bvh)
         if self.get_flag(RenderFlag.AUTOCONNECT):
             for index, segment in enumerate(dynamic.autoconnect_segments):
                 self._draw_capsule_between(
@@ -599,6 +638,41 @@ class ForgeBackend:
                 )
         else:
             autoconnect.clear()
+
+    def _publish_bvh(self, frame: SceneFrame, layer) -> None:
+        source = self._source.diagnostics
+        dynamic = frame.diagnostics
+        show_body = self.get_flag(RenderFlag.BODYBVH)
+        show_mesh = self.get_flag(RenderFlag.MESHBVH)
+        if dynamic is None or not (show_body or show_mesh):
+            layer.clear()
+            return
+
+        kind = source.bvh_kind
+        selected = np.zeros(len(kind), bool)
+        if show_body:
+            selected |= kind == int(BvhKind.BODY)
+        if show_mesh:
+            selected |= kind != int(BvhKind.BODY)
+        selected &= (source.bvh_depth == self._bvh_depth) | (
+            source.bvh_leaf & (source.bvh_depth < self._bvh_depth)
+        )
+        if source.bvh_active_highlight:
+            selected &= ~((kind == int(BvhKind.MESH)) & ~dynamic.bvh_active)
+        records = np.flatnonzero(selected)
+        if not len(records):
+            layer.clear()
+            return
+
+        local = dynamic.bvh_sizes[records, None, :] * _BOX_CORNERS[None, :, :]
+        corners = dynamic.bvh_centers[records, None, :] + np.einsum(
+            "nij,nkj->nki", dynamic.bvh_matrices[records], local
+        )
+        starts = corners[:, _BOX_EDGES[:, 0]].reshape(-1, 3)
+        ends = corners[:, _BOX_EDGES[:, 1]].reshape(-1, 3)
+        colors = np.repeat(source.bvh_rgba[None], len(records), axis=0)
+        colors[dynamic.bvh_active[records]] = source.bvh_active_rgba
+        layer.lines("boxes", starts, ends, np.repeat(colors, len(_BOX_EDGES), axis=0), 1.5)
 
     def _publish_constraints(self, frame: SceneFrame, layer) -> None:
         dynamic = frame.diagnostics
@@ -1190,6 +1264,13 @@ class ForgeBackend:
 
     def get_frame_mode(self) -> FrameMode:
         return self._frame_mode
+
+    def set_bvh_depth(self, depth: int) -> bool:
+        self._bvh_depth = max(int(depth), 0)
+        return True
+
+    def get_bvh_depth(self) -> int:
+        return self._bvh_depth
 
     @property
     def debug_view(self) -> DebugView:

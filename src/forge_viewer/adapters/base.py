@@ -153,6 +153,13 @@ class ActuatorVisualKind(enum.IntEnum):
     BOX = 8
 
 
+class BvhKind(enum.IntEnum):
+    BODY = 0
+    FLEX = 1
+    MESH = 2
+    OCTREE = 3
+
+
 @dataclass(frozen=True)
 class DiagnosticSource:
     joint_kinds: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
@@ -216,6 +223,14 @@ class DiagnosticSource:
     autoconnect_rgba: np.ndarray = field(
         default_factory=lambda: np.array([0.2, 0.2, 0.8, 1.0], np.float32)
     )
+    bvh_kind: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
+    bvh_depth: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
+    bvh_leaf: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
+    bvh_active_highlight: bool = False
+    bvh_rgba: np.ndarray = field(default_factory=lambda: np.array([0.0, 1.0, 0.0, 0.5], np.float32))
+    bvh_active_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.5], np.float32)
+    )
 
 
 @dataclass
@@ -241,6 +256,10 @@ class DiagnosticFrame:
     constraint_starts: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     constraint_ends: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     constraint_visible: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
+    bvh_centers: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    bvh_matrices: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3), np.float32))
+    bvh_sizes: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    bvh_active: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
 
 
 @dataclass
@@ -255,6 +274,7 @@ class FrameNeeds:
     deformables: bool = False
     diagnostics: bool = False
     islands: bool = False
+    bvh: bool = False
 
     def merge(self, other: FrameNeeds) -> FrameNeeds:
         return FrameNeeds(
@@ -268,6 +288,7 @@ class FrameNeeds:
             deformables=self.deformables or other.deformables,
             diagnostics=self.diagnostics or other.diagnostics,
             islands=self.islands or other.islands,
+            bvh=self.bvh or other.bvh,
         )
 
     @staticmethod

@@ -7,7 +7,13 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from forge_viewer.adapters.base import ActuatorVisualKind, FrameNeeds, JointVisualKind, NodeKind
+from forge_viewer.adapters.base import (
+    ActuatorVisualKind,
+    BvhKind,
+    FrameNeeds,
+    JointVisualKind,
+    NodeKind,
+)
 
 pytestmark = pytest.mark.physics
 
@@ -812,6 +818,64 @@ def test_island_colors_match_mujocos_visualizer():
         )
         assert frame.tendon_island_rgba == pytest.approx(tendon_colors, abs=2e-6)
         assert frame.contact_island_rgba == pytest.approx(contact_colors, abs=2e-6)
+    finally:
+        adapter.release()
+
+
+@pytest.mark.parametrize(
+    ("asset", "flag", "kind", "depth", "show_inactive"),
+    (
+        ("joint_types", mujoco.mjtVisFlag.mjVIS_BODYBVH, BvhKind.BODY, 1, False),
+        ("dense_mesh", mujoco.mjtVisFlag.mjVIS_MESHBVH, BvhKind.MESH, 2, True),
+        ("deformables", mujoco.mjtVisFlag.mjVIS_MESHBVH, BvhKind.FLEX, 2, False),
+    ),
+)
+def test_bvh_boxes_match_mujocos_visualizer(asset, flag, kind, depth, show_inactive):
+    from forge_viewer.assets import resolve
+
+    adapter = MuJoCoAdapter(resolve(asset))
+    try:
+        if show_inactive:
+            adapter.model.vis.global_.bvactive = 0
+        source = adapter.scene_source().diagnostics
+        frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True, bvh=True)).diagnostics
+
+        option = mujoco.MjvOption()
+        option.flags[:] = 0
+        option.flags[flag] = True
+        option.bvh_depth = depth
+        reference = mujoco.MjvScene(adapter.model, maxgeom=200_000)
+        mujoco.mjv_updateScene(
+            adapter.model,
+            adapter.data,
+            option,
+            None,
+            mujoco.MjvCamera(),
+            mujoco.mjtCatBit.mjCAT_ALL,
+            reference,
+        )
+        boxes = [
+            geom
+            for geom in reference.geoms[: reference.ngeom]
+            if int(geom.type) == int(mujoco.mjtGeom.mjGEOM_LINEBOX)
+        ]
+
+        selected = (source.bvh_kind == int(kind)) & (
+            (source.bvh_depth == depth) | (source.bvh_leaf & (source.bvh_depth < depth))
+        )
+        records = np.flatnonzero(selected)
+        assert len(records) == len(boxes) > 0
+        assert frame.bvh_centers[records] == pytest.approx(
+            np.asarray([geom.pos for geom in boxes]), abs=2e-6
+        )
+        assert frame.bvh_matrices[records] == pytest.approx(
+            np.asarray([geom.mat for geom in boxes]).reshape(-1, 3, 3), abs=2e-6
+        )
+        assert frame.bvh_sizes[records] == pytest.approx(
+            np.asarray([geom.size for geom in boxes]), abs=2e-6
+        )
+        colors = np.where(frame.bvh_active[records, None], source.bvh_active_rgba, source.bvh_rgba)
+        assert colors == pytest.approx(np.asarray([geom.rgba for geom in boxes]), abs=2e-6)
     finally:
         adapter.release()
 

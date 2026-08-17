@@ -29,6 +29,7 @@ from .base import (
     ActuatorInfo,
     ActuatorVisualKind,
     AdapterCaps,
+    BvhKind,
     CameraInfo,
     DiagnosticFrame,
     DiagnosticSource,
@@ -67,6 +68,10 @@ _GEOM_RGBA_DEFAULT = np.array([0.5, 0.5, 0.5, 1.0], np.float32)
 
 _TEXROLE_RGB = 1
 _TEXROLE_RGBA = 8
+
+_BVH_POSE_BODY = 0
+_BVH_POSE_GEOM = 1
+_BVH_POSE_DYNAMIC = 2
 
 
 _ACTUATOR_POSE_JOINT_AXIS = 0
@@ -157,6 +162,11 @@ class MuJoCoAdapter:
         self._actuator_visual_pose_kinds = np.zeros(0, np.uint8)
         self._actuator_visual_pose_indices = np.zeros(0, np.int32)
         self._slider_crank_actuators = np.zeros(0, np.int32)
+        self._bvh_pose_kind = np.zeros(0, np.uint8)
+        self._bvh_pose_source = np.zeros(0, np.int32)
+        self._bvh_global_index = np.zeros(0, np.int32)
+        self._bvh_local_center = np.zeros((0, 3), np.float32)
+        self._bvh_local_size = np.zeros((0, 3), np.float32)
         self._rangefinder_specs: tuple[_RangefinderSpec, ...] = ()
 
         self._mj_geom_xpos = None
@@ -477,6 +487,8 @@ class MuJoCoAdapter:
             self._fill_autoconnect_visuals(diagnostics)
             self._fill_rangefinder_visuals(diagnostics)
             self._fill_constraint_visuals(diagnostics)
+            if needs.bvh:
+                self._fill_bvh_visuals(diagnostics)
             f.diagnostics = diagnostics
             f.cameras = tuple(self.camera_view(i) for i in range(self._m.ncam))
         else:
@@ -990,8 +1002,123 @@ class MuJoCoAdapter:
         )
         source.flex_vertex_ranges = ranges
 
+    def _build_bvh_records(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        m = self._m
+        kinds: list[int] = []
+        depths: list[int] = []
+        leaves: list[bool] = []
+        pose_kinds: list[int] = []
+        pose_sources: list[int] = []
+        global_indices: list[int] = []
+        centers: list[np.ndarray] = []
+        sizes: list[np.ndarray] = []
+
+        def append(
+            kind: int,
+            depth: int,
+            leaf: bool,
+            pose_kind: int,
+            pose_source: int,
+            global_index: int,
+            center,
+            size,
+        ) -> None:
+            kinds.append(kind)
+            depths.append(depth)
+            leaves.append(leaf)
+            pose_kinds.append(pose_kind)
+            pose_sources.append(pose_source)
+            global_indices.append(global_index)
+            centers.append(np.asarray(center, np.float32))
+            sizes.append(np.asarray(size, np.float32))
+
+        for body in range(m.nbody):
+            start = int(m.body_bvhadr[body])
+            for index in range(start, start + int(m.body_bvhnum[body])):
+                leaf = bool(np.all(np.asarray(m.bvh_child[index]) == -1))
+                geom = int(m.bvh_nodeid[index])
+                if leaf:
+                    center, size = m.geom_aabb[geom, :3], m.geom_aabb[geom, 3:]
+                    pose_kind, pose_source = _BVH_POSE_GEOM, geom
+                else:
+                    center, size = m.bvh_aabb[index, :3], m.bvh_aabb[index, 3:]
+                    pose_kind, pose_source = _BVH_POSE_BODY, body
+                append(
+                    int(BvhKind.BODY),
+                    int(m.bvh_depth[index]),
+                    leaf,
+                    pose_kind,
+                    pose_source,
+                    index,
+                    center,
+                    size,
+                )
+
+        for flex in range(m.nflex):
+            if not self._visual_groups["flex"][int(m.flex_group[flex])]:
+                continue
+            start = int(m.flex_bvhadr[flex])
+            for index in range(start, start + int(m.flex_bvhnum[flex])):
+                append(
+                    int(BvhKind.FLEX),
+                    int(m.bvh_depth[index]),
+                    bool(np.all(np.asarray(m.bvh_child[index]) == -1)),
+                    _BVH_POSE_DYNAMIC,
+                    index,
+                    index,
+                    (0.0, 0.0, 0.0),
+                    (0.0, 0.0, 0.0),
+                )
+
+        mesh_geom = int(mujoco.mjtGeom.mjGEOM_MESH)
+        hfield_geom = int(mujoco.mjtGeom.mjGEOM_HFIELD)
+        for geom in range(m.ngeom):
+            mesh = int(m.geom_dataid[geom])
+            if mesh < 0:
+                continue
+            if int(m.geom_type[geom]) == mesh_geom and int(m.mesh_octadr[mesh]) < 0:
+                start = int(m.mesh_bvhadr[mesh])
+                for index in range(start, start + int(m.mesh_bvhnum[mesh])):
+                    append(
+                        int(BvhKind.MESH),
+                        int(m.bvh_depth[index]),
+                        bool(np.all(np.asarray(m.bvh_child[index]) == -1)),
+                        _BVH_POSE_GEOM,
+                        geom,
+                        index,
+                        m.bvh_aabb[index, :3],
+                        m.bvh_aabb[index, 3:],
+                    )
+            if int(m.geom_type[geom]) not in (hfield_geom,) and int(m.mesh_octadr[mesh]) >= 0:
+                start = int(m.mesh_octadr[mesh])
+                for index in range(start, start + int(m.mesh_octnum[mesh])):
+                    append(
+                        int(BvhKind.OCTREE),
+                        int(m.oct_depth[index]),
+                        False,
+                        _BVH_POSE_GEOM,
+                        geom,
+                        -1,
+                        m.oct_aabb[index, :3],
+                        m.oct_aabb[index, 3:],
+                    )
+
+        self._bvh_pose_kind = np.asarray(pose_kinds, np.uint8)
+        self._bvh_pose_source = np.asarray(pose_sources, np.int32)
+        self._bvh_global_index = np.asarray(global_indices, np.int32)
+        self._bvh_local_center = np.stack(centers) if centers else np.zeros((0, 3), np.float32)
+        self._bvh_local_size = np.stack(sizes) if sizes else np.zeros((0, 3), np.float32)
+        return np.asarray(kinds, np.uint8), np.asarray(depths, np.int32), np.asarray(leaves, bool)
+
     def _build_diagnostic_source(self) -> DiagnosticSource:
         m = self._m
+        bvh_kind, bvh_depth, bvh_leaf = self._build_bvh_records()
+        bvh_rgba = np.asarray(m.vis.rgba.bv, np.float32)
+        if bvh_rgba.shape != (4,):
+            bvh_rgba = np.array([0.0, 1.0, 0.0, 0.5], np.float32)
+        bvh_active_rgba = np.asarray(m.vis.rgba.bvactive, np.float32)
+        if bvh_active_rgba.shape != (4,):
+            bvh_active_rgba = np.array([1.0, 0.0, 0.0, 0.5], np.float32)
         joint_kinds = np.empty(m.njnt, np.uint8)
         joint_kind_map = {
             int(mujoco.mjtJoint.mjJNT_FREE): JointVisualKind.FREE,
@@ -1129,6 +1256,11 @@ class MuJoCoAdapter:
         self._diagnostic_frame.autoconnect_segments = np.zeros(
             (autoconnect_count, 2, 3), np.float32
         )
+        bvh_count = len(bvh_kind)
+        self._diagnostic_frame.bvh_centers = np.zeros((bvh_count, 3), np.float32)
+        self._diagnostic_frame.bvh_matrices = np.zeros((bvh_count, 3, 3), np.float32)
+        self._diagnostic_frame.bvh_sizes = self._bvh_local_size.copy()
+        self._diagnostic_frame.bvh_active = np.zeros(bvh_count, bool)
 
         return DiagnosticSource(
             joint_kinds=joint_kinds,
@@ -1165,6 +1297,12 @@ class MuJoCoAdapter:
             contact_force_scale=float(m.vis.map.force) / float(m.stat.meanmass),
             autoconnect_width=meansize * float(m.vis.scale.connect),
             autoconnect_rgba=np.asarray(m.vis.rgba.connect, np.float32).copy(),
+            bvh_kind=bvh_kind,
+            bvh_depth=bvh_depth,
+            bvh_leaf=bvh_leaf,
+            bvh_active_highlight=bool(m.vis.global_.bvactive),
+            bvh_rgba=bvh_rgba.copy(),
+            bvh_active_rgba=bvh_active_rgba.copy(),
         )
 
     def _fill_constraint_visuals(self, diagnostics: DiagnosticFrame) -> None:
@@ -1196,6 +1334,44 @@ class MuJoCoAdapter:
                     + d.xmat[second].reshape(3, 3) @ data[end_offset : end_offset + 3]
                 )
             visible[equality] = True
+
+    def _fill_bvh_visuals(self, diagnostics: DiagnosticFrame) -> None:
+        if not len(self._bvh_pose_kind):
+            return
+        m, d = self._m, self._d
+        centers = diagnostics.bvh_centers
+        matrices = diagnostics.bvh_matrices
+        np.copyto(diagnostics.bvh_sizes, self._bvh_local_size)
+
+        body = self._bvh_pose_kind == _BVH_POSE_BODY
+        if np.any(body):
+            source = self._bvh_pose_source[body]
+            rotation = d.ximat[source].reshape(-1, 3, 3)
+            matrices[body] = rotation
+            centers[body] = d.xipos[source] + np.einsum(
+                "nij,nj->ni", rotation, self._bvh_local_center[body]
+            )
+
+        geom = self._bvh_pose_kind == _BVH_POSE_GEOM
+        if np.any(geom):
+            source = self._bvh_pose_source[geom]
+            rotation = d.geom_xmat[source].reshape(-1, 3, 3)
+            matrices[geom] = rotation
+            centers[geom] = d.geom_xpos[source] + np.einsum(
+                "nij,nj->ni", rotation, self._bvh_local_center[geom]
+            )
+
+        dynamic = self._bvh_pose_kind == _BVH_POSE_DYNAMIC
+        if np.any(dynamic):
+            source = self._bvh_global_index[dynamic] - int(m.nbvhstatic)
+            aabb = d.bvh_aabb_dyn[source]
+            centers[dynamic] = aabb[:, :3]
+            matrices[dynamic] = np.eye(3, dtype=np.float32)
+            diagnostics.bvh_sizes[dynamic] = aabb[:, 3:]
+
+        diagnostics.bvh_active.fill(False)
+        indexed = self._bvh_global_index >= 0
+        diagnostics.bvh_active[indexed] = d.bvh_active[self._bvh_global_index[indexed]]
 
     @staticmethod
     def _build_rangefinder_specs(model) -> tuple[_RangefinderSpec, ...]:

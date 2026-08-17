@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,6 +31,7 @@ class OffscreenHarness:
         height: int = 800,
         samples: int = 4,
         backend: str = "mujoco",
+        configure_adapter: Callable[[object], None] | None = None,
     ) -> None:
         import glfw
 
@@ -55,6 +57,8 @@ class OffscreenHarness:
         from ..render.builder import SceneSourceBuilder
 
         self.adapter = make_adapter(backend, asset)
+        if configure_adapter is not None:
+            configure_adapter(self.adapter)
         self.backend = ForgeBackend(None, width, height, samples)
         self.builder = SceneSourceBuilder()
         self.source = self.adapter.scene_source()

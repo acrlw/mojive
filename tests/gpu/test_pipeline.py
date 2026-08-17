@@ -346,6 +346,33 @@ def test_contact_split_and_autoconnect_reach_the_gpu_pipeline(gl):
         chain.release()
 
 
+def test_bvh_boxes_reach_the_gpu_pipeline(gl):
+    from forge_viewer.adapters.base import BvhKind
+
+    adapter = make_adapter("mujoco", resolve("deformables"))
+    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=1)
+    try:
+        source = adapter.scene_source()
+        backend.set_scene(source)
+        backend.set_camera(adapter.camera_hint())
+        assert backend.set_flag(RenderFlag.MESHBVH, True)
+        assert backend.set_bvh_depth(2)
+
+        frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True, bvh=True))
+        backend.update(frame)
+        diagnostic = source.diagnostics
+        selected = (diagnostic.bvh_kind == int(BvhKind.FLEX)) & (
+            (diagnostic.bvh_depth == 2) | (diagnostic.bvh_leaf & (diagnostic.bvh_depth < 2))
+        )
+        layer = backend.debug.layer("physics.bvh")
+        assert layer.count_of(Prim.LINE) == 12 * int(np.count_nonzero(selected))
+        assert backend.get_bvh_depth() == 2
+        assert backend.render(frame) is not None
+    finally:
+        backend.release()
+        adapter.release()
+
+
 def test_deformable_vertices_update_without_rebuilding_the_scene(gl):
 
     import mujoco

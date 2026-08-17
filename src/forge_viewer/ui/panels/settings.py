@@ -47,6 +47,8 @@ _VIS_FLAGS: tuple[RenderFlag, ...] = (
     RenderFlag.COM,
     RenderFlag.INERTIA,
     RenderFlag.SCLINERTIA,
+    RenderFlag.BODYBVH,
+    RenderFlag.MESHBVH,
 )
 
 
@@ -157,6 +159,7 @@ class SettingsPanel(Panel):
         imgui.separator()
 
         self._visual_groups(ctx)
+        self._bvh_depth(ctx)
 
         for title, flags in flag_groups():
             if not flags:
@@ -183,6 +186,26 @@ class SettingsPanel(Panel):
                     changed, value = imgui.checkbox(f"{i}##visual_group_{family.category}", visible)
                     if changed:
                         ctx.submit(cmd.SetVisualGroup(family.category, i, value))
+        imgui.separator()
+
+    def _bvh_depth(self, ctx: PanelContext) -> None:
+        backend = ctx.backend
+        if not (
+            backend.caps.supports(RenderFlag.BODYBVH) or backend.caps.supports(RenderFlag.MESHBVH)
+        ):
+            return
+        imgui.align_text_to_frame_padding()
+        imgui.text("BVH depth")
+        imgui.same_line()
+        imgui.set_next_item_width(-1.0)
+        changed, depth = imgui.drag_int("##bvh_depth", backend.get_bvh_depth(), 1.0, 0, 64, "%d")
+        hovered = imgui.is_item_hovered()
+        if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+            changed, depth = True, 0
+        if hovered:
+            imgui.set_tooltip("drag: adjust · double-click: enter value · right-click: reset")
+        if changed:
+            backend.set_bvh_depth(depth)
         imgui.separator()
 
     def _flag_row(self, ctx: PanelContext, flag: RenderFlag) -> None:

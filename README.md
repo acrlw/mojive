@@ -61,6 +61,7 @@ Every user-facing feature has a reproducible Make target.
 | `make mujoco-debug` | Joint, center-of-mass, and inertia overlays |
 | `make mujoco-actuators` | Actuator and activation overlays |
 | `make mujoco-islands` | Constraint-island material and color comparison |
+| `make mujoco-bvh` | Body, mesh, and flex bounding-volume hierarchies |
 | `make mujoco-rangefinder` | Rangefinder rays, hits, and normals |
 | `make mujoco-constraints` | Equality constraint markers |
 | `make mujoco-editing` | Mocap pose and equality controls |
