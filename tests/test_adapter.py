@@ -1264,6 +1264,18 @@ def test_mujoco_camera_intrinsics_preserve_principal_point(tmp_path):
         a.release()
 
 
+def test_many_lights_audit_matches_the_renderer_capacity():
+    from forge_viewer.assets import resolve
+    from forge_viewer.mujoco_audit import audit_model
+
+    adapter = MuJoCoAdapter(resolve("many_lights"))
+    try:
+        report = audit_model(adapter.model)
+        assert not any(item["feature"] == "lights" for item in report["findings"])
+    finally:
+        adapter.release()
+
+
 def test_site_and_camera_rangefinders_publish_generic_diagnostics():
     from forge_viewer.assets import resolve
 

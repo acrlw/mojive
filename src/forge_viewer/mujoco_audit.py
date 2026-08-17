@@ -337,12 +337,13 @@ def audit_model(model) -> dict:
         images = sum(int(x) == int(image_kind) for x in model.light_type)
         if images:
             findings.append(
-                Finding("image light", "degraded", images, "rendered as a directional light")
+                Finding(
+                    "image light",
+                    "degraded",
+                    images,
+                    "directional fallback; image-based lighting is pending",
+                )
             )
-    if model.nlight > 16:
-        findings.append(
-            Finding("lights", "degraded", model.nlight - 16, "forge shades the first 16 lights")
-        )
 
     unsupported = sum(x.count for x in findings if x.status == "unsupported")
     degraded = sum(x.count for x in findings if x.status == "degraded")
