@@ -44,6 +44,7 @@ class RenderFlag(enum.StrEnum):
     CONTACTPOINT = "contactpoint"
     CONTACTFORCE = "contactforce"
     CONTACTSPLIT = "contactsplit"
+    ISLAND = "island"
     AUTOCONNECT = "autoconnect"
     TENDON = "tendon"
     TRANSPARENT = "transparent"

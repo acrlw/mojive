@@ -761,6 +761,61 @@ def test_contact_force_components_and_autoconnect_segments_match_mujoco():
         chain.release()
 
 
+def test_island_colors_match_mujocos_visualizer():
+    from forge_viewer.assets import resolve
+
+    adapter = MuJoCoAdapter(resolve("mujoco_visuals"))
+    try:
+        source = adapter.scene_source()
+        adapter.step(400)
+        frame = adapter.frame(FrameNeeds(poses=True, contacts=True, tendons=True, islands=True))
+
+        option = mujoco.MjvOption()
+        option.flags[mujoco.mjtVisFlag.mjVIS_ISLAND] = True
+        option.flags[mujoco.mjtVisFlag.mjVIS_TENDON] = True
+        option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = True
+        reference = mujoco.MjvScene(adapter.model, maxgeom=256)
+        mujoco.mjv_updateScene(
+            adapter.model,
+            adapter.data,
+            option,
+            None,
+            mujoco.MjvCamera(),
+            mujoco.mjtCatBit.mjCAT_ALL,
+            reference,
+        )
+
+        geom_colors = {
+            int(geom.objid): np.asarray(geom.rgba).copy()
+            for geom in reference.geoms[: reference.ngeom]
+            if int(geom.objtype) == int(mujoco.mjtObj.mjOBJ_GEOM)
+        }
+        moving = np.flatnonzero(source.instance_island_body >= 0)
+        assert len(moving)
+        for instance in moving:
+            geom = int(source.geom_source[instance])
+            assert frame.island_rgba[instance] == pytest.approx(geom_colors[geom], abs=2e-6)
+
+        tendon_colors = np.asarray(
+            [
+                np.asarray(geom.rgba).copy()
+                for geom in reference.geoms[: reference.ngeom]
+                if int(geom.objtype) == int(mujoco.mjtObj.mjOBJ_TENDON)
+            ]
+        )
+        contact_colors = np.asarray(
+            [
+                np.asarray(geom.rgba).copy()
+                for geom in reference.geoms[: reference.ngeom]
+                if int(geom.objtype) == int(mujoco.mjtObj.mjOBJ_UNKNOWN)
+            ]
+        )
+        assert frame.tendon_island_rgba == pytest.approx(tendon_colors, abs=2e-6)
+        assert frame.contact_island_rgba == pytest.approx(contact_colors, abs=2e-6)
+    finally:
+        adapter.release()
+
+
 def test_tendon_material_matches_mujocos_final_color_and_scalars(tmp_path):
     path = tmp_path / "tendon_material.xml"
     path.write_text(
@@ -897,6 +952,26 @@ def test_deformables_match_mujocos_abstract_visualization():
         assert skin.normals == pytest.approx(
             ref.skinnormal[3 * adr : 3 * (adr + count)].reshape(-1, 3), abs=2e-6
         )
+
+        island_frame = a.frame(FrameNeeds(poses=True, deformables=True, islands=True))
+        option.flags[mujoco.mjtVisFlag.mjVIS_ISLAND] = True
+        mujoco.mjv_updateScene(
+            a.model,
+            a.data,
+            option,
+            None,
+            camera,
+            mujoco.mjtCatBit.mjCAT_ALL,
+            ref,
+        )
+        flex_colors = {
+            int(geom.objid): np.asarray(geom.rgba).copy()
+            for geom in ref.geoms[: ref.ngeom]
+            if int(geom.objtype) == int(mujoco.mjtObj.mjOBJ_FLEX)
+        }
+        assert set(flex_colors) == set(range(a.model.nflex))
+        for flex_id, color in flex_colors.items():
+            assert island_frame.flex_island_rgba[flex_id] == pytest.approx(color, abs=2e-6)
 
         builder = SceneSourceBuilder()
         scene = builder.set_source(src)

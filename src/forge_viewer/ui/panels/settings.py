@@ -40,6 +40,7 @@ _VIS_FLAGS: tuple[RenderFlag, ...] = (
     RenderFlag.CONTACTPOINT,
     RenderFlag.CONTACTFORCE,
     RenderFlag.CONTACTSPLIT,
+    RenderFlag.ISLAND,
     RenderFlag.AUTOCONNECT,
     RenderFlag.TENDON,
     RenderFlag.TRANSPARENT,

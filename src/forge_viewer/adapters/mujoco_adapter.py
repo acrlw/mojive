@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from colorsys import hsv_to_rgb
 from dataclasses import dataclass, replace
 from itertools import pairwise
 from typing import TYPE_CHECKING
@@ -144,6 +145,12 @@ class MuJoCoAdapter:
         self._contact_view = self._contact_buf
         self._contact_force_buf = np.zeros((0, 2, 3), np.float32)
         self._contact_force_view = self._contact_force_buf
+        self._contact_island_rgba_buf = np.zeros((0, 4), np.float32)
+        self._contact_island_rgba_view = self._contact_island_rgba_buf
+        self._island_rgba_buf = np.zeros((0, 4), np.float32)
+        self._tendon_island_rgba_buf = np.zeros((0, 4), np.float32)
+        self._flex_island_rgba_buf = np.zeros((0, 4), np.float32)
+        self._body_island_rgba_buf = np.zeros((0, 4), np.float32)
         self._tendon_segments = np.zeros((0, 2, 3), np.float32)
         self._tendon_ids = np.zeros(0, np.int32)
         self._tendon_widths = np.zeros(0, np.float32)
@@ -258,6 +265,12 @@ class MuJoCoAdapter:
         self._contact_view = self._contact_buf[:0]
         self._contact_force_buf = np.zeros((len(self._contact_buf), 2, 3), np.float32)
         self._contact_force_view = self._contact_force_buf[:0]
+        self._contact_island_rgba_buf = np.zeros((len(self._contact_buf), 4), np.float32)
+        self._contact_island_rgba_view = self._contact_island_rgba_buf[:0]
+        self._island_rgba_buf = np.zeros((0, 4), np.float32)
+        self._tendon_island_rgba_buf = np.zeros((model.ntendon, 4), np.float32)
+        self._flex_island_rgba_buf = np.zeros((model.nflex, 4), np.float32)
+        self._body_island_rgba_buf = np.zeros((model.nbody, 4), np.float32)
         d = self._d
         wrap_capacity = d.wrap_xpos.size // 3
         self._tendon_segments = np.zeros((wrap_capacity, 2, 3), np.float32)
@@ -421,11 +434,13 @@ class MuJoCoAdapter:
         f.equality_enabled = self._equality_enabled_buf
 
         if needs.contacts:
-            f.contacts = self._fill_contacts()
+            f.contacts = self._fill_contacts(needs.islands)
             f.contact_forces = self._contact_force_view
+            f.contact_island_rgba = self._contact_island_rgba_view if needs.islands else None
         else:
             f.contacts = None
             f.contact_forces = None
+            f.contact_island_rgba = None
         if needs.tendons:
             f.tendon_segments, f.tendon_ids, f.tendon_widths = self._fill_tendons()
         else:
@@ -438,6 +453,13 @@ class MuJoCoAdapter:
         else:
             f.mesh_updates = None
             f.flex_vertices = None
+
+        if needs.islands:
+            f.island_rgba, f.tendon_island_rgba, f.flex_island_rgba = self._fill_island_colors()
+        else:
+            f.island_rgba = None
+            f.tendon_island_rgba = None
+            f.flex_island_rgba = None
 
         if needs.diagnostics:
             diagnostics = self._diagnostic_frame
@@ -491,7 +513,7 @@ class MuJoCoAdapter:
             self._tendon_widths[:count],
         )
 
-    def _fill_contacts(self) -> np.ndarray:
+    def _fill_contacts(self, islands: bool = False) -> np.ndarray:
 
         d, m = self._d, self._m
         n = int(d.ncon)
@@ -499,8 +521,10 @@ class MuJoCoAdapter:
             capacity = max(n, 2 * len(self._contact_buf))
             self._contact_buf = np.zeros((capacity, 7), np.float32)
             self._contact_force_buf = np.zeros((capacity, 2, 3), np.float32)
+            self._contact_island_rgba_buf = np.zeros((capacity, 4), np.float32)
             self._contact_view = self._contact_buf[:0]
             self._contact_force_view = self._contact_force_buf[:0]
+            self._contact_island_rgba_view = self._contact_island_rgba_buf[:0]
         for i in range(n):
             c = d.contact[i]
             self._contact_buf[i, 0:3] = c.pos
@@ -517,10 +541,109 @@ class MuJoCoAdapter:
             if first > second:
                 self._contact_force_buf[i] *= -1.0
             self._contact_buf[i, 6] = np.linalg.norm(local)
+            if islands:
+                address = int(c.efc_address)
+                if address >= 0:
+                    island = int(d.efc_island[address]) if int(d.nisland) else -1
+                    key = int(d.island_dofadr[island]) if island >= 0 else -1
+                    self._write_island_color(self._contact_island_rgba_buf[i], key, True)
+                else:
+                    self._contact_island_rgba_buf[i] = m.vis.rgba.contactgap
         if len(self._contact_view) != n:
             self._contact_view = self._contact_buf[:n]
             self._contact_force_view = self._contact_force_buf[:n]
+            self._contact_island_rgba_view = self._contact_island_rgba_buf[:n]
         return self._contact_view
+
+    def _fill_island_colors(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        source = self.scene_source()
+        bodies = source.instance_island_body
+        moving = bodies >= 0
+        np.copyto(self._island_rgba_buf, source.geom_rgba)
+        for body in np.unique(bodies[moving]):
+            key, awake = self._body_island_key(int(body))
+            self._write_island_color(self._body_island_rgba_buf[int(body)], key, awake)
+        if np.any(moving):
+            self._island_rgba_buf[moving] = self._body_island_rgba_buf[bodies[moving]]
+
+        model, data = self._m, self._d
+        for flex in range(model.nflex):
+            body = self._flex_island_body(flex)
+            if body >= 0:
+                self._flex_island_rgba_buf[flex] = self._body_island_rgba_buf[body]
+            else:
+                color = np.asarray(model.flex_rgba[flex], np.float32)
+                material = int(model.flex_matid[flex])
+                if material >= 0 and np.array_equal(color, _GEOM_RGBA_DEFAULT):
+                    color = model.mat_rgba[material]
+                self._flex_island_rgba_buf[flex] = color
+
+        for tendon in range(model.ntendon):
+            key = -1
+            address = int(data.tendon_efcadr[tendon])
+            if int(data.nisland) and address >= 0:
+                island = int(data.efc_island[address])
+                key = int(data.island_dofadr[island])
+            self._write_island_color(self._tendon_island_rgba_buf[tendon], key, True)
+        return (
+            self._island_rgba_buf,
+            self._tendon_island_rgba_buf,
+            self._flex_island_rgba_buf,
+        )
+
+    def _body_island_key(self, body: int) -> tuple[int, bool]:
+        model, data = self._m, self._d
+        weld = int(model.body_weldid[body])
+        dof = int(model.body_dofadr[weld])
+        island = int(data.dof_island[dof]) if int(data.nisland) else -1
+        key = int(data.island_dofadr[island]) if island >= 0 else -1
+        awake = bool(data.body_awake[body])
+        sleep = int(model.opt.enableflags) & int(mujoco.mjtEnableBit.mjENBL_SLEEP)
+        if key < 0 and sleep:
+            tree = int(model.dof_treeid[dof])
+            if not awake:
+                tree = self._sleep_cycle(data.tree_asleep, tree)
+            if tree >= 0:
+                key = int(model.tree_dofadr[tree])
+        return key, awake
+
+    def _flex_island_body(self, flex: int) -> int:
+        model = self._m
+        if bool(model.flex_interp[flex]):
+            address = int(model.flex_nodeadr[flex])
+            count = int(model.flex_nodenum[flex])
+            bodies = model.flex_nodebodyid[address : address + count]
+        else:
+            address = int(model.flex_vertadr[flex])
+            count = int(model.flex_vertnum[flex])
+            bodies = model.flex_vertbodyid[address : address + count]
+        return next((int(body) for body in bodies if int(model.body_treeid[body]) >= 0), -1)
+
+    def _sleep_cycle(self, tree_asleep: np.ndarray, start: int) -> int:
+        if start < 0 or start >= self._m.ntree:
+            return -1
+        smallest = current = start
+        for _ in range(self._m.ntree + 1):
+            current = int(tree_asleep[current])
+            if current < 0 or current >= self._m.ntree:
+                return -1
+            smallest = min(smallest, current)
+            if current == start:
+                return smallest
+        return -1
+
+    @staticmethod
+    def _write_island_color(out: np.ndarray, key: int, awake: bool) -> None:
+        hue, saturation, value = 1.0, 0.0, 0.7
+        if key >= 0:
+            hue = float(mujoco.mju_Halton(key + 1, 7))
+            saturation = 0.5 + 0.5 * float(mujoco.mju_Halton(key + 1, 3))
+            value = 0.6 + 0.4 * float(mujoco.mju_Halton(key + 1, 5))
+        if not awake:
+            saturation *= 0.7
+            value *= 0.6
+        out[:3] = hsv_to_rgb(hue, saturation, value)
+        out[3] = 1.0
 
     def scene_source(self) -> SceneSource:
         if self._source is None:
@@ -572,6 +695,7 @@ class MuJoCoAdapter:
         pose_sources: list[int] = []
         visuals: list[int] = []
         statics: list[bool] = []
+        island_bodies: list[int] = []
         node_ids: list[int] = []
         locals_: list[np.ndarray] = []
         infinite: list[bool] = []
@@ -594,6 +718,7 @@ class MuJoCoAdapter:
             is_infinite: bool = False,
             visual: InstanceVisual = InstanceVisual.DEFAULT,
             is_static: bool = False,
+            island_body: int = -1,
         ) -> None:
             for key, scale, cap_offset in parts:
                 if key.shape is not MeshShape.ASSET and key not in meshes:
@@ -608,6 +733,7 @@ class MuJoCoAdapter:
                 pose_sources.append(int(pose_source))
                 visuals.append(int(visual))
                 statics.append(is_static)
+                island_bodies.append(island_body)
                 node_ids.append(node_id)
                 local = np.eye(4, dtype=np.float32)
                 if cap_offset is not None:
@@ -685,6 +811,7 @@ class MuJoCoAdapter:
                 object_id=body,
                 is_infinite=is_infinite,
                 is_static=int(m.body_weldid[body]) == 0,
+                island_body=body if int(m.body_dofnum[int(m.body_weldid[body])]) else -1,
             )
 
         for si in range(m.nsite):
@@ -751,6 +878,7 @@ class MuJoCoAdapter:
                 node_id=node_id,
                 object_id=object_id,
                 visual=spec.visual,
+                island_body=self._flex_island_body(spec.key.index) if is_flex else -1,
             )
 
         src.meshes = {k: v for k, v in meshes.items() if v is not None}
@@ -766,6 +894,7 @@ class MuJoCoAdapter:
         src.geom_pose_source = np.array(pose_sources, np.uint8)
         src.geom_visual = np.array(visuals, np.uint8)
         src.geom_static = np.array(statics, bool)
+        src.instance_island_body = np.array(island_bodies, np.int32)
         src.geom_node = np.array(node_ids, np.int32)
         src.geom_local = np.stack(locals_) if n else np.zeros((0, 4, 4), np.float32)
         src.geom_infinite_plane = np.array(infinite, bool)
@@ -799,6 +928,9 @@ class MuJoCoAdapter:
         material_color = (tendon_matid >= 0) & np.all(src.tendon_rgba == _GEOM_RGBA_DEFAULT, axis=1)
         src.tendon_rgba[material_color] = m.mat_rgba[tendon_matid[material_color]]
         src.tendon_visible = self._group_visibility(m.tendon_group, "tendon")
+        self._island_rgba_buf = src.geom_rgba.copy()
+        self._tendon_island_rgba_buf = np.zeros((m.ntendon, 4), np.float32)
+        self._flex_island_rgba_buf = np.zeros((m.nflex, 4), np.float32)
 
         if skipped:
             names = ", ".join(sorted(str(mujoco.mjtGeom(t)) for t in skipped))
@@ -815,6 +947,8 @@ class MuJoCoAdapter:
         edges: list[np.ndarray] = []
         vertex_colors: list[np.ndarray] = []
         edge_colors: list[np.ndarray] = []
+        vertex_owners: list[np.ndarray] = []
+        edge_owners: list[np.ndarray] = []
         ranges = np.zeros((model.nflex, 2), np.int32)
         for flex in range(model.nflex):
             if not self._visual_groups["flex"][int(model.flex_group[flex])]:
@@ -836,6 +970,8 @@ class MuJoCoAdapter:
             )
             vertex_colors.append(np.repeat(color[None], vertex_count, axis=0))
             edge_colors.append(np.repeat(color[None], edge_count, axis=0))
+            vertex_owners.append(np.full(vertex_count, flex, np.int32))
+            edge_owners.append(np.full(edge_count, flex, np.int32))
         source.flex_vertex_indices = (
             np.concatenate(vertex_indices) if vertex_indices else np.zeros(0, np.int32)
         )
@@ -845,6 +981,12 @@ class MuJoCoAdapter:
         )
         source.flex_edge_rgba = (
             np.concatenate(edge_colors, axis=0) if edge_colors else np.zeros((0, 4), np.float32)
+        )
+        source.flex_vertex_owner = (
+            np.concatenate(vertex_owners) if vertex_owners else np.zeros(0, np.int32)
+        )
+        source.flex_edge_owner = (
+            np.concatenate(edge_owners) if edge_owners else np.zeros(0, np.int32)
         )
         source.flex_vertex_ranges = ranges
 

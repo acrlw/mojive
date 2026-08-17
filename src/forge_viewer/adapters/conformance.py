@@ -42,6 +42,7 @@ def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
             sensors=True,
             deformables=True,
             diagnostics=True,
+            islands=True,
         )
     )
     checks: list[ConformanceCheck] = []

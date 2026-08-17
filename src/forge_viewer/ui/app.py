@@ -514,6 +514,7 @@ class ViewerApp:
             or self.backend.get_flag(RenderFlag.FLEXEDGE)
             or label_mode is LabelMode.FLEX
         )
+        needs.islands = self.backend.get_flag(RenderFlag.ISLAND)
         needs.diagnostics = (
             any(
                 self.backend.get_flag(flag)

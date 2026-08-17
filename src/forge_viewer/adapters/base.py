@@ -254,6 +254,7 @@ class FrameNeeds:
     sensors: bool = False
     deformables: bool = False
     diagnostics: bool = False
+    islands: bool = False
 
     def merge(self, other: FrameNeeds) -> FrameNeeds:
         return FrameNeeds(
@@ -266,6 +267,7 @@ class FrameNeeds:
             sensors=self.sensors or other.sensors,
             deformables=self.deformables or other.deformables,
             diagnostics=self.diagnostics or other.diagnostics,
+            islands=self.islands or other.islands,
         )
 
     @staticmethod
@@ -293,13 +295,17 @@ class SceneFrame:
 
     contacts: np.ndarray | None = None  # (C, 7): position(3), normal(3), force magnitude
     contact_forces: np.ndarray | None = None  # (C, 2, 3): normal and friction force
+    contact_island_rgba: np.ndarray | None = None
     tendon_segments: np.ndarray | None = None  # (W, 2, 3) f32
     tendon_ids: np.ndarray | None = None
     tendon_widths: np.ndarray | None = None
+    tendon_island_rgba: np.ndarray | None = None
     sensors: np.ndarray | None = None
     equality_enabled: np.ndarray | None = None
     mesh_updates: dict[MeshKey, MeshUpdate] | None = None
     flex_vertices: np.ndarray | None = None
+    flex_island_rgba: np.ndarray | None = None
+    island_rgba: np.ndarray | None = None
     diagnostics: DiagnosticFrame | None = None
 
     debug_commands: tuple[dict, ...] | None = None
@@ -327,6 +333,7 @@ class SceneSource:
     geom_pose_source: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
     geom_visual: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
     geom_static: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
+    instance_island_body: np.ndarray = field(default_factory=lambda: np.full(0, -1, np.int32))
 
     geom_node: np.ndarray = field(default_factory=lambda: np.full(0, -1, np.int32))
 
@@ -350,6 +357,8 @@ class SceneSource:
     flex_vertex_rgba: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
     flex_edge_rgba: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
     flex_vertex_ranges: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), np.int32))
+    flex_vertex_owner: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
+    flex_edge_owner: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
     debug_frame_length: float = 0.1
 
     initial_qpos: np.ndarray = field(default_factory=lambda: np.zeros(0, np.float32))

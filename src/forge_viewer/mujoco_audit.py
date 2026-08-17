@@ -79,7 +79,11 @@ _VIS_COVERAGE = (
     Coverage("mjVIS_PERTFORCE", "degraded", "forge-native perturbation feedback"),
     Coverage("mjVIS_PERTOBJ", "degraded", "forge-native perturbation feedback"),
     Coverage("mjVIS_CONTACTPOINT", "supported", "contact point debug layer"),
-    Coverage("mjVIS_ISLAND", "unsupported", "constraint islands are not colored"),
+    Coverage(
+        "mjVIS_ISLAND",
+        "supported",
+        "official island colors for moving geoms, flexes, tendons, and contacts",
+    ),
     Coverage("mjVIS_CONTACTFORCE", "supported", "contact force debug layer"),
     Coverage(
         "mjVIS_CONTACTSPLIT",

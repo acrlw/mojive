@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -70,12 +70,17 @@ class SceneSourceBuilder:
         self._scene = RenderScene()
         self._write_index = np.zeros(0, np.intp)
         self._src_geom = np.zeros(0, np.intp)
+        self._source_instances = np.zeros(0, np.intp)
+        self._base_colors = np.zeros((0, 4), np.float32)
+        self._color_stage = np.zeros((0, 4), np.float32)
+        self._colors_overridden = False
 
         self._overrides: dict[int, bool] = {}
         self._show_static = True
         self._show_skin = True
         self._show_flex_face = False
         self._show_flex_skin = True
+        self._show_island = False
         self._planes: list[_InfinitePlane] = []
         self._tri_counts: dict[MeshKey, int] = {}
         self._notes: tuple[str, ...] = ()
@@ -133,14 +138,15 @@ class SceneSourceBuilder:
         return self._build(camera if camera is not None else self._scene.camera)
 
     def set_visual_options(
-        self, *, static: bool, skin: bool, flex_face: bool, flex_skin: bool
+        self, *, static: bool, skin: bool, flex_face: bool, flex_skin: bool, island: bool = False
     ) -> bool:
-        options = bool(static), bool(skin), bool(flex_face), bool(flex_skin)
+        options = bool(static), bool(skin), bool(flex_face), bool(flex_skin), bool(island)
         current = (
             self._show_static,
             self._show_skin,
             self._show_flex_face,
             self._show_flex_skin,
+            self._show_island,
         )
         if options == current:
             return False
@@ -149,6 +155,7 @@ class SceneSourceBuilder:
             self._show_skin,
             self._show_flex_face,
             self._show_flex_skin,
+            self._show_island,
         ) = options
         self.rebuild()
         return True
@@ -162,9 +169,11 @@ class SceneSourceBuilder:
         keep = self._visible_instances()
         self._hidden_count = int(np.count_nonzero(~keep))
         materials = src.materials or [DEFAULT_MATERIAL]
+        untextured = tuple(replace(material, texture=None) for material in materials)
 
         sb = SceneBuilder()
         slots: list[int] = []
+        source_instances: list[int] = []
         pose_sources: list[int] = []
         ls: list[np.ndarray] = []
         planes: list[_InfinitePlane] = []
@@ -174,6 +183,15 @@ class SceneSourceBuilder:
                 continue
             mat_index = src.geom_material[i] if i < len(src.geom_material) else 0
             mat = materials[mat_index] if 0 <= mat_index < len(materials) else DEFAULT_MATERIAL
+            rgba = src.geom_rgba[i]
+            if (
+                self._show_island
+                and i < len(src.instance_island_body)
+                and int(src.instance_island_body[i]) >= 0
+            ):
+                mat = untextured[mat_index] if 0 <= mat_index < len(untextured) else untextured[0]
+                rgba = rgba.copy()
+                rgba[3] = 1.0
             matid = sb.material_id(mat)
             size = np.asarray(src.geom_size[i], np.float32)
             key: MeshKey = src.geom_mesh[i]
@@ -193,7 +211,7 @@ class SceneSourceBuilder:
                 mesh=key,
                 matid=matid,
                 transform=ls_i,
-                color=self._linear_color(src.geom_rgba[i]),
+                color=self._linear_color(rgba),
                 material=np.array(
                     [
                         mat.emission,
@@ -208,6 +226,7 @@ class SceneSourceBuilder:
                 infinite_plane=infinite,
             )
             slots.append(int(src.geom_source[i]) if len(src.geom_source) > i else i)
+            source_instances.append(i)
             pose_sources.append(
                 int(src.geom_pose_source[i])
                 if len(src.geom_pose_source) > i
@@ -238,6 +257,10 @@ class SceneSourceBuilder:
         lights = src.lights
         self._scene = sb.build(cam, lights, src.scene_extent, src.scene_center, src.shadow_clip)
         self._write_index = sb.write_index.astype(np.intp)
+        self._source_instances = np.asarray(source_instances, np.intp)
+        self._base_colors = self._scene.colors.copy()
+        self._color_stage = np.zeros((self._scene.count, 4), np.float32)
+        self._colors_overridden = False
 
         n = self._scene.count
         self._src_geom = np.array(slots, np.intp) if n else np.zeros(0, np.intp)
@@ -380,13 +403,19 @@ class SceneSourceBuilder:
         self._notes = tuple(notes)
         return counts
 
-    def update(self, frame: SceneFrame, camera: CameraView | None = None) -> RenderScene:
+    def update(
+        self,
+        frame: SceneFrame,
+        camera: CameraView | None = None,
+        instance_rgba: np.ndarray | None = None,
+    ) -> RenderScene:
 
         scene = self._scene
         if camera is not None:
             scene.camera = camera
         if frame.lights is not None:
             scene.lights = frame.lights
+        self._update_colors(instance_rgba)
         if scene.count == 0 or frame.geom_xpos is None or frame.geom_xmat is None:
             return scene
 
@@ -425,6 +454,21 @@ class SceneSourceBuilder:
 
         scene.transforms[self._write_index] = self._stage
         return scene
+
+    def _update_colors(self, rgba: np.ndarray | None) -> None:
+        if rgba is None:
+            if self._colors_overridden:
+                np.copyto(self._scene.colors, self._base_colors)
+                self._colors_overridden = False
+            return
+        np.take(rgba, self._source_instances, axis=0, out=self._color_stage)
+        np.power(
+            np.clip(self._color_stage[:, :3], 0.0, 1.0),
+            2.2,
+            out=self._color_stage[:, :3],
+        )
+        self._scene.colors[self._write_index] = self._color_stage
+        self._colors_overridden = True
 
     def _update_infinite_planes(self, scene: RenderScene) -> None:
 

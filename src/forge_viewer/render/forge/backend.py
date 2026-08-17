@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import moderngl
@@ -84,6 +85,7 @@ class ForgeBackend:
         self._flags[RenderFlag.CONTACTPOINT] = False
         self._flags[RenderFlag.CONTACTFORCE] = False
         self._flags[RenderFlag.CONTACTSPLIT] = False
+        self._flags[RenderFlag.ISLAND] = False
         self._flags[RenderFlag.AUTOCONNECT] = False
         self._flags[RenderFlag.ACTUATOR] = False
         self._flags[RenderFlag.ACTIVATION] = False
@@ -130,6 +132,7 @@ class ForgeBackend:
             RenderFlag.SKIN,
             RenderFlag.FLEXFACE,
             RenderFlag.FLEXSKIN,
+            RenderFlag.ISLAND,
         }
         if "shadow" in self._passes:
             flags.add(RenderFlag.SHADOW)
@@ -210,6 +213,9 @@ class ForgeBackend:
             np.float32,
         )
         self._tendon_material_table = tuple(source.materials)
+        self._island_tendon_material_table = tuple(
+            replace(material, texture=None) for material in source.materials
+        )
         self._tendon_actuator = np.full(len(source.tendon_rgba), -1, np.int32)
         for actuator, tendon in enumerate(source.actuator_tendon):
             if 0 <= tendon < len(self._tendon_actuator):
@@ -255,7 +261,8 @@ class ForgeBackend:
         if self._builder is None:
             return
         self.meshes.update(frame.mesh_updates)
-        self.set_render_scene(self._builder.update(frame, self._camera))
+        island_rgba = frame.island_rgba if self.get_flag(RenderFlag.ISLAND) else None
+        self.set_render_scene(self._builder.update(frame, self._camera, island_rgba))
         self._publish_frame_visuals(frame)
 
     def _publish_frame_visuals(self, frame: SceneFrame) -> None:
@@ -277,7 +284,12 @@ class ForgeBackend:
             forces.clear()
         else:
             if self.get_flag(RenderFlag.CONTACTPOINT):
-                points.points("contacts", contacts[:, :3], contact_source.contact_point_rgba, 4.0)
+                color = (
+                    frame.contact_island_rgba
+                    if self.get_flag(RenderFlag.ISLAND) and frame.contact_island_rgba is not None
+                    else contact_source.contact_point_rgba
+                )
+                points.points("contacts", contacts[:, :3], color, 4.0)
             else:
                 points.erase("contacts")
             if self.get_flag(RenderFlag.CONTACTFORCE):
@@ -342,16 +354,22 @@ class ForgeBackend:
         source = self._source
         if self.get_flag(RenderFlag.FLEXVERT) and len(source.flex_vertex_indices):
             indices = source.flex_vertex_indices
-            points.points("vertices", vertices[indices], source.flex_vertex_rgba, 3.5)
+            color = source.flex_vertex_rgba
+            if self.get_flag(RenderFlag.ISLAND) and frame.flex_island_rgba is not None:
+                color = frame.flex_island_rgba[source.flex_vertex_owner]
+            points.points("vertices", vertices[indices], color, 3.5)
         else:
             points.clear()
         if self.get_flag(RenderFlag.FLEXEDGE) and len(source.flex_edges):
             topology = source.flex_edges
+            color = source.flex_edge_rgba
+            if self.get_flag(RenderFlag.ISLAND) and frame.flex_island_rgba is not None:
+                color = frame.flex_island_rgba[source.flex_edge_owner]
             edges.lines(
                 "edges",
                 vertices[topology[:, 0]],
                 vertices[topology[:, 1]],
-                source.flex_edge_rgba,
+                color,
                 1.4,
             )
         else:
@@ -874,8 +892,11 @@ class ForgeBackend:
         if base_count:
             self._capsule_segments[:base_count] = segments[base_indices]
             self._capsule_widths[:base_count] = widths[base_indices]
+            tendon_rgba = self._source.tendon_rgba
+            if self.get_flag(RenderFlag.ISLAND) and frame.tendon_island_rgba is not None:
+                tendon_rgba = frame.tendon_island_rgba
             np.take(
-                self._source.tendon_rgba,
+                tendon_rgba,
                 ids[base_indices],
                 axis=0,
                 out=self._capsule_colors[:base_count],
@@ -923,6 +944,11 @@ class ForgeBackend:
             out=self._capsule_transparent[:total],
         )
 
+        material_table = (
+            self._island_tendon_material_table
+            if self.get_flag(RenderFlag.ISLAND)
+            else self._tendon_material_table
+        )
         update(
             self._capsule_segments[:total],
             self._capsule_widths[:total],
@@ -930,7 +956,7 @@ class ForgeBackend:
             self._capsule_materials[:total],
             self._capsule_material_ids[:total],
             self._capsule_transparent[:total],
-            self._tendon_material_table,
+            material_table,
         )
 
     def _fill_actuator_palette(self, frame: SceneFrame) -> None:
@@ -1116,6 +1142,7 @@ class ForgeBackend:
             RenderFlag.SKIN,
             RenderFlag.FLEXFACE,
             RenderFlag.FLEXSKIN,
+            RenderFlag.ISLAND,
         }:
             self._sync_instance_visibility()
         return True
@@ -1128,6 +1155,7 @@ class ForgeBackend:
             skin=self.get_flag(RenderFlag.SKIN),
             flex_face=self.get_flag(RenderFlag.FLEXFACE),
             flex_skin=self.get_flag(RenderFlag.FLEXSKIN),
+            island=self.get_flag(RenderFlag.ISLAND),
         )
         if changed:
             self.set_render_scene(self._builder.scene)

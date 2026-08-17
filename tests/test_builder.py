@@ -446,6 +446,45 @@ def test_visual_options_filter_static_skin_and_flex_instances():
     assert builder.scene.count == 3
 
 
+def test_island_colors_replace_dynamic_instance_color_and_texture():
+    src = make_source(bodies=1)
+    src.materials[1] = _grid_material()
+    src.instance_island_body = np.array([-1, 1, 1, 1, 1], np.int32)
+    src.geom_rgba[1:, 3] = 0.25
+    builder = SceneSourceBuilder()
+    builder.set_source(src, CameraView())
+    builder.set_visual_options(
+        static=True,
+        skin=True,
+        flex_face=False,
+        flex_skin=True,
+        island=True,
+    )
+
+    island_rgba = np.array(
+        [
+            [0.1, 0.2, 0.3, 1.0],
+            [0.8, 0.6, 0.4, 1.0],
+            [0.7, 0.5, 0.3, 1.0],
+            [0.6, 0.4, 0.2, 1.0],
+            [0.5, 0.3, 0.1, 1.0],
+        ],
+        np.float32,
+    )
+    scene = builder.update(make_frame(src), instance_rgba=island_rgba)
+
+    for instance in range(src.instance_count):
+        row = builder.write_index[instance]
+        assert scene.colors[row, :3] == pytest.approx(island_rgba[instance, :3] ** 2.2)
+        assert scene.colors[row, 3] == pytest.approx(1.0)
+    assert scene.materials[scene.bucket_keys[scene.bucket[builder.write_index[0]]][1]].texture
+    for instance in range(1, src.instance_count):
+        row = builder.write_index[instance]
+        material = scene.materials[scene.bucket_keys[scene.bucket[row]][1]]
+        assert material.texture is None
+    assert not scene.transparent_buckets
+
+
 def test_stats_reports_batching_numbers():
 
     mesh = pytest.importorskip("forge_viewer.render.mesh", reason="built-in meshes are unavailable")
