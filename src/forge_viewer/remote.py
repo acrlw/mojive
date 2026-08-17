@@ -31,7 +31,7 @@ from .adapters.base import (
     VisualGroupInfo,
 )
 from .commands import CommandResult
-from .types import CameraView
+from .types import CameraView, Environment, Light, Material
 
 DEFAULT_PORT = 47650
 AUTHKEY = b"forge-viewer-local"
@@ -437,6 +437,24 @@ class RemoteSceneAdapter(SceneAdapterBase):
             )
         )
 
+    def set_light(self, light_id: int, light: Light) -> bool:
+        return self._ok(self._send("light", light_id=int(light_id), light=light))
+
+    def set_environment(self, environment: Environment) -> bool:
+        return self._ok(self._send("environment", environment=environment))
+
+    def set_material(self, material_id: int, material: Material) -> bool:
+        return self._ok(self._send("material", material_id=int(material_id), material=material))
+
+    def set_geometry_color(self, node_id: int, rgba: np.ndarray) -> bool:
+        return self._ok(
+            self._send(
+                "geometry_color",
+                node_id=int(node_id),
+                rgba=np.asarray(rgba, np.float32),
+            )
+        )
+
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
         return self._ok(self._send("scene_camera", camera_id=int(camera_id), camera=camera))
 
@@ -486,6 +504,10 @@ def handle_session_command(session, message: dict):
         "equality": lambda: cmd.SetEqualityEnabled(message["constraint_id"], message["enabled"]),
         "ctrl": lambda: cmd.SetCtrl(message["index"], message["value"]),
         "pose": lambda: cmd.SetPose(message["node_id"], message["position"], message["rotation"]),
+        "light": lambda: cmd.SetLight(message["light_id"], message["light"]),
+        "environment": lambda: cmd.SetEnvironment(message["environment"]),
+        "material": lambda: cmd.SetMaterial(message["material_id"], message["material"]),
+        "geometry_color": lambda: cmd.SetGeometryColor(message["node_id"], message["rgba"]),
         "scene_camera": lambda: cmd.SetSceneCamera(message["camera_id"], message["camera"]),
         "perturb": lambda: cmd.Perturb(
             message["node_id"],

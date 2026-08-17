@@ -161,7 +161,8 @@ used by MuJoCo.
 
 `make pvd` starts one headless simulation publisher and two viewer processes. Each viewer owns
 its window, camera, layout, and rendering context. Structure revisions are delivered reliably;
-frame transport keeps the latest state. Commands use a separate request and response channel.
+frame transport keeps the latest state. Camera, light, environment, material, geometry color,
+physics, and perturbation commands use a separate request and response channel.
 
 ```bash
 make serve PVD_SCENE=deformables

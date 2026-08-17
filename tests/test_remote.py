@@ -22,7 +22,7 @@ from forge_viewer.remote import (
 )
 from forge_viewer.scene import Scene
 from forge_viewer.session import Session
-from forge_viewer.types import CameraView
+from forge_viewer.types import CameraView, Environment, Light, Material
 
 
 def _port_pair() -> int:
@@ -112,6 +112,9 @@ def test_commands_use_a_separate_round_trip_channel():
     try:
         assert remote.set_paused(True)
         assert received == [{"op": "pause"}]
+        assert remote.set_environment(Environment(ambient=np.array([0.2, 0.3, 0.4], np.float32)))
+        assert received[-1]["op"] == "environment"
+        assert received[-1]["environment"].ambient == pytest.approx([0.2, 0.3, 0.4])
     finally:
         stop.set()
         worker.join()
@@ -139,6 +142,38 @@ def test_scene_camera_command_keeps_its_typed_remote_boundary():
         Sink(), {"op": "scene_camera", "camera_id": 7, "camera": camera}
     )
     assert command == cmd.SetSceneCamera(7, camera)
+
+
+def test_scene_entity_commands_keep_their_typed_remote_boundary():
+    class Sink:
+        def submit(self, command):
+            return command
+
+    light = Light(diffuse=np.array([0.2, 0.4, 0.8], np.float32))
+    environment = Environment(ambient=np.array([0.1, 0.2, 0.3], np.float32))
+    material = Material(name="remote", emission=0.4)
+    color = np.array([0.3, 0.5, 0.7, 0.8], np.float32)
+
+    command = handle_session_command(Sink(), {"op": "light", "light_id": 3, "light": light})
+    assert isinstance(command, cmd.SetLight)
+    assert command.light_id == 3
+    assert command.light is light
+
+    command = handle_session_command(Sink(), {"op": "environment", "environment": environment})
+    assert isinstance(command, cmd.SetEnvironment)
+    assert command.environment is environment
+
+    command = handle_session_command(
+        Sink(), {"op": "material", "material_id": 2, "material": material}
+    )
+    assert isinstance(command, cmd.SetMaterial)
+    assert command.material_id == 2
+    assert command.material is material
+
+    command = handle_session_command(Sink(), {"op": "geometry_color", "node_id": 9, "rgba": color})
+    assert isinstance(command, cmd.SetGeometryColor)
+    assert command.node_id == 9
+    assert np.array_equal(command.rgba, color)
 
 
 def test_equality_command_keeps_its_typed_remote_boundary():
