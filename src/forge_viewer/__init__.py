@@ -29,7 +29,7 @@ from .recording import SnapshotWriter, VideoRecorder, read_snapshots
 from .remote import RemoteSceneAdapter, SnapshotPublisher
 from .render.backend import DebugView, FrameMode, LabelMode, RenderFlag
 from .render.debugdraw import DebugDraw, Layer, Occlusion
-from .scene import Scene, SceneObject
+from .scene import Scene, SceneLight, SceneObject
 from .types import (
     CameraView,
     Environment,
@@ -101,6 +101,7 @@ __all__ = [
     "SceneAdapter",
     "SceneAdapterBase",
     "SceneFrame",
+    "SceneLight",
     "SceneNode",
     "SceneObject",
     "SceneSource",

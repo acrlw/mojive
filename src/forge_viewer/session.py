@@ -398,7 +398,10 @@ class Session:
             lights = list(self._source.lights.lights)
             lights[c.light_id] = c.light
             self._source.lights = replace(self._source.lights, lights=tuple(lights))
-            self._light_overrides[c.light_id] = c.light
+            if writeback:
+                self._light_overrides.pop(c.light_id, None)
+            else:
+                self._light_overrides[c.light_id] = c.light
             for node in self._nodes:
                 if node.light_index == c.light_id:
                     node.visible = c.light.active

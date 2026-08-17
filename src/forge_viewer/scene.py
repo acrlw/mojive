@@ -18,6 +18,7 @@ from .types import (
     DEFAULT_MATERIAL,
     CameraView,
     Environment,
+    Light,
     LightSet,
     Material,
     MeshData,
@@ -45,6 +46,22 @@ class SceneObject:
         self.scene.remove(self.object_id)
 
 
+@dataclass(frozen=True)
+class SceneLight:
+    scene: Scene = field(repr=False, compare=False)
+    light_id: int
+
+    @property
+    def value(self) -> Light:
+        return self.scene.light_value(self.light_id)
+
+    def set(self, light: Light) -> None:
+        self.scene.set_light_by_id(self.light_id, light)
+
+    def remove(self) -> None:
+        self.scene.remove_light(self.light_id)
+
+
 @dataclass
 class _Item:
     object_id: int
@@ -67,6 +84,12 @@ class _CameraItem:
     view: CameraView
 
 
+@dataclass
+class _LightItem:
+    light_id: int
+    name: str
+
+
 class Scene:
     def __init__(self, *, camera: CameraView | None = None, lights: LightSet | None = None) -> None:
         self.camera = camera
@@ -77,6 +100,11 @@ class Scene:
         self._next_object_id = 1
         self._next_mesh_id = 0
         self._next_camera_id = 0
+        self._next_light_id = len(self.lights.lights)
+        self._lights = [
+            _LightItem(i, f"{light.kind.name.lower()} light {i}")
+            for i, light in enumerate(self.lights.lights)
+        ]
         self._cameras: list[_CameraItem] = []
         self._revision = 0
         if camera is not None:
@@ -173,12 +201,20 @@ class Scene:
         self._revision += 1
         return camera_id
 
+    def remove_camera(self, camera_id: int) -> None:
+        item = next((item for item in self._cameras if item.camera_id == int(camera_id)), None)
+        if item is None:
+            raise KeyError(f"Unknown camera_id={camera_id}")
+        self._cameras.remove(item)
+        self.camera = self._cameras[0].view if self._cameras else None
+        self._revision += 1
+
     def set_camera(self, camera_id: int, view: CameraView) -> bool:
         item = next((item for item in self._cameras if item.camera_id == int(camera_id)), None)
         if item is None:
             return False
         item.view = view
-        if item.camera_id == 0:
+        if item is self._cameras[0]:
             self.camera = view
         if self._built_revision == self._revision:
             self._source.cameras = tuple(camera.view for camera in self._cameras)
@@ -191,6 +227,39 @@ class Scene:
 
     def camera_infos(self) -> list[CameraInfo]:
         return [CameraInfo(item.camera_id, item.name, item.object_id) for item in self._cameras]
+
+    def add_light(self, name: str, light: Light) -> SceneLight:
+        self._sync_light_items()
+        light_id = self._next_light_id
+        self._next_light_id += 1
+        self._lights.append(_LightItem(light_id, str(name)))
+        self.lights = replace(self.lights, lights=(*self.lights.lights, light))
+        self._revision += 1
+        return SceneLight(self, light_id)
+
+    def light(self, name: str) -> SceneLight:
+        self._sync_light_items()
+        item = next((item for item in self._lights if item.name == name), None)
+        if item is None:
+            raise KeyError(f"Unknown light name {name!r}")
+        return SceneLight(self, item.light_id)
+
+    def light_value(self, light_id: int) -> Light:
+        index = self._light_index(light_id)
+        return self.lights.lights[index]
+
+    def set_light_by_id(self, light_id: int, light: Light) -> None:
+        index = self._light_index(light_id)
+        if not self.set_light(index, light):
+            raise KeyError(f"Unknown light_id={light_id}")
+
+    def remove_light(self, light_id: int) -> None:
+        index = self._light_index(light_id)
+        lights = list(self.lights.lights)
+        del lights[index]
+        del self._lights[index]
+        self.lights = replace(self.lights, lights=tuple(lights))
+        self._revision += 1
 
     def object(self, name: str) -> SceneObject:
         item = next((x for x in self._items if x.name == name), None)
@@ -281,6 +350,23 @@ class Scene:
                 return item
         raise KeyError(f"Unknown object_id={object_id}")
 
+    def _light_index(self, light_id: int) -> int:
+        self._sync_light_items()
+        for index, item in enumerate(self._lights):
+            if item.light_id == int(light_id):
+                return index
+        raise KeyError(f"Unknown light_id={light_id}")
+
+    def _sync_light_items(self) -> None:
+        count = len(self.lights.lights)
+        del self._lights[count:]
+        while len(self._lights) < count:
+            index = len(self._lights)
+            light = self.lights.lights[index]
+            light_id = self._next_light_id
+            self._next_light_id += 1
+            self._lights.append(_LightItem(light_id, f"{light.kind.name.lower()} light {index}"))
+
     def _rebuild(self) -> None:
         if self._built_revision == self._revision:
             return
@@ -328,15 +414,16 @@ class Scene:
             self._node_to_oid[link_id] = item.object_id
             self._geom_node_to_oid[geom_id] = item.object_id
 
-        for i, light in enumerate(self.lights.lights):
+        self._sync_light_items()
+        for i, (light, item) in enumerate(zip(self.lights.lights, self._lights, strict=True)):
             node_id = len(nodes)
             nodes.append(
                 SceneNode(
                     node_id,
-                    f"{light.kind.name.lower()} light {i}",
+                    item.name,
                     NodeKind.LIGHT,
                     parent=0,
-                    object_id=LIGHT_OBJECT_BASE + i,
+                    object_id=LIGHT_OBJECT_BASE + item.light_id,
                     visible=light.active,
                     body_index=0,
                     light_index=i,

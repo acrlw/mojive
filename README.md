@@ -136,16 +136,18 @@ rotation.
 implements `scene_source()`, `frame()`, and `step()` through `SceneAdapterBase`.
 
 ```python
-from forge_viewer import Scene, build_scene
+from forge_viewer import Light, Scene, build_scene
 
 scene = Scene()
 ball = scene.sphere(name="ball", position=(0.0, 0.0, 0.5))
+key = scene.add_light("key", Light())
 viewer = build_scene(scene)
 
 for frame in range(300):
     ball.set_pose((frame * 0.01, 0.0, 0.5))
     viewer.sync()
 
+key.remove()
 viewer.release()
 ```
 

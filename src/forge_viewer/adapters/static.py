@@ -19,7 +19,7 @@ class StaticSceneAdapter(SceneAdapterBase):
 
     def __init__(self, scene: Scene) -> None:
         self.scene = scene
-        self.caps = replace(self.caps, model_cameras=bool(scene.camera_infos()))
+        self.caps = replace(self.caps, model_cameras=True)
 
     @property
     def structure_revision(self) -> int:

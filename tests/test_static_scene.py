@@ -5,7 +5,13 @@ from dataclasses import replace
 import numpy as np
 
 from forge_viewer import commands as cmd
-from forge_viewer.adapters.base import AdapterCaps, FrameNeeds, NodeKind, SceneAdapterBase
+from forge_viewer.adapters.base import (
+    LIGHT_OBJECT_BASE,
+    AdapterCaps,
+    FrameNeeds,
+    NodeKind,
+    SceneAdapterBase,
+)
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.render.builder import SceneSourceBuilder
 from forge_viewer.scene import Scene
@@ -113,6 +119,28 @@ def test_lights_are_editable_forge_entities_without_physics():
     assert not node.visible
 
 
+def test_light_entity_ids_survive_slot_changes():
+    scene = Scene()
+    first = scene.add_light("key", Light(kind=LightKind.DIRECTIONAL))
+    second = scene.add_light("fill", Light(kind=LightKind.POINT))
+    session = Session(StaticSceneAdapter(scene))
+    second_node = session.node_by_object_id(LIGHT_OBJECT_BASE + second.light_id)
+
+    edited = replace(second.value, diffuse=np.array([0.2, 0.5, 0.8], np.float32))
+    assert session.submit(cmd.SetLight(1, edited))
+    first.remove()
+    session.tick(FrameNeeds())
+
+    node = session.node_by_object_id(second_node.object_id)
+    assert node.name == "fill"
+    assert node.light_index == 0
+    assert scene.light("fill").light_id == second.light_id
+    assert np.allclose(session.source.lights.lights[0].diffuse, edited.diffuse)
+
+    third = scene.add_light("rim", Light(kind=LightKind.SPOT))
+    assert third.light_id > second.light_id
+
+
 def test_environment_is_editable_without_a_physics_backend():
     scene = Scene()
     session = Session(StaticSceneAdapter(scene))
@@ -202,6 +230,22 @@ def test_cameras_are_editable_forge_entities_without_physics():
     assert scene.camera_view(info.camera_id) is edited
     assert session.source.cameras == (edited,)
     assert session.frame.cameras == (edited,)
+
+
+def test_cameras_can_be_added_and_removed_after_session_creation():
+    scene = Scene()
+    session = Session(StaticSceneAdapter(scene))
+    first = scene.add_camera("first", CameraView())
+    second = scene.add_camera("second", CameraView(eye=np.array([4.0, 2.0, 3.0], np.float32)))
+
+    session.tick(FrameNeeds())
+    second_info = next(camera for camera in session.cameras if camera.camera_id == second)
+    scene.remove_camera(first)
+    session.tick(FrameNeeds())
+
+    assert [camera.camera_id for camera in session.cameras] == [second]
+    assert session.cameras[0].object_id == second_info.object_id
+    assert scene.camera is scene.camera_view(second)
 
 
 def test_backend_cannot_veto_a_forge_light_edit():
