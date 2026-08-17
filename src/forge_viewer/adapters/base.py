@@ -116,6 +116,7 @@ class VisualGroupInfo:
 class AdapterCaps:
     name: str = "?"
     simulation: bool = False
+    asset_loading: bool = False
 
     external_clock: bool = False
 

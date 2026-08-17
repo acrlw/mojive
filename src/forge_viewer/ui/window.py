@@ -145,6 +145,7 @@ class Window:
         self._destroyed = False
         self._frame_index = 0
         self._readback: np.ndarray | None = None
+        self._file_drops: list[Path] = []
 
         glfw.make_context_current(self._window)
         self.set_vsync(self.config.vsync)
@@ -164,6 +165,7 @@ class Window:
         io.set_ini_filename(ini)
 
         self._impl = GlfwRenderer(self._window)
+        glfw.set_drop_callback(self._window, self._on_file_drop)
 
         self._impl.process_inputs()
         fb_w, _ = self.size_pixels
@@ -277,6 +279,14 @@ class Window:
     def request_close(self) -> None:
         glfw.set_window_should_close(self._window, True)
 
+    def consume_file_drops(self) -> tuple[Path, ...]:
+        paths = tuple(self._file_drops)
+        self._file_drops.clear()
+        return paths
+
+    def _on_file_drop(self, _window: Any, paths: list[str]) -> None:
+        self._file_drops.extend(Path(path).expanduser().resolve() for path in paths)
+
     def set_vsync(self, on: bool) -> None:
 
         glfw.swap_interval(1 if on else 0)
@@ -290,6 +300,8 @@ class Window:
         self._refresh_scales()
         self._impl.process_inputs()
         imgui.new_frame()
+
+    def begin_dockspace(self) -> None:
         if self.config.docking:
             self.dockspace_id = imgui.dock_space_over_viewport(
                 0,

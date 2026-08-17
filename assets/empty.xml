@@ -1,0 +1,6 @@
+<mujoco model="empty">
+  <visual>
+    <headlight ambient="0.25 0.25 0.25" diffuse="0.65 0.65 0.65"/>
+  </visual>
+  <worldbody/>
+</mujoco>

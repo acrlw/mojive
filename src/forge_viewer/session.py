@@ -248,7 +248,10 @@ class Session:
         if isinstance(c, cmd.Reload):
             if not caps.reload:
                 return CommandResult.bad(f"{caps.name} does not support reload")
-            self._adapter.reload()
+            try:
+                self._adapter.reload()
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
             self._step_counter = 0
             self._sim_time_credit = 0.0
             self._perturb = PerturbState()
@@ -259,10 +262,17 @@ class Session:
             return CommandResult.good("Scene reloaded")
 
         if isinstance(c, cmd.LoadAsset):
-            self._adapter.load(c.path)
-            self._asset_path = c.path
+            if not caps.asset_loading:
+                return CommandResult.bad(f"{caps.name} does not support model loading")
+            path = Path(c.path).expanduser().resolve()
+            try:
+                self._adapter.load(path)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            self._asset_path = path
             self._step_counter = 0
             self._sim_time_credit = 0.0
+            self._pending_steps = 0
             self._selected = 0
             self._perturb = PerturbState()
             self._active_keyframe = -1

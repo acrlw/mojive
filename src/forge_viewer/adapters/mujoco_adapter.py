@@ -122,6 +122,7 @@ class MuJoCoAdapter:
         self.caps = AdapterCaps(
             name="mujoco",
             simulation=True,
+            asset_loading=True,
             write_pose=True,
             write_qpos=True,
             perturb=True,

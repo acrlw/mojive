@@ -182,6 +182,9 @@ class ObjectGizmo:
     def toggle_space(self) -> None:
         self.set_space("world" if self._space is GizmoSpace.BODY else "body")
 
+    def cancel(self) -> None:
+        self._end()
+
     def update_hover(
         self,
         session: Session,

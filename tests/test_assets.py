@@ -17,6 +17,7 @@ EXPECTED_ASSETS = (
     "constraints.xml",
     "deformables.xml",
     "dense_mesh.xml",
+    "empty.xml",
     "gizmo.xml",
     "interpolated_flex.xml",
     "joint_types.xml",
@@ -109,12 +110,19 @@ def test_empty_name_is_reported() -> None:
 
 
 @pytest.mark.physics
-@pytest.mark.parametrize("name", EXPECTED_ASSETS)
+@pytest.mark.parametrize("name", tuple(name for name in EXPECTED_ASSETS if name != "empty.xml"))
 def test_every_scene_loads(name: str) -> None:
 
     mujoco = pytest.importorskip("mujoco")
     model = mujoco.MjModel.from_xml_path(str(resolve(name)))
     assert model.ngeom > 0
+
+
+@pytest.mark.physics
+def test_empty_scene_has_no_geometry() -> None:
+    mujoco = pytest.importorskip("mujoco")
+    model = mujoco.MjModel.from_xml_path(str(resolve("empty.xml")))
+    assert model.ngeom == 0
 
 
 @pytest.mark.physics

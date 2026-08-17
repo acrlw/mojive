@@ -3,12 +3,14 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading bench showcase probe reverse viewer empty canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
 		'Interactive:' \
 		'  make viewer             default MuJoCo scene' \
+		'  make empty              empty viewer; load MJCF or URDF from File menu' \
+		'  make model-loading      empty, MJCF, and URDF loading reference images' \
 		'  make robot             Unitree Go2; downloads on first run' \
 		'  make outline           selection and antialiased outline' \
 		'  make gizmo             2D/3D position/rotation gizmo' \
@@ -100,6 +102,9 @@ gallery:
 gizmo-gallery:
 	$(PY) -m forge_viewer.tools.gizmo_gallery $(ARGS)
 
+model-loading:
+	$(PY) -m forge_viewer.tools.model_loading $(ARGS)
+
 bench:
 	$(PY) -m forge_viewer.tools.bench
 
@@ -119,6 +124,10 @@ SCENE ?= test_scene
 ARGS  ?=
 viewer:
 	$(PY) -m forge_viewer.cli view $(SCENE) $(ARGS)
+
+## Open an empty MuJoCo scene and load MJCF or URDF from File > Open Model.
+empty:
+	$(PY) -m forge_viewer.cli view empty --paused $(ARGS)
 
 ## Programmatic scene, Forge rendering, and the standard UI.
 canvas:

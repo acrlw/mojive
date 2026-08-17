@@ -388,8 +388,7 @@ def test_interpolated_flex_control_cage_reaches_the_gpu_pipeline(gl):
         frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True, bvh=True))
         backend.update(frame)
         boxes = np.count_nonzero(
-            (source.diagnostics.bvh_kind != int(BvhKind.BODY))
-            & (source.diagnostics.bvh_depth == 0)
+            (source.diagnostics.bvh_kind != int(BvhKind.BODY)) & (source.diagnostics.bvh_depth == 0)
         )
         layer = backend.debug.layer("physics.bvh")
         assert source.diagnostics.bvh_control_count == 12

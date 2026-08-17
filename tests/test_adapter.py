@@ -625,6 +625,36 @@ def test_reload_and_reset(adapter, fixture_path):
     assert np.linalg.norm(f.geom_xpos - adapter.model.geom_pos) > 1e-4
 
 
+def test_session_loads_mjcf_and_urdf_without_losing_the_current_model_on_failure(tmp_path):
+    from forge_viewer import commands as cmd
+    from forge_viewer.assets import resolve
+    from forge_viewer.session import Session
+
+    session = Session(MuJoCoAdapter(resolve("empty")), resolve("empty"))
+    try:
+        generation = session.structure_generation
+        for name in ("test_scene.xml", "test_scene.urdf"):
+            path = resolve(name)
+            result = session.submit(cmd.LoadAsset(path))
+            assert result.ok, result.message
+            assert session.asset_path == path
+            assert session.source.instance_count > 0
+            assert session.structure_generation > generation
+            generation = session.structure_generation
+
+        current_path = session.asset_path
+        current_source = session.source
+        invalid = tmp_path / "invalid.xml"
+        invalid.write_text("<mujoco><worldbody>", encoding="utf-8")
+        result = session.submit(cmd.LoadAsset(invalid))
+        assert not result.ok
+        assert "invalid.xml" in result.message
+        assert session.asset_path == current_path
+        assert session.source is current_source
+    finally:
+        session.release()
+
+
 def test_camera_hint_frames_the_scene(adapter):
     cam = adapter.camera_hint()
     assert cam is not None

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from imgui_bundle import imgui
+from imgui_bundle import imgui, portable_file_dialogs
 
 from .. import commands as cmd
 from ..adapters.base import FrameNeeds, NodeKind
@@ -21,12 +23,16 @@ from .viewcube import ViewCube
 from .window import Window, WindowConfig
 
 if TYPE_CHECKING:
+    from ..commands import CommandResult
     from ..session import Session
 
 CLICK_SLOP_PT = 4.0
 
 
 PICK_SCREEN_RADIUS_PT = 40.0
+
+MODEL_EXTENSIONS = frozenset((".xml", ".mjcf", ".urdf"))
+MODEL_FILTERS = ["Model files", "*.xml *.mjcf *.urdf", "All files", "*"]
 
 
 @dataclass
@@ -77,6 +83,11 @@ class ViewerApp:
         self._model_camera_id = -1
         self._model_camera_view = None
         self._fixed_render_size: tuple[int, int] | None = None
+        self._model_dialog: Any | None = None
+        self._model_load_error = ""
+        self._show_model_load_error = False
+        self._model_drop_notice = ""
+        self._model_drop_notice_until = 0.0
 
     def set_fixed_render_size(self, width: int, height: int) -> None:
 
@@ -114,10 +125,134 @@ class ViewerApp:
         return bool(self.window.should_close())
 
     def release(self) -> None:
+        if self._model_dialog is not None:
+            self._model_dialog.kill()
+            self._model_dialog = None
         if self.debug_bridge is not None:
             self.debug_bridge.close()
         self.backend.release()
         self.session.release()
+
+    def load_model(self, path: str | Path) -> CommandResult:
+        result = self.session.submit(cmd.LoadAsset(Path(path)))
+        if result.ok:
+            self._after_model_change()
+            self._set_model_drop_notice(f"Loaded {self.session.asset_path.name}")
+        else:
+            self._report_model_error(result.message)
+        return result
+
+    def _after_model_change(self) -> None:
+        self.router.abort()
+        self.gizmo.cancel()
+        self._model_camera_id = -1
+        self._model_camera_view = None
+        self._structure_generation = -1
+        self._sync_structure()
+        self._frame_scene(animate=False)
+
+    def _open_model_dialog(self) -> None:
+        if self._model_dialog is not None:
+            return
+        current = self.session.asset_path
+        default_path = str(current.parent if current is not None else Path.cwd())
+        self._model_dialog = portable_file_dialogs.open_file(
+            "Open model", default_path, MODEL_FILTERS
+        )
+        self._set_model_drop_notice("Choose an MJCF or URDF model")
+
+    def _poll_model_dialog(self) -> None:
+        dialog = self._model_dialog
+        if dialog is None or not dialog.ready(0):
+            return
+        self._model_dialog = None
+        try:
+            selected = dialog.result()
+        except Exception as exc:
+            self._report_model_error(str(exc))
+            return
+        if selected:
+            self.load_model(selected[0])
+
+    def _poll_model_drop(self) -> None:
+        paths = self.window.consume_file_drops()
+        if not paths:
+            return
+        if len(paths) != 1:
+            self._report_model_error("Drop one model at a time")
+            return
+        path = paths[0]
+        if path.suffix.lower() not in MODEL_EXTENSIONS:
+            self._report_model_error(f"Unsupported model file: {path.name}")
+            return
+        self.load_model(path)
+
+    def _set_model_drop_notice(self, message: str) -> None:
+        self._model_drop_notice = message
+        self._model_drop_notice_until = time.monotonic() + 1.8
+
+    def _draw_main_menu(self) -> None:
+        can_load = bool(self.session.adapter.caps.asset_loading)
+        shortcut = "Cmd" if sys.platform == "darwin" else "Ctrl"
+        open_model = False
+        reload_model = False
+        quit_viewer = False
+        if imgui.begin_main_menu_bar():
+            if imgui.begin_menu("File"):
+                open_model, _ = imgui.menu_item(
+                    "Open Model...", f"{shortcut}+O", False, can_load and self._model_dialog is None
+                )
+                reload_model, _ = imgui.menu_item(
+                    "Reload Model",
+                    f"{shortcut}+Shift+O",
+                    False,
+                    can_load and self.session.asset_path is not None,
+                )
+                imgui.separator()
+                quit_viewer, _ = imgui.menu_item("Quit", f"{shortcut}+Q", False, True)
+                imgui.end_menu()
+            path = self.session.asset_path
+            if path is not None:
+                imgui.text_disabled(path.name)
+            imgui.end_main_menu_bar()
+
+        io = imgui.get_io()
+        modifier = bool(io.key_ctrl or io.key_super)
+        if can_load and modifier and not io.want_text_input:
+            open_model |= imgui.is_key_pressed(imgui.Key.o, False) and not io.key_shift
+            reload_model |= imgui.is_key_pressed(imgui.Key.o, False) and bool(io.key_shift)
+        quit_viewer |= modifier and imgui.is_key_pressed(imgui.Key.q, False)
+
+        if open_model:
+            self._open_model_dialog()
+        if reload_model:
+            result = self.session.submit(cmd.Reload())
+            if result.ok:
+                self._after_model_change()
+                self._set_model_drop_notice(f"Reloaded {self.session.asset_path.name}")
+            else:
+                self._report_model_error(result.message)
+        if quit_viewer:
+            self.window.request_close()
+
+    def _report_model_error(self, message: str) -> None:
+        self._model_load_error = message
+        self._show_model_load_error = True
+
+    def _draw_model_load_error(self) -> None:
+        if self._show_model_load_error:
+            imgui.open_popup("Model load failed")
+            self._show_model_load_error = False
+        visible, _ = imgui.begin_popup_modal(
+            "Model load failed", None, imgui.WindowFlags_.always_auto_resize.value
+        )
+        if not visible:
+            return
+        imgui.text_wrapped(self._model_load_error)
+        imgui.spacing()
+        if imgui.button("OK", imgui.ImVec2(100.0, 0.0)):
+            imgui.close_current_popup()
+        imgui.end_popup()
 
     def frame(self) -> None:
 
@@ -127,6 +262,10 @@ class ViewerApp:
         self._last_time = now
 
         window.begin_frame()
+        self._poll_model_dialog()
+        self._poll_model_drop()
+        self._draw_main_menu()
+        window.begin_dockspace()
         keys = self._poll_keys()
         self.apply_keys(keys)
 
@@ -161,6 +300,7 @@ class ViewerApp:
         ctx = self._panel_context()
         self._draw_viewport(ctx)
         self.panels.draw(ctx)
+        self._draw_model_load_error()
         window.end_frame()
         self._frame_index += 1
 
@@ -485,9 +625,43 @@ class ViewerApp:
                 style_scale=self.window.style_scale,
             )
             self.view_cube.draw(self.window.style_scale)
+            self._draw_model_drop_overlay()
         finally:
             imgui.pop_clip_rect()
         imgui.end()
+
+    def _draw_model_drop_overlay(self) -> None:
+        source = self.session.source
+        empty = source is not None and source.instance_count == 0
+        notice = self._model_drop_notice if time.monotonic() < self._model_drop_notice_until else ""
+        if not empty and not notice:
+            return
+        message = notice or "Drop an MJCF or URDF model here\nFile > Open Model..."
+        lines = message.splitlines()
+        sizes = [imgui.calc_text_size(line) for line in lines]
+        scale = self.window.style_scale
+        pad_x, pad_y = 18.0 * scale, 12.0 * scale
+        width = max(float(size.x) for size in sizes) + 2.0 * pad_x
+        height = sum(float(size.y) for size in sizes) + 2.0 * pad_y + (len(lines) - 1) * 3.0 * scale
+        x, y, w, h = self._viewport_rect
+        left = x + (w - width) * 0.5
+        top = y + (h - height) * 0.5
+        dl = imgui.get_window_draw_list()
+        color = imgui.color_convert_float4_to_u32
+        dl.add_rect_filled(
+            imgui.ImVec2(left, top),
+            imgui.ImVec2(left + width, top + height),
+            color(imgui.ImVec4(0.08, 0.09, 0.11, 0.88)),
+            7.0 * scale,
+        )
+        cursor_y = top + pad_y
+        for line, size in zip(lines, sizes, strict=True):
+            dl.add_text(
+                imgui.ImVec2(left + (width - float(size.x)) * 0.5, cursor_y),
+                color(imgui.ImVec4(0.93, 0.94, 0.95, 1.0)),
+                line,
+            )
+            cursor_y += float(size.y) + 3.0 * scale
 
     def frame_needs(self) -> FrameNeeds:
 

@@ -41,6 +41,10 @@ forge-viewer audit <asset> [--json] [--strict]
 
 JSON commands reserve stdout for the JSON document and send logs to stderr.
 
+The main menu and window file drop open MJCF, XML, and URDF models at runtime. `File > Reload
+Model` recompiles the current file. Loading replaces the session structure, clears selection and
+interaction state, rebuilds GPU scene resources, and frames the new model.
+
 ## Visual acceptance
 
 Every user-facing feature has a reproducible Make target.
@@ -48,6 +52,8 @@ Every user-facing feature has a reproducible Make target.
 | Target | Purpose |
 |---|---|
 | `make viewer` | Open the default MuJoCo scene |
+| `make empty` | Open an empty viewer and load MJCF or URDF from the File menu |
+| `make model-loading` | Capture empty, MJCF, and URDF runtime-loading references |
 | `make outline` | Selection, x-ray outline, and outline antialiasing |
 | `make gizmo` | Native 2D and 3D transform gizmos |
 | `make gizmo-gallery` | Enlarged position, rotation, and snap reference images |
@@ -78,6 +84,7 @@ Examples:
 
 ```bash
 make viewer SCENE=humanoid ARGS="--paused"
+make empty
 make robot ROBOT=unitree_g1
 make capture SCENE=deformables SCREENSHOT=output/deformables.png
 make record SCENE=humanoid OUTPUT=output/humanoid.mp4 ARGS="--frames 240"
