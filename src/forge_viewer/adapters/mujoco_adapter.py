@@ -1200,7 +1200,9 @@ class MuJoCoAdapter:
 
         meansize = float(m.stat.meansize)
         com_bodies = np.flatnonzero(np.asarray(m.body_parentid[1:]) == 0).astype(np.int32) + 1
-        inertia_bodies = np.flatnonzero(np.asarray(m.body_dofnum) > 0).astype(np.int32)
+        inertia_bodies = np.flatnonzero(
+            (np.asarray(m.body_dofnum) > 0) & (np.asarray(m.body_mass) > 0.0)
+        ).astype(np.int32)
         inertia = np.asarray(m.body_inertia[inertia_bodies], np.float64)
         mass = np.asarray(m.body_mass[inertia_bodies], np.float64)
         inertia_sizes = np.sqrt(

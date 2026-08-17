@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import tracemalloc
+import warnings
 from dataclasses import replace
 
 import numpy as np
@@ -373,7 +374,9 @@ def test_diagnostic_metadata_and_frame_match_mujoco(adapter):
     assert source.com_bodies == pytest.approx(expected_com)
     assert source.com_radius == pytest.approx(model.stat.meansize * model.vis.scale.com)
 
-    moving = np.flatnonzero(np.asarray(model.body_dofnum) > 0)
+    moving = np.flatnonzero(
+        (np.asarray(model.body_dofnum) > 0) & (np.asarray(model.body_mass) > 0.0)
+    )
     assert source.inertia_bodies == pytest.approx(moving)
     mass = np.asarray(model.body_mass[moving])
     assert 8.0 * np.prod(source.scaled_inertia_sizes, axis=1) == pytest.approx(mass / 1000.0)
@@ -398,6 +401,30 @@ def test_diagnostic_metadata_and_frame_match_mujoco(adapter):
     joint = int(model.actuator_trnid[0, 0])
     assert frame.actuator_xpos[0] == pytest.approx(data.xanchor[joint])
     assert frame.actuator_xmat[0, :, 2] == pytest.approx(data.xaxis[joint])
+
+
+def test_massless_free_parent_is_excluded_from_inertia_visuals(tmp_path):
+    path = tmp_path / "massless_parent.xml"
+    path.write_text(
+        """
+<mujoco>
+  <worldbody>
+    <body name="root">
+      <freejoint/>
+      <body><geom type="sphere" size="0.1"/></body>
+    </body>
+  </worldbody>
+</mujoco>
+"""
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        instance = MuJoCoAdapter(path)
+    try:
+        root = instance.model.body("root").id
+        assert root not in instance.scene_source().diagnostics.inertia_bodies
+    finally:
+        instance.release()
 
 
 def test_pose_fetch_allocates_nothing(adapter):
