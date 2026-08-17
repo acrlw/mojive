@@ -854,6 +854,38 @@ def test_mujoco_camera_intrinsics_preserve_principal_point(tmp_path):
         a.release()
 
 
+def test_site_and_camera_rangefinders_publish_generic_diagnostics():
+    from forge_viewer.assets import resolve
+
+    a = MuJoCoAdapter(resolve("rangefinder"))
+    try:
+        frame = a.frame(FrameNeeds(poses=True, diagnostics=True))
+        diagnostics = frame.diagnostics
+        assert diagnostics is not None
+        assert len(diagnostics.rangefinder_lines) == 8
+        assert diagnostics.rangefinder_lines.tolist() == [True, False, *([True] * 6)]
+        assert diagnostics.rangefinder_points.tolist() == [True, False, *([True] * 6)]
+        assert diagnostics.rangefinder_normal_arrows.tolist() == [
+            True,
+            False,
+            *([True] * 6),
+        ]
+        assert diagnostics.rangefinder_starts[0] == pytest.approx([-0.18, 0.0, 2.0])
+        assert diagnostics.rangefinder_ends[0] == pytest.approx([-0.18, 0.0, 0.0])
+        assert diagnostics.rangefinder_normals[0] == pytest.approx([0.0, 0.0, 1.0])
+        assert diagnostics.rangefinder_starts[2:] == pytest.approx(
+            np.repeat([[0.0, 0.0, 2.25]], 6, axis=0)
+        )
+
+        start = int(a.model.sensor_adr[2])
+        output = a.data.sensordata[start:].reshape(6, 7)
+        assert diagnostics.rangefinder_ends[2:] == pytest.approx(output[:, 1:4])
+        assert diagnostics.rangefinder_normals[2:] == pytest.approx(output[:, 4:7])
+        assert np.allclose(np.linalg.norm(diagnostics.rangefinder_normals[2:], axis=1), 1.0)
+    finally:
+        a.release()
+
+
 def test_mujoco_geom_groups_rebuild_scene_nodes_and_raycast_mask():
     from forge_viewer.assets import resolve
 

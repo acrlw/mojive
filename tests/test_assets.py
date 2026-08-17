@@ -27,6 +27,7 @@ EXPECTED_ASSETS = (
     "parity_texture.xml",
     "perturb_ghost.xml",
     "pick_scene.xml",
+    "rangefinder.xml",
     "reflection.xml",
     "scale_extremes.xml",
     "showcase.xml",

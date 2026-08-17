@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
@@ -72,6 +72,25 @@ _ACTUATOR_POSE_SITE = 2
 _ACTUATOR_POSE_GEOM = 3
 
 
+_RAY_FIELD_WIDTHS = (1, 3, 3, 3, 3, 1)
+_RAY_DIST = 1 << 0
+_RAY_DIR = 1 << 1
+_RAY_ORIGIN = 1 << 2
+_RAY_POINT = 1 << 3
+_RAY_NORMAL = 1 << 4
+
+
+@dataclass(frozen=True)
+class _RangefinderSpec:
+    sensor: int
+    fields: int
+    ray_count: int
+    stride: int
+    frame_offset: int
+    object_type: int
+    object_id: int
+
+
 class MuJoCoAdapter:
     def __init__(self, path: Path | None = None) -> None:
         if mujoco is None:  # pragma: no cover
@@ -118,6 +137,7 @@ class MuJoCoAdapter:
         self._tendon_widths = np.zeros(0, np.float32)
         self._actuator_visual_pose_kinds = np.zeros(0, np.uint8)
         self._actuator_visual_pose_indices = np.zeros(0, np.int32)
+        self._rangefinder_specs: tuple[_RangefinderSpec, ...] = ()
 
         self._mj_geom_xpos = None
         self._mj_geom_xmat3 = None
@@ -179,6 +199,8 @@ class MuJoCoAdapter:
         mujoco.mj_forward(self._m, self._d)
 
         g, b = model.ngeom, model.nbody
+        self._rangefinder_specs = self._build_rangefinder_specs(model)
+        rangefinder_count = sum(spec.ray_count for spec in self._rangefinder_specs)
         self._geom_xpos_buf = np.zeros((g, 3), np.float32)
         self._geom_xmat_buf = np.zeros((g, 3, 3), np.float32)
         self._site_xpos_buf = np.zeros((model.nsite, 3), np.float32)
@@ -191,6 +213,12 @@ class MuJoCoAdapter:
             subtree_com=np.zeros((b, 3), np.float32),
             body_xipos=np.zeros((b, 3), np.float32),
             body_ximat=np.zeros((b, 3, 3), np.float32),
+            rangefinder_starts=np.zeros((rangefinder_count, 3), np.float32),
+            rangefinder_ends=np.zeros((rangefinder_count, 3), np.float32),
+            rangefinder_normals=np.zeros((rangefinder_count, 3), np.float32),
+            rangefinder_lines=np.zeros(rangefinder_count, bool),
+            rangefinder_points=np.zeros(rangefinder_count, bool),
+            rangefinder_normal_arrows=np.zeros(rangefinder_count, bool),
         )
         self._qpos_buf = np.zeros(model.nq, np.float32)
         self._qvel_buf = np.zeros(model.nv, np.float32)
@@ -391,6 +419,7 @@ class MuJoCoAdapter:
                 casting="unsafe",
             )
             self._fill_actuator_visual_poses(diagnostics)
+            self._fill_rangefinder_visuals(diagnostics)
             f.diagnostics = diagnostics
             f.cameras = tuple(self.camera_view(i) for i in range(self._m.ncam))
         else:
@@ -854,7 +883,118 @@ class MuJoCoAdapter:
             ),
             camera_rgba=np.asarray(m.vis.rgba.camera, np.float32).copy(),
             light_rgba=np.asarray(m.vis.rgba.light, np.float32).copy(),
+            rangefinder_rgba=np.asarray(m.vis.rgba.rangefinder, np.float32).copy(),
+            rangefinder_normal_length=meansize * 0.25,
         )
+
+    @staticmethod
+    def _build_rangefinder_specs(model) -> tuple[_RangefinderSpec, ...]:
+        kind = int(mujoco.mjtSensor.mjSENS_RANGEFINDER)
+        offset = 0
+        specs = []
+        for sensor in np.flatnonzero(np.asarray(model.sensor_type) == kind):
+            sensor = int(sensor)
+            fields = int(model.sensor_intprm[sensor, 0])
+            stride = sum(
+                width for field, width in enumerate(_RAY_FIELD_WIDTHS) if fields & (1 << field)
+            )
+            ray_count = int(model.sensor_dim[sensor]) // stride
+            specs.append(
+                _RangefinderSpec(
+                    sensor,
+                    fields,
+                    ray_count,
+                    stride,
+                    offset,
+                    int(model.sensor_objtype[sensor]),
+                    int(model.sensor_objid[sensor]),
+                )
+            )
+            offset += ray_count
+        return tuple(specs)
+
+    def _fill_rangefinder_visuals(self, diagnostics: DiagnosticFrame) -> None:
+        diagnostics.rangefinder_lines.fill(False)
+        diagnostics.rangefinder_points.fill(False)
+        diagnostics.rangefinder_normal_arrows.fill(False)
+        for spec in self._rangefinder_specs:
+            output = slice(spec.frame_offset, spec.frame_offset + spec.ray_count)
+            data_start = int(self._m.sensor_adr[spec.sensor])
+            values = self._d.sensordata[
+                data_start : data_start + spec.ray_count * spec.stride
+            ].reshape(spec.ray_count, spec.stride)
+            fields = {}
+            cursor = 0
+            for field, width in enumerate(_RAY_FIELD_WIDTHS):
+                bit = 1 << field
+                if spec.fields & bit:
+                    fields[bit] = values[:, cursor : cursor + width]
+                    cursor += width
+
+            origins, directions = self._rangefinder_rays(spec)
+            if _RAY_ORIGIN in fields:
+                origins = fields[_RAY_ORIGIN]
+            if _RAY_DIR in fields:
+                directions = fields[_RAY_DIR]
+            diagnostics.rangefinder_starts[output] = origins
+
+            distance = fields.get(_RAY_DIST)
+            point = fields.get(_RAY_POINT)
+            normal = fields.get(_RAY_NORMAL)
+            if distance is not None:
+                hit = distance[:, 0] >= 0.0
+            elif point is not None:
+                hit = np.linalg.norm(point, axis=1) > 1e-12
+            else:
+                hit = np.zeros(spec.ray_count, bool)
+
+            ends = origins.copy()
+            if point is not None:
+                ends[hit] = point[hit]
+            elif distance is not None:
+                ends[hit] += directions[hit] * distance[hit]
+            diagnostics.rangefinder_ends[output] = ends
+            diagnostics.rangefinder_lines[output] = hit & bool(spec.fields & _RAY_DIST)
+            diagnostics.rangefinder_points[output] = hit & bool(spec.fields & _RAY_POINT)
+
+            if normal is not None:
+                diagnostics.rangefinder_normals[output] = normal
+                diagnostics.rangefinder_normal_arrows[output] = hit & (
+                    np.linalg.norm(normal, axis=1) > 1e-12
+                )
+
+    def _rangefinder_rays(self, spec: _RangefinderSpec) -> tuple[np.ndarray, np.ndarray]:
+        if spec.object_type == int(mujoco.mjtObj.mjOBJ_SITE):
+            origin = np.asarray(self._d.site_xpos[spec.object_id], np.float32)
+            rotation = np.asarray(self._d.site_xmat[spec.object_id], np.float32).reshape(3, 3)
+            return (
+                np.repeat(origin[None], spec.ray_count, axis=0),
+                np.repeat(rotation[:, 2][None], spec.ray_count, axis=0),
+            )
+
+        width, height = (int(value) for value in self._m.cam_resolution[spec.object_id])
+        view = self.camera_view(spec.object_id).with_aspect(width / height)
+        columns = np.tile(np.arange(width), height)
+        rows = np.repeat(np.arange(height), width)
+        clip = np.column_stack(
+            (
+                2.0 * (columns + 0.5) / width - 1.0,
+                1.0 - 2.0 * (rows + 0.5) / height,
+                np.full(spec.ray_count, -1.0),
+                np.ones(spec.ray_count),
+            )
+        )
+        local = clip @ np.linalg.inv(view.proj_matrix()).T
+        local = local[:, :3] / local[:, 3:4]
+        rotation = np.asarray(self._d.cam_xmat[spec.object_id], np.float32).reshape(3, 3)
+        if view.orthographic:
+            origins = view.eye + local[:, :2] @ rotation[:, :2].T
+            directions = np.repeat((-rotation[:, 2])[None], spec.ray_count, axis=0)
+        else:
+            origins = np.repeat(np.asarray(view.eye)[None], spec.ray_count, axis=0)
+            directions = local @ rotation.T
+            directions /= np.linalg.norm(directions, axis=1, keepdims=True)
+        return origins.astype(np.float32), directions.astype(np.float32)
 
     def _fill_actuator_visual_poses(self, diagnostics: DiagnosticFrame) -> None:
         d, m = self._d, self._m

@@ -174,6 +174,10 @@ class DiagnosticSource:
     light_rgba: np.ndarray = field(
         default_factory=lambda: np.array([1.0, 0.85, 0.3, 1.0], np.float32)
     )
+    rangefinder_rgba: np.ndarray = field(
+        default_factory=lambda: np.array([1.0, 0.4, 0.2, 1.0], np.float32)
+    )
+    rangefinder_normal_length: float = 0.0
 
 
 @dataclass
@@ -185,6 +189,12 @@ class DiagnosticFrame:
     body_ximat: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3), np.float32))
     actuator_xpos: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     actuator_xmat: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3), np.float32))
+    rangefinder_starts: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    rangefinder_ends: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    rangefinder_normals: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
+    rangefinder_lines: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
+    rangefinder_points: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
+    rangefinder_normal_arrows: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
 
 
 @dataclass

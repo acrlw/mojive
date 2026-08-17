@@ -64,7 +64,11 @@ _VIS_COVERAGE = (
         "editable scene entities with point and direction viewport icons",
     ),
     Coverage("mjVIS_TENDON", "supported", "dynamic tendon paths"),
-    Coverage("mjVIS_RANGEFINDER", "unsupported", "rangefinder rays are not drawn"),
+    Coverage(
+        "mjVIS_RANGEFINDER",
+        "supported",
+        "site and camera rays, hit points and surface normals",
+    ),
     Coverage("mjVIS_CONSTRAINT", "unsupported", "constraint overlays are not drawn"),
     Coverage("mjVIS_INERTIA", "supported", "body inertia boxes"),
     Coverage("mjVIS_SCLINERTIA", "supported", "constant-density inertia boxes"),
@@ -198,6 +202,19 @@ def audit_model(model) -> dict:
                 "metadata and live values are available in the Sensors panel (F11)",
             )
         )
+        rangefinder_kind = int(mujoco.mjtSensor.mjSENS_RANGEFINDER)
+        rangefinders = int(
+            np.count_nonzero(np.asarray(model.sensor_type, np.int32) == rangefinder_kind)
+        )
+        if rangefinders:
+            findings.append(
+                Finding(
+                    "rangefinder visualization",
+                    "supported",
+                    rangefinders,
+                    "site and camera rays include requested hit points and normals",
+                )
+            )
     if model.nactuator:
         findings.append(
             Finding(

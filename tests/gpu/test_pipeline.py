@@ -204,6 +204,30 @@ def test_camera_and_light_entities_reach_the_debug_pass(gl):
         adapter.release()
 
 
+def test_rangefinder_rays_hits_and_normals_reach_the_debug_pass(gl):
+    adapter = make_adapter("mujoco", resolve("rangefinder"))
+    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    try:
+        backend.set_scene(adapter.scene_source())
+        backend.set_camera(adapter.camera_hint())
+        assert backend.set_flag(RenderFlag.RANGEFINDER, True)
+        frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True))
+        backend.update(frame)
+
+        layer = backend.debug.layer("physics.rangefinders")
+        assert layer.count_of(Prim.LINE) == 7
+        assert layer.count_of(Prim.POINT) == 7
+        assert layer.count_of(Prim.ARROW) == 7
+        assert backend.render(frame) is not None
+
+        assert backend.set_flag(RenderFlag.RANGEFINDER, False)
+        backend.update(frame)
+        assert layer.primitives == 0
+    finally:
+        backend.release()
+        adapter.release()
+
+
 def test_joint_site_and_body_actuator_visuals_reach_the_gpu_pipeline(gl):
     adapter = make_adapter("mujoco", resolve("actuator_visuals"))
     backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)

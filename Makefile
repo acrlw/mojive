@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery bench showcase probe reverse viewer canvas lighting scene-icons text-overlay capture record serve attach pvd snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-rangefinder musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -18,6 +18,7 @@ help:
 		'  make mujoco-visuals    hfield/site/tendon/contact' \
 		'  make mujoco-debug      joint/COM/inertia debug visuals' \
 		'  make mujoco-actuators  joint/site/body actuator visuals' \
+		'  make mujoco-rangefinder site/camera rays, hits, and normals' \
 		'  make musculoskeletal   人体肌骨模型 + tendon/keyframe' \
 		'  make musculoskeletal-video  300 keyframes → 60 fps MP4' \
 		'  make deformables       flex/skin 动态网格' \
@@ -237,6 +238,10 @@ mujoco-debug:
 mujoco-actuators:
 	$(PY) -m forge_viewer.cli view actuator_visuals --paused \
 		--camera overview --enable-render actuator --enable-render activation $(ARGS)
+
+mujoco-rangefinder:
+	$(PY) -m forge_viewer.cli view rangefinder --paused \
+		--enable-render rangefinder $(ARGS)
 
 MYO_SCENE ?= ../lowerlimb-refactor/lowerlimb-main/assets/models/myo_sim_latest/myo_sim/body/fullbody_kit_9_10_walk_forward_60.xml
 MYO_VIDEO ?= output/musculoskeletal-keyframes-60fps.mp4

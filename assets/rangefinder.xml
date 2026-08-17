@@ -1,0 +1,22 @@
+<mujoco model="forge rangefinder visuals">
+  <visual>
+    <global azimuth="135" elevation="-24" fovy="45"/>
+    <rgba rangefinder="1 .45 .12 1"/>
+  </visual>
+  <worldbody>
+    <light directional="true" pos="0 -2 5" dir="0 .3 -1"/>
+    <geom name="floor" type="plane" size="4 4 .05" rgba=".25 .32 .38 1"/>
+    <body name="sensor_rig" pos="0 0 2">
+      <geom type="box" size=".12 .18 .08" rgba=".25 .6 .9 1"/>
+      <site name="down_ray" pos="-.18 0 0" quat="0 1 0 0" size=".035" rgba="1 .45 .12 1"/>
+      <site name="miss_ray" pos=".18 0 0" quat=".7071068 0 .7071068 0" size=".035"
+            rgba=".6 .6 .6 1"/>
+      <camera name="depth_grid" pos="0 0 .25" resolution="3 2" fovy="38"/>
+    </body>
+  </worldbody>
+  <sensor>
+    <rangefinder name="site_hit" site="down_ray" data="dist dir origin point normal depth"/>
+    <rangefinder name="site_miss" site="miss_ray" data="dist point normal"/>
+    <rangefinder name="camera_grid" camera="depth_grid" data="dist point normal"/>
+  </sensor>
+</mujoco>

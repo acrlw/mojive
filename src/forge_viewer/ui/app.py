@@ -509,6 +509,7 @@ class ViewerApp:
                 RenderFlag.INERTIA,
                 RenderFlag.CAMERA,
                 RenderFlag.LIGHT,
+                RenderFlag.RANGEFINDER,
             )
         )
         return needs

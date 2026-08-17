@@ -89,6 +89,7 @@ class ForgeBackend:
         self._flags[RenderFlag.SCLINERTIA] = False
         self._flags[RenderFlag.CAMERA] = False
         self._flags[RenderFlag.LIGHT] = False
+        self._flags[RenderFlag.RANGEFINDER] = False
         # MuJoCo mjv_defaultOption() enables tendon paths by default.
         self._flags[RenderFlag.TENDON] = True
         self._contact_ends = np.zeros((0, 3), np.float32)
@@ -141,6 +142,7 @@ class ForgeBackend:
                 RenderFlag.SCLINERTIA,
                 RenderFlag.CAMERA,
                 RenderFlag.LIGHT,
+                RenderFlag.RANGEFINDER,
             }
         return frozenset(flags)
 
@@ -208,6 +210,7 @@ class ForgeBackend:
             self.debug.layer("physics.actuators").clear()
             self.debug.layer("scene.cameras", Occlusion.GHOST).clear()
             self.debug.layer("scene.lights", Occlusion.GHOST).clear()
+            self.debug.layer("physics.rangefinders", Occlusion.GHOST).clear()
 
     def set_render_scene(self, scene: RenderScene) -> None:
 
@@ -286,6 +289,7 @@ class ForgeBackend:
         com = self.debug.layer("physics.com", Occlusion.DEPTH)
         inertia = self.debug.layer("physics.inertia", Occlusion.DEPTH)
         actuators = self.debug.layer("physics.actuators", Occlusion.DEPTH)
+        rangefinders = self.debug.layer("physics.rangefinders", Occlusion.GHOST)
         dynamic = frame.diagnostics
         source = self._source.diagnostics
         if dynamic is None:
@@ -293,6 +297,7 @@ class ForgeBackend:
             com.clear()
             inertia.clear()
             actuators.clear()
+            rangefinders.clear()
             return
 
         if self.get_flag(RenderFlag.JOINT):
@@ -358,6 +363,38 @@ class ForgeBackend:
             inertia.clear()
 
         self._publish_actuator_visuals(frame, actuators)
+        self._publish_rangefinders(frame, rangefinders)
+
+    def _publish_rangefinders(self, frame: SceneFrame, layer) -> None:
+        dynamic = frame.diagnostics
+        if not self.get_flag(RenderFlag.RANGEFINDER) or dynamic is None:
+            layer.clear()
+            return
+        source = self._source.diagnostics
+        lines = dynamic.rangefinder_lines
+        points = dynamic.rangefinder_points
+        normals = dynamic.rangefinder_normal_arrows
+        layer.lines(
+            "rays",
+            dynamic.rangefinder_starts[lines],
+            dynamic.rangefinder_ends[lines],
+            source.rangefinder_rgba,
+            1.6,
+        )
+        layer.points(
+            "hits",
+            dynamic.rangefinder_ends[points],
+            source.rangefinder_rgba,
+            4.0,
+        )
+        starts = dynamic.rangefinder_ends[normals]
+        layer.arrows(
+            "normals",
+            starts,
+            starts + dynamic.rangefinder_normals[normals] * source.rangefinder_normal_length,
+            source.rangefinder_rgba,
+            1.6,
+        )
 
     def _publish_actuator_visuals(self, frame: SceneFrame, layer) -> None:
         source = self._source.diagnostics
