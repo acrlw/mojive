@@ -10,7 +10,7 @@ from pathlib import Path
 from ..assets import assets_dir, list_assets
 from ._harness import OffscreenHarness
 
-OUT = Path("out/gallery")
+OUT = Path("output/gallery")
 
 
 def main(argv: list[str] | None = None) -> int:

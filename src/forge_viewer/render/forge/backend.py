@@ -106,7 +106,9 @@ class ForgeBackend:
         self._source: SceneSource | None = None
         self._builder = None
         self._camera = CameraView()
+        self._background = (0.13, 0.14, 0.16, 1.0)
         self._selected = 0
+        self._include_transparent_ids = False
         self._gizmo: GizmoFrame | None = None
         self._debug_view = DebugView.SHADED
         self._label_mode = LabelMode.NONE
@@ -1073,6 +1075,9 @@ class ForgeBackend:
     def set_camera(self, camera: CameraView) -> None:
         self._camera = camera
 
+    def set_background(self, rgba: tuple[float, float, float, float]) -> None:
+        self._background = tuple(float(channel) for channel in rgba)
+
     def resize(self, width: int, height: int) -> None:
         if (width, height) == self.target.size:
             return
@@ -1082,6 +1087,9 @@ class ForgeBackend:
 
     def highlight(self, object_id: int) -> None:
         self._selected = int(object_id)
+
+    def set_transparent_id_rendering(self, enabled: bool) -> None:
+        self._include_transparent_ids = bool(enabled)
 
     def set_gizmo(self, gizmo: GizmoFrame | None) -> bool:
         if gizmo is not None and "gizmo" not in self._passes:
@@ -1140,8 +1148,20 @@ class ForgeBackend:
         self.stats.cpu_ms = self.timing.cpu_table()
         self.stats.gpu_ms = self.timing.gpu_table()
         self.stats.frame_cpu_ms = (time.perf_counter() - t0) * 1000.0
+        self._update_light_stats(scene)
         present = self._passes.get("present")
         return getattr(present, "image", None)
+
+    def _update_light_stats(self, scene: RenderScene) -> None:
+        from .passes.base import schedule_lights
+
+        schedule = schedule_lights(scene.lights)
+        self.stats.notes = {
+            "scene lights": (f"{len(schedule.lights)} active, {schedule.deferred_lights} deferred"),
+            "shadow casters": (
+                f"{schedule.selected_shadow_count} active, {schedule.deferred_shadows} deferred"
+            ),
+        }
 
     def _make_context(self, scene: RenderScene) -> PassContext:
         cam = self._camera.with_aspect(self.target.width / max(self.target.height, 1))
@@ -1164,6 +1184,8 @@ class ForgeBackend:
             debug_view=self._debug_view,
             debug=self.debug,
             selected_id=self._selected,
+            background=self._background,
+            include_transparent_ids=self._include_transparent_ids,
             gizmo=self._gizmo,
             time=time.monotonic(),
             shadow=ShadowResult(),

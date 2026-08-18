@@ -12,7 +12,7 @@ from ..assets import resolve
 from ._harness import OffscreenHarness
 
 GOLDEN_DIR = Path("tests/golden")
-OUT_DIR = Path("out/golden")
+OUT_DIR = Path("output/golden")
 
 
 CASES: tuple[tuple[str, int], ...] = (

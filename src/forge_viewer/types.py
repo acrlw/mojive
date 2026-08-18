@@ -11,6 +11,28 @@ from . import math3d
 
 
 @dataclass(frozen=True)
+class IkOptions:
+    position: bool = True
+    rotation: bool = False
+    max_iterations: int = 64
+    tolerance: float = 1e-4
+    damping: float = 1e-3
+    step_limit: float = 0.25
+    locked_joints: tuple[int, ...] = ()
+    joint_weights: tuple[float, ...] = ()
+
+
+@dataclass(frozen=True)
+class IkResult:
+    success: bool
+    converged: bool = False
+    iterations: int = 0
+    position_error: float = 0.0
+    rotation_error: float = 0.0
+    message: str = ""
+
+
+@dataclass(frozen=True)
 class CameraView:
     eye: np.ndarray = field(default_factory=lambda: np.array([3.0, -3.0, 2.0], np.float32))
     target: np.ndarray = field(default_factory=lambda: np.zeros(3, np.float32))
@@ -95,6 +117,7 @@ class Environment:
     fog_end: float = 0.0
     haze_color: np.ndarray = field(default_factory=lambda: np.ones(3, np.float32))
     haze_density: float = 0.0
+    horizon_haze: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,6 +131,7 @@ class LightSet:
     fog_end: float = 0.0
     haze_color: np.ndarray = field(default_factory=lambda: np.ones(3, np.float32))
     haze_density: float = 0.0
+    horizon_haze: bool = False
 
     def shadow_casters(self) -> tuple[Light, ...]:
         return tuple(
@@ -125,6 +149,7 @@ class LightSet:
             fog_end=self.fog_end,
             haze_color=self.haze_color,
             haze_density=self.haze_density,
+            horizon_haze=self.horizon_haze,
         )
 
     def with_environment(self, environment: Environment) -> LightSet:
@@ -137,6 +162,7 @@ class LightSet:
             fog_end=environment.fog_end,
             haze_color=environment.haze_color,
             haze_density=environment.haze_density,
+            horizon_haze=environment.horizon_haze,
         )
 
 

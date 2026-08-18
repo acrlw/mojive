@@ -37,10 +37,14 @@ from .base import (
     DiagnosticSource,
     EqualityConstraintInfo,
     FrameNeeds,
+    IkOptions,
+    IkResult,
     JointInfo,
     JointVisualKind,
     KeyframeInfo,
     NodeKind,
+    PhysicsState,
+    SceneAdapterBase,
     SceneFrame,
     SceneNode,
     SceneSource,
@@ -48,6 +52,7 @@ from .base import (
     VisualGroupInfo,
 )
 from .mujoco_deformables import build_deformables, update_deformables
+from .mujoco_ik import solve as solve_inverse_kinematics
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -115,7 +120,7 @@ class _RangefinderSpec:
     object_id: int
 
 
-class MuJoCoAdapter:
+class MuJoCoAdapter(SceneAdapterBase):
     def __init__(self, path: Path | None = None) -> None:
         if mujoco is None:  # pragma: no cover
             raise RuntimeError(
@@ -129,7 +134,8 @@ class MuJoCoAdapter:
             write_qpos=True,
             perturb=True,
             raycast=True,
-            inverse_kinematics=False,
+            inverse_kinematics=True,
+            state_snapshots=True,
             contacts=True,
             model_cameras=True,
             keyframes=True,
@@ -186,6 +192,7 @@ class MuJoCoAdapter:
         self._mj_geom_xmat3 = None
         self._mj_site_xmat3 = None
         self._mj_wrap_points = None
+        self._mj_wrap_objects = None
         self._mj_body_xpos = None
         self._mj_body_xmat3 = None
         self._fast_pose = False
@@ -229,14 +236,79 @@ class MuJoCoAdapter:
         self._path = path
         self._install(model)
 
+    def load_model(self, model, data=None) -> None:
+        """Install an existing MuJoCo model and optional data object."""
+        if not isinstance(model, mujoco.MjModel):
+            raise TypeError("model must be a mujoco.MjModel")
+        if data is not None and data.model is not model:
+            raise ValueError("data was created for a different MuJoCo model")
+        self._path = None
+        self._install(model, data)
+
+    def use_data(self, data) -> None:
+        """Bind dynamic state supplied by a programmatic rendering workflow."""
+        if not isinstance(data, mujoco.MjData):
+            raise TypeError("data must be a mujoco.MjData")
+        if data.model is not self._m:
+            raise ValueError("data was created for a different MuJoCo model")
+        if data is self._d:
+            return
+        self._d = data
+        self._bind_data_views()
+
+    def apply_scene_option(self, option) -> bool:
+        """Apply MuJoCo visual-group visibility to the stable scene source."""
+        changed = False
+        fields = {
+            "geom": "geomgroup",
+            "site": "sitegroup",
+            "joint": "jointgroup",
+            "tendon": "tendongroup",
+            "flex": "flexgroup",
+            "skin": "skingroup",
+        }
+        for category, field in fields.items():
+            visible = np.asarray(getattr(option, field), bool)
+            groups = self._visual_groups[category]
+            if not np.array_equal(groups, visible):
+                groups[:] = visible
+                changed = True
+        if not changed:
+            return False
+        self._ray_geomgroup[:] = self._visual_groups["geom"]
+        self._source = None
+        self._nodes = []
+        self._structure_revision += 1
+        return True
+
+    def refresh_model_visuals(self) -> bool:
+        """Refresh cached scene data after direct MjModel visual edits."""
+        source_changed = self._refresh_snapshots(self._visual_state)
+        lights_changed = self._refresh_snapshots(self._light_state)
+        if source_changed:
+            self._source = None
+            self._structure_revision += 1
+        if lights_changed:
+            self._lights_edited = True
+        return source_changed or lights_changed
+
+    def _refresh_snapshots(self, snapshots: dict[str, np.ndarray]) -> bool:
+        changed = False
+        for name, previous in snapshots.items():
+            current = np.asarray(getattr(self._m, name))
+            if not np.array_equal(current, previous):
+                np.copyto(previous, current)
+                changed = True
+        return changed
+
     def reload(self) -> None:
         if self._path is None:
             raise RuntimeError("No asset has been loaded")
         self.load(self._path)
 
-    def _install(self, model) -> None:
+    def _install(self, model, data=None) -> None:
         self._m = model
-        self._d = mujoco.MjData(model)
+        self._d = data if data is not None else mujoco.MjData(model)
         self._notes = []
         mujoco.mj_forward(self._m, self._d)
 
@@ -308,15 +380,7 @@ class MuJoCoAdapter:
         self._bvh_local_size = np.zeros((0, 3), np.float32)
         self._bvh_control_body = np.zeros((0, 2), np.int32)
         self._bvh_control_local = np.zeros((0, 2, 3), np.float32)
-        self._mj_geom_xpos = d.geom_xpos
-        self._mj_geom_xmat3 = d.geom_xmat.reshape(g, 3, 3)
-        self._mj_site_xmat3 = d.site_xmat.reshape(model.nsite, 3, 3)
-        # MuJoCo 3.11 exposes wrap_xpos as (nwrap, 6): ten_wrapadr/num address
-        # the flattened xyz triples, not the first column of each row.
-        self._mj_wrap_points = d.wrap_xpos.reshape(-1, 3)
-        self._mj_wrap_objects = d.wrap_obj.reshape(-1)
-        self._mj_body_xpos = d.xpos
-        self._mj_body_xmat3 = d.xmat.reshape(b, 3, 3)
+        self._bind_data_views()
         self._fast_pose = self._verify_pose_layout()
 
         self._frame = SceneFrame()
@@ -333,6 +397,48 @@ class MuJoCoAdapter:
             groups[:] = [g in DEFAULT_GEOM_GROUPS for g in range(6)]
         self._ray_geomgroup[:] = self._visual_groups["geom"]
         self._lights_dynamic = bool(model.nlight) and bool(np.any(model.light_bodyid != 0))
+        visual_fields = (
+            "geom_rgba",
+            "site_rgba",
+            "flex_rgba",
+            "skin_rgba",
+            "tendon_rgba",
+            "tendon_width",
+            "mat_rgba",
+            "mat_emission",
+            "mat_specular",
+            "mat_shininess",
+            "mat_reflectance",
+            "mat_texrepeat",
+            "mat_texuniform",
+            "mat_texid",
+            "tex_data",
+        )
+        light_fields = (
+            "light_type",
+            "light_pos",
+            "light_dir",
+            "light_diffuse",
+            "light_specular",
+            "light_ambient",
+            "light_attenuation",
+            "light_range",
+            "light_cutoff",
+            "light_exponent",
+            "light_intensity",
+            "light_castshadow",
+            "light_active",
+        )
+        self._visual_state = {
+            name: np.asarray(getattr(model, name)).copy()
+            for name in visual_fields
+            if hasattr(model, name)
+        }
+        self._light_state = {
+            name: np.asarray(getattr(model, name)).copy()
+            for name in light_fields
+            if hasattr(model, name)
+        }
         self._lights_edited = False
         self._perturb = mujoco.MjvPerturb()
         self._perturb_body = -1
@@ -340,6 +446,17 @@ class MuJoCoAdapter:
         self._perturb_jac_m2 = np.zeros((3, model.nv), np.float64)
         self._perturb_sqrt_inv_d = np.zeros(model.nv, np.float64)
         self._structure_revision += 1
+
+    def _bind_data_views(self) -> None:
+        m, d = self._m, self._d
+        self._mj_geom_xpos = d.geom_xpos
+        self._mj_geom_xmat3 = d.geom_xmat.reshape(m.ngeom, 3, 3)
+        self._mj_site_xmat3 = d.site_xmat.reshape(m.nsite, 3, 3)
+        # MuJoCo exposes wrap_xpos as packed xyz triples addressed by ten_wrapadr/num.
+        self._mj_wrap_points = d.wrap_xpos.reshape(-1, 3)
+        self._mj_wrap_objects = d.wrap_obj.reshape(-1)
+        self._mj_body_xpos = d.xpos
+        self._mj_body_xmat3 = d.xmat.reshape(m.nbody, 3, 3)
 
     @property
     def structure_revision(self) -> int:
@@ -1908,7 +2025,8 @@ class MuJoCoAdapter:
             fog_start=float(m.vis.map.fogstart) * extent,
             fog_end=float(m.vis.map.fogend) * extent,
             haze_color=np.asarray(m.vis.rgba.haze[:3], np.float32).copy(),
-            haze_density=float(m.vis.map.haze) / extent,
+            haze_density=float(m.vis.map.haze),
+            horizon_haze=True,
         )
 
     def _headlight(self) -> Light | None:
@@ -1972,6 +2090,7 @@ class MuJoCoAdapter:
                 b,
                 object_id=b,
                 posable=self._is_posable_body(b),
+                ik_target=self._has_kinematic_dof(b),
             )
 
         for b in range(m.nbody):
@@ -2017,7 +2136,14 @@ class MuJoCoAdapter:
                 continue
             b = int(m.site_bodyid[si])
             name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_SITE, si) or f"site{si}"
-            self._site_nodes[si] = add(name, NodeKind.SITE, body_node[b], b)
+            self._site_nodes[si] = add(
+                name,
+                NodeKind.SITE,
+                body_node[b],
+                b,
+                site_index=si,
+                ik_target=self._has_kinematic_dof(b),
+            )
         for fi in range(m.nflex):
             if not self._visual_groups["flex"][int(m.flex_group[fi])]:
                 continue
@@ -2043,6 +2169,13 @@ class MuJoCoAdapter:
 
     def _is_posable_body(self, body: int) -> bool:
         return int(self._m.body_mocapid[body]) >= 0 or self._is_free_body(body)
+
+    def _has_kinematic_dof(self, body: int) -> bool:
+        while body > 0:
+            if int(self._m.body_jntnum[body]) > 0:
+                return True
+            body = int(self._m.body_parentid[body])
+        return False
 
     def joints(self) -> list[JointInfo]:
         m = self._m
@@ -2348,6 +2481,54 @@ class MuJoCoAdapter:
         mujoco.mj_forward(self._m, self._d)
         return True
 
+    def solve_ik(
+        self, node_id: int, target_position, target_rotation, options: IkOptions
+    ) -> IkResult:
+        node = next((item for item in self.nodes() if item.node_id == int(node_id)), None)
+        if node is None:
+            return IkResult(False, message=f"Unknown node {node_id}")
+        return solve_inverse_kinematics(
+            mujoco,
+            self._m,
+            self._d,
+            body=node.body_index if node.kind is not NodeKind.SITE else -1,
+            site=node.site_index,
+            target_position=target_position,
+            target_rotation=target_rotation,
+            options=options,
+        )
+
+    def capture_state(self) -> PhysicsState:
+        data = self._d
+        return PhysicsState(
+            qpos=np.asarray(data.qpos, np.float64).copy(),
+            qvel=np.asarray(data.qvel, np.float64).copy(),
+            act=np.asarray(data.act, np.float64).copy(),
+            ctrl=np.asarray(data.ctrl, np.float64).copy(),
+            time=float(data.time),
+            mocap_pos=np.asarray(data.mocap_pos, np.float64).copy(),
+            mocap_quat=np.asarray(data.mocap_quat, np.float64).copy(),
+        )
+
+    def restore_state(self, state: PhysicsState) -> bool:
+        data = self._d
+        arrays = (
+            (data.qpos, state.qpos),
+            (data.qvel, state.qvel),
+            (data.act, state.act),
+            (data.ctrl, state.ctrl),
+            (data.mocap_pos, state.mocap_pos),
+            (data.mocap_quat, state.mocap_quat),
+        )
+        if any(np.shape(dst) != np.shape(src) for dst, src in arrays):
+            return False
+        for dst, src in arrays:
+            np.copyto(dst, src)
+        data.time = float(state.time)
+        mujoco.mj_forward(self._m, data)
+        self._perturb_body = -1
+        return True
+
     def apply_perturb(
         self, node_id: int, target_position: np.ndarray, target_rotation: np.ndarray, mode: str
     ) -> bool:
@@ -2447,6 +2628,7 @@ class MuJoCoAdapter:
         self._mj_geom_xmat3 = None
         self._mj_site_xmat3 = None
         self._mj_wrap_points = None
+        self._mj_wrap_objects = None
         self._mj_body_xpos = None
         self._mj_body_xmat3 = None
 

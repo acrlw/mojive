@@ -1,0 +1,26 @@
+<mujoco model="IK human chain">
+  <option gravity="0 0 0"/>
+  <visual><headlight ambient=".25 .25 .25" diffuse=".75 .75 .75"/></visual>
+  <worldbody>
+    <geom type="plane" size="3 3 .1" rgba=".16 .18 .21 1"/>
+    <site name="goal" pos=".35 .12 .1" size=".11" rgba="1 .25 .2 .45"/>
+    <body name="pelvis" pos="0 0 .9">
+      <geom type="ellipsoid" size=".25 .16 .18" rgba=".45 .48 .53 1"/>
+      <body name="thigh">
+        <joint name="hip x" type="hinge" axis="1 0 0" range="-45 45"/>
+        <joint name="hip y" type="hinge" axis="0 1 0" range="-120 45"/>
+        <joint name="hip z" type="hinge" axis="0 0 1" range="-60 60"/>
+        <geom type="capsule" fromto="0 0 0 0 0 -.48" size=".075" rgba=".25 .5 .85 1"/>
+        <body name="shin" pos="0 0 -.48">
+          <joint name="knee" type="hinge" axis="0 1 0" range="-150 0"/>
+          <geom type="capsule" fromto="0 0 0 0 0 -.45" size=".06" rgba=".3 .7 .45 1"/>
+          <body name="foot" pos="0 0 -.45">
+            <joint name="ankle" type="hinge" axis="0 1 0" range="-45 45"/>
+            <geom type="capsule" fromto="0 0 0 .22 0 -.04" size=".05" rgba=".65 .45 .3 1"/>
+            <site name="toe" pos=".22 0 -.04" size=".08" rgba="1 .65 .15 1"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

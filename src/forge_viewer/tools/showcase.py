@@ -11,7 +11,7 @@ from ..assets import resolve
 from ..bridge import Occlusion, bridge
 from ._harness import OffscreenHarness
 
-OUT = Path("out/showcase")
+OUT = Path("output/showcase")
 
 
 def _add_debug_layers(harness: OffscreenHarness) -> str:

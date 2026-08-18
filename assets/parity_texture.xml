@@ -70,7 +70,8 @@
           material="speckle"/>
 
     <geom name="tex_sphere" type="sphere" pos="0 -2.0 0.35" size="0.35" material="c2"/>
-    <geom name="tex_box" type="box" pos="1.1 -1.9 0.3" size="0.3 0.3 0.3" material="c3"/>
+    <geom name="tex_box" type="box" pos="1.1 -1.9 0.65" size="0.25 0.40 0.65"
+          euler="12 18 20" material="c3"/>
 
     <camera name="t0_top" pos="0.35 0.15 4.2" xyaxes="1 0 0 0 1 0"/>
     <camera name="t1_oblique" pos="2.6 -2.9 2.2" xyaxes="0.74 0.68 0 -0.34 0.37 0.87"/>

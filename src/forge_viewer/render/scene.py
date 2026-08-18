@@ -161,11 +161,12 @@ class SceneBuilder:
     ) -> RenderScene:
         n = len(self._rows)
 
-        ident: list[tuple[MeshKey, int, bool]] = []
-        seen: dict[tuple[MeshKey, int, bool], int] = {}
+        ident: list[tuple[MeshKey, int, bool, int]] = []
+        seen: dict[tuple[MeshKey, int, bool, int], int] = {}
         row_bucket = np.empty(n, np.int32)
         for i, row in enumerate(self._rows):
-            key = (*row["key"], float(row["color"][3]) < 1.0)
+            transparent = float(row["color"][3]) < 1.0
+            key = (*row["key"], transparent, i if transparent else -1)
             if key not in seen:
                 seen[key] = len(ident)
                 ident.append(key)
@@ -217,7 +218,7 @@ class SceneBuilder:
         scene.bucket_ranges = tuple(
             (int(bounds[b]), int(bounds[b + 1])) for b in range(len(ordered))
         )
-        scene.bucket_keys = tuple((mesh, matid) for mesh, matid, _ in ordered)
+        scene.bucket_keys = tuple((mesh, matid) for mesh, matid, _, _ in ordered)
         scene.opaque_buckets = tuple(b for b, k in enumerate(ordered) if not k[2])
         scene.transparent_buckets = tuple(b for b, k in enumerate(ordered) if k[2])
         scene.materials = tuple(self._materials)

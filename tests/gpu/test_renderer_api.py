@@ -1,0 +1,234 @@
+"""Real OpenGL tests for the public MuJoCo-compatible Renderer API."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+mujoco = pytest.importorskip("mujoco")
+
+from forge_viewer import Renderer  # noqa: E402
+from forge_viewer.render.backend import (  # noqa: E402
+    DebugView,
+    FrameMode,
+    LabelMode,
+    RenderFlag,
+)
+
+pytestmark = pytest.mark.gpu
+
+
+def _model():
+    return mujoco.MjModel.from_xml_string(
+        """
+        <mujoco>
+          <visual>
+            <global offwidth="160" offheight="120"/>
+            <quality offsamples="4"/>
+          </visual>
+          <worldbody>
+            <light pos="0 -2 3"/>
+            <camera name="fixed" pos="0 -3 1"
+                    xyaxes="1 0 0 0 .31622777 .94868330"/>
+            <geom type="plane" size="3 3 .1" rgba=".15 .2 .25 1"/>
+            <geom pos=".8 0 .35" type="sphere" size=".3" rgba=".2 .7 .9 .35"/>
+            <site pos="-.7 0 .4" type="sphere" size=".12" rgba=".2 .9 .4 1"/>
+            <body pos="0 0 .5">
+              <freejoint/>
+              <geom type="box" size=".3 .2 .5" rgba=".8 .2 .1 1"/>
+            </body>
+          </worldbody>
+        </mujoco>
+        """
+    )
+
+
+def test_renderer_rgb_camera_out_and_lifecycle():
+    model = _model()
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    renderer = Renderer(model, height=96, width=128, max_geom=32)
+
+    assert renderer.model is model
+    assert renderer.height == 96
+    assert renderer.width == 128
+    assert isinstance(renderer.scene, mujoco.MjvScene)
+    assert renderer.scene.maxgeom == 32
+
+    renderer.update_scene(data)
+    assert renderer.scene.ngeom > 0
+    image = renderer.render()
+    assert image.shape == (96, 128, 3)
+    assert image.dtype == np.uint8
+    assert image.flags.c_contiguous
+    assert np.ptp(image) > 0
+
+    out = np.empty_like(image)
+    assert renderer.render(out=out) is out
+    assert np.array_equal(out, image)
+    with pytest.raises(ValueError, match=r"out\.shape"):
+        renderer.render(out=np.empty((96, 128), np.uint8))
+
+    renderer.update_scene(data, camera="fixed")
+    renderer.update_scene(data, camera=0)
+    renderer.update_scene(data, camera=mujoco.MjvCamera())
+    with pytest.raises(ValueError, match="does not exist"):
+        renderer.update_scene(data, camera="missing")
+    with pytest.raises(ValueError, match="out of range"):
+        renderer.update_scene(data, camera=1)
+
+    renderer.update_scene(data, camera="fixed")
+    renderer.enable_depth_rendering()
+    depth = renderer.render()
+    assert depth.shape == (96, 128)
+    assert depth.dtype == np.float32
+    assert np.all(np.isfinite(depth))
+    assert np.all(depth > 0.0)
+    depth_out = np.empty_like(depth)
+    assert renderer.render(out=depth_out) is depth_out
+    assert np.array_equal(depth_out, depth)
+
+    renderer.enable_segmentation_rendering()
+    segmentation = renderer.render()
+    assert segmentation.shape == (96, 128, 2)
+    assert segmentation.dtype == np.int32
+    pairs = {tuple(pair) for pair in segmentation.reshape(-1, 2)}
+    assert (-1, -1) in pairs
+    assert (0, int(mujoco.mjtObj.mjOBJ_GEOM)) in pairs
+    assert (1, int(mujoco.mjtObj.mjOBJ_GEOM)) in pairs
+    assert (2, int(mujoco.mjtObj.mjOBJ_GEOM)) in pairs
+    assert (0, int(mujoco.mjtObj.mjOBJ_SITE)) in pairs
+    segmentation_out = np.empty_like(segmentation)
+    assert renderer.render(out=segmentation_out) is segmentation_out
+    assert np.array_equal(segmentation_out, segmentation)
+
+    renderer.disable_segmentation_rendering()
+    assert renderer.render().shape == (96, 128, 3)
+
+    renderer.close()
+    renderer.close()
+    with pytest.raises(RuntimeError, match="after close"):
+        renderer.render()
+
+
+def test_renderer_rejects_data_from_another_model():
+    model = _model()
+    other = _model()
+    with (
+        Renderer(model, height=48, width=64) as renderer,
+        pytest.raises(ValueError, match="different MuJoCo model"),
+    ):
+        renderer.update_scene(mujoco.MjData(other))
+
+
+@pytest.mark.parametrize("projection", ["perspective", "orthographic"])
+def test_renderer_depth_is_metric_for_perspective_and_orthographic(projection):
+    projection_xml = (
+        'projection="orthographic" fovy="4"' if projection == "orthographic" else 'fovy="45"'
+    )
+    model = mujoco.MjModel.from_xml_string(
+        f"""
+        <mujoco>
+          <visual>
+            <global offwidth="80" offheight="80"/>
+            <quality offsamples="0"/>
+          </visual>
+          <worldbody>
+            <camera name="fixed" pos="0 0 3" {projection_xml}/>
+            <geom type="box" size=".5 .5 .5"/>
+          </worldbody>
+        </mujoco>
+        """
+    )
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    with Renderer(model, height=80, width=80) as renderer:
+        renderer.update_scene(data, camera="fixed")
+        renderer.enable_depth_rendering()
+        depth = renderer.render()
+
+    assert depth[40, 40] == pytest.approx(2.5, abs=1e-3)
+    assert depth[0, 0] > depth[40, 40]
+
+
+def test_renderer_maps_mjv_options_to_forge_state():
+    model = _model()
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    option = mujoco.MjvOption()
+    option.flags[mujoco.mjtVisFlag.mjVIS_JOINT] = 1
+    option.flags[mujoco.mjtVisFlag.mjVIS_TENDON] = 0
+    option.label = mujoco.mjtLabel.mjLABEL_BODY
+    option.frame = mujoco.mjtFrame.mjFRAME_WORLD
+    option.bvh_depth = 3
+
+    with Renderer(model, height=48, width=64) as renderer:
+        renderer.scene.flags[mujoco.mjtRndFlag.mjRND_WIREFRAME] = 1
+        renderer.scene.flags[mujoco.mjtRndFlag.mjRND_DEPTH] = 1
+        renderer.update_scene(data, camera="fixed", scene_option=option)
+        backend = renderer._backend
+
+        assert backend.get_flag(RenderFlag.JOINT)
+        assert not backend.get_flag(RenderFlag.TENDON)
+        assert backend.get_flag(RenderFlag.WIREFRAME)
+        assert backend.get_label_mode() is LabelMode.BODY
+        assert backend.get_frame_mode() is FrameMode.WORLD
+        assert backend.get_bvh_depth() == 3
+        assert backend.get_debug_view() is DebugView.DEPTH
+
+        option.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = 1
+        renderer.update_scene(data, camera="fixed", scene_option=option)
+        dynamic = ~renderer._source.geom_static
+        assert np.all(renderer._source.geom_rgba[dynamic, 3] <= 0.3)
+
+
+def test_renderer_max_geom_limits_mujoco_and_forge_scenes():
+    model = _model()
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    with Renderer(model, height=48, width=64, max_geom=1) as renderer:
+        renderer.update_scene(data, camera="fixed")
+
+        assert renderer.scene.ngeom == 1
+        assert set(renderer._source.geom_source) == {0}
+
+
+def test_multiple_renderers_with_different_sizes_coexist():
+    model = _model()
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    with (
+        Renderer(model, height=48, width=64) as small,
+        Renderer(model, height=72, width=96) as large,
+    ):
+        small.update_scene(data, camera="fixed")
+        large.update_scene(data, camera="fixed")
+        assert small.render().shape == (48, 64, 3)
+        assert large.render().shape == (72, 96, 3)
+        assert small.render().shape == (48, 64, 3)
+
+
+def test_renderer_can_be_repeatedly_created_and_destroyed():
+    model = _model()
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    for _ in range(200):
+        with Renderer(model, height=24, width=32) as renderer:
+            renderer.update_scene(data, camera="fixed")
+            assert renderer.render().shape == (24, 32, 3)
+
+
+def test_renderer_segmentation_maps_flex_and_skin_objects():
+    path = Path(__file__).parents[2] / "assets" / "deformables.xml"
+    model = mujoco.MjModel.from_xml_path(str(path))
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    with Renderer(model, height=96, width=128) as renderer:
+        renderer.update_scene(data)
+        renderer.enable_segmentation_rendering()
+        pairs = {tuple(pair) for pair in renderer.render().reshape(-1, 2)}
+
+    assert any(kind == int(mujoco.mjtObj.mjOBJ_FLEX) for _, kind in pairs)
+    assert any(kind == int(mujoco.mjtObj.mjOBJ_SKIN) for _, kind in pairs)

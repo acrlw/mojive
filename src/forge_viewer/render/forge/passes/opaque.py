@@ -12,7 +12,14 @@ from .. import color
 from ..programs import ProgramSpec, UniformCache
 from ..registry import register_pass
 from ..targets import IdLayout
-from .base import MAX_SCENE_LIGHTS, BasePass, PassContext, state_opaque, state_overdraw
+from .base import (
+    MAX_SCENE_LIGHTS,
+    BasePass,
+    PassContext,
+    schedule_lights,
+    state_opaque,
+    state_overdraw,
+)
 
 log = get_logger("opaque")
 
@@ -241,13 +248,7 @@ class OpaquePass(BasePass):
     ) -> None:
         pos, dirs, diff, spec, atten = self._light_block
         n = 0
-        for light in lights.lights:
-            if n >= MAX_SCENE_LIGHTS:
-                break
-            if not light.active:
-                continue
-            if light.kind is LightKind.IMAGE:
-                continue
+        for light in schedule_lights(lights).lights:
             d = np.asarray(light.direction, np.float64)
             norm = float(np.linalg.norm(d))
             pos[n, :3] = light.position
@@ -317,7 +318,11 @@ class OpaquePass(BasePass):
     @staticmethod
     def _atmosphere_uniforms(ctx: PassContext, u: UniformCache, lights: LightSet) -> None:
         fog_on = ctx.flag(RenderFlag.FOG, False) and lights.fog_end > lights.fog_start
-        haze = lights.haze_density if ctx.flag(RenderFlag.HAZE, False) else 0.0
+        haze = (
+            lights.haze_density
+            if ctx.flag(RenderFlag.HAZE, False) and not lights.horizon_haze
+            else 0.0
+        )
         u.set(
             "u_fog",
             (

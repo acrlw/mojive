@@ -11,6 +11,8 @@ import numpy as np
 from ..types import (
     CameraView,
     Environment,
+    IkOptions,
+    IkResult,
     Light,
     LightSet,
     Material,
@@ -54,11 +56,13 @@ class SceneNode:
     object_id: int = 0
 
     posable: bool = False
+    ik_target: bool = False
 
     visible: bool = True
     body_index: int = -1
     light_index: int = -1
     camera_index: int = -1
+    site_index: int = -1
 
 
 @dataclass
@@ -128,6 +132,17 @@ class VisualGroupInfo:
 
 
 @dataclass(frozen=True)
+class PhysicsState:
+    qpos: np.ndarray
+    qvel: np.ndarray
+    act: np.ndarray
+    ctrl: np.ndarray
+    time: float
+    mocap_pos: np.ndarray
+    mocap_quat: np.ndarray
+
+
+@dataclass(frozen=True)
 class AdapterCaps:
     name: str = "?"
     simulation: bool = False
@@ -140,6 +155,7 @@ class AdapterCaps:
     perturb: bool = False
     raycast: bool = False
     inverse_kinematics: bool = False
+    state_snapshots: bool = False
     contacts: bool = False
     model_cameras: bool = False
     keyframes: bool = False
@@ -519,6 +535,17 @@ class SceneAdapterBase:
     def set_pose(self, node_id: int, position, rotation) -> bool:
         return False
 
+    def solve_ik(
+        self, node_id: int, target_position, target_rotation, options: IkOptions
+    ) -> IkResult:
+        return IkResult(False, message=f"{self.caps.name} does not support inverse kinematics")
+
+    def capture_state(self) -> PhysicsState | None:
+        return None
+
+    def restore_state(self, state: PhysicsState) -> bool:
+        return False
+
     def set_light(self, light_id: int, light) -> bool:
         """Edit a Forge scene light.
 
@@ -634,6 +661,11 @@ class SceneAdapter(Protocol):
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool: ...
     def set_ctrl(self, index: int, value: float) -> bool: ...
     def set_pose(self, node_id: int, position, rotation) -> bool: ...
+    def solve_ik(
+        self, node_id: int, target_position, target_rotation, options: IkOptions
+    ) -> IkResult: ...
+    def capture_state(self) -> PhysicsState | None: ...
+    def restore_state(self, state: PhysicsState) -> bool: ...
     def set_light(self, light_id: int, light) -> bool: ...
     def set_environment(self, environment: Environment) -> bool: ...
     def set_material(self, material_id: int, material: Material) -> bool: ...

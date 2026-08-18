@@ -242,6 +242,7 @@ def default_panels() -> list[Panel]:
     from .control import ControlPanel
     from .help import HelpPanel
     from .hierarchy import HierarchyPanel
+    from .ik import IkPanel
     from .info import InfoPanel
     from .inspector import InspectorPanel
     from .joints import JointsPanel
@@ -255,6 +256,7 @@ def default_panels() -> list[Panel]:
         HierarchyPanel(),
         InspectorPanel(),
         JointsPanel(),
+        IkPanel(),
         CameraPanel(),
         PlotPanel(),
         StatsPanel(),

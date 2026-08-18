@@ -7,7 +7,16 @@ from pathlib import Path
 
 import numpy as np
 
-from .types import DEFAULT_MATERIAL, CameraView, Environment, Light, Material, MeshKey, MeshShape
+from .types import (
+    DEFAULT_MATERIAL,
+    CameraView,
+    Environment,
+    IkOptions,
+    Light,
+    Material,
+    MeshKey,
+    MeshShape,
+)
 
 
 @dataclass(frozen=True)
@@ -74,10 +83,29 @@ class Select(Command):
 
 
 @dataclass(frozen=True)
+class SelectNode(Command):
+    node_id: int
+
+
+@dataclass(frozen=True)
 class SetPose(Command):
     node_id: int
     position: np.ndarray
     rotation: np.ndarray  # 3×3
+
+
+@dataclass(frozen=True)
+class SolveIk(Command):
+    node_id: int
+    target_position: np.ndarray
+    target_rotation: np.ndarray
+    options: IkOptions = field(default_factory=IkOptions)
+    record_undo: bool = True
+
+
+@dataclass(frozen=True)
+class UndoIk(Command):
+    pass
 
 
 @dataclass(frozen=True)

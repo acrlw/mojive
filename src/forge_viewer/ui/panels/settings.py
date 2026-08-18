@@ -82,6 +82,10 @@ class SettingsPanel(Panel):
         imgui.text_disabled(f"backend: {caps.name}")
         if caps.gl_version:
             imgui.text_disabled(f"{caps.gl_version}  {caps.renderer}")
+        light_notes = ctx.backend.stats.notes
+        for name in ("scene lights", "shadow casters"):
+            if name in light_notes:
+                imgui.text_disabled(f"{name}: {light_notes[name]}")
 
         if ctx.gizmo is not None:
             solid = ctx.gizmo.style == "3d"

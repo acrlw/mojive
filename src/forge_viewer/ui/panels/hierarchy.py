@@ -92,7 +92,8 @@ class HierarchyPanel(Panel):
             flags |= imgui.TreeNodeFlags_.leaf | imgui.TreeNodeFlags_.no_tree_push_on_open
         if default_open:
             flags |= imgui.TreeNodeFlags_.default_open
-        if node.object_id and node.object_id == ctx.session.selected:
+        selected = ctx.session.selected_node
+        if selected is not None and node.node_id == selected.node_id:
             flags |= imgui.TreeNodeFlags_.selected
 
         color = ctx.theme.node_color(node.kind)
@@ -103,8 +104,8 @@ class HierarchyPanel(Panel):
         opened = imgui.tree_node_ex(f"{node.name or '?'}##n{node.node_id}", flags)
         imgui.pop_style_color()
 
-        if imgui.is_item_clicked() and not imgui.is_item_toggled_open() and node.object_id:
-            ctx.submit(cmd.Select(node.object_id))
+        if imgui.is_item_clicked() and not imgui.is_item_toggled_open():
+            ctx.submit(cmd.SelectNode(node.node_id))
 
         imgui.same_line()
         imgui.text_disabled(str(node.kind))

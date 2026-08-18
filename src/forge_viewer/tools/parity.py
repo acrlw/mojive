@@ -11,7 +11,12 @@ from pathlib import Path
 
 import numpy as np
 
-OUT = Path("out/parity")
+OUT = Path("output/parity")
+MIN_VIEW_EDGE_IOU = 0.14
+MAX_VIEW_BLOCK_LUMA = 23.0
+MIN_MEAN_EDGE_IOU = 0.22
+MAX_MEAN_BLOCK_LUMA = 19.0
+MIN_CELL_AGREEMENT = 0.90
 
 
 def _gray(img: np.ndarray) -> np.ndarray:
@@ -118,6 +123,8 @@ class ViewScore:
     name: str
     edge_iou: float
     block_diff: float
+    cell_agree: int
+    cell_total: int
     cells: str
     triptych: Path | None = None
     notes: list[str] = field(default_factory=list)
@@ -199,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
     for v in doc["views"]:
         ref = np.asarray(Image.open(v["image"]).convert("RGB"))
         got = forge_shots[v["name"]]
-        _agree, _total, cells = texture_cell_agreement(
+        agree, total, cells = texture_cell_agreement(
             got, ref, doc.get("geoms", []), v, doc["width"], doc["height"]
         )
         tri = out_dir / f"{v['name']}.triptych.png"
@@ -209,6 +216,8 @@ def main(argv: list[str] | None = None) -> int:
                 name=v["name"],
                 edge_iou=edge_iou(got, ref),
                 block_diff=block_luma_diff(got, ref),
+                cell_agree=agree,
+                cell_total=total,
                 cells=cells,
                 triptych=tri,
             )
@@ -224,11 +233,38 @@ def main(argv: list[str] | None = None) -> int:
     agree_d = sum(int(s.cells.split("/")[1]) for s in scores if "/" in s.cells)
     print(f"  {'mean':<10}{iou:>10.3f}{blk:>12.1f}{f'{agree_n}/{agree_d}':>12}")
     print(f"\n  Triptychs (forge | reference | difference): {out_dir.resolve()}")
-    print(
-        "\n  Interpret metrics with docs/RENDERER.md. Fixed-function reference behavior "
-        "and intentional forge improvements can increase pixel differences."
+    cell_ratio = agree_n / agree_d if agree_d else 1.0
+    view_pass = all(
+        score.edge_iou >= MIN_VIEW_EDGE_IOU and score.block_diff <= MAX_VIEW_BLOCK_LUMA
+        for score in scores
     )
-    return 0
+    passed = (
+        view_pass
+        and iou >= MIN_MEAN_EDGE_IOU
+        and blk <= MAX_MEAN_BLOCK_LUMA
+        and cell_ratio >= MIN_CELL_AGREEMENT
+    )
+    report = {
+        "scene": scene.stem,
+        "renderer": doc["renderer"],
+        "size": [doc["width"], doc["height"]],
+        "views": [
+            {
+                "name": score.name,
+                "edge_iou": score.edge_iou,
+                "block_luma_difference": score.block_diff,
+                "texture_cells": [score.cell_agree, score.cell_total],
+            }
+            for score in scores
+        ],
+        "mean_edge_iou": iou,
+        "mean_block_luma_difference": blk,
+        "texture_cell_agreement": cell_ratio,
+        "passed": passed,
+    }
+    (out_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(f"  gate: {'PASS' if passed else 'FAIL'}")
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

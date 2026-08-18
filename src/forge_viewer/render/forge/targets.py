@@ -109,6 +109,15 @@ class RenderTarget:
         self.resolve_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self.resolve_fbo = ctx.framebuffer([self.resolve_tex])
 
+        self.depth_resolve = ctx.depth_texture((self.width, self.height))
+        self.depth_resolve_fbo = ctx.framebuffer(depth_attachment=self.depth_resolve)
+        if self.id_layout is IdLayout.SHARED and self.samples > 1:
+            self.id_resolve = ctx.texture((self.width, self.height), 1, dtype="u4")
+            self.id_resolve_fbo = ctx.framebuffer([self.id_resolve])
+        else:
+            self.id_resolve = None
+            self.id_resolve_fbo = None
+
         self._clear_prog = ctx.program(vertex_shader=_CLEAR_VS_FAR, fragment_shader=_CLEAR_FS)
         self._clear_vao = ctx.vertex_array(self._clear_prog, [])
         self._pixel = bytearray(4)
@@ -196,9 +205,36 @@ class RenderTarget:
         img = np.frombuffer(raw, np.uint8).reshape(self.height, self.width, 4)
         return img[::-1] if flip else img
 
-    def read_ids(self) -> np.ndarray:
-        raw = self.id_fbo.read(components=1, dtype="u4", attachment=self.id_draw_buffer)
-        return np.frombuffer(raw, np.uint32).reshape(self.height, self.width)
+    def read_depth(self, flip: bool = True) -> np.ndarray:
+        fbo = self._blit_src
+        if self.samples > 1:
+            if not self._gl.blit_depth(
+                self._blit_src.glo,
+                self.depth_resolve_fbo.glo,
+                self.width,
+                self.height,
+            ):
+                raise RuntimeError("Multisample depth resolve is unavailable")
+            fbo = self.depth_resolve_fbo
+        raw = fbo.read(components=1, dtype="f4", attachment=-1)
+        depth = np.frombuffer(raw, np.float32).reshape(self.height, self.width)
+        return depth[::-1] if flip else depth
+
+    def read_ids(self, flip: bool = False) -> np.ndarray:
+        fbo, attachment = self.id_fbo, self.id_draw_buffer
+        if self.id_resolve_fbo is not None:
+            if not self._gl.blit_color(
+                self.id_fbo.glo,
+                self.id_resolve_fbo.glo,
+                self.width,
+                self.height,
+                self.id_draw_buffer,
+            ):
+                raise RuntimeError("Multisample integer ID resolve is unavailable")
+            fbo, attachment = self.id_resolve_fbo, 0
+        raw = fbo.read(components=1, dtype="u4", attachment=attachment)
+        ids = np.frombuffer(raw, np.uint32).reshape(self.height, self.width)
+        return ids[::-1] if flip else ids
 
     def release(self) -> None:
         with contextlib.suppress(Exception):
@@ -208,6 +244,10 @@ class RenderTarget:
             self._clear_prog,
             self.resolve_fbo,
             self.resolve_tex,
+            self.depth_resolve_fbo,
+            self.depth_resolve,
+            self.id_resolve_fbo,
+            self.id_resolve,
             self._blit_src if self._blit_src is not self.fbo else None,
             self.id_fbo if self.id_fbo is not self.fbo else None,
             self.id_depth,

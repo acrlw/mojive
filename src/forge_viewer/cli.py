@@ -625,6 +625,36 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return subprocess.call([sys.executable, str(tool)])
 
 
+def cmd_rpc_serve(args: argparse.Namespace) -> int:
+    from .backends import make_adapter
+    from .control_rpc import ControlServer, ControlService
+
+    path = _resolve(args.asset)
+    service = ControlService(make_adapter(args.backend, path), path)
+    server = ControlServer(Path(args.socket), service)
+    log.info("Control RPC listening on {}", server.socket_path)
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        service.close()
+    return 0
+
+
+def cmd_control(args: argparse.Namespace) -> int:
+    from .control_rpc import RpcClient
+
+    params = json.loads(args.params)
+    result = RpcClient(Path(args.socket), args.timeout).call(args.method, params)
+    if args.json:
+        print(json.dumps(result, indent=2))
+    elif isinstance(result, dict) and result.get("message"):
+        print(result["message"])
+    else:
+        print(json.dumps(result, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="forge-viewer", description="Interactive 3D simulation viewer")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -747,6 +777,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("probe", help="Probe OpenGL capabilities")
     sp.set_defaults(func=cmd_probe, json=False)
+
+    sp = with_asset(sub.add_parser("rpc-serve", help="Run the local scene control service"))
+    sp.add_argument("--socket", default="output/forge-viewer.sock")
+    sp.set_defaults(func=cmd_rpc_serve, json=False)
+
+    sp = sub.add_parser("control", help="Send one typed command to a local control service")
+    sp.add_argument("method")
+    sp.add_argument("--params", default="{}", help="JSON object containing method parameters")
+    sp.add_argument("--socket", default="output/forge-viewer.sock")
+    sp.add_argument("--timeout", type=float, default=5.0)
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_control)
     return p
 
 
@@ -756,6 +798,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except FileNotFoundError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    except RuntimeError as e:
         print(str(e), file=sys.stderr)
         return 2
     except KeyboardInterrupt:

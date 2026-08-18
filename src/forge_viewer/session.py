@@ -14,9 +14,11 @@ from .adapters.base import (
     CameraInfo,
     EqualityConstraintInfo,
     FrameNeeds,
+    IkResult,
     JointInfo,
     KeyframeInfo,
     NodeKind,
+    PhysicsState,
     SceneAdapter,
     SceneFrame,
     SceneNode,
@@ -51,6 +53,7 @@ class Session:
         self._speed = 1.0
         self._sim_time_credit = 0.0
         self._selected = 0
+        self._selected_node_id = -1
         self._step_counter = 0
         self._pending_steps = 0
         self._frame = SceneFrame()
@@ -59,6 +62,7 @@ class Session:
         self._environment_override: Environment | None = None
         self._camera_overrides: dict[int, CameraView] = {}
         self._nodes: list[SceneNode] = []
+        self._by_node_id: dict[int, SceneNode] = {}
         self._by_object_id: dict[int, SceneNode] = {}
         self._joints: list[JointInfo] = []
         self._actuators: list[ActuatorInfo] = []
@@ -68,6 +72,8 @@ class Session:
         self._equality_constraints: list[EqualityConstraintInfo] = []
         self._active_keyframe = -1
         self._perturb = PerturbState()
+        self._ik_result: IkResult | None = None
+        self._ik_undo_state: PhysicsState | None = None
         self._camera = CameraView()
         self._last_message = ""
         self._structure_generation = 0
@@ -92,7 +98,7 @@ class Session:
 
     @property
     def selected_node(self) -> SceneNode | None:
-        return self._by_object_id.get(self._selected)
+        return self.node(self._selected_node_id)
 
     @property
     def frame(self) -> SceneFrame:
@@ -139,6 +145,10 @@ class Session:
         return self._perturb
 
     @property
+    def ik_result(self) -> IkResult | None:
+        return self._ik_result
+
+    @property
     def camera(self) -> CameraView:
         return self._camera
 
@@ -155,13 +165,27 @@ class Session:
         return self._structure_generation
 
     def node(self, node_id: int) -> SceneNode | None:
-        for n in self._nodes:
-            if n.node_id == node_id:
-                return n
-        return None
+        return self._by_node_id.get(int(node_id))
 
     def node_by_object_id(self, object_id: int) -> SceneNode | None:
         return self._by_object_id.get(int(object_id))
+
+    def restore_physics_state(
+        self, state: PhysicsState, *, active_keyframe: int = -1
+    ) -> CommandResult:
+        if not self._paused:
+            return CommandResult.bad("physics is running; pause to restore a scene snapshot")
+        if not self._adapter.restore_state(state):
+            return CommandResult.bad("scene snapshot state is incompatible with this model")
+        self._active_keyframe = (
+            int(active_keyframe) if -1 <= int(active_keyframe) < len(self._keyframes) else -1
+        )
+        self._pending_steps = 0
+        self._sim_time_credit = 0.0
+        self._perturb = PerturbState()
+        self._ik_result = None
+        self._ik_undo_state = None
+        return CommandResult.good("Scene state restored")
 
     def tick(self, needs: FrameNeeds, wall_dt: float | None = None) -> SceneFrame:
         if not self._paused and not self._adapter.caps.external_clock:
@@ -223,6 +247,8 @@ class Session:
             self._paused = False
             self._sim_time_credit = 0.0
             self._perturb = PerturbState()
+            self._ik_result = None
+            self._ik_undo_state = None
             return CommandResult.good("Simulation resumed")
 
         if isinstance(c, cmd.Step):
@@ -238,6 +264,8 @@ class Session:
             self._step_counter = 0
             self._sim_time_credit = 0.0
             self._perturb = PerturbState()
+            self._ik_result = None
+            self._ik_undo_state = None
             self._active_keyframe = -1
             self._equality_constraints = (
                 self._adapter.equality_constraints() if caps.equality_constraints else []
@@ -255,6 +283,8 @@ class Session:
             self._step_counter = 0
             self._sim_time_credit = 0.0
             self._perturb = PerturbState()
+            self._ik_result = None
+            self._ik_undo_state = None
             self._active_keyframe = -1
             self._light_overrides.clear()
             self._environment_override = None
@@ -275,7 +305,10 @@ class Session:
             self._sim_time_credit = 0.0
             self._pending_steps = 0
             self._selected = 0
+            self._selected_node_id = -1
             self._perturb = PerturbState()
+            self._ik_result = None
+            self._ik_undo_state = None
             self._active_keyframe = -1
             self._light_overrides.clear()
             self._environment_override = None
@@ -305,7 +338,16 @@ class Session:
             if c.object_id and node is None:
                 return CommandResult.bad(f"Unknown object_id={c.object_id}")
             self._selected = int(c.object_id)
+            self._selected_node_id = node.node_id if node is not None else -1
             return CommandResult.good(node.name if node else "Selection cleared")
+
+        if isinstance(c, cmd.SelectNode):
+            node = self.node(c.node_id)
+            if node is None:
+                return CommandResult.bad(f"Unknown node_id={c.node_id}")
+            self._selected_node_id = node.node_id
+            self._selected = int(node.object_id)
+            return CommandResult.good(node.name)
 
         if isinstance(c, cmd.SetVisible):
             node = self.node(c.node_id)
@@ -343,6 +385,39 @@ class Session:
                 return CommandResult.bad("this link is driven by joints; use the Joints panel")
             ok = self._adapter.set_pose(c.node_id, c.position, c.rotation)
             return CommandResult.good("") if ok else CommandResult.bad("Pose update failed")
+
+        if isinstance(c, cmd.SolveIk):
+            if not caps.inverse_kinematics:
+                return CommandResult.bad(f"{caps.name} does not support inverse kinematics")
+            if not self._paused:
+                return CommandResult.bad("physics is running; pause to solve IK")
+            node = self.node(c.node_id)
+            if node is None or not node.ik_target:
+                return CommandResult.bad("Select a body or site for IK")
+            if c.record_undo:
+                self._ik_undo_state = self._adapter.capture_state()
+            result = self._adapter.solve_ik(
+                c.node_id, c.target_position, c.target_rotation, c.options
+            )
+            self._ik_result = result
+            if not result.success:
+                return CommandResult.bad(result.message or "IK solve failed")
+            state = "converged" if result.converged else "stopped"
+            message = (
+                f"IK {state} in {result.iterations} iterations · "
+                f"position {result.position_error:.3g} m · rotation "
+                f"{np.degrees(result.rotation_error):.3g}°"
+            )
+            return CommandResult.good(message)
+
+        if isinstance(c, cmd.UndoIk):
+            if self._ik_undo_state is None:
+                return CommandResult.bad("No IK edit to undo")
+            if not self._adapter.restore_state(self._ik_undo_state):
+                return CommandResult.bad("IK undo state is incompatible")
+            self._ik_undo_state = None
+            self._ik_result = None
+            return CommandResult.good("IK edit undone")
 
         if isinstance(c, cmd.SetQpos):
             if not caps.write_qpos:
@@ -471,6 +546,7 @@ class Session:
                 return CommandResult.bad(f"object {c.object_id} is unavailable")
             if self._selected == c.object_id:
                 self._selected = 0
+                self._selected_node_id = -1
             self._refresh_structure()
             return CommandResult.good("Object removed", c.object_id)
 
@@ -626,7 +702,11 @@ class Session:
         )
         if self._active_keyframe >= len(self._keyframes):
             self._active_keyframe = -1
+        self._by_node_id = {n.node_id: n for n in self._nodes}
         self._by_object_id = {n.object_id: n for n in self._nodes if n.object_id}
+        if self.node(self._selected_node_id) is None:
+            selected = self._by_object_id.get(self._selected)
+            self._selected_node_id = selected.node_id if selected is not None else -1
         self._adapter_revision = self._adapter.structure_revision
         self._structure_generation += 1
         self._frame = self._adapter.frame(FrameNeeds())

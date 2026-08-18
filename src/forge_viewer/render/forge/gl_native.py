@@ -232,14 +232,31 @@ class GLNative:
         self._glClear(GL_DEPTH_BUFFER_BIT)  # type: ignore[attr-defined]
         return True
 
-    def blit_color(self, src_glo: int, dst_glo: int, width: int, height: int) -> bool:
+    def blit_color(
+        self,
+        src_glo: int,
+        dst_glo: int,
+        width: int,
+        height: int,
+        attachment: int = 0,
+    ) -> bool:
         if not self.has_blit:
             return False
         self._glBindFramebuffer(GL_READ_FRAMEBUFFER, src_glo)  # type: ignore[attr-defined]
         self._glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dst_glo)  # type: ignore[attr-defined]
-        self._glReadBuffer(GL_COLOR_ATTACHMENT0)  # type: ignore[attr-defined]
+        self._glReadBuffer(GL_COLOR_ATTACHMENT0 + int(attachment))  # type: ignore[attr-defined]
         self._glBlitFramebuffer(  # type: ignore[attr-defined]
             0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST
+        )
+        return True
+
+    def blit_depth(self, src_glo: int, dst_glo: int, width: int, height: int) -> bool:
+        if not self.has_blit:
+            return False
+        self._glBindFramebuffer(GL_READ_FRAMEBUFFER, src_glo)  # type: ignore[attr-defined]
+        self._glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dst_glo)  # type: ignore[attr-defined]
+        self._glBlitFramebuffer(  # type: ignore[attr-defined]
+            0, 0, width, height, 0, 0, width, height, GL_DEPTH_BUFFER_BIT, GL_NEAREST
         )
         return True
 

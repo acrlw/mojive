@@ -623,7 +623,7 @@ def test_caps_report_what_is_not_there(adapter):
 
     caps = adapter.caps
     assert caps.name == "mujoco"
-    assert caps.inverse_kinematics is False
+    assert caps.inverse_kinematics is True
     assert (
         caps.write_pose
         and caps.write_qpos

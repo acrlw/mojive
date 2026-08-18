@@ -13,6 +13,5 @@ void main() {
     vec3 d = normalize(v_dir);
 
     vec3 c = texture(u_skybox, vec3(d.x, d.z, -d.y)).rgb;
-
     o_color = vec4(finish_color(c, u_exposure, u_tonemap != 0), 1.0);
 }

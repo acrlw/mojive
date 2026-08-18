@@ -363,6 +363,7 @@ def test_texuniform_calibration(repeat: float, expect: float):
     scene = b.set_source(src, CameraView())
     assert scene.tex_coef[0][0] == pytest.approx(expect)
     assert scene.tex_coef[0][1] == pytest.approx(expect)
+    assert scene.tex_coef[0][2] == pytest.approx(1.0)
 
 
 def test_texuniform_off_uses_repeat_directly():

@@ -371,7 +371,7 @@ class SceneSourceBuilder:
     def _tex_coef(
         self, mat, size: np.ndarray, infinite: bool, key: MeshKey, local: np.ndarray
     ) -> np.ndarray:
-        """Return texture scale and offset as (u_scale, v_scale, u_offset, v_offset)."""
+        """Return texture mapping parameters for one primitive instance."""
         if mat.texture is None:
             coef = np.array([1.0, 1.0, 0.0, 0.0], np.float32)
         elif not mat.tex_uniform and not infinite:
@@ -380,7 +380,8 @@ class SceneSourceBuilder:
         else:
             repeat = np.asarray(mat.tex_repeat, np.float32)
             u, v = texuniform_coef(2.0 * float(size[0]), 2.0 * float(size[1]), repeat)
-            coef = np.array([u, v, 0.0, 0.0], np.float32)
+            box_axes = 1.0 if key.shape is MeshShape.BOX else 0.0
+            coef = np.array([u, v, box_axes, 0.0], np.float32)
 
         if key.shape is MeshShape.CAPSULE_CAP and float(local[2, 2]) < 0.0:
             coef[3] = coef[1]

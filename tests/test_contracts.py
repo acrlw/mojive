@@ -59,10 +59,17 @@ def test_mujoco_visual_audit_covers_every_enum_flag():
     assert actual_rnd == expected_rnd
     assert actual_vis == expected_vis
     assert all(
-        item["status"] in {"supported", "degraded", "unsupported"}
+        item["status"] in {"exact", "equivalent", "partial", "deferred"}
         for group in coverage.values()
         for item in group
     )
+    assert not any(item["status"] == "partial" for group in coverage.values() for item in group)
+    assert [
+        item["feature"]
+        for group in coverage.values()
+        for item in group
+        if item["status"] == "deferred"
+    ] == ["mjVIS_SDFITER"]
 
 
 def test_camera_preset_tables_agree_on_which_way_is_up():

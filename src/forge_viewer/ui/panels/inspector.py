@@ -18,10 +18,15 @@ GIZMO_REFUSAL_RUNNING = "physics is running; pause to move things"
 GIZMO_REFUSAL_DRIVEN = "this link is driven by joints; use the Joints panel"
 
 
-def gizmo_refusal_reason(paused: bool, posable: bool) -> str | None:
+def gizmo_refusal_reason(
+    paused: bool,
+    posable: bool,
+    inverse_kinematics: bool = False,
+    ik_target: bool = False,
+) -> str | None:
     if not paused:
         return GIZMO_REFUSAL_RUNNING
-    if not posable:
+    if not posable and not (inverse_kinematics and ik_target):
         return GIZMO_REFUSAL_DRIVEN
     return None
 
@@ -90,7 +95,7 @@ class InspectorPanel(Panel):
         if not self.show_transform:
             return
         frame = ctx.session.frame
-        pos, mat = _body_pose(frame.body_xpos, frame.body_xmat, node.body_index)
+        pos, mat = _node_pose(frame, node)
         if pos is None:
             imgui.text_disabled("no pose this frame")
             return
@@ -195,19 +200,23 @@ class InspectorPanel(Panel):
         return self._rotation_euler.copy()
 
     def _gizmo_reason(self, ctx: PanelContext, node: SceneNode) -> None:
-        reason = gizmo_refusal_reason(ctx.session.paused, node.posable)
-        write_pose = ctx.session.adapter.caps.write_pose
+        caps = ctx.session.adapter.caps
+        ik_target = node.ik_target
+        reason = gizmo_refusal_reason(
+            ctx.session.paused, node.posable, caps.inverse_kinematics, ik_target
+        )
         imgui.separator()
-        if not write_pose:
+        if not caps.write_pose and not (caps.inverse_kinematics and ik_target):
             imgui.text_colored(
                 imgui.ImVec4(*ctx.theme.warning),
-                f"{ctx.session.adapter.caps.name} cannot write poses",
+                f"{caps.name} cannot edit this transform",
             )
             return
         if reason is None:
+            operation = "IK gizmo" if not node.posable else "gizmo"
             imgui.text_colored(
                 imgui.ImVec4(*ctx.theme.primary),
-                f"gizmo: active ({ctx.gizmo.space} frame; g/r mode, t frame)",
+                f"{operation}: active ({ctx.gizmo.space} frame; g/r mode, t frame)",
             )
             return
         imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), "gizmo hidden")
@@ -496,8 +505,10 @@ class InspectorPanel(Panel):
         imgui.text_disabled("haze")
         self._render_flag(ctx, RenderFlag.HAZE, "enabled##haze")
         haze_color_changed, haze_color = imgui.color_edit3("color##haze", environment.haze_color)
+        haze_label = "radius" if environment.horizon_haze else "density"
+        haze_format = "%.4f" if environment.horizon_haze else "%.4f / m"
         haze_density_changed, haze_density = imgui.drag_float(
-            "density", environment.haze_density, 0.001, 0.0, 100.0, "%.4f / m"
+            haze_label, environment.haze_density, 0.001, 0.0, 100.0, haze_format
         )
         changed |= haze_color_changed or haze_density_changed
 
@@ -522,6 +533,7 @@ class InspectorPanel(Panel):
                         fog_end=float(fog_end),
                         haze_color=np.asarray(haze_color, np.float32),
                         haze_density=float(haze_density),
+                        horizon_haze=environment.horizon_haze,
                     )
                 )
             )
@@ -602,6 +614,12 @@ def _body_pose(xpos, xmat, body_index: int):
         return None, None
     mat = xmat[body_index] if xmat is not None and body_index < len(xmat) else None
     return xpos[body_index], mat
+
+
+def _node_pose(frame, node: SceneNode):
+    if node.kind is NodeKind.SITE:
+        return _body_pose(frame.site_xpos, frame.site_xmat, node.site_index)
+    return _body_pose(frame.body_xpos, frame.body_xmat, node.body_index)
 
 
 def _pose_editable(write_pose: bool, paused: bool, posable: bool) -> bool:

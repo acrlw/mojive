@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer hidpi empty canvas lighting image-light many-lights scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu p0 p1 renderer-api golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer hidpi empty canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -36,6 +36,8 @@ help:
 		'  make lighting          editable lights and environment' \
 		'  make image-light       MuJoCo cube-map environment light' \
 		'  make many-lights       16-light and 24-light reference images' \
+		'  make material-parity   texture, transparency, tendon, deformable, and dense scenes' \
+		'  make shadow-scheduling deterministic light and shadow-slot report' \
 		'  make scene-icons       camera and light scene icons' \
 		'  make reflect           multiple planar reflections' \
 		'  make additive          standard and additive transparency images' \
@@ -54,8 +56,18 @@ help:
 		'  make snapshot-replay   replay recorded snapshots' \
 		'' \
 		'Verification:' \
+		'  make p0                complete Renderer compatibility gate' \
+		'  make p1                complete P0 and P1 acceptance gate' \
 		'  make check             lint and CPU tests' \
 		'  make gpu               real OpenGL tests' \
+		'  make renderer-api      public Renderer CPU and GPU contract' \
+		'  make mujoco-ik         body/site inverse-kinematics acceptance' \
+		'  make camera-state      camera bookmark serialization and restore' \
+		'  make scene-snapshot    complete scene-state serialization and restore' \
+		'  make cli               typed local control commands' \
+		'  make rpc               local RPC protocol and capture artifacts' \
+		'  make material-parity   material and dense-scene image baselines' \
+		'  make shadow-scheduling deterministic light and shadow selection' \
 		'  make doctor            window-path smoke test' \
 		'  make mujoco-audit      MuJoCo visualization coverage' \
 		'  make adapter-conformance  adapter contract report' \
@@ -83,6 +95,16 @@ test:
 ## Isolate files because OpenGL and physics libraries own process-global registries.
 gpu:
 	@for f in $$(ls tests/gpu/test_*.py); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
+
+renderer-api:
+	$(PYTEST) -q tests/test_renderer_api.py
+	$(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
+	$(PY) -m forge_viewer.tools.renderer_api
+
+p0: renderer-api
+
+p1: check p0 mujoco-physics mujoco-ik camera-state scene-snapshot rpc material-parity shadow-scheduling mujoco-audit golden parity reverse gpu
+	$(MAKE) adapter-conformance ADAPTER=mujoco CONFORMANCE_ASSET=deformables
 
 ## Compare golden images. Use golden-accept after visual review.
 golden:
@@ -171,6 +193,18 @@ image-light:
 many-lights:
 	$(PY) -m forge_viewer.tools.mujoco_many_lights $(ARGS)
 
+material-parity:
+	$(PYTEST) -q tests/test_builder.py tests/test_scene.py
+	$(PY) -m forge_viewer.tools.material_parity $(ARGS)
+
+material-parity-accept:
+	$(PY) -m forge_viewer.tools.material_parity --accept $(ARGS)
+
+shadow-scheduling:
+	$(PYTEST) -q tests/test_light_schedule.py
+	$(PYTEST) -q -m gpu tests/gpu/test_shadows.py -k 'eight_local or local_light_indices'
+	$(PY) -m forge_viewer.tools.shadow_scheduling $(ARGS)
+
 scene-icons:
 	$(PY) -m forge_viewer.cli canvas --demo lighting \
 		--enable-render camera --enable-render light $(ARGS)
@@ -208,7 +242,7 @@ live-view:
 	trap 'kill $$effect $$debug $$server 2>/dev/null || true' EXIT INT TERM; \
 	wait $$effect; wait $$debug
 
-SNAPSHOT ?= out/session.fvs
+SNAPSHOT ?= output/session.fvs
 ## Record structure revisions, physics frames, and debug commands.
 snapshot-record:
 	$(PY) -m forge_viewer.cli serve $(LIVE_SCENE) --host $(LIVE_HOST) --port $(LIVE_PORT) --record-snapshot $(SNAPSHOT) $(ARGS)
@@ -218,6 +252,21 @@ snapshot-replay:
 	@$(PY) -m forge_viewer.cli replay $(SNAPSHOT) --host $(LIVE_HOST) --port $(LIVE_PORT) --loop & server=$$!; \
 	trap 'kill $$server 2>/dev/null || true' EXIT INT TERM; \
 	$(PY) -m forge_viewer.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) --title "forge replay" $(ARGS)
+
+camera-state:
+	$(PY) -m pytest -q -m physics tests/test_scene_state.py -k camera
+	$(PY) -m forge_viewer.tools.scene_state $(ARGS)
+
+scene-snapshot:
+	$(PY) -m pytest -q -m physics tests/test_scene_state.py
+	$(PY) -m forge_viewer.tools.scene_state $(ARGS)
+
+cli:
+	$(PYTEST) -q -m physics tests/test_control_rpc.py
+
+rpc: cli
+	$(PYTEST) -q -m "gpu or physics" tests/gpu/test_control_rpc_capture.py
+	$(PY) -m forge_viewer.tools.control_rpc
 
 ## Native gizmo acceptance: G position, R rotation, T frame, F9 settings.
 gizmo:
@@ -237,7 +286,7 @@ reflect:
 
 ## Sparse checkout of one Google DeepMind MuJoCo Menagerie model.
 ROBOT ?= unitree_go2
-MENAGERIE_DIR ?= out/mujoco_menagerie
+MENAGERIE_DIR ?= output/mujoco_menagerie
 robot:
 	@if [ ! -d "$(MENAGERIE_DIR)/.git" ]; then \
 		git clone --depth 1 --filter=blob:none --sparse \
@@ -247,6 +296,10 @@ robot:
 	$(PY) -m forge_viewer.cli view "$(MENAGERIE_DIR)/$(ROBOT)/scene.xml" $(ARGS)
 
 AUDIT_SCENE ?= mujoco_visuals
+## Full MuJoCo adapter and simulation regression suite.
+mujoco-physics:
+	$(PYTEST) -q -m physics
+
 ## Headless MuJoCo visualization coverage report.
 mujoco-audit:
 	$(PY) -m forge_viewer.cli audit $(AUDIT_SCENE) --strict
@@ -310,6 +363,10 @@ deformables:
 ## Capture flex topology, scene labels, and coordinate-frame overlays.
 mujoco-overlays:
 	$(PY) -m forge_viewer.tools.mujoco_overlays $(ARGS)
+
+mujoco-ik:
+	$(PY) -m pytest -q tests/test_mujoco_ik.py
+	$(PY) -m forge_viewer.tools.mujoco_ik $(ARGS)
 
 ## List assets, free-body metadata, and optional dependency status.
 assets:

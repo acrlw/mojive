@@ -7,8 +7,9 @@ static canvases, remote processes, and recorded snapshots share one rendering an
 Core workflows include scene inspection, object selection, transform gizmos, physical
 perturbation, debug drawing, camera and light editing, render diagnostics, capture, and video.
 
-The project is under active development. The scene adapter contracts are stable enough for
-experimentation, while higher-level editor and renderer compatibility APIs continue to evolve.
+The project is under active development. The P0/P1 baseline includes the public Renderer API,
+MuJoCo visualization semantics, IK, persistent scene state, local control, and visual regression
+gates. The next milestone focuses on platform packaging and a second production physics adapter.
 
 ## Requirements
 
@@ -117,6 +118,8 @@ forge-viewer inspect <asset> [--json]
 forge-viewer capture <asset> -o output/image.png
 forge-viewer record <asset> -o output/video.mp4 [--frames N] [--fps FPS]
 forge-viewer audit <asset> [--json] [--strict]
+forge-viewer rpc-serve <asset> [--socket output/forge-viewer.sock]
+forge-viewer control <method> [--params JSON] [--json]
 ```
 
 JSON commands reserve stdout for the JSON document and send logs to stderr.
@@ -125,6 +128,33 @@ The main menu and window file drop open MJCF, XML, and URDF models at runtime. O
 viewport highlights when a model enters the window. `File > Reload Model` recompiles the current
 file. Loading replaces the session structure, clears selection and interaction state, rebuilds GPU
 scene resources, and frames the new model.
+
+## Programmatic rendering
+
+`forge_viewer.Renderer` provides the MuJoCo-style offscreen workflow through Forge. It supports
+RGB, metric depth, segmentation, free and fixed cameras, named cameras, `MjvCamera`, `MjvOption`,
+caller-owned output arrays, multiple contexts, and deterministic resource release.
+
+```python
+import mujoco
+from forge_viewer import Renderer
+
+model = mujoco.MjModel.from_xml_path("model.xml")
+data = mujoco.MjData(model)
+
+with Renderer(model, height=480, width=640) as renderer:
+    mujoco.mj_forward(model, data)
+    renderer.update_scene(data, camera=-1)
+    rgb = renderer.render()
+
+    renderer.enable_depth_rendering()
+    depth_m = renderer.render()
+
+    renderer.enable_segmentation_rendering()
+    object_id_and_type = renderer.render()
+```
+
+Run the public contract and real-OpenGL comparison gallery with `make renderer-api`.
 
 ## Visual acceptance
 
@@ -180,8 +210,19 @@ make record SCENE=humanoid OUTPUT=output/humanoid.mp4 ARGS="--frames 240"
 
 | Target | Coverage |
 |---|---|
+| `make p0` | Complete public Renderer compatibility gate |
+| `make p1` | Complete P0 and P1 non-interactive acceptance gate |
 | `make check` | Lint, formatting, and CPU tests |
 | `make gpu` | Isolated real-OpenGL test files |
+| `make renderer-api` | Public Renderer RGB, depth, segmentation, camera, option, and lifecycle contract |
+| `make mujoco-ik` | MuJoCo body/site IK and acceptance captures |
+| `make mujoco-physics` | Full MuJoCo adapter and simulation regression suite |
+| `make camera-state` | Camera bookmark serialization and restore |
+| `make scene-snapshot` | Complete physics, selection, option, light, environment, and material state |
+| `make cli` | Typed local control command contract |
+| `make rpc` | Versioned local RPC and RGB/depth/segmentation capture artifacts |
+| `make material-parity` | Texture, transparency, tendon, deformable, and dense-scene baselines |
+| `make shadow-scheduling` | Deterministic 100-light and 8-shadow-slot scheduling |
 | `make golden` | Golden-image comparison |
 | `make reverse` | Mutation checks for regression assertions |
 | `make doctor` | Window-path smoke test |
@@ -270,8 +311,19 @@ viewer.session.submit(cmd.RemoveSceneObject(result.entity_id))
 Snapshot recording stores structure, frames, and debug commands in `.fvs` files:
 
 ```bash
-make snapshot-record LIVE_SCENE=gizmo SNAPSHOT=output/bug.fvs
+make snapshot-record LIVE_SCENE=gizmo SNAPSHOT=output/session.fvs
 make snapshot-replay SNAPSHOT=output/bug.fvs
+```
+
+Camera bookmarks and complete scene snapshots use versioned JSON under `output/snapshots/`.
+`make camera-state` and `make scene-snapshot` generate acceptance artifacts there.
+
+Local automation uses a versioned AF_UNIX control service:
+
+```bash
+forge-viewer rpc-serve humanoid
+forge-viewer control get_state --json
+forge-viewer control capture --params '{"mode":"depth","output":"output/depth.npy"}'
 ```
 
 ## Architecture

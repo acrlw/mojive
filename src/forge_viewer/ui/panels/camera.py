@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from imgui_bundle import imgui
 
 from ...adapters.base import FrameNeeds
+from ...scene_state import (
+    apply_camera_bookmark,
+    camera_bookmark,
+    capture_scene,
+    delete_named_snapshot,
+    list_named_snapshots,
+    load_named_snapshot,
+    restore_scene,
+    save_named_snapshot,
+)
 from ...types import CameraView
 from . import Panel, PanelContext, begin_kv_table, labeled, value_slider
 
@@ -49,6 +61,13 @@ class CameraPanel(Panel):
     default_open = True
     shortcut = "F6"
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._bookmark_name = "view-1"
+        self._snapshot_name = "scene-1"
+        self._bookmark_index = 0
+        self._snapshot_index = 0
+
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds(poses=False, qpos=True)
 
@@ -69,7 +88,94 @@ class CameraPanel(Panel):
         imgui.separator()
         self._params(ctx, camera)
         imgui.separator()
+        self._stored_states(ctx, camera)
+        imgui.separator()
         self._readout(ctx, camera)
+
+    def _stored_states(self, ctx: PanelContext, camera: Any) -> None:
+        if not imgui.collapsing_header("bookmarks and snapshots"):
+            return
+        camera_dir = Path("output/snapshots/cameras")
+        scene_dir = Path("output/snapshots/scenes")
+        view = ctx.model_camera_view if ctx.model_camera_id >= 0 else camera.view()
+
+        imgui.text_disabled("camera bookmark")
+        _changed, self._bookmark_name = imgui.input_text("##bookmark_name", self._bookmark_name)
+        if imgui.button("save##camera_bookmark"):
+            save_named_snapshot(
+                self._bookmark_name,
+                camera_bookmark(camera, view, ctx.model_camera_id),
+                camera_dir,
+            )
+        imgui.same_line()
+        bookmarks = list_named_snapshots(camera_dir)
+        self._bookmark_index = min(self._bookmark_index, max(len(bookmarks) - 1, 0))
+        if bookmarks:
+            imgui.set_next_item_width(140.0 * ctx.style_scale)
+            _changed, self._bookmark_index = imgui.combo(
+                "##camera_bookmarks", self._bookmark_index, bookmarks
+            )
+            name = bookmarks[self._bookmark_index]
+            if imgui.button("load##camera_bookmark"):
+                apply_camera_bookmark(
+                    load_named_snapshot(name, camera_dir), camera, ctx.select_model_camera
+                )
+            imgui.same_line()
+            if imgui.button("copy##camera_bookmark"):
+                imgui.set_clipboard_text(
+                    json.dumps(load_named_snapshot(name, camera_dir), indent=2)
+                )
+            imgui.same_line()
+            if imgui.button("delete##camera_bookmark"):
+                delete_named_snapshot(name, camera_dir)
+
+        imgui.text_disabled("scene snapshot")
+        _changed, self._snapshot_name = imgui.input_text(
+            "##scene_snapshot_name", self._snapshot_name
+        )
+        state_available = ctx.session.adapter.caps.state_snapshots
+        imgui.begin_disabled(not state_available)
+        if imgui.button("save##scene_snapshot"):
+            save_named_snapshot(
+                self._snapshot_name,
+                capture_scene(
+                    ctx.session,
+                    ctx.backend,
+                    camera,
+                    camera_source=ctx.model_camera_id,
+                    camera_view=view,
+                ),
+                scene_dir,
+            )
+        imgui.end_disabled()
+        imgui.same_line()
+        snapshots = list_named_snapshots(scene_dir)
+        self._snapshot_index = min(self._snapshot_index, max(len(snapshots) - 1, 0))
+        if snapshots:
+            imgui.set_next_item_width(140.0 * ctx.style_scale)
+            _changed, self._snapshot_index = imgui.combo(
+                "##scene_snapshots", self._snapshot_index, snapshots
+            )
+            name = snapshots[self._snapshot_index]
+            imgui.begin_disabled(not ctx.session.paused)
+            if imgui.button("load##scene_snapshot"):
+                try:
+                    restore_scene(
+                        load_named_snapshot(name, scene_dir),
+                        ctx.session,
+                        ctx.backend,
+                        camera,
+                        select_source=ctx.select_model_camera,
+                    )
+                except ValueError as error:
+                    ctx.status = str(error)
+            imgui.end_disabled()
+            imgui.same_line()
+            if imgui.button("copy##scene_snapshot"):
+                imgui.set_clipboard_text(json.dumps(load_named_snapshot(name, scene_dir), indent=2))
+            imgui.same_line()
+            if imgui.button("delete##scene_snapshot"):
+                delete_named_snapshot(name, scene_dir)
 
     def _source(self, ctx: PanelContext) -> None:
         cameras = ctx.session.cameras

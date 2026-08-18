@@ -9,7 +9,7 @@ import numpy as np
 
 from .... import math3d as M
 from ....log import get_logger
-from ....types import Light, LightKind, LightSet
+from ....types import Light, LightKind
 from ...backend import RenderFlag
 from .. import gl_native as G
 from ..cascades import (
@@ -24,8 +24,10 @@ from .base import (
     LOCAL_SHADOW_SLOTS,
     MAX_SCENE_LIGHTS,
     BasePass,
+    LightSchedule,
     PassContext,
     ShadowResult,
+    schedule_lights,
     state_opaque,
 )
 from .idbuffer import IdGeometry
@@ -88,13 +90,6 @@ class ShadowPass(BasePass):
 
         self._failed = ""
 
-    @staticmethod
-    def _sun(lights: LightSet) -> Light | None:
-        for light in lights.lights:
-            if light.active and light.cast_shadow and light.kind is LightKind.DIRECTIONAL:
-                return light
-        return None
-
     def _ensure_local(self, ctx: PassContext) -> bool:
         if self._local_tex is not None:
             return True
@@ -149,8 +144,13 @@ class ShadowPass(BasePass):
             return False
         if not ctx.scene.opaque_buckets:
             return False
-        sun = self._sun(ctx.scene.lights)
-        local_count = self._prepare_locals(ctx)
+        schedule = schedule_lights(ctx.scene.lights)
+        sun = (
+            schedule.lights[schedule.directional_shadow]
+            if schedule.directional_shadow >= 0
+            else None
+        )
+        local_count = self._prepare_locals(ctx, schedule)
         if sun is None and local_count == 0:
             return False
         if sun is not None and not self._ensure_atlas(ctx):
@@ -206,31 +206,21 @@ class ShadowPass(BasePass):
         s.enabled = True
         return True
 
-    def _prepare_locals(self, ctx: PassContext) -> int:
+    def _prepare_locals(self, ctx: PassContext, schedule: LightSchedule) -> int:
         s = ctx.shadow
-        packed_index = 0
-        for light in ctx.scene.lights.lights:
-            if not light.active:
-                continue
-            if light.kind is LightKind.IMAGE:
-                continue
-            if (
-                light.cast_shadow
-                and light.kind in (LightKind.SPOT, LightKind.POINT, LightKind.AREA)
-                and s.local_count < LOCAL_SHADOW_SLOTS
-            ):
-                slot = s.local_count
-                s.local_light_indices[slot] = packed_index
-                s.local_kinds[slot] = int(light.kind)
-                s.local_positions[slot, :3] = light.position
-                s.local_positions[slot, 3] = light.range
-                s.local_radius[slot] = light.area_radius
-                if light.kind is LightKind.SPOT:
-                    self._prepare_spot(ctx, light, slot)
-                else:
-                    self._prepare_point(ctx, light, slot)
-                s.local_count += 1
-            packed_index += 1
+        for packed_index in schedule.local_shadows:
+            light = schedule.lights[packed_index]
+            slot = s.local_count
+            s.local_light_indices[slot] = packed_index
+            s.local_kinds[slot] = int(light.kind)
+            s.local_positions[slot, :3] = light.position
+            s.local_positions[slot, 3] = light.range
+            s.local_radius[slot] = light.area_radius
+            if light.kind is LightKind.SPOT:
+                self._prepare_spot(ctx, light, slot)
+            else:
+                self._prepare_point(ctx, light, slot)
+            s.local_count += 1
         return s.local_count
 
     def _prepare_spot(self, ctx: PassContext, light: Light, slot: int) -> None:

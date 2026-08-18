@@ -9,7 +9,7 @@ in vec4 in_model2;
 in vec4 in_model3;
 in vec4 in_color;      // Linear RGBA
 in vec4 in_material;   // (emission, specular, shininess, reflectance)
-in vec4 in_texcoef;    // (u_scale, v_scale, u_offset, v_offset)
+in vec4 in_texcoef;    // scale/offset; z=1 selects box face-axis mapping
 in uint in_object_id;
 
 uniform mat4 u_view_proj;
@@ -35,7 +35,26 @@ void main() {
 
     v.world = world.xyz;
     v.normal = transpose(inverse(mat3(model))) * in_normal;
-    v.uv = in_uv * in_texcoef.xy + in_texcoef.zw;
+    if (in_texcoef.z > 0.5) {
+        vec3 extent = vec3(
+            length(model[0].xyz),
+            length(model[1].xyz),
+            length(model[2].xyz)
+        );
+        vec2 repeat = in_texcoef.xy / max(extent.xy, vec2(1e-7));
+        vec3 axis = abs(in_normal);
+        vec2 scale;
+        if (axis.x >= axis.y && axis.x >= axis.z) {
+            scale = vec2(extent.y * repeat.x, extent.z * repeat.y);
+        } else if (axis.y >= axis.z) {
+            scale = vec2(extent.x * repeat.x, extent.z * repeat.y);
+        } else {
+            scale = in_texcoef.xy;
+        }
+        v.uv = in_uv * scale;
+    } else {
+        v.uv = in_uv * in_texcoef.xy + in_texcoef.zw;
+    }
     v.color = in_color;
     v.material = in_material.xyz;
     v.reflect = in_material.w;

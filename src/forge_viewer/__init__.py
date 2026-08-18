@@ -11,10 +11,13 @@ from .adapters.base import (
     DiagnosticSource,
     EqualityConstraintInfo,
     FrameNeeds,
+    IkOptions,
+    IkResult,
     JointInfo,
     JointVisualKind,
     KeyframeInfo,
     NodeKind,
+    PhysicsState,
     SceneAdapter,
     SceneAdapterBase,
     SceneFrame,
@@ -47,6 +50,7 @@ from .types import (
 
 if TYPE_CHECKING:
     from .adapters.mujoco_adapter import MuJoCoAdapter
+    from .renderer import Renderer
 
 
 def __getattr__(name: str):
@@ -55,6 +59,10 @@ def __getattr__(name: str):
         from .adapters.mujoco_adapter import MuJoCoAdapter
 
         value = MuJoCoAdapter
+    elif name == "Renderer":
+        from .renderer import Renderer
+
+        value = Renderer
     elif name in {"audit_model", "visual_coverage"}:
         from . import mujoco_audit
 
@@ -81,6 +89,8 @@ __all__ = [
     "EqualityConstraintInfo",
     "FrameMode",
     "FrameNeeds",
+    "IkOptions",
+    "IkResult",
     "JointInfo",
     "JointVisualKind",
     "KeyframeInfo",
@@ -97,8 +107,10 @@ __all__ = [
     "MuJoCoAdapter",
     "NodeKind",
     "Occlusion",
+    "PhysicsState",
     "RemoteSceneAdapter",
     "RenderFlag",
+    "Renderer",
     "Scene",
     "SceneAdapter",
     "SceneAdapterBase",

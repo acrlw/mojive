@@ -142,6 +142,29 @@ def test_transparent_buckets_draw_far_to_near():
     assert dists == sorted(dists, reverse=True)
 
 
+def test_transparent_instances_with_shared_mesh_are_sorted_individually():
+    b = SceneBuilder()
+    material = b.material_id(Material(name="glass"))
+    for x in (1.0, 9.0, 5.0):
+        b.add(
+            MeshKey(MeshShape.BOX),
+            material,
+            M.compose([x, 0, 0], np.eye(3), [1, 1, 1]),
+            GLASS,
+            MAT,
+            1,
+        )
+    scene = b.build(CameraView(eye=np.zeros(3)), LightSet(), 1.0, np.zeros(3))
+
+    assert len(scene.transparent_buckets) == 3
+    assert all(stop - start == 1 for start, stop in scene.bucket_ranges)
+    centers = [
+        scene.transforms[scene.bucket_ranges[bucket][0], 0, 3]
+        for bucket in scene.transparent_draw_order()
+    ]
+    assert centers == [9.0, 5.0, 1.0]
+
+
 def test_transparent_order_accepts_a_reflected_eye():
     b = SceneBuilder()
     m = b.material_id(Material(name="a"))

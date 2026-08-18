@@ -6,6 +6,7 @@ import moderngl
 
 from .... import math3d as M
 from ....log import get_logger
+from ...backend import RenderFlag
 from .. import gl_native as G
 from ..instances import (
     INSTANCE_ATTRIBUTES,
@@ -187,7 +188,14 @@ class IdBufferPass(BasePass):
         if not self._geom.ensure(ctx, ctx.target.id_draw_buffer):
             return False
         self._geom.upload(ctx)
-        return bool(ctx.scene.opaque_buckets)
+        return bool(
+            ctx.scene.opaque_buckets
+            or (
+                ctx.include_transparent_ids
+                and ctx.scene.transparent_buckets
+                and ctx.flag(RenderFlag.TRANSPARENT)
+            )
+        )
 
     def execute(self, ctx: PassContext) -> None:
         target = ctx.target
@@ -206,6 +214,8 @@ class IdBufferPass(BasePass):
 
         self._geom.set_view_proj(ctx)
         ctx.draw_calls += self._geom.draw(ctx, ctx.scene.opaque_buckets)
+        if ctx.include_transparent_ids and ctx.flag(RenderFlag.TRANSPARENT):
+            ctx.draw_calls += self._geom.draw(ctx, ctx.scene.transparent_draw_order())
 
         if shared:
             fbo.color_mask = ((True, True, True, True), (True, True, True, True))

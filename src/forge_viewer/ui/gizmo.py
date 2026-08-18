@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from .. import math3d
-from ..commands import SetPose
+from ..adapters.base import IkOptions, NodeKind
+from ..commands import SetPose, SolveIk
 from ..gizmo import (
     AXIS_COLORS,
     AXIS_END,
@@ -75,10 +76,15 @@ class Verdict:
     reason: str = ""
 
 
-def verdict(paused: bool, node: SceneNode | None) -> Verdict:
+def verdict(paused: bool, node: SceneNode | None, inverse_kinematics: bool = False) -> Verdict:
     if node is None:
         return Verdict(False, REASON_NO_SELECTION)
-    reason = gizmo_refusal_reason(paused, node.posable)
+    reason = gizmo_refusal_reason(
+        paused,
+        node.posable,
+        inverse_kinematics,
+        node.ik_target,
+    )
     return Verdict(reason is None, reason or "")
 
 
@@ -117,6 +123,7 @@ class ObjectGizmo:
         self._rotation_angle = 0.0
         self._snapping = False
         self._label = ""
+        self._edit_started = False
         self.translation_snap_m = DEFAULT_TRANSLATION_SNAP_M
         self.rotation_snap_deg = DEFAULT_ROTATION_SNAP_DEG
 
@@ -201,7 +208,7 @@ class ObjectGizmo:
     ) -> GizmoHandle:
         self._style_scale = float(style_scale)
         node = session.selected_node
-        self._verdict = verdict(session.paused, node)
+        self._verdict = verdict(session.paused, node, session.adapter.caps.inverse_kinematics)
         if not self._verdict.ok:
             self._hovered = GizmoHandle.NONE
             self._axis_mask = self._plane_mask = 0
@@ -264,7 +271,7 @@ class ObjectGizmo:
             self._end()
         if not self._keyboard:
             node = session.selected_node
-            self._verdict = verdict(session.paused, node)
+            self._verdict = verdict(session.paused, node, session.adapter.caps.inverse_kinematics)
             if not self._verdict.ok or not self._begin_handle(session, cam, rect, cursor, handle):
                 return False
             self._keyboard = self._using = True
@@ -285,7 +292,7 @@ class ObjectGizmo:
     ) -> bool:
         self._interactive = bool(interactive)
         node = session.selected_node
-        self._verdict = verdict(session.paused, node)
+        self._verdict = verdict(session.paused, node, session.adapter.caps.inverse_kinematics)
         self._visible = not yielding and self._verdict.ok
         if not self._visible:
             self._clear_translation_guide(backend)
@@ -870,6 +877,7 @@ class ObjectGizmo:
         self._rotation_raw_angle = 0.0
         self._rotation_angle = 0.0
         self._snapping = False
+        self._edit_started = False
         self._label = self._format_value(self._start_pos)
 
         axis = _axis_of(self._active)
@@ -959,17 +967,29 @@ class ObjectGizmo:
         if node is None:
             self._end()
             return False
-        result = session.submit(
-            SetPose(
+        if node.posable:
+            command = SetPose(
                 node_id=node.node_id,
                 position=np.asarray(pos, np.float32),
                 rotation=np.asarray(mat, np.float32),
             )
-        )
+        else:
+            command = SolveIk(
+                node_id=node.node_id,
+                target_position=np.asarray(pos, np.float32),
+                target_rotation=np.asarray(mat, np.float32),
+                options=IkOptions(
+                    position=handle not in ROTATE_HANDLES,
+                    rotation=handle in ROTATE_HANDLES,
+                ),
+                record_undo=not self._edit_started,
+            )
+        result = session.submit(command)
         if not result.ok:
             self._verdict = Verdict(False, result.message)
             self._end()
             return False
+        self._edit_started = True
         self._label = self._format_value(pos)
         return True
 
@@ -1019,6 +1039,7 @@ class ObjectGizmo:
         self._snapping = False
         self._active = GizmoHandle.NONE
         self._label = ""
+        self._edit_started = False
 
 
 def _axis_of(handle: GizmoHandle) -> int:
@@ -1206,6 +1227,15 @@ def _cursor_plane(cam, rect, cursor, point, normal) -> np.ndarray | None:
 
 def _node_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarray]:
     frame = session.frame
+    if node.kind is NodeKind.SITE:
+        i = int(node.site_index)
+        pos = np.zeros(3, np.float64)
+        mat = np.eye(3, dtype=np.float64)
+        if frame.site_xpos is not None and 0 <= i < len(frame.site_xpos):
+            pos = np.asarray(frame.site_xpos[i], np.float64).reshape(3)
+        if frame.site_xmat is not None and 0 <= i < len(frame.site_xmat):
+            mat = np.asarray(frame.site_xmat[i], np.float64).reshape(3, 3)
+        return pos, mat
     i = int(node.body_index)
     pos = np.zeros(3, np.float64)
     mat = np.eye(3, dtype=np.float64)
