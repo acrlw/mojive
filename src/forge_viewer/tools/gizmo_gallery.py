@@ -12,7 +12,7 @@ from PIL import Image
 from .. import commands as cmd
 from ..assets import resolve
 from ..composition import build
-from ..gizmo import RING_RADIUS, GizmoHandle, GizmoMode, hit_test, project, world_scale
+from ..gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, GizmoMode, hit_test, project, world_scale
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -97,6 +97,7 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
             rect,
             tuple(project(camera, (ring_point(angle),), rect)[0, :2]),
             GizmoMode.ROTATE,
+            viewer.window.style_scale,
         )[0]
         is GizmoHandle.ROTATE_Z
     )
@@ -143,7 +144,13 @@ def _state(viewer, node):
     rect = viewer.app._viewport_rect
     origin = np.asarray(viewer.session.frame.body_xpos[node.body_index], np.float64)
     rotation = np.asarray(viewer.session.frame.body_xmat[node.body_index], np.float64).reshape(3, 3)
-    return camera, rect, origin, rotation, world_scale(camera, origin, rect[3])
+    return (
+        camera,
+        rect,
+        origin,
+        rotation,
+        world_scale(camera, origin, rect[3], SIZE_PT * viewer.window.style_scale),
+    )
 
 
 def _save(viewer, node, path: Path) -> None:

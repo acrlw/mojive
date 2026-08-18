@@ -90,6 +90,7 @@ class ViewerApp:
         self._show_model_load_error = False
         self._model_drop_notice = ""
         self._model_drop_notice_until = 0.0
+        self._display_scale_generation = -1
 
     def set_fixed_render_size(self, width: int, height: int) -> None:
         self._fixed_render_size = (max(1, int(width)), max(1, int(height)))
@@ -259,6 +260,7 @@ class ViewerApp:
         self._last_time = now
 
         window.begin_frame()
+        self._sync_display_scale()
         self._poll_model_dialog()
         self._poll_model_drop()
         self._draw_main_menu()
@@ -340,7 +342,13 @@ class ViewerApp:
         over_viewport = gs.viewport_input_allowed(inside, hovered_name)
         view = self._camera_view()
         hovered_ball = self.view_cube.update(view, rect, cursor, self.window.style_scale)
-        self.gizmo.update_hover(self.session, view, rect, cursor)
+        self.gizmo.update_hover(
+            self.session,
+            view,
+            rect,
+            cursor,
+            style_scale=self.window.style_scale,
+        )
         node = self.session.selected_node
         return gs.InputState(
             left=imgui.is_mouse_down(0),
@@ -378,6 +386,7 @@ class ViewerApp:
                 state.cursor,
                 axis,
                 snap=state.shift,
+                style_scale=self.window.style_scale,
             )
             return
         self.gizmo.interact(
@@ -389,6 +398,7 @@ class ViewerApp:
             left_down=state.left,
             released=self.router.released,
             snap=state.shift,
+            style_scale=self.window.style_scale,
         )
 
     def _publish_gizmo(self) -> None:
@@ -397,7 +407,8 @@ class ViewerApp:
             self.session,
             self._camera_view(),
             self._viewport_rect,
-            pixel_scale=self.window.pixel_scale,
+            ui_scale=self.window.ui_scale,
+            style_scale=self.window.style_scale,
             yielding=gs.gizmo_yields(self._state),
             interactive=self.router.claim in (gs.Claim.NONE, gs.Claim.OBJECT_GIZMO),
         )
@@ -736,6 +747,22 @@ class ViewerApp:
         sw, sh = settled
         self.backend.resize(sw, sh)
         self.camera.set_aspect(max(sw, 1) / max(sh, 1))
+
+    def _sync_display_scale(self) -> None:
+        generation = self.window.scale_generation
+        if generation == self._display_scale_generation:
+            return
+        configure_text = getattr(self.backend, "configure_text", None)
+        if configure_text is not None:
+            font = self.window.font_report
+            configure_text(
+                font.mono_path,
+                font.mono_index,
+                font.cjk_path,
+                font.cjk_index,
+                font.size_pt * self.window.ui_scale,
+            )
+        self._display_scale_generation = generation
 
     def _panel_context(self) -> PanelContext:
         return PanelContext(

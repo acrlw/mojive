@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +25,11 @@ glfw: Any = None
 gl: Any = None
 imgui: Any = None
 GlfwRenderer: Any = None
+
+
+def layout_scale(ui_scale: float, framebuffer_scale: float) -> float:
+    """Convert the physical UI scale into ImGui window coordinates."""
+    return float(ui_scale) / max(float(framebuffer_scale), 1e-6)
 
 
 def _load_gl_deps() -> None:
@@ -108,12 +115,17 @@ class WindowConfig:
 
     clear_color: tuple[float, float, float, float] = (0.09, 0.10, 0.11, 1.0)
     font_size_pt: float = 14.0
+    ui_scale: float | None = None
 
 
 class Window:
     def __init__(self, config: WindowConfig | None = None) -> None:
         _load_gl_deps()
         self.config = config or WindowConfig()
+        configured_scale = os.environ.get("FORGE_VIEWER_UI_SCALE")
+        self._scale_override = float(configured_scale) if configured_scale else self.config.ui_scale
+        if self._scale_override is not None and self._scale_override <= 0.0:
+            raise ValueError("UI scale must be positive")
         if not glfw.init():
             raise RuntimeError("GLFW initialization failed")
         global _live_windows
@@ -150,8 +162,11 @@ class Window:
         glfw.make_context_current(self._window)
         self.set_vsync(self.config.vsync)
 
+        self._content_scale = 1.0
         self._ui_scale = 1.0
         self._pixel_scale = 1.0
+        self._style_scale = 1.0
+        self._scale_generation = 0
         self._refresh_scales()
 
         imgui.create_context()
@@ -169,13 +184,9 @@ class Window:
         self._native_drop_token = native_drop.install(glfw, self._window, self)
 
         self._impl.process_inputs()
-        fb_w, _ = self.size_pixels
-        pt_w, _ = self.size_points
-        display_w = float(imgui.get_io().display_size.x) or float(pt_w)
-        self._style_scale = self._ui_scale if abs(display_w - fb_w) < abs(display_w - pt_w) else 1.0
         theme_mod.apply(imgui, ui_scale=self._style_scale)
-
         imgui.get_style().font_scale_dpi = self._style_scale
+        self._applied_style_scale = self._style_scale
         self._load_fonts(io)
 
         self.dockspace_id = 0
@@ -207,12 +218,20 @@ class Window:
         return self._ui_scale
 
     @property
+    def content_scale(self) -> float:
+        return self._content_scale
+
+    @property
     def style_scale(self) -> float:
         return self._style_scale
 
     @property
     def pixel_scale(self) -> float:
         return self._pixel_scale
+
+    @property
+    def scale_generation(self) -> int:
+        return self._scale_generation
 
     def points_to_pixels(self, value: Any) -> Any:
         s = self._pixel_scale
@@ -238,13 +257,41 @@ class Window:
 
     def _refresh_scales(self) -> None:
         try:
-            sx, _sy = glfw.get_window_content_scale(self._window)
-            self._ui_scale = float(sx) or 1.0
+            sx, sy = glfw.get_window_content_scale(self._window)
+            content_scale = max(float(sx), float(sy)) or 1.0
         except Exception:
-            self._ui_scale = 1.0
-        win_w, _ = self.size_points
-        fb_w, _ = self.size_pixels
-        self._pixel_scale = (fb_w / win_w) if win_w > 0 else 1.0
+            content_scale = 1.0
+        win_w, win_h = self.size_points
+        fb_w, fb_h = self.size_pixels
+        pixel_scale = max(
+            (fb_w / win_w) if win_w > 0 else 1.0,
+            (fb_h / win_h) if win_h > 0 else 1.0,
+        )
+        ui_scale = self._scale_override or content_scale
+        style_scale = layout_scale(ui_scale, pixel_scale)
+        changed = any(
+            not math.isclose(current, updated, abs_tol=1e-3)
+            for current, updated in (
+                (self._content_scale, content_scale),
+                (self._ui_scale, ui_scale),
+                (self._pixel_scale, pixel_scale),
+                (self._style_scale, style_scale),
+            )
+        )
+        self._content_scale = content_scale
+        self._ui_scale = ui_scale
+        self._pixel_scale = pixel_scale
+        self._style_scale = style_scale
+        if changed:
+            self._scale_generation += 1
+
+    def _sync_style_scale(self) -> None:
+        if math.isclose(self._applied_style_scale, self._style_scale, abs_tol=1e-3):
+            return
+        style = imgui.get_style()
+        style.scale_all_sizes(self._style_scale / self._applied_style_scale)
+        style.font_scale_dpi = self._style_scale
+        self._applied_style_scale = self._style_scale
 
     def poll_render_size(
         self, viewport_points: tuple[float, float], now: float | None = None
@@ -290,6 +337,7 @@ class Window:
     def begin_frame(self) -> None:
         glfw.poll_events()
         self._refresh_scales()
+        self._sync_style_scale()
         self._impl.process_inputs()
         imgui.new_frame()
 

@@ -226,7 +226,7 @@ class CaptureBackend:
         return frame is not None
 
 
-def test_hidpi_only_scales_the_gpu_size_not_ui_hit_space() -> None:
+def test_hidpi_scales_solid_gizmo_and_hit_geometry() -> None:
     session, _ = session_at()
     gizmo = ObjectGizmo()
     gizmo.set_style("3d")
@@ -234,17 +234,24 @@ def test_hidpi_only_scales_the_gpu_size_not_ui_hit_space() -> None:
     cam = camera()
     center = tuple(project(cam, (np.zeros(3),), RECT)[0, :2])
 
-    assert gizmo.update_hover(session, cam, RECT, center) is GizmoHandle.SCREEN
+    assert gizmo.update_hover(session, cam, RECT, center, style_scale=2.0) is GizmoHandle.SCREEN
     assert gizmo.publish(
         backend,
         session,
         cam,
         RECT,
-        pixel_scale=2.0,
+        ui_scale=2.0,
+        style_scale=2.0,
         yielding=False,
         interactive=True,
     )
     assert backend.frame.size_px == 2.0 * SIZE_PT
+
+    gizmo.set_mode("rotate")
+    outer = (center[0] + SCREEN_RING_RADIUS * SIZE_PT * 2.0, center[1])
+    assert (
+        gizmo.update_hover(session, cam, RECT, outer, style_scale=2.0) is GizmoHandle.ROTATE_SCREEN
+    )
 
 
 def test_body_and_world_space_publish_the_same_basis_used_for_interaction() -> None:
@@ -255,12 +262,30 @@ def test_body_and_world_space_publish_the_same_basis_used_for_interaction() -> N
     backend = CaptureBackend()
     cam = camera()
 
-    gizmo.publish(backend, session, cam, RECT, pixel_scale=1.0, yielding=False, interactive=True)
+    gizmo.publish(
+        backend,
+        session,
+        cam,
+        RECT,
+        ui_scale=1.0,
+        style_scale=1.0,
+        yielding=False,
+        interactive=True,
+    )
     assert backend.frame.space is GizmoSpace.BODY
     assert backend.frame.rotation == pytest.approx(rotation)
 
     gizmo.set_space("world")
-    gizmo.publish(backend, session, cam, RECT, pixel_scale=1.0, yielding=False, interactive=True)
+    gizmo.publish(
+        backend,
+        session,
+        cam,
+        RECT,
+        ui_scale=1.0,
+        style_scale=1.0,
+        yielding=False,
+        interactive=True,
+    )
     assert backend.frame.space is GizmoSpace.WORLD
     assert backend.frame.rotation == pytest.approx(np.eye(3))
 

@@ -241,10 +241,12 @@ def hit_test(
     rect: tuple[float, float, float, float],
     cursor: tuple[float, float],
     mode: GizmoMode,
+    style_scale: float = 1.0,
 ) -> tuple[GizmoHandle, int, int]:
     o = np.asarray(origin, np.float64)
     r = np.asarray(rotation, np.float64).reshape(3, 3)
-    scale = world_scale(cam, o, rect[3])
+    style_scale = float(style_scale)
+    scale = world_scale(cam, o, rect[3], SIZE_PT * style_scale)
     axis_mask, plane_mask = visibility(cam, o, r, rect, scale)
     if not axis_mask and not plane_mask:
         return GizmoHandle.NONE, axis_mask, plane_mask
@@ -252,14 +254,14 @@ def hit_test(
     center = project(cam, [o], rect)[0, :2]
 
     if mode is GizmoMode.TRANSLATE:
-        if np.linalg.norm(p - center) <= CENTER_HIT_PT:
+        if np.linalg.norm(p - center) <= CENTER_HIT_PT * style_scale:
             return GizmoHandle.SCREEN, axis_mask, plane_mask
         for axis, handle in enumerate(PLANE_HANDLES):
             if plane_mask & (1 << axis) and plane_handle_alpha(cam, o, r[:, axis]) > 0.2:
                 poly = project(cam, plane_corners(o, r, scale, axis), rect)[:, :2]
                 if _inside_convex(p, poly):
                     return handle, axis_mask, plane_mask
-        best = (AXIS_HIT_PT, GizmoHandle.NONE)
+        best = (AXIS_HIT_PT * style_scale, GizmoHandle.NONE)
         for axis, handle in enumerate(AXIS_HANDLES):
             if not axis_mask & (1 << axis):
                 continue
@@ -275,11 +277,11 @@ def hit_test(
                 best = (d, handle)
         return best[1], axis_mask, plane_mask
 
-    screen_radius = SCREEN_RING_RADIUS * SIZE_PT
-    if abs(float(np.linalg.norm(p - center)) - screen_radius) <= RING_HIT_PT:
+    screen_radius = SCREEN_RING_RADIUS * SIZE_PT * style_scale
+    if abs(float(np.linalg.norm(p - center)) - screen_radius) <= RING_HIT_PT * style_scale:
         return GizmoHandle.ROTATE_SCREEN, axis_mask, plane_mask
 
-    best = (RING_HIT_PT, GizmoHandle.NONE)
+    best = (RING_HIT_PT * style_scale, GizmoHandle.NONE)
     for axis, handle in enumerate(ROTATE_AXIS_HANDLES):
         if rotation_ring_alpha(cam, o, r[:, axis]) <= 0.2:
             continue

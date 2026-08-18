@@ -3,12 +3,13 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer empty canvas lighting image-light many-lights scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer hidpi empty canvas lighting image-light many-lights scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
 		'Interactive:' \
 		'  make viewer             default MuJoCo scene' \
+		'  make hidpi              viewer with an explicit 200% UI scale' \
 		'  make empty              empty viewer; load MJCF or URDF from File menu' \
 		'  make model-loading      empty, MJCF, and URDF loading reference images' \
 		'  make robot             Unitree Go2; downloads on first run' \
@@ -136,6 +137,10 @@ SCENE ?= test_scene
 ARGS  ?=
 viewer:
 	$(PY) -m forge_viewer.cli view $(SCENE) $(ARGS)
+
+UI_SCALE ?= 2
+hidpi:
+	FORGE_VIEWER_UI_SCALE=$(UI_SCALE) $(PY) -m forge_viewer.cli view gizmo --paused $(ARGS)
 
 ## Open an empty MuJoCo scene and load MJCF or URDF from File > Open Model.
 empty:

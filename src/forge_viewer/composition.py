@@ -162,14 +162,6 @@ def _compose(
 
     fb_w, fb_h = window.size_pixels
     backend = ForgeBackend(None, fb_w, fb_h, samples)
-    font = window.font_report
-    backend.configure_text(
-        font.mono_path,
-        font.mono_index,
-        font.cjk_path,
-        font.cjk_index,
-        font.size_pt * window.ui_scale,
-    )
     debug_bridge = DebugBridge(backend)
     debug_bridge.serve()
 

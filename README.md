@@ -38,6 +38,22 @@ physics adapter can use the core installation without that extra.
 
 From a source checkout, `make viewer` opens the same default scene.
 
+### Display scaling
+
+The viewer reads the GLFW content scale and keeps ImGui, fonts, 2D and 3D gizmos, perturbation
+marks, picking, and world-space labels at the same physical size. Linux X11, Linux Wayland,
+Windows, and macOS use their native framebuffer coordinate models.
+
+Use an explicit scale when the desktop session reports an incorrect value:
+
+```bash
+FORGE_VIEWER_UI_SCALE=2 make viewer
+make hidpi
+```
+
+`make hidpi` opens the gizmo scene at a 200% UI scale. Set `UI_SCALE=1.5` to inspect fractional
+scaling.
+
 Open a local MJCF or URDF model directly:
 
 ```bash
@@ -117,6 +133,7 @@ Every user-facing feature has a reproducible Make target.
 | Target | Purpose |
 |---|---|
 | `make viewer` | Open the default MuJoCo scene |
+| `make hidpi` | Inspect UI, fonts, and gizmos at an explicit 200% scale |
 | `make empty` | Open an empty viewer and load MJCF or URDF from the File menu |
 | `make model-loading` | Capture empty, MJCF, and URDF runtime-loading references |
 | `make outline` | Selection, x-ray outline, and outline antialiasing |

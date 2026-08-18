@@ -19,7 +19,18 @@ Metal, and GLSL 410. Run `make probe` to refresh the report.
 | KHR debug | absent | Debug groups compile to empty scopes |
 | Line width range | `[1.0, 1.0]` | Wide lines use triangle expansion |
 | Geometry shaders | available | Barycentric wireframe path |
-| HiDPI scale | 2.0 | Input and target coordinates use framebuffer scale |
+| HiDPI scale | 2.0 | UI size follows content scale; render targets follow framebuffer scale |
+
+## Display scaling
+
+GLFW reports the desktop content scale and the framebuffer-to-window ratio independently. Forge
+uses the content scale for physical UI size and GPU overlay dimensions. ImGui layout coordinates
+use `content scale / framebuffer scale`, which aligns X11, Wayland, Windows, and macOS behavior.
+The same scale reaches UI fonts, world-space text, view controls, gizmos, perturbation marks, and
+their hit regions.
+
+`FORGE_VIEWER_UI_SCALE` overrides the reported content scale. `make hidpi` runs the gizmo scene
+with a value of `2` for visual acceptance.
 
 ## Render-target layout
 

@@ -99,6 +99,7 @@ class ObjectGizmo:
         self._axis_mask = 0b111
         self._plane_mask = 0b111
         self._frame = GizmoFrame()
+        self._style_scale = 1.0
 
         self._start_pos = np.zeros(3, np.float64)
         self._start_mat = np.eye(3, dtype=np.float64)
@@ -195,7 +196,10 @@ class ObjectGizmo:
         cam: CameraView,
         rect: tuple[float, float, float, float],
         cursor: tuple[float, float],
+        *,
+        style_scale: float = 1.0,
     ) -> GizmoHandle:
+        self._style_scale = float(style_scale)
         node = session.selected_node
         self._verdict = verdict(session.paused, node)
         if not self._verdict.ok:
@@ -207,7 +211,7 @@ class ObjectGizmo:
             return self._hovered
         pos, mat = _node_pose(session, node)
         self._hovered, self._axis_mask, self._plane_mask = hit_test(
-            cam, pos, self._basis(mat), rect, cursor, self._mode
+            cam, pos, self._basis(mat), rect, cursor, self._mode, self._style_scale
         )
         return self._hovered
 
@@ -222,7 +226,9 @@ class ObjectGizmo:
         left_down: bool,
         released: bool,
         snap: bool = False,
+        style_scale: float = 1.0,
     ) -> bool:
+        self._style_scale = float(style_scale)
         if not claimed:
             if self._using and not left_down:
                 self._end()
@@ -236,8 +242,17 @@ class ObjectGizmo:
         return self._drag(session, cam, rect, cursor, snap=snap)
 
     def keyboard_interact(
-        self, session, cam, rect, cursor, axis: int, *, snap: bool = False
+        self,
+        session,
+        cam,
+        rect,
+        cursor,
+        axis: int,
+        *,
+        snap: bool = False,
+        style_scale: float = 1.0,
     ) -> bool:
+        self._style_scale = float(style_scale)
         if axis not in (0, 1, 2):
             if self._keyboard:
                 self._end()
@@ -263,7 +278,8 @@ class ObjectGizmo:
         cam: CameraView,
         rect: tuple[float, float, float, float],
         *,
-        pixel_scale: float,
+        ui_scale: float,
+        style_scale: float,
         yielding: bool,
         interactive: bool,
     ) -> bool:
@@ -279,7 +295,7 @@ class ObjectGizmo:
             return False
         pos, mat = _node_pose(session, node)
         basis = self._basis(mat)
-        scale = world_scale(cam, pos, rect[3])
+        scale = world_scale(cam, pos, rect[3], SIZE_PT * float(style_scale))
         self._axis_mask, self._plane_mask = visibility(cam, pos, basis, rect, scale)
         frame = self._frame
         frame.mode = self._mode
@@ -287,12 +303,12 @@ class ObjectGizmo:
         frame.space = self._space
         np.copyto(frame.position, pos, casting="unsafe")
         np.copyto(frame.rotation, basis, casting="unsafe")
-        frame.size_px = SIZE_PT * float(pixel_scale)
+        frame.size_px = SIZE_PT * float(ui_scale)
         frame.hovered = self._hovered if interactive else GizmoHandle.NONE
         frame.active = self._active
         frame.axis_mask = self._axis_mask
         frame.plane_mask = self._plane_mask
-        self._publish_translation_guide(backend, pixel_scale)
+        self._publish_translation_guide(backend, ui_scale)
         if self._style is GizmoStyle.FLAT:
             if backend.caps.gizmo:
                 backend.set_gizmo(None)
@@ -330,7 +346,7 @@ class ObjectGizmo:
         frame = self._frame
         origin = np.asarray(frame.position, np.float64)
         rotation = np.asarray(frame.rotation, np.float64)
-        scale = world_scale(cam, origin, rect[3])
+        scale = world_scale(cam, origin, rect[3], SIZE_PT * style_scale)
         visible = display_handles(frame)
         u32 = imgui.color_convert_float4_to_u32
 
@@ -426,7 +442,7 @@ class ObjectGizmo:
             if center[2] > 0.0:
                 color = HOVER_COLOR if self._hot(GizmoHandle.ROTATE_SCREEN) else CENTER_COLOR
                 position = imgui.ImVec2(float(center[0]), float(center[1]))
-                radius = SCREEN_RING_RADIUS * SIZE_PT
+                radius = SCREEN_RING_RADIUS * SIZE_PT * style_scale
                 dl.add_circle(
                     position,
                     radius,
@@ -576,7 +592,7 @@ class ObjectGizmo:
         ring_radius = (
             SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
         )
-        scale = world_scale(cam, self._start_pos, rect[3])
+        scale = world_scale(cam, self._start_pos, rect[3], SIZE_PT * style_scale)
         if scale <= 0.0:
             return
         tangent = np.cross(self._axis, self._rotation_start_vec)
@@ -708,7 +724,7 @@ class ObjectGizmo:
             dl.add_circle(center, radius, edge, 24, edge_width)
             dl.add_circle(center, radius, core, 24, core_width)
 
-    def _publish_translation_guide(self, backend: Any, pixel_scale: float) -> None:
+    def _publish_translation_guide(self, backend: Any, ui_scale: float) -> None:
         dd = getattr(backend, "debug", None)
         active = self._using and self._active not in ROTATE_HANDLES
         if not active or not backend.caps.debug_draw or dd is None:
@@ -720,9 +736,9 @@ class ObjectGizmo:
             self._frame.position,
             GUIDE_CORE_COLOR,
             CONTRAST_EDGE_COLOR,
-            width_px=2.0 * pixel_scale,
-            radius_px=6.0 * pixel_scale,
-            edge_px=CONTRAST_EDGE_PT * pixel_scale,
+            width_px=2.0 * ui_scale,
+            radius_px=6.0 * ui_scale,
+            edge_px=CONTRAST_EDGE_PT * ui_scale,
         )
         self._guide_gpu = True
 
@@ -738,7 +754,7 @@ class ObjectGizmo:
         ring_radius = (
             SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
         )
-        radius = world_scale(cam, self._start_pos, rect[3]) * ring_radius
+        radius = world_scale(cam, self._start_pos, rect[3], SIZE_PT * style_scale) * ring_radius
 
         def arc_screen(angles):
             cosine = np.cos(angles)[:, None]
@@ -813,8 +829,8 @@ class ObjectGizmo:
                 + np.sin(self._rotation_angle) * tangent
                 + (1.0 - cosine) * np.dot(self._axis, self._rotation_start_vec) * self._axis
             )
-            radius = world_scale(cam, self._start_pos, rect[3]) * (
-                ring_radius + 14.0 * style_scale / SIZE_PT
+            radius = world_scale(cam, self._start_pos, rect[3], SIZE_PT * style_scale) * (
+                ring_radius + 14.0 / SIZE_PT
             )
             anchor_world = self._start_pos + direction * radius
         anchor = project(cam, (anchor_world,), rect)[0]
@@ -863,7 +879,7 @@ class ObjectGizmo:
             self._axis[:] = -cam.forward()
 
         if self._active in (GizmoHandle.X, GizmoHandle.Y, GizmoHandle.Z):
-            scale = world_scale(cam, pos, rect[3])
+            scale = world_scale(cam, pos, rect[3], SIZE_PT * self._style_scale)
             screen = project(cam, [pos, pos + self._axis * scale * AXIS_END], rect)[:, :2]
             delta = screen[1] - screen[0]
             length = float(np.linalg.norm(delta))
