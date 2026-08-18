@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer empty canvas lighting image-light many-lights scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays musculoskeletal musculoskeletal-video musculoskeletal-check cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer empty canvas lighting image-light many-lights scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -29,8 +29,6 @@ help:
 		'  make mujoco-constraints  equality constraint endpoint markers' \
 		'  make mujoco-editing     mocap pose and equality controls' \
 		'  make mujoco-overlays    flex edges/vertices, labels, and frames' \
-		'  make musculoskeletal   musculoskeletal model, tendons, and keyframes' \
-		'  make musculoskeletal-video  300 keyframes → 60 fps MP4' \
 		'  make deformables       flex/skin dynamic meshes' \
 		'' \
 		'Rendering and output:' \
@@ -288,22 +286,6 @@ mujoco-constraints:
 
 mujoco-editing:
 	$(PY) -m forge_viewer.cli view mocap_equality --paused $(ARGS)
-
-MYO_SCENE ?= ../lowerlimb-refactor/lowerlimb-main/assets/models/myo_sim_latest/myo_sim/body/fullbody_kit_9_10_walk_forward_60.xml
-MYO_VIDEO ?= output/musculoskeletal-keyframes-60fps.mp4
-## Paused musculoskeletal model with 300 keyframes and tendon paths.
-musculoskeletal:
-	$(PY) -m forge_viewer.cli view "$(MYO_SCENE)" --paused $(ARGS)
-
-## Render 300 keyframes as a five-second, 60 fps video.
-musculoskeletal-video:
-	$(PY) -m forge_viewer.cli keyframes "$(MYO_SCENE)" -o "$(MYO_VIDEO)" --fps 60 \
-		--camera cam_track $(ARGS)
-
-## Verify structure, full frame data, dynamic geometry, and visualization coverage.
-musculoskeletal-check:
-	$(PY) -m forge_viewer.cli conformance mujoco --asset "$(MYO_SCENE)"
-	$(PY) -m forge_viewer.cli audit "$(MYO_SCENE)" --strict
 
 ## Open Camera with F6; calibrated_shift demonstrates an off-center principal point.
 cameras:
