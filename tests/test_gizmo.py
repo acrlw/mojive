@@ -41,6 +41,8 @@ from forge_viewer.ui.gizmo import (
     _projected_line_parameters,
     _rotation_fill_alpha,
     _rotation_sweep,
+    _snap_tick_alpha,
+    _split_segment_around_point,
 )
 
 RECT = (0.0, 0.0, 800.0, 600.0)
@@ -127,6 +129,44 @@ def test_translation_center_shell_masks_continuous_axes_but_not_planes() -> None
     visible_radius = CENTER_RADIUS + CONTRAST_EDGE_PT / SIZE_PT
     assert AXIS_START < CENTER_RADIUS < visible_radius < CENTER_SHELL_RADIUS < PLANE_INNER
     assert np.allclose(_masked_axis_start(np.zeros(2), np.array((20.0, 0.0)), 7.0), (7, 0))
+
+
+def test_active_3d_translation_axis_keeps_the_center_shell_mask() -> None:
+    from types import SimpleNamespace
+
+    from forge_viewer.render.forge.passes.gizmo import GizmoPass
+
+    frame = GizmoFrame()
+    frame.active = GizmoHandle.X
+    context = SimpleNamespace(
+        camera=camera(),
+        ctx=SimpleNamespace(enable=lambda *_: None, disable=lambda *_: None),
+        target=SimpleNamespace(fbo=SimpleNamespace(depth_mask=True)),
+    )
+    draws = []
+    gizmo_pass = GizmoPass()
+    gizmo_pass._draw = lambda *args, **kwargs: draws.append((args, kwargs))
+
+    gizmo_pass._draw_translate(context, frame, 1.0)
+
+    assert len(draws) == 1
+    assert draws[0][1]["mask_radius"] == CENTER_SHELL_RADIUS
+
+
+def test_snap_tick_fade_has_a_five_step_core_and_ten_step_cutoff() -> None:
+    assert _snap_tick_alpha(0.0) == 1.0
+    assert _snap_tick_alpha(-5.0) == 1.0
+    assert _snap_tick_alpha(7.5) == pytest.approx(0.5)
+    assert _snap_tick_alpha(10.0) == 0.0
+
+
+def test_snap_ruler_segments_are_clipped_by_the_center_shell() -> None:
+    segments = _split_segment_around_point((0.0, 0.0), (20.0, 0.0), (10.0, 0.0), 3.0)
+    assert len(segments) == 2
+    assert segments[0][0] == pytest.approx((0.0, 0.0))
+    assert segments[0][1] == pytest.approx((7.0, 0.0))
+    assert segments[1][0] == pytest.approx((13.0, 0.0))
+    assert segments[1][1] == pytest.approx((20.0, 0.0))
 
 
 def test_rotation_idle_uses_front_half_rings_and_an_interactive_outer_ring() -> None:

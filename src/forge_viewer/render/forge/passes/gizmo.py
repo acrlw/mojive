@@ -1,3 +1,5 @@
+"""Native 3D gizmo render pass."""
+
 from __future__ import annotations
 
 import moderngl
@@ -141,7 +143,6 @@ class GizmoPass(BasePass):
         self._program["u_view_proj"].write(self._view_proj)
 
     def _draw_translate(self, ctx: PassContext, frame, scale: float) -> None:
-
         visible = display_handles(frame)
         ctx.target.fbo.depth_mask = False
         for axis, handle in enumerate(PLANE_HANDLES):
@@ -183,7 +184,7 @@ class GizmoPass(BasePass):
                         axis_rotation(frame.rotation, axis),
                         scale,
                         self._color(frame, handle, axis, alpha),
-                        mask_radius=(CENTER_SHELL_RADIUS if GizmoHandle.SCREEN in visible else 0.0),
+                        mask_radius=CENTER_SHELL_RADIUS,
                     )
         finally:
             ctx.ctx.disable(moderngl.CULL_FACE)

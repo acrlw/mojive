@@ -1,3 +1,5 @@
+"""Interactive position and rotation gizmo behavior."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -63,6 +65,8 @@ DRAG_LAYER = "ui.gizmo.drag"
 _WORLD_BASIS = np.eye(3, dtype=np.float64)
 DEFAULT_TRANSLATION_SNAP_M = 0.5
 DEFAULT_ROTATION_SNAP_DEG = 5.0
+SNAP_TICK_FULL_STEPS = 5.0
+SNAP_TICK_FADE_STEPS = 10.0
 
 
 @dataclass(frozen=True)
@@ -219,7 +223,6 @@ class ObjectGizmo:
         released: bool,
         snap: bool = False,
     ) -> bool:
-
         if not claimed:
             if self._using and not left_down:
                 self._end()
@@ -235,7 +238,6 @@ class ObjectGizmo:
     def keyboard_interact(
         self, session, cam, rect, cursor, axis: int, *, snap: bool = False
     ) -> bool:
-
         if axis not in (0, 1, 2):
             if self._keyboard:
                 self._end()
@@ -265,7 +267,6 @@ class ObjectGizmo:
         yielding: bool,
         interactive: bool,
     ) -> bool:
-
         self._interactive = bool(interactive)
         node = session.selected_node
         self._verdict = verdict(session.paused, node)
@@ -304,7 +305,6 @@ class ObjectGizmo:
         return self._drawn
 
     def draw_overlay(self, cam, rect, *, style_scale: float = 1.0) -> None:
-
         if not self._visible:
             return
         from imgui_bundle import imgui
@@ -500,58 +500,77 @@ class ObjectGizmo:
 
         u32 = imgui.color_convert_float4_to_u32
         axis_color = AXIS_COLORS[axis_index]
-        edge_color = u32(imgui.ImVec4(*CONTRAST_EDGE_COLOR))
-        line_color = u32(
-            imgui.ImVec4(float(axis_color[0]), float(axis_color[1]), float(axis_color[2]), 0.92)
-        )
-        dl.add_line(
-            imgui.ImVec2(*segment[0]),
-            imgui.ImVec2(*segment[1]),
-            edge_color,
-            2.5 * style_scale,
-        )
-        dl.add_line(
-            imgui.ImVec2(*segment[0]),
-            imgui.ImVec2(*segment[1]),
-            line_color,
-            1.2 * style_scale,
-        )
-
         step = float(self.translation_snap_m)
-        lo = int(np.ceil(min(bounds) / step))
-        hi = int(np.floor(max(bounds) / step))
-        stride = max(1, int(np.ceil(6.0 * style_scale / (pixels_per_meter * step))))
+        current_distance = float(np.dot(self._frame.position - self._start_pos, axis))
+        current_step = current_distance / step
+        lo = max(
+            int(np.ceil(min(bounds) / step)),
+            int(np.ceil(current_step - SNAP_TICK_FADE_STEPS)),
+        )
+        hi = min(
+            int(np.floor(max(bounds) / step)),
+            int(np.floor(current_step + SNAP_TICK_FADE_STEPS)),
+        )
+        if lo > hi:
+            return
+
         normal = np.array((-direction[1], direction[0]))
-        first = int(np.ceil(lo / stride)) * stride
-        visible_indices = set(range(first, hi + 1, stride))
-        if hi - lo <= 4096:
-            visible_indices.update(
-                index
-                for index in range(lo, hi + 1)
-                if abs(index * step - round(index * step)) < 1e-6
-            )
-        for index in sorted(visible_indices):
+        ticks_visible = pixels_per_meter * step >= 2.0 * style_scale
+        ticks: list[tuple[np.ndarray, np.ndarray, float, bool]] = []
+        for index in range(lo, hi + 1):
             distance = index * step
             world = self._start_pos + axis * distance
             point = project(cam, (world,), rect)[0]
             if point[2] <= 0.0:
                 continue
+            alpha = _snap_tick_alpha(index - current_step) if ticks_visible else 0.0
+            if alpha <= 0.01:
+                continue
             major = abs(distance - round(distance)) < 1e-6
             half_length = (7.0 if major else 3.5) * style_scale
             a = point[:2] - normal * half_length
             b = point[:2] + normal * half_length
-            dl.add_line(imgui.ImVec2(*a), imgui.ImVec2(*b), edge_color, 2.5 * style_scale)
-            dl.add_line(imgui.ImVec2(*a), imgui.ImVec2(*b), line_color, 1.2 * style_scale)
+            ticks.append((a, b, alpha, False))
 
-        current_distance = float(np.dot(self._frame.position - self._start_pos, axis))
-        current = project(cam, (self._start_pos + axis * current_distance,), rect)[0]
+        current = project(cam, (self._frame.position,), rect)[0]
+        mask_radius = CENTER_SHELL_RADIUS * SIZE_PT * style_scale
         if current[2] > 0.0:
-            half_length = 9.0 * style_scale
-            a = current[:2] - normal * half_length
-            b = current[:2] + normal * half_length
-            active = u32(imgui.ImVec4(*HOVER_COLOR))
-            dl.add_line(imgui.ImVec2(*a), imgui.ImVec2(*b), edge_color, 4.0 * style_scale)
-            dl.add_line(imgui.ImVec2(*a), imgui.ImVec2(*b), active, 2.2 * style_scale)
+            half_length = 14.0 * style_scale
+            ticks.append(
+                (
+                    current[:2] - normal * half_length,
+                    current[:2] + normal * half_length,
+                    1.0,
+                    True,
+                )
+            )
+        axis_segments = _split_segment_around_point(
+            segment[0], segment[1], current[:2], mask_radius
+        )
+
+        def color(value, alpha: float):
+            return u32(
+                imgui.ImVec4(
+                    float(value[0]), float(value[1]), float(value[2]), float(value[3]) * alpha
+                )
+            )
+
+        for start, end in axis_segments:
+            dl.add_line(
+                imgui.ImVec2(*start),
+                imgui.ImVec2(*end),
+                color((*axis_color, 1.0), 0.92),
+                1.2 * style_scale,
+            )
+        for a, b, alpha, is_active in ticks:
+            tick_color = color(HOVER_COLOR if is_active else (*axis_color, 1.0), alpha)
+            for start, end in _split_segment_around_point(a, b, current[:2], mask_radius):
+                dl.add_line(
+                    imgui.ImVec2(*start),
+                    imgui.ImVec2(*end),
+                    tick_color,
+                    (2.2 if is_active else 1.2) * style_scale,
+                )
 
     def _draw_rotation_snap_ticks(self, imgui, dl, cam, rect, style_scale: float) -> None:
         ring_radius = (
@@ -565,7 +584,6 @@ class ObjectGizmo:
         u32 = imgui.color_convert_float4_to_u32
         edge = u32(imgui.ImVec4(*CONTRAST_EDGE_COLOR))
         core = u32(imgui.ImVec4(*GUIDE_CORE_COLOR))
-        active = u32(imgui.ImVec4(*HOVER_COLOR))
 
         def radial(angle: float) -> np.ndarray:
             cosine = np.cos(angle)
@@ -584,14 +602,16 @@ class ObjectGizmo:
             ),
             rect,
         )
+        trace: np.ndarray | None = None
         if np.all(ring[:, 2] > 0.0):
             normals = _outward_normals(ring[:, :2], center[:2])
             trace = ring[:, :2] + normals * (4.0 * style_scale)
-            points = [imgui.ImVec2(*point) for point in trace]
-            closed = imgui.ImDrawFlags_.closed.value
-            dl.add_polyline(points, edge, 2.5 * style_scale, closed)
-            dl.add_polyline(points, core, 1.1 * style_scale, closed)
 
+        ticks_visible = (
+            self._active is GizmoHandle.ROTATE_SCREEN
+            or rotation_ring_alpha(cam, self._start_pos, self._axis) > 0.0
+        )
+        ticks: list[tuple[np.ndarray, np.ndarray]] = []
         for degrees in np.arange(0.0, 360.0, step):
             rounded = round(float(degrees))
             if abs(degrees - rounded) < 1e-6 and rounded % 90 == 0:
@@ -604,24 +624,28 @@ class ObjectGizmo:
                 length_pt = 3.0
             angle = np.radians(degrees)
             direction = radial(angle)
+            angle_step = np.radians(step)
             points = project(
                 cam,
                 (
                     self._start_pos + scale * ring_radius * radial(angle - 1e-3),
                     self._start_pos + scale * ring_radius * direction,
                     self._start_pos + scale * ring_radius * radial(angle + 1e-3),
+                    self._start_pos + scale * ring_radius * radial(angle + angle_step),
                 ),
                 rect,
             )
             if np.any(points[:, 2] <= 0.0):
                 continue
+            spacing = float(np.linalg.norm(points[3, :2] - points[1, :2]))
+            if not ticks_visible or spacing < 2.0 * style_scale:
+                continue
             normal = _outward_normals(points[:, :2], center[:2])[1]
             inner = points[1, :2] + normal * (4.0 * style_scale)
             outer = inner + normal * (length_pt * style_scale)
-            a, b = imgui.ImVec2(*inner), imgui.ImVec2(*outer)
-            dl.add_line(a, b, edge, 2.5 * style_scale)
-            dl.add_line(a, b, core, 1.1 * style_scale)
+            ticks.append((inner, outer))
 
+        active_tick: tuple[np.ndarray, np.ndarray] | None = None
         direction = radial(self._rotation_angle)
         points = project(
             cam,
@@ -632,22 +656,34 @@ class ObjectGizmo:
             ),
             rect,
         )
-        if np.all(points[:, 2] > 0.0):
+        if np.all(points[:, 2] > 0.0) and ticks_visible:
             normal = _outward_normals(points[:, :2], center[:2])[1]
-            inner = points[1, :2] + normal * (2.0 * style_scale)
-            outer = points[1, :2] + normal * (15.0 * style_scale)
-            dl.add_line(
-                imgui.ImVec2(*inner),
-                imgui.ImVec2(*outer),
-                edge,
-                4.0 * style_scale,
+            active_tick = (
+                points[1, :2] + normal * (4.0 * style_scale),
+                points[1, :2] + normal * (15.0 * style_scale),
             )
+
+        closed = imgui.ImDrawFlags_.closed.value
+        if trace is not None:
+            ring_points = [imgui.ImVec2(*point) for point in trace]
+            dl.add_polyline(ring_points, edge, 2.5 * style_scale, closed)
+        for inner, outer in ticks:
             dl.add_line(
                 imgui.ImVec2(*inner),
                 imgui.ImVec2(*outer),
-                active,
+                core,
+                1.1 * style_scale,
+            )
+        if active_tick is not None:
+            active_color = u32(imgui.ImVec4(*HOVER_COLOR))
+            dl.add_line(
+                imgui.ImVec2(*active_tick[0]),
+                imgui.ImVec2(*active_tick[1]),
+                active_color,
                 2.2 * style_scale,
             )
+        if trace is not None:
+            dl.add_polyline(ring_points, core, 1.1 * style_scale, closed)
 
     def _draw_translation_guide(self, imgui, dl, cam, rect, style_scale: float) -> None:
         screen = project(cam, (self._start_pos, self._frame.position), rect)
@@ -1012,13 +1048,11 @@ def _rotation_sweep(angle: float) -> float:
 
 
 def _rotation_fill_alpha(sweep: float) -> float:
-
     fade = (np.pi - abs(sweep)) / np.radians(60.0)
     return 0.28 * float(np.clip(fade, 0.0, 1.0))
 
 
 def _clip_line_to_rect(origin, direction, rect) -> tuple[np.ndarray, np.ndarray] | None:
-
     origin = np.asarray(origin, np.float64)
     direction = np.asarray(direction, np.float64)
     if float(np.linalg.norm(direction)) < 1e-6:
@@ -1061,6 +1095,44 @@ def _projected_line_parameters(cam, origin, axis, segment, rect) -> tuple[float,
     return values[0], values[1]
 
 
+def _snap_tick_alpha(offset_steps: float) -> float:
+    distance = abs(float(offset_steps))
+    if distance <= SNAP_TICK_FULL_STEPS:
+        return 1.0
+    if distance >= SNAP_TICK_FADE_STEPS:
+        return 0.0
+    t = (distance - SNAP_TICK_FULL_STEPS) / (SNAP_TICK_FADE_STEPS - SNAP_TICK_FULL_STEPS)
+    return float(1.0 - t * t * (3.0 - 2.0 * t))
+
+
+def _split_segment_around_point(
+    start, end, center, radius: float
+) -> tuple[tuple[np.ndarray, np.ndarray], ...]:
+    start = np.asarray(start, np.float64)
+    end = np.asarray(end, np.float64)
+    center = np.asarray(center, np.float64)
+    delta = end - start
+    length = float(np.linalg.norm(delta))
+    if length < 1e-9 or radius <= 0.0:
+        return ((start, end),)
+    direction = delta / length
+    along = float(np.dot(center - start, direction))
+    perpendicular = float(np.linalg.norm(center - (start + along * direction)))
+    if perpendicular >= radius:
+        return ((start, end),)
+    half_gap = float(np.sqrt(radius * radius - perpendicular * perpendicular))
+    gap_start = max(0.0, along - half_gap)
+    gap_end = min(length, along + half_gap)
+    if gap_start >= gap_end:
+        return ((start, end),)
+    segments = []
+    if gap_start > 1e-6:
+        segments.append((start, start + direction * gap_start))
+    if gap_end < length - 1e-6:
+        segments.append((start + direction * gap_end, end))
+    return tuple(segments)
+
+
 def _outward_normals(points: np.ndarray, center: np.ndarray) -> np.ndarray:
     points = np.asarray(points, np.float64)
     tangents = np.roll(points, -1, axis=0) - np.roll(points, 1, axis=0)
@@ -1077,7 +1149,6 @@ def _outward_normals(points: np.ndarray, center: np.ndarray) -> np.ndarray:
 
 
 def _flat_arrow(start: np.ndarray, end: np.ndarray, style_scale: float) -> list[np.ndarray]:
-
     direction = np.asarray(end, np.float64) - np.asarray(start, np.float64)
     length = float(np.linalg.norm(direction))
     if length < 1e-6:
@@ -1100,7 +1171,6 @@ def _flat_arrow(start: np.ndarray, end: np.ndarray, style_scale: float) -> list[
 
 
 def _masked_axis_start(origin: np.ndarray, end: np.ndarray, radius: float) -> np.ndarray:
-
     direction = np.asarray(end, np.float64) - np.asarray(origin, np.float64)
     length = float(np.linalg.norm(direction))
     if length <= radius or length < 1e-9:

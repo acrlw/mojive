@@ -124,6 +124,13 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
             f"target=({snapped[0]:.1f}, {snapped[1]:.1f})"
         )
     _save(viewer, node, output / f"rotation-snap-{style}.png")
+    viewer.app.camera.look_from(-135.0, 0.0, viewer.app.camera_out, animate=False)
+    for _ in range(3):
+        viewer.sync()
+    _save(viewer, node, output / f"rotation-snap-edge-{style}.png")
+    viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
+    for _ in range(3):
+        viewer.sync()
     io.add_key_event(imgui.Key.mod_shift, False)
     io.add_mouse_button_event(0, False)
     viewer.sync()
