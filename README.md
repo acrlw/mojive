@@ -7,12 +7,76 @@ static canvases, remote processes, and recorded snapshots share one rendering an
 Core workflows include scene inspection, object selection, transform gizmos, physical
 perturbation, debug drawing, camera and light editing, render diagnostics, capture, and video.
 
-## Setup
+The project is under active development. The scene adapter contracts are stable enough for
+experimentation, while higher-level editor and renderer compatibility APIs continue to evolve.
+
+## Requirements
+
+- Python 3.11 or newer
+- An OpenGL 4.1 core-profile driver
+- A desktop session for interactive windows
+- MuJoCo 3.1 or newer for MJCF, URDF, simulation, and physics tools
+
+The current acceptance platform is macOS on Apple Silicon. Linux requires a working OpenGL 4.1
+desktop driver. `uv` is the recommended environment and dependency manager.
+
+## Quick start
+
+Install `uv` on macOS, then clone and run the default MuJoCo scene:
+
+```bash
+brew install uv
+git clone https://github.com/acrlw/forge-viewer.git
+cd forge-viewer
+uv sync --python 3.11 --extra mujoco
+uv run forge-viewer view test_scene
+```
+
+The first sync creates `.venv`, installs forge-viewer in editable mode, and resolves the versions
+recorded in `uv.lock`. The `mujoco` extra installs the physics backend. Forge scenes and the toy
+physics adapter can use the core installation without that extra.
+
+From a source checkout, `make viewer` opens the same default scene.
+
+Open a local MJCF or URDF model directly:
+
+```bash
+uv run forge-viewer view path/to/model.xml --paused
+uv run forge-viewer view path/to/model.urdf --paused
+```
+
+Start with an empty viewport and load a model from the File menu or by dropping it into the window:
+
+```bash
+make empty
+```
+
+### pip installation
+
+`pyproject.toml` is the canonical dependency specification. A standard virtual environment works
+without `uv`:
+
+```bash
+git clone https://github.com/acrlw/forge-viewer.git
+cd forge-viewer
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[mujoco]"
+forge-viewer view test_scene
+```
+
+### Development installation
 
 ```bash
 make setup
-make viewer
+make check
+make gpu
 ```
+
+`make setup` installs the `dev` and `mujoco` extras. Generated captures, recordings, downloaded
+robot models, caches, and local UI state stay under ignored paths and are not part of the source
+distribution.
 
 Useful discovery commands:
 
@@ -77,7 +141,6 @@ Every user-facing feature has a reproducible Make target.
 | `make mujoco-constraints` | Equality constraint markers |
 | `make mujoco-editing` | Mocap pose and equality controls |
 | `make deformables` | Flex and skin dynamic meshes |
-| `make musculoskeletal` | Full musculoskeletal model with tendons and keyframes |
 | `make robot` | Download and open a MuJoCo Menagerie robot |
 | `make canvas` | Standalone scene authoring with editable transforms, materials, and Forge entities |
 | `make scene-io` | Save, reload, and capture a `.forge.json` scene |
@@ -221,4 +284,3 @@ coordinates use Z-up.
 - [Platform measurements](docs/PLATFORM.md)
 - [Implementation decisions](docs/DECISIONS.md)
 - [Roadmap](docs/ROADMAP.md)
-- Original project specifications: `../prompt/`

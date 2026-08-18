@@ -62,8 +62,7 @@ help:
 		'Example: make viewer SCENE=humanoid ARGS="--paused"'
 
 setup:
-	uv venv --python 3.11
-	uv pip install -e ".[dev,mujoco]"
+	uv sync --python 3.11 --extra dev --extra mujoco
 
 ## Lint, formatting, and CPU tests.
 check: lint test

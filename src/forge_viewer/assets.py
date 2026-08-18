@@ -14,7 +14,7 @@ class AssetNotFoundError(FileNotFoundError):
 
 def assets_dir() -> Path:
     here = Path(__file__).resolve().parent
-    for candidate in (here.parent.parent / "assets", here / "assets"):
+    for candidate in (here.parent.parent / "assets", here / "data" / "assets"):
         if candidate.is_dir():
             return candidate
     return here.parent.parent / "assets"

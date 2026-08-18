@@ -2,6 +2,7 @@
 name = "forge-viewer"
 version = "0.1.0"
 description = "Interactive 3D viewer and OpenGL renderer for robotics and simulation"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
@@ -22,12 +23,19 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 [project.scripts]
 forge-viewer = "forge_viewer.cli:main"
 
+[project.urls]
+Repository = "https://github.com/acrlw/forge-viewer"
+Issues = "https://github.com/acrlw/forge-viewer/issues"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/forge_viewer"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"assets" = "forge_viewer/data/assets"
 
 [tool.hatch.build]
 artifacts = ["src/forge_viewer/render/forge/shaders/*.glsl"]
