@@ -291,6 +291,7 @@ class PerturbController:
         *,
         rect: tuple[float, float, float, float],
         ui_scale: float = 1.0,
+        style_scale: float = 1.0,
     ) -> MarkBudget:
         budget = self.budget
         budget.primitives = 0
@@ -320,7 +321,7 @@ class PerturbController:
             self._publish_drag(dd, st, pose, budget, ui_scale)
         else:
             layer_name = MARK_LAYER
-            self._publish_mark(dd, st, pose, cam, rect, budget, ui_scale)
+            self._publish_mark(dd, st, pose, cam, rect, budget, ui_scale, style_scale)
 
         if self._published and self._published != layer_name:
             self._clear(backend, self._published)
@@ -359,6 +360,7 @@ class PerturbController:
         rect: tuple[float, float, float, float],
         budget: MarkBudget,
         ui_scale: float,
+        style_scale: float = 1.0,
     ) -> None:
         layer = dd.layer(MARK_LAYER, Occlusion.ALWAYS)
         center = (
@@ -366,7 +368,7 @@ class PerturbController:
             if pose[0] is not None
             else np.asarray(st.target_pos, np.float64)
         )
-        axis_len = world_scale(cam, center, rect[3])
+        axis_len = world_scale(cam, center, rect[3], SIZE_PT * style_scale)
         size = axis_len / AXIS_OVERSHOOT
         half = np.full(3, size, np.float64)
 
@@ -377,7 +379,7 @@ class PerturbController:
                 loop,
                 cam,
                 rect,
-                self.outline_corner_radius_pt * ui_scale,
+                self.outline_corner_radius_pt * style_scale,
             )
             layer.polyline(
                 "perturb.outline.border",
@@ -444,9 +446,10 @@ def fallback_segments(
     st: PerturbState,
     rect: tuple[float, float, float, float],
     center,
+    style_scale: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     center = np.asarray(center, np.float64)
-    size = world_scale(cam, center, rect[3]) / AXIS_OVERSHOOT
+    size = world_scale(cam, center, rect[3], SIZE_PT * style_scale) / AXIS_OVERSHOOT
     edges = silhouette_edges(center, st.target_mat, np.full(3, size), cam.eye)
     points = silhouette_loop(edges)
     scr = project(cam, points, rect)
@@ -459,27 +462,27 @@ def draw_fallback(
     rect: tuple[float, float, float, float],
     cursor: tuple[float, float],
     center,
-    ui_scale: float = 1.0,
+    style_scale: float = 1.0,
 ) -> None:
     from imgui_bundle import imgui
 
     dl = imgui.get_window_draw_list()
     border = imgui.color_convert_float4_to_u32(imgui.ImVec4(*OUTLINE_BORDER_RGBA))
     color = imgui.color_convert_float4_to_u32(imgui.ImVec4(*OUTLINE_RGBA))
-    a, _b = fallback_segments(cam, st, rect, center)
+    a, _b = fallback_segments(cam, st, rect, center, style_scale)
     if len(a) and np.all(a[:, 2] > 0.0):
         points = [imgui.ImVec2(*p[:2]) for p in a]
         closed = imgui.ImDrawFlags_.closed.value
-        dl.add_polyline(points, border, OUTLINE_BORDER_WIDTH_PT * ui_scale, closed)
-        dl.add_polyline(points, color, OUTLINE_WIDTH_PT * ui_scale, closed)
+        dl.add_polyline(points, border, OUTLINE_BORDER_WIDTH_PT * style_scale, closed)
+        dl.add_polyline(points, color, OUTLINE_WIDTH_PT * style_scale, closed)
     dl.add_circle(
         imgui.ImVec2(*cursor),
-        10.0 * ui_scale,
+        10.0 * style_scale,
         border,
         24,
-        (1.5 + 2.0 * CONTRAST_EDGE_PT) * ui_scale,
+        (1.5 + 2.0 * CONTRAST_EDGE_PT) * style_scale,
     )
-    dl.add_circle(imgui.ImVec2(*cursor), 10.0 * ui_scale, color, 24, 1.5 * ui_scale)
+    dl.add_circle(imgui.ImVec2(*cursor), 10.0 * style_scale, color, 24, 1.5 * style_scale)
 
 
 def current_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarray]:

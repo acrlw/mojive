@@ -491,6 +491,38 @@ def test_layers_and_occlusion_tiers_match_the_spec(monkeypatch):
     assert budget.dropped == 0
 
 
+def test_twist_gizmo_scales_world_length_and_pixel_geometry(monkeypatch):
+    monkeypatch.setattr(P, "Occlusion", OCCLUSION)
+    session, _ = make_session()
+    cam = side_camera()
+    controller = P.PerturbController()
+    backend = DebugBackend()
+    controller.begin(session, cam, session.selected_node, np.zeros(3), "rotate")
+
+    controller.publish_marks(backend, session, cam, rect=RECT)
+    base = backend.debug.layers[P.MARK_LAYER].calls
+    base_axes = base["perturb.axes"]
+    base_length = np.linalg.norm(base_axes[1] - base_axes[0], axis=1)
+    base_width = base_axes[3]
+    base_center_radius = base["perturb.center"][2]
+
+    controller.publish_marks(
+        backend,
+        session,
+        cam,
+        rect=RECT,
+        ui_scale=2.0,
+        style_scale=2.0,
+    )
+    scaled = backend.debug.layers[P.MARK_LAYER].calls
+    scaled_axes = scaled["perturb.axes"]
+    scaled_length = np.linalg.norm(scaled_axes[1] - scaled_axes[0], axis=1)
+
+    assert scaled_length == pytest.approx(base_length * 2.0)
+    assert scaled_axes[3] == pytest.approx(base_width * 2.0)
+    assert scaled["perturb.center"][2] == pytest.approx(base_center_radius * 2.0)
+
+
 def test_twist_marks_follow_the_body_position(monkeypatch):
 
     monkeypatch.setattr(P, "Occlusion", OCCLUSION)

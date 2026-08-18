@@ -522,6 +522,7 @@ class ViewerApp:
             self._camera_view(),
             rect=self._viewport_rect,
             ui_scale=self.window.ui_scale,
+            style_scale=self.window.style_scale,
         )
 
     def _poll_pick(self, state: gs.InputState) -> None:
