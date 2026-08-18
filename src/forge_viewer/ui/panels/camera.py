@@ -21,7 +21,15 @@ from ...scene_state import (
     save_named_snapshot,
 )
 from ...types import CameraView
-from . import Panel, PanelContext, begin_kv_table, labeled, value_slider
+from . import (
+    Panel,
+    PanelContext,
+    begin_kv_table,
+    button_row_layout,
+    button_width,
+    labeled,
+    value_slider,
+)
 
 PRESETS: tuple[tuple[str, float, float], ...] = (
     ("front", -90.0, 0.0),
@@ -201,11 +209,19 @@ class CameraPanel(Panel):
         has_setter = hasattr(camera, "set_preset") or (
             hasattr(camera, "yaw") and hasattr(camera, "pitch")
         )
+        widths = tuple(
+            button_width(label, 64.0 * ctx.style_scale) for label, _yaw, _pitch in PRESETS
+        )
+        row = button_row_layout(
+            widths,
+            imgui.get_content_region_avail().x,
+            imgui.get_style().item_spacing.x,
+        )
         imgui.begin_disabled(not has_setter)
         for i, (label, yaw, pitch) in enumerate(PRESETS):
-            if i % 4:
+            if row[i]:
                 imgui.same_line()
-            if imgui.button(label, imgui.ImVec2(64, 0)):
+            if imgui.button(label, imgui.ImVec2(widths[i], 0)):
                 if hasattr(camera, "set_preset"):
                     camera.set_preset(label)
                 else:
@@ -216,8 +232,9 @@ class CameraPanel(Panel):
             imgui.set_item_tooltip("this camera exposes neither set_preset() nor yaw/pitch")
 
         can_frame = hasattr(camera, "frame_all")
+        frame_width = button_width("frame all", 84.0 * ctx.style_scale)
         imgui.begin_disabled(not can_frame)
-        if imgui.button("frame all", imgui.ImVec2(84, 0)):
+        if imgui.button("frame all", imgui.ImVec2(frame_width, 0)):
             lo, hi = ctx.session.bounds()
             camera.frame_all(lo, hi)
         imgui.end_disabled()

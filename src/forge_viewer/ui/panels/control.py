@@ -6,7 +6,15 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds
-from . import Panel, PanelContext, begin_kv_table, labeled, value_slider
+from . import (
+    Panel,
+    PanelContext,
+    begin_kv_table,
+    button_row_layout,
+    button_width,
+    labeled,
+    value_slider,
+)
 
 
 class ControlPanel(Panel):
@@ -22,29 +30,42 @@ class ControlPanel(Panel):
 
         paused = s.paused
         caps = s.adapter.caps
+        labels = ("Resume" if paused else "Pause", "Step", "Reset", "Reload")
+        widths = tuple(
+            button_width(label, width * ctx.style_scale)
+            for label, width in zip(labels, (78.0, 60.0, 60.0, 70.0), strict=True)
+        )
+        row = button_row_layout(
+            widths,
+            imgui.get_content_region_avail().x,
+            imgui.get_style().item_spacing.x,
+        )
 
         imgui.begin_disabled(not caps.simulation)
-        if imgui.button("Resume" if paused else "Pause", imgui.ImVec2(78, 0)):
+        if imgui.button(labels[0], imgui.ImVec2(widths[0], 0)):
             ctx.submit(cmd.Play() if paused else cmd.Pause())
         imgui.set_item_tooltip("Space")
 
-        imgui.same_line()
+        if row[1]:
+            imgui.same_line()
 
         imgui.begin_disabled(not paused)
-        if imgui.button("Step", imgui.ImVec2(60, 0)):
+        if imgui.button(labels[1], imgui.ImVec2(widths[1], 0)):
             ctx.submit(cmd.Step(1))
         imgui.end_disabled()
         if not paused:
             imgui.set_item_tooltip("physics is running; pause to step")
         imgui.end_disabled()
 
-        imgui.same_line()
-        if imgui.button("Reset", imgui.ImVec2(60, 0)):
+        if row[2]:
+            imgui.same_line()
+        if imgui.button(labels[2], imgui.ImVec2(widths[2], 0)):
             ctx.submit(cmd.Reset())
 
-        imgui.same_line()
+        if row[3]:
+            imgui.same_line()
         imgui.begin_disabled(not caps.reload)
-        if imgui.button("Reload", imgui.ImVec2(70, 0)):
+        if imgui.button(labels[3], imgui.ImVec2(widths[3], 0)):
             ctx.submit(cmd.Reload())
         imgui.end_disabled()
         if not caps.reload:
@@ -62,14 +83,20 @@ class ControlPanel(Panel):
             imgui.separator()
             selected = s.active_keyframe if s.active_keyframe >= 0 else 0
             imgui.begin_disabled(not paused)
-            imgui.set_next_item_width(max(80.0, imgui.get_content_region_avail().x - 68.0))
+            available = imgui.get_content_region_avail().x
+            spacing = imgui.get_style().item_spacing.x
+            load_width = button_width("Load", 60.0 * ctx.style_scale)
+            slider_min = 80.0 * ctx.style_scale
+            inline = available >= slider_min + spacing + load_width
+            imgui.set_next_item_width(available - spacing - load_width if inline else -1.0)
             changed, selected = imgui.slider_int(
                 "##keyframe", selected, 0, len(s.keyframes) - 1, "%d"
             )
             if changed:
                 ctx.submit(cmd.LoadKeyframe(selected))
-            imgui.same_line()
-            if imgui.button("Load", imgui.ImVec2(60, 0)):
+            if inline:
+                imgui.same_line()
+            if imgui.button("Load", imgui.ImVec2(load_width, 0)):
                 ctx.submit(cmd.LoadKeyframe(selected))
             imgui.end_disabled()
             if not paused:

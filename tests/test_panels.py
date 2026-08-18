@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from forge_viewer.ui.panels import (
     Panel,
     PanelSet,
+    button_row_layout,
     default_panels,
     slider_gesture,
     validate_panels,
@@ -224,6 +225,12 @@ def test_transform_switches_to_stacked_rows_before_columns_overlap():
     assert _compact_transform(360.0, 1.0)
     assert not _compact_transform(520.0, 1.0)
     assert _compact_transform(700.0, 2.0)
+
+
+def test_button_rows_wrap_without_clipping_items():
+    widths = (156.0, 120.0, 120.0, 140.0)
+    assert button_row_layout(widths, 400.0, 14.0) == (False, True, False, True)
+    assert button_row_layout(widths, 700.0, 14.0) == (False, True, True, True)
 
 
 def test_transform_axis_buttons_have_distinct_hover_and_active_colors():

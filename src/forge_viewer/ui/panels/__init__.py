@@ -160,6 +160,27 @@ def begin_kv_table(str_id: str) -> bool:
     )
 
 
+def button_width(label: str, minimum: float = 0.0) -> float:
+    text = label.partition("##")[0]
+    padding = 2.0 * imgui.get_style().frame_padding.x
+    return max(float(minimum), imgui.calc_text_size(text).x + padding)
+
+
+def button_row_layout(
+    widths: tuple[float, ...], available: float, spacing: float
+) -> tuple[bool, ...]:
+    same_line: list[bool] = []
+    used = 0.0
+    for width in widths:
+        inline = bool(same_line) and used + spacing + width <= available
+        if inline:
+            used += spacing + width
+        else:
+            used = width
+        same_line.append(inline)
+    return tuple(same_line)
+
+
 class PanelSet:
     def __init__(self, panels: list[Panel] | None = None) -> None:
         self.panels: list[Panel] = list(panels) if panels is not None else default_panels()
