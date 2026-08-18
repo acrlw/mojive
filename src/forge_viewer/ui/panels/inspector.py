@@ -1,3 +1,5 @@
+"""Selected entity properties and transform editing."""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -17,7 +19,6 @@ GIZMO_REFUSAL_DRIVEN = "this link is driven by joints; use the Joints panel"
 
 
 def gizmo_refusal_reason(paused: bool, posable: bool) -> str | None:
-
     if not paused:
         return GIZMO_REFUSAL_RUNNING
     if not posable:
@@ -213,7 +214,6 @@ class InspectorPanel(Panel):
         imgui.text_wrapped(reason)
 
     def _velocity(self, ctx: PanelContext, node: SceneNode) -> None:
-
         self.show_velocity = imgui.collapsing_header("velocity")
         if not self.show_velocity:
             return
@@ -609,7 +609,6 @@ def _pose_editable(write_pose: bool, paused: bool, posable: bool) -> bool:
 
 
 def _nearest_euler_degrees(matrix, reference=None) -> np.ndarray:
-
     base = np.degrees(math3d.mat3_to_euler_xyz(matrix)).astype(np.float64)
     if reference is None:
         return base
@@ -727,5 +726,4 @@ def _format_vector(values) -> str:
 
 
 def _lift_color(color, amount: float):
-
     return (*(c + (1.0 - c) * amount for c in color[:3]), color[3])

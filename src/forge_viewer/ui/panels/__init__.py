@@ -1,3 +1,5 @@
+"""Shared panel protocols and UI controls."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -40,7 +42,6 @@ class PanelContext:
     panels: Any = None
 
     def submit(self, command: Any) -> Any:
-
         result = self.session.submit(command)
         if result.message:
             self.status = result.message
@@ -59,11 +60,9 @@ class Panel:
         self.open = self.default_open
 
     def frame_needs(self) -> FrameNeeds:
-
         return FrameNeeds.none()
 
     def needs(self) -> FrameNeeds:
-
         return self.frame_needs() if self.open else FrameNeeds.none()
 
     def draw(self, ctx: PanelContext) -> None:
@@ -82,7 +81,6 @@ _EXPANDED: set[str] = set()
 def slider_gesture(
     hovered: bool, right_clicked: bool, double_clicked: bool, shift: bool
 ) -> str | None:
-
     if not hovered:
         return None
     if right_clicked:
@@ -111,7 +109,6 @@ def value_slider(
     width: float = 0.0,
     more_hint: str = "more options",
 ) -> ValueEdit:
-
     if width:
         imgui.set_next_item_width(width)
     changed, new_value = imgui.slider_float(label, value, lo, hi, fmt)
@@ -150,7 +147,6 @@ def colored_text(color: tuple[float, float, float, float], text: str) -> None:
 
 
 def labeled(label: str, value: str) -> None:
-
     imgui.table_next_row()
     imgui.table_next_column()
     imgui.text_disabled(label)
@@ -178,14 +174,12 @@ class PanelSet:
         return next((p for p in self.panels if p.name == name), None)
 
     def frame_needs(self) -> FrameNeeds:
-
         needs = FrameNeeds.none()
         for p in self.panels:
             needs = needs.merge(p.needs())
         return needs
 
     def draw(self, ctx: PanelContext) -> None:
-
         ctx.panels = self
         for p in self.panels:
             if not p.open:
@@ -198,7 +192,6 @@ class PanelSet:
                 p.open = False
 
     def poll_shortcuts(self) -> None:
-
         if imgui.get_io().want_capture_keyboard and imgui.is_any_item_active():
             return
         for p in self.panels:
@@ -208,7 +201,6 @@ class PanelSet:
                     break
 
     def shortcut_table(self) -> tuple[tuple[str, str, bool], ...]:
-
         return tuple(
             (" / ".join(x for x in (p.shortcut, *p.aliases) if x), p.name, p.default_open)
             for p in self.panels
@@ -223,7 +215,6 @@ def _shortcut_pressed(spec: str) -> bool:
 
 
 def validate_panels(panels: list[Panel]) -> list[str]:
-
     problems: list[str] = []
     seen: dict[str, str] = {}
     names: set[str] = set()
@@ -247,7 +238,6 @@ def validate_panels(panels: list[Panel]) -> list[str]:
 
 
 def default_panels() -> list[Panel]:
-
     from .camera import CameraPanel
     from .control import ControlPanel
     from .help import HelpPanel

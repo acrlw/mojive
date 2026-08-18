@@ -1,3 +1,5 @@
+"""Render scene construction from stable sources and dynamic frames."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -18,17 +20,10 @@ except ImportError:
     builtin_mesh = None
 
 
-# |---|---|---|---|
-# | 1 | 0.5 | 0.5 | 1.0 |
-# | 2 | 1.0 | 1.0 | 2.0 |
-# | 4 | 2.0 | 2.0 | 4.0 |
-
-
 TEXUNIFORM_SCALE = 0.5
 
 
 def texuniform_coef(extent_u: float, extent_v: float, repeat: np.ndarray) -> tuple[float, float]:
-
     return (
         TEXUNIFORM_SCALE * float(repeat[0]) * float(extent_u),
         TEXUNIFORM_SCALE * float(repeat[1]) * float(extent_v),
@@ -114,17 +109,14 @@ class SceneSourceBuilder:
 
     @property
     def write_index(self) -> np.ndarray:
-
         return self._write_index
 
     def set_source(self, source: SceneSource, camera: CameraView | None = None) -> RenderScene:
-
         self._source = source
         self._overrides = {}
         return self._build(camera)
 
     def set_visible(self, node_id: int, visible: bool) -> bool:
-
         if self._source is None:
             return False
         if not any(n.node_id == node_id for n in self._source.nodes):
@@ -323,7 +315,6 @@ class SceneSourceBuilder:
         return self._scene
 
     def _visible_instances(self) -> np.ndarray:
-
         src = self._source
         n = src.instance_count
         keep = np.ones(n, bool)
@@ -398,13 +389,11 @@ class SceneSourceBuilder:
 
     @staticmethod
     def _linear_color(rgba) -> np.ndarray:
-
         c = np.asarray(rgba, np.float32).reshape(4).copy()
         c[:3] = np.power(np.clip(c[:3], 0.0, 1.0), 2.2, dtype=np.float32)
         return c
 
     def _mesh_triangles(self) -> dict[MeshKey, int]:
-
         counts: dict[MeshKey, int] = {}
         notes: list[str] = []
         src = self._source
@@ -430,7 +419,6 @@ class SceneSourceBuilder:
         camera: CameraView | None = None,
         instance_rgba: np.ndarray | None = None,
     ) -> RenderScene:
-
         scene = self._scene
         if camera is not None:
             scene.camera = camera
@@ -492,7 +480,6 @@ class SceneSourceBuilder:
         self._colors_overridden = True
 
     def _update_infinite_planes(self, scene: RenderScene) -> None:
-
         cam = scene.camera
         far = float(cam.far)
         ex, ey, ez = (float(v) for v in np.asarray(cam.eye, np.float32).reshape(3))
@@ -533,7 +520,6 @@ class SceneSourceBuilder:
         )
 
     def infinite_plane_half_extents(self) -> tuple[tuple[float, float], ...]:
-
         return tuple((p.half_x, p.half_y) for p in self._planes)
 
     def infinite_plane_periods(self) -> tuple[tuple[float, float], ...]:
@@ -541,7 +527,6 @@ class SceneSourceBuilder:
 
 
 def _snap_up(value: float, period: float) -> float:
-
     if period <= 0.0:
         return value
     return float(np.ceil(value / period) * period)

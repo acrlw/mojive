@@ -1,3 +1,5 @@
+"""Renderer, visual group, and interaction settings."""
+
 from __future__ import annotations
 
 from imgui_bundle import imgui
@@ -221,7 +223,6 @@ class SettingsPanel(Panel):
             self._message = f"'{flag.value}' refused by {caps.name}"
 
     def current_view(self, backend) -> DebugView:
-
         getter = getattr(backend, "get_debug_view", None)
         return getter() if callable(getter) else self._view
 

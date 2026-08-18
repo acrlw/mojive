@@ -1,3 +1,5 @@
+"""Environment skybox render pass."""
+
 from __future__ import annotations
 
 import moderngl
@@ -28,9 +30,7 @@ class SkyboxPass(BasePass):
         self._texture: moderngl.TextureCube | None = None
         self._inv = np.zeros((4, 4), np.float32)
 
-    # ------------------------------------------------------------------
     def prepare(self, ctx: PassContext) -> bool:
-
         self._texture = ctx.textures.skybox
         if self._texture is None or not ctx.flag(RenderFlag.SKYBOX):
             return False
@@ -61,7 +61,6 @@ class SkyboxPass(BasePass):
         self._generation = ctx.programs.generation
         return True
 
-    # ------------------------------------------------------------------
     def execute(self, ctx: PassContext) -> None:
         target, gl = ctx.target, ctx.ctx
         assert self._vao is not None and self._texture is not None

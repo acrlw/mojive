@@ -1,3 +1,5 @@
+"""Image metrics and reports for MuJoCo renderer parity."""
+
 from __future__ import annotations
 
 import argparse
@@ -23,7 +25,6 @@ def _edges(g: np.ndarray) -> np.ndarray:
 
 
 def edge_iou(a: np.ndarray, b: np.ndarray, threshold: float = 24.0) -> float:
-
     ea = _edges(_gray(a)) > threshold
     eb = _edges(_gray(b)) > threshold
     union = np.count_nonzero(ea | eb)
@@ -31,7 +32,6 @@ def edge_iou(a: np.ndarray, b: np.ndarray, threshold: float = 24.0) -> float:
 
 
 def block_luma_diff(a: np.ndarray, b: np.ndarray, blocks: int = 16) -> float:
-
     ga, gb = _gray(a), _gray(b)
     h, w = ga.shape
     bh, bw = max(h // blocks, 1), max(w // blocks, 1)
@@ -44,7 +44,6 @@ def block_luma_diff(a: np.ndarray, b: np.ndarray, blocks: int = 16) -> float:
 
 
 def _project(world: np.ndarray, view: dict, width: int, height: int) -> tuple[int, int] | None:
-
     eye = np.asarray(view["eye"], np.float64)
     fwd = np.asarray(view["forward"], np.float64)
     up = np.asarray(view["up"], np.float64)
@@ -68,7 +67,6 @@ def _project(world: np.ndarray, view: dict, width: int, height: int) -> tuple[in
 def texture_cell_agreement(
     a: np.ndarray, b: np.ndarray, geoms: list[dict], view: dict, width: int, height: int
 ) -> tuple[int, int, str]:
-
     palette = np.array([g["rgba"][:3] for g in geoms], np.float32)
     if len(palette) == 0:
         return 0, 0, "no samples"
@@ -105,7 +103,6 @@ def texture_cell_agreement(
 
 
 def triptych(forge: np.ndarray, reference: np.ndarray, path: Path) -> None:
-
     from PIL import Image
 
     h = min(forge.shape[0], reference.shape[0])
@@ -127,7 +124,6 @@ class ViewScore:
 
 
 def run_reference(scene: Path, out_dir: Path, width: int, height: int) -> dict:
-
     proc = subprocess.run(
         [
             sys.executable,
@@ -150,7 +146,6 @@ def run_reference(scene: Path, out_dir: Path, width: int, height: int) -> dict:
 
 
 def render_forge(scene: Path, doc: dict, out_dir: Path) -> dict[str, np.ndarray]:
-
     from PIL import Image
 
     from ..types import CameraView

@@ -1,3 +1,5 @@
+"""Low-level OpenGL state and framebuffer helpers."""
+
 from __future__ import annotations
 
 import ctypes
@@ -51,7 +53,6 @@ GL_QUERY_RESULT_AVAILABLE = 0x8867
 
 
 def _load_gl() -> ctypes.CDLL | None:
-
     candidates: tuple[str, ...]
     if sys.platform == "darwin":
         candidates = ("/System/Library/Frameworks/OpenGL.framework/OpenGL",)
@@ -185,9 +186,7 @@ class GLNative:
         setattr(self, "_" + name, fn)
         return True
 
-    # ------------------------------------------------------------------
     def clear_color_uint(self, draw_buffer: int, value: int = 0) -> bool:
-
         if not self.has_clear_buffer_uiv:
             return False
         buf = (c_uint * 4)(value, 0, 0, 0)
@@ -202,7 +201,6 @@ class GLNative:
         base_offset: int,
         attributes: tuple[tuple[int, int, int, int], ...],
     ) -> bool:
-
         if not self.has_attrib_pointer:
             return False
         self._glBindVertexArray(vao_glo)  # type: ignore[attr-defined]
@@ -221,7 +219,6 @@ class GLNative:
         return True
 
     def clear_color_float(self, draw_buffer: int, rgba: tuple[float, float, float, float]) -> bool:
-
         if not self.has_clear_buffer_fv:
             return False
         buf = (c_float * 4)(*rgba)
@@ -229,7 +226,6 @@ class GLNative:
         return True
 
     def clear_depth_only(self, value: float = 1.0) -> bool:
-
         if not self.has_clear_depth:
             return False
         self._glClearDepth(ctypes.c_double(value))  # type: ignore[attr-defined]
@@ -237,7 +233,6 @@ class GLNative:
         return True
 
     def blit_color(self, src_glo: int, dst_glo: int, width: int, height: int) -> bool:
-
         if not self.has_blit:
             return False
         self._glBindFramebuffer(GL_READ_FRAMEBUFFER, src_glo)  # type: ignore[attr-defined]
@@ -249,7 +244,6 @@ class GLNative:
         return True
 
     def attach_array_layer(self, texture_glo: int, layer: int) -> bool:
-
         if not self.has_array_layer:
             return False
         self._glFramebufferTextureLayer(  # type: ignore[attr-defined]
@@ -273,12 +267,10 @@ class GLNative:
         self._glEndQuery(GL_TIME_ELAPSED)  # type: ignore[attr-defined]
 
     def query_ready(self, qid: int, out) -> bool:
-
         self._glGetQueryObjectuiv(qid, GL_QUERY_RESULT_AVAILABLE, out)  # type: ignore[attr-defined]
         return bool(out[0])
 
     def query_result_ns(self, qid: int, out) -> int:
-
         self._glGetQueryObjectui64v(qid, GL_QUERY_RESULT, out)  # type: ignore[attr-defined]
         return int(out[0])
 
@@ -300,7 +292,6 @@ class GLNative:
         return int(fn()) if fn else 0
 
     def drain_errors(self) -> int:
-
         first = 0
         for _ in range(16):
             e = self.get_error()
@@ -343,7 +334,6 @@ class GLNative:
         self._glScissor(x, y, w, h)  # type: ignore[attr-defined]
 
     def polygon_mode(self, mode: int) -> None:
-
         self._glPolygonMode(GL_FRONT_AND_BACK, mode)  # type: ignore[attr-defined]
 
     def front_face(self, mode: int) -> None:
@@ -353,7 +343,6 @@ class GLNative:
         self._glCullFace(mode)  # type: ignore[attr-defined]
 
     def line_width_range(self) -> tuple[float, float]:
-
         fn = getattr(self, "_glGetFloatv", None)
         if fn is None:
             return (1.0, 1.0)
@@ -366,7 +355,6 @@ _INSTANCE: GLNative | None = None
 
 
 def native() -> GLNative:
-
     global _INSTANCE
     if _INSTANCE is None:
         _INSTANCE = GLNative()

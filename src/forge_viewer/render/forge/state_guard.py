@@ -1,3 +1,5 @@
+"""OpenGL state preservation around renderer operations."""
+
 from __future__ import annotations
 
 import ctypes
@@ -19,7 +21,6 @@ class GLStateGuard:
         self._bools = (ctypes.c_ubyte * 4)()
         self._state: dict[str, object] = {}
 
-    # ------------------------------------------------------------------
     def _read_int(self, pname: int) -> int:
         self._gl.get_int(pname, self._ints4)
         return int(self._ints4[0])
@@ -36,7 +37,6 @@ class GLStateGuard:
         self._gl.get_bool(pname, self._bools)
         return tuple(bool(self._bools[i]) for i in range(4))  # type: ignore[return-value]
 
-    # ------------------------------------------------------------------
     def capture(self) -> None:
         if not self.available:
             return
@@ -84,9 +84,7 @@ class GLStateGuard:
     def __exit__(self, *exc) -> None:
         self.restore()
 
-    # ------------------------------------------------------------------
     def snapshot(self) -> dict:
-
         if not self.available:
             return {}
         out: dict = {f"enable_{cap:#x}": self._gl.is_enabled(cap) for cap in G.ENABLE_BITS}
@@ -112,7 +110,6 @@ class GLStateGuard:
 
 
 def bind_default_framebuffer(ctx: moderngl.Context) -> None:
-
     viewport = ctx.viewport
     scissor = ctx.scissor
     ctx.screen.use()

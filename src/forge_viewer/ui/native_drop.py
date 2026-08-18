@@ -1,3 +1,5 @@
+"""Native window file-drop integration."""
+
 from __future__ import annotations
 
 import ctypes

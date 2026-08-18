@@ -1,3 +1,5 @@
+"""Matrix, quaternion, projection, and coordinate utilities."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -17,7 +19,6 @@ def normalize(v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
 
 
 def look_at(eye, target, up) -> Mat4:
-
     eye = np.asarray(eye, dtype=np.float64)
     target = np.asarray(target, dtype=np.float64)
     up = np.asarray(up, dtype=np.float64)
@@ -44,7 +45,6 @@ def look_at(eye, target, up) -> Mat4:
 
 
 def perspective(fov_y: float, aspect: float, near: float, far: float) -> Mat4:
-
     f = 1.0 / np.tan(fov_y * 0.5)
     m = np.zeros((4, 4), dtype=np.float64)
     m[0, 0] = f / max(aspect, 1e-6)
@@ -73,7 +73,6 @@ def perspective_intrinsics(
 
 
 def orthographic(height: float, aspect: float, near: float, far: float) -> Mat4:
-
     h = max(height, 1e-6) * 0.5
     w = h * max(aspect, 1e-6)
     m = np.eye(4, dtype=np.float64)
@@ -85,7 +84,6 @@ def orthographic(height: float, aspect: float, near: float, far: float) -> Mat4:
 
 
 def ortho_box(left, right, bottom, top, near, far) -> Mat4:
-
     m = np.eye(4, dtype=np.float64)
     m[0, 0] = 2.0 / (right - left)
     m[1, 1] = 2.0 / (top - bottom)
@@ -97,7 +95,6 @@ def ortho_box(left, right, bottom, top, near, far) -> Mat4:
 
 
 def compose(position, rotation_3x3, scale) -> Mat4:
-
     m = np.eye(4, dtype=np.float32)
     m[:3, :3] = np.asarray(rotation_3x3, dtype=np.float32).reshape(3, 3) * np.asarray(
         scale, dtype=np.float32
@@ -107,7 +104,6 @@ def compose(position, rotation_3x3, scale) -> Mat4:
 
 
 def quat_to_mat3(q) -> np.ndarray:
-
     w, x, y, z = (float(v) for v in q)
     n = w * w + x * x + y * y + z * z
     s = 2.0 / n if n > 1e-12 else 0.0
@@ -139,7 +135,6 @@ def axis_angle_to_mat3(axis, angle: float) -> np.ndarray:
 
 
 def rotvec_to_mat3(rotvec) -> np.ndarray:
-
     rv = np.asarray(rotvec, dtype=np.float64)
     angle = float(np.linalg.norm(rv))
     if angle < 1e-12:
@@ -167,7 +162,6 @@ def mat3_to_quat(m) -> np.ndarray:
 
 
 def euler_xyz_to_mat3(angles) -> np.ndarray:
-
     x, y, z = (float(v) for v in angles)
     cx, cy, cz = np.cos((x, y, z))
     sx, sy, sz = np.sin((x, y, z))
@@ -182,7 +176,6 @@ def euler_xyz_to_mat3(angles) -> np.ndarray:
 
 
 def mat3_to_euler_xyz(m) -> np.ndarray:
-
     m = np.asarray(m, np.float64).reshape(3, 3)
     y = float(np.arcsin(np.clip(-m[2, 0], -1.0, 1.0)))
     if abs(float(np.cos(y))) > 1e-7:
@@ -195,13 +188,11 @@ def mat3_to_euler_xyz(m) -> np.ndarray:
 
 
 def transform_points(m: Mat4, pts: np.ndarray) -> np.ndarray:
-
     pts = np.asarray(pts, dtype=np.float32).reshape(-1, 3)
     return pts @ m[:3, :3].T + m[:3, 3]
 
 
 def invert_rigid(m: Mat4) -> Mat4:
-
     r = m[:3, :3]
     out = np.eye(4, dtype=np.float32)
     out[:3, :3] = r.T
@@ -210,14 +201,12 @@ def invert_rigid(m: Mat4) -> Mat4:
 
 
 def to_gl(m: Mat4) -> np.ndarray:
-
     return np.ascontiguousarray(np.asarray(m, dtype=np.float32).T)
 
 
 def unproject_ray(
     ndc_x: float, ndc_y: float, view: Mat4, proj: Mat4
 ) -> tuple[np.ndarray, np.ndarray]:
-
     inv = np.linalg.inv((proj @ view).astype(np.float64))
     near = inv @ np.array([ndc_x, ndc_y, -1.0, 1.0])
     far = inv @ np.array([ndc_x, ndc_y, 1.0, 1.0])
@@ -227,7 +216,6 @@ def unproject_ray(
 
 
 def mirror(point, normal) -> np.ndarray:
-
     n = np.asarray(normal, np.float64).reshape(3)
     length = float(np.linalg.norm(n))
     if length < 1e-12:
@@ -241,7 +229,6 @@ def mirror(point, normal) -> np.ndarray:
 
 
 def inverse_perspective(fov_y: float, aspect: float, near: float, far: float) -> np.ndarray:
-
     f = 1.0 / np.tan(fov_y * 0.5)
     a = max(aspect, 1e-6)
     n, fr = float(near), float(far)
@@ -255,7 +242,6 @@ def inverse_perspective(fov_y: float, aspect: float, near: float, far: float) ->
 
 
 def inverse_orthographic_box(left, right, bottom, top, near, far) -> np.ndarray:
-
     rl, rr, rb, rt, rn, rf = (float(v) for v in (left, right, bottom, top, near, far))
     m = np.zeros((4, 4), dtype=np.float64)
     m[0, 0] = (rr - rl) * 0.5

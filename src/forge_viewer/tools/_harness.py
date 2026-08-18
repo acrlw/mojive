@@ -1,3 +1,5 @@
+"""Shared offscreen rendering harness for visual tools."""
+
 from __future__ import annotations
 
 import contextlib
@@ -68,9 +70,7 @@ class OffscreenHarness:
         self.backend.set_camera(self.camera)
         self.needs = FrameNeeds(poses=True)
 
-    # ------------------------------------------------------------------
     def _frame_camera(self) -> CameraView:
-
         hint = self.adapter.camera_hint()
         if hint is not None:
             return hint
@@ -105,7 +105,6 @@ class OffscreenHarness:
         return self.backend.render(frame)
 
     def warmup(self, frames: int = 4) -> None:
-
         for _ in range(frames):
             self.step_and_render(1)
 

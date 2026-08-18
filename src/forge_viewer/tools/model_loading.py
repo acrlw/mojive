@@ -1,3 +1,5 @@
+"""Capture MJCF and URDF model-loading references."""
+
 from __future__ import annotations
 
 import argparse

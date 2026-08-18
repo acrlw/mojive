@@ -1,3 +1,5 @@
+"""GPU mesh resources and instanced draw storage."""
+
 from __future__ import annotations
 
 import enum
@@ -32,7 +34,6 @@ def build_layout(
     entries: tuple[tuple[str, str, int, int, int, int], ...],
     per_instance: bool = False,
 ) -> tuple[str, tuple[str, ...]]:
-
     parts: list[str] = []
     names: list[str] = []
     for name, fmt, nbytes, *_ in entries:
@@ -66,7 +67,6 @@ class GpuMesh:
         self.triangle_count = self.index_count // 3
 
     def update(self, positions: np.ndarray, normals: np.ndarray) -> None:
-
         shape = self._vertices[:, :3].shape
         if positions.shape != shape or normals.shape != shape:
             raise ValueError(
@@ -101,9 +101,7 @@ class InstanceStore:
         self._staging = self._raw.view(np.float32)
         self.draw_calls = 0
 
-    # ------------------------------------------------------------------
     def _ensure_capacity(self, count: int) -> bool:
-
         if count <= self.capacity and self.buffer is not None:
             return False
         new_cap = max(count, self.capacity * 2, 64)
@@ -122,7 +120,6 @@ class InstanceStore:
         meshes: list[GpuMesh | None],
         generation: int,
     ) -> None:
-
         self._release_vaos()
         self._ensure_capacity(max(scene.count, 1))
         self._program = program
@@ -191,9 +188,7 @@ class InstanceStore:
         except KeyError:
             return -1
 
-    # ------------------------------------------------------------------
     def pack(self, scene: RenderScene) -> np.ndarray:
-
         n = scene.count
         if n == 0:
             return self._raw[:0]
@@ -211,7 +206,6 @@ class InstanceStore:
         return self._raw[:n]
 
     def upload(self, scene: RenderScene) -> None:
-
         data = self.pack(scene)
         if len(data) == 0 or self.buffer is None:
             return
@@ -222,9 +216,7 @@ class InstanceStore:
             if stop > start and b < len(self._bucket_buffers):
                 self._bucket_buffers[b].write(data[start:stop])
 
-    # ------------------------------------------------------------------
     def draw(self, bucket: int, instances: int | None = None) -> int:
-
         if not (0 <= bucket < len(self._vaos)):
             return 0
         vao = self._vaos[bucket]
@@ -257,7 +249,6 @@ class InstanceStore:
             or scene.count > self.capacity
         )
 
-    # ------------------------------------------------------------------
     def _release_vaos(self) -> None:
         for vao in self._vaos:
             if vao is not None:

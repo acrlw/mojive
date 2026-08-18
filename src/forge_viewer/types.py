@@ -1,3 +1,5 @@
+"""Shared cameras, lights, materials, meshes, and instance types."""
+
 from __future__ import annotations
 
 import enum
@@ -54,7 +56,6 @@ class CameraView:
         return replace(self, aspect=float(aspect))
 
     def matched_ortho_height(self) -> float:
-
         return 2.0 * self.distance() * float(np.tan(self.fov_y * 0.5))
 
 
@@ -271,7 +272,6 @@ class ViewportImage:
     def pixel_from_viewport_point(
         self, point: tuple[float, float], rect: tuple[float, float, float, float]
     ) -> tuple[int, int] | None:
-
         rx, ry, rw, rh = rect
         if rw <= 0.0 or rh <= 0.0 or self.width <= 0 or self.height <= 0:
             return None

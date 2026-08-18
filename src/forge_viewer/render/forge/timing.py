@@ -1,3 +1,5 @@
+"""CPU and GPU render-pass timing."""
+
 from __future__ import annotations
 
 import ctypes
@@ -41,7 +43,6 @@ class FrameTiming:
         self.gpu_available = bool(enabled and self._gl.has_query and self._probe())
 
     def _probe(self) -> bool:
-
         try:
             qid = self._gl.gen_query()
             self._gl.begin_time_query(qid)
@@ -65,7 +66,6 @@ class FrameTiming:
             self._order.append(name)
         return t
 
-    # ------------------------------------------------------------------
     def begin(self, name: str) -> None:
         t = self._timer(name)
         t._cpu_start = time.perf_counter()
@@ -88,7 +88,6 @@ class FrameTiming:
         t.cpu_ms = (time.perf_counter() - t._cpu_start) * 1000.0
 
     def collect(self) -> None:
-
         if not self.gpu_available:
             return
         for t in self._timers.values():
@@ -103,12 +102,10 @@ class FrameTiming:
                 else:
                     self._gl.delete_query(qid)
 
-    # ------------------------------------------------------------------
     def cpu_table(self) -> dict[str, float]:
         return {n: self._timers[n].cpu_ms for n in self._order}
 
     def gpu_table(self) -> dict[str, float]:
-
         if not self.gpu_available:
             return {}
         return {n: self._timers[n].gpu_ms for n in self._order}

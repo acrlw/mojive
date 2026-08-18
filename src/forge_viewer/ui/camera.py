@@ -1,3 +1,5 @@
+"""Orbit camera controls, animation, and unprojection."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -54,7 +56,6 @@ PRESETS: dict[str, tuple[float, float]] = {
 
 
 def camera_basis(view: CameraView) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-
     forward = np.asarray(view.forward(), np.float64)
     right = np.cross(forward, np.asarray(view.up, np.float64))
     n = np.linalg.norm(right)
@@ -64,13 +65,11 @@ def camera_basis(view: CameraView) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 def _ease_out_quad(t: float) -> float:
-
     t = min(1.0, max(0.0, t))
     return t * (2.0 - t)
 
 
 def _wrap_deg(a: float) -> float:
-
     return float((a + 180.0) % 360.0 - 180.0)
 
 
@@ -128,7 +127,6 @@ class OrbitCamera:
 
     @property
     def pivot(self) -> np.ndarray:
-
         return self._pivot
 
     @pivot.setter
@@ -138,7 +136,6 @@ class OrbitCamera:
 
     @property
     def yaw(self) -> float:
-
         return self._yaw
 
     @yaw.setter
@@ -149,7 +146,6 @@ class OrbitCamera:
 
     @property
     def pitch(self) -> float:
-
         return self._pitch
 
     @pitch.setter
@@ -179,7 +175,6 @@ class OrbitCamera:
 
     @property
     def fov_y(self) -> float:
-
         return self._fov_y
 
     @property
@@ -188,22 +183,18 @@ class OrbitCamera:
 
     @orthographic.setter
     def orthographic(self, value: bool) -> None:
-
         self.set_orthographic(bool(value))
 
     def attach(self, sink: CameraSink) -> None:
-
         self._out = sink
 
     def _require_out(self) -> CameraSink:
-
         if self._out is None:
             raise RuntimeError("Attach a camera sink before publishing")
         return self._out
 
     @property
     def fov_y_deg(self) -> float:
-
         return float(np.degrees(self.fov_y))
 
     @fov_y_deg.setter
@@ -216,11 +207,9 @@ class OrbitCamera:
             self._touch()
 
     def frame_all(self, lo, hi) -> CameraView:
-
         return self.frame_scene((lo, hi), self._require_out())
 
     def set_preset(self, name: str) -> CameraView:
-
         yaw, pitch = PRESETS.get(name.lower(), (None, None))
         if yaw is None:
             raise ValueError(f"Unknown camera preset: {name}")
@@ -247,7 +236,6 @@ class OrbitCamera:
         self._touch()
 
     def direction(self) -> np.ndarray:
-
         yaw = np.radians(self._yaw)
         pitch = np.radians(self._pitch)
         cp = np.cos(pitch)
@@ -257,11 +245,9 @@ class OrbitCamera:
         return self.pivot + self.direction() * self.distance
 
     def basis(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-
         return camera_basis(self.view())
 
     def view(self) -> CameraView:
-
         near = max(MIN_NEAR, min(float(self.near), self._distance * NEAR_DISTANCE_FRACTION))
         return CameraView(
             eye=self.eye().astype(np.float32),
@@ -276,7 +262,6 @@ class OrbitCamera:
         )
 
     def publish(self, sink: CameraSink) -> CameraView:
-
         v = self.view()
         sink.set_camera(v)
         self._dirty = False
@@ -286,7 +271,6 @@ class OrbitCamera:
         self._dirty = True
 
     def _stop_anim(self) -> None:
-
         self._anim = None
         self._anim_start = None
 
@@ -301,7 +285,6 @@ class OrbitCamera:
             self._touch()
 
     def orbit(self, dx_px: float, dy_px: float) -> None:
-
         self._yaw -= float(dx_px) * ORBIT_DEG_PER_PIXEL
         self._pitch = float(
             np.clip(self._pitch + float(dy_px) * ORBIT_DEG_PER_PIXEL, -PITCH_LIMIT, PITCH_LIMIT)
@@ -310,7 +293,6 @@ class OrbitCamera:
         self._touch()
 
     def pan(self, dx_px: float, dy_px: float, viewport_h_px: float) -> None:
-
         h = max(float(viewport_h_px), 1.0)
         world_per_px = self._image_height() / h
         right, up, _ = self.basis()
@@ -319,7 +301,6 @@ class OrbitCamera:
         self._touch()
 
     def dolly(self, steps: float) -> None:
-
         self._distance = max(MIN_DISTANCE, self._distance * float(np.exp(-steps * DOLLY_PER_STEP)))
         if self._orthographic:
             self.ortho_height = self.matched_ortho_height()
@@ -327,7 +308,6 @@ class OrbitCamera:
         self._touch()
 
     def fly(self, dt: float, forward: float = 0.0, right: float = 0.0, up: float = 0.0) -> None:
-
         speed = self._distance * FLY_RATE * float(dt)
         if speed <= 0.0:
             return
@@ -338,7 +318,6 @@ class OrbitCamera:
         self._touch()
 
     def _image_height(self) -> float:
-
         if self._orthographic:
             return float(self.ortho_height)
         return 2.0 * self._distance * float(np.tan(self._fov_y * 0.5))
@@ -347,7 +326,6 @@ class OrbitCamera:
         return self.view().matched_ortho_height()
 
     def set_orthographic(self, on: bool) -> None:
-
         on = bool(on)
         if on == self._orthographic:
             return
@@ -367,7 +345,6 @@ class OrbitCamera:
         *,
         animate: bool = True,
     ) -> CameraView:
-
         lo = np.asarray(bounds[0], np.float64).reshape(3)
         hi = np.asarray(bounds[1], np.float64).reshape(3)
         center = (lo + hi) * 0.5
@@ -394,7 +371,6 @@ class OrbitCamera:
         return self.publish(sink)
 
     def look_from(self, yaw: float, pitch: float, sink: CameraSink, *, animate: bool = True):
-
         goal = _Anim(
             pivot=self.pivot.copy(),
             distance=self._distance,
@@ -430,7 +406,6 @@ class OrbitCamera:
         return self._anim is not None
 
     def advance(self, dt: float, sink: CameraSink) -> bool:
-
         anim = self._anim
         start = self._anim_start
         if anim is not None and start is not None:
@@ -458,14 +433,12 @@ class OrbitCamera:
 
 
 def unproject(view: CameraView, ndc_x: float, ndc_y: float) -> tuple[np.ndarray, np.ndarray]:
-
     return math3d.unproject_ray(ndc_x, ndc_y, view.view_matrix(), view.proj_matrix())
 
 
 def ndc_from_viewport(
     x_px: float, y_px: float, rect: tuple[float, float, float, float]
 ) -> tuple[float, float]:
-
     rx, ry, rw, rh = rect
     nx = (float(x_px) - rx) / max(rw, 1.0) * 2.0 - 1.0
     ny = 1.0 - (float(y_px) - ry) / max(rh, 1.0) * 2.0

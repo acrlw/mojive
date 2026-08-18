@@ -1,3 +1,5 @@
+"""GPU mesh and texture resource stores."""
+
 from __future__ import annotations
 
 import moderngl
@@ -14,7 +16,6 @@ class MeshStore:
         self._sources: dict[MeshKey, MeshData] = {}
 
     def sync(self, meshes: dict[MeshKey, MeshData]) -> None:
-
         for key, data in meshes.items():
             if key not in self._meshes or self._sources.get(key) is not data:
                 old = self._meshes.pop(key, None)
@@ -29,7 +30,6 @@ class MeshStore:
             self._sources.pop(key, None)
 
     def update(self, meshes: dict[MeshKey, MeshUpdate] | None) -> None:
-
         if not meshes:
             return
         for key, data in meshes.items():
@@ -55,7 +55,6 @@ GL_SRGB8_ALPHA8 = 0x8C43
 
 
 def _srgb_internal_format(components: int) -> int | None:
-
     if components == 4:
         return GL_SRGB8_ALPHA8
     if components == 3:
@@ -64,7 +63,6 @@ def _srgb_internal_format(components: int) -> int | None:
 
 
 def srgb_to_linear_u8(pixels: np.ndarray) -> np.ndarray:
-
     out = pixels.astype(np.float32) / 255.0
     rgb = out[..., :3]
     linear = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
@@ -82,7 +80,6 @@ class TextureStore:
 
     @property
     def white(self) -> moderngl.Texture:
-
         if self._white is None:
             self._white = self.ctx.texture((1, 1), 4, b"\xff\xff\xff\xff")
         return self._white

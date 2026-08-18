@@ -1,3 +1,5 @@
+"""Built-in asset discovery and path resolution."""
+
 from __future__ import annotations
 
 import os
@@ -11,7 +13,6 @@ class AssetNotFoundError(FileNotFoundError):
 
 
 def assets_dir() -> Path:
-
     here = Path(__file__).resolve().parent
     for candidate in (here.parent.parent / "assets", here / "assets"):
         if candidate.is_dir():
@@ -20,7 +21,6 @@ def assets_dir() -> Path:
 
 
 def list_assets() -> list[str]:
-
     root = assets_dir()
     if not root.is_dir():
         return []
@@ -28,7 +28,6 @@ def list_assets() -> list[str]:
 
 
 def resolve(name: str) -> Path:
-
     if not name:
         raise AssetNotFoundError(_message("", "asset name is empty"))
 

@@ -1,3 +1,5 @@
+"""Capture MuJoCo constraint-island visualization references."""
+
 from __future__ import annotations
 
 import argparse

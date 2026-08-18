@@ -1,3 +1,5 @@
+"""Orientation view gizmo layout and interaction."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -49,14 +51,12 @@ class Ball:
 
     @property
     def label(self) -> str:
-
         return AXIS_NAMES[self.axis] if self.positive else f"-{AXIS_NAMES[self.axis]}"
 
 
 def layout(
     cam: CameraView, center: tuple[float, float], radius_pt: float, ball_pt: float
 ) -> list[Ball]:
-
     right, up, forward = camera_basis(cam)
     out: list[Ball] = []
     for axis in range(3):
@@ -83,7 +83,6 @@ def layout(
 
 
 def hit_test(balls: list[Ball], cursor: tuple[float, float]) -> Ball | None:
-
     best: Ball | None = None
     for b in balls:
         if b.alpha <= 0.1:
@@ -98,14 +97,12 @@ def hit_test(balls: list[Ball], cursor: tuple[float, float]) -> Ball | None:
 def widget_center(
     rect: tuple[float, float, float, float], style_scale: float
 ) -> tuple[float, float]:
-
     r = (RADIUS_PT + BALL_PT) * style_scale
     m = MARGIN_PT * style_scale
     return (rect[0] + rect[2] - m - r, rect[1] + m + r)
 
 
 def yaw_pitch_for(axis: int, sign: float, current_yaw: float) -> tuple[float, float]:
-
     if axis == 2:
         return TOP_YAW, PITCH_LIMIT * (1.0 if sign > 0 else -1.0)
     yaw = 0.0 if axis == 0 else 90.0
@@ -127,7 +124,6 @@ class ViewCube:
     def update(
         self, cam: CameraView, rect: tuple[float, float, float, float], cursor, style_scale: float
     ) -> Ball | None:
-
         self._center = widget_center(rect, style_scale)
         self._balls = layout(cam, self._center, RADIUS_PT * style_scale, BALL_PT * style_scale)
         self._hover = hit_test(self._balls, cursor)
@@ -138,16 +134,13 @@ class ViewCube:
         return self._hover
 
     def drag(self, camera: OrbitCamera, dx: float, dy: float) -> None:
-
         camera.orbit(dx, dy)
 
     def click(self, camera: OrbitCamera, ball: Ball, sink) -> None:
-
         yaw, pitch = yaw_pitch_for(ball.axis, ball.sign, camera.yaw)
         camera.look_from(yaw, pitch, sink)
 
     def draw(self, style_scale: float = 1.0) -> None:
-
         from imgui_bundle import imgui
 
         dl = imgui.get_window_draw_list()
@@ -206,7 +199,6 @@ def _lollipop_outline(
     line_width: float,
     segments: int = 24,
 ) -> list[tuple[float, float]]:
-
     center_v = np.asarray(center, np.float64)
     ball_v = np.asarray(ball, np.float64)
     direction = ball_v - center_v
@@ -227,7 +219,6 @@ def _lollipop_outline(
 
 
 def _draw_lollipop(imgui, dl, outline: list[tuple[float, float]], color: int) -> None:
-
     points = [imgui.ImVec2(*point) for point in outline]
     aa_flag = imgui.ImDrawListFlags_.anti_aliased_fill.value
     flags = dl.flags
@@ -270,19 +261,16 @@ def _label_alpha(ball: Ball, hovered: bool) -> float:
 
 
 def _dark(rgb: tuple[float, float, float]) -> tuple[float, float, float]:
-
     return tuple(  # type: ignore[return-value]
         c * (1.0 - DARK_MIX) + base * DARK_MIX for c, base in zip(rgb, DARK_BASE, strict=True)
     )
 
 
 def _lift(rgb: tuple[float, float, float]) -> tuple[float, float, float]:
-
     return tuple(min(1.0, c * HOVER_GAIN + HOVER_LIFT) for c in rgb)  # type: ignore[return-value]
 
 
 def _ink_box(font, size: float, text: str):
-
     baked = font.get_font_baked(size)
     pen = 0.0
     x0 = y0 = 1e9
@@ -301,7 +289,6 @@ def _ink_box(font, size: float, text: str):
 
 
 def _centered_label(imgui, dl, text: str, pos, radius: float, color: int) -> None:
-
     font = imgui.get_font()
     size = imgui.get_font_size()
     box = _ink_box(font, size, text)
@@ -334,5 +321,4 @@ def _centered_label(imgui, dl, text: str, pos, radius: float, color: int) -> Non
 
 
 def _axis_rgb(axis: int) -> tuple[float, float, float]:
-
     return tuple(float(c) for c in THEME.axis_color(axis)[:3])  # type: ignore[return-value]

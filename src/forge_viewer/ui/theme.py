@@ -1,3 +1,5 @@
+"""UI colors, contrast metrics, and visual constants."""
+
 from __future__ import annotations
 
 import math
@@ -14,7 +16,6 @@ def _to_linear(c: float) -> float:
 
 
 def rgb8(r: int, g: int, b: int, a: float = 1.0) -> RGBA:
-
     return (r / 255.0, g / 255.0, b / 255.0, a)
 
 
@@ -23,19 +24,16 @@ def with_alpha(color: RGBA, alpha: float) -> RGBA:
 
 
 def relative_luminance(color: RGBA) -> float:
-
     r, g, b = (_to_linear(c) for c in color[:3])
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
 def lstar(color: RGBA) -> float:
-
     y = relative_luminance(color)
     return 116.0 * y ** (1.0 / 3.0) - 16.0 if y > 0.008856 else 903.3 * y
 
 
 def luma601(color: RGBA) -> float:
-
     return 255.0 * (0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2])
 
 
@@ -48,7 +46,6 @@ def hsl_saturation(color: RGBA) -> float:
 
 
 def hsl_hue(color: RGBA) -> float:
-
     r, g, b = color[:3]
     hi, lo = max(r, g, b), min(r, g, b)
     d = hi - lo
@@ -64,7 +61,6 @@ def hsl_hue(color: RGBA) -> float:
 
 
 def chroma(color: RGBA) -> float:
-
     r, g, b = (_to_linear(c) for c in color[:3])
     x = 0.4124 * r + 0.3576 * g + 0.1805 * b
     y = 0.2126 * r + 0.7152 * g + 0.0722 * b
@@ -78,7 +74,6 @@ def chroma(color: RGBA) -> float:
 
 
 def pack_u32(color: RGBA) -> int:
-
     r, g, b, a = (max(0, min(255, round(c * 255.0))) for c in color)
     return r | (g << 8) | (b << 16) | (a << 24)
 
@@ -119,7 +114,6 @@ NODE_COLORS: dict[NodeKind, RGBA] = {
 
 
 def node_color(kind: NodeKind | str) -> RGBA:
-
     try:
         return NODE_COLORS[NodeKind(kind)]
     except (KeyError, ValueError):
@@ -174,7 +168,6 @@ THEME = Theme()
 
 
 def apply(imgui: Any, theme: Theme = THEME, ui_scale: float = 1.0) -> None:
-
     style = imgui.get_style()
     col = imgui.Col_
     v4 = imgui.ImVec4

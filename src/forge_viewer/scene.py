@@ -1,3 +1,5 @@
+"""Authored scene entities for backend-neutral workflows."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace

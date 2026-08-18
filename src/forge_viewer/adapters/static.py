@@ -1,3 +1,5 @@
+"""Scene adapter for authored, backend-neutral scenes."""
+
 from __future__ import annotations
 
 from dataclasses import replace

@@ -1,3 +1,5 @@
+"""Opaque geometry render pass."""
+
 from __future__ import annotations
 
 import moderngl
@@ -51,7 +53,6 @@ _MASK_OFF = (False, False, False, False)
 
 
 def draw_buckets(ctx: PassContext, buckets) -> None:
-
     scene, store = ctx.scene, ctx.instances
     textured = ctx.flag(RenderFlag.TEXTURE)
     white = ctx.textures.white
@@ -84,9 +85,7 @@ class OpaquePass(BasePass):
         self._m2 = np.zeros((4, 4), np.float32)
         self._light_block = np.zeros((5, MAX_SCENE_LIGHTS, 4), np.float32)
 
-    # ------------------------------------------------------------------ program
     def scene_program(self, backend) -> moderngl.Program | None:
-
         spec = self._spec_used or self._spec(
             backend.debug_view,
             self._wireframe_on(backend.debug_view, backend.get_flag(RenderFlag.WIREFRAME)),
@@ -104,7 +103,6 @@ class OpaquePass(BasePass):
 
     @staticmethod
     def _wireframe_on(view: DebugView, flag: bool) -> bool:
-
         return view is DebugView.WIREFRAME or bool(flag)
 
     def _spec(self, view: DebugView, wireframe: bool, use_shadow: bool) -> ProgramSpec:
@@ -122,13 +120,11 @@ class OpaquePass(BasePass):
         )
 
     def _has_shadow_include(self, programs) -> bool:
-
         if self._shadow_include is None or self._shadow_checked != programs.generation:
             self._shadow_include = (programs.dir / "shadow_sample.glsl").exists()
             self._shadow_checked = programs.generation
         return self._shadow_include
 
-    # ------------------------------------------------------------------ prepare
     def prepare(self, ctx: PassContext) -> bool:
         wireframe = self._wireframe_on(ctx.debug_view, ctx.flag(RenderFlag.WIREFRAME, False))
         use_shadow = (
@@ -171,7 +167,6 @@ class OpaquePass(BasePass):
         self._light_buffer.bind_to_uniform_block(LIGHT_BLOCK_BINDING)
 
     def _ensure_vaos(self, ctx: PassContext, prog: moderngl.Program) -> None:
-
         if self._vao_program is prog:
             return
         ctx.instances.rebuild(ctx.scene, prog, ctx.meshes, ctx.programs.generation)
@@ -179,7 +174,6 @@ class OpaquePass(BasePass):
         ctx.instances.upload(ctx.scene)
         self._vao_program = prog
 
-    # ------------------------------------------------------------------ uniform
     def _frame_uniforms(
         self, ctx: PassContext, prog: moderngl.Program, wireframe: bool, use_shadow: bool
     ) -> None:
@@ -216,15 +210,12 @@ class OpaquePass(BasePass):
     linear_out = False
 
     def view_matrices(self, ctx: PassContext):
-
         return ctx.view, ctx.view_proj, ctx.camera.eye
 
     def clip_plane(self, ctx: PassContext) -> tuple[float, float, float, float]:
-
         return NO_CLIP
 
     def reflection_uniforms(self, ctx: PassContext, prog: moderngl.Program) -> None:
-
         textures = () if self.linear_out else tuple(ctx.reflection or ())
         for index, unit in enumerate(TEX_REFLECTIONS):
             texture = textures[index] if index < len(textures) else ctx.textures.white
@@ -235,7 +226,6 @@ class OpaquePass(BasePass):
 
     @staticmethod
     def _set_direct(prog: moderngl.Program, name: str, value) -> None:
-
         member = prog.get(name, None)
         if member is not None:
             member.value = value
@@ -249,7 +239,6 @@ class OpaquePass(BasePass):
     def _light_uniforms(
         self, ctx: PassContext, prog: moderngl.Program, u: UniformCache, lights: LightSet
     ) -> None:
-
         pos, dirs, diff, spec, atten = self._light_block
         n = 0
         for light in lights.lights:
@@ -343,12 +332,10 @@ class OpaquePass(BasePass):
 
     @staticmethod
     def _shadow_uniforms(ctx: PassContext, u: UniformCache) -> None:
-
         from .shadow import bind_shadow_uniforms
 
         bind_shadow_uniforms(u, ctx.shadow)
 
-    # ------------------------------------------------------------------ execute
     def execute(self, ctx: PassContext) -> None:
         target, gl = ctx.target, ctx.ctx
         overdraw = ctx.debug_view is DebugView.OVERDRAW
@@ -374,7 +361,6 @@ class OpaquePass(BasePass):
             target.fbo.color_mask = (_MASK_ON, _MASK_ON)
 
     def release(self) -> None:
-
         if self._light_buffer is not None:
             self._light_buffer.release()
         self._light_buffer = None

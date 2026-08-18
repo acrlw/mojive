@@ -1,3 +1,5 @@
+"""Capture standard and additive transparency references."""
+
 from __future__ import annotations
 
 import argparse

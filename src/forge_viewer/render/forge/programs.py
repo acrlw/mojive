@@ -1,3 +1,5 @@
+"""Shader program creation, preprocessing, and uniform caching."""
+
 from __future__ import annotations
 
 import re
@@ -15,7 +17,6 @@ _INCLUDE = re.compile(r'^\s*#include\s+"([^"]+)"\s*$', re.MULTILINE)
 
 
 def _expand(path: Path, seen: set[Path] | None = None) -> tuple[str, set[Path]]:
-
     seen = seen if seen is not None else set()
     if path in seen:
         return "", seen
@@ -33,7 +34,6 @@ def _expand(path: Path, seen: set[Path] | None = None) -> tuple[str, set[Path]]:
 
 
 def _inject_defines(src: str, defines: dict[str, object]) -> str:
-
     if not defines:
         return src
     lines = src.split("\n")
@@ -68,7 +68,6 @@ class ProgramCache:
         self._deps: dict[tuple, dict[Path, float]] = {}
         self._failed: dict[tuple, str] = {}
 
-    # ------------------------------------------------------------------
     def get(self, spec: ProgramSpec) -> moderngl.Program:
         key = spec.key()
         prog = self._programs.get(key)
@@ -102,9 +101,7 @@ class ProgramCache:
         self._failed.pop(spec.key(), None)
         return prog
 
-    # ------------------------------------------------------------------
     def reload_changed(self) -> list[str]:
-
         changed: list[str] = []
         for key, spec in list(self._specs.items()):
             deps = self._deps.get(key, {})
@@ -172,7 +169,6 @@ class UniformCache:
         self._cache[name] = value
 
     def force(self, name: str, value) -> None:
-
         if name in self._members:
             self._program[name].value = value
             self._cache[name] = value

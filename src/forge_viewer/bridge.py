@@ -1,3 +1,5 @@
+"""Local debug drawing bridge and command transport."""
+
 from __future__ import annotations
 
 import contextlib
@@ -26,18 +28,15 @@ _ACTIVE_PATHS: set[Path] = set()
 
 
 def socket_dir(app: str = APP) -> Path:
-
     base = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
     return Path(base) / app
 
 
 def socket_path(pid: int | None = None, app: str = APP) -> Path:
-
     return socket_dir(app) / f"{os.getpid() if pid is None else int(pid)}.sock"
 
 
 def live_sockets(app: str = APP) -> list[Path]:
-
     out: list[Path] = []
     d = socket_dir(app)
     if not d.is_dir():
@@ -229,13 +228,11 @@ class DebugBridge:
             self.bind(backend)
 
     def bind(self, backend: Any | None) -> None:
-
         self._backend = backend
         self._last_note = ""
 
     @property
     def draw(self) -> DebugDraw | None:
-
         backend = self._backend
         if backend is None:
             return None
@@ -247,7 +244,6 @@ class DebugBridge:
         return bool(backend is not None and backend.caps.debug_draw and backend.debug is not None)
 
     def _unavailable(self, count: int) -> None:
-
         self.stats.dropped += max(1, int(count))
         backend = self._backend
         name = backend.caps.name if backend is not None else "no backend"
@@ -258,7 +254,6 @@ class DebugBridge:
             log.warning("{}", note)
 
     def layer(self, name: str, occlusion: Occlusion = Occlusion.DEPTH) -> Layer | None:
-
         dd = self.draw
         if dd is None or not self.available:
             self._unavailable(1)
@@ -266,7 +261,6 @@ class DebugBridge:
         return dd.layer(name, occlusion)
 
     def publish(self, name: str, occlusion: Occlusion, fn) -> bool:
-
         layer = self.layer(name, occlusion)
         if layer is None:
             return False
@@ -285,7 +279,6 @@ class DebugBridge:
         return True
 
     def serve(self, path: Path | None = None) -> Path | None:
-
         if self._server is not None:
             return self._server.path
         target = Path(path) if path is not None else socket_path(app=self.app)
@@ -306,7 +299,6 @@ class DebugBridge:
         return target
 
     def pump(self, budget: int = DEFAULT_BUDGET) -> int:
-
         applied = 0
         for _ in range(max(0, int(budget))):
             try:
@@ -321,7 +313,6 @@ class DebugBridge:
         return applied
 
     def apply_batch(self, messages, budget: int = DEFAULT_BUDGET) -> int:
-
         applied = 0
         for message in messages[: max(0, int(budget))]:
             applied += int(self._apply(message))
@@ -488,7 +479,6 @@ _BRIDGE: DebugBridge | None = None
 
 
 def bridge(backend: Any | None = None) -> DebugBridge:
-
     global _BRIDGE
     if _BRIDGE is None:
         _BRIDGE = DebugBridge(backend)

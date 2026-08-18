@@ -1,3 +1,5 @@
+"""Capture MuJoCo scenes with many active lights."""
+
 from __future__ import annotations
 
 import argparse

@@ -1,3 +1,5 @@
+"""Viewport coordinate conversion and object picking."""
+
 from __future__ import annotations
 
 import math
@@ -30,7 +32,6 @@ class PickResult:
 def viewport_point_to_target_pixel(
     point: tuple[float, float], rect: Rect, target_size: tuple[int, int]
 ) -> tuple[int, int] | None:
-
     rx, ry, rw, rh = rect
     tw, th = int(target_size[0]), int(target_size[1])
     if rw <= 0.0 or rh <= 0.0 or tw <= 0 or th <= 0:
@@ -51,7 +52,6 @@ def viewport_point_to_target_pixel(
 
 
 def viewport_point_to_ndc(point: tuple[float, float], rect: Rect) -> tuple[float, float]:
-
     rx, ry, rw, rh = rect
     nx = (float(point[0]) - rx) / max(rw, 1e-9) * 2.0 - 1.0
     ny = 1.0 - (float(point[1]) - ry) / max(rh, 1e-9) * 2.0
@@ -67,7 +67,6 @@ def pick(
     nearest_pick: ScreenPicker | None = None,
     root_id: int = 0,
 ) -> PickResult:
-
     px = viewport_point_to_target_pixel(point, rect, target_size)
     if px is None:
         return PickResult()
@@ -91,5 +90,4 @@ def pick(
 
 
 def _selectable(object_id: int, root_id: int) -> int:
-
     return 0 if object_id == root_id else object_id

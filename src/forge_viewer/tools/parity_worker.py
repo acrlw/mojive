@@ -1,3 +1,5 @@
+"""Render parity cases in an isolated worker process."""
+
 from __future__ import annotations
 
 import json

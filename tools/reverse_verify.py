@@ -1,3 +1,5 @@
+"""Verify registered reverse-rendering invariants."""
+
 import os
 import shutil
 import subprocess
@@ -387,7 +389,6 @@ CASES = [
 
 
 def run(test: str, path: str) -> bool:
-
     marks = "gpu" if path.startswith("tests/gpu") else "not gpu"
     env = dict(os.environ)
 

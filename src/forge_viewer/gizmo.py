@@ -1,3 +1,5 @@
+"""Backend-neutral gizmo geometry, projection, and hit testing."""
+
 from __future__ import annotations
 
 import enum
@@ -99,7 +101,6 @@ class GizmoFrame:
 
 
 def display_handles(frame: GizmoFrame) -> tuple[GizmoHandle, ...]:
-
     if frame.active is not GizmoHandle.NONE:
         return (frame.active,)
     if frame.mode is GizmoMode.ROTATE:
@@ -110,7 +111,6 @@ def display_handles(frame: GizmoFrame) -> tuple[GizmoHandle, ...]:
 
 
 def world_scale(cam: CameraView, origin, viewport_height: float, size_pt: float = SIZE_PT) -> float:
-
     h = max(float(viewport_height), 1.0)
     if cam.orthographic:
         return float(cam.ortho_height) * float(size_pt) / h
@@ -121,7 +121,6 @@ def world_scale(cam: CameraView, origin, viewport_height: float, size_pt: float 
 
 
 def project(cam: CameraView, points, rect: tuple[float, float, float, float]) -> np.ndarray:
-
     p = np.asarray(points, np.float64).reshape(-1, 3)
     mvp = np.asarray(cam.proj_matrix(), np.float64) @ np.asarray(cam.view_matrix(), np.float64)
     clip = np.concatenate((p, np.ones((len(p), 1))), axis=1) @ mvp.T
@@ -135,19 +134,16 @@ def project(cam: CameraView, points, rect: tuple[float, float, float, float]) ->
 
 
 def axis_rotation(rotation, axis: int) -> np.ndarray:
-
     r = np.asarray(rotation, np.float64).reshape(3, 3)
     order = ((1, 2, 0), (2, 0, 1), (0, 1, 2))[int(axis)]
     return r[:, order]
 
 
 def screen_rotation_basis(cam: CameraView) -> np.ndarray:
-
     return np.asarray(cam.view_matrix(), np.float64)[:3, :3].T
 
 
 def rotation_half_basis(cam: CameraView, origin, rotation, axis: int) -> np.ndarray:
-
     o = np.asarray(origin, np.float64)
     r = np.asarray(rotation, np.float64).reshape(3, 3)
     normal = r[:, axis]
@@ -163,20 +159,17 @@ def rotation_half_basis(cam: CameraView, origin, rotation, axis: int) -> np.ndar
 
 
 def rotation_ring_alpha(cam: CameraView, origin, normal) -> float:
-
     facing = _view_facing(cam, origin, normal)
     return float(np.clip((facing - 0.08) / 0.20, 0.0, 1.0))
 
 
 def axis_handle_alpha(cam: CameraView, origin, axis) -> float:
-
     facing = _view_facing(cam, origin, axis)
     projected = np.sqrt(max(0.0, 1.0 - facing * facing))
     return float(np.clip((projected - 0.08) / 0.20, 0.0, 1.0))
 
 
 def plane_handle_alpha(cam: CameraView, origin, normal) -> float:
-
     return rotation_ring_alpha(cam, origin, normal)
 
 
@@ -187,7 +180,6 @@ def _view_facing(cam: CameraView, origin, direction) -> float:
 
 
 def rotation_ring(cam, origin, rotation, scale: float, axis: int, *, full: bool) -> np.ndarray:
-
     basis = (
         axis_rotation(rotation, axis) if full else rotation_half_basis(cam, origin, rotation, axis)
     )
@@ -202,7 +194,6 @@ def rotation_ring(cam, origin, rotation, scale: float, axis: int, *, full: bool)
 
 
 def plane_corners(origin, rotation, scale: float, axis: int) -> np.ndarray:
-
     o = np.asarray(origin, np.float64)
     r = np.asarray(rotation, np.float64).reshape(3, 3)
     u, v = ((1, 2), (2, 0), (0, 1))[int(axis)]
@@ -226,7 +217,6 @@ def visibility(
     rect: tuple[float, float, float, float],
     scale: float,
 ) -> tuple[int, int]:
-
     o = np.asarray(origin, np.float64)
     r = np.asarray(rotation, np.float64).reshape(3, 3)
     center = project(cam, [o], rect)[0]
@@ -252,7 +242,6 @@ def hit_test(
     cursor: tuple[float, float],
     mode: GizmoMode,
 ) -> tuple[GizmoHandle, int, int]:
-
     o = np.asarray(origin, np.float64)
     r = np.asarray(rotation, np.float64).reshape(3, 3)
     scale = world_scale(cam, o, rect[3])

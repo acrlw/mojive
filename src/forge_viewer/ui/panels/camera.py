@@ -1,3 +1,5 @@
+"""Camera controls and reproducible scene snapshots."""
+
 from __future__ import annotations
 
 import math
@@ -190,7 +192,6 @@ def camera_snapshot(
     viewport_rect: tuple[float, float, float, float],
     camera: Any = None,
 ) -> str:
-
     def vec(values) -> str:
         return "(" + ", ".join(f"{float(v):+.9g}" for v in values) + ")"
 

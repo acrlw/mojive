@@ -1,3 +1,5 @@
+"""Forge render-pass orchestration and frame submission."""
+
 from __future__ import annotations
 
 import time
@@ -152,9 +154,7 @@ class ForgeBackend:
         self.caps = self._build_caps()
         self._hot_reload = False
 
-    # ------------------------------------------------------------------
     def _supported_flags(self) -> frozenset[RenderFlag]:
-
         flags = {
             RenderFlag.CULL_FACE,
             RenderFlag.TEXTURE,
@@ -236,7 +236,6 @@ class ForgeBackend:
             notes=self.gl_caps.notes,
         )
 
-    # ------------------------------------------------------------------
     def set_scene(self, source: SceneSource) -> None:
         from ..builder import SceneSourceBuilder
         from ..mesh import all_builtin
@@ -278,7 +277,6 @@ class ForgeBackend:
             self.debug.layer("physics.bvh", Occlusion.DEPTH).clear()
 
     def set_render_scene(self, scene: RenderScene) -> None:
-
         self._scene = scene
         gen = self.programs.generation
         need = self.instances.needs_rebuild(scene, gen) or self._structure_generation < 0
@@ -291,13 +289,11 @@ class ForgeBackend:
             self._program_generation = gen
 
     def _scene_program(self) -> moderngl.Program | None:
-
         op = self._passes.get("opaque")
         getter = getattr(op, "scene_program", None)
         return getter(self) if callable(getter) else None
 
     def update(self, frame: SceneFrame) -> None:
-
         if self._builder is None:
             return
         self.meshes.update(frame.mesh_updates)
@@ -306,7 +302,6 @@ class ForgeBackend:
         self._publish_frame_visuals(frame)
 
     def _publish_frame_visuals(self, frame: SceneFrame) -> None:
-
         self._publish_tendons(frame)
         if self.debug is None:
             return
@@ -1045,7 +1040,6 @@ class ForgeBackend:
         )
 
     def _fill_actuator_palette(self, frame: SceneFrame) -> None:
-
         source = self._source
         use_activation = self.get_flag(RenderFlag.ACTIVATION)
         for i, out in enumerate(self._actuator_palette):
@@ -1107,9 +1101,7 @@ class ForgeBackend:
         if debug is not None:
             debug.configure_text(primary, primary_index, fallback, fallback_index, size_px)
 
-    # ------------------------------------------------------------------
     def render(self, frame: SceneFrame | None = None) -> ViewportImage | None:
-
         if self._scene is None and self._builder is not None and frame is not None:
             self.update(frame)
         scene = self._scene
@@ -1177,9 +1169,7 @@ class ForgeBackend:
             shadow=ShadowResult(),
         )
 
-    # ------------------------------------------------------------------
     def pick(self, x: int, y: int) -> int:
-
         return self.target.read_id(int(x), int(y))
 
     def capture(
@@ -1188,7 +1178,6 @@ class ForgeBackend:
         camera: CameraView | None = None,
         size: tuple[int, int] | None = None,
     ) -> bool:
-
         from PIL import Image
 
         saved_target = None
@@ -1257,7 +1246,6 @@ class ForgeBackend:
         return True
 
     def get_debug_view(self) -> DebugView:
-
         return self._debug_view
 
     def set_label_mode(self, mode: LabelMode) -> bool:
@@ -1308,9 +1296,7 @@ class ForgeBackend:
         self.timing.release()
         self.target.release()
 
-    # ------------------------------------------------------------------
     def describe(self) -> str:
-
         c = self.gl_caps
         lines = [
             f"forge  GL {c.version}  ({c.renderer})",

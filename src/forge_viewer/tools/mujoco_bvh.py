@@ -1,3 +1,5 @@
+"""Capture MuJoCo bounding-volume hierarchy visuals."""
+
 from __future__ import annotations
 
 import argparse

@@ -1,3 +1,5 @@
+"""Debug primitive and world-space text render pass."""
+
 from __future__ import annotations
 
 import moderngl
@@ -123,9 +125,7 @@ class DebugPass(BasePass):
         self._emit_bound = self._emit
         self._text = TextRenderer()
 
-    # ------------------------------------------------------------------
     def prepare(self, ctx: PassContext) -> bool:
-
         self.draw_calls = 0
         if self._broken:
             return False
@@ -150,7 +150,6 @@ class DebugPass(BasePass):
         self._text.configure(primary, primary_index, fallback, fallback_index, size_px)
 
     def _sync_programs(self, ctx: PassContext) -> bool:
-
         if self._progs and self._generation == ctx.programs.generation:
             return True
         try:
@@ -177,7 +176,6 @@ class DebugPass(BasePass):
         return True
 
     def _ensure_buffer(self, ctx: PassContext, path: Path, records: int) -> moderngl.Buffer:
-
         stride = RECORD_FLOATS[path] * 4
         buf = self._buffers[path]
         if buf is not None and buf.size >= records * stride:
@@ -216,7 +214,6 @@ class DebugPass(BasePass):
         return vao
 
     def _mesh(self, ctx: PassContext, key: MeshKey) -> GpuMesh | None:
-
         if key in self._meshes:
             return self._meshes[key]
         gpu: GpuMesh | None = None
@@ -308,7 +305,6 @@ class DebugPass(BasePass):
             ctx.draw_calls += 1
 
     def _bind_base(self, frame: PackedFrame, vao: moderngl.VertexArray, b) -> None:
-
         buf = self._buffers[b.path]
         if buf is None:
             return
@@ -321,7 +317,6 @@ class DebugPass(BasePass):
         buf.write(frame.stream(b.path)[b.start : b.start + b.count])
 
     def _set_common(self, ctx: PassContext, path: Path) -> None:
-
         prog = self._progs[path]
         members = self._members[path]
 
@@ -336,7 +331,6 @@ class DebugPass(BasePass):
         if "u_viewport" in members:
             prog["u_viewport"].value = (ctx.target.width, ctx.target.height)
 
-    # ------------------------------------------------------------------
     def _release_vaos(self) -> None:
         for vao in self._vaos.values():
             vao.release()

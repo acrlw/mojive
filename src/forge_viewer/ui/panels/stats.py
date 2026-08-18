@@ -1,3 +1,5 @@
+"""Frame timing and render-pass statistics."""
+
 from __future__ import annotations
 
 from imgui_bundle import imgui
@@ -28,7 +30,6 @@ class StatsPanel(Panel):
         self._scale_hold = 0
 
     def frame_needs(self) -> FrameNeeds:
-
         return FrameNeeds.none()
 
     def draw(self, ctx: PanelContext) -> None:
@@ -75,7 +76,6 @@ class StatsPanel(Panel):
                 imgui.end_table()
 
     def _update_scale(self, peak: float) -> None:
-
         target = _scale_ceiling(peak)
         if target > self._scale_ms:
             self._scale_ms = target

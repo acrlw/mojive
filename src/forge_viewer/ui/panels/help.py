@@ -1,3 +1,5 @@
+"""Keyboard and mouse interaction reference panel."""
+
 from __future__ import annotations
 
 from typing import Any

@@ -1,3 +1,5 @@
+"""Cascaded shadow-map layout and camera fitting."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,7 +27,6 @@ DEFAULT_SHADOW_CLIP = 1.0
 
 
 def slot_pixels(slot: int) -> tuple[int, int, int, int]:
-
     if not 0 <= slot < SLOT_COUNT:
         raise ValueError(f"cascade slot {slot} exceeds atlas capacity {SLOT_COUNT}")
     col, row = slot % ATLAS_COLS, slot // ATLAS_COLS
@@ -33,7 +34,6 @@ def slot_pixels(slot: int) -> tuple[int, int, int, int]:
 
 
 def slot_uv(slot: int, pcf_radius: int = PCF_RADIUS) -> np.ndarray:
-
     x, y, w, h = slot_pixels(slot)
     m = float(pcf_radius) + 0.5
     return np.array(
@@ -48,7 +48,6 @@ def slot_uv(slot: int, pcf_radius: int = PCF_RADIUS) -> np.ndarray:
 
 
 def light_basis(direction) -> np.ndarray:
-
     f = M.normalize(direction).astype(np.float64)
     if float(np.dot(f, f)) < 0.5:
         f = np.array([0.0, 0.0, -1.0])
@@ -61,13 +60,11 @@ def light_basis(direction) -> np.ndarray:
 
 
 def cascade_radii(scene_extent: float, shadow_clip: float = DEFAULT_SHADOW_CLIP) -> np.ndarray:
-
     r = max(float(scene_extent), 1e-6) * max(float(shadow_clip), 1e-6)
     return np.array([r / d for d in RADIUS_DIVISORS], np.float32)
 
 
 def snap_to_texel(center, basis: np.ndarray, texel: float) -> np.ndarray:
-
     c = basis.astype(np.float64) @ np.asarray(center, np.float64)
     c = np.floor(c / texel) * texel
     return (basis.astype(np.float64).T @ c).astype(np.float32)
@@ -103,7 +100,6 @@ def build_cascades(
     pcf_radius: int = PCF_RADIUS,
     into: CascadeSet | None = None,
 ) -> CascadeSet:
-
     out = into if into is not None else CascadeSet()
     basis = light_basis(light_direction)
     radii = cascade_radii(scene_extent, shadow_clip)

@@ -1,3 +1,5 @@
+"""Render, compare, and review golden images."""
+
 from __future__ import annotations
 
 import argparse
@@ -46,7 +48,6 @@ def compare(a: np.ndarray, b: np.ndarray) -> tuple[bool, str]:
 
 
 def side_by_side(old: np.ndarray | None, new: np.ndarray, path: Path) -> None:
-
     from PIL import Image
 
     parts = (

@@ -1,3 +1,5 @@
+"""Multisample render targets and object ID attachments."""
+
 from __future__ import annotations
 
 import contextlib
@@ -17,7 +19,6 @@ class IdLayout(enum.StrEnum):
 
 
 def probe_id_layout(ctx: moderngl.Context, samples: int) -> IdLayout:
-
     if samples <= 1:
         return IdLayout.SHARED
     tex_c = tex_i = fbo = None
@@ -112,7 +113,6 @@ class RenderTarget:
         self._clear_vao = ctx.vertex_array(self._clear_prog, [])
         self._pixel = bytearray(4)
 
-    # ------------------------------------------------------------------
     @property
     def info(self) -> TargetInfo:
         return TargetInfo(self.width, self.height, self.samples, self.id_layout, self.id_samples)
@@ -125,7 +125,6 @@ class RenderTarget:
     def id_multisample(self) -> bool:
         return self.id_samples > 1
 
-    # ------------------------------------------------------------------
     def use_main(self) -> None:
         self.fbo.use()
         self.ctx.viewport = (0, 0, self.width, self.height)
@@ -135,7 +134,6 @@ class RenderTarget:
         self.ctx.viewport = (0, 0, self.width, self.height)
 
     def clear_main(self, color: tuple[float, float, float, float]) -> None:
-
         self.fbo.depth_mask = True
         self.fbo.use()
         if self.id_layout is not IdLayout.SHARED:
@@ -148,7 +146,6 @@ class RenderTarget:
             self._gl.drain_errors()
 
     def clear_id(self, value: int = 0) -> None:
-
         self.id_fbo.use()
         self.ctx.viewport = (0, 0, self.width, self.height)
         split = self.id_layout is IdLayout.SPLIT
@@ -175,16 +172,13 @@ class RenderTarget:
         self.ctx.depth_func = "<"
 
     def resolve(self) -> None:
-
         prev = self.ctx.fbo
         if self._gl.blit_color(self._blit_src.glo, self.resolve_fbo.glo, self.width, self.height):
             prev.use()
             return
         self.ctx.copy_framebuffer(self.resolve_fbo, self._blit_src)
 
-    # ------------------------------------------------------------------
     def read_id(self, x: int, y: int) -> int:
-
         if not (0 <= x < self.width and 0 <= y < self.height):
             return 0
         if self.id_layout is IdLayout.SHARED and self.samples > 1:
@@ -198,19 +192,15 @@ class RenderTarget:
         return int(np.frombuffer(raw, np.uint32)[0])
 
     def read_color(self, flip: bool = True) -> np.ndarray:
-
         raw = self.resolve_fbo.read(components=4, dtype="f1")
         img = np.frombuffer(raw, np.uint8).reshape(self.height, self.width, 4)
         return img[::-1] if flip else img
 
     def read_ids(self) -> np.ndarray:
-
         raw = self.id_fbo.read(components=1, dtype="u4", attachment=self.id_draw_buffer)
         return np.frombuffer(raw, np.uint32).reshape(self.height, self.width)
 
-    # ------------------------------------------------------------------
     def release(self) -> None:
-
         with contextlib.suppress(Exception):
             self.ctx.screen.use()
         for obj in (

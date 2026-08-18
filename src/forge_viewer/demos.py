@@ -1,3 +1,5 @@
+"""Programmatic scenes used by interactive demos."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -7,7 +9,6 @@ from .types import CameraView, Light, LightKind, LightSet
 
 
 def canvas_scene() -> Scene:
-
     sun = Light(
         kind=LightKind.DIRECTIONAL,
         direction=np.array([-0.5, 0.4, -1.0], np.float32),
@@ -43,7 +44,6 @@ def canvas_scene() -> Scene:
 
 
 def lighting_scene() -> Scene:
-
     lights = (
         Light(
             kind=LightKind.SPOT,

@@ -1,3 +1,5 @@
+"""Capture MuJoCo labels, frames, and deformable overlays."""
+
 from __future__ import annotations
 
 import argparse

@@ -1,3 +1,5 @@
+"""Exercise remote scene authoring over Live View."""
+
 from __future__ import annotations
 
 import argparse

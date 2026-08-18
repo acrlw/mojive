@@ -1,3 +1,5 @@
+"""Antialiased selection outline render pass."""
+
 from __future__ import annotations
 
 import moderngl
@@ -17,7 +19,6 @@ OUTLINE_COLOR = (1.0, 0.63, 0.20, 1.0)
 
 
 def circular_offsets(radius: int) -> tuple[tuple[int, int], ...]:
-
     r2 = radius * radius
     return tuple(
         (dx, dy)
@@ -31,7 +32,6 @@ class OutlinePass(BasePass):
     name = "outline"
 
     def __init__(self) -> None:
-
         self._geom = IdGeometry(only_selected=True, float_mask=True)
         self._mask_ms_tex: moderngl.Texture | None = None
         self._mask_ms_fbo: moderngl.Framebuffer | None = None
@@ -57,9 +57,7 @@ class OutlinePass(BasePass):
         self._sel_ids: object = None
         self.color: tuple[float, float, float, float] = OUTLINE_COLOR
 
-    # ------------------------------------------------------------------
     def prepare(self, ctx: PassContext) -> bool:
-
         if not ctx.flag(RenderFlag.OUTLINE):
             return False
         sel = int(ctx.selected_id)
@@ -110,9 +108,7 @@ class OutlinePass(BasePass):
         u.set("u_color", self.color)
         self._vao.render(moderngl.TRIANGLES, vertices=3)
 
-    # ------------------------------------------------------------------
     def _selected_buckets(self, ctx: PassContext, selected: int) -> tuple[int, ...]:
-
         scene = ctx.scene
         if selected == self._sel_id and scene.object_id is self._sel_ids:
             return self._buckets
@@ -128,7 +124,6 @@ class OutlinePass(BasePass):
         return self._buckets
 
     def _ensure_mask(self, ctx: PassContext) -> None:
-
         w, h = ctx.target.width, ctx.target.height
         max_samples = int(ctx.ctx.info.get("GL_MAX_SAMPLES", 1) or 1)
         samples = min(4, max_samples) if max_samples > 1 else 0
@@ -154,7 +149,6 @@ class OutlinePass(BasePass):
         self._size = (w, h)
 
     def _ensure_composite(self, ctx: PassContext) -> None:
-
         if self._prog is not None and self._generation == ctx.programs.generation:
             return
         prog = ctx.programs.get(self._spec)
@@ -169,7 +163,6 @@ class OutlinePass(BasePass):
         else:
             self._uniforms.rebind(prog, self._generation)
 
-    # ------------------------------------------------------------------
     def _release_mask(self) -> None:
         if self._mask_ms_fbo is not None and self._mask_ms_fbo is not self._mask_fbo:
             self._mask_ms_fbo.release()

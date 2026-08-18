@@ -1,3 +1,5 @@
+"""Capture MuJoCo slider-crank visualization references."""
+
 from __future__ import annotations
 
 import argparse

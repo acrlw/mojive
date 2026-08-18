@@ -1,3 +1,5 @@
+"""Application commands and command result types."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -23,7 +25,6 @@ class CommandResult:
 
     @staticmethod
     def bad(message: str) -> CommandResult:
-
         assert message
         return CommandResult(False, message)
 

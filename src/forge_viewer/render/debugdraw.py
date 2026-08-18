@@ -1,3 +1,5 @@
+"""Retained debug primitives and world-space labels."""
+
 from __future__ import annotations
 
 import enum
@@ -175,7 +177,6 @@ class _Store:
             self.transforms = _grow(self.transforms, cap)
 
     def shift_left(self, start: int, count: int) -> int:
-
         n = self.count
         tail = n - (start + count)
         if tail > 0:
@@ -254,7 +255,6 @@ class Layer:
         return st
 
     def _alloc(self, kind: Prim, ident: str, count: int, duration: float) -> int:
-
         now = self._owner.now
         expires = math.inf if duration < 0 else now + float(duration)
         if ident in self._texts:
@@ -304,7 +304,6 @@ class Layer:
             self._owner._primitives -= 1
 
     def line(self, ident: str, a, b, color, width_px: float = 1.5, duration: float = NEVER) -> None:
-
         i = self._alloc(Prim.LINE, ident, 1, duration)
         if i < 0:
             return
@@ -317,7 +316,6 @@ class Layer:
     def lines(
         self, ident: str, pts_a, pts_b, color, width_px: float = 1.5, duration: float = NEVER
     ) -> None:
-
         self._many_segments(Prim.LINE, ident, pts_a, pts_b, color, width_px, duration)
 
     def polyline(
@@ -330,7 +328,6 @@ class Layer:
         closed: bool = False,
         duration: float = NEVER,
     ) -> None:
-
         p = np.asarray(points, np.float32).reshape(-1, 3)
         count = len(p) if closed else len(p) - 1
         if count <= 0:
@@ -364,7 +361,6 @@ class Layer:
         *,
         start_mask_px: float = 0.0,
     ) -> None:
-
         i = self._alloc(Prim.ARROW, ident, 1, duration)
         if i < 0:
             return
@@ -386,13 +382,11 @@ class Layer:
         *,
         start_mask_px: float = 0.0,
     ) -> None:
-
         self._many_segments(
             Prim.ARROW, ident, pts_a, pts_b, color, width_px, duration, start_mask_px
         )
 
     def point(self, ident: str, p, color, radius_px: float = 4.0, duration: float = NEVER) -> None:
-
         i = self._alloc(Prim.POINT, ident, 1, duration)
         if i < 0:
             return
@@ -414,7 +408,6 @@ class Layer:
         edge_px: float = 0.75,
         duration: float = NEVER,
     ) -> None:
-
         i = self._alloc(Prim.DRAG_LINK, ident, 1, duration)
         if i < 0:
             return
@@ -430,7 +423,6 @@ class Layer:
     def points(
         self, ident: str, positions, color, radius_px: float = 4.0, duration: float = NEVER
     ) -> None:
-
         p = np.asarray(positions, np.float32).reshape(-1, 3)
         if not len(p):
             self._remove(ident)
@@ -478,7 +470,6 @@ class Layer:
     def frame(
         self, ident: str, transform4x4, axis_len: float = 0.1, duration: float = NEVER
     ) -> None:
-
         i = self._alloc(Prim.FRAME, ident, 1, duration)
         if i < 0:
             return
@@ -495,15 +486,12 @@ class Layer:
         st.sizes[i] = FRAME_WIDTH_PX
 
     def box(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
-
         self._solid(Prim.BOX, ident, transform4x4, color, duration)
 
     def sphere(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
-
         self._solid(Prim.SPHERE, ident, transform4x4, color, duration)
 
     def cylinder(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
-
         self._solid(Prim.CYLINDER, ident, transform4x4, color, duration)
 
     def solid_arrow(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
@@ -533,7 +521,6 @@ class Layer:
         *,
         radius_px: float = 0.0,
     ) -> None:
-
         i = self._alloc(Prim.SECTOR, ident, 1, duration)
         if i < 0:
             return
@@ -554,7 +541,6 @@ class Layer:
         align=(0.0, 0.5),
         duration: float = NEVER,
     ) -> None:
-
         if not text:
             self.erase(ident)
             return
@@ -601,7 +587,6 @@ class Layer:
         self._text_finite.clear()
 
     def erase(self, ident: str) -> None:
-
         self._owner.moves += self._remove(ident)
         self._remove_text(ident)
 
@@ -614,7 +599,6 @@ class Layer:
         return st.count if st is not None else 0
 
     def positions_of(self, kind: Prim) -> np.ndarray:
-
         st = self._stores.get(kind)
         return (
             st.positions[: st.count]
@@ -676,7 +660,6 @@ class DebugDraw:
         self._last_drop_note = ""
 
     def layer(self, name: str, occlusion: Occlusion = Occlusion.DEPTH) -> Layer:
-
         layer = self._layers.get(name)
         if layer is None:
             layer = Layer(name, occlusion, self)
@@ -695,14 +678,12 @@ class DebugDraw:
         return tuple(self._layers.values())
 
     def drop(self, count: int, note: str) -> None:
-
         self.dropped += int(count)
         if note and note != self._last_drop_note:
             self._last_drop_note = note
             log.warning("Debug draw dropped primitives: {}", note)
 
     def render_frame(self, emit, now: float | None = None) -> PackedFrame:
-
         self.now = time.monotonic() if now is None else float(now)
         frame = self.build()
         emit(frame)
@@ -710,7 +691,6 @@ class DebugDraw:
         return frame
 
     def expire(self, now: float | None = None) -> int:
-
         when = self.now if now is None else float(now)
         total = 0
         for layer in self._layers.values():
@@ -755,7 +735,6 @@ class DebugDraw:
         return self._primitives
 
     def build(self) -> PackedFrame:
-
         frame = self._frame
         for path in Path:
             frame.counts[path] = 0
@@ -798,7 +777,6 @@ class DebugDraw:
         return frame
 
     def _reserve(self, frame: PackedFrame) -> None:
-
         need = self._need
         for path in Path:
             need[path] = 0
@@ -839,7 +817,6 @@ class DebugDraw:
         b.occlusion, b.path, b.mesh, b.start, b.count = occ, path, None, start, at - start
 
     def _batch_solid(self, frame, occ, layers) -> None:
-
         for kind, mesh in PRIM_MESH.items():
             start = frame.counts[Path.SOLID]
             dst = frame.streams[Path.SOLID]
@@ -942,19 +919,16 @@ def _write_color(dst: np.ndarray, i: int, color) -> None:
 
 
 def world_size(size_px: float, px_scale: float, clip_w: float) -> float:
-
     return float(size_px) * float(px_scale) * float(clip_w)
 
 
 def sector_angle(center, rotvec_end) -> float:
-
     return float(
         np.linalg.norm(np.asarray(rotvec_end, np.float64) - np.asarray(center, np.float64))
     )
 
 
 def sector_points(center, rotvec_end, ref_end, segments: int = 32) -> np.ndarray:
-
     c = np.asarray(center, np.float64).reshape(3)
     rotvec = np.asarray(rotvec_end, np.float64).reshape(3) - c
     ref = np.asarray(ref_end, np.float64).reshape(3) - c

@@ -1,3 +1,5 @@
+"""Object ID buffer generation for picking and outlines."""
+
 from __future__ import annotations
 
 import moderngl
@@ -36,9 +38,7 @@ class IdGeometry:
         self._strategy: Strategy | None = None
         self._broken = False
 
-    # ------------------------------------------------------------------
     def ensure(self, ctx: PassContext, attachment: int) -> bool:
-
         fresh = False
         if (
             self.program is None
@@ -129,9 +129,7 @@ class IdGeometry:
         except KeyError:
             return -1
 
-    # ------------------------------------------------------------------
     def upload(self, ctx: PassContext) -> None:
-
         if self._strategy is not Strategy.PER_BUCKET:
             return
         data = ctx.instances.pack(ctx.scene)
@@ -146,7 +144,6 @@ class IdGeometry:
         self.program["u_view_proj"].write(M.to_gl(ctx.view_proj))
 
     def draw(self, ctx: PassContext, buckets) -> int:
-
         ranges = ctx.scene.bucket_ranges
         calls = 0
         for b in buckets:
@@ -160,7 +157,6 @@ class IdGeometry:
             calls += 1
         return calls
 
-    # ------------------------------------------------------------------
     def _release_gl(self) -> None:
         for vao in self._vaos:
             if vao is not None:
@@ -187,7 +183,6 @@ class IdBufferPass(BasePass):
         self._geom = IdGeometry()
 
     def prepare(self, ctx: PassContext) -> bool:
-
         ctx.target.clear_id(0)
         if not self._geom.ensure(ctx, ctx.target.id_draw_buffer):
             return False

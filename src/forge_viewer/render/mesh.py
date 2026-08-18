@@ -1,3 +1,5 @@
+"""Procedural meshes for built-in geometric primitives."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -57,7 +59,6 @@ def _finish(
     uvs: np.ndarray,
     indices: np.ndarray,
 ) -> MeshData:
-
     pos = np.array(positions, np.float32, order="C")
     nrm = np.array(normals, np.float32, order="C")
     uv = np.array(uvs, np.float32, order="C")
@@ -68,12 +69,10 @@ def _finish(
 
 
 def _ring_angles(segments: int) -> np.ndarray:
-
     return np.linspace(0.0, 2.0 * np.pi, segments + 1)
 
 
 def _grid_indices(rows: int, cols: int) -> np.ndarray:
-
     i = np.arange(rows - 1)[:, None]
     j = np.arange(cols - 1)[None, :]
     a = i * cols + j
@@ -84,7 +83,6 @@ def _grid_indices(rows: int, cols: int) -> np.ndarray:
 
 
 def _drop_degenerate(positions: np.ndarray, indices: np.ndarray) -> np.ndarray:
-
     tri = indices.reshape(-1, 3)
     p = positions[tri]
     area2 = np.linalg.norm(np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0]), axis=1)
@@ -94,7 +92,6 @@ def _drop_degenerate(positions: np.ndarray, indices: np.ndarray) -> np.ndarray:
 def _cylinder_side(
     z0: float, z1: float, segments: int, v0: float, v1: float
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-
     th = _ring_angles(segments)
     cos, sin = np.cos(th), np.sin(th)
     u = th / (2.0 * np.pi)
@@ -119,7 +116,6 @@ def _cylinder_side(
 def _cap_disk(
     z: float, segments: int, up: bool
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-
     th = _ring_angles(segments)
     cos, sin = np.cos(th), np.sin(th)
     n = len(th)
@@ -147,7 +143,6 @@ def _cap_disk(
 
 
 def _merge(*parts) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-
     pos, nrm, uvs, idx, offset = [], [], [], [], 0
     for p, n, t, i in parts:
         pos.append(p)
@@ -166,7 +161,6 @@ def _merge(*parts) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
 def _sphere_band(
     phi0: float, phi1: float, rings: int, segments: int, v0: float, v1: float
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-
     phi = np.linspace(phi0, phi1, rings + 1)[:, None]
     th = _ring_angles(segments)[None, :]
     shape = (rings + 1, segments + 1)
@@ -190,7 +184,6 @@ def _make_sphere() -> MeshData:
 
 
 def _make_box() -> MeshData:
-
     faces = (
         ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
         ((-1, 0, 0), (0, -1, 0), (0, 0, 1)),
@@ -213,7 +206,6 @@ def _make_box() -> MeshData:
 
 
 def _make_plane() -> MeshData:
-
     quad = np.array([(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)])
     pos = np.stack([quad[:, 0], quad[:, 1], np.zeros(4)], axis=1)
     nrm = np.tile(np.array([[0.0, 0.0, 1.0]]), (4, 1))
@@ -223,7 +215,6 @@ def _make_plane() -> MeshData:
 
 
 def _make_cylinder() -> MeshData:
-
     return _finish(
         *_merge(
             _cylinder_side(-1.0, 1.0, CIRCLE_SEGMENTS, 0.0, 1.0),
@@ -236,7 +227,6 @@ def _make_cylinder() -> MeshData:
 def _cone_side(
     z_base: float, z_apex: float, segments: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-
     th = _ring_angles(segments)
     cos, sin = np.cos(th), np.sin(th)
     height = z_apex - z_base
@@ -264,7 +254,6 @@ def _cone_side(
 
 
 def _make_cone() -> MeshData:
-
     return _finish(
         *_merge(
             _cone_side(-1.0, 1.0, CIRCLE_SEGMENTS),
@@ -274,22 +263,18 @@ def _make_cone() -> MeshData:
 
 
 def _make_disk() -> MeshData:
-
     return _finish(*_cap_disk(0.0, CIRCLE_SEGMENTS, up=True))
 
 
 def _make_tube() -> MeshData:
-
     return _finish(*_cylinder_side(-1.0, 1.0, CIRCLE_SEGMENTS, TUBE_UV_V0, TUBE_UV_V1))
 
 
 def _make_capsule_shaft() -> MeshData:
-
     return _finish(*_cylinder_side(-1.0, 1.0, CIRCLE_SEGMENTS, CAPSULE_SHAFT_V0, CAPSULE_SHAFT_V1))
 
 
 def _make_capsule_cap() -> MeshData:
-
     return _finish(
         *_sphere_band(
             0.5 * np.pi, np.pi, CAP_RINGS, CIRCLE_SEGMENTS, CAPSULE_CAP_V0, CAPSULE_CAP_V1
@@ -298,7 +283,6 @@ def _make_capsule_cap() -> MeshData:
 
 
 def _make_arrow_shaft() -> MeshData:
-
     return _finish(
         *_merge(
             _cylinder_side(0.0, 1.0, ARROW_SEGMENTS, 0.0, 1.0),
@@ -309,7 +293,6 @@ def _make_arrow_shaft() -> MeshData:
 
 
 def _make_arrow_head() -> MeshData:
-
     return _finish(
         *_merge(
             _cone_side(0.0, 1.0, ARROW_SEGMENTS),
@@ -397,7 +380,6 @@ def _scale_xy(part, radius: float):
 
 
 def _annulus(z: float, inner: float, outer: float, segments: int, *, up: bool):
-
     th = _ring_angles(segments)
     unit = np.stack((np.cos(th), np.sin(th)), axis=1)
     pos = np.concatenate(
@@ -420,7 +402,6 @@ def _annulus(z: float, inner: float, outer: float, segments: int, *, up: bool):
 
 
 def _make_gizmo_arrow() -> MeshData:
-
     shaft_radius = AXIS_SHAFT_HALF_PT / SIZE_PT
     head_radius = AXIS_HEAD_HALF_PT / SIZE_PT
     head_base = 1.0 - AXIS_HEAD_LENGTH_PT / SIZE_PT
@@ -456,7 +437,6 @@ def _make_gizmo_plane() -> MeshData:
 def _make_gizmo_ring(
     radius: float = RING_RADIUS, *, half: bool = False, tube: float = RING_TUBE
 ) -> MeshData:
-
     major, minor = (32 if half else 64), 8
     sweep = np.pi if half else 2.0 * np.pi
     th = np.linspace(0.0, sweep, major + 1)[:, None]
@@ -507,7 +487,6 @@ _GIZMO_CACHE: dict[str, MeshData] = {}
 
 
 def builtin_mesh(key: MeshKey) -> MeshData:
-
     shape = key.shape
     mesh = _CACHE.get(shape)
     if mesh is None:
@@ -523,12 +502,10 @@ def builtin_mesh(key: MeshKey) -> MeshData:
 
 
 def all_builtin() -> dict[MeshKey, MeshData]:
-
     return {MeshKey(shape=s): builtin_mesh(MeshKey(shape=s)) for s in BUILTIN_SHAPES}
 
 
 def gizmo_mesh(name: str) -> MeshData:
-
     mesh = _GIZMO_CACHE.get(name)
     if mesh is not None:
         return mesh

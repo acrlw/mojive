@@ -1,3 +1,5 @@
+"""Scene adapter discovery, availability, and construction."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -16,12 +18,10 @@ PHYSICS_MODULES: dict[str, tuple[str, str]] = {
 
 
 def physics_of(backend_name: str) -> str:
-
     return str(backend_name).split("-", 1)[0]
 
 
 def physics_available(physics: str) -> tuple[bool, str]:
-
     entry = PHYSICS_MODULES.get(physics)
     if entry is None:
         return (
@@ -35,7 +35,6 @@ def physics_available(physics: str) -> tuple[bool, str]:
 
 
 def make_adapter(backend_name: str, asset_path: str | Path | None = None) -> SceneAdapter:
-
     physics = physics_of(backend_name)
     ok, reason = physics_available(physics)
     if not ok:
@@ -58,7 +57,6 @@ def make_adapter(backend_name: str, asset_path: str | Path | None = None) -> Sce
 
 
 def _resolve_asset(asset: str | Path) -> Path:
-
     try:
         from ..assets import resolve
     except ImportError:

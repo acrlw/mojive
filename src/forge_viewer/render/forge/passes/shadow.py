@@ -1,3 +1,5 @@
+"""Directional and local light shadow-map render pass."""
+
 from __future__ import annotations
 
 import time
@@ -62,7 +64,6 @@ class ShadowGeometry(IdGeometry):
         return ProgramSpec(name="shadow", vertex="shadow.vert", fragment="shadow.frag")
 
     def set_matrix(self, matrix: np.ndarray, scratch: np.ndarray) -> None:
-
         assert self.program is not None
         np.copyto(scratch, matrix.T)
         self.program["u_view_proj"].write(scratch)
@@ -87,10 +88,8 @@ class ShadowPass(BasePass):
 
         self._failed = ""
 
-    # ------------------------------------------------------------------
     @staticmethod
     def _sun(lights: LightSet) -> Light | None:
-
         for light in lights.lights:
             if light.active and light.cast_shadow and light.kind is LightKind.DIRECTIONAL:
                 return light
@@ -143,7 +142,6 @@ class ShadowPass(BasePass):
         self._fbo = ctx.ctx.framebuffer(depth_attachment=tex)
         return True
 
-    # ------------------------------------------------------------------
     def prepare(self, ctx: PassContext) -> bool:
         s = ctx.shadow
         self._reset(s)
@@ -277,7 +275,6 @@ class ShadowPass(BasePass):
 
     @staticmethod
     def _reset(s: ShadowResult) -> None:
-
         s.atlas = None
         s.cascade_count = 0
         s.enabled = False
@@ -285,7 +282,6 @@ class ShadowPass(BasePass):
         s.local_light_indices.fill(-1)
         s.local_tex = None
 
-    # ------------------------------------------------------------------
     def execute(self, ctx: PassContext) -> None:
         gl = ctx.ctx
         if ctx.shadow.cascade_count > 0 and self._fbo is not None:
@@ -368,7 +364,6 @@ class ShadowPass(BasePass):
 def bind_shadow_uniforms(
     program_or_cache, result: ShadowResult, unit: int = SHADOW_TEXTURE_UNIT
 ) -> bool:
-
     prog, cache = _resolve(program_or_cache)
     if not result.enabled:
         _set(prog, cache, "u_shadow_count", 0)
@@ -421,7 +416,6 @@ def bind_shadow_uniforms(
 
 
 def _resolve(target) -> tuple[moderngl.Program, object | None]:
-
     if isinstance(target, moderngl.Program):
         return target, None
     prog = getattr(target, "_program", None)

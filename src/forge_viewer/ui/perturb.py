@@ -1,3 +1,5 @@
+"""Translation and rotation perturbation geometry."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -65,7 +67,6 @@ DRAG_LAYER = "ui.perturb.drag"
 
 
 def freeze_plane_depth(cam: CameraView, grab_point) -> float:
-
     _, _, forward = camera_basis(cam)
     return float(
         np.dot(np.asarray(grab_point, np.float64) - np.asarray(cam.eye, np.float64), forward)
@@ -73,7 +74,6 @@ def freeze_plane_depth(cam: CameraView, grab_point) -> float:
 
 
 def point_on_frozen_plane(cam: CameraView, origin, direction, plane_depth: float) -> np.ndarray:
-
     _, _, forward = camera_basis(cam)
     o = np.asarray(origin, np.float64)
     d = np.asarray(direction, np.float64)
@@ -86,7 +86,6 @@ def point_on_frozen_plane(cam: CameraView, origin, direction, plane_depth: float
 
 
 def delta_rotvec(cam: CameraView, dx_px: float, dy_px: float) -> np.ndarray:
-
     right, up, _ = camera_basis(cam)
     k = float(np.deg2rad(DEG_PER_PIXEL))
     return (up * (float(dx_px) * k) + right * (float(dy_px) * k)).astype(np.float64)
@@ -98,7 +97,6 @@ _CORNER_SIGNS = np.array(
 
 
 def box_corners(center, mat3, half) -> np.ndarray:
-
     c = np.asarray(center, np.float64).reshape(3)
     r = np.asarray(mat3, np.float64).reshape(3, 3)
     h = np.broadcast_to(np.asarray(half, np.float64).reshape(-1), (3,))
@@ -106,7 +104,6 @@ def box_corners(center, mat3, half) -> np.ndarray:
 
 
 def silhouette_edges(center, mat3, half, eye) -> list[tuple[np.ndarray, np.ndarray]]:
-
     c = np.asarray(center, np.float64).reshape(3)
     r = np.asarray(mat3, np.float64).reshape(3, 3)
     h = np.broadcast_to(np.asarray(half, np.float64).reshape(-1), (3,)).astype(np.float64)
@@ -139,7 +136,6 @@ def silhouette_edges(center, mat3, half, eye) -> list[tuple[np.ndarray, np.ndarr
 
 
 def silhouette_loop(edges: list[tuple[np.ndarray, np.ndarray]]) -> np.ndarray:
-
     if not edges:
         return np.zeros((0, 3), np.float64)
     unused = list(edges)
@@ -164,7 +160,6 @@ def silhouette_loop(edges: list[tuple[np.ndarray, np.ndarray]]) -> np.ndarray:
 
 
 def project(cam: CameraView, points, rect: tuple[float, float, float, float]) -> np.ndarray:
-
     pts = np.asarray(points, np.float64).reshape(-1, 3)
     mvp = np.asarray(cam.proj_matrix(), np.float64) @ np.asarray(cam.view_matrix(), np.float64)
     h = np.concatenate([pts, np.ones((len(pts), 1))], axis=1) @ mvp.T
@@ -204,7 +199,6 @@ def rounded_loop(
 
 
 def axis_draw_order(cam: CameraView, rotation) -> tuple[int, int, int]:
-
     forward = camera_basis(cam)[2]
     r = np.asarray(rotation, np.float64).reshape(3, 3)
     order = sorted(range(3), key=lambda axis: float(np.dot(r[:, axis], forward)), reverse=True)
@@ -235,7 +229,6 @@ class PerturbController:
         *,
         body_radius: float = 0.1,
     ) -> PerturbState:
-
         st = session.perturb
         pos, mat = current_pose(session, node)
         st.active = True
@@ -252,7 +245,6 @@ class PerturbController:
         return st
 
     def drag_translate(self, session: Session, cam: CameraView, origin, direction) -> np.ndarray:
-
         st = session.perturb
         p = point_on_frozen_plane(cam, origin, direction, st.plane_depth)
         st.target_pos = (
@@ -263,7 +255,6 @@ class PerturbController:
     def drag_rotate(
         self, session: Session, cam: CameraView, dx_px: float, dy_px: float
     ) -> np.ndarray:
-
         st = session.perturb
         delta = math3d.rotvec_to_mat3(delta_rotvec(cam, dx_px, dy_px))
         st.target_mat = (
@@ -275,7 +266,6 @@ class PerturbController:
         session.submit(ClearPerturb())
 
     def apply(self, session: Session) -> None:
-
         st = session.perturb
         if not st.active or st.node_id < 0:
             return
@@ -302,7 +292,6 @@ class PerturbController:
         rect: tuple[float, float, float, float],
         ui_scale: float = 1.0,
     ) -> MarkBudget:
-
         budget = self.budget
         budget.primitives = 0
         budget.dropped = 0
@@ -346,7 +335,6 @@ class PerturbController:
         budget: MarkBudget,
         ui_scale: float,
     ) -> None:
-
         layer = dd.layer(DRAG_LAYER, Occlusion.ALWAYS)
         grab = grab_point_now(st, *pose).astype(np.float32)
         tip = grab_point_target(st).astype(np.float32)
@@ -372,7 +360,6 @@ class PerturbController:
         budget: MarkBudget,
         ui_scale: float,
     ) -> None:
-
         layer = dd.layer(MARK_LAYER, Occlusion.ALWAYS)
         center = (
             np.asarray(pose[0], np.float64)
@@ -438,7 +425,6 @@ class PerturbController:
         budget.primitives = 2 * len(loop) + 5 if len(loop) else 5
 
     def _clear(self, backend: Any, only: str = "") -> None:
-
         dd = backend.debug
         if dd is None or not backend.caps.debug_draw or Occlusion is None:
             return
@@ -448,7 +434,6 @@ class PerturbController:
             dd.layer(DRAG_LAYER, Occlusion.ALWAYS).clear()
 
     def _note(self, message: str) -> None:
-
         if message and message != self._last_note:
             self._last_note = message
             log.warning("{}", message)
@@ -460,7 +445,6 @@ def fallback_segments(
     rect: tuple[float, float, float, float],
     center,
 ) -> tuple[np.ndarray, np.ndarray]:
-
     center = np.asarray(center, np.float64)
     size = world_scale(cam, center, rect[3]) / AXIS_OVERSHOOT
     edges = silhouette_edges(center, st.target_mat, np.full(3, size), cam.eye)
@@ -477,7 +461,6 @@ def draw_fallback(
     center,
     ui_scale: float = 1.0,
 ) -> None:
-
     from imgui_bundle import imgui
 
     dl = imgui.get_window_draw_list()
@@ -500,7 +483,6 @@ def draw_fallback(
 
 
 def current_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarray]:
-
     frame = session.frame
     i = int(node.body_index)
     pos = np.zeros(3, np.float64)
@@ -513,27 +495,23 @@ def current_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndar
 
 
 def grab_point_local(st: PerturbState) -> np.ndarray:
-
     r = np.asarray(st.start_mat, np.float64).reshape(3, 3)
     return r.T @ (np.asarray(st.grab_point, np.float64) - np.asarray(st.start_pos, np.float64))
 
 
 def grab_point_now(st: PerturbState, pos, mat) -> np.ndarray:
-
     if pos is None or mat is None:
         return np.asarray(st.grab_point, np.float64)
     return np.asarray(pos, np.float64) + np.asarray(mat, np.float64) @ grab_point_local(st)
 
 
 def grab_point_target(st: PerturbState) -> np.ndarray:
-
     return np.asarray(st.target_pos, np.float64) + np.asarray(
         st.target_mat, np.float64
     ) @ grab_point_local(st)
 
 
 def rotvec_of(mat3) -> np.ndarray:
-
     m = np.asarray(mat3, np.float64).reshape(3, 3)
     cos = (np.trace(m) - 1.0) * 0.5
     angle = float(np.arccos(np.clip(cos, -1.0, 1.0)))

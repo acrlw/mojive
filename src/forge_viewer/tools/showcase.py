@@ -1,3 +1,5 @@
+"""Render the forge-viewer feature showcase."""
+
 from __future__ import annotations
 
 import argparse
@@ -13,7 +15,6 @@ OUT = Path("out/showcase")
 
 
 def _add_debug_layers(harness: OffscreenHarness) -> str:
-
     notes = []
     br = bridge(harness.backend)
     axes = br.layer("showcase.axes", Occlusion.ALWAYS)

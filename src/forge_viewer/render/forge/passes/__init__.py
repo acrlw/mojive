@@ -1,3 +1,5 @@
+"""Built-in Forge render-pass registration."""
+
 from __future__ import annotations
 
 import importlib
@@ -15,7 +17,6 @@ _done = False
 
 
 def load_all(force: bool = False) -> tuple[str, ...]:
-
     global _done
     if _done and not force:
         return tuple(_loaded)
@@ -36,10 +37,8 @@ def load_all(force: bool = False) -> tuple[str, ...]:
 
 
 def loaded() -> tuple[str, ...]:
-
     return tuple(_loaded)
 
 
 def failed() -> dict[str, str]:
-
     return dict(_failed)

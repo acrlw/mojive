@@ -1,3 +1,5 @@
+"""Forge render-pass registry."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -23,7 +25,6 @@ _REGISTRY: dict[str, PassFactory] = {}
 
 
 def register_pass(name: str, factory: PassFactory) -> None:
-
     if name not in PASS_ORDER:
         raise ValueError(f"Unknown pass {name!r}. Available passes: {PASS_ORDER}")
     _REGISTRY[name] = factory

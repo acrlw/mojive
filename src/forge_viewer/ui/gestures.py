@@ -1,3 +1,5 @@
+"""Input ownership and viewport gesture classification."""
+
 from __future__ import annotations
 
 import enum
@@ -44,17 +46,14 @@ class InputState:
 
 
 def viewport_input_allowed(inside: bool, hovered_window: str | None) -> bool:
-
     return bool(inside and hovered_window == "Viewport")
 
 
 def gizmo_yields(state: InputState) -> bool:
-
     return bool(state.ctrl or state.perturbing)
 
 
 def claim_for(state: InputState) -> Claim:
-
     if state.ui_wants_mouse:
         return Claim.UI
 
@@ -83,7 +82,6 @@ class CameraGesture(enum.StrEnum):
 
 
 def camera_gesture(state: InputState) -> CameraGesture:
-
     if state.right or state.middle or (state.left and state.shift):
         return CameraGesture.PAN
     if state.left:
@@ -94,7 +92,6 @@ def camera_gesture(state: InputState) -> CameraGesture:
 
 
 def perturb_mode(state: InputState) -> str:
-
     return "rotate" if state.right else "translate"
 
 
@@ -113,22 +110,18 @@ class GestureRouter:
 
     @property
     def held(self) -> bool:
-
         return self._held
 
     @property
     def released(self) -> bool:
-
         return self._released
 
     @property
     def mode(self) -> str:
-
         return self._mode
 
     @property
     def travel(self) -> float:
-
         return self._travel
 
     @property
@@ -157,7 +150,6 @@ class GestureRouter:
         return claim
 
     def abort(self) -> None:
-
         self._held = False
         self._released = False
         self._claim = Claim.NONE

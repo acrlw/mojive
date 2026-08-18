@@ -1,3 +1,5 @@
+"""OpenGL context attachment and capability probing."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -34,12 +36,10 @@ class ContextCaps:
 
     @property
     def usable(self) -> bool:
-
         return self.version_code >= 330
 
 
 def attach(ctx: moderngl.Context | None = None) -> tuple[moderngl.Context, ContextCaps]:
-
     gl_ctx = ctx if ctx is not None else moderngl.create_context()
     return gl_ctx, probe(gl_ctx)
 

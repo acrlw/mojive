@@ -1,3 +1,5 @@
+"""Shared scene adapter contracts and capability metadata."""
+
 from __future__ import annotations
 
 import enum

@@ -1,3 +1,5 @@
+"""MuJoCo flex and skin mesh construction and updates."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,7 +21,6 @@ def _normalize_rows(values: np.ndarray, scratch: np.ndarray, lengths: np.ndarray
 
 
 def _cross_rows(a: np.ndarray, b: np.ndarray, out: np.ndarray, scratch: np.ndarray) -> None:
-
     np.multiply(a[:, 1], b[:, 2], out=out[:, 0])
     np.multiply(a[:, 2], b[:, 1], out=scratch[:, 0])
     out[:, 0] -= scratch[:, 0]
@@ -405,7 +406,6 @@ class _Skin(DeformableMesh):
 def build_deformables(
     model, data, visible_flex_groups: set[int], visible_skin_groups: set[int]
 ) -> list[DeformableMesh]:
-
     result: list[DeformableMesh] = []
     for flex_id in range(model.nflex):
         if int(model.flex_group[flex_id]) not in visible_flex_groups:

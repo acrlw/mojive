@@ -1,3 +1,5 @@
+"""Exercise authored scene save, load, and capture."""
+
 from __future__ import annotations
 
 import argparse

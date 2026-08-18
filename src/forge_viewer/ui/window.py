@@ -1,3 +1,5 @@
+"""GLFW window lifecycle, scaling, and input state."""
+
 from __future__ import annotations
 
 import time
@@ -48,7 +50,6 @@ class ResizeLatch:
 
     @property
     def committed(self) -> tuple[int, int] | None:
-
         return self._committed
 
     @property
@@ -57,11 +58,9 @@ class ResizeLatch:
 
     @property
     def rebuilds(self) -> int:
-
         return self._rebuilds
 
     def update(self, size: tuple[int, int], now: float) -> tuple[int, int] | None:
-
         self._frames += 1
         w, h = (max(1, int(size[0])), max(1, int(size[1])))
         target = (w, h)
@@ -83,7 +82,6 @@ class ResizeLatch:
         return None
 
     def reset(self) -> None:
-
         self._committed = None
         self._pending = None
 
@@ -185,18 +183,15 @@ class Window:
         self.latch = ResizeLatch()
 
     def _load_fonts(self, io) -> None:
-
         self.font_report = fonts.load(imgui, io, size_pt=self.config.font_size_pt)
         for note in self.font_report.notes:
             log.warning("Font fallback: {}", note)
 
     @property
     def gl_context(self) -> Any:
-
         return self._window
 
     def make_current(self) -> None:
-
         glfw.make_context_current(self._window)
 
     @property
@@ -207,32 +202,25 @@ class Window:
     def renderer_name(self) -> str:
         return gl.glGetString(gl.GL_RENDERER).decode()
 
-    # ------------------------------------------------------------ HiDPI
-
     @property
     def ui_scale(self) -> float:
-
         return self._ui_scale
 
     @property
     def style_scale(self) -> float:
-
         return self._style_scale
 
     @property
     def pixel_scale(self) -> float:
-
         return self._pixel_scale
 
     def points_to_pixels(self, value: Any) -> Any:
-
         s = self._pixel_scale
         if isinstance(value, (int, float)):
             return float(value) * s
         return tuple(float(v) * s for v in value)
 
     def pixels_to_points(self, value: Any) -> Any:
-
         s = self._pixel_scale
         if isinstance(value, (int, float)):
             return float(value) / s
@@ -261,14 +249,12 @@ class Window:
     def poll_render_size(
         self, viewport_points: tuple[float, float], now: float | None = None
     ) -> tuple[int, int] | None:
-
         px = self.points_to_pixels(viewport_points)
         return self.latch.update(
             (int(px[0]), int(px[1])), time.perf_counter() if now is None else now
         )
 
     def show(self) -> None:
-
         glfw.show_window(self._window)
         self._shown = True
 
@@ -296,14 +282,12 @@ class Window:
         self._file_drops.extend(Path(path).expanduser().resolve() for path in paths)
 
     def set_vsync(self, on: bool) -> None:
-
         glfw.swap_interval(1 if on else 0)
 
     def set_title(self, title: str) -> None:
         glfw.set_window_title(self._window, title)
 
     def begin_frame(self) -> None:
-
         glfw.poll_events()
         self._refresh_scales()
         self._impl.process_inputs()
@@ -323,7 +307,6 @@ class Window:
     _LAYOUT_BOTTOM = ("Stats", "Plot", "Help", "Info")
 
     def _build_default_layout(self) -> None:
-
         if self._layout_done:
             return
         self._layout_done = True
@@ -354,7 +337,6 @@ class Window:
             log.error("Default dock layout failed; panels will float: {}", e)
 
     def end_frame(self, *, readback: bool = False) -> np.ndarray | None:
-
         imgui.render()
         fb_w, fb_h = self.size_pixels
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
@@ -376,7 +358,6 @@ class Window:
         return self._frame_index
 
     def read_frame(self) -> np.ndarray:
-
         w, h = self.size_pixels
         if self._readback is None or self._readback.shape[:2] != (h, w):
             self._readback = np.empty((h, w, 3), np.uint8)
@@ -387,7 +368,6 @@ class Window:
         return self._readback
 
     def close(self) -> None:
-
         if self._destroyed:
             return
         self._destroyed = True

@@ -1,3 +1,5 @@
+"""Capture MuJoCo convex-hull visualization references."""
+
 from __future__ import annotations
 
 import argparse

@@ -1,3 +1,5 @@
+"""Serialization for authored Forge scenes."""
+
 from __future__ import annotations
 
 import base64

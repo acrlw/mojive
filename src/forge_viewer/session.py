@@ -1,3 +1,5 @@
+"""Application state, selection, overrides, and command routing."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
@@ -78,7 +80,6 @@ class Session:
 
     @property
     def paused(self) -> bool:
-
         return self._paused
 
     @property
@@ -139,7 +140,6 @@ class Session:
 
     @property
     def camera(self) -> CameraView:
-
         return self._camera
 
     @property
@@ -152,7 +152,6 @@ class Session:
 
     @property
     def structure_generation(self) -> int:
-
         return self._structure_generation
 
     def node(self, node_id: int) -> SceneNode | None:
@@ -165,7 +164,6 @@ class Session:
         return self._by_object_id.get(int(object_id))
 
     def tick(self, needs: FrameNeeds, wall_dt: float | None = None) -> SceneFrame:
-
         if not self._paused and not self._adapter.caps.external_clock:
             timestep = self._adapter.timestep()
             if wall_dt is not None and timestep > 0.0:
@@ -197,7 +195,6 @@ class Session:
         return self._frame
 
     def submit(self, command: Command) -> CommandResult:
-
         result = self._dispatch(command)
         self._last_message = result.message
         return result
@@ -525,7 +522,6 @@ class Session:
         return CommandResult.bad(f"Unknown command: {type(c).__name__}")
 
     def query(self, q: Query):
-
         if isinstance(q, cmd.Pick):
             if not self._adapter.caps.raycast:
                 return (0, float("inf"))
@@ -537,7 +533,6 @@ class Session:
         raise TypeError(f"Unknown query: {type(q).__name__}")
 
     def bounds(self) -> tuple[np.ndarray, np.ndarray]:
-
         src = self._source
         frame = self._frame
         if src is None:

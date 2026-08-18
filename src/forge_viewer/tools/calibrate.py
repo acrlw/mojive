@@ -1,3 +1,5 @@
+"""Calibrate Forge output against reference images."""
+
 from __future__ import annotations
 
 import argparse
@@ -72,7 +74,6 @@ REFLECT_CAMERA = "cam.lookat[:]=[0,0,0.35]; cam.distance=4.0; cam.azimuth=90.0; 
 
 
 def _reference_image(path: Path, out: Path, camera: str) -> np.ndarray:
-
     code = (
         "import sys,numpy as np,mujoco\n"
         f"m=mujoco.MjModel.from_xml_path({str(path)!r})\n"
@@ -95,7 +96,6 @@ def _write_scene(path: Path, *, ha: float, hd: float, ld: float, la: float, alb:
 
 
 def _reference_center(path: Path) -> tuple[float, float, float]:
-
     code = (
         "import sys,json,numpy as np,mujoco\n"
         f"m=mujoco.MjModel.from_xml_path({str(path)!r})\n"
@@ -115,7 +115,6 @@ def _reference_center(path: Path) -> tuple[float, float, float]:
 
 
 def _forge_center(path: Path) -> tuple[float, float, float]:
-
     from ..types import CameraView
     from ._harness import OffscreenHarness
 

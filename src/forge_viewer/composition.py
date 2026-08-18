@@ -1,3 +1,5 @@
+"""Viewer construction and high-level runtime helpers."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -28,7 +30,6 @@ class Viewer:
         self.app.run(max_frames=max_frames)
 
     def sync(self) -> None:
-
         self.app.sync()
 
     def release(self) -> None:
@@ -51,7 +52,6 @@ class Viewer:
         before_frame: Callable[[int, Viewer], None] | None = None,
         size: tuple[int, int] | None = None,
     ) -> Path:
-
         from .recording import VideoRecorder
 
         if frames <= 0:
@@ -87,7 +87,6 @@ def build(
     samples: int = 4,
     title: str = "forge-viewer",
 ) -> Viewer:
-
     from .backends import make_adapter
 
     return _compose(
@@ -112,7 +111,6 @@ def build_from_adapter(
     samples: int = 4,
     title: str = "forge-viewer",
 ) -> Viewer:
-
     return _compose(
         lambda: adapter,
         asset_path=None,
@@ -126,7 +124,6 @@ def build_from_adapter(
 
 
 def build_scene(scene: Scene, **kwargs) -> Viewer:
-
     from .adapters.static import StaticSceneAdapter
 
     return build_from_adapter(StaticSceneAdapter(scene), **kwargs)
@@ -191,11 +188,7 @@ def _compose(
     )
 
 
-# ---------------------------------------------------------------- doctor
-
-
 def doctor(asset: Path, backend_name: str = "mujoco", frames: int = 90) -> dict:
-
     checks: list[tuple[str, bool, str]] = []
     viewer: Viewer | None = None
     try:
@@ -273,9 +266,6 @@ def doctor(asset: Path, backend_name: str = "mujoco", frames: int = 90) -> dict:
     return {"ok": all(ok for _n, ok, _m in checks), "frames": frames, "checks": checks}
 
 
-# ---------------------------------------------------------------- capture
-
-
 def capture(
     asset: Path,
     output: Path,
@@ -287,7 +277,6 @@ def capture(
     render_flags: tuple[str, ...] = (),
     camera_name: str = "",
 ) -> bool:
-
     viewer: Viewer | None = None
     try:
         w, h = size or (1600, 1000)

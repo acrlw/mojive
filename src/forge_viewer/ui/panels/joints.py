@@ -1,3 +1,5 @@
+"""MuJoCo joint controls and range display."""
+
 from __future__ import annotations
 
 import math
@@ -82,7 +84,6 @@ class JointsPanel(Panel):
             self._drive_detail(ctx, j)
 
     def _drive_detail(self, ctx: PanelContext, j: JointInfo) -> None:
-
         drivers = [a for a in ctx.session.actuators if a.joint == j.joint_id]
         imgui.indent()
         if not drivers:
@@ -119,7 +120,6 @@ class JointsPanel(Panel):
                 ctx.submit(cmd.SetCtrl(address, edit.value))
 
     def _snapshot(self, ctx: PanelContext) -> None:
-
         gen = ctx.session.structure_generation
         frame = ctx.session.frame
         if gen != self._snapshot_generation:
@@ -142,7 +142,6 @@ class JointsPanel(Panel):
 
 
 def _joint_range(j: JointInfo) -> tuple[float, float]:
-
     if j.limited and j.range[1] > j.range[0]:
         return float(j.range[0]), float(j.range[1])
     return (-math.pi, math.pi) if j.kind == "hinge" else (-1.0, 1.0)

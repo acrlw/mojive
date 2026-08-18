@@ -1,3 +1,5 @@
+"""Generate the project visual acceptance gallery."""
+
 from __future__ import annotations
 
 import argparse

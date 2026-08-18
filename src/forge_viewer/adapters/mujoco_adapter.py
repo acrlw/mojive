@@ -1,3 +1,5 @@
+"""MuJoCo scene adapter and simulation state integration."""
+
 from __future__ import annotations
 
 from colorsys import hsv_to_rgb
@@ -220,7 +222,6 @@ class MuJoCoAdapter:
             self.load(path)
 
     def load(self, path: Path) -> None:
-
         try:
             model = mujoco.MjModel.from_xml_path(str(path))
         except Exception as exc:
@@ -345,7 +346,6 @@ class MuJoCoAdapter:
         return self._structure_revision
 
     def _verify_pose_layout(self) -> bool:
-
         m, d = self._m, self._d
         g = m.ngeom
         if g == 0:
@@ -376,7 +376,6 @@ class MuJoCoAdapter:
             mujoco.mj_forward(m, d)
 
     def _fill_poses(self) -> None:
-
         if self._fast_pose:
             np.copyto(self._geom_xpos_buf, self._mj_geom_xpos, casting="unsafe")
             np.copyto(self._geom_xmat_buf, self._mj_geom_xmat3, casting="unsafe")
@@ -410,7 +409,6 @@ class MuJoCoAdapter:
         return float(self._m.opt.timestep)
 
     def frame(self, needs: FrameNeeds) -> SceneFrame:
-
         d = self._d
         f = self._frame
         f.time = float(d.time)
@@ -517,7 +515,6 @@ class MuJoCoAdapter:
         return f
 
     def _fill_tendons(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-
         count = 0
         self._tendon_ids.fill(-1)
         for ti in range(self._m.ntendon):
@@ -544,7 +541,6 @@ class MuJoCoAdapter:
         )
 
     def _fill_contacts(self, islands: bool = False) -> np.ndarray:
-
         d, m = self._d, self._m
         n = int(d.ncon)
         if n > len(self._contact_buf):
@@ -1634,14 +1630,12 @@ class MuJoCoAdapter:
         return rgba.copy()
 
     def _geom_rgba(self, gi: int, matid: int) -> np.ndarray:
-
         rgba = np.asarray(self._m.geom_rgba[gi], np.float32)
         if matid >= 0 and np.array_equal(rgba, _GEOM_RGBA_DEFAULT):
             return np.asarray(self._m.mat_rgba[matid], np.float32).copy()
         return rgba.copy()
 
     def _build_mesh(self, mesh_id: int) -> MeshData:
-
         m = self._m
         va, vn = int(m.mesh_vertadr[mesh_id]), int(m.mesh_vertnum[mesh_id])
         fa, fn = int(m.mesh_faceadr[mesh_id]), int(m.mesh_facenum[mesh_id])
@@ -1729,7 +1723,6 @@ class MuJoCoAdapter:
         )
 
     def _build_heightfield(self, field_id: int) -> MeshData:
-
         m = self._m
         rows = int(m.hfield_nrow[field_id])
         cols = int(m.hfield_ncol[field_id])
@@ -1797,7 +1790,6 @@ class MuJoCoAdapter:
         return MeshData(p, normals, np.asarray(uvs, np.float32), idx)
 
     def _build_textures(self) -> dict[str, TextureData]:
-
         m = self._m
         out: dict[str, TextureData] = {}
         for ti in range(m.ntex):
@@ -1823,7 +1815,6 @@ class MuJoCoAdapter:
     def _build_materials(
         self, textures: dict[str, TextureData]
     ) -> tuple[list[Material], dict[int, int]]:
-
         m = self._m
         tex_names = [
             mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_TEXTURE, i) or f"tex{i}" for i in range(m.ntex)
@@ -1921,7 +1912,6 @@ class MuJoCoAdapter:
         )
 
     def _headlight(self) -> Light | None:
-
         hl = self._m.vis.headlight
         if not bool(hl.active):
             return None
@@ -1934,7 +1924,6 @@ class MuJoCoAdapter:
         )
 
     def _global_ambient(self) -> np.ndarray:
-
         total = np.zeros(3, np.float32)
         hl = self._m.vis.headlight
         if bool(hl.active):
@@ -1946,7 +1935,6 @@ class MuJoCoAdapter:
         return np.clip(total, 0.0, 1.0)
 
     def _build_nodes(self) -> list[SceneNode]:
-
         m = self._m
         nodes: list[SceneNode] = []
         body_node: dict[int, int] = {}
@@ -2049,7 +2037,6 @@ class MuJoCoAdapter:
         return nodes
 
     def _is_free_body(self, body: int) -> bool:
-
         m = self._m
         adr, num = int(m.body_jntadr[body]), int(m.body_jntnum[body])
         return num == 1 and int(m.jnt_type[adr]) == mujoco.mjtJoint.mjJNT_FREE
@@ -2225,7 +2212,6 @@ class MuJoCoAdapter:
         return groups[np.asarray(model_groups, np.intp)].copy()
 
     def set_qpos(self, index: int, value: float) -> bool:
-
         if not 0 <= int(index) < self._m.nq:
             return False
         self._d.qpos[int(index)] = float(value)
@@ -2365,7 +2351,6 @@ class MuJoCoAdapter:
     def apply_perturb(
         self, node_id: int, target_position: np.ndarray, target_rotation: np.ndarray, mode: str
     ) -> bool:
-
         body = self._node_body.get(int(node_id), -1)
         if body <= 0:
             return False
@@ -2411,7 +2396,6 @@ class MuJoCoAdapter:
         self._perturb_body = -1
 
     def raycast(self, origin: np.ndarray, direction: np.ndarray) -> tuple[int, float]:
-
         self._ray_pnt[:] = np.asarray(origin, np.float64).reshape(3)
         v = np.asarray(direction, np.float64).reshape(3)
         n = float(np.linalg.norm(v))
@@ -2438,7 +2422,6 @@ class MuJoCoAdapter:
         return body, float(dist)
 
     def camera_hint(self) -> CameraView | None:
-
         m = self._m
         extent = float(m.stat.extent) or 1.0
         center = np.asarray(m.stat.center, np.float32)
@@ -2469,7 +2452,6 @@ class MuJoCoAdapter:
 
     @property
     def model(self):
-
         return self._m
 
     @property
@@ -2478,5 +2460,4 @@ class MuJoCoAdapter:
 
     @property
     def fast_pose(self) -> bool:
-
         return self._fast_pose

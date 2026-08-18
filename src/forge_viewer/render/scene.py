@@ -1,3 +1,5 @@
+"""Renderer-facing scene data and draw buckets."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -46,7 +48,6 @@ class RenderScene:
 
     infinite_planes: tuple[int, ...] = ()
 
-    # ------------------------------------------------------------------
     def bucket_count(self) -> int:
         return len(self.bucket_keys)
 
@@ -57,7 +58,6 @@ class RenderScene:
         return total
 
     def validate(self) -> None:
-
         n = self.count
         for name in ("transforms", "colors", "material", "tex_coef", "object_id", "bucket"):
             arr = getattr(self, name)
@@ -92,9 +92,7 @@ class RenderScene:
             if not 0 <= matid < len(self.materials):
                 raise ValueError(f"material id {matid} exceeds table size {len(self.materials)}")
 
-    # ------------------------------------------------------------------
     def transparent_draw_order(self, eye: np.ndarray | None = None) -> tuple[int, ...]:
-
         if not self.transparent_buckets:
             return ()
         eye = np.asarray(self.camera.eye if eye is None else eye, np.float32)
@@ -119,7 +117,6 @@ class SceneBuilder:
         self.write_index: np.ndarray = np.zeros(0, np.int32)
 
     def material_id(self, mat: Material) -> int:
-
         token = id(mat)
         if token not in self._mat_index:
             self._mat_index[token] = len(self._materials)

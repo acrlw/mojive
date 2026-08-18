@@ -1,3 +1,5 @@
+"""Simulation playback and speed controls."""
+
 from __future__ import annotations
 
 from imgui_bundle import imgui
@@ -13,7 +15,6 @@ class ControlPanel(Panel):
     shortcut = "F2"
 
     def frame_needs(self) -> FrameNeeds:
-
         return FrameNeeds.none()
 
     def draw(self, ctx: PanelContext) -> None:

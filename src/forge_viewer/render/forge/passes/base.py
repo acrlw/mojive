@@ -1,3 +1,5 @@
+"""Render-pass contracts, shared context, and pipeline states."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -97,7 +99,6 @@ class PassContext:
 
     @property
     def px_scale(self) -> float:
-
         p11 = float(self.proj[1, 1])
         return 2.0 / (p11 * max(self.target.height, 1)) if abs(p11) > 1e-9 else 0.0
 
@@ -143,7 +144,6 @@ def state_transparent(ctx: moderngl.Context, *, additive: bool = False) -> None:
 
 
 def state_overdraw(ctx: moderngl.Context) -> None:
-
     ctx.enable_only(moderngl.BLEND | moderngl.CULL_FACE)
     ctx.blend_func = (moderngl.ONE, moderngl.ONE)
     ctx.front_face = "ccw"
@@ -151,7 +151,6 @@ def state_overdraw(ctx: moderngl.Context) -> None:
 
 
 def state_overlay(ctx: moderngl.Context, depth_test: bool) -> None:
-
     flags = moderngl.BLEND | (moderngl.DEPTH_TEST if depth_test else 0)
     ctx.enable_only(flags)
     ctx.depth_func = "<"

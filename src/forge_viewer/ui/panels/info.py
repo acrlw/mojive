@@ -1,3 +1,5 @@
+"""Renderer and runtime information panel."""
+
 from __future__ import annotations
 
 from imgui_bundle import imgui

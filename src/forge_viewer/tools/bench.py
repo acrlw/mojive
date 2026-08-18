@@ -1,3 +1,5 @@
+"""Measure representative renderer workloads."""
+
 from __future__ import annotations
 
 import argparse

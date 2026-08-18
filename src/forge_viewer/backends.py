@@ -1,3 +1,5 @@
+"""Runtime backend discovery and adapter selection."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -51,7 +53,6 @@ def _missing_modules(names: tuple[str, ...]) -> list[str]:
 
 
 def _classic_blocked() -> str:
-
     if sys.platform == "darwin":
         return (
             "MuJoCo's legacy renderer requires an OpenGL compatibility profile. "
@@ -108,12 +109,10 @@ def _describe(name: str, physics_label: str, renderer: str, role: str) -> Backen
 
 
 def available_backends() -> list[BackendInfo]:
-
     return [_describe(*entry) for entry in _MATRIX]
 
 
 def default_backend() -> str:
-
     infos = available_backends()
     for info in infos:
         if info.name == "mujoco" and info.available:
@@ -125,7 +124,6 @@ def default_backend() -> str:
 
 
 def make_backend_adapter(backend_name: str, asset_path: str | Path | None = None) -> SceneAdapter:
-
     info = backend_info(backend_name)
     if not info.available:
         raise RuntimeError(f"Backend {backend_name!r} is unavailable: {info.reason}")

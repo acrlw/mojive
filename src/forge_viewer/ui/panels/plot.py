@@ -1,3 +1,5 @@
+"""Scrolling telemetry plot panel."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -29,7 +31,6 @@ class Ring:
 
     @property
     def offset(self) -> int:
-
         return self.index if self.filled == len(self.data) else 0
 
     def span(self) -> tuple[float, float]:
@@ -62,7 +63,6 @@ class PlotPanel(Panel):
         self._tracked = -1
 
     def frame_needs(self) -> FrameNeeds:
-
         return FrameNeeds(
             poses=False,
             qpos=self.show_angle,

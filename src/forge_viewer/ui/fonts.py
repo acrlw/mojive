@@ -1,3 +1,5 @@
+"""UI font discovery, download, and atlas setup."""
+
 from __future__ import annotations
 
 import hashlib
@@ -55,7 +57,6 @@ DOWNLOAD_TIMEOUT_S = 20.0
 
 
 def cache_dir() -> Path:
-
     if sys.platform == "darwin":
         base = Path.home() / "Library" / "Caches"
     elif os.name == "nt":
@@ -74,7 +75,6 @@ def _digest(path: Path) -> str:
 
 
 def fetch(remote: Remote, *, timeout: float = DOWNLOAD_TIMEOUT_S) -> tuple[Path | None, str]:
-
     dst = cache_dir() / remote.filename
     if dst.is_file() and dst.stat().st_size == remote.size and _digest(dst) == remote.sha256:
         return dst, f"{remote.label} loaded from cache"
@@ -122,7 +122,6 @@ def _first_existing(cands: tuple[tuple[str, int], ...]) -> tuple[str, int] | Non
 
 
 def _bundled_mono() -> tuple[str, int] | None:
-
     try:
         from imgui_bundle import imgui_bundle_folder
 
@@ -141,7 +140,6 @@ def _resolve(
     timeout: float,
     notes: list[str],
 ) -> tuple[tuple[str, int] | None, str]:
-
     def remote_first() -> tuple[tuple[str, int] | None, str]:
         if not allow_download:
             notes.append(f"{remote.label} is unavailable and downloads are disabled")
@@ -170,7 +168,6 @@ def load(
     allow_download: bool = True,
     timeout: float = DOWNLOAD_TIMEOUT_S,
 ) -> FontReport:
-
     rep = FontReport(size_pt=size_pt)
     io.fonts.clear()
 

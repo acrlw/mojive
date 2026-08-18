@@ -1,3 +1,5 @@
+"""Sorted transparent geometry render pass."""
+
 from __future__ import annotations
 
 import moderngl
@@ -18,7 +20,6 @@ class TransparentPass(BasePass):
     def __init__(self) -> None:
         self._order: tuple[int, ...] = ()
 
-    # ------------------------------------------------------------------
     def prepare(self, ctx: PassContext) -> bool:
         if not ctx.scene.transparent_buckets or not ctx.flag(RenderFlag.TRANSPARENT):
             return False
@@ -28,7 +29,6 @@ class TransparentPass(BasePass):
         self._order = ctx.scene.transparent_draw_order()
         return bool(self._order)
 
-    # ------------------------------------------------------------------
     def execute(self, ctx: PassContext) -> None:
         target, gl = ctx.target, ctx.ctx
         target.use_main()

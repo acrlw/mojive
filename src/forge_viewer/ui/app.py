@@ -1,3 +1,5 @@
+"""Main viewer UI loop and panel coordination."""
+
 from __future__ import annotations
 
 import sys
@@ -90,13 +92,11 @@ class ViewerApp:
         self._model_drop_notice_until = 0.0
 
     def set_fixed_render_size(self, width: int, height: int) -> None:
-
         self._fixed_render_size = (max(1, int(width)), max(1, int(height)))
         self.backend.resize(*self._fixed_render_size)
         self.camera.set_aspect(self._fixed_render_size[0] / self._fixed_render_size[1])
 
     def _startup(self) -> None:
-
         if self._started:
             return
         if self.window is None:
@@ -108,7 +108,6 @@ class ViewerApp:
         self._last_time = time.perf_counter()
 
     def run(self, max_frames: int | None = None) -> None:
-
         self._startup()
         while not self._should_close():
             if max_frames is not None and self._frame_index >= max_frames:
@@ -117,7 +116,6 @@ class ViewerApp:
         self.release()
 
     def sync(self) -> None:
-
         self._startup()
         self.frame()
 
@@ -255,7 +253,6 @@ class ViewerApp:
         imgui.end_popup()
 
     def frame(self) -> None:
-
         window = self.window
         now = time.perf_counter()
         dt = self._dt = min(0.1, now - self._last_time)
@@ -305,7 +302,6 @@ class ViewerApp:
         self._frame_index += 1
 
     def _poll_keys(self) -> Keys:
-
         k = imgui.Key
         io = imgui.get_io()
         self.panels.poll_shortcuts()
@@ -367,11 +363,9 @@ class ViewerApp:
         )
 
     def _claim_gesture(self, state: gs.InputState) -> gs.Claim:
-
         return self.router.update(state)
 
     def _poll_gizmo(self, state: gs.InputState, keys: Keys) -> None:
-
         keyboard_was_active = self.gizmo.keyboard_using
         axis = keys.gizmo_axis
         if not keyboard_was_active and (not state.over_viewport or state.any_button):
@@ -398,7 +392,6 @@ class ViewerApp:
         )
 
     def _publish_gizmo(self) -> None:
-
         self.gizmo.publish(
             self.backend,
             self.session,
@@ -445,7 +438,6 @@ class ViewerApp:
             self.camera.dolly(state.wheel)
 
     def _advance_camera(self, dt: float) -> None:
-
         if self._model_camera_id >= 0:
             return
         self.camera.advance(dt, self.camera_out)
@@ -486,12 +478,10 @@ class ViewerApp:
             self.camera.publish(self.camera_out)
 
     def _frame_scene(self, *, animate: bool = True) -> None:
-
         self.camera.set_aspect(max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0))
         self.camera.frame_scene(self.session.bounds(), self.camera_out, animate=animate)
 
     def _poll_perturb(self, state: gs.InputState) -> None:
-
         st = self.session.perturb
         if not self.router.wants_perturb():
             if st.active:
@@ -524,7 +514,6 @@ class ViewerApp:
         )
 
     def _poll_pick(self, state: gs.InputState) -> None:
-
         if not self.router.wants_camera():
             return
         if not self.router.released or self.router.travel > CLICK_SLOP_PT:
@@ -535,7 +524,6 @@ class ViewerApp:
         self.session.submit(cmd.Select(object_id))
 
     def _pick_at(self, cursor: tuple[float, float]) -> int:
-
         rect = self._viewport_rect
 
         img = self._viewport_image
@@ -555,7 +543,6 @@ class ViewerApp:
         return self._nearest_link(cursor)
 
     def _selectable(self, object_id: int) -> bool:
-
         if object_id <= 0:
             return False
         node = self.session.node_by_object_id(object_id)
@@ -587,7 +574,6 @@ class ViewerApp:
         return 0
 
     def _draw_viewport(self, ctx: PanelContext) -> None:
-
         imgui.begin("Viewport", None, imgui.WindowFlags_.no_scrollbar.value)
         pos = imgui.get_cursor_screen_pos()
         size = imgui.get_content_region_avail()
@@ -678,7 +664,6 @@ class ViewerApp:
             cursor_y += float(size.y) + 3.0 * scale
 
     def frame_needs(self) -> FrameNeeds:
-
         needs = FrameNeeds(poses=True).merge(self.panels.frame_needs())
         label_mode = self.backend.get_label_mode()
         frame_mode = self.backend.get_frame_mode()
@@ -735,14 +720,12 @@ class ViewerApp:
         return needs
 
     def _sync_structure(self) -> None:
-
         gen = self.session.structure_generation
         if gen != self._structure_generation:
             self._structure_generation = gen
             self.backend.set_scene(self.session.source)
 
     def _sync_viewport_size(self) -> None:
-
         if self._fixed_render_size is not None:
             self.backend.resize(*self._fixed_render_size)
             self.camera.set_aspect(self._fixed_render_size[0] / self._fixed_render_size[1])
@@ -755,7 +738,6 @@ class ViewerApp:
         self.camera.set_aspect(max(sw, 1) / max(sh, 1))
 
     def _panel_context(self) -> PanelContext:
-
         return PanelContext(
             session=self.session,
             backend=self.backend,
@@ -789,7 +771,6 @@ class ViewerApp:
         return float(np.max(sizes)) if len(sizes) else 0.1
 
     def apply_keys(self, keys: Keys) -> None:
-
         if keys.toggle_pause:
             self.session.submit(cmd.Play() if self.session.paused else cmd.Pause())
         if keys.gizmo_translate:

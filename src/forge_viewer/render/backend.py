@@ -1,3 +1,5 @@
+"""Renderer protocols, feature flags, and frame statistics."""
+
 from __future__ import annotations
 
 import enum

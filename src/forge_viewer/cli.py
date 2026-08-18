@@ -1,3 +1,5 @@
+"""Command-line entry points for viewing, capture, and diagnostics."""
+
 from __future__ import annotations
 
 import argparse
@@ -14,7 +16,6 @@ log = get_logger("cli")
 
 
 def _setup_logging(json_mode: bool, verbose: bool) -> None:
-
     configure(verbose=verbose, warnings_only=json_mode)
 
 
@@ -24,7 +25,6 @@ def _resolve(name: str) -> Path:
     return resolve(name)
 
 
-# ---------------------------------------------------------------- backends
 def cmd_backends(args: argparse.Namespace) -> int:
     from .backends import available_backends
 
@@ -55,9 +55,7 @@ def cmd_backends(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------- assets
 def cmd_assets(args: argparse.Namespace) -> int:
-
     from .assets import assets_dir, list_assets
 
     names = list_assets()
@@ -102,9 +100,7 @@ def cmd_assets(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------- inspect
 def cmd_inspect(args: argparse.Namespace) -> int:
-
     from .backends import make_adapter
 
     path = _resolve(args.asset)
@@ -279,7 +275,6 @@ def _print_tree(nodes, parent: int = -1, depth: int = 0) -> None:
         _print_tree(nodes, n.node_id, depth + 1)
 
 
-# ---------------------------------------------------------------- view
 def cmd_view(args: argparse.Namespace) -> int:
     from .composition import build
 
@@ -434,7 +429,6 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
 
 def cmd_canvas(args: argparse.Namespace) -> int:
-
     from .composition import build_scene
     from .demos import canvas_scene, lighting_scene
 
@@ -513,9 +507,7 @@ def cmd_conformance(args: argparse.Namespace) -> int:
         adapter.release()
 
 
-# ---------------------------------------------------------------- doctor
 def cmd_doctor(args: argparse.Namespace) -> int:
-
     from .composition import doctor
 
     report = doctor(_resolve(args.asset), args.backend, frames=args.frames)
@@ -528,7 +520,6 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if report["ok"] else 1
 
 
-# ---------------------------------------------------------------- capture
 def cmd_capture(args: argparse.Namespace) -> int:
     from .composition import capture
 
@@ -577,7 +568,6 @@ def cmd_record(args: argparse.Namespace) -> int:
 
 
 def cmd_keyframes(args: argparse.Namespace) -> int:
-
     from . import commands as cmd
     from .composition import build
 
@@ -628,7 +618,6 @@ def cmd_keyframes(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------- probe
 def cmd_probe(args: argparse.Namespace) -> int:
     import subprocess
 

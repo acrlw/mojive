@@ -1,3 +1,5 @@
+"""Report OpenGL context and framebuffer capabilities."""
+
 from __future__ import annotations
 
 import sys

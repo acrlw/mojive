@@ -1,3 +1,5 @@
+"""Scene hierarchy browsing, filtering, and visibility."""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -22,7 +24,6 @@ class HierarchyPanel(Panel):
         self._by_id: dict[int, SceneNode] = {}
 
     def frame_needs(self) -> FrameNeeds:
-
         return FrameNeeds.none()
 
     def draw(self, ctx: PanelContext) -> None:
@@ -65,7 +66,6 @@ class HierarchyPanel(Panel):
         imgui.end_child()
 
     def _refresh(self, ctx: PanelContext) -> None:
-
         gen = ctx.session.structure_generation
         if gen == self._cache_generation:
             return
