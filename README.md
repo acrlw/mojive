@@ -284,3 +284,7 @@ coordinates use Z-up.
 - [Platform measurements](docs/PLATFORM.md)
 - [Implementation decisions](docs/DECISIONS.md)
 - [Roadmap](docs/ROADMAP.md)
+
+## License
+
+forge-viewer is available under the [MIT License](LICENSE).
