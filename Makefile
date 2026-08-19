@@ -101,6 +101,12 @@ renderer-api:
 	$(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
 	$(PY) -m forge_viewer.tools.renderer_api
 
+## Same Renderer API checks against the experimental wgpu backend.
+renderer-api-wgpu:
+	FORGE_VIEWER_BACKEND=wgpu $(PYTEST) -q tests/test_renderer_api.py
+	FORGE_VIEWER_BACKEND=wgpu $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
+	FORGE_VIEWER_BACKEND=wgpu $(PY) -m forge_viewer.tools.renderer_api
+
 p0: renderer-api
 
 p1: check p0 mujoco-physics mujoco-ik camera-state scene-snapshot rpc material-parity shadow-scheduling mujoco-audit golden parity reverse gpu

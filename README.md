@@ -156,6 +156,21 @@ with Renderer(model, height=480, width=640) as renderer:
 
 Run the public contract and real-OpenGL comparison gallery with `make renderer-api`.
 
+### Experimental wgpu backend
+
+The Renderer API can run on [wgpu](https://wgpu.rs/) (Vulkan/Metal/DX12) instead of OpenGL,
+which removes the EGL/GLFW context requirement for offscreen rendering:
+
+```bash
+pip install forge-viewer[wgpu]
+FORGE_VIEWER_BACKEND=wgpu python your_script.py
+```
+
+Validate the installation with `make renderer-api-wgpu`. The backend is experimental: shadows,
+planar reflections, skybox, image-based lighting, tendons, debug draw, and the interactive
+viewer still require the default OpenGL path. Unsupported features are reported through
+`renderer.capabilities().notes`.
+
 ## Visual acceptance
 
 Every user-facing feature has a reproducible Make target.

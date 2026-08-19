@@ -174,6 +174,32 @@ def _create_context(width: int, height: int):
     return _GLFWContext(width, height)
 
 
+def _select_backend(width: int, height: int, samples: int):
+    """Create the render backend selected by FORGE_VIEWER_BACKEND.
+
+    Returns ``(context, backend)``; ``context`` is ``None`` for backends that
+    manage no GL state of their own (the webgpu backend needs no window, EGL,
+    or GLFW at all).
+    """
+    requested = os.environ.get("FORGE_VIEWER_BACKEND", "").strip().lower()
+    if requested in {"wgpu", "webgpu"}:
+        from .render.webgpu.backend import WgpuBackend
+
+        return None, WgpuBackend(max(1, width), max(1, height), samples)
+    if requested not in {"", "forge"}:
+        raise ValueError(f"Unsupported FORGE_VIEWER_BACKEND: {requested}")
+    from .render.forge.backend import ForgeBackend
+
+    context = _create_context(width, height)
+    try:
+        with context.current():
+            backend = ForgeBackend(context.gl_context, max(1, width), max(1, height), samples)
+    except Exception:
+        context.close()
+        raise
+    return context, backend
+
+
 class Renderer:
     """Render an existing MuJoCo model through Forge."""
 
@@ -205,7 +231,6 @@ class Renderer:
         self._scene_option = mujoco.MjvOption()
 
         from .adapters.mujoco_adapter import MuJoCoAdapter
-        from .render.forge.backend import ForgeBackend
 
         adapter = MuJoCoAdapter()
         adapter.load_model(model)
@@ -215,27 +240,32 @@ class Renderer:
         self._segmentation_table = _configure_segmentation(source, model)
         self._source = source
         self._adapter_source = adapter_source
-        context = _create_context(self._width, self._height)
+        samples = max(0, int(model.vis.quality.offsamples))
+        context, backend = _select_backend(self._width, self._height, samples)
+        self._context = context
+        self._backend = backend
         try:
-            with context.current():
-                samples = max(0, int(model.vis.quality.offsamples))
-                backend = ForgeBackend(
-                    context.gl_context,
-                    max(1, self._width),
-                    max(1, self._height),
-                    samples,
-                )
+            with self._gl_current():
                 backend.set_background((0.0, 0.0, 0.0, 1.0))
                 backend.set_scene(source)
                 self._view = (adapter.camera_hint() or CameraView()).with_aspect(self._aspect)
                 backend.set_camera(self._view)
         except Exception:
-            context.close()
+            self._context = None
+            self._backend = None
+            if context is not None:
+                context.close()
             adapter.release()
             raise
         self._adapter = adapter
-        self._context = context
-        self._backend = backend
+
+    @contextmanager
+    def _gl_current(self):
+        if self._context is None:
+            yield
+        else:
+            with self._context.current():
+                yield
 
     @property
     def model(self):
@@ -292,13 +322,13 @@ class Renderer:
             self._source = source
             self._adapter_source = adapter_source
             self._transparent_visual = transparent_visual
-            with self._context.current():
+            with self._gl_current():
                 self._backend.set_scene(source)
         _apply_render_options(self._backend, option, self._scene)
         self._adapter.use_data(data)
         frame = self._adapter.frame(_FRAME_NEEDS)
         view = _camera_view(self._scene, self._model, self._aspect)
-        with self._context.current():
+        with self._gl_current():
             self._view = view
             self._backend.set_camera(view)
             self._backend.update(frame)
@@ -315,7 +345,7 @@ class Renderer:
             raise ValueError(
                 f"Expected `out.shape == {shape}`. Got `out.shape={out.shape}` instead."
             )
-        with self._context.current():
+        with self._gl_current():
             self._backend.render()
             if self._depth_rendering:
                 image = _metric_depth(self._backend.target.read_depth(flip=True), self._view)
@@ -363,7 +393,7 @@ class Renderer:
             return
         self._closed = True
         if self._context is not None and self._backend is not None:
-            with self._context.current():
+            with self._gl_current():
                 self._backend.release()
         if self._adapter is not None:
             self._adapter.release()

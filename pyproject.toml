@@ -20,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 mujoco = ["mujoco>=3.1"]
+wgpu = ["wgpu>=0.32"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
