@@ -11,8 +11,8 @@ Scope: the offscreen ``Renderer`` contract (color/depth/segmentation), lights
 light, transparency sorting, fog and haze, selection highlight and outline,
 debug views (albedo/normal/depth/segment/idcolor/overdraw/wireframe), shadows
 (directional CSM atlas + spot/point/area distance maps), planar reflections,
-tendons, debug draw primitives, and world-space text labels.  Not yet
-implemented: gizmo and the interactive viewer surface path.
+tendons, debug draw primitives, world-space text labels, and the native 3D
+gizmo.  Not yet implemented: the interactive viewer surface path.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ import numpy as np
 import wgpu
 
 from ...adapters.base import SceneFrame, SceneSource
+from ...gizmo import GizmoFrame
 from ...types import CameraView
 from ..backend import BackendCaps, DebugView, FrameMode, LabelMode, RenderFlag, RenderStats
 from ..builder import SceneSourceBuilder
@@ -42,6 +43,7 @@ from .lighting import (
 from .meshes import WIRE_STRIDE, MeshStore
 from .passes import (
     DebugPass,
+    GizmoPass,
     OutlinePass,
     PresentPass,
     ReflectPass,
@@ -245,6 +247,8 @@ class WgpuBackend:
         self.stats = RenderStats()
         self.debug = DebugDraw()
         self._debug = DebugPass(self.device, self.target.samples, self.debug)
+        self._gizmo = GizmoPass(self.device, self.target.samples)
+        self._gizmo_frame: GizmoFrame | None = None
         self._camera = CameraView()
         self._background = (0.13, 0.14, 0.16, 1.0)
         self._selected = 0
@@ -317,11 +321,11 @@ class WgpuBackend:
             orthographic=True,
             shadows=True,
             outline=True,
-            gizmo=False,
+            gizmo=True,
             msaa_samples=self.target.samples,
             id_msaa=False,
             renderer=f"wgpu-py {wgpu.__version__} on {info.vendor} {info.device}",
-            notes=("offscreen only; no gizmo yet",),
+            notes=("offscreen only",),
         )
 
     # -- scene contract -------------------------------------------------------
@@ -911,6 +915,7 @@ class WgpuBackend:
         view = np.asarray(cam.view_matrix(), np.float32)
         proj = proj_matrix_wgpu(cam)
         self._debug.prepare(view, proj, view_proj, target.width, target.height, time.monotonic())
+        self._gizmo.prepare(self._gizmo_frame, cam, view, proj, view_proj, target.height)
         pass1 = encoder.begin_render_pass(
             color_attachments=[color_attachment],
             depth_stencil_attachment={
@@ -987,6 +992,9 @@ class WgpuBackend:
         # Debug primitives and world text draw after the outline composite,
         # matching forge's PASS_ORDER (debug between outline and gizmo).
         draw_calls += self._debug.execute(pass1)
+        # The gizmo draws last inside the main pass, matching forge's
+        # PASS_ORDER (gizmo between debug and present).
+        draw_calls += self._gizmo.execute(pass1)
         pass1.end()
 
         pass2 = encoder.begin_render_pass(
@@ -1092,8 +1100,9 @@ class WgpuBackend:
     def set_transparent_id_rendering(self, enabled: bool) -> None:
         self._include_transparent_ids = bool(enabled)
 
-    def set_gizmo(self, gizmo) -> bool:
-        return False
+    def set_gizmo(self, gizmo: GizmoFrame | None) -> bool:
+        self._gizmo_frame = gizmo
+        return True
 
     def configure_text(
         self,
@@ -1187,6 +1196,7 @@ class WgpuBackend:
         self._shadows.release()
         self._reflect.release()
         self._debug.release()
+        self._gizmo.release()
         self._pipelines.clear()
         self._texture_groups.clear()
         self._image_light_groups.clear()
