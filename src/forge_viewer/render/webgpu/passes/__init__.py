@@ -6,6 +6,7 @@ registration; ``WgpuBackend`` wires the passes it needs directly.
 
 from __future__ import annotations
 
+from .debug import DebugPass
 from .outline import OutlinePass
 from .present import PresentPass
 from .reflect import ReflectPass
@@ -14,6 +15,7 @@ from .skybox import SkyboxPass
 from .tendon import TendonPass
 
 __all__ = [
+    "DebugPass",
     "OutlinePass",
     "PresentPass",
     "ReflectPass",

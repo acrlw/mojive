@@ -11,8 +11,8 @@ Scope: the offscreen ``Renderer`` contract (color/depth/segmentation), lights
 light, transparency sorting, fog and haze, selection highlight and outline,
 debug views (albedo/normal/depth/segment/idcolor/overdraw/wireframe), shadows
 (directional CSM atlas + spot/point/area distance maps), planar reflections,
-and tendons.  Not yet implemented: debug draw, gizmo, labels, and the
-interactive viewer surface path.
+tendons, debug draw primitives, and world-space text labels.  Not yet
+implemented: gizmo and the interactive viewer surface path.
 """
 
 from __future__ import annotations
@@ -28,7 +28,9 @@ from ...adapters.base import SceneFrame, SceneSource
 from ...types import CameraView
 from ..backend import BackendCaps, DebugView, FrameMode, LabelMode, RenderFlag, RenderStats
 from ..builder import SceneSourceBuilder
+from ..debugdraw import DebugDraw
 from ..mesh import all_builtin
+from ..overlay import OverlayPublisher, OverlayState
 from ..scene import RenderScene
 from .instances import InstanceStore
 from .lighting import (
@@ -39,6 +41,7 @@ from .lighting import (
 )
 from .meshes import WIRE_STRIDE, MeshStore
 from .passes import (
+    DebugPass,
     OutlinePass,
     PresentPass,
     ReflectPass,
@@ -59,6 +62,8 @@ NO_CLIP = (0.0, 0.0, 0.0, 1.0)
 # forge opaque.OVERDRAW_CLEAR: the overdraw view accumulates on black.
 OVERDRAW_CLEAR = (0.0, 0.0, 0.0, 1.0)
 
+# The full forge flag set (ForgeBackend._supported_flags with every pass
+# present): 19 scene flags plus the 19 flags gated on forge's debug pass.
 _SUPPORTED_FLAGS = frozenset(
     {
         RenderFlag.TRANSPARENT,
@@ -75,6 +80,30 @@ _SUPPORTED_FLAGS = frozenset(
         RenderFlag.OUTLINE,
         RenderFlag.WIREFRAME,
         RenderFlag.TENDON,
+        RenderFlag.STATIC,
+        RenderFlag.SKIN,
+        RenderFlag.FLEXFACE,
+        RenderFlag.FLEXSKIN,
+        RenderFlag.ISLAND,
+        RenderFlag.CONVEXHULL,
+        RenderFlag.CONTACTPOINT,
+        RenderFlag.CONTACTFORCE,
+        RenderFlag.CONTACTSPLIT,
+        RenderFlag.AUTOCONNECT,
+        RenderFlag.ACTUATOR,
+        RenderFlag.ACTIVATION,
+        RenderFlag.JOINT,
+        RenderFlag.COM,
+        RenderFlag.INERTIA,
+        RenderFlag.SCLINERTIA,
+        RenderFlag.CAMERA,
+        RenderFlag.LIGHT,
+        RenderFlag.RANGEFINDER,
+        RenderFlag.CONSTRAINT,
+        RenderFlag.FLEXVERT,
+        RenderFlag.FLEXEDGE,
+        RenderFlag.BODYBVH,
+        RenderFlag.MESHBVH,
     }
 )
 
@@ -214,7 +243,8 @@ class WgpuBackend:
         self._tendons = TendonPass(self.device)
 
         self.stats = RenderStats()
-        self.debug = None
+        self.debug = DebugDraw()
+        self._debug = DebugPass(self.device, self.target.samples, self.debug)
         self._camera = CameraView()
         self._background = (0.13, 0.14, 0.16, 1.0)
         self._selected = 0
@@ -228,19 +258,40 @@ class WgpuBackend:
         self._flags[RenderFlag.ADDITIVE] = False
         self._flags[RenderFlag.FOG] = False
         self._flags[RenderFlag.HAZE] = False
+        self._flags[RenderFlag.CONTACTPOINT] = False
+        self._flags[RenderFlag.CONTACTFORCE] = False
+        self._flags[RenderFlag.CONTACTSPLIT] = False
+        self._flags[RenderFlag.ISLAND] = False
+        self._flags[RenderFlag.CONVEXHULL] = False
+        self._flags[RenderFlag.AUTOCONNECT] = False
+        self._flags[RenderFlag.ACTUATOR] = False
+        self._flags[RenderFlag.ACTIVATION] = False
+        self._flags[RenderFlag.JOINT] = False
+        self._flags[RenderFlag.COM] = False
+        self._flags[RenderFlag.INERTIA] = False
+        self._flags[RenderFlag.SCLINERTIA] = False
+        self._flags[RenderFlag.BODYBVH] = False
+        self._flags[RenderFlag.MESHBVH] = False
+        self._flags[RenderFlag.CAMERA] = False
+        self._flags[RenderFlag.LIGHT] = False
+        self._flags[RenderFlag.RANGEFINDER] = False
+        self._flags[RenderFlag.CONSTRAINT] = False
+        self._flags[RenderFlag.FLEXFACE] = False
+        self._flags[RenderFlag.FLEXVERT] = False
 
         self._source: SceneSource | None = None
         self._scene: RenderScene | None = None
         self._builder: SceneSourceBuilder | None = None
         # Tendon publishing state, mirroring ForgeBackend: per-source lookup
         # tables captured in set_scene plus reusable capsule packing buffers.
+        # The actuator palette lives in the shared overlay publisher.
+        self._overlay = OverlayPublisher(self.debug, self._flags)
         self._tendon_visible = np.zeros(0, bool)
         self._actuator_visible = np.zeros(0, bool)
         self._material_values = np.zeros((0, 4), np.float32)
         self._tendon_material_table: tuple = ()
         self._island_tendon_material_table: tuple = ()
         self._tendon_actuator = np.zeros(0, np.int32)
-        self._actuator_palette = np.zeros((0, 4), np.float32)
         self._capsule_segments = np.zeros((0, 2, 3), np.float32)
         self._capsule_widths = np.zeros(0, np.float32)
         self._capsule_colors = np.zeros((0, 4), np.float32)
@@ -257,8 +308,11 @@ class WgpuBackend:
         return BackendCaps(
             name="webgpu",
             gpu_pick=True,
+            debug_draw=True,
             render_flags=frozenset(self._flags),
             debug_views=_SUPPORTED_VIEWS,
+            label_modes=frozenset(LabelMode),
+            frame_modes=frozenset(FrameMode),
             capture=True,
             orthographic=True,
             shadows=True,
@@ -267,7 +321,7 @@ class WgpuBackend:
             msaa_samples=self.target.samples,
             id_msaa=False,
             renderer=f"wgpu-py {wgpu.__version__} on {info.vendor} {info.device}",
-            notes=("offscreen only; no debug draw/gizmo/labels yet",),
+            notes=("offscreen only; no gizmo yet",),
         )
 
     # -- scene contract -------------------------------------------------------
@@ -294,7 +348,7 @@ class WgpuBackend:
         for actuator, tendon in enumerate(source.actuator_tendon):
             if 0 <= tendon < len(self._tendon_actuator):
                 self._tendon_actuator[tendon] = actuator
-        self._actuator_palette = np.zeros((len(source.actuator_tendon), 4), np.float32)
+        self._overlay.set_scene(source)
         self.meshes.sync({**all_builtin(), **source.meshes})
         self.textures.sync(source.textures, source.skybox)
         self._texture_groups.clear()
@@ -302,6 +356,7 @@ class WgpuBackend:
         self._skybox.reset()
         self._builder = SceneSourceBuilder()
         self._scene = self._builder.set_source(source, self._camera)
+        self._sync_instance_visibility()
 
     def set_render_scene(self, scene: RenderScene) -> None:
         # Unlike forge there is no per-scene VAO to rebuild; the instance
@@ -312,8 +367,20 @@ class WgpuBackend:
         if self._builder is None:
             return
         self.meshes.update(frame.mesh_updates)
-        self._scene = self._builder.update(frame, self._camera)
+        island_rgba = frame.island_rgba if self.get_flag(RenderFlag.ISLAND) else None
+        self.set_render_scene(self._builder.update(frame, self._camera, island_rgba))
         self._publish_tendons(frame)
+        self._overlay.publish(frame, self._overlay_state())
+
+    def _overlay_state(self) -> OverlayState:
+        return OverlayState(
+            camera=self._camera,
+            viewport_height=self.target.height,
+            selected=self._selected,
+            label_mode=self._label_mode,
+            frame_mode=self._frame_mode,
+            bvh_depth=self._bvh_depth,
+        )
 
     def _publish_tendons(self, frame: SceneFrame) -> None:
         """Pack visible tendon segments into capsule instances (forge parity)."""
@@ -379,7 +446,7 @@ class WgpuBackend:
             ]
 
         if len(actuator_indices):
-            self._fill_actuator_palette(frame)
+            palette = self._overlay.fill_actuator_palette(frame)
             start = base_count
             stop = start + len(actuator_indices)
             self._capsule_segments[start:stop] = segments[actuator_indices]
@@ -387,7 +454,7 @@ class WgpuBackend:
                 widths[actuator_indices] * self._source.actuator_tendon_scale
             )
             np.take(
-                self._actuator_palette,
+                palette,
                 segment_actuators[actuator_indices],
                 axis=0,
                 out=self._capsule_colors[start:stop],
@@ -423,38 +490,6 @@ class WgpuBackend:
             self._capsule_transparent[:total],
             material_table,
         )
-
-    def _fill_actuator_palette(self, frame: SceneFrame) -> None:
-        source = self._source
-        assert source is not None
-        use_activation = self.get_flag(RenderFlag.ACTIVATION)
-        for i, out in enumerate(self._actuator_palette):
-            if source.actuator_ctrl_limited[i]:
-                rmin, rmax = source.actuator_ctrl_range[i]
-            elif use_activation and source.actuator_act_limited[i]:
-                rmin, rmax = source.actuator_act_range[i]
-            else:
-                rmin, rmax = -1.0, 1.0
-            if rmin >= 0.0:
-                low, middle, high = -1.0, float(rmin), float(rmax)
-            elif rmax <= 0.0:
-                low, middle, high = float(rmin), float(rmax), 1.0
-            else:
-                low, middle, high = float(rmin), 0.0, float(rmax)
-            value = float(frame.ctrl[source.actuator_ctrl_address[i]])
-            if (
-                use_activation
-                and source.actuator_dynamic[i]
-                and frame.actuator_activation is not None
-            ):
-                value = float(frame.actuator_activation[i])
-            value = min(max(value, low), high)
-            if value <= middle:
-                weight = (middle - value) / max(middle - low, 1e-15)
-                out[:] = weight * source.actuator_rgba[0] + (1.0 - weight) * source.actuator_rgba[1]
-            else:
-                weight = (value - middle) / max(high - middle, 1e-15)
-                out[:] = (1.0 - weight) * source.actuator_rgba[1] + weight * source.actuator_rgba[2]
 
     def set_camera(self, camera: CameraView) -> None:
         self._camera = camera
@@ -872,6 +907,10 @@ class WgpuBackend:
                 target.width,
                 target.height,
             )
+        # Upload the debug frame before the main pass so execute() only encodes.
+        view = np.asarray(cam.view_matrix(), np.float32)
+        proj = proj_matrix_wgpu(cam)
+        self._debug.prepare(view, proj, view_proj, target.width, target.height, time.monotonic())
         pass1 = encoder.begin_render_pass(
             color_attachments=[color_attachment],
             depth_stencil_attachment={
@@ -945,6 +984,9 @@ class WgpuBackend:
             instances_drawn += drawn
         if outline_buckets:
             draw_calls += self._outline.composite(pass1, target.width, target.height)
+        # Debug primitives and world text draw after the outline composite,
+        # matching forge's PASS_ORDER (debug between outline and gizmo).
+        draw_calls += self._debug.execute(pass1)
         pass1.end()
 
         pass2 = encoder.begin_render_pass(
@@ -1053,9 +1095,44 @@ class WgpuBackend:
     def set_gizmo(self, gizmo) -> bool:
         return False
 
+    def configure_text(
+        self,
+        primary: str = "",
+        primary_index: int = 0,
+        fallback: str = "",
+        fallback_index: int = 0,
+        size_px: float = 14.0,
+    ) -> None:
+        self._debug.configure_text(primary, primary_index, fallback, fallback_index, size_px)
+
     def set_flag(self, flag: RenderFlag, value: bool) -> bool:
+        if flag not in self.caps.render_flags:
+            return False
         self._flags[flag] = bool(value)
-        return flag in _SUPPORTED_FLAGS
+        if flag in {
+            RenderFlag.STATIC,
+            RenderFlag.SKIN,
+            RenderFlag.FLEXFACE,
+            RenderFlag.FLEXSKIN,
+            RenderFlag.ISLAND,
+            RenderFlag.CONVEXHULL,
+        }:
+            self._sync_instance_visibility()
+        return True
+
+    def _sync_instance_visibility(self) -> None:
+        if self._builder is None:
+            return
+        changed = self._builder.set_visual_options(
+            static=self.get_flag(RenderFlag.STATIC),
+            skin=self.get_flag(RenderFlag.SKIN),
+            flex_face=self.get_flag(RenderFlag.FLEXFACE),
+            flex_skin=self.get_flag(RenderFlag.FLEXSKIN),
+            island=self.get_flag(RenderFlag.ISLAND),
+            convex_hull=self.get_flag(RenderFlag.CONVEXHULL),
+        )
+        if changed:
+            self.set_render_scene(self._builder.scene)
 
     def get_flag(self, flag: RenderFlag) -> bool:
         return self._flags.get(flag, False)
@@ -1070,22 +1147,26 @@ class WgpuBackend:
         return self._debug_view
 
     def set_label_mode(self, mode: LabelMode) -> bool:
+        if mode not in self.caps.label_modes:
+            return False
         self._label_mode = mode
-        return False
+        return True
 
     def get_label_mode(self) -> LabelMode:
         return self._label_mode
 
     def set_frame_mode(self, mode: FrameMode) -> bool:
+        if mode not in self.caps.frame_modes:
+            return False
         self._frame_mode = mode
-        return False
+        return True
 
     def get_frame_mode(self) -> FrameMode:
         return self._frame_mode
 
     def set_bvh_depth(self, depth: int) -> bool:
-        self._bvh_depth = int(depth)
-        return False
+        self._bvh_depth = max(int(depth), 0)
+        return True
 
     def get_bvh_depth(self) -> int:
         return self._bvh_depth
@@ -1105,6 +1186,7 @@ class WgpuBackend:
         self._tendons.release()
         self._shadows.release()
         self._reflect.release()
+        self._debug.release()
         self._pipelines.clear()
         self._texture_groups.clear()
         self._image_light_groups.clear()

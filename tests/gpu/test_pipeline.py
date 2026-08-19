@@ -47,8 +47,41 @@ def gl():
     glfw.terminate()
 
 
+def _make_backend(backend_name: str, request, samples: int = 4):
+    """Build the backend selected by FORGE_VIEWER_BACKEND; GL stays lazy."""
+    if backend_name == "wgpu":
+        from forge_viewer.render.webgpu.backend import WgpuBackend
+
+        return WgpuBackend(WIDTH, HEIGHT, samples=samples)
+    _passes.load_all()
+    return ForgeBackend(request.getfixturevalue("gl"), WIDTH, HEIGHT, samples=samples)
+
+
+def _tendon_pass(backend):
+    if backend.caps.name == "webgpu":
+        return backend._tendons
+    return backend._passes["tendon"]
+
+
+def _vbo_bytes(backend, gpu_mesh) -> bytes:
+    # wgpu vertex buffers are created without COPY_SRC; the CPU-side copy in
+    # GpuMesh is the same bytes that were uploaded.
+    if backend.caps.name == "webgpu":
+        return gpu_mesh._vertices.tobytes()
+    return gpu_mesh.vbo.read()
+
+
+def _render(backend, frame) -> None:
+    """Render one frame; forge returns a ViewportImage, wgpu renders offscreen."""
+    image = backend.render(frame)
+    if backend.caps.name == "webgpu":
+        assert image is None
+    else:
+        assert image is not None
+
+
 @pytest.fixture(scope="module")
-def rendered(gl):
+def rendered(backend_name, request):
 
     try:
         path = resolve("pick_scene")
@@ -56,7 +89,8 @@ def rendered(gl):
         pytest.skip("pick_scene asset unavailable")
 
     adapter = make_adapter("mujoco", path)
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    backend = _make_backend(backend_name, request)
+    is_forge = backend_name == "forge"
     builder = SceneSourceBuilder()
     source = adapter.scene_source()
     backend.set_scene(source)
@@ -74,24 +108,26 @@ def rendered(gl):
     backend.set_camera(camera)
     builder.set_source(source, camera)
 
-    guard = GLStateGuard()
-    G.native().drain_errors()
+    guard = GLStateGuard() if is_forge else None
+    if is_forge:
+        G.native().drain_errors()
     for _ in range(4):
         adapter.step(1)
         backend.set_render_scene(builder.update(adapter.frame(FrameNeeds(poses=True)), camera))
         backend.render(None)
 
-    before = guard.snapshot()
-    err_before = G.native().drain_errors()
+    before = guard.snapshot() if guard is not None else None
+    err_before = G.native().drain_errors() if is_forge else 0
     frame = adapter.frame(FrameNeeds(poses=True))
     scene = builder.update(frame, camera)
     backend.set_render_scene(scene)
     image = backend.render(frame)
-    after = guard.snapshot()
-    err_after = G.native().drain_errors()
+    after = guard.snapshot() if guard is not None else None
+    err_after = G.native().drain_errors() if is_forge else 0
 
     yield {
         "backend": backend,
+        "backend_name": backend_name,
         "scene": scene,
         "image": image,
         "camera": camera,
@@ -118,17 +154,18 @@ def _bounds(adapter, source):
     return (p - r).min(axis=0).astype(np.float32), (p + r).max(axis=0).astype(np.float32)
 
 
-def _require(*names: str) -> None:
-
+def _require(backend_name: str, *names: str) -> None:
+    if backend_name != "forge":
+        return  # wgpu wires its passes statically; there is no registry.
     _passes.load_all()
     missing = [n for n in names if n not in registered()]
     if missing:
         pytest.skip(f"required render passes unavailable: {missing}")
 
 
-def test_mujoco_visuals_reach_the_gpu_pipeline(gl):
+def test_mujoco_visuals_reach_the_gpu_pipeline(backend_name, request):
     adapter = make_adapter("mujoco", resolve("mujoco_visuals"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    backend = _make_backend(backend_name, request)
     try:
         source = adapter.scene_source()
         backend.set_scene(source)
@@ -156,10 +193,10 @@ def test_mujoco_visuals_reach_the_gpu_pipeline(gl):
         )
         assert frame.contacts is not None and len(frame.contacts) > 0
         backend.update(frame)
-        assert backend.render(frame) is not None
+        _render(backend, frame)
 
         assert backend.stats.instances > adapter.model.ngeom
-        assert backend._passes["tendon"].capsule_count >= 2
+        assert _tendon_pass(backend).capsule_count >= 2
         assert backend.debug.layer("physics.contact.points").count_of(Prim.POINT) >= 1
         assert backend.debug.layer("physics.contact.forces").count_of(Prim.ARROW) >= 1
         joints = backend.debug.layer("physics.joints")
@@ -173,9 +210,9 @@ def test_mujoco_visuals_reach_the_gpu_pipeline(gl):
         adapter.release()
 
 
-def test_camera_and_light_entities_reach_the_debug_pass(gl):
+def test_camera_and_light_entities_reach_the_debug_pass(backend_name, request):
     adapter = make_adapter("mujoco", resolve("mujoco_visuals"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    backend = _make_backend(backend_name, request)
     try:
         source = adapter.scene_source()
         backend.set_scene(source)
@@ -192,7 +229,7 @@ def test_camera_and_light_entities_reach_the_debug_pass(gl):
         directional_lights = [light for light in active_lights if light.kind.value != "point"]
         assert backend.debug.layer("scene.lights").count_of(Prim.POINT) == len(active_lights)
         assert backend.debug.layer("scene.lights").count_of(Prim.ARROW) == len(directional_lights)
-        assert backend.render(frame) is not None
+        _render(backend, frame)
 
         assert backend.set_flag(RenderFlag.CAMERA, False)
         assert backend.set_flag(RenderFlag.LIGHT, False)
@@ -204,9 +241,9 @@ def test_camera_and_light_entities_reach_the_debug_pass(gl):
         adapter.release()
 
 
-def test_rangefinder_rays_hits_and_normals_reach_the_debug_pass(gl):
+def test_rangefinder_rays_hits_and_normals_reach_the_debug_pass(backend_name, request):
     adapter = make_adapter("mujoco", resolve("rangefinder"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    backend = _make_backend(backend_name, request)
     try:
         backend.set_scene(adapter.scene_source())
         backend.set_camera(adapter.camera_hint())
@@ -218,7 +255,7 @@ def test_rangefinder_rays_hits_and_normals_reach_the_debug_pass(gl):
         assert layer.count_of(Prim.LINE) == 7
         assert layer.count_of(Prim.POINT) == 7
         assert layer.count_of(Prim.ARROW) == 7
-        assert backend.render(frame) is not None
+        _render(backend, frame)
 
         assert backend.set_flag(RenderFlag.RANGEFINDER, False)
         backend.update(frame)
@@ -228,9 +265,9 @@ def test_rangefinder_rays_hits_and_normals_reach_the_debug_pass(gl):
         adapter.release()
 
 
-def test_equality_constraint_endpoints_reach_the_debug_pass(gl):
+def test_equality_constraint_endpoints_reach_the_debug_pass(backend_name, request):
     adapter = make_adapter("mujoco", resolve("constraints"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    backend = _make_backend(backend_name, request)
     try:
         backend.set_scene(adapter.scene_source())
         backend.set_camera(adapter.camera_hint())
@@ -240,7 +277,7 @@ def test_equality_constraint_endpoints_reach_the_debug_pass(gl):
 
         layer = backend.debug.layer("physics.constraints")
         assert layer.count_of(Prim.SPHERE) == 4
-        assert backend.render(frame) is not None
+        _render(backend, frame)
 
         assert adapter.set_equality_enabled(0, False)
         frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True))
@@ -255,9 +292,9 @@ def test_equality_constraint_endpoints_reach_the_debug_pass(gl):
         adapter.release()
 
 
-def test_joint_site_and_body_actuator_visuals_reach_the_gpu_pipeline(gl):
+def test_joint_site_and_body_actuator_visuals_reach_the_gpu_pipeline(backend_name, request):
     adapter = make_adapter("mujoco", resolve("actuator_visuals"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    backend = _make_backend(backend_name, request)
     try:
         backend.set_scene(adapter.scene_source())
         camera = next(item for item in adapter.cameras() if item.name == "overview")
@@ -268,12 +305,12 @@ def test_joint_site_and_body_actuator_visuals_reach_the_gpu_pipeline(gl):
         adapter.data.ctrl[1] = -1.0
         frame = adapter.frame(FrameNeeds(poses=True, actuator=True, diagnostics=True))
         backend.update(frame)
-        negative = backend._actuator_palette[1].copy()
+        negative = backend._overlay.actuator_palette[1].copy()
 
         adapter.data.ctrl[1] = 1.0
         frame = adapter.frame(FrameNeeds(poses=True, actuator=True, diagnostics=True))
         backend.update(frame)
-        positive = backend._actuator_palette[1].copy()
+        positive = backend._overlay.actuator_palette[1].copy()
         layer = backend.debug.layer("physics.actuators")
 
         assert not np.allclose(negative, positive)
@@ -282,16 +319,16 @@ def test_joint_site_and_body_actuator_visuals_reach_the_gpu_pipeline(gl):
         assert layer.count_of(Prim.BOX) == 1
         assert layer.count_of(Prim.CYLINDER) == 2
         assert layer.count_of(Prim.SPHERE) == 2
-        assert backend.render(frame) is not None
+        _render(backend, frame)
         assert float(backend.target.read_color()[..., :3].std()) > 8.0
     finally:
         backend.release()
         adapter.release()
 
 
-def test_slider_crank_visuals_reach_the_gpu_pipeline(gl):
+def test_slider_crank_visuals_reach_the_gpu_pipeline(backend_name, request):
     adapter = make_adapter("mujoco", resolve("slider_crank"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    backend = _make_backend(backend_name, request)
     try:
         source = adapter.scene_source()
         backend.set_scene(source)
@@ -305,18 +342,18 @@ def test_slider_crank_visuals_reach_the_gpu_pipeline(gl):
 
         assert layer.count_of(Prim.CYLINDER) == 4
         assert layer.count_of(Prim.SPHERE) == 4
-        assert backend.render(frame) is not None
+        _render(backend, frame)
         assert float(backend.target.read_color()[..., :3].std()) > 8.0
     finally:
         backend.release()
         adapter.release()
 
 
-def test_contact_split_and_autoconnect_reach_the_gpu_pipeline(gl):
+def test_contact_split_and_autoconnect_reach_the_gpu_pipeline(backend_name, request):
     contacts = make_adapter("mujoco", resolve("mujoco_visuals"))
     chain = make_adapter("mujoco", resolve("joint_types"))
-    contact_backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
-    chain_backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    contact_backend = _make_backend(backend_name, request)
+    chain_backend = _make_backend(backend_name, request)
     try:
         contact_backend.set_scene(contacts.scene_source())
         contact_backend.set_camera(contacts.camera_hint())
@@ -327,7 +364,7 @@ def test_contact_split_and_autoconnect_reach_the_gpu_pipeline(gl):
         contact_backend.update(frame)
         force_layer = contact_backend.debug.layer("physics.contact.forces")
         assert force_layer.count_of(Prim.ARROW) == 2 * len(frame.contacts)
-        assert contact_backend.render(frame) is not None
+        _render(contact_backend, frame)
 
         chain_backend.set_scene(chain.scene_source())
         camera = next(item for item in chain.cameras() if item.name == "joints")
@@ -338,7 +375,7 @@ def test_contact_split_and_autoconnect_reach_the_gpu_pipeline(gl):
         autoconnect = chain_backend.debug.layer("physics.autoconnect")
         assert autoconnect.count_of(Prim.CYLINDER) == len(frame.diagnostics.autoconnect_segments)
         assert autoconnect.count_of(Prim.SPHERE) == 2 * len(frame.diagnostics.autoconnect_segments)
-        assert chain_backend.render(frame) is not None
+        _render(chain_backend, frame)
     finally:
         contact_backend.release()
         chain_backend.release()
@@ -346,11 +383,11 @@ def test_contact_split_and_autoconnect_reach_the_gpu_pipeline(gl):
         chain.release()
 
 
-def test_bvh_boxes_reach_the_gpu_pipeline(gl):
+def test_bvh_boxes_reach_the_gpu_pipeline(backend_name, request):
     from forge_viewer.adapters.base import BvhKind
 
     adapter = make_adapter("mujoco", resolve("deformables"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=1)
+    backend = _make_backend(backend_name, request, samples=1)
     try:
         source = adapter.scene_source()
         backend.set_scene(source)
@@ -367,17 +404,17 @@ def test_bvh_boxes_reach_the_gpu_pipeline(gl):
         layer = backend.debug.layer("physics.bvh")
         assert layer.count_of(Prim.LINE) == 12 * int(np.count_nonzero(selected))
         assert backend.get_bvh_depth() == 2
-        assert backend.render(frame) is not None
+        _render(backend, frame)
     finally:
         backend.release()
         adapter.release()
 
 
-def test_interpolated_flex_control_cage_reaches_the_gpu_pipeline(gl):
+def test_interpolated_flex_control_cage_reaches_the_gpu_pipeline(backend_name, request):
     from forge_viewer.adapters.base import BvhKind
 
     adapter = make_adapter("mujoco", resolve("interpolated_flex"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=1)
+    backend = _make_backend(backend_name, request, samples=1)
     try:
         source = adapter.scene_source()
         backend.set_scene(source)
@@ -393,20 +430,20 @@ def test_interpolated_flex_control_cage_reaches_the_gpu_pipeline(gl):
         layer = backend.debug.layer("physics.bvh")
         assert source.diagnostics.bvh_control_count == 12
         assert layer.count_of(Prim.LINE) == 12 * boxes + 12
-        assert backend.render(frame) is not None
+        _render(backend, frame)
     finally:
         backend.release()
         adapter.release()
 
 
-def test_deformable_vertices_update_without_rebuilding_the_scene(gl):
+def test_deformable_vertices_update_without_rebuilding_the_scene(backend_name, request):
 
     import mujoco
 
     from forge_viewer.types import MeshKey, MeshShape
 
     adapter = make_adapter("mujoco", resolve("deformables"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=1)
+    backend = _make_backend(backend_name, request, samples=1)
     try:
         source = adapter.scene_source()
         backend.set_camera(adapter.camera_hint())
@@ -417,30 +454,30 @@ def test_deformable_vertices_update_without_rebuilding_the_scene(gl):
 
         frame = adapter.frame(FrameNeeds(poses=True, deformables=True))
         backend.update(frame)
-        before = gpu_mesh.vbo.read()
+        before = _vbo_bytes(backend, gpu_mesh)
         ranges = backend._scene.bucket_ranges
 
         joint = mujoco.mj_name2id(adapter.model, mujoco.mjtObj.mjOBJ_JOINT, "skin_tip_hinge")
         assert adapter.set_qpos(int(adapter.model.jnt_qposadr[joint]), np.deg2rad(40.0))
         frame = adapter.frame(FrameNeeds(poses=True, deformables=True))
         backend.update(frame)
-        after = gpu_mesh.vbo.read()
+        after = _vbo_bytes(backend, gpu_mesh)
 
         assert before != after
         assert backend.meshes.get(key) is gpu_mesh
         assert backend._scene.bucket_ranges == ranges
-        assert backend.render(frame) is not None
+        _render(backend, frame)
         assert float(backend.target.read_color()[..., :3].std()) > 8.0
     finally:
         backend.release()
         adapter.release()
 
 
-def test_deformables_are_pickable_and_use_the_normal_outline_pass(gl):
+def test_deformables_are_pickable_and_use_the_normal_outline_pass(backend_name, request):
     from forge_viewer.adapters.base import NodeKind
 
     adapter = make_adapter("mujoco", resolve("deformables"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    backend = _make_backend(backend_name, request)
     try:
         source = adapter.scene_source()
         backend.set_camera(adapter.camera_hint())
@@ -469,12 +506,12 @@ def test_deformables_are_pickable_and_use_the_normal_outline_pass(gl):
         adapter.release()
 
 
-def test_deformable_visibility_flags_rebuild_the_scene(gl):
+def test_deformable_visibility_flags_rebuild_the_scene(backend_name, request):
     from forge_viewer.render.backend import RenderFlag
     from forge_viewer.types import InstanceVisual
 
     adapter = make_adapter("mujoco", resolve("deformables"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=1)
+    backend = _make_backend(backend_name, request, samples=1)
     try:
         source = adapter.scene_source()
         backend.set_camera(adapter.camera_hint())
@@ -501,17 +538,17 @@ def test_deformable_visibility_flags_rebuild_the_scene(gl):
         before_static = backend._scene.count
         assert backend.set_flag(RenderFlag.STATIC, False)
         assert backend._scene.count == before_static - int(np.count_nonzero(source.geom_static))
-        assert backend.render(frame) is not None
+        _render(backend, frame)
     finally:
         backend.release()
         adapter.release()
 
 
-def test_mujoco_flex_labels_and_frames_use_gpu_debug_layers(gl):
+def test_mujoco_flex_labels_and_frames_use_gpu_debug_layers(backend_name, request):
     from forge_viewer.render.backend import FrameMode, LabelMode, RenderFlag
 
     adapter = make_adapter("mujoco", resolve("deformables"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=1)
+    backend = _make_backend(backend_name, request, samples=1)
     try:
         source = adapter.scene_source()
         backend.set_camera(adapter.camera_hint())
@@ -542,9 +579,9 @@ def test_mujoco_flex_labels_and_frames_use_gpu_debug_layers(gl):
         adapter.release()
 
 
-def test_world_text_is_rendered_into_the_forge_target_without_imgui(gl):
+def test_world_text_is_rendered_into_the_target_without_imgui(backend_name, request):
     adapter = make_adapter("mujoco", resolve("pick_scene"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=1)
+    backend = _make_backend(backend_name, request, samples=1)
     try:
         source = adapter.scene_source()
         camera = adapter.camera_hint()
@@ -567,19 +604,19 @@ def test_world_text_is_rendered_into_the_forge_target_without_imgui(gl):
         adapter.release()
 
 
-def test_render_returns_an_image(rendered):
+def test_render_returns_an_image(rendered, require_forge):
     img = rendered["image"]
     assert img is not None
     assert (img.width, img.height) == (WIDTH, HEIGHT)
     assert img.texture_id > 0
 
 
-def test_flip_y_is_declared_and_true_for_gl(rendered):
+def test_flip_y_is_declared_and_true_for_gl(rendered, require_forge):
 
     assert rendered["image"].flip_y is True
 
 
-def test_global_gl_state_is_unchanged_and_no_errors(rendered):
+def test_global_gl_state_is_unchanged_and_no_errors(rendered, require_forge):
 
     assert rendered["err_before"] == 0
     diff = {
@@ -591,7 +628,7 @@ def test_global_gl_state_is_unchanged_and_no_errors(rendered):
     assert rendered["err_after"] == 0
 
 
-def test_every_registered_pass_actually_ran(rendered):
+def test_every_registered_pass_actually_ran(rendered, require_forge):
 
     stats = rendered["backend"].stats
     ran = set(stats.cpu_ms)
@@ -603,7 +640,7 @@ def test_every_registered_pass_actually_ran(rendered):
 
 def test_the_picture_is_not_blank(rendered):
 
-    _require("opaque")
+    _require(rendered["backend_name"], "opaque")
     img = rendered["backend"].target.read_color(flip=True)[..., :3]
     colors = np.unique(img.reshape(-1, 3), axis=0)
     assert len(colors) > 8
@@ -612,7 +649,7 @@ def test_the_picture_is_not_blank(rendered):
 
 def test_id_buffer_agrees_with_the_picture(rendered):
 
-    _require("opaque", "id")
+    _require(rendered["backend_name"], "opaque", "id")
     backend = rendered["backend"]
     ids = backend.target.read_ids()
     img = backend.target.read_color(flip=False)[..., :3].astype(np.int16)
@@ -628,7 +665,7 @@ def test_id_buffer_agrees_with_the_picture(rendered):
 
 def test_picking_reads_a_single_pixel_and_matches(rendered):
 
-    _require("opaque", "id")
+    _require(rendered["backend_name"], "opaque", "id")
     backend = rendered["backend"]
     ids = backend.target.read_ids()
     ys, xs = np.nonzero(ids)
@@ -641,18 +678,24 @@ def test_picking_reads_a_single_pixel_and_matches(rendered):
 
 def test_batching_actually_happened(rendered):
 
-    _require("opaque")
+    _require(rendered["backend_name"], "opaque")
     s = rendered["backend"].stats
     assert s.instances > 0
     assert s.triangles > 0
-    assert s.draw_calls <= s.buckets * 2 + 4
+    if rendered["backend_name"] == "wgpu":
+        # The wgpu shadow pass encodes one draw per CSM cascade tile per
+        # bucket (forge batches its cascades), so with one directional light
+        # the bound grows by the three cascade tiles.
+        assert s.draw_calls <= s.buckets * 5 + 4
+    else:
+        assert s.draw_calls <= s.buckets * 2 + 4
     if s.instances >= 8:
         assert s.draw_calls < s.instances
 
 
 def test_shadow_toggle_is_reversible(rendered):
 
-    _require("opaque", "shadow")
+    _require(rendered["backend_name"], "opaque", "shadow")
     backend = rendered["backend"]
     if not backend.caps.supports(RenderFlag.SHADOW):
         pytest.skip("backend does not support shadows")
@@ -672,9 +715,9 @@ def test_shadow_toggle_is_reversible(rendered):
     assert not np.array_equal(on, off_a)
 
 
-def test_convex_hull_flag_switches_the_gpu_mesh(gl):
+def test_convex_hull_flag_switches_the_gpu_mesh(backend_name, request):
     adapter = make_adapter("mujoco", resolve("convex_hull"))
-    backend = ForgeBackend(gl, WIDTH, HEIGHT, samples=4)
+    backend = _make_backend(backend_name, request)
     try:
         source = adapter.scene_source()
         backend.set_scene(source)

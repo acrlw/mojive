@@ -1,9 +1,9 @@
-from forge_viewer.render.forge.text import TextRenderer
+from forge_viewer.render.text import TextLayout
 
 
 def test_text_atlas_keeps_pil_top_at_the_glyph_top():
-    renderer = TextRenderer()
-    renderer._chars = {"F"}
-    renderer._build_atlas()
+    layout = TextLayout()
+    layout._chars = {"F"}
+    layout._build_atlas()
 
-    assert renderer._glyphs["F"].uv[1] < renderer._glyphs["F"].uv[3]
+    assert layout._glyphs["F"].uv[1] < layout._glyphs["F"].uv[3]
