@@ -96,7 +96,7 @@ test:
 gpu:
 	@for f in $$(ls tests/gpu/test_*.py); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
 
-GPU_WGPU_FILES := tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py tests/gpu/test_horizon_haze.py tests/gpu/test_shading.py tests/gpu/test_shadows.py tests/gpu/test_reflection.py
+GPU_WGPU_FILES := tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py tests/gpu/test_horizon_haze.py tests/gpu/test_shading.py tests/gpu/test_shadows.py tests/gpu/test_reflection.py tests/gpu/test_outline.py
 ## Per-file GPU tests against the experimental wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 gpu-wgpu:
 	@export FORGE_VIEWER_BACKEND=wgpu; for f in $(GPU_WGPU_FILES); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done

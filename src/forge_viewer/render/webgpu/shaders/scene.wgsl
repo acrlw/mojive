@@ -249,6 +249,10 @@ fn vs_scene(
     @location(2) uv: vec2f,
     @builtin(instance_index) instance_index: u32,
 ) -> SceneOut {
+    return scene_vertex(position, normal, uv, instance_index);
+}
+
+fn scene_vertex(position: vec3f, normal: vec3f, uv: vec2f, instance_index: u32) -> SceneOut {
     let inst = instances[instance_index];
     let model = inst.model;
     let world = model * vec4f(position, 1.0);
@@ -309,6 +313,10 @@ fn apply_atmosphere(lit_in: vec3f, view_depth: f32) -> vec3f {
 
 @fragment
 fn fs_scene(in: SceneOut) -> @location(0) vec4f {
+    return scene_fragment(in);
+}
+
+fn scene_fragment(in: SceneOut) -> vec4f {
     let base = scene_albedo(in);
     // gl_ClipDistance[0] port: drop fragments behind the reflection plane.
     // The main pass binds (0,0,0,1), which never discards.
@@ -370,6 +378,84 @@ fn fs_depth(in: SceneOut) -> @location(0) vec4f {
     let range = max(frame.shading.w - frame.shading.z, 1e-6);
     let d = clamp((in.view_depth - frame.shading.z) / range, 0.0, 1.0);
     return vec4f(vec3f(1.0 - d), in.color.a);
+}
+
+// ---- wireframe variant --------------------------------------------------------
+// forge injects barycentrics in wireframe.geom (a geometry stage); WebGPU has
+// none, so the mesh store supplies a non-indexed stream with a bary attribute
+// (see meshes.py GpuMesh.wireframe).  Fragment math mirrors the WIREFRAME
+// branch of scene_body.glsl: the mix runs after finish_color, in display space.
+
+const WIRE_COLOR: vec3f = vec3f(0.10, 0.10, 0.12);  // forge opaque.WIRE_COLOR
+const WIRE_WIDTH: f32 = 1.2;                          // forge opaque.WIRE_WIDTH
+
+struct SceneWireOut {
+    @builtin(position) clip: vec4f,
+    @location(0) world: vec3f,
+    @location(1) normal: vec3f,
+    @location(2) uv: vec2f,
+    @location(3) color: vec4f,
+    @location(4) material: vec3f,    // emission, specular, shininess
+    @location(5) view_depth: f32,
+    @location(6) selected: f32,
+    @location(7) reflect: f32,
+    @location(8) bary: vec3f,
+};
+
+@vertex
+fn vs_scene_wire(
+    @location(0) position: vec3f,
+    @location(1) normal: vec3f,
+    @location(2) uv: vec2f,
+    @location(3) bary: vec3f,
+    @builtin(instance_index) instance_index: u32,
+) -> SceneWireOut {
+    let base = scene_vertex(position, normal, uv, instance_index);
+    var out: SceneWireOut;
+    out.clip = base.clip;
+    out.world = base.world;
+    out.normal = base.normal;
+    out.uv = base.uv;
+    out.color = base.color;
+    out.material = base.material;
+    out.view_depth = base.view_depth;
+    out.selected = base.selected;
+    out.reflect = base.reflect;
+    out.bary = bary;
+    return out;
+}
+
+fn wire_base(in: SceneWireOut) -> SceneOut {
+    var out: SceneOut;
+    out.clip = in.clip;
+    out.world = in.world;
+    out.normal = in.normal;
+    out.uv = in.uv;
+    out.color = in.color;
+    out.material = in.material;
+    out.view_depth = in.view_depth;
+    out.selected = in.selected;
+    out.reflect = in.reflect;
+    return out;
+}
+
+@fragment
+fn fs_scene_wire(in: SceneWireOut) -> @location(0) vec4f {
+    let base = scene_fragment(wire_base(in));
+    let d = min(in.bary.x, min(in.bary.y, in.bary.z));
+    let w = max(fwidth(d), 1e-6) * max(WIRE_WIDTH, 0.1);
+    return vec4f(mix(WIRE_COLOR, base.rgb, smoothstep(0.0, w, d)), base.a);
+}
+
+// ---- overdraw variant ---------------------------------------------------------
+// scene_body.glsl DEBUG_VIEW == 4: a fixed additive increment per covered
+// layer; the pipeline variant supplies the one/one blend and disables depth.
+
+const OVERDRAW_STEP: f32 = 1.0 / 16.0;
+
+@fragment
+fn fs_overdraw(in: SceneOut) -> @location(0) vec4f {
+    return vec4f(vec3f(OVERDRAW_STEP), 0.0);
 }
 
 // ---- depth/id export pass ---------------------------------------------------

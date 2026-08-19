@@ -8,10 +8,11 @@ which makes it usable headless on any platform with a Vulkan/Metal/D3D12 driver.
 
 Scope: the offscreen ``Renderer`` contract (color/depth/segmentation), lights
 (directional/point/spot + headlight), 2D and cube textures, skybox, IBL image
-light, transparency sorting, fog and haze, selection highlight, shadows
+light, transparency sorting, fog and haze, selection highlight and outline,
+debug views (albedo/normal/depth/segment/idcolor/overdraw/wireframe), shadows
 (directional CSM atlas + spot/point/area distance maps), and planar
-reflections.  Not yet implemented: wireframe, tendons, debug draw,
-gizmo, labels, and the interactive viewer surface path.
+reflections.  Not yet implemented: tendons, debug draw, gizmo, labels, and
+the interactive viewer surface path.
 """
 
 from __future__ import annotations
@@ -35,8 +36,14 @@ from .lighting import (
     LightUniforms,
     active_image_light,
 )
-from .meshes import MeshStore
-from .passes import ReflectPass, ShadowPass, SkyboxPass
+from .meshes import WIRE_STRIDE, MeshStore
+from .passes import (
+    OutlinePass,
+    PresentPass,
+    ReflectPass,
+    ShadowPass,
+    SkyboxPass,
+)
 from .programs import load_wgsl
 from .targets import FRAME_BYTES, FRAME_DTYPE, RenderTargetWgpu, proj_matrix_wgpu
 from .textures import TextureStore
@@ -47,6 +54,8 @@ HIGHLIGHT_EMISSION = 0.35
 EXPOSURE = 1.0
 # forge opaque.NO_CLIP: a clip-plane equation that never discards.
 NO_CLIP = (0.0, 0.0, 0.0, 1.0)
+# forge opaque.OVERDRAW_CLEAR: the overdraw view accumulates on black.
+OVERDRAW_CLEAR = (0.0, 0.0, 0.0, 1.0)
 
 _SUPPORTED_FLAGS = frozenset(
     {
@@ -61,15 +70,20 @@ _SUPPORTED_FLAGS = frozenset(
         RenderFlag.SKYBOX,
         RenderFlag.SHADOW,
         RenderFlag.REFLECTION,
+        RenderFlag.OUTLINE,
+        RenderFlag.WIREFRAME,
     }
 )
 
+# Fragment-swap debug views; OVERDRAW/WIREFRAME are scene pipeline variants and
+# SEGMENT/IDCOLOR are rebuilt by the present pass, so they have no entry here.
 _DEBUG_ENTRIES = {
     DebugView.SHADED: "fs_scene",
     DebugView.ALBEDO: "fs_albedo",
     DebugView.NORMAL: "fs_normal",
     DebugView.DEPTH: "fs_depth",
 }
+_SUPPORTED_VIEWS = frozenset(DebugView)
 
 _VERTEX_LAYOUT = {
     "array_stride": 32,
@@ -81,6 +95,19 @@ _VERTEX_LAYOUT = {
     ],
 }
 
+# Non-indexed wireframe stream from MeshStore: the scene vertex attributes plus
+# a barycentric triple per vertex (see shaders/scene.wgsl vs_scene_wire).
+_WIREFRAME_LAYOUT = {
+    "array_stride": WIRE_STRIDE * 4,
+    "step_mode": "vertex",
+    "attributes": [
+        {"format": "float32x3", "offset": 0, "shader_location": 0},
+        {"format": "float32x3", "offset": 12, "shader_location": 1},
+        {"format": "float32x2", "offset": 24, "shader_location": 2},
+        {"format": "float32x3", "offset": 32, "shader_location": 3},
+    ],
+}
+
 _ALPHA_BLEND = {
     "color": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
     "alpha": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
@@ -88,6 +115,11 @@ _ALPHA_BLEND = {
 _ADDITIVE_BLEND = {
     "color": {"src_factor": "src-alpha", "dst_factor": "one"},
     "alpha": {"src_factor": "src-alpha", "dst_factor": "one"},
+}
+# forge state_overdraw: blend_func(ONE, ONE), no depth test or write.
+_OVERDRAW_BLEND = {
+    "color": {"src_factor": "one", "dst_factor": "one"},
+    "alpha": {"src_factor": "one", "dst_factor": "one"},
 }
 
 
@@ -174,6 +206,8 @@ class WgpuBackend:
         self._texture_groups: dict[int, wgpu.GPUBindGroup] = {}
         self._image_light_groups: dict[int, wgpu.GPUBindGroup] = {}
         self._skybox = SkyboxPass(self.device, self.target.samples)
+        self._outline = OutlinePass(self.device, self.target.samples)
+        self._present = PresentPass(self.device)
 
         self.stats = RenderStats()
         self.debug = None
@@ -186,6 +220,7 @@ class WgpuBackend:
         self._frame_mode = FrameMode.NONE
         self._bvh_depth = 0
         self._flags: dict[RenderFlag, bool] = dict.fromkeys(_SUPPORTED_FLAGS, True)
+        self._flags[RenderFlag.WIREFRAME] = False
         self._flags[RenderFlag.ADDITIVE] = False
         self._flags[RenderFlag.FOG] = False
         self._flags[RenderFlag.HAZE] = False
@@ -204,11 +239,11 @@ class WgpuBackend:
             name="webgpu",
             gpu_pick=True,
             render_flags=frozenset(self._flags),
-            debug_views=frozenset(_DEBUG_ENTRIES),
+            debug_views=_SUPPORTED_VIEWS,
             capture=True,
             orthographic=True,
             shadows=True,
-            outline=False,
+            outline=True,
             gizmo=False,
             msaa_samples=self.target.samples,
             id_msaa=False,
@@ -247,13 +282,20 @@ class WgpuBackend:
 
     # -- pipelines ------------------------------------------------------------
 
-    def _scene_pipeline(self, fs_entry: str, blend: str, cull: str) -> wgpu.GPURenderPipeline:
-        key = ("scene", fs_entry, blend, cull, self.target.samples)
+    def _scene_pipeline(
+        self, fs_entry: str, blend: str, cull: str, wireframe: bool = False
+    ) -> wgpu.GPURenderPipeline:
+        key = ("scene", fs_entry, blend, cull, wireframe, self.target.samples)
         pipeline = self._pipelines.get(key)
         if pipeline is not None:
             return pipeline
+        overdraw = fs_entry == "fs_overdraw"
+        # The wireframe variant always pairs vs_scene_wire with fs_scene_wire.
+        wireframe = wireframe or fs_entry == "fs_scene_wire"
         target: dict = {"format": "rgba8unorm"}
-        if blend == "alpha":
+        if overdraw:
+            target["blend"] = _OVERDRAW_BLEND
+        elif blend == "alpha":
             target["blend"] = _ALPHA_BLEND
         elif blend == "additive":
             target["blend"] = _ADDITIVE_BLEND
@@ -261,8 +303,8 @@ class WgpuBackend:
             layout=self._scene_layout,
             vertex={
                 "module": self._module,
-                "entry_point": "vs_scene",
-                "buffers": [_VERTEX_LAYOUT],
+                "entry_point": "vs_scene_wire" if wireframe else "vs_scene",
+                "buffers": [_WIREFRAME_LAYOUT if wireframe else _VERTEX_LAYOUT],
             },
             fragment={
                 "module": self._module,
@@ -272,8 +314,8 @@ class WgpuBackend:
             primitive={"topology": "triangle-list", "front_face": "ccw", "cull_mode": cull},
             depth_stencil={
                 "format": "depth24plus",
-                "depth_write_enabled": blend == "opaque",
-                "depth_compare": "less",
+                "depth_write_enabled": blend == "opaque" and not overdraw,
+                "depth_compare": "always" if overdraw else "less",
             },
             multisample={"count": self.target.samples},
         )
@@ -510,6 +552,19 @@ class WgpuBackend:
         draw_calls = 0
         textured = self.get_flag(RenderFlag.TEXTURE)
         fs_entry = "fs_scene" if reflect else _DEBUG_ENTRIES.get(self._debug_view, "fs_scene")
+        # OVERDRAW and WIREFRAME are variants of the shaded pipeline, mirroring
+        # forge's OpaquePass spec selection (opaque.DEBUG_DEFINE/WIREFRAME).
+        overdraw = not reflect and self._debug_view is DebugView.OVERDRAW
+        wireframe = (
+            not reflect
+            and not overdraw
+            and fs_entry == "fs_scene"
+            and (self._debug_view is DebugView.WIREFRAME or self.get_flag(RenderFlag.WIREFRAME))
+        )
+        if overdraw:
+            fs_entry = "fs_overdraw"
+        elif wireframe:
+            fs_entry = "fs_scene_wire"
         for b in buckets:
             start, stop = scene.bucket_ranges[b]
             if stop <= start:
@@ -521,7 +576,7 @@ class WgpuBackend:
             if reflect:
                 pipeline = self._reflect_pipeline(blend, cull)
             else:
-                pipeline = self._scene_pipeline(fs_entry, blend, cull)
+                pipeline = self._scene_pipeline(fs_entry, blend, cull, wireframe)
             pass_encoder.set_pipeline(pipeline)
             texture_name = None
             if textured and matid < len(scene.materials):
@@ -531,9 +586,14 @@ class WgpuBackend:
             pass_encoder.set_bind_group(2, group2)
             pass_encoder.set_bind_group(3, group3)
             pass_encoder.set_bind_group(4, group4)
-            pass_encoder.set_vertex_buffer(0, mesh.vbo)
-            pass_encoder.set_index_buffer(mesh.ibo, "uint32")
-            pass_encoder.draw_indexed(mesh.index_count, stop - start, 0, 0, start)
+            if wireframe:
+                wire_vbo, wire_count = mesh.wireframe()
+                pass_encoder.set_vertex_buffer(0, wire_vbo)
+                pass_encoder.draw(wire_count, stop - start, 0, start)
+            else:
+                pass_encoder.set_vertex_buffer(0, mesh.vbo)
+                pass_encoder.set_index_buffer(mesh.ibo, "uint32")
+                pass_encoder.draw_indexed(mesh.index_count, stop - start, 0, 0, start)
             draw_calls += 1
         return draw_calls, sum(
             max(0, stop - start) for start, stop in (scene.bucket_ranges[b] for b in buckets)
@@ -604,12 +664,28 @@ class WgpuBackend:
         color_view = target.color_ms.create_view() if target.color_ms is not None else None
         color_attachment = {
             "view": color_view if color_view is not None else target.color.create_view(),
-            "clear_value": self._background,
+            "clear_value": (
+                OVERDRAW_CLEAR if self._debug_view is DebugView.OVERDRAW else self._background
+            ),
             "load_op": "clear",
             "store_op": "store" if color_view is None else "discard",
         }
         if color_view is not None:
             color_attachment["resolve_target"] = target.color.create_view()
+        # The outline mask renders ahead of the main pass; the dilation
+        # composite joins the main pass after transparent geometry, matching
+        # forge's PASS_ORDER (outline between transparent and present).
+        outline_buckets = self._outline.prepare(scene, self._selected, self._flags)
+        if outline_buckets:
+            draw_calls += self._outline.render_mask(
+                encoder,
+                scene,
+                self.meshes,
+                self.instances,
+                view_proj,
+                target.width,
+                target.height,
+            )
         pass1 = encoder.begin_render_pass(
             color_attachments=[color_attachment],
             depth_stencil_attachment={
@@ -645,6 +721,8 @@ class WgpuBackend:
             )
             draw_calls += calls
             instances_drawn += drawn
+        if outline_buckets:
+            draw_calls += self._outline.composite(pass1, target.width, target.height)
         pass1.end()
 
         pass2 = encoder.begin_render_pass(
@@ -687,6 +765,12 @@ class WgpuBackend:
                 pass2.set_index_buffer(mesh.ibo, "uint32")
                 pass2.draw_indexed(mesh.index_count, stop - start, 0, 0, start)
         pass2.end()
+
+        # SEGMENT/IDCOLOR rebuild the resolved color from the export ids;
+        # other views need no present work (the resolve happened in pass1).
+        draw_calls += self._present.execute(
+            encoder, target.color, target.export_id, self._debug_view, self._selected
+        )
 
         self.device.queue.submit([encoder.finish()])
 
@@ -755,7 +839,7 @@ class WgpuBackend:
         return self._flags.get(flag, False)
 
     def set_debug_view(self, view: DebugView) -> bool:
-        if view not in _DEBUG_ENTRIES:
+        if view not in _SUPPORTED_VIEWS:
             return False
         self._debug_view = view
         return True
@@ -794,6 +878,8 @@ class WgpuBackend:
         self.lights.release()
         self.target.release()
         self._skybox.release()
+        self._outline.release()
+        self._present.release()
         self._shadows.release()
         self._reflect.release()
         self._pipelines.clear()

@@ -135,7 +135,12 @@ class RenderTargetWgpu:
         )
         export_usage = wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_SRC
         self.export_depth = device.create_texture(size=size, format="r32float", usage=export_usage)
-        self.export_id = device.create_texture(size=size, format="r32uint", usage=export_usage)
+        # export_id is additionally sampled by the present pass (SEGMENT/IDCOLOR).
+        self.export_id = device.create_texture(
+            size=size,
+            format="r32uint",
+            usage=export_usage | wgpu.TextureUsage.TEXTURE_BINDING,
+        )
         self.export_zbuf = device.create_texture(
             size=size, format="depth24plus", usage=wgpu.TextureUsage.RENDER_ATTACHMENT
         )
