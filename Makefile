@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu p0 p1 renderer-api golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer hidpi empty canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu gpu-wgpu p0 p1 renderer-api golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer hidpi empty canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -95,6 +95,11 @@ test:
 ## Isolate files because OpenGL and physics libraries own process-global registries.
 gpu:
 	@for f in $$(ls tests/gpu/test_*.py); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
+
+GPU_WGPU_FILES := tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py
+## Per-file GPU tests against the experimental wgpu backend; extend GPU_WGPU_FILES as coverage grows.
+gpu-wgpu:
+	@export FORGE_VIEWER_BACKEND=wgpu; for f in $(GPU_WGPU_FILES); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
 
 renderer-api:
 	$(PYTEST) -q tests/test_renderer_api.py

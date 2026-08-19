@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from forge_viewer.render.forge import gl_native as G
@@ -13,6 +15,22 @@ try:
     import moderngl
 except ImportError:  # pragma: no cover
     moderngl = None
+
+
+@pytest.fixture(scope="session")
+def backend_name():
+
+    requested = os.environ.get("FORGE_VIEWER_BACKEND", "").strip().lower()
+    if requested == "webgpu":
+        requested = "wgpu"
+    return requested or "forge"
+
+
+@pytest.fixture(scope="session")
+def require_forge(backend_name):
+
+    if backend_name != "forge":
+        pytest.skip("GL-internals test, forge backend only")
 
 
 @pytest.fixture(scope="session")

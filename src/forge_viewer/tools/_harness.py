@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,25 +36,34 @@ class OffscreenHarness:
         backend: str = "mujoco",
         configure_adapter: Callable[[object], None] | None = None,
     ) -> None:
-        import glfw
+        requested = os.environ.get("FORGE_VIEWER_BACKEND", "").strip().lower()
+        if requested == "webgpu":
+            requested = "wgpu"
+        use_wgpu = requested == "wgpu"
 
-        self._glfw = glfw
-        if not glfw.init():
-            raise RuntimeError("GLFW initialization failed")
-        for k, v in (
-            (glfw.CONTEXT_VERSION_MAJOR, 3),
-            (glfw.CONTEXT_VERSION_MINOR, 3),
-            (glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE),
-            (glfw.OPENGL_FORWARD_COMPAT, True),
-            (glfw.VISIBLE, False),
-        ):
-            glfw.window_hint(k, v)
-        self.window = glfw.create_window(width, height, "forge harness", None, None)
-        if not self.window:
-            glfw.terminate()
-            raise RuntimeError("Failed to create an OpenGL 3.3 core context")
-        glfw.make_context_current(self.window)
-        glfw.swap_interval(0)
+        # The wgpu backend owns its device and needs no GL context or window.
+        self._glfw = None
+        self.window = None
+        if not use_wgpu:
+            import glfw
+
+            self._glfw = glfw
+            if not glfw.init():
+                raise RuntimeError("GLFW initialization failed")
+            for k, v in (
+                (glfw.CONTEXT_VERSION_MAJOR, 3),
+                (glfw.CONTEXT_VERSION_MINOR, 3),
+                (glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE),
+                (glfw.OPENGL_FORWARD_COMPAT, True),
+                (glfw.VISIBLE, False),
+            ):
+                glfw.window_hint(k, v)
+            self.window = glfw.create_window(width, height, "forge harness", None, None)
+            if not self.window:
+                glfw.terminate()
+                raise RuntimeError("Failed to create an OpenGL 3.3 core context")
+            glfw.make_context_current(self.window)
+            glfw.swap_interval(0)
 
         from ..backends import make_adapter
         from ..render.builder import SceneSourceBuilder
@@ -61,7 +71,12 @@ class OffscreenHarness:
         self.adapter = make_adapter(backend, asset)
         if configure_adapter is not None:
             configure_adapter(self.adapter)
-        self.backend = ForgeBackend(None, width, height, samples)
+        if use_wgpu:
+            from ..render.webgpu.backend import WgpuBackend
+
+            self.backend = WgpuBackend(width=width, height=height, samples=samples)
+        else:
+            self.backend = ForgeBackend(None, width, height, samples)
         self.builder = SceneSourceBuilder()
         self.source = self.adapter.scene_source()
         self.backend.set_scene(self.source)
@@ -132,8 +147,9 @@ class OffscreenHarness:
             self.backend.release()
         with contextlib.suppress(Exception):
             self.adapter.release()
-        with contextlib.suppress(Exception):
-            self._glfw.terminate()
+        if self._glfw is not None:
+            with contextlib.suppress(Exception):
+                self._glfw.terminate()
 
     def __enter__(self) -> OffscreenHarness:
         return self

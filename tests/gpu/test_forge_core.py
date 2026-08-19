@@ -30,6 +30,11 @@ from forge_viewer.types import (  # noqa: E402
 )
 
 
+@pytest.fixture(autouse=True, scope="module")
+def _forge_backend_only(require_forge):
+    pass
+
+
 @pytest.fixture(scope="module")
 def gl():
     if not glfw.init():

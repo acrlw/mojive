@@ -22,6 +22,12 @@ from forge_viewer.render.mesh import all_builtin  # noqa: E402
 from forge_viewer.render.scene import SceneBuilder  # noqa: E402
 from forge_viewer.types import CameraView, LightSet, Material, MeshKey, MeshShape  # noqa: E402
 
+
+@pytest.fixture(autouse=True, scope="module")
+def _forge_backend_only(require_forge):
+    pass
+
+
 W, H = 256, 192
 ASPECT = W / H
 ORTHO = 2.0

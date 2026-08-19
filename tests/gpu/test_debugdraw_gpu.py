@@ -22,6 +22,12 @@ from forge_viewer.render.forge.timing import FrameTiming  # noqa: E402
 from forge_viewer.render.scene import RenderScene  # noqa: E402
 from forge_viewer.types import CameraView  # noqa: E402
 
+
+@pytest.fixture(autouse=True, scope="module")
+def _forge_backend_only(require_forge):
+    pass
+
+
 WIDTH, HEIGHT = 400, 300
 BACKGROUND = (0.0, 0.0, 0.0, 1.0)
 WALL_RGBA = (0.10, 0.12, 0.14, 1.0)
