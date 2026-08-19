@@ -11,6 +11,9 @@
 //   re-rasterizes the scene and writes GL-compatible nonlinear depth.  WebGPU
 //   cannot resolve multisampled integer or depth attachments, so this replaces
 //   forge's ``blit_depth``/``blit_color`` resolve of the shared MSAA buffers.
+//
+// Shadow sampling lives in shadow_sample.wgsl (prepended by load_wgsl); the
+// GLSL USE_SHADOW define becomes runtime gating on the shadow_counts fields.
 
 // Keep in sync with instances.py (128-byte stride) and targets.py (frame block).
 struct Frame {
@@ -49,6 +52,19 @@ struct Lights {
     diffuse: array<vec4f, 100>,   // rgb linear, w spot exponent
     specular: array<vec4f, 100>,
     atten: array<vec4f, 100>,     // constant, linear, quadratic, range
+    // Shadow block, mirroring the shadow_sample.glsl uniform set (keep in
+    // sync with lighting.py LIGHTS_DTYPE).
+    shadow_matrix: array<mat4x4f, 3>,  // u_shadow_matrix
+    shadow_tile: array<vec4f, 3>,      // u_shadow_tile
+    shadow_splits: vec4f,              // xyz u_shadow_splits
+    shadow_texel: vec4f,               // xyz u_shadow_texel
+    shadow_bias: vec4f,                // xy u_shadow_bias
+    shadow_counts: vec4f,              // x u_shadow_count, y u_local_count, z u_shadow_light
+    local_matrix: array<mat4x4f, 8>,   // u_local_matrix (spot view-projections)
+    local_pos: array<vec4f, 8>,        // u_local_pos: xyz position, w range
+    local_texel: array<f32, 8>,        // u_local_texel
+    local_radius: array<f32, 8>,       // u_local_radius
+    local_slot: array<i32, 100>,       // u_local_slot: shadow slot per light, -1 none
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -104,7 +120,7 @@ fn finish_color(c_in: vec3f, exposure: f32, tonemap_on: bool) -> vec3f {
 fn light_term(
     albedo: vec3f, n: vec3f, l: vec3f, view_dir: vec3f,
     diffuse_rgb: vec3f, specular_rgb: vec3f,
-    specular: f32, shininess: f32, atten: f32,
+    specular: f32, shininess: f32, atten: f32, shadow: f32,
 ) -> vec3f {
     let ndl = max(dot(n, l), 0.0);
     if ndl <= 0.0 || atten <= 0.0 {
@@ -112,12 +128,12 @@ fn light_term(
     }
     let h = normalize(l + view_dir);
     let spec = specular * pow(max(dot(n, h), 0.0), max(shininess * 128.0, 1e-3));
-    return atten * ndl * (diffuse_rgb * albedo + specular_rgb * spec);
+    return atten * shadow * ndl * (diffuse_rgb * albedo + specular_rgb * spec);
 }
 
 fn shade(
     albedo: vec3f, normal: vec3f, world_pos: vec3f,
-    emission: f32, specular: f32, shininess: f32,
+    emission: f32, specular: f32, shininess: f32, view_depth: f32,
 ) -> vec3f {
     let n = normalize(normal);
     let view_dir = normalize(frame.camera_pos.xyz - world_pos);
@@ -164,10 +180,19 @@ fn shade(
                 }
             }
         }
+        // lighting.glsl:82-86 under USE_SHADOW; here the shadow_counts fields
+        // gate at runtime (-1 / 0 when the shadow pass did not run).
+        var shadow = 1.0;
+        if i == i32(lights.shadow_counts.z) {
+            shadow = shadow_factor(world_pos, n, view_depth);
+        }
+        if kind != 0 {
+            shadow *= local_shadow_factor(kind, lights.local_slot[i], world_pos, n);
+        }
         color += light_term(
             albedo, n, l, view_dir,
             lights.diffuse[i].rgb, lights.specular[i].rgb,
-            specular, shininess, atten,
+            specular, shininess, atten, shadow,
         );
     }
 
@@ -175,7 +200,7 @@ fn shade(
         color += light_term(
             albedo, n, -normalize(frame.camera_dir.xyz), view_dir,
             frame.headlight_diffuse.rgb, frame.headlight_specular.rgb,
-            specular, shininess, 1.0,
+            specular, shininess, 1.0, 1.0,
         );
     }
 
@@ -273,7 +298,9 @@ fn fs_scene(in: SceneOut) -> @location(0) vec4f {
     if in.selected > 0.5 {
         emission += frame.highlight.y;
     }
-    let lit = shade(base.rgb, in.normal, in.world, emission, in.material.y, in.material.z);
+    let lit = shade(
+        base.rgb, in.normal, in.world, emission, in.material.y, in.material.z, in.view_depth
+    );
     let rgb = finish_color(apply_atmosphere(lit, in.view_depth), frame.shading.x, frame.shading.y > 0.5);
     return vec4f(rgb, base.a);
 }

@@ -6,6 +6,7 @@ registration; ``WgpuBackend`` wires the passes it needs directly.
 
 from __future__ import annotations
 
+from .shadow import ShadowPass
 from .skybox import SkyboxPass
 
-__all__ = ["SkyboxPass"]
+__all__ = ["ShadowPass", "SkyboxPass"]

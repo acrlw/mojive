@@ -54,42 +54,27 @@ SPOT_DIR = np.array([-2.5, 3.0, -5.0], np.float32)
 POINT_POS = np.array([2.5, -3.0, 4.0], np.float32)
 
 
-@pytest.fixture(scope="module")
-def gl():
-    if not glfw.init():
-        pytest.skip("GLFW initialization failed")
-    for k, v in (
-        (glfw.CONTEXT_VERSION_MAJOR, 3),
-        (glfw.CONTEXT_VERSION_MINOR, 3),
-        (glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE),
-        (glfw.OPENGL_FORWARD_COMPAT, True),
-        (glfw.VISIBLE, False),
-    ):
-        glfw.window_hint(k, v)
-    win = glfw.create_window(W, H, "forge shadows", None, None)
-    if not win:
-        glfw.terminate()
-        pytest.skip("OpenGL 3.3 core context unavailable")
-    glfw.make_context_current(win)
-    ctx = moderngl.create_context()
-    G.native().drain_errors()
-    yield ctx
-    glfw.terminate()
+@pytest.fixture
+def backend(backend_name, request):
+    """Build the backend selected by FORGE_VIEWER_BACKEND; GL stays lazy."""
+    if backend_name == "wgpu":
+        from forge_viewer.render.webgpu.backend import WgpuBackend
 
-
-@pytest.fixture(autouse=True)
-def _gl_baseline(gl):
-
-    G.native().drain_errors()
-    gl.wireframe = False
-    gl.front_face = "ccw"
-    gl.cull_face = "back"
-    gl.depth_func = "<"
-    gl.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)
-    gl.enable_only(moderngl.NOTHING)
-    gl.multisample = True
-    G.native().depth_mask(True)
-    yield
+        be = WgpuBackend(W, H, samples=4)
+    else:
+        _passes.load_all()
+        if "shadow" not in registered():
+            pytest.skip(
+                f"shadow pass unavailable: {_passes.failed().get('shadow', 'unregistered')}"
+            )
+        be = ForgeBackend(request.getfixturevalue("gl_ctx"), W, H, samples=4)
+    if not be.caps.shadows:
+        be.release()
+        pytest.skip("backend does not support shadows")
+    be.meshes.sync({GROUND: builtin_mesh(GROUND), BOX: builtin_mesh(BOX)})
+    be.textures.sync({}, None)
+    yield be
+    be.release()
 
 
 def _placed(sx, sy, sz, pos) -> np.ndarray:
@@ -223,22 +208,6 @@ def _point_scene(
     return b.build(camera, lights, EXTENT, np.zeros(3, np.float32))
 
 
-@pytest.fixture(scope="module")
-def backend(gl):
-
-    _passes.load_all()
-    if "shadow" not in registered():
-        pytest.skip(f"shadow pass unavailable: {_passes.failed().get('shadow', 'unregistered')}")
-    be = ForgeBackend(gl, W, H, samples=4)
-    if not be.caps.shadows:
-        be.release()
-        pytest.skip("backend does not support shadows")
-    be.meshes.sync({GROUND: builtin_mesh(GROUND), BOX: builtin_mesh(BOX)})
-    be.textures.sync({}, None)
-    yield be
-    be.release()
-
-
 def _render(backend, camera=VIEW, shadow=True, **kw) -> np.ndarray:
 
     backend.set_flag(RenderFlag.SHADOW, bool(shadow))
@@ -309,6 +278,10 @@ def _high_frequency(y: np.ndarray) -> float:
 
 def test_shadow_pass_actually_ran(backend):
 
+    if backend.caps.name == "webgpu":
+        # Per-pass CPU timings and the pass registry are forge implementation
+        # details; the wgpu backend reports frame_cpu_ms only.
+        pytest.skip("per-pass timing table is a forge implementation detail")
     _render(backend, shadow=True)
     order = list(backend.stats.cpu_ms)
     assert "shadow" in order
@@ -398,6 +371,10 @@ def test_every_cascade_addresses_its_own_tile_and_texel(backend):
 
 def test_render_leaves_no_gl_error(backend):
 
+    if backend.caps.name == "webgpu":
+        # GL error state and backend.ctx are forge internals; WebGPU reports
+        # validation failures through device error scopes instead.
+        pytest.skip("GL error state is a forge implementation detail")
     G.native().drain_errors()
     _render(backend, shadow=True)
     assert backend.ctx.error == "GL_NO_ERROR"
@@ -478,7 +455,10 @@ def test_eight_local_lights_cast_simultaneously(backend):
 
     for _ in range(6):
         _render_many_spots(backend, 8)
-    assert backend.stats.cpu_ms["shadow"] < 16.7
+    if backend.caps.pass_timing:
+        # Per-pass CPU timing is forge-only; the pixel assertions above are
+        # the backend-neutral part of this test.
+        assert backend.stats.cpu_ms["shadow"] < 16.7
 
 
 def test_light_range_culls_lighting_and_shadow_casters(backend):

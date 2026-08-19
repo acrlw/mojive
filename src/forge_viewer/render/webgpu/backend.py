@@ -8,8 +8,9 @@ which makes it usable headless on any platform with a Vulkan/Metal/D3D12 driver.
 
 Scope: the offscreen ``Renderer`` contract (color/depth/segmentation), lights
 (directional/point/spot + headlight), 2D and cube textures, skybox, IBL image
-light, transparency sorting, fog and haze, selection highlight.  Not yet
-implemented: shadows, planar reflections, wireframe, tendons, debug draw,
+light, transparency sorting, fog and haze, selection highlight, and shadows
+(directional CSM atlas + spot/point/area distance maps).  Not yet
+implemented: planar reflections, wireframe, tendons, debug draw,
 gizmo, labels, and the interactive viewer surface path.
 """
 
@@ -28,9 +29,14 @@ from ..builder import SceneSourceBuilder
 from ..mesh import all_builtin
 from ..scene import RenderScene
 from .instances import InstanceStore
-from .lighting import IMAGE_LIGHT_REFERENCE_INTENSITY, LightUniforms, active_image_light
+from .lighting import (
+    IMAGE_LIGHT_REFERENCE_INTENSITY,
+    LIGHTS_BYTES,
+    LightUniforms,
+    active_image_light,
+)
 from .meshes import MeshStore
-from .passes import SkyboxPass
+from .passes import ShadowPass, SkyboxPass
 from .programs import load_wgsl
 from .targets import FRAME_BYTES, FRAME_DTYPE, RenderTargetWgpu, proj_matrix_wgpu
 from .textures import TextureStore
@@ -51,6 +57,7 @@ _SUPPORTED_FLAGS = frozenset(
         RenderFlag.HAZE,
         RenderFlag.ADDITIVE,
         RenderFlag.SKYBOX,
+        RenderFlag.SHADOW,
     }
 )
 
@@ -92,7 +99,9 @@ class WgpuBackend:
         self.lights = LightUniforms(self.device)
         self.target = RenderTargetWgpu(self.device, width, height, samples)
 
-        self._module = self.device.create_shader_module(code=load_wgsl("scene.wgsl"))
+        self._module = self.device.create_shader_module(
+            code=load_wgsl("shadow_sample.wgsl", "scene.wgsl")
+        )
         self._group0_layout = self.device.create_bind_group_layout(
             entries=[
                 {
@@ -140,8 +149,17 @@ class WgpuBackend:
                 },
             ]
         )
+        # The shadow pass owns its sampling layout (atlas + local distance
+        # array); the scene pipeline binds it as group 3 with live maps or
+        # 1x1 fallbacks, mirroring forge's always-bound shadow uniforms.
+        self._shadows = ShadowPass(self.device)
         self._scene_layout = self.device.create_pipeline_layout(
-            bind_group_layouts=[self._group0_layout, self._group1_layout, self._group2_layout]
+            bind_group_layouts=[
+                self._group0_layout,
+                self._group1_layout,
+                self._group2_layout,
+                self._shadows.bind_layout,
+            ]
         )
         self._export_layout = self.device.create_pipeline_layout(
             bind_group_layouts=[self._group0_layout]
@@ -183,13 +201,13 @@ class WgpuBackend:
             debug_views=frozenset(_DEBUG_ENTRIES),
             capture=True,
             orthographic=True,
-            shadows=False,
+            shadows=True,
             outline=False,
             gizmo=False,
             msaa_samples=self.target.samples,
             id_msaa=False,
             renderer=f"wgpu-py {wgpu.__version__} on {info.vendor} {info.device}",
-            notes=("offscreen only; no shadows/reflections/tendons/debug draw yet",),
+            notes=("offscreen only; no reflections/tendons/debug draw yet",),
         )
 
     # -- scene contract -------------------------------------------------------
@@ -306,7 +324,7 @@ class WgpuBackend:
                 },
                 {
                     "binding": 2,
-                    "resource": {"buffer": self.lights.buffer, "offset": 0, "size": 8000},
+                    "resource": {"buffer": self.lights.buffer, "offset": 0, "size": LIGHTS_BYTES},
                 },
             ],
         )
@@ -359,9 +377,8 @@ class WgpuBackend:
     # -- frame encoding -------------------------------------------------------
 
     def _write_frame_uniforms(
-        self, light_count: int, image_light: tuple[float, float]
-    ) -> tuple[CameraView, np.ndarray]:
-        cam = self._camera.with_aspect(self.target.width / max(self.target.height, 1))
+        self, cam: CameraView, light_count: int, image_light: tuple[float, float]
+    ) -> np.ndarray:
         view = np.asarray(cam.view_matrix(), np.float32)
         proj = proj_matrix_wgpu(cam)
         lights = self._scene.lights if self._scene is not None else None
@@ -397,10 +414,10 @@ class WgpuBackend:
         f["ids"][:] = (self._selected, light_count, 0, 0)
         f["image_light"][:] = (*image_light, 0.0, 0.0)
         self.device.queue.write_buffer(self.target.frame_buffer, 0, self._frame.tobytes())
-        return cam, proj @ view
+        return proj @ view
 
     def _draw_buckets(
-        self, pass_encoder, group0, group2, buckets, blend: str, cull: str
+        self, pass_encoder, group0, group2, group3, buckets, blend: str, cull: str
     ) -> tuple[int, int]:
         scene = self._scene
         assert scene is not None
@@ -423,6 +440,7 @@ class WgpuBackend:
             pass_encoder.set_bind_group(0, group0)
             pass_encoder.set_bind_group(1, self._texture_group(texture_name))
             pass_encoder.set_bind_group(2, group2)
+            pass_encoder.set_bind_group(3, group3)
             pass_encoder.set_vertex_buffer(0, mesh.vbo)
             pass_encoder.set_index_buffer(mesh.ibo, "uint32")
             pass_encoder.draw_indexed(mesh.index_count, stop - start, 0, 0, start)
@@ -439,15 +457,25 @@ class WgpuBackend:
             return None
 
         t0 = time.perf_counter()
+        target = self.target
         self.instances.upload(scene)
-        light_count = self.lights.upload(scene.lights)
+        cam = self._camera.with_aspect(target.width / max(target.height, 1))
+        # Shadow maps render before the scene pass, matching forge's
+        # PASS_ORDER; the same frame's scene pass samples them.
+        shadow = self._shadows.prepare(scene, cam, self._flags)
+        schedule = self.lights.upload(scene.lights, shadow)
+        light_count = len(schedule.lights)
         group2, image_gain, image_mip = self._image_light_binding(scene.lights)
-        cam, view_proj = self._write_frame_uniforms(light_count, (image_gain, image_mip))
+        view_proj = self._write_frame_uniforms(cam, light_count, (image_gain, image_mip))
+        group3 = self._shadows.sample_group(shadow)
 
         cull = "back" if self.get_flag(RenderFlag.CULL_FACE) else "none"
         group0 = self._bind_group0()
-        target = self.target
         encoder = self.device.create_command_encoder()
+
+        draw_calls = 0
+        if shadow is not None:
+            draw_calls += self._shadows.execute(encoder, scene, self.meshes, self.instances)
 
         color_view = target.color_ms.create_view() if target.color_ms is not None else None
         color_attachment = {
@@ -467,11 +495,10 @@ class WgpuBackend:
                 "depth_store_op": "store",
             },
         )
-        draw_calls = 0
         instances_drawn = 0
         if scene.count:
             calls, drawn = self._draw_buckets(
-                pass1, group0, group2, scene.opaque_buckets, "opaque", cull
+                pass1, group0, group2, group3, scene.opaque_buckets, "opaque", cull
             )
             draw_calls += calls
             instances_drawn += drawn
@@ -489,7 +516,7 @@ class WgpuBackend:
         if scene.count and scene.transparent_buckets and self.get_flag(RenderFlag.TRANSPARENT):
             blend = "additive" if self.get_flag(RenderFlag.ADDITIVE) else "alpha"
             order = scene.transparent_draw_order()
-            calls, drawn = self._draw_buckets(pass1, group0, group2, order, blend, cull)
+            calls, drawn = self._draw_buckets(pass1, group0, group2, group3, order, blend, cull)
             draw_calls += calls
             instances_drawn += drawn
         pass1.end()
@@ -542,6 +569,13 @@ class WgpuBackend:
         self.stats.buckets = scene.bucket_count()
         self.stats.triangles = scene.triangle_count(self.meshes.triangle_counts())
         self.stats.frame_cpu_ms = (time.perf_counter() - t0) * 1000.0
+        # Same report keys as ForgeBackend._update_light_stats.
+        self.stats.notes = {
+            "scene lights": (f"{len(schedule.lights)} active, {schedule.deferred_lights} deferred"),
+            "shadow casters": (
+                f"{schedule.selected_shadow_count} active, {schedule.deferred_shadows} deferred"
+            ),
+        }
         return None
 
     # -- misc protocol surface --------------------------------------------------
@@ -634,6 +668,7 @@ class WgpuBackend:
         self.lights.release()
         self.target.release()
         self._skybox.release()
+        self._shadows.release()
         self._pipelines.clear()
         self._texture_groups.clear()
         self._image_light_groups.clear()
