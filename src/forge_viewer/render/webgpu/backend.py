@@ -10,14 +10,15 @@ Scope: the offscreen ``Renderer`` contract (color/depth/segmentation), lights
 (directional/point/spot + headlight), 2D and cube textures, skybox, IBL image
 light, transparency sorting, fog and haze, selection highlight and outline,
 debug views (albedo/normal/depth/segment/idcolor/overdraw/wireframe), shadows
-(directional CSM atlas + spot/point/area distance maps), and planar
-reflections.  Not yet implemented: tendons, debug draw, gizmo, labels, and
-the interactive viewer surface path.
+(directional CSM atlas + spot/point/area distance maps), planar reflections,
+and tendons.  Not yet implemented: debug draw, gizmo, labels, and the
+interactive viewer surface path.
 """
 
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -43,6 +44,7 @@ from .passes import (
     ReflectPass,
     ShadowPass,
     SkyboxPass,
+    TendonPass,
 )
 from .programs import load_wgsl
 from .targets import FRAME_BYTES, FRAME_DTYPE, RenderTargetWgpu, proj_matrix_wgpu
@@ -72,6 +74,7 @@ _SUPPORTED_FLAGS = frozenset(
         RenderFlag.REFLECTION,
         RenderFlag.OUTLINE,
         RenderFlag.WIREFRAME,
+        RenderFlag.TENDON,
     }
 )
 
@@ -208,6 +211,7 @@ class WgpuBackend:
         self._skybox = SkyboxPass(self.device, self.target.samples)
         self._outline = OutlinePass(self.device, self.target.samples)
         self._present = PresentPass(self.device)
+        self._tendons = TendonPass(self.device)
 
         self.stats = RenderStats()
         self.debug = None
@@ -228,6 +232,21 @@ class WgpuBackend:
         self._source: SceneSource | None = None
         self._scene: RenderScene | None = None
         self._builder: SceneSourceBuilder | None = None
+        # Tendon publishing state, mirroring ForgeBackend: per-source lookup
+        # tables captured in set_scene plus reusable capsule packing buffers.
+        self._tendon_visible = np.zeros(0, bool)
+        self._actuator_visible = np.zeros(0, bool)
+        self._material_values = np.zeros((0, 4), np.float32)
+        self._tendon_material_table: tuple = ()
+        self._island_tendon_material_table: tuple = ()
+        self._tendon_actuator = np.zeros(0, np.int32)
+        self._actuator_palette = np.zeros((0, 4), np.float32)
+        self._capsule_segments = np.zeros((0, 2, 3), np.float32)
+        self._capsule_widths = np.zeros(0, np.float32)
+        self._capsule_colors = np.zeros((0, 4), np.float32)
+        self._capsule_materials = np.zeros((0, 4), np.float32)
+        self._capsule_material_ids = np.zeros(0, np.int32)
+        self._capsule_transparent = np.zeros(0, bool)
         self._frame = np.zeros((), FRAME_DTYPE)
         self.caps = self._build_caps()
 
@@ -248,7 +267,7 @@ class WgpuBackend:
             msaa_samples=self.target.samples,
             id_msaa=False,
             renderer=f"wgpu-py {wgpu.__version__} on {info.vendor} {info.device}",
-            notes=("offscreen only; no tendons/debug draw yet",),
+            notes=("offscreen only; no debug draw/gizmo/labels yet",),
         )
 
     # -- scene contract -------------------------------------------------------
@@ -258,6 +277,24 @@ class WgpuBackend:
 
     def set_scene(self, source: SceneSource) -> None:
         self._source = source
+        self._tendon_visible = source.tendon_visible
+        self._actuator_visible = source.actuator_visible
+        self._material_values = np.asarray(
+            [
+                (mat.emission, mat.specular, mat.shininess, mat.reflectance)
+                for mat in source.materials
+            ],
+            np.float32,
+        )
+        self._tendon_material_table = tuple(source.materials)
+        self._island_tendon_material_table = tuple(
+            replace(material, texture=None) for material in source.materials
+        )
+        self._tendon_actuator = np.full(len(source.tendon_rgba), -1, np.int32)
+        for actuator, tendon in enumerate(source.actuator_tendon):
+            if 0 <= tendon < len(self._tendon_actuator):
+                self._tendon_actuator[tendon] = actuator
+        self._actuator_palette = np.zeros((len(source.actuator_tendon), 4), np.float32)
         self.meshes.sync({**all_builtin(), **source.meshes})
         self.textures.sync(source.textures, source.skybox)
         self._texture_groups.clear()
@@ -276,6 +313,148 @@ class WgpuBackend:
             return
         self.meshes.update(frame.mesh_updates)
         self._scene = self._builder.update(frame, self._camera)
+        self._publish_tendons(frame)
+
+    def _publish_tendons(self, frame: SceneFrame) -> None:
+        """Pack visible tendon segments into capsule instances (forge parity)."""
+        segments, ids, widths = (
+            frame.tendon_segments,
+            frame.tendon_ids,
+            frame.tendon_widths,
+        )
+        if segments is None or ids is None or widths is None or not len(segments):
+            self._tendons.clear()
+            return
+
+        base_indices = (
+            np.flatnonzero(self._tendon_visible[ids])
+            if self.get_flag(RenderFlag.TENDON)
+            else np.zeros(0, np.intp)
+        )
+        base_count = len(base_indices)
+        actuator_indices = np.zeros(0, np.intp)
+        segment_actuators = np.zeros(0, np.int32)
+        if self.get_flag(RenderFlag.ACTUATOR) and frame.ctrl is not None:
+            segment_actuators = self._tendon_actuator[ids]
+            available = segment_actuators >= 0
+            available[available] &= self._actuator_visible[segment_actuators[available]]
+            actuator_indices = np.flatnonzero(available)
+        total = base_count + len(actuator_indices)
+        if not total:
+            self._tendons.clear()
+            return
+
+        if total > len(self._capsule_widths):
+            capacity = max(total, 2 * len(self._capsule_widths), 64)
+            self._capsule_segments = np.zeros((capacity, 2, 3), np.float32)
+            self._capsule_widths = np.zeros(capacity, np.float32)
+            self._capsule_colors = np.zeros((capacity, 4), np.float32)
+            self._capsule_materials = np.zeros((capacity, 4), np.float32)
+            self._capsule_material_ids = np.zeros(capacity, np.int32)
+            self._capsule_transparent = np.zeros(capacity, bool)
+
+        assert self._source is not None
+        if base_count:
+            self._capsule_segments[:base_count] = segments[base_indices]
+            self._capsule_widths[:base_count] = widths[base_indices]
+            tendon_rgba = self._source.tendon_rgba
+            if self.get_flag(RenderFlag.ISLAND) and frame.tendon_island_rgba is not None:
+                tendon_rgba = frame.tendon_island_rgba
+            np.take(
+                tendon_rgba,
+                ids[base_indices],
+                axis=0,
+                out=self._capsule_colors[:base_count],
+                mode="clip",
+            )
+            np.take(
+                self._material_values,
+                self._source.tendon_material[ids[base_indices]],
+                axis=0,
+                out=self._capsule_materials[:base_count],
+                mode="clip",
+            )
+            self._capsule_material_ids[:base_count] = self._source.tendon_material[
+                ids[base_indices]
+            ]
+
+        if len(actuator_indices):
+            self._fill_actuator_palette(frame)
+            start = base_count
+            stop = start + len(actuator_indices)
+            self._capsule_segments[start:stop] = segments[actuator_indices]
+            self._capsule_widths[start:stop] = (
+                widths[actuator_indices] * self._source.actuator_tendon_scale
+            )
+            np.take(
+                self._actuator_palette,
+                segment_actuators[actuator_indices],
+                axis=0,
+                out=self._capsule_colors[start:stop],
+            )
+            np.take(
+                self._material_values,
+                self._source.tendon_material[ids[actuator_indices]],
+                axis=0,
+                out=self._capsule_materials[start:stop],
+                mode="clip",
+            )
+            self._capsule_material_ids[start:stop] = self._source.tendon_material[
+                ids[actuator_indices]
+            ]
+
+        np.less(
+            self._capsule_colors[:total, 3],
+            1.0,
+            out=self._capsule_transparent[:total],
+        )
+
+        material_table = (
+            self._island_tendon_material_table
+            if self.get_flag(RenderFlag.ISLAND)
+            else self._tendon_material_table
+        )
+        self._tendons.update(
+            self._capsule_segments[:total],
+            self._capsule_widths[:total],
+            self._capsule_colors[:total],
+            self._capsule_materials[:total],
+            self._capsule_material_ids[:total],
+            self._capsule_transparent[:total],
+            material_table,
+        )
+
+    def _fill_actuator_palette(self, frame: SceneFrame) -> None:
+        source = self._source
+        assert source is not None
+        use_activation = self.get_flag(RenderFlag.ACTIVATION)
+        for i, out in enumerate(self._actuator_palette):
+            if source.actuator_ctrl_limited[i]:
+                rmin, rmax = source.actuator_ctrl_range[i]
+            elif use_activation and source.actuator_act_limited[i]:
+                rmin, rmax = source.actuator_act_range[i]
+            else:
+                rmin, rmax = -1.0, 1.0
+            if rmin >= 0.0:
+                low, middle, high = -1.0, float(rmin), float(rmax)
+            elif rmax <= 0.0:
+                low, middle, high = float(rmin), float(rmax), 1.0
+            else:
+                low, middle, high = float(rmin), 0.0, float(rmax)
+            value = float(frame.ctrl[source.actuator_ctrl_address[i]])
+            if (
+                use_activation
+                and source.actuator_dynamic[i]
+                and frame.actuator_activation is not None
+            ):
+                value = float(frame.actuator_activation[i])
+            value = min(max(value, low), high)
+            if value <= middle:
+                weight = (middle - value) / max(middle - low, 1e-15)
+                out[:] = weight * source.actuator_rgba[0] + (1.0 - weight) * source.actuator_rgba[1]
+            else:
+                weight = (value - middle) / max(high - middle, 1e-15)
+                out[:] = (1.0 - weight) * source.actuator_rgba[1] + weight * source.actuator_rgba[2]
 
     def set_camera(self, camera: CameraView) -> None:
         self._camera = camera
@@ -546,8 +725,12 @@ class WgpuBackend:
         blend: str,
         cull: str,
         reflect: bool = False,
+        scene: RenderScene | None = None,
     ) -> tuple[int, int]:
-        scene = self._scene
+        # Defaults to the main scene; the tendon pass draws its own scene
+        # through the same pipelines with its own instance buffer in group0.
+        if scene is None:
+            scene = self._scene
         assert scene is not None
         draw_calls = 0
         textured = self.get_flag(RenderFlag.TEXTURE)
@@ -633,6 +816,9 @@ class WgpuBackend:
 
         cull = "back" if self.get_flag(RenderFlag.CULL_FACE) else "none"
         group0 = self._bind_group0()
+        tendon_group0 = self._tendons.bind_group0(
+            self._group0_layout, target.frame_buffer, self.lights.buffer
+        )
         encoder = self.device.create_command_encoder()
 
         draw_calls = 0
@@ -713,6 +899,42 @@ class WgpuBackend:
             view_proj=view_proj,
             scene=scene,
         )
+        # Tendon capsule chains sit between skybox and transparent geometry,
+        # matching forge's PASS_ORDER (shadow, reflect, opaque, id, skybox,
+        # tendon, transparent, ...).
+        if tendon_group0 is not None:
+            tendon_scene = self._tendons.scene
+            # stats.instances mirrors forge's scene.count, so tendon capsules
+            # count as draw calls only.
+            calls, _ = self._draw_buckets(
+                pass1,
+                tendon_group0,
+                group2,
+                group3,
+                group4,
+                tendon_scene.opaque_buckets,
+                "opaque",
+                cull,
+                scene=tendon_scene,
+            )
+            draw_calls += calls
+            if tendon_scene.transparent_buckets and self.get_flag(RenderFlag.TRANSPARENT):
+                blend = "additive" if self.get_flag(RenderFlag.ADDITIVE) else "alpha"
+                # The tendon scene carries the default camera, so its
+                # back-to-front bucket order matches forge's TendonPass.
+                order = tendon_scene.transparent_draw_order()
+                calls, _ = self._draw_buckets(
+                    pass1,
+                    tendon_group0,
+                    group2,
+                    group3,
+                    group4,
+                    order,
+                    blend,
+                    cull,
+                    scene=tendon_scene,
+                )
+                draw_calls += calls
         if scene.count and scene.transparent_buckets and self.get_flag(RenderFlag.TRANSPARENT):
             blend = "additive" if self.get_flag(RenderFlag.ADDITIVE) else "alpha"
             order = scene.transparent_draw_order()
@@ -880,6 +1102,7 @@ class WgpuBackend:
         self._skybox.release()
         self._outline.release()
         self._present.release()
+        self._tendons.release()
         self._shadows.release()
         self._reflect.release()
         self._pipelines.clear()

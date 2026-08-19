@@ -11,5 +11,13 @@ from .present import PresentPass
 from .reflect import ReflectPass
 from .shadow import ShadowPass
 from .skybox import SkyboxPass
+from .tendon import TendonPass
 
-__all__ = ["OutlinePass", "PresentPass", "ReflectPass", "ShadowPass", "SkyboxPass"]
+__all__ = [
+    "OutlinePass",
+    "PresentPass",
+    "ReflectPass",
+    "ShadowPass",
+    "SkyboxPass",
+    "TendonPass",
+]
