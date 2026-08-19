@@ -110,8 +110,12 @@ class GLStateGuard:
 
 
 def bind_default_framebuffer(ctx: moderngl.Context) -> None:
+    # Headless standalone contexts (EGL) own no default framebuffer.
+    screen = ctx.screen
+    if screen is None:
+        return
     viewport = ctx.viewport
     scissor = ctx.scissor
-    ctx.screen.use()
+    screen.use()
     ctx.viewport = viewport
     ctx.scissor = scissor
