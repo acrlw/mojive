@@ -3,7 +3,9 @@
 Faithful port of ``render.forge.passes.base.schedule_lights`` (minus the shadow
 selection, which this backend does not implement yet) and of the
 ``OpaquePass._light_uniforms`` conversion: light colors are sRGB-decoded on the
-CPU, the ambient term stays raw and is decoded in the shader.
+CPU, the ambient term stays raw and is decoded in the shader.  Image lights do
+not enter the light loop; they bind a cube texture plus a (gain, max mip)
+parameter pair, mirroring ``render.forge.passes.opaque``.
 """
 
 from __future__ import annotations
@@ -14,6 +16,9 @@ import wgpu
 from ...types import Light, LightKind, LightSet
 
 MAX_SCENE_LIGHTS = 100
+
+# MuJoCo's image-light intensity scale, mirroring forge passes/opaque.py.
+IMAGE_LIGHT_REFERENCE_INTENSITY = 5000.0
 
 LIGHTS_DTYPE = np.dtype(
     [
@@ -41,6 +46,18 @@ def schedule_lights(lights: LightSet) -> tuple[Light, ...]:
         light for light in lights.lights if light.active and light.kind is not LightKind.IMAGE
     )
     return active[:MAX_SCENE_LIGHTS]
+
+
+def active_image_light(lights: LightSet) -> Light | None:
+    """The last active image light, mirroring ``OpaquePass._light_uniforms``."""
+    return next(
+        (
+            light
+            for light in reversed(lights.lights)
+            if light.active and light.kind is LightKind.IMAGE
+        ),
+        None,
+    )
 
 
 class LightUniforms:

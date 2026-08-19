@@ -7,10 +7,10 @@ pipeline, MSAA targets, and CPU readbacks.  No GL context or window is needed,
 which makes it usable headless on any platform with a Vulkan/Metal/D3D12 driver.
 
 Scope: the offscreen ``Renderer`` contract (color/depth/segmentation), lights
-(directional/point/spot + headlight), 2D textures, transparency sorting, fog
-and haze, selection highlight.  Not yet implemented: shadows, planar
-reflections, skybox, image lights, wireframe, tendons, debug draw, gizmo,
-labels, and the interactive viewer surface path.
+(directional/point/spot + headlight), 2D and cube textures, skybox, IBL image
+light, transparency sorting, fog and haze, selection highlight.  Not yet
+implemented: shadows, planar reflections, wireframe, tendons, debug draw,
+gizmo, labels, and the interactive viewer surface path.
 """
 
 from __future__ import annotations
@@ -28,10 +28,11 @@ from ..builder import SceneSourceBuilder
 from ..mesh import all_builtin
 from ..scene import RenderScene
 from .instances import InstanceStore
-from .lighting import LightUniforms
+from .lighting import IMAGE_LIGHT_REFERENCE_INTENSITY, LightUniforms, active_image_light
 from .meshes import MeshStore
-from .shaders import SCENE_WGSL
-from .targets import FRAME_DTYPE, RenderTargetWgpu, proj_matrix_wgpu
+from .passes import SkyboxPass
+from .programs import load_wgsl
+from .targets import FRAME_BYTES, FRAME_DTYPE, RenderTargetWgpu, proj_matrix_wgpu
 from .textures import TextureStore
 
 HIGHLIGHT_COLOR = (1.0, 0.82, 0.45, 0.0)
@@ -49,6 +50,7 @@ _SUPPORTED_FLAGS = frozenset(
         RenderFlag.FOG,
         RenderFlag.HAZE,
         RenderFlag.ADDITIVE,
+        RenderFlag.SKYBOX,
     }
 )
 
@@ -90,7 +92,7 @@ class WgpuBackend:
         self.lights = LightUniforms(self.device)
         self.target = RenderTargetWgpu(self.device, width, height, samples)
 
-        self._module = self.device.create_shader_module(code=SCENE_WGSL)
+        self._module = self.device.create_shader_module(code=load_wgsl("scene.wgsl"))
         self._group0_layout = self.device.create_bind_group_layout(
             entries=[
                 {
@@ -124,14 +126,30 @@ class WgpuBackend:
                 },
             ]
         )
+        self._group2_layout = self.device.create_bind_group_layout(
+            entries=[
+                {
+                    "binding": 0,
+                    "visibility": wgpu.ShaderStage.FRAGMENT,
+                    "texture": {"sample_type": "float", "view_dimension": "cube"},
+                },
+                {
+                    "binding": 1,
+                    "visibility": wgpu.ShaderStage.FRAGMENT,
+                    "sampler": {"type": "filtering"},
+                },
+            ]
+        )
         self._scene_layout = self.device.create_pipeline_layout(
-            bind_group_layouts=[self._group0_layout, self._group1_layout]
+            bind_group_layouts=[self._group0_layout, self._group1_layout, self._group2_layout]
         )
         self._export_layout = self.device.create_pipeline_layout(
             bind_group_layouts=[self._group0_layout]
         )
         self._pipelines: dict[tuple, wgpu.GPURenderPipeline] = {}
         self._texture_groups: dict[int, wgpu.GPUBindGroup] = {}
+        self._image_light_groups: dict[int, wgpu.GPUBindGroup] = {}
+        self._skybox = SkyboxPass(self.device, self.target.samples)
 
         self.stats = RenderStats()
         self.debug = None
@@ -171,9 +189,7 @@ class WgpuBackend:
             msaa_samples=self.target.samples,
             id_msaa=False,
             renderer=f"wgpu-py {wgpu.__version__} on {info.vendor} {info.device}",
-            notes=(
-                "offscreen only; no shadows/reflections/skybox/tendons/debug draw yet",
-            ),
+            notes=("offscreen only; no shadows/reflections/tendons/debug draw yet",),
         )
 
     # -- scene contract -------------------------------------------------------
@@ -184,10 +200,17 @@ class WgpuBackend:
     def set_scene(self, source: SceneSource) -> None:
         self._source = source
         self.meshes.sync({**all_builtin(), **source.meshes})
-        self.textures.sync(source.textures)
+        self.textures.sync(source.textures, source.skybox)
         self._texture_groups.clear()
+        self._image_light_groups.clear()
+        self._skybox.reset()
         self._builder = SceneSourceBuilder()
         self._scene = self._builder.set_source(source, self._camera)
+
+    def set_render_scene(self, scene: RenderScene) -> None:
+        # Unlike forge there is no per-scene VAO to rebuild; the instance
+        # storage buffer is re-uploaded from the stored scene every render().
+        self._scene = scene
 
     def update(self, frame: SceneFrame) -> None:
         if self._builder is None:
@@ -240,7 +263,11 @@ class WgpuBackend:
             return pipeline
         pipeline = self.device.create_render_pipeline(
             layout=self._export_layout,
-            vertex={"module": self._module, "entry_point": "vs_export", "buffers": [_VERTEX_LAYOUT]},
+            vertex={
+                "module": self._module,
+                "entry_point": "vs_export",
+                "buffers": [_VERTEX_LAYOUT],
+            },
             fragment={
                 "module": self._module,
                 "entry_point": "fs_export",
@@ -261,7 +288,14 @@ class WgpuBackend:
         return self.device.create_bind_group(
             layout=self._group0_layout,
             entries=[
-                {"binding": 0, "resource": {"buffer": self.target.frame_buffer, "offset": 0, "size": 336}},
+                {
+                    "binding": 0,
+                    "resource": {
+                        "buffer": self.target.frame_buffer,
+                        "offset": 0,
+                        "size": FRAME_BYTES,
+                    },
+                },
                 {
                     "binding": 1,
                     "resource": {
@@ -270,7 +304,10 @@ class WgpuBackend:
                         "size": self.instances.capacity * 128,
                     },
                 },
-                {"binding": 2, "resource": {"buffer": self.lights.buffer, "offset": 0, "size": 8000}},
+                {
+                    "binding": 2,
+                    "resource": {"buffer": self.lights.buffer, "offset": 0, "size": 8000},
+                },
             ],
         )
 
@@ -291,9 +328,39 @@ class WgpuBackend:
             self._texture_groups[key] = group
         return group
 
+    def _image_light_binding(self, lights) -> tuple[wgpu.GPUBindGroup, float, float]:
+        """Bind the image-light cube (or the black fallback) and its shader terms.
+
+        Mirrors ``OpaquePass._light_uniforms``: the gain is normalized by
+        MuJoCo's 5000 reference intensity, the max mip comes from the bound
+        texture's face size, and a missing cube binds ``black_cube``.
+        """
+        image = active_image_light(lights)
+        gain = (
+            max(float(image.intensity), 0.0) / IMAGE_LIGHT_REFERENCE_INTENSITY
+            if image is not None
+            else 0.0
+        )
+        entry = self.textures.cube(image.texture) if image is not None else None
+        view, size = entry if entry is not None else (self.textures.black_cube, 1)
+        key = id(view)
+        group = self._image_light_groups.get(key)
+        if group is None:
+            group = self.device.create_bind_group(
+                layout=self._group2_layout,
+                entries=[
+                    {"binding": 0, "resource": view},
+                    {"binding": 1, "resource": self.textures.cube_sampler},
+                ],
+            )
+            self._image_light_groups[key] = group
+        return group, gain, float(np.floor(np.log2(max(size, 1))))
+
     # -- frame encoding -------------------------------------------------------
 
-    def _write_frame_uniforms(self, light_count: int) -> None:
+    def _write_frame_uniforms(
+        self, light_count: int, image_light: tuple[float, float]
+    ) -> tuple[CameraView, np.ndarray]:
         cam = self._camera.with_aspect(self.target.width / max(self.target.height, 1))
         view = np.asarray(cam.view_matrix(), np.float32)
         proj = proj_matrix_wgpu(cam)
@@ -328,9 +395,13 @@ class WgpuBackend:
         )
         f["flags"][:] = (1.0 if cam.orthographic else 0.0, 0.0, 0.0, 0.0)
         f["ids"][:] = (self._selected, light_count, 0, 0)
+        f["image_light"][:] = (*image_light, 0.0, 0.0)
         self.device.queue.write_buffer(self.target.frame_buffer, 0, self._frame.tobytes())
+        return cam, proj @ view
 
-    def _draw_buckets(self, pass_encoder, group0, buckets, blend: str, cull: str) -> tuple[int, int]:
+    def _draw_buckets(
+        self, pass_encoder, group0, group2, buckets, blend: str, cull: str
+    ) -> tuple[int, int]:
         scene = self._scene
         assert scene is not None
         draw_calls = 0
@@ -351,6 +422,7 @@ class WgpuBackend:
                 texture_name = scene.materials[matid].texture
             pass_encoder.set_bind_group(0, group0)
             pass_encoder.set_bind_group(1, self._texture_group(texture_name))
+            pass_encoder.set_bind_group(2, group2)
             pass_encoder.set_vertex_buffer(0, mesh.vbo)
             pass_encoder.set_index_buffer(mesh.ibo, "uint32")
             pass_encoder.draw_indexed(mesh.index_count, stop - start, 0, 0, start)
@@ -369,7 +441,8 @@ class WgpuBackend:
         t0 = time.perf_counter()
         self.instances.upload(scene)
         light_count = self.lights.upload(scene.lights)
-        self._write_frame_uniforms(light_count)
+        group2, image_gain, image_mip = self._image_light_binding(scene.lights)
+        cam, view_proj = self._write_frame_uniforms(light_count, (image_gain, image_mip))
 
         cull = "back" if self.get_flag(RenderFlag.CULL_FACE) else "none"
         group0 = self._bind_group0()
@@ -397,15 +470,28 @@ class WgpuBackend:
         draw_calls = 0
         instances_drawn = 0
         if scene.count:
-            calls, drawn = self._draw_buckets(pass1, group0, scene.opaque_buckets, "opaque", cull)
+            calls, drawn = self._draw_buckets(
+                pass1, group0, group2, scene.opaque_buckets, "opaque", cull
+            )
             draw_calls += calls
             instances_drawn += drawn
-            if scene.transparent_buckets and self.get_flag(RenderFlag.TRANSPARENT):
-                blend = "additive" if self.get_flag(RenderFlag.ADDITIVE) else "alpha"
-                order = scene.transparent_draw_order()
-                calls, drawn = self._draw_buckets(pass1, group0, order, blend, cull)
-                draw_calls += calls
-                instances_drawn += drawn
+        # Skybox and horizon haze sit between opaque and transparent, matching
+        # forge's PASS_ORDER (the id pass is the separate export pass here).
+        draw_calls += self._skybox.render(
+            pass1,
+            textures=self.textures,
+            flags=self._flags,
+            debug_view=self._debug_view,
+            camera=cam,
+            view_proj=view_proj,
+            scene=scene,
+        )
+        if scene.count and scene.transparent_buckets and self.get_flag(RenderFlag.TRANSPARENT):
+            blend = "additive" if self.get_flag(RenderFlag.ADDITIVE) else "alpha"
+            order = scene.transparent_draw_order()
+            calls, drawn = self._draw_buckets(pass1, group0, group2, order, blend, cull)
+            draw_calls += calls
+            instances_drawn += drawn
         pass1.end()
 
         pass2 = encoder.begin_render_pass(
@@ -547,8 +633,10 @@ class WgpuBackend:
         self.instances.release()
         self.lights.release()
         self.target.release()
+        self._skybox.release()
         self._pipelines.clear()
         self._texture_groups.clear()
+        self._image_light_groups.clear()
         self._scene = None
         self._builder = None
         self._source = None

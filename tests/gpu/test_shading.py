@@ -50,7 +50,7 @@ def _transform(scale: float, y: float) -> np.ndarray:
 
 
 class Rig:
-    def __init__(self, backend: ForgeBackend, textures=None, skybox=None, mesh=None) -> None:
+    def __init__(self, backend, textures=None, skybox=None, mesh=None) -> None:
         self.backend = backend
         backend.set_scene(
             SceneSource(meshes={QUAD: mesh or _quad()}, textures=textures or {}, skybox=skybox)
@@ -94,7 +94,11 @@ class Rig:
         )
         self.backend.highlight(selected)
         self.backend.set_render_scene(scene)
-        assert self.backend.render(None) is not None
+        # The wgpu backend renders offscreen only and returns no ViewportImage.
+        if self.backend.caps.name == "webgpu":
+            self.backend.render(None)
+        else:
+            assert self.backend.render(None) is not None
         return self.backend.target.read_color(flip=True)
 
     @staticmethod
@@ -106,10 +110,19 @@ class Rig:
         return img[2, 2].astype(np.int32)
 
 
-@pytest.fixture
-def rig(gl_ctx):
+def _make_backend(backend_name: str, request, samples: int = 4):
+    """Build the backend selected by FORGE_VIEWER_BACKEND; GL stays lazy."""
+    if backend_name == "wgpu":
+        from forge_viewer.render.webgpu.backend import WgpuBackend
+
+        return WgpuBackend(WIDTH, HEIGHT, samples=samples)
     passes.load_all()
-    backend = ForgeBackend(gl_ctx, WIDTH, HEIGHT, samples=4)
+    return ForgeBackend(request.getfixturevalue("gl_ctx"), WIDTH, HEIGHT, samples=samples)
+
+
+@pytest.fixture
+def rig(backend_name, request):
+    backend = _make_backend(backend_name, request)
     yield Rig(backend)
     backend.release()
 
@@ -215,7 +228,8 @@ def test_transparent_leaves_depth_mask_on(rig):
     shots = []
     for _ in range(3):
         img = rig.draw([opaque_quad, glass], ambient=[0.3] * 3)
-        assert rig.backend.target.fbo.depth_mask is True
+        if rig.backend.caps.name == "forge":
+            assert rig.backend.target.fbo.depth_mask is True
 
         assert Rig.corner(img)[:3].max() > 60
         shots.append(img.copy())
@@ -287,13 +301,12 @@ def test_additive_transparency_matches_mujoco_blending(rig):
     assert np.abs(additive[:3] - want).max() <= 2
 
 
-def test_skybox_only_shows_up_when_it_is_on(gl_ctx):
+def test_skybox_only_shows_up_when_it_is_on(backend_name, request):
 
-    passes.load_all()
     sky = np.zeros((6, 4, 4, 4), np.uint8)
     sky[..., :3] = np.array([40, 90, 200], np.uint8)
     sky[..., 3] = 255
-    backend = ForgeBackend(gl_ctx, WIDTH, HEIGHT, samples=4)
+    backend = _make_backend(backend_name, request)
     try:
         rig = Rig(
             backend,
@@ -307,7 +320,7 @@ def test_skybox_only_shows_up_when_it_is_on(gl_ctx):
         backend.set_flag(RenderFlag.SKYBOX, True)
         on = Rig.corner(rig.draw([quad], ambient=[0.3] * 3))
 
-        clear = np.array([round(c * 255) for c in backend._make_context(backend._scene).background])
+        clear = np.array([round(c * 255) for c in backend._background])
         assert np.abs(off - clear).max() <= 1
         assert np.abs(on - off).max() > 20
 
@@ -316,11 +329,10 @@ def test_skybox_only_shows_up_when_it_is_on(gl_ctx):
         backend.release()
 
 
-def test_image_light_uses_cube_radiance_and_mujoco_intensity_scale(gl_ctx):
-    passes.load_all()
+def test_image_light_uses_cube_radiance_and_mujoco_intensity_scale(backend_name, request):
     value = 128
     cube = np.full((6, 8, 8, 3), value, np.uint8)
-    backend = ForgeBackend(gl_ctx, WIDTH, HEIGHT, samples=4)
+    backend = _make_backend(backend_name, request)
     try:
         rig = Rig(
             backend,
@@ -349,9 +361,8 @@ def test_image_light_uses_cube_radiance_and_mujoco_intensity_scale(gl_ctx):
         backend.release()
 
 
-def test_normals_survive_non_uniform_scale(gl_ctx):
+def test_normals_survive_non_uniform_scale(backend_name, request):
 
-    passes.load_all()
     n_local = np.array([0.0, -1.0, 1.0], np.float32) / np.sqrt(2.0)
     slanted = MeshData(
         np.array([[-1, 0, -1], [1, 0, -1], [1, 0, 1], [-1, 0, 1]], np.float32),
@@ -359,7 +370,7 @@ def test_normals_survive_non_uniform_scale(gl_ctx):
         np.zeros((4, 2), np.float32),
         np.array([0, 1, 2, 0, 2, 3], np.uint32),
     )
-    backend = ForgeBackend(gl_ctx, WIDTH, HEIGHT, samples=4)
+    backend = _make_backend(backend_name, request)
     try:
         rig = Rig(backend, mesh=slanted)
         backend.set_debug_view(DebugView.NORMAL)
@@ -381,7 +392,7 @@ def test_normals_survive_non_uniform_scale(gl_ctx):
         backend.release()
 
 
-def test_shared_id_layout_is_not_polluted_by_shading_passes(gl_ctx):
+def test_shared_id_layout_is_not_polluted_by_shading_passes(require_forge, gl_ctx):
 
     passes.load_all()
     backend = ForgeBackend(gl_ctx, WIDTH, HEIGHT, samples=0)
@@ -413,7 +424,12 @@ def test_highlight_needs_the_emission_term(rig, monkeypatch):
     plain = float(Rig.center(rig.draw([quad], ambient=dark))[:3].mean())
     lit = float(Rig.center(rig.draw([quad], ambient=dark, selected=1))[:3].mean())
 
-    monkeypatch.setattr(opaque_pass, "HIGHLIGHT_EMISSION", 0.0)
+    if rig.backend.caps.name == "webgpu":
+        from forge_viewer.render.webgpu import backend as webgpu_backend
+
+        monkeypatch.setattr(webgpu_backend, "HIGHLIGHT_EMISSION", 0.0)
+    else:
+        monkeypatch.setattr(opaque_pass, "HIGHLIGHT_EMISSION", 0.0)
     mix_only = float(Rig.center(rig.draw([quad], ambient=dark, selected=1))[:3].mean())
 
     assert lit - plain > 40.0
@@ -433,6 +449,8 @@ def test_albedo_view_is_the_unlit_base_color(rig):
 
 def test_overdraw_clears_to_zero_and_counts_layers(rig):
 
+    if DebugView.OVERDRAW not in rig.backend.caps.debug_views:
+        pytest.skip("overdraw debug view unsupported by this backend")
     rig.backend.set_debug_view(DebugView.OVERDRAW)
     img = rig.draw(
         [
@@ -448,6 +466,8 @@ def test_overdraw_clears_to_zero_and_counts_layers(rig):
 
 def test_wireframe_is_another_program_and_still_shades(rig):
 
+    if DebugView.WIREFRAME not in rig.backend.caps.debug_views:
+        pytest.skip("wireframe debug view unsupported by this backend")
     quad = (np.array([0.7, 0.7, 0.7, 1.0], np.float32), (0.0, 0.0, 0.5), 2.0, 0.0)
     inside = (HEIGHT // 4, WIDTH // 2)
 

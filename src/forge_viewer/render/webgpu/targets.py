@@ -20,7 +20,7 @@ import wgpu
 
 from ...types import CameraView
 
-# Frame uniform block, mirrors `struct Frame` in shaders.SCENE_WGSL.
+# Frame uniform block, mirrors `struct Frame` in shaders/scene.wgsl.
 FRAME_DTYPE = np.dtype(
     [
         ("view_proj", "(4,4)f4"),
@@ -38,10 +38,11 @@ FRAME_DTYPE = np.dtype(
         ("shading", "(4,)f4"),  # exposure, tonemap on, near, far
         ("flags", "(4,)f4"),  # x: orthographic
         ("ids", "(4,)u4"),  # x: selected id, y: light count
+        ("image_light", "(4,)f4"),  # x: gain, y: max mip level
     ]
 )
 FRAME_BYTES = FRAME_DTYPE.itemsize
-assert FRAME_BYTES == 336
+assert FRAME_BYTES == 352
 
 
 def perspective_wgpu(fov_y: float, aspect: float, near: float, far: float) -> np.ndarray:

@@ -41,7 +41,10 @@ packages = ["src/forge_viewer"]
 "assets" = "forge_viewer/data/assets"
 
 [tool.hatch.build]
-artifacts = ["src/forge_viewer/render/forge/shaders/*.glsl"]
+artifacts = [
+    "src/forge_viewer/render/forge/shaders/*.glsl",
+    "src/forge_viewer/render/webgpu/shaders/*.wgsl",
+]
 
 [tool.ruff]
 line-length = 100

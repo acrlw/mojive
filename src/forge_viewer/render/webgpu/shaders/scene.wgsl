@@ -1,22 +1,18 @@
-"""WGSL shaders for the webgpu backend.
+// Scene shaders for the webgpu backend.
+//
+// Direct ports of the forge GLSL pipeline (scene.vert, scene_body.glsl,
+// lighting.glsl, id.vert/id.frag) with three deliberate deltas:
+//
+// - Clip space follows WebGPU conventions (z in [0,1]); the perspective and
+//   orthographic projections are built on the CPU side in ``targets.py``.
+// - ``gl_ClipDistance`` (planar reflection clipping) is dropped; the reflection
+//   pass is not part of this backend.
+// - Depth and object-id export runs as a separate single-sampled MRT pass that
+//   re-rasterizes the scene and writes GL-compatible nonlinear depth.  WebGPU
+//   cannot resolve multisampled integer or depth attachments, so this replaces
+//   forge's ``blit_depth``/``blit_color`` resolve of the shared MSAA buffers.
 
-These are direct ports of the forge GLSL pipeline (scene.vert, scene_body.glsl,
-lighting.glsl, id.vert/id.frag) with three deliberate deltas:
-
-- Clip space follows WebGPU conventions (z in [0,1]); the perspective and
-  orthographic projections are built on the CPU side in ``targets.py``.
-- ``gl_ClipDistance`` (planar reflection clipping) is dropped; the reflection
-  pass is not part of this backend.
-- Depth and object-id export runs as a separate single-sampled MRT pass that
-  re-rasterizes the scene and writes GL-compatible nonlinear depth.  WebGPU
-  cannot resolve multisampled integer or depth attachments, so this replaces
-  forge's ``blit_depth``/``blit_color`` resolve of the shared MSAA buffers.
-"""
-
-from __future__ import annotations
-
-# Keep in sync with instances.py (128-byte stride) and targets.py (frame block).
-SCENE_WGSL = """
+// Keep in sync with instances.py (128-byte stride) and targets.py (frame block).
 struct Frame {
     view_proj: mat4x4f,         // WebGPU-clip view-projection
     view: mat4x4f,
@@ -33,6 +29,7 @@ struct Frame {
     shading: vec4f,             // exposure, tonemap on, near, far
     flags: vec4f,               // x orthographic
     ids: vec4u,                 // x selected id, y light count
+    image_light: vec4f,         // x gain (intensity / 5000), y max mip level
 };
 
 struct Instance {
@@ -59,6 +56,8 @@ struct Lights {
 @group(0) @binding(2) var<storage, read> lights: Lights;
 @group(1) @binding(0) var albedo_tex: texture_2d<f32>;
 @group(1) @binding(1) var albedo_sampler: sampler;
+@group(2) @binding(0) var image_light_tex: texture_cube<f32>;
+@group(2) @binding(1) var image_light_sampler: sampler;
 
 const FORGE_GAMMA: f32 = 2.2;
 const FORGE_KNEE: f32 = 0.8;
@@ -123,6 +122,22 @@ fn shade(
     let n = normalize(normal);
     let view_dir = normalize(frame.camera_pos.xyz - world_pos);
     var color = ambient_linear(frame.ambient.xyz) * albedo;
+
+    // Image-based lighting, mirroring lighting.glsl: diffuse irradiance comes
+    // from the most blurred mip, specular from the roughness-selected LOD.
+    if frame.image_light.x > 0.0 {
+        let cube_n = vec3f(n.x, n.z, -n.y);
+        let reflected = reflect(-view_dir, n);
+        let cube_r = vec3f(reflected.x, reflected.z, -reflected.y);
+        let diffuse_ibl = textureSampleLevel(
+            image_light_tex, image_light_sampler, cube_n, frame.image_light.y
+        ).rgb;
+        let roughness = 1.0 - clamp(shininess, 0.0, 1.0);
+        let specular_ibl = textureSampleLevel(
+            image_light_tex, image_light_sampler, cube_r, roughness * frame.image_light.y
+        ).rgb;
+        color += frame.image_light.x * (diffuse_ibl * albedo + specular * specular_ibl);
+    }
 
     let light_count = i32(frame.ids.y);
     for (var i = 0; i < light_count; i = i + 1) {
@@ -325,4 +340,3 @@ fn fs_export(in: ExportOut) -> ExportFrag {
     out.object_id = in.object_id;
     return out;
 }
-"""
