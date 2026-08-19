@@ -49,8 +49,14 @@ class TextureStore:
         self._skybox_name: str | None = None
         self._white: wgpu.GPUTextureView | None = None
         self._black_cube: wgpu.GPUTextureView | None = None
+        # forge 2D textures wrap (repeat_x/repeat_y = True); tiled planes and
+        # box face-axis mapping rely on uv outside [0,1] repeating.
         self.sampler = device.create_sampler(
-            mag_filter="linear", min_filter="linear", mipmap_filter="nearest"
+            mag_filter="linear",
+            min_filter="linear",
+            mipmap_filter="nearest",
+            address_mode_u="repeat",
+            address_mode_v="repeat",
         )
         self.cube_sampler = device.create_sampler(
             mag_filter="linear", min_filter="linear", mipmap_filter="linear"

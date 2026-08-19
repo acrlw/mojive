@@ -36,13 +36,15 @@ FRAME_DTYPE = np.dtype(
         ("highlight_color", "(4,)f4"),
         ("highlight", "(4,)f4"),
         ("shading", "(4,)f4"),  # exposure, tonemap on, near, far
-        ("flags", "(4,)f4"),  # x: orthographic
+        ("flags", "(4,)f4"),  # x: orthographic, y: linear out (reflection pass)
         ("ids", "(4,)u4"),  # x: selected id, y: light count
         ("image_light", "(4,)f4"),  # x: gain, y: max mip level
+        ("clip_plane", "(4,)f4"),  # reflection clip plane; (0,0,0,1) disables
+        ("reflection", "(4,)f4"),  # x/y: reflection target size; x=0 disables
     ]
 )
 FRAME_BYTES = FRAME_DTYPE.itemsize
-assert FRAME_BYTES == 352
+assert FRAME_BYTES == 384
 
 
 def perspective_wgpu(fov_y: float, aspect: float, near: float, far: float) -> np.ndarray:

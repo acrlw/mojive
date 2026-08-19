@@ -5,8 +5,8 @@
 //
 // - Clip space follows WebGPU conventions (z in [0,1]); the perspective and
 //   orthographic projections are built on the CPU side in ``targets.py``.
-// - ``gl_ClipDistance`` (planar reflection clipping) is dropped; the reflection
-//   pass is not part of this backend.
+// - ``gl_ClipDistance`` becomes a fragment discard on a plane equation in the
+//   frame uniforms (clip_plane); the main pass binds the (0,0,0,1) no-op.
 // - Depth and object-id export runs as a separate single-sampled MRT pass that
 //   re-rasterizes the scene and writes GL-compatible nonlinear depth.  WebGPU
 //   cannot resolve multisampled integer or depth attachments, so this replaces
@@ -30,9 +30,11 @@ struct Frame {
     highlight_color: vec4f,
     highlight: vec4f,           // x blend, y emission
     shading: vec4f,             // exposure, tonemap on, near, far
-    flags: vec4f,               // x orthographic
+    flags: vec4f,               // x orthographic, y linear out (reflection pass)
     ids: vec4u,                 // x selected id, y light count
     image_light: vec4f,         // x gain (intensity / 5000), y max mip level
+    clip_plane: vec4f,          // reflection clip plane; (0,0,0,1) keeps everything
+    reflection: vec4f,          // xy reflection target size; x=0 disables sampling
 };
 
 struct Instance {
@@ -74,6 +76,13 @@ struct Lights {
 @group(1) @binding(1) var albedo_sampler: sampler;
 @group(2) @binding(0) var image_light_tex: texture_cube<f32>;
 @group(2) @binding(1) var image_light_sampler: sampler;
+// Planar reflection color targets (mirrors u_reflection0-3 in scene_body.glsl);
+// the reflect pass binds 1x1 fallbacks so no reflection feeds back into itself.
+@group(4) @binding(0) var reflection0: texture_2d<f32>;
+@group(4) @binding(1) var reflection1: texture_2d<f32>;
+@group(4) @binding(2) var reflection2: texture_2d<f32>;
+@group(4) @binding(3) var reflection3: texture_2d<f32>;
+@group(4) @binding(4) var reflection_sampler: sampler;
 
 const FORGE_GAMMA: f32 = 2.2;
 const FORGE_KNEE: f32 = 0.8;
@@ -230,6 +239,7 @@ struct SceneOut {
     @location(4) material: vec3f,    // emission, specular, shininess
     @location(5) view_depth: f32,
     @location(6) selected: f32,
+    @location(7) reflect: f32,       // planar reflection coefficient (encoded < 0)
 };
 
 @vertex
@@ -268,6 +278,12 @@ fn vs_scene(
     out.uv = texcoord;
     out.color = inst.color;
     out.material = inst.material.xyz;
+    // scene.vert:60-62: negative reflectance encodes (layer, top-face); the
+    // top-face code keeps only the local +Z face of a box reflective.
+    out.reflect = inst.material.w;
+    if out.reflect < 0.0 && (-out.reflect % 4.0) >= 2.0 && normal.z < 0.5 {
+        out.reflect = 0.0;
+    }
     out.view_depth = -(frame.view * world).z;
     out.selected = select(0.0, 1.0, frame.ids.x != 0u && inst.object_id == frame.ids.x);
     return out;
@@ -294,14 +310,47 @@ fn apply_atmosphere(lit_in: vec3f, view_depth: f32) -> vec3f {
 @fragment
 fn fs_scene(in: SceneOut) -> @location(0) vec4f {
     let base = scene_albedo(in);
+    // gl_ClipDistance[0] port: drop fragments behind the reflection plane.
+    // The main pass binds (0,0,0,1), which never discards.
+    if dot(in.world, frame.clip_plane.xyz) + frame.clip_plane.w < 0.0 {
+        discard;
+    }
     var emission = in.material.x;
     if in.selected > 0.5 {
         emission += frame.highlight.y;
     }
-    let lit = shade(
+    var lit = shade(
         base.rgb, in.normal, in.world, emission, in.material.y, in.material.z, in.view_depth
     );
-    let rgb = finish_color(apply_atmosphere(lit, in.view_depth), frame.shading.x, frame.shading.y > 0.5);
+    // scene_body.glsl:72-89: negative reflectance carries (layer, top-face);
+    // add the reflected color before atmosphere, in linear space.
+    if in.reflect < 0.0 && frame.reflection.x > 0.0 {
+        let code = -in.reflect;
+        let layer = i32(floor(code * 0.25));
+        let surface = code - f32(layer * 4);
+        let reflectance = surface - select(0.0, 2.0, surface >= 2.0);
+        let reflection_uv = in.clip.xy / frame.reflection.xy;
+        // Explicit LOD: the reflection targets have a single mip level, and
+        // textureSample would be rejected in this non-uniform branch.
+        var reflected: vec3f;
+        if layer == 0 {
+            reflected = textureSampleLevel(reflection0, reflection_sampler, reflection_uv, 0.0).rgb;
+        } else if layer == 1 {
+            reflected = textureSampleLevel(reflection1, reflection_sampler, reflection_uv, 0.0).rgb;
+        } else if layer == 2 {
+            reflected = textureSampleLevel(reflection2, reflection_sampler, reflection_uv, 0.0).rgb;
+        } else {
+            reflected = textureSampleLevel(reflection3, reflection_sampler, reflection_uv, 0.0).rgb;
+        }
+        lit += reflectance * reflected;
+    }
+    let shaded = apply_atmosphere(lit, in.view_depth);
+    // u_linear_out port: the reflection pass stores linear HDR color and the
+    // main pass applies tonemap/gamma when compositing.
+    if frame.flags.y > 0.5 {
+        return vec4f(shaded, base.a);
+    }
+    let rgb = finish_color(shaded, frame.shading.x, frame.shading.y > 0.5);
     return vec4f(rgb, base.a);
 }
 

@@ -8,9 +8,9 @@ which makes it usable headless on any platform with a Vulkan/Metal/D3D12 driver.
 
 Scope: the offscreen ``Renderer`` contract (color/depth/segmentation), lights
 (directional/point/spot + headlight), 2D and cube textures, skybox, IBL image
-light, transparency sorting, fog and haze, selection highlight, and shadows
-(directional CSM atlas + spot/point/area distance maps).  Not yet
-implemented: planar reflections, wireframe, tendons, debug draw,
+light, transparency sorting, fog and haze, selection highlight, shadows
+(directional CSM atlas + spot/point/area distance maps), and planar
+reflections.  Not yet implemented: wireframe, tendons, debug draw,
 gizmo, labels, and the interactive viewer surface path.
 """
 
@@ -36,7 +36,7 @@ from .lighting import (
     active_image_light,
 )
 from .meshes import MeshStore
-from .passes import ShadowPass, SkyboxPass
+from .passes import ReflectPass, ShadowPass, SkyboxPass
 from .programs import load_wgsl
 from .targets import FRAME_BYTES, FRAME_DTYPE, RenderTargetWgpu, proj_matrix_wgpu
 from .textures import TextureStore
@@ -45,6 +45,8 @@ HIGHLIGHT_COLOR = (1.0, 0.82, 0.45, 0.0)
 HIGHLIGHT_BLEND = 0.35
 HIGHLIGHT_EMISSION = 0.35
 EXPOSURE = 1.0
+# forge opaque.NO_CLIP: a clip-plane equation that never discards.
+NO_CLIP = (0.0, 0.0, 0.0, 1.0)
 
 _SUPPORTED_FLAGS = frozenset(
     {
@@ -58,6 +60,7 @@ _SUPPORTED_FLAGS = frozenset(
         RenderFlag.ADDITIVE,
         RenderFlag.SKYBOX,
         RenderFlag.SHADOW,
+        RenderFlag.REFLECTION,
     }
 )
 
@@ -152,13 +155,16 @@ class WgpuBackend:
         # The shadow pass owns its sampling layout (atlas + local distance
         # array); the scene pipeline binds it as group 3 with live maps or
         # 1x1 fallbacks, mirroring forge's always-bound shadow uniforms.
+        # Group 4 is the reflection pass's four color textures + sampler.
         self._shadows = ShadowPass(self.device)
+        self._reflect = ReflectPass(self.device)
         self._scene_layout = self.device.create_pipeline_layout(
             bind_group_layouts=[
                 self._group0_layout,
                 self._group1_layout,
                 self._group2_layout,
                 self._shadows.bind_layout,
+                self._reflect.sample_layout,
             ]
         )
         self._export_layout = self.device.create_pipeline_layout(
@@ -207,7 +213,7 @@ class WgpuBackend:
             msaa_samples=self.target.samples,
             id_msaa=False,
             renderer=f"wgpu-py {wgpu.__version__} on {info.vendor} {info.device}",
-            notes=("offscreen only; no reflections/tendons/debug draw yet",),
+            notes=("offscreen only; no tendons/debug draw yet",),
         )
 
     # -- scene contract -------------------------------------------------------
@@ -270,6 +276,45 @@ class WgpuBackend:
                 "depth_compare": "less",
             },
             multisample={"count": self.target.samples},
+        )
+        self._pipelines[key] = pipeline
+        return pipeline
+
+    def _reflect_pipeline(self, blend: str, cull: str) -> wgpu.GPURenderPipeline:
+        """Scene pipeline variant for the reflection pass.
+
+        Single-sampled rgba16float target, mirrored winding (front_face cw),
+        always the shaded fragment entry — mirroring forge's ReflectPass FBO
+        and gl.front_face handling.
+        """
+        key = ("reflect", blend, cull)
+        pipeline = self._pipelines.get(key)
+        if pipeline is not None:
+            return pipeline
+        target: dict = {"format": "rgba16float"}
+        if blend == "alpha":
+            target["blend"] = _ALPHA_BLEND
+        elif blend == "additive":
+            target["blend"] = _ADDITIVE_BLEND
+        pipeline = self.device.create_render_pipeline(
+            layout=self._scene_layout,
+            vertex={
+                "module": self._module,
+                "entry_point": "vs_scene",
+                "buffers": [_VERTEX_LAYOUT],
+            },
+            fragment={
+                "module": self._module,
+                "entry_point": "fs_scene",
+                "targets": [target],
+            },
+            primitive={"topology": "triangle-list", "front_face": "cw", "cull_mode": cull},
+            depth_stencil={
+                "format": "depth24plus",
+                "depth_write_enabled": blend == "opaque",
+                "depth_compare": "less",
+            },
+            multisample={"count": 1},
         )
         self._pipelines[key] = pipeline
         return pipeline
@@ -377,16 +422,48 @@ class WgpuBackend:
     # -- frame encoding -------------------------------------------------------
 
     def _write_frame_uniforms(
-        self, cam: CameraView, light_count: int, image_light: tuple[float, float]
+        self,
+        cam: CameraView,
+        light_count: int,
+        image_light: tuple[float, float],
+        reflection_size: tuple[float, float] = (0.0, 0.0),
     ) -> np.ndarray:
         view = np.asarray(cam.view_matrix(), np.float32)
         proj = proj_matrix_wgpu(cam)
+        self._pack_frame_block(
+            self._frame,
+            cam,
+            view,
+            proj @ view,
+            cam.eye,
+            light_count,
+            image_light,
+            NO_CLIP,
+            reflection_size,
+            0.0,
+        )
+        self.device.queue.write_buffer(self.target.frame_buffer, 0, self._frame.tobytes())
+        return proj @ view
+
+    def _pack_frame_block(
+        self,
+        f: np.ndarray,
+        cam: CameraView,
+        view: np.ndarray,
+        view_proj: np.ndarray,
+        eye,
+        light_count: int,
+        image_light: tuple[float, float],
+        clip_plane: tuple[float, float, float, float],
+        reflection_size: tuple[float, float],
+        linear_out: float,
+    ) -> None:
+        """Fill one frame uniform block; shared by the main and mirror views."""
         lights = self._scene.lights if self._scene is not None else None
 
-        f = self._frame
-        f["view_proj"][:] = (proj @ view).T
-        f["view"][:] = view.T
-        f["camera_pos"][:3] = cam.eye
+        f["view_proj"][:] = np.asarray(view_proj, np.float32).T
+        f["view"][:] = np.asarray(view, np.float32).T
+        f["camera_pos"][:3] = eye
         f["camera_dir"][:3] = cam.forward()
         if lights is not None:
             f["ambient"][:3] = lights.ambient
@@ -410,20 +487,29 @@ class WgpuBackend:
             float(cam.near),
             float(cam.far),
         )
-        f["flags"][:] = (1.0 if cam.orthographic else 0.0, 0.0, 0.0, 0.0)
+        f["flags"][:] = (1.0 if cam.orthographic else 0.0, linear_out, 0.0, 0.0)
         f["ids"][:] = (self._selected, light_count, 0, 0)
         f["image_light"][:] = (*image_light, 0.0, 0.0)
-        self.device.queue.write_buffer(self.target.frame_buffer, 0, self._frame.tobytes())
-        return proj @ view
+        f["clip_plane"][:] = clip_plane
+        f["reflection"][:] = (*reflection_size, 0.0, 0.0)
 
     def _draw_buckets(
-        self, pass_encoder, group0, group2, group3, buckets, blend: str, cull: str
+        self,
+        pass_encoder,
+        group0,
+        group2,
+        group3,
+        group4,
+        buckets,
+        blend: str,
+        cull: str,
+        reflect: bool = False,
     ) -> tuple[int, int]:
         scene = self._scene
         assert scene is not None
         draw_calls = 0
         textured = self.get_flag(RenderFlag.TEXTURE)
-        fs_entry = _DEBUG_ENTRIES.get(self._debug_view, "fs_scene")
+        fs_entry = "fs_scene" if reflect else _DEBUG_ENTRIES.get(self._debug_view, "fs_scene")
         for b in buckets:
             start, stop = scene.bucket_ranges[b]
             if stop <= start:
@@ -432,7 +518,10 @@ class WgpuBackend:
             mesh = self.meshes.get(mesh_key)
             if mesh is None:
                 continue
-            pipeline = self._scene_pipeline(fs_entry, blend, cull)
+            if reflect:
+                pipeline = self._reflect_pipeline(blend, cull)
+            else:
+                pipeline = self._scene_pipeline(fs_entry, blend, cull)
             pass_encoder.set_pipeline(pipeline)
             texture_name = None
             if textured and matid < len(scene.materials):
@@ -441,6 +530,7 @@ class WgpuBackend:
             pass_encoder.set_bind_group(1, self._texture_group(texture_name))
             pass_encoder.set_bind_group(2, group2)
             pass_encoder.set_bind_group(3, group3)
+            pass_encoder.set_bind_group(4, group4)
             pass_encoder.set_vertex_buffer(0, mesh.vbo)
             pass_encoder.set_index_buffer(mesh.ibo, "uint32")
             pass_encoder.draw_indexed(mesh.index_count, stop - start, 0, 0, start)
@@ -458,16 +548,28 @@ class WgpuBackend:
 
         t0 = time.perf_counter()
         target = self.target
-        self.instances.upload(scene)
         cam = self._camera.with_aspect(target.width / max(target.height, 1))
+        # Plane detection runs before the instance upload so the encoded
+        # negative reflectance reaches the GPU in the same write (forge relies
+        # on its persistent scene object for the same ordering).
+        reflective = self._reflect.prepare(scene, cam, self._flags, target.width, target.height)
+        self.instances.upload(scene)
         # Shadow maps render before the scene pass, matching forge's
         # PASS_ORDER; the same frame's scene pass samples them.
         shadow = self._shadows.prepare(scene, cam, self._flags)
         schedule = self.lights.upload(scene.lights, shadow)
         light_count = len(schedule.lights)
         group2, image_gain, image_mip = self._image_light_binding(scene.lights)
-        view_proj = self._write_frame_uniforms(cam, light_count, (image_gain, image_mip))
+        reflection_size = (float(target.width), float(target.height)) if reflective else (0.0, 0.0)
+        view_proj = self._write_frame_uniforms(
+            cam, light_count, (image_gain, image_mip), reflection_size
+        )
+        if reflective:
+            self._reflect.write_frames(
+                cam, light_count, (image_gain, image_mip), self._pack_frame_block
+            )
         group3 = self._shadows.sample_group(shadow)
+        group4 = self._reflect.sample_group()
 
         cull = "back" if self.get_flag(RenderFlag.CULL_FACE) else "none"
         group0 = self._bind_group0()
@@ -476,6 +578,28 @@ class WgpuBackend:
         draw_calls = 0
         if shadow is not None:
             draw_calls += self._shadows.execute(encoder, scene, self.meshes, self.instances)
+        # Mirrored scene passes run between the shadow pass and the main scene
+        # pass, matching forge's PASS_ORDER (shadow, reflect, opaque, ...).
+        if reflective:
+            group4_fallback = self._reflect.fallback_group()
+
+            def draw_reflected(pass_encoder, plane_group0, buckets, blend):
+                return self._draw_buckets(
+                    pass_encoder,
+                    plane_group0,
+                    group2,
+                    group3,
+                    group4_fallback,
+                    buckets,
+                    blend,
+                    cull,
+                    reflect=True,
+                )
+
+            calls, _ = self._reflect.execute(
+                encoder, scene, self._group0_layout, self.instances, self.lights, draw_reflected
+            )
+            draw_calls += calls
 
         color_view = target.color_ms.create_view() if target.color_ms is not None else None
         color_attachment = {
@@ -498,7 +622,7 @@ class WgpuBackend:
         instances_drawn = 0
         if scene.count:
             calls, drawn = self._draw_buckets(
-                pass1, group0, group2, group3, scene.opaque_buckets, "opaque", cull
+                pass1, group0, group2, group3, group4, scene.opaque_buckets, "opaque", cull
             )
             draw_calls += calls
             instances_drawn += drawn
@@ -516,7 +640,9 @@ class WgpuBackend:
         if scene.count and scene.transparent_buckets and self.get_flag(RenderFlag.TRANSPARENT):
             blend = "additive" if self.get_flag(RenderFlag.ADDITIVE) else "alpha"
             order = scene.transparent_draw_order()
-            calls, drawn = self._draw_buckets(pass1, group0, group2, group3, order, blend, cull)
+            calls, drawn = self._draw_buckets(
+                pass1, group0, group2, group3, group4, order, blend, cull
+            )
             draw_calls += calls
             instances_drawn += drawn
         pass1.end()
@@ -669,6 +795,7 @@ class WgpuBackend:
         self.target.release()
         self._skybox.release()
         self._shadows.release()
+        self._reflect.release()
         self._pipelines.clear()
         self._texture_groups.clear()
         self._image_light_groups.clear()
