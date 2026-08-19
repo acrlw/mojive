@@ -3,12 +3,13 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu p0 p1 renderer-api golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer hidpi empty canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu egl p0 p1 renderer-api golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
 		'Interactive:' \
 		'  make viewer             default MuJoCo scene' \
+		'  make egl-viewer         Linux viewer with a GLFW EGL context' \
 		'  make hidpi              viewer with an explicit 200% UI scale' \
 		'  make empty              empty viewer; load MJCF or URDF from File menu' \
 		'  make model-loading      empty, MJCF, and URDF loading reference images' \
@@ -60,6 +61,7 @@ help:
 		'  make p1                complete P0 and P1 acceptance gate' \
 		'  make check             lint and CPU tests' \
 		'  make gpu               real OpenGL tests' \
+		'  make egl               Linux EGL Renderer and wireframe contract' \
 		'  make renderer-api      public Renderer CPU and GPU contract' \
 		'  make mujoco-ik         body/site inverse-kinematics acceptance' \
 		'  make camera-state      camera bookmark serialization and restore' \
@@ -95,6 +97,10 @@ test:
 ## Isolate files because OpenGL and physics libraries own process-global registries.
 gpu:
 	@for f in $$(ls tests/gpu/test_*.py); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
+
+egl:
+	@test "$$(uname -s)" = Linux || { echo 'make egl requires Linux'; exit 2; }
+	FORGE_VIEWER_GL=egl $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
 
 renderer-api:
 	$(PYTEST) -q tests/test_renderer_api.py
@@ -159,6 +165,10 @@ SCENE ?= test_scene
 ARGS  ?=
 viewer:
 	$(PY) -m forge_viewer.cli view $(SCENE) $(ARGS)
+
+egl-viewer:
+	@test "$$(uname -s)" = Linux || { echo 'make egl-viewer requires Linux'; exit 2; }
+	FORGE_VIEWER_GL=egl $(PY) -m forge_viewer.cli view $(SCENE) $(ARGS)
 
 UI_SCALE ?= 2
 hidpi:

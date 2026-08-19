@@ -18,7 +18,7 @@ Metal, and GLSL 410. Run `make probe` to refresh the report.
 | GPU elapsed query | available | Frame totals and approximate pass timing |
 | KHR debug | absent | Debug groups compile to empty scopes |
 | Line width range | `[1.0, 1.0]` | Wide lines use triangle expansion |
-| Geometry shaders | available | Barycentric wireframe path |
+| Geometry shaders | available | OpenGL 3.3 wireframe path |
 | HiDPI scale | 2.0 | UI size follows content scale; render targets follow framebuffer scale |
 
 ## Display scaling

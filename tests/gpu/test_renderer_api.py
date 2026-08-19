@@ -123,6 +123,20 @@ def test_renderer_rejects_data_from_another_model():
         renderer.update_scene(mujoco.MjData(other))
 
 
+def test_renderer_wireframe_geometry_shader():
+    model = _model()
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    with Renderer(model, height=96, width=128) as renderer:
+        renderer.update_scene(data)
+        shaded = renderer.render()
+        renderer.set_render_flag("mjRND_WIREFRAME", True)
+        wireframe = renderer.render()
+
+    assert np.ptp(wireframe) > 0
+    assert not np.array_equal(wireframe, shaded)
+
+
 @pytest.mark.parametrize("projection", ["perspective", "orthographic"])
 def test_renderer_depth_is_metric_for_perspective_and_orthographic(projection):
     projection_xml = (

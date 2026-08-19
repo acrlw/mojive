@@ -40,6 +40,7 @@ void main() {
         v.selected = v_in[i].selected;
         v_bary = vec3(i == 0 ? 1.0 : 0.0, i == 1 ? 1.0 : 0.0, i == 2 ? 1.0 : 0.0);
         gl_Position = gl_in[i].gl_Position;
+        gl_ClipDistance[0] = gl_in[i].gl_ClipDistance[0];
         EmitVertex();
     }
     EndPrimitive();
