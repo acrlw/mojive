@@ -7,13 +7,16 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from ..log import get_logger
 from . import fonts, native_drop
 from . import theme as theme_mod
+
+if TYPE_CHECKING:
+    from ..types import ViewportImage
 
 log = get_logger("window")
 
@@ -414,6 +417,14 @@ class Window:
         gl.glPixelStorei(gl.GL_PACK_ALIGNMENT, 1)
         gl.glReadPixels(0, 0, w, h, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, self._readback)
         return self._readback
+
+    def viewport_texture_ref(self, image: ViewportImage) -> Any:
+        """The imgui texture reference used to draw the viewport image.
+
+        The GL path addresses the resolved color texture by its integer name;
+        surface-backed backends override this to bind their payload instead.
+        """
+        return imgui.ImTextureRef(image.texture_id)
 
     def close(self) -> None:
         if self._destroyed:

@@ -72,12 +72,8 @@ def _vbo_bytes(backend, gpu_mesh) -> bytes:
 
 
 def _render(backend, frame) -> None:
-    """Render one frame; forge returns a ViewportImage, wgpu renders offscreen."""
-    image = backend.render(frame)
-    if backend.caps.name == "webgpu":
-        assert image is None
-    else:
-        assert image is not None
+    """Render one frame; both backends return the frame's ViewportImage."""
+    assert backend.render(frame) is not None
 
 
 @pytest.fixture(scope="module")

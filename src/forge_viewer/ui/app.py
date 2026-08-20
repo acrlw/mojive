@@ -601,7 +601,7 @@ class ViewerApp:
         else:
             uv0 = imgui.ImVec2(0.0, 1.0) if image.flip_y else imgui.ImVec2(0.0, 0.0)
             uv1 = imgui.ImVec2(1.0, 0.0) if image.flip_y else imgui.ImVec2(1.0, 1.0)
-            imgui.image(imgui.ImTextureRef(image.texture_id), size, uv0, uv1)
+            imgui.image(self.window.viewport_texture_ref(image), size, uv0, uv1)
         x, y, w, h = self._viewport_rect
         imgui.push_clip_rect(imgui.ImVec2(x, y), imgui.ImVec2(x + w, y + h), True)
         try:

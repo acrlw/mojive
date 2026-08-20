@@ -115,8 +115,14 @@ class RenderTargetWgpu:
     def _build(self) -> None:
         device = self._device
         size = (self.width, self.height, 1)
-        color_usage = wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_SRC
+        # TEXTURE_BINDING: the viewer window binds color as the viewport image.
+        color_usage = (
+            wgpu.TextureUsage.RENDER_ATTACHMENT
+            | wgpu.TextureUsage.COPY_SRC
+            | wgpu.TextureUsage.TEXTURE_BINDING
+        )
         self.color = device.create_texture(size=size, format="rgba8unorm", usage=color_usage)
+        self.color_view = self.color.create_view()
         self.color_ms = (
             device.create_texture(
                 size=size,

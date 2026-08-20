@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,7 +38,21 @@ _RENDER_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "forge": ("moderngl", "glfw"),
     "mjr_": ("mujoco",),
     "newton-gl": ("newton",),
+    "wgpu": ("wgpu", "rendercanvas"),
 }
+
+
+def _active_renderer(renderer: str) -> str:
+    """The renderer the viewer would actually use for a matrix row.
+
+    FORGE_VIEWER_BACKEND swaps the forge renderer for the wgpu backend; other
+    renderers (the MuJoCo reference, planned adapters) are unaffected.
+    """
+    if renderer != "forge":
+        return renderer
+    requested = os.environ.get("FORGE_VIEWER_BACKEND", "").strip().lower()
+    return "wgpu" if requested in {"wgpu", "webgpu"} else "forge"
+
 
 _MATRIX: tuple[tuple[str, str, str, str], ...] = (
     # (name, physics, renderer, role)
@@ -76,6 +91,7 @@ def backend_info(name: str) -> BackendInfo:
 
 
 def _describe(name: str, physics_label: str, renderer: str, role: str) -> BackendInfo:
+    renderer = _active_renderer(renderer)
     reasons: list[str] = []
 
     ok, why = physics_available(physics_of(name))

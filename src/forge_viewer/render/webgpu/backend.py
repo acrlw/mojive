@@ -12,7 +12,9 @@ light, transparency sorting, fog and haze, selection highlight and outline,
 debug views (albedo/normal/depth/segment/idcolor/overdraw/wireframe), shadows
 (directional CSM atlas + spot/point/area distance maps), planar reflections,
 tendons, debug draw primitives, world-space text labels, and the native 3D
-gizmo.  Not yet implemented: the interactive viewer surface path.
+gizmo.  ``render()`` returns a ``ViewportImage`` whose payload is the resolved
+color view; the interactive viewer window (``ui/window_wgpu.py``) binds it
+through imgui and presents the UI over wgpu surfaces.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ import wgpu
 
 from ...adapters.base import SceneFrame, SceneSource
 from ...gizmo import GizmoFrame
-from ...types import CameraView
+from ...types import CameraView, ViewportImage
 from ..backend import BackendCaps, DebugView, FrameMode, LabelMode, RenderFlag, RenderStats
 from ..builder import SceneSourceBuilder
 from ..debugdraw import DebugDraw
@@ -160,8 +162,16 @@ _OVERDRAW_BLEND = {
 class WgpuBackend:
     """Offscreen scene renderer over wgpu-py; see module docstring for scope."""
 
-    def __init__(self, width: int = 1280, height: int = 720, samples: int = 4) -> None:
-        self.device = wgpu.utils.get_default_device()
+    def __init__(
+        self,
+        width: int = 1280,
+        height: int = 720,
+        samples: int = 4,
+        device: wgpu.GPUDevice | None = None,
+    ) -> None:
+        # The viewer window shares this device (surface configuration and the
+        # imgui texture binding must match the device that rendered the scene).
+        self.device = device if device is not None else wgpu.utils.get_default_device()
         self.meshes = MeshStore(self.device)
         self.textures = TextureStore(self.device)
         self.instances = InstanceStore(self.device)
@@ -325,7 +335,7 @@ class WgpuBackend:
             msaa_samples=self.target.samples,
             id_msaa=False,
             renderer=f"wgpu-py {wgpu.__version__} on {info.vendor} {info.device}",
-            notes=("offscreen only",),
+            notes=("GPU timer queries unavailable; CPU frame timing only",),
         )
 
     # -- scene contract -------------------------------------------------------
@@ -821,7 +831,7 @@ class WgpuBackend:
             max(0, stop - start) for start, stop in (scene.bucket_ranges[b] for b in buckets)
         )
 
-    def render(self, frame: SceneFrame | None = None) -> None:
+    def render(self, frame: SceneFrame | None = None) -> ViewportImage | None:
         if frame is not None:
             self.update(frame)
         scene = self._scene
@@ -1058,7 +1068,15 @@ class WgpuBackend:
                 f"{schedule.selected_shadow_count} active, {schedule.deferred_shadows} deferred"
             ),
         }
-        return None
+        # The resolved color is display-domain (finish_color gamma-encodes it)
+        # and top-row-first, so the viewer presents it without a y flip.
+        return ViewportImage(
+            texture_id=0,
+            width=target.width,
+            height=target.height,
+            flip_y=False,
+            payload=target.color_view,
+        )
 
     # -- misc protocol surface --------------------------------------------------
 

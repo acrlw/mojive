@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 import numpy as np
 
@@ -290,6 +291,10 @@ class ViewportImage:
     width: int
     height: int
     flip_y: bool = True
+    # Backend-specific presentation payload: the GL path presents texture_id
+    # directly and leaves this None; the wgpu path carries the GPUTextureView
+    # of the resolved color target for the window's imgui renderer.
+    payload: Any = None
 
     @property
     def aspect(self) -> float:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,16 @@ log = get_logger("composition")
 if TYPE_CHECKING:
     from .adapters.base import SceneAdapter
     from .scene import Scene
+
+
+def render_backend_name() -> str:
+    """The renderer selected by FORGE_VIEWER_BACKEND ("forge" or "wgpu")."""
+    requested = os.environ.get("FORGE_VIEWER_BACKEND", "").strip().lower()
+    if requested == "webgpu":
+        requested = "wgpu"
+    if requested not in {"", "forge", "wgpu"}:
+        raise ValueError(f"Unsupported FORGE_VIEWER_BACKEND: {requested}")
+    return requested or "forge"
 
 
 @dataclass
@@ -144,24 +155,33 @@ def _compose(
     from .bridge import DebugBridge
     from .session import Session
     from .ui.app import ViewerApp
-    from .ui.window import Window, WindowConfig
+    from .ui.window import WindowConfig
 
     ini = "imgui.ini" if vsync else ""
-    window = Window(
-        WindowConfig(
-            title=title,
-            width=width,
-            height=height,
-            vsync=vsync,
-            ini_path=ini,
-        )
+    config = WindowConfig(
+        title=title,
+        width=width,
+        height=height,
+        vsync=vsync,
+        ini_path=ini,
     )
-    window.make_current()
 
-    from .render.forge.backend import ForgeBackend
+    if render_backend_name() == "wgpu":
+        from .render.webgpu.backend import WgpuBackend
+        from .ui.window_wgpu import WgpuWindow
 
-    fb_w, fb_h = window.size_pixels
-    backend = ForgeBackend(None, fb_w, fb_h, samples)
+        window = WgpuWindow(config)
+        fb_w, fb_h = window.size_pixels
+        backend = WgpuBackend(fb_w, fb_h, samples, device=window.device)
+    else:
+        from .render.forge.backend import ForgeBackend
+        from .ui.window import Window
+
+        window = Window(config)
+        window.make_current()
+        fb_w, fb_h = window.size_pixels
+        backend = ForgeBackend(None, fb_w, fb_h, samples)
+
     debug_bridge = DebugBridge(backend)
     debug_bridge.serve()
 
@@ -186,19 +206,21 @@ def doctor(asset: Path, backend_name: str = "mujoco", frames: int = 90) -> dict:
     try:
         viewer = build(asset, backend_name, paused=False, vsync=False, width=960, height=720)
         caps = viewer.backend.caps
-        gl = viewer.backend.gl_caps
+        is_wgpu = caps.name == "webgpu"
 
-        checks.append(
-            ("GL context", gl.usable, f"{gl.version} ({gl.renderer}) core={gl.core_profile}")
-        )
-        checks.append(
-            (
-                "render target",
-                viewer.backend.target.width > 0 and viewer.backend.target.height > 0,
-                f"{viewer.backend.target.width}×{viewer.backend.target.height} "
-                f"{viewer.backend.target.samples}× MSAA, id layout {viewer.backend.target.id_layout}",
+        if is_wgpu:
+            checks.append(("GPU device", True, caps.renderer))
+        else:
+            gl = viewer.backend.gl_caps
+            checks.append(
+                ("GL context", gl.usable, f"{gl.version} ({gl.renderer}) core={gl.core_profile}")
             )
-        )
+        target = viewer.backend.target
+        target_detail = f"{target.width}×{target.height} {target.samples}× MSAA"
+        id_layout = getattr(target, "id_layout", None)
+        if id_layout is not None:
+            target_detail += f", id layout {id_layout}"
+        checks.append(("render target", target.width > 0 and target.height > 0, target_detail))
         failures = getattr(viewer.backend, "pass_load_failures", {})
         checks.append(
             ("pass loading", not failures, "complete" if not failures else f"failed: {failures}")
@@ -220,7 +242,11 @@ def doctor(asset: Path, backend_name: str = "mujoco", frames: int = 90) -> dict:
             )
         )
         if last_image is not None:
-            checks.append(("flip_y", last_image.flip_y is True, f"flip_y={last_image.flip_y}"))
+            # WebGPU color targets are top-row-first; the GL resolve texture is not.
+            expect_flip = not is_wgpu
+            checks.append(
+                ("flip_y", last_image.flip_y is expect_flip, f"flip_y={last_image.flip_y}")
+            )
 
         frame_px = viewer.window.read_frame()
         if frame_px is None:
@@ -234,10 +260,11 @@ def doctor(asset: Path, backend_name: str = "mujoco", frames: int = 90) -> dict:
         f = viewer.session.frame
         checks.append(("simulation step", f.step > 0, f"step={f.step} time={f.time:.3f}s"))
 
-        from .render.forge import gl_native as G
+        if not is_wgpu:
+            from .render.forge import gl_native as G
 
-        err = G.native().drain_errors()
-        checks.append(("GL errors", err == 0, f"glGetError={err}"))
+            err = G.native().drain_errors()
+            checks.append(("GL errors", err == 0, f"glGetError={err}"))
 
         stats = viewer.backend.stats
         checks.append(

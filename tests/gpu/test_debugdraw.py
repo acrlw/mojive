@@ -77,11 +77,7 @@ class Rig:
             )
         scene = sb.build(self.camera, LightSet(ambient=AMBIENT), 2.0, np.zeros(3, np.float32))
         self.backend.set_render_scene(scene)
-        # The wgpu backend renders offscreen only and returns no ViewportImage.
-        if self.backend.caps.name == "webgpu":
-            self.backend.render(None)
-        else:
-            assert self.backend.render(None) is not None
+        assert self.backend.render(None) is not None
         return self.backend.target.read_color(flip=True)
 
     def debug_pass(self):

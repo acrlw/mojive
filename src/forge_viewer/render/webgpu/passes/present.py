@@ -7,9 +7,10 @@ the main pass; the only remaining work is the pseudocolor rebuild for the
 SEGMENT/IDCOLOR debug views, which rewrites the color target from the
 single-sampled export id texture (see shaders/present.wgsl for the deltas).
 
-Unlike forge there is no ``ViewportImage`` to publish yet — the offscreen
-backend returns ``None`` from ``render()`` and tests read the color target
-directly; the interactive surface path is a later milestone.
+Unlike forge there is no separate MSAA resolve here — the main pass resolves
+into the color target directly.  ``WgpuBackend.render()`` publishes the
+resolved color view as the ``ViewportImage`` payload; the interactive surface
+path lives in ``ui/window_wgpu.py``.
 """
 
 from __future__ import annotations

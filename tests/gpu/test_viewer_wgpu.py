@@ -1,0 +1,127 @@
+"""Window-stack smoke tests for the wgpu viewer path.
+
+Runs only under ``FORGE_VIEWER_BACKEND=wgpu`` (see Makefile ``gpu-wgpu``);
+like the GL window tests it needs a display server for GLFW.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+pytestmark = pytest.mark.gpu
+
+pytest.importorskip("glfw")
+pytest.importorskip("wgpu")
+pytest.importorskip("rendercanvas")
+
+from forge_viewer.composition import build_scene  # noqa: E402
+from forge_viewer.demos import canvas_scene  # noqa: E402
+from forge_viewer.render.webgpu.backend import WgpuBackend  # noqa: E402
+from forge_viewer.ui.window_wgpu import WgpuWindow  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def viewer(backend_name):
+    if backend_name != "wgpu":
+        pytest.skip("wgpu window-stack test; run with FORGE_VIEWER_BACKEND=wgpu")
+    scene = canvas_scene()
+    instance = build_scene(scene, vsync=False, width=960, height=640)
+    try:
+        for _ in range(8):
+            instance.sync()
+        yield instance, scene
+    finally:
+        instance.release()
+
+
+def snap(v) -> np.ndarray:
+    px = v.window.read_frame()
+    assert px is not None
+    return np.asarray(px)[::-1][..., :3].copy()
+
+
+def viewport_snap(v) -> np.ndarray:
+    image = snap(v)
+    x, y, w, h = v.window.points_to_pixels(v.app._viewport_rect)
+    x0, y0, x1, y1 = round(x), round(y), round(x + w), round(y + h)
+    return image[y0:y1, x0:x1]
+
+
+def test_window_and_backend_are_wgpu(viewer):
+    v, _scene = viewer
+    assert isinstance(v.backend, WgpuBackend)
+    assert isinstance(v.window, WgpuWindow)
+    assert v.backend.caps.name == "webgpu"
+    assert v.backend.device is v.window.device
+    fb_w, fb_h = v.window.size_pixels
+    pt_w, pt_h = v.window.size_points
+    assert fb_w >= pt_w and fb_h >= pt_h
+
+
+def test_read_frame_contains_scene_pixels(viewer):
+    v, _scene = viewer
+    px = v.window.read_frame()
+    fb_w, fb_h = v.window.size_pixels
+    assert px is not None
+    assert px.shape == (fb_h, fb_w, 3)
+    assert px.dtype == np.uint8
+    # The scene is drawn into the Viewport panel, not just UI chrome.
+    assert float(viewport_snap(v).std()) > 10.0
+
+
+def test_viewport_image_carries_the_wgpu_color_view(viewer):
+    v, _scene = viewer
+    image = v.app._viewport_image
+    assert image is not None
+    assert image.flip_y is False
+    assert (image.width, image.height) == (v.backend.target.width, v.backend.target.height)
+    assert image.payload is v.backend.target.color_view
+    # Registering through the window is cached while the target is unchanged.
+    ref = v.window.viewport_texture_ref(image)
+    assert ref is v.window.viewport_texture_ref(image)
+
+
+def test_scene_edit_reaches_the_window(viewer):
+    v, scene = viewer
+    before = viewport_snap(v)
+    scene.object("ball").set_pose((1.4, -0.3, 0.42))
+    v.sync()
+    v.sync()
+    after = viewport_snap(v)
+    assert after.shape == before.shape
+    diff = np.max(np.abs(after.astype(np.int16) - before.astype(np.int16)), axis=-1)
+    assert np.count_nonzero(diff > 10) > 500
+
+
+def test_injected_mouse_drag_rotates_the_camera(viewer):
+    from imgui_bundle import imgui
+
+    v, _scene = viewer
+    io = imgui.get_io()
+    x, y, w, h = v.app._viewport_rect
+    cx, cy = x + w * 0.5, y + h * 0.5
+    before = viewport_snap(v)
+    io.add_mouse_pos_event(cx, cy)
+    io.add_mouse_button_event(0, True)
+    v.sync()
+    for i in range(1, 13):
+        io.add_mouse_pos_event(cx + i * 5.0, cy + i * 2.0)
+        v.sync()
+    io.add_mouse_button_event(0, False)
+    v.sync()
+    after = viewport_snap(v)
+    assert after.shape == before.shape
+    diff = np.max(np.abs(after.astype(np.int16) - before.astype(np.int16)), axis=-1)
+    assert np.count_nonzero(diff > 10) > 500
+
+
+def test_vendored_imgui_render_path(viewer, monkeypatch):
+    from forge_viewer.ui import window_wgpu
+
+    # Force the vendored imgui-1.92 draw-data fix even where the installed
+    # wgpu no longer needs it, so the vendored code path stays exercised.
+    monkeypatch.setattr(window_wgpu, "_upstream_needs_imgui_192_fix", lambda: True)
+    v, _scene = viewer
+    v.sync()
+    assert float(viewport_snap(v).std()) > 10.0
