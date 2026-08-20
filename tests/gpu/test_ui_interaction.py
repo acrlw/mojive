@@ -1012,6 +1012,8 @@ def test_gizmo_drag_feedback_matches_in_2d_and_3d(free_body_viewer, style, arrow
     from forge_viewer.render.debugdraw import Prim
 
     class Recorder:
+        """Counts the gizmo's Draw2D calls while forwarding to the real overlay."""
+
         def __init__(self, inner):
             self.inner = inner
             self.arrows = 0
@@ -1019,21 +1021,21 @@ def test_gizmo_drag_feedback_matches_in_2d_and_3d(free_body_viewer, style, arrow
             self.circles = 0
             self.texts = []
 
-        def add_concave_poly_filled(self, points, color):
+        def concave_fill(self, points, color):
             self.arrows += 1
-            return self.inner.add_concave_poly_filled(points, color)
+            return self.inner.concave_fill(points, color)
 
-        def add_text(self, *args):
-            self.texts.append(args[2] if len(args) == 3 else args[4])
-            return self.inner.add_text(*args)
-
-        def add_line(self, *args):
+        def line(self, *args, **kwargs):
             self.lines += 1
-            return self.inner.add_line(*args)
+            return self.inner.line(*args, **kwargs)
 
-        def add_circle(self, *args):
+        def circle(self, *args, **kwargs):
             self.circles += 1
-            return self.inner.add_circle(*args)
+            return self.inner.circle(*args, **kwargs)
+
+        def text(self, pos, color, text):
+            self.texts.append(text)
+            return self.inner.text(pos, color, text)
 
         def __getattr__(self, name):
             return getattr(self.inner, name)
@@ -1065,20 +1067,20 @@ def test_gizmo_drag_feedback_matches_in_2d_and_3d(free_body_viewer, style, arrow
     io.add_mouse_pos_event(*(cursor + direction * 36.0))
     v.sync()
 
-    real = imgui.get_window_draw_list
+    orig_draw = v.app.gizmo.draw_overlay
     recorders = []
 
-    def spy():
-        recorder = Recorder(real())
+    def spy(cam, rect, overlay, *, style_scale=1.0):
+        recorder = Recorder(overlay)
         recorders.append(recorder)
-        return recorder
+        return orig_draw(cam, rect, recorder, style_scale=style_scale)
 
-    imgui.get_window_draw_list = spy
+    v.app.gizmo.draw_overlay = spy
     try:
         v.sync()
         drag_count = v.backend.debug.layer("ui.gizmo.drag").count_of(Prim.DRAG_LINK)
     finally:
-        imgui.get_window_draw_list = real
+        v.app.gizmo.draw_overlay = orig_draw
         io.add_mouse_button_event(0, False)
         v.sync()
         v.session.submit(cmd.Reset())
@@ -1160,6 +1162,8 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style):
         v.sync()
 
     class Recorder:
+        """Counts the gizmo's Draw2D calls while forwarding to the real overlay."""
+
         def __init__(self, inner):
             self.inner = inner
             self.sectors = 0
@@ -1169,39 +1173,41 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style):
             self.center_dots = 0
             self.texts = []
 
-        def add_convex_poly_filled(self, *args):
+        def convex_fill(self, points, color):
             self.sectors += 1
-            return self.inner.add_convex_poly_filled(*args)
+            return self.inner.convex_fill(points, color)
 
-        def add_polyline(self, *args):
-            self.open_arcs += args[3] == imgui.ImDrawFlags_.none.value
-            self.closed_arcs += args[3] == imgui.ImDrawFlags_.closed.value
-            return self.inner.add_polyline(*args)
+        def polyline(self, points, color, width, *, closed=False):
+            if closed:
+                self.closed_arcs += 1
+            else:
+                self.open_arcs += 1
+            return self.inner.polyline(points, color, width, closed=closed)
 
-        def add_line(self, *args):
+        def line(self, *args, **kwargs):
             self.radials += 1
-            return self.inner.add_line(*args)
+            return self.inner.line(*args, **kwargs)
 
-        def add_circle_filled(self, *args):
+        def circle_filled(self, *args, **kwargs):
             self.center_dots += 1
-            return self.inner.add_circle_filled(*args)
+            return self.inner.circle_filled(*args, **kwargs)
 
-        def add_text(self, *args):
-            self.texts.append(args[2] if len(args) == 3 else args[4])
-            return self.inner.add_text(*args)
+        def text(self, pos, color, text):
+            self.texts.append(text)
+            return self.inner.text(pos, color, text)
 
         def __getattr__(self, name):
             return getattr(self.inner, name)
 
-    real = imgui.get_window_draw_list
+    orig_draw = v.app.gizmo.draw_overlay
     recorders = []
 
-    def spy():
-        recorder = Recorder(real())
+    def spy(cam, rect, overlay, *, style_scale=1.0):
+        recorder = Recorder(overlay)
         recorders.append(recorder)
-        return recorder
+        return orig_draw(cam, rect, recorder, style_scale=style_scale)
 
-    imgui.get_window_draw_list = spy
+    v.app.gizmo.draw_overlay = spy
     try:
         v.sync()
         v.app.gizmo._rotation_raw_angle += 2.0 * np.pi
@@ -1209,7 +1215,7 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style):
         after_pos = np.asarray(v.session.frame.body_xpos[node.body_index]).copy()
         after_mat = np.asarray(v.session.frame.body_xmat[node.body_index]).reshape(3, 3).copy()
     finally:
-        imgui.get_window_draw_list = real
+        v.app.gizmo.draw_overlay = orig_draw
         io.add_mouse_button_event(0, False)
         v.sync()
         v.session.submit(cmd.Reset())
