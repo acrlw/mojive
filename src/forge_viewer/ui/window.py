@@ -35,6 +35,16 @@ def layout_scale(ui_scale: float, framebuffer_scale: float) -> float:
     return float(ui_scale) / max(float(framebuffer_scale), 1e-6)
 
 
+def resolve_context_api(requested: str) -> str:
+    """Resolve the GLFW context creation API."""
+    value = requested.strip().lower()
+    if value in {"", "auto", "native", "glfw"}:
+        return "native"
+    if value == "egl":
+        return "egl"
+    raise ValueError(f"Unsupported FORGE_VIEWER_GL backend: {requested}")
+
+
 def _load_gl_deps() -> None:
     global glfw, gl, imgui, GlfwRenderer
     if glfw is not None:
@@ -119,6 +129,7 @@ class WindowConfig:
     clear_color: tuple[float, float, float, float] = (0.09, 0.10, 0.11, 1.0)
     font_size_pt: float = 14.0
     ui_scale: float | None = None
+    context_api: str = "auto"
 
 
 class Window:
@@ -134,24 +145,31 @@ class Window:
         global _live_windows
         _live_windows += 1
 
+        requested_api = os.environ.get("FORGE_VIEWER_GL", self.config.context_api)
+        self._context_api = resolve_context_api(requested_api)
+        glfw.default_window_hints()
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, self.config.gl_major)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, self.config.gl_minor)
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+        glfw.window_hint(glfw.CLIENT_API, glfw.OPENGL_API)
         glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, glfw.TRUE)
         glfw.window_hint(glfw.SAMPLES, self.config.samples)
         glfw.window_hint(glfw.DOUBLEBUFFER, glfw.TRUE)
-
         glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
-
         glfw.window_hint(glfw.FOCUS_ON_SHOW, glfw.FALSE)
-
+        glfw.window_hint(
+            glfw.CONTEXT_CREATION_API,
+            glfw.EGL_CONTEXT_API if self._context_api == "egl" else glfw.NATIVE_CONTEXT_API,
+        )
         handle = glfw.create_window(
             self.config.width, self.config.height, self.config.title, None, None
         )
         if not handle:
+            _live_windows = max(0, _live_windows - 1)
             glfw.terminate()
             raise RuntimeError(
-                f"Failed to create an OpenGL {self.config.gl_major}.{self.config.gl_minor} core context"
+                f"Failed to create an OpenGL {self.config.gl_major}.{self.config.gl_minor} "
+                f"core context with GLFW {self._context_api}"
             )
         self._window = handle
         self._shown = False
@@ -164,6 +182,12 @@ class Window:
 
         glfw.make_context_current(self._window)
         self.set_vsync(self.config.vsync)
+        log.info(
+            "OpenGL {}.{} core context created with GLFW {}",
+            self.config.gl_major,
+            self.config.gl_minor,
+            self._context_api,
+        )
 
         self._content_scale = 1.0
         self._ui_scale = 1.0
@@ -204,6 +228,10 @@ class Window:
     @property
     def gl_context(self) -> Any:
         return self._window
+
+    @property
+    def context_api(self) -> str:
+        return self._context_api
 
     def make_current(self) -> None:
         glfw.make_context_current(self._window)

@@ -14,12 +14,12 @@ gates. The next milestone focuses on platform packaging and a second production 
 ## Requirements
 
 - Python 3.11 or newer
-- An OpenGL 4.1 core-profile driver
+- An OpenGL 3.3 core-profile driver
 - A desktop session for interactive windows
 - MuJoCo 3.1 or newer for MJCF, URDF, simulation, and physics tools
 
-The current acceptance platform is macOS on Apple Silicon. Linux requires a working OpenGL 4.1
-desktop driver. `uv` is the recommended environment and dependency manager.
+Forge targets macOS on Apple Silicon and Linux with a desktop OpenGL 3.3 driver. `uv` is the
+recommended environment and dependency manager.
 
 ## Quick start
 
@@ -54,6 +54,19 @@ make hidpi
 
 `make hidpi` opens the gizmo scene at a 200% UI scale. Set `UI_SCALE=1.5` to inspect fractional
 scaling.
+
+### Linux OpenGL contexts
+
+Interactive windows use the native GLFW context API. On Wayland this is EGL; on X11 it is GLX.
+Force GLFW EGL explicitly to verify that path:
+
+```bash
+make egl-viewer
+make egl
+```
+
+The offscreen `Renderer` uses EGL by default on Linux. `FORGE_VIEWER_GL=native` selects a hidden
+GLFW context. Both paths create desktop OpenGL 3.3 core contexts.
 
 Open a local MJCF or URDF model directly:
 
@@ -186,6 +199,7 @@ Every user-facing feature has a reproducible Make target.
 | Target | Purpose |
 |---|---|
 | `make viewer` | Open the default MuJoCo scene |
+| `make egl-viewer` | Open the Linux viewer through GLFW EGL |
 | `make hidpi` | Inspect UI, fonts, and gizmos at an explicit 200% scale |
 | `make empty` | Open an empty viewer and load MJCF or URDF from the File menu |
 | `make model-loading` | Capture empty, MJCF, and URDF runtime-loading references |
@@ -237,6 +251,7 @@ make record SCENE=humanoid OUTPUT=output/humanoid.mp4 ARGS="--frames 240"
 | `make p1` | Complete P0 and P1 non-interactive acceptance gate |
 | `make check` | Lint, formatting, and CPU tests |
 | `make gpu` | Isolated real-OpenGL test files |
+| `make egl` | Linux EGL Renderer and geometry-shader wireframe contract |
 | `make renderer-api` | Public Renderer RGB, depth, segmentation, camera, option, and lifecycle contract |
 | `make mujoco-ik` | MuJoCo body/site IK and acceptance captures |
 | `make mujoco-physics` | Full MuJoCo adapter and simulation regression suite |

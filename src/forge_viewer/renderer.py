@@ -167,9 +167,9 @@ class _StandaloneContext:
 
 def _create_context(width: int, height: int):
     requested = os.environ.get("FORGE_VIEWER_GL", "").strip().lower()
-    if requested == "egl" or (not requested and sys.platform.startswith("linux")):
+    if requested == "egl" or (requested in {"", "auto"} and sys.platform.startswith("linux")):
         return _StandaloneContext("egl")
-    if requested not in {"", "glfw"}:
+    if requested not in {"", "auto", "glfw", "native"}:
         raise ValueError(f"Unsupported FORGE_VIEWER_GL backend: {requested}")
     return _GLFWContext(width, height)
 
