@@ -355,9 +355,16 @@ class WgpuWindow(Window):
         glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
         glfw.window_hint(glfw.FOCUS_ON_SHOW, glfw.FALSE)
 
-        handle = glfw.create_window(
-            self.config.width, self.config.height, self.config.title, None, None
-        )
+        try:
+            handle = glfw.create_window(
+                self.config.width, self.config.height, self.config.title, None, None
+            )
+        finally:
+            # Window hints are process-global: leave CLIENT_API at its default
+            # so a later GL window (forge backend) still gets a context.
+            glfw.window_hint(glfw.CLIENT_API, glfw.OPENGL_API)
+            glfw.window_hint(glfw.VISIBLE, glfw.TRUE)
+            glfw.window_hint(glfw.FOCUS_ON_SHOW, glfw.TRUE)
         if not handle:
             glfw.terminate()
             raise RuntimeError("Failed to create a GLFW window (CLIENT_API=NO_API)")
