@@ -12,7 +12,7 @@ pytest.importorskip("mujoco")
 from forge_viewer.adapters.base import FrameNeeds  # noqa: E402
 from forge_viewer.assets import resolve  # noqa: E402
 from forge_viewer.backends import make_adapter  # noqa: E402
-from forge_viewer.render.backend import RenderFlag  # noqa: E402
+from forge_viewer.render.backend import DebugView, RenderFlag  # noqa: E402
 from forge_viewer.render.builder import SceneSourceBuilder  # noqa: E402
 from forge_viewer.render.debugdraw import Occlusion, Prim  # noqa: E402
 from forge_viewer.render.forge import gl_native as G  # noqa: E402
@@ -490,6 +490,67 @@ def test_deformable_vertices_update_without_rebuilding_the_scene(backend_name, r
         assert backend._scene.bucket_ranges == ranges
         _render(backend, frame)
         assert float(backend.target.read_color()[..., :3].std()) > 8.0
+    finally:
+        backend.release()
+        adapter.release()
+
+
+def test_deformable_wireframe_view_follows_vertex_updates(backend_name, request):
+    """The wireframe debug view must track in-place deformable vertex updates.
+
+    The wgpu mesh store expands indexed triangles into a barycentric wire
+    stream that GpuMesh.update refreshes in place; forge injects barycentrics
+    in a geometry stage over the same VBO.  A stale wire stream would keep
+    drawing the rest pose, which the pixel assertions below catch on both
+    backends.
+    """
+
+    import mujoco
+
+    from forge_viewer.adapters.base import NodeKind
+
+    adapter = make_adapter("mujoco", resolve("deformables"))
+    backend = _make_backend(backend_name, request, samples=1)
+    try:
+        source = adapter.scene_source()
+        backend.set_camera(adapter.camera_hint())
+        backend.set_scene(source)
+        assert backend.set_debug_view(DebugView.WIREFRAME)
+        # Shadows are off: the moving skin would otherwise also repaint its
+        # shadow on the floor, outside the skin's own screen region.
+        assert backend.set_flag(RenderFlag.SHADOW, False)
+
+        joint = mujoco.mj_name2id(adapter.model, mujoco.mjtObj.mjOBJ_JOINT, "skin_tip_hinge")
+        qpos_adr = int(adapter.model.jnt_qposadr[joint])
+
+        def wireframe_at(angle: float) -> np.ndarray:
+            assert adapter.set_qpos(qpos_adr, angle)
+            frame = adapter.frame(FrameNeeds(poses=True, deformables=True))
+            backend.update(frame)
+            _render(backend, frame)
+            return backend.target.read_color(flip=False).copy()
+
+        rest = wireframe_at(0.0)
+        rest_ids = backend.target.read_ids()
+        deformed = wireframe_at(np.deg2rad(40.0))
+        changed = np.max(np.abs(deformed.astype(np.int16) - rest.astype(np.int16)), axis=2) > 10
+        assert np.count_nonzero(changed) > 50
+
+        # The id pass rasterizes solid triangles regardless of the debug view,
+        # so its coverage marks the skin region the wire pixels must stay in.
+        # Both silhouettes matter: the skin vacates its rest pose coverage.
+        skin_ids = [n.object_id for n in adapter.nodes() if n.kind is NodeKind.SKIN]
+        assert skin_ids
+        region = np.isin(rest_ids, skin_ids) | np.isin(backend.target.read_ids(), skin_ids)
+        for _ in range(2):  # dilate: antialiased wires bleed past the id region
+            region[1:] |= region[:-1]
+            region[:-1] |= region[1:]
+            region[:, 1:] |= region[:, :-1]
+            region[:, :-1] |= region[:, 1:]
+        assert np.count_nonzero(changed & ~region) * 20 <= np.count_nonzero(changed)
+
+        # Returning to the rest pose restores the rest wireframe exactly.
+        assert np.array_equal(wireframe_at(0.0), rest)
     finally:
         backend.release()
         adapter.release()

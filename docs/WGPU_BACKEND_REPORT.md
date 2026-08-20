@@ -15,7 +15,7 @@ interactive viewer window. Planning and milestone detail live in
 
 ## How to run the tests
 
-- `make gpu-wgpu` — per-file GPU suite against the wgpu backend (12 files, list in
+- `make gpu-wgpu` — per-file GPU suite against the wgpu backend (14 files, list in
   the Makefile variable `GPU_WGPU_FILES`); `make gpu` is the forge counterpart.
 - `make renderer-api-wgpu` / `make renderer-api` — Renderer API contract suites plus
   the comparison gallery against `mujoco.Renderer`.
@@ -44,7 +44,7 @@ interactive viewer window. Planning and milestone detail live in
 
 | Check | Result |
 |---|---|
-| `make gpu-wgpu` (12 files) | all green |
+| `make gpu-wgpu` (14 files) | all green |
 | `pytest -q` | 495 passed |
 | forge per-file GPU regression | failure signature identical to `main` (pre-existing: forge_core 2, id_outline 3, pipeline 1, model_loading 2 errors, ui_interaction 1+39) |
 | `make renderer-api-wgpu` | 6+9 passed, gallery `passed: true` (seg agreement 0.99990) |
@@ -78,12 +78,6 @@ Milestone feedback renders (wgpu vs forge side by side) live in `output/wgpu/`
 - Merge decision for the `wgpu-py` branch, after cross-platform validation; forge
   stays the default backend.
 
-### Test coverage
-
-- Parameterize the portable subset of `test_static_viewer.py` for the wgpu window
-  stack (`test_ui_interaction.py` / `test_model_loading.py` stay forge-only).
-- Pin deformable-mesh + wireframe interaction as a regression test.
-
 ### Performance (deferred until a profile justifies them)
 
 - Gate the export MRT pass on actual depth/segmentation/pick demand (mode-switch
@@ -108,7 +102,6 @@ recording — swapchain textures are not readable), instance-buffer dirty tracki
 
 - `id_msaa`: shader-side resolve of a 4x uint mask would remove the 1-px picking
   difference at MSAA edges; modest payoff for the complexity.
-- Shader hot reload for the wgpu backend (forge-only developer convenience).
 - GPU-side mip generation, only if float/HDR texture inputs ever appear (CPU box
   filter covers u8 today).
 

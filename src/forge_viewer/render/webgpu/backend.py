@@ -28,6 +28,7 @@ import wgpu
 
 from ...adapters.base import SceneFrame, SceneSource
 from ...gizmo import GizmoFrame
+from ...log import get_logger
 from ...types import CameraView, ViewportImage
 from ..backend import BackendCaps, DebugView, FrameMode, LabelMode, RenderFlag, RenderStats
 from ..builder import SceneSourceBuilder
@@ -53,9 +54,11 @@ from .passes import (
     SkyboxPass,
     TendonPass,
 )
-from .programs import load_wgsl
+from .programs import WgslWatch, load_wgsl
 from .targets import FRAME_BYTES, FRAME_DTYPE, RenderTargetWgpu, proj_matrix_wgpu
 from .textures import TextureStore
+
+log = get_logger("webgpu")
 
 HIGHLIGHT_COLOR = (1.0, 0.82, 0.45, 0.0)
 HIGHLIGHT_BLEND = 0.35
@@ -65,6 +68,9 @@ EXPOSURE = 1.0
 NO_CLIP = (0.0, 0.0, 0.0, 1.0)
 # forge opaque.OVERDRAW_CLEAR: the overdraw view accumulates on black.
 OVERDRAW_CLEAR = (0.0, 0.0, 0.0, 1.0)
+
+# Scene module sources in load order; the hot-reload watch tracks this set.
+_SCENE_SHADERS = ("shadow_sample.wgsl", "scene.wgsl")
 
 # The full forge flag set (ForgeBackend._supported_flags with every pass
 # present): 19 scene flags plus the 19 flags gated on forge's debug pass.
@@ -178,9 +184,10 @@ class WgpuBackend:
         self.lights = LightUniforms(self.device)
         self.target = RenderTargetWgpu(self.device, width, height, samples)
 
-        self._module = self.device.create_shader_module(
-            code=load_wgsl("shadow_sample.wgsl", "scene.wgsl")
-        )
+        self._module = self.device.create_shader_module(code=load_wgsl(*_SCENE_SHADERS))
+        self._shader_watch = WgslWatch(*_SCENE_SHADERS)
+        self._shader_reload_error = ""
+        self._hot_reload = False
         self._group0_layout = self.device.create_bind_group_layout(
             entries=[
                 {
@@ -848,6 +855,8 @@ class WgpuBackend:
         scene = self._scene
         if scene is None:
             return None
+        if self._hot_reload:
+            self._reload_wgsl()
 
         t0 = time.perf_counter()
         target = self.target
@@ -1211,6 +1220,36 @@ class WgpuBackend:
 
     def render_options(self) -> tuple[RenderFlag, ...]:
         return tuple(flag for flag in self._flags if flag in _SUPPORTED_FLAGS)
+
+    def enable_hot_reload(self, on: bool = True) -> None:
+        self._hot_reload = bool(on)
+
+    def _reload_wgsl(self) -> None:
+        """Rebuild the scene shader module when its sources changed on disk.
+
+        Mirrors forge's ``ProgramCache.reload_changed``: a failed compile
+        keeps the previous module and pipelines, and the new mtimes are
+        recorded either way so one broken edit logs once instead of every
+        frame.  wgpu-py raises ``GPUValidationError`` synchronously from
+        ``create_shader_module``; pipelines bake in the module, so a
+        successful reload drops the cache and the next draw rebuilds them.
+        """
+        watch = self._shader_watch
+        if not watch.changed():
+            return
+        try:
+            module = self.device.create_shader_module(code=load_wgsl(*watch.names))
+        except Exception as e:
+            msg = str(e)
+            if msg != self._shader_reload_error:
+                self._shader_reload_error = msg
+                log.error("Scene shaders failed to compile; keeping the previous version:\n{}", msg)
+        else:
+            self._module = module
+            self._pipelines.clear()
+            self._shader_reload_error = ""
+            log.info("Scene shaders reloaded")
+        watch.mark()
 
     def release(self) -> None:
         self.meshes.release()

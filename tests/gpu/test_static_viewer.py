@@ -36,6 +36,19 @@ def snap(viewer) -> np.ndarray:
     return np.asarray(px)[::-1][..., :3].copy()
 
 
+def viewport_snap(viewer) -> np.ndarray:
+    """Crop the window snapshot to the viewport panel.
+
+    The docked stats panel redraws its frame-time plot every sync, so a
+    whole-window diff measures UI churn instead of the scene edit — and the
+    churn differs between the forge and wgpu frame loops.
+    """
+    image = snap(viewer)
+    x, y, w, h = viewer.window.points_to_pixels(viewer.app._viewport_rect)
+    x0, y0, x1, y1 = round(x), round(y), round(x + w), round(y + h)
+    return image[y0:y1, x0:x1]
+
+
 def test_canvas_opens_without_importing_mujoco(canvas):
     viewer, _scene = canvas
     image = snap(viewer)
@@ -73,16 +86,16 @@ def test_canvas_pose_update_changes_the_window(canvas):
 
 def test_canvas_material_edits_change_the_window(canvas):
     viewer, scene = canvas
-    before = snap(viewer)
+    before = viewport_snap(viewer)
     crate = scene.object("crate")
     crate.set_color((0.1, 0.8, 0.9, 1.0))
     crate.set_material(Material(name="emissive", emission=0.65, specular=0.1))
     viewer.sync()
     viewer.sync()
-    after = snap(viewer)
+    after = viewport_snap(viewer)
 
     diff = np.max(np.abs(after.astype(np.int16) - before.astype(np.int16)), axis=-1)
-    assert np.count_nonzero(diff > 10) > 1000
+    assert np.count_nonzero(diff > 10) > 150
 
     crate.set_color((0.92, 0.42, 0.18, 1.0))
     crate.set_material(DEFAULT_MATERIAL)
