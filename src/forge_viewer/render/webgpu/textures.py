@@ -6,11 +6,12 @@ hardware decode matches GL ``SRGB8_ALPHA8``; other formats are linearized on
 the CPU the same way forge does when no sRGB internal format exists.
 
 Cube textures (``TextureKind.CUBE``/``SKYBOX``) upload six faces as a 2D array
-exposed through a ``cube`` view.  WebGPU has no mipmap generation, so the mip
-chain is box-filtered on the CPU in stored (possibly sRGB-encoded) space —
-the same domain ``glGenerateMipmap`` averages in for forge.  The IBL roughness
-LOD depends on the full chain.  A 1x1 ``black_cube`` stands in when no image
-light or skybox cube is bound.
+exposed through a ``cube`` view.  WebGPU has no mipmap generation, so mip
+chains (2D and cube alike) are box-filtered on the CPU in stored (possibly
+sRGB-encoded) space — the same domain ``glGenerateMipmap`` averages in for
+forge.  2D filtering matches forge: trilinear with anisotropy 8.0.  The IBL
+roughness LOD depends on the full cube chain.  A 1x1 ``black_cube`` stands in
+when no image light or skybox cube is bound.
 """
 
 from __future__ import annotations
@@ -31,12 +32,13 @@ def _srgb_to_linear_u8(pixels: np.ndarray) -> np.ndarray:
 
 
 def _mip_chain(pixels: np.ndarray) -> list[np.ndarray]:
-    """Box-filtered mip levels of a (layers, S, S, C) u8 array, in stored space."""
+    """Box-filtered mip levels of a (layers, h, w, comps) u8 array, in stored space."""
     levels = [pixels]
-    size = pixels.shape[1]
-    while size > 1 and size % 2 == 0:
-        size //= 2
-        level = levels[-1].reshape(-1, size, 2, size, 2, pixels.shape[3]).mean(axis=(2, 4))
+    h, w = pixels.shape[1], pixels.shape[2]
+    while (h > 1 or w > 1) and h % 2 == 0 and w % 2 == 0:
+        h, w = h // 2, w // 2
+        layers, _, _, comps = levels[-1].shape
+        level = levels[-1].reshape(layers, h, 2, w, 2, comps).mean(axis=(2, 4))
         levels.append(np.ascontiguousarray((level + 0.5).astype(np.uint8)))
     return levels
 
@@ -50,13 +52,17 @@ class TextureStore:
         self._white: wgpu.GPUTextureView | None = None
         self._black_cube: wgpu.GPUTextureView | None = None
         # forge 2D textures wrap (repeat_x/repeat_y = True); tiled planes and
-        # box face-axis mapping rely on uv outside [0,1] repeating.
+        # box face-axis mapping rely on uv outside [0,1] repeating.  Trilinear
+        # plus anisotropy 8.0 matches forge (resources.py builds mipmaps with
+        # aniso 8.0); WebGPU has no mipmap generation, so _upload builds the
+        # chain on the CPU.
         self.sampler = device.create_sampler(
             mag_filter="linear",
             min_filter="linear",
-            mipmap_filter="nearest",
+            mipmap_filter="linear",
             address_mode_u="repeat",
             address_mode_v="repeat",
+            max_anisotropy=8,
         )
         self.cube_sampler = device.create_sampler(
             mag_filter="linear", min_filter="linear", mipmap_filter="linear"
@@ -129,12 +135,15 @@ class TextureStore:
             pixels = np.concatenate([pixels, alpha], axis=2)
         if linearize:
             pixels = np.ascontiguousarray(_srgb_to_linear_u8(pixels))
+        levels = _mip_chain(pixels[None])
         tex = self._device.create_texture(
             size=(w, h, 1),
             format=fmt,
             usage=wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST,
+            mip_level_count=len(levels),
         )
-        self._write_payload(tex, pixels[None], bpp, 0)
+        for mip_level, level in enumerate(levels):
+            self._write_payload(tex, level, bpp, mip_level)
         return tex.create_view()
 
     def _upload_cube(self, data: TextureData) -> tuple[wgpu.GPUTextureView, int]:
