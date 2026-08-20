@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 
@@ -12,6 +14,21 @@ from forge_viewer.assets import resolve  # noqa: E402
 from forge_viewer.composition import build  # noqa: E402
 
 W, H = 1280, 800
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _pin_ui_scale():
+    # These tests assume scale-1 layout geometry (CI displays); pin the UI
+    # scale so HiDPI machines produce the same coordinates.
+    old = os.environ.get("FORGE_VIEWER_UI_SCALE")
+    os.environ["FORGE_VIEWER_UI_SCALE"] = "1"
+    try:
+        yield
+    finally:
+        if old is None:
+            del os.environ["FORGE_VIEWER_UI_SCALE"]
+        else:
+            os.environ["FORGE_VIEWER_UI_SCALE"] = old
 
 
 @pytest.fixture(scope="module")
