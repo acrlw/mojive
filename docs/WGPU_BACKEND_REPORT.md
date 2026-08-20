@@ -44,16 +44,18 @@ interactive viewer window. Planning and milestone detail live in
 
 | Check | Result |
 |---|---|
-| `make gpu-wgpu` (14 files) | all green |
-| `pytest -q` | 495 passed |
+| `make gpu-wgpu` (14 files) | all green (gizmo suite now 7 cases: axis direction/sign vs CPU projection, foreshortened-stub placement, body-frame following) |
+| `pytest -q` | 501 passed (view cube gained a 6-case nearest-ball-on-top pin) |
 | forge per-file GPU regression | failure signature identical to `main` (pre-existing: forge_core 2, id_outline 3, pipeline 1, model_loading 2 errors, ui_interaction 1+39) |
 | `make renderer-api-wgpu` | 6+9 passed, gallery `passed: true` (seg agreement 0.99990) |
 | Viewer smoke, both backends | main loop runs clean, no tracebacks |
 | `ruff check .` + `ruff format --check` | clean |
 | Caps comparison vs forge | identical except the honest gaps below |
+| Gizmo / view-cube alignment audit (2026-08-20) | forge-faithful: full-window captures at 3 cameras and offscreen ground-truth renders at 5 cameras × 2 modes match forge within AA noise; the view cube is pixel-identical across backends (shared imgui code), its near-ball-on-top order is the correct painter sort, and a faint foreshortened axis handle is the deliberate shared `axis_handle_alpha` fade, not a backend bug |
 
 Milestone feedback renders (wgpu vs forge side by side) live in `output/wgpu/`
-(`m3_*.png` … `m9_*.png`, gitignored).
+(`m3_*.png` … `m9_*.png`, audit captures `audit_viewcube_*` / `audit_gizmo_*` /
+`audit_truth_*` / `audit_zoom_*`, all gitignored).
 
 ## Deliberate differences from forge (reported in `caps.notes`)
 

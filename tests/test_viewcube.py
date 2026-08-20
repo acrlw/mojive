@@ -75,6 +75,21 @@ def test_back_ball_fades_instead_of_hiding_only_its_label():
     assert find(balls, 0, -1.0).alpha == 0.0
 
 
+@pytest.mark.parametrize("axis", range(3))
+@pytest.mark.parametrize("sign", (1.0, -1.0))
+def test_nearest_ball_is_drawn_last_on_top(axis, sign):
+    # Painter's order: the ball on the camera's side is drawn last (on top)
+    # and fully opaque; the far ball is drawn first and fully faded out.
+    eye = [0.0, 0.0, 0.0]
+    eye[axis] = 5.0 * sign
+    balls = balls_from(eye)
+    nearest, farthest = balls[-1], balls[0]
+    assert (nearest.axis, nearest.sign) == (axis, sign)
+    assert (farthest.axis, farthest.sign) == (axis, -sign)
+    assert nearest.alpha == 1.0
+    assert farthest.alpha == 0.0
+
+
 def test_back_ball_fade_is_continuous():
     assert vc._back_alpha(vc.BACK_FADE_START) == pytest.approx(1.0)
     assert vc._back_alpha((vc.BACK_FADE_START + vc.BACK_FADE_END) * 0.5) == pytest.approx(0.5)

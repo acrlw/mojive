@@ -243,6 +243,69 @@ def test_rotate_mode_draws_axis_and_screen_rings(rig):
     assert hits >= 12
 
 
+def _head_on_camera() -> CameraView:
+    """Nearly head-on along +Y: the Y handle foreshortens to a faint stub."""
+    return CameraView(
+        eye=np.array((0.0, -5.0, 1.2), np.float32),
+        target=ORIGIN.copy(),
+        up=np.array((0.0, 0.0, 1.0), np.float32),
+        near=0.1,
+        far=50.0,
+        aspect=W / H,
+    )
+
+
+def _dominance(img: np.ndarray, x: int, y: int, channel: int, radius: int = 6) -> bool:
+    patch = img[y - radius : y + radius + 1, x - radius : x + radius + 1, :3].astype(np.int16)
+    rest = [i for i in range(3) if i != channel]
+    margin = patch[..., channel] - np.maximum(patch[..., rest[0]], patch[..., rest[1]])
+    return bool((margin > 25).any())
+
+
+def test_foreshortened_axis_leans_toward_its_projected_tip(rig):
+    if not rig.backend.caps.gizmo:
+        pytest.skip("gizmo unsupported by this backend")
+    cam = _head_on_camera()
+    img = rig.draw(_frame(), cam, box=False)
+    scale = world_scale(cam, ORIGIN, H)
+    cx, cy = _project(cam, ORIGIN)
+
+    # +Y points at the camera: faded and squashed, but the stub must lean
+    # toward its projected tip (up-screen here) — never the mirror side.
+    tx, ty = _project(cam, ORIGIN + np.array((0.0, 1.0, 0.0)) * scale)
+    assert abs(tx - cx) <= 1 and ty < cy
+    assert _dominance(img, tx, ty, 1), "foreshortened Y stub missing at its tip"
+    assert not _dominance(img, 2 * cx - tx, 2 * cy - ty, 1), "Y stub flipped to the far side"
+
+    # The perpendicular handles keep full length and point along +axis only.
+    mx, my = _project(cam, ORIGIN + np.array((1.0, 0.0, 0.0)) * (0.55 * scale))
+    assert _dominance(img, mx, my, 0, radius=3), "X mid-shaft missing"
+    assert not _dominance(img, 2 * cx - mx, my, 0, radius=3), "X handle leaked to -X"
+    mx, my = _project(cam, ORIGIN + np.array((0.0, 0.0, 1.0)) * (0.55 * scale))
+    assert _dominance(img, mx, my, 2, radius=3), "Z mid-shaft missing"
+
+
+def test_handles_follow_the_body_frame(rig):
+    if not rig.backend.caps.gizmo:
+        pytest.skip("gizmo unsupported by this backend")
+    cam = _head_on_camera()
+    yaw90 = M.rotvec_to_mat3(np.array((0.0, 0.0, np.pi / 2)))
+    frame = GizmoFrame(position=ORIGIN.copy(), rotation=np.asarray(yaw90, np.float32))
+    img = rig.draw(frame, cam, box=False)
+    scale = world_scale(cam, ORIGIN, H)
+    cx = _project(cam, ORIGIN)[0]
+
+    # Body frame yaw +90°: the X handle now lies along world +Y (faded stub
+    # leaning up-screen) and the Y handle along world -X (full length left).
+    tx, ty = _project(cam, ORIGIN + yaw90[:, 0] * scale)
+    assert _dominance(img, tx, ty, 0), "rotated X stub missing at its tip"
+    mx, my = _project(cam, ORIGIN + yaw90[:, 1] * (0.55 * scale))
+    assert mx < cx and _dominance(img, mx, my, 1, radius=3), "rotated Y mid-shaft missing"
+    assert not _dominance(img, 2 * cx - mx, my, 1, radius=3), "rotated Y leaked to +X"
+    mx, my = _project(cam, ORIGIN + yaw90[:, 2] * (0.55 * scale))
+    assert _dominance(img, mx, my, 2, radius=3), "rotated Z mid-shaft missing"
+
+
 def test_clearing_the_gizmo_removes_all_handles(rig):
     cam = _camera()
     img = rig.draw(_frame(), cam)
