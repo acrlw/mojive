@@ -22,6 +22,9 @@ from forge_viewer.gizmo import (
     axis_rotation,
     display_handles,
     hit_test,
+    paint_order,
+    plane_corners,
+    plane_direction,
     plane_handle_alpha,
     project,
     rotation_ring,
@@ -213,6 +216,32 @@ def test_axis_rotation_maps_mesh_z_to_each_object_axis_without_mirroring() -> No
         mapped = axis_rotation(rotation, axis)
         assert mapped[:, 2] == pytest.approx(rotation[:, axis])
         assert np.linalg.det(mapped) == pytest.approx(1.0)
+
+
+def test_paint_order_sorts_handles_far_to_near_along_the_view() -> None:
+    eye = np.array((3.0, -4.0, 2.2), np.float32)
+    origin = np.zeros(3, np.float32)
+    up = np.array((0.0, 0.0, 1.0), np.float32)
+    # View direction ~= (-0.55, 0.73, -0.40): Y is farthest, X nearest.
+    for cam in (
+        CameraView(eye=eye, target=origin.copy(), up=up),
+        CameraView(eye=eye, target=origin.copy(), up=up, orthographic=True),
+    ):
+        assert paint_order(cam, origin, [np.eye(3)[:, i] for i in range(3)]) == (1, 2, 0)
+    yaw90 = np.array(((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)))
+    cam = CameraView(eye=eye, target=origin.copy(), up=up)
+    assert paint_order(cam, origin, [yaw90[:, i] for i in range(3)]) == (0, 1, 2)
+
+
+def test_plane_direction_points_toward_the_quad_center() -> None:
+    origin = np.zeros(3)
+    rotation = np.array(((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)))
+    for axis in range(3):
+        direction = plane_direction(rotation, axis)
+        center = plane_corners(origin, rotation, 1.0, axis).mean(axis=0)
+        assert direction == pytest.approx(
+            center * np.linalg.norm(direction) / np.linalg.norm(center)
+        )
 
 
 class CaptureBackend:

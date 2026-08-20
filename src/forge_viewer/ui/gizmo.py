@@ -44,7 +44,9 @@ from ..gizmo import (
     axis_handle_alpha,
     display_handles,
     hit_test,
+    paint_order,
     plane_corners,
+    plane_direction,
     plane_handle_alpha,
     project,
     rotation_ring,
@@ -357,9 +359,13 @@ class ObjectGizmo:
         visible = display_handles(frame)
         u32 = imgui.color_convert_float4_to_u32
 
-        for axis, handle in enumerate(PLANE_HANDLES):
-            if handle not in visible:
-                continue
+        # The draw list paints in submission order with no depth buffer, so
+        # each handle group draws far-to-near (painter's order) to put the
+        # nearer handle on top where handles overlap.
+        planes = [axis for axis, handle in enumerate(PLANE_HANDLES) if handle in visible]
+        for k in paint_order(cam, origin, [plane_direction(rotation, axis) for axis in planes]):
+            axis = planes[k]
+            handle = PLANE_HANDLES[axis]
             alpha = (
                 1.0
                 if frame.active is handle
@@ -377,9 +383,10 @@ class ObjectGizmo:
                 u32(imgui.ImVec4(*color)),
             )
 
-        for axis, handle in enumerate(AXIS_HANDLES):
-            if handle not in visible:
-                continue
+        axes = [axis for axis, handle in enumerate(AXIS_HANDLES) if handle in visible]
+        for k in paint_order(cam, origin, [rotation[:, axis] for axis in axes]):
+            axis = axes[k]
+            handle = AXIS_HANDLES[axis]
             alpha = (
                 1.0 if frame.active is handle else axis_handle_alpha(cam, origin, rotation[:, axis])
             )

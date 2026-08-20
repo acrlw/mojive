@@ -173,10 +173,42 @@ def plane_handle_alpha(cam: CameraView, origin, normal) -> float:
     return rotation_ring_alpha(cam, origin, normal)
 
 
+_PLANE_SPAN_AXES = ((1, 2), (2, 0), (0, 1))
+
+
+def plane_direction(rotation, axis: int) -> np.ndarray:
+    """World direction from the origin toward the plane handle's center."""
+    r = np.asarray(rotation, np.float64).reshape(3, 3)
+    u, v = _PLANE_SPAN_AXES[int(axis)]
+    return r[:, u] + r[:, v]
+
+
+def paint_order(cam: CameraView, origin, directions) -> tuple[int, ...]:
+    """Painter's-algorithm handle order: far-to-near along the view ray.
+
+    Overlapping handles cannot rely on per-pixel depth (the 2D overlay draws
+    into an imgui draw list; the 3D depth pin squashes handle depth against
+    the near plane), so each handle group is drawn far-to-near by the depth
+    of a point one unit along its direction (arrow axis or plane diagonal).
+    Returns indices into ``directions``.
+    """
+    view = _view_direction(cam, origin)
+    keys = [float(np.dot(np.asarray(d, np.float64), view)) for d in directions]
+    return tuple(sorted(range(len(directions)), key=keys.__getitem__, reverse=True))
+
+
+def _view_direction(cam: CameraView, origin) -> np.ndarray:
+    """Unit vector pointing away from the camera through ``origin``."""
+    d = (
+        np.asarray(cam.forward(), np.float64)
+        if cam.orthographic
+        else np.asarray(origin, np.float64) - np.asarray(cam.eye, np.float64)
+    )
+    return d / max(float(np.linalg.norm(d)), 1e-12)
+
+
 def _view_facing(cam: CameraView, origin, direction) -> float:
-    to_eye = -cam.forward() if cam.orthographic else np.asarray(cam.eye) - np.asarray(origin)
-    to_eye /= max(float(np.linalg.norm(to_eye)), 1e-12)
-    return abs(float(np.dot(np.asarray(direction), to_eye)))
+    return abs(float(np.dot(np.asarray(direction), _view_direction(cam, origin))))
 
 
 def rotation_ring(cam, origin, rotation, scale: float, axis: int, *, full: bool) -> np.ndarray:
@@ -196,7 +228,7 @@ def rotation_ring(cam, origin, rotation, scale: float, axis: int, *, full: bool)
 def plane_corners(origin, rotation, scale: float, axis: int) -> np.ndarray:
     o = np.asarray(origin, np.float64)
     r = np.asarray(rotation, np.float64).reshape(3, 3)
-    u, v = ((1, 2), (2, 0), (0, 1))[int(axis)]
+    u, v = _PLANE_SPAN_AXES[int(axis)]
     return np.array(
         [
             o + scale * (r[:, u] * a + r[:, v] * b)
