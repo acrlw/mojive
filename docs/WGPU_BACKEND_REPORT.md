@@ -96,7 +96,10 @@ recording — swapchain textures are not readable), instance-buffer dirty tracki
 - Track `timestamp-query` support (API signature present, marked unused) — unblock
   per-pass/GPU timing once wired.
 - Track present-mode/vsync control and a public surface-release API (we call the
-  private `_release()` to avoid an X11 segfault at GC, pygfx#642).
+  private `_release()` to avoid an X11 segfault at GC, pygfx#642). wgpu-py 0.32
+  hardcodes the present-mode preference `immediate > mailbox > fifo`, so
+  `WgpuWindow` emulates vsync with an app-side frame pacer (`_pace_frame`);
+  upstream present-mode control would let the driver do the pacing.
 
 ### Optional polish
 

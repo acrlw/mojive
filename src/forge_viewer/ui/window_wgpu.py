@@ -21,6 +21,7 @@ sRGB surface would apply a second hardware encode (double gamma).
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -305,6 +306,8 @@ class WgpuWindow(Window):
         self._imgui_backend: _WgpuImguiBackend | None = None
         self._scene_view: Any = None
         self._scene_ref: Any = None
+        self._vsync_interval: float | None = None
+        self._next_frame_at: float | None = None
 
         self.set_vsync(self.config.vsync)
 
@@ -371,8 +374,28 @@ class WgpuWindow(Window):
         pass
 
     def set_vsync(self, on: bool) -> None:
-        # wgpu-py 0.32 exposes no present-mode knob; surfaces present FIFO.
+        # wgpu-py 0.32 picks the immediate present mode and exposes no knob,
+        # so vsync is emulated by pacing the frame loop (see _pace_frame).
         self._vsync = bool(on)
+        self._next_frame_at = None
+
+    def _pace_frame(self) -> None:
+        if self._vsync_interval is None:
+            refresh = 0
+            monitor = glfw.get_window_monitor(self._window) or glfw.get_primary_monitor()
+            if monitor:
+                mode = glfw.get_video_mode(monitor)
+                if mode is not None:
+                    refresh = mode.refresh_rate
+            self._vsync_interval = 1.0 / (refresh if refresh > 0 else 60)
+        now = time.perf_counter()
+        target = self._next_frame_at
+        if target is None or now >= target + self._vsync_interval:
+            self._next_frame_at = now + self._vsync_interval  # resync when behind
+            return
+        if now < target:
+            time.sleep(target - now)
+        self._next_frame_at = target + self._vsync_interval
 
     def viewport_texture_ref(self, image: ViewportImage) -> Any:
         """Bind the backend's color view with the imgui renderer (cached)."""
@@ -427,6 +450,8 @@ class WgpuWindow(Window):
             self._gpu_context.present()
             if readback:
                 frame = self.read_frame()
+            if self._vsync:
+                self._pace_frame()
         self._frame_index += 1
         return frame
 
