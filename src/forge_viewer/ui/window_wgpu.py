@@ -20,10 +20,11 @@ sRGB surface would apply a second hardware encode (double gamma).
 
 from __future__ import annotations
 
+import ctypes
 import os
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import glfw
 import numpy as np
@@ -61,12 +62,85 @@ def _upstream_needs_imgui_192_fix() -> bool:
 
 
 class _WgpuImguiBackend(ImguiWgpuBackend):
-    """wgpu's imgui backend with the imgui 1.92 draw-data guard vendored in.
+    """wgpu's imgui backend with the imgui 1.92 fixes vendored in.
 
-    The render() body below is wgpu 0.32's with the single broken line fixed
-    (``draw_data.cmd_lists_count`` -> ``draw_data.cmd_lists.size()``); patching
-    site-packages is not an option, so the fixed copy lives here.
+    - render() is wgpu 0.32's with the single broken line fixed
+      (``draw_data.cmd_lists_count`` -> ``draw_data.cmd_lists.size()``);
+      patching site-packages is not an option, so the fixed copy lives here.
+    - imgui contexts share the font atlas between windows, so a texture's
+      update/destroy events can arrive at a backend instance that never
+      created it: the registry is shared between instances and
+      _update_texture() recreates or skips foreign textures instead of
+      trusting their ids. (All instances share the default device.)
     """
+
+    _shared_textures: ClassVar[dict[int, Any]] = {}
+    _shared_texture_views: ClassVar[dict[int, Any]] = {}
+    _shared_pending_cleanup: ClassVar[list[Any]] = []
+
+    def __init__(self, device, target_format) -> None:
+        super().__init__(device, target_format)
+        self._textures = self._shared_textures
+        self._texture_views = self._shared_texture_views
+        self._pending_cleanup_textures = self._shared_pending_cleanup
+
+    def _update_texture(self, tex: imgui.ImTextureData) -> None:
+        foreign = tex.tex_id not in self._textures
+        if tex.status == imgui.ImTextureStatus.want_create or (
+            tex.status == imgui.ImTextureStatus.want_updates and foreign
+        ):
+            if tex.status == imgui.ImTextureStatus.want_create:
+                assert tex.tex_id == 0
+            assert tex.format == imgui.ImTextureFormat.rgba32
+
+            wgpu_tex = self._device.create_texture(
+                label="Dear ImGui Texture",
+                size=(tex.width, tex.height, 1),
+                format=wgpu.TextureFormat.rgba8unorm,
+                usage=wgpu.TextureUsage.COPY_DST | wgpu.TextureUsage.TEXTURE_BINDING,
+            )
+            wgpu_tex_view = wgpu_tex.create_view()
+            tex_id = ctypes.c_int32(id(wgpu_tex_view)).value
+            tex.set_tex_id(tex_id)
+            self._textures[tex_id] = wgpu_tex
+            self._texture_views[tex_id] = wgpu_tex_view
+            full_upload = True
+        else:
+            full_upload = False
+
+        if tex.status in (
+            imgui.ImTextureStatus.want_create,
+            imgui.ImTextureStatus.want_updates,
+        ):
+            wgpu_tex = self._textures[tex.tex_id]
+            if full_upload:
+                upload_x = upload_y = 0
+                upload_w, upload_h = tex.width, tex.height
+            else:
+                upload_x = tex.update_rect.x
+                upload_y = tex.update_rect.y
+                upload_w, upload_h = tex.update_rect.w, tex.update_rect.h
+
+            full_data = tex.get_pixels_array()
+            offset = (upload_y * tex.width + upload_x) * tex.bytes_per_pixel
+            self._device.queue.write_texture(
+                {
+                    "texture": wgpu_tex,
+                    "mip_level": 0,
+                    "origin": (upload_x, upload_y, 0),
+                },
+                full_data[offset:],
+                {"offset": 0, "bytes_per_row": tex.width * tex.bytes_per_pixel},
+                (upload_w, upload_h, 1),
+            )
+            tex.set_status(imgui.ImTextureStatus.ok)
+
+        if tex.status == imgui.ImTextureStatus.want_destroy and tex.unused_frames > 0:
+            # Pop before invalidating the id (upstream pops key 0 and leaks).
+            self._textures.pop(tex.tex_id, None)
+            self._texture_views.pop(tex.tex_id, None)
+            tex.set_tex_id(0)
+            tex.set_status(imgui.ImTextureStatus.destroyed)
 
     def render(self, draw_data, render_pass) -> None:
         if not _upstream_needs_imgui_192_fix():
