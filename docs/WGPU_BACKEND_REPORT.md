@@ -67,11 +67,53 @@ Milestone feedback renders (wgpu vs forge side by side) live in `output/wgpu/`
 
 ## Follow-ups
 
-- The vendored imgui-bundle 1.92 workaround in `ui/window_wgpu.py`
-  (`cmd_lists_count`) should be upstreamed to wgpu-py; it self-disables once fixed.
+### Correctness / merging (do first)
+
 - `main@4aa187d` lost the local `state_guard.py` EGL patch in a pull and currently
   crashes the forge gallery on headless EGL (`ctx.screen` is None); the committed
-  fix is `512b637` on this branch.
+  fix is `512b637` on this branch — land it on `main`.
+- Cross-platform validation: run `make gpu-wgpu` + viewer smoke on macOS (Metal)
+  and Windows (DX12); this is the remaining gap behind the "mujoco.Renderer
+  replacement" claim.
+- Merge decision for the `wgpu-py` branch, after cross-platform validation; forge
+  stays the default backend.
+
+### Test coverage
+
+- Parameterize the portable subset of `test_static_viewer.py` for the wgpu window
+  stack (`test_ui_interaction.py` / `test_model_loading.py` stay forge-only).
+- Pin deformable-mesh + wireframe interaction as a regression test.
+
+### Performance (deferred until a profile justifies them)
+
+- Gate the export MRT pass on actual depth/segmentation/pick demand (mode-switch
+  semantics need care; Renderer-API users usually read depth anyway).
+- Async double-buffered readback for the MP4 recording path.
+- Shadow layer-draw consolidation (bounded: WebGPU has no layered rendering).
+
+Rejected with reasons: eliminating the viewer frame copy (breaks `read_frame`/
+recording — swapchain textures are not readable), instance-buffer dirty tracking
+(poses change every frame under simulation, so nothing is ever clean).
+
+### Upstream (wgpu-py)
+
+- Upstream the vendored imgui-bundle 1.92 fix in `ui/window_wgpu.py`
+  (`cmd_lists_count`); it self-disables once fixed.
+- Track `timestamp-query` support (API signature present, marked unused) — unblock
+  per-pass/GPU timing once wired.
+- Track present-mode/vsync control and a public surface-release API (we call the
+  private `_release()` to avoid an X11 segfault at GC, pygfx#642).
+
+### Optional polish
+
+- `id_msaa`: shader-side resolve of a 4x uint mask would remove the 1-px picking
+  difference at MSAA edges; modest payoff for the complexity.
+- Shader hot reload for the wgpu backend (forge-only developer convenience).
+- GPU-side mip generation, only if float/HDR texture inputs ever appear (CPU box
+  filter covers u8 today).
+
+### Environment note
+
 - The forge-path gallery segmentation agreement (0.99702) misses the 0.999 gate on
   this machine; identical value reproduced on `main`, so it is a pre-existing
   driver/MSAA environment artifact, not a branch regression.
