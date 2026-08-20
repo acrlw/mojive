@@ -334,8 +334,19 @@ class WgpuBackend:
             gizmo=True,
             msaa_samples=self.target.samples,
             id_msaa=False,
-            renderer=f"wgpu-py {wgpu.__version__} on {info.vendor} {info.device}",
-            notes=("GPU timer queries unavailable; CPU frame timing only",),
+            gl_version=f"WebGPU {info.get('backend_type', '')}".rstrip(),
+            renderer=f"wgpu-py {wgpu.__version__} on {info.device}",
+            notes=(
+                "GPU timer queries unavailable; CPU frame timing only",
+                # forge toggles GL multisample rasterization per pass; WebGPU
+                # bakes the sample count into pipeline state, so the flag is
+                # accepted and stored but never retargets pipelines.
+                "MSAA sample count is fixed at construction; the MSAA flag has no draw-time effect",
+                # id_msaa=False: the export MRT pass re-rasterizes the scene
+                # single-sampled instead of resolving the MSAA id/depth targets.
+                "Object ID/depth export is single-sampled; WebGPU cannot resolve "
+                "multisampled integer or depth attachments",
+            ),
         )
 
     # -- scene contract -------------------------------------------------------

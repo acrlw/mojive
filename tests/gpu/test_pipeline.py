@@ -159,6 +159,32 @@ def _require(backend_name: str, *names: str) -> None:
         pytest.skip(f"required render passes unavailable: {missing}")
 
 
+def test_msaa_samples_stay_fixed_at_construction(backend_name, request):
+    """MSAA sample counts are construction-time state in both backends.
+
+    Forge clamps the RenderTarget sample count once and only toggles per-pass
+    GL multisample rasterization via the flag; the wgpu backend bakes the count
+    into its pipelines.  In both, the flag is accepted and stored, and the
+    targets are never rebuilt.
+    """
+    backend = _make_backend(backend_name, request)
+    try:
+        assert RenderFlag.MSAA in backend.caps.render_flags
+        assert backend.get_flag(RenderFlag.MSAA)
+        assert backend.target.samples == 4
+        assert backend.caps.msaa_samples == 4
+
+        assert backend.set_flag(RenderFlag.MSAA, False)
+        assert not backend.get_flag(RenderFlag.MSAA)
+        assert backend.target.samples == 4
+        assert backend.caps.msaa_samples == 4
+
+        assert backend.set_flag(RenderFlag.MSAA, True)
+        assert backend.get_flag(RenderFlag.MSAA)
+    finally:
+        backend.release()
+
+
 def test_mujoco_visuals_reach_the_gpu_pipeline(backend_name, request):
     adapter = make_adapter("mujoco", resolve("mujoco_visuals"))
     backend = _make_backend(backend_name, request)

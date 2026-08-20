@@ -176,8 +176,8 @@ FORGE_VIEWER_BACKEND=wgpu make viewer
 All render flags, debug views, shadows, planar reflections, skybox/IBL, tendons, debug draw,
 and the native gizmo work on both backends. What remains GL-only is infrastructure, not
 features: GL state guarding, native GL entry points, GLSL hot reload, and GPU timer queries
-(wgpu reports CPU frame timing only). Current gaps are reported through
-`renderer.capabilities().notes`.
+(wgpu reports CPU frame timing only). Current gaps are reported through the backend
+capability notes (`backend.caps.notes`).
 
 ## Visual acceptance
 

@@ -50,6 +50,8 @@ artifacts = [
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+# spike/ holds archived experiments (commit 7523ab9), not maintained code.
+extend-exclude = ["spike"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]

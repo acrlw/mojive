@@ -22,6 +22,14 @@ gizmo
 The ID pass shares scene visibility with opaque rendering and supplies picking, segmentation,
 and selection outlines. Debug and gizmo passes consume generic commands and UI state.
 
+The wgpu backend (`FORGE_VIEWER_BACKEND=wgpu`) runs the same pass order with WebGPU
+constructions for the GL-only pieces: picking/segmentation/depth readback comes from a
+single-sampled export MRT pass that re-rasterizes the scene instead of an MSAA blit resolve
+(WebGPU cannot resolve integer or depth MSAA), wireframe carries barycentrics in a lazily
+built vertex attribute instead of a geometry shader, and reflection clipping is a fragment
+discard on a plane equation instead of `gl_ClipDistance`. MSAA sample counts are fixed at
+construction in both backends.
+
 ## Color pipeline
 
 Texture sampling uses sRGB formats. Lighting, reflection, fog, haze, emission, and selection
