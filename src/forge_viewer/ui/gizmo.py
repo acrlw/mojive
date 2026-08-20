@@ -57,6 +57,7 @@ from ..gizmo import (
 from ..render.debugdraw import Occlusion
 from ..types import CameraView
 from .camera import ndc_from_viewport, unproject
+from .draw2d import Draw2D
 from .panels.inspector import gizmo_refusal_reason
 
 if TYPE_CHECKING:
@@ -329,35 +330,31 @@ class ObjectGizmo:
         self._drawn = bool(backend.set_gizmo(frame))
         return self._drawn
 
-    def draw_overlay(self, cam, rect, *, style_scale: float = 1.0) -> None:
+    def draw_overlay(self, cam, rect, overlay: Draw2D, *, style_scale: float = 1.0) -> None:
         if not self._visible:
             return
-        from imgui_bundle import imgui
-
-        dl = imgui.get_window_draw_list()
         if self._keyboard and not self._snapping:
-            self._draw_axis_constraint(imgui, dl, cam, rect, style_scale)
+            self._draw_axis_constraint(overlay, cam, rect, style_scale)
         if self._style is GizmoStyle.FLAT:
-            self._draw_flat(imgui, dl, cam, rect, style_scale)
+            self._draw_flat(overlay, cam, rect, style_scale)
             self._drawn = True
         if self._using and self._snapping and self._active in AXIS_HANDLES:
-            self._draw_translation_snap_ruler(imgui, dl, cam, rect, style_scale)
+            self._draw_translation_snap_ruler(overlay, cam, rect, style_scale)
         if self._using and self._snapping and self._active in ROTATE_HANDLES:
-            self._draw_rotation_snap_ticks(imgui, dl, cam, rect, style_scale)
+            self._draw_rotation_snap_ticks(overlay, cam, rect, style_scale)
         if self._using and self._active not in ROTATE_HANDLES and not self._guide_gpu:
-            self._draw_translation_guide(imgui, dl, cam, rect, style_scale)
+            self._draw_translation_guide(overlay, cam, rect, style_scale)
         if self._using and self._active in ROTATE_HANDLES:
-            self._draw_rotation_guide(imgui, dl, cam, rect, style_scale)
+            self._draw_rotation_guide(overlay, cam, rect, style_scale)
         if self._using and self._label:
-            self._draw_value_label(imgui, dl, cam, rect, style_scale)
+            self._draw_value_label(overlay, cam, rect, style_scale)
 
-    def _draw_flat(self, imgui, dl, cam, rect, style_scale: float) -> None:
+    def _draw_flat(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         frame = self._frame
         origin = np.asarray(frame.position, np.float64)
         rotation = np.asarray(frame.rotation, np.float64)
         scale = world_scale(cam, origin, rect[3], SIZE_PT * style_scale)
         visible = display_handles(frame)
-        u32 = imgui.color_convert_float4_to_u32
 
         # The draw list paints in submission order with no depth buffer, so
         # each handle group draws far-to-near (painter's order) to put the
@@ -377,11 +374,7 @@ class ObjectGizmo:
             if np.any(screen[:, 2] <= 0.0):
                 continue
             opacity = PLANE_ACTIVE_ALPHA if frame.active is handle else PLANE_ALPHA * alpha
-            color = self._flat_color(handle, axis, opacity)
-            dl.add_convex_poly_filled(
-                [imgui.ImVec2(float(p[0]), float(p[1])) for p in screen],
-                u32(imgui.ImVec4(*color)),
-            )
+            overlay.convex_fill(screen[:, :2], self._flat_color(handle, axis, opacity))
 
         axes = [axis for axis, handle in enumerate(AXIS_HANDLES) if handle in visible]
         for k in paint_order(cam, origin, [rotation[:, axis] for axis in axes]):
@@ -409,29 +402,20 @@ class ObjectGizmo:
             )
             points = _flat_arrow(start, screen[1, :2], style_scale)
             if points:
-                dl.add_concave_poly_filled(
-                    [imgui.ImVec2(float(p[0]), float(p[1])) for p in points],
-                    u32(imgui.ImVec4(*self._flat_color(handle, axis, alpha))),
-                )
+                overlay.concave_fill(points, self._flat_color(handle, axis, alpha))
 
         if GizmoHandle.SCREEN in visible:
             center = project(cam, (origin,), rect)[0]
             if center[2] > 0.0:
                 color = HOVER_COLOR if self._hot(GizmoHandle.SCREEN) else CENTER_COLOR
-                position = imgui.ImVec2(float(center[0]), float(center[1]))
                 radius = CENTER_RADIUS * SIZE_PT * style_scale
-                dl.add_circle_filled(
-                    position,
+                overlay.circle_filled(
+                    center[:2],
                     radius + CONTRAST_EDGE_PT * style_scale,
-                    u32(imgui.ImVec4(*(float(x) for x in CONTRAST_EDGE_COLOR))),
-                    24,
+                    CONTRAST_EDGE_COLOR,
+                    segments=24,
                 )
-                dl.add_circle_filled(
-                    position,
-                    radius,
-                    u32(imgui.ImVec4(*(float(x) for x in color))),
-                    24,
-                )
+                overlay.circle_filled(center[:2], radius, color, segments=24)
 
         for axis, handle in enumerate(ROTATE_AXIS_HANDLES):
             if handle not in visible:
@@ -444,32 +428,31 @@ class ObjectGizmo:
             screen = project(cam, ring, rect)
             if np.any(screen[:, 2] <= 0.0):
                 continue
-            dl.add_polyline(
-                [imgui.ImVec2(float(p[0]), float(p[1])) for p in screen],
-                u32(imgui.ImVec4(*self._flat_color(handle, axis, alpha))),
+            overlay.polyline(
+                screen[:, :2],
+                self._flat_color(handle, axis, alpha),
                 RING_WIDTH_PT * style_scale,
-                (imgui.ImDrawFlags_.closed if full else imgui.ImDrawFlags_.none).value,
+                closed=full,
             )
 
         if GizmoHandle.ROTATE_SCREEN in visible:
             center = project(cam, (origin,), rect)[0]
             if center[2] > 0.0:
                 color = HOVER_COLOR if self._hot(GizmoHandle.ROTATE_SCREEN) else CENTER_COLOR
-                position = imgui.ImVec2(float(center[0]), float(center[1]))
                 radius = SCREEN_RING_RADIUS * SIZE_PT * style_scale
-                dl.add_circle(
-                    position,
+                overlay.circle(
+                    center[:2],
                     radius,
-                    u32(imgui.ImVec4(*(float(x) for x in CONTRAST_EDGE_COLOR))),
-                    RING_SEGMENTS,
+                    CONTRAST_EDGE_COLOR,
                     (SCREEN_RING_WIDTH_PT + 2.0 * CONTRAST_EDGE_PT) * style_scale,
+                    segments=RING_SEGMENTS,
                 )
-                dl.add_circle(
-                    position,
+                overlay.circle(
+                    center[:2],
                     radius,
-                    u32(imgui.ImVec4(*(float(x) for x in color))),
-                    RING_SEGMENTS,
+                    color,
                     SCREEN_RING_WIDTH_PT * style_scale,
+                    segments=RING_SEGMENTS,
                 )
 
     def _flat_color(self, handle: GizmoHandle, axis: int, alpha: float = 1.0):
@@ -479,7 +462,7 @@ class ObjectGizmo:
     def _hot(self, handle: GizmoHandle) -> bool:
         return self._active is handle or (self._interactive and self._hovered is handle)
 
-    def _draw_axis_constraint(self, imgui, dl, cam, rect, style_scale: float) -> None:
+    def _draw_axis_constraint(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         axis = _axis_of(self._active)
         if axis < 0:
             return
@@ -491,16 +474,14 @@ class ObjectGizmo:
         if segment is None:
             return
         color = AXIS_COLORS[axis]
-        dl.add_line(
-            imgui.ImVec2(*segment[0]),
-            imgui.ImVec2(*segment[1]),
-            imgui.color_convert_float4_to_u32(
-                imgui.ImVec4(float(color[0]), float(color[1]), float(color[2]), 0.62)
-            ),
+        overlay.line(
+            segment[0],
+            segment[1],
+            (float(color[0]), float(color[1]), float(color[2]), 0.62),
             1.5 * style_scale,
         )
 
-    def _draw_translation_snap_ruler(self, imgui, dl, cam, rect, style_scale: float) -> None:
+    def _draw_translation_snap_ruler(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         axis_index = _axis_of(self._active)
         if axis_index < 0:
             return
@@ -528,7 +509,6 @@ class ObjectGizmo:
         if bounds is None:
             return
 
-        u32 = imgui.color_convert_float4_to_u32
         axis_color = AXIS_COLORS[axis_index]
         step = float(self.translation_snap_m)
         current_distance = float(np.dot(self._frame.position - self._start_pos, axis))
@@ -579,30 +559,16 @@ class ObjectGizmo:
         )
 
         def color(value, alpha: float):
-            return u32(
-                imgui.ImVec4(
-                    float(value[0]), float(value[1]), float(value[2]), float(value[3]) * alpha
-                )
-            )
+            return (float(value[0]), float(value[1]), float(value[2]), float(value[3]) * alpha)
 
         for start, end in axis_segments:
-            dl.add_line(
-                imgui.ImVec2(*start),
-                imgui.ImVec2(*end),
-                color((*axis_color, 1.0), 0.92),
-                1.2 * style_scale,
-            )
+            overlay.line(start, end, color((*axis_color, 1.0), 0.92), 1.2 * style_scale)
         for a, b, alpha, is_active in ticks:
             tick_color = color(HOVER_COLOR if is_active else (*axis_color, 1.0), alpha)
             for start, end in _split_segment_around_point(a, b, current[:2], mask_radius):
-                dl.add_line(
-                    imgui.ImVec2(*start),
-                    imgui.ImVec2(*end),
-                    tick_color,
-                    (2.2 if is_active else 1.2) * style_scale,
-                )
+                overlay.line(start, end, tick_color, (2.2 if is_active else 1.2) * style_scale)
 
-    def _draw_rotation_snap_ticks(self, imgui, dl, cam, rect, style_scale: float) -> None:
+    def _draw_rotation_snap_ticks(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         ring_radius = (
             SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
         )
@@ -611,9 +577,8 @@ class ObjectGizmo:
             return
         tangent = np.cross(self._axis, self._rotation_start_vec)
         step = float(self.rotation_snap_deg)
-        u32 = imgui.color_convert_float4_to_u32
-        edge = u32(imgui.ImVec4(*CONTRAST_EDGE_COLOR))
-        core = u32(imgui.ImVec4(*GUIDE_CORE_COLOR))
+        edge = CONTRAST_EDGE_COLOR
+        core = GUIDE_CORE_COLOR
 
         def radial(angle: float) -> np.ndarray:
             cosine = np.cos(angle)
@@ -693,50 +658,36 @@ class ObjectGizmo:
                 points[1, :2] + normal * (15.0 * style_scale),
             )
 
-        closed = imgui.ImDrawFlags_.closed.value
         if trace is not None:
-            ring_points = [imgui.ImVec2(*point) for point in trace]
-            dl.add_polyline(ring_points, edge, 2.5 * style_scale, closed)
+            overlay.polyline(trace, edge, 2.5 * style_scale, closed=True)
         for inner, outer in ticks:
-            dl.add_line(
-                imgui.ImVec2(*inner),
-                imgui.ImVec2(*outer),
-                core,
-                1.1 * style_scale,
-            )
+            overlay.line(inner, outer, core, 1.1 * style_scale)
         if active_tick is not None:
-            active_color = u32(imgui.ImVec4(*HOVER_COLOR))
-            dl.add_line(
-                imgui.ImVec2(*active_tick[0]),
-                imgui.ImVec2(*active_tick[1]),
-                active_color,
-                2.2 * style_scale,
-            )
+            overlay.line(active_tick[0], active_tick[1], HOVER_COLOR, 2.2 * style_scale)
         if trace is not None:
-            dl.add_polyline(ring_points, core, 1.1 * style_scale, closed)
+            overlay.polyline(trace, core, 1.1 * style_scale, closed=True)
 
-    def _draw_translation_guide(self, imgui, dl, cam, rect, style_scale: float) -> None:
+    def _draw_translation_guide(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         screen = project(cam, (self._start_pos, self._frame.position), rect)
         if np.any(screen[:, 2] <= 0.0):
             return
         start, end = screen[:, :2]
         delta = end - start
         distance = float(np.linalg.norm(delta))
-        edge = imgui.color_convert_float4_to_u32(imgui.ImVec4(*CONTRAST_EDGE_COLOR))
-        core = imgui.color_convert_float4_to_u32(imgui.ImVec4(*GUIDE_CORE_COLOR))
+        edge = CONTRAST_EDGE_COLOR
+        core = GUIDE_CORE_COLOR
         radius = 6.0 * style_scale
         core_width = 2.0 * style_scale
         edge_width = core_width + 2.0 * CONTRAST_EDGE_PT * style_scale
         if distance > 2.0 * radius:
             direction = delta / distance
-            a = imgui.ImVec2(*(start + direction * radius))
-            b = imgui.ImVec2(*(end - direction * radius))
-            dl.add_line(a, b, edge, edge_width)
-            dl.add_line(a, b, core, core_width)
+            a = start + direction * radius
+            b = end - direction * radius
+            overlay.line(a, b, edge, edge_width)
+            overlay.line(a, b, core, core_width)
         for point in (start, end):
-            center = imgui.ImVec2(*point)
-            dl.add_circle(center, radius, edge, 24, edge_width)
-            dl.add_circle(center, radius, core, 24, core_width)
+            overlay.circle(point, radius, edge, edge_width, segments=24)
+            overlay.circle(point, radius, core, core_width, segments=24)
 
     def _publish_translation_guide(self, backend: Any, ui_scale: float) -> None:
         dd = getattr(backend, "debug", None)
@@ -762,7 +713,7 @@ class ObjectGizmo:
             dd.layer(DRAG_LAYER, Occlusion.ALWAYS).clear()
         self._guide_gpu = False
 
-    def _draw_rotation_guide(self, imgui, dl, cam, rect, style_scale: float) -> None:
+    def _draw_rotation_guide(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         sweep = _rotation_sweep(self._rotation_angle)
         tangent = np.cross(self._axis, self._rotation_start_vec)
         ring_radius = (
@@ -787,10 +738,8 @@ class ObjectGizmo:
             return
         center = center[:2]
         arc = arc[:, :2]
-        sector = [imgui.ImVec2(*center), *(imgui.ImVec2(*p) for p in arc)]
-        arc_points = [imgui.ImVec2(*p) for p in arc]
-        u32 = imgui.color_convert_float4_to_u32
-        border = u32(imgui.ImVec4(1.0, 0.5, 0.06, 1.0))
+        sector = [center, *arc]
+        border = (1.0, 0.5, 0.06, 1.0)
         turns = int(abs(round(float(np.degrees(self._rotation_angle)), 1)) // 360.0)
         if turns:
             full = arc_screen(
@@ -802,33 +751,23 @@ class ObjectGizmo:
                 )
             )
             if np.all(full[:, 2] > 0.0):
-                dl.add_polyline(
-                    [imgui.ImVec2(*p) for p in full[:, :2]],
-                    u32(imgui.ImVec4(1.0, 0.5, 0.06, 0.42)),
+                overlay.polyline(
+                    full[:, :2],
+                    (1.0, 0.5, 0.06, 0.42),
                     1.5 * style_scale,
-                    imgui.ImDrawFlags_.closed.value,
+                    closed=True,
                 )
 
         fill_alpha = _rotation_fill_alpha(sweep)
         if fill_alpha > 0.0:
-            dl.add_convex_poly_filled(sector, u32(imgui.ImVec4(1.0, 0.5, 0.06, fill_alpha)))
+            overlay.convex_fill(sector, (1.0, 0.5, 0.06, fill_alpha))
         if abs(sweep) > 1e-6:
-            dl.add_polyline(
-                arc_points,
-                border,
-                2.0 * style_scale,
-                imgui.ImDrawFlags_.none.value,
-            )
+            overlay.polyline(arc, border, 2.0 * style_scale)
         endpoints = (arc[0],) if abs(sweep) < 1e-6 else (arc[0], arc[-1])
         for endpoint in endpoints:
-            dl.add_line(
-                imgui.ImVec2(*center),
-                imgui.ImVec2(*endpoint),
-                border,
-                2.0 * style_scale,
-            )
+            overlay.line(center, endpoint, border, 2.0 * style_scale)
 
-    def _draw_value_label(self, imgui, dl, cam, rect, style_scale: float) -> None:
+    def _draw_value_label(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         pad = 6.0 * style_scale
         gap = 14.0 * style_scale
         anchor_world = self._frame.position
@@ -850,22 +789,17 @@ class ObjectGizmo:
         anchor = project(cam, (anchor_world,), rect)[0]
         if anchor[2] <= 0.0:
             return
-        size = imgui.calc_text_size(self._label)
-        width, height = float(size.x) + 2.0 * pad, float(size.y) + 2.0 * pad
+        width_f, height_f = overlay.text_size(self._label)
+        width, height = width_f + 2.0 * pad, height_f + 2.0 * pad
         x = float(np.clip(anchor[0] + gap, rect[0] + 4.0, rect[0] + rect[2] - width - 4.0))
         y = float(np.clip(anchor[1] + gap, rect[1] + 4.0, rect[1] + rect[3] - height - 4.0))
-        u32 = imgui.color_convert_float4_to_u32
-        dl.add_rect_filled(
-            imgui.ImVec2(x, y),
-            imgui.ImVec2(x + width, y + height),
-            u32(imgui.ImVec4(0.08, 0.09, 0.11, 0.92)),
-            4.0 * style_scale,
+        overlay.rect_filled(
+            (x, y),
+            (x + width, y + height),
+            (0.08, 0.09, 0.11, 0.92),
+            rounding=4.0 * style_scale,
         )
-        dl.add_text(
-            imgui.ImVec2(x + pad, y + pad),
-            u32(imgui.ImVec4(0.96, 0.96, 0.97, 1.0)),
-            self._label,
-        )
+        overlay.text((x + pad, y + pad), (0.96, 0.96, 0.97, 1.0), self._label)
 
     def _begin(self, session, cam, rect, cursor) -> bool:
         return self._begin_handle(session, cam, rect, cursor, self._hovered)

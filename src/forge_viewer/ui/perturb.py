@@ -25,6 +25,7 @@ from ..gizmo import (
 from ..log import get_logger
 from ..types import CameraView
 from .camera import camera_basis
+from .draw2d import Draw2D
 
 log = get_logger("perturb")
 
@@ -462,27 +463,24 @@ def draw_fallback(
     rect: tuple[float, float, float, float],
     cursor: tuple[float, float],
     center,
+    overlay: Draw2D,
     style_scale: float = 1.0,
 ) -> None:
-    from imgui_bundle import imgui
-
-    dl = imgui.get_window_draw_list()
-    border = imgui.color_convert_float4_to_u32(imgui.ImVec4(*OUTLINE_BORDER_RGBA))
-    color = imgui.color_convert_float4_to_u32(imgui.ImVec4(*OUTLINE_RGBA))
     a, _b = fallback_segments(cam, st, rect, center, style_scale)
     if len(a) and np.all(a[:, 2] > 0.0):
-        points = [imgui.ImVec2(*p[:2]) for p in a]
-        closed = imgui.ImDrawFlags_.closed.value
-        dl.add_polyline(points, border, OUTLINE_BORDER_WIDTH_PT * style_scale, closed)
-        dl.add_polyline(points, color, OUTLINE_WIDTH_PT * style_scale, closed)
-    dl.add_circle(
-        imgui.ImVec2(*cursor),
+        points = a[:, :2]
+        overlay.polyline(
+            points, OUTLINE_BORDER_RGBA, OUTLINE_BORDER_WIDTH_PT * style_scale, closed=True
+        )
+        overlay.polyline(points, OUTLINE_RGBA, OUTLINE_WIDTH_PT * style_scale, closed=True)
+    overlay.circle(
+        cursor,
         10.0 * style_scale,
-        border,
-        24,
+        OUTLINE_BORDER_RGBA,
         (1.5 + 2.0 * CONTRAST_EDGE_PT) * style_scale,
+        segments=24,
     )
-    dl.add_circle(imgui.ImVec2(*cursor), 10.0 * style_scale, color, 24, 1.5 * style_scale)
+    overlay.circle(cursor, 10.0 * style_scale, OUTLINE_RGBA, 1.5 * style_scale, segments=24)
 
 
 def current_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarray]:

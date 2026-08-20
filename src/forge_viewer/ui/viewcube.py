@@ -8,6 +8,7 @@ import numpy as np
 
 from ..types import CameraView
 from .camera import PITCH_LIMIT, OrbitCamera, camera_basis
+from .draw2d import Draw2D
 from .theme import THEME
 
 RADIUS_PT = 34.0
@@ -140,21 +141,16 @@ class ViewCube:
         yaw, pitch = yaw_pitch_for(ball.axis, ball.sign, camera.yaw)
         camera.look_from(yaw, pitch, sink)
 
-    def draw(self, style_scale: float = 1.0) -> None:
-        from imgui_bundle import imgui
-
-        dl = imgui.get_window_draw_list()
+    def draw(self, overlay: Draw2D, style_scale: float = 1.0) -> None:
         if not self._balls:
             return
-        center = imgui.ImVec2(*self._center)
-        u32 = imgui.color_convert_float4_to_u32
 
         if self._hover is not None:
-            dl.add_circle_filled(
-                center,
+            overlay.circle_filled(
+                self._center,
                 (RADIUS_PT + BALL_PT + 2.0) * style_scale,
-                u32(imgui.ImVec4(0.0, 0.0, 0.0, 0.28)),
-                32,
+                (0.0, 0.0, 0.0, 0.28),
+                segments=32,
             )
 
         for b in self._balls:
@@ -162,30 +158,29 @@ class ViewCube:
                 continue
             hovered = b is self._hover
             rgb = _axis_rgb(b.axis)
-            pos = imgui.ImVec2(*b.screen)
 
             face = (
                 (_lift(rgb) if hovered else rgb) if b.positive else (rgb if hovered else _dark(rgb))
             )
-            color = u32(imgui.ImVec4(*face, b.alpha))
+            color = (*face, b.alpha)
             if b.positive:
                 outline = _lollipop_outline(self._center, b.screen, b.radius, LINE_PT * style_scale)
-                _draw_lollipop(imgui, dl, outline, color)
+                overlay.fringed_concave_fill(outline, color)
             else:
-                dl.add_circle_filled(pos, b.radius, color, 24)
-
-                dl.add_circle(
-                    pos,
+                overlay.circle_filled(b.screen, b.radius, color, segments=24)
+                overlay.circle(
+                    b.screen,
                     b.radius,
-                    u32(imgui.ImVec4(*rgb, b.alpha)),
-                    24,
+                    (*rgb, b.alpha),
                     1.6 * style_scale,
+                    segments=24,
                 )
 
             label_alpha = _label_alpha(b, hovered)
             if label_alpha > 0.0:
-                white = u32(imgui.ImVec4(*LABEL_FILL[:3], label_alpha))
-                _centered_label(imgui, dl, b.label, pos, b.radius, white)
+                overlay.centered_label(
+                    b.label, b.screen, (*LABEL_FILL[:3], label_alpha), b.radius * 1.5
+                )
 
 
 def _back_alpha(depth: float) -> float:
@@ -218,42 +213,6 @@ def _lollipop_outline(
     return [tuple(point) for point in points]
 
 
-def _draw_lollipop(imgui, dl, outline: list[tuple[float, float]], color: int) -> None:
-    points = [imgui.ImVec2(*point) for point in outline]
-    aa_flag = imgui.ImDrawListFlags_.anti_aliased_fill.value
-    flags = dl.flags
-    dl.flags = flags & ~aa_flag
-    dl.add_concave_poly_filled(points, color)
-    dl.flags = flags
-    if not (flags & aa_flag):
-        return
-
-    vertices = np.asarray(outline, np.float64)
-    edges = np.roll(vertices, -1, axis=0) - vertices
-    lengths = np.linalg.norm(edges, axis=1)
-    normals = np.column_stack((edges[:, 1], -edges[:, 0])) / lengths[:, None]
-    miters = (np.roll(normals, 1, axis=0) + normals) * 0.5
-    scale = np.minimum(1.0 / np.maximum(np.sum(miters * miters, axis=1), 1e-4), 100.0)
-    outer = vertices + miters * scale[:, None]
-
-    count = len(vertices)
-    base = dl._vtx_current_idx
-    transparent = color & 0x00FFFFFF
-    uv = imgui.get_io().fonts.tex_uv_white_pixel
-    dl.prim_reserve(count * 6, count * 2)
-    for inner, fringe in zip(vertices, outer, strict=True):
-        dl.prim_write_vtx(imgui.ImVec2(*inner), uv, color)
-        dl.prim_write_vtx(imgui.ImVec2(*fringe), uv, transparent)
-    for i in range(count):
-        j = (i + 1) % count
-        dl.prim_write_idx(base + i * 2)
-        dl.prim_write_idx(base + j * 2)
-        dl.prim_write_idx(base + j * 2 + 1)
-        dl.prim_write_idx(base + i * 2)
-        dl.prim_write_idx(base + j * 2 + 1)
-        dl.prim_write_idx(base + i * 2 + 1)
-
-
 def _label_alpha(ball: Ball, hovered: bool) -> float:
     if ball.positive or hovered:
         return ball.alpha
@@ -268,56 +227,6 @@ def _dark(rgb: tuple[float, float, float]) -> tuple[float, float, float]:
 
 def _lift(rgb: tuple[float, float, float]) -> tuple[float, float, float]:
     return tuple(min(1.0, c * HOVER_GAIN + HOVER_LIFT) for c in rgb)  # type: ignore[return-value]
-
-
-def _ink_box(font, size: float, text: str):
-    baked = font.get_font_baked(size)
-    pen = 0.0
-    x0 = y0 = 1e9
-    x1 = y1 = -1e9
-    for ch in text:
-        g = baked.find_glyph(ord(ch))
-        if g is not None and g.x1 > g.x0 and g.y1 > g.y0:
-            x0 = min(x0, pen + g.x0)
-            x1 = max(x1, pen + g.x1)
-            y0 = min(y0, g.y0)
-            y1 = max(y1, g.y1)
-            pen += g.advance_x
-        elif g is not None:
-            pen += g.advance_x
-    return None if x1 < x0 else (x0, y0, x1, y1)
-
-
-def _centered_label(imgui, dl, text: str, pos, radius: float, color: int) -> None:
-    font = imgui.get_font()
-    size = imgui.get_font_size()
-    box = _ink_box(font, size, text)
-    if box is None:
-        return
-    limit = radius * 1.5
-    width = box[2] - box[0]
-    if width > limit > 0.0:
-        size *= limit / width
-        box = _ink_box(font, size, text) or box
-
-    pen_x = round(pos.x - (box[0] + box[2]) * 0.5)
-    pen_y = round(pos.y - (box[1] + box[3]) * 0.5)
-    baked = font.get_font_baked(size)
-    tex = imgui.get_io().fonts.tex_data.get_tex_ref()
-    for ch in text:
-        g = baked.find_glyph(ord(ch))
-        if g is None:
-            continue
-        if g.x1 > g.x0 and g.y1 > g.y0:
-            dl.add_image(
-                tex,
-                imgui.ImVec2(pen_x + g.x0, pen_y + g.y0),
-                imgui.ImVec2(pen_x + g.x1, pen_y + g.y1),
-                imgui.ImVec2(g.u0, g.v0),
-                imgui.ImVec2(g.u1, g.v1),
-                color,
-            )
-        pen_x += g.advance_x
 
 
 def _axis_rgb(axis: int) -> tuple[float, float, float]:

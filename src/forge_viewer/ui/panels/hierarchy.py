@@ -8,6 +8,7 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, NodeKind, SceneNode
+from ..draw2d import ImguiDraw2D
 from . import Panel, PanelContext
 
 
@@ -124,15 +125,15 @@ class HierarchyPanel(Panel):
         pressed = imgui.invisible_button(f"##vis{node.node_id}", imgui.ImVec2(size, size))
         hovered = imgui.is_item_hovered()
         lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        center = imgui.ImVec2((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5)
+        center = ((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5)
         radius = 4.0 * ctx.style_scale
         base = ctx.theme.primary_bright if hovered else ctx.theme.primary
         alpha = 1.0 if node.visible else 0.45
-        color = imgui.color_convert_float4_to_u32(imgui.ImVec4(*base[:3], alpha))
-        dl = imgui.get_window_draw_list()
-        dl.add_circle(center, radius, color, 16, 1.4 * ctx.style_scale)
+        color = (*base[:3], alpha)
+        draw = ImguiDraw2D()
+        draw.circle(center, radius, color, 1.4 * ctx.style_scale, segments=16)
         if node.visible:
-            dl.add_circle_filled(center, radius * 0.42, color, 12)
+            draw.circle_filled(center, radius * 0.42, color, segments=12)
         if pressed:
             if node.kind is NodeKind.LIGHT and node.light_index >= 0:
                 source = ctx.session.source

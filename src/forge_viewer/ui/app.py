@@ -17,6 +17,7 @@ from ..render.backend import FrameMode, LabelMode, RenderFlag
 from ..types import ViewportImage
 from . import gestures as gs
 from .camera import CameraOut, OrbitCamera, ndc_from_viewport, unproject
+from .draw2d import ImguiDraw2D
 from .gizmo import ObjectGizmo
 from .panels import PanelContext, PanelSet
 from .perturb import PerturbController, draw_fallback
@@ -605,6 +606,7 @@ class ViewerApp:
         x, y, w, h = self._viewport_rect
         imgui.push_clip_rect(imgui.ImVec2(x, y), imgui.ImVec2(x + w, y + h), True)
         try:
+            overlay = ImguiDraw2D()
             st = self.session.perturb
             if st.active and not self.backend.caps.debug_draw:
                 node = self.session.node(st.node_id)
@@ -615,20 +617,22 @@ class ViewerApp:
                     self._viewport_rect,
                     (imgui.get_io().mouse_pos.x, imgui.get_io().mouse_pos.y),
                     center,
+                    overlay,
                     self.window.style_scale,
                 )
             self.gizmo.draw_overlay(
                 self._camera_view(),
                 self._viewport_rect,
+                overlay,
                 style_scale=self.window.style_scale,
             )
-            self.view_cube.draw(self.window.style_scale)
-            self._draw_model_drop_overlay()
+            self.view_cube.draw(overlay, self.window.style_scale)
+            self._draw_model_drop_overlay(overlay)
         finally:
             imgui.pop_clip_rect()
         imgui.end()
 
-    def _draw_model_drop_overlay(self) -> None:
+    def _draw_model_drop_overlay(self, overlay: ImguiDraw2D) -> None:
         source = self.session.source
         empty = source is not None and source.instance_count == 0
         notice = self._model_drop_notice if time.monotonic() < self._model_drop_notice_until else ""
@@ -641,39 +645,36 @@ class ViewerApp:
             else notice or "Drop an MJCF or URDF model here\nFile > Open Model..."
         )
         lines = message.splitlines()
-        sizes = [imgui.calc_text_size(line) for line in lines]
+        sizes = [overlay.text_size(line) for line in lines]
         scale = self.window.style_scale
         pad_x, pad_y = 18.0 * scale, 12.0 * scale
-        width = max(float(size.x) for size in sizes) + 2.0 * pad_x
-        height = sum(float(size.y) for size in sizes) + 2.0 * pad_y + (len(lines) - 1) * 3.0 * scale
+        width = max(size[0] for size in sizes) + 2.0 * pad_x
+        height = sum(size[1] for size in sizes) + 2.0 * pad_y + (len(lines) - 1) * 3.0 * scale
         x, y, w, h = self._viewport_rect
         left = x + (w - width) * 0.5
         top = y + (h - height) * 0.5
-        dl = imgui.get_window_draw_list()
-        color = imgui.color_convert_float4_to_u32
         if dragging:
-            dl.add_rect(
-                imgui.ImVec2(x + 3.0 * scale, y + 3.0 * scale),
-                imgui.ImVec2(x + w - 3.0 * scale, y + h - 3.0 * scale),
-                color(imgui.ImVec4(0.95, 0.68, 0.24, 0.95)),
-                8.0 * scale,
+            overlay.rect(
+                (x + 3.0 * scale, y + 3.0 * scale),
+                (x + w - 3.0 * scale, y + h - 3.0 * scale),
+                (0.95, 0.68, 0.24, 0.95),
                 2.0 * scale,
-                0,
+                rounding=8.0 * scale,
             )
-        dl.add_rect_filled(
-            imgui.ImVec2(left, top),
-            imgui.ImVec2(left + width, top + height),
-            color(imgui.ImVec4(0.08, 0.09, 0.11, 0.88)),
-            7.0 * scale,
+        overlay.rect_filled(
+            (left, top),
+            (left + width, top + height),
+            (0.08, 0.09, 0.11, 0.88),
+            rounding=7.0 * scale,
         )
         cursor_y = top + pad_y
         for line, size in zip(lines, sizes, strict=True):
-            dl.add_text(
-                imgui.ImVec2(left + (width - float(size.x)) * 0.5, cursor_y),
-                color(imgui.ImVec4(0.93, 0.94, 0.95, 1.0)),
+            overlay.text(
+                (left + (width - size[0]) * 0.5, cursor_y),
+                (0.93, 0.94, 0.95, 1.0),
                 line,
             )
-            cursor_y += float(size.y) + 3.0 * scale
+            cursor_y += size[1] + 3.0 * scale
 
     def frame_needs(self) -> FrameNeeds:
         needs = FrameNeeds(poses=True).merge(self.panels.frame_needs())
