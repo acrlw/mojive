@@ -8,7 +8,7 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, NodeKind, SceneNode
-from ..draw2d import ImguiDraw2D
+from ..draw2d import ImguiDraw2D, ink_box
 from . import Panel, PanelContext
 
 
@@ -125,7 +125,12 @@ class HierarchyPanel(Panel):
         pressed = imgui.invisible_button(f"##vis{node.node_id}", imgui.ImVec2(size, size))
         hovered = imgui.is_item_hovered()
         lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        center = ((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5)
+        # The frame is taller than the label's ink box, so centering on the
+        # frame leaves the mark a few pixels low; center on the row's ink.
+        label = f"{node.name or '?'} {node.kind}"
+        box = ink_box(imgui.get_font(), imgui.get_font_size(), label)
+        center_y = lo.y + (box[1] + box[3]) * 0.5 if box else (lo.y + hi.y) * 0.5
+        center = ((lo.x + hi.x) * 0.5, center_y)
         radius = 4.0 * ctx.style_scale
         base = ctx.theme.primary_bright if hovered else ctx.theme.primary
         alpha = 1.0 if node.visible else 0.45

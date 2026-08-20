@@ -153,13 +153,13 @@ class ImguiDraw2D:
         imgui = self._imgui
         font = imgui.get_font()
         size = imgui.get_font_size()
-        box = _ink_box(font, size, text)
+        box = ink_box(font, size, text)
         if box is None:
             return
         width = box[2] - box[0]
         if width > max_width > 0.0:
             size *= max_width / width
-            box = _ink_box(font, size, text) or box
+            box = ink_box(font, size, text) or box
 
         pen_x = round(float(center[0]) - (box[0] + box[2]) * 0.5)
         pen_y = round(float(center[1]) - (box[1] + box[3]) * 0.5)
@@ -182,7 +182,7 @@ class ImguiDraw2D:
             pen_x += g.advance_x
 
 
-def _ink_box(font, size: float, text: str):
+def ink_box(font, size: float, text: str):
     """Ink bounding box of ``text`` in pixels (the visual, not line, box)."""
     baked = font.get_font_baked(size)
     pen = 0.0
