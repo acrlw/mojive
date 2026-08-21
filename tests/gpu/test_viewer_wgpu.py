@@ -25,6 +25,21 @@ from forge_viewer.render.webgpu.backend import WgpuBackend  # noqa: E402
 from forge_viewer.ui.window_wgpu import WgpuWindow  # noqa: E402
 
 
+@pytest.fixture(autouse=True, scope="module")
+def _pin_ui_scale():
+    # The pixel-diff thresholds below assume scale-1 layout geometry; pin the
+    # UI scale so HiDPI machines produce the same viewport size.
+    old = os.environ.get("FORGE_VIEWER_UI_SCALE")
+    os.environ["FORGE_VIEWER_UI_SCALE"] = "1"
+    try:
+        yield
+    finally:
+        if old is None:
+            del os.environ["FORGE_VIEWER_UI_SCALE"]
+        else:
+            os.environ["FORGE_VIEWER_UI_SCALE"] = old
+
+
 @pytest.fixture(scope="module")
 def viewer(backend_name):
     if backend_name != "wgpu":
