@@ -18,6 +18,21 @@ from forge_viewer.demos import canvas_scene  # noqa: E402
 from forge_viewer.types import DEFAULT_MATERIAL, Material  # noqa: E402
 
 
+@pytest.fixture(autouse=True, scope="module")
+def _pin_ui_scale():
+    # The pixel-diff thresholds below assume scale-1 layout geometry; pin the
+    # UI scale so HiDPI machines produce the same viewport size.
+    old = os.environ.get("FORGE_VIEWER_UI_SCALE")
+    os.environ["FORGE_VIEWER_UI_SCALE"] = "1"
+    try:
+        yield
+    finally:
+        if old is None:
+            del os.environ["FORGE_VIEWER_UI_SCALE"]
+        else:
+            os.environ["FORGE_VIEWER_UI_SCALE"] = old
+
+
 @pytest.fixture(scope="module")
 def canvas():
     scene = canvas_scene()
