@@ -1,12 +1,4 @@
-"""Cascaded shadow-map layout and camera fitting for the webgpu backend.
-
-Port of ``render.forge.cascades``: same 4096² atlas with 2×2 tiles (three
-2048² cascade tiles), the same radius divisors, and the same texel snapping.
-The only delta is the projection matrix — forge builds the ortho box for GL
-clip z in [-1, 1]; here ``orthographic_wgpu`` produces WebGPU clip z in
-[0, 1].  Everything downstream (split radii, texel sizes, tile UVs) is
-convention-independent and shared verbatim.
-"""
+"""Cascaded shadow-map layout and camera fitting for wgpu."""
 
 from __future__ import annotations
 

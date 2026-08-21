@@ -6,6 +6,10 @@ like the GL window tests it needs a display server for GLFW.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 import numpy as np
 import pytest
 
@@ -52,11 +56,32 @@ def test_window_and_backend_are_wgpu(viewer):
     v, _scene = viewer
     assert isinstance(v.backend, WgpuBackend)
     assert isinstance(v.window, WgpuWindow)
-    assert v.backend.caps.name == "webgpu"
+    assert v.backend.caps.name == "wgpu"
     assert v.backend.device is v.window.device
     fb_w, fb_h = v.window.size_pixels
     pt_w, pt_h = v.window.size_points
     assert fb_w >= pt_w and fb_h >= pt_h
+
+
+def test_window_dependencies_use_the_imgui_glfw_library(backend_name):
+    if backend_name != "wgpu":
+        pytest.skip("wgpu window-stack test; run with FORGE_VIEWER_BACKEND=wgpu")
+
+    env = os.environ.copy()
+    env.pop("PYGLFW_LIBRARY", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from forge_viewer.ui.window_wgpu import _load_window_deps; _load_window_deps()",
+        ],
+        capture_output=True,
+        check=False,
+        env=env,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "implemented in both" not in result.stderr
 
 
 def test_read_frame_contains_scene_pixels(viewer):
@@ -125,3 +150,46 @@ def test_vendored_imgui_render_path(viewer, monkeypatch):
     v, _scene = viewer
     v.sync()
     assert float(viewport_snap(v).std()) > 10.0
+
+
+def test_occluded_surface_keeps_the_frame_loop_alive(viewer):
+    import wgpu
+
+    class OccludedSurface:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def get_current_texture(self):
+            raise wgpu.DrawCancelled("Occluded")
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    v, _scene = viewer
+    context = v.window._gpu_context
+    v.window._gpu_context = OccludedSurface(context)
+    try:
+        v.sync()
+        assert float(viewport_snap(v).std()) > 10.0
+    finally:
+        v.window._gpu_context = context
+
+
+def test_windows_keep_independent_imgui_contexts(backend_name):
+    if backend_name != "wgpu":
+        pytest.skip("wgpu window-stack test; run with FORGE_VIEWER_BACKEND=wgpu")
+
+    left = build_scene(canvas_scene(), vsync=False, width=480, height=360)
+    right = build_scene(canvas_scene(), vsync=False, width=640, height=420)
+    try:
+        assert left.window._imgui_context != right.window._imgui_context
+        for _ in range(3):
+            left.sync()
+            right.sync()
+        assert left.window.size_points == (480, 360)
+        assert right.window.size_points == (640, 420)
+        assert float(viewport_snap(left).std()) > 10.0
+        assert float(viewport_snap(right).std()) > 10.0
+    finally:
+        left.release()
+        right.release()

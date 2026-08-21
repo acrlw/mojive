@@ -48,7 +48,7 @@ def _position(viewer, node, style: str, output: Path) -> None:
     _save(viewer, node, output / f"position-{style}.png")
 
     camera, rect, origin, rotation, scale = _state(viewer, node)
-    cursor = project(camera, (origin + rotation[:, 2] * scale * 0.55,), rect)[0, :2]
+    cursor = _axis_cursor(viewer, camera, rect, origin, rotation, scale)
     io.add_mouse_pos_event(*cursor)
     viewer.sync()
     io.add_mouse_button_event(0, True)
@@ -89,19 +89,19 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
 
     start_angle = next(
         angle
-        for angle in np.linspace(0.0, 2.0 * np.pi, 64, endpoint=False)
+        for angle in np.linspace(0.0, 2.0 * np.pi, 96, endpoint=False)
         if hit_test(
             camera,
             origin,
             rotation,
             rect,
-            tuple(project(camera, (ring_point(angle),), rect)[0, :2]),
+            tuple(np.floor(project(camera, (ring_point(angle),), rect)[0, :2])),
             GizmoMode.ROTATE,
             viewer.window.style_scale,
         )[0]
         is GizmoHandle.ROTATE_Z
     )
-    start = project(camera, (ring_point(start_angle),), rect)[0, :2]
+    start = np.floor(project(camera, (ring_point(start_angle),), rect)[0, :2])
     io.add_mouse_pos_event(*start)
     viewer.sync()
     io.add_mouse_button_event(0, True)
@@ -153,6 +153,25 @@ def _state(viewer, node):
     )
 
 
+def _axis_cursor(viewer, camera, rect, origin, rotation, scale) -> np.ndarray:
+    for fraction in np.linspace(0.4, 0.75, 15):
+        point = np.floor(
+            project(camera, (origin + rotation[:, 2] * scale * fraction,), rect)[0, :2]
+        )
+        handle, _axes, _planes = hit_test(
+            camera,
+            origin,
+            rotation,
+            rect,
+            tuple(point),
+            GizmoMode.TRANSLATE,
+            viewer.window.style_scale,
+        )
+        if handle is GizmoHandle.Z:
+            return point
+    raise RuntimeError("Z-axis gizmo handle is not visible")
+
+
 def _save(viewer, node, path: Path) -> None:
     viewer.sync()
     pixels = viewer.window.read_frame()[::-1, :, :3]
@@ -161,7 +180,8 @@ def _save(viewer, node, path: Path) -> None:
     display = imgui.get_io().display_size
     sx = pixels.shape[1] / display.x
     sy = pixels.shape[0] / display.y
-    half = int(180 * max(sx, sy))
+    crop_points = 180.0 if viewer.window.style_scale <= 1.0 else 240.0 * viewer.window.style_scale
+    half = int(crop_points * max(sx, sy))
     x0 = max(0, int(center[0] * sx) - half)
     y0 = max(0, int(center[1] * sy) - half)
     crop = pixels[y0 : y0 + 2 * half, x0 : x0 + 2 * half]

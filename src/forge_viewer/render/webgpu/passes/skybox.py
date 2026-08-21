@@ -1,19 +1,4 @@
-"""Environment skybox and horizon-haze pass for the webgpu backend.
-
-Port of ``render.forge.passes.skybox.SkyboxPass``.  The pass draws into the
-main color pass after opaque and before transparent, matching forge's
-PASS_ORDER (the id/export pass runs separately in this backend):
-
-- skybox: fullscreen triangle, inverse view-projection ray, Z-up cubemap
-  swizzle, far-plane depth with a less-equal test and no depth write;
-- horizon haze: CPU-generated two-layer ring band around the camera on the
-  first infinite plane, alpha-blended, depth-tested (less) but not written.
-
-GL state translations: ``depth_func <=`` / ``depth_mask False`` become
-``depth_compare: less-equal`` / ``depth_write_enabled: False`` on the pipeline,
-and moderngl's two-tuple ``blend_func`` becomes identical color/alpha blend
-states on the color target.
-"""
+"""Environment skybox and horizon haze for wgpu."""
 
 from __future__ import annotations
 

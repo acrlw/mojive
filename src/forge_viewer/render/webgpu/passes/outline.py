@@ -1,22 +1,4 @@
-"""Antialiased selection outline pass for the webgpu backend.
-
-Port of ``render.forge.passes.outline.OutlinePass``; see shaders/outline.wgsl
-for the shader-level deltas.  The pass runs in two stages mirroring forge:
-
-1. ``render_mask`` — the selected object's silhouette is rasterized into a
-   single-sampled r8unorm mask with no depth test (so the outline stays solid
-   behind occluders), culling back faces like forge's mask state.
-2. ``composite`` — a fullscreen triangle inside the main color pass dilates
-   the mask and alpha-blends the ring, matching forge's overlay state
-   (blend on, no depth test/write).
-
-The mask is deliberately single-sampled where forge uses a 4x MSAA mask with a
-resolve blit: WebGPU has no multisample resolve into a sampled texture without
-an extra pass, and the dilation kernel already antialiases the ring's outer
-edge.  Only buckets containing the selected id are drawn, mirroring forge's
-``_selected_buckets`` prefilter; the fragment still discards non-matching
-ids as a backup (ID_ONLY_SELECTED semantics).
-"""
+"""Antialiased selection outlines for wgpu."""
 
 from __future__ import annotations
 

@@ -1,8 +1,4 @@
-"""GPU mesh storage for the webgpu backend.
-
-Mirrors ``render.forge.resources.MeshStore``: builtin and source meshes keyed by
-``MeshKey``, with in-place vertex updates for dynamic (deformable) meshes.
-"""
+"""GPU mesh resources and dynamic vertex updates for wgpu."""
 
 from __future__ import annotations
 

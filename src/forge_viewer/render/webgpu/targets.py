@@ -1,17 +1,4 @@
-"""Render targets, frame uniforms, and readbacks for the webgpu backend.
-
-Target chain (mirrors ``render.forge.targets.RenderTarget`` with WebGPU
-constraints applied):
-
-- color: rgba8unorm, MSAA when samples > 1, resolved for readback
-- depth: depth24plus, MSAA matching color, test-only (never read back)
-- export: single-sampled MRT (r32float GL-compatible depth + r32uint object
-  id) re-rasterized by a dedicated pass, because WebGPU cannot resolve
-  multisampled integer or depth attachments
-
-Readback convention matches forge: ``flip=True`` returns the image top row
-first (WebGPU texture rows are already top-first, so no actual flip happens).
-"""
+"""wgpu render targets, frame uniforms, and pixel readback."""
 
 from __future__ import annotations
 

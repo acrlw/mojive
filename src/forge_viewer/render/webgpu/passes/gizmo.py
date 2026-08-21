@@ -1,25 +1,4 @@
-"""Native 3D gizmo pass for the webgpu backend.
-
-Port of ``render.forge.passes.gizmo.GizmoPass``.  Handle visibility, alpha,
-and draw ordering are forge's CPU logic verbatim (shared helpers from
-``forge_viewer.gizmo``); the GL idioms translate as follows:
-
-- Per-handle uniforms (model/color/mask_radius) live in a dynamic-offset
-  uniform buffer uploaded in ``prepare`` — ``queue.write_buffer`` cannot vary
-  a uniform between draws of one render pass (same convention as DebugPass).
-- forge squashes handle depth against the near plane with ``clip.z =
-  -0.999*w + 0.001*z`` (GL z in [-1, 1]); shaders/gizmo.wgsl uses
-  ``z = 0.001*w + 0.001*z`` for WebGPU z in [0, 1].
-- forge's moderngl state toggles per handle group become pipeline variants
-  (compare/write/cull): planes (less, no write, no cull), arrows and rings
-  (less, write, cull back), center and screen ring (always, no write, cull
-  back — GL ignores the depth mask while DEPTH_TEST is disabled).
-- No id-attachment masking: export ids are re-rasterized by a separate pass
-  that never draws the gizmo (forge masks its shared id attachment instead).
-
-The pass draws into the main MSAA color pass after debug primitives, matching
-forge's PASS_ORDER (gizmo between debug and present).
-"""
+"""Native 3D gizmo rendering for wgpu."""
 
 from __future__ import annotations
 

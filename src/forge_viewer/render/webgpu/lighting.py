@@ -1,17 +1,4 @@
-"""Light scheduling and uniform packing for the webgpu backend.
-
-Faithful port of ``render.forge.passes.base.schedule_lights`` (including the
-shadow-caster selection: 1 directional + up to 8 local casters) and of the
-``OpaquePass._light_uniforms`` conversion: light colors are sRGB-decoded on the
-CPU, the ambient term stays raw and is decoded in the shader.  Image lights do
-not enter the light loop; they bind a cube texture plus a (gain, max mip)
-parameter pair, mirroring ``render.forge.passes.opaque``.
-
-The storage block also carries the shadow-sampling parameters that forge keeps
-in the ``shadow_sample.glsl`` uniform set (matrices, atlas tiles, local slots);
-each field's comment cites the GLSL uniform it mirrors.  The block is rewritten
-every frame so the count fields gate sampling when shadows are off.
-"""
+"""Light scheduling and uniform packing for wgpu render passes."""
 
 from __future__ import annotations
 

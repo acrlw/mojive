@@ -128,7 +128,7 @@ def rig(backend_name, request):
 
 def _set_outline_color(backend, rgba) -> None:
     """Outline color lives on the pass in both backends (no public API)."""
-    if backend.caps.name == "webgpu":
+    if backend.caps.name == "wgpu":
         backend._outline.color = rgba
     else:
         backend._passes["outline"].color = rgba

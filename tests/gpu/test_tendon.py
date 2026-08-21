@@ -60,7 +60,7 @@ def harness(tmp_path, backend_name):
     scene = tmp_path / "tendon.xml"
     scene.write_text(MJCF, encoding="utf-8")
     with OffscreenHarness(scene, W, H) as h:
-        assert h.backend.caps.name == ("webgpu" if backend_name == "wgpu" else "forge")
+        assert h.backend.caps.name == ("wgpu" if backend_name == "wgpu" else "forge")
         h.needs = FrameNeeds(poses=True, tendons=True)
         camera = _camera()
         h.camera = camera
@@ -71,7 +71,7 @@ def harness(tmp_path, backend_name):
 
 def _capsule_count(backend) -> int:
     """Segment count lives on the tendon pass in both backends (no public API)."""
-    if backend.caps.name == "webgpu":
+    if backend.caps.name == "wgpu":
         return backend._tendons.capsule_count
     return backend._passes["tendon"].capsule_count
 

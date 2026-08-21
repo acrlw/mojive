@@ -1,25 +1,4 @@
-"""Directional and local light shadow-map render pass for the webgpu backend.
-
-Port of ``render.forge.passes.shadow.ShadowPass``.  WebGPU translations:
-
-- the 4096² depth atlas is a ``depth32float`` texture; the three cascade
-  tiles render inside one depth-only pass with per-tile viewports (no FBO or
-  attachment juggling — the sampling side reads it as ``texture_depth_2d``
-  with manual comparison, mirroring forge's NEAREST + manual PCF);
-- the local distance map is an ``r16float`` 2D array (8 slots × 6 layers);
-  per-layer 2D views are native WebGPU attachments, replacing
-  ``glFramebufferTextureLayer``; MIN blending replaces the depth buffer so
-  the nearest occluder distance survives, like forge's blend equation;
-- 1×1 fallback textures keep the scene bind group valid when a map family is
-  inactive, mirroring forge's local-array fallback;
-- resource creation failure degrades to "no shadows this frame", mirroring
-  forge's ``_ensure_atlas``/``_ensure_local`` error paths.
-
-Per-draw matrices ride one uniform buffer at 256-byte dynamic offsets
-(3 cascade tiles + up to 48 local layers), packed once per frame in
-``prepare`` — WebGPU queue writes are submit-ordered, so per-draw
-``write_buffer`` calls inside the encoder would not be seen per draw.
-"""
+"""Directional and local-light shadow maps for wgpu."""
 
 from __future__ import annotations
 

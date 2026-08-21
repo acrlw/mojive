@@ -1,8 +1,4 @@
-"""Render passes for the webgpu backend.
-
-Static imports only — unlike ``render.forge.passes`` there is no dynamic
-registration; ``WgpuBackend`` wires the passes it needs directly.
-"""
+"""Render passes used by the wgpu backend."""
 
 from __future__ import annotations
 

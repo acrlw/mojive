@@ -1,4 +1,4 @@
-"""MuJoCo-compatible offscreen rendering API backed by Forge."""
+"""MuJoCo-compatible offscreen rendering through the selected backend."""
 
 from __future__ import annotations
 
@@ -201,7 +201,7 @@ def _select_backend(width: int, height: int, samples: int):
 
 
 class Renderer:
-    """Render an existing MuJoCo model through Forge."""
+    """Render an existing MuJoCo model through the selected backend."""
 
     def __init__(
         self,

@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -17,6 +17,7 @@ help:
 		'  make outline           selection and antialiased outline' \
 		'  make gizmo             2D/3D position/rotation gizmo' \
 		'  make gizmo-gallery     enlarged 2D/3D gizmo reference images' \
+		'  make hidpi-gallery     gizmo references at explicit 200% UI scale' \
 		'  make perturb           MuJoCo translation/rotation perturbation' \
 		'  make text-overlay      GPU world-space text' \
 		'  make mujoco-visuals    hfield/site/tendon/contact' \
@@ -61,8 +62,10 @@ help:
 		'  make p1                complete P0 and P1 acceptance gate' \
 		'  make check             lint and CPU tests' \
 		'  make gpu               real OpenGL tests' \
+		'  make gpu-wgpu          real WebGPU tests' \
 		'  make egl               Linux EGL Renderer and wireframe contract' \
 		'  make renderer-api      public Renderer CPU and GPU contract' \
+		'  make renderer-api-wgpu public Renderer contract over wgpu' \
 		'  make mujoco-ik         body/site inverse-kinematics acceptance' \
 		'  make camera-state      camera bookmark serialization and restore' \
 		'  make scene-snapshot    complete scene-state serialization and restore' \
@@ -77,7 +80,7 @@ help:
 		'Example: make viewer SCENE=humanoid ARGS="--paused"'
 
 setup:
-	uv sync --python 3.11 --extra dev --extra mujoco
+	uv sync --python 3.11 --extra dev --extra mujoco --extra wgpu
 
 ## Lint, formatting, and CPU tests.
 check: lint test
@@ -99,7 +102,7 @@ gpu:
 	@for f in $$(ls tests/gpu/test_*.py); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
 
 GPU_WGPU_FILES := tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py tests/gpu/test_horizon_haze.py tests/gpu/test_shading.py tests/gpu/test_shadows.py tests/gpu/test_reflection.py tests/gpu/test_outline.py tests/gpu/test_tendon.py tests/gpu/test_debugdraw.py tests/gpu/test_gizmo.py tests/gpu/test_pipeline.py tests/gpu/test_viewer_wgpu.py tests/gpu/test_static_viewer.py tests/gpu/test_model_loading.py tests/gpu/test_ui_interaction.py tests/gpu/test_wgpu_shader_reload.py
-## Per-file GPU tests against the experimental wgpu backend; extend GPU_WGPU_FILES as coverage grows.
+## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
 gpu-wgpu:
 	@export FORGE_VIEWER_BACKEND=wgpu; for f in $(GPU_WGPU_FILES); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
@@ -113,7 +116,7 @@ renderer-api:
 	$(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
 	$(PY) -m forge_viewer.tools.renderer_api
 
-## Same Renderer API checks against the experimental wgpu backend.
+## Same Renderer API checks against the wgpu backend.
 renderer-api-wgpu:
 	FORGE_VIEWER_BACKEND=wgpu $(PYTEST) -q tests/test_renderer_api.py
 	FORGE_VIEWER_BACKEND=wgpu $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
@@ -121,7 +124,7 @@ renderer-api-wgpu:
 
 p0: renderer-api
 
-p1: check p0 mujoco-physics mujoco-ik camera-state scene-snapshot rpc material-parity shadow-scheduling mujoco-audit golden parity reverse gpu
+p1: check p0 renderer-api-wgpu mujoco-physics mujoco-ik camera-state scene-snapshot rpc material-parity shadow-scheduling mujoco-audit golden parity reverse gpu gpu-wgpu
 	$(MAKE) adapter-conformance ADAPTER=mujoco CONFORMANCE_ASSET=deformables
 
 ## Compare golden images. Use golden-accept after visual review.
@@ -145,6 +148,10 @@ gallery:
 
 gizmo-gallery:
 	$(PY) -m forge_viewer.tools.gizmo_gallery $(ARGS)
+
+hidpi-gallery:
+	FORGE_VIEWER_UI_SCALE=$(UI_SCALE) $(PY) -m forge_viewer.tools.gizmo_gallery \
+		-o output/gizmo-gallery-hidpi $(ARGS)
 
 model-loading:
 	$(PY) -m forge_viewer.tools.model_loading $(ARGS)

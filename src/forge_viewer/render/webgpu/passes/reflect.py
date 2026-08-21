@@ -1,24 +1,4 @@
-"""Planar reflection render pass for the webgpu backend.
-
-Port of ``render.forge.passes.reflect.ReflectPass`` (up to four planes detected
-from negative-capable reflectance on PLANE/BOX shapes, deduped by plane
-equation).  WebGPU translations:
-
-- per-plane ``rgba16float`` color textures + one shared ``depth24plus``
-  texture, single-sampled — forge's f2 color textures and shared depth FBO;
-- the mirrored view (``view @ mirror``) flips triangle winding, so the scene
-  pipeline variant for reflections uses ``front_face="cw"`` instead of
-  ``gl.front_face``;
-- ``gl_ClipDistance0`` becomes a fragment discard on the plane equation in the
-  frame uniforms (``clip_plane``); the main pass binds the (0,0,0,1) no-op;
-- reflection rendering writes linear color (``flags.y`` linear-out, forge's
-  ``u_linear_out``); the main pass adds ``reflectance * reflected`` before
-  atmosphere/tonemap;
-- one frame-uniform buffer holds one block per plane at 512-byte stride
-  (384-byte frame block + ``minUniformBufferOffsetAlignment``), because
-  ``queue.write_buffer`` is submit-ordered and cannot retarget a single
-  binding between passes inside one encoder.
-"""
+"""Planar reflections for wgpu scene rendering."""
 
 from __future__ import annotations
 

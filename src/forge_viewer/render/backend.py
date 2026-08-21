@@ -189,6 +189,8 @@ class RenderBackend(Protocol):
 
     def render_options(self) -> tuple[RenderFlag, ...]: ...
 
+    def describe(self) -> str: ...
+
     def release(self) -> None: ...
 
 
@@ -252,5 +254,8 @@ class NullBackend:
 
     def render_options(self) -> tuple[RenderFlag, ...]:
         return ()
+
+    def describe(self) -> str:
+        return f"null renderer: {self.reason}"
 
     def release(self) -> None: ...

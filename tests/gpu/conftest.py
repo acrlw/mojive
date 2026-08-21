@@ -6,10 +6,17 @@ import pytest
 
 from forge_viewer.render.forge import gl_native as G
 
-try:
+
+def _load_glfw():
+    from imgui_bundle._glfw_set_search_path import _glfw_set_search_path
+
+    _glfw_set_search_path()
     import glfw
-except ImportError:  # pragma: no cover
-    glfw = None
+
+    return glfw
+
+
+glfw = _load_glfw()
 
 try:
     import moderngl

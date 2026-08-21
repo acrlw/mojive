@@ -1,10 +1,4 @@
-"""Per-instance storage buffer for the webgpu backend.
-
-Same logical record as ``render.forge.instances`` (transform, color, material,
-texcoef, object id), padded to a 128-byte stride for WGSL struct alignment.
-Instances live in a storage buffer indexed by ``instance_index``; bucket draws
-pass ``first_instance`` so no per-bucket offsets or VAOs are needed.
-"""
+"""GPU instance storage and WGSL-compatible record packing."""
 
 from __future__ import annotations
 

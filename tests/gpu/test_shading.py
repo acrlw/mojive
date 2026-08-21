@@ -420,7 +420,7 @@ def test_highlight_needs_the_emission_term(rig, monkeypatch):
     plain = float(Rig.center(rig.draw([quad], ambient=dark))[:3].mean())
     lit = float(Rig.center(rig.draw([quad], ambient=dark, selected=1))[:3].mean())
 
-    if rig.backend.caps.name == "webgpu":
+    if rig.backend.caps.name == "wgpu":
         from forge_viewer.render.webgpu import backend as webgpu_backend
 
         monkeypatch.setattr(webgpu_backend, "HIGHLIGHT_EMISSION", 0.0)

@@ -206,7 +206,7 @@ def doctor(asset: Path, backend_name: str = "mujoco", frames: int = 90) -> dict:
     try:
         viewer = build(asset, backend_name, paused=False, vsync=False, width=960, height=720)
         caps = viewer.backend.caps
-        is_wgpu = caps.name == "webgpu"
+        is_wgpu = caps.name == "wgpu"
 
         if is_wgpu:
             checks.append(("GPU device", True, caps.renderer))

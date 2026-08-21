@@ -58,7 +58,7 @@ def _make_backend(backend_name: str, request, samples: int = 4):
 
 
 def _tendon_pass(backend):
-    if backend.caps.name == "webgpu":
+    if backend.caps.name == "wgpu":
         return backend._tendons
     return backend._passes["tendon"]
 
@@ -66,7 +66,7 @@ def _tendon_pass(backend):
 def _vbo_bytes(backend, gpu_mesh) -> bytes:
     # wgpu vertex buffers are created without COPY_SRC; the CPU-side copy in
     # GpuMesh is the same bytes that were uploaded.
-    if backend.caps.name == "webgpu":
+    if backend.caps.name == "wgpu":
         return gpu_mesh._vertices.tobytes()
     return gpu_mesh.vbo.read()
 

@@ -1,7 +1,7 @@
 [project]
 name = "forge-viewer"
 version = "0.1.0"
-description = "Interactive 3D viewer and OpenGL renderer for robotics and simulation"
+description = "Backend-neutral 3D viewer and renderer for robotics and simulation"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -50,8 +50,6 @@ artifacts = [
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-# spike/ holds archived experiments (commit 7523ab9), not maintained code.
-extend-exclude = ["spike"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
@@ -75,7 +73,7 @@ testpaths = ["tests"]
 # The default suite excludes real GPU and physics worlds.
 addopts = "-m 'not gpu and not physics' --strict-markers"
 markers = [
-    "gpu: requires a real OpenGL context",
+    "gpu: requires a real GPU device or graphics context",
     "physics: requires an installed physics engine and a live world",
     "golden: compares rendered output with reviewed reference images",
     "slow: runs an extended workload",

@@ -45,16 +45,28 @@ def resolve_context_api(requested: str) -> str:
     raise ValueError(f"Unsupported FORGE_VIEWER_GL backend: {requested}")
 
 
-def _load_gl_deps() -> None:
-    global glfw, gl, imgui, GlfwRenderer
+def _load_window_deps() -> None:
+    global glfw, imgui, GlfwRenderer
     if glfw is not None:
         return
-    import glfw as _glfw
     from imgui_bundle import imgui as _imgui
+    from imgui_bundle._glfw_set_search_path import _glfw_set_search_path
+
+    _glfw_set_search_path()
+    import glfw as _glfw
     from imgui_bundle.python_backends.glfw_backend import GlfwRenderer as _GlfwRenderer
+
+    glfw, imgui, GlfwRenderer = _glfw, _imgui, _GlfwRenderer
+
+
+def _load_gl_deps() -> None:
+    global gl
+    _load_window_deps()
+    if gl is not None:
+        return
     from OpenGL import GL as _gl
 
-    glfw, gl, imgui, GlfwRenderer = _glfw, _gl, _imgui, _GlfwRenderer
+    gl = _gl
 
 
 @dataclass
@@ -196,7 +208,8 @@ class Window:
         self._scale_generation = 0
         self._refresh_scales()
 
-        imgui.create_context()
+        self._imgui_context = imgui.create_context()
+        imgui.set_current_context(self._imgui_context)
         io = imgui.get_io()
         if self.config.docking:
             io.config_flags |= imgui.ConfigFlags_.docking_enable
@@ -221,7 +234,11 @@ class Window:
         self.latch = ResizeLatch()
 
     def _load_fonts(self, io) -> None:
-        self.font_report = fonts.load(imgui, io, size_pt=self.config.font_size_pt)
+        self.font_report = fonts.load(
+            imgui,
+            io,
+            size_pt=self.config.font_size_pt * self._style_scale,
+        )
         for note in self.font_report.notes:
             log.warning("Font fallback: {}", note)
 
@@ -366,6 +383,7 @@ class Window:
         glfw.set_window_title(self._window, title)
 
     def begin_frame(self) -> None:
+        imgui.set_current_context(self._imgui_context)
         glfw.poll_events()
         self._refresh_scales()
         self._sync_style_scale()
@@ -416,6 +434,7 @@ class Window:
             log.error("Default dock layout failed; panels will float: {}", e)
 
     def end_frame(self, *, readback: bool = False) -> np.ndarray | None:
+        imgui.set_current_context(self._imgui_context)
         imgui.render()
         fb_w, fb_h = self.size_pixels
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
@@ -461,6 +480,7 @@ class Window:
         native_drop.uninstall(self._native_drop_token)
         global _live_windows
 
+        imgui.set_current_context(self._imgui_context)
         try:
             glfw.make_context_current(self._window)
         except Exception as e:
@@ -468,6 +488,7 @@ class Window:
         try:
             self._impl.shutdown()
         finally:
+            imgui.destroy_context(self._imgui_context)
             glfw.destroy_window(self._window)
             _live_windows = max(0, _live_windows - 1)
             if _live_windows == 0:

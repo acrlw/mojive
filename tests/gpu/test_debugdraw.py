@@ -81,7 +81,7 @@ class Rig:
         return self.backend.target.read_color(flip=True)
 
     def debug_pass(self):
-        if self.backend.caps.name == "webgpu":
+        if self.backend.caps.name == "wgpu":
             return self.backend._debug
         return self.backend._passes["debug"]
 

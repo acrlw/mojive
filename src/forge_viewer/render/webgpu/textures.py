@@ -1,18 +1,4 @@
-"""Texture storage for the webgpu backend.
-
-2D and cube textures, matching the sRGB semantics of
-``render.forge.resources.TextureStore``: sRGB sources use an sRGB view so the
-hardware decode matches GL ``SRGB8_ALPHA8``; other formats are linearized on
-the CPU the same way forge does when no sRGB internal format exists.
-
-Cube textures (``TextureKind.CUBE``/``SKYBOX``) upload six faces as a 2D array
-exposed through a ``cube`` view.  WebGPU has no mipmap generation, so mip
-chains (2D and cube alike) are box-filtered on the CPU in stored (possibly
-sRGB-encoded) space — the same domain ``glGenerateMipmap`` averages in for
-forge.  2D filtering matches forge: trilinear with anisotropy 8.0.  The IBL
-roughness LOD depends on the full cube chain.  A 1x1 ``black_cube`` stands in
-when no image light or skybox cube is bound.
-"""
+"""2D and cube texture resources for wgpu."""
 
 from __future__ import annotations
 

@@ -1,16 +1,4 @@
-"""Spatial tendon / actuator paths as instanced 3D capsules for the webgpu backend.
-
-Port of ``render.forge.passes.tendon.TendonPass``.  Every segment becomes
-three instances of the shared builtin capsule meshes (shaft plus two caps)
-drawn through the regular scene pipeline; the pass owns its CPU-side
-``RenderScene`` and ``InstanceStore`` so the main scene stays untouched.
-Bucket layout, the sRGB→linear color conversion (pow 2.2), and the
-back-to-front transparent bucket order are identical to forge.
-
-Unlike forge there is no per-bucket VAO to rebuild: meshes come from the
-shared ``MeshStore`` (``set_scene`` already syncs all builtins), and drawing
-only needs a group0 whose instance storage buffer is this pass's own.
-"""
+"""Spatial tendon and actuator paths rendered as 3D capsules."""
 
 from __future__ import annotations
 

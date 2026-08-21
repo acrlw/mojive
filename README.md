@@ -169,7 +169,7 @@ with Renderer(model, height=480, width=640) as renderer:
 
 Run the public contract and real-OpenGL comparison gallery with `make renderer-api`.
 
-### Experimental wgpu backend
+### wgpu backend
 
 The Renderer API can run on [wgpu](https://wgpu.rs/) (Vulkan/Metal/DX12) instead of OpenGL,
 which removes the EGL/GLFW context requirement for offscreen rendering:
@@ -186,11 +186,10 @@ suite with `make gpu-wgpu`. The full interactive viewer also runs on wgpu:
 FORGE_VIEWER_BACKEND=wgpu make viewer
 ```
 
-All render flags, debug views, shadows, planar reflections, skybox/IBL, tendons, debug draw,
-and the native gizmo work on both backends. What remains GL-only is infrastructure, not
-features: GL state guarding, native GL entry points, GLSL hot reload, and GPU timer queries
-(wgpu reports CPU frame timing only). Current gaps are reported through the backend
-capability notes (`backend.caps.notes`).
+The wgpu backend supports the interactive viewer and the public Renderer API on Metal and
+Vulkan. It includes render flags, debug views, shadows, planar reflections, skybox/IBL,
+tendons, debug draw, selection outlines, and the native gizmo. `backend.caps.notes` reports
+backend-specific limits such as CPU-only timing and single-sample ID/depth export.
 
 ## Visual acceptance
 
@@ -201,6 +200,7 @@ Every user-facing feature has a reproducible Make target.
 | `make viewer` | Open the default MuJoCo scene |
 | `make egl-viewer` | Open the Linux viewer through GLFW EGL |
 | `make hidpi` | Inspect UI, fonts, and gizmos at an explicit 200% scale |
+| `make hidpi-gallery` | Capture enlarged 2D/3D gizmo references at 200% UI scale |
 | `make empty` | Open an empty viewer and load MJCF or URDF from the File menu |
 | `make model-loading` | Capture empty, MJCF, and URDF runtime-loading references |
 | `make outline` | Selection, x-ray outline, and outline antialiasing |
@@ -375,19 +375,21 @@ src/forge_viewer/
 ├── render/
 │   ├── scene.py                       renderer scene representation
 │   ├── backend.py                     rendering backend protocol
-│   └── forge/                         OpenGL renderer, passes, and shaders
+│   ├── forge/                         OpenGL renderer, passes, and shaders
+│   └── webgpu/                        wgpu renderer, passes, and WGSL shaders
 └── ui/                                window, panels, gestures, and gizmos
 ```
 
 Renderer code depends on shared scene contracts. Physics integration lives in adapters. UI code
 depends on protocols and session state. `tests/test_layering.py` enforces these boundaries.
 
-Forge uses row-major matrices in Python and transposes at the OpenGL upload boundary. World
-coordinates use Z-up.
+Renderer contracts use row-major matrices in Python. Each backend applies its GPU upload
+convention. World coordinates use Z-up.
 
 ## Documentation
 
 - [Renderer design](docs/RENDERER.md)
+- [wgpu backend report](docs/WGPU_BACKEND_REPORT.md)
 - [Platform measurements](docs/PLATFORM.md)
 - [Implementation decisions](docs/DECISIONS.md)
 - [Roadmap](docs/ROADMAP.md)

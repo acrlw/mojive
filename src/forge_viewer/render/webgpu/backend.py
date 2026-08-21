@@ -1,20 +1,7 @@
-"""wgpu-py render backend for forge-viewer.
+"""wgpu render backend for offscreen and interactive rendering.
 
-Offscreen ``RenderBackend`` implementation on WebGPU (via wgpu-py).  It consumes
-the same renderer-neutral contracts as ``ForgeBackend`` — ``SceneSourceBuilder``
-produces the ``RenderScene``, this package owns device management, WGSL shader
-pipeline, MSAA targets, and CPU readbacks.  No GL context or window is needed,
-which makes it usable headless on any platform with a Vulkan/Metal/D3D12 driver.
-
-Scope: the offscreen ``Renderer`` contract (color/depth/segmentation), lights
-(directional/point/spot + headlight), 2D and cube textures, skybox, IBL image
-light, transparency sorting, fog and haze, selection highlight and outline,
-debug views (albedo/normal/depth/segment/idcolor/overdraw/wireframe), shadows
-(directional CSM atlas + spot/point/area distance maps), planar reflections,
-tendons, debug draw primitives, world-space text labels, and the native 3D
-gizmo.  ``render()`` returns a ``ViewportImage`` whose payload is the resolved
-color view; the interactive viewer window (``ui/window_wgpu.py``) binds it
-through imgui and presents the UI over wgpu surfaces.
+The backend consumes the shared scene contracts and owns WebGPU resources,
+WGSL pipelines, render passes, readback, and the viewport texture.
 """
 
 from __future__ import annotations
@@ -58,7 +45,7 @@ from .programs import WgslWatch, load_wgsl
 from .targets import FRAME_BYTES, FRAME_DTYPE, RenderTargetWgpu, proj_matrix_wgpu
 from .textures import TextureStore
 
-log = get_logger("webgpu")
+log = get_logger("wgpu")
 
 HIGHLIGHT_COLOR = (1.0, 0.82, 0.45, 0.0)
 HIGHLIGHT_BLEND = 0.35
@@ -72,8 +59,7 @@ OVERDRAW_CLEAR = (0.0, 0.0, 0.0, 1.0)
 # Scene module sources in load order; the hot-reload watch tracks this set.
 _SCENE_SHADERS = ("shadow_sample.wgsl", "scene.wgsl")
 
-# The full forge flag set (ForgeBackend._supported_flags with every pass
-# present): 19 scene flags plus the 19 flags gated on forge's debug pass.
+# Render flags implemented by the wgpu pass graph.
 _SUPPORTED_FLAGS = frozenset(
     {
         RenderFlag.TRANSPARENT,
@@ -327,7 +313,7 @@ class WgpuBackend:
     def _build_caps(self) -> BackendCaps:
         info = self.device.adapter.info
         return BackendCaps(
-            name="webgpu",
+            name="wgpu",
             gpu_pick=True,
             debug_draw=True,
             render_flags=frozenset(self._flags),
@@ -1219,7 +1205,7 @@ class WgpuBackend:
         return self._bvh_depth
 
     def render_options(self) -> tuple[RenderFlag, ...]:
-        return tuple(flag for flag in self._flags if flag in _SUPPORTED_FLAGS)
+        return tuple(sorted(self.caps.render_flags, key=lambda flag: flag.value))
 
     def enable_hot_reload(self, on: bool = True) -> None:
         self._hot_reload = bool(on)
@@ -1271,3 +1257,14 @@ class WgpuBackend:
         self._scene = None
         self._builder = None
         self._source = None
+
+    def describe(self) -> str:
+        caps = self.caps
+        lines = [
+            f"wgpu  {caps.gl_version}  ({caps.renderer})",
+            f"  MSAA              : {caps.msaa_samples}×",
+            f"  ID buffer MSAA    : {caps.id_msaa}",
+            f"  GPU timing        : {caps.gpu_timing}",
+        ]
+        lines.extend(f"  · {note}" for note in caps.notes)
+        return "\n".join(lines)

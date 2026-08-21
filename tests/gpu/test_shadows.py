@@ -278,7 +278,7 @@ def _high_frequency(y: np.ndarray) -> float:
 
 def test_shadow_pass_actually_ran(backend):
 
-    if backend.caps.name == "webgpu":
+    if backend.caps.name == "wgpu":
         # Per-pass CPU timings and the pass registry are forge implementation
         # details; the wgpu backend reports frame_cpu_ms only.
         pytest.skip("per-pass timing table is a forge implementation detail")
@@ -371,7 +371,7 @@ def test_every_cascade_addresses_its_own_tile_and_texel(backend):
 
 def test_render_leaves_no_gl_error(backend):
 
-    if backend.caps.name == "webgpu":
+    if backend.caps.name == "wgpu":
         # GL error state and backend.ctx are forge internals; WebGPU reports
         # validation failures through device error scopes instead.
         pytest.skip("GL error state is a forge implementation detail")

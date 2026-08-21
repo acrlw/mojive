@@ -1,21 +1,7 @@
-"""wgpu viewer window: GLFW NO_API surface, wgpu canvas context, imgui over wgpu.
+"""GLFW NO_API window with imgui composition and wgpu presentation.
 
-Counterpart to ``ui/window.py`` for the wgpu backend, exposing the same
-external contract so ``ViewerApp`` runs unchanged.  The GLFW window is created
-with ``GLFW_CLIENT_API=GLFW_NO_API`` (no GL context exists); the platform
-present-info query comes from rendercanvas and the surface is driven through
-``wgpu.gpu.get_canvas_context`` directly, so rendercanvas's canvas/loop
-machinery (forced show, asyncio scheduling, callback ownership) stays out of
-the way of the viewer's explicit frame loop.
-
-Presentation composites imgui into a persistent frame texture and copies it
-into the swapchain texture.  That extra copy keeps ``read_frame()`` well
-defined — reading a swapchain texture after present is not — and matches the
-GL ``read_frame`` contract (full window including panels, bottom row first).
-
-The surface format is deliberately non-sRGB: the scene color target is already
-gamma-encoded by ``finish_color`` and imgui colors are display-domain, so an
-sRGB surface would apply a second hardware encode (double gamma).
+Frames are composed into a readable texture before presentation. The
+non-sRGB surface preserves the display-domain colors emitted by the renderer.
 """
 
 from __future__ import annotations
@@ -26,13 +12,9 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-import glfw
 import numpy as np
 import wgpu
-from imgui_bundle import imgui
 from imgui_bundle.python_backends import compute_fb_scale
-from imgui_bundle.python_backends.glfw_backend import GlfwRenderer
-from rendercanvas.glfw import get_glfw_present_info
 from wgpu.utils.imgui import ImguiWgpuBackend
 
 from ..log import get_logger
@@ -45,6 +27,24 @@ if TYPE_CHECKING:
     from ..types import ViewportImage
 
 log = get_logger("window_wgpu")
+
+glfw: Any = None
+imgui: Any = None
+GlfwRenderer: Any = None
+get_glfw_present_info: Any = None
+
+
+def _load_window_deps() -> None:
+    global glfw, imgui, GlfwRenderer, get_glfw_present_info
+    if glfw is not None:
+        return
+    _window_module._load_window_deps()
+    from rendercanvas.glfw import get_glfw_present_info as _get_glfw_present_info
+
+    glfw = _window_module.glfw
+    imgui = _window_module.imgui
+    GlfwRenderer = _window_module.GlfwRenderer
+    get_glfw_present_info = _get_glfw_present_info
 
 
 def _upstream_needs_imgui_192_fix() -> bool:
@@ -339,7 +339,7 @@ class WgpuWindow(Window):
     """``Window`` contract over a wgpu surface instead of a GL context."""
 
     def __init__(self, config: WindowConfig | None = None, device: Any = None) -> None:
-        _window_module._load_gl_deps()  # populate the base module's lazy globals
+        _load_window_deps()
         self.config = config or WindowConfig()
         configured_scale = os.environ.get("FORGE_VIEWER_UI_SCALE")
         self._scale_override = float(configured_scale) if configured_scale else self.config.ui_scale
@@ -399,7 +399,8 @@ class WgpuWindow(Window):
         self._scale_generation = 0
         self._refresh_scales()
 
-        imgui.create_context()
+        self._imgui_context = imgui.create_context()
+        imgui.set_current_context(self._imgui_context)
         io = imgui.get_io()
         if self.config.docking:
             io.config_flags |= imgui.ConfigFlags_.docking_enable
@@ -504,6 +505,7 @@ class WgpuWindow(Window):
         return self._frame_tex_view
 
     def end_frame(self, *, readback: bool = False) -> np.ndarray | None:
+        imgui.set_current_context(self._imgui_context)
         imgui.render()
         fb_w, fb_h = self.size_pixels
         frame = None
@@ -523,12 +525,17 @@ class WgpuWindow(Window):
             )
             self._imgui_backend.render(imgui.get_draw_data(), render_pass)
             render_pass.end()
-            surface = self._gpu_context.get_current_texture()
-            encoder.copy_texture_to_texture(
-                {"texture": self._frame_tex}, {"texture": surface}, (fb_w, fb_h, 1)
-            )
+            try:
+                surface = self._gpu_context.get_current_texture()
+            except wgpu.DrawCancelled:
+                surface = None
+            if surface is not None:
+                encoder.copy_texture_to_texture(
+                    {"texture": self._frame_tex}, {"texture": surface}, (fb_w, fb_h, 1)
+                )
             self._device.queue.submit([encoder.finish()])
-            self._gpu_context.present()
+            if surface is not None:
+                self._gpu_context.present()
             if readback:
                 frame = self.read_frame()
             if self._vsync:
@@ -557,6 +564,7 @@ class WgpuWindow(Window):
         if self._destroyed:
             return
         self._destroyed = True
+        imgui.set_current_context(self._imgui_context)
         native_drop.uninstall(self._native_drop_token)
         if self._gpu_context is not None:
             # The surface holds the native window handle, so it must be
@@ -571,6 +579,7 @@ class WgpuWindow(Window):
         if self._frame_tex is not None:
             self._frame_tex.destroy()
             self._frame_tex = None
+        imgui.destroy_context(self._imgui_context)
         glfw.destroy_window(self._window)
         _window_module._live_windows = max(0, _window_module._live_windows - 1)
         if _window_module._live_windows == 0:

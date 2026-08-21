@@ -1,26 +1,4 @@
-"""Debug primitive and world-space text pass for the webgpu backend.
-
-Port of ``render.forge.passes.debug.DebugPass`` (and the GL half of
-``render.forge.text``).  The retained ``DebugDraw`` store and the packed
-record layouts are shared unchanged; GL idioms translate as follows:
-
-- ``gl_VertexID`` expansion + instanced attributes become
-  ``@builtin(vertex_index)`` expansion over instance-step vertex buffers;
-  forge's ``rebind_instance_attributes`` batch offsets become
-  ``set_vertex_buffer`` byte offsets (``first_instance`` for the indexed
-  solid path).
-- Occlusion modes are pipeline depth variants with no depth write: DEPTH and
-  the visible GHOST half use ``less``, ALWAYS uses ``always``, and the
-  occluded GHOST half uses ``greater`` with the alpha from uniform slot 1
-  (``GHOST_ALPHA``), selected per draw via a dynamic uniform offset —
-  ``queue.write_buffer`` cannot vary a uniform between draws of one pass.
-- The glyph atlas is an ``r8unorm`` texture with a linear sampler; atlas
-  building and label layout live in the backend-neutral ``render.text``.
-
-The pass draws into the main MSAA color pass after the outline composite,
-matching forge's PASS_ORDER (debug between outline and gizmo); the export
-(id/depth) pass never sees debug primitives, so picking is unaffected.
-"""
+"""Debug primitives and world-space text for wgpu."""
 
 from __future__ import annotations
 

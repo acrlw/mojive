@@ -1,17 +1,4 @@
-"""Present pass for the webgpu backend: SEGMENT/IDCOLOR display modes.
-
-Port of ``render.forge.passes.present.PresentPass``.  Where forge resolves the
-MSAA color and id textures and redraws the resolved target with
-``present.frag``, this backend's color resolve already happens at the end of
-the main pass; the only remaining work is the pseudocolor rebuild for the
-SEGMENT/IDCOLOR debug views, which rewrites the color target from the
-single-sampled export id texture (see shaders/present.wgsl for the deltas).
-
-Unlike forge there is no separate MSAA resolve here — the main pass resolves
-into the color target directly.  ``WgpuBackend.render()`` publishes the
-resolved color view as the ``ViewportImage`` payload; the interactive surface
-path lives in ``ui/window_wgpu.py``.
-"""
+"""SEGMENT and IDCOLOR presentation for wgpu."""
 
 from __future__ import annotations
 
