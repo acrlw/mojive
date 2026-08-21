@@ -13,7 +13,8 @@ Validated platforms:
 - macOS with Metal
 - Linux with Vulkan
 
-Windows D3D12 validation remains on the roadmap. Forge stays the default backend.
+Windows D3D12 validation is tracked in [development status](../plan/STATUS.md). Forge stays the
+default backend.
 
 ## Usage
 
@@ -64,9 +65,3 @@ one ImGui context per window. Offscreen rendering creates a device without a nat
 WGSL uses pipeline variants for shader configuration, explicit barycentric attributes for
 wireframe rendering, fragment clipping for reflection planes, and WebGPU's zero-to-one depth
 range. Texture mip chains are generated on the CPU.
-
-## Upstream tracking
-
-- Remove the local imgui 1.92 compatibility path after wgpu-py ships the matching API.
-- Adopt GPU timestamps when wgpu-py exposes stable query support.
-- Adopt driver-controlled present modes and public surface release when available.

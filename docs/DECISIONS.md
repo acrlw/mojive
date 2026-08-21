@@ -49,9 +49,9 @@ This preserves picking data under text, debug drawing, outlines, and gizmos.
 
 ## Texture coordinates
 
-The current per-instance texture coefficient stores one UV scale. Primitive boxes derive this
-scale from X and Y extent. Full `texuniform` box semantics require object-space texture
-generation for three face-axis pairs and remain a planned material feature.
+Per-instance texture coefficients carry repeat, offset, and primitive mapping metadata.
+Primitive boxes generate object-space coordinates for all three face-axis pairs and apply
+MuJoCo `texuniform` scaling. Meshes use their authored UV coordinates.
 
 ## Debug primitives
 

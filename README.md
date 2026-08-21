@@ -9,17 +9,18 @@ perturbation, debug drawing, camera and light editing, render diagnostics, captu
 
 The project is under active development. The P0/P1 baseline includes the public Renderer API,
 MuJoCo visualization semantics, IK, persistent scene state, local control, and visual regression
-gates. The next milestone focuses on platform packaging and a second production physics adapter.
+gates.
 
 ## Requirements
 
 - Python 3.11 or newer
-- An OpenGL 3.3 core-profile driver
+- An OpenGL 3.3 core-profile driver for Forge, or a Metal/Vulkan adapter for wgpu
 - A desktop session for interactive windows
 - MuJoCo 3.1 or newer for MJCF, URDF, simulation, and physics tools
 
-Forge targets macOS on Apple Silicon and Linux with a desktop OpenGL 3.3 driver. `uv` is the
-recommended environment and dependency manager.
+Forge targets macOS on Apple Silicon and Linux with a desktop OpenGL 3.3 driver. The wgpu backend
+is validated on macOS Metal and Linux Vulkan. `uv` is the recommended environment and dependency
+manager.
 
 ## Quick start
 
@@ -392,7 +393,8 @@ convention. World coordinates use Z-up.
 - [wgpu backend report](docs/WGPU_BACKEND_REPORT.md)
 - [Platform measurements](docs/PLATFORM.md)
 - [Implementation decisions](docs/DECISIONS.md)
-- [Roadmap](docs/ROADMAP.md)
+
+Development plans live in [plan/](plan/README.md).
 
 ## License
 

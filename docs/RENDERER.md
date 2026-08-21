@@ -1,7 +1,7 @@
 # Renderer design
 
-Forge is an OpenGL 4.1 renderer for simulation inspection and tooling. It uses a linear-light
-pipeline, bucketed instancing, backend-neutral scene data, and explicit diagnostic passes.
+forge-viewer provides the OpenGL Forge backend and the cross-platform wgpu backend. Both consume
+backend-neutral scene data and implement the same linear-light, bucketed render pipeline.
 
 ## Frame pipeline
 
@@ -54,7 +54,7 @@ remain aligned.
   intensity of 5000 maps to unit radiance in the Forge lighting model.
 - Tendons use their model material, RGBA, width, texture, and transparency.
 
-## Forge diagnostics
+## Renderer diagnostics
 
 | Feature | Implementation |
 |---|---|
@@ -66,7 +66,7 @@ remain aligned.
 | Reflections | Mirrored camera, oblique clipping, and surface sampling |
 | Wide lines | Screen-space triangle strips |
 | Text | GPU glyph atlas shared with UI font configuration |
-| Timing | CPU and GPU measurements per named pass |
+| Timing | CPU measurements on both backends; GPU measurements on Forge when timer queries exist |
 
 ## Transparency
 
