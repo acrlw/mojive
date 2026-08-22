@@ -416,7 +416,6 @@ class WgpuWindow(Window):
 
         self._impl.process_inputs()
         theme_mod.apply(imgui, ui_scale=self._style_scale)
-        imgui.get_style().font_scale_dpi = self._style_scale
         self._applied_style_scale = self._style_scale
         self._load_fonts(io)
 

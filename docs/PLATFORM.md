@@ -29,8 +29,8 @@ use `content scale / framebuffer scale`, which aligns X11, Wayland, Windows, and
 The same scale reaches UI fonts, world-space text, view controls, gizmos, perturbation marks, and
 their hit regions.
 
-`FORGE_VIEWER_UI_SCALE` overrides the reported content scale. `make hidpi` runs the gizmo scene
-with a value of `2` for visual acceptance.
+`FORGE_VIEWER_UI_SCALE` sets the logical UI scale directly. Physical overlay dimensions combine
+that value with the framebuffer scale. `make hidpi` uses a value of `2` for visual acceptance.
 
 ## Render-target layout
 

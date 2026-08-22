@@ -44,12 +44,24 @@ class InspectorPanel(Panel):
         self._rotation_node = -1
         self._rotation_euler = np.zeros(3, np.float64)
         self._rotation_matrix = np.eye(3, dtype=np.float64)
+        self._edit_transaction = False
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds(
             poses=True,
             qvel=(self.show_transform and self._transform_velocity) or self.show_velocity,
         )
+
+    def finish_frame(self, ctx: PanelContext) -> None:
+        if self._edit_transaction and not imgui.is_any_item_active():
+            ctx.submit(cmd.EndEditTransaction())
+            self._edit_transaction = False
+
+    def _submit_edit(self, ctx: PanelContext, command) -> None:
+        if imgui.is_any_item_active() and not self._edit_transaction and not ctx.session.editing:
+            result = ctx.submit(cmd.BeginEditTransaction("Inspector edit"))
+            self._edit_transaction = result.ok
+        ctx.submit(command)
 
     def draw(self, ctx: PanelContext) -> None:
         s = ctx.session
@@ -66,6 +78,9 @@ class InspectorPanel(Panel):
         imgui.text_disabled(f"({node.kind})")
 
         self._identity(node)
+        if node.kind is NodeKind.MODEL:
+            self._model(ctx, node)
+            return
         if node.kind is NodeKind.LIGHT:
             self._light(ctx, node)
             return
@@ -79,6 +94,20 @@ class InspectorPanel(Panel):
         self._gizmo_reason(ctx, node)
         self._velocity(ctx, node)
         self._material(ctx, node)
+
+    @staticmethod
+    def _model(ctx: PanelContext, node: SceneNode) -> None:
+        info = next(
+            (item for item in ctx.session.scene_models if item.model_id == node.model_id), None
+        )
+        if info is None:
+            return
+        if begin_kv_table("insp_model"):
+            labeled("file", str(info.path))
+            labeled("position", "  ".join(f"{value:+.3f}" for value in info.position))
+            imgui.end_table()
+        if info.removable and imgui.button("Remove Model"):
+            ctx.submit(cmd.RemoveSceneModel(info.model_id))
 
     def _identity(self, node: SceneNode) -> None:
         if begin_kv_table("insp_id"):
@@ -180,12 +209,13 @@ class InspectorPanel(Panel):
             if rot_changed:
                 self._rotation_euler[:] = new_euler
                 self._rotation_matrix[:] = rotation
-            ctx.submit(
+            self._submit_edit(
+                ctx,
                 cmd.SetPose(
                     node.node_id,
                     np.asarray(new_pos, np.float32),
                     rotation,
-                )
+                ),
             )
 
     def _continuous_euler(self, node_id: int, matrix) -> np.ndarray:
@@ -281,7 +311,7 @@ class InspectorPanel(Panel):
 
         color_changed, rgba = imgui.color_edit4("instance color", src.geom_rgba[first])
         if color_changed and node_id >= 0:
-            ctx.submit(cmd.SetGeometryColor(node_id, np.asarray(rgba, np.float32)))
+            self._submit_edit(ctx, cmd.SetGeometryColor(node_id, np.asarray(rgba, np.float32)))
 
         imgui.text_disabled(f"shared material: {material.name or material_id}")
         emission_changed, emission = imgui.drag_float(
@@ -320,7 +350,8 @@ class InspectorPanel(Panel):
                 uniform_changed,
             )
         ):
-            ctx.submit(
+            self._submit_edit(
+                ctx,
                 cmd.SetMaterial(
                     material_id,
                     replace(
@@ -333,7 +364,7 @@ class InspectorPanel(Panel):
                         tex_repeat=np.asarray(tex_repeat, np.float32),
                         tex_uniform=bool(tex_uniform),
                     ),
-                )
+                ),
             )
         imgui.pop_id()
 
@@ -433,7 +464,8 @@ class InspectorPanel(Panel):
             or shadow_changed
         )
         if changed:
-            ctx.submit(
+            self._submit_edit(
+                ctx,
                 cmd.SetLight(
                     index,
                     replace(
@@ -454,7 +486,7 @@ class InspectorPanel(Panel):
                         intensity=float(image_intensity),
                         cast_shadow=cast_shadow,
                     ),
-                )
+                ),
             )
 
     def _environment(self, ctx: PanelContext) -> None:
@@ -513,7 +545,8 @@ class InspectorPanel(Panel):
         changed |= haze_color_changed or haze_density_changed
 
         if changed:
-            ctx.submit(
+            self._submit_edit(
+                ctx,
                 cmd.SetEnvironment(
                     Environment(
                         headlight=(
@@ -535,7 +568,7 @@ class InspectorPanel(Panel):
                         haze_density=float(haze_density),
                         horizon_haze=environment.horizon_haze,
                     )
-                )
+                ),
             )
 
     @staticmethod
@@ -591,7 +624,8 @@ class InspectorPanel(Panel):
                 height_changed,
             )
         ):
-            ctx.submit(
+            self._submit_edit(
+                ctx,
                 cmd.SetSceneCamera(
                     info.camera_id,
                     replace(
@@ -605,7 +639,7 @@ class InspectorPanel(Panel):
                         orthographic=orthographic,
                         ortho_height=float(ortho_height),
                     ),
-                )
+                ),
             )
 
 

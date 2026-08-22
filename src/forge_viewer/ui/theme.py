@@ -99,8 +99,9 @@ TEXT_DISABLED: RGBA = rgb8(123, 129, 137)
 
 
 NODE_COLORS: dict[NodeKind, RGBA] = {
-    NodeKind.FLEX: rgb8(46, 53, 62),
+    NodeKind.FLEX: rgb8(30, 35, 42),
     NodeKind.WORLD: rgb8(66, 81, 103),
+    NodeKind.MODEL: rgb8(44, 50, 60),
     NodeKind.JOINT: rgb8(123, 84, 131),
     NodeKind.SITE: rgb8(162, 97, 124),
     NodeKind.GEOM: rgb8(172, 125, 101),

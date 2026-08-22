@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 
@@ -23,10 +24,6 @@ from ..types import (
     TextureData,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-
 LIGHT_OBJECT_BASE = 0x70000000
 CAMERA_OBJECT_BASE = 0x71000000
 ENVIRONMENT_OBJECT_ID = 0x72000000
@@ -34,6 +31,7 @@ ENVIRONMENT_OBJECT_ID = 0x72000000
 
 class NodeKind(enum.StrEnum):
     WORLD = "world"
+    MODEL = "model"
     ROBOT = "robot"
     LINK = "link"
     GEOM = "geom"
@@ -63,6 +61,7 @@ class SceneNode:
     light_index: int = -1
     camera_index: int = -1
     site_index: int = -1
+    model_id: int = -1
 
 
 @dataclass
@@ -95,6 +94,17 @@ class CameraInfo:
     camera_id: int
     name: str
     object_id: int = 0
+
+
+@dataclass(frozen=True)
+class SceneModelInfo:
+    """One file-backed model participating in an adapter scene."""
+
+    model_id: int
+    name: str
+    path: Path
+    removable: bool
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
 @dataclass(frozen=True)
@@ -164,6 +174,9 @@ class AdapterCaps:
     visual_groups: bool = False
     reload: bool = False
     scene_authoring: bool = False
+    scene_files: bool = False
+    edit_history: bool = False
+    model_composition: bool = False
     notes: tuple[str, ...] = ()
 
 
@@ -478,6 +491,30 @@ class SceneAdapterBase:
     def reload(self) -> None:
         raise RuntimeError(f"{self.caps.name} does not support reload")
 
+    def new_scene(self) -> None:
+        raise RuntimeError(f"{self.caps.name} does not support scene files")
+
+    def open_scene(self, path: Path) -> None:
+        raise RuntimeError(f"{self.caps.name} does not support scene files")
+
+    def save_scene(self, path: Path) -> None:
+        raise RuntimeError(f"{self.caps.name} does not support scene files")
+
+    def capture_edit_state(self) -> object | None:
+        return None
+
+    def restore_edit_state(self, state: object) -> bool:
+        return False
+
+    def scene_models(self) -> tuple[SceneModelInfo, ...]:
+        return ()
+
+    def add_scene_model(self, path: Path, position, rotation) -> int:
+        return -1
+
+    def remove_scene_model(self, model_id: int) -> bool:
+        return False
+
     def reset(self) -> None: ...
     def step(self, count: int = 1) -> None: ...
 
@@ -613,6 +650,15 @@ class SceneAdapterBase:
     def remove_scene_camera(self, camera_id: int) -> bool:
         return False
 
+    def duplicate_scene_entity(self, object_id: int) -> int:
+        return 0
+
+    def remove_scene_entity(self, object_id: int) -> bool:
+        return False
+
+    def rename_scene_entity(self, object_id: int, name: str) -> bool:
+        return False
+
     def apply_perturb(
         self, node_id: int, target_position: np.ndarray, target_rotation: np.ndarray, mode: str
     ) -> bool:
@@ -641,6 +687,14 @@ class SceneAdapter(Protocol):
 
     def load(self, path: Path) -> None: ...
     def reload(self) -> None: ...
+    def new_scene(self) -> None: ...
+    def open_scene(self, path: Path) -> None: ...
+    def save_scene(self, path: Path) -> None: ...
+    def capture_edit_state(self) -> object | None: ...
+    def restore_edit_state(self, state: object) -> bool: ...
+    def scene_models(self) -> tuple[SceneModelInfo, ...]: ...
+    def add_scene_model(self, path: Path, position, rotation) -> int: ...
+    def remove_scene_model(self, model_id: int) -> bool: ...
     def reset(self) -> None: ...
     def step(self, count: int = 1) -> None: ...
     def set_paused(self, paused: bool) -> bool: ...
@@ -686,6 +740,9 @@ class SceneAdapter(Protocol):
     def remove_scene_light(self, light_id: int) -> bool: ...
     def add_scene_camera(self, name: str, camera: CameraView) -> int: ...
     def remove_scene_camera(self, camera_id: int) -> bool: ...
+    def duplicate_scene_entity(self, object_id: int) -> int: ...
+    def remove_scene_entity(self, object_id: int) -> bool: ...
+    def rename_scene_entity(self, object_id: int, name: str) -> bool: ...
     def apply_perturb(
         self, node_id: int, target_position: np.ndarray, target_rotation: np.ndarray, mode: str
     ) -> bool: ...

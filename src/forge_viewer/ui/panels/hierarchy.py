@@ -108,6 +108,31 @@ class HierarchyPanel(Panel):
         if imgui.is_item_clicked() and not imgui.is_item_toggled_open():
             ctx.submit(cmd.SelectNode(node.node_id))
 
+        editable = bool(
+            ctx.session.adapter.caps.scene_authoring
+            and node.object_id
+            and node.kind in (NodeKind.LINK, NodeKind.LIGHT, NodeKind.CAMERA)
+        )
+        if imgui.begin_popup_context_item(f"##entity_context_{node.node_id}"):
+            if node.kind is NodeKind.MODEL and node.model_id >= 0:
+                remove, _ = imgui.menu_item("Remove Model", "", False)
+                if remove:
+                    ctx.submit(cmd.RemoveSceneModel(node.model_id))
+            elif editable:
+                ctx.submit(cmd.SelectNode(node.node_id))
+                duplicate, _ = imgui.menu_item("Duplicate", "Cmd/Ctrl+D", False)
+                rename, _ = imgui.menu_item("Rename", "F2", False)
+                remove, _ = imgui.menu_item("Delete", "Delete", False)
+                if duplicate:
+                    ctx.submit(cmd.DuplicateSceneEntity(node.object_id))
+                if rename and ctx.request_rename is not None:
+                    ctx.request_rename(node.object_id)
+                if remove:
+                    ctx.submit(cmd.RemoveSceneEntity(node.object_id))
+            else:
+                imgui.text_disabled("Read-only entity")
+            imgui.end_popup()
+
         imgui.same_line()
         imgui.text_disabled(str(node.kind))
 
@@ -117,7 +142,7 @@ class HierarchyPanel(Panel):
 
     @staticmethod
     def _visibility_toggle(ctx: PanelContext, node: SceneNode) -> None:
-        if node.kind is NodeKind.ENVIRONMENT:
+        if node.kind in (NodeKind.ENVIRONMENT, NodeKind.MODEL):
             return
         size = imgui.get_frame_height()
         avail = imgui.get_content_region_avail().x

@@ -14,7 +14,7 @@ from imgui_bundle import imgui, portable_file_dialogs
 from .. import commands as cmd
 from ..adapters.base import FrameNeeds, NodeKind
 from ..render.backend import FrameMode, LabelMode, RenderFlag
-from ..types import ViewportImage
+from ..types import Light, LightKind, MeshShape, ViewportImage
 from . import gestures as gs
 from .camera import CameraOut, OrbitCamera, ndc_from_viewport, unproject
 from .draw2d import ImguiDraw2D
@@ -35,7 +35,18 @@ CLICK_SLOP_PT = 4.0
 PICK_SCREEN_RADIUS_PT = 40.0
 
 MODEL_EXTENSIONS = frozenset((".xml", ".mjcf", ".urdf"))
-MODEL_FILTERS = ["Model files", "*.xml *.mjcf *.urdf", "All files", "*"]
+MODEL_FILTERS = [
+    "All supported models (*.xml, *.mjcf, *.urdf)",
+    "*.xml *.mjcf *.urdf",
+    "MuJoCo XML / MJCF (*.xml, *.mjcf)",
+    "*.xml *.mjcf",
+    "URDF (*.urdf)",
+    "*.urdf",
+    "All files",
+    "*",
+]
+SCENE_SUFFIX = ".forge.json"
+SCENE_FILTERS = ["Forge scenes", "*.forge.json", "All files", "*"]
 
 
 @dataclass
@@ -87,6 +98,16 @@ class ViewerApp:
         self._model_camera_view = None
         self._fixed_render_size: tuple[int, int] | None = None
         self._model_dialog: Any | None = None
+        self._model_dialog_action = ""
+        self._scene_dialog: Any | None = None
+        self._scene_dialog_action = ""
+        self._pending_document_action: tuple[str, Path | None] | None = None
+        self._after_save_action: tuple[str, Path | None] | None = None
+        self._rename_object_id = 0
+        self._rename_value = ""
+        self._open_rename_popup = False
+        self._window_title = ""
+        self._closing_without_save = False
         self._model_load_error = ""
         self._show_model_load_error = False
         self._model_drop_notice = ""
@@ -122,12 +143,22 @@ class ViewerApp:
         self.frame()
 
     def _should_close(self) -> bool:
-        return bool(self.window.should_close())
+        closing = bool(self.window.should_close())
+        if closing and self._closing_without_save:
+            return True
+        if closing and self.session.dirty and self._pending_document_action is None:
+            self.window.cancel_close()
+            self._pending_document_action = ("quit", None)
+            return False
+        return closing
 
     def release(self) -> None:
         if self._model_dialog is not None:
             self._model_dialog.kill()
             self._model_dialog = None
+        if self._scene_dialog is not None:
+            self._scene_dialog.kill()
+            self._scene_dialog = None
         if self.debug_bridge is not None:
             self.debug_bridge.close()
         self.backend.release()
@@ -142,6 +173,47 @@ class ViewerApp:
             self._report_model_error(result.message)
         return result
 
+    def add_model(
+        self, path: str | Path, position: tuple[float, float, float] | None = None
+    ) -> CommandResult:
+        location = position or tuple(float(value) for value in self.camera.pivot)
+        result = self.session.submit(cmd.AddSceneModel(Path(path), location))
+        if result.ok:
+            self._after_model_change()
+            self._set_model_drop_notice(result.message)
+        else:
+            self._report_model_error(result.message)
+        return result
+
+    def remove_model(self, model_id: int) -> CommandResult:
+        result = self.session.submit(cmd.RemoveSceneModel(model_id))
+        if result.ok:
+            self._after_model_change()
+            self._set_model_drop_notice(result.message)
+        else:
+            self._report_model_error(result.message)
+        return result
+
+    def open_scene(self, path: str | Path) -> CommandResult:
+        result = self.session.submit(cmd.OpenScene(Path(path)))
+        if result.ok:
+            self._after_model_change()
+            self._set_model_drop_notice(f"Opened {self.session.asset_path.name}")
+        else:
+            self._report_model_error(result.message)
+        return result
+
+    def save_scene(self, path: str | Path) -> CommandResult:
+        target = Path(path).expanduser()
+        if not target.name.endswith(SCENE_SUFFIX):
+            target = target.with_name(target.name + SCENE_SUFFIX)
+        result = self.session.submit(cmd.SaveScene(target))
+        if result.ok:
+            self._set_model_drop_notice(result.message)
+        else:
+            self._report_model_error(result.message)
+        return result
+
     def _after_model_change(self) -> None:
         self.router.abort()
         self.gizmo.cancel()
@@ -151,80 +223,241 @@ class ViewerApp:
         self._sync_structure()
         self._frame_scene(animate=False)
 
-    def _open_model_dialog(self) -> None:
+    def _open_model_dialog(self, action: str = "open") -> None:
         if self._model_dialog is not None:
             return
         current = self.session.asset_path
         default_path = str(current.parent if current is not None else Path.cwd())
         self._model_dialog = portable_file_dialogs.open_file(
-            "Open model", default_path, MODEL_FILTERS
+            "Add MJCF or URDF models" if action == "add" else "Open an MJCF or URDF model",
+            default_path,
+            MODEL_FILTERS,
+            portable_file_dialogs.opt.multiselect
+            if action == "add"
+            else portable_file_dialogs.opt.none,
         )
-        self._set_model_drop_notice("Choose an MJCF or URDF model")
+        self._model_dialog_action = action
+        self._set_model_drop_notice(
+            "Choose a model to add" if action == "add" else "Choose an MJCF or URDF model"
+        )
+
+    def _open_scene_dialog(self, action: str) -> None:
+        if self._scene_dialog is not None:
+            return
+        current = self.session.asset_path
+        if action == "save":
+            default = current or (Path.cwd() / f"scene{SCENE_SUFFIX}")
+            self._scene_dialog = portable_file_dialogs.save_file(
+                "Save Forge scene", str(default), SCENE_FILTERS
+            )
+        else:
+            default = current.parent if current is not None else Path.cwd()
+            self._scene_dialog = portable_file_dialogs.open_file(
+                "Open Forge scene", str(default), SCENE_FILTERS
+            )
+        self._scene_dialog_action = action
+
+    def _poll_scene_dialog(self) -> None:
+        dialog = self._scene_dialog
+        if dialog is None or not dialog.ready(0):
+            return
+        action = self._scene_dialog_action
+        self._scene_dialog = None
+        self._scene_dialog_action = ""
+        try:
+            selected = dialog.result()
+        except Exception as exc:
+            self._report_model_error(str(exc))
+            self._after_save_action = None
+            return
+        if isinstance(selected, (list, tuple)):
+            selected = selected[0] if selected else ""
+        if not selected:
+            self._after_save_action = None
+            return
+        if action == "save":
+            pending = self._after_save_action
+            self._after_save_action = None
+            if self.save_scene(selected).ok and pending is not None:
+                self._execute_document_action(*pending)
+        else:
+            self._request_document_action("open_scene", Path(selected))
 
     def _poll_model_dialog(self) -> None:
         dialog = self._model_dialog
         if dialog is None or not dialog.ready(0):
             return
+        action = self._model_dialog_action
         self._model_dialog = None
+        self._model_dialog_action = ""
         try:
             selected = dialog.result()
         except Exception as exc:
             self._report_model_error(str(exc))
             return
-        if selected:
+        if not selected:
+            return
+        if action == "add":
+            for path in selected:
+                if not self.add_model(path).ok:
+                    break
+        else:
             self.load_model(selected[0])
 
     def _poll_model_drop(self) -> None:
         paths = self.window.consume_file_drops()
         if not paths:
             return
-        if len(paths) != 1:
-            self._report_model_error("Drop one model at a time")
+        if len(paths) == 1 and paths[0].name.endswith(SCENE_SUFFIX):
+            path = paths[0]
+            if not self.session.adapter.caps.scene_files:
+                self._report_model_error("The current workspace cannot open Forge scene files")
+                return
+            self._request_document_action("open_scene", path)
             return
-        path = paths[0]
-        if path.suffix.lower() not in MODEL_EXTENSIONS:
-            self._report_model_error(f"Unsupported model file: {path.name}")
+        unsupported = next(
+            (path for path in paths if path.suffix.lower() not in MODEL_EXTENSIONS), None
+        )
+        if unsupported is not None:
+            self._report_model_error(f"Unsupported file: {unsupported.name}")
             return
-        self.load_model(path)
+        can_add = self.session.adapter.caps.model_composition
+        for path in paths:
+            source = self.session.source
+            has_scene_content = source is not None and source.instance_count > 0
+            if has_scene_content and can_add:
+                result = self.add_model(path)
+            else:
+                result = self.load_model(path)
+            if not result.ok:
+                break
 
     def _set_model_drop_notice(self, message: str) -> None:
         self._model_drop_notice = message
         self._model_drop_notice_until = time.monotonic() + 1.8
 
     def _draw_main_menu(self) -> None:
-        can_load = bool(self.session.adapter.caps.asset_loading)
+        caps = self.session.adapter.caps
+        can_load = bool(caps.asset_loading)
+        can_edit = bool(caps.scene_authoring)
+        can_scene_files = bool(caps.scene_files)
         shortcut = "Cmd" if sys.platform == "darwin" else "Ctrl"
+        new_scene = False
+        open_scene = False
+        save_scene = False
+        save_scene_as = False
         open_model = False
+        add_model = False
+        remove_model_id = -1
         reload_model = False
+        undo = False
+        redo = False
         quit_viewer = False
         if imgui.begin_main_menu_bar():
             if imgui.begin_menu("File"):
-                open_model, _ = imgui.menu_item(
-                    "Open Model...", f"{shortcut}+O", False, can_load and self._model_dialog is None
-                )
-                reload_model, _ = imgui.menu_item(
-                    "Reload Model",
-                    f"{shortcut}+Shift+O",
-                    False,
-                    can_load and self.session.asset_path is not None,
-                )
+                if can_scene_files:
+                    new_scene, _ = imgui.menu_item("New Scene", f"{shortcut}+N", False)
+                    open_scene, _ = imgui.menu_item(
+                        "Open Scene...", f"{shortcut}+O", False, self._scene_dialog is None
+                    )
+                    save_scene, _ = imgui.menu_item(
+                        "Save", f"{shortcut}+S", False, self.session.dirty
+                    )
+                    save_scene_as, _ = imgui.menu_item("Save As...", f"{shortcut}+Shift+S", False)
+                if can_load:
+                    if can_scene_files:
+                        imgui.separator()
+                    open_model, _ = imgui.menu_item(
+                        "Open Model (MJCF / URDF)...",
+                        f"{shortcut}+O" if not can_scene_files else "",
+                        False,
+                        self._model_dialog is None,
+                    )
+                    if caps.model_composition and self.session.scene_models:
+                        add_model, _ = imgui.menu_item(
+                            "Add Models (MJCF / URDF)...",
+                            "",
+                            False,
+                            self._model_dialog is None,
+                        )
+                        removable = [item for item in self.session.scene_models if item.removable]
+                        if imgui.begin_menu("Remove Model", bool(removable)):
+                            for item in removable:
+                                clicked, _ = imgui.menu_item(item.name, "", False)
+                                if clicked:
+                                    remove_model_id = item.model_id
+                            imgui.end_menu()
+                    reload_model, _ = imgui.menu_item(
+                        "Reload Model",
+                        f"{shortcut}+Shift+O",
+                        False,
+                        self.session.asset_path is not None,
+                    )
                 imgui.separator()
                 quit_viewer, _ = imgui.menu_item("Quit", f"{shortcut}+Q", False, True)
                 imgui.end_menu()
+            if imgui.begin_menu("Edit", caps.edit_history):
+                undo, _ = imgui.menu_item("Undo", f"{shortcut}+Z", False, self.session.can_undo)
+                redo, _ = imgui.menu_item(
+                    "Redo", f"{shortcut}+Shift+Z", False, self.session.can_redo
+                )
+                imgui.end_menu()
+            self._draw_entity_menu(shortcut, can_edit)
             path = self.session.asset_path
             if path is not None:
-                imgui.text_disabled(path.name)
+                imgui.text_disabled(path.name + (" *" if self.session.dirty else ""))
+            elif can_scene_files:
+                imgui.text_disabled("Untitled" + (" *" if self.session.dirty else ""))
             imgui.end_main_menu_bar()
 
         io = imgui.get_io()
         modifier = bool(io.key_ctrl or io.key_super)
-        if can_load and modifier and not io.want_text_input:
-            open_model |= imgui.is_key_pressed(imgui.Key.o, False) and not io.key_shift
-            reload_model |= imgui.is_key_pressed(imgui.Key.o, False) and bool(io.key_shift)
+        keyboard_free = not io.want_text_input and not imgui.is_any_item_active()
+        if modifier and keyboard_free:
+            if caps.edit_history:
+                undo |= imgui.is_key_pressed(imgui.Key.z, False) and not io.key_shift
+                redo |= imgui.is_key_pressed(imgui.Key.z, False) and bool(io.key_shift)
+            if can_scene_files:
+                new_scene |= imgui.is_key_pressed(imgui.Key.n, False)
+                open_scene |= imgui.is_key_pressed(imgui.Key.o, False) and not io.key_shift
+                save_scene |= imgui.is_key_pressed(imgui.Key.s, False) and not io.key_shift
+                save_scene_as |= imgui.is_key_pressed(imgui.Key.s, False) and bool(io.key_shift)
+            elif can_load:
+                open_model |= imgui.is_key_pressed(imgui.Key.o, False) and not io.key_shift
+            if can_load:
+                reload_model |= imgui.is_key_pressed(imgui.Key.o, False) and bool(io.key_shift)
+            if can_edit and self._selected_entity() and imgui.is_key_pressed(imgui.Key.d, False):
+                self._duplicate_selected()
         quit_viewer |= modifier and imgui.is_key_pressed(imgui.Key.q, False)
+        if can_edit and keyboard_free and self._selected_entity():
+            if imgui.is_key_pressed(imgui.Key.delete, False) or imgui.is_key_pressed(
+                imgui.Key.backspace, False
+            ):
+                self._remove_selected()
+            if imgui.is_key_pressed(imgui.Key.f2, False):
+                self.request_rename(self.session.selected)
 
+        if new_scene:
+            self._request_document_action("new_scene")
+        if undo:
+            self.session.submit(cmd.Undo())
+        if redo:
+            self.session.submit(cmd.Redo())
+        if open_scene:
+            self._open_scene_dialog("open")
+        if save_scene:
+            if self.session.asset_path is None:
+                self._open_scene_dialog("save")
+            else:
+                self.save_scene(self.session.asset_path)
+        if save_scene_as:
+            self._open_scene_dialog("save")
         if open_model:
             self._open_model_dialog()
+        if add_model:
+            self._open_model_dialog("add")
+        if remove_model_id >= 0:
+            self.remove_model(remove_model_id)
         if reload_model:
             result = self.session.submit(cmd.Reload())
             if result.ok:
@@ -233,7 +466,105 @@ class ViewerApp:
             else:
                 self._report_model_error(result.message)
         if quit_viewer:
-            self.window.request_close()
+            self._request_document_action("quit")
+
+    def _draw_entity_menu(self, shortcut: str, enabled: bool) -> None:
+        if not imgui.begin_menu("Entity", enabled):
+            return
+        if imgui.begin_menu("Create"):
+            for label, shape in (
+                ("Box", MeshShape.BOX),
+                ("Sphere", MeshShape.SPHERE),
+                ("Cylinder", MeshShape.CYLINDER),
+                ("Cone", MeshShape.CONE),
+                ("Plane", MeshShape.PLANE),
+            ):
+                clicked, _ = imgui.menu_item(label, "", False)
+                if clicked:
+                    self._add_scene_object(shape, label.lower())
+            imgui.separator()
+            point_light, _ = imgui.menu_item("Point Light", "", False)
+            camera, _ = imgui.menu_item("Camera", "", False)
+            if point_light:
+                self._add_scene_light()
+            if camera:
+                self._add_scene_camera()
+            imgui.end_menu()
+        selected = bool(self._selected_entity())
+        duplicate, _ = imgui.menu_item("Duplicate", f"{shortcut}+D", False, selected)
+        rename, _ = imgui.menu_item("Rename", "F2", False, selected)
+        remove, _ = imgui.menu_item("Delete", "Delete", False, selected)
+        if duplicate:
+            self._duplicate_selected()
+        if rename:
+            self.request_rename(self.session.selected)
+        if remove:
+            self._remove_selected()
+        imgui.end_menu()
+
+    def _entity_name(self, base: str) -> str:
+        names = {node.name for node in self.session.nodes}
+        if base not in names:
+            return base
+        index = 2
+        while f"{base} {index}" in names:
+            index += 1
+        return f"{base} {index}"
+
+    def _add_scene_object(self, shape: MeshShape, base_name: str) -> None:
+        position = tuple(float(value) for value in self._camera_view().target)
+        size = (4.0, 4.0, 0.02) if shape is MeshShape.PLANE else (0.5, 0.5, 0.5)
+        result = self.session.submit(
+            cmd.AddSceneObject(shape, self._entity_name(base_name), size=size, position=position)
+        )
+        if result.ok:
+            self.session.submit(cmd.Select(result.entity_id))
+
+    def _add_scene_light(self) -> None:
+        view = self._camera_view()
+        result = self.session.submit(
+            cmd.AddSceneLight(
+                self._entity_name("point light"),
+                Light(kind=LightKind.POINT, position=np.asarray(view.eye, np.float32).copy()),
+            )
+        )
+        if result.ok:
+            from ..adapters.base import LIGHT_OBJECT_BASE
+
+            self.session.submit(cmd.Select(LIGHT_OBJECT_BASE + result.entity_id))
+
+    def _add_scene_camera(self) -> None:
+        result = self.session.submit(
+            cmd.AddSceneCamera(self._entity_name("camera"), self._camera_view())
+        )
+        if result.ok:
+            from ..adapters.base import CAMERA_OBJECT_BASE
+
+            self.session.submit(cmd.Select(CAMERA_OBJECT_BASE + result.entity_id))
+
+    def _duplicate_selected(self) -> None:
+        object_id = self._selected_entity()
+        if object_id:
+            self.session.submit(cmd.DuplicateSceneEntity(object_id))
+
+    def _remove_selected(self) -> None:
+        object_id = self._selected_entity()
+        if object_id:
+            self.session.submit(cmd.RemoveSceneEntity(object_id))
+
+    def _selected_entity(self) -> int:
+        node = self.session.selected_node
+        if node is None or node.kind not in (NodeKind.LINK, NodeKind.LIGHT, NodeKind.CAMERA):
+            return 0
+        return int(node.object_id)
+
+    def request_rename(self, object_id: int) -> None:
+        node = self.session.node_by_object_id(object_id)
+        if node is None or node.kind not in (NodeKind.LINK, NodeKind.LIGHT, NodeKind.CAMERA):
+            return
+        self._rename_object_id = int(object_id)
+        self._rename_value = node.name
+        self._open_rename_popup = True
 
     def _report_model_error(self, message: str) -> None:
         self._model_load_error = message
@@ -241,10 +572,10 @@ class ViewerApp:
 
     def _draw_model_load_error(self) -> None:
         if self._show_model_load_error:
-            imgui.open_popup("Model load failed")
+            imgui.open_popup("File operation failed")
             self._show_model_load_error = False
         visible, _ = imgui.begin_popup_modal(
-            "Model load failed", None, imgui.WindowFlags_.always_auto_resize.value
+            "File operation failed", None, imgui.WindowFlags_.always_auto_resize.value
         )
         if not visible:
             return
@@ -253,6 +584,98 @@ class ViewerApp:
         if imgui.button("OK", imgui.ImVec2(100.0, 0.0)):
             imgui.close_current_popup()
         imgui.end_popup()
+
+    def _request_document_action(self, action: str, path: Path | None = None) -> None:
+        if self.session.dirty:
+            self._pending_document_action = (action, path)
+            return
+        self._execute_document_action(action, path)
+
+    def _execute_document_action(self, action: str, path: Path | None = None) -> None:
+        if action == "new_scene":
+            result = self.session.submit(cmd.NewScene())
+            if result.ok:
+                self._after_model_change()
+                self._set_model_drop_notice("New Forge scene")
+            else:
+                self._report_model_error(result.message)
+        elif action == "open_scene" and path is not None:
+            self.open_scene(path)
+        elif action == "quit":
+            self._closing_without_save = True
+            self.window.request_close()
+
+    def _draw_unsaved_changes(self) -> None:
+        pending = self._pending_document_action
+        if pending is None:
+            return
+        imgui.open_popup("Unsaved changes")
+        visible, _ = imgui.begin_popup_modal(
+            "Unsaved changes", None, imgui.WindowFlags_.always_auto_resize.value
+        )
+        if not visible:
+            return
+        name = self.session.asset_path.name if self.session.asset_path is not None else "Untitled"
+        imgui.text(f"Save changes to {name}?")
+        imgui.spacing()
+        if imgui.button("Save", imgui.ImVec2(100.0, 0.0)):
+            if self.session.asset_path is None:
+                self._after_save_action = pending
+                self._pending_document_action = None
+                self._open_scene_dialog("save")
+            elif self.save_scene(self.session.asset_path).ok:
+                self._pending_document_action = None
+                self._execute_document_action(*pending)
+            imgui.close_current_popup()
+        imgui.same_line()
+        if imgui.button("Discard", imgui.ImVec2(100.0, 0.0)):
+            self._pending_document_action = None
+            self._execute_document_action(*pending)
+            imgui.close_current_popup()
+        imgui.same_line()
+        if imgui.button("Cancel", imgui.ImVec2(100.0, 0.0)):
+            self._pending_document_action = None
+            imgui.close_current_popup()
+        imgui.end_popup()
+
+    def _draw_rename_popup(self) -> None:
+        if self._open_rename_popup:
+            imgui.open_popup("Rename Entity")
+            self._open_rename_popup = False
+        visible, _ = imgui.begin_popup_modal(
+            "Rename Entity", None, imgui.WindowFlags_.always_auto_resize.value
+        )
+        if not visible:
+            return
+        imgui.set_next_item_width(320.0 * self.window.style_scale)
+        submitted, self._rename_value = imgui.input_text(
+            "##entity_name",
+            self._rename_value,
+            imgui.InputTextFlags_.enter_returns_true.value,
+        )
+        if imgui.is_window_appearing():
+            imgui.set_keyboard_focus_here(-1)
+        accept = submitted or imgui.button("Rename", imgui.ImVec2(100.0, 0.0))
+        imgui.same_line()
+        cancel = imgui.button("Cancel", imgui.ImVec2(100.0, 0.0)) or imgui.is_key_pressed(
+            imgui.Key.escape, False
+        )
+        if accept and self._rename_value.strip():
+            self.session.submit(
+                cmd.RenameSceneEntity(self._rename_object_id, self._rename_value.strip())
+            )
+            imgui.close_current_popup()
+        elif cancel:
+            imgui.close_current_popup()
+        imgui.end_popup()
+
+    def _sync_window_title(self) -> None:
+        path = self.session.asset_path
+        document = path.name if path is not None else "Untitled"
+        title = f"{document}{' *' if self.session.dirty else ''} — {self.title}"
+        if title != self._window_title:
+            self.window.set_title(title)
+            self._window_title = title
 
     def frame(self) -> None:
         window = self.window
@@ -263,6 +686,7 @@ class ViewerApp:
         window.begin_frame()
         self._sync_display_scale()
         self._poll_model_dialog()
+        self._poll_scene_dialog()
         self._poll_model_drop()
         self._draw_main_menu()
         window.begin_dockspace()
@@ -300,7 +724,10 @@ class ViewerApp:
         ctx = self._panel_context()
         self._draw_viewport(ctx)
         self.panels.draw(ctx)
+        self._draw_rename_popup()
+        self._draw_unsaved_changes()
         self._draw_model_load_error()
+        self._sync_window_title()
         window.end_frame()
         self._frame_index += 1
 
@@ -310,6 +737,8 @@ class ViewerApp:
         self.panels.poll_shortcuts()
 
         if io.want_text_input:
+            return Keys()
+        if io.key_ctrl or io.key_super:
             return Keys()
 
         def down(key) -> float:
@@ -636,14 +1065,23 @@ class ViewerApp:
         source = self.session.source
         empty = source is not None and source.instance_count == 0
         notice = self._model_drop_notice if time.monotonic() < self._model_drop_notice_until else ""
-        dragging = self.window.file_drag_active and self.session.adapter.caps.asset_loading
+        caps = self.session.adapter.caps
+        dragging = self.window.file_drag_active and (caps.asset_loading or caps.scene_files)
         if not empty and not notice and not dragging:
             return
-        message = (
-            "Release to load this model"
-            if dragging
-            else notice or "Drop an MJCF or URDF model here\nFile > Open Model..."
+        empty_hint = (
+            "Drop a .forge.json scene here\nFile > Open Scene...  ·  Entity > Create"
+            if caps.scene_files
+            else "Drop an MJCF or URDF model here\nFile > Open Model...  ·  Add Model..."
         )
+        if dragging:
+            message = (
+                "Release to add model(s)"
+                if caps.model_composition and self.session.scene_models
+                else "Release to open model"
+            )
+        else:
+            message = notice or empty_hint
         lines = message.splitlines()
         sizes = [overlay.text_size(line) for line in lines]
         scale = self.window.style_scale
@@ -762,7 +1200,7 @@ class ViewerApp:
                 font.mono_index,
                 font.cjk_path,
                 font.cjk_index,
-                font.size_pt * self.window.ui_scale,
+                self.window.config.font_size_pt * self.window.ui_scale,
             )
         self._display_scale_generation = generation
 
@@ -774,6 +1212,7 @@ class ViewerApp:
             model_camera_id=self._model_camera_id,
             model_camera_view=self._model_camera_view,
             select_model_camera=self.select_model_camera,
+            request_rename=self.request_rename,
             gizmo=self.gizmo,
             perturb=self.perturb,
             theme=self.theme,

@@ -73,6 +73,53 @@ class LoadAsset(Command):
 
 
 @dataclass(frozen=True)
+class AddSceneModel(Command):
+    path: Path
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    rotation: np.ndarray = field(default_factory=lambda: np.eye(3, dtype=np.float32))
+
+
+@dataclass(frozen=True)
+class RemoveSceneModel(Command):
+    model_id: int
+
+
+@dataclass(frozen=True)
+class NewScene(Command):
+    pass
+
+
+@dataclass(frozen=True)
+class OpenScene(Command):
+    path: Path
+
+
+@dataclass(frozen=True)
+class SaveScene(Command):
+    path: Path
+
+
+@dataclass(frozen=True)
+class BeginEditTransaction(Command):
+    label: str = "Edit"
+
+
+@dataclass(frozen=True)
+class EndEditTransaction(Command):
+    pass
+
+
+@dataclass(frozen=True)
+class Undo(Command):
+    pass
+
+
+@dataclass(frozen=True)
+class Redo(Command):
+    pass
+
+
+@dataclass(frozen=True)
 class LoadKeyframe(Command):
     keyframe_id: int
 
@@ -173,6 +220,22 @@ class AddSceneCamera(Command):
 @dataclass(frozen=True)
 class RemoveSceneCamera(Command):
     camera_id: int
+
+
+@dataclass(frozen=True)
+class DuplicateSceneEntity(Command):
+    object_id: int
+
+
+@dataclass(frozen=True)
+class RemoveSceneEntity(Command):
+    object_id: int
+
+
+@dataclass(frozen=True)
+class RenameSceneEntity(Command):
+    object_id: int
+    name: str
 
 
 @dataclass(frozen=True)

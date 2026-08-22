@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading scene-io remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -12,7 +12,9 @@ help:
 		'  make egl-viewer         Linux viewer with a GLFW EGL context' \
 		'  make hidpi              viewer with an explicit 200% UI scale' \
 		'  make empty              empty viewer; load MJCF or URDF from File menu' \
+		'  make editor             empty Forge scene with file and Entity authoring menus' \
 		'  make model-loading      empty, MJCF, and URDF loading reference images' \
+		'  make model-composition  add and remove MJCF/URDF models at runtime' \
 		'  make robot             Unitree Go2; downloads on first run' \
 		'  make outline           selection and antialiased outline' \
 		'  make gizmo             2D/3D position/rotation gizmo' \
@@ -51,6 +53,9 @@ help:
 		'Backends and remote viewing:' \
 		'  make canvas            standalone scene and material editor' \
 		'  make scene-io          save, load, and capture a Forge scene' \
+		'  make editor-files      scene document workflow acceptance' \
+		'  make entity-edit       Entity lifecycle acceptance' \
+		'  make undo-redo        editor history and continuous edit acceptance' \
 		'  make toy-physics       minimal independent physics backend' \
 		'  make live-view         one publisher and two remote viewers' \
 		'  make remote-authoring  runtime entity creation over Live View' \
@@ -101,7 +106,7 @@ test:
 gpu:
 	@for f in $$(ls tests/gpu/test_*.py); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
 
-GPU_WGPU_FILES := tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py tests/gpu/test_horizon_haze.py tests/gpu/test_shading.py tests/gpu/test_shadows.py tests/gpu/test_reflection.py tests/gpu/test_outline.py tests/gpu/test_tendon.py tests/gpu/test_debugdraw.py tests/gpu/test_gizmo.py tests/gpu/test_pipeline.py tests/gpu/test_viewer_wgpu.py tests/gpu/test_static_viewer.py tests/gpu/test_model_loading.py tests/gpu/test_ui_interaction.py tests/gpu/test_wgpu_shader_reload.py
+GPU_WGPU_FILES := tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py tests/gpu/test_hidpi.py tests/gpu/test_horizon_haze.py tests/gpu/test_shading.py tests/gpu/test_shadows.py tests/gpu/test_reflection.py tests/gpu/test_outline.py tests/gpu/test_tendon.py tests/gpu/test_debugdraw.py tests/gpu/test_gizmo.py tests/gpu/test_pipeline.py tests/gpu/test_viewer_wgpu.py tests/gpu/test_static_viewer.py tests/gpu/test_model_loading.py tests/gpu/test_ui_interaction.py tests/gpu/test_wgpu_shader_reload.py
 ## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
 gpu-wgpu:
@@ -156,8 +161,24 @@ hidpi-gallery:
 model-loading:
 	$(PY) -m forge_viewer.tools.model_loading $(ARGS)
 
+model-composition:
+	$(PYTEST) -q -m physics tests/test_adapter.py -k 'mjspec_model_composition'
+	$(PY) -m forge_viewer.tools.model_composition $(ARGS)
+
 scene-io:
 	$(PY) -m forge_viewer.tools.scene_io $(ARGS)
+
+editor-files:
+	$(PYTEST) -q tests/test_static_scene.py -k 'document_commands'
+	$(PY) -m forge_viewer.tools.scene_io $(ARGS)
+
+entity-edit:
+	$(PYTEST) -q tests/test_static_scene.py -k 'entity_lifecycle'
+	$(PYTEST) -q -m gpu tests/gpu/test_static_viewer.py -k 'editor_actions'
+
+undo-redo:
+	$(PYTEST) -q tests/test_static_scene.py -k 'undo_redo or history or edit_transaction'
+	$(PYTEST) -q -m gpu tests/gpu/test_static_viewer.py -k 'undo_redo'
 
 remote-authoring:
 	$(PY) -m forge_viewer.tools.remote_authoring $(ARGS)
@@ -196,6 +217,10 @@ hidpi:
 ## Open an empty MuJoCo scene and load MJCF or URDF from File > Open Model.
 empty:
 	$(PY) -m forge_viewer.cli view empty --paused $(ARGS)
+
+## Empty authored scene with New/Open/Save and Entity creation workflows.
+editor:
+	$(PY) -m forge_viewer.cli canvas --demo empty $(ARGS)
 
 ## Programmatic scene, Forge rendering, and the standard UI.
 canvas:

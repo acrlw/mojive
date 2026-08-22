@@ -15,7 +15,8 @@ from forge_viewer import commands as cmd  # noqa: E402
 from forge_viewer.bridge import DebugClient  # noqa: E402
 from forge_viewer.composition import build_scene  # noqa: E402
 from forge_viewer.demos import canvas_scene  # noqa: E402
-from forge_viewer.types import DEFAULT_MATERIAL, Material  # noqa: E402
+from forge_viewer.scene import Scene  # noqa: E402
+from forge_viewer.types import DEFAULT_MATERIAL, Material, MeshShape  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -152,3 +153,71 @@ def test_canvas_records_streaming_video(canvas, tmp_path):
     assert output.stat().st_size > 1000
     assert count == 4
     assert metadata["fps"] == pytest.approx(24.0)
+
+
+def test_editor_actions_save_and_restore_an_authored_scene(tmp_path, monkeypatch):
+    viewer = build_scene(Scene(), vsync=False, width=960, height=640)
+    document = tmp_path / "editor.forge.json"
+    try:
+        viewer.sync()
+        viewer.app._add_scene_object(MeshShape.BOX, "box")
+        assert viewer.session.selected
+        viewer.app._duplicate_selected()
+        assert viewer.session.source.instance_count == 2
+        assert viewer.session.dirty
+
+        assert viewer.app.save_scene(document)
+        assert not viewer.session.dirty
+        viewer.app._execute_document_action("new_scene")
+        assert viewer.session.source.instance_count == 0
+        assert viewer.app.open_scene(document)
+        viewer.sync()
+        assert viewer.backend.stats.instances == 2
+        assert [node.name for node in viewer.session.nodes if node.object_id][:2] == [
+            "box",
+            "box Copy",
+        ]
+
+        from imgui_bundle import imgui
+
+        box = next(node for node in viewer.session.nodes if node.name == "box")
+        viewer.session.submit(cmd.Select(box.object_id))
+        viewer.app.request_rename(box.object_id)
+        viewer.sync()
+        imgui.get_io().add_key_event(imgui.Key.escape, True)
+        viewer.sync()
+        imgui.get_io().add_key_event(imgui.Key.escape, False)
+        viewer.sync()
+
+        viewer.app._add_scene_object(MeshShape.SPHERE, "sphere")
+        viewer.app._request_document_action("new_scene")
+        original_button = imgui.button
+
+        def discard_changes(label, *args, **kwargs):
+            clicked = original_button(label, *args, **kwargs)
+            return True if label == "Discard" else clicked
+
+        monkeypatch.setattr(imgui, "button", discard_changes)
+        viewer.sync()
+        assert viewer.session.source.instance_count == 0
+    finally:
+        viewer.release()
+
+
+def test_editor_undo_redo_updates_the_render_backend():
+    viewer = build_scene(Scene(), vsync=False, width=960, height=640)
+    try:
+        viewer.sync()
+        viewer.app._add_scene_object(MeshShape.BOX, "box")
+        viewer.sync()
+        assert viewer.backend.stats.instances == 1
+
+        assert viewer.session.submit(cmd.Undo())
+        viewer.sync()
+        assert viewer.backend.stats.instances == 0
+
+        assert viewer.session.submit(cmd.Redo())
+        viewer.sync()
+        assert viewer.backend.stats.instances == 1
+    finally:
+        viewer.release()

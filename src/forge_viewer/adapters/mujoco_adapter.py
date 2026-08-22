@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import warnings
 from colorsys import hsv_to_rgb
 from dataclasses import dataclass, replace
 from itertools import pairwise
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import numpy as np
 
@@ -46,6 +47,7 @@ from .base import (
     PhysicsState,
     SceneAdapterBase,
     SceneFrame,
+    SceneModelInfo,
     SceneNode,
     SceneSource,
     SensorInfo,
@@ -53,9 +55,6 @@ from .base import (
 )
 from .mujoco_deformables import build_deformables, update_deformables
 from .mujoco_ik import solve as solve_inverse_kinematics
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 try:
     import mujoco
@@ -120,6 +119,25 @@ class _RangefinderSpec:
     object_id: int
 
 
+@dataclass(frozen=True)
+class _AttachedModel:
+    model_id: int
+    name: str
+    path: Path
+    prefix: str
+    position: np.ndarray
+    rotation: np.ndarray
+
+
+@dataclass(frozen=True)
+class _NamedModelState:
+    joints: dict[str, tuple[np.ndarray, np.ndarray]]
+    actuators: dict[str, tuple[np.ndarray, np.ndarray]]
+    mocap: dict[str, tuple[np.ndarray, np.ndarray]]
+    equality: dict[str, bool]
+    time: float
+
+
 class MuJoCoAdapter(SceneAdapterBase):
     def __init__(self, path: Path | None = None) -> None:
         if mujoco is None:  # pragma: no cover
@@ -143,10 +161,14 @@ class MuJoCoAdapter(SceneAdapterBase):
             equality_constraints=True,
             visual_groups=True,
             reload=True,
+            model_composition=True,
         )
         self._m = None
         self._d = None
         self._path: Path | None = None
+        self._root_path: Path | None = None
+        self._attached_models: list[_AttachedModel] = []
+        self._next_model_id = 1
         self._structure_revision = 0
         self._notes: list[str] = []
 
@@ -229,11 +251,16 @@ class MuJoCoAdapter(SceneAdapterBase):
             self.load(path)
 
     def load(self, path: Path) -> None:
+        path = Path(path).expanduser().resolve()
         try:
-            model = mujoco.MjModel.from_xml_path(str(path))
+            model = mujoco.MjSpec.from_file(str(path)).compile()
         except Exception as exc:
             raise RuntimeError(f"Failed to load {path}: {exc}") from exc
         self._path = path
+        self._root_path = path
+        self._attached_models.clear()
+        self._next_model_id = 1
+        self.caps = replace(self.caps, model_composition=True)
         self._install(model)
 
     def load_model(self, model, data=None) -> None:
@@ -243,6 +270,9 @@ class MuJoCoAdapter(SceneAdapterBase):
         if data is not None and data.model is not model:
             raise ValueError("data was created for a different MuJoCo model")
         self._path = None
+        self._root_path = None
+        self._attached_models.clear()
+        self.caps = replace(self.caps, model_composition=False)
         self._install(model, data)
 
     def use_data(self, data) -> None:
@@ -302,9 +332,186 @@ class MuJoCoAdapter(SceneAdapterBase):
         return changed
 
     def reload(self) -> None:
-        if self._path is None:
+        if self._root_path is None:
             raise RuntimeError("No asset has been loaded")
-        self.load(self._path)
+        self._install(self._compile_composed_model())
+
+    def scene_models(self) -> tuple[SceneModelInfo, ...]:
+        if self._root_path is None:
+            return ()
+        root = SceneModelInfo(0, self._root_path.stem, self._root_path, False)
+        attached = tuple(
+            SceneModelInfo(
+                item.model_id,
+                item.name,
+                item.path,
+                True,
+                tuple(float(value) for value in item.position),
+            )
+            for item in self._attached_models
+        )
+        return (root, *attached)
+
+    def add_scene_model(self, path: Path, position, rotation) -> int:
+        if self._root_path is None:
+            return -1
+        path = Path(path).expanduser().resolve()
+        model_id = self._next_model_id
+        item = _AttachedModel(
+            model_id=model_id,
+            name=path.stem,
+            path=path,
+            prefix=f"forge_{model_id}_",
+            position=np.asarray(position, np.float64).reshape(3).copy(),
+            rotation=np.asarray(rotation, np.float64).reshape(3, 3).copy(),
+        )
+        state = self._capture_named_model_state()
+        self._attached_models.append(item)
+        try:
+            model = self._compile_composed_model()
+        except Exception as exc:
+            self._attached_models.pop()
+            raise RuntimeError(f"Failed to add {path}: {exc}") from exc
+        self._next_model_id += 1
+        self._install(model)
+        self._restore_named_model_state(state)
+        return model_id
+
+    def remove_scene_model(self, model_id: int) -> bool:
+        index = next(
+            (
+                index
+                for index, item in enumerate(self._attached_models)
+                if item.model_id == int(model_id)
+            ),
+            -1,
+        )
+        if index < 0:
+            return False
+        state = self._capture_named_model_state()
+        item = self._attached_models.pop(index)
+        try:
+            model = self._compile_composed_model()
+        except Exception as exc:
+            self._attached_models.insert(index, item)
+            raise RuntimeError(f"Failed to remove {item.name}: {exc}") from exc
+        self._install(model)
+        self._restore_named_model_state(state)
+        return True
+
+    def _compile_composed_model(self):
+        spec = mujoco.MjSpec.from_file(str(self._root_path))
+        for item in self._attached_models:
+            child = mujoco.MjSpec.from_file(str(item.path))
+            child.option = spec.option
+            frame = spec.worldbody.add_frame(name=f"forge_model_{item.model_id}")
+            frame.pos = item.position
+            frame.quat = math3d.mat3_to_quat(item.rotation)
+            spec.attach(child, prefix=item.prefix, frame=frame)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Attach conflict.*")
+            return spec.compile()
+
+    @staticmethod
+    def _joint_state_key(model, joint: int) -> str:
+        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, joint)
+        if name:
+            return name
+        body = int(model.jnt_bodyid[joint])
+        body_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body) or str(body)
+        ordinal = joint - int(model.body_jntadr[body])
+        return f"{body_name}:joint:{ordinal}"
+
+    @staticmethod
+    def _actuator_state_key(model, actuator: int) -> str:
+        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_ACTUATOR, actuator)
+        return name or f"actuator:{actuator}"
+
+    @staticmethod
+    def _span(addresses, index: int, total: int) -> slice:
+        start = int(addresses[index])
+        stop = int(addresses[index + 1]) if index + 1 < len(addresses) else int(total)
+        return slice(start, stop)
+
+    def _capture_named_model_state(self) -> _NamedModelState:
+        model, data = self._m, self._d
+        joints = {}
+        for joint in range(model.njnt):
+            qpos = self._span(model.jnt_qposadr, joint, model.nq)
+            qvel = self._span(model.jnt_dofadr, joint, model.nv)
+            joints[self._joint_state_key(model, joint)] = (
+                np.asarray(data.qpos[qpos]).copy(),
+                np.asarray(data.qvel[qvel]).copy(),
+            )
+        actuators = {}
+        for actuator in range(model.nactuator):
+            ctrl_start = int(model.actuator_ctrladr[actuator])
+            ctrl_stop = ctrl_start + int(model.actuator_ctrlnum[actuator])
+            act_start = int(model.actuator_actadr[actuator])
+            act_stop = act_start + int(model.actuator_actnum[actuator])
+            activation = (
+                np.asarray(data.act[act_start:act_stop]).copy()
+                if act_start >= 0
+                else np.zeros(0, np.float64)
+            )
+            actuators[self._actuator_state_key(model, actuator)] = (
+                np.asarray(data.ctrl[ctrl_start:ctrl_stop]).copy(),
+                activation,
+            )
+        mocap = {}
+        for body in range(1, model.nbody):
+            mocap_id = int(model.body_mocapid[body])
+            if mocap_id < 0:
+                continue
+            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body) or f"body:{body}"
+            mocap[name] = (data.mocap_pos[mocap_id].copy(), data.mocap_quat[mocap_id].copy())
+        equality = {
+            mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_EQUALITY, index)
+            or f"equality:{index}": bool(data.eq_active[index])
+            for index in range(model.neq)
+        }
+        return _NamedModelState(joints, actuators, mocap, equality, float(data.time))
+
+    def _restore_named_model_state(self, state: _NamedModelState) -> None:
+        model, data = self._m, self._d
+        for joint in range(model.njnt):
+            values = state.joints.get(self._joint_state_key(model, joint))
+            if values is None:
+                continue
+            qpos = self._span(model.jnt_qposadr, joint, model.nq)
+            qvel = self._span(model.jnt_dofadr, joint, model.nv)
+            if data.qpos[qpos].shape == values[0].shape:
+                data.qpos[qpos] = values[0]
+            if data.qvel[qvel].shape == values[1].shape:
+                data.qvel[qvel] = values[1]
+        for actuator in range(model.nactuator):
+            values = state.actuators.get(self._actuator_state_key(model, actuator))
+            if values is None:
+                continue
+            ctrl_start = int(model.actuator_ctrladr[actuator])
+            ctrl_stop = ctrl_start + int(model.actuator_ctrlnum[actuator])
+            act_start = int(model.actuator_actadr[actuator])
+            act_stop = act_start + int(model.actuator_actnum[actuator])
+            if data.ctrl[ctrl_start:ctrl_stop].shape == values[0].shape:
+                data.ctrl[ctrl_start:ctrl_stop] = values[0]
+            if act_start >= 0 and data.act[act_start:act_stop].shape == values[1].shape:
+                data.act[act_start:act_stop] = values[1]
+        for body in range(1, model.nbody):
+            mocap_id = int(model.body_mocapid[body])
+            if mocap_id < 0:
+                continue
+            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body) or f"body:{body}"
+            values = state.mocap.get(name)
+            if values is not None:
+                data.mocap_pos[mocap_id], data.mocap_quat[mocap_id] = values
+        for index in range(model.neq):
+            name = (
+                mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_EQUALITY, index) or f"equality:{index}"
+            )
+            if name in state.equality:
+                data.eq_active[index] = state.equality[name]
+        data.time = state.time
+        mujoco.mj_forward(model, data)
 
     def _install(self, model, data=None) -> None:
         self._m = model
@@ -2074,19 +2281,35 @@ class MuJoCoAdapter(SceneAdapterBase):
             self._node_body[node_id] = body
             return node_id
 
-        for b in range(m.nbody):
+        world_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, 0) or "world"
+        body_node[0] = add(world_name, NodeKind.WORLD, -1, 0, object_id=0)
+        model_parents = {
+            item.model_id: add(
+                item.name,
+                NodeKind.MODEL,
+                body_node[0],
+                -1,
+                model_id=item.model_id,
+            )
+            for item in self._attached_models
+        }
+
+        for b in range(1, m.nbody):
             name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b) or f"body{b}"
-            if b == 0:
-                body_node[b] = add(name or "world", NodeKind.WORLD, -1, 0, object_id=0)
-                continue
             parent = int(m.body_parentid[b])
             has_child = bool(np.any(m.body_parentid[b + 1 :] == b))
-
             kind = NodeKind.ROBOT if parent == 0 and has_child else NodeKind.LINK
+            parent_node = body_node[parent]
+            if parent == 0:
+                attached = next(
+                    (item for item in self._attached_models if name.startswith(item.prefix)), None
+                )
+                if attached is not None:
+                    parent_node = model_parents[attached.model_id]
             body_node[b] = add(
                 name,
                 kind,
-                body_node[parent],
+                parent_node,
                 b,
                 object_id=b,
                 posable=self._is_posable_body(b),

@@ -39,8 +39,10 @@ from forge_viewer.ui.gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,
     DEFAULT_TRANSLATION_SNAP_M,
     ObjectGizmo,
+    RotationTickProjection,
     _clip_line_to_rect,
     _masked_axis_start,
+    _project_rotation_dial,
     _projected_line_parameters,
     _rotation_fill_alpha,
     _rotation_sweep,
@@ -480,6 +482,66 @@ def test_gizmo_snap_defaults_match_the_settings_resets() -> None:
     gizmo = ObjectGizmo()
     assert gizmo.translation_snap_m == DEFAULT_TRANSLATION_SNAP_M == 0.5
     assert gizmo.rotation_snap_deg == DEFAULT_ROTATION_SNAP_DEG == 5.0
+    assert gizmo.rotation_tick_projection is RotationTickProjection.ORTHOGRAPHIC
+
+
+def test_rotation_tick_projection_can_be_changed_while_idle() -> None:
+    gizmo = ObjectGizmo()
+    gizmo.set_rotation_tick_projection(RotationTickProjection.CLASSIC.value)
+    assert gizmo.rotation_tick_projection is RotationTickProjection.CLASSIC
+
+
+def test_axis_rotation_dial_uses_orthographic_projection() -> None:
+    cam = camera()
+    center = np.array((0.35, -0.2, 0.4))
+    basis = axis_rotation(
+        np.array(((0.82, -0.48, 0.30), (0.55, 0.80, -0.23), (-0.13, 0.36, 0.92))),
+        2,
+    )
+    angles = np.radians((20.0, 75.0, 145.0, 230.0, 315.0))
+    directions = np.cos(angles)[:, None] * basis[:, 0] + np.sin(angles)[:, None] * basis[:, 1]
+    radii = np.tile((RING_RADIUS * SIZE_PT + 4.0, RING_RADIUS * SIZE_PT + 13.0), len(angles))
+    points = _project_rotation_dial(
+        cam,
+        RECT,
+        center,
+        np.repeat(directions, 2, axis=0),
+        radii,
+        1.0,
+        False,
+    ).reshape(-1, 2, 3)
+    projected_center = project(cam, (center,), RECT)[0, :2]
+    view_rotation = np.asarray(cam.view_matrix())[:3, :3]
+    projected_directions = directions @ view_rotation[:2, :].T
+    projected_directions[:, 1] *= -1.0
+    expected = (
+        projected_center
+        + projected_directions[:, None, :]
+        * np.array((RING_RADIUS * SIZE_PT + 4.0, RING_RADIUS * SIZE_PT + 13.0))[None, :, None]
+    )
+    assert points[:, :, :2] == pytest.approx(expected, abs=1e-6)
+
+
+def test_screen_rotation_dial_remains_a_screen_space_circle() -> None:
+    cam = camera()
+    center = np.array((0.35, -0.2, 0.4))
+    right = np.asarray(cam.view_matrix())[:3, :3].T[:, 0]
+    up = np.asarray(cam.view_matrix())[:3, :3].T[:, 1]
+    angles = np.linspace(0.0, 2.0 * np.pi, 24, endpoint=False)
+    directions = np.cos(angles)[:, None] * right + np.sin(angles)[:, None] * up
+    radius_pt = SCREEN_RING_RADIUS * SIZE_PT + 4.0
+    points = _project_rotation_dial(
+        cam,
+        RECT,
+        center,
+        directions,
+        np.full(len(angles), radius_pt),
+        1.5,
+        True,
+    )
+    projected_center = project(cam, (center,), RECT)[0, :2]
+    radii = np.linalg.norm(points[:, :2] - projected_center, axis=1)
+    assert radii == pytest.approx(np.full(len(angles), radius_pt * 1.5), abs=1e-6)
 
 
 def test_screen_translation_reports_all_xyz_components() -> None:

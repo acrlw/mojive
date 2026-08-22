@@ -35,6 +35,19 @@ def layout_scale(ui_scale: float, framebuffer_scale: float) -> float:
     return float(ui_scale) / max(float(framebuffer_scale), 1e-6)
 
 
+def resolve_ui_scales(
+    content_scale: float,
+    framebuffer_scale: float,
+    layout_override: float | None = None,
+) -> tuple[float, float]:
+    """Return physical and logical UI scales for the current display."""
+    if layout_override is not None:
+        style_scale = float(layout_override)
+        return style_scale * float(framebuffer_scale), style_scale
+    ui_scale = float(content_scale)
+    return ui_scale, layout_scale(ui_scale, framebuffer_scale)
+
+
 def resolve_context_api(requested: str) -> str:
     """Resolve the GLFW context creation API."""
     value = requested.strip().lower()
@@ -225,7 +238,6 @@ class Window:
 
         self._impl.process_inputs()
         theme_mod.apply(imgui, ui_scale=self._style_scale)
-        imgui.get_style().font_scale_dpi = self._style_scale
         self._applied_style_scale = self._style_scale
         self._load_fonts(io)
 
@@ -234,10 +246,12 @@ class Window:
         self.latch = ResizeLatch()
 
     def _load_fonts(self, io) -> None:
+        self._font_atlas_scale = self._style_scale
+        imgui.get_style().font_scale_dpi = 1.0
         self.font_report = fonts.load(
             imgui,
             io,
-            size_pt=self.config.font_size_pt * self._style_scale,
+            size_pt=self.config.font_size_pt * self._font_atlas_scale,
         )
         for note in self.font_report.notes:
             log.warning("Font fallback: {}", note)
@@ -315,8 +329,11 @@ class Window:
             (fb_w / win_w) if win_w > 0 else 1.0,
             (fb_h / win_h) if win_h > 0 else 1.0,
         )
-        ui_scale = self._scale_override or content_scale
-        style_scale = layout_scale(ui_scale, pixel_scale)
+        ui_scale, style_scale = resolve_ui_scales(
+            content_scale,
+            pixel_scale,
+            self._scale_override,
+        )
         changed = any(
             not math.isclose(current, updated, abs_tol=1e-3)
             for current, updated in (
@@ -338,7 +355,7 @@ class Window:
             return
         style = imgui.get_style()
         style.scale_all_sizes(self._style_scale / self._applied_style_scale)
-        style.font_scale_dpi = self._style_scale
+        style.font_scale_dpi = self._style_scale / self._font_atlas_scale
         self._applied_style_scale = self._style_scale
 
     def poll_render_size(
@@ -362,6 +379,9 @@ class Window:
 
     def request_close(self) -> None:
         glfw.set_window_should_close(self._window, True)
+
+    def cancel_close(self) -> None:
+        glfw.set_window_should_close(self._window, False)
 
     def consume_file_drops(self) -> tuple[Path, ...]:
         paths = tuple(self._file_drops)

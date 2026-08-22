@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from pathlib import Path
 
 from ..scene import Scene
 from .base import (
@@ -17,11 +17,45 @@ from .base import (
 
 
 class StaticSceneAdapter(SceneAdapterBase):
-    caps = AdapterCaps(name="static", simulation=False, write_pose=True, scene_authoring=True)
+    caps = AdapterCaps(
+        name="static",
+        simulation=False,
+        write_pose=True,
+        model_cameras=True,
+        reload=True,
+        scene_authoring=True,
+        scene_files=True,
+        edit_history=True,
+    )
 
     def __init__(self, scene: Scene) -> None:
         self.scene = scene
-        self.caps = replace(self.caps, model_cameras=True)
+        self._path: Path | None = None
+
+    def new_scene(self) -> None:
+        self.scene = Scene()
+        self._path = None
+
+    def open_scene(self, path: Path) -> None:
+        self.scene = Scene.load(path)
+        self._path = Path(path).expanduser().resolve()
+
+    def save_scene(self, path: Path) -> None:
+        self._path = self.scene.save(path)
+
+    def capture_edit_state(self) -> object:
+        return self.scene.clone()
+
+    def restore_edit_state(self, state: object) -> bool:
+        if not isinstance(state, Scene):
+            return False
+        self.scene = state.clone()
+        return True
+
+    def reload(self) -> None:
+        if self._path is None:
+            raise RuntimeError("Scene has not been saved")
+        self.scene = Scene.load(self._path)
 
     @property
     def structure_revision(self) -> int:
@@ -98,6 +132,26 @@ class StaticSceneAdapter(SceneAdapterBase):
         try:
             self.scene.remove_camera(camera_id)
         except KeyError:
+            return False
+        return True
+
+    def duplicate_scene_entity(self, object_id: int) -> int:
+        try:
+            return self.scene.duplicate_entity(object_id)
+        except KeyError:
+            return 0
+
+    def remove_scene_entity(self, object_id: int) -> bool:
+        try:
+            self.scene.remove_entity(object_id)
+        except KeyError:
+            return False
+        return True
+
+    def rename_scene_entity(self, object_id: int, name: str) -> bool:
+        try:
+            self.scene.rename_entity(object_id, name)
+        except (KeyError, ValueError):
             return False
         return True
 

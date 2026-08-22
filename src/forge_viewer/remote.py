@@ -265,6 +265,8 @@ class RemoteSceneAdapter(SceneAdapterBase):
             caps,
             name=f"remote:{caps.name}",
             external_clock=True,
+            edit_history=False,
+            model_composition=False,
             model_cameras=bool(self._structure.cameras),
             notes=(*caps.notes, f"attached to {host}:{port}"),
         )

@@ -168,3 +168,24 @@ def test_widget_sits_inside_the_viewport_corner():
     assert rect[0] <= cx - outer and cx + outer <= rect[0] + rect[2]
     assert rect[1] <= cy - outer and cy + outer <= rect[1] + rect[3]
     assert abs((rect[0] + rect[2]) - (cx + outer)) - vc.MARGIN_PT < 1e-6
+
+
+def test_view_gizmo_geometry_follows_layout_scale():
+    rect = (291.0, 28.0, 680.0, 554.0)
+    cube = vc.ViewCube()
+    view = cam((4.0, -4.0, 3.0))
+
+    cube.update(view, rect, cursor=(-1.0, -1.0), style_scale=1.0)
+    center_1 = vc.widget_center(rect, 1.0)
+    balls_1 = {(ball.axis, ball.sign): ball for ball in cube.balls}
+
+    cube.update(view, rect, cursor=(-1.0, -1.0), style_scale=2.0)
+    center_2 = vc.widget_center(rect, 2.0)
+    balls_2 = {(ball.axis, ball.sign): ball for ball in cube.balls}
+
+    for key, ball_1 in balls_1.items():
+        ball_2 = balls_2[key]
+        offset_1 = np.asarray(ball_1.screen) - center_1
+        offset_2 = np.asarray(ball_2.screen) - center_2
+        assert ball_2.radius == pytest.approx(ball_1.radius * 2.0)
+        assert offset_2 == pytest.approx(offset_1 * 2.0)

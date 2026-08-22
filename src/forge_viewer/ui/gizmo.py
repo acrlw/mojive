@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -9,7 +10,7 @@ import numpy as np
 
 from .. import math3d
 from ..adapters.base import IkOptions, NodeKind
-from ..commands import SetPose, SolveIk
+from ..commands import BeginEditTransaction, EndEditTransaction, SetPose, SolveIk
 from ..gizmo import (
     AXIS_COLORS,
     AXIS_END,
@@ -73,6 +74,11 @@ SNAP_TICK_FULL_STEPS = 5.0
 SNAP_TICK_FADE_STEPS = 10.0
 
 
+class RotationTickProjection(enum.StrEnum):
+    CLASSIC = "classic screen-space"
+    ORTHOGRAPHIC = "orthographic"
+
+
 @dataclass(frozen=True)
 class Verdict:
     ok: bool
@@ -127,8 +133,10 @@ class ObjectGizmo:
         self._snapping = False
         self._label = ""
         self._edit_started = False
+        self._edit_session: Session | None = None
         self.translation_snap_m = DEFAULT_TRANSLATION_SNAP_M
         self.rotation_snap_deg = DEFAULT_ROTATION_SNAP_DEG
+        self.rotation_tick_projection = RotationTickProjection.ORTHOGRAPHIC
 
     @property
     def mode(self) -> str:
@@ -193,6 +201,10 @@ class ObjectGizmo:
     def set_space(self, space: str) -> None:
         if space in (GizmoSpace.BODY.value, GizmoSpace.WORLD.value) and not self._using:
             self._space = GizmoSpace(space)
+
+    def set_rotation_tick_projection(self, projection: str) -> None:
+        if not self._using:
+            self.rotation_tick_projection = RotationTickProjection(projection)
 
     def toggle_space(self) -> None:
         self.set_space("world" if self._space is GizmoSpace.BODY else "body")
@@ -324,6 +336,15 @@ class ObjectGizmo:
                 backend.set_gizmo(None)
             self._drawn = False
             return True
+        if (
+            backend.caps.gizmo
+            and self._snapping
+            and self._active in ROTATE_AXIS_HANDLES
+            and self.rotation_tick_projection is RotationTickProjection.ORTHOGRAPHIC
+        ):
+            backend.set_gizmo(None)
+            self._drawn = False
+            return True
         if not backend.caps.gizmo:
             self._drawn = False
             return False
@@ -419,6 +440,12 @@ class ObjectGizmo:
 
         for axis, handle in enumerate(ROTATE_AXIS_HANDLES):
             if handle not in visible:
+                continue
+            if (
+                self._snapping
+                and handle is self._active
+                and self.rotation_tick_projection is RotationTickProjection.ORTHOGRAPHIC
+            ):
                 continue
             full = frame.active is handle
             alpha = 1.0 if full else rotation_ring_alpha(cam, origin, rotation[:, axis])
@@ -572,6 +599,7 @@ class ObjectGizmo:
         ring_radius = (
             SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
         )
+        screen_space = self._active is GizmoHandle.ROTATE_SCREEN
         scale = world_scale(cam, self._start_pos, rect[3], SIZE_PT * style_scale)
         if scale <= 0.0:
             return
@@ -588,19 +616,65 @@ class ObjectGizmo:
                 + (1.0 - cosine) * np.dot(self._axis, self._rotation_start_vec) * self._axis
             )
 
+        ring_radius_pt = ring_radius * SIZE_PT
         center = project(cam, (self._start_pos,), rect)[0]
+
+        def dial_points(angles, offsets_pt=0.0) -> np.ndarray:
+            values = np.atleast_1d(np.asarray(angles, np.float64))
+            directions = np.asarray([radial(float(angle)) for angle in values])
+            radii = ring_radius_pt + np.broadcast_to(
+                np.asarray(offsets_pt, np.float64), values.shape
+            )
+            return _project_rotation_dial(
+                cam,
+                rect,
+                self._start_pos,
+                directions,
+                radii,
+                style_scale,
+                screen_space,
+            )
+
+        def perspective_points(angles) -> np.ndarray:
+            values = np.atleast_1d(np.asarray(angles, np.float64))
+            directions = np.asarray([radial(float(angle)) for angle in values])
+            return project(
+                cam,
+                self._start_pos + directions * (scale * ring_radius),
+                rect,
+            )
+
         ring_angles = np.linspace(0.0, 2.0 * np.pi, RING_SEGMENTS, endpoint=False)
-        ring = project(
-            cam,
-            np.asarray(
-                [self._start_pos + scale * ring_radius * radial(angle) for angle in ring_angles]
-            ),
-            rect,
-        )
+        classic = self.rotation_tick_projection is RotationTickProjection.CLASSIC
+        ring = perspective_points(ring_angles) if classic else dial_points(ring_angles, 4.0)
+        active_ring: np.ndarray | None = None
+        if not classic and not screen_space:
+            active_ring = dial_points(ring_angles)
         trace: np.ndarray | None = None
         if np.all(ring[:, 2] > 0.0):
-            normals = _outward_normals(ring[:, :2], center[:2])
-            trace = ring[:, :2] + normals * (4.0 * style_scale)
+            trace = ring[:, :2]
+            if classic:
+                trace = trace + _outward_normals(trace, center[:2]) * (4.0 * style_scale)
+
+        def tick_segment(angle: float, length_pt: float):
+            points = dial_points((angle, angle), (4.0, 5.0))
+            direction = points[1, :2] - points[0, :2]
+            projected_length = float(np.linalg.norm(direction))
+            if np.any(points[:, 2] <= 0.0) or projected_length < 1e-6:
+                return None
+            return (
+                points[0, :2],
+                points[0, :2] + direction * (length_pt * style_scale / projected_length),
+            )
+
+        def classic_tick_segment(angle: float, length_pt: float):
+            epsilon = 1e-3
+            points = perspective_points((angle - epsilon, angle, angle + epsilon))
+            if np.any(points[:, 2] <= 0.0):
+                return None
+            normal = _outward_normals(points[:, :2], center[:2])[1]
+            inner = points[1, :2] + normal * (4.0 * style_scale)
+            return inner, inner + normal * (length_pt * style_scale)
 
         ticks_visible = (
             self._active is GizmoHandle.ROTATE_SCREEN
@@ -618,46 +692,40 @@ class ObjectGizmo:
             else:
                 length_pt = 3.0
             angle = np.radians(degrees)
-            direction = radial(angle)
             angle_step = np.radians(step)
-            points = project(
-                cam,
-                (
-                    self._start_pos + scale * ring_radius * radial(angle - 1e-3),
-                    self._start_pos + scale * ring_radius * direction,
-                    self._start_pos + scale * ring_radius * radial(angle + 1e-3),
-                    self._start_pos + scale * ring_radius * radial(angle + angle_step),
-                ),
-                rect,
+            points = (
+                perspective_points((angle, angle + angle_step))
+                if classic
+                else dial_points((angle, angle + angle_step))
             )
             if np.any(points[:, 2] <= 0.0):
                 continue
-            spacing = float(np.linalg.norm(points[3, :2] - points[1, :2]))
+            spacing = float(np.linalg.norm(points[1, :2] - points[0, :2]))
             if not ticks_visible or spacing < 2.0 * style_scale:
                 continue
-            normal = _outward_normals(points[:, :2], center[:2])[1]
-            inner = points[1, :2] + normal * (4.0 * style_scale)
-            outer = inner + normal * (length_pt * style_scale)
-            ticks.append((inner, outer))
+            segment = (
+                classic_tick_segment(angle, length_pt)
+                if classic
+                else tick_segment(angle, length_pt)
+            )
+            if segment is not None:
+                ticks.append(segment)
 
-        active_tick: tuple[np.ndarray, np.ndarray] | None = None
-        direction = radial(self._rotation_angle)
-        points = project(
-            cam,
-            (
-                self._start_pos + scale * ring_radius * radial(self._rotation_angle - 1e-3),
-                self._start_pos + scale * ring_radius * direction,
-                self._start_pos + scale * ring_radius * radial(self._rotation_angle + 1e-3),
-            ),
-            rect,
-        )
-        if np.all(points[:, 2] > 0.0) and ticks_visible:
-            normal = _outward_normals(points[:, :2], center[:2])[1]
+        active_tick = None
+        if ticks_visible:
             active_tick = (
-                points[1, :2] + normal * (4.0 * style_scale),
-                points[1, :2] + normal * (15.0 * style_scale),
+                classic_tick_segment(self._rotation_angle, 15.0)
+                if classic
+                else tick_segment(self._rotation_angle, 15.0)
             )
 
+        if active_ring is not None and np.all(active_ring[:, 2] > 0.0):
+            overlay.polyline(
+                active_ring[:, :2],
+                HOVER_COLOR,
+                RING_WIDTH_PT * style_scale,
+                closed=True,
+            )
         if trace is not None:
             overlay.polyline(trace, edge, 2.5 * style_scale, closed=True)
         for inner, outer in ticks:
@@ -720,6 +788,10 @@ class ObjectGizmo:
             SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
         )
         radius = world_scale(cam, self._start_pos, rect[3], SIZE_PT * style_scale) * ring_radius
+        orthographic = (
+            self._active in ROTATE_AXIS_HANDLES
+            and self.rotation_tick_projection is RotationTickProjection.ORTHOGRAPHIC
+        )
 
         def arc_screen(angles):
             cosine = np.cos(angles)[:, None]
@@ -729,6 +801,16 @@ class ObjectGizmo:
                 + sine * tangent
                 + (1.0 - cosine) * np.dot(self._axis, self._rotation_start_vec) * self._axis
             )
+            if orthographic:
+                return _project_rotation_dial(
+                    cam,
+                    rect,
+                    self._start_pos,
+                    arc,
+                    np.full(len(arc), ring_radius * SIZE_PT),
+                    style_scale,
+                    False,
+                )
             return project(cam, self._start_pos + radius * arc, rect)
 
         point_count = max(2, int(np.ceil(RING_SEGMENTS * abs(sweep) / (2.0 * np.pi))) + 1)
@@ -771,6 +853,7 @@ class ObjectGizmo:
         pad = 6.0 * style_scale
         gap = 14.0 * style_scale
         anchor_world = self._frame.position
+        anchor = None
         if self._active in ROTATE_HANDLES:
             ring_radius = (
                 SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
@@ -782,11 +865,26 @@ class ObjectGizmo:
                 + np.sin(self._rotation_angle) * tangent
                 + (1.0 - cosine) * np.dot(self._axis, self._rotation_start_vec) * self._axis
             )
-            radius = world_scale(cam, self._start_pos, rect[3], SIZE_PT * style_scale) * (
-                ring_radius + 14.0 / SIZE_PT
-            )
-            anchor_world = self._start_pos + direction * radius
-        anchor = project(cam, (anchor_world,), rect)[0]
+            if (
+                self._active in ROTATE_AXIS_HANDLES
+                and self.rotation_tick_projection is RotationTickProjection.ORTHOGRAPHIC
+            ):
+                anchor = _project_rotation_dial(
+                    cam,
+                    rect,
+                    self._start_pos,
+                    (direction,),
+                    np.asarray((ring_radius * SIZE_PT + 14.0,)),
+                    style_scale,
+                    False,
+                )[0]
+            else:
+                radius = world_scale(cam, self._start_pos, rect[3], SIZE_PT * style_scale) * (
+                    ring_radius + 14.0 / SIZE_PT
+                )
+                anchor_world = self._start_pos + direction * radius
+        if anchor is None:
+            anchor = project(cam, (anchor_world,), rect)[0]
         if anchor[2] <= 0.0:
             return
         width_f, height_f = overlay.text_size(self._label)
@@ -837,6 +935,7 @@ class ObjectGizmo:
                 return False
             self._axis_screen[:] = delta / length
             self._world_per_pt = scale / length
+            self._start_edit(session)
             return True
 
         if self._active in (GizmoHandle.SCREEN, GizmoHandle.ROTATE_SCREEN):
@@ -857,6 +956,7 @@ class ObjectGizmo:
             self._rotation_start_vec[:] = self._last_rot_vec[:] = v / n
         else:
             self._plane_start[:] = hit
+        self._start_edit(session)
         return True
 
     def _drag(self, session, cam, rect, cursor, *, snap: bool) -> bool:
@@ -974,7 +1074,17 @@ class ObjectGizmo:
             return np.asarray(rotation, np.float64).reshape(3, 3)
         return _WORLD_BASIS
 
+    def _start_edit(self, session: Session) -> None:
+        if not session.adapter.caps.edit_history:
+            return
+        result = session.submit(BeginEditTransaction(f"{self._mode.value.title()} transform"))
+        if result.ok:
+            self._edit_session = session
+
     def _end(self) -> None:
+        if self._edit_session is not None:
+            self._edit_session.submit(EndEditTransaction())
+            self._edit_session = None
         self._using = False
         self._keyboard = False
         self._snapping = False
@@ -1121,9 +1231,31 @@ def _outward_normals(points: np.ndarray, center: np.ndarray) -> np.ndarray:
     normals[degenerate] = radial[degenerate]
     lengths[degenerate] = np.linalg.norm(normals[degenerate], axis=1)
     normals /= np.maximum(lengths[:, None], 1e-9)
-    inward = np.sum(normals * radial, axis=1) < 0.0
-    normals[inward] *= -1.0
+    normals[np.sum(normals * radial, axis=1) < 0.0] *= -1.0
     return normals
+
+
+def _project_rotation_dial(
+    cam: CameraView,
+    rect: tuple[float, float, float, float],
+    center: np.ndarray,
+    directions: np.ndarray,
+    radii_pt: np.ndarray,
+    style_scale: float,
+    screen_space: bool,
+) -> np.ndarray:
+    directions = np.asarray(directions, np.float64).reshape(-1, 3)
+    radii = np.asarray(radii_pt, np.float64).reshape(-1)
+    center = np.asarray(center, np.float64)
+    projected_center = project(cam, (center,), rect)[0]
+    view_rotation = np.asarray(cam.view_matrix(), np.float64)[:3, :3]
+    radial = directions @ view_rotation[:2, :].T
+    radial[:, 1] *= -1.0
+    if screen_space:
+        lengths = np.linalg.norm(radial, axis=1)
+        radial /= np.maximum(lengths[:, None], 1e-9)
+    screen = projected_center[:2] + radial * (radii * style_scale)[:, None]
+    return np.column_stack((screen, np.full(len(screen), projected_center[2])))
 
 
 def _flat_arrow(start: np.ndarray, end: np.ndarray, style_scale: float) -> list[np.ndarray]:

@@ -32,6 +32,7 @@ def test_adapter_and_render_extension_types_are_public():
         "SceneAdapterBase",
         "SceneAdapter",
         "SceneFrame",
+        "SceneModelInfo",
         "SceneSource",
         "SnapshotPublisher",
         "SnapshotWriter",

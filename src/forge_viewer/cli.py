@@ -431,8 +431,12 @@ def cmd_replay(args: argparse.Namespace) -> int:
 def cmd_canvas(args: argparse.Namespace) -> int:
     from .composition import build_scene
     from .demos import canvas_scene, lighting_scene
+    from .scene import Scene
 
-    scene = lighting_scene() if args.demo == "lighting" else canvas_scene()
+    if args.demo == "empty":
+        scene = Scene()
+    else:
+        scene = lighting_scene() if args.demo == "lighting" else canvas_scene()
     viewer = build_scene(scene, vsync=not args.no_vsync, title=f"forge {args.demo}")
     try:
         for name in args.enable_render:
@@ -682,7 +686,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_view, json=False)
 
     sp = with_render_flags(sub.add_parser("canvas", help="Open a procedural 3D canvas"))
-    sp.add_argument("--demo", choices=("canvas", "lighting", "text"), default="canvas")
+    sp.add_argument("--demo", choices=("empty", "canvas", "lighting", "text"), default="canvas")
     sp.add_argument("--no-vsync", action="store_true")
     sp.set_defaults(func=cmd_canvas, json=False)
 

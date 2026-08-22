@@ -21,12 +21,13 @@ from .adapters.base import (
     PhysicsState,
     SceneAdapter,
     SceneFrame,
+    SceneModelInfo,
     SceneNode,
     SceneSource,
     SensorInfo,
 )
 from .commands import Command, CommandResult, Query
-from .types import CameraView, Environment, Light
+from .types import CameraView, Environment, Light, Material
 
 
 @dataclass
@@ -45,6 +46,58 @@ class PerturbState:
     body_radius: float = 0.1
 
 
+@dataclass(frozen=True)
+class _DocumentState:
+    adapter_state: object
+    selected: int
+
+
+@dataclass(frozen=True)
+class _EditRecord:
+    label: str
+    before: _DocumentState
+    after: _DocumentState
+    before_revision: int
+    after_revision: int
+
+
+@dataclass
+class AuthoredSceneOverlay:
+    """Forge-owned property edits layered over an adapter scene."""
+
+    lights: dict[int, Light] = field(default_factory=dict)
+    environment: Environment | None = None
+    materials: dict[int, Material] = field(default_factory=dict)
+    geometry_colors: dict[int, np.ndarray] = field(default_factory=dict)
+    cameras: dict[int, CameraView] = field(default_factory=dict)
+
+    def clear(self) -> None:
+        self.lights.clear()
+        self.environment = None
+        self.materials.clear()
+        self.geometry_colors.clear()
+        self.cameras.clear()
+
+
+_SCENE_EDIT_COMMANDS = (
+    cmd.SetPose,
+    cmd.SetLight,
+    cmd.SetEnvironment,
+    cmd.SetMaterial,
+    cmd.SetGeometryColor,
+    cmd.SetSceneCamera,
+    cmd.AddSceneObject,
+    cmd.RemoveSceneObject,
+    cmd.AddSceneLight,
+    cmd.RemoveSceneLight,
+    cmd.AddSceneCamera,
+    cmd.RemoveSceneCamera,
+    cmd.DuplicateSceneEntity,
+    cmd.RemoveSceneEntity,
+    cmd.RenameSceneEntity,
+)
+
+
 class Session:
     def __init__(self, adapter: SceneAdapter, asset_path: Path | None = None) -> None:
         self._adapter = adapter
@@ -58,9 +111,7 @@ class Session:
         self._pending_steps = 0
         self._frame = SceneFrame()
         self._source: SceneSource | None = None
-        self._light_overrides: dict[int, Light] = {}
-        self._environment_override: Environment | None = None
-        self._camera_overrides: dict[int, CameraView] = {}
+        self._authored = AuthoredSceneOverlay()
         self._nodes: list[SceneNode] = []
         self._by_node_id: dict[int, SceneNode] = {}
         self._by_object_id: dict[int, SceneNode] = {}
@@ -76,6 +127,15 @@ class Session:
         self._ik_undo_state: PhysicsState | None = None
         self._camera = CameraView()
         self._last_message = ""
+        self._undo_stack: list[_EditRecord] = []
+        self._redo_stack: list[_EditRecord] = []
+        self._edit_before: _DocumentState | None = None
+        self._edit_before_revision = 0
+        self._edit_label = ""
+        self._edit_changed = False
+        self._document_revision = 0
+        self._saved_revision = 0
+        self._next_document_revision = 1
         self._structure_generation = 0
         self._adapter_revision = -1
         self._refresh_structure()
@@ -153,12 +213,36 @@ class Session:
         return self._camera
 
     @property
+    def authored_overlay(self) -> AuthoredSceneOverlay:
+        return self._authored
+
+    @property
+    def scene_models(self) -> tuple[SceneModelInfo, ...]:
+        return self._adapter.scene_models()
+
+    @property
     def asset_path(self) -> Path | None:
         return self._asset_path
 
     @property
     def last_message(self) -> str:
         return self._last_message
+
+    @property
+    def dirty(self) -> bool:
+        return self._edit_changed or self._document_revision != self._saved_revision
+
+    @property
+    def can_undo(self) -> bool:
+        return bool(self._undo_stack)
+
+    @property
+    def can_redo(self) -> bool:
+        return bool(self._redo_stack)
+
+    @property
+    def editing(self) -> bool:
+        return self._edit_before is not None
 
     @property
     def structure_generation(self) -> int:
@@ -219,9 +303,146 @@ class Session:
         return self._frame
 
     def submit(self, command: Command) -> CommandResult:
+        if isinstance(command, cmd.BeginEditTransaction):
+            result = self._begin_edit(command.label)
+            self._last_message = result.message
+            return result
+        if isinstance(command, cmd.EndEditTransaction):
+            result = self._end_edit()
+            self._last_message = result.message
+            return result
+        if isinstance(command, cmd.Undo):
+            result = self._undo()
+            self._last_message = result.message
+            return result
+        if isinstance(command, cmd.Redo):
+            result = self._redo()
+            self._last_message = result.message
+            return result
+
+        scene_edit = isinstance(command, _SCENE_EDIT_COMMANDS)
+        before = (
+            self._capture_document_state()
+            if scene_edit and self._adapter.caps.edit_history and not self.editing
+            else None
+        )
         result = self._dispatch(command)
+        if result.ok and scene_edit and self._adapter.caps.scene_files:
+            if self.editing:
+                self._edit_changed = True
+            elif before is not None:
+                self._commit_edit(type(command).__name__, before)
+            else:
+                self._advance_document_revision()
         self._last_message = result.message
         return result
+
+    def _capture_document_state(self) -> _DocumentState:
+        state = self._adapter.capture_edit_state()
+        if state is None:
+            raise RuntimeError(f"{self._adapter.caps.name} did not provide an edit state")
+        return _DocumentState(state, self._selected)
+
+    def _restore_document_state(self, state: _DocumentState) -> bool:
+        if not self._adapter.restore_edit_state(state.adapter_state):
+            return False
+        self._authored.clear()
+        self._selected = int(state.selected)
+        self._selected_node_id = -1
+        self._refresh_structure()
+        if self._selected not in self._by_object_id:
+            self._selected = 0
+            self._selected_node_id = -1
+        return True
+
+    def _begin_edit(self, label: str) -> CommandResult:
+        if not self._adapter.caps.edit_history:
+            return CommandResult.bad(f"{self._adapter.caps.name} does not support edit history")
+        if self.editing:
+            return CommandResult.bad("An edit transaction is already active")
+        self._edit_before = self._capture_document_state()
+        self._edit_before_revision = self._document_revision
+        self._edit_label = str(label) or "Edit"
+        self._edit_changed = False
+        return CommandResult.good()
+
+    def _end_edit(self) -> CommandResult:
+        if not self.editing:
+            return CommandResult.bad("No edit transaction is active")
+        before = self._edit_before
+        label = self._edit_label
+        changed = self._edit_changed
+        before_revision = self._edit_before_revision
+        self._edit_before = None
+        self._edit_label = ""
+        self._edit_changed = False
+        if changed and before is not None:
+            self._commit_edit(label, before, before_revision)
+            return CommandResult.good(label)
+        return CommandResult.good()
+
+    def _commit_edit(
+        self,
+        label: str,
+        before: _DocumentState,
+        before_revision: int | None = None,
+    ) -> None:
+        revision = self._document_revision if before_revision is None else before_revision
+        after_revision = self._next_document_revision
+        self._next_document_revision += 1
+        self._undo_stack.append(
+            _EditRecord(
+                label,
+                before,
+                self._capture_document_state(),
+                revision,
+                after_revision,
+            )
+        )
+        del self._undo_stack[:-100]
+        self._redo_stack.clear()
+        self._document_revision = after_revision
+
+    def _advance_document_revision(self) -> None:
+        self._document_revision = self._next_document_revision
+        self._next_document_revision += 1
+        self._redo_stack.clear()
+
+    def _undo(self) -> CommandResult:
+        if self.editing:
+            return CommandResult.bad("Finish the active edit before undo")
+        if not self._undo_stack:
+            return CommandResult.bad("Nothing to undo")
+        record = self._undo_stack.pop()
+        if not self._restore_document_state(record.before):
+            self._undo_stack.append(record)
+            return CommandResult.bad("Undo state is incompatible with this scene")
+        self._redo_stack.append(record)
+        self._document_revision = record.before_revision
+        return CommandResult.good(f"Undo {record.label}")
+
+    def _redo(self) -> CommandResult:
+        if self.editing:
+            return CommandResult.bad("Finish the active edit before redo")
+        if not self._redo_stack:
+            return CommandResult.bad("Nothing to redo")
+        record = self._redo_stack.pop()
+        if not self._restore_document_state(record.after):
+            self._redo_stack.append(record)
+            return CommandResult.bad("Redo state is incompatible with this scene")
+        self._undo_stack.append(record)
+        self._document_revision = record.after_revision
+        return CommandResult.good(f"Redo {record.label}")
+
+    def _reset_edit_history(self) -> None:
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._edit_before = None
+        self._edit_label = ""
+        self._edit_changed = False
+        self._document_revision = 0
+        self._saved_revision = 0
+        self._next_document_revision = 1
 
     def _dispatch(self, c: Command) -> CommandResult:
         caps = self._adapter.caps
@@ -286,11 +507,50 @@ class Session:
             self._ik_result = None
             self._ik_undo_state = None
             self._active_keyframe = -1
-            self._light_overrides.clear()
-            self._environment_override = None
-            self._camera_overrides.clear()
+            self._authored.clear()
             self._refresh_structure()
+            self._reset_edit_history()
             return CommandResult.good("Scene reloaded")
+
+        if isinstance(c, cmd.NewScene):
+            if not caps.scene_files:
+                return CommandResult.bad(f"{caps.name} does not support scene files")
+            self._adapter.new_scene()
+            self._asset_path = None
+            self._selected = 0
+            self._selected_node_id = -1
+            self._authored.clear()
+            self._refresh_structure()
+            self._reset_edit_history()
+            return CommandResult.good("New scene")
+
+        if isinstance(c, cmd.OpenScene):
+            if not caps.scene_files:
+                return CommandResult.bad(f"{caps.name} does not support scene files")
+            path = Path(c.path).expanduser().resolve()
+            try:
+                self._adapter.open_scene(path)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            self._asset_path = path
+            self._selected = 0
+            self._selected_node_id = -1
+            self._authored.clear()
+            self._refresh_structure()
+            self._reset_edit_history()
+            return CommandResult.good(f"Opened {path.name}")
+
+        if isinstance(c, cmd.SaveScene):
+            if not caps.scene_files:
+                return CommandResult.bad(f"{caps.name} does not support scene files")
+            path = Path(c.path).expanduser().resolve()
+            try:
+                self._adapter.save_scene(path)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            self._asset_path = path
+            self._saved_revision = self._document_revision
+            return CommandResult.good(f"Saved {path.name}")
 
         if isinstance(c, cmd.LoadAsset):
             if not caps.asset_loading:
@@ -310,11 +570,56 @@ class Session:
             self._ik_result = None
             self._ik_undo_state = None
             self._active_keyframe = -1
-            self._light_overrides.clear()
-            self._environment_override = None
-            self._camera_overrides.clear()
+            self._authored.clear()
             self._refresh_structure()
+            self._reset_edit_history()
             return CommandResult.good(f"Loaded {c.path.name}")
+
+        if isinstance(c, cmd.AddSceneModel):
+            if not caps.model_composition:
+                return CommandResult.bad(f"{caps.name} does not support model composition")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before changing model topology")
+            path = Path(c.path).expanduser().resolve()
+            try:
+                model_id = self._adapter.add_scene_model(path, c.position, c.rotation)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if model_id < 0:
+                return CommandResult.bad(f"Failed to add {path.name}")
+            self._selected = 0
+            self._selected_node_id = -1
+            self._perturb = PerturbState()
+            self._ik_result = None
+            self._ik_undo_state = None
+            self._active_keyframe = -1
+            self._refresh_structure()
+            return CommandResult.good(f"Added {path.name}", model_id)
+
+        if isinstance(c, cmd.RemoveSceneModel):
+            if not caps.model_composition:
+                return CommandResult.bad(f"{caps.name} does not support model composition")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before changing model topology")
+            info = next(
+                (item for item in self.scene_models if item.model_id == int(c.model_id)), None
+            )
+            if info is None or not info.removable:
+                return CommandResult.bad(f"Model {c.model_id} cannot be removed")
+            try:
+                removed = self._adapter.remove_scene_model(c.model_id)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if not removed:
+                return CommandResult.bad(f"Failed to remove {info.name}")
+            self._selected = 0
+            self._selected_node_id = -1
+            self._perturb = PerturbState()
+            self._ik_result = None
+            self._ik_undo_state = None
+            self._active_keyframe = -1
+            self._refresh_structure()
+            return CommandResult.good(f"Removed {info.name}")
 
         if isinstance(c, cmd.LoadKeyframe):
             if not caps.keyframes:
@@ -467,13 +772,13 @@ class Session:
             if self._source is None or not 0 <= c.light_id < len(self._source.lights.lights):
                 return CommandResult.bad(f"light {c.light_id} is unavailable")
             writeback = self._adapter.set_light(c.light_id, c.light)
+            if self._preserve_authored_override(writeback):
+                self._authored.lights[c.light_id] = c.light
+            else:
+                self._authored.lights.pop(c.light_id, None)
             lights = list(self._source.lights.lights)
             lights[c.light_id] = c.light
             self._source.lights = replace(self._source.lights, lights=tuple(lights))
-            if writeback:
-                self._light_overrides.pop(c.light_id, None)
-            else:
-                self._light_overrides[c.light_id] = c.light
             for node in self._nodes:
                 if node.light_index == c.light_id:
                     node.visible = c.light.active
@@ -486,8 +791,10 @@ class Session:
             if self._source is None:
                 return CommandResult.bad("environment is unavailable")
             writeback = self._adapter.set_environment(c.environment)
+            self._authored.environment = (
+                c.environment if self._preserve_authored_override(writeback) else None
+            )
             self._source.lights = self._source.lights.with_environment(c.environment)
-            self._environment_override = c.environment
             self._compose_lights()
             message = "" if writeback else "edited in Forge; backend write-back is unavailable"
             return CommandResult.good(message)
@@ -496,6 +803,10 @@ class Session:
             if self._source is None or not 0 <= c.material_id < len(self._source.materials):
                 return CommandResult.bad(f"material {c.material_id} is unavailable")
             writeback = self._adapter.set_material(c.material_id, c.material)
+            if self._preserve_authored_override(writeback):
+                self._authored.materials[c.material_id] = c.material
+            else:
+                self._authored.materials.pop(c.material_id, None)
             self._source.materials[c.material_id] = c.material
             self._structure_generation += 1
             message = "" if writeback else "edited in Forge; backend write-back is unavailable"
@@ -509,6 +820,10 @@ class Session:
                 return CommandResult.bad(f"geometry node {c.node_id} is unavailable")
             rgba = np.asarray(c.rgba, np.float32).reshape(4).copy()
             writeback = self._adapter.set_geometry_color(c.node_id, rgba)
+            if self._preserve_authored_override(writeback):
+                self._authored.geometry_colors[c.node_id] = rgba
+            else:
+                self._authored.geometry_colors.pop(c.node_id, None)
             self._source.geom_rgba[instances] = rgba
             self._structure_generation += 1
             message = "" if writeback else "edited in Forge; backend write-back is unavailable"
@@ -523,7 +838,10 @@ class Session:
             cameras = list(self._source.cameras)
             cameras[slot] = c.camera
             self._source.cameras = tuple(cameras)
-            self._camera_overrides[camera_id] = c.camera
+            if self._preserve_authored_override(writeback):
+                self._authored.cameras[camera_id] = c.camera
+            else:
+                self._authored.cameras.pop(camera_id, None)
             self._compose_cameras()
             message = "" if writeback else "edited in Forge; backend write-back is unavailable"
             return CommandResult.good(message)
@@ -581,9 +899,39 @@ class Session:
                 return CommandResult.bad(f"{caps.name} does not support scene authoring")
             if not self._adapter.remove_scene_camera(c.camera_id):
                 return CommandResult.bad(f"camera {c.camera_id} is unavailable")
-            self._camera_overrides.pop(c.camera_id, None)
+            self._authored.cameras.pop(c.camera_id, None)
             self._refresh_structure()
             return CommandResult.good("Camera removed", c.camera_id)
+
+        if isinstance(c, cmd.DuplicateSceneEntity):
+            if not caps.scene_authoring:
+                return CommandResult.bad(f"{caps.name} does not support scene authoring")
+            object_id = self._adapter.duplicate_scene_entity(c.object_id)
+            if not object_id:
+                return CommandResult.bad(f"entity {c.object_id} cannot be duplicated")
+            self._selected = object_id
+            self._selected_node_id = -1
+            self._refresh_structure()
+            return CommandResult.good("Entity duplicated", object_id)
+
+        if isinstance(c, cmd.RemoveSceneEntity):
+            if not caps.scene_authoring:
+                return CommandResult.bad(f"{caps.name} does not support scene authoring")
+            if not self._adapter.remove_scene_entity(c.object_id):
+                return CommandResult.bad(f"entity {c.object_id} cannot be removed")
+            if self._selected == c.object_id:
+                self._selected = 0
+                self._selected_node_id = -1
+            self._refresh_structure()
+            return CommandResult.good("Entity removed", c.object_id)
+
+        if isinstance(c, cmd.RenameSceneEntity):
+            if not caps.scene_authoring:
+                return CommandResult.bad(f"{caps.name} does not support scene authoring")
+            if not self._adapter.rename_scene_entity(c.object_id, c.name):
+                return CommandResult.bad(f"entity {c.object_id} cannot be renamed")
+            self._refresh_structure()
+            return CommandResult.good("Entity renamed", c.object_id)
 
         if isinstance(c, cmd.SetSpeed):
             if not caps.simulation:
@@ -646,23 +994,33 @@ class Session:
 
     def camera_view(self, camera_id: int) -> CameraView | None:
         i = int(camera_id)
-        if i in self._camera_overrides:
-            return self._camera_overrides[i]
+        if i in self._authored.cameras:
+            return self._authored.cameras[i]
         return self._adapter.camera_view(i) if self._adapter.caps.model_cameras else None
+
+    def _preserve_authored_override(self, writeback: bool) -> bool:
+        caps = self._adapter.caps
+        return not writeback or caps.external_clock or caps.model_composition
 
     def visual_groups(self):
         return self._adapter.visual_groups() if self._adapter.caps.visual_groups else ()
 
     def _refresh_structure(self) -> None:
         self._source = self._adapter.scene_source()
-        if self._environment_override is not None:
-            self._source.lights = self._source.lights.with_environment(self._environment_override)
-        if self._light_overrides:
+        if self._authored.environment is not None:
+            self._source.lights = self._source.lights.with_environment(self._authored.environment)
+        if self._authored.lights:
             lights = list(self._source.lights.lights)
-            for i, light in self._light_overrides.items():
+            for i, light in self._authored.lights.items():
                 if i < len(lights):
                     lights[i] = light
             self._source.lights = replace(self._source.lights, lights=tuple(lights))
+        for material_id, material in self._authored.materials.items():
+            if material_id < len(self._source.materials):
+                self._source.materials[material_id] = material
+        for node_id, rgba in self._authored.geometry_colors.items():
+            instances = np.flatnonzero(self._source.geom_node == node_id)
+            self._source.geom_rgba[instances] = rgba
         self._nodes = [
             replace(node, children=list(node.children)) for node in self._adapter.nodes()
         ]
@@ -688,9 +1046,9 @@ class Session:
         self._joints = self._adapter.joints()
         self._actuators = self._adapter.actuators()
         self._cameras = self._adapter.cameras() if self._adapter.caps.model_cameras else []
-        if self._camera_overrides:
+        if self._authored.cameras:
             cameras = list(self._source.cameras)
-            for camera_id, camera in self._camera_overrides.items():
+            for camera_id, camera in self._authored.cameras.items():
                 slot = self._camera_slot(camera_id)
                 if 0 <= slot < len(cameras):
                     cameras[slot] = camera
@@ -751,7 +1109,7 @@ class Session:
         cameras = list(driven if driven is not None else self._source.cameras)
         if len(cameras) != len(self._source.cameras):
             cameras = list(self._source.cameras)
-        for camera_id, camera in self._camera_overrides.items():
+        for camera_id, camera in self._authored.cameras.items():
             slot = self._camera_slot(camera_id)
             if 0 <= slot < len(cameras):
                 cameras[slot] = camera

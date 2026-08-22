@@ -82,6 +82,12 @@ Start with an empty viewport and load a model from the File menu or by dropping 
 make empty
 ```
 
+Pause the simulation to compose models. `File > Add Model...` attaches another MJCF or URDF at
+the current camera target. Dropping several model files opens the first and adds the rest. Attached
+models appear as model groups in the Hierarchy and can be removed from the File menu, Hierarchy
+context menu, or Inspector. Topology rebuilds preserve matching joint, actuator, mocap, equality,
+and simulation-time state.
+
 ### pip installation
 
 `pyproject.toml` is the canonical dependency specification. A standard virtual environment works
@@ -121,7 +127,7 @@ forge-viewer probe
 
 ```text
 forge-viewer view <asset> [--paused] [-b BACKEND]
-forge-viewer canvas [--demo canvas|lighting|text]
+forge-viewer canvas [--demo empty|canvas|lighting|text]
 forge-viewer toy
 forge-viewer conformance [BACKEND] [--asset ASSET]
 forge-viewer serve <asset> [--host HOST] [--port PORT]
@@ -138,10 +144,13 @@ forge-viewer control <method> [--params JSON] [--json]
 
 JSON commands reserve stdout for the JSON document and send logs to stderr.
 
-The main menu and window file drop open MJCF, XML, and URDF models at runtime. On macOS the
-viewport highlights when a model enters the window. `File > Reload Model` recompiles the current
-file. Loading replaces the session structure, clears selection and interaction state, rebuilds GPU
-scene resources, and frames the new model.
+The main menu and window file drop open MJCF, XML, and URDF models at runtime. `File > Reload
+Model` recompiles the current model and rebuilds GPU scene resources.
+
+`make editor` starts an empty authored scene. The File menu creates, opens, and saves
+`.forge.json` scenes. The Entity menu creates primitives, lights, and cameras. Selected entities
+support duplicate, rename, and delete from the menu, keyboard shortcuts, and the Hierarchy context
+menu. Unsaved scenes display an asterisk in the title and prompt before replacement or exit.
 
 ## Programmatic rendering
 
@@ -204,6 +213,7 @@ Every user-facing feature has a reproducible Make target.
 | `make hidpi-gallery` | Capture enlarged 2D/3D gizmo references at 200% UI scale |
 | `make empty` | Open an empty viewer and load MJCF or URDF from the File menu |
 | `make model-loading` | Capture empty, MJCF, and URDF runtime-loading references |
+| `make model-composition` | Validate MjSpec state migration and capture add/remove references |
 | `make outline` | Selection, x-ray outline, and outline antialiasing |
 | `make gizmo` | Native 2D and 3D transform gizmos |
 | `make gizmo-gallery` | Enlarged position, rotation, and snap reference images |
@@ -227,6 +237,9 @@ Every user-facing feature has a reproducible Make target.
 | `make mujoco-editing` | Mocap pose and equality controls |
 | `make deformables` | Flex and skin dynamic meshes |
 | `make robot` | Download and open a MuJoCo Menagerie robot |
+| `make editor` | Empty authored workspace with scene files and Entity editing |
+| `make editor-files` | Scene document workflow acceptance and capture |
+| `make entity-edit` | Entity lifecycle CPU and GPU acceptance |
 | `make canvas` | Standalone scene authoring with editable transforms, materials, and Forge entities |
 | `make scene-io` | Save, reload, and capture a `.forge.json` scene |
 | `make toy-physics` | Minimal physics backend independent of MuJoCo |

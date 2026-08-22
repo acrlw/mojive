@@ -24,6 +24,7 @@ class PanelContext:
     model_camera_id: int = -1
     model_camera_view: Any = None
     select_model_camera: Any = None
+    request_rename: Any = None
 
     theme: Theme = THEME
     gizmo: Any = None
@@ -67,6 +68,9 @@ class Panel:
 
     def draw(self, ctx: PanelContext) -> None:
         raise NotImplementedError
+
+    def finish_frame(self, ctx: PanelContext) -> None:
+        pass
 
     def toggle(self) -> None:
         self.open = not self.open
@@ -208,6 +212,7 @@ class PanelSet:
             expanded, keep_open = imgui.begin(p.name, True)
             if expanded:
                 p.draw(ctx)
+            p.finish_frame(ctx)
             imgui.end()
             if keep_open is not None and not keep_open:
                 p.open = False

@@ -7,7 +7,11 @@ from imgui_bundle import imgui
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds
 from ...render.backend import DebugView, FrameMode, LabelMode, RenderFlag
-from ..gizmo import DEFAULT_ROTATION_SNAP_DEG, DEFAULT_TRANSLATION_SNAP_M
+from ..gizmo import (
+    DEFAULT_ROTATION_SNAP_DEG,
+    DEFAULT_TRANSLATION_SNAP_M,
+    RotationTickProjection,
+)
 from ..perturb import OUTLINE_CORNER_RADIUS_PT
 from . import Panel, PanelContext
 
@@ -137,6 +141,21 @@ class SettingsPanel(Panel):
                 imgui.set_tooltip("drag: adjust · double-click: enter value · right-click: reset")
             if changed:
                 ctx.gizmo.rotation_snap_deg = step
+
+            projection = ctx.gizmo.rotation_tick_projection
+            imgui.set_next_item_width(-1.0)
+            if imgui.begin_combo(
+                "##rotation_tick_projection", f"rotation ticks: {projection.value}"
+            ):
+                for option in RotationTickProjection:
+                    selected, _ = imgui.selectable(option.value, option is projection)
+                    if selected:
+                        ctx.gizmo.set_rotation_tick_projection(option.value)
+                imgui.end_combo()
+            imgui.set_item_tooltip(
+                "Classic follows the perspective ring with fixed screen-space ticks; "
+                "orthographic keeps the dial centered on the projected origin"
+            )
 
         if ctx.perturb is not None:
             imgui.align_text_to_frame_padding()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -127,6 +128,9 @@ class Scene:
         from .scene_io import save_scene
 
         return save_scene(self, path)
+
+    def clone(self) -> Scene:
+        return copy.deepcopy(self)
 
     @classmethod
     def load(cls, path: str | Path) -> Scene:
@@ -349,6 +353,59 @@ class Scene:
         self._items = [x for x in self._items if x.object_id != int(object_id)]
         if len(self._items) == before:
             raise KeyError(f"Unknown object_id={object_id}")
+        self._revision += 1
+
+    def duplicate_entity(self, object_id: int) -> int:
+        oid = int(object_id)
+        if oid >= CAMERA_OBJECT_BASE:
+            camera_id = oid - CAMERA_OBJECT_BASE
+            item = next((item for item in self._cameras if item.camera_id == camera_id), None)
+            if item is None:
+                raise KeyError(f"Unknown object_id={object_id}")
+            return CAMERA_OBJECT_BASE + self.add_camera(f"{item.name} Copy", item.view)
+        if oid >= LIGHT_OBJECT_BASE:
+            light_id = oid - LIGHT_OBJECT_BASE
+            index = self._light_index(light_id)
+            item = self._lights[index]
+            duplicate = self.add_light(f"{item.name} Copy", self.lights.lights[index])
+            return LIGHT_OBJECT_BASE + duplicate.light_id
+        item = self._item(oid)
+        duplicate = self.add(
+            item.mesh,
+            name=f"{item.name} Copy",
+            size=item.size,
+            position=item.position,
+            rotation=item.rotation,
+            color=item.color,
+            material=item.material,
+        )
+        return duplicate.object_id
+
+    def remove_entity(self, object_id: int) -> None:
+        oid = int(object_id)
+        if oid >= CAMERA_OBJECT_BASE:
+            self.remove_camera(oid - CAMERA_OBJECT_BASE)
+        elif oid >= LIGHT_OBJECT_BASE:
+            self.remove_light(oid - LIGHT_OBJECT_BASE)
+        else:
+            self.remove(oid)
+
+    def rename_entity(self, object_id: int, name: str) -> None:
+        value = str(name).strip()
+        if not value:
+            raise ValueError("Entity name cannot be empty")
+        oid = int(object_id)
+        if oid >= CAMERA_OBJECT_BASE:
+            camera_id = oid - CAMERA_OBJECT_BASE
+            item = next((item for item in self._cameras if item.camera_id == camera_id), None)
+        elif oid >= LIGHT_OBJECT_BASE:
+            light_id = oid - LIGHT_OBJECT_BASE
+            item = next((item for item in self._lights if item.light_id == light_id), None)
+        else:
+            item = next((item for item in self._items if item.object_id == oid), None)
+        if item is None:
+            raise KeyError(f"Unknown object_id={object_id}")
+        item.name = value
         self._revision += 1
 
     def reset_poses(self) -> None:

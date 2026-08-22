@@ -13,6 +13,8 @@ from .. import commands as cmd
 from ..assets import resolve
 from ..composition import build
 from ..gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, GizmoMode, hit_test, project, world_scale
+from ..ui import viewcube
+from ..ui.gizmo import RotationTickProjection
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -28,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
         viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
         for _ in range(4):
             viewer.sync()
+        _save_view_gizmo(viewer, args.output / "view-gizmo.png")
 
         for style in ("2d", "3d"):
             _position(viewer, node, style, args.output)
@@ -78,6 +81,7 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
     viewer.app.gizmo.set_mode("rotate")
     viewer.app.gizmo.set_style(style)
     viewer.app.gizmo.set_space("body")
+    viewer.app.gizmo.set_rotation_tick_projection(RotationTickProjection.ORTHOGRAPHIC.value)
     for _ in range(3):
         viewer.sync()
     camera, rect, origin, rotation, scale = _state(viewer, node)
@@ -125,9 +129,15 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
             f"target=({snapped[0]:.1f}, {snapped[1]:.1f})"
         )
     _save(viewer, node, output / f"rotation-snap-{style}.png")
+    viewer.app.gizmo.rotation_tick_projection = RotationTickProjection.ORTHOGRAPHIC
+    viewer.sync()
+    _save(viewer, node, output / f"rotation-snap-orthographic-{style}.png")
     viewer.app.camera.look_from(-135.0, 0.0, viewer.app.camera_out, animate=False)
     for _ in range(3):
         viewer.sync()
+    _save(viewer, node, output / f"rotation-snap-orthographic-edge-{style}.png")
+    viewer.app.gizmo.rotation_tick_projection = RotationTickProjection.CLASSIC
+    viewer.sync()
     _save(viewer, node, output / f"rotation-snap-edge-{style}.png")
     viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
     for _ in range(3):
@@ -186,6 +196,21 @@ def _save(viewer, node, path: Path) -> None:
     y0 = max(0, int(center[1] * sy) - half)
     crop = pixels[y0 : y0 + 2 * half, x0 : x0 + 2 * half]
     Image.fromarray(crop, "RGB").resize((1080, 1080), Image.Resampling.LANCZOS).save(path)
+
+
+def _save_view_gizmo(viewer, path: Path) -> None:
+    viewer.sync()
+    pixels = viewer.window.read_frame()[::-1, :, :3]
+    center = viewcube.widget_center(viewer.app._viewport_rect, viewer.window.style_scale)
+    display = imgui.get_io().display_size
+    sx = pixels.shape[1] / display.x
+    sy = pixels.shape[0] / display.y
+    half_x = int(120.0 * sx)
+    half_y = int(120.0 * sy)
+    x = int(center[0] * sx)
+    y = int(center[1] * sy)
+    crop = pixels[max(0, y - half_y) : y + half_y, max(0, x - half_x) : x + half_x]
+    Image.fromarray(crop, "RGB").save(path)
 
 
 if __name__ == "__main__":

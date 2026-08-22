@@ -711,6 +711,68 @@ def test_reload_and_reset(adapter, fixture_path):
     assert np.linalg.norm(f.geom_xpos - adapter.model.geom_pos) > 1e-4
 
 
+def test_mjspec_model_composition_preserves_matching_state(tmp_path):
+    from forge_viewer import commands as cmd
+    from forge_viewer.session import Session
+
+    root = tmp_path / "root.xml"
+    root.write_text(
+        """
+        <mujoco model="root">
+          <worldbody>
+            <body name="arm" pos="0 0 1">
+              <joint name="hinge" type="hinge"/>
+              <geom type="capsule" size=".08 .3"/>
+            </body>
+          </worldbody>
+          <actuator><motor name="motor" joint="hinge"/></actuator>
+        </mujoco>
+        """
+    )
+    child = tmp_path / "payload.xml"
+    child.write_text(
+        """
+        <mujoco model="payload">
+          <worldbody>
+            <body name="payload" pos=".2 0 0">
+              <freejoint name="root"/>
+              <geom type="sphere" size=".1"/>
+            </body>
+          </worldbody>
+        </mujoco>
+        """
+    )
+
+    adapter = MuJoCoAdapter(root)
+    session = Session(adapter, root)
+    assert session.submit(cmd.Pause())
+    adapter.data.qpos[0] = 0.37
+    adapter.data.qvel[0] = -0.2
+    adapter.data.ctrl[0] = 0.6
+    adapter.data.time = 2.5
+
+    added = session.submit(cmd.AddSceneModel(child, (1.0, 2.0, 3.0)))
+    assert added.ok and added.entity_id > 0
+    assert [item.name for item in session.scene_models] == ["root", "payload"]
+    assert adapter.data.qpos[0] == pytest.approx(0.37)
+    assert adapter.data.qvel[0] == pytest.approx(-0.2)
+    assert adapter.data.ctrl[0] == pytest.approx(0.6)
+    assert adapter.data.time == pytest.approx(2.5)
+    assert adapter.model.body("forge_1_payload").id > 0
+    model_node = next(node for node in session.nodes if node.kind is NodeKind.MODEL)
+    assert model_node.name == "payload" and model_node.model_id == added.entity_id
+    assert any(session.node(child).name == "forge_1_payload" for child in model_node.children)
+
+    removed = session.submit(cmd.RemoveSceneModel(added.entity_id))
+    assert removed.ok
+    assert [item.name for item in session.scene_models] == ["root"]
+    assert adapter.data.qpos[0] == pytest.approx(0.37)
+    assert adapter.data.qvel[0] == pytest.approx(-0.2)
+    assert adapter.data.ctrl[0] == pytest.approx(0.6)
+    assert adapter.data.time == pytest.approx(2.5)
+    adapter.release()
+
+
 def test_session_loads_mjcf_and_urdf_without_losing_the_current_model_on_failure(tmp_path):
     from forge_viewer import commands as cmd
     from forge_viewer.assets import resolve

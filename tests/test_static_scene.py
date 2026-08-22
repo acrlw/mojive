@@ -6,6 +6,7 @@ import numpy as np
 
 from forge_viewer import commands as cmd
 from forge_viewer.adapters.base import (
+    CAMERA_OBJECT_BASE,
     LIGHT_OBJECT_BASE,
     AdapterCaps,
     FrameNeeds,
@@ -17,6 +18,7 @@ from forge_viewer.render.builder import SceneSourceBuilder
 from forge_viewer.scene import Scene
 from forge_viewer.session import Session
 from forge_viewer.types import (
+    DEFAULT_MATERIAL,
     CameraView,
     Environment,
     Light,
@@ -103,6 +105,144 @@ def test_scene_authoring_commands_return_stable_entity_ids():
     assert session.node_by_object_id(added.entity_id) is None
     assert session.node_by_object_id(LIGHT_OBJECT_BASE + light.entity_id) is None
     assert all(info.camera_id != camera.entity_id for info in session.cameras)
+
+
+def test_static_scene_document_commands_track_dirty_state(tmp_path):
+    scene = Scene()
+    session = Session(StaticSceneAdapter(scene))
+    path = tmp_path / "workspace.forge.json"
+
+    added = session.submit(cmd.AddSceneObject(MeshShape.BOX, "box"))
+    assert added.ok and session.dirty
+    assert session.submit(cmd.SaveScene(path))
+    assert path.exists() and session.asset_path == path and not session.dirty
+
+    node = session.node_by_object_id(added.entity_id)
+    assert session.submit(cmd.SetPose(node.node_id, np.ones(3), np.eye(3)))
+    assert session.dirty
+    assert session.submit(cmd.OpenScene(path))
+    assert not session.dirty
+    assert np.allclose(session.frame.geom_xpos[0], 0.0)
+
+    assert session.submit(cmd.NewScene())
+    assert session.asset_path is None and not session.dirty
+    assert session.source.instance_count == 0
+
+
+def test_static_scene_entity_lifecycle_commands_use_selection_identity():
+    scene = Scene()
+    obj = scene.box(name="box", position=(1.0, 2.0, 3.0))
+    session = Session(StaticSceneAdapter(scene))
+
+    assert session.submit(cmd.Select(obj.object_id))
+    duplicate = session.submit(cmd.DuplicateSceneEntity(obj.object_id))
+    assert duplicate.ok and duplicate.entity_id != obj.object_id
+    assert session.selected == duplicate.entity_id
+    assert session.selected_node.name == "box Copy"
+    assert np.allclose(scene.frame.geom_xpos[1], (1.0, 2.0, 3.0))
+
+    assert session.submit(cmd.RenameSceneEntity(duplicate.entity_id, "copy"))
+    assert session.selected_node.name == "copy"
+    assert session.submit(cmd.RemoveSceneEntity(duplicate.entity_id))
+    assert session.selected == 0
+    assert session.node_by_object_id(duplicate.entity_id) is None
+
+    light = scene.add_light("key", Light(kind=LightKind.DIRECTIONAL))
+    camera_id = scene.add_camera("shot", CameraView())
+    session.tick(FrameNeeds())
+    for object_id, expected_name in (
+        (LIGHT_OBJECT_BASE + light.light_id, "key Copy"),
+        (CAMERA_OBJECT_BASE + camera_id, "shot Copy"),
+    ):
+        duplicate = session.submit(cmd.DuplicateSceneEntity(object_id))
+        assert duplicate.ok
+        assert session.node_by_object_id(duplicate.entity_id).name == expected_name
+        assert session.submit(cmd.RemoveSceneEntity(duplicate.entity_id))
+
+
+def test_static_scene_undo_redo_restores_entities_and_saved_revision(tmp_path):
+    session = Session(StaticSceneAdapter(Scene()))
+    path = tmp_path / "history.forge.json"
+
+    added = session.submit(cmd.AddSceneObject(MeshShape.BOX, "box"))
+    assert added.ok and session.can_undo and session.dirty
+    assert session.submit(cmd.SaveScene(path))
+    assert not session.dirty
+
+    assert session.submit(cmd.RenameSceneEntity(added.entity_id, "renamed"))
+    assert session.node_by_object_id(added.entity_id).name == "renamed"
+    assert session.dirty
+    assert session.submit(cmd.Undo())
+    assert session.node_by_object_id(added.entity_id).name == "box"
+    assert not session.dirty and session.can_redo
+    assert session.submit(cmd.Redo())
+    assert session.node_by_object_id(added.entity_id).name == "renamed"
+    assert session.dirty
+
+    assert session.submit(cmd.RemoveSceneEntity(added.entity_id))
+    assert session.node_by_object_id(added.entity_id) is None
+    assert session.submit(cmd.Undo())
+    assert session.node_by_object_id(added.entity_id).name == "renamed"
+
+
+def test_static_scene_continuous_pose_edit_is_one_history_entry():
+    scene = Scene()
+    obj = scene.box(name="box")
+    session = Session(StaticSceneAdapter(scene))
+    node = session.node_by_object_id(obj.object_id)
+
+    assert session.submit(cmd.BeginEditTransaction("Move transform"))
+    for x in (0.5, 1.0, 2.0):
+        assert session.submit(cmd.SetPose(node.node_id, np.array([x, 0.0, 0.0]), np.eye(3)))
+    assert session.submit(cmd.EndEditTransaction())
+    assert np.allclose(session.frame.geom_xpos[0], (2.0, 0.0, 0.0))
+
+    assert session.submit(cmd.Undo())
+    assert np.allclose(session.frame.geom_xpos[0], 0.0)
+    assert not session.can_undo
+    assert session.submit(cmd.Redo())
+    assert np.allclose(session.frame.geom_xpos[0], (2.0, 0.0, 0.0))
+
+
+def test_empty_edit_transaction_does_not_create_history():
+    session = Session(StaticSceneAdapter(Scene()))
+
+    assert session.submit(cmd.BeginEditTransaction("No-op"))
+    assert session.submit(cmd.EndEditTransaction())
+    assert not session.can_undo
+
+
+def test_authored_overlay_survives_adapter_source_rebuilds():
+    class RenderOnlyAdapter(StaticSceneAdapter):
+        def set_light(self, light_id, light):
+            return False
+
+        def set_material(self, material_id, material):
+            return False
+
+        def set_geometry_color(self, node_id, rgba):
+            return False
+
+    scene = Scene(lights=LightSet(lights=(Light(kind=LightKind.POINT),)))
+    obj = scene.box(name="box")
+    session = Session(RenderOnlyAdapter(scene))
+    node = session.node_by_object_id(obj.object_id)
+    material = replace(DEFAULT_MATERIAL, name="authored", emission=0.4)
+    light = replace(
+        session.source.lights.lights[0],
+        diffuse=np.array([0.2, 0.7, 0.9], np.float32),
+    )
+    rgba = np.array([0.8, 0.2, 0.4, 1.0], np.float32)
+
+    assert session.submit(cmd.SetLight(0, light))
+    assert session.submit(cmd.SetMaterial(0, material))
+    assert session.submit(cmd.SetGeometryColor(node.children[0], rgba))
+    scene.sphere(name="structure change")
+    session.tick(FrameNeeds())
+
+    assert session.source.lights.lights[0] is light
+    assert session.source.materials[0] is material
+    assert np.allclose(session.source.geom_rgba[0], rgba)
 
 
 def test_static_session_has_pose_editing_but_no_fake_playback():

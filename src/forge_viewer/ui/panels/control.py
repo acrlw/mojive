@@ -20,7 +20,7 @@ from . import (
 class ControlPanel(Panel):
     name = "Control"
     default_open = True
-    shortcut = "F2"
+    shortcut = ""
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -64,12 +64,13 @@ class ControlPanel(Panel):
 
         if row[3]:
             imgui.same_line()
-        imgui.begin_disabled(not caps.reload)
+        can_reload = bool(caps.reload and s.asset_path is not None and not s.dirty)
+        imgui.begin_disabled(not can_reload)
         if imgui.button(labels[3], imgui.ImVec2(widths[3], 0)):
             ctx.submit(cmd.Reload())
         imgui.end_disabled()
-        if not caps.reload:
-            imgui.set_item_tooltip(f"{caps.name} does not support reload")
+        if not can_reload:
+            imgui.set_item_tooltip("No saved scene or reloadable model")
 
         imgui.separator()
 
