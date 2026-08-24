@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from forge_viewer import commands as cmd
 from forge_viewer.adapters.base import NodeKind
 from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
 from forge_viewer.adapters.workspace import WorkspaceAdapter
+from forge_viewer.session import Session
 from forge_viewer.types import DEFAULT_MATERIAL, CameraView, Light, LightKind, MeshShape
-from forge_viewer.workspace_io import missing_resources
+from forge_viewer.workspace_io import (
+    missing_resource_entries,
+    missing_resources,
+    relocate_workspace_resource,
+    repair_workspace_resources,
+)
 
 mujoco = pytest.importorskip("mujoco")
 
@@ -21,6 +29,36 @@ def workspace() -> WorkspaceAdapter:
     primary = MuJoCoAdapter()
     primary.new_scene()
     return WorkspaceAdapter(primary)
+
+
+@pytest.mark.parametrize(
+    "shape",
+    (
+        MeshShape.BOX,
+        MeshShape.SPHERE,
+        MeshShape.CYLINDER,
+        MeshShape.CONE,
+        MeshShape.PLANE,
+    ),
+)
+def test_workspace_authored_hierarchy_has_one_edge_per_node(shape: MeshShape) -> None:
+    document = workspace()
+    document.add_scene_object(
+        shape,
+        "primitive",
+        np.ones(3, np.float32),
+        np.zeros(3, np.float32),
+        np.eye(3, dtype=np.float32),
+        np.ones(4, np.float32),
+        DEFAULT_MATERIAL,
+    )
+
+    nodes = document.scene_source().nodes
+    assert all(len(node.children) == len(set(node.children)) for node in nodes)
+    for node in nodes[1:]:
+        assert nodes[node.parent].children.count(node.node_id) == 1
+    link = next(node for node in nodes if node.name == "primitive")
+    assert [nodes[child].name for child in link.children] == ["primitive.geom"]
 
 
 def test_workspace_round_trip_preserves_models_resources_and_entities(tmp_path: Path) -> None:
@@ -82,6 +120,65 @@ def test_workspace_resolves_models_from_resource_roots(tmp_path: Path) -> None:
     restored = workspace()
     restored.open_scene(path)
     assert restored.scene_models()[0].path == model_path.resolve()
+
+
+def test_workspace_relocates_one_missing_resource_and_reopens(tmp_path: Path) -> None:
+    document = workspace()
+    document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
+    path = tmp_path / "workspace" / "cell.forge.json"
+    document.save_scene(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["models"][0]["path"] = "missing/robot.xml"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    path.chmod(0o640)
+    replacement = tmp_path / "recovered" / "replacement.xml"
+    replacement.parent.mkdir()
+    replacement.write_text((ASSETS / "test_scene.xml").read_text(), encoding="utf-8")
+
+    missing = missing_resource_entries(path)
+    assert len(missing) == 1
+    assert missing[0].reference == "missing/robot.xml"
+    assert missing[0].expected_path == (path.parent / "missing/robot.xml").resolve()
+
+    result = relocate_workspace_resource(path, missing[0].model_index, replacement)
+    assert result.repaired == 1
+    assert result.missing == ()
+    assert path.stat().st_mode & 0o777 == 0o640
+    restored = workspace()
+    restored.open_scene(path)
+    assert restored.scene_models()[0].path == replacement.resolve()
+
+
+def test_workspace_repairs_unambiguous_resources_from_directory(tmp_path: Path) -> None:
+    document = workspace()
+    document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
+    document.add_scene_model(ASSETS / "test_scene.xml", np.ones(3), np.eye(3))
+    document.add_scene_model(ASSETS / "test_scene.xml", np.full(3, 2.0), np.eye(3))
+    path = tmp_path / "workspace" / "cell.forge.json"
+    document.save_scene(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["models"][0]["path"] = "old/robots/arm.xml"
+    payload["models"][1]["path"] = "old/tools/gripper.xml"
+    payload["models"][2]["path"] = "old/ambiguous.xml"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    root = tmp_path / "new-assets"
+    for relative in ("robots/arm.xml", "gripper.xml", "a/ambiguous.xml", "b/ambiguous.xml"):
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text((ASSETS / "test_scene.xml").read_text(), encoding="utf-8")
+
+    result = repair_workspace_resources(path, root)
+    assert result.repaired == 2
+    assert [item.reference for item in result.missing] == ["old/ambiguous.xml"]
+    repaired = json.loads(path.read_text(encoding="utf-8"))
+    assert (path.parent / repaired["models"][0]["path"]).resolve() == (
+        root / "robots/arm.xml"
+    ).resolve()
+    assert (path.parent / repaired["models"][1]["path"]).resolve() == (
+        root / "gripper.xml"
+    ).resolve()
+    assert repaired["models"][2]["path"] == "old/ambiguous.xml"
 
 
 def test_mjspec_topology_edits_round_trip_in_workspace(tmp_path: Path) -> None:
@@ -190,3 +287,119 @@ def test_model_source_supports_complete_mjcf_topology(tmp_path: Path) -> None:
     restored.open_scene(path)
     model = restored.primary.model
     assert (model.ntendon, model.nu, model.nsensor, model.neq) == (1, 1, 1, 1)
+
+
+def test_structured_model_components_edit_and_round_trip(tmp_path: Path) -> None:
+    document = workspace()
+    model_id = document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
+    source = """<mujoco model="components">
+  <worldbody>
+    <body name="arm">
+      <joint name="hinge" type="hinge"/>
+      <geom size="0.05"/>
+      <site name="start" pos="0 0 -0.1"/>
+      <site name="end" pos="0 0 0.1"/>
+    </body>
+  </worldbody>
+</mujoco>"""
+    assert document.set_scene_model_xml(model_id, source)
+
+    expected = {
+        "actuator": "motor",
+        "sensor": "jointpos",
+        "tendon": "spatial",
+        "equality": "joint",
+    }
+    for category, subtype in expected.items():
+        assert subtype in document.model_component_presets(model_id, category)
+        assert document.add_model_component(model_id, category, subtype, category) == 0
+
+    actuator = document.model_components(model_id, "actuator")[0]
+    assert actuator.name == "actuator"
+    assert {field.name: field.value for field in actuator.fields}["joint"] == "hinge"
+    fields = tuple(
+        (field.name, "-2 2" if field.name == "ctrlrange" else field.value)
+        for field in actuator.fields
+    )
+    assert document.update_model_component(model_id, "actuator", 0, "drive", fields, ())
+
+    tendon = document.model_components(model_id, "tendon")[0]
+    assert tendon.subtype == "spatial"
+    assert [item.kind for item in tendon.path] == ["site", "site"]
+    assert document.update_model_component(
+        model_id,
+        "tendon",
+        0,
+        "cable",
+        tuple((field.name, field.value) for field in tendon.fields),
+        tuple(
+            (
+                item.kind,
+                tuple((field.name, field.value) for field in item.fields),
+            )
+            for item in tendon.path
+        ),
+    )
+    assert document.remove_model_component(model_id, "sensor", 0)
+
+    model = document.primary.model
+    assert (model.ntendon, model.nu, model.nsensor, model.neq) == (1, 1, 0, 1)
+    assert model.actuator_ctrlrange[0] == pytest.approx((-2.0, 2.0))
+    path = tmp_path / "structured-components.forge.json"
+    document.save_scene(path)
+    restored = workspace()
+    restored.open_scene(path)
+    assert restored.model_components(model_id, "actuator")[0].name == "drive"
+    assert restored.model_components(model_id, "tendon")[0].name == "cable"
+    assert restored.model_components(model_id, "sensor") == ()
+
+
+def test_invalid_structured_component_edit_keeps_last_good_model() -> None:
+    document = workspace()
+    model_id = document.add_scene_model(ASSETS / "actuator_visuals.xml", np.zeros(3), np.eye(3))
+    before = document.primary.model
+    actuator = document.model_components(model_id, "actuator")[0]
+    fields = tuple(
+        (field.name, "missing_joint" if field.name == "body" else field.value)
+        for field in actuator.fields
+    )
+
+    with pytest.raises(ValueError):
+        document.update_model_component(model_id, "actuator", 0, actuator.name, fields, ())
+
+    assert document.primary.model is before
+    assert document.model_components(model_id, "actuator")[0] == actuator
+
+
+def test_structured_component_commands_participate_in_undo_redo() -> None:
+    document = workspace()
+    model_id = document.add_scene_model(ASSETS / "actuator_visuals.xml", np.zeros(3), np.eye(3))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    assert session.submit(cmd.AddModelComponent(model_id, "sensor", "jointpos", "angle"))
+    assert session.can_undo
+    assert [item.name for item in session.model_components(model_id, "sensor")] == ["angle"]
+
+    assert session.submit(cmd.Undo())
+    assert session.model_components(model_id, "sensor") == ()
+    assert session.submit(cmd.Redo())
+    assert [item.name for item in session.model_components(model_id, "sensor")] == ["angle"]
+
+
+def test_noop_model_edits_skip_recompilation() -> None:
+    document = workspace()
+    model_id = document.add_scene_model(ASSETS / "actuator_visuals.xml", np.zeros(3), np.eye(3))
+    compiled = document.primary.model
+    assert document.set_scene_model_transform(model_id, np.zeros(3), np.eye(3))
+    assert document.primary.model is compiled
+
+    component = document.model_components(model_id, "actuator")[0]
+    assert document.update_model_component(
+        model_id,
+        component.category,
+        component.component_id,
+        component.name,
+        tuple((field.name, field.value) for field in component.fields),
+        (),
+    )
+    assert document.primary.model is compiled

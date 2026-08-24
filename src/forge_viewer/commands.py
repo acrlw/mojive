@@ -116,6 +116,31 @@ class SetModelSource(Command):
 
 
 @dataclass(frozen=True)
+class AddModelComponent(Command):
+    model_id: int
+    category: str
+    subtype: str
+    name: str
+
+
+@dataclass(frozen=True)
+class UpdateModelComponent(Command):
+    model_id: int
+    category: str
+    component_id: int
+    name: str
+    fields: tuple[tuple[str, str], ...]
+    path: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
+
+
+@dataclass(frozen=True)
+class RemoveModelComponent(Command):
+    model_id: int
+    category: str
+    component_id: int
+
+
+@dataclass(frozen=True)
 class NewScene(Command):
     pass
 

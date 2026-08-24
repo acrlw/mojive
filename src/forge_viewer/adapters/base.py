@@ -115,6 +115,36 @@ class SceneModelInfo:
 
 
 @dataclass(frozen=True)
+class ModelComponentField:
+    """One editable MJCF attribute with optional model-local reference choices."""
+
+    name: str
+    value: str
+    choices: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ModelComponentPathItem:
+    """One nested tendon path element such as a site or joint reference."""
+
+    kind: str
+    fields: tuple[ModelComponentField, ...] = ()
+
+
+@dataclass(frozen=True)
+class ModelComponentInfo:
+    """One model-level actuator, tendon, sensor, or equality declaration."""
+
+    component_id: int
+    model_id: int
+    category: str
+    subtype: str
+    name: str
+    fields: tuple[ModelComponentField, ...] = ()
+    path: tuple[ModelComponentPathItem, ...] = ()
+
+
+@dataclass(frozen=True)
 class KeyframeInfo:
     """A named MuJoCo state preset; unnamed motion frames get a stable fallback label."""
 
@@ -557,6 +587,29 @@ class SceneAdapterBase:
     def set_scene_model_xml(self, model_id: int, xml: str) -> bool:
         return False
 
+    def model_components(self, model_id: int, category: str) -> tuple[ModelComponentInfo, ...]:
+        return ()
+
+    def model_component_presets(self, model_id: int, category: str) -> tuple[str, ...]:
+        return ()
+
+    def add_model_component(self, model_id: int, category: str, subtype: str, name: str) -> int:
+        return -1
+
+    def update_model_component(
+        self,
+        model_id: int,
+        category: str,
+        component_id: int,
+        name: str,
+        fields: tuple[tuple[str, str], ...],
+        path: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
+    ) -> bool:
+        return False
+
+    def remove_model_component(self, model_id: int, category: str, component_id: int) -> bool:
+        return False
+
     def reset(self) -> None: ...
     def step(self, count: int = 1) -> None: ...
 
@@ -749,6 +802,19 @@ class SceneAdapter(Protocol):
     def scene_model_xml(self, model_id: int) -> str | None: ...
     def scene_model_source(self, model_id: int) -> str | None: ...
     def set_scene_model_xml(self, model_id: int, xml: str) -> bool: ...
+    def model_components(self, model_id: int, category: str) -> tuple[ModelComponentInfo, ...]: ...
+    def model_component_presets(self, model_id: int, category: str) -> tuple[str, ...]: ...
+    def add_model_component(self, model_id: int, category: str, subtype: str, name: str) -> int: ...
+    def update_model_component(
+        self,
+        model_id: int,
+        category: str,
+        component_id: int,
+        name: str,
+        fields: tuple[tuple[str, str], ...],
+        path: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
+    ) -> bool: ...
+    def remove_model_component(self, model_id: int, category: str, component_id: int) -> bool: ...
     def reset(self) -> None: ...
     def step(self, count: int = 1) -> None: ...
     def set_paused(self, paused: bool) -> bool: ...

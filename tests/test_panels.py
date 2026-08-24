@@ -24,6 +24,7 @@ from forge_viewer.ui.panels.inspector import (
     _lift_color,
     _nearest_euler_degrees,
     _pose_editable,
+    _unique_component_name,
     gizmo_refusal_reason,
 )
 from forge_viewer.ui.panels.stats import StatsPanel, _scale_ceiling
@@ -231,6 +232,11 @@ def test_button_rows_wrap_without_clipping_items():
     widths = (156.0, 120.0, 120.0, 140.0)
     assert button_row_layout(widths, 400.0, 14.0) == (False, True, False, True)
     assert button_row_layout(widths, 700.0, 14.0) == (False, True, True, True)
+
+
+def test_model_component_names_are_stable_and_unique():
+    assert _unique_component_name("sensor", set()) == "sensor"
+    assert _unique_component_name("sensor", {"sensor", "sensor2", "sensor4"}) == "sensor3"
 
 
 def test_transform_axis_buttons_have_distinct_hover_and_active_colors():

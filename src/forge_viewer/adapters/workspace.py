@@ -178,6 +178,40 @@ class WorkspaceAdapter(SceneAdapterBase):
             self._invalidate()
         return changed
 
+    def model_components(self, model_id: int, category: str):
+        return self.primary.model_components(model_id, category)
+
+    def model_component_presets(self, model_id: int, category: str) -> tuple[str, ...]:
+        return self.primary.model_component_presets(model_id, category)
+
+    def add_model_component(self, model_id: int, category: str, subtype: str, name: str) -> int:
+        component_id = self.primary.add_model_component(model_id, category, subtype, name)
+        if component_id >= 0:
+            self._invalidate()
+        return component_id
+
+    def update_model_component(
+        self,
+        model_id: int,
+        category: str,
+        component_id: int,
+        name: str,
+        fields: tuple[tuple[str, str], ...],
+        path: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
+    ) -> bool:
+        changed = self.primary.update_model_component(
+            model_id, category, component_id, name, fields, path
+        )
+        if changed:
+            self._invalidate()
+        return changed
+
+    def remove_model_component(self, model_id: int, category: str, component_id: int) -> bool:
+        changed = self.primary.remove_model_component(model_id, category, component_id)
+        if changed:
+            self._invalidate()
+        return changed
+
     def scene_source(self) -> SceneSource:
         if (
             self._source is None
@@ -429,6 +463,11 @@ class WorkspaceAdapter(SceneAdapterBase):
 
     def release(self) -> None:
         self.primary.release()
+        self._source = None
+        self._node_to_scene.clear()
+        self._object_to_scene.clear()
+        self._light_to_scene.clear()
+        self._camera_to_scene.clear()
 
     def _invalidate(self) -> None:
         self._source = None
@@ -469,7 +508,7 @@ class WorkspaceAdapter(SceneAdapterBase):
                 raw,
                 node_id=node_id,
                 parent=parent,
-                children=[node_offset + child for child in raw.children],
+                children=[],
                 object_id=object_id,
                 body_index=body,
                 light_index=light,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+import xml.etree.ElementTree as ET
 from colorsys import hsv_to_rgb
 from dataclasses import dataclass, replace
 from itertools import pairwise
@@ -44,6 +45,9 @@ from .base import (
     JointInfo,
     JointVisualKind,
     KeyframeInfo,
+    ModelComponentField,
+    ModelComponentInfo,
+    ModelComponentPathItem,
     NodeKind,
     PhysicsState,
     SceneAdapterBase,
@@ -86,6 +90,35 @@ _ACTUATOR_POSE_JOINT_BODY = 1
 _ACTUATOR_POSE_SITE = 2
 _ACTUATOR_POSE_GEOM = 3
 
+_MODEL_COMPONENT_CATEGORIES = ("actuator", "sensor", "tendon", "equality")
+_COMPONENT_OPTIONAL_FIELDS = {
+    "actuator": ("gear", "ctrlrange", "forcerange", "group"),
+    "sensor": ("cutoff", "noise"),
+    "tendon": ("width", "stiffness", "damping", "range", "limited"),
+    "equality": ("active", "solref", "solimp", "polycoef"),
+}
+_REFERENCE_ELEMENT = {
+    "actuator": "actuator",
+    "actuator1": "actuator",
+    "actuator2": "actuator",
+    "body": "body",
+    "body1": "body",
+    "body2": "body",
+    "camera": "camera",
+    "geom": "geom",
+    "geom1": "geom",
+    "geom2": "geom",
+    "joint": "joint",
+    "joint1": "joint",
+    "joint2": "joint",
+    "site": "site",
+    "site1": "site",
+    "site2": "site",
+    "tendon": "tendon",
+    "tendon1": "tendon",
+    "tendon2": "tendon",
+}
+
 
 def _load_editable_spec(path: Path):
     spec = mujoco.MjSpec.from_file(str(path))
@@ -93,6 +126,65 @@ def _load_editable_spec(path: Path):
         spec = mujoco.MjSpec.from_string(spec.to_xml())
         spec.modelfiledir = str(path.parent)
     return spec
+
+
+def _component_xml(spec) -> tuple[ET.Element, str]:
+    xml = spec.to_xml()
+    return ET.fromstring(xml), xml
+
+
+def _component_section(root: ET.Element, category: str, *, create: bool = False):
+    if category not in _MODEL_COMPONENT_CATEGORIES:
+        raise ValueError(f"Unsupported model component category: {category}")
+    section = root.find(category)
+    if section is None and create:
+        section = ET.SubElement(root, category)
+    return section
+
+
+def _named_elements(root: ET.Element, tag: str) -> tuple[str, ...]:
+    if tag in _MODEL_COMPONENT_CATEGORIES:
+        section = root.find(tag)
+        return (
+            tuple(
+                value
+                for element in section or ()
+                if (value := str(element.attrib.get("name", "")).strip())
+            )
+            if section is not None
+            else ()
+        )
+    return tuple(
+        value
+        for element in root.iter(tag)
+        if (value := str(element.attrib.get("name", "")).strip())
+    )
+
+
+def _field_choices(root: ET.Element, name: str, attributes: dict[str, str]) -> tuple[str, ...]:
+    target = _REFERENCE_ELEMENT.get(name)
+    if name == "objname":
+        target = attributes.get("objtype", "").lower()
+    elif name == "refname":
+        target = attributes.get("reftype", "").lower()
+    return _named_elements(root, target) if target else ()
+
+
+def _component_fields(
+    root: ET.Element, category: str, attributes: dict[str, str]
+) -> tuple[ModelComponentField, ...]:
+    values = {name: value for name, value in attributes.items() if name != "name"}
+    for name in _COMPONENT_OPTIONAL_FIELDS[category]:
+        values.setdefault(name, "")
+    return tuple(
+        ModelComponentField(name, value, _field_choices(root, name, values))
+        for name, value in values.items()
+    )
+
+
+def _serialize_component_xml(root: ET.Element) -> str:
+    ET.indent(root, space="  ")
+    return ET.tostring(root, encoding="unicode")
 
 
 def _grid_node(start: int, ny: int, nz: int, i: int, j: int, k: int) -> int:
@@ -492,11 +584,17 @@ class MuJoCoAdapter(SceneAdapterBase):
         )
         if item is None:
             return False
+        next_position = np.asarray(position, np.float64).reshape(3)
+        next_rotation = np.asarray(rotation, np.float64).reshape(3, 3)
+        if np.array_equal(item.position, next_position) and np.array_equal(
+            item.rotation, next_rotation
+        ):
+            return True
         state = self._capture_named_model_state()
         previous_position = item.position.copy()
         previous_rotation = item.rotation.copy()
-        item.position[:] = np.asarray(position, np.float64).reshape(3)
-        item.rotation[:] = np.asarray(rotation, np.float64).reshape(3, 3)
+        item.position[:] = next_position
+        item.rotation[:] = next_rotation
         try:
             model = self._compile_composed_model()
         except Exception:
@@ -622,11 +720,217 @@ class MuJoCoAdapter(SceneAdapterBase):
         )
         if path is not None:
             spec.modelfiledir = str(path.parent)
+        return self._replace_model_spec(model_id, spec)
+
+    def model_components(self, model_id: int, category: str) -> tuple[ModelComponentInfo, ...]:
+        spec = self._spec_for_model(model_id)
+        if spec is None:
+            return ()
+        root, _xml = _component_xml(spec)
+        section = _component_section(root, category)
+        if section is None:
+            return ()
+        components = []
+        for component_id, element in enumerate(section):
+            attributes = dict(element.attrib)
+            path = tuple(
+                ModelComponentPathItem(
+                    child.tag,
+                    tuple(
+                        ModelComponentField(
+                            name,
+                            value,
+                            _field_choices(root, name, dict(child.attrib)),
+                        )
+                        for name, value in child.attrib.items()
+                    ),
+                )
+                for child in element
+            )
+            components.append(
+                ModelComponentInfo(
+                    component_id,
+                    int(model_id),
+                    category,
+                    element.tag,
+                    attributes.get("name", f"{category}{component_id}"),
+                    _component_fields(root, category, attributes),
+                    path,
+                )
+            )
+        return tuple(components)
+
+    def model_component_presets(self, model_id: int, category: str) -> tuple[str, ...]:
+        spec = self._spec_for_model(model_id)
+        if spec is None:
+            return ()
+        root, _xml = _component_xml(spec)
+        joints = _named_elements(root, "joint")
+        bodies = _named_elements(root, "body")
+        sites = _named_elements(root, "site")
+        tendons = _named_elements(root, "fixed") + _named_elements(root, "spatial")
+        if category == "actuator":
+            return ("motor", "position", "velocity") if joints else ()
+        if category == "sensor":
+            return (
+                *(("jointpos", "jointvel") if joints else ()),
+                *(("framepos", "framequat") if bodies else ()),
+            )
+        if category == "tendon":
+            return (
+                *(("fixed",) if joints else ()),
+                *(("spatial",) if len(sites) >= 2 else ()),
+            )
+        if category == "equality":
+            return (
+                *(("joint",) if joints else ()),
+                *(("weld", "connect") if bodies else ()),
+                *(("tendon",) if tendons else ()),
+            )
+        _component_section(root, category)
+        return ()
+
+    def add_model_component(self, model_id: int, category: str, subtype: str, name: str) -> int:
+        spec = self._spec_for_model(model_id)
+        value = str(name).strip()
+        if spec is None or not value:
+            return -1
+        presets = self.model_component_presets(model_id, category)
+        if subtype not in presets:
+            raise ValueError(f"Cannot add {category} subtype {subtype!r} to this model")
+        root, _xml = _component_xml(spec)
+        section = _component_section(root, category, create=True)
+        assert section is not None
+        if any(item.attrib.get("name") == value for item in section):
+            raise ValueError(f"{category} {value!r} already exists")
+        element = ET.SubElement(section, subtype, {"name": value})
+        joints = _named_elements(root, "joint")
+        bodies = _named_elements(root, "body")
+        sites = _named_elements(root, "site")
+        tendons = _named_elements(root, "fixed") + _named_elements(root, "spatial")
+        if category == "actuator":
+            element.set("joint", joints[0])
+        elif category == "sensor":
+            if subtype.startswith("joint"):
+                element.set("joint", joints[0])
+            else:
+                element.set("objtype", "body")
+                element.set("objname", bodies[0])
+        elif category == "tendon" and subtype == "fixed":
+            ET.SubElement(element, "joint", {"joint": joints[0], "coef": "1"})
+        elif category == "tendon":
+            ET.SubElement(element, "site", {"site": sites[0]})
+            ET.SubElement(element, "site", {"site": sites[1]})
+        elif category == "equality" and subtype == "joint":
+            element.set("joint1", joints[0])
+        elif category == "equality" and subtype in ("weld", "connect"):
+            element.set("body1", bodies[0])
+        elif category == "equality":
+            element.set("tendon1", tendons[0])
+        new_spec = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        if not self._replace_model_spec(model_id, new_spec):
+            return -1
+        return len(section) - 1
+
+    def update_model_component(
+        self,
+        model_id: int,
+        category: str,
+        component_id: int,
+        name: str,
+        fields: tuple[tuple[str, str], ...],
+        path: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
+    ) -> bool:
+        spec = self._spec_for_model(model_id)
+        value = str(name).strip()
+        if spec is None or not value:
+            return False
+        root, _xml = _component_xml(spec)
+        section = _component_section(root, category)
+        if section is None or not 0 <= int(component_id) < len(section):
+            return False
+        if any(
+            index != int(component_id) and item.attrib.get("name") == value
+            for index, item in enumerate(section)
+        ):
+            raise ValueError(f"{category} {value!r} already exists")
+        element = section[int(component_id)]
+        next_attributes = {
+            str(field_name).strip(): str(field_value).strip()
+            for field_name, field_value in fields
+            if str(field_name).strip()
+            and str(field_name).strip() != "name"
+            and str(field_value).strip()
+        }
+        next_attributes = {"name": value, **next_attributes}
+        next_path = tuple(
+            (
+                str(item_kind).strip(),
+                tuple(
+                    (str(field_name).strip(), str(field_value).strip())
+                    for field_name, field_value in item_fields
+                    if str(field_name).strip() and str(field_value).strip()
+                ),
+            )
+            for item_kind, item_fields in path
+            if str(item_kind).strip()
+        )
+        current_path = tuple((child.tag, tuple(child.attrib.items())) for child in element)
+        if dict(element.attrib) == next_attributes and (
+            category != "tendon" or current_path == next_path
+        ):
+            return True
+        element.attrib.clear()
+        element.attrib.update(next_attributes)
+        if category == "tendon":
+            element[:] = []
+            for item_kind, item_fields in next_path:
+                ET.SubElement(element, item_kind, dict(item_fields))
+        new_spec = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        return self._replace_model_spec(model_id, new_spec)
+
+    def remove_model_component(self, model_id: int, category: str, component_id: int) -> bool:
+        spec = self._spec_for_model(model_id)
+        if spec is None:
+            return False
+        root, _xml = _component_xml(spec)
+        section = _component_section(root, category)
+        if section is None or not 0 <= int(component_id) < len(section):
+            return False
+        section.remove(section[int(component_id)])
+        if not len(section):
+            root.remove(section)
+        new_spec = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        return self._replace_model_spec(model_id, new_spec)
+
+    def _spec_from_component_xml(self, model_id: int, xml: str):
+        spec = mujoco.MjSpec.from_string(xml)
+        path = next(
+            (item.path for item in self._attached_models if item.model_id == int(model_id)),
+            self._root_path,
+        )
+        if path is not None:
+            spec.modelfiledir = str(path.parent)
+        return spec
+
+    def _replace_model_spec(self, model_id: int, spec) -> bool:
+        # MjSpec.attach can defer a broken local reference until later serialization.
+        # Validate the edited standalone model before it enters the composed document.
+        spec.to_xml()
+        state = self._capture_named_model_state()
         if int(model_id) == 0:
             if self._root_spec is None:
                 return False
+            previous_spec = self._root_spec
+            previous_edited = self._root_edited
             self._root_spec = spec
             self._root_edited = True
+            try:
+                model = self._compile_composed_model()
+            except Exception:
+                self._root_spec = previous_spec
+                self._root_edited = previous_edited
+                raise
         else:
             index = next(
                 (
@@ -638,10 +942,15 @@ class MuJoCoAdapter(SceneAdapterBase):
             )
             if index < 0:
                 return False
-            self._attached_models[index] = replace(
-                self._attached_models[index], spec=spec, edited=True
-            )
-        self._recompile_topology()
+            previous = self._attached_models[index]
+            self._attached_models[index] = replace(previous, spec=spec, edited=True)
+            try:
+                model = self._compile_composed_model()
+            except Exception:
+                self._attached_models[index] = previous
+                raise
+        self._install(model)
+        self._restore_named_model_state(state)
         return True
 
     def _recompile_topology(self) -> None:
@@ -3398,6 +3707,19 @@ class MuJoCoAdapter(SceneAdapterBase):
     def release(self) -> None:
         self._m = None
         self._d = None
+        self._root_spec = None
+        self._attached_models.clear()
+        self._source = None
+        self._nodes.clear()
+        self._node_body.clear()
+        self._node_model.clear()
+        self._node_element.clear()
+        self._geom_nodes.clear()
+        self._site_nodes.clear()
+        self._flex_nodes.clear()
+        self._skin_nodes.clear()
+        self._deformables.clear()
+        self._mesh_updates.clear()
         self._mj_geom_xpos = None
         self._mj_geom_xmat3 = None
         self._mj_site_xmat3 = None
@@ -3405,6 +3727,29 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._mj_wrap_objects = None
         self._mj_body_xpos = None
         self._mj_body_xmat3 = None
+        self._geom_xpos_buf = np.zeros((0, 3), np.float32)
+        self._geom_xmat_buf = np.zeros((0, 3, 3), np.float32)
+        self._site_xpos_buf = np.zeros((0, 3), np.float32)
+        self._site_xmat_buf = np.zeros((0, 3, 3), np.float32)
+        self._body_xpos_buf = np.zeros((0, 3), np.float32)
+        self._body_xmat_buf = np.zeros((0, 3, 3), np.float32)
+        self._qpos_buf = np.zeros(0, np.float32)
+        self._qvel_buf = np.zeros(0, np.float32)
+        self._ctrl_buf = np.zeros(0, np.float32)
+        self._sensor_buf = np.zeros(0, np.float32)
+        self._contact_buf = np.zeros((0, 7), np.float32)
+        self._contact_view = self._contact_buf
+        self._contact_force_buf = np.zeros((0, 2, 3), np.float32)
+        self._contact_force_view = self._contact_force_buf
+        self._tendon_segments = np.zeros((0, 2, 3), np.float32)
+        self._tendon_ids = np.zeros(0, np.int32)
+        self._tendon_widths = np.zeros(0, np.float32)
+        self._flex_vertices_buf = np.zeros((0, 3), np.float32)
+        self._perturb_jac = np.zeros((3, 0), np.float64)
+        self._perturb_jac_m2 = np.zeros((3, 0), np.float64)
+        self._perturb_sqrt_inv_d = np.zeros(0, np.float64)
+        self._visual_state = {}
+        self._light_state = {}
 
     @property
     def model(self):

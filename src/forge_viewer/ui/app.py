@@ -15,6 +15,12 @@ from .. import commands as cmd
 from ..adapters.base import FrameNeeds, NodeKind
 from ..render.backend import FrameMode, LabelMode, RenderFlag
 from ..types import Light, LightKind, MeshShape, ViewportImage
+from ..workspace_io import (
+    MissingResource,
+    missing_resource_entries,
+    relocate_workspace_resource,
+    repair_workspace_resources,
+)
 from . import gestures as gs
 from .camera import CameraOut, OrbitCamera, ndc_from_viewport, unproject
 from .camera_preview import CameraPreview
@@ -106,6 +112,13 @@ class ViewerApp:
         self._scene_dialog: Any | None = None
         self._scene_dialog_action = ""
         self._resource_dialog: Any | None = None
+        self._resource_repair_dialog: Any | None = None
+        self._resource_repair_dialog_action = ""
+        self._resource_repair_model_index = -1
+        self._resource_repair_path: Path | None = None
+        self._missing_resources: tuple[MissingResource, ...] = ()
+        self._resource_repair_status = ""
+        self._open_resource_repair_popup = False
         self._pending_document_action: tuple[str, Path | None] | None = None
         self._after_save_action: tuple[str, Path | None] | None = None
         self._rename_object_id = 0
@@ -167,6 +180,9 @@ class ViewerApp:
         if self._resource_dialog is not None:
             self._resource_dialog.kill()
             self._resource_dialog = None
+        if self._resource_repair_dialog is not None:
+            self._resource_repair_dialog.kill()
+            self._resource_repair_dialog = None
         if self.debug_bridge is not None:
             self.debug_bridge.close()
         self.camera_preview.release()
@@ -204,7 +220,17 @@ class ViewerApp:
         return result
 
     def open_scene(self, path: str | Path) -> CommandResult:
-        result = self.session.submit(cmd.OpenScene(Path(path)))
+        target = Path(path).expanduser().resolve()
+        try:
+            missing = missing_resource_entries(target)
+        except Exception:
+            missing = ()
+        if missing:
+            self._begin_resource_repair(target, missing)
+            return cmd.CommandResult.bad(
+                f"{len(missing)} workspace resource(s) must be located before opening"
+            )
+        result = self.session.submit(cmd.OpenScene(target))
         if result.ok:
             self._after_model_change()
             self._set_model_drop_notice(f"Opened {self.session.asset_path.name}")
@@ -275,6 +301,76 @@ class ViewerApp:
             "Add Forge resource directory", str(default)
         )
 
+    def _begin_resource_repair(self, path: Path, missing: tuple[MissingResource, ...]) -> None:
+        self._resource_repair_path = path
+        self._missing_resources = missing
+        self._resource_repair_status = ""
+        self._open_resource_repair_popup = True
+
+    def _open_resource_repair_dialog(self, action: str, model_index: int = -1) -> None:
+        if self._resource_repair_dialog is not None or self._resource_repair_path is None:
+            return
+        default = self._resource_repair_path.parent
+        if action == "locate":
+            missing = next(
+                (item for item in self._missing_resources if item.model_index == model_index), None
+            )
+            if missing is None:
+                return
+            self._resource_repair_dialog = portable_file_dialogs.open_file(
+                f"Locate {missing.model_name}", str(default), MODEL_FILTERS
+            )
+        else:
+            self._resource_repair_dialog = portable_file_dialogs.select_folder(
+                "Search a directory for missing resources", str(default)
+            )
+        self._resource_repair_dialog_action = action
+        self._resource_repair_model_index = model_index
+
+    def _poll_resource_repair_dialog(self) -> None:
+        dialog = self._resource_repair_dialog
+        if dialog is None or not dialog.ready(0):
+            return
+        action = self._resource_repair_dialog_action
+        model_index = self._resource_repair_model_index
+        self._resource_repair_dialog = None
+        self._resource_repair_dialog_action = ""
+        self._resource_repair_model_index = -1
+        try:
+            selected = dialog.result()
+        except Exception as exc:
+            self._resource_repair_status = str(exc)
+            self._open_resource_repair_popup = True
+            return
+        if isinstance(selected, (list, tuple)):
+            selected = selected[0] if selected else ""
+        if not selected:
+            self._open_resource_repair_popup = True
+            return
+        path = self._resource_repair_path
+        if path is None:
+            return
+        try:
+            if action == "locate":
+                repair = relocate_workspace_resource(path, model_index, selected)
+            else:
+                repair = repair_workspace_resources(path, selected)
+        except Exception as exc:
+            self._resource_repair_status = str(exc)
+            self._open_resource_repair_popup = True
+            return
+        self._missing_resources = repair.missing
+        if repair.missing:
+            self._resource_repair_status = (
+                f"Repaired {repair.repaired}; {len(repair.missing)} resource(s) still missing."
+            )
+            self._open_resource_repair_popup = True
+            return
+        self._resource_repair_path = None
+        self._resource_repair_status = ""
+        self._set_model_drop_notice(f"Repaired {repair.repaired} resource path(s)")
+        self.open_scene(path)
+
     def _poll_resource_dialog(self) -> None:
         dialog = self._resource_dialog
         if dialog is None or not dialog.ready(0):
@@ -289,6 +385,46 @@ class ViewerApp:
             result = self.session.submit(cmd.AddResourceRoot(Path(selected)))
             if not result.ok:
                 self._report_model_error(result.message)
+
+    def _draw_resource_repair(self) -> None:
+        if self._open_resource_repair_popup:
+            imgui.open_popup("Missing Resources")
+            self._open_resource_repair_popup = False
+        visible, _ = imgui.begin_popup_modal(
+            "Missing Resources", None, imgui.WindowFlags_.always_auto_resize.value
+        )
+        if not visible:
+            return
+        imgui.text_wrapped(
+            "This Forge scene references model files that are no longer available. "
+            "Locate files individually or search one directory to repair every unambiguous path."
+        )
+        imgui.spacing()
+        locate = -1
+        for missing in self._missing_resources:
+            imgui.text(f"{missing.model_name}: {missing.reference}")
+            imgui.same_line()
+            if imgui.small_button(f"Locate...##missing-resource-{missing.model_index}"):
+                locate = missing.model_index
+        if self._resource_repair_status:
+            imgui.spacing()
+            imgui.text_wrapped(self._resource_repair_status)
+        imgui.spacing()
+        search = imgui.button("Search Directory...", imgui.ImVec2(160.0, 0.0))
+        imgui.same_line()
+        cancel = imgui.button("Cancel", imgui.ImVec2(100.0, 0.0))
+        if locate >= 0:
+            self._open_resource_repair_dialog("locate", locate)
+            imgui.close_current_popup()
+        elif search:
+            self._open_resource_repair_dialog("search")
+            imgui.close_current_popup()
+        elif cancel:
+            self._resource_repair_path = None
+            self._missing_resources = ()
+            self._resource_repair_status = ""
+            imgui.close_current_popup()
+        imgui.end_popup()
 
     def _poll_scene_dialog(self) -> None:
         dialog = self._scene_dialog
@@ -758,6 +894,7 @@ class ViewerApp:
         self._poll_model_dialog()
         self._poll_scene_dialog()
         self._poll_resource_dialog()
+        self._poll_resource_repair_dialog()
         self._poll_model_drop()
         self._draw_main_menu()
         window.begin_dockspace()
@@ -817,6 +954,7 @@ class ViewerApp:
         self.panels.draw(ctx)
         self._draw_rename_popup()
         self._draw_unsaved_changes()
+        self._draw_resource_repair()
         self._draw_model_load_error()
         self._sync_window_title()
         window.end_frame()

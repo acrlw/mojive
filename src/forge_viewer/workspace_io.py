@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import stat
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +15,25 @@ from .scene_io import scene_from_document, scene_to_document
 
 FORMAT = "forge-viewer.workspace"
 VERSION = 1
+
+
+@dataclass(frozen=True)
+class MissingResource:
+    """One unresolved model reference in a Forge workspace document."""
+
+    model_index: int
+    model_id: int
+    model_name: str
+    reference: str
+    expected_path: Path
+
+
+@dataclass(frozen=True)
+class ResourceRepair:
+    """Result of rewriting missing model references in a workspace document."""
+
+    repaired: int
+    missing: tuple[MissingResource, ...]
 
 
 def save_workspace(workspace, path: str | Path) -> Path:
@@ -52,6 +74,10 @@ def load_workspace(workspace, path: str | Path) -> None:
         return
     if document.get("format") != FORMAT or document.get("version") != VERSION:
         raise ValueError(f"Unsupported Forge workspace format in {source}")
+    missing = _missing_resource_entries(document, source)
+    if missing:
+        names = ", ".join(item.reference for item in missing)
+        raise FileNotFoundError(f"Missing workspace resources: {names}")
     workspace.primary.new_scene()
     resource_roots = _document_resource_roots(document, source.parent)
     workspace.set_resource_roots(tuple(root for root in resource_roots if root != source.parent))
@@ -71,16 +97,56 @@ def load_workspace(workspace, path: str | Path) -> None:
 
 
 def missing_resources(path: str | Path) -> tuple[Path, ...]:
+    return tuple(item.expected_path for item in missing_resource_entries(path))
+
+
+def missing_resource_entries(path: str | Path) -> tuple[MissingResource, ...]:
     source = Path(path).expanduser().resolve()
     document = json.loads(source.read_text(encoding="utf-8"))
-    resource_roots = _document_resource_roots(document, source.parent)
-    return tuple(
-        candidate
-        for item in document.get("models", ())
-        if not (
-            candidate := _resolve_resource(str(item["path"]), source.parent, resource_roots)
-        ).is_file()
-    )
+    return _missing_resource_entries(document, source)
+
+
+def relocate_workspace_resource(
+    path: str | Path, model_index: int, replacement: str | Path
+) -> ResourceRepair:
+    """Replace one missing model reference with a caller-selected file."""
+
+    source = Path(path).expanduser().resolve()
+    selected = Path(replacement).expanduser().resolve()
+    if not selected.is_file():
+        raise FileNotFoundError(f"Replacement resource is unavailable: {selected}")
+    document = json.loads(source.read_text(encoding="utf-8"))
+    models = document.get("models", ())
+    if not 0 <= int(model_index) < len(models):
+        raise IndexError(f"Workspace model index is unavailable: {model_index}")
+    models[int(model_index)]["path"] = _relative_path(selected, source.parent)
+    _write_document(source, document)
+    return ResourceRepair(1, _missing_resource_entries(document, source))
+
+
+def repair_workspace_resources(path: str | Path, search_root: str | Path) -> ResourceRepair:
+    """Repair every unambiguous missing model reference found below a directory."""
+
+    source = Path(path).expanduser().resolve()
+    root = Path(search_root).expanduser().resolve()
+    if not root.is_dir():
+        raise NotADirectoryError(f"Resource directory is unavailable: {root}")
+    document = json.loads(source.read_text(encoding="utf-8"))
+    missing = _missing_resource_entries(document, source)
+    candidates = {
+        name: tuple(item.resolve() for item in root.rglob(name) if item.is_file())
+        for name in {Path(item.reference).name for item in missing}
+    }
+    repaired = 0
+    for item in missing:
+        replacement = _resource_replacement(item, root, candidates[Path(item.reference).name])
+        if replacement is None:
+            continue
+        document["models"][item.model_index]["path"] = _relative_path(replacement, source.parent)
+        repaired += 1
+    if repaired:
+        _write_document(source, document)
+    return ResourceRepair(repaired, _missing_resource_entries(document, source))
 
 
 def _relative_path(path: Path, directory: Path) -> str:
@@ -124,3 +190,74 @@ def _absolute_path(value: str, directory: Path) -> Path:
 
 def _unique_paths(paths) -> tuple[Path, ...]:
     return tuple(dict.fromkeys(path.resolve() for path in paths))
+
+
+def _missing_resource_entries(document: dict, source: Path) -> tuple[MissingResource, ...]:
+    resource_roots = _document_resource_roots(document, source.parent)
+    missing = []
+    for index, item in enumerate(document.get("models", ())):
+        reference = str(item["path"])
+        candidate = _resolve_resource(reference, source.parent, resource_roots)
+        if candidate.is_file():
+            continue
+        missing.append(
+            MissingResource(
+                model_index=index,
+                model_id=int(item.get("id", index)),
+                model_name=str(item.get("name", Path(reference).stem)),
+                reference=reference,
+                expected_path=candidate,
+            )
+        )
+    return tuple(missing)
+
+
+def _resource_replacement(
+    missing: MissingResource, root: Path, candidates: tuple[Path, ...]
+) -> Path | None:
+    reference = Path(missing.reference).expanduser()
+    if not reference.is_absolute():
+        exact = (root / reference).resolve()
+        if exact.is_file():
+            return exact
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        return None
+    reference_parts = tuple(part.casefold() for part in reference.parts)
+    ranked = []
+    for candidate in candidates:
+        relative_parts = tuple(part.casefold() for part in candidate.relative_to(root).parts)
+        score = 0
+        for expected, actual in zip(
+            reversed(reference_parts), reversed(relative_parts), strict=False
+        ):
+            if expected != actual:
+                break
+            score += 1
+        ranked.append((score, candidate))
+    best_score = max(score for score, _candidate in ranked)
+    best = [candidate for score, candidate in ranked if score == best_score]
+    return best[0] if len(best) == 1 and best_score > 1 else None
+
+
+def _write_document(path: Path, document: dict) -> None:
+    temporary: Path | None = None
+    mode = stat.S_IMODE(path.stat().st_mode)
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as output:
+            json.dump(document, output, indent=2)
+            temporary = Path(output.name)
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    except Exception:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        raise

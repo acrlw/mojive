@@ -9,13 +9,35 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ... import math3d
-from ...adapters.base import FrameNeeds, NodeKind, SceneNode
+from ...adapters.base import FrameNeeds, ModelComponentInfo, NodeKind, SceneNode
 from ...render.backend import RenderFlag
 from ...types import DEFAULT_HEADLIGHT, Environment, LightKind, TextureKind
 from . import Panel, PanelContext, begin_kv_table, labeled
 
 GIZMO_REFUSAL_RUNNING = "physics is running; pause to move things"
 GIZMO_REFUSAL_DRIVEN = "this link is driven by joints; use the Joints panel"
+
+
+def _unique_component_name(category: str, existing: set[str]) -> str:
+    if category not in existing:
+        return category
+    index = 2
+    while f"{category}{index}" in existing:
+        index += 1
+    return f"{category}{index}"
+
+
+def _component_value_editor(label: str, value: str, choices: tuple[str, ...]) -> str:
+    if choices:
+        if imgui.begin_combo(label, value or "select"):
+            for choice in choices:
+                selected, _ = imgui.selectable(choice, choice == value)
+                if selected:
+                    value = choice
+            imgui.end_combo()
+        return value
+    _changed, value = imgui.input_text(label, value)
+    return value
 
 
 def gizmo_refusal_reason(
@@ -51,6 +73,21 @@ class InspectorPanel(Panel):
         self._source_text = ""
         self._source_error = ""
         self._open_source_popup = False
+        self._component_cache_generation = -1
+        self._component_cache_model = -1
+        self._component_cache: dict[str, tuple[ModelComponentInfo, ...]] = {}
+        self._component_presets: dict[str, tuple[str, ...]] = {}
+        self._component_edit: ModelComponentInfo | None = None
+        self._component_name = ""
+        self._component_fields: list[list[str]] = []
+        self._component_path: list[tuple[str, list[list[str]]]] = []
+        self._component_error = ""
+        self._open_component_popup = False
+        self._model_transform_model = -1
+        self._model_transform_generation = -1
+        self._model_transform_position = np.zeros(3, np.float32)
+        self._model_transform_euler = np.zeros(3, np.float64)
+        self._model_transform_dirty = False
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds(
@@ -62,6 +99,17 @@ class InspectorPanel(Panel):
         if self._edit_transaction and not imgui.is_any_item_active():
             ctx.submit(cmd.EndEditTransaction())
             self._edit_transaction = False
+        if self._model_transform_dirty and not imgui.is_any_item_active():
+            result = ctx.submit(
+                cmd.SetSceneModelTransform(
+                    self._model_transform_model,
+                    self._model_transform_position.copy(),
+                    math3d.euler_xyz_to_mat3(np.radians(self._model_transform_euler)),
+                )
+            )
+            self._model_transform_dirty = False
+            if not result.ok:
+                self._model_transform_model = -1
 
     def _submit_edit(self, ctx: PanelContext, command) -> None:
         if imgui.is_any_item_active() and not self._edit_transaction and not ctx.session.editing:
@@ -71,6 +119,7 @@ class InspectorPanel(Panel):
 
     def draw(self, ctx: PanelContext) -> None:
         self._draw_model_source(ctx)
+        self._draw_component_editor(ctx)
         s = ctx.session
         node = s.selected_node
         if node is None:
@@ -123,26 +172,31 @@ class InspectorPanel(Panel):
         if info is None:
             return
         imgui.text_disabled(str(info.path))
-        position = np.asarray(info.position, np.float32)
-        rotation = np.asarray(info.rotation, np.float64).reshape(3, 3)
-        euler = self._continuous_euler(node.node_id, rotation)
+        if self._model_transform_model != info.model_id or (
+            self._model_transform_generation != ctx.session.structure_generation
+            and not self._model_transform_dirty
+        ):
+            self._model_transform_model = info.model_id
+            self._model_transform_generation = ctx.session.structure_generation
+            self._model_transform_position = np.asarray(info.position, np.float32).copy()
+            self._model_transform_euler = self._continuous_euler(
+                node.node_id, np.asarray(info.rotation, np.float64).reshape(3, 3)
+            )
         editable = ctx.session.paused and info.removable
         if not editable:
             imgui.begin_disabled()
-        pos_changed, position = imgui.drag_float3("position", position, 0.01, 0.0, 0.0, "%.3f")
-        rot_changed, euler = imgui.drag_float3("rotation", euler, 0.5, 0.0, 0.0, "%.1f°")
+        pos_changed, position = imgui.drag_float3(
+            "position", self._model_transform_position, 0.01, 0.0, 0.0, "%.3f"
+        )
+        rot_changed, euler = imgui.drag_float3(
+            "rotation", self._model_transform_euler, 0.5, 0.0, 0.0, "%.1f°"
+        )
         if not editable:
             imgui.end_disabled()
         if editable and (pos_changed or rot_changed):
-            matrix = math3d.euler_xyz_to_mat3(np.radians(euler))
-            self._submit_edit(
-                ctx,
-                cmd.SetSceneModelTransform(
-                    info.model_id,
-                    np.asarray(position, np.float32),
-                    matrix,
-                ),
-            )
+            self._model_transform_position = np.asarray(position, np.float32).copy()
+            self._model_transform_euler = np.asarray(euler, np.float64).copy()
+            self._model_transform_dirty = True
         if info.removable and imgui.button("Remove Model"):
             ctx.submit(cmd.RemoveSceneModel(info.model_id))
         if ctx.session.adapter.caps.topology_editing:
@@ -159,6 +213,144 @@ class InspectorPanel(Panel):
                     self._source_text = source
                     self._source_error = ""
                     self._open_source_popup = True
+            self._model_components(ctx, info.model_id)
+
+    def _model_components(self, ctx: PanelContext, model_id: int) -> None:
+        self._refresh_component_cache(ctx, model_id)
+        imgui.separator()
+        imgui.text_disabled("Model Components")
+        editable = ctx.session.paused
+        for category in ("actuator", "sensor", "tendon", "equality"):
+            components = self._component_cache[category]
+            label = f"{category.capitalize()} ({len(components)})"
+            if not imgui.collapsing_header(label):
+                continue
+            if not components:
+                imgui.text_disabled(f"no {category} components")
+            for component in components:
+                imgui.push_id(f"{category}-{component.component_id}")
+                imgui.text(f"{component.name}  ({component.subtype})")
+                imgui.same_line()
+                if not editable:
+                    imgui.begin_disabled()
+                if imgui.small_button("Edit"):
+                    self._begin_component_edit(component)
+                imgui.same_line()
+                if imgui.small_button("Delete"):
+                    ctx.submit(cmd.RemoveModelComponent(model_id, category, component.component_id))
+                if not editable:
+                    imgui.end_disabled()
+                imgui.pop_id()
+            presets = self._component_presets[category]
+            if not editable or not presets:
+                imgui.begin_disabled()
+            if imgui.begin_combo(f"Add {category}...##add-{category}", "select type"):
+                names = {component.name for component in components}
+                for subtype in presets:
+                    selected, _ = imgui.selectable(subtype, False)
+                    if selected:
+                        name = _unique_component_name(category, names)
+                        ctx.submit(cmd.AddModelComponent(model_id, category, subtype, name))
+                imgui.end_combo()
+            if not editable or not presets:
+                imgui.end_disabled()
+            if not presets:
+                imgui.set_item_tooltip("Add the referenced model elements first")
+
+    def _refresh_component_cache(self, ctx: PanelContext, model_id: int) -> None:
+        generation = ctx.session.structure_generation
+        if (
+            generation == self._component_cache_generation
+            and model_id == self._component_cache_model
+        ):
+            return
+        self._component_cache_generation = generation
+        self._component_cache_model = model_id
+        self._component_cache = {
+            category: ctx.session.model_components(model_id, category)
+            for category in ("actuator", "sensor", "tendon", "equality")
+        }
+        self._component_presets = {
+            category: ctx.session.model_component_presets(model_id, category)
+            for category in self._component_cache
+        }
+
+    def _begin_component_edit(self, component: ModelComponentInfo) -> None:
+        self._component_edit = component
+        self._component_name = component.name
+        self._component_fields = [[field.name, field.value] for field in component.fields]
+        self._component_path = [
+            (item.kind, [[field.name, field.value] for field in item.fields])
+            for item in component.path
+        ]
+        self._component_error = ""
+        self._open_component_popup = True
+
+    def _draw_component_editor(self, ctx: PanelContext) -> None:
+        component = self._component_edit
+        if self._open_component_popup and component is not None:
+            imgui.open_popup("Model Component")
+            self._open_component_popup = False
+        imgui.set_next_window_size(
+            imgui.ImVec2(560.0 * ctx.style_scale, 520.0 * ctx.style_scale),
+            imgui.Cond_.appearing.value,
+        )
+        visible, _ = imgui.begin_popup_modal("Model Component")
+        if not visible:
+            return
+        if component is None:
+            imgui.close_current_popup()
+            imgui.end_popup()
+            return
+        imgui.text_disabled(f"{component.category} / {component.subtype}")
+        _changed, self._component_name = imgui.input_text("name", self._component_name)
+        choices = {field.name: field.choices for field in component.fields}
+        for index, field in enumerate(self._component_fields):
+            field[1] = _component_value_editor(
+                f"{field[0]}##component-field-{index}", field[1], choices.get(field[0], ())
+            )
+        if self._component_path:
+            imgui.separator()
+            imgui.text_disabled("Path")
+        path_choices = [
+            {field.name: field.choices for field in item.fields} for item in component.path
+        ]
+        for path_index, (kind, fields) in enumerate(self._component_path):
+            imgui.push_id(f"path-{path_index}")
+            imgui.text_disabled(f"{path_index + 1}. {kind}")
+            for field_index, field in enumerate(fields):
+                field[1] = _component_value_editor(
+                    f"{field[0]}##path-field-{field_index}",
+                    field[1],
+                    path_choices[path_index].get(field[0], ()),
+                )
+            imgui.pop_id()
+        if self._component_error:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._component_error)
+        if imgui.button("Apply", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+            result = ctx.submit(
+                cmd.UpdateModelComponent(
+                    component.model_id,
+                    component.category,
+                    component.component_id,
+                    self._component_name,
+                    tuple((name, value) for name, value in self._component_fields),
+                    tuple(
+                        (kind, tuple((name, value) for name, value in fields))
+                        for kind, fields in self._component_path
+                    ),
+                )
+            )
+            if result.ok:
+                self._component_edit = None
+                imgui.close_current_popup()
+            else:
+                self._component_error = result.message
+        imgui.same_line()
+        if imgui.button("Cancel", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+            self._component_edit = None
+            imgui.close_current_popup()
+        imgui.end_popup()
 
     def _draw_model_source(self, ctx: PanelContext) -> None:
         if self._open_source_popup:
