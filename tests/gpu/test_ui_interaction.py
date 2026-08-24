@@ -134,7 +134,7 @@ def test_all_panels_docked_not_stacked(viewer):
     from forge_viewer.ui.window import Window
 
     laid_out = set(Window._LAYOUT_LEFT + Window._LAYOUT_RIGHT + Window._LAYOUT_BOTTOM)
-    declared = {p.name for p in viewer.app.panels.panels}
+    declared = {p.name for p in viewer.app.panels.panels if not p.standalone}
     assert declared <= laid_out
 
 

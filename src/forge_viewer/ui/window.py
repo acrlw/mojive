@@ -420,7 +420,7 @@ class Window:
             self._build_default_layout()
 
     _LAYOUT_LEFT = ("Hierarchy", "Inspector")
-    _LAYOUT_RIGHT = ("Control", "Joints", "IK", "Camera", "Settings", "Sensors")
+    _LAYOUT_RIGHT = ("Control", "Joints", "IK", "Camera", "Sensors")
     _LAYOUT_BOTTOM = ("Stats", "Plot", "Help", "Info")
 
     def _build_default_layout(self) -> None:

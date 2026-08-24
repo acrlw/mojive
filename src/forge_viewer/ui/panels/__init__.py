@@ -43,11 +43,19 @@ class PanelContext:
 
     panels: Any = None
 
+    language: str = "en"
+    translate: Any = None
+    set_language: Any = None
+    font_report: Any = None
+
     def submit(self, command: Any) -> Any:
         result = self.session.submit(command)
         if result.message:
             self.status = result.message
         return result
+
+    def tr(self, value: str) -> str:
+        return self.translate(value) if self.translate is not None else value
 
 
 class Panel:
@@ -57,6 +65,8 @@ class Panel:
     shortcut: str = ""
 
     aliases: tuple[str, ...] = ()
+    standalone: bool = False
+    initial_size: tuple[float, float] = (0.0, 0.0)
 
     def __init__(self) -> None:
         self.open = self.default_open
@@ -199,6 +209,11 @@ class PanelSet:
     def get(self, name: str) -> Panel | None:
         return next((p for p in self.panels if p.name == name), None)
 
+    def open_panel(self, name: str) -> None:
+        panel = self.get(name)
+        if panel is not None:
+            panel.open = True
+
     def frame_needs(self) -> FrameNeeds:
         needs = FrameNeeds.none()
         for p in self.panels:
@@ -210,7 +225,24 @@ class PanelSet:
         for p in self.panels:
             if not p.open:
                 continue
-            expanded, keep_open = imgui.begin(p.name, True)
+            translated = ctx.tr(p.name)
+            title = p.name if translated == p.name else f"{translated}###{p.name}"
+            flags = 0
+            if p.standalone:
+                viewport = imgui.get_main_viewport()
+                width, height = p.initial_size
+                if width > 0.0 and height > 0.0:
+                    imgui.set_next_window_size(
+                        imgui.ImVec2(width * ctx.style_scale, height * ctx.style_scale),
+                        imgui.Cond_.first_use_ever,
+                    )
+                imgui.set_next_window_pos(
+                    viewport.get_center(),
+                    imgui.Cond_.first_use_ever,
+                    imgui.ImVec2(0.5, 0.5),
+                )
+                flags = imgui.WindowFlags_.no_docking.value
+            expanded, keep_open = imgui.begin(title, True, flags)
             if expanded:
                 p.draw(ctx)
             p.finish_frame(ctx)

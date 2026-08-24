@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from forge_viewer.ui.localization import Language, Localizer
 from forge_viewer.ui.panels import (
     Panel,
     PanelSet,
@@ -54,6 +55,28 @@ def panels() -> PanelSet:
 def test_registered_panels(panels: PanelSet):
 
     assert {p.name for p in panels} == EXPECTED_PANELS
+
+
+def test_settings_is_a_standalone_window(panels: PanelSet):
+    settings = panels.get("Settings")
+    assert settings is not None
+    assert settings.standalone
+    assert not settings.default_open
+
+
+def test_language_preference_round_trip(tmp_path, monkeypatch):
+    path = tmp_path / "settings.json"
+    monkeypatch.setenv("FORGE_VIEWER_SETTINGS", str(path))
+    monkeypatch.delenv("FORGE_VIEWER_LANGUAGE", raising=False)
+
+    localizer = Localizer.load()
+    assert localizer.language is Language.ENGLISH
+    localizer.set_language(Language.SIMPLIFIED_CHINESE)
+    assert localizer.text("Settings") == "设置"
+
+    restored = Localizer.load()
+    assert restored.language is Language.SIMPLIFIED_CHINESE
+    assert restored.text("Return to Editor Camera") == "返回编辑器相机"
 
 
 def test_every_panel_declares_a_shortcut(panels: PanelSet):

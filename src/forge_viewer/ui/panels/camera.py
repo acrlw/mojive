@@ -87,7 +87,11 @@ class CameraPanel(Panel):
 
         self._source(ctx)
         if ctx.model_camera_id >= 0 and ctx.model_camera_view is not None:
-            imgui.text_disabled("model camera follows scene kinematics; choose free to orbit")
+            if ctx.select_model_camera is not None and imgui.button(
+                ctx.tr("Return to Editor Camera")
+            ):
+                ctx.select_model_camera(-1)
+            imgui.text_disabled(ctx.tr("model camera follows scene kinematics"))
             imgui.separator()
             self._readout_view(ctx, ctx.model_camera_view)
             return
@@ -101,13 +105,13 @@ class CameraPanel(Panel):
         self._readout(ctx, camera)
 
     def _stored_states(self, ctx: PanelContext, camera: Any) -> None:
-        if not imgui.collapsing_header("bookmarks and snapshots"):
+        if not imgui.collapsing_header(f"{ctx.tr('bookmarks and snapshots')}###camera_states"):
             return
         camera_dir = Path("output/snapshots/cameras")
         scene_dir = Path("output/snapshots/scenes")
         view = ctx.model_camera_view if ctx.model_camera_id >= 0 else camera.view()
 
-        imgui.text_disabled("camera bookmark")
+        imgui.text_disabled(ctx.tr("camera bookmark"))
         _changed, self._bookmark_name = imgui.input_text("##bookmark_name", self._bookmark_name)
         if imgui.button("save##camera_bookmark"):
             save_named_snapshot(
@@ -137,7 +141,7 @@ class CameraPanel(Panel):
             if imgui.button("delete##camera_bookmark"):
                 delete_named_snapshot(name, camera_dir)
 
-        imgui.text_disabled("scene snapshot")
+        imgui.text_disabled(ctx.tr("scene snapshot"))
         _changed, self._snapshot_name = imgui.input_text(
             "##scene_snapshot_name", self._snapshot_name
         )
@@ -190,11 +194,15 @@ class CameraPanel(Panel):
         if not cameras:
             return
         by_id = {c.camera_id: c.name for c in cameras}
-        current = "free" if ctx.model_camera_id < 0 else by_id.get(ctx.model_camera_id, "missing")
+        current = (
+            ctx.tr("free")
+            if ctx.model_camera_id < 0
+            else by_id.get(ctx.model_camera_id, ctx.tr("missing"))
+        )
         imgui.set_next_item_width(-1)
-        if not imgui.begin_combo("##camera_source", f"source: {current}"):
+        if not imgui.begin_combo("##camera_source", f"{ctx.tr('source')}: {current}"):
             return
-        selected, _ = imgui.selectable("free", ctx.model_camera_id < 0)
+        selected, _ = imgui.selectable(ctx.tr("free"), ctx.model_camera_id < 0)
         if selected and ctx.select_model_camera is not None:
             ctx.select_model_camera(-1)
         for info in cameras:
@@ -205,12 +213,12 @@ class CameraPanel(Panel):
         imgui.separator()
 
     def _presets(self, ctx: PanelContext, camera: Any) -> None:
-        imgui.text_disabled("presets")
+        imgui.text_disabled(ctx.tr("presets"))
         has_setter = hasattr(camera, "set_preset") or (
             hasattr(camera, "yaw") and hasattr(camera, "pitch")
         )
         widths = tuple(
-            button_width(label, 64.0 * ctx.style_scale) for label, _yaw, _pitch in PRESETS
+            button_width(ctx.tr(label), 64.0 * ctx.style_scale) for label, _yaw, _pitch in PRESETS
         )
         row = button_row_layout(
             widths,
@@ -221,7 +229,7 @@ class CameraPanel(Panel):
         for i, (label, yaw, pitch) in enumerate(PRESETS):
             if row[i]:
                 imgui.same_line()
-            if imgui.button(label, imgui.ImVec2(widths[i], 0)):
+            if imgui.button(ctx.tr(label), imgui.ImVec2(widths[i], 0)):
                 if hasattr(camera, "set_preset"):
                     camera.set_preset(label)
                 else:
@@ -232,9 +240,9 @@ class CameraPanel(Panel):
             imgui.set_item_tooltip("this camera exposes neither set_preset() nor yaw/pitch")
 
         can_frame = hasattr(camera, "frame_all")
-        frame_width = button_width("frame all", 84.0 * ctx.style_scale)
+        frame_width = button_width(ctx.tr("frame all"), 84.0 * ctx.style_scale)
         imgui.begin_disabled(not can_frame)
-        if imgui.button("frame all", imgui.ImVec2(frame_width, 0)):
+        if imgui.button(ctx.tr("frame all"), imgui.ImVec2(frame_width, 0)):
             lo, hi = ctx.session.bounds()
             camera.frame_all(lo, hi)
         imgui.end_disabled()
@@ -256,7 +264,9 @@ class CameraPanel(Panel):
         if ortho is not None:
             supported = ctx.backend.caps.orthographic
             imgui.begin_disabled(not supported)
-            changed, value = imgui.checkbox("orthographic", bool(ortho))
+            changed, value = imgui.checkbox(
+                f"{ctx.tr('orthographic')}##editor_camera_orthographic", bool(ortho)
+            )
             imgui.end_disabled()
             if not supported:
                 imgui.set_item_tooltip(f"{ctx.backend.caps.name} has no orthographic projection")
@@ -272,15 +282,15 @@ class CameraPanel(Panel):
 
     def _readout_view(self, ctx: PanelContext, view: CameraView, camera: Any = None) -> None:
         snapshot = camera_snapshot(view, ctx.viewport_rect, camera)
-        if imgui.button("copy camera snapshot"):
+        if imgui.button(ctx.tr("copy camera snapshot")):
             imgui.set_clipboard_text(snapshot)
         imgui.set_item_tooltip("copy exact camera and viewport values for bug reproduction")
         qpos = ctx.session.frame.qpos
         imgui.begin_disabled(qpos is None)
-        if imgui.button("copy qpos") and qpos is not None:
+        if imgui.button(ctx.tr("copy qpos")) and qpos is not None:
             imgui.set_clipboard_text(qpos_snapshot(qpos))
         imgui.set_item_tooltip("copy the complete generalized position vector")
-        if imgui.button("copy reproduction state") and qpos is not None:
+        if imgui.button(ctx.tr("copy reproduction state")) and qpos is not None:
             imgui.set_clipboard_text(reproduction_snapshot(ctx, view, camera))
         imgui.set_item_tooltip("copy the model, qpos, simulation time, camera, and viewport")
         imgui.end_disabled()

@@ -26,6 +26,7 @@ from .camera import CameraOut, OrbitCamera, ndc_from_viewport, unproject
 from .camera_preview import CameraPreview
 from .draw2d import ImguiDraw2D
 from .gizmo import ObjectGizmo
+from .localization import Localizer
 from .panels import PanelContext, PanelSet
 from .perturb import PerturbController, draw_fallback
 from .scene_entities import SceneEntityHelpers
@@ -101,6 +102,7 @@ class ViewerApp:
         self.title = title
         self.theme = theme or THEME
         self.debug_bridge = debug_bridge
+        self.localizer = Localizer.load()
         self.camera = OrbitCamera()
 
         self.camera_out = CameraOut(backend=backend, session=session)
@@ -147,6 +149,9 @@ class ViewerApp:
         self._model_drop_notice = ""
         self._model_drop_notice_until = 0.0
         self._display_scale_generation = -1
+
+    def set_language(self, language: str) -> None:
+        self.localizer.set_language(language)
 
     def set_fixed_render_size(self, width: int, height: int) -> None:
         self._fixed_render_size = (max(1, int(width)), max(1, int(height)))
@@ -524,6 +529,7 @@ class ViewerApp:
         self._model_drop_notice_until = time.monotonic() + 1.8
 
     def _draw_main_menu(self) -> None:
+        t = self.localizer.text
         caps = self.session.adapter.caps
         can_load = bool(caps.asset_loading)
         can_edit = bool(caps.scene_authoring)
@@ -541,71 +547,87 @@ class ViewerApp:
         reload_model = False
         undo = False
         redo = False
+        open_settings = False
         quit_viewer = False
         if imgui.begin_main_menu_bar():
-            if imgui.begin_menu("File"):
+            if imgui.begin_menu(t("File")):
                 if can_scene_files:
-                    new_scene, _ = imgui.menu_item("New Scene", f"{shortcut}+N", False)
+                    new_scene, _ = imgui.menu_item(t("New Scene"), f"{shortcut}+N", False)
                     open_scene, _ = imgui.menu_item(
-                        "Open Scene...", f"{shortcut}+O", False, self._scene_dialog is None
+                        t("Open Scene..."),
+                        f"{shortcut}+O",
+                        False,
+                        self._scene_dialog is None,
                     )
                     save_scene, _ = imgui.menu_item(
-                        "Save", f"{shortcut}+S", False, self.session.dirty
+                        t("Save"), f"{shortcut}+S", False, self.session.dirty
                     )
-                    save_scene_as, _ = imgui.menu_item("Save As...", f"{shortcut}+Shift+S", False)
+                    save_scene_as, _ = imgui.menu_item(
+                        t("Save As..."), f"{shortcut}+Shift+S", False
+                    )
                 if can_load:
                     if can_scene_files:
                         imgui.separator()
                     open_model, _ = imgui.menu_item(
-                        "Open Model (MJCF / URDF)...",
+                        t("Open Model (MJCF / URDF)..."),
                         f"{shortcut}+O" if not can_scene_files else "",
                         False,
                         self._model_dialog is None,
                     )
                     if caps.model_composition:
                         add_model, _ = imgui.menu_item(
-                            "Add Models (MJCF / URDF)...",
+                            t("Add Models (MJCF / URDF)..."),
                             "",
                             False,
                             self._model_dialog is None,
                         )
                         removable = [item for item in self.session.scene_models if item.removable]
-                        if imgui.begin_menu("Remove Model", bool(removable)):
+                        if imgui.begin_menu(t("Remove Model"), bool(removable)):
                             for item in removable:
                                 clicked, _ = imgui.menu_item(item.name, "", False)
                                 if clicked:
                                     remove_model_id = item.model_id
                             imgui.end_menu()
                     reload_model, _ = imgui.menu_item(
-                        "Reload Model",
+                        t("Reload Model"),
                         f"{shortcut}+Shift+O",
                         False,
                         self.session.asset_path is not None,
                     )
-                if can_scene_files and imgui.begin_menu("Resource Directories"):
+                if can_scene_files and imgui.begin_menu(t("Resource Directories")):
                     add_resource_root, _ = imgui.menu_item(
-                        "Add Directory...", "", False, self._resource_dialog is None
+                        t("Add Directory..."), "", False, self._resource_dialog is None
                     )
                     for root in self.session.adapter.resource_roots:
-                        clicked, _ = imgui.menu_item(f"Remove {root}", "", False)
+                        clicked, _ = imgui.menu_item(f"{t('Remove')} {root}", "", False)
                         if clicked:
                             remove_resource_root = root
                     imgui.end_menu()
                 imgui.separator()
-                quit_viewer, _ = imgui.menu_item("Quit", f"{shortcut}+Q", False, True)
+                quit_viewer, _ = imgui.menu_item(t("Quit"), f"{shortcut}+Q", False, True)
                 imgui.end_menu()
-            if imgui.begin_menu("Edit", caps.edit_history):
-                undo, _ = imgui.menu_item("Undo", f"{shortcut}+Z", False, self.session.can_undo)
-                redo, _ = imgui.menu_item(
-                    "Redo", f"{shortcut}+Shift+Z", False, self.session.can_redo
+            if imgui.begin_menu(t("Edit")):
+                undo, _ = imgui.menu_item(
+                    t("Undo"),
+                    f"{shortcut}+Z",
+                    False,
+                    caps.edit_history and self.session.can_undo,
                 )
+                redo, _ = imgui.menu_item(
+                    t("Redo"),
+                    f"{shortcut}+Shift+Z",
+                    False,
+                    caps.edit_history and self.session.can_redo,
+                )
+                imgui.separator()
+                open_settings, _ = imgui.menu_item(t("Settings..."), f"{shortcut}+,", False)
                 imgui.end_menu()
             self._draw_entity_menu(shortcut, can_edit)
             path = self.session.asset_path
             if path is not None:
                 imgui.text_disabled(path.name + (" *" if self.session.dirty else ""))
             elif can_scene_files:
-                imgui.text_disabled("Untitled" + (" *" if self.session.dirty else ""))
+                imgui.text_disabled(t("Untitled") + (" *" if self.session.dirty else ""))
             imgui.end_main_menu_bar()
 
         io = imgui.get_io()
@@ -624,6 +646,7 @@ class ViewerApp:
                 open_model |= imgui.is_key_pressed(imgui.Key.o, False) and not io.key_shift
             if can_load:
                 reload_model |= imgui.is_key_pressed(imgui.Key.o, False) and bool(io.key_shift)
+            open_settings |= imgui.is_key_pressed(imgui.Key.comma, False)
             if can_edit and self._selected_entity() and imgui.is_key_pressed(imgui.Key.d, False):
                 self._duplicate_selected()
         quit_viewer |= modifier and imgui.is_key_pressed(imgui.Key.q, False)
@@ -641,6 +664,8 @@ class ViewerApp:
             self.session.submit(cmd.Undo())
         if redo:
             self.session.submit(cmd.Redo())
+        if open_settings:
+            self.panels.open_panel("Settings")
         if open_scene:
             self._open_scene_dialog("open")
         if save_scene:
@@ -671,9 +696,10 @@ class ViewerApp:
             self._request_document_action("quit")
 
     def _draw_entity_menu(self, shortcut: str, enabled: bool) -> None:
-        if not imgui.begin_menu("Entity", enabled):
+        t = self.localizer.text
+        if not imgui.begin_menu(t("Entity"), enabled):
             return
-        if imgui.begin_menu("Create"):
+        if imgui.begin_menu(t("Create")):
             for label, shape in (
                 ("Box", MeshShape.BOX),
                 ("Sphere", MeshShape.SPHERE),
@@ -681,21 +707,21 @@ class ViewerApp:
                 ("Cone", MeshShape.CONE),
                 ("Plane", MeshShape.PLANE),
             ):
-                clicked, _ = imgui.menu_item(label, "", False)
+                clicked, _ = imgui.menu_item(t(label), "", False)
                 if clicked:
                     self._add_scene_object(shape, label.lower())
             imgui.separator()
-            point_light, _ = imgui.menu_item("Point Light", "", False)
-            camera, _ = imgui.menu_item("Camera", "", False)
+            point_light, _ = imgui.menu_item(t("Point Light"), "", False)
+            camera, _ = imgui.menu_item(t("Camera"), "", False)
             if point_light:
                 self._add_scene_light()
             if camera:
                 self._add_scene_camera()
             imgui.end_menu()
         selected = bool(self._selected_entity())
-        duplicate, _ = imgui.menu_item("Duplicate", f"{shortcut}+D", False, selected)
-        rename, _ = imgui.menu_item("Rename", "F2", False, selected)
-        remove, _ = imgui.menu_item("Delete", "Delete", False, selected)
+        duplicate, _ = imgui.menu_item(t("Duplicate"), f"{shortcut}+D", False, selected)
+        rename, _ = imgui.menu_item(t("Rename"), "F2", False, selected)
+        remove, _ = imgui.menu_item(t("Delete"), "Delete", False, selected)
         if duplicate:
             self._duplicate_selected()
         if rename:
@@ -1193,8 +1219,7 @@ class ViewerApp:
     def _leave_model_camera(self, *, publish: bool = False) -> None:
         if self._model_camera_id < 0:
             return
-        if self._model_camera_view is not None:
-            self.camera.adopt(self._model_camera_view)
+        # Model cameras remain scene entities; the editor orbit camera keeps its own view.
         self._model_camera_id = -1
         self._model_camera_view = None
         if publish:
@@ -1309,7 +1334,10 @@ class ViewerApp:
         return 0
 
     def _draw_viewport(self, ctx: PanelContext, preview_name: str = "") -> None:
-        imgui.begin("Viewport", None, imgui.WindowFlags_.no_scrollbar.value)
+        title = self.localizer.text("Viewport")
+        if title != "Viewport":
+            title += "###Viewport"
+        imgui.begin(title, None, imgui.WindowFlags_.no_scrollbar.value)
         pos = imgui.get_cursor_screen_pos()
         size = imgui.get_content_region_avail()
         self._viewport_rect = (
@@ -1515,6 +1543,10 @@ class ViewerApp:
             viewport_rect=self._viewport_rect,
             dt=self._dt,
             status=self.session.last_message,
+            language=self.localizer.language.value,
+            translate=self.localizer.text,
+            set_language=self.set_language,
+            font_report=self.window.font_report,
         )
 
     def _cursor_ray(self, cursor: tuple[float, float]):

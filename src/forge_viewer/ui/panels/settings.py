@@ -13,6 +13,7 @@ from ..gizmo import (
     DEFAULT_TRANSLATION_SNAP_M,
     RotationDialProjection,
 )
+from ..localization import LANGUAGE_LABELS, Language
 from ..perturb import OUTLINE_CORNER_RADIUS_PT
 from . import Panel, PanelContext
 
@@ -72,6 +73,8 @@ class SettingsPanel(Panel):
     name = "Settings"
     default_open = False
     shortcut = "F9"
+    standalone = True
+    initial_size = (560.0, 720.0)
 
     def __init__(self) -> None:
         super().__init__()
@@ -83,8 +86,25 @@ class SettingsPanel(Panel):
         return FrameNeeds.none()
 
     def draw(self, ctx: PanelContext) -> None:
+        t = ctx.tr
+        imgui.text_disabled(t("Application"))
+        languages = tuple(Language)
+        current = Language(ctx.language)
+        labels = [LANGUAGE_LABELS[language] for language in languages]
+        imgui.set_next_item_width(-1.0)
+        changed, index = imgui.combo(
+            f"{t('Language')}##ui_language", languages.index(current), labels
+        )
+        if changed and ctx.set_language is not None:
+            ctx.set_language(languages[index].value)
+        if ctx.font_report is not None:
+            imgui.text_disabled(f"{t('UI font')}: {ctx.font_report.mono}")
+            imgui.text_disabled(f"{t('CJK font')}: {ctx.font_report.cjk or 'none'}")
+
+        imgui.separator()
+        imgui.text_disabled(t("Rendering"))
         caps = ctx.backend.caps
-        imgui.text_disabled(f"backend: {caps.name}")
+        imgui.text_disabled(f"{t('Backend')}: {caps.name}")
         if caps.gl_version:
             imgui.text_disabled(f"{caps.gl_version}  {caps.renderer}")
         light_notes = ctx.backend.stats.notes
@@ -92,19 +112,21 @@ class SettingsPanel(Panel):
             if name in light_notes:
                 imgui.text_disabled(f"{name}: {light_notes[name]}")
 
+        imgui.separator()
+        imgui.text_disabled(t("Interaction"))
         if ctx.gizmo is not None:
             solid = ctx.gizmo.style == "3d"
-            changed, solid = imgui.checkbox("3D gizmo", solid)
-            imgui.set_item_tooltip("Use the flat 2D overlay")
+            changed, solid = imgui.checkbox(f"{t('3D gizmo')}##3d_gizmo", solid)
+            imgui.set_item_tooltip(t("Use the flat 2D overlay"))
             if changed:
                 ctx.gizmo.set_style("3d" if solid else "2d")
             world = ctx.gizmo.space == "world"
-            changed, world = imgui.checkbox("World frame (T)", world)
+            changed, world = imgui.checkbox(f"{t('World frame (T)')}##world_frame", world)
             if changed:
                 ctx.gizmo.set_space("world" if world else "body")
 
             imgui.align_text_to_frame_padding()
-            imgui.text("position snap (Shift)")
+            imgui.text(t("position snap (Shift)"))
             imgui.same_line()
             imgui.set_next_item_width(-1.0)
             changed, step = imgui.drag_float(
@@ -124,7 +146,7 @@ class SettingsPanel(Panel):
                 ctx.gizmo.translation_snap_m = step
 
             imgui.align_text_to_frame_padding()
-            imgui.text("rotation snap (Shift)")
+            imgui.text(t("rotation snap (Shift)"))
             imgui.same_line()
             imgui.set_next_item_width(-1.0)
             changed, step = imgui.drag_float(
@@ -144,7 +166,7 @@ class SettingsPanel(Panel):
                 ctx.gizmo.rotation_snap_deg = step
 
             imgui.align_text_to_frame_padding()
-            imgui.text("rotation tick scale")
+            imgui.text(t("rotation tick scale"))
             imgui.same_line()
             imgui.set_next_item_width(-1.0)
             changed, scale = imgui.drag_float(
@@ -179,7 +201,7 @@ class SettingsPanel(Panel):
 
         if ctx.perturb is not None:
             imgui.align_text_to_frame_padding()
-            imgui.text("perturb corner radius")
+            imgui.text(t("perturb corner radius"))
             imgui.same_line()
             imgui.set_next_item_width(-1.0)
             changed, radius = imgui.drag_float(
@@ -200,12 +222,16 @@ class SettingsPanel(Panel):
                 ctx.perturb.outline_corner_radius_pt = radius
 
         if ctx.scene_entities is not None:
-            changed, visible = imgui.checkbox("scene entity helpers", ctx.scene_entities.visible)
+            changed, visible = imgui.checkbox(
+                f"{t('scene entity helpers')}##scene_entity_helpers",
+                ctx.scene_entities.visible,
+            )
             if changed:
                 ctx.scene_entities.visible = visible
             imgui.begin_disabled(not ctx.scene_entities.visible)
             changed, influence = imgui.checkbox(
-                "selected influence volumes", ctx.scene_entities.show_influence
+                f"{t('selected influence volumes')}##selected_influence_volumes",
+                ctx.scene_entities.show_influence,
             )
             imgui.end_disabled()
             if changed:
@@ -234,7 +260,9 @@ class SettingsPanel(Panel):
         groups = ctx.session.visual_groups()
         if not groups:
             return
-        if imgui.collapsing_header("visual groups", imgui.TreeNodeFlags_.default_open):
+        if imgui.collapsing_header(
+            f"{ctx.tr('visual groups')}###visual_groups", imgui.TreeNodeFlags_.default_open
+        ):
             for family in groups:
                 imgui.align_text_to_frame_padding()
                 imgui.text(family.category)
@@ -252,7 +280,7 @@ class SettingsPanel(Panel):
         ):
             return
         imgui.align_text_to_frame_padding()
-        imgui.text("BVH depth")
+        imgui.text(ctx.tr("BVH depth"))
         imgui.same_line()
         imgui.set_next_item_width(-1.0)
         changed, depth = imgui.drag_int("##bvh_depth", backend.get_bvh_depth(), 1.0, 0, 64, "%d")

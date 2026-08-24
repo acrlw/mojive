@@ -897,25 +897,58 @@ class InspectorPanel(Panel):
             imgui.text_disabled("camera view is unavailable")
             return
 
-        if ctx.select_model_camera is not None and imgui.button("view through camera"):
-            ctx.select_model_camera(info.camera_id)
+        if ctx.select_model_camera is not None:
+            active = ctx.model_camera_id == info.camera_id
+            label = "Return to Editor Camera" if active else "View Through Camera"
+            if imgui.button(ctx.tr(label)):
+                ctx.select_model_camera(-1 if active else info.camera_id)
 
-        eye_changed, eye = imgui.drag_float3("position", view.eye, 0.01, 0.0, 0.0, "%.4f")
-        target_changed, target = imgui.drag_float3("target", view.target, 0.01, 0.0, 0.0, "%.4f")
-        up_changed, up = imgui.drag_float3("up", view.up, 0.01, 0.0, 0.0, "%.4f")
+        eye_changed, eye = imgui.drag_float3(
+            f"{ctx.tr('position')}##camera_position", view.eye, 0.01, 0.0, 0.0, "%.4f"
+        )
+        target_changed, target = imgui.drag_float3(
+            f"{ctx.tr('target')}##camera_target", view.target, 0.01, 0.0, 0.0, "%.4f"
+        )
+        up_changed, up = imgui.drag_float3(
+            f"{ctx.tr('up')}##camera_up", view.up, 0.01, 0.0, 0.0, "%.4f"
+        )
         fov_changed, fov = imgui.drag_float(
-            "vertical fov", float(np.degrees(view.fov_y)), 0.1, 1.0, 179.0, "%.2f deg"
+            f"{ctx.tr('vertical fov')}##camera_fov",
+            float(np.degrees(view.fov_y)),
+            0.1,
+            1.0,
+            179.0,
+            "%.2f deg",
         )
         near_changed, near = imgui.drag_float(
-            "near", float(view.near), 0.001, 1e-5, float(view.far), "%.6f"
+            f"{ctx.tr('near')}##camera_near",
+            float(view.near),
+            0.001,
+            1e-5,
+            float(view.far),
+            "%.6f",
         )
-        far_changed, far = imgui.drag_float("far", float(view.far), 0.1, float(near), 1e7, "%.3f")
-        ortho_changed, orthographic = imgui.checkbox("orthographic", view.orthographic)
+        far_changed, far = imgui.drag_float(
+            f"{ctx.tr('far')}##camera_far",
+            float(view.far),
+            0.1,
+            float(near),
+            1e7,
+            "%.3f",
+        )
+        ortho_changed, orthographic = imgui.checkbox(
+            f"{ctx.tr('orthographic')}##camera_orthographic", view.orthographic
+        )
         height_changed = False
         ortho_height = view.ortho_height
         if orthographic:
             height_changed, ortho_height = imgui.drag_float(
-                "ortho height", float(view.ortho_height), 0.01, 1e-4, 1e6, "%.4f"
+                f"{ctx.tr('ortho height')}##camera_ortho_height",
+                float(view.ortho_height),
+                0.01,
+                1e-4,
+                1e6,
+                "%.4f",
             )
 
         if any(

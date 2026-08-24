@@ -294,6 +294,22 @@ def test_editor_undo_redo_updates_the_render_backend():
         viewer.release()
 
 
+def test_settings_window_is_standalone(canvas):
+    from imgui_bundle import imgui
+
+    viewer, _scene = canvas
+    settings = viewer.app.panels.get("Settings")
+    assert settings is not None
+    try:
+        settings.open = True
+        viewer.sync()
+        window = imgui.internal.find_window_by_name("Settings")
+        assert window is not None
+        assert window.dock_node is None
+    finally:
+        settings.open = False
+
+
 def test_scene_camera_helper_is_pickable_and_transformable():
     from imgui_bundle import imgui
 
@@ -318,6 +334,17 @@ def test_scene_camera_helper_is_pickable_and_transformable():
         viewer.app.camera.adopt(editor_camera)
         viewer.app.camera.publish(viewer.app.camera_out)
         viewer.sync()
+
+        saved_editor_view = viewer.app.camera.view()
+        viewer.app.select_model_camera(camera_id)
+        viewer.sync()
+        assert viewer.app._model_camera_view is not None
+        viewer.app.select_model_camera(-1)
+        viewer.sync()
+        restored_editor_view = viewer.app.camera.view()
+        assert restored_editor_view.eye == pytest.approx(saved_editor_view.eye)
+        assert restored_editor_view.target == pytest.approx(saved_editor_view.target)
+        assert restored_editor_view.fov_y == pytest.approx(saved_editor_view.fov_y)
 
         node = next(node for node in viewer.session.nodes if node.name == "shot")
         screen = project(

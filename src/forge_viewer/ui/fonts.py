@@ -21,10 +21,19 @@ _MONO: tuple[tuple[str, int], ...] = (
 
 
 _CJK: tuple[tuple[str, int], ...] = (
+    (str(Path.home() / "Library/Fonts/SourceHanMonoSC-Regular.otf"), 0),
+    (str(Path.home() / "Library/Fonts/SourceHanSansSC-Regular.otf"), 0),
+    ("/Library/Fonts/SourceHanMonoSC-Regular.otf", 0),
+    ("/Library/Fonts/SourceHanSansSC-Regular.otf", 0),
     ("/System/Library/Fonts/PingFang.ttc", 0),
     ("/System/Library/Fonts/Hiragino Sans GB.ttc", 0),
     ("/System/Library/Fonts/STHeiti Light.ttc", 0),
+    ("/usr/share/fonts/opentype/source-han-mono/SourceHanMonoSC-Regular.otf", 0),
+    ("/usr/share/fonts/opentype/source-han-sans/SourceHanSansSC-Regular.otf", 0),
+    ("/usr/share/fonts/opentype/noto/NotoSansMonoCJK-Regular.ttc", 0),
     ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 0),
+    ("C:/Windows/Fonts/SourceHanMonoSC-Regular.otf", 0),
+    ("C:/Windows/Fonts/SourceHanSansSC-Regular.otf", 0),
     ("C:/Windows/Fonts/msyh.ttc", 0),
 )
 
@@ -197,8 +206,12 @@ def load(
         rep.mono = label
         rep.mono_path, rep.mono_index = mono
 
+    configured_cjk = os.environ.get("FORGE_VIEWER_CJK_FONT")
+    cjk_candidates = (
+        ((str(Path(configured_cjk).expanduser()), 0), *_CJK) if configured_cjk else _CJK
+    )
     cjk, label = _resolve(
-        _CJK,
+        cjk_candidates,
         _REMOTE_CJK,
         prefer_remote=False,
         allow_download=allow_download,

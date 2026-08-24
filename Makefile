@@ -87,7 +87,9 @@ help:
 		'' \
 		'Display and backend options:' \
 		'  make editor BACKEND=wgpu' \
+		'  make editor LANGUAGE=zh_CN                 simplified Chinese UI' \
 		'  FORGE_VIEWER_UI_SCALE=2 make editor' \
+		'  FORGE_VIEWER_CJK_FONT=/path/font.otf make editor' \
 		'  make hidpi BACKEND=wgpu UI_SCALE=2' \
 		'  FORGE_VIEWER_UI_SCALE=1.5 make viewer BACKEND=wgpu SCENE=gizmo ARGS="--paused"' \
 		'  FORGE_VIEWER_GL=egl make viewer          Linux GLFW EGL context' \
@@ -223,8 +225,9 @@ reverse:
 SCENE ?= test_scene
 ARGS  ?=
 BACKEND ?= forge
+LANGUAGE ?= $(FORGE_VIEWER_LANGUAGE)
 viewer:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli view $(SCENE) $(ARGS)
+	FORGE_VIEWER_BACKEND=$(BACKEND) FORGE_VIEWER_LANGUAGE=$(LANGUAGE) $(PY) -m forge_viewer.cli view $(SCENE) $(ARGS)
 
 egl-viewer:
 	@test "$$(uname -s)" = Linux || { echo 'make egl-viewer requires Linux'; exit 2; }
@@ -232,15 +235,15 @@ egl-viewer:
 
 UI_SCALE ?= 2
 hidpi:
-	FORGE_VIEWER_BACKEND=$(BACKEND) FORGE_VIEWER_UI_SCALE=$(UI_SCALE) $(PY) -m forge_viewer.cli view gizmo --paused $(ARGS)
+	FORGE_VIEWER_BACKEND=$(BACKEND) FORGE_VIEWER_LANGUAGE=$(LANGUAGE) FORGE_VIEWER_UI_SCALE=$(UI_SCALE) $(PY) -m forge_viewer.cli view gizmo --paused $(ARGS)
 
 ## Open an empty MuJoCo scene and load MJCF or URDF from File > Open Model.
 empty:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli view empty --paused $(ARGS)
+	FORGE_VIEWER_BACKEND=$(BACKEND) FORGE_VIEWER_LANGUAGE=$(LANGUAGE) $(PY) -m forge_viewer.cli view empty --paused $(ARGS)
 
 ## Empty authored scene with New/Open/Save and Entity creation workflows.
 editor:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor $(ARGS)
+	FORGE_VIEWER_BACKEND=$(BACKEND) FORGE_VIEWER_LANGUAGE=$(LANGUAGE) $(PY) -m forge_viewer.cli editor $(ARGS)
 
 workspace-edit:
 	$(PYTEST) -q tests/test_workspace.py tests/test_scene_entities.py

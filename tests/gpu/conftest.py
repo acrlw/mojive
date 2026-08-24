@@ -24,6 +24,17 @@ except ImportError:  # pragma: no cover
     moderngl = None
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _english_ui():
+    previous = os.environ.get("FORGE_VIEWER_LANGUAGE")
+    os.environ["FORGE_VIEWER_LANGUAGE"] = "en"
+    yield
+    if previous is None:
+        del os.environ["FORGE_VIEWER_LANGUAGE"]
+    else:
+        os.environ["FORGE_VIEWER_LANGUAGE"] = previous
+
+
 @pytest.fixture(scope="session")
 def backend_name():
 

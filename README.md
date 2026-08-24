@@ -57,6 +57,19 @@ make hidpi BACKEND=wgpu UI_SCALE=2
 `make hidpi` opens the gizmo scene at a 200% UI scale. Set `UI_SCALE=1.5` to inspect fractional
 scaling.
 
+### Language and settings
+
+Open `Edit > Settings...` or press `F9` to use the standalone Settings window. The language choice
+is stored in the platform application-settings directory. Start directly in Simplified Chinese
+with:
+
+```bash
+make editor LANGUAGE=zh_CN
+```
+
+The UI atlas combines JetBrains Mono with an installed Source Han, Noto CJK, PingFang, or system
+CJK font. `FORGE_VIEWER_CJK_FONT=/path/to/font.otf` selects a specific CJK font file.
+
 ### Linux OpenGL contexts
 
 Interactive windows use the native GLFW context API. On Wayland this is EGL; on X11 it is GLX.
@@ -169,8 +182,9 @@ rename, and delete from the menu, keyboard shortcuts, and the Hierarchy context 
 Cameras and lights are selectable in the viewport. Their position and rotation gizmos edit world
 transforms; selected helpers show camera frustums and light influence volumes. Selecting a camera
 also opens a draggable live preview in the lower-right corner of the viewport. The Settings panel
-controls helper and influence visibility. Unsaved workspaces display an asterisk in the title and
-prompt before replacement or exit.
+controls helper and influence visibility. `View Through Camera` switches to the selected scene
+camera, and `Return to Editor Camera` restores the previous editor orbit view. Unsaved workspaces
+display an asterisk in the title and prompt before replacement or exit.
 
 ## Programmatic rendering
 
