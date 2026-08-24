@@ -224,6 +224,48 @@ def test_multiple_renderers_with_different_sizes_coexist():
         assert small.render().shape == (48, 64, 3)
 
 
+def test_multi_camera_concurrency_survives_interleaved_render_and_partial_close():
+    model = mujoco.MjModel.from_xml_string(
+        """
+        <mujoco>
+          <visual>
+            <global offwidth="128" offheight="96"/>
+            <headlight ambient=".3 .3 .3" diffuse=".8 .8 .8"/>
+          </visual>
+          <worldbody>
+            <camera name="front" pos="0 -3 1" mode="targetbody" target="target"/>
+            <camera name="side" pos="3 0 1" mode="targetbody" target="target"/>
+            <camera name="top" pos=".2 0 4" mode="targetbody" target="target"/>
+            <body name="target" pos="0 0 .4">
+              <geom pos="-.6 0 0" type="box" size=".4 .15 .2" rgba=".9 .2 .1 1"/>
+              <geom pos=".55 .3 .35" type="sphere" size=".3" rgba=".1 .7 .9 1"/>
+            </body>
+          </worldbody>
+        </mujoco>
+        """
+    )
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    renderers = [Renderer(model, height=72, width=96) for _ in range(3)]
+    cameras = ("front", "side", "top")
+    outputs = [np.empty((72, 96, 3), np.uint8) for _ in renderers]
+    try:
+        for _ in range(12):
+            for renderer, camera, output in zip(renderers, cameras, outputs, strict=True):
+                renderer.update_scene(data, camera=camera)
+                assert renderer.render(out=output) is output
+        assert not np.array_equal(outputs[0], outputs[1])
+        assert not np.array_equal(outputs[1], outputs[2])
+
+        renderers[1].close()
+        for index in (0, 2):
+            renderers[index].update_scene(data, camera=cameras[index])
+            assert np.ptp(renderers[index].render()) > 0
+    finally:
+        for renderer in renderers:
+            renderer.close()
+
+
 def test_renderer_can_be_repeatedly_created_and_destroyed():
     model = _model()
     data = mujoco.MjData(model)

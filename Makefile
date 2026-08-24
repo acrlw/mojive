@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition editor-performance stability scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -16,6 +16,8 @@ help:
 		'  make workspace-edit     workspace, MjSpec topology, camera and light acceptance' \
 		'  make model-loading      empty, MJCF, and URDF loading reference images' \
 		'  make model-composition  add and remove MJCF/URDF models at runtime' \
+		'  make editor-performance composition editing performance baseline' \
+		'  make stability          long-frame, large-model, and multi-camera gates' \
 		'  make robot             Unitree Go2; downloads on first run' \
 		'  make outline           selection and antialiased outline' \
 		'  make gizmo             2D/3D position/rotation gizmo' \
@@ -172,6 +174,15 @@ model-loading:
 model-composition:
 	$(PYTEST) -q -m physics tests/test_adapter.py -k 'mjspec_model_composition'
 	$(PY) -m forge_viewer.tools.model_composition $(ARGS)
+
+editor-performance:
+	$(PYTEST) -q tests/test_editor_performance.py
+	$(PY) -m forge_viewer.tools.editor_performance $(ARGS)
+
+stability:
+	$(PYTEST) -q tests/test_stability.py
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py -k 'multi_camera_concurrency'
+	$(PY) -m forge_viewer.tools.stability $(ARGS)
 
 scene-io:
 	$(PY) -m forge_viewer.tools.scene_io $(ARGS)
