@@ -1,0 +1,274 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+from forge_viewer import commands as cmd
+from forge_viewer import math3d
+from forge_viewer.adapters.base import FrameNeeds, NodeKind, SceneFrame, SceneNode, SceneSource
+from forge_viewer.adapters.static import StaticSceneAdapter
+from forge_viewer.gizmo import project
+from forge_viewer.render.backend import BackendCaps
+from forge_viewer.render.debugdraw import DebugDraw, Prim
+from forge_viewer.scene import Scene
+from forge_viewer.session import Session
+from forge_viewer.types import CameraView, Light, LightKind, LightSet
+from forge_viewer.ui.gizmo import (
+    ObjectGizmo,
+    _node_pose,
+    _set_camera_from_world,
+    _set_light_from_world,
+)
+from forge_viewer.ui.scene_entities import (
+    HELPER_LAYER,
+    SceneEntityHelpers,
+    camera_frustum_segments,
+    camera_rotation,
+    spot_cone_segments,
+)
+
+
+def test_perspective_frustum_uses_camera_projection_planes() -> None:
+    view = CameraView(
+        eye=np.zeros(3, np.float32),
+        target=np.array((0.0, 0.0, -1.0), np.float32),
+        up=np.array((0.0, 1.0, 0.0), np.float32),
+        fov_y=np.deg2rad(90.0),
+        aspect=2.0,
+        near=1.0,
+        far=3.0,
+    )
+    starts, ends = camera_frustum_segments(view)
+    points = np.unique(np.concatenate((starts, ends)), axis=0)
+    near = points[np.isclose(points[:, 2], -1.0)]
+    far = points[np.isclose(points[:, 2], -3.0)]
+    assert np.unique(np.abs(near[:, 0])) == pytest.approx([2.0])
+    assert np.unique(np.abs(near[:, 1])) == pytest.approx([1.0])
+    assert np.unique(np.abs(far[:, 0])) == pytest.approx([6.0])
+    assert np.unique(np.abs(far[:, 1])) == pytest.approx([3.0])
+
+
+def test_spot_influence_uses_range_and_cutoff() -> None:
+    light = Light(
+        kind=LightKind.SPOT,
+        position=np.zeros(3, np.float32),
+        direction=np.array((0.0, 0.0, -1.0), np.float32),
+        range=2.0,
+        cutoff=45.0,
+    )
+    starts, ends = spot_cone_segments(light)
+    points = np.concatenate((starts, ends))
+    rim = points[np.isclose(points[:, 2], -2.0)]
+    assert np.max(np.linalg.norm(rim[:, :2], axis=1)) == pytest.approx(2.0)
+
+
+def test_orthographic_frustum_preserves_parallel_planes() -> None:
+    view = CameraView(
+        eye=np.zeros(3, np.float32),
+        target=np.array((0.0, 0.0, -1.0), np.float32),
+        up=np.array((0.0, 1.0, 0.0), np.float32),
+        near=1.0,
+        far=3.0,
+        aspect=2.0,
+        orthographic=True,
+        ortho_height=4.0,
+    )
+    starts, ends = camera_frustum_segments(view)
+    points = np.unique(np.concatenate((starts, ends)), axis=0)
+    near = points[np.isclose(points[:, 2], -1.0)]
+    far = points[np.isclose(points[:, 2], -3.0)]
+    assert np.max(np.abs(near[:, :2]), axis=0) == pytest.approx((4.0, 2.0))
+    assert np.max(np.abs(far[:, :2]), axis=0) == pytest.approx((4.0, 2.0))
+
+
+def test_camera_rotation_handles_collinear_up_vector() -> None:
+    basis = camera_rotation(
+        CameraView(
+            eye=np.zeros(3, np.float32),
+            target=np.array((1.0, 0.0, 0.0), np.float32),
+            up=np.array((1.0, 0.0, 0.0), np.float32),
+        )
+    )
+    assert basis.T @ basis == pytest.approx(np.eye(3), abs=1e-6)
+    assert np.linalg.det(basis) == pytest.approx(1.0)
+
+
+def test_helpers_publish_selected_frustum_and_pick_camera_anchor() -> None:
+    scene = Scene()
+    camera_id = scene.add_camera(
+        "shot",
+        CameraView(
+            eye=np.array((0.0, 0.0, 1.0), np.float32),
+            target=np.array((0.0, 1.0, 1.0), np.float32),
+            near=0.1,
+            far=2.0,
+        ),
+    )
+    session = Session(StaticSceneAdapter(scene))
+    session.tick(FrameNeeds())
+    node = next(node for node in session.nodes if node.kind is NodeKind.CAMERA)
+    assert session.submit(cmd.Select(node.object_id))
+
+    editor_camera = CameraView(
+        eye=np.array((0.0, -5.0, 2.0), np.float32),
+        target=np.array((0.0, 0.0, 1.0), np.float32),
+        aspect=1.25,
+    )
+    backend = SimpleNamespace(debug=DebugDraw())
+    helpers = SceneEntityHelpers()
+    helpers.publish(backend, session, editor_camera, 800.0, 1.0)
+    layer = backend.debug.layer(HELPER_LAYER)
+    assert layer.count_of(Prim.LINE) == 20
+    assert layer.count_of(Prim.POINT) == 1
+
+    hit = helpers.pick(session, editor_camera, (0.0, 0.0, 1000.0, 800.0), (500.0, 400.0), 1.0)
+    assert hit == node.object_id
+    assert session.camera_view(camera_id) is not None
+
+
+def test_view_through_camera_hides_editor_helpers() -> None:
+    scene = Scene()
+    camera_id = scene.add_camera(
+        "moving shot",
+        CameraView(
+            eye=np.array((0.0, 0.0, 1.0), np.float32),
+            target=np.array((0.0, 1.0, 1.0), np.float32),
+            near=0.1,
+            far=4.0,
+        ),
+    )
+    scene.add_light(
+        "moving key",
+        Light(
+            kind=LightKind.SPOT,
+            position=np.array((1.0, -2.0, 3.0), np.float32),
+            direction=np.array((0.0, 1.0, -1.0), np.float32),
+        ),
+    )
+    session = Session(StaticSceneAdapter(scene))
+    session.tick(FrameNeeds())
+    node = next(node for node in session.nodes if node.kind is NodeKind.CAMERA)
+    assert session.submit(cmd.Select(node.object_id))
+    view = session.camera_view(camera_id)
+    backend = SimpleNamespace(debug=DebugDraw())
+    helpers = SceneEntityHelpers()
+
+    helpers.publish(backend, session, view, 800.0, 1.0, True)
+
+    layer = backend.debug.layer(HELPER_LAYER)
+    assert layer.count_of(Prim.LINE) == 0
+    assert layer.count_of(Prim.POINT) == 0
+    assert helpers.pick(session, view, (0.0, 0.0, 1000.0, 800.0), (500.0, 400.0), 1.0, True) == 0
+
+
+def test_light_and_camera_gizmo_commands_write_entity_transforms() -> None:
+    scene = Scene()
+    scene.add_light(
+        "spot",
+        Light(
+            kind=LightKind.SPOT,
+            position=np.array((1.0, 2.0, 3.0), np.float32),
+            direction=np.array((0.0, 0.0, -1.0), np.float32),
+        ),
+    )
+    scene.add_camera(
+        "shot",
+        CameraView(
+            eye=np.array((3.0, -3.0, 2.0), np.float32),
+            target=np.zeros(3, np.float32),
+        ),
+    )
+    session = Session(StaticSceneAdapter(scene))
+    light_node = next(node for node in session.nodes if node.kind is NodeKind.LIGHT)
+    camera_node = next(node for node in session.nodes if node.kind is NodeKind.CAMERA)
+
+    light_rotation = np.array(((1.0, 0.0, 0.0), (0.0, 0.0, -1.0), (0.0, 1.0, 0.0)), np.float32)
+    light_command = _set_light_from_world(
+        session, light_node, np.array((4.0, 5.0, 6.0)), light_rotation
+    )
+    assert light_command is not None and session.submit(light_command)
+    light_position, light_basis = _node_pose(session, light_node)
+    assert light_position == pytest.approx((4.0, 5.0, 6.0))
+    assert -light_basis[:, 2] == pytest.approx((0.0, 1.0, 0.0))
+
+    camera_rotation = np.eye(3, dtype=np.float32)
+    camera_command = _set_camera_from_world(
+        session, camera_node, np.array((2.0, 3.0, 4.0)), camera_rotation
+    )
+    assert camera_command is not None and session.submit(camera_command)
+    camera_position, camera_rotation = _node_pose(session, camera_node)
+    assert camera_position == pytest.approx((2.0, 3.0, 4.0))
+    assert -camera_rotation[:, 2] == pytest.approx((0.0, 0.0, -1.0))
+
+
+def test_light_rotation_gizmo_keeps_its_drag_frame_after_write_back() -> None:
+    scene = Scene()
+    scene.add_light(
+        "spot",
+        Light(
+            kind=LightKind.SPOT,
+            position=np.zeros(3, np.float32),
+            direction=np.array((0.0, 0.0, -1.0), np.float32),
+        ),
+    )
+    session = Session(StaticSceneAdapter(scene))
+    node = next(node for node in session.nodes if node.kind is NodeKind.LIGHT)
+    assert session.submit(cmd.Select(node.object_id))
+    editor_camera = CameraView(
+        eye=np.array((4.0, -6.0, 3.0), np.float32),
+        target=np.zeros(3, np.float32),
+        up=np.array((0.0, 0.0, 1.0), np.float32),
+        aspect=4.0 / 3.0,
+    )
+    rect = (0.0, 0.0, 800.0, 600.0)
+    gizmo = ObjectGizmo("rotate")
+    gizmo.set_style("3d")
+    start_position, start_basis = _node_pose(session, node)
+    scale = 0.5
+    start = start_position + start_basis[:, 1] * scale
+    end = start_position + start_basis[:, 2] * scale
+    start_cursor, end_cursor = project(editor_camera, (start, end), rect)[:, :2]
+    assert gizmo.keyboard_interact(session, editor_camera, rect, start_cursor, 0)
+    assert gizmo.keyboard_interact(session, editor_camera, rect, end_cursor, 0)
+    assert not np.allclose(_node_pose(session, node)[1], start_basis)
+
+    backend = SimpleNamespace(
+        caps=BackendCaps(name="capture", gizmo=True),
+        set_gizmo=lambda _frame: True,
+    )
+    assert gizmo.publish(
+        backend,
+        session,
+        editor_camera,
+        rect,
+        ui_scale=1.0,
+        style_scale=1.0,
+        yielding=False,
+        interactive=True,
+    )
+    assert gizmo._frame.position == pytest.approx(start_position)
+    assert gizmo._frame.rotation == pytest.approx(start_basis)
+
+
+def test_light_gizmo_converts_world_pose_to_parent_body_frame() -> None:
+    body_rotation = math3d.euler_xyz_to_mat3(np.array((0.0, 0.0, np.pi * 0.5)))
+    local_light = Light(
+        kind=LightKind.SPOT,
+        position=np.zeros(3, np.float32),
+        direction=np.array((0.0, 0.0, -1.0), np.float32),
+    )
+    source = SceneSource(lights=LightSet(lights=(local_light,)))
+    frame = SceneFrame(
+        body_xpos=np.array(((0.0, 0.0, 0.0), (2.0, 3.0, 4.0)), np.float32),
+        body_xmat=np.array((np.eye(3), body_rotation), np.float32),
+    )
+    session = SimpleNamespace(source=source, frame=frame)
+    node = SceneNode(1, "spot", NodeKind.LIGHT, body_index=1, light_index=0)
+    world_position = np.array((2.0, 4.0, 4.0), np.float32)
+    world_rotation = np.eye(3, dtype=np.float32)
+
+    command = _set_light_from_world(session, node, world_position, world_rotation)
+    assert command.light.position == pytest.approx((1.0, 0.0, 0.0), abs=1e-6)
+    assert command.light.direction == pytest.approx((0.0, 0.0, -1.0), abs=1e-6)

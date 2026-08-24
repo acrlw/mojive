@@ -223,6 +223,8 @@ class GizmoPass(BasePass):
             for axis, handle in enumerate(ROTATE_AXIS_HANDLES):
                 if handle not in visible:
                     continue
+                if frame.active_rotation_overlay and frame.active is handle:
+                    continue
                 full = frame.active is handle
                 alpha = (
                     1.0
@@ -243,7 +245,9 @@ class GizmoPass(BasePass):
                     scale,
                     self._color(frame, handle, axis, alpha),
                 )
-            if GizmoHandle.ROTATE_SCREEN in visible:
+            if GizmoHandle.ROTATE_SCREEN in visible and not (
+                frame.active_rotation_overlay and frame.active is GizmoHandle.ROTATE_SCREEN
+            ):
                 ctx.ctx.disable(moderngl.DEPTH_TEST)
                 try:
                     basis = screen_rotation_basis(ctx.camera)

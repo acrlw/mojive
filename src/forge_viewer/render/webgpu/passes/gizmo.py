@@ -233,6 +233,8 @@ class GizmoPass:
         for axis, handle in enumerate(ROTATE_AXIS_HANDLES):
             if handle not in visible:
                 continue
+            if frame.active_rotation_overlay and frame.active is handle:
+                continue
             full = frame.active is handle
             alpha = (
                 1.0
@@ -256,7 +258,9 @@ class GizmoPass:
                     0.0,
                 )
             )
-        if GizmoHandle.ROTATE_SCREEN in visible:
+        if GizmoHandle.ROTATE_SCREEN in visible and not (
+            frame.active_rotation_overlay and frame.active is GizmoHandle.ROTATE_SCREEN
+        ):
             basis = screen_rotation_basis(camera)
             plans.append(
                 (

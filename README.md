@@ -51,6 +51,7 @@ Use an explicit scale when the desktop session reports an incorrect value:
 ```bash
 FORGE_VIEWER_UI_SCALE=2 make viewer
 make hidpi
+make hidpi BACKEND=wgpu UI_SCALE=2
 ```
 
 `make hidpi` opens the gizmo scene at a 200% UI scale. Set `UI_SCALE=1.5` to inspect fractional
@@ -127,6 +128,7 @@ forge-viewer probe
 
 ```text
 forge-viewer view <asset> [--paused] [-b BACKEND]
+forge-viewer editor [--no-vsync]
 forge-viewer canvas [--demo empty|canvas|lighting|text]
 forge-viewer toy
 forge-viewer conformance [BACKEND] [--asset ASSET]
@@ -147,10 +149,24 @@ JSON commands reserve stdout for the JSON document and send logs to stderr.
 The main menu and window file drop open MJCF, XML, and URDF models at runtime. `File > Reload
 Model` recompiles the current model and rebuilds GPU scene resources.
 
-`make editor` starts an empty authored scene. The File menu creates, opens, and saves
-`.forge.json` scenes. The Entity menu creates primitives, lights, and cameras. Selected entities
-support duplicate, rename, and delete from the menu, keyboard shortcuts, and the Hierarchy context
-menu. Unsaved scenes display an asterisk in the title and prompt before replacement or exit.
+`make editor` starts an empty Forge workspace. A `.forge.json` workspace combines MJCF and URDF
+models with Forge-authored geometry, materials, lights, cameras, and environment settings. Model
+paths resolve from the workspace directory and its resource directories. Every model has an
+editable root position and rotation. URDF enters as an import format and is stored as editable
+MJCF when its topology changes.
+
+The File menu creates, opens, and saves workspaces. `Add Model...` and file drop compose robots and
+scene assets. `File > Resource Directories` manages reusable asset search paths. The Hierarchy
+context menu adds and removes MJCF bodies, geometry, joints, sites, cameras, and lights through
+MjSpec. Model elements support rename and local transform editing. The Entity menu creates
+backend-neutral primitives, lights, and cameras. Selected Forge entities support duplicate,
+rename, and delete from the menu, keyboard shortcuts, and the Hierarchy context menu.
+
+Cameras and lights are selectable in the viewport. Their position and rotation gizmos edit world
+transforms; selected helpers show camera frustums and light influence volumes. Selecting a camera
+also opens a draggable live preview in the lower-right corner of the viewport. The Settings panel
+controls helper and influence visibility. Unsaved workspaces display an asterisk in the title and
+prompt before replacement or exit.
 
 ## Programmatic rendering
 
@@ -193,7 +209,7 @@ Validate the installation with `make renderer-api-wgpu` and the backend-paramete
 suite with `make gpu-wgpu`. The full interactive viewer also runs on wgpu:
 
 ```bash
-FORGE_VIEWER_BACKEND=wgpu make viewer
+make viewer BACKEND=wgpu
 ```
 
 The wgpu backend supports the interactive viewer and the public Renderer API on Metal and
@@ -223,6 +239,7 @@ Every user-facing feature has a reproducible Make target.
 | `make image-light` | MuJoCo cube-map environment light with editable intensity and texture |
 | `make many-lights` | 16-light and 24-light MuJoCo reference images |
 | `make scene-icons` | Camera and light scene icons |
+| `make scene-entities` | Selectable camera and light helpers, transforms, frustums, and influence volumes |
 | `make reflect` | Planar reflections |
 | `make additive` | Standard and additive transparency reference images |
 | `make cameras` | Free, named, and orthographic cameras |
@@ -238,6 +255,7 @@ Every user-facing feature has a reproducible Make target.
 | `make deformables` | Flex and skin dynamic meshes |
 | `make robot` | Download and open a MuJoCo Menagerie robot |
 | `make editor` | Empty authored workspace with scene files and Entity editing |
+| `make workspace-edit` | Workspace composition, MjSpec topology, camera and light acceptance |
 | `make editor-files` | Scene document workflow acceptance and capture |
 | `make entity-edit` | Entity lifecycle CPU and GPU acceptance |
 | `make canvas` | Standalone scene authoring with editable transforms, materials, and Forge entities |

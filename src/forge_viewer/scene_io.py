@@ -43,6 +43,16 @@ def load_scene(path: str | Path) -> Scene:
     return _scene_from_document(document)
 
 
+def scene_to_document(scene: Scene) -> dict:
+    return _scene_document(scene)
+
+
+def scene_from_document(document: dict) -> Scene:
+    if document.get("format") != FORMAT or document.get("version") != VERSION:
+        raise ValueError("Unsupported embedded Forge scene")
+    return _scene_from_document(document)
+
+
 def _scene_document(scene: Scene) -> dict:
     scene._sync_light_items()
     materials: list[Material] = []

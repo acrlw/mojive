@@ -3,21 +3,25 @@
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from .. import math3d
 from ..adapters.base import IkOptions, NodeKind
-from ..commands import BeginEditTransaction, EndEditTransaction, SetPose, SolveIk
+from ..commands import (
+    BeginEditTransaction,
+    EndEditTransaction,
+    SetLight,
+    SetPose,
+    SetSceneCamera,
+    SolveIk,
+)
 from ..gizmo import (
     AXIS_COLORS,
     AXIS_END,
     AXIS_HANDLES,
-    AXIS_HEAD_HALF_PT,
-    AXIS_HEAD_LENGTH_PT,
-    AXIS_SHAFT_HALF_PT,
     AXIS_START,
     CENTER_COLOR,
     CENTER_RADIUS,
@@ -42,24 +46,28 @@ from ..gizmo import (
     GizmoMode,
     GizmoSpace,
     GizmoStyle,
+    axis_arrow_polygon,
     axis_handle_alpha,
     display_handles,
     hit_test,
+    masked_axis_start,
     paint_order,
     plane_corners,
     plane_direction,
     plane_handle_alpha,
     project,
+    rotation_dial,
     rotation_ring,
     rotation_ring_alpha,
     visibility,
     world_scale,
 )
 from ..render.debugdraw import Occlusion
-from ..types import CameraView
+from ..types import CameraView, LightKind
 from .camera import ndc_from_viewport, unproject
 from .draw2d import Draw2D
 from .panels.inspector import gizmo_refusal_reason
+from .scene_entities import camera_rotation, direction_basis
 
 if TYPE_CHECKING:
     from ..adapters.base import SceneNode
@@ -70,13 +78,90 @@ DRAG_LAYER = "ui.gizmo.drag"
 _WORLD_BASIS = np.eye(3, dtype=np.float64)
 DEFAULT_TRANSLATION_SNAP_M = 0.5
 DEFAULT_ROTATION_SNAP_DEG = 5.0
+DEFAULT_ROTATION_TICK_SCALE = 1.25
 SNAP_TICK_FULL_STEPS = 5.0
 SNAP_TICK_FADE_STEPS = 10.0
+ROTATION_TICK_MIN_ALPHA = 0.5
 
 
-class RotationTickProjection(enum.StrEnum):
-    CLASSIC = "classic screen-space"
+class RotationDialProjection(enum.StrEnum):
+    CLASSIC = "classic"
     ORTHOGRAPHIC = "orthographic"
+
+
+class _RotationDialProjector:
+    """Project every active rotation-dial layer through one shared mapping."""
+
+    def __init__(
+        self,
+        cam: CameraView,
+        rect: tuple[float, float, float, float],
+        center,
+        axis,
+        start_direction,
+        size_px: float,
+        projection: RotationDialProjection,
+    ) -> None:
+        self._cam = cam
+        self._rect = rect
+        self._center = np.asarray(center, np.float64)
+        self._axis = np.asarray(axis, np.float64)
+        self._start_direction = np.asarray(start_direction, np.float64)
+        self._size_px = float(size_px)
+        self._projection = projection
+        self._screen_center = project(cam, (center,), rect)[0]
+        self._screen_basis = None
+        self._world_scale = 0.0
+        if projection is RotationDialProjection.ORTHOGRAPHIC:
+            world_basis = rotation_dial(
+                np.zeros(3),
+                axis,
+                start_direction,
+                1.0,
+                1.0,
+                (0.0, 0.5 * np.pi),
+            )
+            view_rotation = np.asarray(cam.view_matrix(), np.float64)[:3, :3]
+            self._screen_basis = world_basis @ view_rotation[:2, :].T
+            self._screen_basis[:, 1] *= -1.0
+        else:
+            self._world_scale = world_scale(cam, center, rect[3], size_px)
+
+    def points(self, radius, angles) -> np.ndarray:
+        angles = np.atleast_1d(np.asarray(angles, np.float64))
+        if self._projection is RotationDialProjection.ORTHOGRAPHIC:
+            weights = np.column_stack((np.cos(angles), np.sin(angles)))
+            radial = weights @ self._screen_basis
+            radii = np.broadcast_to(np.asarray(radius, np.float64), angles.shape)
+            screen = self._screen_center[:2] + radial * (radii[:, None] * self._size_px)
+            return np.column_stack((screen, np.full(len(screen), self._screen_center[2])))
+        return project(
+            self._cam,
+            rotation_dial(
+                self._center,
+                self._axis,
+                self._start_direction,
+                self._world_scale,
+                radius,
+                angles,
+            ),
+            self._rect,
+        )
+
+    def tick(
+        self,
+        radius: float,
+        angle: float,
+        length_px: float,
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        points = self.points((radius, radius + 1.0 / SIZE_PT), (angle, angle))
+        direction = points[1, :2] - points[0, :2]
+        projected_length = float(np.linalg.norm(direction))
+        if np.any(points[:, 2] <= 0.0) or projected_length < 1e-6:
+            return None
+        radial = direction / projected_length
+        start = points[0, :2]
+        return start, start + radial * float(length_px)
 
 
 @dataclass(frozen=True)
@@ -88,6 +173,8 @@ class Verdict:
 def verdict(paused: bool, node: SceneNode | None, inverse_kinematics: bool = False) -> Verdict:
     if node is None:
         return Verdict(False, REASON_NO_SELECTION)
+    if node.kind in (NodeKind.LIGHT, NodeKind.CAMERA):
+        return Verdict(True)
     reason = gizmo_refusal_reason(
         paused,
         node.posable,
@@ -136,7 +223,8 @@ class ObjectGizmo:
         self._edit_session: Session | None = None
         self.translation_snap_m = DEFAULT_TRANSLATION_SNAP_M
         self.rotation_snap_deg = DEFAULT_ROTATION_SNAP_DEG
-        self.rotation_tick_projection = RotationTickProjection.ORTHOGRAPHIC
+        self.rotation_tick_scale = DEFAULT_ROTATION_TICK_SCALE
+        self.rotation_dial_projection = RotationDialProjection.ORTHOGRAPHIC
 
     @property
     def mode(self) -> str:
@@ -202,9 +290,9 @@ class ObjectGizmo:
         if space in (GizmoSpace.BODY.value, GizmoSpace.WORLD.value) and not self._using:
             self._space = GizmoSpace(space)
 
-    def set_rotation_tick_projection(self, projection: str) -> None:
+    def set_rotation_dial_projection(self, projection: str) -> None:
         if not self._using:
-            self.rotation_tick_projection = RotationTickProjection(projection)
+            self.rotation_dial_projection = RotationDialProjection(projection)
 
     def toggle_space(self) -> None:
         self.set_space("world" if self._space is GizmoSpace.BODY else "body")
@@ -219,17 +307,21 @@ class ObjectGizmo:
         rect: tuple[float, float, float, float],
         cursor: tuple[float, float],
         *,
+        enabled: bool = True,
         style_scale: float = 1.0,
     ) -> GizmoHandle:
         self._style_scale = float(style_scale)
         node = session.selected_node
-        self._verdict = verdict(session.paused, node, session.adapter.caps.inverse_kinematics)
+        self._verdict = self._evaluate(session, node)
         if not self._verdict.ok:
             self._hovered = GizmoHandle.NONE
             self._axis_mask = self._plane_mask = 0
             return self._hovered
         if self._active is not GizmoHandle.NONE:
             self._hovered = self._active
+            return self._hovered
+        if not enabled:
+            self._hovered = GizmoHandle.NONE
             return self._hovered
         pos, mat = _node_pose(session, node)
         self._hovered, self._axis_mask, self._plane_mask = hit_test(
@@ -286,7 +378,7 @@ class ObjectGizmo:
             self._end()
         if not self._keyboard:
             node = session.selected_node
-            self._verdict = verdict(session.paused, node, session.adapter.caps.inverse_kinematics)
+            self._verdict = self._evaluate(session, node)
             if not self._verdict.ok or not self._begin_handle(session, cam, rect, cursor, handle):
                 return False
             self._keyboard = self._using = True
@@ -307,7 +399,7 @@ class ObjectGizmo:
     ) -> bool:
         self._interactive = bool(interactive)
         node = session.selected_node
-        self._verdict = verdict(session.paused, node, session.adapter.caps.inverse_kinematics)
+        self._verdict = self._evaluate(session, node)
         self._visible = not yielding and self._verdict.ok
         if not self._visible:
             self._clear_translation_guide(backend)
@@ -316,7 +408,13 @@ class ObjectGizmo:
             self._drawn = False
             return False
         pos, mat = _node_pose(session, node)
-        basis = self._basis(mat)
+        active = self._active is not GizmoHandle.NONE
+        if active:
+            basis = self._start_basis
+            if self._active in ROTATE_HANDLES:
+                pos = self._start_pos
+        else:
+            basis = self._basis(mat)
         scale = world_scale(cam, pos, rect[3], SIZE_PT * float(style_scale))
         self._axis_mask, self._plane_mask = visibility(cam, pos, basis, rect, scale)
         frame = self._frame
@@ -328,21 +426,13 @@ class ObjectGizmo:
         frame.size_px = SIZE_PT * float(ui_scale)
         frame.hovered = self._hovered if interactive else GizmoHandle.NONE
         frame.active = self._active
+        frame.active_rotation_overlay = self._using and self._active in ROTATE_HANDLES
         frame.axis_mask = self._axis_mask
         frame.plane_mask = self._plane_mask
         self._publish_translation_guide(backend, ui_scale)
         if self._style is GizmoStyle.FLAT:
             if backend.caps.gizmo:
                 backend.set_gizmo(None)
-            self._drawn = False
-            return True
-        if (
-            backend.caps.gizmo
-            and self._snapping
-            and self._active in ROTATE_AXIS_HANDLES
-            and self.rotation_tick_projection is RotationTickProjection.ORTHOGRAPHIC
-        ):
-            backend.set_gizmo(None)
             self._drawn = False
             return True
         if not backend.caps.gizmo:
@@ -361,14 +451,26 @@ class ObjectGizmo:
             self._drawn = True
         if self._using and self._snapping and self._active in AXIS_HANDLES:
             self._draw_translation_snap_ruler(overlay, cam, rect, style_scale)
-        if self._using and self._snapping and self._active in ROTATE_HANDLES:
-            self._draw_rotation_snap_ticks(overlay, cam, rect, style_scale)
         if self._using and self._active not in ROTATE_HANDLES and not self._guide_gpu:
             self._draw_translation_guide(overlay, cam, rect, style_scale)
+        rotation_dial_projector = None
         if self._using and self._active in ROTATE_HANDLES:
-            self._draw_rotation_guide(overlay, cam, rect, style_scale)
+            rotation_dial_projector = _RotationDialProjector(
+                cam,
+                rect,
+                self._start_pos,
+                self._axis,
+                self._rotation_start_vec,
+                SIZE_PT * style_scale,
+                self.rotation_dial_projection,
+            )
+            if self._snapping:
+                self._draw_rotation_snap_ticks(
+                    overlay, cam, rect, style_scale, rotation_dial_projector
+                )
+            self._draw_rotation_guide(overlay, cam, rect, style_scale, rotation_dial_projector)
         if self._using and self._label:
-            self._draw_value_label(overlay, cam, rect, style_scale)
+            self._draw_value_label(overlay, cam, rect, style_scale, rotation_dial_projector)
 
     def _draw_flat(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         frame = self._frame
@@ -416,13 +518,13 @@ class ObjectGizmo:
             )
             if np.any(screen[:, 2] <= 0.0):
                 continue
-            start = _masked_axis_start(
+            start = masked_axis_start(
                 screen[0, :2],
                 screen[1, :2],
                 CENTER_SHELL_RADIUS * SIZE_PT * style_scale,
             )
-            points = _flat_arrow(start, screen[1, :2], style_scale)
-            if points:
+            points = axis_arrow_polygon(start, screen[1, :2], style_scale)
+            if len(points):
                 overlay.concave_fill(points, self._flat_color(handle, axis, alpha))
 
         if GizmoHandle.SCREEN in visible:
@@ -441,11 +543,7 @@ class ObjectGizmo:
         for axis, handle in enumerate(ROTATE_AXIS_HANDLES):
             if handle not in visible:
                 continue
-            if (
-                self._snapping
-                and handle is self._active
-                and self.rotation_tick_projection is RotationTickProjection.ORTHOGRAPHIC
-            ):
+            if frame.active_rotation_overlay and frame.active is handle:
                 continue
             full = frame.active is handle
             alpha = 1.0 if full else rotation_ring_alpha(cam, origin, rotation[:, axis])
@@ -462,7 +560,9 @@ class ObjectGizmo:
                 closed=full,
             )
 
-        if GizmoHandle.ROTATE_SCREEN in visible:
+        if GizmoHandle.ROTATE_SCREEN in visible and not (
+            frame.active_rotation_overlay and frame.active is GizmoHandle.ROTATE_SCREEN
+        ):
             center = project(cam, (origin,), rect)[0]
             if center[2] > 0.0:
                 color = HOVER_COLOR if self._hot(GizmoHandle.ROTATE_SCREEN) else CENTER_COLOR
@@ -595,145 +695,64 @@ class ObjectGizmo:
             for start, end in _split_segment_around_point(a, b, current[:2], mask_radius):
                 overlay.line(start, end, tick_color, (2.2 if is_active else 1.2) * style_scale)
 
-    def _draw_rotation_snap_ticks(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
+    def _draw_rotation_snap_ticks(
+        self,
+        overlay: Draw2D,
+        cam,
+        rect,
+        style_scale: float,
+        dial: _RotationDialProjector,
+    ) -> None:
         ring_radius = (
             SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
         )
-        screen_space = self._active is GizmoHandle.ROTATE_SCREEN
-        scale = world_scale(cam, self._start_pos, rect[3], SIZE_PT * style_scale)
-        if scale <= 0.0:
-            return
-        tangent = np.cross(self._axis, self._rotation_start_vec)
         step = float(self.rotation_snap_deg)
-        edge = CONTRAST_EDGE_COLOR
         core = GUIDE_CORE_COLOR
 
-        def radial(angle: float) -> np.ndarray:
-            cosine = np.cos(angle)
-            return (
-                cosine * self._rotation_start_vec
-                + np.sin(angle) * tangent
-                + (1.0 - cosine) * np.dot(self._axis, self._rotation_start_vec) * self._axis
-            )
+        tick_radius = ring_radius
 
-        ring_radius_pt = ring_radius * SIZE_PT
-        center = project(cam, (self._start_pos,), rect)[0]
-
-        def dial_points(angles, offsets_pt=0.0) -> np.ndarray:
-            values = np.atleast_1d(np.asarray(angles, np.float64))
-            directions = np.asarray([radial(float(angle)) for angle in values])
-            radii = ring_radius_pt + np.broadcast_to(
-                np.asarray(offsets_pt, np.float64), values.shape
-            )
-            return _project_rotation_dial(
-                cam,
-                rect,
-                self._start_pos,
-                directions,
-                radii,
-                style_scale,
-                screen_space,
-            )
-
-        def perspective_points(angles) -> np.ndarray:
-            values = np.atleast_1d(np.asarray(angles, np.float64))
-            directions = np.asarray([radial(float(angle)) for angle in values])
-            return project(
-                cam,
-                self._start_pos + directions * (scale * ring_radius),
-                rect,
-            )
-
-        ring_angles = np.linspace(0.0, 2.0 * np.pi, RING_SEGMENTS, endpoint=False)
-        classic = self.rotation_tick_projection is RotationTickProjection.CLASSIC
-        ring = perspective_points(ring_angles) if classic else dial_points(ring_angles, 4.0)
-        active_ring: np.ndarray | None = None
-        if not classic and not screen_space:
-            active_ring = dial_points(ring_angles)
-        trace: np.ndarray | None = None
-        if np.all(ring[:, 2] > 0.0):
-            trace = ring[:, :2]
-            if classic:
-                trace = trace + _outward_normals(trace, center[:2]) * (4.0 * style_scale)
+        def dial_points(angles, radius=tick_radius) -> np.ndarray:
+            return dial.points(radius, angles)
 
         def tick_segment(angle: float, length_pt: float):
-            points = dial_points((angle, angle), (4.0, 5.0))
-            direction = points[1, :2] - points[0, :2]
-            projected_length = float(np.linalg.norm(direction))
-            if np.any(points[:, 2] <= 0.0) or projected_length < 1e-6:
-                return None
-            return (
-                points[0, :2],
-                points[0, :2] + direction * (length_pt * style_scale / projected_length),
+            return dial.tick(
+                tick_radius,
+                angle,
+                length_pt * self.rotation_tick_scale * style_scale,
             )
-
-        def classic_tick_segment(angle: float, length_pt: float):
-            epsilon = 1e-3
-            points = perspective_points((angle - epsilon, angle, angle + epsilon))
-            if np.any(points[:, 2] <= 0.0):
-                return None
-            normal = _outward_normals(points[:, :2], center[:2])[1]
-            inner = points[1, :2] + normal * (4.0 * style_scale)
-            return inner, inner + normal * (length_pt * style_scale)
 
         ticks_visible = (
             self._active is GizmoHandle.ROTATE_SCREEN
-            or rotation_ring_alpha(cam, self._start_pos, self._axis) > 0.0
+            or rotation_ring_alpha(cam, self._start_pos, self._axis) >= ROTATION_TICK_MIN_ALPHA
         )
         ticks: list[tuple[np.ndarray, np.ndarray]] = []
         for degrees in np.arange(0.0, 360.0, step):
             rounded = round(float(degrees))
             if abs(degrees - rounded) < 1e-6 and rounded % 90 == 0:
-                length_pt = 9.0
+                length_pt = 8.0
             elif abs(degrees / 45.0 - round(degrees / 45.0)) < 1e-6:
                 length_pt = 7.0
             elif abs(degrees / 15.0 - round(degrees / 15.0)) < 1e-6:
-                length_pt = 5.0
+                length_pt = 5.5
             else:
-                length_pt = 3.0
+                length_pt = 4.0
             angle = np.radians(degrees)
             angle_step = np.radians(step)
-            points = (
-                perspective_points((angle, angle + angle_step))
-                if classic
-                else dial_points((angle, angle + angle_step))
-            )
+            points = dial_points((angle, angle + angle_step))
             if np.any(points[:, 2] <= 0.0):
                 continue
             spacing = float(np.linalg.norm(points[1, :2] - points[0, :2]))
             if not ticks_visible or spacing < 2.0 * style_scale:
                 continue
-            segment = (
-                classic_tick_segment(angle, length_pt)
-                if classic
-                else tick_segment(angle, length_pt)
-            )
+            segment = tick_segment(angle, length_pt)
             if segment is not None:
                 ticks.append(segment)
 
-        active_tick = None
-        if ticks_visible:
-            active_tick = (
-                classic_tick_segment(self._rotation_angle, 15.0)
-                if classic
-                else tick_segment(self._rotation_angle, 15.0)
-            )
-
-        if active_ring is not None and np.all(active_ring[:, 2] > 0.0):
-            overlay.polyline(
-                active_ring[:, :2],
-                HOVER_COLOR,
-                RING_WIDTH_PT * style_scale,
-                closed=True,
-            )
-        if trace is not None:
-            overlay.polyline(trace, edge, 2.5 * style_scale, closed=True)
+        active_tick = tick_segment(self._rotation_angle, 15.0) if ticks_visible else None
         for inner, outer in ticks:
             overlay.line(inner, outer, core, 1.1 * style_scale)
         if active_tick is not None:
             overlay.line(active_tick[0], active_tick[1], HOVER_COLOR, 2.2 * style_scale)
-        if trace is not None:
-            overlay.polyline(trace, core, 1.1 * style_scale, closed=True)
 
     def _draw_translation_guide(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         screen = project(cam, (self._start_pos, self._frame.position), rect)
@@ -781,39 +800,38 @@ class ObjectGizmo:
             dd.layer(DRAG_LAYER, Occlusion.ALWAYS).clear()
         self._guide_gpu = False
 
-    def _draw_rotation_guide(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
+    def _draw_rotation_guide(
+        self,
+        overlay: Draw2D,
+        cam,
+        rect,
+        style_scale: float,
+        dial: _RotationDialProjector,
+    ) -> None:
         sweep = _rotation_sweep(self._rotation_angle)
-        tangent = np.cross(self._axis, self._rotation_start_vec)
         ring_radius = (
             SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
         )
-        radius = world_scale(cam, self._start_pos, rect[3], SIZE_PT * style_scale) * ring_radius
-        orthographic = (
-            self._active in ROTATE_AXIS_HANDLES
-            and self.rotation_tick_projection is RotationTickProjection.ORTHOGRAPHIC
+
+        reference = dial.points(
+            ring_radius,
+            np.linspace(
+                0.0,
+                2.0 * np.pi,
+                _rotation_dial_segments(
+                    cam, self._start_pos, self._axis, self.rotation_dial_projection
+                ),
+                endpoint=False,
+            ),
         )
 
         def arc_screen(angles):
-            cosine = np.cos(angles)[:, None]
-            sine = np.sin(angles)[:, None]
-            arc = (
-                cosine * self._rotation_start_vec
-                + sine * tangent
-                + (1.0 - cosine) * np.dot(self._axis, self._rotation_start_vec) * self._axis
-            )
-            if orthographic:
-                return _project_rotation_dial(
-                    cam,
-                    rect,
-                    self._start_pos,
-                    arc,
-                    np.full(len(arc), ring_radius * SIZE_PT),
-                    style_scale,
-                    False,
-                )
-            return project(cam, self._start_pos + radius * arc, rect)
+            return dial.points(ring_radius, angles)
 
-        point_count = max(2, int(np.ceil(RING_SEGMENTS * abs(sweep) / (2.0 * np.pi))) + 1)
+        dial_segments = _rotation_dial_segments(
+            cam, self._start_pos, self._axis, self.rotation_dial_projection
+        )
+        point_count = max(2, int(np.ceil(dial_segments * abs(sweep) / (2.0 * np.pi))) + 1)
         arc = arc_screen(np.linspace(0.0, sweep, point_count))
         center = project(cam, (self._start_pos,), rect)[0]
         if center[2] <= 0.0 or np.any(arc[:, 2] <= 0.0):
@@ -822,34 +840,35 @@ class ObjectGizmo:
         arc = arc[:, :2]
         sector = [center, *arc]
         border = (1.0, 0.5, 0.06, 1.0)
-        turns = int(abs(round(float(np.degrees(self._rotation_angle)), 1)) // 360.0)
-        if turns:
-            full = arc_screen(
-                np.linspace(
-                    0.0,
-                    np.copysign(2.0 * np.pi, self._rotation_angle),
-                    RING_SEGMENTS,
-                    endpoint=False,
-                )
-            )
-            if np.all(full[:, 2] > 0.0):
-                overlay.polyline(
-                    full[:, :2],
-                    (1.0, 0.5, 0.06, 0.42),
-                    1.5 * style_scale,
-                    closed=True,
-                )
 
         fill_alpha = _rotation_fill_alpha(sweep)
         if fill_alpha > 0.0:
-            overlay.convex_fill(sector, (1.0, 0.5, 0.06, fill_alpha))
+            fill = (1.0, 0.5, 0.06, fill_alpha)
+            if abs(sweep) <= np.pi:
+                overlay.convex_fill(sector, fill)
+            else:
+                overlay.fringed_concave_fill(sector, fill)
+        if np.all(reference[:, 2] > 0.0):
+            overlay.polyline(
+                reference[:, :2],
+                HOVER_COLOR,
+                RING_WIDTH_PT * style_scale,
+                closed=True,
+            )
         if abs(sweep) > 1e-6:
-            overlay.polyline(arc, border, 2.0 * style_scale)
-        endpoints = (arc[0],) if abs(sweep) < 1e-6 else (arc[0], arc[-1])
-        for endpoint in endpoints:
-            overlay.line(center, endpoint, border, 2.0 * style_scale)
+            width = RING_WIDTH_PT * style_scale
+            overlay.polyline(np.vstack((center, arc)), border, width, closed=True)
+            for joint in (center, arc[0], arc[-1]):
+                overlay.circle_filled(joint, width * 0.5, border, segments=12)
 
-    def _draw_value_label(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
+    def _draw_value_label(
+        self,
+        overlay: Draw2D,
+        cam,
+        rect,
+        style_scale: float,
+        dial: _RotationDialProjector | None,
+    ) -> None:
         pad = 6.0 * style_scale
         gap = 14.0 * style_scale
         anchor_world = self._frame.position
@@ -858,31 +877,8 @@ class ObjectGizmo:
             ring_radius = (
                 SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
             )
-            tangent = np.cross(self._axis, self._rotation_start_vec)
-            cosine = np.cos(self._rotation_angle)
-            direction = (
-                cosine * self._rotation_start_vec
-                + np.sin(self._rotation_angle) * tangent
-                + (1.0 - cosine) * np.dot(self._axis, self._rotation_start_vec) * self._axis
-            )
-            if (
-                self._active in ROTATE_AXIS_HANDLES
-                and self.rotation_tick_projection is RotationTickProjection.ORTHOGRAPHIC
-            ):
-                anchor = _project_rotation_dial(
-                    cam,
-                    rect,
-                    self._start_pos,
-                    (direction,),
-                    np.asarray((ring_radius * SIZE_PT + 14.0,)),
-                    style_scale,
-                    False,
-                )[0]
-            else:
-                radius = world_scale(cam, self._start_pos, rect[3], SIZE_PT * style_scale) * (
-                    ring_radius + 14.0 / SIZE_PT
-                )
-                anchor_world = self._start_pos + direction * radius
+            if dial is not None:
+                anchor = dial.points(ring_radius, (self._rotation_angle,))[0]
         if anchor is None:
             anchor = project(cam, (anchor_world,), rect)[0]
         if anchor[2] <= 0.0:
@@ -1008,7 +1004,11 @@ class ObjectGizmo:
         if node is None:
             self._end()
             return False
-        if node.posable:
+        if node.kind is NodeKind.LIGHT:
+            command = _set_light_from_world(session, node, pos, mat)
+        elif node.kind is NodeKind.CAMERA:
+            command = _set_camera_from_world(session, node, pos, mat)
+        elif node.posable:
             command = SetPose(
                 node_id=node.node_id,
                 position=np.asarray(pos, np.float32),
@@ -1025,6 +1025,10 @@ class ObjectGizmo:
                 ),
                 record_undo=not self._edit_started,
             )
+        if command is None:
+            self._verdict = Verdict(False, "entity transform is unavailable")
+            self._end()
+            return False
         result = session.submit(command)
         if not result.ok:
             self._verdict = Verdict(False, result.message)
@@ -1073,6 +1077,20 @@ class ObjectGizmo:
         if self._space is GizmoSpace.BODY:
             return np.asarray(rotation, np.float64).reshape(3, 3)
         return _WORLD_BASIS
+
+    def _evaluate(self, session: Session, node: SceneNode | None) -> Verdict:
+        result = verdict(session.paused, node, session.adapter.caps.inverse_kinematics)
+        if not result.ok or node is None:
+            return result
+        if node.kind is NodeKind.LIGHT:
+            light = _source_light(session, node)
+            if light is None:
+                return Verdict(False, "light transform is unavailable")
+            if light.kind is LightKind.IMAGE:
+                return Verdict(False, "image light has no spatial transform")
+            if self._mode is GizmoMode.ROTATE and light.kind is LightKind.POINT:
+                return Verdict(False, "this light has no direction")
+        return result
 
     def _start_edit(self, session: Session) -> None:
         if not session.adapter.caps.edit_history:
@@ -1136,8 +1154,7 @@ def _rotation_sweep(angle: float) -> float:
 
 
 def _rotation_fill_alpha(sweep: float) -> float:
-    fade = (np.pi - abs(sweep)) / np.radians(60.0)
-    return 0.28 * float(np.clip(fade, 0.0, 1.0))
+    return 0.28 if abs(float(sweep)) > 1e-6 else 0.0
 
 
 def _clip_line_to_rect(origin, direction, rect) -> tuple[np.ndarray, np.ndarray] | None:
@@ -1221,71 +1238,68 @@ def _split_segment_around_point(
     return tuple(segments)
 
 
-def _outward_normals(points: np.ndarray, center: np.ndarray) -> np.ndarray:
-    points = np.asarray(points, np.float64)
-    tangents = np.roll(points, -1, axis=0) - np.roll(points, 1, axis=0)
-    normals = np.column_stack((-tangents[:, 1], tangents[:, 0]))
-    lengths = np.linalg.norm(normals, axis=1)
-    radial = points - np.asarray(center, np.float64)
-    degenerate = lengths < 1e-9
-    normals[degenerate] = radial[degenerate]
-    lengths[degenerate] = np.linalg.norm(normals[degenerate], axis=1)
-    normals /= np.maximum(lengths[:, None], 1e-9)
-    normals[np.sum(normals * radial, axis=1) < 0.0] *= -1.0
-    return normals
-
-
 def _project_rotation_dial(
     cam: CameraView,
     rect: tuple[float, float, float, float],
-    center: np.ndarray,
-    directions: np.ndarray,
-    radii_pt: np.ndarray,
-    style_scale: float,
-    screen_space: bool,
+    center,
+    axis,
+    start_direction,
+    size_px: float,
+    radius: float,
+    angles,
+    projection: RotationDialProjection,
 ) -> np.ndarray:
-    directions = np.asarray(directions, np.float64).reshape(-1, 3)
-    radii = np.asarray(radii_pt, np.float64).reshape(-1)
-    center = np.asarray(center, np.float64)
-    projected_center = project(cam, (center,), rect)[0]
-    view_rotation = np.asarray(cam.view_matrix(), np.float64)[:3, :3]
-    radial = directions @ view_rotation[:2, :].T
-    radial[:, 1] *= -1.0
-    if screen_space:
-        lengths = np.linalg.norm(radial, axis=1)
-        radial /= np.maximum(lengths[:, None], 1e-9)
-    screen = projected_center[:2] + radial * (radii * style_scale)[:, None]
-    return np.column_stack((screen, np.full(len(screen), projected_center[2])))
+    """Project one dial through the selected camera or screen-orthographic mapping."""
+    return _RotationDialProjector(
+        cam,
+        rect,
+        center,
+        axis,
+        start_direction,
+        size_px,
+        projection,
+    ).points(radius, angles)
 
 
-def _flat_arrow(start: np.ndarray, end: np.ndarray, style_scale: float) -> list[np.ndarray]:
-    direction = np.asarray(end, np.float64) - np.asarray(start, np.float64)
-    length = float(np.linalg.norm(direction))
-    if length < 1e-6:
-        return []
-    direction /= length
-    side = np.array((-direction[1], direction[0]))
-    shaft = AXIS_SHAFT_HALF_PT * style_scale
-    head = min(AXIS_HEAD_LENGTH_PT * style_scale, length * 0.42)
-    wing = AXIS_HEAD_HALF_PT * style_scale
-    neck = np.asarray(end) - direction * head
-    return [
-        np.asarray(start) - side * shaft,
-        neck - side * shaft,
-        neck - side * wing,
-        np.asarray(end),
-        neck + side * wing,
-        neck + side * shaft,
-        np.asarray(start) + side * shaft,
-    ]
+def _project_rotation_tick(
+    cam: CameraView,
+    rect: tuple[float, float, float, float],
+    center,
+    axis,
+    start_direction,
+    size_px: float,
+    radius: float,
+    angle: float,
+    length_px: float,
+    projection: RotationDialProjection,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Project one radial tick and keep its displayed length in pixels."""
+    return _RotationDialProjector(
+        cam,
+        rect,
+        center,
+        axis,
+        start_direction,
+        size_px,
+        projection,
+    ).tick(radius, angle, length_px)
 
 
-def _masked_axis_start(origin: np.ndarray, end: np.ndarray, radius: float) -> np.ndarray:
-    direction = np.asarray(end, np.float64) - np.asarray(origin, np.float64)
-    length = float(np.linalg.norm(direction))
-    if length <= radius or length < 1e-9:
-        return np.asarray(end, np.float64)
-    return np.asarray(origin, np.float64) + direction * (float(radius) / length)
+def _rotation_dial_segments(
+    cam: CameraView,
+    center,
+    axis,
+    projection: RotationDialProjection,
+) -> int:
+    view = (
+        np.asarray(cam.forward(), np.float64)
+        if projection is RotationDialProjection.ORTHOGRAPHIC or cam.orthographic
+        else np.asarray(center, np.float64) - np.asarray(cam.eye, np.float64)
+    )
+    view /= np.linalg.norm(view)
+    facing = abs(float(np.dot(np.asarray(axis, np.float64), view)))
+    multiplier = min(4.0, 1.0 / max(np.sqrt(facing), 0.25))
+    return int(np.ceil(RING_SEGMENTS * multiplier))
 
 
 def _cursor_plane(cam, rect, cursor, point, normal) -> np.ndarray | None:
@@ -1300,6 +1314,28 @@ def _cursor_plane(cam, rect, cursor, point, normal) -> np.ndarray | None:
 
 def _node_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarray]:
     frame = session.frame
+    if node.kind is NodeKind.MODEL:
+        info = next((item for item in session.scene_models if item.model_id == node.model_id), None)
+        if info is not None:
+            return (
+                np.asarray(info.position, np.float64).reshape(3),
+                np.asarray(info.rotation, np.float64).reshape(3, 3),
+            )
+    if node.kind is NodeKind.LIGHT:
+        lights = frame.lights or (session.source.lights if session.source is not None else None)
+        if lights is not None and 0 <= node.light_index < len(lights.lights):
+            light = lights.lights[node.light_index]
+            return (
+                np.asarray(light.position, np.float64).reshape(3),
+                np.asarray(direction_basis(light.direction), np.float64),
+            )
+    if node.kind is NodeKind.CAMERA:
+        view = _camera_for_node(session, node)
+        if view is not None:
+            return (
+                np.asarray(view.eye, np.float64).reshape(3),
+                np.asarray(camera_rotation(view), np.float64),
+            )
     if node.kind is NodeKind.SITE:
         i = int(node.site_index)
         pos = np.zeros(3, np.float64)
@@ -1309,6 +1345,15 @@ def _node_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarra
         if frame.site_xmat is not None and 0 <= i < len(frame.site_xmat):
             mat = np.asarray(frame.site_xmat[i], np.float64).reshape(3, 3)
         return pos, mat
+    if node.kind is NodeKind.GEOM:
+        i = int(node.geom_index)
+        pos = np.zeros(3, np.float64)
+        mat = np.eye(3, dtype=np.float64)
+        if frame.geom_xpos is not None and 0 <= i < len(frame.geom_xpos):
+            pos = np.asarray(frame.geom_xpos[i], np.float64).reshape(3)
+        if frame.geom_xmat is not None and 0 <= i < len(frame.geom_xmat):
+            mat = np.asarray(frame.geom_xmat[i], np.float64).reshape(3, 3)
+        return pos, mat
     i = int(node.body_index)
     pos = np.zeros(3, np.float64)
     mat = np.eye(3, dtype=np.float64)
@@ -1317,3 +1362,65 @@ def _node_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarra
     if frame.body_xmat is not None and 0 <= i < len(frame.body_xmat):
         mat = np.asarray(frame.body_xmat[i], np.float64).reshape(3, 3)
     return pos, mat
+
+
+def _source_light(session: Session, node: SceneNode):
+    source = session.source
+    if source is None or not 0 <= node.light_index < len(source.lights.lights):
+        return None
+    return source.lights.lights[node.light_index]
+
+
+def _camera_for_node(session: Session, node: SceneNode) -> CameraView | None:
+    if not 0 <= node.camera_index < len(session.cameras):
+        return None
+    camera_id = session.cameras[node.camera_index].camera_id
+    view = session.camera_view(camera_id)
+    if view is not None:
+        return view
+    frame = session.frame
+    if frame.cameras is not None and node.camera_index < len(frame.cameras):
+        return frame.cameras[node.camera_index]
+    return None
+
+
+def _set_light_from_world(session: Session, node: SceneNode, position, rotation):
+    light = _source_light(session, node)
+    if light is None:
+        return None
+    position = np.asarray(position, np.float64).reshape(3)
+    direction = -np.asarray(rotation, np.float64).reshape(3, 3)[:, 2]
+    frame = session.frame
+    body = int(node.body_index)
+    if (
+        frame.body_xpos is not None
+        and frame.body_xmat is not None
+        and 0 <= body < len(frame.body_xpos)
+        and body < len(frame.body_xmat)
+    ):
+        body_position = np.asarray(frame.body_xpos[body], np.float64).reshape(3)
+        body_rotation = np.asarray(frame.body_xmat[body], np.float64).reshape(3, 3)
+        position = body_rotation.T @ (position - body_position)
+        direction = body_rotation.T @ direction
+    return SetLight(
+        node.light_index,
+        replace(
+            light,
+            position=np.asarray(position, np.float32),
+            direction=math3d.normalize(direction),
+        ),
+    )
+
+
+def _set_camera_from_world(session: Session, node: SceneNode, position, rotation):
+    view = _camera_for_node(session, node)
+    if view is None or not 0 <= node.camera_index < len(session.cameras):
+        return None
+    rotation = np.asarray(rotation, np.float64).reshape(3, 3)
+    eye = np.asarray(position, np.float32).reshape(3)
+    distance = max(view.distance(), 1e-4)
+    forward = -rotation[:, 2]
+    target = eye + np.asarray(forward * distance, np.float32)
+    up = math3d.normalize(rotation[:, 1])
+    camera_id = session.cameras[node.camera_index].camera_id
+    return SetSceneCamera(camera_id, replace(view, eye=eye, target=target, up=up))

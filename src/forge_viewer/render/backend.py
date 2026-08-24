@@ -189,6 +189,8 @@ class RenderBackend(Protocol):
 
     def render_options(self) -> tuple[RenderFlag, ...]: ...
 
+    def create_peer(self, width: int, height: int) -> RenderBackend: ...
+
     def describe(self) -> str: ...
 
     def release(self) -> None: ...
@@ -254,6 +256,9 @@ class NullBackend:
 
     def render_options(self) -> tuple[RenderFlag, ...]:
         return ()
+
+    def create_peer(self, width: int, height: int) -> NullBackend:
+        return NullBackend(self.reason)
 
     def describe(self) -> str:
         return f"null renderer: {self.reason}"

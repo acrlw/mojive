@@ -45,6 +45,12 @@ class InspectorPanel(Panel):
         self._rotation_euler = np.zeros(3, np.float64)
         self._rotation_matrix = np.eye(3, dtype=np.float64)
         self._edit_transaction = False
+        self._model_name_node = -1
+        self._model_name = ""
+        self._source_model_id = -1
+        self._source_text = ""
+        self._source_error = ""
+        self._open_source_popup = False
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds(
@@ -64,6 +70,7 @@ class InspectorPanel(Panel):
         ctx.submit(command)
 
     def draw(self, ctx: PanelContext) -> None:
+        self._draw_model_source(ctx)
         s = ctx.session
         node = s.selected_node
         if node is None:
@@ -78,6 +85,7 @@ class InspectorPanel(Panel):
         imgui.text_disabled(f"({node.kind})")
 
         self._identity(node)
+        self._model_element(ctx, node)
         if node.kind is NodeKind.MODEL:
             self._model(ctx, node)
             return
@@ -95,19 +103,93 @@ class InspectorPanel(Panel):
         self._velocity(ctx, node)
         self._material(ctx, node)
 
-    @staticmethod
-    def _model(ctx: PanelContext, node: SceneNode) -> None:
+    def _model_element(self, ctx: PanelContext, node: SceneNode) -> None:
+        if node.model_id < 0 or node.kind in (NodeKind.WORLD, NodeKind.MODEL):
+            return
+        if self._model_name_node != node.node_id:
+            self._model_name_node = node.node_id
+            prefix = f"forge_{node.model_id}_"
+            self._model_name = node.name.removeprefix(prefix)
+        imgui.set_next_item_width(-80.0 * ctx.style_scale)
+        _changed, self._model_name = imgui.input_text("##model_element_name", self._model_name)
+        imgui.same_line()
+        if imgui.button("Rename") and self._model_name.strip():
+            ctx.submit(cmd.RenameModelElement(node.node_id, self._model_name.strip()))
+
+    def _model(self, ctx: PanelContext, node: SceneNode) -> None:
         info = next(
             (item for item in ctx.session.scene_models if item.model_id == node.model_id), None
         )
         if info is None:
             return
-        if begin_kv_table("insp_model"):
-            labeled("file", str(info.path))
-            labeled("position", "  ".join(f"{value:+.3f}" for value in info.position))
-            imgui.end_table()
+        imgui.text_disabled(str(info.path))
+        position = np.asarray(info.position, np.float32)
+        rotation = np.asarray(info.rotation, np.float64).reshape(3, 3)
+        euler = self._continuous_euler(node.node_id, rotation)
+        editable = ctx.session.paused and info.removable
+        if not editable:
+            imgui.begin_disabled()
+        pos_changed, position = imgui.drag_float3("position", position, 0.01, 0.0, 0.0, "%.3f")
+        rot_changed, euler = imgui.drag_float3("rotation", euler, 0.5, 0.0, 0.0, "%.1f°")
+        if not editable:
+            imgui.end_disabled()
+        if editable and (pos_changed or rot_changed):
+            matrix = math3d.euler_xyz_to_mat3(np.radians(euler))
+            self._submit_edit(
+                ctx,
+                cmd.SetSceneModelTransform(
+                    info.model_id,
+                    np.asarray(position, np.float32),
+                    matrix,
+                ),
+            )
         if info.removable and imgui.button("Remove Model"):
             ctx.submit(cmd.RemoveSceneModel(info.model_id))
+        if ctx.session.adapter.caps.topology_editing:
+            imgui.same_line()
+            if not ctx.session.paused:
+                imgui.begin_disabled()
+            edit_source = imgui.button("Edit MJCF Source...")
+            if not ctx.session.paused:
+                imgui.end_disabled()
+            if edit_source:
+                source = ctx.session.adapter.scene_model_source(info.model_id)
+                if source is not None:
+                    self._source_model_id = info.model_id
+                    self._source_text = source
+                    self._source_error = ""
+                    self._open_source_popup = True
+
+    def _draw_model_source(self, ctx: PanelContext) -> None:
+        if self._open_source_popup:
+            imgui.open_popup("MJCF Source")
+            self._open_source_popup = False
+        imgui.set_next_window_size(
+            imgui.ImVec2(820.0 * ctx.style_scale, 620.0 * ctx.style_scale),
+            imgui.Cond_.appearing.value,
+        )
+        visible, _ = imgui.begin_popup_modal("MJCF Source")
+        if not visible:
+            return
+        imgui.text_disabled("MjSpec validates and recompiles the model when changes are applied.")
+        _changed, self._source_text = imgui.input_text_multiline(
+            "##mjcf_source",
+            self._source_text,
+            imgui.ImVec2(-1.0, -70.0 * ctx.style_scale),
+            imgui.InputTextFlags_.allow_tab_input.value,
+        )
+        if self._source_error:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._source_error)
+        if imgui.button("Apply", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+            result = ctx.submit(cmd.SetModelSource(self._source_model_id, self._source_text))
+            if result.ok:
+                imgui.close_current_popup()
+            else:
+                self._source_error = result.message
+        imgui.same_line()
+        if imgui.button("Cancel", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+            imgui.close_current_popup()
+        imgui.end_popup()
 
     def _identity(self, node: SceneNode) -> None:
         if begin_kv_table("insp_id"):
@@ -651,6 +733,8 @@ def _body_pose(xpos, xmat, body_index: int):
 
 
 def _node_pose(frame, node: SceneNode):
+    if node.kind is NodeKind.GEOM:
+        return _body_pose(frame.geom_xpos, frame.geom_xmat, node.geom_index)
     if node.kind is NodeKind.SITE:
         return _body_pose(frame.site_xpos, frame.site_xmat, node.site_index)
     return _body_pose(frame.body_xpos, frame.body_xmat, node.body_index)

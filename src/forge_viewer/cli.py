@@ -467,6 +467,17 @@ def cmd_canvas(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_editor(args: argparse.Namespace) -> int:
+    from .composition import build_editor
+
+    viewer = build_editor(vsync=not args.no_vsync, title="forge editor")
+    try:
+        viewer.run()
+    finally:
+        viewer.release()
+    return 0
+
+
 def cmd_toy(args: argparse.Namespace) -> int:
     """Open the dependency-free reference physics adapter through the production viewer."""
     from .backends import make_adapter
@@ -689,6 +700,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--demo", choices=("empty", "canvas", "lighting", "text"), default="canvas")
     sp.add_argument("--no-vsync", action="store_true")
     sp.set_defaults(func=cmd_canvas, json=False)
+
+    sp = sub.add_parser("editor", help="Open an empty model and scene workspace")
+    sp.add_argument("--no-vsync", action="store_true")
+    sp.set_defaults(func=cmd_editor, json=False)
 
     sp = sub.add_parser("toy", help="Open the toy physics backend")
     sp.add_argument("--no-vsync", action="store_true")

@@ -520,28 +520,32 @@ class _RecordingDrawList:
             d = (b.screen[0] - pos.x) ** 2 + (b.screen[1] - pos.y) ** 2
             if d < bd:
                 best, bd = i, d
-        return best
+        return best if bd <= 50.0**2 else -1
+
+    def _record(self, kind, pos):
+        index = self._nearest(pos)
+        if index >= 0:
+            self.calls.append((kind, index))
 
     def add_line(self, a, b, *rest):
-        self.calls.append(("line", self._nearest(b)))
+        self._record("line", b)
         return self._inner.add_line(a, b, *rest)
 
     def add_concave_poly_filled(self, points, *rest):
-        self.calls.append(("lollipop", self._nearest(points[len(points) // 2])))
+        self._record("lollipop", points[len(points) // 2])
         return self._inner.add_concave_poly_filled(points, *rest)
 
     def add_circle_filled(self, pos, r, *rest):
-
         if r < 30.0:
-            self.calls.append(("disc", self._nearest(pos)))
+            self._record("disc", pos)
         return self._inner.add_circle_filled(pos, r, *rest)
 
     def add_circle(self, pos, r, *rest):
-        self.calls.append(("ring", self._nearest(pos)))
+        self._record("ring", pos)
         return self._inner.add_circle(pos, r, *rest)
 
     def add_image(self, tex, p_min, p_max, *rest):
-        self.calls.append(("label", self._nearest(p_min)))
+        self._record("label", p_min)
         return self._inner.add_image(tex, p_min, p_max, *rest)
 
     def __getattr__(self, name):
@@ -942,12 +946,20 @@ def test_gizmo_is_live_for_a_free_body(free_body_viewer):
 def test_gizmo_disappears_without_a_free_body(free_body_viewer):
 
     import forge_viewer.commands as cmd
+    from forge_viewer.adapters.base import NodeKind
 
     v = free_body_viewer
 
     fr = v.session.frame
     node = max(
-        (n for n in v.session.nodes if not n.posable and n.object_id and n.body_index >= 0),
+        (
+            n
+            for n in v.session.nodes
+            if not n.posable
+            and n.object_id
+            and n.body_index >= 0
+            and n.kind in (NodeKind.ROBOT, NodeKind.LINK)
+        ),
         key=lambda n: float(np.linalg.norm(fr.body_xpos[n.body_index])),
     )
     v.session.submit(cmd.Select(node.object_id))
@@ -1229,10 +1241,10 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style):
 
     gizmo_draw = recorders[0]
     assert gizmo_draw.sectors == 1
-    assert gizmo_draw.open_arcs == 1
-    assert max(draw.closed_arcs for draw in recorders[1:]) == gizmo_draw.closed_arcs + 1
-    assert gizmo_draw.radials == 2
-    assert gizmo_draw.center_dots == 0
+    assert gizmo_draw.open_arcs == 0
+    assert all(draw.closed_arcs == gizmo_draw.closed_arcs for draw in recorders[1:])
+    assert gizmo_draw.radials == 0
+    assert gizmo_draw.center_dots == 3
     assert any(text.startswith("Z ") and text.endswith("°") for text in gizmo_draw.texts)
     assert after_pos == pytest.approx(before_pos, abs=1e-5)
     assert np.linalg.norm(after_mat - before_mat) > 0.05

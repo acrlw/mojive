@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt test gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -12,7 +12,8 @@ help:
 		'  make egl-viewer         Linux viewer with a GLFW EGL context' \
 		'  make hidpi              viewer with an explicit 200% UI scale' \
 		'  make empty              empty viewer; load MJCF or URDF from File menu' \
-		'  make editor             empty Forge scene with file and Entity authoring menus' \
+		'  make editor             empty Forge workspace; combine MJCF/URDF and entities' \
+		'  make workspace-edit     workspace, MjSpec topology, camera and light acceptance' \
 		'  make model-loading      empty, MJCF, and URDF loading reference images' \
 		'  make model-composition  add and remove MJCF/URDF models at runtime' \
 		'  make robot             Unitree Go2; downloads on first run' \
@@ -82,7 +83,14 @@ help:
 		'  make mujoco-audit      MuJoCo visualization coverage' \
 		'  make adapter-conformance  adapter contract report' \
 		'' \
-		'Example: make viewer SCENE=humanoid ARGS="--paused"'
+		'Display and backend options:' \
+		'  make editor BACKEND=wgpu' \
+		'  FORGE_VIEWER_UI_SCALE=2 make editor' \
+		'  make hidpi BACKEND=wgpu UI_SCALE=2' \
+		'  FORGE_VIEWER_UI_SCALE=1.5 make viewer BACKEND=wgpu SCENE=gizmo ARGS="--paused"' \
+		'  FORGE_VIEWER_GL=egl make viewer          Linux GLFW EGL context' \
+		'' \
+		'BACKEND accepts forge (OpenGL) or wgpu. Leave UI scale unset for automatic scaling.'
 
 setup:
 	uv sync --python 3.11 --extra dev --extra mujoco --extra wgpu
@@ -203,8 +211,9 @@ reverse:
 ## Open an asset. Pass viewer flags through ARGS.
 SCENE ?= test_scene
 ARGS  ?=
+BACKEND ?= forge
 viewer:
-	$(PY) -m forge_viewer.cli view $(SCENE) $(ARGS)
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli view $(SCENE) $(ARGS)
 
 egl-viewer:
 	@test "$$(uname -s)" = Linux || { echo 'make egl-viewer requires Linux'; exit 2; }
@@ -212,19 +221,23 @@ egl-viewer:
 
 UI_SCALE ?= 2
 hidpi:
-	FORGE_VIEWER_UI_SCALE=$(UI_SCALE) $(PY) -m forge_viewer.cli view gizmo --paused $(ARGS)
+	FORGE_VIEWER_BACKEND=$(BACKEND) FORGE_VIEWER_UI_SCALE=$(UI_SCALE) $(PY) -m forge_viewer.cli view gizmo --paused $(ARGS)
 
 ## Open an empty MuJoCo scene and load MJCF or URDF from File > Open Model.
 empty:
-	$(PY) -m forge_viewer.cli view empty --paused $(ARGS)
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli view empty --paused $(ARGS)
 
 ## Empty authored scene with New/Open/Save and Entity creation workflows.
 editor:
-	$(PY) -m forge_viewer.cli canvas --demo empty $(ARGS)
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor $(ARGS)
+
+workspace-edit:
+	$(PYTEST) -q tests/test_workspace.py tests/test_scene_entities.py
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor $(ARGS)
 
 ## Programmatic scene, Forge rendering, and the standard UI.
 canvas:
-	$(PY) -m forge_viewer.cli canvas $(ARGS)
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli canvas $(ARGS)
 
 ## Independent physics adapter with gravity, collision, controls, and pose editing.
 toy-physics:
@@ -239,7 +252,7 @@ adapter-conformance:
 
 ## Editable lights and Environment controls for ambient light, fog, haze, and headlight.
 lighting:
-	$(PY) -m forge_viewer.cli canvas --demo lighting $(ARGS)
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli canvas --demo lighting $(ARGS)
 
 image-light:
 	$(PY) -m forge_viewer.cli view assets/image_light.xml --paused $(ARGS)
@@ -262,6 +275,10 @@ shadow-scheduling:
 scene-icons:
 	$(PY) -m forge_viewer.cli canvas --demo lighting \
 		--enable-render camera --enable-render light $(ARGS)
+
+scene-entities:
+	$(PYTEST) -q tests/test_scene_entities.py
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.tools.scene_entities $(ARGS)
 
 ## World anchors, screen offsets, alignment, and depth modes with the UI font.
 text-overlay:
@@ -324,11 +341,11 @@ rpc: cli
 
 ## Native gizmo acceptance: G position, R rotation, T frame, F9 settings.
 gizmo:
-	$(PY) -m forge_viewer.cli view gizmo --paused $(ARGS)
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli view gizmo --paused $(ARGS)
 
 ## Perturbation acceptance: Ctrl+left translates and Ctrl+right rotates a selected free body.
 perturb:
-	$(PY) -m forge_viewer.cli view gizmo $(ARGS)
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli view gizmo $(ARGS)
 
 ## Selection outline acceptance across multiple geoms and occlusion.
 outline:

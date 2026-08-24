@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -7,6 +9,7 @@ from forge_viewer import commands as cmd
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.gizmo import (
     AXIS_START,
+    CENTER_HIT_PT,
     CENTER_RADIUS,
     CENTER_SHELL_RADIUS,
     PLANE_INNER,
@@ -22,11 +25,13 @@ from forge_viewer.gizmo import (
     axis_rotation,
     display_handles,
     hit_test,
+    masked_axis_start,
     paint_order,
     plane_corners,
     plane_direction,
     plane_handle_alpha,
     project,
+    rotation_dial,
     rotation_ring,
     rotation_ring_alpha,
     world_scale,
@@ -37,15 +42,17 @@ from forge_viewer.session import Session
 from forge_viewer.types import CameraView
 from forge_viewer.ui.gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,
+    DEFAULT_ROTATION_TICK_SCALE,
     DEFAULT_TRANSLATION_SNAP_M,
     ObjectGizmo,
-    RotationTickProjection,
+    RotationDialProjection,
     _clip_line_to_rect,
-    _masked_axis_start,
     _project_rotation_dial,
+    _project_rotation_tick,
     _projected_line_parameters,
     _rotation_fill_alpha,
     _rotation_sweep,
+    _RotationDialProjector,
     _snap_tick_alpha,
     _split_segment_around_point,
 )
@@ -71,9 +78,9 @@ def test_rotation_guide_wraps_only_after_a_full_turn(degrees: float, sweep: floa
 
 @pytest.mark.parametrize(
     ("degrees", "alpha"),
-    ((90.0, 0.28), (120.0, 0.28), (150.0, 0.14), (180.0, 0.0), (247.0, 0.0)),
+    ((0.0, 0.0), (90.0, 0.28), (150.0, 0.28), (180.0, 0.28), (247.0, 0.28)),
 )
-def test_large_rotation_sweeps_stop_filling_the_scene(degrees: float, alpha: float) -> None:
+def test_rotation_fill_keeps_constant_opacity(degrees: float, alpha: float) -> None:
     assert _rotation_fill_alpha(np.radians(degrees)) == pytest.approx(alpha)
     assert _rotation_fill_alpha(np.radians(-degrees)) == pytest.approx(alpha)
 
@@ -114,8 +121,9 @@ def test_gizmo_keeps_the_same_screen_size_at_different_depths(orthographic: bool
         assert np.linalg.norm(screen[1, :2] - screen[0, :2]) == pytest.approx(SIZE_PT)
 
 
-def test_center_and_axis_hit_use_the_same_projected_geometry() -> None:
-    cam = camera()
+@pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
+def test_center_and_axis_hit_use_the_viewport_projection(orthographic: bool) -> None:
+    cam = camera(orthographic=orthographic)
     origin = np.zeros(3)
     rotation = np.eye(3)
     center = project(cam, (origin,), RECT)[0, :2]
@@ -128,12 +136,66 @@ def test_center_and_axis_hit_use_the_same_projected_geometry() -> None:
     assert hit_test(cam, origin, rotation, RECT, x_axis, GizmoMode.TRANSLATE)[0] is GizmoHandle.X
 
 
+def test_hover_clears_when_the_viewport_does_not_own_input() -> None:
+    session, _ = session_at()
+    gizmo = ObjectGizmo()
+    cam = camera()
+    center = tuple(project(cam, (np.zeros(3),), RECT)[0, :2])
+
+    assert gizmo.update_hover(session, cam, RECT, center) is GizmoHandle.SCREEN
+    assert gizmo.update_hover(session, cam, RECT, center, enabled=False) is GizmoHandle.NONE
+
+
+def test_axis_hit_respects_the_center_mask_and_visible_shaft_width() -> None:
+    cam = CameraView(
+        eye=np.array((0.0, -5.0, 0.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 0.0, 1.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    origin = np.zeros(3)
+    center = project(cam, (origin,), RECT)[0, :2]
+    masked = center + np.array((0.5 * (CENTER_HIT_PT + CENTER_SHELL_RADIUS * SIZE_PT), 0.0))
+    assert hit_test(cam, origin, np.eye(3), RECT, masked, GizmoMode.TRANSLATE)[0] is (
+        GizmoHandle.NONE
+    )
+
+    scale = world_scale(cam, origin, RECT[3])
+    shaft = project(cam, (origin + np.array((0.5 * scale, 0.0, 0.0)),), RECT)[0, :2]
+    assert (
+        hit_test(
+            cam,
+            origin,
+            np.eye(3),
+            RECT,
+            shaft + np.array((0.0, 6.5)),
+            GizmoMode.TRANSLATE,
+        )[0]
+        is GizmoHandle.NONE
+    )
+
+
+def test_overlapping_axis_hit_matches_the_topmost_drawn_handle() -> None:
+    cam = CameraView(
+        eye=np.array((5.0, -5.0, 0.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 0.0, 1.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    origin = np.zeros(3)
+    scale = world_scale(cam, origin, RECT[3])
+    cursor = project(cam, (origin + np.array((0.5 * scale, 0.0, 0.0)),), RECT)[0, :2]
+
+    assert paint_order(cam, origin, np.eye(3).T) == (1, 2, 0)
+    assert hit_test(cam, origin, np.eye(3), RECT, cursor, GizmoMode.TRANSLATE)[0] is (GizmoHandle.X)
+
+
 def test_translation_center_shell_masks_continuous_axes_but_not_planes() -> None:
     from forge_viewer.gizmo import CONTRAST_EDGE_PT, SIZE_PT
 
     visible_radius = CENTER_RADIUS + CONTRAST_EDGE_PT / SIZE_PT
     assert AXIS_START < CENTER_RADIUS < visible_radius < CENTER_SHELL_RADIUS < PLANE_INNER
-    assert np.allclose(_masked_axis_start(np.zeros(2), np.array((20.0, 0.0)), 7.0), (7, 0))
+    assert np.allclose(masked_axis_start(np.zeros(2), np.array((20.0, 0.0)), 7.0), (7, 0))
 
 
 def test_active_3d_translation_axis_keeps_the_center_shell_mask() -> None:
@@ -482,66 +544,172 @@ def test_gizmo_snap_defaults_match_the_settings_resets() -> None:
     gizmo = ObjectGizmo()
     assert gizmo.translation_snap_m == DEFAULT_TRANSLATION_SNAP_M == 0.5
     assert gizmo.rotation_snap_deg == DEFAULT_ROTATION_SNAP_DEG == 5.0
-    assert gizmo.rotation_tick_projection is RotationTickProjection.ORTHOGRAPHIC
+    assert gizmo.rotation_tick_scale == DEFAULT_ROTATION_TICK_SCALE == 1.25
+    assert gizmo.rotation_dial_projection is RotationDialProjection.ORTHOGRAPHIC
 
 
-def test_rotation_tick_projection_can_be_changed_while_idle() -> None:
-    gizmo = ObjectGizmo()
-    gizmo.set_rotation_tick_projection(RotationTickProjection.CLASSIC.value)
-    assert gizmo.rotation_tick_projection is RotationTickProjection.CLASSIC
-
-
-def test_axis_rotation_dial_uses_orthographic_projection() -> None:
-    cam = camera()
+@pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
+def test_rotation_dial_layers_use_independent_world_radii(orthographic: bool) -> None:
+    cam = camera(orthographic=orthographic)
     center = np.array((0.35, -0.2, 0.4))
-    basis = axis_rotation(
-        np.array(((0.82, -0.48, 0.30), (0.55, 0.80, -0.23), (-0.13, 0.36, 0.92))),
-        2,
-    )
-    angles = np.radians((20.0, 75.0, 145.0, 230.0, 315.0))
-    directions = np.cos(angles)[:, None] * basis[:, 0] + np.sin(angles)[:, None] * basis[:, 1]
-    radii = np.tile((RING_RADIUS * SIZE_PT + 4.0, RING_RADIUS * SIZE_PT + 13.0), len(angles))
-    points = _project_rotation_dial(
-        cam,
-        RECT,
-        center,
-        np.repeat(directions, 2, axis=0),
-        radii,
-        1.0,
-        False,
-    ).reshape(-1, 2, 3)
+    axis = np.array((0.31, -0.22, 0.925))
+    axis /= np.linalg.norm(axis)
+    start = np.cross(axis, np.array((0.0, 0.0, 1.0)))
+    start /= np.linalg.norm(start)
+    angles = np.linspace(0.0, 2.0 * np.pi, 32, endpoint=False)
+    size_px = SIZE_PT
+    scale = world_scale(cam, center, RECT[3], size_px)
+    spacing = 0.1
+    radii = (RING_RADIUS - spacing, RING_RADIUS, RING_RADIUS + spacing)
+    layers = [
+        _project_rotation_dial(
+            cam,
+            RECT,
+            center,
+            axis,
+            start,
+            size_px,
+            radius,
+            angles,
+            RotationDialProjection.CLASSIC,
+        )
+        for radius in radii
+    ]
+    for layer, radius in zip(layers, radii, strict=True):
+        expected = project(
+            cam,
+            rotation_dial(center, axis, start, scale, radius, angles),
+            RECT,
+        )
+        assert layer == pytest.approx(expected, abs=1e-6)
+
+    coincident = [
+        _project_rotation_dial(
+            cam,
+            RECT,
+            center,
+            axis,
+            start,
+            size_px,
+            RING_RADIUS,
+            angles,
+            RotationDialProjection.CLASSIC,
+        )
+        for _ in range(3)
+    ]
+    assert coincident[0] == pytest.approx(coincident[1], abs=1e-6)
+    assert coincident[1] == pytest.approx(coincident[2], abs=1e-6)
+
+
+@pytest.mark.parametrize("camera_projection", [False, True], ids=("perspective", "orthographic"))
+def test_orthographic_rotation_dial_layers_are_concentric_and_homothetic(
+    camera_projection: bool,
+) -> None:
+    cam = camera(orthographic=camera_projection)
+    center = np.array((0.35, -0.2, 0.4))
+    axis = np.array((0.31, -0.22, 0.925))
+    axis /= np.linalg.norm(axis)
+    start = np.cross(axis, np.array((0.0, 0.0, 1.0)))
+    start /= np.linalg.norm(start)
+    angles = np.linspace(0.0, 2.0 * np.pi, 64, endpoint=False)
+    radii = np.array((RING_RADIUS - 0.1, RING_RADIUS, RING_RADIUS + 0.1))
     projected_center = project(cam, (center,), RECT)[0, :2]
-    view_rotation = np.asarray(cam.view_matrix())[:3, :3]
-    projected_directions = directions @ view_rotation[:2, :].T
-    projected_directions[:, 1] *= -1.0
-    expected = (
-        projected_center
-        + projected_directions[:, None, :]
-        * np.array((RING_RADIUS * SIZE_PT + 4.0, RING_RADIUS * SIZE_PT + 13.0))[None, :, None]
-    )
-    assert points[:, :, :2] == pytest.approx(expected, abs=1e-6)
-
-
-def test_screen_rotation_dial_remains_a_screen_space_circle() -> None:
-    cam = camera()
-    center = np.array((0.35, -0.2, 0.4))
-    right = np.asarray(cam.view_matrix())[:3, :3].T[:, 0]
-    up = np.asarray(cam.view_matrix())[:3, :3].T[:, 1]
-    angles = np.linspace(0.0, 2.0 * np.pi, 24, endpoint=False)
-    directions = np.cos(angles)[:, None] * right + np.sin(angles)[:, None] * up
-    radius_pt = SCREEN_RING_RADIUS * SIZE_PT + 4.0
-    points = _project_rotation_dial(
+    dial = _RotationDialProjector(
         cam,
         RECT,
         center,
-        directions,
-        np.full(len(angles), radius_pt),
-        1.5,
-        True,
+        axis,
+        start,
+        SIZE_PT,
+        RotationDialProjection.ORTHOGRAPHIC,
     )
+    layers = [dial.points(radius, angles)[:, :2] for radius in radii]
+
+    normalized = [
+        (layer - projected_center) / radius for layer, radius in zip(layers, radii, strict=True)
+    ]
+    assert normalized[0] == pytest.approx(normalized[1], abs=1e-10)
+    assert normalized[1] == pytest.approx(normalized[2], abs=1e-10)
+    for layer in layers:
+        assert np.mean(layer, axis=0) == pytest.approx(projected_center, abs=1e-10)
+
+
+def test_orthographic_rotation_dial_is_independent_of_scene_focal_length() -> None:
+    center = np.array((0.35, -0.2, 0.4))
+    axis = np.array((0.31, -0.22, 0.925))
+    axis /= np.linalg.norm(axis)
+    start = np.cross(axis, np.array((0.0, 0.0, 1.0)))
+    start /= np.linalg.norm(start)
+    angles = np.linspace(0.0, 2.0 * np.pi, 64, endpoint=False)
+    normalized_layers = []
+    for fov_y in np.radians((5.0, 45.0, 140.0)):
+        cam = replace(camera(), fov_y=fov_y)
+        projected_center = project(cam, (center,), RECT)[0, :2]
+        dial = _RotationDialProjector(
+            cam,
+            RECT,
+            center,
+            axis,
+            start,
+            SIZE_PT,
+            RotationDialProjection.ORTHOGRAPHIC,
+        )
+        layer = dial.points(RING_RADIUS, angles)[:, :2]
+        normalized_layers.append((layer - projected_center) / RING_RADIUS)
+
+    assert normalized_layers[0] == pytest.approx(normalized_layers[1], abs=1e-10)
+    assert normalized_layers[1] == pytest.approx(normalized_layers[2], abs=1e-10)
+
+
+@pytest.mark.parametrize("distance", [4.0, 12.0], ids=("near", "far"))
+@pytest.mark.parametrize("projection", list(RotationDialProjection))
+def test_rotation_tick_keeps_its_screen_length_across_camera_distance(
+    distance: float,
+    projection: RotationDialProjection,
+) -> None:
+    cam = CameraView(
+        eye=np.array((distance, -1.5 * distance, 0.75 * distance)),
+        target=np.zeros(3),
+        up=np.array((0.0, 0.0, 1.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    center = np.zeros(3)
+    tick = _project_rotation_tick(
+        cam,
+        RECT,
+        center,
+        np.array((0.0, 0.0, 1.0)),
+        np.array((1.0, 0.0, 0.0)),
+        SIZE_PT,
+        RING_RADIUS,
+        0.8,
+        9.0,
+        projection,
+    )
+    assert tick is not None
+    assert np.linalg.norm(tick[1] - tick[0]) == pytest.approx(9.0)
+
+
+@pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
+def test_screen_rotation_dial_keeps_a_constant_screen_radius(orthographic: bool) -> None:
+    cam = camera(orthographic=orthographic)
+    center = np.array((0.35, -0.2, 0.4))
+    view_basis = np.asarray(cam.view_matrix())[:3, :3].T
+    angles = np.linspace(0.0, 2.0 * np.pi, 24, endpoint=False)
+    scale = world_scale(cam, center, RECT[3], SIZE_PT * 1.5)
+    world = rotation_dial(
+        center,
+        -cam.forward(),
+        view_basis[:, 0],
+        scale,
+        SCREEN_RING_RADIUS,
+        angles,
+    )
+    points = project(cam, world, RECT)
     projected_center = project(cam, (center,), RECT)[0, :2]
     radii = np.linalg.norm(points[:, :2] - projected_center, axis=1)
-    assert radii == pytest.approx(np.full(len(angles), radius_pt * 1.5), abs=1e-6)
+    expected = SCREEN_RING_RADIUS * SIZE_PT * 1.5
+    assert radii == pytest.approx(np.full(len(angles), expected), abs=1e-5)
 
 
 def test_screen_translation_reports_all_xyz_components() -> None:
@@ -679,6 +847,7 @@ def test_plane_drag_stays_in_the_selected_local_plane() -> None:
 def test_rotation_drag_preserves_position_and_a_rigid_rotation() -> None:
     session, node = session_at()
     gizmo = ObjectGizmo("rotate")
+    gizmo.set_style("3d")
     cam = camera()
     origin = np.zeros(3)
     scale = world_scale(cam, origin, RECT[3])
@@ -725,6 +894,20 @@ def test_rotation_drag_preserves_position_and_a_rigid_rotation() -> None:
     assert np.linalg.det(rotation) == pytest.approx(1.0, abs=1e-6)
     assert not np.allclose(rotation, np.eye(3))
     assert gizmo.value_label.startswith("Z +") and gizmo.value_label.endswith("°")
+
+    backend = CaptureBackend()
+    assert gizmo.publish(
+        backend,
+        session,
+        cam,
+        RECT,
+        ui_scale=1.0,
+        style_scale=1.0,
+        yielding=False,
+        interactive=True,
+    )
+    assert backend.frame.rotation == pytest.approx(np.eye(3))
+    assert backend.frame.position == pytest.approx(origin)
 
     for angle in np.linspace(0.35, 0.35 - 10.5 * np.pi, 190)[1:]:
         world = (

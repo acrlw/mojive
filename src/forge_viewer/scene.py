@@ -318,12 +318,14 @@ class Scene:
         self.lights = replace(self.lights, lights=tuple(lights))
         if self._built_revision == self._revision:
             self._source.lights = self.lights
+            self._frame.lights = self.lights
         return True
 
     def set_environment(self, environment: Environment) -> bool:
         self.lights = self.lights.with_environment(environment)
         if self._built_revision == self._revision:
             self._source.lights = self.lights
+            self._frame.lights = self.lights
         return True
 
     def set_material(self, material_id: int, material: Material) -> bool:

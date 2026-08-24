@@ -29,6 +29,7 @@ class PanelContext:
     theme: Theme = THEME
     gizmo: Any = None
     perturb: Any = None
+    scene_entities: Any = None
 
     style_scale: float = 1.0
 

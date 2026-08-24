@@ -26,6 +26,7 @@ from .base import (
     SensorInfo,
     VisualGroupInfo,
 )
+from .workspace import WorkspaceAdapter
 
 if TYPE_CHECKING:
     from .mujoco_adapter import MuJoCoAdapter
@@ -64,4 +65,5 @@ __all__ = [
     "SceneSource",
     "SensorInfo",
     "VisualGroupInfo",
+    "WorkspaceAdapter",
 ]

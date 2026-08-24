@@ -80,6 +80,13 @@ class AuthoredSceneOverlay:
 
 
 _SCENE_EDIT_COMMANDS = (
+    cmd.SetSceneModelTransform,
+    cmd.AddModelElement,
+    cmd.RemoveModelElement,
+    cmd.RenameModelElement,
+    cmd.SetModelSource,
+    cmd.AddResourceRoot,
+    cmd.RemoveResourceRoot,
     cmd.SetPose,
     cmd.SetLight,
     cmd.SetEnvironment,
@@ -620,6 +627,104 @@ class Session:
             self._active_keyframe = -1
             self._refresh_structure()
             return CommandResult.good(f"Removed {info.name}")
+
+        if isinstance(c, cmd.SetSceneModelTransform):
+            if not caps.model_composition:
+                return CommandResult.bad(f"{caps.name} does not support model composition")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before moving a model root")
+            try:
+                changed = self._adapter.set_scene_model_transform(
+                    c.model_id, c.position, c.rotation
+                )
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if not changed:
+                return CommandResult.bad(f"Model {c.model_id} cannot be transformed")
+            self._refresh_structure()
+            return CommandResult.good("Updated model transform")
+
+        if isinstance(c, cmd.AddModelElement):
+            if not caps.topology_editing:
+                return CommandResult.bad(f"{caps.name} does not support topology editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before changing model topology")
+            try:
+                node_id = self._adapter.add_model_element(c.parent_node_id, c.kind, c.name)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if node_id < 0:
+                return CommandResult.bad(f"Failed to add {c.kind}")
+            self._refresh_structure()
+            return CommandResult.good(f"Added {c.name}", node_id)
+
+        if isinstance(c, cmd.RemoveModelElement):
+            if not caps.topology_editing:
+                return CommandResult.bad(f"{caps.name} does not support topology editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before changing model topology")
+            node = self.node(c.node_id)
+            if node is None:
+                return CommandResult.bad(f"Unknown node_id={c.node_id}")
+            try:
+                changed = self._adapter.remove_model_element(c.node_id)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if not changed:
+                return CommandResult.bad(f"{node.name} cannot be removed from the model")
+            self._selected = 0
+            self._selected_node_id = -1
+            self._refresh_structure()
+            return CommandResult.good(f"Removed {node.name}")
+
+        if isinstance(c, cmd.RenameModelElement):
+            if not caps.topology_editing:
+                return CommandResult.bad(f"{caps.name} does not support topology editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before changing model topology")
+            node = self.node(c.node_id)
+            if node is None:
+                return CommandResult.bad(f"Unknown node_id={c.node_id}")
+            try:
+                changed = self._adapter.rename_model_element(c.node_id, c.name)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if not changed:
+                return CommandResult.bad(f"{node.name} cannot be renamed")
+            self._refresh_structure()
+            return CommandResult.good(f"Renamed {node.name}")
+
+        if isinstance(c, cmd.SetModelSource):
+            if not caps.topology_editing:
+                return CommandResult.bad(f"{caps.name} does not support topology editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before changing model topology")
+            try:
+                changed = self._adapter.set_scene_model_xml(c.model_id, c.mjcf)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if not changed:
+                return CommandResult.bad(f"Model {c.model_id} source cannot be updated")
+            self._selected = 0
+            self._selected_node_id = -1
+            self._refresh_structure()
+            return CommandResult.good("Updated MJCF source")
+
+        if isinstance(c, cmd.AddResourceRoot):
+            if not caps.scene_files or not c.path.is_dir():
+                return CommandResult.bad(f"Resource directory is unavailable: {c.path}")
+            return (
+                CommandResult.good(f"Added resource directory {c.path}")
+                if self._adapter.add_resource_root(c.path)
+                else CommandResult.bad(f"Failed to add resource directory {c.path}")
+            )
+
+        if isinstance(c, cmd.RemoveResourceRoot):
+            return (
+                CommandResult.good(f"Removed resource directory {c.path}")
+                if self._adapter.remove_resource_root(c.path)
+                else CommandResult.bad(f"Resource directory is unavailable: {c.path}")
+            )
 
         if isinstance(c, cmd.LoadKeyframe):
             if not caps.keyframes:

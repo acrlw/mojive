@@ -111,13 +111,31 @@ class HierarchyPanel(Panel):
         editable = bool(
             ctx.session.adapter.caps.scene_authoring
             and node.object_id
+            and node.model_id < 0
             and node.kind in (NodeKind.LINK, NodeKind.LIGHT, NodeKind.CAMERA)
         )
         if imgui.begin_popup_context_item(f"##entity_context_{node.node_id}"):
             if node.kind is NodeKind.MODEL and node.model_id >= 0:
+                self._model_create_menu(ctx, node)
                 remove, _ = imgui.menu_item("Remove Model", "", False)
                 if remove:
                     ctx.submit(cmd.RemoveSceneModel(node.model_id))
+            elif node.model_id >= 0:
+                if node.kind in (NodeKind.ROBOT, NodeKind.LINK):
+                    self._model_create_menu(ctx, node)
+                    imgui.separator()
+                removable = node.kind in (
+                    NodeKind.ROBOT,
+                    NodeKind.LINK,
+                    NodeKind.GEOM,
+                    NodeKind.JOINT,
+                    NodeKind.SITE,
+                    NodeKind.CAMERA,
+                    NodeKind.LIGHT,
+                )
+                remove, _ = imgui.menu_item("Delete from Model", "", False, removable)
+                if remove:
+                    ctx.submit(cmd.RemoveModelElement(node.node_id))
             elif editable:
                 ctx.submit(cmd.SelectNode(node.node_id))
                 duplicate, _ = imgui.menu_item("Duplicate", "Cmd/Ctrl+D", False)
@@ -139,6 +157,40 @@ class HierarchyPanel(Panel):
         imgui.table_next_column()
         self._visibility_toggle(ctx, node)
         return opened
+
+    @staticmethod
+    def _model_create_menu(ctx: PanelContext, node: SceneNode) -> None:
+        if not imgui.begin_menu("Add Child", ctx.session.adapter.caps.topology_editing):
+            return
+        entries = [
+            ("Body", "body"),
+            ("Box Geometry", "geom:box"),
+            ("Sphere Geometry", "geom:sphere"),
+            ("Capsule Geometry", "geom:capsule"),
+            ("Cylinder Geometry", "geom:cylinder"),
+            ("Plane Geometry", "geom:plane"),
+            ("Hinge Joint", "joint:hinge"),
+            ("Slide Joint", "joint:slide"),
+            ("Ball Joint", "joint:ball"),
+            ("Free Joint", "joint:free"),
+            ("Site", "site"),
+            ("Camera", "camera"),
+            ("Light", "light"),
+        ]
+        if node.kind is NodeKind.MODEL:
+            entries = [entry for entry in entries if not entry[1].startswith("joint:")]
+        names = {item.name for item in ctx.session.nodes}
+        for label, kind in entries:
+            clicked, _ = imgui.menu_item(label, "", False)
+            if clicked:
+                base = kind.split(":", 1)[0]
+                index = 1
+                name = base
+                while name in names:
+                    index += 1
+                    name = f"{base}{index}"
+                ctx.submit(cmd.AddModelElement(node.node_id, kind, name))
+        imgui.end_menu()
 
     @staticmethod
     def _visibility_toggle(ctx: PanelContext, node: SceneNode) -> None:

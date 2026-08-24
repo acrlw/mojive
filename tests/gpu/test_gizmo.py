@@ -29,9 +29,12 @@ from forge_viewer.gizmo import (  # noqa: E402
     CENTER_RADIUS,
     CENTER_SHELL_RADIUS,
     CONTRAST_EDGE_PT,
+    HOVER_COLOR,
+    RING_RADIUS,
     SCREEN_RING_RADIUS,
     SIZE_PT,
     GizmoFrame,
+    GizmoHandle,
     GizmoMode,
     project,
     world_scale,
@@ -56,6 +59,7 @@ AMBIENT = np.full(3, 0.3, np.float32)
 ORIGIN = np.zeros(3, np.float32)
 RECT = (0.0, 0.0, float(W), float(H))
 AXIS_U8 = np.rint(AXIS_COLORS[:, :3] * 255.0)  # X red, Y green, Z blue
+HOVER_U8 = np.rint(HOVER_COLOR[:3] * 255.0)
 
 # Gaze direction shared by all cameras: every axis and plane handle is fully
 # facing (alpha 1.0).
@@ -94,6 +98,11 @@ def _axis_mask(img: np.ndarray, axis: int) -> np.ndarray:
         & (rgb[..., dom] - rgb[..., rest[0]] > 40)
         & (rgb[..., dom] - rgb[..., rest[1]] > 40)
     )
+
+
+def _hover_mask(img: np.ndarray) -> np.ndarray:
+    rgb = img[..., :3].astype(np.int16)
+    return np.max(np.abs(rgb - HOVER_U8.astype(np.int16)), axis=-1) < 85
 
 
 class Rig:
@@ -241,6 +250,32 @@ def test_rotate_mode_draws_axis_and_screen_rings(rig):
             hits += 1
     print(f"\n[metric] screen ring hits: {hits}/16")
     assert hits >= 12
+
+
+def test_edge_on_active_rotation_ring_has_a_rounded_silhouette(rig):
+    if not rig.backend.caps.gizmo:
+        pytest.skip("gizmo unsupported by this backend")
+    cam = CameraView(
+        eye=np.array((0.0, -5.0, 0.0), np.float32),
+        target=ORIGIN.copy(),
+        up=np.array((0.0, 0.0, 1.0), np.float32),
+        near=0.1,
+        far=50.0,
+        aspect=W / H,
+    )
+    frame = _frame(GizmoMode.ROTATE)
+    frame.active = GizmoHandle.ROTATE_Z
+    img = rig.draw(frame, cam, box=False)
+    ys, xs = np.nonzero(_hover_mask(img))
+    assert len(xs) > 100
+    expected_span = 2.0 * RING_RADIUS * SIZE_PT
+    assert np.ptp(xs) == pytest.approx(expected_span, abs=6.0)
+    assert np.ptp(ys) >= 3
+
+    for x in (int(xs.min()) + 2, int(xs.max()) - 2):
+        cap_y = ys[xs == x]
+        assert len(cap_y) >= 2
+        assert np.ptp(cap_y) >= 1
 
 
 def _head_on_camera() -> CameraView:

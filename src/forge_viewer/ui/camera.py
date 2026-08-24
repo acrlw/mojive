@@ -59,7 +59,11 @@ def camera_basis(view: CameraView) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     forward = np.asarray(view.forward(), np.float64)
     right = np.cross(forward, np.asarray(view.up, np.float64))
     n = np.linalg.norm(right)
-    right = right / n if n > 1e-9 else np.array([1.0, 0.0, 0.0])
+    if n > 1e-9:
+        right = right / n
+    else:
+        reference = (0.0, 0.0, 1.0) if abs(float(forward[2])) < 0.95 else (0.0, 1.0, 0.0)
+        right = math3d.normalize(np.cross(forward, reference))
     up = np.cross(right, forward)
     return right, up, forward
 

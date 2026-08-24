@@ -251,6 +251,7 @@ class WgpuBackend:
         self.debug = DebugDraw()
         self._debug = DebugPass(self.device, self.target.samples, self.debug)
         self._gizmo = GizmoPass(self.device, self.target.samples)
+
         self._gizmo_frame: GizmoFrame | None = None
         self._camera = CameraView()
         self._background = (0.13, 0.14, 0.16, 1.0)
@@ -309,6 +310,9 @@ class WgpuBackend:
         self.caps = self._build_caps()
 
     # -- capabilities ---------------------------------------------------------
+
+    def create_peer(self, width: int, height: int) -> WgpuBackend:
+        return WgpuBackend(width, height, samples=1, device=self.device)
 
     def _build_caps(self) -> BackendCaps:
         info = self.device.adapter.info

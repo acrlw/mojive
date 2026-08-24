@@ -9,8 +9,9 @@ from ...adapters.base import FrameNeeds
 from ...render.backend import DebugView, FrameMode, LabelMode, RenderFlag
 from ..gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,
+    DEFAULT_ROTATION_TICK_SCALE,
     DEFAULT_TRANSLATION_SNAP_M,
-    RotationTickProjection,
+    RotationDialProjection,
 )
 from ..perturb import OUTLINE_CORNER_RADIUS_PT
 from . import Panel, PanelContext
@@ -142,19 +143,38 @@ class SettingsPanel(Panel):
             if changed:
                 ctx.gizmo.rotation_snap_deg = step
 
-            projection = ctx.gizmo.rotation_tick_projection
+            imgui.align_text_to_frame_padding()
+            imgui.text("rotation tick scale")
+            imgui.same_line()
+            imgui.set_next_item_width(-1.0)
+            changed, scale = imgui.drag_float(
+                "##rotation_tick_scale",
+                float(ctx.gizmo.rotation_tick_scale),
+                0.05,
+                0.5,
+                3.0,
+                "%.2fx",
+            )
+            hovered = imgui.is_item_hovered()
+            if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                changed, scale = True, DEFAULT_ROTATION_TICK_SCALE
+            if hovered:
+                imgui.set_tooltip("drag: adjust · double-click: enter value · right-click: reset")
+            if changed:
+                ctx.gizmo.rotation_tick_scale = scale
+
+            projection = ctx.gizmo.rotation_dial_projection
             imgui.set_next_item_width(-1.0)
             if imgui.begin_combo(
-                "##rotation_tick_projection", f"rotation ticks: {projection.value}"
+                "##rotation_dial_projection", f"rotation dial: {projection.value}"
             ):
-                for option in RotationTickProjection:
+                for option in RotationDialProjection:
                     selected, _ = imgui.selectable(option.value, option is projection)
                     if selected:
-                        ctx.gizmo.set_rotation_tick_projection(option.value)
+                        ctx.gizmo.set_rotation_dial_projection(option.value)
                 imgui.end_combo()
             imgui.set_item_tooltip(
-                "Classic follows the perspective ring with fixed screen-space ticks; "
-                "orthographic keeps the dial centered on the projected origin"
+                "Orthographic keeps the dial screen-affine; classic follows the viewport camera"
             )
 
         if ctx.perturb is not None:
@@ -178,6 +198,18 @@ class SettingsPanel(Panel):
                 imgui.set_tooltip("drag: adjust · double-click: enter value · right-click: reset")
             if changed:
                 ctx.perturb.outline_corner_radius_pt = radius
+
+        if ctx.scene_entities is not None:
+            changed, visible = imgui.checkbox("scene entity helpers", ctx.scene_entities.visible)
+            if changed:
+                ctx.scene_entities.visible = visible
+            imgui.begin_disabled(not ctx.scene_entities.visible)
+            changed, influence = imgui.checkbox(
+                "selected influence volumes", ctx.scene_entities.show_influence
+            )
+            imgui.end_disabled()
+            if changed:
+                ctx.scene_entities.show_influence = influence
 
         self._debug_view(ctx)
         self._overlay_modes(ctx)

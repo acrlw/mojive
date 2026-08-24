@@ -85,6 +85,37 @@ class RemoveSceneModel(Command):
 
 
 @dataclass(frozen=True)
+class SetSceneModelTransform(Command):
+    model_id: int
+    position: np.ndarray
+    rotation: np.ndarray
+
+
+@dataclass(frozen=True)
+class AddModelElement(Command):
+    parent_node_id: int
+    kind: str
+    name: str
+
+
+@dataclass(frozen=True)
+class RemoveModelElement(Command):
+    node_id: int
+
+
+@dataclass(frozen=True)
+class RenameModelElement(Command):
+    node_id: int
+    name: str
+
+
+@dataclass(frozen=True)
+class SetModelSource(Command):
+    model_id: int
+    mjcf: str
+
+
+@dataclass(frozen=True)
 class NewScene(Command):
     pass
 
@@ -96,6 +127,16 @@ class OpenScene(Command):
 
 @dataclass(frozen=True)
 class SaveScene(Command):
+    path: Path
+
+
+@dataclass(frozen=True)
+class AddResourceRoot(Command):
+    path: Path
+
+
+@dataclass(frozen=True)
+class RemoveResourceRoot(Command):
     path: Path
 
 

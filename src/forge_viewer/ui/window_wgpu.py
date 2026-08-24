@@ -385,8 +385,7 @@ class WgpuWindow(Window):
         self._frame_tex_view: Any = None
         self._frame_tex_size = (0, 0)
         self._imgui_backend: _WgpuImguiBackend | None = None
-        self._scene_view: Any = None
-        self._scene_ref: Any = None
+        self._viewport_textures: dict[int, tuple[Any, Any]] = {}
         self._vsync_interval: float | None = None
         self._next_frame_at: float | None = None
 
@@ -479,16 +478,16 @@ class WgpuWindow(Window):
         self._next_frame_at = target + self._vsync_interval
 
     def viewport_texture_ref(self, image: ViewportImage) -> Any:
-        """Bind the backend's color view with the imgui renderer (cached)."""
+        """Bind a backend color view with the imgui renderer."""
         view = image.payload
         if view is None:
             return imgui.ImTextureRef(image.texture_id)
-        if view is not self._scene_view:
-            if self._scene_ref is not None:
-                self._imgui_backend.unregister_texture(self._scene_ref)
-            self._scene_ref = self._imgui_backend.register_texture(view)
-            self._scene_view = view
-        return self._scene_ref
+        key = id(view)
+        cached = self._viewport_textures.get(key)
+        if cached is None or cached[0] is not view:
+            cached = (view, self._imgui_backend.register_texture(view))
+            self._viewport_textures[key] = cached
+        return cached[1]
 
     def _frame_view(self, width: int, height: int) -> Any:
         if self._frame_tex_size != (width, height):
@@ -565,6 +564,9 @@ class WgpuWindow(Window):
         self._destroyed = True
         imgui.set_current_context(self._imgui_context)
         native_drop.uninstall(self._native_drop_token)
+        for _view, texture_ref in self._viewport_textures.values():
+            self._imgui_backend.unregister_texture(texture_ref)
+        self._viewport_textures.clear()
         if self._gpu_context is not None:
             # The surface holds the native window handle, so it must be
             # released before the GLFW window is destroyed — otherwise the

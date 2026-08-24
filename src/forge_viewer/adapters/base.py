@@ -27,6 +27,7 @@ from ..types import (
 LIGHT_OBJECT_BASE = 0x70000000
 CAMERA_OBJECT_BASE = 0x71000000
 ENVIRONMENT_OBJECT_ID = 0x72000000
+MODEL_OBJECT_BASE = 0x73000000
 
 
 class NodeKind(enum.StrEnum):
@@ -58,6 +59,7 @@ class SceneNode:
 
     visible: bool = True
     body_index: int = -1
+    geom_index: int = -1
     light_index: int = -1
     camera_index: int = -1
     site_index: int = -1
@@ -105,6 +107,11 @@ class SceneModelInfo:
     path: Path
     removable: bool
     position: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    rotation: tuple[tuple[float, float, float], ...] = (
+        (1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, 0.0, 1.0),
+    )
 
 
 @dataclass(frozen=True)
@@ -177,6 +184,7 @@ class AdapterCaps:
     scene_files: bool = False
     edit_history: bool = False
     model_composition: bool = False
+    topology_editing: bool = False
     notes: tuple[str, ...] = ()
 
 
@@ -500,6 +508,19 @@ class SceneAdapterBase:
     def save_scene(self, path: Path) -> None:
         raise RuntimeError(f"{self.caps.name} does not support scene files")
 
+    @property
+    def resource_roots(self) -> tuple[Path, ...]:
+        return ()
+
+    def add_resource_root(self, path: Path) -> bool:
+        return False
+
+    def remove_resource_root(self, path: Path) -> bool:
+        return False
+
+    def set_resource_roots(self, paths: tuple[Path, ...]) -> None:
+        pass
+
     def capture_edit_state(self) -> object | None:
         return None
 
@@ -513,6 +534,27 @@ class SceneAdapterBase:
         return -1
 
     def remove_scene_model(self, model_id: int) -> bool:
+        return False
+
+    def set_scene_model_transform(self, model_id: int, position, rotation) -> bool:
+        return False
+
+    def add_model_element(self, parent_node_id: int, kind: str, name: str) -> int:
+        return -1
+
+    def remove_model_element(self, node_id: int) -> bool:
+        return False
+
+    def rename_model_element(self, node_id: int, name: str) -> bool:
+        return False
+
+    def scene_model_xml(self, model_id: int) -> str | None:
+        return None
+
+    def scene_model_source(self, model_id: int) -> str | None:
+        return None
+
+    def set_scene_model_xml(self, model_id: int, xml: str) -> bool:
         return False
 
     def reset(self) -> None: ...
@@ -690,11 +732,23 @@ class SceneAdapter(Protocol):
     def new_scene(self) -> None: ...
     def open_scene(self, path: Path) -> None: ...
     def save_scene(self, path: Path) -> None: ...
+    @property
+    def resource_roots(self) -> tuple[Path, ...]: ...
+    def add_resource_root(self, path: Path) -> bool: ...
+    def remove_resource_root(self, path: Path) -> bool: ...
+    def set_resource_roots(self, paths: tuple[Path, ...]) -> None: ...
     def capture_edit_state(self) -> object | None: ...
     def restore_edit_state(self, state: object) -> bool: ...
     def scene_models(self) -> tuple[SceneModelInfo, ...]: ...
     def add_scene_model(self, path: Path, position, rotation) -> int: ...
     def remove_scene_model(self, model_id: int) -> bool: ...
+    def set_scene_model_transform(self, model_id: int, position, rotation) -> bool: ...
+    def add_model_element(self, parent_node_id: int, kind: str, name: str) -> int: ...
+    def remove_model_element(self, node_id: int) -> bool: ...
+    def rename_model_element(self, node_id: int, name: str) -> bool: ...
+    def scene_model_xml(self, model_id: int) -> str | None: ...
+    def scene_model_source(self, model_id: int) -> str | None: ...
+    def set_scene_model_xml(self, model_id: int, xml: str) -> bool: ...
     def reset(self) -> None: ...
     def step(self, count: int = 1) -> None: ...
     def set_paused(self, paused: bool) -> bool: ...

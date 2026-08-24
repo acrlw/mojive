@@ -140,6 +140,16 @@ def build_scene(scene: Scene, **kwargs) -> Viewer:
     return build_from_adapter(StaticSceneAdapter(scene), **kwargs)
 
 
+def build_editor(**kwargs) -> Viewer:
+    """Build an empty workspace with MuJoCo models and Forge-authored entities."""
+    from .adapters.mujoco_adapter import MuJoCoAdapter
+    from .adapters.workspace import WorkspaceAdapter
+
+    primary = MuJoCoAdapter()
+    primary.new_scene()
+    return build_from_adapter(WorkspaceAdapter(primary), paused=True, **kwargs)
+
+
 def _compose(
     adapter_factory: Callable[[], SceneAdapter],
     *,

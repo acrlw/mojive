@@ -437,7 +437,7 @@ def _make_gizmo_plane() -> MeshData:
 def _make_gizmo_ring(
     radius: float = RING_RADIUS, *, half: bool = False, tube: float = RING_TUBE
 ) -> MeshData:
-    major, minor = (32 if half else 64), 8
+    major, minor = (32 if half else 64), 16
     sweep = np.pi if half else 2.0 * np.pi
     th = np.linspace(0.0, sweep, major + 1)[:, None]
     ph = np.linspace(0.0, 2.0 * np.pi, minor + 1)[None, :]

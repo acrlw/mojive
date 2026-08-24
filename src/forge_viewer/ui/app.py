@@ -17,10 +17,12 @@ from ..render.backend import FrameMode, LabelMode, RenderFlag
 from ..types import Light, LightKind, MeshShape, ViewportImage
 from . import gestures as gs
 from .camera import CameraOut, OrbitCamera, ndc_from_viewport, unproject
+from .camera_preview import CameraPreview
 from .draw2d import ImguiDraw2D
 from .gizmo import ObjectGizmo
 from .panels import PanelContext, PanelSet
 from .perturb import PerturbController, draw_fallback
+from .scene_entities import SceneEntityHelpers
 from .theme import THEME, Theme
 from .viewcube import ViewCube
 from .window import Window, WindowConfig
@@ -81,9 +83,11 @@ class ViewerApp:
 
         self.camera_out = CameraOut(backend=backend, session=session)
         self.camera.attach(self.camera_out)
+        self.camera_preview = CameraPreview()
         self.gizmo = ObjectGizmo()
         self.view_cube = ViewCube()
         self.perturb = PerturbController()
+        self.scene_entities = SceneEntityHelpers()
         self.router = gs.GestureRouter()
         self.panels = PanelSet()
         self._started = False
@@ -101,6 +105,7 @@ class ViewerApp:
         self._model_dialog_action = ""
         self._scene_dialog: Any | None = None
         self._scene_dialog_action = ""
+        self._resource_dialog: Any | None = None
         self._pending_document_action: tuple[str, Path | None] | None = None
         self._after_save_action: tuple[str, Path | None] | None = None
         self._rename_object_id = 0
@@ -159,8 +164,12 @@ class ViewerApp:
         if self._scene_dialog is not None:
             self._scene_dialog.kill()
             self._scene_dialog = None
+        if self._resource_dialog is not None:
+            self._resource_dialog.kill()
+            self._resource_dialog = None
         if self.debug_bridge is not None:
             self.debug_bridge.close()
+        self.camera_preview.release()
         self.backend.release()
         self.session.release()
 
@@ -257,6 +266,30 @@ class ViewerApp:
             )
         self._scene_dialog_action = action
 
+    def _open_resource_dialog(self) -> None:
+        if self._resource_dialog is not None:
+            return
+        current = self.session.asset_path
+        default = current.parent if current is not None else Path.cwd()
+        self._resource_dialog = portable_file_dialogs.select_folder(
+            "Add Forge resource directory", str(default)
+        )
+
+    def _poll_resource_dialog(self) -> None:
+        dialog = self._resource_dialog
+        if dialog is None or not dialog.ready(0):
+            return
+        self._resource_dialog = None
+        try:
+            selected = dialog.result()
+        except Exception as exc:
+            self._report_model_error(str(exc))
+            return
+        if selected:
+            result = self.session.submit(cmd.AddResourceRoot(Path(selected)))
+            if not result.ok:
+                self._report_model_error(result.message)
+
     def _poll_scene_dialog(self) -> None:
         dialog = self._scene_dialog
         if dialog is None or not dialog.ready(0):
@@ -349,6 +382,8 @@ class ViewerApp:
         open_model = False
         add_model = False
         remove_model_id = -1
+        add_resource_root = False
+        remove_resource_root: Path | None = None
         reload_model = False
         undo = False
         redo = False
@@ -373,7 +408,7 @@ class ViewerApp:
                         False,
                         self._model_dialog is None,
                     )
-                    if caps.model_composition and self.session.scene_models:
+                    if caps.model_composition:
                         add_model, _ = imgui.menu_item(
                             "Add Models (MJCF / URDF)...",
                             "",
@@ -393,6 +428,15 @@ class ViewerApp:
                         False,
                         self.session.asset_path is not None,
                     )
+                if can_scene_files and imgui.begin_menu("Resource Directories"):
+                    add_resource_root, _ = imgui.menu_item(
+                        "Add Directory...", "", False, self._resource_dialog is None
+                    )
+                    for root in self.session.adapter.resource_roots:
+                        clicked, _ = imgui.menu_item(f"Remove {root}", "", False)
+                        if clicked:
+                            remove_resource_root = root
+                    imgui.end_menu()
                 imgui.separator()
                 quit_viewer, _ = imgui.menu_item("Quit", f"{shortcut}+Q", False, True)
                 imgui.end_menu()
@@ -458,6 +502,10 @@ class ViewerApp:
             self._open_model_dialog("add")
         if remove_model_id >= 0:
             self.remove_model(remove_model_id)
+        if add_resource_root:
+            self._open_resource_dialog()
+        if remove_resource_root is not None:
+            self.session.submit(cmd.RemoveResourceRoot(remove_resource_root))
         if reload_model:
             result = self.session.submit(cmd.Reload())
             if result.ok:
@@ -522,25 +570,39 @@ class ViewerApp:
 
     def _add_scene_light(self) -> None:
         view = self._camera_view()
+        name = self._entity_name("point light")
         result = self.session.submit(
             cmd.AddSceneLight(
-                self._entity_name("point light"),
+                name,
                 Light(kind=LightKind.POINT, position=np.asarray(view.eye, np.float32).copy()),
             )
         )
         if result.ok:
-            from ..adapters.base import LIGHT_OBJECT_BASE
-
-            self.session.submit(cmd.Select(LIGHT_OBJECT_BASE + result.entity_id))
+            node = next(
+                (
+                    node
+                    for node in reversed(self.session.nodes)
+                    if node.kind is NodeKind.LIGHT and node.name == name
+                ),
+                None,
+            )
+            if node is not None:
+                self.session.submit(cmd.Select(node.object_id))
 
     def _add_scene_camera(self) -> None:
-        result = self.session.submit(
-            cmd.AddSceneCamera(self._entity_name("camera"), self._camera_view())
-        )
+        name = self._entity_name("camera")
+        result = self.session.submit(cmd.AddSceneCamera(name, self._camera_view()))
         if result.ok:
-            from ..adapters.base import CAMERA_OBJECT_BASE
-
-            self.session.submit(cmd.Select(CAMERA_OBJECT_BASE + result.entity_id))
+            node = next(
+                (
+                    node
+                    for node in reversed(self.session.nodes)
+                    if node.kind is NodeKind.CAMERA and node.name == name
+                ),
+                None,
+            )
+            if node is not None:
+                self.session.submit(cmd.Select(node.object_id))
 
     def _duplicate_selected(self) -> None:
         object_id = self._selected_entity()
@@ -554,13 +616,21 @@ class ViewerApp:
 
     def _selected_entity(self) -> int:
         node = self.session.selected_node
-        if node is None or node.kind not in (NodeKind.LINK, NodeKind.LIGHT, NodeKind.CAMERA):
+        if (
+            node is None
+            or node.model_id >= 0
+            or node.kind not in (NodeKind.LINK, NodeKind.LIGHT, NodeKind.CAMERA)
+        ):
             return 0
         return int(node.object_id)
 
     def request_rename(self, object_id: int) -> None:
         node = self.session.node_by_object_id(object_id)
-        if node is None or node.kind not in (NodeKind.LINK, NodeKind.LIGHT, NodeKind.CAMERA):
+        if (
+            node is None
+            or node.model_id >= 0
+            or node.kind not in (NodeKind.LINK, NodeKind.LIGHT, NodeKind.CAMERA)
+        ):
             return
         self._rename_object_id = int(object_id)
         self._rename_value = node.name
@@ -687,6 +757,7 @@ class ViewerApp:
         self._sync_display_scale()
         self._poll_model_dialog()
         self._poll_scene_dialog()
+        self._poll_resource_dialog()
         self._poll_model_drop()
         self._draw_main_menu()
         window.begin_dockspace()
@@ -717,12 +788,32 @@ class ViewerApp:
                 self.debug_bridge.apply_batch(frame.debug_commands)
 
         self._publish_perturb_marks()
+        self.scene_entities.publish(
+            self.backend,
+            self.session,
+            self._camera_view(),
+            self._viewport_rect[3],
+            self.window.ui_scale,
+            self._model_camera_id >= 0,
+        )
         self._publish_gizmo()
 
         self._viewport_image = self.backend.render(frame)
+        preview_name, preview_camera = self.camera_preview.selected_camera(self.session)
+        preview_width = min(
+            1024, max(320, int(self.window.points_to_pixels(340.0 * self.window.style_scale)))
+        )
+        self.camera_preview.update(
+            self.backend,
+            self.session.source,
+            self.session.structure_generation,
+            frame,
+            preview_camera,
+            (preview_width, max(1, preview_width * 9 // 16)),
+        )
 
         ctx = self._panel_context()
-        self._draw_viewport(ctx)
+        self._draw_viewport(ctx, preview_name)
         self.panels.draw(ctx)
         self._draw_rename_popup()
         self._draw_unsaved_changes()
@@ -777,6 +868,7 @@ class ViewerApp:
             view,
             rect,
             cursor,
+            enabled=over_viewport and not self._viewing_selected_camera(),
             style_scale=self.window.style_scale,
         )
         node = self.session.selected_node
@@ -804,6 +896,26 @@ class ViewerApp:
         return self.router.update(state)
 
     def _poll_gizmo(self, state: gs.InputState, keys: Keys) -> None:
+        if self._viewing_selected_camera():
+            self.gizmo.keyboard_interact(
+                self.session,
+                self._camera_view(),
+                self._viewport_rect,
+                state.cursor,
+                -1,
+                style_scale=self.window.style_scale,
+            )
+            self.gizmo.interact(
+                self.session,
+                self._camera_view(),
+                self._viewport_rect,
+                state.cursor,
+                claimed=False,
+                left_down=state.left,
+                released=self.router.released,
+                style_scale=self.window.style_scale,
+            )
+            return
         keyboard_was_active = self.gizmo.keyboard_using
         axis = keys.gizmo_axis
         if not keyboard_was_active and (not state.over_viewport or state.any_button):
@@ -839,7 +951,7 @@ class ViewerApp:
             self._viewport_rect,
             ui_scale=self.window.ui_scale,
             style_scale=self.window.style_scale,
-            yielding=gs.gizmo_yields(self._state),
+            yielding=gs.gizmo_yields(self._state) or self._viewing_selected_camera(),
             interactive=self.router.claim in (gs.Claim.NONE, gs.Claim.OBJECT_GIZMO),
         )
 
@@ -894,6 +1006,15 @@ class ViewerApp:
             self._leave_model_camera(publish=True)
             return
         self._model_camera_id = i
+
+    def _viewing_selected_camera(self) -> bool:
+        node = self.session.selected_node
+        if node is None or node.kind is not NodeKind.CAMERA:
+            return False
+        index = int(node.camera_index)
+        if not 0 <= index < len(self.session.cameras):
+            return False
+        return int(self.session.cameras[index].camera_id) == self._model_camera_id
 
     def _sync_model_camera(self) -> None:
         if self._model_camera_id < 0:
@@ -968,6 +1089,17 @@ class ViewerApp:
     def _pick_at(self, cursor: tuple[float, float]) -> int:
         rect = self._viewport_rect
 
+        helper = self.scene_entities.pick(
+            self.session,
+            self._camera_view(),
+            rect,
+            cursor,
+            self.window.style_scale,
+            self._model_camera_id >= 0,
+        )
+        if self._selectable(helper):
+            return helper
+
         img = self._viewport_image
         if self.backend.caps.gpu_pick and img is not None:
             hit = img.pixel_from_viewport_point(cursor, rect)
@@ -1015,7 +1147,7 @@ class ViewerApp:
                 return int(node.object_id)
         return 0
 
-    def _draw_viewport(self, ctx: PanelContext) -> None:
+    def _draw_viewport(self, ctx: PanelContext, preview_name: str = "") -> None:
         imgui.begin("Viewport", None, imgui.WindowFlags_.no_scrollbar.value)
         pos = imgui.get_cursor_screen_pos()
         size = imgui.get_content_region_avail()
@@ -1059,6 +1191,7 @@ class ViewerApp:
             self._draw_model_drop_overlay(overlay)
         finally:
             imgui.pop_clip_rect()
+        self.camera_preview.draw(self.window, self._viewport_rect, preview_name)
         imgui.end()
 
     def _draw_model_drop_overlay(self, overlay: ImguiDraw2D) -> None:
@@ -1215,6 +1348,7 @@ class ViewerApp:
             request_rename=self.request_rename,
             gizmo=self.gizmo,
             perturb=self.perturb,
+            scene_entities=self.scene_entities,
             theme=self.theme,
             style_scale=self.window.style_scale,
             viewport_rect=self._viewport_rect,

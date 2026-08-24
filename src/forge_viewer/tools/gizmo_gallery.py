@@ -14,7 +14,6 @@ from ..assets import resolve
 from ..composition import build
 from ..gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, GizmoMode, hit_test, project, world_scale
 from ..ui import viewcube
-from ..ui.gizmo import RotationTickProjection
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -46,34 +45,38 @@ def _position(viewer, node, style: str, output: Path) -> None:
     viewer.app.gizmo.set_mode("translate")
     viewer.app.gizmo.set_style(style)
     viewer.app.gizmo.set_space("body")
-    for _ in range(3):
-        viewer.sync()
-    _save(viewer, node, output / f"position-{style}.png")
+    for orthographic in (False, True):
+        suffix = "-orthographic" if orthographic else ""
+        viewer.app.camera.set_orthographic(orthographic)
+        for _ in range(3):
+            viewer.sync()
+        _save(viewer, node, output / f"position{suffix}-{style}.png")
 
-    camera, rect, origin, rotation, scale = _state(viewer, node)
-    cursor = _axis_cursor(viewer, camera, rect, origin, rotation, scale)
-    io.add_mouse_pos_event(*cursor)
-    viewer.sync()
-    io.add_mouse_button_event(0, True)
-    viewer.sync()
-    axis = project(camera, (origin, origin + rotation[:, 2] * scale), rect)[:, :2]
-    direction = axis[1] - axis[0]
-    direction /= np.linalg.norm(direction)
-    io.add_mouse_pos_event(*(cursor + direction * 42.0))
-    viewer.sync()
-    _save(viewer, node, output / f"position-drag-{style}.png")
-    viewer.app.gizmo.translation_snap_m = 0.5
-    io.add_key_event(imgui.Key.mod_shift, True)
-    io.add_mouse_pos_event(*(cursor + direction * 57.0))
-    viewer.sync()
-    if not viewer.app.gizmo.snapping:
-        raise RuntimeError("position snap input was not applied")
-    _save(viewer, node, output / f"position-snap-{style}.png")
-    io.add_key_event(imgui.Key.mod_shift, False)
-    io.add_mouse_button_event(0, False)
-    viewer.sync()
-    viewer.session.submit(cmd.Reset())
-    viewer.sync()
+        camera, rect, origin, rotation, scale = _state(viewer, node)
+        cursor = _axis_cursor(viewer, camera, rect, origin, rotation, scale)
+        io.add_mouse_pos_event(*cursor)
+        viewer.sync()
+        io.add_mouse_button_event(0, True)
+        viewer.sync()
+        axis = project(camera, (origin, origin + rotation[:, 2] * scale), rect)[:, :2]
+        direction = axis[1] - axis[0]
+        direction /= np.linalg.norm(direction)
+        io.add_mouse_pos_event(*(cursor + direction * 42.0))
+        viewer.sync()
+        _save(viewer, node, output / f"position-drag{suffix}-{style}.png")
+        viewer.app.gizmo.translation_snap_m = 0.5
+        io.add_key_event(imgui.Key.mod_shift, True)
+        io.add_mouse_pos_event(*(cursor + direction * 57.0))
+        viewer.sync()
+        if not viewer.app.gizmo.snapping:
+            raise RuntimeError("position snap input was not applied")
+        _save(viewer, node, output / f"position-snap{suffix}-{style}.png")
+        io.add_key_event(imgui.Key.mod_shift, False)
+        io.add_mouse_button_event(0, False)
+        viewer.sync()
+        viewer.session.submit(cmd.Reset())
+        viewer.sync()
+    viewer.app.camera.set_orthographic(False)
 
 
 def _rotation(viewer, node, style: str, output: Path) -> None:
@@ -81,72 +84,119 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
     viewer.app.gizmo.set_mode("rotate")
     viewer.app.gizmo.set_style(style)
     viewer.app.gizmo.set_space("body")
-    viewer.app.gizmo.set_rotation_tick_projection(RotationTickProjection.ORTHOGRAPHIC.value)
-    for _ in range(3):
-        viewer.sync()
-    camera, rect, origin, rotation, scale = _state(viewer, node)
+    for orthographic in (False, True):
+        suffix = "-orthographic" if orthographic else ""
+        viewer.app.camera.set_orthographic(orthographic)
+        viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
+        for _ in range(3):
+            viewer.sync()
+        camera, rect, origin, rotation, scale = _state(viewer, node)
+        start_rotation = rotation.copy()
 
-    def ring_point(angle: float) -> np.ndarray:
-        return origin + scale * RING_RADIUS * (
-            np.cos(angle) * rotation[:, 0] + np.sin(angle) * rotation[:, 1]
+        start_angle = next(
+            angle
+            for angle in np.linspace(0.0, 2.0 * np.pi, 96, endpoint=False)
+            if hit_test(
+                camera,
+                origin,
+                rotation,
+                rect,
+                tuple(
+                    np.floor(
+                        project(
+                            camera,
+                            (_rotation_ring_point(origin, start_rotation, scale, angle),),
+                            rect,
+                        )[0, :2]
+                    )
+                ),
+                GizmoMode.ROTATE,
+                viewer.window.style_scale,
+            )[0]
+            is GizmoHandle.ROTATE_Z
         )
-
-    start_angle = next(
-        angle
-        for angle in np.linspace(0.0, 2.0 * np.pi, 96, endpoint=False)
-        if hit_test(
+        start = np.floor(
+            project(
+                camera,
+                (_rotation_ring_point(origin, start_rotation, scale, start_angle),),
+                rect,
+            )[0, :2]
+        )
+        io.add_mouse_pos_event(*start)
+        viewer.sync()
+        io.add_mouse_button_event(0, True)
+        viewer.sync()
+        end = project(
             camera,
-            origin,
-            rotation,
+            (
+                _rotation_ring_point(
+                    origin,
+                    start_rotation,
+                    scale,
+                    start_angle + np.radians(42.0),
+                ),
+            ),
             rect,
-            tuple(np.floor(project(camera, (ring_point(angle),), rect)[0, :2])),
-            GizmoMode.ROTATE,
-            viewer.window.style_scale,
-        )[0]
-        is GizmoHandle.ROTATE_Z
-    )
-    start = np.floor(project(camera, (ring_point(start_angle),), rect)[0, :2])
-    io.add_mouse_pos_event(*start)
-    viewer.sync()
-    io.add_mouse_button_event(0, True)
-    viewer.sync()
-    end = project(camera, (ring_point(start_angle + np.radians(42.0)),), rect)[0, :2]
-    io.add_mouse_pos_event(*end)
-    viewer.sync()
-    _save(viewer, node, output / f"rotation-drag-{style}.png")
-    viewer.app.gizmo.rotation_snap_deg = 5.0
-    io.add_key_event(imgui.Key.mod_shift, True)
-    snapped = project(camera, (ring_point(start_angle + np.radians(49.0)),), rect)[0, :2]
-    io.add_mouse_pos_event(*snapped)
-    viewer.sync()
-    if not viewer.app.gizmo.snapping:
-        raise RuntimeError(
-            "rotation snap input was not applied: "
-            f"using={viewer.app.gizmo.using}, "
-            f"active={viewer.app.gizmo.active_handle.name}, "
-            f"label={viewer.app.gizmo.value_label!r}, "
-            f"cursor=({io.mouse_pos.x:.1f}, {io.mouse_pos.y:.1f}), "
-            f"target=({snapped[0]:.1f}, {snapped[1]:.1f})"
-        )
-    _save(viewer, node, output / f"rotation-snap-{style}.png")
-    viewer.app.gizmo.rotation_tick_projection = RotationTickProjection.ORTHOGRAPHIC
-    viewer.sync()
-    _save(viewer, node, output / f"rotation-snap-orthographic-{style}.png")
-    viewer.app.camera.look_from(-135.0, 0.0, viewer.app.camera_out, animate=False)
-    for _ in range(3):
+        )[0, :2]
+        io.add_mouse_pos_event(*end)
         viewer.sync()
-    _save(viewer, node, output / f"rotation-snap-orthographic-edge-{style}.png")
-    viewer.app.gizmo.rotation_tick_projection = RotationTickProjection.CLASSIC
-    viewer.sync()
-    _save(viewer, node, output / f"rotation-snap-edge-{style}.png")
+        _save(viewer, node, output / f"rotation-drag{suffix}-{style}.png")
+
+        viewer.app.camera.look_from(-135.0, 0.0, viewer.app.camera_out, animate=False)
+        for _ in range(3):
+            viewer.sync()
+        _save(viewer, node, output / f"rotation-drag{suffix}-edge-{style}.png")
+        viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
+        for _ in range(3):
+            viewer.sync()
+        camera, rect, origin, _rotation, scale = _state(viewer, node)
+        viewer.app.gizmo.rotation_snap_deg = 5.0
+        io.add_key_event(imgui.Key.mod_shift, True)
+        snapped = project(
+            camera,
+            (
+                _rotation_ring_point(
+                    origin,
+                    start_rotation,
+                    scale,
+                    start_angle + np.radians(49.0),
+                ),
+            ),
+            rect,
+        )[0, :2]
+        io.add_mouse_pos_event(*snapped)
+        viewer.sync()
+        if not viewer.app.gizmo.snapping:
+            raise RuntimeError("rotation snap input was not applied")
+        _save(viewer, node, output / f"rotation-snap{suffix}-{style}.png")
+
+        for degrees in np.linspace(50.0, -415.0, 94):
+            cursor = project(
+                camera,
+                (
+                    _rotation_ring_point(
+                        origin,
+                        start_rotation,
+                        scale,
+                        start_angle + np.radians(float(degrees)),
+                    ),
+                ),
+                rect,
+            )[0, :2]
+            io.add_mouse_pos_event(*cursor)
+            viewer.sync()
+        _save(viewer, node, output / f"rotation-snap{suffix}-multiturn-{style}.png")
+        viewer.app.camera.look_from(-135.0, 0.0, viewer.app.camera_out, animate=False)
+        for _ in range(3):
+            viewer.sync()
+        _save(viewer, node, output / f"rotation-snap{suffix}-edge-{style}.png")
+        io.add_key_event(imgui.Key.mod_shift, False)
+        io.add_mouse_button_event(0, False)
+        viewer.sync()
+        viewer.session.submit(cmd.Reset())
+        viewer.sync()
+    viewer.app.camera.set_orthographic(False)
     viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
-    for _ in range(3):
-        viewer.sync()
-    io.add_key_event(imgui.Key.mod_shift, False)
-    io.add_mouse_button_event(0, False)
-    viewer.sync()
-    viewer.session.submit(cmd.Reset())
-    viewer.sync()
 
 
 def _state(viewer, node):
@@ -160,6 +210,12 @@ def _state(viewer, node):
         origin,
         rotation,
         world_scale(camera, origin, rect[3], SIZE_PT * viewer.window.style_scale),
+    )
+
+
+def _rotation_ring_point(origin, rotation, scale: float, angle: float) -> np.ndarray:
+    return origin + scale * RING_RADIUS * (
+        np.cos(angle) * rotation[:, 0] + np.sin(angle) * rotation[:, 1]
     )
 
 

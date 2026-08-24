@@ -69,6 +69,7 @@ class ForgeBackend:
                 self._passes[name] = PresentPass()
             elif name in factories:
                 self._passes[name] = factories[name]()
+
         self.debug = getattr(self._passes.get("debug"), "draw", None)
 
         self._scene: RenderScene | None = None
@@ -127,6 +128,9 @@ class ForgeBackend:
         self._program_generation = -1
         self.caps = self._build_caps()
         self._hot_reload = False
+
+    def create_peer(self, width: int, height: int) -> ForgeBackend:
+        return ForgeBackend(self.ctx, width, height, samples=1)
 
     def _supported_flags(self) -> frozenset[RenderFlag]:
         flags = {

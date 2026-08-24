@@ -31,9 +31,11 @@ RING_TUBE = RING_WIDTH_PT / (2.0 * SIZE_PT)
 SCREEN_RING_TUBE = SCREEN_RING_WIDTH_PT / (2.0 * SIZE_PT)
 SCREEN_RING_EDGE_TUBE = (SCREEN_RING_WIDTH_PT + 2.0 * CONTRAST_EDGE_PT) / (2.0 * SIZE_PT)
 
-AXIS_HIT_PT = 7.0
-RING_HIT_PT = 7.0
+AXIS_HIT_PADDING_PT = 4.0
+PLANE_HIT_PADDING_PT = 2.0
+RING_HIT_PT = 5.5
 CENTER_HIT_PT = 9.0
+HANDLE_HIT_ALPHA = 0.05
 RING_SEGMENTS = 64
 
 AXIS_COLORS = np.array(
@@ -96,6 +98,7 @@ class GizmoFrame:
     size_px: float = SIZE_PT
     hovered: GizmoHandle = GizmoHandle.NONE
     active: GizmoHandle = GizmoHandle.NONE
+    active_rotation_overlay: bool = False
     axis_mask: int = 0b111
     plane_mask: int = 0b111
 
@@ -112,12 +115,14 @@ def display_handles(frame: GizmoFrame) -> tuple[GizmoHandle, ...]:
 
 def world_scale(cam: CameraView, origin, viewport_height: float, size_pt: float = SIZE_PT) -> float:
     h = max(float(viewport_height), 1.0)
-    if cam.orthographic:
-        return float(cam.ortho_height) * float(size_pt) / h
-    depth = float(np.dot(np.asarray(origin, np.float64) - cam.eye, cam.forward()))
-    if depth <= 0.0:
+    view = np.asarray(cam.view_matrix(), np.float64)
+    projection = np.asarray(cam.proj_matrix(), np.float64)
+    point = np.append(np.asarray(origin, np.float64), 1.0)
+    clip_w = float((projection @ (view @ point))[3])
+    p11 = float(projection[1, 1])
+    if clip_w <= 0.0 or abs(p11) < 1e-9:
         return 0.0
-    return 2.0 * depth * float(np.tan(cam.fov_y * 0.5)) * float(size_pt) / h
+    return 2.0 * clip_w * float(size_pt) / (p11 * h)
 
 
 def project(cam: CameraView, points, rect: tuple[float, float, float, float]) -> np.ndarray:
@@ -221,8 +226,28 @@ def rotation_ring(cam, origin, rotation, scale: float, axis: int, *, full: bool)
         if full
         else np.linspace(0.0, np.pi, segments + 1)
     )
-    radial = np.cos(angles)[:, None] * basis[:, 0] + np.sin(angles)[:, None] * basis[:, 1]
-    return np.asarray(origin, np.float64) + scale * RING_RADIUS * radial
+    return rotation_dial(
+        origin,
+        basis[:, 2],
+        basis[:, 0],
+        scale,
+        RING_RADIUS,
+        angles,
+    )
+
+
+def rotation_dial(origin, axis, start_direction, scale: float, radius, angles) -> np.ndarray:
+    """Build dial points in one world-space rotation plane."""
+    normal = np.asarray(axis, np.float64)
+    normal /= np.linalg.norm(normal)
+    radial = np.asarray(start_direction, np.float64)
+    radial -= normal * np.dot(radial, normal)
+    radial /= np.linalg.norm(radial)
+    tangent = np.cross(normal, radial)
+    angles = np.atleast_1d(np.asarray(angles, np.float64))
+    radii = np.broadcast_to(np.asarray(radius, np.float64), angles.shape)
+    directions = np.cos(angles)[:, None] * radial + np.sin(angles)[:, None] * tangent
+    return np.asarray(origin, np.float64) + float(scale) * radii[:, None] * directions
 
 
 def plane_corners(origin, rotation, scale: float, axis: int) -> np.ndarray:
@@ -239,6 +264,45 @@ def plane_corners(origin, rotation, scale: float, axis: int) -> np.ndarray:
                 (PLANE_INNER, PLANE_OUTER),
             )
         ]
+    )
+
+
+def masked_axis_start(origin, end, radius: float) -> np.ndarray:
+    """Clip a projected axis against the position handle's invisible shell."""
+    origin = np.asarray(origin, np.float64)
+    end = np.asarray(end, np.float64)
+    direction = end - origin
+    length = float(np.linalg.norm(direction))
+    if length <= radius or length < 1e-9:
+        return end
+    return origin + direction * (float(radius) / length)
+
+
+def axis_arrow_polygon(start, end, style_scale: float = 1.0) -> np.ndarray:
+    """Return the exact screen-space silhouette used by a flat axis handle."""
+    start = np.asarray(start, np.float64)
+    end = np.asarray(end, np.float64)
+    direction = end - start
+    length = float(np.linalg.norm(direction))
+    if length < 1e-6:
+        return np.empty((0, 2), np.float64)
+    direction /= length
+    side = np.array((-direction[1], direction[0]))
+    shaft = AXIS_SHAFT_HALF_PT * float(style_scale)
+    head = min(AXIS_HEAD_LENGTH_PT * float(style_scale), length * 0.42)
+    wing = AXIS_HEAD_HALF_PT * float(style_scale)
+    neck = end - direction * head
+    return np.asarray(
+        (
+            start - side * shaft,
+            neck - side * shaft,
+            neck - side * wing,
+            end,
+            neck + side * wing,
+            neck + side * shaft,
+            start + side * shaft,
+        ),
+        np.float64,
     )
 
 
@@ -288,45 +352,75 @@ def hit_test(
     if mode is GizmoMode.TRANSLATE:
         if np.linalg.norm(p - center) <= CENTER_HIT_PT * style_scale:
             return GizmoHandle.SCREEN, axis_mask, plane_mask
-        for axis, handle in enumerate(PLANE_HANDLES):
-            if plane_mask & (1 << axis) and plane_handle_alpha(cam, o, r[:, axis]) > 0.2:
-                poly = project(cam, plane_corners(o, r, scale, axis), rect)[:, :2]
-                if _inside_convex(p, poly):
-                    return handle, axis_mask, plane_mask
-        best = (AXIS_HIT_PT * style_scale, GizmoHandle.NONE)
-        for axis, handle in enumerate(AXIS_HANDLES):
-            if not axis_mask & (1 << axis):
+        axes = [axis for axis in range(3) if axis_mask & (1 << axis)]
+        order = paint_order(cam, o, [r[:, axis] for axis in axes])
+        for index in reversed(order):
+            axis = axes[index]
+            handle = AXIS_HANDLES[axis]
+            if axis_handle_alpha(cam, o, r[:, axis]) <= HANDLE_HIT_ALPHA:
                 continue
-            if axis_handle_alpha(cam, o, r[:, axis]) <= 0.2:
+            if np.linalg.norm(p - center) < CENTER_SHELL_RADIUS * SIZE_PT * style_scale:
                 continue
-            a, b = project(
+            screen = project(
                 cam,
-                [o + r[:, axis] * scale * AXIS_START, o + r[:, axis] * scale * AXIS_END],
+                (o + r[:, axis] * scale * AXIS_START, o + r[:, axis] * scale * AXIS_END),
                 rect,
-            )[:, :2]
-            d = _segment_distance(p, a, b)
-            if d <= best[0]:
-                best = (d, handle)
-        return best[1], axis_mask, plane_mask
+            )
+            if np.any(screen[:, 2] <= 0.0):
+                continue
+            start = masked_axis_start(
+                screen[0, :2],
+                screen[1, :2],
+                CENTER_SHELL_RADIUS * SIZE_PT * style_scale,
+            )
+            polygon = axis_arrow_polygon(start, screen[1, :2], style_scale)
+            if _polygon_distance(p, polygon) <= AXIS_HIT_PADDING_PT * style_scale:
+                return handle, axis_mask, plane_mask
+
+        planes = [axis for axis in range(3) if plane_mask & (1 << axis)]
+        order = paint_order(cam, o, [plane_direction(r, axis) for axis in planes])
+        for index in reversed(order):
+            axis = planes[index]
+            if plane_handle_alpha(cam, o, r[:, axis]) <= HANDLE_HIT_ALPHA:
+                continue
+            polygon = project(cam, plane_corners(o, r, scale, axis), rect)[:, :2]
+            if _polygon_distance(p, polygon) <= PLANE_HIT_PADDING_PT * style_scale:
+                return PLANE_HANDLES[axis], axis_mask, plane_mask
+        return GizmoHandle.NONE, axis_mask, plane_mask
 
     screen_radius = SCREEN_RING_RADIUS * SIZE_PT * style_scale
     if abs(float(np.linalg.norm(p - center)) - screen_radius) <= RING_HIT_PT * style_scale:
         return GizmoHandle.ROTATE_SCREEN, axis_mask, plane_mask
 
-    best = (RING_HIT_PT * style_scale, GizmoHandle.NONE)
+    best_distance = RING_HIT_PT * style_scale
+    best_handle = GizmoHandle.NONE
     for axis, handle in enumerate(ROTATE_AXIS_HANDLES):
-        if rotation_ring_alpha(cam, o, r[:, axis]) <= 0.2:
+        if rotation_ring_alpha(cam, o, r[:, axis]) <= HANDLE_HIT_ALPHA:
             continue
         ring = rotation_ring(cam, o, r, scale, axis, full=False)
         screen = project(cam, ring, rect)
         if np.any(screen[:, 2] <= 0.0):
             continue
-        d = min(
+        distance = min(
             _segment_distance(p, screen[i, :2], screen[i + 1, :2]) for i in range(len(screen) - 1)
         )
-        if d <= best[0]:
-            best = (d, handle)
-    return best[1], axis_mask, plane_mask
+        if distance < best_distance - 1e-6 or (
+            abs(distance - best_distance) <= 1e-6 and handle > best_handle
+        ):
+            best_distance = distance
+            best_handle = handle
+    return best_handle, axis_mask, plane_mask
+
+
+def _polygon_distance(point: np.ndarray, polygon: np.ndarray) -> float:
+    if len(polygon) < 3:
+        return float("inf")
+    if _inside_polygon(point, polygon):
+        return 0.0
+    return min(
+        _segment_distance(point, polygon[i], polygon[(i + 1) % len(polygon)])
+        for i in range(len(polygon))
+    )
 
 
 def _segment_distance(p: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
@@ -336,8 +430,16 @@ def _segment_distance(p: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
     return float(np.linalg.norm(p - (a + ab * t)))
 
 
-def _inside_convex(p: np.ndarray, poly: np.ndarray) -> bool:
-    edge = np.roll(poly, -1, axis=0) - poly
-    rel = p - poly
-    cross = edge[:, 0] * rel[:, 1] - edge[:, 1] * rel[:, 0]
-    return bool(np.all(cross >= -1e-6) or np.all(cross <= 1e-6))
+def _inside_polygon(point: np.ndarray, polygon: np.ndarray) -> bool:
+    """Return whether a point lies inside a simple screen-space polygon."""
+    x, y = float(point[0]), float(point[1])
+    inside = False
+    previous = polygon[-1]
+    for current in polygon:
+        if (current[1] > y) != (previous[1] > y):
+            edge_x = previous[0] - current[0]
+            edge_y = previous[1] - current[1]
+            if x < current[0] + edge_x * (y - current[1]) / edge_y:
+                inside = not inside
+        previous = current
+    return inside

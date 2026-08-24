@@ -124,4 +124,14 @@ def lighting_scene() -> Scene:
             position=(3.2, y, 1.25),
             color=(0.92, 0.92, 0.92, 1.0),
         )
+    scene.add_camera(
+        "preview camera",
+        CameraView(
+            eye=np.array([4.5, -3.5, 3.2], np.float32),
+            target=np.array([0.0, 2.0, 0.8], np.float32),
+            near=0.1,
+            far=16.0,
+            aspect=16.0 / 9.0,
+        ),
+    )
     return scene

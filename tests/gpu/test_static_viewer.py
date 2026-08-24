@@ -15,8 +15,11 @@ from forge_viewer import commands as cmd  # noqa: E402
 from forge_viewer.bridge import DebugClient  # noqa: E402
 from forge_viewer.composition import build_scene  # noqa: E402
 from forge_viewer.demos import canvas_scene  # noqa: E402
+from forge_viewer.gizmo import SIZE_PT, project, world_scale  # noqa: E402
+from forge_viewer.render.debugdraw import Prim  # noqa: E402
 from forge_viewer.scene import Scene  # noqa: E402
-from forge_viewer.types import DEFAULT_MATERIAL, Material, MeshShape  # noqa: E402
+from forge_viewer.types import DEFAULT_MATERIAL, CameraView, Material, MeshShape  # noqa: E402
+from forge_viewer.ui.scene_entities import HELPER_LAYER  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -220,4 +223,79 @@ def test_editor_undo_redo_updates_the_render_backend():
         viewer.sync()
         assert viewer.backend.stats.instances == 1
     finally:
+        viewer.release()
+
+
+def test_scene_camera_helper_is_pickable_and_transformable():
+    from imgui_bundle import imgui
+
+    scene = Scene()
+    camera_id = scene.add_camera(
+        "shot",
+        CameraView(
+            eye=np.array((0.0, 0.0, 1.0), np.float32),
+            target=np.array((0.0, 1.0, 1.0), np.float32),
+            near=0.1,
+            far=2.0,
+        ),
+    )
+    viewer = build_scene(scene, vsync=False, width=960, height=640)
+    try:
+        viewer.sync()
+        editor_camera = CameraView(
+            eye=np.array((0.0, -5.0, 2.0), np.float32),
+            target=np.array((0.0, 0.0, 1.0), np.float32),
+            aspect=1.5,
+        )
+        viewer.app.camera.adopt(editor_camera)
+        viewer.app.camera.publish(viewer.app.camera_out)
+        viewer.sync()
+
+        node = next(node for node in viewer.session.nodes if node.name == "shot")
+        screen = project(
+            viewer.app._camera_view(), [np.array((0.0, 0.0, 1.0))], viewer.app._viewport_rect
+        )[0]
+        assert viewer.app._pick_at((float(screen[0]), float(screen[1]))) == node.object_id
+
+        viewer.session.submit(cmd.Select(node.object_id))
+        viewer.sync()
+        assert viewer.app.camera_preview._image is not None
+        assert viewer.app.camera_preview._image.aspect == pytest.approx(16.0 / 9.0, rel=0.01)
+        layer = viewer.backend.debug.layer(HELPER_LAYER)
+        assert layer.count_of(Prim.POINT) == 1
+        assert layer.count_of(Prim.LINE) == 20
+
+        viewer.app.gizmo.set_mode("translate")
+        viewer.app.gizmo.set_space("world")
+        view = viewer.session.camera_view(camera_id)
+        before = np.asarray(view.eye, np.float64).copy()
+        scale = world_scale(
+            viewer.app._camera_view(),
+            before,
+            viewer.app._viewport_rect[3],
+            SIZE_PT * viewer.window.style_scale,
+        )
+        axis = np.array((0.0, 0.0, 1.0))
+        cursor = project(
+            viewer.app._camera_view(), (before + axis * scale * 0.55,), viewer.app._viewport_rect
+        )[0, :2]
+        io = imgui.get_io()
+        io.add_mouse_pos_event(*cursor)
+        viewer.sync()
+        io.add_mouse_button_event(0, True)
+        viewer.sync()
+        axis_screen = project(
+            viewer.app._camera_view(), (before, before + axis * scale), viewer.app._viewport_rect
+        )[:, :2]
+        direction = axis_screen[1] - axis_screen[0]
+        direction /= np.linalg.norm(direction)
+        io.add_mouse_pos_event(*(cursor + direction * 40.0))
+        viewer.sync()
+        io.add_mouse_button_event(0, False)
+        viewer.sync()
+
+        after = np.asarray(viewer.session.camera_view(camera_id).eye)
+        assert after[2] - before[2] > 0.1
+    finally:
+        imgui.get_io().add_mouse_button_event(0, False)
         viewer.release()
