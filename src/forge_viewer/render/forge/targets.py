@@ -190,13 +190,12 @@ class RenderTarget:
     def read_id(self, x: int, y: int) -> int:
         if not (0 <= x < self.width and 0 <= y < self.height):
             return 0
-        if self.id_layout is IdLayout.SHARED and self.samples > 1:
-            return 0
-        raw = self.id_fbo.read(
+        fbo, attachment = self._id_read_target()
+        raw = fbo.read(
             viewport=(int(x), int(y), 1, 1),
             components=1,
             dtype="u4",
-            attachment=self.id_draw_buffer,
+            attachment=attachment,
         )
         return int(np.frombuffer(raw, np.uint32)[0])
 
@@ -221,6 +220,12 @@ class RenderTarget:
         return depth[::-1] if flip else depth
 
     def read_ids(self, flip: bool = False) -> np.ndarray:
+        fbo, attachment = self._id_read_target()
+        raw = fbo.read(components=1, dtype="u4", attachment=attachment)
+        ids = np.frombuffer(raw, np.uint32).reshape(self.height, self.width)
+        return ids[::-1] if flip else ids
+
+    def _id_read_target(self):
         fbo, attachment = self.id_fbo, self.id_draw_buffer
         if self.id_resolve_fbo is not None:
             if not self._gl.blit_color(
@@ -232,9 +237,7 @@ class RenderTarget:
             ):
                 raise RuntimeError("Multisample integer ID resolve is unavailable")
             fbo, attachment = self.id_resolve_fbo, 0
-        raw = fbo.read(components=1, dtype="u4", attachment=attachment)
-        ids = np.frombuffer(raw, np.uint32).reshape(self.height, self.width)
-        return ids[::-1] if flip else ids
+        return fbo, attachment
 
     def release(self) -> None:
         with contextlib.suppress(Exception):

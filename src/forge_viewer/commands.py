@@ -245,6 +245,12 @@ class SetGeometryColor(Command):
 
 
 @dataclass(frozen=True)
+class SetGeometrySize(Command):
+    node_id: int
+    size: np.ndarray
+
+
+@dataclass(frozen=True)
 class SetSceneCamera(Command):
     camera_id: int
     camera: CameraView

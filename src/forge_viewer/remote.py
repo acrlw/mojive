@@ -547,6 +547,7 @@ def handle_session_command(session, message: dict):
         "environment": lambda: cmd.SetEnvironment(message["environment"]),
         "material": lambda: cmd.SetMaterial(message["material_id"], message["material"]),
         "geometry_color": lambda: cmd.SetGeometryColor(message["node_id"], message["rgba"]),
+        "geometry_size": lambda: cmd.SetGeometrySize(message["node_id"], message["size"]),
         "scene_camera": lambda: cmd.SetSceneCamera(message["camera_id"], message["camera"]),
         "add_scene_object": lambda: cmd.AddSceneObject(
             message["shape"],

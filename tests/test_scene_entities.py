@@ -203,12 +203,13 @@ def test_light_and_camera_gizmo_commands_write_entity_transforms() -> None:
     assert -camera_rotation[:, 2] == pytest.approx((0.0, 0.0, -1.0))
 
 
-def test_light_rotation_gizmo_keeps_its_drag_frame_after_write_back() -> None:
+@pytest.mark.parametrize("kind", (LightKind.POINT, LightKind.SPOT))
+def test_light_rotation_gizmo_keeps_its_drag_frame_after_write_back(kind: LightKind) -> None:
     scene = Scene()
     scene.add_light(
-        "spot",
+        "light",
         Light(
-            kind=LightKind.SPOT,
+            kind=kind,
             position=np.zeros(3, np.float32),
             direction=np.array((0.0, 0.0, -1.0), np.float32),
         ),

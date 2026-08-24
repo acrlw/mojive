@@ -97,6 +97,7 @@ _SCENE_EDIT_COMMANDS = (
     cmd.SetEnvironment,
     cmd.SetMaterial,
     cmd.SetGeometryColor,
+    cmd.SetGeometrySize,
     cmd.SetSceneCamera,
     cmd.AddSceneObject,
     cmd.RemoveSceneObject,
@@ -997,6 +998,20 @@ class Session:
             self._structure_generation += 1
             message = "" if writeback else "edited in Forge; backend write-back is unavailable"
             return CommandResult.good(message)
+
+        if isinstance(c, cmd.SetGeometrySize):
+            if self._source is None:
+                return CommandResult.bad("geometry is unavailable")
+            instances = np.flatnonzero(self._source.geom_node == int(c.node_id))
+            if not len(instances):
+                return CommandResult.bad(f"geometry node {c.node_id} is unavailable")
+            size = np.asarray(c.size, np.float32).reshape(3)
+            if not np.all(np.isfinite(size)) or np.any(size <= 0.0):
+                return CommandResult.bad("geometry size must contain three positive values")
+            if not self._adapter.set_geometry_size(c.node_id, size):
+                return CommandResult.bad("geometry size cannot be edited")
+            self._refresh_structure()
+            return CommandResult.good("")
 
         if isinstance(c, cmd.SetSceneCamera):
             camera_id = int(c.camera_id)

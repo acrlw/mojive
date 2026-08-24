@@ -57,6 +57,22 @@ SCENE_SUFFIX = ".forge.json"
 SCENE_FILTERS = ["Forge scenes", "*.forge.json", "All files", "*"]
 
 
+def _prepare_modal(style_scale: float, width_pt: float) -> None:
+    """Keep blocking prompts readable and centered as the host window resizes."""
+
+    viewport = imgui.get_main_viewport()
+    imgui.set_next_window_pos(
+        viewport.get_center(),
+        imgui.Cond_.always.value,
+        imgui.ImVec2(0.5, 0.5),
+    )
+    width = float(width_pt) * float(style_scale)
+    imgui.set_next_window_size_constraints(
+        imgui.ImVec2(width, 0.0),
+        imgui.ImVec2(width, float(np.finfo(np.float32).max)),
+    )
+
+
 @dataclass
 class Keys:
     fly: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -390,6 +406,8 @@ class ViewerApp:
         if self._open_resource_repair_popup:
             imgui.open_popup("Missing Resources")
             self._open_resource_repair_popup = False
+        if imgui.is_popup_open("Missing Resources"):
+            _prepare_modal(self.window.style_scale, 560.0)
         visible, _ = imgui.begin_popup_modal(
             "Missing Resources", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -780,6 +798,8 @@ class ViewerApp:
         if self._show_model_load_error:
             imgui.open_popup("File operation failed")
             self._show_model_load_error = False
+        if imgui.is_popup_open("File operation failed"):
+            _prepare_modal(self.window.style_scale, 440.0)
         visible, _ = imgui.begin_popup_modal(
             "File operation failed", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -816,6 +836,7 @@ class ViewerApp:
         if pending is None:
             return
         imgui.open_popup("Unsaved changes")
+        _prepare_modal(self.window.style_scale, 360.0)
         visible, _ = imgui.begin_popup_modal(
             "Unsaved changes", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -848,6 +869,8 @@ class ViewerApp:
         if self._open_rename_popup:
             imgui.open_popup("Rename Entity")
             self._open_rename_popup = False
+        if imgui.is_popup_open("Rename Entity"):
+            _prepare_modal(self.window.style_scale, 360.0)
         visible, _ = imgui.begin_popup_modal(
             "Rename Entity", None, imgui.WindowFlags_.always_auto_resize.value
         )

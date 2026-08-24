@@ -1095,8 +1095,6 @@ class ObjectGizmo:
                 return Verdict(False, "light transform is unavailable")
             if light.kind is LightKind.IMAGE:
                 return Verdict(False, "image light has no spatial transform")
-            if self._mode is GizmoMode.ROTATE and light.kind is LightKind.POINT:
-                return Verdict(False, "this light has no direction")
         return result
 
     def _start_edit(self, session: Session) -> None:

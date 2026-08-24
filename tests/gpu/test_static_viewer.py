@@ -9,7 +9,7 @@ import pytest
 
 pytestmark = pytest.mark.gpu
 
-pytest.importorskip("glfw")
+glfw = pytest.importorskip("glfw")
 
 from forge_viewer import commands as cmd  # noqa: E402
 from forge_viewer.bridge import DebugClient  # noqa: E402
@@ -203,6 +203,74 @@ def test_editor_actions_save_and_restore_an_authored_scene(tmp_path, monkeypatch
         monkeypatch.setattr(imgui, "button", discard_changes)
         viewer.sync()
         assert viewer.session.source.instance_count == 0
+    finally:
+        viewer.release()
+
+
+def test_finite_authored_plane_is_pickable_in_the_viewport():
+    scene = Scene()
+    floor = scene.plane(name="floor", size=(2.0, 2.0, 0.02))
+    viewer = build_scene(scene, vsync=False, width=960, height=640)
+    try:
+        viewer.session.submit(cmd.Select(floor.object_id))
+        for _ in range(3):
+            viewer.sync()
+        viewer.session.submit(cmd.Select(0))
+        viewer.sync()
+        cursor = project(
+            viewer.app._camera_view(),
+            [np.array((0.8, 0.0, 0.0), np.float32)],
+            viewer.app._viewport_rect,
+        )[0, :2]
+
+        assert viewer.app._pick_at((float(cursor[0]), float(cursor[1]))) == floor.object_id
+    finally:
+        viewer.release()
+
+
+def test_editor_modals_are_readable_and_follow_the_resized_window_center(monkeypatch):
+    from imgui_bundle import imgui
+
+    viewer = build_scene(Scene(), vsync=False, width=900, height=600)
+
+    def geometry(name):
+        popup = imgui.internal.find_window_by_name(name)
+        viewport = imgui.get_main_viewport()
+        center = (popup.pos.x + popup.size.x * 0.5, popup.pos.y + popup.size.y * 0.5)
+        expected = (viewport.get_center().x, viewport.get_center().y)
+        return popup, center, expected
+
+    try:
+        viewer.sync()
+        viewer.app._report_model_error(
+            "Unable to open the selected workspace because referenced resources are missing."
+        )
+        for _ in range(3):
+            viewer.sync()
+        error, center, expected = geometry("File operation failed")
+        assert error.size.x == pytest.approx(440.0 * viewer.window.style_scale)
+        assert error.size.x > error.size.y
+        assert center == pytest.approx(expected, abs=1.0)
+
+        original_button = imgui.button
+
+        def accept_error(label, *args, **kwargs):
+            return True if label == "OK" else original_button(label, *args, **kwargs)
+
+        monkeypatch.setattr(imgui, "button", accept_error)
+        viewer.sync()
+        monkeypatch.setattr(imgui, "button", original_button)
+
+        viewer.app._add_scene_object(MeshShape.BOX, "box")
+        viewer.app._request_document_action("quit")
+        for _ in range(3):
+            viewer.sync()
+        width, height = viewer.window.size_points
+        glfw.set_window_size(viewer.window._window, width + 400, height + 300)
+        for _ in range(3):
+            viewer.sync()
+        _prompt, center, expected = geometry("Unsaved changes")
+        assert center == pytest.approx(expected, abs=1.0)
     finally:
         viewer.release()
 

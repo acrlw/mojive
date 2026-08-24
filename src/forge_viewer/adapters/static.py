@@ -88,6 +88,9 @@ class StaticSceneAdapter(SceneAdapterBase):
     def set_geometry_color(self, node_id, rgba) -> bool:
         return self.scene.set_geometry_color(node_id, rgba)
 
+    def set_geometry_size(self, node_id, size) -> bool:
+        return self.scene.set_geometry_size(node_id, size)
+
     def cameras(self) -> list[CameraInfo]:
         return self.scene.camera_infos()
 

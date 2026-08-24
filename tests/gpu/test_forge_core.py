@@ -151,6 +151,7 @@ def test_integer_attachment_clear_is_exact(gl):
             tgt.clear_id(value)
             uniq = np.unique(tgt.read_ids())
             assert len(uniq) == 1 and uniq[0] == value
+            assert tgt.read_id(17, 11) == value
         assert n.drain_errors() == 0
     finally:
         tgt.release()

@@ -181,6 +181,12 @@ def test_scene_entity_commands_keep_their_typed_remote_boundary():
     assert command.node_id == 9
     assert np.array_equal(command.rgba, color)
 
+    size = np.array((2.0, 3.0, 0.02), np.float32)
+    command = handle_session_command(Sink(), {"op": "geometry_size", "node_id": 9, "size": size})
+    assert isinstance(command, cmd.SetGeometrySize)
+    assert command.node_id == 9
+    assert np.array_equal(command.size, size)
+
     command = handle_session_command(
         Sink(),
         {

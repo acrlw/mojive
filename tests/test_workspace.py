@@ -61,6 +61,30 @@ def test_workspace_authored_hierarchy_has_one_edge_per_node(shape: MeshShape) ->
     assert [nodes[child].name for child in link.children] == ["primitive.geom"]
 
 
+def test_workspace_authored_plane_size_is_editable_and_finite() -> None:
+    document = workspace()
+    object_id = document.add_scene_object(
+        MeshShape.PLANE,
+        "floor",
+        np.array((4.0, 4.0, 0.02), np.float32),
+        np.zeros(3, np.float32),
+        np.eye(3, dtype=np.float32),
+        np.ones(4, np.float32),
+        DEFAULT_MATERIAL,
+    )
+    session = Session(document)
+    link = session.node_by_object_id(object_id)
+    geometry = session.node(link.children[0])
+
+    assert session.source.geom_infinite_plane.tolist() == [False]
+    assert session.submit(
+        cmd.SetGeometrySize(geometry.node_id, np.array((3.0, 5.0, 0.02), np.float32))
+    )
+    assert session.source.geom_size[0] == pytest.approx((3.0, 5.0, 0.02))
+    assert session.submit(cmd.Undo())
+    assert session.source.geom_size[0] == pytest.approx((4.0, 4.0, 0.02))
+
+
 def test_workspace_round_trip_preserves_models_resources_and_entities(tmp_path: Path) -> None:
     document = workspace()
     model_id = document.add_scene_model(

@@ -11,7 +11,7 @@ from ... import commands as cmd
 from ... import math3d
 from ...adapters.base import FrameNeeds, ModelComponentInfo, NodeKind, SceneNode
 from ...render.backend import RenderFlag
-from ...types import DEFAULT_HEADLIGHT, Environment, LightKind, TextureKind
+from ...types import DEFAULT_HEADLIGHT, Environment, LightKind, MeshShape, TextureKind
 from . import Panel, PanelContext, begin_kv_table, labeled
 
 GIZMO_REFUSAL_RUNNING = "physics is running; pause to move things"
@@ -582,6 +582,38 @@ class InspectorPanel(Panel):
         if not opened:
             imgui.pop_id()
             return
+
+        shape = src.geom_mesh[first].shape
+        infinite_plane = bool(src.geom_infinite_plane[first])
+        editable_size = (
+            shape is MeshShape.PLANE
+            and not infinite_plane
+            and scene_node is not None
+            and scene_node.model_id < 0
+            and ctx.session.adapter.caps.scene_authoring
+        )
+        if shape is MeshShape.PLANE:
+            if infinite_plane:
+                imgui.text_disabled("infinite plane")
+            else:
+                if not editable_size:
+                    imgui.begin_disabled()
+                dimensions = np.asarray(src.geom_size[first, :2], np.float32) * 2.0
+                size_changed, dimensions = imgui.drag_float2(
+                    "width / length", dimensions, 0.05, 0.002, 1000000.0, "%.3f"
+                )
+                if not editable_size:
+                    imgui.end_disabled()
+                hint = (
+                    "Full X/Y dimensions of this finite plane"
+                    if editable_size
+                    else "Edit model geometry dimensions in its source"
+                )
+                imgui.set_item_tooltip(hint)
+                if size_changed and editable_size:
+                    size = np.asarray(src.geom_size[first], np.float32).copy()
+                    size[:2] = np.maximum(np.asarray(dimensions, np.float32) * 0.5, 0.001)
+                    self._submit_edit(ctx, cmd.SetGeometrySize(node_id, size))
 
         color_changed, rgba = imgui.color_edit4("instance color", src.geom_rgba[first])
         if color_changed and node_id >= 0:

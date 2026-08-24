@@ -306,6 +306,12 @@ class WorkspaceAdapter(SceneAdapterBase):
             return self.scene.set_geometry_color(scene_node, rgba)
         return self.primary.set_geometry_color(node_id, rgba)
 
+    def set_geometry_size(self, node_id: int, size) -> bool:
+        scene_node = self._node_to_scene.get(int(node_id))
+        if scene_node is not None:
+            return self.scene.set_geometry_size(scene_node, size)
+        return False
+
     def add_scene_object(self, shape, name, size, position, rotation, color, material) -> int:
         raw = self.scene.add(
             shape,

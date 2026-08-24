@@ -715,6 +715,9 @@ class SceneAdapterBase:
         source.geom_rgba[instances] = np.asarray(rgba, np.float32)
         return True
 
+    def set_geometry_size(self, node_id: int, size: np.ndarray) -> bool:
+        return False
+
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
         return False
 
@@ -844,6 +847,7 @@ class SceneAdapter(Protocol):
     def set_environment(self, environment: Environment) -> bool: ...
     def set_material(self, material_id: int, material: Material) -> bool: ...
     def set_geometry_color(self, node_id: int, rgba: np.ndarray) -> bool: ...
+    def set_geometry_size(self, node_id: int, size: np.ndarray) -> bool: ...
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool: ...
     def add_scene_object(
         self,

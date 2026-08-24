@@ -46,6 +46,9 @@ class SceneObject:
     def set_color(self, rgba) -> None:
         self.scene.set_object_color(self.object_id, rgba)
 
+    def set_size(self, size) -> None:
+        self.scene.set_object_size(self.object_id, size)
+
     def remove(self) -> None:
         self.scene.remove(self.object_id)
 
@@ -308,6 +311,23 @@ class Scene:
         item = self._item(object_id)
         item.color[:] = np.asarray(rgba, np.float32).reshape(4)
         self._revision += 1
+
+    def set_object_size(self, object_id: int, size) -> None:
+        value = _vec3(size)
+        if not np.all(np.isfinite(value)) or np.any(value <= 0.0):
+            raise ValueError("Geometry size must contain three positive finite values")
+        self._item(object_id).size[:] = value
+        self._revision += 1
+
+    def set_geometry_size(self, node_id: int, size) -> bool:
+        object_id = self._geom_node_to_oid.get(int(node_id))
+        if object_id is None:
+            return False
+        try:
+            self.set_object_size(object_id, size)
+        except ValueError:
+            return False
+        return True
 
     def set_light(self, light_id: int, light) -> bool:
         i = int(light_id)

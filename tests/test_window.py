@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
+from types import SimpleNamespace
 
+import pytest
+from imgui_bundle import imgui
+
+from forge_viewer.ui.app import _prepare_modal
 from forge_viewer.ui.window import layout_scale, resolve_context_api, resolve_ui_scales
 
 
@@ -58,3 +62,33 @@ def test_resolve_context_api(requested: str, expected: str) -> None:
 def test_resolve_context_api_rejects_unknown_backend() -> None:
     with pytest.raises(ValueError, match="Unsupported FORGE_VIEWER_GL"):
         resolve_context_api("gles")
+
+
+def test_modal_layout_tracks_the_current_viewport_and_enforces_readable_width(
+    monkeypatch,
+) -> None:
+    positions = []
+    constraints = []
+    center = imgui.ImVec2(700.0, 450.0)
+    monkeypatch.setattr(
+        imgui,
+        "get_main_viewport",
+        lambda: SimpleNamespace(get_center=lambda: center),
+    )
+    monkeypatch.setattr(imgui, "set_next_window_pos", lambda *args: positions.append(args))
+    monkeypatch.setattr(
+        imgui,
+        "set_next_window_size_constraints",
+        lambda *args: constraints.append(args),
+    )
+
+    _prepare_modal(1.5, 440.0)
+
+    position, condition, pivot = positions[0]
+    assert (position.x, position.y) == pytest.approx((700.0, 450.0))
+    assert condition == imgui.Cond_.always.value
+    assert (pivot.x, pivot.y) == pytest.approx((0.5, 0.5))
+    minimum, maximum = constraints[0]
+    assert (minimum.x, minimum.y) == pytest.approx((660.0, 0.0))
+    assert maximum.x == pytest.approx(660.0)
+    assert maximum.y > 1e30
