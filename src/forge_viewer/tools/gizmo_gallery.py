@@ -126,6 +126,44 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
         viewer.sync()
         io.add_mouse_button_event(0, True)
         viewer.sync()
+        small = project(
+            camera,
+            (
+                _rotation_ring_point(
+                    origin,
+                    start_rotation,
+                    scale,
+                    start_angle + np.radians(5.0),
+                ),
+            ),
+            rect,
+        )[0, :2]
+        io.add_mouse_pos_event(*small)
+        viewer.sync()
+        _save(viewer, node, output / f"rotation-drag{suffix}-small-{style}.png")
+        io.add_key_event(imgui.Key.mod_shift, True)
+        io.add_mouse_pos_event(*small)
+        viewer.sync()
+        if not viewer.app.gizmo.snapping:
+            raise RuntimeError("small-angle rotation snap input was not applied")
+        _save(viewer, node, output / f"rotation-snap{suffix}-small-{style}.png")
+        negative = project(
+            camera,
+            (
+                _rotation_ring_point(
+                    origin,
+                    start_rotation,
+                    scale,
+                    start_angle - np.radians(30.0),
+                ),
+            ),
+            rect,
+        )[0, :2]
+        io.add_mouse_pos_event(*negative)
+        viewer.sync()
+        _save(viewer, node, output / f"rotation-snap{suffix}-negative-{style}.png")
+        io.add_key_event(imgui.Key.mod_shift, False)
+        viewer.sync()
         end = project(
             camera,
             (

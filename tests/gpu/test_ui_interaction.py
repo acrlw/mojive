@@ -1185,6 +1185,7 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style):
         def __init__(self, inner):
             self.inner = inner
             self.sectors = 0
+            self.arc_strokes = 0
             self.open_arcs = 0
             self.closed_arcs = 0
             self.radials = 0
@@ -1194,6 +1195,10 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style):
         def convex_fill(self, points, color):
             self.sectors += 1
             return self.inner.convex_fill(points, color)
+
+        def fringed_concave_fill(self, points, color):
+            self.arc_strokes += 1
+            return self.inner.fringed_concave_fill(points, color)
 
         def polyline(self, points, color, width, *, closed=False):
             if closed:
@@ -1241,10 +1246,11 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style):
 
     gizmo_draw = recorders[0]
     assert gizmo_draw.sectors == 1
+    assert gizmo_draw.arc_strokes == 1
     assert gizmo_draw.open_arcs == 0
     assert all(draw.closed_arcs == gizmo_draw.closed_arcs for draw in recorders[1:])
     assert gizmo_draw.radials == 0
-    assert gizmo_draw.center_dots == 3
+    assert gizmo_draw.center_dots == 0
     assert any(text.startswith("Z ") and text.endswith("°") for text in gizmo_draw.texts)
     assert after_pos == pytest.approx(before_pos, abs=1e-5)
     assert np.linalg.norm(after_mat - before_mat) > 0.05

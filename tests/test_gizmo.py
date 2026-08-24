@@ -12,9 +12,12 @@ from forge_viewer.gizmo import (
     CENTER_HIT_PT,
     CENTER_RADIUS,
     CENTER_SHELL_RADIUS,
+    GUIDE_CORE_COLOR,
+    HOVER_COLOR,
     PLANE_INNER,
     RING_RADIUS,
     RING_SEGMENTS,
+    RING_WIDTH_PT,
     SCREEN_RING_RADIUS,
     SIZE_PT,
     GizmoFrame,
@@ -60,6 +63,20 @@ from forge_viewer.ui.gizmo import (
 RECT = (0.0, 0.0, 800.0, 600.0)
 
 
+class RecordingDraw2D:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple, dict]] = []
+
+    def __getattr__(self, name: str):
+        if name.startswith("__"):
+            raise AttributeError(name)
+
+        def record(*args, **kwargs):
+            self.calls.append((name, args, kwargs))
+
+        return record
+
+
 @pytest.mark.parametrize(
     ("degrees", "sweep"),
     (
@@ -83,6 +100,93 @@ def test_rotation_guide_wraps_only_after_a_full_turn(degrees: float, sweep: floa
 def test_rotation_fill_keeps_constant_opacity(degrees: float, alpha: float) -> None:
     assert _rotation_fill_alpha(np.radians(degrees)) == pytest.approx(alpha)
     assert _rotation_fill_alpha(np.radians(-degrees)) == pytest.approx(alpha)
+
+
+@pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
+@pytest.mark.parametrize("degrees", [5.0, -30.0], ids=("small", "negative"))
+def test_rotation_guide_keeps_the_sector_and_arc_without_center_strokes(
+    orthographic: bool,
+    degrees: float,
+) -> None:
+    cam = CameraView(
+        eye=np.array((4.0, -6.0, 0.8), np.float32),
+        target=np.zeros(3, np.float32),
+        up=np.array((0.0, 0.0, 1.0), np.float32),
+        aspect=RECT[2] / RECT[3],
+        orthographic=orthographic,
+        ortho_height=5.0,
+    )
+    center = np.zeros(3)
+    axis = np.array((0.0, 0.0, 1.0))
+    start = np.array((1.0, 0.0, 0.0))
+    dial = _RotationDialProjector(
+        cam,
+        RECT,
+        center,
+        axis,
+        start,
+        SIZE_PT,
+        RotationDialProjection.ORTHOGRAPHIC,
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._axis[:] = axis
+    gizmo._rotation_angle = np.radians(degrees)
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_rotation_guide(overlay, cam, RECT, 1.0, dial)
+
+    fills = [args[0] for name, args, _kwargs in overlay.calls if name == "convex_fill"]
+    polylines = [kwargs for name, _args, kwargs in overlay.calls if name == "polyline"]
+    strokes = [args[0] for name, args, _kwargs in overlay.calls if name == "fringed_concave_fill"]
+    dots = [args[0] for name, args, _kwargs in overlay.calls if name == "circle_filled"]
+    projected_center = project(cam, (center,), RECT)[0, :2]
+    assert len(fills) == 1
+    assert fills[0][0] == pytest.approx(projected_center)
+    assert sum(bool(kwargs.get("closed")) for kwargs in polylines) == 1
+    assert sum(not bool(kwargs.get("closed")) for kwargs in polylines) == 0
+    assert len(strokes) == 1
+    stroke = strokes[0]
+    point_count = len(stroke) // 2
+    caps = (stroke[0] - stroke[-1], stroke[point_count] - stroke[point_count - 1])
+    for cap, angle in zip(caps, (0.0, gizmo._rotation_angle), strict=True):
+        tick = dial.tick(RING_RADIUS, angle, 1.0)
+        assert tick is not None
+        radial = tick[1] - tick[0]
+        cross = cap[0] * radial[1] - cap[1] * radial[0]
+        assert abs(cross) <= 1e-6 * np.linalg.norm(cap) * np.linalg.norm(radial)
+        assert np.linalg.norm(cap) == pytest.approx(RING_WIDTH_PT)
+    assert not dots
+    assert all(name != "line" for name, _args, _kwargs in overlay.calls)
+
+
+def test_rotation_snap_highlight_matches_the_corresponding_tick_length() -> None:
+    cam = camera()
+    axis = np.array((0.0, 0.0, 1.0))
+    dial = _RotationDialProjector(
+        cam,
+        RECT,
+        np.zeros(3),
+        axis,
+        np.array((1.0, 0.0, 0.0)),
+        SIZE_PT,
+        RotationDialProjection.ORTHOGRAPHIC,
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._axis[:] = axis
+    gizmo._rotation_angle = np.radians(5.0)
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_rotation_snap_ticks(overlay, cam, RECT, 1.0, dial)
+
+    lines = [args for name, args, _kwargs in overlay.calls if name == "line"]
+    core = [args for args in lines if np.allclose(args[2], GUIDE_CORE_COLOR)]
+    highlighted = [args for args in lines if np.allclose(args[2], HOVER_COLOR)]
+    assert core
+    assert len(highlighted) == 1
+    start, end = highlighted[0][:2]
+    assert np.linalg.norm(end - start) == pytest.approx(4.0 * DEFAULT_ROTATION_TICK_SCALE)
 
 
 def camera(*, orthographic: bool = False) -> CameraView:

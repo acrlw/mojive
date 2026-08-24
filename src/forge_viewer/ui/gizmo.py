@@ -727,15 +727,6 @@ class ObjectGizmo:
         )
         ticks: list[tuple[np.ndarray, np.ndarray]] = []
         for degrees in np.arange(0.0, 360.0, step):
-            rounded = round(float(degrees))
-            if abs(degrees - rounded) < 1e-6 and rounded % 90 == 0:
-                length_pt = 8.0
-            elif abs(degrees / 45.0 - round(degrees / 45.0)) < 1e-6:
-                length_pt = 7.0
-            elif abs(degrees / 15.0 - round(degrees / 15.0)) < 1e-6:
-                length_pt = 5.5
-            else:
-                length_pt = 4.0
             angle = np.radians(degrees)
             angle_step = np.radians(step)
             points = dial_points((angle, angle + angle_step))
@@ -744,11 +735,23 @@ class ObjectGizmo:
             spacing = float(np.linalg.norm(points[1, :2] - points[0, :2]))
             if not ticks_visible or spacing < 2.0 * style_scale:
                 continue
-            segment = tick_segment(angle, length_pt)
+            segment = tick_segment(angle, _rotation_tick_length_pt(degrees))
             if segment is not None:
                 ticks.append(segment)
 
-        active_tick = tick_segment(self._rotation_angle, 15.0) if ticks_visible else None
+        active_tick = None
+        if ticks_visible:
+            angle = self._rotation_angle
+            points = dial_points((angle, angle + np.radians(step)))
+            spacing = float(np.linalg.norm(points[1, :2] - points[0, :2]))
+            if np.all(points[:, 2] > 0.0) and spacing >= 2.0 * style_scale:
+                # Highlight the existing tick without extending beyond the
+                # tick field when the projected dial becomes narrow.
+                active_tick = tick_segment(
+                    angle,
+                    _rotation_tick_length_pt(np.degrees(angle)),
+                )
+
         for inner, outer in ticks:
             overlay.line(inner, outer, core, 1.1 * style_scale)
         if active_tick is not None:
@@ -813,26 +816,21 @@ class ObjectGizmo:
             SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
         )
 
+        dial_segments = _rotation_dial_segments(
+            cam, self._start_pos, self._axis, self.rotation_dial_projection
+        )
         reference = dial.points(
             ring_radius,
             np.linspace(
                 0.0,
                 2.0 * np.pi,
-                _rotation_dial_segments(
-                    cam, self._start_pos, self._axis, self.rotation_dial_projection
-                ),
+                dial_segments,
                 endpoint=False,
             ),
         )
-
-        def arc_screen(angles):
-            return dial.points(ring_radius, angles)
-
-        dial_segments = _rotation_dial_segments(
-            cam, self._start_pos, self._axis, self.rotation_dial_projection
-        )
         point_count = max(2, int(np.ceil(dial_segments * abs(sweep) / (2.0 * np.pi))) + 1)
-        arc = arc_screen(np.linspace(0.0, sweep, point_count))
+        angles = np.linspace(0.0, sweep, point_count)
+        arc = dial.points(ring_radius, angles)
         center = project(cam, (self._start_pos,), rect)[0]
         if center[2] <= 0.0 or np.any(arc[:, 2] <= 0.0):
             return
@@ -857,9 +855,18 @@ class ObjectGizmo:
             )
         if abs(sweep) > 1e-6:
             width = RING_WIDTH_PT * style_scale
-            overlay.polyline(np.vstack((center, arc)), border, width, closed=True)
-            for joint in (center, arc[0], arc[-1]):
-                overlay.circle_filled(joint, width * 0.5, border, segments=12)
+            start_tick = dial.tick(ring_radius, float(angles[0]), 1.0)
+            end_tick = dial.tick(ring_radius, float(angles[-1]), 1.0)
+            stroke = _rotation_arc_stroke(
+                arc,
+                None if start_tick is None else start_tick[1] - start_tick[0],
+                None if end_tick is None else end_tick[1] - end_tick[0],
+                width,
+            )
+            if len(stroke):
+                overlay.fringed_concave_fill(stroke, border)
+            else:
+                overlay.polyline(arc, border, width)
 
     def _draw_value_label(
         self,
@@ -1155,6 +1162,64 @@ def _rotation_sweep(angle: float) -> float:
 
 def _rotation_fill_alpha(sweep: float) -> float:
     return 0.28 if abs(float(sweep)) > 1e-6 else 0.0
+
+
+def _rotation_tick_length_pt(degrees: float) -> float:
+    degrees = float(degrees) % 360.0
+    rounded = round(degrees)
+    if abs(degrees - rounded) < 1e-6 and rounded % 90 == 0:
+        return 8.0
+    if abs(degrees / 45.0 - round(degrees / 45.0)) < 1e-6:
+        return 7.0
+    if abs(degrees / 15.0 - round(degrees / 15.0)) < 1e-6:
+        return 5.5
+    return 4.0
+
+
+def _rotation_arc_stroke(points, start_radial, end_radial, width: float) -> np.ndarray:
+    """Build a constant-width arc whose flat caps follow projected dial radii."""
+    points = np.asarray(points, np.float64).reshape(-1, 2)
+    width = float(width)
+    if len(points) < 2 or width <= 0.0:
+        return np.empty((0, 2), np.float64)
+
+    tangents = np.empty_like(points)
+    tangents[0] = points[1] - points[0]
+    tangents[-1] = points[-1] - points[-2]
+    if len(points) > 2:
+        tangents[1:-1] = points[2:] - points[:-2]
+    lengths = np.linalg.norm(tangents, axis=1)
+    for index in np.flatnonzero(lengths < 1e-6):
+        candidates = []
+        if index > 0:
+            candidates.append(points[index] - points[index - 1])
+        if index + 1 < len(points):
+            candidates.append(points[index + 1] - points[index])
+        if candidates:
+            tangent = max(candidates, key=np.linalg.norm)
+            tangents[index] = tangent
+            lengths[index] = np.linalg.norm(tangent)
+    if np.any(lengths < 1e-6):
+        return np.empty((0, 2), np.float64)
+
+    tangents /= lengths[:, None]
+    offsets = np.column_stack((-tangents[:, 1], tangents[:, 0]))
+    for index, radial in ((0, start_radial), (-1, end_radial)):
+        if radial is None:
+            continue
+        radial = np.asarray(radial, np.float64).reshape(2)
+        length = float(np.linalg.norm(radial))
+        if length < 1e-6:
+            continue
+        radial /= length
+        if np.dot(radial, offsets[index]) < 0.0:
+            radial *= -1.0
+        offsets[index] = radial
+
+    half_width = 0.5 * width
+    side_a = points - offsets * half_width
+    side_b = points + offsets * half_width
+    return np.vstack((side_a, side_b[::-1]))
 
 
 def _clip_line_to_rect(origin, direction, rect) -> tuple[np.ndarray, np.ndarray] | None:
