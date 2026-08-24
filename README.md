@@ -156,9 +156,13 @@ editable root position and rotation. URDF enters as an import format and is stor
 MJCF when its topology changes.
 
 The File menu creates, opens, and saves workspaces. `Add Model...` and file drop compose robots and
-scene assets. `File > Resource Directories` manages reusable asset search paths. The Hierarchy
+scene assets. `File > Resource Directories` manages reusable asset search paths. Opening a
+workspace with missing models shows a repair dialog: locate one file directly or search a
+directory to rewrite every unambiguous path before loading. The Hierarchy
 context menu adds and removes MJCF bodies, geometry, joints, sites, cameras, and lights through
-MjSpec. Model elements support rename and local transform editing. The Entity menu creates
+MjSpec. Selecting a model exposes structured actuator, sensor, tendon, and equality components in
+Inspector; edits use model-local reference choices, MjSpec validation, undo/redo, and workspace
+round trips. Model elements support rename and local transform editing. The Entity menu creates
 backend-neutral primitives, lights, and cameras. Selected Forge entities support duplicate,
 rename, and delete from the menu, keyboard shortcuts, and the Hierarchy context menu.
 
@@ -215,7 +219,7 @@ make viewer BACKEND=wgpu
 The wgpu backend supports the interactive viewer and the public Renderer API on Metal and
 Vulkan. It includes render flags, debug views, shadows, planar reflections, skybox/IBL,
 tendons, debug draw, selection outlines, and the native gizmo. `backend.caps.notes` reports
-backend-specific limits such as CPU-only timing and single-sample ID/depth export.
+backend-specific limits such as optional GPU timing and single-sample ID/depth export.
 
 ## Visual acceptance
 
@@ -230,6 +234,8 @@ Every user-facing feature has a reproducible Make target.
 | `make empty` | Open an empty viewer and load MJCF or URDF from the File menu |
 | `make model-loading` | Capture empty, MJCF, and URDF runtime-loading references |
 | `make model-composition` | Validate MjSpec state migration and capture add/remove references |
+| `make editor-performance` | Record large composition editing timings under `output/` |
+| `make stability BACKEND=wgpu` | Run long-frame, large-model lifecycle, and multi-camera gates |
 | `make outline` | Selection, x-ray outline, and outline antialiasing |
 | `make gizmo` | Native 2D and 3D transform gizmos |
 | `make gizmo-gallery` | Enlarged position, rotation, and snap reference images |
@@ -255,7 +261,7 @@ Every user-facing feature has a reproducible Make target.
 | `make deformables` | Flex and skin dynamic meshes |
 | `make robot` | Download and open a MuJoCo Menagerie robot |
 | `make editor` | Empty authored workspace with scene files and Entity editing |
-| `make workspace-edit` | Workspace composition, MjSpec topology, camera and light acceptance |
+| `make workspace-edit` | Workspace composition, resource repair, structured MJCF, camera and light acceptance |
 | `make editor-files` | Scene document workflow acceptance and capture |
 | `make entity-edit` | Entity lifecycle CPU and GPU acceptance |
 | `make canvas` | Standalone scene authoring with editable transforms, materials, and Forge entities |
@@ -299,6 +305,8 @@ make record SCENE=humanoid OUTPUT=output/humanoid.mp4 ARGS="--frames 240"
 | `make mujoco-audit` | MuJoCo feature coverage for one model |
 | `make adapter-conformance` | Backend-neutral scene contract |
 | `make bench` | Median CPU and GPU pass timing |
+| `make editor-performance` | Composition compile and structured-edit timing baseline |
+| `make stability BACKEND=wgpu` | Memory, lifecycle, and interleaved multi-camera stability |
 | `make parity` | Forge and MuJoCo reference renders |
 | `make calibrate` | Reference-lighting calibration |
 | `make probe` | OpenGL capability report |
