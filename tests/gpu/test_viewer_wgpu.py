@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 
 import numpy as np
 import pytest
@@ -21,6 +22,7 @@ pytest.importorskip("rendercanvas")
 
 from forge_viewer.composition import build_scene  # noqa: E402
 from forge_viewer.demos import canvas_scene  # noqa: E402
+from forge_viewer.render.backend import RenderFlag  # noqa: E402
 from forge_viewer.render.webgpu.backend import WgpuBackend  # noqa: E402
 from forge_viewer.ui.window_wgpu import WgpuWindow  # noqa: E402
 
@@ -61,6 +63,22 @@ def test_window_and_backend_are_wgpu(viewer):
     fb_w, fb_h = v.window.size_pixels
     pt_w, pt_h = v.window.size_points
     assert fb_w >= pt_w and fb_h >= pt_h
+
+
+def test_gpu_pass_timing_is_reported_when_supported(viewer):
+    v, _scene = viewer
+    supported = "timestamp-query" in v.backend.device.features
+    assert v.backend.caps.gpu_timing is supported
+    if not supported:
+        assert not v.backend.stats.gpu_ms
+        return
+    for _ in range(20):
+        v.sync()
+        if {"scene", "export"} <= v.backend.stats.gpu_ms.keys():
+            break
+        time.sleep(0.005)
+    assert v.backend.stats.gpu_ms["scene"] > 0.0
+    assert v.backend.stats.gpu_ms["export"] > 0.0
 
 
 def test_window_dependencies_use_the_imgui_glfw_library(backend_name):
@@ -105,6 +123,25 @@ def test_viewport_image_carries_the_wgpu_color_view(viewer):
     # Registering through the window is cached while the target is unchanged.
     ref = v.window.viewport_texture_ref(image)
     assert ref is v.window.viewport_texture_ref(image)
+
+
+def test_msaa_flag_rebuilds_wgpu_targets_and_pipelines(viewer):
+    v, _scene = viewer
+    original_color = v.backend.target.color
+    assert v.backend.target.samples == 4
+
+    assert v.backend.set_flag(RenderFlag.MSAA, False)
+    assert v.backend.target.samples == 1
+    assert v.backend.caps.msaa_samples == 1
+    assert v.backend.target.color is not original_color
+    v.sync()
+    assert float(viewport_snap(v).std()) > 10.0
+
+    assert v.backend.set_flag(RenderFlag.MSAA, True)
+    assert v.backend.target.samples == 4
+    assert v.backend.caps.msaa_samples == 4
+    v.sync()
+    assert float(viewport_snap(v).std()) > 10.0
 
 
 def test_scene_edit_reaches_the_window(viewer):

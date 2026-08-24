@@ -12,6 +12,7 @@ from ...scene import RenderScene
 from ..instances import InstanceStore
 from ..lighting import LIGHTS_BYTES, LightUniforms
 from ..targets import FRAME_BYTES, FRAME_DTYPE, proj_matrix_wgpu
+from ..timing import TimestampWriter
 
 MAX_REFLECTION_PLANES = 4
 REFLECT_STRIDE = 512  # FRAME_BYTES (384) rounded up to 256-byte binding alignment
@@ -349,6 +350,7 @@ class ReflectPass:
         instances: InstanceStore,
         lights: LightUniforms,
         draw_buckets,
+        timestamp: TimestampWriter | None = None,
     ) -> tuple[int, int]:
         """Encode one pass per plane; returns (draw calls, instances drawn)."""
         excluded = set().union(*(group.buckets for group in self._groups))
@@ -370,6 +372,7 @@ class ReflectPass:
                     "depth_load_op": "clear",
                     "depth_store_op": "store",
                 },
+                timestamp_writes=timestamp("reflection") if timestamp is not None else None,
             )
             group0 = self._group0(group0_layout, k, instances, lights)
             opaque = tuple(b for b in scene.opaque_buckets if b not in excluded)

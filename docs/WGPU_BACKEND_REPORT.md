@@ -1,6 +1,6 @@
 # wgpu Backend Report
 
-Date: 2026-08-21
+Date: 2026-08-24
 
 ## Status
 
@@ -42,16 +42,21 @@ make renderer-api-wgpu
 | Diagnostics | Debug views, labels, frames, BVH, constraints, contacts, tendons |
 | Tooling | Selection outline, debug draw, text overlay, native gizmo |
 | Viewer | GLFW NO_API surface, imgui composition, capture and readback |
+| Runtime diagnostics | Non-blocking GPU pass timestamps; live 1×/4× MSAA toggle |
 
 ## Backend limits
 
-- Pass statistics contain CPU timing. GPU timestamp queries are pending wgpu API support.
+- GPU pass timestamps are requested as an optional device feature and read back asynchronously.
+  Unsupported adapters continue with CPU frame timing only.
 - Object ID and depth export use a single-sample pass because WebGPU does not resolve
   multisampled integer or depth attachments.
-- The MSAA sample count is selected when the backend is created.
+- The MSAA render flag switches between 1× and the configured 4× sample count by rebuilding
+  multisampled targets and sample-count-dependent pipelines.
 - Window pacing implements the viewer's vsync setting while wgpu-py lacks present-mode
   selection.
 - Surface shutdown uses wgpu-py's private release hook until a public API is available.
+- The version-guarded imgui 1.92 adapter remains necessary because wgpu-py 0.32 still reads
+  the removed `cmd_lists_count` property.
 
 These limits are also exposed through `backend.caps.notes`.
 

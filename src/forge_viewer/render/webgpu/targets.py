@@ -96,8 +96,15 @@ class RenderTargetWgpu:
         self._device = device
         self.width = max(1, int(width))
         self.height = max(1, int(height))
-        self.samples = 4 if int(samples) > 1 else 1
+        self.samples = self._sample_count(samples)
         self._build()
+        self.frame_buffer = device.create_buffer(
+            size=FRAME_BYTES, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST
+        )
+
+    @staticmethod
+    def _sample_count(samples: int) -> int:
+        return 4 if int(samples) > 1 else 1
 
     def _build(self) -> None:
         device = self._device
@@ -137,15 +144,25 @@ class RenderTargetWgpu:
         self.export_zbuf = device.create_texture(
             size=size, format="depth24plus", usage=wgpu.TextureUsage.RENDER_ATTACHMENT
         )
-        self.frame_buffer = device.create_buffer(
-            size=FRAME_BYTES, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST
-        )
 
     def resize(self, width: int, height: int) -> None:
         width, height = max(1, int(width)), max(1, int(height))
         if (width, height) == (self.width, self.height):
             return
         self.width, self.height = width, height
+        self._release_textures()
+        self._build()
+
+    def set_samples(self, samples: int) -> bool:
+        samples = self._sample_count(samples)
+        if samples == self.samples:
+            return False
+        self.samples = samples
+        self._release_textures()
+        self._build()
+        return True
+
+    def _release_textures(self) -> None:
         for tex in (
             self.color,
             self.color_ms,
@@ -156,7 +173,6 @@ class RenderTargetWgpu:
         ):
             if tex is not None:
                 tex.destroy()
-        self._build()
 
     def _read_texture(self, texture, dtype, channels: int, flip: bool) -> np.ndarray:
         bpp = np.dtype(dtype).itemsize * channels
@@ -197,13 +213,5 @@ class RenderTargetWgpu:
         return int(np.frombuffer(data, np.uint32)[0])
 
     def release(self) -> None:
-        for tex in (
-            self.color,
-            self.color_ms,
-            self.zbuf,
-            self.export_depth,
-            self.export_id,
-            self.export_zbuf,
-        ):
-            if tex is not None:
-                tex.destroy()
+        self._release_textures()
+        self.frame_buffer.destroy()

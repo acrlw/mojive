@@ -15,6 +15,7 @@ from ..lighting import LOCAL_SHADOW_SLOTS, LightSchedule, ShadowState, schedule_
 from ..meshes import MeshStore
 from ..programs import load_wgsl
 from ..targets import perspective_wgpu
+from ..timing import TimestampWriter
 
 log = get_logger("shadow")
 
@@ -379,6 +380,7 @@ class ShadowPass:
         scene: RenderScene,
         meshes: MeshStore,
         instances,
+        timestamp: TimestampWriter | None = None,
     ) -> int:
         """Encode the shadow passes; returns the draw-call count."""
         state = self._state
@@ -396,6 +398,7 @@ class ShadowPass:
                     "depth_load_op": "clear",
                     "depth_store_op": "store",
                 },
+                timestamp_writes=timestamp("shadow") if timestamp is not None else None,
             )
             depth_pass.set_pipeline(self._depth_pipeline)
             for i in range(state.cascade_count):
@@ -421,7 +424,8 @@ class ShadowPass:
                             "load_op": "clear",
                             "store_op": "store",
                         }
-                    ]
+                    ],
+                    timestamp_writes=timestamp("shadow") if timestamp is not None else None,
                 )
                 layer_pass.set_pipeline(self._dist_pipeline)
                 layer_pass.set_bind_group(0, group0, [draw * UNIFORM_STRIDE])

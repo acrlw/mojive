@@ -8,6 +8,7 @@ import wgpu
 from ...backend import RenderFlag
 from ...scene import RenderScene
 from ..programs import load_wgsl
+from ..timing import TimestampWriter
 
 OUTLINE_RADIUS = 3
 OUTLINE_COLOR = (1.0, 0.63, 0.20, 1.0)
@@ -173,6 +174,7 @@ class OutlinePass:
         view_proj: np.ndarray,
         width: int,
         height: int,
+        timestamp: TimestampWriter | None = None,
     ) -> int:
         """Rasterize the selected silhouette; returns the draw-call count."""
         mask = self._ensure_mask(width, height)
@@ -212,7 +214,8 @@ class OutlinePass:
                     "load_op": "clear",
                     "store_op": "store",
                 }
-            ]
+            ],
+            timestamp_writes=timestamp("outline") if timestamp is not None else None,
         )
         mask_pass.set_pipeline(self._mask_pipeline)
         mask_pass.set_bind_group(0, group)

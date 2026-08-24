@@ -330,6 +330,12 @@ class GizmoPass:
             pass_encoder.draw_indexed(mesh.index_count)
         return len(self._draws)
 
+    def set_samples(self, samples: int) -> None:
+        if int(samples) == self._samples:
+            return
+        self._samples = int(samples)
+        self._pipelines.clear()
+
     def release(self) -> None:
         for mesh in self._meshes.values():
             mesh.release()

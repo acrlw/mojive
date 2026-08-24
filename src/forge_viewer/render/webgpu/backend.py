@@ -44,6 +44,7 @@ from .passes import (
 from .programs import WgslWatch, load_wgsl
 from .targets import FRAME_BYTES, FRAME_DTYPE, RenderTargetWgpu, proj_matrix_wgpu
 from .textures import TextureStore
+from .timing import WgpuTiming, default_device
 
 log = get_logger("wgpu")
 
@@ -163,12 +164,14 @@ class WgpuBackend:
     ) -> None:
         # The viewer window shares this device (surface configuration and the
         # imgui texture binding must match the device that rendered the scene).
-        self.device = device if device is not None else wgpu.utils.get_default_device()
+        self.device = device if device is not None else default_device()
         self.meshes = MeshStore(self.device)
         self.textures = TextureStore(self.device)
         self.instances = InstanceStore(self.device)
         self.lights = LightUniforms(self.device)
         self.target = RenderTargetWgpu(self.device, width, height, samples)
+        self._configured_samples = self.target.samples
+        self.timing = WgpuTiming(self.device)
 
         self._module = self.device.create_shader_module(code=load_wgsl(*_SCENE_SHADERS))
         self._shader_watch = WgslWatch(*_SCENE_SHADERS)
@@ -262,6 +265,7 @@ class WgpuBackend:
         self._frame_mode = FrameMode.NONE
         self._bvh_depth = 0
         self._flags: dict[RenderFlag, bool] = dict.fromkeys(_SUPPORTED_FLAGS, True)
+        self._flags[RenderFlag.MSAA] = self.target.samples > 1
         self._flags[RenderFlag.WIREFRAME] = False
         self._flags[RenderFlag.ADDITIVE] = False
         self._flags[RenderFlag.FOG] = False
@@ -329,16 +333,18 @@ class WgpuBackend:
             shadows=True,
             outline=True,
             gizmo=True,
+            gpu_timing=self.timing.active,
             msaa_samples=self.target.samples,
             id_msaa=False,
             gl_version=f"WebGPU {info.get('backend_type', '')}".rstrip(),
             renderer=f"wgpu-py {wgpu.__version__} on {info.device}",
             notes=(
-                "GPU timer queries unavailable; CPU frame timing only",
-                # forge toggles GL multisample rasterization per pass; WebGPU
-                # bakes the sample count into pipeline state, so the flag is
-                # accepted and stored but never retargets pipelines.
-                "MSAA sample count is fixed at construction; the MSAA flag has no draw-time effect",
+                *(
+                    ()
+                    if self.timing.active
+                    else ("GPU timer queries unavailable; CPU frame timing only",)
+                ),
+                "MSAA changes rebuild multisampled targets and pipelines at runtime",
                 # id_msaa=False: the export MRT pass re-rasterizes the scene
                 # single-sampled instead of resolving the MSAA id/depth targets.
                 "Object ID/depth export is single-sampled; WebGPU cannot resolve "
@@ -879,10 +885,14 @@ class WgpuBackend:
             self._group0_layout, target.frame_buffer, self.lights.buffer
         )
         encoder = self.device.create_command_encoder()
+        self.timing.begin_frame()
+        timestamp = self.timing.timestamp_writes
 
         draw_calls = 0
         if shadow is not None:
-            draw_calls += self._shadows.execute(encoder, scene, self.meshes, self.instances)
+            draw_calls += self._shadows.execute(
+                encoder, scene, self.meshes, self.instances, timestamp
+            )
         # Mirrored scene passes run between the shadow pass and the main scene
         # pass, matching forge's PASS_ORDER (shadow, reflect, opaque, ...).
         if reflective:
@@ -902,7 +912,13 @@ class WgpuBackend:
                 )
 
             calls, _ = self._reflect.execute(
-                encoder, scene, self._group0_layout, self.instances, self.lights, draw_reflected
+                encoder,
+                scene,
+                self._group0_layout,
+                self.instances,
+                self.lights,
+                draw_reflected,
+                timestamp,
             )
             draw_calls += calls
 
@@ -930,6 +946,7 @@ class WgpuBackend:
                 view_proj,
                 target.width,
                 target.height,
+                timestamp,
             )
         # Upload the debug frame before the main pass so execute() only encodes.
         view = np.asarray(cam.view_matrix(), np.float32)
@@ -944,6 +961,7 @@ class WgpuBackend:
                 "depth_load_op": "clear",
                 "depth_store_op": "store",
             },
+            timestamp_writes=timestamp("scene"),
         )
         instances_drawn = 0
         if scene.count:
@@ -1039,6 +1057,7 @@ class WgpuBackend:
                 "depth_load_op": "clear",
                 "depth_store_op": "store",
             },
+            timestamp_writes=timestamp("export"),
         )
         if scene.count:
             pass2.set_pipeline(self._export_pipeline(cull))
@@ -1061,16 +1080,24 @@ class WgpuBackend:
         # SEGMENT/IDCOLOR rebuild the resolved color from the export ids;
         # other views need no present work (the resolve happened in pass1).
         draw_calls += self._present.execute(
-            encoder, target.color, target.export_id, self._debug_view, self._selected
+            encoder,
+            target.color,
+            target.export_id,
+            self._debug_view,
+            self._selected,
+            timestamp,
         )
 
+        pending_timing = self.timing.resolve(encoder)
         self.device.queue.submit([encoder.finish()])
+        self.timing.submitted(pending_timing)
 
         self.stats.draw_calls = draw_calls
         self.stats.instances = instances_drawn
         self.stats.buckets = scene.bucket_count()
         self.stats.triangles = scene.triangle_count(self.meshes.triangle_counts())
         self.stats.frame_cpu_ms = (time.perf_counter() - t0) * 1000.0
+        self.stats.gpu_ms = dict(self.timing.gpu_ms)
         # Same report keys as ForgeBackend._update_light_stats.
         self.stats.notes = {
             "scene lights": (f"{len(schedule.lights)} active, {schedule.deferred_lights} deferred"),
@@ -1092,6 +1119,19 @@ class WgpuBackend:
 
     def resize(self, width: int, height: int) -> None:
         self.target.resize(width, height)
+
+    def _set_msaa_enabled(self, enabled: bool) -> None:
+        samples = self._configured_samples if enabled else 1
+        if not self.target.set_samples(samples):
+            return
+        self._pipelines.clear()
+        self._skybox.release()
+        self._skybox = SkyboxPass(self.device, self.target.samples)
+        self._outline.release()
+        self._outline = OutlinePass(self.device, self.target.samples)
+        self._debug.set_samples(self.target.samples)
+        self._gizmo.set_samples(self.target.samples)
+        self.caps = replace(self.caps, msaa_samples=self.target.samples)
 
     def capture(
         self,
@@ -1145,7 +1185,11 @@ class WgpuBackend:
     def set_flag(self, flag: RenderFlag, value: bool) -> bool:
         if flag not in self.caps.render_flags:
             return False
+        if flag is RenderFlag.MSAA and value and self._configured_samples == 1:
+            return False
         self._flags[flag] = bool(value)
+        if flag is RenderFlag.MSAA:
+            self._set_msaa_enabled(bool(value))
         if flag in {
             RenderFlag.STATIC,
             RenderFlag.SKIN,
@@ -1242,6 +1286,7 @@ class WgpuBackend:
         watch.mark()
 
     def release(self) -> None:
+        self.timing.release()
         self.meshes.release()
         self.textures.release()
         self.instances.release()

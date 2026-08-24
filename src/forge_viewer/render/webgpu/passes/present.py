@@ -7,6 +7,7 @@ import wgpu
 
 from ...backend import DebugView
 from ..programs import load_wgsl
+from ..timing import TimestampWriter
 
 _MODE = {DebugView.SEGMENT: 1, DebugView.IDCOLOR: 2}
 
@@ -56,6 +57,7 @@ class PresentPass:
         ids: wgpu.GPUTexture,
         debug_view: DebugView,
         selected_id: int,
+        timestamp: TimestampWriter | None = None,
     ) -> int:
         """Rewrite ``color`` with the pseudocolor view; returns the draw-call count."""
         mode = _MODE.get(debug_view)
@@ -87,7 +89,8 @@ class PresentPass:
                     "load_op": "clear",
                     "store_op": "store",
                 }
-            ]
+            ],
+            timestamp_writes=timestamp("present") if timestamp is not None else None,
         )
         present_pass.set_pipeline(self._pipeline)
         present_pass.set_bind_group(0, group)

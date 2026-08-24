@@ -247,6 +247,13 @@ class DebugPass:
     ) -> None:
         self._text.configure(primary, primary_index, fallback, fallback_index, size_px)
 
+    def set_samples(self, samples: int) -> None:
+        if int(samples) == self._samples:
+            return
+        self._samples = int(samples)
+        self._pipelines.clear()
+        self._text_pipelines.clear()
+
     def prepare(
         self,
         view: np.ndarray,

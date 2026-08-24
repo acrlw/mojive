@@ -9,6 +9,7 @@ from __future__ import annotations
 import ctypes
 import os
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -32,6 +33,14 @@ glfw: Any = None
 imgui: Any = None
 GlfwRenderer: Any = None
 get_glfw_present_info: Any = None
+
+
+def _default_device() -> wgpu.GPUDevice:
+    with suppress(RuntimeError):
+        wgpu.utils.preconfigure_default_device(
+            "forge-viewer GPU timing", preferred_features={wgpu.FeatureName.timestamp_query}
+        )
+    return wgpu.utils.get_default_device()
 
 
 def _load_window_deps() -> None:
@@ -377,7 +386,7 @@ class WgpuWindow(Window):
         self._file_drag_active = False
         self._native_drop_token = 0
 
-        self._device = device if device is not None else wgpu.utils.get_default_device()
+        self._device = device if device is not None else _default_device()
         self._gpu_context: Any = None
         self._surface_format = ""
         self._rgb_channels = (0, 1, 2)
