@@ -79,6 +79,7 @@ def test_gpu_pass_timing_is_reported_when_supported(viewer):
         time.sleep(0.005)
     assert v.backend.stats.gpu_ms["scene"] > 0.0
     assert v.backend.stats.gpu_ms["export"] > 0.0
+    assert all(np.isfinite(value) and value < 1000.0 for value in v.backend.stats.gpu_ms.values())
 
 
 def test_window_dependencies_use_the_imgui_glfw_library(backend_name):

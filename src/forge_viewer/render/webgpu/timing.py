@@ -31,9 +31,9 @@ def default_device() -> wgpu.GPUDevice:
 class WgpuTiming:
     """Collect pass timestamps without stalling the render loop."""
 
-    def __init__(self, device: wgpu.GPUDevice) -> None:
+    def __init__(self, device: wgpu.GPUDevice, *, enabled: bool = True) -> None:
         self._device = device
-        self.active = wgpu.FeatureName.timestamp_query in device.features
+        self.active = enabled and wgpu.FeatureName.timestamp_query in device.features
         self.gpu_ms: dict[str, float] = {}
         self._query_set: wgpu.GPUQuerySet | None = None
         self._resolve_buffer: wgpu.GPUBuffer | None = None
@@ -118,10 +118,22 @@ class WgpuTiming:
                 promise.sync_wait()
                 values = buffer.read_mapped(size=count * 8).cast("Q").tolist()
                 totals: dict[str, float] = {}
+                invalid: set[str] = set()
                 for name, begin, end in entries:
-                    totals[name] = totals.get(name, 0.0) + (values[end] - values[begin]) / 1e6
+                    elapsed = values[end] - values[begin]
+                    # Metal can leave one pass-boundary slot unchanged; only
+                    # publish samples whose timestamp pair is ordered.
+                    if elapsed <= 0:
+                        invalid.add(name)
+                        continue
+                    totals[name] = totals.get(name, 0.0) + elapsed / 1e6
                 if not self._released:
-                    self.gpu_ms = totals
+                    active = {name for name, _, _ in entries}
+                    current = {name: value for name, value in self.gpu_ms.items() if name in active}
+                    current.update(
+                        (name, value) for name, value in totals.items() if name not in invalid
+                    )
+                    self.gpu_ms = current
             except Exception:
                 pass
             finally:

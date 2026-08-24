@@ -161,6 +161,8 @@ class WgpuBackend:
         height: int = 720,
         samples: int = 4,
         device: wgpu.GPUDevice | None = None,
+        *,
+        gpu_timing: bool = True,
     ) -> None:
         # The viewer window shares this device (surface configuration and the
         # imgui texture binding must match the device that rendered the scene).
@@ -171,7 +173,7 @@ class WgpuBackend:
         self.lights = LightUniforms(self.device)
         self.target = RenderTargetWgpu(self.device, width, height, samples)
         self._configured_samples = self.target.samples
-        self.timing = WgpuTiming(self.device)
+        self.timing = WgpuTiming(self.device, enabled=gpu_timing)
 
         self._module = self.device.create_shader_module(code=load_wgsl(*_SCENE_SHADERS))
         self._shader_watch = WgslWatch(*_SCENE_SHADERS)

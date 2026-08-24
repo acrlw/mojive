@@ -185,7 +185,7 @@ def _select_backend(width: int, height: int, samples: int):
     if requested in {"wgpu", "webgpu"}:
         from .render.webgpu.backend import WgpuBackend
 
-        return None, WgpuBackend(max(1, width), max(1, height), samples)
+        return None, WgpuBackend(max(1, width), max(1, height), samples, gpu_timing=False)
     if requested not in {"", "forge"}:
         raise ValueError(f"Unsupported FORGE_VIEWER_BACKEND: {requested}")
     from .render.forge.backend import ForgeBackend
