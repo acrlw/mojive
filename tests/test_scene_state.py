@@ -9,6 +9,9 @@ from forge_viewer import commands as cmd
 from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
 from forge_viewer.render.backend import RenderFlag
 from forge_viewer.scene_state import (
+    CAMERA_BOOKMARK_FORMAT,
+    FORMAT_VERSION,
+    SCENE_SNAPSHOT_FORMAT,
     apply_camera_bookmark,
     camera_bookmark,
     capture_scene,
@@ -77,6 +80,18 @@ def test_camera_bookmark_restores_projection_and_orbit_values():
     assert camera.pivot == pytest.approx([1.0, 2.0, 3.0])
     assert (camera.yaw, camera.pitch, camera.distance) == pytest.approx((42.0, -17.0, 7.0))
     assert view.orthographic
+    assert saved["format"] == CAMERA_BOOKMARK_FORMAT
+
+
+def test_camera_bookmark_accepts_legacy_payload_and_rejects_future_version():
+    camera = OrbitCamera()
+    saved = camera_bookmark(camera, camera.view())
+    legacy = {key: value for key, value in saved.items() if key not in {"format", "version"}}
+    assert apply_camera_bookmark(legacy, camera).eye == pytest.approx(saved["eye"])
+
+    saved["version"] = 2
+    with pytest.raises(ValueError, match="Unsupported camera bookmark version: 2"):
+        apply_camera_bookmark(saved, camera)
 
 
 def test_scene_snapshot_restores_physics_view_flags_and_selection(state_rig):
@@ -88,6 +103,8 @@ def test_scene_snapshot_restores_physics_view_flags_and_selection(state_rig):
     session.adapter.data.time = 2.5
     camera.yaw = 33.0
     snapshot = capture_scene(session, backend, camera)
+    assert snapshot["format"] == SCENE_SNAPSHOT_FORMAT
+    assert snapshot["version"] == FORMAT_VERSION
 
     session.adapter.data.qpos[:] = 0.0
     session.adapter.data.qvel[:] = 0.0
@@ -136,4 +153,18 @@ def test_snapshot_rejects_a_different_model(state_rig):
     snapshot = capture_scene(session, backend, camera)
     snapshot["asset"] = "/different/model.xml"
     with pytest.raises(ValueError, match="different model"):
+        restore_scene(snapshot, session, backend, camera)
+
+
+def test_scene_snapshot_accepts_version_one_and_rejects_future_versions(state_rig):
+    session, backend, camera = state_rig
+    snapshot = capture_scene(session, backend, camera)
+    snapshot.pop("format")
+    snapshot["version"] = 1
+    restore_scene(snapshot, session, backend, camera)
+
+    snapshot["version"] = FORMAT_VERSION + 1
+    with pytest.raises(
+        ValueError, match=f"Unsupported scene snapshot version: {FORMAT_VERSION + 1}"
+    ):
         restore_scene(snapshot, session, backend, camera)

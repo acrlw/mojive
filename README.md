@@ -67,8 +67,9 @@ directory. Start directly in Simplified Chinese with:
 make editor LANGUAGE=zh_CN
 ```
 
-The UI atlas combines JetBrains Mono with an installed Source Han, Noto CJK, PingFang, or system
-CJK font. `FORGE_VIEWER_CJK_FONT=/path/to/font.otf` selects a specific CJK font file.
+The UI atlas combines JetBrains Mono with Noto Sans SC. Noto is loaded from the system or downloaded
+to the application cache with checksum verification. `FORGE_VIEWER_CJK_FONT=/path/to/font.otf`
+selects a different CJK font file.
 
 ### Linux OpenGL contexts
 
@@ -181,9 +182,10 @@ rename, and delete from the menu, keyboard shortcuts, and the Hierarchy context 
 
 Cameras and lights are selectable in the viewport. Their position and rotation gizmos edit world
 transforms; selected helpers show camera frustums and light influence volumes. Selecting a camera
-also opens a draggable live preview in the lower-right corner of the viewport. Pinning the preview
-keeps its camera and widget position while another entity is selected or perturbed. Camera and light
-gizmos lock by default while simulation runs; Inspector can unlock an entity for runtime editing.
+also opens a draggable live preview in the lower-right corner of the viewport. **Pin** freezes the
+current preview camera and widget position. **Lock** keeps the widget attached to that camera entity
+and follows its live pose after selection changes. Camera and light gizmos lock by default while
+simulation runs; Inspector can unlock an entity for runtime editing.
 The Settings panel controls helper and influence visibility. `View Through Camera` switches to the
 selected scene camera, and `Return to Editor Camera` restores the previous editor orbit view.
 Unsaved workspaces display an asterisk in the title and prompt before replacement or exit.
@@ -406,17 +408,20 @@ result = viewer.session.submit(
 viewer.session.submit(cmd.RemoveSceneObject(result.entity_id))
 ```
 
-Snapshot recording stores structure, frames, and debug commands in `.fvs` files:
+Snapshot recording stores structure, frames, and debug commands in versioned `.fvs` files. Current
+readers also accept version 1 recordings:
 
 ```bash
 make snapshot-record LIVE_SCENE=gizmo SNAPSHOT=output/session.fvs
 make snapshot-replay SNAPSHOT=output/bug.fvs
 ```
 
-Camera bookmarks and complete scene snapshots use versioned JSON under `output/snapshots/`.
+Camera bookmarks and complete scene snapshots use versioned JSON under `output/snapshots/`. Scene
+snapshot version 2 readers accept version 1 snapshots.
 `make camera-state` and `make scene-snapshot` generate acceptance artifacts there.
 
-Local automation uses a versioned AF_UNIX control service:
+Local automation uses a versioned AF_UNIX control service. Clients keep the connection open across
+requests and reconnect after a timeout or transport failure:
 
 ```bash
 forge-viewer rpc-serve humanoid

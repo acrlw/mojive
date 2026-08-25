@@ -14,6 +14,7 @@ The public package exports the common scene, rendering, adapter, remote, and rec
 | `forge_viewer.render.debugdraw` | Debug primitives and layers | `DebugDraw`, `Layer`, `Occlusion` |
 | `forge_viewer.remote` | Live structure, frame, and command transport | `SnapshotPublisher`, `RemoteSceneAdapter` |
 | `forge_viewer.recording` | Video and snapshot streams | `VideoRecorder`, `SnapshotWriter` |
+| `forge_viewer.control_rpc` | Local process control | `ControlServer`, `ControlService`, `RpcClient` |
 
 ## Integration paths
 

@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 import pickle
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
-SNAPSHOT_MAGIC = b"FORGE-SNAPSHOT\x00\x01"
+SNAPSHOT_PREFIX = b"FORGE-SNAPSHOT\x00"
+SNAPSHOT_FORMAT = "forge.snapshot-recording"
+SNAPSHOT_FORMAT_VERSION = 2
+SNAPSHOT_MAGIC = SNAPSHOT_PREFIX + bytes((SNAPSHOT_FORMAT_VERSION,))
+LEGACY_SNAPSHOT_MAGIC = SNAPSHOT_PREFIX + b"\x01"
+
+
+@dataclass(frozen=True)
+class SnapshotHeader:
+    format: str = SNAPSHOT_FORMAT
+    version: int = SNAPSHOT_FORMAT_VERSION
 
 
 class VideoRecorder:
@@ -62,6 +73,7 @@ class SnapshotWriter:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._file = self.path.open("wb")
         self._file.write(SNAPSHOT_MAGIC)
+        pickle.dump(SnapshotHeader(), self._file, protocol=pickle.HIGHEST_PROTOCOL)
         self.packets = 0
 
     def write(self, packet: object) -> None:
@@ -83,10 +95,27 @@ class SnapshotWriter:
 def read_snapshots(path: Path):
     """Yield a snapshot stream and reject unrelated files before unpickling packets."""
     with Path(path).open("rb") as stream:
-        if stream.read(len(SNAPSHOT_MAGIC)) != SNAPSHOT_MAGIC:
+        if stream.read(len(SNAPSHOT_PREFIX)) != SNAPSHOT_PREFIX:
             raise ValueError("not a forge snapshot recording")
+        encoded_version = stream.read(1)
+        if len(encoded_version) != 1:
+            raise ValueError("truncated forge snapshot header")
+        version = encoded_version[0]
+        if version == SNAPSHOT_FORMAT_VERSION:
+            try:
+                header = pickle.load(stream)
+            except (EOFError, pickle.UnpicklingError) as exc:
+                raise ValueError("invalid forge snapshot header") from exc
+            if not isinstance(header, SnapshotHeader) or header != SnapshotHeader():
+                raise ValueError("invalid forge snapshot header")
+        elif version != 1:
+            raise ValueError(f"unsupported forge snapshot version: {version}")
         while True:
+            offset = stream.tell()
+            if not stream.read(1):
+                return
+            stream.seek(offset)
             try:
                 yield pickle.load(stream)
-            except EOFError:
-                return
+            except (EOFError, pickle.UnpicklingError) as exc:
+                raise ValueError("truncated forge snapshot packet") from exc

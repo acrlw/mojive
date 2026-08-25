@@ -14,12 +14,17 @@ from . import commands as cmd
 from .adapters.base import PhysicsState
 from .types import CameraView, Environment, Light, LightKind, Material
 
-FORMAT_VERSION = 1
+SCENE_SNAPSHOT_FORMAT = "forge.scene-snapshot"
+FORMAT_VERSION = 2
+CAMERA_BOOKMARK_FORMAT = "forge.camera-bookmark"
+CAMERA_BOOKMARK_VERSION = 1
 DEFAULT_DIRECTORY = Path("output/snapshots")
 
 
 def camera_bookmark(camera, view: CameraView, source: int = -1) -> dict[str, Any]:
     return {
+        "format": CAMERA_BOOKMARK_FORMAT,
+        "version": CAMERA_BOOKMARK_VERSION,
         "source": int(source),
         "eye": _array(view.eye),
         "target": _array(view.target),
@@ -37,6 +42,12 @@ def camera_bookmark(camera, view: CameraView, source: int = -1) -> dict[str, Any
 
 
 def apply_camera_bookmark(bookmark: dict[str, Any], camera, select_source=None) -> CameraView:
+    format_name = bookmark.get("format")
+    if format_name is not None and format_name != CAMERA_BOOKMARK_FORMAT:
+        raise ValueError(f"Unsupported camera bookmark format: {format_name}")
+    version = bookmark.get("version")
+    if version is not None and int(version) != CAMERA_BOOKMARK_VERSION:
+        raise ValueError(f"Unsupported camera bookmark version: {version}")
     view = CameraView(
         eye=np.asarray(bookmark["eye"], np.float32),
         target=np.asarray(bookmark["target"], np.float32),
@@ -67,6 +78,7 @@ def capture_scene(
         raise RuntimeError(f"{session.adapter.caps.name} does not expose scene state")
     source = session.source
     return {
+        "format": SCENE_SNAPSHOT_FORMAT,
         "version": FORMAT_VERSION,
         "asset": str(session.asset_path) if session.asset_path is not None else "",
         "backend": session.adapter.caps.name,
@@ -90,8 +102,11 @@ def capture_scene(
 
 
 def restore_scene(snapshot, session, backend, camera, *, select_source=None):
-    if int(snapshot.get("version", -1)) != FORMAT_VERSION:
-        raise ValueError("Unsupported scene snapshot version")
+    version = int(snapshot.get("version", -1))
+    if version not in {1, FORMAT_VERSION}:
+        raise ValueError(f"Unsupported scene snapshot version: {version}")
+    if version == FORMAT_VERSION and snapshot.get("format") != SCENE_SNAPSHOT_FORMAT:
+        raise ValueError(f"Unsupported scene snapshot format: {snapshot.get('format')}")
     expected = str(session.asset_path) if session.asset_path is not None else ""
     if snapshot.get("asset", "") != expected:
         raise ValueError("Scene snapshot belongs to a different model")
@@ -126,7 +141,7 @@ def restore_scene(snapshot, session, backend, camera, *, select_source=None):
 def save_named_snapshot(name: str, snapshot: dict[str, Any], directory=DEFAULT_DIRECTORY) -> Path:
     path = Path(directory) / f"{_safe_name(name)}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(snapshot, indent=2) + "\n")
+    path.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n")
     return path
 
 

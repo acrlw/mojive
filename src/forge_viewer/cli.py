@@ -660,7 +660,8 @@ def cmd_control(args: argparse.Namespace) -> int:
     from .control_rpc import RpcClient
 
     params = json.loads(args.params)
-    result = RpcClient(Path(args.socket), args.timeout).call(args.method, params)
+    with RpcClient(Path(args.socket), args.timeout) as client:
+        result = client.call(args.method, params)
     if args.json:
         print(json.dumps(result, indent=2))
     elif isinstance(result, dict) and result.get("message"):

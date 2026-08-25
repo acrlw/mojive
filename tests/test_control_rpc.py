@@ -36,6 +36,7 @@ def rpc():
         try:
             yield client, service, server
         finally:
+            client.close()
             server.shutdown()
             server.server_close()
             service.close()
@@ -102,6 +103,67 @@ def test_rpc_returns_structured_errors_and_correlates_requests(rpc):
         response = json.loads(connection.makefile().readline())
     assert response["id"] == "version"
     assert response["error"]["code"] == "version_mismatch"
+
+
+def test_rpc_reuses_one_connection_for_many_requests(rpc):
+    client, _, _ = rpc
+    first_socket = None
+    for _ in range(256):
+        assert "physics" in client.call("get_state")
+        first_socket = first_socket or client._client
+        assert client._client is first_socket
+
+
+def test_rpc_connection_recovers_after_invalid_request(rpc):
+    _, _, server = rpc
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.connect(str(server.socket_path))
+        stream = connection.makefile("rwb")
+        stream.write(b"not-json\n")
+        stream.flush()
+        invalid = json.loads(stream.readline())
+        stream.write(
+            json.dumps(
+                {"version": PROTOCOL_VERSION, "id": 9, "method": "get_state", "params": {}}
+            ).encode()
+            + b"\n"
+        )
+        stream.flush()
+        recovered = json.loads(stream.readline())
+
+    assert invalid["error"]["code"] == "invalid_request"
+    assert recovered["id"] == 9
+    assert recovered["error"] is None
+
+
+def test_idle_connection_does_not_block_other_clients(rpc):
+    client, _, server = rpc
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as idle:
+        idle.connect(str(server.socket_path))
+        assert "physics" in client.call("get_state")
+
+
+def test_rpc_reconnects_on_the_call_after_a_timeout(rpc):
+    client, service, _ = rpc
+    original = service.dispatch
+    delayed = True
+
+    def dispatch(method, params):
+        nonlocal delayed
+        if delayed and method == "get_state":
+            delayed = False
+            threading.Event().wait(0.05)
+        return original(method, params)
+
+    service.dispatch = dispatch
+    client.timeout = 0.01
+    with pytest.raises(RpcError, match="timed out") as error:
+        client.call("get_state")
+    assert error.value.code == "timeout"
+    assert client._client is None
+
+    client.timeout = 1.0
+    assert "physics" in client.call("get_state")
 
 
 def test_control_cli_prints_json(rpc, capsys):

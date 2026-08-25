@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import pickle
 from dataclasses import replace
 
 import pytest
 
 from forge_viewer.adapters.static import StaticSceneAdapter
-from forge_viewer.recording import SnapshotWriter, read_snapshots
+from forge_viewer.recording import (
+    LEGACY_SNAPSHOT_MAGIC,
+    SNAPSHOT_PREFIX,
+    SnapshotWriter,
+    read_snapshots,
+)
 from forge_viewer.remote import RemoteFrame, RemoteStructure, snapshot_structure
 from forge_viewer.scene import Scene
 from forge_viewer.session import Session
@@ -47,3 +53,27 @@ def test_snapshot_reader_rejects_an_unrelated_file_before_unpickling(tmp_path):
 
     with pytest.raises(ValueError, match="not a forge snapshot"):
         list(read_snapshots(path))
+
+
+def test_snapshot_reader_accepts_legacy_version_one_recordings(tmp_path):
+    packet = {"frame": 12}
+    path = tmp_path / "legacy.fvs"
+    with path.open("wb") as stream:
+        stream.write(LEGACY_SNAPSHOT_MAGIC)
+        pickle.dump(packet, stream)
+
+    assert list(read_snapshots(path)) == [packet]
+
+
+def test_snapshot_reader_rejects_future_and_truncated_recordings(tmp_path):
+    future = tmp_path / "future.fvs"
+    future.write_bytes(SNAPSHOT_PREFIX + b"\x7f")
+    with pytest.raises(ValueError, match="unsupported forge snapshot version: 127"):
+        list(read_snapshots(future))
+
+    truncated = tmp_path / "truncated.fvs"
+    with SnapshotWriter(truncated) as writer:
+        writer.write({"frame": 1})
+    truncated.write_bytes(truncated.read_bytes()[:-2])
+    with pytest.raises(ValueError, match="truncated forge snapshot packet"):
+        list(read_snapshots(truncated))

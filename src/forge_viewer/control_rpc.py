@@ -318,19 +318,29 @@ class ControlService:
 
 class _RequestHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
-        line = self.rfile.readline()
-        if not line:
-            return
-        try:
-            request = json.loads(line)
-            response = self.server.service.handle(request)
-        except Exception as exc:
-            response = _response(None, error={"code": "invalid_request", "message": str(exc)})
-        self.wfile.write(json.dumps(response, separators=(",", ":")).encode() + b"\n")
+        while True:
+            try:
+                line = self.rfile.readline()
+            except OSError:
+                return
+            if not line:
+                return
+            try:
+                request = json.loads(line)
+                response = self.server.service.handle(request)
+            except Exception as exc:
+                response = _response(None, error={"code": "invalid_request", "message": str(exc)})
+            try:
+                self.wfile.write(json.dumps(response, separators=(",", ":")).encode() + b"\n")
+                self.wfile.flush()
+            except OSError:
+                return
 
 
-class ControlServer(socketserver.UnixStreamServer):
-    """Sequential newline-delimited JSON server over an AF_UNIX socket."""
+class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    """Concurrent newline-delimited JSON server over an AF_UNIX socket."""
+
+    daemon_threads = True
 
     def __init__(self, socket_path: Path, service: ControlService) -> None:
         self.socket_path = Path(socket_path).expanduser().resolve()
@@ -345,40 +355,75 @@ class ControlServer(socketserver.UnixStreamServer):
 
 
 class RpcClient:
-    """Synchronous local control client with request correlation and timeouts."""
+    """Persistent local control client with correlation, timeouts, and recovery."""
 
     def __init__(self, socket_path: Path = DEFAULT_SOCKET, timeout: float = 5.0) -> None:
         self.socket_path = Path(socket_path).expanduser().resolve()
         self.timeout = float(timeout)
         self._next_id = 1
+        self._client: socket.socket | None = None
+        self._lock = threading.Lock()
 
     def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
-        request_id = self._next_id
-        self._next_id += 1
-        request = {
-            "version": PROTOCOL_VERSION,
-            "id": request_id,
-            "method": method,
-            "params": params or {},
-        }
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(self.timeout)
-                client.connect(str(self.socket_path))
+        with self._lock:
+            request_id = self._next_id
+            self._next_id += 1
+            request = {
+                "version": PROTOCOL_VERSION,
+                "id": request_id,
+                "method": method,
+                "params": params or {},
+            }
+            try:
+                client = self._connect()
                 client.sendall(json.dumps(request, separators=(",", ":")).encode() + b"\n")
                 response = _read_response(client)
-        except TimeoutError as exc:
-            raise RpcError(
-                "timeout", f"RPC request timed out after {self.timeout:g} seconds"
-            ) from exc
-        except OSError as exc:
-            raise RpcError("connection_failed", str(exc)) from exc
-        if response.get("id") != request_id:
-            raise RpcError("invalid_response", "RPC response ID does not match the request")
-        if response.get("error"):
-            error = response["error"]
-            raise RpcError(error["code"], error["message"])
-        return response.get("result")
+            except TimeoutError as exc:
+                self.close()
+                raise RpcError(
+                    "timeout", f"RPC request timed out after {self.timeout:g} seconds"
+                ) from exc
+            except RpcError:
+                self.close()
+                raise
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                self.close()
+                raise RpcError("connection_failed", str(exc)) from exc
+            if response.get("version") != PROTOCOL_VERSION:
+                self.close()
+                raise RpcError("invalid_response", "RPC response version is incompatible")
+            if response.get("id") != request_id:
+                self.close()
+                raise RpcError("invalid_response", "RPC response ID does not match the request")
+            if response.get("error"):
+                error = response["error"]
+                raise RpcError(error["code"], error["message"])
+            return response.get("result")
+
+    def _connect(self) -> socket.socket:
+        if self._client is None:
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.settimeout(self.timeout)
+            try:
+                client.connect(str(self.socket_path))
+            except Exception:
+                client.close()
+                raise
+            self._client = client
+        else:
+            self._client.settimeout(self.timeout)
+        return self._client
+
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def __enter__(self) -> RpcClient:
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()
 
 
 def _read_response(client: socket.socket) -> dict[str, Any]:
