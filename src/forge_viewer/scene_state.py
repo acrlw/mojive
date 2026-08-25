@@ -43,10 +43,10 @@ def camera_bookmark(camera, view: CameraView, source: int = -1) -> dict[str, Any
 
 def apply_camera_bookmark(bookmark: dict[str, Any], camera, select_source=None) -> CameraView:
     format_name = bookmark.get("format")
-    if format_name is not None and format_name != CAMERA_BOOKMARK_FORMAT:
+    if format_name != CAMERA_BOOKMARK_FORMAT:
         raise ValueError(f"Unsupported camera bookmark format: {format_name}")
-    version = bookmark.get("version")
-    if version is not None and int(version) != CAMERA_BOOKMARK_VERSION:
+    version = bookmark.get("version", -1)
+    if int(version) != CAMERA_BOOKMARK_VERSION:
         raise ValueError(f"Unsupported camera bookmark version: {version}")
     view = CameraView(
         eye=np.asarray(bookmark["eye"], np.float32),
@@ -103,9 +103,9 @@ def capture_scene(
 
 def restore_scene(snapshot, session, backend, camera, *, select_source=None):
     version = int(snapshot.get("version", -1))
-    if version not in {1, FORMAT_VERSION}:
+    if version != FORMAT_VERSION:
         raise ValueError(f"Unsupported scene snapshot version: {version}")
-    if version == FORMAT_VERSION and snapshot.get("format") != SCENE_SNAPSHOT_FORMAT:
+    if snapshot.get("format") != SCENE_SNAPSHOT_FORMAT:
         raise ValueError(f"Unsupported scene snapshot format: {snapshot.get('format')}")
     expected = str(session.asset_path) if session.asset_path is not None else ""
     if snapshot.get("asset", "") != expected:

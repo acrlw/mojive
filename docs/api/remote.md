@@ -8,8 +8,8 @@
 
 ::: forge_viewer.recording
 
-`.fvs` version 2 begins with a format header and stores the packet sequence consumed by
-`RemoteSceneAdapter`. The reader accepts version 1 streams and reports future versions and
+`.fvs` begins with a format header and stores the packet sequence consumed by
+`RemoteSceneAdapter`. The reader accepts the current format and reports mismatched versions and
 truncated packets before replay.
 
 ## Local control RPC

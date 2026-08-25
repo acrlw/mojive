@@ -12,7 +12,6 @@ SNAPSHOT_PREFIX = b"FORGE-SNAPSHOT\x00"
 SNAPSHOT_FORMAT = "forge.snapshot-recording"
 SNAPSHOT_FORMAT_VERSION = 2
 SNAPSHOT_MAGIC = SNAPSHOT_PREFIX + bytes((SNAPSHOT_FORMAT_VERSION,))
-LEGACY_SNAPSHOT_MAGIC = SNAPSHOT_PREFIX + b"\x01"
 
 
 @dataclass(frozen=True)
@@ -108,7 +107,7 @@ def read_snapshots(path: Path):
                 raise ValueError("invalid forge snapshot header") from exc
             if not isinstance(header, SnapshotHeader) or header != SnapshotHeader():
                 raise ValueError("invalid forge snapshot header")
-        elif version != 1:
+        else:
             raise ValueError(f"unsupported forge snapshot version: {version}")
         while True:
             offset = stream.tell()

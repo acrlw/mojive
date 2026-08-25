@@ -15,6 +15,8 @@ import numpy as np
 from . import commands as cmd
 from .adapters.base import FrameNeeds, PhysicsState
 from .scene_state import (
+    CAMERA_BOOKMARK_FORMAT,
+    CAMERA_BOOKMARK_VERSION,
     DEFAULT_DIRECTORY,
     apply_camera_bookmark,
     camera_bookmark,
@@ -190,7 +192,11 @@ class ControlService:
             self.camera.adopt(view)
         else:
             self.camera_source = int(params.get("source", -1))
-            apply_camera_bookmark(params, self.camera)
+            bookmark = camera_bookmark(self.camera, self.camera.view(), self.camera_source)
+            bookmark.update(params)
+            bookmark["format"] = CAMERA_BOOKMARK_FORMAT
+            bookmark["version"] = CAMERA_BOOKMARK_VERSION
+            apply_camera_bookmark(bookmark, self.camera)
         return camera_bookmark(self.camera, self.camera.view(), self.camera_source)
 
     def _load_camera_bookmark(self, params: dict[str, Any]) -> dict[str, Any]:

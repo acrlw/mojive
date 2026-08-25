@@ -408,16 +408,14 @@ result = viewer.session.submit(
 viewer.session.submit(cmd.RemoveSceneObject(result.entity_id))
 ```
 
-Snapshot recording stores structure, frames, and debug commands in versioned `.fvs` files. Current
-readers also accept version 1 recordings:
+Snapshot recording stores structure, frames, and debug commands in versioned `.fvs` files:
 
 ```bash
 make snapshot-record LIVE_SCENE=gizmo SNAPSHOT=output/session.fvs
 make snapshot-replay SNAPSHOT=output/bug.fvs
 ```
 
-Camera bookmarks and complete scene snapshots use versioned JSON under `output/snapshots/`. Scene
-snapshot version 2 readers accept version 1 snapshots.
+Camera bookmarks and complete scene snapshots use versioned JSON under `output/snapshots/`.
 `make camera-state` and `make scene-snapshot` generate acceptance artifacts there.
 
 Local automation uses a versioned AF_UNIX control service. Clients keep the connection open across

@@ -83,11 +83,13 @@ def test_camera_bookmark_restores_projection_and_orbit_values():
     assert saved["format"] == CAMERA_BOOKMARK_FORMAT
 
 
-def test_camera_bookmark_accepts_legacy_payload_and_rejects_future_version():
+def test_camera_bookmark_requires_the_current_format_and_version():
     camera = OrbitCamera()
     saved = camera_bookmark(camera, camera.view())
-    legacy = {key: value for key, value in saved.items() if key not in {"format", "version"}}
-    assert apply_camera_bookmark(legacy, camera).eye == pytest.approx(saved["eye"])
+    missing_format = saved.copy()
+    missing_format.pop("format")
+    with pytest.raises(ValueError, match="Unsupported camera bookmark format: None"):
+        apply_camera_bookmark(missing_format, camera)
 
     saved["version"] = 2
     with pytest.raises(ValueError, match="Unsupported camera bookmark version: 2"):
@@ -156,12 +158,13 @@ def test_snapshot_rejects_a_different_model(state_rig):
         restore_scene(snapshot, session, backend, camera)
 
 
-def test_scene_snapshot_accepts_version_one_and_rejects_future_versions(state_rig):
+def test_scene_snapshot_rejects_non_current_versions(state_rig):
     session, backend, camera = state_rig
     snapshot = capture_scene(session, backend, camera)
     snapshot.pop("format")
     snapshot["version"] = 1
-    restore_scene(snapshot, session, backend, camera)
+    with pytest.raises(ValueError, match="Unsupported scene snapshot version: 1"):
+        restore_scene(snapshot, session, backend, camera)
 
     snapshot["version"] = FORMAT_VERSION + 1
     with pytest.raises(
