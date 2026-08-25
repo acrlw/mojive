@@ -33,6 +33,17 @@ def workspace() -> WorkspaceAdapter:
     return WorkspaceAdapter(primary)
 
 
+def test_loaded_model_workspace_supports_authored_entities() -> None:
+    document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
+    session = Session(document, ASSETS / "test_scene.xml")
+
+    assert session.adapter.caps.scene_authoring
+    result = session.submit(cmd.AddSceneObject(MeshShape.PLANE, "plane"))
+
+    assert result.ok
+    assert any(node.name == "plane" for node in session.nodes)
+
+
 def test_workspace_preserves_every_primary_environment_field(tmp_path: Path) -> None:
     model_path = tmp_path / "haze.xml"
     model_path.write_text(

@@ -232,6 +232,25 @@ def test_orbit_moves_camera_and_picture(viewer):
     assert diff > 1.0
 
 
+def test_localized_viewport_accepts_camera_input(viewer):
+    from imgui_bundle import imgui
+
+    language = viewer.app.localizer.language
+    try:
+        viewer.app.set_language("zh_CN")
+        viewer.sync()
+        viewer.sync()
+        cx, cy = center(viewer)
+        before_yaw = viewer.app.camera.yaw
+
+        drag(viewer, imgui.get_io(), cx, cy, 96.0, 0.0)
+
+        assert abs(viewer.app.camera.yaw - before_yaw) > 5.0
+    finally:
+        viewer.app.set_language(language)
+        viewer.sync()
+
+
 def test_wheel_dollies(viewer):
 
     from imgui_bundle import imgui

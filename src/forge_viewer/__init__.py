@@ -29,7 +29,7 @@ from .adapters.base import (
 from .adapters.conformance import ConformanceCheck, ConformanceReport, check_adapter
 from .adapters.toy import ToyPhysicsAdapter
 from .backends import make_adapter
-from .composition import build_from_adapter, build_scene
+from .composition import build_from_adapter, build_scene, build_workspace
 from .recording import SnapshotWriter, VideoRecorder, read_snapshots
 from .remote import RemoteSceneAdapter, SnapshotPublisher
 from .render.backend import DebugView, FrameMode, LabelMode, RenderFlag
@@ -130,6 +130,7 @@ __all__ = [
     "audit_model",
     "build_from_adapter",
     "build_scene",
+    "build_workspace",
     "check_adapter",
     "make_adapter",
     "read_snapshots",

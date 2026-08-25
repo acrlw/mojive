@@ -144,6 +144,8 @@ def test_ui_drag_keeps_ownership_after_the_cursor_enters_the_viewport():
 
 def test_floating_panels_block_input_even_when_they_overlap_the_viewport_rect():
     assert viewport_input_allowed(inside=True, hovered_window="Viewport")
+    assert viewport_input_allowed(inside=True, hovered_window="视口###Viewport")
+    assert not viewport_input_allowed(inside=True, hovered_window="视口###Viewport/child")
     assert not viewport_input_allowed(inside=True, hovered_window="Inspector")
     assert not viewport_input_allowed(inside=True, hovered_window=None)
 

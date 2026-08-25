@@ -46,7 +46,10 @@ class InputState:
 
 
 def viewport_input_allowed(inside: bool, hovered_window: str | None) -> bool:
-    return bool(inside and hovered_window == "Viewport")
+    if not inside or hovered_window is None:
+        return False
+    window_id = hovered_window.rsplit("###", 1)[-1]
+    return window_id == "Viewport"
 
 
 def gizmo_yields(state: InputState) -> bool:

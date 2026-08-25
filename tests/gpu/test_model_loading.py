@@ -277,6 +277,40 @@ def test_camera_preview_matches_the_main_backend_for_the_same_camera_and_size():
         instance.release()
 
 
+def test_dragging_camera_preview_does_not_orbit_scene_camera():
+    from imgui_bundle import imgui
+
+    instance = build(resolve("parity_scene"), paused=True, vsync=False, width=960, height=640)
+    try:
+        instance.sync()
+        camera_node = next(node for node in instance.session.nodes if node.kind is NodeKind.CAMERA)
+        assert instance.session.submit(SelectNode(camera_node.node_id))
+        instance.sync()
+        preview = instance.app.camera_preview
+        assert preview._position is not None
+        before_position = preview._position
+        before_camera = instance.app.camera.view()
+        scale = instance.window.style_scale
+        start = (before_position[0] + 48.0 * scale, before_position[1] + 12.0 * scale)
+        io = imgui.get_io()
+        io.add_mouse_pos_event(*start)
+        instance.sync()
+        io.add_mouse_button_event(0, True)
+        instance.sync()
+        io.add_mouse_pos_event(start[0] - 40.0 * scale, start[1] - 24.0 * scale)
+        instance.sync()
+        io.add_mouse_button_event(0, False)
+        instance.sync()
+
+        assert preview._position != before_position
+        after_camera = instance.app.camera.view()
+        np.testing.assert_allclose(after_camera.eye, before_camera.eye)
+        np.testing.assert_allclose(after_camera.target, before_camera.target)
+    finally:
+        imgui.get_io().add_mouse_button_event(0, False)
+        instance.release()
+
+
 def test_viewer_frames_reuse_adapter_buffers_without_python_growth():
     instance = build(resolve("actuator_visuals"), paused=False, vsync=False, width=640, height=480)
     tracemalloc.start()

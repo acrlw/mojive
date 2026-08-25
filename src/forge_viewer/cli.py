@@ -276,9 +276,10 @@ def _print_tree(nodes, parent: int = -1, depth: int = 0) -> None:
 
 
 def cmd_view(args: argparse.Namespace) -> int:
-    from .composition import build
+    from .composition import build, build_workspace
 
-    viewer = build(
+    compose = build_workspace if args.backend == "mujoco" else build
+    viewer = compose(
         _resolve(args.asset),
         args.backend,
         paused=args.paused,

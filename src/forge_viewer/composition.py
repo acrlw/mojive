@@ -33,9 +33,9 @@ def render_backend_name() -> str:
 class Viewer:
     """Own the objects that make up one interactive viewer.
 
-    Create instances through :func:`build`, :func:`build_scene`, or
-    :func:`build_from_adapter`. Call :meth:`release` when an application embeds
-    the viewer without using a context manager.
+    Create instances through :func:`build`, :func:`build_workspace`,
+    :func:`build_scene`, or :func:`build_from_adapter`. Call :meth:`release`
+    when an application embeds the viewer without using a context manager.
     """
 
     app: Any
@@ -139,6 +139,33 @@ def build(
 
     return _compose(
         lambda: make_adapter(backend_name, asset),
+        asset_path=asset,
+        paused=paused,
+        vsync=vsync,
+        width=width,
+        height=height,
+        samples=samples,
+        title=title,
+    )
+
+
+def build_workspace(
+    asset: Path,
+    backend_name: str = "mujoco",
+    *,
+    paused: bool = False,
+    vsync: bool = True,
+    width: int = 1600,
+    height: int = 1000,
+    samples: int = 4,
+    title: str = "forge-viewer",
+) -> Viewer:
+    """Build an editable workspace around a model adapter."""
+    from .adapters.workspace import WorkspaceAdapter
+    from .backends import make_adapter
+
+    return _compose(
+        lambda: WorkspaceAdapter(make_adapter(backend_name, asset)),
         asset_path=asset,
         paused=paused,
         vsync=vsync,
