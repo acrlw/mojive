@@ -35,12 +35,15 @@ nav:
       - Platform support: PLATFORM.md
   - API reference:
       - API map: api/index.md
+      - Public package exports: api/public.md
       - Scene contracts: api/scene.md
       - Adapters and session: api/adapters.md
+      - Adapter implementations: api/implementations.md
       - Viewer composition: api/application.md
       - Renderer and debug draw: api/rendering.md
       - Remote and recording: api/remote.md
       - Scene and workspace files: api/io.md
+      - Math and persistence: api/utilities.md
   - Engineering decisions: DECISIONS.md
 plugins:
   - search
