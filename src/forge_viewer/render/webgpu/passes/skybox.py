@@ -42,10 +42,10 @@ _HAZE_VERTEX_LAYOUT = {
 }
 _SKYBOX_VERTEX_LAYOUT = _HAZE_VERTEX_LAYOUT
 
-# moderngl blend_func(SRC_ALPHA, ONE_MINUS_SRC_ALPHA) applied to color and alpha.
+# Straight-alpha RGB composition with source-over coverage for the target alpha.
 _ALPHA_BLEND = {
     "color": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
-    "alpha": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
+    "alpha": {"src_factor": "one", "dst_factor": "one-minus-src-alpha"},
 }
 
 

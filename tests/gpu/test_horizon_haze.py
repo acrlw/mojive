@@ -125,15 +125,65 @@ def test_mujoco_haze_changes_sky_below_horizon_without_fogging_objects(tmp_path)
 
         harness.backend.set_flag(RenderFlag.HAZE, True)
         harness.step_and_render(0)
-        haze = harness.backend.target.read_color(flip=True)[..., :3].astype(np.int16)
+        haze_rgba = harness.backend.target.read_color(flip=True)
+        haze = haze_rgba[..., :3].astype(np.int16)
 
     difference = np.max(np.abs(haze - clear), axis=2)
     sphere = (clear[..., 1] > clear[..., 0] + 20) & (clear[..., 1] > clear[..., 2] + 20)
     assert np.count_nonzero(sphere) > 100
     assert np.count_nonzero(difference > 5) > 100
     assert np.count_nonzero(difference[sphere]) == 0
+    assert np.all(haze_rgba[..., 3] == 255)
     target = np.array([0.9, 0.5, 0.1]) * 255.0
     assert np.abs(haze.astype(np.float32) - target).max(axis=2).min() <= 2.0
+
+
+def test_interactive_viewport_does_not_composite_haze_twice(tmp_path):
+    pytest.importorskip("glfw")
+    from forge_viewer.composition import build
+
+    scene = tmp_path / "interactive-haze.xml"
+    scene.write_text(
+        """
+        <mujoco>
+          <visual>
+            <rgba haze="0.45 0.55 0.65 1"/>
+            <map haze="0.3"/>
+          </visual>
+          <asset>
+            <texture type="skybox" builtin="gradient" width="64" height="384"
+                     rgb1="0.08 0.18 0.32" rgb2="0.3 0.5 0.7"/>
+          </asset>
+          <worldbody>
+            <geom type="plane" size="0 0 .05" rgba=".1 .15 .2 1"/>
+          </worldbody>
+        </mujoco>
+        """,
+        encoding="utf-8",
+    )
+    viewer = build(scene, paused=True, vsync=False, width=960, height=640)
+    try:
+        viewer.app.camera.pivot = (0.0, 0.0, 0.7)
+        viewer.app.camera.distance = 5.0
+        viewer.app.camera.yaw = -90.0
+        viewer.app.camera.pitch = 5.0
+        for _ in range(12):
+            viewer.sync()
+
+        target = viewer.backend.target.read_color(flip=True)
+        window = np.asarray(viewer.window.read_frame())[::-1, :, :3]
+        x, y, width, height = viewer.window.points_to_pixels(viewer.app._viewport_rect)
+        x0, y0, x1, y1 = map(round, (x, y, x + width, y + height))
+        viewport = window[y0:y1, x0:x1]
+
+        assert viewport.shape == (*target.shape[:2], 3)
+        assert np.all(target[..., 3] == 255)
+        # The view cube and transient UI live on the right/center. The left sky
+        # is an unobstructed probe of the exact texture-to-ImGui composition.
+        probe_width = target.shape[1] // 4
+        np.testing.assert_array_equal(viewport[:, :probe_width], target[:, :probe_width, :3])
+    finally:
+        viewer.release()
 
 
 def test_mujoco_haze_writes_depth_before_transparent_geometry(tmp_path):

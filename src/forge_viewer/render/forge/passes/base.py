@@ -188,6 +188,8 @@ def state_transparent(ctx: moderngl.Context, *, additive: bool = False) -> None:
     ctx.blend_func = (
         moderngl.SRC_ALPHA,
         moderngl.ONE if additive else moderngl.ONE_MINUS_SRC_ALPHA,
+        moderngl.ONE,
+        moderngl.ONE_MINUS_SRC_ALPHA,
     )
     ctx.front_face = "ccw"
     ctx.cull_face = "back"
@@ -204,4 +206,9 @@ def state_overlay(ctx: moderngl.Context, depth_test: bool) -> None:
     flags = moderngl.BLEND | (moderngl.DEPTH_TEST if depth_test else 0)
     ctx.enable_only(flags)
     ctx.depth_func = "<"
-    ctx.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)
+    ctx.blend_func = (
+        moderngl.SRC_ALPHA,
+        moderngl.ONE_MINUS_SRC_ALPHA,
+        moderngl.ONE,
+        moderngl.ONE_MINUS_SRC_ALPHA,
+    )

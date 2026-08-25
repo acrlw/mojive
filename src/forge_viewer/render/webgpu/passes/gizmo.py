@@ -51,7 +51,7 @@ _SLOT_BYTES = 256
 
 _ALPHA_BLEND = {
     "color": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
-    "alpha": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
+    "alpha": {"src_factor": "one", "dst_factor": "one-minus-src-alpha"},
 }
 
 # Standard GpuMesh stream; only position/normal are read (forge "3f 3f 8x").

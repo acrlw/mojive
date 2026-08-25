@@ -223,7 +223,15 @@ class SkyboxPass(BasePass):
         gl = ctx.ctx
         gl.enable_only(moderngl.DEPTH_TEST | moderngl.BLEND)
         gl.depth_func = "<="
-        gl.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)
+        # Preserve opaque target coverage while compositing straight-alpha haze.
+        # The viewport texture is composed by ImGui later, so leaking haze alpha
+        # here would blend the already-composited RGB against the UI a second time.
+        gl.blend_func = (
+            moderngl.SRC_ALPHA,
+            moderngl.ONE_MINUS_SRC_ALPHA,
+            moderngl.ONE,
+            moderngl.ONE_MINUS_SRC_ALPHA,
+        )
         # MuJoCo's classic haze is part of the opaque skybox stage and writes
         # depth before transparent geoms are drawn.
         ctx.target.fbo.depth_mask = self._classic

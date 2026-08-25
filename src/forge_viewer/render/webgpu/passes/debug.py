@@ -35,7 +35,7 @@ _UNIFORM_SLOT_BYTES = 256
 
 _ALPHA_BLEND = {
     "color": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
-    "alpha": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
+    "alpha": {"src_factor": "one", "dst_factor": "one-minus-src-alpha"},
 }
 
 _VERTICES: dict[Path, int] = {

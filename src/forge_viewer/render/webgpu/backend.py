@@ -139,11 +139,11 @@ _WIREFRAME_LAYOUT = {
 
 _ALPHA_BLEND = {
     "color": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
-    "alpha": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
+    "alpha": {"src_factor": "one", "dst_factor": "one-minus-src-alpha"},
 }
 _ADDITIVE_BLEND = {
     "color": {"src_factor": "src-alpha", "dst_factor": "one"},
-    "alpha": {"src_factor": "src-alpha", "dst_factor": "one"},
+    "alpha": {"src_factor": "one", "dst_factor": "one-minus-src-alpha"},
 }
 # forge state_overdraw: blend_func(ONE, ONE), no depth test or write.
 _OVERDRAW_BLEND = {
