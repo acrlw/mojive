@@ -25,6 +25,8 @@ class Draw2D(Protocol):
 
     def convex_fill(self, points, color) -> None: ...
 
+    def triangle_fan_fill(self, points, color) -> None: ...
+
     def concave_fill(self, points, color) -> None: ...
 
     def fringed_concave_fill(self, points, color) -> None:
@@ -79,6 +81,22 @@ class ImguiDraw2D:
 
     def convex_fill(self, points, color) -> None:
         self._dl.add_convex_poly_filled([self._vec(p) for p in points], self._u32(color))
+
+    def triangle_fan_fill(self, points, color) -> None:
+        vertices = np.asarray(points, np.float64).reshape(-1, 2)
+        if len(vertices) < 3:
+            return
+        dl = self._dl
+        base = dl._vtx_current_idx
+        uv = self._imgui.get_io().fonts.tex_uv_white_pixel
+        rgba = self._u32(color)
+        dl.prim_reserve((len(vertices) - 2) * 3, len(vertices))
+        for point in vertices:
+            dl.prim_write_vtx(self._vec(point), uv, rgba)
+        for index in range(1, len(vertices) - 1):
+            dl.prim_write_idx(base)
+            dl.prim_write_idx(base + index)
+            dl.prim_write_idx(base + index + 1)
 
     def concave_fill(self, points, color) -> None:
         self._dl.add_concave_poly_filled([self._vec(p) for p in points], self._u32(color))

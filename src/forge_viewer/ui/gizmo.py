@@ -842,10 +842,7 @@ class ObjectGizmo:
         fill_alpha = _rotation_fill_alpha(sweep)
         if fill_alpha > 0.0:
             fill = (1.0, 0.5, 0.06, fill_alpha)
-            if abs(sweep) <= np.pi:
-                overlay.convex_fill(sector, fill)
-            else:
-                overlay.fringed_concave_fill(sector, fill)
+            overlay.triangle_fan_fill(sector, fill)
         if np.all(reference[:, 2] > 0.0):
             overlay.polyline(
                 reference[:, :2],

@@ -136,7 +136,7 @@ def test_rotation_guide_keeps_the_sector_and_arc_without_center_strokes(
 
     gizmo._draw_rotation_guide(overlay, cam, RECT, 1.0, dial)
 
-    fills = [args[0] for name, args, _kwargs in overlay.calls if name == "convex_fill"]
+    fills = [args[0] for name, args, _kwargs in overlay.calls if name == "triangle_fan_fill"]
     polylines = [kwargs for name, _args, kwargs in overlay.calls if name == "polyline"]
     strokes = [args[0] for name, args, _kwargs in overlay.calls if name == "fringed_concave_fill"]
     dots = [args[0] for name, args, _kwargs in overlay.calls if name == "circle_filled"]
@@ -158,6 +158,40 @@ def test_rotation_guide_keeps_the_sector_and_arc_without_center_strokes(
         assert np.linalg.norm(cap) == pytest.approx(RING_WIDTH_PT)
     assert not dots
     assert all(name != "line" for name, _args, _kwargs in overlay.calls)
+
+
+@pytest.mark.parametrize("degrees", [285.0, -285.0])
+def test_rotation_guide_uses_an_oriented_triangle_fan_for_reflex_sectors(
+    degrees: float,
+) -> None:
+    cam = camera()
+    center = np.zeros(3)
+    axis = np.array((0.0, 0.0, 1.0))
+    start = np.array((1.0, 0.0, 0.0))
+    dial = _RotationDialProjector(
+        cam,
+        RECT,
+        center,
+        axis,
+        start,
+        SIZE_PT,
+        RotationDialProjection.ORTHOGRAPHIC,
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._axis[:] = axis
+    gizmo._rotation_angle = np.radians(degrees)
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_rotation_guide(overlay, cam, RECT, 1.0, dial)
+
+    fills = [args[0] for name, args, _kwargs in overlay.calls if name == "triangle_fan_fill"]
+    assert len(fills) == 1
+    sector = np.asarray(fills[0])
+    assert sector[0] == pytest.approx(project(cam, (center,), RECT)[0, :2])
+    assert sector[1] == pytest.approx(dial.points(RING_RADIUS, (0.0,))[0, :2])
+    assert sector[-1] == pytest.approx(dial.points(RING_RADIUS, (np.radians(degrees),))[0, :2])
+    assert all(name != "convex_fill" for name, _args, _kwargs in overlay.calls)
 
 
 def test_rotation_snap_highlight_matches_the_corresponding_tick_length() -> None:

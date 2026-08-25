@@ -208,6 +208,38 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
             raise RuntimeError("rotation snap input was not applied")
         _save(viewer, node, output / f"rotation-snap{suffix}-{style}.png")
 
+        for degrees in np.linspace(50.0, 285.0, 48):
+            cursor = project(
+                camera,
+                (
+                    _rotation_ring_point(
+                        origin,
+                        start_rotation,
+                        scale,
+                        start_angle + np.radians(float(degrees)),
+                    ),
+                ),
+                rect,
+            )[0, :2]
+            io.add_mouse_pos_event(*cursor)
+            viewer.sync()
+        _save(viewer, node, output / f"rotation-snap{suffix}-reflex-{style}.png")
+
+        for degrees in np.linspace(280.0, 50.0, 47):
+            cursor = project(
+                camera,
+                (
+                    _rotation_ring_point(
+                        origin,
+                        start_rotation,
+                        scale,
+                        start_angle + np.radians(float(degrees)),
+                    ),
+                ),
+                rect,
+            )[0, :2]
+            io.add_mouse_pos_event(*cursor)
+            viewer.sync()
         for degrees in np.linspace(50.0, -415.0, 94):
             cursor = project(
                 camera,
