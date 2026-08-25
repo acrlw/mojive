@@ -43,8 +43,8 @@ CASES = [
     ),
     (
         "src/forge_viewer/render/forge/state_guard.py",
-        "    viewport = ctx.viewport\n    scissor = ctx.scissor\n    ctx.screen.use()\n    ctx.viewport = viewport\n    ctx.scissor = scissor",
-        "    ctx.screen.use()",
+        "    viewport = ctx.viewport\n    scissor = ctx.scissor\n    screen.use()\n    ctx.viewport = viewport\n    ctx.scissor = scissor",
+        "    screen.use()",
         "test_bind_default_framebuffer_does_not_touch_viewport",
         GPU_TESTS,
     ),
@@ -198,8 +198,8 @@ CASES = [
     ),
     (
         "src/forge_viewer/ui/window.py",
-        "self.font_report = fonts.load(imgui, io, size_pt=self.config.font_size_pt)",
-        "self.font_report = fonts.load(\n            imgui, io, size_pt=self.config.font_size_pt * self._ui_scale\n        )",
+        "            size_pt=self.config.font_size_pt * self._font_atlas_scale,",
+        "            size_pt=self.config.font_size_pt * self._font_atlas_scale * 1.5,",
         "test_font_size_is_in_layout_space",
         UI_TESTS,
     ),
@@ -255,12 +255,15 @@ CASES = [
     ),
     (
         "src/forge_viewer/ui/viewcube.py",
-        """    pen_x = round(pos.x - (box[0] + box[2]) * 0.5)
-    pen_y = round(pos.y - (box[1] + box[3]) * 0.5)""",
-        """    dl.add_text(font, size, imgui.ImVec2(pos.x - size * 0.32, pos.y - size * 0.5), color, text)
-    pen_x = round(pos.x - (box[0] + box[2]) * 0.5)
-    pen_y = round(pos.y - (box[1] + box[3]) * 0.5)
-    return  # noqa""",
+        """                overlay.centered_label(
+                    b.label, b.screen, (*LABEL_FILL[:3], label_alpha), b.radius * 1.5
+                )""",
+        """                overlay.centered_label(
+                    b.label,
+                    (b.screen[0] + b.radius, b.screen[1]),
+                    (*LABEL_FILL[:3], label_alpha),
+                    b.radius * 1.5,
+                )""",
         "test_gizmo_label_sits_in_the_middle_of_its_ball",
         UI_TESTS,
     ),
@@ -273,8 +276,8 @@ CASES = [
     ),
     (
         "src/forge_viewer/ui/viewcube.py",
-        "            color = u32(imgui.ImVec4(*face, b.alpha))",
-        "            color = u32(imgui.ImVec4(*face, b.alpha * 0.55))",
+        "                (_lift(rgb) if hovered else rgb) if b.positive else (rgb if hovered else _dark(rgb))",
+        "                (_lift(rgb) if hovered else rgb) if b.positive else rgb",
         "test_negative_balls_are_dark_and_opaque",
         UI_TESTS,
     ),
@@ -285,7 +288,7 @@ CASES = [
         "                    self._center, b.screen, b.radius * (1.25 if hovered else 1.0), LINE_PT * style_scale\n"
         "                )",
         "test_hover_does_not_resize_the_ball",
-        UI_TESTS,
+        VC_TESTS,
     ),
     (
         "src/forge_viewer/ui/viewcube.py",
@@ -345,8 +348,8 @@ CASES = [
     ),
     (
         "src/forge_viewer/ui/gizmo.py",
-        "        self._verdict = verdict(session.paused, node, session.adapter.caps.inverse_kinematics)",
-        "        self._verdict = verdict(False, node, session.adapter.caps.inverse_kinematics)",
+        "        result = verdict(session.paused, node, session.adapter.caps.inverse_kinematics)",
+        "        result = verdict(False, node, session.adapter.caps.inverse_kinematics)",
         "test_gizmo_is_live_for_a_free_body",
         UI_TESTS,
     ),

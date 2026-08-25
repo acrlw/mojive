@@ -110,6 +110,33 @@ def test_lollipop_becomes_one_circle_when_the_ball_covers_the_center():
     assert radii == pytest.approx(np.full(24, BALL))
 
 
+def test_hover_does_not_resize_the_ball():
+    class Overlay:
+        def __init__(self) -> None:
+            self.outline = None
+
+        def circle_filled(self, *args, **kwargs) -> None:
+            pass
+
+        def fringed_concave_fill(self, points, _color) -> None:
+            self.outline = np.asarray(points)
+
+        def centered_label(self, *args, **kwargs) -> None:
+            pass
+
+    ball = vc.Ball(axis=0, sign=1.0, screen=(140.0, 100.0), radius=BALL, depth=-0.5)
+    cube = vc.ViewCube()
+    cube._center = CENTER
+    cube._balls = [ball]
+    cube._hover = ball
+    overlay = Overlay()
+
+    cube.draw(overlay)
+
+    expected = np.asarray(vc._lollipop_outline(CENTER, ball.screen, BALL, vc.LINE_PT))
+    assert overlay.outline == pytest.approx(expected)
+
+
 def test_negative_label_crossfades_in_when_looking_down_the_negative_axis():
     normal = vc.Ball(axis=0, sign=-1.0, screen=CENTER, radius=BALL, depth=-0.5)
     aligned = vc.Ball(axis=0, sign=-1.0, screen=CENTER, radius=BALL, depth=-1.0)
