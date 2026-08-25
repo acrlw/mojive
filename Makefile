@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt test gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition editor-performance stability scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt docs docs-serve test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -16,6 +16,7 @@ help:
 		'  make workspace-edit     workspace, MjSpec topology, camera and light acceptance' \
 		'  make model-loading      empty, MJCF, and URDF loading reference images' \
 		'  make model-composition  add and remove MJCF/URDF models at runtime' \
+		'  make mjcf-roundtrip     export edited workspaces as re-loadable MJCF' \
 		'  make editor-performance composition editing performance baseline' \
 		'  make stability          long-frame, large-model, and multi-camera gates' \
 		'  make robot             Unitree Go2; downloads on first run' \
@@ -68,7 +69,11 @@ help:
 		'Verification:' \
 		'  make p0                complete Renderer compatibility gate' \
 		'  make p1                complete P0 and P1 acceptance gate' \
-		'  make check             lint and CPU tests' \
+		'  make test-fast         pure CPU behavior used during iteration' \
+		'  make test-integration  file, protocol, and multi-module CPU tests' \
+		'  make test-physics      tests that compile or step physics worlds' \
+		'  make check             lint plus fast and integration CPU tests' \
+		'  make test-all          CPU, physics, and both real GPU backends' \
 		'  make gpu               real OpenGL tests' \
 		'  make gpu-wgpu          real WebGPU tests' \
 		'  make egl               Linux EGL Renderer and wireframe contract' \
@@ -84,6 +89,8 @@ help:
 		'  make doctor            window-path smoke test' \
 		'  make mujoco-audit      MuJoCo visualization coverage' \
 		'  make adapter-conformance  adapter contract report' \
+		'  make docs              build the API and user guide under output/site' \
+		'  make docs-serve        serve the documentation locally' \
 		'' \
 		'Display and backend options:' \
 		'  make editor BACKEND=wgpu' \
@@ -110,9 +117,30 @@ fmt:
 	$(RUFF) check --fix src tests tools
 	$(RUFF) format src tests tools
 
-## The default suite excludes real GPU and physics worlds.
-test:
-	$(PYTEST) -q
+docs:
+	uv run --extra docs mkdocs build --strict --site-dir output/site
+
+docs-serve:
+	uv run --extra docs mkdocs serve
+
+## Fast tests contain pure CPU behavior and module contracts.
+test-fast:
+	$(PYTEST) -q -m "not integration and not gpu and not physics and not slow and not golden"
+
+## Integration tests cover files, protocols, processes, and composed modules.
+test-integration:
+	$(PYTEST) -q -m "integration and not gpu and not physics and not slow and not golden"
+
+## The default CPU suite excludes real GPU and physics worlds.
+test: test-fast test-integration
+
+test-physics:
+	$(PYTEST) -q -m physics
+
+test-all: test test-physics gpu gpu-wgpu
+
+mjcf-roundtrip:
+	$(PYTEST) -q -m physics tests/test_workspace.py -k 'exports_formatted or export_current_pose'
 
 ## Isolate files because OpenGL and physics libraries own process-global registries.
 gpu:

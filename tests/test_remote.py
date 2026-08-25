@@ -30,6 +30,8 @@ from forge_viewer.scene import Scene
 from forge_viewer.session import Session
 from forge_viewer.types import CameraView, Environment, Light, Material, MeshShape
 
+pytestmark = pytest.mark.integration
+
 
 def _port_pair() -> int:
     for port in range(47000, 49000, 2):

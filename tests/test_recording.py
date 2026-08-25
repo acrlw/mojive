@@ -12,6 +12,8 @@ from forge_viewer.remote import RemoteFrame, RemoteStructure, snapshot_structure
 from forge_viewer.scene import Scene
 from forge_viewer.session import Session
 
+pytestmark = pytest.mark.integration
+
 
 def test_snapshot_stream_round_trips_structure_frame_and_debug_commands(tmp_path):
     scene = Scene()

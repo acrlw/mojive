@@ -21,7 +21,7 @@ from forge_viewer.scene_state import (
 from forge_viewer.session import Session
 from forge_viewer.ui.camera import OrbitCamera
 
-pytestmark = pytest.mark.physics
+pytestmark = [pytest.mark.integration, pytest.mark.physics]
 
 
 MODEL = """

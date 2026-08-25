@@ -4,10 +4,11 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("mujoco")
-
 from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
 from forge_viewer.tools.stability import run_stability
+
+pytest.importorskip("mujoco")
+pytestmark = [pytest.mark.integration, pytest.mark.physics]
 
 
 def test_headless_frame_and_large_model_lifecycle_stability(tmp_path: Path) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 
 from forge_viewer.adapters.base import LIGHT_OBJECT_BASE
 from forge_viewer.render.builder import SceneSourceBuilder
@@ -17,6 +18,8 @@ from forge_viewer.types import (
     TextureData,
     TextureKind,
 )
+
+pytestmark = pytest.mark.integration
 
 
 def test_forge_scene_round_trip_preserves_authored_content(tmp_path):

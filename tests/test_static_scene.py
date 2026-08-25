@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
+import pytest
 
 from forge_viewer import commands as cmd
 from forge_viewer.adapters.base import (
@@ -28,6 +29,8 @@ from forge_viewer.types import (
     MeshData,
     MeshShape,
 )
+
+pytestmark = pytest.mark.integration
 
 
 def test_static_scene_builds_without_a_physics_package():

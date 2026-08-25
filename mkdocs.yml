@@ -1,0 +1,52 @@
+site_name: forge-viewer
+site_description: Backend-neutral 3D viewer and renderer for robotics and simulation
+site_url: https://acrlw.github.io/forge-viewer/
+repo_url: https://github.com/acrlw/forge-viewer
+repo_name: acrlw/forge-viewer
+docs_dir: docs
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+nav:
+  - Overview: index.md
+  - Getting started: getting-started.md
+  - Concepts:
+      - Architecture: concepts/architecture.md
+      - Renderer: RENDERER.md
+      - Platform support: PLATFORM.md
+  - Guides:
+      - Editor and MJCF: guides/editor-and-mjcf.md
+      - Testing: guides/testing.md
+      - WebGPU backend: WGPU_BACKEND_REPORT.md
+  - API reference:
+      - API map: api/index.md
+      - Scene contracts: api/scene.md
+      - Adapters and session: api/adapters.md
+      - Renderer and debug draw: api/rendering.md
+      - Remote and recording: api/remote.md
+  - Engineering decisions: DECISIONS.md
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            filters: ["!^_"]
+            heading_level: 2
+            members_order: source
+            show_root_heading: true
+            show_source: false
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - tables
+strict: true

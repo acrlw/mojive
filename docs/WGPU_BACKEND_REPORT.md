@@ -13,8 +13,7 @@ Validated platforms:
 - macOS with Metal
 - Linux with Vulkan
 
-Windows D3D12 validation is tracked in [development status](../plan/STATUS.md). Forge stays the
-default backend.
+Forge stays the default backend.
 
 ## Usage
 

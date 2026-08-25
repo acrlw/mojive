@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from forge_viewer import commands as cmd
 from forge_viewer.adapters.base import FrameNeeds
@@ -13,6 +14,8 @@ from forge_viewer.backends import available_backends, make_adapter
 from forge_viewer.scene import Scene
 from forge_viewer.session import Session
 from forge_viewer.types import Light, LightSet
+
+pytestmark = pytest.mark.integration
 
 
 def test_toy_is_a_real_available_backend_and_passes_the_shared_contract():
