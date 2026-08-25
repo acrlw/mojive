@@ -20,7 +20,19 @@ _MONO: tuple[tuple[str, int], ...] = (
 )
 
 
-_CJK: tuple[tuple[str, int], ...] = (
+_NOTO_CJK: tuple[tuple[str, int], ...] = (
+    (str(Path.home() / "Library/Fonts/NotoSansSC-Regular.otf"), 0),
+    (str(Path.home() / "Library/Fonts/NotoSansCJK-Regular.ttc"), 0),
+    ("/Library/Fonts/NotoSansSC-Regular.otf", 0),
+    ("/Library/Fonts/NotoSansCJK-Regular.ttc", 0),
+    ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 0),
+    ("/usr/share/fonts/opentype/noto/NotoSansSC-Regular.otf", 0),
+    ("C:/Windows/Fonts/NotoSansSC-Regular.otf", 0),
+    ("C:/Windows/Fonts/NotoSansCJK-Regular.ttc", 0),
+)
+
+
+_CJK_FALLBACK: tuple[tuple[str, int], ...] = (
     (str(Path.home() / "Library/Fonts/SourceHanMonoSC-Regular.otf"), 0),
     (str(Path.home() / "Library/Fonts/SourceHanSansSC-Regular.otf"), 0),
     ("/Library/Fonts/SourceHanMonoSC-Regular.otf", 0),
@@ -30,8 +42,6 @@ _CJK: tuple[tuple[str, int], ...] = (
     ("/System/Library/Fonts/STHeiti Light.ttc", 0),
     ("/usr/share/fonts/opentype/source-han-mono/SourceHanMonoSC-Regular.otf", 0),
     ("/usr/share/fonts/opentype/source-han-sans/SourceHanSansSC-Regular.otf", 0),
-    ("/usr/share/fonts/opentype/noto/NotoSansMonoCJK-Regular.ttc", 0),
-    ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 0),
     ("C:/Windows/Fonts/SourceHanMonoSC-Regular.otf", 0),
     ("C:/Windows/Fonts/SourceHanSansSC-Regular.otf", 0),
     ("C:/Windows/Fonts/msyh.ttc", 0),
@@ -169,6 +179,34 @@ def _resolve(
     return None, ""
 
 
+def _resolve_cjk(
+    configured: str | None,
+    *,
+    allow_download: bool,
+    timeout: float,
+    notes: list[str],
+) -> tuple[tuple[str, int] | None, str]:
+    if configured:
+        path = Path(configured).expanduser()
+        if path.is_file():
+            return (str(path), 0), path.name
+        notes.append(f"Configured CJK font is unavailable: {path}")
+
+    font, label = _resolve(
+        _NOTO_CJK,
+        _REMOTE_CJK,
+        prefer_remote=False,
+        allow_download=allow_download,
+        timeout=timeout,
+        notes=notes,
+    )
+    if font is not None:
+        return font, label
+
+    fallback = _first_existing(_CJK_FALLBACK)
+    return (fallback, Path(fallback[0]).name) if fallback is not None else (None, "")
+
+
 def load(
     imgui,
     io,
@@ -206,14 +244,8 @@ def load(
         rep.mono = label
         rep.mono_path, rep.mono_index = mono
 
-    configured_cjk = os.environ.get("FORGE_VIEWER_CJK_FONT")
-    cjk_candidates = (
-        ((str(Path(configured_cjk).expanduser()), 0), *_CJK) if configured_cjk else _CJK
-    )
-    cjk, label = _resolve(
-        cjk_candidates,
-        _REMOTE_CJK,
-        prefer_remote=False,
+    cjk, label = _resolve_cjk(
+        os.environ.get("FORGE_VIEWER_CJK_FONT"),
         allow_download=allow_download,
         timeout=timeout,
         notes=rep.notes,
