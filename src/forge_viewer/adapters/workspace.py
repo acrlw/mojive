@@ -18,6 +18,7 @@ from .base import (
     SceneFrame,
     SceneModelInfo,
     SceneNode,
+    SceneSaveOptions,
     SceneSource,
 )
 
@@ -93,10 +94,18 @@ class WorkspaceAdapter(SceneAdapterBase):
         self._path = Path(path).expanduser().resolve()
         self._invalidate()
 
-    def save_scene(self, path: Path) -> None:
+    def save_scene(self, path: Path, options: SceneSaveOptions | None = None) -> None:
+        target = Path(path).expanduser().resolve()
+        if target.suffix.lower() in {".xml", ".mjcf"}:
+            self.primary.export_mjcf(target, self.scene.source, self.scene.frame, options)
+            self._path = target
+            return
         from ..workspace_io import save_workspace
 
-        self._path = save_workspace(self, path)
+        self._path = save_workspace(self, target)
+
+    def current_pose_modified(self) -> bool:
+        return self.primary.current_pose_modified()
 
     def capture_edit_state(self) -> object:
         return self.scene.clone(), self.primary.capture_edit_state(), self._resource_roots
@@ -113,18 +122,25 @@ class WorkspaceAdapter(SceneAdapterBase):
         return True
 
     def reload(self) -> None:
-        if self._path is not None:
+        if self._path is None:
+            self.primary.reload()
+        elif self._path.name.endswith(".forge.json"):
             self.open_scene(self._path)
         else:
-            self.primary.reload()
+            self.load(self._path)
 
     def load(self, path: Path) -> None:
+        target = Path(path).expanduser().resolve()
         self.primary.new_scene()
         model_id = self.primary.add_scene_model(
-            Path(path), np.zeros(3, np.float32), np.eye(3, dtype=np.float32)
+            target, np.zeros(3, np.float32), np.eye(3, dtype=np.float32)
         )
         if model_id < 0:
-            raise RuntimeError(f"Failed to load {path}")
+            raise RuntimeError(f"Failed to load {target}")
+        environment = self.primary.scene_source().lights.environment()
+        self.scene = Scene(lights=LightSet().with_environment(environment))
+        self._path = target
+        self._resource_roots = ()
         self._invalidate()
 
     def scene_models(self) -> tuple[SceneModelInfo, ...]:

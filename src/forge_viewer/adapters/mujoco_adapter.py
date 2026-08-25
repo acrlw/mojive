@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import warnings
 import xml.etree.ElementTree as ET
 from colorsys import hsv_to_rgb
@@ -54,6 +55,7 @@ from .base import (
     SceneFrame,
     SceneModelInfo,
     SceneNode,
+    SceneSaveOptions,
     SceneSource,
     SensorInfo,
     VisualGroupInfo,
@@ -1005,12 +1007,15 @@ class MuJoCoAdapter(SceneAdapterBase):
             node = next((item for item in self.nodes() if item.node_id == node.parent), None)
         return None
 
-    def _compile_composed_model(self):
+    def _composed_spec(self):
         if self._root_spec is None:
             raise RuntimeError("Model composition is unavailable")
         spec = self._root_spec.copy()
+        if self._root_path is not None:
+            self._resolve_asset_paths(spec, self._root_path.parent)
         for index, item in enumerate(self._attached_models):
             child = item.spec.copy()
+            self._resolve_asset_paths(child, item.path.parent)
             if index == 0 and self._root_path is None:
                 spec.option = child.option
                 spec.visual = child.visual
@@ -1022,9 +1027,246 @@ class MuJoCoAdapter(SceneAdapterBase):
             frame.pos = item.position
             frame.quat = math3d.mat3_to_quat(item.rotation)
             spec.attach(child, prefix=item.prefix, frame=frame)
+        return spec
+
+    def _compile_composed_model(self):
+        spec = self._composed_spec()
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Attach conflict.*")
             return spec.compile()
+
+    @staticmethod
+    def _resolve_asset_paths(spec, directory: Path) -> None:
+        mesh_dir = directory / spec.compiler.meshdir if spec.compiler.meshdir else directory
+        texture_dir = (
+            directory / spec.compiler.texturedir if spec.compiler.texturedir else directory
+        )
+        for assets, base in (
+            (spec.meshes, mesh_dir),
+            (spec.textures, texture_dir),
+            (spec.hfields, directory),
+            (spec.skins, directory),
+        ):
+            for asset in assets:
+                file = str(asset.file)
+                if file and not Path(file).is_absolute():
+                    asset.file = str((base / file).resolve())
+        spec.compiler.meshdir = ""
+        spec.compiler.texturedir = ""
+
+    def current_pose_modified(self) -> bool:
+        if self._m is None or self._d is None:
+            return False
+        return not np.allclose(self._d.qpos, self._m.qpos0, rtol=1e-6, atol=1e-7)
+
+    def export_mjcf(
+        self,
+        path: Path,
+        source: SceneSource,
+        frame: SceneFrame,
+        options: SceneSaveOptions | None = None,
+    ) -> Path:
+        """Write the composed MuJoCo model and Forge-authored entities as MJCF."""
+        target = Path(path).expanduser().resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        spec = self._composed_spec()
+        self._append_authored_scene(spec, target, source, frame)
+        key_name = (options or SceneSaveOptions()).current_pose_keyframe
+        if key_name:
+            previous = spec.key(key_name)
+            if previous is not None:
+                spec.delete(previous)
+            state = self.capture_state()
+            spec.add_key(
+                name=key_name,
+                qpos=state.qpos,
+                qvel=np.zeros_like(state.qvel),
+                act=state.act,
+                mpos=state.mocap_pos.reshape(-1),
+                mquat=state.mocap_quat.reshape(-1),
+                ctrl=state.ctrl,
+            )
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Attach conflict.*")
+            spec.compile()
+        target.write_text(spec.to_xml().rstrip() + "\n", encoding="utf-8")
+        return target
+
+    def _append_authored_scene(
+        self, spec, target: Path, source: SceneSource, frame: SceneFrame
+    ) -> None:
+        texture_names = self._export_authored_textures(spec, target, source)
+        material_names: list[str] = []
+        for index, material in enumerate(source.materials):
+            name = _mjcf_name("forge_material", material.name, index)
+            textures = (
+                ["", texture_names[material.texture]] if material.texture in texture_names else []
+            )
+            spec.add_material(
+                name=name,
+                textures=textures,
+                texuniform=material.tex_uniform,
+                texrepeat=material.tex_repeat,
+                emission=material.emission,
+                specular=material.specular,
+                shininess=material.shininess,
+                reflectance=material.reflectance,
+                rgba=material.rgba,
+            )
+            material_names.append(name)
+
+        positions = frame.geom_xpos
+        rotations = frame.geom_xmat
+        if positions is None or rotations is None:
+            positions = np.zeros((source.instance_count, 3), np.float32)
+            rotations = np.repeat(np.eye(3, dtype=np.float32)[None], source.instance_count, axis=0)
+        nodes = {node.node_id: node for node in source.nodes}
+        for index, key in enumerate(source.geom_mesh):
+            node = nodes.get(int(source.geom_node[index]))
+            owner = nodes.get(node.parent) if node is not None else None
+            name = _mjcf_name(
+                "forge_object",
+                owner.name if owner is not None else (node.name if node is not None else "object"),
+                index,
+            )
+            body = spec.worldbody.add_body(
+                name=name,
+                pos=positions[index],
+                quat=math3d.mat3_to_quat(rotations[index]),
+            )
+            material = (
+                material_names[int(source.geom_material[index])]
+                if material_names and 0 <= int(source.geom_material[index]) < len(material_names)
+                else ""
+            )
+            geom = {
+                "name": f"{name}_geom",
+                "rgba": source.geom_rgba[index],
+                "material": material,
+                "contype": 0,
+                "conaffinity": 0,
+            }
+            shape = key.shape
+            size = np.asarray(source.geom_size[index], np.float64)
+            if shape is MeshShape.SPHERE:
+                body.add_geom(type=mujoco.mjtGeom.mjGEOM_ELLIPSOID, size=size, **geom)
+            elif shape is MeshShape.BOX:
+                body.add_geom(type=mujoco.mjtGeom.mjGEOM_BOX, size=size, **geom)
+            elif shape is MeshShape.PLANE:
+                body.add_geom(
+                    type=mujoco.mjtGeom.mjGEOM_PLANE,
+                    size=(float(size[0]), float(size[1]), max(float(size[2]), 1e-3)),
+                    **geom,
+                )
+            elif shape is MeshShape.CYLINDER and np.isclose(size[0], size[1]):
+                body.add_geom(
+                    type=mujoco.mjtGeom.mjGEOM_CYLINDER,
+                    size=(float(size[0]), float(size[2])),
+                    **geom,
+                )
+            else:
+                mesh = source.meshes.get(key) or _authored_builtin_mesh(shape)
+                if mesh is None:
+                    continue
+                mesh_name = f"{name}_mesh"
+                spec.add_mesh(
+                    name=mesh_name,
+                    scale=size,
+                    uservert=np.asarray(mesh.positions, np.float64).reshape(-1),
+                    userface=np.asarray(mesh.indices, np.int32).reshape(-1),
+                )
+                body.add_geom(
+                    type=mujoco.mjtGeom.mjGEOM_MESH,
+                    meshname=mesh_name,
+                    **geom,
+                )
+
+        camera_names = {
+            node.camera_index: node.name
+            for node in source.nodes
+            if node.kind is NodeKind.CAMERA and node.camera_index >= 0
+        }
+        for index, camera in enumerate(source.cameras):
+            name = _mjcf_name(
+                "forge_camera",
+                camera_names.get(index, "camera"),
+                index,
+            )
+            spec.worldbody.add_camera(
+                name=name,
+                pos=camera.eye,
+                quat=_camera_quaternion(camera),
+                mode=mujoco.mjtCamLight.mjCAMLIGHT_FIXED,
+                proj=(
+                    mujoco.mjtProjection.mjPROJ_ORTHOGRAPHIC
+                    if camera.orthographic
+                    else mujoco.mjtProjection.mjPROJ_PERSPECTIVE
+                ),
+                fovy=(camera.ortho_height if camera.orthographic else np.degrees(camera.fov_y)),
+                focal_length=camera.focal_length if camera.uses_intrinsics() else None,
+                sensor_size=camera.sensor_size if camera.uses_intrinsics() else None,
+                principal_length=camera.principal_offset if camera.uses_intrinsics() else None,
+            )
+
+        light_names = {
+            node.light_index: node.name
+            for node in source.nodes
+            if node.kind is NodeKind.LIGHT and node.light_index >= 0
+        }
+        kinds = {
+            LightKind.DIRECTIONAL: mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
+            LightKind.POINT: mujoco.mjtLightType.mjLIGHT_POINT,
+            LightKind.SPOT: mujoco.mjtLightType.mjLIGHT_SPOT,
+            LightKind.AREA: mujoco.mjtLightType.mjLIGHT_POINT,
+        }
+        for index, light in enumerate(source.lights.lights):
+            if light.kind is LightKind.IMAGE:
+                continue
+            name = _mjcf_name(
+                "forge_light",
+                light_names.get(index, "light"),
+                index,
+            )
+            spec.worldbody.add_light(
+                name=name,
+                pos=light.position,
+                dir=light.direction,
+                mode=mujoco.mjtCamLight.mjCAMLIGHT_FIXED,
+                active=light.active,
+                type=kinds[light.kind],
+                castshadow=light.cast_shadow,
+                bulbradius=light.area_radius,
+                intensity=light.intensity,
+                range=light.range,
+                attenuation=light.attenuation,
+                cutoff=light.cutoff,
+                exponent=light.exponent,
+                ambient=light.ambient,
+                diffuse=light.diffuse,
+                specular=light.specular,
+            )
+        _apply_environment(spec, source.lights)
+
+    @staticmethod
+    def _export_authored_textures(spec, target: Path, source: SceneSource) -> dict[str, str]:
+        from PIL import Image
+
+        texture_names: dict[str, str] = {}
+        assets = target.parent / f"{target.stem}_assets"
+        for index, texture in enumerate(source.textures.values()):
+            if texture.kind is not TextureKind.TWO_D:
+                continue
+            assets.mkdir(parents=True, exist_ok=True)
+            name = _mjcf_name("forge_texture", texture.name, index)
+            file = assets / f"{name}.png"
+            Image.fromarray(texture.pixels).save(file)
+            spec.add_texture(
+                name=name,
+                type=mujoco.mjtTexture.mjTEXTURE_2D,
+                file=str(file.resolve()),
+            )
+            texture_names[texture.name] = name
+        return texture_names
 
     @staticmethod
     def _joint_state_key(model, joint: int) -> str:
@@ -3762,6 +4004,69 @@ class MuJoCoAdapter(SceneAdapterBase):
     @property
     def fast_pose(self) -> bool:
         return self._fast_pose
+
+
+def _mjcf_name(prefix: str, value: str, index: int) -> str:
+    token = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value).strip()).strip("_")
+    return f"{prefix}_{index}_{token or 'entity'}"
+
+
+def _camera_quaternion(camera: CameraView) -> np.ndarray:
+    forward = math3d.normalize(np.asarray(camera.target, np.float64) - camera.eye)
+    up = math3d.normalize(np.asarray(camera.up, np.float64))
+    right = math3d.normalize(np.cross(forward, up))
+    if not np.any(right):
+        right = math3d.normalize(np.cross(forward, np.array((0.0, 0.0, 1.0))))
+    up = math3d.normalize(np.cross(right, forward))
+    return math3d.mat3_to_quat(np.column_stack((right, up, -forward)))
+
+
+def _apply_environment(spec, lights: LightSet) -> None:
+    headlight = lights.headlight
+    spec.visual.headlight.active = headlight is not None and headlight.active
+    if headlight is not None:
+        spec.visual.headlight.ambient = headlight.ambient
+        spec.visual.headlight.diffuse = headlight.diffuse
+        spec.visual.headlight.specular = headlight.specular
+    spec.visual.rgba.fog = (*np.asarray(lights.fog_color, np.float64), 1.0)
+    spec.visual.map.fogstart = lights.fog_start
+    spec.visual.map.fogend = lights.fog_end
+    spec.visual.rgba.haze = (*np.asarray(lights.haze_color, np.float64), 1.0)
+    spec.visual.map.haze = lights.haze_density
+
+
+def _authored_builtin_mesh(shape: MeshShape) -> MeshData | None:
+    if shape not in (MeshShape.CYLINDER, MeshShape.CONE):
+        return None
+    segments = 32
+    positions: list[tuple[float, float, float]] = []
+    indices: list[int] = []
+    radius_top = 1.0 if shape is MeshShape.CYLINDER else 0.0
+    for segment in range(segments):
+        angle = 2.0 * np.pi * segment / segments
+        x, y = float(np.cos(angle)), float(np.sin(angle))
+        positions.extend(((x, y, -1.0), (radius_top * x, radius_top * y, 1.0)))
+    bottom_center = len(positions)
+    positions.append((0.0, 0.0, -1.0))
+    top_center = len(positions)
+    positions.append((0.0, 0.0, 1.0))
+    for segment in range(segments):
+        next_segment = (segment + 1) % segments
+        bottom = 2 * segment
+        top = bottom + 1
+        next_bottom = 2 * next_segment
+        next_top = next_bottom + 1
+        indices.extend((bottom, next_bottom, top, top, next_bottom, next_top))
+        indices.extend((bottom_center, next_bottom, bottom))
+        if radius_top > 0.0:
+            indices.extend((top_center, top, next_top))
+    vertex_count = len(positions)
+    return MeshData(
+        positions=np.asarray(positions, np.float32),
+        normals=np.zeros((vertex_count, 3), np.float32),
+        uvs=np.zeros((vertex_count, 2), np.float32),
+        indices=np.asarray(indices, np.uint32),
+    )
 
 
 def _relative_pose(position, rotation, parent_position, parent_rotation):

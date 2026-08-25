@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from forge_viewer import commands as cmd
-from forge_viewer.adapters.base import NodeKind
+from forge_viewer.adapters.base import NodeKind, SceneSaveOptions
 from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
 from forge_viewer.adapters.workspace import WorkspaceAdapter
 from forge_viewer.session import Session
@@ -21,6 +21,7 @@ from forge_viewer.workspace_io import (
 )
 
 mujoco = pytest.importorskip("mujoco")
+pytestmark = [pytest.mark.integration, pytest.mark.physics]
 
 ASSETS = Path(__file__).parents[1] / "assets"
 
@@ -124,6 +125,84 @@ def test_workspace_round_trip_preserves_models_resources_and_entities(tmp_path: 
     assert model.position == pytest.approx((1.0, 2.0, 3.0))
     names = {node.name for node in restored.nodes()}
     assert {"workcell", "key", "inspection"} <= names
+
+
+def test_workspace_exports_formatted_re_loadable_mjcf(tmp_path: Path) -> None:
+    document = workspace()
+    document.add_scene_model(
+        ASSETS / "test_scene.xml",
+        np.array((1.0, 2.0, 0.0), np.float32),
+        np.eye(3, dtype=np.float32),
+    )
+    document.add_scene_object(
+        MeshShape.CONE,
+        "inspection cone",
+        np.array((0.2, 0.2, 0.4), np.float32),
+        np.array((0.0, 0.0, 0.4), np.float32),
+        np.eye(3, dtype=np.float32),
+        np.array((0.2, 0.4, 0.8, 1.0), np.float32),
+        DEFAULT_MATERIAL,
+    )
+    document.add_scene_light(
+        "inspection light",
+        Light(
+            kind=LightKind.SPOT,
+            position=np.array((1.0, -2.0, 3.0), np.float32),
+            cutoff=30.0,
+        ),
+    )
+    document.add_scene_camera(
+        "inspection camera",
+        CameraView(
+            eye=np.array((2.0, -2.0, 1.5), np.float32),
+            target=np.array((0.0, 0.0, 0.5), np.float32),
+        ),
+    )
+
+    path = tmp_path / "workcell.xml"
+    document.save_scene(path)
+    xml = path.read_text(encoding="utf-8")
+    assert xml.endswith("\n")
+    assert '\n    <camera name="forge_camera_0_inspection_camera"' in xml
+    assert 'name="forge_light_0_inspection_light"' in xml
+    assert 'name="forge_object_0_inspection_cone"' in xml
+
+    model = mujoco.MjModel.from_xml_path(str(path))
+    restored = MuJoCoAdapter(path)
+    assert model.ncam == restored.model.ncam == 2
+    assert model.nlight == restored.model.nlight == 2
+    assert model.ngeom == restored.model.ngeom
+
+    document.reload()
+    source = document.scene_source()
+    assert len(source.cameras) == 2
+    assert len(source.lights.lights) == 2
+    assert sum(node.kind is NodeKind.GEOM for node in source.nodes) == model.ngeom
+
+
+def test_workspace_can_export_current_pose_as_key0(tmp_path: Path) -> None:
+    model_path = tmp_path / "free-body.xml"
+    model_path.write_text(
+        """<mujoco model="free-body">
+  <worldbody>
+    <body name="body"><freejoint/><geom type="box" size="0.1 0.1 0.1"/></body>
+  </worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    primary = MuJoCoAdapter(model_path)
+    document = WorkspaceAdapter(primary)
+    primary.data.qpos[:3] = (1.0, 2.0, 3.0)
+    mujoco.mj_forward(primary.model, primary.data)
+    assert document.current_pose_modified()
+
+    path = tmp_path / "posed.xml"
+    document.save_scene(path, SceneSaveOptions(current_pose_keyframe="key0"))
+    model = mujoco.MjModel.from_xml_path(str(path))
+    key_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, "key0")
+    assert key_id >= 0
+    assert model.key_qpos[key_id, :3] == pytest.approx((1.0, 2.0, 3.0))
 
 
 def test_workspace_resolves_models_from_resource_roots(tmp_path: Path) -> None:

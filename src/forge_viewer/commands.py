@@ -153,6 +153,7 @@ class OpenScene(Command):
 @dataclass(frozen=True)
 class SaveScene(Command):
     path: Path
+    current_pose_keyframe: str | None = None
 
 
 @dataclass(frozen=True)

@@ -12,6 +12,7 @@ from .base import (
     SceneAdapterBase,
     SceneFrame,
     SceneNode,
+    SceneSaveOptions,
     SceneSource,
 )
 
@@ -40,7 +41,7 @@ class StaticSceneAdapter(SceneAdapterBase):
         self.scene = Scene.load(path)
         self._path = Path(path).expanduser().resolve()
 
-    def save_scene(self, path: Path) -> None:
+    def save_scene(self, path: Path, options: SceneSaveOptions | None = None) -> None:
         self._path = self.scene.save(path)
 
     def capture_edit_state(self) -> object:

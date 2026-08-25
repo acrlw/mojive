@@ -55,7 +55,21 @@ MODEL_FILTERS = [
     "*",
 ]
 SCENE_SUFFIX = ".forge.json"
-SCENE_FILTERS = ["Forge scenes", "*.forge.json", "All files", "*"]
+SCENE_FILTERS = [
+    "Forge scenes (*.forge.json)",
+    "*.forge.json",
+    "MuJoCo XML / MJCF (*.xml, *.mjcf)",
+    "*.xml *.mjcf",
+    "All files",
+    "*",
+]
+
+
+def _scene_save_target(path: str | Path) -> Path:
+    target = Path(path).expanduser().resolve()
+    if target.name.endswith(SCENE_SUFFIX) or target.suffix.lower() in {".xml", ".mjcf"}:
+        return target
+    return target.with_name(target.name + SCENE_SUFFIX)
 
 
 def _prepare_modal(style_scale: float, width_pt: float) -> None:
@@ -139,6 +153,7 @@ class ViewerApp:
         self._open_resource_repair_popup = False
         self._pending_document_action: tuple[str, Path | None] | None = None
         self._after_save_action: tuple[str, Path | None] | None = None
+        self._pending_pose_save: tuple[Path, tuple[str, Path | None] | None] | None = None
         self._rename_object_id = 0
         self._rename_value = ""
         self._open_rename_popup = False
@@ -242,6 +257,8 @@ class ViewerApp:
 
     def open_scene(self, path: str | Path) -> CommandResult:
         target = Path(path).expanduser().resolve()
+        if target.suffix.lower() in MODEL_EXTENSIONS:
+            return self.load_model(target)
         try:
             missing = missing_resource_entries(target)
         except Exception:
@@ -259,16 +276,28 @@ class ViewerApp:
             self._report_model_error(result.message)
         return result
 
-    def save_scene(self, path: str | Path) -> CommandResult:
-        target = Path(path).expanduser()
-        if not target.name.endswith(SCENE_SUFFIX):
-            target = target.with_name(target.name + SCENE_SUFFIX)
-        result = self.session.submit(cmd.SaveScene(target))
+    def save_scene(
+        self, path: str | Path, *, current_pose_keyframe: str | None = None
+    ) -> CommandResult:
+        target = _scene_save_target(path)
+        result = self.session.submit(cmd.SaveScene(target, current_pose_keyframe))
         if result.ok:
             self._set_model_drop_notice(result.message)
         else:
             self._report_model_error(result.message)
         return result
+
+    def _request_scene_save(
+        self,
+        path: str | Path,
+        pending: tuple[str, Path | None] | None = None,
+    ) -> None:
+        target = _scene_save_target(path)
+        if target.suffix.lower() in {".xml", ".mjcf"} and self.session.current_pose_modified:
+            self._pending_pose_save = (target, pending)
+            return
+        if self.save_scene(target).ok and pending is not None:
+            self._execute_document_action(*pending)
 
     def _after_model_change(self) -> None:
         self.router.abort()
@@ -304,7 +333,7 @@ class ViewerApp:
         if action == "save":
             default = current or (Path.cwd() / f"scene{SCENE_SUFFIX}")
             self._scene_dialog = portable_file_dialogs.save_file(
-                "Save Forge scene", str(default), SCENE_FILTERS
+                "Save scene", str(default), SCENE_FILTERS
             )
         else:
             default = current.parent if current is not None else Path.cwd()
@@ -470,8 +499,7 @@ class ViewerApp:
         if action == "save":
             pending = self._after_save_action
             self._after_save_action = None
-            if self.save_scene(selected).ok and pending is not None:
-                self._execute_document_action(*pending)
+            self._request_scene_save(selected, pending)
         else:
             self._request_document_action("open_scene", Path(selected))
 
@@ -672,7 +700,7 @@ class ViewerApp:
             if self.session.asset_path is None:
                 self._open_scene_dialog("save")
             else:
-                self.save_scene(self.session.asset_path)
+                self._request_scene_save(self.session.asset_path)
         if save_scene_as:
             self._open_scene_dialog("save")
         if open_model:
@@ -876,9 +904,9 @@ class ViewerApp:
                 self._after_save_action = pending
                 self._pending_document_action = None
                 self._open_scene_dialog("save")
-            elif self.save_scene(self.session.asset_path).ok:
+            else:
                 self._pending_document_action = None
-                self._execute_document_action(*pending)
+                self._request_scene_save(self.session.asset_path, pending)
             imgui.close_current_popup()
         imgui.same_line()
         if imgui.button("Discard", imgui.ImVec2(100.0, 0.0)):
@@ -888,6 +916,40 @@ class ViewerApp:
         imgui.same_line()
         if imgui.button("Cancel", imgui.ImVec2(100.0, 0.0)):
             self._pending_document_action = None
+            imgui.close_current_popup()
+        imgui.end_popup()
+
+    def _draw_pose_save_prompt(self) -> None:
+        pending = self._pending_pose_save
+        if pending is None:
+            return
+        imgui.open_popup("Save current pose")
+        _prepare_modal(self.window.style_scale, 500.0)
+        visible, _ = imgui.begin_popup_modal(
+            "Save current pose", None, imgui.WindowFlags_.always_auto_resize.value
+        )
+        if not visible:
+            return
+        imgui.text_wrapped(
+            "The current pose differs from the model default. Add the current qpos as "
+            "keyframe key0 in the exported MJCF?"
+        )
+        imgui.spacing()
+        target, after = pending
+        if imgui.button("Save as key0", imgui.ImVec2(130.0, 0.0)):
+            self._pending_pose_save = None
+            if self.save_scene(target, current_pose_keyframe="key0").ok and after is not None:
+                self._execute_document_action(*after)
+            imgui.close_current_popup()
+        imgui.same_line()
+        if imgui.button("Save without keyframe", imgui.ImVec2(190.0, 0.0)):
+            self._pending_pose_save = None
+            if self.save_scene(target).ok and after is not None:
+                self._execute_document_action(*after)
+            imgui.close_current_popup()
+        imgui.same_line()
+        if imgui.button("Cancel", imgui.ImVec2(90.0, 0.0)):
+            self._pending_pose_save = None
             imgui.close_current_popup()
         imgui.end_popup()
 
@@ -1003,6 +1065,7 @@ class ViewerApp:
         self.panels.draw(ctx)
         self._draw_rename_popup()
         self._draw_unsaved_changes()
+        self._draw_pose_save_prompt()
         self._draw_resource_repair()
         self._draw_model_load_error()
         self._sync_window_title()

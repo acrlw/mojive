@@ -23,6 +23,7 @@ from .adapters.base import (
     SceneFrame,
     SceneModelInfo,
     SceneNode,
+    SceneSaveOptions,
     SceneSource,
     SensorInfo,
 )
@@ -250,6 +251,10 @@ class Session:
     @property
     def dirty(self) -> bool:
         return self._edit_changed or self._document_revision != self._saved_revision
+
+    @property
+    def current_pose_modified(self) -> bool:
+        return self._adapter.current_pose_modified()
 
     @property
     def can_undo(self) -> bool:
@@ -564,7 +569,10 @@ class Session:
                 return CommandResult.bad(f"{caps.name} does not support scene files")
             path = Path(c.path).expanduser().resolve()
             try:
-                self._adapter.save_scene(path)
+                self._adapter.save_scene(
+                    path,
+                    SceneSaveOptions(current_pose_keyframe=c.current_pose_keyframe),
+                )
             except Exception as exc:
                 return CommandResult.bad(str(exc))
             self._asset_path = path

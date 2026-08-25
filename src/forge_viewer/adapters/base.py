@@ -115,6 +115,13 @@ class SceneModelInfo:
 
 
 @dataclass(frozen=True)
+class SceneSaveOptions:
+    """Optional format-specific behavior for a scene save operation."""
+
+    current_pose_keyframe: str | None = None
+
+
+@dataclass(frozen=True)
 class ModelComponentField:
     """One editable MJCF attribute with optional model-local reference choices."""
 
@@ -535,8 +542,20 @@ class SceneAdapterBase:
     def open_scene(self, path: Path) -> None:
         raise RuntimeError(f"{self.caps.name} does not support scene files")
 
-    def save_scene(self, path: Path) -> None:
+    def save_scene(self, path: Path, options: SceneSaveOptions | None = None) -> None:
         raise RuntimeError(f"{self.caps.name} does not support scene files")
+
+    def current_pose_modified(self) -> bool:
+        return False
+
+    def export_mjcf(
+        self,
+        path: Path,
+        source: SceneSource,
+        frame: SceneFrame,
+        options: SceneSaveOptions | None = None,
+    ) -> Path:
+        raise RuntimeError(f"{self.caps.name} does not support MJCF export")
 
     @property
     def resource_roots(self) -> tuple[Path, ...]:
@@ -787,7 +806,15 @@ class SceneAdapter(Protocol):
     def reload(self) -> None: ...
     def new_scene(self) -> None: ...
     def open_scene(self, path: Path) -> None: ...
-    def save_scene(self, path: Path) -> None: ...
+    def save_scene(self, path: Path, options: SceneSaveOptions | None = None) -> None: ...
+    def current_pose_modified(self) -> bool: ...
+    def export_mjcf(
+        self,
+        path: Path,
+        source: SceneSource,
+        frame: SceneFrame,
+        options: SceneSaveOptions | None = None,
+    ) -> Path: ...
     @property
     def resource_roots(self) -> tuple[Path, ...]: ...
     def add_resource_root(self, path: Path) -> bool: ...
