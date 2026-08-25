@@ -8,27 +8,39 @@ theme:
   name: material
   features:
     - content.code.copy
+    - content.code.annotate
+    - navigation.indexes
     - navigation.sections
     - navigation.top
+    - toc.follow
     - search.highlight
 nav:
   - Overview: index.md
   - Getting started: getting-started.md
+  - Tutorials:
+      - Tutorial map: guides/examples.md
+      - Programmatic scene: tutorials/programmatic-scene.md
+      - MuJoCo rendering: tutorials/mujoco-rendering.md
+      - Remote viewing and replay: tutorials/remote-viewing.md
+  - How-to guides:
+      - Custom scene adapter: how-to/custom-adapter.md
+      - Debug drawing: how-to/debug-draw.md
+      - Local RPC control: how-to/rpc-control.md
+      - Editor and MJCF: guides/editor-and-mjcf.md
+      - Testing: guides/testing.md
+      - WebGPU backend: WGPU_BACKEND_REPORT.md
   - Concepts:
       - Architecture: concepts/architecture.md
       - Renderer: RENDERER.md
       - Platform support: PLATFORM.md
-  - Guides:
-      - Editor and MJCF: guides/editor-and-mjcf.md
-      - Examples: guides/examples.md
-      - Testing: guides/testing.md
-      - WebGPU backend: WGPU_BACKEND_REPORT.md
   - API reference:
       - API map: api/index.md
       - Scene contracts: api/scene.md
       - Adapters and session: api/adapters.md
+      - Viewer composition: api/application.md
       - Renderer and debug draw: api/rendering.md
       - Remote and recording: api/remote.md
+      - Scene and workspace files: api/io.md
   - Engineering decisions: DECISIONS.md
 plugins:
   - search
@@ -41,6 +53,9 @@ plugins:
             filters: ["!^_"]
             heading_level: 2
             members_order: source
+            merge_init_into_class: true
+            separate_signature: true
+            show_signature_annotations: true
             show_root_heading: true
             show_source: false
 markdown_extensions:
@@ -48,6 +63,9 @@ markdown_extensions:
   - attr_list
   - pymdownx.highlight:
       anchor_linenums: true
+  - pymdownx.snippets:
+      base_path: [.]
+      check_paths: true
   - pymdownx.superfences
   - tables
 strict: true

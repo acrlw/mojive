@@ -17,6 +17,8 @@ log = get_logger("debugdraw")
 
 
 class Occlusion(enum.StrEnum):
+    """Choose how a debug layer interacts with scene depth."""
+
     DEPTH = "depth"
 
     ALWAYS = "always"
@@ -28,6 +30,8 @@ OCCLUSION_ORDER: tuple[Occlusion, ...] = (Occlusion.DEPTH, Occlusion.ALWAYS, Occ
 
 
 class Prim(enum.IntEnum):
+    """Internal primitive layout identifiers exposed for diagnostics and tests."""
+
     LINE = 0
     ARROW = 1
     POINT = 2
@@ -59,6 +63,8 @@ VERTEX_COUNT: dict[Prim, int] = {
 
 
 class Path(enum.StrEnum):
+    """Packed GPU stream used by a debug primitive family."""
+
     SEGMENT = "segment"
 
     POINT = "point"
@@ -203,6 +209,8 @@ class _Entry:
 
 @dataclass
 class TextLabel:
+    """One retained world-space text label with a screen-space offset."""
+
     text: str
     anchor: np.ndarray
     color: np.ndarray
@@ -214,6 +222,8 @@ class TextLabel:
 
 @dataclass
 class DebugStats:
+    """Current storage and lifecycle counters for a :class:`DebugDraw`."""
+
     primitives: int = 0
     layers: int = 0
     dropped: int = 0
@@ -306,6 +316,7 @@ class Layer:
             self._owner._primitives -= 1
 
     def line(self, ident: str, a, b, color, width_px: float = 1.5, duration: float = NEVER) -> None:
+        """Create or replace one screen-width world-space line segment."""
         i = self._alloc(Prim.LINE, ident, 1, duration)
         if i < 0:
             return
@@ -318,6 +329,7 @@ class Layer:
     def lines(
         self, ident: str, pts_a, pts_b, color, width_px: float = 1.5, duration: float = NEVER
     ) -> None:
+        """Create or replace a batch of independent line segments."""
         self._many_segments(Prim.LINE, ident, pts_a, pts_b, color, width_px, duration)
 
     def polyline(
@@ -330,6 +342,7 @@ class Layer:
         closed: bool = False,
         duration: float = NEVER,
     ) -> None:
+        """Create or replace a joined polyline through world-space points."""
         p = np.asarray(points, np.float32).reshape(-1, 3)
         count = len(p) if closed else len(p) - 1
         if count <= 0:
@@ -363,6 +376,7 @@ class Layer:
         *,
         start_mask_px: float = 0.0,
     ) -> None:
+        """Create or replace one line arrow with a screen-space arrow head."""
         i = self._alloc(Prim.ARROW, ident, 1, duration)
         if i < 0:
             return
@@ -384,11 +398,13 @@ class Layer:
         *,
         start_mask_px: float = 0.0,
     ) -> None:
+        """Create or replace a batch of independent line arrows."""
         self._many_segments(
             Prim.ARROW, ident, pts_a, pts_b, color, width_px, duration, start_mask_px
         )
 
     def point(self, ident: str, p, color, radius_px: float = 4.0, duration: float = NEVER) -> None:
+        """Create or replace one world-anchored screen-space point."""
         i = self._alloc(Prim.POINT, ident, 1, duration)
         if i < 0:
             return
@@ -410,6 +426,7 @@ class Layer:
         edge_px: float = 0.75,
         duration: float = NEVER,
     ) -> None:
+        """Draw a connected drag origin, line, and target with one outline."""
         i = self._alloc(Prim.DRAG_LINK, ident, 1, duration)
         if i < 0:
             return
@@ -425,6 +442,7 @@ class Layer:
     def points(
         self, ident: str, positions, color, radius_px: float = 4.0, duration: float = NEVER
     ) -> None:
+        """Create or replace a batch of world-anchored points."""
         p = np.asarray(positions, np.float32).reshape(-1, 3)
         if not len(p):
             self._remove(ident)
@@ -472,6 +490,7 @@ class Layer:
     def frame(
         self, ident: str, transform4x4, axis_len: float = 0.1, duration: float = NEVER
     ) -> None:
+        """Draw RGB axes from a row-major world transform."""
         i = self._alloc(Prim.FRAME, ident, 1, duration)
         if i < 0:
             return
@@ -488,18 +507,23 @@ class Layer:
         st.sizes[i] = FRAME_WIDTH_PX
 
     def box(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
+        """Create or replace a solid unit box transformed into world space."""
         self._solid(Prim.BOX, ident, transform4x4, color, duration)
 
     def sphere(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
+        """Create or replace a solid unit sphere transformed into world space."""
         self._solid(Prim.SPHERE, ident, transform4x4, color, duration)
 
     def cylinder(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
+        """Create or replace a solid unit cylinder transformed into world space."""
         self._solid(Prim.CYLINDER, ident, transform4x4, color, duration)
 
     def solid_arrow(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
+        """Create or replace a solid arrow transformed into world space."""
         self._solid(Prim.SOLID_ARROW, ident, transform4x4, color, duration)
 
     def solid_double_arrow(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
+        """Create or replace a solid double arrow transformed into world space."""
         self._solid(Prim.SOLID_DOUBLE_ARROW, ident, transform4x4, color, duration)
 
     def _solid(self, kind: Prim, ident: str, transform4x4, color, duration: float) -> None:
@@ -523,6 +547,7 @@ class Layer:
         *,
         radius_px: float = 0.0,
     ) -> None:
+        """Draw a rotation sector from reference and rotated radius endpoints."""
         i = self._alloc(Prim.SECTOR, ident, 1, duration)
         if i < 0:
             return
@@ -543,6 +568,11 @@ class Layer:
         align=(0.0, 0.5),
         duration: float = NEVER,
     ) -> None:
+        """Create or replace a world-anchored text label.
+
+        ``offset_px`` and ``align`` operate in screen space. A negative duration
+        retains the label until :meth:`erase` or :meth:`clear` is called.
+        """
         if not text:
             self.erase(ident)
             return
@@ -579,6 +609,7 @@ class Layer:
             self._text_finite.add(ident)
 
     def clear(self) -> None:
+        """Remove every primitive and label from this layer."""
         for st in self._stores.values():
             self._owner._primitives -= st.count
             st.count = 0
@@ -589,11 +620,13 @@ class Layer:
         self._text_finite.clear()
 
     def erase(self, ident: str) -> None:
+        """Remove one retained primitive or label by identifier."""
         self._owner.moves += self._remove(ident)
         self._remove_text(ident)
 
     @property
     def primitives(self) -> int:
+        """Return the number of primitives and labels in this layer."""
         return sum(st.count for st in self._stores.values()) + len(self._texts)
 
     def count_of(self, kind: Prim) -> int:
@@ -615,6 +648,8 @@ class Layer:
 
 @dataclass
 class Batch:
+    """One packed draw range sharing occlusion, path, and optional mesh."""
+
     occlusion: Occlusion = Occlusion.DEPTH
     path: Path = Path.SEGMENT
     mesh: MeshKey | None = None
@@ -624,6 +659,8 @@ class Batch:
 
 @dataclass
 class PackedFrame:
+    """Reusable packed debug streams consumed by renderer debug passes."""
+
     streams: dict[Path, np.ndarray] = field(default_factory=dict)
 
     counts: dict[Path, int] = field(default_factory=dict)
@@ -664,6 +701,11 @@ class DebugDraw:
         self._last_drop_note = ""
 
     def layer(self, name: str, occlusion: Occlusion = Occlusion.DEPTH) -> Layer:
+        """Return a persistent named layer, creating it on first use.
+
+        A layer keeps the occlusion mode from its first creation. Reusing stable
+        layer and primitive names updates storage in place on hot frame paths.
+        """
         layer = self._layers.get(name)
         if layer is None:
             layer = Layer(name, occlusion, self)
@@ -679,6 +721,7 @@ class DebugDraw:
         return layer
 
     def layers(self) -> tuple[Layer, ...]:
+        """Return all layers in creation order."""
         return tuple(self._layers.values())
 
     def drop(self, count: int, note: str) -> None:
@@ -688,6 +731,7 @@ class DebugDraw:
             log.warning("Debug draw dropped primitives: {}", note)
 
     def render_frame(self, emit, now: float | None = None) -> PackedFrame:
+        """Pack active primitives, pass them to ``emit``, then expire old entries."""
         self.now = time.monotonic() if now is None else float(now)
         frame = self.build()
         emit(frame)
@@ -695,6 +739,7 @@ class DebugDraw:
         return frame
 
     def expire(self, now: float | None = None) -> int:
+        """Remove entries whose finite duration elapsed and return the count."""
         when = self.now if now is None else float(now)
         total = 0
         for layer in self._layers.values():
@@ -710,10 +755,12 @@ class DebugDraw:
         return total
 
     def clear(self) -> None:
+        """Clear every debug layer while retaining allocated storage."""
         for layer in self._layers.values():
             layer.clear()
 
     def stats(self) -> DebugStats:
+        """Measure active primitives, vertices, layers, and lifecycle counters."""
         prims = 0
         verts = 0
         expiring = 0
@@ -923,16 +970,19 @@ def _write_color(dst: np.ndarray, i: int, color) -> None:
 
 
 def world_size(size_px: float, px_scale: float, clip_w: float) -> float:
+    """Convert a screen-space size to world units at one clip-space depth."""
     return float(size_px) * float(px_scale) * float(clip_w)
 
 
 def sector_angle(center, rotvec_end) -> float:
+    """Return the rotation angle encoded by a sector endpoint."""
     return float(
         np.linalg.norm(np.asarray(rotvec_end, np.float64) - np.asarray(center, np.float64))
     )
 
 
 def sector_points(center, rotvec_end, ref_end, segments: int = 32) -> np.ndarray:
+    """Tessellate a rotation sector as a world-space triangle fan."""
     c = np.asarray(center, np.float64).reshape(3)
     rotvec = np.asarray(rotvec_end, np.float64).reshape(3) - c
     ref = np.asarray(ref_end, np.float64).reshape(3) - c

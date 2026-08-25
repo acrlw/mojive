@@ -16,6 +16,8 @@ SNAPSHOT_MAGIC = SNAPSHOT_PREFIX + bytes((SNAPSHOT_FORMAT_VERSION,))
 
 @dataclass(frozen=True)
 class SnapshotHeader:
+    """Version metadata stored at the start of a snapshot recording."""
+
     format: str = SNAPSHOT_FORMAT
     version: int = SNAPSHOT_FORMAT_VERSION
 
@@ -41,6 +43,7 @@ class VideoRecorder:
         self.frames = 0
 
     def append(self, frame: np.ndarray) -> None:
+        """Encode one uint8 RGB image matching the configured frame size."""
         image = np.asarray(frame)
         expected = (self.size[1], self.size[0])
         if image.shape[:2] != expected or image.ndim != 3 or image.shape[2] < 3:
@@ -53,6 +56,7 @@ class VideoRecorder:
         self.frames += 1
 
     def close(self) -> None:
+        """Finalize the video stream."""
         if self._writer is not None:
             self._writer.close()
             self._writer = None
@@ -76,10 +80,12 @@ class SnapshotWriter:
         self.packets = 0
 
     def write(self, packet: object) -> None:
+        """Append one remote structure or frame packet."""
         pickle.dump(packet, self._file, protocol=pickle.HIGHEST_PROTOCOL)
         self.packets += 1
 
     def close(self) -> None:
+        """Flush and close the recording file."""
         if self._file is not None:
             self._file.close()
             self._file = None

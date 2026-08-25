@@ -1,55 +1,30 @@
-# Examples
+# Tutorials and examples
 
-The repository `examples/` directory contains small programs that use the public interfaces. Run
-them from an editable checkout after `make setup`.
+The `examples/` programs are executable API documentation. Tutorial pages embed their source
+directly, so the guide and runnable code stay synchronized.
 
-| Example | Interfaces | Result |
+## Start here
+
+| Goal | Tutorial | Primary interfaces |
 |---|---|---|
-| `programmatic_scene.py` | `Scene`, `build_scene` | interactive scene without physics |
-| `mujoco_render.py` | `Renderer` | RGB PNG, metric depth, and segmentation arrays |
-| `mujoco_control.py` | `Session`, `FrameNeeds`, commands | qpos editing and deterministic stepping |
-| `compose_scene.py` | `WorkspaceAdapter`, `MuJoCoAdapter` | composed `.forge.json` or portable MJCF |
-| `remote_publish.py` | `SnapshotPublisher`, remote commands | live scene for independent viewers |
+| Create geometry, cameras, and lights | [Programmatic scene](../tutorials/programmatic-scene.md) | `Scene`, `build_scene` |
+| Render MuJoCo arrays | [MuJoCo rendering](../tutorials/mujoco-rendering.md) | `Renderer` |
+| Publish or record dynamic frames | [Remote viewing and replay](../tutorials/remote-viewing.md) | `SnapshotPublisher`, `SnapshotWriter` |
+| Integrate another physics engine | [Custom scene adapter](../how-to/custom-adapter.md) | `SceneAdapterBase`, `SceneSource`, `SceneFrame` |
+| Add diagnostics and labels | [Debug drawing](../how-to/debug-draw.md) | `DebugDraw`, `Layer`, `Occlusion` |
+| Automate a running process | [Local RPC control](../how-to/rpc-control.md) | `RpcClient`, `ControlService` |
 
-## Programmatic scene
+## Example catalog
 
-```bash
-.venv/bin/python examples/programmatic_scene.py
-```
-
-## MuJoCo rendering
-
-```bash
-.venv/bin/python examples/mujoco_render.py assets/test_scene.xml --output output/examples
-.venv/bin/python examples/mujoco_render.py assets/test_scene.xml --backend wgpu
-```
-
-## MuJoCo state and control
-
-```bash
-.venv/bin/python examples/mujoco_control.py assets/slider_crank.xml --steps 120
-```
-
-Pass `--qpos-index` and `--qpos` to change one generalized position before stepping.
-
-## Model composition
-
-```bash
-.venv/bin/python examples/compose_scene.py \
-  assets/test_scene.xml assets/test_scene.urdf \
-  --output output/examples/workcell.forge.json
-```
-
-Use an `.xml` output path to export portable MJCF with a sibling asset directory.
-
-## Remote viewing
-
-Run the publisher and viewer in separate terminals:
-
-```bash
-.venv/bin/python examples/remote_publish.py
-.venv/bin/forge-viewer attach --title effect
-```
-
-Additional viewers may use independent cameras and render settings. Dynamic frames retain the
-latest state, while scene structure and commands use reliable delivery.
+| Example | Result |
+|---|---|
+| `programmatic_scene.py` | interactive scene without a physics backend |
+| `debug_draw.py` | retained lines, arrows, points, frames, and labels |
+| `custom_adapter.py` | backend-neutral simulation integration |
+| `mujoco_render.py` | RGB, metric depth, and segmentation output |
+| `multi_camera_render.py` | one PNG per MuJoCo camera |
+| `mujoco_control.py` | qpos editing and deterministic stepping |
+| `compose_scene.py` | combined MJCF/URDF workspace or portable MJCF |
+| `remote_publish.py` | live latest-state publisher for independent viewers |
+| `record_replay.py` | `.fvs` snapshot recording |
+| `control_client.py` | persistent local RPC automation |

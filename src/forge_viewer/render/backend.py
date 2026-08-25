@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 
 class RenderFlag(enum.StrEnum):
+    """Independently switchable renderer features and MuJoCo visual semantics."""
+
     # --- mjtRndFlag
     SHADOW = "shadow"
     WIREFRAME = "wireframe"
@@ -66,6 +68,8 @@ class RenderFlag(enum.StrEnum):
 
 
 class DebugView(enum.StrEnum):
+    """Viewport output selected for renderer inspection."""
+
     SHADED = "shaded"
     ALBEDO = "albedo"
     NORMAL = "normal"
@@ -77,6 +81,8 @@ class DebugView(enum.StrEnum):
 
 
 class LabelMode(enum.StrEnum):
+    """Scene entity category rendered as text labels."""
+
     NONE = "none"
     BODY = "body"
     JOINT = "joint"
@@ -94,6 +100,8 @@ class LabelMode(enum.StrEnum):
 
 
 class FrameMode(enum.StrEnum):
+    """Scene entity category rendered with coordinate frames."""
+
     NONE = "none"
     BODY = "body"
     GEOM = "geom"
@@ -106,6 +114,8 @@ class FrameMode(enum.StrEnum):
 
 @dataclass(frozen=True)
 class BackendCaps:
+    """Immutable feature and platform capabilities reported by a render backend."""
+
     name: str = "?"
     gpu_pick: bool = False
     debug_draw: bool = False
@@ -128,11 +138,15 @@ class BackendCaps:
     notes: tuple[str, ...] = ()
 
     def supports(self, flag: RenderFlag) -> bool:
+        """Return whether the backend implements ``flag``."""
+
         return flag in self.render_flags
 
 
 @dataclass
 class RenderStats:
+    """Per-frame workload counters and named CPU/GPU render-pass timings."""
+
     draw_calls: int = 0
     instances: int = 0
     triangles: int = 0
@@ -145,58 +159,136 @@ class RenderStats:
 
 @runtime_checkable
 class RenderBackend(Protocol):
+    """Renderer contract consumed by the viewer and offscreen composition layer.
+
+    A backend receives stable data through :meth:`set_scene` and dynamic data
+    through :meth:`update`. Image orientation is declared by the returned
+    :class:`~forge_viewer.types.ViewportImage` metadata.
+    """
+
     caps: BackendCaps
     debug: DebugDraw | None
     stats: RenderStats
 
-    def set_scene(self, source: SceneSource) -> None: ...
+    def set_scene(self, source: SceneSource) -> None:
+        """Upload stable scene structure after its revision changes."""
 
-    def update(self, frame: SceneFrame) -> None: ...
+        ...
 
-    def set_camera(self, camera: CameraView) -> None: ...
+    def update(self, frame: SceneFrame) -> None:
+        """Upload one dynamic scene frame."""
 
-    def render(self, frame: SceneFrame) -> ViewportImage | None: ...
+        ...
 
-    def resize(self, width: int, height: int) -> None: ...
+    def set_camera(self, camera: CameraView) -> None:
+        """Set the camera used by the next render call."""
 
-    def capture(self, path: Path, camera: CameraView | None = None) -> bool: ...
+        ...
 
-    def pick(self, x: int, y: int) -> int: ...
+    def render(self, frame: SceneFrame) -> ViewportImage | None:
+        """Render ``frame`` and return an image handle suitable for the viewport."""
 
-    def highlight(self, object_id: int) -> None: ...
+        ...
 
-    def set_gizmo(self, gizmo: GizmoFrame | None) -> bool: ...
+    def resize(self, width: int, height: int) -> None:
+        """Resize color, depth, ID, and post-process targets in physical pixels."""
 
-    def set_flag(self, flag: RenderFlag, value: bool) -> bool: ...
+        ...
 
-    def get_flag(self, flag: RenderFlag) -> bool: ...
+    def capture(self, path: Path, camera: CameraView | None = None) -> bool:
+        """Write the current scene to ``path``, optionally from another camera."""
 
-    def set_debug_view(self, view: DebugView) -> bool: ...
+        ...
 
-    def get_debug_view(self) -> DebugView: ...
+    def pick(self, x: int, y: int) -> int:
+        """Return the object ID at a physical-pixel viewport coordinate."""
 
-    def set_label_mode(self, mode: LabelMode) -> bool: ...
+        ...
 
-    def get_label_mode(self) -> LabelMode: ...
+    def highlight(self, object_id: int) -> None:
+        """Set the object rendered by the selection outline pass."""
 
-    def set_frame_mode(self, mode: FrameMode) -> bool: ...
+        ...
 
-    def get_frame_mode(self) -> FrameMode: ...
+    def set_gizmo(self, gizmo: GizmoFrame | None) -> bool:
+        """Set or hide the optional GPU-rendered transform gizmo."""
 
-    def set_bvh_depth(self, depth: int) -> bool: ...
+        ...
 
-    def get_bvh_depth(self) -> int: ...
+    def set_flag(self, flag: RenderFlag, value: bool) -> bool:
+        """Set a render flag and report whether the backend accepted it."""
 
-    def render_options(self) -> tuple[RenderFlag, ...]: ...
+        ...
 
-    def create_peer(self, width: int, height: int) -> RenderBackend: ...
+    def get_flag(self, flag: RenderFlag) -> bool:
+        """Return the effective value of a render flag."""
 
-    def describe(self) -> str: ...
+        ...
 
-    def release(self) -> None: ...
+    def set_debug_view(self, view: DebugView) -> bool:
+        """Select a debug output and report whether it is supported."""
+
+        ...
+
+    def get_debug_view(self) -> DebugView:
+        """Return the active debug output."""
+
+        ...
+
+    def set_label_mode(self, mode: LabelMode) -> bool:
+        """Select the scene label category."""
+
+        ...
+
+    def get_label_mode(self) -> LabelMode:
+        """Return the active scene label category."""
+
+        ...
+
+    def set_frame_mode(self, mode: FrameMode) -> bool:
+        """Select the coordinate-frame overlay category."""
+
+        ...
+
+    def get_frame_mode(self) -> FrameMode:
+        """Return the active coordinate-frame overlay category."""
+
+        ...
+
+    def set_bvh_depth(self, depth: int) -> bool:
+        """Select the diagnostic BVH depth."""
+
+        ...
+
+    def get_bvh_depth(self) -> int:
+        """Return the active diagnostic BVH depth."""
+
+        ...
+
+    def render_options(self) -> tuple[RenderFlag, ...]:
+        """Return render flags exposed by the backend settings UI."""
+
+        ...
+
+    def create_peer(self, width: int, height: int) -> RenderBackend:
+        """Create an independent render target sharing immutable GPU resources."""
+
+        ...
+
+    def describe(self) -> str:
+        """Return a compact renderer and platform description for diagnostics."""
+
+        ...
+
+    def release(self) -> None:
+        """Release GPU resources owned by this backend instance."""
+
+        ...
 
 
 class NullBackend:
+    """No-op backend used when rendering is unavailable or intentionally disabled."""
+
     def __init__(self, reason: str = "No render backend is available") -> None:
         self.reason = reason
         self.caps = BackendCaps(name="null", notes=(reason,))

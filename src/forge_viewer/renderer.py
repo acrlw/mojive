@@ -201,7 +201,12 @@ def _select_backend(width: int, height: int, samples: int):
 
 
 class Renderer:
-    """Render an existing MuJoCo model through the selected backend."""
+    """Render an existing MuJoCo model through the selected backend.
+
+    The public control flow mirrors ``mujoco.Renderer``: update from ``MjData``,
+    select RGB, depth, or segmentation output, then render into a new or reused
+    NumPy array. Use the object as a context manager to release GPU resources.
+    """
 
     def __init__(
         self,
@@ -269,25 +274,41 @@ class Renderer:
 
     @property
     def model(self):
+        """Return the MuJoCo model bound at construction."""
         return self._model
 
     @property
     def scene(self):
+        """Return the compatibility ``MjvScene`` updated for each frame."""
         return self._scene
 
     @property
     def height(self) -> int:
+        """Return output image height in pixels."""
         return self._height
 
     @property
     def width(self) -> int:
+        """Return output image width in pixels."""
         return self._width
 
     @property
     def _aspect(self) -> float:
         return self._width / max(self._height, 1)
 
-    def update_scene(self, data, camera=-1, scene_option=None) -> None:
+    def update_scene(
+        self,
+        data: Any,
+        camera: Any = -1,
+        scene_option: Any | None = None,
+    ) -> None:
+        """Update dynamic scene state from MuJoCo data.
+
+        Args:
+            data: ``mujoco.MjData`` created for :attr:`model`.
+            camera: Free camera ``-1``, fixed camera ID or name, or ``MjvCamera``.
+            scene_option: Optional ``MjvOption`` controlling visual categories.
+        """
         self._require_open("update_scene")
         if not isinstance(data, mujoco.MjData):
             raise TypeError("data must be a mujoco.MjData")
@@ -334,6 +355,14 @@ class Renderer:
             self._backend.update(frame)
 
     def render(self, *, out: np.ndarray | None = None) -> np.ndarray:
+        """Render the selected output mode.
+
+        Args:
+            out: Optional correctly shaped destination array.
+
+        Returns:
+            RGB ``uint8``, metric depth ``float32``, or MuJoCo segmentation IDs.
+        """
         self._require_open("render")
         if self._depth_rendering:
             shape = (self._height, self._width)
@@ -361,19 +390,23 @@ class Renderer:
         return out
 
     def enable_depth_rendering(self) -> None:
+        """Select metric depth output for subsequent :meth:`render` calls."""
         self._segmentation_rendering = False
         self._depth_rendering = True
         self._backend.set_transparent_id_rendering(False)
 
     def disable_depth_rendering(self) -> None:
+        """Return from depth output to RGB output."""
         self._depth_rendering = False
 
     def enable_segmentation_rendering(self) -> None:
+        """Select MuJoCo object and object-type IDs for subsequent renders."""
         self._segmentation_rendering = True
         self._depth_rendering = False
         self._backend.set_transparent_id_rendering(True)
 
     def disable_segmentation_rendering(self) -> None:
+        """Return from segmentation output to RGB output."""
         self._segmentation_rendering = False
         self._backend.set_transparent_id_rendering(False)
 
@@ -389,6 +422,7 @@ class Renderer:
             self._backend.set_flag(backend_flag, bool(enabled))
 
     def close(self) -> None:
+        """Release renderer, adapter, and graphics-context resources."""
         if self._closed:
             return
         self._closed = True

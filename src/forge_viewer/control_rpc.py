@@ -56,12 +56,14 @@ class ControlService:
         self._lock = threading.RLock()
 
     def close(self) -> None:
+        """Release the cached renderer and adapter resources."""
         if self._renderer is not None:
             self._renderer.close()
             self._renderer = None
         self.session.adapter.release()
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Validate one protocol request and return a serializable response."""
         request_id = request.get("id")
         version = request.get("version")
         if version != PROTOCOL_VERSION:
@@ -92,6 +94,7 @@ class ControlService:
         return _response(request_id, result=result)
 
     def dispatch(self, method: str, params: dict[str, Any]) -> Any:
+        """Invoke one typed control operation by protocol method name."""
         handlers = {
             "load": self._load,
             "reload": lambda _: self._command(cmd.Reload()),
@@ -371,6 +374,7 @@ class RpcClient:
         self._lock = threading.Lock()
 
     def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
+        """Send one request, validate correlation metadata, and return its result."""
         with self._lock:
             request_id = self._next_id
             self._next_id += 1
@@ -421,6 +425,7 @@ class RpcClient:
         return self._client
 
     def close(self) -> None:
+        """Close the persistent connection; the next call reconnects."""
         if self._client is not None:
             self._client.close()
             self._client = None

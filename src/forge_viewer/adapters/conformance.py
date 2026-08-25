@@ -12,6 +12,8 @@ from .base import FrameNeeds, SceneAdapter
 
 @dataclass(frozen=True)
 class ConformanceCheck:
+    """One named adapter invariant and its diagnostic result."""
+
     name: str
     ok: bool
     detail: str
@@ -19,11 +21,15 @@ class ConformanceCheck:
 
 @dataclass(frozen=True)
 class ConformanceReport:
+    """Complete backend-neutral adapter validation report."""
+
     backend: str
     checks: tuple[ConformanceCheck, ...]
 
     @property
     def ok(self) -> bool:
+        """Return whether every conformance invariant passed."""
+
         return all(check.ok for check in self.checks)
 
 

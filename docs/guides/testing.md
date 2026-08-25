@@ -6,6 +6,8 @@ change while iterating, then run the required acceptance targets before handoff.
 | Layer | Marker or target | Coverage |
 |---|---|---|
 | Fast | `make test-fast` | pure CPU behavior and module contracts |
+| Examples | `make examples-check` | example syntax and import-independent entry points |
+| Documentation | `make docs-check` | public docstrings, example catalog, snippets, strict site build |
 | Integration | `make test-integration` | files, serialization, protocols, processes, composition |
 | Physics | `make test-physics` | model compilation and live physics worlds |
 | OpenGL GPU | `make gpu` | real OpenGL contexts and rendered output |
@@ -23,6 +25,7 @@ change while iterating, then run the required acceptance targets before handoff.
 | Render pass or shader | one GPU test file | `make gpu` and `make gpu-wgpu` |
 | Visual interaction | focused GPU test | relevant Make gallery and `make reverse` |
 | Settings layout | focused UI GPU test | `make settings` |
+| Documentation or examples | `make examples-check` | `make docs-check` |
 
 Markers may be combined. A file-format test that compiles MuJoCo uses both `integration` and
 `physics`; it runs in the physics layer.
@@ -32,7 +35,7 @@ Markers may be combined. A file-format test that compiles MuJoCo uses both `inte
 Build the user guide and generated API reference with:
 
 ```bash
-make docs
+make docs-check
 ```
 
 The strict build rejects broken links, unresolved API modules, and documentation warnings.

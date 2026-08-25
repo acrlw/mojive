@@ -31,6 +31,13 @@ def render_backend_name() -> str:
 
 @dataclass
 class Viewer:
+    """Own the objects that make up one interactive viewer.
+
+    Create instances through :func:`build`, :func:`build_scene`, or
+    :func:`build_from_adapter`. Call :meth:`release` when an application embeds
+    the viewer without using a context manager.
+    """
+
     app: Any
     session: Any
     backend: Any
@@ -38,12 +45,15 @@ class Viewer:
     bridge: Any
 
     def run(self, max_frames: int | None = None) -> None:
+        """Run the UI event loop until the window closes or a frame limit is reached."""
         self.app.run(max_frames=max_frames)
 
     def sync(self) -> None:
+        """Advance the session and render one frame without entering the event loop."""
         self.app.sync()
 
     def release(self) -> None:
+        """Release the bridge, renderer, session, and native window."""
         self.bridge.close()
         for obj, what in ((self.backend, "backend"), (self.session, "session")):
             try:
@@ -63,6 +73,18 @@ class Viewer:
         before_frame: Callable[[int, Viewer], None] | None = None,
         size: tuple[int, int] | None = None,
     ) -> Path:
+        """Render a fixed number of frames to a video file.
+
+        Args:
+            output: Destination video path.
+            frames: Number of frames to encode.
+            fps: Playback frame rate stored in the video.
+            before_frame: Optional callback invoked before each rendered frame.
+            size: Optional fixed render width and height.
+
+        Returns:
+            The destination path.
+        """
         from .recording import VideoRecorder
 
         if frames <= 0:
@@ -98,6 +120,21 @@ def build(
     samples: int = 4,
     title: str = "forge-viewer",
 ) -> Viewer:
+    """Build an interactive viewer for a model or scene asset.
+
+    Args:
+        asset: Asset path accepted by the selected scene adapter.
+        backend_name: Scene adapter name, such as ``"mujoco"``.
+        paused: Start physics in the paused state.
+        vsync: Synchronize presentation to the display.
+        width: Initial logical window width.
+        height: Initial logical window height.
+        samples: Requested MSAA sample count.
+        title: Native window title.
+
+    Returns:
+        A composed viewer ready to run or step manually.
+    """
     from .backends import make_adapter
 
     return _compose(
@@ -215,6 +252,11 @@ def _compose(
 
 
 def doctor(asset: Path, backend_name: str = "mujoco", frames: int = 90) -> dict:
+    """Exercise viewer composition and return structured diagnostic checks.
+
+    The diagnostic creates a real window and renderer, renders several frames,
+    checks readback and simulation progress, then releases all resources.
+    """
     checks: list[tuple[str, bool, str]] = []
     viewer: Viewer | None = None
     try:
@@ -310,6 +352,21 @@ def capture(
     render_flags: tuple[str, ...] = (),
     camera_name: str = "",
 ) -> bool:
+    """Render an asset to a PNG image.
+
+    Args:
+        asset: Model or scene path.
+        output: Destination image path.
+        backend_name: Scene adapter used to load the asset.
+        include_ui: Capture the complete application window.
+        size: Optional render width and height.
+        settle_frames: Frames rendered before capture.
+        render_flags: Renderer feature names enabled for the capture.
+        camera_name: Optional named model camera.
+
+    Returns:
+        ``True`` when the image was written successfully.
+    """
     viewer: Viewer | None = None
     try:
         w, h = size or (1600, 1000)

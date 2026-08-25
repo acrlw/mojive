@@ -37,6 +37,7 @@ class ResourceRepair:
 
 
 def save_workspace(workspace, path: str | Path) -> Path:
+    """Write model composition, resource roots, and authored entities as JSON."""
     target = Path(path).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     resource_roots = _unique_paths((target.parent, *workspace.resource_roots))
@@ -65,6 +66,7 @@ def save_workspace(workspace, path: str | Path) -> Path:
 
 
 def load_workspace(workspace, path: str | Path) -> None:
+    """Replace a workspace with models and entities loaded from a document."""
     source = Path(path).expanduser().resolve()
     document = json.loads(source.read_text(encoding="utf-8"))
     if document.get("format") == "forge-viewer.scene":
@@ -97,10 +99,12 @@ def load_workspace(workspace, path: str | Path) -> None:
 
 
 def missing_resources(path: str | Path) -> tuple[Path, ...]:
+    """Return unresolved model paths referenced by a workspace."""
     return tuple(item.expected_path for item in missing_resource_entries(path))
 
 
 def missing_resource_entries(path: str | Path) -> tuple[MissingResource, ...]:
+    """Return structured details for unresolved workspace model references."""
     source = Path(path).expanduser().resolve()
     document = json.loads(source.read_text(encoding="utf-8"))
     return _missing_resource_entries(document, source)

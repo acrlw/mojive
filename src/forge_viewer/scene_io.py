@@ -29,6 +29,7 @@ VERSION = 1
 
 
 def save_scene(scene: Scene, path: str | Path) -> Path:
+    """Write an authored scene as formatted Forge JSON."""
     target = Path(path).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(_scene_document(scene), indent=2), encoding="utf-8")
@@ -36,6 +37,7 @@ def save_scene(scene: Scene, path: str | Path) -> Path:
 
 
 def load_scene(path: str | Path) -> Scene:
+    """Load and validate an authored Forge JSON scene."""
     source = Path(path).expanduser().resolve()
     document = json.loads(source.read_text(encoding="utf-8"))
     if document.get("format") != FORMAT or document.get("version") != VERSION:
@@ -44,10 +46,12 @@ def load_scene(path: str | Path) -> Scene:
 
 
 def scene_to_document(scene: Scene) -> dict:
+    """Convert a scene into its JSON-compatible document representation."""
     return _scene_document(scene)
 
 
 def scene_from_document(document: dict) -> Scene:
+    """Build a scene from a validated embedded document."""
     if document.get("format") != FORMAT or document.get("version") != VERSION:
         raise ValueError("Unsupported embedded Forge scene")
     return _scene_from_document(document)

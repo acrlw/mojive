@@ -39,6 +39,8 @@ AUTHKEY = b"forge-viewer-local"
 
 @dataclass(frozen=True)
 class RemoteStructure:
+    """Reliable stable structure sent when a scene revision changes."""
+
     structure_revision: int
     source: SceneSource
     caps: AdapterCaps
@@ -56,12 +58,15 @@ class RemoteStructure:
 
 @dataclass(frozen=True)
 class RemoteFrame:
+    """Latest-only dynamic scene frame and its debug commands."""
+
     frame_sequence: int
     frame: SceneFrame
     debug_commands: tuple[dict, ...] = ()
 
 
 def snapshot_structure(session) -> RemoteStructure:
+    """Capture adapter structure and metadata from a session."""
     return RemoteStructure(
         session.structure_generation,
         session.source,
@@ -155,6 +160,7 @@ class SnapshotPublisher:
         ).start()
 
     def publish_structure(self, structure: RemoteStructure) -> None:
+        """Reliably publish stable structure to current and future clients."""
         payload = pickle.dumps(structure, protocol=pickle.HIGHEST_PROTOCOL)
         self._structure = payload
         with self._clients_lock:
@@ -164,6 +170,7 @@ class SnapshotPublisher:
             client.reliable(payload)
 
     def publish_frame(self, frame: SceneFrame, debug_commands=None) -> int:
+        """Publish a latest-only frame and return its sequence number."""
         self._frame_sequence += 1
         commands = frame.debug_commands if debug_commands is None else debug_commands
         packet = RemoteFrame(self._frame_sequence, frame, tuple(commands or ()))
@@ -177,6 +184,7 @@ class SnapshotPublisher:
         return self._frame_sequence
 
     def pump_commands(self, handler: Callable[[dict], Any], budget: int = 256) -> int:
+        """Handle queued viewer commands on the publisher thread."""
         count = 0
         for _ in range(max(0, int(budget))):
             try:
@@ -233,6 +241,7 @@ class SnapshotPublisher:
             connection.close()
 
     def close(self) -> None:
+        """Close listeners and all connected clients."""
         self._closed = True
         self._state_listener.close()
         self._command_listener.close()
@@ -526,6 +535,7 @@ class RemoteSceneAdapter(SceneAdapterBase):
 
 
 def handle_session_command(session, message: dict):
+    """Translate one remote command payload into a session command or query."""
     op = message.get("op")
     if op == "raycast":
         return session.query(cmd.Pick(message["origin"], message["direction"]))

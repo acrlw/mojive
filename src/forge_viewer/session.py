@@ -33,6 +33,8 @@ from .types import CameraView, Environment, Light, Material
 
 @dataclass
 class PerturbState:
+    """Transient state for an active translation or rotation perturbation."""
+
     active: bool = False
     node_id: int = -1
     object_id: int = 0
@@ -73,6 +75,8 @@ class AuthoredSceneOverlay:
     cameras: dict[int, CameraView] = field(default_factory=dict)
 
     def clear(self) -> None:
+        """Discard all authored overrides and reveal adapter-owned values."""
+
         self.lights.clear()
         self.environment = None
         self.materials.clear()
@@ -113,6 +117,13 @@ _SCENE_EDIT_COMMANDS = (
 
 
 class Session:
+    """Own viewer state and route typed commands to one scene adapter.
+
+    The session separates UI and renderer code from physics-specific methods. It
+    tracks selection, pause and step state, authored overrides, edit history, and
+    stable-structure generations while the adapter owns simulation data.
+    """
+
     def __init__(self, adapter: SceneAdapter, asset_path: Path | None = None) -> None:
         self._adapter = adapter
         self._asset_path = asset_path
@@ -157,22 +168,27 @@ class Session:
 
     @property
     def adapter(self) -> SceneAdapter:
+        """Return the scene adapter owned by this session."""
         return self._adapter
 
     @property
     def paused(self) -> bool:
+        """Return the effective simulation pause state."""
         return self._paused
 
     @property
     def speed(self) -> float:
+        """Return the real-time simulation speed multiplier."""
         return self._speed
 
     @property
     def selected(self) -> int:
+        """Return the selected render object ID, or zero when selection is empty."""
         return self._selected
 
     @property
     def selected_node(self) -> SceneNode | None:
+        """Return the selected hierarchy node."""
         return self.node(self._selected_node_id)
 
     def entity_gizmo_lock_enabled(self, node: SceneNode) -> bool:
@@ -196,111 +212,139 @@ class Session:
 
     @property
     def frame(self) -> SceneFrame:
+        """Return the most recent dynamic frame produced by :meth:`tick`."""
         return self._frame
 
     @property
     def source(self) -> SceneSource | None:
+        """Return the current stable scene source."""
         return self._source
 
     @property
     def nodes(self) -> list[SceneNode]:
+        """Return hierarchy nodes for the current structure generation."""
         return self._nodes
 
     @property
     def joints(self) -> list[JointInfo]:
+        """Return editable joint metadata from the adapter."""
         return self._joints
 
     @property
     def actuators(self) -> list[ActuatorInfo]:
+        """Return actuator control metadata from the adapter."""
         return self._actuators
 
     @property
     def cameras(self) -> list[CameraInfo]:
+        """Return selectable model and authored camera metadata."""
         return self._cameras
 
     @property
     def keyframes(self) -> list[KeyframeInfo]:
+        """Return available physics keyframes."""
         return self._keyframes
 
     @property
     def active_keyframe(self) -> int:
+        """Return the loaded keyframe ID, or ``-1`` for the current state."""
         return self._active_keyframe
 
     @property
     def sensor_infos(self) -> list[SensorInfo]:
+        """Return sensor metadata for slices of the current sensor array."""
         return self._sensor_infos
 
     @property
     def equality_constraints(self) -> list[EqualityConstraintInfo]:
+        """Return editable equality-constraint metadata."""
         return self._equality_constraints
 
     @property
     def perturb(self) -> PerturbState:
+        """Return the active physics perturbation state."""
         return self._perturb
 
     @property
     def ik_result(self) -> IkResult | None:
+        """Return the result of the latest inverse-kinematics operation."""
         return self._ik_result
 
     @property
     def camera(self) -> CameraView:
+        """Return the current viewport camera submitted through commands."""
         return self._camera
 
     @property
     def authored_overlay(self) -> AuthoredSceneOverlay:
+        """Return Forge-authored overrides layered over adapter structure."""
         return self._authored
 
     @property
     def scene_models(self) -> tuple[SceneModelInfo, ...]:
+        """Return file-backed models participating in the composed scene."""
         return self._adapter.scene_models()
 
     def model_components(self, model_id: int, category: str):
+        """Return editable components in one model-level MJCF category."""
         return self._adapter.model_components(model_id, category)
 
     def model_component_presets(self, model_id: int, category: str) -> tuple[str, ...]:
+        """Return supported component subtypes for a model and category."""
         return self._adapter.model_component_presets(model_id, category)
 
     @property
     def asset_path(self) -> Path | None:
+        """Return the current document or model path."""
         return self._asset_path
 
     @property
     def last_message(self) -> str:
+        """Return the latest user-facing command result message."""
         return self._last_message
 
     @property
     def dirty(self) -> bool:
+        """Return whether the current document contains unsaved edits."""
         return self._edit_changed or self._document_revision != self._saved_revision
 
     @property
     def current_pose_modified(self) -> bool:
+        """Return whether physics state differs from its saved initial pose."""
         return self._adapter.current_pose_modified()
 
     @property
     def can_undo(self) -> bool:
+        """Return whether one document edit can be undone."""
         return bool(self._undo_stack)
 
     @property
     def can_redo(self) -> bool:
+        """Return whether one document edit can be redone."""
         return bool(self._redo_stack)
 
     @property
     def editing(self) -> bool:
+        """Return whether a continuous edit transaction is active."""
         return self._edit_before is not None
 
     @property
     def structure_generation(self) -> int:
+        """Return the generation incremented after stable structure changes."""
         return self._structure_generation
 
     def node(self, node_id: int) -> SceneNode | None:
+        """Look up a hierarchy node by node ID."""
         return self._by_node_id.get(int(node_id))
 
     def node_by_object_id(self, object_id: int) -> SceneNode | None:
+        """Look up a hierarchy node by selectable object ID."""
         return self._by_object_id.get(int(object_id))
 
     def restore_physics_state(
         self, state: PhysicsState, *, active_keyframe: int = -1
     ) -> CommandResult:
+        """Restore a complete physics state while the session is paused."""
         if not self._paused:
             return CommandResult.bad("physics is running; pause to restore a scene snapshot")
         if not self._adapter.restore_state(state):
@@ -316,6 +360,12 @@ class Session:
         return CommandResult.good("Scene state restored")
 
     def tick(self, needs: FrameNeeds, wall_dt: float | None = None) -> SceneFrame:
+        """Advance simulation time and obtain one composed dynamic frame.
+
+        Args:
+            needs: Optional dynamic arrays required by current consumers.
+            wall_dt: Elapsed wall time used for real-time simulation scheduling.
+        """
         if not self._paused and not self._adapter.caps.external_clock:
             timestep = self._adapter.timestep()
             if wall_dt is not None and timestep > 0.0:
@@ -347,6 +397,7 @@ class Session:
         return self._frame
 
     def submit(self, command: Command) -> CommandResult:
+        """Apply one typed command and update edit history and status text."""
         if isinstance(command, cmd.BeginEditTransaction):
             result = self._begin_edit(command.label)
             self._last_message = result.message
@@ -1158,6 +1209,7 @@ class Session:
         return CommandResult.bad(f"Unknown command: {type(c).__name__}")
 
     def query(self, q: Query):
+        """Evaluate a read-only pick, node lookup, or bounds query."""
         if isinstance(q, cmd.Pick):
             if not self._adapter.caps.raycast:
                 return (0, float("inf"))
@@ -1169,6 +1221,7 @@ class Session:
         raise TypeError(f"Unknown query: {type(q).__name__}")
 
     def bounds(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return an axis-aligned world-space bound for finite scene geometry."""
         src = self._source
         frame = self._frame
         if src is None:
@@ -1202,9 +1255,11 @@ class Session:
         return lo.astype(np.float32), hi.astype(np.float32)
 
     def camera_hint(self) -> CameraView | None:
+        """Return the adapter camera suggested for initial framing."""
         return self._adapter.camera_hint()
 
     def camera_view(self, camera_id: int) -> CameraView | None:
+        """Return an authored override or adapter camera by stable ID."""
         i = int(camera_id)
         if i in self._authored.cameras:
             return self._authored.cameras[i]
@@ -1215,6 +1270,7 @@ class Session:
         return not writeback or caps.external_clock or caps.model_composition
 
     def visual_groups(self):
+        """Return numbered visual group states exposed by the adapter."""
         return self._adapter.visual_groups() if self._adapter.caps.visual_groups else ()
 
     def _refresh_structure(self) -> None:
@@ -1335,4 +1391,5 @@ class Session:
         )
 
     def release(self) -> None:
+        """Release resources owned by the scene adapter."""
         self._adapter.release()

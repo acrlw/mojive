@@ -31,6 +31,8 @@ MODEL_OBJECT_BASE = 0x73000000
 
 
 class NodeKind(enum.StrEnum):
+    """Semantic node categories shown by the hierarchy and selection system."""
+
     WORLD = "world"
     MODEL = "model"
     ROBOT = "robot"
@@ -47,6 +49,12 @@ class NodeKind(enum.StrEnum):
 
 @dataclass
 class SceneNode:
+    """One stable hierarchy node exposed by a scene adapter.
+
+    ``node_id`` identifies the hierarchy entry and write-back target. ``object_id`` identifies
+    the rendered selection object. Physics-specific indices are optional lookup accelerators.
+    """
+
     node_id: int
     name: str
     kind: NodeKind
@@ -68,6 +76,8 @@ class SceneNode:
 
 @dataclass
 class JointInfo:
+    """Joint metadata used by the Joints panel and qpos editors."""
+
     joint_id: int
     name: str
     kind: str  # free / ball / slide / hinge
@@ -81,6 +91,8 @@ class JointInfo:
 
 @dataclass
 class ActuatorInfo:
+    """Actuator control metadata exposed by a simulation adapter."""
+
     actuator_id: int
     name: str
     ctrl_range: tuple[float, float]
@@ -93,6 +105,8 @@ class ActuatorInfo:
 
 @dataclass(frozen=True)
 class CameraInfo:
+    """Stable camera identity and selectable scene object ID."""
+
     camera_id: int
     name: str
     object_id: int = 0
@@ -162,6 +176,8 @@ class KeyframeInfo:
 
 @dataclass(frozen=True)
 class SensorInfo:
+    """Sensor metadata describing a slice of the current sensor frame."""
+
     sensor_id: int
     name: str
     kind: str
@@ -171,6 +187,8 @@ class SensorInfo:
 
 @dataclass(frozen=True)
 class EqualityConstraintInfo:
+    """Editable equality-constraint state."""
+
     constraint_id: int
     name: str
     kind: str
@@ -187,6 +205,8 @@ class VisualGroupInfo:
 
 @dataclass(frozen=True)
 class PhysicsState:
+    """Complete simulation state used by snapshots, reset, and reproduction tools."""
+
     qpos: np.ndarray
     qvel: np.ndarray
     act: np.ndarray
@@ -198,6 +218,12 @@ class PhysicsState:
 
 @dataclass(frozen=True)
 class AdapterCaps:
+    """Capabilities used by UI and command routing to expose supported operations.
+
+    Adapters declare behavior here instead of relying on type checks. A capability set to
+    ``True`` means the corresponding adapter method provides functional write-back.
+    """
+
     name: str = "?"
     simulation: bool = False
     asset_loading: bool = False
@@ -226,6 +252,8 @@ class AdapterCaps:
 
 
 class JointVisualKind(enum.IntEnum):
+    """Debug-draw representation selected for each joint type."""
+
     FREE = 0
     BALL = 1
     SLIDE = 2
@@ -233,6 +261,8 @@ class JointVisualKind(enum.IntEnum):
 
 
 class ActuatorVisualKind(enum.IntEnum):
+    """Debug-draw representation selected for actuator transmissions."""
+
     SLIDE = 0
     HINGE = 1
     BALL = 2
@@ -245,6 +275,8 @@ class ActuatorVisualKind(enum.IntEnum):
 
 
 class BvhKind(enum.IntEnum):
+    """Bounding-volume hierarchy source used by diagnostic overlays."""
+
     BODY = 0
     FLEX = 1
     MESH = 2
@@ -253,6 +285,8 @@ class BvhKind(enum.IntEnum):
 
 @dataclass(frozen=True)
 class DiagnosticSource:
+    """Stable metadata required to construct physics diagnostic overlays."""
+
     joint_kinds: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
     joint_visible: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
     joint_length: float = 0.0
@@ -330,6 +364,8 @@ class DiagnosticSource:
 
 @dataclass
 class DiagnosticFrame:
+    """Dynamic positions, transforms, and visibility for diagnostic overlays."""
+
     joint_xpos: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     joint_xaxis: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     subtree_com: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
@@ -362,6 +398,12 @@ class DiagnosticFrame:
 
 @dataclass
 class FrameNeeds:
+    """Requests optional dynamic arrays for one adapter frame.
+
+    Consumers merge their requirements before calling :meth:`SceneAdapter.frame`. Adapters can
+    avoid work and allocation for every field left ``False``.
+    """
+
     poses: bool = True
     qpos: bool = False
     qvel: bool = False
@@ -375,6 +417,7 @@ class FrameNeeds:
     bvh: bool = False
 
     def merge(self, other: FrameNeeds) -> FrameNeeds:
+        """Return the union of two frame requirement sets."""
         return FrameNeeds(
             poses=self.poses or other.poses,
             qpos=self.qpos or other.qpos,
@@ -391,11 +434,19 @@ class FrameNeeds:
 
     @staticmethod
     def none() -> FrameNeeds:
+        """Return a request with every optional field disabled."""
         return FrameNeeds(poses=False)
 
 
 @dataclass
 class SceneFrame:
+    """Dynamic scene data for one simulation or authored-scene frame.
+
+    Arrays correspond to indices stored in :class:`SceneSource`. Optional arrays are ``None``
+    when the matching :class:`FrameNeeds` flag was disabled or the adapter lacks that feature.
+    Adapters may reuse these arrays between calls; consumers copy data that must outlive a frame.
+    """
+
     time: float = 0.0
     step: int = 0
     paused: bool = False
@@ -435,6 +486,13 @@ class SceneFrame:
 
 @dataclass
 class SceneSource:
+    """Stable scene structure uploaded when ``structure_revision`` changes.
+
+    The source owns meshes, textures, materials, hierarchy nodes, instance metadata, cameras,
+    lights, and diagnostic descriptions. Per-frame transforms and simulation values live in
+    :class:`SceneFrame`.
+    """
+
     meshes: dict[MeshKey, MeshData] = field(default_factory=dict)
     dynamic_meshes: frozenset[MeshKey] = frozenset()
 
@@ -520,16 +578,24 @@ class SceneSource:
 
     @property
     def instance_count(self) -> int:
+        """Return the number of render instances."""
         return len(self.geom_mesh)
 
 
 class SceneAdapterBase:
-    """Default implementation of the scene adapter contract and optional capabilities."""
+    """Default implementation of the scene adapter contract.
+
+    A custom adapter must implement :meth:`scene_source`, :meth:`frame`, and
+    :attr:`structure_revision`. Simulation adapters also implement :meth:`step` and
+    :meth:`reset`. Optional editor and physics operations return an unsupported result until the
+    adapter advertises and implements the matching :class:`AdapterCaps` field.
+    """
 
     caps = AdapterCaps(name="custom")
 
     @property
     def structure_revision(self) -> int:
+        """Return a monotonically increasing stable-structure revision."""
         return 0
 
     def load(self, path: Path) -> None:
@@ -635,15 +701,19 @@ class SceneAdapterBase:
     def step(self, count: int = 1) -> None: ...
 
     def set_paused(self, paused: bool) -> bool:
+        """Set adapter-owned pause state and report whether it was accepted."""
         return True
 
     def frame(self, needs: FrameNeeds) -> SceneFrame:
+        """Return the latest dynamic frame containing the requested optional data."""
         raise NotImplementedError
 
     def scene_source(self) -> SceneSource:
+        """Return stable scene structure for the current revision."""
         raise NotImplementedError
 
     def nodes(self) -> list[SceneNode]:
+        """Return hierarchy nodes in stable node order."""
         return self.scene_source().nodes
 
     def joints(self) -> list[JointInfo]:
@@ -694,9 +764,11 @@ class SceneAdapterBase:
         return IkResult(False, message=f"{self.caps.name} does not support inverse kinematics")
 
     def capture_state(self) -> PhysicsState | None:
+        """Capture a complete restorable physics state when supported."""
         return None
 
     def restore_state(self, state: PhysicsState) -> bool:
+        """Restore a previously captured physics state."""
         return False
 
     def set_light(self, light_id: int, light) -> bool:
@@ -781,17 +853,21 @@ class SceneAdapterBase:
     def apply_perturb(
         self, node_id: int, target_position: np.ndarray, target_rotation: np.ndarray, mode: str
     ) -> bool:
+        """Apply a translation or rotation perturbation to a hierarchy node."""
         return False
 
     def clear_perturb(self) -> None: ...
 
     def raycast(self, origin: np.ndarray, direction: np.ndarray) -> tuple[int, float]:
+        """Return the selected object ID and ray distance, or ``(0, inf)`` for no hit."""
         return (0, float("inf"))
 
     def camera_hint(self) -> CameraView | None:
+        """Return the adapter's preferred initial editor camera."""
         return None
 
     def timestep(self) -> float:
+        """Return the simulation step duration in seconds."""
         return 0.0
 
     def release(self) -> None: ...
@@ -799,6 +875,8 @@ class SceneAdapterBase:
 
 @runtime_checkable
 class SceneAdapter(Protocol):
+    """Structural protocol implemented by every scene and physics adapter."""
+
     caps: AdapterCaps
 
     @property
