@@ -13,7 +13,7 @@ from ..gizmo import (
     DEFAULT_TRANSLATION_SNAP_M,
     RotationDialProjection,
 )
-from ..localization import LANGUAGE_LABELS, Language
+from ..localization import LANGUAGE_LABELS, Language, parse_language
 from ..perturb import OUTLINE_CORNER_RADIUS_PT
 from . import Panel, PanelContext
 
@@ -136,7 +136,7 @@ class SettingsPanel(Panel):
     def _general(self, ctx: PanelContext) -> None:
         t = ctx.tr
         languages = tuple(Language)
-        current = Language(ctx.language)
+        current = parse_language(ctx.language)
         labels = [LANGUAGE_LABELS[language] for language in languages]
         if not self._begin_properties("settings_general"):
             return

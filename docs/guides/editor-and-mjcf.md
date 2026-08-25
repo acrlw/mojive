@@ -50,7 +50,8 @@ runs** in Inspector to enable runtime editing for one entity. This keeps physica
 nearby bodies unambiguous.
 
 Selecting a camera opens its live preview in the viewport. **Pin** freezes the preview camera and
-widget position while the scene continues to update. Unpin it to follow the selected camera again.
+widget position while the scene continues to update. **Lock** keeps the widget attached to that
+camera entity and follows its live pose after selection changes.
 
 Open **Edit > Settings...**, press `F9`, or run `make settings`. Settings is a centered modal; scene
 interaction resumes after the panel closes.

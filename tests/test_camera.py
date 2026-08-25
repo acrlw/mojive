@@ -416,3 +416,25 @@ def test_pinned_camera_preview_keeps_camera_and_selection() -> None:
 
     preview.set_pinned(False)
     assert preview.selected_camera(session) == ("", None)
+
+
+def test_locked_camera_preview_tracks_camera_after_selection_changes() -> None:
+    camera = CameraView(eye=np.array((2.0, -3.0, 1.0), np.float32))
+    session = PreviewSession(camera)
+    preview = CameraPreview()
+
+    assert preview.selected_camera(session)[0] == "inspection"
+    preview.set_locked(True)
+    camera.eye[:] = (4.0, 5.0, 6.0)
+    session.selected_node = None
+
+    name, locked_view = preview.selected_camera(session)
+    assert preview.locked and not preview.pinned
+    assert name == "inspection"
+    assert locked_view is not None
+    assert locked_view.eye == pytest.approx((4.0, 5.0, 6.0))
+
+    preview.set_pinned(True)
+    camera.eye[:] = 9.0
+    assert preview.pinned and not preview.locked
+    assert preview.selected_camera(session)[1].eye == pytest.approx((4.0, 5.0, 6.0))

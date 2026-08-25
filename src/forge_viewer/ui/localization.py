@@ -99,6 +99,8 @@ _ZH_CN = {
     "Lock gizmo while simulation runs": "模拟运行时锁定 Gizmo",
     "Pin": "固定",
     "Pinned": "已固定",
+    "Lock": "锁定相机",
+    "Locked": "已锁定",
     "model camera follows scene kinematics": "模型相机跟随场景运动",
     "presets": "预设",
     "front": "前",
@@ -139,13 +141,27 @@ def settings_path() -> Path:
     return root / "forge-viewer" / "settings.json"
 
 
+def parse_language(value: Language | str) -> Language:
+    if isinstance(value, Language):
+        return value
+    normalized = str(value).strip().split(":", 1)[0].split(".", 1)[0].replace("-", "_").lower()
+    if normalized in {"zh", "zh_cn", "zh_hans", "zh_chs"}:
+        return Language.SIMPLIFIED_CHINESE
+    if normalized in {"en", "en_us", "en_gb"}:
+        return Language.ENGLISH
+    raise ValueError(f"Unsupported language: {value}")
+
+
 def _read_language(path: Path) -> Language:
     requested = os.environ.get("FORGE_VIEWER_LANGUAGE")
     if requested:
-        return Language(requested)
+        try:
+            return parse_language(requested)
+        except ValueError:
+            return Language.ENGLISH
     try:
         value = json.loads(path.read_text(encoding="utf-8")).get("language", Language.ENGLISH)
-        return Language(value)
+        return parse_language(value)
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return Language.ENGLISH
 
@@ -166,7 +182,7 @@ class Localizer:
         return value
 
     def set_language(self, value: Language | str, *, persist: bool = True) -> None:
-        self.language = Language(value)
+        self.language = parse_language(value)
         if not persist or self.path is None:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)

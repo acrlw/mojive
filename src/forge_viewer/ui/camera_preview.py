@@ -19,7 +19,9 @@ class CameraPreview:
         self._source_generation = -1
         self._position: tuple[float, float] | None = None
         self._pinned = False
+        self._locked = False
         self._camera_name = ""
+        self._camera_index = -1
         self._camera: CameraView | None = None
 
     def update(
@@ -81,17 +83,29 @@ class CameraPreview:
             imgui.end_child()
             return
         pin_label = translate("Pinned" if self._pinned else "Pin")
+        lock_label = translate("Locked" if self._locked else "Lock")
         pin_width = imgui.calc_text_size(pin_label).x + 18.0 * scale
+        lock_width = imgui.calc_text_size(lock_label).x + 18.0 * scale
         spacing = imgui.get_style().item_spacing.x
-        title_width = max(1.0, imgui.get_content_region_avail().x - pin_width - spacing)
+        title_width = max(
+            1.0,
+            imgui.get_content_region_avail().x - pin_width - lock_width - 2.0 * spacing,
+        )
         title = f"{translate('Camera')} · {camera_name}"
         imgui.button(title, imgui.ImVec2(title_width, header_height))
-        if not self._pinned and imgui.is_item_active() and imgui.is_mouse_dragging(0):
+        if (
+            not (self._pinned or self._locked)
+            and imgui.is_item_active()
+            and imgui.is_mouse_dragging(0)
+        ):
             delta = imgui.get_io().mouse_delta
             self._position = (px + float(delta.x), py + float(delta.y))
         imgui.same_line()
         if imgui.button(pin_label, imgui.ImVec2(pin_width, header_height)):
             self.set_pinned(not self._pinned)
+        imgui.same_line()
+        if imgui.button(lock_label, imgui.ImVec2(lock_width, header_height)):
+            self.set_locked(not self._locked)
         available = imgui.get_content_region_avail()
         uv0 = imgui.ImVec2(0.0, 1.0) if image.flip_y else imgui.ImVec2(0.0, 0.0)
         uv1 = imgui.ImVec2(1.0, 0.0) if image.flip_y else imgui.ImVec2(1.0, 1.0)
@@ -102,11 +116,29 @@ class CameraPreview:
     def pinned(self) -> bool:
         return self._pinned
 
+    @property
+    def locked(self) -> bool:
+        return self._locked
+
     def set_pinned(self, pinned: bool) -> None:
         self._pinned = bool(pinned and self._camera is not None)
+        if self._pinned:
+            self._locked = False
+
+    def set_locked(self, locked: bool) -> None:
+        self._locked = bool(locked and self._camera_index >= 0)
+        if self._locked:
+            self._pinned = False
 
     def selected_camera(self, session) -> tuple[str, CameraView | None]:
         if self._pinned:
+            return self._camera_name, self._camera
+        if self._locked:
+            camera = session.camera_view(self._camera_index)
+            if camera is None:
+                self._locked = False
+                return "", None
+            self._camera = _copy_camera(camera)
             return self._camera_name, self._camera
         node = session.selected_node
         if node is None or node.kind is not NodeKind.CAMERA or node.camera_index < 0:
@@ -115,15 +147,8 @@ class CameraPreview:
         if camera is None:
             return "", None
         self._camera_name = node.name
-        self._camera = replace(
-            camera,
-            eye=np.asarray(camera.eye).copy(),
-            target=np.asarray(camera.target).copy(),
-            up=np.asarray(camera.up).copy(),
-            focal_length=np.asarray(camera.focal_length).copy(),
-            sensor_size=np.asarray(camera.sensor_size).copy(),
-            principal_offset=np.asarray(camera.principal_offset).copy(),
-        )
+        self._camera_index = node.camera_index
+        self._camera = _copy_camera(camera)
         return self._camera_name, self._camera
 
     def release(self) -> None:
@@ -137,3 +162,15 @@ class CameraPreview:
             return self._backend
         self._backend = main_backend.create_peer(*size)
         return self._backend
+
+
+def _copy_camera(camera: CameraView) -> CameraView:
+    return replace(
+        camera,
+        eye=np.asarray(camera.eye).copy(),
+        target=np.asarray(camera.target).copy(),
+        up=np.asarray(camera.up).copy(),
+        focal_length=np.asarray(camera.focal_length).copy(),
+        sensor_size=np.asarray(camera.sensor_size).copy(),
+        principal_offset=np.asarray(camera.principal_offset).copy(),
+    )

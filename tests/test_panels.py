@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from forge_viewer.ui.localization import Language, Localizer
+from forge_viewer.ui.localization import Language, Localizer, parse_language
 from forge_viewer.ui.panels import (
     Panel,
     PanelSet,
@@ -78,6 +78,17 @@ def test_language_preference_round_trip(tmp_path, monkeypatch):
     restored = Localizer.load()
     assert restored.language is Language.SIMPLIFIED_CHINESE
     assert restored.text("Return to Editor Camera") == "返回编辑器相机"
+
+
+@pytest.mark.parametrize("value", ["zh_CN", "zh-CN", "zh_CN.UTF-8", "zh_CN:zh"])
+def test_simplified_chinese_locale_variants(value):
+    assert parse_language(value) is Language.SIMPLIFIED_CHINESE
+
+
+def test_linux_language_environment_is_normalized(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_VIEWER_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("FORGE_VIEWER_LANGUAGE", "zh_CN.UTF-8")
+    assert Localizer.load().language is Language.SIMPLIFIED_CHINESE
 
 
 def test_every_panel_declares_a_shortcut(panels: PanelSet):
