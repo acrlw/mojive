@@ -73,62 +73,125 @@ class SettingsPanel(Panel):
     name = "Settings"
     default_open = False
     shortcut = "F9"
-    standalone = True
-    initial_size = (560.0, 720.0)
+    modal = True
+    initial_size = (820.0, 620.0)
 
     def __init__(self) -> None:
         super().__init__()
         self._view = DebugView.SHADED
-
         self._message = ""
+        self._category = "General"
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
 
     def draw(self, ctx: PanelContext) -> None:
+        scale = ctx.style_scale
+        footer_height = 42.0 * scale
+        imgui.begin_child(
+            "settings_categories",
+            imgui.ImVec2(176.0 * scale, -footer_height),
+            imgui.ChildFlags_.borders.value,
+        )
+        for category in ("General", "Interaction", "Rendering", "MuJoCo Visuals"):
+            selected, _ = imgui.selectable(
+                f"{ctx.tr(category)}##settings_{category}", self._category == category
+            )
+            if selected:
+                self._category = category
+        imgui.end_child()
+
+        imgui.same_line()
+        imgui.begin_child(
+            "settings_page",
+            imgui.ImVec2(0.0, -footer_height),
+            imgui.ChildFlags_.borders.value,
+        )
+        imgui.text(ctx.tr(self._category))
+        imgui.separator()
+        if self._category == "General":
+            self._general(ctx)
+        elif self._category == "Interaction":
+            self._interaction(ctx)
+        elif self._category == "Rendering":
+            self._rendering(ctx)
+        else:
+            self._mujoco_visuals(ctx)
+        imgui.end_child()
+
+        imgui.separator()
+        close_width = 92.0 * scale
+        imgui.set_cursor_pos_x(
+            max(
+                imgui.get_cursor_pos_x(),
+                imgui.get_window_width() - close_width - 16.0 * scale,
+            )
+        )
+        if imgui.button(ctx.tr("Close"), imgui.ImVec2(close_width, 0.0)) or imgui.is_key_pressed(
+            imgui.Key.escape, False
+        ):
+            self.open = False
+            imgui.close_current_popup()
+
+    def _general(self, ctx: PanelContext) -> None:
         t = ctx.tr
-        imgui.text_disabled(t("Application"))
         languages = tuple(Language)
         current = Language(ctx.language)
         labels = [LANGUAGE_LABELS[language] for language in languages]
-        imgui.set_next_item_width(-1.0)
-        changed, index = imgui.combo(
-            f"{t('Language')}##ui_language", languages.index(current), labels
-        )
+        if not self._begin_properties("settings_general"):
+            return
+        self._property(t("Language"))
+        changed, index = imgui.combo("##ui_language", languages.index(current), labels)
         if changed and ctx.set_language is not None:
             ctx.set_language(languages[index].value)
         if ctx.font_report is not None:
-            imgui.text_disabled(f"{t('UI font')}: {ctx.font_report.mono}")
-            imgui.text_disabled(f"{t('CJK font')}: {ctx.font_report.cjk or 'none'}")
+            self._property(t("UI font"))
+            imgui.text(ctx.font_report.mono)
+            self._property(t("CJK font"))
+            imgui.text(ctx.font_report.cjk or "none")
+        imgui.end_table()
 
-        imgui.separator()
-        imgui.text_disabled(t("Rendering"))
+    def _rendering(self, ctx: PanelContext) -> None:
+        t = ctx.tr
         caps = ctx.backend.caps
-        imgui.text_disabled(f"{t('Backend')}: {caps.name}")
-        if caps.gl_version:
-            imgui.text_disabled(f"{caps.gl_version}  {caps.renderer}")
-        light_notes = ctx.backend.stats.notes
-        for name in ("scene lights", "shadow casters"):
-            if name in light_notes:
-                imgui.text_disabled(f"{name}: {light_notes[name]}")
+        if self._begin_properties("settings_rendering"):
+            self._property(t("Backend"))
+            imgui.text(caps.name)
+            if caps.gl_version:
+                self._property(t("Graphics device"))
+                imgui.text_wrapped(f"{caps.gl_version}  {caps.renderer}")
+            light_notes = ctx.backend.stats.notes
+            for name in ("scene lights", "shadow casters"):
+                if name in light_notes:
+                    self._property(t(name))
+                    imgui.text(str(light_notes[name]))
+            imgui.end_table()
+        imgui.spacing()
+        self._debug_view(ctx)
+        self._overlay_modes(ctx)
+        forge_flags = flag_groups()[-1][1]
+        if forge_flags and imgui.collapsing_header(t("Forge render flags")):
+            for flag in forge_flags:
+                self._flag_row(ctx, flag)
 
-        imgui.separator()
-        imgui.text_disabled(t("Interaction"))
+    def _interaction(self, ctx: PanelContext) -> None:
+        t = ctx.tr
+        if not self._begin_properties("settings_interaction"):
+            return
         if ctx.gizmo is not None:
             solid = ctx.gizmo.style == "3d"
+            self._property(t("Gizmo style"))
             changed, solid = imgui.checkbox(f"{t('3D gizmo')}##3d_gizmo", solid)
             imgui.set_item_tooltip(t("Use the flat 2D overlay"))
             if changed:
                 ctx.gizmo.set_style("3d" if solid else "2d")
             world = ctx.gizmo.space == "world"
+            self._property(t("Gizmo orientation"))
             changed, world = imgui.checkbox(f"{t('World frame (T)')}##world_frame", world)
             if changed:
                 ctx.gizmo.set_space("world" if world else "body")
 
-            imgui.align_text_to_frame_padding()
-            imgui.text(t("position snap (Shift)"))
-            imgui.same_line()
-            imgui.set_next_item_width(-1.0)
+            self._property(t("position snap (Shift)"))
             changed, step = imgui.drag_float(
                 "##position_snap",
                 float(ctx.gizmo.translation_snap_m),
@@ -145,10 +208,7 @@ class SettingsPanel(Panel):
             if changed:
                 ctx.gizmo.translation_snap_m = step
 
-            imgui.align_text_to_frame_padding()
-            imgui.text(t("rotation snap (Shift)"))
-            imgui.same_line()
-            imgui.set_next_item_width(-1.0)
+            self._property(t("rotation snap (Shift)"))
             changed, step = imgui.drag_float(
                 "##rotation_snap",
                 float(ctx.gizmo.rotation_snap_deg),
@@ -165,10 +225,7 @@ class SettingsPanel(Panel):
             if changed:
                 ctx.gizmo.rotation_snap_deg = step
 
-            imgui.align_text_to_frame_padding()
-            imgui.text(t("rotation tick scale"))
-            imgui.same_line()
-            imgui.set_next_item_width(-1.0)
+            self._property(t("rotation tick scale"))
             changed, scale = imgui.drag_float(
                 "##rotation_tick_scale",
                 float(ctx.gizmo.rotation_tick_scale),
@@ -186,10 +243,8 @@ class SettingsPanel(Panel):
                 ctx.gizmo.rotation_tick_scale = scale
 
             projection = ctx.gizmo.rotation_dial_projection
-            imgui.set_next_item_width(-1.0)
-            if imgui.begin_combo(
-                "##rotation_dial_projection", f"rotation dial: {projection.value}"
-            ):
+            self._property(t("Rotation dial projection"))
+            if imgui.begin_combo("##rotation_dial_projection", projection.value):
                 for option in RotationDialProjection:
                     selected, _ = imgui.selectable(option.value, option is projection)
                     if selected:
@@ -200,10 +255,7 @@ class SettingsPanel(Panel):
             )
 
         if ctx.perturb is not None:
-            imgui.align_text_to_frame_padding()
-            imgui.text(t("perturb corner radius"))
-            imgui.same_line()
-            imgui.set_next_item_width(-1.0)
+            self._property(t("perturb corner radius"))
             changed, radius = imgui.drag_float(
                 "##perturb_corner_radius",
                 float(ctx.perturb.outline_corner_radius_pt),
@@ -222,6 +274,7 @@ class SettingsPanel(Panel):
                 ctx.perturb.outline_corner_radius_pt = radius
 
         if ctx.scene_entities is not None:
+            self._property(t("Scene helpers"))
             changed, visible = imgui.checkbox(
                 f"{t('scene entity helpers')}##scene_entity_helpers",
                 ctx.scene_entities.visible,
@@ -236,15 +289,13 @@ class SettingsPanel(Panel):
             imgui.end_disabled()
             if changed:
                 ctx.scene_entities.show_influence = influence
+        imgui.end_table()
 
-        self._debug_view(ctx)
-        self._overlay_modes(ctx)
-        imgui.separator()
-
+    def _mujoco_visuals(self, ctx: PanelContext) -> None:
         self._visual_groups(ctx)
         self._bvh_depth(ctx)
 
-        for title, flags in flag_groups():
+        for title, flags in flag_groups()[:2]:
             if not flags:
                 continue
             if not imgui.collapsing_header(title, imgui.TreeNodeFlags_.default_open):
@@ -255,6 +306,24 @@ class SettingsPanel(Panel):
         if self._message:
             imgui.separator()
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._message)
+
+    @staticmethod
+    def _begin_properties(str_id: str) -> bool:
+        flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.pad_outer_x
+        if not imgui.begin_table(str_id, 2, flags):
+            return False
+        imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch.value, 0.42)
+        imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch.value, 0.58)
+        return True
+
+    @staticmethod
+    def _property(label: str) -> None:
+        imgui.table_next_row()
+        imgui.table_next_column()
+        imgui.align_text_to_frame_padding()
+        imgui.text(label)
+        imgui.table_next_column()
+        imgui.set_next_item_width(-1.0)
 
     def _visual_groups(self, ctx: PanelContext) -> None:
         groups = ctx.session.visual_groups()

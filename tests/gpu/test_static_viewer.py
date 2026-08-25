@@ -294,7 +294,7 @@ def test_editor_undo_redo_updates_the_render_backend():
         viewer.release()
 
 
-def test_settings_window_is_standalone(canvas):
+def test_settings_window_is_modal_and_centered(canvas):
     from imgui_bundle import imgui
 
     viewer, _scene = canvas
@@ -303,9 +303,16 @@ def test_settings_window_is_standalone(canvas):
     try:
         settings.open = True
         viewer.sync()
-        window = imgui.internal.find_window_by_name("Settings")
+        viewer.sync()
+        translated = viewer.app.localizer.text(settings.name)
+        title = settings.name if translated == settings.name else f"{translated}###{settings.name}"
+        window = imgui.internal.find_window_by_name(title)
         assert window is not None
         assert window.dock_node is None
+        center = window.pos + window.size * 0.5
+        expected = imgui.get_main_viewport().get_center()
+        assert center.x == pytest.approx(expected.x, abs=1.0)
+        assert center.y == pytest.approx(expected.y, abs=1.0)
     finally:
         settings.open = False
 

@@ -66,6 +66,7 @@ class Panel:
 
     aliases: tuple[str, ...] = ()
     standalone: bool = False
+    modal: bool = False
     initial_size: tuple[float, float] = (0.0, 0.0)
 
     def __init__(self) -> None:
@@ -227,6 +228,9 @@ class PanelSet:
                 continue
             translated = ctx.tr(p.name)
             title = p.name if translated == p.name else f"{translated}###{p.name}"
+            if p.modal:
+                self._draw_modal(p, ctx, title)
+                continue
             flags = 0
             if p.standalone:
                 viewport = imgui.get_main_viewport()
@@ -249,6 +253,35 @@ class PanelSet:
             imgui.end()
             if keep_open is not None and not keep_open:
                 p.open = False
+
+    @staticmethod
+    def _draw_modal(panel: Panel, ctx: PanelContext, title: str) -> None:
+        if not imgui.is_popup_open(title):
+            imgui.open_popup(title)
+        viewport = imgui.get_main_viewport()
+        width, height = panel.initial_size
+        if width > 0.0 and height > 0.0:
+            margin = 32.0 * ctx.style_scale
+            imgui.set_next_window_size(
+                imgui.ImVec2(
+                    min(width * ctx.style_scale, viewport.work_size.x - margin),
+                    min(height * ctx.style_scale, viewport.work_size.y - margin),
+                ),
+                imgui.Cond_.appearing.value,
+            )
+        imgui.set_next_window_pos(
+            viewport.get_center(),
+            imgui.Cond_.always.value,
+            imgui.ImVec2(0.5, 0.5),
+        )
+        flags = imgui.WindowFlags_.no_docking.value | imgui.WindowFlags_.no_collapse.value
+        visible, keep_open = imgui.begin_popup_modal(title, True, flags)
+        if visible:
+            panel.draw(ctx)
+            panel.finish_frame(ctx)
+            imgui.end_popup()
+        if keep_open is not None and not keep_open:
+            panel.open = False
 
     def poll_shortcuts(self) -> None:
         if imgui.get_io().want_capture_keyboard and imgui.is_any_item_active():

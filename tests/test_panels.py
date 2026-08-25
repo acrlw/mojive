@@ -57,10 +57,11 @@ def test_registered_panels(panels: PanelSet):
     assert {p.name for p in panels} == EXPECTED_PANELS
 
 
-def test_settings_is_a_standalone_window(panels: PanelSet):
+def test_settings_is_a_modal_dialog(panels: PanelSet):
     settings = panels.get("Settings")
     assert settings is not None
-    assert settings.standalone
+    assert settings.modal
+    assert not settings.standalone
     assert not settings.default_open
 
 

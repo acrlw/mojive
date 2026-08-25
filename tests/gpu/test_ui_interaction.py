@@ -134,7 +134,7 @@ def test_all_panels_docked_not_stacked(viewer):
     from forge_viewer.ui.window import Window
 
     laid_out = set(Window._LAYOUT_LEFT + Window._LAYOUT_RIGHT + Window._LAYOUT_BOTTOM)
-    declared = {p.name for p in viewer.app.panels.panels if not p.standalone}
+    declared = {p.name for p in viewer.app.panels.panels if not p.standalone and not p.modal}
     assert declared <= laid_out
 
 
@@ -1195,6 +1195,10 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style):
         def convex_fill(self, points, color):
             self.sectors += 1
             return self.inner.convex_fill(points, color)
+
+        def triangle_fan_fill(self, points, color):
+            self.sectors += 1
+            return self.inner.triangle_fan_fill(points, color)
 
         def fringed_concave_fill(self, points, color):
             self.arc_strokes += 1
