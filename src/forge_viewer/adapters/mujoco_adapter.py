@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
+import shutil
 import warnings
 import xml.etree.ElementTree as ET
 from colorsys import hsv_to_rgb
 from dataclasses import dataclass, replace
+from html import escape
 from itertools import pairwise
 from pathlib import Path
 
@@ -252,6 +254,8 @@ class _CompositionEditState:
 
 
 class MuJoCoAdapter(SceneAdapterBase):
+    """Expose MuJoCo model structure, simulation state, and authoring through scene contracts."""
+
     def __init__(self, path: Path | None = None) -> None:
         if mujoco is None:  # pragma: no cover
             raise RuntimeError(
@@ -1069,6 +1073,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         """Write the composed MuJoCo model and Forge-authored entities as MJCF."""
         target = Path(path).expanduser().resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
+        self._validate_authored_mjcf(source)
         spec = self._composed_spec()
         self._append_authored_scene(spec, target, source, frame)
         key_name = (options or SceneSaveOptions()).current_pose_keyframe
@@ -1089,8 +1094,58 @@ class MuJoCoAdapter(SceneAdapterBase):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Attach conflict.*")
             spec.compile()
-        target.write_text(spec.to_xml().rstrip() + "\n", encoding="utf-8")
+        assets = self._stage_mjcf_assets(spec, target)
+        xml = spec.to_xml()
+        for source_file, exported_file in assets:
+            xml = xml.replace(
+                f'file="{escape(source_file, quote=True)}"',
+                f'file="{escape(exported_file, quote=True)}"',
+            )
+        target.write_text(xml.rstrip() + "\n", encoding="utf-8")
+        mujoco.MjModel.from_xml_path(str(target))
         return target
+
+    @staticmethod
+    def _validate_authored_mjcf(source: SceneSource) -> None:
+        unsupported: list[str] = []
+        for light in source.lights.lights:
+            if light.kind in {LightKind.AREA, LightKind.IMAGE}:
+                unsupported.append(f"{light.kind.name.lower()} light")
+        for texture in source.textures.values():
+            if texture.kind is not TextureKind.TWO_D:
+                unsupported.append(f"{texture.kind.value} texture '{texture.name}'")
+        if unsupported:
+            details = ", ".join(dict.fromkeys(unsupported))
+            raise RuntimeError(f"MJCF export cannot preserve {details}")
+
+    @staticmethod
+    def _stage_mjcf_assets(spec, target: Path) -> list[tuple[str, str]]:
+        assets = target.parent / f"{target.stem}_assets"
+        exported: list[tuple[str, str]] = []
+        groups = (
+            ("mesh", spec.meshes),
+            ("texture", spec.textures),
+            ("hfield", spec.hfields),
+            ("skin", spec.skins),
+        )
+        for kind, items in groups:
+            for index, asset in enumerate(items):
+                if asset.file is None:
+                    continue
+                file = str(asset.file)
+                if not file:
+                    continue
+                source = Path(file).expanduser().resolve()
+                suffix = source.suffix or ".bin"
+                name = _mjcf_name(kind, str(asset.name), index)
+                destination = (
+                    source if source.parent == assets.resolve() else assets / f"{name}{suffix}"
+                )
+                assets.mkdir(parents=True, exist_ok=True)
+                if source != destination.resolve():
+                    shutil.copy2(source, destination)
+                exported.append((str(source), destination.relative_to(target.parent).as_posix()))
+        return exported
 
     def _append_authored_scene(
         self, spec, target: Path, source: SceneSource, frame: SceneFrame
@@ -1217,11 +1272,8 @@ class MuJoCoAdapter(SceneAdapterBase):
             LightKind.DIRECTIONAL: mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
             LightKind.POINT: mujoco.mjtLightType.mjLIGHT_POINT,
             LightKind.SPOT: mujoco.mjtLightType.mjLIGHT_SPOT,
-            LightKind.AREA: mujoco.mjtLightType.mjLIGHT_POINT,
         }
         for index, light in enumerate(source.lights.lights):
-            if light.kind is LightKind.IMAGE:
-                continue
             name = _mjcf_name(
                 "forge_light",
                 light_names.get(index, "light"),

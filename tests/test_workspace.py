@@ -180,6 +180,53 @@ def test_workspace_exports_formatted_re_loadable_mjcf(tmp_path: Path) -> None:
     assert sum(node.kind is NodeKind.GEOM for node in source.nodes) == model.ngeom
 
 
+def test_workspace_mjcf_export_stages_file_assets_with_relative_paths(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    (source / "meshes").mkdir(parents=True)
+    (source / "meshes" / "part.obj").write_text(
+        """v 0 0 0
+v 1 0 0
+v 0 1 0
+v 0 0 1
+f 1 3 2
+f 1 2 4
+f 1 4 3
+f 2 3 4
+""",
+        encoding="utf-8",
+    )
+    model_path = source / "model.xml"
+    model_path.write_text(
+        """<mujoco model="portable">
+  <compiler meshdir="meshes"/>
+  <asset><mesh name="part" file="part.obj"/></asset>
+  <worldbody><geom type="mesh" mesh="part"/></worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(model_path))
+    export_dir = tmp_path / "export"
+    path = export_dir / "portable.xml"
+
+    document.save_scene(path)
+
+    xml = path.read_text(encoding="utf-8")
+    assert str(source) not in xml
+    assert 'file="portable_assets/mesh_0_part.obj"' in xml
+    moved = tmp_path / "moved"
+    export_dir.rename(moved)
+    assert mujoco.MjModel.from_xml_path(str(moved / "portable.xml")).ngeom == 1
+
+
+def test_workspace_mjcf_export_rejects_lossy_authored_lights(tmp_path: Path) -> None:
+    document = workspace()
+    document.add_scene_light("panel", Light(kind=LightKind.AREA))
+
+    with pytest.raises(RuntimeError, match="area light"):
+        document.save_scene(tmp_path / "scene.xml")
+
+
 def test_workspace_can_export_current_pose_as_key0(tmp_path: Path) -> None:
     model_path = tmp_path / "free-body.xml"
     model_path.write_text(
