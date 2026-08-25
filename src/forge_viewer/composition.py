@@ -122,6 +122,8 @@ def build_from_adapter(
     samples: int = 4,
     title: str = "forge-viewer",
 ) -> Viewer:
+    """Build an interactive viewer around an initialized scene adapter."""
+
     return _compose(
         lambda: adapter,
         asset_path=None,
@@ -135,6 +137,8 @@ def build_from_adapter(
 
 
 def build_scene(scene: Scene, **kwargs) -> Viewer:
+    """Build an interactive viewer for a backend-neutral authored scene."""
+
     from .adapters.static import StaticSceneAdapter
 
     return build_from_adapter(StaticSceneAdapter(scene), **kwargs)

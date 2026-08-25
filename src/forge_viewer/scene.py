@@ -98,6 +98,8 @@ class _LightItem:
 
 
 class Scene:
+    """Mutable backend-neutral scene for programmatic geometry, cameras, and lights."""
+
     def __init__(self, *, camera: CameraView | None = None, lights: LightSet | None = None) -> None:
         self.camera = camera
         self.lights = lights or LightSet(headlight=DEFAULT_HEADLIGHT)

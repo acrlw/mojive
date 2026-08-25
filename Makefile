@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt docs docs-serve test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt docs docs-serve test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -13,6 +13,7 @@ help:
 		'  make hidpi              viewer with an explicit 200% UI scale' \
 		'  make empty              empty viewer; load MJCF or URDF from File menu' \
 		'  make editor             empty Forge workspace; combine MJCF/URDF and entities' \
+		'  make settings           editor with the modal Settings panel open' \
 		'  make workspace-edit     workspace, MjSpec topology, camera and light acceptance' \
 		'  make model-loading      empty, MJCF, and URDF loading reference images' \
 		'  make model-composition  add and remove MJCF/URDF models at runtime' \
@@ -110,12 +111,12 @@ setup:
 check: lint test
 
 lint:
-	$(RUFF) check src tests tools
-	$(RUFF) format --check src tests tools
+	$(RUFF) check src tests tools examples
+	$(RUFF) format --check src tests tools examples
 
 fmt:
-	$(RUFF) check --fix src tests tools
-	$(RUFF) format src tests tools
+	$(RUFF) check --fix src tests tools examples
+	$(RUFF) format src tests tools examples
 
 docs:
 	uv run --extra docs mkdocs build --strict --site-dir output/site
@@ -140,7 +141,7 @@ test-physics:
 test-all: test test-physics gpu gpu-wgpu
 
 mjcf-roundtrip:
-	$(PYTEST) -q -m physics tests/test_workspace.py -k 'exports_formatted or export_current_pose'
+	$(PYTEST) -q -m physics tests/test_workspace.py -k 'mjcf_export or exports_formatted or export_current_pose'
 
 ## Isolate files because OpenGL and physics libraries own process-global registries.
 gpu:
@@ -384,6 +385,10 @@ rpc: cli
 ## Native gizmo acceptance: G position, R rotation, T frame, F9 settings.
 gizmo:
 	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli view gizmo --paused $(ARGS)
+
+## Centered modal Settings acceptance. Close it to continue editing the scene.
+settings:
+	FORGE_VIEWER_OPEN_SETTINGS=1 FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor $(ARGS)
 
 ## Perturbation acceptance: Ctrl+left translates and Ctrl+right rotates a selected free body.
 perturb:

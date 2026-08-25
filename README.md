@@ -59,9 +59,9 @@ scaling.
 
 ### Language and settings
 
-Open `Edit > Settings...` or press `F9` to use the standalone Settings window. The language choice
-is stored in the platform application-settings directory. Start directly in Simplified Chinese
-with:
+Open `Edit > Settings...` or press `F9` to use the centered modal Settings panel. The editor stays
+inactive until the panel closes. The language choice is stored in the platform application-settings
+directory. Start directly in Simplified Chinese with:
 
 ```bash
 make editor LANGUAGE=zh_CN
@@ -181,10 +181,15 @@ rename, and delete from the menu, keyboard shortcuts, and the Hierarchy context 
 
 Cameras and lights are selectable in the viewport. Their position and rotation gizmos edit world
 transforms; selected helpers show camera frustums and light influence volumes. Selecting a camera
-also opens a draggable live preview in the lower-right corner of the viewport. The Settings panel
-controls helper and influence visibility. `View Through Camera` switches to the selected scene
-camera, and `Return to Editor Camera` restores the previous editor orbit view. Unsaved workspaces
-display an asterisk in the title and prompt before replacement or exit.
+also opens a draggable live preview in the lower-right corner of the viewport. Pinning the preview
+keeps its camera and widget position while another entity is selected or perturbed. Camera and light
+gizmos lock by default while simulation runs; Inspector can unlock an entity for runtime editing.
+The Settings panel controls helper and influence visibility. `View Through Camera` switches to the
+selected scene camera, and `Return to Editor Camera` restores the previous editor orbit view.
+Unsaved workspaces display an asterisk in the title and prompt before replacement or exit.
+
+Runnable integrations from basic scene construction through MuJoCo rendering, model composition,
+and remote publishing live in [`examples/`](examples/README.md).
 
 ## Programmatic rendering
 
@@ -275,6 +280,7 @@ Every user-facing feature has a reproducible Make target.
 | `make deformables` | Flex and skin dynamic meshes |
 | `make robot` | Download and open a MuJoCo Menagerie robot |
 | `make editor` | Empty authored workspace with scene files and Entity editing |
+| `make settings` | Open the editor with the centered modal Settings panel |
 | `make workspace-edit` | Workspace composition, resource repair, structured MJCF, camera and light acceptance |
 | `make editor-files` | Scene document workflow acceptance and capture |
 | `make entity-edit` | Entity lifecycle CPU and GPU acceptance |

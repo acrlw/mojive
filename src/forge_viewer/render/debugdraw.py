@@ -226,6 +226,8 @@ class DebugStats:
 
 
 class Layer:
+    """Named collection of retained debug primitives sharing one occlusion mode."""
+
     __slots__ = (
         "_finite",
         "_index",
@@ -641,6 +643,8 @@ class PackedFrame:
 
 
 class DebugDraw:
+    """Build retained and transient debug primitives into reusable GPU batches."""
+
     def __init__(self, limit: int = DEFAULT_LIMIT) -> None:
         self.limit = int(limit)
         self.dropped = 0

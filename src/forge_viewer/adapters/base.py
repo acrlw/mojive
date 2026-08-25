@@ -524,6 +524,8 @@ class SceneSource:
 
 
 class SceneAdapterBase:
+    """Default implementation of the scene adapter contract and optional capabilities."""
+
     caps = AdapterCaps(name="custom")
 
     @property

@@ -131,6 +131,8 @@ def visual_coverage() -> dict[str, list[dict]]:
 
 
 def audit_model(model) -> dict:
+    """Report Forge coverage and model usage for one compiled MuJoCo model."""
+
     supported = {
         int(mujoco.mjtGeom.mjGEOM_PLANE),
         int(mujoco.mjtGeom.mjGEOM_HFIELD),

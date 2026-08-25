@@ -35,6 +35,8 @@ def physics_available(physics: str) -> tuple[bool, str]:
 
 
 def make_adapter(backend_name: str, asset_path: str | Path | None = None) -> SceneAdapter:
+    """Create a registered physics adapter and optionally load an asset."""
+
     physics = physics_of(backend_name)
     ok, reason = physics_available(physics)
     if not ok:

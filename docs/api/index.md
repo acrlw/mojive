@@ -15,6 +15,19 @@ The public package exports the common scene, rendering, adapter, remote, and rec
 | `forge_viewer.remote` | Live structure, frame, and command transport | `SnapshotPublisher`, `RemoteSceneAdapter` |
 | `forge_viewer.recording` | Video and snapshot streams | `VideoRecorder`, `SnapshotWriter` |
 
+## Integration paths
+
+| Goal | Start with | Example |
+|---|---|---|
+| Build a scene in Python | `Scene`, `build_scene` | `examples/programmatic_scene.py` |
+| Render MuJoCo arrays | `Renderer` | `examples/mujoco_render.py` |
+| Control MuJoCo state | `Session`, typed commands | `examples/mujoco_control.py` |
+| Compose MJCF and URDF | `WorkspaceAdapter` | `examples/compose_scene.py` |
+| Publish a live scene | `SnapshotPublisher` | `examples/remote_publish.py` |
+
+The [examples guide](../guides/examples.md) explains how to run each workflow. The module pages
+list signatures, types, and public members generated from the source documentation.
+
 ## Stability
 
 Names exported from `forge_viewer.__all__` form the supported public surface. Adapter

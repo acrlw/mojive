@@ -20,6 +20,7 @@ nav:
       - Platform support: PLATFORM.md
   - Guides:
       - Editor and MJCF: guides/editor-and-mjcf.md
+      - Examples: guides/examples.md
       - Testing: guides/testing.md
       - WebGPU backend: WGPU_BACKEND_REPORT.md
   - API reference:

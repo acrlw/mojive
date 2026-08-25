@@ -11,6 +11,8 @@ SNAPSHOT_MAGIC = b"FORGE-SNAPSHOT\x00\x01"
 
 
 class VideoRecorder:
+    """Stream RGB frames to an encoded video without retaining them in memory."""
+
     def __init__(self, path: Path, size: tuple[int, int], fps: float = 30.0) -> None:
         from imageio_ffmpeg import write_frames
 

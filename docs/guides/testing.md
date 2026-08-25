@@ -22,6 +22,7 @@ change while iterating, then run the required acceptance targets before handoff.
 | MuJoCo adapter or MJCF authoring | focused physics test | `make test-physics` and `make mujoco-audit` |
 | Render pass or shader | one GPU test file | `make gpu` and `make gpu-wgpu` |
 | Visual interaction | focused GPU test | relevant Make gallery and `make reverse` |
+| Settings layout | focused UI GPU test | `make settings` |
 
 Markers may be combined. A file-format test that compiles MuJoCo uses both `integration` and
 `physics`; it runs in the physics layer.
