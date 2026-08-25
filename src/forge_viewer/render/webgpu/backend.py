@@ -23,6 +23,7 @@ from ..debugdraw import DebugDraw
 from ..mesh import all_builtin
 from ..overlay import OverlayPublisher, OverlayState
 from ..scene import RenderScene
+from .blend import ADDITIVE_BLEND, ALPHA_BLEND, OVERDRAW_BLEND
 from .instances import INSTANCE_STRIDE, InstanceStore
 from .lighting import (
     IMAGE_LIGHT_REFERENCE_INTENSITY,
@@ -135,20 +136,6 @@ _WIREFRAME_LAYOUT = {
         {"format": "float32x2", "offset": 24, "shader_location": 2},
         {"format": "float32x3", "offset": 32, "shader_location": 3},
     ],
-}
-
-_ALPHA_BLEND = {
-    "color": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
-    "alpha": {"src_factor": "one", "dst_factor": "one-minus-src-alpha"},
-}
-_ADDITIVE_BLEND = {
-    "color": {"src_factor": "src-alpha", "dst_factor": "one"},
-    "alpha": {"src_factor": "one", "dst_factor": "one-minus-src-alpha"},
-}
-# forge state_overdraw: blend_func(ONE, ONE), no depth test or write.
-_OVERDRAW_BLEND = {
-    "color": {"src_factor": "one", "dst_factor": "one"},
-    "alpha": {"src_factor": "one", "dst_factor": "one"},
 }
 
 
@@ -557,11 +544,11 @@ class WgpuBackend:
         wireframe = wireframe or fs_entry == "fs_scene_wire"
         target: dict = {"format": "rgba8unorm"}
         if overdraw:
-            target["blend"] = _OVERDRAW_BLEND
+            target["blend"] = OVERDRAW_BLEND
         elif blend == "alpha":
-            target["blend"] = _ALPHA_BLEND
+            target["blend"] = ALPHA_BLEND
         elif blend == "additive":
-            target["blend"] = _ADDITIVE_BLEND
+            target["blend"] = ADDITIVE_BLEND
         pipeline = self.device.create_render_pipeline(
             layout=self._scene_layout,
             vertex={
@@ -598,9 +585,9 @@ class WgpuBackend:
             return pipeline
         target: dict = {"format": "rgba16float"}
         if blend == "alpha":
-            target["blend"] = _ALPHA_BLEND
+            target["blend"] = ALPHA_BLEND
         elif blend == "additive":
-            target["blend"] = _ADDITIVE_BLEND
+            target["blend"] = ADDITIVE_BLEND
         pipeline = self.device.create_render_pipeline(
             layout=self._scene_layout,
             vertex={

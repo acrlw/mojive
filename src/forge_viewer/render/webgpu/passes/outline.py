@@ -7,6 +7,7 @@ import wgpu
 
 from ...backend import RenderFlag
 from ...scene import RenderScene
+from ..blend import ALPHA_BLEND
 from ..instances import INSTANCE_STRIDE
 from ..programs import load_wgsl
 from ..timing import TimestampWriter
@@ -27,11 +28,6 @@ _COMPOSITE_DTYPE = np.dtype(
         ("size", "(4,)u4"),  # xy: target size
     ]
 )
-
-_ALPHA_BLEND = {
-    "color": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
-    "alpha": {"src_factor": "one", "dst_factor": "one-minus-src-alpha"},
-}
 
 
 class OutlinePass:
@@ -102,7 +98,7 @@ class OutlinePass:
             fragment={
                 "module": module,
                 "entry_point": "fs_outline",
-                "targets": [{"format": "rgba8unorm", "blend": _ALPHA_BLEND}],
+                "targets": [{"format": "rgba8unorm", "blend": ALPHA_BLEND}],
             },
             primitive={"topology": "triangle-list", "front_face": "ccw", "cull_mode": "none"},
             # state_overlay(depth_test=False): blended overlay, depth untouched.

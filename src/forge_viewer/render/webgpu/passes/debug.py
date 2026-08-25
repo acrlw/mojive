@@ -11,6 +11,7 @@ from ...debugdraw import RECORD_FLOATS, DebugDraw, Occlusion, PackedFrame, Path
 from ...mesh import builtin_mesh
 from ...text import RECORD_FLOATS as TEXT_RECORD_FLOATS
 from ...text import TextLayout
+from ..blend import ALPHA_BLEND
 from ..meshes import GpuMesh
 from ..programs import load_wgsl
 
@@ -32,11 +33,6 @@ _DEBUG_DTYPE = np.dtype(
 )
 _UNIFORM_SLOTS = 2
 _UNIFORM_SLOT_BYTES = 256
-
-_ALPHA_BLEND = {
-    "color": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
-    "alpha": {"src_factor": "one", "dst_factor": "one-minus-src-alpha"},
-}
 
 _VERTICES: dict[Path, int] = {
     Path.SEGMENT: 15,
@@ -380,7 +376,7 @@ class DebugPass:
             fragment={
                 "module": self._module,
                 "entry_point": fs,
-                "targets": [{"format": "rgba8unorm", "blend": _ALPHA_BLEND}],
+                "targets": [{"format": "rgba8unorm", "blend": ALPHA_BLEND}],
             },
             primitive={"topology": "triangle-list", "front_face": "ccw", "cull_mode": "none"},
             depth_stencil={
@@ -407,7 +403,7 @@ class DebugPass:
             fragment={
                 "module": self._module,
                 "entry_point": "fs_debug_text",
-                "targets": [{"format": "rgba8unorm", "blend": _ALPHA_BLEND}],
+                "targets": [{"format": "rgba8unorm", "blend": ALPHA_BLEND}],
             },
             primitive={"topology": "triangle-list", "front_face": "ccw", "cull_mode": "none"},
             depth_stencil={

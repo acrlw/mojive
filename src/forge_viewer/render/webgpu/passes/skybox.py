@@ -8,6 +8,7 @@ import wgpu
 from ....types import CameraView, ShadingModel
 from ...backend import DebugView, RenderFlag
 from ...scene import RenderScene
+from ..blend import ALPHA_BLEND
 from ..programs import load_wgsl
 from ..textures import TextureStore
 
@@ -42,12 +43,6 @@ _HAZE_VERTEX_LAYOUT = {
 }
 _SKYBOX_VERTEX_LAYOUT = _HAZE_VERTEX_LAYOUT
 
-# Straight-alpha RGB composition with source-over coverage for the target alpha.
-_ALPHA_BLEND = {
-    "color": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
-    "alpha": {"src_factor": "one", "dst_factor": "one-minus-src-alpha"},
-}
-
 
 def _make_haze_pipeline(
     device: wgpu.GPUDevice,
@@ -67,7 +62,7 @@ def _make_haze_pipeline(
         fragment={
             "module": module,
             "entry_point": "fs_haze",
-            "targets": [{"format": "rgba8unorm", "blend": _ALPHA_BLEND}],
+            "targets": [{"format": "rgba8unorm", "blend": ALPHA_BLEND}],
         },
         primitive={"topology": "triangle-list", "front_face": "ccw", "cull_mode": "none"},
         depth_stencil={

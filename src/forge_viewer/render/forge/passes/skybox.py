@@ -229,8 +229,8 @@ class SkyboxPass(BasePass):
         gl.blend_func = (
             moderngl.SRC_ALPHA,
             moderngl.ONE_MINUS_SRC_ALPHA,
+            moderngl.ZERO,
             moderngl.ONE,
-            moderngl.ONE_MINUS_SRC_ALPHA,
         )
         # MuJoCo's classic haze is part of the opaque skybox stage and writes
         # depth before transparent geoms are drawn.

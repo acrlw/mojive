@@ -32,6 +32,7 @@ from ....gizmo import (
 )
 from ....types import CameraView, MeshKey, MeshShape
 from ...mesh import builtin_mesh, gizmo_mesh
+from ..blend import ALPHA_BLEND
 from ..meshes import GpuMesh
 from ..programs import load_wgsl
 
@@ -48,11 +49,6 @@ _SLOT_DTYPE = np.dtype(
 # (3 planes + 3 arrows + 2 center spheres).
 _SLOTS = 8
 _SLOT_BYTES = 256
-
-_ALPHA_BLEND = {
-    "color": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
-    "alpha": {"src_factor": "one", "dst_factor": "one-minus-src-alpha"},
-}
 
 # Standard GpuMesh stream; only position/normal are read (forge "3f 3f 8x").
 _VERTEX_LAYOUT = {
@@ -306,7 +302,7 @@ class GizmoPass:
             fragment={
                 "module": self._module,
                 "entry_point": "fs_gizmo",
-                "targets": [{"format": "rgba8unorm", "blend": _ALPHA_BLEND}],
+                "targets": [{"format": "rgba8unorm", "blend": ALPHA_BLEND}],
             },
             primitive={"topology": "triangle-list", "front_face": "ccw", "cull_mode": cull},
             depth_stencil={
