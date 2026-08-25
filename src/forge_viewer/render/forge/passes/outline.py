@@ -101,12 +101,23 @@ class OutlinePass(BasePass):
 
         ctx.target.use_main()
         state_overlay(gl, depth_test=False)
+        shared_id = ctx.target.id_fbo is ctx.target.fbo
+        if shared_id:
+            ctx.target.fbo.color_mask = (
+                (True, True, True, True),
+                (False, False, False, False),
+            )
         self._mask_tex.use(0)
         u = self._uniforms
         u.force("u_mask", 0)
         u.set("u_size", self._size)
         u.set("u_color", self.color)
         self._vao.render(moderngl.TRIANGLES, vertices=3)
+        if shared_id:
+            ctx.target.fbo.color_mask = (
+                (True, True, True, True),
+                (True, True, True, True),
+            )
 
     def _selected_buckets(self, ctx: PassContext, selected: int) -> tuple[int, ...]:
         scene = ctx.scene

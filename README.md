@@ -8,8 +8,7 @@ Core workflows include scene inspection, object selection, transform gizmos, phy
 perturbation, debug drawing, camera and light editing, render diagnostics, capture, and video.
 
 The project is under active development. The P0/P1 baseline includes the public Renderer API,
-MuJoCo visualization semantics, IK, persistent scene state, local control, and visual regression
-gates.
+MuJoCo visualization semantics, persistent scene state, local control, and visual regression gates.
 
 ## Requirements
 
@@ -313,7 +312,6 @@ make record SCENE=humanoid OUTPUT=output/humanoid.mp4 ARGS="--frames 240"
 | `make gpu` | Isolated real-OpenGL test files |
 | `make egl` | Linux EGL Renderer and geometry-shader wireframe contract |
 | `make renderer-api` | Public Renderer RGB, depth, segmentation, camera, option, and lifecycle contract |
-| `make mujoco-ik` | MuJoCo body/site IK and acceptance captures |
 | `make mujoco-physics` | Full MuJoCo adapter and simulation regression suite |
 | `make camera-state` | Camera bookmark serialization and restore |
 | `make scene-snapshot` | Complete physics, selection, option, light, environment, and material state |

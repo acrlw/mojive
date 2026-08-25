@@ -21,16 +21,17 @@ class IdLayout(enum.StrEnum):
 def probe_id_layout(ctx: moderngl.Context, samples: int) -> IdLayout:
     if samples <= 1:
         return IdLayout.SHARED
-    tex_c = tex_i = fbo = None
+    tex_c = tex_i = depth = fbo = None
     try:
         tex_c = ctx.texture((8, 8), 4, samples=samples, dtype="f1")
         tex_i = ctx.texture((8, 8), 1, samples=samples, dtype="u4")
-        fbo = ctx.framebuffer([tex_c, tex_i], ctx.depth_renderbuffer((8, 8), samples=samples))
+        depth = ctx.depth_renderbuffer((8, 8), samples=samples)
+        fbo = ctx.framebuffer([tex_c, tex_i], depth)
         return IdLayout.SHARED
     except Exception:
         return IdLayout.SPLIT
     finally:
-        for obj in (fbo, tex_i, tex_c):
+        for obj in (fbo, depth, tex_i, tex_c):
             if obj is not None:
                 obj.release()
 

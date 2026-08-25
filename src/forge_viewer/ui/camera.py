@@ -116,6 +116,7 @@ class OrbitCamera:
         self._aspect = float(aspect)
         self._orthographic = bool(orthographic)
         self.ortho_height = float(ortho_height)
+        self._adaptive_near = True
         self._anim: _Anim | None = None
 
         self._anim_start: _Anim | None = None
@@ -234,6 +235,7 @@ class OrbitCamera:
         self._fov_y = float(view.fov_y)
         self.near = float(view.near)
         self.far = float(view.far)
+        self._adaptive_near = False
         self._aspect = float(view.aspect)
         self._orthographic = bool(view.orthographic)
         self.ortho_height = float(view.ortho_height)
@@ -252,7 +254,9 @@ class OrbitCamera:
         return camera_basis(self.view())
 
     def view(self) -> CameraView:
-        near = max(MIN_NEAR, min(float(self.near), self._distance * NEAR_DISTANCE_FRACTION))
+        near = max(MIN_NEAR, float(self.near))
+        if self._adaptive_near:
+            near = min(near, self._distance * NEAR_DISTANCE_FRACTION)
         return CameraView(
             eye=self.eye().astype(np.float32),
             target=self.pivot.astype(np.float32),
@@ -348,6 +352,7 @@ class OrbitCamera:
         sink: CameraSink,
         *,
         animate: bool = True,
+        clip: CameraView | None = None,
     ) -> CameraView:
         lo = np.asarray(bounds[0], np.float64).reshape(3)
         hi = np.asarray(bounds[1], np.float64).reshape(3)
@@ -361,8 +366,14 @@ class OrbitCamera:
 
         distance = radius / max(float(np.sin(min(half_y, half_x))), 1e-3) * FRAME_MARGIN
 
-        near = max(1e-3, (distance - radius) * 0.25)
-        far = (distance + radius) * FRAME_FAR_MARGIN
+        if clip is None:
+            near = max(1e-3, (distance - radius) * 0.25)
+            far = (distance + radius) * FRAME_FAR_MARGIN
+            self._adaptive_near = True
+        else:
+            near = max(MIN_NEAR, float(clip.near))
+            far = max(near, float(clip.far))
+            self._adaptive_near = False
         goal = _Anim(
             pivot=center,
             distance=distance,

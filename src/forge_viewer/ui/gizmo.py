@@ -9,14 +9,13 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from .. import math3d
-from ..adapters.base import IkOptions, NodeKind
+from ..adapters.base import NodeKind
 from ..commands import (
     BeginEditTransaction,
     EndEditTransaction,
     SetLight,
     SetPose,
     SetSceneCamera,
-    SolveIk,
 )
 from ..gizmo import (
     AXIS_COLORS,
@@ -170,17 +169,12 @@ class Verdict:
     reason: str = ""
 
 
-def verdict(paused: bool, node: SceneNode | None, inverse_kinematics: bool = False) -> Verdict:
+def verdict(paused: bool, node: SceneNode | None) -> Verdict:
     if node is None:
         return Verdict(False, REASON_NO_SELECTION)
     if node.kind in (NodeKind.LIGHT, NodeKind.CAMERA):
         return Verdict(True)
-    reason = gizmo_refusal_reason(
-        paused,
-        node.posable,
-        inverse_kinematics,
-        node.ik_target,
-    )
+    reason = gizmo_refusal_reason(paused, node.posable)
     return Verdict(reason is None, reason or "")
 
 
@@ -1019,16 +1013,9 @@ class ObjectGizmo:
                 rotation=np.asarray(mat, np.float32),
             )
         else:
-            command = SolveIk(
-                node_id=node.node_id,
-                target_position=np.asarray(pos, np.float32),
-                target_rotation=np.asarray(mat, np.float32),
-                options=IkOptions(
-                    position=handle not in ROTATE_HANDLES,
-                    rotation=handle in ROTATE_HANDLES,
-                ),
-                record_undo=not self._edit_started,
-            )
+            self._verdict = Verdict(False, gizmo_refusal_reason(session.paused, False) or "")
+            self._end()
+            return False
         if command is None:
             self._verdict = Verdict(False, "entity transform is unavailable")
             self._end()
@@ -1083,7 +1070,7 @@ class ObjectGizmo:
         return _WORLD_BASIS
 
     def _evaluate(self, session: Session, node: SceneNode | None) -> Verdict:
-        result = verdict(session.paused, node, session.adapter.caps.inverse_kinematics)
+        result = verdict(session.paused, node)
         if not result.ok or node is None:
             return result
         if session.entity_gizmo_locked(node):

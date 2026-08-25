@@ -7,7 +7,7 @@ uniform sampler2D u_mask;
 uniform ivec2 u_size;
 uniform vec4 u_color;
 
-out vec4 o_color;
+layout(location = 0) out vec4 o_color;
 
 const int AA_RADIUS = OUTLINE_RADIUS + 1;
 const float CORE_R2 = float(OUTLINE_RADIUS * OUTLINE_RADIUS);

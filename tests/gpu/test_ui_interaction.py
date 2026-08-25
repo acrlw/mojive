@@ -129,6 +129,19 @@ def test_viewport_gets_real_estate(viewer):
     assert (w * h) / (pw * ph) > 0.20
 
 
+def test_interactive_entry_uses_adapter_camera_hint(viewer):
+    hint = viewer.session.camera_hint()
+    assert hint is not None
+    view = viewer.app.camera.view()
+    np.testing.assert_allclose(view.eye, hint.eye, atol=1e-6)
+    np.testing.assert_allclose(view.target, hint.target, atol=1e-6)
+    np.testing.assert_allclose(view.forward(), hint.forward(), atol=1e-6)
+    assert view.fov_y == pytest.approx(hint.fov_y)
+    assert view.near == pytest.approx(hint.near)
+    assert view.far == pytest.approx(hint.far)
+    assert view.orthographic is hint.orthographic
+
+
 def test_all_panels_docked_not_stacked(viewer):
 
     from forge_viewer.ui.window import Window
@@ -676,7 +689,7 @@ def test_top_view_is_canonical_x_right_y_up(viewer):
     from forge_viewer.ui import viewcube as vc
     from forge_viewer.ui.camera import camera_basis
 
-    yaw, pitch = vc.yaw_pitch_for(2, 1.0, viewer.app.camera.yaw)
+    yaw, pitch = vc.yaw_pitch_for(2, 1.0, 37.0)
     viewer.app.camera.look_from(yaw, pitch, viewer.app.camera_out, animate=False)
     viewer.sync()
     right, up, _fwd = camera_basis(viewer.app.camera.view())

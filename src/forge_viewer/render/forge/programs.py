@@ -58,7 +58,12 @@ class ProgramSpec:
 
 
 class ProgramCache:
-    def __init__(self, ctx: moderngl.Context, shader_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        ctx: moderngl.Context,
+        shader_dir: Path | None = None,
+        source_snapshot: dict[tuple, tuple[dict[str, str], dict[Path, float]]] | None = None,
+    ) -> None:
         self.ctx = ctx
         self.dir = shader_dir or SHADER_DIR
         self.generation = 0
@@ -66,6 +71,8 @@ class ProgramCache:
         self._programs: dict[tuple, moderngl.Program] = {}
         self._specs: dict[tuple, ProgramSpec] = {}
         self._deps: dict[tuple, dict[Path, float]] = {}
+        self._compiled_sources: dict[tuple, tuple[dict[str, str], dict[Path, float]]] = {}
+        self._source_snapshot = source_snapshot or {}
         self._failed: dict[tuple, str] = {}
 
     def get(self, spec: ProgramSpec) -> moderngl.Program:
@@ -77,7 +84,12 @@ class ProgramCache:
             self._specs[key] = spec
         return prog
 
-    def _sources(self, spec: ProgramSpec) -> tuple[dict[str, str], dict[Path, float]]:
+    def _sources(
+        self, spec: ProgramSpec, *, from_disk: bool = False
+    ) -> tuple[dict[str, str], dict[Path, float]]:
+        if not from_disk and spec.key() in self._source_snapshot:
+            sources, deps = self._source_snapshot[spec.key()]
+            return dict(sources), dict(deps)
         deps: dict[Path, float] = {}
         out: dict[str, str] = {}
         for stage, fname in (
@@ -94,10 +106,11 @@ class ProgramCache:
             out[stage] = _inject_defines(text, spec.defines)
         return out, deps
 
-    def _compile(self, spec: ProgramSpec) -> moderngl.Program:
-        sources, deps = self._sources(spec)
+    def _compile(self, spec: ProgramSpec, *, from_disk: bool = False) -> moderngl.Program:
+        sources, deps = self._sources(spec, from_disk=from_disk)
         prog = self.ctx.program(**sources)
         self._deps[spec.key()] = deps
+        self._compiled_sources[spec.key()] = (dict(sources), dict(deps))
         self._failed.pop(spec.key(), None)
         return prog
 
@@ -108,7 +121,7 @@ class ProgramCache:
             if not any(p.exists() and p.stat().st_mtime != t for p, t in deps.items()):
                 continue
             try:
-                prog = self._compile(spec)
+                prog = self._compile(spec, from_disk=True)
             except Exception as e:
                 msg = str(e)
                 if self._failed.get(key) != msg:
@@ -136,6 +149,11 @@ class ProgramCache:
     @property
     def last_error(self) -> str:
         return next(iter(self._failed.values()), "")
+
+    def fork(self) -> ProgramCache:
+        """Create an independent GL cache from this cache's exact shader sources."""
+        snapshot = {**self._source_snapshot, **self._compiled_sources}
+        return ProgramCache(self.ctx, self.dir, snapshot)
 
     def release(self) -> None:
         for prog in self._programs.values():

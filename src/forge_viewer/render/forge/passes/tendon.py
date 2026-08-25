@@ -112,6 +112,7 @@ class TendonPass(BasePass):
         scene.colors = np.ones((count, 4), np.float32)
         scene.material = np.tile(np.array((0.0, 0.5, 0.5, 0.0), np.float32), (count, 1))
         scene.tex_coef = np.tile(np.array((1.0, 1.0, 0.0, 0.0), np.float32), (count, 1))
+        scene.cube_coef = np.zeros((count, 4), np.float32)
         scene.object_id = np.zeros(count, np.uint32)
         scene.bucket = np.zeros(count, np.int32)
         scene.materials = material_table or (DEFAULT_MATERIAL,)

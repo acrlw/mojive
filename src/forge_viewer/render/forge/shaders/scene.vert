@@ -10,6 +10,7 @@ in vec4 in_model3;
 in vec4 in_color;      // Linear RGBA
 in vec4 in_material;   // (emission, specular, shininess, reflectance)
 in vec4 in_texcoef;    // scale/offset; z=1 selects box face-axis mapping
+in vec4 in_cubecoef;   // xyz object-linear scale, w capsule-axis offset
 in uint in_object_id;
 
 uniform mat4 u_view_proj;
@@ -22,6 +23,8 @@ out VertexData {
     vec3 world;
     vec3 normal;
     vec2 uv;
+    vec3 cube;
+    float cube_on;
     vec4 color;
     vec3 material;    // emission, specular, shininess
     float reflect;    // Planar reflection coefficient
@@ -55,6 +58,8 @@ void main() {
     } else {
         v.uv = in_uv * in_texcoef.xy + in_texcoef.zw;
     }
+    v.cube = in_position * in_cubecoef.xyz + vec3(0.0, 0.0, in_cubecoef.w);
+    v.cube_on = dot(abs(in_cubecoef.xyz), vec3(1.0)) > 0.0 ? 1.0 : 0.0;
     v.color = in_color;
     v.material = in_material.xyz;
     v.reflect = in_material.w;

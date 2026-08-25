@@ -12,43 +12,6 @@ from . import math3d
 
 
 @dataclass(frozen=True)
-class IkOptions:
-    """Controls the numerical inverse-kinematics solve.
-
-    Attributes:
-        position: Match the target position.
-        rotation: Match the target orientation.
-        max_iterations: Maximum damped least-squares iterations.
-        tolerance: Position and rotation error threshold for convergence.
-        damping: Damping coefficient used by the least-squares solve.
-        step_limit: Maximum generalized-coordinate update per iteration.
-        locked_joints: Joint indices excluded from the solve.
-        joint_weights: Optional per-joint weights in adapter joint order.
-    """
-
-    position: bool = True
-    rotation: bool = False
-    max_iterations: int = 64
-    tolerance: float = 1e-4
-    damping: float = 1e-3
-    step_limit: float = 0.25
-    locked_joints: tuple[int, ...] = ()
-    joint_weights: tuple[float, ...] = ()
-
-
-@dataclass(frozen=True)
-class IkResult:
-    """Result returned by an adapter inverse-kinematics operation."""
-
-    success: bool
-    converged: bool = False
-    iterations: int = 0
-    position_error: float = 0.0
-    rotation_error: float = 0.0
-    message: str = ""
-
-
-@dataclass(frozen=True)
 class CameraView:
     """Backend-neutral camera definition in world coordinates.
 
@@ -161,6 +124,7 @@ class Environment:
     haze_color: np.ndarray = field(default_factory=lambda: np.ones(3, np.float32))
     haze_density: float = 0.0
     horizon_haze: bool = False
+    horizon_haze_slices: int = 64
 
 
 @dataclass(frozen=True)
@@ -177,6 +141,7 @@ class LightSet:
     haze_color: np.ndarray = field(default_factory=lambda: np.ones(3, np.float32))
     haze_density: float = 0.0
     horizon_haze: bool = False
+    horizon_haze_slices: int = 64
 
     def shadow_casters(self) -> tuple[Light, ...]:
         """Return active non-image lights that request shadow maps."""
@@ -197,6 +162,7 @@ class LightSet:
             haze_color=self.haze_color,
             haze_density=self.haze_density,
             horizon_haze=self.horizon_haze,
+            horizon_haze_slices=self.horizon_haze_slices,
         )
 
     def with_environment(self, environment: Environment) -> LightSet:
@@ -211,6 +177,7 @@ class LightSet:
             haze_color=environment.haze_color,
             haze_density=environment.haze_density,
             horizon_haze=environment.horizon_haze,
+            horizon_haze_slices=environment.horizon_haze_slices,
         )
 
 
@@ -315,6 +282,13 @@ class TextureKind(enum.StrEnum):
     TWO_D = "2d"
     CUBE = "cube"
     SKYBOX = "skybox"
+
+
+class ShadingModel(enum.StrEnum):
+    """Color-space and material-lighting convention used by a scene source."""
+
+    LINEAR = "linear"
+    MUJOCO_CLASSIC = "mujoco-classic"
 
 
 @dataclass(frozen=True)

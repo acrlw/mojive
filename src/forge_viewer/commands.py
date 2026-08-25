@@ -11,7 +11,6 @@ from .types import (
     DEFAULT_MATERIAL,
     CameraView,
     Environment,
-    IkOptions,
     Light,
     Material,
     MeshKey,
@@ -254,22 +253,6 @@ class SetPose(Command):
     node_id: int
     position: np.ndarray
     rotation: np.ndarray  # 3×3
-
-
-@dataclass(frozen=True)
-class SolveIk(Command):
-    """Solve inverse kinematics toward a world-space target pose."""
-
-    node_id: int
-    target_position: np.ndarray
-    target_rotation: np.ndarray
-    options: IkOptions = field(default_factory=IkOptions)
-    record_undo: bool = True
-
-
-@dataclass(frozen=True)
-class UndoIk(Command):
-    """Restore joint coordinates captured before the latest IK solve."""
 
 
 @dataclass(frozen=True)

@@ -74,8 +74,10 @@ class TextureStore:
     def __init__(self, ctx: moderngl.Context) -> None:
         self.ctx = ctx
         self._textures: dict[str, moderngl.Texture | moderngl.TextureCube] = {}
+        self._sources: dict[str, TextureData] = {}
         self._skybox_name: str | None = None
         self._white: moderngl.Texture | None = None
+        self._white_cube: moderngl.TextureCube | None = None
         self._black_cube: moderngl.TextureCube | None = None
 
     @property
@@ -90,10 +92,21 @@ class TextureStore:
             self._black_cube = self.ctx.texture_cube((1, 1), 3, bytes(18))
         return self._black_cube
 
+    @property
+    def white_cube(self) -> moderngl.TextureCube:
+        if self._white_cube is None:
+            self._white_cube = self.ctx.texture_cube((1, 1), 3, b"\xff" * 18)
+        return self._white_cube
+
     def sync(self, textures: dict[str, TextureData], skybox: str | None = None) -> None:
         for name, data in textures.items():
-            if name in self._textures:
+            # Texture names are local to one SceneSource. A runtime model replacement
+            # can reuse a name for different pixels, just like meshes reuse MeshKey.
+            if self._sources.get(name) is data:
                 continue
+            old = self._textures.pop(name, None)
+            if old is not None:
+                old.release()
             pixels = data.pixels
             comps = pixels.shape[-1]
 
@@ -114,8 +127,10 @@ class TextureStore:
                 tex.build_mipmaps()
                 tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
             self._textures[name] = tex
+            self._sources[name] = data
         for name in [k for k in self._textures if k not in textures]:
             self._textures.pop(name).release()
+            self._sources.pop(name, None)
         self._skybox_name = skybox
 
     def _make_2d(self, w, h, comps, pixels, fmt):
@@ -150,9 +165,13 @@ class TextureStore:
         for t in self._textures.values():
             t.release()
         self._textures.clear()
+        self._sources.clear()
         if self._white is not None:
             self._white.release()
             self._white = None
+        if self._white_cube is not None:
+            self._white_cube.release()
+            self._white_cube = None
         if self._black_cube is not None:
             self._black_cube.release()
             self._black_cube = None

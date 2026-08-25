@@ -32,14 +32,13 @@ construction in both backends.
 
 ## Color pipeline
 
-Texture sampling uses sRGB formats. Lighting, reflection, fog, haze, emission, and selection
-highlight combine in linear light. Tone mapping applies a soft knee at 0.8 before display
-encoding.
+Texture sampling uses sRGB formats. Forge-native scene sources combine lighting, reflection, fog,
+haze, emission, and selection highlight in linear light, then apply a soft tone-mapping knee at
+0.8 before display encoding.
 
-MuJoCo's classic fixed-function renderer combines lighting in display space. The difference is
-measurable in scenes with multiple light contributions. On the parity floor, Forge/reference
-brightness measures about 0.774. Isolated diffuse, ambient, headlight, and texture calibration
-remain aligned.
+MuJoCo scene sources select the `mujoco-classic` shading model. It reconstructs display-domain
+material and texture values, combines the classic renderer's light contributions in display
+space, and bypasses Forge tone mapping. Other adapters retain the linear pipeline by default.
 
 `make calibrate` measures individual terms. `make parity` evaluates the complete scene.
 
@@ -49,6 +48,14 @@ remain aligned.
 - Default headlight terms are diffuse 0.4, specular 0.5, and ambient 0.1.
 - Headlight and active scene-light ambient terms add together.
 - MuJoCo render and visualization flags retain their public names.
+- MuJoCo horizon haze is enabled by default, matching `mjRND_HAZE`. Its truncated-cone geometry
+  uses the model's `quality.numslices`, and its color is blended in the classic display domain
+  over the sky without depth-fogging scene geometry.
+- Infinite MuJoCo planes reconstruct the classic renderer's 200-cell grid and triangle-interpolate
+  spotlight attenuation, avoiding the hard per-fragment boundary produced by a two-triangle proxy
+  plane.
+- Classic fixed-function specular is modulated by the surface texture together with ambient and
+  diffuse lighting; Forge-native scenes retain the untextured specular path.
 - Texture surfaces receive lighting.
 - Image lights sample cube-map diffuse radiance and roughness-aware specular mip levels. An
   intensity of 5000 maps to unit radiance in the Forge lighting model.

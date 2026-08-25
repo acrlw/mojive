@@ -4,8 +4,9 @@ import numpy as np
 import pytest
 
 from forge_viewer import math3d
-from forge_viewer.adapters.base import NodeKind, SceneNode
+from forge_viewer.adapters.base import NodeKind, SceneFrame, SceneNode, SceneSource
 from forge_viewer.commands import SetCamera
+from forge_viewer.render.backend import DebugView, FrameMode, LabelMode, RenderFlag
 from forge_viewer.types import CameraView
 from forge_viewer.ui.camera import CameraOut, OrbitCamera
 from forge_viewer.ui.camera_preview import CameraPreview
@@ -261,6 +262,36 @@ def test_frame_scene_keeps_distant_ground_in_view():
     assert cam.far >= (cam.distance + radius) * 30.0
 
 
+def test_frame_scene_preserves_scene_clip_planes_when_provided():
+    bounds = (np.full(3, -1.0), np.full(3, 1.0))
+    clip = CameraView(near=0.016, far=50.0)
+    cam = OrbitCamera(aspect=1.6)
+
+    view = cam.frame_scene(bounds, RecordingSink(), animate=False, clip=clip)
+
+    assert view.near == pytest.approx(clip.near)
+    assert view.far == pytest.approx(clip.far)
+
+
+def test_adopted_scene_clip_planes_survive_free_camera_navigation():
+    clip = CameraView(
+        eye=np.array([1.2, -2.1, 1.55], np.float32),
+        target=np.array([0.0, 0.0, 0.7], np.float32),
+        near=0.01667475,
+        far=50.024253,
+    )
+    cam = OrbitCamera()
+    cam.adopt(clip)
+
+    cam.orbit(80.0, -25.0)
+    cam.pan(30.0, -15.0, 900.0)
+    cam.dolly(-2.0)
+    view = cam.view()
+
+    assert view.near == pytest.approx(clip.near)
+    assert view.far == pytest.approx(clip.far)
+
+
 def test_frame_scene_publishes_the_camera_to_the_backend():
 
     cam = OrbitCamera()
@@ -305,6 +336,7 @@ def test_free_camera_can_adopt_a_rolled_model_camera_without_an_eye_jump():
     assert adopted.eye == pytest.approx(view.eye)
     assert adopted.target == pytest.approx(view.target)
     assert adopted.fov_y == pytest.approx(view.fov_y)
+    assert adopted.near == pytest.approx(view.near)
     assert adopted.far == pytest.approx(view.far)
 
 
@@ -438,3 +470,81 @@ def test_locked_camera_preview_tracks_camera_after_selection_changes() -> None:
     camera.eye[:] = 9.0
     assert preview.pinned and not preview.locked
     assert preview.selected_camera(session)[1].eye == pytest.approx((4.0, 5.0, 6.0))
+
+
+def test_camera_preview_copies_the_main_render_state() -> None:
+    class Peer:
+        def __init__(self) -> None:
+            self.flags = {}
+            self.debug_view = None
+            self.label_mode = None
+            self.frame_mode = None
+            self.bvh_depth = None
+            self.camera = None
+
+        def resize(self, *_size) -> None:
+            pass
+
+        def set_scene(self, _source) -> None:
+            pass
+
+        def set_flag(self, flag, value) -> None:
+            self.flags[flag] = value
+
+        def set_debug_view(self, value) -> None:
+            self.debug_view = value
+
+        def set_label_mode(self, value) -> None:
+            self.label_mode = value
+
+        def set_frame_mode(self, value) -> None:
+            self.frame_mode = value
+
+        def set_bvh_depth(self, value) -> None:
+            self.bvh_depth = value
+
+        def set_camera(self, value) -> None:
+            self.camera = value
+
+        def highlight(self, _value) -> None:
+            pass
+
+        def update(self, _frame) -> None:
+            pass
+
+        def render(self):
+            return None
+
+    peer = Peer()
+
+    class Main:
+        def create_peer(self, *_size):
+            return peer
+
+        def render_options(self):
+            return (RenderFlag.HAZE, RenderFlag.SHADOW)
+
+        def get_flag(self, flag):
+            return flag is RenderFlag.HAZE
+
+        def get_debug_view(self):
+            return DebugView.NORMAL
+
+        def get_label_mode(self):
+            return LabelMode.BODY
+
+        def get_frame_mode(self):
+            return FrameMode.WORLD
+
+        def get_bvh_depth(self):
+            return 3
+
+    preview = CameraPreview()
+    preview.update(Main(), SceneSource(), 1, SceneFrame(), CameraView(), (320, 180))
+
+    assert peer.flags == {RenderFlag.HAZE: True, RenderFlag.SHADOW: False}
+    assert peer.debug_view is DebugView.NORMAL
+    assert peer.label_mode is LabelMode.BODY
+    assert peer.frame_mode is FrameMode.WORLD
+    assert peer.bvh_depth == 3
+    assert peer.camera.aspect == pytest.approx(16.0 / 9.0)

@@ -10,7 +10,15 @@ import pytest
 from forge_viewer.adapters.base import NodeKind as NK
 from forge_viewer.adapters.base import SceneFrame, SceneNode, SceneSource
 from forge_viewer.render.builder import SceneSourceBuilder
-from forge_viewer.types import CameraView, InstanceVisual, Material, MeshKey, MeshShape
+from forge_viewer.types import (
+    CameraView,
+    InstanceVisual,
+    Material,
+    MeshKey,
+    MeshShape,
+    TextureData,
+    TextureKind,
+)
 
 
 def _grid_material(repeat: float = 1.0, uniform: bool = True) -> Material:
@@ -242,6 +250,25 @@ def test_flipped_capsule_cap_flips_v():
     assert mapped(top, 0.75) == pytest.approx(0.75)
 
 
+def test_cube_material_uses_object_linear_primitive_coordinates():
+    src = make_source(bodies=1, with_plane=False)
+    src.textures["body"] = TextureData(
+        name="body",
+        kind=TextureKind.CUBE,
+        pixels=np.zeros((6, 2, 2, 3), np.uint8),
+    )
+    src.materials[1] = replace(src.materials[1], texture="body", tex_uniform=True)
+
+    b = SceneSourceBuilder()
+    scene = b.set_source(src, CameraView())
+    box, shaft, top, bottom = (scene.cube_coef[b.write_index[i]] for i in range(4))
+
+    assert box == pytest.approx([0.11, 0.2, 0.3, 0.0])
+    assert shaft == pytest.approx([0.05, 0.05, 0.25, 0.0])
+    assert top == pytest.approx([0.05, 0.05, 0.05, 0.25])
+    assert bottom == pytest.approx([0.05, -0.05, -0.05, -0.25])
+
+
 def test_buckets_never_move_across_frames():
 
     src = make_source(bodies=8)
@@ -342,6 +369,16 @@ def test_infinite_plane_phase_is_stable():
         repeats = b.scene.tex_coef[row][0]
         periods.append(2.0 * half / repeats)
     assert np.allclose(periods, periods[0], rtol=1e-6)
+
+
+def test_infinite_plane_does_not_overload_texture_coordinates_with_lighting_state():
+    src = make_source(bodies=1, plane_repeat=1.0)
+    b = SceneSourceBuilder()
+    camera = CameraView(far=50.0)
+    scene = b.set_source(src, camera)
+    row = scene.infinite_planes[0]
+
+    assert scene.tex_coef[row, 2:] == pytest.approx((0.0, 0.0))
 
 
 @pytest.mark.parametrize(("repeat", "expect"), [(1.0, 0.5), (2.0, 1.0), (4.0, 2.0)])

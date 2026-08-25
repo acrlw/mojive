@@ -149,9 +149,9 @@ def test_instance_layout_matches_the_documented_stride():
     )
     from forge_viewer.render.scene import INSTANCE_FLOATS, INSTANCE_STRIDE
 
-    assert INSTANCE_FLOATS == 28, "transform 16 + color 4 + material 4 + tex_coef 4"
-    assert INSTANCE_WORDS == 29
-    assert INSTANCE_BYTES == 116
+    assert INSTANCE_FLOATS == 32, "transform 16 + color 4 + material 4 + tex_coef 4 + cube_coef 4"
+    assert INSTANCE_WORDS == 33
+    assert INSTANCE_BYTES == 132
     assert INSTANCE_STRIDE == INSTANCE_BYTES
 
     cursor = 0

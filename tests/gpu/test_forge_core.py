@@ -331,7 +331,13 @@ def test_both_instance_strategies_draw_the_same_thing(gl, strategy):
         expect = {tuple(round(v * 255) for v in c) for c in _COLORS}
         assert drawn == 9
         assert inst.draw_calls == 4
-        assert seen == expect
+        # UNORM conversion of an interpolated 0.5 may land on either adjacent
+        # 8-bit value across drivers; the instance payload itself is exact.
+        assert len(seen) == len(expect)
+        assert all(
+            any(max(abs(got[i] - want[i]) for i in range(3)) <= 1 for got in seen)
+            for want in expect
+        )
         assert G.native().drain_errors() == 0
     finally:
         inst.release()
@@ -365,7 +371,7 @@ def test_object_id_survives_packing_as_an_exact_uint32(gl):
     inst._ensure_capacity(scene.count)
     raw = inst.pack(scene)
     assert raw.dtype == np.uint32
-    assert np.array_equal(raw[:, 28], scene.object_id)
+    assert np.array_equal(raw[:, 32], scene.object_id)
     inst.release()
 
 
@@ -473,6 +479,26 @@ def test_shader_compile_failure_keeps_last_good_program(gl, tmp_path):
     assert cache.reload_changed() == ["t"]
     assert cache.generation == gen + 1
     cache.release()
+
+
+def test_program_cache_fork_uses_the_parent_shader_snapshot(gl, tmp_path):
+    vertex = "#version 330 core\nvoid main(){gl_Position=vec4(0,0,0,1);}"
+    original = "#version 330 core\nout vec4 c;void main(){c=vec4(1);}"
+    changed = "#version 330 core\nout vec4 c;void main(){c=vec4(0);}"
+    (tmp_path / "a.vert").write_text(vertex, encoding="utf-8")
+    (tmp_path / "a.frag").write_text(original, encoding="utf-8")
+    cache = ProgramCache(gl, tmp_path)
+    spec = ProgramSpec(name="snapshot", vertex="a.vert", fragment="a.frag")
+    cache.get(spec)
+    (tmp_path / "a.frag").write_text(changed, encoding="utf-8")
+    peer = cache.fork()
+    try:
+        peer.get(spec)
+        sources, _deps = peer._compiled_sources[spec.key()]
+        assert sources["fragment_shader"] == original
+    finally:
+        peer.release()
+        cache.release()
 
 
 def test_uniform_cache_skips_unchanged_writes(gl):

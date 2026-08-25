@@ -27,6 +27,7 @@ from ..types import (
     MeshData,
     MeshKey,
     MeshShape,
+    ShadingModel,
     TextureData,
     TextureKind,
 )
@@ -43,8 +44,6 @@ from .base import (
     DiagnosticSource,
     EqualityConstraintInfo,
     FrameNeeds,
-    IkOptions,
-    IkResult,
     JointInfo,
     JointVisualKind,
     KeyframeInfo,
@@ -63,7 +62,6 @@ from .base import (
     VisualGroupInfo,
 )
 from .mujoco_deformables import build_deformables, update_deformables
-from .mujoco_ik import solve as solve_inverse_kinematics
 
 try:
     import mujoco
@@ -269,7 +267,6 @@ class MuJoCoAdapter(SceneAdapterBase):
             write_qpos=True,
             perturb=True,
             raycast=True,
-            inverse_kinematics=True,
             state_snapshots=True,
             contacts=True,
             model_cameras=True,
@@ -596,9 +593,16 @@ class MuJoCoAdapter(SceneAdapterBase):
             item.rotation, next_rotation
         ):
             return True
-        state = self._capture_named_model_state()
         previous_position = item.position.copy()
         previous_rotation = item.rotation.copy()
+        state = self._transform_named_model_state(
+            self._capture_named_model_state(),
+            item.prefix,
+            previous_position,
+            previous_rotation,
+            next_position,
+            next_rotation,
+        )
         item.position[:] = next_position
         item.rotation[:] = next_rotation
         try:
@@ -1380,6 +1384,47 @@ class MuJoCoAdapter(SceneAdapterBase):
         }
         return _NamedModelState(joints, actuators, mocap, equality, float(data.time))
 
+    def _transform_named_model_state(
+        self,
+        state: _NamedModelState,
+        prefix: str,
+        previous_position: np.ndarray,
+        previous_rotation: np.ndarray,
+        next_position: np.ndarray,
+        next_rotation: np.ndarray,
+    ) -> _NamedModelState:
+        """Move world-space free-joint and mocap state with an attached model root."""
+        delta_rotation = next_rotation @ previous_rotation.T
+        joints = dict(state.joints)
+        for joint in range(self._m.njnt):
+            if int(self._m.jnt_type[joint]) != int(mujoco.mjtJoint.mjJNT_FREE):
+                continue
+            body = int(self._m.jnt_bodyid[joint])
+            body_name = mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_BODY, body) or ""
+            if not body_name.startswith(prefix):
+                continue
+            key = self._joint_state_key(self._m, joint)
+            values = joints.get(key)
+            if values is None or values[0].shape != (7,) or values[1].shape != (6,):
+                continue
+            qpos, qvel = values[0].copy(), values[1].copy()
+            qpos[:3] = next_position + delta_rotation @ (qpos[:3] - previous_position)
+            qpos[3:7] = math3d.mat3_to_quat(delta_rotation @ math3d.quat_to_mat3(qpos[3:7]))
+            # Free-joint linear velocity is world-space; angular velocity is in
+            # the local body frame and therefore remains unchanged.
+            qvel[:3] = delta_rotation @ qvel[:3]
+            joints[key] = (qpos, qvel)
+
+        mocap = dict(state.mocap)
+        for name, values in state.mocap.items():
+            if not name.startswith(prefix):
+                continue
+            position, quaternion = values[0].copy(), values[1].copy()
+            position[:] = next_position + delta_rotation @ (position - previous_position)
+            quaternion[:] = math3d.mat3_to_quat(delta_rotation @ math3d.quat_to_mat3(quaternion))
+            mocap[name] = (position, quaternion)
+        return replace(state, joints=joints, mocap=mocap)
+
     def _restore_named_model_state(self, state: _NamedModelState) -> None:
         model, data = self._m, self._d
         for joint in range(model.njnt):
@@ -1513,7 +1558,10 @@ class MuJoCoAdapter(SceneAdapterBase):
         for groups in self._visual_groups.values():
             groups[:] = [g in DEFAULT_GEOM_GROUPS for g in range(6)]
         self._ray_geomgroup[:] = self._visual_groups["geom"]
-        self._lights_dynamic = bool(model.nlight) and bool(np.any(model.light_bodyid != 0))
+        self._lights_dynamic = bool(model.nlight) and bool(
+            np.any(model.light_bodyid != 0)
+            or np.any(model.light_mode != mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
+        )
         visual_fields = (
             "geom_rgba",
             "site_rgba",
@@ -1918,6 +1966,7 @@ class MuJoCoAdapter(SceneAdapterBase):
     def _build_source(self) -> SceneSource:
         m = self._m
         src = SceneSource()
+        src.shading_model = ShadingModel.MUJOCO_CLASSIC
         src.nodes = self.nodes()
         src.diagnostics = self._build_diagnostic_source()
         trn_tendon = np.asarray(m.actuator_trntype) == int(mujoco.mjtTrn.mjTRN_TENDON)
@@ -3118,11 +3167,9 @@ class MuJoCoAdapter(SceneAdapterBase):
         )
 
     def _build_lights(self) -> LightSet:
+        d = self._d
         return self._light_set(
-            tuple(
-                self._light(i, self._m.light_pos[i], self._m.light_dir[i])
-                for i in range(self._m.nlight)
-            )
+            tuple(self._light(i, d.light_xpos[i], d.light_xdir[i]) for i in range(self._m.nlight))
         )
 
     def _dynamic_lights(self) -> LightSet:
@@ -3144,6 +3191,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             haze_color=np.asarray(m.vis.rgba.haze[:3], np.float32).copy(),
             haze_density=float(m.vis.map.haze),
             horizon_haze=True,
+            horizon_haze_slices=max(3, int(m.vis.quality.numslices)),
         )
 
     def _headlight(self) -> Light | None:
@@ -3231,7 +3279,6 @@ class MuJoCoAdapter(SceneAdapterBase):
                 object_id=b,
                 posable=self._is_posable_body(b)
                 or (model_id > 0 and not self._has_kinematic_dof(b)),
-                ik_target=self._has_kinematic_dof(b),
             )
             nodes[body_node[b]].model_id = model_id
             self._node_element[body_node[b]] = (model_id, kind, raw_name)
@@ -3303,15 +3350,13 @@ class MuJoCoAdapter(SceneAdapterBase):
             b = int(m.site_bodyid[si])
             name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_SITE, si) or f"site{si}"
             model_id, raw_name = self._model_element_name(name)
-            ik_target = self._has_kinematic_dof(b)
             self._site_nodes[si] = add(
                 name,
                 NodeKind.SITE,
                 body_node[b],
                 b,
                 site_index=si,
-                posable=model_id > 0 and not ik_target,
-                ik_target=ik_target,
+                posable=model_id > 0 and not self._has_kinematic_dof(b),
             )
             nodes[self._site_nodes[si]].model_id = model_id
             self._node_element[self._site_nodes[si]] = (model_id, NodeKind.SITE, raw_name)
@@ -3639,6 +3684,26 @@ class MuJoCoAdapter(SceneAdapterBase):
         length = float(np.linalg.norm(direction))
         if length > 0.0:
             m.light_dir[i] = direction / length
+
+        # MuJoCo compiles the reference poses used by track and trackcom lights
+        # into light_pos0/light_poscom0/light_dir0. mj_forward() consumes those
+        # arrays but does not rebuild them after an interactive model edit, so a
+        # paused gizmo write would otherwise snap back to the compiled pose.
+        body = int(m.light_bodyid[i])
+        body_rotation = np.asarray(self._d.xmat[body], np.float64).reshape(3, 3)
+        world_position = np.asarray(self._d.xpos[body], np.float64) + body_rotation @ np.asarray(
+            m.light_pos[i], np.float64
+        )
+        world_direction = body_rotation @ np.asarray(m.light_dir[i], np.float64)
+        target = int(m.light_targetbodyid[i])
+        reference_body = target if target >= 0 else body
+        m.light_pos0[i] = world_position - np.asarray(self._d.xpos[body], np.float64)
+        m.light_poscom0[i] = world_position - np.asarray(
+            self._d.subtree_com[reference_body], np.float64
+        )
+        world_direction_length = float(np.linalg.norm(world_direction))
+        if world_direction_length > 0.0:
+            m.light_dir0[i] = world_direction / world_direction_length
         m.light_diffuse[i] = light.diffuse
         m.light_specular[i] = light.specular
         m.light_ambient[i] = light.ambient
@@ -3857,23 +3922,6 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._mark_model_edited(model_id)
         mujoco.mj_forward(self._m, self._d)
         return True
-
-    def solve_ik(
-        self, node_id: int, target_position, target_rotation, options: IkOptions
-    ) -> IkResult:
-        node = next((item for item in self.nodes() if item.node_id == int(node_id)), None)
-        if node is None:
-            return IkResult(False, message=f"Unknown node {node_id}")
-        return solve_inverse_kinematics(
-            mujoco,
-            self._m,
-            self._d,
-            body=node.body_index if node.kind is not NodeKind.SITE else -1,
-            site=node.site_index,
-            target_position=target_position,
-            target_rotation=target_rotation,
-            options=options,
-        )
 
     def capture_state(self) -> PhysicsState:
         data = self._d

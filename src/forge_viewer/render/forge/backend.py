@@ -43,10 +43,11 @@ class ForgeBackend:
         height: int = 720,
         samples: int = 4,
         shader_dir: Path | None = None,
+        program_cache: ProgramCache | None = None,
     ) -> None:
         self.ctx, self.gl_caps = attach(gl_context)
         self.guard = GLStateGuard()
-        self.programs = ProgramCache(self.ctx, shader_dir)
+        self.programs = program_cache or ProgramCache(self.ctx, shader_dir)
         self.meshes = MeshStore(self.ctx)
         self.textures = TextureStore(self.ctx)
         self.instances = InstanceStore(self.ctx)
@@ -87,7 +88,6 @@ class ForgeBackend:
         self._flags[RenderFlag.WIREFRAME] = False
         self._flags[RenderFlag.ADDITIVE] = False
         self._flags[RenderFlag.FOG] = False
-        self._flags[RenderFlag.HAZE] = False
         self._flags[RenderFlag.CONTACTPOINT] = False
         self._flags[RenderFlag.CONTACTFORCE] = False
         self._flags[RenderFlag.CONTACTSPLIT] = False
@@ -130,7 +130,15 @@ class ForgeBackend:
         self._hot_reload = False
 
     def create_peer(self, width: int, height: int) -> ForgeBackend:
-        return ForgeBackend(self.ctx, width, height, samples=1)
+        peer = ForgeBackend(
+            self.ctx,
+            width,
+            height,
+            samples=self.target.samples,
+            program_cache=self.programs.fork(),
+        )
+        peer._hot_reload = self._hot_reload
+        return peer
 
     def _supported_flags(self) -> frozenset[RenderFlag]:
         flags = {

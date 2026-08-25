@@ -92,16 +92,16 @@ CASES = [
     ),
     (
         "src/forge_viewer/render/forge/instances.py",
-        '("in_object_id", "1u", 4, 1, 112, G.GL_UNSIGNED_INT),',
-        '("in_object_id", "1f", 4, 1, 112, G.GL_FLOAT),',
+        '("in_object_id", "1u", 4, 1, 128, G.GL_UNSIGNED_INT),',
+        '("in_object_id", "1f", 4, 1, 128, G.GL_FLOAT),',
         "test_object_id_reaches_the_shader_exactly",
         GPU_TESTS,
     ),
     (
         "src/forge_viewer/render/forge/instances.py",
-        "        self._raw[:n, 28] = scene.object_id",
-        "        self._raw[:n, 28] = scene.object_id.astype(np.float32).astype(np.uint32)"
-        + "\n        self._raw[:n, 28] = np.float32(scene.object_id).astype(np.uint32)",
+        "        self._raw[:n, 32] = scene.object_id",
+        "        self._raw[:n, 32] = scene.object_id.astype(np.float32).astype(np.uint32)"
+        + "\n        self._raw[:n, 32] = np.float32(scene.object_id).astype(np.uint32)",
         "test_object_id_survives_packing_as_an_exact_uint32",
         GPU_TESTS,
     ),
@@ -206,7 +206,7 @@ CASES = [
     (
         "src/forge_viewer/ui/app.py",
         "hovered_ball = self.view_cube.update(view, rect, cursor, self.window.style_scale)",
-        "hovered_ball = self.view_cube.update(view, rect, cursor, self.window.ui_scale)",
+        "hovered_ball = self.view_cube.update(view, rect, cursor, self.window.style_scale * 3.0)",
         "test_view_gizmo_fits_the_corner",
         UI_TESTS,
     ),
@@ -348,8 +348,8 @@ CASES = [
     ),
     (
         "src/forge_viewer/ui/gizmo.py",
-        "        result = verdict(session.paused, node, session.adapter.caps.inverse_kinematics)",
-        "        result = verdict(False, node, session.adapter.caps.inverse_kinematics)",
+        "        result = verdict(session.paused, node)",
+        "        result = verdict(False, node)",
         "test_gizmo_is_live_for_a_free_body",
         UI_TESTS,
     ),

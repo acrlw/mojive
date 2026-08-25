@@ -11,6 +11,8 @@ in VertexData {
     vec3 world;
     vec3 normal;
     vec2 uv;
+    vec3 cube;
+    float cube_on;
     vec4 color;
     vec3 material;
     float reflect;
@@ -27,6 +29,7 @@ uniform float u_wire_width;   // Pixels
 layout(location = 0) out vec4 o_color;
 
 uniform sampler2D u_texture;
+uniform samplerCube u_cube_texture;
 uniform float u_exposure;
 uniform int u_tonemap;
 uniform vec2 u_depth_range;        // near, far
@@ -45,7 +48,13 @@ uniform vec3 u_haze_color;
 
 
 void main() {
-    vec4 base = v.color * texture(u_texture, v.uv);
+    vec4 texel = v.cube_on > 0.5 ? texture(u_cube_texture, v.cube) : texture(u_texture, v.uv);
+    vec3 surface = v.color.rgb;
+    if (u_classic_lighting != 0) {
+        surface = gamma_encode(surface);
+        texel.rgb = linear_to_srgb(texel.rgb);
+    }
+    vec4 base = vec4(surface * texel.rgb, v.color.a * texel.a);
     vec3 albedo = base.rgb;
     float alpha = base.a;
     float emission = v.material.x;
@@ -56,7 +65,7 @@ void main() {
     }
 
 #if DEBUG_VIEW == 1
-    o_color = vec4(gamma_encode(albedo), alpha);
+    o_color = vec4(u_classic_lighting != 0 ? albedo : gamma_encode(albedo), alpha);
 #elif DEBUG_VIEW == 2
     o_color = vec4(normalize(v.normal) * 0.5 + 0.5, alpha);
 #elif DEBUG_VIEW == 3
@@ -66,7 +75,8 @@ void main() {
 #else
     vec3 lit = shade(
         albedo, v.normal, v.world,
-        emission, v.material.y, v.material.z, v.view_depth
+        emission, v.material.y, v.material.z, v.view_depth,
+        texel.rgb
     );
 
     if (v.reflect < 0.0 && u_reflection_size.x > 0.0) {
@@ -90,10 +100,16 @@ void main() {
 
     float fog = u_fog.z * smoothstep(u_fog.x, max(u_fog.y, u_fog.x + 1e-6), v.view_depth);
     float haze = 1.0 - exp(-max(u_fog.w, 0.0) * max(v.view_depth, 0.0));
-    lit = mix(lit, srgb_to_linear(u_fog_color), fog);
-    lit = mix(lit, srgb_to_linear(u_haze_color), haze);
+    vec3 fog_color = u_classic_lighting != 0 ? u_fog_color : srgb_to_linear(u_fog_color);
+    vec3 haze_color = u_classic_lighting != 0 ? u_haze_color : srgb_to_linear(u_haze_color);
+    lit = mix(lit, fog_color, fog);
+    lit = mix(lit, haze_color, haze);
 
-    vec3 rgb = (u_linear_out != 0) ? lit : finish_color(lit, u_exposure, u_tonemap != 0);
+    vec3 rgb = (u_linear_out != 0)
+        ? lit
+        : (u_classic_lighting != 0
+            ? clamp(lit * u_exposure, 0.0, 1.0)
+            : finish_color(lit, u_exposure, u_tonemap != 0));
   #ifdef WIREFRAME
     float d = min(v_bary.x, min(v_bary.y, v_bary.z));
     float w = max(fwidth(d), 1e-6) * max(u_wire_width, 0.1);

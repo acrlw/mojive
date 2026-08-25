@@ -24,6 +24,7 @@ from forge_viewer.types import (  # noqa: E402
     MeshData,
     MeshKey,
     MeshShape,
+    ShadingModel,
     TextureData,
     TextureKind,
 )
@@ -71,6 +72,7 @@ class Rig:
         lights=(),
         headlight=None,
         selected: int = 0,
+        shading_model: ShadingModel = ShadingModel.LINEAR,
     ) -> np.ndarray:
 
         sb = SceneBuilder()
@@ -91,6 +93,7 @@ class Rig:
             ),
             2.0,
             np.zeros(3, np.float32),
+            shading_model=shading_model,
         )
         self.backend.highlight(selected)
         self.backend.set_render_scene(scene)
@@ -177,6 +180,76 @@ def test_diffuse_alone_is_monotone_and_matches_the_cpu(rig):
         seen.append(int(got[0]))
     assert seen == sorted(seen) and seen[0] < seen[-1]
     assert seen[0] > 0
+
+
+def test_mujoco_classic_lighting_combines_terms_in_display_space(rig):
+    display_albedo = np.array([0.8, 0.6, 0.4], np.float32)
+    albedo = color.srgb_to_linear(display_albedo)
+    img = rig.draw(
+        [(np.append(albedo, 1.0), (0.0, 0.0, 0.5), 2.0, 0.0)],
+        ambient=[0.1] * 3,
+        lights=[_dir_light(0.4), _dir_light(0.5)],
+        shading_model=ShadingModel.MUJOCO_CLASSIC,
+    )
+    got = Rig.center(img)[:3]
+    want = np.rint(display_albedo * 255.0).astype(np.int32)
+
+    assert np.abs(got - want).max() <= 2
+
+
+def test_mujoco_classic_texture_modulates_fixed_function_specular(backend_name, request):
+    texel = np.array([64, 128, 192], np.uint8)
+    pixels = np.empty((4, 4, 3), np.uint8)
+    pixels[:] = texel
+    backend = _make_backend(backend_name, request, samples=1)
+    try:
+        rig = Rig(
+            backend,
+            textures={"surface": TextureData("surface", TextureKind.TWO_D, pixels, srgb=True)},
+        )
+        sb = SceneBuilder()
+        matid = sb.material_id(Material(texture="surface"))
+        sb.add(
+            QUAD,
+            matid,
+            _transform(2.0, 0.0),
+            np.ones(4, np.float32),
+            np.array([0.0, 1.0, 1.0, 0.0], np.float32),
+            object_id=1,
+            tex_coef=np.array([1.0, 1.0, 0.0, 0.0], np.float32),
+        )
+        scene = sb.build(
+            rig.camera,
+            LightSet(lights=(_dir_light(0.0, specular=1.0),), ambient=NO_AMBIENT),
+            2.0,
+            np.zeros(3, np.float32),
+            shading_model=ShadingModel.MUJOCO_CLASSIC,
+        )
+        backend.set_render_scene(scene)
+        assert backend.render(None) is not None
+        got = Rig.center(backend.target.read_color(flip=True))[:3]
+
+        assert np.abs(got - texel.astype(np.int32)).max() <= 3
+    finally:
+        backend.release()
+
+
+def test_mujoco_classic_specular_is_not_scaled_by_diffuse_cosine(rig):
+    light = Light(
+        kind=LightKind.DIRECTIONAL,
+        direction=np.array([0.0, 0.5, np.sqrt(0.75)], np.float32),
+        diffuse=np.zeros(3, np.float32),
+        specular=np.full(3, 0.5, np.float32),
+        ambient=np.zeros(3, np.float32),
+        cast_shadow=False,
+    )
+    img = rig.draw(
+        [(np.ones(4, np.float32), (0.0, 1.0, 0.0), 2.0, 0.0)],
+        lights=(light,),
+        shading_model=ShadingModel.MUJOCO_CLASSIC,
+    )
+
+    assert Rig.center(img)[0] == pytest.approx(128, abs=3)
 
 
 def test_light_color_is_decoded_from_the_display_domain(rig):
@@ -353,6 +426,40 @@ def test_image_light_uses_cube_radiance_and_mujoco_intensity_scale(backend_name,
         expected = color.to_u8(color.finish(np.full(3, radiance))).astype(np.int32)
         assert np.max(np.abs(on[:3] - expected)) <= 2
         assert np.max(off[:3]) == 0
+    finally:
+        backend.release()
+
+
+def test_cube_texture_reaches_an_ordinary_material(backend_name, request):
+    cube = np.empty((6, 8, 8, 3), np.uint8)
+    cube[:] = [230, 30, 50]
+    backend = _make_backend(backend_name, request)
+    try:
+        rig = Rig(backend, textures={"body": TextureData("body", TextureKind.CUBE, cube)})
+        sb = SceneBuilder()
+        matid = sb.material_id(Material(texture="body", tex_uniform=True))
+        sb.add(
+            QUAD,
+            matid,
+            _transform(2.0, 0.0),
+            np.ones(4, np.float32),
+            np.array([0.0, 0.0, 0.5, 0.0], np.float32),
+            object_id=1,
+            cube_coef=np.ones(4, np.float32),
+        )
+        scene = sb.build(
+            rig.camera,
+            LightSet(ambient=np.ones(3, np.float32)),
+            2.0,
+            np.zeros(3, np.float32),
+        )
+        backend.set_render_scene(scene)
+        assert backend.render(None) is not None
+        center = Rig.center(backend.target.read_color(flip=True))
+
+        assert center[0] > 180
+        assert center[1] < 90
+        assert center[2] < 110
     finally:
         backend.release()
 

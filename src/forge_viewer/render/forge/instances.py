@@ -18,10 +18,11 @@ INSTANCE_ATTRIBUTES: tuple[tuple[str, str, int, int, int, int], ...] = (
     ("in_color", "4f", 16, 4, 64, G.GL_FLOAT),
     ("in_material", "4f", 16, 4, 80, G.GL_FLOAT),
     ("in_texcoef", "4f", 16, 4, 96, G.GL_FLOAT),
-    ("in_object_id", "1u", 4, 1, 112, G.GL_UNSIGNED_INT),
+    ("in_cubecoef", "4f", 16, 4, 112, G.GL_FLOAT),
+    ("in_object_id", "1u", 4, 1, 128, G.GL_UNSIGNED_INT),
 )
 INSTANCE_WORDS = INSTANCE_FLOATS + 1
-INSTANCE_BYTES = INSTANCE_WORDS * 4  # 116
+INSTANCE_BYTES = INSTANCE_WORDS * 4  # 132
 MESH_ATTRIBUTES: tuple[tuple[str, str, int, int, int, int], ...] = (
     ("in_position", "3f", 12, 3, 0, G.GL_FLOAT),
     ("in_normal", "3f", 12, 3, 12, G.GL_FLOAT),
@@ -201,8 +202,9 @@ class InstanceStore:
         dst[:, 16:20] = scene.colors
         dst[:, 20:24] = scene.material
         dst[:, 24:28] = scene.tex_coef
+        dst[:, 28:32] = scene.cube_coef
 
-        self._raw[:n, 28] = scene.object_id
+        self._raw[:n, 32] = scene.object_id
         return self._raw[:n]
 
     def upload(self, scene: RenderScene) -> None:

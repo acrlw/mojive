@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -27,6 +28,7 @@ from forge_viewer.ui.scene_entities import (
     camera_frustum_segments,
     camera_rotation,
     spot_cone_segments,
+    spot_helper_length,
 )
 
 
@@ -62,6 +64,84 @@ def test_spot_influence_uses_range_and_cutoff() -> None:
     points = np.concatenate((starts, ends))
     rim = points[np.isclose(points[:, 2], -2.0)]
     assert np.max(np.linalg.norm(rim[:, :2], axis=1)) == pytest.approx(2.0)
+
+
+def test_spot_helper_is_screen_bounded_and_hidden_behind_camera() -> None:
+    light = Light(
+        kind=LightKind.SPOT,
+        position=np.zeros(3, np.float32),
+        direction=np.array((0.0, 0.0, -1.0), np.float32),
+        range=10.0,
+        cutoff=5.1,
+    )
+    visible = CameraView(
+        eye=np.array((0.0, -3.0, 1.0), np.float32),
+        target=np.zeros(3, np.float32),
+        up=np.array((0.0, 0.0, 1.0), np.float32),
+    )
+    behind = CameraView(
+        eye=np.zeros(3, np.float32),
+        target=np.array((0.0, -1.0, 0.0), np.float32),
+        up=np.array((0.0, 0.0, 1.0), np.float32),
+    )
+
+    assert 0.0 < spot_helper_length(light, visible, 800.0) < light.range
+    assert (
+        spot_helper_length(replace(light, position=np.array((0.0, 1.0, 0.0))), behind, 800.0) == 0.0
+    )
+
+
+def test_small_cutoff_spot_helper_stays_inside_its_screen_budget() -> None:
+    camera = CameraView(
+        eye=np.array((0.0, -3.0, 1.0), np.float32),
+        target=np.zeros(3, np.float32),
+        up=np.array((0.0, 0.0, 1.0), np.float32),
+        aspect=1.8,
+    )
+    light = Light(
+        kind=LightKind.SPOT,
+        position=np.zeros(3, np.float32),
+        direction=np.array((1.0, 0.0, 0.0), np.float32),
+        range=10.0,
+        cutoff=5.1,
+    )
+    rect = (0.0, 0.0, 1800.0, 1000.0)
+
+    length = spot_helper_length(light, camera, rect[3])
+    starts, ends = spot_cone_segments(light, length)
+    screen = project(camera, np.concatenate((starts, ends)), rect)
+    anchor = project(camera, [light.position], rect)[0]
+
+    assert np.all(screen[:, 2] > 0.0)
+    assert np.max(np.linalg.norm(screen[:, :2] - anchor[:2], axis=1)) <= 220.0
+
+
+def test_near_camera_spot_helper_uses_its_projected_screen_extent() -> None:
+    camera = CameraView(
+        eye=np.array((-3.66184, -3.66184, 2.68583), np.float32),
+        target=np.array((0.0, 0.0, 0.271), np.float32),
+        up=np.array((0.0, 0.0, 1.0), np.float32),
+        aspect=1.5,
+        near=0.0143,
+        far=244.0,
+    )
+    light = Light(
+        kind=LightKind.SPOT,
+        position=np.array((0.0, -6.0, 4.0), np.float32),
+        direction=np.array((0.0023, 0.8854, -0.4649), np.float32),
+        range=10.0,
+        cutoff=5.1,
+    )
+    rect = (0.0, 0.0, 1200.0, 800.0)
+
+    length = spot_helper_length(light, camera, rect[3])
+    starts, ends = spot_cone_segments(light, length)
+    screen = project(camera, np.concatenate((starts, ends)), rect)
+    anchor = project(camera, [light.position], rect)[0]
+
+    assert length < 0.02
+    assert np.all(screen[:, 2] > camera.near)
+    assert np.max(np.linalg.norm(screen[:, :2] - anchor[:2], axis=1)) <= 220.0
 
 
 def test_orthographic_frustum_preserves_parallel_planes() -> None:
@@ -126,6 +206,43 @@ def test_helpers_publish_selected_frustum_and_pick_camera_anchor() -> None:
     hit = helpers.pick(session, editor_camera, (0.0, 0.0, 1000.0, 800.0), (500.0, 400.0), 1.0)
     assert hit == node.object_id
     assert session.camera_view(camera_id) is not None
+
+
+def test_selected_camera_frustum_uses_preview_aspect() -> None:
+    scene = Scene()
+    scene.add_camera(
+        "shot",
+        CameraView(
+            eye=np.zeros(3, np.float32),
+            target=np.array((0.0, 0.0, -1.0), np.float32),
+            up=np.array((0.0, 1.0, 0.0), np.float32),
+            fov_y=np.deg2rad(90.0),
+            near=1.0,
+            far=3.0,
+        ),
+    )
+    session = Session(StaticSceneAdapter(scene))
+    session.tick(FrameNeeds())
+    node = next(node for node in session.nodes if node.kind is NodeKind.CAMERA)
+    assert session.submit(cmd.Select(node.object_id))
+
+    backend = SimpleNamespace(debug=DebugDraw())
+    helpers = SceneEntityHelpers()
+    helpers.publish(
+        backend,
+        session,
+        CameraView(),
+        800.0,
+        1.0,
+        selected_camera_aspect=16.0 / 9.0,
+    )
+
+    store = backend.debug.layer(HELPER_LAYER)._stores[Prim.LINE]
+    frustum = store.positions[store.count - 12 : store.count]
+    near = np.unique(frustum.reshape(-1, 3), axis=0)
+    near = near[np.isclose(near[:, 2], -1.0)]
+    assert np.unique(np.abs(near[:, 0])) == pytest.approx([16.0 / 9.0])
+    assert np.unique(np.abs(near[:, 1])) == pytest.approx([1.0])
 
 
 def test_view_through_camera_hides_editor_helpers() -> None:

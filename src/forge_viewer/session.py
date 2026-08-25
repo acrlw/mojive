@@ -14,7 +14,6 @@ from .adapters.base import (
     CameraInfo,
     EqualityConstraintInfo,
     FrameNeeds,
-    IkResult,
     JointInfo,
     KeyframeInfo,
     NodeKind,
@@ -149,8 +148,6 @@ class Session:
         self._equality_constraints: list[EqualityConstraintInfo] = []
         self._active_keyframe = -1
         self._perturb = PerturbState()
-        self._ik_result: IkResult | None = None
-        self._ik_undo_state: PhysicsState | None = None
         self._camera = CameraView()
         self._last_message = ""
         self._undo_stack: list[_EditRecord] = []
@@ -266,11 +263,6 @@ class Session:
         return self._perturb
 
     @property
-    def ik_result(self) -> IkResult | None:
-        """Return the result of the latest inverse-kinematics operation."""
-        return self._ik_result
-
-    @property
     def camera(self) -> CameraView:
         """Return the current viewport camera submitted through commands."""
         return self._camera
@@ -355,8 +347,6 @@ class Session:
         self._pending_steps = 0
         self._sim_time_credit = 0.0
         self._perturb = PerturbState()
-        self._ik_result = None
-        self._ik_undo_state = None
         return CommandResult.good("Scene state restored")
 
     def tick(self, needs: FrameNeeds, wall_dt: float | None = None) -> SceneFrame:
@@ -563,8 +553,6 @@ class Session:
             self._paused = False
             self._sim_time_credit = 0.0
             self._perturb = PerturbState()
-            self._ik_result = None
-            self._ik_undo_state = None
             return CommandResult.good("Simulation resumed")
 
         if isinstance(c, cmd.Step):
@@ -580,8 +568,6 @@ class Session:
             self._step_counter = 0
             self._sim_time_credit = 0.0
             self._perturb = PerturbState()
-            self._ik_result = None
-            self._ik_undo_state = None
             self._active_keyframe = -1
             self._equality_constraints = (
                 self._adapter.equality_constraints() if caps.equality_constraints else []
@@ -599,8 +585,6 @@ class Session:
             self._step_counter = 0
             self._sim_time_credit = 0.0
             self._perturb = PerturbState()
-            self._ik_result = None
-            self._ik_undo_state = None
             self._active_keyframe = -1
             self._authored.clear()
             self._refresh_structure()
@@ -665,8 +649,6 @@ class Session:
             self._selected = 0
             self._selected_node_id = -1
             self._perturb = PerturbState()
-            self._ik_result = None
-            self._ik_undo_state = None
             self._active_keyframe = -1
             self._authored.clear()
             self._refresh_structure()
@@ -688,8 +670,6 @@ class Session:
             self._selected = 0
             self._selected_node_id = -1
             self._perturb = PerturbState()
-            self._ik_result = None
-            self._ik_undo_state = None
             self._active_keyframe = -1
             self._refresh_structure()
             return CommandResult.good(f"Added {path.name}", model_id)
@@ -713,8 +693,6 @@ class Session:
             self._selected = 0
             self._selected_node_id = -1
             self._perturb = PerturbState()
-            self._ik_result = None
-            self._ik_undo_state = None
             self._active_keyframe = -1
             self._refresh_structure()
             return CommandResult.good(f"Removed {info.name}")
@@ -939,39 +917,6 @@ class Session:
                 return CommandResult.bad("this link is driven by joints; use the Joints panel")
             ok = self._adapter.set_pose(c.node_id, c.position, c.rotation)
             return CommandResult.good("") if ok else CommandResult.bad("Pose update failed")
-
-        if isinstance(c, cmd.SolveIk):
-            if not caps.inverse_kinematics:
-                return CommandResult.bad(f"{caps.name} does not support inverse kinematics")
-            if not self._paused:
-                return CommandResult.bad("physics is running; pause to solve IK")
-            node = self.node(c.node_id)
-            if node is None or not node.ik_target:
-                return CommandResult.bad("Select a body or site for IK")
-            if c.record_undo:
-                self._ik_undo_state = self._adapter.capture_state()
-            result = self._adapter.solve_ik(
-                c.node_id, c.target_position, c.target_rotation, c.options
-            )
-            self._ik_result = result
-            if not result.success:
-                return CommandResult.bad(result.message or "IK solve failed")
-            state = "converged" if result.converged else "stopped"
-            message = (
-                f"IK {state} in {result.iterations} iterations · "
-                f"position {result.position_error:.3g} m · rotation "
-                f"{np.degrees(result.rotation_error):.3g}°"
-            )
-            return CommandResult.good(message)
-
-        if isinstance(c, cmd.UndoIk):
-            if self._ik_undo_state is None:
-                return CommandResult.bad("No IK edit to undo")
-            if not self._adapter.restore_state(self._ik_undo_state):
-                return CommandResult.bad("IK undo state is incompatible")
-            self._ik_undo_state = None
-            self._ik_result = None
-            return CommandResult.good("IK edit undone")
 
         if isinstance(c, cmd.SetQpos):
             if not caps.write_qpos:

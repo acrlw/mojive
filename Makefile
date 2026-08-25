@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays mujoco-ik cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo perturb reflect outline robot mujoco-physics mujoco-audit mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -82,7 +82,6 @@ help:
 		'  make egl               Linux EGL Renderer and wireframe contract' \
 		'  make renderer-api      public Renderer CPU and GPU contract' \
 		'  make renderer-api-wgpu public Renderer contract over wgpu' \
-		'  make mujoco-ik         body/site inverse-kinematics acceptance' \
 		'  make camera-state      camera bookmark serialization and restore' \
 		'  make scene-snapshot    complete scene-state serialization and restore' \
 		'  make cli               typed local control commands' \
@@ -181,7 +180,7 @@ renderer-api-wgpu:
 
 p0: renderer-api
 
-p1: check p0 renderer-api-wgpu mujoco-physics mujoco-ik camera-state scene-snapshot rpc material-parity shadow-scheduling mujoco-audit golden parity reverse gpu gpu-wgpu
+p1: check p0 renderer-api-wgpu mujoco-physics camera-state scene-snapshot rpc material-parity shadow-scheduling mujoco-audit golden parity reverse gpu gpu-wgpu
 	$(MAKE) adapter-conformance ADAPTER=mujoco CONFORMANCE_ASSET=deformables
 
 ## Compare golden images. Use golden-accept after visual review.
@@ -193,7 +192,7 @@ golden-accept:
 
 ## Render Forge and the MuJoCo reference from one camera. The reference uses a subprocess.
 parity:
-	$(PY) -m forge_viewer.tools.parity
+	$(PY) -m forge_viewer.tools.parity $(ARGS)
 
 ## Calibrate diffuse, headlight, ambient, and texture lighting against MuJoCo.
 calibrate:
@@ -499,10 +498,6 @@ deformables:
 ## Capture flex topology, scene labels, and coordinate-frame overlays.
 mujoco-overlays:
 	$(PY) -m forge_viewer.tools.mujoco_overlays $(ARGS)
-
-mujoco-ik:
-	$(PY) -m pytest -q tests/test_mujoco_ik.py
-	$(PY) -m forge_viewer.tools.mujoco_ik $(ARGS)
 
 ## List assets, free-body metadata, and optional dependency status.
 assets:

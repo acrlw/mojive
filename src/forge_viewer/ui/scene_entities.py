@@ -20,6 +20,8 @@ SELECTED_COLOR = np.array((1.0, 0.58, 0.12, 1.0), np.float32)
 ANCHOR_RADIUS_PT = 6.0
 PICK_RADIUS_PT = 13.0
 _CIRCLE_SEGMENTS = 48
+_SPOT_HELPER_LENGTH_PT = 180.0
+_SPOT_HELPER_RADIUS_PT = 120.0
 
 
 @dataclass
@@ -37,6 +39,7 @@ class SceneEntityHelpers:
         viewport_height: float,
         ui_scale: float,
         view_through_camera: bool = False,
+        selected_camera_aspect: float | None = None,
     ) -> None:
         debug = getattr(backend, "debug", None)
         if debug is None:
@@ -49,6 +52,8 @@ class SceneEntityHelpers:
         selected = session.selected
         for node in session.nodes:
             if node.kind is NodeKind.CAMERA and (view := _camera_view(session, node)) is not None:
+                if selected == node.object_id and selected_camera_aspect is not None:
+                    view = view.with_aspect(selected_camera_aspect)
                 self._camera(
                     layer,
                     node.object_id,
@@ -156,8 +161,10 @@ class SceneEntityHelpers:
             starts, ends = sphere_segments(position, light.range)
             layer.lines(f"{ident}:range", starts, ends, color, 1.2 * ui_scale)
         elif light.kind is LightKind.SPOT and light.range > 0.0:
-            starts, ends = spot_cone_segments(light)
-            layer.lines(f"{ident}:range", starts, ends, color, 1.4 * ui_scale)
+            length = spot_helper_length(light, editor_camera, viewport_height)
+            if length > 0.0:
+                starts, ends = spot_cone_segments(light, length)
+                layer.lines(f"{ident}:range", starts, ends, color, 1.4 * ui_scale)
         elif light.kind is LightKind.AREA and light.area_radius > 0.0:
             points = oriented_circle(position, direction, light.area_radius)
             layer.polyline(f"{ident}:area", points, color, 1.4 * ui_scale, closed=True)
@@ -243,10 +250,42 @@ def sphere_segments(center, radius: float) -> tuple[np.ndarray, np.ndarray]:
     return points, np.concatenate([np.roll(ring, -1, axis=0) for ring in rings], axis=0)
 
 
-def spot_cone_segments(light: Light) -> tuple[np.ndarray, np.ndarray]:
+def spot_helper_length(light: Light, camera: CameraView, viewport_height: float) -> float:
+    """Bound the editor-only cone without changing the light's physical range."""
+    axial_limit = world_scale(camera, light.position, viewport_height, _SPOT_HELPER_LENGTH_PT)
+    if axial_limit <= 0.0:
+        return 0.0
+    radial_limit = world_scale(camera, light.position, viewport_height, _SPOT_HELPER_RADIUS_PT)
+    tangent = np.tan(np.deg2rad(np.clip(float(light.cutoff), 0.1, 89.0)))
+    radial_length = radial_limit / max(float(tangent), 1e-6)
+    length = min(float(light.range), axial_limit, radial_length)
+
+    # A light near the camera can move substantially in screen space along
+    # its axis even when world_scale() bounds perpendicular motion. Refine the
+    # candidate against its actual projected cone so an off-axis helper cannot
+    # span the viewport or cross the near plane.
+    height = max(float(viewport_height), 1.0)
+    rect = (0.0, 0.0, max(float(camera.aspect), 1e-3) * height, height)
+    anchor = project(camera, [light.position], rect)[0]
+    budget = float(np.hypot(_SPOT_HELPER_LENGTH_PT, _SPOT_HELPER_RADIUS_PT))
+    for _ in range(6):
+        starts, ends = spot_cone_segments(light, length)
+        screen = project(camera, np.concatenate((starts, ends)), rect)
+        if np.all(screen[:, 2] > max(float(camera.near), 1e-6)):
+            extent = float(np.max(np.linalg.norm(screen[:, :2] - anchor[:2], axis=1)))
+            if np.isfinite(extent) and extent <= budget:
+                return length
+        else:
+            extent = np.inf
+        scale = 0.5 if not np.isfinite(extent) else min(0.75, 0.95 * budget / extent)
+        length *= max(scale, 0.05)
+    return 0.0
+
+
+def spot_cone_segments(light: Light, length: float | None = None) -> tuple[np.ndarray, np.ndarray]:
     position = np.asarray(light.position, np.float32)
     direction = _direction(light.direction)
-    length = float(light.range)
+    length = float(light.range if length is None else length)
     radius = length * np.tan(np.deg2rad(np.clip(float(light.cutoff), 0.1, 89.0)))
     circle = oriented_circle(position + direction * length, direction, radius)
     rim = np.roll(circle, -1, axis=0)

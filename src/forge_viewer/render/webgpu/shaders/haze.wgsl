@@ -14,7 +14,7 @@ struct HazeUniforms {
     normal: vec4f,
     geometry: vec4f,            // skybox distance, elevation, radius, transition height
     color: vec4f,               // raw sRGB
-    params: vec4f,              // x exposure, y tonemap on
+    params: vec4f,              // x exposure, y tonemap on, z MuJoCo classic
 };
 
 @group(0) @binding(0) var<uniform> haze: HazeUniforms;
@@ -45,6 +45,10 @@ fn vs_haze(@location(0) in_haze: vec3f) -> HazeOut {
 
 @fragment
 fn fs_haze(in: HazeOut) -> @location(0) vec4f {
-    let color = finish_color(srgb_to_linear3(haze.color.xyz), haze.params.x, haze.params.y > 0.5);
+    let color = select(
+        finish_color(srgb_to_linear3(haze.color.xyz), haze.params.x, haze.params.y > 0.5),
+        haze.color.xyz,
+        haze.params.z > 0.5,
+    );
     return vec4f(color, in.alpha);
 }

@@ -34,8 +34,10 @@ class TextureStore:
         self._device = device
         self._textures: dict[str, wgpu.GPUTextureView] = {}
         self._cubes: dict[str, tuple[wgpu.GPUTextureView, int]] = {}
+        self._sources: dict[str, TextureData] = {}
         self._skybox_name: str | None = None
         self._white: wgpu.GPUTextureView | None = None
+        self._white_cube: wgpu.GPUTextureView | None = None
         self._black_cube: wgpu.GPUTextureView | None = None
         # forge 2D textures wrap (repeat_x/repeat_y = True); tiled planes and
         # box face-axis mapping rely on uv outside [0,1] repeating.  Trilinear
@@ -73,15 +75,21 @@ class TextureStore:
 
     def sync(self, textures: dict[str, TextureData], skybox: str | None = None) -> None:
         for name, data in textures.items():
+            # Names identify textures only within the current SceneSource. Replace
+            # resources when a newly loaded scene reuses a 2D or cube texture name.
+            if self._sources.get(name) is data:
+                continue
+            self._textures.pop(name, None)
+            self._cubes.pop(name, None)
             if data.kind is TextureKind.TWO_D:
-                if name not in self._textures:
-                    self._textures[name] = self._upload(data)
-            elif name not in self._cubes:
+                self._textures[name] = self._upload(data)
+            else:
                 self._cubes[name] = self._upload_cube(data)
-        for name in [k for k in self._textures if k not in textures]:
-            del self._textures[name]
-        for name in [k for k in self._cubes if k not in textures]:
-            del self._cubes[name]
+            self._sources[name] = data
+        for name in [k for k in self._sources if k not in textures]:
+            self._textures.pop(name, None)
+            self._cubes.pop(name, None)
+            self._sources.pop(name, None)
         self._skybox_name = skybox
 
     def _format_for(self, comps: int, srgb: bool) -> tuple[str, int, bool]:
@@ -158,7 +166,7 @@ class TextureStore:
         return self._textures.get(name)
 
     def cube(self, name: str | None) -> tuple[wgpu.GPUTextureView, int] | None:
-        """Cube view and face size for an image-light or skybox texture."""
+        """Cube view and face size for a material, image light, or skybox."""
         if name is None:
             return None
         return self._cubes.get(name)
@@ -180,9 +188,23 @@ class TextureStore:
             self._black_cube = tex.create_view(dimension="cube")
         return self._black_cube
 
+    @property
+    def white_cube(self) -> wgpu.GPUTextureView:
+        if self._white_cube is None:
+            tex = self._device.create_texture(
+                size=(1, 1, 6),
+                format=wgpu.TextureFormat.rgba8unorm,
+                usage=wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST,
+            )
+            self._write_payload(tex, np.full((6, 1, 1, 4), 255, np.uint8), 4, 0)
+            self._white_cube = tex.create_view(dimension="cube")
+        return self._white_cube
+
     def release(self) -> None:
         self._textures.clear()
         self._cubes.clear()
+        self._sources.clear()
         self._skybox_name = None
         self._white = None
+        self._white_cube = None
         self._black_cube = None

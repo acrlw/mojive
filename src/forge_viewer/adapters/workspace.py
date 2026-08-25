@@ -462,9 +462,6 @@ class WorkspaceAdapter(SceneAdapterBase):
     def set_ctrl(self, index: int, value: float) -> bool:
         return self.primary.set_ctrl(index, value)
 
-    def solve_ik(self, node_id: int, target_position, target_rotation, options):
-        return self.primary.solve_ik(node_id, target_position, target_rotation, options)
-
     def capture_state(self):
         return self.primary.capture_state()
 
@@ -502,6 +499,7 @@ class WorkspaceAdapter(SceneAdapterBase):
             int(np.max(primary.geom_source[geom_instances])) + 1 if np.any(geom_instances) else 0
         )
         material_offset = len(primary.materials)
+        scene_center, scene_extent = _merge_scene_bounds(primary, authored)
 
         mesh_map, meshes = _merge_meshes(primary.meshes, authored.meshes)
         texture_map, textures = _merge_textures(primary.textures, authored.textures)
@@ -609,8 +607,8 @@ class WorkspaceAdapter(SceneAdapterBase):
                 lights=(*primary.lights.lights, *authored.lights.lights),
             ),
             cameras=(*primary.cameras, *authored.cameras),
-            scene_extent=max(primary.scene_extent, authored.scene_extent),
-            scene_center=(primary.scene_center + authored.scene_center) * 0.5,
+            scene_extent=scene_extent,
+            scene_center=scene_center,
             nodes=nodes,
         )
         return source
@@ -646,6 +644,30 @@ def _body_rows(first, second):
     if first is None:
         return second
     return np.concatenate((first, second[1:]), axis=0)
+
+
+def _merge_scene_bounds(first: SceneSource, second: SceneSource) -> tuple[np.ndarray, float]:
+    """Return the smallest sphere containing both non-empty source bounds."""
+    first_used = first.instance_count > 0 or bool(first.dynamic_meshes)
+    second_used = second.instance_count > 0 or bool(second.dynamic_meshes)
+    if not second_used:
+        return np.asarray(first.scene_center, np.float32).copy(), float(first.scene_extent)
+    if not first_used:
+        return np.asarray(second.scene_center, np.float32).copy(), float(second.scene_extent)
+
+    first_center = np.asarray(first.scene_center, np.float64)
+    second_center = np.asarray(second.scene_center, np.float64)
+    first_radius = max(float(first.scene_extent), 0.0)
+    second_radius = max(float(second.scene_extent), 0.0)
+    delta = second_center - first_center
+    distance = float(np.linalg.norm(delta))
+    if first_radius >= distance + second_radius:
+        return first_center.astype(np.float32), first_radius
+    if second_radius >= distance + first_radius:
+        return second_center.astype(np.float32), second_radius
+    radius = 0.5 * (distance + first_radius + second_radius)
+    center = first_center + delta * ((radius - first_radius) / max(distance, 1e-12))
+    return center.astype(np.float32), radius
 
 
 def _body_count(nodes: list[SceneNode]) -> int:

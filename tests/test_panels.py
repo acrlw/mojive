@@ -36,7 +36,6 @@ EXPECTED_PANELS = {
     "Hierarchy",
     "Inspector",
     "Joints",
-    "IK",
     "Camera",
     "Plot",
     "Stats",
@@ -325,10 +324,6 @@ def test_gizmo_refusal_texts_are_verbatim():
         "this link is driven by joints; use the Joints panel"
     )
     assert gizmo_refusal_reason(paused=True, posable=True) is None
-    assert (
-        gizmo_refusal_reason(paused=True, posable=False, inverse_kinematics=True, ik_target=True)
-        is None
-    )
 
 
 def test_gizmo_refusal_prefers_the_running_reason():

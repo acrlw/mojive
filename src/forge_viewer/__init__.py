@@ -11,8 +11,6 @@ from .adapters.base import (
     DiagnosticSource,
     EqualityConstraintInfo,
     FrameNeeds,
-    IkOptions,
-    IkResult,
     JointInfo,
     JointVisualKind,
     KeyframeInfo,
@@ -48,6 +46,7 @@ from .types import (
     MeshKey,
     MeshShape,
     MeshUpdate,
+    ShadingModel,
 )
 
 if TYPE_CHECKING:
@@ -91,8 +90,6 @@ __all__ = [
     "EqualityConstraintInfo",
     "FrameMode",
     "FrameNeeds",
-    "IkOptions",
-    "IkResult",
     "JointInfo",
     "JointVisualKind",
     "KeyframeInfo",
@@ -124,6 +121,7 @@ __all__ = [
     "SceneSaveOptions",
     "SceneSource",
     "SensorInfo",
+    "ShadingModel",
     "SnapshotPublisher",
     "SnapshotWriter",
     "ToyPhysicsAdapter",

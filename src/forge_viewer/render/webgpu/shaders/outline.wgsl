@@ -20,8 +20,9 @@ struct OutlineInstances {
     color: vec4f,
     material: vec4f,
     texcoef: vec4f,
+    cubecoef: vec4f,
     object_id: u32,
-    // Ends at 116 bytes; the array stride rounds up to 128, matching
+    // Ends at 132 bytes; the array stride rounds up to 144, matching
     // instances.py (same layout as scene.wgsl's Instance).
 };
 

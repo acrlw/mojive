@@ -9,7 +9,7 @@ import wgpu
 
 from ....types import DEFAULT_MATERIAL, MeshKey, MeshShape
 from ...scene import RenderScene
-from ..instances import InstanceStore
+from ..instances import INSTANCE_STRIDE, InstanceStore
 from ..lighting import LIGHTS_BYTES
 from ..targets import FRAME_BYTES
 
@@ -111,6 +111,7 @@ class TendonPass:
         scene.colors = np.ones((count, 4), np.float32)
         scene.material = np.tile(np.array((0.0, 0.5, 0.5, 0.0), np.float32), (count, 1))
         scene.tex_coef = np.tile(np.array((1.0, 1.0, 0.0, 0.0), np.float32), (count, 1))
+        scene.cube_coef = np.zeros((count, 4), np.float32)
         scene.object_id = np.zeros(count, np.uint32)
         scene.bucket = np.zeros(count, np.int32)
         scene.materials = material_table or (DEFAULT_MATERIAL,)
@@ -170,7 +171,7 @@ class TendonPass:
                     "resource": {
                         "buffer": self._store.buffer,
                         "offset": 0,
-                        "size": self._store.capacity * 128,
+                        "size": self._store.capacity * INSTANCE_STRIDE,
                     },
                 },
                 {

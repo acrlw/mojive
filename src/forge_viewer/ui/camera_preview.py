@@ -43,6 +43,10 @@ class CameraPreview:
             self._source_generation = source_generation
         for flag in main_backend.render_options():
             backend.set_flag(flag, main_backend.get_flag(flag))
+        backend.set_debug_view(main_backend.get_debug_view())
+        backend.set_label_mode(main_backend.get_label_mode())
+        backend.set_frame_mode(main_backend.get_frame_mode())
+        backend.set_bvh_depth(main_backend.get_bvh_depth())
         backend.set_camera(camera.with_aspect(size[0] / max(size[1], 1)))
         backend.highlight(0)
         backend.update(frame)

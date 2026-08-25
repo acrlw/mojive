@@ -57,7 +57,6 @@ _ZH_CN = {
     "Hierarchy": "层级",
     "Inspector": "检查器",
     "Joints": "关节",
-    "IK": "逆向运动学",
     "Plot": "曲线",
     "Stats": "统计",
     "Settings": "设置",

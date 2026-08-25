@@ -92,8 +92,8 @@ def test_reflection_scales_with_reflectance(tmp_path):
             h.backend.set_camera(h.camera)
             h.backend.set_flag(RenderFlag.TONEMAP, False)
             h.warmup(4)
-            lit = _linear(shot(h, reflection=True))
-            dark = _linear(shot(h, reflection=False))
+            lit = shot(h, reflection=True).astype(np.float64) / 255.0
+            dark = shot(h, reflection=False).astype(np.float64) / 255.0
         band = (slice(H - 140, H - 10), slice(20, W - 20))
         return float((lit[band] - dark[band]).mean())
 
@@ -120,7 +120,7 @@ def test_reflection_shows_outer_faces_not_the_inside(pair):
     mask = np.abs(on - off).sum(axis=2) > 4
     assert mask.sum() > 5000
     mean = float(on[mask].mean())
-    assert mean > 65.0
+    assert mean > 80.0
 
 
 def test_transparent_geometry_appears_in_reflections(tmp_path):

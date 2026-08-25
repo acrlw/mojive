@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import wgpu
 
-from ....types import CameraView
+from ....types import CameraView, ShadingModel
 from ...backend import DebugView, RenderFlag
 from ...scene import RenderScene
 from ..programs import load_wgsl
@@ -16,7 +16,9 @@ EXPOSURE = 1.0  # mirrors render.forge.color.EXPOSURE
 SKYBOX_DTYPE = np.dtype(
     [
         ("inv_view_proj", "(4,4)f4"),
-        ("params", "(4,)f4"),  # exposure, tonemap on
+        ("view_proj", "(4,4)f4"),
+        ("eye_distance", "(4,)f4"),  # xyz camera eye, w classic cylinder distance
+        ("params", "(4,)f4"),  # exposure, tonemap on, MuJoCo classic
     ]
 )
 
@@ -29,7 +31,7 @@ HAZE_DTYPE = np.dtype(
         ("normal", "(4,)f4"),
         ("geometry", "(4,)f4"),  # skybox distance, elevation, radius, transition height
         ("color", "(4,)f4"),  # raw sRGB
-        ("params", "(4,)f4"),  # exposure, tonemap on
+        ("params", "(4,)f4"),  # exposure, tonemap on, MuJoCo classic
     ]
 )
 
@@ -38,12 +40,43 @@ _HAZE_VERTEX_LAYOUT = {
     "step_mode": "vertex",
     "attributes": [{"format": "float32x3", "offset": 0, "shader_location": 0}],
 }
+_SKYBOX_VERTEX_LAYOUT = _HAZE_VERTEX_LAYOUT
 
 # moderngl blend_func(SRC_ALPHA, ONE_MINUS_SRC_ALPHA) applied to color and alpha.
 _ALPHA_BLEND = {
     "color": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
     "alpha": {"src_factor": "src-alpha", "dst_factor": "one-minus-src-alpha"},
 }
+
+
+def _make_haze_pipeline(
+    device: wgpu.GPUDevice,
+    module: wgpu.GPUShaderModule,
+    layout: wgpu.GPUPipelineLayout,
+    samples: int,
+    *,
+    depth_write: bool,
+) -> wgpu.GPURenderPipeline:
+    return device.create_render_pipeline(
+        layout=layout,
+        vertex={
+            "module": module,
+            "entry_point": "vs_haze",
+            "buffers": [_HAZE_VERTEX_LAYOUT],
+        },
+        fragment={
+            "module": module,
+            "entry_point": "fs_haze",
+            "targets": [{"format": "rgba8unorm", "blend": _ALPHA_BLEND}],
+        },
+        primitive={"topology": "triangle-list", "front_face": "ccw", "cull_mode": "none"},
+        depth_stencil={
+            "format": "depth24plus",
+            "depth_write_enabled": depth_write,
+            "depth_compare": "less-equal",
+        },
+        multisample={"count": samples},
+    )
 
 
 class SkyboxPass:
@@ -77,10 +110,11 @@ class SkyboxPass:
                 },
             ]
         )
+        skybox_pipeline_layout = device.create_pipeline_layout(
+            bind_group_layouts=[self._skybox_uniform_layout, self._skybox_texture_layout]
+        )
         self._skybox_pipeline = device.create_render_pipeline(
-            layout=device.create_pipeline_layout(
-                bind_group_layouts=[self._skybox_uniform_layout, self._skybox_texture_layout]
-            ),
+            layout=skybox_pipeline_layout,
             vertex={"module": module_skybox, "entry_point": "vs_skybox", "buffers": []},
             fragment={
                 "module": module_skybox,
@@ -95,6 +129,26 @@ class SkyboxPass:
             },
             multisample={"count": samples},
         )
+        self._classic_skybox_pipeline = device.create_render_pipeline(
+            layout=skybox_pipeline_layout,
+            vertex={
+                "module": module_skybox,
+                "entry_point": "vs_classic_skybox",
+                "buffers": [_SKYBOX_VERTEX_LAYOUT],
+            },
+            fragment={
+                "module": module_skybox,
+                "entry_point": "fs_skybox",
+                "targets": [{"format": "rgba8unorm"}],
+            },
+            primitive={"topology": "triangle-list", "front_face": "ccw", "cull_mode": "none"},
+            depth_stencil={
+                "format": "depth24plus",
+                "depth_write_enabled": True,
+                "depth_compare": "less-equal",
+            },
+            multisample={"count": samples},
+        )
 
         self._haze_uniform_layout = device.create_bind_group_layout(
             entries=[
@@ -105,25 +159,14 @@ class SkyboxPass:
                 }
             ]
         )
-        self._haze_pipeline = device.create_render_pipeline(
-            layout=device.create_pipeline_layout(bind_group_layouts=[self._haze_uniform_layout]),
-            vertex={
-                "module": module_haze,
-                "entry_point": "vs_haze",
-                "buffers": [_HAZE_VERTEX_LAYOUT],
-            },
-            fragment={
-                "module": module_haze,
-                "entry_point": "fs_haze",
-                "targets": [{"format": "rgba8unorm", "blend": _ALPHA_BLEND}],
-            },
-            primitive={"topology": "triangle-list", "front_face": "ccw", "cull_mode": "none"},
-            depth_stencil={
-                "format": "depth24plus",
-                "depth_write_enabled": False,
-                "depth_compare": "less",
-            },
-            multisample={"count": samples},
+        haze_pipeline_layout = device.create_pipeline_layout(
+            bind_group_layouts=[self._haze_uniform_layout]
+        )
+        self._haze_pipeline = _make_haze_pipeline(
+            device, module_haze, haze_pipeline_layout, samples, depth_write=False
+        )
+        self._classic_haze_pipeline = _make_haze_pipeline(
+            device, module_haze, haze_pipeline_layout, samples, depth_write=True
         )
 
         self._skybox_block = np.zeros((), SKYBOX_DTYPE)
@@ -144,6 +187,12 @@ class SkyboxPass:
             ],
         )
         self._skybox_groups: dict[int, wgpu.GPUBindGroup] = {}
+        self._classic_slices = 64
+        classic_vertices = self._classic_skybox_vertices(self._classic_slices)
+        self._classic_buffer = device.create_buffer_with_data(
+            data=classic_vertices.tobytes(), usage=wgpu.BufferUsage.VERTEX
+        )
+        self._classic_vertex_count = len(classic_vertices)
 
         self._haze_block = np.zeros((), HAZE_DTYPE)
         self._haze_uniforms = device.create_buffer(
@@ -162,11 +211,30 @@ class SkyboxPass:
                 }
             ],
         )
-        vertices = self._haze_vertices()
+        self._haze_slices = 64
+        vertices = self._haze_vertices(self._haze_slices)
         self._haze_buffer = device.create_buffer_with_data(
             data=vertices.tobytes(), usage=wgpu.BufferUsage.VERTEX
         )
         self._haze_vertex_count = len(vertices)
+
+    @staticmethod
+    def _classic_skybox_vertices(slices: int) -> np.ndarray:
+        """Closed unit cylinder used by MuJoCo's classic skybox display list."""
+        vertices: list[tuple[float, float, float]] = []
+        for index in range(slices):
+            angle0 = 2.0 * np.pi * index / slices
+            angle1 = 2.0 * np.pi * (index + 1) / slices
+            x0, y0 = np.cos(angle0), np.sin(angle0)
+            x1, y1 = np.cos(angle1), np.sin(angle1)
+            lower0 = (x0, y0, -1.0)
+            lower1 = (x1, y1, -1.0)
+            upper0 = (x0, y0, 1.0)
+            upper1 = (x1, y1, 1.0)
+            vertices.extend((lower0, lower1, upper1, lower0, upper1, upper0))
+            vertices.extend(((0.0, 0.0, 1.0), upper0, upper1))
+            vertices.extend(((0.0, 0.0, -1.0), lower1, lower0))
+        return np.asarray(vertices, np.float32)
 
     @staticmethod
     def _haze_vertices(slices: int = 64) -> np.ndarray:
@@ -219,19 +287,32 @@ class SkyboxPass:
             return 0
 
         tonemap = 1.0 if flags.get(RenderFlag.TONEMAP, True) else 0.0
+        is_classic = scene.shading_model is ShadingModel.MUJOCO_CLASSIC
+        classic = 1.0 if is_classic else 0.0
         block = self._skybox_block
         block["inv_view_proj"][:] = np.linalg.inv(view_proj.astype(np.float64)).T
-        block["params"][:] = (EXPOSURE, tonemap, 0.0, 0.0)
+        block["view_proj"][:] = np.asarray(view_proj, np.float32).T
+        block["eye_distance"][:] = (*camera.eye, float(camera.far) * 0.70)
+        block["params"][:] = (EXPOSURE, tonemap, classic, 0.0)
         self._device.queue.write_buffer(self._skybox_uniforms, 0, block.tobytes())
 
-        pass_encoder.set_pipeline(self._skybox_pipeline)
+        pass_encoder.set_pipeline(
+            self._classic_skybox_pipeline if is_classic else self._skybox_pipeline
+        )
         pass_encoder.set_bind_group(0, self._skybox_uniform_group)
         pass_encoder.set_bind_group(1, self._skybox_group(view, textures.cube_sampler))
-        pass_encoder.draw(3)
+        if is_classic:
+            self._ensure_classic_buffer(max(3, int(scene.lights.horizon_haze_slices)))
+            pass_encoder.set_vertex_buffer(0, self._classic_buffer)
+            pass_encoder.draw(self._classic_vertex_count)
+        else:
+            pass_encoder.draw(3)
         calls = 1
 
         if self._write_haze_uniforms(flags, tonemap, camera, view_proj, scene):
-            pass_encoder.set_pipeline(self._haze_pipeline)
+            pass_encoder.set_pipeline(
+                self._classic_haze_pipeline if is_classic else self._haze_pipeline
+            )
             pass_encoder.set_bind_group(0, self._haze_uniform_group)
             pass_encoder.set_vertex_buffer(0, self._haze_buffer)
             pass_encoder.draw(self._haze_vertex_count)
@@ -268,6 +349,7 @@ class SkyboxPass:
         beta = 0.75 * np.pi - alpha
         transition = float(np.sqrt(0.5) * radius * np.sin(alpha) / np.sin(beta))
         distance = float(camera.far) * 0.70
+        self._ensure_haze_buffer(max(3, int(lights.horizon_haze_slices)))
 
         block = self._haze_block
         block["view_proj"][:] = np.asarray(view_proj, np.float32).T
@@ -277,12 +359,40 @@ class SkyboxPass:
         block["normal"][:3] = normal
         block["geometry"][:] = (distance, elevation, radius, transition)
         block["color"][:3] = lights.haze_color
-        block["params"][:] = (EXPOSURE, tonemap, 0.0, 0.0)
+        block["params"][:] = (
+            EXPOSURE,
+            tonemap,
+            1.0 if scene.shading_model is ShadingModel.MUJOCO_CLASSIC else 0.0,
+            0.0,
+        )
         self._device.queue.write_buffer(self._haze_uniforms, 0, block.tobytes())
         return True
+
+    def _ensure_haze_buffer(self, slices: int) -> None:
+        if slices == self._haze_slices:
+            return
+        self._haze_buffer.destroy()
+        vertices = self._haze_vertices(slices)
+        self._haze_buffer = self._device.create_buffer_with_data(
+            data=vertices.tobytes(), usage=wgpu.BufferUsage.VERTEX
+        )
+        self._haze_vertex_count = len(vertices)
+        self._haze_slices = slices
+
+    def _ensure_classic_buffer(self, slices: int) -> None:
+        if slices == self._classic_slices:
+            return
+        self._classic_buffer.destroy()
+        vertices = self._classic_skybox_vertices(slices)
+        self._classic_buffer = self._device.create_buffer_with_data(
+            data=vertices.tobytes(), usage=wgpu.BufferUsage.VERTEX
+        )
+        self._classic_vertex_count = len(vertices)
+        self._classic_slices = slices
 
     def release(self) -> None:
         self._skybox_uniforms.destroy()
         self._haze_uniforms.destroy()
+        self._classic_buffer.destroy()
         self._haze_buffer.destroy()
         self._skybox_groups.clear()

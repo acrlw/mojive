@@ -10,12 +10,13 @@ struct ShadowDraw {
     light: vec4f,               // xyz u_light_pos, w u_light_range (spot_dist.frag)
 };
 
-// Keep in sync with instances.py (128-byte stride).
+// Keep in sync with instances.py (144-byte stride).
 struct Instance {
     model: mat4x4f,
     color: vec4f,
     material: vec4f,
     texcoef: vec4f,
+    cubecoef: vec4f,
     object_id: u32,
 };
 

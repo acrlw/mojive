@@ -7,6 +7,7 @@ import wgpu
 
 from ...backend import RenderFlag
 from ...scene import RenderScene
+from ..instances import INSTANCE_STRIDE
 from ..programs import load_wgsl
 from ..timing import TimestampWriter
 
@@ -201,7 +202,7 @@ class OutlinePass:
                     "resource": {
                         "buffer": instances.buffer,
                         "offset": 0,
-                        "size": instances.capacity * 128,
+                        "size": instances.capacity * INSTANCE_STRIDE,
                     },
                 },
             ],

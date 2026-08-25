@@ -16,7 +16,7 @@ from forge_viewer.render.forge.passes.idbuffer import IdBufferPass  # noqa: E402
 from forge_viewer.render.forge.passes.outline import OUTLINE_RADIUS, OutlinePass  # noqa: E402
 from forge_viewer.render.forge.programs import ProgramCache  # noqa: E402
 from forge_viewer.render.forge.resources import MeshStore, TextureStore  # noqa: E402
-from forge_viewer.render.forge.targets import IdLayout, RenderTarget  # noqa: E402
+from forge_viewer.render.forge.targets import IdLayout, RenderTarget, probe_id_layout  # noqa: E402
 from forge_viewer.render.forge.timing import FrameTiming  # noqa: E402
 from forge_viewer.render.mesh import all_builtin  # noqa: E402
 from forge_viewer.render.scene import SceneBuilder  # noqa: E402
@@ -249,8 +249,7 @@ def test_id_buffer_matches_the_picture_pixel_by_pixel(rig):
 
     rig.set_scene(_rod_and_sphere())
     rig.frame()
-    expect_layout = IdLayout.SHARED if rig.target.samples <= 1 else IdLayout.SPLIT
-    assert rig.target.id_layout is expect_layout
+    assert rig.target.id_layout is probe_id_layout(rig.gl, rig.target.samples)
     _check_id_matches_picture(rig)
 
 

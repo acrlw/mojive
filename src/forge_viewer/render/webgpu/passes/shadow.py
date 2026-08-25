@@ -11,6 +11,7 @@ from ....types import CameraView, Light, LightKind
 from ...backend import RenderFlag
 from ...scene import RenderScene
 from ..cascades import ATLAS_SIZE, CascadeSet, build_cascades, slot_pixels
+from ..instances import INSTANCE_STRIDE
 from ..lighting import LOCAL_SHADOW_SLOTS, LightSchedule, ShadowState, schedule_lights
 from ..meshes import MeshStore
 from ..programs import load_wgsl
@@ -454,7 +455,7 @@ class ShadowPass:
                         "resource": {
                             "buffer": instances.buffer,
                             "offset": 0,
-                            "size": instances.capacity * 128,
+                            "size": instances.capacity * INSTANCE_STRIDE,
                         },
                     },
                 ],

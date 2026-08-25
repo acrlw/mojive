@@ -8,6 +8,8 @@ in VertexData {
     vec3 world;
     vec3 normal;
     vec2 uv;
+    vec3 cube;
+    float cube_on;
     vec4 color;
     vec3 material;
     float reflect;
@@ -19,6 +21,8 @@ out VertexData {
     vec3 world;
     vec3 normal;
     vec2 uv;
+    vec3 cube;
+    float cube_on;
     vec4 color;
     vec3 material;
     float reflect;
@@ -33,6 +37,8 @@ void main() {
         v.world = v_in[i].world;
         v.normal = v_in[i].normal;
         v.uv = v_in[i].uv;
+        v.cube = v_in[i].cube;
+        v.cube_on = v_in[i].cube_on;
         v.color = v_in[i].color;
         v.material = v_in[i].material;
         v.reflect = v_in[i].reflect;

@@ -268,7 +268,7 @@ def test_scatter_refill_does_not_allocate():
 
 def test_instance_float_count_matches_the_documented_layout():
 
-    assert INSTANCE_FLOATS == 16 + 4 + 4 + 4 == 28
+    assert INSTANCE_FLOATS == 16 + 4 + 4 + 4 + 4 == 32
 
 
 def test_material_quadruple_keeps_the_fourth_slot_reserved():

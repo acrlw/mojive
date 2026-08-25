@@ -182,7 +182,7 @@ class ViewerApp:
         if self.window is None:
             self.window = Window(WindowConfig(title=self.title))
         self._sync_structure()
-        self._frame_scene(animate=False)
+        self._reset_source_camera()
         self.window.show()
         self._started = True
         self._last_time = time.perf_counter()
@@ -309,7 +309,7 @@ class ViewerApp:
         self._model_camera_view = None
         self._structure_generation = -1
         self._sync_structure()
-        self._frame_scene(animate=False)
+        self._reset_source_camera()
 
     def _open_model_dialog(self, action: str = "open") -> None:
         if self._model_dialog is not None:
@@ -1038,6 +1038,11 @@ class ViewerApp:
             if frame.debug_commands:
                 self.debug_bridge.apply_batch(frame.debug_commands)
 
+        preview_name, preview_camera = self.camera_preview.selected_camera(self.session)
+        preview_width = min(
+            1024, max(320, int(self.window.points_to_pixels(340.0 * self.window.style_scale)))
+        )
+        preview_size = (preview_width, max(1, preview_width * 9 // 16))
         self._publish_perturb_marks()
         self.scene_entities.publish(
             self.backend,
@@ -1045,22 +1050,21 @@ class ViewerApp:
             self._camera_view(),
             self._viewport_rect[3],
             self.window.ui_scale,
-            self._model_camera_id >= 0,
+            view_through_camera=self._model_camera_id >= 0,
+            selected_camera_aspect=(
+                preview_size[0] / preview_size[1] if preview_camera is not None else None
+            ),
         )
         self._publish_gizmo()
 
         self._viewport_image = self.backend.render(frame)
-        preview_name, preview_camera = self.camera_preview.selected_camera(self.session)
-        preview_width = min(
-            1024, max(320, int(self.window.points_to_pixels(340.0 * self.window.style_scale)))
-        )
         self.camera_preview.update(
             self.backend,
             self.session.source,
             self.session.structure_generation,
             frame,
             preview_camera,
-            (preview_width, max(1, preview_width * 9 // 16)),
+            preview_size,
         )
 
         ctx = self._panel_context()
@@ -1293,7 +1297,22 @@ class ViewerApp:
 
     def _frame_scene(self, *, animate: bool = True) -> None:
         self.camera.set_aspect(max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0))
-        self.camera.frame_scene(self.session.bounds(), self.camera_out, animate=animate)
+        self.camera.frame_scene(
+            self.session.bounds(),
+            self.camera_out,
+            animate=animate,
+            clip=self.session.camera_hint(),
+        )
+
+    def _reset_source_camera(self) -> None:
+        """Restore the scene source's authored/default free camera."""
+        hint = self.session.camera_hint()
+        if hint is None:
+            self._frame_scene(animate=False)
+            return
+        aspect = max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0)
+        self.camera.adopt(hint.with_aspect(aspect))
+        self.camera.publish(self.camera_out)
 
     def _poll_perturb(self, state: gs.InputState) -> None:
         st = self.session.perturb

@@ -45,7 +45,7 @@ _VIS_COVERAGE = (
         "exact",
         "collision mesh and SDF geoms switch to MuJoCo compiled convex hulls",
     ),
-    Coverage("mjVIS_TEXTURE", "exact", "2D color textures and skyboxes"),
+    Coverage("mjVIS_TEXTURE", "exact", "2D and cube color textures plus skyboxes"),
     Coverage("mjVIS_JOINT", "equivalent", "solid free, ball, slide and hinge markers"),
     Coverage(
         "mjVIS_CAMERA",

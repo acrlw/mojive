@@ -21,32 +21,48 @@ uniform vec3 u_camera_pos;
 uniform vec3 u_camera_dir;
 uniform samplerCube u_image_light_texture;
 uniform vec2 u_image_light;  // intensity gain, maximum mip level
+uniform int u_classic_lighting;
 
 uniform int u_shadow_light;
 
 float shadow_factor(vec3 world_pos, vec3 normal, float view_depth);
 float local_shadow(int kind, int slot, vec3 world_pos, vec3 normal);
 
+vec3 forge_lighting_color(vec3 c) {
+    return u_classic_lighting != 0 ? linear_to_srgb(c) : c;
+}
+
 vec3 forge_light_term(
     vec3 albedo, vec3 n, vec3 l, vec3 view_dir,
     vec3 diffuse_rgb, vec3 specular_rgb,
+    vec3 specular_mod,
     float specular, float shininess, float atten, float shadow
 ) {
     float ndl = max(dot(n, l), 0.0);
     if (ndl <= 0.0 || atten <= 0.0) return vec3(0.0);
     vec3 h = normalize(l + view_dir);
     float spec = specular * pow(max(dot(n, h), 0.0), max(shininess * 128.0, 1e-3));
-    return atten * shadow * ndl * (diffuse_rgb * albedo + specular_rgb * spec);
+    diffuse_rgb = forge_lighting_color(diffuse_rgb);
+    specular_rgb = forge_lighting_color(specular_rgb);
+    if (u_classic_lighting != 0) {
+        return atten * shadow
+            * (ndl * diffuse_rgb * albedo + specular_rgb * spec * specular_mod);
+    }
+    return atten * shadow * ndl
+        * (diffuse_rgb * albedo + specular_rgb * spec * specular_mod);
 }
 
 vec3 shade(
     vec3 albedo, vec3 normal, vec3 world_pos,
-    float emission, float specular, float shininess, float view_depth
+    float emission, float specular, float shininess, float view_depth,
+    vec3 texture_color
 ) {
     vec3 n = normalize(normal);
     vec3 view_dir = normalize(u_camera_pos - world_pos);
 
-    vec3 color = ambient_linear(u_ambient) * albedo;
+    vec3 ambient = u_classic_lighting != 0 ? clamp(u_ambient, 0.0, 1.0) : ambient_linear(u_ambient);
+    vec3 color = ambient * albedo;
+    vec3 specular_mod = u_classic_lighting != 0 ? texture_color : vec3(1.0);
 
     if (u_image_light.x > 0.0) {
         vec3 cube_n = vec3(n.x, n.z, -n.y);
@@ -57,7 +73,10 @@ vec3 shade(
         vec3 specular_ibl = textureLod(
             u_image_light_texture, cube_r, roughness * u_image_light.y
         ).rgb;
-        color += u_image_light.x * (diffuse_ibl * albedo + specular * specular_ibl);
+        diffuse_ibl = forge_lighting_color(diffuse_ibl);
+        specular_ibl = forge_lighting_color(specular_ibl);
+        color += u_image_light.x
+            * (diffuse_ibl * albedo + specular * specular_ibl * specular_mod);
     }
 
     for (int i = 0; i < FORGE_MAX_LIGHTS; ++i) {
@@ -76,7 +95,9 @@ vec3 shade(
             if (u_light_atten[i].w > 0.0 && dist > u_light_atten[i].w) atten = 0.0;
             if (kind == 2) {
                 float cd = dot(-l, normalize(u_light_dir[i].xyz));
-                atten *= (cd < u_light_dir[i].w) ? 0.0 : pow(max(cd, 0.0), u_light_diffuse[i].w);
+                atten *= (cd < u_light_dir[i].w)
+                    ? 0.0
+                    : pow(max(cd, 0.0), u_light_diffuse[i].w);
             }
         }
         float shadow = 1.0;
@@ -87,6 +108,7 @@ vec3 shade(
         color += forge_light_term(
             albedo, n, l, view_dir,
             u_light_diffuse[i].rgb, u_light_specular[i].rgb,
+            specular_mod,
             specular, shininess, atten, shadow
         );
     }
@@ -95,6 +117,7 @@ vec3 shade(
         color += forge_light_term(
             albedo, n, -normalize(u_camera_dir), view_dir,
             u_headlight_diffuse.rgb, u_headlight_specular,
+            specular_mod,
             specular, shininess, 1.0, 1.0
         );
     }

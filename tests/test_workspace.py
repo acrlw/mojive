@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from forge_viewer import commands as cmd
+from forge_viewer import math3d
 from forge_viewer.adapters.base import NodeKind, SceneSaveOptions
 from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
 from forge_viewer.adapters.workspace import WorkspaceAdapter
@@ -30,6 +31,73 @@ def workspace() -> WorkspaceAdapter:
     primary = MuJoCoAdapter()
     primary.new_scene()
     return WorkspaceAdapter(primary)
+
+
+def test_workspace_preserves_every_primary_environment_field(tmp_path: Path) -> None:
+    model_path = tmp_path / "haze.xml"
+    model_path.write_text(
+        """<mujoco>
+  <visual>
+    <headlight ambient=".11 .12 .13" diffuse=".21 .22 .23" specular=".31 .32 .33"/>
+    <rgba fog=".1 .2 .3 1" haze=".4 .5 .6 1"/>
+    <map fogstart=".25" fogend="4" haze=".7"/>
+    <quality numslices="23"/>
+  </visual>
+  <worldbody>
+    <light pos="0 0 2" ambient=".03 .04 .05"/>
+    <geom type="plane" size="0 0 0.1"/>
+  </worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    document = workspace()
+
+    document.load(model_path)
+
+    expected = document.primary.scene_source().lights.environment()
+    actual = document.scene_source().lights.environment()
+    for item in fields(expected):
+        left = getattr(expected, item.name)
+        right = getattr(actual, item.name)
+        if isinstance(left, np.ndarray):
+            assert right == pytest.approx(left)
+        elif isinstance(left, Light):
+            for light_item in fields(left):
+                light_left = getattr(left, light_item.name)
+                light_right = getattr(right, light_item.name)
+                if isinstance(light_left, np.ndarray):
+                    assert light_right == pytest.approx(light_left)
+                else:
+                    assert light_right == light_left
+        else:
+            assert right == left
+    assert document.scene_source().scene_center == pytest.approx(
+        document.primary.scene_source().scene_center
+    )
+    assert document.scene_source().scene_extent == pytest.approx(
+        document.primary.scene_source().scene_extent
+    )
+
+
+def test_workspace_bounds_contain_primary_and_authored_geometry() -> None:
+    document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
+    document.add_scene_object(
+        MeshShape.BOX,
+        "left",
+        np.ones(3, np.float32),
+        np.array((-4.0, 0.0, 0.0), np.float32),
+        np.eye(3, dtype=np.float32),
+        np.ones(4, np.float32),
+        DEFAULT_MATERIAL,
+    )
+    primary = document.primary.scene_source()
+    authored = document.scene.source
+    merged = document.scene_source()
+
+    for source in (primary, authored):
+        distance = float(np.linalg.norm(source.scene_center - merged.scene_center))
+        assert distance + source.scene_extent <= merged.scene_extent + 1e-6
 
 
 @pytest.mark.parametrize(
@@ -408,6 +476,35 @@ def test_mjcf_camera_and_light_edits_persist_with_model(tmp_path: Path) -> None:
     assert restored_camera.eye == pytest.approx(translated.eye, abs=1e-5)
     assert np.degrees(restored_camera.fov_y) == pytest.approx(52.0)
     assert restored.scene_source().lights.lights[0].range == pytest.approx(13.0)
+
+
+def test_model_root_transform_moves_free_bodies_and_model_cameras() -> None:
+    document = workspace()
+    model_id = document.add_scene_model(ASSETS / "mujoco_visuals.xml", np.zeros(3), np.eye(3))
+    session = Session(document)
+    assert session.submit(cmd.Pause()).ok
+    model_node = next(
+        node for node in session.nodes if node.kind is NodeKind.MODEL and node.model_id == model_id
+    )
+    before_cameras = {
+        camera.name: session.camera_view(camera.camera_id) for camera in session.cameras
+    }
+    ball = next(node for node in document.nodes() if node.name.endswith("ball"))
+    before_ball = document.primary.data.xpos[ball.body_index].copy()
+
+    position = np.array((1.5, -0.75, 0.4))
+    rotation = math3d.axis_angle_to_mat3((0.0, 0.0, 1.0), np.deg2rad(35.0))
+    assert session.submit(cmd.SetPose(model_node.node_id, position, rotation)).ok
+
+    after_ball = document.primary.data.xpos[ball.body_index]
+    assert after_ball == pytest.approx(position + rotation @ before_ball)
+    for camera in session.cameras:
+        before = before_cameras[camera.name]
+        after = session.camera_view(camera.camera_id)
+        assert before is not None and after is not None
+        assert after.eye == pytest.approx(position + rotation @ before.eye, abs=1e-5)
+        assert after.target == pytest.approx(position + rotation @ before.target, abs=1e-5)
+        assert after.up == pytest.approx(rotation @ before.up, abs=1e-5)
 
 
 def test_model_source_supports_complete_mjcf_topology(tmp_path: Path) -> None:

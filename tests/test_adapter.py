@@ -15,6 +15,7 @@ from forge_viewer.adapters.base import (
     JointVisualKind,
     NodeKind,
 )
+from forge_viewer.types import ShadingModel
 
 pytestmark = pytest.mark.physics
 
@@ -209,6 +210,7 @@ def test_mesh_without_texcoord_gets_zero_uv(adapter):
 def test_textures_are_srgb_and_cube_is_six_faces(adapter):
 
     src = adapter.scene_source()
+    assert src.shading_model is ShadingModel.MUJOCO_CLASSIC
     assert set(src.textures) == {"grid", "sky"}
     assert all(t.srgb for t in src.textures.values())
     assert src.skybox == "sky"
@@ -258,6 +260,7 @@ def test_material_and_lights(adapter):
     lights = src.lights
     assert len(lights.lights) == 1
     assert lights.headlight is not None
+    assert lights.horizon_haze_slices == int(adapter.model.vis.quality.numslices)
     hl = adapter.model.vis.headlight
 
     assert lights.headlight.diffuse == pytest.approx(np.asarray(hl.diffuse))
@@ -271,6 +274,69 @@ def test_material_and_lights(adapter):
     frame = adapter.frame(FrameNeeds())
     assert frame.lights is not None
     assert frame.lights.lights[0].diffuse == pytest.approx([0.2, 0.3, 0.4])
+
+
+def test_target_light_uses_mujoco_world_pose_and_updates_with_its_target(tmp_path):
+    path = tmp_path / "target_light.xml"
+    path.write_text(
+        """
+        <mujoco>
+          <worldbody>
+            <light name="target" mode="targetbodycom" target="body" pos="0 -4 3"/>
+            <body name="body" pos="0 0 1">
+              <freejoint/>
+              <geom type="sphere" size=".2"/>
+            </body>
+          </worldbody>
+        </mujoco>
+        """
+    )
+    target_adapter = MuJoCoAdapter(path)
+    try:
+        initial = target_adapter.scene_source().lights.lights[0]
+        assert initial.position == pytest.approx(target_adapter.data.light_xpos[0])
+        assert initial.direction == pytest.approx(target_adapter.data.light_xdir[0])
+        assert initial.direction != pytest.approx(target_adapter.model.light_dir[0])
+
+        target_adapter.data.qpos[0] = 1.0
+        mujoco.mj_forward(target_adapter.model, target_adapter.data)
+        frame = target_adapter.frame(FrameNeeds())
+
+        assert frame.lights is not None
+        assert frame.lights.lights[0].direction == pytest.approx(target_adapter.data.light_xdir[0])
+        assert frame.lights.lights[0].direction != pytest.approx(initial.direction)
+    finally:
+        target_adapter.release()
+
+
+def test_trackcom_light_edit_updates_while_simulation_is_paused(tmp_path):
+    path = tmp_path / "tracking_light.xml"
+    path.write_text(
+        """
+        <mujoco>
+          <worldbody>
+            <light name="tracking" mode="trackcom" pos="0 0 2"/>
+            <body name="body" pos="1 0 1">
+              <freejoint/>
+              <geom type="sphere" size=".2"/>
+            </body>
+          </worldbody>
+        </mujoco>
+        """
+    )
+    tracking_adapter = MuJoCoAdapter(path)
+    try:
+        light = tracking_adapter.scene_source().lights.lights[0]
+        edited_position = np.array((0.75, -0.5, 2.25), np.float32)
+
+        assert tracking_adapter.set_light(0, replace(light, position=edited_position))
+
+        frame = tracking_adapter.frame(FrameNeeds())
+        assert frame.lights is not None
+        assert frame.lights.lights[0].position == pytest.approx(edited_position)
+        assert tracking_adapter.data.light_xpos[0] == pytest.approx(edited_position)
+    finally:
+        tracking_adapter.release()
 
 
 def test_forge_area_light_survives_mujoco_writeback(adapter, fixture_path):
@@ -623,7 +689,6 @@ def test_caps_report_what_is_not_there(adapter):
 
     caps = adapter.caps
     assert caps.name == "mujoco"
-    assert caps.inverse_kinematics is True
     assert (
         caps.write_pose
         and caps.write_qpos

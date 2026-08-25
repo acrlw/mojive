@@ -6,6 +6,7 @@ import tracemalloc
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 pytestmark = pytest.mark.gpu
@@ -18,7 +19,9 @@ from forge_viewer.assets import resolve  # noqa: E402
 from forge_viewer.commands import AddModelComponent, CommandResult, SelectNode  # noqa: E402
 from forge_viewer.composition import build, build_editor, build_scene  # noqa: E402
 from forge_viewer.scene import Scene  # noqa: E402
+from forge_viewer.types import CameraView  # noqa: E402
 from forge_viewer.ui.app import MODEL_FILTERS  # noqa: E402
+from forge_viewer.ui.camera_preview import CameraPreview  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -124,6 +127,154 @@ def test_runtime_model_loading_rebuilds_gpu_scene(viewer):
         assert viewer.session.asset_path == resolve(name)
         assert viewer.backend.stats.instances == viewer.session.source.instance_count
         assert viewer.backend.stats.instances > 0
+
+
+def test_viewer_and_editor_render_the_same_loaded_model_at_the_same_state():
+    asset = resolve("parity_scene")
+    images = []
+    bounds = []
+    entry_cameras = []
+    camera = CameraView(
+        eye=np.array((-4.0, -4.0, 3.0), np.float32),
+        target=np.array((0.0, 0.0, 0.5), np.float32),
+        up=np.array((0.0, 0.0, 1.0), np.float32),
+        fov_y=float(np.radians(45.0)),
+        near=0.01,
+        far=50.0,
+        aspect=4.0 / 3.0,
+    )
+    for mode in ("viewer", "editor"):
+        instance = (
+            build(resolve("test_scene"), paused=True, vsync=False, width=960, height=640)
+            if mode == "viewer"
+            else build_editor(vsync=False, width=960, height=640)
+        )
+        try:
+            instance.app.set_fixed_render_size(640, 480)
+            instance.sync()
+            instance.sync()
+            assert instance.app.load_model(asset).ok
+            instance.sync()
+            instance.sync()
+            hint = instance.session.camera_hint()
+            assert hint is not None
+            entry_camera = instance.app.camera.view()
+            np.testing.assert_allclose(entry_camera.eye, hint.eye, atol=1e-6)
+            np.testing.assert_allclose(entry_camera.target, hint.target, atol=1e-6)
+            entry_cameras.append(entry_camera)
+            instance.backend.set_camera(camera)
+            instance.backend.highlight(0)
+            instance.backend.update(instance.session.frame)
+            instance.backend.debug.clear()
+            assert instance.backend.render() is not None
+            images.append(instance.backend.target.read_color(flip=True).copy())
+            bounds.append(
+                (instance.session.source.scene_center.copy(), instance.session.source.scene_extent)
+            )
+        finally:
+            instance.release()
+
+    assert bounds[1][0] == pytest.approx(bounds[0][0])
+    assert bounds[1][1] == pytest.approx(bounds[0][1])
+    np.testing.assert_allclose(entry_cameras[1].eye, entry_cameras[0].eye, atol=1e-6)
+    np.testing.assert_allclose(entry_cameras[1].target, entry_cameras[0].target, atol=1e-6)
+    delta = np.abs(images[1].astype(np.int16) - images[0].astype(np.int16))
+    # Separate GL contexts can round a few shadow-edge samples by one UNORM step.
+    assert int(delta.max()) <= 1
+    assert float(delta.mean()) < 1e-3
+
+
+def _replacement_camera(source) -> CameraView:
+    center = np.asarray(source.scene_center, np.float32)
+    extent = max(float(source.scene_extent), 1.0)
+    return CameraView(
+        eye=center + extent * np.array([2.4, -3.0, 1.8], np.float32),
+        target=center,
+        up=np.array([0.0, 0.0, 1.0], np.float32),
+        fov_y=float(np.radians(45.0)),
+        near=max(extent * 0.01, 1e-3),
+        far=max(extent * 40.0, 50.0),
+        aspect=4.0 / 3.0,
+    )
+
+
+def _render_loaded_model(instance, camera: CameraView) -> np.ndarray:
+    instance.app.set_fixed_render_size(320, 240)
+    instance.backend.set_camera(camera)
+    instance.backend.highlight(0)
+    instance.backend.update(instance.session.frame)
+    instance.backend.debug.clear()
+    assert instance.backend.render() is not None
+    return instance.backend.target.read_color(flip=True).copy()
+
+
+def test_repeated_model_replacement_matches_fresh_renderer_state():
+    assets = tuple(
+        resolve(name)
+        for name in ("image_light", "parity_texture", "empty", "parity_scene", "test_scene")
+    )
+    baselines = {}
+    for asset in assets:
+        fresh = build(asset, paused=True, vsync=False, width=640, height=480)
+        try:
+            fresh.sync()
+            camera = _replacement_camera(fresh.session.source)
+            baselines[asset] = (
+                _render_loaded_model(fresh, camera),
+                camera,
+                fresh.session.source.scene_center.copy(),
+                fresh.session.source.scene_extent,
+            )
+        finally:
+            fresh.release()
+
+    instance = build(resolve("test_scene"), paused=True, vsync=False, width=640, height=480)
+    try:
+        instance.sync()
+        _render_loaded_model(instance, _replacement_camera(instance.session.source))
+        for asset in assets:
+            assert instance.app.load_model(asset).ok
+            instance.sync()
+            expected, camera, center, extent = baselines[asset]
+            assert instance.session.source.scene_center == pytest.approx(center)
+            assert instance.session.source.scene_extent == pytest.approx(extent)
+            actual = _render_loaded_model(instance, camera)
+            delta = np.abs(actual.astype(np.int16) - expected.astype(np.int16))
+            assert int(delta.max()) <= 1, asset.name
+            assert float(delta.mean()) < 1e-3, asset.name
+    finally:
+        instance.release()
+
+
+def test_camera_preview_matches_the_main_backend_for_the_same_camera_and_size():
+    instance = build(resolve("parity_scene"), paused=True, vsync=False, width=960, height=640)
+    preview = CameraPreview()
+    try:
+        instance.app.set_fixed_render_size(640, 480)
+        instance.sync()
+        camera = instance.session.camera_view(0).with_aspect(640.0 / 480.0)
+        frame = instance.session.frame
+        instance.backend.set_camera(camera)
+        instance.backend.highlight(0)
+        instance.backend.update(frame)
+        instance.backend.debug.clear()
+        assert instance.backend.render() is not None
+        main = instance.backend.target.read_color(flip=True).copy()
+
+        preview.update(
+            instance.backend,
+            instance.session.source,
+            instance.session.structure_generation,
+            frame,
+            camera,
+            (640, 480),
+        )
+        peer = preview._backend
+        assert peer is not None
+        assert np.array_equal(peer.target.read_color(flip=True), main)
+    finally:
+        preview.release()
+        instance.release()
 
 
 def test_viewer_frames_reuse_adapter_buffers_without_python_growth():

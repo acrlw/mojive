@@ -7,7 +7,15 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..types import DEFAULT_MATERIAL, InstancePoseSource, InstanceVisual, MeshKey, MeshShape
+from ..types import (
+    DEFAULT_MATERIAL,
+    InstancePoseSource,
+    InstanceVisual,
+    MeshKey,
+    MeshShape,
+    ShadingModel,
+    TextureKind,
+)
 from .scene import RenderScene, SceneBuilder
 
 if TYPE_CHECKING:
@@ -220,6 +228,7 @@ class SceneSourceBuilder:
             ls_i[:3, :3] = local[:3, :3] * size[None, :]
 
             tex = self._tex_coef(mat, size, infinite, key, local)
+            cube = self._cube_coef(src, mat, size, key, local)
             slot = sb.add(
                 mesh=key,
                 matid=matid,
@@ -236,6 +245,7 @@ class SceneSourceBuilder:
                 ),
                 object_id=int(src.geom_object_id[i]),
                 tex_coef=tex,
+                cube_coef=cube,
                 infinite_plane=infinite,
             )
             slots.append(int(src.geom_source[i]) if len(src.geom_source) > i else i)
@@ -268,7 +278,14 @@ class SceneSourceBuilder:
 
         cam = camera if camera is not None else self._scene.camera
         lights = src.lights
-        self._scene = sb.build(cam, lights, src.scene_extent, src.scene_center, src.shadow_clip)
+        self._scene = sb.build(
+            cam,
+            lights,
+            src.scene_extent,
+            src.scene_center,
+            src.shadow_clip,
+            getattr(src, "shading_model", ShadingModel.LINEAR),
+        )
         self._write_index = sb.write_index.astype(np.intp)
         self._source_instances = np.asarray(source_instances, np.intp)
         self._base_colors = self._scene.colors.copy()
@@ -387,6 +404,26 @@ class SceneSourceBuilder:
             coef[3] = coef[1]
             coef[1] = -coef[1]
         return coef
+
+    @staticmethod
+    def _cube_coef(src, mat, size: np.ndarray, key: MeshKey, local: np.ndarray) -> np.ndarray:
+        """Return MuJoCo object-linear cubemap coordinates for one primitive part."""
+        texture = src.textures.get(mat.texture) if mat.texture is not None else None
+        if texture is None or texture.kind is not TextureKind.CUBE:
+            return np.zeros(4, np.float32)
+
+        scale = np.asarray(size if mat.tex_uniform else np.ones(3), np.float32).copy()
+        offset = 0.0
+        if key.shape is MeshShape.CAPSULE_CAP:
+            cap_offset = float(local[2, 3])
+            if mat.tex_uniform:
+                offset = cap_offset
+            else:
+                radius = max(abs(float(size[0])), 1e-7)
+                offset = cap_offset / radius
+            if float(local[2, 2]) < 0.0:
+                scale[1:] *= -1.0
+        return np.array([scale[0], scale[1], scale[2], offset], np.float32)
 
     @staticmethod
     def _linear_color(rgba) -> np.ndarray:

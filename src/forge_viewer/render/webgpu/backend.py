@@ -16,14 +16,14 @@ import wgpu
 from ...adapters.base import SceneFrame, SceneSource
 from ...gizmo import GizmoFrame
 from ...log import get_logger
-from ...types import CameraView, ViewportImage
+from ...types import CameraView, ShadingModel, ViewportImage
 from ..backend import BackendCaps, DebugView, FrameMode, LabelMode, RenderFlag, RenderStats
 from ..builder import SceneSourceBuilder
 from ..debugdraw import DebugDraw
 from ..mesh import all_builtin
 from ..overlay import OverlayPublisher, OverlayState
 from ..scene import RenderScene
-from .instances import InstanceStore
+from .instances import INSTANCE_STRIDE, InstanceStore
 from .lighting import (
     IMAGE_LIGHT_REFERENCE_INTENSITY,
     LIGHTS_BYTES,
@@ -163,6 +163,7 @@ class WgpuBackend:
         device: wgpu.GPUDevice | None = None,
         *,
         gpu_timing: bool = True,
+        scene_shader_code: str | None = None,
     ) -> None:
         # The viewer window shares this device (surface configuration and the
         # imgui texture binding must match the device that rendered the scene).
@@ -175,7 +176,8 @@ class WgpuBackend:
         self._configured_samples = self.target.samples
         self.timing = WgpuTiming(self.device, enabled=gpu_timing)
 
-        self._module = self.device.create_shader_module(code=load_wgsl(*_SCENE_SHADERS))
+        self._scene_shader_code = scene_shader_code or load_wgsl(*_SCENE_SHADERS)
+        self._module = self.device.create_shader_module(code=self._scene_shader_code)
         self._shader_watch = WgslWatch(*_SCENE_SHADERS)
         self._shader_reload_error = ""
         self._hot_reload = False
@@ -207,6 +209,16 @@ class WgpuBackend:
                 },
                 {
                     "binding": 1,
+                    "visibility": wgpu.ShaderStage.FRAGMENT,
+                    "sampler": {"type": "filtering"},
+                },
+                {
+                    "binding": 2,
+                    "visibility": wgpu.ShaderStage.FRAGMENT,
+                    "texture": {"sample_type": "float", "view_dimension": "cube"},
+                },
+                {
+                    "binding": 3,
                     "visibility": wgpu.ShaderStage.FRAGMENT,
                     "sampler": {"type": "filtering"},
                 },
@@ -245,7 +257,7 @@ class WgpuBackend:
             bind_group_layouts=[self._group0_layout]
         )
         self._pipelines: dict[tuple, wgpu.GPURenderPipeline] = {}
-        self._texture_groups: dict[int, wgpu.GPUBindGroup] = {}
+        self._texture_groups: dict[tuple[int, int], wgpu.GPUBindGroup] = {}
         self._image_light_groups: dict[int, wgpu.GPUBindGroup] = {}
         self._skybox = SkyboxPass(self.device, self.target.samples)
         self._outline = OutlinePass(self.device, self.target.samples)
@@ -271,7 +283,6 @@ class WgpuBackend:
         self._flags[RenderFlag.WIREFRAME] = False
         self._flags[RenderFlag.ADDITIVE] = False
         self._flags[RenderFlag.FOG] = False
-        self._flags[RenderFlag.HAZE] = False
         self._flags[RenderFlag.CONTACTPOINT] = False
         self._flags[RenderFlag.CONTACTFORCE] = False
         self._flags[RenderFlag.CONTACTSPLIT] = False
@@ -318,7 +329,15 @@ class WgpuBackend:
     # -- capabilities ---------------------------------------------------------
 
     def create_peer(self, width: int, height: int) -> WgpuBackend:
-        return WgpuBackend(width, height, samples=1, device=self.device)
+        peer = WgpuBackend(
+            width,
+            height,
+            samples=self._configured_samples,
+            device=self.device,
+            scene_shader_code=self._scene_shader_code,
+        )
+        peer._hot_reload = self._hot_reload
+        return peer
 
     def _build_caps(self) -> BackendCaps:
         info = self.device.adapter.info
@@ -650,7 +669,7 @@ class WgpuBackend:
                     "resource": {
                         "buffer": self.instances.buffer,
                         "offset": 0,
-                        "size": self.instances.capacity * 128,
+                        "size": self.instances.capacity * INSTANCE_STRIDE,
                     },
                 },
                 {
@@ -662,9 +681,10 @@ class WgpuBackend:
 
     def _texture_group(self, name: str | None) -> wgpu.GPUBindGroup:
         view = self.textures.get(name) if name else None
-        if view is None:
-            view = self.textures.white
-        key = id(view)
+        cube = self.textures.cube(name) if name else None
+        view = view if view is not None else self.textures.white
+        cube_view = cube[0] if cube is not None else self.textures.white_cube
+        key = (id(view), id(cube_view))
         group = self._texture_groups.get(key)
         if group is None:
             group = self.device.create_bind_group(
@@ -672,6 +692,8 @@ class WgpuBackend:
                 entries=[
                     {"binding": 0, "resource": view},
                     {"binding": 1, "resource": self.textures.sampler},
+                    {"binding": 2, "resource": cube_view},
+                    {"binding": 3, "resource": self.textures.cube_sampler},
                 ],
             )
             self._texture_groups[key] = group
@@ -773,7 +795,15 @@ class WgpuBackend:
             float(cam.near),
             float(cam.far),
         )
-        f["flags"][:] = (1.0 if cam.orthographic else 0.0, linear_out, 0.0, 0.0)
+        classic = bool(
+            self._scene is not None and self._scene.shading_model is ShadingModel.MUJOCO_CLASSIC
+        )
+        f["flags"][:] = (
+            1.0 if cam.orthographic else 0.0,
+            linear_out,
+            1.0 if classic else 0.0,
+            0.0,
+        )
         f["ids"][:] = (self._selected, light_count, 0, 0)
         f["image_light"][:] = (*image_light, 0.0, 0.0)
         f["clip_plane"][:] = clip_plane
@@ -1274,7 +1304,8 @@ class WgpuBackend:
         if not watch.changed():
             return
         try:
-            module = self.device.create_shader_module(code=load_wgsl(*watch.names))
+            code = load_wgsl(*watch.names)
+            module = self.device.create_shader_module(code=code)
         except Exception as e:
             msg = str(e)
             if msg != self._shader_reload_error:
@@ -1282,6 +1313,7 @@ class WgpuBackend:
                 log.error("Scene shaders failed to compile; keeping the previous version:\n{}", msg)
         else:
             self._module = module
+            self._scene_shader_code = code
             self._pipelines.clear()
             self._shader_reload_error = ""
             log.info("Scene shaders reloaded")

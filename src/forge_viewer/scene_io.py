@@ -225,6 +225,7 @@ def _environment_document(environment: Environment) -> dict:
         "haze_color": environment.haze_color.tolist(),
         "haze_density": environment.haze_density,
         "horizon_haze": environment.horizon_haze,
+        "horizon_haze_slices": environment.horizon_haze_slices,
     }
 
 
@@ -238,6 +239,7 @@ def _environment_from_document(item: dict) -> Environment:
         haze_color=_f32(item["haze_color"], (3,)),
         haze_density=float(item["haze_density"]),
         horizon_haze=bool(item.get("horizon_haze", False)),
+        horizon_haze_slices=max(3, int(item.get("horizon_haze_slices", 64))),
     )
 
 

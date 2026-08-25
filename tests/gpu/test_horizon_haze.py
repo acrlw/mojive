@@ -12,6 +12,78 @@ from forge_viewer.types import CameraView
 pytestmark = pytest.mark.gpu
 
 
+def test_mujoco_classic_skybox_depth_clips_far_infinite_plane(tmp_path):
+    scene = tmp_path / "skybox-depth.xml"
+    scene.write_text(
+        """
+        <mujoco>
+          <visual><map zfar="30"/></visual>
+          <asset>
+            <texture type="skybox" builtin="gradient" width="64" height="384"
+                     rgb1="0.2 0.4 0.7" rgb2="0.02 0.04 0.08"/>
+            <texture name="grid" type="2d" builtin="flat" width="8" height="8"
+                     rgb1="0.7 0.1 0.05"/>
+            <material name="grid" texture="grid" texuniform="true"/>
+          </asset>
+          <worldbody>
+            <geom name="floor" type="plane" size="0 0 .05" material="grid"/>
+          </worldbody>
+        </mujoco>
+        """,
+        encoding="utf-8",
+    )
+    with OffscreenHarness(scene, 320, 240) as harness:
+        camera = CameraView(
+            eye=np.array([0.0, -5.0, 1.0], np.float32),
+            target=np.array([0.0, 0.0, 0.7], np.float32),
+            up=np.array([0.0, 0.0, 1.0], np.float32),
+            near=0.01,
+            far=50.0,
+            aspect=4.0 / 3.0,
+        )
+        harness.camera = camera
+        harness.backend.set_camera(camera)
+        harness.backend.set_flag(RenderFlag.SKYBOX, True)
+        harness.backend.set_flag(RenderFlag.HAZE, False)
+        harness.step_and_render(0)
+        visible = harness.backend.target.read_color(flip=True)[..., :3].copy()
+
+        floor = next(node for node in harness.source.nodes if node.name == "floor")
+        assert harness.backend._builder.set_visible(floor.node_id, False)
+        harness.backend.set_render_scene(harness.backend._builder.scene)
+        harness.step_and_render(0)
+        hidden = harness.backend.target.read_color(flip=True)[..., :3].copy()
+
+    height, width = visible.shape[:2]
+    y, x = np.mgrid[0:height, 0:width]
+    ndc_x = 2.0 * (x + 0.5) / width - 1.0
+    ndc_y = 1.0 - 2.0 * (y + 0.5) / height
+    forward = camera.target - camera.eye
+    forward /= np.linalg.norm(forward)
+    right = np.cross(forward, camera.up)
+    right /= np.linalg.norm(right)
+    true_up = np.cross(right, forward)
+    tan_half = np.tan(camera.fov_y * 0.5)
+    rays = (
+        forward
+        + ndc_x[..., None] * tan_half * camera.aspect * right
+        + ndc_y[..., None] * tan_half * true_up
+    )
+    rays /= np.linalg.norm(rays, axis=2, keepdims=True)
+    plane_distance = -float(camera.eye[2]) / np.minimum(rays[..., 2], -1e-9)
+    view_depth = plane_distance * np.sum(rays * forward, axis=2)
+    cylinder_distance = (camera.far * 0.70) / np.maximum(
+        np.hypot(rays[..., 0], rays[..., 1]), np.abs(rays[..., 2])
+    )
+    behind_skybox = (
+        (rays[..., 2] < -1e-4)
+        & (plane_distance > cylinder_distance * 1.05)
+        & (view_depth < camera.far * 0.95)
+    )
+    assert np.count_nonzero(behind_skybox) > 100
+    assert np.max(np.abs(visible.astype(np.int16) - hidden.astype(np.int16))[behind_skybox]) <= 1
+
+
 def test_mujoco_haze_changes_sky_below_horizon_without_fogging_objects(tmp_path):
     scene = tmp_path / "horizon-haze.xml"
     scene.write_text(
@@ -35,6 +107,8 @@ def test_mujoco_haze_changes_sky_below_horizon_without_fogging_objects(tmp_path)
         encoding="utf-8",
     )
     with OffscreenHarness(scene, 320, 240) as harness:
+        assert harness.backend.get_flag(RenderFlag.HAZE)
+        assert harness.source.lights.horizon_haze_slices == 28
         camera = CameraView(
             eye=np.array([0.0, -5.0, 1.0], np.float32),
             target=np.array([0.0, 0.0, 0.7], np.float32),
@@ -58,3 +132,49 @@ def test_mujoco_haze_changes_sky_below_horizon_without_fogging_objects(tmp_path)
     assert np.count_nonzero(sphere) > 100
     assert np.count_nonzero(difference > 5) > 100
     assert np.count_nonzero(difference[sphere]) == 0
+    target = np.array([0.9, 0.5, 0.1]) * 255.0
+    assert np.abs(haze.astype(np.float32) - target).max(axis=2).min() <= 2.0
+
+
+def test_mujoco_haze_writes_depth_before_transparent_geometry(tmp_path):
+    scene = tmp_path / "haze-transparent-depth.xml"
+    scene.write_text(
+        """
+        <mujoco>
+          <statistic center="0 3 0.5" extent="1"/>
+          <visual>
+            <map znear="0.01" zfar="10" haze="0.3"/>
+            <rgba haze="0.15 0.25 0.35 1"/>
+          </visual>
+          <asset>
+            <texture type="skybox" builtin="flat" rgb1="0 0 0"
+                     width="32" height="256"/>
+            <material name="probe" rgba="1 0 1 0.5" emission="1"/>
+          </asset>
+          <worldbody>
+            <geom type="plane" size="0 0 0.05" rgba="0.05 0.05 0.05 1"/>
+            <geom type="sphere" pos="0 6 0.4" size="0.25" material="probe"/>
+            <camera name="probe" pos="0 0 1" xyaxes="1 0 0 0 0.1 0.995" fovy="45"/>
+          </worldbody>
+        </mujoco>
+        """,
+        encoding="utf-8",
+    )
+    with OffscreenHarness(scene, 640, 480) as harness:
+        camera = harness.adapter.camera_view(0)
+        assert camera is not None
+        camera = camera.with_aspect(4.0 / 3.0)
+        harness.camera = camera
+        harness.backend.set_camera(camera)
+
+        counts = []
+        for enabled in (False, True):
+            harness.backend.set_flag(RenderFlag.HAZE, enabled)
+            harness.step_and_render(0)
+            image = harness.backend.target.read_color(flip=True)[..., :3].astype(np.int16)
+            magenta = (image[..., 0] > image[..., 1] + 30) & (image[..., 2] > image[..., 1] + 30)
+            counts.append(int(np.count_nonzero(magenta)))
+
+    clear_count, haze_count = counts
+    assert clear_count > 1_000
+    assert clear_count * 0.25 < haze_count < clear_count * 0.65

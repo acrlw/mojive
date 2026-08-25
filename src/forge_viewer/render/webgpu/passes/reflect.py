@@ -9,7 +9,7 @@ from .... import math3d as M
 from ....types import CameraView, MeshShape
 from ...backend import RenderFlag
 from ...scene import RenderScene
-from ..instances import InstanceStore
+from ..instances import INSTANCE_STRIDE, InstanceStore
 from ..lighting import LIGHTS_BYTES, LightUniforms
 from ..targets import FRAME_BYTES, FRAME_DTYPE, proj_matrix_wgpu
 from ..timing import TimestampWriter
@@ -298,7 +298,7 @@ class ReflectPass:
                         "resource": {
                             "buffer": instances.buffer,
                             "offset": 0,
-                            "size": instances.capacity * 128,
+                            "size": instances.capacity * INSTANCE_STRIDE,
                         },
                     },
                     {

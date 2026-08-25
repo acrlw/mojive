@@ -43,12 +43,10 @@ def _component_value_editor(label: str, value: str, choices: tuple[str, ...]) ->
 def gizmo_refusal_reason(
     paused: bool,
     posable: bool,
-    inverse_kinematics: bool = False,
-    ik_target: bool = False,
 ) -> str | None:
     if not paused:
         return GIZMO_REFUSAL_RUNNING
-    if not posable and not (inverse_kinematics and ik_target):
+    if not posable:
         return GIZMO_REFUSAL_DRIVEN
     return None
 
@@ -505,22 +503,18 @@ class InspectorPanel(Panel):
 
     def _gizmo_reason(self, ctx: PanelContext, node: SceneNode) -> None:
         caps = ctx.session.adapter.caps
-        ik_target = node.ik_target
-        reason = gizmo_refusal_reason(
-            ctx.session.paused, node.posable, caps.inverse_kinematics, ik_target
-        )
+        reason = gizmo_refusal_reason(ctx.session.paused, node.posable)
         imgui.separator()
-        if not caps.write_pose and not (caps.inverse_kinematics and ik_target):
+        if not caps.write_pose:
             imgui.text_colored(
                 imgui.ImVec4(*ctx.theme.warning),
                 f"{caps.name} cannot edit this transform",
             )
             return
         if reason is None:
-            operation = "IK gizmo" if not node.posable else "gizmo"
             imgui.text_colored(
                 imgui.ImVec4(*ctx.theme.primary),
-                f"{operation}: active ({ctx.gizmo.space} frame; g/r mode, t frame)",
+                f"gizmo: active ({ctx.gizmo.space} frame; g/r mode, t frame)",
             )
             return
         imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), "gizmo hidden")
@@ -874,6 +868,7 @@ class InspectorPanel(Panel):
                         haze_color=np.asarray(haze_color, np.float32),
                         haze_density=float(haze_density),
                         horizon_haze=environment.horizon_haze,
+                        horizon_haze_slices=environment.horizon_haze_slices,
                     )
                 ),
             )

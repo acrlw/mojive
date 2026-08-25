@@ -234,6 +234,7 @@ def _environment_to_json(environment: Environment) -> dict[str, Any]:
         "haze_color": _array(environment.haze_color),
         "haze_density": environment.haze_density,
         "horizon_haze": environment.horizon_haze,
+        "horizon_haze_slices": environment.horizon_haze_slices,
     }
 
 
@@ -247,6 +248,7 @@ def _environment_from_json(value: dict[str, Any]) -> Environment:
         haze_color=np.asarray(value["haze_color"], np.float32),
         haze_density=float(value["haze_density"]),
         horizon_haze=bool(value.get("horizon_haze", False)),
+        horizon_haze_slices=max(3, int(value.get("horizon_haze_slices", 64))),
     )
 
 

@@ -15,7 +15,7 @@
 // Shadow sampling lives in shadow_sample.wgsl (prepended by load_wgsl); the
 // GLSL USE_SHADOW define becomes runtime gating on the shadow_counts fields.
 
-// Keep in sync with instances.py (128-byte stride) and targets.py (frame block).
+// Keep in sync with instances.py (144-byte stride) and targets.py (frame block).
 struct Frame {
     view_proj: mat4x4f,         // WebGPU-clip view-projection
     view: mat4x4f,
@@ -30,7 +30,7 @@ struct Frame {
     highlight_color: vec4f,
     highlight: vec4f,           // x blend, y emission
     shading: vec4f,             // exposure, tonemap on, near, far
-    flags: vec4f,               // x orthographic, y linear out (reflection pass)
+    flags: vec4f,               // x orthographic, y reflection output, z MuJoCo classic
     ids: vec4u,                 // x selected id, y light count
     image_light: vec4f,         // x gain (intensity / 5000), y max mip level
     clip_plane: vec4f,          // reflection clip plane; (0,0,0,1) keeps everything
@@ -41,11 +41,11 @@ struct Instance {
     model: mat4x4f,
     color: vec4f,               // linear rgba
     material: vec4f,            // emission, specular, shininess, reflectance
-    texcoef: vec4f,             // scale/offset; z=1 selects box face-axis mapping
+    texcoef: vec4f,             // xy scale; z=1 box mapping, zw<0 infinite-plane light grid
+    cubecoef: vec4f,            // xyz object-linear scale, w capsule-axis offset
     object_id: u32,
-    // No trailing pad field: a vec3f member would push the array stride to
-    // 144 (vec3 alignment is 16 in WGSL).  The struct ends at 116 and rounds
-    // up to a 128-byte array stride, matching instances.py's padded dtype.
+    // The struct ends at 132 and rounds up to a 144-byte array stride,
+    // matching instances.py's padded dtype.
 };
 
 struct Lights {
@@ -74,6 +74,8 @@ struct Lights {
 @group(0) @binding(2) var<storage, read> lights: Lights;
 @group(1) @binding(0) var albedo_tex: texture_2d<f32>;
 @group(1) @binding(1) var albedo_sampler: sampler;
+@group(1) @binding(2) var cube_albedo_tex: texture_cube<f32>;
+@group(1) @binding(3) var cube_albedo_sampler: sampler;
 @group(2) @binding(0) var image_light_tex: texture_cube<f32>;
 @group(2) @binding(1) var image_light_sampler: sampler;
 // Planar reflection color targets (mirrors u_reflection0-3 in scene_body.glsl);
@@ -91,6 +93,17 @@ fn srgb_to_linear3(c: vec3f) -> vec3f {
     let lo = c / 12.92;
     let hi = pow((max(c, vec3f(0.0)) + 0.055) / 1.055, vec3f(2.4));
     return select(hi, lo, c <= vec3f(0.04045));
+}
+
+fn linear_to_srgb3(c_in: vec3f) -> vec3f {
+    let c = max(c_in, vec3f(0.0));
+    let lo = c * 12.92;
+    let hi = 1.055 * pow(c, vec3f(1.0 / 2.4)) - 0.055;
+    return select(hi, lo, c <= vec3f(0.0031308));
+}
+
+fn lighting_color(c: vec3f) -> vec3f {
+    return select(c, linear_to_srgb3(c), frame.flags.z > 0.5);
 }
 
 fn gamma_encode(c: vec3f) -> vec3f {
@@ -129,6 +142,7 @@ fn finish_color(c_in: vec3f, exposure: f32, tonemap_on: bool) -> vec3f {
 fn light_term(
     albedo: vec3f, n: vec3f, l: vec3f, view_dir: vec3f,
     diffuse_rgb: vec3f, specular_rgb: vec3f,
+    specular_mod: vec3f,
     specular: f32, shininess: f32, atten: f32, shadow: f32,
 ) -> vec3f {
     let ndl = max(dot(n, l), 0.0);
@@ -137,16 +151,32 @@ fn light_term(
     }
     let h = normalize(l + view_dir);
     let spec = specular * pow(max(dot(n, h), 0.0), max(shininess * 128.0, 1e-3));
-    return atten * shadow * ndl * (diffuse_rgb * albedo + specular_rgb * spec);
+    if frame.flags.z > 0.5 {
+        return atten * shadow * (
+            ndl * lighting_color(diffuse_rgb) * albedo
+                + lighting_color(specular_rgb) * spec * specular_mod
+        );
+    }
+    return atten * shadow * ndl * (
+        lighting_color(diffuse_rgb) * albedo
+            + lighting_color(specular_rgb) * spec * specular_mod
+    );
 }
 
 fn shade(
     albedo: vec3f, normal: vec3f, world_pos: vec3f,
     emission: f32, specular: f32, shininess: f32, view_depth: f32,
+    texture_color: vec3f,
 ) -> vec3f {
     let n = normalize(normal);
     let view_dir = normalize(frame.camera_pos.xyz - world_pos);
-    var color = ambient_linear(frame.ambient.xyz) * albedo;
+    let ambient = select(
+        ambient_linear(frame.ambient.xyz),
+        clamp(frame.ambient.xyz, vec3f(0.0), vec3f(1.0)),
+        frame.flags.z > 0.5,
+    );
+    var color = ambient * albedo;
+    let specular_mod = select(vec3f(1.0), texture_color, frame.flags.z > 0.5);
 
     // Image-based lighting, mirroring lighting.glsl: diffuse irradiance comes
     // from the most blurred mip, specular from the roughness-selected LOD.
@@ -161,7 +191,10 @@ fn shade(
         let specular_ibl = textureSampleLevel(
             image_light_tex, image_light_sampler, cube_r, roughness * frame.image_light.y
         ).rgb;
-        color += frame.image_light.x * (diffuse_ibl * albedo + specular * specular_ibl);
+        color += frame.image_light.x * (
+            lighting_color(diffuse_ibl) * albedo
+                + specular * lighting_color(specular_ibl) * specular_mod
+        );
     }
 
     let light_count = i32(frame.ids.y);
@@ -201,6 +234,7 @@ fn shade(
         color += light_term(
             albedo, n, l, view_dir,
             lights.diffuse[i].rgb, lights.specular[i].rgb,
+            specular_mod,
             specular, shininess, atten, shadow,
         );
     }
@@ -209,6 +243,7 @@ fn shade(
         color += light_term(
             albedo, n, -normalize(frame.camera_dir.xyz), view_dir,
             frame.headlight_diffuse.rgb, frame.headlight_specular.rgb,
+            specular_mod,
             specular, shininess, 1.0, 1.0,
         );
     }
@@ -240,6 +275,8 @@ struct SceneOut {
     @location(5) view_depth: f32,
     @location(6) selected: f32,
     @location(7) reflect: f32,       // planar reflection coefficient (encoded < 0)
+    @location(8) cube: vec3f,
+    @location(9) cube_on: f32,
 };
 
 @vertex
@@ -280,6 +317,8 @@ fn scene_vertex(position: vec3f, normal: vec3f, uv: vec2f, instance_index: u32) 
         texcoord = uv * inst.texcoef.xy + inst.texcoef.zw;
     }
     out.uv = texcoord;
+    out.cube = position * inst.cubecoef.xyz + vec3f(0.0, 0.0, inst.cubecoef.w);
+    out.cube_on = select(0.0, 1.0, dot(abs(inst.cubecoef.xyz), vec3f(1.0)) > 0.0);
     out.color = inst.color;
     out.material = inst.material.xyz;
     // scene.vert:60-62: negative reflectance encodes (layer, top-face); the
@@ -293,21 +332,46 @@ fn scene_vertex(position: vec3f, normal: vec3f, uv: vec2f, instance_index: u32) 
     return out;
 }
 
-fn scene_albedo(in: SceneOut) -> vec4f {
-    var base = in.color * textureSample(albedo_tex, albedo_sampler, in.uv);
+struct SurfaceSample {
+    base: vec4f,
+    texture_color: vec3f,
+};
+
+fn scene_surface(in: SceneOut) -> SurfaceSample {
+    var texel: vec4f;
+    if in.cube_on > 0.5 {
+        texel = textureSample(cube_albedo_tex, cube_albedo_sampler, in.cube);
+    } else {
+        texel = textureSample(albedo_tex, albedo_sampler, in.uv);
+    }
+    var surface = in.color.rgb;
+    if frame.flags.z > 0.5 {
+        surface = gamma_encode(surface);
+        texel = vec4f(linear_to_srgb3(texel.rgb), texel.a);
+    }
+    var base = vec4f(surface * texel.rgb, in.color.a * texel.a);
     if in.selected > 0.5 {
         let albedo = mix(base.rgb, frame.highlight_color.xyz, frame.highlight.x);
         base = vec4f(albedo, base.a);
     }
-    return base;
+    var out: SurfaceSample;
+    out.base = base;
+    out.texture_color = texel.rgb;
+    return out;
 }
 
 fn apply_atmosphere(lit_in: vec3f, view_depth: f32) -> vec3f {
     var lit = lit_in;
     let fog = frame.fog.z * smoothstep(frame.fog.x, max(frame.fog.y, frame.fog.x + 1e-6), view_depth);
     let haze = 1.0 - exp(-max(frame.fog.w, 0.0) * max(view_depth, 0.0));
-    lit = mix(lit, srgb_to_linear3(frame.fog_color.xyz), fog);
-    lit = mix(lit, srgb_to_linear3(frame.haze_color.xyz), haze);
+    let fog_color = select(
+        srgb_to_linear3(frame.fog_color.xyz), frame.fog_color.xyz, frame.flags.z > 0.5
+    );
+    let haze_color = select(
+        srgb_to_linear3(frame.haze_color.xyz), frame.haze_color.xyz, frame.flags.z > 0.5
+    );
+    lit = mix(lit, fog_color, fog);
+    lit = mix(lit, haze_color, haze);
     return lit;
 }
 
@@ -317,7 +381,8 @@ fn fs_scene(in: SceneOut) -> @location(0) vec4f {
 }
 
 fn scene_fragment(in: SceneOut) -> vec4f {
-    let base = scene_albedo(in);
+    let surface = scene_surface(in);
+    let base = surface.base;
     // gl_ClipDistance[0] port: drop fragments behind the reflection plane.
     // The main pass binds (0,0,0,1), which never discards.
     if dot(in.world, frame.clip_plane.xyz) + frame.clip_plane.w < 0.0 {
@@ -328,7 +393,8 @@ fn scene_fragment(in: SceneOut) -> vec4f {
         emission += frame.highlight.y;
     }
     var lit = shade(
-        base.rgb, in.normal, in.world, emission, in.material.y, in.material.z, in.view_depth
+        base.rgb, in.normal, in.world, emission, in.material.y, in.material.z, in.view_depth,
+        surface.texture_color,
     );
     // scene_body.glsl:72-89: negative reflectance carries (layer, top-face);
     // add the reflected color before atmosphere, in linear space.
@@ -358,14 +424,20 @@ fn scene_fragment(in: SceneOut) -> vec4f {
     if frame.flags.y > 0.5 {
         return vec4f(shaded, base.a);
     }
-    let rgb = finish_color(shaded, frame.shading.x, frame.shading.y > 0.5);
+    var rgb: vec3f;
+    if frame.flags.z > 0.5 {
+        rgb = clamp(shaded * frame.shading.x, vec3f(0.0), vec3f(1.0));
+    } else {
+        rgb = finish_color(shaded, frame.shading.x, frame.shading.y > 0.5);
+    }
     return vec4f(rgb, base.a);
 }
 
 @fragment
 fn fs_albedo(in: SceneOut) -> @location(0) vec4f {
-    let base = scene_albedo(in);
-    return vec4f(gamma_encode(base.rgb), base.a);
+    let base = scene_surface(in).base;
+    let albedo_rgb = select(gamma_encode(base.rgb), base.rgb, frame.flags.z > 0.5);
+    return vec4f(albedo_rgb, base.a);
 }
 
 @fragment
@@ -399,7 +471,9 @@ struct SceneWireOut {
     @location(5) view_depth: f32,
     @location(6) selected: f32,
     @location(7) reflect: f32,
-    @location(8) bary: vec3f,
+    @location(8) cube: vec3f,
+    @location(9) cube_on: f32,
+    @location(10) bary: vec3f,
 };
 
 @vertex
@@ -421,6 +495,8 @@ fn vs_scene_wire(
     out.view_depth = base.view_depth;
     out.selected = base.selected;
     out.reflect = base.reflect;
+    out.cube = base.cube;
+    out.cube_on = base.cube_on;
     out.bary = bary;
     return out;
 }
@@ -436,6 +512,8 @@ fn wire_base(in: SceneWireOut) -> SceneOut {
     out.view_depth = in.view_depth;
     out.selected = in.selected;
     out.reflect = in.reflect;
+    out.cube = in.cube;
+    out.cube_on = in.cube_on;
     return out;
 }
 

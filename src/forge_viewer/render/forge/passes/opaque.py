@@ -6,7 +6,7 @@ import moderngl
 import numpy as np
 
 from ....log import get_logger
-from ....types import LightKind, LightSet
+from ....types import LightKind, LightSet, ShadingModel
 from ...backend import DebugView, RenderFlag
 from .. import color
 from ..programs import ProgramSpec, UniformCache
@@ -48,6 +48,7 @@ WIRE_COLOR = (0.10, 0.10, 0.12)
 WIRE_WIDTH = 1.2
 
 TEX_ALBEDO = 0
+TEX_CUBE_ALBEDO = 8
 TEX_REFLECTIONS = (2, 4, 5, 6)
 TEX_IMAGE_LIGHT = 7
 IMAGE_LIGHT_REFERENCE_INTENSITY = 5000.0
@@ -63,12 +64,14 @@ def draw_buckets(ctx: PassContext, buckets) -> None:
     scene, store = ctx.scene, ctx.instances
     textured = ctx.flag(RenderFlag.TEXTURE)
     white = ctx.textures.white
+    white_cube = ctx.textures.white_cube
     for b in buckets:
         key = scene.bucket_keys[b]
         mat = scene.materials[key[1]] if key[1] < len(scene.materials) else None
         tex = ctx.textures.get(mat.texture) if (textured and mat is not None) else None
 
         (tex if isinstance(tex, moderngl.Texture) else white).use(TEX_ALBEDO)
+        (tex if isinstance(tex, moderngl.TextureCube) else white_cube).use(TEX_CUBE_ALBEDO)
         drawn = store.draw(b)
         if drawn:
             ctx.instance_count += drawn
@@ -197,6 +200,11 @@ class OpaquePass(BasePass):
         self._set_direct(prog, "u_camera_dir", tuple(float(v) for v in cam.forward()))
         u.set("u_selected_id", int(ctx.selected_id))
         u.set("u_texture", TEX_ALBEDO)
+        u.set("u_cube_texture", TEX_CUBE_ALBEDO)
+        u.set(
+            "u_classic_lighting",
+            1 if ctx.scene.shading_model is ShadingModel.MUJOCO_CLASSIC else 0,
+        )
         u.set("u_exposure", color.EXPOSURE)
         u.set("u_tonemap", 1 if ctx.flag(RenderFlag.TONEMAP) else 0)
         u.set("u_depth_range", (float(cam.near), float(cam.far)))

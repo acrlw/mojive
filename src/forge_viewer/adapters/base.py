@@ -12,8 +12,6 @@ import numpy as np
 from ..types import (
     CameraView,
     Environment,
-    IkOptions,
-    IkResult,
     Light,
     LightSet,
     Material,
@@ -21,6 +19,7 @@ from ..types import (
     MeshKey,
     MeshShape,
     MeshUpdate,
+    ShadingModel,
     TextureData,
 )
 
@@ -63,7 +62,6 @@ class SceneNode:
     object_id: int = 0
 
     posable: bool = False
-    ik_target: bool = False
 
     visible: bool = True
     body_index: int = -1
@@ -234,7 +232,6 @@ class AdapterCaps:
     write_qpos: bool = False
     perturb: bool = False
     raycast: bool = False
-    inverse_kinematics: bool = False
     state_snapshots: bool = False
     contacts: bool = False
     model_cameras: bool = False
@@ -575,6 +572,7 @@ class SceneSource:
     scene_extent: float = 1.0
     scene_center: np.ndarray = field(default_factory=lambda: np.zeros(3, np.float32))
     nodes: list[SceneNode] = field(default_factory=list)
+    shading_model: ShadingModel = ShadingModel.LINEAR
 
     @property
     def instance_count(self) -> int:
@@ -758,11 +756,6 @@ class SceneAdapterBase:
     def set_pose(self, node_id: int, position, rotation) -> bool:
         return False
 
-    def solve_ik(
-        self, node_id: int, target_position, target_rotation, options: IkOptions
-    ) -> IkResult:
-        return IkResult(False, message=f"{self.caps.name} does not support inverse kinematics")
-
     def capture_state(self) -> PhysicsState | None:
         """Capture a complete restorable physics state when supported."""
         return None
@@ -945,9 +938,6 @@ class SceneAdapter(Protocol):
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool: ...
     def set_ctrl(self, index: int, value: float) -> bool: ...
     def set_pose(self, node_id: int, position, rotation) -> bool: ...
-    def solve_ik(
-        self, node_id: int, target_position, target_rotation, options: IkOptions
-    ) -> IkResult: ...
     def capture_state(self) -> PhysicsState | None: ...
     def restore_state(self, state: PhysicsState) -> bool: ...
     def set_light(self, light_id: int, light) -> bool: ...

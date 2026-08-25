@@ -6,10 +6,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..types import CameraView, LightSet, Material, MeshKey
+from ..types import CameraView, LightSet, Material, MeshKey, ShadingModel
 
-# transform 16 + color 4 + material 4 + tex_coef 4 = 28
-INSTANCE_FLOATS = 28
+# transform 16 + color 4 + material 4 + tex_coef 4 + cube_coef 4 = 32
+INSTANCE_FLOATS = 32
 INSTANCE_STRIDE = INSTANCE_FLOATS * 4 + 4  # + object_id(uint32)
 
 BACKGROUND_ID = np.uint32(0)
@@ -26,6 +26,8 @@ class RenderScene:
 
     tex_coef: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
 
+    cube_coef: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
+
     object_id: np.ndarray = field(default_factory=lambda: np.zeros((0,), np.uint32))
 
     bucket: np.ndarray = field(default_factory=lambda: np.zeros((0,), np.int32))
@@ -38,6 +40,7 @@ class RenderScene:
     camera: CameraView = field(default_factory=CameraView)
     lights: LightSet = field(default_factory=LightSet)
     materials: tuple[Material, ...] = ()
+    shading_model: ShadingModel = ShadingModel.LINEAR
 
     scene_extent: float = 1.0
 
@@ -59,7 +62,15 @@ class RenderScene:
 
     def validate(self) -> None:
         n = self.count
-        for name in ("transforms", "colors", "material", "tex_coef", "object_id", "bucket"):
+        for name in (
+            "transforms",
+            "colors",
+            "material",
+            "tex_coef",
+            "cube_coef",
+            "object_id",
+            "bucket",
+        ):
             arr = getattr(self, name)
             if len(arr) != n:
                 raise ValueError(f"{name} length {len(arr)} does not match count {n}")
@@ -132,6 +143,7 @@ class SceneBuilder:
         material: np.ndarray,
         object_id: int,
         tex_coef: np.ndarray | None = None,
+        cube_coef: np.ndarray | None = None,
         infinite_plane: bool = False,
     ) -> int:
         self._rows.append(
@@ -144,6 +156,11 @@ class SceneBuilder:
                     np.array([1.0, 1.0, 0.0, 0.0], np.float32)
                     if tex_coef is None
                     else np.asarray(tex_coef, np.float32).reshape(4)
+                ),
+                "cube_coef": (
+                    np.zeros(4, np.float32)
+                    if cube_coef is None
+                    else np.asarray(cube_coef, np.float32).reshape(4)
                 ),
                 "object_id": np.uint32(object_id),
                 "infinite_plane": infinite_plane,
@@ -158,6 +175,7 @@ class SceneBuilder:
         scene_extent: float,
         scene_center: np.ndarray,
         shadow_clip: float = 1.0,
+        shading_model: ShadingModel = ShadingModel.LINEAR,
     ) -> RenderScene:
         n = len(self._rows)
 
@@ -205,6 +223,11 @@ class SceneBuilder:
             if n
             else np.zeros((0, 4), np.float32)
         )
+        scene.cube_coef = (
+            np.stack([r["cube_coef"] for r in self._rows])[order]
+            if n
+            else np.zeros((0, 4), np.float32)
+        )
         scene.object_id = (
             np.array([r["object_id"] for r in self._rows], np.uint32)[order]
             if n
@@ -222,6 +245,7 @@ class SceneBuilder:
         scene.opaque_buckets = tuple(b for b, k in enumerate(ordered) if not k[2])
         scene.transparent_buckets = tuple(b for b, k in enumerate(ordered) if k[2])
         scene.materials = tuple(self._materials)
+        scene.shading_model = shading_model
         scene.camera = camera
         scene.lights = lights
         scene.scene_extent = float(scene_extent)

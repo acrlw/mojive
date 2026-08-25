@@ -64,6 +64,8 @@ def test_forge_scene_round_trip_preserves_authored_content(tmp_path):
             fog_color=np.array([0.4, 0.5, 0.6], np.float32),
             fog_start=3.0,
             fog_end=18.0,
+            horizon_haze=True,
+            horizon_haze_slices=23,
         )
     )
     removed_camera = scene.add_camera("removed", CameraView())
@@ -87,6 +89,8 @@ def test_forge_scene_round_trip_preserves_authored_content(tmp_path):
     light_node = next(node for node in source.nodes if node.name == "fill")
     assert light_node.object_id == LIGHT_OBJECT_BASE + fill.light_id
     assert np.allclose(source.lights.fog_color, [0.4, 0.5, 0.6])
+    assert source.lights.horizon_haze
+    assert source.lights.horizon_haze_slices == 23
     assert [info.camera_id for info in restored.camera_infos()] == [camera]
     assert restored.camera_infos()[0].name == "shot"
     assert rendered.count == 2
