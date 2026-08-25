@@ -33,7 +33,16 @@ def render_all(scene: Path, out_dir: Path, width: int, height: int) -> dict:
     renderer = mujoco.Renderer(m, height=height, width=width)
     views: list[dict] = []
     try:
-        for name, azimuth, elevation, dist_factor in VIEWPOINTS:
+        viewpoints = (
+            (
+                "model-default",
+                float(m.vis.global_.azimuth),
+                float(m.vis.global_.elevation),
+                1.5,
+            ),
+            *VIEWPOINTS,
+        )
+        for name, azimuth, elevation, dist_factor in viewpoints:
             cam = mujoco.MjvCamera()
             mujoco.mjv_defaultCamera(cam)
             cam.type = mujoco.mjtCamera.mjCAMERA_FREE

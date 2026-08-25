@@ -210,7 +210,7 @@ fn shade(
             l = to_light / max(dist, 1e-6);
             let k = lights.atten[i].xyz;
             atten = 1.0 / max(k.x + k.y * dist + k.z * dist * dist, 1e-6);
-            if lights.atten[i].w > 0.0 && dist > lights.atten[i].w {
+            if frame.flags.z <= 0.5 && lights.atten[i].w > 0.0 && dist > lights.atten[i].w {
                 atten = 0.0;
             }
             if kind == 2 {

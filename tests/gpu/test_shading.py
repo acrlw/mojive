@@ -289,6 +289,30 @@ def test_all_mujoco_scene_light_slots_reach_the_shader(rig, count):
     assert center[2] < 3
 
 
+def test_mujoco_classic_ignores_local_light_range(rig):
+    light = Light(
+        kind=LightKind.SPOT,
+        position=np.array([0.0, -1.0, 0.0], np.float32),
+        direction=np.array([0.0, 1.0, 0.0], np.float32),
+        diffuse=np.ones(3, np.float32),
+        specular=np.zeros(3, np.float32),
+        attenuation=np.array([1.0, 0.0, 0.0], np.float32),
+        range=0.5,
+        cutoff=45.0,
+        exponent=0.0,
+        cast_shadow=False,
+    )
+    surface = [(np.ones(4, np.float32), (0.0, 0.0, 0.5), 2.0, 0.0)]
+
+    limited = Rig.center(rig.draw(surface, lights=[light]))
+    classic = Rig.center(
+        rig.draw(surface, lights=[light], shading_model=ShadingModel.MUJOCO_CLASSIC)
+    )
+
+    assert limited[:3].max() == 0
+    assert classic[:3].min() > 200
+
+
 def test_transparent_leaves_depth_mask_on(rig):
 
     opaque_quad = (np.array([0.2, 0.8, 0.3, 1.0], np.float32), (0.0, 0.0, 0.5), 2.0, 0.5)

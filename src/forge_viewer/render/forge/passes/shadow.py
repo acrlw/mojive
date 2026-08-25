@@ -9,7 +9,7 @@ import numpy as np
 
 from .... import math3d as M
 from ....log import get_logger
-from ....types import Light, LightKind
+from ....types import Light, LightKind, ShadingModel
 from ...backend import RenderFlag
 from .. import gl_native as G
 from ..cascades import (
@@ -210,20 +210,25 @@ class ShadowPass(BasePass):
         s = ctx.shadow
         for packed_index in schedule.local_shadows:
             light = schedule.lights[packed_index]
+            light_range = (
+                0.0
+                if ctx.scene.shading_model is ShadingModel.MUJOCO_CLASSIC
+                else float(light.range)
+            )
             slot = s.local_count
             s.local_light_indices[slot] = packed_index
             s.local_kinds[slot] = int(light.kind)
             s.local_positions[slot, :3] = light.position
-            s.local_positions[slot, 3] = light.range
+            s.local_positions[slot, 3] = light_range
             s.local_radius[slot] = light.area_radius
             if light.kind is LightKind.SPOT:
-                self._prepare_spot(ctx, light, slot)
+                self._prepare_spot(ctx, light, light_range, slot)
             else:
-                self._prepare_point(ctx, light, slot)
+                self._prepare_point(ctx, light, light_range, slot)
             s.local_count += 1
         return s.local_count
 
-    def _prepare_spot(self, ctx: PassContext, light: Light, slot: int) -> None:
+    def _prepare_spot(self, ctx: PassContext, light: Light, light_range: float, slot: int) -> None:
         s = ctx.shadow
 
         pos = np.asarray(light.position, np.float64)
@@ -231,14 +236,14 @@ class ShadowPass(BasePass):
         fov = float(np.deg2rad(2.0 * min(max(light.cutoff, 1.0), 89.0)))
         extent = float(ctx.scene.scene_extent)
         near = max(extent * 0.02, 1e-3)
-        far = light.range if light.range > near else extent * 6.0
+        far = light_range if light_range > near else extent * 6.0
         target = pos + np.asarray(light.direction, np.float64) * extent
         view = M.look_at(pos, target, np.array([0.0, 0.0, 1.0]))
         proj = M.perspective(fov, 1.0, near, far)
         np.copyto(s.local_matrices[slot], proj.astype(np.float64) @ view.astype(np.float64))
         s.local_texel[slot] = 2.0 * float(np.tan(fov * 0.5)) / LOCAL_PIXELS
 
-    def _prepare_point(self, ctx: PassContext, light: Light, slot: int) -> None:
+    def _prepare_point(self, ctx: PassContext, light: Light, light_range: float, slot: int) -> None:
         s = ctx.shadow
         s.local_texel[slot] = 2.0 / LOCAL_PIXELS
 
@@ -246,7 +251,7 @@ class ShadowPass(BasePass):
         extent = float(ctx.scene.scene_extent)
         near = max(extent * 0.02, 1e-3)
         scene_far = float(np.linalg.norm(pos - ctx.scene.scene_center)) + 2.0 * extent
-        far = light.range if light.range > near else max(scene_far, near * 2.0)
+        far = light_range if light_range > near else max(scene_far, near * 2.0)
         proj = M.perspective(np.pi * 0.5, 1.0, near, far)
         faces = (
             ((1, 0, 0), (0, -1, 0)),

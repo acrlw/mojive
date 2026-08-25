@@ -7,7 +7,7 @@ import wgpu
 
 from .... import math3d as M
 from ....log import get_logger
-from ....types import CameraView, Light, LightKind
+from ....types import CameraView, Light, LightKind, ShadingModel
 from ...backend import RenderFlag
 from ...scene import RenderScene
 from ..cascades import ATLAS_SIZE, CascadeSet, build_cascades, slot_pixels
@@ -298,28 +298,36 @@ class ShadowPass:
     ) -> int:
         for packed_index in schedule.local_shadows:
             light = schedule.lights[packed_index]
+            light_range = (
+                0.0 if scene.shading_model is ShadingModel.MUJOCO_CLASSIC else float(light.range)
+            )
             slot = state.local_count
             state.local_light_indices[slot] = packed_index
             self._local_kinds[slot] = int(light.kind)
             state.local_positions[slot, :3] = light.position
-            state.local_positions[slot, 3] = light.range
+            state.local_positions[slot, 3] = light_range
             state.local_radius[slot] = light.area_radius
             if light.kind is LightKind.SPOT:
-                self._prepare_spot(scene, light, slot, state)
+                self._prepare_spot(scene, light, light_range, slot, state)
             else:
-                self._prepare_point(scene, light, slot, state)
+                self._prepare_point(scene, light, light_range, slot, state)
             state.local_count += 1
         return state.local_count
 
     def _prepare_spot(
-        self, scene: RenderScene, light: Light, slot: int, state: ShadowState
+        self,
+        scene: RenderScene,
+        light: Light,
+        light_range: float,
+        slot: int,
+        state: ShadowState,
     ) -> None:
         pos = np.asarray(light.position, np.float64)
 
         fov = float(np.deg2rad(2.0 * min(max(light.cutoff, 1.0), 89.0)))
         extent = float(scene.scene_extent)
         near = max(extent * 0.02, 1e-3)
-        far = light.range if light.range > near else extent * 6.0
+        far = light_range if light_range > near else extent * 6.0
         target = pos + np.asarray(light.direction, np.float64) * extent
         view = M.look_at(pos, target, np.array([0.0, 0.0, 1.0]))
         proj = perspective_wgpu(fov, 1.0, near, far)
@@ -327,7 +335,12 @@ class ShadowPass:
         state.local_texel[slot] = 2.0 * float(np.tan(fov * 0.5)) / LOCAL_PIXELS
 
     def _prepare_point(
-        self, scene: RenderScene, light: Light, slot: int, state: ShadowState
+        self,
+        scene: RenderScene,
+        light: Light,
+        light_range: float,
+        slot: int,
+        state: ShadowState,
     ) -> None:
         state.local_texel[slot] = 2.0 / LOCAL_PIXELS
 
@@ -335,7 +348,7 @@ class ShadowPass:
         extent = float(scene.scene_extent)
         near = max(extent * 0.02, 1e-3)
         scene_far = float(np.linalg.norm(pos - scene.scene_center)) + 2.0 * extent
-        far = light.range if light.range > near else max(scene_far, near * 2.0)
+        far = light_range if light_range > near else max(scene_far, near * 2.0)
         proj = perspective_wgpu(np.pi * 0.5, 1.0, near, far)
         faces = (
             ((1, 0, 0), (0, -1, 0)),

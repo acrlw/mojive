@@ -92,7 +92,11 @@ vec3 shade(
             l = to_light / max(dist, 1e-6);
             vec3 k = u_light_atten[i].xyz;
             atten = 1.0 / max(k.x + k.y * dist + k.z * dist * dist, 1e-6);
-            if (u_light_atten[i].w > 0.0 && dist > u_light_atten[i].w) atten = 0.0;
+            if (
+                u_classic_lighting == 0
+                && u_light_atten[i].w > 0.0
+                && dist > u_light_atten[i].w
+            ) atten = 0.0;
             if (kind == 2) {
                 float cd = dot(-l, normalize(u_light_dir[i].xyz));
                 atten *= (cd < u_light_dir[i].w)
