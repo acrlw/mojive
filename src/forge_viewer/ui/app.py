@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -128,6 +129,8 @@ class ViewerApp:
         self.scene_entities = SceneEntityHelpers()
         self.router = gs.GestureRouter()
         self.panels = PanelSet()
+        if os.environ.get("FORGE_VIEWER_OPEN_SETTINGS") == "1":
+            self.panels.open_panel("Settings")
         self._started = False
         self._frame_index = 0
         self._last_time = time.perf_counter()
@@ -1443,7 +1446,12 @@ class ViewerApp:
             self._draw_model_drop_overlay(overlay)
         finally:
             imgui.pop_clip_rect()
-        self.camera_preview.draw(self.window, self._viewport_rect, preview_name)
+        self.camera_preview.draw(
+            self.window,
+            self._viewport_rect,
+            preview_name,
+            self.localizer.text,
+        )
         imgui.end()
 
     def _draw_model_drop_overlay(self, overlay: ImguiDraw2D) -> None:

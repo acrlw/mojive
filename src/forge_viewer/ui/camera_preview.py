@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
+import numpy as np
 from imgui_bundle import imgui
 
 from ..adapters.base import NodeKind, SceneFrame, SceneSource
@@ -16,6 +18,9 @@ class CameraPreview:
         self._image: ViewportImage | None = None
         self._source_generation = -1
         self._position: tuple[float, float] | None = None
+        self._pinned = False
+        self._camera_name = ""
+        self._camera: CameraView | None = None
 
     def update(
         self,
@@ -46,10 +51,12 @@ class CameraPreview:
         window: Any,
         viewport: tuple[float, float, float, float],
         camera_name: str,
+        translate: Any = None,
     ) -> None:
         image = self._image
         if image is None:
             return
+        translate = translate or str
         x, y, width, height = viewport
         scale = window.style_scale
         panel_width = min(340.0 * scale, max(180.0, width * 0.48))
@@ -73,23 +80,51 @@ class CameraPreview:
         ):
             imgui.end_child()
             return
-        title = f"Camera · {camera_name}"
-        imgui.button(title, imgui.ImVec2(-1.0, header_height))
-        if imgui.is_item_active() and imgui.is_mouse_dragging(0):
+        pin_label = translate("Pinned" if self._pinned else "Pin")
+        pin_width = imgui.calc_text_size(pin_label).x + 18.0 * scale
+        spacing = imgui.get_style().item_spacing.x
+        title_width = max(1.0, imgui.get_content_region_avail().x - pin_width - spacing)
+        title = f"{translate('Camera')} · {camera_name}"
+        imgui.button(title, imgui.ImVec2(title_width, header_height))
+        if not self._pinned and imgui.is_item_active() and imgui.is_mouse_dragging(0):
             delta = imgui.get_io().mouse_delta
             self._position = (px + float(delta.x), py + float(delta.y))
+        imgui.same_line()
+        if imgui.button(pin_label, imgui.ImVec2(pin_width, header_height)):
+            self.set_pinned(not self._pinned)
         available = imgui.get_content_region_avail()
         uv0 = imgui.ImVec2(0.0, 1.0) if image.flip_y else imgui.ImVec2(0.0, 0.0)
         uv1 = imgui.ImVec2(1.0, 0.0) if image.flip_y else imgui.ImVec2(1.0, 1.0)
         imgui.image(window.viewport_texture_ref(image), available, uv0, uv1)
         imgui.end_child()
 
-    @staticmethod
-    def selected_camera(session) -> tuple[str, CameraView | None]:
+    @property
+    def pinned(self) -> bool:
+        return self._pinned
+
+    def set_pinned(self, pinned: bool) -> None:
+        self._pinned = bool(pinned and self._camera is not None)
+
+    def selected_camera(self, session) -> tuple[str, CameraView | None]:
+        if self._pinned:
+            return self._camera_name, self._camera
         node = session.selected_node
         if node is None or node.kind is not NodeKind.CAMERA or node.camera_index < 0:
             return "", None
-        return node.name, session.camera_view(node.camera_index)
+        camera = session.camera_view(node.camera_index)
+        if camera is None:
+            return "", None
+        self._camera_name = node.name
+        self._camera = replace(
+            camera,
+            eye=np.asarray(camera.eye).copy(),
+            target=np.asarray(camera.target).copy(),
+            up=np.asarray(camera.up).copy(),
+            focal_length=np.asarray(camera.focal_length).copy(),
+            sensor_size=np.asarray(camera.sensor_size).copy(),
+            principal_offset=np.asarray(camera.principal_offset).copy(),
+        )
+        return self._camera_name, self._camera
 
     def release(self) -> None:
         if self._backend is not None:

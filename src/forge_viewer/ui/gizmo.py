@@ -1086,6 +1086,8 @@ class ObjectGizmo:
         result = verdict(session.paused, node, session.adapter.caps.inverse_kinematics)
         if not result.ok or node is None:
             return result
+        if session.entity_gizmo_locked(node):
+            return Verdict(False, "gizmo is locked while simulation is running")
         if node.kind is NodeKind.LIGHT:
             light = _source_light(session, node)
             if light is None:

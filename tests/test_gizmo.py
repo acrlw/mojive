@@ -6,7 +6,9 @@ import numpy as np
 import pytest
 
 from forge_viewer import commands as cmd
+from forge_viewer.adapters.base import NodeKind
 from forge_viewer.adapters.static import StaticSceneAdapter
+from forge_viewer.adapters.toy import ToyPhysicsAdapter
 from forge_viewer.gizmo import (
     AXIS_START,
     CENTER_HIT_PT,
@@ -100,6 +102,27 @@ def test_rotation_guide_wraps_only_after_a_full_turn(degrees: float, sweep: floa
 def test_rotation_fill_keeps_constant_opacity(degrees: float, alpha: float) -> None:
     assert _rotation_fill_alpha(np.radians(degrees)) == pytest.approx(alpha)
     assert _rotation_fill_alpha(np.radians(-degrees)) == pytest.approx(alpha)
+
+
+def test_running_simulation_locks_camera_and_light_gizmos_by_default() -> None:
+    session = Session(ToyPhysicsAdapter())
+    gizmo = ObjectGizmo()
+    camera = next(node for node in session.nodes if node.kind is NodeKind.CAMERA)
+    light = next(node for node in session.nodes if node.kind is NodeKind.LIGHT)
+
+    for node in (camera, light):
+        assert session.entity_gizmo_locked(node)
+        assert (
+            gizmo._evaluate(session, node).reason == "gizmo is locked while simulation is running"
+        )
+        session.set_entity_gizmo_lock(node, False)
+        assert not session.entity_gizmo_locked(node)
+        assert gizmo._evaluate(session, node).ok
+
+    session.submit(cmd.Pause())
+    session.set_entity_gizmo_lock(camera, True)
+    assert not session.entity_gizmo_locked(camera)
+    assert gizmo._evaluate(session, camera).ok
 
 
 @pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))

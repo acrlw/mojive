@@ -4,9 +4,11 @@ import numpy as np
 import pytest
 
 from forge_viewer import math3d
+from forge_viewer.adapters.base import NodeKind, SceneNode
 from forge_viewer.commands import SetCamera
 from forge_viewer.types import CameraView
 from forge_viewer.ui.camera import CameraOut, OrbitCamera
+from forge_viewer.ui.camera_preview import CameraPreview
 
 
 class RecordingSink:
@@ -24,6 +26,20 @@ class RecordingSession:
     def submit(self, command):
         self.commands.append(command)
         return None
+
+
+class PreviewSession:
+    def __init__(self, camera: CameraView) -> None:
+        self.selected_node = SceneNode(
+            node_id=1,
+            name="inspection",
+            kind=NodeKind.CAMERA,
+            camera_index=0,
+        )
+        self.camera = camera
+
+    def camera_view(self, _index: int) -> CameraView:
+        return self.camera
 
 
 def visible_height_at_target(view) -> float:
@@ -379,3 +395,24 @@ def test_every_public_setter_marks_dirty_and_publishes():
         setattr(cam, name, samples[name])
         cam.advance(0.0, sink)
         assert len(sink.views) == before + 1
+
+
+def test_pinned_camera_preview_keeps_camera_and_selection() -> None:
+    camera = CameraView(eye=np.array((2.0, -3.0, 1.0), np.float32))
+    session = PreviewSession(camera)
+    preview = CameraPreview()
+
+    name, pinned_view = preview.selected_camera(session)
+    assert name == "inspection"
+    assert pinned_view is not None
+    preview.set_pinned(True)
+    camera.eye[:] = 9.0
+    session.selected_node = None
+
+    name, pinned_view = preview.selected_camera(session)
+    assert preview.pinned
+    assert name == "inspection"
+    assert pinned_view.eye == pytest.approx((2.0, -3.0, 1.0))
+
+    preview.set_pinned(False)
+    assert preview.selected_camera(session) == ("", None)

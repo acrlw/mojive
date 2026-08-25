@@ -121,6 +121,7 @@ class Session:
         self._sim_time_credit = 0.0
         self._selected = 0
         self._selected_node_id = -1
+        self._unlocked_entity_gizmos: set[int] = set()
         self._step_counter = 0
         self._pending_steps = 0
         self._frame = SceneFrame()
@@ -173,6 +174,25 @@ class Session:
     @property
     def selected_node(self) -> SceneNode | None:
         return self.node(self._selected_node_id)
+
+    def entity_gizmo_lock_enabled(self, node: SceneNode) -> bool:
+        """Return the runtime gizmo-lock preference for a camera or light."""
+        return node.object_id not in self._unlocked_entity_gizmos
+
+    def set_entity_gizmo_lock(self, node: SceneNode, enabled: bool) -> None:
+        """Set the runtime gizmo-lock preference for a camera or light."""
+        if enabled:
+            self._unlocked_entity_gizmos.discard(node.object_id)
+        else:
+            self._unlocked_entity_gizmos.add(node.object_id)
+
+    def entity_gizmo_locked(self, node: SceneNode) -> bool:
+        """Return whether a running simulation currently locks this entity gizmo."""
+        return (
+            not self._paused
+            and node.kind in (NodeKind.CAMERA, NodeKind.LIGHT)
+            and self.entity_gizmo_lock_enabled(node)
+        )
 
     @property
     def frame(self) -> SceneFrame:
@@ -1254,6 +1274,7 @@ class Session:
             self._active_keyframe = -1
         self._by_node_id = {n.node_id: n for n in self._nodes}
         self._by_object_id = {n.object_id: n for n in self._nodes if n.object_id}
+        self._unlocked_entity_gizmos.intersection_update(self._by_object_id)
         if self.node(self._selected_node_id) is None:
             selected = self._by_object_id.get(self._selected)
             self._selected_node_id = selected.node_id if selected is not None else -1

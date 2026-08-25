@@ -681,6 +681,7 @@ class InspectorPanel(Panel):
             imgui.text_disabled("light data is unavailable")
             return
         light = source.lights.lights[index]
+        self._entity_gizmo_lock(ctx, node)
 
         changed, active = imgui.checkbox("enabled", light.active)
         kind_changed, kind_index = imgui.combo(
@@ -897,6 +898,8 @@ class InspectorPanel(Panel):
             imgui.text_disabled("camera view is unavailable")
             return
 
+        self._entity_gizmo_lock(ctx, node)
+
         if ctx.select_model_camera is not None:
             active = ctx.model_camera_id == info.camera_id
             label = "Return to Editor Camera" if active else "View Through Camera"
@@ -980,6 +983,17 @@ class InspectorPanel(Panel):
                     ),
                 ),
             )
+
+    @staticmethod
+    def _entity_gizmo_lock(ctx: PanelContext, node: SceneNode) -> None:
+        if not ctx.session.adapter.caps.simulation:
+            return
+        changed, locked = imgui.checkbox(
+            ctx.tr("Lock gizmo while simulation runs"),
+            ctx.session.entity_gizmo_lock_enabled(node),
+        )
+        if changed:
+            ctx.session.set_entity_gizmo_lock(node, locked)
 
 
 def _body_pose(xpos, xmat, body_index: int):
