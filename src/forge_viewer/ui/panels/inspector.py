@@ -325,6 +325,8 @@ class InspectorPanel(Panel):
             imgui.pop_id()
         if self._component_error:
             imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._component_error)
+            if imgui.small_button("Copy error##component"):
+                imgui.set_clipboard_text(self._component_error)
         if imgui.button("Apply", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
             result = ctx.submit(
                 cmd.UpdateModelComponent(
@@ -370,6 +372,8 @@ class InspectorPanel(Panel):
         )
         if self._source_error:
             imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._source_error)
+            if imgui.small_button("Copy error##source"):
+                imgui.set_clipboard_text(self._source_error)
         if imgui.button("Apply", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
             result = ctx.submit(cmd.SetModelSource(self._source_model_id, self._source_text))
             if result.ok:
@@ -583,8 +587,10 @@ class InspectorPanel(Panel):
             shape is MeshShape.PLANE
             and not infinite_plane
             and scene_node is not None
-            and scene_node.model_id < 0
-            and ctx.session.adapter.caps.scene_authoring
+            and (
+                ctx.session.adapter.caps.topology_editing
+                or (scene_node.model_id < 0 and ctx.session.adapter.caps.scene_authoring)
+            )
         )
         if shape is MeshShape.PLANE:
             if infinite_plane:

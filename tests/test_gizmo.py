@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from forge_viewer import commands as cmd
-from forge_viewer.adapters.base import NodeType
+from forge_viewer.adapters.base import FrameNeeds, NodeType
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.adapters.toy import ToyPhysicsAdapter
 from forge_viewer.gizmo import (
@@ -29,6 +29,7 @@ from forge_viewer.gizmo import (
     axis_handle_alpha,
     axis_rotation,
     display_handles,
+    handle_mask,
     hit_test,
     masked_axis_start,
     paint_order,
@@ -573,6 +574,41 @@ def test_flat_is_default_and_active_handle_hides_the_rest() -> None:
     frame.active = GizmoHandle.ROTATE_Z
     assert display_handles(frame) == (GizmoHandle.ROTATE_Z,)
 
+    frame.active = GizmoHandle.NONE
+    frame.handle_mask = handle_mask(GizmoHandle.ROTATE_Z)
+    assert display_handles(frame) == (GizmoHandle.ROTATE_Z,)
+
+
+def test_multiple_direct_joints_require_an_explicit_gizmo_target() -> None:
+    from forge_viewer.adapters.base import JointInfo, SceneNode
+
+    joints = (
+        JointInfo(3, "yaw", "hinge", False, (0.0, 0.0), 5, 4, 1, body=2),
+        JointInfo(4, "lift", "slide", True, (-0.2, 0.2), 6, 5, 1, body=2),
+    )
+
+    class JointSession:
+        structure_generation = 1
+
+        @staticmethod
+        def joints_for_body(body_index: int):
+            return joints if body_index == 2 else ()
+
+    session = JointSession()
+    node = SceneNode(2, "compound", NodeType.LINK, body_index=2)
+    gizmo = ObjectGizmo()
+
+    target, reason = gizmo._joint_target(session, node)
+    assert target is None
+    assert "select one direct joint" in reason
+
+    gizmo.select_joint(node.body_index, joints[1].joint_id)
+    target, reason = gizmo._joint_target(session, node)
+    assert not reason
+    assert target is not None and target.joint is joints[1]
+    assert target.mode is GizmoMode.TRANSLATE
+    assert target.handles == handle_mask(GizmoHandle.Z)
+
 
 def test_axis_drag_moves_the_body_but_not_across_other_local_axes() -> None:
     session, node = session_at()
@@ -1105,3 +1141,63 @@ def test_outer_ring_rotates_around_the_camera_axis() -> None:
     assert rotation @ view_axis == pytest.approx(view_axis, abs=1e-6)
     assert not np.allclose(rotation, np.eye(3))
     assert gizmo.value_label.startswith("Screen ")
+
+
+@pytest.mark.physics
+@pytest.mark.parametrize(
+    ("body_name", "handle", "amount"),
+    (
+        ("hinge_body", GizmoHandle.ROTATE_Z, 0.3),
+        ("slide_body", GizmoHandle.Z, 0.1),
+        ("ball_body", GizmoHandle.ROTATE_Z, 0.3),
+    ),
+)
+def test_joint_gizmo_edits_only_the_selected_joint_dof(
+    body_name: str, handle: GizmoHandle, amount: float
+) -> None:
+    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
+    from forge_viewer.assets import resolve
+
+    adapter = MuJoCoAdapter(resolve("joint_types"))
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == body_name)
+    assert session.submit(cmd.Select(node.object_id))
+    gizmo = ObjectGizmo()
+    needs = gizmo.frame_needs(session)
+    assert needs.qpos and needs.diagnostics
+    session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
+
+    target, reason = gizmo._joint_target(session, node)
+    assert target is not None, reason
+    pose = gizmo._target_pose(session, node, target)
+    assert pose is not None
+    position, basis = pose
+    cam = CameraView(eye=np.array((2.0, -4.0, 2.0)), target=position.copy())
+
+    if target.mode is GizmoMode.ROTATE:
+        scale = world_scale(cam, position, RECT[3], SIZE_PT)
+        start_world = position + basis[:, 0] * scale * RING_RADIUS
+        end_world = (
+            position
+            + (basis[:, 0] * np.cos(amount) + basis[:, 1] * np.sin(amount)) * scale * RING_RADIUS
+        )
+        start = project(cam, (start_world,), RECT)[0, :2]
+        end = project(cam, (end_world,), RECT)[0, :2]
+    else:
+        start = project(cam, (position + basis[:, 2] * 0.1,), RECT)[0, :2]
+        end = None
+
+    assert gizmo._begin_handle(session, cam, RECT, start, handle)
+    if end is None:
+        end = start + gizmo._axis_screen * (amount / gizmo._world_per_pt)
+    assert gizmo._drag(session, cam, RECT, end, snap=False)
+
+    joint = target.joint
+    if joint.type == "ball":
+        expected = np.array((np.cos(amount / 2.0), 0.0, 0.0, np.sin(amount / 2.0)))
+        assert adapter.data.qpos[joint.qpos_adr : joint.qpos_adr + 4] == pytest.approx(
+            expected, abs=1e-6
+        )
+    else:
+        assert adapter.data.qpos[joint.qpos_adr] == pytest.approx(amount)

@@ -593,6 +593,8 @@ class ViewerApp:
         if self._resource_repair_status:
             imgui.spacing()
             imgui.text_wrapped(self._resource_repair_status)
+            if imgui.small_button("Copy details##resource-repair"):
+                imgui.set_clipboard_text(self._resource_repair_status)
         imgui.spacing()
         search = imgui.button("Search Directory...", imgui.ImVec2(160.0, 0.0))
         imgui.same_line()
@@ -1741,7 +1743,11 @@ class ViewerApp:
             cursor_y += size[1] + 3.0 * scale
 
     def frame_needs(self) -> FrameNeeds:
-        needs = FrameNeeds(poses=True).merge(self.panels.frame_needs())
+        needs = (
+            FrameNeeds(poses=True)
+            .merge(self.panels.frame_needs())
+            .merge(self.gizmo.frame_needs(self.session))
+        )
         label_mode = self.backend.get_label_mode()
         frame_mode = self.backend.get_frame_mode()
         needs.contacts = (

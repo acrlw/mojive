@@ -23,6 +23,7 @@ from ..types import (
     TextureData,
 )
 
+GEOMETRY_OBJECT_BASE = 0x50000000
 LIGHT_OBJECT_BASE = 0x70000000
 CAMERA_OBJECT_BASE = 0x71000000
 ENVIRONMENT_OBJECT_ID = 0x72000000
@@ -793,6 +794,10 @@ class SceneAdapterBase:
         """Set one generalized position coordinate."""
         return False
 
+    def set_qpos_batch(self, indices: np.ndarray, values: np.ndarray) -> bool:
+        """Atomically set generalized position coordinates."""
+        return False
+
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool:
         """Enable or disable an equality constraint."""
         return False
@@ -1000,6 +1005,7 @@ class SceneAdapter(Protocol):
     def visual_groups(self) -> tuple[VisualGroupInfo, ...]: ...
     def set_visual_group(self, category: str, group: int, visible: bool) -> bool: ...
     def set_qpos(self, index: int, value: float) -> bool: ...
+    def set_qpos_batch(self, indices: np.ndarray, values: np.ndarray) -> bool: ...
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool: ...
     def set_ctrl(self, index: int, value: float) -> bool: ...
     def set_pose(self, node_id: int, position, rotation) -> bool: ...

@@ -491,6 +491,15 @@ class RemoteSceneAdapter(SceneAdapterBase):
     def set_qpos(self, index: int, value: float) -> bool:
         return self._ok(self._send("qpos", index=int(index), value=float(value)))
 
+    def set_qpos_batch(self, indices: np.ndarray, values: np.ndarray) -> bool:
+        return self._ok(
+            self._send(
+                "qpos_batch",
+                indices=np.asarray(indices, np.intp),
+                values=np.asarray(values, np.float64),
+            )
+        )
+
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool:
         return self._ok(
             self._send(
@@ -650,6 +659,7 @@ def handle_session_command(session, message: dict):
             message["category"], message["group"], message["visible"]
         ),
         "qpos": lambda: cmd.SetQpos(message["index"], message["value"]),
+        "qpos_batch": lambda: cmd.SetQposBatch(message["indices"], message["values"]),
         "equality": lambda: cmd.SetEqualityEnabled(message["constraint_id"], message["enabled"]),
         "ctrl": lambda: cmd.SetCtrl(message["index"], message["value"]),
         "pose": lambda: cmd.SetPose(message["node_id"], message["position"], message["rotation"]),

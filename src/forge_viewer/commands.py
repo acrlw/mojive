@@ -383,6 +383,14 @@ class SetQpos(Command):
 
 
 @dataclass(frozen=True)
+class SetQposBatch(Command):
+    """Atomically set generalized positions by flat qpos index."""
+
+    indices: np.ndarray
+    values: np.ndarray
+
+
+@dataclass(frozen=True)
 class SetEqualityEnabled(Command):
     """Enable or disable a model equality constraint."""
 

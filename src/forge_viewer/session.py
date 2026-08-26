@@ -975,6 +975,25 @@ class Session:
                 else CommandResult.bad(f"Joint {c.index} update failed")
             )
 
+        if isinstance(c, cmd.SetQposBatch):
+            if not caps.write_qpos:
+                return CommandResult.bad(f"{caps.name} does not support joint editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before editing joints")
+            raw_indices = np.asarray(c.indices).reshape(-1)
+            if not np.issubdtype(raw_indices.dtype, np.integer):
+                return CommandResult.bad("Joint batch indices must be integers")
+            indices = raw_indices.astype(np.intp, copy=False)
+            values = np.asarray(c.values, np.float64).reshape(-1)
+            if not len(indices) or len(indices) != len(values):
+                return CommandResult.bad("Joint batch indices and values must have equal lengths")
+            if len(np.unique(indices)) != len(indices):
+                return CommandResult.bad("Joint batch indices must be unique")
+            if not np.all(np.isfinite(values)):
+                return CommandResult.bad("Joint batch values must be finite")
+            ok = self._adapter.set_qpos_batch(indices, values)
+            return CommandResult.good("") if ok else CommandResult.bad("Joint batch update failed")
+
         if isinstance(c, cmd.SetEqualityEnabled):
             if not caps.equality_constraints:
                 return CommandResult.bad(f"{caps.name} does not expose equality constraints")

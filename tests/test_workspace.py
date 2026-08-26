@@ -357,8 +357,46 @@ def test_editor_plane_is_a_static_mujoco_ground_during_model_composition() -> No
     assert document.primary.model.ngeom == 1
     assert int(document.primary.model.geom_type[0]) == int(mujoco.mjtGeom.mjGEOM_PLANE)
     assert int(document.primary.model.geom_bodyid[0]) == 0
+    plane = next(node for node in session.nodes if node.name == "plane")
+    assert plane.object_id != 0
+    assert session.selected == plane.object_id
+    assert session.source.geom_object_id.tolist() == [plane.object_id]
+    picked, distance = document.primary.raycast(
+        np.array((0.0, 0.0, 3.0)), np.array((0.0, 0.0, -1.0))
+    )
+    assert picked == plane.object_id
+    assert distance == pytest.approx(3.0)
+
+    assert session.submit(cmd.SetPose(plane.node_id, np.array((1.0, 2.0, 0.0)), np.eye(3)))
+    assert document.primary.model.geom_pos[0] == pytest.approx((1.0, 2.0, 0.0))
+    assert session.submit(cmd.Undo())
+    assert document.primary.model.geom_pos[0] == pytest.approx((0.0, 0.0, 0.0))
+
+    plane = session.node_by_object_id(plane.object_id)
+    assert plane is not None
+    assert session.submit(cmd.SetGeometrySize(plane.node_id, np.array((3.0, 5.0, 1.0), np.float32)))
+    assert document.primary.model.geom_size[0] == pytest.approx((3.0, 5.0, 0.02))
+    assert session.source.geom_size[0] == pytest.approx((3.0, 5.0, 1.0))
+    assert session.submit(cmd.Undo())
+    assert document.primary.model.geom_size[0] == pytest.approx((4.0, 4.0, 0.02))
+    assert session.submit(cmd.Redo())
+    assert document.primary.model.geom_size[0] == pytest.approx((3.0, 5.0, 0.02))
+    object_id = session.selected
+    plane = session.node_by_object_id(object_id)
+    assert plane is not None
+    assert session.submit(cmd.RenameModelElement(plane.node_id, "ground plane"))
+    assert session.selected == object_id
+    assert session.node_by_object_id(object_id).name == "ground plane"
+    assert session.submit(cmd.Undo())
+    assert session.selected == object_id
+    assert session.node_by_object_id(object_id).name == "plane"
+    assert session.submit(cmd.Redo())
+    assert session.selected == object_id
+    assert session.node_by_object_id(object_id).name == "ground plane"
+
     added = session.submit(cmd.AddSceneModel(ASSETS / "test_scene.urdf", np.zeros(3, np.float32)))
     assert added.ok, added.message
+    assert document.primary.model.geom_size[0] == pytest.approx((3.0, 5.0, 0.02))
     assert session.submit(cmd.Play())
     for _ in range(10):
         frame = session.tick(FrameNeeds(poses=True), wall_dt=document.timestep())

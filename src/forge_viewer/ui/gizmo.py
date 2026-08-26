@@ -9,15 +9,18 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from .. import math3d
-from ..adapters.base import NodeType
+from ..adapters.base import FrameNeeds, JointInfo, NodeType
 from ..commands import (
     BeginEditTransaction,
     EndEditTransaction,
     SetLight,
     SetPose,
+    SetQpos,
+    SetQposBatch,
     SetSceneCamera,
 )
 from ..gizmo import (
+    ALL_HANDLE_MASK,
     AXIS_COLORS,
     AXIS_END,
     AXIS_HANDLES,
@@ -48,6 +51,7 @@ from ..gizmo import (
     axis_arrow_polygon,
     axis_handle_alpha,
     display_handles,
+    handle_mask,
     hit_test,
     masked_axis_start,
     paint_order,
@@ -169,6 +173,13 @@ class Verdict:
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class _JointTarget:
+    joint: JointInfo
+    mode: GizmoMode
+    handles: int
+
+
 def verdict(paused: bool, node: SceneNode | None) -> Verdict:
     if node is None:
         return Verdict(False, REASON_NO_SELECTION)
@@ -194,6 +205,7 @@ class ObjectGizmo:
         self._drawn = False
         self._axis_mask = 0b111
         self._plane_mask = 0b111
+        self._handle_mask = ALL_HANDLE_MASK
         self._frame = GizmoFrame()
         self._style_scale = 1.0
 
@@ -215,6 +227,10 @@ class ObjectGizmo:
         self._label = ""
         self._edit_started = False
         self._edit_session: Session | None = None
+        self._joint_selection: dict[int, int] = {}
+        self._joint_structure_generation = -1
+        self._active_joint: JointInfo | None = None
+        self._start_joint_qpos = np.zeros(0, np.float64)
         self.translation_snap_m = DEFAULT_TRANSLATION_SNAP_M
         self.rotation_snap_deg = DEFAULT_ROTATION_SNAP_DEG
         self.rotation_tick_scale = DEFAULT_ROTATION_TICK_SCALE
@@ -272,6 +288,24 @@ class ObjectGizmo:
     def snapping(self) -> bool:
         return self._snapping
 
+    def frame_needs(self, session: Session) -> FrameNeeds:
+        node = session.selected_node
+        target, _reason = self._joint_target(session, node)
+        if target is None:
+            return FrameNeeds.none()
+        return FrameNeeds(poses=False, qpos=True, diagnostics=True)
+
+    def selected_joint_id(self, body_index: int) -> int:
+        return self._joint_selection.get(int(body_index), -1)
+
+    def select_joint(self, body_index: int, joint_id: int) -> None:
+        body = int(body_index)
+        joint = int(joint_id)
+        if self._joint_selection.get(body) == joint:
+            return
+        self._end()
+        self._joint_selection[body] = joint
+
     def set_mode(self, mode: str) -> None:
         if mode in (GizmoMode.TRANSLATE.value, GizmoMode.ROTATE.value) and not self._using:
             self._mode = GizmoMode(mode)
@@ -317,9 +351,23 @@ class ObjectGizmo:
         if not enabled:
             self._hovered = GizmoHandle.NONE
             return self._hovered
-        pos, mat = _node_pose(session, node)
+        target, _reason = self._joint_target(session, node)
+        pose = self._target_pose(session, node, target)
+        if pose is None:
+            self._hovered = GizmoHandle.NONE
+            return self._hovered
+        pos, mat = pose
+        mode = target.mode if target is not None else self._mode
+        self._handle_mask = target.handles if target is not None else ALL_HANDLE_MASK
         self._hovered, self._axis_mask, self._plane_mask = hit_test(
-            cam, pos, self._basis(mat), rect, cursor, self._mode, self._style_scale
+            cam,
+            pos,
+            self._target_basis(mat, target),
+            rect,
+            cursor,
+            mode,
+            self._style_scale,
+            self._handle_mask,
         )
         return self._hovered
 
@@ -365,13 +413,16 @@ class ObjectGizmo:
             if self._keyboard:
                 self._end()
             return False
-        handle = (
-            AXIS_HANDLES[axis] if self._mode is GizmoMode.TRANSLATE else ROTATE_AXIS_HANDLES[axis]
-        )
+        node = session.selected_node
+        target, _reason = self._joint_target(session, node)
+        mode = target.mode if target is not None else self._mode
+        handle = AXIS_HANDLES[axis] if mode is GizmoMode.TRANSLATE else ROTATE_AXIS_HANDLES[axis]
+        allowed = target.handles if target is not None else ALL_HANDLE_MASK
+        if not allowed & (1 << int(handle)):
+            return False
         if self._keyboard and self._active is not handle:
             self._end()
         if not self._keyboard:
-            node = session.selected_node
             self._verdict = self._evaluate(session, node)
             if not self._verdict.ok or not self._begin_handle(session, cam, rect, cursor, handle):
                 return False
@@ -401,18 +452,25 @@ class ObjectGizmo:
                 backend.set_gizmo(None)
             self._drawn = False
             return False
-        pos, mat = _node_pose(session, node)
+        target, _reason = self._joint_target(session, node)
+        pose = self._target_pose(session, node, target)
+        if pose is None:
+            self._drawn = False
+            return False
+        pos, mat = pose
+        mode = target.mode if target is not None else self._mode
+        self._handle_mask = target.handles if target is not None else ALL_HANDLE_MASK
         active = self._active is not GizmoHandle.NONE
         if active:
             basis = self._start_basis
             if self._active in ROTATE_HANDLES:
                 pos = self._start_pos
         else:
-            basis = self._basis(mat)
+            basis = self._target_basis(mat, target)
         scale = world_scale(cam, pos, rect[3], SIZE_PT * float(style_scale))
         self._axis_mask, self._plane_mask = visibility(cam, pos, basis, rect, scale)
         frame = self._frame
-        frame.mode = self._mode
+        frame.mode = mode
         frame.style = self._style
         frame.space = self._space
         np.copyto(frame.position, pos, casting="unsafe")
@@ -423,6 +481,7 @@ class ObjectGizmo:
         frame.active_rotation_overlay = self._using and self._active in ROTATE_HANDLES
         frame.axis_mask = self._axis_mask
         frame.plane_mask = self._plane_mask
+        frame.handle_mask = self._handle_mask
         self._publish_translation_guide(backend, ui_scale)
         if self._style is GizmoStyle.FLAT:
             if backend.caps.gizmo:
@@ -900,11 +959,30 @@ class ObjectGizmo:
         node = session.selected_node
         if node is None or handle is GizmoHandle.NONE:
             return False
-        pos, mat = _node_pose(session, node)
+        target, _reason = self._joint_target(session, node)
+        allowed = target.handles if target is not None else ALL_HANDLE_MASK
+        if not allowed & (1 << int(handle)):
+            return False
+        pose = self._target_pose(session, node, target)
+        if pose is None:
+            return False
+        pos, mat = pose
+        self._active_joint = target.joint if target is not None else None
+        if self._active_joint is not None:
+            count = 4 if self._active_joint.type == "ball" else 1
+            qpos = session.frame.qpos
+            if qpos is None:
+                self._active_joint = None
+                return False
+            start = self._active_joint.qpos_adr
+            self._start_joint_qpos = np.asarray(qpos[start : start + count], np.float64).copy()
+            if len(self._start_joint_qpos) != count:
+                self._active_joint = None
+                return False
         self._active = handle
         np.copyto(self._start_pos, pos)
         np.copyto(self._start_mat, mat)
-        np.copyto(self._start_basis, self._basis(mat))
+        np.copyto(self._start_basis, self._target_basis(mat, target))
         np.copyto(self._current_mat, mat)
         self._start_cursor[:] = cursor
         self._rotation_raw_angle = 0.0
@@ -1002,7 +1080,31 @@ class ObjectGizmo:
         if node is None:
             self._end()
             return False
-        if node.type is NodeType.LIGHT:
+        if self._active_joint is not None:
+            joint = self._active_joint
+            if joint.type == "ball":
+                qstart = math3d.quat_to_mat3(self._start_joint_qpos)
+                relative = qstart @ self._start_mat.T @ mat
+                command = SetQposBatch(
+                    indices=np.arange(joint.qpos_adr, joint.qpos_adr + 4, dtype=np.intp),
+                    values=np.asarray(math3d.mat3_to_quat(relative), np.float64),
+                )
+            else:
+                delta = (
+                    self._rotation_angle
+                    if joint.type == "hinge"
+                    else float(np.dot(pos - self._start_pos, self._axis))
+                )
+                value = float(self._start_joint_qpos[0]) + delta
+                if joint.limited and joint.range[1] > joint.range[0]:
+                    value = float(np.clip(value, joint.range[0], joint.range[1]))
+                applied = value - float(self._start_joint_qpos[0])
+                if joint.type == "hinge":
+                    self._rotation_angle = applied
+                else:
+                    pos = self._start_pos + self._axis * applied
+                command = SetQpos(joint.qpos_adr, value)
+        elif node.type is NodeType.LIGHT:
             command = _set_light_from_world(session, node, pos, mat)
         elif node.type is NodeType.CAMERA:
             command = _set_camera_from_world(session, node, pos, mat)
@@ -1064,13 +1166,79 @@ class ObjectGizmo:
             return value
         return f"{value} · SNAP {_format_step(self.translation_snap_m)} m"
 
+    def _joint_target(
+        self, session: Session, node: SceneNode | None
+    ) -> tuple[_JointTarget | None, str]:
+        if self._joint_structure_generation < 0:
+            self._joint_structure_generation = session.structure_generation
+        elif self._joint_structure_generation != session.structure_generation:
+            self._joint_structure_generation = session.structure_generation
+            self._joint_selection.clear()
+        if node is None or node.posable or node.type not in (NodeType.LINK, NodeType.ROBOT):
+            return None, ""
+        joints = session.joints_for_body(node.body_index)
+        if not joints:
+            return None, "this link has no editable direct joint"
+        selected = self._joint_selection.get(int(node.body_index), -1)
+        joint = next((item for item in joints if item.joint_id == selected), None)
+        if joint is None:
+            if len(joints) != 1:
+                return None, "select one direct joint for the viewport gizmo in the Joints panel"
+            joint = joints[0]
+        if joint.type == "hinge":
+            return _JointTarget(joint, GizmoMode.ROTATE, handle_mask(GizmoHandle.ROTATE_Z)), ""
+        if joint.type == "slide":
+            return _JointTarget(joint, GizmoMode.TRANSLATE, handle_mask(GizmoHandle.Z)), ""
+        if joint.type == "ball":
+            return _JointTarget(joint, GizmoMode.ROTATE, handle_mask(*ROTATE_HANDLES)), ""
+        return None, f"{joint.type} joint uses the free-body transform gizmo"
+
+    def _target_pose(
+        self, session: Session, node: SceneNode, target: _JointTarget | None
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        if target is None:
+            return _node_pose(session, node)
+        frame = session.frame
+        diagnostics = frame.diagnostics
+        joint_id = target.joint.joint_id
+        if (
+            frame.qpos is None
+            or diagnostics is None
+            or not 0 <= joint_id < len(diagnostics.joint_xpos)
+            or not 0 <= joint_id < len(diagnostics.joint_xaxis)
+        ):
+            return None
+        position = np.asarray(diagnostics.joint_xpos[joint_id], np.float64).reshape(3)
+        if target.joint.type == "ball":
+            _body_position, body_rotation = _node_pose(session, node)
+            return position, body_rotation
+        axis = np.asarray(diagnostics.joint_xaxis[joint_id], np.float64).reshape(3)
+        return position, _basis_from_z(axis)
+
+    def _target_basis(self, rotation, target: _JointTarget | None) -> np.ndarray:
+        if target is not None and target.joint.type in ("hinge", "slide"):
+            return np.asarray(rotation, np.float64).reshape(3, 3)
+        return self._basis(rotation)
+
     def _basis(self, rotation) -> np.ndarray:
         if self._space is GizmoSpace.BODY:
             return np.asarray(rotation, np.float64).reshape(3, 3)
         return _WORLD_BASIS
 
     def _evaluate(self, session: Session, node: SceneNode | None) -> Verdict:
-        result = verdict(session.paused, node)
+        target, reason = self._joint_target(session, node)
+        if node is not None and not node.posable and node.type in (NodeType.LINK, NodeType.ROBOT):
+            if not session.paused:
+                return Verdict(False, gizmo_refusal_reason(False, False) or "")
+            if not session.adapter.caps.write_qpos:
+                return Verdict(False, f"{session.adapter.caps.name} cannot write joint positions")
+            if target is None:
+                return Verdict(False, reason or "joint gizmo is unavailable")
+            if self._target_pose(session, node, target) is None:
+                return Verdict(False, "joint frame data is unavailable")
+            result = Verdict(True)
+        else:
+            result = verdict(session.paused, node)
         if not result.ok or node is None:
             return result
         if session.entity_gizmo_locked(node):
@@ -1084,7 +1252,7 @@ class ObjectGizmo:
         return result
 
     def _start_edit(self, session: Session) -> None:
-        if not session.adapter.caps.edit_history:
+        if self._active_joint is not None or not session.adapter.caps.edit_history:
             return
         result = session.submit(BeginEditTransaction(f"{self._mode.value.title()} transform"))
         if result.ok:
@@ -1098,6 +1266,8 @@ class ObjectGizmo:
         self._keyboard = False
         self._snapping = False
         self._active = GizmoHandle.NONE
+        self._active_joint = None
+        self._start_joint_qpos = np.zeros(0, np.float64)
         self._label = ""
         self._edit_started = False
 
@@ -1359,6 +1529,21 @@ def _cursor_plane(cam, rect, cursor, point, normal) -> np.ndarray | None:
         return None
     t = float(np.dot(np.asarray(point) - origin, normal) / den)
     return np.asarray(origin, np.float64) + np.asarray(direction, np.float64) * t
+
+
+def _basis_from_z(axis) -> np.ndarray:
+    z = np.asarray(axis, np.float64).reshape(3)
+    length = float(np.linalg.norm(z))
+    if length < 1e-9:
+        return np.eye(3, dtype=np.float64)
+    z /= length
+    reference = np.array((0.0, 0.0, 1.0), np.float64)
+    if abs(float(np.dot(reference, z))) > 0.9:
+        reference[:] = (0.0, 1.0, 0.0)
+    x = np.cross(reference, z)
+    x /= np.linalg.norm(x)
+    y = np.cross(z, x)
+    return np.column_stack((x, y, z))
 
 
 def _node_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarray]:

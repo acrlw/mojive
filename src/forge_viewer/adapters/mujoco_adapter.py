@@ -33,6 +33,7 @@ from ..types import (
 )
 from .base import (
     CAMERA_OBJECT_BASE,
+    GEOMETRY_OBJECT_BASE,
     LIGHT_OBJECT_BASE,
     MODEL_OBJECT_BASE,
     ActuatorInfo,
@@ -333,6 +334,8 @@ class _CompositionEditState:
     physics: PhysicsState
     root_spec: object
     root_edited: bool
+    geometry_object_ids: dict[tuple[int, str], int]
+    next_geometry_object_id: int
 
 
 class MuJoCoAdapter(SceneAdapterBase):
@@ -442,6 +445,8 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._node_body: dict[int, int] = {}
         self._node_model: dict[int, int] = {}
         self._node_element: dict[int, tuple[int, NodeType, str]] = {}
+        self._geometry_object_ids: dict[tuple[int, str], int] = {}
+        self._next_geometry_object_id = GEOMETRY_OBJECT_BASE
         self._geom_nodes: dict[int, int] = {}
         self._site_nodes: dict[int, int] = {}
         self._flex_nodes: dict[int, int] = {}
@@ -467,6 +472,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._root_edited = False
         self._attached_models.clear()
         self._next_model_id = 1
+        self._reset_geometry_object_ids()
         self.caps = replace(self.caps, model_composition=True)
         self._install(model)
 
@@ -477,6 +483,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._root_edited = False
         self._attached_models.clear()
         self._next_model_id = 1
+        self._reset_geometry_object_ids()
         self.caps = replace(self.caps, model_composition=True)
         self._install(self._root_spec.compile())
 
@@ -491,6 +498,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._root_spec = None
         self._root_edited = False
         self._attached_models.clear()
+        self._reset_geometry_object_ids()
         self.caps = replace(self.caps, model_composition=False)
         self._install(model, data)
 
@@ -593,7 +601,12 @@ class MuJoCoAdapter(SceneAdapterBase):
             for item in self._attached_models
         )
         return _CompositionEditState(
-            models, self.capture_state(), self._root_spec.copy(), self._root_edited
+            models,
+            self.capture_state(),
+            self._root_spec.copy(),
+            self._root_edited,
+            dict(self._geometry_object_ids),
+            self._next_geometry_object_id,
         )
 
     def restore_edit_state(self, state: object) -> bool:
@@ -614,6 +627,8 @@ class MuJoCoAdapter(SceneAdapterBase):
         ]
         self._root_spec = state.root_spec.copy()
         self._root_edited = state.root_edited
+        self._geometry_object_ids = dict(state.geometry_object_ids)
+        self._next_geometry_object_id = state.next_geometry_object_id
         self._next_model_id = max((item.model_id for item in state.models), default=0) + 1
         self._install(self._compile_composed_model())
         return self.restore_state(state.physics)
@@ -721,7 +736,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                 "cylinder": mujoco.mjtGeom.mjGEOM_CYLINDER,
                 "plane": mujoco.mjtGeom.mjGEOM_PLANE,
             }.get(subtype, mujoco.mjtGeom.mjGEOM_SPHERE)
-            geom.size = [0.1, 0.1, 0.1]
+            geom.size = [4.0, 4.0, 0.02] if subtype == "plane" else [0.1, 0.1, 0.1]
         elif type_name == "joint":
             joint = body.add_joint(name=value)
             joint.type = {
@@ -789,9 +804,20 @@ class MuJoCoAdapter(SceneAdapterBase):
         element = self._element(model_id, node_type.value, current)
         if element is None:
             return False
+        previous_object_id = None
+        if node_type is NodeType.GEOM:
+            previous_object_id = self._geometry_object_ids.pop((model_id, current), None)
+            if previous_object_id is not None:
+                self._geometry_object_ids[(model_id, value)] = previous_object_id
         element.name = value
         self._mark_model_edited(model_id)
-        self._recompile_topology()
+        try:
+            self._recompile_topology()
+        except Exception:
+            if previous_object_id is not None:
+                self._geometry_object_ids.pop((model_id, value), None)
+                self._geometry_object_ids[(model_id, current)] = previous_object_id
+            raise
         return True
 
     def scene_model_xml(self, model_id: int) -> str | None:
@@ -1083,6 +1109,19 @@ class MuJoCoAdapter(SceneAdapterBase):
         lookup = "body" if element_type in ("link", "robot") else element_type
         finder = getattr(spec, lookup, None)
         return finder(name) if finder is not None else None
+
+    def _reset_geometry_object_ids(self) -> None:
+        self._geometry_object_ids.clear()
+        self._next_geometry_object_id = GEOMETRY_OBJECT_BASE
+
+    def _geometry_object_id(self, model_id: int, name: str) -> int:
+        identity = (int(model_id), str(name))
+        object_id = self._geometry_object_ids.get(identity)
+        if object_id is None:
+            object_id = self._next_geometry_object_id
+            self._next_geometry_object_id += 1
+            self._geometry_object_ids[identity] = object_id
+        return object_id
 
     def _model_parent(self, node_id: int):
         node = next((node for node in self.nodes() if node.node_id == node_id), None)
@@ -2310,7 +2349,11 @@ class MuJoCoAdapter(SceneAdapterBase):
                 source=gi,
                 pose_source=InstancePoseSource.GEOM,
                 node_id=self._geom_nodes.get(gi, -1),
-                object_id=body,
+                object_id=(
+                    self.nodes()[self._geom_nodes[gi]].object_id
+                    if body == 0 and gi in self._geom_nodes
+                    else body
+                ),
                 is_infinite=is_infinite,
                 is_static=int(m.body_weldid[body]) == 0,
                 island_body=body if int(m.body_dofnum[int(m.body_weldid[body])]) else -1,
@@ -3496,15 +3539,25 @@ class MuJoCoAdapter(SceneAdapterBase):
                 if not self._visual_groups["geom"][int(m.geom_group[gi])]:
                     continue
                 gname = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, gi) or f"geom{gi}"
+                model_id, raw_name = self._model_element_name(gname)
+                is_plane = int(m.geom_type[gi]) == int(mujoco.mjtGeom.mjGEOM_PLANE)
+                is_infinite_plane = is_plane and (
+                    float(m.geom_size[gi, 0]) == 0.0 or float(m.geom_size[gi, 1]) == 0.0
+                )
+                object_id = (
+                    self._geometry_object_id(model_id, raw_name)
+                    if b == 0 and is_plane and not is_infinite_plane
+                    else 0
+                )
                 self._geom_nodes[gi] = add(
                     gname,
                     NodeType.GEOM,
                     parent,
                     b,
+                    object_id=object_id,
                     geom_index=gi,
                     posable=True,
                 )
-                model_id, raw_name = self._model_element_name(gname)
                 nodes[self._geom_nodes[gi]].model_id = model_id
                 self._node_element[self._geom_nodes[gi]] = (
                     model_id,
@@ -3846,6 +3899,25 @@ class MuJoCoAdapter(SceneAdapterBase):
         mujoco.mj_forward(self._m, self._d)
         return True
 
+    def set_qpos_batch(self, indices: np.ndarray, values: np.ndarray) -> bool:
+        raw_slots = np.asarray(indices).reshape(-1)
+        if not np.issubdtype(raw_slots.dtype, np.integer):
+            return False
+        slots = raw_slots.astype(np.intp, copy=False)
+        coordinates = np.asarray(values, np.float64).reshape(-1)
+        if (
+            not len(slots)
+            or len(slots) != len(coordinates)
+            or np.any(slots < 0)
+            or np.any(slots >= self._m.nq)
+            or len(np.unique(slots)) != len(slots)
+            or not np.all(np.isfinite(coordinates))
+        ):
+            return False
+        self._d.qpos[slots] = coordinates
+        mujoco.mj_forward(self._m, self._d)
+        return True
+
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool:
         i = int(constraint_id)
         if not 0 <= i < self._m.neq:
@@ -4031,6 +4103,40 @@ class MuJoCoAdapter(SceneAdapterBase):
                 if element is not None:
                     element.rgba = color
                     self._mark_model_edited(model_id)
+        return True
+
+    def set_geometry_size(self, node_id: int, size: np.ndarray) -> bool:
+        identity = self._node_element.get(int(node_id))
+        node = next((item for item in self.nodes() if item.node_id == int(node_id)), None)
+        if identity is None or node is None or node.type is not NodeType.GEOM:
+            return False
+        geom = int(node.geom_index)
+        if not 0 <= geom < self._m.ngeom:
+            return False
+        if int(self._m.geom_type[geom]) != int(mujoco.mjtGeom.mjGEOM_PLANE):
+            return False
+        values = np.asarray(size, np.float64).reshape(3)
+        if not np.all(np.isfinite(values)) or np.any(values[:2] <= 0.0):
+            return False
+
+        model_id, _node_type, name = identity
+        element = self._element(model_id, "geom", name)
+        if element is None:
+            return False
+        authored_size = np.asarray(element.size, np.float64).copy()
+        authored_size[:2] = values[:2]
+        element.size = authored_size
+        self._m.geom_size[geom, :2] = values[:2]
+        mujoco.mj_setConst(self._m, self._d)
+        mujoco.mj_forward(self._m, self._d)
+
+        source = self.scene_source()
+        instances = np.flatnonzero(source.geom_node == int(node_id))
+        source.geom_size[instances, :2] = values[:2]
+        source.scene_center = np.asarray(self._m.stat.center, np.float32).copy()
+        source.scene_extent = float(self._m.stat.extent)
+        self._mark_model_edited(model_id)
+        self._structure_revision += 1
         return True
 
     def set_pose(self, node_id: int, position, rotation) -> bool:
@@ -4241,7 +4347,11 @@ class MuJoCoAdapter(SceneAdapterBase):
             return 0, float("inf")
         body = int(self._m.geom_bodyid[gid])
         if body == 0:
-            return 0, float("inf")
+            node_id = self._geom_nodes.get(gid, -1)
+            node = next((item for item in self.nodes() if item.node_id == node_id), None)
+            if node is None or not node.object_id:
+                return 0, float("inf")
+            return int(node.object_id), float(dist)
         return body, float(dist)
 
     def camera_hint(self) -> CameraView | None:
@@ -4273,6 +4383,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._source = None
         self._nodes.clear()
         self._node_body.clear()
+        self._reset_geometry_object_ids()
         self._node_model.clear()
         self._node_element.clear()
         self._geom_nodes.clear()

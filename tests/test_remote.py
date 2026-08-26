@@ -277,6 +277,21 @@ def test_scene_camera_command_keeps_its_typed_remote_boundary():
     assert command == cmd.SetSceneCamera(7, camera)
 
 
+def test_qpos_batch_command_keeps_its_typed_remote_boundary():
+    class Sink:
+        def submit(self, command):
+            return command
+
+    indices = np.array((3, 4, 5, 6), np.intp)
+    values = np.array((1.0, 0.0, 0.0, 0.0), np.float64)
+    command = handle_session_command(
+        Sink(), {"op": "qpos_batch", "indices": indices, "values": values}
+    )
+    assert isinstance(command, cmd.SetQposBatch)
+    assert np.array_equal(command.indices, indices)
+    assert np.array_equal(command.values, values)
+
+
 def test_scene_entity_commands_keep_their_typed_remote_boundary():
     class Sink:
         def submit(self, command):

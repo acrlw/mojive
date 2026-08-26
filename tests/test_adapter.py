@@ -1018,6 +1018,38 @@ def test_session_indexes_selected_body_joints_and_requires_pause() -> None:
     assert session.submit(cmd.SetQpos(joint.qpos_adr, 0.1))
 
 
+def test_qpos_batch_validates_atomically_and_forwards_once(monkeypatch) -> None:
+    from forge_viewer import commands as cmd
+    from forge_viewer.assets import resolve
+    from forge_viewer.session import Session
+
+    adapter = MuJoCoAdapter(resolve("joint_types"))
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+    ball = next(joint for joint in session.joints if joint.type == "ball")
+    indices = np.arange(ball.qpos_adr, ball.qpos_adr + 4, dtype=np.intp)
+    before = np.asarray(adapter.data.qpos[indices]).copy()
+
+    assert not session.submit(cmd.SetQposBatch(indices, np.array((1.0, 0.0, 0.0))))
+    assert adapter.data.qpos[indices] == pytest.approx(before)
+    assert not session.submit(cmd.SetQposBatch(np.array((indices[0], indices[0])), np.ones(2)))
+    assert adapter.data.qpos[indices] == pytest.approx(before)
+
+    calls = 0
+    real_forward = mujoco.mj_forward
+
+    def count_forward(model, data):
+        nonlocal calls
+        calls += 1
+        return real_forward(model, data)
+
+    monkeypatch.setattr(mujoco, "mj_forward", count_forward)
+    values = np.array((np.cos(0.2), 0.0, 0.0, np.sin(0.2)))
+    assert session.submit(cmd.SetQposBatch(indices, values))
+    assert calls == 1
+    assert adapter.data.qpos[indices] == pytest.approx(values)
+
+
 def test_mujoco_visuals_cover_heightfield_sites_and_tendon():
     from forge_viewer.assets import resolve
     from forge_viewer.mujoco_audit import audit_model

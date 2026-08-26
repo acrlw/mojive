@@ -112,6 +112,14 @@ class JointsPanel(Panel):
         qpos = ctx.session.frame.qpos
         if qpos is None or j.qpos_adr >= len(qpos):
             return
+        direct_joints = ctx.session.joints_for_body(j.body)
+        if ctx.gizmo is not None and len(direct_joints) > 1 and j.type in (*_SCALAR_KINDS, "ball"):
+            selected = ctx.gizmo.selected_joint_id(j.body) == j.joint_id
+            label = "Using gizmo" if selected else "Use gizmo"
+            if imgui.small_button(f"{label}##joint-gizmo-{j.joint_id}"):
+                ctx.gizmo.select_joint(j.body, j.joint_id)
+            imgui.set_item_tooltip("Choose which direct joint the viewport gizmo edits")
+            imgui.same_line()
         if j.type not in _SCALAR_KINDS:
             imgui.text_disabled(f"{j.name or f'joint{j.joint_id}'}  ({j.type}, {j.dof} dof)")
             return

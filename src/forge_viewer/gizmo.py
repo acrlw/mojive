@@ -86,6 +86,11 @@ AXIS_HANDLES = (GizmoHandle.X, GizmoHandle.Y, GizmoHandle.Z)
 PLANE_HANDLES = (GizmoHandle.YZ, GizmoHandle.ZX, GizmoHandle.XY)
 ROTATE_AXIS_HANDLES = (GizmoHandle.ROTATE_X, GizmoHandle.ROTATE_Y, GizmoHandle.ROTATE_Z)
 ROTATE_HANDLES = (*ROTATE_AXIS_HANDLES, GizmoHandle.ROTATE_SCREEN)
+ALL_HANDLE_MASK = sum(1 << int(handle) for handle in GizmoHandle if handle is not GizmoHandle.NONE)
+
+
+def handle_mask(*handles: GizmoHandle) -> int:
+    return sum(1 << int(handle) for handle in handles)
 
 
 @dataclass
@@ -101,16 +106,18 @@ class GizmoFrame:
     active_rotation_overlay: bool = False
     axis_mask: int = 0b111
     plane_mask: int = 0b111
+    handle_mask: int = ALL_HANDLE_MASK
 
 
 def display_handles(frame: GizmoFrame) -> tuple[GizmoHandle, ...]:
     if frame.active is not GizmoHandle.NONE:
         return (frame.active,)
     if frame.mode is GizmoMode.ROTATE:
-        return ROTATE_HANDLES
+        return tuple(handle for handle in ROTATE_HANDLES if frame.handle_mask & (1 << int(handle)))
     axes = tuple(h for i, h in enumerate(AXIS_HANDLES) if frame.axis_mask & (1 << i))
     planes = tuple(h for i, h in enumerate(PLANE_HANDLES) if frame.plane_mask & (1 << i))
-    return (*planes, *axes, GizmoHandle.SCREEN)
+    handles = (*planes, *axes, GizmoHandle.SCREEN)
+    return tuple(handle for handle in handles if frame.handle_mask & (1 << int(handle)))
 
 
 def world_scale(cam: CameraView, origin, viewport_height: float, size_pt: float = SIZE_PT) -> float:
@@ -430,6 +437,7 @@ def hit_test(
     cursor: tuple[float, float],
     mode: GizmoMode,
     style_scale: float = 1.0,
+    allowed_handles: int = ALL_HANDLE_MASK,
 ) -> tuple[GizmoHandle, int, int]:
     o = np.asarray(origin, np.float64)
     r = np.asarray(rotation, np.float64).reshape(3, 3)
@@ -441,10 +449,18 @@ def hit_test(
     p = np.asarray(cursor, np.float64)
     center = project(cam, [o], rect)[0, :2]
 
+    def allowed(handle: GizmoHandle) -> bool:
+        return bool(allowed_handles & (1 << int(handle)))
+
     if mode is GizmoMode.TRANSLATE:
-        if np.linalg.norm(p - center) <= CENTER_HIT_PT * style_scale:
+        if (
+            allowed(GizmoHandle.SCREEN)
+            and np.linalg.norm(p - center) <= CENTER_HIT_PT * style_scale
+        ):
             return GizmoHandle.SCREEN, axis_mask, plane_mask
-        axes = [axis for axis in range(3) if axis_mask & (1 << axis)]
+        axes = [
+            axis for axis in range(3) if axis_mask & (1 << axis) and allowed(AXIS_HANDLES[axis])
+        ]
         order = paint_order(cam, o, [r[:, axis] for axis in axes])
         for index in reversed(order):
             axis = axes[index]
@@ -469,7 +485,9 @@ def hit_test(
             if _polygon_distance(p, polygon) <= AXIS_HIT_PADDING_PT * style_scale:
                 return handle, axis_mask, plane_mask
 
-        planes = [axis for axis in range(3) if plane_mask & (1 << axis)]
+        planes = [
+            axis for axis in range(3) if plane_mask & (1 << axis) and allowed(PLANE_HANDLES[axis])
+        ]
         order = paint_order(cam, o, [plane_direction(r, axis) for axis in planes])
         for index in reversed(order):
             axis = planes[index]
@@ -481,12 +499,16 @@ def hit_test(
         return GizmoHandle.NONE, axis_mask, plane_mask
 
     screen_radius = SCREEN_RING_RADIUS * SIZE_PT * style_scale
-    if abs(float(np.linalg.norm(p - center)) - screen_radius) <= RING_HIT_PT * style_scale:
+    if allowed(GizmoHandle.ROTATE_SCREEN) and (
+        abs(float(np.linalg.norm(p - center)) - screen_radius) <= RING_HIT_PT * style_scale
+    ):
         return GizmoHandle.ROTATE_SCREEN, axis_mask, plane_mask
 
     best_distance = RING_HIT_PT * style_scale
     best_handle = GizmoHandle.NONE
     for axis, handle in enumerate(ROTATE_AXIS_HANDLES):
+        if not allowed(handle):
+            continue
         if rotation_ring_alpha(cam, o, r[:, axis]) <= HANDLE_HIT_ALPHA:
             continue
         ring = rotation_ring(cam, o, r, scale, axis, full=False)

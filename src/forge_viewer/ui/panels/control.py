@@ -132,3 +132,5 @@ class ControlPanel(Panel):
         if s.last_message:
             imgui.separator()
             imgui.text_wrapped(s.last_message)
+            if imgui.small_button("Copy message"):
+                imgui.set_clipboard_text(s.last_message)

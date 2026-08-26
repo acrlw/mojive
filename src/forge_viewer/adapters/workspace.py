@@ -325,7 +325,7 @@ class WorkspaceAdapter(SceneAdapterBase):
         scene_node = self._node_to_scene.get(int(node_id))
         if scene_node is not None:
             return self.scene.set_geometry_size(scene_node, size)
-        return False
+        return self.primary.set_geometry_size(node_id, size)
 
     def add_scene_object(self, shape, name, size, position, rotation, color, material) -> int:
         raw = self.scene.add(
@@ -461,6 +461,9 @@ class WorkspaceAdapter(SceneAdapterBase):
 
     def set_qpos(self, index: int, value: float) -> bool:
         return self.primary.set_qpos(index, value)
+
+    def set_qpos_batch(self, indices, values) -> bool:
+        return self.primary.set_qpos_batch(indices, values)
 
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool:
         return self.primary.set_equality_enabled(constraint_id, enabled)
