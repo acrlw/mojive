@@ -91,6 +91,68 @@ def test_workspace_preserves_every_primary_environment_field(tmp_path: Path) -> 
     )
 
 
+@pytest.mark.parametrize("operation", ("load", "add"))
+def test_workspace_preserves_explicit_world_light_target(tmp_path: Path, operation: str) -> None:
+    """Root loading and composition keep the singleton world light target."""
+
+    model_path = tmp_path / "world_target.xml"
+    model_path.write_text(
+        """<mujoco>
+  <worldbody>
+    <light name="tracking" mode="targetbodycom" target="world" pos="0 -2 3"/>
+    <body name="object"><geom type="sphere" size=".2"/></body>
+  </worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    document = workspace()
+
+    if operation == "load":
+        document.load(model_path)
+    else:
+        document.add_scene_model(model_path, np.zeros(3), np.eye(3))
+
+    assert document.primary.model.nlight == 1
+    assert document.primary.model.light_targetbodyid[0] == 0
+    assert document.scene_source().instance_count == 1
+
+
+def test_workspace_composes_flex_with_model_root_transform(tmp_path: Path) -> None:
+    """Model composition preserves flex declarations and world-owned vertices."""
+
+    model_path = tmp_path / "cloth.xml"
+    model_path.write_text(
+        """<mujoco>
+  <worldbody>
+    <flexcomp name="cloth" type="grid" count="3 3 1" spacing=".2 .2 .2"
+              dim="2" radius=".01">
+      <pin id="0 2 6 8"/><edge equality="true"/>
+    </flexcomp>
+  </worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    direct = MuJoCoAdapter(model_path)
+    composed = MuJoCoAdapter()
+    composed.new_scene()
+    position = np.array((1.0, -2.0, 0.5), np.float32)
+    rotation = np.array(((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)), np.float32)
+
+    try:
+        model_id = composed.add_scene_model(model_path, position, rotation)
+
+        assert model_id > 0
+        assert composed.model.nflex == direct.model.nflex == 1
+        expected = np.asarray(direct.data.flexvert_xpos) @ rotation.T + position
+        assert composed.data.flexvert_xpos == pytest.approx(expected)
+        assert composed.scene_source().instance_count == direct.scene_source().instance_count
+    finally:
+        direct.release()
+        composed.release()
+
+
 def test_workspace_bounds_contain_primary_and_authored_geometry() -> None:
     document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
     document.add_scene_object(

@@ -54,4 +54,6 @@ def test_report_counts_every_outcome(tmp_path: Path):
 
     assert report["counts"]["passed"] == 1
     assert report["counts"]["render_failed"] == 1
+    assert report["counts"]["workspace_failed"] == 0
+    assert report["counts"]["composition_failed"] == 0
     assert report["counts"]["skipped_dependency"] == 0

@@ -22,6 +22,8 @@ class ModelAuditStatus(enum.StrEnum):
     SKIPPED_DEPENDENCY = "skipped_dependency"
     LOAD_FAILED = "load_failed"
     ADAPTER_FAILED = "adapter_failed"
+    WORKSPACE_FAILED = "workspace_failed"
+    COMPOSITION_FAILED = "composition_failed"
     RENDER_FAILED = "render_failed"
     EMPTY_RENDER = "empty_render"
 
@@ -51,6 +53,8 @@ class ModelAuditResult:
     flex_count: int = 0
     skin_count: int = 0
     source_instances: int = 0
+    workspace_instances: int = 0
+    composed_instances: int = 0
     rendered_views: int = 0
     visible_views: int = 0
     visible_objects: int = 0
@@ -183,6 +187,90 @@ def audit_model(request: ModelAuditRequest) -> ModelAuditResult:
             skin_count=int(model.nskin),
         )
 
+    try:
+        from ..adapters.workspace import WorkspaceAdapter
+
+        workspace_primary = MuJoCoAdapter()
+        workspace_primary.new_scene()
+        workspace = WorkspaceAdapter(workspace_primary)
+        try:
+            workspace.load(path)
+            workspace_source = workspace.scene_source()
+            workspace.frame(FrameNeeds(poses=True))
+            workspace_instances = int(workspace_source.instance_count)
+        finally:
+            workspace.release()
+    except Exception as exc:
+        return ModelAuditResult(
+            path=str(path),
+            status=ModelAuditStatus.WORKSPACE_FAILED,
+            message=str(exc),
+            plugins=plugins,
+            geom_count=int(model.ngeom),
+            flex_count=int(model.nflex),
+            skin_count=int(model.nskin),
+            source_instances=source_instances,
+        )
+
+    if workspace_instances != source_instances:
+        return ModelAuditResult(
+            path=str(path),
+            status=ModelAuditStatus.WORKSPACE_FAILED,
+            message=(
+                f"Workspace produced {workspace_instances} instances; "
+                f"direct adapter produced {source_instances}"
+            ),
+            plugins=plugins,
+            geom_count=int(model.ngeom),
+            flex_count=int(model.nflex),
+            skin_count=int(model.nskin),
+            source_instances=source_instances,
+            workspace_instances=workspace_instances,
+        )
+
+    try:
+        primary = MuJoCoAdapter()
+        primary.new_scene()
+        try:
+            primary.add_scene_model(path, np.zeros(3, np.float32), np.eye(3, dtype=np.float32))
+            composed_source = primary.scene_source()
+            primary.frame(FrameNeeds(poses=True))
+            composed_instances = int(composed_source.instance_count)
+            composed_counts = (primary.model.ngeom, primary.model.nflex, primary.model.nskin)
+        finally:
+            primary.release()
+    except Exception as exc:
+        return ModelAuditResult(
+            path=str(path),
+            status=ModelAuditStatus.COMPOSITION_FAILED,
+            message=str(exc),
+            plugins=plugins,
+            geom_count=int(model.ngeom),
+            flex_count=int(model.nflex),
+            skin_count=int(model.nskin),
+            source_instances=source_instances,
+            workspace_instances=workspace_instances,
+        )
+
+    direct_counts = (int(model.ngeom), int(model.nflex), int(model.nskin))
+    if composed_instances != source_instances or composed_counts != direct_counts:
+        return ModelAuditResult(
+            path=str(path),
+            status=ModelAuditStatus.COMPOSITION_FAILED,
+            message=(
+                f"Composition produced geom/flex/skin={composed_counts} and "
+                f"{composed_instances} instances; direct loading produced "
+                f"geom/flex/skin={direct_counts} and {source_instances} instances"
+            ),
+            plugins=plugins,
+            geom_count=int(model.ngeom),
+            flex_count=int(model.nflex),
+            skin_count=int(model.nskin),
+            source_instances=source_instances,
+            workspace_instances=workspace_instances,
+            composed_instances=composed_instances,
+        )
+
     common = {
         "path": str(path),
         "plugins": plugins,
@@ -190,6 +278,8 @@ def audit_model(request: ModelAuditRequest) -> ModelAuditResult:
         "flex_count": int(model.nflex),
         "skin_count": int(model.nskin),
         "source_instances": source_instances,
+        "workspace_instances": workspace_instances,
+        "composed_instances": composed_instances,
     }
     if request.load_only:
         return ModelAuditResult(status=ModelAuditStatus.PASSED, **common)
@@ -349,6 +439,8 @@ def main(argv: list[str] | None = None) -> int:
     failures = {
         ModelAuditStatus.LOAD_FAILED,
         ModelAuditStatus.ADAPTER_FAILED,
+        ModelAuditStatus.WORKSPACE_FAILED,
+        ModelAuditStatus.COMPOSITION_FAILED,
         ModelAuditStatus.RENDER_FAILED,
         ModelAuditStatus.EMPTY_RENDER,
     }

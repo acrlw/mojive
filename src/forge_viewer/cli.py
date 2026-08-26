@@ -694,9 +694,11 @@ def build_parser() -> argparse.ArgumentParser:
         return sp
 
     sp = with_render_flags(with_asset(sub.add_parser("view", help="Open the viewer")))
-    sp.add_argument("--paused", action="store_true")
+    startup = sp.add_mutually_exclusive_group()
+    startup.add_argument("--paused", dest="paused", action="store_true")
+    startup.add_argument("--play", dest="paused", action="store_false")
     sp.add_argument("--no-vsync", action="store_true")
-    sp.set_defaults(func=cmd_view, json=False)
+    sp.set_defaults(func=cmd_view, json=False, paused=True)
 
     sp = with_render_flags(sub.add_parser("canvas", help="Open a procedural 3D canvas"))
     sp.add_argument("--demo", choices=("empty", "canvas", "lighting", "text"), default="canvas")

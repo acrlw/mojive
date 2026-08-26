@@ -131,12 +131,7 @@ class WorkspaceAdapter(SceneAdapterBase):
 
     def load(self, path: Path) -> None:
         target = Path(path).expanduser().resolve()
-        self.primary.new_scene()
-        model_id = self.primary.add_scene_model(
-            target, np.zeros(3, np.float32), np.eye(3, dtype=np.float32)
-        )
-        if model_id < 0:
-            raise RuntimeError(f"Failed to load {target}")
+        self.primary.load(target)
         environment = self.primary.scene_source().lights.environment()
         self.scene = Scene(lights=LightSet().with_environment(environment))
         self._path = target

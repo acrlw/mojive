@@ -895,9 +895,12 @@ def test_session_loads_mjcf_and_urdf_without_losing_the_current_model_on_failure
     try:
         generation = session.structure_generation
         for name in ("test_scene.xml", "test_scene.urdf"):
+            assert session.submit(cmd.Play())
+            assert not session.paused
             path = resolve(name)
             result = session.submit(cmd.LoadAsset(path))
             assert result.ok, result.message
+            assert session.paused
             assert session.asset_path == path
             assert session.source.instance_count > 0
             assert session.structure_generation > generation

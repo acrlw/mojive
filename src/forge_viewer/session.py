@@ -529,6 +529,15 @@ class Session:
         self._saved_revision = 0
         self._next_document_revision = 1
 
+    def _pause_loaded_scene(self) -> None:
+        """Return a newly loaded simulation to its editable paused state."""
+
+        if self._adapter.caps.simulation:
+            self._adapter.set_paused(True)
+        self._paused = True
+        self._pending_steps = 0
+        self._sim_time_credit = 0.0
+
     def _dispatch(self, c: Command) -> CommandResult:
         caps = self._adapter.caps
 
@@ -582,8 +591,8 @@ class Session:
                 self._adapter.reload()
             except Exception as exc:
                 return CommandResult.bad(str(exc))
+            self._pause_loaded_scene()
             self._step_counter = 0
-            self._sim_time_credit = 0.0
             self._perturb = PerturbState()
             self._active_keyframe = -1
             self._authored.clear()
@@ -595,6 +604,7 @@ class Session:
             if not caps.scene_files:
                 return CommandResult.bad(f"{caps.name} does not support scene files")
             self._adapter.new_scene()
+            self._pause_loaded_scene()
             self._asset_path = None
             self._selected = 0
             self._selected_node_id = -1
@@ -611,6 +621,7 @@ class Session:
                 self._adapter.open_scene(path)
             except Exception as exc:
                 return CommandResult.bad(str(exc))
+            self._pause_loaded_scene()
             self._asset_path = path
             self._selected = 0
             self._selected_node_id = -1
@@ -642,10 +653,9 @@ class Session:
                 self._adapter.load(path)
             except Exception as exc:
                 return CommandResult.bad(str(exc))
+            self._pause_loaded_scene()
             self._asset_path = path
             self._step_counter = 0
-            self._sim_time_credit = 0.0
-            self._pending_steps = 0
             self._selected = 0
             self._selected_node_id = -1
             self._perturb = PerturbState()

@@ -121,6 +121,42 @@ _REFERENCE_ELEMENT = {
     "tendon2": "tendon",
 }
 
+_FLEX_COPY_FIELDS = (
+    "contype",
+    "conaffinity",
+    "condim",
+    "priority",
+    "friction",
+    "solmix",
+    "solref",
+    "solimp",
+    "margin",
+    "gap",
+    "dim",
+    "radius",
+    "size",
+    "internal",
+    "flatskin",
+    "selfcollide",
+    "passive",
+    "activelayers",
+    "group",
+    "edgestiffness",
+    "edgedamping",
+    "rgba",
+    "young",
+    "poisson",
+    "damping",
+    "thickness",
+    "elastic2d",
+    "cellcount",
+    "order",
+    "elem",
+    "texcoord",
+    "elemtexcoord",
+    "info",
+)
+
 
 def _load_editable_spec(path: Path):
     spec = mujoco.MjSpec.from_file(str(path))
@@ -1024,6 +1060,9 @@ class MuJoCoAdapter(SceneAdapterBase):
         for index, item in enumerate(self._attached_models):
             child = item.spec.copy()
             self._resolve_asset_paths(child, item.path.parent)
+            # Resolve keyframes inherited from nested model assets before the child is
+            # attached again. MuJoCo can then namespace their compiled state correctly.
+            child.compile()
             if index == 0 and self._root_path is None:
                 spec.option = child.option
                 spec.visual = child.visual
@@ -1034,7 +1073,15 @@ class MuJoCoAdapter(SceneAdapterBase):
             frame = spec.worldbody.add_frame(name=f"forge_model_{item.model_id}")
             frame.pos = item.position
             frame.quat = math3d.mat3_to_quat(item.rotation)
+            self._copy_world_attached_flexes(
+                spec,
+                child,
+                item.prefix,
+                item.position,
+                item.rotation,
+            )
             spec.attach(child, prefix=item.prefix, frame=frame)
+            self._restore_attached_world_targets(spec, item.prefix)
         return spec
 
     def _compile_composed_model(self):
@@ -1061,6 +1108,75 @@ class MuJoCoAdapter(SceneAdapterBase):
                     asset.file = str((base / file).resolve())
         spec.compiler.meshdir = ""
         spec.compiler.texturedir = ""
+
+    @staticmethod
+    def _restore_attached_world_targets(spec, prefix: str) -> None:
+        """Restore camera and light targets that refer to MuJoCo's world body.
+
+        MjSpec attachment namespaces every explicit target body. The world body is
+        shared by the composed model and retains the reserved name ``world``.
+        """
+
+        namespaced_world = f"{prefix}world"
+        for camera in spec.cameras:
+            if camera.targetbody == namespaced_world:
+                camera.targetbody = "world"
+        for light in spec.lights:
+            if light.targetbody == namespaced_world:
+                light.targetbody = "world"
+
+    @staticmethod
+    def _copy_world_attached_flexes(spec, child, prefix: str, position, rotation) -> None:
+        """Copy world-referencing flexes that MuJoCo omits during attachment.
+
+        Flex vertices owned by the world body require the model-root transform.
+        Body-owned vertices remain in body-local coordinates and move with the
+        attached frame.
+        """
+
+        def namespaced_body(name: str) -> str:
+            if not name or name == "world":
+                return name
+            return f"{prefix}{name}"
+
+        def transformed_points(values, owners) -> list[float]:
+            points = np.asarray(values, np.float64).reshape(-1, 3).copy()
+            if not len(points):
+                return []
+            if owners:
+                world_owned = np.asarray(
+                    [not name or name == "world" for name in owners],
+                    dtype=bool,
+                )
+            else:
+                world_owned = np.ones(len(points), dtype=bool)
+            points[world_owned] = points[world_owned] @ np.asarray(rotation).T + position
+            return points.reshape(-1).tolist()
+
+        for flex in child.flexes:
+            references_world = (
+                any(name == "world" for name in flex.nodebody)
+                or any(name == "world" for name in flex.vertbody)
+                or (len(flex.node) > 0 and not flex.nodebody)
+                or (len(flex.vert) > 0 and not flex.vertbody)
+            )
+            if not references_world:
+                continue
+            fields = {
+                name: getattr(flex, name).tolist()
+                if hasattr(getattr(flex, name), "tolist")
+                else getattr(flex, name)
+                for name in _FLEX_COPY_FIELDS
+            }
+            fields.update(
+                name=f"{prefix}{flex.name}" if flex.name else None,
+                material=f"{prefix}{flex.material}" if flex.material else None,
+                nodebody=[namespaced_body(name) for name in flex.nodebody],
+                vertbody=[namespaced_body(name) for name in flex.vertbody],
+                node=transformed_points(flex.node, flex.nodebody),
+                vert=transformed_points(flex.vert, flex.vertbody),
+            )
+            spec.add_flex(**fields)
 
     def current_pose_modified(self) -> bool:
         if self._m is None or self._d is None:
