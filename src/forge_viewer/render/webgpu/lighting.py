@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import wgpu
 
-from ...types import Light, LightKind, LightSet
+from ...types import Light, LightSet, LightType
 
 MAX_SCENE_LIGHTS = 100
 LOCAL_SHADOW_SLOTS = 8
@@ -20,7 +20,7 @@ SHADOW_BIAS = (1.0, 2.5)
 
 LIGHTS_DTYPE = np.dtype(
     [
-        ("pos", "(100,4)f4"),  # xyz position, w kind
+        ("pos", "(100,4)f4"),  # xyz position, w light type
         ("dir", "(100,4)f4"),  # xyz direction, w cutoff cosine
         ("diffuse", "(100,4)f4"),  # rgb linear, w spot exponent
         ("specular", "(100,4)f4"),
@@ -37,11 +37,12 @@ LIGHTS_DTYPE = np.dtype(
         ("local_pos", "(8,4)f4"),  # u_local_pos xyz position, w range (glsl:26)
         ("local_texel", "(8,)f4"),  # u_local_texel (glsl:27)
         ("local_radius", "(8,)f4"),  # u_local_radius (glsl:28)
+        ("local_layer", "(8,)i4"),  # packed base layer for each local shadow
         ("local_slot", "(100,)i4"),  # u_local_slot (glsl:29)
     ]
 )
 LIGHTS_BYTES = LIGHTS_DTYPE.itemsize
-assert LIGHTS_BYTES == 9408
+assert LIGHTS_BYTES == 9440
 
 
 def srgb_to_linear(x) -> np.ndarray:
@@ -78,25 +79,25 @@ class LightSchedule:
 def schedule_lights(lights: LightSet) -> LightSchedule:
     """Active lights plus shadow-caster selection, mirroring forge base.py:40."""
     active = tuple(
-        light for light in lights.lights if light.active and light.kind is not LightKind.IMAGE
+        light for light in lights.lights if light.active and light.type is not LightType.IMAGE
     )
     selected = active[:MAX_SCENE_LIGHTS]
     directional = next(
         (
             index
             for index, light in enumerate(selected)
-            if light.cast_shadow and light.kind is LightKind.DIRECTIONAL
+            if light.cast_shadow and light.type is LightType.DIRECTIONAL
         ),
         -1,
     )
     local = tuple(
         index
         for index, light in enumerate(selected)
-        if light.cast_shadow and light.kind in (LightKind.POINT, LightKind.SPOT, LightKind.AREA)
+        if light.cast_shadow and light.type in (LightType.POINT, LightType.SPOT, LightType.AREA)
     )[:LOCAL_SHADOW_SLOTS]
     shadow_candidates = sum(
         light.cast_shadow
-        and light.kind in (LightKind.DIRECTIONAL, LightKind.POINT, LightKind.SPOT, LightKind.AREA)
+        and light.type in (LightType.DIRECTIONAL, LightType.POINT, LightType.SPOT, LightType.AREA)
         for light in active
     )
     return LightSchedule(selected, len(active), directional, local, shadow_candidates)
@@ -108,7 +109,7 @@ def active_image_light(lights: LightSet) -> Light | None:
         (
             light
             for light in reversed(lights.lights)
-            if light.active and light.kind is LightKind.IMAGE
+            if light.active and light.type is LightType.IMAGE
         ),
         None,
     )
@@ -147,6 +148,7 @@ class ShadowState:
     local_radius: np.ndarray = field(
         default_factory=lambda: np.zeros(LOCAL_SHADOW_SLOTS, np.float32)
     )
+    local_layers: np.ndarray = field(default_factory=lambda: np.zeros(LOCAL_SHADOW_SLOTS, np.int32))
 
 
 class LightUniforms:
@@ -166,7 +168,7 @@ class LightUniforms:
             d = np.asarray(light.direction, np.float64)
             norm = float(np.linalg.norm(d))
             block["pos"][n, :3] = light.position
-            block["pos"][n, 3] = float(int(light.kind))
+            block["pos"][n, 3] = float(int(light.type))
             block["dir"][n, :3] = d / norm if norm > 1e-9 else (0.0, 0.0, -1.0)
             block["dir"][n, 3] = float(np.cos(np.deg2rad(min(max(light.cutoff, 0.0), 180.0))))
             block["diffuse"][n, :3] = srgb_to_linear(light.diffuse)
@@ -205,6 +207,7 @@ class LightUniforms:
         block["local_pos"][:] = shadow.local_positions
         block["local_texel"][:] = shadow.local_texel
         block["local_radius"][:] = shadow.local_radius
+        block["local_layer"][:] = shadow.local_layers
         block["local_slot"].fill(-1)
         for slot in range(m):
             index = int(shadow.local_light_indices[slot])

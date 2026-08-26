@@ -195,7 +195,7 @@ def test_transform_editability_matches_the_set_pose_contract():
 def test_free_body_velocity_is_split_into_linear_and_angular_xyz():
     from types import SimpleNamespace
 
-    joint = SimpleNamespace(body=3, kind="free", dof=6, qvel_adr=2)
+    joint = SimpleNamespace(body=3, type="free", dof=6, qvel_adr=2)
     linear, angular = _free_velocity([8, 9, 1, 2, 3, 4, 5, 6], [joint], 3)
     assert linear.tolist() == [1, 2, 3]
     assert angular.tolist() == [4, 5, 6]

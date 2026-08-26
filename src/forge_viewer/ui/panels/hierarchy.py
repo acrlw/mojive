@@ -7,7 +7,7 @@ from dataclasses import replace
 from imgui_bundle import imgui
 
 from ... import commands as cmd
-from ...adapters.base import FrameNeeds, NodeKind, SceneNode
+from ...adapters.base import FrameNeeds, NodeType, SceneNode
 from ..draw2d import ImguiDraw2D, ink_box
 from . import Panel, PanelContext
 
@@ -97,7 +97,7 @@ class HierarchyPanel(Panel):
         if selected is not None and node.node_id == selected.node_id:
             flags |= imgui.TreeNodeFlags_.selected
 
-        color = ctx.theme.node_color(node.kind)
+        color = ctx.theme.node_color(node.type)
         if not node.visible:
             color = (color[0] * 0.5, color[1] * 0.5, color[2] * 0.5, 1.0)
 
@@ -112,26 +112,26 @@ class HierarchyPanel(Panel):
             ctx.session.adapter.caps.scene_authoring
             and node.object_id
             and node.model_id < 0
-            and node.kind in (NodeKind.LINK, NodeKind.LIGHT, NodeKind.CAMERA)
+            and node.type in (NodeType.LINK, NodeType.LIGHT, NodeType.CAMERA)
         )
         if imgui.begin_popup_context_item(f"##entity_context_{node.node_id}"):
-            if node.kind is NodeKind.MODEL and node.model_id >= 0:
+            if node.type is NodeType.MODEL and node.model_id >= 0:
                 self._model_create_menu(ctx, node)
                 remove, _ = imgui.menu_item("Remove Model", "", False)
                 if remove:
                     ctx.submit(cmd.RemoveSceneModel(node.model_id))
             elif node.model_id >= 0:
-                if node.kind in (NodeKind.ROBOT, NodeKind.LINK):
+                if node.type in (NodeType.ROBOT, NodeType.LINK):
                     self._model_create_menu(ctx, node)
                     imgui.separator()
-                removable = node.kind in (
-                    NodeKind.ROBOT,
-                    NodeKind.LINK,
-                    NodeKind.GEOM,
-                    NodeKind.JOINT,
-                    NodeKind.SITE,
-                    NodeKind.CAMERA,
-                    NodeKind.LIGHT,
+                removable = node.type in (
+                    NodeType.ROBOT,
+                    NodeType.LINK,
+                    NodeType.GEOM,
+                    NodeType.JOINT,
+                    NodeType.SITE,
+                    NodeType.CAMERA,
+                    NodeType.LIGHT,
                 )
                 remove, _ = imgui.menu_item("Delete from Model", "", False, removable)
                 if remove:
@@ -152,7 +152,7 @@ class HierarchyPanel(Panel):
             imgui.end_popup()
 
         imgui.same_line()
-        imgui.text_disabled(str(node.kind))
+        imgui.text_disabled(str(node.type))
 
         imgui.table_next_column()
         self._visibility_toggle(ctx, node)
@@ -177,24 +177,24 @@ class HierarchyPanel(Panel):
             ("Camera", "camera"),
             ("Light", "light"),
         ]
-        if node.kind is NodeKind.MODEL:
+        if node.type is NodeType.MODEL:
             entries = [entry for entry in entries if not entry[1].startswith("joint:")]
         names = {item.name for item in ctx.session.nodes}
-        for label, kind in entries:
+        for label, element_type in entries:
             clicked, _ = imgui.menu_item(label, "", False)
             if clicked:
-                base = kind.split(":", 1)[0]
+                base = element_type.split(":", 1)[0]
                 index = 1
                 name = base
                 while name in names:
                     index += 1
                     name = f"{base}{index}"
-                ctx.submit(cmd.AddModelElement(node.node_id, kind, name))
+                ctx.submit(cmd.AddModelElement(node.node_id, element_type, name))
         imgui.end_menu()
 
     @staticmethod
     def _visibility_toggle(ctx: PanelContext, node: SceneNode) -> None:
-        if node.kind in (NodeKind.ENVIRONMENT, NodeKind.MODEL):
+        if node.type in (NodeType.ENVIRONMENT, NodeType.MODEL):
             return
         size = imgui.get_frame_height()
         avail = imgui.get_content_region_avail().x
@@ -204,7 +204,7 @@ class HierarchyPanel(Panel):
         lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         # The frame is taller than the label's ink box, so centering on the
         # frame leaves the mark a few pixels low; center on the row's ink.
-        label = f"{node.name or '?'} {node.kind}"
+        label = f"{node.name or '?'} {node.type}"
         box = ink_box(imgui.get_font(), imgui.get_font_size(), label)
         center_y = lo.y + (box[1] + box[3]) * 0.5 if box else (lo.y + hi.y) * 0.5
         center = ((lo.x + hi.x) * 0.5, center_y)
@@ -217,7 +217,7 @@ class HierarchyPanel(Panel):
         if node.visible:
             draw.circle_filled(center, radius * 0.42, color, segments=12)
         if pressed:
-            if node.kind is NodeKind.LIGHT and node.light_index >= 0:
+            if node.type is NodeType.LIGHT and node.light_index >= 0:
                 source = ctx.session.source
                 if source is not None and node.light_index < len(source.lights.lights):
                     light = source.lights.lights[node.light_index]

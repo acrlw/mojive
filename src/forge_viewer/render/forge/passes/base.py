@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import moderngl
 import numpy as np
 
-from ....types import Light, LightKind, LightSet
+from ....types import Light, LightSet, LightType
 from ...backend import DebugView, RenderFlag
 from ...scene import RenderScene
 
@@ -39,25 +39,25 @@ class LightSchedule:
 
 def schedule_lights(lights: LightSet) -> LightSchedule:
     active = tuple(
-        light for light in lights.lights if light.active and light.kind is not LightKind.IMAGE
+        light for light in lights.lights if light.active and light.type is not LightType.IMAGE
     )
     selected = active[:MAX_SCENE_LIGHTS]
     directional = next(
         (
             index
             for index, light in enumerate(selected)
-            if light.cast_shadow and light.kind is LightKind.DIRECTIONAL
+            if light.cast_shadow and light.type is LightType.DIRECTIONAL
         ),
         -1,
     )
     local = tuple(
         index
         for index, light in enumerate(selected)
-        if light.cast_shadow and light.kind in (LightKind.POINT, LightKind.SPOT, LightKind.AREA)
+        if light.cast_shadow and light.type in (LightType.POINT, LightType.SPOT, LightType.AREA)
     )[:LOCAL_SHADOW_SLOTS]
     shadow_candidates = sum(
         light.cast_shadow
-        and light.kind in (LightKind.DIRECTIONAL, LightKind.POINT, LightKind.SPOT, LightKind.AREA)
+        and light.type in (LightType.DIRECTIONAL, LightType.POINT, LightType.SPOT, LightType.AREA)
         for light in active
     )
     return LightSchedule(selected, len(active), directional, local, shadow_candidates)
@@ -107,6 +107,8 @@ class ShadowResult:
     local_radius: np.ndarray = field(
         default_factory=lambda: np.zeros(LOCAL_SHADOW_SLOTS, np.float32)
     )
+
+    local_layers: np.ndarray = field(default_factory=lambda: np.zeros(LOCAL_SHADOW_SLOTS, np.int32))
 
     local_tex: Any = None
 

@@ -8,14 +8,14 @@ import pytest
 
 from forge_viewer import commands as cmd
 from forge_viewer import math3d
-from forge_viewer.adapters.base import FrameNeeds, NodeKind, SceneFrame, SceneNode, SceneSource
+from forge_viewer.adapters.base import FrameNeeds, NodeType, SceneFrame, SceneNode, SceneSource
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.gizmo import project
 from forge_viewer.render.backend import BackendCaps
-from forge_viewer.render.debugdraw import DebugDraw, Prim
+from forge_viewer.render.debugdraw import DebugDraw, PrimitiveType
 from forge_viewer.scene import Scene
 from forge_viewer.session import Session
-from forge_viewer.types import CameraView, Light, LightKind, LightSet
+from forge_viewer.types import CameraView, Light, LightSet, LightType
 from forge_viewer.ui.gizmo import (
     ObjectGizmo,
     _node_pose,
@@ -54,7 +54,7 @@ def test_perspective_frustum_uses_camera_projection_planes() -> None:
 
 def test_spot_influence_uses_range_and_cutoff() -> None:
     light = Light(
-        kind=LightKind.SPOT,
+        type=LightType.SPOT,
         position=np.zeros(3, np.float32),
         direction=np.array((0.0, 0.0, -1.0), np.float32),
         range=2.0,
@@ -68,7 +68,7 @@ def test_spot_influence_uses_range_and_cutoff() -> None:
 
 def test_spot_helper_is_screen_bounded_and_hidden_behind_camera() -> None:
     light = Light(
-        kind=LightKind.SPOT,
+        type=LightType.SPOT,
         position=np.zeros(3, np.float32),
         direction=np.array((0.0, 0.0, -1.0), np.float32),
         range=10.0,
@@ -99,7 +99,7 @@ def test_small_cutoff_spot_helper_stays_inside_its_screen_budget() -> None:
         aspect=1.8,
     )
     light = Light(
-        kind=LightKind.SPOT,
+        type=LightType.SPOT,
         position=np.zeros(3, np.float32),
         direction=np.array((1.0, 0.0, 0.0), np.float32),
         range=10.0,
@@ -126,7 +126,7 @@ def test_near_camera_spot_helper_uses_its_projected_screen_extent() -> None:
         far=244.0,
     )
     light = Light(
-        kind=LightKind.SPOT,
+        type=LightType.SPOT,
         position=np.array((0.0, -6.0, 4.0), np.float32),
         direction=np.array((0.0023, 0.8854, -0.4649), np.float32),
         range=10.0,
@@ -188,7 +188,7 @@ def test_helpers_publish_selected_frustum_and_pick_camera_anchor() -> None:
     )
     session = Session(StaticSceneAdapter(scene))
     session.tick(FrameNeeds())
-    node = next(node for node in session.nodes if node.kind is NodeKind.CAMERA)
+    node = next(node for node in session.nodes if node.type is NodeType.CAMERA)
     assert session.submit(cmd.Select(node.object_id))
 
     editor_camera = CameraView(
@@ -200,8 +200,8 @@ def test_helpers_publish_selected_frustum_and_pick_camera_anchor() -> None:
     helpers = SceneEntityHelpers()
     helpers.publish(backend, session, editor_camera, 800.0, 1.0)
     layer = backend.debug.layer(HELPER_LAYER)
-    assert layer.count_of(Prim.LINE) == 20
-    assert layer.count_of(Prim.POINT) == 1
+    assert layer.count_of(PrimitiveType.LINE) == 20
+    assert layer.count_of(PrimitiveType.POINT) == 1
 
     hit = helpers.pick(session, editor_camera, (0.0, 0.0, 1000.0, 800.0), (500.0, 400.0), 1.0)
     assert hit == node.object_id
@@ -223,7 +223,7 @@ def test_selected_camera_frustum_uses_preview_aspect() -> None:
     )
     session = Session(StaticSceneAdapter(scene))
     session.tick(FrameNeeds())
-    node = next(node for node in session.nodes if node.kind is NodeKind.CAMERA)
+    node = next(node for node in session.nodes if node.type is NodeType.CAMERA)
     assert session.submit(cmd.Select(node.object_id))
 
     backend = SimpleNamespace(debug=DebugDraw())
@@ -237,7 +237,7 @@ def test_selected_camera_frustum_uses_preview_aspect() -> None:
         selected_camera_aspect=16.0 / 9.0,
     )
 
-    store = backend.debug.layer(HELPER_LAYER)._stores[Prim.LINE]
+    store = backend.debug.layer(HELPER_LAYER)._stores[PrimitiveType.LINE]
     frustum = store.positions[store.count - 12 : store.count]
     near = np.unique(frustum.reshape(-1, 3), axis=0)
     near = near[np.isclose(near[:, 2], -1.0)]
@@ -259,14 +259,14 @@ def test_view_through_camera_hides_editor_helpers() -> None:
     scene.add_light(
         "moving key",
         Light(
-            kind=LightKind.SPOT,
+            type=LightType.SPOT,
             position=np.array((1.0, -2.0, 3.0), np.float32),
             direction=np.array((0.0, 1.0, -1.0), np.float32),
         ),
     )
     session = Session(StaticSceneAdapter(scene))
     session.tick(FrameNeeds())
-    node = next(node for node in session.nodes if node.kind is NodeKind.CAMERA)
+    node = next(node for node in session.nodes if node.type is NodeType.CAMERA)
     assert session.submit(cmd.Select(node.object_id))
     view = session.camera_view(camera_id)
     backend = SimpleNamespace(debug=DebugDraw())
@@ -275,8 +275,8 @@ def test_view_through_camera_hides_editor_helpers() -> None:
     helpers.publish(backend, session, view, 800.0, 1.0, True)
 
     layer = backend.debug.layer(HELPER_LAYER)
-    assert layer.count_of(Prim.LINE) == 0
-    assert layer.count_of(Prim.POINT) == 0
+    assert layer.count_of(PrimitiveType.LINE) == 0
+    assert layer.count_of(PrimitiveType.POINT) == 0
     assert helpers.pick(session, view, (0.0, 0.0, 1000.0, 800.0), (500.0, 400.0), 1.0, True) == 0
 
 
@@ -285,7 +285,7 @@ def test_light_and_camera_gizmo_commands_write_entity_transforms() -> None:
     scene.add_light(
         "spot",
         Light(
-            kind=LightKind.SPOT,
+            type=LightType.SPOT,
             position=np.array((1.0, 2.0, 3.0), np.float32),
             direction=np.array((0.0, 0.0, -1.0), np.float32),
         ),
@@ -298,8 +298,8 @@ def test_light_and_camera_gizmo_commands_write_entity_transforms() -> None:
         ),
     )
     session = Session(StaticSceneAdapter(scene))
-    light_node = next(node for node in session.nodes if node.kind is NodeKind.LIGHT)
-    camera_node = next(node for node in session.nodes if node.kind is NodeKind.CAMERA)
+    light_node = next(node for node in session.nodes if node.type is NodeType.LIGHT)
+    camera_node = next(node for node in session.nodes if node.type is NodeType.CAMERA)
 
     light_rotation = np.array(((1.0, 0.0, 0.0), (0.0, 0.0, -1.0), (0.0, 1.0, 0.0)), np.float32)
     light_command = _set_light_from_world(
@@ -320,19 +320,21 @@ def test_light_and_camera_gizmo_commands_write_entity_transforms() -> None:
     assert -camera_rotation[:, 2] == pytest.approx((0.0, 0.0, -1.0))
 
 
-@pytest.mark.parametrize("kind", (LightKind.POINT, LightKind.SPOT))
-def test_light_rotation_gizmo_keeps_its_drag_frame_after_write_back(kind: LightKind) -> None:
+@pytest.mark.parametrize("light_type", (LightType.POINT, LightType.SPOT))
+def test_light_rotation_gizmo_keeps_its_drag_frame_after_write_back(
+    light_type: LightType,
+) -> None:
     scene = Scene()
     scene.add_light(
         "light",
         Light(
-            kind=kind,
+            type=light_type,
             position=np.zeros(3, np.float32),
             direction=np.array((0.0, 0.0, -1.0), np.float32),
         ),
     )
     session = Session(StaticSceneAdapter(scene))
-    node = next(node for node in session.nodes if node.kind is NodeKind.LIGHT)
+    node = next(node for node in session.nodes if node.type is NodeType.LIGHT)
     assert session.submit(cmd.Select(node.object_id))
     editor_camera = CameraView(
         eye=np.array((4.0, -6.0, 3.0), np.float32),
@@ -373,7 +375,7 @@ def test_light_rotation_gizmo_keeps_its_drag_frame_after_write_back(kind: LightK
 def test_light_gizmo_converts_world_pose_to_parent_body_frame() -> None:
     body_rotation = math3d.euler_xyz_to_mat3(np.array((0.0, 0.0, np.pi * 0.5)))
     local_light = Light(
-        kind=LightKind.SPOT,
+        type=LightType.SPOT,
         position=np.zeros(3, np.float32),
         direction=np.array((0.0, 0.0, -1.0), np.float32),
     )
@@ -383,7 +385,7 @@ def test_light_gizmo_converts_world_pose_to_parent_body_frame() -> None:
         body_xmat=np.array((np.eye(3), body_rotation), np.float32),
     )
     session = SimpleNamespace(source=source, frame=frame)
-    node = SceneNode(1, "spot", NodeKind.LIGHT, body_index=1, light_index=0)
+    node = SceneNode(1, "spot", NodeType.LIGHT, body_index=1, light_index=0)
     world_position = np.array((2.0, 4.0, 4.0), np.float32)
     world_rotation = np.eye(3, dtype=np.float32)
 

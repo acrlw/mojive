@@ -23,7 +23,7 @@ from ..remote import (
 from ..render.backend import RenderFlag
 from ..scene import Scene
 from ..session import Session
-from ..types import CameraView, Light, LightKind, MeshShape
+from ..types import CameraView, Light, LightType, MeshShape
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -111,7 +111,7 @@ def _author_scene(session: Session, camera: CameraView) -> None:
             cmd.AddSceneLight(
                 "remote key",
                 Light(
-                    kind=LightKind.POINT,
+                    type=LightType.POINT,
                     position=np.array([0.0, -1.5, 3.5], np.float32),
                     diffuse=np.array([1.0, 0.85, 0.7], np.float32),
                     range=12.0,

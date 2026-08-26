@@ -7,7 +7,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from forge_viewer.adapters.base import NodeKind as NK
+from forge_viewer.adapters.base import NodeType as NK
 from forge_viewer.adapters.base import SceneFrame, SceneNode, SceneSource
 from forge_viewer.render.builder import SceneSourceBuilder
 from forge_viewer.types import (
@@ -17,7 +17,7 @@ from forge_viewer.types import (
     MeshKey,
     MeshShape,
     TextureData,
-    TextureKind,
+    TextureType,
 )
 
 
@@ -50,7 +50,7 @@ def make_source(
     source: list[int] = []
     local: list[np.ndarray] = []
     infinite: list[bool] = []
-    nodes: list[SceneNode] = [SceneNode(node_id=0, name="world", kind=NK.WORLD, parent=-1)]
+    nodes: list[SceneNode] = [SceneNode(node_id=0, name="world", type=NK.WORLD, parent=-1)]
 
     geom = 0
     if with_plane:
@@ -64,7 +64,7 @@ def make_source(
         local.append(np.eye(4, dtype=np.float32))
         infinite.append(True)
         nodes.append(
-            SceneNode(node_id=len(nodes), name="floor", kind=NK.GEOM, parent=0, body_index=0)
+            SceneNode(node_id=len(nodes), name="floor", type=NK.GEOM, parent=0, body_index=0)
         )
         geom += 1
 
@@ -74,7 +74,7 @@ def make_source(
             SceneNode(
                 node_id=body_node,
                 name=f"link{b}",
-                kind=NK.LINK,
+                type=NK.LINK,
                 parent=0,
                 object_id=b,
                 body_index=b,
@@ -92,7 +92,7 @@ def make_source(
         infinite.append(False)
         nodes.append(
             SceneNode(
-                node_id=len(nodes), name=f"box{b}", kind=NK.GEOM, parent=body_node, body_index=b
+                node_id=len(nodes), name=f"box{b}", type=NK.GEOM, parent=body_node, body_index=b
             )
         )
         geom += 1
@@ -120,7 +120,7 @@ def make_source(
             infinite.append(False)
         nodes.append(
             SceneNode(
-                node_id=len(nodes), name=f"cap{b}", kind=NK.GEOM, parent=body_node, body_index=b
+                node_id=len(nodes), name=f"cap{b}", type=NK.GEOM, parent=body_node, body_index=b
             )
         )
         geom += 1
@@ -254,7 +254,7 @@ def test_cube_material_uses_object_linear_primitive_coordinates():
     src = make_source(bodies=1, with_plane=False)
     src.textures["body"] = TextureData(
         name="body",
-        kind=TextureKind.CUBE,
+        type=TextureType.CUBE,
         pixels=np.zeros((6, 2, 2, 3), np.uint8),
     )
     src.materials[1] = replace(src.materials[1], texture="body", tex_uniform=True)

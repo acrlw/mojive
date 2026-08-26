@@ -21,7 +21,7 @@ CASCADE_COUNT = 3
 RADIUS_DIVISORS: tuple[float, ...] = (9.0, 3.0, 1.0)
 
 
-PCF_RADIUS = 2
+PCF_RADIUS = 1
 
 
 DEFAULT_SHADOW_CLIP = 1.0

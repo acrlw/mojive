@@ -29,7 +29,7 @@ class Occlusion(enum.StrEnum):
 OCCLUSION_ORDER: tuple[Occlusion, ...] = (Occlusion.DEPTH, Occlusion.ALWAYS, Occlusion.GHOST)
 
 
-class Prim(enum.IntEnum):
+class PrimitiveType(enum.IntEnum):
     """Internal primitive layout identifiers exposed for diagnostics and tests."""
 
     LINE = 0
@@ -46,23 +46,23 @@ class Prim(enum.IntEnum):
     CYLINDER = 11
 
 
-VERTEX_COUNT: dict[Prim, int] = {
-    Prim.LINE: 2,
-    Prim.ARROW: 2,
-    Prim.POINT: 1,
-    Prim.FRAME: 6,
-    Prim.BOX: 1,
-    Prim.SPHERE: 1,
-    Prim.SECTOR: 3,
-    Prim.STROKE: 3,
-    Prim.DRAG_LINK: 2,
-    Prim.SOLID_ARROW: 1,
-    Prim.SOLID_DOUBLE_ARROW: 1,
-    Prim.CYLINDER: 1,
+VERTEX_COUNT: dict[PrimitiveType, int] = {
+    PrimitiveType.LINE: 2,
+    PrimitiveType.ARROW: 2,
+    PrimitiveType.POINT: 1,
+    PrimitiveType.FRAME: 6,
+    PrimitiveType.BOX: 1,
+    PrimitiveType.SPHERE: 1,
+    PrimitiveType.SECTOR: 3,
+    PrimitiveType.STROKE: 3,
+    PrimitiveType.DRAG_LINK: 2,
+    PrimitiveType.SOLID_ARROW: 1,
+    PrimitiveType.SOLID_DOUBLE_ARROW: 1,
+    PrimitiveType.CYLINDER: 1,
 }
 
 
-class Path(enum.StrEnum):
+class DrawPath(enum.StrEnum):
     """Packed GPU stream used by a debug primitive family."""
 
     SEGMENT = "segment"
@@ -76,38 +76,38 @@ class Path(enum.StrEnum):
     DRAG_LINK = "drag_link"
 
 
-PRIM_PATH: dict[Prim, Path] = {
-    Prim.LINE: Path.SEGMENT,
-    Prim.ARROW: Path.SEGMENT,
-    Prim.FRAME: Path.SEGMENT,
-    Prim.POINT: Path.POINT,
-    Prim.BOX: Path.SOLID,
-    Prim.SPHERE: Path.SOLID,
-    Prim.SECTOR: Path.SECTOR,
-    Prim.STROKE: Path.STROKE,
-    Prim.DRAG_LINK: Path.DRAG_LINK,
-    Prim.SOLID_ARROW: Path.SOLID,
-    Prim.SOLID_DOUBLE_ARROW: Path.SOLID,
-    Prim.CYLINDER: Path.SOLID,
+PRIMITIVE_PATH: dict[PrimitiveType, DrawPath] = {
+    PrimitiveType.LINE: DrawPath.SEGMENT,
+    PrimitiveType.ARROW: DrawPath.SEGMENT,
+    PrimitiveType.FRAME: DrawPath.SEGMENT,
+    PrimitiveType.POINT: DrawPath.POINT,
+    PrimitiveType.BOX: DrawPath.SOLID,
+    PrimitiveType.SPHERE: DrawPath.SOLID,
+    PrimitiveType.SECTOR: DrawPath.SECTOR,
+    PrimitiveType.STROKE: DrawPath.STROKE,
+    PrimitiveType.DRAG_LINK: DrawPath.DRAG_LINK,
+    PrimitiveType.SOLID_ARROW: DrawPath.SOLID,
+    PrimitiveType.SOLID_DOUBLE_ARROW: DrawPath.SOLID,
+    PrimitiveType.CYLINDER: DrawPath.SOLID,
 }
 
-PRIM_MESH: dict[Prim, MeshKey] = {
-    Prim.BOX: MeshKey(MeshShape.BOX),
-    Prim.SPHERE: MeshKey(MeshShape.SPHERE),
-    Prim.SOLID_ARROW: MeshKey(MeshShape.ARROW),
-    Prim.SOLID_DOUBLE_ARROW: MeshKey(MeshShape.DOUBLE_ARROW),
-    Prim.CYLINDER: MeshKey(MeshShape.CYLINDER),
+PRIMITIVE_MESH: dict[PrimitiveType, MeshKey] = {
+    PrimitiveType.BOX: MeshKey(MeshShape.BOX),
+    PrimitiveType.SPHERE: MeshKey(MeshShape.SPHERE),
+    PrimitiveType.SOLID_ARROW: MeshKey(MeshShape.ARROW),
+    PrimitiveType.SOLID_DOUBLE_ARROW: MeshKey(MeshShape.DOUBLE_ARROW),
+    PrimitiveType.CYLINDER: MeshKey(MeshShape.CYLINDER),
 }
 
 
-RECORD_FLOATS: dict[Path, int] = {
-    Path.SEGMENT: 13,  # a(3) b(3) rgba(4) width_px(1) head_px(1) start_mask_px(1)
-    Path.POINT: 8,  # p(3) rgba(4) radius_px(1)
-    Path.SOLID: 20,
-    Path.SECTOR: 14,  # center(3) rotvec_end(3) ref_end(3) rgba(4) radius_px(1)
-    Path.STROKE: 14,  # prev/a/b(9) rgba(4) width_px(1)
+RECORD_FLOATS: dict[DrawPath, int] = {
+    DrawPath.SEGMENT: 13,  # a(3) b(3) rgba(4) width_px(1) head_px(1) start_mask_px(1)
+    DrawPath.POINT: 8,  # p(3) rgba(4) radius_px(1)
+    DrawPath.SOLID: 20,
+    DrawPath.SECTOR: 14,  # center(3) rotvec_end(3) ref_end(3) rgba(4) radius_px(1)
+    DrawPath.STROKE: 14,  # prev/a/b(9) rgba(4) width_px(1)
     # a(3) b(3) core_rgba(4) edge_rgba(4) width/radius/edge_px(3)
-    Path.DRAG_LINK: 17,
+    DrawPath.DRAG_LINK: 17,
 }
 
 NEVER = -1.0
@@ -139,17 +139,17 @@ class _Store:
         "count",
         "edge_colors",
         "extras",
-        "kind",
         "outlines",
         "positions",
+        "primitive_type",
         "sizes",
         "transforms",
         "verts",
     )
 
-    def __init__(self, kind: Prim) -> None:
-        self.kind = kind
-        self.verts = VERTEX_COUNT[kind]
+    def __init__(self, primitive_type: PrimitiveType) -> None:
+        self.primitive_type = primitive_type
+        self.verts = VERTEX_COUNT[primitive_type]
         self.count = 0
         self.positions = np.zeros((0, self.verts, 3), np.float32)
         self.colors = np.zeros((0, 4), np.float32)
@@ -161,7 +161,7 @@ class _Store:
         self.outlines = np.zeros(0, np.float32)
         self.transforms = (
             np.zeros((0, 4, 4), np.float32)
-            if kind in PRIM_MESH
+            if primitive_type in PRIMITIVE_MESH
             else np.zeros((0, 0, 0), np.float32)
         )
 
@@ -201,7 +201,7 @@ class _Store:
 
 @dataclass
 class _Entry:
-    kind: Prim
+    primitive_type: PrimitiveType
     start: int
     count: int
     expires: float
@@ -253,26 +253,26 @@ class Layer:
         self.name = name
         self.occlusion = occlusion
         self._owner = owner
-        self._stores: dict[Prim, _Store] = {}
+        self._stores: dict[PrimitiveType, _Store] = {}
         self._index: dict[str, _Entry] = {}
         self._texts: dict[str, TextLabel] = {}
         self._finite: set[str] = set()
         self._text_finite: set[str] = set()
 
-    def _store(self, kind: Prim) -> _Store:
-        st = self._stores.get(kind)
+    def _store(self, primitive_type: PrimitiveType) -> _Store:
+        st = self._stores.get(primitive_type)
         if st is None:
-            st = _Store(kind)
-            self._stores[kind] = st
+            st = _Store(primitive_type)
+            self._stores[primitive_type] = st
         return st
 
-    def _alloc(self, kind: Prim, ident: str, count: int, duration: float) -> int:
+    def _alloc(self, primitive_type: PrimitiveType, ident: str, count: int, duration: float) -> int:
         now = self._owner.now
         expires = math.inf if duration < 0 else now + float(duration)
         if ident in self._texts:
             self._remove_text(ident)
         old = self._index.get(ident)
-        if old is not None and old.kind is kind and old.count == count:
+        if old is not None and old.primitive_type is primitive_type and old.count == count:
             old.expires = expires
             self._track(ident, expires)
             return old.start
@@ -283,12 +283,12 @@ class Layer:
                 count, f"Primitive limit {self._owner.limit} exceeded; dropped {ident!r}"
             )
             return -1
-        st = self._store(kind)
+        st = self._store(primitive_type)
         start = st.count
         st.reserve(start + count)
         st.count = start + count
         self._owner._primitives += count
-        self._index[ident] = _Entry(kind, start, count, expires)
+        self._index[ident] = _Entry(primitive_type, start, count, expires)
         self._track(ident, expires)
         return start
 
@@ -303,10 +303,10 @@ class Layer:
         if entry is None:
             return 0
         self._finite.discard(ident)
-        moved = self._stores[entry.kind].shift_left(entry.start, entry.count)
+        moved = self._stores[entry.primitive_type].shift_left(entry.start, entry.count)
         self._owner._primitives -= entry.count
         for other in self._index.values():
-            if other.kind is entry.kind and other.start > entry.start:
+            if other.primitive_type is entry.primitive_type and other.start > entry.start:
                 other.start -= entry.count
         return moved
 
@@ -317,10 +317,10 @@ class Layer:
 
     def line(self, ident: str, a, b, color, width_px: float = 1.5, duration: float = NEVER) -> None:
         """Create or replace one screen-width world-space line segment."""
-        i = self._alloc(Prim.LINE, ident, 1, duration)
+        i = self._alloc(PrimitiveType.LINE, ident, 1, duration)
         if i < 0:
             return
-        st = self._stores[Prim.LINE]
+        st = self._stores[PrimitiveType.LINE]
         st.positions[i, 0] = a
         st.positions[i, 1] = b
         _write_color(st.colors, i, color)
@@ -330,7 +330,7 @@ class Layer:
         self, ident: str, pts_a, pts_b, color, width_px: float = 1.5, duration: float = NEVER
     ) -> None:
         """Create or replace a batch of independent line segments."""
-        self._many_segments(Prim.LINE, ident, pts_a, pts_b, color, width_px, duration)
+        self._many_segments(PrimitiveType.LINE, ident, pts_a, pts_b, color, width_px, duration)
 
     def polyline(
         self,
@@ -348,10 +348,10 @@ class Layer:
         if count <= 0:
             self._remove(ident)
             return
-        i = self._alloc(Prim.STROKE, ident, count, duration)
+        i = self._alloc(PrimitiveType.STROKE, ident, count, duration)
         if i < 0:
             return
-        st = self._stores[Prim.STROKE]
+        st = self._stores[PrimitiveType.STROKE]
         dst = st.positions[i : i + count]
         if closed:
             dst[:, 0] = np.roll(p, 1, axis=0)
@@ -377,10 +377,10 @@ class Layer:
         start_mask_px: float = 0.0,
     ) -> None:
         """Create or replace one line arrow with a screen-space arrow head."""
-        i = self._alloc(Prim.ARROW, ident, 1, duration)
+        i = self._alloc(PrimitiveType.ARROW, ident, 1, duration)
         if i < 0:
             return
-        st = self._stores[Prim.ARROW]
+        st = self._stores[PrimitiveType.ARROW]
         st.positions[i, 0] = a
         st.positions[i, 1] = b
         _write_color(st.colors, i, color)
@@ -400,15 +400,15 @@ class Layer:
     ) -> None:
         """Create or replace a batch of independent line arrows."""
         self._many_segments(
-            Prim.ARROW, ident, pts_a, pts_b, color, width_px, duration, start_mask_px
+            PrimitiveType.ARROW, ident, pts_a, pts_b, color, width_px, duration, start_mask_px
         )
 
     def point(self, ident: str, p, color, radius_px: float = 4.0, duration: float = NEVER) -> None:
         """Create or replace one world-anchored screen-space point."""
-        i = self._alloc(Prim.POINT, ident, 1, duration)
+        i = self._alloc(PrimitiveType.POINT, ident, 1, duration)
         if i < 0:
             return
-        st = self._stores[Prim.POINT]
+        st = self._stores[PrimitiveType.POINT]
         st.positions[i, 0] = p
         _write_color(st.colors, i, color)
         st.sizes[i] = radius_px
@@ -427,10 +427,10 @@ class Layer:
         duration: float = NEVER,
     ) -> None:
         """Draw a connected drag origin, line, and target with one outline."""
-        i = self._alloc(Prim.DRAG_LINK, ident, 1, duration)
+        i = self._alloc(PrimitiveType.DRAG_LINK, ident, 1, duration)
         if i < 0:
             return
-        st = self._stores[Prim.DRAG_LINK]
+        st = self._stores[PrimitiveType.DRAG_LINK]
         st.positions[i, 0] = start
         st.positions[i, 1] = target
         _write_color(st.colors, i, core_color)
@@ -447,10 +447,10 @@ class Layer:
         if not len(p):
             self._remove(ident)
             return
-        i = self._alloc(Prim.POINT, ident, len(p), duration)
+        i = self._alloc(PrimitiveType.POINT, ident, len(p), duration)
         if i < 0:
             return
-        st = self._stores[Prim.POINT]
+        st = self._stores[PrimitiveType.POINT]
         st.positions[i : i + len(p), 0] = p
         colors = np.asarray(color, np.float32)
         st.colors[i : i + len(p)] = colors[: len(p)] if colors.ndim == 2 else _rgba(color)
@@ -458,7 +458,7 @@ class Layer:
 
     def _many_segments(
         self,
-        kind: Prim,
+        primitive_type: PrimitiveType,
         ident: str,
         pts_a,
         pts_b,
@@ -473,10 +473,10 @@ class Layer:
         if n == 0:
             self._remove(ident)
             return
-        i = self._alloc(kind, ident, n, duration)
+        i = self._alloc(primitive_type, ident, n, duration)
         if i < 0:
             return
-        st = self._stores[kind]
+        st = self._stores[primitive_type]
         st.positions[i : i + n, 0] = a[:n]
         st.positions[i : i + n, 1] = b[:n]
         colors = np.asarray(color, np.float32)
@@ -485,17 +485,17 @@ class Layer:
         else:
             st.colors[i : i + n] = _rgba(color)
         st.sizes[i : i + n] = width_px
-        st.extras[i : i + n] = extra if kind is Prim.ARROW else 0.0
+        st.extras[i : i + n] = extra if primitive_type is PrimitiveType.ARROW else 0.0
 
     def frame(
         self, ident: str, transform4x4, axis_len: float = 0.1, duration: float = NEVER
     ) -> None:
         """Draw RGB axes from a row-major world transform."""
-        i = self._alloc(Prim.FRAME, ident, 1, duration)
+        i = self._alloc(PrimitiveType.FRAME, ident, 1, duration)
         if i < 0:
             return
         m = np.asarray(transform4x4, np.float32).reshape(4, 4)
-        st = self._stores[Prim.FRAME]
+        st = self._stores[PrimitiveType.FRAME]
         origin = m[:3, 3]
         for k in range(3):
             axis = m[:3, k]
@@ -508,29 +508,31 @@ class Layer:
 
     def box(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
         """Create or replace a solid unit box transformed into world space."""
-        self._solid(Prim.BOX, ident, transform4x4, color, duration)
+        self._solid(PrimitiveType.BOX, ident, transform4x4, color, duration)
 
     def sphere(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
         """Create or replace a solid unit sphere transformed into world space."""
-        self._solid(Prim.SPHERE, ident, transform4x4, color, duration)
+        self._solid(PrimitiveType.SPHERE, ident, transform4x4, color, duration)
 
     def cylinder(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
         """Create or replace a solid unit cylinder transformed into world space."""
-        self._solid(Prim.CYLINDER, ident, transform4x4, color, duration)
+        self._solid(PrimitiveType.CYLINDER, ident, transform4x4, color, duration)
 
     def solid_arrow(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
         """Create or replace a solid arrow transformed into world space."""
-        self._solid(Prim.SOLID_ARROW, ident, transform4x4, color, duration)
+        self._solid(PrimitiveType.SOLID_ARROW, ident, transform4x4, color, duration)
 
     def solid_double_arrow(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
         """Create or replace a solid double arrow transformed into world space."""
-        self._solid(Prim.SOLID_DOUBLE_ARROW, ident, transform4x4, color, duration)
+        self._solid(PrimitiveType.SOLID_DOUBLE_ARROW, ident, transform4x4, color, duration)
 
-    def _solid(self, kind: Prim, ident: str, transform4x4, color, duration: float) -> None:
-        i = self._alloc(kind, ident, 1, duration)
+    def _solid(
+        self, primitive_type: PrimitiveType, ident: str, transform4x4, color, duration: float
+    ) -> None:
+        i = self._alloc(primitive_type, ident, 1, duration)
         if i < 0:
             return
-        st = self._stores[kind]
+        st = self._stores[primitive_type]
         m = np.asarray(transform4x4, np.float32).reshape(4, 4)
         st.transforms[i] = m
         st.positions[i, 0] = m[:3, 3]
@@ -548,10 +550,10 @@ class Layer:
         radius_px: float = 0.0,
     ) -> None:
         """Draw a rotation sector from reference and rotated radius endpoints."""
-        i = self._alloc(Prim.SECTOR, ident, 1, duration)
+        i = self._alloc(PrimitiveType.SECTOR, ident, 1, duration)
         if i < 0:
             return
-        st = self._stores[Prim.SECTOR]
+        st = self._stores[PrimitiveType.SECTOR]
         st.positions[i, 0] = center
         st.positions[i, 1] = rotvec_end
         st.positions[i, 2] = ref_end
@@ -629,16 +631,16 @@ class Layer:
         """Return the number of primitives and labels in this layer."""
         return sum(st.count for st in self._stores.values()) + len(self._texts)
 
-    def count_of(self, kind: Prim) -> int:
-        st = self._stores.get(kind)
+    def count_of(self, primitive_type: PrimitiveType) -> int:
+        st = self._stores.get(primitive_type)
         return st.count if st is not None else 0
 
-    def positions_of(self, kind: Prim) -> np.ndarray:
-        st = self._stores.get(kind)
+    def positions_of(self, primitive_type: PrimitiveType) -> np.ndarray:
+        st = self._stores.get(primitive_type)
         return (
             st.positions[: st.count]
             if st is not None
-            else np.zeros((0, VERTEX_COUNT[kind], 3), np.float32)
+            else np.zeros((0, VERTEX_COUNT[primitive_type], 3), np.float32)
         )
 
     def expiry_of(self, ident: str) -> float:
@@ -651,7 +653,7 @@ class Batch:
     """One packed draw range sharing occlusion, path, and optional mesh."""
 
     occlusion: Occlusion = Occlusion.DEPTH
-    path: Path = Path.SEGMENT
+    path: DrawPath = DrawPath.SEGMENT
     mesh: MeshKey | None = None
     start: int = 0
     count: int = 0
@@ -661,15 +663,15 @@ class Batch:
 class PackedFrame:
     """Reusable packed debug streams consumed by renderer debug passes."""
 
-    streams: dict[Path, np.ndarray] = field(default_factory=dict)
+    streams: dict[DrawPath, np.ndarray] = field(default_factory=dict)
 
-    counts: dict[Path, int] = field(default_factory=dict)
+    counts: dict[DrawPath, int] = field(default_factory=dict)
     batches: list[Batch] = field(default_factory=list)
     batch_count: int = 0
     texts: list[TextLabel] = field(default_factory=list)
     text_count: int = 0
 
-    def stream(self, path: Path) -> np.ndarray:
+    def stream(self, path: DrawPath) -> np.ndarray:
         return self.streams[path][: self.counts[path]]
 
     def active(self) -> list[Batch]:
@@ -692,10 +694,10 @@ class DebugDraw:
         self._layers: dict[str, Layer] = {}
         self._by_occlusion: dict[Occlusion, list[Layer]] = {o: [] for o in OCCLUSION_ORDER}
         self._frame = PackedFrame(
-            streams={p: np.zeros((0, RECORD_FLOATS[p]), np.float32) for p in Path},
-            counts=dict.fromkeys(Path, 0),
+            streams={p: np.zeros((0, RECORD_FLOATS[p]), np.float32) for p in DrawPath},
+            counts=dict.fromkeys(DrawPath, 0),
         )
-        self._need = dict.fromkeys(Path, 0)
+        self._need = dict.fromkeys(DrawPath, 0)
         self._primitives = 0
 
         self._last_drop_note = ""
@@ -768,9 +770,9 @@ class DebugDraw:
             expiring += len(layer._finite) + len(layer._text_finite)
             prims += len(layer._texts)
             verts += sum(6 * len(label.text) for label in layer._texts.values())
-            for kind, st in layer._stores.items():
+            for primitive_type, st in layer._stores.items():
                 prims += st.count
-                verts += st.count * VERTEX_COUNT[kind]
+                verts += st.count * VERTEX_COUNT[primitive_type]
         return DebugStats(
             primitives=prims,
             layers=len(self._layers),
@@ -787,7 +789,7 @@ class DebugDraw:
 
     def build(self) -> PackedFrame:
         frame = self._frame
-        for path in Path:
+        for path in DrawPath:
             frame.counts[path] = 0
         frame.batch_count = 0
         frame.text_count = 0
@@ -799,25 +801,31 @@ class DebugDraw:
                 continue
 
             self._batch_solid(frame, occ, layers)
-            self._batch(frame, occ, layers, Path.SECTOR, (Prim.SECTOR,), self._pack_sector)
-            self._batch(frame, occ, layers, Path.STROKE, (Prim.STROKE,), self._pack_stroke)
+            self._batch(
+                frame, occ, layers, DrawPath.SECTOR, (PrimitiveType.SECTOR,), self._pack_sector
+            )
+            self._batch(
+                frame, occ, layers, DrawPath.STROKE, (PrimitiveType.STROKE,), self._pack_stroke
+            )
             self._batch(
                 frame,
                 occ,
                 layers,
-                Path.DRAG_LINK,
-                (Prim.DRAG_LINK,),
+                DrawPath.DRAG_LINK,
+                (PrimitiveType.DRAG_LINK,),
                 self._pack_drag_link,
             )
             self._batch(
                 frame,
                 occ,
                 layers,
-                Path.SEGMENT,
-                (Prim.LINE, Prim.ARROW, Prim.FRAME),
+                DrawPath.SEGMENT,
+                (PrimitiveType.LINE, PrimitiveType.ARROW, PrimitiveType.FRAME),
                 self._pack_segment,
             )
-            self._batch(frame, occ, layers, Path.POINT, (Prim.POINT,), self._pack_point)
+            self._batch(
+                frame, occ, layers, DrawPath.POINT, (PrimitiveType.POINT,), self._pack_point
+            )
             for layer in layers:
                 for label in layer._texts.values():
                     if frame.text_count == len(frame.texts):
@@ -829,15 +837,15 @@ class DebugDraw:
 
     def _reserve(self, frame: PackedFrame) -> None:
         need = self._need
-        for path in Path:
+        for path in DrawPath:
             need[path] = 0
         for layer in self._layers.values():
-            for kind, st in layer._stores.items():
+            for primitive_type, st in layer._stores.items():
                 if st.count == 0:
                     continue
 
-                factor = 3 if kind is Prim.FRAME else 1
-                need[PRIM_PATH[kind]] += st.count * factor
+                factor = 3 if primitive_type is PrimitiveType.FRAME else 1
+                need[PRIMITIVE_PATH[primitive_type]] += st.count * factor
         for path, n in need.items():
             buf = frame.streams[path]
             if n > len(buf):
@@ -852,13 +860,13 @@ class DebugDraw:
         frame.batch_count += 1
         return b
 
-    def _batch(self, frame, occ, layers, path, kinds, pack) -> None:
+    def _batch(self, frame, occ, layers, path, primitive_types, pack) -> None:
         start = frame.counts[path]
         dst = frame.streams[path]
         at = start
         for layer in layers:
-            for kind in kinds:
-                st = layer._stores.get(kind)
+            for primitive_type in primitive_types:
+                st = layer._stores.get(primitive_type)
                 if st is not None and st.count:
                     at = pack(dst, at, st)
         if at == start:
@@ -868,24 +876,30 @@ class DebugDraw:
         b.occlusion, b.path, b.mesh, b.start, b.count = occ, path, None, start, at - start
 
     def _batch_solid(self, frame, occ, layers) -> None:
-        for kind, mesh in PRIM_MESH.items():
-            start = frame.counts[Path.SOLID]
-            dst = frame.streams[Path.SOLID]
+        for primitive_type, mesh in PRIMITIVE_MESH.items():
+            start = frame.counts[DrawPath.SOLID]
+            dst = frame.streams[DrawPath.SOLID]
             at = start
             for layer in layers:
-                st = layer._stores.get(kind)
+                st = layer._stores.get(primitive_type)
                 if st is not None and st.count:
                     at = self._pack_solid(dst, at, st)
             if at == start:
                 continue
-            frame.counts[Path.SOLID] = at
+            frame.counts[DrawPath.SOLID] = at
             b = self._new_batch(frame)
-            b.occlusion, b.path, b.mesh, b.start, b.count = occ, Path.SOLID, mesh, start, at - start
+            b.occlusion, b.path, b.mesh, b.start, b.count = (
+                occ,
+                DrawPath.SOLID,
+                mesh,
+                start,
+                at - start,
+            )
 
     @staticmethod
     def _pack_segment(dst: np.ndarray, at: int, st: _Store) -> int:
         n = st.count
-        if st.kind is Prim.FRAME:
+        if st.primitive_type is PrimitiveType.FRAME:
             for k in range(3):
                 s = slice(at + k * n, at + (k + 1) * n)
                 dst[s, 0:3] = st.positions[:n, 2 * k]
@@ -901,8 +915,10 @@ class DebugDraw:
         dst[s, 6:10] = st.colors[:n]
         dst[s, 10] = st.sizes[:n]
 
-        dst[s, 11] = st.sizes[:n] * ARROW_HEAD_RATIO if st.kind is Prim.ARROW else 0.0
-        dst[s, 12] = st.extras[:n] if st.kind is Prim.ARROW else 0.0
+        dst[s, 11] = (
+            st.sizes[:n] * ARROW_HEAD_RATIO if st.primitive_type is PrimitiveType.ARROW else 0.0
+        )
+        dst[s, 12] = st.extras[:n] if st.primitive_type is PrimitiveType.ARROW else 0.0
         return at + n
 
     @staticmethod

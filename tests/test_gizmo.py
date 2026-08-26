@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from forge_viewer import commands as cmd
-from forge_viewer.adapters.base import NodeKind
+from forge_viewer.adapters.base import NodeType
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.adapters.toy import ToyPhysicsAdapter
 from forge_viewer.gizmo import (
@@ -107,8 +107,8 @@ def test_rotation_fill_keeps_constant_opacity(degrees: float, alpha: float) -> N
 def test_running_simulation_locks_camera_and_light_gizmos_by_default() -> None:
     session = Session(ToyPhysicsAdapter())
     gizmo = ObjectGizmo()
-    camera = next(node for node in session.nodes if node.kind is NodeKind.CAMERA)
-    light = next(node for node in session.nodes if node.kind is NodeKind.LIGHT)
+    camera = next(node for node in session.nodes if node.type is NodeType.CAMERA)
+    light = next(node for node in session.nodes if node.type is NodeType.LIGHT)
 
     for node in (camera, light):
         assert session.entity_gizmo_locked(node)

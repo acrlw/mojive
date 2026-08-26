@@ -5,12 +5,12 @@ from __future__ import annotations
 import numpy as np
 
 from .scene import Scene
-from .types import CameraView, Light, LightKind, LightSet
+from .types import CameraView, Light, LightSet, LightType
 
 
 def canvas_scene() -> Scene:
     sun = Light(
-        kind=LightKind.DIRECTIONAL,
+        type=LightType.DIRECTIONAL,
         direction=np.array([-0.5, 0.4, -1.0], np.float32),
         diffuse=np.full(3, 0.75, np.float32),
         specular=np.full(3, 0.3, np.float32),
@@ -46,7 +46,7 @@ def canvas_scene() -> Scene:
 def lighting_scene() -> Scene:
     lights = (
         Light(
-            kind=LightKind.SPOT,
+            type=LightType.SPOT,
             position=np.array([-3.0, -4.0, 5.5], np.float32),
             direction=np.array([3.0, 7.0, -5.0], np.float32),
             diffuse=np.array([0.65, 0.52, 0.42], np.float32),
@@ -55,14 +55,14 @@ def lighting_scene() -> Scene:
             range=12.0,
         ),
         Light(
-            kind=LightKind.POINT,
+            type=LightType.POINT,
             position=np.array([3.2, 1.5, 3.0], np.float32),
             diffuse=np.array([0.35, 0.48, 0.72], np.float32),
             attenuation=np.array([1.0, 0.03, 0.015], np.float32),
             range=10.0,
         ),
         Light(
-            kind=LightKind.AREA,
+            type=LightType.AREA,
             position=np.array([-1.0, 7.0, 4.0], np.float32),
             diffuse=np.array([0.48, 0.62, 0.44], np.float32),
             attenuation=np.array([1.0, 0.03, 0.01], np.float32),

@@ -395,10 +395,12 @@ def test_every_primitive_kind_reaches_the_screen(rig):
 
     m = np.eye(4, dtype=np.float32)
     m[:3, :3] *= 0.35
-    for i, kind in enumerate(("box", "sphere")):
+    for i, primitive_name in enumerate(("box", "sphere")):
         t = m.copy()
         t[:3, 3] = (-1.0 + 2.0 * i, 0.0, -1.0)
-        getattr(rig.draw.layer("solids", Occlusion.DEPTH), kind)(kind, t, (0.3, 0.8, 0.4, 1.0))
+        getattr(rig.draw.layer("solids", Occlusion.DEPTH), primitive_name)(
+            primitive_name, t, (0.3, 0.8, 0.4, 1.0)
+        )
 
     layer = rig.draw.layer("marks", Occlusion.ALWAYS)
     layer.line("l", (-1.5, 0.0, 1.0), (1.5, 0.0, 1.0), LINE_RGBA, 4.0)
@@ -412,7 +414,7 @@ def test_every_primitive_kind_reaches_the_screen(rig):
     rig.render()
     px = rig.pixels()
     lit = int(np.count_nonzero(px[:, :, :3].max(axis=2) > 20))
-    print(f"\n[metric] seven primitive kinds cover {lit} pixels")
+    print(f"\n[metric] seven primitive types cover {lit} pixels")
     assert rig.draw.stats().dropped == 0
     assert lit > 2000
 
@@ -431,10 +433,12 @@ def test_the_no_native_symbol_fallback_draws_the_same_picture(rig):
     def paint() -> None:
         m = np.eye(4, dtype=np.float32)
         m[:3, :3] *= 0.4
-        for i, kind in enumerate(("box", "sphere")):
+        for i, primitive_name in enumerate(("box", "sphere")):
             t = m.copy()
             t[:3, 3] = (-1.0 + 2.0 * i, 0.0, -0.8)
-            getattr(rig.draw.layer("solids", Occlusion.GHOST), kind)(kind, t, (0.3, 0.8, 0.4, 1.0))
+            getattr(rig.draw.layer("solids", Occlusion.GHOST), primitive_name)(
+                primitive_name, t, (0.3, 0.8, 0.4, 1.0)
+            )
         rig.draw.layer("marks", Occlusion.GHOST).line(
             "l", (-1.5, 0.0, 1.0), (1.5, 0.0, 1.0), LINE_RGBA, 5.0
         )

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from forge_viewer import CameraView, Light, LightKind, MuJoCoAdapter
+from forge_viewer import CameraView, Light, LightType, MuJoCoAdapter
 from forge_viewer.adapters.workspace import WorkspaceAdapter
 
 
@@ -33,7 +33,7 @@ def main() -> None:
     workspace.add_scene_light(
         "key",
         Light(
-            kind=LightKind.SPOT,
+            type=LightType.SPOT,
             position=np.array((3.0, -4.0, 6.0), np.float32),
             direction=np.array((-0.4, 0.5, -1.0), np.float32),
         ),

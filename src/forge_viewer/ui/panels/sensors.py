@@ -35,7 +35,7 @@ class SensorsPanel(Panel):
         values = ctx.session.frame.sensors
 
         if begin_kv_table("sensor_kv"):
-            labeled("type", sensor.kind.removeprefix("mjSENS_").lower())
+            labeled("type", sensor.type.removeprefix("mjSENS_").lower())
             labeled("dimension", str(sensor.dim))
             if values is None:
                 labeled("value", "not produced this frame")

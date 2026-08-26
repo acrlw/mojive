@@ -190,14 +190,14 @@ def test_joint_types_covers_every_kind() -> None:
 
     mujoco = pytest.importorskip("mujoco")
     model = mujoco.MjModel.from_xml_path(str(resolve("joint_types.xml")))
-    kinds = {int(t) for t in model.jnt_type}
+    joint_types = {int(value) for value in model.jnt_type}
     for want in (
         mujoco.mjtJoint.mjJNT_FREE,
         mujoco.mjtJoint.mjJNT_BALL,
         mujoco.mjtJoint.mjJNT_SLIDE,
         mujoco.mjtJoint.mjJNT_HINGE,
     ):
-        assert int(want) in kinds
+        assert int(want) in joint_types
 
     limited = {bool(x) for x in model.jnt_limited}
     assert limited == {True, False}
@@ -209,8 +209,8 @@ def test_many_lights_has_many_lights() -> None:
     mujoco = pytest.importorskip("mujoco")
     model = mujoco.MjModel.from_xml_path(str(resolve("many_lights.xml")))
     assert model.nlight == 24
-    kinds = {int(t) for t in model.light_type}
-    assert len(kinds) >= 3
+    light_types = {int(value) for value in model.light_type}
+    assert len(light_types) >= 3
 
 
 @pytest.mark.physics

@@ -7,7 +7,7 @@ import wgpu
 
 from .... import math3d as M
 from ....log import get_logger
-from ....types import CameraView, Light, LightKind, ShadingModel
+from ....types import CameraView, Light, LightType, ShadingModel
 from ...backend import RenderFlag
 from ...scene import RenderScene
 from ..cascades import ATLAS_SIZE, CascadeSet, build_cascades, slot_pixels
@@ -21,6 +21,7 @@ from ..timing import TimestampWriter
 log = get_logger("shadow")
 
 LOCAL_PIXELS = 1024
+SPOT_PIXELS = 2048
 
 # One uniform block per draw: 3 cascade tiles + 8 slots × 6 cube faces.
 MAX_DRAWS = 3 + LOCAL_SHADOW_SLOTS * 6
@@ -47,8 +48,6 @@ _MIN_BLEND = {
     "color": {"operation": "min", "src_factor": "one", "dst_factor": "one"},
     "alpha": {"operation": "min", "src_factor": "one", "dst_factor": "one"},
 }
-
-_LOCAL_LAYERS = LOCAL_SHADOW_SLOTS * 6
 
 
 def _draw_opaque(pass_encoder: wgpu.GPURenderPassEncoder, scene: RenderScene, meshes) -> int:
@@ -123,6 +122,8 @@ class ShadowPass:
         self._local_tex: wgpu.GPUTexture | None = None
         self._local_view: wgpu.GPUTextureView | None = None
         self._layer_views: list[wgpu.GPUTextureView] = []
+        self._local_pixels = 0
+        self._local_layers = 0
         self._atlas_fallback: wgpu.GPUTextureView | None = None
         self._local_fallback: wgpu.GPUTextureView | None = None
 
@@ -202,12 +203,17 @@ class ShadowPass:
         self._atlas_view = tex.create_view()
         return True
 
-    def _ensure_local(self) -> bool:
-        if self._local_tex is not None:
+    def _ensure_local(self, pixels: int, layers: int) -> bool:
+        if (
+            self._local_tex is not None
+            and self._local_pixels == pixels
+            and self._local_layers == layers
+        ):
             return True
+        self._release_local()
         try:
             tex = self._device.create_texture(
-                size=(LOCAL_PIXELS, LOCAL_PIXELS, _LOCAL_LAYERS),
+                size=(pixels, pixels, layers),
                 format="r16float",
                 usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.TEXTURE_BINDING,
             )
@@ -220,9 +226,21 @@ class ShadowPass:
         self._local_view = tex.create_view(dimension="2d-array")
         self._layer_views = [
             tex.create_view(dimension="2d", base_array_layer=layer, array_layer_count=1)
-            for layer in range(_LOCAL_LAYERS)
+            for layer in range(layers)
         ]
+        self._local_pixels = pixels
+        self._local_layers = layers
         return True
+
+    def _release_local(self) -> None:
+        if self._local_tex is not None:
+            self._local_tex.destroy()
+        self._local_tex = None
+        self._local_view = None
+        self._layer_views = []
+        self._local_pixels = 0
+        self._local_layers = 0
+        self._sample_groups.clear()
 
     def _fallback_atlas_view(self) -> wgpu.GPUTextureView:
         if self._atlas_fallback is None:
@@ -257,14 +275,15 @@ class ShadowPass:
             else None
         )
         state = ShadowState()
-        local_count = self._prepare_locals(scene, schedule, state)
+        local_pixels = self._local_resolution(schedule)
+        local_count, local_layers = self._prepare_locals(scene, schedule, state, local_pixels)
         if sun is None and local_count == 0:
             return None
         if not self._ensure_pipelines():
             return None
         if sun is not None and not self._ensure_atlas():
             return None
-        if local_count and not self._ensure_local():
+        if local_count and not self._ensure_local(local_pixels, local_layers):
             state.local_count = local_count = 0
             if sun is None:
                 return None
@@ -293,9 +312,25 @@ class ShadowPass:
         self._write_draw_uniforms(state)
         return state
 
+    @staticmethod
+    def _local_resolution(schedule: LightSchedule) -> int:
+        return (
+            SPOT_PIXELS
+            if schedule.local_shadows
+            and all(
+                schedule.lights[index].type is LightType.SPOT for index in schedule.local_shadows
+            )
+            else LOCAL_PIXELS
+        )
+
     def _prepare_locals(
-        self, scene: RenderScene, schedule: LightSchedule, state: ShadowState
-    ) -> int:
+        self,
+        scene: RenderScene,
+        schedule: LightSchedule,
+        state: ShadowState,
+        pixels: int,
+    ) -> tuple[int, int]:
+        layer = 0
         for packed_index in schedule.local_shadows:
             light = schedule.lights[packed_index]
             light_range = (
@@ -303,16 +338,19 @@ class ShadowPass:
             )
             slot = state.local_count
             state.local_light_indices[slot] = packed_index
-            self._local_kinds[slot] = int(light.kind)
+            self._local_kinds[slot] = int(light.type)
+            state.local_layers[slot] = layer
             state.local_positions[slot, :3] = light.position
             state.local_positions[slot, 3] = light_range
             state.local_radius[slot] = light.area_radius
-            if light.kind is LightKind.SPOT:
-                self._prepare_spot(scene, light, light_range, slot, state)
+            if light.type is LightType.SPOT:
+                self._prepare_spot(scene, light, light_range, slot, state, pixels)
+                layer += 1
             else:
-                self._prepare_point(scene, light, light_range, slot, state)
+                self._prepare_point(scene, light, light_range, slot, state, pixels)
+                layer += 6
             state.local_count += 1
-        return state.local_count
+        return state.local_count, layer
 
     def _prepare_spot(
         self,
@@ -321,6 +359,7 @@ class ShadowPass:
         light_range: float,
         slot: int,
         state: ShadowState,
+        pixels: int,
     ) -> None:
         pos = np.asarray(light.position, np.float64)
 
@@ -332,7 +371,7 @@ class ShadowPass:
         view = M.look_at(pos, target, np.array([0.0, 0.0, 1.0]))
         proj = perspective_wgpu(fov, 1.0, near, far)
         np.copyto(state.local_matrices[slot], proj.astype(np.float64) @ view.astype(np.float64))
-        state.local_texel[slot] = 2.0 * float(np.tan(fov * 0.5)) / LOCAL_PIXELS
+        state.local_texel[slot] = 2.0 * float(np.tan(fov * 0.5)) / pixels
 
     def _prepare_point(
         self,
@@ -341,8 +380,9 @@ class ShadowPass:
         light_range: float,
         slot: int,
         state: ShadowState,
+        pixels: int,
     ) -> None:
-        state.local_texel[slot] = 2.0 / LOCAL_PIXELS
+        state.local_texel[slot] = 2.0 / pixels
 
         pos = np.asarray(light.position, np.float64)
         extent = float(scene.scene_extent)
@@ -375,7 +415,7 @@ class ShadowPass:
             n += 1
         for slot in range(state.local_count):
             pos_range = state.local_positions[slot]
-            if self._local_kinds[slot] == int(LightKind.SPOT):
+            if self._local_kinds[slot] == int(LightType.SPOT):
                 arena["view_proj"][n] = state.local_matrices[slot].T
                 arena["light"][n] = pos_range
                 n += 1
@@ -424,10 +464,11 @@ class ShadowPass:
             depth_pass.end()
 
         for slot in range(state.local_count):
-            if self._local_kinds[slot] == int(LightKind.SPOT):
-                layers = (slot * 6,)
+            base_layer = int(state.local_layers[slot])
+            if self._local_kinds[slot] == int(LightType.SPOT):
+                layers = (base_layer,)
             else:
-                layers = tuple(slot * 6 + face for face in range(6))
+                layers = tuple(base_layer + face for face in range(6))
             for layer in layers:
                 layer_pass = encoder.begin_render_pass(
                     color_attachments=[
@@ -496,17 +537,14 @@ class ShadowPass:
         return group
 
     def release(self) -> None:
-        for tex in (self.atlas, self._local_tex):
-            if tex is not None:
-                tex.destroy()
+        if self.atlas is not None:
+            self.atlas.destroy()
+        self._release_local()
         self._uniforms.destroy()
         self._draw_groups.clear()
         self._sample_groups.clear()
         self.atlas = None
         self._atlas_view = None
-        self._local_tex = None
-        self._local_view = None
-        self._layer_views = []
         self._atlas_fallback = None
         self._local_fallback = None
         self._depth_pipeline = None

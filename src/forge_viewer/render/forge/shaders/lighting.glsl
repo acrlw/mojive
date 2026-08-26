@@ -26,7 +26,7 @@ uniform int u_classic_lighting;
 uniform int u_shadow_light;
 
 float shadow_factor(vec3 world_pos, vec3 normal, float view_depth);
-float local_shadow(int kind, int slot, vec3 world_pos, vec3 normal);
+float local_shadow(int light_type, int slot, vec3 world_pos, vec3 normal);
 
 vec3 forge_lighting_color(vec3 c) {
     return u_classic_lighting != 0 ? linear_to_srgb(c) : c;
@@ -81,10 +81,10 @@ vec3 shade(
 
     for (int i = 0; i < FORGE_MAX_LIGHTS; ++i) {
         if (i >= u_light_count) break;
-        int kind = int(u_light_pos[i].w + 0.5);
+        int light_type = int(u_light_pos[i].w + 0.5);
         vec3 l;
         float atten = 1.0;
-        if (kind == 0) {
+        if (light_type == 0) {
             l = -normalize(u_light_dir[i].xyz);
         } else {
             vec3 to_light = u_light_pos[i].xyz - world_pos;
@@ -97,7 +97,7 @@ vec3 shade(
                 && u_light_atten[i].w > 0.0
                 && dist > u_light_atten[i].w
             ) atten = 0.0;
-            if (kind == 2) {
+            if (light_type == 2) {
                 float cd = dot(-l, normalize(u_light_dir[i].xyz));
                 atten *= (cd < u_light_dir[i].w)
                     ? 0.0
@@ -107,7 +107,9 @@ vec3 shade(
         float shadow = 1.0;
 #ifdef USE_SHADOW
         if (i == u_shadow_light) shadow = shadow_factor(world_pos, n, view_depth);
-        if (kind != 0) shadow *= local_shadow(kind, u_local_slot[i], world_pos, n);
+        if (light_type != 0) {
+            shadow *= local_shadow(light_type, u_local_slot[i], world_pos, n);
+        }
 #endif
         color += forge_light_term(
             albedo, n, l, view_dir,

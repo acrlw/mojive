@@ -13,7 +13,7 @@ from .adapters.base import (
     CAMERA_OBJECT_BASE,
     LIGHT_OBJECT_BASE,
     CameraInfo,
-    NodeKind,
+    NodeType,
     SceneFrame,
     SceneNode,
     SceneSource,
@@ -124,7 +124,7 @@ class Scene:
         self._next_camera_id = 0
         self._next_light_id = len(self.lights.lights)
         self._lights = [
-            _LightItem(i, f"{light.kind.name.lower()} light {i}")
+            _LightItem(i, f"{light.type.name.lower()} light {i}")
             for i, light in enumerate(self.lights.lights)
         ]
         self._cameras: list[_CameraItem] = []
@@ -522,7 +522,7 @@ class Scene:
             light = self.lights.lights[index]
             light_id = self._next_light_id
             self._next_light_id += 1
-            self._lights.append(_LightItem(light_id, f"{light.kind.name.lower()} light {index}"))
+            self._lights.append(_LightItem(light_id, f"{light.type.name.lower()} light {index}"))
 
     def _rebuild(self) -> None:
         if self._built_revision == self._revision:
@@ -530,7 +530,7 @@ class Scene:
         n = len(self._items)
         materials: list[Material] = []
         material_ids: dict[int, int] = {}
-        nodes = [SceneNode(0, "world", NodeKind.WORLD, body_index=0)]
+        nodes = [SceneNode(0, "world", NodeType.WORLD, body_index=0)]
         geom_material: list[int] = []
         self._oid_to_index = {}
         self._node_to_oid = {}
@@ -549,7 +549,7 @@ class Scene:
                 SceneNode(
                     link_id,
                     item.name,
-                    NodeKind.LINK,
+                    NodeType.LINK,
                     parent=0,
                     children=[geom_id],
                     object_id=item.object_id,
@@ -561,7 +561,7 @@ class Scene:
                 SceneNode(
                     geom_id,
                     f"{item.name}.geom",
-                    NodeKind.GEOM,
+                    NodeType.GEOM,
                     parent=link_id,
                     body_index=body_index,
                 )
@@ -578,7 +578,7 @@ class Scene:
                 SceneNode(
                     node_id,
                     item.name,
-                    NodeKind.LIGHT,
+                    NodeType.LIGHT,
                     parent=0,
                     object_id=LIGHT_OBJECT_BASE + item.light_id,
                     visible=light.active,
@@ -594,7 +594,7 @@ class Scene:
                 SceneNode(
                     node_id,
                     camera.name,
-                    NodeKind.CAMERA,
+                    NodeType.CAMERA,
                     parent=0,
                     object_id=camera.object_id,
                     body_index=0,

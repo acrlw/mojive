@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from forge_viewer import math3d
-from forge_viewer.adapters.base import NodeKind, SceneFrame, SceneNode, SceneSource
+from forge_viewer.adapters.base import NodeType, SceneFrame, SceneNode, SceneSource
 from forge_viewer.commands import SetCamera
 from forge_viewer.render.backend import DebugView, FrameMode, LabelMode, RenderFlag
 from forge_viewer.types import CameraView
@@ -34,7 +34,7 @@ class PreviewSession:
         self.selected_node = SceneNode(
             node_id=1,
             name="inspection",
-            kind=NodeKind.CAMERA,
+            type=NodeType.CAMERA,
             camera_index=0,
         )
         self.camera = camera

@@ -164,8 +164,8 @@ class WorkspaceAdapter(SceneAdapterBase):
             self._invalidate()
         return changed
 
-    def add_model_element(self, parent_node_id: int, kind: str, name: str) -> int:
-        node_id = self.primary.add_model_element(parent_node_id, kind, name)
+    def add_model_element(self, parent_node_id: int, element_type: str, name: str) -> int:
+        node_id = self.primary.add_model_element(parent_node_id, element_type, name)
         if node_id >= 0:
             self._invalidate()
         return node_id
@@ -599,7 +599,7 @@ class WorkspaceAdapter(SceneAdapterBase):
                 *(
                     node.name
                     for node in authored.nodes
-                    if node.body_index > 0 and node.kind.value == "link"
+                    if node.body_index > 0 and node.type.value == "link"
                 ),
             ),
             lights=replace(

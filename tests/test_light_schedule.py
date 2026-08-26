@@ -5,11 +5,11 @@ from forge_viewer.render.forge.passes.base import (
     MAX_SCENE_LIGHTS,
     schedule_lights,
 )
-from forge_viewer.types import Light, LightKind, LightSet
+from forge_viewer.types import Light, LightSet, LightType
 
 
 def test_light_schedule_caps_scene_and_local_shadow_slots():
-    lights = tuple(Light(kind=LightKind.POINT) for _ in range(MAX_SCENE_LIGHTS + 5))
+    lights = tuple(Light(type=LightType.POINT) for _ in range(MAX_SCENE_LIGHTS + 5))
     schedule = schedule_lights(LightSet(lights=lights))
 
     assert len(schedule.lights) == MAX_SCENE_LIGHTS
@@ -21,18 +21,18 @@ def test_light_schedule_caps_scene_and_local_shadow_slots():
 
 def test_light_schedule_uses_source_order_and_skips_inactive_and_image_lights():
     lights = (
-        Light(kind=LightKind.IMAGE),
-        Light(kind=LightKind.POINT, active=False),
-        Light(kind=LightKind.DIRECTIONAL),
-        Light(kind=LightKind.DIRECTIONAL),
-        Light(kind=LightKind.SPOT),
+        Light(type=LightType.IMAGE),
+        Light(type=LightType.POINT, active=False),
+        Light(type=LightType.DIRECTIONAL),
+        Light(type=LightType.DIRECTIONAL),
+        Light(type=LightType.SPOT),
     )
     schedule = schedule_lights(LightSet(lights=lights))
 
-    assert [light.kind for light in schedule.lights] == [
-        LightKind.DIRECTIONAL,
-        LightKind.DIRECTIONAL,
-        LightKind.SPOT,
+    assert [light.type for light in schedule.lights] == [
+        LightType.DIRECTIONAL,
+        LightType.DIRECTIONAL,
+        LightType.SPOT,
     ]
     assert schedule.directional_shadow == 0
     assert schedule.local_shadows == (2,)

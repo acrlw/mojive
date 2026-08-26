@@ -130,7 +130,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
                 {
                     "id": n.node_id,
                     "name": n.name,
-                    "kind": str(n.kind),
+                    "type": str(n.type),
                     "parent": n.parent,
                     "object_id": int(n.object_id),
                     "posable": n.posable,
@@ -141,7 +141,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
                 {
                     "id": j.joint_id,
                     "name": j.name,
-                    "kind": j.kind,
+                    "type": j.type,
                     "limited": j.limited,
                     "range": list(j.range),
                     "dof": j.dof,
@@ -163,7 +163,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
                 {
                     "id": sensor.sensor_id,
                     "name": sensor.name,
-                    "kind": sensor.kind,
+                    "type": sensor.type,
                     "adr": sensor.data_adr,
                     "dim": sensor.dim,
                 }
@@ -187,7 +187,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
             print("\nJoints:")
             for j in joints:
                 lim = f"[{j.range[0]:.3g}, {j.range[1]:.3g}]" if j.limited else "unlimited"
-                print(f"  {j.joint_id:>3}  {j.name:<24} {j.kind:<6} dof={j.dof}  {lim}")
+                print(f"  {j.joint_id:>3}  {j.name:<24} {j.type:<6} dof={j.dof}  {lim}")
         if actuators:
             print("\nActuators:")
             for a in actuators:
@@ -271,7 +271,7 @@ def _print_tree(nodes, parent: int = -1, depth: int = 0) -> None:
         if n.parent != parent:
             continue
         tag = " ◆" if n.posable else ""
-        print(f"  {'  ' * depth}{n.name}  ({n.kind}, id={n.object_id}){tag}")
+        print(f"  {'  ' * depth}{n.name}  ({n.type}, id={n.object_id}){tag}")
         _print_tree(nodes, n.node_id, depth + 1)
 
 

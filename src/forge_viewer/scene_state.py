@@ -12,7 +12,7 @@ import numpy as np
 
 from . import commands as cmd
 from .adapters.base import PhysicsState
-from .types import CameraView, Environment, Light, LightKind, Material
+from .types import CameraView, Environment, Light, LightType, Material
 
 SCENE_SNAPSHOT_FORMAT = "forge.scene-snapshot"
 FORMAT_VERSION = 2
@@ -200,7 +200,7 @@ def _light_to_json(light: Light) -> dict[str, Any]:
     return {
         field.name: (
             int(value)
-            if field.name == "kind"
+            if field.name == "type"
             else _array(value)
             if isinstance(value, np.ndarray)
             else value
@@ -214,8 +214,8 @@ def _light_from_json(value: dict[str, Any]) -> Light:
     arrays = {"position", "direction", "diffuse", "specular", "ambient", "attenuation"}
     return Light(
         **{
-            name: LightKind(item)
-            if name == "kind"
+            name: LightType(item)
+            if name == "type"
             else np.asarray(item, np.float32)
             if name in arrays
             else item

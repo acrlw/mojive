@@ -6,7 +6,7 @@ import moderngl
 import numpy as np
 
 from ....log import get_logger
-from ....types import LightKind, LightSet, ShadingModel
+from ....types import LightSet, LightType, ShadingModel
 from ...backend import DebugView, RenderFlag
 from .. import color
 from ..programs import ProgramSpec, UniformCache
@@ -260,7 +260,7 @@ class OpaquePass(BasePass):
             d = np.asarray(light.direction, np.float64)
             norm = float(np.linalg.norm(d))
             pos[n, :3] = light.position
-            pos[n, 3] = float(int(light.kind))
+            pos[n, 3] = float(int(light.type))
             dirs[n, :3] = d / norm if norm > 1e-9 else (0.0, 0.0, -1.0)
             dirs[n, 3] = np.cos(np.deg2rad(min(max(light.cutoff, 0.0), 180.0)))
 
@@ -280,7 +280,7 @@ class OpaquePass(BasePass):
             (
                 light
                 for light in reversed(lights.lights)
-                if light.active and light.kind is LightKind.IMAGE
+                if light.active and light.type is LightType.IMAGE
             ),
             None,
         )
@@ -316,9 +316,9 @@ class OpaquePass(BasePass):
         for light in lights.lights:
             if not light.active:
                 continue
-            if light.kind is LightKind.IMAGE:
+            if light.type is LightType.IMAGE:
                 continue
-            if light.cast_shadow and light.kind is LightKind.DIRECTIONAL:
+            if light.cast_shadow and light.type is LightType.DIRECTIONAL:
                 return n
             n += 1
         return -1

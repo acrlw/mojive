@@ -9,6 +9,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "forge_viewer"
 
 
 def _module_name(path: Path) -> str:
+    """Return the import name represented by a source path."""
 
     try:
         rel = path.resolve().relative_to(SRC).with_suffix("")
@@ -21,6 +22,7 @@ def _module_name(path: Path) -> str:
 
 
 def _imports(path: Path) -> set[str]:
+    """Collect absolute import names without importing the module."""
 
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     full = _module_name(path)
@@ -45,11 +47,15 @@ def _imports(path: Path) -> set[str]:
 
 
 def _files(*subdirs: str) -> list[Path]:
+    """Return Python source paths below selected package directories."""
+
     roots = [SRC / s for s in subdirs] if subdirs else [SRC]
     return sorted(p for root in roots for p in root.rglob("*.py") if root.exists())
 
 
 def _hits(imports: set[str], prefix: str) -> set[str]:
+    """Return imports equal to or below a package prefix."""
+
     return {i for i in imports if i == prefix or i.startswith(prefix + ".")}
 
 
@@ -57,6 +63,7 @@ def _hits(imports: set[str], prefix: str) -> set[str]:
 
 
 def test_render_layer_does_not_import_ui():
+    """Render modules remain independent of the UI layer."""
 
     bad = {}
     for path in _files("render"):
@@ -67,6 +74,7 @@ def test_render_layer_does_not_import_ui():
 
 
 def test_ui_layer_does_not_import_concrete_backend():
+    """UI modules depend on render contracts instead of backend internals."""
 
     allowed_prefixes = ("forge_viewer.render.backend", "forge_viewer.render.debugdraw")
     bad = {}
@@ -81,6 +89,7 @@ def test_ui_layer_does_not_import_concrete_backend():
 
 
 def test_render_layer_does_not_import_physics():
+    """Render modules remain independent of physics packages."""
 
     physics = ("mujoco", "newton", "warp")
     bad = {}
@@ -92,6 +101,7 @@ def test_render_layer_does_not_import_physics():
 
 
 def test_shared_vocabulary_is_dependency_free():
+    """Shared contracts remain importable without window or render dependencies."""
 
     forbidden = (
         "forge_viewer.render",
@@ -113,6 +123,7 @@ def test_shared_vocabulary_is_dependency_free():
 
 
 def test_adapters_do_not_import_render_internals():
+    """Adapters publish shared scene contracts without backend imports."""
 
     bad = {}
     for path in _files("adapters"):
@@ -123,6 +134,7 @@ def test_adapters_do_not_import_render_internals():
 
 
 def test_this_scan_needs_no_gpu_and_no_optional_deps():
+    """Architecture checks remain runnable in the fast CPU layer."""
 
     hit = _imports(Path(__file__))
     external = {i.split(".")[0] for i in hit} - {"ast", "pathlib", "pytest", "__future__"}
@@ -131,8 +143,44 @@ def test_this_scan_needs_no_gpu_and_no_optional_deps():
 
 @pytest.mark.parametrize("pkg", ["render", "ui", "adapters"])
 def test_every_package_has_docstring(pkg: str):
+    """Each architectural package documents its role at module level."""
 
     init = SRC / pkg / "__init__.py"
     assert init.exists()
     tree = ast.parse(init.read_text(encoding="utf-8"))
     assert ast.get_docstring(tree)
+
+
+@pytest.mark.parametrize("name", ["types.py", "commands.py", "math3d.py"])
+def test_public_contract_definitions_have_docstrings(name: str):
+    """Public shared definitions provide API documentation at their declaration."""
+
+    tree = ast.parse((SRC / name).read_text(encoding="utf-8"), filename=name)
+    missing = [
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and not node.name.startswith("_")
+        and ast.get_docstring(node) is None
+    ]
+    assert not missing
+
+
+def test_scene_adapter_base_methods_have_docstrings():
+    """The default adapter contract documents every public operation."""
+
+    path = SRC / "adapters" / "base.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    adapter = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "SceneAdapterBase"
+    )
+    missing = [
+        node.name
+        for node in adapter.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and not node.name.startswith("_")
+        and ast.get_docstring(node) is None
+    ]
+    assert not missing

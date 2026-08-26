@@ -177,11 +177,11 @@ def test_environment_inspector_controls_render_flags(viewer):
     from imgui_bundle import imgui
 
     import forge_viewer.commands as cmd
-    from forge_viewer.adapters.base import NodeKind
+    from forge_viewer.adapters.base import NodeType
     from forge_viewer.render.backend import RenderFlag
 
     selected_before = viewer.session.selected
-    environment = next(n for n in viewer.session.nodes if n.kind is NodeKind.ENVIRONMENT)
+    environment = next(n for n in viewer.session.nodes if n.type is NodeType.ENVIRONMENT)
     viewer.session.submit(cmd.Select(environment.object_id))
     activate_panel(viewer, "Inspector")
     point = item_rect(viewer, "checkbox", "enabled##fog")
@@ -198,13 +198,13 @@ def test_material_inspector_exposes_instance_and_shared_controls(viewer):
     from imgui_bundle import imgui
 
     import forge_viewer.commands as cmd
-    from forge_viewer.adapters.base import NodeKind
+    from forge_viewer.adapters.base import NodeType
 
     selected_before = viewer.session.selected
     target = next(
         node
         for node in viewer.session.nodes
-        if node.kind is NodeKind.LINK and node.name == "ball_00"
+        if node.type is NodeType.LINK and node.name == "ball_00"
     )
     viewer.session.submit(cmd.Select(target.object_id))
     activate_panel(viewer, "Inspector")
@@ -554,10 +554,10 @@ class _RecordingDrawList:
                 best, bd = i, d
         return best if bd <= 50.0**2 else -1
 
-    def _record(self, kind, pos):
+    def _record(self, event_type, pos):
         index = self._nearest(pos)
         if index >= 0:
-            self.calls.append((kind, index))
+            self.calls.append((event_type, index))
 
     def add_line(self, a, b, *rest):
         self._record("line", b)
@@ -626,12 +626,12 @@ def test_gizmo_draws_each_axis_as_one_unit(viewer):
                 assert span[i][1] < span[j][0]
 
     for idx, (lo, hi) in span.items():
-        kinds = [k for k, i in calls[lo : hi + 1] if i == idx]
+        event_types = [event_type for event_type, i in calls[lo : hi + 1] if i == idx]
         if balls[idx].positive:
-            assert kinds.count("lollipop") == 1
-        if "label" in kinds:
+            assert event_types.count("lollipop") == 1
+        if "label" in event_types:
             body = "lollipop" if balls[idx].positive else "disc"
-            assert kinds.index(body) < kinds.index("label")
+            assert event_types.index(body) < event_types.index("label")
 
 
 def test_negative_balls_are_dark_and_opaque(viewer):
@@ -978,7 +978,7 @@ def test_gizmo_is_live_for_a_free_body(free_body_viewer):
 def test_gizmo_disappears_without_a_free_body(free_body_viewer):
 
     import forge_viewer.commands as cmd
-    from forge_viewer.adapters.base import NodeKind
+    from forge_viewer.adapters.base import NodeType
 
     v = free_body_viewer
 
@@ -990,7 +990,7 @@ def test_gizmo_disappears_without_a_free_body(free_body_viewer):
             if not n.posable
             and n.object_id
             and n.body_index >= 0
-            and n.kind in (NodeKind.ROBOT, NodeKind.LINK)
+            and n.type in (NodeType.ROBOT, NodeType.LINK)
         ),
         key=lambda n: float(np.linalg.norm(fr.body_xpos[n.body_index])),
     )
@@ -1054,7 +1054,7 @@ def test_gizmo_drag_feedback_matches_in_2d_and_3d(free_body_viewer, style, arrow
 
     import forge_viewer.commands as cmd
     from forge_viewer.gizmo import SIZE_PT, project, world_scale
-    from forge_viewer.render.debugdraw import Prim
+    from forge_viewer.render.debugdraw import PrimitiveType
 
     class Recorder:
         """Counts the gizmo's Draw2D calls while forwarding to the real overlay."""
@@ -1123,7 +1123,7 @@ def test_gizmo_drag_feedback_matches_in_2d_and_3d(free_body_viewer, style, arrow
     v.app.gizmo.draw_overlay = spy
     try:
         v.sync()
-        drag_count = v.backend.debug.layer("ui.gizmo.drag").count_of(Prim.DRAG_LINK)
+        drag_count = v.backend.debug.layer("ui.gizmo.drag").count_of(PrimitiveType.DRAG_LINK)
     finally:
         v.app.gizmo.draw_overlay = orig_draw
         io.add_mouse_button_event(0, False)

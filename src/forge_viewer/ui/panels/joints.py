@@ -62,8 +62,8 @@ class JointsPanel(Panel):
         qpos = ctx.session.frame.qpos
         if qpos is None or j.qpos_adr >= len(qpos):
             return
-        if j.kind not in _SCALAR_KINDS:
-            imgui.text_disabled(f"{j.name or f'joint{j.joint_id}'}  ({j.kind}, {j.dof} dof)")
+        if j.type not in _SCALAR_KINDS:
+            imgui.text_disabled(f"{j.name or f'joint{j.joint_id}'}  ({j.type}, {j.dof} dof)")
             return
 
         value = float(qpos[j.qpos_adr])
@@ -144,4 +144,4 @@ class JointsPanel(Panel):
 def _joint_range(j: JointInfo) -> tuple[float, float]:
     if j.limited and j.range[1] > j.range[0]:
         return float(j.range[0]), float(j.range[1])
-    return (-math.pi, math.pi) if j.kind == "hinge" else (-1.0, 1.0)
+    return (-math.pi, math.pi) if j.type == "hinge" else (-1.0, 1.0)

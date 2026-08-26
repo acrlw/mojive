@@ -9,11 +9,11 @@ import pytest
 
 from forge_viewer import commands as cmd
 from forge_viewer import math3d
-from forge_viewer.adapters.base import NodeKind, SceneSaveOptions
+from forge_viewer.adapters.base import NodeType, SceneSaveOptions
 from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
 from forge_viewer.adapters.workspace import WorkspaceAdapter
 from forge_viewer.session import Session
-from forge_viewer.types import DEFAULT_MATERIAL, CameraView, Light, LightKind, MeshShape
+from forge_viewer.types import DEFAULT_MATERIAL, CameraView, Light, LightType, MeshShape
 from forge_viewer.workspace_io import (
     missing_resource_entries,
     missing_resources,
@@ -183,7 +183,7 @@ def test_workspace_round_trip_preserves_models_resources_and_entities(tmp_path: 
     )
     document.add_scene_light(
         "key",
-        Light(kind=LightKind.SPOT, position=np.array((1.0, -2.0, 3.0), np.float32)),
+        Light(type=LightType.SPOT, position=np.array((1.0, -2.0, 3.0), np.float32)),
     )
     document.add_scene_camera(
         "inspection",
@@ -225,7 +225,7 @@ def test_workspace_exports_formatted_re_loadable_mjcf(tmp_path: Path) -> None:
     document.add_scene_light(
         "inspection light",
         Light(
-            kind=LightKind.SPOT,
+            type=LightType.SPOT,
             position=np.array((1.0, -2.0, 3.0), np.float32),
             cutoff=30.0,
         ),
@@ -256,7 +256,7 @@ def test_workspace_exports_formatted_re_loadable_mjcf(tmp_path: Path) -> None:
     source = document.scene_source()
     assert len(source.cameras) == 2
     assert len(source.lights.lights) == 2
-    assert sum(node.kind is NodeKind.GEOM for node in source.nodes) == model.ngeom
+    assert sum(node.type is NodeType.GEOM for node in source.nodes) == model.ngeom
 
 
 def test_workspace_mjcf_export_stages_file_assets_with_relative_paths(tmp_path: Path) -> None:
@@ -300,7 +300,7 @@ f 2 3 4
 
 def test_workspace_mjcf_export_rejects_lossy_authored_lights(tmp_path: Path) -> None:
     document = workspace()
-    document.add_scene_light("panel", Light(kind=LightKind.AREA))
+    document.add_scene_light("panel", Light(type=LightType.AREA))
 
     with pytest.raises(RuntimeError, match="area light"):
         document.save_scene(tmp_path / "scene.xml")
@@ -416,7 +416,7 @@ def test_mjspec_topology_edits_round_trip_in_workspace(tmp_path: Path) -> None:
     model_node = next(
         node
         for node in document.nodes()
-        if node.kind is NodeKind.MODEL and node.model_id == model_id
+        if node.type is NodeType.MODEL and node.model_id == model_id
     )
     body_id = document.add_model_element(model_node.node_id, "body", "fixture")
     geom_id = document.add_model_element(body_id, "geom:box", "fixture_visual")
@@ -443,7 +443,7 @@ def test_mjspec_element_pose_edits_round_trip_in_workspace(tmp_path: Path) -> No
         np.array((2.0, 0.0, 0.0)),
         np.eye(3),
     )
-    model_node = next(node for node in document.nodes() if node.kind is NodeKind.MODEL)
+    model_node = next(node for node in document.nodes() if node.type is NodeType.MODEL)
     document.add_model_element(model_node.node_id, "body", "fixture")
     body = next(node for node in document.nodes() if node.name == "forge_1_fixture")
     document.add_model_element(body.node_id, "geom:box", "fixture_visual")
@@ -495,7 +495,7 @@ def test_model_root_transform_moves_free_bodies_and_model_cameras() -> None:
     session = Session(document)
     assert session.submit(cmd.Pause()).ok
     model_node = next(
-        node for node in session.nodes if node.kind is NodeKind.MODEL and node.model_id == model_id
+        node for node in session.nodes if node.type is NodeType.MODEL and node.model_id == model_id
     )
     before_cameras = {
         camera.name: session.camera_view(camera.camera_id) for camera in session.cameras
@@ -583,7 +583,7 @@ def test_structured_model_components_edit_and_round_trip(tmp_path: Path) -> None
 
     tendon = document.model_components(model_id, "tendon")[0]
     assert tendon.subtype == "spatial"
-    assert [item.kind for item in tendon.path] == ["site", "site"]
+    assert [item.type for item in tendon.path] == ["site", "site"]
     assert document.update_model_component(
         model_id,
         "tendon",
@@ -592,7 +592,7 @@ def test_structured_model_components_edit_and_round_trip(tmp_path: Path) -> None
         tuple((field.name, field.value) for field in tendon.fields),
         tuple(
             (
-                item.kind,
+                item.type,
                 tuple((field.name, field.value) for field in item.fields),
             )
             for item in tendon.path

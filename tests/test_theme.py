@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from forge_viewer.adapters.base import NodeKind
+from forge_viewer.adapters.base import NodeType
 from forge_viewer.ui import theme
 
 MAX_NODE_SATURATION = 0.40
@@ -84,15 +84,15 @@ def test_independent_color_math_agrees_with_theme():
 
 def test_every_node_kind_has_a_color():
 
-    missing = [k for k in NodeKind if k not in theme.NODE_COLORS]
+    missing = [k for k in NodeType if k not in theme.NODE_COLORS]
     assert not missing
-    assert len(theme.NODE_COLORS) == len(list(NodeKind))
+    assert len(theme.NODE_COLORS) == len(list(NodeType))
 
 
-@pytest.mark.parametrize("kind", list(NodeKind))
-def test_node_colors_are_desaturated(kind: NodeKind):
+@pytest.mark.parametrize("node_type", list(NodeType))
+def test_node_colors_are_desaturated(node_type: NodeType):
 
-    color = theme.NODE_COLORS[kind]
+    color = theme.NODE_COLORS[node_type]
     sat = _hsl_saturation(color)
     chroma = _chroma(color)
     assert sat < MAX_NODE_SATURATION

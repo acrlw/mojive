@@ -13,7 +13,7 @@ from forge_viewer import math3d
 from forge_viewer.adapters.base import (
     AdapterCaps,
     FrameNeeds,
-    NodeKind,
+    NodeType,
     SceneFrame,
     SceneNode,
     SceneSource,
@@ -53,11 +53,11 @@ class FakeAdapter:
 
     def nodes(self) -> list[SceneNode]:
         return [
-            SceneNode(node_id=0, name="world", kind=NodeKind.WORLD, parent=-1, body_index=0),
+            SceneNode(node_id=0, name="world", type=NodeType.WORLD, parent=-1, body_index=0),
             SceneNode(
                 node_id=1,
                 name="cube",
-                kind=NodeKind.LINK,
+                type=NodeType.LINK,
                 parent=0,
                 object_id=1,
                 posable=True,

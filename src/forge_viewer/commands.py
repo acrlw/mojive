@@ -111,7 +111,7 @@ class AddModelElement(Command):
     """Add a topology element beneath an editable model node."""
 
     parent_node_id: int
-    kind: str
+    element_type: str
     name: str
 
 

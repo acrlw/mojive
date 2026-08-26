@@ -16,7 +16,7 @@ from forge_viewer.bridge import DebugClient  # noqa: E402
 from forge_viewer.composition import build_scene  # noqa: E402
 from forge_viewer.demos import canvas_scene  # noqa: E402
 from forge_viewer.gizmo import SIZE_PT, project, world_scale  # noqa: E402
-from forge_viewer.render.debugdraw import Prim  # noqa: E402
+from forge_viewer.render.debugdraw import PrimitiveType  # noqa: E402
 from forge_viewer.scene import Scene  # noqa: E402
 from forge_viewer.types import DEFAULT_MATERIAL, CameraView, Material, MeshShape  # noqa: E402
 from forge_viewer.ui.scene_entities import HELPER_LAYER  # noqa: E402
@@ -364,8 +364,8 @@ def test_scene_camera_helper_is_pickable_and_transformable():
         assert viewer.app.camera_preview._image is not None
         assert viewer.app.camera_preview._image.aspect == pytest.approx(16.0 / 9.0, rel=0.01)
         layer = viewer.backend.debug.layer(HELPER_LAYER)
-        assert layer.count_of(Prim.POINT) == 1
-        assert layer.count_of(Prim.LINE) == 20
+        assert layer.count_of(PrimitiveType.POINT) == 1
+        assert layer.count_of(PrimitiveType.LINE) == 20
 
         viewer.app.gizmo.set_mode("translate")
         viewer.app.gizmo.set_space("world")

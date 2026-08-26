@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 from imgui_bundle import imgui
 
-from ..adapters.base import NodeKind, SceneFrame, SceneSource
+from ..adapters.base import NodeType, SceneFrame, SceneSource
 from ..types import CameraView, ViewportImage
 
 
@@ -145,7 +145,7 @@ class CameraPreview:
             self._camera = _copy_camera(camera)
             return self._camera_name, self._camera
         node = session.selected_node
-        if node is None or node.kind is not NodeKind.CAMERA or node.camera_index < 0:
+        if node is None or node.type is not NodeType.CAMERA or node.camera_index < 0:
             return "", None
         camera = session.camera_view(node.camera_index)
         if camera is None:

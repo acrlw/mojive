@@ -14,14 +14,14 @@ from .types import (
     CameraView,
     Environment,
     Light,
-    LightKind,
     LightSet,
+    LightType,
     Material,
     MeshData,
     MeshKey,
     MeshShape,
     TextureData,
-    TextureKind,
+    TextureType,
 )
 
 FORMAT = "forge-viewer.scene"
@@ -175,7 +175,7 @@ def _light_document(light: Light | None) -> dict | None:
     if light is None:
         return None
     return {
-        "kind": light.kind.name.lower(),
+        "type": light.type.name.lower(),
         "position": light.position.tolist(),
         "direction": light.direction.tolist(),
         "diffuse": light.diffuse.tolist(),
@@ -197,7 +197,7 @@ def _light_from_document(item: dict | None) -> Light | None:
     if item is None:
         return None
     return Light(
-        kind=LightKind[item["kind"].upper()],
+        type=LightType[item["type"].upper()],
         position=_f32(item["position"], (3,)),
         direction=_f32(item["direction"], (3,)),
         diffuse=_f32(item["diffuse"], (3,)),
@@ -326,7 +326,7 @@ def _mesh_from_document(item: dict) -> MeshData:
 def _texture_document(texture: TextureData) -> dict:
     return {
         "name": texture.name,
-        "kind": texture.kind.value,
+        "type": texture.type.value,
         "srgb": texture.srgb,
         "pixels": _array_document(texture.pixels),
     }
@@ -335,7 +335,7 @@ def _texture_document(texture: TextureData) -> dict:
 def _texture_from_document(item: dict) -> TextureData:
     return TextureData(
         name=str(item["name"]),
-        kind=TextureKind(item["kind"]),
+        type=TextureType(item["type"]),
         pixels=_array_from_document(item["pixels"]),
         srgb=bool(item["srgb"]),
     )

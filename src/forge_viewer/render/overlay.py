@@ -16,13 +16,13 @@ import numpy as np
 
 from .. import math3d
 from ..adapters.base import (
-    ActuatorVisualKind,
-    BvhKind,
-    JointVisualKind,
+    ActuatorVisualType,
+    BvhType,
+    JointVisualType,
     SceneFrame,
     SceneSource,
 )
-from ..types import CameraView, LightKind
+from ..types import CameraView, LightType
 from .backend import FrameMode, LabelMode, RenderFlag
 from .debugdraw import DebugDraw, Occlusion
 
@@ -357,14 +357,14 @@ class OverlayPublisher:
             identity = np.eye(3, dtype=np.float32)
             for joint in np.flatnonzero(source.joint_visible):
                 position = dynamic.joint_xpos[joint]
-                kind = JointVisualKind(int(source.joint_kinds[joint]))
-                if kind is JointVisualKind.FREE:
+                visual_type = JointVisualType(int(source.joint_types[joint]))
+                if visual_type is JointVisualType.FREE:
                     joints.box(
                         f"free:{joint}",
                         math3d.compose(position, identity, np.full(3, joint_radius)),
                         source.joint_rgba,
                     )
-                elif kind is JointVisualKind.BALL:
+                elif visual_type is JointVisualType.BALL:
                     joints.sphere(
                         f"ball:{joint}",
                         math3d.compose(position, identity, np.full(3, joint_radius)),
@@ -376,7 +376,7 @@ class OverlayPublisher:
                         _axis_rotation(dynamic.joint_xaxis[joint]),
                         (2.0 * source.joint_width, 2.0 * source.joint_width, source.joint_length),
                     )
-                    if kind is JointVisualKind.SLIDE:
+                    if visual_type is JointVisualType.SLIDE:
                         joints.solid_double_arrow(f"slide:{joint}", transform, source.joint_rgba)
                     else:
                         joints.solid_arrow(f"hinge:{joint}", transform, source.joint_rgba)
@@ -440,17 +440,17 @@ class OverlayPublisher:
             layer.clear()
             return
 
-        kind = source.bvh_kind
-        selected = np.zeros(len(kind), bool)
+        bvh_type = source.bvh_type
+        selected = np.zeros(len(bvh_type), bool)
         if show_body:
-            selected |= kind == int(BvhKind.BODY)
+            selected |= bvh_type == int(BvhType.BODY)
         if show_mesh:
-            selected |= kind != int(BvhKind.BODY)
+            selected |= bvh_type != int(BvhType.BODY)
         selected &= (source.bvh_depth == state.bvh_depth) | (
             source.bvh_leaf & (source.bvh_depth < state.bvh_depth)
         )
         if source.bvh_active_highlight:
-            selected &= ~((kind == int(BvhKind.MESH)) & ~dynamic.bvh_active)
+            selected &= ~((bvh_type == int(BvhType.MESH)) & ~dynamic.bvh_active)
         records = np.flatnonzero(selected)
         layer.clear()
         if len(records):
@@ -537,26 +537,26 @@ class OverlayPublisher:
             actuator = int(actuator)
             if not self._source.actuator_visible[actuator]:
                 continue
-            kind = ActuatorVisualKind(int(source.actuator_visual_kinds[record]))
+            visual_type = ActuatorVisualType(int(source.actuator_visual_types[record]))
             position = dynamic.actuator_xpos[record]
             rotation = dynamic.actuator_xmat[record]
             size = source.actuator_visual_sizes[record]
             color = palette[actuator]
             transform = math3d.compose(position, rotation, size)
             ident = f"actuator:{record}"
-            if kind is ActuatorVisualKind.SLIDE:
+            if visual_type is ActuatorVisualType.SLIDE:
                 layer.solid_double_arrow(ident, transform, color)
-            elif kind is ActuatorVisualKind.HINGE:
+            elif visual_type is ActuatorVisualType.HINGE:
                 layer.solid_arrow(ident, transform, color)
-            elif kind in (
-                ActuatorVisualKind.BALL,
-                ActuatorVisualKind.SPHERE,
-                ActuatorVisualKind.ELLIPSOID,
+            elif visual_type in (
+                ActuatorVisualType.BALL,
+                ActuatorVisualType.SPHERE,
+                ActuatorVisualType.ELLIPSOID,
             ):
                 layer.sphere(ident, transform, color)
-            elif kind in (ActuatorVisualKind.FREE, ActuatorVisualKind.BOX):
+            elif visual_type in (ActuatorVisualType.FREE, ActuatorVisualType.BOX):
                 layer.box(ident, transform, color)
-            elif kind is ActuatorVisualKind.CYLINDER:
+            elif visual_type is ActuatorVisualType.CYLINDER:
                 layer.cylinder(ident, transform, color)
             else:
                 _draw_capsule(layer, ident, position, rotation, size, color)
@@ -636,7 +636,7 @@ class OverlayPublisher:
     def _draw_light_icon(self, layer, index: int, light, color, state) -> None:
         position = np.asarray(light.position, np.float32)
         layer.point(f"light:{index}:point", position, color, 6.0)
-        if light.kind in (LightKind.POINT, LightKind.IMAGE):
+        if light.type in (LightType.POINT, LightType.IMAGE):
             layer.erase(f"light:{index}:direction")
             return
         direction = math3d.normalize(np.asarray(light.direction, np.float32))

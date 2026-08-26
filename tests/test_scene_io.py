@@ -12,11 +12,11 @@ from forge_viewer.types import (
     CameraView,
     Environment,
     Light,
-    LightKind,
+    LightType,
     Material,
     MeshData,
     TextureData,
-    TextureKind,
+    TextureType,
 )
 
 pytestmark = pytest.mark.integration
@@ -42,7 +42,7 @@ def test_forge_scene_round_trip_preserves_authored_content(tmp_path):
     scene.add_texture(
         TextureData(
             "checker",
-            TextureKind.TWO_D,
+            TextureType.TWO_D,
             np.array([[[255, 0, 0], [0, 0, 255]]], np.uint8),
         )
     )
@@ -50,7 +50,7 @@ def test_forge_scene_round_trip_preserves_authored_content(tmp_path):
     fill = scene.add_light(
         "fill",
         Light(
-            kind=LightKind.POINT,
+            type=LightType.POINT,
             position=np.array([2.0, -1.0, 4.0], np.float32),
             diffuse=np.array([0.3, 0.5, 0.9], np.float32),
             texture="checker",

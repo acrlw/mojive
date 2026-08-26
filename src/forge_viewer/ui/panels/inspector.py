@@ -9,9 +9,9 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ... import math3d
-from ...adapters.base import FrameNeeds, ModelComponentInfo, NodeKind, SceneNode
+from ...adapters.base import FrameNeeds, ModelComponentInfo, NodeType, SceneNode
 from ...render.backend import RenderFlag
-from ...types import DEFAULT_HEADLIGHT, Environment, LightKind, MeshShape, TextureKind
+from ...types import DEFAULT_HEADLIGHT, Environment, LightType, MeshShape, TextureType
 from . import Panel, PanelContext, begin_kv_table, labeled
 
 GIZMO_REFUSAL_RUNNING = "physics is running; pause to move things"
@@ -126,23 +126,23 @@ class InspectorPanel(Panel):
             imgui.text_disabled("click an object in the viewport or the Hierarchy panel")
             return
 
-        color = ctx.theme.node_color(node.kind)
+        color = ctx.theme.node_color(node.type)
         imgui.text_colored(imgui.ImVec4(*color), node.name or "?")
         imgui.same_line()
-        imgui.text_disabled(f"({node.kind})")
+        imgui.text_disabled(f"({node.type})")
 
         self._identity(node)
         self._model_element(ctx, node)
-        if node.kind is NodeKind.MODEL:
+        if node.type is NodeType.MODEL:
             self._model(ctx, node)
             return
-        if node.kind is NodeKind.LIGHT:
+        if node.type is NodeType.LIGHT:
             self._light(ctx, node)
             return
-        if node.kind is NodeKind.CAMERA:
+        if node.type is NodeType.CAMERA:
             self._camera(ctx, node)
             return
-        if node.kind is NodeKind.ENVIRONMENT:
+        if node.type is NodeType.ENVIRONMENT:
             self._environment(ctx)
             return
         self._transform(ctx, node)
@@ -151,7 +151,7 @@ class InspectorPanel(Panel):
         self._material(ctx, node)
 
     def _model_element(self, ctx: PanelContext, node: SceneNode) -> None:
-        if node.model_id < 0 or node.kind in (NodeKind.WORLD, NodeKind.MODEL):
+        if node.model_id < 0 or node.type in (NodeType.WORLD, NodeType.MODEL):
             return
         if self._model_name_node != node.node_id:
             self._model_name_node = node.node_id
@@ -278,7 +278,7 @@ class InspectorPanel(Panel):
         self._component_name = component.name
         self._component_fields = [[field.name, field.value] for field in component.fields]
         self._component_path = [
-            (item.kind, [[field.name, field.value] for field in item.fields])
+            (item.type, [[field.name, field.value] for field in item.fields])
             for item in component.path
         ]
         self._component_error = ""
@@ -313,9 +313,9 @@ class InspectorPanel(Panel):
         path_choices = [
             {field.name: field.choices for field in item.fields} for item in component.path
         ]
-        for path_index, (kind, fields) in enumerate(self._component_path):
+        for path_index, (element_type, fields) in enumerate(self._component_path):
             imgui.push_id(f"path-{path_index}")
-            imgui.text_disabled(f"{path_index + 1}. {kind}")
+            imgui.text_disabled(f"{path_index + 1}. {element_type}")
             for field_index, field in enumerate(fields):
                 field[1] = _component_value_editor(
                     f"{field[0]}##path-field-{field_index}",
@@ -334,8 +334,8 @@ class InspectorPanel(Panel):
                     self._component_name,
                     tuple((name, value) for name, value in self._component_fields),
                     tuple(
-                        (kind, tuple((name, value) for name, value in fields))
-                        for kind, fields in self._component_path
+                        (element_type, tuple((name, value) for name, value in fields))
+                        for element_type, fields in self._component_path
                     ),
                 )
             )
@@ -679,10 +679,10 @@ class InspectorPanel(Panel):
 
         changed, active = imgui.checkbox("enabled", light.active)
         kind_changed, kind_index = imgui.combo(
-            "type", int(light.kind), ["directional", "point", "spot", "area", "image"]
+            "type", int(light.type), ["directional", "point", "spot", "area", "image"]
         )
         changed |= kind_changed
-        kind = LightKind(kind_index)
+        light_type = LightType(kind_index)
 
         diffuse = light.diffuse
         specular = light.specular
@@ -692,14 +692,14 @@ class InspectorPanel(Panel):
         image_intensity = light.intensity
         texture = light.texture
 
-        if kind is LightKind.IMAGE:
+        if light_type is LightType.IMAGE:
             intensity_changed, image_intensity = imgui.drag_float(
                 "intensity", light.intensity, 50.0, 0.0, 100000.0, "%.0f"
             )
             textures = [
                 name
                 for name, item in source.textures.items()
-                if item.kind in (TextureKind.CUBE, TextureKind.SKYBOX)
+                if item.type in (TextureType.CUBE, TextureType.SKYBOX)
             ]
             texture_index = textures.index(light.texture) if light.texture in textures else 0
             texture_changed = False
@@ -734,27 +734,27 @@ class InspectorPanel(Panel):
         light_range, cutoff, exponent = light.range, light.cutoff, light.exponent
         area_radius = light.area_radius
         attenuation = light.attenuation
-        if kind in (LightKind.POINT, LightKind.SPOT, LightKind.AREA):
+        if light_type in (LightType.POINT, LightType.SPOT, LightType.AREA):
             range_changed, light_range = imgui.drag_float(
                 "range (0 = unlimited)", light.range, 0.05, 0.0, 10000.0, "%.2f"
             )
             attenuation_changed, attenuation = imgui.drag_float3(
                 "attenuation", light.attenuation, 0.01, 0.0, 100.0, "%.3f"
             )
-        if kind is LightKind.SPOT:
+        if light_type is LightType.SPOT:
             cutoff_changed, cutoff = imgui.drag_float(
                 "cutoff", light.cutoff, 0.25, 0.1, 89.9, "%.1f deg"
             )
             exponent_changed, exponent = imgui.drag_float(
                 "falloff exponent", light.exponent, 0.1, 0.0, 100.0, "%.1f"
             )
-        if kind is LightKind.AREA:
+        if light_type is LightType.AREA:
             area_changed, area_radius = imgui.drag_float(
                 "source radius", light.area_radius, 0.01, 0.0, 1000.0, "%.3f"
             )
         shadow_changed = False
         cast_shadow = light.cast_shadow
-        if kind is not LightKind.IMAGE:
+        if light_type is not LightType.IMAGE:
             shadow_changed, cast_shadow = imgui.checkbox("cast shadow", light.cast_shadow)
         changed |= (
             range_changed
@@ -771,7 +771,7 @@ class InspectorPanel(Panel):
                     index,
                     replace(
                         light,
-                        kind=kind,
+                        type=light_type,
                         active=active,
                         diffuse=diffuse,
                         specular=np.asarray(specular, np.float32),
@@ -999,9 +999,9 @@ def _body_pose(xpos, xmat, body_index: int):
 
 
 def _node_pose(frame, node: SceneNode):
-    if node.kind is NodeKind.GEOM:
+    if node.type is NodeType.GEOM:
         return _body_pose(frame.geom_xpos, frame.geom_xmat, node.geom_index)
-    if node.kind is NodeKind.SITE:
+    if node.type is NodeType.SITE:
         return _body_pose(frame.site_xpos, frame.site_xmat, node.site_index)
     return _body_pose(frame.body_xpos, frame.body_xmat, node.body_index)
 
@@ -1026,7 +1026,7 @@ def _free_velocity(qvel, joints, body_index: int):
     if qvel is None:
         return None
     joint = next(
-        (j for j in joints if j.body == body_index and j.kind == "free" and j.dof >= 6), None
+        (j for j in joints if j.body == body_index and j.type == "free" and j.dof >= 6), None
     )
     if joint is None or joint.qvel_adr + 6 > len(qvel):
         return None
@@ -1035,7 +1035,7 @@ def _free_velocity(qvel, joints, body_index: int):
 
 
 def _has_free_velocity(joints, body_index: int) -> bool:
-    return any(j.body == body_index and j.kind == "free" and j.dof >= 6 for j in joints)
+    return any(j.body == body_index and j.type == "free" and j.dof >= 6 for j in joints)
 
 
 def _compact_transform(width: float, style_scale: float) -> bool:

@@ -14,7 +14,7 @@ from forge_viewer.assets import resolve  # noqa: E402
 from forge_viewer.backends import make_adapter  # noqa: E402
 from forge_viewer.render.backend import DebugView, RenderFlag  # noqa: E402
 from forge_viewer.render.builder import SceneSourceBuilder  # noqa: E402
-from forge_viewer.render.debugdraw import Occlusion, Prim  # noqa: E402
+from forge_viewer.render.debugdraw import Occlusion, PrimitiveType  # noqa: E402
 from forge_viewer.render.forge import gl_native as G  # noqa: E402
 from forge_viewer.render.forge import passes as _passes  # noqa: E402
 from forge_viewer.render.forge.backend import PASS_ORDER, ForgeBackend, registered  # noqa: E402
@@ -216,13 +216,13 @@ def test_mujoco_visuals_reach_the_gpu_pipeline(backend_name, request):
 
         assert backend.stats.instances > adapter.model.ngeom
         assert _tendon_pass(backend).capsule_count >= 2
-        assert backend.debug.layer("physics.contact.points").count_of(Prim.POINT) >= 1
-        assert backend.debug.layer("physics.contact.forces").count_of(Prim.ARROW) >= 1
+        assert backend.debug.layer("physics.contact.points").count_of(PrimitiveType.POINT) >= 1
+        assert backend.debug.layer("physics.contact.forces").count_of(PrimitiveType.ARROW) >= 1
         joints = backend.debug.layer("physics.joints")
-        assert joints.count_of(Prim.BOX) == 1
-        assert joints.count_of(Prim.SOLID_ARROW) == 1
-        assert backend.debug.layer("physics.com").count_of(Prim.SPHERE) == 2
-        assert backend.debug.layer("physics.inertia").count_of(Prim.BOX) == 2
+        assert joints.count_of(PrimitiveType.BOX) == 1
+        assert joints.count_of(PrimitiveType.SOLID_ARROW) == 1
+        assert backend.debug.layer("physics.com").count_of(PrimitiveType.SPHERE) == 2
+        assert backend.debug.layer("physics.inertia").count_of(PrimitiveType.BOX) == 2
         assert float(backend.target.read_color()[..., :3].std()) > 8.0
     finally:
         backend.release()
@@ -242,12 +242,18 @@ def test_camera_and_light_entities_reach_the_debug_pass(backend_name, request):
         frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True))
         backend.update(frame)
 
-        assert backend.debug.layer("scene.cameras").count_of(Prim.LINE) == 8 * len(source.cameras)
+        assert backend.debug.layer("scene.cameras").count_of(PrimitiveType.LINE) == 8 * len(
+            source.cameras
+        )
         light_set = frame.lights if frame.lights is not None else source.lights
         active_lights = [light for light in light_set.lights if light.active]
-        directional_lights = [light for light in active_lights if light.kind.value != "point"]
-        assert backend.debug.layer("scene.lights").count_of(Prim.POINT) == len(active_lights)
-        assert backend.debug.layer("scene.lights").count_of(Prim.ARROW) == len(directional_lights)
+        directional_lights = [light for light in active_lights if light.type.value != "point"]
+        assert backend.debug.layer("scene.lights").count_of(PrimitiveType.POINT) == len(
+            active_lights
+        )
+        assert backend.debug.layer("scene.lights").count_of(PrimitiveType.ARROW) == len(
+            directional_lights
+        )
         _render(backend, frame)
 
         assert backend.set_flag(RenderFlag.CAMERA, False)
@@ -271,9 +277,9 @@ def test_rangefinder_rays_hits_and_normals_reach_the_debug_pass(backend_name, re
         backend.update(frame)
 
         layer = backend.debug.layer("physics.rangefinders")
-        assert layer.count_of(Prim.LINE) == 7
-        assert layer.count_of(Prim.POINT) == 7
-        assert layer.count_of(Prim.ARROW) == 7
+        assert layer.count_of(PrimitiveType.LINE) == 7
+        assert layer.count_of(PrimitiveType.POINT) == 7
+        assert layer.count_of(PrimitiveType.ARROW) == 7
         _render(backend, frame)
 
         assert backend.set_flag(RenderFlag.RANGEFINDER, False)
@@ -295,13 +301,13 @@ def test_equality_constraint_endpoints_reach_the_debug_pass(backend_name, reques
         backend.update(frame)
 
         layer = backend.debug.layer("physics.constraints")
-        assert layer.count_of(Prim.SPHERE) == 4
+        assert layer.count_of(PrimitiveType.SPHERE) == 4
         _render(backend, frame)
 
         assert adapter.set_equality_enabled(0, False)
         frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True))
         backend.update(frame)
-        assert layer.count_of(Prim.SPHERE) == 2
+        assert layer.count_of(PrimitiveType.SPHERE) == 2
 
         assert backend.set_flag(RenderFlag.CONSTRAINT, False)
         backend.update(frame)
@@ -333,11 +339,11 @@ def test_joint_site_and_body_actuator_visuals_reach_the_gpu_pipeline(backend_nam
         layer = backend.debug.layer("physics.actuators")
 
         assert not np.allclose(negative, positive)
-        assert layer.count_of(Prim.SOLID_ARROW) == 1
-        assert layer.count_of(Prim.SOLID_DOUBLE_ARROW) == 1
-        assert layer.count_of(Prim.BOX) == 1
-        assert layer.count_of(Prim.CYLINDER) == 2
-        assert layer.count_of(Prim.SPHERE) == 2
+        assert layer.count_of(PrimitiveType.SOLID_ARROW) == 1
+        assert layer.count_of(PrimitiveType.SOLID_DOUBLE_ARROW) == 1
+        assert layer.count_of(PrimitiveType.BOX) == 1
+        assert layer.count_of(PrimitiveType.CYLINDER) == 2
+        assert layer.count_of(PrimitiveType.SPHERE) == 2
         _render(backend, frame)
         assert float(backend.target.read_color()[..., :3].std()) > 8.0
     finally:
@@ -359,8 +365,8 @@ def test_slider_crank_visuals_reach_the_gpu_pipeline(backend_name, request):
         backend.update(frame)
         layer = backend.debug.layer("physics.actuators")
 
-        assert layer.count_of(Prim.CYLINDER) == 4
-        assert layer.count_of(Prim.SPHERE) == 4
+        assert layer.count_of(PrimitiveType.CYLINDER) == 4
+        assert layer.count_of(PrimitiveType.SPHERE) == 4
         _render(backend, frame)
         assert float(backend.target.read_color()[..., :3].std()) > 8.0
     finally:
@@ -382,7 +388,7 @@ def test_contact_split_and_autoconnect_reach_the_gpu_pipeline(backend_name, requ
         frame = contacts.frame(FrameNeeds(poses=True, contacts=True, diagnostics=True))
         contact_backend.update(frame)
         force_layer = contact_backend.debug.layer("physics.contact.forces")
-        assert force_layer.count_of(Prim.ARROW) == 2 * len(frame.contacts)
+        assert force_layer.count_of(PrimitiveType.ARROW) == 2 * len(frame.contacts)
         _render(contact_backend, frame)
 
         chain_backend.set_scene(chain.scene_source())
@@ -392,8 +398,12 @@ def test_contact_split_and_autoconnect_reach_the_gpu_pipeline(backend_name, requ
         frame = chain.frame(FrameNeeds(poses=True, diagnostics=True))
         chain_backend.update(frame)
         autoconnect = chain_backend.debug.layer("physics.autoconnect")
-        assert autoconnect.count_of(Prim.CYLINDER) == len(frame.diagnostics.autoconnect_segments)
-        assert autoconnect.count_of(Prim.SPHERE) == 2 * len(frame.diagnostics.autoconnect_segments)
+        assert autoconnect.count_of(PrimitiveType.CYLINDER) == len(
+            frame.diagnostics.autoconnect_segments
+        )
+        assert autoconnect.count_of(PrimitiveType.SPHERE) == 2 * len(
+            frame.diagnostics.autoconnect_segments
+        )
         _render(chain_backend, frame)
     finally:
         contact_backend.release()
@@ -403,7 +413,7 @@ def test_contact_split_and_autoconnect_reach_the_gpu_pipeline(backend_name, requ
 
 
 def test_bvh_boxes_reach_the_gpu_pipeline(backend_name, request):
-    from forge_viewer.adapters.base import BvhKind
+    from forge_viewer.adapters.base import BvhType
 
     adapter = make_adapter("mujoco", resolve("deformables"))
     backend = _make_backend(backend_name, request, samples=1)
@@ -417,11 +427,11 @@ def test_bvh_boxes_reach_the_gpu_pipeline(backend_name, request):
         frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True, bvh=True))
         backend.update(frame)
         diagnostic = source.diagnostics
-        selected = (diagnostic.bvh_kind == int(BvhKind.FLEX)) & (
+        selected = (diagnostic.bvh_type == int(BvhType.FLEX)) & (
             (diagnostic.bvh_depth == 2) | (diagnostic.bvh_leaf & (diagnostic.bvh_depth < 2))
         )
         layer = backend.debug.layer("physics.bvh")
-        assert layer.count_of(Prim.LINE) == 12 * int(np.count_nonzero(selected))
+        assert layer.count_of(PrimitiveType.LINE) == 12 * int(np.count_nonzero(selected))
         assert backend.get_bvh_depth() == 2
         _render(backend, frame)
     finally:
@@ -430,7 +440,7 @@ def test_bvh_boxes_reach_the_gpu_pipeline(backend_name, request):
 
 
 def test_interpolated_flex_control_cage_reaches_the_gpu_pipeline(backend_name, request):
-    from forge_viewer.adapters.base import BvhKind
+    from forge_viewer.adapters.base import BvhType
 
     adapter = make_adapter("mujoco", resolve("interpolated_flex"))
     backend = _make_backend(backend_name, request, samples=1)
@@ -444,11 +454,11 @@ def test_interpolated_flex_control_cage_reaches_the_gpu_pipeline(backend_name, r
         frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True, bvh=True))
         backend.update(frame)
         boxes = np.count_nonzero(
-            (source.diagnostics.bvh_kind != int(BvhKind.BODY)) & (source.diagnostics.bvh_depth == 0)
+            (source.diagnostics.bvh_type != int(BvhType.BODY)) & (source.diagnostics.bvh_depth == 0)
         )
         layer = backend.debug.layer("physics.bvh")
         assert source.diagnostics.bvh_control_count == 12
-        assert layer.count_of(Prim.LINE) == 12 * boxes + 12
+        assert layer.count_of(PrimitiveType.LINE) == 12 * boxes + 12
         _render(backend, frame)
     finally:
         backend.release()
@@ -504,7 +514,7 @@ def test_deformable_wireframe_view_follows_vertex_updates(backend_name, request)
 
     import mujoco
 
-    from forge_viewer.adapters.base import NodeKind
+    from forge_viewer.adapters.base import NodeType
 
     adapter = make_adapter("mujoco", resolve("deformables"))
     backend = _make_backend(backend_name, request, samples=1)
@@ -536,7 +546,7 @@ def test_deformable_wireframe_view_follows_vertex_updates(backend_name, request)
         # The id pass rasterizes solid triangles regardless of the debug view,
         # so its coverage marks the skin region the wire pixels must stay in.
         # Both silhouettes matter: the skin vacates its rest pose coverage.
-        skin_ids = [n.object_id for n in adapter.nodes() if n.kind is NodeKind.SKIN]
+        skin_ids = [n.object_id for n in adapter.nodes() if n.type is NodeType.SKIN]
         assert skin_ids
         region = np.isin(rest_ids, skin_ids) | np.isin(backend.target.read_ids(), skin_ids)
         for _ in range(2):  # dilate: antialiased wires bleed past the id region
@@ -554,7 +564,7 @@ def test_deformable_wireframe_view_follows_vertex_updates(backend_name, request)
 
 
 def test_deformables_are_pickable_and_use_the_normal_outline_pass(backend_name, request):
-    from forge_viewer.adapters.base import NodeKind
+    from forge_viewer.adapters.base import NodeType
 
     adapter = make_adapter("mujoco", resolve("deformables"))
     backend = _make_backend(backend_name, request)
@@ -569,7 +579,7 @@ def test_deformables_are_pickable_and_use_the_normal_outline_pass(backend_name, 
         deformable_ids = {
             node.object_id
             for node in adapter.nodes()
-            if node.kind in (NodeKind.FLEX, NodeKind.SKIN)
+            if node.type in (NodeType.FLEX, NodeType.SKIN)
         }
         visible_ids = set(np.unique(backend.target.read_ids()).tolist())
         visible_deformables = deformable_ids & visible_ids

@@ -8,7 +8,7 @@
 #define AREA_PCF_RADIUS 3
 
 #ifndef SHADOW_PCF_RADIUS
-#define SHADOW_PCF_RADIUS 2
+#define SHADOW_PCF_RADIUS 1
 #endif
 
 const vec2 FORGE_SHADOW_BIAS = vec2(1.0, 2.5);
@@ -31,6 +31,7 @@ uniform mat4 u_local_matrix[SHADOW_MAX_LOCAL];
 uniform vec4 u_local_pos[SHADOW_MAX_LOCAL];       // xyz position, w range
 uniform float u_local_texel[SHADOW_MAX_LOCAL];
 uniform float u_local_radius[SHADOW_MAX_LOCAL];
+uniform int u_local_layer[SHADOW_MAX_LOCAL];
 uniform int u_local_slot[SHADOW_MAX_LIGHTS];
 uniform int u_local_count;
 
@@ -116,7 +117,7 @@ float local_spot_shadow(int slot, vec3 world_pos, vec3 normal) {
             float weight = pcf_tent_weight(x, LOCAL_PCF_RADIUS) *
                            pcf_tent_weight(y, LOCAL_PCF_RADIUS);
             lit += step(dist - bias,
-                        texture(u_local_shadow, vec3(sample_uv, float(slot * 6))).r) * weight;
+                        texture(u_local_shadow, vec3(sample_uv, float(u_local_layer[slot]))).r) * weight;
             taps += weight;
         }
     }
@@ -141,7 +142,7 @@ vec3 point_layer_uv(int slot, vec3 d) {
         if (d.z > 0.0) { face = 4.0; sc = vec2( d.x, -d.y); }
         else           { face = 5.0; sc = vec2(-d.x, -d.y); }
     }
-    return vec3(sc / max(ma, 1e-6) * 0.5 + 0.5, float(slot * 6) + face);
+    return vec3(sc / max(ma, 1e-6) * 0.5 + 0.5, float(u_local_layer[slot]) + face);
 }
 
 float local_point_shadow(int slot, vec3 world_pos, vec3 normal) {
@@ -174,9 +175,9 @@ float local_point_shadow(int slot, vec3 world_pos, vec3 normal) {
     return lit / taps;
 }
 
-float local_shadow(int kind, int slot, vec3 world_pos, vec3 normal) {
+float local_shadow(int light_type, int slot, vec3 world_pos, vec3 normal) {
     if (slot < 0 || slot >= u_local_count) return 1.0;
-    return (kind == 2)
+    return (light_type == 2)
         ? local_spot_shadow(slot, world_pos, normal)
         : local_point_shadow(slot, world_pos, normal);
 }

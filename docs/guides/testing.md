@@ -22,6 +22,7 @@ change while iterating, then run the required acceptance targets before handoff.
 | Shared types or commands | `make test-fast` | `make check` |
 | File format or remote protocol | `make test-integration` | `make check` |
 | MuJoCo adapter or MJCF authoring | focused physics test | `make test-physics` and `make mujoco-audit` |
+| MuJoCo model loading | one XML path with the model-suite module | `make mujoco-model-suite` |
 | Render pass or shader | one GPU test file | `make gpu` and `make gpu-wgpu` |
 | Visual interaction | focused GPU test | relevant Make gallery and `make reverse` |
 | Settings layout | focused UI GPU test | `make settings` |
@@ -39,3 +40,22 @@ make docs-check
 ```
 
 The strict build rejects broken links, unresolved API modules, and documentation warnings.
+
+## MuJoCo model corpus
+
+`make mujoco-model-suite` compiles, adapts, and renders the XML files under the configured model
+roots. Each model uses multiple azimuth and elevation views, RGB and segmentation output, and one
+dynamic simulation step. Workers run in isolated processes so a native model failure has a stable
+file-level result.
+
+```bash
+make mujoco-model-suite
+make mujoco-model-suite ARGS="--backend wgpu"
+make mujoco-model-suite \
+  MUJOCO_MODEL_ROOTS="/path/to/model /path/to/another/model" \
+  MUJOCO_MODEL_JOBS=8
+```
+
+The JSON report defaults to `output/mujoco-model-suite.json`. Unavailable plugin runtimes are
+reported as `skipped_dependency`; compilation, adapter, render, and empty-output failures remain
+test failures.

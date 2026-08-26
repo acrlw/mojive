@@ -29,7 +29,7 @@ ENVIRONMENT_OBJECT_ID = 0x72000000
 MODEL_OBJECT_BASE = 0x73000000
 
 
-class NodeKind(enum.StrEnum):
+class NodeType(enum.StrEnum):
     """Semantic node categories shown by the hierarchy and selection system."""
 
     WORLD = "world"
@@ -56,7 +56,7 @@ class SceneNode:
 
     node_id: int
     name: str
-    kind: NodeKind
+    type: NodeType
     parent: int = -1
     children: list[int] = field(default_factory=list)
     object_id: int = 0
@@ -78,7 +78,7 @@ class JointInfo:
 
     joint_id: int
     name: str
-    kind: str  # free / ball / slide / hinge
+    type: str  # free / ball / slide / hinge
     limited: bool
     range: tuple[float, float]
     qpos_adr: int
@@ -146,7 +146,7 @@ class ModelComponentField:
 class ModelComponentPathItem:
     """One nested tendon path element such as a site or joint reference."""
 
-    kind: str
+    type: str
     fields: tuple[ModelComponentField, ...] = ()
 
 
@@ -178,7 +178,7 @@ class SensorInfo:
 
     sensor_id: int
     name: str
-    kind: str
+    type: str
     data_adr: int
     dim: int
 
@@ -189,7 +189,7 @@ class EqualityConstraintInfo:
 
     constraint_id: int
     name: str
-    kind: str
+    type: str
     enabled: bool
 
 
@@ -248,7 +248,7 @@ class AdapterCaps:
     notes: tuple[str, ...] = ()
 
 
-class JointVisualKind(enum.IntEnum):
+class JointVisualType(enum.IntEnum):
     """Debug-draw representation selected for each joint type."""
 
     FREE = 0
@@ -257,7 +257,7 @@ class JointVisualKind(enum.IntEnum):
     HINGE = 3
 
 
-class ActuatorVisualKind(enum.IntEnum):
+class ActuatorVisualType(enum.IntEnum):
     """Debug-draw representation selected for actuator transmissions."""
 
     SLIDE = 0
@@ -271,7 +271,7 @@ class ActuatorVisualKind(enum.IntEnum):
     BOX = 8
 
 
-class BvhKind(enum.IntEnum):
+class BvhType(enum.IntEnum):
     """Bounding-volume hierarchy source used by diagnostic overlays."""
 
     BODY = 0
@@ -284,7 +284,7 @@ class BvhKind(enum.IntEnum):
 class DiagnosticSource:
     """Stable metadata required to construct physics diagnostic overlays."""
 
-    joint_kinds: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
+    joint_types: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
     joint_visible: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
     joint_length: float = 0.0
     joint_width: float = 0.0
@@ -303,7 +303,7 @@ class DiagnosticSource:
         default_factory=lambda: np.array([0.8, 0.2, 0.2, 0.6], np.float32)
     )
 
-    actuator_visual_kinds: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
+    actuator_visual_types: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
     actuator_visual_actuators: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
     actuator_visual_sizes: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     slider_crank_actuators: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
@@ -345,7 +345,7 @@ class DiagnosticSource:
     autoconnect_rgba: np.ndarray = field(
         default_factory=lambda: np.array([0.2, 0.2, 0.8, 1.0], np.float32)
     )
-    bvh_kind: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
+    bvh_type: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
     bvh_depth: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
     bvh_leaf: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
     bvh_active_highlight: bool = False
@@ -597,21 +597,27 @@ class SceneAdapterBase:
         return 0
 
     def load(self, path: Path) -> None:
+        """Replace the current source with the model at ``path``."""
         raise RuntimeError(f"{self.caps.name} does not support asset loading")
 
     def reload(self) -> None:
+        """Reload the current file-backed source."""
         raise RuntimeError(f"{self.caps.name} does not support reload")
 
     def new_scene(self) -> None:
+        """Replace the current source with an empty authored scene."""
         raise RuntimeError(f"{self.caps.name} does not support scene files")
 
     def open_scene(self, path: Path) -> None:
+        """Open an authored scene document."""
         raise RuntimeError(f"{self.caps.name} does not support scene files")
 
     def save_scene(self, path: Path, options: SceneSaveOptions | None = None) -> None:
+        """Save the current authored scene document."""
         raise RuntimeError(f"{self.caps.name} does not support scene files")
 
     def current_pose_modified(self) -> bool:
+        """Return whether dynamic pose state differs from its authored state."""
         return False
 
     def export_mjcf(
@@ -621,64 +627,84 @@ class SceneAdapterBase:
         frame: SceneFrame,
         options: SceneSaveOptions | None = None,
     ) -> Path:
+        """Export the current source and frame as a portable MJCF document."""
         raise RuntimeError(f"{self.caps.name} does not support MJCF export")
 
     @property
     def resource_roots(self) -> tuple[Path, ...]:
+        """Return directories searched for document resources."""
         return ()
 
     def add_resource_root(self, path: Path) -> bool:
+        """Append a resource search directory."""
         return False
 
     def remove_resource_root(self, path: Path) -> bool:
+        """Remove a resource search directory."""
         return False
 
     def set_resource_roots(self, paths: tuple[Path, ...]) -> None:
+        """Replace the ordered resource search directories."""
         pass
 
     def capture_edit_state(self) -> object | None:
+        """Capture adapter-owned state for undo and redo."""
         return None
 
     def restore_edit_state(self, state: object) -> bool:
+        """Restore a state returned by :meth:`capture_edit_state`."""
         return False
 
     def scene_models(self) -> tuple[SceneModelInfo, ...]:
+        """Return file-backed models composed into the current scene."""
         return ()
 
     def add_scene_model(self, path: Path, position, rotation) -> int:
+        """Add a model with a world transform and return its model ID."""
         return -1
 
     def remove_scene_model(self, model_id: int) -> bool:
+        """Remove a composed model by ID."""
         return False
 
     def set_scene_model_transform(self, model_id: int, position, rotation) -> bool:
+        """Set the world transform of a composed model."""
         return False
 
-    def add_model_element(self, parent_node_id: int, kind: str, name: str) -> int:
+    def add_model_element(self, parent_node_id: int, element_type: str, name: str) -> int:
+        """Add a supported topology element below a hierarchy node."""
         return -1
 
     def remove_model_element(self, node_id: int) -> bool:
+        """Remove a topology element by hierarchy node ID."""
         return False
 
     def rename_model_element(self, node_id: int, name: str) -> bool:
+        """Rename a topology element by hierarchy node ID."""
         return False
 
     def scene_model_xml(self, model_id: int) -> str | None:
+        """Return the normalized editable MJCF text for one model."""
         return None
 
     def scene_model_source(self, model_id: int) -> str | None:
+        """Return the original source text for one model."""
         return None
 
     def set_scene_model_xml(self, model_id: int, xml: str) -> bool:
+        """Compile and apply replacement MJCF text for one model."""
         return False
 
     def model_components(self, model_id: int, category: str) -> tuple[ModelComponentInfo, ...]:
+        """Return editable model-level declarations in a category."""
         return ()
 
     def model_component_presets(self, model_id: int, category: str) -> tuple[str, ...]:
+        """Return supported declaration subtypes for a model category."""
         return ()
 
     def add_model_component(self, model_id: int, category: str, subtype: str, name: str) -> int:
+        """Add a model-level declaration and return its component ID."""
         return -1
 
     def update_model_component(
@@ -690,13 +716,18 @@ class SceneAdapterBase:
         fields: tuple[tuple[str, str], ...],
         path: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
     ) -> bool:
+        """Replace the editable fields and path of a model-level declaration."""
         return False
 
     def remove_model_component(self, model_id: int, category: str, component_id: int) -> bool:
+        """Remove a model-level declaration."""
         return False
 
-    def reset(self) -> None: ...
-    def step(self, count: int = 1) -> None: ...
+    def reset(self) -> None:
+        """Restore the adapter's initial dynamic state."""
+
+    def step(self, count: int = 1) -> None:
+        """Advance simulation state by ``count`` fixed steps."""
 
     def set_paused(self, paused: bool) -> bool:
         """Set adapter-owned pause state and report whether it was accepted."""
@@ -715,45 +746,59 @@ class SceneAdapterBase:
         return self.scene_source().nodes
 
     def joints(self) -> list[JointInfo]:
+        """Return editable joint metadata in stable model order."""
         return []
 
     def actuators(self) -> list[ActuatorInfo]:
+        """Return editable actuator metadata in stable model order."""
         return []
 
     def cameras(self) -> list[CameraInfo]:
+        """Return model camera identities in stable model order."""
         return []
 
     def keyframes(self) -> list[KeyframeInfo]:
+        """Return named simulation keyframes."""
         return []
 
     def sensors(self) -> list[SensorInfo]:
+        """Return sensor metadata for the current source."""
         return []
 
     def equality_constraints(self) -> list[EqualityConstraintInfo]:
+        """Return editable equality-constraint metadata."""
         return []
 
     def load_keyframe(self, keyframe_id: int) -> bool:
+        """Replace dynamic state with a model keyframe."""
         return False
 
     def camera_view(self, camera_id: int) -> CameraView | None:
+        """Resolve a model camera into a backend-neutral world view."""
         return None
 
     def visual_groups(self) -> tuple[VisualGroupInfo, ...]:
+        """Return numbered visibility groups exposed by the source."""
         return ()
 
     def set_visual_group(self, category: str, group: int, visible: bool) -> bool:
+        """Set one numbered visibility group."""
         return False
 
     def set_qpos(self, index: int, value: float) -> bool:
+        """Set one generalized position coordinate."""
         return False
 
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool:
+        """Enable or disable an equality constraint."""
         return False
 
     def set_ctrl(self, index: int, value: float) -> bool:
+        """Set one actuator control coordinate."""
         return False
 
     def set_pose(self, node_id: int, position, rotation) -> bool:
+        """Write a world pose to a posable hierarchy node."""
         return False
 
     def capture_state(self) -> PhysicsState | None:
@@ -781,11 +826,13 @@ class SceneAdapterBase:
         return True
 
     def set_environment(self, environment: Environment) -> bool:
+        """Replace the Forge environment values exposed by this adapter."""
         source = self.scene_source()
         source.lights = source.lights.with_environment(environment)
         return True
 
     def set_material(self, material_id: int, material: Material) -> bool:
+        """Replace one Forge material by source index."""
         source = self.scene_source()
         i = int(material_id)
         if not 0 <= i < len(source.materials):
@@ -794,6 +841,7 @@ class SceneAdapterBase:
         return True
 
     def set_geometry_color(self, node_id: int, rgba: np.ndarray) -> bool:
+        """Set the instance color of all geometry owned by a hierarchy node."""
         source = self.scene_source()
         instances = np.flatnonzero(source.geom_node == int(node_id))
         if not len(instances):
@@ -802,9 +850,11 @@ class SceneAdapterBase:
         return True
 
     def set_geometry_size(self, node_id: int, size: np.ndarray) -> bool:
+        """Set authored geometry dimensions for a hierarchy node."""
         return False
 
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
+        """Write a backend-neutral view to a model camera."""
         return False
 
     def add_scene_object(
@@ -817,30 +867,39 @@ class SceneAdapterBase:
         color,
         material: Material,
     ) -> int:
+        """Create an authored render object and return its object ID."""
         return -1
 
     def remove_scene_object(self, object_id: int) -> bool:
+        """Remove an authored render object."""
         return False
 
     def add_scene_light(self, name: str, light: Light) -> int:
+        """Create an authored light and return its light index."""
         return -1
 
     def remove_scene_light(self, light_id: int) -> bool:
+        """Remove an authored light by source index."""
         return False
 
     def add_scene_camera(self, name: str, camera: CameraView) -> int:
+        """Create an authored camera and return its camera index."""
         return -1
 
     def remove_scene_camera(self, camera_id: int) -> bool:
+        """Remove an authored camera by source index."""
         return False
 
     def duplicate_scene_entity(self, object_id: int) -> int:
+        """Duplicate an authored entity and return its new object ID."""
         return 0
 
     def remove_scene_entity(self, object_id: int) -> bool:
+        """Remove an authored entity by selection object ID."""
         return False
 
     def rename_scene_entity(self, object_id: int, name: str) -> bool:
+        """Rename an authored entity by selection object ID."""
         return False
 
     def apply_perturb(
@@ -849,7 +908,8 @@ class SceneAdapterBase:
         """Apply a translation or rotation perturbation to a hierarchy node."""
         return False
 
-    def clear_perturb(self) -> None: ...
+    def clear_perturb(self) -> None:
+        """Clear the active physical perturbation."""
 
     def raycast(self, origin: np.ndarray, direction: np.ndarray) -> tuple[int, float]:
         """Return the selected object ID and ray distance, or ``(0, inf)`` for no hit."""
@@ -863,7 +923,8 @@ class SceneAdapterBase:
         """Return the simulation step duration in seconds."""
         return 0.0
 
-    def release(self) -> None: ...
+    def release(self) -> None:
+        """Release adapter-owned resources."""
 
 
 @runtime_checkable
@@ -899,7 +960,7 @@ class SceneAdapter(Protocol):
     def add_scene_model(self, path: Path, position, rotation) -> int: ...
     def remove_scene_model(self, model_id: int) -> bool: ...
     def set_scene_model_transform(self, model_id: int, position, rotation) -> bool: ...
-    def add_model_element(self, parent_node_id: int, kind: str, name: str) -> int: ...
+    def add_model_element(self, parent_node_id: int, element_type: str, name: str) -> int: ...
     def remove_model_element(self, node_id: int) -> bool: ...
     def rename_model_element(self, node_id: int, name: str) -> bool: ...
     def scene_model_xml(self, model_id: int) -> str | None: ...

@@ -49,7 +49,7 @@ struct Instance {
 };
 
 struct Lights {
-    pos: array<vec4f, 100>,       // xyz position, w kind
+    pos: array<vec4f, 100>,       // xyz position, w light type
     dir: array<vec4f, 100>,       // xyz direction, w cutoff cosine
     diffuse: array<vec4f, 100>,   // rgb linear, w spot exponent
     specular: array<vec4f, 100>,
@@ -66,6 +66,7 @@ struct Lights {
     local_pos: array<vec4f, 8>,        // u_local_pos: xyz position, w range
     local_texel: array<f32, 8>,        // u_local_texel
     local_radius: array<f32, 8>,       // u_local_radius
+    local_layer: array<i32, 8>,        // packed base layer for each local shadow
     local_slot: array<i32, 100>,       // u_local_slot: shadow slot per light, -1 none
 };
 
@@ -199,10 +200,10 @@ fn shade(
 
     let light_count = i32(frame.ids.y);
     for (var i = 0; i < light_count; i = i + 1) {
-        let kind = i32(lights.pos[i].w + 0.5);
+        let light_type = i32(lights.pos[i].w + 0.5);
         var l: vec3f;
         var atten = 1.0;
-        if kind == 0 {
+        if light_type == 0 {
             l = -normalize(lights.dir[i].xyz);
         } else {
             let to_light = lights.pos[i].xyz - world_pos;
@@ -213,7 +214,7 @@ fn shade(
             if frame.flags.z <= 0.5 && lights.atten[i].w > 0.0 && dist > lights.atten[i].w {
                 atten = 0.0;
             }
-            if kind == 2 {
+            if light_type == 2 {
                 let cd = dot(-l, normalize(lights.dir[i].xyz));
                 if cd < lights.dir[i].w {
                     atten = 0.0;
@@ -228,8 +229,8 @@ fn shade(
         if i == i32(lights.shadow_counts.z) {
             shadow = shadow_factor(world_pos, n, view_depth);
         }
-        if kind != 0 {
-            shadow *= local_shadow_factor(kind, lights.local_slot[i], world_pos, n);
+        if light_type != 0 {
+            shadow *= local_shadow_factor(light_type, lights.local_slot[i], world_pos, n);
         }
         color += light_term(
             albedo, n, l, view_dir,

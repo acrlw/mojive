@@ -13,9 +13,9 @@ import numpy as np
 from imgui_bundle import imgui, portable_file_dialogs
 
 from .. import commands as cmd
-from ..adapters.base import FrameNeeds, NodeKind
+from ..adapters.base import FrameNeeds, NodeType
 from ..render.backend import FrameMode, LabelMode, RenderFlag
-from ..types import Light, LightKind, MeshShape, ViewportImage
+from ..types import Light, LightType, MeshShape, ViewportImage
 from ..workspace_io import (
     MissingResource,
     missing_resource_entries,
@@ -785,7 +785,7 @@ class ViewerApp:
         result = self.session.submit(
             cmd.AddSceneLight(
                 name,
-                Light(kind=LightKind.POINT, position=np.asarray(view.eye, np.float32).copy()),
+                Light(type=LightType.POINT, position=np.asarray(view.eye, np.float32).copy()),
             )
         )
         if result.ok:
@@ -793,7 +793,7 @@ class ViewerApp:
                 (
                     node
                     for node in reversed(self.session.nodes)
-                    if node.kind is NodeKind.LIGHT and node.name == name
+                    if node.type is NodeType.LIGHT and node.name == name
                 ),
                 None,
             )
@@ -808,7 +808,7 @@ class ViewerApp:
                 (
                     node
                     for node in reversed(self.session.nodes)
-                    if node.kind is NodeKind.CAMERA and node.name == name
+                    if node.type is NodeType.CAMERA and node.name == name
                 ),
                 None,
             )
@@ -830,7 +830,7 @@ class ViewerApp:
         if (
             node is None
             or node.model_id >= 0
-            or node.kind not in (NodeKind.LINK, NodeKind.LIGHT, NodeKind.CAMERA)
+            or node.type not in (NodeType.LINK, NodeType.LIGHT, NodeType.CAMERA)
         ):
             return 0
         return int(node.object_id)
@@ -840,7 +840,7 @@ class ViewerApp:
         if (
             node is None
             or node.model_id >= 0
-            or node.kind not in (NodeKind.LINK, NodeKind.LIGHT, NodeKind.CAMERA)
+            or node.type not in (NodeType.LINK, NodeType.LIGHT, NodeType.CAMERA)
         ):
             return
         self._rename_object_id = int(object_id)
@@ -1266,7 +1266,7 @@ class ViewerApp:
 
     def _viewing_selected_camera(self) -> bool:
         node = self.session.selected_node
-        if node is None or node.kind is not NodeKind.CAMERA:
+        if node is None or node.type is not NodeType.CAMERA:
             return False
         index = int(node.camera_index)
         if not 0 <= index < len(self.session.cameras):
@@ -1393,7 +1393,7 @@ class ViewerApp:
         node = self.session.node_by_object_id(object_id)
         if node is None:
             return False
-        return node.kind is not NodeKind.WORLD and node.parent >= 0
+        return node.type is not NodeType.WORLD and node.parent >= 0
 
     def _nearest_link(self, cursor: tuple[float, float]) -> int:
         frame = self.session.frame

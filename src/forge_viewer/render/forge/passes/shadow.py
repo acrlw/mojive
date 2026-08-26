@@ -9,7 +9,7 @@ import numpy as np
 
 from .... import math3d as M
 from ....log import get_logger
-from ....types import Light, LightKind, ShadingModel
+from ....types import Light, LightType, ShadingModel
 from ...backend import RenderFlag
 from .. import gl_native as G
 from ..cascades import (
@@ -37,6 +37,7 @@ log = get_logger("shadow")
 SHADOW_TEXTURE_UNIT = 1
 LOCAL_TEXTURE_UNIT = 3
 LOCAL_PIXELS = 1024
+SPOT_PIXELS = 2048
 
 
 SHADOW_BIAS = (1.0, 2.5)
@@ -83,6 +84,8 @@ class ShadowPass(BasePass):
         self._local_fallback: moderngl.TextureArray | None = None
         self._local_fbo: moderngl.Framebuffer | None = None
         self._local_placeholder: moderngl.Texture | None = None
+        self._local_pixels = 0
+        self._local_layers = 0
         self._point_matrices = np.zeros((LOCAL_SHADOW_SLOTS, 6, 4, 4), np.float32)
         self._cascades = CascadeSet()
         self._scratch = np.zeros((4, 4), np.float32)
@@ -90,23 +93,38 @@ class ShadowPass(BasePass):
 
         self._failed = ""
 
-    def _ensure_local(self, ctx: PassContext) -> bool:
-        if self._local_tex is not None:
+    def _ensure_local(self, ctx: PassContext, pixels: int, layers: int) -> bool:
+        if (
+            self._local_tex is not None
+            and self._local_pixels == pixels
+            and self._local_layers == layers
+        ):
             return True
         if not G.native().has_array_layer:
             log.error(
                 "This GL entry point cannot attach texture-array layers; local shadows are disabled"
             )
             return False
-        tex = ctx.ctx.texture_array(
-            (LOCAL_PIXELS, LOCAL_PIXELS, LOCAL_SHADOW_SLOTS * 6), 1, dtype="f2"
-        )
+        self._release_local()
+        tex = ctx.ctx.texture_array((pixels, pixels, layers), 1, dtype="f2")
         tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
-        placeholder = ctx.ctx.texture((LOCAL_PIXELS, LOCAL_PIXELS), 1, dtype="f2")
+        placeholder = ctx.ctx.texture((pixels, pixels), 1, dtype="f2")
         self._local_tex = tex
         self._local_placeholder = placeholder
         self._local_fbo = ctx.ctx.framebuffer([placeholder])
+        self._local_pixels = pixels
+        self._local_layers = layers
         return True
+
+    def _release_local(self) -> None:
+        for obj in (self._local_fbo, self._local_placeholder, self._local_tex):
+            if obj is not None:
+                obj.release()
+        self._local_fbo = None
+        self._local_placeholder = None
+        self._local_tex = None
+        self._local_pixels = 0
+        self._local_layers = 0
 
     def _ensure_local_fallback(self, ctx: PassContext) -> None:
         if self._local_fallback is None:
@@ -150,12 +168,13 @@ class ShadowPass(BasePass):
             if schedule.directional_shadow >= 0
             else None
         )
-        local_count = self._prepare_locals(ctx, schedule)
+        local_pixels = self._local_resolution(schedule)
+        local_count, local_layers = self._prepare_locals(ctx, schedule, local_pixels)
         if sun is None and local_count == 0:
             return False
         if sun is not None and not self._ensure_atlas(ctx):
             return False
-        if local_count and not self._ensure_local(ctx):
+        if local_count and not self._ensure_local(ctx, local_pixels, local_layers):
             s.local_count = local_count = 0
             if sun is None:
                 return False
@@ -206,8 +225,22 @@ class ShadowPass(BasePass):
         s.enabled = True
         return True
 
-    def _prepare_locals(self, ctx: PassContext, schedule: LightSchedule) -> int:
+    @staticmethod
+    def _local_resolution(schedule: LightSchedule) -> int:
+        return (
+            SPOT_PIXELS
+            if schedule.local_shadows
+            and all(
+                schedule.lights[index].type is LightType.SPOT for index in schedule.local_shadows
+            )
+            else LOCAL_PIXELS
+        )
+
+    def _prepare_locals(
+        self, ctx: PassContext, schedule: LightSchedule, pixels: int
+    ) -> tuple[int, int]:
         s = ctx.shadow
+        layer = 0
         for packed_index in schedule.local_shadows:
             light = schedule.lights[packed_index]
             light_range = (
@@ -217,18 +250,23 @@ class ShadowPass(BasePass):
             )
             slot = s.local_count
             s.local_light_indices[slot] = packed_index
-            s.local_kinds[slot] = int(light.kind)
+            s.local_kinds[slot] = int(light.type)
+            s.local_layers[slot] = layer
             s.local_positions[slot, :3] = light.position
             s.local_positions[slot, 3] = light_range
             s.local_radius[slot] = light.area_radius
-            if light.kind is LightKind.SPOT:
-                self._prepare_spot(ctx, light, light_range, slot)
+            if light.type is LightType.SPOT:
+                self._prepare_spot(ctx, light, light_range, slot, pixels)
+                layer += 1
             else:
-                self._prepare_point(ctx, light, light_range, slot)
+                self._prepare_point(ctx, light, light_range, slot, pixels)
+                layer += 6
             s.local_count += 1
-        return s.local_count
+        return s.local_count, layer
 
-    def _prepare_spot(self, ctx: PassContext, light: Light, light_range: float, slot: int) -> None:
+    def _prepare_spot(
+        self, ctx: PassContext, light: Light, light_range: float, slot: int, pixels: int
+    ) -> None:
         s = ctx.shadow
 
         pos = np.asarray(light.position, np.float64)
@@ -241,11 +279,13 @@ class ShadowPass(BasePass):
         view = M.look_at(pos, target, np.array([0.0, 0.0, 1.0]))
         proj = M.perspective(fov, 1.0, near, far)
         np.copyto(s.local_matrices[slot], proj.astype(np.float64) @ view.astype(np.float64))
-        s.local_texel[slot] = 2.0 * float(np.tan(fov * 0.5)) / LOCAL_PIXELS
+        s.local_texel[slot] = 2.0 * float(np.tan(fov * 0.5)) / pixels
 
-    def _prepare_point(self, ctx: PassContext, light: Light, light_range: float, slot: int) -> None:
+    def _prepare_point(
+        self, ctx: PassContext, light: Light, light_range: float, slot: int, pixels: int
+    ) -> None:
         s = ctx.shadow
-        s.local_texel[slot] = 2.0 / LOCAL_PIXELS
+        s.local_texel[slot] = 2.0 / pixels
 
         pos = np.asarray(light.position, np.float64)
         extent = float(ctx.scene.scene_extent)
@@ -306,7 +346,7 @@ class ShadowPass(BasePass):
         gl, fbo = ctx.ctx, self._local_fbo
         assert fbo is not None
         fbo.use()
-        gl.viewport = (0, 0, LOCAL_PIXELS, LOCAL_PIXELS)
+        gl.viewport = (0, 0, self._local_pixels, self._local_pixels)
         state_opaque(gl)
         gl.multisample = False
         gl.enable(moderngl.BLEND)
@@ -317,12 +357,13 @@ class ShadowPass(BasePass):
             for slot in range(s.local_count):
                 pos_range = s.local_positions[slot]
                 self._distance_geom.set_light(pos_range[:3], pos_range[3])
-                if s.local_kinds[slot] == int(LightKind.SPOT):
-                    self._draw_local_layer(ctx, slot * 6, s.local_matrices[slot])
+                base_layer = int(s.local_layers[slot])
+                if s.local_kinds[slot] == int(LightType.SPOT):
+                    self._draw_local_layer(ctx, base_layer, s.local_matrices[slot])
                 else:
                     for face in range(6):
                         self._draw_local_layer(
-                            ctx, slot * 6 + face, self._point_matrices[slot, face]
+                            ctx, base_layer + face, self._point_matrices[slot, face]
                         )
         finally:
             gl.disable(moderngl.BLEND)
@@ -338,21 +379,12 @@ class ShadowPass(BasePass):
     def release(self) -> None:
         self._geom.release()
         self._distance_geom.release()
-        for obj in (
-            self._fbo,
-            self.atlas,
-            self._local_fbo,
-            self._local_placeholder,
-            self._local_tex,
-            self._local_fallback,
-        ):
+        self._release_local()
+        for obj in (self._fbo, self.atlas, self._local_fallback):
             if obj is not None:
                 obj.release()
         self._fbo = None
         self.atlas = None
-        self._local_fbo = None
-        self._local_placeholder = None
-        self._local_tex = None
         self._local_fallback = None
 
 
@@ -393,6 +425,7 @@ def bind_shadow_uniforms(
         _write_uniform_array(prog, "u_local_pos", result.local_positions)
         _write_uniform_array(prog, "u_local_texel", result.local_texel)
         _write_uniform_array(prog, "u_local_radius", result.local_radius)
+        _write_uniform_array(prog, "u_local_layer", result.local_layers)
         if "u_local_matrix" in prog:
             k = min(result.local_count, len(_GL_LOCAL_MATRICES))
             np.copyto(_GL_LOCAL_MATRICES[:k], result.local_matrices[:k].transpose(0, 2, 1))

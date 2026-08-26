@@ -5,7 +5,7 @@ from __future__ import annotations
 import moderngl
 import numpy as np
 
-from ...types import MeshData, MeshKey, MeshUpdate, TextureData, TextureKind
+from ...types import MeshData, MeshKey, MeshUpdate, TextureData, TextureType
 from .instances import GpuMesh
 
 
@@ -114,7 +114,7 @@ class TextureStore:
             if data.srgb and fmt is None:
                 pixels = srgb_to_linear_u8(pixels)
 
-            if data.kind is TextureKind.TWO_D:
+            if data.type is TextureType.TWO_D:
                 h, w = pixels.shape[0], pixels.shape[1]
                 tex = self._make_2d(w, h, comps, pixels, fmt)
                 tex.repeat_x = tex.repeat_y = True

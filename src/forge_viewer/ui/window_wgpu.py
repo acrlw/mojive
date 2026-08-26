@@ -357,7 +357,7 @@ class WgpuWindow(Window):
         if not glfw.init():
             raise RuntimeError("GLFW initialization failed")
         # Share the GL window module's live-window count so glfw.terminate()
-        # runs when the last window of either kind closes.
+        # runs when the last GLFW or wgpu window closes.
         _window_module._live_windows += 1
 
         glfw.window_hint(glfw.CLIENT_API, glfw.NO_API)

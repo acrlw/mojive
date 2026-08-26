@@ -11,7 +11,7 @@ from forge_viewer.adapters.base import (
     LIGHT_OBJECT_BASE,
     AdapterCaps,
     FrameNeeds,
-    NodeKind,
+    NodeType,
     SceneAdapterBase,
 )
 from forge_viewer.adapters.static import StaticSceneAdapter
@@ -23,8 +23,8 @@ from forge_viewer.types import (
     CameraView,
     Environment,
     Light,
-    LightKind,
     LightSet,
+    LightType,
     Material,
     MeshData,
     MeshShape,
@@ -94,7 +94,7 @@ def test_scene_authoring_commands_return_stable_entity_ids():
     assert added.ok and added.entity_id > 0
     assert session.node_by_object_id(added.entity_id).name == "remote box"
 
-    light = session.submit(cmd.AddSceneLight("remote light", Light(kind=LightKind.POINT)))
+    light = session.submit(cmd.AddSceneLight("remote light", Light(type=LightType.POINT)))
     camera = session.submit(cmd.AddSceneCamera("remote camera", CameraView()))
     assert light.ok and camera.ok
     assert session.node_by_object_id(LIGHT_OBJECT_BASE + light.entity_id).name == "remote light"
@@ -150,7 +150,7 @@ def test_static_scene_entity_lifecycle_commands_use_selection_identity():
     assert session.selected == 0
     assert session.node_by_object_id(duplicate.entity_id) is None
 
-    light = scene.add_light("key", Light(kind=LightKind.DIRECTIONAL))
+    light = scene.add_light("key", Light(type=LightType.DIRECTIONAL))
     camera_id = scene.add_camera("shot", CameraView())
     session.tick(FrameNeeds())
     for object_id, expected_name in (
@@ -226,7 +226,7 @@ def test_authored_overlay_survives_adapter_source_rebuilds():
         def set_geometry_color(self, node_id, rgba):
             return False
 
-    scene = Scene(lights=LightSet(lights=(Light(kind=LightKind.POINT),)))
+    scene = Scene(lights=LightSet(lights=(Light(type=LightType.POINT),)))
     obj = scene.box(name="box")
     session = Session(RenderOnlyAdapter(scene))
     node = session.node_by_object_id(obj.object_id)
@@ -274,15 +274,15 @@ def test_visibility_edits_reach_the_render_source():
 
 
 def test_lights_are_editable_forge_entities_without_physics():
-    light = Light(kind=LightKind.POINT, position=np.array([1.0, 2.0, 3.0], np.float32))
+    light = Light(type=LightType.POINT, position=np.array([1.0, 2.0, 3.0], np.float32))
     scene = Scene(lights=LightSet(lights=(light,)))
     session = Session(StaticSceneAdapter(scene))
 
     node = next(node for node in session.nodes if node.light_index == 0)
-    assert node.kind.value == "light" and node.object_id
+    assert node.type.value == "light" and node.object_id
 
     edited = Light(
-        kind=LightKind.POINT,
+        type=LightType.POINT,
         position=light.position,
         diffuse=np.array([0.2, 0.4, 0.8], np.float32),
         active=False,
@@ -296,8 +296,8 @@ def test_lights_are_editable_forge_entities_without_physics():
 
 def test_light_entity_ids_survive_slot_changes():
     scene = Scene()
-    first = scene.add_light("key", Light(kind=LightKind.DIRECTIONAL))
-    second = scene.add_light("fill", Light(kind=LightKind.POINT))
+    first = scene.add_light("key", Light(type=LightType.DIRECTIONAL))
+    second = scene.add_light("fill", Light(type=LightType.POINT))
     session = Session(StaticSceneAdapter(scene))
     second_node = session.node_by_object_id(LIGHT_OBJECT_BASE + second.light_id)
 
@@ -312,14 +312,14 @@ def test_light_entity_ids_survive_slot_changes():
     assert scene.light("fill").light_id == second.light_id
     assert np.allclose(session.source.lights.lights[0].diffuse, edited.diffuse)
 
-    third = scene.add_light("rim", Light(kind=LightKind.SPOT))
+    third = scene.add_light("rim", Light(type=LightType.SPOT))
     assert third.light_id > second.light_id
 
 
 def test_environment_is_editable_without_a_physics_backend():
     scene = Scene()
     session = Session(StaticSceneAdapter(scene))
-    node = next(node for node in session.nodes if node.kind is NodeKind.ENVIRONMENT)
+    node = next(node for node in session.nodes if node.type is NodeType.ENVIRONMENT)
 
     assert node.object_id
     assert session.submit(cmd.Select(node.object_id))
@@ -354,7 +354,7 @@ def test_material_components_support_shared_and_instance_edits():
     geometry_node = next(
         node
         for node in session.nodes
-        if node.parent == first_node.node_id and node.kind is NodeKind.GEOM
+        if node.parent == first_node.node_id and node.type is NodeType.GEOM
     )
     material_id = int(session.source.geom_material[0])
 
@@ -392,7 +392,7 @@ def test_cameras_are_editable_forge_entities_without_physics():
 
     info = session.cameras[0]
     node = next(node for node in session.nodes if node.camera_index == 0)
-    assert node.kind is NodeKind.CAMERA
+    assert node.type is NodeType.CAMERA
     assert node.object_id == info.object_id
     assert session.frame.cameras == (initial,)
 
@@ -433,17 +433,17 @@ def test_backend_cannot_veto_a_forge_light_edit():
             return False
 
     session = Session(ReadOnlyLights())
-    edited = Light(kind=LightKind.AREA, area_radius=0.5)
+    edited = Light(type=LightType.AREA, area_radius=0.5)
 
     result = session.submit(cmd.SetLight(0, edited))
 
     assert result.ok and "write-back" in result.message
     assert session.source.lights.lights[0] is edited
-    assert session.frame.lights.lights[0].kind is LightKind.AREA
+    assert session.frame.lights.lights[0].type is LightType.AREA
 
     session.adapter.scene.box(name="new body")
     session.tick(FrameNeeds())
-    assert session.source.lights.lights[0].kind is LightKind.AREA
+    assert session.source.lights.lights[0].type is LightType.AREA
 
 
 def test_camera_ids_are_resolved_independently_from_source_slots():

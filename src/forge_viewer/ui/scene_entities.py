@@ -7,10 +7,10 @@ from dataclasses import dataclass
 import numpy as np
 
 from .. import math3d
-from ..adapters.base import NodeKind
+from ..adapters.base import NodeType
 from ..gizmo import project, world_scale
 from ..render.debugdraw import Occlusion
-from ..types import CameraView, Light, LightKind
+from ..types import CameraView, Light, LightType
 from .camera import camera_basis
 
 HELPER_LAYER = "ui.scene_entities"
@@ -51,7 +51,7 @@ class SceneEntityHelpers:
 
         selected = session.selected
         for node in session.nodes:
-            if node.kind is NodeKind.CAMERA and (view := _camera_view(session, node)) is not None:
+            if node.type is NodeType.CAMERA and (view := _camera_view(session, node)) is not None:
                 if selected == node.object_id and selected_camera_aspect is not None:
                     view = view.with_aspect(selected_camera_aspect)
                 self._camera(
@@ -67,9 +67,9 @@ class SceneEntityHelpers:
         frame = session.frame
         light_set = frame.lights if frame.lights is not None else session.source.lights
         for node in session.nodes:
-            if node.kind is NodeKind.LIGHT and 0 <= node.light_index < len(light_set.lights):
+            if node.type is NodeType.LIGHT and 0 <= node.light_index < len(light_set.lights):
                 light = light_set.lights[node.light_index]
-                if light.active and light.kind is not LightKind.IMAGE:
+                if light.active and light.type is not LightType.IMAGE:
                     self._light(
                         layer,
                         node.object_id,
@@ -94,11 +94,11 @@ class SceneEntityHelpers:
         anchors: list[tuple[int, np.ndarray]] = []
         lights = session.frame.lights or session.source.lights
         for node in session.nodes:
-            if node.kind is NodeKind.CAMERA and (view := _camera_view(session, node)) is not None:
+            if node.type is NodeType.CAMERA and (view := _camera_view(session, node)) is not None:
                 anchors.append((node.object_id, np.asarray(view.eye, np.float64)))
-            elif node.kind is NodeKind.LIGHT and 0 <= node.light_index < len(lights.lights):
+            elif node.type is NodeType.LIGHT and 0 <= node.light_index < len(lights.lights):
                 light = lights.lights[node.light_index]
-                if light.active and light.kind is not LightKind.IMAGE:
+                if light.active and light.type is not LightType.IMAGE:
                     anchors.append((node.object_id, np.asarray(light.position, np.float64)))
         if not anchors:
             return 0
@@ -146,7 +146,7 @@ class SceneEntityHelpers:
         layer.point(f"{ident}:anchor", position, color, ANCHOR_RADIUS_PT * ui_scale)
         icon_size = world_scale(editor_camera, position, viewport_height, 30.0)
         direction = _direction(light.direction)
-        if light.kind not in (LightKind.POINT, LightKind.IMAGE):
+        if light.type not in (LightType.POINT, LightType.IMAGE):
             layer.arrow(
                 f"{ident}:direction",
                 position,
@@ -157,15 +157,15 @@ class SceneEntityHelpers:
             )
         if not selected or not self.show_influence:
             return
-        if light.kind is LightKind.POINT and light.range > 0.0:
+        if light.type is LightType.POINT and light.range > 0.0:
             starts, ends = sphere_segments(position, light.range)
             layer.lines(f"{ident}:range", starts, ends, color, 1.2 * ui_scale)
-        elif light.kind is LightKind.SPOT and light.range > 0.0:
+        elif light.type is LightType.SPOT and light.range > 0.0:
             length = spot_helper_length(light, editor_camera, viewport_height)
             if length > 0.0:
                 starts, ends = spot_cone_segments(light, length)
                 layer.lines(f"{ident}:range", starts, ends, color, 1.4 * ui_scale)
-        elif light.kind is LightKind.AREA and light.area_radius > 0.0:
+        elif light.type is LightType.AREA and light.area_radius > 0.0:
             points = oriented_circle(position, direction, light.area_radius)
             layer.polyline(f"{ident}:area", points, color, 1.4 * ui_scale, closed=True)
 

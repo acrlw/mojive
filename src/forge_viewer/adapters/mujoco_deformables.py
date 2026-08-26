@@ -158,11 +158,15 @@ class _SurfaceFlex(DeformableMesh):
         self.update(data)
 
     def _uvs(self, model, flex_id, elements, shells, dim: int) -> np.ndarray:
+        """Expand indexed MuJoCo flex texture coordinates to render corners."""
+
         adr = int(model.flex_texcoordadr[flex_id])
         if adr < 0:
             return np.zeros((len(self._corner_ids), 2), np.float32)
-        count = int(model.flex_vertnum[flex_id])
-        tex = np.asarray(model.flex_texcoord[adr : adr + count], np.float32)
+        next_addresses = np.asarray(model.flex_texcoordadr[flex_id + 1 :], np.int64)
+        next_addresses = next_addresses[next_addresses >= 0]
+        end = int(next_addresses[0]) if len(next_addresses) else int(model.nflextexcoord)
+        tex = np.asarray(model.flex_texcoord[adr:end], np.float32)
         if dim == 3:
             return np.ascontiguousarray(tex[self._corner_ids], np.float32)
         eadr = int(model.flex_elemdataadr[flex_id])

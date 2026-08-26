@@ -463,7 +463,7 @@ def _node_payload(node) -> dict[str, Any]:
         "node_id": int(node.node_id),
         "object_id": int(node.object_id),
         "name": node.name,
-        "kind": node.kind.value,
+        "type": node.type.value,
         "parent": int(node.parent),
         "visible": bool(node.visible),
         "posable": bool(node.posable),

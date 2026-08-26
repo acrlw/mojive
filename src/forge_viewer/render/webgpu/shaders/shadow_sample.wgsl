@@ -19,7 +19,7 @@
 // touch the (1x1 fallback) textures.
 
 const SHADOW_MAX_CASCADES: i32 = 3;
-const SHADOW_PCF_RADIUS: i32 = 2;
+const SHADOW_PCF_RADIUS: i32 = 1;
 const LOCAL_PCF_RADIUS: i32 = 1;
 const AREA_PCF_RADIUS: i32 = 3;
 const FORGE_SHADOW_BIAS: vec2f = vec2f(1.0, 2.5);
@@ -148,7 +148,8 @@ fn local_spot_shadow(slot: i32, world_pos: vec3f, normal: vec3f) -> f32 {
             let weight = pcf_tent_weight(x, LOCAL_PCF_RADIUS) *
                 pcf_tent_weight(y, LOCAL_PCF_RADIUS);
             lit += step(
-                dist - bias, textureLoad(local_shadow, vec2i(sample_uv * dims), slot * 6, 0).r
+                dist - bias,
+                textureLoad(local_shadow, vec2i(sample_uv * dims), lights.local_layer[slot], 0).r
             ) * weight;
             taps += weight;
         }
@@ -194,7 +195,7 @@ fn point_layer_uv(slot: i32, d: vec3f) -> vec3f {
     return vec3f(
         sc.x / max(ma, 1e-6) * 0.5 + 0.5,
         0.5 - sc.y / max(ma, 1e-6) * 0.5,
-        f32(slot * 6) + face,
+        f32(lights.local_layer[slot]) + face,
     );
 }
 
@@ -234,11 +235,11 @@ fn local_point_shadow(slot: i32, world_pos: vec3f, normal: vec3f) -> f32 {
     return lit / taps;
 }
 
-fn local_shadow_factor(kind: i32, slot: i32, world_pos: vec3f, normal: vec3f) -> f32 {
+fn local_shadow_factor(light_type: i32, slot: i32, world_pos: vec3f, normal: vec3f) -> f32 {
     if slot < 0 || slot >= i32(lights.shadow_counts.y) {
         return 1.0;
     }
-    if kind == 2 {
+    if light_type == 2 {
         return local_spot_shadow(slot, world_pos, normal);
     }
     return local_point_shadow(slot, world_pos, normal);

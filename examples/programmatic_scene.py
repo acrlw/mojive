@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from forge_viewer import CameraView, Light, LightKind, Scene, build_scene
+from forge_viewer import CameraView, Light, LightType, Scene, build_scene
 
 
 def create_scene() -> Scene:
@@ -25,7 +25,7 @@ def create_scene() -> Scene:
     scene.add_light(
         "sun",
         Light(
-            kind=LightKind.DIRECTIONAL,
+            type=LightType.DIRECTIONAL,
             direction=np.array((-0.5, 0.4, -1.0), np.float32),
         ),
     )

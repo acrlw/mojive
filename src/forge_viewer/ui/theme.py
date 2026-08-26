@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..adapters.base import NodeKind
+from ..adapters.base import NodeType
 
 RGBA = tuple[float, float, float, float]
 
@@ -98,25 +98,25 @@ TEXT: RGBA = rgb8(220, 223, 227)
 TEXT_DISABLED: RGBA = rgb8(123, 129, 137)
 
 
-NODE_COLORS: dict[NodeKind, RGBA] = {
-    NodeKind.FLEX: rgb8(30, 35, 42),
-    NodeKind.WORLD: rgb8(66, 81, 103),
-    NodeKind.MODEL: rgb8(44, 50, 60),
-    NodeKind.JOINT: rgb8(123, 84, 131),
-    NodeKind.SITE: rgb8(162, 97, 124),
-    NodeKind.GEOM: rgb8(172, 125, 101),
-    NodeKind.LINK: rgb8(154, 150, 198),
-    NodeKind.CAMERA: rgb8(138, 183, 192),
-    NodeKind.ENVIRONMENT: rgb8(35, 71, 80),
-    NodeKind.LIGHT: rgb8(202, 198, 152),
-    NodeKind.ROBOT: rgb8(197, 222, 212),
-    NodeKind.SKIN: rgb8(239, 243, 241),
+NODE_COLORS: dict[NodeType, RGBA] = {
+    NodeType.FLEX: rgb8(30, 35, 42),
+    NodeType.WORLD: rgb8(66, 81, 103),
+    NodeType.MODEL: rgb8(44, 50, 60),
+    NodeType.JOINT: rgb8(123, 84, 131),
+    NodeType.SITE: rgb8(162, 97, 124),
+    NodeType.GEOM: rgb8(172, 125, 101),
+    NodeType.LINK: rgb8(154, 150, 198),
+    NodeType.CAMERA: rgb8(138, 183, 192),
+    NodeType.ENVIRONMENT: rgb8(35, 71, 80),
+    NodeType.LIGHT: rgb8(202, 198, 152),
+    NodeType.ROBOT: rgb8(197, 222, 212),
+    NodeType.SKIN: rgb8(239, 243, 241),
 }
 
 
-def node_color(kind: NodeKind | str) -> RGBA:
+def node_color(node_type: NodeType | str) -> RGBA:
     try:
-        return NODE_COLORS[NodeKind(kind)]
+        return NODE_COLORS[NodeType(node_type)]
     except (KeyError, ValueError):
         return rgb8(140, 145, 150)
 
@@ -151,12 +151,12 @@ class Theme:
     bg_frame_active: RGBA = BG_FRAME_ACTIVE
     bg_header: RGBA = BG_HEADER
     border: RGBA = BORDER
-    node_colors: dict[NodeKind, RGBA] = field(default_factory=lambda: dict(NODE_COLORS))
+    node_colors: dict[NodeType, RGBA] = field(default_factory=lambda: dict(NODE_COLORS))
     axis_colors: dict[str, RGBA] = field(default_factory=lambda: dict(AXIS_COLORS))
 
-    def node_color(self, kind: NodeKind | str) -> RGBA:
+    def node_color(self, node_type: NodeType | str) -> RGBA:
         try:
-            return self.node_colors[NodeKind(kind)]
+            return self.node_colors[NodeType(node_type)]
         except (KeyError, ValueError):
             return rgb8(140, 145, 150)
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..scene import Scene
-from ..types import CameraView, Light, LightKind, LightSet
+from ..types import CameraView, Light, LightSet, LightType
 from .base import AdapterCaps, CameraInfo, FrameNeeds, SceneAdapterBase, SceneFrame, SceneSource
 
 
@@ -22,7 +22,7 @@ class ToyPhysicsAdapter(SceneAdapterBase):
 
     def __init__(self) -> None:
         light = Light(
-            kind=LightKind.DIRECTIONAL,
+            type=LightType.DIRECTIONAL,
             direction=np.array([-0.6, 0.4, -1.0], np.float32),
             diffuse=np.full(3, 0.8, np.float32),
         )

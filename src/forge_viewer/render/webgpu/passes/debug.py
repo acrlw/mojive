@@ -7,7 +7,7 @@ import wgpu
 
 from ....log import get_logger
 from ....types import MeshKey
-from ...debugdraw import RECORD_FLOATS, DebugDraw, Occlusion, PackedFrame, Path
+from ...debugdraw import RECORD_FLOATS, DebugDraw, DrawPath, Occlusion, PackedFrame
 from ...mesh import builtin_mesh
 from ...text import RECORD_FLOATS as TEXT_RECORD_FLOATS
 from ...text import TextLayout
@@ -34,25 +34,25 @@ _DEBUG_DTYPE = np.dtype(
 _UNIFORM_SLOTS = 2
 _UNIFORM_SLOT_BYTES = 256
 
-_VERTICES: dict[Path, int] = {
-    Path.SEGMENT: 15,
-    Path.STROKE: 6 + 3 * STROKE_JOIN_SEGMENTS,
-    Path.POINT: 6,
-    Path.DRAG_LINK: 6,
-    Path.SECTOR: 3 * SECTOR_SEGMENTS,
+_VERTICES: dict[DrawPath, int] = {
+    DrawPath.SEGMENT: 15,
+    DrawPath.STROKE: 6 + 3 * STROKE_JOIN_SEGMENTS,
+    DrawPath.POINT: 6,
+    DrawPath.DRAG_LINK: 6,
+    DrawPath.SECTOR: 3 * SECTOR_SEGMENTS,
 }
 
-_ENTRIES: dict[Path, tuple[str, str]] = {
-    Path.SEGMENT: ("vs_debug_line", "fs_debug_line"),
-    Path.STROKE: ("vs_debug_stroke", "fs_debug_line"),
-    Path.POINT: ("vs_debug_point", "fs_debug_point"),
-    Path.DRAG_LINK: ("vs_debug_drag_link", "fs_debug_drag_link"),
-    Path.SOLID: ("vs_debug_solid", "fs_debug_solid"),
-    Path.SECTOR: ("vs_debug_sector", "fs_debug_line"),
+_ENTRIES: dict[DrawPath, tuple[str, str]] = {
+    DrawPath.SEGMENT: ("vs_debug_line", "fs_debug_line"),
+    DrawPath.STROKE: ("vs_debug_stroke", "fs_debug_line"),
+    DrawPath.POINT: ("vs_debug_point", "fs_debug_point"),
+    DrawPath.DRAG_LINK: ("vs_debug_drag_link", "fs_debug_drag_link"),
+    DrawPath.SOLID: ("vs_debug_solid", "fs_debug_solid"),
+    DrawPath.SECTOR: ("vs_debug_sector", "fs_debug_line"),
 }
 
 
-def _instanced(path: Path, *attrs: tuple[str, int]) -> dict:
+def _instanced(path: DrawPath, *attrs: tuple[str, int]) -> dict:
     """Instance-step vertex layout for one packed record stream."""
     return {
         "array_stride": RECORD_FLOATS[path] * 4,
@@ -64,10 +64,10 @@ def _instanced(path: Path, *attrs: tuple[str, int]) -> dict:
     }
 
 
-_LAYOUTS: dict[Path, list[dict]] = {
-    Path.SEGMENT: [
+_LAYOUTS: dict[DrawPath, list[dict]] = {
+    DrawPath.SEGMENT: [
         _instanced(
-            Path.SEGMENT,
+            DrawPath.SEGMENT,
             ("float32x3", 0),
             ("float32x3", 12),
             ("float32x4", 24),
@@ -76,9 +76,9 @@ _LAYOUTS: dict[Path, list[dict]] = {
             ("float32", 48),
         )
     ],
-    Path.STROKE: [
+    DrawPath.STROKE: [
         _instanced(
-            Path.STROKE,
+            DrawPath.STROKE,
             ("float32x3", 0),
             ("float32x3", 12),
             ("float32x3", 24),
@@ -86,10 +86,12 @@ _LAYOUTS: dict[Path, list[dict]] = {
             ("float32", 52),
         )
     ],
-    Path.POINT: [_instanced(Path.POINT, ("float32x3", 0), ("float32x4", 12), ("float32", 28))],
-    Path.DRAG_LINK: [
+    DrawPath.POINT: [
+        _instanced(DrawPath.POINT, ("float32x3", 0), ("float32x4", 12), ("float32", 28))
+    ],
+    DrawPath.DRAG_LINK: [
         _instanced(
-            Path.DRAG_LINK,
+            DrawPath.DRAG_LINK,
             ("float32x3", 0),
             ("float32x3", 12),
             ("float32x4", 24),
@@ -99,9 +101,9 @@ _LAYOUTS: dict[Path, list[dict]] = {
             ("float32", 64),
         )
     ],
-    Path.SECTOR: [
+    DrawPath.SECTOR: [
         _instanced(
-            Path.SECTOR,
+            DrawPath.SECTOR,
             ("float32x3", 0),
             ("float32x3", 12),
             ("float32x3", 24),
@@ -123,7 +125,7 @@ _SOLID_LAYOUTS = [
         ],
     },
     {
-        "array_stride": RECORD_FLOATS[Path.SOLID] * 4,
+        "array_stride": RECORD_FLOATS[DrawPath.SOLID] * 4,
         "step_mode": "instance",
         "attributes": [
             {"format": "float32x4", "offset": 0, "shader_location": 2},
@@ -221,9 +223,9 @@ class DebugPass:
             ],
         )
         self._uniform_block = np.zeros((), _DEBUG_DTYPE)
-        self._pipelines: dict[tuple[Path, str], wgpu.GPURenderPipeline] = {}
+        self._pipelines: dict[tuple[DrawPath, str], wgpu.GPURenderPipeline] = {}
         self._text_pipelines: dict[str, wgpu.GPURenderPipeline] = {}
-        self._buffers: dict[Path, wgpu.GPUBuffer | None] = dict.fromkeys(Path, None)
+        self._buffers: dict[DrawPath, wgpu.GPUBuffer | None] = dict.fromkeys(DrawPath, None)
         self._meshes: dict[MeshKey, GpuMesh | None] = {}
         self._text = TextLayout()
         self._text_buffer: wgpu.GPUBuffer | None = None
@@ -279,7 +281,7 @@ class DebugPass:
         self.draw.render_frame(self._upload, now=now)
 
     def _upload(self, frame: PackedFrame) -> None:
-        for path in Path:
+        for path in DrawPath:
             n = frame.counts[path]
             if n:
                 buf = self._ensure_buffer(path, n)
@@ -289,7 +291,7 @@ class DebugPass:
             self._sync_text_gpu()
         self._frame = frame
 
-    def _ensure_buffer(self, path: Path, records: int) -> wgpu.GPUBuffer:
+    def _ensure_buffer(self, path: DrawPath, records: int) -> wgpu.GPUBuffer:
         stride = RECORD_FLOATS[path] * 4
         buf = self._buffers[path]
         if buf is not None and buf.size >= records * stride:
@@ -360,7 +362,7 @@ class DebugPass:
 
     # -- pipelines ------------------------------------------------------------
 
-    def _pipeline(self, path: Path, compare: str) -> wgpu.GPURenderPipeline:
+    def _pipeline(self, path: DrawPath, compare: str) -> wgpu.GPURenderPipeline:
         key = (path, compare)
         pipeline = self._pipelines.get(key)
         if pipeline is not None:
@@ -371,7 +373,7 @@ class DebugPass:
             vertex={
                 "module": self._module,
                 "entry_point": vs,
-                "buffers": _SOLID_LAYOUTS if path is Path.SOLID else _LAYOUTS[path],
+                "buffers": _SOLID_LAYOUTS if path is DrawPath.SOLID else _LAYOUTS[path],
             },
             fragment={
                 "module": self._module,
@@ -464,7 +466,7 @@ class DebugPass:
                 continue
             pass_encoder.set_pipeline(self._pipeline(b.path, compare))
             pass_encoder.set_bind_group(0, self._uniform_group, [offset])
-            if b.path is Path.SOLID:
+            if b.path is DrawPath.SOLID:
                 mesh = self._mesh(b.mesh)
                 if mesh is None:
                     self.draw.drop(b.count, f"{b.path} batch is missing a mesh")
@@ -502,7 +504,7 @@ class DebugPass:
         for buf in self._buffers.values():
             if buf is not None:
                 buf.destroy()
-        self._buffers = dict.fromkeys(Path, None)
+        self._buffers = dict.fromkeys(DrawPath, None)
         for mesh in self._meshes.values():
             if mesh is not None:
                 mesh.release()

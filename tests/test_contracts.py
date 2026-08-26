@@ -10,7 +10,7 @@ def test_adapter_and_render_extension_types_are_public():
 
     for name in (
         "ActuatorInfo",
-        "ActuatorVisualKind",
+        "ActuatorVisualType",
         "CameraView",
         "ConformanceReport",
         "CameraInfo",
@@ -21,7 +21,7 @@ def test_adapter_and_render_extension_types_are_public():
         "FrameNeeds",
         "FrameMode",
         "JointInfo",
-        "JointVisualKind",
+        "JointVisualType",
         "KeyframeInfo",
         "LabelMode",
         "MeshUpdate",

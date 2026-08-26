@@ -14,7 +14,7 @@ from ..types import (
     MeshKey,
     MeshShape,
     ShadingModel,
-    TextureKind,
+    TextureType,
 )
 from .scene import RenderScene, SceneBuilder
 
@@ -362,9 +362,9 @@ class SceneSourceBuilder:
         geom_nodes: dict[int, list[int]] = {}
         body_nodes: dict[int, int] = {}
         for node in src.nodes:
-            if node.kind == "geom":
+            if node.type == "geom":
                 geom_nodes.setdefault(node.body_index, []).append(node.node_id)
-            elif node.kind in ("world", "robot", "link"):
+            elif node.type in ("world", "robot", "link"):
                 body_nodes.setdefault(node.body_index, node.node_id)
 
         order: dict[int, dict[int, int]] = {}
@@ -409,7 +409,7 @@ class SceneSourceBuilder:
     def _cube_coef(src, mat, size: np.ndarray, key: MeshKey, local: np.ndarray) -> np.ndarray:
         """Return MuJoCo object-linear cubemap coordinates for one primitive part."""
         texture = src.textures.get(mat.texture) if mat.texture is not None else None
-        if texture is None or texture.kind is not TextureKind.CUBE:
+        if texture is None or texture.type is not TextureType.CUBE:
             return np.zeros(4, np.float32)
 
         scale = np.asarray(size if mat.tex_uniform else np.ones(3), np.float32).copy()

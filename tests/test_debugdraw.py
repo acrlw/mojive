@@ -19,17 +19,15 @@ from forge_viewer.render.backend import BackendCaps, NullBackend
 from forge_viewer.render.debugdraw import (
     ARROW_HEAD_RATIO,
     AXIS_COLORS,
-    PRIM_PATH,
+    PRIMITIVE_PATH,
     VERTEX_COUNT,
     DebugDraw,
+    DrawPath,
     Occlusion,
-    Prim,
+    PrimitiveType,
     sector_angle,
     sector_points,
     world_size,
-)
-from forge_viewer.render.debugdraw import (
-    Path as DrawPath,
 )
 
 RED = (0.9, 0.2, 0.2, 1.0)
@@ -60,7 +58,9 @@ def test_same_id_redrawn_every_frame_does_not_grow():
 
     assert dd.stats().moves == 0
 
-    assert layer.positions_of(Prim.LINE)[0, 1] == pytest.approx([100.0, 99.0, 99.0], abs=1e-3)
+    assert layer.positions_of(PrimitiveType.LINE)[0, 1] == pytest.approx(
+        [100.0, 99.0, 99.0], abs=1e-3
+    )
 
 
 def test_batch_entry_stays_one_id_and_still_emits_plain_lines():
@@ -75,7 +75,7 @@ def test_batch_entry_stays_one_id_and_still_emits_plain_lines():
         dd.render_frame(lambda _f: None)
 
     assert dd.stats().primitives == 6
-    assert layer.count_of(Prim.LINE) == 6
+    assert layer.count_of(PrimitiveType.LINE) == 6
 
     layer.lines("silhouette", pts_a[:4], pts_b[:4], RED, 1.5)
     assert dd.stats().primitives == 4
@@ -91,8 +91,8 @@ def test_batch_points_and_arrows_keep_one_id_and_per_item_colors():
     layer.points("contacts", b, colors, 4.0)
     layer.arrows("forces", a, b, colors, 2.0)
 
-    assert layer.count_of(Prim.POINT) == 2
-    assert layer.count_of(Prim.ARROW) == 2
+    assert layer.count_of(PrimitiveType.POINT) == 2
+    assert layer.count_of(PrimitiveType.ARROW) == 2
     frame = dd.build()
     point_stream = frame.stream(DrawPath.POINT)
     segment_stream = frame.stream(DrawPath.SEGMENT)
@@ -158,7 +158,7 @@ def test_world_text_expires_and_can_replace_a_geometric_id():
     layer = dd.layer("labels")
     layer.line("same", A, B, RED)
     layer.text("same", A, "replacement", duration=0.0)
-    assert layer.count_of(Prim.LINE) == 0
+    assert layer.count_of(PrimitiveType.LINE) == 0
     assert dd.primitives == 1
     dd.render_frame(lambda frame: frame.text_count == 1, now=1.0)
     assert dd.primitives == 0
@@ -225,18 +225,18 @@ def test_expire_runs_after_drawing_not_before():
 def test_vertex_counts_match_the_spec_table():
 
     assert VERTEX_COUNT == {
-        Prim.LINE: 2,
-        Prim.ARROW: 2,
-        Prim.POINT: 1,
-        Prim.FRAME: 6,
-        Prim.BOX: 1,
-        Prim.SPHERE: 1,
-        Prim.SECTOR: 3,
-        Prim.STROKE: 3,
-        Prim.DRAG_LINK: 2,
-        Prim.SOLID_ARROW: 1,
-        Prim.SOLID_DOUBLE_ARROW: 1,
-        Prim.CYLINDER: 1,
+        PrimitiveType.LINE: 2,
+        PrimitiveType.ARROW: 2,
+        PrimitiveType.POINT: 1,
+        PrimitiveType.FRAME: 6,
+        PrimitiveType.BOX: 1,
+        PrimitiveType.SPHERE: 1,
+        PrimitiveType.SECTOR: 3,
+        PrimitiveType.STROKE: 3,
+        PrimitiveType.DRAG_LINK: 2,
+        PrimitiveType.SOLID_ARROW: 1,
+        PrimitiveType.SOLID_DOUBLE_ARROW: 1,
+        PrimitiveType.CYLINDER: 1,
     }
     assert len(VERTEX_COUNT) == 12
 
@@ -263,7 +263,7 @@ def test_frame_is_three_independent_segments_on_the_arrow_path():
     m[:3, 3] = (1.0, 2.0, 3.0)
     layer.frame("f", m, axis_len=0.5)
 
-    pos = layer.positions_of(Prim.FRAME)
+    pos = layer.positions_of(PrimitiveType.FRAME)
     assert pos.shape == (1, 6, 3)
     for k in range(3):
         start, end = pos[0, 2 * k], pos[0, 2 * k + 1]
@@ -273,7 +273,11 @@ def test_frame_is_three_independent_segments_on_the_arrow_path():
     layer.arrow("a", A, B, RED, 2.0)
     frame = dd.build()
     segs = [b for b in frame.active() if b.path is DrawPath.SEGMENT]
-    assert PRIM_PATH[Prim.FRAME] is PRIM_PATH[Prim.ARROW] is DrawPath.SEGMENT
+    assert (
+        PRIMITIVE_PATH[PrimitiveType.FRAME]
+        is PRIMITIVE_PATH[PrimitiveType.ARROW]
+        is DrawPath.SEGMENT
+    )
     assert len(segs) == 1
     assert segs[0].count == 4
 
@@ -295,7 +299,7 @@ def test_axis_length_ignores_scale_baked_into_the_transform():
     m[3, 3] = 1.0
     m[:3, 3] = 0.0
     layer.frame("f", m, axis_len=0.25)
-    pos = layer.positions_of(Prim.FRAME)
+    pos = layer.positions_of(PrimitiveType.FRAME)
     for k in range(3):
         assert np.linalg.norm(pos[0, 2 * k + 1] - pos[0, 2 * k]) == pytest.approx(0.25)
 
@@ -318,7 +322,7 @@ def test_solid_primitives_reuse_the_builtin_meshes():
 
     rec = frame.stream(DrawPath.SOLID)[0]
     assert rec[12:15] == pytest.approx([1.0, 0.0, 0.0])
-    assert layer.positions_of(Prim.BOX)[0, 0] == pytest.approx([1.0, 0.0, 0.0])
+    assert layer.positions_of(PrimitiveType.BOX)[0, 0] == pytest.approx([1.0, 0.0, 0.0])
 
 
 def test_sector_swept_angle_is_the_rotation_vector_norm():
@@ -330,7 +334,7 @@ def test_sector_swept_angle_is_the_rotation_vector_norm():
     layer = dd.layer("joint", Occlusion.DEPTH)
     layer.sector("j0", center, center + axis * angle, center + np.array([1.0, 0.0, 0.0]), RED)
 
-    pos = layer.positions_of(Prim.SECTOR)
+    pos = layer.positions_of(PrimitiveType.SECTOR)
     assert pos.shape == (1, 3, 3)
     assert sector_angle(pos[0, 0], pos[0, 1]) == pytest.approx(angle, abs=1e-6)
 
@@ -410,8 +414,8 @@ def test_batches_are_grouped_by_occlusion_then_path():
     dd.layer("mark", Occlusion.ALWAYS).point("p", A, RED, 4.0)
 
     frame = dd.build()
-    kinds = [(b.occlusion, b.path, b.count) for b in frame.active()]
-    assert kinds == [
+    batch_descriptors = [(b.occlusion, b.path, b.count) for b in frame.active()]
+    assert batch_descriptors == [
         (Occlusion.ALWAYS, DrawPath.POINT, 1),
         (Occlusion.GHOST, DrawPath.SEGMENT, 3),
     ]
@@ -590,7 +594,7 @@ def test_perturbation_feedback_lands_on_the_layers_it_asks_for():
     ctrl._publish_drag(dd, st, (None, None), MarkBudget(), 1.0)
     drag = dd.layer("ui.perturb.drag")
     assert drag.occlusion is Occlusion.ALWAYS
-    assert drag.count_of(Prim.DRAG_LINK) == 1
+    assert drag.count_of(PrimitiveType.DRAG_LINK) == 1
     record = dd.build().stream(DrawPath.DRAG_LINK)[0]
     assert record[0:3] == pytest.approx([0.1, 0.0, 0.2])
     assert record[3:6] == pytest.approx([0.5, 0.0, 0.4])
@@ -601,9 +605,9 @@ def test_perturbation_feedback_lands_on_the_layers_it_asks_for():
     )
     mark = dd.layer("ui.perturb.mark")
     assert mark.occlusion is Occlusion.ALWAYS
-    assert mark.count_of(Prim.BOX) == 0
-    assert mark.count_of(Prim.ARROW) == 3
-    assert mark.count_of(Prim.STROKE) > 0
+    assert mark.count_of(PrimitiveType.BOX) == 0
+    assert mark.count_of(PrimitiveType.ARROW) == 3
+    assert mark.count_of(PrimitiveType.STROKE) > 0
 
     before = dd.stats().primitives
     for _ in range(100):
@@ -678,8 +682,8 @@ def test_external_json_lines_are_received_off_thread_and_applied_on_the_main_thr
         assert backend.debug.stats().primitives == 2
         layer = backend.debug.layers()[0]
         assert layer.name == "policy" and layer.occlusion is Occlusion.GHOST
-        assert layer.count_of(Prim.ARROW) == 1
-        assert layer.positions_of(Prim.POINT)[0, 0] == pytest.approx([1.0, 2.0, 3.0])
+        assert layer.count_of(PrimitiveType.ARROW) == 1
+        assert layer.positions_of(PrimitiveType.POINT)[0, 0] == pytest.approx([1.0, 2.0, 3.0])
     finally:
         br.close()
     assert not path.exists()

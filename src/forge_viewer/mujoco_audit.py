@@ -149,11 +149,14 @@ def audit_model(model) -> dict:
     types = Counter(int(model.geom_type[i]) for i in visible)
     findings: list[Finding] = []
 
-    for kind, count in sorted(types.items()):
-        if kind not in supported:
+    for geom_type, count in sorted(types.items()):
+        if geom_type not in supported:
             findings.append(
                 Finding(
-                    _enum_name(mujoco.mjtGeom, kind), "unsupported", count, "geometry is skipped"
+                    _enum_name(mujoco.mjtGeom, geom_type),
+                    "unsupported",
+                    count,
+                    "geometry is skipped",
                 )
             )
     hidden = model.ngeom - len(visible)

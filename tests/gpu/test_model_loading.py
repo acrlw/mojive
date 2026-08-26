@@ -14,7 +14,7 @@ pytestmark = pytest.mark.gpu
 pytest.importorskip("glfw")
 pytest.importorskip("mujoco")
 
-from forge_viewer.adapters.base import NodeKind  # noqa: E402
+from forge_viewer.adapters.base import NodeType  # noqa: E402
 from forge_viewer.assets import resolve  # noqa: E402
 from forge_viewer.commands import AddModelComponent, CommandResult, SelectNode  # noqa: E402
 from forge_viewer.composition import build, build_editor, build_scene  # noqa: E402
@@ -283,7 +283,7 @@ def test_dragging_camera_preview_does_not_orbit_scene_camera():
     instance = build(resolve("parity_scene"), paused=True, vsync=False, width=960, height=640)
     try:
         instance.sync()
-        camera_node = next(node for node in instance.session.nodes if node.kind is NodeKind.CAMERA)
+        camera_node = next(node for node in instance.session.nodes if node.type is NodeType.CAMERA)
         assert instance.session.submit(SelectNode(camera_node.node_id))
         instance.sync()
         preview = instance.app.camera_preview
@@ -347,7 +347,7 @@ def test_model_component_inspector_tracks_structured_edits():
     instance = build_editor(vsync=False, width=960, height=640)
     try:
         assert instance.app.add_model(resolve("actuator_visuals"))
-        model = next(node for node in instance.session.nodes if node.kind is NodeKind.MODEL)
+        model = next(node for node in instance.session.nodes if node.type is NodeType.MODEL)
         assert instance.session.submit(SelectNode(model.node_id))
         instance.sync()
         inspector = instance.app.panels.get("Inspector")

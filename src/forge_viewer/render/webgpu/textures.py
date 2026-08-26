@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import wgpu
 
-from ...types import TextureData, TextureKind
+from ...types import TextureData, TextureType
 
 _BYTES_PER_CHANNEL = {1: (wgpu.TextureFormat.r8unorm, 1), 2: (wgpu.TextureFormat.rg8unorm, 2)}
 
@@ -81,7 +81,7 @@ class TextureStore:
                 continue
             self._textures.pop(name, None)
             self._cubes.pop(name, None)
-            if data.kind is TextureKind.TWO_D:
+            if data.type is TextureType.TWO_D:
                 self._textures[name] = self._upload(data)
             else:
                 self._cubes[name] = self._upload_cube(data)

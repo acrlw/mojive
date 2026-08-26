@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from .base import (
     ActuatorInfo,
-    ActuatorVisualKind,
+    ActuatorVisualType,
     AdapterCaps,
     CameraInfo,
     DiagnosticFrame,
@@ -12,7 +12,7 @@ from .base import (
     EqualityConstraintInfo,
     FrameNeeds,
     JointInfo,
-    JointVisualKind,
+    JointVisualType,
     KeyframeInfo,
     PhysicsState,
     SceneAdapter,
@@ -41,7 +41,7 @@ def __getattr__(name: str):
 
 __all__ = [
     "ActuatorInfo",
-    "ActuatorVisualKind",
+    "ActuatorVisualType",
     "AdapterCaps",
     "CameraInfo",
     "DiagnosticFrame",
@@ -49,7 +49,7 @@ __all__ = [
     "EqualityConstraintInfo",
     "FrameNeeds",
     "JointInfo",
-    "JointVisualKind",
+    "JointVisualType",
     "KeyframeInfo",
     "MuJoCoAdapter",
     "PhysicsState",

@@ -18,15 +18,15 @@ from forge_viewer.render.scene import SceneBuilder  # noqa: E402
 from forge_viewer.types import (  # noqa: E402
     CameraView,
     Light,
-    LightKind,
     LightSet,
+    LightType,
     Material,
     MeshData,
     MeshKey,
     MeshShape,
     ShadingModel,
     TextureData,
-    TextureKind,
+    TextureType,
 )
 
 WIDTH, HEIGHT = 128, 96
@@ -129,7 +129,7 @@ def rig(backend_name, request):
 def _dir_light(diffuse: float, specular: float = 0.0) -> Light:
 
     return Light(
-        kind=LightKind.DIRECTIONAL,
+        type=LightType.DIRECTIONAL,
         direction=np.array([0.0, 1.0, 0.0], np.float32),
         diffuse=np.full(3, diffuse, np.float32),
         specular=np.full(3, specular, np.float32),
@@ -205,7 +205,7 @@ def test_mujoco_classic_texture_modulates_fixed_function_specular(backend_name, 
     try:
         rig = Rig(
             backend,
-            textures={"surface": TextureData("surface", TextureKind.TWO_D, pixels, srgb=True)},
+            textures={"surface": TextureData("surface", TextureType.TWO_D, pixels, srgb=True)},
         )
         sb = SceneBuilder()
         matid = sb.material_id(Material(texture="surface"))
@@ -236,7 +236,7 @@ def test_mujoco_classic_texture_modulates_fixed_function_specular(backend_name, 
 
 def test_mujoco_classic_specular_is_not_scaled_by_diffuse_cosine(rig):
     light = Light(
-        kind=LightKind.DIRECTIONAL,
+        type=LightType.DIRECTIONAL,
         direction=np.array([0.0, 0.5, np.sqrt(0.75)], np.float32),
         diffuse=np.zeros(3, np.float32),
         specular=np.full(3, 0.5, np.float32),
@@ -269,7 +269,7 @@ def test_light_color_is_decoded_from_the_display_domain(rig):
 def test_all_mujoco_scene_light_slots_reach_the_shader(rig, count):
     dark = [_dir_light(0.0) for _ in range(count - 1)]
     marker = Light(
-        kind=LightKind.DIRECTIONAL,
+        type=LightType.DIRECTIONAL,
         direction=np.array([0.0, 1.0, 0.0], np.float32),
         diffuse=np.array([0.55, 0.0, 0.0], np.float32),
         specular=np.zeros(3, np.float32),
@@ -291,7 +291,7 @@ def test_all_mujoco_scene_light_slots_reach_the_shader(rig, count):
 
 def test_mujoco_classic_ignores_local_light_range(rig):
     light = Light(
-        kind=LightKind.SPOT,
+        type=LightType.SPOT,
         position=np.array([0.0, -1.0, 0.0], np.float32),
         direction=np.array([0.0, 1.0, 0.0], np.float32),
         diffuse=np.ones(3, np.float32),
@@ -403,7 +403,7 @@ def test_skybox_only_shows_up_when_it_is_on(backend_name, request):
     try:
         rig = Rig(
             backend,
-            textures={"sky": TextureData("sky", TextureKind.SKYBOX, sky)},
+            textures={"sky": TextureData("sky", TextureType.SKYBOX, sky)},
             skybox="sky",
         )
         quad = (np.array([0.5, 0.5, 0.5, 1.0], np.float32), (0.0, 0.0, 0.5), 0.3, 0.0)
@@ -429,7 +429,7 @@ def test_image_light_uses_cube_radiance_and_mujoco_intensity_scale(backend_name,
     try:
         rig = Rig(
             backend,
-            textures={"studio": TextureData("studio", TextureKind.CUBE, cube)},
+            textures={"studio": TextureData("studio", TextureType.CUBE, cube)},
         )
         surface = [(np.ones(4, np.float32), (0.0, 0.0, 0.5), 2.0, 0.0)]
         off = Rig.center(rig.draw(surface))
@@ -438,7 +438,7 @@ def test_image_light_uses_cube_radiance_and_mujoco_intensity_scale(backend_name,
                 surface,
                 lights=[
                     Light(
-                        kind=LightKind.IMAGE,
+                        type=LightType.IMAGE,
                         texture="studio",
                         intensity=opaque_pass.IMAGE_LIGHT_REFERENCE_INTENSITY,
                     )
@@ -459,7 +459,7 @@ def test_cube_texture_reaches_an_ordinary_material(backend_name, request):
     cube[:] = [230, 30, 50]
     backend = _make_backend(backend_name, request)
     try:
-        rig = Rig(backend, textures={"body": TextureData("body", TextureKind.CUBE, cube)})
+        rig = Rig(backend, textures={"body": TextureData("body", TextureType.CUBE, cube)})
         sb = SceneBuilder()
         matid = sb.material_id(Material(texture="body", tex_uniform=True))
         sb.add(

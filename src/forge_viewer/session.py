@@ -16,7 +16,7 @@ from .adapters.base import (
     FrameNeeds,
     JointInfo,
     KeyframeInfo,
-    NodeKind,
+    NodeType,
     PhysicsState,
     SceneAdapter,
     SceneFrame,
@@ -203,7 +203,7 @@ class Session:
         """Return whether a running simulation currently locks this entity gizmo."""
         return (
             not self._paused
-            and node.kind in (NodeKind.CAMERA, NodeKind.LIGHT)
+            and node.type in (NodeType.CAMERA, NodeType.LIGHT)
             and self.entity_gizmo_lock_enabled(node)
         )
 
@@ -719,11 +719,11 @@ class Session:
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before changing model topology")
             try:
-                node_id = self._adapter.add_model_element(c.parent_node_id, c.kind, c.name)
+                node_id = self._adapter.add_model_element(c.parent_node_id, c.element_type, c.name)
             except Exception as exc:
                 return CommandResult.bad(str(exc))
             if node_id < 0:
-                return CommandResult.bad(f"Failed to add {c.kind}")
+                return CommandResult.bad(f"Failed to add {c.element_type}")
             self._refresh_structure()
             return CommandResult.good(f"Added {c.name}", node_id)
 
@@ -1237,16 +1237,16 @@ class Session:
         self._nodes = [
             replace(node, children=list(node.children)) for node in self._adapter.nodes()
         ]
-        if not any(node.kind is NodeKind.ENVIRONMENT for node in self._nodes):
+        if not any(node.type is NodeType.ENVIRONMENT for node in self._nodes):
             parent = next(
-                (node for node in self._nodes if node.kind is NodeKind.WORLD and node.parent < 0),
+                (node for node in self._nodes if node.type is NodeType.WORLD and node.parent < 0),
                 None,
             )
             node_id = max((node.node_id for node in self._nodes), default=-1) + 1
             environment = SceneNode(
                 node_id,
                 "environment",
-                NodeKind.ENVIRONMENT,
+                NodeType.ENVIRONMENT,
                 parent=parent.node_id if parent is not None else -1,
                 object_id=ENVIRONMENT_OBJECT_ID,
             )

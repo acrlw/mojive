@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from .. import math3d
-from ..adapters.base import NodeKind
+from ..adapters.base import NodeType
 from ..commands import (
     BeginEditTransaction,
     EndEditTransaction,
@@ -62,7 +62,7 @@ from ..gizmo import (
     world_scale,
 )
 from ..render.debugdraw import Occlusion
-from ..types import CameraView, LightKind
+from ..types import CameraView, LightType
 from .camera import ndc_from_viewport, unproject
 from .draw2d import Draw2D
 from .panels.inspector import gizmo_refusal_reason
@@ -172,7 +172,7 @@ class Verdict:
 def verdict(paused: bool, node: SceneNode | None) -> Verdict:
     if node is None:
         return Verdict(False, REASON_NO_SELECTION)
-    if node.kind in (NodeKind.LIGHT, NodeKind.CAMERA):
+    if node.type in (NodeType.LIGHT, NodeType.CAMERA):
         return Verdict(True)
     reason = gizmo_refusal_reason(paused, node.posable)
     return Verdict(reason is None, reason or "")
@@ -1002,9 +1002,9 @@ class ObjectGizmo:
         if node is None:
             self._end()
             return False
-        if node.kind is NodeKind.LIGHT:
+        if node.type is NodeType.LIGHT:
             command = _set_light_from_world(session, node, pos, mat)
-        elif node.kind is NodeKind.CAMERA:
+        elif node.type is NodeType.CAMERA:
             command = _set_camera_from_world(session, node, pos, mat)
         elif node.posable:
             command = SetPose(
@@ -1075,11 +1075,11 @@ class ObjectGizmo:
             return result
         if session.entity_gizmo_locked(node):
             return Verdict(False, "gizmo is locked while simulation is running")
-        if node.kind is NodeKind.LIGHT:
+        if node.type is NodeType.LIGHT:
             light = _source_light(session, node)
             if light is None:
                 return Verdict(False, "light transform is unavailable")
-            if light.kind is LightKind.IMAGE:
+            if light.type is LightType.IMAGE:
                 return Verdict(False, "image light has no spatial transform")
         return result
 
@@ -1363,14 +1363,14 @@ def _cursor_plane(cam, rect, cursor, point, normal) -> np.ndarray | None:
 
 def _node_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarray]:
     frame = session.frame
-    if node.kind is NodeKind.MODEL:
+    if node.type is NodeType.MODEL:
         info = next((item for item in session.scene_models if item.model_id == node.model_id), None)
         if info is not None:
             return (
                 np.asarray(info.position, np.float64).reshape(3),
                 np.asarray(info.rotation, np.float64).reshape(3, 3),
             )
-    if node.kind is NodeKind.LIGHT:
+    if node.type is NodeType.LIGHT:
         lights = frame.lights or (session.source.lights if session.source is not None else None)
         if lights is not None and 0 <= node.light_index < len(lights.lights):
             light = lights.lights[node.light_index]
@@ -1378,14 +1378,14 @@ def _node_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarra
                 np.asarray(light.position, np.float64).reshape(3),
                 np.asarray(direction_basis(light.direction), np.float64),
             )
-    if node.kind is NodeKind.CAMERA:
+    if node.type is NodeType.CAMERA:
         view = _camera_for_node(session, node)
         if view is not None:
             return (
                 np.asarray(view.eye, np.float64).reshape(3),
                 np.asarray(camera_rotation(view), np.float64),
             )
-    if node.kind is NodeKind.SITE:
+    if node.type is NodeType.SITE:
         i = int(node.site_index)
         pos = np.zeros(3, np.float64)
         mat = np.eye(3, dtype=np.float64)
@@ -1394,7 +1394,7 @@ def _node_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarra
         if frame.site_xmat is not None and 0 <= i < len(frame.site_xmat):
             mat = np.asarray(frame.site_xmat[i], np.float64).reshape(3, 3)
         return pos, mat
-    if node.kind is NodeKind.GEOM:
+    if node.type is NodeType.GEOM:
         i = int(node.geom_index)
         pos = np.zeros(3, np.float64)
         mat = np.eye(3, dtype=np.float64)

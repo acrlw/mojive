@@ -7,7 +7,7 @@ import numpy as np
 
 from ....log import get_logger
 from ....types import MeshKey
-from ...debugdraw import RECORD_FLOATS, DebugDraw, Occlusion, PackedFrame, Path
+from ...debugdraw import RECORD_FLOATS, DebugDraw, DrawPath, Occlusion, PackedFrame
 from .. import gl_native as G
 from ..backend import register_pass
 from ..instances import GpuMesh
@@ -28,33 +28,35 @@ GHOST_ALPHA = 0.28
 
 
 _SPECS = {
-    Path.SEGMENT: ProgramSpec("debug_line", "debug_line.vert", "debug_line.frag"),
-    Path.STROKE: ProgramSpec(
+    DrawPath.SEGMENT: ProgramSpec("debug_line", "debug_line.vert", "debug_line.frag"),
+    DrawPath.STROKE: ProgramSpec(
         "debug_stroke",
         "debug_stroke.vert",
         "debug_line.frag",
         defines={"STROKE_JOIN_SEGMENTS": STROKE_JOIN_SEGMENTS},
     ),
-    Path.POINT: ProgramSpec("debug_point", "debug_point.vert", "debug_point.frag"),
-    Path.DRAG_LINK: ProgramSpec("debug_drag_link", "debug_drag_link.vert", "debug_drag_link.frag"),
-    Path.SOLID: ProgramSpec("debug_solid", "debug_solid.vert", "debug_solid.frag"),
-    Path.SECTOR: ProgramSpec(
+    DrawPath.POINT: ProgramSpec("debug_point", "debug_point.vert", "debug_point.frag"),
+    DrawPath.DRAG_LINK: ProgramSpec(
+        "debug_drag_link", "debug_drag_link.vert", "debug_drag_link.frag"
+    ),
+    DrawPath.SOLID: ProgramSpec("debug_solid", "debug_solid.vert", "debug_solid.frag"),
+    DrawPath.SECTOR: ProgramSpec(
         "debug_sector",
         "debug_sector.vert",
         "debug_sector.frag",
         defines={"SECTOR_SEGMENTS": SECTOR_SEGMENTS},
     ),
 }
-_LAYOUT: dict[Path, str] = {
-    Path.SEGMENT: "3f 3f 4f 1f 1f 1f/i",
-    Path.STROKE: "3f 3f 3f 4f 1f/i",
-    Path.POINT: "3f 4f 1f/i",
-    Path.DRAG_LINK: "3f 3f 4f 4f 1f 1f 1f/i",
-    Path.SOLID: "4f 4f 4f 4f 4f/i",
-    Path.SECTOR: "3f 3f 3f 4f 1f/i",
+_LAYOUT: dict[DrawPath, str] = {
+    DrawPath.SEGMENT: "3f 3f 4f 1f 1f 1f/i",
+    DrawPath.STROKE: "3f 3f 3f 4f 1f/i",
+    DrawPath.POINT: "3f 4f 1f/i",
+    DrawPath.DRAG_LINK: "3f 3f 4f 4f 1f 1f 1f/i",
+    DrawPath.SOLID: "4f 4f 4f 4f 4f/i",
+    DrawPath.SECTOR: "3f 3f 3f 4f 1f/i",
 }
-_ATTRS: dict[Path, tuple[tuple[str, int, int], ...]] = {
-    Path.SEGMENT: (
+_ATTRS: dict[DrawPath, tuple[tuple[str, int, int], ...]] = {
+    DrawPath.SEGMENT: (
         ("in_a", 3, 0),
         ("in_b", 3, 12),
         ("in_color", 4, 24),
@@ -62,15 +64,15 @@ _ATTRS: dict[Path, tuple[tuple[str, int, int], ...]] = {
         ("in_head", 1, 44),
         ("in_start_mask", 1, 48),
     ),
-    Path.STROKE: (
+    DrawPath.STROKE: (
         ("in_prev", 3, 0),
         ("in_a", 3, 12),
         ("in_b", 3, 24),
         ("in_color", 4, 36),
         ("in_width", 1, 52),
     ),
-    Path.POINT: (("in_p", 3, 0), ("in_color", 4, 12), ("in_radius", 1, 28)),
-    Path.DRAG_LINK: (
+    DrawPath.POINT: (("in_p", 3, 0), ("in_color", 4, 12), ("in_radius", 1, 28)),
+    DrawPath.DRAG_LINK: (
         ("in_a", 3, 0),
         ("in_b", 3, 12),
         ("in_core_color", 4, 24),
@@ -79,14 +81,14 @@ _ATTRS: dict[Path, tuple[tuple[str, int, int], ...]] = {
         ("in_radius", 1, 60),
         ("in_edge", 1, 64),
     ),
-    Path.SOLID: (
+    DrawPath.SOLID: (
         ("in_model0", 4, 0),
         ("in_model1", 4, 16),
         ("in_model2", 4, 32),
         ("in_model3", 4, 48),
         ("in_color", 4, 64),
     ),
-    Path.SECTOR: (
+    DrawPath.SECTOR: (
         ("in_center", 3, 0),
         ("in_rot_end", 3, 12),
         ("in_ref_end", 3, 24),
@@ -94,12 +96,12 @@ _ATTRS: dict[Path, tuple[tuple[str, int, int], ...]] = {
         ("in_radius", 1, 52),
     ),
 }
-_VERTICES: dict[Path, int] = {
-    Path.SEGMENT: 15,
-    Path.STROKE: 6 + 3 * STROKE_JOIN_SEGMENTS,
-    Path.POINT: 6,
-    Path.DRAG_LINK: 6,
-    Path.SECTOR: 3 * SECTOR_SEGMENTS,
+_VERTICES: dict[DrawPath, int] = {
+    DrawPath.SEGMENT: 15,
+    DrawPath.STROKE: 6 + 3 * STROKE_JOIN_SEGMENTS,
+    DrawPath.POINT: 6,
+    DrawPath.DRAG_LINK: 6,
+    DrawPath.SECTOR: 3 * SECTOR_SEGMENTS,
 }
 _MESH_LAYOUT = ("3f 3f 8x", ("in_position", "in_normal"))
 
@@ -111,11 +113,11 @@ class DebugPass(BasePass):
         self.draw = DebugDraw()
         self.draw_calls = 0
         self._gl = G.native()
-        self._buffers: dict[Path, moderngl.Buffer | None] = dict.fromkeys(Path, None)
-        self._vaos: dict[tuple[Path, MeshKey | None], moderngl.VertexArray] = {}
-        self._progs: dict[Path, moderngl.Program] = {}
-        self._members: dict[Path, frozenset[str]] = {}
-        self._locs: dict[Path, tuple[tuple[int, int, int], ...]] = {}
+        self._buffers: dict[DrawPath, moderngl.Buffer | None] = dict.fromkeys(DrawPath, None)
+        self._vaos: dict[tuple[DrawPath, MeshKey | None], moderngl.VertexArray] = {}
+        self._progs: dict[DrawPath, moderngl.Program] = {}
+        self._members: dict[DrawPath, frozenset[str]] = {}
+        self._locs: dict[DrawPath, tuple[tuple[int, int, int], ...]] = {}
         self._meshes: dict[MeshKey, GpuMesh | None] = {}
         self._generation = -1
         self._broken = ""
@@ -175,7 +177,7 @@ class DebugPass(BasePass):
         self._generation = ctx.programs.generation
         return True
 
-    def _ensure_buffer(self, ctx: PassContext, path: Path, records: int) -> moderngl.Buffer:
+    def _ensure_buffer(self, ctx: PassContext, path: DrawPath, records: int) -> moderngl.Buffer:
         stride = RECORD_FLOATS[path] * 4
         buf = self._buffers[path]
         if buf is not None and buf.size >= records * stride:
@@ -190,7 +192,7 @@ class DebugPass(BasePass):
         return buf
 
     def _vao(
-        self, ctx: PassContext, path: Path, mesh: MeshKey | None
+        self, ctx: PassContext, path: DrawPath, mesh: MeshKey | None
     ) -> moderngl.VertexArray | None:
         vao = self._vaos.get((path, mesh))
         if vao is not None:
@@ -234,7 +236,7 @@ class DebugPass(BasePass):
         assert ctx is not None
         text_ready = self._text.prepare(ctx, frame.texts, frame.text_count)
 
-        for path in Path:
+        for path in DrawPath:
             n = frame.counts[path]
             if n:
                 self._ensure_buffer(ctx, path, n).write(frame.stream(path))
@@ -316,7 +318,7 @@ class DebugPass(BasePass):
 
         buf.write(frame.stream(b.path)[b.start : b.start + b.count])
 
-    def _set_common(self, ctx: PassContext, path: Path) -> None:
+    def _set_common(self, ctx: PassContext, path: DrawPath) -> None:
         prog = self._progs[path]
         members = self._members[path]
 
@@ -341,7 +343,7 @@ class DebugPass(BasePass):
         for buf in self._buffers.values():
             if buf is not None:
                 buf.release()
-        self._buffers = dict.fromkeys(Path, None)
+        self._buffers = dict.fromkeys(DrawPath, None)
         for mesh in self._meshes.values():
             if mesh is not None:
                 mesh.release()

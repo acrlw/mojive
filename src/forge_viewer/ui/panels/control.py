@@ -116,7 +116,7 @@ class ControlPanel(Panel):
                 if changed:
                     ctx.submit(cmd.SetEqualityEnabled(constraint.constraint_id, enabled))
                 imgui.same_line()
-                imgui.text_disabled(constraint.kind)
+                imgui.text_disabled(constraint.type)
 
         frame = s.frame
         if begin_kv_table("control_kv"):

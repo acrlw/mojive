@@ -9,11 +9,11 @@ import numpy as np
 import pytest
 
 from forge_viewer.adapters.base import (
-    ActuatorVisualKind,
-    BvhKind,
+    ActuatorVisualType,
+    BvhType,
     FrameNeeds,
-    JointVisualKind,
-    NodeKind,
+    JointVisualType,
+    NodeType,
 )
 from forge_viewer.types import ShadingModel
 
@@ -171,7 +171,7 @@ def test_object_id_is_per_body(adapter):
     assert ids("cap") != ids("lower")
 
     nodes = adapter.nodes()
-    body_ids = {n.object_id for n in nodes if n.kind in (NodeKind.LINK, NodeKind.ROBOT)}
+    body_ids = {n.object_id for n in nodes if n.type in (NodeType.LINK, NodeType.ROBOT)}
     assert ids("cap") <= body_ids
 
 
@@ -215,8 +215,54 @@ def test_textures_are_srgb_and_cube_is_six_faces(adapter):
     assert all(t.srgb for t in src.textures.values())
     assert src.skybox == "sky"
     sky = src.textures["sky"]
-    assert sky.pixels.ndim == 4 and sky.pixels.shape[0] == 6
+    assert sky.pixels.shape == (6, 4, 4, 3)
     assert src.textures["grid"].pixels.ndim == 3
+
+
+def test_square_cube_texture_repeats_one_image_on_every_face(tmp_path):
+    from PIL import Image
+
+    pixels = np.arange(8 * 8 * 3, dtype=np.uint8).reshape(8, 8, 3)
+    Image.fromarray(pixels, "RGB").save(tmp_path / "cube.png")
+    path = tmp_path / "cube.xml"
+    path.write_text(
+        """
+        <mujoco>
+          <asset><texture name="cube" type="cube" file="cube.png"/></asset>
+          <worldbody><geom type="box" size=".1 .1 .1"/></worldbody>
+        </mujoco>
+        """
+    )
+
+    cube_adapter = MuJoCoAdapter(path)
+    try:
+        texture = cube_adapter.scene_source().textures["cube"]
+        assert texture.pixels.shape == (6, 8, 8, 3)
+        assert np.all(texture.pixels == texture.pixels[0])
+    finally:
+        cube_adapter.release()
+
+
+def test_flex_uv_indices_can_reference_texture_coordinates_beyond_vertex_count():
+    from types import SimpleNamespace
+
+    from forge_viewer.adapters.mujoco_deformables import _SurfaceFlex
+
+    surface = object.__new__(_SurfaceFlex)
+    surface._corner_ids = np.array([0, 1, 2, 0, 2, 1], np.int32)
+    surface._smooth = False
+    model = SimpleNamespace(
+        flex_texcoordadr=np.array([0], np.int32),
+        nflextexcoord=4,
+        flex_texcoord=np.array(((0, 0), (1, 0), (0, 1), (1, 1)), np.float32),
+        flex_elemdataadr=np.array([0], np.int32),
+        flex_elemtexcoord=np.array([0, 1, 3], np.int32),
+        flex_vertnum=np.array([3], np.int32),
+    )
+
+    uvs = surface._uvs(model, 0, np.array([[0, 1, 2]]), np.empty((0, 2)), 2)
+
+    assert uvs == pytest.approx(model.flex_texcoord[[0, 1, 3, 0, 3, 1]])
 
 
 def test_material_and_lights(adapter):
@@ -267,7 +313,7 @@ def test_material_and_lights(adapter):
 
     assert lights.ambient == pytest.approx(np.asarray(hl.ambient))
 
-    node = next(node for node in adapter.nodes() if node.kind is NodeKind.LIGHT)
+    node = next(node for node in adapter.nodes() if node.type is NodeType.LIGHT)
     assert node.object_id and node.light_index == 0
     edited = replace(lights.lights[0], diffuse=np.array([0.2, 0.3, 0.4], np.float32))
     assert adapter.set_light(0, edited)
@@ -342,23 +388,23 @@ def test_trackcom_light_edit_updates_while_simulation_is_paused(tmp_path):
 def test_forge_area_light_survives_mujoco_writeback(adapter, fixture_path):
     from forge_viewer import commands as cmd
     from forge_viewer.session import Session
-    from forge_viewer.types import LightKind
+    from forge_viewer.types import LightType
 
     session = Session(adapter, fixture_path)
     source_light = session.source.lights.lights[0]
-    edited = replace(source_light, kind=LightKind.AREA, area_radius=0.35)
+    edited = replace(source_light, type=LightType.AREA, area_radius=0.35)
 
     assert session.submit(cmd.SetLight(0, edited))
-    assert session.source.lights.lights[0].kind is LightKind.AREA
+    assert session.source.lights.lights[0].type is LightType.AREA
     assert int(adapter.model.light_type[0]) == int(mujoco.mjtLightType.mjLIGHT_POINT)
 
     frame = session.tick(FrameNeeds())
-    assert frame.lights.lights[0].kind is LightKind.AREA
+    assert frame.lights.lights[0].type is LightType.AREA
     assert frame.lights.lights[0].position == pytest.approx(adapter.data.light_xpos[0])
 
 
 def test_image_light_preserves_its_cube_texture_and_intensity(tmp_path):
-    from forge_viewer.types import LightKind
+    from forge_viewer.types import LightType
 
     path = tmp_path / "image_light.xml"
     path.write_text(
@@ -378,9 +424,11 @@ def test_image_light_preserves_its_cube_texture_and_intensity(tmp_path):
     image_adapter = MuJoCoAdapter(path)
     try:
         light = image_adapter.scene_source().lights.lights[0]
-        assert light.kind is LightKind.IMAGE
+        texture = image_adapter.scene_source().textures["studio"]
+        assert light.type is LightType.IMAGE
         assert light.texture == "studio"
         assert light.intensity == pytest.approx(7500.0)
+        assert texture.pixels.shape == (6, 8, 8, 3)
 
         edited = replace(light, intensity=3200.0)
         assert image_adapter.set_light(0, edited)
@@ -424,13 +472,13 @@ def test_diagnostic_metadata_and_frame_match_mujoco(adapter):
     model, data = adapter.model, adapter.data
     expected_kinds = np.asarray(
         [
-            JointVisualKind.FREE,
-            JointVisualKind.HINGE,
-            JointVisualKind.HINGE,
+            JointVisualType.FREE,
+            JointVisualType.HINGE,
+            JointVisualType.HINGE,
         ],
         np.uint8,
     )
-    assert source.joint_kinds == pytest.approx(expected_kinds)
+    assert source.joint_types == pytest.approx(expected_kinds)
     assert source.joint_visible.tolist() == [True] * model.njnt
     assert source.joint_length == pytest.approx(model.stat.meansize * model.vis.scale.jointlength)
     assert source.joint_width == pytest.approx(model.stat.meansize * model.vis.scale.jointwidth)
@@ -447,7 +495,7 @@ def test_diagnostic_metadata_and_frame_match_mujoco(adapter):
     mass = np.asarray(model.body_mass[moving])
     assert 8.0 * np.prod(source.scaled_inertia_sizes, axis=1) == pytest.approx(mass / 1000.0)
 
-    assert source.actuator_visual_kinds.tolist() == [ActuatorVisualKind.HINGE]
+    assert source.actuator_visual_types.tolist() == [ActuatorVisualType.HINGE]
     assert source.actuator_visual_actuators.tolist() == [0]
     assert source.actuator_visual_sizes[0] == pytest.approx(
         (
@@ -573,8 +621,8 @@ def test_set_qpos_on_joint_types_scene():
     slide = joints["slide"]
     assert a.data.qpos[slide.qpos_adr] == pytest.approx(before[slide.qpos_adr])
 
-    body_kinds = (NodeKind.WORLD, NodeKind.ROBOT, NodeKind.LINK)
-    nodes = {n.name: n for n in a.nodes() if n.kind in body_kinds}
+    body_kinds = (NodeType.WORLD, NodeType.ROBOT, NodeType.LINK)
+    nodes = {n.name: n for n in a.nodes() if n.type in body_kinds}
     assert nodes["free_body"].posable
     assert nodes["free_chain"].posable
     for name in ("ball_body", "slide_body", "hinge_body", "chain_root", "chain_0"):
@@ -634,7 +682,7 @@ def test_equality_constraints_are_listed_and_switchable():
     session = Session(adapter)
     try:
         constraints = session.equality_constraints
-        assert [(item.name, item.kind, item.enabled) for item in constraints] == [
+        assert [(item.name, item.type, item.enabled) for item in constraints] == [
             ("mocap_weld", "mjEQ_WELD", True)
         ]
         assert session.submit(cmd.SetEqualityEnabled(0, False))
@@ -728,7 +776,7 @@ def test_sensor_metadata_addresses_the_frame_values(adapter):
     sensors = adapter.sensors()
     assert len(sensors) == 1
     sensor = sensors[0]
-    assert (sensor.name, sensor.kind, sensor.data_adr, sensor.dim) == (
+    assert (sensor.name, sensor.type, sensor.data_adr, sensor.dim) == (
         "root_pos",
         "mjSENS_FRAMEPOS",
         0,
@@ -824,7 +872,7 @@ def test_mjspec_model_composition_preserves_matching_state(tmp_path):
     assert adapter.data.ctrl[0] == pytest.approx(0.6)
     assert adapter.data.time == pytest.approx(2.5)
     assert adapter.model.body("forge_1_payload").id > 0
-    model_node = next(node for node in session.nodes if node.kind is NodeKind.MODEL)
+    model_node = next(node for node in session.nodes if node.type is NodeType.MODEL)
     assert model_node.name == "payload" and model_node.model_id == added.entity_id
     assert any(session.node(child).name == "forge_1_payload" for child in model_node.children)
 
@@ -960,7 +1008,7 @@ def test_actuator_visual_metadata_and_controls_follow_mujoco_addresses():
         frame = a.frame(FrameNeeds(poses=False, actuator=True, diagnostics=True))
         assert frame.actuator_activation.shape == (model.nactuator,)
         assert frame.diagnostics.actuator_xpos.shape[0] == len(
-            source.diagnostics.actuator_visual_kinds
+            source.diagnostics.actuator_visual_types
         )
 
         address = actuators[1].ctrl_address
@@ -1085,14 +1133,14 @@ def test_island_colors_match_mujocos_visualizer():
 
 
 @pytest.mark.parametrize(
-    ("asset", "flag", "kind", "depth", "show_inactive"),
+    ("asset", "flag", "bvh_type", "depth", "show_inactive"),
     (
-        ("joint_types", mujoco.mjtVisFlag.mjVIS_BODYBVH, BvhKind.BODY, 1, False),
-        ("dense_mesh", mujoco.mjtVisFlag.mjVIS_MESHBVH, BvhKind.MESH, 2, True),
-        ("deformables", mujoco.mjtVisFlag.mjVIS_MESHBVH, BvhKind.FLEX, 2, False),
+        ("joint_types", mujoco.mjtVisFlag.mjVIS_BODYBVH, BvhType.BODY, 1, False),
+        ("dense_mesh", mujoco.mjtVisFlag.mjVIS_MESHBVH, BvhType.MESH, 2, True),
+        ("deformables", mujoco.mjtVisFlag.mjVIS_MESHBVH, BvhType.FLEX, 2, False),
     ),
 )
-def test_bvh_boxes_match_mujocos_visualizer(asset, flag, kind, depth, show_inactive):
+def test_bvh_boxes_match_mujocos_visualizer(asset, flag, bvh_type, depth, show_inactive):
     from forge_viewer.assets import resolve
 
     adapter = MuJoCoAdapter(resolve(asset))
@@ -1122,7 +1170,7 @@ def test_bvh_boxes_match_mujocos_visualizer(asset, flag, kind, depth, show_inact
             if int(geom.type) == int(mujoco.mjtGeom.mjGEOM_LINEBOX)
         ]
 
-        selected = (source.bvh_kind == int(kind)) & (
+        selected = (source.bvh_type == int(bvh_type)) & (
             (source.bvh_depth == depth) | (source.bvh_leaf & (source.bvh_depth < depth))
         )
         records = np.flatnonzero(selected)
@@ -1242,7 +1290,7 @@ def test_deformables_match_mujocos_abstract_visualization():
         assert audit_model(a.model)["unsupported"] == 0
         assert sum(src.geom_pose_source == int(InstancePoseSource.WORLD)) == 6
         deformable_nodes = [
-            node for node in a.nodes() if node.kind in (NodeKind.FLEX, NodeKind.SKIN)
+            node for node in a.nodes() if node.type in (NodeType.FLEX, NodeType.SKIN)
         ]
         deformable_ids = {node.object_id for node in deformable_nodes}
         assert len(deformable_ids) == 4
@@ -1397,7 +1445,7 @@ def test_mujoco_model_cameras_follow_forward_kinematics():
     try:
         cameras = {c.name: c.camera_id for c in a.cameras()}
         assert set(cameras) == {"overview", "calibrated_shift", "ball_camera"}
-        camera_nodes = [node for node in a.nodes() if node.kind is NodeKind.CAMERA]
+        camera_nodes = [node for node in a.nodes() if node.type is NodeType.CAMERA]
         assert [node.camera_index for node in camera_nodes] == [0, 1, 2]
         assert [node.object_id for node in camera_nodes] == [
             camera.object_id for camera in a.cameras()
@@ -1553,7 +1601,7 @@ def test_mujoco_geom_groups_rebuild_scene_nodes_and_raycast_mask():
         assert a.set_visual_group("actuator", 0, False)
         assert a.scene_source().actuator_visible.tolist() == [False]
         assert a.set_visual_group("site", 0, False)
-        assert not any(n.kind is NodeKind.SITE for n in a.nodes())
+        assert not any(n.type is NodeType.SITE for n in a.nodes())
         assert not a.set_visual_group("geom", 6, True)
         assert not a.set_visual_group("unknown", 0, True)
     finally:

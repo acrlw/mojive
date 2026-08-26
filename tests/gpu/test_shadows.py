@@ -17,8 +17,8 @@ from forge_viewer.render.scene import SceneBuilder  # noqa: E402
 from forge_viewer.types import (  # noqa: E402
     CameraView,
     Light,
-    LightKind,
     LightSet,
+    LightType,
     Material,
     MeshKey,
     MeshShape,
@@ -114,7 +114,7 @@ def _scene(
             2,
         )
     sun = Light(
-        kind=LightKind.DIRECTIONAL,
+        type=LightType.DIRECTIONAL,
         direction=sun_dir,
         diffuse=np.full(3, 0.85, np.float32),
         specular=np.zeros(3, np.float32),
@@ -122,7 +122,7 @@ def _scene(
     )
 
     fill = Light(
-        kind=LightKind.DIRECTIONAL,
+        type=LightType.DIRECTIONAL,
         direction=np.array([-0.6, -0.4, -1.0], np.float32),
         diffuse=np.full(3, 0.15, np.float32),
         specular=np.zeros(3, np.float32),
@@ -153,7 +153,7 @@ def _spot_scene(camera: CameraView, cast: bool = True):
         2,
     )
     spot = Light(
-        kind=LightKind.SPOT,
+        type=LightType.SPOT,
         position=SPOT_POS,
         direction=SPOT_DIR,
         diffuse=np.full(3, 0.9, np.float32),
@@ -171,7 +171,7 @@ def _point_scene(
     cast: bool = True,
     light_range: float = 0.0,
     active: bool = True,
-    kind: LightKind = LightKind.POINT,
+    light_type: LightType = LightType.POINT,
     area_radius: float = 0.0,
 ):
     b = SceneBuilder()
@@ -194,7 +194,7 @@ def _point_scene(
         2,
     )
     point = Light(
-        kind=kind,
+        type=light_type,
         position=POINT_POS,
         diffuse=np.full(3, 0.9, np.float32),
         specular=np.zeros(3, np.float32),
@@ -231,7 +231,7 @@ def _render_point(
     cast=True,
     light_range=0.0,
     active=True,
-    kind=LightKind.POINT,
+    light_type=LightType.POINT,
     area_radius=0.0,
 ) -> np.ndarray:
     backend.set_flag(RenderFlag.SHADOW, bool(shadow))
@@ -242,7 +242,7 @@ def _render_point(
             cast=cast,
             light_range=light_range,
             active=active,
-            kind=kind,
+            light_type=light_type,
             area_radius=area_radius,
         )
     )
@@ -419,7 +419,7 @@ def _many_spot_scene(camera: CameraView, cast_count: int):
     scene = _spot_scene(camera)
     lights = tuple(
         Light(
-            kind=LightKind.SPOT,
+            type=LightType.SPOT,
             position=SPOT_POS,
             direction=SPOT_DIR,
             diffuse=np.full(3, 0.12, np.float32),
@@ -471,11 +471,11 @@ def test_light_range_culls_lighting_and_shadow_casters(backend):
 
 
 def test_area_light_soft_shadow_is_reversible_to_hard_shadow(backend):
-    lit = _render_point(backend, shadow=False, kind=LightKind.AREA, area_radius=0.5)
+    lit = _render_point(backend, shadow=False, light_type=LightType.AREA, area_radius=0.5)
     ambient = _render_point(backend, shadow=True, active=False)
     hard_point = _render_point(backend, shadow=True)
-    hard_area = _render_point(backend, shadow=True, kind=LightKind.AREA, area_radius=0.0)
-    soft = _render_point(backend, shadow=True, kind=LightKind.AREA, area_radius=0.5)
+    hard_area = _render_point(backend, shadow=True, light_type=LightType.AREA, area_radius=0.0)
+    soft = _render_point(backend, shadow=True, light_type=LightType.AREA, area_radius=0.5)
 
     assert np.array_equal(hard_area, hard_point)
     assert not np.array_equal(soft, hard_area)

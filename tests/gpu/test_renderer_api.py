@@ -286,5 +286,5 @@ def test_renderer_segmentation_maps_flex_and_skin_objects():
         renderer.enable_segmentation_rendering()
         pairs = {tuple(pair) for pair in renderer.render().reshape(-1, 2)}
 
-    assert any(kind == int(mujoco.mjtObj.mjOBJ_FLEX) for _, kind in pairs)
-    assert any(kind == int(mujoco.mjtObj.mjOBJ_SKIN) for _, kind in pairs)
+    assert any(object_type == int(mujoco.mjtObj.mjOBJ_FLEX) for _, object_type in pairs)
+    assert any(object_type == int(mujoco.mjtObj.mjOBJ_SKIN) for _, object_type in pairs)

@@ -76,7 +76,7 @@ class CameraView:
         return 2.0 * self.distance() * float(np.tan(self.fov_y * 0.5))
 
 
-class LightKind(enum.IntEnum):
+class LightType(enum.IntEnum):
     """Supported light source models."""
 
     DIRECTIONAL = 0
@@ -95,7 +95,7 @@ class Light:
     range estimation from attenuation.
     """
 
-    kind: LightKind = LightKind.DIRECTIONAL
+    type: LightType = LightType.DIRECTIONAL
     position: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 3.0], np.float32))
     direction: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, -1.0], np.float32))
     diffuse: np.ndarray = field(default_factory=lambda: np.full(3, 0.7, np.float32))
@@ -148,7 +148,7 @@ class LightSet:
         return tuple(
             light
             for light in self.lights
-            if light.active and light.cast_shadow and light.kind is not LightKind.IMAGE
+            if light.active and light.cast_shadow and light.type is not LightType.IMAGE
         )
 
     def environment(self) -> Environment:
@@ -182,7 +182,7 @@ class LightSet:
 
 
 DEFAULT_HEADLIGHT = Light(
-    kind=LightKind.DIRECTIONAL,
+    type=LightType.DIRECTIONAL,
     diffuse=np.full(3, 0.4, np.float32),
     specular=np.full(3, 0.5, np.float32),
     ambient=np.full(3, 0.1, np.float32),
@@ -276,7 +276,7 @@ class MeshUpdate:
     normals: np.ndarray  # (V, 3) f32
 
 
-class TextureKind(enum.StrEnum):
+class TextureType(enum.StrEnum):
     """Texture dimensionality and environment role."""
 
     TWO_D = "2d"
@@ -296,14 +296,14 @@ class TextureData:
     """Named uint8 texture pixels stored in a scene source."""
 
     name: str
-    kind: TextureKind
+    type: TextureType
     pixels: np.ndarray  # 2D: (H, W, C) u8; cube/skybox: (6, S, S, C) u8
     srgb: bool = True
 
     @property
     def size(self) -> tuple[int, int]:
         """Return texture width and height."""
-        if self.kind is TextureKind.TWO_D:
+        if self.type is TextureType.TWO_D:
             return int(self.pixels.shape[1]), int(self.pixels.shape[0])
         return int(self.pixels.shape[2]), int(self.pixels.shape[1])
 
