@@ -9,6 +9,7 @@ import pytest
 mujoco = pytest.importorskip("mujoco")
 
 import forge_viewer  # noqa: E402
+import forge_viewer.renderer as renderer_module  # noqa: E402
 from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter  # noqa: E402
 
 
@@ -111,3 +112,66 @@ def test_adapter_refreshes_direct_model_visual_edits():
         assert not adapter.refresh_model_visuals()
     finally:
         adapter.release()
+
+
+def test_renderer_releases_backend_without_a_separate_graphics_context():
+    class Releasable:
+        def __init__(self):
+            self.releases = 0
+
+        def release(self):
+            self.releases += 1
+
+    renderer = renderer_module.Renderer.__new__(renderer_module.Renderer)
+    renderer._closed = False
+    renderer._context = None
+    backend = Releasable()
+    adapter = Releasable()
+    renderer._backend = backend
+    renderer._adapter = adapter
+
+    renderer.close()
+    renderer.close()
+
+    assert renderer._backend is None
+    assert renderer._adapter is None
+    assert backend.releases == 1
+    assert adapter.releases == 1
+
+
+def test_renderer_releases_backend_when_initialization_fails(monkeypatch):
+    class BrokenBackend:
+        def __init__(self):
+            self.releases = 0
+
+        def set_background(self, color):
+            del color
+            raise RuntimeError("backend setup failed")
+
+        def release(self):
+            self.releases += 1
+
+    backend = BrokenBackend()
+    monkeypatch.setattr(renderer_module, "_select_backend", lambda *args: (None, backend))
+
+    with pytest.raises(RuntimeError, match="backend setup failed"):
+        renderer_module.Renderer(_model(), width=64, height=48)
+
+    assert backend.releases == 1
+
+
+@pytest.mark.parametrize(
+    "method",
+    (
+        "enable_depth_rendering",
+        "disable_depth_rendering",
+        "enable_segmentation_rendering",
+        "disable_segmentation_rendering",
+    ),
+)
+def test_renderer_output_modes_reject_calls_after_close(method):
+    renderer = renderer_module.Renderer.__new__(renderer_module.Renderer)
+    renderer._closed = True
+
+    with pytest.raises(RuntimeError, match=f"{method} cannot be called after close"):
+        getattr(renderer, method)()

@@ -444,7 +444,7 @@ class ForgeBackend:
             debug.configure_text(primary, primary_index, fallback, fallback_index, size_px)
 
     def render(self, frame: SceneFrame | None = None) -> ViewportImage | None:
-        if self._scene is None and self._builder is not None and frame is not None:
+        if frame is not None:
             self.update(frame)
         scene = self._scene
         if scene is None or not self.gl_caps.usable:

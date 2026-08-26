@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import pickle
 import queue
 import threading
@@ -63,6 +64,7 @@ class RemoteFrame:
     frame_sequence: int
     frame: SceneFrame
     debug_commands: tuple[dict, ...] = ()
+    structure_revision: int = -1
 
 
 def snapshot_structure(session) -> RemoteStructure:
@@ -93,8 +95,10 @@ class _LatestSender:
         self.closed = False
         threading.Thread(target=self._run, name="forge-remote-send", daemon=True).start()
 
-    def reliable(self, payload: bytes) -> None:
+    def reliable(self, payload: bytes, *, clear_latest: bool = False) -> None:
         with self._condition:
+            if clear_latest:
+                self._latest = None
             self._reliable.append(payload)
             self._condition.notify()
 
@@ -136,23 +140,34 @@ class _LatestSender:
 class _CommandRequest:
     payload: dict
     done: threading.Event = field(default_factory=threading.Event)
+    cancelled: threading.Event = field(default_factory=threading.Event)
     result: Any = None
 
 
 class SnapshotPublisher:
     """Transport reliable scene structure and latest-only frames."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> None:
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = DEFAULT_PORT,
+        *,
+        command_timeout: float = 10.0,
+    ) -> None:
         self.host, self.port = host, int(port)
         self.command_port = self.port + 1
         self._state_listener = Listener((host, self.port), authkey=AUTHKEY)
         self._command_listener = Listener((host, self.command_port), authkey=AUTHKEY)
         self._clients: list[_LatestSender] = []
         self._clients_lock = threading.Lock()
+        self._command_clients: set[Connection] = set()
+        self._command_clients_lock = threading.Lock()
         self._commands: queue.SimpleQueue[_CommandRequest] = queue.SimpleQueue()
         self._structure: bytes | None = None
+        self._structure_revision = -1
         self._frame: bytes | None = None
         self._frame_sequence = 0
+        self._command_timeout = max(0.0, float(command_timeout))
         self._closed = False
         threading.Thread(target=self._accept_state, name="forge-remote-state", daemon=True).start()
         threading.Thread(
@@ -163,17 +178,24 @@ class SnapshotPublisher:
         """Reliably publish stable structure to current and future clients."""
         payload = pickle.dumps(structure, protocol=pickle.HIGHEST_PROTOCOL)
         self._structure = payload
+        self._structure_revision = int(structure.structure_revision)
+        self._frame = None
         with self._clients_lock:
             self._clients = [client for client in self._clients if not client.closed]
             clients = tuple(self._clients)
         for client in clients:
-            client.reliable(payload)
+            client.reliable(payload, clear_latest=True)
 
     def publish_frame(self, frame: SceneFrame, debug_commands=None) -> int:
         """Publish a latest-only frame and return its sequence number."""
         self._frame_sequence += 1
         commands = frame.debug_commands if debug_commands is None else debug_commands
-        packet = RemoteFrame(self._frame_sequence, frame, tuple(commands or ()))
+        packet = RemoteFrame(
+            frame_sequence=self._frame_sequence,
+            frame=frame,
+            debug_commands=tuple(commands or ()),
+            structure_revision=self._structure_revision,
+        )
         payload = pickle.dumps(packet, protocol=pickle.HIGHEST_PROTOCOL)
         self._frame = payload
         with self._clients_lock:
@@ -191,6 +213,10 @@ class SnapshotPublisher:
                 request = self._commands.get_nowait()
             except queue.Empty:
                 break
+            if request.cancelled.is_set():
+                request.done.set()
+                count += 1
+                continue
             try:
                 request.result = handler(request.payload)
             except Exception as exc:
@@ -219,6 +245,11 @@ class SnapshotPublisher:
                 connection = self._command_listener.accept()
             except (EOFError, OSError):
                 return
+            with self._command_clients_lock:
+                if self._closed:
+                    connection.close()
+                    return
+                self._command_clients.add(connection)
             threading.Thread(
                 target=self._command_client,
                 args=(connection,),
@@ -231,17 +262,23 @@ class SnapshotPublisher:
             while not self._closed:
                 request = _CommandRequest(connection.recv())
                 self._commands.put(request)
-                if not request.done.wait(10.0):
+                if not request.done.wait(self._command_timeout):
+                    request.cancelled.set()
                     connection.send(CommandResult.bad("remote command timed out"))
                 else:
                     connection.send(request.result)
         except (EOFError, OSError):
             pass
         finally:
-            connection.close()
+            with self._command_clients_lock:
+                self._command_clients.discard(connection)
+            with contextlib.suppress(OSError):
+                connection.close()
 
     def close(self) -> None:
         """Close listeners and all connected clients."""
+        if self._closed:
+            return
         self._closed = True
         self._state_listener.close()
         self._command_listener.close()
@@ -249,6 +286,11 @@ class SnapshotPublisher:
             clients, self._clients = self._clients, []
         for client in clients:
             client.close()
+        with self._command_clients_lock:
+            command_clients, self._command_clients = self._command_clients, set()
+        for connection in command_clients:
+            with contextlib.suppress(OSError):
+                connection.close()
 
 
 class RemoteSceneAdapter(SceneAdapterBase):
@@ -264,19 +306,30 @@ class RemoteSceneAdapter(SceneAdapterBase):
         self._delivered_sequence = -1
         self._error = ""
         self._closed = False
+        self._timeout = float(timeout)
         self._command_lock = threading.Lock()
-        self._state = self._connect((host, self.port), timeout)
-        self._command = self._connect((host, self.port + 1), timeout)
-        threading.Thread(target=self._receive, name="forge-remote-receive", daemon=True).start()
-        self._wait(lambda: self._structure is not None, timeout, "scene structure")
+        self._state: Connection | None = None
+        self._command: Connection | None = None
+        try:
+            self._state = self._connect((host, self.port), timeout)
+            self._command = self._connect((host, self.port + 1), timeout)
+            threading.Thread(target=self._receive, name="forge-remote-receive", daemon=True).start()
+            self._wait(lambda: self._structure is not None, timeout, "scene structure")
+        except Exception:
+            self.release()
+            raise
         caps = self._structure.caps
         self.caps = replace(
             caps,
             name=f"remote:{caps.name}",
+            asset_loading=False,
             external_clock=True,
+            state_snapshots=False,
             edit_history=False,
             model_composition=False,
-            model_cameras=bool(self._structure.cameras),
+            model_cameras=caps.model_cameras,
+            scene_files=False,
+            topology_editing=False,
             notes=(*caps.notes, f"attached to {host}:{port}"),
         )
 
@@ -297,11 +350,19 @@ class RemoteSceneAdapter(SceneAdapterBase):
     def _receive(self) -> None:
         try:
             while not self._closed:
+                if self._state is None:
+                    return
                 packet = pickle.loads(self._state.recv_bytes())
                 with self._lock:
                     if isinstance(packet, RemoteStructure):
                         self._structure = packet
-                    elif isinstance(packet, RemoteFrame):
+                        self._latest = None
+                        self._delivered_sequence = -1
+                    elif (
+                        isinstance(packet, RemoteFrame)
+                        and self._structure is not None
+                        and packet.structure_revision == self._structure.structure_revision
+                    ):
                         self._latest = packet
                     self._lock.notify_all()
         except (EOFError, OSError, pickle.PickleError) as exc:
@@ -324,11 +385,12 @@ class RemoteSceneAdapter(SceneAdapterBase):
             return self._structure.structure_revision if self._structure is not None else -1
 
     def scene_source(self) -> SceneSource:
-        self._wait(lambda: self._structure is not None, 8.0, "scene structure")
+        self._wait(lambda: self._structure is not None, self._timeout, "scene structure")
         return self._structure.source
 
     def frame(self, needs: FrameNeeds) -> SceneFrame:
-        self._wait(lambda: self._latest is not None, 8.0, "first frame")
+        del needs
+        self._wait(lambda: self._latest is not None, self._timeout, "first frame")
         with self._lock:
             packet = self._latest
             packet.frame.debug_commands = (
@@ -392,6 +454,8 @@ class RemoteSceneAdapter(SceneAdapterBase):
     def _send(self, op: str, **args):
         with self._command_lock:
             try:
+                if self._command is None:
+                    return CommandResult.bad("remote command channel is closed")
                 self._command.send({"op": op, **args})
                 return self._command.recv()
             except (EOFError, OSError):
@@ -466,6 +530,15 @@ class RemoteSceneAdapter(SceneAdapterBase):
             )
         )
 
+    def set_geometry_size(self, node_id: int, size: np.ndarray) -> bool:
+        return self._ok(
+            self._send_structure_edit(
+                "geometry_size",
+                node_id=int(node_id),
+                size=np.asarray(size, np.float32),
+            )
+        )
+
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
         return self._ok(self._send("scene_camera", camera_id=int(camera_id), camera=camera))
 
@@ -473,7 +546,11 @@ class RemoteSceneAdapter(SceneAdapterBase):
         revision = self.structure_revision
         result = self._send(op, **args)
         if isinstance(result, CommandResult) and result.ok:
-            self._wait(lambda: self.structure_revision != revision, 8.0, "scene structure update")
+            self._wait(
+                lambda: self.structure_revision != revision,
+                self._timeout,
+                "scene structure update",
+            )
         return result
 
     def add_scene_object(self, shape, name, size, position, rotation, color, material) -> int:
@@ -506,6 +583,20 @@ class RemoteSceneAdapter(SceneAdapterBase):
     def remove_scene_camera(self, camera_id: int) -> bool:
         return self._ok(self._send_structure_edit("remove_scene_camera", camera_id=int(camera_id)))
 
+    def duplicate_scene_entity(self, object_id: int) -> int:
+        result = self._send_structure_edit("duplicate_scene_entity", object_id=int(object_id))
+        return result.entity_id if result.ok else 0
+
+    def remove_scene_entity(self, object_id: int) -> bool:
+        return self._ok(self._send_structure_edit("remove_scene_entity", object_id=int(object_id)))
+
+    def rename_scene_entity(self, object_id: int, name: str) -> bool:
+        return self._ok(
+            self._send_structure_edit(
+                "rename_scene_entity", object_id=int(object_id), name=str(name)
+            )
+        )
+
     def apply_perturb(self, node_id: int, target_position, target_rotation, mode: str) -> bool:
         return self._ok(
             self._send(
@@ -529,9 +620,17 @@ class RemoteSceneAdapter(SceneAdapterBase):
         return tuple(result) if isinstance(result, tuple) else (0, float("inf"))
 
     def release(self) -> None:
+        if self._closed:
+            return
         self._closed = True
-        self._state.close()
-        self._command.close()
+        if self._state is not None:
+            with contextlib.suppress(OSError):
+                self._state.close()
+            self._state = None
+        if self._command is not None:
+            with contextlib.suppress(OSError):
+                self._command.close()
+            self._command = None
 
 
 def handle_session_command(session, message: dict):
@@ -573,6 +672,9 @@ def handle_session_command(session, message: dict):
         "remove_scene_light": lambda: cmd.RemoveSceneLight(message["light_id"]),
         "add_scene_camera": lambda: cmd.AddSceneCamera(message["name"], message["camera"]),
         "remove_scene_camera": lambda: cmd.RemoveSceneCamera(message["camera_id"]),
+        "duplicate_scene_entity": lambda: cmd.DuplicateSceneEntity(message["object_id"]),
+        "remove_scene_entity": lambda: cmd.RemoveSceneEntity(message["object_id"]),
+        "rename_scene_entity": lambda: cmd.RenameSceneEntity(message["object_id"], message["name"]),
         "perturb": lambda: cmd.Perturb(
             message["node_id"],
             message["target_position"],

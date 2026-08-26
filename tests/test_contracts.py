@@ -47,6 +47,16 @@ def test_adapter_and_render_extension_types_are_public():
         assert getattr(fv, name) is not None
 
 
+def test_null_backend_can_render_after_an_explicit_update():
+    from forge_viewer.adapters.base import SceneFrame
+    from forge_viewer.render.backend import NullBackend
+
+    backend = NullBackend()
+    backend.update(SceneFrame())
+
+    assert backend.render() is None
+
+
 def test_mujoco_visual_audit_covers_every_enum_flag():
     mujoco = pytest.importorskip("mujoco")
 

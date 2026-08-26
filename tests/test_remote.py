@@ -96,6 +96,63 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
         source_session.release()
 
 
+def test_structure_update_invalidates_frames_from_the_previous_revision():
+    scene = Scene()
+    scene.box(name="first")
+    source_session = Session(StaticSceneAdapter(scene))
+    source_session.tick(FrameNeeds(poses=True))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(source_session.frame)
+    remote = RemoteSceneAdapter(port=port, timeout=0.1)
+    try:
+        assert len(remote.frame(FrameNeeds()).geom_xpos) == 1
+
+        scene.sphere(name="second")
+        source_session.tick(FrameNeeds(poses=True))
+        revision = source_session.structure_generation
+        publisher.publish_structure(snapshot_structure(source_session))
+        assert _eventually(lambda: remote.structure_revision == revision)
+
+        with pytest.raises(TimeoutError, match="first frame"):
+            remote.frame(FrameNeeds())
+
+        publisher.publish_frame(source_session.frame)
+        frame = _eventually(
+            lambda: (
+                candidate if len((candidate := remote.frame(FrameNeeds())).geom_xpos) == 2 else None
+            )
+        )
+        assert len(frame.geom_xpos) == 2
+    finally:
+        remote.release()
+        publisher.close()
+        source_session.release()
+
+
+def test_remote_masks_operations_that_have_no_transport_and_retains_camera_capability():
+    source_session = Session(StaticSceneAdapter(Scene()))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(source_session.frame)
+    adapter = RemoteSceneAdapter(port=port)
+    session = Session(adapter)
+    try:
+        assert adapter.caps.model_cameras
+        assert not adapter.caps.scene_files
+        assert not adapter.caps.asset_loading
+        assert not adapter.caps.state_snapshots
+        result = session.submit(cmd.NewScene())
+        assert not result.ok
+        assert "does not support scene files" in result.message
+    finally:
+        session.release()
+        publisher.close()
+        source_session.release()
+
+
 def test_commands_use_a_separate_round_trip_channel():
     scene = Scene()
     scene.sphere()
@@ -126,6 +183,47 @@ def test_commands_use_a_separate_round_trip_channel():
     finally:
         stop.set()
         worker.join()
+        remote.release()
+        publisher.close()
+        source_session.release()
+
+
+def test_timed_out_command_is_cancelled_before_it_reaches_the_handler():
+    source_session = Session(StaticSceneAdapter(Scene()))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port, command_timeout=0.05)
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(source_session.frame)
+    remote = RemoteSceneAdapter(port=port)
+    handled = []
+    try:
+        assert not remote.set_paused(True)
+        assert publisher.pump_commands(lambda message: handled.append(message)) == 1
+        assert handled == []
+    finally:
+        remote.release()
+        publisher.close()
+        source_session.release()
+
+
+def test_publisher_close_unblocks_a_waiting_remote_command():
+    source_session = Session(StaticSceneAdapter(Scene()))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port, command_timeout=5.0)
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(source_session.frame)
+    remote = RemoteSceneAdapter(port=port)
+    results = []
+    worker = threading.Thread(target=lambda: results.append(remote.set_paused(True)))
+    worker.start()
+    try:
+        _eventually(lambda: not publisher._commands.empty())
+        publisher.close()
+        worker.join(timeout=1.0)
+
+        assert not worker.is_alive()
+        assert results == [False]
+    finally:
         remote.release()
         publisher.close()
         source_session.release()
@@ -236,6 +334,14 @@ def test_remote_scene_authoring_publishes_structure_updates():
         assert added.ok and added.entity_id > 0
         assert remote.node_by_object_id(added.entity_id).name == "live sphere"
         assert source.node_by_object_id(added.entity_id).name == "live sphere"
+
+        geometry_node_id = int(remote.source.geom_node[0])
+        assert remote.submit(cmd.SetGeometrySize(geometry_node_id, np.array([0.3, 0.4, 0.5])))
+        duplicate = remote.submit(cmd.DuplicateSceneEntity(added.entity_id))
+        assert duplicate.ok and duplicate.entity_id != added.entity_id
+        assert remote.submit(cmd.RenameSceneEntity(duplicate.entity_id, "remote copy"))
+        assert remote.node_by_object_id(duplicate.entity_id).name == "remote copy"
+        assert remote.submit(cmd.RemoveSceneEntity(duplicate.entity_id))
 
         light = remote.submit(cmd.AddSceneLight("live light", Light()))
         camera = remote.submit(cmd.AddSceneCamera("live camera", CameraView()))

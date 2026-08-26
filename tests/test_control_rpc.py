@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
+import stat
 import tempfile
 import threading
 from pathlib import Path
@@ -19,7 +20,9 @@ from forge_viewer.control_rpc import (
     ControlService,
     RpcClient,
     RpcError,
+    _mujoco_camera,
 )
+from forge_viewer.types import CameraView
 
 pytestmark = pytest.mark.physics
 
@@ -57,6 +60,39 @@ def test_rpc_routes_simulation_and_state_commands(rpc):
     assert after["paused"]
     assert after["physics"]["qpos"]["values"][0] == pytest.approx(changed[0])
     assert service.session.frame.step == 2
+
+
+def test_control_socket_is_private_to_the_current_user(rpc):
+    client, _, _ = rpc
+
+    assert stat.S_IMODE(client.socket_path.stat().st_mode) == 0o600
+
+
+def test_rpc_free_camera_preserves_eye_and_view_direction():
+    import mujoco
+
+    model = mujoco.MjModel.from_xml_string(
+        '<mujoco><worldbody><geom type="box" size=".1 .1 .1"/></worldbody></mujoco>'
+    )
+    view = CameraView(
+        eye=np.array([2.0, -3.0, 1.5], np.float32),
+        target=np.array([0.2, 0.4, 0.7], np.float32),
+        up=np.array([0.0, 0.0, 1.0], np.float32),
+    )
+    scene = mujoco.MjvScene(model, maxgeom=16)
+    mujoco.mjv_updateScene(
+        model,
+        mujoco.MjData(model),
+        mujoco.MjvOption(),
+        None,
+        _mujoco_camera(view),
+        mujoco.mjtCatBit.mjCAT_ALL,
+        scene,
+    )
+
+    eye = (np.asarray(scene.camera[0].pos) + np.asarray(scene.camera[1].pos)) * 0.5
+    assert eye == pytest.approx(view.eye, abs=1e-6)
+    assert scene.camera[0].forward == pytest.approx(view.forward(), abs=1e-6)
 
 
 def test_rpc_lists_selects_and_inspects_objects(rpc):

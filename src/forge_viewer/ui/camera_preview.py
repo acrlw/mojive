@@ -21,7 +21,7 @@ class CameraPreview:
         self._pinned = False
         self._locked = False
         self._camera_name = ""
-        self._camera_index = -1
+        self._camera_id = -1
         self._camera: CameraView | None = None
 
     def update(
@@ -130,7 +130,7 @@ class CameraPreview:
             self._locked = False
 
     def set_locked(self, locked: bool) -> None:
-        self._locked = bool(locked and self._camera_index >= 0)
+        self._locked = bool(locked and self._camera_id >= 0)
         if self._locked:
             self._pinned = False
 
@@ -138,7 +138,7 @@ class CameraPreview:
         if self._pinned:
             return self._camera_name, self._camera
         if self._locked:
-            camera = session.camera_view(self._camera_index)
+            camera = session.camera_view(self._camera_id)
             if camera is None:
                 self._locked = False
                 return "", None
@@ -147,11 +147,14 @@ class CameraPreview:
         node = session.selected_node
         if node is None or node.type is not NodeType.CAMERA or node.camera_index < 0:
             return "", None
-        camera = session.camera_view(node.camera_index)
+        if node.camera_index >= len(session.cameras):
+            return "", None
+        camera_id = session.cameras[node.camera_index].camera_id
+        camera = session.camera_view(camera_id)
         if camera is None:
             return "", None
         self._camera_name = node.name
-        self._camera_index = node.camera_index
+        self._camera_id = camera_id
         self._camera = _copy_camera(camera)
         return self._camera_name, self._camera
 

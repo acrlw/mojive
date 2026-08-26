@@ -14,6 +14,7 @@ from imgui_bundle import imgui, portable_file_dialogs
 
 from .. import commands as cmd
 from ..adapters.base import FrameNeeds, NodeType
+from ..log import get_logger
 from ..render.backend import FrameMode, LabelMode, RenderFlag
 from ..types import Light, LightType, MeshShape, ViewportImage
 from ..workspace_io import (
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from ..session import Session
 
 CLICK_SLOP_PT = 4.0
+log = get_logger("ui")
 
 
 PICK_SCREEN_RADIUS_PT = 40.0
@@ -132,6 +134,7 @@ class ViewerApp:
         if os.environ.get("FORGE_VIEWER_OPEN_SETTINGS") == "1":
             self.panels.open_panel("Settings")
         self._started = False
+        self._released = False
         self._frame_index = 0
         self._last_time = time.perf_counter()
         self._viewport_rect = (0.0, 0.0, 640.0, 480.0)
@@ -193,7 +196,6 @@ class ViewerApp:
             if max_frames is not None and self._frame_index >= max_frames:
                 break
             self.frame()
-        self.release()
 
     def sync(self) -> None:
         self._startup()
@@ -210,23 +212,32 @@ class ViewerApp:
         return closing
 
     def release(self) -> None:
-        if self._model_dialog is not None:
-            self._model_dialog.kill()
-            self._model_dialog = None
-        if self._scene_dialog is not None:
-            self._scene_dialog.kill()
-            self._scene_dialog = None
-        if self._resource_dialog is not None:
-            self._resource_dialog.kill()
-            self._resource_dialog = None
-        if self._resource_repair_dialog is not None:
-            self._resource_repair_dialog.kill()
-            self._resource_repair_dialog = None
+        if self._released:
+            return
+        self._released = True
+        for attribute in (
+            "_model_dialog",
+            "_scene_dialog",
+            "_resource_dialog",
+            "_resource_repair_dialog",
+        ):
+            dialog = getattr(self, attribute)
+            setattr(self, attribute, None)
+            if dialog is not None:
+                self._release_resource(dialog, "kill", attribute)
         if self.debug_bridge is not None:
-            self.debug_bridge.close()
-        self.camera_preview.release()
-        self.backend.release()
-        self.session.release()
+            self._release_resource(self.debug_bridge, "close", "debug bridge")
+            self.debug_bridge = None
+        self._release_resource(self.camera_preview, "release", "camera preview")
+        self._release_resource(self.backend, "release", "render backend")
+        self._release_resource(self.session, "release", "session")
+
+    @staticmethod
+    def _release_resource(resource: Any, operation: str, name: str) -> None:
+        try:
+            getattr(resource, operation)()
+        except Exception as exc:
+            log.warning("Failed to release {}: {}", name, exc)
 
     def load_model(self, path: str | Path) -> CommandResult:
         result = self.session.submit(cmd.LoadAsset(Path(path)))
@@ -1057,7 +1068,7 @@ class ViewerApp:
         )
         self._publish_gizmo()
 
-        self._viewport_image = self.backend.render(frame)
+        self._viewport_image = self.backend.render()
         self.camera_preview.update(
             self.backend,
             self.session.source,

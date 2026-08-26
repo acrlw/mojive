@@ -3715,6 +3715,13 @@ class MuJoCoAdapter(SceneAdapterBase):
             element.focal_length = np.asarray(camera.focal_length, np.float64)
             element.sensor_size = np.asarray(camera.sensor_size, np.float64)
             element.principal_length = np.asarray(camera.principal_offset, np.float64)
+        else:
+            zeros = np.zeros(2, np.float64)
+            element.focal_length = zeros
+            element.focal_pixel = zeros
+            element.sensor_size = zeros
+            element.principal_length = zeros
+            element.principal_pixel = zeros
         self._mark_model_edited(model_id)
 
         self._m.cam_pos[i] = local_position

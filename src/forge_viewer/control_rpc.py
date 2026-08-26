@@ -357,6 +357,7 @@ class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         self.socket_path.unlink(missing_ok=True)
         self.service = service
         super().__init__(str(self.socket_path), _RequestHandler)
+        self.socket_path.chmod(0o600)
 
     def server_close(self) -> None:
         super().server_close()
@@ -482,7 +483,7 @@ def _mujoco_camera(view: CameraView):
     camera.type = mujoco.mjtCamera.mjCAMERA_FREE
     camera.lookat[:] = view.target
     camera.distance = distance
-    camera.azimuth = float(np.degrees(np.arctan2(direction[1], direction[0])))
+    camera.azimuth = float(np.degrees(np.arctan2(direction[1], direction[0]))) + 180.0
     camera.elevation = float(-np.degrees(np.arcsin(np.clip(direction[2], -1.0, 1.0))))
     camera.orthographic = int(view.orthographic)
     return camera

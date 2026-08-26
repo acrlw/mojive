@@ -9,7 +9,15 @@ import pytest
 
 from forge_viewer import commands as cmd
 from forge_viewer import math3d
-from forge_viewer.adapters.base import NodeType, SceneSaveOptions
+from forge_viewer.adapters.base import (
+    AdapterCaps,
+    NodeType,
+    SceneAdapterBase,
+    SceneFrame,
+    SceneNode,
+    SceneSaveOptions,
+    SceneSource,
+)
 from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
 from forge_viewer.adapters.workspace import WorkspaceAdapter
 from forge_viewer.session import Session
@@ -57,6 +65,64 @@ def test_workspace_camera_lookup_uses_stable_scene_metadata(monkeypatch) -> None
     assert actual is not None
     assert actual.eye == pytest.approx(camera.eye)
     assert actual.target == pytest.approx(camera.target)
+
+
+def test_workspace_authored_light_and_camera_ids_survive_earlier_removals() -> None:
+    session = Session(workspace())
+
+    first_light = session.submit(cmd.AddSceneLight("first light", Light())).entity_id
+    second_light = session.submit(cmd.AddSceneLight("second light", Light())).entity_id
+    assert session.submit(cmd.RemoveSceneLight(first_light))
+    assert session.submit(cmd.RemoveSceneLight(second_light))
+
+    first_camera = session.submit(cmd.AddSceneCamera("first camera", CameraView())).entity_id
+    second_camera = session.submit(cmd.AddSceneCamera("second camera", CameraView())).entity_id
+    assert session.submit(cmd.RemoveSceneCamera(first_camera))
+    assert [camera.camera_id for camera in session.cameras] == [second_camera]
+    assert session.camera_view(second_camera) is not None
+    assert session.submit(cmd.RemoveSceneCamera(second_camera))
+    assert session.cameras == []
+
+
+def test_workspace_remaps_authored_nodes_after_sparse_primary_ids() -> None:
+    class SparsePrimary(SceneAdapterBase):
+        caps = AdapterCaps(name="sparse")
+
+        def __init__(self) -> None:
+            self.source = SceneSource(
+                body_names=("world", "primary"),
+                nodes=[
+                    SceneNode(10, "world", NodeType.WORLD, children=[42], body_index=0),
+                    SceneNode(42, "primary", NodeType.LINK, parent=10, body_index=1),
+                ],
+            )
+
+        def scene_source(self):
+            return self.source
+
+        def frame(self, needs):
+            del needs
+            return SceneFrame()
+
+    document = WorkspaceAdapter(SparsePrimary())
+    document.add_scene_object(
+        MeshShape.BOX,
+        "authored",
+        np.ones(3, np.float32),
+        np.zeros(3, np.float32),
+        np.eye(3, dtype=np.float32),
+        np.ones(4, np.float32),
+        DEFAULT_MATERIAL,
+    )
+
+    nodes = document.scene_source().nodes
+    known = {node.node_id for node in nodes}
+    authored = next(node for node in nodes if node.name == "authored")
+
+    assert len(known) == len(nodes)
+    assert authored.node_id > 42
+    assert authored.parent == 10
+    assert all(node.parent < 0 or node.parent in known for node in nodes)
 
 
 def test_workspace_preserves_every_primary_environment_field(tmp_path: Path) -> None:

@@ -97,7 +97,7 @@ class TextureStore:
         if comps in (3, 4):
             if srgb:
                 return wgpu.TextureFormat.rgba8unorm_srgb, 4, False
-            return wgpu.TextureFormat.rgba8unorm, 4, True
+            return wgpu.TextureFormat.rgba8unorm, 4, False
         if comps in _BYTES_PER_CHANNEL:
             fmt, bpp = _BYTES_PER_CHANNEL[comps]
             return fmt, bpp, srgb  # no single/dual-channel sRGB formats in WebGPU

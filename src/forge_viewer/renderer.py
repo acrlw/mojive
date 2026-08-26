@@ -256,6 +256,8 @@ class Renderer:
                 self._view = (adapter.camera_hint() or CameraView()).with_aspect(self._aspect)
                 backend.set_camera(self._view)
         except Exception:
+            with contextlib.suppress(Exception), self._gl_current():
+                backend.release()
             self._context = None
             self._backend = None
             if context is not None:
@@ -391,22 +393,26 @@ class Renderer:
 
     def enable_depth_rendering(self) -> None:
         """Select metric depth output for subsequent :meth:`render` calls."""
+        self._require_open("enable_depth_rendering")
         self._segmentation_rendering = False
         self._depth_rendering = True
         self._backend.set_transparent_id_rendering(False)
 
     def disable_depth_rendering(self) -> None:
         """Return from depth output to RGB output."""
+        self._require_open("disable_depth_rendering")
         self._depth_rendering = False
 
     def enable_segmentation_rendering(self) -> None:
         """Select MuJoCo object and object-type IDs for subsequent renders."""
+        self._require_open("enable_segmentation_rendering")
         self._segmentation_rendering = True
         self._depth_rendering = False
         self._backend.set_transparent_id_rendering(True)
 
     def disable_segmentation_rendering(self) -> None:
         """Return from segmentation output to RGB output."""
+        self._require_open("disable_segmentation_rendering")
         self._segmentation_rendering = False
         self._backend.set_transparent_id_rendering(False)
 
@@ -426,7 +432,7 @@ class Renderer:
         if self._closed:
             return
         self._closed = True
-        if self._context is not None and self._backend is not None:
+        if self._backend is not None:
             with self._gl_current():
                 self._backend.release()
         if self._adapter is not None:

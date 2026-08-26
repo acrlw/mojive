@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from forge_viewer import math3d
-from forge_viewer.adapters.base import NodeType, SceneFrame, SceneNode, SceneSource
+from forge_viewer.adapters.base import CameraInfo, NodeType, SceneFrame, SceneNode, SceneSource
 from forge_viewer.commands import SetCamera
 from forge_viewer.render.backend import DebugView, FrameMode, LabelMode, RenderFlag
 from forge_viewer.types import CameraView
@@ -38,9 +38,10 @@ class PreviewSession:
             camera_index=0,
         )
         self.camera = camera
+        self.cameras = [CameraInfo(camera_id=42, name="inspection")]
 
-    def camera_view(self, _index: int) -> CameraView:
-        return self.camera
+    def camera_view(self, camera_id: int) -> CameraView | None:
+        return self.camera if camera_id == 42 else None
 
 
 def visible_height_at_target(view) -> float:

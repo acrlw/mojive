@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
+import operator
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -43,6 +45,7 @@ class Viewer:
     backend: Any
     window: Any
     bridge: Any
+    _released: bool = field(default=False, init=False, repr=False)
 
     def run(self, max_frames: int | None = None) -> None:
         """Run the UI event loop until the window closes or a frame limit is reached."""
@@ -53,17 +56,25 @@ class Viewer:
         self.app.sync()
 
     def release(self) -> None:
-        """Release the bridge, renderer, session, and native window."""
-        self.bridge.close()
-        for obj, what in ((self.backend, "backend"), (self.session, "session")):
-            try:
-                obj.release()
-            except Exception as e:
-                log.warning("Failed to release {}: {}", what, e)
+        """Release application-owned resources and the native window once."""
+        if self._released:
+            return
+        self._released = True
+        try:
+            self.app.release()
+        except Exception as e:
+            log.warning("Failed to release viewer application: {}", e)
         try:
             self.window.close()
         except Exception as e:
             log.warning("Failed to close the window: {}", e)
+
+    def __enter__(self) -> Viewer:
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        del exc_type, exc_value, traceback
+        self.release()
 
     def record(
         self,
@@ -87,13 +98,19 @@ class Viewer:
         """
         from .recording import VideoRecorder
 
-        if frames <= 0:
+        try:
+            frame_count = operator.index(frames)
+        except TypeError as exc:
+            raise TypeError("frame count must be an integer") from exc
+        if frame_count <= 0:
             raise ValueError("frame count must be positive")
+        if not np.isfinite(fps) or fps <= 0.0:
+            raise ValueError("frame rate must be finite and positive")
         if size is not None:
             self.app.set_fixed_render_size(*size)
         recorder = None
         try:
-            for index in range(int(frames)):
+            for index in range(frame_count):
                 if before_frame is not None:
                     before_frame(index, self)
                 self.sync()
@@ -244,38 +261,61 @@ def _compose(
         ini_path=ini,
     )
 
-    if render_backend_name() == "wgpu":
-        from .render.webgpu.backend import WgpuBackend
-        from .ui.window_wgpu import WgpuWindow
+    window = None
+    backend = None
+    debug_bridge = None
+    adapter = None
+    session = None
+    try:
+        if render_backend_name() == "wgpu":
+            from .render.webgpu.backend import WgpuBackend
+            from .ui.window_wgpu import WgpuWindow
 
-        window = WgpuWindow(config)
-        fb_w, fb_h = window.size_pixels
-        backend = WgpuBackend(fb_w, fb_h, samples, device=window.device)
-    else:
-        from .render.forge.backend import ForgeBackend
-        from .ui.window import Window
+            window = WgpuWindow(config)
+            fb_w, fb_h = window.size_pixels
+            backend = WgpuBackend(fb_w, fb_h, samples, device=window.device)
+        else:
+            from .render.forge.backend import ForgeBackend
+            from .ui.window import Window
 
-        window = Window(config)
-        window.make_current()
-        fb_w, fb_h = window.size_pixels
-        backend = ForgeBackend(None, fb_w, fb_h, samples)
+            window = Window(config)
+            window.make_current()
+            fb_w, fb_h = window.size_pixels
+            backend = ForgeBackend(None, fb_w, fb_h, samples)
 
-    debug_bridge = DebugBridge(backend)
-    debug_bridge.serve()
+        debug_bridge = DebugBridge(backend)
+        debug_bridge.serve()
 
-    adapter = adapter_factory()
-    session = Session(adapter, asset_path)
-    if paused and not session.paused:
-        session.submit(cmd.Pause())
+        adapter = adapter_factory()
+        session = Session(adapter, asset_path)
+        if paused and not session.paused:
+            session.submit(cmd.Pause())
 
-    app = ViewerApp(session, backend, window, title=title, debug_bridge=debug_bridge)
-    return Viewer(
-        app=app,
-        session=session,
-        backend=backend,
-        window=window,
-        bridge=debug_bridge,
-    )
+        app = ViewerApp(session, backend, window, title=title, debug_bridge=debug_bridge)
+        return Viewer(
+            app=app,
+            session=session,
+            backend=backend,
+            window=window,
+            bridge=debug_bridge,
+        )
+    except Exception:
+        if debug_bridge is not None:
+            with contextlib.suppress(Exception):
+                debug_bridge.close()
+        if backend is not None:
+            with contextlib.suppress(Exception):
+                backend.release()
+        if session is not None:
+            with contextlib.suppress(Exception):
+                session.release()
+        elif adapter is not None:
+            with contextlib.suppress(Exception):
+                adapter.release()
+        if window is not None:
+            with contextlib.suppress(Exception):
+                window.close()
+        raise
 
 
 def doctor(asset: Path, backend_name: str = "mujoco", frames: int = 90) -> dict:

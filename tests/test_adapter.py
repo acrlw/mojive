@@ -1502,6 +1502,35 @@ def test_mujoco_camera_intrinsics_preserve_principal_point(tmp_path):
         a.release()
 
 
+def test_mujoco_camera_switch_to_fov_clears_persisted_intrinsics(tmp_path):
+    path = tmp_path / "intrinsic_camera.xml"
+    path.write_text(
+        """<mujoco><worldbody>
+  <camera name="calibrated" sensorsize=".036 .024" focal=".05 .04"
+          principal=".003 -.002" resolution="1920 1080"/>
+</worldbody></mujoco>"""
+    )
+    adapter = MuJoCoAdapter(path)
+    try:
+        original = adapter.camera_view(0)
+        fov_view = replace(
+            original,
+            fov_y=float(np.deg2rad(60.0)),
+            focal_length=np.zeros(2, np.float32),
+            sensor_size=np.zeros(2, np.float32),
+            principal_offset=np.zeros(2, np.float32),
+        )
+
+        assert adapter.set_camera_view(0, fov_view)
+        recompiled = adapter._root_spec.compile()
+
+        assert adapter.camera_view(0).uses_intrinsics() is False
+        assert recompiled.cam_sensorsize[0] == pytest.approx(np.zeros(2))
+        assert recompiled.cam_fovy[0] == pytest.approx(60.0)
+    finally:
+        adapter.release()
+
+
 def test_many_lights_audit_matches_the_renderer_capacity():
     from forge_viewer.assets import resolve
     from forge_viewer.mujoco_audit import audit_model

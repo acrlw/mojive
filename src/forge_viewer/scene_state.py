@@ -38,6 +38,9 @@ def camera_bookmark(camera, view: CameraView, source: int = -1) -> dict[str, Any
         "aspect": float(view.aspect),
         "orthographic": bool(view.orthographic),
         "ortho_height": float(view.ortho_height),
+        "focal_length": _array(view.focal_length),
+        "sensor_size": _array(view.sensor_size),
+        "principal_offset": _array(view.principal_offset),
     }
 
 
@@ -58,6 +61,9 @@ def apply_camera_bookmark(bookmark: dict[str, Any], camera, select_source=None) 
         aspect=float(bookmark["aspect"]),
         orthographic=bool(bookmark["orthographic"]),
         ortho_height=float(bookmark["ortho_height"]),
+        focal_length=np.asarray(bookmark.get("focal_length", (0.0, 0.0)), np.float32),
+        sensor_size=np.asarray(bookmark.get("sensor_size", (0.0, 0.0)), np.float32),
+        principal_offset=np.asarray(bookmark.get("principal_offset", (0.0, 0.0)), np.float32),
     )
     source = int(bookmark.get("source", -1))
     if select_source is not None:

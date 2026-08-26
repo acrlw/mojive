@@ -173,7 +173,7 @@ def mat3_to_quat(m) -> np.ndarray:
 
 
 def euler_xyz_to_mat3(angles) -> np.ndarray:
-    """Convert intrinsic XYZ Euler angles in radians to a rotation matrix."""
+    """Convert extrinsic XYZ Euler angles in radians to a rotation matrix."""
     x, y, z = (float(v) for v in angles)
     cx, cy, cz = np.cos((x, y, z))
     sx, sy, sz = np.sin((x, y, z))
@@ -188,7 +188,7 @@ def euler_xyz_to_mat3(angles) -> np.ndarray:
 
 
 def mat3_to_euler_xyz(m) -> np.ndarray:
-    """Convert a rotation matrix to intrinsic XYZ Euler angles in radians."""
+    """Convert a rotation matrix to extrinsic XYZ Euler angles in radians."""
     m = np.asarray(m, np.float64).reshape(3, 3)
     y = float(np.arcsin(np.clip(-m[2, 0], -1.0, 1.0)))
     if abs(float(np.cos(y))) > 1e-7:
@@ -269,6 +269,6 @@ def inverse_orthographic_box(left, right, bottom, top, near, far) -> np.ndarray:
     m[2, 2] = (rf - rn) * -0.5
     m[0, 3] = (rr + rl) * 0.5
     m[1, 3] = (rt + rb) * 0.5
-    m[2, 3] = (rf + rn) * 0.5
+    m[2, 3] = -(rf + rn) * 0.5
     m[3, 3] = 1.0
     return m.astype(np.float32)

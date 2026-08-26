@@ -22,6 +22,7 @@ from forge_viewer.scene_state import (
     save_named_snapshot,
 )
 from forge_viewer.session import Session
+from forge_viewer.types import CameraView
 from forge_viewer.ui.camera import OrbitCamera
 
 pytestmark = [pytest.mark.integration, pytest.mark.physics]
@@ -94,6 +95,21 @@ def test_camera_bookmark_requires_the_current_format_and_version():
     saved["version"] = 2
     with pytest.raises(ValueError, match="Unsupported camera bookmark version: 2"):
         apply_camera_bookmark(saved, camera)
+
+
+def test_camera_bookmark_preserves_physical_intrinsics():
+    camera = OrbitCamera()
+    view = CameraView(
+        focal_length=np.array([0.05, 0.04], np.float32),
+        sensor_size=np.array([0.036, 0.024], np.float32),
+        principal_offset=np.array([0.003, -0.002], np.float32),
+    )
+
+    restored = apply_camera_bookmark(camera_bookmark(camera, view), camera)
+
+    assert restored.focal_length == pytest.approx(view.focal_length)
+    assert restored.sensor_size == pytest.approx(view.sensor_size)
+    assert restored.principal_offset == pytest.approx(view.principal_offset)
 
 
 def test_scene_snapshot_restores_physics_view_flags_and_selection(state_rig):

@@ -185,8 +185,8 @@ class RenderBackend(Protocol):
 
         ...
 
-    def render(self, frame: SceneFrame) -> ViewportImage | None:
-        """Render ``frame`` and return an image handle suitable for the viewport."""
+    def render(self, frame: SceneFrame | None = None) -> ViewportImage | None:
+        """Optionally update from ``frame``, then return a viewport image handle."""
 
         ...
 
@@ -302,7 +302,7 @@ class NullBackend:
     def set_scene(self, source) -> None: ...
     def update(self, frame) -> None: ...
     def set_camera(self, camera) -> None: ...
-    def render(self, frame) -> ViewportImage | None:
+    def render(self, frame=None) -> ViewportImage | None:
         return None
 
     def resize(self, width: int, height: int) -> None: ...

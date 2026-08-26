@@ -10,9 +10,13 @@ from forge_viewer.adapters.base import (
     CAMERA_OBJECT_BASE,
     LIGHT_OBJECT_BASE,
     AdapterCaps,
+    EqualityConstraintInfo,
     FrameNeeds,
+    KeyframeInfo,
     NodeType,
     SceneAdapterBase,
+    SceneFrame,
+    SceneSource,
 )
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.render.builder import SceneSourceBuilder
@@ -73,10 +77,13 @@ def test_session_detects_programmatic_add_and_remove():
     assert session.structure_generation == generation + 1
     assert session.node_by_object_id(second.object_id).name == "second"
 
+    assert session.submit(cmd.Select(first.object_id))
     first.remove()
     session.tick(FrameNeeds())
     assert session.node_by_object_id(first.object_id) is None
     assert session.node_by_object_id(second.object_id).name == "second"
+    assert session.selected == 0
+    assert session.selected_node is None
 
 
 def test_scene_authoring_commands_return_stable_entity_ids():
@@ -127,9 +134,12 @@ def test_static_scene_document_commands_track_dirty_state(tmp_path):
     assert not session.dirty
     assert np.allclose(session.frame.geom_xpos[0], 0.0)
 
+    session._step_counter = 9
     assert session.submit(cmd.NewScene())
+    session.tick(FrameNeeds())
     assert session.asset_path is None and not session.dirty
     assert session.source.instance_count == 0
+    assert session.frame.step == 0
 
 
 def test_static_scene_entity_lifecycle_commands_use_selection_identity():
@@ -506,6 +516,51 @@ class ToyPhysics(SceneAdapterBase):
         self.body.set_pose((self.steps * 0.1, 0.0, 0.0))
 
 
+class SparseControlPhysics(SceneAdapterBase):
+    caps = AdapterCaps(
+        name="sparse-controls",
+        simulation=True,
+        keyframes=True,
+        equality_constraints=True,
+    )
+
+    def __init__(self) -> None:
+        self.loaded_keyframe = -1
+        self.equality_updates: list[tuple[int, bool]] = []
+
+    def scene_source(self):
+        return SceneSource()
+
+    def frame(self, needs):
+        del needs
+        return SceneFrame()
+
+    def keyframes(self):
+        return [KeyframeInfo(42, "sparse pose", 1.0)]
+
+    def equality_constraints(self):
+        return [EqualityConstraintInfo(7, "sparse weld", "weld", True)]
+
+    def load_keyframe(self, keyframe_id):
+        self.loaded_keyframe = int(keyframe_id)
+        return keyframe_id == 42
+
+    def set_equality_enabled(self, constraint_id, enabled):
+        self.equality_updates.append((int(constraint_id), bool(enabled)))
+        return constraint_id == 7
+
+
+class UnpausableScenePhysics(ToyPhysics):
+    caps = replace(ToyPhysics.caps, scene_files=True)
+
+    def new_scene(self):
+        self.scene = Scene()
+        self.body = self.scene.sphere(name="replacement")
+
+    def set_paused(self, paused):
+        return not paused
+
+
 def test_custom_physics_only_implements_its_actual_contract():
     adapter = ToyPhysics()
     session = Session(adapter)
@@ -516,6 +571,51 @@ def test_custom_physics_only_implements_its_actual_contract():
     assert frame.time == 0.01
     assert np.allclose(frame.geom_xpos[0], (0.1, 0.0, 0.0))
     assert session.nodes[1].name == "body"
+
+
+def test_session_routes_sparse_stable_control_ids_without_using_them_as_slots():
+    adapter = SparseControlPhysics()
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+
+    keyframe = session.submit(cmd.LoadKeyframe(42))
+    equality = session.submit(cmd.SetEqualityEnabled(7, False))
+
+    assert keyframe.ok and session.active_keyframe == 42
+    assert adapter.loaded_keyframe == 42
+    assert equality.ok and adapter.equality_updates == [(7, False)]
+    assert not session.equality_constraints[0].enabled
+
+
+@pytest.mark.parametrize("count", (0, -1))
+def test_session_rejects_non_positive_step_counts(count):
+    adapter = ToyPhysics()
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+
+    result = session.submit(cmd.Step(count))
+    session.tick(FrameNeeds())
+
+    assert not result.ok
+    assert adapter.steps == 0
+
+
+@pytest.mark.parametrize("factor", (0.0, -1.0, float("nan"), float("inf")))
+def test_session_rejects_invalid_simulation_speeds(factor):
+    session = Session(ToyPhysics())
+
+    result = session.submit(cmd.SetSpeed(factor))
+
+    assert not result.ok
+    assert session.speed == 1.0
+
+
+def test_scene_replacement_does_not_claim_pause_when_the_adapter_rejects_it():
+    session = Session(UnpausableScenePhysics())
+
+    assert session.submit(cmd.NewScene())
+
+    assert not session.paused
 
 
 class ClockedToyPhysics(ToyPhysics):

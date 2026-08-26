@@ -341,8 +341,12 @@ class Session:
             return CommandResult.bad("physics is running; pause to restore a scene snapshot")
         if not self._adapter.restore_state(state):
             return CommandResult.bad("scene snapshot state is incompatible with this model")
+        keyframe_id = int(active_keyframe)
         self._active_keyframe = (
-            int(active_keyframe) if -1 <= int(active_keyframe) < len(self._keyframes) else -1
+            keyframe_id
+            if keyframe_id == -1
+            or any(keyframe.keyframe_id == keyframe_id for keyframe in self._keyframes)
+            else -1
         )
         self._pending_steps = 0
         self._sim_time_credit = 0.0
@@ -530,13 +534,14 @@ class Session:
         self._next_document_revision = 1
 
     def _pause_loaded_scene(self) -> None:
-        """Return a newly loaded simulation to its editable paused state."""
+        """Request an editable pause and reset state associated with the old scene."""
 
-        if self._adapter.caps.simulation:
-            self._adapter.set_paused(True)
-        self._paused = True
+        self._paused = not self._adapter.caps.simulation or self._adapter.set_paused(True)
+        self._step_counter = 0
         self._pending_steps = 0
         self._sim_time_credit = 0.0
+        self._perturb = PerturbState()
+        self._active_keyframe = -1
 
     def _dispatch(self, c: Command) -> CommandResult:
         caps = self._adapter.caps
@@ -569,8 +574,11 @@ class Session:
                 return CommandResult.bad(f"{caps.name} has no simulation to step")
             if not self._paused:
                 return CommandResult.bad("Pause the simulation before stepping")
-            self._pending_steps += max(1, c.count)
-            return CommandResult.good(f"Stepped {c.count} frame(s)")
+            count = int(c.count)
+            if count <= 0:
+                return CommandResult.bad("step count must be positive")
+            self._pending_steps += count
+            return CommandResult.good(f"Stepped {count} frame(s)")
 
         if isinstance(c, cmd.Reset):
             self._adapter.reset()
@@ -864,7 +872,8 @@ class Session:
             if not self._paused:
                 return CommandResult.bad("physics is running; pause to load a keyframe")
             i = int(c.keyframe_id)
-            if not 0 <= i < len(self._keyframes):
+            slot = self._keyframe_slot(i)
+            if slot < 0:
                 return CommandResult.bad(f"keyframe {i} is unavailable")
             if not self._adapter.load_keyframe(i):
                 return CommandResult.bad(f"failed to load keyframe {i}")
@@ -873,7 +882,7 @@ class Session:
             self._pending_steps = 0
             self._perturb = PerturbState()
             self._active_keyframe = i
-            return CommandResult.good(f"loaded {self._keyframes[i].name}")
+            return CommandResult.good(f"loaded {self._keyframes[slot].name}")
 
         if isinstance(c, cmd.Select):
             node = self._by_object_id.get(int(c.object_id))
@@ -942,12 +951,13 @@ class Session:
             if not caps.equality_constraints:
                 return CommandResult.bad(f"{caps.name} does not expose equality constraints")
             i = int(c.constraint_id)
-            if not 0 <= i < len(self._equality_constraints):
+            slot = self._equality_slot(i)
+            if slot < 0:
                 return CommandResult.bad(f"equality constraint {i} is unavailable")
             if not self._adapter.set_equality_enabled(i, c.enabled):
                 return CommandResult.bad(f"equality constraint {i} update failed")
-            self._equality_constraints[i] = replace(
-                self._equality_constraints[i], enabled=bool(c.enabled)
+            self._equality_constraints[slot] = replace(
+                self._equality_constraints[slot], enabled=bool(c.enabled)
             )
             return CommandResult.good("")
 
@@ -1154,7 +1164,10 @@ class Session:
         if isinstance(c, cmd.SetSpeed):
             if not caps.simulation:
                 return CommandResult.bad(f"{caps.name} has no simulation speed")
-            self._speed = max(0.05, float(c.factor))
+            factor = float(c.factor)
+            if not np.isfinite(factor) or factor <= 0.0:
+                return CommandResult.bad("simulation speed must be finite and positive")
+            self._speed = max(0.05, factor)
             return CommandResult.good(f"Speed ×{self._speed:g}")
 
         if isinstance(c, cmd.SetCamera):
@@ -1281,14 +1294,20 @@ class Session:
         self._equality_constraints = (
             self._adapter.equality_constraints() if self._adapter.caps.equality_constraints else []
         )
-        if self._active_keyframe >= len(self._keyframes):
+        if self._active_keyframe != -1 and self._keyframe_slot(self._active_keyframe) < 0:
             self._active_keyframe = -1
         self._by_node_id = {n.node_id: n for n in self._nodes}
         self._by_object_id = {n.object_id: n for n in self._nodes if n.object_id}
         self._unlocked_entity_gizmos.intersection_update(self._by_object_id)
-        if self.node(self._selected_node_id) is None:
+        if self._selected:
             selected = self._by_object_id.get(self._selected)
-            self._selected_node_id = selected.node_id if selected is not None else -1
+            if selected is None:
+                self._selected = 0
+                self._selected_node_id = -1
+            else:
+                self._selected_node_id = selected.node_id
+        elif (selected := self.node(self._selected_node_id)) is None or selected.object_id:
+            self._selected_node_id = -1
         self._adapter_revision = self._adapter.structure_revision
         self._structure_generation += 1
         self._frame = self._adapter.frame(FrameNeeds())
@@ -1342,6 +1361,26 @@ class Session:
     def _camera_slot(self, camera_id: int) -> int:
         return next(
             (slot for slot, camera in enumerate(self._cameras) if camera.camera_id == camera_id),
+            -1,
+        )
+
+    def _keyframe_slot(self, keyframe_id: int) -> int:
+        return next(
+            (
+                slot
+                for slot, keyframe in enumerate(self._keyframes)
+                if keyframe.keyframe_id == keyframe_id
+            ),
+            -1,
+        )
+
+    def _equality_slot(self, constraint_id: int) -> int:
+        return next(
+            (
+                slot
+                for slot, constraint in enumerate(self._equality_constraints)
+                if constraint.constraint_id == constraint_id
+            ),
             -1,
         )
 

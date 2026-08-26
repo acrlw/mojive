@@ -117,7 +117,7 @@ class OffscreenHarness:
             self.adapter.step(steps)
         frame = self.adapter.frame(self.needs)
         self.backend.update(frame)
-        return self.backend.render(frame)
+        return self.backend.render()
 
     def warmup(self, frames: int = 4) -> None:
         for _ in range(frames):

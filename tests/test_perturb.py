@@ -696,7 +696,7 @@ def test_run_and_sync_go_through_the_same_startup(monkeypatch):
 
     monkeypatch.setattr(ViewerApp, "_startup", lambda self: seen.append("startup"))
     monkeypatch.setattr(ViewerApp, "frame", lambda self: seen.append("frame"))
-    monkeypatch.setattr(ViewerApp, "release", lambda self: None)
+    monkeypatch.setattr(ViewerApp, "release", lambda self: seen.append("release"))
     monkeypatch.setattr(ViewerApp, "_should_close", lambda self: True)
 
     app = ViewerApp.__new__(ViewerApp)
@@ -704,6 +704,74 @@ def test_run_and_sync_go_through_the_same_startup(monkeypatch):
     app.run(max_frames=0)
     app.sync()
     assert seen.count("startup") == 2
+    assert "release" not in seen
+
+
+def test_app_release_is_idempotent():
+    app_mod = load_app_module()
+    ViewerApp = app_mod.ViewerApp
+
+    class Resource:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def close(self) -> None:
+            self.calls += 1
+
+        def release(self) -> None:
+            self.calls += 1
+
+    app = ViewerApp.__new__(ViewerApp)
+    app._released = False
+    app._model_dialog = None
+    app._scene_dialog = None
+    app._resource_dialog = None
+    app._resource_repair_dialog = None
+    bridge = Resource()
+    app.debug_bridge = bridge
+    app.camera_preview = Resource()
+    app.backend = Resource()
+    app.session = Resource()
+
+    app.release()
+    app.release()
+
+    assert app.debug_bridge is None
+    assert bridge.calls == 1
+    assert app.camera_preview.calls == 1
+    assert app.backend.calls == 1
+    assert app.session.calls == 1
+
+
+def test_app_release_continues_after_one_resource_fails():
+    app_mod = load_app_module()
+    ViewerApp = app_mod.ViewerApp
+
+    class FailingBridge:
+        def close(self) -> None:
+            raise RuntimeError("bridge failed")
+
+    class Resource:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def release(self) -> None:
+            self.calls += 1
+
+    app = ViewerApp.__new__(ViewerApp)
+    app._released = False
+    app._model_dialog = None
+    app._scene_dialog = None
+    app._resource_dialog = None
+    app._resource_repair_dialog = None
+    app.debug_bridge = FailingBridge()
+    app.camera_preview = Resource()
+    app.backend = Resource()
+    app.session = Resource()
+
+    app.release()
+
+    assert app.camera_preview.calls == app.backend.calls == app.session.calls == 1
 
 
 def test_frame_publishes_marks_between_tick_and_render():

@@ -14,6 +14,7 @@ from .base import (
     LIGHT_OBJECT_BASE,
     CameraInfo,
     FrameNeeds,
+    NodeType,
     SceneAdapterBase,
     SceneFrame,
     SceneModelInfo,
@@ -48,6 +49,8 @@ class WorkspaceAdapter(SceneAdapterBase):
         self.caps = replace(
             primary.caps,
             name=f"workspace:{primary.caps.name}",
+            write_pose=True,
+            model_cameras=True,
             scene_authoring=True,
             scene_files=True,
             edit_history=True,
@@ -264,31 +267,25 @@ class WorkspaceAdapter(SceneAdapterBase):
             *primary,
             *(
                 CameraInfo(
-                    len(primary) + index,
+                    _AUTHORED_CAMERA_BASE + item.camera_id,
                     item.name,
                     _AUTHORED_CAMERA_BASE + item.camera_id,
                 )
-                for index, item in enumerate(self.scene._cameras)
+                for item in self.scene._cameras
             ),
         ]
 
     def camera_view(self, camera_id: int):
-        primary_count = len(self.primary.scene_source().cameras)
-        if int(camera_id) < primary_count:
-            return self.primary.camera_view(camera_id)
-        index = int(camera_id) - primary_count
-        if not 0 <= index < len(self.scene._cameras):
-            return None
-        return self.scene.camera_view(self.scene._cameras[index].camera_id)
+        value = int(camera_id)
+        if value >= _AUTHORED_CAMERA_BASE:
+            return self.scene.camera_view(value - _AUTHORED_CAMERA_BASE)
+        return self.primary.camera_view(value)
 
     def set_camera_view(self, camera_id: int, camera) -> bool:
-        primary_count = len(self.primary.scene_source().cameras)
-        if int(camera_id) < primary_count:
-            return self.primary.set_camera_view(camera_id, camera)
-        index = int(camera_id) - primary_count
-        if not 0 <= index < len(self.scene._cameras):
-            return False
-        return self.scene.set_camera(self.scene._cameras[index].camera_id, camera)
+        value = int(camera_id)
+        if value >= _AUTHORED_CAMERA_BASE:
+            return self.scene.set_camera(value - _AUTHORED_CAMERA_BASE, camera)
+        return self.primary.set_camera_view(value, camera)
 
     def set_pose(self, node_id: int, position, rotation) -> bool:
         scene_node = self._node_to_scene.get(int(node_id))
@@ -344,32 +341,39 @@ class WorkspaceAdapter(SceneAdapterBase):
         return True
 
     def add_scene_light(self, name: str, light) -> int:
-        return (
-            len(self.primary.scene_source().lights.lights)
-            + self.scene.add_light(name, light).light_id
-        )
+        return _AUTHORED_LIGHT_BASE + self.scene.add_light(name, light).light_id
 
     def remove_scene_light(self, light_id: int) -> bool:
-        primary_count = len(self.primary.scene_source().lights.lights)
-        index = int(light_id) - primary_count
-        self.scene._sync_light_items()
-        if not 0 <= index < len(self.scene._lights):
-            return False
+        value = int(light_id)
+        if value >= _AUTHORED_LIGHT_BASE:
+            raw_id = value - _AUTHORED_LIGHT_BASE
+        else:
+            primary_count = len(self.primary.scene_source().lights.lights)
+            index = value - primary_count
+            self.scene._sync_light_items()
+            if not 0 <= index < len(self.scene._lights):
+                return False
+            raw_id = self.scene._lights[index].light_id
         try:
-            self.scene.remove_light(self.scene._lights[index].light_id)
+            self.scene.remove_light(raw_id)
         except KeyError:
             return False
         return True
 
     def add_scene_camera(self, name: str, camera) -> int:
-        return len(self.primary.cameras()) + self.scene.add_camera(name, camera)
+        return _AUTHORED_CAMERA_BASE + self.scene.add_camera(name, camera)
 
     def remove_scene_camera(self, camera_id: int) -> bool:
-        index = int(camera_id) - len(self.primary.cameras())
-        if not 0 <= index < len(self.scene._cameras):
-            return False
+        value = int(camera_id)
+        if value >= _AUTHORED_CAMERA_BASE:
+            raw_id = value - _AUTHORED_CAMERA_BASE
+        else:
+            index = value - len(self.primary.cameras())
+            if not 0 <= index < len(self.scene._cameras):
+                return False
+            raw_id = self.scene._cameras[index].camera_id
         try:
-            self.scene.remove_camera(self.scene._cameras[index].camera_id)
+            self.scene.remove_camera(raw_id)
         except KeyError:
             return False
         return True
@@ -488,7 +492,6 @@ class WorkspaceAdapter(SceneAdapterBase):
 
     def _merge_source(self, primary: SceneSource, authored: SceneSource) -> SceneSource:
         body_offset = len(primary.body_names) or _body_count(primary.nodes)
-        node_offset = len(primary.nodes) - 1
         geom_instances = primary.geom_pose_source == int(InstancePoseSource.GEOM)
         geom_offset = (
             int(np.max(primary.geom_source[geom_instances])) + 1 if np.any(geom_instances) else 0
@@ -511,10 +514,33 @@ class WorkspaceAdapter(SceneAdapterBase):
         self._light_to_scene.clear()
         self._camera_to_scene.clear()
         nodes = [replace(node, children=list(node.children)) for node in primary.nodes]
-        authored_nodes: dict[int, int] = {}
-        for raw in authored.nodes[1:]:
-            node_id = node_offset + raw.node_id
-            parent = 0 if raw.parent == 0 else node_offset + raw.parent
+        primary_root = next(
+            (node for node in nodes if node.type is NodeType.WORLD and node.parent < 0),
+            next((node for node in nodes if node.parent < 0), None),
+        )
+        authored_root = next(
+            (node for node in authored.nodes if node.type is NodeType.WORLD and node.parent < 0),
+            next((node for node in authored.nodes if node.parent < 0), None),
+        )
+        if primary_root is None or authored_root is None:
+            raise ValueError("workspace sources must each contain a root node")
+        next_node_id = max((node.node_id for node in nodes), default=-1) + 1
+        authored_nodes = {
+            raw.node_id: next_node_id + index
+            for index, raw in enumerate(
+                node for node in authored.nodes if node.node_id != authored_root.node_id
+            )
+        }
+        by_node_id = {node.node_id: node for node in nodes}
+        for raw in authored.nodes:
+            if raw.node_id == authored_root.node_id:
+                continue
+            node_id = authored_nodes[raw.node_id]
+            parent = (
+                primary_root.node_id
+                if raw.parent == authored_root.node_id
+                else authored_nodes[raw.parent]
+            )
             object_id = self._map_object(raw)
             body = 0 if raw.body_index == 0 else body_offset + raw.body_index - 1
             light = len(primary.lights.lights) + raw.light_index if raw.light_index >= 0 else -1
@@ -530,8 +556,8 @@ class WorkspaceAdapter(SceneAdapterBase):
                 camera_index=camera,
             )
             nodes.append(node)
-            nodes[parent].children.append(node_id)
-            authored_nodes[raw.node_id] = node_id
+            by_node_id[parent].children.append(node_id)
+            by_node_id[node_id] = node
             self._node_to_scene[node_id] = raw.node_id
             if object_id:
                 self._object_to_scene[object_id] = raw.object_id
