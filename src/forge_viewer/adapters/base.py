@@ -733,6 +733,10 @@ class SceneAdapterBase:
         """Set adapter-owned pause state and report whether it was accepted."""
         return True
 
+    def prepare_frame(self, needs: FrameNeeds) -> bool:
+        """Materialize optional stable data and report whether structure changed."""
+        return False
+
     def frame(self, needs: FrameNeeds) -> SceneFrame:
         """Return the latest dynamic frame containing the requested optional data."""
         raise NotImplementedError

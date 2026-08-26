@@ -11,6 +11,9 @@ from ...adapters.base import FrameNeeds, NodeType, SceneNode
 from ..draw2d import ImguiDraw2D, ink_box
 from . import Panel, PanelContext
 
+_LARGE_SCENE_NODES = 2_000
+_VISIBLE_ROW_BUDGET = 512
+
 
 class HierarchyPanel(Panel):
     name = "Hierarchy"
@@ -23,7 +26,11 @@ class HierarchyPanel(Panel):
         self._cache_generation = -1
         self._roots: list[SceneNode] = []
         self._by_id: dict[int, SceneNode] = {}
+        self._search_names: tuple[str, ...] = ()
         self._default_open_depth = 2
+        self._row_budget = _VISIBLE_ROW_BUDGET
+        self._rows_drawn = 0
+        self._rows_truncated = False
         self._ink_center_cache: dict[tuple[float, str], float] = {}
 
     def frame_needs(self) -> FrameNeeds:
@@ -52,9 +59,17 @@ class HierarchyPanel(Panel):
             "visible", imgui.TableColumnFlags_.width_fixed, 24.0 * ctx.style_scale
         )
 
+        self._rows_drawn = 0
+        self._rows_truncated = False
         if self._filter:
-            needle = self._filter.lower()
-            hits = [n for n in s.nodes if needle in n.name.lower()]
+            needle = self._filter.casefold()
+            hits = []
+            for node, name in zip(s.nodes, self._search_names, strict=True):
+                if needle in name:
+                    if len(hits) >= self._row_budget:
+                        self._rows_truncated = True
+                        break
+                    hits.append(node)
             for node in hits:
                 self._row(ctx, node, leaf=True)
             if not hits:
@@ -63,7 +78,17 @@ class HierarchyPanel(Panel):
                 imgui.text_disabled("no match")
         else:
             for root in self._roots:
+                if self._rows_drawn >= self._row_budget:
+                    self._rows_truncated = True
+                    break
                 self._subtree(ctx, root, depth=0)
+
+        if self._rows_truncated:
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.text_disabled(
+                f"showing the first {self._row_budget} visible nodes; use the filter to narrow"
+            )
 
         imgui.end_table()
         imgui.end_child()
@@ -76,22 +101,33 @@ class HierarchyPanel(Panel):
         nodes = ctx.session.nodes
         self._by_id = {n.node_id: n for n in nodes}
         self._roots = [n for n in nodes if n.parent < 0 or n.parent not in self._by_id]
-        self._default_open_depth = 1 if len(nodes) >= 1000 else 2
+        self._search_names = tuple(node.name.casefold() for node in nodes)
+        self._default_open_depth = hierarchy_open_depth(len(nodes))
+        self._row_budget = (
+            _VISIBLE_ROW_BUDGET if len(nodes) >= _LARGE_SCENE_NODES else len(nodes) + 1
+        )
         self._ink_center_cache.clear()
 
     def _subtree(self, ctx: PanelContext, node: SceneNode, depth: int) -> None:
+        if self._rows_drawn >= self._row_budget:
+            self._rows_truncated = True
+            return
         children = [self._by_id[c] for c in node.children if c in self._by_id]
         opened = self._row(
             ctx, node, leaf=not children, default_open=depth < self._default_open_depth
         )
         if children and opened:
             for child in children:
+                if self._rows_drawn >= self._row_budget:
+                    self._rows_truncated = True
+                    break
                 self._subtree(ctx, child, depth + 1)
             imgui.tree_pop()
 
     def _row(
         self, ctx: PanelContext, node: SceneNode, leaf: bool, default_open: bool = False
     ) -> bool:
+        self._rows_drawn += 1
         imgui.table_next_row()
         imgui.table_next_column()
         flags = imgui.TreeNodeFlags_.open_on_arrow | imgui.TreeNodeFlags_.span_avail_width
@@ -239,3 +275,12 @@ class HierarchyPanel(Panel):
             else:
                 ctx.submit(cmd.SetVisible(node.node_id, not node.visible))
         imgui.set_item_tooltip("hide" if node.visible else "show")
+
+
+def hierarchy_open_depth(node_count: int) -> int:
+    """Keep the first frame bounded while preserving small-scene expansion."""
+    if node_count >= _LARGE_SCENE_NODES:
+        return 0
+    if node_count >= 1_000:
+        return 1
+    return 2

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -29,7 +30,7 @@ from .camera_preview import CameraPreview
 from .draw2d import ImguiDraw2D
 from .gizmo import ObjectGizmo
 from .localization import Localizer
-from .panels import PanelContext, PanelSet
+from .panels import PanelContext, PanelSet, button_width
 from .perturb import PerturbController, draw_fallback
 from .scene_entities import SceneEntityHelpers
 from .theme import THEME, Theme
@@ -75,7 +76,7 @@ def _scene_save_target(path: str | Path) -> Path:
     return target.with_name(target.name + SCENE_SUFFIX)
 
 
-def _prepare_modal(style_scale: float, width_pt: float) -> None:
+def _prepare_modal(width_pt: float) -> None:
     """Keep blocking prompts readable and centered as the host window resizes."""
 
     viewport = imgui.get_main_viewport()
@@ -84,11 +85,21 @@ def _prepare_modal(style_scale: float, width_pt: float) -> None:
         imgui.Cond_.always.value,
         imgui.ImVec2(0.5, 0.5),
     )
-    width = float(width_pt) * float(style_scale)
+    # ImGui's font and style are already expressed in layout coordinates. Clamp
+    # fixed-width dialogs to the current work area so centering survives resizes.
+    width = min(float(width_pt), max(1.0, float(viewport.work_size.x) - 32.0))
     imgui.set_next_window_size_constraints(
         imgui.ImVec2(width, 0.0),
         imgui.ImVec2(width, float(np.finfo(np.float32).max)),
     )
+
+
+def _equal_button_width(labels: tuple[str, ...]) -> float:
+    """Fill one dialog row while retaining enough room for every label."""
+    spacing = float(imgui.get_style().item_spacing.x)
+    available = float(imgui.get_content_region_avail().x)
+    shared = (available - spacing * max(0, len(labels) - 1)) / max(1, len(labels))
+    return max(shared, *(button_width(label) for label in labels))
 
 
 @dataclass
@@ -100,6 +111,13 @@ class Keys:
     gizmo_rotate: bool = False
     gizmo_space: bool = False
     gizmo_axis: int = -1
+
+
+@dataclass(frozen=True)
+class _ModelLoadJob:
+    action: str
+    path: Path
+    command: Any
 
 
 class ViewerApp:
@@ -167,6 +185,12 @@ class ViewerApp:
         self._closing_without_save = False
         self._model_load_error = ""
         self._show_model_load_error = False
+        self._model_load_executor: ThreadPoolExecutor | None = None
+        self._model_load_future: Future[Any] | None = None
+        self._model_load_job: _ModelLoadJob | None = None
+        self._model_load_queue: list[_ModelLoadJob] = []
+        self._model_load_started = 0.0
+        self._close_after_model_load = False
         self._model_drop_notice = ""
         self._model_drop_notice_until = 0.0
         self._display_scale_generation = -1
@@ -203,6 +227,10 @@ class ViewerApp:
 
     def _should_close(self) -> bool:
         closing = bool(self.window.should_close())
+        if closing and self._model_load_future is not None:
+            self.window.cancel_close()
+            self._close_after_model_load = True
+            return False
         if closing and self._closing_without_save:
             return True
         if closing and self.session.dirty and self._pending_document_action is None:
@@ -215,6 +243,13 @@ class ViewerApp:
         if self._released:
             return
         self._released = True
+        executor = getattr(self, "_model_load_executor", None)
+        if executor is not None:
+            executor.shutdown(wait=True, cancel_futures=True)
+            self._model_load_executor = None
+            self._model_load_future = None
+            self._model_load_job = None
+            self._model_load_queue.clear()
         for attribute in (
             "_model_dialog",
             "_scene_dialog",
@@ -289,6 +324,89 @@ class ViewerApp:
         else:
             self._report_model_error(result.message)
         return result
+
+    def _queue_scene_open(self, path: str | Path) -> None:
+        target = Path(path).expanduser().resolve()
+        if target.suffix.lower() in MODEL_EXTENSIONS:
+            self._queue_model_load("load", target)
+            return
+        try:
+            missing = missing_resource_entries(target)
+        except Exception:
+            missing = ()
+        if missing:
+            self._begin_resource_repair(target, missing)
+            return
+        self._queue_model_load("open", target)
+
+    def _queue_model_load(
+        self,
+        action: str,
+        path: str | Path,
+        position: tuple[float, float, float] | None = None,
+    ) -> None:
+        target = Path(path).expanduser().resolve()
+        if action == "add":
+            command = cmd.AddSceneModel(target, position or tuple(self.camera.pivot))
+        elif action == "open":
+            command = cmd.OpenScene(target)
+        elif action == "reload":
+            command = cmd.Reload()
+        else:
+            command = cmd.LoadAsset(target)
+        self._model_load_queue.append(_ModelLoadJob(action, target, command))
+
+    def _start_model_load(self) -> bool:
+        if self._model_load_future is not None or not self._model_load_queue:
+            return self._model_load_future is not None
+        if self._model_load_executor is None:
+            self._model_load_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="forge-model-loader",
+            )
+        job = self._model_load_queue.pop(0)
+        self._model_load_job = job
+        self._model_load_started = time.monotonic()
+        log.info("{} {}", self._model_load_verb(job.action), job.path)
+        self._model_load_future = self._model_load_executor.submit(self.session.submit, job.command)
+        return True
+
+    def _poll_model_load(self) -> bool:
+        future = self._model_load_future
+        job = self._model_load_job
+        if future is None or job is None:
+            return False
+        if not future.done():
+            return True
+        elapsed = time.monotonic() - self._model_load_started
+        try:
+            result = future.result()
+        except Exception as exc:
+            result = cmd.CommandResult.bad(str(exc))
+        self._model_load_future = None
+        self._model_load_job = None
+        log.info("{} {} in {:.3f}s", result.message or "Finished", job.path, elapsed)
+        if result.ok:
+            self._after_model_change()
+            self._set_model_drop_notice(result.message)
+        else:
+            self._model_load_queue.clear()
+            self._report_model_error(result.message)
+        if self._model_load_queue:
+            self._start_model_load()
+            return True
+        if self._close_after_model_load:
+            self._close_after_model_load = False
+            self._request_document_action("quit")
+        return False
+
+    @staticmethod
+    def _model_load_verb(action: str) -> str:
+        return {
+            "add": "Adding model",
+            "open": "Opening scene",
+            "reload": "Reloading model",
+        }.get(action, "Loading model")
 
     def save_scene(
         self, path: str | Path, *, current_pose_keyframe: str | None = None
@@ -433,7 +551,7 @@ class ViewerApp:
         self._resource_repair_path = None
         self._resource_repair_status = ""
         self._set_model_drop_notice(f"Repaired {repair.repaired} resource path(s)")
-        self.open_scene(path)
+        self._queue_scene_open(path)
 
     def _poll_resource_dialog(self) -> None:
         dialog = self._resource_dialog
@@ -455,7 +573,7 @@ class ViewerApp:
             imgui.open_popup("Missing Resources")
             self._open_resource_repair_popup = False
         if imgui.is_popup_open("Missing Resources"):
-            _prepare_modal(self.window.style_scale, 560.0)
+            _prepare_modal(560.0)
         visible, _ = imgui.begin_popup_modal(
             "Missing Resources", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -532,11 +650,11 @@ class ViewerApp:
         if not selected:
             return
         if action == "add":
+            position = tuple(float(value) for value in self.camera.pivot)
             for path in selected:
-                if not self.add_model(path).ok:
-                    break
+                self._queue_model_load("add", path, position)
         else:
-            self.load_model(selected[0])
+            self._queue_model_load("load", selected[0])
 
     def _poll_model_drop(self) -> None:
         paths = self.window.consume_file_drops()
@@ -556,15 +674,15 @@ class ViewerApp:
             self._report_model_error(f"Unsupported file: {unsupported.name}")
             return
         can_add = self.session.adapter.caps.model_composition
+        source = self.session.source
+        has_scene_content = source is not None and source.instance_count > 0
+        position = tuple(float(value) for value in self.camera.pivot)
         for path in paths:
-            source = self.session.source
-            has_scene_content = source is not None and source.instance_count > 0
             if has_scene_content and can_add:
-                result = self.add_model(path)
+                self._queue_model_load("add", path, position)
             else:
-                result = self.load_model(path)
-            if not result.ok:
-                break
+                self._queue_model_load("load", path)
+            has_scene_content = True
 
     def _set_model_drop_notice(self, message: str) -> None:
         self._model_drop_notice = message
@@ -728,12 +846,7 @@ class ViewerApp:
         if remove_resource_root is not None:
             self.session.submit(cmd.RemoveResourceRoot(remove_resource_root))
         if reload_model:
-            result = self.session.submit(cmd.Reload())
-            if result.ok:
-                self._after_model_change()
-                self._set_model_drop_notice(f"Reloaded {self.session.asset_path.name}")
-            else:
-                self._report_model_error(result.message)
+            self._queue_model_load("reload", self.session.asset_path)
         if quit_viewer:
             self._request_document_action("quit")
 
@@ -782,6 +895,28 @@ class ViewerApp:
         return f"{base} {index}"
 
     def _add_scene_object(self, shape: MeshShape, base_name: str) -> None:
+        if shape is MeshShape.PLANE and self.session.adapter.caps.topology_editing:
+            world = next(
+                (
+                    node
+                    for node in self.session.nodes
+                    if node.type is NodeType.WORLD and node.parent < 0
+                ),
+                None,
+            )
+            if world is not None:
+                result = self.session.submit(
+                    cmd.AddModelElement(
+                        world.node_id,
+                        "geom:plane",
+                        self._entity_name(base_name),
+                    )
+                )
+                if result.ok:
+                    node = self.session.node(result.entity_id)
+                    if node is not None:
+                        self.session.submit(cmd.Select(node.object_id))
+                    return
         position = tuple(float(value) for value in self._camera_view().target)
         size = (4.0, 4.0, 0.02) if shape is MeshShape.PLANE else (0.5, 0.5, 0.5)
         result = self.session.submit(
@@ -867,7 +1002,7 @@ class ViewerApp:
             imgui.open_popup("File operation failed")
             self._show_model_load_error = False
         if imgui.is_popup_open("File operation failed"):
-            _prepare_modal(self.window.style_scale, 440.0)
+            _prepare_modal(440.0)
         visible, _ = imgui.begin_popup_modal(
             "File operation failed", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -875,7 +1010,10 @@ class ViewerApp:
             return
         imgui.text_wrapped(self._model_load_error)
         imgui.spacing()
-        if imgui.button("OK", imgui.ImVec2(100.0, 0.0)):
+        if imgui.button("Copy error", imgui.ImVec2(button_width("Copy error", 110.0), 0.0)):
+            imgui.set_clipboard_text(self._model_load_error)
+        imgui.same_line()
+        if imgui.button("OK", imgui.ImVec2(button_width("OK", 88.0), 0.0)):
             imgui.close_current_popup()
         imgui.end_popup()
 
@@ -894,7 +1032,7 @@ class ViewerApp:
             else:
                 self._report_model_error(result.message)
         elif action == "open_scene" and path is not None:
-            self.open_scene(path)
+            self._queue_scene_open(path)
         elif action == "quit":
             self._closing_without_save = True
             self.window.request_close()
@@ -904,16 +1042,18 @@ class ViewerApp:
         if pending is None:
             return
         imgui.open_popup("Unsaved changes")
-        _prepare_modal(self.window.style_scale, 360.0)
+        _prepare_modal(400.0)
         visible, _ = imgui.begin_popup_modal(
             "Unsaved changes", None, imgui.WindowFlags_.always_auto_resize.value
         )
         if not visible:
             return
         name = self.session.asset_path.name if self.session.asset_path is not None else "Untitled"
-        imgui.text(f"Save changes to {name}?")
+        imgui.text("Save changes to this file?")
+        imgui.text_wrapped(name)
         imgui.spacing()
-        if imgui.button("Save", imgui.ImVec2(100.0, 0.0)):
+        width = _equal_button_width(("Save", "Discard", "Cancel"))
+        if imgui.button("Save", imgui.ImVec2(width, 0.0)):
             if self.session.asset_path is None:
                 self._after_save_action = pending
                 self._pending_document_action = None
@@ -923,12 +1063,12 @@ class ViewerApp:
                 self._request_scene_save(self.session.asset_path, pending)
             imgui.close_current_popup()
         imgui.same_line()
-        if imgui.button("Discard", imgui.ImVec2(100.0, 0.0)):
+        if imgui.button("Discard", imgui.ImVec2(width, 0.0)):
             self._pending_document_action = None
             self._execute_document_action(*pending)
             imgui.close_current_popup()
         imgui.same_line()
-        if imgui.button("Cancel", imgui.ImVec2(100.0, 0.0)):
+        if imgui.button("Cancel", imgui.ImVec2(width, 0.0)):
             self._pending_document_action = None
             imgui.close_current_popup()
         imgui.end_popup()
@@ -938,7 +1078,7 @@ class ViewerApp:
         if pending is None:
             return
         imgui.open_popup("Save current pose")
-        _prepare_modal(self.window.style_scale, 500.0)
+        _prepare_modal(500.0)
         visible, _ = imgui.begin_popup_modal(
             "Save current pose", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -972,13 +1112,13 @@ class ViewerApp:
             imgui.open_popup("Rename Entity")
             self._open_rename_popup = False
         if imgui.is_popup_open("Rename Entity"):
-            _prepare_modal(self.window.style_scale, 360.0)
+            _prepare_modal(360.0)
         visible, _ = imgui.begin_popup_modal(
             "Rename Entity", None, imgui.WindowFlags_.always_auto_resize.value
         )
         if not visible:
             return
-        imgui.set_next_item_width(320.0 * self.window.style_scale)
+        imgui.set_next_item_width(320.0)
         submitted, self._rename_value = imgui.input_text(
             "##entity_name",
             self._rename_value,
@@ -1016,11 +1156,21 @@ class ViewerApp:
 
         window.begin_frame()
         self._sync_display_scale()
+        if self._model_load_future is not None and self._poll_model_load():
+            self._draw_model_loading_frame()
+            window.end_frame()
+            self._frame_index += 1
+            return
         self._poll_model_dialog()
         self._poll_scene_dialog()
         self._poll_resource_dialog()
         self._poll_resource_repair_dialog()
         self._poll_model_drop()
+        if self._start_model_load():
+            self._draw_model_loading_frame()
+            window.end_frame()
+            self._frame_index += 1
+            return
         self._draw_main_menu()
         window.begin_dockspace()
         keys = self._poll_keys()
@@ -1089,6 +1239,42 @@ class ViewerApp:
         self._sync_window_title()
         window.end_frame()
         self._frame_index += 1
+
+    def _draw_model_loading_frame(self) -> None:
+        """Keep the native window responsive without reading a mutating Session."""
+
+        self.window.begin_dockspace()
+        self._viewport_image = self.backend.render()
+        self._draw_viewport(None, session_busy=True)
+        self._draw_model_loading_window()
+
+    def _draw_model_loading_window(self) -> None:
+        job = self._model_load_job
+        if job is None:
+            return
+        _prepare_modal(460.0)
+        flags = (
+            imgui.WindowFlags_.always_auto_resize.value
+            | imgui.WindowFlags_.no_collapse.value
+            | imgui.WindowFlags_.no_docking.value
+            | imgui.WindowFlags_.no_move.value
+            | imgui.WindowFlags_.no_saved_settings.value
+        )
+        visible, _ = imgui.begin("Loading###model_loading", None, flags)
+        if visible:
+            elapsed = max(0.0, time.monotonic() - self._model_load_started)
+            dots = "." * (int(elapsed * 2.0) % 3 + 1)
+            imgui.text(f"{self._model_load_verb(job.action)}{dots}")
+            imgui.separator()
+            imgui.text_disabled("File")
+            imgui.text_wrapped(str(job.path))
+            imgui.spacing()
+            imgui.text(f"Elapsed: {elapsed:.1f} s")
+            if self._model_load_queue:
+                imgui.text(f"Queued: {len(self._model_load_queue)}")
+            imgui.spacing()
+            imgui.text_disabled("The loader does not expose reliable stage progress.")
+        imgui.end()
 
     def _poll_keys(self) -> Keys:
         k = imgui.Key
@@ -1429,7 +1615,13 @@ class ViewerApp:
                 return int(node.object_id)
         return 0
 
-    def _draw_viewport(self, ctx: PanelContext, preview_name: str = "") -> None:
+    def _draw_viewport(
+        self,
+        ctx: PanelContext | None,
+        preview_name: str = "",
+        *,
+        session_busy: bool = False,
+    ) -> None:
         title = self.localizer.text("Viewport")
         if title != "Viewport":
             title += "###Viewport"
@@ -1453,35 +1645,37 @@ class ViewerApp:
         imgui.push_clip_rect(imgui.ImVec2(x, y), imgui.ImVec2(x + w, y + h), True)
         try:
             overlay = ImguiDraw2D()
-            st = self.session.perturb
-            if st.active and not self.backend.caps.debug_draw:
-                node = self.session.node(st.node_id)
-                center = self._node_pose(node)[0] if node is not None else st.target_pos
-                draw_fallback(
+            if not session_busy:
+                st = self.session.perturb
+                if st.active and not self.backend.caps.debug_draw:
+                    node = self.session.node(st.node_id)
+                    center = self._node_pose(node)[0] if node is not None else st.target_pos
+                    draw_fallback(
+                        self._camera_view(),
+                        st,
+                        self._viewport_rect,
+                        (imgui.get_io().mouse_pos.x, imgui.get_io().mouse_pos.y),
+                        center,
+                        overlay,
+                        self.window.style_scale,
+                    )
+                self.gizmo.draw_overlay(
                     self._camera_view(),
-                    st,
                     self._viewport_rect,
-                    (imgui.get_io().mouse_pos.x, imgui.get_io().mouse_pos.y),
-                    center,
                     overlay,
-                    self.window.style_scale,
+                    style_scale=self.window.style_scale,
                 )
-            self.gizmo.draw_overlay(
-                self._camera_view(),
-                self._viewport_rect,
-                overlay,
-                style_scale=self.window.style_scale,
-            )
-            self.view_cube.draw(overlay, self.window.style_scale)
-            self._draw_model_drop_overlay(overlay)
+                self.view_cube.draw(overlay, self.window.style_scale)
+                self._draw_model_drop_overlay(overlay)
         finally:
             imgui.pop_clip_rect()
-        self.camera_preview.draw(
-            self.window,
-            self._viewport_rect,
-            preview_name,
-            self.localizer.text,
-        )
+        if not session_busy:
+            self.camera_preview.draw(
+                self.window,
+                self._viewport_rect,
+                preview_name,
+                self.localizer.text,
+            )
         imgui.end()
 
     def _draw_model_drop_overlay(self, overlay: ImguiDraw2D) -> None:
@@ -1505,6 +1699,15 @@ class ViewerApp:
             )
         else:
             message = notice or empty_hint
+        self._draw_center_notice(overlay, message, border=dragging)
+
+    def _draw_center_notice(
+        self,
+        overlay: ImguiDraw2D,
+        message: str,
+        *,
+        border: bool = False,
+    ) -> None:
         lines = message.splitlines()
         sizes = [overlay.text_size(line) for line in lines]
         scale = self.window.style_scale
@@ -1514,7 +1717,7 @@ class ViewerApp:
         x, y, w, h = self._viewport_rect
         left = x + (w - width) * 0.5
         top = y + (h - height) * 0.5
-        if dragging:
+        if border:
             overlay.rect(
                 (x + 3.0 * scale, y + 3.0 * scale),
                 (x + w - 3.0 * scale, y + h - 3.0 * scale),

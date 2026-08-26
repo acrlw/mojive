@@ -73,7 +73,7 @@ def test_modal_layout_tracks_the_current_viewport_and_enforces_readable_width(
     monkeypatch.setattr(
         imgui,
         "get_main_viewport",
-        lambda: SimpleNamespace(get_center=lambda: center),
+        lambda: SimpleNamespace(get_center=lambda: center, work_size=imgui.ImVec2(800.0, 600.0)),
     )
     monkeypatch.setattr(imgui, "set_next_window_pos", lambda *args: positions.append(args))
     monkeypatch.setattr(
@@ -82,13 +82,13 @@ def test_modal_layout_tracks_the_current_viewport_and_enforces_readable_width(
         lambda *args: constraints.append(args),
     )
 
-    _prepare_modal(1.5, 440.0)
+    _prepare_modal(440.0)
 
     position, condition, pivot = positions[0]
     assert (position.x, position.y) == pytest.approx((700.0, 450.0))
     assert condition == imgui.Cond_.always.value
     assert (pivot.x, pivot.y) == pytest.approx((0.5, 0.5))
     minimum, maximum = constraints[0]
-    assert (minimum.x, minimum.y) == pytest.approx((660.0, 0.0))
-    assert maximum.x == pytest.approx(660.0)
+    assert (minimum.x, minimum.y) == pytest.approx((440.0, 0.0))
+    assert maximum.x == pytest.approx(440.0)
     assert maximum.y > 1e30

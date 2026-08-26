@@ -506,6 +506,37 @@ class Layer:
         st.colors[i] = 1.0
         st.sizes[i] = FRAME_WIDTH_PX
 
+    def frames(
+        self,
+        ident: str,
+        positions,
+        rotations,
+        axis_len: float = 0.1,
+        duration: float = NEVER,
+    ) -> None:
+        """Create or replace a batch of RGB coordinate frames."""
+        origins = np.asarray(positions, np.float32).reshape(-1, 3)
+        matrices = np.asarray(rotations, np.float32).reshape(-1, 3, 3)
+        count = min(len(origins), len(matrices))
+        if count == 0:
+            self._remove(ident)
+            return
+        i = self._alloc(PrimitiveType.FRAME, ident, count, duration)
+        if i < 0:
+            return
+        st = self._stores[PrimitiveType.FRAME]
+        dst = st.positions[i : i + count]
+        dst[:, 0::2] = origins[:count, None, :]
+        ends = dst[:, 1::2]
+        ends[:] = matrices[:count].transpose(0, 2, 1)
+        norms = np.linalg.norm(ends, axis=2, keepdims=True)
+        np.divide(ends, norms, out=ends, where=norms > 1e-12)
+        ends[norms[..., 0] <= 1e-12] = 0.0
+        ends *= float(axis_len)
+        ends += origins[:count, None, :]
+        st.colors[i : i + count] = 1.0
+        st.sizes[i : i + count] = FRAME_WIDTH_PX
+
     def box(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
         """Create or replace a solid unit box transformed into world space."""
         self._solid(PrimitiveType.BOX, ident, transform4x4, color, duration)

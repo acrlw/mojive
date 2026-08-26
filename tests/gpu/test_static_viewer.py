@@ -248,7 +248,7 @@ def test_editor_modals_are_readable_and_follow_the_resized_window_center(monkeyp
         for _ in range(3):
             viewer.sync()
         error, center, expected = geometry("File operation failed")
-        assert error.size.x == pytest.approx(440.0 * viewer.window.style_scale)
+        assert error.size.x == pytest.approx(440.0)
         assert error.size.x > error.size.y
         assert center == pytest.approx(expected, abs=1.0)
 

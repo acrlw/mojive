@@ -16,7 +16,7 @@ pytest.importorskip("mujoco")
 
 from forge_viewer.adapters.base import NodeType  # noqa: E402
 from forge_viewer.assets import resolve  # noqa: E402
-from forge_viewer.commands import AddModelComponent, CommandResult, SelectNode  # noqa: E402
+from forge_viewer.commands import AddModelComponent, SelectNode  # noqa: E402
 from forge_viewer.composition import build, build_editor, build_scene  # noqa: E402
 from forge_viewer.scene import Scene  # noqa: E402
 from forge_viewer.types import CameraView  # noqa: E402
@@ -97,8 +97,8 @@ def test_add_model_dialog_filters_formats_and_accepts_multiple_files(viewer, mon
     monkeypatch.setattr(portable_file_dialogs, "open_file", open_file)
     monkeypatch.setattr(
         viewer.app,
-        "add_model",
-        lambda path: loaded.append(Path(path)) or CommandResult.good(),
+        "_queue_model_load",
+        lambda action, path, position=None: loaded.append((action, Path(path), position)),
     )
 
     viewer.app._open_model_dialog("add")
@@ -107,7 +107,7 @@ def test_add_model_dialog_filters_formats_and_accepts_multiple_files(viewer, mon
     assert opened["title"] == "Add MJCF or URDF models"
     assert opened["filters"] == MODEL_FILTERS
     assert opened["options"] == portable_file_dialogs.opt.multiselect
-    assert loaded == [Path(path) for path in paths]
+    assert [item[:2] for item in loaded] == [("add", Path(path)) for path in paths]
 
 
 def test_runtime_model_loading_rebuilds_gpu_scene(viewer):
@@ -117,6 +117,8 @@ def test_runtime_model_loading_rebuilds_gpu_scene(viewer):
     viewer.window._file_drag_active = True
     viewer.window._on_file_drop(None, [str(resolve("test_scene.xml"))])
     assert not viewer.window.file_drag_active
+    viewer.sync()
+    viewer.app._model_load_future.result(timeout=10.0)
     viewer.sync()
     assert viewer.session.asset_path == resolve("test_scene.xml")
 

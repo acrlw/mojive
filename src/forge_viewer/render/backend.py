@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+import numpy as np
+
 from ..types import CameraView, ViewportImage
 
 if TYPE_CHECKING:
@@ -157,6 +159,18 @@ class RenderStats:
     notes: dict[str, str] = field(default_factory=dict)
 
 
+class ReadbackTarget(Protocol):
+    """Minimal render-target surface exposed to capture and compatibility APIs."""
+
+    width: int
+    height: int
+    samples: int
+
+    def read_color(self, flip: bool = True) -> np.ndarray: ...
+    def read_depth(self, flip: bool = True) -> np.ndarray: ...
+    def read_ids(self, flip: bool = False) -> np.ndarray: ...
+
+
 @runtime_checkable
 class RenderBackend(Protocol):
     """Renderer contract consumed by the viewer and offscreen composition layer.
@@ -169,6 +183,17 @@ class RenderBackend(Protocol):
     caps: BackendCaps
     debug: DebugDraw | None
     stats: RenderStats
+    target: ReadbackTarget
+
+    def set_background(self, rgba: tuple[float, float, float, float]) -> None:
+        """Set the clear color used by subsequent render calls."""
+
+        ...
+
+    def set_transparent_id_rendering(self, enabled: bool) -> None:
+        """Include or exclude transparent objects from ID output."""
+
+        ...
 
     def set_scene(self, source: SceneSource) -> None:
         """Upload stable scene structure after its revision changes."""
@@ -195,7 +220,12 @@ class RenderBackend(Protocol):
 
         ...
 
-    def capture(self, path: Path, camera: CameraView | None = None) -> bool:
+    def capture(
+        self,
+        path: Path,
+        camera: CameraView | None = None,
+        size: tuple[int, int] | None = None,
+    ) -> bool:
         """Write the current scene to ``path``, optionally from another camera."""
 
         ...
@@ -286,6 +316,25 @@ class RenderBackend(Protocol):
         ...
 
 
+@dataclass
+class _NullTarget:
+    width: int = 1
+    height: int = 1
+    samples: int = 0
+
+    def read_color(self, flip: bool = True) -> np.ndarray:
+        del flip
+        return np.zeros((self.height, self.width, 4), np.uint8)
+
+    def read_depth(self, flip: bool = True) -> np.ndarray:
+        del flip
+        return np.ones((self.height, self.width), np.float32)
+
+    def read_ids(self, flip: bool = False) -> np.ndarray:
+        del flip
+        return np.zeros((self.height, self.width), np.uint32)
+
+
 class NullBackend:
     """No-op backend used when rendering is unavailable or intentionally disabled."""
 
@@ -294,6 +343,7 @@ class NullBackend:
         self.caps = BackendCaps(name="null", notes=(reason,))
         self.debug = None
         self.stats = RenderStats()
+        self.target = _NullTarget()
         self._flags: dict[RenderFlag, bool] = {}
         self._view = DebugView.SHADED
         self._label_mode = LabelMode.NONE
@@ -302,11 +352,16 @@ class NullBackend:
     def set_scene(self, source) -> None: ...
     def update(self, frame) -> None: ...
     def set_camera(self, camera) -> None: ...
+    def set_background(self, rgba) -> None: ...
+    def set_transparent_id_rendering(self, enabled: bool) -> None: ...
     def render(self, frame=None) -> ViewportImage | None:
         return None
 
-    def resize(self, width: int, height: int) -> None: ...
-    def capture(self, path, camera=None) -> bool:
+    def resize(self, width: int, height: int) -> None:
+        self.target.width = max(1, int(width))
+        self.target.height = max(1, int(height))
+
+    def capture(self, path, camera=None, size=None) -> bool:
         return False
 
     def pick(self, x: int, y: int) -> int:

@@ -83,6 +83,18 @@ class AuthoredSceneOverlay:
         self.cameras.clear()
 
 
+def _apply_geometry_color_overrides(source: SceneSource, overrides: dict[int, np.ndarray]) -> None:
+    """Apply retained colors without multiplying override and instance counts."""
+    if len(overrides) <= 8:
+        for node_id, rgba in overrides.items():
+            source.geom_rgba[source.geom_node == node_id] = rgba
+        return
+    for instance, node_id in enumerate(source.geom_node):
+        rgba = overrides.get(int(node_id))
+        if rgba is not None:
+            source.geom_rgba[instance] = rgba
+
+
 _SCENE_EDIT_COMMANDS = (
     cmd.AddSceneModel,
     cmd.RemoveSceneModel,
@@ -141,8 +153,11 @@ class Session:
         self._by_node_id: dict[int, SceneNode] = {}
         self._by_object_id: dict[int, SceneNode] = {}
         self._joints: list[JointInfo] = []
+        self._joints_by_body: dict[int, tuple[JointInfo, ...]] = {}
         self._actuators: list[ActuatorInfo] = []
+        self._actuators_by_joint: dict[int, tuple[ActuatorInfo, ...]] = {}
         self._cameras: list[CameraInfo] = []
+        self._camera_slot_by_id: dict[int, int] = {}
         self._keyframes: list[KeyframeInfo] = []
         self._sensor_infos: list[SensorInfo] = []
         self._equality_constraints: list[EqualityConstraintInfo] = []
@@ -227,10 +242,18 @@ class Session:
         """Return editable joint metadata from the adapter."""
         return self._joints
 
+    def joints_for_body(self, body_index: int) -> tuple[JointInfo, ...]:
+        """Return joints attached directly to one physics body."""
+        return self._joints_by_body.get(int(body_index), ())
+
     @property
     def actuators(self) -> list[ActuatorInfo]:
         """Return actuator control metadata from the adapter."""
         return self._actuators
+
+    def actuators_for_joint(self, joint_id: int) -> tuple[ActuatorInfo, ...]:
+        """Return actuators attached directly to one joint."""
+        return self._actuators_by_joint.get(int(joint_id), ())
 
     @property
     def cameras(self) -> list[CameraInfo]:
@@ -376,6 +399,9 @@ class Session:
             self._step_counter += self._pending_steps
             self._pending_steps = 0
 
+        prepare_frame = getattr(self._adapter, "prepare_frame", None)
+        if prepare_frame is not None:
+            prepare_frame(needs)
         if self._adapter.structure_revision != self._adapter_revision:
             self._refresh_structure()
 
@@ -940,6 +966,8 @@ class Session:
         if isinstance(c, cmd.SetQpos):
             if not caps.write_qpos:
                 return CommandResult.bad(f"{caps.name} does not support joint editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before editing joints")
             ok = self._adapter.set_qpos(c.index, c.value)
             return (
                 CommandResult.good("")
@@ -1254,9 +1282,7 @@ class Session:
         for material_id, material in self._authored.materials.items():
             if material_id < len(self._source.materials):
                 self._source.materials[material_id] = material
-        for node_id, rgba in self._authored.geometry_colors.items():
-            instances = np.flatnonzero(self._source.geom_node == node_id)
-            self._source.geom_rgba[instances] = rgba
+        _apply_geometry_color_overrides(self._source, self._authored.geometry_colors)
         self._nodes = [
             replace(node, children=list(node.children)) for node in self._adapter.nodes()
         ]
@@ -1280,8 +1306,21 @@ class Session:
             if 0 <= node.light_index < len(self._source.lights.lights):
                 node.visible = self._source.lights.lights[node.light_index].active
         self._joints = self._adapter.joints()
+        joints_by_body: dict[int, list[JointInfo]] = {}
+        for joint in self._joints:
+            joints_by_body.setdefault(int(joint.body), []).append(joint)
+        self._joints_by_body = {body: tuple(joints) for body, joints in joints_by_body.items()}
         self._actuators = self._adapter.actuators()
+        actuators_by_joint: dict[int, list[ActuatorInfo]] = {}
+        for actuator in self._actuators:
+            actuators_by_joint.setdefault(int(actuator.joint), []).append(actuator)
+        self._actuators_by_joint = {
+            joint: tuple(actuators) for joint, actuators in actuators_by_joint.items()
+        }
         self._cameras = self._adapter.cameras() if self._adapter.caps.model_cameras else []
+        self._camera_slot_by_id = {
+            camera.camera_id: slot for slot, camera in enumerate(self._cameras)
+        }
         if self._authored.cameras:
             cameras = list(self._source.cameras)
             for camera_id, camera in self._authored.cameras.items():
@@ -1349,9 +1388,15 @@ class Session:
         if self._source is None:
             return
         driven = self._frame.cameras
-        cameras = list(driven if driven is not None else self._source.cameras)
-        if len(cameras) != len(self._source.cameras):
-            cameras = list(self._source.cameras)
+        if not self._authored.cameras:
+            if driven is None or len(driven) != len(self._source.cameras):
+                self._frame.cameras = self._source.cameras
+            return
+        cameras = list(
+            driven
+            if driven is not None and len(driven) == len(self._source.cameras)
+            else self._source.cameras
+        )
         for camera_id, camera in self._authored.cameras.items():
             slot = self._camera_slot(camera_id)
             if 0 <= slot < len(cameras):
@@ -1359,10 +1404,7 @@ class Session:
         self._frame.cameras = tuple(cameras)
 
     def _camera_slot(self, camera_id: int) -> int:
-        return next(
-            (slot for slot, camera in enumerate(self._cameras) if camera.camera_id == camera_id),
-            -1,
-        )
+        return self._camera_slot_by_id.get(int(camera_id), -1)
 
     def _keyframe_slot(self, keyframe_id: int) -> int:
         return next(

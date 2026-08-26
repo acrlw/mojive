@@ -159,11 +159,59 @@ _FLEX_COPY_FIELDS = (
 
 
 def _load_editable_spec(path: Path):
-    spec = mujoco.MjSpec.from_file(str(path))
-    if path.suffix.lower() == ".urdf":
+    is_urdf = path.suffix.lower() == ".urdf"
+    source = _normalized_urdf_source(path) if is_urdf else None
+    spec = (
+        mujoco.MjSpec.from_string(source)
+        if source is not None
+        else mujoco.MjSpec.from_file(str(path))
+    )
+    if is_urdf:
+        spec.modelfiledir = str(path.parent)
         spec = mujoco.MjSpec.from_string(spec.to_xml())
         spec.modelfiledir = str(path.parent)
     return spec
+
+
+def _normalized_urdf_source(path: Path) -> str | None:
+    """Repair a redundant compiler mesh directory when only the shorter path exists.
+
+    Some exported URDFs set ``meshdir="meshes"`` while also storing filenames as
+    ``meshes/foo.stl``. MuJoCo applies both values and looks below
+    ``meshes/meshes``. Preserve that explicit path when it exists; otherwise use
+    the compatible shorter path only when its asset exists on disk.
+    """
+
+    root = ET.fromstring(path.read_bytes())
+    compiler = root.find("./mujoco/compiler")
+    meshdir = "" if compiler is None else str(compiler.attrib.get("meshdir", ""))
+    directory = meshdir.strip().replace("\\", "/").rstrip("/")
+    if (
+        not directory
+        or directory.startswith("/")
+        or (len(directory) >= 2 and directory[1] == ":")
+        or ".." in directory.split("/")
+    ):
+        return None
+    prefix = directory + "/"
+    mesh_root = path.parent / directory
+
+    changed = False
+    for mesh in root.iter("mesh"):
+        filename = str(mesh.attrib.get("filename", "")).replace("\\", "/")
+        while filename.startswith("./"):
+            filename = filename[2:]
+        if not filename.startswith(prefix):
+            continue
+        shorter = filename[len(prefix) :]
+        if not shorter or shorter.startswith("/") or ".." in shorter.split("/"):
+            continue
+        explicit_path = mesh_root / filename
+        compatible_path = mesh_root / shorter
+        if not explicit_path.is_file() and compatible_path.is_file():
+            mesh.attrib["filename"] = shorter
+            changed = True
+    return ET.tostring(root, encoding="unicode") if changed else None
 
 
 def _component_xml(spec) -> tuple[ET.Element, str]:
@@ -361,6 +409,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._bvh_local_size = np.zeros((0, 3), np.float32)
         self._bvh_control_body = np.zeros((0, 2), np.int32)
         self._bvh_control_local = np.zeros((0, 2, 3), np.float32)
+        self._bvh_source_ready = False
         self._rangefinder_specs: tuple[_RangefinderSpec, ...] = ()
 
         self._mj_geom_xpos = None
@@ -1062,7 +1111,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             self._resolve_asset_paths(child, item.path.parent)
             # Resolve keyframes inherited from nested model assets before the child is
             # attached again. MuJoCo can then namespace their compiled state correctly.
-            child.compile()
+            self._resolve_attached_keyframes(child)
             if index == 0 and self._root_path is None:
                 spec.option = child.option
                 spec.visual = child.visual
@@ -1083,6 +1132,12 @@ class MuJoCoAdapter(SceneAdapterBase):
             spec.attach(child, prefix=item.prefix, frame=frame)
             self._restore_attached_world_targets(spec, item.prefix)
         return spec
+
+    @staticmethod
+    def _resolve_attached_keyframes(spec) -> None:
+        """Compile an attached spec early only when unresolved keyframes require it."""
+        if len(spec.keys):
+            spec.compile()
 
     def _compile_composed_model(self):
         spec = self._composed_spec()
@@ -1656,6 +1711,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._bvh_local_size = np.zeros((0, 3), np.float32)
         self._bvh_control_body = np.zeros((0, 2), np.int32)
         self._bvh_control_local = np.zeros((0, 2, 3), np.float32)
+        self._bvh_source_ready = False
         self._bind_data_views()
         self._fast_pose = self._verify_pose_layout()
 
@@ -1807,6 +1863,8 @@ class MuJoCoAdapter(SceneAdapterBase):
         return float(self._m.opt.timestep)
 
     def frame(self, needs: FrameNeeds) -> SceneFrame:
+        if self.prepare_frame(needs):
+            self.scene_source()
         d = self._d
         f = self._frame
         f.time = float(d.time)
@@ -1911,6 +1969,16 @@ class MuJoCoAdapter(SceneAdapterBase):
 
         f.lights = self._dynamic_lights() if self._lights_dynamic or self._lights_edited else None
         return f
+
+    def prepare_frame(self, needs: FrameNeeds) -> bool:
+        """Build potentially huge BVH diagnostics only after they are requested."""
+        if not needs.bvh or self._bvh_source_ready:
+            return False
+        self._bvh_source_ready = True
+        self._source = None
+        self._nodes = []
+        self._structure_revision += 1
+        return True
 
     def _fill_tendons(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         count = 0
@@ -2579,8 +2647,14 @@ class MuJoCoAdapter(SceneAdapterBase):
 
     def _build_diagnostic_source(self) -> DiagnosticSource:
         m = self._m
-        bvh_type, bvh_depth, bvh_leaf = self._build_bvh_records()
-        bvh_control_count = self._build_bvh_control_cages()
+        if self._bvh_source_ready:
+            bvh_type, bvh_depth, bvh_leaf = self._build_bvh_records()
+            bvh_control_count = self._build_bvh_control_cages()
+        else:
+            bvh_type = np.zeros(0, np.uint8)
+            bvh_depth = np.zeros(0, np.int32)
+            bvh_leaf = np.zeros(0, bool)
+            bvh_control_count = 0
         bvh_rgba = np.asarray(m.vis.rgba.bv, np.float32)
         if bvh_rgba.shape != (4,):
             bvh_rgba = np.array([0.0, 1.0, 0.0, 0.5], np.float32)
@@ -4186,7 +4260,9 @@ class MuJoCoAdapter(SceneAdapterBase):
             up=np.array([0.0, 0.0, 1.0], np.float32),
             fov_y=float(np.deg2rad(float(m.vis.global_.fovy))),
             near=float(m.vis.map.znear) * extent,
-            far=float(m.vis.map.zfar) * extent,
+            # The free editor camera is not constrained to MuJoCo's classic
+            # viewport range. Keep distant authored and composed entities visible.
+            far=max(float(m.vis.map.zfar), 200.0) * extent,
         )
 
     def release(self) -> None:

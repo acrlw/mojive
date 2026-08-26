@@ -418,6 +418,7 @@ def test_bvh_boxes_reach_the_gpu_pipeline(backend_name, request):
     adapter = make_adapter("mujoco", resolve("deformables"))
     backend = _make_backend(backend_name, request, samples=1)
     try:
+        adapter.prepare_frame(FrameNeeds(poses=True, diagnostics=True, bvh=True))
         source = adapter.scene_source()
         backend.set_scene(source)
         backend.set_camera(adapter.camera_hint())
@@ -445,6 +446,7 @@ def test_interpolated_flex_control_cage_reaches_the_gpu_pipeline(backend_name, r
     adapter = make_adapter("mujoco", resolve("interpolated_flex"))
     backend = _make_backend(backend_name, request, samples=1)
     try:
+        adapter.prepare_frame(FrameNeeds(poses=True, diagnostics=True, bvh=True))
         source = adapter.scene_source()
         backend.set_scene(source)
         backend.set_camera(adapter.camera_hint())
@@ -657,7 +659,8 @@ def test_mujoco_flex_labels_and_frames_use_gpu_debug_layers(backend_name, reques
         assert edge_entry.count == len(source.flex_edges)
         assert vertex_entry.count == len(source.flex_vertex_indices)
         assert len(draw.layer("scene.labels")._texts) == len(source.geom_names)
-        assert len(draw.layer("scene.frames")._index) == len(source.geom_names)
+        assert len(draw.layer("scene.frames")._index) == 1
+        assert draw.layer("scene.frames").count_of(PrimitiveType.FRAME) == len(source.geom_names)
 
         backend.set_label_mode(LabelMode.NONE)
         backend.set_frame_mode(FrameMode.NONE)

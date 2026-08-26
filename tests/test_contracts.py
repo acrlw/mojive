@@ -49,12 +49,17 @@ def test_adapter_and_render_extension_types_are_public():
 
 def test_null_backend_can_render_after_an_explicit_update():
     from forge_viewer.adapters.base import SceneFrame
-    from forge_viewer.render.backend import NullBackend
+    from forge_viewer.render.backend import NullBackend, RenderBackend
 
     backend = NullBackend()
     backend.update(SceneFrame())
+    backend.resize(32, 24)
 
+    assert isinstance(backend, RenderBackend)
     assert backend.render() is None
+    assert backend.target.read_color().shape == (24, 32, 4)
+    assert backend.target.read_depth().shape == (24, 32)
+    assert backend.target.read_ids().shape == (24, 32)
 
 
 def test_mujoco_visual_audit_covers_every_enum_flag():

@@ -18,6 +18,7 @@ from forge_viewer.ui.panels import (
     validate_panels,
 )
 from forge_viewer.ui.panels.camera import camera_snapshot, qpos_snapshot, reproduction_snapshot
+from forge_viewer.ui.panels.hierarchy import hierarchy_open_depth
 from forge_viewer.ui.panels.inspector import (
     _compact_transform,
     _format_vector,
@@ -28,6 +29,7 @@ from forge_viewer.ui.panels.inspector import (
     _unique_component_name,
     gizmo_refusal_reason,
 )
+from forge_viewer.ui.panels.joints import page_span
 from forge_viewer.ui.panels.stats import StatsPanel, _scale_ceiling
 from forge_viewer.ui.window import ResizeLatch
 
@@ -54,6 +56,14 @@ def panels() -> PanelSet:
 def test_registered_panels(panels: PanelSet):
 
     assert {p.name for p in panels} == EXPECTED_PANELS
+
+
+def test_large_editor_lists_are_bounded_and_large_hierarchies_start_closed():
+    assert page_span(4096, 99, 128) == (31, 32, 3968, 4096)
+    assert page_span(0, -1, 128) == (0, 1, 0, 0)
+    assert hierarchy_open_depth(999) == 2
+    assert hierarchy_open_depth(1000) == 1
+    assert hierarchy_open_depth(2000) == 0
 
 
 def test_settings_is_a_modal_dialog(panels: PanelSet):

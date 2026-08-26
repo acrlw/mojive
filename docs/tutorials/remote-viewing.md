@@ -34,3 +34,14 @@ Create a deterministic snapshot stream:
 
 A recording stores the same `RemoteStructure` and `RemoteFrame` packets consumed by a remote
 viewer. Replay timing uses frame timestamps and supports speed control and looping.
+
+The publisher retains one bootstrap frame for viewers that connect later, but avoids repeatedly
+serializing frames while no viewer is attached. Once a viewer is connected, each
+`publish_frame()` call still snapshots its arrays with pickle before the latest-only sender can
+drop an older packet. High-rate training loops should therefore publish at a deliberate viewing
+cadence (commonly 20–30 Hz) instead of publishing every simulation step.
+
+For dense diagnostics, publish plural debug operations such as one `arrows` command containing
+NumPy start/end arrays. Thousands of scalar `arrow` commands carry separate dictionaries and
+retained IDs and may exceed the viewer's per-frame command budget. Keep scalar commands for items
+that need independent lifetime or erasure.

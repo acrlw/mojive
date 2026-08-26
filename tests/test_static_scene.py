@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import replace
 
 import numpy as np
@@ -35,6 +36,36 @@ from forge_viewer.types import (
 )
 
 pytestmark = pytest.mark.integration
+
+
+def test_model_load_jobs_execute_off_the_ui_thread(tmp_path) -> None:
+    from forge_viewer.ui.app import ViewerApp
+
+    calls = []
+
+    class RecordingSession:
+        def submit(self, command):
+            calls.append((threading.get_ident(), command))
+            return cmd.CommandResult.good("Loaded model.xml")
+
+    app = ViewerApp.__new__(ViewerApp)
+    app.session = RecordingSession()
+    app._model_load_executor = None
+    app._model_load_future = None
+    app._model_load_job = None
+    app._model_load_queue = []
+    app._model_load_started = 0.0
+    app._queue_model_load("load", tmp_path / "model.xml")
+
+    try:
+        assert app._start_model_load()
+        result = app._model_load_future.result(timeout=2.0)
+    finally:
+        app._model_load_executor.shutdown(wait=True)
+
+    assert result.ok
+    assert calls[0][0] != threading.get_ident()
+    assert isinstance(calls[0][1], cmd.LoadAsset)
 
 
 def test_static_scene_builds_without_a_physics_package():
@@ -472,9 +503,51 @@ def test_camera_ids_are_resolved_independently_from_source_slots():
     session = Session(SparseCameraAdapter(scene))
     edited = CameraView(eye=np.array([1.0, 2.0, 3.0], np.float32))
 
+    class NoCameraScan(list):
+        def __iter__(self):
+            raise AssertionError("camera lookup scanned the full camera list")
+
+    session._cameras = NoCameraScan(session._cameras)
+
     assert session.submit(cmd.SetSceneCamera(42, edited))
     assert scene.camera_view(0) is edited
     assert session.frame.cameras == (edited,)
+
+
+def test_read_only_camera_override_follows_its_stable_id_after_removal():
+    class ReadOnlyCameras(StaticSceneAdapter):
+        def set_camera_view(self, camera_id, camera):
+            return False
+
+    scene = Scene()
+    first = scene.add_camera("first", CameraView())
+    second = scene.add_camera("second", CameraView(eye=np.array([4.0, 2.0, 3.0], np.float32)))
+    session = Session(ReadOnlyCameras(scene))
+    edited = CameraView(eye=np.array([-2.0, 1.0, 4.0], np.float32))
+
+    assert session.submit(cmd.SetSceneCamera(second, edited))
+    scene.remove_camera(first)
+    session.tick(FrameNeeds())
+
+    assert [camera.camera_id for camera in session.cameras] == [second]
+    assert session.source.cameras == (edited,)
+    assert session.frame.cameras == (edited,)
+
+
+def test_many_authored_geometry_colors_are_applied_in_one_instance_pass():
+    from types import SimpleNamespace
+
+    from forge_viewer.session import _apply_geometry_color_overrides
+
+    source = SimpleNamespace(
+        geom_node=np.array([0, 15, 99, 7], np.int32),
+        geom_rgba=np.zeros((4, 4), np.float32),
+    )
+    overrides = {node_id: np.array([node_id, 0.0, 0.0, 1.0], np.float32) for node_id in range(16)}
+
+    _apply_geometry_color_overrides(source, overrides)
+
+    assert source.geom_rgba[:, 0].tolist() == [0.0, 15.0, 0.0, 7.0]
 
 
 def test_custom_mesh_enters_the_same_scene_contract():

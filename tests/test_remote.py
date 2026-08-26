@@ -96,6 +96,33 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
         source_session.release()
 
 
+def test_publisher_does_not_serialize_every_frame_before_a_viewer_connects(monkeypatch):
+    import forge_viewer.remote as remote_module
+
+    source_session = Session(StaticSceneAdapter(Scene()))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source_session))
+    dumps = remote_module.pickle.dumps
+    calls = []
+
+    def counted(value, *args, **kwargs):
+        calls.append(value)
+        return dumps(value, *args, **kwargs)
+
+    monkeypatch.setattr(remote_module.pickle, "dumps", counted)
+    try:
+        for step in range(100):
+            publisher.publish_frame(replace(source_session.frame, step=step))
+
+        assert len(calls) == 1
+        assert isinstance(calls[0], remote_module.RemoteFrame)
+        assert publisher._frame_sequence == 100
+    finally:
+        publisher.close()
+        source_session.release()
+
+
 def test_structure_update_invalidates_frames_from_the_previous_revision():
     scene = Scene()
     scene.box(name="first")
@@ -394,6 +421,16 @@ def test_remote_camera_metadata_and_edits_use_the_shared_scene_contract():
     try:
         assert remote.adapter.caps.model_cameras
         info = remote.cameras[0]
+
+        class NoCameraScan(list):
+            def __iter__(self):
+                raise AssertionError("remote camera lookup scanned all camera metadata")
+
+        with remote.adapter._lock:
+            remote.adapter._structure = replace(
+                remote.adapter._structure,
+                cameras=NoCameraScan(remote.adapter._structure.cameras),
+            )
         assert remote.camera_view(info.camera_id) is not None
         edited = CameraView(eye=np.array([4.0, -3.0, 2.0], np.float32))
         assert remote.submit(cmd.SetSceneCamera(info.camera_id, edited))

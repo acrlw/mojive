@@ -304,6 +304,26 @@ def test_axis_length_ignores_scale_baked_into_the_transform():
         assert np.linalg.norm(pos[0, 2 * k + 1] - pos[0, 2 * k]) == pytest.approx(0.25)
 
 
+def test_batched_frames_preserve_origins_axes_and_one_retained_id():
+    dd = DebugDraw()
+    layer = dd.layer("axes", Occlusion.ALWAYS)
+    positions = np.array([[1, 2, 3], [4, 5, 6]], np.float32)
+    rotations = np.array([np.eye(3, dtype=np.float32), np.diag([2.0, 3.0, 4.0])], np.float32)
+
+    layer.frames("frames", positions, rotations, axis_len=0.5)
+
+    packed = layer.positions_of(PrimitiveType.FRAME)
+    assert packed.shape == (2, 6, 3)
+    assert len(layer._index) == 1
+    for frame_index in range(2):
+        assert packed[frame_index, 0::2] == pytest.approx(
+            np.broadcast_to(positions[frame_index], (3, 3))
+        )
+        assert np.linalg.norm(
+            packed[frame_index, 1::2] - packed[frame_index, 0::2], axis=1
+        ) == pytest.approx([0.5, 0.5, 0.5])
+
+
 def test_solid_primitives_reuse_the_builtin_meshes():
 
     dd = DebugDraw()
@@ -563,6 +583,91 @@ def test_bridge_exposes_world_text_without_a_ui_specific_path():
     assert frame.text_count == 1
     assert frame.texts[0].text == "3.2 m/s"
     assert frame.texts[0].occlusion is Occlusion.ALWAYS
+
+
+def test_bridge_exposes_batched_coordinate_frames() -> None:
+    backend = _Backend()
+    bridge = DebugBridge(backend)
+
+    assert bridge._apply(
+        {
+            "op": "frames",
+            "layer": "policy.frames",
+            "id": "bodies",
+            "positions": [[0, 0, 0], [1, 2, 3]],
+            "rotations": [np.eye(3).tolist(), np.eye(3).tolist()],
+            "axis_len": 0.25,
+        }
+    )
+
+    layer = backend.debug.layer("policy.frames")
+    assert layer.count_of(PrimitiveType.FRAME) == 2
+    assert len(layer._index) == 1
+
+
+def test_bridge_reports_commands_dropped_by_the_per_frame_budget() -> None:
+    bridge = DebugBridge(_Backend())
+    messages = [
+        {"op": "point", "layer": "policy", "id": str(index), "p": [index, 0, 0]}
+        for index in range(3)
+    ]
+
+    assert bridge.apply_batch(messages, budget=2) == 2
+    assert bridge.stats.dropped == 1
+    assert "Use lines, arrows, points, or frames batches" in bridge.stats.notes[-1]
+
+
+def test_selection_label_uses_the_structure_object_index() -> None:
+    from forge_viewer.adapters.base import NodeType, SceneFrame, SceneNode, SceneSource
+    from forge_viewer.render.backend import FrameMode, LabelMode
+    from forge_viewer.render.overlay import OverlayPublisher, OverlayState
+    from forge_viewer.types import CameraView
+
+    node = SceneNode(1, "selected", NodeType.LINK, object_id=17, body_index=0)
+    source = SceneSource(nodes=[node])
+    draw = DebugDraw()
+    publisher = OverlayPublisher(draw, {})
+    publisher.set_scene(source)
+
+    class NoNodeScan(list):
+        def __iter__(self):
+            raise AssertionError("selection label scanned the full node list")
+
+    source.nodes = NoNodeScan(source.nodes)
+    publisher.publish(
+        SceneFrame(body_xpos=np.zeros((1, 3), np.float32)),
+        OverlayState(CameraView(), 720, 17, LabelMode.SELECTION, FrameMode.NONE, 0),
+    )
+
+    labels = draw.layer("scene.labels")._texts
+    assert labels["selection"].text == "selected"
+
+
+def test_tendon_labels_group_segments_in_one_indexed_pass() -> None:
+    from forge_viewer.adapters.base import SceneFrame, SceneSource
+    from forge_viewer.render.overlay import OverlayPublisher
+
+    source = SceneSource(tendon_names=("first", "second"))
+    frame = SceneFrame(
+        tendon_segments=np.array(
+            [
+                [[0, 0, 0], [2, 0, 0]],
+                [[0, 2, 0], [2, 2, 0]],
+                [[0, 4, 0], [2, 4, 0]],
+            ],
+            np.float32,
+        ),
+        tendon_ids=np.array([1, 0, 1], np.int32),
+    )
+    draw = DebugDraw()
+    publisher = OverlayPublisher(draw, {})
+    publisher.set_scene(source)
+    layer = draw.layer("scene.labels")
+
+    publisher._draw_tendon_labels(layer, frame)
+
+    assert layer._texts["tendon:0"].anchor == pytest.approx([1.0, 2.0, 0.0])
+    assert layer._texts["tendon:1"].anchor == pytest.approx([1.0, 2.0, 0.0])
 
 
 def test_pass_is_registered_and_hands_its_draw_to_the_backend():

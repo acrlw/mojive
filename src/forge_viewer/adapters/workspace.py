@@ -237,7 +237,14 @@ class WorkspaceAdapter(SceneAdapterBase):
             self._scene_revision = self.scene.structure_revision
         return self._source
 
+    def prepare_frame(self, needs: FrameNeeds) -> bool:
+        changed = self.primary.prepare_frame(needs)
+        if changed:
+            self._invalidate()
+        return changed
+
     def frame(self, needs: FrameNeeds) -> SceneFrame:
+        self.prepare_frame(needs)
         source = self.scene_source()
         primary = self.primary.frame(needs)
         authored = self.scene.frame

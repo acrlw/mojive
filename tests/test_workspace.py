@@ -11,6 +11,7 @@ from forge_viewer import commands as cmd
 from forge_viewer import math3d
 from forge_viewer.adapters.base import (
     AdapterCaps,
+    FrameNeeds,
     NodeType,
     SceneAdapterBase,
     SceneFrame,
@@ -234,6 +235,40 @@ def test_workspace_composes_flex_with_model_root_transform(tmp_path: Path) -> No
         composed.release()
 
 
+def test_keyless_attached_specs_skip_the_redundant_pre_attach_compile() -> None:
+    class KeylessSpec:
+        keys = ()
+
+        @staticmethod
+        def compile():
+            raise AssertionError("keyless child was compiled before the composed model")
+
+    MuJoCoAdapter._resolve_attached_keyframes(KeylessSpec())
+
+
+def test_attached_model_keyframes_survive_composition(tmp_path: Path) -> None:
+    path = tmp_path / "keyed.xml"
+    path.write_text(
+        """<mujoco model="keyed">
+  <worldbody><body name="body"><joint name="joint"/><geom type="sphere" size=".1"/></body></worldbody>
+  <keyframe><key name="pose" qpos=".25"/></keyframe>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    adapter = MuJoCoAdapter()
+    adapter.new_scene()
+
+    try:
+        adapter.add_scene_model(path, np.zeros(3), np.eye(3))
+
+        assert adapter.model.nkey == 1
+        assert adapter.keyframes()[0].name.endswith("pose")
+        assert float(adapter.model.key_qpos[0, 0]) == pytest.approx(0.25)
+    finally:
+        adapter.release()
+
+
 def test_workspace_bounds_contain_primary_and_authored_geometry() -> None:
     document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
     document.add_scene_object(
@@ -306,6 +341,30 @@ def test_workspace_authored_plane_size_is_editable_and_finite() -> None:
     assert session.source.geom_size[0] == pytest.approx((3.0, 5.0, 0.02))
     assert session.submit(cmd.Undo())
     assert session.source.geom_size[0] == pytest.approx((4.0, 4.0, 0.02))
+
+
+def test_editor_plane_is_a_static_mujoco_ground_during_model_composition() -> None:
+    from forge_viewer.ui.app import ViewerApp
+
+    document = workspace()
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    app = ViewerApp.__new__(ViewerApp)
+    app.session = session
+
+    app._add_scene_object(MeshShape.PLANE, "plane")
+
+    assert document.primary.model.ngeom == 1
+    assert int(document.primary.model.geom_type[0]) == int(mujoco.mjtGeom.mjGEOM_PLANE)
+    assert int(document.primary.model.geom_bodyid[0]) == 0
+    added = session.submit(cmd.AddSceneModel(ASSETS / "test_scene.urdf", np.zeros(3, np.float32)))
+    assert added.ok, added.message
+    assert session.submit(cmd.Play())
+    for _ in range(10):
+        frame = session.tick(FrameNeeds(poses=True), wall_dt=document.timestep())
+
+    assert frame.geom_xpos[0] == pytest.approx(np.zeros(3))
+    assert frame.geom_xmat[0] == pytest.approx(np.eye(3))
 
 
 def test_workspace_round_trip_preserves_models_resources_and_entities(tmp_path: Path) -> None:

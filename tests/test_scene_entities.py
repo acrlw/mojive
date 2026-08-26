@@ -280,6 +280,55 @@ def test_view_through_camera_hides_editor_helpers() -> None:
     assert helpers.pick(session, view, (0.0, 0.0, 1000.0, 800.0), (500.0, 400.0), 1.0, True) == 0
 
 
+def test_light_helpers_use_one_anchor_and_direction_batch() -> None:
+    scene = Scene()
+    for index, light_type in enumerate((LightType.POINT, LightType.DIRECTIONAL, LightType.SPOT)):
+        scene.add_light(
+            f"light{index}",
+            Light(
+                type=light_type,
+                position=np.array((float(index), 0.0, 1.0), np.float32),
+                direction=np.array((0.0, 0.0, -1.0), np.float32),
+            ),
+        )
+    session = Session(StaticSceneAdapter(scene))
+    backend = SimpleNamespace(debug=DebugDraw())
+
+    SceneEntityHelpers(show_influence=False).publish(backend, session, CameraView(), 800.0, 1.0)
+
+    layer = backend.debug.layer(HELPER_LAYER)
+    assert layer.count_of(PrimitiveType.POINT) == 3
+    assert layer.count_of(PrimitiveType.ARROW) == 2
+    assert set(layer._index) == {"lights:anchors", "lights:directions"}
+
+
+def test_scene_entity_helpers_index_large_hierarchies_once_per_structure() -> None:
+    class LargeSession:
+        structure_generation = 7
+        selected = 0
+        source = SceneSource(lights=LightSet())
+        frame = SceneFrame()
+
+        def __init__(self) -> None:
+            self.node_reads = 0
+            self._nodes = [SceneNode(i, str(i), NodeType.LINK) for i in range(10_000)]
+
+        @property
+        def nodes(self):
+            self.node_reads += 1
+            return self._nodes
+
+    session = LargeSession()
+    backend = SimpleNamespace(debug=DebugDraw())
+    helpers = SceneEntityHelpers()
+
+    helpers.publish(backend, session, CameraView(), 800.0, 1.0)
+    helpers.publish(backend, session, CameraView(), 800.0, 1.0)
+    helpers.pick(session, CameraView(), (0.0, 0.0, 1000.0, 800.0), (0.0, 0.0), 1.0)
+
+    assert session.node_reads == 1
+
+
 def test_light_and_camera_gizmo_commands_write_entity_transforms() -> None:
     scene = Scene()
     scene.add_light(

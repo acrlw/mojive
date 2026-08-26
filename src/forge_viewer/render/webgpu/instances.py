@@ -29,6 +29,7 @@ class InstanceStore:
         self.buffer: wgpu.GPUBuffer | None = None
         self.capacity = 0
         self.count = 0
+        self._staging = np.zeros(0, INSTANCE_DTYPE)
 
     def _ensure_capacity(self, count: int) -> None:
         if count <= self.capacity and self.buffer is not None:
@@ -41,6 +42,7 @@ class InstanceStore:
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
         )
         self.capacity = new_cap
+        self._staging = np.zeros(new_cap, INSTANCE_DTYPE)
 
     def upload(self, scene: RenderScene) -> None:
         n = scene.count
@@ -48,7 +50,7 @@ class InstanceStore:
         self.count = n
         if n == 0:
             return
-        data = np.zeros(n, INSTANCE_DTYPE)
+        data = self._staging[:n]
         data["model"] = scene.transforms.transpose(0, 2, 1)
         data["color"] = scene.colors
         data["material"] = scene.material
@@ -63,3 +65,4 @@ class InstanceStore:
             self.buffer = None
         self.capacity = 0
         self.count = 0
+        self._staging = np.zeros(0, INSTANCE_DTYPE)

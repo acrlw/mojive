@@ -528,7 +528,7 @@ class InspectorPanel(Panel):
         if qvel is None:
             imgui.text_disabled("waiting for the next frame (qvel is produced on demand)")
             return
-        dofs = [j for j in ctx.session.joints if j.body == node.body_index]
+        dofs = ctx.session.joints_for_body(node.body_index)
         if not dofs:
             imgui.text_disabled("no joint on this body")
             return

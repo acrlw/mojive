@@ -47,6 +47,7 @@ PARAM_SLIDERS: tuple[tuple[str, float, float, str, float | None], ...] = (
     ("pitch", -89.9, 89.9, "%.1f deg", 30.0),
     ("distance", 0.05, 200.0, "%.3f m", None),
     ("fov_y_deg", 10.0, 120.0, "%.1f deg", 45.0),
+    ("far", 1.0, 100000.0, "%.1f m", 200.0),
 )
 
 
@@ -56,6 +57,7 @@ class CameraLike(Protocol):
     pitch: float
     distance: float
     fov_y_deg: float
+    far: float
 
     def view(self) -> CameraView: ...
 

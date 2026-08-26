@@ -146,6 +146,16 @@ def _apply_frame(layer: Layer, m: dict) -> None:
     )
 
 
+def _apply_frames(layer: Layer, m: dict) -> None:
+    layer.frames(
+        m["id"],
+        m["positions"],
+        m["rotations"],
+        float(m.get("axis_len", 0.1)),
+        float(m.get("duration", NEVER)),
+    )
+
+
 def _apply_box(layer: Layer, m: dict) -> None:
     layer.box(m["id"], m["transform"], m.get("color", _WHITE), float(m.get("duration", NEVER)))
 
@@ -206,6 +216,7 @@ OPS = {
     "point": _apply_point,
     "points": _apply_points,
     "frame": _apply_frame,
+    "frames": _apply_frames,
     "box": _apply_box,
     "sphere": _apply_sphere,
     "solid_arrow": _apply_solid_arrow,
@@ -313,10 +324,18 @@ class DebugBridge:
         return applied
 
     def apply_batch(self, messages, budget: int = DEFAULT_BUDGET) -> int:
+        limit = max(0, int(budget))
         applied = 0
-        for message in messages[: max(0, int(budget))]:
+        for message in messages[:limit]:
             applied += int(self._apply(message))
         self.stats.applied += applied
+        dropped = max(0, len(messages) - limit)
+        if dropped:
+            self.stats.dropped += dropped
+            self.stats.note(
+                f"Debug command budget {limit} exceeded; dropped {dropped} commands. "
+                "Use lines, arrows, points, or frames batches for high-cardinality data."
+            )
         return applied
 
     def _apply(self, msg: dict) -> bool:

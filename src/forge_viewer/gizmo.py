@@ -125,6 +125,98 @@ def world_scale(cam: CameraView, origin, viewport_height: float, size_pt: float 
     return 2.0 * clip_w * float(size_pt) / (p11 * h)
 
 
+def screen_constant_world_sizes(
+    camera: CameraView,
+    positions,
+    viewport_height: float,
+    pixels: float,
+    *,
+    visible_only: bool = False,
+) -> np.ndarray:
+    """Return world lengths that occupy a fixed number of viewport pixels."""
+    positions = np.asarray(positions, np.float64).reshape(-1, 3)
+    if not len(positions):
+        return np.zeros(0, np.float64)
+    if camera.orthographic:
+        value = float(camera.ortho_height) * float(pixels) / max(float(viewport_height), 1.0)
+        return np.full(len(positions), value, np.float64)
+    forward = np.asarray(camera.forward(), np.float64)
+    depths = (positions - np.asarray(camera.eye, np.float64)) @ forward
+    visible = depths > 0.0
+    if not visible_only:
+        np.abs(depths, out=depths)
+        visible[:] = True
+    result = np.zeros(len(positions), np.float64)
+    np.maximum(depths, max(float(camera.near), 1e-4), out=depths)
+    result[visible] = (
+        2.0
+        * depths[visible]
+        * np.tan(float(camera.fov_y) * 0.5)
+        * float(pixels)
+        / max(float(viewport_height), 1.0)
+    )
+    return result
+
+
+def camera_icon_segments(
+    views: tuple[CameraView, ...] | list[CameraView],
+    editor_camera: CameraView,
+    viewport_height: float,
+    pixels: float,
+    *,
+    visible_only: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build compact screen-constant camera icons for one debug-draw batch."""
+    if not views:
+        empty = np.empty((0, 3), np.float32)
+        return empty, empty
+    eyes = np.asarray([view.eye for view in views], np.float64)
+    targets = np.asarray([view.target for view in views], np.float64)
+    ups = np.asarray([view.up for view in views], np.float64)
+    forward = _normalize_rows(targets - eyes, (0.0, 0.0, -1.0))
+    right = np.cross(forward, ups)
+    degenerate = np.linalg.norm(right, axis=1) <= 1e-9
+    if np.any(degenerate):
+        reference = np.zeros((int(np.count_nonzero(degenerate)), 3), np.float64)
+        reference[:, 2] = 1.0
+        reference[np.abs(forward[degenerate, 2]) >= 0.95] = (0.0, 1.0, 0.0)
+        right[degenerate] = np.cross(forward[degenerate], reference)
+    right = _normalize_rows(right, (1.0, 0.0, 0.0))
+    up = np.cross(right, forward)
+    lengths = screen_constant_world_sizes(
+        editor_camera, eyes, viewport_height, pixels, visible_only=visible_only
+    )
+    centers = eyes + forward * lengths[:, None]
+    half_height = lengths * 0.45
+    half_width = half_height * np.clip(
+        np.asarray([view.aspect for view in views], np.float64), 0.75, 1.8
+    )
+    horizontal = right * half_width[:, None]
+    vertical = up * half_height[:, None]
+    corners = np.stack(
+        (
+            centers - horizontal - vertical,
+            centers + horizontal - vertical,
+            centers + horizontal + vertical,
+            centers - horizontal + vertical,
+        ),
+        axis=1,
+    )
+    starts = np.concatenate((np.repeat(eyes[:, None], 4, axis=1), corners), axis=1)
+    ends = np.concatenate((corners, np.roll(corners, -1, axis=1)), axis=1)
+    return starts.reshape(-1, 3).astype(np.float32), ends.reshape(-1, 3).astype(np.float32)
+
+
+def _normalize_rows(values: np.ndarray, fallback) -> np.ndarray:
+    values = np.asarray(values, np.float64).reshape(-1, 3)
+    lengths = np.linalg.norm(values, axis=1)
+    result = np.empty_like(values)
+    valid = lengths > 1e-9
+    result[valid] = values[valid] / lengths[valid, None]
+    result[~valid] = fallback
+    return result
+
+
 def project(cam: CameraView, points, rect: tuple[float, float, float, float]) -> np.ndarray:
     p = np.asarray(points, np.float64).reshape(-1, 3)
     mvp = np.asarray(cam.proj_matrix(), np.float64) @ np.asarray(cam.view_matrix(), np.float64)

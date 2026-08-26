@@ -107,8 +107,25 @@ class RenderScene:
         if not self.transparent_buckets:
             return ()
         eye = np.asarray(self.camera.eye if eye is None else eye, np.float32)
+        buckets = np.asarray(self.transparent_buckets, np.intp)
+        starts = np.fromiter(
+            (self.bucket_ranges[int(bucket)][0] for bucket in buckets),
+            np.intp,
+            count=len(buckets),
+        )
+        stops = np.fromiter(
+            (self.bucket_ranges[int(bucket)][1] for bucket in buckets),
+            np.intp,
+            count=len(buckets),
+        )
+        if np.all(stops - starts == 1):
+            offsets = self.transforms[starts, :3, 3] - eye
+            distance2 = np.einsum("ij,ij->i", offsets, offsets)
+            order = np.argsort(-distance2, kind="stable")
+            return tuple(int(bucket) for bucket in buckets[order])
         keyed = []
-        for b in self.transparent_buckets:
+        for b in buckets:
+            b = int(b)
             start, stop = self.bucket_ranges[b]
             if stop <= start:
                 keyed.append((-np.inf, b))

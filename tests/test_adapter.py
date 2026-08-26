@@ -4,6 +4,7 @@ import gc
 import tracemalloc
 import warnings
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -919,13 +920,102 @@ def test_session_loads_mjcf_and_urdf_without_losing_the_current_model_on_failure
         session.release()
 
 
+def test_urdf_loader_normalizes_repeated_compiler_mesh_directory(tmp_path: Path) -> None:
+    meshes = tmp_path / "meshes"
+    meshes.mkdir()
+    (meshes / "tetra.obj").write_text(
+        "\n".join(
+            (
+                "v 0 0 0",
+                "v 1 0 0",
+                "v 0 1 0",
+                "v 0 0 1",
+                "f 1 3 2",
+                "f 1 2 4",
+                "f 1 4 3",
+                "f 2 3 4",
+            )
+        ),
+        encoding="utf-8",
+    )
+    path = tmp_path / "redundant-meshdir.urdf"
+    path.write_text(
+        """<robot name="redundant_meshdir">
+  <mujoco><compiler meshdir="meshes" discardvisual="false"/></mujoco>
+  <link name="base">
+    <visual><geometry><mesh filename="meshes/tetra.obj"/></geometry></visual>
+  </link>
+</robot>
+""",
+        encoding="utf-8",
+    )
+
+    adapter = MuJoCoAdapter(path)
+
+    assert adapter.model.nmesh == 1
+
+
+def test_urdf_loader_preserves_an_explicit_repeated_mesh_directory(tmp_path: Path) -> None:
+    from forge_viewer.adapters.mujoco_adapter import _normalized_urdf_source
+
+    meshes = tmp_path / "meshes" / "meshes"
+    meshes.mkdir(parents=True)
+    mesh_source = "\n".join(
+        (
+            "v 0 0 0",
+            "v 1 0 0",
+            "v 0 1 0",
+            "v 0 0 1",
+            "f 1 3 2",
+            "f 1 2 4",
+            "f 1 4 3",
+            "f 2 3 4",
+        )
+    )
+    (meshes / "tetra.obj").write_text(mesh_source, encoding="utf-8")
+    (tmp_path / "meshes" / "tetra.obj").write_text(mesh_source, encoding="utf-8")
+    path = tmp_path / "explicit-repeated-meshdir.urdf"
+    path.write_text(
+        """<robot name="explicit_repeated_meshdir">
+  <mujoco><compiler meshdir="meshes" discardvisual="false"/></mujoco>
+  <link name="base">
+    <visual><geometry><mesh filename="meshes/tetra.obj"/></geometry></visual>
+  </link>
+</robot>
+""",
+        encoding="utf-8",
+    )
+
+    assert _normalized_urdf_source(path) is None
+    adapter = MuJoCoAdapter(path)
+
+    assert adapter.model.nmesh == 1
+
+
 def test_camera_hint_frames_the_scene(adapter):
     cam = adapter.camera_hint()
     assert cam is not None
     extent = adapter.model.stat.extent
     assert cam.near < cam.far
     assert cam.near == pytest.approx(adapter.model.vis.map.znear * extent)
+    assert cam.far >= 200.0 * extent
     assert 0.5 * extent < np.linalg.norm(cam.eye - cam.target) < 5.0 * extent
+
+
+def test_session_indexes_selected_body_joints_and_requires_pause() -> None:
+    from forge_viewer import commands as cmd
+    from forge_viewer.assets import resolve
+    from forge_viewer.session import Session
+
+    session = Session(MuJoCoAdapter(resolve("joint_types")))
+    joint = session.joints[0]
+
+    assert joint in session.joints_for_body(joint.body)
+    for actuator in session.actuators_for_joint(joint.joint_id):
+        assert actuator.joint == joint.joint_id
+    assert not session.submit(cmd.SetQpos(joint.qpos_adr, 0.1))
+    assert session.submit(cmd.Pause())
+    assert session.submit(cmd.SetQpos(joint.qpos_adr, 0.1))
 
 
 def test_mujoco_visuals_cover_heightfield_sites_and_tendon():
@@ -1150,8 +1240,8 @@ def test_bvh_boxes_match_mujocos_visualizer(asset, flag, bvh_type, depth, show_i
     try:
         if show_inactive:
             adapter.model.vis.global_.bvactive = 0
-        source = adapter.scene_source().diagnostics
         frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True, bvh=True)).diagnostics
+        source = adapter.scene_source().diagnostics
 
         option = mujoco.MjvOption()
         option.flags[:] = 0
@@ -1193,6 +1283,26 @@ def test_bvh_boxes_match_mujocos_visualizer(asset, flag, bvh_type, depth, show_i
         adapter.release()
 
 
+def test_bvh_metadata_is_materialized_only_when_a_frame_requests_it():
+    from forge_viewer.assets import resolve
+    from forge_viewer.session import Session
+
+    adapter = MuJoCoAdapter(resolve("dense_mesh"))
+    session = Session(adapter)
+    try:
+        generation = session.structure_generation
+
+        assert not len(session.source.diagnostics.bvh_type)
+
+        frame = session.tick(FrameNeeds(poses=True, diagnostics=True, bvh=True))
+
+        assert session.structure_generation == generation + 1
+        assert len(session.source.diagnostics.bvh_type) > 0
+        assert len(frame.diagnostics.bvh_centers) == len(session.source.diagnostics.bvh_type)
+    finally:
+        session.release()
+
+
 def test_interpolated_flex_control_cage_matches_mujocos_visualizer(tmp_path):
     path = tmp_path / "interpolated_flex.xml"
     path.write_text(
@@ -1209,8 +1319,8 @@ def test_interpolated_flex_control_cage_matches_mujocos_visualizer(tmp_path):
     )
     adapter = MuJoCoAdapter(path)
     try:
-        source = adapter.scene_source().diagnostics
         frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True, bvh=True)).diagnostics
+        source = adapter.scene_source().diagnostics
 
         option = mujoco.MjvOption()
         option.flags[:] = 0

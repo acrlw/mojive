@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from .. import math3d
-from ..adapters.base import NodeType
-from ..gizmo import project, world_scale
+from ..adapters.base import NodeType, SceneNode
+from ..gizmo import camera_icon_segments, project, screen_constant_world_sizes, world_scale
 from ..render.debugdraw import Occlusion
 from ..types import CameraView, Light, LightType
 from .camera import camera_basis
@@ -30,6 +30,10 @@ class SceneEntityHelpers:
 
     visible: bool = True
     show_influence: bool = True
+    _cache_session: object | None = field(default=None, init=False, repr=False)
+    _cache_generation: int = field(default=-1, init=False, repr=False)
+    _camera_nodes: tuple[SceneNode, ...] = field(default=(), init=False, repr=False)
+    _light_nodes: tuple[SceneNode, ...] = field(default=(), init=False, repr=False)
 
     def publish(
         self,
@@ -48,11 +52,12 @@ class SceneEntityHelpers:
         layer.clear()
         if view_through_camera or not self.visible or session.source is None:
             return
+        self._refresh_nodes(session)
 
         selected = session.selected
         camera_helpers: list[tuple[int, CameraView, bool]] = []
-        for node in session.nodes:
-            if node.type is NodeType.CAMERA and (view := _camera_view(session, node)) is not None:
+        for node in self._camera_nodes:
+            if (view := _camera_view(session, node)) is not None:
                 if selected == node.object_id and selected_camera_aspect is not None:
                     view = view.with_aspect(selected_camera_aspect)
                 camera_helpers.append((node.object_id, view, selected == node.object_id))
@@ -60,19 +65,13 @@ class SceneEntityHelpers:
 
         frame = session.frame
         light_set = frame.lights if frame.lights is not None else session.source.lights
-        for node in session.nodes:
-            if node.type is NodeType.LIGHT and 0 <= node.light_index < len(light_set.lights):
+        light_helpers: list[tuple[int, Light, bool]] = []
+        for node in self._light_nodes:
+            if 0 <= node.light_index < len(light_set.lights):
                 light = light_set.lights[node.light_index]
                 if light.active and light.type is not LightType.IMAGE:
-                    self._light(
-                        layer,
-                        node.object_id,
-                        light,
-                        selected == node.object_id,
-                        camera,
-                        viewport_height,
-                        ui_scale,
-                    )
+                    light_helpers.append((node.object_id, light, selected == node.object_id))
+        self._lights(layer, light_helpers, camera, viewport_height, ui_scale)
 
     def pick(
         self,
@@ -85,12 +84,14 @@ class SceneEntityHelpers:
     ) -> int:
         if view_through_camera or not self.visible or session.source is None:
             return 0
+        self._refresh_nodes(session)
         anchors: list[tuple[int, np.ndarray]] = []
         lights = session.frame.lights or session.source.lights
-        for node in session.nodes:
-            if node.type is NodeType.CAMERA and (view := _camera_view(session, node)) is not None:
+        for node in self._camera_nodes:
+            if (view := _camera_view(session, node)) is not None:
                 anchors.append((node.object_id, np.asarray(view.eye, np.float64)))
-            elif node.type is NodeType.LIGHT and 0 <= node.light_index < len(lights.lights):
+        for node in self._light_nodes:
+            if 0 <= node.light_index < len(lights.lights):
                 light = lights.lights[node.light_index]
                 if light.active and light.type is not LightType.IMAGE:
                     anchors.append((node.object_id, np.asarray(light.position, np.float64)))
@@ -103,6 +104,16 @@ class SceneEntityHelpers:
         index = int(np.argmin(distance2))
         radius = PICK_RADIUS_PT * float(style_scale)
         return int(anchors[index][0]) if distance2[index] <= radius * radius else 0
+
+    def _refresh_nodes(self, session) -> None:
+        generation = int(session.structure_generation)
+        if session is self._cache_session and generation == self._cache_generation:
+            return
+        self._cache_session = session
+        self._cache_generation = generation
+        nodes = session.nodes
+        self._camera_nodes = tuple(node for node in nodes if node.type is NodeType.CAMERA)
+        self._light_nodes = tuple(node for node in nodes if node.type is NodeType.LIGHT)
 
     def _cameras(
         self,
@@ -125,7 +136,9 @@ class SceneEntityHelpers:
             colors,
             ANCHOR_RADIUS_PT * ui_scale,
         )
-        starts, ends = compact_camera_segments(views, editor_camera, viewport_height, 26.0)
+        starts, ends = camera_icon_segments(
+            views, editor_camera, viewport_height, 26.0, visible_only=True
+        )
         layer.lines(
             "cameras:icons",
             starts,
@@ -145,33 +158,67 @@ class SceneEntityHelpers:
                         1.6 * ui_scale,
                     )
 
-    def _light(
+    def _lights(
         self,
+        layer,
+        helpers: list[tuple[int, Light, bool]],
+        editor_camera: CameraView,
+        viewport_height: float,
+        ui_scale: float,
+    ) -> None:
+        if not helpers:
+            return
+        positions = np.asarray([light.position for _, light, _ in helpers], np.float32)
+        colors = np.asarray(
+            [SELECTED_COLOR if selected else LIGHT_COLOR for _, _, selected in helpers],
+            np.float32,
+        )
+        layer.points("lights:anchors", positions, colors, ANCHOR_RADIUS_PT * ui_scale)
+
+        directed = np.asarray([light.type is not LightType.POINT for _, light, _ in helpers], bool)
+        if np.any(directed):
+            starts = positions[directed]
+            directions = np.asarray(
+                [_direction(light.direction) for _, light, _ in helpers], np.float32
+            )[directed]
+            lengths = screen_constant_world_sizes(
+                editor_camera, starts, viewport_height, 30.0, visible_only=True
+            )
+            layer.arrows(
+                "lights:directions",
+                starts,
+                starts + directions * lengths[:, None],
+                colors[directed],
+                1.8 * ui_scale,
+                start_mask_px=ANCHOR_RADIUS_PT * ui_scale,
+            )
+
+        if not self.show_influence:
+            return
+        for object_id, light, selected in helpers:
+            if selected:
+                self._light_influence(
+                    layer,
+                    object_id,
+                    light,
+                    editor_camera,
+                    viewport_height,
+                    ui_scale,
+                )
+
+    @staticmethod
+    def _light_influence(
         layer,
         object_id: int,
         light: Light,
-        selected: bool,
         editor_camera: CameraView,
         viewport_height: float,
         ui_scale: float,
     ) -> None:
         ident = f"light:{object_id}"
-        color = SELECTED_COLOR if selected else LIGHT_COLOR
+        color = SELECTED_COLOR
         position = np.asarray(light.position, np.float32)
-        layer.point(f"{ident}:anchor", position, color, ANCHOR_RADIUS_PT * ui_scale)
-        icon_size = world_scale(editor_camera, position, viewport_height, 30.0)
         direction = _direction(light.direction)
-        if light.type not in (LightType.POINT, LightType.IMAGE):
-            layer.arrow(
-                f"{ident}:direction",
-                position,
-                position + direction * icon_size,
-                color,
-                1.8 * ui_scale,
-                start_mask_px=ANCHOR_RADIUS_PT * ui_scale,
-            )
-        if not selected or not self.show_influence:
-            return
         if light.type is LightType.POINT and light.range > 0.0:
             starts, ends = sphere_segments(position, light.range)
             layer.lines(f"{ident}:range", starts, ends, color, 1.2 * ui_scale)
@@ -228,73 +275,6 @@ def camera_frustum_segments(view: CameraView) -> tuple[np.ndarray, np.ndarray]:
         np.intp,
     )
     return points[edges[:, 0]], points[edges[:, 1]]
-
-
-def compact_camera_segments(
-    views: list[CameraView],
-    editor_camera: CameraView,
-    viewport_height: float,
-    pixels: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Build compact camera icons for one debug-draw batch."""
-    if not views:
-        empty = np.empty((0, 3), np.float32)
-        return empty, empty
-
-    eyes = np.asarray([view.eye for view in views], np.float64)
-    targets = np.asarray([view.target for view in views], np.float64)
-    ups = np.asarray([view.up for view in views], np.float64)
-    forward = _normalize_rows(targets - eyes, (0.0, 0.0, -1.0))
-    right = np.cross(forward, ups)
-    right_norm = np.linalg.norm(right, axis=1)
-    degenerate = right_norm <= 1e-9
-    if np.any(degenerate):
-        reference = np.zeros((int(np.count_nonzero(degenerate)), 3), np.float64)
-        reference[:, 2] = 1.0
-        vertical = np.abs(forward[degenerate, 2]) >= 0.95
-        reference[vertical] = (0.0, 1.0, 0.0)
-        right[degenerate] = np.cross(forward[degenerate], reference)
-    right = _normalize_rows(right, (1.0, 0.0, 0.0))
-    corrected_up = np.cross(right, forward)
-
-    height = max(float(viewport_height), 1.0)
-    projection = np.asarray(editor_camera.proj_matrix(), np.float64)
-    mvp = projection @ np.asarray(editor_camera.view_matrix(), np.float64)
-    clip_w = np.column_stack((eyes, np.ones(len(eyes), np.float64))) @ mvp[3]
-    p11 = float(projection[1, 1])
-    lengths = np.zeros(len(eyes), np.float64)
-    if abs(p11) >= 1e-9:
-        visible = clip_w > 0.0
-        lengths[visible] = 2.0 * clip_w[visible] * float(pixels) / (p11 * height)
-
-    centers = eyes + forward * lengths[:, None]
-    half_height = lengths * 0.45
-    half_width = half_height * np.clip(
-        np.asarray([view.aspect for view in views], np.float64), 0.75, 1.8
-    )
-    horizontal = right * half_width[:, None]
-    vertical = corrected_up * half_height[:, None]
-    corners = np.stack(
-        (
-            centers - horizontal - vertical,
-            centers + horizontal - vertical,
-            centers + horizontal + vertical,
-            centers - horizontal + vertical,
-        ),
-        axis=1,
-    )
-    starts = np.concatenate((np.repeat(eyes[:, None], 4, axis=1), corners), axis=1)
-    ends = np.concatenate((corners, np.roll(corners, -1, axis=1)), axis=1)
-    return starts.reshape(-1, 3).astype(np.float32), ends.reshape(-1, 3).astype(np.float32)
-
-
-def _normalize_rows(values: np.ndarray, fallback) -> np.ndarray:
-    lengths = np.linalg.norm(values, axis=1)
-    result = np.empty_like(values)
-    valid = lengths > 1e-9
-    result[valid] = values[valid] / lengths[valid, None]
-    result[~valid] = fallback
-    return result
 
 
 def sphere_segments(center, radius: float) -> tuple[np.ndarray, np.ndarray]:

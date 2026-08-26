@@ -22,6 +22,7 @@ from ..adapters.base import (
     SceneFrame,
     SceneSource,
 )
+from ..gizmo import camera_icon_segments, screen_constant_world_sizes
 from ..types import CameraView, LightType
 from .backend import FrameMode, LabelMode, RenderFlag
 from .debugdraw import DebugDraw, Occlusion
@@ -82,8 +83,11 @@ class OverlayPublisher:
         self.debug = debug
         self._flags = flags
         self._source: SceneSource | None = None
+        self._node_by_object_id = {}
         self._actuator_palette = np.zeros((0, 4), np.float32)
         self._contact_ends = np.zeros((0, 3), np.float32)
+        self._tendon_label_sums = np.zeros((0, 3), np.float32)
+        self._tendon_label_counts = np.zeros(0, np.int32)
 
     @property
     def actuator_palette(self) -> np.ndarray:
@@ -95,7 +99,10 @@ class OverlayPublisher:
 
     def set_scene(self, source: SceneSource) -> None:
         self._source = source
+        self._node_by_object_id = {node.object_id: node for node in source.nodes if node.object_id}
         self._actuator_palette = np.zeros((len(source.actuator_tendon), 4), np.float32)
+        self._tendon_label_sums = np.zeros((len(source.tendon_names), 3), np.float32)
+        self._tendon_label_counts = np.zeros(len(source.tendon_names), np.int32)
         self.debug.layer("physics.joints").clear()
         self.debug.layer("physics.com").clear()
         self.debug.layer("physics.inertia").clear()
@@ -274,7 +281,7 @@ class OverlayPublisher:
                         text = f"{contact[6]:.3g} N"
                     layer.text(f"{mode.value}:{index}", contact[:3], text)
         elif mode is LabelMode.SELECTION and state.selected:
-            node = next((node for node in source.nodes if node.object_id == state.selected), None)
+            node = self._node_by_object_id.get(state.selected)
             if node is not None and frame.body_xpos is not None and node.body_index >= 0:
                 layer.text("selection", frame.body_xpos[node.body_index], node.name)
 
@@ -282,11 +289,24 @@ class OverlayPublisher:
         source = self._source
         if frame.tendon_segments is None or frame.tendon_ids is None:
             return
-        for tendon, name in enumerate(source.tendon_names):
-            matches = frame.tendon_ids == tendon
-            if np.any(matches):
-                anchor = frame.tendon_segments[matches].mean(axis=(0, 1))
-                layer.text(f"tendon:{tendon}", anchor, name)
+        ids = np.asarray(frame.tendon_ids, np.intp)
+        valid = (ids >= 0) & (ids < len(source.tendon_names))
+        if not np.any(valid):
+            return
+        selected = ids[valid]
+        segments = np.asarray(frame.tendon_segments, np.float32)[valid]
+        sums = self._tendon_label_sums
+        counts = self._tendon_label_counts
+        sums.fill(0.0)
+        counts.fill(0)
+        np.add.at(sums, selected, segments[:, 0] + segments[:, 1])
+        np.add.at(counts, selected, 2)
+        for tendon in np.flatnonzero(counts):
+            layer.text(
+                f"tendon:{tendon}",
+                sums[tendon] / counts[tendon],
+                source.tendon_names[tendon],
+            )
 
     def _publish_frames(self, frame: SceneFrame, state: OverlayState) -> None:
         layer = self.debug.layer("scene.frames", Occlusion.GHOST)
@@ -306,29 +326,29 @@ class OverlayPublisher:
             _draw_frames(layer, mode, frame.site_xpos, frame.site_xmat, length)
         elif mode is FrameMode.CAMERA:
             cameras = frame.cameras if frame.cameras is not None else source.cameras
+            positions = np.empty((len(cameras), 3), np.float32)
+            rotations = np.empty((len(cameras), 3, 3), np.float32)
             for index, view in enumerate(cameras):
                 forward = math3d.normalize(np.asarray(view.target) - np.asarray(view.eye))
                 right = math3d.normalize(np.cross(forward, np.asarray(view.up)))
                 up = math3d.normalize(np.cross(right, forward))
-                rotation = np.column_stack((right, up, -forward)).astype(np.float32)
-                layer.frame(
-                    f"{mode.value}:{index}", math3d.compose(view.eye, rotation, 1.0), length
-                )
+                positions[index] = view.eye
+                rotations[index] = np.column_stack((right, up, -forward))
+            layer.frames(mode.value, positions, rotations, length)
         elif mode is FrameMode.LIGHT:
             lights = frame.lights if frame.lights is not None else source.lights
+            positions = np.empty((len(lights.lights), 3), np.float32)
+            rotations = np.empty((len(lights.lights), 3, 3), np.float32)
             for index, light in enumerate(lights.lights):
-                layer.frame(
-                    f"{mode.value}:{index}",
-                    math3d.compose(light.position, _axis_rotation(light.direction), 1.0),
-                    length,
-                )
+                positions[index] = light.position
+                rotations[index] = _axis_rotation(light.direction)
+            layer.frames(mode.value, positions, rotations, length)
         elif mode is FrameMode.CONTACT and frame.contacts is not None:
+            positions = frame.contacts[:, :3]
+            rotations = np.empty((len(frame.contacts), 3, 3), np.float32)
             for index, contact in enumerate(frame.contacts):
-                layer.frame(
-                    f"{mode.value}:{index}",
-                    math3d.compose(contact[:3], _axis_rotation(contact[3:6]), 1.0),
-                    length,
-                )
+                rotations[index] = _axis_rotation(contact[3:6])
+            layer.frames(mode.value, positions, rotations, length)
 
     def _publish_diagnostics(self, frame: SceneFrame, state: OverlayState) -> None:
         joints = self.debug.layer("physics.joints", Occlusion.DEPTH)
@@ -594,72 +614,35 @@ class OverlayPublisher:
 
         if self.get_flag(RenderFlag.CAMERA):
             views = frame.cameras if frame.cameras is not None else source.cameras
-            for index, view in enumerate(views):
-                self._draw_camera_icon(cameras, index, view, source.diagnostics.camera_rgba, state)
+            starts, ends = camera_icon_segments(views, state.camera, state.viewport_height, 26.0)
+            cameras.lines("cameras", starts, ends, source.diagnostics.camera_rgba, 1.8)
         else:
             cameras.clear()
 
         if self.get_flag(RenderFlag.LIGHT):
             light_set = frame.lights if frame.lights is not None else source.lights
-            for index, light in enumerate(light_set.lights):
-                if light.active:
-                    self._draw_light_icon(
-                        lights, index, light, source.diagnostics.light_rgba, state
-                    )
-                else:
-                    lights.erase(f"light:{index}:point")
-                    lights.erase(f"light:{index}:direction")
+            active = tuple(light for light in light_set.lights if light.active)
+            positions = np.asarray([light.position for light in active], np.float32).reshape(-1, 3)
+            lights.points("lights", positions, source.diagnostics.light_rgba, 6.0)
+            directed = tuple(
+                light for light in active if light.type not in (LightType.POINT, LightType.IMAGE)
+            )
+            starts = np.asarray([light.position for light in directed], np.float32).reshape(-1, 3)
+            directions = _normalize_rows(
+                np.asarray([light.direction for light in directed], np.float64).reshape(-1, 3),
+                (0.0, 0.0, -1.0),
+            )
+            lengths = screen_constant_world_sizes(state.camera, starts, state.viewport_height, 30.0)
+            lights.arrows(
+                "directions",
+                starts,
+                starts + directions * lengths[:, None],
+                source.diagnostics.light_rgba,
+                2.0,
+                start_mask_px=7.0,
+            )
         else:
             lights.clear()
-
-    def _draw_camera_icon(self, layer, index: int, view: CameraView, color, state) -> None:
-        eye = np.asarray(view.eye, np.float32)
-        forward = math3d.normalize(np.asarray(view.target, np.float32) - eye)
-        right = math3d.normalize(np.cross(forward, np.asarray(view.up, np.float32)))
-        up = math3d.normalize(np.cross(right, forward))
-        length = self._icon_world_size(eye, 26.0, state)
-        center = eye + forward * length
-        half_height = length * 0.45
-        half_width = half_height * min(max(float(view.aspect), 0.75), 1.8)
-        corners = np.stack(
-            (
-                center - right * half_width - up * half_height,
-                center + right * half_width - up * half_height,
-                center + right * half_width + up * half_height,
-                center - right * half_width + up * half_height,
-            )
-        )
-        starts = np.concatenate((np.repeat(eye[None], 4, axis=0), corners), axis=0)
-        ends = np.concatenate((corners, np.roll(corners, -1, axis=0)), axis=0)
-        layer.lines(f"camera:{index}", starts, ends, color, 1.8)
-
-    def _draw_light_icon(self, layer, index: int, light, color, state) -> None:
-        position = np.asarray(light.position, np.float32)
-        layer.point(f"light:{index}:point", position, color, 6.0)
-        if light.type in (LightType.POINT, LightType.IMAGE):
-            layer.erase(f"light:{index}:direction")
-            return
-        direction = math3d.normalize(np.asarray(light.direction, np.float32))
-        length = self._icon_world_size(position, 30.0, state)
-        layer.arrow(
-            f"light:{index}:direction",
-            position,
-            position + direction * length,
-            color,
-            2.0,
-            start_mask_px=7.0,
-        )
-
-    def _icon_world_size(self, position: np.ndarray, pixels: float, state: OverlayState) -> float:
-        camera = state.camera
-        if camera.orthographic:
-            return float(camera.ortho_height) * float(pixels) / max(state.viewport_height, 1)
-        depth = abs(float(np.dot(position - camera.eye, camera.forward())))
-        depth = max(depth, float(camera.near), 1e-4)
-        world_per_pixel = (
-            2.0 * depth * np.tan(float(camera.fov_y) * 0.5) / max(state.viewport_height, 1)
-        )
-        return float(world_per_pixel * pixels)
 
     def fill_actuator_palette(self, frame: SceneFrame) -> np.ndarray:
         """Fill and return the per-actuator RGBA palette for this frame."""
@@ -695,6 +678,16 @@ class OverlayPublisher:
         return self._actuator_palette
 
 
+def _normalize_rows(values: np.ndarray, fallback) -> np.ndarray:
+    values = np.asarray(values, np.float64).reshape(-1, 3)
+    lengths = np.linalg.norm(values, axis=1)
+    result = np.empty_like(values)
+    valid = lengths > 1e-9
+    result[valid] = values[valid] / lengths[valid, None]
+    result[~valid] = fallback
+    return result
+
+
 def _draw_labels(layer, mode: LabelMode, names, positions) -> None:
     for index, (name, position) in enumerate(zip(names, positions, strict=False)):
         layer.text(f"{mode.value}:{index}", position, name)
@@ -703,8 +696,7 @@ def _draw_labels(layer, mode: LabelMode, names, positions) -> None:
 def _draw_frames(layer, mode: FrameMode, positions, rotations, length: float) -> None:
     if rotations is None:
         return
-    for index, (position, rotation) in enumerate(zip(positions, rotations, strict=False)):
-        layer.frame(f"{mode.value}:{index}", math3d.compose(position, rotation, 1.0), length)
+    layer.frames(mode.value, positions, rotations, length)
 
 
 def _draw_capsule(layer, ident, position, rotation, size, color) -> None:

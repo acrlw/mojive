@@ -189,6 +189,13 @@ class SnapshotPublisher:
     def publish_frame(self, frame: SceneFrame, debug_commands=None) -> int:
         """Publish a latest-only frame and return its sequence number."""
         self._frame_sequence += 1
+        with self._clients_lock:
+            self._clients = [client for client in self._clients if not client.closed]
+            clients = tuple(self._clients)
+        # Retain one bootstrap frame for a future viewer, but do not serialize
+        # every training step while nobody is connected.
+        if not clients and self._frame is not None:
+            return self._frame_sequence
         commands = frame.debug_commands if debug_commands is None else debug_commands
         packet = RemoteFrame(
             frame_sequence=self._frame_sequence,
@@ -198,9 +205,6 @@ class SnapshotPublisher:
         )
         payload = pickle.dumps(packet, protocol=pickle.HIGHEST_PROTOCOL)
         self._frame = payload
-        with self._clients_lock:
-            self._clients = [client for client in self._clients if not client.closed]
-            clients = tuple(self._clients)
         for client in clients:
             client.latest(payload)
         return self._frame_sequence
@@ -302,6 +306,7 @@ class RemoteSceneAdapter(SceneAdapterBase):
         self.host, self.port = host, int(port)
         self._lock = threading.Condition()
         self._structure: RemoteStructure | None = None
+        self._camera_slot_by_id: dict[int, int] = {}
         self._latest: RemoteFrame | None = None
         self._delivered_sequence = -1
         self._error = ""
@@ -356,6 +361,9 @@ class RemoteSceneAdapter(SceneAdapterBase):
                 with self._lock:
                     if isinstance(packet, RemoteStructure):
                         self._structure = packet
+                        self._camera_slot_by_id = {
+                            camera.camera_id: slot for slot, camera in enumerate(packet.cameras)
+                        }
                         self._latest = None
                         self._delivered_sequence = -1
                     elif (
@@ -412,17 +420,10 @@ class RemoteSceneAdapter(SceneAdapterBase):
         return self._structure.cameras
 
     def camera_view(self, camera_id: int) -> CameraView | None:
-        slot = next(
-            (
-                slot
-                for slot, camera in enumerate(self._structure.cameras)
-                if camera.camera_id == int(camera_id)
-            ),
-            -1,
-        )
-        if slot < 0:
-            return None
         with self._lock:
+            slot = self._camera_slot_by_id.get(int(camera_id), -1)
+            if slot < 0:
+                return None
             frame = self._latest.frame if self._latest is not None else None
             cameras = frame.cameras if frame is not None else None
             if cameras is not None and slot < len(cameras):
