@@ -273,7 +273,7 @@ class WorkspaceAdapter(SceneAdapterBase):
         ]
 
     def camera_view(self, camera_id: int):
-        primary_count = len(self.primary.cameras())
+        primary_count = len(self.primary.scene_source().cameras)
         if int(camera_id) < primary_count:
             return self.primary.camera_view(camera_id)
         index = int(camera_id) - primary_count
@@ -282,7 +282,7 @@ class WorkspaceAdapter(SceneAdapterBase):
         return self.scene.camera_view(self.scene._cameras[index].camera_id)
 
     def set_camera_view(self, camera_id: int, camera) -> bool:
-        primary_count = len(self.primary.cameras())
+        primary_count = len(self.primary.scene_source().cameras)
         if int(camera_id) < primary_count:
             return self.primary.set_camera_view(camera_id, camera)
         index = int(camera_id) - primary_count

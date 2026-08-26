@@ -50,19 +50,13 @@ class SceneEntityHelpers:
             return
 
         selected = session.selected
+        camera_helpers: list[tuple[int, CameraView, bool]] = []
         for node in session.nodes:
             if node.type is NodeType.CAMERA and (view := _camera_view(session, node)) is not None:
                 if selected == node.object_id and selected_camera_aspect is not None:
                     view = view.with_aspect(selected_camera_aspect)
-                self._camera(
-                    layer,
-                    node.object_id,
-                    view,
-                    selected == node.object_id,
-                    camera,
-                    viewport_height,
-                    ui_scale,
-                )
+                camera_helpers.append((node.object_id, view, selected == node.object_id))
+        self._cameras(layer, camera_helpers, camera, viewport_height, ui_scale)
 
         frame = session.frame
         light_set = frame.lights if frame.lights is not None else session.source.lights
@@ -110,25 +104,46 @@ class SceneEntityHelpers:
         radius = PICK_RADIUS_PT * float(style_scale)
         return int(anchors[index][0]) if distance2[index] <= radius * radius else 0
 
-    def _camera(
+    def _cameras(
         self,
         layer,
-        object_id: int,
-        view: CameraView,
-        selected: bool,
+        helpers: list[tuple[int, CameraView, bool]],
         editor_camera: CameraView,
         viewport_height: float,
         ui_scale: float,
     ) -> None:
-        ident = f"camera:{object_id}"
-        color = SELECTED_COLOR if selected else CAMERA_COLOR
-        eye = np.asarray(view.eye, np.float32)
-        layer.point(f"{ident}:anchor", eye, color, ANCHOR_RADIUS_PT * ui_scale)
-        starts, ends = compact_camera_segments(view, editor_camera, viewport_height, 26.0)
-        layer.lines(f"{ident}:icon", starts, ends, color, 1.6 * ui_scale)
-        if selected and self.show_influence:
-            starts, ends = camera_frustum_segments(view)
-            layer.lines(f"{ident}:frustum", starts, ends, color, 1.6 * ui_scale)
+        if not helpers:
+            return
+        views = [view for _, view, _ in helpers]
+        colors = np.asarray(
+            [SELECTED_COLOR if selected else CAMERA_COLOR for _, _, selected in helpers],
+            np.float32,
+        )
+        layer.points(
+            "cameras:anchors",
+            np.asarray([view.eye for view in views], np.float32),
+            colors,
+            ANCHOR_RADIUS_PT * ui_scale,
+        )
+        starts, ends = compact_camera_segments(views, editor_camera, viewport_height, 26.0)
+        layer.lines(
+            "cameras:icons",
+            starts,
+            ends,
+            np.repeat(colors, 8, axis=0),
+            1.6 * ui_scale,
+        )
+        if self.show_influence:
+            for object_id, view, selected in helpers:
+                if selected:
+                    starts, ends = camera_frustum_segments(view)
+                    layer.lines(
+                        f"camera:{object_id}:frustum",
+                        starts,
+                        ends,
+                        SELECTED_COLOR,
+                        1.6 * ui_scale,
+                    )
 
     def _light(
         self,
@@ -216,25 +231,70 @@ def camera_frustum_segments(view: CameraView) -> tuple[np.ndarray, np.ndarray]:
 
 
 def compact_camera_segments(
-    view: CameraView, editor_camera: CameraView, viewport_height: float, pixels: float
+    views: list[CameraView],
+    editor_camera: CameraView,
+    viewport_height: float,
+    pixels: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    eye = np.asarray(view.eye, np.float32)
-    basis = camera_rotation(view)
-    length = world_scale(editor_camera, eye, viewport_height, pixels)
-    center = eye - basis[:, 2] * length
-    half_height = length * 0.45
-    half_width = half_height * min(max(float(view.aspect), 0.75), 1.8)
+    """Build compact camera icons for one debug-draw batch."""
+    if not views:
+        empty = np.empty((0, 3), np.float32)
+        return empty, empty
+
+    eyes = np.asarray([view.eye for view in views], np.float64)
+    targets = np.asarray([view.target for view in views], np.float64)
+    ups = np.asarray([view.up for view in views], np.float64)
+    forward = _normalize_rows(targets - eyes, (0.0, 0.0, -1.0))
+    right = np.cross(forward, ups)
+    right_norm = np.linalg.norm(right, axis=1)
+    degenerate = right_norm <= 1e-9
+    if np.any(degenerate):
+        reference = np.zeros((int(np.count_nonzero(degenerate)), 3), np.float64)
+        reference[:, 2] = 1.0
+        vertical = np.abs(forward[degenerate, 2]) >= 0.95
+        reference[vertical] = (0.0, 1.0, 0.0)
+        right[degenerate] = np.cross(forward[degenerate], reference)
+    right = _normalize_rows(right, (1.0, 0.0, 0.0))
+    corrected_up = np.cross(right, forward)
+
+    height = max(float(viewport_height), 1.0)
+    projection = np.asarray(editor_camera.proj_matrix(), np.float64)
+    mvp = projection @ np.asarray(editor_camera.view_matrix(), np.float64)
+    clip_w = np.column_stack((eyes, np.ones(len(eyes), np.float64))) @ mvp[3]
+    p11 = float(projection[1, 1])
+    lengths = np.zeros(len(eyes), np.float64)
+    if abs(p11) >= 1e-9:
+        visible = clip_w > 0.0
+        lengths[visible] = 2.0 * clip_w[visible] * float(pixels) / (p11 * height)
+
+    centers = eyes + forward * lengths[:, None]
+    half_height = lengths * 0.45
+    half_width = half_height * np.clip(
+        np.asarray([view.aspect for view in views], np.float64), 0.75, 1.8
+    )
+    horizontal = right * half_width[:, None]
+    vertical = corrected_up * half_height[:, None]
     corners = np.stack(
         (
-            center - basis[:, 0] * half_width - basis[:, 1] * half_height,
-            center + basis[:, 0] * half_width - basis[:, 1] * half_height,
-            center + basis[:, 0] * half_width + basis[:, 1] * half_height,
-            center - basis[:, 0] * half_width + basis[:, 1] * half_height,
-        )
+            centers - horizontal - vertical,
+            centers + horizontal - vertical,
+            centers + horizontal + vertical,
+            centers - horizontal + vertical,
+        ),
+        axis=1,
     )
-    starts = np.concatenate((np.repeat(eye[None], 4, axis=0), corners), axis=0)
-    ends = np.concatenate((corners, np.roll(corners, -1, axis=0)), axis=0)
-    return starts.astype(np.float32), ends.astype(np.float32)
+    starts = np.concatenate((np.repeat(eyes[:, None], 4, axis=1), corners), axis=1)
+    ends = np.concatenate((corners, np.roll(corners, -1, axis=1)), axis=1)
+    return starts.reshape(-1, 3).astype(np.float32), ends.reshape(-1, 3).astype(np.float32)
+
+
+def _normalize_rows(values: np.ndarray, fallback) -> np.ndarray:
+    lengths = np.linalg.norm(values, axis=1)
+    result = np.empty_like(values)
+    valid = lengths > 1e-9
+    result[valid] = values[valid] / lengths[valid, None]
+    result[~valid] = fallback
+    return result
 
 
 def sphere_segments(center, radius: float) -> tuple[np.ndarray, np.ndarray]:
@@ -313,9 +373,11 @@ def _direction(value) -> np.ndarray:
 
 def _camera_view(session, node):
     index = int(node.camera_index)
+    cameras = session.frame.cameras or session.source.cameras
+    if 0 <= index < len(cameras):
+        return cameras[index]
     if 0 <= index < len(session.cameras):
         view = session.camera_view(session.cameras[index].camera_id)
         if view is not None:
             return view
-    cameras = session.frame.cameras or session.source.cameras
-    return cameras[index] if 0 <= index < len(cameras) else None
+    return None

@@ -23,6 +23,8 @@ class HierarchyPanel(Panel):
         self._cache_generation = -1
         self._roots: list[SceneNode] = []
         self._by_id: dict[int, SceneNode] = {}
+        self._default_open_depth = 2
+        self._ink_center_cache: dict[tuple[float, str], float] = {}
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -74,10 +76,14 @@ class HierarchyPanel(Panel):
         nodes = ctx.session.nodes
         self._by_id = {n.node_id: n for n in nodes}
         self._roots = [n for n in nodes if n.parent < 0 or n.parent not in self._by_id]
+        self._default_open_depth = 1 if len(nodes) >= 1000 else 2
+        self._ink_center_cache.clear()
 
     def _subtree(self, ctx: PanelContext, node: SceneNode, depth: int) -> None:
         children = [self._by_id[c] for c in node.children if c in self._by_id]
-        opened = self._row(ctx, node, leaf=not children, default_open=depth < 2)
+        opened = self._row(
+            ctx, node, leaf=not children, default_open=depth < self._default_open_depth
+        )
         if children and opened:
             for child in children:
                 self._subtree(ctx, child, depth + 1)
@@ -192,8 +198,7 @@ class HierarchyPanel(Panel):
                 ctx.submit(cmd.AddModelElement(node.node_id, element_type, name))
         imgui.end_menu()
 
-    @staticmethod
-    def _visibility_toggle(ctx: PanelContext, node: SceneNode) -> None:
+    def _visibility_toggle(self, ctx: PanelContext, node: SceneNode) -> None:
         if node.type in (NodeType.ENVIRONMENT, NodeType.MODEL):
             return
         size = imgui.get_frame_height()
@@ -205,8 +210,15 @@ class HierarchyPanel(Panel):
         # The frame is taller than the label's ink box, so centering on the
         # frame leaves the mark a few pixels low; center on the row's ink.
         label = f"{node.name or '?'} {node.type}"
-        box = ink_box(imgui.get_font(), imgui.get_font_size(), label)
-        center_y = lo.y + (box[1] + box[3]) * 0.5 if box else (lo.y + hi.y) * 0.5
+        font = imgui.get_font()
+        font_size = imgui.get_font_size()
+        cache_key = (round(font_size, 3), label)
+        center_offset = self._ink_center_cache.get(cache_key)
+        if center_offset is None:
+            box = ink_box(font, font_size, label)
+            center_offset = (box[1] + box[3]) * 0.5 if box else (hi.y - lo.y) * 0.5
+            self._ink_center_cache[cache_key] = center_offset
+        center_y = lo.y + center_offset
         center = ((lo.x + hi.x) * 0.5, center_y)
         radius = 4.0 * ctx.style_scale
         base = ctx.theme.primary_bright if hovered else ctx.theme.primary

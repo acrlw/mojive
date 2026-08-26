@@ -44,6 +44,21 @@ def test_loaded_model_workspace_supports_authored_entities() -> None:
     assert any(node.name == "plane" for node in session.nodes)
 
 
+def test_workspace_camera_lookup_uses_stable_scene_metadata(monkeypatch) -> None:
+    document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
+    camera = document.primary.scene_source().cameras[0]
+
+    def reject_camera_enumeration():
+        raise AssertionError("camera metadata must not be rebuilt during frame lookup")
+
+    monkeypatch.setattr(document.primary, "cameras", reject_camera_enumeration)
+
+    actual = document.camera_view(0)
+    assert actual is not None
+    assert actual.eye == pytest.approx(camera.eye)
+    assert actual.target == pytest.approx(camera.target)
+
+
 def test_workspace_preserves_every_primary_environment_field(tmp_path: Path) -> None:
     model_path = tmp_path / "haze.xml"
     model_path.write_text(
