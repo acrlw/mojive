@@ -14,8 +14,8 @@ from ...render.backend import RenderFlag
 from ...types import DEFAULT_HEADLIGHT, Environment, LightType, MeshShape, TextureType
 from . import Panel, PanelContext, begin_kv_table, labeled
 
-GIZMO_REFUSAL_RUNNING = "physics is running; pause to move things"
-GIZMO_REFUSAL_DRIVEN = "this link is driven by joints; use the Joints panel"
+GIZMO_REFUSAL_RUNNING = "Physics is running; pause to move things"
+GIZMO_REFUSAL_DRIVEN = "This link is joint-driven; use its joint gizmo or the Joints panel"
 
 
 def _unique_component_name(category: str, existing: set[str]) -> str:
@@ -507,18 +507,42 @@ class InspectorPanel(Panel):
 
     def _gizmo_reason(self, ctx: PanelContext, node: SceneNode) -> None:
         caps = ctx.session.adapter.caps
-        reason = gizmo_refusal_reason(ctx.session.paused, node.posable)
+        availability = ctx.gizmo.evaluate(ctx.session, node) if ctx.gizmo is not None else None
+        reason = (
+            availability.reason
+            if availability is not None
+            else gizmo_refusal_reason(ctx.session.paused, node.posable)
+        )
         imgui.separator()
-        if not caps.write_pose:
+        if availability is None and not caps.write_pose:
             imgui.text_colored(
                 imgui.ImVec4(*ctx.theme.warning),
                 f"{caps.name} cannot edit this transform",
             )
             return
-        if reason is None:
+        active = availability.ok if availability is not None else reason is None
+        if active:
+            direct_joints = ctx.session.joints_for_body(node.body_index)
+            joint = None
+            if not node.posable and direct_joints:
+                selected = ctx.gizmo.selected_joint_id(node.body_index)
+                joint = next(
+                    (item for item in direct_joints if item.joint_id == selected),
+                    direct_joints[0] if len(direct_joints) == 1 else None,
+                )
+            detail = (
+                "hinge / revolute joint; rotate about its axis"
+                if joint is not None and joint.type == "hinge"
+                else (
+                    f"{joint.type} joint; joint-axis control"
+                    if joint is not None
+                    else f"{ctx.gizmo.space if ctx.gizmo is not None else 'body'} frame; "
+                    "g/r mode, t frame"
+                )
+            )
             imgui.text_colored(
                 imgui.ImVec4(*ctx.theme.primary),
-                f"gizmo: active ({ctx.gizmo.space} frame; g/r mode, t frame)",
+                f"gizmo: active ({detail})",
             )
             return
         imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), "gizmo hidden")

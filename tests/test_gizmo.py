@@ -113,17 +113,15 @@ def test_running_simulation_locks_camera_and_light_gizmos_by_default() -> None:
 
     for node in (camera, light):
         assert session.entity_gizmo_locked(node)
-        assert (
-            gizmo._evaluate(session, node).reason == "gizmo is locked while simulation is running"
-        )
+        assert gizmo.evaluate(session, node).reason == "gizmo is locked while simulation is running"
         session.set_entity_gizmo_lock(node, False)
         assert not session.entity_gizmo_locked(node)
-        assert gizmo._evaluate(session, node).ok
+        assert gizmo.evaluate(session, node).ok
 
     session.submit(cmd.Pause())
     session.set_entity_gizmo_lock(camera, True)
     assert not session.entity_gizmo_locked(camera)
-    assert gizmo._evaluate(session, camera).ok
+    assert gizmo.evaluate(session, camera).ok
 
 
 @pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
@@ -1167,6 +1165,7 @@ def test_joint_gizmo_edits_only_the_selected_joint_dof(
     needs = gizmo.frame_needs(session)
     assert needs.qpos and needs.diagnostics
     session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
+    assert gizmo.evaluate(session, node).ok
 
     target, reason = gizmo._joint_target(session, node)
     assert target is not None, reason
@@ -1201,3 +1200,34 @@ def test_joint_gizmo_edits_only_the_selected_joint_dof(
         )
     else:
         assert adapter.data.qpos[joint.qpos_adr] == pytest.approx(amount)
+
+
+@pytest.mark.physics
+def test_inspector_reports_the_actual_hinge_joint_gizmo(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
+    from forge_viewer.assets import resolve
+    from forge_viewer.ui.panels import PanelContext
+    from forge_viewer.ui.panels import inspector as inspector_module
+    from forge_viewer.ui.panels.inspector import InspectorPanel
+
+    session = Session(MuJoCoAdapter(resolve("joint_types")))
+    assert session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == "hinge_body")
+    assert session.submit(cmd.Select(node.object_id))
+    gizmo = ObjectGizmo()
+    session.tick(gizmo.frame_needs(session))
+
+    lines: list[str] = []
+    fake_imgui = SimpleNamespace(
+        ImVec4=lambda *values: values,
+        separator=lambda: None,
+        text_colored=lambda _color, value: lines.append(value),
+        text_wrapped=lambda value: lines.append(value),
+    )
+    monkeypatch.setattr(inspector_module, "imgui", fake_imgui)
+
+    InspectorPanel()._gizmo_reason(PanelContext(session, None, gizmo=gizmo), node)
+
+    assert lines == ["gizmo: active (hinge / revolute joint; rotate about its axis)"]

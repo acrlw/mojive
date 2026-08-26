@@ -979,7 +979,9 @@ class Session:
             if node is None:
                 return CommandResult.bad(f"Unknown node_id={c.node_id}")
             if not node.posable:
-                return CommandResult.bad("this link is driven by joints; use the Joints panel")
+                return CommandResult.bad(
+                    "This link is joint-driven; use its viewport gizmo or the Joints panel"
+                )
             ok = self._adapter.set_pose(c.node_id, c.position, c.rotation)
             return CommandResult.good("") if ok else CommandResult.bad("Pose update failed")
 

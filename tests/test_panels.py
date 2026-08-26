@@ -328,10 +328,10 @@ def test_closed_panels_ask_for_nothing(panels: PanelSet):
 def test_gizmo_refusal_texts_are_verbatim():
 
     assert gizmo_refusal_reason(paused=False, posable=True) == (
-        "physics is running; pause to move things"
+        "Physics is running; pause to move things"
     )
     assert gizmo_refusal_reason(paused=True, posable=False) == (
-        "this link is driven by joints; use the Joints panel"
+        "This link is joint-driven; use its joint gizmo or the Joints panel"
     )
     assert gizmo_refusal_reason(paused=True, posable=True) is None
 
@@ -339,7 +339,7 @@ def test_gizmo_refusal_texts_are_verbatim():
 def test_gizmo_refusal_prefers_the_running_reason():
 
     assert gizmo_refusal_reason(paused=False, posable=False) == (
-        "physics is running; pause to move things"
+        "Physics is running; pause to move things"
     )
 
 

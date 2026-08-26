@@ -340,7 +340,7 @@ class ObjectGizmo:
     ) -> GizmoHandle:
         self._style_scale = float(style_scale)
         node = session.selected_node
-        self._verdict = self._evaluate(session, node)
+        self._verdict = self.evaluate(session, node)
         if not self._verdict.ok:
             self._hovered = GizmoHandle.NONE
             self._axis_mask = self._plane_mask = 0
@@ -423,7 +423,7 @@ class ObjectGizmo:
         if self._keyboard and self._active is not handle:
             self._end()
         if not self._keyboard:
-            self._verdict = self._evaluate(session, node)
+            self._verdict = self.evaluate(session, node)
             if not self._verdict.ok or not self._begin_handle(session, cam, rect, cursor, handle):
                 return False
             self._keyboard = self._using = True
@@ -444,7 +444,7 @@ class ObjectGizmo:
     ) -> bool:
         self._interactive = bool(interactive)
         node = session.selected_node
-        self._verdict = self._evaluate(session, node)
+        self._verdict = self.evaluate(session, node)
         self._visible = not yielding and self._verdict.ok
         if not self._visible:
             self._clear_translation_guide(backend)
@@ -1225,7 +1225,8 @@ class ObjectGizmo:
             return np.asarray(rotation, np.float64).reshape(3, 3)
         return _WORLD_BASIS
 
-    def _evaluate(self, session: Session, node: SceneNode | None) -> Verdict:
+    def evaluate(self, session: Session, node: SceneNode | None) -> Verdict:
+        """Return the actual viewport-gizmo availability for one scene node."""
         target, reason = self._joint_target(session, node)
         if node is not None and not node.posable and node.type in (NodeType.LINK, NodeType.ROBOT):
             if not session.paused:
@@ -1241,6 +1242,12 @@ class ObjectGizmo:
             result = verdict(session.paused, node)
         if not result.ok or node is None:
             return result
+        if (
+            node.posable
+            and node.type not in (NodeType.LIGHT, NodeType.CAMERA)
+            and not session.adapter.caps.write_pose
+        ):
+            return Verdict(False, f"{session.adapter.caps.name} cannot edit this transform")
         if session.entity_gizmo_locked(node):
             return Verdict(False, "gizmo is locked while simulation is running")
         if node.type is NodeType.LIGHT:
