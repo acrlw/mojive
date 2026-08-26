@@ -4,14 +4,19 @@
 #define SHADOW_MAX_CASCADES 3
 #define SHADOW_MAX_LOCAL 8
 #define SHADOW_MAX_LIGHTS 100
+#define LOCAL_PCF_RADIUS 1
 #define AREA_PCF_RADIUS 3
 
 #ifndef SHADOW_PCF_RADIUS
-#define SHADOW_PCF_RADIUS 1
+#define SHADOW_PCF_RADIUS 2
 #endif
 
 const vec2 FORGE_SHADOW_BIAS = vec2(1.0, 2.5);
 const float FORGE_SHADOW_MIN_NDL = 0.15;
+
+float pcf_tent_weight(int offset, int radius) {
+    return float(radius + 1 - abs(offset));
+}
 
 uniform sampler2D u_shadow_atlas;
 uniform mat4 u_shadow_matrix[SHADOW_MAX_CASCADES];
@@ -73,8 +78,10 @@ float shadow_factor(vec3 world_pos, vec3 normal, float view_depth) {
     for (int y = -SHADOW_PCF_RADIUS; y <= SHADOW_PCF_RADIUS; ++y) {
         for (int x = -SHADOW_PCF_RADIUS; x <= SHADOW_PCF_RADIUS; ++x) {
             vec2 s = clamp(uv + vec2(float(x), float(y)) * texel_uv, tile.xy, tile.zw);
-            lit += step(ref, texture(u_shadow_atlas, s).r);
-            taps += 1.0;
+            float weight = pcf_tent_weight(x, SHADOW_PCF_RADIUS) *
+                           pcf_tent_weight(y, SHADOW_PCF_RADIUS);
+            lit += step(ref, texture(u_shadow_atlas, s).r) * weight;
+            taps += weight;
         }
     }
     return lit / taps;
@@ -98,19 +105,22 @@ float local_spot_shadow(int slot, vec3 world_pos, vec3 normal) {
     if (u_local_pos[slot].w > 0.0 && dist > u_local_pos[slot].w) return 1.0;
     float bias = local_bias(slot, dist, normal, to_light / max(dist, 1e-6));
     vec2 texel = 1.0 / vec2(textureSize(u_local_shadow, 0).xy);
-    vec2 margin = (float(SHADOW_PCF_RADIUS) + 0.5) * texel;
+    vec2 margin = (float(LOCAL_PCF_RADIUS) + 0.5) * texel;
     vec2 uv = mix(margin, vec2(1.0) - margin, p.xy);
     float lit = 0.0;
-    for (int y = -SHADOW_PCF_RADIUS; y <= SHADOW_PCF_RADIUS; ++y) {
-        for (int x = -SHADOW_PCF_RADIUS; x <= SHADOW_PCF_RADIUS; ++x) {
+    float taps = 0.0;
+    for (int y = -LOCAL_PCF_RADIUS; y <= LOCAL_PCF_RADIUS; ++y) {
+        for (int x = -LOCAL_PCF_RADIUS; x <= LOCAL_PCF_RADIUS; ++x) {
             vec2 sample_uv = clamp(uv + vec2(float(x), float(y)) * texel,
                                    margin, vec2(1.0) - margin);
+            float weight = pcf_tent_weight(x, LOCAL_PCF_RADIUS) *
+                           pcf_tent_weight(y, LOCAL_PCF_RADIUS);
             lit += step(dist - bias,
-                        texture(u_local_shadow, vec3(sample_uv, float(slot * 6))).r);
+                        texture(u_local_shadow, vec3(sample_uv, float(slot * 6))).r) * weight;
+            taps += weight;
         }
     }
-    float side = float(2 * SHADOW_PCF_RADIUS + 1);
-    return lit / (side * side);
+    return lit / taps;
 }
 
 vec3 point_layer_uv(int slot, vec3 d) {
@@ -146,7 +156,7 @@ float local_point_shadow(int slot, vec3 world_pos, vec3 normal) {
     vec3 up = cross(right, direction);
     float lit = 0.0;
     float taps = 0.0;
-    int radius = (u_local_radius[slot] > 0.0) ? AREA_PCF_RADIUS : SHADOW_PCF_RADIUS;
+    int radius = (u_local_radius[slot] > 0.0) ? AREA_PCF_RADIUS : LOCAL_PCF_RADIUS;
     float step_angle = max(
         u_local_texel[slot],
         u_local_radius[slot] / max(dist * float(AREA_PCF_RADIUS), 1e-6)

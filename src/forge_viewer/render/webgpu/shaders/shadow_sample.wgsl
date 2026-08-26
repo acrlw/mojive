@@ -19,7 +19,8 @@
 // touch the (1x1 fallback) textures.
 
 const SHADOW_MAX_CASCADES: i32 = 3;
-const SHADOW_PCF_RADIUS: i32 = 1;
+const SHADOW_PCF_RADIUS: i32 = 2;
+const LOCAL_PCF_RADIUS: i32 = 1;
 const AREA_PCF_RADIUS: i32 = 3;
 const FORGE_SHADOW_BIAS: vec2f = vec2f(1.0, 2.5);
 const FORGE_SHADOW_MIN_NDL: f32 = 0.15;
@@ -31,8 +32,12 @@ fn shadow_bias_factors() -> vec2f {
     return select(FORGE_SHADOW_BIAS, lights.shadow_bias.xy, lights.shadow_bias.x > 0.0);
 }
 
+fn pcf_tent_weight(offset: i32, radius: i32) -> f32 {
+    return f32(radius + 1 - abs(offset));
+}
+
 // shadow_sample.glsl shadow_factor(): cascade select with fallback, slope-
-// scaled bias, 3x3 PCF, atlas tile clamp.
+// scaled bias, tent-filtered PCF, atlas tile clamp.
 fn shadow_factor(world_pos: vec3f, normal: vec3f, view_depth: f32) -> f32 {
     let count = min(i32(lights.shadow_counts.x), SHADOW_MAX_CASCADES);
     if count <= 0 {
@@ -96,8 +101,10 @@ fn shadow_factor(world_pos: vec3f, normal: vec3f, view_depth: f32) -> f32 {
     for (var y = -SHADOW_PCF_RADIUS; y <= SHADOW_PCF_RADIUS; y = y + 1) {
         for (var x = -SHADOW_PCF_RADIUS; x <= SHADOW_PCF_RADIUS; x = x + 1) {
             let s = clamp(uv + vec2f(f32(x), f32(y)) * texel_uv, tile.xy, tile.zw);
-            lit += step(ref_depth, textureLoad(shadow_atlas, vec2i(s * dims), 0));
-            taps += 1.0;
+            let weight = pcf_tent_weight(x, SHADOW_PCF_RADIUS) *
+                pcf_tent_weight(y, SHADOW_PCF_RADIUS);
+            lit += step(ref_depth, textureLoad(shadow_atlas, vec2i(s * dims), 0)) * weight;
+            taps += weight;
         }
     }
     return lit / taps;
@@ -129,19 +136,24 @@ fn local_spot_shadow(slot: i32, world_pos: vec3f, normal: vec3f) -> f32 {
     let bias = local_bias(slot, dist, normal, to_light / max(dist, 1e-6));
     let dims = vec2f(textureDimensions(local_shadow, 0u).xy);
     let texel = 1.0 / dims;
-    let margin = (f32(SHADOW_PCF_RADIUS) + 0.5) * texel;
+    let margin = (f32(LOCAL_PCF_RADIUS) + 0.5) * texel;
     let uv = mix(margin, vec2f(1.0) - margin, p.xy);
     var lit = 0.0;
-    for (var y = -SHADOW_PCF_RADIUS; y <= SHADOW_PCF_RADIUS; y = y + 1) {
-        for (var x = -SHADOW_PCF_RADIUS; x <= SHADOW_PCF_RADIUS; x = x + 1) {
+    var taps = 0.0;
+    for (var y = -LOCAL_PCF_RADIUS; y <= LOCAL_PCF_RADIUS; y = y + 1) {
+        for (var x = -LOCAL_PCF_RADIUS; x <= LOCAL_PCF_RADIUS; x = x + 1) {
             let sample_uv = clamp(
                 uv + vec2f(f32(x), f32(y)) * texel, margin, vec2f(1.0) - margin
             );
-            lit += step(dist - bias, textureLoad(local_shadow, vec2i(sample_uv * dims), slot * 6, 0).r);
+            let weight = pcf_tent_weight(x, LOCAL_PCF_RADIUS) *
+                pcf_tent_weight(y, LOCAL_PCF_RADIUS);
+            lit += step(
+                dist - bias, textureLoad(local_shadow, vec2i(sample_uv * dims), slot * 6, 0).r
+            ) * weight;
+            taps += weight;
         }
     }
-    let side = f32(2 * SHADOW_PCF_RADIUS + 1);
-    return lit / (side * side);
+    return lit / taps;
 }
 
 // shadow_sample.glsl point_layer_uv(): direction to cube-face layer uv; the
@@ -202,7 +214,7 @@ fn local_point_shadow(slot: i32, world_pos: vec3f, normal: vec3f) -> f32 {
     let up = cross(right, direction);
     var lit = 0.0;
     var taps = 0.0;
-    let radius = select(SHADOW_PCF_RADIUS, AREA_PCF_RADIUS, lights.local_radius[slot] > 0.0);
+    let radius = select(LOCAL_PCF_RADIUS, AREA_PCF_RADIUS, lights.local_radius[slot] > 0.0);
     let step_angle = max(
         lights.local_texel[slot],
         lights.local_radius[slot] / max(dist * f32(AREA_PCF_RADIUS), 1e-6),
