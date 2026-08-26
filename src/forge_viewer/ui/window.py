@@ -403,6 +403,10 @@ class Window:
         glfw.set_window_title(self._window, title)
 
     def begin_frame(self) -> None:
+        # A process may host multiple viewers. Window creation and shutdown both
+        # change GLFW's process-local current context, so each frame must restore
+        # the context that owns this window before ImGui or render resources run.
+        self.make_current()
         imgui.set_current_context(self._imgui_context)
         glfw.poll_events()
         self._refresh_scales()

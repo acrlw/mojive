@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -323,6 +324,44 @@ def test_closed_panels_ask_for_nothing(panels: PanelSet):
     assert not any(
         (needs.poses, needs.qpos, needs.qvel, needs.contacts, needs.actuator, needs.sensors)
     )
+
+
+def test_app_frame_needs_preserves_consumer_requests():
+    """Backend visualization choices must not erase panel or gizmo requirements."""
+
+    from forge_viewer.adapters.base import FrameNeeds
+    from forge_viewer.render.backend import FrameMode, LabelMode
+    from forge_viewer.ui.app import ViewerApp
+
+    requested = FrameNeeds(
+        poses=False,
+        contacts=True,
+        tendons=True,
+        actuator=True,
+        deformables=True,
+        diagnostics=True,
+        islands=True,
+        bvh=True,
+    )
+    app = ViewerApp.__new__(ViewerApp)
+    app.panels = SimpleNamespace(frame_needs=lambda: requested)
+    app.gizmo = SimpleNamespace(frame_needs=lambda _session: FrameNeeds.none())
+    app.session = SimpleNamespace(source=SimpleNamespace(dynamic_meshes=()))
+    app.backend = SimpleNamespace(
+        get_flag=lambda _flag: False,
+        get_label_mode=lambda: LabelMode.NONE,
+        get_frame_mode=lambda: FrameMode.NONE,
+    )
+
+    needs = app.frame_needs()
+
+    assert needs.contacts
+    assert needs.tendons
+    assert needs.actuator
+    assert needs.deformables
+    assert needs.diagnostics
+    assert needs.islands
+    assert needs.bvh
 
 
 def test_gizmo_refusal_texts_are_verbatim():

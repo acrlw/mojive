@@ -310,20 +310,44 @@ class WorkspaceAdapter(SceneAdapterBase):
             return self.scene.set_pose_by_node(scene_node, position, rotation)
         return self.primary.set_pose(node_id, position, rotation)
 
-    def set_light(self, light_id: int, light) -> bool:
+    def set_light(self, light_index: int, light) -> bool:
         primary_count = len(self.primary.scene_source().lights.lights)
-        if int(light_id) < primary_count:
-            return self.primary.set_light(light_id, light)
-        return self.scene.set_light(int(light_id) - primary_count, light)
+        if int(light_index) < primary_count:
+            return self.primary.set_light(light_index, light)
+        return self.scene.set_light_at(int(light_index) - primary_count, light)
 
     def set_environment(self, environment) -> bool:
         return self.scene.set_environment(environment)
 
-    def set_material(self, material_id: int, material: Material) -> bool:
+    def set_skybox(self, texture: str | None) -> bool:
+        if texture is None:
+            primary = self.primary.set_skybox(None)
+            authored = self.scene.set_skybox(None)
+            self._invalidate()
+            return primary or authored
+        if texture in self.primary.scene_source().textures:
+            changed = self.primary.set_skybox(texture)
+            if changed:
+                self.scene.set_skybox(None)
+        else:
+            mapping, _textures = _merge_textures(
+                self.primary.scene_source().textures, self.scene.source.textures
+            )
+            authored_name = next(
+                (name for name, merged in mapping.items() if merged == texture), None
+            )
+            changed = authored_name is not None and self.scene.set_skybox(authored_name)
+            if changed:
+                self.primary.set_skybox(None)
+        if changed:
+            self._invalidate()
+        return changed
+
+    def set_material(self, material_index: int, material: Material) -> bool:
         offset = len(self.primary.scene_source().materials)
-        if int(material_id) < offset:
-            return self.primary.set_material(material_id, material)
-        return self.scene.set_material(int(material_id) - offset, material)
+        if int(material_index) < offset:
+            return self.primary.set_material(material_index, material)
+        return self.scene.set_material(int(material_index) - offset, material)
 
     def set_geometry_color(self, node_id: int, rgba) -> bool:
         scene_node = self._node_to_scene.get(int(node_id))
@@ -648,6 +672,11 @@ class WorkspaceAdapter(SceneAdapterBase):
                 lights=(*primary.lights.lights, *authored.lights.lights),
             ),
             cameras=(*primary.cameras, *authored.cameras),
+            skybox=(
+                texture_map.get(authored.skybox, authored.skybox)
+                if authored.skybox is not None
+                else primary.skybox
+            ),
             scene_extent=scene_extent,
             scene_center=scene_center,
             nodes=nodes,

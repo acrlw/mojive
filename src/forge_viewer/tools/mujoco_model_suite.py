@@ -20,6 +20,8 @@ class ModelAuditStatus(enum.StrEnum):
 
     PASSED = "passed"
     SKIPPED_DEPENDENCY = "skipped_dependency"
+    SKIPPED_FRAGMENT = "skipped_fragment"
+    SKIPPED_UNSUPPORTED_ASSET = "skipped_unsupported_asset"
     LOAD_FAILED = "load_failed"
     ADAPTER_FAILED = "adapter_failed"
     WORKSPACE_FAILED = "workspace_failed"
@@ -39,6 +41,7 @@ class ModelAuditRequest:
     height: int
     dynamic_frames: int
     load_only: bool
+    model_fragment: bool = False
 
 
 @dataclass(frozen=True)
@@ -75,16 +78,65 @@ _CAMERA_POSES = (
 
 
 def discover_models(roots: list[Path]) -> list[Path]:
-    """Return every XML file below the existing model roots."""
+    """Return MuJoCo MJCF and URDF documents below the existing roots."""
 
     models: set[Path] = set()
     for root in roots:
         resolved = root.expanduser().resolve()
-        if resolved.is_file() and resolved.suffix.lower() == ".xml":
+        if resolved.is_file() and _is_model_document(resolved):
             models.add(resolved)
         elif resolved.is_dir():
-            models.update(path.resolve() for path in resolved.rglob("*.xml"))
+            models.update(
+                path.resolve()
+                for path in resolved.rglob("*")
+                if path.is_file()
+                and path.suffix.lower() in (".xml", ".mjcf", ".urdf")
+                and _is_model_document(path)
+            )
     return sorted(models)
+
+
+def _is_model_document(path: Path) -> bool:
+    """Reject unrelated XML metadata while retaining malformed model candidates."""
+
+    if path.suffix.lower() not in (".xml", ".mjcf", ".urdf"):
+        return False
+    try:
+        tag = ET.parse(path).getroot().tag.rsplit("}", 1)[-1].lower()
+    except (ET.ParseError, OSError):
+        return True
+    return tag in ("mujoco", "robot")
+
+
+def inspect_fragment_files(models: list[Path]) -> set[Path]:
+    """Return MJCF files that are composition fragments rather than standalone models."""
+
+    included: set[Path] = set()
+    candidates = set(models)
+    for path in models:
+        try:
+            root = ET.parse(path).getroot()
+        except (ET.ParseError, OSError):
+            continue
+        includes = tuple(root.iter("include"))
+        worldbody = root.find("worldbody")
+        has_standalone_geometry = worldbody is not None and any(
+            worldbody.find(f".//{tag}") is not None for tag in ("body", "geom")
+        )
+        if (
+            root.tag.rsplit("}", 1)[-1].lower() == "mujoco"
+            and not includes
+            and not has_standalone_geometry
+        ):
+            included.add(path)
+        for element in includes:
+            filename = element.attrib.get("file", "")
+            if not filename:
+                continue
+            target = (path.parent / filename).resolve()
+            if target in candidates:
+                included.add(target)
+    return included
 
 
 def inspect_plugin_references(path: Path) -> tuple[str, ...]:
@@ -104,7 +156,23 @@ def inspect_plugin_references(path: Path) -> tuple[str, ...]:
     return tuple(sorted(plugins))
 
 
-def classify_load_failure(plugins: tuple[str, ...], message: str) -> ModelAuditStatus:
+def inspect_unsupported_assets(path: Path) -> tuple[str, ...]:
+    """Return mesh formats that the installed MuJoCo compiler cannot decode."""
+
+    try:
+        root = ET.parse(path).getroot()
+    except (ET.ParseError, OSError):
+        return ()
+    formats = {
+        Path(element.attrib.get("filename", element.attrib.get("file", ""))).suffix.lower()
+        for element in root.iter("mesh")
+    }
+    return tuple(sorted(formats & {".dae"}))
+
+
+def classify_load_failure(
+    plugins: tuple[str, ...], message: str, *, model_fragment: bool = False
+) -> ModelAuditStatus:
     """Distinguish unavailable runtime dependencies from model compilation failures."""
 
     lowered = message.lower()
@@ -119,6 +187,8 @@ def classify_load_failure(plugins: tuple[str, ...], message: str) -> ModelAuditS
     )
     if plugins and unavailable_plugin:
         return ModelAuditStatus.SKIPPED_DEPENDENCY
+    if model_fragment:
+        return ModelAuditStatus.SKIPPED_FRAGMENT
     return ModelAuditStatus.LOAD_FAILED
 
 
@@ -150,16 +220,34 @@ def audit_model(request: ModelAuditRequest) -> ModelAuditResult:
 
     path = Path(request.path)
     plugins = inspect_plugin_references(path)
+    unsupported_assets = inspect_unsupported_assets(path)
     try:
         import mujoco
 
-        model = mujoco.MjModel.from_xml_path(str(path))
+        if path.suffix.lower() == ".urdf":
+            from ..adapters.mujoco_adapter import _load_editable_spec
+
+            model = _load_editable_spec(path).compile()
+        else:
+            model = mujoco.MjModel.from_xml_path(str(path))
     except Exception as exc:
         message = str(exc)
+        unsupported_failure = bool(unsupported_assets) and any(
+            marker in message.lower()
+            for marker in ("no decoder found", "repeated element: 'material'")
+        )
         return ModelAuditResult(
             path=str(path),
-            status=classify_load_failure(plugins, message),
-            message=message,
+            status=(
+                ModelAuditStatus.SKIPPED_UNSUPPORTED_ASSET
+                if unsupported_failure
+                else classify_load_failure(plugins, message, model_fragment=request.model_fragment)
+            ),
+            message=(
+                f"MuJoCo cannot compile {', '.join(unsupported_assets)} mesh assets: {message}"
+                if unsupported_failure
+                else message
+            ),
             plugins=plugins,
         )
 
@@ -355,6 +443,7 @@ def run_suite(
 ) -> list[ModelAuditResult]:
     """Audit model paths in parallel and return results in path order."""
 
+    fragment_files = inspect_fragment_files(models)
     requests = [
         ModelAuditRequest(
             path=str(path),
@@ -364,6 +453,7 @@ def run_suite(
             height=height,
             dynamic_frames=dynamic_frames,
             load_only=load_only,
+            model_fragment=path in fragment_files,
         )
         for path in models
     ]
@@ -390,7 +480,7 @@ def build_report(roots: list[Path], results: list[ModelAuditResult]) -> dict[str
     for result in results:
         counts[result.status] += 1
     return {
-        "schema": 1,
+        "schema": 2,
         "roots": [str(root.expanduser().resolve()) for root in roots],
         "counts": counts,
         "results": [asdict(result) for result in results],
@@ -401,7 +491,7 @@ def _parser() -> argparse.ArgumentParser:
     """Create the command-line parser for the model suite."""
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("roots", nargs="+", type=Path, help="model directories or XML files")
+    parser.add_argument("roots", nargs="+", type=Path, help="model directories or MJCF/URDF files")
     parser.add_argument("--backend", choices=("forge", "wgpu"), default="forge")
     parser.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
     parser.add_argument("--camera-count", type=int, default=len(_CAMERA_POSES))
@@ -419,7 +509,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     models = discover_models(args.roots)
     if not models:
-        raise SystemExit("No MuJoCo XML models found")
+        raise SystemExit("No MuJoCo MJCF or URDF models found")
     results = run_suite(
         models,
         backend=args.backend,

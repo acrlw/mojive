@@ -301,9 +301,9 @@ class SetPose(Command):
 
 @dataclass(frozen=True)
 class SetLight(Command):
-    """Replace an existing scene light definition."""
+    """Replace a light at its current SceneSource array index."""
 
-    light_id: int
+    light_index: int
     light: Light
 
 
@@ -315,10 +315,17 @@ class SetEnvironment(Command):
 
 
 @dataclass(frozen=True)
-class SetMaterial(Command):
-    """Replace a scene material by material ID."""
+class SetSkybox(Command):
+    """Select a cube texture for the environment, or disable the skybox."""
 
-    material_id: int
+    texture: str | None
+
+
+@dataclass(frozen=True)
+class SetMaterial(Command):
+    """Replace a material at its current SceneSource array index."""
+
+    material_index: int
     material: Material
 
 

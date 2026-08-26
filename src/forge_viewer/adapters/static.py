@@ -77,14 +77,17 @@ class StaticSceneAdapter(SceneAdapterBase):
     def set_pose(self, node_id: int, position, rotation) -> bool:
         return self.scene.set_pose_by_node(node_id, position, rotation)
 
-    def set_light(self, light_id: int, light) -> bool:
-        return self.scene.set_light(light_id, light)
+    def set_light(self, light_index: int, light) -> bool:
+        return self.scene.set_light_at(light_index, light)
 
     def set_environment(self, environment) -> bool:
         return self.scene.set_environment(environment)
 
-    def set_material(self, material_id, material) -> bool:
-        return self.scene.set_material(material_id, material)
+    def set_skybox(self, texture: str | None) -> bool:
+        return self.scene.set_skybox(texture)
+
+    def set_material(self, material_index, material) -> bool:
+        return self.scene.set_material(material_index, material)
 
     def set_geometry_color(self, node_id, rgba) -> bool:
         return self.scene.set_geometry_color(node_id, rgba)

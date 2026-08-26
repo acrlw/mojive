@@ -11,7 +11,7 @@ pytest.importorskip("glfw")
 pytest.importorskip("mujoco")
 
 from forge_viewer.assets import resolve  # noqa: E402
-from forge_viewer.composition import build  # noqa: E402
+from forge_viewer.composition import build, build_workspace  # noqa: E402
 
 W, H = 1280, 800
 
@@ -184,6 +184,8 @@ def test_environment_inspector_controls_render_flags(viewer):
     environment = next(n for n in viewer.session.nodes if n.type is NodeType.ENVIRONMENT)
     viewer.session.submit(cmd.Select(environment.object_id))
     activate_panel(viewer, "Inspector")
+    item_rect(viewer, "combo", "texture##skybox")
+    item_rect(viewer, "combo", "mode##haze")
     point = item_rect(viewer, "checkbox", "enabled##fog")
     before = viewer.backend.get_flag(RenderFlag.FOG)
 
@@ -211,7 +213,10 @@ def test_material_inspector_exposes_instance_and_shared_controls(viewer):
     header = item_rect(viewer, "collapsing_header", "material")
     click(viewer, imgui.get_io(), header)
 
+    item_rect(viewer, "input_text", "##entity_name")
     item_rect(viewer, "color_edit4", "instance color")
+    item_rect(viewer, "color_edit4", "base color")
+    item_rect(viewer, "begin_combo", "preset")
     item_rect(viewer, "drag_float", "specular")
     viewer.session.submit(cmd.Select(selected_before))
 
@@ -973,6 +978,37 @@ def test_gizmo_is_live_for_a_free_body(free_body_viewer):
     for _ in range(2):
         v.sync()
     assert not v.app.gizmo.hovered
+
+
+@pytest.mark.parametrize("workspace", (False, True), ids=("viewer", "editor"))
+def test_joint_gizmo_is_live_in_the_real_viewer_pipeline(workspace):
+    """Viewer and editor must retain the diagnostics requested by a joint gizmo."""
+
+    import forge_viewer.commands as cmd
+
+    factory = build_workspace if workspace else build
+    v = factory(
+        resolve("joint_types"),
+        "mujoco",
+        paused=True,
+        vsync=False,
+        width=W,
+        height=H,
+    )
+    try:
+        for _ in range(10):
+            v.sync()
+        node = next(item for item in v.session.nodes if item.name == "hinge_body")
+        assert v.session.submit(cmd.Select(node.object_id))
+        for _ in range(3):
+            v.sync()
+
+        assert v.session.frame.diagnostics is not None
+        assert v.app.frame_needs().diagnostics
+        assert v.app.gizmo.last_verdict.ok
+        assert v.app.gizmo.visible
+    finally:
+        v.release()
 
 
 def test_gizmo_disappears_without_a_free_body(free_body_viewer):

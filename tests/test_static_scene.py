@@ -33,9 +33,49 @@ from forge_viewer.types import (
     Material,
     MeshData,
     MeshShape,
+    TextureData,
+    TextureType,
 )
 
 pytestmark = pytest.mark.integration
+
+
+def _model_load_app(results):
+    from forge_viewer.ui.app import ViewerApp
+
+    class RecordingSession:
+        def __init__(self):
+            self.calls = []
+
+        def submit(self, command):
+            self.calls.append(command)
+            result = results[len(self.calls) - 1]
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+    app = ViewerApp.__new__(ViewerApp)
+    app.session = RecordingSession()
+    app._model_load_executor = None
+    app._model_load_future = None
+    app._model_load_job = None
+    app._model_load_queue = []
+    app._model_load_started = 0.0
+    app._close_after_model_load = False
+    app._after_calls = []
+    app._notices = []
+    app._errors = []
+    app._actions = []
+    app._after_model_change = lambda: app._after_calls.append(True)
+    app._set_model_drop_notice = app._notices.append
+    app._report_model_error = app._errors.append
+    app._request_document_action = lambda action, path=None: app._actions.append((action, path))
+    return app
+
+
+def _finish_model_load(app) -> bool:
+    app._model_load_future.exception(timeout=2.0)
+    return app._poll_model_load()
 
 
 def test_model_load_jobs_execute_off_the_ui_thread(tmp_path) -> None:
@@ -66,6 +106,65 @@ def test_model_load_jobs_execute_off_the_ui_thread(tmp_path) -> None:
     assert result.ok
     assert calls[0][0] != threading.get_ident()
     assert isinstance(calls[0][1], cmd.LoadAsset)
+
+
+def test_async_model_load_success_finishes_and_notifies(tmp_path) -> None:
+    app = _model_load_app([cmd.CommandResult.good("Loaded model.xml")])
+    app._queue_model_load("load", tmp_path / "model.xml")
+    try:
+        assert app._start_model_load()
+        assert not _finish_model_load(app)
+    finally:
+        app._model_load_executor.shutdown(wait=True)
+
+    assert len(app._after_calls) == 1
+    assert app._notices == ["Loaded model.xml"]
+    assert app._errors == []
+
+
+def test_async_model_load_failure_clears_following_jobs(tmp_path) -> None:
+    app = _model_load_app([RuntimeError("broken model")])
+    app._queue_model_load("load", tmp_path / "broken.xml")
+    app._queue_model_load("load", tmp_path / "never.xml")
+    try:
+        assert app._start_model_load()
+        assert not _finish_model_load(app)
+    finally:
+        app._model_load_executor.shutdown(wait=True)
+
+    assert len(app.session.calls) == 1
+    assert app._model_load_queue == []
+    assert app._after_calls == []
+    assert app._errors == ["broken model"]
+
+
+def test_async_model_load_runs_consecutive_queued_jobs(tmp_path) -> None:
+    app = _model_load_app([cmd.CommandResult.good("first"), cmd.CommandResult.good("second")])
+    app._queue_model_load("load", tmp_path / "first.xml")
+    app._queue_model_load("load", tmp_path / "second.xml")
+    try:
+        assert app._start_model_load()
+        assert _finish_model_load(app)
+        assert not _finish_model_load(app)
+    finally:
+        app._model_load_executor.shutdown(wait=True)
+
+    assert len(app.session.calls) == 2
+    assert app._notices == ["first", "second"]
+
+
+def test_async_model_load_defers_exit_until_the_job_finishes(tmp_path) -> None:
+    app = _model_load_app([cmd.CommandResult.good("loaded")])
+    app._queue_model_load("load", tmp_path / "model.xml")
+    app._close_after_model_load = True
+    try:
+        assert app._start_model_load()
+        assert not _finish_model_load(app)
+    finally:
+        app._model_load_executor.shutdown(wait=True)
+
+    assert app._close_after_model_load is False
+    assert app._actions == [("quit", None)]
 
 
 def test_static_scene_builds_without_a_physics_package():
@@ -353,8 +452,34 @@ def test_light_entity_ids_survive_slot_changes():
     assert scene.light("fill").light_id == second.light_id
     assert np.allclose(session.source.lights.lights[0].diffuse, edited.diffuse)
 
+    stable_edit = replace(edited, ambient=np.array([0.1, 0.2, 0.3], np.float32))
+    assert scene.set_light(second.light_id, stable_edit)
+    assert scene.light_value(second.light_id) is stable_edit
+
     third = scene.add_light("rim", Light(type=LightType.SPOT))
     assert third.light_id > second.light_id
+
+
+def test_light_override_tracks_stable_object_id_across_slot_changes():
+    class OverlayOnlyAdapter(StaticSceneAdapter):
+        def set_light(self, light_index: int, light: Light) -> bool:
+            return False
+
+    scene = Scene()
+    first = scene.add_light("key", Light(type=LightType.DIRECTIONAL))
+    second = scene.add_light("fill", Light(type=LightType.POINT))
+    session = Session(OverlayOnlyAdapter(scene))
+    original = second.value
+    edited = replace(original, diffuse=np.array([0.2, 0.5, 0.8], np.float32))
+
+    assert session.submit(cmd.SetLight(1, edited))
+    first.remove()
+    session.tick(FrameNeeds())
+
+    node = session.node_by_object_id(LIGHT_OBJECT_BASE + second.light_id)
+    assert node.light_index == 0
+    assert session.source.lights.lights[0].diffuse == pytest.approx(edited.diffuse)
+    assert scene.light_value(second.light_id) is original
 
 
 def test_environment_is_editable_without_a_physics_backend():
@@ -383,6 +508,24 @@ def test_environment_is_editable_without_a_physics_backend():
     scene.box(name="new body")
     session.tick(FrameNeeds())
     assert session.source.lights.fog_end == environment.fog_end
+
+
+def test_skybox_selection_uses_only_cube_textures():
+    scene = Scene()
+    scene.add_texture(TextureData("studio", TextureType.CUBE, np.zeros((6, 2, 2, 3), np.uint8)))
+    scene.add_texture(TextureData("albedo", TextureType.TWO_D, np.zeros((2, 2, 3), np.uint8)))
+    session = Session(StaticSceneAdapter(scene))
+
+    assert session.submit(cmd.SetSkybox("studio"))
+    assert session.source.skybox == "studio"
+    assert scene.skybox == "studio"
+    assert session.submit(cmd.Undo())
+    assert session.source.skybox is None
+    assert session.submit(cmd.Redo())
+    assert session.source.skybox == "studio"
+    assert not session.submit(cmd.SetSkybox("albedo"))
+    assert session.submit(cmd.SetSkybox(None))
+    assert session.source.skybox is None
 
 
 def test_material_components_support_shared_and_instance_edits():

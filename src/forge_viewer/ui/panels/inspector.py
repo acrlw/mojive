@@ -16,6 +16,13 @@ from . import Panel, PanelContext, begin_kv_table, labeled
 
 GIZMO_REFUSAL_RUNNING = "Physics is running; pause to move things"
 GIZMO_REFUSAL_DRIVEN = "This link is joint-driven; use its joint gizmo or the Joints panel"
+_MATERIAL_PRESETS = {
+    "Matte": (0.0, 0.05, 0.10, 0.0),
+    "Plastic": (0.0, 0.40, 0.50, 0.05),
+    "Metal": (0.0, 0.90, 0.90, 0.65),
+    "Rubber": (0.0, 0.08, 0.20, 0.0),
+    "Emissive": (1.0, 0.10, 0.20, 0.0),
+}
 
 
 def _unique_component_name(category: str, existing: set[str]) -> str:
@@ -132,7 +139,7 @@ class InspectorPanel(Panel):
         imgui.text_disabled(f"({node.type})")
 
         self._identity(node)
-        self._model_element(ctx, node)
+        self._name_editor(ctx, node)
         if node.type is NodeType.MODEL:
             self._model(ctx, node)
             return
@@ -150,18 +157,37 @@ class InspectorPanel(Panel):
         self._velocity(ctx, node)
         self._material(ctx, node)
 
-    def _model_element(self, ctx: PanelContext, node: SceneNode) -> None:
-        if node.model_id < 0 or node.type in (NodeType.WORLD, NodeType.MODEL):
+    def _name_editor(self, ctx: PanelContext, node: SceneNode) -> None:
+        model_element = node.model_id >= 0 and node.type not in (NodeType.WORLD, NodeType.MODEL)
+        scene_entity = (
+            node.model_id < 0
+            and node.object_id > 0
+            and node.type in (NodeType.LINK, NodeType.LIGHT, NodeType.CAMERA)
+            and ctx.session.adapter.caps.scene_authoring
+        )
+        if not model_element and not scene_entity:
             return
         if self._model_name_node != node.node_id:
             self._model_name_node = node.node_id
             prefix = f"forge_{node.model_id}_"
             self._model_name = node.name.removeprefix(prefix)
         imgui.set_next_item_width(-80.0 * ctx.style_scale)
-        _changed, self._model_name = imgui.input_text("##model_element_name", self._model_name)
+        entered, self._model_name = imgui.input_text(
+            "##entity_name",
+            self._model_name,
+            imgui.InputTextFlags_.enter_returns_true.value,
+        )
         imgui.same_line()
-        if imgui.button("Rename") and self._model_name.strip():
-            ctx.submit(cmd.RenameModelElement(node.node_id, self._model_name.strip()))
+        apply = imgui.button("Apply##name")
+        value = self._model_name.strip()
+        if (entered or apply) and value:
+            command = (
+                cmd.RenameModelElement(node.node_id, value)
+                if model_element
+                else cmd.RenameSceneEntity(node.object_id, value)
+            )
+            ctx.submit(command)
+        imgui.separator()
 
     def _model(self, ctx: PanelContext, node: SceneNode) -> None:
         info = next(
@@ -181,16 +207,16 @@ class InspectorPanel(Panel):
                 node.node_id, np.asarray(info.rotation, np.float64).reshape(3, 3)
             )
         editable = ctx.session.paused and info.removable
-        if not editable:
-            imgui.begin_disabled()
-        pos_changed, position = imgui.drag_float3(
-            "position", self._model_transform_position, 0.01, 0.0, 0.0, "%.3f"
+        (pos_changed, position), (rot_changed, euler) = _vector_fields(
+            ctx,
+            node,
+            "insp_model_transform",
+            (
+                ("position", self._model_transform_position, 0.01, "%.3f", None),
+                ("rotation", self._model_transform_euler, 0.5, "%.1f°", None),
+            ),
+            editable=editable,
         )
-        rot_changed, euler = imgui.drag_float3(
-            "rotation", self._model_transform_euler, 0.5, 0.0, 0.0, "%.1f°"
-        )
-        if not editable:
-            imgui.end_disabled()
         if editable and (pos_changed or rot_changed):
             self._model_transform_position = np.asarray(position, np.float32).copy()
             self._model_transform_euler = np.asarray(euler, np.float64).copy()
@@ -590,11 +616,11 @@ class InspectorPanel(Panel):
         src = ctx.session.source
         assert src is not None
         first = instances[0]
-        material_id = src.geom_material[first] if first < len(src.geom_material) else -1
-        if not 0 <= material_id < len(src.materials):
+        material_index = src.geom_material[first] if first < len(src.geom_material) else -1
+        if not 0 <= material_index < len(src.materials):
             imgui.text_disabled("material data is unavailable")
             return
-        material = src.materials[material_id]
+        material = src.materials[material_index]
         scene_node = ctx.session.node(node_id)
         label = scene_node.name if scene_node is not None else f"geometry {node_id}"
         imgui.push_id(node_id)
@@ -643,18 +669,27 @@ class InspectorPanel(Panel):
         if color_changed and node_id >= 0:
             self._submit_edit(ctx, cmd.SetGeometryColor(node_id, np.asarray(rgba, np.float32)))
 
-        imgui.text_disabled(f"shared material: {material.name or material_id}")
-        emission_changed, emission = imgui.drag_float(
-            "emission", material.emission, 0.01, 0.0, 10.0, "%.2f"
-        )
-        specular_changed, specular = imgui.drag_float(
-            "specular", material.specular, 0.01, 0.0, 1.0, "%.2f"
-        )
+        imgui.text_disabled(f"shared material: {material.name or material_index}")
+        rgba_changed, material_rgba = imgui.color_edit4("base color", material.rgba)
+        emission = material.emission
+        specular = material.specular
+        shininess = material.shininess
+        reflectance = material.reflectance
+        preset_changed = False
+        if imgui.begin_combo("preset", "Presets..."):
+            for preset, values in _MATERIAL_PRESETS.items():
+                selected, _ = imgui.selectable(preset, False)
+                if selected:
+                    emission, specular, shininess, reflectance = values
+                    preset_changed = True
+            imgui.end_combo()
+        emission_changed, emission = imgui.drag_float("emission", emission, 0.01, 0.0, 10.0, "%.2f")
+        specular_changed, specular = imgui.drag_float("specular", specular, 0.01, 0.0, 1.0, "%.2f")
         shininess_changed, shininess = imgui.drag_float(
-            "shininess", material.shininess, 0.01, 0.0, 1.0, "%.2f"
+            "shininess", shininess, 0.01, 0.0, 1.0, "%.2f"
         )
         reflectance_changed, reflectance = imgui.drag_float(
-            "reflectance", material.reflectance, 0.01, 0.0, 1.0, "%.2f"
+            "reflectance", reflectance, 0.01, 0.0, 1.0, "%.2f"
         )
         texture = material.texture
         texture_changed = False
@@ -675,6 +710,8 @@ class InspectorPanel(Panel):
                 specular_changed,
                 shininess_changed,
                 reflectance_changed,
+                rgba_changed,
+                preset_changed,
                 texture_changed,
                 repeat_changed,
                 uniform_changed,
@@ -683,9 +720,10 @@ class InspectorPanel(Panel):
             self._submit_edit(
                 ctx,
                 cmd.SetMaterial(
-                    material_id,
+                    material_index,
                     replace(
                         material,
+                        rgba=np.asarray(material_rgba, np.float32),
                         emission=float(emission),
                         specular=float(specular),
                         shininess=float(shininess),
@@ -751,13 +789,24 @@ class InspectorPanel(Panel):
 
             specular_changed, specular = imgui.color_edit3("specular", light.specular)
             ambient_changed, ambient = imgui.color_edit3("ambient", light.ambient)
-            pos_changed, position = imgui.drag_float3(
-                "position (local)", light.position, 0.01, 0.0, 0.0, "%.3f"
-            )
-            dir_changed, direction = imgui.drag_float3(
-                "direction (local)", light.direction, 0.01, 0.0, 0.0, "%.3f"
-            )
-            changed |= specular_changed or ambient_changed or pos_changed or dir_changed
+            changed |= specular_changed or ambient_changed
+
+        (pos_changed, position), (dir_changed, direction) = _vector_fields(
+            ctx,
+            node,
+            "insp_light_pose",
+            (
+                ("position (local)", position, 0.01, "%.3f", None),
+                (
+                    "direction (local)",
+                    direction,
+                    0.01,
+                    "%.3f",
+                    np.array((0.0, 0.0, -1.0)),
+                ),
+            ),
+        )
+        changed |= pos_changed or dir_changed
 
         range_changed = cutoff_changed = exponent_changed = attenuation_changed = False
         area_changed = False
@@ -768,8 +817,19 @@ class InspectorPanel(Panel):
             range_changed, light_range = imgui.drag_float(
                 "range (0 = unlimited)", light.range, 0.05, 0.0, 10000.0, "%.2f"
             )
-            attenuation_changed, attenuation = imgui.drag_float3(
-                "attenuation", light.attenuation, 0.01, 0.0, 100.0, "%.3f"
+            ((attenuation_changed, attenuation),) = _vector_fields(
+                ctx,
+                node,
+                "insp_light_attenuation",
+                (
+                    (
+                        "attenuation",
+                        light.attenuation,
+                        0.01,
+                        "%.3f",
+                        np.array((1.0, 0.0, 0.0)),
+                    ),
+                ),
             )
         if light_type is LightType.SPOT:
             cutoff_changed, cutoff = imgui.drag_float(
@@ -808,7 +868,7 @@ class InspectorPanel(Panel):
                         ambient=np.asarray(ambient, np.float32),
                         position=np.asarray(position, np.float32),
                         direction=np.asarray(direction, np.float32),
-                        attenuation=np.asarray(attenuation, np.float32),
+                        attenuation=np.clip(np.asarray(attenuation, np.float32), 0.0, 100.0),
                         range=float(light_range),
                         area_radius=float(area_radius),
                         cutoff=float(cutoff),
@@ -828,6 +888,24 @@ class InspectorPanel(Panel):
         environment = source.lights.environment()
         changed = False
 
+        imgui.text_disabled("skybox")
+        self._render_flag(ctx, RenderFlag.SKYBOX, "enabled##skybox")
+        cube_textures = [
+            name
+            for name, item in source.textures.items()
+            if item.type in (TextureType.CUBE, TextureType.SKYBOX)
+        ]
+        skyboxes = [None, *cube_textures]
+        skybox_index = skyboxes.index(source.skybox) if source.skybox in skyboxes else 0
+        skybox_changed, skybox_index = imgui.combo(
+            "texture##skybox",
+            skybox_index,
+            [name or "none" for name in skyboxes],
+        )
+        if skybox_changed:
+            self._submit_edit(ctx, cmd.SetSkybox(skyboxes[skybox_index]))
+
+        imgui.separator()
         imgui.text_disabled("ambient light")
         ambient_changed, ambient = imgui.color_edit3("color##ambient", environment.ambient)
         changed |= ambient_changed
@@ -867,13 +945,23 @@ class InspectorPanel(Panel):
         imgui.separator()
         imgui.text_disabled("haze")
         self._render_flag(ctx, RenderFlag.HAZE, "enabled##haze")
+        mode_changed, haze_mode = imgui.combo(
+            "mode##haze",
+            int(environment.horizon_haze),
+            ["volumetric", "horizon"],
+        )
+        horizon_haze = bool(haze_mode)
         haze_color_changed, haze_color = imgui.color_edit3("color##haze", environment.haze_color)
-        haze_label = "radius" if environment.horizon_haze else "density"
-        haze_format = "%.4f" if environment.horizon_haze else "%.4f / m"
+        haze_label = "radius" if horizon_haze else "density"
+        haze_format = "%.4f" if horizon_haze else "%.4f / m"
         haze_density_changed, haze_density = imgui.drag_float(
             haze_label, environment.haze_density, 0.001, 0.0, 100.0, haze_format
         )
-        changed |= haze_color_changed or haze_density_changed
+        slices_changed = False
+        haze_slices = environment.horizon_haze_slices
+        if horizon_haze:
+            slices_changed, haze_slices = imgui.drag_int("slices", haze_slices, 1.0, 3, 512, "%d")
+        changed |= haze_color_changed or haze_density_changed or mode_changed or slices_changed
 
         if changed:
             self._submit_edit(
@@ -897,8 +985,8 @@ class InspectorPanel(Panel):
                         fog_end=float(fog_end),
                         haze_color=np.asarray(haze_color, np.float32),
                         haze_density=float(haze_density),
-                        horizon_haze=environment.horizon_haze,
-                        horizon_haze_slices=environment.horizon_haze_slices,
+                        horizon_haze=horizon_haze,
+                        horizon_haze_slices=int(haze_slices),
                     )
                 ),
             )
@@ -931,14 +1019,21 @@ class InspectorPanel(Panel):
             if imgui.button(ctx.tr(label)):
                 ctx.select_model_camera(-1 if active else info.camera_id)
 
-        eye_changed, eye = imgui.drag_float3(
-            f"{ctx.tr('position')}##camera_position", view.eye, 0.01, 0.0, 0.0, "%.4f"
-        )
-        target_changed, target = imgui.drag_float3(
-            f"{ctx.tr('target')}##camera_target", view.target, 0.01, 0.0, 0.0, "%.4f"
-        )
-        up_changed, up = imgui.drag_float3(
-            f"{ctx.tr('up')}##camera_up", view.up, 0.01, 0.0, 0.0, "%.4f"
+        (eye_changed, eye), (target_changed, target), (up_changed, up) = _vector_fields(
+            ctx,
+            node,
+            "insp_camera_pose",
+            (
+                (ctx.tr("position"), view.eye, 0.01, "%.4f", None),
+                (ctx.tr("target"), view.target, 0.01, "%.4f", None),
+                (
+                    ctx.tr("up"),
+                    view.up,
+                    0.01,
+                    "%.4f",
+                    np.array((0.0, 0.0, 1.0)),
+                ),
+            ),
         )
         fov_changed, fov = imgui.drag_float(
             f"{ctx.tr('vertical fov')}##camera_fov",
@@ -1072,6 +1167,53 @@ def _compact_transform(width: float, style_scale: float) -> bool:
     return float(width) < 420.0 * float(style_scale)
 
 
+def _vector_fields(
+    ctx: PanelContext,
+    node: SceneNode,
+    table_id: str,
+    rows,
+    *,
+    editable: bool = True,
+) -> tuple[tuple[bool, np.ndarray], ...]:
+    compact = _compact_transform(imgui.get_content_region_avail().x, ctx.style_scale)
+    flags = (
+        imgui.TableFlags_.sizing_stretch_same
+        | imgui.TableFlags_.no_saved_settings
+        | imgui.TableFlags_.no_pad_inner_x
+        | imgui.TableFlags_.no_pad_outer_x
+    )
+    columns = 1 if compact else 7
+    if not imgui.begin_table(table_id, columns, flags):
+        return tuple((False, np.asarray(row[1], np.float64).copy()) for row in rows)
+    if compact:
+        imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+    else:
+        imgui.table_setup_column(
+            "value", imgui.TableColumnFlags_.width_fixed, 96.0 * ctx.style_scale
+        )
+        for axis in "xyz":
+            imgui.table_setup_column(
+                axis, imgui.TableColumnFlags_.width_fixed, 20.0 * ctx.style_scale
+            )
+            imgui.table_setup_column(f"{axis} value", imgui.TableColumnFlags_.width_stretch, 1.0)
+    result = tuple(
+        _vector_row(
+            ctx,
+            node,
+            name,
+            values,
+            editable=editable,
+            speed=speed,
+            fmt=fmt,
+            compact=compact,
+            reset_values=reset_values,
+        )
+        for name, values, speed, fmt, reset_values in rows
+    )
+    imgui.end_table()
+    return result
+
+
 def _vector_row(
     ctx: PanelContext,
     node: SceneNode,
@@ -1082,8 +1224,14 @@ def _vector_row(
     speed: float,
     fmt: str,
     compact: bool,
+    reset_values=None,
 ) -> tuple[bool, np.ndarray]:
     out = np.asarray(values, np.float64).copy()
+    resets = (
+        np.zeros(3, np.float64)
+        if reset_values is None
+        else np.asarray(reset_values, np.float64).reshape(3)
+    )
     imgui.table_next_row()
     imgui.table_next_column()
     imgui.align_text_to_frame_padding()
@@ -1129,7 +1277,7 @@ def _vector_row(
         if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
             imgui.set_tooltip("click: reset to 0" if editable else "read only")
         if reset:
-            out[axis] = 0.0
+            out[axis] = resets[axis]
             changed = True
 
         imgui.table_next_column()

@@ -302,21 +302,28 @@ def test_scene_entity_commands_keep_their_typed_remote_boundary():
     material = Material(name="remote", emission=0.4)
     color = np.array([0.3, 0.5, 0.7, 0.8], np.float32)
 
-    command = handle_session_command(Sink(), {"op": "light", "light_id": 3, "light": light})
+    command = handle_session_command(Sink(), {"op": "light", "light_index": 3, "light": light})
     assert isinstance(command, cmd.SetLight)
-    assert command.light_id == 3
+    assert command.light_index == 3
     assert command.light is light
 
     command = handle_session_command(Sink(), {"op": "environment", "environment": environment})
     assert isinstance(command, cmd.SetEnvironment)
     assert command.environment is environment
 
+    command = handle_session_command(Sink(), {"op": "skybox", "texture": "studio"})
+    assert isinstance(command, cmd.SetSkybox)
+    assert command.texture == "studio"
+
     command = handle_session_command(
-        Sink(), {"op": "material", "material_id": 2, "material": material}
+        Sink(), {"op": "material", "material_index": 2, "material": material}
     )
     assert isinstance(command, cmd.SetMaterial)
-    assert command.material_id == 2
+    assert command.material_index == 2
     assert command.material is material
+
+    legacy = handle_session_command(Sink(), {"op": "light", "light_id": 4, "light": light})
+    assert legacy.light_index == 4
 
     command = handle_session_command(Sink(), {"op": "geometry_color", "node_id": 9, "rgba": color})
     assert isinstance(command, cmd.SetGeometryColor)

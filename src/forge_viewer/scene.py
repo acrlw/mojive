@@ -30,6 +30,7 @@ from .types import (
     MeshKey,
     MeshShape,
     TextureData,
+    TextureType,
 )
 
 
@@ -117,6 +118,7 @@ class Scene:
         self.camera = camera
         self.lights = lights or LightSet(headlight=DEFAULT_HEADLIGHT)
         self.textures: dict[str, TextureData] = {}
+        self.skybox: str | None = None
         self._items: list[_Item] = []
         self._meshes: dict[MeshKey, MeshData] = {}
         self._next_object_id = 1
@@ -244,6 +246,16 @@ class Scene:
         self.textures[texture.name] = texture
         self._revision += 1
 
+    def set_skybox(self, texture: str | None) -> bool:
+        """Select a cube texture as the environment skybox."""
+        if texture is not None:
+            item = self.textures.get(texture)
+            if item is None or item.type not in (TextureType.CUBE, TextureType.SKYBOX):
+                return False
+        self.skybox = texture
+        self._revision += 1
+        return True
+
     def add_camera(self, name: str, view: CameraView) -> int:
         """Add a selectable scene camera and return its camera ID."""
         camera_id = self._next_camera_id
@@ -318,7 +330,7 @@ class Scene:
     def set_light_by_id(self, light_id: int, light: Light) -> None:
         """Replace a light by stable ID."""
         index = self._light_index(light_id)
-        if not self.set_light(index, light):
+        if not self.set_light_at(index, light):
             raise KeyError(f"Unknown light_id={light_id}")
 
     def remove_light(self, light_id: int) -> None:
@@ -385,8 +397,16 @@ class Scene:
         return True
 
     def set_light(self, light_id: int, light) -> bool:
-        """Replace a light by its zero-based render index."""
-        i = int(light_id)
+        """Replace a light by stable ID."""
+        try:
+            index = self._light_index(light_id)
+        except KeyError:
+            return False
+        return self.set_light_at(index, light)
+
+    def set_light_at(self, light_index: int, light) -> bool:
+        """Replace a light by its current zero-based render array index."""
+        i = int(light_index)
         if not 0 <= i < len(self.lights.lights):
             return False
         lights = list(self.lights.lights)
@@ -405,10 +425,10 @@ class Scene:
             self._frame.lights = self.lights
         return True
 
-    def set_material(self, material_id: int, material: Material) -> bool:
-        """Replace a material referenced by the current scene source."""
+    def set_material(self, material_index: int, material: Material) -> bool:
+        """Replace a material by its current scene-source array index."""
         self._rebuild()
-        i = int(material_id)
+        i = int(material_index)
         if not 0 <= i < len(self._source.materials):
             return False
         current = self._source.materials[i]
@@ -647,6 +667,7 @@ class Scene:
             geom_infinite_plane=np.zeros(n, bool),
             lights=self.lights,
             cameras=tuple(camera.view for camera in self._cameras),
+            skybox=self.skybox,
             scene_extent=extent,
             scene_center=center,
             nodes=nodes,

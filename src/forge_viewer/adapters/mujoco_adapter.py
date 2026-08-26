@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import warnings
@@ -89,6 +90,10 @@ _GEOM_RGBA_DEFAULT = np.array([0.5, 0.5, 0.5, 1.0], np.float32)
 
 _TEXROLE_RGB = 1
 _TEXROLE_RGBA = 8
+_FORGE_AMBIENT_NUMERIC = "forge_viewer.environment.ambient"
+_FORGE_HAZE_NUMERIC = "forge_viewer.environment.horizon_haze"
+_FORGE_AREA_LIGHTS_TEXT = "forge_viewer.light.area"
+_URDF_MIN_POSITIVE_INERTIA = 1e-14
 
 _BVH_POSE_BODY = 0
 _BVH_POSE_GEOM = 1
@@ -182,43 +187,107 @@ def _load_editable_spec(path: Path):
 
 
 def _normalized_urdf_source(path: Path) -> str | None:
-    """Repair a redundant compiler mesh directory when only the shorter path exists.
+    """Repair deterministic local URDF resource paths that MuJoCo cannot resolve.
 
     Some exported URDFs set ``meshdir="meshes"`` while also storing filenames as
     ``meshes/foo.stl``. MuJoCo applies both values and looks below
     ``meshes/meshes``. Preserve that explicit path when it exists; otherwise use
-    the compatible shorter path only when its asset exists on disk.
+    the compatible shorter path only when its asset exists on disk. ROS package
+    URIs and uniquely relocated local meshes are resolved only when one existing
+    file is unambiguous. Positive-definite inertia tensors entirely below MuJoCo's
+    numerical acceptance floor are scaled uniformly, preserving their shape while
+    avoiding a compiler rejection for physically negligible decorative links.
     """
 
     root = ET.fromstring(path.read_bytes())
     compiler = root.find("./mujoco/compiler")
     meshdir = "" if compiler is None else str(compiler.attrib.get("meshdir", ""))
     directory = meshdir.strip().replace("\\", "/").rstrip("/")
-    if (
-        not directory
-        or directory.startswith("/")
+    safe_directory = not (
+        directory.startswith("/")
         or (len(directory) >= 2 and directory[1] == ":")
         or ".." in directory.split("/")
-    ):
-        return None
-    prefix = directory + "/"
-    mesh_root = path.parent / directory
+    )
+    prefix = directory + "/" if directory and safe_directory else ""
+    mesh_root = path.parent / directory if directory and safe_directory else path.parent
+
+    def package_asset(filename: str) -> Path | None:
+        if not filename.startswith("package://"):
+            return None
+        parts = tuple(part for part in filename[len("package://") :].split("/") if part)
+        if not parts or ".." in parts:
+            return None
+        parents = (path.parent, *tuple(path.parents)[:6])
+        candidates = [path.parent.joinpath(*parts)]
+        for parent in parents:
+            if len(parts) > 1:
+                candidates.append(parent.joinpath(*parts[1:]))
+            candidates.append(parent.joinpath(*parts))
+            if parent.name == parts[0] and len(parts) > 1:
+                candidates.append(parent.joinpath(*parts[1:]))
+        existing = {candidate.resolve() for candidate in candidates if candidate.is_file()}
+        return next(iter(existing)) if len(existing) == 1 else None
+
+    def unique_local_asset(filename: str) -> Path | None:
+        name = Path(filename).name
+        if not name:
+            return None
+        exact = {
+            parent.joinpath(filename).resolve()
+            for parent in (path.parent, *tuple(path.parents)[:4])
+            if parent.joinpath(filename).is_file()
+        }
+        if len(exact) == 1:
+            return next(iter(exact))
+        if exact:
+            return None
+        matches = {
+            candidate.resolve() for candidate in path.parent.rglob(name) if candidate.is_file()
+        }
+        return next(iter(matches)) if len(matches) == 1 else None
 
     changed = False
     for mesh in root.iter("mesh"):
         filename = str(mesh.attrib.get("filename", "")).replace("\\", "/")
         while filename.startswith("./"):
             filename = filename[2:]
-        if not filename.startswith(prefix):
+        package_path = package_asset(filename)
+        if package_path is not None:
+            mesh.attrib["filename"] = str(package_path)
+            changed = True
             continue
-        shorter = filename[len(prefix) :]
-        if not shorter or shorter.startswith("/") or ".." in shorter.split("/"):
+        if filename.startswith("package://") or Path(filename).is_absolute():
             continue
         explicit_path = mesh_root / filename
-        compatible_path = mesh_root / shorter
-        if not explicit_path.is_file() and compatible_path.is_file():
-            mesh.attrib["filename"] = shorter
+        if explicit_path.is_file():
+            continue
+        if prefix and filename.startswith(prefix):
+            shorter = filename[len(prefix) :]
+            compatible_path = mesh_root / shorter
+            if shorter and ".." not in shorter.split("/") and compatible_path.is_file():
+                mesh.attrib["filename"] = shorter
+                changed = True
+                continue
+        local_path = unique_local_asset(filename)
+        if local_path is not None:
+            mesh.attrib["filename"] = str(local_path)
             changed = True
+
+    inertia_fields = ("ixx", "ixy", "ixz", "iyy", "iyz", "izz")
+    for inertia in root.iter("inertia"):
+        try:
+            ixx, ixy, ixz, iyy, iyz, izz = (float(inertia.attrib[name]) for name in inertia_fields)
+        except (KeyError, ValueError):
+            continue
+        matrix = np.array(((ixx, ixy, ixz), (ixy, iyy, iyz), (ixz, iyz, izz)), np.float64)
+        eigenvalues = np.linalg.eigvalsh(matrix)
+        largest = float(eigenvalues[-1])
+        if float(eigenvalues[0]) <= 0.0 or not 0.0 < largest < _URDF_MIN_POSITIVE_INERTIA:
+            continue
+        scale = _URDF_MIN_POSITIVE_INERTIA / largest
+        for name in inertia_fields:
+            inertia.attrib[name] = f"{float(inertia.attrib[name]) * scale:.17g}"
+        changed = True
     return ET.tostring(root, encoding="unicode") if changed else None
 
 
@@ -462,6 +531,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._mesh_updates = {}
         self._lights_dynamic = False
         self._lights_edited = False
+        self._area_lights = np.zeros(0, bool)
 
         if path is not None:
             self.load(path)
@@ -645,6 +715,11 @@ class MuJoCoAdapter(SceneAdapterBase):
             return -1
         path = Path(path).expanduser().resolve()
         model_id = self._next_model_id
+        spec = _load_editable_spec(path)
+        # MjSpec.copy() can omit unresolved declarations originating in an include.
+        # Compiling keyed models once resolves their full actuator/state layout before
+        # the stored editable spec is copied for composition.
+        self._resolve_attached_keyframes(spec)
         item = _AttachedModel(
             model_id=model_id,
             name=path.stem,
@@ -652,7 +727,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             prefix=f"forge_{model_id}_",
             position=np.asarray(position, np.float64).reshape(3).copy(),
             rotation=np.asarray(rotation, np.float64).reshape(3, 3).copy(),
-            spec=_load_editable_spec(path),
+            spec=spec,
         )
         state = self._capture_named_model_state()
         self._attached_models.append(item)
@@ -1248,6 +1323,25 @@ class MuJoCoAdapter(SceneAdapterBase):
         if index >= 0:
             self._attached_models[index] = replace(self._attached_models[index], edited=True)
 
+    def _store_model_spec(self, model_id: int, spec) -> None:
+        """Replace one stored editable spec without recompiling the composed model."""
+        if int(model_id) == 0:
+            self._root_spec = spec
+            self._root_edited = True
+            return
+        index = next(
+            (
+                index
+                for index, item in enumerate(self._attached_models)
+                if item.model_id == int(model_id)
+            ),
+            -1,
+        )
+        if index >= 0:
+            self._attached_models[index] = replace(
+                self._attached_models[index], spec=spec, edited=True
+            )
+
     def _element(self, model_id: int, element_type: str, name: str):
         spec = self._spec_for_model(model_id)
         if spec is None:
@@ -1332,19 +1426,21 @@ class MuJoCoAdapter(SceneAdapterBase):
 
     @staticmethod
     def _resolve_asset_paths(spec, directory: Path) -> None:
-        mesh_dir = directory / spec.compiler.meshdir if spec.compiler.meshdir else directory
-        texture_dir = (
-            directory / spec.compiler.texturedir if spec.compiler.texturedir else directory
-        )
-        for assets, base in (
-            (spec.meshes, mesh_dir),
-            (spec.textures, texture_dir),
-            (spec.hfields, directory),
-            (spec.skins, directory),
+        def asset_base(asset, compiler_field: str) -> Path:
+            compiler = getattr(asset, "compiler", spec.compiler)
+            relative = str(getattr(compiler, compiler_field, ""))
+            return directory / relative if relative else directory
+
+        for assets, compiler_field in (
+            (spec.meshes, "meshdir"),
+            (spec.textures, "texturedir"),
+            (spec.hfields, ""),
+            (spec.skins, "meshdir"),
         ):
             for asset in assets:
                 file = str(asset.file)
                 if file and not Path(file).is_absolute():
+                    base = asset_base(asset, compiler_field) if compiler_field else directory
                     asset.file = str((base / file).resolve())
         spec.compiler.meshdir = ""
         spec.compiler.texturedir = ""
@@ -1453,13 +1549,15 @@ class MuJoCoAdapter(SceneAdapterBase):
             )
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Attach conflict.*")
+            preview = spec.compile()
+            _apply_environment(spec, source.lights, float(preview.stat.extent))
             spec.compile()
         assets = self._stage_mjcf_assets(spec, target)
         xml = spec.to_xml()
         for source_file, exported_file in assets:
             xml = xml.replace(
-                f'file="{escape(source_file, quote=True)}"',
-                f'file="{escape(exported_file, quote=True)}"',
+                f'="{escape(source_file, quote=True)}"',
+                f'="{escape(exported_file, quote=True)}"',
             )
         target.write_text(xml.rstrip() + "\n", encoding="utf-8")
         mujoco.MjModel.from_xml_path(str(target))
@@ -1469,11 +1567,15 @@ class MuJoCoAdapter(SceneAdapterBase):
     def _validate_authored_mjcf(source: SceneSource) -> None:
         unsupported: list[str] = []
         for light in source.lights.lights:
-            if light.type in {LightType.AREA, LightType.IMAGE}:
-                unsupported.append(f"{light.type.name.lower()} light")
-        for texture in source.textures.values():
-            if texture.type is not TextureType.TWO_D:
-                unsupported.append(f"{texture.type.value} texture '{texture.name}'")
+            texture = source.textures.get(light.texture or "")
+            if light.type is LightType.IMAGE and (
+                texture is None or texture.type not in (TextureType.CUBE, TextureType.SKYBOX)
+            ):
+                unsupported.append("image light without a cube texture")
+        if source.skybox is not None:
+            texture = source.textures.get(source.skybox)
+            if texture is None or texture.type not in (TextureType.CUBE, TextureType.SKYBOX):
+                unsupported.append("skybox without a cube texture")
         if unsupported:
             details = ", ".join(dict.fromkeys(unsupported))
             raise RuntimeError(f"MJCF export cannot preserve {details}")
@@ -1490,21 +1592,26 @@ class MuJoCoAdapter(SceneAdapterBase):
         )
         for asset_type, items in groups:
             for index, asset in enumerate(items):
-                if asset.file is None:
-                    continue
-                file = str(asset.file)
-                if not file:
-                    continue
-                source = Path(file).expanduser().resolve()
-                suffix = source.suffix or ".bin"
-                name = _mjcf_name(asset_type, str(asset.name), index)
-                destination = (
-                    source if source.parent == assets.resolve() else assets / f"{name}{suffix}"
-                )
-                assets.mkdir(parents=True, exist_ok=True)
-                if source != destination.resolve():
-                    shutil.copy2(source, destination)
-                exported.append((str(source), destination.relative_to(target.parent).as_posix()))
+                files = [str(asset.file or "")]
+                files.extend(str(file or "") for file in getattr(asset, "cubefiles", ()))
+                for file_index, file in enumerate(files):
+                    if not file:
+                        continue
+                    source = Path(file).expanduser().resolve()
+                    suffix = source.suffix or ".bin"
+                    name = _mjcf_name(asset_type, str(asset.name), index)
+                    face = f"_{file_index - 1}" if file_index else ""
+                    destination = (
+                        source
+                        if source.parent == assets.resolve()
+                        else assets / f"{name}{face}{suffix}"
+                    )
+                    assets.mkdir(parents=True, exist_ok=True)
+                    if source != destination.resolve():
+                        shutil.copy2(source, destination)
+                    exported.append(
+                        (str(source), destination.relative_to(target.parent).as_posix())
+                    )
         return exported
 
     def _append_authored_scene(
@@ -1632,7 +1739,13 @@ class MuJoCoAdapter(SceneAdapterBase):
             LightType.DIRECTIONAL: mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
             LightType.POINT: mujoco.mjtLightType.mjLIGHT_POINT,
             LightType.SPOT: mujoco.mjtLightType.mjLIGHT_SPOT,
+            # MuJoCo has no area-light enum.  Forge records the semantic type in
+            # custom metadata and uses the native point-light bulb radius as the
+            # portable fallback representation.
+            LightType.AREA: mujoco.mjtLightType.mjLIGHT_POINT,
+            LightType.IMAGE: mujoco.mjtLightType.mjLIGHT_IMAGE,
         }
+        area_names = set(_spec_text_names(spec, _FORGE_AREA_LIGHTS_TEXT))
         for index, light in enumerate(source.lights.lights):
             name = _mjcf_name(
                 "forge_light",
@@ -1646,6 +1759,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                 mode=mujoco.mjtCamLight.mjCAMLIGHT_FIXED,
                 active=light.active,
                 type=light_types[light.type],
+                texture=texture_names.get(light.texture or "", ""),
                 castshadow=light.cast_shadow,
                 bulbradius=light.area_radius,
                 intensity=light.intensity,
@@ -1657,7 +1771,9 @@ class MuJoCoAdapter(SceneAdapterBase):
                 diffuse=light.diffuse,
                 specular=light.specular,
             )
-        _apply_environment(spec, source.lights)
+            if light.type is LightType.AREA:
+                area_names.add(name)
+        _set_text_names(spec, _FORGE_AREA_LIGHTS_TEXT, area_names)
 
     @staticmethod
     def _export_authored_textures(spec, target: Path, source: SceneSource) -> dict[str, str]:
@@ -1666,17 +1782,28 @@ class MuJoCoAdapter(SceneAdapterBase):
         texture_names: dict[str, str] = {}
         assets = target.parent / f"{target.stem}_assets"
         for index, texture in enumerate(source.textures.values()):
-            if texture.type is not TextureType.TWO_D:
-                continue
             assets.mkdir(parents=True, exist_ok=True)
             name = _mjcf_name("forge_texture", texture.name, index)
-            file = assets / f"{name}.png"
-            Image.fromarray(texture.pixels).save(file)
-            spec.add_texture(
-                name=name,
-                type=mujoco.mjtTexture.mjTEXTURE_2D,
-                file=str(file.resolve()),
-            )
+            if texture.type is TextureType.TWO_D:
+                file = assets / f"{name}.png"
+                Image.fromarray(texture.pixels).save(file)
+                spec.add_texture(
+                    name=name,
+                    type=mujoco.mjtTexture.mjTEXTURE_2D,
+                    file=str(file.resolve()),
+                )
+            else:
+                files = []
+                for face, pixels in enumerate(np.asarray(texture.pixels)):
+                    file = assets / f"{name}_{face}.png"
+                    Image.fromarray(pixels).save(file)
+                    files.append(str(file.resolve()))
+                texture_type = (
+                    mujoco.mjtTexture.mjTEXTURE_SKYBOX
+                    if texture.name == source.skybox
+                    else mujoco.mjtTexture.mjTEXTURE_CUBE
+                )
+                spec.add_texture(name=name, type=texture_type, cubefiles=files)
             texture_names[texture.name] = name
         return texture_names
 
@@ -1918,6 +2045,16 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._lights_dynamic = bool(model.nlight) and bool(
             np.any(model.light_bodyid != 0)
             or np.any(model.light_mode != mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
+        )
+        area_names: set[str] = set()
+        for prefix, names in _compiled_text_names(model, _FORGE_AREA_LIGHTS_TEXT):
+            area_names.update(f"{prefix}{name}" for name in names)
+        self._area_lights = np.asarray(
+            [
+                (mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_LIGHT, i) or "") in area_names
+                for i in range(model.nlight)
+            ],
+            bool,
         )
         visual_fields = (
             "geom_rgba",
@@ -3529,7 +3666,9 @@ class MuJoCoAdapter(SceneAdapterBase):
 
         # MuJoCo values: spot=0, directional=1, point=2, image=3.
 
-        if ltype == mujoco.mjtLightType.mjLIGHT_DIRECTIONAL:
+        if i < len(self._area_lights) and self._area_lights[i]:
+            light_type = LightType.AREA
+        elif ltype == mujoco.mjtLightType.mjLIGHT_DIRECTIONAL:
             light_type = LightType.DIRECTIONAL
         elif ltype == mujoco.mjtLightType.mjLIGHT_POINT:
             light_type = LightType.POINT
@@ -3548,6 +3687,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             ambient=np.asarray(m.light_ambient[i], np.float32).copy(),
             attenuation=np.asarray(m.light_attenuation[i], np.float32).copy(),
             range=float(m.light_range[i]),
+            area_radius=float(m.light_bulbradius[i]),
             cutoff=float(m.light_cutoff[i]),
             exponent=float(m.light_exponent[i]),
             texture=texture,
@@ -3571,17 +3711,27 @@ class MuJoCoAdapter(SceneAdapterBase):
     def _light_set(self, lights: tuple[Light, ...]) -> LightSet:
         m = self._m
         extent = float(m.stat.extent) or 1.0
+        ambient = _numeric_values(m, _FORGE_AMBIENT_NUMERIC)
+        haze = _numeric_values(m, _FORGE_HAZE_NUMERIC)
         return LightSet(
             lights=lights,
             headlight=self._headlight(),
-            ambient=self._global_ambient(),
+            ambient=(
+                np.asarray(ambient[:3], np.float32).copy()
+                if ambient is not None and len(ambient) >= 3
+                else self._global_ambient()
+            ),
             fog_color=np.asarray(m.vis.rgba.fog[:3], np.float32).copy(),
             fog_start=float(m.vis.map.fogstart) * extent,
             fog_end=float(m.vis.map.fogend) * extent,
             haze_color=np.asarray(m.vis.rgba.haze[:3], np.float32).copy(),
             haze_density=float(m.vis.map.haze),
-            horizon_haze=True,
-            horizon_haze_slices=max(3, int(m.vis.quality.numslices)),
+            horizon_haze=bool(haze[0]) if haze is not None and len(haze) >= 1 else True,
+            horizon_haze_slices=(
+                max(3, round(haze[1]))
+                if haze is not None and len(haze) >= 2
+                else max(3, int(m.vis.quality.numslices))
+            ),
         )
 
     def _headlight(self) -> Light | None:
@@ -4084,23 +4234,25 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._d.ctrl[i] = v
         return True
 
-    def set_light(self, light_id: int, light: Light) -> bool:
-        i = int(light_id)
+    def set_light(self, light_index: int, light: Light) -> bool:
+        i = int(light_index)
         if not 0 <= i < self._m.nlight:
             return False
+        identity = self._element_identity(NodeType.LIGHT, i)
         light_types = {
             LightType.DIRECTIONAL: mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
             LightType.POINT: mujoco.mjtLightType.mjLIGHT_POINT,
             LightType.SPOT: mujoco.mjtLightType.mjLIGHT_SPOT,
             LightType.IMAGE: mujoco.mjtLightType.mjLIGHT_IMAGE,
-            # AREA is a Forge render extension.  MuJoCo keeps its local pose as
-            # a point light; Session restores the authored AREA type afterwards.
+            # AREA is a Forge render extension represented by a MuJoCo point
+            # light plus custom metadata.
             LightType.AREA: mujoco.mjtLightType.mjLIGHT_POINT,
         }
         if light.type not in light_types:
             return False
         m = self._m
         texture_id = -1
+        texture_name = ""
         if light.type is LightType.IMAGE:
             texture_id = (
                 mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_TEXTURE, light.texture)
@@ -4108,6 +4260,12 @@ class MuJoCoAdapter(SceneAdapterBase):
                 else -1
             )
             if texture_id < 0:
+                return False
+            texture_model, texture_name = self._model_element_name(light.texture or "")
+            # A stored child MjSpec can only reference assets from that child.
+            # The composed model exposes prefixed names, so strip the prefix for
+            # write-back and reject references that cannot survive standalone export.
+            if identity is not None and texture_model != identity[0]:
                 return False
         m.light_type[i] = int(light_types[light.type])
         m.light_pos[i] = light.position
@@ -4142,12 +4300,11 @@ class MuJoCoAdapter(SceneAdapterBase):
         m.light_range[i] = light.range
         m.light_cutoff[i] = light.cutoff
         m.light_exponent[i] = light.exponent
-        if light.type is LightType.IMAGE:
-            m.light_texid[i] = texture_id
-            m.light_intensity[i] = light.intensity
+        m.light_bulbradius[i] = light.area_radius
+        m.light_texid[i] = texture_id
+        m.light_intensity[i] = light.intensity
         m.light_castshadow[i] = light.cast_shadow
         m.light_active[i] = light.active
-        identity = self._element_identity(NodeType.LIGHT, i)
         if identity is not None:
             model_id, name = identity
             element = self._element(model_id, "light", name)
@@ -4162,16 +4319,78 @@ class MuJoCoAdapter(SceneAdapterBase):
                 element.range = light.range
                 element.cutoff = light.cutoff
                 element.exponent = light.exponent
-                element.texture = light.texture or ""
+                element.texture = texture_name
                 element.intensity = light.intensity
                 element.castshadow = light.cast_shadow
                 element.active = light.active
                 element.bulbradius = light.area_radius
+                names = set(
+                    _spec_text_names(self._spec_for_model(model_id), _FORGE_AREA_LIGHTS_TEXT)
+                )
+                if light.type is LightType.AREA:
+                    names.add(name)
+                else:
+                    names.discard(name)
+                _set_text_names(self._spec_for_model(model_id), _FORGE_AREA_LIGHTS_TEXT, names)
                 self._mark_model_edited(model_id)
+        if i < len(self._area_lights):
+            self._area_lights[i] = light.type is LightType.AREA
         mujoco.mj_forward(m, self._d)
         self._lights_edited = True
         if self._source is not None:
             self._source.lights = self._build_lights()
+        return True
+
+    def set_skybox(self, texture: str | None) -> bool:
+        selected = -1
+        if texture is not None:
+            selected = mujoco.mj_name2id(self._m, mujoco.mjtObj.mjOBJ_TEXTURE, texture)
+            if selected < 0 or int(self._m.tex_type[selected]) not in (
+                int(mujoco.mjtTexture.mjTEXTURE_CUBE),
+                int(mujoco.mjtTexture.mjTEXTURE_SKYBOX),
+            ):
+                return False
+
+        updates = []
+        for index in range(self._m.ntex):
+            current = int(self._m.tex_type[index])
+            next_type = (
+                mujoco.mjtTexture.mjTEXTURE_SKYBOX
+                if index == selected
+                else (
+                    mujoco.mjtTexture.mjTEXTURE_CUBE
+                    if current == int(mujoco.mjtTexture.mjTEXTURE_SKYBOX)
+                    else current
+                )
+            )
+            if int(next_type) == current:
+                continue
+            compiled_name = mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_TEXTURE, index) or ""
+            model_id, name = self._model_element_name(compiled_name)
+            spec = self._spec_for_model(model_id)
+            element = spec.texture(name) if spec is not None and name else None
+            if element is None:
+                return False
+            updates.append((index, next_type, model_id, compiled_name, element))
+
+        changed_models: set[int] = set()
+        for index, next_type, model_id, _compiled_name, element in updates:
+            self._m.tex_type[index] = int(next_type)
+            element.type = next_type
+            changed_models.add(model_id)
+        for model_id in changed_models:
+            self._mark_model_edited(model_id)
+        if self._source is not None:
+            for _index, next_type, _model_id, compiled_name, _element in updates:
+                item = self._source.textures.get(compiled_name)
+                if item is not None:
+                    item_type = (
+                        TextureType.SKYBOX
+                        if int(next_type) == int(mujoco.mjtTexture.mjTEXTURE_SKYBOX)
+                        else TextureType.CUBE
+                    )
+                    self._source.textures[compiled_name] = replace(item, type=item_type)
+            self._source.skybox = texture
         return True
 
     def _element_identity(self, node_type: NodeType, slot: int) -> tuple[int, str] | None:
@@ -4188,11 +4407,28 @@ class MuJoCoAdapter(SceneAdapterBase):
         identity = self._node_element.get(node.node_id) if node is not None else None
         return (identity[0], identity[2]) if identity is not None else None
 
-    def set_material(self, material_id: int, material: Material) -> bool:
-        i = int(material_id)
+    def set_material(self, material_index: int, material: Material) -> bool:
+        i = int(material_index)
         if not 0 <= i < self._m.nmat:
             return False
         m = self._m
+        texture_id = (
+            mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_TEXTURE, material.texture)
+            if material.texture
+            else -1
+        )
+        if material.texture and texture_id < 0:
+            return False
+        compiled_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_MATERIAL, i) or ""
+        model_id, name = self._model_element_name(compiled_name)
+        spec = self._spec_for_model(model_id)
+        element = spec.material(name) if spec is not None and name else None
+        texture_name = ""
+        if element is not None and material.texture:
+            texture_model, texture_name = self._model_element_name(material.texture)
+            if texture_model != model_id:
+                return False
+
         m.mat_rgba[i] = material.rgba
         m.mat_emission[i] = material.emission
         m.mat_specular[i] = material.specular
@@ -4200,16 +4436,8 @@ class MuJoCoAdapter(SceneAdapterBase):
         m.mat_reflectance[i] = material.reflectance
         m.mat_texrepeat[i] = material.tex_repeat
         m.mat_texuniform[i] = material.tex_uniform
-        m.mat_texid[i, _TEXROLE_RGB] = (
-            mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_TEXTURE, material.texture)
-            if material.texture
-            else -1
-        )
+        m.mat_texid[i, _TEXROLE_RGB] = texture_id
         m.mat_texid[i, _TEXROLE_RGBA] = -1
-        compiled_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_MATERIAL, i) or ""
-        model_id, name = self._model_element_name(compiled_name)
-        spec = self._spec_for_model(model_id)
-        element = spec.material(name) if spec is not None and name else None
         if element is not None:
             element.rgba = material.rgba
             element.emission = material.emission
@@ -4218,7 +4446,13 @@ class MuJoCoAdapter(SceneAdapterBase):
             element.reflectance = material.reflectance
             element.texrepeat = material.tex_repeat
             element.texuniform = material.tex_uniform
-            self._mark_model_edited(model_id)
+            textures = [""] * int(mujoco.mjtTextureRole.mjNTEXROLE)
+            textures[_TEXROLE_RGB] = texture_name
+            element.textures = textures
+            # MuJoCo 3.11 serializes MjsMaterial.textures correctly but retains
+            # the old compiled texture reference in that live MjSpec. Reparse the
+            # serialized spec so a later topology rebuild or export sees the edit.
+            self._store_model_spec(model_id, mujoco.MjSpec.from_string(spec.to_xml()))
         return True
 
     def set_geometry_color(self, node_id: int, rgba: np.ndarray) -> bool:
@@ -4597,7 +4831,73 @@ def _camera_quaternion(camera: CameraView) -> np.ndarray:
     return math3d.mat3_to_quat(np.column_stack((right, up, -forward)))
 
 
-def _apply_environment(spec, lights: LightSet) -> None:
+def _decode_text_names(data: str) -> tuple[str, ...]:
+    try:
+        values = json.loads(data)
+    except (TypeError, ValueError):
+        return ()
+    if not isinstance(values, list):
+        return ()
+    return tuple(value for value in values if isinstance(value, str) and value)
+
+
+def _spec_text_names(spec, name: str) -> tuple[str, ...]:
+    if spec is None:
+        return ()
+    item = spec.text(name)
+    return _decode_text_names(item.data) if item is not None else ()
+
+
+def _set_text_names(spec, name: str, values) -> None:
+    if spec is None:
+        return
+    previous = spec.text(name)
+    names = sorted(set(values))
+    if not names:
+        if previous is not None:
+            spec.delete(previous)
+        return
+    data = json.dumps(names, ensure_ascii=True, separators=(",", ":"))
+    if previous is None:
+        spec.add_text(name=name, data=data)
+    else:
+        previous.data = data
+
+
+def _compiled_text_names(model, name: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    out = []
+    for index in range(model.ntext):
+        compiled_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_TEXT, index) or ""
+        if compiled_name == name:
+            prefix = ""
+        elif compiled_name.endswith(name):
+            prefix = compiled_name[: -len(name)]
+        else:
+            continue
+        start = int(model.text_adr[index])
+        stop = start + int(model.text_size[index])
+        raw = bytes(model.text_data[start:stop]).split(b"\0", 1)[0]
+        out.append((prefix, _decode_text_names(raw.decode("utf-8", errors="replace"))))
+    return tuple(out)
+
+
+def _numeric_values(model, name: str) -> np.ndarray | None:
+    index = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_NUMERIC, name)
+    if index < 0:
+        return None
+    start = int(model.numeric_adr[index])
+    stop = start + int(model.numeric_size[index])
+    return np.asarray(model.numeric_data[start:stop], np.float64)
+
+
+def _set_numeric(spec, name: str, values) -> None:
+    previous = spec.numeric(name)
+    if previous is not None:
+        spec.delete(previous)
+    spec.add_numeric(name=name, data=np.asarray(values, np.float64).reshape(-1))
+
+
+def _apply_environment(spec, lights: LightSet, extent: float) -> None:
     headlight = lights.headlight
     spec.visual.headlight.active = headlight is not None and headlight.active
     if headlight is not None:
@@ -4605,10 +4905,18 @@ def _apply_environment(spec, lights: LightSet) -> None:
         spec.visual.headlight.diffuse = headlight.diffuse
         spec.visual.headlight.specular = headlight.specular
     spec.visual.rgba.fog = (*np.asarray(lights.fog_color, np.float64), 1.0)
-    spec.visual.map.fogstart = lights.fog_start
-    spec.visual.map.fogend = lights.fog_end
+    scale = max(float(extent), 1e-9)
+    spec.visual.map.fogstart = lights.fog_start / scale
+    spec.visual.map.fogend = lights.fog_end / scale
     spec.visual.rgba.haze = (*np.asarray(lights.haze_color, np.float64), 1.0)
     spec.visual.map.haze = lights.haze_density
+    spec.visual.quality.numslices = max(3, int(lights.horizon_haze_slices))
+    _set_numeric(spec, _FORGE_AMBIENT_NUMERIC, lights.ambient)
+    _set_numeric(
+        spec,
+        _FORGE_HAZE_NUMERIC,
+        (float(lights.horizon_haze), float(lights.horizon_haze_slices)),
+    )
 
 
 def _authored_builtin_mesh(shape: MeshShape) -> MeshData | None:

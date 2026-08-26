@@ -46,6 +46,14 @@ def test_forge_scene_round_trip_preserves_authored_content(tmp_path):
             np.array([[[255, 0, 0], [0, 0, 255]]], np.uint8),
         )
     )
+    scene.add_texture(
+        TextureData(
+            "sky",
+            TextureType.CUBE,
+            np.full((6, 2, 2, 3), 128, np.uint8),
+        )
+    )
+    assert scene.set_skybox("sky")
     removed_light = scene.add_light("removed", Light())
     fill = scene.add_light(
         "fill",
@@ -82,6 +90,8 @@ def test_forge_scene_round_trip_preserves_authored_content(tmp_path):
     assert source.geom_material == [0, 0]
     assert np.allclose(restored.frame.geom_xpos[0], [1.0, 2.0, 3.0])
     assert np.array_equal(restored.textures["checker"].pixels, scene.textures["checker"].pixels)
+    assert source.skybox == "sky"
+    assert restored.textures["sky"].type is TextureType.CUBE
     assert np.array_equal(next(iter(restored.source.meshes.values())).indices, mesh.indices)
     assert restored.light("fill").light_id == fill.light_id
     assert restored.light("fill").value.texture == "checker"

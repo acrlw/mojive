@@ -253,6 +253,10 @@ class ObjectGizmo:
         return self._drawn
 
     @property
+    def visible(self) -> bool:
+        return self._visible
+
+    @property
     def interactive(self) -> bool:
         return self._interactive
 
@@ -297,6 +301,15 @@ class ObjectGizmo:
 
     def selected_joint_id(self, body_index: int) -> int:
         return self._joint_selection.get(int(body_index), -1)
+
+    def joint_choices(self, session: Session) -> tuple[JointInfo, ...]:
+        """Return direct joints that need an explicit viewport gizmo choice."""
+
+        node = session.selected_node
+        if node is None or node.posable or node.type not in (NodeType.LINK, NodeType.ROBOT):
+            return ()
+        joints = tuple(session.joints_for_body(node.body_index))
+        return joints if len(joints) > 1 else ()
 
     def select_joint(self, body_index: int, joint_id: int) -> None:
         body = int(body_index)

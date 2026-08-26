@@ -21,6 +21,7 @@ from ..types import (
     MeshUpdate,
     ShadingModel,
     TextureData,
+    TextureType,
 )
 
 if TYPE_CHECKING:
@@ -825,7 +826,7 @@ class SceneAdapterBase:
         """Restore a previously captured physics state."""
         return False
 
-    def set_light(self, light_id: int, light) -> bool:
+    def set_light(self, light_index: int, light) -> bool:
         """Edit a Forge scene light.
 
         Lights belong to ``SceneSource``, not to the physics backend.  Adapters
@@ -833,7 +834,7 @@ class SceneAdapterBase:
         the default keeps custom and render-only adapters editable.
         """
         source = self.scene_source()
-        i = int(light_id)
+        i = int(light_index)
         if not 0 <= i < len(source.lights.lights):
             return False
         lights = list(source.lights.lights)
@@ -847,10 +848,20 @@ class SceneAdapterBase:
         source.lights = source.lights.with_environment(environment)
         return True
 
-    def set_material(self, material_id: int, material: Material) -> bool:
+    def set_skybox(self, texture: str | None) -> bool:
+        """Select one cube texture as the rendered environment."""
+        source = self.scene_source()
+        if texture is not None:
+            item = source.textures.get(texture)
+            if item is None or item.type not in (TextureType.CUBE, TextureType.SKYBOX):
+                return False
+        source.skybox = texture
+        return True
+
+    def set_material(self, material_index: int, material: Material) -> bool:
         """Replace one Forge material by source index."""
         source = self.scene_source()
-        i = int(material_id)
+        i = int(material_index)
         if not 0 <= i < len(source.materials):
             return False
         source.materials[i] = material
@@ -1019,9 +1030,10 @@ class SceneAdapter(Protocol):
     def set_pose(self, node_id: int, position, rotation) -> bool: ...
     def capture_state(self) -> PhysicsState | None: ...
     def restore_state(self, state: PhysicsState) -> bool: ...
-    def set_light(self, light_id: int, light) -> bool: ...
+    def set_light(self, light_index: int, light) -> bool: ...
     def set_environment(self, environment: Environment) -> bool: ...
-    def set_material(self, material_id: int, material: Material) -> bool: ...
+    def set_skybox(self, texture: str | None) -> bool: ...
+    def set_material(self, material_index: int, material: Material) -> bool: ...
     def set_geometry_color(self, node_id: int, rgba: np.ndarray) -> bool: ...
     def set_geometry_size(self, node_id: int, size: np.ndarray) -> bool: ...
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool: ...

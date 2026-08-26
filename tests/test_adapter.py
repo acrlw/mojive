@@ -220,6 +220,23 @@ def test_textures_are_srgb_and_cube_is_six_faces(adapter):
     assert src.textures["grid"].pixels.ndim == 3
 
 
+def test_skybox_selection_writes_back_to_the_editable_spec(adapter):
+    sky_id = mujoco.mj_name2id(adapter.model, mujoco.mjtObj.mjOBJ_TEXTURE, "sky")
+
+    assert adapter.set_skybox(None)
+    assert int(adapter.model.tex_type[sky_id]) == int(mujoco.mjtTexture.mjTEXTURE_CUBE)
+    assert int(adapter._root_spec.compile().tex_type[sky_id]) == int(
+        mujoco.mjtTexture.mjTEXTURE_CUBE
+    )
+
+    assert adapter.set_skybox("sky")
+    assert int(adapter.model.tex_type[sky_id]) == int(mujoco.mjtTexture.mjTEXTURE_SKYBOX)
+    assert int(adapter._root_spec.compile().tex_type[sky_id]) == int(
+        mujoco.mjtTexture.mjTEXTURE_SKYBOX
+    )
+    assert not adapter.set_skybox("grid")
+
+
 def test_square_cube_texture_repeats_one_image_on_every_face(tmp_path):
     from PIL import Image
 
@@ -281,6 +298,7 @@ def test_material_and_lights(adapter):
     material_id = src.materials.index(grid)
     edited_material = replace(
         grid,
+        rgba=np.array([0.15, 0.25, 0.35, 0.8], np.float32),
         emission=0.35,
         specular=0.65,
         shininess=0.75,
@@ -296,6 +314,11 @@ def test_material_and_lights(adapter):
     assert adapter.model.mat_reflectance[material_id] == pytest.approx(0.45)
     assert adapter.model.mat_texrepeat[material_id] == pytest.approx([3.0, 4.0])
     assert adapter.model.mat_texid[material_id, 1] == -1
+    recompiled = adapter._root_spec.compile()
+    assert recompiled.mat_rgba[material_id] == pytest.approx(edited_material.rgba)
+    assert recompiled.mat_emission[material_id] == pytest.approx(0.35)
+    assert recompiled.mat_texrepeat[material_id] == pytest.approx([3.0, 4.0])
+    assert recompiled.mat_texid[material_id, 1] == -1
 
     instance = next(i for i, value in enumerate(src.geom_node) if value >= 0)
     node_id = int(src.geom_node[instance])
@@ -435,6 +458,51 @@ def test_image_light_preserves_its_cube_texture_and_intensity(tmp_path):
         assert image_adapter.set_light(0, edited)
         assert image_adapter.model.light_intensity[0] == pytest.approx(3200.0)
         assert image_adapter.frame(FrameNeeds()).lights.lights[0].intensity == pytest.approx(3200.0)
+        assert image_adapter.set_light(0, replace(edited, type=LightType.POINT, texture=None))
+        assert image_adapter.model.light_texid[0] == -1
+        assert image_adapter.set_light(0, edited)
+    finally:
+        image_adapter.release()
+
+
+def test_attached_image_light_writes_its_local_texture_name(tmp_path):
+    from forge_viewer import commands as cmd
+    from forge_viewer.session import Session
+
+    root = tmp_path / "root.xml"
+    root.write_text('<mujoco model="root"><worldbody/></mujoco>')
+    child = tmp_path / "child.xml"
+    child.write_text(
+        """
+        <mujoco model="child">
+          <asset>
+            <texture name="studio" type="cube" builtin="gradient" width="8" height="48"
+                     rgb1="1 .4 .1" rgb2=".1 .3 1"/>
+          </asset>
+          <worldbody>
+            <light name="environment" type="image" texture="studio" intensity="7500"/>
+            <geom type="sphere" size=".2"/>
+          </worldbody>
+        </mujoco>
+        """
+    )
+
+    image_adapter = MuJoCoAdapter(root)
+    session = Session(image_adapter, root)
+    try:
+        assert session.submit(cmd.Pause())
+        assert session.submit(cmd.AddSceneModel(child, np.zeros(3, np.float32)))
+        light = session.source.lights.lights[0]
+        assert light.texture == "forge_1_studio"
+        assert image_adapter.set_light(0, replace(light, intensity=3200.0))
+
+        exported = tmp_path / "exported.xml"
+        image_adapter.export_mjcf(exported, session.source, session.frame)
+        restored = MuJoCoAdapter(exported)
+        try:
+            assert restored.scene_source().lights.lights[0].intensity == pytest.approx(3200.0)
+        finally:
+            restored.release()
     finally:
         image_adapter.release()
 
@@ -990,6 +1058,96 @@ def test_urdf_loader_preserves_an_explicit_repeated_mesh_directory(tmp_path: Pat
     adapter = MuJoCoAdapter(path)
 
     assert adapter.model.nmesh == 1
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ("package://assets/tetra.obj", "meshes/tetra.obj"),
+)
+def test_urdf_loader_resolves_unambiguous_local_mesh_relocations(
+    tmp_path: Path, filename: str
+) -> None:
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "tetra.obj").write_text(
+        """v 0 0 0
+v 1 0 0
+v 0 1 0
+v 0 0 1
+f 1 3 2
+f 1 2 4
+f 1 4 3
+f 2 3 4
+""",
+        encoding="utf-8",
+    )
+    path = tmp_path / "relocated.urdf"
+    path.write_text(
+        f"""<robot name="relocated">
+  <mujoco><compiler discardvisual="false"/></mujoco>
+  <link name="base">
+    <visual><geometry><mesh filename="{filename}"/></geometry></visual>
+  </link>
+</robot>
+""",
+        encoding="utf-8",
+    )
+
+    adapter = MuJoCoAdapter(path)
+
+    assert adapter.model.nmesh == 1
+
+
+def test_urdf_loader_does_not_guess_between_ambiguous_meshes(tmp_path: Path) -> None:
+    from forge_viewer.adapters.mujoco_adapter import _normalized_urdf_source
+
+    for directory in (tmp_path / "first", tmp_path / "second"):
+        directory.mkdir()
+        (directory / "part.stl").write_bytes(b"not needed for path normalization")
+    path = tmp_path / "ambiguous.urdf"
+    path.write_text(
+        """<robot name="ambiguous">
+  <link name="base"><visual><geometry><mesh filename="missing/part.stl"/></geometry></visual></link>
+</robot>
+""",
+        encoding="utf-8",
+    )
+
+    assert _normalized_urdf_source(path) is None
+
+
+def test_urdf_loader_scales_only_tiny_positive_definite_inertia(tmp_path: Path) -> None:
+    import xml.etree.ElementTree as ET
+
+    from forge_viewer.adapters.mujoco_adapter import _normalized_urdf_source
+
+    path = tmp_path / "tiny-inertia.urdf"
+    path.write_text(
+        """<robot name="tiny_inertia">
+  <mujoco><compiler discardvisual="false"/></mujoco>
+  <link name="base">
+    <inertial>
+      <mass value="6.55e-8"/>
+      <inertia ixx="1.64e-15" ixy="0" ixz="0"
+               iyy="1.64e-15" iyz="0" izz="1.64e-15"/>
+    </inertial>
+    <visual><geometry><box size=".01 .01 .01"/></geometry></visual>
+  </link>
+</robot>
+""",
+        encoding="utf-8",
+    )
+
+    normalized = _normalized_urdf_source(path)
+    assert normalized is not None
+    adapter = MuJoCoAdapter(path)
+
+    assert adapter.model.ngeom == 1
+    inertia = ET.fromstring(normalized).find("link/inertial/inertia")
+    assert inertia is not None
+    assert [float(inertia.attrib[name]) for name in ("ixx", "iyy", "izz")] == pytest.approx(
+        [1e-14] * 3
+    )
 
 
 def test_camera_hint_frames_the_scene(adapter):

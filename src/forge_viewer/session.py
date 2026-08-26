@@ -27,7 +27,7 @@ from .adapters.base import (
     SensorInfo,
 )
 from .commands import Command, CommandResult, Query
-from .types import CameraView, Environment, Light, Material
+from .types import CameraView, Environment, Light, Material, TextureType
 
 
 @dataclass
@@ -63,11 +63,20 @@ class _EditRecord:
     after_revision: int
 
 
+@dataclass(frozen=True)
+class _LightOverride:
+    """One render-slot edit retained against a stable scene object when available."""
+
+    object_id: int
+    light_index: int
+    light: Light
+
+
 @dataclass
 class AuthoredSceneOverlay:
     """Forge-owned property edits layered over an adapter scene."""
 
-    lights: dict[int, Light] = field(default_factory=dict)
+    lights: dict[int, _LightOverride] = field(default_factory=dict)
     environment: Environment | None = None
     materials: dict[int, Material] = field(default_factory=dict)
     geometry_colors: dict[int, np.ndarray] = field(default_factory=dict)
@@ -112,6 +121,7 @@ _SCENE_EDIT_COMMANDS = (
     cmd.SetPose,
     cmd.SetLight,
     cmd.SetEnvironment,
+    cmd.SetSkybox,
     cmd.SetMaterial,
     cmd.SetGeometryColor,
     cmd.SetGeometrySize,
@@ -1052,18 +1062,22 @@ class Session:
             return CommandResult.good("")
 
         if isinstance(c, cmd.SetLight):
-            if self._source is None or not 0 <= c.light_id < len(self._source.lights.lights):
-                return CommandResult.bad(f"light {c.light_id} is unavailable")
-            writeback = self._adapter.set_light(c.light_id, c.light)
+            index = int(c.light_index)
+            if self._source is None or not 0 <= index < len(self._source.lights.lights):
+                return CommandResult.bad(f"light index {index} is unavailable")
+            writeback = self._adapter.set_light(index, c.light)
+            node = next((node for node in self._nodes if node.light_index == index), None)
+            object_id = int(node.object_id) if node is not None else 0
+            override_key = object_id if object_id > 0 else -(index + 1)
             if self._preserve_authored_override(writeback):
-                self._authored.lights[c.light_id] = c.light
+                self._authored.lights[override_key] = _LightOverride(object_id, index, c.light)
             else:
-                self._authored.lights.pop(c.light_id, None)
+                self._authored.lights.pop(override_key, None)
             lights = list(self._source.lights.lights)
-            lights[c.light_id] = c.light
+            lights[index] = c.light
             self._source.lights = replace(self._source.lights, lights=tuple(lights))
             for node in self._nodes:
-                if node.light_index == c.light_id:
+                if node.light_index == index:
                     node.visible = c.light.active
                     break
             self._compose_lights()
@@ -1082,15 +1096,30 @@ class Session:
             message = "" if writeback else "edited in Forge; backend write-back is unavailable"
             return CommandResult.good(message)
 
+        if isinstance(c, cmd.SetSkybox):
+            if self._source is None:
+                return CommandResult.bad("skybox is unavailable")
+            texture = self._source.textures.get(c.texture or "")
+            if c.texture is not None and (
+                texture is None or texture.type not in (TextureType.CUBE, TextureType.SKYBOX)
+            ):
+                return CommandResult.bad(f"cube texture {c.texture!r} is unavailable")
+            if not self._adapter.set_skybox(c.texture):
+                return CommandResult.bad("skybox update failed")
+            self._source.skybox = c.texture
+            self._structure_generation += 1
+            return CommandResult.good("")
+
         if isinstance(c, cmd.SetMaterial):
-            if self._source is None or not 0 <= c.material_id < len(self._source.materials):
-                return CommandResult.bad(f"material {c.material_id} is unavailable")
-            writeback = self._adapter.set_material(c.material_id, c.material)
+            index = int(c.material_index)
+            if self._source is None or not 0 <= index < len(self._source.materials):
+                return CommandResult.bad(f"material index {index} is unavailable")
+            writeback = self._adapter.set_material(index, c.material)
             if self._preserve_authored_override(writeback):
-                self._authored.materials[c.material_id] = c.material
+                self._authored.materials[index] = c.material
             else:
-                self._authored.materials.pop(c.material_id, None)
-            self._source.materials[c.material_id] = c.material
+                self._authored.materials.pop(index, None)
+            self._source.materials[index] = c.material
             self._structure_generation += 1
             message = "" if writeback else "edited in Forge; backend write-back is unavailable"
             return CommandResult.good(message)
@@ -1314,19 +1343,26 @@ class Session:
         self._source = self._adapter.scene_source()
         if self._authored.environment is not None:
             self._source.lights = self._source.lights.with_environment(self._authored.environment)
-        if self._authored.lights:
-            lights = list(self._source.lights.lights)
-            for i, light in self._authored.lights.items():
-                if i < len(lights):
-                    lights[i] = light
-            self._source.lights = replace(self._source.lights, lights=tuple(lights))
-        for material_id, material in self._authored.materials.items():
-            if material_id < len(self._source.materials):
-                self._source.materials[material_id] = material
+        for material_index, material in self._authored.materials.items():
+            if material_index < len(self._source.materials):
+                self._source.materials[material_index] = material
         _apply_geometry_color_overrides(self._source, self._authored.geometry_colors)
         self._nodes = [
             replace(node, children=list(node.children)) for node in self._adapter.nodes()
         ]
+        if self._authored.lights:
+            light_nodes = {
+                node.object_id: node
+                for node in self._nodes
+                if node.object_id > 0 and node.light_index >= 0
+            }
+            lights = list(self._source.lights.lights)
+            for override in self._authored.lights.values():
+                node = light_nodes.get(override.object_id) if override.object_id > 0 else None
+                index = node.light_index if node is not None else override.light_index
+                if 0 <= index < len(lights):
+                    lights[index] = override.light
+            self._source.lights = replace(self._source.lights, lights=tuple(lights))
         if not any(node.type is NodeType.ENVIRONMENT for node in self._nodes):
             parent = next(
                 (node for node in self._nodes if node.type is NodeType.WORLD and node.parent < 0),

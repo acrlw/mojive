@@ -22,7 +22,16 @@ from forge_viewer.adapters.base import (
 from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
 from forge_viewer.adapters.workspace import WorkspaceAdapter
 from forge_viewer.session import Session
-from forge_viewer.types import DEFAULT_MATERIAL, CameraView, Light, LightType, MeshShape
+from forge_viewer.types import (
+    DEFAULT_MATERIAL,
+    CameraView,
+    Environment,
+    Light,
+    LightType,
+    MeshShape,
+    TextureData,
+    TextureType,
+)
 from forge_viewer.workspace_io import (
     missing_resource_entries,
     missing_resources,
@@ -265,6 +274,94 @@ def test_attached_model_keyframes_survive_composition(tmp_path: Path) -> None:
         assert adapter.model.nkey == 1
         assert adapter.keyframes()[0].name.endswith("pose")
         assert float(adapter.model.key_qpos[0, 0]) == pytest.approx(0.25)
+    finally:
+        adapter.release()
+
+
+def test_attached_model_resolves_actuators_from_includes_before_copy(tmp_path: Path) -> None:
+    included = tmp_path / "included.xml"
+    included.write_text(
+        """<mujoco>
+  <worldbody>
+    <body name="body">
+      <joint name="first"/><joint name="second"/>
+      <geom type="sphere" size=".1"/>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="first_position" joint="first"/>
+    <position name="second_position" joint="second"/>
+  </actuator>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    scene = tmp_path / "scene.xml"
+    scene.write_text(
+        """<mujoco>
+  <include file="included.xml"/>
+  <keyframe><key name="home" qpos=".1 .2" ctrl=".3 .4"/></keyframe>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    assert mujoco.MjModel.from_xml_path(str(scene)).nu == 2
+    adapter = MuJoCoAdapter()
+    adapter.new_scene()
+
+    try:
+        adapter.add_scene_model(scene, np.zeros(3), np.eye(3))
+
+        assert adapter.model.nu == 2
+        assert adapter.model.nkey == 1
+        assert adapter.model.key_ctrl[0] == pytest.approx((0.3, 0.4))
+    finally:
+        adapter.release()
+
+
+def test_attached_nested_model_uses_its_own_mesh_directory(tmp_path: Path) -> None:
+    meshes = tmp_path / "meshes"
+    meshes.mkdir()
+    (meshes / "tetra.obj").write_text(
+        """v 0 0 0
+v 1 0 0
+v 0 1 0
+v 0 0 1
+f 1 3 2
+f 1 2 4
+f 1 4 3
+f 2 3 4
+""",
+        encoding="utf-8",
+    )
+    child = tmp_path / "child.xml"
+    child.write_text(
+        """<mujoco>
+  <compiler meshdir="meshes"/>
+  <asset><mesh name="tetra" file="tetra.obj"/></asset>
+  <worldbody><body name="attachment"><geom type="mesh" mesh="tetra"/></body></worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    scene = tmp_path / "scene.xml"
+    scene.write_text(
+        """<mujoco>
+  <asset><model name="payload" file="child.xml"/></asset>
+  <worldbody><attach model="payload" body="attachment" prefix="payload_"/></worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    assert mujoco.MjModel.from_xml_path(str(scene)).nmesh == 1
+    adapter = MuJoCoAdapter()
+    adapter.new_scene()
+
+    try:
+        adapter.add_scene_model(scene, np.zeros(3), np.eye(3))
+
+        assert adapter.model.nmesh == 1
+        assert adapter.model.ngeom == 1
     finally:
         adapter.release()
 
@@ -538,12 +635,84 @@ f 2 3 4
     assert mujoco.MjModel.from_xml_path(str(moved / "portable.xml")).ngeom == 1
 
 
-def test_workspace_mjcf_export_rejects_lossy_authored_lights(tmp_path: Path) -> None:
+def test_workspace_mjcf_export_roundtrips_forge_render_properties(tmp_path: Path) -> None:
     document = workspace()
-    document.add_scene_light("panel", Light(type=LightType.AREA))
+    pixels = np.full((6, 4, 4, 3), 96, np.uint8)
+    document.scene.add_texture(TextureData("sky", TextureType.CUBE, pixels))
+    document.scene.add_texture(TextureData("studio", TextureType.CUBE, pixels + 32))
+    assert document.scene.set_skybox("sky")
+    document.scene.set_environment(
+        Environment(
+            ambient=np.array((0.11, 0.12, 0.13), np.float32),
+            fog_color=np.array((0.2, 0.3, 0.4), np.float32),
+            fog_start=0.75,
+            fog_end=8.5,
+            haze_color=np.array((0.5, 0.6, 0.7), np.float32),
+            haze_density=0.35,
+            horizon_haze=False,
+            horizon_haze_slices=19,
+        )
+    )
+    document.add_scene_light(
+        "panel",
+        Light(type=LightType.AREA, area_radius=0.45),
+    )
+    document.add_scene_light(
+        "studio",
+        Light(type=LightType.IMAGE, texture="studio", intensity=2.25),
+    )
 
-    with pytest.raises(RuntimeError, match="area light"):
-        document.save_scene(tmp_path / "scene.xml")
+    path = tmp_path / "scene.xml"
+    document.save_scene(path)
+
+    restored = MuJoCoAdapter(path).scene_source()
+    assert restored.skybox is not None
+    assert restored.textures[restored.skybox].type is TextureType.SKYBOX
+    assert [light.type for light in restored.lights.lights] == [
+        LightType.AREA,
+        LightType.IMAGE,
+    ]
+    assert restored.lights.lights[0].area_radius == pytest.approx(0.45)
+    image = restored.lights.lights[1]
+    assert image.texture is not None
+    assert restored.textures[image.texture].type is TextureType.CUBE
+    assert image.intensity == pytest.approx(2.25)
+    environment = restored.lights.environment()
+    assert environment.ambient == pytest.approx((0.11, 0.12, 0.13))
+    assert environment.fog_color == pytest.approx((0.2, 0.3, 0.4))
+    assert environment.fog_start == pytest.approx(0.75)
+    assert environment.fog_end == pytest.approx(8.5)
+    assert environment.haze_color == pytest.approx((0.5, 0.6, 0.7))
+    assert environment.haze_density == pytest.approx(0.35)
+    assert environment.horizon_haze is False
+    assert environment.horizon_haze_slices == 19
+
+
+def test_workspace_can_switch_from_authored_to_primary_skybox(tmp_path: Path) -> None:
+    model = tmp_path / "skybox.xml"
+    model.write_text(
+        """
+        <mujoco>
+          <asset>
+            <texture name="primary" type="skybox" builtin="gradient"
+                     width="8" height="48" rgb1="1 0 0" rgb2="0 0 1"/>
+          </asset>
+          <worldbody/>
+        </mujoco>
+        """,
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(model))
+    pixels = np.full((6, 4, 4, 3), 96, np.uint8)
+    document.scene.add_texture(TextureData("authored", TextureType.CUBE, pixels))
+    session = Session(document, model)
+
+    assert session.submit(cmd.SetSkybox("authored"))
+    assert session.source.skybox == "authored"
+    assert document.primary.scene_source().skybox is None
+    assert session.submit(cmd.SetSkybox("primary"))
+    assert session.source.skybox == "primary"
+    assert document.scene.skybox is None
 
 
 def test_workspace_can_export_current_pose_as_key0(tmp_path: Path) -> None:

@@ -394,6 +394,9 @@ def test_missing_workspace_resources_can_be_repaired_from_directory(tmp_path):
         instance.app._resource_repair_dialog = Dialog()
         instance.app._resource_repair_dialog_action = "search"
         instance.app._poll_resource_repair_dialog()
+        instance.sync()
+        instance.app._model_load_future.result(timeout=10.0)
+        instance.sync()
 
         assert instance.session.asset_path == document.resolve()
         assert instance.session.scene_models[0].path == replacement.resolve()

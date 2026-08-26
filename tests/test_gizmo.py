@@ -594,8 +594,10 @@ def test_multiple_direct_joints_require_an_explicit_gizmo_target() -> None:
 
     session = JointSession()
     node = SceneNode(2, "compound", NodeType.LINK, body_index=2)
+    session.selected_node = node
     gizmo = ObjectGizmo()
 
+    assert gizmo.joint_choices(session) == joints
     target, reason = gizmo._joint_target(session, node)
     assert target is None
     assert "select one direct joint" in reason

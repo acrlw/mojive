@@ -98,6 +98,7 @@ def _scene_document(scene: Scene) -> dict:
             if key.shape is MeshShape.ASSET
         ],
         "textures": [_texture_document(texture) for texture in scene.textures.values()],
+        "skybox": scene.skybox,
         "objects": objects,
         "environment": _environment_document(scene.lights.environment()),
         "lights": [
@@ -130,6 +131,9 @@ def _scene_from_document(document: dict) -> Scene:
         texture.name: texture
         for texture in (_texture_from_document(item) for item in document["textures"])
     }
+    skybox = document.get("skybox")
+    if skybox is not None and not scene.set_skybox(str(skybox)):
+        raise ValueError(f"Scene skybox {skybox!r} is not a cube texture")
     scene._items = [
         _Item(
             object_id=int(item["id"]),

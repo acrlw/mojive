@@ -171,8 +171,7 @@ class SettingsPanel(Panel):
         self._overlay_modes(ctx)
         forge_flags = flag_groups()[-1][1]
         if forge_flags and imgui.collapsing_header(t("Forge render flags")):
-            for flag in forge_flags:
-                self._flag_row(ctx, flag)
+            self._flag_table(ctx, "forge_render_flags", forge_flags)
 
     def _interaction(self, ctx: PanelContext) -> None:
         t = ctx.tr
@@ -300,8 +299,7 @@ class SettingsPanel(Panel):
                 continue
             if not imgui.collapsing_header(title, imgui.TreeNodeFlags_.default_open):
                 continue
-            for flag in flags:
-                self._flag_row(ctx, flag)
+            self._flag_table(ctx, f"settings_{title}", flags)
 
         if self._message:
             imgui.separator()
@@ -321,6 +319,9 @@ class SettingsPanel(Panel):
         imgui.table_next_row()
         imgui.table_next_column()
         imgui.align_text_to_frame_padding()
+        width = imgui.get_content_region_avail().x
+        text_width = imgui.calc_text_size(label).x
+        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, width - text_width))
         imgui.text(label)
         imgui.table_next_column()
         imgui.set_next_item_width(-1.0)
@@ -332,14 +333,29 @@ class SettingsPanel(Panel):
         if imgui.collapsing_header(
             f"{ctx.tr('visual groups')}###visual_groups", imgui.TreeNodeFlags_.default_open
         ):
-            for family in groups:
-                imgui.align_text_to_frame_padding()
-                imgui.text(family.category)
-                for i, visible in enumerate(family.visible):
-                    imgui.same_line()
-                    changed, value = imgui.checkbox(f"{i}##visual_group_{family.category}", visible)
-                    if changed:
-                        ctx.submit(cmd.SetVisualGroup(family.category, i, value))
+            flags = imgui.TableFlags_.sizing_stretch_same | imgui.TableFlags_.row_bg
+            if imgui.begin_table("mujoco_visual_groups", 7, flags):
+                imgui.table_setup_column(
+                    "category",
+                    imgui.TableColumnFlags_.width_fixed,
+                    104.0 * ctx.style_scale,
+                )
+                for index in range(6):
+                    imgui.table_setup_column(str(index), imgui.TableColumnFlags_.width_stretch, 1.0)
+                imgui.table_headers_row()
+                for family in groups:
+                    imgui.table_next_row()
+                    imgui.table_next_column()
+                    imgui.align_text_to_frame_padding()
+                    imgui.text(family.category)
+                    for i, visible in enumerate(family.visible):
+                        imgui.table_next_column()
+                        changed, value = imgui.checkbox(
+                            f"##visual_group_{family.category}_{i}", visible
+                        )
+                        if changed:
+                            ctx.submit(cmd.SetVisualGroup(family.category, i, value))
+                imgui.end_table()
         imgui.separator()
 
     def _bvh_depth(self, ctx: PanelContext) -> None:
@@ -366,13 +382,49 @@ class SettingsPanel(Panel):
         caps = ctx.backend.caps
         supported = caps.supports(flag)
         imgui.begin_disabled(not supported)
-        changed, value = imgui.checkbox(f"{flag.value}##rf", ctx.backend.get_flag(flag))
+        changed, value = imgui.checkbox(f"##rf_{flag.value}", ctx.backend.get_flag(flag))
         imgui.end_disabled()
         if not supported:
             imgui.set_item_tooltip(f"{caps.name} does not implement '{flag.value}'")
             return
         if changed and not ctx.backend.set_flag(flag, value):
             self._message = f"'{flag.value}' refused by {caps.name}"
+
+    def _flag_table(
+        self,
+        ctx: PanelContext,
+        table_id: str,
+        flags: tuple[RenderFlag, ...],
+        groups: int = 3,
+    ) -> None:
+        table_flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.row_bg
+        if not imgui.begin_table(table_id, groups * 2, table_flags):
+            return
+        for group in range(groups):
+            imgui.table_setup_column(f"label {group}", imgui.TableColumnFlags_.width_stretch, 1.0)
+            imgui.table_setup_column(
+                f"value {group}",
+                imgui.TableColumnFlags_.width_fixed,
+                28.0 * ctx.style_scale,
+            )
+        row_count = (len(flags) + groups - 1) // groups
+        for row in range(row_count):
+            imgui.table_next_row()
+            for group in range(groups):
+                index = group * row_count + row
+                imgui.table_next_column()
+                if index >= len(flags):
+                    imgui.table_next_column()
+                    continue
+                flag = flags[index]
+                imgui.align_text_to_frame_padding()
+                width = imgui.get_content_region_avail().x
+                label_width = imgui.calc_text_size(flag.value).x
+                imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, width - label_width))
+                imgui.text(flag.value)
+                imgui.table_next_column()
+                self._flag_row(ctx, flag)
+        imgui.end_table()
 
     def current_view(self, backend) -> DebugView:
         getter = getattr(backend, "get_debug_view", None)

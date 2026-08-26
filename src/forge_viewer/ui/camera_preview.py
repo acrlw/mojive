@@ -65,11 +65,16 @@ class CameraPreview:
         translate = translate or str
         x, y, width, height = viewport
         scale = window.style_scale
-        panel_width = min(340.0 * scale, max(180.0, width * 0.48))
-        image_height = panel_width * 9.0 / 16.0
         header_height = 25.0 * scale
-        panel_height = header_height + image_height
         margin = 12.0 * scale
+        panel_width = min(
+            340.0 * scale,
+            max(180.0 * scale, width * 0.48),
+            max(1.0, width - 2.0 * margin),
+            max(1.0, height - header_height - 2.0 * margin) * 16.0 / 9.0,
+        )
+        image_height = panel_width * 9.0 / 16.0
+        panel_height = header_height + image_height
         if self._position is None:
             self._position = (x + width - panel_width - margin, y + height - panel_height - margin)
         px = min(max(self._position[0], x + margin), x + width - panel_width - margin)

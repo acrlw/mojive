@@ -1679,6 +1679,52 @@ class ViewerApp:
                 self.localizer.text,
             )
         imgui.end()
+        if not session_busy:
+            self._draw_joint_gizmo_picker()
+
+    def _draw_joint_gizmo_picker(self) -> None:
+        """Draw a compact viewport chooser for links with multiple direct joints."""
+
+        joints = self.gizmo.joint_choices(self.session)
+        node = self.session.selected_node
+        if not joints or node is None:
+            return
+        x, y, _w, _h = self._viewport_rect
+        scale = self.window.style_scale
+        imgui.set_next_window_pos(
+            imgui.ImVec2(x + 12.0 * scale, y + 12.0 * scale),
+            imgui.Cond_.always,
+        )
+        imgui.set_next_window_bg_alpha(0.92)
+        flags = (
+            imgui.WindowFlags_.always_auto_resize.value
+            | imgui.WindowFlags_.no_collapse.value
+            | imgui.WindowFlags_.no_decoration.value
+            | imgui.WindowFlags_.no_docking.value
+            | imgui.WindowFlags_.no_move.value
+            | imgui.WindowFlags_.no_saved_settings.value
+        )
+        visible, _ = imgui.begin("Joint gizmo###viewport_joint_gizmo", None, flags)
+        if visible:
+            imgui.text_disabled("Joint gizmo")
+            imgui.text(node.name)
+            imgui.separator()
+            selected = self.gizmo.selected_joint_id(node.body_index)
+            for joint in joints:
+                supported = joint.type in ("hinge", "slide", "ball")
+                imgui.begin_disabled(not supported)
+                label = joint.name or f"joint {joint.joint_id}"
+                clicked, _selected = imgui.selectable(
+                    f"{label}  ({joint.type})##viewport-joint-{joint.joint_id}",
+                    selected == joint.joint_id,
+                )
+                if clicked:
+                    self.gizmo.select_joint(node.body_index, joint.joint_id)
+                imgui.end_disabled()
+            if not self.session.paused:
+                imgui.separator()
+                imgui.text_disabled("Pause to edit")
+        imgui.end()
 
     def _draw_model_drop_overlay(self, overlay: ImguiDraw2D) -> None:
         source = self.session.source
@@ -1750,31 +1796,33 @@ class ViewerApp:
         )
         label_mode = self.backend.get_label_mode()
         frame_mode = self.backend.get_frame_mode()
-        needs.contacts = (
+        needs.contacts = needs.contacts or (
             self.backend.get_flag(RenderFlag.CONTACTPOINT)
             or self.backend.get_flag(RenderFlag.CONTACTFORCE)
             or label_mode in (LabelMode.CONTACT_POINT, LabelMode.CONTACT_FORCE)
             or frame_mode is FrameMode.CONTACT
         )
-        needs.tendons = (
+        needs.tendons = needs.tendons or (
             self.backend.get_flag(RenderFlag.TENDON)
             or self.backend.get_flag(RenderFlag.ACTUATOR)
             or label_mode is LabelMode.TENDON
         )
-        needs.actuator = (
+        needs.actuator = needs.actuator or (
             self.backend.get_flag(RenderFlag.ACTUATOR) or label_mode is LabelMode.ACTUATOR
         )
-        needs.deformables = bool(
+        needs.deformables = needs.deformables or bool(
             (self.session.source and self.session.source.dynamic_meshes)
             or self.backend.get_flag(RenderFlag.FLEXVERT)
             or self.backend.get_flag(RenderFlag.FLEXEDGE)
             or label_mode is LabelMode.FLEX
         )
-        needs.islands = self.backend.get_flag(RenderFlag.ISLAND)
-        needs.bvh = self.backend.get_flag(RenderFlag.BODYBVH) or self.backend.get_flag(
-            RenderFlag.MESHBVH
+        needs.islands = needs.islands or self.backend.get_flag(RenderFlag.ISLAND)
+        needs.bvh = (
+            needs.bvh
+            or self.backend.get_flag(RenderFlag.BODYBVH)
+            or self.backend.get_flag(RenderFlag.MESHBVH)
         )
-        needs.diagnostics = (
+        needs.diagnostics = needs.diagnostics or (
             needs.bvh
             or any(
                 self.backend.get_flag(flag)
