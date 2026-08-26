@@ -102,6 +102,7 @@ _SCENE_EDIT_COMMANDS = (
     cmd.AddModelElement,
     cmd.RemoveModelElement,
     cmd.RenameModelElement,
+    cmd.ModelEditBatch,
     cmd.SetModelSource,
     cmd.AddModelComponent,
     cmd.UpdateModelComponent,
@@ -806,6 +807,25 @@ class Session:
                 return CommandResult.bad(f"{node.name} cannot be renamed")
             self._refresh_structure()
             return CommandResult.good(f"Renamed {node.name}")
+
+        if isinstance(c, cmd.ModelEditBatch):
+            if not caps.topology_editing:
+                return CommandResult.bad(f"{caps.name} does not support topology editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before changing model topology")
+            if not c.edits:
+                return CommandResult.bad("A model edit batch cannot be empty")
+            if not all(isinstance(edit, cmd.ModelEdit) for edit in c.edits):
+                return CommandResult.bad("A model edit batch contains an unsupported operation")
+            try:
+                node_ids = self._adapter.apply_model_edit_batch(c.edits)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if len(node_ids) != len(c.edits):
+                return CommandResult.bad("The model edit batch was not applied")
+            self._refresh_structure()
+            entity_id = next((node_id for node_id in reversed(node_ids) if node_id >= 0), -1)
+            return CommandResult.good(f"Applied {len(c.edits)} model edits", entity_id)
 
         if isinstance(c, cmd.SetModelSource):
             if not caps.topology_editing:

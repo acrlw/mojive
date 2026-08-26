@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -22,6 +23,9 @@ from .base import (
     SceneSaveOptions,
     SceneSource,
 )
+
+if TYPE_CHECKING:
+    from ..commands import ModelEdit
 
 _AUTHORED_OBJECT_BASE = 0x60000000
 _AUTHORED_LIGHT_BASE = 0x74000000
@@ -179,6 +183,12 @@ class WorkspaceAdapter(SceneAdapterBase):
         if changed:
             self._invalidate()
         return changed
+
+    def apply_model_edit_batch(self, edits: tuple[ModelEdit, ...]) -> tuple[int, ...]:
+        results = self.primary.apply_model_edit_batch(edits)
+        if results:
+            self._invalidate()
+        return results
 
     def scene_model_xml(self, model_id: int) -> str | None:
         return self.primary.scene_model_xml(model_id)

@@ -15,6 +15,13 @@ from pathlib import Path
 import numpy as np
 
 from .. import math3d
+from ..commands import (
+    AddModelElementEdit,
+    ModelEdit,
+    ModelElementRef,
+    RemoveModelElementEdit,
+    RenameModelElementEdit,
+)
 from ..types import (
     DEFAULT_HEADLIGHT,
     CameraView,
@@ -716,63 +723,16 @@ class MuJoCoAdapter(SceneAdapterBase):
         return True
 
     def add_model_element(self, parent_node_id: int, element_type: str, name: str) -> int:
-        parent = self._model_parent(int(parent_node_id))
-        if parent is None:
+        if self._model_parent(int(parent_node_id)) is None or not str(name).strip():
             return -1
-        model_id, body = parent
-        value = str(name).strip()
-        if not value:
-            return -1
-        type_name, _, subtype = str(element_type).partition(":")
-        if self._element(model_id, type_name, value) is not None:
-            raise ValueError(f"{type_name} {value!r} already exists")
-        if type_name == "body":
-            body.add_body(name=value)
-        elif type_name == "geom":
-            geom = body.add_geom(name=value)
-            geom.type = {
-                "box": mujoco.mjtGeom.mjGEOM_BOX,
-                "capsule": mujoco.mjtGeom.mjGEOM_CAPSULE,
-                "cylinder": mujoco.mjtGeom.mjGEOM_CYLINDER,
-                "plane": mujoco.mjtGeom.mjGEOM_PLANE,
-            }.get(subtype, mujoco.mjtGeom.mjGEOM_SPHERE)
-            geom.size = [4.0, 4.0, 0.02] if subtype == "plane" else [0.1, 0.1, 0.1]
-        elif type_name == "joint":
-            joint = body.add_joint(name=value)
-            joint.type = {
-                "slide": mujoco.mjtJoint.mjJNT_SLIDE,
-                "ball": mujoco.mjtJoint.mjJNT_BALL,
-                "free": mujoco.mjtJoint.mjJNT_FREE,
-            }.get(subtype, mujoco.mjtJoint.mjJNT_HINGE)
-        elif type_name == "site":
-            site = body.add_site(name=value)
-            site.type = mujoco.mjtGeom.mjGEOM_SPHERE
-            site.size = [0.03, 0.03, 0.03]
-        elif type_name == "camera":
-            body.add_camera(name=value)
-        elif type_name == "light":
-            body.add_light(name=value)
-        else:
-            return -1
-        self._mark_model_edited(model_id)
-        self._recompile_topology()
-        self.nodes()
-        target_type = NodeType(type_name if type_name != "body" else "link")
-        return next(
-            (
-                node_id
-                for node_id, identity in self._node_element.items()
-                if identity == (model_id, target_type, value)
-            ),
-            -1,
+        results = self.apply_model_edit_batch(
+            (AddModelElementEdit(ModelElementRef(node_id=int(parent_node_id)), element_type, name),)
         )
+        return results[0] if results else -1
 
     def remove_model_element(self, node_id: int) -> bool:
         identity = self._node_element.get(int(node_id))
-        if identity is None:
-            return False
-        model_id, node_type, name = identity
-        if node_type not in {
+        if identity is None or identity[1] not in {
             NodeType.LINK,
             NodeType.ROBOT,
             NodeType.GEOM,
@@ -782,43 +742,229 @@ class MuJoCoAdapter(SceneAdapterBase):
             NodeType.LIGHT,
         }:
             return False
-        element = self._element(model_id, node_type.value, name)
-        spec = self._spec_for_model(model_id)
-        if spec is None or element is None:
-            return False
-        spec.delete(element)
-        self._mark_model_edited(model_id)
-        self._recompile_topology()
-        return True
+        return bool(
+            self.apply_model_edit_batch(
+                (RemoveModelElementEdit(ModelElementRef(node_id=int(node_id))),)
+            )
+        )
 
     def rename_model_element(self, node_id: int, name: str) -> bool:
         identity = self._node_element.get(int(node_id))
         value = str(name).strip()
         if identity is None or not value:
             return False
-        model_id, node_type, current = identity
-        if node_type in (NodeType.WORLD, NodeType.MODEL) or value == current:
-            return value == current
-        if self._element(model_id, node_type.value, value) is not None:
-            raise ValueError(f"{node_type.value} {value!r} already exists")
-        element = self._element(model_id, node_type.value, current)
-        if element is None:
-            return False
-        previous_object_id = None
-        if node_type is NodeType.GEOM:
-            previous_object_id = self._geometry_object_ids.pop((model_id, current), None)
-            if previous_object_id is not None:
-                self._geometry_object_ids[(model_id, value)] = previous_object_id
-        element.name = value
-        self._mark_model_edited(model_id)
+        if identity[1] in (NodeType.WORLD, NodeType.MODEL) or value == identity[2]:
+            return value == identity[2]
+        return bool(
+            self.apply_model_edit_batch(
+                (RenameModelElementEdit(ModelElementRef(node_id=int(node_id)), name),)
+            )
+        )
+
+    def apply_model_edit_batch(self, edits: tuple[ModelEdit, ...]) -> tuple[int, ...]:
+        operations = tuple(edits)
+        if self._root_spec is None or not operations:
+            return ()
+        if not all(
+            isinstance(
+                edit,
+                (AddModelElementEdit, RemoveModelElementEdit, RenameModelElementEdit),
+            )
+            for edit in operations
+        ):
+            raise ValueError("Unsupported model edit operation")
+
+        # Node IDs describe the currently installed hierarchy. Keep their semantic
+        # identities while edits rename elements and before the hierarchy is rebuilt.
+        nodes_by_id = {node.node_id: node for node in self.nodes()}
+        node_identities: dict[int, tuple[int, NodeType, str]] = {}
+        batch_identities: dict[str, tuple[int, NodeType, str]] = {}
+        result_identities: list[tuple[int, NodeType, str] | None] = []
+
+        def node_identity(node_id: int) -> tuple[int, NodeType, str]:
+            value = node_identities.get(int(node_id))
+            if value is None:
+                value = self._node_element.get(int(node_id))
+                if value is None:
+                    raise ValueError(f"Unknown model node_id={node_id}")
+                node_identities[int(node_id)] = value
+            return value
+
+        def identity(ref: ModelElementRef) -> tuple[int, NodeType, str]:
+            key = str(ref.batch_key).strip()
+            has_node = int(ref.node_id) >= 0
+            if has_node == bool(key):
+                raise ValueError("A model element reference must use one node ID or batch key")
+            if key:
+                value = batch_identities.get(key)
+                if value is None:
+                    raise ValueError(f"Unknown model edit batch key {key!r}")
+                return value
+            return node_identity(int(ref.node_id))
+
+        def parent_identity(ref: ModelElementRef) -> tuple[int, NodeType, str]:
+            if str(ref.batch_key).strip():
+                return identity(ref)
+            node = nodes_by_id.get(int(ref.node_id))
+            while node is not None:
+                value = node_identities.get(node.node_id)
+                if value is None:
+                    value = self._node_element.get(node.node_id)
+                    if value is not None:
+                        node_identities[node.node_id] = value
+                if value is not None and value[1] in {
+                    NodeType.MODEL,
+                    NodeType.WORLD,
+                    NodeType.LINK,
+                    NodeType.ROBOT,
+                }:
+                    return value
+                node = nodes_by_id.get(node.parent)
+            raise ValueError(f"Model node_id={ref.node_id} cannot own topology children")
+
+        previous_root = self._root_spec
+        previous_models = self._attached_models
+        previous_root_edited = self._root_edited
+        previous_object_ids = dict(self._geometry_object_ids)
+        previous_next_object_id = self._next_geometry_object_id
+        self._root_spec = previous_root.copy()
+        self._attached_models = [replace(item, spec=item.spec.copy()) for item in previous_models]
+        changed_models: set[int] = set()
+
         try:
-            self._recompile_topology()
+            for edit in operations:
+                if isinstance(edit, AddModelElementEdit):
+                    model_id, parent_type, parent_name = parent_identity(edit.parent)
+                    spec = self._spec_for_model(model_id)
+                    if spec is None:
+                        raise ValueError(f"Model {model_id} is unavailable")
+                    if parent_type in (NodeType.MODEL, NodeType.WORLD):
+                        body = spec.worldbody
+                    elif parent_type in (NodeType.LINK, NodeType.ROBOT):
+                        body = spec.body(parent_name)
+                    else:
+                        body = None
+                    if body is None:
+                        raise ValueError(f"Model parent {parent_name!r} is unavailable")
+
+                    value = str(edit.name).strip()
+                    if not value:
+                        raise ValueError("A model element name cannot be empty")
+                    type_name, _, subtype = str(edit.element_type).partition(":")
+                    if self._element(model_id, type_name, value) is not None:
+                        raise ValueError(f"{type_name} {value!r} already exists")
+                    if type_name == "body":
+                        body.add_body(name=value)
+                    elif type_name == "geom":
+                        geom = body.add_geom(name=value)
+                        geom.type = {
+                            "box": mujoco.mjtGeom.mjGEOM_BOX,
+                            "capsule": mujoco.mjtGeom.mjGEOM_CAPSULE,
+                            "cylinder": mujoco.mjtGeom.mjGEOM_CYLINDER,
+                            "plane": mujoco.mjtGeom.mjGEOM_PLANE,
+                        }.get(subtype, mujoco.mjtGeom.mjGEOM_SPHERE)
+                        geom.size = [4.0, 4.0, 0.02] if subtype == "plane" else [0.1, 0.1, 0.1]
+                    elif type_name == "joint":
+                        joint = body.add_joint(name=value)
+                        joint.type = {
+                            "slide": mujoco.mjtJoint.mjJNT_SLIDE,
+                            "ball": mujoco.mjtJoint.mjJNT_BALL,
+                            "free": mujoco.mjtJoint.mjJNT_FREE,
+                        }.get(subtype, mujoco.mjtJoint.mjJNT_HINGE)
+                    elif type_name == "site":
+                        site = body.add_site(name=value)
+                        site.type = mujoco.mjtGeom.mjGEOM_SPHERE
+                        site.size = [0.03, 0.03, 0.03]
+                    elif type_name == "camera":
+                        body.add_camera(name=value)
+                    elif type_name == "light":
+                        body.add_light(name=value)
+                    else:
+                        raise ValueError(f"Unsupported model element type {type_name!r}")
+                    target_type = NodeType(type_name if type_name != "body" else "link")
+                    target = (model_id, target_type, value)
+                    key = str(edit.key).strip()
+                    if key:
+                        if key in batch_identities:
+                            raise ValueError(f"Duplicate model edit batch key {key!r}")
+                        batch_identities[key] = target
+                    result_identities.append(target)
+                    changed_models.add(model_id)
+                    continue
+
+                target = identity(edit.target)
+                model_id, node_type, current = target
+                element = self._element(model_id, node_type.value, current)
+                spec = self._spec_for_model(model_id)
+                if spec is None or element is None:
+                    raise ValueError(f"{node_type.value} {current!r} is unavailable")
+
+                if isinstance(edit, RemoveModelElementEdit):
+                    if node_type not in {
+                        NodeType.LINK,
+                        NodeType.ROBOT,
+                        NodeType.GEOM,
+                        NodeType.JOINT,
+                        NodeType.SITE,
+                        NodeType.CAMERA,
+                        NodeType.LIGHT,
+                    }:
+                        raise ValueError(f"{node_type.value} {current!r} cannot be removed")
+                    spec.delete(element)
+                    result_identities.append(None)
+                    changed_models.add(model_id)
+                    continue
+
+                value = str(edit.name).strip()
+                if not value:
+                    raise ValueError("A model element name cannot be empty")
+                if node_type in (NodeType.WORLD, NodeType.MODEL):
+                    raise ValueError(f"{node_type.value} {current!r} cannot be renamed")
+                if value == current:
+                    result_identities.append(target)
+                    continue
+                if self._element(model_id, node_type.value, value) is not None:
+                    raise ValueError(f"{node_type.value} {value!r} already exists")
+                if node_type is NodeType.GEOM:
+                    object_id = self._geometry_object_ids.pop((model_id, current), None)
+                    if object_id is not None:
+                        self._geometry_object_ids[(model_id, value)] = object_id
+                element.name = value
+                renamed = (model_id, node_type, value)
+                batch_identities.update(
+                    (key, renamed if item == target else item)
+                    for key, item in tuple(batch_identities.items())
+                )
+                node_identities.update(
+                    (node_id, renamed if item == target else item)
+                    for node_id, item in tuple(node_identities.items())
+                )
+                result_identities = [
+                    renamed if item == target else item for item in result_identities
+                ]
+                result_identities.append(renamed)
+                changed_models.add(model_id)
+
+            if not changed_models:
+                self._root_spec = previous_root
+                self._attached_models = previous_models
+            else:
+                for model_id in changed_models:
+                    self._mark_model_edited(model_id)
+                self._recompile_topology()
+                self.nodes()
         except Exception:
-            if previous_object_id is not None:
-                self._geometry_object_ids.pop((model_id, value), None)
-                self._geometry_object_ids[(model_id, current)] = previous_object_id
+            self._root_spec = previous_root
+            self._attached_models = previous_models
+            self._root_edited = previous_root_edited
+            self._geometry_object_ids = previous_object_ids
+            self._next_geometry_object_id = previous_next_object_id
             raise
-        return True
+
+        by_identity = {identity: node_id for node_id, identity in self._node_element.items()}
+        return tuple(
+            by_identity.get(item, -1) if item is not None else -1 for item in result_identities
+        )
 
     def scene_model_xml(self, model_id: int) -> str | None:
         spec = self._spec_for_model(model_id)

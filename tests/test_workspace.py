@@ -676,6 +676,72 @@ def test_mjspec_topology_edits_round_trip_in_workspace(tmp_path: Path) -> None:
     assert not any(name.endswith("fixture_visual") for name in names)
 
 
+def test_model_edit_batch_compiles_once_is_atomic_and_undoes_once(monkeypatch) -> None:
+    document = workspace()
+    model_id = document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    model_node = next(
+        node for node in session.nodes if node.type is NodeType.MODEL and node.model_id == model_id
+    )
+
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    node = cmd.ModelElementRef(node_id=model_node.node_id)
+    fixture = cmd.ModelElementRef(batch_key="fixture")
+    visual = cmd.ModelElementRef(batch_key="visual")
+    result = session.submit(
+        cmd.ModelEditBatch(
+            (
+                cmd.AddModelElementEdit(node, "body", "fixture", key="fixture"),
+                cmd.AddModelElementEdit(fixture, "geom:box", "fixture_visual", key="visual"),
+                cmd.RenameModelElementEdit(fixture, "fixture_root"),
+                cmd.RemoveModelElementEdit(visual),
+            )
+        )
+    )
+
+    assert result.ok, result.message
+    assert compile_count == 1
+    names = {node.name for node in session.nodes}
+    assert any(name.endswith("fixture_root") for name in names)
+    assert not any(name.endswith("fixture_visual") for name in names)
+
+    failed = session.submit(
+        cmd.ModelEditBatch(
+            (
+                cmd.AddModelElementEdit(node, "body", "partial", key="partial"),
+                cmd.AddModelElementEdit(node, "body", "partial"),
+            )
+        )
+    )
+    assert not failed.ok
+    assert compile_count == 1
+    assert not any(item.name.endswith("partial") for item in session.nodes)
+
+    compile_failed = session.submit(
+        cmd.ModelEditBatch((cmd.AddModelElementEdit(node, "joint:hinge", "bad_world_joint"),))
+    )
+    assert not compile_failed.ok
+    assert "joint found in world body" in compile_failed.message
+    assert compile_count == 2
+    assert "bad_world_joint" not in document.scene_model_source(model_id)
+
+    assert session.submit(cmd.Undo())
+    assert compile_count == 3
+    assert not any(item.name.endswith("fixture_root") for item in session.nodes)
+    assert session.submit(cmd.Redo())
+    assert compile_count == 4
+    assert any(item.name.endswith("fixture_root") for item in session.nodes)
+
+
 def test_mjspec_element_pose_edits_round_trip_in_workspace(tmp_path: Path) -> None:
     document = workspace()
     model_id = document.add_scene_model(

@@ -131,6 +131,50 @@ class RenameModelElement(Command):
 
 
 @dataclass(frozen=True)
+class ModelElementRef:
+    """Reference an existing node or an element created earlier in one batch."""
+
+    node_id: int = -1
+    batch_key: str = ""
+
+
+class ModelEdit:
+    """Base type for one operation inside :class:`ModelEditBatch`."""
+
+
+@dataclass(frozen=True)
+class AddModelElementEdit(ModelEdit):
+    """Add an element and optionally expose it to later edits by a batch-local key."""
+
+    parent: ModelElementRef
+    element_type: str
+    name: str
+    key: str = ""
+
+
+@dataclass(frozen=True)
+class RemoveModelElementEdit(ModelEdit):
+    """Remove an element referenced by node ID or batch-local key."""
+
+    target: ModelElementRef
+
+
+@dataclass(frozen=True)
+class RenameModelElementEdit(ModelEdit):
+    """Rename an element referenced by node ID or batch-local key."""
+
+    target: ModelElementRef
+    name: str
+
+
+@dataclass(frozen=True)
+class ModelEditBatch(Command):
+    """Apply multiple model-element topology edits atomically with one rebuild."""
+
+    edits: tuple[ModelEdit, ...]
+
+
+@dataclass(frozen=True)
 class SetModelSource(Command):
     """Replace a model with MJCF source text."""
 

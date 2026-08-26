@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -22,6 +22,9 @@ from ..types import (
     ShadingModel,
     TextureData,
 )
+
+if TYPE_CHECKING:
+    from ..commands import ModelEdit
 
 GEOMETRY_OBJECT_BASE = 0x50000000
 LIGHT_OBJECT_BASE = 0x70000000
@@ -684,6 +687,10 @@ class SceneAdapterBase:
         """Rename a topology element by hierarchy node ID."""
         return False
 
+    def apply_model_edit_batch(self, edits: tuple[ModelEdit, ...]) -> tuple[int, ...]:
+        """Apply model-element topology edits atomically and return per-edit node IDs."""
+        return ()
+
     def scene_model_xml(self, model_id: int) -> str | None:
         """Return the normalized editable MJCF text for one model."""
         return None
@@ -972,6 +979,7 @@ class SceneAdapter(Protocol):
     def add_model_element(self, parent_node_id: int, element_type: str, name: str) -> int: ...
     def remove_model_element(self, node_id: int) -> bool: ...
     def rename_model_element(self, node_id: int, name: str) -> bool: ...
+    def apply_model_edit_batch(self, edits: tuple[ModelEdit, ...]) -> tuple[int, ...]: ...
     def scene_model_xml(self, model_id: int) -> str | None: ...
     def scene_model_source(self, model_id: int) -> str | None: ...
     def set_scene_model_xml(self, model_id: int, xml: str) -> bool: ...
