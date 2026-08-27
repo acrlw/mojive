@@ -378,10 +378,58 @@ f 2 3 4
     adapter.new_scene()
 
     try:
-        adapter.add_scene_model(scene, np.zeros(3), np.eye(3))
+        model_id = adapter.add_scene_model(scene, np.zeros(3), np.eye(3))
 
         assert adapter.model.nmesh == 1
         assert adapter.model.ngeom == 1
+        attachment = next(node for node in adapter.nodes() if node.name.endswith("attachment"))
+        assert attachment.model_id == model_id
+    finally:
+        adapter.release()
+
+
+def test_model_element_ownership_is_typed_exact_and_preindexed(tmp_path: Path) -> None:
+    root = tmp_path / "root.xml"
+    root.write_text(
+        """<mujoco>
+  <asset><material name="forge_1_root_paint"/></asset>
+  <worldbody>
+    <body name="forge_1_root_body">
+      <geom name="forge_1_root_geom" type="box" size=".1 .1 .1"
+            material="forge_1_root_paint"/>
+    </body>
+  </worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    adapter = MuJoCoAdapter(root)
+    attached = adapter.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
+    try:
+        root_body = next(node for node in adapter.nodes() if node.name == "forge_1_root_body")
+        root_geom = next(node for node in adapter.nodes() if node.name == "forge_1_root_geom")
+        child_body = next(node for node in adapter.nodes() if node.name == "forge_1_frame")
+        assert (root_body.model_id, root_geom.model_id, child_body.model_id) == (0, 0, attached)
+
+        root_material = mujoco.mj_name2id(
+            adapter.model, mujoco.mjtObj.mjOBJ_MATERIAL, "forge_1_root_paint"
+        )
+        assert root_material in adapter.model_material_indices(0)
+        assert root_material not in adapter.model_material_indices(attached)
+
+        class NoModelScan(list):
+            def __iter__(self):
+                raise AssertionError("model ownership lookup rescanned attached models")
+
+        models = adapter._attached_models
+        adapter._attached_models = NoModelScan(models)
+        try:
+            assert adapter._model_element_name("forge_1_frame", mujoco.mjtObj.mjOBJ_BODY) == (
+                attached,
+                "frame",
+            )
+        finally:
+            adapter._attached_models = models
     finally:
         adapter.release()
 

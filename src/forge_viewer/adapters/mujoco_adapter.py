@@ -524,6 +524,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._node_body: dict[int, int] = {}
         self._node_model: dict[int, int] = {}
         self._node_element: dict[int, tuple[int, NodeType, str]] = {}
+        self._model_element_names: dict[tuple[int, str], tuple[int, str]] = {}
         self._geometry_object_ids: dict[tuple[int, str], int] = {}
         self._next_geometry_object_id = GEOMETRY_OBJECT_BASE
         self._geom_nodes: dict[int, int] = {}
@@ -1403,8 +1404,15 @@ class MuJoCoAdapter(SceneAdapterBase):
             self._geometry_object_ids[identity] = object_id
         return object_id
 
+    def _node_for_id(self, node_id: int) -> SceneNode | None:
+        nodes = self.nodes()
+        index = int(node_id)
+        if 0 <= index < len(nodes) and nodes[index].node_id == index:
+            return nodes[index]
+        return None
+
     def _model_parent(self, node_id: int):
-        node = next((node for node in self.nodes() if node.node_id == node_id), None)
+        node = self._node_for_id(node_id)
         while node is not None:
             identity = self._node_element.get(node.node_id)
             if identity is not None:
@@ -1416,7 +1424,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                     return model_id, spec.worldbody
                 if node_type in (NodeType.LINK, NodeType.ROBOT):
                     return model_id, spec.body(name)
-            node = next((item for item in self.nodes() if item.node_id == node.parent), None)
+            node = self._node_for_id(node.parent)
         return None
 
     def _composed_spec(self):
@@ -1993,6 +2001,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._m = model
         self._d = data if data is not None else mujoco.MjData(model)
         self._notes = []
+        self._rebuild_model_element_names()
         mujoco.mj_forward(self._m, self._d)
 
         g, b = model.ngeom, model.nbody
@@ -3803,10 +3812,21 @@ class MuJoCoAdapter(SceneAdapterBase):
         nodes: list[SceneNode] = []
         body_node: dict[int, int] = {}
         self._node_body = {}
+        self._node_element = {}
         self._geom_nodes = {}
         self._site_nodes = {}
         self._flex_nodes = {}
         self._skin_nodes = {}
+
+        body_parent = np.asarray(m.body_parentid, np.int32)
+        has_child = np.zeros(m.nbody, bool)
+        if m.nbody > 1:
+            has_child[body_parent[1:]] = True
+        has_kinematic_dof = np.zeros(m.nbody, bool)
+        for body in range(1, m.nbody):
+            has_kinematic_dof[body] = (
+                bool(m.body_jntnum[body]) or has_kinematic_dof[body_parent[body]]
+            )
 
         def add(name: str, node_type: NodeType, parent: int, body: int, **kw) -> int:
             node_id = len(nodes)
@@ -3846,25 +3866,19 @@ class MuJoCoAdapter(SceneAdapterBase):
 
         for b in range(1, m.nbody):
             name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b) or f"body{b}"
-            parent = int(m.body_parentid[b])
-            has_child = bool(np.any(m.body_parentid[b + 1 :] == b))
-            node_type = NodeType.ROBOT if parent == 0 and has_child else NodeType.LINK
+            parent = int(body_parent[b])
+            node_type = NodeType.ROBOT if parent == 0 and has_child[b] else NodeType.LINK
+            model_id, raw_name = self._model_element_name(name, mujoco.mjtObj.mjOBJ_BODY)
             parent_node = body_node[parent]
-            if parent == 0:
-                attached = next(
-                    (item for item in self._attached_models if name.startswith(item.prefix)), None
-                )
-                if attached is not None:
-                    parent_node = model_parents[attached.model_id]
-            model_id, raw_name = self._model_element_name(name)
+            if parent == 0 and model_id in model_parents:
+                parent_node = model_parents[model_id]
             body_node[b] = add(
                 name,
                 node_type,
                 parent_node,
                 b,
                 object_id=b,
-                posable=self._is_posable_body(b)
-                or (model_id >= 0 and not self._has_kinematic_dof(b)),
+                posable=self._is_posable_body(b) or (model_id >= 0 and not has_kinematic_dof[b]),
             )
             nodes[body_node[b]].model_id = model_id
             self._node_element[body_node[b]] = (model_id, node_type, raw_name)
@@ -3876,7 +3890,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                 if not self._visual_groups["geom"][int(m.geom_group[gi])]:
                     continue
                 gname = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, gi) or f"geom{gi}"
-                model_id, raw_name = self._model_element_name(gname)
+                model_id, raw_name = self._model_element_name(gname, mujoco.mjtObj.mjOBJ_GEOM)
                 is_plane = int(m.geom_type[gi]) == int(mujoco.mjtGeom.mjGEOM_PLANE)
                 is_infinite_plane = is_plane and (
                     float(m.geom_size[gi, 0]) == 0.0 or float(m.geom_size[gi, 1]) == 0.0
@@ -3907,7 +3921,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                     continue
                 jname = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, ji) or f"joint{ji}"
                 node_id = add(jname, NodeType.JOINT, parent, b, joint_index=ji)
-                model_id, raw_name = self._model_element_name(jname)
+                model_id, raw_name = self._model_element_name(jname, mujoco.mjtObj.mjOBJ_JOINT)
                 nodes[node_id].model_id = model_id
                 self._node_element[node_id] = (model_id, NodeType.JOINT, raw_name)
 
@@ -3923,7 +3937,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                 visible=bool(m.light_active[li]),
                 light_index=li,
             )
-            model_id, raw_name = self._model_element_name(name)
+            model_id, raw_name = self._model_element_name(name, mujoco.mjtObj.mjOBJ_LIGHT)
             nodes[node_id].model_id = model_id
             self._node_element[node_id] = (model_id, NodeType.LIGHT, raw_name)
         for ci in range(m.ncam):
@@ -3937,7 +3951,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                 object_id=CAMERA_OBJECT_BASE + ci,
                 camera_index=ci,
             )
-            model_id, raw_name = self._model_element_name(name)
+            model_id, raw_name = self._model_element_name(name, mujoco.mjtObj.mjOBJ_CAMERA)
             nodes[node_id].model_id = model_id
             self._node_element[node_id] = (model_id, NodeType.CAMERA, raw_name)
         for si in range(m.nsite):
@@ -3945,14 +3959,14 @@ class MuJoCoAdapter(SceneAdapterBase):
                 continue
             b = int(m.site_bodyid[si])
             name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_SITE, si) or f"site{si}"
-            model_id, raw_name = self._model_element_name(name)
+            model_id, raw_name = self._model_element_name(name, mujoco.mjtObj.mjOBJ_SITE)
             self._site_nodes[si] = add(
                 name,
                 NodeType.SITE,
                 body_node[b],
                 b,
                 site_index=si,
-                posable=model_id >= 0 and not self._has_kinematic_dof(b),
+                posable=model_id >= 0 and not has_kinematic_dof[b],
             )
             nodes[self._site_nodes[si]].model_id = model_id
             self._node_element[self._site_nodes[si]] = (model_id, NodeType.SITE, raw_name)
@@ -3974,11 +3988,37 @@ class MuJoCoAdapter(SceneAdapterBase):
             )
         return nodes
 
-    def _model_element_name(self, compiled_name: str) -> tuple[int, str]:
-        for item in self._attached_models:
-            if compiled_name.startswith(item.prefix):
-                return item.model_id, compiled_name[len(item.prefix) :]
-        return 0, compiled_name
+    def _rebuild_model_element_names(self) -> None:
+        """Index compiled model names by owning editable MjSpec in O(E)."""
+        collections = (
+            (mujoco.mjtObj.mjOBJ_BODY, "bodies"),
+            (mujoco.mjtObj.mjOBJ_GEOM, "geoms"),
+            (mujoco.mjtObj.mjOBJ_JOINT, "joints"),
+            (mujoco.mjtObj.mjOBJ_SITE, "sites"),
+            (mujoco.mjtObj.mjOBJ_CAMERA, "cameras"),
+            (mujoco.mjtObj.mjOBJ_LIGHT, "lights"),
+            (mujoco.mjtObj.mjOBJ_MATERIAL, "materials"),
+            (mujoco.mjtObj.mjOBJ_TEXTURE, "textures"),
+        )
+        index: dict[tuple[int, str], tuple[int, str]] = {}
+        specs = [(item.model_id, item.prefix, item.spec) for item in self._attached_models]
+        if self._root_spec is not None:
+            # Root names win if they merely resemble an attached-model prefix.
+            specs.append((0, "", self._root_spec))
+        for model_id, prefix, spec in specs:
+            for object_type, collection_name in collections:
+                for element in getattr(spec, collection_name, ()):
+                    raw_name = str(element.name or "")
+                    if raw_name:
+                        index[(int(object_type), f"{prefix}{raw_name}")] = (
+                            int(model_id),
+                            raw_name,
+                        )
+        self._model_element_names = index
+
+    def _model_element_name(self, compiled_name: str, object_type) -> tuple[int, str]:
+        name = str(compiled_name)
+        return self._model_element_names.get((int(object_type), name), (0, name))
 
     def _is_free_body(self, body: int) -> bool:
         m = self._m
@@ -3987,13 +4027,6 @@ class MuJoCoAdapter(SceneAdapterBase):
 
     def _is_posable_body(self, body: int) -> bool:
         return int(self._m.body_mocapid[body]) >= 0 or self._is_free_body(body)
-
-    def _has_kinematic_dof(self, body: int) -> bool:
-        while body > 0:
-            if int(self._m.body_jntnum[body]) > 0:
-                return True
-            body = int(self._m.body_parentid[body])
-        return False
 
     def joints(self) -> list[JointInfo]:
         m = self._m
@@ -4390,7 +4423,9 @@ class MuJoCoAdapter(SceneAdapterBase):
             )
             if texture_id < 0:
                 return False
-            texture_model, texture_name = self._model_element_name(light.texture or "")
+            texture_model, texture_name = self._model_element_name(
+                light.texture or "", mujoco.mjtObj.mjOBJ_TEXTURE
+            )
             # A stored child MjSpec can only reference assets from that child.
             # The composed model exposes prefixed names, so strip the prefix for
             # write-back and reject references that cannot survive standalone export.
@@ -4495,7 +4530,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             if int(next_type) == current:
                 continue
             compiled_name = mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_TEXTURE, index) or ""
-            model_id, name = self._model_element_name(compiled_name)
+            model_id, name = self._model_element_name(compiled_name, mujoco.mjtObj.mjOBJ_TEXTURE)
             spec = self._spec_for_model(model_id)
             element = spec.texture(name) if spec is not None and name else None
             if element is None:
@@ -4549,12 +4584,14 @@ class MuJoCoAdapter(SceneAdapterBase):
         if material.texture and texture_id < 0:
             return False
         compiled_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_MATERIAL, i) or ""
-        model_id, name = self._model_element_name(compiled_name)
+        model_id, name = self._model_element_name(compiled_name, mujoco.mjtObj.mjOBJ_MATERIAL)
         spec = self._spec_for_model(model_id)
         element = spec.material(name) if spec is not None and name else None
         texture_name = ""
         if element is not None and material.texture:
-            texture_model, texture_name = self._model_element_name(material.texture)
+            texture_model, texture_name = self._model_element_name(
+                material.texture, mujoco.mjtObj.mjOBJ_TEXTURE
+            )
             if texture_model != model_id:
                 return False
 
@@ -4589,7 +4626,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             index
             for index in range(self._m.nmat)
             if (name := mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_MATERIAL, index))
-            and self._model_element_name(name)[0] == int(model_id)
+            and self._model_element_name(name, mujoco.mjtObj.mjOBJ_MATERIAL)[0] == int(model_id)
         )
 
     def model_texture_names(self, model_id: int) -> tuple[str, ...]:
@@ -4597,7 +4634,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             name
             for index in range(self._m.ntex)
             if (name := mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_TEXTURE, index))
-            and self._model_element_name(name)[0] == int(model_id)
+            and self._model_element_name(name, mujoco.mjtObj.mjOBJ_TEXTURE)[0] == int(model_id)
         )
 
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int:
@@ -4618,12 +4655,16 @@ class MuJoCoAdapter(SceneAdapterBase):
             compiled_name = (
                 mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_MATERIAL, source_index) or ""
             )
-            source_model, _source_name = self._model_element_name(compiled_name)
+            source_model, _source_name = self._model_element_name(
+                compiled_name, mujoco.mjtObj.mjOBJ_MATERIAL
+            )
             if source_model != model_id:
                 return -1
             material = self.scene_source().materials[source_index]
             if material.texture:
-                texture_model, texture_name = self._model_element_name(material.texture)
+                texture_model, texture_name = self._model_element_name(
+                    material.texture, mujoco.mjtObj.mjOBJ_TEXTURE
+                )
                 if texture_model != model_id:
                     return -1
 
@@ -4680,7 +4721,9 @@ class MuJoCoAdapter(SceneAdapterBase):
             if not 0 <= material < self._m.nmat:
                 return False
             compiled_name = mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_MATERIAL, material) or ""
-            material_model, material_name = self._model_element_name(compiled_name)
+            material_model, material_name = self._model_element_name(
+                compiled_name, mujoco.mjtObj.mjOBJ_MATERIAL
+            )
             target = working.material(material_name) if material_model == model_id else None
             if target is None:
                 return False
@@ -4691,7 +4734,7 @@ class MuJoCoAdapter(SceneAdapterBase):
 
     def set_geometry_material(self, node_id: int, material_index: int) -> bool:
         identity = self._node_element.get(int(node_id))
-        node = next((item for item in self.nodes() if item.node_id == int(node_id)), None)
+        node = self._node_for_id(node_id)
         if identity is None or node is None or identity[1] not in (NodeType.GEOM, NodeType.SITE):
             return False
         model_id, node_type, name = identity
@@ -4701,7 +4744,9 @@ class MuJoCoAdapter(SceneAdapterBase):
             if not 0 <= material < self._m.nmat:
                 return False
             compiled_name = mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_MATERIAL, material) or ""
-            material_model, material_name = self._model_element_name(compiled_name)
+            material_model, material_name = self._model_element_name(
+                compiled_name, mujoco.mjtObj.mjOBJ_MATERIAL
+            )
             if material_model != model_id:
                 return False
         element = self._element(model_id, node_type.value, name)
@@ -4749,7 +4794,7 @@ class MuJoCoAdapter(SceneAdapterBase):
 
     def set_geometry_size(self, node_id: int, size: np.ndarray) -> bool:
         identity = self._node_element.get(int(node_id))
-        node = next((item for item in self.nodes() if item.node_id == int(node_id)), None)
+        node = self._node_for_id(node_id)
         if identity is None or node is None or node.type not in (NodeType.GEOM, NodeType.SITE):
             return False
         values = np.asarray(size, np.float64).reshape(3)
@@ -4839,10 +4884,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             body = self._node_body.get(int(node_id), -1)
             if node_type in (NodeType.LINK, NodeType.ROBOT) and self._is_posable_body(body):
                 return self._set_dynamic_body_pose(body, position, rotation)
-            node = next(
-                (item for item in self.nodes() if item.node_id == int(node_id)),
-                None,
-            )
+            node = self._node_for_id(node_id)
             if (
                 node is not None
                 and node.posable
@@ -4878,7 +4920,7 @@ class MuJoCoAdapter(SceneAdapterBase):
 
     def _set_model_element_pose(self, node_id: int, position, rotation) -> bool:
         identity = self._node_element.get(int(node_id))
-        node = next((item for item in self.nodes() if item.node_id == int(node_id)), None)
+        node = self._node_for_id(node_id)
         if identity is None or node is None:
             return False
         model_id, node_type, name = identity
@@ -5050,7 +5092,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         body = int(self._m.geom_bodyid[gid])
         if body == 0:
             node_id = self._geom_nodes.get(gid, -1)
-            node = next((item for item in self.nodes() if item.node_id == node_id), None)
+            node = self._node_for_id(node_id)
             if node is None or not node.object_id:
                 return 0, float("inf")
             return int(node.object_id), float(dist)

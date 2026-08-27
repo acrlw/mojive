@@ -82,6 +82,13 @@ def run_benchmark(
 
         target = model_ids[-1]
         target_x = float(len(model_ids) - 1) * spacing
+        node_build_ms: list[float] = []
+        for _index in range(max(1, int(iterations))):
+            primary._nodes = []
+            start = time.perf_counter()
+            primary.nodes()
+            node_build_ms.append((time.perf_counter() - start) * 1000.0)
+
         transform_ms: list[float] = []
         for index in range(max(1, int(iterations))):
             start = time.perf_counter()
@@ -124,7 +131,7 @@ def run_benchmark(
                 raise RuntimeError(result.message)
 
         report: dict[str, object] = {
-            "schema": 1,
+            "schema": 2,
             "platform": platform.platform(),
             "python": platform.python_version(),
             "workload": {
@@ -136,6 +143,7 @@ def run_benchmark(
             },
             "timing": {
                 "add_model": _summary(add_ms),
+                "build_nodes": _summary(node_build_ms),
                 "commit_model_transform": _summary(transform_ms),
                 "add_component_ms": float(component_add_ms),
                 "update_component": _summary(component_ms),
