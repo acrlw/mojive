@@ -19,6 +19,7 @@ from .base import (
     GeometryAdvancedProperties,
     GeometryProperties,
     GeometryShapeProperties,
+    JointAdvancedProperties,
     NodeType,
     SceneAdapterBase,
     SceneFrame,
@@ -26,6 +27,7 @@ from .base import (
     SceneNode,
     SceneSaveOptions,
     SceneSource,
+    SiteProperties,
 )
 
 if TYPE_CHECKING:
@@ -479,6 +481,22 @@ class WorkspaceAdapter(SceneAdapterBase):
         return self.primary.set_joint_properties(
             joint_id, axis, limited, value_range, damping, stiffness
         )
+
+    def joint_advanced_properties(self, joint_id: int) -> JointAdvancedProperties | None:
+        return self.primary.joint_advanced_properties(joint_id)
+
+    def set_joint_advanced_properties(self, properties: JointAdvancedProperties) -> bool:
+        return self.primary.set_joint_advanced_properties(properties)
+
+    def site_properties(self, node_id: int) -> SiteProperties | None:
+        if int(node_id) in self._node_to_scene:
+            return None
+        return self.primary.site_properties(node_id)
+
+    def set_site_properties(self, properties: SiteProperties) -> bool:
+        if int(properties.node_id) in self._node_to_scene:
+            return False
+        return self.primary.set_site_properties(properties)
 
     def geometry_properties(self, node_id: int) -> GeometryProperties | None:
         if int(node_id) in self._node_to_scene:

@@ -1137,6 +1137,82 @@ def test_primary_fixed_primitives_and_site_support_authoring(tmp_path: Path) -> 
     assert np.abs(math3d.quat_to_mat3(capsule.quat)[:, 2]) == pytest.approx((0.0, 0.0, 1.0))
 
 
+def test_site_properties_apply_shape_group_and_endpoints_in_one_rebuild(
+    tmp_path: Path, monkeypatch
+) -> None:
+    path = tmp_path / "site-properties.xml"
+    path.write_text(
+        """
+<mujoco>
+  <worldbody>
+    <body name="fixture">
+      <site name="marker" type="capsule" fromto="0 0 0 0 0 1" size="0.1" group="1"/>
+      <geom type="sphere" size="0.1"/>
+    </body>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == "marker")
+    current = session.site_properties(node.node_id)
+    assert current is not None
+    assert current.type == "capsule"
+    assert current.group == 1
+    assert current.use_from_to
+    assert current.from_to == pytest.approx((0.0, 0.0, 0.0, 0.0, 0.0, 1.0))
+
+    invalid = session.submit(
+        cmd.SetSiteProperties(node.node_id, "sphere", 2, True, current.from_to)
+    )
+    assert not invalid.ok
+    assert "capsule and cylinder" in invalid.message
+
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    result = session.submit(
+        cmd.SetSiteProperties(
+            node.node_id,
+            "cylinder",
+            2,
+            True,
+            (-1.0, 0.0, 0.25, 1.0, 0.0, 0.25),
+        )
+    )
+
+    assert result.ok, result.message
+    assert compile_count == 1
+    updated_node = next(item for item in session.nodes if item.name == "marker")
+    updated = session.site_properties(updated_node.node_id)
+    assert updated is not None
+    assert updated.type == "cylinder"
+    assert updated.group == 2
+    assert updated.use_from_to
+    assert updated.from_to == pytest.approx((-1.0, 0.0, 0.25, 1.0, 0.0, 0.25))
+    site = mujoco.mj_name2id(document.primary.model, mujoco.mjtObj.mjOBJ_SITE, "marker")
+    assert int(document.primary.model.site_type[site]) == int(mujoco.mjtGeom.mjGEOM_CYLINDER)
+    assert int(document.primary.model.site_group[site]) == 2
+    assert document.primary.model.site_pos[site] == pytest.approx((0.0, 0.0, 0.25))
+    assert document.primary.model.site_size[site, 1] == pytest.approx(1.0)
+
+    assert session.submit(cmd.Undo())
+    restored_node = next(item for item in session.nodes if item.name == "marker")
+    restored = session.site_properties(restored_node.node_id)
+    assert restored is not None
+    assert restored.type == "capsule"
+    assert restored.group == 1
+
+
 def test_joint_properties_update_without_topology_recompile(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "joint-properties.xml"
     path.write_text(
@@ -1256,6 +1332,111 @@ def test_ball_joint_properties_apply_one_limit_and_all_rotational_damping(tmp_pa
     assert model.jnt_stiffness[0] == pytest.approx(0.8)
     spec = mujoco.MjSpec.from_string(document.scene_model_xml(0))
     assert spec.joint("ball").range == pytest.approx((0.0, 1.0))
+
+
+def test_joint_advanced_properties_rebuild_once_and_preserve_authored_units(
+    tmp_path: Path, monkeypatch
+) -> None:
+    path = tmp_path / "joint-advanced.xml"
+    path.write_text(
+        """
+<mujoco>
+  <compiler angle="degree" autolimits="true"/>
+  <worldbody>
+    <body name="hinge_body">
+      <joint name="hinge" type="hinge" range="-90 90" ref="10" springref="5"
+             group="2" armature="0.1" frictionloss="0.2" margin="0.01"
+             solreflimit="0.03 1.2" solimplimit="0.8 0.9 0.002 0.6 3"
+             solreffriction="0.04 1.3" solimpfriction="0.7 0.95 0.003 0.55 4"
+             actuatorfrclimited="auto" actuatorfrcrange="-1 1"/>
+      <geom type="box" size="0.1 0.1 0.1" mass="1"/>
+    </body>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    current = session.joint_advanced_properties(0)
+    assert current is not None
+    assert current.reference == pytest.approx(np.radians(10.0))
+    assert current.spring_reference == pytest.approx(np.radians(5.0))
+    assert current.actuator_force_limit_mode == "auto"
+
+    invalid = session.submit(
+        cmd.SetJointAdvancedProperties(
+            0,
+            2,
+            0.1,
+            0.2,
+            current.reference,
+            current.spring_reference,
+            0.01,
+            current.limit_solver_reference,
+            current.limit_solver_impedance,
+            current.friction_solver_reference,
+            current.friction_solver_impedance,
+            "limited",
+            (3.0, -2.0),
+            False,
+        )
+    )
+    assert not invalid.ok
+    assert "upper bound" in invalid.message.lower()
+
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    result = session.submit(
+        cmd.SetJointAdvancedProperties(
+            joint_id=0,
+            group=4,
+            armature=0.35,
+            friction_loss=0.45,
+            reference=np.radians(20.0),
+            spring_reference=np.radians(-15.0),
+            margin=0.025,
+            limit_solver_reference=(0.05, 1.5),
+            limit_solver_impedance=(0.6, 0.95, 0.004, 0.7, 2.5),
+            friction_solver_reference=(0.06, 1.6),
+            friction_solver_impedance=(0.5, 0.9, 0.005, 0.65, 3.5),
+            actuator_force_limit_mode="limited",
+            actuator_force_range=(-2.0, 3.0),
+            actuator_gravity_compensation=True,
+        )
+    )
+
+    assert result.ok, result.message
+    assert compile_count == 1
+    updated = session.joint_advanced_properties(0)
+    assert updated is not None
+    assert updated.group == 4
+    assert updated.reference == pytest.approx(np.radians(20.0))
+    assert updated.spring_reference == pytest.approx(np.radians(-15.0))
+    assert updated.actuator_force_limit_mode == "limited"
+    assert updated.actuator_force_range == pytest.approx((-2.0, 3.0))
+    assert updated.actuator_gravity_compensation
+    assert document.primary.model.qpos0[0] == pytest.approx(np.radians(20.0))
+    assert document.primary.model.qpos_spring[0] == pytest.approx(np.radians(-15.0))
+    assert bool(document.primary.model.jnt_actfrclimited[0])
+
+    authored = mujoco.MjSpec.from_string(document.scene_model_xml(0)).joint("hinge")
+    assert authored.ref == pytest.approx(np.radians(20.0), abs=1e-6)
+    assert authored.springref == pytest.approx(np.radians(-15.0), abs=1e-6)
+    assert authored.actfrcrange == pytest.approx((-2.0, 3.0))
+    assert session.submit(cmd.Undo())
+    restored = session.joint_advanced_properties(0)
+    assert restored is not None
+    assert restored.reference == pytest.approx(np.radians(10.0))
+    assert restored.actuator_force_limit_mode == "auto"
 
 
 def test_geometry_contact_properties_update_without_topology_recompile(

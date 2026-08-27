@@ -40,7 +40,10 @@ The structured Inspector currently covers:
 
 - fixed body and site transforms;
 - finite plane, box, sphere/ellipsoid, capsule, cylinder, and site dimensions;
-- joint axis, limits, damping, and stiffness;
+- joint axis, limits, damping, stiffness, armature, friction loss, reference/spring reference,
+  limit/friction solver parameters, visual group, and actuator-force policy/range;
+- site type, visual group, and optional capsule/cylinder endpoints, in addition to direct pose,
+  dimensions, color, and material controls;
 - body auto/diagonal/full inertia, mass, inertial frame, gravity compensation, mocap, and sleep
   policy;
 - geometry friction, contact dimension, collision masks, priority, margin, gap, solver mix,
@@ -69,6 +72,7 @@ make material-authoring BACKEND=wgpu
 make contact-authoring BACKEND=wgpu
 make body-authoring BACKEND=wgpu
 make resource-authoring BACKEND=wgpu
+make joint-site-authoring BACKEND=wgpu
 make joint-gizmo BACKEND=wgpu
 ```
 

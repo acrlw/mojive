@@ -26,6 +26,7 @@ from .adapters.base import (
     GeometryAdvancedProperties,
     GeometryProperties,
     GeometryShapeProperties,
+    JointAdvancedProperties,
     JointInfo,
     KeyframeInfo,
     SceneAdapterBase,
@@ -33,6 +34,7 @@ from .adapters.base import (
     SceneNode,
     SceneSource,
     SensorInfo,
+    SiteProperties,
     VisualGroupInfo,
 )
 from .commands import CommandResult
@@ -63,6 +65,8 @@ class RemoteStructure:
     body_properties: tuple[BodyProperties, ...] = ()
     geometry_advanced_properties: tuple[GeometryAdvancedProperties, ...] = ()
     geometry_shape_properties: tuple[GeometryShapeProperties, ...] = ()
+    joint_advanced_properties: tuple[JointAdvancedProperties, ...] = ()
+    site_properties: tuple[SiteProperties, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -110,6 +114,16 @@ def snapshot_structure(session) -> RemoteStructure:
             properties
             for node in session.nodes
             if (properties := session.geometry_shape_properties(node.node_id)) is not None
+        ),
+        tuple(
+            properties
+            for joint in session.joints
+            if (properties := session.joint_advanced_properties(joint.joint_id)) is not None
+        ),
+        tuple(
+            properties
+            for node in session.nodes
+            if (properties := session.site_properties(node.node_id)) is not None
         ),
     )
 
@@ -339,6 +353,8 @@ class RemoteSceneAdapter(SceneAdapterBase):
         self._body_properties_by_node: dict[int, BodyProperties] = {}
         self._geometry_advanced_properties_by_node: dict[int, GeometryAdvancedProperties] = {}
         self._geometry_shape_properties_by_node: dict[int, GeometryShapeProperties] = {}
+        self._joint_advanced_properties_by_id: dict[int, JointAdvancedProperties] = {}
+        self._site_properties_by_node: dict[int, SiteProperties] = {}
         self._latest: RemoteFrame | None = None
         self._delivered_sequence = -1
         self._error = ""
@@ -408,6 +424,12 @@ class RemoteSceneAdapter(SceneAdapterBase):
                         }
                         self._geometry_shape_properties_by_node = {
                             item.node_id: item for item in packet.geometry_shape_properties
+                        }
+                        self._joint_advanced_properties_by_id = {
+                            item.joint_id: item for item in packet.joint_advanced_properties
+                        }
+                        self._site_properties_by_node = {
+                            item.node_id: item for item in packet.site_properties
                         }
                         self._latest = None
                         self._delivered_sequence = -1
@@ -500,6 +522,14 @@ class RemoteSceneAdapter(SceneAdapterBase):
     def geometry_shape_properties(self, node_id: int) -> GeometryShapeProperties | None:
         with self._lock:
             return self._geometry_shape_properties_by_node.get(int(node_id))
+
+    def joint_advanced_properties(self, joint_id: int) -> JointAdvancedProperties | None:
+        with self._lock:
+            return self._joint_advanced_properties_by_id.get(int(joint_id))
+
+    def site_properties(self, node_id: int) -> SiteProperties | None:
+        with self._lock:
+            return self._site_properties_by_node.get(int(node_id))
 
     def load_keyframe(self, keyframe_id: int) -> bool:
         return self._ok(self._send("keyframe", keyframe_id=int(keyframe_id)))
@@ -633,6 +663,39 @@ class RemoteSceneAdapter(SceneAdapterBase):
                 range=tuple(float(value) for value in value_range),
                 damping=float(damping),
                 stiffness=float(stiffness),
+            )
+        )
+
+    def set_joint_advanced_properties(self, properties: JointAdvancedProperties) -> bool:
+        return self._ok(
+            self._send_structure_edit(
+                "joint_advanced_properties",
+                joint_id=int(properties.joint_id),
+                group=int(properties.group),
+                armature=float(properties.armature),
+                friction_loss=float(properties.friction_loss),
+                reference=float(properties.reference),
+                spring_reference=float(properties.spring_reference),
+                margin=float(properties.margin),
+                limit_solver_reference=properties.limit_solver_reference,
+                limit_solver_impedance=properties.limit_solver_impedance,
+                friction_solver_reference=properties.friction_solver_reference,
+                friction_solver_impedance=properties.friction_solver_impedance,
+                actuator_force_limit_mode=properties.actuator_force_limit_mode,
+                actuator_force_range=properties.actuator_force_range,
+                actuator_gravity_compensation=properties.actuator_gravity_compensation,
+            )
+        )
+
+    def set_site_properties(self, properties: SiteProperties) -> bool:
+        return self._ok(
+            self._send_structure_edit(
+                "site_properties",
+                node_id=int(properties.node_id),
+                type=properties.type,
+                group=int(properties.group),
+                use_from_to=bool(properties.use_from_to),
+                from_to=properties.from_to,
             )
         )
 
@@ -816,6 +879,29 @@ def handle_session_command(session, message: dict):
             message["range"],
             message["damping"],
             message["stiffness"],
+        ),
+        "joint_advanced_properties": lambda: cmd.SetJointAdvancedProperties(
+            message["joint_id"],
+            message["group"],
+            message["armature"],
+            message["friction_loss"],
+            message["reference"],
+            message["spring_reference"],
+            message["margin"],
+            message["limit_solver_reference"],
+            message["limit_solver_impedance"],
+            message["friction_solver_reference"],
+            message["friction_solver_impedance"],
+            message["actuator_force_limit_mode"],
+            message["actuator_force_range"],
+            message["actuator_gravity_compensation"],
+        ),
+        "site_properties": lambda: cmd.SetSiteProperties(
+            message["node_id"],
+            message["type"],
+            message["group"],
+            message["use_from_to"],
+            message["from_to"],
         ),
         "geometry_properties": lambda: cmd.SetGeometryProperties(
             message["node_id"],

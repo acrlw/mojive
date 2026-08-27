@@ -14,9 +14,12 @@ from ...adapters.base import (
     FrameNeeds,
     GeometryAdvancedProperties,
     GeometryShapeProperties,
+    JointAdvancedProperties,
+    JointInfo,
     ModelComponentInfo,
     NodeType,
     SceneNode,
+    SiteProperties,
 )
 from ...render.backend import RenderFlag
 from ...types import DEFAULT_HEADLIGHT, Environment, LightType, MeshShape, TextureType
@@ -149,6 +152,14 @@ class InspectorPanel(Panel):
         self._geometry_shape_generation = -1
         self._geometry_shape_edit: GeometryShapeProperties | None = None
         self._geometry_shape_error = ""
+        self._joint_advanced_id = -1
+        self._joint_advanced_generation = -1
+        self._joint_advanced_edit: JointAdvancedProperties | None = None
+        self._joint_advanced_error = ""
+        self._site_property_node = -1
+        self._site_property_generation = -1
+        self._site_property_edit: SiteProperties | None = None
+        self._site_property_error = ""
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds(
@@ -216,6 +227,8 @@ class InspectorPanel(Panel):
         self._velocity(ctx, node)
         if node.type in (NodeType.LINK, NodeType.ROBOT):
             self._body_properties(ctx, node)
+        if node.type is NodeType.SITE:
+            self._site_properties(ctx, node)
         self._material(ctx, node)
 
     def _name_editor(self, ctx: PanelContext, node: SceneNode) -> None:
@@ -867,9 +880,11 @@ class InspectorPanel(Panel):
             labeled("qpos address", str(joint.qpos_adr))
             labeled("dof", str(joint.dof))
             imgui.end_table()
-        if not imgui.collapsing_header("joint properties", imgui.TreeNodeFlags_.default_open):
-            return
+        if imgui.collapsing_header("joint properties", imgui.TreeNodeFlags_.default_open):
+            self._joint_properties(ctx, joint)
+        self._joint_advanced_properties(ctx, joint)
 
+    def _joint_properties(self, ctx: PanelContext, joint: JointInfo) -> None:
         editable = bool(
             ctx.session.adapter.caps.model_properties
             and ctx.session.paused
@@ -968,6 +983,361 @@ class InspectorPanel(Panel):
                     float(stiffness),
                 ),
             )
+
+    def _joint_advanced_properties(self, ctx: PanelContext, joint: JointInfo) -> None:
+        current = ctx.session.joint_advanced_properties(joint.joint_id)
+        if current is None:
+            return
+        generation = ctx.session.structure_generation
+        if (
+            self._joint_advanced_id != joint.joint_id
+            or self._joint_advanced_generation != generation
+            or self._joint_advanced_edit is None
+        ):
+            self._joint_advanced_id = joint.joint_id
+            self._joint_advanced_generation = generation
+            self._joint_advanced_edit = current
+            self._joint_advanced_error = ""
+        properties = self._joint_advanced_edit
+        if properties is None or not imgui.collapsing_header("advanced joint properties"):
+            return
+        editable = bool(
+            ctx.session.adapter.caps.model_properties
+            and (not ctx.session.adapter.caps.simulation or ctx.session.paused)
+        )
+        if not editable:
+            imgui.begin_disabled()
+
+        group_changed, group = imgui.combo(
+            "group", int(properties.group), tuple(str(value) for value in range(6))
+        )
+        armature_changed, armature = imgui.drag_float(
+            "armature", properties.armature, 0.001, 0.0, 1000000000.0, "%.6g"
+        )
+        friction_changed, friction_loss = imgui.drag_float(
+            "friction loss", properties.friction_loss, 0.001, 0.0, 1000000000.0, "%.6g"
+        )
+        rotational = joint.type in ("hinge", "ball")
+        reference = (
+            float(np.degrees(properties.reference)) if rotational else float(properties.reference)
+        )
+        spring_reference = (
+            float(np.degrees(properties.spring_reference))
+            if rotational
+            else float(properties.spring_reference)
+        )
+        reference_changed, reference = imgui.drag_float(
+            "reference",
+            reference,
+            0.25 if rotational else 0.001,
+            -360000.0 if rotational else -1000000.0,
+            360000.0 if rotational else 1000000.0,
+            "%.3f deg" if rotational else "%.6g m",
+        )
+        spring_reference_changed, spring_reference = imgui.drag_float(
+            "spring reference",
+            spring_reference,
+            0.25 if rotational else 0.001,
+            -360000.0 if rotational else -1000000.0,
+            360000.0 if rotational else 1000000.0,
+            "%.3f deg" if rotational else "%.6g m",
+        )
+        margin_changed, margin = imgui.drag_float(
+            "limit margin", properties.margin, 0.001, 0.0, 1000000.0, "%.6g"
+        )
+
+        limit_reference_changed, limit_reference = imgui.drag_float2(
+            "limit solver reference",
+            np.asarray(properties.limit_solver_reference, np.float32),
+            0.001,
+            -1000000.0,
+            1000000.0,
+            "%.5g",
+        )
+        limit_impedance_first_changed, limit_impedance_first = imgui.drag_float3(
+            "limit impedance min / max / width",
+            np.asarray(properties.limit_solver_impedance[:3], np.float32),
+            0.001,
+            0.0,
+            1.0,
+            "%.5g",
+        )
+        limit_impedance_shape_changed, limit_impedance_shape = imgui.drag_float2(
+            "limit impedance midpoint / power",
+            np.asarray(properties.limit_solver_impedance[3:], np.float32),
+            0.01,
+            0.0,
+            1000.0,
+            "%.4g",
+        )
+        friction_reference_changed, friction_reference = imgui.drag_float2(
+            "friction solver reference",
+            np.asarray(properties.friction_solver_reference, np.float32),
+            0.001,
+            -1000000.0,
+            1000000.0,
+            "%.5g",
+        )
+        friction_impedance_first_changed, friction_impedance_first = imgui.drag_float3(
+            "friction impedance min / max / width",
+            np.asarray(properties.friction_solver_impedance[:3], np.float32),
+            0.001,
+            0.0,
+            1.0,
+            "%.5g",
+        )
+        friction_impedance_shape_changed, friction_impedance_shape = imgui.drag_float2(
+            "friction impedance midpoint / power",
+            np.asarray(properties.friction_solver_impedance[3:], np.float32),
+            0.01,
+            0.0,
+            1000.0,
+            "%.4g",
+        )
+
+        force_modes = ("auto", "unlimited", "limited")
+        force_mode = force_modes.index(properties.actuator_force_limit_mode)
+        force_mode_changed, force_mode = imgui.combo(
+            "actuator force limit", force_mode, force_modes
+        )
+        force_range_changed, force_range = imgui.drag_float2(
+            "actuator force range",
+            np.asarray(properties.actuator_force_range, np.float32),
+            0.01,
+            -1000000000.0,
+            1000000000.0,
+            "%.6g N",
+        )
+        imgui.set_item_tooltip(
+            "Auto enables the limit when a valid range is authored; unlimited ignores the range"
+        )
+        gravity_changed, gravity_compensation = imgui.checkbox(
+            "actuator gravity compensation", properties.actuator_gravity_compensation
+        )
+        if not editable:
+            imgui.end_disabled()
+            imgui.text_disabled("Pause the simulation to edit advanced joint properties")
+
+        edited = properties
+        if group_changed:
+            edited = replace(edited, group=int(group))
+        if armature_changed:
+            edited = replace(edited, armature=float(armature))
+        if friction_changed:
+            edited = replace(edited, friction_loss=float(friction_loss))
+        if reference_changed:
+            edited = replace(
+                edited,
+                reference=float(np.radians(reference) if rotational else reference),
+            )
+        if spring_reference_changed:
+            edited = replace(
+                edited,
+                spring_reference=float(
+                    np.radians(spring_reference) if rotational else spring_reference
+                ),
+            )
+        if margin_changed:
+            edited = replace(edited, margin=float(margin))
+        if limit_reference_changed:
+            edited = replace(
+                edited,
+                limit_solver_reference=tuple(float(value) for value in limit_reference),
+            )
+        if limit_impedance_first_changed or limit_impedance_shape_changed:
+            edited = replace(
+                edited,
+                limit_solver_impedance=tuple(
+                    float(value) for value in (*limit_impedance_first, *limit_impedance_shape)
+                ),
+            )
+        if friction_reference_changed:
+            edited = replace(
+                edited,
+                friction_solver_reference=tuple(float(value) for value in friction_reference),
+            )
+        if friction_impedance_first_changed or friction_impedance_shape_changed:
+            edited = replace(
+                edited,
+                friction_solver_impedance=tuple(
+                    float(value) for value in (*friction_impedance_first, *friction_impedance_shape)
+                ),
+            )
+        if force_mode_changed:
+            edited = replace(edited, actuator_force_limit_mode=force_modes[force_mode])
+        if force_range_changed:
+            edited = replace(
+                edited,
+                actuator_force_range=tuple(float(value) for value in force_range),
+            )
+        if gravity_changed:
+            edited = replace(edited, actuator_gravity_compensation=bool(gravity_compensation))
+        self._joint_advanced_edit = edited
+
+        dirty = edited != current
+        invalid_force_range = (
+            edited.actuator_force_limit_mode == "limited"
+            and edited.actuator_force_range[1] <= edited.actuator_force_range[0]
+        )
+        if invalid_force_range:
+            imgui.text_colored(
+                imgui.ImVec4(*ctx.theme.warning),
+                "Actuator force upper bound must exceed its lower bound",
+            )
+        if not editable or not dirty or invalid_force_range:
+            imgui.begin_disabled()
+        if imgui.button("Apply##joint-advanced"):
+            result = ctx.submit(
+                cmd.SetJointAdvancedProperties(
+                    joint_id=edited.joint_id,
+                    group=edited.group,
+                    armature=edited.armature,
+                    friction_loss=edited.friction_loss,
+                    reference=edited.reference,
+                    spring_reference=edited.spring_reference,
+                    margin=edited.margin,
+                    limit_solver_reference=edited.limit_solver_reference,
+                    limit_solver_impedance=edited.limit_solver_impedance,
+                    friction_solver_reference=edited.friction_solver_reference,
+                    friction_solver_impedance=edited.friction_solver_impedance,
+                    actuator_force_limit_mode=edited.actuator_force_limit_mode,
+                    actuator_force_range=edited.actuator_force_range,
+                    actuator_gravity_compensation=edited.actuator_gravity_compensation,
+                )
+            )
+            if result.ok:
+                self._joint_advanced_generation = -1
+                self._joint_advanced_error = ""
+            else:
+                self._joint_advanced_error = result.message
+        if not editable or not dirty or invalid_force_range:
+            imgui.end_disabled()
+        imgui.same_line()
+        if imgui.button("Revert##joint-advanced"):
+            self._joint_advanced_edit = current
+            self._joint_advanced_error = ""
+        imgui.same_line()
+        imgui.text_disabled("Apply rebuilds the model once")
+        if self._joint_advanced_error:
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._joint_advanced_error)
+            if imgui.small_button("Copy error##joint-advanced"):
+                imgui.set_clipboard_text(self._joint_advanced_error)
+
+    def _site_properties(self, ctx: PanelContext, node: SceneNode) -> None:
+        current = ctx.session.site_properties(node.node_id)
+        if current is None:
+            return
+        generation = ctx.session.structure_generation
+        if (
+            self._site_property_node != node.node_id
+            or self._site_property_generation != generation
+            or self._site_property_edit is None
+        ):
+            self._site_property_node = node.node_id
+            self._site_property_generation = generation
+            self._site_property_edit = current
+            self._site_property_error = ""
+        properties = self._site_property_edit
+        if properties is None or not imgui.collapsing_header("site shape and endpoints"):
+            return
+        editable = bool(
+            ctx.session.adapter.caps.model_properties
+            and (not ctx.session.adapter.caps.simulation or ctx.session.paused)
+        )
+        if not editable:
+            imgui.begin_disabled()
+
+        site_types = ("sphere", "ellipsoid", "capsule", "cylinder", "box")
+        site_type = site_types.index(properties.type)
+        type_changed, site_type = imgui.combo("type", site_type, site_types)
+        group_changed, group = imgui.combo(
+            "visual group", int(properties.group), tuple(str(value) for value in range(6))
+        )
+        type_value = site_types[site_type]
+        supports_endpoints = type_value in ("capsule", "cylinder")
+        use_from_to = properties.use_from_to if supports_endpoints else False
+        if not supports_endpoints:
+            imgui.begin_disabled()
+        endpoints_changed, use_from_to = imgui.checkbox("define with endpoints", use_from_to)
+        if not supports_endpoints:
+            imgui.end_disabled()
+            imgui.set_item_tooltip("Endpoints apply only to capsule and cylinder sites")
+        from_to = np.asarray(properties.from_to, np.float32)
+        first_changed = second_changed = False
+        if use_from_to:
+            first_changed, first = imgui.drag_float3(
+                "endpoint A (body frame)",
+                from_to[:3],
+                0.001,
+                -1000000.0,
+                1000000.0,
+                "%.5f m",
+            )
+            second_changed, second = imgui.drag_float3(
+                "endpoint B (body frame)",
+                from_to[3:],
+                0.001,
+                -1000000.0,
+                1000000.0,
+                "%.5f m",
+            )
+            from_to = np.asarray((*first, *second), np.float32)
+        if not editable:
+            imgui.end_disabled()
+            imgui.text_disabled("Pause the simulation to edit site properties")
+
+        edited = properties
+        if type_changed:
+            edited = replace(
+                edited,
+                type=type_value,
+                use_from_to=bool(use_from_to),
+            )
+        if group_changed:
+            edited = replace(edited, group=int(group))
+        if endpoints_changed:
+            edited = replace(edited, use_from_to=bool(use_from_to))
+        if first_changed or second_changed:
+            edited = replace(edited, from_to=tuple(float(value) for value in from_to))
+        self._site_property_edit = edited
+
+        invalid_endpoints = (
+            edited.use_from_to
+            and np.linalg.norm(np.asarray(edited.from_to[3:]) - np.asarray(edited.from_to[:3]))
+            <= 1e-9
+        )
+        if invalid_endpoints:
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), "Site endpoints must be distinct")
+        dirty = edited != current
+        if not editable or not dirty or invalid_endpoints:
+            imgui.begin_disabled()
+        if imgui.button("Apply##site-properties"):
+            result = ctx.submit(
+                cmd.SetSiteProperties(
+                    node_id=edited.node_id,
+                    type=edited.type,
+                    group=edited.group,
+                    use_from_to=edited.use_from_to,
+                    from_to=edited.from_to,
+                )
+            )
+            if result.ok:
+                self._site_property_generation = -1
+                self._site_property_error = ""
+            else:
+                self._site_property_error = result.message
+        if not editable or not dirty or invalid_endpoints:
+            imgui.end_disabled()
+        imgui.same_line()
+        if imgui.button("Revert##site-properties"):
+            self._site_property_edit = current
+            self._site_property_error = ""
+        imgui.same_line()
+        imgui.text_disabled("Apply rebuilds the model once")
+        if self._site_property_error:
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._site_property_error)
+            if imgui.small_button("Copy error##site-properties"):
+                imgui.set_clipboard_text(self._site_property_error)
 
     def _material(self, ctx: PanelContext, node: SceneNode) -> None:
         if not imgui.collapsing_header("material"):

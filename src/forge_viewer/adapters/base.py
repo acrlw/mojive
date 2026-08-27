@@ -230,6 +230,37 @@ class GeometryShapeProperties:
 
 
 @dataclass(frozen=True)
+class JointAdvancedProperties:
+    """Joint properties that require rebuilding MuJoCo-derived constants."""
+
+    joint_id: int
+    group: int
+    armature: float
+    friction_loss: float
+    reference: float
+    spring_reference: float
+    margin: float
+    limit_solver_reference: tuple[float, float]
+    limit_solver_impedance: tuple[float, float, float, float, float]
+    friction_solver_reference: tuple[float, float]
+    friction_solver_impedance: tuple[float, float, float, float, float]
+    actuator_force_limit_mode: str
+    actuator_force_range: tuple[float, float]
+    actuator_gravity_compensation: bool
+
+
+@dataclass(frozen=True)
+class SiteProperties:
+    """Editable site shape, visual group, and endpoint representation."""
+
+    node_id: int
+    type: str
+    group: int
+    use_from_to: bool
+    from_to: tuple[float, float, float, float, float, float]
+
+
+@dataclass(frozen=True)
 class BodyProperties:
     """Editable inertial and dynamic properties for one model body."""
 
@@ -897,6 +928,22 @@ class SceneAdapterBase:
         """Set authored numeric properties for one model joint."""
         return False
 
+    def joint_advanced_properties(self, joint_id: int) -> JointAdvancedProperties | None:
+        """Return joint properties backed by rebuilt MuJoCo constants."""
+        return None
+
+    def set_joint_advanced_properties(self, properties: JointAdvancedProperties) -> bool:
+        """Set joint properties that require rebuilding MuJoCo constants."""
+        return False
+
+    def site_properties(self, node_id: int) -> SiteProperties | None:
+        """Return editable shape and endpoint properties for one model site."""
+        return None
+
+    def set_site_properties(self, properties: SiteProperties) -> bool:
+        """Set shape and endpoint properties for one model site."""
+        return False
+
     def geometry_properties(self, node_id: int) -> GeometryProperties | None:
         """Return editable contact parameters for one model geometry."""
         return None
@@ -1190,6 +1237,10 @@ class SceneAdapter(Protocol):
         damping: float,
         stiffness: float,
     ) -> bool: ...
+    def joint_advanced_properties(self, joint_id: int) -> JointAdvancedProperties | None: ...
+    def set_joint_advanced_properties(self, properties: JointAdvancedProperties) -> bool: ...
+    def site_properties(self, node_id: int) -> SiteProperties | None: ...
+    def set_site_properties(self, properties: SiteProperties) -> bool: ...
     def geometry_properties(self, node_id: int) -> GeometryProperties | None: ...
     def set_geometry_properties(self, properties: GeometryProperties) -> bool: ...
     def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None: ...

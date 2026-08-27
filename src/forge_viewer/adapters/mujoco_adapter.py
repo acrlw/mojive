@@ -58,6 +58,7 @@ from .base import (
     GeometryAdvancedProperties,
     GeometryProperties,
     GeometryShapeProperties,
+    JointAdvancedProperties,
     JointInfo,
     JointVisualType,
     KeyframeInfo,
@@ -73,6 +74,7 @@ from .base import (
     SceneSaveOptions,
     SceneSource,
     SensorInfo,
+    SiteProperties,
     VisualGroupInfo,
 )
 from .mujoco_deformables import build_deformables, update_deformables
@@ -4146,6 +4148,180 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._mark_model_edited(model_id)
         self._structure_revision += 1
         return True
+
+    def joint_advanced_properties(self, joint_id: int) -> JointAdvancedProperties | None:
+        joint = int(joint_id)
+        if not 0 <= joint < self._m.njnt:
+            return None
+        compiled_name = mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_JOINT, joint) or ""
+        model_id, name = self._model_element_name(compiled_name, mujoco.mjtObj.mjOBJ_JOINT)
+        if not name:
+            return None
+        spec = self._spec_for_model(model_id)
+        element = spec.joint(name) if spec is not None else None
+        if spec is None or element is None:
+            return None
+        reference = float(element.ref)
+        spring_reference = float(element.springref)
+        joint_type = int(self._m.jnt_type[joint])
+        if bool(spec.compiler.degree) and joint_type in {
+            int(mujoco.mjtJoint.mjJNT_HINGE),
+            int(mujoco.mjtJoint.mjJNT_BALL),
+        }:
+            reference = float(np.radians(reference))
+            spring_reference = float(np.radians(spring_reference))
+        force_limit_modes = {
+            int(mujoco.mjtLimited.mjLIMITED_AUTO): "auto",
+            int(mujoco.mjtLimited.mjLIMITED_FALSE): "unlimited",
+            int(mujoco.mjtLimited.mjLIMITED_TRUE): "limited",
+        }
+        return JointAdvancedProperties(
+            joint_id=joint,
+            group=int(element.group),
+            armature=float(element.armature),
+            friction_loss=float(element.frictionloss),
+            reference=reference,
+            spring_reference=spring_reference,
+            margin=float(element.margin),
+            limit_solver_reference=tuple(float(value) for value in element.solref_limit),
+            limit_solver_impedance=tuple(float(value) for value in element.solimp_limit),
+            friction_solver_reference=tuple(float(value) for value in element.solref_friction),
+            friction_solver_impedance=tuple(float(value) for value in element.solimp_friction),
+            actuator_force_limit_mode=force_limit_modes[int(element.actfrclimited)],
+            actuator_force_range=tuple(float(value) for value in self._m.jnt_actfrcrange[joint]),
+            actuator_gravity_compensation=bool(element.actgravcomp),
+        )
+
+    def set_joint_advanced_properties(self, properties: JointAdvancedProperties) -> bool:
+        joint = int(properties.joint_id)
+        if not 0 <= joint < self._m.njnt:
+            return False
+        compiled_name = mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_JOINT, joint) or ""
+        model_id, name = self._model_element_name(compiled_name, mujoco.mjtObj.mjOBJ_JOINT)
+        if not name:
+            return False
+        source_spec = self._spec_for_model(model_id)
+        if source_spec is None:
+            return False
+        working = source_spec.copy()
+        element = working.joint(name)
+        if element is None:
+            return False
+        reference = float(properties.reference)
+        spring_reference = float(properties.spring_reference)
+        joint_type = int(self._m.jnt_type[joint])
+        if bool(working.compiler.degree) and joint_type in {
+            int(mujoco.mjtJoint.mjJNT_HINGE),
+            int(mujoco.mjtJoint.mjJNT_BALL),
+        }:
+            reference = float(np.degrees(reference))
+            spring_reference = float(np.degrees(spring_reference))
+        element.group = int(properties.group)
+        element.armature = float(properties.armature)
+        element.frictionloss = float(properties.friction_loss)
+        element.ref = reference
+        element.springref = spring_reference
+        element.margin = float(properties.margin)
+        element.solref_limit = properties.limit_solver_reference
+        element.solimp_limit = properties.limit_solver_impedance
+        element.solref_friction = properties.friction_solver_reference
+        element.solimp_friction = properties.friction_solver_impedance
+        element.actfrclimited = {
+            "auto": mujoco.mjtLimited.mjLIMITED_AUTO,
+            "unlimited": mujoco.mjtLimited.mjLIMITED_FALSE,
+            "limited": mujoco.mjtLimited.mjLIMITED_TRUE,
+        }[properties.actuator_force_limit_mode]
+        element.actfrcrange = properties.actuator_force_range
+        element.actgravcomp = bool(properties.actuator_gravity_compensation)
+        return self._replace_model_spec(model_id, working)
+
+    def site_properties(self, node_id: int) -> SiteProperties | None:
+        node = self._node_for_id(node_id)
+        identity = self._node_element.get(int(node_id))
+        if (
+            node is None
+            or identity is None
+            or node.type is not NodeType.SITE
+            or not 0 <= node.site_index < self._m.nsite
+        ):
+            return None
+        model_id, _node_type, name = identity
+        spec = self._spec_for_model(model_id)
+        element = spec.site(name) if spec is not None else None
+        if element is None:
+            return None
+        type_names = {
+            int(mujoco.mjtGeom.mjGEOM_SPHERE): "sphere",
+            int(mujoco.mjtGeom.mjGEOM_ELLIPSOID): "ellipsoid",
+            int(mujoco.mjtGeom.mjGEOM_CAPSULE): "capsule",
+            int(mujoco.mjtGeom.mjGEOM_CYLINDER): "cylinder",
+            int(mujoco.mjtGeom.mjGEOM_BOX): "box",
+        }
+        site_type = type_names.get(int(self._m.site_type[node.site_index]))
+        if site_type is None:
+            return None
+        authored_from_to = np.asarray(element.fromto, np.float64).reshape(6)
+        use_from_to = bool(np.all(np.isfinite(authored_from_to)))
+        if use_from_to:
+            from_to = authored_from_to
+        else:
+            center = np.asarray(element.pos, np.float64).reshape(3)
+            axis = math3d.quat_to_mat3(element.quat)[:, 2]
+            half_length = (
+                float(self._m.site_size[node.site_index, 1])
+                if site_type in ("capsule", "cylinder")
+                else 0.5
+            )
+            from_to = np.concatenate((center - axis * half_length, center + axis * half_length))
+        return SiteProperties(
+            node_id=int(node_id),
+            type=site_type,
+            group=int(element.group),
+            use_from_to=use_from_to,
+            from_to=tuple(float(value) for value in from_to),
+        )
+
+    def set_site_properties(self, properties: SiteProperties) -> bool:
+        node = self._node_for_id(properties.node_id)
+        identity = self._node_element.get(int(properties.node_id))
+        if (
+            node is None
+            or identity is None
+            or node.type is not NodeType.SITE
+            or not 0 <= node.site_index < self._m.nsite
+        ):
+            return False
+        model_id, _node_type, name = identity
+        source_spec = self._spec_for_model(model_id)
+        if source_spec is None:
+            return False
+        working = source_spec.copy()
+        element = working.site(name)
+        if element is None:
+            return False
+        site_types = {
+            "sphere": mujoco.mjtGeom.mjGEOM_SPHERE,
+            "ellipsoid": mujoco.mjtGeom.mjGEOM_ELLIPSOID,
+            "capsule": mujoco.mjtGeom.mjGEOM_CAPSULE,
+            "cylinder": mujoco.mjtGeom.mjGEOM_CYLINDER,
+            "box": mujoco.mjtGeom.mjGEOM_BOX,
+        }
+        site_type = site_types.get(str(properties.type))
+        if site_type is None:
+            return False
+        element.type = site_type
+        element.group = int(properties.group)
+        if properties.use_from_to:
+            if str(properties.type) not in ("capsule", "cylinder"):
+                return False
+            element.fromto = np.asarray(properties.from_to, np.float64).reshape(6)
+        else:
+            index = int(node.site_index)
+            element.fromto = [np.nan, 0.0, 0.0, 0.0, 0.0, 0.0]
+            element.pos = np.asarray(self._m.site_pos[index], np.float64)
+            element.quat = np.asarray(self._m.site_quat[index], np.float64)
+            element.size = np.asarray(self._m.site_size[index], np.float64)
+        return self._replace_model_spec(model_id, working)
 
     def geometry_properties(self, node_id: int) -> GeometryProperties | None:
         node = self._node_for_id(node_id)

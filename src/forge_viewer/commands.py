@@ -454,6 +454,37 @@ class SetJointProperties(Command):
 
 
 @dataclass(frozen=True)
+class SetJointAdvancedProperties(Command):
+    """Set joint properties backed by rebuilt MuJoCo constants."""
+
+    joint_id: int
+    group: int
+    armature: float
+    friction_loss: float
+    reference: float
+    spring_reference: float
+    margin: float
+    limit_solver_reference: tuple[float, float]
+    limit_solver_impedance: tuple[float, float, float, float, float]
+    friction_solver_reference: tuple[float, float]
+    friction_solver_impedance: tuple[float, float, float, float, float]
+    actuator_force_limit_mode: str
+    actuator_force_range: tuple[float, float]
+    actuator_gravity_compensation: bool
+
+
+@dataclass(frozen=True)
+class SetSiteProperties(Command):
+    """Set a model site's shape, visual group, and endpoint representation."""
+
+    node_id: int
+    type: str
+    group: int
+    use_from_to: bool
+    from_to: tuple[float, float, float, float, float, float]
+
+
+@dataclass(frozen=True)
 class SetGeometryProperties(Command):
     """Set contact parameters for one model geometry."""
 

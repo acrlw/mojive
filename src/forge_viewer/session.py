@@ -18,6 +18,7 @@ from .adapters.base import (
     GeometryAdvancedProperties,
     GeometryProperties,
     GeometryShapeProperties,
+    JointAdvancedProperties,
     JointInfo,
     KeyframeInfo,
     NodeType,
@@ -29,6 +30,7 @@ from .adapters.base import (
     SceneSaveOptions,
     SceneSource,
     SensorInfo,
+    SiteProperties,
 )
 from .commands import Command, CommandResult, Query
 from .types import CameraView, Environment, Light, Material, TextureType
@@ -124,6 +126,8 @@ _SCENE_EDIT_COMMANDS = (
     cmd.RemoveResourceRoot,
     cmd.SetPose,
     cmd.SetJointProperties,
+    cmd.SetJointAdvancedProperties,
+    cmd.SetSiteProperties,
     cmd.SetGeometryProperties,
     cmd.SetGeometryAdvancedProperties,
     cmd.SetGeometryShape,
@@ -339,6 +343,14 @@ class Session:
     def geometry_properties(self, node_id: int) -> GeometryProperties | None:
         """Return editable contact parameters for one model geometry."""
         return self._adapter.geometry_properties(node_id)
+
+    def joint_advanced_properties(self, joint_id: int) -> JointAdvancedProperties | None:
+        """Return joint properties backed by rebuilt MuJoCo constants."""
+        return self._adapter.joint_advanced_properties(joint_id)
+
+    def site_properties(self, node_id: int) -> SiteProperties | None:
+        """Return editable shape and endpoint properties for one model site."""
+        return self._adapter.site_properties(node_id)
 
     def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None:
         """Return geometry properties backed by rebuilt MuJoCo constants."""
@@ -1144,6 +1156,112 @@ class Session:
             self._refresh_joint_metadata()
             self._adapter_revision = self._adapter.structure_revision
             self._structure_generation += 1
+            return CommandResult.good("")
+
+        if isinstance(c, cmd.SetJointAdvancedProperties):
+            if not caps.model_properties:
+                return CommandResult.bad(f"{caps.name} does not support model property editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before editing joint properties")
+            if self._adapter.joint_advanced_properties(c.joint_id) is None:
+                return CommandResult.bad(f"Joint {c.joint_id} is unavailable")
+            try:
+                group = int(c.group)
+                scalars = np.asarray(
+                    (c.armature, c.friction_loss, c.reference, c.spring_reference, c.margin),
+                    np.float64,
+                )
+                limit_reference = np.asarray(c.limit_solver_reference, np.float64).reshape(2)
+                limit_impedance = np.asarray(c.limit_solver_impedance, np.float64).reshape(5)
+                friction_reference = np.asarray(c.friction_solver_reference, np.float64).reshape(2)
+                friction_impedance = np.asarray(c.friction_solver_impedance, np.float64).reshape(5)
+                force_range = np.asarray(c.actuator_force_range, np.float64).reshape(2)
+            except (TypeError, ValueError, OverflowError):
+                return CommandResult.bad("Advanced joint properties have invalid value types")
+            values = np.concatenate(
+                (
+                    scalars,
+                    limit_reference,
+                    limit_impedance,
+                    friction_reference,
+                    friction_impedance,
+                    force_range,
+                )
+            )
+            if not np.all(np.isfinite(values)):
+                return CommandResult.bad("Advanced joint properties must be finite")
+            if not 0 <= group < 6:
+                return CommandResult.bad("Joint group must be between 0 and 5")
+            if scalars[0] < 0.0 or scalars[1] < 0.0 or scalars[4] < 0.0:
+                return CommandResult.bad("Armature, friction loss, and margin cannot be negative")
+            force_limit_mode = str(c.actuator_force_limit_mode)
+            if force_limit_mode not in {"auto", "unlimited", "limited"}:
+                return CommandResult.bad("Actuator force limit mode is invalid")
+            if force_limit_mode == "limited" and force_range[1] <= force_range[0]:
+                return CommandResult.bad("Actuator force upper bound must exceed its lower bound")
+            properties = JointAdvancedProperties(
+                joint_id=int(c.joint_id),
+                group=group,
+                armature=float(scalars[0]),
+                friction_loss=float(scalars[1]),
+                reference=float(scalars[2]),
+                spring_reference=float(scalars[3]),
+                margin=float(scalars[4]),
+                limit_solver_reference=tuple(float(value) for value in limit_reference),
+                limit_solver_impedance=tuple(float(value) for value in limit_impedance),
+                friction_solver_reference=tuple(float(value) for value in friction_reference),
+                friction_solver_impedance=tuple(float(value) for value in friction_impedance),
+                actuator_force_limit_mode=force_limit_mode,
+                actuator_force_range=tuple(float(value) for value in force_range),
+                actuator_gravity_compensation=bool(c.actuator_gravity_compensation),
+            )
+            try:
+                changed = self._adapter.set_joint_advanced_properties(properties)
+            except Exception as exc:
+                return CommandResult.bad(f"Joint properties could not be applied: {exc}")
+            if not changed:
+                return CommandResult.bad("Advanced joint properties could not be edited")
+            self._refresh_structure()
+            return CommandResult.good("")
+
+        if isinstance(c, cmd.SetSiteProperties):
+            if not caps.model_properties:
+                return CommandResult.bad(f"{caps.name} does not support model property editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before editing site properties")
+            if self._adapter.site_properties(c.node_id) is None:
+                return CommandResult.bad(f"Site node {c.node_id} is unavailable")
+            site_type = str(c.type).strip().lower()
+            if site_type not in {"sphere", "ellipsoid", "capsule", "cylinder", "box"}:
+                return CommandResult.bad("Site type is invalid")
+            try:
+                group = int(c.group)
+                from_to = np.asarray(c.from_to, np.float64).reshape(6)
+            except (TypeError, ValueError, OverflowError):
+                return CommandResult.bad("Site properties have invalid value types")
+            if not 0 <= group < 6:
+                return CommandResult.bad("Site group must be between 0 and 5")
+            if not np.all(np.isfinite(from_to)):
+                return CommandResult.bad("Site endpoints must be finite")
+            if bool(c.use_from_to):
+                if site_type not in {"capsule", "cylinder"}:
+                    return CommandResult.bad("Only capsule and cylinder sites use endpoints")
+                if np.linalg.norm(from_to[3:] - from_to[:3]) <= 1e-9:
+                    return CommandResult.bad("Site endpoints must be distinct")
+            properties = SiteProperties(
+                node_id=int(c.node_id),
+                type=site_type,
+                group=group,
+                use_from_to=bool(c.use_from_to),
+                from_to=tuple(float(value) for value in from_to),
+            )
+            try:
+                changed = self._adapter.set_site_properties(properties)
+            except Exception as exc:
+                return CommandResult.bad(f"Site properties could not be applied: {exc}")
+            if not changed:
+                return CommandResult.bad("Site properties could not be edited")
+            self._refresh_structure()
             return CommandResult.good("")
 
         if isinstance(c, cmd.SetGeometryProperties):

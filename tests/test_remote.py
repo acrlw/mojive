@@ -20,7 +20,10 @@ from forge_viewer.adapters.base import (
     GeometryAdvancedProperties,
     GeometryProperties,
     GeometryShapeProperties,
+    JointAdvancedProperties,
+    JointInfo,
     SceneAdapterBase,
+    SiteProperties,
 )
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.commands import CommandResult
@@ -103,6 +106,29 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
         (0.6, 0.3, 1.2, 0.8, 0.7),
     )
     shape_properties = GeometryShapeProperties(geometry_node_id, "mesh", "part", ("part",), ())
+    joint_properties = JointAdvancedProperties(
+        0,
+        2,
+        0.1,
+        0.2,
+        0.3,
+        0.4,
+        0.01,
+        (0.02, 1.0),
+        (0.9, 0.95, 0.001, 0.5, 2.0),
+        (0.03, 1.1),
+        (0.8, 0.9, 0.002, 0.6, 3.0),
+        "auto",
+        (-1.0, 1.0),
+        True,
+    )
+    site_properties = SiteProperties(
+        geometry_node_id,
+        "capsule",
+        2,
+        True,
+        (0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+    )
 
     def geometry_properties(node_id: int) -> GeometryProperties | None:
         return properties if node_id == geometry_node_id else None
@@ -116,6 +142,13 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
     )
     source_session.geometry_shape_properties = lambda node_id: (
         shape_properties if node_id == geometry_node_id else None
+    )
+    source_session._joints = [JointInfo(0, "hinge", "hinge", True, (-1.0, 1.0), 0, 0, 1)]
+    source_session.adapter.joint_advanced_properties = lambda joint_id: (
+        joint_properties if joint_id == 0 else None
+    )
+    source_session.site_properties = lambda node_id: (
+        site_properties if node_id == geometry_node_id else None
     )
     port = _port_pair()
     publisher = SnapshotPublisher(port=port)
@@ -132,6 +165,8 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
         assert remote.body_properties(geometry_node_id) == body_properties
         assert remote.geometry_advanced_properties(geometry_node_id) == advanced_properties
         assert remote.geometry_shape_properties(geometry_node_id) == shape_properties
+        assert remote.joint_advanced_properties(0) == joint_properties
+        assert remote.site_properties(geometry_node_id) == site_properties
         first = remote.frame(FrameNeeds())
         assert first.step == 7
         assert first.debug_commands[0]["text"] == "remote"
@@ -408,6 +443,45 @@ def test_scene_entity_commands_keep_their_typed_remote_boundary():
     assert isinstance(command, cmd.SetJointProperties)
     assert command.joint_id == 2
     assert command.range == (-0.5, 0.75)
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "joint_advanced_properties",
+            "joint_id": 2,
+            "group": 3,
+            "armature": 0.1,
+            "friction_loss": 0.2,
+            "reference": 0.3,
+            "spring_reference": 0.4,
+            "margin": 0.01,
+            "limit_solver_reference": (0.02, 1.0),
+            "limit_solver_impedance": (0.9, 0.95, 0.001, 0.5, 2.0),
+            "friction_solver_reference": (0.03, 1.1),
+            "friction_solver_impedance": (0.8, 0.9, 0.002, 0.6, 3.0),
+            "actuator_force_limit_mode": "limited",
+            "actuator_force_range": (-2.0, 3.0),
+            "actuator_gravity_compensation": True,
+        },
+    )
+    assert isinstance(command, cmd.SetJointAdvancedProperties)
+    assert command.joint_id == 2
+    assert command.actuator_force_limit_mode == "limited"
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "site_properties",
+            "node_id": 7,
+            "type": "capsule",
+            "group": 2,
+            "use_from_to": True,
+            "from_to": (0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        },
+    )
+    assert isinstance(command, cmd.SetSiteProperties)
+    assert command.node_id == 7
+    assert command.use_from_to
 
     command = handle_session_command(
         Sink(),
