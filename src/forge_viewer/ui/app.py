@@ -199,6 +199,8 @@ class ViewerApp:
         self._open_rename_popup = False
         self._precise_gizmo_edit: PreciseGizmoInput | None = None
         self._precise_gizmo_value = 0.0
+        self._precise_gizmo_absolute = False
+        self._precise_gizmo_preferred_absolute = False
         self._precise_gizmo_angle_unit = "degrees"
         self._precise_gizmo_error = ""
         self._open_precise_gizmo_popup = False
@@ -1414,10 +1416,7 @@ class ViewerApp:
             if edit is not None:
                 self.gizmo.cancel()
                 self.router.abort()
-                self._precise_gizmo_edit = edit
-                self._precise_gizmo_value = 0.0
-                self._precise_gizmo_error = ""
-                self._open_precise_gizmo_popup = True
+                self._begin_precise_gizmo_input(edit)
                 return
         self.gizmo.interact(
             self.session,
@@ -1430,6 +1429,21 @@ class ViewerApp:
             snap=state.shift,
             style_scale=self.window.style_scale,
         )
+
+    def _begin_precise_gizmo_input(self, edit: PreciseGizmoInput) -> None:
+        self._precise_gizmo_edit = edit
+        if not self.gizmo.remember_precise_input_choices:
+            self._precise_gizmo_absolute = False
+            self._precise_gizmo_angle_unit = "degrees"
+        else:
+            self._precise_gizmo_absolute = bool(
+                self._precise_gizmo_preferred_absolute and edit.absolute_value is not None
+            )
+        self._precise_gizmo_value = (
+            self._precise_gizmo_reference(edit) if self._precise_gizmo_absolute else 0.0
+        )
+        self._precise_gizmo_error = ""
+        self._open_precise_gizmo_popup = True
 
     def _draw_precise_gizmo_popup(self) -> None:
         edit = self._precise_gizmo_edit
@@ -1454,7 +1468,20 @@ class ViewerApp:
             )
         unit = "rad" if angular and self._precise_gizmo_angle_unit == "radians" else edit.unit
         imgui.text_wrapped(f"{edit.action} {edit.label}")
-        _disabled_text_wrapped("Enter a relative delta; negative values reverse direction.")
+        modes = ("Relative", "Absolute") if edit.absolute_value is not None else ("Relative",)
+        mode_index = 1 if self._precise_gizmo_absolute and len(modes) > 1 else 0
+        imgui.set_next_item_width(-1.0)
+        changed, mode_index = imgui.combo("##precise_gizmo_mode", mode_index, modes)
+        if changed:
+            self._set_precise_gizmo_absolute(edit, bool(mode_index))
+        if self._precise_gizmo_absolute:
+            _disabled_text_wrapped(f"Enter the {edit.absolute_label}.")
+        else:
+            _disabled_text_wrapped("Enter a relative delta; negative values reverse direction.")
+        if edit.absolute_value is None:
+            _disabled_text_wrapped(
+                "Absolute input requires a scalar joint or a world-frame axis handle."
+            )
         imgui.spacing()
         unit_width = float(imgui.calc_text_size(unit).x)
         if angular:
@@ -1467,7 +1494,7 @@ class ViewerApp:
         )
         imgui.set_next_item_width(input_width)
         submitted, self._precise_gizmo_value = imgui.input_double(
-            "##precise_gizmo_delta",
+            "##precise_gizmo_value",
             self._precise_gizmo_value,
             0.0,
             0.0,
@@ -1503,11 +1530,12 @@ class ViewerApp:
             value = self._precise_gizmo_value
             if angular and self._precise_gizmo_angle_unit == "radians":
                 value = float(np.degrees(value))
-            result = self.gizmo.apply_precise_delta(
+            result = self.gizmo.apply_precise_value(
                 self.session,
                 self._camera_view(),
                 edit,
                 value,
+                absolute=self._precise_gizmo_absolute,
             )
             if result.ok:
                 self._precise_gizmo_edit = None
@@ -1520,6 +1548,21 @@ class ViewerApp:
             self._precise_gizmo_error = ""
             imgui.close_current_popup()
         imgui.end_popup()
+
+    def _precise_gizmo_reference(self, edit: PreciseGizmoInput) -> float:
+        value = float(edit.absolute_value or 0.0)
+        if edit.unit == "°" and self._precise_gizmo_angle_unit == "radians":
+            return float(np.radians(value))
+        return value
+
+    def _set_precise_gizmo_absolute(self, edit: PreciseGizmoInput, absolute: bool) -> None:
+        absolute = bool(absolute and edit.absolute_value is not None)
+        if absolute == self._precise_gizmo_absolute:
+            return
+        reference = self._precise_gizmo_reference(edit)
+        self._precise_gizmo_value += reference if absolute else -reference
+        self._precise_gizmo_absolute = absolute
+        self._precise_gizmo_preferred_absolute = absolute
 
     def _publish_gizmo(self) -> None:
         self.gizmo.publish(

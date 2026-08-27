@@ -1195,7 +1195,7 @@ def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(
     popup = imgui.internal.find_window_by_name("Precise Gizmo Input")
     assert popup is not None
     content_right = popup.pos.x + popup.size.x - imgui.get_style().window_padding.x
-    assert len(wrapped) == 3
+    assert len(wrapped) == 4
     assert all(right <= content_right + 1.0 for _value, _left, right in wrapped)
     assert input_bounds[-1][1] <= content_right + 1.0
     v.app._precise_gizmo_edit = edit
@@ -1270,6 +1270,57 @@ def test_precise_rotation_input_switches_to_radians_with_u(free_body_viewer):
     assert v.session.submit(cmd.SetPose(node.node_id, before_pos, before_mat))
     for _ in range(2):
         v.sync()
+
+
+def test_precise_input_choice_memory_can_be_disabled(free_body_viewer):
+    import forge_viewer.commands as cmd
+    from forge_viewer.gizmo import GizmoHandle
+
+    v = free_body_viewer
+    node = next(n for n in v.session.nodes if n.posable)
+    assert v.session.submit(cmd.Select(node.object_id))
+    v.app.gizmo.set_mode("rotate")
+    v.app.gizmo.set_space("world")
+    v.app.gizmo._hovered = GizmoHandle.ROTATE_Z
+    edit = v.app.gizmo.precise_input(v.session)
+    assert edit is not None and edit.absolute_value is not None
+
+    v.app.gizmo.remember_precise_input_choices = True
+    v.app._precise_gizmo_preferred_absolute = True
+    v.app._precise_gizmo_angle_unit = "radians"
+    v.app._begin_precise_gizmo_input(edit)
+    assert v.app._precise_gizmo_absolute
+    assert v.app._precise_gizmo_angle_unit == "radians"
+    assert v.app._precise_gizmo_value == pytest.approx(np.radians(edit.absolute_value))
+
+    v.app._precise_gizmo_value += 0.25
+    intended_absolute = v.app._precise_gizmo_value
+    v.app._set_precise_gizmo_absolute(edit, False)
+    assert v.app._precise_gizmo_value == pytest.approx(0.25)
+    v.app._set_precise_gizmo_absolute(edit, True)
+    assert v.app._precise_gizmo_value == pytest.approx(intended_absolute)
+
+    v.app.gizmo.set_space("body")
+    body_edit = v.app.gizmo.precise_input(v.session)
+    assert body_edit is not None and body_edit.absolute_value is None
+    v.app._begin_precise_gizmo_input(body_edit)
+    assert not v.app._precise_gizmo_absolute
+    assert v.app._precise_gizmo_preferred_absolute
+    v.app.gizmo.set_space("world")
+    v.app._begin_precise_gizmo_input(edit)
+    assert v.app._precise_gizmo_absolute
+
+    v.app.gizmo.remember_precise_input_choices = False
+    v.app._begin_precise_gizmo_input(edit)
+    assert not v.app._precise_gizmo_absolute
+    assert v.app._precise_gizmo_angle_unit == "degrees"
+    assert v.app._precise_gizmo_value == 0.0
+
+    v.app.gizmo.remember_precise_input_choices = True
+    v.app._precise_gizmo_edit = None
+    v.app._precise_gizmo_absolute = False
+    v.app._precise_gizmo_preferred_absolute = False
+    v.app._open_precise_gizmo_popup = False
 
 
 @pytest.mark.parametrize(("style", "arrow_count"), (("2d", 1), ("3d", 0)))

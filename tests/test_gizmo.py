@@ -318,7 +318,7 @@ def test_precise_axis_input_applies_a_body_frame_delta_and_one_undo() -> None:
     edit = gizmo.precise_input(session)
     assert edit is not None
     assert (edit.action, edit.label, edit.unit) == ("Move", "X", "m")
-    assert gizmo.apply_precise_delta(session, camera(), edit, 0.125)
+    assert gizmo.apply_precise_value(session, camera(), edit, 0.125)
 
     expected = rotation[:, 0] * 0.125
     assert session.frame.body_xpos[node.body_index] == pytest.approx(expected, abs=1e-7)
@@ -336,7 +336,7 @@ def test_precise_rotation_input_uses_degrees_and_preserves_position() -> None:
     edit = gizmo.precise_input(session)
     assert edit is not None
     assert (edit.action, edit.label, edit.unit) == ("Rotate", "Z", "°")
-    assert gizmo.apply_precise_delta(session, camera(), edit, -12.5)
+    assert gizmo.apply_precise_value(session, camera(), edit, -12.5)
 
     expected = math3d.rotvec_to_mat3(np.array((0.0, 0.0, np.radians(-12.5))))
     assert session.frame.body_xpos[node.body_index] == pytest.approx((0.2, -0.4, 0.6))
@@ -350,6 +350,52 @@ def test_precise_input_is_only_available_for_scalar_handles() -> None:
     for handle in (GizmoHandle.SCREEN, GizmoHandle.XY, GizmoHandle.YZ, GizmoHandle.ZX):
         gizmo._hovered = handle
         assert gizmo.precise_input(session) is None
+
+
+def test_precise_world_translation_accepts_an_absolute_axis_value() -> None:
+    session, node = session_at(position=(0.2, -0.4, 0.6))
+    gizmo = ObjectGizmo()
+    gizmo.set_space("world")
+    gizmo._hovered = GizmoHandle.X
+
+    edit = gizmo.precise_input(session)
+
+    assert edit is not None
+    assert edit.absolute_value == pytest.approx(0.2)
+    assert edit.absolute_label == "target world X position"
+    assert gizmo.apply_precise_value(session, camera(), edit, 1.25, absolute=True)
+    assert session.frame.body_xpos[node.body_index] == pytest.approx((1.25, -0.4, 0.6))
+
+
+def test_precise_world_rotation_accepts_an_absolute_euler_component() -> None:
+    initial = np.radians((10.0, 20.0, 30.0))
+    session, node = session_at(rotation=math3d.euler_xyz_to_mat3(initial))
+    gizmo = ObjectGizmo("rotate")
+    gizmo.set_space("world")
+    gizmo._hovered = GizmoHandle.ROTATE_Y
+
+    edit = gizmo.precise_input(session)
+
+    assert edit is not None
+    assert edit.absolute_value == pytest.approx(20.0, abs=1e-5)
+    assert edit.absolute_label == "target world Y rotation"
+    assert gizmo.apply_precise_value(session, camera(), edit, -40.0, absolute=True)
+    expected = math3d.euler_xyz_to_mat3(np.radians((10.0, -40.0, 30.0)))
+    assert session.frame.body_xmat[node.body_index] == pytest.approx(expected, abs=1e-6)
+
+
+def test_precise_body_frame_input_does_not_claim_an_ambiguous_absolute_value() -> None:
+    session, _node = session_at(rotation=math3d.euler_xyz_to_mat3(np.radians((20.0, 0.0, 0.0))))
+    gizmo = ObjectGizmo("rotate")
+    gizmo._hovered = GizmoHandle.ROTATE_X
+
+    edit = gizmo.precise_input(session)
+
+    assert edit is not None
+    assert edit.absolute_value is None
+    result = gizmo.apply_precise_value(session, camera(), edit, 45.0, absolute=True)
+    assert not result.ok
+    assert "unavailable" in result.message
 
 
 def test_clicking_a_gizmo_without_motion_does_not_create_an_undo_record() -> None:
@@ -869,6 +915,7 @@ def test_gizmo_snap_defaults_match_the_settings_resets() -> None:
     assert gizmo.translation_snap_m == DEFAULT_TRANSLATION_SNAP_M == 0.1
     assert gizmo.rotation_snap_deg == DEFAULT_ROTATION_SNAP_DEG == 5.0
     assert gizmo.rotation_tick_scale == DEFAULT_ROTATION_TICK_SCALE == 1.25
+    assert gizmo.remember_precise_input_choices
 
 
 @pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
@@ -1344,9 +1391,97 @@ def test_precise_joint_input_uses_display_units_and_clamps_to_the_range(
     assert edit.label
     target, reason = gizmo._joint_target(session, node)
     assert target is not None, reason
-    assert gizmo.apply_precise_delta(session, camera(), edit, amount)
+    assert gizmo.apply_precise_value(session, camera(), edit, amount)
 
     expected = target.joint.range[1] if amount > 0.0 else target.joint.range[0]
+    assert adapter.data.qpos[target.joint.qpos_adr] == pytest.approx(expected)
+
+
+@pytest.mark.physics
+@pytest.mark.parametrize(
+    ("body_name", "handle", "current", "requested", "expected_display"),
+    (
+        ("hinge_body", GizmoHandle.ROTATE_Z, np.radians(-20.0), 30.0, -20.0),
+        ("slide_body", GizmoHandle.Z, -0.1, 0.2, -0.1),
+    ),
+)
+def test_precise_joint_input_accepts_an_absolute_qpos(
+    body_name: str,
+    handle: GizmoHandle,
+    current: float,
+    requested: float,
+    expected_display: float,
+) -> None:
+    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
+    from forge_viewer.assets import resolve
+
+    adapter = MuJoCoAdapter(resolve("joint_types"))
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == body_name)
+    assert session.submit(cmd.Select(node.object_id))
+    target, reason = ObjectGizmo()._joint_target(session, node)
+    assert target is not None, reason
+    assert session.submit(cmd.SetQpos(target.joint.qpos_adr, current))
+    session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
+    gizmo = ObjectGizmo()
+    gizmo._hovered = handle
+
+    edit = gizmo.precise_input(session)
+
+    assert edit is not None
+    assert edit.absolute_value == pytest.approx(expected_display)
+    assert "joint position" in edit.absolute_label
+    assert gizmo.apply_precise_value(
+        session,
+        camera(),
+        edit,
+        requested,
+        absolute=True,
+    )
+    expected = np.radians(requested) if target.joint.type == "hinge" else requested
+    assert adapter.data.qpos[target.joint.qpos_adr] == pytest.approx(expected)
+
+
+@pytest.mark.physics
+@pytest.mark.parametrize(
+    ("body_name", "handle", "current", "delta", "expected"),
+    (
+        (
+            "hinge_body",
+            GizmoHandle.ROTATE_Z,
+            np.radians(-20.0),
+            10.0,
+            np.radians(-10.0),
+        ),
+        ("slide_body", GizmoHandle.Z, -0.1, 0.05, -0.05),
+    ),
+)
+def test_precise_joint_relative_input_keeps_display_units(
+    body_name: str,
+    handle: GizmoHandle,
+    current: float,
+    delta: float,
+    expected: float,
+) -> None:
+    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
+    from forge_viewer.assets import resolve
+
+    adapter = MuJoCoAdapter(resolve("joint_types"))
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == body_name)
+    assert session.submit(cmd.Select(node.object_id))
+    gizmo = ObjectGizmo()
+    target, reason = gizmo._joint_target(session, node)
+    assert target is not None, reason
+    assert session.submit(cmd.SetQpos(target.joint.qpos_adr, current))
+    session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
+    gizmo._hovered = handle
+    edit = gizmo.precise_input(session)
+
+    assert edit is not None
+    assert gizmo.apply_precise_value(session, camera(), edit, delta)
     assert adapter.data.qpos[target.joint.qpos_adr] == pytest.approx(expected)
 
 

@@ -116,6 +116,10 @@ _ZH_CN = {
     "copy qpos": "复制 qpos",
     "copy reproduction state": "复制复现状态",
     "orthographic": "正交投影",
+    "Remember precise input choices": "记住精确输入选项",
+    "Reuse the last relative/absolute mode and angle unit in this editor session": (
+        "在当前编辑器会话中沿用上次的相对/绝对模式和角度单位"
+    ),
     "position": "位置",
     "target": "目标",
     "up": "上方向",

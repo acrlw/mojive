@@ -189,6 +189,17 @@ class SettingsPanel(Panel):
             if changed:
                 ctx.gizmo.set_space("world" if world else "body")
 
+            self._property(t("Remember precise input choices"))
+            changed, remember = imgui.checkbox(
+                "##remember_precise_input_choices",
+                bool(ctx.gizmo.remember_precise_input_choices),
+            )
+            imgui.set_item_tooltip(
+                t("Reuse the last relative/absolute mode and angle unit in this editor session")
+            )
+            if changed:
+                ctx.gizmo.remember_precise_input_choices = remember
+
             self._property(t("position snap (Shift)"))
             changed, step = imgui.drag_float(
                 "##position_snap",

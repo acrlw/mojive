@@ -319,6 +319,35 @@ def test_settings_window_is_modal_and_centered(canvas):
         settings.open = False
 
 
+def test_settings_controls_precise_input_choice_memory(canvas, monkeypatch):
+    from imgui_bundle import imgui
+
+    viewer, _scene = canvas
+    settings = viewer.app.panels.get("Settings")
+    assert settings is not None
+    original_checkbox = imgui.checkbox
+    toggled = []
+
+    def toggle_memory(label, value):
+        changed, current = original_checkbox(label, value)
+        if label == "##remember_precise_input_choices" and not toggled:
+            toggled.append(True)
+            return True, not value
+        return changed, current
+
+    try:
+        viewer.app.gizmo.remember_precise_input_choices = True
+        settings._category = "Interaction"
+        settings.open = True
+        monkeypatch.setattr(imgui, "checkbox", toggle_memory)
+        viewer.sync()
+        assert toggled
+        assert not viewer.app.gizmo.remember_precise_input_choices
+    finally:
+        viewer.app.gizmo.remember_precise_input_choices = True
+        settings.open = False
+
+
 def test_scene_camera_helper_is_pickable_and_transformable():
     from imgui_bundle import imgui
 

@@ -187,6 +187,9 @@ class PreciseGizmoInput:
     action: str
     label: str
     unit: str
+    space: str
+    absolute_value: float | None
+    absolute_label: str
 
 
 def verdict(paused: bool, node: SceneNode | None) -> Verdict:
@@ -244,6 +247,7 @@ class ObjectGizmo:
         self.translation_snap_m = DEFAULT_TRANSLATION_SNAP_M
         self.rotation_snap_deg = DEFAULT_ROTATION_SNAP_DEG
         self.rotation_tick_scale = DEFAULT_ROTATION_TICK_SCALE
+        self.remember_precise_input_choices = True
 
     @property
     def mode(self) -> str:
@@ -377,6 +381,29 @@ class ObjectGizmo:
                 joint_name if joint.type in ("hinge", "slide") else f"{joint_name} · {handle_name}"
             )
         rotating = handle in ROTATE_HANDLES
+        absolute_value = None
+        absolute_label = ""
+        if target is not None and target.joint.type in ("hinge", "slide"):
+            qpos = session.frame.qpos
+            address = int(target.joint.qpos_adr)
+            if qpos is not None and 0 <= address < len(qpos):
+                absolute_value = float(qpos[address])
+                if target.joint.type == "hinge":
+                    absolute_value = float(np.degrees(absolute_value))
+                absolute_label = f"target {label} joint position"
+        # Absolute body-frame and screen rotations are not scalar coordinates. World-frame
+        # axis input deliberately matches the Inspector's extrinsic XYZ convention.
+        elif self._space is GizmoSpace.WORLD and handle is not GizmoHandle.ROTATE_SCREEN:
+            pose = self._target_pose(session, node, target)
+            if pose is not None:
+                position, rotation = pose
+                if handle in AXIS_HANDLES:
+                    absolute_value = float(position[axis])
+                    absolute_label = f"target world {handle_name} position"
+                elif handle in ROTATE_AXIS_HANDLES:
+                    euler = np.degrees(math3d.mat3_to_euler_xyz(rotation))
+                    absolute_value = float(euler[axis])
+                    absolute_label = f"target world {handle_name} rotation"
         return PreciseGizmoInput(
             handle=handle,
             object_id=int(session.selected),
@@ -385,20 +412,27 @@ class ObjectGizmo:
             action="Rotate" if rotating else "Move",
             label=label,
             unit="°" if rotating else "m",
+            space=self._space.value,
+            absolute_value=absolute_value,
+            absolute_label=absolute_label,
         )
 
-    def apply_precise_delta(
+    def apply_precise_value(
         self,
         session: Session,
         cam: CameraView,
         edit: PreciseGizmoInput,
         value: float,
+        *,
+        absolute: bool = False,
     ) -> CommandResult:
-        """Apply one exact scalar delta through the regular transform commands."""
+        """Apply one exact relative delta or unambiguous absolute scalar value."""
 
         amount = float(value)
         if not np.isfinite(amount):
-            return CommandResult.bad("Enter a finite numeric delta")
+            return CommandResult.bad("Enter a finite numeric value")
+        if absolute and edit.absolute_value is None:
+            return CommandResult.bad("Absolute input is unavailable for this gizmo handle")
         node = session.selected_node
         if (
             node is None
@@ -423,25 +457,23 @@ class ObjectGizmo:
         position, rotation = pose
         position = np.asarray(position, np.float64).copy()
         rotation = np.asarray(rotation, np.float64).reshape(3, 3).copy()
-        basis = self._target_basis(rotation, target)
+        basis = self._target_basis(rotation, target, space=edit.space)
         axis_index = _axis_of(edit.handle)
-        if edit.handle in AXIS_HANDLES:
-            if axis_index < 0:
-                return CommandResult.bad("Precise input requires a single translation axis")
-            axis = basis[:, axis_index]
-            position += axis * amount
-        elif edit.handle in ROTATE_HANDLES:
-            axis = (
-                -np.asarray(cam.forward(), np.float64)
-                if edit.handle is GizmoHandle.ROTATE_SCREEN
-                else basis[:, axis_index]
-            )
-            rotation = math3d.rotvec_to_mat3(axis * np.radians(amount)) @ rotation
-        else:
+        if edit.handle not in (*AXIS_HANDLES, *ROTATE_HANDLES):
             return CommandResult.bad("Precise input requires a scalar gizmo handle")
+        if axis_index < 0 and edit.handle is not GizmoHandle.ROTATE_SCREEN:
+            return CommandResult.bad("Precise input requires a single gizmo axis")
 
-        if abs(amount) < 1e-12:
-            return CommandResult.good("No change")
+        axis = (
+            -np.asarray(cam.forward(), np.float64)
+            if edit.handle is GizmoHandle.ROTATE_SCREEN
+            else basis[:, axis_index]
+        )
+        applied_amount = (
+            float(np.radians(amount))
+            if target is not None and edit.handle in ROTATE_HANDLES
+            else amount
+        )
         if target is not None:
             joint = target.joint
             qpos = session.frame.qpos
@@ -449,14 +481,42 @@ class ObjectGizmo:
             start = int(joint.qpos_adr)
             if qpos is None or start < 0 or start + count > len(qpos):
                 return CommandResult.bad("Joint position data is unavailable")
-            self._start_joint_qpos = np.asarray(qpos[start : start + count], np.float64).copy()
+            joint_qpos = np.asarray(qpos[start : start + count], np.float64).copy()
+            self._start_joint_qpos = joint_qpos.copy()
+            if absolute and joint.type in ("hinge", "slide"):
+                target_value = np.radians(amount) if joint.type == "hinge" else amount
+                applied_amount = float(target_value - joint_qpos[0])
+
+        if edit.handle in AXIS_HANDLES:
+            if absolute and target is None:
+                position[axis_index] = amount
+                applied_amount = amount - float(pose[0][axis_index])
+            else:
+                position += axis * applied_amount
+        elif absolute and target is None:
+            euler = np.asarray(math3d.mat3_to_euler_xyz(rotation), np.float64)
+            applied_amount = float(np.radians(amount) - euler[axis_index])
+            euler[axis_index] = np.radians(amount)
+            rotation = math3d.euler_xyz_to_mat3(euler)
+        else:
+            angle = applied_amount if target is not None else np.radians(applied_amount)
+            rotation = math3d.rotvec_to_mat3(axis * angle) @ rotation
+
+        if abs(applied_amount) < 1e-12:
+            return CommandResult.good("No change")
         self._active = edit.handle
         self._active_joint = target.joint if target is not None else None
         np.copyto(self._start_pos, pose[0])
         np.copyto(self._start_mat, pose[1])
         np.copyto(self._start_basis, basis)
         self._axis[:] = axis
-        self._rotation_angle = np.radians(amount) if edit.handle in ROTATE_HANDLES else 0.0
+        self._rotation_angle = 0.0
+        if edit.handle in ROTATE_HANDLES:
+            self._rotation_angle = (
+                applied_amount
+                if target is not None or absolute
+                else float(np.radians(applied_amount))
+            )
         result, _position = self._submit_transform(session, node, position, rotation)
         self._end()
         if not result.ok:
@@ -1566,10 +1626,19 @@ class ObjectGizmo:
         axis = np.asarray(diagnostics.joint_xaxis[joint_id], np.float64).reshape(3)
         return position, _basis_from_z(axis)
 
-    def _target_basis(self, rotation, target: _JointTarget | None) -> np.ndarray:
+    def _target_basis(
+        self,
+        rotation,
+        target: _JointTarget | None,
+        *,
+        space: str | GizmoSpace | None = None,
+    ) -> np.ndarray:
         if target is not None and target.joint.type in ("hinge", "slide"):
             return np.asarray(rotation, np.float64).reshape(3, 3)
-        return self._basis(rotation)
+        selected = self._space if space is None else GizmoSpace(space)
+        if selected is GizmoSpace.BODY:
+            return np.asarray(rotation, np.float64).reshape(3, 3)
+        return _WORLD_BASIS
 
     def _basis(self, rotation) -> np.ndarray:
         if self._space is GizmoSpace.BODY:
