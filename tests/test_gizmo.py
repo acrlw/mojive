@@ -19,7 +19,6 @@ from forge_viewer.gizmo import (
     RING_RADIUS,
     RING_SEGMENTS,
     RING_WIDTH_PT,
-    ROTATE_AXIS_HANDLES,
     SCREEN_RING_RADIUS,
     SIZE_PT,
     GizmoFrame,
@@ -164,8 +163,8 @@ def test_rotation_guide_keeps_the_sector_and_arc_without_center_strokes(
     projected_center = project(cam, (center,), RECT)[0, :2]
     assert len(fills) == 1
     assert fills[0][0] == pytest.approx(projected_center)
-    assert sum(bool(kwargs.get("closed")) for kwargs in polylines) == 0
-    assert sum(not bool(kwargs.get("closed")) for kwargs in polylines) == 1
+    assert sum(bool(kwargs.get("closed")) for kwargs in polylines) == 1
+    assert sum(not bool(kwargs.get("closed")) for kwargs in polylines) == 0
     assert len(strokes) == 1
     stroke = strokes[0]
     point_count = len(stroke) // 2
@@ -859,57 +858,6 @@ def test_active_axis_dial_matches_the_idle_full_ring(
     ).points(RING_RADIUS, angles)
 
     assert active == pytest.approx(idle, abs=1e-6)
-
-
-@pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
-@pytest.mark.parametrize("full", [False, True], ids=("multi_axis", "single_axis"))
-@pytest.mark.parametrize("axis_index", range(3), ids=("x", "y", "z"))
-def test_pressed_axis_reference_keeps_the_idle_ring_shape(
-    orthographic: bool,
-    full: bool,
-    axis_index: int,
-) -> None:
-    cam = camera(orthographic=orthographic)
-    center = np.array((0.35, -0.2, 0.4))
-    rotation = math3d.rotvec_to_mat3(np.array((0.3, -0.2, 0.4)))
-    basis = axis_rotation(rotation, axis_index)
-    handle = ROTATE_AXIS_HANDLES[axis_index]
-    gizmo = ObjectGizmo("rotate")
-    gizmo._active = handle
-    gizmo._start_pos[:] = center
-    gizmo._start_basis[:] = rotation
-    gizmo._axis[:] = basis[:, 2]
-    gizmo._rotation_start_vec[:] = basis[:, 0]
-    gizmo._handle_mask = handle_mask(handle) if full else handle_mask(*ROTATE_AXIS_HANDLES)
-    dial = _RotationDialProjector(
-        cam,
-        RECT,
-        center,
-        basis[:, 2],
-        basis[:, 0],
-        SIZE_PT,
-    )
-    overlay = RecordingDraw2D()
-
-    gizmo._draw_rotation_guide(overlay, cam, RECT, 1.0, dial)
-
-    references = [(args[0], kwargs) for name, args, kwargs in overlay.calls if name == "polyline"]
-    assert len(references) == 1
-    reference, kwargs = references[0]
-    expected = project(
-        cam,
-        rotation_ring(
-            cam,
-            center,
-            rotation,
-            world_scale(cam, center, RECT[3], SIZE_PT),
-            axis_index,
-            full=full,
-        ),
-        RECT,
-    )[:, :2]
-    assert reference == pytest.approx(expected, abs=1e-6)
-    assert bool(kwargs.get("closed")) is full
 
 
 @pytest.mark.parametrize("distance", [4.0, 12.0], ids=("near", "far"))

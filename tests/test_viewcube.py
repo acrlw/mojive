@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -50,6 +52,31 @@ def test_layout_is_orthographic_not_perspective():
         assert abs(a.screen[0] - b.screen[0]) < 1e-9
         assert abs(a.screen[1] - b.screen[1]) < 1e-9
         assert abs(a.radius - b.radius) < 1e-9
+
+
+def test_layout_ignores_the_scene_camera_projection_mode() -> None:
+    view = cam((4.0, -4.0, 3.0))
+    perspective = vc.layout(
+        replace(view, orthographic=False, fov_y=np.radians(120.0)), CENTER, R, BALL
+    )
+    orthographic = vc.layout(
+        replace(view, orthographic=True, ortho_height=0.25),
+        CENTER,
+        R,
+        BALL,
+    )
+
+    for first, second in zip(perspective, orthographic, strict=True):
+        assert first.screen == pytest.approx(second.screen)
+        assert first.radius == pytest.approx(second.radius)
+        assert first.depth == pytest.approx(second.depth)
+
+
+def test_axis_reach_uses_orthographic_foreshortening() -> None:
+    for ball in balls_from((3.0, -5.0, 2.0)):
+        reach = np.linalg.norm(np.asarray(ball.screen) - CENTER)
+        expected = R * np.sqrt(max(0.0, 1.0 - ball.depth * ball.depth))
+        assert reach == pytest.approx(expected)
 
 
 def test_opposite_balls_are_symmetric_about_the_center():

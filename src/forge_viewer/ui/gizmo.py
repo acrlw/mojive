@@ -851,33 +851,10 @@ class ObjectGizmo:
         )
 
         dial_segments = _rotation_dial_segments(cam, self._start_pos, self._axis)
-        reference_closed = True
-        if self._active is GizmoHandle.ROTATE_SCREEN:
-            reference = dial.points(
-                ring_radius,
-                np.linspace(0.0, 2.0 * np.pi, dial_segments, endpoint=False),
-            )
-        else:
-            # The overlay replaces the idle ring while dragging, so preserve that ring's
-            # full/half geometry instead of switching to a newly oriented full dial.
-            axis_index = _axis_of(self._active)
-            visible_axes = sum(
-                bool(self._handle_mask & (1 << int(handle))) for handle in ROTATE_AXIS_HANDLES
-            )
-            reference_closed = visible_axes == 1
-            scale = world_scale(cam, self._start_pos, rect[3], SIZE_PT * style_scale)
-            reference = project(
-                cam,
-                rotation_ring(
-                    cam,
-                    self._start_pos,
-                    self._start_basis,
-                    scale,
-                    axis_index,
-                    full=reference_closed,
-                ),
-                rect,
-            )
+        reference = dial.points(
+            ring_radius,
+            np.linspace(0.0, 2.0 * np.pi, dial_segments, endpoint=False),
+        )
         point_count = max(2, int(np.ceil(dial_segments * abs(sweep) / (2.0 * np.pi))) + 1)
         angles = np.linspace(0.0, sweep, point_count)
         arc = dial.points(ring_radius, angles)
@@ -898,7 +875,7 @@ class ObjectGizmo:
                 reference[:, :2],
                 HOVER_COLOR,
                 RING_WIDTH_PT * style_scale,
-                closed=reference_closed,
+                closed=True,
             )
         if abs(sweep) > 1e-6:
             width = RING_WIDTH_PT * style_scale
