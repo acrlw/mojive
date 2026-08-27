@@ -36,6 +36,7 @@ from forge_viewer.gizmo import (  # noqa: E402
     GizmoFrame,
     GizmoHandle,
     GizmoMode,
+    handle_mask,
     project,
     world_scale,
 )
@@ -250,6 +251,25 @@ def test_rotate_mode_draws_axis_and_screen_rings(rig):
             hits += 1
     print(f"\n[metric] screen ring hits: {hits}/16")
     assert hits >= 12
+
+
+def test_idle_single_axis_rotation_draws_a_full_ring(rig):
+    if not rig.backend.caps.gizmo:
+        pytest.skip("gizmo unsupported by this backend")
+    cam = _camera()
+    frame = _frame(GizmoMode.ROTATE)
+    frame.handle_mask = handle_mask(GizmoHandle.ROTATE_Z)
+    img = rig.draw(frame, cam, box=False)
+
+    hits = 0
+    radius = RING_RADIUS * world_scale(cam, ORIGIN, H, SIZE_PT)
+    for angle in np.linspace(0.0, 2.0 * np.pi, 32, endpoint=False):
+        point = ORIGIN + radius * np.array((np.cos(angle), np.sin(angle), 0.0))
+        x, y = np.rint(project(cam, (point,), RECT)[0, :2]).astype(int)
+        patch = img[max(0, y - 2) : y + 3, max(0, x - 2) : x + 3]
+        hits += bool(_axis_mask(patch, 2).any())
+    print(f"\n[metric] idle single-axis ring hits: {hits}/32")
+    assert hits >= 26
 
 
 def test_edge_on_active_rotation_ring_has_a_rounded_silhouette(rig):

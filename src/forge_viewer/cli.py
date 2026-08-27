@@ -469,9 +469,18 @@ def cmd_canvas(args: argparse.Namespace) -> int:
 
 
 def cmd_editor(args: argparse.Namespace) -> int:
-    from .composition import build_editor
+    from .composition import build_editor, build_workspace
 
-    viewer = build_editor(vsync=not args.no_vsync, title="forge editor")
+    viewer = (
+        build_workspace(
+            _resolve(args.asset),
+            "mujoco",
+            vsync=not args.no_vsync,
+            title="forge editor",
+        )
+        if args.asset
+        else build_editor(vsync=not args.no_vsync, title="forge editor")
+    )
     try:
         viewer.run()
     finally:
@@ -705,7 +714,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-vsync", action="store_true")
     sp.set_defaults(func=cmd_canvas, json=False)
 
-    sp = sub.add_parser("editor", help="Open an empty model and scene workspace")
+    sp = sub.add_parser("editor", help="Open a model and scene workspace")
+    sp.add_argument("asset", nargs="?", help="Optional MJCF or URDF path or asset name")
     sp.add_argument("--no-vsync", action="store_true")
     sp.set_defaults(func=cmd_editor, json=False)
 

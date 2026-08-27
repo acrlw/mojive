@@ -40,6 +40,7 @@ from forge_viewer.gizmo import (
     rotation_dial,
     rotation_ring,
     rotation_ring_alpha,
+    rotation_ring_is_full,
     world_scale,
 )
 from forge_viewer.render.backend import BackendCaps
@@ -423,6 +424,46 @@ def test_rotation_idle_uses_front_half_rings_and_an_interactive_outer_ring() -> 
     assert rotation_ring_alpha(edge_cam, origin, rotation[:, 2]) == 0.0
 
 
+def test_single_axis_rotation_uses_and_hits_the_full_ring() -> None:
+    cam = camera()
+    origin = np.zeros(3)
+    rotation = np.eye(3)
+    frame = GizmoFrame(
+        mode=GizmoMode.ROTATE,
+        handle_mask=handle_mask(GizmoHandle.ROTATE_Z),
+    )
+    assert rotation_ring_is_full(frame, GizmoHandle.ROTATE_Z)
+
+    scale = world_scale(cam, origin, RECT[3])
+    front = rotation_ring(cam, origin, rotation, scale, 2, full=False)
+    full = rotation_ring(cam, origin, rotation, scale, 2, full=True)
+    front_screen = project(cam, front, RECT)[:, :2]
+    full_screen = project(cam, full, RECT)[:, :2]
+    distances = np.array(
+        [
+            min(np.linalg.norm(point - front_screen[index]) for index in range(len(front_screen)))
+            for point in full_screen
+        ]
+    )
+    back_point = full_screen[int(np.argmax(distances))]
+    assert distances.max() > 20.0
+    assert (
+        hit_test(
+            cam,
+            origin,
+            rotation,
+            RECT,
+            back_point,
+            GizmoMode.ROTATE,
+            allowed_handles=frame.handle_mask,
+        )[0]
+        is GizmoHandle.ROTATE_Z
+    )
+
+    frame.handle_mask = handle_mask(GizmoHandle.ROTATE_X, GizmoHandle.ROTATE_Z)
+    assert not rotation_ring_is_full(frame, GizmoHandle.ROTATE_Z)
+
+
 def test_translation_axes_and_planes_fade_when_their_projection_degenerates() -> None:
     cam = CameraView(
         eye=np.array((5.0, 0.0, 0.0)),
@@ -600,7 +641,7 @@ def test_multiple_direct_joints_require_an_explicit_gizmo_target() -> None:
     assert gizmo.joint_choices(session) == joints
     target, reason = gizmo._joint_target(session, node)
     assert target is None
-    assert "select one direct joint" in reason
+    assert "viewport picker" in reason
 
     gizmo.select_joint(node.body_index, joints[1].joint_id)
     target, reason = gizmo._joint_target(session, node)

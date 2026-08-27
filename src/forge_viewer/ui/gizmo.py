@@ -62,6 +62,7 @@ from ..gizmo import (
     rotation_dial,
     rotation_ring,
     rotation_ring_alpha,
+    rotation_ring_is_full,
     visibility,
     world_scale,
 )
@@ -611,8 +612,12 @@ class ObjectGizmo:
                 continue
             if frame.active_rotation_overlay and frame.active is handle:
                 continue
-            full = frame.active is handle
-            alpha = 1.0 if full else rotation_ring_alpha(cam, origin, rotation[:, axis])
+            full = rotation_ring_is_full(frame, handle)
+            alpha = (
+                1.0
+                if frame.active is handle
+                else rotation_ring_alpha(cam, origin, rotation[:, axis])
+            )
             if alpha <= 0.0:
                 continue
             ring = rotation_ring(cam, origin, rotation, scale, axis, full=full)
@@ -1196,7 +1201,7 @@ class ObjectGizmo:
         joint = next((item for item in joints if item.joint_id == selected), None)
         if joint is None:
             if len(joints) != 1:
-                return None, "select one direct joint for the viewport gizmo in the Joints panel"
+                return None, ("choose one direct joint in the viewport picker or the Joints panel")
             joint = joints[0]
         if joint.type == "hinge":
             return _JointTarget(joint, GizmoMode.ROTATE, handle_mask(GizmoHandle.ROTATE_Z)), ""

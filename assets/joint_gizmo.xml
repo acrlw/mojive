@@ -1,0 +1,78 @@
+<mujoco model="joint_gizmo_acceptance">
+  <compiler angle="degree" autolimits="true"/>
+  <option gravity="0 0 0"/>
+
+  <visual>
+    <headlight ambient="0.25 0.25 0.25" diffuse="0.55 0.55 0.55" specular="0.35 0.35 0.35"/>
+    <quality shadowsize="2048" numslices="28" numstacks="16"/>
+    <map znear="0.02" zfar="30"/>
+  </visual>
+
+  <asset>
+    <texture name="floor_grid" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.15 0.17 0.20" rgb2="0.24 0.27 0.31"/>
+    <material name="floor_grid" texture="floor_grid" texrepeat="2 2" texuniform="true"/>
+    <material name="anchor" rgba="0.31 0.33 0.37 1" specular="0.25" shininess="0.35"/>
+    <material name="revolute" rgba="0.93 0.56 0.18 1" specular="0.45" shininess="0.55"/>
+    <material name="prismatic" rgba="0.27 0.72 0.42 1" specular="0.45" shininess="0.55"/>
+    <material name="ball" rgba="0.25 0.58 0.91 1" specular="0.45" shininess="0.55"/>
+    <material name="free" rgba="0.75 0.37 0.86 1" specular="0.45" shininess="0.55"/>
+    <material name="multi" rgba="0.88 0.32 0.42 1" specular="0.45" shininess="0.55"/>
+  </asset>
+
+  <worldbody>
+    <light name="key" type="directional" pos="1 -3 6" dir="-0.15 0.35 -1"
+           diffuse="0.75 0.75 0.75" specular="0.35 0.35 0.35" castshadow="true"/>
+    <geom name="floor" type="plane" size="0 0 0.04" material="floor_grid"/>
+
+    <!-- 01: select 01_revolute. Its one rotation axis must render as a full ring. -->
+    <body name="01_revolute_anchor" pos="-1.65 0 0.55">
+      <geom type="cylinder" size="0.10 0.10" euler="90 0 0" material="anchor"/>
+      <body name="01_revolute">
+        <joint name="01_revolute_y" type="hinge" axis="0 1 0" range="-120 120"/>
+        <geom type="capsule" fromto="0 0 0 0.52 0 0" size="0.065" material="revolute"/>
+        <geom type="sphere" pos="0.52 0 0" size="0.10" material="revolute"/>
+      </body>
+    </body>
+
+    <!-- 02: select 02_prismatic. It exposes one arrow along the joint axis. -->
+    <body name="02_prismatic_anchor" pos="-0.55 0 0.55">
+      <geom type="capsule" fromto="-.42 0 0 .42 0 0" size="0.025" material="anchor"/>
+      <body name="02_prismatic">
+        <joint name="02_prismatic_x" type="slide" axis="1 0 0" range="-.34 .34"/>
+        <geom type="box" size="0.13 0.11 0.11" material="prismatic"/>
+      </body>
+    </body>
+
+    <!-- 03: select 03_ball. Its three overlapping axes retain front half-rings. -->
+    <body name="03_ball_anchor" pos="0.55 0 0.82">
+      <geom type="sphere" size="0.09" material="anchor"/>
+      <body name="03_ball" pos="0 0 -0.22">
+        <joint name="03_ball_xyz" type="ball"/>
+        <geom type="capsule" fromto="0 0 .22 0 0 -.30" size="0.06" material="ball"/>
+        <geom type="box" pos="0 0 -.30" size="0.13 0.08 0.08" material="ball"/>
+      </body>
+    </body>
+
+    <!-- 04: select 04_free. It uses the regular translate/rotate transform gizmo. -->
+    <body name="04_free" pos="1.65 0 0.55">
+      <freejoint name="04_free_6dof"/>
+      <geom type="box" size="0.16 0.16 0.16" material="free"/>
+      <geom type="capsule" fromto="0 0 .16 0 0 .38" size="0.055" material="free"/>
+    </body>
+
+    <!-- 05: one body with three direct joints. Choose the active joint in the viewport picker. -->
+    <body name="05_multi_anchor" pos="0 1.05 0.48">
+      <geom type="box" size="0.48 0.34 0.04" material="anchor"/>
+      <body name="05_multi_joint">
+        <joint name="05_multi_slide_x" type="slide" axis="1 0 0" range="-.30 .30"/>
+        <joint name="05_multi_slide_y" type="slide" axis="0 1 0" range="-.22 .22"/>
+        <joint name="05_multi_revolute_z" type="hinge" axis="0 0 1" range="-100 100"/>
+        <geom type="cylinder" size="0.16 0.13" material="multi"/>
+        <geom type="capsule" fromto="0 0 .13 .36 0 .13" size="0.055" material="multi"/>
+      </body>
+    </body>
+
+    <camera name="joint_gizmos" pos="0 -4.1 2.55" xyaxes="1 0 0 0 0.53 0.85"/>
+  </worldbody>
+</mujoco>

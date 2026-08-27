@@ -1011,6 +1011,46 @@ def test_joint_gizmo_is_live_in_the_real_viewer_pipeline(workspace):
         v.release()
 
 
+def test_multi_joint_viewport_picker_selects_the_gizmo_target():
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+
+    v = build(
+        resolve("joint_gizmo"),
+        "mujoco",
+        paused=True,
+        vsync=False,
+        width=W,
+        height=H,
+    )
+    try:
+        for _ in range(10):
+            v.sync()
+        node = next(item for item in v.session.nodes if item.name == "05_multi_joint")
+        assert v.session.submit(cmd.Select(node.object_id))
+        for _ in range(3):
+            v.sync()
+
+        choices = v.app.gizmo.joint_choices(v.session)
+        assert [joint.name for joint in choices] == [
+            "05_multi_slide_x",
+            "05_multi_slide_y",
+            "05_multi_revolute_z",
+        ]
+        assert not v.app.gizmo.last_verdict.ok
+        label = f"05_multi_revolute_z  (hinge)##viewport-joint-{choices[2].joint_id}"
+        click(v, imgui.get_io(), item_rect(v, "selectable", label))
+        for _ in range(3):
+            v.sync()
+
+        assert v.app.gizmo.selected_joint_id(node.body_index) == choices[2].joint_id
+        assert v.app.gizmo.last_verdict.ok
+        assert v.app.gizmo.visible
+    finally:
+        v.release()
+
+
 def test_gizmo_disappears_without_a_free_body(free_body_viewer):
 
     import forge_viewer.commands as cmd

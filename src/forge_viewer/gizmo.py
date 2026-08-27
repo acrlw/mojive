@@ -120,6 +120,19 @@ def display_handles(frame: GizmoFrame) -> tuple[GizmoHandle, ...]:
     return tuple(handle for handle in handles if frame.handle_mask & (1 << int(handle)))
 
 
+def rotation_ring_is_full(frame: GizmoFrame, handle: GizmoHandle) -> bool:
+    """Return whether an axis ring should show its full circumference."""
+
+    if frame.active is handle:
+        return True
+    if frame.active is not GizmoHandle.NONE:
+        return False
+    visible_axes = sum(
+        bool(frame.handle_mask & (1 << int(candidate))) for candidate in ROTATE_AXIS_HANDLES
+    )
+    return visible_axes == 1 and bool(frame.handle_mask & (1 << int(handle)))
+
+
 def world_scale(cam: CameraView, origin, viewport_height: float, size_pt: float = SIZE_PT) -> float:
     h = max(float(viewport_height), 1.0)
     view = np.asarray(cam.view_matrix(), np.float64)
@@ -506,17 +519,19 @@ def hit_test(
 
     best_distance = RING_HIT_PT * style_scale
     best_handle = GizmoHandle.NONE
+    full_axis_ring = sum(allowed(handle) for handle in ROTATE_AXIS_HANDLES) == 1
     for axis, handle in enumerate(ROTATE_AXIS_HANDLES):
         if not allowed(handle):
             continue
         if rotation_ring_alpha(cam, o, r[:, axis]) <= HANDLE_HIT_ALPHA:
             continue
-        ring = rotation_ring(cam, o, r, scale, axis, full=False)
+        ring = rotation_ring(cam, o, r, scale, axis, full=full_axis_ring)
         screen = project(cam, ring, rect)
         if np.any(screen[:, 2] <= 0.0):
             continue
         distance = min(
-            _segment_distance(p, screen[i, :2], screen[i + 1, :2]) for i in range(len(screen) - 1)
+            _segment_distance(p, screen[i, :2], screen[(i + 1) % len(screen), :2])
+            for i in range(len(screen) if full_axis_ring else len(screen) - 1)
         )
         if distance < best_distance - 1e-6 or (
             abs(distance - best_distance) <= 1e-6 and handle > best_handle

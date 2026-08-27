@@ -27,6 +27,7 @@ from ....gizmo import (
     plane_handle_alpha,
     rotation_half_basis,
     rotation_ring_alpha,
+    rotation_ring_is_full,
     screen_rotation_basis,
 )
 from ....log import get_logger
@@ -225,10 +226,10 @@ class GizmoPass(BasePass):
                     continue
                 if frame.active_rotation_overlay and frame.active is handle:
                     continue
-                full = frame.active is handle
+                full = rotation_ring_is_full(frame, handle)
                 alpha = (
                     1.0
-                    if full
+                    if frame.active is handle
                     else rotation_ring_alpha(ctx.camera, frame.position, frame.rotation[:, axis])
                 )
                 if alpha <= 0.0:

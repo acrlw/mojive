@@ -22,6 +22,7 @@ EXPECTED_ASSETS = (
     "gizmo.xml",
     "image_light.xml",
     "interpolated_flex.xml",
+    "joint_gizmo.xml",
     "joint_types.xml",
     "many_lights.xml",
     "many_objects.xml",
@@ -201,6 +202,22 @@ def test_joint_types_covers_every_kind() -> None:
 
     limited = {bool(x) for x in model.jnt_limited}
     assert limited == {True, False}
+
+
+@pytest.mark.physics
+def test_joint_gizmo_scene_covers_single_and_multi_joint_targets() -> None:
+    mujoco = pytest.importorskip("mujoco")
+    model = mujoco.MjModel.from_xml_path(str(resolve("joint_gizmo.xml")))
+
+    names = {
+        mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body): body
+        for body in range(model.nbody)
+    }
+    assert model.body_jntnum[names["01_revolute"]] == 1
+    assert model.body_jntnum[names["02_prismatic"]] == 1
+    assert model.body_jntnum[names["03_ball"]] == 1
+    assert model.body_jntnum[names["04_free"]] == 1
+    assert model.body_jntnum[names["05_multi_joint"]] == 3
 
 
 @pytest.mark.physics
