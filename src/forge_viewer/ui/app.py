@@ -102,6 +102,14 @@ def _equal_button_width(labels: tuple[str, ...]) -> float:
     return max(shared, *(button_width(label) for label in labels))
 
 
+def _disabled_text_wrapped(value: str) -> None:
+    """Draw secondary copy without letting long text escape a constrained dialog."""
+
+    imgui.push_style_color(imgui.Col_.text, imgui.get_style_color_vec4(imgui.Col_.text_disabled))
+    imgui.text_wrapped(value)
+    imgui.pop_style_color()
+
+
 @dataclass
 class Keys:
     fly: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -1429,10 +1437,17 @@ class ViewerApp:
         if not visible:
             return
 
-        imgui.text(f"{edit.action} {edit.label}")
-        imgui.text_disabled("Enter a relative delta; negative values reverse direction.")
+        imgui.text_wrapped(f"{edit.action} {edit.label}")
+        _disabled_text_wrapped("Enter a relative delta; negative values reverse direction.")
         imgui.spacing()
-        imgui.set_next_item_width(320.0)
+        unit_width = float(imgui.calc_text_size(edit.unit).x)
+        input_width = max(
+            120.0,
+            float(imgui.get_content_region_avail().x)
+            - float(imgui.get_style().item_spacing.x)
+            - unit_width,
+        )
+        imgui.set_next_item_width(input_width)
         submitted, self._precise_gizmo_value = imgui.input_double(
             "##precise_gizmo_delta",
             self._precise_gizmo_value,
@@ -1446,7 +1461,7 @@ class ViewerApp:
         if imgui.is_window_appearing():
             imgui.set_keyboard_focus_here(-1)
         if edit.joint_id >= 0:
-            imgui.text_disabled("Joint limits are applied when this value exceeds the range.")
+            _disabled_text_wrapped("Joint limits are applied when this value exceeds the range.")
         if self._precise_gizmo_error:
             imgui.spacing()
             imgui.text_wrapped(self._precise_gizmo_error)

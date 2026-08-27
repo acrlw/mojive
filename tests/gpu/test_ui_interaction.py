@@ -1123,7 +1123,11 @@ def test_dragging_the_gizmo_moves_the_object_not_the_camera(free_body_viewer):
     assert abs(v.app.camera.yaw - before_yaw) < 1e-6
 
 
-def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(free_body_viewer):
+def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(
+    free_body_viewer, monkeypatch
+):
+    from dataclasses import replace
+
     from imgui_bundle import imgui
 
     import forge_viewer.commands as cmd
@@ -1162,6 +1166,43 @@ def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(free_bod
     assert (edit.action, edit.label, edit.unit) == ("Move", "Z", "m")
     assert v.session.frame.body_xpos[node.body_index] == pytest.approx(before, abs=1e-7)
     assert abs(v.app.camera.yaw - before_yaw) < 1e-6
+
+    wrapped = []
+    input_bounds = []
+    original_text_wrapped = imgui.text_wrapped
+    original_input_double = imgui.input_double
+
+    def record_wrapped(value):
+        result = original_text_wrapped(value)
+        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        wrapped.append((value, lo.x, hi.x))
+        return result
+
+    def record_input(*args, **kwargs):
+        result = original_input_double(*args, **kwargs)
+        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        input_bounds.append((lo.x, hi.x))
+        return result
+
+    monkeypatch.setattr(imgui, "text_wrapped", record_wrapped)
+    monkeypatch.setattr(imgui, "input_double", record_input)
+    v.app._precise_gizmo_edit = replace(
+        edit,
+        label="01_revolute_y_with_a_long_joint_name",
+        joint_id=123,
+    )
+    v.sync()
+    popup = imgui.internal.find_window_by_name("Precise Gizmo Input")
+    assert popup is not None
+    content_right = popup.pos.x + popup.size.x - imgui.get_style().window_padding.x
+    assert len(wrapped) == 3
+    assert all(right <= content_right + 1.0 for _value, _left, right in wrapped)
+    assert input_bounds[-1][1] <= content_right + 1.0
+    v.app._precise_gizmo_edit = edit
+    monkeypatch.setattr(imgui, "text_wrapped", original_text_wrapped)
+    monkeypatch.setattr(imgui, "input_double", original_input_double)
+    for _ in range(2):
+        v.sync()
 
     v.app._precise_gizmo_value = 0.125
     apply = item_rect(v, "button", "Apply")
