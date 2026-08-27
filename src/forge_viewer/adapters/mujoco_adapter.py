@@ -54,6 +54,7 @@ from .base import (
     DiagnosticSource,
     EqualityConstraintInfo,
     FrameNeeds,
+    GeometryProperties,
     JointInfo,
     JointVisualType,
     KeyframeInfo,
@@ -4140,6 +4141,85 @@ class MuJoCoAdapter(SceneAdapterBase):
         mujoco.mj_setConst(self._m, self._d)
         mujoco.mj_forward(self._m, self._d)
         self._mark_model_edited(model_id)
+        self._structure_revision += 1
+        return True
+
+    def geometry_properties(self, node_id: int) -> GeometryProperties | None:
+        node = self._node_for_id(node_id)
+        if node is None or node.type is not NodeType.GEOM or node.geom_index < 0:
+            return None
+        geom = int(node.geom_index)
+        return GeometryProperties(
+            node_id=int(node_id),
+            friction=tuple(float(value) for value in self._m.geom_friction[geom]),
+            collision_type_mask=int(self._m.geom_contype[geom]),
+            collision_affinity_mask=int(self._m.geom_conaffinity[geom]),
+            contact_dimension=int(self._m.geom_condim[geom]),
+            contact_priority=int(self._m.geom_priority[geom]),
+            margin=float(self._m.geom_margin[geom]),
+            gap=float(self._m.geom_gap[geom]),
+            solver_mix=float(self._m.geom_solmix[geom]),
+        )
+
+    def set_geometry_properties(self, properties: GeometryProperties) -> bool:
+        node = self._node_for_id(properties.node_id)
+        identity = self._node_element.get(int(properties.node_id))
+        if (
+            node is None
+            or identity is None
+            or node.type is not NodeType.GEOM
+            or node.geom_index < 0
+        ):
+            return False
+        try:
+            friction = np.asarray(properties.friction, np.float64).reshape(3)
+            masks = (
+                int(properties.collision_type_mask),
+                int(properties.collision_affinity_mask),
+            )
+            contact_dimension = int(properties.contact_dimension)
+            contact_priority = int(properties.contact_priority)
+            values = np.asarray(
+                (properties.margin, properties.gap, properties.solver_mix), np.float64
+            )
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if (
+            not np.all(np.isfinite(friction))
+            or not np.all(np.isfinite(values))
+            or np.any(friction < 0.0)
+            or any(value < 0 or value > np.iinfo(np.int32).max for value in masks)
+            or contact_dimension not in (1, 3, 4, 6)
+            or not 0 <= contact_priority <= np.iinfo(np.int32).max
+            or values[0] < 0.0
+            or values[1] < 0.0
+            or not 0.0 <= values[2] <= 1.0
+        ):
+            return False
+        model_id, node_type, name = identity
+        element = self._element(model_id, node_type.value, name)
+        if element is None:
+            return False
+        element.friction = friction
+        element.contype = masks[0]
+        element.conaffinity = masks[1]
+        element.condim = contact_dimension
+        element.priority = contact_priority
+        element.margin = float(values[0])
+        element.gap = float(values[1])
+        element.solmix = float(values[2])
+
+        geom = int(node.geom_index)
+        self._m.geom_friction[geom] = friction
+        self._m.geom_contype[geom] = masks[0]
+        self._m.geom_conaffinity[geom] = masks[1]
+        self._m.geom_condim[geom] = contact_dimension
+        self._m.geom_priority[geom] = contact_priority
+        self._m.geom_margin[geom] = values[0]
+        self._m.geom_gap[geom] = values[1]
+        self._m.geom_solmix[geom] = values[2]
+        self._mark_model_edited(model_id)
+        mujoco.mj_forward(self._m, self._d)
         self._structure_revision += 1
         return True
 

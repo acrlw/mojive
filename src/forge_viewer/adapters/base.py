@@ -173,6 +173,21 @@ class ModelComponentInfo:
 
 
 @dataclass(frozen=True)
+class GeometryProperties:
+    """Editable MuJoCo contact parameters for one model geometry."""
+
+    node_id: int
+    friction: tuple[float, float, float]
+    collision_type_mask: int
+    collision_affinity_mask: int
+    contact_dimension: int
+    contact_priority: int
+    margin: float
+    gap: float
+    solver_mix: float
+
+
+@dataclass(frozen=True)
 class KeyframeInfo:
     """A named MuJoCo state preset; unnamed motion frames get a stable fallback label."""
 
@@ -824,6 +839,14 @@ class SceneAdapterBase:
         """Set authored numeric properties for one model joint."""
         return False
 
+    def geometry_properties(self, node_id: int) -> GeometryProperties | None:
+        """Return editable contact parameters for one model geometry."""
+        return None
+
+    def set_geometry_properties(self, properties: GeometryProperties) -> bool:
+        """Set authored contact parameters for one model geometry."""
+        return False
+
     def model_material_indices(self, model_id: int) -> tuple[int, ...]:
         """Return render material indices owned by one editable model."""
         return ()
@@ -1074,6 +1097,8 @@ class SceneAdapter(Protocol):
         damping: float,
         stiffness: float,
     ) -> bool: ...
+    def geometry_properties(self, node_id: int) -> GeometryProperties | None: ...
+    def set_geometry_properties(self, properties: GeometryProperties) -> bool: ...
     def model_material_indices(self, model_id: int) -> tuple[int, ...]: ...
     def model_texture_names(self, model_id: int) -> tuple[str, ...]: ...
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int: ...

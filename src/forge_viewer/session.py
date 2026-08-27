@@ -14,6 +14,7 @@ from .adapters.base import (
     CameraInfo,
     EqualityConstraintInfo,
     FrameNeeds,
+    GeometryProperties,
     JointInfo,
     KeyframeInfo,
     NodeType,
@@ -120,6 +121,7 @@ _SCENE_EDIT_COMMANDS = (
     cmd.RemoveResourceRoot,
     cmd.SetPose,
     cmd.SetJointProperties,
+    cmd.SetGeometryProperties,
     cmd.AddModelMaterial,
     cmd.ImportModelTexture,
     cmd.SetGeometryMaterial,
@@ -326,6 +328,10 @@ class Session:
     def model_material_indices(self, model_id: int) -> tuple[int, ...]:
         """Return render material indices owned by one editable model."""
         return self._adapter.model_material_indices(model_id)
+
+    def geometry_properties(self, node_id: int) -> GeometryProperties | None:
+        """Return editable contact parameters for one model geometry."""
+        return self._adapter.geometry_properties(node_id)
 
     def model_texture_names(self, model_id: int) -> tuple[str, ...]:
         """Return compiled texture names owned by one editable model."""
@@ -1117,6 +1123,58 @@ class Session:
             if not changed:
                 return CommandResult.bad(f"Joint {joint.name} properties cannot be edited")
             self._refresh_joint_metadata()
+            self._adapter_revision = self._adapter.structure_revision
+            self._structure_generation += 1
+            return CommandResult.good("")
+
+        if isinstance(c, cmd.SetGeometryProperties):
+            if not caps.model_properties:
+                return CommandResult.bad(f"{caps.name} does not support model property editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before editing geometry properties")
+            current = self._adapter.geometry_properties(c.node_id)
+            if current is None:
+                return CommandResult.bad(f"Geometry node {c.node_id} is unavailable")
+            try:
+                friction = np.asarray(c.friction, np.float64).reshape(3)
+                collision_type_mask = int(c.collision_type_mask)
+                collision_affinity_mask = int(c.collision_affinity_mask)
+                contact_dimension = int(c.contact_dimension)
+                contact_priority = int(c.contact_priority)
+                margin = float(c.margin)
+                gap = float(c.gap)
+                solver_mix = float(c.solver_mix)
+            except (TypeError, ValueError, OverflowError):
+                return CommandResult.bad("Geometry contact properties have invalid value types")
+            if not np.isfinite((*friction, margin, gap, solver_mix)).all():
+                return CommandResult.bad("Geometry properties must contain finite values")
+            if np.any(friction < 0.0):
+                return CommandResult.bad("Geometry friction cannot be negative")
+            if collision_type_mask < 0 or collision_affinity_mask < 0:
+                return CommandResult.bad("Collision masks cannot be negative")
+            if max(collision_type_mask, collision_affinity_mask) > np.iinfo(np.int32).max:
+                return CommandResult.bad("Collision masks exceed MuJoCo's 31-bit positive range")
+            if contact_dimension not in (1, 3, 4, 6):
+                return CommandResult.bad("Contact dimension must be 1, 3, 4, or 6")
+            if not 0 <= contact_priority <= np.iinfo(np.int32).max:
+                return CommandResult.bad("Contact priority exceeds MuJoCo's positive integer range")
+            if margin < 0.0 or gap < 0.0:
+                return CommandResult.bad("Contact margin and gap cannot be negative")
+            if not 0.0 <= solver_mix <= 1.0:
+                return CommandResult.bad("Solver mix must be between 0 and 1")
+            properties = GeometryProperties(
+                node_id=int(c.node_id),
+                friction=tuple(float(value) for value in friction),
+                collision_type_mask=collision_type_mask,
+                collision_affinity_mask=collision_affinity_mask,
+                contact_dimension=contact_dimension,
+                contact_priority=contact_priority,
+                margin=margin,
+                gap=gap,
+                solver_mix=solver_mix,
+            )
+            if not self._adapter.set_geometry_properties(properties):
+                return CommandResult.bad("Geometry contact properties could not be edited")
             self._adapter_revision = self._adapter.structure_revision
             self._structure_generation += 1
             return CommandResult.good("")

@@ -1258,6 +1258,88 @@ def test_ball_joint_properties_apply_one_limit_and_all_rotational_damping(tmp_pa
     assert spec.joint("ball").range == pytest.approx((0.0, 1.0))
 
 
+def test_geometry_contact_properties_update_without_topology_recompile(
+    tmp_path: Path, monkeypatch
+) -> None:
+    path = tmp_path / "contact-properties.xml"
+    path.write_text(
+        """<mujoco>
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 .1" friction=".8 .02 .003"
+          contype="2" conaffinity="5" condim="4" priority="3"
+          margin=".01" gap=".002" solmix=".6"/>
+  </worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    floor = next(node for node in session.nodes if node.name == "floor")
+    initial = session.geometry_properties(floor.node_id)
+    assert initial is not None
+    assert initial.friction == pytest.approx((0.8, 0.02, 0.003))
+    assert initial.contact_dimension == 4
+
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    source = session.source
+    generation = session.structure_generation
+    edited = cmd.SetGeometryProperties(
+        floor.node_id,
+        (1.2, 0.04, 0.006),
+        7,
+        9,
+        6,
+        11,
+        0.03,
+        0.004,
+        0.25,
+    )
+    result = session.submit(edited)
+    assert result.ok, result.message
+    assert compile_count == 0
+    assert session.source is source
+    assert session.structure_generation == generation + 1
+
+    current = session.geometry_properties(floor.node_id)
+    assert current is not None
+    assert current.friction == pytest.approx((1.2, 0.04, 0.006))
+    assert (
+        current.collision_type_mask,
+        current.collision_affinity_mask,
+        current.contact_dimension,
+        current.contact_priority,
+    ) == (7, 9, 6, 11)
+    assert (current.margin, current.gap, current.solver_mix) == pytest.approx((0.03, 0.004, 0.25))
+    geom = mujoco.mj_name2id(document.primary.model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
+    assert document.primary.model.geom_friction[geom] == pytest.approx((1.2, 0.04, 0.006))
+    spec_geom = document.primary._root_spec.geom("floor")
+    assert spec_geom.friction == pytest.approx((1.2, 0.04, 0.006))
+    assert (spec_geom.contype, spec_geom.conaffinity, spec_geom.condim) == (7, 9, 6)
+
+    invalid = session.submit(replace(edited, friction=(-1.0, 0.0, 0.0)))
+    assert not invalid.ok
+    assert "friction" in invalid.message.lower()
+    malformed = session.submit(replace(edited, friction=(1.0,)))
+    assert not malformed.ok
+    assert "invalid value types" in malformed.message.lower()
+    assert session.submit(cmd.Undo())
+    restored = session.geometry_properties(floor.node_id)
+    assert restored is not None and restored.friction == pytest.approx(initial.friction)
+    assert session.submit(cmd.Redo())
+    restored = session.geometry_properties(floor.node_id)
+    assert restored is not None and restored.friction == pytest.approx((1.2, 0.04, 0.006))
+
+
 def test_model_material_creation_binding_and_texture_import(tmp_path: Path, monkeypatch) -> None:
     from PIL import Image
 

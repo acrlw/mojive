@@ -223,6 +223,11 @@ def test_material_inspector_exposes_instance_and_shared_controls(viewer):
 
     item_rect(viewer, "input_text", "##entity_name")
     item_rect(viewer, "color_edit4", "instance color")
+    contact = item_rect(viewer, "collapsing_header", "contact properties")
+    click(viewer, imgui.get_io(), contact)
+    item_rect(viewer, "drag_float3", "friction (slide spin roll)")
+    item_rect(viewer, "combo", "contact dimension")
+    item_rect(viewer, "input_int", "collision type mask")
     item_rect(viewer, "begin_combo", "assigned material")
     item_rect(viewer, "small_button", "New material")
     item_rect(viewer, "small_button", "Duplicate material")

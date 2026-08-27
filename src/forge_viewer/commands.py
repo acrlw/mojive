@@ -454,6 +454,21 @@ class SetJointProperties(Command):
 
 
 @dataclass(frozen=True)
+class SetGeometryProperties(Command):
+    """Set contact parameters for one model geometry."""
+
+    node_id: int
+    friction: tuple[float, float, float]
+    collision_type_mask: int
+    collision_affinity_mask: int
+    contact_dimension: int
+    contact_priority: int
+    margin: float
+    gap: float
+    solver_mix: float
+
+
+@dataclass(frozen=True)
 class AddModelMaterial(Command):
     """Create a model-local material and bind it to a geometry or site node."""
 

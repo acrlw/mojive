@@ -22,6 +22,7 @@ from .adapters.base import (
     CameraInfo,
     EqualityConstraintInfo,
     FrameNeeds,
+    GeometryProperties,
     JointInfo,
     KeyframeInfo,
     SceneAdapterBase,
@@ -55,6 +56,7 @@ class RemoteStructure:
     camera_hint: CameraView | None
     timestep: float
     visual_groups: tuple[VisualGroupInfo, ...] = ()
+    geometry_properties: tuple[GeometryProperties, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -83,6 +85,11 @@ def snapshot_structure(session) -> RemoteStructure:
         session.camera_hint(),
         session.adapter.timestep(),
         session.visual_groups(),
+        tuple(
+            properties
+            for node in session.nodes
+            if (properties := session.geometry_properties(node.node_id)) is not None
+        ),
     )
 
 
@@ -307,6 +314,7 @@ class RemoteSceneAdapter(SceneAdapterBase):
         self._lock = threading.Condition()
         self._structure: RemoteStructure | None = None
         self._camera_slot_by_id: dict[int, int] = {}
+        self._geometry_properties_by_node: dict[int, GeometryProperties] = {}
         self._latest: RemoteFrame | None = None
         self._delivered_sequence = -1
         self._error = ""
@@ -364,6 +372,9 @@ class RemoteSceneAdapter(SceneAdapterBase):
                         self._structure = packet
                         self._camera_slot_by_id = {
                             camera.camera_id: slot for slot, camera in enumerate(packet.cameras)
+                        }
+                        self._geometry_properties_by_node = {
+                            item.node_id: item for item in packet.geometry_properties
                         }
                         self._latest = None
                         self._delivered_sequence = -1
@@ -440,6 +451,10 @@ class RemoteSceneAdapter(SceneAdapterBase):
 
     def equality_constraints(self) -> list[EqualityConstraintInfo]:
         return self._structure.equality_constraints
+
+    def geometry_properties(self, node_id: int) -> GeometryProperties | None:
+        with self._lock:
+            return self._geometry_properties_by_node.get(int(node_id))
 
     def load_keyframe(self, keyframe_id: int) -> bool:
         return self._ok(self._send("keyframe", keyframe_id=int(keyframe_id)))
@@ -576,6 +591,22 @@ class RemoteSceneAdapter(SceneAdapterBase):
             )
         )
 
+    def set_geometry_properties(self, properties: GeometryProperties) -> bool:
+        return self._ok(
+            self._send_structure_edit(
+                "geometry_properties",
+                node_id=int(properties.node_id),
+                friction=properties.friction,
+                collision_type_mask=int(properties.collision_type_mask),
+                collision_affinity_mask=int(properties.collision_affinity_mask),
+                contact_dimension=int(properties.contact_dimension),
+                contact_priority=int(properties.contact_priority),
+                margin=float(properties.margin),
+                gap=float(properties.gap),
+                solver_mix=float(properties.solver_mix),
+            )
+        )
+
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
         return self._ok(self._send("scene_camera", camera_id=int(camera_id), camera=camera))
 
@@ -694,6 +725,17 @@ def handle_session_command(session, message: dict):
             message["range"],
             message["damping"],
             message["stiffness"],
+        ),
+        "geometry_properties": lambda: cmd.SetGeometryProperties(
+            message["node_id"],
+            message["friction"],
+            message["collision_type_mask"],
+            message["collision_affinity_mask"],
+            message["contact_dimension"],
+            message["contact_priority"],
+            message["margin"],
+            message["gap"],
+            message["solver_mix"],
         ),
         "equality": lambda: cmd.SetEqualityEnabled(message["constraint_id"], message["enabled"]),
         "ctrl": lambda: cmd.SetCtrl(message["index"], message["value"]),

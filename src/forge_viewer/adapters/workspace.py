@@ -15,6 +15,7 @@ from .base import (
     LIGHT_OBJECT_BASE,
     CameraInfo,
     FrameNeeds,
+    GeometryProperties,
     NodeType,
     SceneAdapterBase,
     SceneFrame,
@@ -475,6 +476,16 @@ class WorkspaceAdapter(SceneAdapterBase):
         return self.primary.set_joint_properties(
             joint_id, axis, limited, value_range, damping, stiffness
         )
+
+    def geometry_properties(self, node_id: int) -> GeometryProperties | None:
+        if int(node_id) in self._node_to_scene:
+            return None
+        return self.primary.geometry_properties(node_id)
+
+    def set_geometry_properties(self, properties: GeometryProperties) -> bool:
+        if int(properties.node_id) in self._node_to_scene:
+            return False
+        return self.primary.set_geometry_properties(properties)
 
     def model_material_indices(self, model_id: int) -> tuple[int, ...]:
         return self.primary.model_material_indices(model_id)

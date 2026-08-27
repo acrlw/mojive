@@ -16,6 +16,7 @@ from forge_viewer.adapters.base import (
     LIGHT_OBJECT_BASE,
     AdapterCaps,
     FrameNeeds,
+    GeometryProperties,
     SceneAdapterBase,
 )
 from forge_viewer.adapters.static import StaticSceneAdapter
@@ -64,6 +65,23 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
     scene = Scene()
     scene.box(name="remote box")
     source_session = Session(StaticSceneAdapter(scene))
+    geometry_node_id = source_session.nodes[-1].node_id
+    properties = GeometryProperties(
+        geometry_node_id,
+        (1.0, 0.02, 0.003),
+        3,
+        5,
+        4,
+        2,
+        0.01,
+        0.002,
+        0.7,
+    )
+
+    def geometry_properties(node_id: int) -> GeometryProperties | None:
+        return properties if node_id == geometry_node_id else None
+
+    source_session.geometry_properties = geometry_properties
     port = _port_pair()
     publisher = SnapshotPublisher(port=port)
     publisher.publish_structure(snapshot_structure(source_session))
@@ -75,6 +93,7 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
     remote = RemoteSceneAdapter(port=port)
     try:
         assert remote.scene_source().instance_count == 1
+        assert remote.geometry_properties(geometry_node_id) == properties
         first = remote.frame(FrameNeeds())
         assert first.step == 7
         assert first.debug_commands[0]["text"] == "remote"
@@ -351,6 +370,26 @@ def test_scene_entity_commands_keep_their_typed_remote_boundary():
     assert isinstance(command, cmd.SetJointProperties)
     assert command.joint_id == 2
     assert command.range == (-0.5, 0.75)
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "geometry_properties",
+            "node_id": 9,
+            "friction": (1.0, 0.02, 0.003),
+            "collision_type_mask": 3,
+            "collision_affinity_mask": 5,
+            "contact_dimension": 4,
+            "contact_priority": 2,
+            "margin": 0.01,
+            "gap": 0.002,
+            "solver_mix": 0.7,
+        },
+    )
+    assert isinstance(command, cmd.SetGeometryProperties)
+    assert command.node_id == 9
+    assert command.friction == (1.0, 0.02, 0.003)
+    assert command.contact_dimension == 4
 
     command = handle_session_command(
         Sink(),

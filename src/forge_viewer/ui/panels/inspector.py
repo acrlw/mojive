@@ -840,6 +840,8 @@ class InspectorPanel(Panel):
                     ),
                 )
 
+        self._geometry_contact_properties(ctx, node_id)
+
         color_changed, rgba = imgui.color_edit4("instance color", src.geom_rgba[first])
         if color_changed and node_id >= 0:
             self._submit_edit(ctx, cmd.SetGeometryColor(node_id, np.asarray(rgba, np.float32)))
@@ -985,6 +987,94 @@ class InspectorPanel(Panel):
                 ),
             )
         imgui.pop_id()
+
+    def _geometry_contact_properties(self, ctx: PanelContext, node_id: int) -> None:
+        properties = ctx.session.geometry_properties(node_id)
+        if properties is None or not imgui.collapsing_header("contact properties"):
+            return
+        editable = bool(
+            ctx.session.adapter.caps.model_properties
+            and (not ctx.session.adapter.caps.simulation or ctx.session.paused)
+        )
+        if not editable:
+            imgui.begin_disabled()
+        friction_changed, friction = imgui.drag_float3(
+            "friction (slide spin roll)",
+            np.asarray(properties.friction, np.float32),
+            0.005,
+            0.0,
+            1000000.0,
+            "%.5f",
+        )
+        dimensions = (1, 3, 4, 6)
+        dimension_labels = (
+            "1 · frictionless",
+            "3 · sliding",
+            "4 · sliding + torsional",
+            "6 · sliding + torsional + rolling",
+        )
+        dimension = (
+            dimensions.index(properties.contact_dimension)
+            if properties.contact_dimension in dimensions
+            else 1
+        )
+        dimension_changed, dimension = imgui.combo("contact dimension", dimension, dimension_labels)
+        type_changed, type_mask = imgui.input_int(
+            "collision type mask", properties.collision_type_mask, 1, 16
+        )
+        imgui.set_item_tooltip("Decimal MuJoCo contype bitmask")
+        affinity_changed, affinity_mask = imgui.input_int(
+            "collision affinity mask", properties.collision_affinity_mask, 1, 16
+        )
+        imgui.set_item_tooltip("Decimal MuJoCo conaffinity bitmask")
+        priority_changed, priority = imgui.drag_int(
+            "contact priority", properties.contact_priority, 1.0, 0, 2147483647, "%d"
+        )
+        margin_changed, margin = imgui.drag_float(
+            "contact margin", properties.margin, 0.001, 0.0, 1000000.0, "%.5f m"
+        )
+        gap_changed, gap = imgui.drag_float(
+            "contact gap", properties.gap, 0.001, 0.0, 1000000.0, "%.5f m"
+        )
+        mix_changed, solver_mix = imgui.drag_float(
+            "solver mix", properties.solver_mix, 0.01, 0.0, 1.0, "%.3f"
+        )
+        if not editable:
+            imgui.end_disabled()
+            imgui.text_disabled("Pause the simulation to edit model contact properties")
+
+        invalid_masks = type_mask < 0 or affinity_mask < 0
+        if invalid_masks:
+            imgui.text_colored(
+                imgui.ImVec4(*ctx.theme.warning), "Collision masks cannot be negative"
+            )
+        changed = any(
+            (
+                friction_changed,
+                dimension_changed,
+                type_changed,
+                affinity_changed,
+                priority_changed,
+                margin_changed,
+                gap_changed,
+                mix_changed,
+            )
+        )
+        if changed and editable and not invalid_masks:
+            self._submit_edit(
+                ctx,
+                cmd.SetGeometryProperties(
+                    node_id,
+                    tuple(float(value) for value in friction),
+                    int(type_mask),
+                    int(affinity_mask),
+                    dimensions[dimension],
+                    int(priority),
+                    float(margin),
+                    float(gap),
+                    float(solver_mix),
+                ),
+            )
 
     def _light(self, ctx: PanelContext, node: SceneNode) -> None:
         source = ctx.session.source
