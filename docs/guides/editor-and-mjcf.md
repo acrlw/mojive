@@ -29,9 +29,10 @@ cameras, lights, actuators, sensors, tendons, and equality constraints. Topology
 new MjSpec model and migrate named simulation state where dimensions remain compatible.
 
 `ModelEditBatch` groups dependent topology operations into one compile and can reference an element
-created earlier in the same batch. Numeric edits that do not change topology use narrower paths:
-joint properties and geometry contact properties update MjSpec and the compiled model without
-rebuilding `SceneSource`.
+created earlier in the same batch. Numeric edits that do not change derived constants use narrower
+paths: joint properties and geometry contact/solver/surface properties update MjSpec and the
+compiled model without rebuilding `SceneSource`. Body inertia and geometry mass/group/fluid edits
+are buffered until **Apply**, then rebuild the model once.
 
 ## Structured model properties
 
@@ -40,7 +41,12 @@ The structured Inspector currently covers:
 - fixed body and site transforms;
 - finite plane, box, sphere/ellipsoid, capsule, cylinder, and site dimensions;
 - joint axis, limits, damping, and stiffness;
-- geometry friction, contact dimension, collision masks, priority, margin, gap, and solver mix;
+- body auto/diagonal/full inertia, mass, inertial frame, gravity compensation, mocap, and sleep
+  policy;
+- geometry friction, contact dimension, collision masks, priority, margin, gap, solver mix,
+  `solref`, `solimp`, adhesion, and surface velocity;
+- geometry visual group, density or explicit mass, volume/shell inertia, and ellipsoid fluid
+  coefficients;
 - model-local material creation, duplication, assignment, inline appearance, and PNG 2D texture
   import.
 
@@ -48,11 +54,10 @@ These controls validate values, participate in Undo/Redo, persist in workspace d
 the remote typed-command boundary where the adapter exposes the capability. Pause a simulation
 before editing model properties.
 
-This is not a complete form-based copy of the MJCF schema. Body inertial properties, geometry
-`solref`/`solimp`, resource-backed geometry creation, many component subtypes, keyframe authoring,
-contact pair/exclude, default classes, and global option/solver fields still use **Edit MJCF
-Source...**. The source popup compiles before applying changes and keeps the last good model when
-validation fails.
+This is not a complete form-based copy of the MJCF schema. Resource-backed geometry creation, many
+component subtypes, keyframe authoring, contact pair/exclude, default classes, and global
+option/solver fields still use **Edit MJCF Source...**. The source popup compiles before applying
+changes and keeps the last good model when validation fails.
 
 Use these visual acceptance entries for the supported structured paths:
 
@@ -60,6 +65,7 @@ Use these visual acceptance entries for the supported structured paths:
 make primitive-authoring BACKEND=wgpu
 make material-authoring BACKEND=wgpu
 make contact-authoring BACKEND=wgpu
+make body-authoring BACKEND=wgpu
 make joint-gizmo BACKEND=wgpu
 ```
 

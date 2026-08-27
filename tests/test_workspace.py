@@ -1303,6 +1303,10 @@ def test_geometry_contact_properties_update_without_topology_recompile(
         0.03,
         0.004,
         0.25,
+        (-120.0, -4.0),
+        (0.7, 0.9, 0.004, 0.35, 3.0),
+        0.2,
+        (1.0, 2.0, 3.0, 0.1, 0.2, 0.3),
     )
     result = session.submit(edited)
     assert result.ok, result.message
@@ -1320,11 +1324,19 @@ def test_geometry_contact_properties_update_without_topology_recompile(
         current.contact_priority,
     ) == (7, 9, 6, 11)
     assert (current.margin, current.gap, current.solver_mix) == pytest.approx((0.03, 0.004, 0.25))
+    assert current.solver_reference == pytest.approx((-120.0, -4.0))
+    assert current.solver_impedance == pytest.approx((0.7, 0.9, 0.004, 0.35, 3.0))
+    assert current.adhesion == pytest.approx(0.2)
+    assert current.surface_velocity == pytest.approx((1.0, 2.0, 3.0, 0.1, 0.2, 0.3))
     geom = mujoco.mj_name2id(document.primary.model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
     assert document.primary.model.geom_friction[geom] == pytest.approx((1.2, 0.04, 0.006))
     spec_geom = document.primary._root_spec.geom("floor")
     assert spec_geom.friction == pytest.approx((1.2, 0.04, 0.006))
     assert (spec_geom.contype, spec_geom.conaffinity, spec_geom.condim) == (7, 9, 6)
+    assert spec_geom.solref == pytest.approx((-120.0, -4.0))
+    assert spec_geom.solimp == pytest.approx((0.7, 0.9, 0.004, 0.35, 3.0))
+    assert spec_geom.adhesion == pytest.approx(0.2)
+    assert spec_geom.surfacevel == pytest.approx((1.0, 2.0, 3.0, 0.1, 0.2, 0.3))
 
     invalid = session.submit(replace(edited, friction=(-1.0, 0.0, 0.0)))
     assert not invalid.ok
@@ -1338,6 +1350,153 @@ def test_geometry_contact_properties_update_without_topology_recompile(
     assert session.submit(cmd.Redo())
     restored = session.geometry_properties(floor.node_id)
     assert restored is not None and restored.friction == pytest.approx((1.2, 0.04, 0.006))
+
+
+def test_geometry_advanced_properties_recompile_once(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "geometry-advanced.xml"
+    path.write_text(
+        """<mujoco>
+  <worldbody>
+    <body name="payload">
+      <freejoint/>
+      <geom name="payload_geom" type="box" size="0.2 0.3 0.4" density="500"
+            group="2" shellinertia="true" fluidshape="ellipsoid"
+            fluidcoef="0.6 0.3 1.2 0.8 0.7"/>
+    </body>
+  </worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    geom = next(node for node in session.nodes if node.name == "payload_geom")
+    initial = session.geometry_advanced_properties(geom.node_id)
+    assert initial is not None
+    assert initial.visual_group == 2
+    assert initial.mass_mode == "density"
+    assert initial.density == pytest.approx(500.0)
+    assert initial.inertia_mode == "shell"
+    assert initial.fluid_ellipsoid
+
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    edited = cmd.SetGeometryAdvancedProperties(
+        geom.node_id,
+        1,
+        "mass",
+        5.0,
+        700.0,
+        "volume",
+        False,
+        (0.5, 0.25, 1.5, 1.0, 1.0),
+    )
+    result = session.submit(edited)
+    assert result.ok, result.message
+    assert compile_count == 1
+    current = session.geometry_advanced_properties(geom.node_id)
+    assert current is not None
+    assert current.visual_group == 1
+    assert current.mass_mode == "mass"
+    assert current.mass == pytest.approx(5.0)
+    assert current.inertia_mode == "volume"
+    assert not current.fluid_ellipsoid
+    body = mujoco.mj_name2id(document.primary.model, mujoco.mjtObj.mjOBJ_BODY, "payload")
+    assert document.primary.model.body_mass[body] == pytest.approx(5.0)
+
+    assert session.submit(cmd.Undo())
+    restored = session.geometry_advanced_properties(geom.node_id)
+    assert restored is not None
+    assert restored.mass_mode == "density"
+    assert restored.inertia_mode == "shell"
+
+
+def test_body_inertia_properties_recompile_once_and_restore_auto_derivation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    path = tmp_path / "body-properties.xml"
+    path.write_text(
+        """<mujoco>
+  <worldbody>
+    <body name="payload">
+      <freejoint/>
+      <inertial pos="0.1 0.2 0.3" mass="2" diaginertia="1 1.5 2"/>
+      <geom name="payload_geom" type="box" size="0.2 0.3 0.4" density="500"/>
+    </body>
+  </worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    payload = next(node for node in session.nodes if node.name == "payload")
+    initial = session.body_properties(payload.node_id)
+    assert initial is not None
+    assert initial.inertia_mode == "diagonal"
+    assert initial.mass == pytest.approx(2.0)
+
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    edited = cmd.SetBodyProperties(
+        payload.node_id,
+        "full",
+        3.0,
+        (0.2, 0.1, -0.1),
+        (1.0, 0.0, 0.0, 0.0),
+        (1.0, 1.5, 2.0),
+        (2.0, 3.0, 4.0, 0.1, 0.2, 0.3),
+        0.25,
+        False,
+        "allowed",
+    )
+    result = session.submit(edited)
+    assert result.ok, result.message
+    assert compile_count == 1
+    current = session.body_properties(payload.node_id)
+    assert current is not None
+    assert current.inertia_mode == "full"
+    assert current.mass == pytest.approx(3.0)
+    assert current.full_inertia == pytest.approx(edited.full_inertia)
+    assert current.gravity_compensation == pytest.approx(0.25)
+    assert current.sleep_policy == "allowed"
+
+    result = session.submit(replace(edited, inertia_mode="auto", sleep_policy="auto"))
+    assert result.ok, result.message
+    assert compile_count == 2
+    automatic = session.body_properties(payload.node_id)
+    assert automatic is not None
+    assert automatic.inertia_mode == "auto"
+    assert automatic.mass == pytest.approx(96.0)
+    spec_body = document.primary._root_spec.body("payload")
+    assert not spec_body.explicitinertial
+    assert spec_body.mass == 0.0
+    assert np.isnan(spec_body.ipos[0])
+    assert np.isnan(spec_body.fullinertia[0])
+
+    invalid = session.submit(replace(edited, full_inertia=(1.0, 1.0, 3.0, 0, 0, 0)))
+    assert not invalid.ok
+    assert "triangle" in invalid.message.lower()
+    assert session.submit(cmd.Undo())
+    restored = session.body_properties(payload.node_id)
+    assert restored is not None and restored.inertia_mode == "full"
+    assert restored.mass == pytest.approx(3.0)
 
 
 def test_model_material_creation_binding_and_texture_import(tmp_path: Path, monkeypatch) -> None:

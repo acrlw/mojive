@@ -48,12 +48,14 @@ from .base import (
     ActuatorInfo,
     ActuatorVisualType,
     AdapterCaps,
+    BodyProperties,
     BvhType,
     CameraInfo,
     DiagnosticFrame,
     DiagnosticSource,
     EqualityConstraintInfo,
     FrameNeeds,
+    GeometryAdvancedProperties,
     GeometryProperties,
     JointInfo,
     JointVisualType,
@@ -4159,6 +4161,10 @@ class MuJoCoAdapter(SceneAdapterBase):
             margin=float(self._m.geom_margin[geom]),
             gap=float(self._m.geom_gap[geom]),
             solver_mix=float(self._m.geom_solmix[geom]),
+            solver_reference=tuple(float(value) for value in self._m.geom_solref[geom]),
+            solver_impedance=tuple(float(value) for value in self._m.geom_solimp[geom]),
+            adhesion=float(self._m.geom_adhesion[geom]),
+            surface_velocity=tuple(float(value) for value in self._m.geom_surfacevel[geom]),
         )
 
     def set_geometry_properties(self, properties: GeometryProperties) -> bool:
@@ -4182,11 +4188,19 @@ class MuJoCoAdapter(SceneAdapterBase):
             values = np.asarray(
                 (properties.margin, properties.gap, properties.solver_mix), np.float64
             )
+            solver_reference = np.asarray(properties.solver_reference, np.float64).reshape(2)
+            solver_impedance = np.asarray(properties.solver_impedance, np.float64).reshape(5)
+            adhesion = float(properties.adhesion)
+            surface_velocity = np.asarray(properties.surface_velocity, np.float64).reshape(6)
         except (TypeError, ValueError, OverflowError):
             return False
         if (
             not np.all(np.isfinite(friction))
             or not np.all(np.isfinite(values))
+            or not np.all(np.isfinite(solver_reference))
+            or not np.all(np.isfinite(solver_impedance))
+            or not np.all(np.isfinite(surface_velocity))
+            or not np.isfinite(adhesion)
             or np.any(friction < 0.0)
             or any(value < 0 or value > np.iinfo(np.int32).max for value in masks)
             or contact_dimension not in (1, 3, 4, 6)
@@ -4194,6 +4208,12 @@ class MuJoCoAdapter(SceneAdapterBase):
             or values[0] < 0.0
             or values[1] < 0.0
             or not 0.0 <= values[2] <= 1.0
+            or adhesion < 0.0
+            or not (np.all(solver_reference > 0.0) or np.all(solver_reference <= 0.0))
+            or not 0.0 <= solver_impedance[0] <= solver_impedance[1] <= 1.0
+            or solver_impedance[2] <= 0.0
+            or not 0.0 <= solver_impedance[3] <= 1.0
+            or solver_impedance[4] < 1.0
         ):
             return False
         model_id, node_type, name = identity
@@ -4208,6 +4228,10 @@ class MuJoCoAdapter(SceneAdapterBase):
         element.margin = float(values[0])
         element.gap = float(values[1])
         element.solmix = float(values[2])
+        element.solref = solver_reference
+        element.solimp = solver_impedance
+        element.adhesion = adhesion
+        element.surfacevel = surface_velocity
 
         geom = int(node.geom_index)
         self._m.geom_friction[geom] = friction
@@ -4218,10 +4242,192 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._m.geom_margin[geom] = values[0]
         self._m.geom_gap[geom] = values[1]
         self._m.geom_solmix[geom] = values[2]
+        self._m.geom_solref[geom] = solver_reference
+        self._m.geom_solimp[geom] = solver_impedance
+        self._m.geom_adhesion[geom] = adhesion
+        self._m.geom_surfacevel[geom] = surface_velocity
         self._mark_model_edited(model_id)
         mujoco.mj_forward(self._m, self._d)
         self._structure_revision += 1
         return True
+
+    def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None:
+        node = self._node_for_id(node_id)
+        identity = self._node_element.get(int(node_id))
+        if (
+            node is None
+            or identity is None
+            or node.type is not NodeType.GEOM
+            or node.geom_index < 0
+        ):
+            return None
+        model_id, node_type, name = identity
+        element = self._element(model_id, node_type.value, name)
+        if element is None:
+            return None
+        authored_mass = float(element.mass)
+        mass_mode = "mass" if np.isfinite(authored_mass) else "density"
+        return GeometryAdvancedProperties(
+            node_id=int(node_id),
+            visual_group=int(element.group),
+            mass_mode=mass_mode,
+            mass=authored_mass if mass_mode == "mass" else 1.0,
+            density=float(element.density),
+            inertia_mode=(
+                "shell"
+                if int(element.typeinertia) == int(mujoco.mjtGeomInertia.mjINERTIA_SHELL)
+                else "volume"
+            ),
+            fluid_ellipsoid=bool(float(element.fluid_ellipsoid) > 0.0),
+            fluid_coefficients=tuple(float(value) for value in element.fluid_coefs),
+        )
+
+    def set_geometry_advanced_properties(self, properties: GeometryAdvancedProperties) -> bool:
+        node = self._node_for_id(properties.node_id)
+        identity = self._node_element.get(int(properties.node_id))
+        if node is None or identity is None or node.type is not NodeType.GEOM:
+            return False
+        model_id, _node_type, name = identity
+        source_spec = self._spec_for_model(model_id)
+        if source_spec is None:
+            return False
+        edited = source_spec.copy()
+        element = edited.geom(name)
+        if element is None:
+            return False
+        mass_mode = str(properties.mass_mode).strip().lower()
+        inertia_mode = str(properties.inertia_mode).strip().lower()
+        if mass_mode not in ("density", "mass") or inertia_mode not in ("volume", "shell"):
+            return False
+        try:
+            fluid_coefficients = np.asarray(properties.fluid_coefficients, np.float64).reshape(5)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if (
+            not 0 <= int(properties.visual_group) < 6
+            or not np.isfinite((properties.mass, properties.density, *fluid_coefficients)).all()
+            or (mass_mode == "mass" and properties.mass <= 0.0)
+            or (mass_mode == "density" and properties.density <= 0.0)
+            or np.any(fluid_coefficients < 0.0)
+        ):
+            return False
+        element.group = int(properties.visual_group)
+        element.density = float(properties.density)
+        element.mass = float(properties.mass) if mass_mode == "mass" else np.nan
+        element.typeinertia = (
+            mujoco.mjtGeomInertia.mjINERTIA_SHELL
+            if inertia_mode == "shell"
+            else mujoco.mjtGeomInertia.mjINERTIA_VOLUME
+        )
+        element.fluid_ellipsoid = 1.0 if properties.fluid_ellipsoid else 0.0
+        element.fluid_coefs = fluid_coefficients
+        return self._replace_model_spec(model_id, edited)
+
+    def body_properties(self, node_id: int) -> BodyProperties | None:
+        node = self._node_for_id(node_id)
+        identity = self._node_element.get(int(node_id))
+        if (
+            node is None
+            or identity is None
+            or node.type not in (NodeType.LINK, NodeType.ROBOT)
+            or not 0 < node.body_index < self._m.nbody
+        ):
+            return None
+        model_id, node_type, name = identity
+        element = self._element(model_id, node_type.value, name)
+        if element is None:
+            return None
+        body = int(node.body_index)
+        authored_full = np.asarray(element.fullinertia, np.float64).reshape(6)
+        if not bool(element.explicitinertial):
+            inertia_mode = "auto"
+        elif np.isfinite(authored_full[0]):
+            inertia_mode = "full"
+        else:
+            inertia_mode = "diagonal"
+        diagonal = np.asarray(self._m.body_inertia[body], np.float64)
+        full = (
+            authored_full
+            if inertia_mode == "full"
+            else np.array((*diagonal, 0.0, 0.0, 0.0), np.float64)
+        )
+        sleep_policies = {
+            int(mujoco.mjtSleepPolicy.mjSLEEP_NEVER): "never",
+            int(mujoco.mjtSleepPolicy.mjSLEEP_ALLOWED): "allowed",
+            int(mujoco.mjtSleepPolicy.mjSLEEP_INIT): "init",
+        }
+        return BodyProperties(
+            node_id=int(node_id),
+            inertia_mode=inertia_mode,
+            mass=float(self._m.body_mass[body]),
+            inertial_position=tuple(float(value) for value in self._m.body_ipos[body]),
+            inertial_quaternion=tuple(float(value) for value in self._m.body_iquat[body]),
+            diagonal_inertia=tuple(float(value) for value in diagonal),
+            full_inertia=tuple(float(value) for value in full),
+            gravity_compensation=float(element.gravcomp),
+            mocap=bool(element.mocap),
+            sleep_policy=sleep_policies.get(int(element.sleep), "auto"),
+        )
+
+    def set_body_properties(self, properties: BodyProperties) -> bool:
+        node = self._node_for_id(properties.node_id)
+        identity = self._node_element.get(int(properties.node_id))
+        if (
+            node is None
+            or identity is None
+            or node.type not in (NodeType.LINK, NodeType.ROBOT)
+            or node.body_index <= 0
+        ):
+            return False
+        model_id, node_type, name = identity
+        source_spec = self._spec_for_model(model_id)
+        if source_spec is None:
+            return False
+        edited = source_spec.copy()
+        lookup = "body" if node_type in (NodeType.LINK, NodeType.ROBOT) else node_type.value
+        element = getattr(edited, lookup)(name)
+        if element is None:
+            return False
+        mode = str(properties.inertia_mode).strip().lower()
+        sleep_policy = str(properties.sleep_policy).strip().lower()
+        if mode not in ("auto", "diagonal", "full") or sleep_policy not in (
+            "auto",
+            "never",
+            "allowed",
+            "init",
+        ):
+            return False
+        element.gravcomp = float(properties.gravity_compensation)
+        element.mocap = bool(properties.mocap)
+        element.sleep = {
+            "auto": mujoco.mjtSleepPolicy.mjSLEEP_AUTO,
+            "never": mujoco.mjtSleepPolicy.mjSLEEP_NEVER,
+            "allowed": mujoco.mjtSleepPolicy.mjSLEEP_ALLOWED,
+            "init": mujoco.mjtSleepPolicy.mjSLEEP_INIT,
+        }[sleep_policy]
+        if mode == "auto":
+            # MjSpec retains explicit inertial values after toggling the flag. Clear every
+            # sentinel-backed field so the next compile really derives inertia from geoms.
+            element.explicitinertial = False
+            element.mass = 0.0
+            element.ipos = [np.nan, 0.0, 0.0]
+            element.iquat = [1.0, 0.0, 0.0, 0.0]
+            element.inertia = [0.0, 0.0, 0.0]
+            element.fullinertia = [np.nan, 0.0, 0.0, 0.0, 0.0, 0.0]
+        else:
+            quaternion = np.asarray(properties.inertial_quaternion, np.float64).reshape(4)
+            quaternion /= np.linalg.norm(quaternion)
+            element.explicitinertial = True
+            element.mass = float(properties.mass)
+            element.ipos = np.asarray(properties.inertial_position, np.float64).reshape(3)
+            element.iquat = quaternion
+            if mode == "diagonal":
+                element.inertia = np.asarray(properties.diagonal_inertia, np.float64).reshape(3)
+                element.fullinertia = [np.nan, 0.0, 0.0, 0.0, 0.0, 0.0]
+            else:
+                element.inertia = [0.0, 0.0, 0.0]
+                element.fullinertia = np.asarray(properties.full_inertia, np.float64).reshape(6)
+        return self._replace_model_spec(model_id, edited)
 
     def actuators(self) -> list[ActuatorInfo]:
         m = self._m

@@ -15,7 +15,9 @@ from forge_viewer.adapters.base import (
     CAMERA_OBJECT_BASE,
     LIGHT_OBJECT_BASE,
     AdapterCaps,
+    BodyProperties,
     FrameNeeds,
+    GeometryAdvancedProperties,
     GeometryProperties,
     SceneAdapterBase,
 )
@@ -77,11 +79,39 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
         0.002,
         0.7,
     )
+    body_properties = BodyProperties(
+        geometry_node_id,
+        "diagonal",
+        2.0,
+        (0.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0, 0.0),
+        (1.0, 1.5, 2.0),
+        (1.0, 1.5, 2.0, 0.0, 0.0, 0.0),
+        0.0,
+        False,
+        "auto",
+    )
+    advanced_properties = GeometryAdvancedProperties(
+        geometry_node_id,
+        2,
+        "density",
+        1.0,
+        500.0,
+        "shell",
+        True,
+        (0.6, 0.3, 1.2, 0.8, 0.7),
+    )
 
     def geometry_properties(node_id: int) -> GeometryProperties | None:
         return properties if node_id == geometry_node_id else None
 
     source_session.geometry_properties = geometry_properties
+    source_session.body_properties = lambda node_id: (
+        body_properties if node_id == geometry_node_id else None
+    )
+    source_session.geometry_advanced_properties = lambda node_id: (
+        advanced_properties if node_id == geometry_node_id else None
+    )
     port = _port_pair()
     publisher = SnapshotPublisher(port=port)
     publisher.publish_structure(snapshot_structure(source_session))
@@ -94,6 +124,8 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
     try:
         assert remote.scene_source().instance_count == 1
         assert remote.geometry_properties(geometry_node_id) == properties
+        assert remote.body_properties(geometry_node_id) == body_properties
+        assert remote.geometry_advanced_properties(geometry_node_id) == advanced_properties
         first = remote.frame(FrameNeeds())
         assert first.step == 7
         assert first.debug_commands[0]["text"] == "remote"
@@ -390,6 +422,44 @@ def test_scene_entity_commands_keep_their_typed_remote_boundary():
     assert command.node_id == 9
     assert command.friction == (1.0, 0.02, 0.003)
     assert command.contact_dimension == 4
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "body_properties",
+            "node_id": 7,
+            "inertia_mode": "diagonal",
+            "mass": 2.0,
+            "inertial_position": (0.0, 0.0, 0.0),
+            "inertial_quaternion": (1.0, 0.0, 0.0, 0.0),
+            "diagonal_inertia": (1.0, 1.5, 2.0),
+            "full_inertia": (1.0, 1.5, 2.0, 0.0, 0.0, 0.0),
+            "gravity_compensation": 0.0,
+            "mocap": False,
+            "sleep_policy": "auto",
+        },
+    )
+    assert isinstance(command, cmd.SetBodyProperties)
+    assert command.node_id == 7
+    assert command.diagonal_inertia == (1.0, 1.5, 2.0)
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "geometry_advanced_properties",
+            "node_id": 8,
+            "visual_group": 2,
+            "mass_mode": "density",
+            "mass": 1.0,
+            "density": 500.0,
+            "inertia_mode": "shell",
+            "fluid_ellipsoid": True,
+            "fluid_coefficients": (0.6, 0.3, 1.2, 0.8, 0.7),
+        },
+    )
+    assert isinstance(command, cmd.SetGeometryAdvancedProperties)
+    assert command.node_id == 8
+    assert command.inertia_mode == "shell"
 
     command = handle_session_command(
         Sink(),

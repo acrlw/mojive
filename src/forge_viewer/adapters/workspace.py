@@ -13,8 +13,10 @@ from ..types import InstancePoseSource, LightSet, Material, MeshKey, MeshShape
 from .base import (
     CAMERA_OBJECT_BASE,
     LIGHT_OBJECT_BASE,
+    BodyProperties,
     CameraInfo,
     FrameNeeds,
+    GeometryAdvancedProperties,
     GeometryProperties,
     NodeType,
     SceneAdapterBase,
@@ -486,6 +488,26 @@ class WorkspaceAdapter(SceneAdapterBase):
         if int(properties.node_id) in self._node_to_scene:
             return False
         return self.primary.set_geometry_properties(properties)
+
+    def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None:
+        if int(node_id) in self._node_to_scene:
+            return None
+        return self.primary.geometry_advanced_properties(node_id)
+
+    def set_geometry_advanced_properties(self, properties: GeometryAdvancedProperties) -> bool:
+        if int(properties.node_id) in self._node_to_scene:
+            return False
+        return self.primary.set_geometry_advanced_properties(properties)
+
+    def body_properties(self, node_id: int) -> BodyProperties | None:
+        if int(node_id) in self._node_to_scene:
+            return None
+        return self.primary.body_properties(node_id)
+
+    def set_body_properties(self, properties: BodyProperties) -> bool:
+        if int(properties.node_id) in self._node_to_scene:
+            return False
+        return self.primary.set_body_properties(properties)
 
     def model_material_indices(self, model_id: int) -> tuple[int, ...]:
         return self.primary.model_material_indices(model_id)

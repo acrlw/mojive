@@ -11,9 +11,11 @@ from . import commands as cmd
 from .adapters.base import (
     ENVIRONMENT_OBJECT_ID,
     ActuatorInfo,
+    BodyProperties,
     CameraInfo,
     EqualityConstraintInfo,
     FrameNeeds,
+    GeometryAdvancedProperties,
     GeometryProperties,
     JointInfo,
     KeyframeInfo,
@@ -122,6 +124,8 @@ _SCENE_EDIT_COMMANDS = (
     cmd.SetPose,
     cmd.SetJointProperties,
     cmd.SetGeometryProperties,
+    cmd.SetGeometryAdvancedProperties,
+    cmd.SetBodyProperties,
     cmd.AddModelMaterial,
     cmd.ImportModelTexture,
     cmd.SetGeometryMaterial,
@@ -332,6 +336,14 @@ class Session:
     def geometry_properties(self, node_id: int) -> GeometryProperties | None:
         """Return editable contact parameters for one model geometry."""
         return self._adapter.geometry_properties(node_id)
+
+    def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None:
+        """Return geometry properties backed by rebuilt MuJoCo constants."""
+        return self._adapter.geometry_advanced_properties(node_id)
+
+    def body_properties(self, node_id: int) -> BodyProperties | None:
+        """Return editable inertial and dynamic properties for one model body."""
+        return self._adapter.body_properties(node_id)
 
     def model_texture_names(self, model_id: int) -> tuple[str, ...]:
         """Return compiled texture names owned by one editable model."""
@@ -1144,9 +1156,31 @@ class Session:
                 margin = float(c.margin)
                 gap = float(c.gap)
                 solver_mix = float(c.solver_mix)
+                solver_reference = np.asarray(
+                    current.solver_reference if c.solver_reference is None else c.solver_reference,
+                    np.float64,
+                ).reshape(2)
+                solver_impedance = np.asarray(
+                    current.solver_impedance if c.solver_impedance is None else c.solver_impedance,
+                    np.float64,
+                ).reshape(5)
+                adhesion = float(current.adhesion if c.adhesion is None else c.adhesion)
+                surface_velocity = np.asarray(
+                    current.surface_velocity if c.surface_velocity is None else c.surface_velocity,
+                    np.float64,
+                ).reshape(6)
             except (TypeError, ValueError, OverflowError):
                 return CommandResult.bad("Geometry contact properties have invalid value types")
-            if not np.isfinite((*friction, margin, gap, solver_mix)).all():
+            finite_values = np.concatenate(
+                (
+                    friction,
+                    np.array((margin, gap, solver_mix, adhesion)),
+                    solver_reference,
+                    solver_impedance,
+                    surface_velocity,
+                )
+            )
+            if not np.all(np.isfinite(finite_values)):
                 return CommandResult.bad("Geometry properties must contain finite values")
             if np.any(friction < 0.0):
                 return CommandResult.bad("Geometry friction cannot be negative")
@@ -1162,6 +1196,21 @@ class Session:
                 return CommandResult.bad("Contact margin and gap cannot be negative")
             if not 0.0 <= solver_mix <= 1.0:
                 return CommandResult.bad("Solver mix must be between 0 and 1")
+            standard_reference = np.all(solver_reference > 0.0)
+            direct_reference = np.all(solver_reference <= 0.0)
+            if not standard_reference and not direct_reference:
+                return CommandResult.bad(
+                    "Solver reference values must both use standard or direct format"
+                )
+            if (
+                not 0.0 <= solver_impedance[0] <= solver_impedance[1] <= 1.0
+                or solver_impedance[2] <= 0.0
+                or not 0.0 <= solver_impedance[3] <= 1.0
+                or solver_impedance[4] < 1.0
+            ):
+                return CommandResult.bad("Solver impedance values are outside MuJoCo limits")
+            if adhesion < 0.0:
+                return CommandResult.bad("Geometry adhesion cannot be negative")
             properties = GeometryProperties(
                 node_id=int(c.node_id),
                 friction=tuple(float(value) for value in friction),
@@ -1172,11 +1221,139 @@ class Session:
                 margin=margin,
                 gap=gap,
                 solver_mix=solver_mix,
+                solver_reference=tuple(float(value) for value in solver_reference),
+                solver_impedance=tuple(float(value) for value in solver_impedance),
+                adhesion=adhesion,
+                surface_velocity=tuple(float(value) for value in surface_velocity),
             )
             if not self._adapter.set_geometry_properties(properties):
                 return CommandResult.bad("Geometry contact properties could not be edited")
             self._adapter_revision = self._adapter.structure_revision
             self._structure_generation += 1
+            return CommandResult.good("")
+
+        if isinstance(c, cmd.SetGeometryAdvancedProperties):
+            if not caps.model_properties:
+                return CommandResult.bad(f"{caps.name} does not support model property editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before editing geometry properties")
+            if self._adapter.geometry_advanced_properties(c.node_id) is None:
+                return CommandResult.bad(f"Geometry node {c.node_id} is unavailable")
+            mass_mode = str(c.mass_mode).strip().lower()
+            inertia_mode = str(c.inertia_mode).strip().lower()
+            if mass_mode not in ("density", "mass"):
+                return CommandResult.bad("Geometry mass mode must be density or mass")
+            if inertia_mode not in ("volume", "shell"):
+                return CommandResult.bad("Geometry inertia mode must be volume or shell")
+            try:
+                visual_group = int(c.visual_group)
+                mass = float(c.mass)
+                density = float(c.density)
+                fluid_coefficients = np.asarray(c.fluid_coefficients, np.float64).reshape(5)
+            except (TypeError, ValueError, OverflowError):
+                return CommandResult.bad("Advanced geometry properties have invalid value types")
+            if not np.isfinite((mass, density, *fluid_coefficients)).all():
+                return CommandResult.bad("Advanced geometry properties must be finite")
+            if not 0 <= visual_group < 6:
+                return CommandResult.bad("Geometry visual group must be between 0 and 5")
+            if mass_mode == "mass" and mass <= 0.0:
+                return CommandResult.bad("Geometry mass must be positive")
+            if mass_mode == "density" and density <= 0.0:
+                return CommandResult.bad("Geometry density must be positive")
+            if np.any(fluid_coefficients < 0.0):
+                return CommandResult.bad("Geometry fluid coefficients cannot be negative")
+            properties = GeometryAdvancedProperties(
+                node_id=int(c.node_id),
+                visual_group=visual_group,
+                mass_mode=mass_mode,
+                mass=mass,
+                density=density,
+                inertia_mode=inertia_mode,
+                fluid_ellipsoid=bool(c.fluid_ellipsoid),
+                fluid_coefficients=tuple(float(value) for value in fluid_coefficients),
+            )
+            try:
+                changed = self._adapter.set_geometry_advanced_properties(properties)
+            except Exception as exc:
+                return CommandResult.bad(f"Geometry properties could not be applied: {exc}")
+            if not changed:
+                return CommandResult.bad("Advanced geometry properties could not be edited")
+            self._refresh_structure()
+            return CommandResult.good("")
+
+        if isinstance(c, cmd.SetBodyProperties):
+            if not caps.model_properties:
+                return CommandResult.bad(f"{caps.name} does not support model property editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before editing body properties")
+            if self._adapter.body_properties(c.node_id) is None:
+                return CommandResult.bad(f"Body node {c.node_id} is unavailable")
+            inertia_mode = str(c.inertia_mode).strip().lower()
+            sleep_policy = str(c.sleep_policy).strip().lower()
+            if inertia_mode not in ("auto", "diagonal", "full"):
+                return CommandResult.bad("Body inertia mode must be auto, diagonal, or full")
+            if sleep_policy not in ("auto", "never", "allowed", "init"):
+                return CommandResult.bad(
+                    "Body sleep policy must be auto, never, allowed, or initially asleep"
+                )
+            try:
+                mass = float(c.mass)
+                inertial_position = np.asarray(c.inertial_position, np.float64).reshape(3)
+                inertial_quaternion = np.asarray(c.inertial_quaternion, np.float64).reshape(4)
+                diagonal_inertia = np.asarray(c.diagonal_inertia, np.float64).reshape(3)
+                full_inertia = np.asarray(c.full_inertia, np.float64).reshape(6)
+                gravity_compensation = float(c.gravity_compensation)
+            except (TypeError, ValueError, OverflowError):
+                return CommandResult.bad("Body properties have invalid value types")
+            values = np.concatenate(
+                (
+                    np.array((mass, gravity_compensation), np.float64),
+                    inertial_position,
+                    inertial_quaternion,
+                    diagonal_inertia,
+                    full_inertia,
+                )
+            )
+            if not np.all(np.isfinite(values)):
+                return CommandResult.bad("Body properties must contain finite values")
+            quaternion_norm = float(np.linalg.norm(inertial_quaternion))
+            if quaternion_norm <= 1e-12:
+                return CommandResult.bad("Body inertial rotation must be non-zero")
+            inertial_quaternion /= quaternion_norm
+            if inertia_mode != "auto" and mass <= 0.0:
+                return CommandResult.bad("Explicit body mass must be positive")
+            if inertia_mode == "diagonal":
+                if np.any(diagonal_inertia <= 0.0):
+                    return CommandResult.bad("Diagonal inertia values must be positive")
+                if 2.0 * float(np.max(diagonal_inertia)) > float(np.sum(diagonal_inertia)):
+                    return CommandResult.bad("Diagonal inertia violates the triangle inequality")
+            if inertia_mode == "full":
+                ixx, iyy, izz, ixy, ixz, iyz = full_inertia
+                tensor = np.array(((ixx, ixy, ixz), (ixy, iyy, iyz), (ixz, iyz, izz)), np.float64)
+                principal = np.linalg.eigvalsh(tensor)
+                if np.any(principal <= 0.0):
+                    return CommandResult.bad("Full inertia tensor must be positive definite")
+                if 2.0 * float(np.max(principal)) > float(np.sum(principal)):
+                    return CommandResult.bad("Full inertia tensor violates the triangle inequality")
+            properties = BodyProperties(
+                node_id=int(c.node_id),
+                inertia_mode=inertia_mode,
+                mass=mass,
+                inertial_position=tuple(float(value) for value in inertial_position),
+                inertial_quaternion=tuple(float(value) for value in inertial_quaternion),
+                diagonal_inertia=tuple(float(value) for value in diagonal_inertia),
+                full_inertia=tuple(float(value) for value in full_inertia),
+                gravity_compensation=gravity_compensation,
+                mocap=bool(c.mocap),
+                sleep_policy=sleep_policy,
+            )
+            try:
+                changed = self._adapter.set_body_properties(properties)
+            except Exception as exc:
+                return CommandResult.bad(f"Body properties could not be applied: {exc}")
+            if not changed:
+                return CommandResult.bad("Body properties could not be edited")
+            self._refresh_structure()
             return CommandResult.good("")
 
         if isinstance(c, cmd.AddModelMaterial):

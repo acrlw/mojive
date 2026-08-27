@@ -19,9 +19,11 @@ from . import commands as cmd
 from .adapters.base import (
     ActuatorInfo,
     AdapterCaps,
+    BodyProperties,
     CameraInfo,
     EqualityConstraintInfo,
     FrameNeeds,
+    GeometryAdvancedProperties,
     GeometryProperties,
     JointInfo,
     KeyframeInfo,
@@ -57,6 +59,8 @@ class RemoteStructure:
     timestep: float
     visual_groups: tuple[VisualGroupInfo, ...] = ()
     geometry_properties: tuple[GeometryProperties, ...] = ()
+    body_properties: tuple[BodyProperties, ...] = ()
+    geometry_advanced_properties: tuple[GeometryAdvancedProperties, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -89,6 +93,16 @@ def snapshot_structure(session) -> RemoteStructure:
             properties
             for node in session.nodes
             if (properties := session.geometry_properties(node.node_id)) is not None
+        ),
+        tuple(
+            properties
+            for node in session.nodes
+            if (properties := session.body_properties(node.node_id)) is not None
+        ),
+        tuple(
+            properties
+            for node in session.nodes
+            if (properties := session.geometry_advanced_properties(node.node_id)) is not None
         ),
     )
 
@@ -315,6 +329,8 @@ class RemoteSceneAdapter(SceneAdapterBase):
         self._structure: RemoteStructure | None = None
         self._camera_slot_by_id: dict[int, int] = {}
         self._geometry_properties_by_node: dict[int, GeometryProperties] = {}
+        self._body_properties_by_node: dict[int, BodyProperties] = {}
+        self._geometry_advanced_properties_by_node: dict[int, GeometryAdvancedProperties] = {}
         self._latest: RemoteFrame | None = None
         self._delivered_sequence = -1
         self._error = ""
@@ -375,6 +391,12 @@ class RemoteSceneAdapter(SceneAdapterBase):
                         }
                         self._geometry_properties_by_node = {
                             item.node_id: item for item in packet.geometry_properties
+                        }
+                        self._body_properties_by_node = {
+                            item.node_id: item for item in packet.body_properties
+                        }
+                        self._geometry_advanced_properties_by_node = {
+                            item.node_id: item for item in packet.geometry_advanced_properties
                         }
                         self._latest = None
                         self._delivered_sequence = -1
@@ -455,6 +477,14 @@ class RemoteSceneAdapter(SceneAdapterBase):
     def geometry_properties(self, node_id: int) -> GeometryProperties | None:
         with self._lock:
             return self._geometry_properties_by_node.get(int(node_id))
+
+    def body_properties(self, node_id: int) -> BodyProperties | None:
+        with self._lock:
+            return self._body_properties_by_node.get(int(node_id))
+
+    def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None:
+        with self._lock:
+            return self._geometry_advanced_properties_by_node.get(int(node_id))
 
     def load_keyframe(self, keyframe_id: int) -> bool:
         return self._ok(self._send("keyframe", keyframe_id=int(keyframe_id)))
@@ -604,6 +634,42 @@ class RemoteSceneAdapter(SceneAdapterBase):
                 margin=float(properties.margin),
                 gap=float(properties.gap),
                 solver_mix=float(properties.solver_mix),
+                solver_reference=properties.solver_reference,
+                solver_impedance=properties.solver_impedance,
+                adhesion=float(properties.adhesion),
+                surface_velocity=properties.surface_velocity,
+            )
+        )
+
+    def set_geometry_advanced_properties(self, properties: GeometryAdvancedProperties) -> bool:
+        return self._ok(
+            self._send_structure_edit(
+                "geometry_advanced_properties",
+                node_id=int(properties.node_id),
+                visual_group=int(properties.visual_group),
+                mass_mode=properties.mass_mode,
+                mass=float(properties.mass),
+                density=float(properties.density),
+                inertia_mode=properties.inertia_mode,
+                fluid_ellipsoid=bool(properties.fluid_ellipsoid),
+                fluid_coefficients=properties.fluid_coefficients,
+            )
+        )
+
+    def set_body_properties(self, properties: BodyProperties) -> bool:
+        return self._ok(
+            self._send_structure_edit(
+                "body_properties",
+                node_id=int(properties.node_id),
+                inertia_mode=properties.inertia_mode,
+                mass=float(properties.mass),
+                inertial_position=properties.inertial_position,
+                inertial_quaternion=properties.inertial_quaternion,
+                diagonal_inertia=properties.diagonal_inertia,
+                full_inertia=properties.full_inertia,
+                gravity_compensation=float(properties.gravity_compensation),
+                mocap=bool(properties.mocap),
+                sleep_policy=properties.sleep_policy,
             )
         )
 
@@ -736,6 +802,32 @@ def handle_session_command(session, message: dict):
             message["margin"],
             message["gap"],
             message["solver_mix"],
+            message.get("solver_reference"),
+            message.get("solver_impedance"),
+            message.get("adhesion"),
+            message.get("surface_velocity"),
+        ),
+        "geometry_advanced_properties": lambda: cmd.SetGeometryAdvancedProperties(
+            message["node_id"],
+            message["visual_group"],
+            message["mass_mode"],
+            message["mass"],
+            message["density"],
+            message["inertia_mode"],
+            message["fluid_ellipsoid"],
+            message["fluid_coefficients"],
+        ),
+        "body_properties": lambda: cmd.SetBodyProperties(
+            message["node_id"],
+            message["inertia_mode"],
+            message["mass"],
+            message["inertial_position"],
+            message["inertial_quaternion"],
+            message["diagonal_inertia"],
+            message["full_inertia"],
+            message["gravity_compensation"],
+            message["mocap"],
+            message["sleep_policy"],
         ),
         "equality": lambda: cmd.SetEqualityEnabled(message["constraint_id"], message["enabled"]),
         "ctrl": lambda: cmd.SetCtrl(message["index"], message["value"]),

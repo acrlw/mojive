@@ -185,6 +185,53 @@ class GeometryProperties:
     margin: float
     gap: float
     solver_mix: float
+    solver_reference: tuple[float, float] = (0.02, 1.0)
+    solver_impedance: tuple[float, float, float, float, float] = (
+        0.9,
+        0.95,
+        0.001,
+        0.5,
+        2.0,
+    )
+    adhesion: float = 0.0
+    surface_velocity: tuple[float, float, float, float, float, float] = (
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    )
+
+
+@dataclass(frozen=True)
+class GeometryAdvancedProperties:
+    """Geometry properties that require rebuilding MuJoCo-derived constants."""
+
+    node_id: int
+    visual_group: int
+    mass_mode: str
+    mass: float
+    density: float
+    inertia_mode: str
+    fluid_ellipsoid: bool
+    fluid_coefficients: tuple[float, float, float, float, float]
+
+
+@dataclass(frozen=True)
+class BodyProperties:
+    """Editable inertial and dynamic properties for one model body."""
+
+    node_id: int
+    inertia_mode: str
+    mass: float
+    inertial_position: tuple[float, float, float]
+    inertial_quaternion: tuple[float, float, float, float]
+    diagonal_inertia: tuple[float, float, float]
+    full_inertia: tuple[float, float, float, float, float, float]
+    gravity_compensation: float
+    mocap: bool
+    sleep_policy: str
 
 
 @dataclass(frozen=True)
@@ -847,6 +894,22 @@ class SceneAdapterBase:
         """Set authored contact parameters for one model geometry."""
         return False
 
+    def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None:
+        """Return geometry properties backed by rebuilt MuJoCo constants."""
+        return None
+
+    def set_geometry_advanced_properties(self, properties: GeometryAdvancedProperties) -> bool:
+        """Set geometry properties that require rebuilding MuJoCo constants."""
+        return False
+
+    def body_properties(self, node_id: int) -> BodyProperties | None:
+        """Return editable inertial and dynamic properties for one model body."""
+        return None
+
+    def set_body_properties(self, properties: BodyProperties) -> bool:
+        """Set authored inertial and dynamic properties for one model body."""
+        return False
+
     def model_material_indices(self, model_id: int) -> tuple[int, ...]:
         """Return render material indices owned by one editable model."""
         return ()
@@ -1099,6 +1162,10 @@ class SceneAdapter(Protocol):
     ) -> bool: ...
     def geometry_properties(self, node_id: int) -> GeometryProperties | None: ...
     def set_geometry_properties(self, properties: GeometryProperties) -> bool: ...
+    def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None: ...
+    def set_geometry_advanced_properties(self, properties: GeometryAdvancedProperties) -> bool: ...
+    def body_properties(self, node_id: int) -> BodyProperties | None: ...
+    def set_body_properties(self, properties: BodyProperties) -> bool: ...
     def model_material_indices(self, model_id: int) -> tuple[int, ...]: ...
     def model_texture_names(self, model_id: int) -> tuple[str, ...]: ...
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int: ...

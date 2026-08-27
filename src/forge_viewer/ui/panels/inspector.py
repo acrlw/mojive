@@ -9,7 +9,14 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ... import math3d
-from ...adapters.base import FrameNeeds, ModelComponentInfo, NodeType, SceneNode
+from ...adapters.base import (
+    BodyProperties,
+    FrameNeeds,
+    GeometryAdvancedProperties,
+    ModelComponentInfo,
+    NodeType,
+    SceneNode,
+)
 from ...render.backend import RenderFlag
 from ...types import DEFAULT_HEADLIGHT, Environment, LightType, MeshShape, TextureType
 from . import Panel, PanelContext, begin_kv_table, labeled
@@ -128,6 +135,15 @@ class InspectorPanel(Panel):
         self._model_transform_position = np.zeros(3, np.float32)
         self._model_transform_euler = np.zeros(3, np.float64)
         self._model_transform_dirty = False
+        self._body_property_node = -1
+        self._body_property_generation = -1
+        self._body_property_edit: BodyProperties | None = None
+        self._body_inertial_euler = np.zeros(3, np.float64)
+        self._body_property_error = ""
+        self._geometry_advanced_node = -1
+        self._geometry_advanced_generation = -1
+        self._geometry_advanced_edit: GeometryAdvancedProperties | None = None
+        self._geometry_advanced_error = ""
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds(
@@ -193,6 +209,8 @@ class InspectorPanel(Panel):
         self._transform(ctx, node)
         self._gizmo_reason(ctx, node)
         self._velocity(ctx, node)
+        if node.type in (NodeType.LINK, NodeType.ROBOT):
+            self._body_properties(ctx, node)
         self._material(ctx, node)
 
     def _name_editor(self, ctx: PanelContext, node: SceneNode) -> None:
@@ -631,6 +649,207 @@ class InspectorPanel(Panel):
                 labeled(j.name or f"dof{lo}", "  ".join(f"{v:+.4f}" for v in qvel[lo:hi]))
             imgui.end_table()
 
+    def _body_properties(self, ctx: PanelContext, node: SceneNode) -> None:
+        current = ctx.session.body_properties(node.node_id)
+        if current is None:
+            return
+        generation = ctx.session.structure_generation
+        if (
+            self._body_property_node != node.node_id
+            or self._body_property_generation != generation
+            or self._body_property_edit is None
+        ):
+            self._body_property_node = node.node_id
+            self._body_property_generation = generation
+            self._body_property_edit = current
+            self._body_inertial_euler = _nearest_euler_degrees(
+                math3d.quat_to_mat3(current.inertial_quaternion), None
+            )
+            self._body_property_error = ""
+        properties = self._body_property_edit
+        if properties is None or not imgui.collapsing_header("body inertial and dynamics"):
+            return
+        editable = bool(
+            ctx.session.adapter.caps.model_properties
+            and (not ctx.session.adapter.caps.simulation or ctx.session.paused)
+        )
+        if not editable:
+            imgui.begin_disabled()
+
+        inertia_modes = ("auto from geoms", "diagonal", "full tensor")
+        mode_values = ("auto", "diagonal", "full")
+        mode = mode_values.index(properties.inertia_mode)
+        mode_changed, mode = imgui.combo("inertia mode", mode, inertia_modes)
+        inertia_mode = mode_values[mode]
+        edited = replace(properties, inertia_mode=inertia_mode) if mode_changed else properties
+
+        derived = inertia_mode == "auto"
+        if derived:
+            imgui.begin_disabled()
+        mass_changed, mass = imgui.drag_float(
+            "mass", float(edited.mass), 0.01, 0.000001, 1000000000.0, "%.6g kg"
+        )
+        position_changed, inertial_position = imgui.drag_float3(
+            "inertial position",
+            np.asarray(edited.inertial_position, np.float32),
+            0.001,
+            -1000000.0,
+            1000000.0,
+            "%.5f m",
+        )
+        rotation_disabled = derived or inertia_mode == "full"
+        if rotation_disabled and not derived:
+            imgui.begin_disabled()
+        rotation_changed, inertial_euler = imgui.drag_float3(
+            "inertial rotation",
+            self._body_inertial_euler.astype(np.float32),
+            0.25,
+            -360000.0,
+            360000.0,
+            "%.2f°",
+        )
+        imgui.set_item_tooltip(
+            "Body-frame rotation of diagonal principal axes; full tensors derive this rotation"
+        )
+        if rotation_disabled and not derived:
+            imgui.end_disabled()
+        if inertia_mode in ("auto", "diagonal"):
+            diagonal_changed, diagonal_inertia = imgui.drag_float3(
+                "diagonal inertia",
+                np.asarray(edited.diagonal_inertia, np.float32),
+                0.001,
+                0.000000001,
+                1000000000000.0,
+                "%.6g",
+            )
+            full_diagonal_changed = False
+            full_cross_changed = False
+            full_diagonal = np.asarray(edited.full_inertia[:3], np.float32)
+            full_cross = np.asarray(edited.full_inertia[3:], np.float32)
+        else:
+            diagonal_changed = False
+            diagonal_inertia = np.asarray(edited.diagonal_inertia, np.float32)
+            full_diagonal_changed, full_diagonal = imgui.drag_float3(
+                "tensor xx / yy / zz",
+                np.asarray(edited.full_inertia[:3], np.float32),
+                0.001,
+                -1000000000000.0,
+                1000000000000.0,
+                "%.6g",
+            )
+            full_cross_changed, full_cross = imgui.drag_float3(
+                "tensor xy / xz / yz",
+                np.asarray(edited.full_inertia[3:], np.float32),
+                0.001,
+                -1000000000000.0,
+                1000000000000.0,
+                "%.6g",
+            )
+        if derived:
+            imgui.end_disabled()
+            imgui.text_disabled("Mass and inertia are derived from attached geoms")
+
+        gravity_changed, gravity_compensation = imgui.drag_float(
+            "gravity compensation",
+            float(edited.gravity_compensation),
+            0.01,
+            -1000000.0,
+            1000000.0,
+            "%.4f",
+        )
+        mocap_changed, mocap = imgui.checkbox("mocap body", bool(edited.mocap))
+        parent = ctx.session.node(node.parent)
+        root_body = parent is not None and parent.type in (NodeType.WORLD, NodeType.MODEL)
+        movable_root = root_body and bool(ctx.session.joints_for_body(node.body_index))
+        sleep_values = ("auto", "never", "allowed", "init")
+        sleep_labels = ("automatic", "never", "allowed", "initially asleep")
+        sleep_policy = (
+            sleep_values.index(edited.sleep_policy) if edited.sleep_policy in sleep_values else 0
+        )
+        if not movable_root:
+            imgui.begin_disabled()
+        sleep_changed, sleep_policy = imgui.combo("sleep policy", sleep_policy, sleep_labels)
+        if not movable_root:
+            imgui.end_disabled()
+            imgui.set_item_tooltip("MuJoCo sleep policies apply only to movable root bodies")
+        sleep_policy_value = sleep_values[sleep_policy]
+
+        if not editable:
+            imgui.end_disabled()
+            imgui.text_disabled("Pause the simulation to edit model body properties")
+
+        if mass_changed:
+            edited = replace(edited, mass=float(mass))
+        if position_changed:
+            edited = replace(
+                edited,
+                inertial_position=tuple(float(value) for value in inertial_position),
+            )
+        if rotation_changed and not rotation_disabled:
+            self._body_inertial_euler = np.asarray(inertial_euler, np.float64)
+            quaternion = math3d.mat3_to_quat(
+                math3d.euler_xyz_to_mat3(np.radians(self._body_inertial_euler))
+            )
+            edited = replace(
+                edited, inertial_quaternion=tuple(float(value) for value in quaternion)
+            )
+        if diagonal_changed:
+            edited = replace(
+                edited,
+                diagonal_inertia=tuple(float(value) for value in diagonal_inertia),
+            )
+        if full_diagonal_changed or full_cross_changed:
+            edited = replace(
+                edited,
+                full_inertia=tuple(float(value) for value in (*full_diagonal, *full_cross)),
+            )
+        if gravity_changed:
+            edited = replace(edited, gravity_compensation=float(gravity_compensation))
+        if mocap_changed:
+            edited = replace(edited, mocap=bool(mocap))
+        if sleep_changed and movable_root:
+            edited = replace(edited, sleep_policy=sleep_policy_value)
+        self._body_property_edit = edited
+
+        dirty = edited != current
+        if not editable or not dirty:
+            imgui.begin_disabled()
+        if imgui.button("Apply##body-properties"):
+            result = ctx.submit(
+                cmd.SetBodyProperties(
+                    node_id=edited.node_id,
+                    inertia_mode=edited.inertia_mode,
+                    mass=edited.mass,
+                    inertial_position=edited.inertial_position,
+                    inertial_quaternion=edited.inertial_quaternion,
+                    diagonal_inertia=edited.diagonal_inertia,
+                    full_inertia=edited.full_inertia,
+                    gravity_compensation=edited.gravity_compensation,
+                    mocap=edited.mocap,
+                    sleep_policy=edited.sleep_policy,
+                )
+            )
+            if result.ok:
+                self._body_property_generation = -1
+                self._body_property_error = ""
+            else:
+                self._body_property_error = result.message
+        if not editable or not dirty:
+            imgui.end_disabled()
+        imgui.same_line()
+        if imgui.button("Revert##body-properties"):
+            self._body_property_edit = current
+            self._body_inertial_euler = _nearest_euler_degrees(
+                math3d.quat_to_mat3(current.inertial_quaternion), None
+            )
+            self._body_property_error = ""
+        imgui.same_line()
+        imgui.text_disabled("Apply rebuilds the model once")
+        if self._body_property_error:
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._body_property_error)
+            if imgui.small_button("Copy error##body-properties"):
+                imgui.set_clipboard_text(self._body_property_error)
+
     def _joint(self, ctx: PanelContext, node: SceneNode) -> None:
         joint = next(
             (item for item in ctx.session.joints if item.joint_id == node.joint_index), None
@@ -841,6 +1060,7 @@ class InspectorPanel(Panel):
                 )
 
         self._geometry_contact_properties(ctx, node_id)
+        self._geometry_advanced_properties(ctx, node_id)
 
         color_changed, rgba = imgui.color_edit4("instance color", src.geom_rgba[first])
         if color_changed and node_id >= 0:
@@ -1039,6 +1259,53 @@ class InspectorPanel(Panel):
         mix_changed, solver_mix = imgui.drag_float(
             "solver mix", properties.solver_mix, 0.01, 0.0, 1.0, "%.3f"
         )
+        reference_changed, solver_reference = imgui.drag_float2(
+            "solver reference",
+            np.asarray(properties.solver_reference, np.float32),
+            0.001,
+            -1000000.0,
+            1000000.0,
+            "%.5g",
+        )
+        imgui.set_item_tooltip(
+            "Positive values use time-constant/damping-ratio format; non-positive values use "
+            "direct stiffness/damping format"
+        )
+        impedance_first_changed, impedance_first = imgui.drag_float3(
+            "impedance min / max / width",
+            np.asarray(properties.solver_impedance[:3], np.float32),
+            0.001,
+            0.0,
+            1.0,
+            "%.5g",
+        )
+        impedance_shape_changed, impedance_shape = imgui.drag_float2(
+            "impedance midpoint / power",
+            np.asarray(properties.solver_impedance[3:], np.float32),
+            0.01,
+            0.0,
+            1000.0,
+            "%.4g",
+        )
+        adhesion_changed, adhesion = imgui.drag_float(
+            "adhesion", properties.adhesion, 0.01, 0.0, 1000000000.0, "%.5g"
+        )
+        linear_velocity_changed, linear_velocity = imgui.drag_float3(
+            "surface linear velocity",
+            np.asarray(properties.surface_velocity[:3], np.float32),
+            0.01,
+            -1000000.0,
+            1000000.0,
+            "%.4g",
+        )
+        angular_velocity_changed, angular_velocity = imgui.drag_float3(
+            "surface angular velocity",
+            np.asarray(properties.surface_velocity[3:], np.float32),
+            0.01,
+            -1000000.0,
+            1000000.0,
+            "%.4g",
+        )
         if not editable:
             imgui.end_disabled()
             imgui.text_disabled("Pause the simulation to edit model contact properties")
@@ -1058,6 +1325,12 @@ class InspectorPanel(Panel):
                 margin_changed,
                 gap_changed,
                 mix_changed,
+                reference_changed,
+                impedance_first_changed,
+                impedance_shape_changed,
+                adhesion_changed,
+                linear_velocity_changed,
+                angular_velocity_changed,
             )
         )
         if changed and editable and not invalid_masks:
@@ -1073,8 +1346,138 @@ class InspectorPanel(Panel):
                     float(margin),
                     float(gap),
                     float(solver_mix),
+                    tuple(float(value) for value in solver_reference),
+                    tuple(float(value) for value in (*impedance_first, *impedance_shape)),
+                    float(adhesion),
+                    tuple(float(value) for value in (*linear_velocity, *angular_velocity)),
                 ),
             )
+
+    def _geometry_advanced_properties(self, ctx: PanelContext, node_id: int) -> None:
+        current = ctx.session.geometry_advanced_properties(node_id)
+        if current is None:
+            return
+        generation = ctx.session.structure_generation
+        if (
+            self._geometry_advanced_node != node_id
+            or self._geometry_advanced_generation != generation
+            or self._geometry_advanced_edit is None
+        ):
+            self._geometry_advanced_node = node_id
+            self._geometry_advanced_generation = generation
+            self._geometry_advanced_edit = current
+            self._geometry_advanced_error = ""
+        properties = self._geometry_advanced_edit
+        if properties is None or not imgui.collapsing_header("mass, group, and fluid"):
+            return
+        editable = bool(
+            ctx.session.adapter.caps.model_properties
+            and (not ctx.session.adapter.caps.simulation or ctx.session.paused)
+        )
+        if not editable:
+            imgui.begin_disabled()
+        group_changed, visual_group = imgui.combo(
+            "visual group", int(properties.visual_group), tuple(str(value) for value in range(6))
+        )
+        imgui.set_item_tooltip("MuJoCo geom group used by visibility filters")
+        mass_values = ("density", "mass")
+        mass_mode = mass_values.index(properties.mass_mode)
+        mass_mode_changed, mass_mode = imgui.combo(
+            "mass source", mass_mode, ("density", "explicit mass")
+        )
+        mass_mode_value = mass_values[mass_mode]
+        if mass_mode_value == "density":
+            mass_value_changed, density = imgui.drag_float(
+                "density", properties.density, 1.0, 0.000001, 1000000000000.0, "%.6g kg/m³"
+            )
+            mass = properties.mass
+        else:
+            mass_value_changed, mass = imgui.drag_float(
+                "mass", properties.mass, 0.01, 0.000001, 1000000000000.0, "%.6g kg"
+            )
+            density = properties.density
+        inertia_values = ("volume", "shell")
+        inertia_mode = inertia_values.index(properties.inertia_mode)
+        inertia_changed, inertia_mode = imgui.combo(
+            "inertia distribution", inertia_mode, inertia_values
+        )
+        fluid_changed, fluid_ellipsoid = imgui.checkbox(
+            "ellipsoid fluid interaction", properties.fluid_ellipsoid
+        )
+        first_fluid_changed, first_fluid = imgui.drag_float3(
+            "fluid blunt / slender / angular",
+            np.asarray(properties.fluid_coefficients[:3], np.float32),
+            0.01,
+            0.0,
+            1000000.0,
+            "%.4g",
+        )
+        last_fluid_changed, last_fluid = imgui.drag_float2(
+            "fluid Kutta / Magnus",
+            np.asarray(properties.fluid_coefficients[3:], np.float32),
+            0.01,
+            0.0,
+            1000000.0,
+            "%.4g",
+        )
+        if not editable:
+            imgui.end_disabled()
+            imgui.text_disabled("Pause the simulation to edit model geometry properties")
+
+        edited = properties
+        if group_changed:
+            edited = replace(edited, visual_group=int(visual_group))
+        if mass_mode_changed:
+            edited = replace(edited, mass_mode=mass_mode_value)
+        if mass_value_changed:
+            edited = (
+                replace(edited, density=float(density))
+                if mass_mode_value == "density"
+                else replace(edited, mass=float(mass))
+            )
+        if inertia_changed:
+            edited = replace(edited, inertia_mode=inertia_values[inertia_mode])
+        if fluid_changed:
+            edited = replace(edited, fluid_ellipsoid=bool(fluid_ellipsoid))
+        if first_fluid_changed or last_fluid_changed:
+            edited = replace(
+                edited,
+                fluid_coefficients=tuple(float(value) for value in (*first_fluid, *last_fluid)),
+            )
+        self._geometry_advanced_edit = edited
+        dirty = edited != current
+        if not editable or not dirty:
+            imgui.begin_disabled()
+        if imgui.button("Apply##geometry-advanced"):
+            result = ctx.submit(
+                cmd.SetGeometryAdvancedProperties(
+                    node_id=edited.node_id,
+                    visual_group=edited.visual_group,
+                    mass_mode=edited.mass_mode,
+                    mass=edited.mass,
+                    density=edited.density,
+                    inertia_mode=edited.inertia_mode,
+                    fluid_ellipsoid=edited.fluid_ellipsoid,
+                    fluid_coefficients=edited.fluid_coefficients,
+                )
+            )
+            if result.ok:
+                self._geometry_advanced_generation = -1
+                self._geometry_advanced_error = ""
+            else:
+                self._geometry_advanced_error = result.message
+        if not editable or not dirty:
+            imgui.end_disabled()
+        imgui.same_line()
+        if imgui.button("Revert##geometry-advanced"):
+            self._geometry_advanced_edit = current
+            self._geometry_advanced_error = ""
+        imgui.same_line()
+        imgui.text_disabled("Apply rebuilds the model once")
+        if self._geometry_advanced_error:
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._geometry_advanced_error)
+            if imgui.small_button("Copy error##geometry-advanced"):
+                imgui.set_clipboard_text(self._geometry_advanced_error)
 
     def _light(self, ctx: PanelContext, node: SceneNode) -> None:
         source = ctx.session.source

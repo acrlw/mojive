@@ -466,6 +466,40 @@ class SetGeometryProperties(Command):
     margin: float
     gap: float
     solver_mix: float
+    solver_reference: tuple[float, float] | None = None
+    solver_impedance: tuple[float, float, float, float, float] | None = None
+    adhesion: float | None = None
+    surface_velocity: tuple[float, float, float, float, float, float] | None = None
+
+
+@dataclass(frozen=True)
+class SetGeometryAdvancedProperties(Command):
+    """Set geometry properties backed by rebuilt MuJoCo constants."""
+
+    node_id: int
+    visual_group: int
+    mass_mode: str
+    mass: float
+    density: float
+    inertia_mode: str
+    fluid_ellipsoid: bool
+    fluid_coefficients: tuple[float, float, float, float, float]
+
+
+@dataclass(frozen=True)
+class SetBodyProperties(Command):
+    """Set inertial and dynamic properties for one model body."""
+
+    node_id: int
+    inertia_mode: str
+    mass: float
+    inertial_position: tuple[float, float, float]
+    inertial_quaternion: tuple[float, float, float, float]
+    diagonal_inertia: tuple[float, float, float]
+    full_inertia: tuple[float, float, float, float, float, float]
+    gravity_compensation: float
+    mocap: bool
+    sleep_policy: str
 
 
 @dataclass(frozen=True)
