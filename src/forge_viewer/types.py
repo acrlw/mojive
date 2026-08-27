@@ -22,7 +22,7 @@ class CameraView:
     Angles are radians and clipping distances are world units.
     """
 
-    eye: np.ndarray = field(default_factory=lambda: np.array([3.0, -3.0, 2.0], np.float32))
+    eye: np.ndarray = field(default_factory=lambda: np.array([0.0, 4.0, 0.0], np.float32))
     target: np.ndarray = field(default_factory=lambda: np.zeros(3, np.float32))
     up: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 1.0], np.float32))
     fov_y: float = np.deg2rad(45.0)

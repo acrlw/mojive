@@ -21,6 +21,7 @@ from ...scene_state import (
     save_named_snapshot,
 )
 from ...types import CameraView
+from ..camera import DEFAULT_PITCH, DEFAULT_YAW
 from . import (
     Panel,
     PanelContext,
@@ -43,8 +44,8 @@ PRESETS: tuple[tuple[str, float, float], ...] = (
 
 
 PARAM_SLIDERS: tuple[tuple[str, float, float, str, float | None], ...] = (
-    ("yaw", -180.0, 180.0, "%.1f deg", -135.0),
-    ("pitch", -89.9, 89.9, "%.1f deg", 30.0),
+    ("yaw", -180.0, 180.0, "%.1f deg", DEFAULT_YAW),
+    ("pitch", -89.9, 89.9, "%.1f deg", DEFAULT_PITCH),
     ("distance", 0.05, 200.0, "%.3f m", None),
     ("fov_y_deg", 10.0, 120.0, "%.1f deg", 45.0),
     ("far", 1.0, 100000.0, "%.1f m", 200.0),

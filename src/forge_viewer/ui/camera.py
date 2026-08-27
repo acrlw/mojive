@@ -42,6 +42,8 @@ FRAME_MARGIN = 1.15
 FRAME_FAR_MARGIN = 32.0
 
 FRAME_DURATION = 0.35
+DEFAULT_YAW = 90.0
+DEFAULT_PITCH = 0.0
 
 
 PRESETS: dict[str, tuple[float, float]] = {
@@ -93,8 +95,8 @@ class OrbitCamera:
         self,
         pivot=None,
         distance: float = 4.0,
-        yaw: float = -135.0,
-        pitch: float = 25.0,
+        yaw: float = DEFAULT_YAW,
+        pitch: float = DEFAULT_PITCH,
         fov_y_deg: float = 45.0,
         near: float = 0.02,
         far: float = 200.0,

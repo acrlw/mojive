@@ -102,16 +102,15 @@ def test_camera_preset_tables_agree_on_which_way_is_up():
         assert abs(((yaw - cam_yaw + 180) % 360) - 180) < 1.0
 
 
-def test_pitch_slider_reset_keeps_the_camera_above_ground():
+def test_camera_slider_reset_matches_the_default_camera():
 
+    from forge_viewer.ui.camera import OrbitCamera
     from forge_viewer.ui.panels.camera import PARAM_SLIDERS
-    from forge_viewer.ui.panels.camera import PRESETS as PANEL
 
     initial = {attr: init for attr, _lo, _hi, _fmt, init in PARAM_SLIDERS}
-    pitch0 = initial.get("pitch")
-    assert pitch0 is not None
-    assert pitch0 > 0
-    assert any(abs(p - pitch0) < 1.0 for _n, _y, p in PANEL)
+    camera = OrbitCamera()
+    assert initial["yaw"] == camera.yaw
+    assert initial["pitch"] == camera.pitch
 
 
 def test_the_two_picking_coordinate_paths_agree():

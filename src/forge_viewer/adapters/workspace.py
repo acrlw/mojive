@@ -521,7 +521,14 @@ class WorkspaceAdapter(SceneAdapterBase):
         return self.primary.raycast(origin, direction)
 
     def camera_hint(self):
-        return self.scene.camera or self.primary.camera_hint()
+        if self.scene.camera is not None:
+            return self.scene.camera
+        source = self.primary.scene_source()
+        if source.instance_count == 0 and not any(
+            node.type is not NodeType.WORLD for node in source.nodes
+        ):
+            return None
+        return self.primary.camera_hint()
 
     def release(self) -> None:
         self.primary.release()

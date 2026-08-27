@@ -51,6 +51,26 @@ def workspace() -> WorkspaceAdapter:
     return WorkspaceAdapter(primary)
 
 
+def test_empty_workspace_does_not_override_the_editor_default_camera() -> None:
+    document = workspace()
+    try:
+        assert document.camera_hint() is None
+    finally:
+        document.release()
+
+
+def test_loaded_workspace_keeps_the_primary_camera_hint() -> None:
+    document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
+    try:
+        expected = document.primary.camera_hint()
+        actual = document.camera_hint()
+        assert expected is not None and actual is not None
+        assert actual.eye == pytest.approx(expected.eye)
+        assert actual.target == pytest.approx(expected.target)
+    finally:
+        document.release()
+
+
 def test_loaded_model_workspace_supports_authored_entities() -> None:
     document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
     session = Session(document, ASSETS / "test_scene.xml")

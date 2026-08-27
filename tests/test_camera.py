@@ -110,6 +110,17 @@ def test_orbit_keeps_the_distance_to_the_pivot():
         assert np.allclose(cam.pivot, [1.0, -2.0, 0.5])
 
 
+def test_default_camera_looks_from_positive_y_toward_negative_y():
+    cam = OrbitCamera()
+    view = CameraView()
+
+    assert cam.eye() == pytest.approx((0.0, 4.0, 0.0), abs=1e-7)
+    assert cam.view().forward() == pytest.approx((0.0, -1.0, 0.0), abs=1e-7)
+    assert cam.view().up == pytest.approx((0.0, 0.0, 1.0))
+    assert view.eye == pytest.approx(cam.eye(), abs=1e-7)
+    assert view.forward() == pytest.approx(cam.view().forward(), abs=1e-7)
+
+
 def test_dolly_only_changes_the_distance():
 
     cam = OrbitCamera(pivot=np.array([0.4, 0.2, -0.1]), distance=5.0)
