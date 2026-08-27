@@ -469,6 +469,13 @@ class WorkspaceAdapter(SceneAdapterBase):
     def joints(self):
         return self.primary.joints()
 
+    def set_joint_properties(
+        self, joint_id, axis, limited, value_range, damping, stiffness
+    ) -> bool:
+        return self.primary.set_joint_properties(
+            joint_id, axis, limited, value_range, damping, stiffness
+        )
+
     def actuators(self):
         return self.primary.actuators()
 

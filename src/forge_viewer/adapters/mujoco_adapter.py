@@ -441,6 +441,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             reload=True,
             model_composition=True,
             topology_editing=True,
+            model_properties=True,
         )
         self._m = None
         self._d = None
@@ -3904,7 +3905,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                 if not self._visual_groups["joint"][int(m.jnt_group[ji])]:
                     continue
                 jname = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, ji) or f"joint{ji}"
-                node_id = add(jname, NodeType.JOINT, parent, b)
+                node_id = add(jname, NodeType.JOINT, parent, b, joint_index=ji)
                 model_id, raw_name = self._model_element_name(jname)
                 nodes[node_id].model_id = model_id
                 self._node_element[node_id] = (model_id, NodeType.JOINT, raw_name)
@@ -4016,9 +4017,97 @@ class MuJoCoAdapter(SceneAdapterBase):
                     qvel_adr=int(m.jnt_dofadr[ji]),
                     dof=dofs[joint_type],
                     body=int(m.jnt_bodyid[ji]),
+                    axis=tuple(float(value) for value in m.jnt_axis[ji]),
+                    damping=float(m.dof_damping[int(m.jnt_dofadr[ji])]),
+                    stiffness=float(m.jnt_stiffness[ji]),
                 )
             )
         return out
+
+    def set_joint_properties(
+        self,
+        joint_id: int,
+        axis: np.ndarray,
+        limited: bool,
+        value_range: tuple[float, float],
+        damping: float,
+        stiffness: float,
+    ) -> bool:
+        joint = int(joint_id)
+        if not 0 <= joint < self._m.njnt:
+            return False
+        joint_type = int(self._m.jnt_type[joint])
+        if joint_type == int(mujoco.mjtJoint.mjJNT_FREE):
+            return False
+        values = np.asarray(value_range, np.float64).reshape(2)
+        axis = np.asarray(axis, np.float64).reshape(3)
+        damping = float(damping)
+        stiffness = float(stiffness)
+        if (
+            not np.all(np.isfinite(values))
+            or not np.all(np.isfinite(axis))
+            or not np.isfinite((damping, stiffness)).all()
+            or damping < 0.0
+            or stiffness < 0.0
+        ):
+            return False
+        if joint_type == int(mujoco.mjtJoint.mjJNT_BALL):
+            if bool(limited) and values[1] <= 0.0:
+                return False
+            values[0] = 0.0
+        elif bool(limited) and values[1] <= values[0]:
+            return False
+        if joint_type in {
+            int(mujoco.mjtJoint.mjJNT_HINGE),
+            int(mujoco.mjtJoint.mjJNT_SLIDE),
+        }:
+            norm = float(np.linalg.norm(axis))
+            if norm <= 1e-12:
+                return False
+            axis /= norm
+
+        node = next((item for item in self.nodes() if item.joint_index == joint), None)
+        identity = self._node_element.get(node.node_id) if node is not None else None
+        if identity is None:
+            return False
+        model_id, node_type, name = identity
+        element = self._element(model_id, node_type.value, name)
+        spec = self._spec_for_model(model_id)
+        if element is None or spec is None:
+            return False
+
+        if joint_type in {
+            int(mujoco.mjtJoint.mjJNT_HINGE),
+            int(mujoco.mjtJoint.mjJNT_SLIDE),
+        }:
+            element.axis = axis
+            self._m.jnt_axis[joint] = axis
+        element.limited = bool(limited)
+        authored_range = values.copy()
+        if bool(spec.compiler.degree) and joint_type in {
+            int(mujoco.mjtJoint.mjJNT_HINGE),
+            int(mujoco.mjtJoint.mjJNT_BALL),
+        }:
+            authored_range = np.degrees(authored_range)
+        element.range = authored_range
+        authored_damping = np.asarray(element.damping, np.float64).copy()
+        authored_stiffness = np.asarray(element.stiffness, np.float64).copy()
+        authored_damping[0] = damping
+        authored_stiffness[0] = stiffness
+        element.damping = authored_damping
+        element.stiffness = authored_stiffness
+
+        self._m.jnt_limited[joint] = bool(limited)
+        self._m.jnt_range[joint] = values
+        dof_address = int(self._m.jnt_dofadr[joint])
+        dof_count = 3 if joint_type == int(mujoco.mjtJoint.mjJNT_BALL) else 1
+        self._m.dof_damping[dof_address : dof_address + dof_count] = damping
+        self._m.jnt_stiffness[joint] = stiffness
+        mujoco.mj_setConst(self._m, self._d)
+        mujoco.mj_forward(self._m, self._d)
+        self._mark_model_edited(model_id)
+        self._structure_revision += 1
+        return True
 
     def actuators(self) -> list[ActuatorInfo]:
         m = self._m

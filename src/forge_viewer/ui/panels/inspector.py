@@ -187,6 +187,9 @@ class InspectorPanel(Panel):
         if node.type is NodeType.ENVIRONMENT:
             self._environment(ctx)
             return
+        if node.type is NodeType.JOINT:
+            self._joint(ctx, node)
+            return
         self._transform(ctx, node)
         self._gizmo_reason(ctx, node)
         self._velocity(ctx, node)
@@ -627,6 +630,120 @@ class InspectorPanel(Panel):
                 hi = min(lo + max(1, j.dof), len(qvel))
                 labeled(j.name or f"dof{lo}", "  ".join(f"{v:+.4f}" for v in qvel[lo:hi]))
             imgui.end_table()
+
+    def _joint(self, ctx: PanelContext, node: SceneNode) -> None:
+        joint = next(
+            (item for item in ctx.session.joints if item.joint_id == node.joint_index), None
+        )
+        if joint is None:
+            imgui.text_disabled("joint metadata is unavailable")
+            return
+        if begin_kv_table("joint_identity"):
+            labeled("type", joint.type)
+            labeled("qpos address", str(joint.qpos_adr))
+            labeled("dof", str(joint.dof))
+            imgui.end_table()
+        if not imgui.collapsing_header("joint properties", imgui.TreeNodeFlags_.default_open):
+            return
+
+        editable = bool(
+            ctx.session.adapter.caps.model_properties
+            and ctx.session.paused
+            and joint.type != "free"
+        )
+        if not editable:
+            imgui.begin_disabled()
+        axis = np.asarray(joint.axis, np.float32)
+        axis_changed = False
+        if joint.type in ("hinge", "slide"):
+            axis_changed, axis = imgui.drag_float3(
+                "axis (body frame)", axis, 0.01, -1.0, 1.0, "%.4f"
+            )
+
+        limited = bool(joint.limited)
+        limited_changed = False
+        range_changed = False
+        value_range = np.asarray(joint.range, np.float64).copy()
+        range_valid = (
+            value_range[1] > 0.0 if joint.type == "ball" else value_range[1] > value_range[0]
+        )
+        default_range = np.array(
+            (0.0, np.pi)
+            if joint.type == "ball"
+            else ((-np.pi, np.pi) if joint.type == "hinge" else (-1.0, 1.0)),
+            np.float64,
+        )
+        displayed_range = value_range.copy() if range_valid else default_range
+        if joint.type in ("hinge", "slide", "ball"):
+            limited_changed, limited = imgui.checkbox("limited", limited)
+            if joint.type == "ball":
+                upper_deg = float(np.degrees(displayed_range[1]))
+                range_changed, upper_deg = imgui.drag_float(
+                    "limit angle", upper_deg, 0.5, 0.001, 360.0, "%.2f deg"
+                )
+                displayed_range[:] = (0.0, np.radians(upper_deg))
+            elif joint.type == "hinge":
+                degrees = np.degrees(displayed_range)
+                range_changed, degrees = imgui.drag_float2(
+                    "range", degrees, 0.5, -36000.0, 36000.0, "%.2f deg"
+                )
+                displayed_range[:] = np.radians(degrees)
+            else:
+                range_changed, displayed_range = imgui.drag_float2(
+                    "range", displayed_range, 0.01, -1000000.0, 1000000.0, "%.4f m"
+                )
+                displayed_range = np.asarray(displayed_range, np.float64)
+            if range_changed or (limited_changed and limited and not range_valid):
+                value_range = displayed_range
+
+        damping_changed, damping = imgui.drag_float(
+            "damping", float(joint.damping), 0.01, 0.0, 1000000.0, "%.4f"
+        )
+        stiffness_changed, stiffness = imgui.drag_float(
+            "stiffness", float(joint.stiffness), 0.01, 0.0, 1000000.0, "%.4f"
+        )
+        if not editable:
+            imgui.end_disabled()
+            reason = (
+                "Free-joint properties stay defined by the free body"
+                if joint.type == "free"
+                else (
+                    "Pause the simulation to edit model properties"
+                    if not ctx.session.paused
+                    else "This adapter cannot write model properties"
+                )
+            )
+            imgui.text_disabled(reason)
+
+        changed = any(
+            (
+                axis_changed,
+                limited_changed,
+                range_changed,
+                damping_changed,
+                stiffness_changed,
+            )
+        )
+        invalid_axis = joint.type in ("hinge", "slide") and np.linalg.norm(axis) <= 1e-6
+        invalid_range = bool(limited) and value_range[1] <= value_range[0]
+        if invalid_axis:
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), "Axis must be non-zero")
+        if invalid_range:
+            imgui.text_colored(
+                imgui.ImVec4(*ctx.theme.warning), "Range upper bound must exceed lower bound"
+            )
+        if changed and editable and not invalid_axis and not invalid_range:
+            self._submit_edit(
+                ctx,
+                cmd.SetJointProperties(
+                    joint.joint_id,
+                    np.asarray(axis, np.float64),
+                    bool(limited),
+                    (float(value_range[0]), float(value_range[1])),
+                    float(damping),
+                    float(stiffness),
+                ),
+            )
 
     def _material(self, ctx: PanelContext, node: SceneNode) -> None:
         if not imgui.collapsing_header("material"):

@@ -119,6 +119,7 @@ _SCENE_EDIT_COMMANDS = (
     cmd.AddResourceRoot,
     cmd.RemoveResourceRoot,
     cmd.SetPose,
+    cmd.SetJointProperties,
     cmd.SetLight,
     cmd.SetEnvironment,
     cmd.SetSkybox,
@@ -1064,6 +1065,51 @@ class Session:
             ok = self._adapter.set_qpos_batch(indices, values)
             return CommandResult.good("") if ok else CommandResult.bad("Joint batch update failed")
 
+        if isinstance(c, cmd.SetJointProperties):
+            if not caps.model_properties:
+                return CommandResult.bad(f"{caps.name} does not support model property editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before editing joint properties")
+            joint = next((item for item in self._joints if item.joint_id == c.joint_id), None)
+            if joint is None:
+                return CommandResult.bad(f"Joint {c.joint_id} is unavailable")
+            if joint.type == "free":
+                return CommandResult.bad("Free-joint properties are not editable here")
+            axis = np.asarray(c.axis, np.float64).reshape(3)
+            value_range = np.asarray(c.range, np.float64).reshape(2)
+            damping = float(c.damping)
+            stiffness = float(c.stiffness)
+            if (
+                not np.all(np.isfinite(axis))
+                or not np.all(np.isfinite(value_range))
+                or not np.isfinite((damping, stiffness)).all()
+            ):
+                return CommandResult.bad("Joint properties must contain finite values")
+            if joint.type in ("hinge", "slide") and np.linalg.norm(axis) <= 1e-12:
+                return CommandResult.bad("Joint axis must be non-zero")
+            if joint.type == "ball":
+                if bool(c.limited) and value_range[1] <= 0.0:
+                    return CommandResult.bad("Ball-joint limit must be positive")
+                value_range[0] = 0.0
+            elif bool(c.limited) and value_range[1] <= value_range[0]:
+                return CommandResult.bad("Joint range upper bound must exceed its lower bound")
+            if damping < 0.0 or stiffness < 0.0:
+                return CommandResult.bad("Joint damping and stiffness cannot be negative")
+            changed = self._adapter.set_joint_properties(
+                c.joint_id,
+                axis,
+                bool(c.limited),
+                (float(value_range[0]), float(value_range[1])),
+                damping,
+                stiffness,
+            )
+            if not changed:
+                return CommandResult.bad(f"Joint {joint.name} properties cannot be edited")
+            self._refresh_joint_metadata()
+            self._adapter_revision = self._adapter.structure_revision
+            self._structure_generation += 1
+            return CommandResult.good("")
+
         if isinstance(c, cmd.SetEqualityEnabled):
             if not caps.equality_constraints:
                 return CommandResult.bad(f"{caps.name} does not expose equality constraints")
@@ -1420,11 +1466,8 @@ class Session:
         for node in self._nodes:
             if 0 <= node.light_index < len(self._source.lights.lights):
                 node.visible = self._source.lights.lights[node.light_index].active
-        self._joints = self._adapter.joints()
-        joints_by_body: dict[int, list[JointInfo]] = {}
-        for joint in self._joints:
-            joints_by_body.setdefault(int(joint.body), []).append(joint)
-        self._joints_by_body = {body: tuple(joints) for body, joints in joints_by_body.items()}
+        self._refresh_joint_metadata()
+
         self._actuators = self._adapter.actuators()
         actuators_by_joint: dict[int, list[ActuatorInfo]] = {}
         for actuator in self._actuators:
@@ -1468,6 +1511,14 @@ class Session:
         self._sync_equality_state()
         self._compose_lights()
         self._compose_cameras()
+
+    def _refresh_joint_metadata(self) -> None:
+        """Refresh joint lookup tables without rebuilding stable scene geometry."""
+        self._joints = self._adapter.joints()
+        joints_by_body: dict[int, list[JointInfo]] = {}
+        for joint in self._joints:
+            joints_by_body.setdefault(int(joint.body), []).append(joint)
+        self._joints_by_body = {body: tuple(joints) for body, joints in joints_by_body.items()}
 
     def _compose_lights(self) -> None:
         """Combine Forge-authored light settings with backend-driven transforms.

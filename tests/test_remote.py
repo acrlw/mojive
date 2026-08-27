@@ -339,6 +339,22 @@ def test_scene_entity_commands_keep_their_typed_remote_boundary():
     command = handle_session_command(
         Sink(),
         {
+            "op": "joint_properties",
+            "joint_id": 2,
+            "axis": (0.0, 1.0, 0.0),
+            "limited": True,
+            "range": (-0.5, 0.75),
+            "damping": 0.2,
+            "stiffness": 0.3,
+        },
+    )
+    assert isinstance(command, cmd.SetJointProperties)
+    assert command.joint_id == 2
+    assert command.range == (-0.5, 0.75)
+
+    command = handle_session_command(
+        Sink(),
+        {
             "op": "add_scene_object",
             "shape": MeshShape.BOX,
             "name": "box",

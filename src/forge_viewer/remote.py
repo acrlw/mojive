@@ -554,6 +554,27 @@ class RemoteSceneAdapter(SceneAdapterBase):
             )
         )
 
+    def set_joint_properties(
+        self,
+        joint_id: int,
+        axis: np.ndarray,
+        limited: bool,
+        value_range: tuple[float, float],
+        damping: float,
+        stiffness: float,
+    ) -> bool:
+        return self._ok(
+            self._send_structure_edit(
+                "joint_properties",
+                joint_id=int(joint_id),
+                axis=np.asarray(axis, np.float64),
+                limited=bool(limited),
+                range=tuple(float(value) for value in value_range),
+                damping=float(damping),
+                stiffness=float(stiffness),
+            )
+        )
+
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
         return self._ok(self._send("scene_camera", camera_id=int(camera_id), camera=camera))
 
@@ -665,6 +686,14 @@ def handle_session_command(session, message: dict):
         ),
         "qpos": lambda: cmd.SetQpos(message["index"], message["value"]),
         "qpos_batch": lambda: cmd.SetQposBatch(message["indices"], message["values"]),
+        "joint_properties": lambda: cmd.SetJointProperties(
+            message["joint_id"],
+            message["axis"],
+            message["limited"],
+            message["range"],
+            message["damping"],
+            message["stiffness"],
+        ),
         "equality": lambda: cmd.SetEqualityEnabled(message["constraint_id"], message["enabled"]),
         "ctrl": lambda: cmd.SetCtrl(message["index"], message["value"]),
         "pose": lambda: cmd.SetPose(message["node_id"], message["position"], message["rotation"]),

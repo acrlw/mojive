@@ -1089,6 +1089,127 @@ def test_primary_fixed_primitives_and_site_support_authoring(tmp_path: Path) -> 
     assert np.abs(math3d.quat_to_mat3(capsule.quat)[:, 2]) == pytest.approx((0.0, 0.0, 1.0))
 
 
+def test_joint_properties_update_without_topology_recompile(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "joint-properties.xml"
+    path.write_text(
+        """
+<mujoco>
+  <compiler angle="degree" autolimits="true"/>
+  <worldbody>
+    <body name="hinge_body">
+      <joint name="hinge" type="hinge" axis="0 0 1" range="-90 90"
+             damping="0.1" stiffness="0.2"/>
+      <geom type="box" size="0.1 0.1 0.1" mass="1"/>
+    </body>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    joint = session.joints[0]
+    assert joint.axis == pytest.approx((0.0, 0.0, 1.0))
+    assert joint.damping == pytest.approx(0.1)
+    assert joint.stiffness == pytest.approx(0.2)
+    invalid = session.submit(
+        cmd.SetJointProperties(
+            joint.joint_id,
+            np.zeros(3),
+            True,
+            (-0.5, 0.75),
+            0.4,
+            0.6,
+        )
+    )
+    assert not invalid.ok
+    assert "axis" in invalid.message.lower()
+
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    source = session.source
+    result = session.submit(
+        cmd.SetJointProperties(
+            joint.joint_id,
+            np.array((1.0, 1.0, 0.0)),
+            True,
+            (-0.5, 0.75),
+            0.4,
+            0.6,
+        )
+    )
+
+    assert result.ok, result.message
+    assert compile_count == 0
+    assert session.source is source
+    model = document.primary.model
+    assert model.jnt_axis[0] == pytest.approx(np.sqrt(0.5) * np.array((1.0, 1.0, 0.0)))
+    assert bool(model.jnt_limited[0])
+    assert model.jnt_range[0] == pytest.approx((-0.5, 0.75))
+    assert model.dof_damping[0] == pytest.approx(0.4)
+    assert model.jnt_stiffness[0] == pytest.approx(0.6)
+    spec = mujoco.MjSpec.from_string(document.scene_model_xml(0))
+    authored = spec.joint("hinge")
+    assert authored.range == pytest.approx((-0.5, 0.75))
+    assert authored.damping[0] == pytest.approx(0.4)
+    assert authored.stiffness[0] == pytest.approx(0.6)
+
+    assert session.submit(cmd.Undo())
+    assert document.primary.model.jnt_axis[0] == pytest.approx((0.0, 0.0, 1.0))
+    assert session.submit(cmd.Redo())
+    assert document.primary.model.jnt_axis[0] == pytest.approx(
+        np.sqrt(0.5) * np.array((1.0, 1.0, 0.0))
+    )
+
+
+def test_ball_joint_properties_apply_one_limit_and_all_rotational_damping(tmp_path: Path) -> None:
+    path = tmp_path / "ball-properties.xml"
+    path.write_text(
+        """
+<mujoco>
+  <compiler angle="degree" autolimits="true"/>
+  <worldbody>
+    <body name="ball_body">
+      <joint name="ball" type="ball" range="0 120" damping="0.1" stiffness="0.2"/>
+      <geom type="sphere" size="0.1" mass="1"/>
+    </body>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+
+    result = session.submit(
+        cmd.SetJointProperties(0, np.array((0.0, 0.0, 1.0)), False, (0.0, 0.0), 0.5, 0.4)
+    )
+    assert result.ok, result.message
+    assert not bool(document.primary.model.jnt_limited[0])
+    assert document.primary.model.jnt_range[0] == pytest.approx((0.0, 0.0))
+
+    result = session.submit(
+        cmd.SetJointProperties(0, np.array((0.0, 0.0, 1.0)), True, (-4.0, 1.0), 0.7, 0.8)
+    )
+
+    assert result.ok, result.message
+    model = document.primary.model
+    assert model.jnt_range[0] == pytest.approx((0.0, 1.0))
+    assert model.dof_damping[:3] == pytest.approx((0.7, 0.7, 0.7))
+    assert model.jnt_stiffness[0] == pytest.approx(0.8)
+    spec = mujoco.MjSpec.from_string(document.scene_model_xml(0))
+    assert spec.joint("ball").range == pytest.approx((0.0, 1.0))
+
+
 def test_mjspec_element_pose_edits_round_trip_in_workspace(tmp_path: Path) -> None:
     document = workspace()
     model_id = document.add_scene_model(

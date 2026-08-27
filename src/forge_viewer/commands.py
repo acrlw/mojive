@@ -442,6 +442,18 @@ class SetQposBatch(Command):
 
 
 @dataclass(frozen=True)
+class SetJointProperties(Command):
+    """Set authored axis, limits, damping, and stiffness for one model joint."""
+
+    joint_id: int
+    axis: np.ndarray
+    limited: bool
+    range: tuple[float, float]
+    damping: float
+    stiffness: float
+
+
+@dataclass(frozen=True)
 class SetEqualityEnabled(Command):
     """Enable or disable a model equality constraint."""
 

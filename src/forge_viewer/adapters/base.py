@@ -74,6 +74,7 @@ class SceneNode:
     light_index: int = -1
     camera_index: int = -1
     site_index: int = -1
+    joint_index: int = -1
     model_id: int = -1
 
 
@@ -90,6 +91,9 @@ class JointInfo:
     qvel_adr: int
     dof: int
     body: int = -1
+    axis: tuple[float, float, float] = (0.0, 0.0, 1.0)
+    damping: float = 0.0
+    stiffness: float = 0.0
 
 
 @dataclass
@@ -250,6 +254,7 @@ class AdapterCaps:
     edit_history: bool = False
     model_composition: bool = False
     topology_editing: bool = False
+    model_properties: bool = False
     notes: tuple[str, ...] = ()
 
 
@@ -806,6 +811,18 @@ class SceneAdapterBase:
         """Atomically set generalized position coordinates."""
         return False
 
+    def set_joint_properties(
+        self,
+        joint_id: int,
+        axis: np.ndarray,
+        limited: bool,
+        value_range: tuple[float, float],
+        damping: float,
+        stiffness: float,
+    ) -> bool:
+        """Set authored numeric properties for one model joint."""
+        return False
+
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool:
         """Enable or disable an equality constraint."""
         return False
@@ -1025,6 +1042,15 @@ class SceneAdapter(Protocol):
     def set_visual_group(self, category: str, group: int, visible: bool) -> bool: ...
     def set_qpos(self, index: int, value: float) -> bool: ...
     def set_qpos_batch(self, indices: np.ndarray, values: np.ndarray) -> bool: ...
+    def set_joint_properties(
+        self,
+        joint_id: int,
+        axis: np.ndarray,
+        limited: bool,
+        value_range: tuple[float, float],
+        damping: float,
+        stiffness: float,
+    ) -> bool: ...
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool: ...
     def set_ctrl(self, index: int, value: float) -> bool: ...
     def set_pose(self, node_id: int, position, rotation) -> bool: ...
