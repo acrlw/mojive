@@ -15,15 +15,53 @@ exporter writes formatted XML, copies file-backed assets into `<name>_assets/`, 
 resource paths, and recompiles the document before completing the save. The XML and its sibling
 asset directory can be moved together.
 
-MJCF represents directional, point, and spot lights plus 2D textures. Save As reports Forge scene
-features outside that format, such as area lights and image lights. Save `.forge.json` to preserve
-the complete Forge scene.
+The exporter preserves directional, point, spot, area, and image lights plus 2D, cube, and skybox
+textures. MuJoCo has no native area-light enum, so Forge writes a point-light fallback with bulb
+radius and private text metadata that restores the area semantic when the file is reopened through
+Forge. Image lights require a cube or skybox texture; export reports an error instead of silently
+dropping an invalid reference. Save `.forge.json` when the Forge composition itself, including model
+references and resource roots, must remain editable.
 
 ## Editing model topology
 
 Select a model or model element in Hierarchy. Inspector exposes bodies, geometry, joints, sites,
 cameras, lights, actuators, sensors, tendons, and equality constraints. Topology edits compile a
 new MjSpec model and migrate named simulation state where dimensions remain compatible.
+
+`ModelEditBatch` groups dependent topology operations into one compile and can reference an element
+created earlier in the same batch. Numeric edits that do not change topology use narrower paths:
+joint properties and geometry contact properties update MjSpec and the compiled model without
+rebuilding `SceneSource`.
+
+## Structured model properties
+
+The structured Inspector currently covers:
+
+- fixed body and site transforms;
+- finite plane, box, sphere/ellipsoid, capsule, cylinder, and site dimensions;
+- joint axis, limits, damping, and stiffness;
+- geometry friction, contact dimension, collision masks, priority, margin, gap, and solver mix;
+- model-local material creation, duplication, assignment, inline appearance, and PNG 2D texture
+  import.
+
+These controls validate values, participate in Undo/Redo, persist in workspace documents, and use
+the remote typed-command boundary where the adapter exposes the capability. Pause a simulation
+before editing model properties.
+
+This is not a complete form-based copy of the MJCF schema. Body inertial properties, geometry
+`solref`/`solimp`, resource-backed geometry creation, many component subtypes, keyframe authoring,
+contact pair/exclude, default classes, and global option/solver fields still use **Edit MJCF
+Source...**. The source popup compiles before applying changes and keeps the last good model when
+validation fails.
+
+Use these visual acceptance entries for the supported structured paths:
+
+```bash
+make primitive-authoring BACKEND=wgpu
+make material-authoring BACKEND=wgpu
+make contact-authoring BACKEND=wgpu
+make joint-gizmo BACKEND=wgpu
+```
 
 ## Current pose and key0
 
