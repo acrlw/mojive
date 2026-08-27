@@ -85,12 +85,40 @@ def test_language_preference_round_trip(tmp_path, monkeypatch):
 
     localizer = Localizer.load()
     assert localizer.language is Language.ENGLISH
+    localizer.set_preferences(
+        {
+            "remember_precise_input_choices": True,
+            "precise_gizmo_angle_unit": "radians",
+        }
+    )
     localizer.set_language(Language.SIMPLIFIED_CHINESE)
     assert localizer.text("Settings") == "设置"
 
     restored = Localizer.load()
     assert restored.language is Language.SIMPLIFIED_CHINESE
     assert restored.text("Return to Editor Camera") == "返回编辑器相机"
+    assert restored.preference("remember_precise_input_choices") is True
+    assert restored.preference("precise_gizmo_angle_unit") == "radians"
+
+
+def test_viewer_restores_precise_input_preferences(tmp_path, monkeypatch):
+    from forge_viewer.ui.app import ViewerApp
+
+    path = tmp_path / "settings.json"
+    monkeypatch.setenv("FORGE_VIEWER_SETTINGS", str(path))
+    Localizer.load().set_preferences(
+        {
+            "remember_precise_input_choices": False,
+            "precise_gizmo_absolute": True,
+            "precise_gizmo_angle_unit": "radians",
+        }
+    )
+
+    app = ViewerApp(SimpleNamespace(), SimpleNamespace())
+
+    assert not app.gizmo.remember_precise_input_choices
+    assert app._precise_gizmo_preferred_absolute
+    assert app._precise_gizmo_angle_unit == "radians"
 
 
 @pytest.mark.parametrize("value", ["zh_CN", "zh-CN", "zh_CN.UTF-8", "zh_CN:zh"])

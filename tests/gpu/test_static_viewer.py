@@ -22,6 +22,21 @@ from forge_viewer.types import DEFAULT_MATERIAL, CameraView, Material, MeshShape
 from forge_viewer.ui.scene_entities import HELPER_LAYER  # noqa: E402
 
 
+@pytest.fixture(autouse=True, scope="module")
+def _isolated_settings(tmp_path_factory):
+    previous = os.environ.get("FORGE_VIEWER_SETTINGS")
+    os.environ["FORGE_VIEWER_SETTINGS"] = str(
+        tmp_path_factory.mktemp("static-viewer-settings") / "settings.json"
+    )
+    try:
+        yield
+    finally:
+        if previous is None:
+            del os.environ["FORGE_VIEWER_SETTINGS"]
+        else:
+            os.environ["FORGE_VIEWER_SETTINGS"] = previous
+
+
 @pytest.fixture(scope="module")
 def canvas():
     scene = canvas_scene()
@@ -343,8 +358,9 @@ def test_settings_controls_precise_input_choice_memory(canvas, monkeypatch):
         viewer.sync()
         assert toggled
         assert not viewer.app.gizmo.remember_precise_input_choices
+        assert viewer.app.localizer.preference("remember_precise_input_choices") is False
     finally:
-        viewer.app.gizmo.remember_precise_input_choices = True
+        viewer.app.set_precise_input_choice_memory(True)
         settings.open = False
 
 

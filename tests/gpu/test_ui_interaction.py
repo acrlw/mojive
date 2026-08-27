@@ -17,11 +17,15 @@ W, H = 1280, 800
 
 
 @pytest.fixture(autouse=True, scope="module")
-def _pin_ui_scale():
+def _pin_ui_scale(tmp_path_factory):
     # These tests assume scale-1 layout geometry (CI displays); pin the UI
     # scale so HiDPI machines produce the same coordinates.
     old = os.environ.get("FORGE_VIEWER_UI_SCALE")
+    old_settings = os.environ.get("FORGE_VIEWER_SETTINGS")
     os.environ["FORGE_VIEWER_UI_SCALE"] = "1"
+    os.environ["FORGE_VIEWER_SETTINGS"] = str(
+        tmp_path_factory.mktemp("ui-interaction-settings") / "settings.json"
+    )
     try:
         yield
     finally:
@@ -29,6 +33,10 @@ def _pin_ui_scale():
             del os.environ["FORGE_VIEWER_UI_SCALE"]
         else:
             os.environ["FORGE_VIEWER_UI_SCALE"] = old
+        if old_settings is None:
+            del os.environ["FORGE_VIEWER_SETTINGS"]
+        else:
+            os.environ["FORGE_VIEWER_SETTINGS"] = old_settings
 
 
 @pytest.fixture(scope="module")
@@ -1210,6 +1218,44 @@ def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(
     assert v.session.submit(cmd.SetPose(node.node_id, before, rotation))
     for _ in range(2):
         v.sync()
+
+
+def test_precise_input_error_has_copy_button(free_body_viewer, monkeypatch):
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+    from forge_viewer.gizmo import GizmoHandle
+
+    v = free_body_viewer
+    node = next(n for n in v.session.nodes if n.posable)
+    assert v.session.submit(cmd.Select(node.object_id))
+    v.app.gizmo.set_mode("translate")
+    v.app.gizmo._hovered = GizmoHandle.Z
+    edit = v.app.gizmo.precise_input(v.session)
+    assert edit is not None
+    v.app._precise_gizmo_edit = edit
+    v.app._precise_gizmo_error = "Enter a finite numeric value"
+    v.app._open_precise_gizmo_popup = True
+
+    copied = []
+    original_small_button = imgui.small_button
+    original_button = imgui.button
+
+    def press_copy_error(label, *args, **kwargs):
+        shown = original_small_button(label, *args, **kwargs)
+        return True if label == "Copy error##precise-gizmo" else shown
+
+    def press_cancel(label, *args, **kwargs):
+        shown = original_button(label, *args, **kwargs)
+        return True if label == "Cancel" else shown
+
+    monkeypatch.setattr(imgui, "set_clipboard_text", copied.append)
+    monkeypatch.setattr(imgui, "small_button", press_copy_error)
+    monkeypatch.setattr(imgui, "button", press_cancel)
+    v.sync()
+
+    assert copied == ["Enter a finite numeric value"]
+    assert v.app._precise_gizmo_edit is None
 
 
 def test_precise_rotation_input_switches_to_radians_with_u(free_body_viewer):

@@ -47,6 +47,7 @@ class PanelContext:
     language: str = "en"
     translate: Any = None
     set_language: Any = None
+    set_precise_input_memory: Any = None
     font_report: Any = None
 
     def submit(self, command: Any) -> Any:

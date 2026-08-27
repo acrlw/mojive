@@ -167,6 +167,9 @@ class ViewerApp:
         self.camera.attach(self.camera_out)
         self.camera_preview = CameraPreview()
         self.gizmo = ObjectGizmo()
+        remember_precise = self.localizer.preference("remember_precise_input_choices", True)
+        if isinstance(remember_precise, bool):
+            self.gizmo.remember_precise_input_choices = remember_precise
         self.view_cube = ViewCube()
         self.perturb = PerturbController()
         self.scene_entities = SceneEntityHelpers()
@@ -209,8 +212,14 @@ class ViewerApp:
         self._precise_gizmo_edit: PreciseGizmoInput | None = None
         self._precise_gizmo_value = 0.0
         self._precise_gizmo_absolute = False
-        self._precise_gizmo_preferred_absolute = False
-        self._precise_gizmo_angle_unit = "degrees"
+        preferred_absolute = self.localizer.preference("precise_gizmo_absolute", False)
+        self._precise_gizmo_preferred_absolute = (
+            preferred_absolute if isinstance(preferred_absolute, bool) else False
+        )
+        angle_unit = self.localizer.preference("precise_gizmo_angle_unit", "degrees")
+        self._precise_gizmo_angle_unit = (
+            str(angle_unit) if angle_unit in ("degrees", "radians") else "degrees"
+        )
         self._precise_gizmo_error = ""
         self._open_precise_gizmo_popup = False
         self._window_title = ""
@@ -229,6 +238,16 @@ class ViewerApp:
 
     def set_language(self, language: str) -> None:
         self.localizer.set_language(language)
+
+    def set_precise_input_choice_memory(self, enabled: bool) -> None:
+        self.gizmo.remember_precise_input_choices = bool(enabled)
+        values: dict[str, object] = {"remember_precise_input_choices": bool(enabled)}
+        if enabled:
+            values.update(
+                precise_gizmo_absolute=self._precise_gizmo_preferred_absolute,
+                precise_gizmo_angle_unit=self._precise_gizmo_angle_unit,
+            )
+        self.localizer.set_preferences(values)
 
     def set_fixed_render_size(self, width: int, height: int) -> None:
         self._fixed_render_size = (max(1, int(width)), max(1, int(height)))
@@ -1513,10 +1532,7 @@ class ViewerApp:
 
         angular = edit.unit == "°"
         if angular and imgui.is_key_pressed(imgui.Key.u, False):
-            self._precise_gizmo_value, self._precise_gizmo_angle_unit = _toggle_angle_input(
-                self._precise_gizmo_value,
-                self._precise_gizmo_angle_unit,
-            )
+            self._toggle_precise_gizmo_angle_unit()
         unit = "rad" if angular and self._precise_gizmo_angle_unit == "radians" else edit.unit
         imgui.text_wrapped(f"{edit.action} {edit.label}")
         modes = ("Relative", "Absolute") if edit.absolute_value is not None else ("Relative",)
@@ -1555,10 +1571,7 @@ class ViewerApp:
         imgui.same_line()
         if angular:
             if imgui.small_button(f"{unit}##precise_gizmo_angle_unit"):
-                self._precise_gizmo_value, self._precise_gizmo_angle_unit = _toggle_angle_input(
-                    self._precise_gizmo_value,
-                    self._precise_gizmo_angle_unit,
-                )
+                self._toggle_precise_gizmo_angle_unit()
             imgui.set_item_tooltip("Click or press U to switch degrees / radians")
         else:
             imgui.text(unit)
@@ -1571,6 +1584,8 @@ class ViewerApp:
         if self._precise_gizmo_error:
             imgui.spacing()
             imgui.text_wrapped(self._precise_gizmo_error)
+            if imgui.small_button("Copy error##precise-gizmo"):
+                imgui.set_clipboard_text(self._precise_gizmo_error)
         imgui.spacing()
         apply = submitted or imgui.button("Apply", imgui.ImVec2(100.0, 0.0))
         imgui.same_line()
@@ -1614,6 +1629,24 @@ class ViewerApp:
         self._precise_gizmo_value += reference if absolute else -reference
         self._precise_gizmo_absolute = absolute
         self._precise_gizmo_preferred_absolute = absolute
+        self._persist_precise_gizmo_choices()
+
+    def _toggle_precise_gizmo_angle_unit(self) -> None:
+        self._precise_gizmo_value, self._precise_gizmo_angle_unit = _toggle_angle_input(
+            self._precise_gizmo_value,
+            self._precise_gizmo_angle_unit,
+        )
+        self._persist_precise_gizmo_choices()
+
+    def _persist_precise_gizmo_choices(self) -> None:
+        if not self.gizmo.remember_precise_input_choices:
+            return
+        self.localizer.set_preferences(
+            {
+                "precise_gizmo_absolute": self._precise_gizmo_preferred_absolute,
+                "precise_gizmo_angle_unit": self._precise_gizmo_angle_unit,
+            }
+        )
 
     def _publish_gizmo(self) -> None:
         self.gizmo.publish(
@@ -2121,6 +2154,7 @@ class ViewerApp:
             language=self.localizer.language.value,
             translate=self.localizer.text,
             set_language=self.set_language,
+            set_precise_input_memory=self.set_precise_input_choice_memory,
             font_report=self.window.font_report,
         )
 

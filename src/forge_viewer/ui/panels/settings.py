@@ -195,10 +195,13 @@ class SettingsPanel(Panel):
                 bool(ctx.gizmo.remember_precise_input_choices),
             )
             imgui.set_item_tooltip(
-                t("Reuse the last relative/absolute mode and angle unit in this editor session")
+                t("Reuse the last relative/absolute mode and angle unit across editor sessions")
             )
             if changed:
-                ctx.gizmo.remember_precise_input_choices = remember
+                if ctx.set_precise_input_memory is not None:
+                    ctx.set_precise_input_memory(remember)
+                else:
+                    ctx.gizmo.remember_precise_input_choices = remember
 
             self._property(t("position snap (Shift)"))
             changed, step = imgui.drag_float(

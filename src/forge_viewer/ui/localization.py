@@ -1,11 +1,11 @@
-"""Editor language selection and localized UI text."""
+"""Editor preference persistence and localized UI text."""
 
 from __future__ import annotations
 
 import json
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
@@ -117,8 +117,8 @@ _ZH_CN = {
     "copy reproduction state": "复制复现状态",
     "orthographic": "正交投影",
     "Remember precise input choices": "记住精确输入选项",
-    "Reuse the last relative/absolute mode and angle unit in this editor session": (
-        "在当前编辑器会话中沿用上次的相对/绝对模式和角度单位"
+    "Reuse the last relative/absolute mode and angle unit across editor sessions": (
+        "跨编辑器会话沿用上次的相对/绝对模式和角度单位"
     ),
     "position": "位置",
     "target": "目标",
@@ -154,7 +154,15 @@ def parse_language(value: Language | str) -> Language:
     raise ValueError(f"Unsupported language: {value}")
 
 
-def _read_language(path: Path) -> Language:
+def _read_settings(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return dict(value) if isinstance(value, dict) else {}
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def _read_language(settings: dict[str, object]) -> Language:
     requested = os.environ.get("FORGE_VIEWER_LANGUAGE")
     if requested:
         try:
@@ -162,9 +170,9 @@ def _read_language(path: Path) -> Language:
         except ValueError:
             return Language.ENGLISH
     try:
-        value = json.loads(path.read_text(encoding="utf-8")).get("language", Language.ENGLISH)
+        value = settings.get("language", Language.ENGLISH)
         return parse_language(value)
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+    except (ValueError, TypeError):
         return Language.ENGLISH
 
 
@@ -172,11 +180,13 @@ def _read_language(path: Path) -> Language:
 class Localizer:
     language: Language = Language.ENGLISH
     path: Path | None = None
+    preferences: dict[str, object] = field(default_factory=dict)
 
     @classmethod
     def load(cls) -> Localizer:
         path = settings_path()
-        return cls(_read_language(path), path)
+        preferences = _read_settings(path)
+        return cls(_read_language(preferences), path, preferences)
 
     def text(self, value: str) -> str:
         if self.language is Language.SIMPLIFIED_CHINESE:
@@ -185,10 +195,18 @@ class Localizer:
 
     def set_language(self, value: Language | str, *, persist: bool = True) -> None:
         self.language = parse_language(value)
+        if persist:
+            self.set_preferences({"language": self.language.value})
+
+    def preference(self, name: str, default: object = None) -> object:
+        return self.preferences.get(str(name), default)
+
+    def set_preferences(self, values: dict[str, object], *, persist: bool = True) -> None:
+        self.preferences.update({str(name): value for name, value in values.items()})
         if not persist or self.path is None:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
-            json.dumps({"language": self.language.value}, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(self.preferences, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
