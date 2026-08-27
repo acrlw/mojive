@@ -3862,7 +3862,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                 b,
                 object_id=b,
                 posable=self._is_posable_body(b)
-                or (model_id > 0 and not self._has_kinematic_dof(b)),
+                or (model_id >= 0 and not self._has_kinematic_dof(b)),
             )
             nodes[body_node[b]].model_id = model_id
             self._node_element[body_node[b]] = (model_id, node_type, raw_name)
@@ -3950,7 +3950,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                 body_node[b],
                 b,
                 site_index=si,
-                posable=model_id > 0 and not self._has_kinematic_dof(b),
+                posable=model_id >= 0 and not self._has_kinematic_dof(b),
             )
             nodes[self._site_nodes[si]].model_id = model_id
             self._node_element[self._site_nodes[si]] = (model_id, NodeType.SITE, raw_name)
@@ -4527,34 +4527,82 @@ class MuJoCoAdapter(SceneAdapterBase):
     def set_geometry_size(self, node_id: int, size: np.ndarray) -> bool:
         identity = self._node_element.get(int(node_id))
         node = next((item for item in self.nodes() if item.node_id == int(node_id)), None)
-        if identity is None or node is None or node.type is not NodeType.GEOM:
-            return False
-        geom = int(node.geom_index)
-        if not 0 <= geom < self._m.ngeom:
-            return False
-        if int(self._m.geom_type[geom]) != int(mujoco.mjtGeom.mjGEOM_PLANE):
+        if identity is None or node is None or node.type not in (NodeType.GEOM, NodeType.SITE):
             return False
         values = np.asarray(size, np.float64).reshape(3)
-        if not np.all(np.isfinite(values)) or np.any(values[:2] <= 0.0):
+        if not np.all(np.isfinite(values)) or np.any(values <= 0.0):
             return False
 
-        model_id, _node_type, name = identity
-        element = self._element(model_id, "geom", name)
+        model_id, node_type, name = identity
+        element = self._element(model_id, node_type.value, name)
         if element is None:
             return False
+
+        if node_type is NodeType.GEOM:
+            index = int(node.geom_index)
+            if not 0 <= index < self._m.ngeom:
+                return False
+            primitive_type = int(self._m.geom_type[index])
+            compiled_size = np.asarray(self._m.geom_size[index], np.float64).copy()
+        else:
+            index = int(node.site_index)
+            if not 0 <= index < self._m.nsite:
+                return False
+            primitive_type = int(self._m.site_type[index])
+            compiled_size = np.asarray(self._m.site_size[index], np.float64).copy()
+
+        supported = {
+            int(mujoco.mjtGeom.mjGEOM_PLANE),
+            int(mujoco.mjtGeom.mjGEOM_SPHERE),
+            int(mujoco.mjtGeom.mjGEOM_ELLIPSOID),
+            int(mujoco.mjtGeom.mjGEOM_BOX),
+            int(mujoco.mjtGeom.mjGEOM_CYLINDER),
+            int(mujoco.mjtGeom.mjGEOM_CAPSULE),
+        }
+        if primitive_type not in supported or (
+            node_type is NodeType.SITE and primitive_type == int(mujoco.mjtGeom.mjGEOM_PLANE)
+        ):
+            return False
+
         authored_size = np.asarray(element.size, np.float64).copy()
-        authored_size[:2] = values[:2]
+        if primitive_type == int(mujoco.mjtGeom.mjGEOM_PLANE):
+            authored_size[:2] = values[:2]
+            compiled_size[:2] = values[:2]
+        elif primitive_type == int(mujoco.mjtGeom.mjGEOM_SPHERE):
+            authored_size[0] = values[0]
+            compiled_size[0] = values[0]
+        elif primitive_type in {
+            int(mujoco.mjtGeom.mjGEOM_CYLINDER),
+            int(mujoco.mjtGeom.mjGEOM_CAPSULE),
+        }:
+            authored_size[0] = values[0]
+            compiled_size[:2] = (values[0], values[2])
+            fromto = np.asarray(element.fromto, np.float64).copy()
+            if np.all(np.isfinite(fromto)):
+                center = 0.5 * (fromto[:3] + fromto[3:])
+                axis = fromto[3:] - fromto[:3]
+                length = float(np.linalg.norm(axis))
+                if length <= 1e-12:
+                    return False
+                axis /= length
+                fromto[:3] = center - axis * values[2]
+                fromto[3:] = center + axis * values[2]
+                element.fromto = fromto
+            else:
+                authored_size[1] = values[2]
+        else:
+            authored_size[:3] = values[:3]
+            compiled_size[:3] = values[:3]
         element.size = authored_size
-        self._m.geom_size[geom, :2] = values[:2]
+        if node_type is NodeType.GEOM:
+            self._m.geom_size[index] = compiled_size
+        else:
+            self._m.site_size[index] = compiled_size
         mujoco.mj_setConst(self._m, self._d)
         mujoco.mj_forward(self._m, self._d)
 
-        source = self.scene_source()
-        instances = np.flatnonzero(source.geom_node == int(node_id))
-        source.geom_size[instances, :2] = values[:2]
-        source.scene_center = np.asarray(self._m.stat.center, np.float32).copy()
-        source.scene_extent = float(self._m.stat.extent)
         self._mark_model_edited(model_id)
+        self._source = None
         self._structure_revision += 1
         return True
 
@@ -4647,8 +4695,20 @@ class MuJoCoAdapter(SceneAdapterBase):
             spec_parent_position,
             spec_parent_rotation,
         )
-        element.pos = local_position
-        element.quat = math3d.mat3_to_quat(local_rotation)
+        fromto = (
+            np.asarray(element.fromto, np.float64).copy()
+            if node_type in (NodeType.GEOM, NodeType.SITE)
+            else np.empty(0, np.float64)
+        )
+        if fromto.shape == (6,) and np.all(np.isfinite(fromto)):
+            half_length = 0.5 * float(np.linalg.norm(fromto[3:] - fromto[:3]))
+            axis = local_rotation[:, 2]
+            fromto[:3] = local_position - axis * half_length
+            fromto[3:] = local_position + axis * half_length
+            element.fromto = fromto
+        else:
+            element.pos = local_position
+            element.quat = math3d.mat3_to_quat(local_rotation)
 
         if node_type in (NodeType.LINK, NodeType.ROBOT):
             self._m.body_pos[node.body_index] = compiled_position

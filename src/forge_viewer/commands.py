@@ -339,7 +339,7 @@ class SetGeometryColor(Command):
 
 @dataclass(frozen=True)
 class SetGeometrySize(Command):
-    """Set an editable geometry node's shape-specific size vector."""
+    """Set an editable geometry or site node's render-size vector."""
 
     node_id: int
     size: np.ndarray

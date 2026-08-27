@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from forge_viewer.types import MeshShape
 from forge_viewer.ui.localization import Language, Localizer, parse_language
 from forge_viewer.ui.panels import (
     Panel,
@@ -24,6 +25,8 @@ from forge_viewer.ui.panels.inspector import (
     _compact_transform,
     _format_vector,
     _free_velocity,
+    _geometry_dimensions,
+    _geometry_size_from_dimensions,
     _lift_color,
     _nearest_euler_degrees,
     _pose_editable,
@@ -201,6 +204,30 @@ def test_transform_editability_matches_the_set_pose_contract():
     assert not _pose_editable(write_pose=False, paused=True, posable=True)
     assert not _pose_editable(write_pose=True, paused=False, posable=True)
     assert not _pose_editable(write_pose=True, paused=True, posable=False)
+
+
+@pytest.mark.parametrize(
+    ("shape", "size", "label", "dimensions"),
+    (
+        (MeshShape.PLANE, (2.0, 3.0, 1.0), "width / length", (4.0, 6.0)),
+        (MeshShape.BOX, (1.0, 2.0, 3.0), "width / depth / height", (2.0, 4.0, 6.0)),
+        (MeshShape.SPHERE, (0.5, 0.5, 0.5), "diameter", (1.0,)),
+        (MeshShape.SPHERE, (0.5, 1.0, 1.5), "width / depth / height", (1.0, 2.0, 3.0)),
+        (MeshShape.CYLINDER, (0.5, 0.5, 2.0), "diameter / height", (1.0, 4.0)),
+        (
+            MeshShape.CAPSULE_SHAFT,
+            (0.5, 0.5, 2.0),
+            "diameter / shaft length",
+            (1.0, 4.0),
+        ),
+    ),
+)
+def test_geometry_dimension_editor_uses_full_user_facing_dimensions(shape, size, label, dimensions):
+    editor = _geometry_dimensions(shape, size)
+    assert editor is not None
+    assert editor[0] == label
+    assert editor[1] == pytest.approx(dimensions)
+    assert _geometry_size_from_dimensions(shape, size, editor[1]) == pytest.approx(size)
 
 
 def test_free_body_velocity_is_split_into_linear_and_angular_xyz():

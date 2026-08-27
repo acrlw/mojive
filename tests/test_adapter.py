@@ -749,7 +749,8 @@ def test_set_qpos_on_joint_types_scene():
     nodes = {n.name: n for n in a.nodes() if n.type in body_kinds}
     assert nodes["free_body"].posable
     assert nodes["free_chain"].posable
-    for name in ("ball_body", "slide_body", "hinge_body", "chain_root", "chain_0"):
+    assert nodes["chain_root"].posable
+    for name in ("ball_body", "slide_body", "hinge_body", "chain_0"):
         assert not nodes[name].posable
     a.release()
 
@@ -760,7 +761,7 @@ def test_set_ctrl_clips_to_range(adapter):
     assert not adapter.set_ctrl(7, 0.0)
 
 
-def test_set_pose_only_on_free_bodies(adapter):
+def test_set_pose_on_free_body_resets_velocity(adapter):
 
     nodes = {n.name: n for n in adapter.nodes()}
     assert nodes["free_body"].posable

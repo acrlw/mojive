@@ -25,6 +25,41 @@ _MATERIAL_PRESETS = {
 }
 
 
+def _geometry_dimensions(shape: MeshShape, size) -> tuple[str, np.ndarray] | None:
+    """Return user-facing full dimensions for one editable primitive."""
+    value = np.asarray(size, np.float32).reshape(3)
+    if shape is MeshShape.PLANE:
+        return "width / length", value[:2] * 2.0
+    if shape is MeshShape.BOX:
+        return "width / depth / height", value * 2.0
+    if shape is MeshShape.SPHERE:
+        if np.allclose(value, value[0], rtol=1e-5, atol=1e-7):
+            return "diameter", value[:1] * 2.0
+        return "width / depth / height", value * 2.0
+    if shape is MeshShape.CYLINDER:
+        return "diameter / height", np.array((value[0] * 2.0, value[2] * 2.0))
+    if shape is MeshShape.CAPSULE_SHAFT:
+        return "diameter / shaft length", np.array((value[0] * 2.0, value[2] * 2.0))
+    return None
+
+
+def _geometry_size_from_dimensions(shape: MeshShape, size, dimensions) -> np.ndarray:
+    """Convert full UI dimensions back to the render-size convention."""
+    value = np.asarray(size, np.float32).reshape(3).copy()
+    dimensions = np.maximum(np.asarray(dimensions, np.float32).reshape(-1), 0.002)
+    half = dimensions * 0.5
+    if shape is MeshShape.PLANE:
+        value[:2] = half[:2]
+    elif shape is MeshShape.BOX or (shape is MeshShape.SPHERE and len(half) == 3):
+        value[:] = half[:3]
+    elif shape is MeshShape.SPHERE:
+        value[:] = half[0]
+    elif shape in (MeshShape.CYLINDER, MeshShape.CAPSULE_SHAFT):
+        value[:2] = half[0]
+        value[2] = half[1]
+    return value
+
+
 def _unique_component_name(category: str, existing: set[str]) -> str:
     if category not in existing:
         return category
@@ -600,7 +635,11 @@ class InspectorPanel(Panel):
         if src is None or node.body_index < 0 or len(src.geom_body) == 0:
             imgui.text_disabled("no geometry")
             return
-        instances = np.flatnonzero(np.asarray(src.geom_body) == node.body_index)
+        instances = (
+            np.flatnonzero(np.asarray(src.geom_node) == node.node_id)
+            if node.type in (NodeType.GEOM, NodeType.SITE)
+            else np.flatnonzero(np.asarray(src.geom_body) == node.body_index)
+        )
         if len(instances) == 0:
             imgui.text_disabled("no geometry on this body")
             return
@@ -633,8 +672,9 @@ class InspectorPanel(Panel):
 
         shape = src.geom_mesh[first].shape
         infinite_plane = bool(src.geom_infinite_plane[first])
+        size_editor = _geometry_dimensions(shape, src.geom_size[first])
         editable_size = (
-            shape is MeshShape.PLANE
+            size_editor is not None
             and not infinite_plane
             and scene_node is not None
             and (
@@ -642,28 +682,46 @@ class InspectorPanel(Panel):
                 or (scene_node.model_id < 0 and ctx.session.adapter.caps.scene_authoring)
             )
         )
-        if shape is MeshShape.PLANE:
-            if infinite_plane:
-                imgui.text_disabled("infinite plane")
-            else:
-                if not editable_size:
-                    imgui.begin_disabled()
-                dimensions = np.asarray(src.geom_size[first, :2], np.float32) * 2.0
+        if infinite_plane:
+            imgui.text_disabled("infinite plane")
+        elif size_editor is not None:
+            if not editable_size:
+                imgui.begin_disabled()
+            dimension_label, dimensions = size_editor
+            if len(dimensions) == 1:
+                size_changed, scalar = imgui.drag_float(
+                    dimension_label,
+                    float(dimensions[0]),
+                    0.05,
+                    0.002,
+                    1000000.0,
+                    "%.3f",
+                )
+                dimensions = np.array((scalar,), np.float32)
+            elif len(dimensions) == 2:
                 size_changed, dimensions = imgui.drag_float2(
-                    "width / length", dimensions, 0.05, 0.002, 1000000.0, "%.3f"
+                    dimension_label, dimensions, 0.05, 0.002, 1000000.0, "%.3f"
                 )
-                if not editable_size:
-                    imgui.end_disabled()
-                hint = (
-                    "Full X/Y dimensions of this finite plane"
-                    if editable_size
-                    else "Edit model geometry dimensions in its source"
+            else:
+                size_changed, dimensions = imgui.drag_float3(
+                    dimension_label, dimensions, 0.05, 0.002, 1000000.0, "%.3f"
                 )
-                imgui.set_item_tooltip(hint)
-                if size_changed and editable_size:
-                    size = np.asarray(src.geom_size[first], np.float32).copy()
-                    size[:2] = np.maximum(np.asarray(dimensions, np.float32) * 0.5, 0.001)
-                    self._submit_edit(ctx, cmd.SetGeometrySize(node_id, size))
+            if not editable_size:
+                imgui.end_disabled()
+            hint = (
+                "Full authored primitive dimensions"
+                if editable_size
+                else "Edit model geometry dimensions in its source"
+            )
+            imgui.set_item_tooltip(hint)
+            if size_changed and editable_size:
+                self._submit_edit(
+                    ctx,
+                    cmd.SetGeometrySize(
+                        node_id,
+                        _geometry_size_from_dimensions(shape, src.geom_size[first], dimensions),
+                    ),
+                )
 
         color_changed, rgba = imgui.color_edit4("instance color", src.geom_rgba[first])
         if color_changed and node_id >= 0:

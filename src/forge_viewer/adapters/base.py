@@ -877,7 +877,7 @@ class SceneAdapterBase:
         return True
 
     def set_geometry_size(self, node_id: int, size: np.ndarray) -> bool:
-        """Set authored geometry dimensions for a hierarchy node."""
+        """Set authored primitive dimensions for a geometry or site node."""
         return False
 
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:

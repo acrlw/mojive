@@ -1017,6 +1017,78 @@ def test_model_edit_batch_compiles_once_is_atomic_and_undoes_once(monkeypatch) -
     assert any(item.name.endswith("fixture_root") for item in session.nodes)
 
 
+def test_primary_fixed_primitives_and_site_support_authoring(tmp_path: Path) -> None:
+    path = tmp_path / "primitive-authoring.xml"
+    path.write_text(
+        """
+<mujoco>
+  <worldbody>
+    <body name="fixture" pos="1 0 0">
+      <geom name="sphere" type="sphere" size="0.1"/>
+      <geom name="box" type="box" size="0.1 0.2 0.3"/>
+      <geom name="cylinder" type="cylinder" size="0.1 0.2"/>
+      <geom name="capsule" type="capsule" fromto="0 0 -0.5 0 0 0.5" size="0.1"/>
+      <site name="target" type="box" size="0.1 0.1 0.1" pos="0 1 0"/>
+    </body>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+
+    fixture = next(node for node in session.nodes if node.name == "fixture")
+    target = next(node for node in session.nodes if node.name == "target")
+    assert fixture.posable
+    assert target.posable
+    assert session.submit(cmd.SetPose(fixture.node_id, np.array((2.0, 0.0, 0.0)), np.eye(3)))
+    assert session.submit(cmd.SetPose(target.node_id, np.array((2.0, 2.0, 0.0)), np.eye(3)))
+    capsule_node = next(node for node in session.nodes if node.name == "capsule")
+    assert session.submit(cmd.SetPose(capsule_node.node_id, np.array((2.0, 0.0, 1.0)), np.eye(3)))
+
+    requested = {
+        "sphere": np.array((0.2, 0.2, 0.2), np.float32),
+        "box": np.array((0.2, 0.3, 0.4), np.float32),
+        "cylinder": np.array((0.2, 0.2, 0.3), np.float32),
+        "capsule": np.array((0.2, 0.2, 0.3), np.float32),
+        "target": np.array((0.4, 0.5, 0.6), np.float32),
+    }
+    for name, size in requested.items():
+        node = next(item for item in session.nodes if item.name == name)
+        result = session.submit(cmd.SetGeometrySize(node.node_id, size))
+        assert result.ok, f"{name}: {result.message}"
+
+    assert session.submit(cmd.Undo())
+    model = document.primary.model
+    site = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "target")
+    assert model.site_size[site] == pytest.approx((0.1, 0.1, 0.1))
+    assert session.submit(cmd.Redo())
+
+    model = document.primary.model
+    for name, expected in {
+        "sphere": (0.2, 0.0, 0.0),
+        "box": (0.2, 0.3, 0.4),
+        "cylinder": (0.2, 0.3, 0.0),
+        "capsule": (0.2, 0.3, 0.0),
+    }.items():
+        index = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
+        assert model.geom_size[index] == pytest.approx(expected)
+    site = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "target")
+    assert model.site_size[site] == pytest.approx((0.4, 0.5, 0.6))
+
+    xml = document.scene_model_xml(0)
+    assert xml is not None
+    spec = mujoco.MjSpec.from_string(xml)
+    assert spec.body("fixture").pos == pytest.approx((2.0, 0.0, 0.0))
+    assert spec.site("target").pos == pytest.approx((0.0, 2.0, 0.0))
+    capsule = spec.geom("capsule")
+    assert capsule.size[:2] == pytest.approx((0.2, 0.3))
+    assert capsule.pos == pytest.approx((0.0, 0.0, 1.0))
+    assert np.abs(math3d.quat_to_mat3(capsule.quat)[:, 2]) == pytest.approx((0.0, 0.0, 1.0))
+
+
 def test_mjspec_element_pose_edits_round_trip_in_workspace(tmp_path: Path) -> None:
     document = workspace()
     model_id = document.add_scene_model(

@@ -1051,26 +1051,14 @@ def test_multi_joint_viewport_picker_selects_the_gizmo_target():
         v.release()
 
 
-def test_gizmo_disappears_without_a_free_body(free_body_viewer):
+def test_gizmo_disappears_without_an_editable_body(free_body_viewer):
 
     import forge_viewer.commands as cmd
     from forge_viewer.adapters.base import NodeType
 
     v = free_body_viewer
-
-    fr = v.session.frame
-    node = max(
-        (
-            n
-            for n in v.session.nodes
-            if not n.posable
-            and n.object_id
-            and n.body_index >= 0
-            and n.type in (NodeType.ROBOT, NodeType.LINK)
-        ),
-        key=lambda n: float(np.linalg.norm(fr.body_xpos[n.body_index])),
-    )
-    v.session.submit(cmd.Select(node.object_id))
+    node = next(n for n in v.session.nodes if n.type is NodeType.WORLD)
+    v.session.submit(cmd.SelectNode(node.node_id))
     for _ in range(4):
         v.sync()
 
