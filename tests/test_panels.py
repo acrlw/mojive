@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from forge_viewer.adapters.base import NodeType, SceneNode
 from forge_viewer.types import MeshShape
 from forge_viewer.ui.localization import Language, Localizer, parse_language
 from forge_viewer.ui.panels import (
@@ -20,7 +21,7 @@ from forge_viewer.ui.panels import (
     validate_panels,
 )
 from forge_viewer.ui.panels.camera import camera_snapshot, qpos_snapshot, reproduction_snapshot
-from forge_viewer.ui.panels.hierarchy import hierarchy_open_depth
+from forge_viewer.ui.panels.hierarchy import HierarchyPanel, hierarchy_open_depth
 from forge_viewer.ui.panels.inspector import (
     _compact_transform,
     _format_vector,
@@ -68,6 +69,20 @@ def test_large_editor_lists_are_bounded_and_large_hierarchies_start_closed():
     assert hierarchy_open_depth(999) == 2
     assert hierarchy_open_depth(1000) == 1
     assert hierarchy_open_depth(2000) == 0
+
+
+def test_hierarchy_batch_delete_collapses_selected_descendants_and_skips_scene_entities():
+    panel = HierarchyPanel()
+    nodes = (
+        SceneNode(1, "body", NodeType.LINK, model_id=0),
+        SceneNode(2, "child geom", NodeType.GEOM, parent=1, model_id=0),
+        SceneNode(3, "sibling geom", NodeType.GEOM, model_id=0),
+        SceneNode(4, "forge object", NodeType.LINK, model_id=-1),
+    )
+    panel._by_id = {node.node_id: node for node in nodes}
+    panel._batch_selected = {1, 2, 3, 4}
+
+    assert panel._batch_removable_roots() == (1, 3)
 
 
 def test_settings_is_a_modal_dialog(panels: PanelSet):

@@ -2364,6 +2364,114 @@ def test_model_keyframe_authoring_captures_edits_loads_and_undoes(tmp_path: Path
     assert session.keyframes == []
 
 
+def test_schema_model_properties_batch_globals_defaults_and_assets_once() -> None:
+    document = workspace()
+    adapter = document.primary
+    assert document.set_scene_model_xml(
+        0,
+        """<mujoco model="schema-properties">
+  <compiler angle="degree"/>
+  <option timestep="0.01"><flag energy="enable"/></option>
+  <visual><global fovy="50"/></visual>
+  <default><default class="soft"><geom friction="0.5 0.1 0.01"/><joint damping="1"/></default></default>
+  <asset>
+    <mesh name="tetra" vertex="0 0 0  1 0 0  0 1 0  0 0 1"
+          face="0 2 1  0 1 3  0 3 2  1 2 3"/>
+    <hfield name="terrain" nrow="2" ncol="2" size="1 1 0.2 0.1"
+            elevation="0 0 0 1"/>
+  </asset>
+  <worldbody><body><joint/><geom size="0.1"/></body></worldbody>
+</mujoco>""",
+    )
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    groups = {group.group_id: group for group in session.model_property_groups(0)}
+    assert {"global:compiler", "global:option", "global:option/flag"} <= groups.keys()
+    assert {field.name for field in groups["global:option"].fields} >= {
+        "timestep",
+        "gravity",
+        "solver",
+    }
+    assert {field.name for field in groups["asset:mesh:0"].fields} >= {
+        "scale",
+        "inertia",
+        "smoothnormal",
+    }
+    assert "vertex" not in {field.name for field in groups["asset:mesh:0"].fields}
+    soft_geom = next(
+        group
+        for group in groups.values()
+        if group.category == "default" and group.label == "Default soft / geom"
+    )
+
+    replace_count = 0
+    replace_model_spec = adapter._replace_model_spec
+
+    def counted_replace(model_id, spec):
+        nonlocal replace_count
+        replace_count += 1
+        return replace_model_spec(model_id, spec)
+
+    adapter._replace_model_spec = counted_replace
+    updates = (
+        ("global:option", (("timestep", "0.005"), ("gravity", "0 0 -1"))),
+        ("global:size", (("nuserdata", "8"),)),
+        ("global:visual/global", (("orthographic", "true"), ("fovy", "35"))),
+        (soft_geom.group_id, (("friction", "0.8 0.2 0.02"), ("rgba", "0.2 0.3 0.4 1"))),
+        ("asset:mesh:0", (("scale", "2 3 4"), ("smoothnormal", "true"))),
+        ("asset:hfield:0", (("size", "2 3 0.4 0.2"),)),
+    )
+    result = session.submit(cmd.SetModelPropertyGroups(0, updates))
+    assert result.ok
+    assert replace_count == 1
+    assert adapter.model.opt.timestep == pytest.approx(0.005)
+    assert adapter.model.opt.gravity == pytest.approx((0.0, 0.0, -1.0))
+    edited = {group.group_id: group for group in session.model_property_groups(0)}
+    assert {field.name: field.value for field in edited["global:visual/global"].fields}[
+        "orthographic"
+    ] == "true"
+    assert {field.name: field.value for field in edited["asset:mesh:0"].fields}["scale"] == "2 3 4"
+    assert {field.name: field.value for field in edited[soft_geom.group_id].fields}[
+        "friction"
+    ] == "0.8 0.2 0.02"
+
+    assert session.submit(cmd.Undo())
+    assert adapter.model.opt.timestep == pytest.approx(0.01)
+    assert session.submit(cmd.Redo())
+    assert adapter.model.opt.timestep == pytest.approx(0.005)
+
+
+def test_default_class_add_nested_edit_remove_and_undo() -> None:
+    document = workspace()
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+
+    base = session.submit(cmd.AddModelDefault(0, -1, "base"))
+    assert base.ok
+    child = session.submit(cmd.AddModelDefault(0, base.entity_id, "child"))
+    assert child.ok
+    groups = {group.label: group for group in session.model_property_groups(0)}
+    assert "Default base / class" in groups
+    child_geom = groups["Default child / geom"]
+    assert session.submit(
+        cmd.SetModelPropertyGroups(
+            0,
+            ((child_geom.group_id, (("friction", "0.7 0.2 0.03"),)),),
+        )
+    )
+    edited = {group.label: group for group in session.model_property_groups(0)}
+    assert {field.name: field.value for field in edited["Default child / geom"].fields}[
+        "friction"
+    ] == "0.7 0.2 0.03"
+
+    assert not session.submit(cmd.RemoveModelDefault(0, 0))
+    assert session.submit(cmd.RemoveModelDefault(0, base.entity_id))
+    assert all("Default base" not in group.label for group in session.model_property_groups(0))
+    assert session.submit(cmd.Undo())
+    labels = {group.label for group in session.model_property_groups(0)}
+    assert {"Default base / class", "Default child / class"} <= labels
+
+
 def test_noop_model_edits_skip_recompilation() -> None:
     document = workspace()
     model_id = document.add_scene_model(ASSETS / "actuator_visuals.xml", np.zeros(3), np.eye(3))

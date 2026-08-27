@@ -22,6 +22,7 @@ from .adapters.base import (
     JointInfo,
     KeyframeInfo,
     KeyframeProperties,
+    ModelPropertyGroup,
     NodeType,
     PhysicsState,
     SceneAdapter,
@@ -126,6 +127,9 @@ _SCENE_EDIT_COMMANDS = (
     cmd.AddModelComponent,
     cmd.UpdateModelComponent,
     cmd.RemoveModelComponent,
+    cmd.SetModelPropertyGroups,
+    cmd.AddModelDefault,
+    cmd.RemoveModelDefault,
     cmd.AddResourceRoot,
     cmd.RemoveResourceRoot,
     cmd.SetPose,
@@ -339,6 +343,10 @@ class Session:
     def model_component_presets(self, model_id: int, category: str) -> tuple[str, ...]:
         """Return supported component subtypes for a model and category."""
         return self._adapter.model_component_presets(model_id, category)
+
+    def model_property_groups(self, model_id: int) -> tuple[ModelPropertyGroup, ...]:
+        """Return schema-driven model, default-class, and asset properties."""
+        return self._adapter.model_property_groups(model_id)
 
     def model_material_indices(self, model_id: int) -> tuple[int, ...]:
         """Return render material indices owned by one editable model."""
@@ -1000,6 +1008,55 @@ class Session:
                 return CommandResult.bad(f"{c.category} {c.component_id} cannot be removed")
             self._refresh_structure()
             return CommandResult.good(f"Removed {c.category}")
+
+        if isinstance(c, cmd.SetModelPropertyGroups):
+            if not caps.topology_editing:
+                return CommandResult.bad(f"{caps.name} does not support topology editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before changing model properties")
+            if not c.updates or len({group_id for group_id, _fields in c.updates}) != len(
+                c.updates
+            ):
+                return CommandResult.bad("Model property updates must use unique group IDs")
+            try:
+                changed = self._adapter.set_model_property_groups(c.model_id, c.updates)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if not changed:
+                return CommandResult.bad("Model properties were unchanged or unavailable")
+            self._refresh_structure()
+            return CommandResult.good(f"Updated {len(c.updates)} model property group(s)")
+
+        if isinstance(c, cmd.AddModelDefault):
+            if not caps.topology_editing:
+                return CommandResult.bad(f"{caps.name} does not support topology editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before adding a default class")
+            name = str(c.name).strip()
+            if not name:
+                return CommandResult.bad("Default class name cannot be empty")
+            try:
+                default_id = self._adapter.add_model_default(c.model_id, c.parent_default_id, name)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if default_id < 0:
+                return CommandResult.bad(f"Default class {name!r} could not be added")
+            self._refresh_structure()
+            return CommandResult.good(f"Added default class {name}", default_id)
+
+        if isinstance(c, cmd.RemoveModelDefault):
+            if not caps.topology_editing:
+                return CommandResult.bad(f"{caps.name} does not support topology editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before removing a default class")
+            try:
+                changed = self._adapter.remove_model_default(c.model_id, c.default_id)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if not changed:
+                return CommandResult.bad(f"Default class {c.default_id} could not be removed")
+            self._refresh_structure()
+            return CommandResult.good("Removed default class")
 
         if isinstance(c, cmd.AddResourceRoot):
             if not caps.scene_files or not c.path.is_dir():

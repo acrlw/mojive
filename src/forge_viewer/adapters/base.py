@@ -174,6 +174,17 @@ class ModelComponentInfo:
 
 
 @dataclass(frozen=True)
+class ModelPropertyGroup:
+    """One schema-driven model, default-class, or asset property group."""
+
+    model_id: int
+    group_id: str
+    category: str
+    label: str
+    fields: tuple[ModelComponentField, ...]
+
+
+@dataclass(frozen=True)
 class GeometryProperties:
     """Editable MuJoCo contact parameters for one model geometry."""
 
@@ -860,6 +871,26 @@ class SceneAdapterBase:
         """Remove a model-level declaration."""
         return False
 
+    def model_property_groups(self, model_id: int) -> tuple[ModelPropertyGroup, ...]:
+        """Return schema-driven global, default-class, and asset properties."""
+        return ()
+
+    def set_model_property_groups(
+        self,
+        model_id: int,
+        updates: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
+    ) -> bool:
+        """Apply one or more schema property groups with one model rebuild."""
+        return False
+
+    def add_model_default(self, model_id: int, parent_default_id: int, name: str) -> int:
+        """Add a named default class and return its schema index."""
+        return -1
+
+    def remove_model_default(self, model_id: int, default_id: int) -> bool:
+        """Remove a named default class."""
+        return False
+
     def reset(self) -> None:
         """Restore the adapter's initial dynamic state."""
 
@@ -1244,6 +1275,14 @@ class SceneAdapter(Protocol):
         path: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
     ) -> bool: ...
     def remove_model_component(self, model_id: int, category: str, component_id: int) -> bool: ...
+    def model_property_groups(self, model_id: int) -> tuple[ModelPropertyGroup, ...]: ...
+    def set_model_property_groups(
+        self,
+        model_id: int,
+        updates: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
+    ) -> bool: ...
+    def add_model_default(self, model_id: int, parent_default_id: int, name: str) -> int: ...
+    def remove_model_default(self, model_id: int, default_id: int) -> bool: ...
     def reset(self) -> None: ...
     def step(self, count: int = 1) -> None: ...
     def set_paused(self, paused: bool) -> bool: ...

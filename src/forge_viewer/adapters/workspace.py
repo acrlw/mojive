@@ -21,6 +21,7 @@ from .base import (
     GeometryShapeProperties,
     JointAdvancedProperties,
     KeyframeProperties,
+    ModelPropertyGroup,
     NodeType,
     SceneAdapterBase,
     SceneFrame,
@@ -239,6 +240,31 @@ class WorkspaceAdapter(SceneAdapterBase):
 
     def remove_model_component(self, model_id: int, category: str, component_id: int) -> bool:
         changed = self.primary.remove_model_component(model_id, category, component_id)
+        if changed:
+            self._invalidate()
+        return changed
+
+    def model_property_groups(self, model_id: int) -> tuple[ModelPropertyGroup, ...]:
+        return self.primary.model_property_groups(model_id)
+
+    def set_model_property_groups(
+        self,
+        model_id: int,
+        updates: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
+    ) -> bool:
+        changed = self.primary.set_model_property_groups(model_id, updates)
+        if changed:
+            self._invalidate()
+        return changed
+
+    def add_model_default(self, model_id: int, parent_default_id: int, name: str) -> int:
+        default_id = self.primary.add_model_default(model_id, parent_default_id, name)
+        if default_id >= 0:
+            self._invalidate()
+        return default_id
+
+    def remove_model_default(self, model_id: int, default_id: int) -> bool:
+        changed = self.primary.remove_model_default(model_id, default_id)
         if changed:
             self._invalidate()
         return changed

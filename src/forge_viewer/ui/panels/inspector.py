@@ -18,6 +18,7 @@ from ...adapters.base import (
     JointInfo,
     KeyframeProperties,
     ModelComponentInfo,
+    ModelPropertyGroup,
     NodeType,
     SceneNode,
     SiteProperties,
@@ -97,8 +98,10 @@ def _format_keyframe_values(values: tuple[float, ...]) -> str:
 def _component_value_editor(label: str, value: str, choices: tuple[str, ...]) -> str:
     if choices:
         if imgui.begin_combo(label, value or "select"):
-            for choice in choices:
-                selected, _ = imgui.selectable(choice, choice == value)
+            for index, choice in enumerate(choices):
+                selected, _ = imgui.selectable(
+                    f"{choice or '<default>'}##choice-{index}", choice == value
+                )
                 if selected:
                     value = choice
             imgui.end_combo()
@@ -156,6 +159,19 @@ class InspectorPanel(Panel):
         self._keyframe_values: dict[str, str] = {}
         self._keyframe_error = ""
         self._open_keyframe_popup = False
+        self._model_property_cache_generation = -1
+        self._model_property_cache_model = -1
+        self._model_property_groups: tuple[ModelPropertyGroup, ...] = ()
+        self._model_property_edit: ModelPropertyGroup | None = None
+        self._model_property_fields: list[list[str]] = []
+        self._model_property_error = ""
+        self._open_model_property_popup = False
+        self._show_empty_default_groups = False
+        self._default_model_id = -1
+        self._default_parent_id = 0
+        self._default_name = ""
+        self._default_error = ""
+        self._open_default_popup = False
         self._model_transform_model = -1
         self._model_transform_generation = -1
         self._model_transform_position = np.zeros(3, np.float32)
@@ -215,6 +231,8 @@ class InspectorPanel(Panel):
         self._draw_model_source(ctx)
         self._draw_component_editor(ctx)
         self._draw_keyframe_editor(ctx)
+        self._draw_model_property_editor(ctx)
+        self._draw_default_editor(ctx)
         s = ctx.session
         node = s.selected_node
         if node is None:
@@ -336,6 +354,205 @@ class InspectorPanel(Panel):
                     self._open_source_popup = True
             self._model_components(ctx, info.model_id)
             self._model_keyframes(ctx, info.model_id)
+            self._model_properties(ctx, info.model_id)
+
+    def _model_properties(self, ctx: PanelContext, model_id: int) -> None:
+        generation = ctx.session.structure_generation
+        if (
+            generation != self._model_property_cache_generation
+            or model_id != self._model_property_cache_model
+        ):
+            self._model_property_cache_generation = generation
+            self._model_property_cache_model = model_id
+            self._model_property_groups = ctx.session.model_property_groups(model_id)
+        imgui.separator()
+        if not imgui.collapsing_header("Model Configuration"):
+            return
+        editable = ctx.session.paused
+        if not editable:
+            imgui.begin_disabled()
+        if imgui.button("Add Default Class..."):
+            self._default_model_id = model_id
+            self._default_parent_id = 0
+            self._default_name = ""
+            self._default_error = ""
+            self._open_default_popup = True
+        if not editable:
+            imgui.end_disabled()
+        for category, label in (
+            ("global", "Global Settings"),
+            ("asset", "Mesh and Height-field Assets"),
+            ("default", "Default Classes"),
+        ):
+            groups = tuple(
+                group for group in self._model_property_groups if group.category == category
+            )
+            if category == "default":
+                _changed, self._show_empty_default_groups = imgui.checkbox(
+                    "Show available default element types", self._show_empty_default_groups
+                )
+                if not self._show_empty_default_groups:
+                    groups = tuple(
+                        group
+                        for group in groups
+                        if group.group_id.endswith(":class")
+                        or any(field.value for field in group.fields)
+                    )
+            if not imgui.collapsing_header(f"{label} ({len(groups)})"):
+                continue
+            if not groups:
+                imgui.text_disabled("no entries")
+            for group in groups:
+                authored = sum(bool(field.value) for field in group.fields)
+                imgui.push_id(group.group_id)
+                imgui.text(group.label)
+                imgui.same_line()
+                imgui.text_disabled(f"{authored}/{len(group.fields)} set")
+                imgui.same_line()
+                if not editable:
+                    imgui.begin_disabled()
+                if imgui.small_button("Edit"):
+                    self._begin_model_property_edit(group)
+                if (
+                    group.category == "default"
+                    and group.group_id.endswith(":class")
+                    and group.fields[0].value
+                ):
+                    imgui.same_line()
+                    if imgui.small_button("Delete"):
+                        default_id = int(group.group_id.split(":")[1])
+                        result = ctx.submit(cmd.RemoveModelDefault(model_id, default_id))
+                        if not result.ok:
+                            self._default_error = result.message
+                if not editable:
+                    imgui.end_disabled()
+                imgui.pop_id()
+        if not editable:
+            imgui.text_disabled("Pause the simulation to edit model configuration")
+        if self._default_error:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._default_error)
+            if imgui.small_button("Copy error##default-list"):
+                imgui.set_clipboard_text(self._default_error)
+
+    def _begin_model_property_edit(self, group: ModelPropertyGroup) -> None:
+        self._model_property_edit = group
+        self._model_property_fields = [[field.name, field.value] for field in group.fields]
+        self._model_property_error = ""
+        self._open_model_property_popup = True
+
+    def _draw_model_property_editor(self, ctx: PanelContext) -> None:
+        group = self._model_property_edit
+        if self._open_model_property_popup and group is not None:
+            imgui.open_popup("Model Properties")
+            self._open_model_property_popup = False
+        imgui.set_next_window_size(
+            imgui.ImVec2(620.0 * ctx.style_scale, 680.0 * ctx.style_scale),
+            imgui.Cond_.appearing.value,
+        )
+        visible, _ = imgui.begin_popup_modal("Model Properties")
+        if not visible:
+            return
+        if group is None:
+            imgui.close_current_popup()
+            imgui.end_popup()
+            return
+        imgui.text(group.label)
+        imgui.text_disabled("Blank values use the MuJoCo default or inherited class value.")
+        imgui.begin_child(
+            "model_property_fields",
+            imgui.ImVec2(0.0, -92.0 * ctx.style_scale),
+            imgui.ChildFlags_.borders.value,
+        )
+        choices = {field.name: field.choices for field in group.fields}
+        for index, field in enumerate(self._model_property_fields):
+            field[1] = _component_value_editor(
+                f"{field[0]}##model-property-{index}",
+                field[1],
+                choices.get(field[0], ()),
+            )
+        imgui.end_child()
+        if self._model_property_error:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._model_property_error)
+            if imgui.small_button("Copy error##model-properties"):
+                imgui.set_clipboard_text(self._model_property_error)
+        if imgui.button("Apply", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+            result = ctx.submit(
+                cmd.SetModelPropertyGroups(
+                    group.model_id,
+                    (
+                        (
+                            group.group_id,
+                            tuple((name, value) for name, value in self._model_property_fields),
+                        ),
+                    ),
+                )
+            )
+            if result.ok:
+                self._model_property_edit = None
+                imgui.close_current_popup()
+            else:
+                self._model_property_error = result.message
+        imgui.same_line()
+        if imgui.button("Cancel", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+            self._model_property_edit = None
+            imgui.close_current_popup()
+        imgui.end_popup()
+
+    def _draw_default_editor(self, ctx: PanelContext) -> None:
+        if self._open_default_popup:
+            imgui.open_popup("Add Default Class")
+            self._open_default_popup = False
+        imgui.set_next_window_size(
+            imgui.ImVec2(460.0 * ctx.style_scale, 230.0 * ctx.style_scale),
+            imgui.Cond_.appearing.value,
+        )
+        visible, _ = imgui.begin_popup_modal("Add Default Class")
+        if not visible:
+            return
+        parents = tuple(
+            group
+            for group in self._model_property_groups
+            if group.category == "default" and group.group_id.endswith(":class")
+        )
+        parent_ids = tuple(int(group.group_id.split(":")[1]) for group in parents)
+        parent_labels = tuple(group.fields[0].value or "main" for group in parents)
+        if parent_ids:
+            slot = (
+                parent_ids.index(self._default_parent_id)
+                if self._default_parent_id in parent_ids
+                else 0
+            )
+            changed, slot = imgui.combo("parent class", slot, parent_labels)
+            if changed:
+                self._default_parent_id = parent_ids[slot]
+        else:
+            imgui.text_disabled("parent class: main (will be created)")
+            self._default_parent_id = -1
+        _changed, self._default_name = imgui.input_text("class name", self._default_name)
+        if self._default_error:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._default_error)
+            if imgui.small_button("Copy error##default-class"):
+                imgui.set_clipboard_text(self._default_error)
+        if not self._default_name.strip():
+            imgui.begin_disabled()
+        if imgui.button("Add", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+            result = ctx.submit(
+                cmd.AddModelDefault(
+                    self._default_model_id,
+                    self._default_parent_id,
+                    self._default_name,
+                )
+            )
+            if result.ok:
+                imgui.close_current_popup()
+            else:
+                self._default_error = result.message
+        if not self._default_name.strip():
+            imgui.end_disabled()
+        imgui.same_line()
+        if imgui.button("Cancel", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+            imgui.close_current_popup()
+        imgui.end_popup()
 
     def _model_keyframes(self, ctx: PanelContext, model_id: int) -> None:
         keyframes = tuple(key for key in ctx.session.keyframes if key.model_id == model_id)

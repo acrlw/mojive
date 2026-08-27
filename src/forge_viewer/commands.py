@@ -214,6 +214,31 @@ class RemoveModelComponent(Command):
 
 
 @dataclass(frozen=True)
+class SetModelPropertyGroups(Command):
+    """Apply schema-driven model properties in one model rebuild."""
+
+    model_id: int
+    updates: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
+
+
+@dataclass(frozen=True)
+class AddModelDefault(Command):
+    """Add a named default class below an existing default class."""
+
+    model_id: int
+    parent_default_id: int
+    name: str
+
+
+@dataclass(frozen=True)
+class RemoveModelDefault(Command):
+    """Remove a named default class by schema index."""
+
+    model_id: int
+    default_id: int
+
+
+@dataclass(frozen=True)
 class NewScene(Command):
     """Create an empty authored scene document."""
 

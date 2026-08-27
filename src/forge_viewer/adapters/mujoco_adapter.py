@@ -66,6 +66,7 @@ from .base import (
     ModelComponentField,
     ModelComponentInfo,
     ModelComponentPathItem,
+    ModelPropertyGroup,
     NodeType,
     PhysicsState,
     SceneAdapterBase,
@@ -114,6 +115,89 @@ _ACTUATOR_POSE_SITE = 2
 _ACTUATOR_POSE_GEOM = 3
 
 _MODEL_COMPONENT_CATEGORIES = ("contact", "actuator", "sensor", "tendon", "equality")
+
+
+def _mjcf_schema_attributes() -> dict[tuple[str, ...], tuple[str, ...]]:
+    """Read attribute inventories from the exact linked MuJoCo version."""
+    if mujoco is None:
+        return {}
+    pattern = re.compile(r"^(\s*)(\S+)\s+\([^)]*\)\s*(.*)$")
+    attributes: dict[tuple[str, ...], list[str]] = {}
+    stack: list[str] = []
+    current: tuple[str, ...] | None = None
+    for line in mujoco.mj_printSchema(False, True).splitlines():
+        match = pattern.match(line)
+        if match is not None:
+            indent, tag, values = match.groups()
+            depth = len(indent) // 3
+            stack = stack[:depth]
+            current = (*stack, tag)
+            stack.append(tag)
+            attributes.setdefault(current, []).extend(values.split())
+        elif current is not None and line.strip():
+            attributes[current].extend(line.split())
+    return {path: tuple(dict.fromkeys(values)) for path, values in attributes.items()}
+
+
+_MJCF_SCHEMA_ATTRIBUTES = _mjcf_schema_attributes()
+_GLOBAL_PROPERTY_GROUPS = (
+    ("global:compiler", "Compiler", ("compiler",)),
+    ("global:compiler/lengthrange", "Actuator Length Range", ("compiler", "lengthrange")),
+    ("global:option", "Simulation Options", ("option",)),
+    ("global:option/flag", "Simulation Flags", ("option", "flag")),
+    ("global:size", "Memory and User Data", ("size",)),
+    ("global:statistic", "Model Statistics", ("statistic",)),
+    ("global:visual/global", "Visual / Global", ("visual", "global")),
+    ("global:visual/quality", "Visual / Quality", ("visual", "quality")),
+    ("global:visual/headlight", "Visual / Headlight", ("visual", "headlight")),
+    ("global:visual/map", "Visual / Map", ("visual", "map")),
+    ("global:visual/scale", "Visual / Scale", ("visual", "scale")),
+    ("global:visual/rgba", "Visual / Colors", ("visual", "rgba")),
+)
+_DEFAULT_PROPERTY_TYPES = tuple(
+    path[-1]
+    for path in _MJCF_SCHEMA_ATTRIBUTES
+    if len(path) == 3
+    and path[:2] == ("mujoco", "default")
+    and path[-1] not in {"default", "plugin"}
+)
+_ASSET_PROPERTY_FIELDS = {
+    "mesh": tuple(
+        field
+        for field in _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "asset", "mesh"), ())
+        if field not in {"face", "normal", "texcoord", "vertex"}
+    ),
+    "hfield": tuple(
+        field
+        for field in _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "asset", "hfield"), ())
+        if field != "elevation"
+    ),
+}
+_MODEL_PROPERTY_CHOICES = {
+    ("global:compiler", "angle"): ("", "degree", "radian"),
+    ("global:compiler", "conflict"): ("", "warning", "error"),
+    ("global:compiler", "inertiafromgeom"): ("", "false", "true", "auto"),
+    ("global:option", "integrator"): ("", "Euler", "RK4", "implicit", "implicitfast", "exact"),
+    ("global:option", "cone"): ("", "pyramidal", "elliptic"),
+    ("global:option", "jacobian"): ("", "dense", "sparse", "auto"),
+    ("global:option", "solver"): ("", "PGS", "CG", "Newton"),
+}
+_BOOLEAN_PROPERTY_FIELDS = {
+    "active",
+    "alignfree",
+    "autolimits",
+    "balanceinertia",
+    "bvactive",
+    "discardvisual",
+    "ellipsoidinertia",
+    "fitaabb",
+    "fusestatic",
+    "orthographic",
+    "saveinertial",
+    "smoothnormal",
+    "strippath",
+    "usethread",
+}
 _ACTUATOR_TRANSMISSION_FIELDS = (
     "joint",
     "jointinparent",
@@ -691,6 +775,49 @@ def _component_path_presets(
         )
     presets.append(ModelComponentPathItem("pulley", (ModelComponentField("divisor", "2"),)))
     return tuple(presets)
+
+
+def _model_property_choices(
+    root: ET.Element,
+    group_id: str,
+    field: str,
+    attributes: dict[str, str],
+) -> tuple[str, ...]:
+    choices = _MODEL_PROPERTY_CHOICES.get((group_id, field))
+    if choices is not None:
+        return choices
+    if group_id == "global:option/flag":
+        return ("", "enable", "disable")
+    if field in _BOOLEAN_PROPERTY_FIELDS:
+        return ("", "true", "false")
+    references = _field_choices(root, field, attributes)
+    return ("", *references) if references else ()
+
+
+def _model_property_fields(
+    root: ET.Element,
+    group_id: str,
+    names: tuple[str, ...],
+    attributes: dict[str, str],
+) -> tuple[ModelComponentField, ...]:
+    return tuple(
+        ModelComponentField(
+            name,
+            attributes.get(name, ""),
+            _model_property_choices(root, group_id, name, attributes),
+        )
+        for name in names
+    )
+
+
+def _find_or_create_xml_path(root: ET.Element, path: tuple[str, ...]) -> ET.Element:
+    element = root
+    for tag in path:
+        child = element.find(tag)
+        if child is None:
+            child = ET.SubElement(element, tag)
+        element = child
+    return element
 
 
 def _serialize_component_xml(root: ET.Element) -> str:
@@ -1802,6 +1929,205 @@ class MuJoCoAdapter(SceneAdapterBase):
         section.remove(section[int(component_id)])
         if not len(section):
             root.remove(section)
+        new_spec = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        return self._replace_model_spec(model_id, new_spec)
+
+    def model_property_groups(self, model_id: int) -> tuple[ModelPropertyGroup, ...]:
+        spec = self._spec_for_model(model_id)
+        if spec is None:
+            return ()
+        root, _xml = _component_xml(spec)
+        groups: list[ModelPropertyGroup] = []
+        for group_id, label, path in _GLOBAL_PROPERTY_GROUPS:
+            element = root.find("/".join(path))
+            attributes = dict(element.attrib) if element is not None else {}
+            schema = _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", *path), ())
+            names = tuple(dict.fromkeys((*schema, *attributes)))
+            groups.append(
+                ModelPropertyGroup(
+                    int(model_id),
+                    group_id,
+                    "global",
+                    label,
+                    _model_property_fields(root, group_id, names, attributes),
+                )
+            )
+
+        asset = root.find("asset")
+        for asset_type, schema in _ASSET_PROPERTY_FIELDS.items():
+            elements = tuple(asset.findall(asset_type)) if asset is not None else ()
+            for index, element in enumerate(elements):
+                attributes = dict(element.attrib)
+                group_id = f"asset:{asset_type}:{index}"
+                names = schema
+                name = attributes.get("name") or attributes.get("file") or str(index)
+                groups.append(
+                    ModelPropertyGroup(
+                        int(model_id),
+                        group_id,
+                        "asset",
+                        f"{asset_type}: {name}",
+                        _model_property_fields(root, group_id, names, attributes),
+                    )
+                )
+
+        defaults = tuple(root.iter("default"))
+        for default_index, default in enumerate(defaults):
+            class_name = default.attrib.get("class") or "main"
+            class_group = f"default:{default_index}:class"
+            groups.append(
+                ModelPropertyGroup(
+                    int(model_id),
+                    class_group,
+                    "default",
+                    f"Default {class_name} / class",
+                    (ModelComponentField("class", default.attrib.get("class", "")),),
+                )
+            )
+            for element_type in _DEFAULT_PROPERTY_TYPES:
+                element = default.find(element_type)
+                attributes = dict(element.attrib) if element is not None else {}
+                group_id = f"default:{default_index}:{element_type}"
+                schema = _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "default", element_type), ())
+                names = tuple(dict.fromkeys((*schema, *attributes)))
+                groups.append(
+                    ModelPropertyGroup(
+                        int(model_id),
+                        group_id,
+                        "default",
+                        f"Default {class_name} / {element_type}",
+                        _model_property_fields(root, group_id, names, attributes),
+                    )
+                )
+        return tuple(groups)
+
+    def set_model_property_groups(
+        self,
+        model_id: int,
+        updates: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
+    ) -> bool:
+        spec = self._spec_for_model(model_id)
+        if spec is None or not updates:
+            return False
+        root, _xml = _component_xml(spec)
+        before = _serialize_component_xml(root)
+        global_paths = {group_id: path for group_id, _label, path in _GLOBAL_PROPERTY_GROUPS}
+
+        for raw_group_id, raw_fields in updates:
+            group_id = str(raw_group_id)
+            fields = tuple((str(name).strip(), str(value).strip()) for name, value in raw_fields)
+            if (
+                not fields
+                or any(not name for name, _value in fields)
+                or len({name for name, _value in fields}) != len(fields)
+            ):
+                raise ValueError(f"Invalid fields for model property group {group_id!r}")
+
+            element = None
+            allowed: tuple[str, ...] = ()
+            if group_id in global_paths:
+                path = global_paths[group_id]
+                allowed = _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", *path), ())
+                element = root.find("/".join(path))
+                if element is None and any(value for _name, value in fields):
+                    element = _find_or_create_xml_path(root, path)
+            elif group_id.startswith("asset:"):
+                _prefix, asset_type, index_text = group_id.split(":", 2)
+                asset = root.find("asset")
+                elements = tuple(asset.findall(asset_type)) if asset is not None else ()
+                index = int(index_text)
+                if asset_type not in _ASSET_PROPERTY_FIELDS or not 0 <= index < len(elements):
+                    raise ValueError(f"Unknown model asset property group {group_id!r}")
+                element = elements[index]
+                allowed = _ASSET_PROPERTY_FIELDS[asset_type]
+            elif group_id.startswith("default:"):
+                _prefix, index_text, element_type = group_id.split(":", 2)
+                defaults = tuple(root.iter("default"))
+                index = int(index_text)
+                if not 0 <= index < len(defaults):
+                    raise ValueError(f"Unknown default property group {group_id!r}")
+                default = defaults[index]
+                if element_type == "class":
+                    element = default
+                    allowed = ("class",)
+                elif element_type in _DEFAULT_PROPERTY_TYPES:
+                    allowed = _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "default", element_type), ())
+                    element = default.find(element_type)
+                    if element is None and any(value for _name, value in fields):
+                        element = ET.SubElement(default, element_type)
+                else:
+                    raise ValueError(f"Unknown default property group {group_id!r}")
+            else:
+                raise ValueError(f"Unknown model property group {group_id!r}")
+
+            unknown = {name for name, _value in fields}.difference(allowed)
+            if unknown:
+                raise ValueError(f"Unknown fields for {group_id}: {', '.join(sorted(unknown))}")
+            if element is None:
+                continue
+            for name, value in fields:
+                if value:
+                    element.set(name, value)
+                else:
+                    element.attrib.pop(name, None)
+            if group_id.startswith("default:") and not element.attrib and not len(element):
+                _prefix, index_text, element_type = group_id.split(":", 2)
+                if element_type != "class":
+                    tuple(root.iter("default"))[int(index_text)].remove(element)
+
+        after = _serialize_component_xml(root)
+        if after == before:
+            return True
+        new_spec = self._spec_from_component_xml(model_id, after)
+        return self._replace_model_spec(model_id, new_spec)
+
+    def add_model_default(self, model_id: int, parent_default_id: int, name: str) -> int:
+        spec = self._spec_for_model(model_id)
+        value = str(name).strip()
+        if spec is None or not value:
+            return -1
+        root, _xml = _component_xml(spec)
+        if any(item.attrib.get("class") == value for item in root.iter("default")):
+            raise ValueError(f"Default class {value!r} already exists")
+        defaults = tuple(root.iter("default"))
+        if not defaults:
+            main = ET.Element("default")
+            insertion = next(
+                (
+                    index
+                    for index, child in enumerate(root)
+                    if child.tag in {"asset", "contact", "worldbody"}
+                ),
+                len(root),
+            )
+            root.insert(insertion, main)
+            defaults = (main,)
+        parent_index = int(parent_default_id)
+        if parent_index < 0:
+            parent_index = 0
+        if not 0 <= parent_index < len(defaults):
+            return -1
+        added = ET.SubElement(defaults[parent_index], "default", {"class": value})
+        default_id = tuple(root.iter("default")).index(added)
+        new_spec = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        return default_id if self._replace_model_spec(model_id, new_spec) else -1
+
+    def remove_model_default(self, model_id: int, default_id: int) -> bool:
+        spec = self._spec_for_model(model_id)
+        if spec is None:
+            return False
+        root, _xml = _component_xml(spec)
+        defaults = tuple(root.iter("default"))
+        index = int(default_id)
+        if not 0 <= index < len(defaults):
+            return False
+        target = defaults[index]
+        if not target.attrib.get("class"):
+            return False
+        parent = next((item for item in root.iter() if target in tuple(item)), None)
+        if parent is None:
+            return False
+        parent.remove(target)
         new_spec = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
         return self._replace_model_spec(model_id, new_spec)
 

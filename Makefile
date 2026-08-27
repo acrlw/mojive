@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring joint-site-authoring model-component-authoring keyframe-authoring perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring joint-site-authoring model-component-authoring keyframe-authoring model-settings-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -34,6 +34,8 @@ help:
 		'  make joint-site-authoring advanced joint and site shape/endpoint properties' \
 		'  make model-component-authoring contacts, actuators, sensors, tendons, and equality' \
 		'  make keyframe-authoring capture, edit, load, and remove model keyframes' \
+		'  make model-settings-authoring global schema, defaults, mesh, and hfield properties' \
+		'  make batch-editing      Ctrl/Cmd multi-select and one-rebuild topology deletion' \
 		'  make gizmo-gallery     enlarged 2D/3D gizmo reference images' \
 		'  make hidpi-gallery     gizmo references at explicit 200% UI scale' \
 		'  make perturb           MuJoCo translation/rotation perturbation' \
@@ -447,6 +449,14 @@ model-component-authoring:
 
 ## Model-local keyframe capture, full-state editing, loading, and removal acceptance.
 keyframe-authoring:
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
+
+## Schema-driven compiler/option/visual/default/mesh/hfield property acceptance.
+model-settings-authoring:
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
+
+## Ctrl/Cmd multi-selection and one-rebuild model topology deletion acceptance.
+batch-editing:
 	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
 
 ## Centered modal Settings acceptance. Close it to continue editing the scene.

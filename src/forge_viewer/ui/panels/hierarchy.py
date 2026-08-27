@@ -32,6 +32,7 @@ class HierarchyPanel(Panel):
         self._rows_drawn = 0
         self._rows_truncated = False
         self._ink_center_cache: dict[tuple[float, str], float] = {}
+        self._batch_selected: set[int] = set()
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -44,6 +45,28 @@ class HierarchyPanel(Panel):
         _changed, self._filter = imgui.input_text("##filter", self._filter)
         if not self._filter:
             imgui.set_item_tooltip("filter by name")
+
+        removable = self._batch_removable_roots()
+        if len(self._batch_selected) > 1:
+            imgui.text_disabled(f"{len(self._batch_selected)} selected (Ctrl/Cmd+click)")
+            if removable:
+                imgui.same_line()
+                if not ctx.session.paused:
+                    imgui.begin_disabled()
+                if imgui.small_button(f"Delete {len(removable)} model element(s)"):
+                    result = ctx.submit(
+                        cmd.ModelEditBatch(
+                            tuple(
+                                cmd.RemoveModelElementEdit(cmd.ModelElementRef(node_id=node_id))
+                                for node_id in removable
+                            )
+                        )
+                    )
+                    if result.ok:
+                        self._batch_selected.clear()
+                if not ctx.session.paused:
+                    imgui.end_disabled()
+                    imgui.set_item_tooltip("Pause the simulation before editing model topology")
 
         imgui.separator()
         if not imgui.begin_child("tree"):
@@ -100,6 +123,7 @@ class HierarchyPanel(Panel):
         self._cache_generation = gen
         nodes = ctx.session.nodes
         self._by_id = {n.node_id: n for n in nodes}
+        self._batch_selected.intersection_update(self._by_id)
         self._roots = [n for n in nodes if n.parent < 0 or n.parent not in self._by_id]
         self._search_names = tuple(node.name.casefold() for node in nodes)
         self._default_open_depth = hierarchy_open_depth(len(nodes))
@@ -136,7 +160,9 @@ class HierarchyPanel(Panel):
         if default_open:
             flags |= imgui.TreeNodeFlags_.default_open
         selected = ctx.session.selected_node
-        if selected is not None and node.node_id == selected.node_id:
+        if node.node_id in self._batch_selected or (
+            selected is not None and node.node_id == selected.node_id
+        ):
             flags |= imgui.TreeNodeFlags_.selected
 
         color = ctx.theme.node_color(node.type)
@@ -148,7 +174,20 @@ class HierarchyPanel(Panel):
         imgui.pop_style_color()
 
         if imgui.is_item_clicked() and not imgui.is_item_toggled_open():
-            ctx.submit(cmd.SelectNode(node.node_id))
+            io = imgui.get_io()
+            if io.key_ctrl or io.key_super:
+                if node.node_id in self._batch_selected:
+                    self._batch_selected.remove(node.node_id)
+                    if self._batch_selected:
+                        ctx.submit(cmd.SelectNode(next(reversed(tuple(self._batch_selected)))))
+                    else:
+                        ctx.submit(cmd.Select(0))
+                else:
+                    self._batch_selected.add(node.node_id)
+                    ctx.submit(cmd.SelectNode(node.node_id))
+            else:
+                self._batch_selected = {node.node_id}
+                ctx.submit(cmd.SelectNode(node.node_id))
 
         editable = bool(
             ctx.session.adapter.caps.scene_authoring
@@ -199,6 +238,32 @@ class HierarchyPanel(Panel):
         imgui.table_next_column()
         self._visibility_toggle(ctx, node)
         return opened
+
+    def _batch_removable_roots(self) -> tuple[int, ...]:
+        removable_types = {
+            NodeType.ROBOT,
+            NodeType.LINK,
+            NodeType.GEOM,
+            NodeType.JOINT,
+            NodeType.SITE,
+            NodeType.CAMERA,
+            NodeType.LIGHT,
+        }
+        eligible = {
+            node_id
+            for node_id in self._batch_selected
+            if (node := self._by_id.get(node_id)) is not None
+            and node.model_id >= 0
+            and node.type in removable_types
+        }
+        roots = []
+        for node_id in sorted(eligible):
+            parent = self._by_id[node_id].parent
+            while parent in self._by_id and parent not in eligible:
+                parent = self._by_id[parent].parent
+            if parent not in eligible:
+                roots.append(node_id)
+        return tuple(roots)
 
     @staticmethod
     def _model_create_menu(ctx: PanelContext, node: SceneNode) -> None:

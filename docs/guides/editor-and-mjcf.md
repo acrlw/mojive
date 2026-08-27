@@ -58,15 +58,24 @@ The structured Inspector currently covers:
 - non-plugin actuators, the MuJoCo sensor catalog, fixed/spatial tendon paths, and equality
   constraints through schema-driven reference fields;
 - model-local keyframe capture, full state-array editing, loading, deletion, and Undo/Redo.
+- compiler, actuator length-range, simulation option/flag, size, statistic, and all visual groups;
+- creation, inheritance, editing, and removal of default classes using the linked MuJoCo schema;
+- detailed mesh and height-field metadata while keeping bulk vertex/face/elevation payloads out of
+  text controls.
 
 These controls validate values, participate in Undo/Redo, persist in workspace documents, and use
 the remote typed-command boundary where the adapter exposes the capability. Pause a simulation
 before editing model properties.
 
-This is not a complete form-based copy of the MJCF schema. Detailed mesh/height-field asset
-parameters, plugin-defined components, default classes, and global compiler/option/size/visual/
-statistic fields still use **Edit MJCF Source...**. The source popup compiles before applying
-changes and keeps the last good model when validation fails.
+Schema-driven groups read their field inventories from the linked MuJoCo version and submit any
+number of groups through one rebuild. Blank fields retain MuJoCo defaults or default-class
+inheritance. **Edit MJCF Source...** remains the intentional escape hatch for plugin-defined
+components, raw bulk asset payloads, includes, comments, and unusual schema combinations. The
+source popup compiles before applying changes and keeps the last good model when validation fails.
+
+In Hierarchy, Ctrl/Cmd+click selects multiple rows. **Delete model elements** removes the selected
+top-level model elements through one `ModelEditBatch`; descendants of another selected row are
+collapsed so the same subtree is never deleted twice.
 
 Use these visual acceptance entries for the supported structured paths:
 
@@ -79,6 +88,8 @@ make resource-authoring BACKEND=wgpu
 make joint-site-authoring BACKEND=wgpu
 make model-component-authoring BACKEND=wgpu
 make keyframe-authoring BACKEND=wgpu
+make model-settings-authoring BACKEND=wgpu
+make batch-editing BACKEND=wgpu
 make joint-gizmo BACKEND=wgpu
 ```
 
