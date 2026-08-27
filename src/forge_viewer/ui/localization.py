@@ -76,7 +76,6 @@ _ZH_CN = {
     "Graphics device": "图形设备",
     "Gizmo style": "Gizmo 样式",
     "Gizmo orientation": "Gizmo 坐标系",
-    "Rotation dial projection": "旋转刻度盘投影",
     "Scene helpers": "场景辅助图形",
     "Forge render flags": "Forge 渲染开关",
     "3D gizmo": "3D Gizmo",

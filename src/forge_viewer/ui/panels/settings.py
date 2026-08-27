@@ -11,7 +11,6 @@ from ..gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,
     DEFAULT_ROTATION_TICK_SCALE,
     DEFAULT_TRANSLATION_SNAP_M,
-    RotationDialProjection,
 )
 from ..localization import LANGUAGE_LABELS, Language, parse_language
 from ..perturb import OUTLINE_CORNER_RADIUS_PT
@@ -240,18 +239,6 @@ class SettingsPanel(Panel):
                 imgui.set_tooltip("drag: adjust · double-click: enter value · right-click: reset")
             if changed:
                 ctx.gizmo.rotation_tick_scale = scale
-
-            projection = ctx.gizmo.rotation_dial_projection
-            self._property(t("Rotation dial projection"))
-            if imgui.begin_combo("##rotation_dial_projection", projection.value):
-                for option in RotationDialProjection:
-                    selected, _ = imgui.selectable(option.value, option is projection)
-                    if selected:
-                        ctx.gizmo.set_rotation_dial_projection(option.value)
-                imgui.end_combo()
-            imgui.set_item_tooltip(
-                "Orthographic keeps the dial screen-affine; classic follows the viewport camera"
-            )
 
         if ctx.perturb is not None:
             self._property(t("perturb corner radius"))

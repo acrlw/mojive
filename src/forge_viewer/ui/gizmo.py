@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import enum
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
@@ -88,11 +87,6 @@ SNAP_TICK_FADE_STEPS = 10.0
 ROTATION_TICK_MIN_ALPHA = 0.5
 
 
-class RotationDialProjection(enum.StrEnum):
-    CLASSIC = "classic"
-    ORTHOGRAPHIC = "orthographic"
-
-
 class _RotationDialProjector:
     """Project every active rotation-dial layer through one shared mapping."""
 
@@ -104,41 +98,16 @@ class _RotationDialProjector:
         axis,
         start_direction,
         size_px: float,
-        projection: RotationDialProjection,
     ) -> None:
         self._cam = cam
         self._rect = rect
         self._center = np.asarray(center, np.float64)
         self._axis = np.asarray(axis, np.float64)
         self._start_direction = np.asarray(start_direction, np.float64)
-        self._size_px = float(size_px)
-        self._projection = projection
-        self._screen_center = project(cam, (center,), rect)[0]
-        self._screen_basis = None
-        self._world_scale = 0.0
-        if projection is RotationDialProjection.ORTHOGRAPHIC:
-            world_basis = rotation_dial(
-                np.zeros(3),
-                axis,
-                start_direction,
-                1.0,
-                1.0,
-                (0.0, 0.5 * np.pi),
-            )
-            view_rotation = np.asarray(cam.view_matrix(), np.float64)[:3, :3]
-            self._screen_basis = world_basis @ view_rotation[:2, :].T
-            self._screen_basis[:, 1] *= -1.0
-        else:
-            self._world_scale = world_scale(cam, center, rect[3], size_px)
+        self._world_scale = world_scale(cam, center, rect[3], size_px)
 
     def points(self, radius, angles) -> np.ndarray:
         angles = np.atleast_1d(np.asarray(angles, np.float64))
-        if self._projection is RotationDialProjection.ORTHOGRAPHIC:
-            weights = np.column_stack((np.cos(angles), np.sin(angles)))
-            radial = weights @ self._screen_basis
-            radii = np.broadcast_to(np.asarray(radius, np.float64), angles.shape)
-            screen = self._screen_center[:2] + radial * (radii[:, None] * self._size_px)
-            return np.column_stack((screen, np.full(len(screen), self._screen_center[2])))
         return project(
             self._cam,
             rotation_dial(
@@ -235,7 +204,6 @@ class ObjectGizmo:
         self.translation_snap_m = DEFAULT_TRANSLATION_SNAP_M
         self.rotation_snap_deg = DEFAULT_ROTATION_SNAP_DEG
         self.rotation_tick_scale = DEFAULT_ROTATION_TICK_SCALE
-        self.rotation_dial_projection = RotationDialProjection.ORTHOGRAPHIC
 
     @property
     def mode(self) -> str:
@@ -331,10 +299,6 @@ class ObjectGizmo:
     def set_space(self, space: str) -> None:
         if space in (GizmoSpace.BODY.value, GizmoSpace.WORLD.value) and not self._using:
             self._space = GizmoSpace(space)
-
-    def set_rotation_dial_projection(self, projection: str) -> None:
-        if not self._using:
-            self.rotation_dial_projection = RotationDialProjection(projection)
 
     def toggle_space(self) -> None:
         self.set_space("world" if self._space is GizmoSpace.BODY else "body")
@@ -529,7 +493,6 @@ class ObjectGizmo:
                 self._axis,
                 self._rotation_start_vec,
                 SIZE_PT * style_scale,
-                self.rotation_dial_projection,
             )
             if self._snapping:
                 self._draw_rotation_snap_ticks(
@@ -887,18 +850,34 @@ class ObjectGizmo:
             SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
         )
 
-        dial_segments = _rotation_dial_segments(
-            cam, self._start_pos, self._axis, self.rotation_dial_projection
-        )
-        reference = dial.points(
-            ring_radius,
-            np.linspace(
-                0.0,
-                2.0 * np.pi,
-                dial_segments,
-                endpoint=False,
-            ),
-        )
+        dial_segments = _rotation_dial_segments(cam, self._start_pos, self._axis)
+        reference_closed = True
+        if self._active is GizmoHandle.ROTATE_SCREEN:
+            reference = dial.points(
+                ring_radius,
+                np.linspace(0.0, 2.0 * np.pi, dial_segments, endpoint=False),
+            )
+        else:
+            # The overlay replaces the idle ring while dragging, so preserve that ring's
+            # full/half geometry instead of switching to a newly oriented full dial.
+            axis_index = _axis_of(self._active)
+            visible_axes = sum(
+                bool(self._handle_mask & (1 << int(handle))) for handle in ROTATE_AXIS_HANDLES
+            )
+            reference_closed = visible_axes == 1
+            scale = world_scale(cam, self._start_pos, rect[3], SIZE_PT * style_scale)
+            reference = project(
+                cam,
+                rotation_ring(
+                    cam,
+                    self._start_pos,
+                    self._start_basis,
+                    scale,
+                    axis_index,
+                    full=reference_closed,
+                ),
+                rect,
+            )
         point_count = max(2, int(np.ceil(dial_segments * abs(sweep) / (2.0 * np.pi))) + 1)
         angles = np.linspace(0.0, sweep, point_count)
         arc = dial.points(ring_radius, angles)
@@ -919,7 +898,7 @@ class ObjectGizmo:
                 reference[:, :2],
                 HOVER_COLOR,
                 RING_WIDTH_PT * style_scale,
-                closed=True,
+                closed=reference_closed,
             )
         if abs(sweep) > 1e-6:
             width = RING_WIDTH_PT * style_scale
@@ -1227,6 +1206,9 @@ class ObjectGizmo:
         ):
             return None
         position = np.asarray(diagnostics.joint_xpos[joint_id], np.float64).reshape(3)
+        if target.joint.type == "slide":
+            # MuJoCo's xanchor excludes this slide coordinate; the driven body pose does not.
+            position, _ = _node_pose(session, node)
         if target.joint.type == "ball":
             _body_position, body_rotation = _node_pose(session, node)
             return position, body_rotation
@@ -1491,9 +1473,8 @@ def _project_rotation_dial(
     size_px: float,
     radius: float,
     angles,
-    projection: RotationDialProjection,
 ) -> np.ndarray:
-    """Project one dial through the selected camera or screen-orthographic mapping."""
+    """Project one dial through the same camera mapping as the idle gizmo."""
     return _RotationDialProjector(
         cam,
         rect,
@@ -1501,7 +1482,6 @@ def _project_rotation_dial(
         axis,
         start_direction,
         size_px,
-        projection,
     ).points(radius, angles)
 
 
@@ -1515,7 +1495,6 @@ def _project_rotation_tick(
     radius: float,
     angle: float,
     length_px: float,
-    projection: RotationDialProjection,
 ) -> tuple[np.ndarray, np.ndarray] | None:
     """Project one radial tick and keep its displayed length in pixels."""
     return _RotationDialProjector(
@@ -1525,7 +1504,6 @@ def _project_rotation_tick(
         axis,
         start_direction,
         size_px,
-        projection,
     ).tick(radius, angle, length_px)
 
 
@@ -1533,11 +1511,10 @@ def _rotation_dial_segments(
     cam: CameraView,
     center,
     axis,
-    projection: RotationDialProjection,
 ) -> int:
     view = (
         np.asarray(cam.forward(), np.float64)
-        if projection is RotationDialProjection.ORTHOGRAPHIC or cam.orthographic
+        if cam.orthographic
         else np.asarray(center, np.float64) - np.asarray(cam.eye, np.float64)
     )
     view /= np.linalg.norm(view)
