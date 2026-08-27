@@ -34,6 +34,7 @@ def viewer(backend_name):
     scene = canvas_scene()
     instance = build_scene(scene, vsync=False, width=960, height=640)
     try:
+        instance.app.camera.look_from(-135.0, 25.0, instance.app.camera_out, animate=False)
         for _ in range(8):
             instance.sync()
         yield instance, scene

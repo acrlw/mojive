@@ -15,6 +15,7 @@ from forge_viewer.gizmo import (
     CENTER_SHELL_RADIUS,
     GUIDE_CORE_COLOR,
     HOVER_COLOR,
+    JOINT_HANDLE_COLOR,
     PLANE_INNER,
     RING_RADIUS,
     RING_SEGMENTS,
@@ -779,7 +780,7 @@ def test_shift_snaps_rotation_from_the_drag_origin() -> None:
 
 def test_gizmo_snap_defaults_match_the_settings_resets() -> None:
     gizmo = ObjectGizmo()
-    assert gizmo.translation_snap_m == DEFAULT_TRANSLATION_SNAP_M == 0.5
+    assert gizmo.translation_snap_m == DEFAULT_TRANSLATION_SNAP_M == 0.1
     assert gizmo.rotation_snap_deg == DEFAULT_ROTATION_SNAP_DEG == 5.0
     assert gizmo.rotation_tick_scale == DEFAULT_ROTATION_TICK_SCALE == 1.25
 
@@ -1214,6 +1215,7 @@ def test_joint_gizmo_edits_only_the_selected_joint_dof(
         )
     else:
         assert adapter.data.qpos[joint.qpos_adr] == pytest.approx(amount)
+        assert gizmo.value_label.startswith(f"{joint.name} ")
     if joint.type == "slide":
         session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
         updated_pose = gizmo._target_pose(session, node, target)
@@ -1289,7 +1291,7 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
         )
         expected_limits = dial.points(
             JOINT_RANGE_RADIUS,
-            (lower - current_value, upper - current_value),
+            (lower, upper),
         )[:, :2]
         assert range_args[0][[0, -1]] == pytest.approx(expected_limits, abs=1e-6)
     else:
@@ -1317,6 +1319,85 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
     assert np.allclose(
         texts[next(label for label in labels if label.startswith("MAX"))], JOINT_UPPER_LIMIT_COLOR
     )
+
+
+@pytest.mark.physics
+def test_hinge_joint_range_stays_fixed_while_the_current_marker_moves() -> None:
+    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
+    from forge_viewer.assets import resolve
+
+    session = Session(MuJoCoAdapter(resolve("joint_types")))
+    assert session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == "hinge_body")
+    assert session.submit(cmd.Select(node.object_id))
+    gizmo = ObjectGizmo()
+    target, reason = gizmo._joint_target(session, node)
+    assert target is not None, reason
+    session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
+    pose = gizmo._target_pose(session, node, target)
+    assert pose is not None
+    cam = CameraView(eye=np.array((2.0, -4.0, 2.0)), target=pose[0].copy())
+
+    samples = []
+    for current in np.radians((-35.0, 40.0)):
+        assert session.submit(cmd.SetQpos(target.joint.qpos_adr, current))
+        session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
+        assert gizmo.publish(
+            CaptureBackend(),
+            session,
+            cam,
+            RECT,
+            ui_scale=1.0,
+            style_scale=1.0,
+            yielding=False,
+            interactive=True,
+        )
+        overlay = RecordingDraw2D()
+        gizmo.draw_overlay(cam, RECT, overlay, style_scale=1.0)
+        allowed = next(
+            args[0]
+            for name, args, _kwargs in overlay.calls
+            if name == "polyline" and np.allclose(args[1], JOINT_RANGE_COLOR)
+        )
+        current_tick = next(
+            args[:2]
+            for name, args, _kwargs in overlay.calls
+            if name == "line" and np.allclose(args[2], HOVER_COLOR)
+        )
+        samples.append((allowed[[0, -1]].copy(), np.asarray(current_tick).copy()))
+
+    assert samples[1][0] == pytest.approx(samples[0][0], abs=1e-6)
+    assert not np.allclose(samples[1][1], samples[0][1])
+
+
+@pytest.mark.physics
+@pytest.mark.parametrize("body_name", ("hinge_body", "slide_body"))
+def test_scalar_joint_gizmo_uses_a_joint_color_instead_of_xyz(body_name: str) -> None:
+    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
+    from forge_viewer.assets import resolve
+
+    session = Session(MuJoCoAdapter(resolve("joint_types")))
+    assert session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == body_name)
+    assert session.submit(cmd.Select(node.object_id))
+    gizmo = ObjectGizmo()
+    gizmo.set_style("3d")
+    session.tick(gizmo.frame_needs(session), wall_dt=0.0)
+    pose = gizmo._target_pose(session, node, gizmo._joint_target(session, node)[0])
+    assert pose is not None
+    backend = CaptureBackend()
+
+    assert gizmo.publish(
+        backend,
+        session,
+        CameraView(eye=np.array((2.0, -4.0, 2.0)), target=pose[0].copy()),
+        RECT,
+        ui_scale=1.0,
+        style_scale=1.0,
+        yielding=False,
+        interactive=True,
+    )
+    assert backend.frame.handle_color == pytest.approx(JOINT_HANDLE_COLOR)
 
 
 @pytest.mark.physics

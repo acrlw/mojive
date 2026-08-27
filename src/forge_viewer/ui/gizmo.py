@@ -31,6 +31,7 @@ from ..gizmo import (
     CONTRAST_EDGE_PT,
     GUIDE_CORE_COLOR,
     HOVER_COLOR,
+    JOINT_HANDLE_COLOR,
     PLANE_ACTIVE_ALPHA,
     PLANE_ALPHA,
     PLANE_HANDLES,
@@ -79,7 +80,7 @@ if TYPE_CHECKING:
 REASON_NO_SELECTION = "nothing selected"
 DRAG_LAYER = "ui.gizmo.drag"
 _WORLD_BASIS = np.eye(3, dtype=np.float64)
-DEFAULT_TRANSLATION_SNAP_M = 0.5
+DEFAULT_TRANSLATION_SNAP_M = 0.1
 DEFAULT_ROTATION_SNAP_DEG = 5.0
 DEFAULT_ROTATION_TICK_SCALE = 1.25
 SNAP_TICK_FULL_STEPS = 5.0
@@ -478,6 +479,11 @@ class ObjectGizmo:
         frame.axis_mask = self._axis_mask
         frame.plane_mask = self._plane_mask
         frame.handle_mask = self._handle_mask
+        frame.handle_color = (
+            JOINT_HANDLE_COLOR
+            if target is not None and target.joint.type in ("hinge", "slide")
+            else None
+        )
         self._publish_translation_guide(backend, ui_scale)
         if self._style is GizmoStyle.FLAT:
             if backend.caps.gizmo:
@@ -637,8 +643,12 @@ class ObjectGizmo:
                 )
 
     def _flat_color(self, handle: GizmoHandle, axis: int, alpha: float = 1.0):
-        color = HOVER_COLOR if self._hot(handle) else AXIS_COLORS[axis]
+        color = HOVER_COLOR if self._hot(handle) else self._handle_color(axis)
         return float(color[0]), float(color[1]), float(color[2]), float(alpha)
+
+    def _handle_color(self, axis: int) -> np.ndarray:
+        color = self._frame.handle_color
+        return AXIS_COLORS[axis] if color is None else np.asarray(color, np.float32)
 
     def _hot(self, handle: GizmoHandle) -> bool:
         return self._active is handle or (self._interactive and self._hovered is handle)
@@ -683,7 +693,7 @@ class ObjectGizmo:
             )
 
         span = min(state.upper - state.lower, 2.0 * np.pi)
-        start_angle = state.lower - state.current
+        start_angle = state.lower
         point_count = max(2, int(np.ceil(segments * span / (2.0 * np.pi))) + 1)
         allowed_angles = np.linspace(start_angle, start_angle + span, point_count)
         allowed = dial.points(JOINT_RANGE_RADIUS, allowed_angles)
@@ -713,7 +723,7 @@ class ObjectGizmo:
             style_scale,
             label_above=False,
         )
-        current_tick = dial.tick(JOINT_RANGE_RADIUS, 0.0, 5.0 * style_scale)
+        current_tick = dial.tick(JOINT_RANGE_RADIUS, state.current, 5.0 * style_scale)
         if current_tick is not None:
             overlay.line(
                 current_tick[0],
@@ -805,7 +815,7 @@ class ObjectGizmo:
         segment = _clip_line_to_rect(screen[0, :2], screen[1, :2] - screen[0, :2], rect)
         if segment is None:
             return
-        color = AXIS_COLORS[axis]
+        color = self._handle_color(axis)
         overlay.line(
             segment[0],
             segment[1],
@@ -841,7 +851,7 @@ class ObjectGizmo:
         if bounds is None:
             return
 
-        axis_color = AXIS_COLORS[axis_index]
+        axis_color = self._handle_color(axis_index)
         step = float(self.translation_snap_m)
         current_distance = float(np.dot(self._frame.position - self._start_pos, axis))
         current_step = current_distance / step
@@ -1283,6 +1293,8 @@ class ObjectGizmo:
             if self._active is GizmoHandle.ROTATE_SCREEN
             else ("XYZ"[axis] if axis >= 0 else "")
         )
+        if self._active_joint is not None and self._active_joint.type in ("hinge", "slide"):
+            name = self._active_joint.name or self._active_joint.type
         if self._active in ROTATE_HANDLES:
             degrees = round(float(np.degrees(self._rotation_angle)), 1)
             turns = int(abs(degrees) // 360.0)

@@ -30,6 +30,7 @@ from forge_viewer.gizmo import (  # noqa: E402
     CENTER_SHELL_RADIUS,
     CONTRAST_EDGE_PT,
     HOVER_COLOR,
+    JOINT_HANDLE_COLOR,
     RING_RADIUS,
     SCREEN_RING_RADIUS,
     SIZE_PT,
@@ -61,6 +62,7 @@ ORIGIN = np.zeros(3, np.float32)
 RECT = (0.0, 0.0, float(W), float(H))
 AXIS_U8 = np.rint(AXIS_COLORS[:, :3] * 255.0)  # X red, Y green, Z blue
 HOVER_U8 = np.rint(HOVER_COLOR[:3] * 255.0)
+JOINT_U8 = np.rint(JOINT_HANDLE_COLOR[:3] * 255.0)
 
 # Gaze direction shared by all cameras: every axis and plane handle is fully
 # facing (alpha 1.0).
@@ -104,6 +106,16 @@ def _axis_mask(img: np.ndarray, axis: int) -> np.ndarray:
 def _hover_mask(img: np.ndarray) -> np.ndarray:
     rgb = img[..., :3].astype(np.int16)
     return np.max(np.abs(rgb - HOVER_U8.astype(np.int16)), axis=-1) < 85
+
+
+def _joint_mask(img: np.ndarray) -> np.ndarray:
+    rgb = img[..., :3].astype(np.int16)
+    shaded = rgb / np.maximum(JOINT_U8.astype(np.float64), 1.0)
+    return (
+        (rgb[..., 0] > 90)
+        & (rgb[..., 2] > 120)
+        & (np.max(shaded, axis=-1) - np.min(shaded, axis=-1) < 0.18)
+    )
 
 
 class Rig:
@@ -170,6 +182,23 @@ def test_translate_gizmo_draws_axis_handles_over_the_box(rig):
         x, y = _project(cam, ORIGIN + direction * min(0.25, 0.2 * scale))
         patch = img[y - 1 : y + 2, x - 1 : x + 2]
         assert _axis_mask(patch, axis).any(), f"axis {axis} lost to the box"
+
+
+def test_scalar_joint_color_override_does_not_look_like_a_world_axis(rig):
+    if not rig.backend.caps.gizmo:
+        pytest.skip("gizmo unsupported by this backend")
+    cam = _camera()
+    frame = _frame()
+    frame.handle_mask = handle_mask(GizmoHandle.Z)
+    frame.handle_color = JOINT_HANDLE_COLOR
+    img = rig.draw(frame, cam, box=False)
+    scale = world_scale(cam, ORIGIN, H)
+    x, y = _project(cam, ORIGIN + np.array((0.0, 0.0, 0.55 * scale)))
+    patch = img[y - 3 : y + 4, x - 3 : x + 4]
+
+    joint_pixels = patch[_joint_mask(patch), :3].astype(np.float64)
+    assert len(joint_pixels) > 0
+    assert np.median(joint_pixels[:, 0] / joint_pixels[:, 2]) > 0.65
 
 
 def test_gizmo_screen_size_is_constant_across_distances(rig):

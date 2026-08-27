@@ -280,7 +280,8 @@ class GizmoPass(BasePass):
         return frame.active is handle or frame.hovered is handle
 
     def _color(self, frame, handle: GizmoHandle, axis: int, alpha: float = 1.0):
-        color = HOVER_COLOR.copy() if self._hot(frame, handle) else AXIS_COLORS[axis].copy()
+        base = AXIS_COLORS[axis] if frame.handle_color is None else frame.handle_color
+        color = HOVER_COLOR.copy() if self._hot(frame, handle) else np.asarray(base).copy()
         color[3] = alpha
         return color
 

@@ -27,6 +27,7 @@ def canvas():
     scene = canvas_scene()
     viewer = build_scene(scene, vsync=False, width=1100, height=720)
     try:
+        viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
         for _ in range(8):
             viewer.sync()
         yield viewer, scene
@@ -212,6 +213,7 @@ def test_finite_authored_plane_is_pickable_in_the_viewport():
     floor = scene.plane(name="floor", size=(2.0, 2.0, 0.02))
     viewer = build_scene(scene, vsync=False, width=960, height=640)
     try:
+        viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
         viewer.session.submit(cmd.Select(floor.object_id))
         for _ in range(3):
             viewer.sync()

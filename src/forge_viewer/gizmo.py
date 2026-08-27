@@ -47,6 +47,7 @@ AXIS_COLORS = np.array(
     np.float32,
 )
 HOVER_COLOR = np.array((1.0, 0.72, 0.12, 1.0), np.float32)
+JOINT_HANDLE_COLOR = np.array((0.72, 0.48, 0.95, 1.0), np.float32)
 CENTER_COLOR = np.array((0.92, 0.92, 0.92, 1.0), np.float32)
 CONTRAST_EDGE_COLOR = np.array((0.68, 0.71, 0.76, 1.0), np.float32)
 GUIDE_CORE_COLOR = np.array((0.98, 0.98, 0.99, 1.0), np.float32)
@@ -107,6 +108,7 @@ class GizmoFrame:
     axis_mask: int = 0b111
     plane_mask: int = 0b111
     handle_mask: int = ALL_HANDLE_MASK
+    handle_color: np.ndarray | None = None
 
 
 def display_handles(frame: GizmoFrame) -> tuple[GizmoHandle, ...]:
