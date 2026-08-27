@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from imgui_bundle import imgui
 
-from forge_viewer.ui.app import _prepare_modal
+from forge_viewer.ui.app import _prepare_modal, _toggle_angle_input
 from forge_viewer.ui.window import layout_scale, resolve_context_api, resolve_ui_scales
 
 
@@ -62,6 +63,16 @@ def test_resolve_context_api(requested: str, expected: str) -> None:
 def test_resolve_context_api_rejects_unknown_backend() -> None:
     with pytest.raises(ValueError, match="Unsupported FORGE_VIEWER_GL"):
         resolve_context_api("gles")
+
+
+def test_precise_angle_input_toggles_units_without_changing_the_angle() -> None:
+    radians, unit = _toggle_angle_input(180.0, "degrees")
+    assert unit == "radians"
+    assert radians == pytest.approx(np.pi)
+
+    degrees, unit = _toggle_angle_input(radians, unit)
+    assert unit == "degrees"
+    assert degrees == pytest.approx(180.0)
 
 
 def test_modal_layout_tracks_the_current_viewport_and_enforces_readable_width(

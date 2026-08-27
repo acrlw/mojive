@@ -26,6 +26,7 @@ KEYS: tuple[tuple[str, str], ...] = (
     ("t", "gizmo: body / world frame"),
     ("Shift while using a gizmo", "snap to the position or rotation step from Settings"),
     ("hold X / Y / Z", "move the mouse along that gizmo axis; no click required"),
+    ("U in precise rotation input", "switch between degrees and radians"),
     ("f", "frame the whole scene (eased)"),
     ("W A S D", "fly"),
     ("Q / E", "up / down along world Z"),

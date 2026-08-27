@@ -1220,6 +1220,58 @@ def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(
         v.sync()
 
 
+def test_precise_rotation_input_switches_to_radians_with_u(free_body_viewer):
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+    from forge_viewer import math3d
+    from forge_viewer.gizmo import GizmoHandle
+
+    v = free_body_viewer
+    io = imgui.get_io()
+    node = next(n for n in v.session.nodes if n.posable)
+    assert v.session.submit(cmd.Select(node.object_id))
+    v.app.gizmo.set_mode("rotate")
+    v.app.gizmo.set_space("body")
+    for _ in range(2):
+        v.sync()
+
+    before_pos = np.asarray(v.session.frame.body_xpos[node.body_index], np.float64).copy()
+    before_mat = (
+        np.asarray(v.session.frame.body_xmat[node.body_index], np.float64).reshape(3, 3).copy()
+    )
+    v.app.gizmo._hovered = GizmoHandle.ROTATE_Z
+    edit = v.app.gizmo.precise_input(v.session)
+    assert edit is not None and edit.unit == "°"
+    v.app._precise_gizmo_edit = edit
+    v.app._precise_gizmo_value = 180.0
+    v.app._precise_gizmo_angle_unit = "degrees"
+    v.app._open_precise_gizmo_popup = True
+    v.sync()
+
+    io.add_key_event(imgui.Key.u, True)
+    v.sync()
+    io.add_key_event(imgui.Key.u, False)
+    v.sync()
+    assert v.app._precise_gizmo_angle_unit == "radians"
+    assert v.app._precise_gizmo_value == pytest.approx(np.pi)
+
+    apply = item_rect(v, "button", "Apply")
+    click(v, io, apply)
+    for _ in range(2):
+        v.sync()
+
+    axis = before_mat[:, 2]
+    expected = math3d.rotvec_to_mat3(axis * np.pi) @ before_mat
+    assert v.app._precise_gizmo_edit is None
+    assert v.session.frame.body_xpos[node.body_index] == pytest.approx(before_pos, abs=1e-5)
+    assert v.session.frame.body_xmat[node.body_index] == pytest.approx(expected, abs=1e-5)
+
+    assert v.session.submit(cmd.SetPose(node.node_id, before_pos, before_mat))
+    for _ in range(2):
+        v.sync()
+
+
 @pytest.mark.parametrize(("style", "arrow_count"), (("2d", 1), ("3d", 0)))
 def test_gizmo_drag_feedback_matches_in_2d_and_3d(free_body_viewer, style, arrow_count):
     """2D/3D share one compound GPU drag link and the same value label."""

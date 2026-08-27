@@ -110,6 +110,14 @@ def _disabled_text_wrapped(value: str) -> None:
     imgui.pop_style_color()
 
 
+def _toggle_angle_input(value: float, unit: str) -> tuple[float, str]:
+    """Change the displayed unit without changing the represented angle."""
+
+    if unit == "degrees":
+        return float(np.radians(value)), "radians"
+    return float(np.degrees(value)), "degrees"
+
+
 @dataclass
 class Keys:
     fly: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -191,6 +199,7 @@ class ViewerApp:
         self._open_rename_popup = False
         self._precise_gizmo_edit: PreciseGizmoInput | None = None
         self._precise_gizmo_value = 0.0
+        self._precise_gizmo_angle_unit = "degrees"
         self._precise_gizmo_error = ""
         self._open_precise_gizmo_popup = False
         self._window_title = ""
@@ -1437,10 +1446,19 @@ class ViewerApp:
         if not visible:
             return
 
+        angular = edit.unit == "°"
+        if angular and imgui.is_key_pressed(imgui.Key.u, False):
+            self._precise_gizmo_value, self._precise_gizmo_angle_unit = _toggle_angle_input(
+                self._precise_gizmo_value,
+                self._precise_gizmo_angle_unit,
+            )
+        unit = "rad" if angular and self._precise_gizmo_angle_unit == "radians" else edit.unit
         imgui.text_wrapped(f"{edit.action} {edit.label}")
         _disabled_text_wrapped("Enter a relative delta; negative values reverse direction.")
         imgui.spacing()
-        unit_width = float(imgui.calc_text_size(edit.unit).x)
+        unit_width = float(imgui.calc_text_size(unit).x)
+        if angular:
+            unit_width += 2.0 * float(imgui.get_style().frame_padding.x)
         input_width = max(
             120.0,
             float(imgui.get_content_region_avail().x)
@@ -1453,13 +1471,23 @@ class ViewerApp:
             self._precise_gizmo_value,
             0.0,
             0.0,
-            "%.6f" if edit.unit == "m" else "%.3f",
+            "%.6f" if edit.unit == "m" or unit == "rad" else "%.3f",
             imgui.InputTextFlags_.enter_returns_true.value,
         )
         imgui.same_line()
-        imgui.text(edit.unit)
+        if angular:
+            if imgui.small_button(f"{unit}##precise_gizmo_angle_unit"):
+                self._precise_gizmo_value, self._precise_gizmo_angle_unit = _toggle_angle_input(
+                    self._precise_gizmo_value,
+                    self._precise_gizmo_angle_unit,
+                )
+            imgui.set_item_tooltip("Click or press U to switch degrees / radians")
+        else:
+            imgui.text(unit)
         if imgui.is_window_appearing():
             imgui.set_keyboard_focus_here(-1)
+        if angular:
+            _disabled_text_wrapped("U or click the unit to switch degrees / radians.")
         if edit.joint_id >= 0:
             _disabled_text_wrapped("Joint limits are applied when this value exceeds the range.")
         if self._precise_gizmo_error:
@@ -1472,11 +1500,14 @@ class ViewerApp:
             imgui.Key.escape, False
         )
         if apply:
+            value = self._precise_gizmo_value
+            if angular and self._precise_gizmo_angle_unit == "radians":
+                value = float(np.degrees(value))
             result = self.gizmo.apply_precise_delta(
                 self.session,
                 self._camera_view(),
                 edit,
-                self._precise_gizmo_value,
+                value,
             )
             if result.ok:
                 self._precise_gizmo_edit = None
