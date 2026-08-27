@@ -1325,6 +1325,15 @@ class MuJoCoAdapter(SceneAdapterBase):
 
     def _store_model_spec(self, model_id: int, spec) -> None:
         """Replace one stored editable spec without recompiling the composed model."""
+        path = next(
+            (item.path for item in self._attached_models if item.model_id == int(model_id)),
+            self._root_path,
+        )
+        if path is not None:
+            # MjSpec.from_string() drops modelfiledir.  Material texture edits
+            # reparse the spec below, so restore the model's resource root before
+            # a later edit, export, or topology rebuild resolves relative meshes.
+            spec.modelfiledir = str(path.parent)
         if int(model_id) == 0:
             self._root_spec = spec
             self._root_edited = True

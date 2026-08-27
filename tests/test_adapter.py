@@ -346,6 +346,61 @@ def test_material_and_lights(adapter):
     assert frame.lights.lights[0].diffuse == pytest.approx([0.2, 0.3, 0.4])
 
 
+def test_material_texture_roundtrip_preserves_relative_mesh_directory(tmp_path):
+    from forge_viewer import commands as cmd
+    from forge_viewer.session import Session
+
+    meshes = tmp_path / "meshes"
+    meshes.mkdir()
+    (meshes / "tetrahedron.obj").write_text(
+        """v 0 0 0
+v 1 0 0
+v 0 1 0
+v 0 0 1
+f 1 3 2
+f 1 2 4
+f 1 4 3
+f 2 3 4
+""",
+        encoding="utf-8",
+    )
+    path = tmp_path / "relative_mesh.xml"
+    path.write_text(
+        """
+        <mujoco>
+          <compiler meshdir="meshes"/>
+          <asset>
+            <mesh name="tetrahedron" file="tetrahedron.obj" scale=".1 .1 .1"/>
+            <texture name="checker" type="2d" builtin="checker" width="8" height="8"/>
+            <material name="ground" texture="checker"/>
+          </asset>
+          <worldbody>
+            <geom name="mesh" type="mesh" mesh="tetrahedron"/>
+            <geom name="floor" type="plane" size="0 0 .05" material="ground"/>
+          </worldbody>
+        </mujoco>
+        """,
+        encoding="utf-8",
+    )
+    relative_adapter = MuJoCoAdapter(path)
+    session = Session(relative_adapter, path)
+    try:
+        source = session.source
+        assert source is not None
+        material_id = next(
+            index for index, material in enumerate(source.materials) if material.name == "ground"
+        )
+        material = source.materials[material_id]
+
+        assert session.submit(cmd.SetMaterial(material_id, replace(material, texture=None))).ok
+        assert Path(relative_adapter._root_spec.modelfiledir) == tmp_path
+        assert "tetrahedron.obj" in relative_adapter.scene_model_source(0)
+        assert session.submit(cmd.SetMaterial(material_id, material)).ok
+        assert relative_adapter._root_spec.compile().nmesh == 1
+    finally:
+        session.release()
+
+
 def test_target_light_uses_mujoco_world_pose_and_updates_with_its_target(tmp_path):
     path = tmp_path / "target_light.xml"
     path.write_text(
