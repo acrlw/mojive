@@ -219,6 +219,17 @@ class GeometryAdvancedProperties:
 
 
 @dataclass(frozen=True)
+class GeometryShapeProperties:
+    """Editable geometry type and model-local mesh or height-field binding."""
+
+    node_id: int
+    type: str
+    resource_name: str
+    mesh_names: tuple[str, ...] = ()
+    height_field_names: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class BodyProperties:
     """Editable inertial and dynamic properties for one model body."""
 
@@ -902,6 +913,20 @@ class SceneAdapterBase:
         """Set geometry properties that require rebuilding MuJoCo constants."""
         return False
 
+    def geometry_shape_properties(self, node_id: int) -> GeometryShapeProperties | None:
+        """Return geometry type and model-local resource choices."""
+        return None
+
+    def set_geometry_shape(self, node_id: int, geom_type: str, resource_name: str) -> bool:
+        """Set a geometry type and optional model-local resource binding."""
+        return False
+
+    def import_model_geometry_resource(
+        self, node_id: int, resource_type: str, path: Path, name: str
+    ) -> bool:
+        """Import and bind one mesh or height-field resource atomically."""
+        return False
+
     def body_properties(self, node_id: int) -> BodyProperties | None:
         """Return editable inertial and dynamic properties for one model body."""
         return None
@@ -923,9 +948,14 @@ class SceneAdapterBase:
         return -1
 
     def import_model_texture(
-        self, model_id: int, path: Path, name: str, material_index: int = -1
+        self,
+        model_id: int,
+        path: Path,
+        name: str,
+        material_index: int = -1,
+        texture_type: str = "2d",
     ) -> bool:
-        """Import one 2D image and optionally bind it to a model material."""
+        """Import one 2D, cube, or skybox image and optionally bind a 2D image."""
         return False
 
     def set_geometry_material(self, node_id: int, material_index: int) -> bool:
@@ -1164,13 +1194,23 @@ class SceneAdapter(Protocol):
     def set_geometry_properties(self, properties: GeometryProperties) -> bool: ...
     def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None: ...
     def set_geometry_advanced_properties(self, properties: GeometryAdvancedProperties) -> bool: ...
+    def geometry_shape_properties(self, node_id: int) -> GeometryShapeProperties | None: ...
+    def set_geometry_shape(self, node_id: int, geom_type: str, resource_name: str) -> bool: ...
+    def import_model_geometry_resource(
+        self, node_id: int, resource_type: str, path: Path, name: str
+    ) -> bool: ...
     def body_properties(self, node_id: int) -> BodyProperties | None: ...
     def set_body_properties(self, properties: BodyProperties) -> bool: ...
     def model_material_indices(self, model_id: int) -> tuple[int, ...]: ...
     def model_texture_names(self, model_id: int) -> tuple[str, ...]: ...
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int: ...
     def import_model_texture(
-        self, model_id: int, path: Path, name: str, material_index: int = -1
+        self,
+        model_id: int,
+        path: Path,
+        name: str,
+        material_index: int = -1,
+        texture_type: str = "2d",
     ) -> bool: ...
     def set_geometry_material(self, node_id: int, material_index: int) -> bool: ...
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool: ...

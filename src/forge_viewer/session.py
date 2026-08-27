@@ -17,6 +17,7 @@ from .adapters.base import (
     FrameNeeds,
     GeometryAdvancedProperties,
     GeometryProperties,
+    GeometryShapeProperties,
     JointInfo,
     KeyframeInfo,
     NodeType,
@@ -125,6 +126,8 @@ _SCENE_EDIT_COMMANDS = (
     cmd.SetJointProperties,
     cmd.SetGeometryProperties,
     cmd.SetGeometryAdvancedProperties,
+    cmd.SetGeometryShape,
+    cmd.ImportModelGeometryResource,
     cmd.SetBodyProperties,
     cmd.AddModelMaterial,
     cmd.ImportModelTexture,
@@ -340,6 +343,10 @@ class Session:
     def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None:
         """Return geometry properties backed by rebuilt MuJoCo constants."""
         return self._adapter.geometry_advanced_properties(node_id)
+
+    def geometry_shape_properties(self, node_id: int) -> GeometryShapeProperties | None:
+        """Return geometry type and model-local resource choices."""
+        return self._adapter.geometry_shape_properties(node_id)
 
     def body_properties(self, node_id: int) -> BodyProperties | None:
         """Return editable inertial and dynamic properties for one model body."""
@@ -1281,6 +1288,79 @@ class Session:
             self._refresh_structure()
             return CommandResult.good("")
 
+        if isinstance(c, cmd.SetGeometryShape):
+            if not caps.model_properties:
+                return CommandResult.bad(f"{caps.name} does not support model property editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before editing geometry shape")
+            current = self._adapter.geometry_shape_properties(c.node_id)
+            if current is None:
+                return CommandResult.bad(f"Geometry node {c.node_id} is unavailable")
+            geom_type = str(c.type).strip().lower()
+            resource_name = str(c.resource_name).strip()
+            supported = (
+                "plane",
+                "hfield",
+                "sphere",
+                "capsule",
+                "ellipsoid",
+                "cylinder",
+                "box",
+                "mesh",
+            )
+            if geom_type not in supported:
+                return CommandResult.bad(f"Unsupported geometry type {geom_type!r}")
+            choices = (
+                current.mesh_names
+                if geom_type == "mesh"
+                else current.height_field_names
+                if geom_type == "hfield"
+                else ()
+            )
+            if geom_type in ("mesh", "hfield") and resource_name not in choices:
+                return CommandResult.bad(
+                    f"{geom_type} resource {resource_name!r} is unavailable in this model"
+                )
+            try:
+                changed = self._adapter.set_geometry_shape(c.node_id, geom_type, resource_name)
+            except Exception as exc:
+                return CommandResult.bad(f"Geometry shape could not be applied: {exc}")
+            if not changed:
+                return CommandResult.bad("Geometry shape could not be edited")
+            self._refresh_structure()
+            return CommandResult.good("")
+
+        if isinstance(c, cmd.ImportModelGeometryResource):
+            if not caps.model_assets:
+                return CommandResult.bad(f"{caps.name} does not support model asset editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before importing geometry resources")
+            resource_type = str(c.resource_type).strip().lower()
+            if resource_type not in ("mesh", "hfield"):
+                return CommandResult.bad("Geometry resource type must be mesh or hfield")
+            path = Path(c.path).expanduser().resolve()
+            name = str(c.name).strip()
+            if not path.is_file():
+                return CommandResult.bad(f"Geometry resource file does not exist: {path}")
+            allowed_suffixes = (
+                {".stl", ".obj", ".msh", ".ply"} if resource_type == "mesh" else {".png"}
+            )
+            if path.suffix.lower() not in allowed_suffixes:
+                suffixes = ", ".join(sorted(allowed_suffixes))
+                return CommandResult.bad(f"{resource_type} resources must use one of: {suffixes}")
+            if not name:
+                return CommandResult.bad("A geometry resource name cannot be empty")
+            try:
+                changed = self._adapter.import_model_geometry_resource(
+                    c.node_id, resource_type, path, name
+                )
+            except Exception as exc:
+                return CommandResult.bad(f"Geometry resource {name!r} could not be imported: {exc}")
+            if not changed:
+                return CommandResult.bad(f"Geometry resource {name!r} could not be imported")
+            self._refresh_structure()
+            return CommandResult.good(f"Imported and assigned {resource_type} {name}")
+
         if isinstance(c, cmd.SetBodyProperties):
             if not caps.model_properties:
                 return CommandResult.bad(f"{caps.name} does not support model property editing")
@@ -1377,15 +1457,24 @@ class Session:
                 return CommandResult.bad("Pause the simulation before importing textures")
             path = Path(c.path).expanduser().resolve()
             value = str(c.name).strip()
+            texture_type = str(c.texture_type).strip().lower()
             if not path.is_file():
                 return CommandResult.bad(f"Texture file does not exist: {path}")
             if path.suffix.lower() != ".png":
-                return CommandResult.bad("MuJoCo 2D image textures must use PNG files")
+                return CommandResult.bad("MuJoCo image textures must use PNG files")
             if not value:
                 return CommandResult.bad("A texture name cannot be empty")
+            if texture_type not in ("2d", "cube", "skybox"):
+                return CommandResult.bad("Texture type must be 2d, cube, or skybox")
+            if texture_type != "2d" and int(c.material_index) >= 0:
+                return CommandResult.bad("Only 2D textures can be assigned to a material")
             try:
                 changed = self._adapter.import_model_texture(
-                    c.model_id, path, value, int(c.material_index)
+                    c.model_id,
+                    path,
+                    value,
+                    int(c.material_index),
+                    texture_type,
                 )
             except (RuntimeError, ValueError) as exc:
                 return CommandResult.bad(f"Texture {value!r} could not be imported: {exc}")
@@ -1484,6 +1573,16 @@ class Session:
                 return CommandResult.bad(f"cube texture {c.texture!r} is unavailable")
             if not self._adapter.set_skybox(c.texture):
                 return CommandResult.bad("skybox update failed")
+            for name, item in tuple(self._source.textures.items()):
+                next_type = (
+                    TextureType.SKYBOX
+                    if name == c.texture
+                    else TextureType.CUBE
+                    if item.type is TextureType.SKYBOX
+                    else item.type
+                )
+                if next_type is not item.type:
+                    self._source.textures[name] = replace(item, type=next_type)
             self._source.skybox = c.texture
             self._structure_generation += 1
             return CommandResult.good("")

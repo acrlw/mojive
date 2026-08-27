@@ -19,6 +19,7 @@ from forge_viewer.adapters.base import (
     FrameNeeds,
     GeometryAdvancedProperties,
     GeometryProperties,
+    GeometryShapeProperties,
     SceneAdapterBase,
 )
 from forge_viewer.adapters.static import StaticSceneAdapter
@@ -101,6 +102,7 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
         True,
         (0.6, 0.3, 1.2, 0.8, 0.7),
     )
+    shape_properties = GeometryShapeProperties(geometry_node_id, "mesh", "part", ("part",), ())
 
     def geometry_properties(node_id: int) -> GeometryProperties | None:
         return properties if node_id == geometry_node_id else None
@@ -111,6 +113,9 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
     )
     source_session.geometry_advanced_properties = lambda node_id: (
         advanced_properties if node_id == geometry_node_id else None
+    )
+    source_session.geometry_shape_properties = lambda node_id: (
+        shape_properties if node_id == geometry_node_id else None
     )
     port = _port_pair()
     publisher = SnapshotPublisher(port=port)
@@ -126,6 +131,7 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
         assert remote.geometry_properties(geometry_node_id) == properties
         assert remote.body_properties(geometry_node_id) == body_properties
         assert remote.geometry_advanced_properties(geometry_node_id) == advanced_properties
+        assert remote.geometry_shape_properties(geometry_node_id) == shape_properties
         first = remote.frame(FrameNeeds())
         assert first.step == 7
         assert first.debug_commands[0]["text"] == "remote"
@@ -460,6 +466,19 @@ def test_scene_entity_commands_keep_their_typed_remote_boundary():
     assert isinstance(command, cmd.SetGeometryAdvancedProperties)
     assert command.node_id == 8
     assert command.inertia_mode == "shell"
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "geometry_shape",
+            "node_id": 8,
+            "type": "mesh",
+            "resource_name": "part",
+        },
+    )
+    assert isinstance(command, cmd.SetGeometryShape)
+    assert command.node_id == 8
+    assert command.resource_name == "part"
 
     command = handle_session_command(
         Sink(),

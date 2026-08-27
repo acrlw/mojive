@@ -487,6 +487,25 @@ class SetGeometryAdvancedProperties(Command):
 
 
 @dataclass(frozen=True)
+class SetGeometryShape(Command):
+    """Set a geometry type and optional model-local resource binding."""
+
+    node_id: int
+    type: str
+    resource_name: str = ""
+
+
+@dataclass(frozen=True)
+class ImportModelGeometryResource(Command):
+    """Import and bind one mesh or height-field resource atomically."""
+
+    node_id: int
+    resource_type: str
+    path: Path
+    name: str
+
+
+@dataclass(frozen=True)
 class SetBodyProperties(Command):
     """Set inertial and dynamic properties for one model body."""
 
@@ -513,12 +532,13 @@ class AddModelMaterial(Command):
 
 @dataclass(frozen=True)
 class ImportModelTexture(Command):
-    """Import one 2D image into a model and optionally apply it to a material."""
+    """Import one 2D, cube, or skybox image into a model."""
 
     model_id: int
     path: Path
     name: str
     material_index: int = -1
+    texture_type: str = "2d"
 
 
 @dataclass(frozen=True)

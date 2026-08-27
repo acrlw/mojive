@@ -57,6 +57,7 @@ from .base import (
     FrameNeeds,
     GeometryAdvancedProperties,
     GeometryProperties,
+    GeometryShapeProperties,
     JointInfo,
     JointVisualType,
     KeyframeInfo,
@@ -4323,6 +4324,148 @@ class MuJoCoAdapter(SceneAdapterBase):
         element.fluid_coefs = fluid_coefficients
         return self._replace_model_spec(model_id, edited)
 
+    def geometry_shape_properties(self, node_id: int) -> GeometryShapeProperties | None:
+        node = self._node_for_id(node_id)
+        identity = self._node_element.get(int(node_id))
+        if (
+            node is None
+            or identity is None
+            or node.type is not NodeType.GEOM
+            or node.geom_index < 0
+        ):
+            return None
+        model_id, node_type, name = identity
+        spec = self._spec_for_model(model_id)
+        element = self._element(model_id, node_type.value, name)
+        if spec is None or element is None:
+            return None
+        geom_types = {
+            int(mujoco.mjtGeom.mjGEOM_PLANE): "plane",
+            int(mujoco.mjtGeom.mjGEOM_HFIELD): "hfield",
+            int(mujoco.mjtGeom.mjGEOM_SPHERE): "sphere",
+            int(mujoco.mjtGeom.mjGEOM_CAPSULE): "capsule",
+            int(mujoco.mjtGeom.mjGEOM_ELLIPSOID): "ellipsoid",
+            int(mujoco.mjtGeom.mjGEOM_CYLINDER): "cylinder",
+            int(mujoco.mjtGeom.mjGEOM_BOX): "box",
+            int(mujoco.mjtGeom.mjGEOM_MESH): "mesh",
+        }
+        geom_type = geom_types.get(int(element.type))
+        if geom_type is None:
+            return None
+        resource_name = (
+            str(element.meshname)
+            if geom_type == "mesh"
+            else str(element.hfieldname)
+            if geom_type == "hfield"
+            else ""
+        )
+        return GeometryShapeProperties(
+            node_id=int(node_id),
+            type=geom_type,
+            resource_name=resource_name,
+            mesh_names=tuple(str(item.name) for item in spec.meshes if item.name),
+            height_field_names=tuple(str(item.name) for item in spec.hfields if item.name),
+        )
+
+    def set_geometry_shape(self, node_id: int, geom_type: str, resource_name: str) -> bool:
+        identity = self._node_element.get(int(node_id))
+        node = self._node_for_id(node_id)
+        if identity is None or node is None or node.type is not NodeType.GEOM:
+            return False
+        model_id, _node_type, name = identity
+        source_spec = self._spec_for_model(model_id)
+        if source_spec is None:
+            return False
+        types = {
+            "plane": mujoco.mjtGeom.mjGEOM_PLANE,
+            "hfield": mujoco.mjtGeom.mjGEOM_HFIELD,
+            "sphere": mujoco.mjtGeom.mjGEOM_SPHERE,
+            "capsule": mujoco.mjtGeom.mjGEOM_CAPSULE,
+            "ellipsoid": mujoco.mjtGeom.mjGEOM_ELLIPSOID,
+            "cylinder": mujoco.mjtGeom.mjGEOM_CYLINDER,
+            "box": mujoco.mjtGeom.mjGEOM_BOX,
+            "mesh": mujoco.mjtGeom.mjGEOM_MESH,
+        }
+        kind = str(geom_type).strip().lower()
+        resource = str(resource_name).strip()
+        if kind not in types:
+            return False
+        working = source_spec.copy()
+        element = working.geom(name)
+        if element is None:
+            return False
+        if kind == "mesh" and working.mesh(resource) is None:
+            return False
+        if kind == "hfield" and working.hfield(resource) is None:
+            return False
+        element.type = types[kind]
+        element.meshname = resource if kind == "mesh" else ""
+        element.hfieldname = resource if kind == "hfield" else ""
+        size = np.asarray(element.size, np.float64).reshape(3).copy()
+        defaults = {
+            "plane": np.array((1.0, 1.0, 0.1)),
+            "sphere": np.array((0.1, 0.1, 0.1)),
+            "capsule": np.array((0.1, 0.2, 0.0)),
+            "ellipsoid": np.array((0.1, 0.1, 0.1)),
+            "cylinder": np.array((0.1, 0.2, 0.0)),
+            "box": np.array((0.1, 0.1, 0.1)),
+        }
+        required = {
+            "plane": (0, 1),
+            "sphere": (0,),
+            "capsule": (0, 1),
+            "ellipsoid": (0, 1, 2),
+            "cylinder": (0, 1),
+            "box": (0, 1, 2),
+        }.get(kind, ())
+        if required and any(
+            not np.isfinite(size[index]) or size[index] <= 0.0 for index in required
+        ):
+            size = defaults[kind]
+        element.size = size
+        if kind not in ("capsule", "cylinder"):
+            element.fromto = [np.nan, 0.0, 0.0, 0.0, 0.0, 0.0]
+        return self._replace_model_spec(model_id, working)
+
+    def import_model_geometry_resource(
+        self, node_id: int, resource_type: str, path: Path, name: str
+    ) -> bool:
+        identity = self._node_element.get(int(node_id))
+        node = self._node_for_id(node_id)
+        if identity is None or node is None or node.type is not NodeType.GEOM:
+            return False
+        model_id, _node_type, element_name = identity
+        source_spec = self._spec_for_model(model_id)
+        source = Path(path).expanduser().resolve()
+        kind = str(resource_type).strip().lower()
+        value = str(name).strip()
+        if (
+            source_spec is None
+            or not source.is_file()
+            or kind not in ("mesh", "hfield")
+            or not value
+        ):
+            return False
+        if kind == "mesh" and source_spec.mesh(value) is not None:
+            return False
+        if kind == "hfield" and source_spec.hfield(value) is not None:
+            return False
+        working = source_spec.copy()
+        if kind == "mesh":
+            working.add_mesh(name=value, file=str(source))
+        else:
+            working.add_hfield(name=value, file=str(source), size=(1.0, 1.0, 1.0, 0.1))
+        element = working.geom(element_name)
+        if element is None:
+            return False
+        element.type = (
+            mujoco.mjtGeom.mjGEOM_MESH if kind == "mesh" else mujoco.mjtGeom.mjGEOM_HFIELD
+        )
+        element.meshname = value if kind == "mesh" else ""
+        element.hfieldname = value if kind == "hfield" else ""
+        element.fromto = [np.nan, 0.0, 0.0, 0.0, 0.0, 0.0]
+        return self._replace_model_spec(model_id, working)
+
     def body_properties(self, node_id: int) -> BodyProperties | None:
         node = self._node_for_id(node_id)
         identity = self._node_element.get(int(node_id))
@@ -4988,7 +5131,12 @@ class MuJoCoAdapter(SceneAdapterBase):
         return mujoco.mj_name2id(self._m, mujoco.mjtObj.mjOBJ_MATERIAL, compiled_name)
 
     def import_model_texture(
-        self, model_id: int, path: Path, name: str, material_index: int = -1
+        self,
+        model_id: int,
+        path: Path,
+        name: str,
+        material_index: int = -1,
+        texture_type: str = "2d",
     ) -> bool:
         model_id = int(model_id)
         source = Path(path).expanduser().resolve()
@@ -4996,10 +5144,18 @@ class MuJoCoAdapter(SceneAdapterBase):
         spec = self._spec_for_model(model_id)
         if spec is None or not source.is_file() or not value or spec.texture(value) is not None:
             return False
+        texture_types = {
+            "2d": mujoco.mjtTexture.mjTEXTURE_2D,
+            "cube": mujoco.mjtTexture.mjTEXTURE_CUBE,
+            "skybox": mujoco.mjtTexture.mjTEXTURE_SKYBOX,
+        }
+        kind = str(texture_type).strip().lower()
+        if kind not in texture_types or (kind != "2d" and int(material_index) >= 0):
+            return False
         working = spec.copy()
         working.add_texture(
             name=value,
-            type=mujoco.mjtTexture.mjTEXTURE_2D,
+            type=texture_types[kind],
             file=str(source),
         )
         material = int(material_index)

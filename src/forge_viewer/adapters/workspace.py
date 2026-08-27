@@ -18,6 +18,7 @@ from .base import (
     FrameNeeds,
     GeometryAdvancedProperties,
     GeometryProperties,
+    GeometryShapeProperties,
     NodeType,
     SceneAdapterBase,
     SceneFrame,
@@ -499,6 +500,23 @@ class WorkspaceAdapter(SceneAdapterBase):
             return False
         return self.primary.set_geometry_advanced_properties(properties)
 
+    def geometry_shape_properties(self, node_id: int) -> GeometryShapeProperties | None:
+        if int(node_id) in self._node_to_scene:
+            return None
+        return self.primary.geometry_shape_properties(node_id)
+
+    def set_geometry_shape(self, node_id: int, geom_type: str, resource_name: str) -> bool:
+        if int(node_id) in self._node_to_scene:
+            return False
+        return self.primary.set_geometry_shape(node_id, geom_type, resource_name)
+
+    def import_model_geometry_resource(
+        self, node_id: int, resource_type: str, path: Path, name: str
+    ) -> bool:
+        if int(node_id) in self._node_to_scene:
+            return False
+        return self.primary.import_model_geometry_resource(node_id, resource_type, path, name)
+
     def body_properties(self, node_id: int) -> BodyProperties | None:
         if int(node_id) in self._node_to_scene:
             return None
@@ -519,9 +537,14 @@ class WorkspaceAdapter(SceneAdapterBase):
         return self.primary.add_model_material(node_id, name, copy_from)
 
     def import_model_texture(
-        self, model_id: int, path: Path, name: str, material_index: int = -1
+        self,
+        model_id: int,
+        path: Path,
+        name: str,
+        material_index: int = -1,
+        texture_type: str = "2d",
     ) -> bool:
-        return self.primary.import_model_texture(model_id, path, name, material_index)
+        return self.primary.import_model_texture(model_id, path, name, material_index, texture_type)
 
     def set_geometry_material(self, node_id: int, material_index: int) -> bool:
         return self.primary.set_geometry_material(node_id, material_index)

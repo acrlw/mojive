@@ -47,17 +47,19 @@ The structured Inspector currently covers:
   `solref`, `solimp`, adhesion, and surface velocity;
 - geometry visual group, density or explicit mass, volume/shell inertia, and ellipsoid fluid
   coefficients;
+- geometry type switching plus model-local OBJ/STL/MSH/PLY mesh and PNG height-field import and
+  assignment;
 - model-local material creation, duplication, assignment, inline appearance, and PNG 2D texture
-  import.
+  import, plus cube and skybox PNG import.
 
 These controls validate values, participate in Undo/Redo, persist in workspace documents, and use
 the remote typed-command boundary where the adapter exposes the capability. Pause a simulation
 before editing model properties.
 
-This is not a complete form-based copy of the MJCF schema. Resource-backed geometry creation, many
-component subtypes, keyframe authoring, contact pair/exclude, default classes, and global
-option/solver fields still use **Edit MJCF Source...**. The source popup compiles before applying
-changes and keeps the last good model when validation fails.
+This is not a complete form-based copy of the MJCF schema. Detailed mesh/height-field asset
+parameters, many component subtypes, keyframe authoring, contact pair/exclude, default classes, and
+global option/solver fields still use **Edit MJCF Source...**. The source popup compiles before
+applying changes and keeps the last good model when validation fails.
 
 Use these visual acceptance entries for the supported structured paths:
 
@@ -66,6 +68,7 @@ make primitive-authoring BACKEND=wgpu
 make material-authoring BACKEND=wgpu
 make contact-authoring BACKEND=wgpu
 make body-authoring BACKEND=wgpu
+make resource-authoring BACKEND=wgpu
 make joint-gizmo BACKEND=wgpu
 ```
 

@@ -54,6 +54,17 @@ def test_layout_is_orthographic_not_perspective():
         assert abs(a.radius - b.radius) < 1e-9
 
 
+def test_default_view_places_positive_y_on_the_right() -> None:
+    balls = vc.layout(CameraView(), CENTER, R, BALL)
+
+    positive_y = find(balls, 1, 1.0)
+    positive_z = find(balls, 2, 1.0)
+    assert positive_y.screen[0] > CENTER[0]
+    assert positive_y.screen[1] == pytest.approx(CENTER[1])
+    assert positive_z.screen[0] == pytest.approx(CENTER[0])
+    assert positive_z.screen[1] < CENTER[1]
+
+
 def test_layout_ignores_the_scene_camera_projection_mode() -> None:
     view = cam((4.0, -4.0, 3.0))
     perspective = vc.layout(

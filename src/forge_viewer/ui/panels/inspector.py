@@ -13,6 +13,7 @@ from ...adapters.base import (
     BodyProperties,
     FrameNeeds,
     GeometryAdvancedProperties,
+    GeometryShapeProperties,
     ModelComponentInfo,
     NodeType,
     SceneNode,
@@ -144,6 +145,10 @@ class InspectorPanel(Panel):
         self._geometry_advanced_generation = -1
         self._geometry_advanced_edit: GeometryAdvancedProperties | None = None
         self._geometry_advanced_error = ""
+        self._geometry_shape_node = -1
+        self._geometry_shape_generation = -1
+        self._geometry_shape_edit: GeometryShapeProperties | None = None
+        self._geometry_shape_error = ""
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds(
@@ -1006,6 +1011,8 @@ class InspectorPanel(Panel):
             imgui.pop_id()
             return
 
+        self._geometry_shape_properties(ctx, node_id)
+
         shape = src.geom_mesh[first].shape
         infinite_plane = bool(src.geom_infinite_plane[first])
         size_editor = _geometry_dimensions(shape, src.geom_size[first])
@@ -1133,6 +1140,17 @@ class InspectorPanel(Panel):
             if import_texture and can_import:
                 ctx.request_texture_import(model_id, material_index)
 
+            can_import_environment = bool(asset_editable and ctx.request_texture_import is not None)
+            if not can_import_environment:
+                imgui.begin_disabled()
+            if imgui.small_button("Import cube texture") and can_import_environment:
+                ctx.request_texture_import(model_id, -1, "cube")
+            imgui.same_line()
+            if imgui.small_button("Import skybox texture") and can_import_environment:
+                ctx.request_texture_import(model_id, -1, "skybox")
+            if not can_import_environment:
+                imgui.end_disabled()
+
             if not assigned:
                 imgui.text_disabled("Create or assign a shared material to edit its properties")
                 imgui.pop_id()
@@ -1207,6 +1225,120 @@ class InspectorPanel(Panel):
                 ),
             )
         imgui.pop_id()
+
+    def _geometry_shape_properties(self, ctx: PanelContext, node_id: int) -> None:
+        current = ctx.session.geometry_shape_properties(node_id)
+        if current is None:
+            return
+        generation = ctx.session.structure_generation
+        if (
+            self._geometry_shape_node != node_id
+            or self._geometry_shape_generation != generation
+            or self._geometry_shape_edit is None
+        ):
+            self._geometry_shape_node = node_id
+            self._geometry_shape_generation = generation
+            self._geometry_shape_edit = current
+            self._geometry_shape_error = ""
+        properties = self._geometry_shape_edit
+        if properties is None or not imgui.collapsing_header("geometry shape and resource"):
+            return
+        editable = bool(
+            ctx.session.adapter.caps.model_properties
+            and (not ctx.session.adapter.caps.simulation or ctx.session.paused)
+        )
+        if not editable:
+            imgui.begin_disabled()
+        types = (
+            "plane",
+            "hfield",
+            "sphere",
+            "capsule",
+            "ellipsoid",
+            "cylinder",
+            "box",
+            "mesh",
+        )
+        type_index = types.index(properties.type)
+        type_changed, type_index = imgui.combo("geometry type", type_index, types)
+        geom_type = types[type_index]
+        edited = properties
+        if type_changed:
+            choices = (
+                properties.mesh_names
+                if geom_type == "mesh"
+                else properties.height_field_names
+                if geom_type == "hfield"
+                else ()
+            )
+            edited = replace(
+                edited,
+                type=geom_type,
+                resource_name=choices[0] if choices else "",
+            )
+        resources = (
+            properties.mesh_names
+            if geom_type == "mesh"
+            else properties.height_field_names
+            if geom_type == "hfield"
+            else ()
+        )
+        if geom_type in ("mesh", "hfield"):
+            current_resource = edited.resource_name
+            resource_index = (
+                resources.index(current_resource) if current_resource in resources else 0
+            )
+            if resources:
+                resource_changed, resource_index = imgui.combo(
+                    "resource", resource_index, resources
+                )
+                if resource_changed or not current_resource:
+                    edited = replace(edited, resource_name=resources[resource_index])
+            else:
+                imgui.text_disabled(f"no {geom_type} resources in this model")
+        if not editable:
+            imgui.end_disabled()
+            imgui.text_disabled("Pause the simulation to edit model geometry shape")
+
+        self._geometry_shape_edit = edited
+        dirty = edited.type != current.type or edited.resource_name != current.resource_name
+        ready = geom_type not in ("mesh", "hfield") or edited.resource_name in resources
+        if not editable or not dirty or not ready:
+            imgui.begin_disabled()
+        if imgui.button("Apply##geometry-shape"):
+            result = ctx.submit(
+                cmd.SetGeometryShape(edited.node_id, edited.type, edited.resource_name)
+            )
+            if result.ok:
+                self._geometry_shape_generation = -1
+                self._geometry_shape_error = ""
+            else:
+                self._geometry_shape_error = result.message
+        if not editable or not dirty or not ready:
+            imgui.end_disabled()
+        imgui.same_line()
+        if imgui.button("Revert##geometry-shape"):
+            self._geometry_shape_edit = current
+            self._geometry_shape_error = ""
+
+        can_import = bool(
+            editable
+            and ctx.session.adapter.caps.model_assets
+            and ctx.request_geometry_resource_import is not None
+        )
+        if not can_import:
+            imgui.begin_disabled()
+        if imgui.small_button("Import and assign mesh") and can_import:
+            ctx.request_geometry_resource_import(node_id, "mesh")
+        imgui.same_line()
+        if imgui.small_button("Import and assign height field") and can_import:
+            ctx.request_geometry_resource_import(node_id, "hfield")
+        if not can_import:
+            imgui.end_disabled()
+        if self._geometry_shape_error:
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._geometry_shape_error)
+            if imgui.small_button("Copy error##geometry-shape"):
+                imgui.set_clipboard_text(self._geometry_shape_error)
 
     def _geometry_contact_properties(self, ctx: PanelContext, node_id: int) -> None:
         properties = ctx.session.geometry_properties(node_id)

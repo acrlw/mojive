@@ -25,6 +25,7 @@ from .adapters.base import (
     FrameNeeds,
     GeometryAdvancedProperties,
     GeometryProperties,
+    GeometryShapeProperties,
     JointInfo,
     KeyframeInfo,
     SceneAdapterBase,
@@ -61,6 +62,7 @@ class RemoteStructure:
     geometry_properties: tuple[GeometryProperties, ...] = ()
     body_properties: tuple[BodyProperties, ...] = ()
     geometry_advanced_properties: tuple[GeometryAdvancedProperties, ...] = ()
+    geometry_shape_properties: tuple[GeometryShapeProperties, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,11 @@ def snapshot_structure(session) -> RemoteStructure:
             properties
             for node in session.nodes
             if (properties := session.geometry_advanced_properties(node.node_id)) is not None
+        ),
+        tuple(
+            properties
+            for node in session.nodes
+            if (properties := session.geometry_shape_properties(node.node_id)) is not None
         ),
     )
 
@@ -331,6 +338,7 @@ class RemoteSceneAdapter(SceneAdapterBase):
         self._geometry_properties_by_node: dict[int, GeometryProperties] = {}
         self._body_properties_by_node: dict[int, BodyProperties] = {}
         self._geometry_advanced_properties_by_node: dict[int, GeometryAdvancedProperties] = {}
+        self._geometry_shape_properties_by_node: dict[int, GeometryShapeProperties] = {}
         self._latest: RemoteFrame | None = None
         self._delivered_sequence = -1
         self._error = ""
@@ -397,6 +405,9 @@ class RemoteSceneAdapter(SceneAdapterBase):
                         }
                         self._geometry_advanced_properties_by_node = {
                             item.node_id: item for item in packet.geometry_advanced_properties
+                        }
+                        self._geometry_shape_properties_by_node = {
+                            item.node_id: item for item in packet.geometry_shape_properties
                         }
                         self._latest = None
                         self._delivered_sequence = -1
@@ -485,6 +496,10 @@ class RemoteSceneAdapter(SceneAdapterBase):
     def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None:
         with self._lock:
             return self._geometry_advanced_properties_by_node.get(int(node_id))
+
+    def geometry_shape_properties(self, node_id: int) -> GeometryShapeProperties | None:
+        with self._lock:
+            return self._geometry_shape_properties_by_node.get(int(node_id))
 
     def load_keyframe(self, keyframe_id: int) -> bool:
         return self._ok(self._send("keyframe", keyframe_id=int(keyframe_id)))
@@ -656,6 +671,16 @@ class RemoteSceneAdapter(SceneAdapterBase):
             )
         )
 
+    def set_geometry_shape(self, node_id: int, geom_type: str, resource_name: str) -> bool:
+        return self._ok(
+            self._send_structure_edit(
+                "geometry_shape",
+                node_id=int(node_id),
+                type=str(geom_type),
+                resource_name=str(resource_name),
+            )
+        )
+
     def set_body_properties(self, properties: BodyProperties) -> bool:
         return self._ok(
             self._send_structure_edit(
@@ -816,6 +841,9 @@ def handle_session_command(session, message: dict):
             message["inertia_mode"],
             message["fluid_ellipsoid"],
             message["fluid_coefficients"],
+        ),
+        "geometry_shape": lambda: cmd.SetGeometryShape(
+            message["node_id"], message["type"], message.get("resource_name", "")
         ),
         "body_properties": lambda: cmd.SetBodyProperties(
             message["node_id"],

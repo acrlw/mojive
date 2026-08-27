@@ -74,6 +74,12 @@ IMAGE_FILTERS = [
     "All files",
     "*",
 ]
+MESH_FILTERS = [
+    "MuJoCo mesh files (*.stl, *.obj, *.msh, *.ply)",
+    "*.stl *.obj *.msh *.ply",
+    "All files",
+    "*",
+]
 
 
 def _scene_save_target(path: str | Path) -> Path:
@@ -195,7 +201,9 @@ class ViewerApp:
         self._scene_dialog_action = ""
         self._resource_dialog: Any | None = None
         self._texture_dialog: Any | None = None
-        self._texture_import_target = (-1, -1)
+        self._texture_import_target = (-1, -1, "2d")
+        self._geometry_resource_dialog: Any | None = None
+        self._geometry_resource_import_target = (-1, "")
         self._resource_repair_dialog: Any | None = None
         self._resource_repair_dialog_action = ""
         self._resource_repair_model_index = -1
@@ -545,23 +553,28 @@ class ViewerApp:
             "Add Forge resource directory", str(default)
         )
 
-    def _open_texture_dialog(self, model_id: int, material_index: int = -1) -> None:
+    def _open_texture_dialog(
+        self, model_id: int, material_index: int = -1, texture_type: str = "2d"
+    ) -> None:
         if self._texture_dialog is not None:
+            return
+        kind = str(texture_type).strip().lower()
+        if kind not in ("2d", "cube", "skybox"):
             return
         current = self.session.asset_path
         default = current.parent if current is not None else Path.cwd()
         self._texture_dialog = portable_file_dialogs.open_file(
-            "Import 2D texture", str(default), IMAGE_FILTERS
+            f"Import {'2D' if kind == '2d' else kind} texture", str(default), IMAGE_FILTERS
         )
-        self._texture_import_target = (int(model_id), int(material_index))
+        self._texture_import_target = (int(model_id), int(material_index), kind)
 
     def _poll_texture_dialog(self) -> None:
         dialog = self._texture_dialog
         if dialog is None or not dialog.ready(0):
             return
         self._texture_dialog = None
-        model_id, material_index = self._texture_import_target
-        self._texture_import_target = (-1, -1)
+        model_id, material_index, texture_type = self._texture_import_target
+        self._texture_import_target = (-1, -1, "2d")
         try:
             selected = dialog.result()
         except Exception as exc:
@@ -582,7 +595,60 @@ class ViewerApp:
         while name in existing:
             name = f"{base}{suffix}"
             suffix += 1
-        result = self.session.submit(cmd.ImportModelTexture(model_id, path, name, material_index))
+        result = self.session.submit(
+            cmd.ImportModelTexture(model_id, path, name, material_index, texture_type)
+        )
+        if not result.ok:
+            self._report_model_error(result.message)
+
+    def _open_geometry_resource_dialog(self, node_id: int, resource_type: str) -> None:
+        if self._geometry_resource_dialog is not None:
+            return
+        kind = str(resource_type).strip().lower()
+        if kind not in ("mesh", "hfield"):
+            return
+        current = self.session.asset_path
+        default = current.parent if current is not None else Path.cwd()
+        filters = MESH_FILTERS if kind == "mesh" else IMAGE_FILTERS
+        title = "Import mesh" if kind == "mesh" else "Import PNG height field"
+        self._geometry_resource_dialog = portable_file_dialogs.open_file(
+            title, str(default), filters
+        )
+        self._geometry_resource_import_target = (int(node_id), kind)
+
+    def _poll_geometry_resource_dialog(self) -> None:
+        dialog = self._geometry_resource_dialog
+        if dialog is None or not dialog.ready(0):
+            return
+        self._geometry_resource_dialog = None
+        node_id, resource_type = self._geometry_resource_import_target
+        self._geometry_resource_import_target = (-1, "")
+        try:
+            selected = dialog.result()
+        except Exception as exc:
+            self._report_model_error(str(exc))
+            return
+        if isinstance(selected, (list, tuple)):
+            selected = selected[0] if selected else ""
+        if not selected:
+            return
+        path = Path(selected).expanduser().resolve()
+        base = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem).strip("_.-") or resource_type
+        properties = self.session.geometry_shape_properties(node_id)
+        if properties is None:
+            self._report_model_error("The target geometry is no longer available")
+            return
+        existing = set(
+            properties.mesh_names if resource_type == "mesh" else properties.height_field_names
+        )
+        name = base
+        suffix = 2
+        while name in existing:
+            name = f"{base}{suffix}"
+            suffix += 1
+        result = self.session.submit(
+            cmd.ImportModelGeometryResource(node_id, resource_type, path, name)
+        )
         if not result.ok:
             self._report_model_error(result.message)
 
@@ -1270,6 +1336,7 @@ class ViewerApp:
         self._poll_scene_dialog()
         self._poll_resource_dialog()
         self._poll_texture_dialog()
+        self._poll_geometry_resource_dialog()
         self._poll_resource_repair_dialog()
         self._poll_model_drop()
         if self._start_model_load():
@@ -2154,6 +2221,7 @@ class ViewerApp:
             select_model_camera=self.select_model_camera,
             request_rename=self.request_rename,
             request_texture_import=self._open_texture_dialog,
+            request_geometry_resource_import=self._open_geometry_resource_dialog,
             gizmo=self.gizmo,
             perturb=self.perturb,
             scene_entities=self.scene_entities,

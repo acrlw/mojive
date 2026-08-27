@@ -26,6 +26,7 @@ class PanelContext:
     select_model_camera: Any = None
     request_rename: Any = None
     request_texture_import: Any = None
+    request_geometry_resource_import: Any = None
 
     theme: Theme = THEME
     gizmo: Any = None

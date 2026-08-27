@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -30,6 +30,7 @@ help:
 		'  make material-authoring  material creation, binding, and 2D texture import' \
 		'  make contact-authoring  geometry contact, mass, group, and fluid properties' \
 		'  make body-authoring     body mass, inertia, gravcomp, mocap, and sleep policy' \
+		'  make resource-authoring geometry shape, mesh/hfield, cube, and skybox import' \
 		'  make gizmo-gallery     enlarged 2D/3D gizmo reference images' \
 		'  make hidpi-gallery     gizmo references at explicit 200% UI scale' \
 		'  make perturb           MuJoCo translation/rotation perturbation' \
@@ -427,6 +428,10 @@ contact-authoring:
 
 ## Body auto/explicit inertia, gravcomp, mocap, and sleep-policy acceptance.
 body-authoring:
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
+
+## Geometry shape switching plus mesh, height-field, cube, and skybox import acceptance.
+resource-authoring:
 	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
 
 ## Centered modal Settings acceptance. Close it to continue editing the scene.

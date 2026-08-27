@@ -1419,6 +1419,84 @@ def test_geometry_advanced_properties_recompile_once(tmp_path: Path, monkeypatch
     assert restored.inertia_mode == "shell"
 
 
+def test_geometry_resource_import_and_shape_assignment_are_atomic(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from PIL import Image
+
+    path = tmp_path / "resource-shape.xml"
+    path.write_text(
+        """<mujoco>
+  <worldbody><geom name="resource_geom" type="box" size="0.2 0.3 0.4"/></worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    mesh_path = tmp_path / "tetra.obj"
+    mesh_path.write_text(
+        """v 0 0 0
+v 1 0 0
+v 0 1 0
+v 0 0 1
+f 1 3 2
+f 1 2 4
+f 1 4 3
+f 2 3 4
+""",
+        encoding="utf-8",
+    )
+    height_path = tmp_path / "terrain.png"
+    Image.fromarray(np.arange(16, dtype=np.uint8).reshape(4, 4)).save(height_path)
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    geom = next(node for node in session.nodes if node.name == "resource_geom")
+
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    result = session.submit(
+        cmd.ImportModelGeometryResource(geom.node_id, "mesh", mesh_path, "tetra")
+    )
+    assert result.ok, result.message
+    assert compile_count == 1
+    shape = session.geometry_shape_properties(geom.node_id)
+    assert shape is not None
+    assert shape.type == "mesh"
+    assert shape.resource_name == "tetra"
+    assert shape.mesh_names == ("tetra",)
+
+    result = session.submit(cmd.SetGeometryShape(geom.node_id, "box"))
+    assert result.ok, result.message
+    assert compile_count == 2
+    shape = session.geometry_shape_properties(geom.node_id)
+    assert shape is not None and shape.type == "box"
+
+    result = session.submit(
+        cmd.ImportModelGeometryResource(geom.node_id, "hfield", height_path, "terrain")
+    )
+    assert result.ok, result.message
+    assert compile_count == 3
+    shape = session.geometry_shape_properties(geom.node_id)
+    assert shape is not None
+    assert shape.type == "hfield"
+    assert shape.resource_name == "terrain"
+    assert shape.height_field_names == ("terrain",)
+
+    missing = session.submit(cmd.SetGeometryShape(geom.node_id, "mesh", "missing"))
+    assert not missing.ok
+    assert "unavailable" in missing.message.lower()
+    assert session.submit(cmd.Undo())
+    restored = session.geometry_shape_properties(geom.node_id)
+    assert restored is not None and restored.type == "box"
+
+
 def test_body_inertia_properties_recompile_once_and_restore_auto_derivation(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -1518,6 +1596,8 @@ def test_model_material_creation_binding_and_texture_import(tmp_path: Path, monk
     )
     texture_path = tmp_path / "surface.png"
     Image.fromarray(np.full((4, 6, 3), (40, 120, 200), np.uint8)).save(texture_path)
+    cube_path = tmp_path / "studio.png"
+    Image.fromarray(np.full((8, 8, 3), (20, 80, 160), np.uint8)).save(cube_path)
     document = WorkspaceAdapter(MuJoCoAdapter(path))
     session = Session(document)
     assert session.submit(cmd.Pause())
@@ -1576,6 +1656,17 @@ def test_model_material_creation_binding_and_texture_import(tmp_path: Path, monk
     assert "surface" not in session.model_texture_names(0)
     assert session.submit(cmd.Redo())
     assert "surface" in session.model_texture_names(0)
+
+    cube = session.submit(cmd.ImportModelTexture(0, cube_path, "studio", texture_type="cube"))
+    assert cube.ok, cube.message
+    assert session.source.textures["studio"].type is TextureType.CUBE
+    assert session.submit(cmd.SetSkybox("studio"))
+    assert session.source.textures["studio"].type is TextureType.SKYBOX
+    rejected_binding = session.submit(
+        cmd.ImportModelTexture(0, cube_path, "invalid_cube", copied, "cube")
+    )
+    assert not rejected_binding.ok
+    assert "2D" in rejected_binding.message
 
     before_copy_compile = compile_count
     textured_copy = session.submit(cmd.AddModelMaterial(box.node_id, "textured_copy", copied))

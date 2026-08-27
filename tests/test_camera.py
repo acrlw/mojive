@@ -8,7 +8,7 @@ from forge_viewer.adapters.base import CameraInfo, NodeType, SceneFrame, SceneNo
 from forge_viewer.commands import SetCamera
 from forge_viewer.render.backend import DebugView, FrameMode, LabelMode, RenderFlag
 from forge_viewer.types import CameraView
-from forge_viewer.ui.camera import CameraOut, OrbitCamera
+from forge_viewer.ui.camera import CameraOut, OrbitCamera, camera_basis
 from forge_viewer.ui.camera_preview import CameraPreview
 
 
@@ -110,13 +110,15 @@ def test_orbit_keeps_the_distance_to_the_pivot():
         assert np.allclose(cam.pivot, [1.0, -2.0, 0.5])
 
 
-def test_default_camera_looks_from_positive_y_toward_negative_y():
+def test_default_camera_looks_from_positive_x_with_positive_y_on_the_right():
     cam = OrbitCamera()
     view = CameraView()
 
-    assert cam.eye() == pytest.approx((0.0, 4.0, 0.0), abs=1e-7)
-    assert cam.view().forward() == pytest.approx((0.0, -1.0, 0.0), abs=1e-7)
+    assert cam.eye() == pytest.approx((4.0, 0.0, 0.0), abs=1e-7)
+    assert cam.view().forward() == pytest.approx((-1.0, 0.0, 0.0), abs=1e-7)
     assert cam.view().up == pytest.approx((0.0, 0.0, 1.0))
+    right, _up, _forward = camera_basis(cam.view())
+    assert right == pytest.approx((0.0, 1.0, 0.0), abs=1e-7)
     assert view.eye == pytest.approx(cam.eye(), abs=1e-7)
     assert view.forward() == pytest.approx(cam.view().forward(), abs=1e-7)
 

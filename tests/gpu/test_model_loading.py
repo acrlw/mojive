@@ -14,13 +14,13 @@ pytestmark = pytest.mark.gpu
 pytest.importorskip("glfw")
 pytest.importorskip("mujoco")
 
-from forge_viewer.adapters.base import NodeType  # noqa: E402
+from forge_viewer.adapters.base import GeometryShapeProperties, NodeType  # noqa: E402
 from forge_viewer.assets import resolve  # noqa: E402
 from forge_viewer.commands import AddModelComponent, SelectNode  # noqa: E402
 from forge_viewer.composition import build, build_editor, build_scene  # noqa: E402
 from forge_viewer.scene import Scene  # noqa: E402
 from forge_viewer.types import CameraView  # noqa: E402
-from forge_viewer.ui.app import IMAGE_FILTERS, MODEL_FILTERS  # noqa: E402
+from forge_viewer.ui.app import IMAGE_FILTERS, MESH_FILTERS, MODEL_FILTERS  # noqa: E402
 from forge_viewer.ui.camera_preview import CameraPreview  # noqa: E402
 
 
@@ -150,6 +150,53 @@ def test_texture_dialog_uses_image_filters_and_unique_model_name(viewer, monkeyp
         2,
         7,
         "surface2",
+    )
+
+
+def test_geometry_resource_dialog_imports_and_assigns_a_unique_mesh(viewer, monkeypatch, tmp_path):
+    from imgui_bundle import portable_file_dialogs
+
+    import forge_viewer.commands as cmd
+
+    path = tmp_path / "part.obj"
+    path.write_bytes(b"dialog only")
+    opened = {}
+
+    class Dialog:
+        def ready(self, _timeout):
+            return True
+
+        def result(self):
+            return str(path)
+
+    def open_file(title, default_path, filters):
+        opened.update(title=title, default_path=default_path, filters=filters)
+        return Dialog()
+
+    submitted = []
+    monkeypatch.setattr(portable_file_dialogs, "open_file", open_file)
+    monkeypatch.setattr(
+        viewer.session,
+        "geometry_shape_properties",
+        lambda node_id: GeometryShapeProperties(node_id, "box", "", ("part",), ()),
+    )
+    monkeypatch.setattr(
+        viewer.session,
+        "submit",
+        lambda command: submitted.append(command) or cmd.CommandResult.good(""),
+    )
+
+    viewer.app._open_geometry_resource_dialog(12, "mesh")
+    viewer.app._poll_geometry_resource_dialog()
+
+    assert opened["title"] == "Import mesh"
+    assert opened["filters"] == MESH_FILTERS
+    assert len(submitted) == 1
+    assert isinstance(submitted[0], cmd.ImportModelGeometryResource)
+    assert (submitted[0].node_id, submitted[0].resource_type, submitted[0].name) == (
+        12,
+        "mesh",
+        "part2",
     )
 
 
