@@ -109,6 +109,7 @@ class GizmoFrame:
     plane_mask: int = 0b111
     handle_mask: int = ALL_HANDLE_MASK
     handle_color: np.ndarray | None = None
+    active_projection_fade: bool = False
 
 
 def display_handles(frame: GizmoFrame) -> tuple[GizmoHandle, ...]:
@@ -290,6 +291,24 @@ def axis_handle_alpha(cam: CameraView, origin, axis) -> float:
 
 def plane_handle_alpha(cam: CameraView, origin, normal) -> float:
     return rotation_ring_alpha(cam, origin, normal)
+
+
+def handle_projection_alpha(
+    frame: GizmoFrame,
+    handle: GizmoHandle,
+    cam: CameraView,
+    origin,
+    direction,
+) -> float:
+    """Return one projection-degeneracy alpha for every gizmo renderer."""
+
+    if frame.active is handle and not frame.active_projection_fade:
+        return 1.0
+    if handle in AXIS_HANDLES:
+        return axis_handle_alpha(cam, origin, direction)
+    if handle in PLANE_HANDLES or handle in ROTATE_AXIS_HANDLES:
+        return rotation_ring_alpha(cam, origin, direction)
+    return 1.0
 
 
 _PLANE_SPAN_AXES = ((1, 2), (2, 0), (0, 1))

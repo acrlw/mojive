@@ -53,12 +53,12 @@ from ..gizmo import (
     axis_handle_alpha,
     display_handles,
     handle_mask,
+    handle_projection_alpha,
     hit_test,
     masked_axis_start,
     paint_order,
     plane_corners,
     plane_direction,
-    plane_handle_alpha,
     project,
     rotation_dial,
     rotation_ring,
@@ -94,6 +94,15 @@ JOINT_RANGE_COLOR = (0.30, 0.78, 0.46, 0.96)
 JOINT_RANGE_UNAVAILABLE_COLOR = (0.34, 0.36, 0.40, 0.68)
 JOINT_LOWER_LIMIT_COLOR = (0.30, 0.58, 1.00, 1.0)
 JOINT_UPPER_LIMIT_COLOR = (1.00, 0.34, 0.28, 1.0)
+
+
+def _with_alpha(color, alpha: float) -> tuple[float, float, float, float]:
+    return (
+        float(color[0]),
+        float(color[1]),
+        float(color[2]),
+        float(color[3]) * float(alpha),
+    )
 
 
 class _RotationDialProjector:
@@ -615,6 +624,7 @@ class ObjectGizmo:
             if target is not None and target.joint.type in ("hinge", "slide")
             else None
         )
+        frame.active_projection_fade = target is not None
         self._publish_translation_guide(backend, ui_scale)
         if self._style is GizmoStyle.FLAT:
             if backend.caps.gizmo:
@@ -673,11 +683,7 @@ class ObjectGizmo:
         for k in paint_order(cam, origin, [plane_direction(rotation, axis) for axis in planes]):
             axis = planes[k]
             handle = PLANE_HANDLES[axis]
-            alpha = (
-                1.0
-                if frame.active is handle
-                else plane_handle_alpha(cam, origin, rotation[:, axis])
-            )
+            alpha = handle_projection_alpha(frame, handle, cam, origin, rotation[:, axis])
             if alpha <= 0.0:
                 continue
             screen = project(cam, plane_corners(origin, rotation, scale, axis), rect)
@@ -690,9 +696,7 @@ class ObjectGizmo:
         for k in paint_order(cam, origin, [rotation[:, axis] for axis in axes]):
             axis = axes[k]
             handle = AXIS_HANDLES[axis]
-            alpha = (
-                1.0 if frame.active is handle else axis_handle_alpha(cam, origin, rotation[:, axis])
-            )
+            alpha = handle_projection_alpha(frame, handle, cam, origin, rotation[:, axis])
             if alpha <= 0.0:
                 continue
             screen = project(
@@ -733,11 +737,7 @@ class ObjectGizmo:
             if frame.active_rotation_overlay and frame.active is handle:
                 continue
             full = rotation_ring_is_full(frame, handle)
-            alpha = (
-                1.0
-                if frame.active is handle
-                else rotation_ring_alpha(cam, origin, rotation[:, axis])
-            )
+            alpha = handle_projection_alpha(frame, handle, cam, origin, rotation[:, axis])
             if alpha <= 0.0:
                 continue
             ring = rotation_ring(cam, origin, rotation, scale, axis, full=full)
@@ -804,6 +804,9 @@ class ObjectGizmo:
         frame = self._frame
         origin = np.asarray(frame.position, np.float64)
         rotation = np.asarray(frame.rotation, np.float64)
+        alpha = rotation_ring_alpha(cam, origin, rotation[:, 2])
+        if alpha <= 0.0:
+            return
         dial = _RotationDialProjector(
             cam,
             rect,
@@ -818,7 +821,7 @@ class ObjectGizmo:
         if np.all(full_ring[:, 2] > 0.0):
             overlay.polyline(
                 full_ring[:, :2],
-                JOINT_RANGE_UNAVAILABLE_COLOR,
+                _with_alpha(JOINT_RANGE_UNAVAILABLE_COLOR, alpha),
                 JOINT_RANGE_WIDTH_PT * style_scale,
                 closed=True,
             )
@@ -831,7 +834,7 @@ class ObjectGizmo:
         if np.all(allowed[:, 2] > 0.0):
             overlay.polyline(
                 allowed[:, :2],
-                JOINT_RANGE_COLOR,
+                _with_alpha(JOINT_RANGE_COLOR, alpha),
                 JOINT_RANGE_WIDTH_PT * style_scale,
                 closed=span >= 2.0 * np.pi - 1e-6,
             )
@@ -840,7 +843,7 @@ class ObjectGizmo:
             overlay,
             dial,
             start_angle,
-            JOINT_LOWER_LIMIT_COLOR,
+            _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha),
             _joint_limit_label("MIN", state.lower, "hinge"),
             style_scale,
             label_above=True,
@@ -849,7 +852,7 @@ class ObjectGizmo:
             overlay,
             dial,
             start_angle + span,
-            JOINT_UPPER_LIMIT_COLOR,
+            _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha),
             _joint_limit_label("MAX", state.upper, "hinge"),
             style_scale,
             label_above=False,
@@ -859,7 +862,7 @@ class ObjectGizmo:
             overlay.line(
                 current_tick[0],
                 current_tick[1],
-                HOVER_COLOR,
+                _with_alpha(HOVER_COLOR, alpha),
                 2.4 * style_scale,
             )
 
@@ -891,6 +894,13 @@ class ObjectGizmo:
     ) -> None:
         origin = np.asarray(self._frame.position, np.float64)
         axis = np.asarray(self._frame.rotation, np.float64)[:, 2]
+        alpha = axis_handle_alpha(cam, origin, axis)
+        if alpha <= 0.0:
+            return
+        range_color = _with_alpha(JOINT_RANGE_COLOR, alpha)
+        lower_color = _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha)
+        upper_color = _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha)
+        current_color = _with_alpha(HOVER_COLOR, alpha)
         values = np.array((state.lower, state.current, state.upper), np.float64)
         positions = origin + (values - state.current)[:, None] * axis
         projected = project(cam, positions, rect)
@@ -905,12 +915,12 @@ class ObjectGizmo:
         normal = np.array((-tangent[1], tangent[0]))
         offset = normal * JOINT_RANGE_OFFSET_PT * style_scale
         lower, current, upper = lower + offset, current + offset, upper + offset
-        overlay.line(lower, upper, JOINT_RANGE_COLOR, JOINT_RANGE_WIDTH_PT * style_scale)
+        overlay.line(lower, upper, range_color, JOINT_RANGE_WIDTH_PT * style_scale)
 
         half_tick = 6.0 * style_scale
         for point, limit_color in (
-            (lower, JOINT_LOWER_LIMIT_COLOR),
-            (upper, JOINT_UPPER_LIMIT_COLOR),
+            (lower, lower_color),
+            (upper, upper_color),
         ):
             overlay.line(
                 point - normal * half_tick,
@@ -921,17 +931,17 @@ class ObjectGizmo:
         overlay.line(
             current - normal * 4.0 * style_scale,
             current + normal * 4.0 * style_scale,
-            HOVER_COLOR,
+            current_color,
             2.4 * style_scale,
         )
         overlay.text(
             lower + np.array((4.0, -16.0)) * style_scale,
-            JOINT_LOWER_LIMIT_COLOR,
+            lower_color,
             _joint_limit_label("MIN", state.lower, "slide"),
         )
         overlay.text(
             upper + np.array((4.0, 3.0)) * style_scale,
-            JOINT_UPPER_LIMIT_COLOR,
+            upper_color,
             _joint_limit_label("MAX", state.upper, "slide"),
         )
 
@@ -1053,7 +1063,12 @@ class ObjectGizmo:
             SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
         )
         step = float(self.rotation_snap_deg)
-        core = GUIDE_CORE_COLOR
+        projection_alpha = (
+            rotation_ring_alpha(cam, self._start_pos, self._axis)
+            if self._frame.active_projection_fade and self._active is not GizmoHandle.ROTATE_SCREEN
+            else 1.0
+        )
+        core = _with_alpha(GUIDE_CORE_COLOR, projection_alpha)
 
         tick_radius = ring_radius
 
@@ -1068,8 +1083,7 @@ class ObjectGizmo:
             )
 
         ticks_visible = (
-            self._active is GizmoHandle.ROTATE_SCREEN
-            or rotation_ring_alpha(cam, self._start_pos, self._axis) >= ROTATION_TICK_MIN_ALPHA
+            self._active is GizmoHandle.ROTATE_SCREEN or projection_alpha >= ROTATION_TICK_MIN_ALPHA
         )
         ticks: list[tuple[np.ndarray, np.ndarray]] = []
         for degrees in np.arange(0.0, 360.0, step):
@@ -1101,7 +1115,12 @@ class ObjectGizmo:
         for inner, outer in ticks:
             overlay.line(inner, outer, core, 1.1 * style_scale)
         if active_tick is not None:
-            overlay.line(active_tick[0], active_tick[1], HOVER_COLOR, 2.2 * style_scale)
+            overlay.line(
+                active_tick[0],
+                active_tick[1],
+                _with_alpha(HOVER_COLOR, projection_alpha),
+                2.2 * style_scale,
+            )
 
     def _draw_translation_guide(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         screen = project(cam, (self._start_pos, self._frame.position), rect)
@@ -1157,6 +1176,13 @@ class ObjectGizmo:
         style_scale: float,
         dial: _RotationDialProjector,
     ) -> None:
+        projection_alpha = (
+            rotation_ring_alpha(cam, self._start_pos, self._axis)
+            if self._frame.active_projection_fade and self._active is not GizmoHandle.ROTATE_SCREEN
+            else 1.0
+        )
+        if projection_alpha <= 0.0:
+            return
         sweep = _rotation_sweep(self._rotation_angle)
         ring_radius = (
             SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
@@ -1176,16 +1202,16 @@ class ObjectGizmo:
         center = center[:2]
         arc = arc[:, :2]
         sector = [center, *arc]
-        border = (1.0, 0.5, 0.06, 1.0)
+        border = _with_alpha((1.0, 0.5, 0.06, 1.0), projection_alpha)
 
-        fill_alpha = _rotation_fill_alpha(sweep)
+        fill_alpha = _rotation_fill_alpha(sweep) * projection_alpha
         if fill_alpha > 0.0:
             fill = (1.0, 0.5, 0.06, fill_alpha)
             overlay.triangle_fan_fill(sector, fill)
         if np.all(reference[:, 2] > 0.0):
             overlay.polyline(
                 reference[:, :2],
-                HOVER_COLOR,
+                _with_alpha(HOVER_COLOR, projection_alpha),
                 RING_WIDTH_PT * style_scale,
                 closed=True,
             )

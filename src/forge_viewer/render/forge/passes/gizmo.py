@@ -21,12 +21,10 @@ from ....gizmo import (
     SIZE_PT,
     GizmoHandle,
     GizmoMode,
-    axis_handle_alpha,
     axis_rotation,
     display_handles,
-    plane_handle_alpha,
+    handle_projection_alpha,
     rotation_half_basis,
-    rotation_ring_alpha,
     rotation_ring_is_full,
     screen_rotation_basis,
 )
@@ -148,10 +146,8 @@ class GizmoPass(BasePass):
         ctx.target.fbo.depth_mask = False
         for axis, handle in enumerate(PLANE_HANDLES):
             if handle in visible:
-                alpha = (
-                    1.0
-                    if frame.active is handle
-                    else plane_handle_alpha(ctx.camera, frame.position, frame.rotation[:, axis])
+                alpha = handle_projection_alpha(
+                    frame, handle, ctx.camera, frame.position, frame.rotation[:, axis]
                 )
                 if alpha <= 0.0:
                     continue
@@ -171,10 +167,8 @@ class GizmoPass(BasePass):
         try:
             for axis, handle in enumerate(AXIS_HANDLES):
                 if handle in visible:
-                    alpha = (
-                        1.0
-                        if frame.active is handle
-                        else axis_handle_alpha(ctx.camera, frame.position, frame.rotation[:, axis])
+                    alpha = handle_projection_alpha(
+                        frame, handle, ctx.camera, frame.position, frame.rotation[:, axis]
                     )
                     if alpha <= 0.0:
                         continue
@@ -227,10 +221,8 @@ class GizmoPass(BasePass):
                 if frame.active_rotation_overlay and frame.active is handle:
                     continue
                 full = rotation_ring_is_full(frame, handle)
-                alpha = (
-                    1.0
-                    if frame.active is handle
-                    else rotation_ring_alpha(ctx.camera, frame.position, frame.rotation[:, axis])
+                alpha = handle_projection_alpha(
+                    frame, handle, ctx.camera, frame.position, frame.rotation[:, axis]
                 )
                 if alpha <= 0.0:
                     continue

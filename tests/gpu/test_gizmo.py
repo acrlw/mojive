@@ -201,6 +201,41 @@ def test_scalar_joint_color_override_does_not_look_like_a_world_axis(rig):
     assert np.median(joint_pixels[:, 0] / joint_pixels[:, 2]) > 0.65
 
 
+@pytest.mark.parametrize(
+    ("mode", "handle", "eye", "up"),
+    (
+        (GizmoMode.TRANSLATE, GizmoHandle.Z, (0.0, 0.0, 5.0), (0.0, 1.0, 0.0)),
+        (GizmoMode.ROTATE, GizmoHandle.ROTATE_Z, (5.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+    ),
+)
+def test_active_joint_handle_disappears_when_its_projection_degenerates(
+    rig,
+    mode: GizmoMode,
+    handle: GizmoHandle,
+    eye: tuple[float, float, float],
+    up: tuple[float, float, float],
+):
+    if not rig.backend.caps.gizmo:
+        pytest.skip("gizmo unsupported by this backend")
+    cam = CameraView(
+        eye=np.asarray(eye, np.float32),
+        target=ORIGIN.copy(),
+        up=np.asarray(up, np.float32),
+        near=0.1,
+        far=50.0,
+        aspect=W / H,
+    )
+    frame = _frame(mode)
+    frame.active = handle
+    frame.handle_mask = handle_mask(handle)
+    frame.handle_color = JOINT_HANDLE_COLOR
+    frame.active_projection_fade = True
+
+    img = rig.draw(frame, cam, box=False)
+
+    assert not _joint_mask(img).any()
+
+
 def test_gizmo_screen_size_is_constant_across_distances(rig):
     if not rig.backend.caps.gizmo:
         pytest.skip("gizmo unsupported by this backend")

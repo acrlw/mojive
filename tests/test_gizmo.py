@@ -30,6 +30,7 @@ from forge_viewer.gizmo import (
     axis_rotation,
     display_handles,
     handle_mask,
+    handle_projection_alpha,
     hit_test,
     masked_axis_start,
     paint_order,
@@ -57,6 +58,7 @@ from forge_viewer.ui.gizmo import (
     JOINT_UPPER_LIMIT_COLOR,
     ObjectGizmo,
     _clip_line_to_rect,
+    _JointRangeState,
     _project_rotation_dial,
     _project_rotation_tick,
     _projected_line_parameters,
@@ -530,6 +532,33 @@ def test_translation_axes_and_planes_fade_when_their_projection_degenerates() ->
     )
     assert axis_handle_alpha(cam, np.zeros(3), np.array((1.0, 0.0, 0.0))) == 0.0
     assert plane_handle_alpha(cam, np.zeros(3), np.array((0.0, 1.0, 0.0))) == 0.0
+
+
+@pytest.mark.parametrize(
+    ("mode", "handle", "eye"),
+    (
+        (GizmoMode.TRANSLATE, GizmoHandle.Z, (0.0, 0.0, 5.0)),
+        (GizmoMode.ROTATE, GizmoHandle.ROTATE_Z, (5.0, 0.0, 0.0)),
+    ),
+)
+def test_joint_active_handle_keeps_projection_degeneracy_fade(
+    mode: GizmoMode,
+    handle: GizmoHandle,
+    eye: tuple[float, float, float],
+) -> None:
+    up = (0.0, 1.0, 0.0) if mode is GizmoMode.TRANSLATE else (0.0, 0.0, 1.0)
+    cam = CameraView(
+        eye=np.asarray(eye),
+        target=np.zeros(3),
+        up=np.asarray(up),
+        aspect=RECT[2] / RECT[3],
+    )
+    frame = GizmoFrame(mode=mode, active=handle)
+    direction = frame.rotation[:, 2]
+
+    assert handle_projection_alpha(frame, handle, cam, frame.position, direction) == 1.0
+    frame.active_projection_fade = True
+    assert handle_projection_alpha(frame, handle, cam, frame.position, direction) == 0.0
 
 
 def test_axis_rotation_maps_mesh_z_to_each_object_axis_without_mirroring() -> None:
@@ -1414,6 +1443,91 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
     assert np.allclose(
         texts[next(label for label in labels if label.startswith("MAX"))], JOINT_UPPER_LIMIT_COLOR
     )
+
+
+def test_hinge_joint_range_continuously_fades_before_its_projection_degenerates() -> None:
+    facing = 0.18
+    view = np.array((np.sqrt(1.0 - facing * facing), 0.0, facing))
+    cam = CameraView(
+        eye=-view * 5.0,
+        target=np.zeros(3),
+        up=np.array((0.0, 1.0, 0.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._joint_range = _JointRangeState("hinge", 0.0, -1.0, 1.0)
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_joint_range(overlay, cam, RECT, 1.0)
+
+    expected_alpha = rotation_ring_alpha(cam, np.zeros(3), np.array((0.0, 0.0, 1.0)))
+    range_color = next(
+        args[1]
+        for name, args, _kwargs in overlay.calls
+        if name == "polyline" and np.allclose(args[1][:3], JOINT_RANGE_COLOR[:3])
+    )
+    limit_colors = [
+        args[1]
+        for name, args, _kwargs in overlay.calls
+        if name == "text" and args[2].startswith(("MIN ", "MAX "))
+    ]
+    assert 0.0 < expected_alpha < 1.0
+    assert range_color[3] == pytest.approx(JOINT_RANGE_COLOR[3] * expected_alpha)
+    assert [color[3] for color in limit_colors] == pytest.approx([expected_alpha, expected_alpha])
+
+
+@pytest.mark.parametrize(
+    ("joint_type", "eye", "up"),
+    (
+        ("hinge", (5.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+        ("slide", (0.0, 0.0, 5.0), (0.0, 1.0, 0.0)),
+    ),
+)
+def test_joint_range_is_hidden_when_its_projection_degenerates(
+    joint_type: str,
+    eye: tuple[float, float, float],
+    up: tuple[float, float, float],
+) -> None:
+    cam = CameraView(
+        eye=np.asarray(eye),
+        target=np.zeros(3),
+        up=np.asarray(up),
+        aspect=RECT[2] / RECT[3],
+    )
+    gizmo = ObjectGizmo("rotate" if joint_type == "hinge" else "translate")
+    gizmo._joint_range = _JointRangeState(joint_type, 0.0, -1.0, 1.0)
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_joint_range(overlay, cam, RECT, 1.0)
+
+    assert overlay.calls == []
+
+
+def test_active_joint_rotation_guide_is_hidden_when_the_ring_is_edge_on() -> None:
+    cam = CameraView(
+        eye=np.array((5.0, 0.0, 0.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 0.0, 1.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._axis[:] = (0.0, 0.0, 1.0)
+    gizmo._rotation_start_vec[:] = (1.0, 0.0, 0.0)
+    gizmo._frame.active_projection_fade = True
+    dial = _RotationDialProjector(
+        cam,
+        RECT,
+        gizmo._start_pos,
+        gizmo._axis,
+        gizmo._rotation_start_vec,
+        SIZE_PT,
+    )
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_rotation_guide(overlay, cam, RECT, 1.0, dial)
+
+    assert overlay.calls == []
 
 
 @pytest.mark.physics
