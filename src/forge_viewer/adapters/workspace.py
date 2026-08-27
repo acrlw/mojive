@@ -476,6 +476,23 @@ class WorkspaceAdapter(SceneAdapterBase):
             joint_id, axis, limited, value_range, damping, stiffness
         )
 
+    def model_material_indices(self, model_id: int) -> tuple[int, ...]:
+        return self.primary.model_material_indices(model_id)
+
+    def model_texture_names(self, model_id: int) -> tuple[str, ...]:
+        return self.primary.model_texture_names(model_id)
+
+    def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int:
+        return self.primary.add_model_material(node_id, name, copy_from)
+
+    def import_model_texture(
+        self, model_id: int, path: Path, name: str, material_index: int = -1
+    ) -> bool:
+        return self.primary.import_model_texture(model_id, path, name, material_index)
+
+    def set_geometry_material(self, node_id: int, material_index: int) -> bool:
+        return self.primary.set_geometry_material(node_id, material_index)
+
     def actuators(self):
         return self.primary.actuators()
 

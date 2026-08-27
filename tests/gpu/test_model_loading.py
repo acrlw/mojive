@@ -20,7 +20,7 @@ from forge_viewer.commands import AddModelComponent, SelectNode  # noqa: E402
 from forge_viewer.composition import build, build_editor, build_scene  # noqa: E402
 from forge_viewer.scene import Scene  # noqa: E402
 from forge_viewer.types import CameraView  # noqa: E402
-from forge_viewer.ui.app import MODEL_FILTERS  # noqa: E402
+from forge_viewer.ui.app import IMAGE_FILTERS, MODEL_FILTERS  # noqa: E402
 from forge_viewer.ui.camera_preview import CameraPreview  # noqa: E402
 
 
@@ -108,6 +108,49 @@ def test_add_model_dialog_filters_formats_and_accepts_multiple_files(viewer, mon
     assert opened["filters"] == MODEL_FILTERS
     assert opened["options"] == portable_file_dialogs.opt.multiselect
     assert [item[:2] for item in loaded] == [("add", Path(path)) for path in paths]
+
+
+def test_texture_dialog_uses_image_filters_and_unique_model_name(viewer, monkeypatch, tmp_path):
+    from imgui_bundle import portable_file_dialogs
+
+    import forge_viewer.commands as cmd
+
+    path = tmp_path / "surface.png"
+    path.write_bytes(b"dialog only")
+    opened = {}
+
+    class Dialog:
+        def ready(self, _timeout):
+            return True
+
+        def result(self):
+            return str(path)
+
+    def open_file(title, default_path, filters):
+        opened.update(title=title, default_path=default_path, filters=filters)
+        return Dialog()
+
+    submitted = []
+    monkeypatch.setattr(portable_file_dialogs, "open_file", open_file)
+    monkeypatch.setattr(viewer.session, "model_texture_names", lambda _model_id: ("surface",))
+    monkeypatch.setattr(
+        viewer.session,
+        "submit",
+        lambda command: submitted.append(command) or cmd.CommandResult.good(""),
+    )
+
+    viewer.app._open_texture_dialog(2, 7)
+    viewer.app._poll_texture_dialog()
+
+    assert opened["title"] == "Import 2D texture"
+    assert opened["filters"] == IMAGE_FILTERS
+    assert len(submitted) == 1
+    assert isinstance(submitted[0], cmd.ImportModelTexture)
+    assert (submitted[0].model_id, submitted[0].material_index, submitted[0].name) == (
+        2,
+        7,
+        "surface2",
+    )
 
 
 def test_runtime_model_loading_rebuilds_gpu_scene(viewer):

@@ -442,6 +442,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             model_composition=True,
             topology_editing=True,
             model_properties=True,
+            model_assets=True,
         )
         self._m = None
         self._d = None
@@ -4581,6 +4582,139 @@ class MuJoCoAdapter(SceneAdapterBase):
             # the old compiled texture reference in that live MjSpec. Reparse the
             # serialized spec so a later topology rebuild or export sees the edit.
             self._store_model_spec(model_id, mujoco.MjSpec.from_string(spec.to_xml()))
+        return True
+
+    def model_material_indices(self, model_id: int) -> tuple[int, ...]:
+        return tuple(
+            index
+            for index in range(self._m.nmat)
+            if (name := mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_MATERIAL, index))
+            and self._model_element_name(name)[0] == int(model_id)
+        )
+
+    def model_texture_names(self, model_id: int) -> tuple[str, ...]:
+        return tuple(
+            name
+            for index in range(self._m.ntex)
+            if (name := mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_TEXTURE, index))
+            and self._model_element_name(name)[0] == int(model_id)
+        )
+
+    def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int:
+        identity = self._node_element.get(int(node_id))
+        value = str(name).strip()
+        if identity is None or identity[1] not in (NodeType.GEOM, NodeType.SITE) or not value:
+            return -1
+        model_id, node_type, element_name = identity
+        spec = self._spec_for_model(model_id)
+        if spec is None or spec.material(value) is not None:
+            return -1
+        material = None
+        texture_name = ""
+        source_index = int(copy_from)
+        if source_index >= 0:
+            if not 0 <= source_index < self._m.nmat:
+                return -1
+            compiled_name = (
+                mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_MATERIAL, source_index) or ""
+            )
+            source_model, _source_name = self._model_element_name(compiled_name)
+            if source_model != model_id:
+                return -1
+            material = self.scene_source().materials[source_index]
+            if material.texture:
+                texture_model, texture_name = self._model_element_name(material.texture)
+                if texture_model != model_id:
+                    return -1
+
+        working = spec.copy()
+        textures = [""] * int(mujoco.mjtTextureRole.mjNTEXROLE)
+        textures[_TEXROLE_RGB] = texture_name
+        if material is None:
+            working.add_material(name=value)
+        else:
+            working.add_material(
+                name=value,
+                textures=textures,
+                texuniform=material.tex_uniform,
+                texrepeat=material.tex_repeat,
+                emission=material.emission,
+                specular=material.specular,
+                shininess=material.shininess,
+                reflectance=material.reflectance,
+                rgba=material.rgba,
+            )
+        target = getattr(working, node_type.value)(element_name)
+        if target is None:
+            return -1
+        target.material = value
+        if not self._replace_model_spec(model_id, working):
+            return -1
+        compiled_name = value
+        if model_id > 0:
+            attached = next(
+                (item for item in self._attached_models if item.model_id == model_id), None
+            )
+            if attached is None:
+                return -1
+            compiled_name = f"{attached.prefix}{value}"
+        return mujoco.mj_name2id(self._m, mujoco.mjtObj.mjOBJ_MATERIAL, compiled_name)
+
+    def import_model_texture(
+        self, model_id: int, path: Path, name: str, material_index: int = -1
+    ) -> bool:
+        model_id = int(model_id)
+        source = Path(path).expanduser().resolve()
+        value = str(name).strip()
+        spec = self._spec_for_model(model_id)
+        if spec is None or not source.is_file() or not value or spec.texture(value) is not None:
+            return False
+        working = spec.copy()
+        working.add_texture(
+            name=value,
+            type=mujoco.mjtTexture.mjTEXTURE_2D,
+            file=str(source),
+        )
+        material = int(material_index)
+        if material >= 0:
+            if not 0 <= material < self._m.nmat:
+                return False
+            compiled_name = mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_MATERIAL, material) or ""
+            material_model, material_name = self._model_element_name(compiled_name)
+            target = working.material(material_name) if material_model == model_id else None
+            if target is None:
+                return False
+            textures = [""] * int(mujoco.mjtTextureRole.mjNTEXROLE)
+            textures[_TEXROLE_RGB] = value
+            target.textures = textures
+        return self._replace_model_spec(model_id, working)
+
+    def set_geometry_material(self, node_id: int, material_index: int) -> bool:
+        identity = self._node_element.get(int(node_id))
+        node = next((item for item in self.nodes() if item.node_id == int(node_id)), None)
+        if identity is None or node is None or identity[1] not in (NodeType.GEOM, NodeType.SITE):
+            return False
+        model_id, node_type, name = identity
+        material = int(material_index)
+        material_name = ""
+        if material >= 0:
+            if not 0 <= material < self._m.nmat:
+                return False
+            compiled_name = mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_MATERIAL, material) or ""
+            material_model, material_name = self._model_element_name(compiled_name)
+            if material_model != model_id:
+                return False
+        element = self._element(model_id, node_type.value, name)
+        if element is None:
+            return False
+        element.material = material_name
+        if node_type is NodeType.GEOM:
+            self._m.geom_matid[node.geom_index] = material
+        else:
+            self._m.site_matid[node.site_index] = material
+        self._mark_model_edited(model_id)
+        self._source = None
+        self._structure_revision += 1
         return True
 
     def set_geometry_color(self, node_id: int, rgba: np.ndarray) -> bool:

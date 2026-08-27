@@ -255,6 +255,7 @@ class AdapterCaps:
     model_composition: bool = False
     topology_editing: bool = False
     model_properties: bool = False
+    model_assets: bool = False
     notes: tuple[str, ...] = ()
 
 
@@ -823,6 +824,28 @@ class SceneAdapterBase:
         """Set authored numeric properties for one model joint."""
         return False
 
+    def model_material_indices(self, model_id: int) -> tuple[int, ...]:
+        """Return render material indices owned by one editable model."""
+        return ()
+
+    def model_texture_names(self, model_id: int) -> tuple[str, ...]:
+        """Return compiled texture names owned by one editable model."""
+        return ()
+
+    def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int:
+        """Create and bind a model-local material to one geometry or site."""
+        return -1
+
+    def import_model_texture(
+        self, model_id: int, path: Path, name: str, material_index: int = -1
+    ) -> bool:
+        """Import one 2D image and optionally bind it to a model material."""
+        return False
+
+    def set_geometry_material(self, node_id: int, material_index: int) -> bool:
+        """Bind a model-local material, or -1 for inline appearance."""
+        return False
+
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool:
         """Enable or disable an equality constraint."""
         return False
@@ -1051,6 +1074,13 @@ class SceneAdapter(Protocol):
         damping: float,
         stiffness: float,
     ) -> bool: ...
+    def model_material_indices(self, model_id: int) -> tuple[int, ...]: ...
+    def model_texture_names(self, model_id: int) -> tuple[str, ...]: ...
+    def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int: ...
+    def import_model_texture(
+        self, model_id: int, path: Path, name: str, material_index: int = -1
+    ) -> bool: ...
+    def set_geometry_material(self, node_id: int, material_index: int) -> bool: ...
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool: ...
     def set_ctrl(self, index: int, value: float) -> bool: ...
     def set_pose(self, node_id: int, position, rotation) -> bool: ...

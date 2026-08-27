@@ -1210,6 +1210,132 @@ def test_ball_joint_properties_apply_one_limit_and_all_rotational_damping(tmp_pa
     assert spec.joint("ball").range == pytest.approx((0.0, 1.0))
 
 
+def test_model_material_creation_binding_and_texture_import(tmp_path: Path, monkeypatch) -> None:
+    from PIL import Image
+
+    path = tmp_path / "material-assets.xml"
+    path.write_text(
+        """
+<mujoco>
+  <asset>
+    <material name="paint" rgba="0.2 0.4 0.6 1" specular="0.3"/>
+  </asset>
+  <worldbody>
+    <geom name="box" type="box" size="0.1 0.1 0.1"/>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    texture_path = tmp_path / "surface.png"
+    Image.fromarray(np.full((4, 6, 3), (40, 120, 200), np.uint8)).save(texture_path)
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    box = next(node for node in session.nodes if node.name == "box")
+    paint = session.model_material_indices(0)[0]
+
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    jpeg_path = tmp_path / "surface.jpg"
+    Image.fromarray(np.zeros((2, 2, 3), np.uint8)).save(jpeg_path)
+    rejected = session.submit(cmd.ImportModelTexture(0, jpeg_path, "jpeg"))
+    assert not rejected.ok
+    assert "PNG" in rejected.message
+    assert compile_count == 0
+
+    created = session.submit(cmd.AddModelMaterial(box.node_id, "paint_copy", paint))
+    assert created.ok, created.message
+    assert compile_count == 1
+    copied = created.entity_id
+    assert copied in session.model_material_indices(0)
+    model = document.primary.model
+    geom = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "box")
+    assert int(model.geom_matid[geom]) == copied
+    assert model.mat_rgba[copied] == pytest.approx((0.2, 0.4, 0.6, 1.0))
+    instance = next(
+        index for index, node_id in enumerate(session.source.geom_node) if node_id == box.node_id
+    )
+    assert int(session.source.geom_material[instance]) == copied
+
+    bound = session.submit(cmd.SetGeometryMaterial(box.node_id, paint))
+    assert bound.ok, bound.message
+    assert compile_count == 1
+    assert int(document.primary.model.geom_matid[geom]) == paint
+    assert int(session.source.geom_material[instance]) == paint
+
+    imported = session.submit(
+        cmd.ImportModelTexture(0, texture_path, "surface", material_index=copied)
+    )
+    assert imported.ok, imported.message
+    assert compile_count == 2
+    assert "surface" in session.model_texture_names(0)
+    model = document.primary.model
+    texture = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_TEXTURE, "surface")
+    assert texture >= 0
+    assert int(model.mat_texid[copied, 1]) == texture
+    assert session.source.textures["surface"].pixels.shape == (4, 6, 3)
+
+    assert session.submit(cmd.Undo())
+    assert "surface" not in session.model_texture_names(0)
+    assert session.submit(cmd.Redo())
+    assert "surface" in session.model_texture_names(0)
+
+    before_copy_compile = compile_count
+    textured_copy = session.submit(cmd.AddModelMaterial(box.node_id, "textured_copy", copied))
+    assert textured_copy.ok, textured_copy.message
+    assert compile_count == before_copy_compile + 1
+    model = document.primary.model
+    texture = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_TEXTURE, "surface")
+    assert int(model.mat_texid[textured_copy.entity_id, 1]) == texture
+
+    workspace_path = tmp_path / "material-assets.forge.json"
+    document.save_scene(workspace_path)
+    restored = workspace()
+    restored.open_scene(workspace_path)
+    assert any(name.endswith("surface") for name in restored.model_texture_names(1))
+    restored_model = restored.primary.model
+    restored_copy = mujoco.mj_name2id(
+        restored_model, mujoco.mjtObj.mjOBJ_MATERIAL, "forge_1_paint_copy"
+    )
+    restored_texture = mujoco.mj_name2id(
+        restored_model, mujoco.mjtObj.mjOBJ_TEXTURE, "forge_1_surface"
+    )
+    assert int(restored_model.mat_texid[restored_copy, 1]) == restored_texture
+
+
+def test_model_material_and_texture_choices_stay_model_local() -> None:
+    document = workspace()
+    first = document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
+    second = document.add_scene_model(
+        ASSETS / "test_scene.xml", np.array((2.0, 0.0, 0.0)), np.eye(3)
+    )
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+
+    first_materials = set(session.model_material_indices(first))
+    second_materials = set(session.model_material_indices(second))
+    assert first_materials
+    assert second_materials
+    assert first_materials.isdisjoint(second_materials)
+    assert all(name.startswith(f"forge_{first}_") for name in session.model_texture_names(first))
+    assert all(name.startswith(f"forge_{second}_") for name in session.model_texture_names(second))
+
+    geometry = next(
+        node for node in session.nodes if node.model_id == first and node.type is NodeType.GEOM
+    )
+    result = session.submit(cmd.SetGeometryMaterial(geometry.node_id, next(iter(second_materials))))
+    assert not result.ok
+    assert "unavailable" in result.message.lower()
+
+
 def test_mjspec_element_pose_edits_round_trip_in_workspace(tmp_path: Path) -> None:
     document = workspace()
     model_id = document.add_scene_model(

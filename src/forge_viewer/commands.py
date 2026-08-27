@@ -454,6 +454,33 @@ class SetJointProperties(Command):
 
 
 @dataclass(frozen=True)
+class AddModelMaterial(Command):
+    """Create a model-local material and bind it to a geometry or site node."""
+
+    node_id: int
+    name: str
+    copy_from: int = -1
+
+
+@dataclass(frozen=True)
+class ImportModelTexture(Command):
+    """Import one 2D image into a model and optionally apply it to a material."""
+
+    model_id: int
+    path: Path
+    name: str
+    material_index: int = -1
+
+
+@dataclass(frozen=True)
+class SetGeometryMaterial(Command):
+    """Bind a shared model material, or -1 for inline geometry appearance."""
+
+    node_id: int
+    material_index: int
+
+
+@dataclass(frozen=True)
 class SetEqualityEnabled(Command):
     """Enable or disable a model equality constraint."""
 

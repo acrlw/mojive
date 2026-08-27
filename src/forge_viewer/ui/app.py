@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -64,6 +65,12 @@ SCENE_FILTERS = [
     "*.forge.json",
     "MuJoCo XML / MJCF (*.xml, *.mjcf)",
     "*.xml *.mjcf",
+    "All files",
+    "*",
+]
+IMAGE_FILTERS = [
+    "PNG images (*.png)",
+    "*.png",
     "All files",
     "*",
 ]
@@ -184,6 +191,8 @@ class ViewerApp:
         self._scene_dialog: Any | None = None
         self._scene_dialog_action = ""
         self._resource_dialog: Any | None = None
+        self._texture_dialog: Any | None = None
+        self._texture_import_target = (-1, -1)
         self._resource_repair_dialog: Any | None = None
         self._resource_repair_dialog_action = ""
         self._resource_repair_model_index = -1
@@ -505,6 +514,47 @@ class ViewerApp:
         self._resource_dialog = portable_file_dialogs.select_folder(
             "Add Forge resource directory", str(default)
         )
+
+    def _open_texture_dialog(self, model_id: int, material_index: int = -1) -> None:
+        if self._texture_dialog is not None:
+            return
+        current = self.session.asset_path
+        default = current.parent if current is not None else Path.cwd()
+        self._texture_dialog = portable_file_dialogs.open_file(
+            "Import 2D texture", str(default), IMAGE_FILTERS
+        )
+        self._texture_import_target = (int(model_id), int(material_index))
+
+    def _poll_texture_dialog(self) -> None:
+        dialog = self._texture_dialog
+        if dialog is None or not dialog.ready(0):
+            return
+        self._texture_dialog = None
+        model_id, material_index = self._texture_import_target
+        self._texture_import_target = (-1, -1)
+        try:
+            selected = dialog.result()
+        except Exception as exc:
+            self._report_model_error(str(exc))
+            return
+        if isinstance(selected, (list, tuple)):
+            selected = selected[0] if selected else ""
+        if not selected:
+            return
+        path = Path(selected).expanduser().resolve()
+        base = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem).strip("_.-") or "texture"
+        prefix = f"forge_{model_id}_"
+        existing = {
+            name.removeprefix(prefix) for name in self.session.model_texture_names(model_id)
+        }
+        name = base
+        suffix = 2
+        while name in existing:
+            name = f"{base}{suffix}"
+            suffix += 1
+        result = self.session.submit(cmd.ImportModelTexture(model_id, path, name, material_index))
+        if not result.ok:
+            self._report_model_error(result.message)
 
     def _begin_resource_repair(self, path: Path, missing: tuple[MissingResource, ...]) -> None:
         self._resource_repair_path = path
@@ -1189,6 +1239,7 @@ class ViewerApp:
         self._poll_model_dialog()
         self._poll_scene_dialog()
         self._poll_resource_dialog()
+        self._poll_texture_dialog()
         self._poll_resource_repair_dialog()
         self._poll_model_drop()
         if self._start_model_load():
@@ -2058,6 +2109,7 @@ class ViewerApp:
             model_camera_view=self._model_camera_view,
             select_model_camera=self.select_model_camera,
             request_rename=self.request_rename,
+            request_texture_import=self._open_texture_dialog,
             gizmo=self.gizmo,
             perturb=self.perturb,
             scene_entities=self.scene_entities,

@@ -215,6 +215,10 @@ def test_material_inspector_exposes_instance_and_shared_controls(viewer):
 
     item_rect(viewer, "input_text", "##entity_name")
     item_rect(viewer, "color_edit4", "instance color")
+    item_rect(viewer, "begin_combo", "assigned material")
+    item_rect(viewer, "small_button", "New material")
+    item_rect(viewer, "small_button", "Duplicate material")
+    item_rect(viewer, "small_button", "Import texture")
     item_rect(viewer, "color_edit4", "base color")
     item_rect(viewer, "begin_combo", "preset")
     item_rect(viewer, "drag_float", "specular")

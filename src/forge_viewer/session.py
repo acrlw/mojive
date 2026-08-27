@@ -120,6 +120,9 @@ _SCENE_EDIT_COMMANDS = (
     cmd.RemoveResourceRoot,
     cmd.SetPose,
     cmd.SetJointProperties,
+    cmd.AddModelMaterial,
+    cmd.ImportModelTexture,
+    cmd.SetGeometryMaterial,
     cmd.SetLight,
     cmd.SetEnvironment,
     cmd.SetSkybox,
@@ -319,6 +322,14 @@ class Session:
     def model_component_presets(self, model_id: int, category: str) -> tuple[str, ...]:
         """Return supported component subtypes for a model and category."""
         return self._adapter.model_component_presets(model_id, category)
+
+    def model_material_indices(self, model_id: int) -> tuple[int, ...]:
+        """Return render material indices owned by one editable model."""
+        return self._adapter.model_material_indices(model_id)
+
+    def model_texture_names(self, model_id: int) -> tuple[str, ...]:
+        """Return compiled texture names owned by one editable model."""
+        return self._adapter.model_texture_names(model_id)
 
     @property
     def asset_path(self) -> Path | None:
@@ -1108,6 +1119,54 @@ class Session:
             self._refresh_joint_metadata()
             self._adapter_revision = self._adapter.structure_revision
             self._structure_generation += 1
+            return CommandResult.good("")
+
+        if isinstance(c, cmd.AddModelMaterial):
+            if not caps.model_assets:
+                return CommandResult.bad(f"{caps.name} does not support model asset editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before creating materials")
+            value = str(c.name).strip()
+            if not value:
+                return CommandResult.bad("A material name cannot be empty")
+            material_index = self._adapter.add_model_material(c.node_id, value, int(c.copy_from))
+            if material_index < 0:
+                return CommandResult.bad(f"Material {value!r} could not be created")
+            self._refresh_structure()
+            return CommandResult.good(f"Created material {value}", material_index)
+
+        if isinstance(c, cmd.ImportModelTexture):
+            if not caps.model_assets:
+                return CommandResult.bad(f"{caps.name} does not support model asset editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before importing textures")
+            path = Path(c.path).expanduser().resolve()
+            value = str(c.name).strip()
+            if not path.is_file():
+                return CommandResult.bad(f"Texture file does not exist: {path}")
+            if path.suffix.lower() != ".png":
+                return CommandResult.bad("MuJoCo 2D image textures must use PNG files")
+            if not value:
+                return CommandResult.bad("A texture name cannot be empty")
+            try:
+                changed = self._adapter.import_model_texture(
+                    c.model_id, path, value, int(c.material_index)
+                )
+            except (RuntimeError, ValueError) as exc:
+                return CommandResult.bad(f"Texture {value!r} could not be imported: {exc}")
+            if not changed:
+                return CommandResult.bad(f"Texture {value!r} could not be imported")
+            self._refresh_structure()
+            return CommandResult.good(f"Imported texture {value}")
+
+        if isinstance(c, cmd.SetGeometryMaterial):
+            if not caps.model_assets:
+                return CommandResult.bad(f"{caps.name} does not support model asset editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before binding materials")
+            if not self._adapter.set_geometry_material(c.node_id, c.material_index):
+                return CommandResult.bad("The material is unavailable for this model geometry")
+            self._refresh_structure()
             return CommandResult.good("")
 
         if isinstance(c, cmd.SetEqualityEnabled):

@@ -335,6 +335,7 @@ class RemoteSceneAdapter(SceneAdapterBase):
             model_cameras=caps.model_cameras,
             scene_files=False,
             topology_editing=False,
+            model_assets=False,
             notes=(*caps.notes, f"attached to {host}:{port}"),
         )
 

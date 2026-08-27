@@ -844,6 +844,78 @@ class InspectorPanel(Panel):
         if color_changed and node_id >= 0:
             self._submit_edit(ctx, cmd.SetGeometryColor(node_id, np.asarray(rgba, np.float32)))
 
+        model_id = scene_node.model_id if scene_node is not None else -1
+        model_assets = bool(model_id >= 0 and ctx.session.adapter.caps.model_assets)
+        if model_assets:
+            compatible_materials = ctx.session.model_material_indices(model_id)
+            asset_editable = bool(not ctx.session.adapter.caps.simulation or ctx.session.paused)
+            assigned = material_index in compatible_materials
+            assignment_label = material.name if assigned else "inline appearance"
+            if not asset_editable:
+                imgui.begin_disabled()
+            if imgui.begin_combo("assigned material", assignment_label):
+                selected, _ = imgui.selectable("inline appearance", not assigned)
+                if selected and assigned:
+                    self._submit_edit(ctx, cmd.SetGeometryMaterial(node_id, -1))
+                    imgui.end_combo()
+                    if not asset_editable:
+                        imgui.end_disabled()
+                    imgui.pop_id()
+                    return
+                for candidate in compatible_materials:
+                    candidate_material = src.materials[candidate]
+                    selected, _ = imgui.selectable(
+                        candidate_material.name or f"material {candidate}",
+                        candidate == material_index,
+                    )
+                    if selected and candidate != material_index:
+                        self._submit_edit(ctx, cmd.SetGeometryMaterial(node_id, candidate))
+                        imgui.end_combo()
+                        if not asset_editable:
+                            imgui.end_disabled()
+                        imgui.pop_id()
+                        return
+                imgui.end_combo()
+
+            prefix = f"forge_{model_id}_"
+            existing_materials = {
+                src.materials[index].name.removeprefix(prefix) for index in compatible_materials
+            }
+            new_name = _unique_component_name("material", existing_materials)
+            create = imgui.small_button("New material")
+            imgui.same_line()
+            if not assigned:
+                imgui.begin_disabled()
+            duplicate = imgui.small_button("Duplicate material")
+            if not assigned:
+                imgui.end_disabled()
+            imgui.same_line()
+            can_import = assigned and ctx.request_texture_import is not None
+            if not can_import:
+                imgui.begin_disabled()
+            import_texture = imgui.small_button("Import texture")
+            if not can_import:
+                imgui.end_disabled()
+            if not asset_editable:
+                imgui.end_disabled()
+            if create or duplicate:
+                ctx.submit(
+                    cmd.AddModelMaterial(
+                        node_id,
+                        new_name,
+                        material_index if duplicate and assigned else -1,
+                    )
+                )
+                imgui.pop_id()
+                return
+            if import_texture and can_import:
+                ctx.request_texture_import(model_id, material_index)
+
+            if not assigned:
+                imgui.text_disabled("Create or assign a shared material to edit its properties")
+                imgui.pop_id()
+                return
+
         imgui.text_disabled(f"shared material: {material.name or material_index}")
         rgba_changed, material_rgba = imgui.color_edit4("base color", material.rgba)
         emission = material.emission
@@ -869,7 +941,10 @@ class InspectorPanel(Panel):
         texture = material.texture
         texture_changed = False
         if imgui.begin_combo("texture", texture or "none"):
-            for candidate in (None, *src.textures):
+            compatible_textures = (
+                ctx.session.model_texture_names(model_id) if model_assets else tuple(src.textures)
+            )
+            for candidate in (None, *compatible_textures):
                 selected, _ = imgui.selectable(candidate or "none", candidate == texture)
                 if selected:
                     texture = candidate
