@@ -1123,6 +1123,62 @@ def test_dragging_the_gizmo_moves_the_object_not_the_camera(free_body_viewer):
     assert abs(v.app.camera.yaw - before_yaw) < 1e-6
 
 
+def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(free_body_viewer):
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+    from forge_viewer.gizmo import SIZE_PT, GizmoHandle, project, world_scale
+
+    v = free_body_viewer
+    io = imgui.get_io()
+    node = next(n for n in v.session.nodes if n.posable)
+    assert v.session.submit(cmd.Select(node.object_id))
+    v.app.gizmo.set_mode("translate")
+    v.app.gizmo.set_space("body")
+    v.app.camera.look_from(-135.0, 25.0, v.app.camera_out, animate=False)
+    for _ in range(4):
+        v.sync()
+
+    cam = v.app.camera.view()
+    rect = v.app._viewport_rect
+    before = np.asarray(v.session.frame.body_xpos[node.body_index], np.float64).copy()
+    rotation = np.asarray(v.session.frame.body_xmat[node.body_index], np.float64).reshape(3, 3)
+    scale = world_scale(cam, before, rect[3], SIZE_PT * v.window.style_scale)
+    cursor = project(cam, (before + rotation[:, 2] * scale * 0.55,), rect)[0, :2]
+    before_yaw = v.app.camera.yaw
+
+    io.add_mouse_pos_event(*cursor)
+    for _ in range(2):
+        v.sync()
+    assert v.app.gizmo.hovered_handle is GizmoHandle.Z
+    for _ in range(2):
+        io.add_mouse_button_event(0, True)
+        v.sync()
+        io.add_mouse_button_event(0, False)
+        v.sync()
+
+    edit = v.app._precise_gizmo_edit
+    assert edit is not None
+    assert (edit.action, edit.label, edit.unit) == ("Move", "Z", "m")
+    assert v.session.frame.body_xpos[node.body_index] == pytest.approx(before, abs=1e-7)
+    assert abs(v.app.camera.yaw - before_yaw) < 1e-6
+
+    v.app._precise_gizmo_value = 0.125
+    apply = item_rect(v, "button", "Apply")
+    click(v, io, apply)
+    for _ in range(2):
+        v.sync()
+
+    expected = before + rotation[:, 2] * 0.125
+    assert v.app._precise_gizmo_edit is None
+    assert v.session.frame.body_xpos[node.body_index] == pytest.approx(expected, abs=1e-5)
+    assert abs(v.app.camera.yaw - before_yaw) < 1e-6
+
+    assert v.session.submit(cmd.SetPose(node.node_id, before, rotation))
+    for _ in range(2):
+        v.sync()
+
+
 @pytest.mark.parametrize(("style", "arrow_count"), (("2d", 1), ("3d", 0)))
 def test_gizmo_drag_feedback_matches_in_2d_and_3d(free_body_viewer, style, arrow_count):
     """2D/3D share one compound GPU drag link and the same value label."""

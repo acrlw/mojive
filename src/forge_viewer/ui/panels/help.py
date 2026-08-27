@@ -14,6 +14,7 @@ MOUSE_GESTURES: tuple[tuple[str, str], ...] = (
     ("right / middle drag, or Shift + left drag", "pan"),
     ("wheel", "dolly"),
     ("left click", "select the object under the cursor"),
+    ("double-click a gizmo axis or ring", "enter an exact relative distance or angle"),
     ("Ctrl + left drag", "push the object; physics reacts (works while running)"),
     ("Ctrl + right drag", "twist the object"),
     ("drag the view balls (top right)", "free rotate; click a ball to snap to that view"),

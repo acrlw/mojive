@@ -11,6 +11,7 @@ from .. import math3d
 from ..adapters.base import FrameNeeds, JointInfo, NodeType
 from ..commands import (
     BeginEditTransaction,
+    CommandResult,
     EndEditTransaction,
     SetLight,
     SetPose,
@@ -164,6 +165,19 @@ class _JointRangeState:
     current: float
     lower: float
     upper: float
+
+
+@dataclass(frozen=True)
+class PreciseGizmoInput:
+    """Stable scalar-handle target captured when precise input opens."""
+
+    handle: GizmoHandle
+    object_id: int
+    node_id: int
+    joint_id: int
+    action: str
+    label: str
+    unit: str
 
 
 def verdict(paused: bool, node: SceneNode | None) -> Verdict:
@@ -322,6 +336,123 @@ class ObjectGizmo:
 
     def cancel(self) -> None:
         self._end()
+
+    def precise_input(self, session: Session) -> PreciseGizmoInput | None:
+        """Describe the hovered scalar handle for a relative numeric edit."""
+
+        node = session.selected_node
+        handle = self._hovered
+        if node is None or handle not in (*AXIS_HANDLES, *ROTATE_HANDLES):
+            return None
+        if not self.evaluate(session, node).ok:
+            return None
+        target, _reason = self._joint_target(session, node)
+        mode = target.mode if target is not None else self._mode
+        if mode is GizmoMode.TRANSLATE and handle not in AXIS_HANDLES:
+            return None
+        if mode is GizmoMode.ROTATE and handle not in ROTATE_HANDLES:
+            return None
+        allowed = target.handles if target is not None else ALL_HANDLE_MASK
+        if not allowed & (1 << int(handle)):
+            return None
+
+        axis = _axis_of(handle)
+        handle_name = "Screen" if handle is GizmoHandle.ROTATE_SCREEN else "XYZ"[axis]
+        joint_id = -1
+        label = handle_name
+        if target is not None:
+            joint = target.joint
+            joint_id = int(joint.joint_id)
+            joint_name = joint.name or joint.type
+            label = (
+                joint_name if joint.type in ("hinge", "slide") else f"{joint_name} · {handle_name}"
+            )
+        rotating = handle in ROTATE_HANDLES
+        return PreciseGizmoInput(
+            handle=handle,
+            object_id=int(session.selected),
+            node_id=int(node.node_id),
+            joint_id=joint_id,
+            action="Rotate" if rotating else "Move",
+            label=label,
+            unit="°" if rotating else "m",
+        )
+
+    def apply_precise_delta(
+        self,
+        session: Session,
+        cam: CameraView,
+        edit: PreciseGizmoInput,
+        value: float,
+    ) -> CommandResult:
+        """Apply one exact scalar delta through the regular transform commands."""
+
+        amount = float(value)
+        if not np.isfinite(amount):
+            return CommandResult.bad("Enter a finite numeric delta")
+        node = session.selected_node
+        if (
+            node is None
+            or int(session.selected) != edit.object_id
+            or int(node.node_id) != edit.node_id
+        ):
+            return CommandResult.bad("The gizmo target changed; reopen precise input")
+        available = self.evaluate(session, node)
+        if not available.ok:
+            return CommandResult.bad(available.reason)
+        target, reason = self._joint_target(session, node)
+        joint_id = -1 if target is None else int(target.joint.joint_id)
+        if joint_id != edit.joint_id:
+            return CommandResult.bad("The selected joint changed; reopen precise input")
+        allowed = target.handles if target is not None else ALL_HANDLE_MASK
+        if not allowed & (1 << int(edit.handle)):
+            return CommandResult.bad(reason or "This gizmo handle is no longer available")
+
+        pose = self._target_pose(session, node, target)
+        if pose is None:
+            return CommandResult.bad("Gizmo frame data is unavailable")
+        position, rotation = pose
+        position = np.asarray(position, np.float64).copy()
+        rotation = np.asarray(rotation, np.float64).reshape(3, 3).copy()
+        basis = self._target_basis(rotation, target)
+        axis_index = _axis_of(edit.handle)
+        if edit.handle in AXIS_HANDLES:
+            if axis_index < 0:
+                return CommandResult.bad("Precise input requires a single translation axis")
+            axis = basis[:, axis_index]
+            position += axis * amount
+        elif edit.handle in ROTATE_HANDLES:
+            axis = (
+                -np.asarray(cam.forward(), np.float64)
+                if edit.handle is GizmoHandle.ROTATE_SCREEN
+                else basis[:, axis_index]
+            )
+            rotation = math3d.rotvec_to_mat3(axis * np.radians(amount)) @ rotation
+        else:
+            return CommandResult.bad("Precise input requires a scalar gizmo handle")
+
+        if abs(amount) < 1e-12:
+            return CommandResult.good("No change")
+        if target is not None:
+            joint = target.joint
+            qpos = session.frame.qpos
+            count = 4 if joint.type == "ball" else 1
+            start = int(joint.qpos_adr)
+            if qpos is None or start < 0 or start + count > len(qpos):
+                return CommandResult.bad("Joint position data is unavailable")
+            self._start_joint_qpos = np.asarray(qpos[start : start + count], np.float64).copy()
+        self._active = edit.handle
+        self._active_joint = target.joint if target is not None else None
+        np.copyto(self._start_pos, pose[0])
+        np.copyto(self._start_mat, pose[1])
+        np.copyto(self._start_basis, basis)
+        self._axis[:] = axis
+        self._rotation_angle = np.radians(amount) if edit.handle in ROTATE_HANDLES else 0.0
+        result, _position = self._submit_transform(session, node, position, rotation)
+        self._end()
+        if not result.ok:
+            self._verdict = Verdict(False, result.message)
+        return result
 
     def update_hover(
         self,
@@ -1231,10 +1362,32 @@ class ObjectGizmo:
             delta = _snap_translation(delta, handle, self.translation_snap_m)
             pos = self._start_pos + self._start_basis @ delta
 
+        unchanged = (
+            abs(self._rotation_angle) < 1e-12
+            if handle in ROTATE_HANDLES
+            else float(np.linalg.norm(pos - self._start_pos)) < 1e-12
+        )
+        if unchanged and not self._edit_started:
+            self._label = self._format_value(pos)
+            return True
+
         node = session.selected_node
         if node is None:
             self._end()
             return False
+        result, pos = self._submit_transform(session, node, pos, mat)
+        if not result.ok:
+            self._verdict = Verdict(False, result.message)
+            self._end()
+            return False
+        self._edit_started = True
+        self._label = self._format_value(pos)
+        return True
+
+    def _submit_transform(self, session, node, pos, mat) -> tuple[CommandResult, np.ndarray]:
+        """Route drag and precise edits through the same target command path."""
+
+        pos = np.asarray(pos, np.float64)
         if self._active_joint is not None:
             joint = self._active_joint
             if joint.type == "ball":
@@ -1270,21 +1423,11 @@ class ObjectGizmo:
                 rotation=np.asarray(mat, np.float32),
             )
         else:
-            self._verdict = Verdict(False, gizmo_refusal_reason(session.paused, False) or "")
-            self._end()
-            return False
+            reason = gizmo_refusal_reason(session.paused, False) or "Entity is not posable"
+            return CommandResult.bad(reason), pos
         if command is None:
-            self._verdict = Verdict(False, "entity transform is unavailable")
-            self._end()
-            return False
-        result = session.submit(command)
-        if not result.ok:
-            self._verdict = Verdict(False, result.message)
-            self._end()
-            return False
-        self._edit_started = True
-        self._label = self._format_value(pos)
-        return True
+            return CommandResult.bad("Entity transform is unavailable"), pos
+        return session.submit(command), pos
 
     def _format_value(self, position) -> str:
         axis = _axis_of(self._active)

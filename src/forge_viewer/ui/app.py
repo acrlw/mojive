@@ -28,7 +28,7 @@ from . import gestures as gs
 from .camera import CameraOut, OrbitCamera, ndc_from_viewport, unproject
 from .camera_preview import CameraPreview
 from .draw2d import ImguiDraw2D
-from .gizmo import ObjectGizmo
+from .gizmo import ObjectGizmo, PreciseGizmoInput
 from .localization import Localizer
 from .panels import PanelContext, PanelSet, button_width
 from .perturb import PerturbController, draw_fallback
@@ -181,6 +181,10 @@ class ViewerApp:
         self._rename_object_id = 0
         self._rename_value = ""
         self._open_rename_popup = False
+        self._precise_gizmo_edit: PreciseGizmoInput | None = None
+        self._precise_gizmo_value = 0.0
+        self._precise_gizmo_error = ""
+        self._open_precise_gizmo_popup = False
         self._window_title = ""
         self._closing_without_save = False
         self._model_load_error = ""
@@ -1233,6 +1237,7 @@ class ViewerApp:
         ctx = self._panel_context()
         self._draw_viewport(ctx, preview_name)
         self.panels.draw(ctx)
+        self._draw_precise_gizmo_popup()
         self._draw_rename_popup()
         self._draw_unsaved_changes()
         self._draw_pose_save_prompt()
@@ -1387,6 +1392,16 @@ class ViewerApp:
                 style_scale=self.window.style_scale,
             )
             return
+        if state.gizmo_hovered and imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
+            edit = self.gizmo.precise_input(self.session)
+            if edit is not None:
+                self.gizmo.cancel()
+                self.router.abort()
+                self._precise_gizmo_edit = edit
+                self._precise_gizmo_value = 0.0
+                self._precise_gizmo_error = ""
+                self._open_precise_gizmo_popup = True
+                return
         self.gizmo.interact(
             self.session,
             self._camera_view(),
@@ -1398,6 +1413,67 @@ class ViewerApp:
             snap=state.shift,
             style_scale=self.window.style_scale,
         )
+
+    def _draw_precise_gizmo_popup(self) -> None:
+        edit = self._precise_gizmo_edit
+        if self._open_precise_gizmo_popup and edit is not None:
+            imgui.open_popup("Precise Gizmo Input")
+            self._open_precise_gizmo_popup = False
+        if edit is None:
+            return
+        if imgui.is_popup_open("Precise Gizmo Input"):
+            _prepare_modal(400.0)
+        visible, _ = imgui.begin_popup_modal(
+            "Precise Gizmo Input", None, imgui.WindowFlags_.always_auto_resize.value
+        )
+        if not visible:
+            return
+
+        imgui.text(f"{edit.action} {edit.label}")
+        imgui.text_disabled("Enter a relative delta; negative values reverse direction.")
+        imgui.spacing()
+        imgui.set_next_item_width(320.0)
+        submitted, self._precise_gizmo_value = imgui.input_double(
+            "##precise_gizmo_delta",
+            self._precise_gizmo_value,
+            0.0,
+            0.0,
+            "%.6f" if edit.unit == "m" else "%.3f",
+            imgui.InputTextFlags_.enter_returns_true.value,
+        )
+        imgui.same_line()
+        imgui.text(edit.unit)
+        if imgui.is_window_appearing():
+            imgui.set_keyboard_focus_here(-1)
+        if edit.joint_id >= 0:
+            imgui.text_disabled("Joint limits are applied when this value exceeds the range.")
+        if self._precise_gizmo_error:
+            imgui.spacing()
+            imgui.text_wrapped(self._precise_gizmo_error)
+        imgui.spacing()
+        apply = submitted or imgui.button("Apply", imgui.ImVec2(100.0, 0.0))
+        imgui.same_line()
+        cancel = imgui.button("Cancel", imgui.ImVec2(100.0, 0.0)) or imgui.is_key_pressed(
+            imgui.Key.escape, False
+        )
+        if apply:
+            result = self.gizmo.apply_precise_delta(
+                self.session,
+                self._camera_view(),
+                edit,
+                self._precise_gizmo_value,
+            )
+            if result.ok:
+                self._precise_gizmo_edit = None
+                self._precise_gizmo_error = ""
+                imgui.close_current_popup()
+            else:
+                self._precise_gizmo_error = result.message
+        elif cancel:
+            self._precise_gizmo_edit = None
+            self._precise_gizmo_error = ""
+            imgui.close_current_popup()
+        imgui.end_popup()
 
     def _publish_gizmo(self) -> None:
         self.gizmo.publish(

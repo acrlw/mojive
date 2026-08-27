@@ -307,6 +307,63 @@ def test_hover_clears_when_the_viewport_does_not_own_input() -> None:
     assert gizmo.update_hover(session, cam, RECT, center, enabled=False) is GizmoHandle.NONE
 
 
+def test_precise_axis_input_applies_a_body_frame_delta_and_one_undo() -> None:
+    rotation = math3d.rotvec_to_mat3(np.array((0.0, 0.0, np.pi / 2.0)))
+    session, node = session_at(rotation=rotation)
+    gizmo = ObjectGizmo()
+    gizmo._hovered = GizmoHandle.X
+
+    edit = gizmo.precise_input(session)
+    assert edit is not None
+    assert (edit.action, edit.label, edit.unit) == ("Move", "X", "m")
+    assert gizmo.apply_precise_delta(session, camera(), edit, 0.125)
+
+    expected = rotation[:, 0] * 0.125
+    assert session.frame.body_xpos[node.body_index] == pytest.approx(expected, abs=1e-7)
+    assert session.can_undo
+    assert session.submit(cmd.Undo())
+    assert session.frame.body_xpos[node.body_index] == pytest.approx(np.zeros(3), abs=1e-7)
+    assert not session.can_undo
+
+
+def test_precise_rotation_input_uses_degrees_and_preserves_position() -> None:
+    session, node = session_at(position=(0.2, -0.4, 0.6))
+    gizmo = ObjectGizmo("rotate")
+    gizmo._hovered = GizmoHandle.ROTATE_Z
+
+    edit = gizmo.precise_input(session)
+    assert edit is not None
+    assert (edit.action, edit.label, edit.unit) == ("Rotate", "Z", "°")
+    assert gizmo.apply_precise_delta(session, camera(), edit, -12.5)
+
+    expected = math3d.rotvec_to_mat3(np.array((0.0, 0.0, np.radians(-12.5))))
+    assert session.frame.body_xpos[node.body_index] == pytest.approx((0.2, -0.4, 0.6))
+    assert session.frame.body_xmat[node.body_index] == pytest.approx(expected, abs=1e-6)
+
+
+def test_precise_input_is_only_available_for_scalar_handles() -> None:
+    session, _node = session_at()
+    gizmo = ObjectGizmo()
+
+    for handle in (GizmoHandle.SCREEN, GizmoHandle.XY, GizmoHandle.YZ, GizmoHandle.ZX):
+        gizmo._hovered = handle
+        assert gizmo.precise_input(session) is None
+
+
+def test_clicking_a_gizmo_without_motion_does_not_create_an_undo_record() -> None:
+    session, _node = session_at()
+    gizmo = ObjectGizmo()
+    cam = camera()
+    scale = world_scale(cam, np.zeros(3), RECT[3])
+    cursor = project(cam, (np.array((0.55 * scale, 0.0, 0.0)),), RECT)[0, :2]
+
+    assert gizmo._begin_handle(session, cam, RECT, cursor, GizmoHandle.X)
+    assert gizmo._drag(session, cam, RECT, cursor, snap=False)
+    gizmo.cancel()
+
+    assert not session.can_undo
+
+
 def test_axis_hit_respects_the_center_mask_and_visible_shaft_width() -> None:
     cam = CameraView(
         eye=np.array((0.0, -5.0, 0.0)),
@@ -1224,6 +1281,44 @@ def test_joint_gizmo_edits_only_the_selected_joint_dof(
         assert updated_position == pytest.approx(session.frame.body_xpos[node.body_index], abs=1e-7)
         assert updated_position == pytest.approx(position + basis[:, 2] * amount, abs=1e-6)
         assert updated_basis == pytest.approx(basis, abs=1e-6)
+
+
+@pytest.mark.physics
+@pytest.mark.parametrize(
+    ("body_name", "handle", "amount", "unit"),
+    (
+        ("hinge_body", GizmoHandle.ROTATE_Z, 1000.0, "°"),
+        ("slide_body", GizmoHandle.Z, -1000.0, "m"),
+    ),
+)
+def test_precise_joint_input_uses_display_units_and_clamps_to_the_range(
+    body_name: str,
+    handle: GizmoHandle,
+    amount: float,
+    unit: str,
+) -> None:
+    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
+    from forge_viewer.assets import resolve
+
+    adapter = MuJoCoAdapter(resolve("joint_types"))
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == body_name)
+    assert session.submit(cmd.Select(node.object_id))
+    session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
+    gizmo = ObjectGizmo()
+    gizmo._hovered = handle
+
+    edit = gizmo.precise_input(session)
+    assert edit is not None
+    assert edit.unit == unit
+    assert edit.label
+    target, reason = gizmo._joint_target(session, node)
+    assert target is not None, reason
+    assert gizmo.apply_precise_delta(session, camera(), edit, amount)
+
+    expected = target.joint.range[1] if amount > 0.0 else target.joint.range[0]
+    assert adapter.data.qpos[target.joint.qpos_adr] == pytest.approx(expected)
 
 
 @pytest.mark.physics
