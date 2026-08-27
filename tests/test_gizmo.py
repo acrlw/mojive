@@ -50,6 +50,10 @@ from forge_viewer.ui.gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,
     DEFAULT_ROTATION_TICK_SCALE,
     DEFAULT_TRANSLATION_SNAP_M,
+    JOINT_LOWER_LIMIT_COLOR,
+    JOINT_RANGE_COLOR,
+    JOINT_RANGE_RADIUS,
+    JOINT_UPPER_LIMIT_COLOR,
     ObjectGizmo,
     _clip_line_to_rect,
     _project_rotation_dial,
@@ -1218,6 +1222,136 @@ def test_joint_gizmo_edits_only_the_selected_joint_dof(
         assert updated_position == pytest.approx(session.frame.body_xpos[node.body_index], abs=1e-7)
         assert updated_position == pytest.approx(position + basis[:, 2] * amount, abs=1e-6)
         assert updated_basis == pytest.approx(basis, abs=1e-6)
+
+
+@pytest.mark.physics
+@pytest.mark.parametrize(
+    ("body_name", "range_call", "labels", "current_value"),
+    (
+        (
+            "hinge_body",
+            "polyline",
+            {"MIN -60.0°", "MAX +60.0°"},
+            np.radians(20.0),
+        ),
+        ("slide_body", "line", {"MIN -0.350 m", "MAX +0.350 m"}, 0.1),
+    ),
+)
+def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
+    body_name: str,
+    range_call: str,
+    labels: set[str],
+    current_value: float,
+) -> None:
+    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
+    from forge_viewer.assets import resolve
+
+    session = Session(MuJoCoAdapter(resolve("joint_types")))
+    assert session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == body_name)
+    assert session.submit(cmd.Select(node.object_id))
+    gizmo = ObjectGizmo()
+    target, reason = gizmo._joint_target(session, node)
+    assert target is not None, reason
+    assert session.submit(cmd.SetQpos(target.joint.qpos_adr, current_value))
+    session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
+    pose = gizmo._target_pose(session, node, target)
+    assert pose is not None
+    cam = CameraView(eye=np.array((2.0, -4.0, 2.0)), target=pose[0].copy())
+    assert gizmo.publish(
+        CaptureBackend(),
+        session,
+        cam,
+        RECT,
+        ui_scale=1.0,
+        style_scale=1.0,
+        yielding=False,
+        interactive=True,
+    )
+
+    overlay = RecordingDraw2D()
+    gizmo.draw_overlay(cam, RECT, overlay, style_scale=1.0)
+
+    range_args = next(
+        args
+        for name, args, _kwargs in overlay.calls
+        if name == range_call and np.allclose(args[2 if name == "line" else 1], JOINT_RANGE_COLOR)
+    )
+    lower, upper = target.joint.range
+    if target.joint.type == "hinge":
+        dial = _RotationDialProjector(
+            cam,
+            RECT,
+            pose[0],
+            pose[1][:, 2],
+            pose[1][:, 0],
+            SIZE_PT,
+        )
+        expected_limits = dial.points(
+            JOINT_RANGE_RADIUS,
+            (lower - current_value, upper - current_value),
+        )[:, :2]
+        assert range_args[0][[0, -1]] == pytest.approx(expected_limits, abs=1e-6)
+    else:
+        axis = pose[1][:, 2]
+        expected_limits = project(
+            cam,
+            (
+                pose[0] + axis * (lower - current_value),
+                pose[0] + axis * (upper - current_value),
+            ),
+            RECT,
+        )[:, :2]
+        assert range_args[1] - range_args[0] == pytest.approx(
+            expected_limits[1] - expected_limits[0], abs=1e-6
+        )
+    texts = {
+        args[2]: args[1]
+        for name, args, _kwargs in overlay.calls
+        if name == "text" and args[2] in labels
+    }
+    assert set(texts) == labels
+    assert np.allclose(
+        texts[next(label for label in labels if label.startswith("MIN"))], JOINT_LOWER_LIMIT_COLOR
+    )
+    assert np.allclose(
+        texts[next(label for label in labels if label.startswith("MAX"))], JOINT_UPPER_LIMIT_COLOR
+    )
+
+
+@pytest.mark.physics
+def test_unlimited_joint_gizmo_does_not_invent_limits() -> None:
+    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
+    from forge_viewer.assets import resolve
+
+    session = Session(MuJoCoAdapter(resolve("joint_types")))
+    assert session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == "hinge_free_body")
+    assert session.submit(cmd.Select(node.object_id))
+    gizmo = ObjectGizmo()
+    session.tick(gizmo.frame_needs(session), wall_dt=0.0)
+    target, reason = gizmo._joint_target(session, node)
+    assert target is not None, reason
+    pose = gizmo._target_pose(session, node, target)
+    assert pose is not None
+    cam = CameraView(eye=np.array((2.0, -4.0, 2.0)), target=pose[0].copy())
+    assert gizmo.publish(
+        CaptureBackend(),
+        session,
+        cam,
+        RECT,
+        ui_scale=1.0,
+        style_scale=1.0,
+        yielding=False,
+        interactive=True,
+    )
+
+    overlay = RecordingDraw2D()
+    gizmo.draw_overlay(cam, RECT, overlay, style_scale=1.0)
+    assert not any(
+        name == "text" and args[2].startswith(("MIN ", "MAX "))
+        for name, args, _kwargs in overlay.calls
+    )
 
 
 @pytest.mark.physics

@@ -85,6 +85,13 @@ DEFAULT_ROTATION_TICK_SCALE = 1.25
 SNAP_TICK_FULL_STEPS = 5.0
 SNAP_TICK_FADE_STEPS = 10.0
 ROTATION_TICK_MIN_ALPHA = 0.5
+JOINT_RANGE_RADIUS = 0.90
+JOINT_RANGE_WIDTH_PT = 3.0
+JOINT_RANGE_OFFSET_PT = 13.0
+JOINT_RANGE_COLOR = (0.30, 0.78, 0.46, 0.96)
+JOINT_RANGE_UNAVAILABLE_COLOR = (0.34, 0.36, 0.40, 0.68)
+JOINT_LOWER_LIMIT_COLOR = (0.30, 0.58, 1.00, 1.0)
+JOINT_UPPER_LIMIT_COLOR = (1.00, 0.34, 0.28, 1.0)
 
 
 class _RotationDialProjector:
@@ -150,6 +157,14 @@ class _JointTarget:
     handles: int
 
 
+@dataclass(frozen=True)
+class _JointRangeState:
+    joint_type: str
+    current: float
+    lower: float
+    upper: float
+
+
 def verdict(paused: bool, node: SceneNode | None) -> Verdict:
     if node is None:
         return Verdict(False, REASON_NO_SELECTION)
@@ -200,6 +215,7 @@ class ObjectGizmo:
         self._joint_selection: dict[int, int] = {}
         self._joint_structure_generation = -1
         self._active_joint: JointInfo | None = None
+        self._joint_range: _JointRangeState | None = None
         self._start_joint_qpos = np.zeros(0, np.float64)
         self.translation_snap_m = DEFAULT_TRANSLATION_SNAP_M
         self.rotation_snap_deg = DEFAULT_ROTATION_SNAP_DEG
@@ -421,6 +437,7 @@ class ObjectGizmo:
         interactive: bool,
     ) -> bool:
         self._interactive = bool(interactive)
+        self._joint_range = None
         node = session.selected_node
         self._verdict = self.evaluate(session, node)
         self._visible = not yielding and self._verdict.ok
@@ -436,6 +453,7 @@ class ObjectGizmo:
             self._drawn = False
             return False
         pos, mat = pose
+        self._joint_range = self._joint_range_state(session, target)
         mode = target.mode if target is not None else self._mode
         self._handle_mask = target.handles if target is not None else ALL_HANDLE_MASK
         active = self._active is not GizmoHandle.NONE
@@ -480,6 +498,8 @@ class ObjectGizmo:
         if self._style is GizmoStyle.FLAT:
             self._draw_flat(overlay, cam, rect, style_scale)
             self._drawn = True
+        if self._joint_range is not None:
+            self._draw_joint_range(overlay, cam, rect, style_scale)
         if self._using and self._snapping and self._active in AXIS_HANDLES:
             self._draw_translation_snap_ruler(overlay, cam, rect, style_scale)
         if self._using and self._active not in ROTATE_HANDLES and not self._guide_gpu:
@@ -622,6 +642,157 @@ class ObjectGizmo:
 
     def _hot(self, handle: GizmoHandle) -> bool:
         return self._active is handle or (self._interactive and self._hovered is handle)
+
+    def _draw_joint_range(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
+        state = self._joint_range
+        if state is None:
+            return
+        if state.joint_type == "hinge":
+            self._draw_hinge_range(overlay, cam, rect, style_scale, state)
+        elif state.joint_type == "slide":
+            self._draw_slide_range(overlay, cam, rect, style_scale, state)
+
+    def _draw_hinge_range(
+        self,
+        overlay: Draw2D,
+        cam,
+        rect,
+        style_scale: float,
+        state: _JointRangeState,
+    ) -> None:
+        frame = self._frame
+        origin = np.asarray(frame.position, np.float64)
+        rotation = np.asarray(frame.rotation, np.float64)
+        dial = _RotationDialProjector(
+            cam,
+            rect,
+            origin,
+            rotation[:, 2],
+            rotation[:, 0],
+            SIZE_PT * style_scale,
+        )
+        segments = _rotation_dial_segments(cam, origin, rotation[:, 2])
+        full_angles = np.linspace(0.0, 2.0 * np.pi, segments, endpoint=False)
+        full_ring = dial.points(JOINT_RANGE_RADIUS, full_angles)
+        if np.all(full_ring[:, 2] > 0.0):
+            overlay.polyline(
+                full_ring[:, :2],
+                JOINT_RANGE_UNAVAILABLE_COLOR,
+                JOINT_RANGE_WIDTH_PT * style_scale,
+                closed=True,
+            )
+
+        span = min(state.upper - state.lower, 2.0 * np.pi)
+        start_angle = state.lower - state.current
+        point_count = max(2, int(np.ceil(segments * span / (2.0 * np.pi))) + 1)
+        allowed_angles = np.linspace(start_angle, start_angle + span, point_count)
+        allowed = dial.points(JOINT_RANGE_RADIUS, allowed_angles)
+        if np.all(allowed[:, 2] > 0.0):
+            overlay.polyline(
+                allowed[:, :2],
+                JOINT_RANGE_COLOR,
+                JOINT_RANGE_WIDTH_PT * style_scale,
+                closed=span >= 2.0 * np.pi - 1e-6,
+            )
+
+        self._draw_hinge_limit(
+            overlay,
+            dial,
+            start_angle,
+            JOINT_LOWER_LIMIT_COLOR,
+            _joint_limit_label("MIN", state.lower, "hinge"),
+            style_scale,
+            label_above=True,
+        )
+        self._draw_hinge_limit(
+            overlay,
+            dial,
+            start_angle + span,
+            JOINT_UPPER_LIMIT_COLOR,
+            _joint_limit_label("MAX", state.upper, "hinge"),
+            style_scale,
+            label_above=False,
+        )
+        current_tick = dial.tick(JOINT_RANGE_RADIUS, 0.0, 5.0 * style_scale)
+        if current_tick is not None:
+            overlay.line(
+                current_tick[0],
+                current_tick[1],
+                HOVER_COLOR,
+                2.4 * style_scale,
+            )
+
+    @staticmethod
+    def _draw_hinge_limit(
+        overlay: Draw2D,
+        dial: _RotationDialProjector,
+        angle: float,
+        limit_color,
+        label: str,
+        style_scale: float,
+        *,
+        label_above: bool,
+    ) -> None:
+        tick = dial.tick(JOINT_RANGE_RADIUS, angle, 9.0 * style_scale)
+        if tick is None:
+            return
+        overlay.line(tick[0], tick[1], limit_color, 3.0 * style_scale)
+        label_offset = np.array((4.0, -14.0 if label_above else 2.0)) * style_scale
+        overlay.text(tick[1] + label_offset, limit_color, label)
+
+    def _draw_slide_range(
+        self,
+        overlay: Draw2D,
+        cam,
+        rect,
+        style_scale: float,
+        state: _JointRangeState,
+    ) -> None:
+        origin = np.asarray(self._frame.position, np.float64)
+        axis = np.asarray(self._frame.rotation, np.float64)[:, 2]
+        values = np.array((state.lower, state.current, state.upper), np.float64)
+        positions = origin + (values - state.current)[:, None] * axis
+        projected = project(cam, positions, rect)
+        if np.any(projected[:, 2] <= 0.0):
+            return
+        lower, current, upper = projected[:, :2]
+        direction = upper - lower
+        length = float(np.linalg.norm(direction))
+        if length < 1e-6:
+            return
+        tangent = direction / length
+        normal = np.array((-tangent[1], tangent[0]))
+        offset = normal * JOINT_RANGE_OFFSET_PT * style_scale
+        lower, current, upper = lower + offset, current + offset, upper + offset
+        overlay.line(lower, upper, JOINT_RANGE_COLOR, JOINT_RANGE_WIDTH_PT * style_scale)
+
+        half_tick = 6.0 * style_scale
+        for point, limit_color in (
+            (lower, JOINT_LOWER_LIMIT_COLOR),
+            (upper, JOINT_UPPER_LIMIT_COLOR),
+        ):
+            overlay.line(
+                point - normal * half_tick,
+                point + normal * half_tick,
+                limit_color,
+                3.0 * style_scale,
+            )
+        overlay.line(
+            current - normal * 4.0 * style_scale,
+            current + normal * 4.0 * style_scale,
+            HOVER_COLOR,
+            2.4 * style_scale,
+        )
+        overlay.text(
+            lower + np.array((4.0, -16.0)) * style_scale,
+            JOINT_LOWER_LIMIT_COLOR,
+            _joint_limit_label("MIN", state.lower, "slide"),
+        )
+        overlay.text(
+            upper + np.array((4.0, 3.0)) * style_scale,
+            JOINT_UPPER_LIMIT_COLOR,
+            _joint_limit_label("MAX", state.upper, "slide"),
+        )
 
     def _draw_axis_constraint(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         axis = _axis_of(self._active)
@@ -1167,6 +1338,28 @@ class ObjectGizmo:
             return _JointTarget(joint, GizmoMode.ROTATE, handle_mask(*ROTATE_HANDLES)), ""
         return None, f"{joint.type} joint uses the free-body transform gizmo"
 
+    @staticmethod
+    def _joint_range_state(
+        session: Session, target: _JointTarget | None
+    ) -> _JointRangeState | None:
+        if target is None or target.joint.type not in ("hinge", "slide"):
+            return None
+        joint = target.joint
+        lower, upper = (float(value) for value in joint.range)
+        qpos = session.frame.qpos
+        if (
+            not joint.limited
+            or upper <= lower
+            or not np.isfinite((lower, upper)).all()
+            or qpos is None
+            or not 0 <= joint.qpos_adr < len(qpos)
+        ):
+            return None
+        current = float(qpos[joint.qpos_adr])
+        if not np.isfinite(current):
+            return None
+        return _JointRangeState(joint.type, current, lower, upper)
+
     def _target_pose(
         self, session: Session, node: SceneNode, target: _JointTarget | None
     ) -> tuple[np.ndarray, np.ndarray] | None:
@@ -1291,6 +1484,12 @@ def _snap_translation(delta: np.ndarray, handle: GizmoHandle, step: float) -> np
 
 def _format_step(value: float) -> str:
     return f"{float(value):g}"
+
+
+def _joint_limit_label(prefix: str, value: float, joint_type: str) -> str:
+    if joint_type == "hinge":
+        return f"{prefix} {np.degrees(value):+.1f}°"
+    return f"{prefix} {value:+.3f} m"
 
 
 def _rotation_sweep(angle: float) -> float:
