@@ -28,8 +28,6 @@ class RenderFlag(enum.StrEnum):
     SKYBOX = "skybox"
     FOG = "fog"
     HAZE = "haze"
-    SEGMENT = "segment"
-    IDCOLOR = "idcolor"
     CULL_FACE = "cull_face"
 
     CONVEXHULL = "convexhull"
@@ -61,10 +59,6 @@ class RenderFlag(enum.StrEnum):
     MESHBVH = "mesh_bvh"
 
     OUTLINE = "outline"
-    ALBEDO = "albedo"
-    NORMAL = "normal"
-    OVERDRAW = "overdraw"
-    DEPTH = "depth"
     TONEMAP = "tonemap"
     MSAA = "msaa"
 

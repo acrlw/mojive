@@ -254,6 +254,17 @@ class ViewerApp:
         self.backend.resize(*self._fixed_render_size)
         self.camera.set_aspect(self._fixed_render_size[0] / self._fixed_render_size[1])
 
+    @property
+    def fixed_render_size(self) -> tuple[int, int] | None:
+        """Return the active fixed output size, if viewport sizing is overridden."""
+        return self._fixed_render_size
+
+    def clear_fixed_render_size(self) -> None:
+        """Return rendering to the interactive viewport size."""
+        self._fixed_render_size = None
+        if self._started:
+            self._sync_viewport_size()
+
     def _startup(self) -> None:
         if self._started:
             return

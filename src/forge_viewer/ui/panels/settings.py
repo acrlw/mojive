@@ -24,8 +24,6 @@ _RND_FLAGS: tuple[RenderFlag, ...] = (
     RenderFlag.SKYBOX,
     RenderFlag.FOG,
     RenderFlag.HAZE,
-    RenderFlag.SEGMENT,
-    RenderFlag.IDCOLOR,
     RenderFlag.CULL_FACE,
 )
 _VIS_FLAGS: tuple[RenderFlag, ...] = (

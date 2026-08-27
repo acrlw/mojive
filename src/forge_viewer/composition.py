@@ -106,6 +106,7 @@ class Viewer:
             raise ValueError("frame count must be positive")
         if not np.isfinite(fps) or fps <= 0.0:
             raise ValueError("frame rate must be finite and positive")
+        previous_size = self.app.fixed_render_size if size is not None else None
         if size is not None:
             self.app.set_fixed_render_size(*size)
         recorder = None
@@ -121,8 +122,15 @@ class Viewer:
                     )
                 recorder.append(image)
         finally:
-            if recorder is not None:
-                recorder.close()
+            try:
+                if recorder is not None:
+                    recorder.close()
+            finally:
+                if size is not None:
+                    if previous_size is None:
+                        self.app.clear_fixed_render_size()
+                    else:
+                        self.app.set_fixed_render_size(*previous_size)
         return Path(output)
 
 

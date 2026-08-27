@@ -62,6 +62,13 @@ def test_null_backend_can_render_after_an_explicit_update():
     assert backend.target.read_ids().shape == (24, 32)
 
 
+def test_debug_outputs_are_not_exposed_as_independent_render_flags():
+    from forge_viewer.render.backend import DebugView, RenderFlag
+
+    debug_only = {view.value for view in DebugView} - {DebugView.WIREFRAME.value}
+    assert debug_only.isdisjoint(flag.value for flag in RenderFlag)
+
+
 def test_mujoco_visual_audit_covers_every_enum_flag():
     mujoco = pytest.importorskip("mujoco")
 
@@ -231,9 +238,9 @@ def test_registering_an_unknown_pass_name_is_refused():
         register_pass("bloom", lambda: None)
 
 
-def test_render_flags_cover_the_reference_renderers_vocabulary():
+def test_render_flags_cover_the_reference_renderer_feature_switches():
 
-    from forge_viewer.render.backend import RenderFlag
+    from forge_viewer.render.backend import DebugView, RenderFlag
 
     names = {f.value for f in RenderFlag}
     for required in (
@@ -244,8 +251,6 @@ def test_render_flags_cover_the_reference_renderers_vocabulary():
         "skybox",
         "fog",
         "haze",
-        "segment",
-        "idcolor",
         "cull_face",
         "texture",
         "joint",
@@ -262,6 +267,7 @@ def test_render_flags_cover_the_reference_renderers_vocabulary():
         "convexhull",
     ):
         assert required in names
+    assert {"segment", "idcolor"}.issubset(view.value for view in DebugView)
 
 
 def test_debug_view_combo_lists_every_enum_member():
