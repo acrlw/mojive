@@ -62,6 +62,7 @@ from .base import (
     JointInfo,
     JointVisualType,
     KeyframeInfo,
+    KeyframeProperties,
     ModelComponentField,
     ModelComponentInfo,
     ModelComponentPathItem,
@@ -112,12 +113,296 @@ _ACTUATOR_POSE_JOINT_BODY = 1
 _ACTUATOR_POSE_SITE = 2
 _ACTUATOR_POSE_GEOM = 3
 
-_MODEL_COMPONENT_CATEGORIES = ("actuator", "sensor", "tendon", "equality")
+_MODEL_COMPONENT_CATEGORIES = ("contact", "actuator", "sensor", "tendon", "equality")
+_ACTUATOR_TRANSMISSION_FIELDS = (
+    "joint",
+    "jointinparent",
+    "tendon",
+    "site",
+    "refsite",
+    "body",
+    "gear",
+    "ctrlrange",
+    "forcerange",
+    "group",
+    "armature",
+    "damping",
+    "delay",
+    "nsample",
+    "interp",
+    "lengthrange",
+)
+_SENSOR_COMMON_FIELDS = ("cutoff", "noise", "delay", "nsample", "interp", "interval")
+_SENSOR_SITE_TYPES = (
+    "touch",
+    "accelerometer",
+    "velocimeter",
+    "gyro",
+    "force",
+    "torque",
+    "magnetometer",
+    "rangefinder",
+    "camprojection",
+)
+_SENSOR_JOINT_TYPES = ("jointpos", "jointvel", "jointactuatorfrc")
+_SENSOR_BALL_TYPES = ("ballquat", "ballangvel")
+_SENSOR_JOINT_LIMIT_TYPES = ("jointlimitpos", "jointlimitvel", "jointlimitfrc")
+_SENSOR_TENDON_TYPES = ("tendonpos", "tendonvel", "tendonactuatorfrc")
+_SENSOR_TENDON_LIMIT_TYPES = ("tendonlimitpos", "tendonlimitvel", "tendonlimitfrc")
+_SENSOR_ACTUATOR_TYPES = ("actuatorpos", "actuatorvel", "actuatorfrc")
+_SENSOR_FRAME_TYPES = (
+    "framepos",
+    "framequat",
+    "framexaxis",
+    "frameyaxis",
+    "framezaxis",
+    "framelinvel",
+    "frameangvel",
+)
+_SENSOR_FRAME_ACCEL_TYPES = ("framelinacc", "frameangacc")
+_SENSOR_SUBTREE_TYPES = ("subtreecom", "subtreelinvel", "subtreeangmom")
 _COMPONENT_OPTIONAL_FIELDS = {
-    "actuator": ("gear", "ctrlrange", "forcerange", "group"),
-    "sensor": ("cutoff", "noise"),
-    "tendon": ("width", "stiffness", "damping", "range", "limited"),
+    "contact": (),
+    "actuator": _ACTUATOR_TRANSMISSION_FIELDS,
+    "sensor": _SENSOR_COMMON_FIELDS,
+    "tendon": (
+        "width",
+        "stiffness",
+        "damping",
+        "frictionloss",
+        "springlength",
+        "range",
+        "limited",
+        "margin",
+        "group",
+        "material",
+        "rgba",
+        "solreflimit",
+        "solimplimit",
+        "solreffriction",
+        "solimpfriction",
+        "actuatorfrclimited",
+        "actuatorfrcrange",
+        "armature",
+    ),
     "equality": ("active", "solref", "solimp", "polycoef"),
+}
+_COMPONENT_SUBTYPE_OPTIONAL_FIELDS = {
+    ("contact", "pair"): (
+        "geom1",
+        "geom2",
+        "condim",
+        "friction",
+        "solref",
+        "solreffriction",
+        "solimp",
+        "margin",
+        "gap",
+        "adhesion",
+    ),
+    ("contact", "exclude"): ("body1", "body2"),
+    ("actuator", "general"): (
+        *_ACTUATOR_TRANSMISSION_FIELDS,
+        "dyntype",
+        "gaintype",
+        "biastype",
+        "dynprm",
+        "gainprm",
+        "biasprm",
+        "actdim",
+        "actearly",
+        "actrange",
+        "actlimited",
+    ),
+    ("actuator", "position"): (
+        *_ACTUATOR_TRANSMISSION_FIELDS,
+        "kp",
+        "kv",
+        "dampratio",
+        "timeconst",
+        "inheritrange",
+    ),
+    ("actuator", "velocity"): (*_ACTUATOR_TRANSMISSION_FIELDS, "kv"),
+    ("actuator", "intvelocity"): (
+        *_ACTUATOR_TRANSMISSION_FIELDS,
+        "kp",
+        "kv",
+        "dampratio",
+        "inheritrange",
+        "actrange",
+        "actlimited",
+    ),
+    ("actuator", "orientation"): (
+        "joint",
+        "site",
+        "refsite",
+        "ctrlrange",
+        "forcerange",
+        "group",
+        "kp",
+        "kv",
+        "dampratio",
+        "input",
+        "delay",
+        "nsample",
+        "interp",
+    ),
+    ("actuator", "damper"): (*_ACTUATOR_TRANSMISSION_FIELDS, "kv"),
+    ("actuator", "cylinder"): (
+        *_ACTUATOR_TRANSMISSION_FIELDS,
+        "timeconst",
+        "area",
+        "diameter",
+        "bias",
+    ),
+    ("actuator", "muscle"): (
+        *_ACTUATOR_TRANSMISSION_FIELDS,
+        "timeconst",
+        "range",
+        "force",
+        "scale",
+        "lmin",
+        "lmax",
+        "vmax",
+        "fpmax",
+        "fvmax",
+        "tausmooth",
+    ),
+    ("actuator", "adhesion"): (
+        "body",
+        "ctrlrange",
+        "forcerange",
+        "group",
+        "gain",
+        "delay",
+        "nsample",
+        "interp",
+    ),
+    ("actuator", "dcmotor"): (
+        *_ACTUATOR_TRANSMISSION_FIELDS,
+        "motorconst",
+        "resistance",
+        "inductance",
+        "cogging",
+        "lugre",
+        "saturation",
+        "thermal",
+        "controller",
+        "input",
+        "nominal",
+    ),
+    ("equality", "connect"): (
+        "body1",
+        "body2",
+        "site1",
+        "site2",
+        "anchor",
+        "active",
+        "solref",
+        "solimp",
+    ),
+    ("equality", "weld"): (
+        "body1",
+        "body2",
+        "site1",
+        "site2",
+        "anchor",
+        "relpose",
+        "torquescale",
+        "active",
+        "solref",
+        "solimp",
+    ),
+    ("equality", "joint"): (
+        "joint1",
+        "joint2",
+        "polycoef",
+        "active",
+        "solref",
+        "solimp",
+    ),
+    ("equality", "tendon"): (
+        "tendon1",
+        "tendon2",
+        "polycoef",
+        "active",
+        "solref",
+        "solimp",
+    ),
+    ("equality", "flex"): ("flex", "active", "solref", "solimp"),
+    ("equality", "flexvert"): ("flex", "active", "solref", "solimp"),
+    ("equality", "flexstrain"): ("flex", "cell", "active", "solref", "solimp"),
+    **{
+        ("sensor", subtype): ("site", *_SENSOR_COMMON_FIELDS)
+        for subtype in _SENSOR_SITE_TYPES
+        if subtype not in {"rangefinder", "camprojection"}
+    },
+    ("sensor", "rangefinder"): ("site", "camera", "data", *_SENSOR_COMMON_FIELDS),
+    ("sensor", "camprojection"): ("site", "camera", *_SENSOR_COMMON_FIELDS),
+    **{
+        ("sensor", subtype): ("joint", *_SENSOR_COMMON_FIELDS)
+        for subtype in (*_SENSOR_JOINT_TYPES, *_SENSOR_BALL_TYPES, *_SENSOR_JOINT_LIMIT_TYPES)
+    },
+    **{
+        ("sensor", subtype): ("tendon", *_SENSOR_COMMON_FIELDS)
+        for subtype in (*_SENSOR_TENDON_TYPES, *_SENSOR_TENDON_LIMIT_TYPES)
+    },
+    **{
+        ("sensor", subtype): ("actuator", *_SENSOR_COMMON_FIELDS)
+        for subtype in _SENSOR_ACTUATOR_TYPES
+    },
+    **{
+        ("sensor", subtype): (
+            "objtype",
+            "objname",
+            "reftype",
+            "refname",
+            *_SENSOR_COMMON_FIELDS,
+        )
+        for subtype in _SENSOR_FRAME_TYPES
+    },
+    **{
+        ("sensor", subtype): ("objtype", "objname", *_SENSOR_COMMON_FIELDS)
+        for subtype in _SENSOR_FRAME_ACCEL_TYPES
+    },
+    **{("sensor", subtype): ("body", *_SENSOR_COMMON_FIELDS) for subtype in _SENSOR_SUBTREE_TYPES},
+    ("sensor", "insidesite"): (
+        "site",
+        "objtype",
+        "objname",
+        *_SENSOR_COMMON_FIELDS,
+    ),
+    **{
+        ("sensor", subtype): ("body1", "body2", "geom1", "geom2", *_SENSOR_COMMON_FIELDS)
+        for subtype in ("distance", "normal", "fromto")
+    },
+    ("sensor", "contact"): (
+        "body1",
+        "body2",
+        "geom1",
+        "geom2",
+        "site",
+        "subtree1",
+        "subtree2",
+        "data",
+        "num",
+        "reduce",
+        *_SENSOR_COMMON_FIELDS,
+    ),
+    **{
+        ("sensor", subtype): _SENSOR_COMMON_FIELDS
+        for subtype in ("e_potential", "e_kinetic", "clock")
+    },
+    ("sensor", "tactile"): ("geom", "mesh", "delay", "nsample", "interp", "interval"),
+    ("sensor", "user"): (
+        "objtype",
+        "objname",
+        "datatype",
+        "needstage",
+        "dim",
+        "cutoff",
+        "noise",
+    ),
 }
 _REFERENCE_ELEMENT = {
     "actuator": "actuator",
@@ -127,15 +412,23 @@ _REFERENCE_ELEMENT = {
     "body1": "body",
     "body2": "body",
     "camera": "camera",
+    "cranksite": "site",
+    "flex": "flex",
     "geom": "geom",
     "geom1": "geom",
     "geom2": "geom",
     "joint": "joint",
+    "jointinparent": "joint",
     "joint1": "joint",
     "joint2": "joint",
+    "mesh": "mesh",
+    "refsite": "site",
     "site": "site",
     "site1": "site",
     "site2": "site",
+    "slidersite": "site",
+    "subtree1": "body",
+    "subtree2": "body",
     "tendon": "tendon",
     "tendon1": "tendon",
     "tendon2": "tendon",
@@ -300,7 +593,15 @@ def _normalized_urdf_source(path: Path) -> str | None:
 
 def _component_xml(spec) -> tuple[ET.Element, str]:
     xml = spec.to_xml()
-    return ET.fromstring(xml), xml
+    root = ET.fromstring(xml)
+    # MuJoCo 3.11 serializes the input-only e_potential/e_kinetic sensor tags
+    # without their e_ prefix, then rejects that spelling on the next parse.
+    # Normalize the generated XML before the structured editor reparses it.
+    sensor = root.find("sensor")
+    for element in sensor or ():
+        if element.tag in {"potential", "kinetic"}:
+            element.tag = f"e_{element.tag}"
+    return root, xml
 
 
 def _component_section(root: ET.Element, category: str, *, create: bool = False):
@@ -341,15 +642,55 @@ def _field_choices(root: ET.Element, name: str, attributes: dict[str, str]) -> t
 
 
 def _component_fields(
-    root: ET.Element, category: str, attributes: dict[str, str]
+    root: ET.Element, category: str, subtype: str, attributes: dict[str, str]
 ) -> tuple[ModelComponentField, ...]:
     values = {name: value for name, value in attributes.items() if name != "name"}
-    for name in _COMPONENT_OPTIONAL_FIELDS[category]:
+    optional = _COMPONENT_SUBTYPE_OPTIONAL_FIELDS.get(
+        (category, subtype), _COMPONENT_OPTIONAL_FIELDS[category]
+    )
+    for name in optional:
         values.setdefault(name, "")
     return tuple(
         ModelComponentField(name, value, _field_choices(root, name, values))
         for name, value in values.items()
     )
+
+
+def _component_path_presets(
+    root: ET.Element, category: str, subtype: str
+) -> tuple[ModelComponentPathItem, ...]:
+    if category != "tendon":
+        return ()
+    if subtype == "fixed":
+        joints = _named_elements(root, "joint")
+        return (
+            ModelComponentPathItem(
+                "joint",
+                (
+                    ModelComponentField("joint", joints[0] if joints else "", joints),
+                    ModelComponentField("coef", "1"),
+                ),
+            ),
+        )
+    sites = _named_elements(root, "site")
+    geoms = _named_elements(root, "geom")
+    presets = []
+    if sites:
+        presets.append(
+            ModelComponentPathItem("site", (ModelComponentField("site", sites[0], sites),))
+        )
+    if geoms:
+        presets.append(
+            ModelComponentPathItem(
+                "geom",
+                (
+                    ModelComponentField("geom", geoms[0], geoms),
+                    ModelComponentField("sidesite", sites[0] if sites else "", sites),
+                ),
+            )
+        )
+    presets.append(ModelComponentPathItem("pulley", (ModelComponentField("divisor", "2"),)))
+    return tuple(presets)
 
 
 def _serialize_component_xml(root: ET.Element) -> str:
@@ -1116,8 +1457,9 @@ class MuJoCoAdapter(SceneAdapterBase):
                     category,
                     element.tag,
                     attributes.get("name", f"{category}{component_id}"),
-                    _component_fields(root, category, attributes),
+                    _component_fields(root, category, element.tag, attributes),
                     path,
+                    _component_path_presets(root, category, element.tag),
                 )
             )
         return tuple(components)
@@ -1127,16 +1469,115 @@ class MuJoCoAdapter(SceneAdapterBase):
         if spec is None:
             return ()
         root, _xml = _component_xml(spec)
+        joint_elements = tuple(root.iter("joint"))
         joints = _named_elements(root, "joint")
+        ball_joints = tuple(
+            element.attrib["name"]
+            for element in joint_elements
+            if element.attrib.get("name") and element.attrib.get("type", "hinge") == "ball"
+        )
+        limited_joints = tuple(
+            element.attrib["name"]
+            for element in joint_elements
+            if element.attrib.get("name")
+            and (
+                element.attrib.get("limited") in {"true", "1"} or bool(element.attrib.get("range"))
+            )
+        )
         bodies = _named_elements(root, "body")
+        geoms = _named_elements(root, "geom")
         sites = _named_elements(root, "site")
         tendons = _named_elements(root, "fixed") + _named_elements(root, "spatial")
+        tendon_section = root.find("tendon")
+        limited_tendons = tuple(
+            element.attrib["name"]
+            for element in tendon_section or ()
+            if element.attrib.get("name")
+            and (
+                element.attrib.get("limited") in {"true", "1"} or bool(element.attrib.get("range"))
+            )
+        )
+        actuators = _named_elements(root, "actuator")
+        cameras = _named_elements(root, "camera")
+        meshes = _named_elements(root, "mesh")
+        flexes = _named_elements(root, "flex")
+        if category == "contact":
+            return (
+                *(("pair",) if len(geoms) >= 2 else ()),
+                *(("exclude",) if len(bodies) >= 2 else ()),
+            )
         if category == "actuator":
-            return ("motor", "position", "velocity") if joints else ()
+            return (
+                *(
+                    (
+                        "general",
+                        "motor",
+                        "position",
+                        "velocity",
+                        "intvelocity",
+                        "damper",
+                        "cylinder",
+                        "muscle",
+                        "dcmotor",
+                    )
+                    if joints
+                    else ()
+                ),
+                *(("orientation",) if ball_joints else ()),
+                *(("adhesion",) if bodies else ()),
+            )
         if category == "sensor":
             return (
-                *(("jointpos", "jointvel") if joints else ()),
-                *(("framepos", "framequat") if bodies else ()),
+                *(
+                    (
+                        "touch",
+                        "accelerometer",
+                        "velocimeter",
+                        "gyro",
+                        "force",
+                        "torque",
+                        "magnetometer",
+                        "rangefinder",
+                    )
+                    if sites
+                    else ()
+                ),
+                *(("camprojection",) if sites and cameras else ()),
+                *(("jointpos", "jointvel", "jointactuatorfrc") if joints else ()),
+                *(("ballquat", "ballangvel") if ball_joints else ()),
+                *(("jointlimitpos", "jointlimitvel", "jointlimitfrc") if limited_joints else ()),
+                *(("tendonpos", "tendonvel", "tendonactuatorfrc") if tendons else ()),
+                *(
+                    ("tendonlimitpos", "tendonlimitvel", "tendonlimitfrc")
+                    if limited_tendons
+                    else ()
+                ),
+                *(("actuatorpos", "actuatorvel", "actuatorfrc") if actuators else ()),
+                *(
+                    (
+                        "framepos",
+                        "framequat",
+                        "framexaxis",
+                        "frameyaxis",
+                        "framezaxis",
+                        "framelinvel",
+                        "frameangvel",
+                        "framelinacc",
+                        "frameangacc",
+                        "subtreecom",
+                        "subtreelinvel",
+                        "subtreeangmom",
+                    )
+                    if bodies
+                    else ()
+                ),
+                *(("insidesite",) if sites and bodies else ()),
+                *(("distance", "normal", "fromto", "contact") if len(bodies) >= 2 else ()),
+                *(("tactile",) if meshes else ()),
+                "e_potential",
+                "e_kinetic",
+                "clock",
+                "user",
             )
         if category == "tendon":
             return (
@@ -1148,6 +1589,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                 *(("joint",) if joints else ()),
                 *(("weld", "connect") if bodies else ()),
                 *(("tendon",) if tendons else ()),
+                *(("flex", "flexvert", "flexstrain") if flexes else ()),
             )
         _component_section(root, category)
         return ()
@@ -1166,18 +1608,105 @@ class MuJoCoAdapter(SceneAdapterBase):
         if any(item.attrib.get("name") == value for item in section):
             raise ValueError(f"{category} {value!r} already exists")
         element = ET.SubElement(section, subtype, {"name": value})
+        joint_elements = tuple(root.iter("joint"))
         joints = _named_elements(root, "joint")
+        ball_joints = tuple(
+            element.attrib["name"]
+            for element in joint_elements
+            if element.attrib.get("name") and element.attrib.get("type", "hinge") == "ball"
+        )
+        limited_joints = tuple(
+            element.attrib["name"]
+            for element in joint_elements
+            if element.attrib.get("name")
+            and (
+                element.attrib.get("limited") in {"true", "1"} or bool(element.attrib.get("range"))
+            )
+        )
         bodies = _named_elements(root, "body")
+        geoms = _named_elements(root, "geom")
         sites = _named_elements(root, "site")
         tendons = _named_elements(root, "fixed") + _named_elements(root, "spatial")
-        if category == "actuator":
-            element.set("joint", joints[0])
-        elif category == "sensor":
-            if subtype.startswith("joint"):
-                element.set("joint", joints[0])
+        tendon_section = root.find("tendon")
+        limited_tendons = tuple(
+            item.attrib["name"]
+            for item in tendon_section or ()
+            if item.attrib.get("name")
+            and (item.attrib.get("limited") in {"true", "1"} or bool(item.attrib.get("range")))
+        )
+        actuators = _named_elements(root, "actuator")
+        cameras = _named_elements(root, "camera")
+        meshes = _named_elements(root, "mesh")
+        flexes = _named_elements(root, "flex")
+        if category == "contact" and subtype == "pair":
+            element.set("geom1", geoms[0])
+            element.set("geom2", geoms[1])
+        elif category == "contact":
+            element.set("body1", bodies[0])
+            element.set("body2", bodies[1])
+        elif category == "actuator":
+            if subtype == "adhesion":
+                element.set("body", bodies[0])
+                element.set("ctrlrange", "0 1")
+            elif subtype == "orientation":
+                element.set("joint", ball_joints[0])
             else:
+                element.set("joint", joints[0])
+                if subtype == "damper":
+                    element.set("ctrlrange", "0 1")
+                elif subtype == "muscle":
+                    element.set("lengthrange", "0 1")
+                elif subtype == "dcmotor":
+                    element.set("motorconst", "1")
+                    element.set("resistance", "1")
+                    element.set("inductance", "1")
+        elif category == "sensor":
+            site_sensors = {
+                "touch",
+                "accelerometer",
+                "velocimeter",
+                "gyro",
+                "force",
+                "torque",
+                "magnetometer",
+                "rangefinder",
+                "camprojection",
+            }
+            if subtype in site_sensors:
+                element.set("site", sites[0])
+                if subtype == "camprojection":
+                    element.set("camera", cameras[0])
+            elif subtype in {"ballquat", "ballangvel"}:
+                element.set("joint", ball_joints[0])
+            elif subtype.startswith("jointlimit"):
+                element.set("joint", limited_joints[0])
+            elif subtype.startswith("joint"):
+                element.set("joint", joints[0])
+            elif subtype.startswith("tendonlimit"):
+                element.set("tendon", limited_tendons[0])
+            elif subtype.startswith("tendon"):
+                element.set("tendon", tendons[0])
+            elif subtype.startswith("actuator"):
+                element.set("actuator", actuators[0])
+            elif subtype in {"subtreecom", "subtreelinvel", "subtreeangmom"}:
+                element.set("body", bodies[0])
+            elif subtype == "insidesite":
+                element.set("site", sites[0])
                 element.set("objtype", "body")
                 element.set("objname", bodies[0])
+            elif subtype in {"distance", "normal", "fromto", "contact"}:
+                element.set("body1", bodies[0])
+                element.set("body2", bodies[1])
+            elif subtype == "tactile":
+                element.set("mesh", meshes[0])
+            elif subtype == "user":
+                element.set("dim", "1")
+                element.set("needstage", "pos")
+            elif subtype.startswith("frame"):
+                element.set("objtype", "body")
+                element.set("objname", bodies[0])
+            else:
+                pass
         elif category == "tendon" and subtype == "fixed":
             ET.SubElement(element, "joint", {"joint": joints[0], "coef": "1"})
         elif category == "tendon":
@@ -1185,10 +1714,21 @@ class MuJoCoAdapter(SceneAdapterBase):
             ET.SubElement(element, "site", {"site": sites[1]})
         elif category == "equality" and subtype == "joint":
             element.set("joint1", joints[0])
-        elif category == "equality" and subtype in ("weld", "connect"):
+        elif category == "equality" and subtype == "connect":
+            if len(sites) >= 2:
+                element.set("site1", sites[0])
+                element.set("site2", sites[1])
+            else:
+                element.set("body1", bodies[0])
+                element.set("anchor", "0 0 0")
+        elif category == "equality" and subtype == "weld":
             element.set("body1", bodies[0])
-        elif category == "equality":
+        elif category == "equality" and subtype == "tendon":
             element.set("tendon1", tendons[0])
+        elif category == "equality":
+            element.set("flex", flexes[0])
+            if subtype == "flexstrain":
+                element.set("cell", "0")
         new_spec = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
         if not self._replace_model_spec(model_id, new_spec):
             return -1
@@ -1444,7 +1984,14 @@ class MuJoCoAdapter(SceneAdapterBase):
             self._resolve_asset_paths(child, item.path.parent)
             # Resolve keyframes inherited from nested model assets before the child is
             # attached again. MuJoCo can then namespace their compiled state correctly.
-            self._resolve_attached_keyframes(child)
+            child_model = self._resolve_attached_keyframes(child)
+            if child_model is not None:
+                self._transform_attached_keyframes(
+                    child,
+                    child_model,
+                    item.position,
+                    item.rotation,
+                )
             if index == 0 and self._root_path is None:
                 spec.option = child.option
                 spec.visual = child.visual
@@ -1467,10 +2014,42 @@ class MuJoCoAdapter(SceneAdapterBase):
         return spec
 
     @staticmethod
-    def _resolve_attached_keyframes(spec) -> None:
+    def _resolve_attached_keyframes(spec):
         """Compile an attached spec early only when unresolved keyframes require it."""
         if len(spec.keys):
-            spec.compile()
+            return spec.compile()
+        return None
+
+    @staticmethod
+    def _transform_attached_keyframes(spec, model, position, rotation) -> None:
+        """Transform model-local free and mocap poses before MjSpec attachment.
+
+        MuJoCo namespaces attached keyframes but leaves their pose arrays unchanged,
+        even though those arrays become world-space in the composed model.
+        """
+        offset = np.asarray(position, np.float64).reshape(3)
+        matrix = np.asarray(rotation, np.float64).reshape(3, 3)
+        for key_index, key in enumerate(spec.keys):
+            qpos = np.asarray(model.key_qpos[key_index], np.float64).copy()
+            for joint in range(model.njnt):
+                if int(model.jnt_type[joint]) != mujoco.mjtJoint.mjJNT_FREE:
+                    continue
+                address = int(model.jnt_qposadr[joint])
+                qpos[address : address + 3] = qpos[address : address + 3] @ matrix.T + offset
+                qpos[address + 3 : address + 7] = math3d.mat3_to_quat(
+                    matrix @ math3d.quat_to_mat3(qpos[address + 3 : address + 7])
+                )
+            key.qpos = qpos
+            if model.nmocap:
+                mocap_position = np.asarray(model.key_mpos[key_index], np.float64).reshape(-1, 3)
+                mocap_quaternion = np.asarray(model.key_mquat[key_index], np.float64).reshape(-1, 4)
+                key.mpos = (mocap_position @ matrix.T + offset).reshape(-1)
+                key.mquat = np.asarray(
+                    [
+                        math3d.mat3_to_quat(matrix @ math3d.quat_to_mat3(quaternion))
+                        for quaternion in mocap_quaternion
+                    ]
+                ).reshape(-1)
 
     def _compile_composed_model(self):
         spec = self._composed_spec()
@@ -4005,6 +4584,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             (mujoco.mjtObj.mjOBJ_LIGHT, "lights"),
             (mujoco.mjtObj.mjOBJ_MATERIAL, "materials"),
             (mujoco.mjtObj.mjOBJ_TEXTURE, "textures"),
+            (mujoco.mjtObj.mjOBJ_KEY, "keys"),
         )
         index: dict[tuple[int, str], tuple[int, str]] = {}
         specs = [(item.model_id, item.prefix, item.spec) for item in self._attached_models]
@@ -4788,14 +5368,254 @@ class MuJoCoAdapter(SceneAdapterBase):
 
     def keyframes(self) -> list[KeyframeInfo]:
         m = self._m
-        return [
-            KeyframeInfo(
-                keyframe_id=i,
-                name=mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_KEY, i) or f"Key {i:03d}",
-                time=float(m.key_time[i]),
+        result = []
+        for index in range(m.nkey):
+            compiled_name = (
+                mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_KEY, index) or f"Key {index:03d}"
             )
-            for i in range(m.nkey)
-        ]
+            model_id, name = self._model_element_name(compiled_name, mujoco.mjtObj.mjOBJ_KEY)
+            result.append(
+                KeyframeInfo(
+                    keyframe_id=index,
+                    name=name or compiled_name,
+                    time=float(m.key_time[index]),
+                    model_id=model_id,
+                )
+            )
+        return result
+
+    def _keyframe_identity(self, keyframe_id: int) -> tuple[int, str] | None:
+        index = int(keyframe_id)
+        if not 0 <= index < self._m.nkey:
+            return None
+        compiled_name = mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_KEY, index) or ""
+        model_id, name = self._model_element_name(compiled_name, mujoco.mjtObj.mjOBJ_KEY)
+        return (model_id, name) if name else None
+
+    def keyframe_properties(self, keyframe_id: int) -> KeyframeProperties | None:
+        identity = self._keyframe_identity(keyframe_id)
+        if identity is None:
+            return None
+        model_id, name = identity
+        spec = self._spec_for_model(model_id)
+        if spec is None or spec.key(name) is None:
+            return None
+        local_model = spec.copy().compile()
+        local_key = mujoco.mj_name2id(local_model, mujoco.mjtObj.mjOBJ_KEY, name)
+        if local_key < 0:
+            return None
+        return KeyframeProperties(
+            keyframe_id=int(keyframe_id),
+            model_id=model_id,
+            name=name,
+            time=float(local_model.key_time[local_key]),
+            qpos=tuple(float(value) for value in local_model.key_qpos[local_key]),
+            qvel=tuple(float(value) for value in local_model.key_qvel[local_key]),
+            act=tuple(float(value) for value in local_model.key_act[local_key]),
+            ctrl=tuple(float(value) for value in local_model.key_ctrl[local_key]),
+            mocap_position=tuple(float(value) for value in local_model.key_mpos[local_key]),
+            mocap_quaternion=tuple(float(value) for value in local_model.key_mquat[local_key]),
+        )
+
+    def _model_prefix(self, model_id: int) -> str:
+        item = next(
+            (item for item in self._attached_models if item.model_id == int(model_id)), None
+        )
+        return item.prefix if item is not None else ""
+
+    def _model_transform(self, model_id: int) -> tuple[np.ndarray, np.ndarray]:
+        item = next(
+            (item for item in self._attached_models if item.model_id == int(model_id)), None
+        )
+        if item is None:
+            return np.zeros(3, np.float64), np.eye(3, dtype=np.float64)
+        return item.position, item.rotation
+
+    def _model_object_offset(self, model_id: int, local, object_type, count_name: str) -> int:
+        """Map local object indices to the composed model without requiring names."""
+        prefix = self._model_prefix(model_id)
+        count = int(getattr(local, count_name))
+        start = 1 if object_type == mujoco.mjtObj.mjOBJ_BODY else 0
+        for local_index in range(start, count):
+            name = mujoco.mj_id2name(local, object_type, local_index) or ""
+            if not name:
+                continue
+            compiled_index = mujoco.mj_name2id(self._m, object_type, f"{prefix}{name}")
+            if compiled_index >= 0:
+                return compiled_index - local_index
+        if int(model_id) == 0:
+            return 0
+        if self._root_spec is None:
+            return -1
+        offset = int(getattr(self._root_spec.copy().compile(), count_name))
+        for item in self._attached_models:
+            if item.model_id == int(model_id):
+                return offset
+            offset += int(getattr(item.spec.copy().compile(), count_name))
+        return -1
+
+    def _capture_model_keyframe_values(self, model_id: int):
+        spec = self._spec_for_model(model_id)
+        if spec is None:
+            return None
+        local = spec.copy().compile()
+        model_position, model_rotation = self._model_transform(model_id)
+        joint_offset = self._model_object_offset(model_id, local, mujoco.mjtObj.mjOBJ_JOINT, "njnt")
+        actuator_offset = self._model_object_offset(
+            model_id, local, mujoco.mjtObj.mjOBJ_ACTUATOR, "nu"
+        )
+        body_offset = self._model_object_offset(model_id, local, mujoco.mjtObj.mjOBJ_BODY, "nbody")
+        qpos = np.asarray(local.qpos0, np.float64).copy()
+        qvel = np.zeros(local.nv, np.float64)
+        act = np.zeros(local.na, np.float64)
+        ctrl = np.zeros(local.nu, np.float64)
+        mocap_position = np.zeros((local.nmocap, 3), np.float64)
+        mocap_quaternion = np.zeros((local.nmocap, 4), np.float64)
+        if local.nmocap:
+            mocap_quaternion[:, 0] = 1.0
+
+        for local_joint in range(local.njnt):
+            compiled_joint = local_joint + joint_offset
+            if not 0 <= compiled_joint < self._m.njnt:
+                continue
+            local_qpos = self._span(local.jnt_qposadr, local_joint, local.nq)
+            compiled_qpos = self._span(self._m.jnt_qposadr, compiled_joint, self._m.nq)
+            local_qvel = self._span(local.jnt_dofadr, local_joint, local.nv)
+            compiled_qvel = self._span(self._m.jnt_dofadr, compiled_joint, self._m.nv)
+            if local_qpos.stop - local_qpos.start == compiled_qpos.stop - compiled_qpos.start:
+                qpos[local_qpos] = self._d.qpos[compiled_qpos]
+                if int(local.jnt_type[local_joint]) == mujoco.mjtJoint.mjJNT_FREE:
+                    values = qpos[local_qpos]
+                    values[:3] = (values[:3] - model_position) @ model_rotation
+                    values[3:7] = math3d.mat3_to_quat(
+                        model_rotation.T @ math3d.quat_to_mat3(values[3:7])
+                    )
+            if local_qvel.stop - local_qvel.start == compiled_qvel.stop - compiled_qvel.start:
+                qvel[local_qvel] = self._d.qvel[compiled_qvel]
+
+        for local_actuator in range(local.nu):
+            compiled_actuator = local_actuator + actuator_offset
+            if not 0 <= compiled_actuator < self._m.nu:
+                continue
+            local_ctrl = self._span(local.actuator_ctrladr, local_actuator, local.nu)
+            compiled_ctrl = self._span(self._m.actuator_ctrladr, compiled_actuator, self._m.nu)
+            if local_ctrl.stop - local_ctrl.start == compiled_ctrl.stop - compiled_ctrl.start:
+                ctrl[local_ctrl] = self._d.ctrl[compiled_ctrl]
+            local_activation = self._span(local.actuator_actadr, local_actuator, local.na)
+            compiled_activation = self._span(self._m.actuator_actadr, compiled_actuator, self._m.na)
+            if (
+                local_activation.stop - local_activation.start
+                == compiled_activation.stop - compiled_activation.start
+            ):
+                act[local_activation] = self._d.act[compiled_activation]
+
+        for local_body in range(1, local.nbody):
+            local_mocap = int(local.body_mocapid[local_body])
+            if local_mocap < 0:
+                continue
+            compiled_body = local_body + body_offset
+            compiled_mocap = int(self._m.body_mocapid[compiled_body]) if compiled_body >= 0 else -1
+            if compiled_mocap >= 0:
+                mocap_position[local_mocap] = (
+                    self._d.mocap_pos[compiled_mocap] - model_position
+                ) @ model_rotation
+                mocap_quaternion[local_mocap] = math3d.mat3_to_quat(
+                    model_rotation.T @ math3d.quat_to_mat3(self._d.mocap_quat[compiled_mocap])
+                )
+        return (
+            qpos,
+            qvel,
+            act,
+            ctrl,
+            mocap_position.reshape(-1),
+            mocap_quaternion.reshape(-1),
+        )
+
+    def add_model_keyframe(self, model_id: int, name: str) -> int:
+        value = str(name).strip()
+        source_spec = self._spec_for_model(model_id)
+        values = self._capture_model_keyframe_values(model_id)
+        if source_spec is None or values is None or not value or source_spec.key(value) is not None:
+            return -1
+        working = source_spec.copy()
+        working.add_key(
+            name=value,
+            time=float(self._d.time),
+            qpos=values[0],
+            qvel=values[1],
+            act=values[2],
+            ctrl=values[3],
+            mpos=values[4],
+            mquat=values[5],
+        )
+        if not self._replace_model_spec(model_id, working):
+            return -1
+        return mujoco.mj_name2id(
+            self._m,
+            mujoco.mjtObj.mjOBJ_KEY,
+            f"{self._model_prefix(model_id)}{value}",
+        )
+
+    def set_keyframe_properties(self, properties: KeyframeProperties) -> bool:
+        identity = self._keyframe_identity(properties.keyframe_id)
+        if identity is None or identity[0] != int(properties.model_id):
+            return False
+        model_id, current_name = identity
+        source_spec = self._spec_for_model(model_id)
+        if source_spec is None:
+            return False
+        local = source_spec.copy().compile()
+        expected = (
+            local.nq,
+            local.nv,
+            local.na,
+            local.nu,
+            local.nmocap * 3,
+            local.nmocap * 4,
+        )
+        arrays = tuple(
+            np.asarray(values, np.float64).reshape(-1)
+            for values in (
+                properties.qpos,
+                properties.qvel,
+                properties.act,
+                properties.ctrl,
+                properties.mocap_position,
+                properties.mocap_quaternion,
+            )
+        )
+        if tuple(len(values) for values in arrays) != expected:
+            return False
+        working = source_spec.copy()
+        element = working.key(current_name)
+        value = str(properties.name).strip()
+        duplicate = working.key(value)
+        if element is None or not value or (value != current_name and duplicate is not None):
+            return False
+        element.name = value
+        element.time = float(properties.time)
+        element.qpos = arrays[0]
+        element.qvel = arrays[1]
+        element.act = arrays[2]
+        element.ctrl = arrays[3]
+        element.mpos = arrays[4]
+        element.mquat = arrays[5]
+        return self._replace_model_spec(model_id, working)
+
+    def remove_model_keyframe(self, keyframe_id: int) -> bool:
+        identity = self._keyframe_identity(keyframe_id)
+        if identity is None:
+            return False
+        model_id, name = identity
+        source_spec = self._spec_for_model(model_id)
+        if source_spec is None:
+            return False
+        working = source_spec.copy()
+        element = working.key(name)
+        if element is None:
+            return False
+        working.delete(element)
+        return self._replace_model_spec(model_id, working)
 
     def sensors(self) -> list[SensorInfo]:
         m = self._m

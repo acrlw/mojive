@@ -20,6 +20,7 @@ from .base import (
     GeometryProperties,
     GeometryShapeProperties,
     JointAdvancedProperties,
+    KeyframeProperties,
     NodeType,
     SceneAdapterBase,
     SceneFrame,
@@ -474,6 +475,18 @@ class WorkspaceAdapter(SceneAdapterBase):
 
     def joints(self):
         return self.primary.joints()
+
+    def keyframe_properties(self, keyframe_id: int) -> KeyframeProperties | None:
+        return self.primary.keyframe_properties(keyframe_id)
+
+    def add_model_keyframe(self, model_id: int, name: str) -> int:
+        return self.primary.add_model_keyframe(model_id, name)
+
+    def set_keyframe_properties(self, properties: KeyframeProperties) -> bool:
+        return self.primary.set_keyframe_properties(properties)
+
+    def remove_model_keyframe(self, keyframe_id: int) -> bool:
+        return self.primary.remove_model_keyframe(keyframe_id)
 
     def set_joint_properties(
         self, joint_id, axis, limited, value_range, damping, stiffness

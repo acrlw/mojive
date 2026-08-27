@@ -2015,7 +2015,7 @@ def test_structured_model_components_edit_and_round_trip(tmp_path: Path) -> None
   <worldbody>
     <body name="arm">
       <joint name="hinge" type="hinge"/>
-      <geom size="0.05"/>
+      <geom name="arm_geom" size="0.05"/>
       <site name="start" pos="0 0 -0.1"/>
       <site name="end" pos="0 0 0.1"/>
     </body>
@@ -2045,6 +2045,9 @@ def test_structured_model_components_edit_and_round_trip(tmp_path: Path) -> None
     tendon = document.model_components(model_id, "tendon")[0]
     assert tendon.subtype == "spatial"
     assert [item.type for item in tendon.path] == ["site", "site"]
+    assert [item.type for item in tendon.path_presets] == ["site", "geom", "pulley"]
+    site_preset = tendon.path_presets[0]
+    assert site_preset.fields[0].choices == ("start", "end")
     assert document.update_model_component(
         model_id,
         "tendon",
@@ -2071,6 +2074,167 @@ def test_structured_model_components_edit_and_round_trip(tmp_path: Path) -> None
     assert restored.model_components(model_id, "actuator")[0].name == "drive"
     assert restored.model_components(model_id, "tendon")[0].name == "cable"
     assert restored.model_components(model_id, "sensor") == ()
+
+
+def test_contact_pair_and_exclude_use_structured_reference_fields(tmp_path: Path) -> None:
+    document = workspace()
+    model_id = document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
+    source = """<mujoco model="contacts">
+  <worldbody>
+    <body name="first"><geom name="first_geom" type="sphere" size="0.1"/></body>
+    <body name="second"><geom name="second_geom" type="box" size="0.1 0.1 0.1"/></body>
+  </worldbody>
+</mujoco>"""
+    assert document.set_scene_model_xml(model_id, source)
+    assert document.model_component_presets(model_id, "contact") == ("pair", "exclude")
+
+    assert document.add_model_component(model_id, "contact", "pair", "explicit_pair") == 0
+    assert document.add_model_component(model_id, "contact", "exclude", "body_exclusion") == 1
+    pair, exclude = document.model_components(model_id, "contact")
+    pair_fields = {field.name: field for field in pair.fields}
+    assert pair.subtype == "pair"
+    assert pair_fields["geom1"].value == "first_geom"
+    assert pair_fields["geom2"].value == "second_geom"
+    assert pair_fields["geom1"].choices == ("first_geom", "second_geom")
+    assert "body1" not in pair_fields
+    exclude_fields = {field.name: field for field in exclude.fields}
+    assert exclude.subtype == "exclude"
+    assert exclude_fields["body1"].choices == ("first", "second")
+    assert "geom1" not in exclude_fields
+
+    edited_fields = tuple(
+        (
+            field.name,
+            {
+                "condim": "4",
+                "friction": "1 0.1 0.01 0.2 0.3",
+                "margin": "0.01",
+                "gap": "0.002",
+            }.get(field.name, field.value),
+        )
+        for field in pair.fields
+    )
+    assert document.update_model_component(
+        model_id, "contact", pair.component_id, pair.name, edited_fields, ()
+    )
+    assert (document.primary.model.npair, document.primary.model.nexclude) == (1, 1)
+    assert int(document.primary.model.pair_dim[0]) == 4
+    assert document.primary.model.pair_friction[0] == pytest.approx((1.0, 0.1, 0.01, 0.2, 0.3))
+
+    path = tmp_path / "contacts.forge.json"
+    document.save_scene(path)
+    restored = workspace()
+    restored.open_scene(path)
+    assert [item.subtype for item in restored.model_components(model_id, "contact")] == [
+        "pair",
+        "exclude",
+    ]
+    assert (restored.primary.model.npair, restored.primary.model.nexclude) == (1, 1)
+
+
+def test_non_plugin_component_presets_compile_and_energy_sensors_round_trip() -> None:
+    adapter = MuJoCoAdapter()
+    adapter.new_scene()
+    assert adapter.set_scene_model_xml(
+        0,
+        """<mujoco model="component-catalog">
+  <worldbody>
+    <body name="hinge_body">
+      <joint name="hinge" type="hinge" limited="true" range="-1 1"/>
+      <geom name="first_geom" size="0.1"/>
+      <site name="first_site"/>
+      <camera name="inspection"/>
+    </body>
+    <body name="ball_body">
+      <joint name="ball" type="ball"/>
+      <geom name="second_geom" type="box" size="0.1 0.1 0.1"/>
+      <site name="second_site"/>
+    </body>
+  </worldbody>
+</mujoco>""",
+    )
+
+    actuator_presets = adapter.model_component_presets(0, "actuator")
+    assert set(actuator_presets) == {
+        "general",
+        "motor",
+        "position",
+        "velocity",
+        "intvelocity",
+        "orientation",
+        "damper",
+        "cylinder",
+        "muscle",
+        "adhesion",
+        "dcmotor",
+    }
+    for index, subtype in enumerate(actuator_presets):
+        assert adapter.add_model_component(0, "actuator", subtype, f"actuator{index}") == index
+
+    for index, subtype in enumerate(adapter.model_component_presets(0, "tendon")):
+        assert adapter.add_model_component(0, "tendon", subtype, f"tendon{index}") == index
+    fixed = adapter.model_components(0, "tendon")[0]
+    fixed_fields = tuple(
+        (
+            field.name,
+            {"limited": "true", "range": "-1 1"}.get(field.name, field.value),
+        )
+        for field in fixed.fields
+    )
+    assert adapter.update_model_component(
+        0,
+        "tendon",
+        0,
+        fixed.name,
+        fixed_fields,
+        tuple(
+            (
+                item.type,
+                tuple((field.name, field.value) for field in item.fields),
+            )
+            for item in fixed.path
+        ),
+    )
+
+    sensor_presets = adapter.model_component_presets(0, "sensor")
+    assert {
+        "touch",
+        "camprojection",
+        "jointactuatorfrc",
+        "ballquat",
+        "jointlimitfrc",
+        "tendonlimitfrc",
+        "actuatorfrc",
+        "frameangacc",
+        "subtreeangmom",
+        "insidesite",
+        "distance",
+        "normal",
+        "fromto",
+        "contact",
+        "e_potential",
+        "e_kinetic",
+        "clock",
+        "user",
+    }.issubset(sensor_presets)
+    assert "plugin" not in sensor_presets
+    for index, subtype in enumerate(sensor_presets):
+        assert adapter.add_model_component(0, "sensor", subtype, f"sensor{index}") == index
+
+    equality_presets = adapter.model_component_presets(0, "equality")
+    assert equality_presets == ("joint", "weld", "connect", "tendon")
+    for index, subtype in enumerate(equality_presets):
+        assert adapter.add_model_component(0, "equality", subtype, f"equality{index}") == index
+
+    assert len(adapter.model_components(0, "actuator")) == len(actuator_presets)
+    assert len(adapter.model_components(0, "sensor")) == len(sensor_presets)
+    assert {item.subtype for item in adapter.model_components(0, "sensor")} >= {
+        "e_potential",
+        "e_kinetic",
+        "clock",
+        "user",
+    }
+    assert len(adapter.model_components(0, "equality")) == len(equality_presets)
 
 
 def test_invalid_structured_component_edit_keeps_last_good_model() -> None:
@@ -2103,6 +2267,101 @@ def test_structured_component_commands_participate_in_undo_redo() -> None:
     assert session.model_components(model_id, "sensor") == ()
     assert session.submit(cmd.Redo())
     assert [item.name for item in session.model_components(model_id, "sensor")] == ["angle"]
+
+
+def test_model_keyframe_authoring_captures_edits_loads_and_undoes(tmp_path: Path) -> None:
+    model_path = tmp_path / "keyframe-authoring.xml"
+    model_path.write_text(
+        """<mujoco model="keyframe-authoring">
+  <worldbody>
+    <body mocap="true"><geom size="0.05"/></body>
+    <body name="arm">
+      <joint name="hinge" type="hinge"/>
+      <geom size="0.1"/>
+    </body>
+    <body><joint type="slide"/><geom size="0.05"/></body>
+  </worldbody>
+  <actuator><position joint="hinge"/></actuator>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    document = workspace()
+    model_position = np.array((4.0, -3.0, 2.0))
+    model_rotation = math3d.axis_angle_to_mat3((0.0, 0.0, 1.0), np.pi * 0.5)
+    model_id = document.add_scene_model(model_path, model_position, model_rotation)
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+
+    joint = mujoco.mj_name2id(document.primary.model, mujoco.mjtObj.mjOBJ_JOINT, "forge_1_hinge")
+    unnamed_joint = next(index for index in range(document.primary.model.njnt) if index != joint)
+    actuator = 0
+    body = next(
+        index
+        for index in range(document.primary.model.nbody)
+        if document.primary.model.body_mocapid[index] >= 0
+    )
+    mocap = int(document.primary.model.body_mocapid[body])
+    document.primary.data.qpos[document.primary.model.jnt_qposadr[joint]] = 0.4
+    document.primary.data.qvel[document.primary.model.jnt_dofadr[joint]] = -0.2
+    document.primary.data.qpos[document.primary.model.jnt_qposadr[unnamed_joint]] = 0.8
+    document.primary.data.qvel[document.primary.model.jnt_dofadr[unnamed_joint]] = 0.3
+    document.primary.data.ctrl[document.primary.model.actuator_ctrladr[actuator]] = 0.6
+    local_mocap_position = np.array((1.0, 2.0, 3.0))
+    document.primary.data.mocap_pos[mocap] = (
+        local_mocap_position @ model_rotation.T + model_position
+    )
+    document.primary.data.mocap_quat[mocap] = (1.0, 0.0, 0.0, 0.0)
+
+    added = session.submit(cmd.AddModelKeyframe(model_id, "captured"))
+    assert added.ok
+    keyframe_id = added.entity_id
+    properties = session.keyframe_properties(keyframe_id)
+    assert properties is not None
+    assert (properties.model_id, properties.name) == (model_id, "captured")
+    assert properties.qpos == pytest.approx((0.4, 0.8))
+    assert properties.qvel == pytest.approx((-0.2, 0.3))
+    assert properties.ctrl == pytest.approx((0.6,))
+    assert properties.mocap_position == pytest.approx(local_mocap_position)
+
+    updated = replace(
+        properties,
+        name="edited",
+        time=1.25,
+        qpos=(0.25, -0.1),
+        qvel=(0.5, 0.2),
+        ctrl=(-0.75,),
+        mocap_position=(3.0, 2.0, 1.0),
+    )
+    result = session.submit(cmd.SetModelKeyframe(**updated.__dict__))
+    assert result.ok
+    assert session.keyframes[keyframe_id].name == "edited"
+    assert session.submit(cmd.LoadKeyframe(keyframe_id))
+    assert document.primary.data.qpos[document.primary.model.jnt_qposadr[joint]] == pytest.approx(
+        0.25
+    )
+    assert document.primary.data.qvel[document.primary.model.jnt_dofadr[joint]] == pytest.approx(
+        0.5
+    )
+    assert document.primary.data.qpos[
+        document.primary.model.jnt_qposadr[unnamed_joint]
+    ] == pytest.approx(-0.1)
+    assert document.primary.data.qvel[
+        document.primary.model.jnt_dofadr[unnamed_joint]
+    ] == pytest.approx(0.2)
+    assert document.primary.data.ctrl[
+        document.primary.model.actuator_ctrladr[actuator]
+    ] == pytest.approx(-0.75)
+    assert document.primary.data.mocap_pos[mocap] == pytest.approx(
+        np.array((3.0, 2.0, 1.0)) @ model_rotation.T + model_position
+    )
+
+    assert session.submit(cmd.RemoveModelKeyframe(keyframe_id))
+    assert session.keyframes == []
+    assert session.submit(cmd.Undo())
+    assert [key.name for key in session.keyframes] == ["edited"]
+    assert session.submit(cmd.Redo())
+    assert session.keyframes == []
 
 
 def test_noop_model_edits_skip_recompilation() -> None:

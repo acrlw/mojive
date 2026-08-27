@@ -184,7 +184,7 @@ class SetModelSource(Command):
 
 @dataclass(frozen=True)
 class AddModelComponent(Command):
-    """Add a model-level actuator, tendon, sensor, or equality component."""
+    """Add a model-level contact, actuator, tendon, sensor, or equality component."""
 
     model_id: int
     category: str
@@ -272,6 +272,37 @@ class Redo(Command):
 @dataclass(frozen=True)
 class LoadKeyframe(Command):
     """Restore a model-defined keyframe by stable keyframe ID."""
+
+    keyframe_id: int
+
+
+@dataclass(frozen=True)
+class AddModelKeyframe(Command):
+    """Capture current model-local state in a new named keyframe."""
+
+    model_id: int
+    name: str
+
+
+@dataclass(frozen=True)
+class SetModelKeyframe(Command):
+    """Replace all editable values of one model-local keyframe."""
+
+    keyframe_id: int
+    model_id: int
+    name: str
+    time: float
+    qpos: tuple[float, ...]
+    qvel: tuple[float, ...]
+    act: tuple[float, ...]
+    ctrl: tuple[float, ...]
+    mocap_position: tuple[float, ...]
+    mocap_quaternion: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class RemoveModelKeyframe(Command):
+    """Remove one model-local keyframe."""
 
     keyframe_id: int
 

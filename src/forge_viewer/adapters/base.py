@@ -170,6 +170,7 @@ class ModelComponentInfo:
     name: str
     fields: tuple[ModelComponentField, ...] = ()
     path: tuple[ModelComponentPathItem, ...] = ()
+    path_presets: tuple[ModelComponentPathItem, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -283,6 +284,23 @@ class KeyframeInfo:
     keyframe_id: int
     name: str
     time: float
+    model_id: int = -1
+
+
+@dataclass(frozen=True)
+class KeyframeProperties:
+    """Complete editable state stored by one model-local keyframe."""
+
+    keyframe_id: int
+    model_id: int
+    name: str
+    time: float
+    qpos: tuple[float, ...]
+    qvel: tuple[float, ...]
+    act: tuple[float, ...]
+    ctrl: tuple[float, ...]
+    mocap_position: tuple[float, ...]
+    mocap_quaternion: tuple[float, ...]
 
 
 @dataclass(frozen=True)
@@ -896,6 +914,22 @@ class SceneAdapterBase:
         """Replace dynamic state with a model keyframe."""
         return False
 
+    def keyframe_properties(self, keyframe_id: int) -> KeyframeProperties | None:
+        """Return complete editable state for one model-local keyframe."""
+        return None
+
+    def add_model_keyframe(self, model_id: int, name: str) -> int:
+        """Capture current model-local state in a new keyframe."""
+        return -1
+
+    def set_keyframe_properties(self, properties: KeyframeProperties) -> bool:
+        """Replace one model-local keyframe."""
+        return False
+
+    def remove_model_keyframe(self, keyframe_id: int) -> bool:
+        """Remove one model-local keyframe."""
+        return False
+
     def camera_view(self, camera_id: int) -> CameraView | None:
         """Resolve a model camera into a backend-neutral world view."""
         return None
@@ -1223,6 +1257,10 @@ class SceneAdapter(Protocol):
     def sensors(self) -> list[SensorInfo]: ...
     def equality_constraints(self) -> list[EqualityConstraintInfo]: ...
     def load_keyframe(self, keyframe_id: int) -> bool: ...
+    def keyframe_properties(self, keyframe_id: int) -> KeyframeProperties | None: ...
+    def add_model_keyframe(self, model_id: int, name: str) -> int: ...
+    def set_keyframe_properties(self, properties: KeyframeProperties) -> bool: ...
+    def remove_model_keyframe(self, keyframe_id: int) -> bool: ...
     def camera_view(self, camera_id: int) -> CameraView | None: ...
     def visual_groups(self) -> tuple[VisualGroupInfo, ...]: ...
     def set_visual_group(self, category: str, group: int, visible: bool) -> bool: ...

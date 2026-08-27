@@ -16,6 +16,7 @@ from ...adapters.base import (
     GeometryShapeProperties,
     JointAdvancedProperties,
     JointInfo,
+    KeyframeProperties,
     ModelComponentInfo,
     NodeType,
     SceneNode,
@@ -80,6 +81,19 @@ def _unique_component_name(category: str, existing: set[str]) -> str:
     return f"{category}{index}"
 
 
+def _unique_keyframe_name(existing: set[str]) -> str:
+    name = "key"
+    index = 1
+    while name in existing:
+        index += 1
+        name = f"key{index}"
+    return name
+
+
+def _format_keyframe_values(values: tuple[float, ...]) -> str:
+    return " ".join(f"{value:.9g}" for value in values)
+
+
 def _component_value_editor(label: str, value: str, choices: tuple[str, ...]) -> str:
     if choices:
         if imgui.begin_combo(label, value or "select"):
@@ -132,8 +146,16 @@ class InspectorPanel(Panel):
         self._component_name = ""
         self._component_fields: list[list[str]] = []
         self._component_path: list[tuple[str, list[list[str]]]] = []
+        self._component_path_choices: list[dict[str, tuple[str, ...]]] = []
+        self._component_path_presets = ()
         self._component_error = ""
         self._open_component_popup = False
+        self._keyframe_edit: KeyframeProperties | None = None
+        self._keyframe_name = ""
+        self._keyframe_time = 0.0
+        self._keyframe_values: dict[str, str] = {}
+        self._keyframe_error = ""
+        self._open_keyframe_popup = False
         self._model_transform_model = -1
         self._model_transform_generation = -1
         self._model_transform_position = np.zeros(3, np.float32)
@@ -192,6 +214,7 @@ class InspectorPanel(Panel):
     def draw(self, ctx: PanelContext) -> None:
         self._draw_model_source(ctx)
         self._draw_component_editor(ctx)
+        self._draw_keyframe_editor(ctx)
         s = ctx.session
         node = s.selected_node
         if node is None:
@@ -312,13 +335,146 @@ class InspectorPanel(Panel):
                     self._source_error = ""
                     self._open_source_popup = True
             self._model_components(ctx, info.model_id)
+            self._model_keyframes(ctx, info.model_id)
+
+    def _model_keyframes(self, ctx: PanelContext, model_id: int) -> None:
+        keyframes = tuple(key for key in ctx.session.keyframes if key.model_id == model_id)
+        imgui.separator()
+        if not imgui.collapsing_header(f"Keyframes ({len(keyframes)})"):
+            return
+        editable = ctx.session.paused
+        for keyframe in keyframes:
+            imgui.push_id(f"keyframe-{keyframe.keyframe_id}")
+            imgui.text(f"{keyframe.name}  (t={keyframe.time:g} s)")
+            imgui.same_line()
+            if not editable:
+                imgui.begin_disabled()
+            if imgui.small_button("Load"):
+                ctx.submit(cmd.LoadKeyframe(keyframe.keyframe_id))
+            imgui.same_line()
+            if imgui.small_button("Edit"):
+                properties = ctx.session.keyframe_properties(keyframe.keyframe_id)
+                if properties is not None:
+                    self._begin_keyframe_edit(properties)
+            imgui.same_line()
+            if imgui.small_button("Delete"):
+                result = ctx.submit(cmd.RemoveModelKeyframe(keyframe.keyframe_id))
+                self._keyframe_error = "" if result.ok else result.message
+            if not editable:
+                imgui.end_disabled()
+            imgui.pop_id()
+        if not editable:
+            imgui.begin_disabled()
+        if imgui.button("Add Current State"):
+            name = _unique_keyframe_name({key.name for key in keyframes})
+            result = ctx.submit(cmd.AddModelKeyframe(model_id, name))
+            self._keyframe_error = "" if result.ok else result.message
+        if not editable:
+            imgui.end_disabled()
+            imgui.set_item_tooltip("Pause the simulation before authoring keyframes")
+        if self._keyframe_error:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._keyframe_error)
+            if imgui.small_button("Copy error##keyframe-list"):
+                imgui.set_clipboard_text(self._keyframe_error)
+
+    def _begin_keyframe_edit(self, properties: KeyframeProperties) -> None:
+        self._keyframe_edit = properties
+        self._keyframe_name = properties.name
+        self._keyframe_time = properties.time
+        self._keyframe_values = {
+            name: _format_keyframe_values(getattr(properties, name))
+            for name in (
+                "qpos",
+                "qvel",
+                "act",
+                "ctrl",
+                "mocap_position",
+                "mocap_quaternion",
+            )
+        }
+        self._keyframe_error = ""
+        self._open_keyframe_popup = True
+
+    def _draw_keyframe_editor(self, ctx: PanelContext) -> None:
+        properties = self._keyframe_edit
+        if self._open_keyframe_popup and properties is not None:
+            imgui.open_popup("Keyframe")
+            self._open_keyframe_popup = False
+        imgui.set_next_window_size(
+            imgui.ImVec2(680.0 * ctx.style_scale, 620.0 * ctx.style_scale),
+            imgui.Cond_.appearing.value,
+        )
+        visible, _ = imgui.begin_popup_modal("Keyframe")
+        if not visible:
+            return
+        if properties is None:
+            imgui.close_current_popup()
+            imgui.end_popup()
+            return
+        imgui.text_disabled("Edit model-local state values. Array lengths must remain unchanged.")
+        _changed, self._keyframe_name = imgui.input_text("name", self._keyframe_name)
+        _changed, self._keyframe_time = imgui.input_double(
+            "time", self._keyframe_time, 0.0, 0.0, "%.9g"
+        )
+        for name in (
+            "qpos",
+            "qvel",
+            "act",
+            "ctrl",
+            "mocap_position",
+            "mocap_quaternion",
+        ):
+            expected = len(getattr(properties, name))
+            imgui.text_disabled(f"{name} ({expected})")
+            _changed, self._keyframe_values[name] = imgui.input_text_multiline(
+                f"##keyframe-{name}",
+                self._keyframe_values[name],
+                imgui.ImVec2(-1.0, 48.0 * ctx.style_scale),
+            )
+        if self._keyframe_error:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._keyframe_error)
+            if imgui.small_button("Copy error##keyframe-editor"):
+                imgui.set_clipboard_text(self._keyframe_error)
+        if imgui.button("Apply", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+            try:
+                values = {
+                    name: tuple(float(value) for value in text.split())
+                    for name, text in self._keyframe_values.items()
+                }
+            except ValueError:
+                self._keyframe_error = "Keyframe arrays must contain whitespace-separated numbers"
+            else:
+                result = ctx.submit(
+                    cmd.SetModelKeyframe(
+                        properties.keyframe_id,
+                        properties.model_id,
+                        self._keyframe_name,
+                        self._keyframe_time,
+                        values["qpos"],
+                        values["qvel"],
+                        values["act"],
+                        values["ctrl"],
+                        values["mocap_position"],
+                        values["mocap_quaternion"],
+                    )
+                )
+                if result.ok:
+                    self._keyframe_edit = None
+                    imgui.close_current_popup()
+                else:
+                    self._keyframe_error = result.message
+        imgui.same_line()
+        if imgui.button("Cancel", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+            self._keyframe_edit = None
+            imgui.close_current_popup()
+        imgui.end_popup()
 
     def _model_components(self, ctx: PanelContext, model_id: int) -> None:
         self._refresh_component_cache(ctx, model_id)
         imgui.separator()
         imgui.text_disabled("Model Components")
         editable = ctx.session.paused
-        for category in ("actuator", "sensor", "tendon", "equality"):
+        for category in ("contact", "actuator", "sensor", "tendon", "equality"):
             components = self._component_cache[category]
             label = f"{category.capitalize()} ({len(components)})"
             if not imgui.collapsing_header(label):
@@ -366,7 +522,7 @@ class InspectorPanel(Panel):
         self._component_cache_model = model_id
         self._component_cache = {
             category: ctx.session.model_components(model_id, category)
-            for category in ("actuator", "sensor", "tendon", "equality")
+            for category in ("contact", "actuator", "sensor", "tendon", "equality")
         }
         self._component_presets = {
             category: ctx.session.model_component_presets(model_id, category)
@@ -381,6 +537,10 @@ class InspectorPanel(Panel):
             (item.type, [[field.name, field.value] for field in item.fields])
             for item in component.path
         ]
+        self._component_path_choices = [
+            {field.name: field.choices for field in item.fields} for item in component.path
+        ]
+        self._component_path_presets = component.path_presets
         self._component_error = ""
         self._open_component_popup = True
 
@@ -410,19 +570,64 @@ class InspectorPanel(Panel):
         if self._component_path:
             imgui.separator()
             imgui.text_disabled("Path")
-        path_choices = [
-            {field.name: field.choices for field in item.fields} for item in component.path
-        ]
-        for path_index, (element_type, fields) in enumerate(self._component_path):
+        for path_index, (element_type, fields) in enumerate(tuple(self._component_path)):
             imgui.push_id(f"path-{path_index}")
             imgui.text_disabled(f"{path_index + 1}. {element_type}")
+            imgui.same_line()
+            if path_index == 0:
+                imgui.begin_disabled()
+            move_up = imgui.small_button("Up")
+            if path_index == 0:
+                imgui.end_disabled()
+            imgui.same_line()
+            if path_index + 1 == len(self._component_path):
+                imgui.begin_disabled()
+            move_down = imgui.small_button("Down")
+            if path_index + 1 == len(self._component_path):
+                imgui.end_disabled()
+            imgui.same_line()
+            remove = imgui.small_button("Remove")
             for field_index, field in enumerate(fields):
                 field[1] = _component_value_editor(
                     f"{field[0]}##path-field-{field_index}",
                     field[1],
-                    path_choices[path_index].get(field[0], ()),
+                    self._component_path_choices[path_index].get(field[0], ()),
                 )
             imgui.pop_id()
+            if move_up:
+                self._component_path[path_index - 1 : path_index + 1] = reversed(
+                    self._component_path[path_index - 1 : path_index + 1]
+                )
+                self._component_path_choices[path_index - 1 : path_index + 1] = reversed(
+                    self._component_path_choices[path_index - 1 : path_index + 1]
+                )
+                break
+            if move_down:
+                self._component_path[path_index : path_index + 2] = reversed(
+                    self._component_path[path_index : path_index + 2]
+                )
+                self._component_path_choices[path_index : path_index + 2] = reversed(
+                    self._component_path_choices[path_index : path_index + 2]
+                )
+                break
+            if remove:
+                self._component_path.pop(path_index)
+                self._component_path_choices.pop(path_index)
+                break
+        if self._component_path_presets and imgui.begin_combo("Add path item", "select type"):
+            for preset in self._component_path_presets:
+                selected, _ = imgui.selectable(preset.type, False)
+                if selected:
+                    self._component_path.append(
+                        (
+                            preset.type,
+                            [[field.name, field.value] for field in preset.fields],
+                        )
+                    )
+                    self._component_path_choices.append(
+                        {field.name: field.choices for field in preset.fields}
+                    )
+            imgui.end_combo()
         if self._component_error:
             imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._component_error)
             if imgui.small_button("Copy error##component"):

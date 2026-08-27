@@ -21,6 +21,7 @@ from .adapters.base import (
     JointAdvancedProperties,
     JointInfo,
     KeyframeInfo,
+    KeyframeProperties,
     NodeType,
     PhysicsState,
     SceneAdapter,
@@ -119,6 +120,9 @@ _SCENE_EDIT_COMMANDS = (
     cmd.RenameModelElement,
     cmd.ModelEditBatch,
     cmd.SetModelSource,
+    cmd.AddModelKeyframe,
+    cmd.SetModelKeyframe,
+    cmd.RemoveModelKeyframe,
     cmd.AddModelComponent,
     cmd.UpdateModelComponent,
     cmd.RemoveModelComponent,
@@ -339,6 +343,10 @@ class Session:
     def model_material_indices(self, model_id: int) -> tuple[int, ...]:
         """Return render material indices owned by one editable model."""
         return self._adapter.model_material_indices(model_id)
+
+    def keyframe_properties(self, keyframe_id: int) -> KeyframeProperties | None:
+        """Return complete editable state for one model-local keyframe."""
+        return self._adapter.keyframe_properties(keyframe_id)
 
     def geometry_properties(self, node_id: int) -> GeometryProperties | None:
         """Return editable contact parameters for one model geometry."""
@@ -1026,6 +1034,104 @@ class Session:
             self._perturb = PerturbState()
             self._active_keyframe = i
             return CommandResult.good(f"loaded {self._keyframes[slot].name}")
+
+        if isinstance(c, cmd.AddModelKeyframe):
+            if not caps.topology_editing:
+                return CommandResult.bad(f"{caps.name} does not support keyframe authoring")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before adding a keyframe")
+            name = str(c.name).strip()
+            if not name:
+                return CommandResult.bad("Keyframe name cannot be empty")
+            try:
+                keyframe_id = self._adapter.add_model_keyframe(c.model_id, name)
+            except Exception as exc:
+                return CommandResult.bad(f"Keyframe could not be added: {exc}")
+            if keyframe_id < 0:
+                return CommandResult.bad(f"Keyframe {name} could not be added")
+            self._refresh_structure()
+            return CommandResult.good(f"Added keyframe {name}", keyframe_id)
+
+        if isinstance(c, cmd.SetModelKeyframe):
+            if not caps.topology_editing:
+                return CommandResult.bad(f"{caps.name} does not support keyframe authoring")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before editing a keyframe")
+            current = self._adapter.keyframe_properties(c.keyframe_id)
+            if current is None or current.model_id != int(c.model_id):
+                return CommandResult.bad(f"Keyframe {c.keyframe_id} is unavailable")
+            name = str(c.name).strip()
+            try:
+                time_value = float(c.time)
+                arrays = tuple(
+                    np.asarray(values, np.float64).reshape(-1)
+                    for values in (
+                        c.qpos,
+                        c.qvel,
+                        c.act,
+                        c.ctrl,
+                        c.mocap_position,
+                        c.mocap_quaternion,
+                    )
+                )
+            except (TypeError, ValueError, OverflowError):
+                return CommandResult.bad("Keyframe values have invalid value types")
+            if not name:
+                return CommandResult.bad("Keyframe name cannot be empty")
+            if not np.isfinite(time_value) or any(
+                not np.all(np.isfinite(values)) for values in arrays
+            ):
+                return CommandResult.bad("Keyframe values must be finite")
+            expected = tuple(
+                len(values)
+                for values in (
+                    current.qpos,
+                    current.qvel,
+                    current.act,
+                    current.ctrl,
+                    current.mocap_position,
+                    current.mocap_quaternion,
+                )
+            )
+            if tuple(len(values) for values in arrays) != expected:
+                return CommandResult.bad("Keyframe array lengths must match the model")
+            properties = KeyframeProperties(
+                keyframe_id=int(c.keyframe_id),
+                model_id=int(c.model_id),
+                name=name,
+                time=time_value,
+                qpos=tuple(float(value) for value in arrays[0]),
+                qvel=tuple(float(value) for value in arrays[1]),
+                act=tuple(float(value) for value in arrays[2]),
+                ctrl=tuple(float(value) for value in arrays[3]),
+                mocap_position=tuple(float(value) for value in arrays[4]),
+                mocap_quaternion=tuple(float(value) for value in arrays[5]),
+            )
+            try:
+                changed = self._adapter.set_keyframe_properties(properties)
+            except Exception as exc:
+                return CommandResult.bad(f"Keyframe could not be applied: {exc}")
+            if not changed:
+                return CommandResult.bad("Keyframe could not be edited")
+            self._refresh_structure()
+            return CommandResult.good(f"Updated keyframe {name}")
+
+        if isinstance(c, cmd.RemoveModelKeyframe):
+            if not caps.topology_editing:
+                return CommandResult.bad(f"{caps.name} does not support keyframe authoring")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before removing a keyframe")
+            if self._adapter.keyframe_properties(c.keyframe_id) is None:
+                return CommandResult.bad(f"Keyframe {c.keyframe_id} is unavailable")
+            try:
+                changed = self._adapter.remove_model_keyframe(c.keyframe_id)
+            except Exception as exc:
+                return CommandResult.bad(f"Keyframe could not be removed: {exc}")
+            if not changed:
+                return CommandResult.bad("Keyframe could not be removed")
+            self._active_keyframe = -1
+            self._refresh_structure()
+            return CommandResult.good("Removed keyframe")
 
         if isinstance(c, cmd.Select):
             node = self._by_object_id.get(int(c.object_id))
