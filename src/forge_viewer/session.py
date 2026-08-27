@@ -827,13 +827,51 @@ class Session:
                 return CommandResult.bad("A model edit batch cannot be empty")
             if not all(isinstance(edit, cmd.ModelEdit) for edit in c.edits):
                 return CommandResult.bad("A model edit batch contains an unsupported operation")
+            selected = self.selected_node
+            selected_identity = (
+                (selected.model_id, selected.type, selected.name) if selected is not None else None
+            )
+            if selected is not None:
+                for edit in c.edits:
+                    if (
+                        not isinstance(
+                            edit, (cmd.RemoveModelElementEdit, cmd.RenameModelElementEdit)
+                        )
+                        or int(edit.target.node_id) != selected.node_id
+                    ):
+                        continue
+                    if isinstance(edit, cmd.RemoveModelElementEdit):
+                        selected_identity = None
+                    elif isinstance(edit, cmd.RenameModelElementEdit):
+                        selected_identity = (selected.model_id, selected.type, edit.name)
             try:
                 node_ids = self._adapter.apply_model_edit_batch(c.edits)
             except Exception as exc:
                 return CommandResult.bad(str(exc))
             if len(node_ids) != len(c.edits):
                 return CommandResult.bad("The model edit batch was not applied")
+            self._selected = 0
+            self._selected_node_id = -1
             self._refresh_structure()
+            if selected_identity is not None:
+                model_id, node_type, name = selected_identity
+                body_types = {NodeType.LINK, NodeType.ROBOT}
+                restored = next(
+                    (
+                        node
+                        for node in self._nodes
+                        if node.model_id == model_id
+                        and node.name == name
+                        and (
+                            node.type is node_type
+                            or (node.type in body_types and node_type in body_types)
+                        )
+                    ),
+                    None,
+                )
+                if restored is not None:
+                    self._selected = restored.object_id
+                    self._selected_node_id = restored.node_id
             entity_id = next((node_id for node_id in reversed(node_ids) if node_id >= 0), -1)
             return CommandResult.good(f"Applied {len(c.edits)} model edits", entity_id)
 

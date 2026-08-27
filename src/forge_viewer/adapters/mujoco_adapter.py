@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from html import escape
 from itertools import pairwise
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -854,6 +855,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         nodes_by_id = {node.node_id: node for node in self.nodes()}
         node_identities: dict[int, tuple[int, NodeType, str]] = {}
         batch_identities: dict[str, tuple[int, NodeType, str]] = {}
+        batch_elements: dict[str, Any] = {}
         result_identities: list[tuple[int, NodeType, str] | None] = []
 
         def node_identity(node_id: int) -> tuple[int, NodeType, str]:
@@ -916,7 +918,10 @@ class MuJoCoAdapter(SceneAdapterBase):
                     if parent_type in (NodeType.MODEL, NodeType.WORLD):
                         body = spec.worldbody
                     elif parent_type in (NodeType.LINK, NodeType.ROBOT):
-                        body = spec.body(parent_name)
+                        parent_key = str(edit.parent.batch_key).strip()
+                        body = (
+                            batch_elements.get(parent_key) if parent_key else spec.body(parent_name)
+                        )
                     else:
                         body = None
                     if body is None:
@@ -929,31 +934,31 @@ class MuJoCoAdapter(SceneAdapterBase):
                     if self._element(model_id, type_name, value) is not None:
                         raise ValueError(f"{type_name} {value!r} already exists")
                     if type_name == "body":
-                        body.add_body(name=value)
+                        element = body.add_body(name=value)
                     elif type_name == "geom":
-                        geom = body.add_geom(name=value)
-                        geom.type = {
+                        element = body.add_geom(name=value)
+                        element.type = {
                             "box": mujoco.mjtGeom.mjGEOM_BOX,
                             "capsule": mujoco.mjtGeom.mjGEOM_CAPSULE,
                             "cylinder": mujoco.mjtGeom.mjGEOM_CYLINDER,
                             "plane": mujoco.mjtGeom.mjGEOM_PLANE,
                         }.get(subtype, mujoco.mjtGeom.mjGEOM_SPHERE)
-                        geom.size = [4.0, 4.0, 0.02] if subtype == "plane" else [0.1, 0.1, 0.1]
+                        element.size = [4.0, 4.0, 0.02] if subtype == "plane" else [0.1, 0.1, 0.1]
                     elif type_name == "joint":
-                        joint = body.add_joint(name=value)
-                        joint.type = {
+                        element = body.add_joint(name=value)
+                        element.type = {
                             "slide": mujoco.mjtJoint.mjJNT_SLIDE,
                             "ball": mujoco.mjtJoint.mjJNT_BALL,
                             "free": mujoco.mjtJoint.mjJNT_FREE,
                         }.get(subtype, mujoco.mjtJoint.mjJNT_HINGE)
                     elif type_name == "site":
-                        site = body.add_site(name=value)
-                        site.type = mujoco.mjtGeom.mjGEOM_SPHERE
-                        site.size = [0.03, 0.03, 0.03]
+                        element = body.add_site(name=value)
+                        element.type = mujoco.mjtGeom.mjGEOM_SPHERE
+                        element.size = [0.03, 0.03, 0.03]
                     elif type_name == "camera":
-                        body.add_camera(name=value)
+                        element = body.add_camera(name=value)
                     elif type_name == "light":
-                        body.add_light(name=value)
+                        element = body.add_light(name=value)
                     else:
                         raise ValueError(f"Unsupported model element type {type_name!r}")
                     target_type = NodeType(type_name if type_name != "body" else "link")
@@ -963,13 +968,19 @@ class MuJoCoAdapter(SceneAdapterBase):
                         if key in batch_identities:
                             raise ValueError(f"Duplicate model edit batch key {key!r}")
                         batch_identities[key] = target
+                        batch_elements[key] = element
                     result_identities.append(target)
                     changed_models.add(model_id)
                     continue
 
                 target = identity(edit.target)
                 model_id, node_type, current = target
-                element = self._element(model_id, node_type.value, current)
+                target_key = str(edit.target.batch_key).strip()
+                element = (
+                    batch_elements.get(target_key)
+                    if target_key
+                    else self._element(model_id, node_type.value, current)
+                )
                 spec = self._spec_for_model(model_id)
                 if spec is None or element is None:
                     raise ValueError(f"{node_type.value} {current!r} is unavailable")
@@ -1357,7 +1368,25 @@ class MuJoCoAdapter(SceneAdapterBase):
             return None
         lookup = "body" if element_type in ("link", "robot") else element_type
         finder = getattr(spec, lookup, None)
-        return finder(name) if finder is not None else None
+        element = finder(name) if finder is not None else None
+        if element is not None:
+            return element
+        # MuJoCo's name lookup can lag behind an in-place MjSpec rename until
+        # the corresponding collection is materialized. Batch edits must still
+        # be able to address that element by its new semantic identity.
+        collection = getattr(
+            spec,
+            {
+                "body": "bodies",
+                "geom": "geoms",
+                "joint": "joints",
+                "site": "sites",
+                "camera": "cameras",
+                "light": "lights",
+            }.get(lookup, ""),
+            (),
+        )
+        return next((item for item in collection if item.name == name), None)
 
     def _reset_geometry_object_ids(self) -> None:
         self._geometry_object_ids.clear()
@@ -3007,6 +3036,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             joint_types[np.asarray(m.jnt_type) == source_type] = int(visual_type)
 
         meansize = float(m.stat.meansize)
+        meanmass = float(m.stat.meanmass)
         com_bodies = np.flatnonzero(np.asarray(m.body_parentid[1:]) == 0).astype(np.int32) + 1
         inertia_bodies = np.flatnonzero(
             (np.asarray(m.body_dofnum) > 0) & (np.asarray(m.body_mass) > 0.0)
@@ -3176,7 +3206,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             contact_point_rgba=np.asarray(m.vis.rgba.contactpoint, np.float32).copy(),
             contact_force_rgba=np.asarray(m.vis.rgba.contactforce, np.float32).copy(),
             contact_friction_rgba=np.asarray(m.vis.rgba.contactfriction, np.float32).copy(),
-            contact_force_scale=float(m.vis.map.force) / float(m.stat.meanmass),
+            contact_force_scale=float(m.vis.map.force) / meanmass if meanmass > 0.0 else 0.0,
             autoconnect_width=meansize * float(m.vis.scale.connect),
             autoconnect_rgba=np.asarray(m.vis.rgba.connect, np.float32).copy(),
             bvh_type=bvh_type,

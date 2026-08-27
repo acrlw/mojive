@@ -865,6 +865,92 @@ def test_mjspec_topology_edits_round_trip_in_workspace(tmp_path: Path) -> None:
     assert not any(name.endswith("fixture_visual") for name in names)
 
 
+def test_empty_root_body_addition_keeps_diagnostics_finite() -> None:
+    document = workspace()
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    world = next(node for node in session.nodes if node.type is NodeType.WORLD)
+
+    result = session.submit(cmd.AddModelElement(world.node_id, "body", "fixture"))
+
+    assert result.ok, result.message
+    assert any(node.name == "fixture" for node in session.nodes)
+    diagnostics = session.source.diagnostics
+    assert diagnostics is not None
+    assert np.isfinite(diagnostics.contact_force_scale)
+
+
+def test_empty_root_model_edit_batch_resolves_new_body_by_key() -> None:
+    document = workspace()
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    world = next(node for node in session.nodes if node.type is NodeType.WORLD)
+    root = cmd.ModelElementRef(node_id=world.node_id)
+    fixture = cmd.ModelElementRef(batch_key="fixture")
+
+    result = session.submit(
+        cmd.ModelEditBatch(
+            (
+                cmd.AddModelElementEdit(root, "body", "fixture", key="fixture"),
+                cmd.AddModelElementEdit(fixture, "geom:box", "fixture_visual"),
+                cmd.RenameModelElementEdit(fixture, "fixture_root"),
+            )
+        )
+    )
+
+    assert result.ok, result.message
+    names = {node.name for node in session.nodes}
+    assert {"fixture_root", "fixture_visual"} <= names
+
+
+def test_model_edit_batch_restores_selection_by_model_element_identity() -> None:
+    document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    removed = next(node for node in session.nodes if node.name == "frame")
+    selected = next(
+        node
+        for node in session.nodes
+        if node.name == "mark_sphere" and node.type in (NodeType.LINK, NodeType.ROBOT)
+    )
+    assert session.submit(cmd.SelectNode(selected.node_id))
+
+    result = session.submit(
+        cmd.ModelEditBatch(
+            (cmd.RemoveModelElementEdit(cmd.ModelElementRef(node_id=removed.node_id)),)
+        )
+    )
+
+    assert result.ok, result.message
+    assert session.selected_node is not None
+    assert session.selected_node.name == "mark_sphere"
+    assert session.selected == session.selected_node.object_id
+
+    selected = session.selected_node
+    result = session.submit(
+        cmd.ModelEditBatch(
+            (
+                cmd.RenameModelElementEdit(
+                    cmd.ModelElementRef(node_id=selected.node_id), "renamed_mark_sphere"
+                ),
+            )
+        )
+    )
+    assert result.ok, result.message
+    assert session.selected_node is not None
+    assert session.selected_node.name == "renamed_mark_sphere"
+
+    selected = session.selected_node
+    result = session.submit(
+        cmd.ModelEditBatch(
+            (cmd.RemoveModelElementEdit(cmd.ModelElementRef(node_id=selected.node_id)),)
+        )
+    )
+    assert result.ok, result.message
+    assert session.selected == 0
+    assert session.selected_node is None
+
+
 def test_model_edit_batch_compiles_once_is_atomic_and_undoes_once(monkeypatch) -> None:
     document = workspace()
     model_id = document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
