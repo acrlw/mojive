@@ -362,6 +362,56 @@ def test_floating_panel_over_the_viewport_blocks_camera_input(viewer):
         viewer.sync()
 
 
+def test_floating_viewport_separates_window_and_scene_gestures(viewer):
+    from imgui_bundle import imgui
+
+    v = build(resolve("pick_scene"), "mujoco", paused=True, vsync=False, width=W, height=H)
+    try:
+        for _ in range(8):
+            v.sync()
+        imgui.set_current_context(v.window._imgui_context)
+        io = imgui.get_io()
+        assert io.config_windows_move_from_title_bar_only
+        viewport = imgui.internal.find_window_by_name("Viewport")
+        imgui.internal.dock_context_process_undock_window(
+            imgui.get_current_context(), viewport, True
+        )
+        v.sync()
+        viewport = imgui.internal.find_window_by_name("Viewport")
+        assert viewport.dock_node is None
+
+        window_before = (viewport.pos.x, viewport.pos.y)
+        yaw_before = v.app.camera.yaw
+        x, y, width, height = v.app._viewport_rect
+        drag(v, io, x + width * 0.5, y + height * 0.5, 80.0, 0.0)
+        viewport = imgui.internal.find_window_by_name("Viewport")
+        assert (viewport.pos.x, viewport.pos.y) == pytest.approx(window_before)
+        assert abs(v.app.camera.yaw - yaw_before) > 5.0
+
+        window_before = (viewport.pos.x, viewport.pos.y)
+        yaw_before = v.app.camera.yaw
+        title = viewport.title_bar_rect()
+        title_x = (title.min.x + title.max.x) * 0.5
+        title_y = (title.min.y + title.max.y) * 0.5
+        drag(v, io, title_x, title_y, 70.0, 35.0)
+        viewport = imgui.internal.find_window_by_name("Viewport")
+        assert viewport.pos.x > window_before[0] + 50.0
+        assert viewport.pos.y > window_before[1] + 20.0
+        assert v.app.camera.yaw == pytest.approx(yaw_before)
+
+        size_before = (viewport.size.x, viewport.size.y)
+        yaw_before = v.app.camera.yaw
+        edge = (viewport.pos.x + viewport.size.x - 1.0, viewport.pos.y + viewport.size.y * 0.5)
+        drag(v, io, *edge, 50.0, 0.0)
+        viewport = imgui.internal.find_window_by_name("Viewport")
+        assert viewport.size.x > size_before[0] + 30.0
+        assert viewport.size.y == pytest.approx(size_before[1])
+        assert v.app.camera.yaw == pytest.approx(yaw_before)
+    finally:
+        v.release()
+        imgui.set_current_context(viewer.window._imgui_context)
+
+
 def _project(cam, world, rect):
 
     clip = cam.proj_matrix() @ (cam.view_matrix() @ np.array([*world, 1.0], np.float64))

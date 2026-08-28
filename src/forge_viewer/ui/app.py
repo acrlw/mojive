@@ -1602,7 +1602,8 @@ class ViewerApp:
         )
         hovered_window = imgui.get_current_context().hovered_window
         hovered_name = None if hovered_window is None else str(hovered_window.name)
-        over_viewport = gs.viewport_input_allowed(inside, hovered_name)
+        viewport_window_busy = self._viewport_window_is_being_manipulated()
+        over_viewport = gs.viewport_input_allowed(inside, hovered_name) and not viewport_window_busy
         view = self._camera_view()
         hovered_ball = self.view_cube.update(view, rect, cursor, self.window.style_scale)
         self.gizmo.update_hover(
@@ -1631,7 +1632,23 @@ class ViewerApp:
             gizmo_hovered=over_viewport and self.gizmo.hovered,
             has_selection=node is not None,
             perturbing=self.session.perturb.active,
-            ui_wants_mouse=io.want_capture_mouse and not over_viewport,
+            ui_wants_mouse=viewport_window_busy or (io.want_capture_mouse and not over_viewport),
+        )
+
+    @staticmethod
+    def _viewport_window_is_being_manipulated() -> bool:
+        """Keep scene gestures out of floating-window move and resize gestures."""
+
+        context = imgui.get_current_context()
+        window = context.current_window
+        if window is None or str(window.name).rsplit("###", 1)[-1] != "Viewport":
+            return False
+        moving = context.moving_window
+        if moving is not None and int(moving.id_) == int(window.id_):
+            return True
+        return bool(
+            int(window.resize_border_held) >= 0
+            or (int(window.resize_border_hovered) >= 0 and imgui.is_mouse_down(0))
         )
 
     def _claim_gesture(self, state: gs.InputState) -> gs.Claim:

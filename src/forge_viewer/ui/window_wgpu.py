@@ -444,6 +444,7 @@ class WgpuWindow(Window):
         if self.config.docking:
             io.config_flags |= imgui.ConfigFlags_.docking_enable
         io.config_flags |= imgui.ConfigFlags_.nav_enable_keyboard
+        io.config_windows_move_from_title_bar_only = True
 
         ini = self.config.ini_path or ""
         self._ini_existed = bool(ini) and Path(ini).exists()
