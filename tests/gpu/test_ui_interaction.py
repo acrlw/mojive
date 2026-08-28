@@ -159,6 +159,43 @@ def test_all_panels_docked_not_stacked(viewer):
     assert declared <= laid_out
 
 
+def test_output_panel_filters_visible_messages(viewer):
+    from imgui_bundle import imgui
+
+    panel = viewer.app.panels.get("Output")
+    output = viewer.app.output
+    output.clear()
+    output.write("[forge/ui] FILTER_KEEP", level="warning", timestamp="10:00:00")
+    output.write("[forge/window] FILTER_HIDE", level="info", timestamp="10:00:01")
+    panel._filter_text = "forge/ui"
+    panel._level_filter = 0
+    panel._filter_cache_key = None
+    activate_panel(viewer, "Output")
+
+    visible: list[str] = []
+    original = imgui.text
+
+    def spy(value, *args, **kwargs):
+        if "FILTER_" in value:
+            visible.append(value)
+        return original(value, *args, **kwargs)
+
+    imgui.text = spy
+    try:
+        viewer.sync()
+        item_rect(viewer, "input_text_with_hint", "##output-filter")
+        item_rect(viewer, "combo", "##output-level")
+    finally:
+        imgui.text = original
+        panel._filter_text = ""
+        panel._level_filter = 0
+        panel._filter_cache_key = None
+        output.clear()
+
+    assert any("FILTER_KEEP" in value for value in visible)
+    assert all("FILTER_HIDE" not in value for value in visible)
+
+
 def test_hierarchy_visibility_toggle_does_not_select_the_row(viewer):
 
     from imgui_bundle import imgui

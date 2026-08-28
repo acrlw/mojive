@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -100,7 +101,8 @@ class OutputBuffer:
         stamp = timestamp.strftime("%H:%M:%S") if timestamp is not None else None
         self.write(f"[forge/{component}] {message}", level=level, timestamp=stamp)
 
-    def copy_text(self) -> str:
+    def copy_text(self, entries: Iterable[OutputMessage] | None = None) -> str:
+        selected = self.entries() if entries is None else entries
         return "\n".join(
-            f"{entry.timestamp} [{entry.level.upper()}] {entry.text}" for entry in self.entries()
+            f"{entry.timestamp} [{entry.level.upper()}] {entry.text}" for entry in selected
         )

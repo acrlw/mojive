@@ -44,6 +44,7 @@ from forge_viewer.ui.panels.inspector import (
     gizmo_refusal_reason,
 )
 from forge_viewer.ui.panels.joints import page_span
+from forge_viewer.ui.panels.output import filter_output_entries
 from forge_viewer.ui.panels.stats import StatsPanel, _scale_ceiling
 from forge_viewer.ui.window import ResizeLatch
 
@@ -103,6 +104,21 @@ def test_output_buffer_separates_history_from_transient_status(monkeypatch):
     assert output.active_status(now + 4.9) == status
     assert output.active_status(now + 5.0) is None
     assert "[DEBUG] runtime detail" in output.copy_text()
+
+
+def test_output_filter_combines_text_component_and_severity():
+    output = OutputBuffer()
+    output.write("[forge/window] cache detail", level="debug", timestamp="10:00:00")
+    loading = output.write("[forge/ui] Loading robot model", level="info", timestamp="10:00:01")
+    warning = output.write("[forge/window] Font fallback", level="warning", timestamp="10:00:02")
+    error = output.write("[forge/ui] Model load failed", level="error", timestamp="10:00:03")
+    entries = output.entries()
+
+    assert filter_output_entries(entries, "forge/ui loading", 0) == (loading,)
+    assert filter_output_entries(entries, "", 30) == (warning, error)
+    assert filter_output_entries(entries, "forge/ui", 40) == (error,)
+    assert "Font fallback" in output.copy_text(filter_output_entries(entries, "", 30))
+    assert "cache detail" not in output.copy_text(filter_output_entries(entries, "", 30))
 
 
 def test_default_workspace_panels_do_not_expose_accidental_close_buttons(panels: PanelSet):
