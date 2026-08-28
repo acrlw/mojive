@@ -346,7 +346,8 @@ class ViewerApp:
             self.window = Window(WindowConfig(title=self.title))
         self._sync_structure()
         self._reset_source_camera()
-        self.window.show()
+        if self.window.config.show_on_start:
+            self.window.show()
         self._started = True
         self._last_time = time.perf_counter()
 
@@ -574,6 +575,7 @@ class ViewerApp:
     def _after_model_change(self) -> None:
         self.router.abort()
         self.gizmo.cancel()
+        self.gizmo.cancel_model_placement(self.session)
         self._model_camera_id = -1
         self._model_camera_view = None
         self._structure_generation = -1

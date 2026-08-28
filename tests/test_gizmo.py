@@ -1773,6 +1773,44 @@ def test_full_hinge_range_has_no_unavailable_overlay() -> None:
     assert range_calls[0][1]["closed"] is True
 
 
+def test_active_hinge_guide_does_not_cover_the_unavailable_range() -> None:
+    cam = CameraView(
+        eye=np.array((0.0, 0.0, 5.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 1.0, 0.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._axis[:] = (0.0, 0.0, 1.0)
+    gizmo._rotation_angle = np.radians(23.0)
+    gizmo._joint_range = _JointRangeState(
+        "hinge", np.radians(23.0), np.radians(-90.0), np.radians(200.0)
+    )
+    dial = _RotationDialProjector(
+        cam,
+        RECT,
+        gizmo._start_pos,
+        gizmo._axis,
+        np.array((1.0, 0.0, 0.0)),
+        SIZE_PT,
+    )
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_joint_range(overlay, cam, RECT, 1.0)
+    gizmo._draw_rotation_guide(overlay, cam, RECT, 1.0, dial)
+
+    assert any(
+        name == "polyline" and np.allclose(args[1], JOINT_RANGE_UNAVAILABLE_COLOR)
+        for name, args, _kwargs in overlay.calls
+    )
+    assert not any(
+        name == "polyline" and kwargs.get("closed") and np.allclose(args[1], HOVER_COLOR)
+        for name, args, kwargs in overlay.calls
+    )
+    assert any(name == "fringed_concave_fill" for name, _args, _kwargs in overlay.calls)
+
+
 @pytest.mark.parametrize(
     ("joint_type", "eye", "up"),
     (

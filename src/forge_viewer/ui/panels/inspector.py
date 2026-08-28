@@ -21,6 +21,7 @@ from ...adapters.base import (
     ModelComponentPathItem,
     ModelPropertyGroup,
     NodeType,
+    SceneModelInfo,
     SceneNode,
     SiteProperties,
 )
@@ -214,7 +215,6 @@ class InspectorPanel(Panel):
         self._model_transform_generation = -1
         self._model_transform_position = np.zeros(3, np.float32)
         self._model_transform_euler = np.zeros(3, np.float64)
-        self._model_transform_dirty = False
         self._body_property_node = -1
         self._body_property_generation = -1
         self._body_property_edit: BodyProperties | None = None
@@ -244,20 +244,22 @@ class InspectorPanel(Panel):
         )
 
     def finish_frame(self, ctx: PanelContext) -> None:
+        gizmo = ctx.gizmo
+        if gizmo is not None and gizmo.model_placement_model_id >= 0:
+            node = ctx.session.selected_node
+            model_id = gizmo.model_placement_model_id
+            invalid_placement = (
+                not ctx.session.paused
+                or node is None
+                or node.type is not NodeType.MODEL
+                or node.model_id != model_id
+                or not gizmo.model_placement_active(ctx.session, model_id)
+            )
+            if invalid_placement and gizmo.cancel_model_placement(ctx.session).ok:
+                self._model_transform_model = -1
         if self._edit_transaction and not imgui.is_any_item_active():
             ctx.submit(cmd.EndEditTransaction())
             self._edit_transaction = False
-        if self._model_transform_dirty and not imgui.is_any_item_active():
-            result = ctx.submit(
-                cmd.SetSceneModelTransform(
-                    self._model_transform_model,
-                    self._model_transform_position.copy(),
-                    math3d.euler_xyz_to_mat3(np.radians(self._model_transform_euler)),
-                )
-            )
-            self._model_transform_dirty = False
-            if not result.ok:
-                self._model_transform_model = -1
 
     def _submit_edit(self, ctx: PanelContext, command) -> None:
         if imgui.is_any_item_active() and not self._edit_transaction and not ctx.session.editing:
@@ -349,17 +351,40 @@ class InspectorPanel(Panel):
         if info is None:
             return
         imgui.text_disabled(str(info.path))
+        gizmo = ctx.gizmo
+        placement_active = gizmo is not None and gizmo.model_placement_active(
+            ctx.session, info.model_id
+        )
         if self._model_transform_model != info.model_id or (
             self._model_transform_generation != ctx.session.structure_generation
-            and not self._model_transform_dirty
         ):
-            self._model_transform_model = info.model_id
-            self._model_transform_generation = ctx.session.structure_generation
-            self._model_transform_position = np.asarray(info.position, np.float32).copy()
-            self._model_transform_euler = self._continuous_euler(
-                node.node_id, np.asarray(info.rotation, np.float64).reshape(3, 3)
-            )
-        editable = ctx.session.paused and info.removable
+            self._sync_model_transform(ctx, node, info)
+        if placement_active:
+            transform = gizmo.model_placement_transform(ctx.session, info.model_id)
+            if transform is not None:
+                self._model_transform_position = np.asarray(transform[0], np.float32).copy()
+                self._model_transform_euler = self._continuous_euler(node.node_id, transform[1])
+
+        imgui.separator()
+        imgui.text("Model placement")
+        can_edit = ctx.session.paused and info.removable and gizmo is not None
+        if placement_active:
+            imgui.text_wrapped("Preview only; applying rebuilds the composed model once.")
+        else:
+            imgui.text_wrapped("Locked to avoid accidental model rebuilds.")
+            if not can_edit:
+                imgui.begin_disabled()
+            begin_placement = imgui.button("Edit Placement")
+            if not can_edit:
+                imgui.end_disabled()
+            if begin_placement and gizmo is not None:
+                result = gizmo.begin_model_placement(ctx.session, info.model_id)
+                if result.ok:
+                    placement_active = True
+                    ctx.report(result.message, level="info")
+                else:
+                    ctx.report(result.message, level="error")
+
         (pos_changed, position), (rot_changed, euler) = _vector_fields(
             ctx,
             node,
@@ -368,12 +393,40 @@ class InspectorPanel(Panel):
                 ("position", self._model_transform_position, 0.01, "%.3f", None),
                 ("rotation", self._model_transform_euler, 0.5, "%.1f°", None),
             ),
-            editable=editable,
+            editable=placement_active,
         )
-        if editable and (pos_changed or rot_changed):
-            self._model_transform_position = np.asarray(position, np.float32).copy()
-            self._model_transform_euler = np.asarray(euler, np.float64).copy()
-            self._model_transform_dirty = True
+        if placement_active and (pos_changed or rot_changed) and gizmo is not None:
+            next_position = np.asarray(position, np.float32).copy()
+            next_euler = np.asarray(euler, np.float64).copy()
+            result = gizmo.preview_model_placement(
+                ctx.session,
+                info.model_id,
+                next_position,
+                math3d.euler_xyz_to_mat3(np.radians(next_euler)),
+            )
+            if result.ok:
+                self._model_transform_position = next_position
+                self._model_transform_euler = next_euler
+            else:
+                ctx.report(result.message, level="error")
+
+        if placement_active and gizmo is not None:
+            apply = imgui.button("Apply Placement")
+            imgui.same_line()
+            cancel = imgui.button("Cancel##model-placement")
+            if apply:
+                result = gizmo.apply_model_placement(ctx.session)
+                if not result.ok:
+                    ctx.report(result.message, level="error")
+            elif cancel:
+                result = gizmo.cancel_model_placement(ctx.session)
+                if result.ok:
+                    self._model_transform_model = -1
+                    ctx.report(result.message, level="info")
+                else:
+                    ctx.report(result.message, level="error")
+            return
+
         if info.removable and imgui.button("Remove Model"):
             ctx.submit(cmd.RemoveSceneModel(info.model_id))
         if ctx.session.adapter.caps.topology_editing:
@@ -393,6 +446,16 @@ class InspectorPanel(Panel):
             self._model_components(ctx, info.model_id)
             self._model_keyframes(ctx, info.model_id)
             self._model_properties(ctx, info.model_id)
+
+    def _sync_model_transform(
+        self, ctx: PanelContext, node: SceneNode, info: SceneModelInfo
+    ) -> None:
+        self._model_transform_model = info.model_id
+        self._model_transform_generation = ctx.session.structure_generation
+        self._model_transform_position = np.asarray(info.position, np.float32).copy()
+        self._model_transform_euler = self._continuous_euler(
+            node.node_id, np.asarray(info.rotation, np.float64).reshape(3, 3)
+        )
 
     def _model_properties(self, ctx: PanelContext, model_id: int) -> None:
         generation = ctx.session.structure_generation

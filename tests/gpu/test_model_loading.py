@@ -67,6 +67,44 @@ def _item_center(viewer, function_name: str, label: str) -> tuple[float, float]:
     return found[-1]
 
 
+def _activate_panel(viewer, name: str) -> None:
+    from imgui_bundle import imgui
+
+    window = imgui.internal.find_window_by_name(name)
+    assert window is not None
+    node = window.dock_node
+    if node is None or node.selected_tab_id == window.tab_id:
+        return
+    tab = next(item for item in node.tab_bar.tabs if item.id_ == window.tab_id)
+    bar = node.tab_bar.bar_rect
+    _click(
+        viewer,
+        (bar.min.x + tab.offset + tab.width * 0.5, (bar.min.y + bar.max.y) * 0.5),
+    )
+    for _ in range(2):
+        viewer.sync()
+    assert not imgui.internal.find_window_by_name(name).hidden
+
+
+def _trigger_button(viewer, monkeypatch, label: str) -> None:
+    from imgui_bundle import imgui
+
+    original = imgui.button
+    found = []
+
+    def trigger(item_label, *args, **kwargs):
+        result = original(item_label, *args, **kwargs)
+        if item_label == label:
+            found.append(True)
+            return True
+        return result
+
+    monkeypatch.setattr(imgui, "button", trigger)
+    viewer.sync()
+    monkeypatch.setattr(imgui, "button", original)
+    assert found
+
+
 def test_file_menu_opens_model_browser(viewer, monkeypatch):
     opened = []
     viewer.sync()
@@ -463,6 +501,65 @@ def test_model_component_inspector_tracks_structured_edits():
         inspector._begin_component_edit(custom[0])
         instance.sync()
         assert inspector._component_edit == custom[0]
+    finally:
+        instance.release()
+
+
+def test_model_placement_requires_explicit_unlock_and_apply(monkeypatch):
+    monkeypatch.setenv("FORGE_VIEWER_UI_SCALE", "1")
+    instance = build_editor(vsync=False, width=1280, height=800)
+    try:
+        assert instance.app.add_model(resolve("actuator_visuals"))
+        model = next(node for node in instance.session.nodes if node.type is NodeType.MODEL)
+        assert instance.session.submit(SelectNode(model.node_id))
+        for _ in range(3):
+            instance.sync()
+        _activate_panel(instance, "Inspector")
+
+        primary = instance.session.adapter.primary
+        compile_count = 0
+        compile_model = primary._compile_composed_model
+
+        def counted_compile():
+            nonlocal compile_count
+            compile_count += 1
+            return compile_model()
+
+        monkeypatch.setattr(primary, "_compile_composed_model", counted_compile)
+        assert not instance.app.gizmo.visible
+        assert "Edit Placement" in instance.app.gizmo.last_verdict.reason
+
+        _trigger_button(instance, monkeypatch, "Edit Placement")
+        assert instance.app.gizmo.model_placement_active(instance.session, model.model_id)
+        instance.sync()
+        assert instance.app.gizmo.visible
+        assert instance.app.gizmo.preview_model_placement(
+            instance.session,
+            model.model_id,
+            np.array((1.0, 0.0, 0.0)),
+            np.eye(3),
+        )
+        instance.sync()
+        assert compile_count == 0
+
+        _trigger_button(instance, monkeypatch, "Cancel##model-placement")
+        assert compile_count == 0
+        assert not instance.app.gizmo.model_placement_active(instance.session, model.model_id)
+        instance.sync()
+        assert not instance.app.gizmo.visible
+
+        _trigger_button(instance, monkeypatch, "Edit Placement")
+        assert instance.app.gizmo.preview_model_placement(
+            instance.session,
+            model.model_id,
+            np.array((1.0, 0.0, 0.0)),
+            np.eye(3),
+        )
+        _trigger_button(instance, monkeypatch, "Apply Placement")
+
+        assert compile_count == 1
+        assert instance.session.can_undo
+        assert not instance.app.gizmo.model_placement_active(instance.session, model.model_id)
     finally:
         instance.release()
 

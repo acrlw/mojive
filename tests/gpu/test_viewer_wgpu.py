@@ -59,6 +59,7 @@ def test_window_and_backend_are_wgpu(viewer):
     v, _scene = viewer
     assert isinstance(v.backend, WgpuBackend)
     assert isinstance(v.window, WgpuWindow)
+    assert not v.window.shown
     assert v.backend.caps.name == "wgpu"
     assert v.backend.device is v.window.device
     fb_w, fb_h = v.window.size_pixels

@@ -2671,7 +2671,7 @@ def test_model_transform_preview_moves_frames_without_recompiling(monkeypatch) -
     assert cleared_frame.body_xpos[node.body_index] == pytest.approx(before_position)
 
 
-def test_model_gizmo_commits_one_compile_after_preview(monkeypatch) -> None:
+def test_model_placement_stays_preview_only_until_explicit_apply(monkeypatch) -> None:
     from forge_viewer.gizmo import GizmoHandle
     from forge_viewer.ui.gizmo import ObjectGizmo
 
@@ -2695,19 +2695,38 @@ def test_model_gizmo_commits_one_compile_after_preview(monkeypatch) -> None:
 
     monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
     gizmo = ObjectGizmo()
+    locked = gizmo.evaluate(session, node)
+    assert not locked.ok
+    assert "Edit Placement" in locked.reason
+    assert gizmo.begin_model_placement(session, model_id)
+    assert gizmo.evaluate(session, node).ok
     gizmo._active = GizmoHandle.X
     gizmo._start_edit(session)
 
-    result, _ = gizmo._submit_transform(session, node, np.array((2.0, 0.0, 0.0)), np.eye(3))
-    assert result.ok
+    for x in (1.25, 1.5, 2.0):
+        result, _ = gizmo._submit_transform(session, node, np.array((x, 0.0, 0.0)), np.eye(3))
+        assert result.ok
     gizmo._edit_started = True
     assert compile_count == 0
+    assert not session.editing
 
     gizmo._end(commit=True)
+
+    assert compile_count == 0
+    assert not session.can_undo
+    assert gizmo.model_placement_active(session, model_id)
+    assert next(item for item in session.scene_models if item.model_id == model_id).position == (
+        2.0,
+        0.0,
+        0.0,
+    )
+
+    assert gizmo.apply_model_placement(session)
 
     assert compile_count == 1
     assert not session.editing
     assert session.can_undo
+    assert not gizmo.model_placement_active(session, model_id)
     assert next(item for item in session.scene_models if item.model_id == model_id).position == (
         2.0,
         0.0,
@@ -2721,7 +2740,7 @@ def test_model_gizmo_commits_one_compile_after_preview(monkeypatch) -> None:
     )
 
 
-def test_cancelled_model_gizmo_discards_preview_without_recompiling(monkeypatch) -> None:
+def test_cancelled_model_placement_discards_preview_without_recompiling(monkeypatch) -> None:
     from forge_viewer.gizmo import GizmoHandle
     from forge_viewer.ui.gizmo import ObjectGizmo
 
@@ -2734,6 +2753,7 @@ def test_cancelled_model_gizmo_discards_preview_without_recompiling(monkeypatch)
     node = next(
         item for item in session.nodes if item.type is NodeType.MODEL and item.model_id == model_id
     )
+    assert session.submit(cmd.Select(node.object_id))
     compile_count = 0
     compile_model = document.primary._compile_composed_model
 
@@ -2744,13 +2764,22 @@ def test_cancelled_model_gizmo_discards_preview_without_recompiling(monkeypatch)
 
     monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
     gizmo = ObjectGizmo()
+    assert gizmo.begin_model_placement(session, model_id)
     gizmo._active = GizmoHandle.X
     gizmo._start_edit(session)
     result, _ = gizmo._submit_transform(session, node, np.array((2.0, 0.0, 0.0)), np.eye(3))
     assert result.ok
     gizmo._edit_started = True
 
-    gizmo.cancel()
+    gizmo._end(commit=True)
+    assert gizmo.model_placement_active(session, model_id)
+    assert next(item for item in session.scene_models if item.model_id == model_id).position == (
+        2.0,
+        0.0,
+        0.0,
+    )
+
+    assert gizmo.cancel_model_placement(session)
 
     assert compile_count == 0
     assert not session.editing
@@ -2760,3 +2789,31 @@ def test_cancelled_model_gizmo_discards_preview_without_recompiling(monkeypatch)
         0.0,
         0.0,
     )
+
+
+def test_unchanged_model_placement_exits_without_recompiling(monkeypatch) -> None:
+    from forge_viewer.ui.gizmo import ObjectGizmo
+
+    document = workspace()
+    model_id = document.add_scene_model(
+        ASSETS / "actuator_visuals.xml", np.array((1.0, 0.0, 0.0)), np.eye(3)
+    )
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    gizmo = ObjectGizmo()
+
+    assert gizmo.begin_model_placement(session, model_id)
+    assert gizmo.apply_model_placement(session)
+
+    assert compile_count == 0
+    assert not session.can_undo
+    assert not gizmo.model_placement_active(session, model_id)

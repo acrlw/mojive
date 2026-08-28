@@ -305,6 +305,10 @@ class ObjectGizmo:
         self._edit_session: Session | None = None
         self._model_preview: tuple[int, np.ndarray, np.ndarray] | None = None
         self._model_preview_session: Session | None = None
+        self._model_placement_model = -1
+        self._model_placement_generation = -1
+        self._model_placement_session: Session | None = None
+        self._model_placement_original: tuple[np.ndarray, np.ndarray] | None = None
         self._joint_selection: dict[int, int] = {}
         self._joint_structure_generation = -1
         self._active_joint: JointInfo | None = None
@@ -415,6 +419,122 @@ class ObjectGizmo:
 
     def cancel(self) -> None:
         self._end()
+
+    @property
+    def model_placement_model_id(self) -> int:
+        return self._model_placement_model
+
+    def model_placement_active(self, session: Session, model_id: int | None = None) -> bool:
+        active = (
+            self._model_placement_model >= 0
+            and self._model_placement_session is session
+            and self._model_placement_generation == session.structure_generation
+        )
+        return active and (model_id is None or self._model_placement_model == int(model_id))
+
+    def begin_model_placement(self, session: Session, model_id: int) -> CommandResult:
+        """Unlock one model root for preview-only placement edits."""
+
+        model_id = int(model_id)
+        if self.model_placement_active(session, model_id):
+            return CommandResult.good("Model placement is already unlocked")
+        if self._model_placement_model >= 0:
+            result = self.cancel_model_placement(session)
+            if not result.ok:
+                return result
+        if not session.paused:
+            return CommandResult.bad("Pause the simulation before editing model placement")
+        info = next((item for item in session.scene_models if item.model_id == model_id), None)
+        if info is None or not info.removable:
+            return CommandResult.bad(f"Model {model_id} placement cannot be edited")
+        position = np.asarray(info.position, np.float64).reshape(3).copy()
+        rotation = np.asarray(info.rotation, np.float64).reshape(3, 3).copy()
+        self._model_placement_model = model_id
+        self._model_placement_generation = session.structure_generation
+        self._model_placement_session = session
+        self._model_placement_original = (position, rotation)
+        return CommandResult.good("Model placement unlocked; Apply rebuilds the composed model")
+
+    def model_placement_transform(
+        self, session: Session, model_id: int
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        if not self.model_placement_active(session, model_id):
+            return None
+        if self._model_preview is not None and self._model_preview[0] == int(model_id):
+            return self._model_preview[1].copy(), self._model_preview[2].copy()
+        original = self._model_placement_original
+        if original is None:
+            return None
+        return original[0].copy(), original[1].copy()
+
+    def preview_model_placement(
+        self, session: Session, model_id: int, position, rotation
+    ) -> CommandResult:
+        """Update render-frame placement without compiling the model."""
+
+        model_id = int(model_id)
+        if not self.model_placement_active(session, model_id):
+            return CommandResult.bad("Use Edit Placement in the Inspector before moving a model")
+        position = np.asarray(position, np.float64).reshape(3).copy()
+        rotation = np.asarray(rotation, np.float64).reshape(3, 3).copy()
+        result = session.submit(PreviewSceneModelTransform(model_id, position, rotation))
+        if result.ok:
+            self._model_preview = (model_id, position, rotation)
+            self._model_preview_session = session
+        return result
+
+    def apply_model_placement(self, session: Session) -> CommandResult:
+        """Commit one staged model placement, compiling at most once."""
+
+        model_id = self._model_placement_model
+        if not self.model_placement_active(session, model_id):
+            self._reset_model_placement()
+            return CommandResult.bad("Model placement preview is no longer valid")
+        preview = self._model_preview
+        original = self._model_placement_original
+        if preview is None or original is None:
+            self._reset_model_placement()
+            return CommandResult.good("Model placement unchanged")
+        changed = not (
+            np.array_equal(preview[1], original[0]) and np.array_equal(preview[2], original[1])
+        )
+        if not changed:
+            result = session.submit(ClearSceneModelTransformPreview(model_id))
+            if result.ok:
+                self._reset_model_placement()
+                return CommandResult.good("Model placement unchanged")
+            return result
+        result = session.submit(SetSceneModelTransform(model_id, preview[1], preview[2]))
+        if result.ok:
+            self._reset_model_placement()
+        return result
+
+    def cancel_model_placement(self, session: Session) -> CommandResult:
+        """Discard a staged placement without compiling the model."""
+
+        model_id = self._model_placement_model
+        if model_id < 0:
+            return CommandResult.good()
+        preview_is_current = (
+            self._model_preview is not None
+            and self._model_preview_session is session
+            and self._model_placement_session is session
+            and self._model_placement_generation == session.structure_generation
+        )
+        if preview_is_current:
+            result = session.submit(ClearSceneModelTransformPreview(model_id))
+            if not result.ok:
+                return result
+        self._reset_model_placement()
+        return CommandResult.good("Cancelled model placement")
+
+    def _reset_model_placement(self) -> None:
+        self._model_preview = None
+        self._model_preview_session = None
+        self._model_placement_model = -1
+        self._model_placement_generation = -1
+        self._model_placement_session = None
+        self._model_placement_original = None
 
     def precise_input(self, session: Session) -> PreciseGizmoInput | None:
         """Describe the hovered scalar handle for a relative numeric edit."""
@@ -584,7 +704,11 @@ class ObjectGizmo:
                 else float(np.radians(applied_amount))
             )
         result, _position = self._submit_transform(
-            session, node, position, rotation, preview_model=False
+            session,
+            node,
+            position,
+            rotation,
+            preview_model=node.type is NodeType.MODEL,
         )
         self._end()
         if not result.ok:
@@ -1340,10 +1464,6 @@ class ObjectGizmo:
         )
 
         dial_segments = _rotation_dial_segments(cam, self._start_pos, self._axis)
-        reference = dial.points(
-            ring_radius,
-            np.linspace(0.0, 2.0 * np.pi, dial_segments, endpoint=False),
-        )
         point_count = max(2, int(np.ceil(dial_segments * abs(sweep) / (2.0 * np.pi))) + 1)
         angles = np.linspace(0.0, sweep, point_count)
         arc = dial.points(ring_radius, angles)
@@ -1359,13 +1479,19 @@ class ObjectGizmo:
         if fill_alpha > 0.0:
             fill = (1.0, 0.5, 0.06, fill_alpha)
             overlay.triangle_fan_fill(sector, fill)
-        if np.all(reference[:, 2] > 0.0):
-            overlay.polyline(
-                reference[:, :2],
-                _with_alpha(HOVER_COLOR, projection_alpha),
-                RING_WIDTH_PT * style_scale,
-                closed=True,
+        joint_range_ring = self._joint_range is not None and self._joint_range.joint_type == "hinge"
+        if not joint_range_ring:
+            reference = dial.points(
+                ring_radius,
+                np.linspace(0.0, 2.0 * np.pi, dial_segments, endpoint=False),
             )
+            if np.all(reference[:, 2] > 0.0):
+                overlay.polyline(
+                    reference[:, :2],
+                    _with_alpha(HOVER_COLOR, projection_alpha),
+                    RING_WIDTH_PT * style_scale,
+                    closed=True,
+                )
         if abs(sweep) > 1e-6:
             width = RING_WIDTH_PT * style_scale
             start_tick = dial.tick(ring_radius, float(angles[0]), 1.0)
@@ -1591,9 +1717,11 @@ class ObjectGizmo:
                 else:
                     pos = self._start_pos + self._axis * applied
                 command = SetQpos(joint.qpos_adr, value)
+        elif node.type is NodeType.MODEL and preview_model:
+            result = self.preview_model_placement(session, node.model_id, pos, mat)
+            return result, pos
         elif node.type is NodeType.MODEL:
-            command_type = PreviewSceneModelTransform if preview_model else SetSceneModelTransform
-            command = command_type(
+            command = SetSceneModelTransform(
                 model_id=node.model_id,
                 position=np.asarray(pos, np.float32),
                 rotation=np.asarray(mat, np.float32),
@@ -1614,13 +1742,6 @@ class ObjectGizmo:
         if command is None:
             return CommandResult.bad("Entity transform is unavailable"), pos
         result = session.submit(command)
-        if result.ok and preview_model and node.type is NodeType.MODEL:
-            self._model_preview = (
-                int(node.model_id),
-                np.asarray(pos, np.float64).copy(),
-                np.asarray(mat, np.float64).reshape(3, 3).copy(),
-            )
-            self._model_preview_session = session
         return result, pos
 
     def _format_value(self, position) -> str:
@@ -1755,6 +1876,13 @@ class ObjectGizmo:
 
     def evaluate(self, session: Session, node: SceneNode | None) -> Verdict:
         """Return the actual viewport-gizmo availability for one scene node."""
+
+        if (
+            node is not None
+            and node.type is NodeType.MODEL
+            and not self.model_placement_active(session, node.model_id)
+        ):
+            return Verdict(False, "Model placement is locked; use Edit Placement in the Inspector")
         target, reason = self._joint_target(session, node)
         if node is not None and not node.posable and node.type in (NodeType.LINK, NodeType.ROBOT):
             if not session.paused:
@@ -1789,6 +1917,9 @@ class ObjectGizmo:
     def _start_edit(self, session: Session) -> None:
         if self._active_joint is not None or not session.adapter.caps.edit_history:
             return
+        node = session.selected_node
+        if node is not None and node.type is NodeType.MODEL:
+            return
         result = session.submit(BeginEditTransaction(f"{self._mode.value.title()} transform"))
         if result.ok:
             self._edit_session = session
@@ -1797,15 +1928,19 @@ class ObjectGizmo:
         if self._model_preview is not None and self._model_preview_session is not None:
             model_id, position, rotation = self._model_preview
             session = self._model_preview_session
-            if commit and self._edit_started:
+            placement_active = self.model_placement_active(session, model_id)
+            if placement_active:
+                pass
+            elif commit and self._edit_started:
                 result = session.submit(SetSceneModelTransform(model_id, position, rotation))
                 if not result.ok:
                     session.submit(ClearSceneModelTransformPreview(model_id))
                     self._verdict = Verdict(False, result.message)
             else:
                 session.submit(ClearSceneModelTransformPreview(model_id))
-            self._model_preview = None
-            self._model_preview_session = None
+            if not placement_active:
+                self._model_preview = None
+                self._model_preview_session = None
         if self._edit_session is not None:
             self._edit_session.submit(EndEditTransaction())
             self._edit_session = None

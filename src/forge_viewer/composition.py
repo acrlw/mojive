@@ -144,6 +144,7 @@ def build(
     height: int = 1000,
     samples: int = 4,
     title: str = "forge-viewer",
+    show_window: bool = True,
 ) -> Viewer:
     """Build an interactive viewer for a model or scene asset.
 
@@ -156,6 +157,8 @@ def build(
         height: Initial logical window height.
         samples: Requested MSAA sample count.
         title: Native window title.
+        show_window: Show the native window when rendering starts. Disable for
+            automated UI tests and off-screen capture.
 
     Returns:
         A composed viewer ready to run or step manually.
@@ -171,6 +174,7 @@ def build(
         height=height,
         samples=samples,
         title=title,
+        show_window=show_window,
     )
 
 
@@ -184,6 +188,7 @@ def build_workspace(
     height: int = 1000,
     samples: int = 4,
     title: str = "forge-viewer",
+    show_window: bool = True,
 ) -> Viewer:
     """Build an editable workspace around a model adapter."""
     from .adapters.workspace import WorkspaceAdapter
@@ -198,6 +203,7 @@ def build_workspace(
         height=height,
         samples=samples,
         title=title,
+        show_window=show_window,
     )
 
 
@@ -210,6 +216,7 @@ def build_from_adapter(
     height: int = 1000,
     samples: int = 4,
     title: str = "forge-viewer",
+    show_window: bool = True,
 ) -> Viewer:
     """Build an interactive viewer around an initialized scene adapter."""
 
@@ -222,6 +229,7 @@ def build_from_adapter(
         height=height,
         samples=samples,
         title=title,
+        show_window=show_window,
     )
 
 
@@ -253,6 +261,7 @@ def _compose(
     height: int,
     samples: int,
     title: str,
+    show_window: bool,
 ) -> Viewer:
     from . import commands as cmd
     from .bridge import DebugBridge
@@ -267,6 +276,7 @@ def _compose(
         height=height,
         vsync=vsync,
         ini_path=ini,
+        show_on_start=show_window,
     )
 
     window = None

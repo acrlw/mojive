@@ -18,6 +18,26 @@ def _load_glfw():
 
 glfw = _load_glfw()
 
+
+@pytest.fixture(autouse=True, scope="session")
+def _keep_composed_windows_hidden():
+    """Prevent automated UI tests from interrupting the active desktop."""
+
+    from forge_viewer import composition
+
+    original = composition._compose
+
+    def hidden_compose(*args, **kwargs):
+        kwargs["show_window"] = False
+        return original(*args, **kwargs)
+
+    composition._compose = hidden_compose
+    try:
+        yield
+    finally:
+        composition._compose = original
+
+
 try:
     import moderngl
 except ImportError:  # pragma: no cover

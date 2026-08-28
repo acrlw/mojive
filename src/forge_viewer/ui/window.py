@@ -150,6 +150,7 @@ class WindowConfig:
 
     docking: bool = True
     ini_path: str | None = "imgui.ini"
+    show_on_start: bool = True
 
     clear_color: tuple[float, float, float, float] = (0.09, 0.10, 0.11, 1.0)
     font_size_pt: float = 14.0
