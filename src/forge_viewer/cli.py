@@ -234,6 +234,9 @@ def cmd_audit(args: argparse.Namespace) -> int:
                     f"  {finding['status'].upper():<11} {finding['feature']:<20} "
                     f"x{finding['count']:<4} {finding['detail']}"
                 )
+            schema = report["schema_coverage"]
+            summary = ", ".join(f"{status}={count}" for status, count in schema["counts"].items())
+            print(f"MuJoCo {schema['mujoco_version']} schema: {summary}")
             if not report["findings"]:
                 print("  SUPPORTED   No skipped or degraded visual features found")
             enabled = [

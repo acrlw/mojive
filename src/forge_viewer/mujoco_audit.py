@@ -7,7 +7,11 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
-from .adapters.mujoco_adapter import DEFAULT_GEOM_GROUPS, mujoco
+from .adapters.mujoco_adapter import (
+    _MJCF_SCHEMA_ATTRIBUTES,
+    DEFAULT_GEOM_GROUPS,
+    mujoco,
+)
 
 
 @dataclass(frozen=True)
@@ -23,6 +27,109 @@ class Coverage:
     feature: str
     status: str
     detail: str
+
+
+@dataclass(frozen=True)
+class SchemaCoverage:
+    """Structured editor coverage for one exact MuJoCo schema element path."""
+
+    path: str
+    status: str
+    attributes: tuple[str, ...]
+    detail: str
+
+
+_STRUCTURED_GLOBAL_PATHS = {
+    ("mujoco", "compiler"),
+    ("mujoco", "compiler", "lengthrange"),
+    ("mujoco", "option"),
+    ("mujoco", "option", "flag"),
+    ("mujoco", "size"),
+    ("mujoco", "statistic"),
+    ("mujoco", "visual", "global"),
+    ("mujoco", "visual", "quality"),
+    ("mujoco", "visual", "headlight"),
+    ("mujoco", "visual", "map"),
+    ("mujoco", "visual", "scale"),
+    ("mujoco", "visual", "rgba"),
+}
+_STRUCTURED_COMPONENT_SECTIONS = {"contact", "equality", "tendon", "actuator", "sensor"}
+_PARTIAL_ASSET_TYPES = {"mesh", "hfield", "texture", "material"}
+_PARTIAL_BODY_ELEMENTS = {
+    "(world)body",
+    "inertial",
+    "joint",
+    "freejoint",
+    "geom",
+    "site",
+    "camera",
+    "light",
+}
+
+
+def _schema_path_coverage(path: tuple[str, ...]) -> tuple[str, str]:
+    if "plugin" in path[1:] or (len(path) > 1 and path[1] == "extension"):
+        return (
+            "plugin-out-of-scope",
+            "excluded from the core completion gate; loading remains MuJoCo-dependent",
+        )
+    if path in _STRUCTURED_GLOBAL_PATHS:
+        return "structured", "schema-driven Model Configuration editor"
+    if path == ("mujoco", "default"):
+        return "structured", "default-class lifecycle editor"
+    if len(path) == 3 and path[:2] == ("mujoco", "default"):
+        return "structured", "schema-driven default-class editor"
+    if len(path) >= 3 and path[1] in _STRUCTURED_COMPONENT_SECTIONS:
+        return "structured", "model component editor with schema-derived fields"
+    if path[:2] == ("mujoco", "custom") and len(path) >= 3:
+        return "structured", "custom numeric, text, and tuple component editor"
+    if path == ("mujoco", "keyframe", "key"):
+        return "structured", "keyframe lifecycle and full-state editor"
+    if len(path) >= 3 and path[:2] == ("mujoco", "asset"):
+        if path[2] in _PARTIAL_ASSET_TYPES:
+            return (
+                "structured-partial",
+                "Assets/Inspector lifecycle exists; remaining fields use the MJCF source editor",
+            )
+        if path[2] == "skin":
+            return "runtime-only", "compiled and rendered; no structured skin authoring"
+    if len(path) >= 2 and path[1] == "(world)body":
+        element = path[2] if len(path) >= 3 else path[1]
+        if element in _PARTIAL_BODY_ELEMENTS:
+            return (
+                "structured-partial",
+                "topology, gizmo, and specialized Inspector support; some attributes remain raw MJCF",
+            )
+        if element in {"composite", "flexcomp"}:
+            return "runtime-only", "compiled and rendered; no structured generator authoring"
+    if len(path) >= 2 and path[1] == "deformable":
+        return "runtime-only", "compiled and rendered; no structured flex or skin authoring"
+    return "raw-mjcf-only", "editable through the model source editor without a structured form"
+
+
+def schema_coverage() -> dict:
+    """Classify every attributed path from the exact linked MuJoCo schema."""
+
+    rows = []
+    for path, attributes in _MJCF_SCHEMA_ATTRIBUTES.items():
+        if not attributes:
+            continue
+        status, detail = _schema_path_coverage(path)
+        rows.append(SchemaCoverage("/".join(path), status, attributes, detail))
+    counts = Counter(row.status for row in rows)
+    return {
+        "mujoco_version": getattr(mujoco, "__version__", "unavailable"),
+        "counts": dict(sorted(counts.items())),
+        "rows": [asdict(row) for row in rows],
+        "source_meta": [
+            {
+                "path": name,
+                "status": "raw-mjcf-only",
+                "detail": "preprocessor/source construct preserved by the model source workflow",
+            }
+            for name in ("include", "frame", "replicate")
+        ],
+    }
 
 
 _RND_COVERAGE = (
@@ -373,6 +480,7 @@ def audit_model(model) -> dict:
         "degraded": degraded,
         "findings": [asdict(x) for x in findings],
         "coverage": visual_coverage(),
+        "schema_coverage": schema_coverage(),
     }
 
 

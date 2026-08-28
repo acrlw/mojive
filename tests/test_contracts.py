@@ -41,6 +41,7 @@ def test_adapter_and_render_extension_types_are_public():
         "VisualGroupInfo",
         "audit_model",
         "make_adapter",
+        "schema_coverage",
         "visual_coverage",
     ):
         assert name in fv.__all__
@@ -93,6 +94,27 @@ def test_mujoco_visual_audit_covers_every_enum_flag():
         for item in group
         if item["status"] == "deferred"
     ] == ["mjVIS_SDFITER"]
+
+
+def test_mujoco_schema_audit_classifies_every_attributed_path():
+    from forge_viewer.adapters.mujoco_adapter import _MJCF_SCHEMA_ATTRIBUTES
+    from forge_viewer.mujoco_audit import schema_coverage
+
+    report = schema_coverage()
+    rows = {item["path"]: item for item in report["rows"]}
+    expected = {"/".join(path) for path, fields in _MJCF_SCHEMA_ATTRIBUTES.items() if fields}
+    assert set(rows) == expected
+    assert rows["mujoco/compiler"]["status"] == "structured"
+    assert rows["mujoco/asset/hfield"]["status"] == "structured-partial"
+    assert rows["mujoco/(world)body/site"]["status"] == "structured-partial"
+    assert rows["mujoco/deformable/flex"]["status"] == "runtime-only"
+    assert rows["mujoco/extension/plugin"]["status"] == "plugin-out-of-scope"
+    assert rows["mujoco/actuator/plugin"]["status"] == "plugin-out-of-scope"
+    assert {item["path"] for item in report["source_meta"]} == {
+        "include",
+        "frame",
+        "replicate",
+    }
 
 
 def test_camera_preset_tables_agree_on_which_way_is_up():

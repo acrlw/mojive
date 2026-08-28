@@ -64,7 +64,7 @@ def __getattr__(name: str):
         from .renderer import Renderer
 
         value = Renderer
-    elif name in {"audit_model", "visual_coverage"}:
+    elif name in {"audit_model", "schema_coverage", "visual_coverage"}:
         from . import mujoco_audit
 
         value = getattr(mujoco_audit, name)
@@ -134,6 +134,7 @@ __all__ = [
     "check_adapter",
     "make_adapter",
     "read_snapshots",
+    "schema_coverage",
     "visual_coverage",
 ]
 
