@@ -46,8 +46,9 @@ AXIS_COLORS = np.array(
     ),
     np.float32,
 )
-ACTIVE_COLOR = np.array((1.0, 0.5, 0.06, 1.0), np.float32)
 HOVER_COLOR = np.array((1.0, 0.72, 0.12, 1.0), np.float32)
+# Keep active and hover as separate semantic slots even while the palette matches.
+ACTIVE_COLOR = np.array((1.0, 0.72, 0.12, 1.0), np.float32)
 JOINT_HANDLE_COLOR = np.array((0.72, 0.48, 0.95, 1.0), np.float32)
 CENTER_COLOR = np.array((0.92, 0.92, 0.92, 1.0), np.float32)
 CONTRAST_EDGE_COLOR = np.array((0.68, 0.71, 0.76, 1.0), np.float32)

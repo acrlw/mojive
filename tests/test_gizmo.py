@@ -9,7 +9,6 @@ from forge_viewer.adapters.base import FrameNeeds, NodeType
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.adapters.toy import ToyPhysicsAdapter
 from forge_viewer.gizmo import (
-    ACTIVE_COLOR,
     AXIS_START,
     CENTER_HIT_PT,
     CENTER_RADIUS,
@@ -1781,12 +1780,19 @@ def test_hinge_joint_range_uses_one_complementary_ring_across_180_degrees() -> N
 
 
 @pytest.mark.parametrize(
-    ("interaction", "expected_color"),
-    (("hovered", HOVER_COLOR), ("active", ACTIVE_COLOR)),
+    ("interaction", "color_name", "expected_color"),
+    (
+        ("hovered", "HOVER_COLOR", np.array((0.91, 0.82, 0.13, 1.0))),
+        ("active", "ACTIVE_COLOR", np.array((0.96, 0.43, 0.09, 1.0))),
+    ),
 )
-def test_hinge_joint_range_distinguishes_hover_and_active_colors(
-    interaction: str, expected_color: np.ndarray
+def test_hinge_joint_range_keeps_hover_and_active_colors_configurable(
+    monkeypatch: pytest.MonkeyPatch,
+    interaction: str,
+    color_name: str,
+    expected_color: np.ndarray,
 ) -> None:
+    monkeypatch.setattr(f"forge_viewer.ui.gizmo.{color_name}", expected_color)
     cam = CameraView(
         eye=np.array((0.0, 0.0, 5.0)),
         target=np.zeros(3),
