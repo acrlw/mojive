@@ -107,7 +107,7 @@ def test_mujoco_schema_audit_classifies_every_attributed_path():
     assert rows["mujoco/compiler"]["status"] == "structured"
     assert rows["mujoco/asset/hfield"]["status"] == "structured-partial"
     assert rows["mujoco/(world)body/site"]["status"] == "structured-partial"
-    assert rows["mujoco/deformable/flex"]["status"] == "runtime-only"
+    assert rows["mujoco/deformable/flex"]["status"] == "structured-partial"
     assert rows["mujoco/extension/plugin"]["status"] == "plugin-out-of-scope"
     assert rows["mujoco/actuator/plugin"]["status"] == "plugin-out-of-scope"
     assert {item["path"] for item in report["source_meta"]} == {

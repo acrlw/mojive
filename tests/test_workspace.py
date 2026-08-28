@@ -2429,6 +2429,64 @@ def test_structured_model_components_edit_and_round_trip(tmp_path: Path) -> None
     assert restored.model_components(model_id, "sensor") == ()
 
 
+def test_deformable_flex_and_skin_components_are_structurally_editable() -> None:
+    document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "deformables.xml"))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+
+    components = session.model_components(0, "deformable")
+    assert {item.subtype for item in components} == {"flex", "skin"}
+    skin = next(item for item in components if item.subtype == "skin")
+    assert skin.name == "ribbon"
+    assert [item.type for item in skin.path] == ["bone", "bone"]
+    assert {field.name for field in skin.path[0].fields} == {
+        "body",
+        "bindpos",
+        "bindquat",
+        "vertid",
+        "vertweight",
+    }
+    fields = tuple(
+        (field.name, "0.012" if field.name == "inflate" else field.value) for field in skin.fields
+    )
+    path = tuple(
+        (
+            item.type,
+            tuple(
+                (
+                    field.name,
+                    "0.56 0 0.85" if path_index == 0 and field.name == "bindpos" else field.value,
+                )
+                for field in item.fields
+            ),
+        )
+        for path_index, item in enumerate(skin.path)
+    )
+    edited = session.submit(
+        cmd.UpdateModelComponent(0, "deformable", skin.component_id, skin.name, fields, path)
+    )
+    assert edited.ok, edited.message
+    assert float(document.primary.model.skin_inflate[0]) == pytest.approx(0.012)
+    xml = document.scene_model_source(0)
+    assert xml is not None and 'inflate="0.012"' in xml
+    assert 'bindpos="0.56 0 0.85"' in xml
+
+    assert session.submit(cmd.Undo())
+    restored = next(
+        item for item in session.model_components(0, "deformable") if item.subtype == "skin"
+    )
+    assert {field.name: field.value for field in restored.fields}["inflate"] == "0.004"
+    assert session.submit(cmd.Redo())
+    restored = next(
+        item for item in session.model_components(0, "deformable") if item.subtype == "skin"
+    )
+    assert {field.name: field.value for field in restored.fields}["inflate"] == "0.012"
+    assert session.submit(cmd.RemoveModelComponent(0, "deformable", restored.component_id))
+    assert document.primary.model.nskin == 0
+    assert session.submit(cmd.Undo())
+    assert document.primary.model.nskin == 1
+
+
 def test_custom_numeric_text_and_tuple_authoring_round_trips(tmp_path: Path) -> None:
     document = workspace()
     assert document.model_component_presets(0, "custom") == ("numeric", "text", "tuple")

@@ -119,6 +119,7 @@ _MODEL_COMPONENT_CATEGORIES = (
     "tendon",
     "equality",
     "custom",
+    "deformable",
 )
 
 

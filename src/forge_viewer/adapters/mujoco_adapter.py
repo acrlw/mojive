@@ -124,6 +124,7 @@ _MODEL_COMPONENT_CATEGORIES = (
     "tendon",
     "equality",
     "custom",
+    "deformable",
 )
 _OBJECT_REFERENCE_TAGS = {
     "body": ("body",),
@@ -326,6 +327,7 @@ _COMPONENT_OPTIONAL_FIELDS = {
     ),
     "equality": ("active", "solref", "solimp", "polycoef"),
     "custom": (),
+    "deformable": (),
 }
 _COMPONENT_SUBTYPE_OPTIONAL_FIELDS = {
     ("contact", "pair"): (
@@ -899,6 +901,9 @@ def _component_path_fields(
     values = dict(child.attrib)
     if category == "custom" and subtype == "tuple":
         for name in _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "custom", "tuple", "element"), ()):
+            values.setdefault(name, "")
+    elif category == "deformable":
+        for name in _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "deformable", subtype, child.tag), ()):
             values.setdefault(name, "")
     return tuple(
         ModelComponentField(name, value, _field_choices(root, name, values))
@@ -2351,7 +2356,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             if str(item_kind).strip()
         )
         current_path = tuple((child.tag, tuple(child.attrib.items())) for child in element)
-        path_category = category in {"tendon", "custom"}
+        path_category = category in {"tendon", "custom", "deformable"}
         if dict(element.attrib) == next_attributes and (
             not path_category or current_path == next_path
         ):

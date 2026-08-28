@@ -103,7 +103,11 @@ def _schema_path_coverage(path: tuple[str, ...]) -> tuple[str, str]:
         if element in {"composite", "flexcomp"}:
             return "runtime-only", "compiled and rendered; no structured generator authoring"
     if len(path) >= 2 and path[1] == "deformable":
-        return "runtime-only", "compiled and rendered; no structured flex or skin authoring"
+        return (
+            "structured-partial",
+            "flex and skin fields plus existing nested declarations are editable; "
+            "creation still uses the MJCF source editor",
+        )
     return "raw-mjcf-only", "editable through the model source editor without a structured form"
 
 
