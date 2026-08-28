@@ -191,6 +191,42 @@ def test_vendored_imgui_render_path(viewer, monkeypatch):
     assert float(viewport_snap(v).std()) > 10.0
 
 
+def test_native_resize_between_draw_and_submit_stays_within_wgpu_target(viewer, monkeypatch):
+    from forge_viewer.ui import window_wgpu
+
+    v, _scene = viewer
+    window = v.window
+    original_size = window.size_points
+    target_size = (max(480, original_size[0] - 240), max(360, original_size[1] - 160))
+    original_end_frame = window.end_frame
+    resized = False
+
+    def resize_before_submit(*args, **kwargs):
+        nonlocal resized
+        if not resized:
+            resized = True
+            window_wgpu.glfw.set_window_size(window._window, *target_size)
+            window_wgpu.glfw.poll_events()
+        return original_end_frame(*args, **kwargs)
+
+    monkeypatch.setattr(window, "end_frame", resize_before_submit)
+    try:
+        # The old ImGui draw data and the new framebuffer deliberately coexist
+        # in this frame, matching a native maximize/restore event.
+        v.sync()
+        assert resized
+        v.sync()
+        image = v.app._viewport_image
+        assert image is not None
+        assert v.app._viewport_rect[2] / v.app._viewport_rect[3] == pytest.approx(image.aspect)
+    finally:
+        monkeypatch.setattr(window, "end_frame", original_end_frame)
+        window_wgpu.glfw.set_window_size(window._window, *original_size)
+        window_wgpu.glfw.poll_events()
+        for _ in range(3):
+            v.sync()
+
+
 def test_occluded_surface_keeps_the_frame_loop_alive(viewer):
     import wgpu
 

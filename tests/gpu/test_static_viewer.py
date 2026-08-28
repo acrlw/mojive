@@ -364,6 +364,36 @@ def test_settings_controls_precise_input_choice_memory(canvas, monkeypatch):
         settings.open = False
 
 
+def test_settings_exposes_view_selection_padding(canvas, monkeypatch):
+    from imgui_bundle import imgui
+
+    from forge_viewer.ui.viewcube import DEFAULT_SELECTION_PADDING
+
+    viewer, _scene = canvas
+    settings = viewer.app.panels.get("Settings")
+    assert settings is not None
+    original_drag = imgui.drag_float
+    adjusted = []
+
+    def adjust_padding(label, value, *args, **kwargs):
+        changed, current = original_drag(label, value, *args, **kwargs)
+        if label == "##view_selection_padding" and not adjusted:
+            adjusted.append(True)
+            return True, 1.75
+        return changed, current
+
+    try:
+        settings._category = "Interaction"
+        settings.open = True
+        monkeypatch.setattr(imgui, "drag_float", adjust_padding)
+        viewer.sync()
+        assert adjusted
+        assert viewer.app.view_cube.selection_padding == pytest.approx(1.75)
+    finally:
+        viewer.app.set_view_selection_padding(DEFAULT_SELECTION_PADDING)
+        settings.open = False
+
+
 def test_scene_camera_helper_is_pickable_and_transformable():
     from imgui_bundle import imgui
 

@@ -189,6 +189,7 @@ def test_viewer_restores_precise_input_preferences(tmp_path, monkeypatch):
             "remember_precise_input_choices": False,
             "precise_gizmo_absolute": True,
             "precise_gizmo_angle_unit": "radians",
+            "view_selection_padding": 1.8,
         }
     )
 
@@ -197,6 +198,10 @@ def test_viewer_restores_precise_input_preferences(tmp_path, monkeypatch):
     assert not app.gizmo.remember_precise_input_choices
     assert app._precise_gizmo_preferred_absolute
     assert app._precise_gizmo_angle_unit == "radians"
+    assert app.view_cube.selection_padding == pytest.approx(1.8)
+
+    app.set_view_selection_padding(2.25)
+    assert Localizer.load().preference("view_selection_padding") == pytest.approx(2.25)
 
 
 @pytest.mark.parametrize("value", ["zh_CN", "zh-CN", "zh_CN.UTF-8", "zh_CN:zh"])

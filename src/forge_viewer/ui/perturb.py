@@ -57,6 +57,8 @@ OUTLINE_WIDTH_PT = 2.0
 OUTLINE_BORDER_WIDTH_PT = OUTLINE_WIDTH_PT + 2.0 * CONTRAST_EDGE_PT
 OUTLINE_CORNER_RADIUS_PT = 4.0
 OUTLINE_CORNER_SEGMENTS = 5
+OUTLINE_BOUNDS_PADDING_PT = 6.0
+OUTLINE_MIN_HALF_PT = 2.0
 
 DRAG_EDGE_RGBA = tuple(float(v) for v in CONTRAST_EDGE_COLOR)
 DRAG_RGBA = tuple(float(v) for v in GUIDE_CORE_COLOR)
@@ -112,6 +114,30 @@ def box_corners(center, mat3, half) -> np.ndarray:
     r = np.asarray(mat3, np.float64).reshape(3, 3)
     h = np.broadcast_to(np.asarray(half, np.float64).reshape(-1), (3,))
     return c + (_CORNER_SIGNS * h) @ r.T
+
+
+def perturb_outline_box(
+    cam: CameraView,
+    st: PerturbState,
+    rect: tuple[float, float, float, float],
+    body_center,
+    style_scale: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return the rotation perturb outline center and half extents in target body space."""
+
+    body_center = np.asarray(body_center, np.float64).reshape(3)
+    if not st.has_local_bounds:
+        size = world_scale(cam, body_center, rect[3], SIZE_PT * style_scale) / AXIS_OVERSHOOT
+        return body_center, np.full(3, size, np.float64)
+
+    rotation = np.asarray(st.target_mat, np.float64).reshape(3, 3)
+    center = body_center + rotation @ np.asarray(st.local_bounds_center, np.float64)
+    pixel_scale = world_scale(cam, center, rect[3], style_scale)
+    half = np.asarray(st.local_bounds_half, np.float64)
+    half = np.maximum(
+        half + OUTLINE_BOUNDS_PADDING_PT * pixel_scale, OUTLINE_MIN_HALF_PT * pixel_scale
+    )
+    return center, half
 
 
 def silhouette_edges(center, mat3, half, eye) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -238,7 +264,7 @@ class PerturbController:
         grab_point,
         mode: str,
         *,
-        body_radius: float = 0.1,
+        local_bounds: tuple[np.ndarray, np.ndarray] | None = None,
     ) -> PerturbState:
         st = session.perturb
         pos, mat = current_pose(session, node)
@@ -252,7 +278,14 @@ class PerturbController:
         st.target_pos = pos.astype(np.float32)
         st.target_mat = mat.astype(np.float32)
         st.plane_depth = freeze_plane_depth(cam, grab_point)
-        st.body_radius = float(body_radius)
+        st.has_local_bounds = local_bounds is not None
+        if local_bounds is None:
+            st.local_bounds_center.fill(0.0)
+            st.local_bounds_half.fill(0.0)
+        else:
+            center, half = local_bounds
+            st.local_bounds_center = np.asarray(center, np.float32).reshape(3).copy()
+            st.local_bounds_half = np.maximum(np.asarray(half, np.float32).reshape(3), 0.0)
         return st
 
     def drag_translate(self, session: Session, cam: CameraView, origin, direction) -> np.ndarray:
@@ -374,14 +407,13 @@ class PerturbController:
         style_scale: float = 1.0,
     ) -> None:
         layer = dd.layer(MARK_LAYER, Occlusion.ALWAYS)
-        center = (
+        body_center = (
             np.asarray(pose[0], np.float64)
             if pose[0] is not None
             else np.asarray(st.target_pos, np.float64)
         )
-        axis_len = world_scale(cam, center, rect[3], SIZE_PT * style_scale)
-        size = axis_len / AXIS_OVERSHOOT
-        half = np.full(3, size, np.float64)
+        axis_len = world_scale(cam, body_center, rect[3], SIZE_PT * style_scale)
+        center, half = perturb_outline_box(cam, st, rect, body_center, style_scale)
 
         outline = silhouette_edges(center, st.target_mat, half, cam.eye)
         loop = silhouette_loop(outline)
@@ -414,24 +446,24 @@ class PerturbController:
         directions = rotation[:, order].T
         colors = np.asarray(AXIS_COLORS)[list(order)].copy()
         for row, direction in zip(colors, directions, strict=True):
-            row[3] = axis_handle_alpha(cam, center, direction)
+            row[3] = axis_handle_alpha(cam, body_center, direction)
         layer.arrows(
             "perturb.axes",
-            np.broadcast_to(center, (3, 3)),
-            center + directions * axis_len,
+            np.broadcast_to(body_center, (3, 3)),
+            body_center + directions * axis_len,
             colors,
             axis_width,
             start_mask_px=shell_radius,
         )
         layer.point(
             "perturb.center.edge",
-            center,
+            body_center,
             CONTRAST_EDGE_COLOR,
             (CENTER_RADIUS * SIZE_PT + CONTRAST_EDGE_PT) * ui_scale,
         )
         layer.point(
             "perturb.center",
-            center,
+            body_center,
             CENTER_COLOR,
             CENTER_RADIUS * SIZE_PT * ui_scale,
         )
@@ -459,9 +491,8 @@ def fallback_segments(
     center,
     style_scale: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
-    center = np.asarray(center, np.float64)
-    size = world_scale(cam, center, rect[3], SIZE_PT * style_scale) / AXIS_OVERSHOOT
-    edges = silhouette_edges(center, st.target_mat, np.full(3, size), cam.eye)
+    center, half = perturb_outline_box(cam, st, rect, center, style_scale)
+    edges = silhouette_edges(center, st.target_mat, half, cam.eye)
     points = silhouette_loop(edges)
     scr = project(cam, points, rect)
     return scr, np.roll(scr, -1, axis=0)

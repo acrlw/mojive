@@ -287,6 +287,49 @@ def test_frame_scene_preserves_scene_clip_planes_when_provided():
     assert view.far == pytest.approx(clip.far)
 
 
+def test_look_from_target_centers_selection_and_padding_controls_distance():
+    center = np.array((3.0, -2.0, 1.0))
+    cam = OrbitCamera(aspect=1.6)
+    sink = RecordingSink()
+
+    cam.look_from_target(90.0, 0.0, center, 2.0, sink, margin=1.0, animate=False)
+    tight_distance = cam.distance
+    assert cam.pivot == pytest.approx(center)
+    assert cam.yaw == pytest.approx(90.0)
+    assert cam.pitch == pytest.approx(0.0)
+
+    cam.look_from_target(0.0, 30.0, center, 2.0, sink, margin=1.75, animate=False)
+    assert cam.distance == pytest.approx(tight_distance * 1.75)
+    assert cam.pivot == pytest.approx(center)
+    assert cam.yaw == pytest.approx(0.0)
+    assert cam.pitch == pytest.approx(30.0)
+
+
+def test_look_from_target_updates_orthographic_framing_height():
+    cam = OrbitCamera(orthographic=True, aspect=1.0)
+    sink = RecordingSink()
+
+    cam.look_from_target(0.0, 0.0, np.zeros(3), 1.0, sink, margin=1.0, animate=False)
+    tight_height = cam.ortho_height
+    cam.look_from_target(0.0, 0.0, np.zeros(3), 1.0, sink, margin=2.0, animate=False)
+
+    assert cam.ortho_height == pytest.approx(tight_height * 2.0)
+
+
+def test_look_from_target_uses_fast_ease_out_quart():
+    from forge_viewer.ui.camera import FRAME_DURATION, _ease_out_quart
+
+    cam = OrbitCamera(pivot=np.zeros(3))
+    sink = RecordingSink()
+    target = np.array((8.0, -4.0, 2.0))
+
+    cam.look_from_target(90.0, 0.0, target, 1.0, sink, animate=True)
+    cam.advance(FRAME_DURATION * 0.25, sink)
+
+    assert cam.pivot == pytest.approx(target * _ease_out_quart(0.25))
+    assert _ease_out_quart(0.25) > 0.65
+
+
 def test_adopted_scene_clip_planes_survive_free_camera_navigation():
     clip = CameraView(
         eye=np.array([1.2, -2.1, 1.55], np.float32),

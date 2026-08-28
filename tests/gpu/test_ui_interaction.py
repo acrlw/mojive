@@ -511,6 +511,41 @@ def test_view_gizmo_click_snaps_to_that_axis(viewer, axis, sign, yaw, pitch):
     assert abs(viewer.app.camera.pitch - pitch) < 1.0
 
 
+def test_view_gizmo_click_frames_the_selected_object(viewer):
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+    from forge_viewer.adapters.base import NodeType
+
+    node = next(
+        node
+        for node in viewer.session.nodes
+        if node.object_id > 0
+        and node.body_index > 0
+        and node.type in (NodeType.ROBOT, NodeType.LINK)
+    )
+    viewer.session.submit(cmd.Select(node.object_id))
+    viewer.app.view_cube.selection_padding = 1.6
+    viewer.app.camera.pivot = np.array((20.0, -15.0, 9.0))
+    viewer.app.camera.distance = 30.0
+    viewer.sync()
+    focus = viewer.app._selected_view_focus()
+    assert focus is not None
+    center, radius = focus
+
+    ball = next(b for b in viewer.app.view_cube.balls if b.axis == 0 and b.sign == 1.0)
+    click(viewer, imgui.get_io(), ball.screen)
+    viewer.app.camera.advance(1.0, viewer.app.camera_out)
+    viewer.sync()
+
+    expected_distance, _height = viewer.app.camera._framing_distance(radius, 1.6)
+    assert viewer.app.camera.pivot == pytest.approx(center, abs=1e-5)
+    assert viewer.app.camera.distance == pytest.approx(expected_distance)
+
+    viewer.session.submit(cmd.Select(0))
+    viewer.app.view_cube.selection_padding = 1.2
+
+
 def test_view_gizmo_axis_points_at_you_when_you_look_down_it(viewer):
 
     viewer.app.camera.look_from(0.0, 0.0, viewer.app.camera_out, animate=False)

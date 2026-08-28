@@ -20,8 +20,8 @@ from forge_viewer.adapters.base import (
 )
 from forge_viewer.commands import ClearPerturb, Select
 from forge_viewer.log import configure
-from forge_viewer.session import Session
-from forge_viewer.types import CameraView
+from forge_viewer.session import Session, _node_local_bounds, _node_world_bounds
+from forge_viewer.types import CameraView, InstancePoseSource, MeshData, MeshKey, MeshShape
 from forge_viewer.ui import perturb as P
 
 APP_PATH = Path(__file__).resolve().parents[1] / "src" / "forge_viewer" / "ui" / "app.py"
@@ -315,6 +315,105 @@ def test_mark_size_reuses_the_position_gizmo_screen_scale():
     assert far == pytest.approx(near * 20.0, rel=1e-6)
 
 
+def test_target_local_bounds_combines_body_geometries_and_local_parts():
+    body_rotation = math3d.axis_angle_to_mat3((0.0, 0.0, 1.0), np.deg2rad(37.0))
+    body_position = np.array((4.0, -3.0, 2.0))
+    geom_position = body_position + body_rotation @ np.array((1.0, 0.0, 0.0))
+    cap_local = np.eye(4, dtype=np.float32)
+    cap_local[2, 3] = 2.0
+    source = SceneSource(
+        geom_mesh=[
+            MeshKey(MeshShape.BOX),
+            MeshKey(MeshShape.CAPSULE_CAP),
+            MeshKey(MeshShape.BOX),
+        ],
+        geom_size=np.array(((1.0, 2.0, 0.5), (0.25, 0.25, 0.5), (0.5, 0.5, 0.5))),
+        geom_body=np.array((1, 1, 1), np.int32),
+        geom_source=np.array((0, 0, 1), np.int32),
+        geom_pose_source=np.full(3, int(InstancePoseSource.GEOM), np.uint8),
+        geom_local=np.stack((np.eye(4), cap_local, np.eye(4))).astype(np.float32),
+        geom_infinite_plane=np.zeros(3, bool),
+    )
+    frame = SceneFrame(
+        body_xpos=np.array(((0.0, 0.0, 0.0), body_position)),
+        body_xmat=np.array((np.eye(3), body_rotation)),
+        geom_xpos=np.array((geom_position, body_position + body_rotation @ (8.0, 0.0, 0.0))),
+        geom_xmat=np.array((body_rotation, body_rotation)),
+    )
+    geom = SceneNode(10, "part", NodeType.GEOM, body_index=1, geom_index=0)
+    body = SceneNode(11, "body", NodeType.LINK, body_index=1)
+
+    geom_center, geom_half = _node_local_bounds(source, frame, geom)
+    body_center, body_half = _node_local_bounds(source, frame, body)
+
+    assert geom_center == pytest.approx((1.0, 0.0, 1.0))
+    assert geom_half == pytest.approx((1.0, 2.0, 1.5))
+    assert body_center == pytest.approx((4.25, 0.0, 1.0))
+    assert body_half == pytest.approx((4.25, 2.0, 1.5))
+
+
+def test_target_local_bounds_uses_asset_vertices_and_rejects_missing_geometry():
+    key = MeshKey(MeshShape.ASSET, 7)
+    positions = np.array(((-1.0, -2.0, -3.0), (4.0, 5.0, 6.0)), np.float32)
+    mesh = MeshData(
+        positions=positions,
+        normals=np.zeros_like(positions),
+        uvs=np.zeros((2, 2), np.float32),
+        indices=np.zeros(0, np.uint32),
+    )
+    source = SceneSource(
+        meshes={key: mesh},
+        geom_mesh=[key],
+        geom_size=np.array(((2.0, 3.0, 4.0),)),
+        geom_body=np.array((1,), np.int32),
+        geom_source=np.array((0,), np.int32),
+        geom_pose_source=np.array((int(InstancePoseSource.GEOM),), np.uint8),
+        geom_local=np.array((np.eye(4),), np.float32),
+        geom_infinite_plane=np.zeros(1, bool),
+    )
+    frame = SceneFrame(
+        body_xpos=np.zeros((2, 3)),
+        body_xmat=np.array((np.eye(3), np.eye(3))),
+        geom_xpos=np.array(((1.0, 0.0, 0.0),)),
+        geom_xmat=np.array((np.eye(3),)),
+    )
+    node = SceneNode(1, "mesh", NodeType.LINK, body_index=1)
+
+    center, half = _node_local_bounds(source, frame, node)
+
+    assert center == pytest.approx((4.0, 4.5, 6.0))
+    assert half == pytest.approx((5.0, 10.5, 18.0))
+    source.meshes.clear()
+    assert _node_local_bounds(source, frame, node) is None
+
+
+def test_model_world_bounds_scans_only_its_geometry_once():
+    source = SceneSource(
+        geom_mesh=[MeshKey(MeshShape.BOX), MeshKey(MeshShape.BOX)],
+        geom_size=np.array(((1.0, 2.0, 0.5), (4.0, 4.0, 4.0))),
+        geom_body=np.array((1, 2), np.int32),
+        geom_source=np.array((0, 1), np.int32),
+        geom_pose_source=np.full(2, int(InstancePoseSource.GEOM), np.uint8),
+        geom_local=np.array((np.eye(4), np.eye(4)), np.float32),
+        geom_infinite_plane=np.zeros(2, bool),
+    )
+    frame = SceneFrame(
+        geom_xpos=np.array(((5.0, -2.0, 1.0), (-20.0, 0.0, 0.0))),
+        geom_xmat=np.array((np.eye(3), np.eye(3))),
+    )
+    model = SceneNode(1, "selected", NodeType.MODEL, children=[2], model_id=7)
+    nodes = [
+        model,
+        SceneNode(2, "selected geom", NodeType.GEOM, parent=1, geom_index=0, model_id=7),
+        SceneNode(3, "other geom", NodeType.GEOM, geom_index=1, model_id=8),
+    ]
+
+    center, half = _node_world_bounds(source, frame, model, nodes)
+
+    assert center == pytest.approx((5.0, -2.0, 1.0))
+    assert half == pytest.approx((1.0, 2.0, 0.5))
+
+
 def test_axes_stick_out_of_the_outline():
 
     assert P.AXIS_OVERSHOOT > 1.0
@@ -568,6 +667,45 @@ def test_twist_marks_follow_the_body_position(monkeypatch):
     assert not np.allclose(seen[-1][1], session.perturb.start_mat)
     assert layer.calls["perturb.axes"][0] == pytest.approx(np.broadcast_to(center, (3, 3)))
     assert layer.calls["perturb.center"][0] == pytest.approx(center)
+
+
+def test_twist_outline_tracks_cached_bounds_while_axes_stay_on_body_origin(monkeypatch):
+    monkeypatch.setattr(P, "Occlusion", OCCLUSION)
+    session, adapter = make_session()
+    cam = side_camera((10.0, 7.0, 5.0))
+    controller = P.PerturbController()
+    local_center = np.array((0.8, -0.4, 0.3), np.float32)
+    local_half = np.array((2.0, 1.0, 0.5), np.float32)
+    controller.begin(
+        session,
+        cam,
+        session.selected_node,
+        np.zeros(3),
+        "rotate",
+        local_bounds=(local_center, local_half),
+    )
+    target_rotation = math3d.axis_angle_to_mat3((0.0, 0.0, 1.0), np.deg2rad(70.0))
+    session.perturb.target_mat = target_rotation.astype(np.float32)
+    body_center = np.array((2.0, 3.0, 4.0), np.float32)
+    adapter.body_xpos[1] = body_center
+    session.tick(FrameNeeds())
+
+    seen: list[tuple[np.ndarray, np.ndarray]] = []
+    silhouette = P.silhouette_edges
+
+    def record_silhouette(center, rotation, half, eye):
+        seen.append((np.asarray(center).copy(), np.asarray(half).copy()))
+        return silhouette(center, rotation, half, eye)
+
+    monkeypatch.setattr(P, "silhouette_edges", record_silhouette)
+    backend = DebugBackend()
+    controller.publish_marks(backend, session, cam, rect=RECT)
+
+    expected_center = body_center + target_rotation @ local_center
+    assert seen[-1][0] == pytest.approx(expected_center)
+    assert np.all(seen[-1][1] > local_half)
+    axes = backend.debug.layers[P.MARK_LAYER].calls["perturb.axes"]
+    assert axes[0] == pytest.approx(np.broadcast_to(body_center, (3, 3)))
 
 
 def test_twist_axes_reuse_position_gizmo_view_angle_fade(monkeypatch):

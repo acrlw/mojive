@@ -31,6 +31,7 @@ class PanelContext:
 
     theme: Theme = THEME
     gizmo: Any = None
+    view_cube: Any = None
     perturb: Any = None
     scene_entities: Any = None
 
@@ -50,6 +51,7 @@ class PanelContext:
     translate: Any = None
     set_language: Any = None
     set_precise_input_memory: Any = None
+    set_view_selection_padding: Any = None
     font_report: Any = None
     output: Any = None
 

@@ -40,7 +40,7 @@ from .perturb import (
 )
 from .scene_entities import SceneEntityHelpers
 from .theme import THEME, Theme
-from .viewcube import ViewCube
+from .viewcube import DEFAULT_SELECTION_PADDING, ViewCube
 from .window import Window, WindowConfig
 
 if TYPE_CHECKING:
@@ -85,6 +85,27 @@ MESH_FILTERS = [
     "All files",
     "*",
 ]
+
+
+def _fit_image_rect(
+    position: tuple[float, float],
+    available: tuple[float, float],
+    image_size: tuple[int, int],
+) -> tuple[float, float, float, float]:
+    """Aspect-fit a render target inside its current viewport panel."""
+
+    x, y = float(position[0]), float(position[1])
+    width, height = max(float(available[0]), 1.0), max(float(available[1]), 1.0)
+    image_width, image_height = max(int(image_size[0]), 1), max(int(image_size[1]), 1)
+    scale = min(width / image_width, height / image_height)
+    fitted_width = image_width * scale
+    fitted_height = image_height * scale
+    return (
+        x + (width - fitted_width) * 0.5,
+        y + (height - fitted_height) * 0.5,
+        fitted_width,
+        fitted_height,
+    )
 
 
 def _scene_save_target(path: str | Path) -> Path:
@@ -202,7 +223,14 @@ class ViewerApp:
         remember_precise = self.localizer.preference("remember_precise_input_choices", True)
         if isinstance(remember_precise, bool):
             self.gizmo.remember_precise_input_choices = remember_precise
-        self.view_cube = ViewCube()
+        selection_padding = self.localizer.preference(
+            "view_selection_padding", DEFAULT_SELECTION_PADDING
+        )
+        try:
+            selection_padding = float(selection_padding)
+        except (TypeError, ValueError):
+            selection_padding = DEFAULT_SELECTION_PADDING
+        self.view_cube = ViewCube(selection_padding)
         self.perturb = PerturbController()
         self.scene_entities = SceneEntityHelpers()
         self.router = gs.GestureRouter()
@@ -215,6 +243,7 @@ class ViewerApp:
         self._frame_index = 0
         self._last_time = time.perf_counter()
         self._viewport_rect = (0.0, 0.0, 640.0, 480.0)
+        self._viewport_panel_size = (640.0, 480.0)
         self._viewport_image: ViewportImage | None = None
         self._dt = 0.0
         self._structure_generation = -1
@@ -287,6 +316,10 @@ class ViewerApp:
                 precise_gizmo_angle_unit=self._precise_gizmo_angle_unit,
             )
         self.localizer.set_preferences(values)
+
+    def set_view_selection_padding(self, value: float) -> None:
+        self.view_cube.selection_padding = value
+        self.localizer.set_preferences({"view_selection_padding": self.view_cube.selection_padding})
 
     def set_fixed_render_size(self, width: int, height: int) -> None:
         self._fixed_render_size = (max(1, int(width)), max(1, int(height)))
@@ -1795,7 +1828,12 @@ class ViewerApp:
                 self.view_cube.drag(self.camera, *state.delta)
             elif ball is not None and self.router.released and self.router.travel < CLICK_SLOP_PT:
                 self._leave_model_camera()
-                self.view_cube.click(self.camera, ball, self.camera_out)
+                self.view_cube.click(
+                    self.camera,
+                    ball,
+                    self.camera_out,
+                    focus=self._selected_view_focus(),
+                )
             return
 
         if not self.router.wants_camera():
@@ -1903,7 +1941,7 @@ class ViewerApp:
                 node,
                 grab_point,
                 self.router.mode,
-                body_radius=self._body_radius(node),
+                local_bounds=self.session.node_local_bounds(node.node_id),
             )
         if st.mode == "translate":
             origin, direction = ray if ray is not None else self._cursor_ray(state.cursor)
@@ -1921,6 +1959,20 @@ class ViewerApp:
             ui_scale=self.window.ui_scale,
             style_scale=self.window.style_scale,
         )
+
+    def _selected_view_focus(self) -> tuple[np.ndarray, float] | None:
+        node = self.session.selected_node
+        if node is None:
+            return None
+        bounds = self.session.node_world_bounds(node.node_id)
+        if bounds is None:
+            return None
+        center, world_half = bounds
+        center = np.asarray(center, np.float64)
+        radius = float(np.linalg.norm(world_half))
+        if not np.isfinite(center).all() or not np.isfinite(radius) or radius < 1e-6:
+            return None
+        return center, radius
 
     def _poll_pick(self, state: gs.InputState) -> None:
         if not self.router.wants_camera():
@@ -2006,19 +2058,28 @@ class ViewerApp:
         imgui.begin(title, None, imgui.WindowFlags_.no_scrollbar.value)
         pos = imgui.get_cursor_screen_pos()
         size = imgui.get_content_region_avail()
-        self._viewport_rect = (
-            float(pos.x),
-            float(pos.y),
-            max(float(size.x), 1.0),
-            max(float(size.y), 1.0),
-        )
+        panel_position = (float(pos.x), float(pos.y))
+        self._viewport_panel_size = (max(float(size.x), 1.0), max(float(size.y), 1.0))
         image = self._viewport_image
         if image is None:
+            self._viewport_rect = (*panel_position, *self._viewport_panel_size)
             imgui.text_disabled("No viewport image is available")
         else:
+            self._viewport_rect = _fit_image_rect(
+                panel_position,
+                self._viewport_panel_size,
+                (image.width, image.height),
+            )
             uv0 = imgui.ImVec2(0.0, 1.0) if image.flip_y else imgui.ImVec2(0.0, 0.0)
             uv1 = imgui.ImVec2(1.0, 0.0) if image.flip_y else imgui.ImVec2(1.0, 1.0)
-            imgui.image(self.window.viewport_texture_ref(image), size, uv0, uv1)
+            x, y, width, height = self._viewport_rect
+            imgui.set_cursor_screen_pos(imgui.ImVec2(x, y))
+            imgui.image(
+                self.window.viewport_texture_ref(image),
+                imgui.ImVec2(width, height),
+                uv0,
+                uv1,
+            )
         x, y, w, h = self._viewport_rect
         imgui.push_clip_rect(imgui.ImVec2(x, y), imgui.ImVec2(x + w, y + h), True)
         try:
@@ -2287,7 +2348,7 @@ class ViewerApp:
             self.backend.resize(*self._fixed_render_size)
             self.camera.set_aspect(self._fixed_render_size[0] / self._fixed_render_size[1])
             return
-        settled = self.window.poll_render_size(self._viewport_rect[2:])
+        settled = self.window.poll_render_size(self._viewport_panel_size)
         if settled is None:
             return
         sw, sh = settled
@@ -2322,6 +2383,7 @@ class ViewerApp:
             request_texture_import=self._open_texture_dialog,
             request_geometry_resource_import=self._open_geometry_resource_dialog,
             gizmo=self.gizmo,
+            view_cube=self.view_cube,
             perturb=self.perturb,
             scene_entities=self.scene_entities,
             theme=self.theme,
@@ -2333,6 +2395,7 @@ class ViewerApp:
             translate=self.localizer.text,
             set_language=self.set_language,
             set_precise_input_memory=self.set_precise_input_choice_memory,
+            set_view_selection_padding=self.set_view_selection_padding,
             font_report=self.window.font_report,
             output=self.output,
         )
@@ -2345,13 +2408,6 @@ class ViewerApp:
         from .perturb import current_pose
 
         return current_pose(self.session, node)
-
-    def _body_radius(self, node) -> float:
-        src = self.session.source
-        if src is None or len(src.geom_size) == 0:
-            return 0.1
-        sizes = src.geom_size[np.asarray(src.geom_body) == node.body_index]
-        return float(np.max(sizes)) if len(sizes) else 0.1
 
     def apply_keys(self, keys: Keys) -> None:
         if keys.toggle_pause:

@@ -8,8 +8,9 @@ import numpy as np
 import pytest
 from imgui_bundle import imgui
 
-from forge_viewer.ui.app import _prepare_modal, _toggle_angle_input
+from forge_viewer.ui.app import _fit_image_rect, _prepare_modal, _toggle_angle_input
 from forge_viewer.ui.window import layout_scale, resolve_context_api, resolve_ui_scales
+from forge_viewer.ui.window_wgpu import _scissor_rect_for_target
 
 
 @pytest.mark.parametrize(
@@ -63,6 +64,39 @@ def test_resolve_context_api(requested: str, expected: str) -> None:
 def test_resolve_context_api_rejects_unknown_backend() -> None:
     with pytest.raises(ValueError, match="Unsupported FORGE_VIEWER_GL"):
         resolve_context_api("gles")
+
+
+def test_viewport_image_is_aspect_fitted_while_render_target_resize_is_pending() -> None:
+    assert _fit_image_rect((10.0, 20.0), (800.0, 800.0), (1600, 900)) == pytest.approx(
+        (10.0, 195.0, 800.0, 450.0)
+    )
+    assert _fit_image_rect((10.0, 20.0), (800.0, 450.0), (1600, 900)) == pytest.approx(
+        (10.0, 20.0, 800.0, 450.0)
+    )
+
+
+def test_wgpu_scissor_is_scaled_and_clamped_to_a_resized_target() -> None:
+    scissor = _scissor_rect_for_target(
+        (0.0, 40.0, 3840.0, 1978.0),
+        (0.0, 0.0),
+        (1.0, 1.0),
+        (3840, 1938),
+        (1600, 1000),
+    )
+    assert scissor == (0, 20, 1600, 980)
+
+
+def test_wgpu_scissor_discards_clips_outside_the_resized_target() -> None:
+    assert (
+        _scissor_rect_for_target(
+            (4000.0, 2000.0, 4100.0, 2100.0),
+            (0.0, 0.0),
+            (1.0, 1.0),
+            (3840, 1938),
+            (1600, 1000),
+        )
+        is None
+    )
 
 
 def test_precise_angle_input_toggles_units_without_changing_the_angle() -> None:

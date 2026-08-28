@@ -14,6 +14,11 @@ from ..gizmo import (
 )
 from ..localization import LANGUAGE_LABELS, Language, parse_language
 from ..perturb import OUTLINE_CORNER_RADIUS_PT
+from ..viewcube import (
+    DEFAULT_SELECTION_PADDING,
+    MAX_SELECTION_PADDING,
+    MIN_SELECTION_PADDING,
+)
 from . import Panel, PanelContext
 
 _RND_FLAGS: tuple[RenderFlag, ...] = (
@@ -254,6 +259,29 @@ class SettingsPanel(Panel):
                 imgui.set_tooltip("drag: adjust · double-click: enter value · right-click: reset")
             if changed:
                 ctx.gizmo.rotation_tick_scale = scale
+
+        if ctx.view_cube is not None:
+            self._property(t("view selection padding"))
+            changed, padding = imgui.drag_float(
+                "##view_selection_padding",
+                float(ctx.view_cube.selection_padding),
+                0.02,
+                MIN_SELECTION_PADDING,
+                MAX_SELECTION_PADDING,
+                "%.2fx",
+            )
+            hovered = imgui.is_item_hovered()
+            committed = imgui.is_item_deactivated_after_edit()
+            reset = False
+            if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                changed, padding = True, DEFAULT_SELECTION_PADDING
+                reset = True
+            if hovered:
+                imgui.set_tooltip(t("1x is a tight fit; larger values move the view farther away"))
+            if changed:
+                ctx.view_cube.selection_padding = padding
+            if ctx.set_view_selection_padding is not None and (committed or reset):
+                ctx.set_view_selection_padding(ctx.view_cube.selection_padding)
 
         if ctx.perturb is not None:
             self._property(t("perturb corner radius"))

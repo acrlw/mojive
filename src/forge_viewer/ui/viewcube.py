@@ -35,6 +35,10 @@ HOVER_LIFT = 0.10
 BACK_FADE_START = 0.72
 BACK_FADE_END = 0.96
 
+DEFAULT_SELECTION_PADDING = 1.2
+MIN_SELECTION_PADDING = 1.0
+MAX_SELECTION_PADDING = 4.0
+
 
 @dataclass(frozen=True)
 class Ball:
@@ -113,10 +117,11 @@ def yaw_pitch_for(axis: int, sign: float, current_yaw: float) -> tuple[float, fl
 
 
 class ViewCube:
-    def __init__(self) -> None:
+    def __init__(self, selection_padding: float = DEFAULT_SELECTION_PADDING) -> None:
         self._balls: list[Ball] = []
         self._hover: Ball | None = None
         self._center: tuple[float, float] = (0.0, 0.0)
+        self.selection_padding = selection_padding
 
     @property
     def balls(self) -> list[Ball]:
@@ -137,9 +142,33 @@ class ViewCube:
     def drag(self, camera: OrbitCamera, dx: float, dy: float) -> None:
         camera.orbit(dx, dy)
 
-    def click(self, camera: OrbitCamera, ball: Ball, sink) -> None:
+    @property
+    def selection_padding(self) -> float:
+        return self._selection_padding
+
+    @selection_padding.setter
+    def selection_padding(self, value: float) -> None:
+        parsed = float(value)
+        if not np.isfinite(parsed):
+            parsed = DEFAULT_SELECTION_PADDING
+        self._selection_padding = float(
+            np.clip(parsed, MIN_SELECTION_PADDING, MAX_SELECTION_PADDING)
+        )
+
+    def click(self, camera: OrbitCamera, ball: Ball, sink, *, focus=None) -> None:
         yaw, pitch = yaw_pitch_for(ball.axis, ball.sign, camera.yaw)
-        camera.look_from(yaw, pitch, sink)
+        if focus is None:
+            camera.look_from(yaw, pitch, sink)
+            return
+        center, radius = focus
+        camera.look_from_target(
+            yaw,
+            pitch,
+            center,
+            radius,
+            sink,
+            margin=self.selection_padding,
+        )
 
     def draw(self, overlay: Draw2D, style_scale: float = 1.0) -> None:
         if not self._balls:

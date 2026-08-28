@@ -35,7 +35,15 @@ from .adapters.base import (
     SiteProperties,
 )
 from .commands import Command, CommandResult, Query
-from .types import CameraView, Environment, Light, Material, TextureType
+from .types import (
+    CameraView,
+    Environment,
+    InstancePoseSource,
+    Light,
+    Material,
+    MeshShape,
+    TextureType,
+)
 
 
 @dataclass
@@ -53,7 +61,9 @@ class PerturbState:
     target_mat: np.ndarray = field(default_factory=lambda: np.eye(3, dtype=np.float32))
     plane_depth: float = 0.0
 
-    body_radius: float = 0.1
+    has_local_bounds: bool = False
+    local_bounds_center: np.ndarray = field(default_factory=lambda: np.zeros(3, np.float32))
+    local_bounds_half: np.ndarray = field(default_factory=lambda: np.zeros(3, np.float32))
 
 
 @dataclass(frozen=True)
@@ -110,6 +120,206 @@ def _apply_geometry_color_overrides(source: SceneSource, overrides: dict[int, np
         rgba = overrides.get(int(node_id))
         if rgba is not None:
             source.geom_rgba[instance] = rgba
+
+
+_BOUND_CORNER_SIGNS = np.array(
+    [[x, y, z] for x in (-1.0, 1.0) for y in (-1.0, 1.0) for z in (-1.0, 1.0)],
+    np.float64,
+)
+
+
+def _instance_mesh_bounds(
+    source: SceneSource, instance: int
+) -> tuple[np.ndarray, np.ndarray] | None:
+    key = source.geom_mesh[instance]
+    mesh = source.meshes.get(key)
+    if mesh is not None:
+        points = np.asarray(mesh.positions, np.float64).reshape(-1, 3)
+        points = points[np.isfinite(points).all(axis=1)]
+        if not len(points):
+            return None
+        return points.min(axis=0), points.max(axis=0)
+
+    if key.shape in {
+        MeshShape.ASSET,
+        MeshShape.HEIGHTFIELD,
+        MeshShape.FLEX,
+        MeshShape.FLEX_FACE,
+        MeshShape.SKIN,
+        MeshShape.CONVEX_HULL,
+    }:
+        return None
+    if key.shape in {MeshShape.PLANE, MeshShape.DISK}:
+        return np.array((-1.0, -1.0, 0.0)), np.array((1.0, 1.0, 0.0))
+    if key.shape in {
+        MeshShape.CAPSULE_CAP,
+        MeshShape.ARROW_SHAFT,
+        MeshShape.ARROW_HEAD,
+        MeshShape.ARROW,
+    }:
+        return np.array((-1.0, -1.0, 0.0)), np.ones(3, np.float64)
+    return -np.ones(3, np.float64), np.ones(3, np.float64)
+
+
+def _instance_world_corners(
+    source: SceneSource,
+    frame: SceneFrame,
+    instance: int,
+) -> np.ndarray | None:
+    """Return one finite rendered instance's eight world-space bound corners."""
+
+    count = source.instance_count
+    if len(source.geom_size) != count:
+        return None
+    pose_index = int(source.geom_source[instance]) if len(source.geom_source) == count else instance
+    if not 0 <= pose_index < len(frame.geom_xpos) or pose_index >= len(frame.geom_xmat):
+        return None
+    mesh_bounds = _instance_mesh_bounds(source, instance)
+    if mesh_bounds is None:
+        return None
+    mesh_lo, mesh_hi = mesh_bounds
+    mesh_center = (mesh_lo + mesh_hi) * 0.5
+    mesh_half = (mesh_hi - mesh_lo) * 0.5
+    size = np.asarray(source.geom_size[instance], np.float64).reshape(3)
+    local = (
+        np.asarray(source.geom_local[instance], np.float64).reshape(4, 4)
+        if len(source.geom_local) == count
+        else np.eye(4, dtype=np.float64)
+    )
+    geom_position = np.asarray(frame.geom_xpos[pose_index], np.float64).reshape(3)
+    geom_rotation = np.asarray(frame.geom_xmat[pose_index], np.float64).reshape(3, 3)
+    if not all(
+        np.isfinite(value).all()
+        for value in (mesh_center, mesh_half, size, local, geom_position, geom_rotation)
+    ):
+        return None
+    points = _BOUND_CORNER_SIGNS * mesh_half + mesh_center
+    points = (points * size) @ local[:3, :3].T + local[:3, 3]
+    return points @ geom_rotation.T + geom_position
+
+
+def _node_local_bounds(
+    source: SceneSource | None,
+    frame: SceneFrame,
+    node: SceneNode,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Return the selected geom or body's finite geometry bound in its body frame."""
+
+    if source is None or source.instance_count == 0 or node.body_index < 0:
+        return None
+    if frame.body_xpos is None or frame.body_xmat is None:
+        return None
+    if frame.geom_xpos is None or frame.geom_xmat is None:
+        return None
+
+    body = int(node.body_index)
+    if body >= len(frame.body_xpos) or body >= len(frame.body_xmat):
+        return None
+    body_position = np.asarray(frame.body_xpos[body], np.float64).reshape(3)
+    body_rotation = np.asarray(frame.body_xmat[body], np.float64).reshape(3, 3)
+    if not np.isfinite(body_position).all() or not np.isfinite(body_rotation).all():
+        return None
+
+    count = source.instance_count
+    if len(source.geom_body) != count or len(source.geom_size) != count:
+        return None
+    geom_only = len(source.geom_pose_source) == count
+    target_geom = int(node.geom_index) if node.type is NodeType.GEOM else -1
+    lo: np.ndarray | None = None
+    hi: np.ndarray | None = None
+    for instance in range(count):
+        if int(source.geom_body[instance]) != body:
+            continue
+        if len(source.geom_infinite_plane) == count and source.geom_infinite_plane[instance]:
+            continue
+        if geom_only and int(source.geom_pose_source[instance]) != int(InstancePoseSource.GEOM):
+            continue
+
+        pose_index = (
+            int(source.geom_source[instance]) if len(source.geom_source) == count else instance
+        )
+        if target_geom >= 0 and pose_index != target_geom:
+            continue
+        if not 0 <= pose_index < len(frame.geom_xpos) or pose_index >= len(frame.geom_xmat):
+            continue
+
+        points = _instance_world_corners(source, frame, instance)
+        if points is None:
+            continue
+        points = (points - body_position) @ body_rotation
+        part_lo, part_hi = points.min(axis=0), points.max(axis=0)
+        lo = part_lo if lo is None else np.minimum(lo, part_lo)
+        hi = part_hi if hi is None else np.maximum(hi, part_hi)
+
+    if lo is None or hi is None:
+        return None
+    return ((lo + hi) * 0.5).astype(np.float32), ((hi - lo) * 0.5).astype(np.float32)
+
+
+def _node_world_bounds(
+    source: SceneSource | None,
+    frame: SceneFrame,
+    node: SceneNode,
+    nodes: list[SceneNode],
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Return selected finite geometry bounds without nesting body/geom scans."""
+
+    if source is None or source.instance_count == 0:
+        return None
+    if frame.geom_xpos is None or frame.geom_xmat is None:
+        return None
+    count = source.instance_count
+    if len(source.geom_body) != count:
+        return None
+
+    target_geoms: set[int] | None = None
+    target_bodies: set[int] | None = None
+    if node.type is NodeType.MODEL:
+        nodes_by_id = {candidate.node_id: candidate for candidate in nodes}
+        pending = list(node.children)
+        target_geoms = set()
+        while pending:
+            candidate = nodes_by_id.get(pending.pop())
+            if candidate is None:
+                continue
+            pending.extend(candidate.children)
+            if candidate.type is NodeType.GEOM and candidate.geom_index >= 0:
+                target_geoms.add(int(candidate.geom_index))
+        if not target_geoms:
+            return None
+    elif node.body_index >= 0:
+        target_bodies = {int(node.body_index)}
+        if node.type is NodeType.GEOM and node.geom_index >= 0:
+            target_geoms = {int(node.geom_index)}
+    else:
+        return None
+
+    lo: np.ndarray | None = None
+    hi: np.ndarray | None = None
+    for instance in range(count):
+        if len(source.geom_infinite_plane) == count and source.geom_infinite_plane[instance]:
+            continue
+        if len(source.geom_pose_source) == count and int(source.geom_pose_source[instance]) != int(
+            InstancePoseSource.GEOM
+        ):
+            continue
+        pose_index = (
+            int(source.geom_source[instance]) if len(source.geom_source) == count else instance
+        )
+        if target_geoms is not None and pose_index not in target_geoms:
+            continue
+        if target_bodies is not None and int(source.geom_body[instance]) not in target_bodies:
+            continue
+        points = _instance_world_corners(source, frame, instance)
+        if points is None:
+            continue
+        part_lo, part_hi = points.min(axis=0), points.max(axis=0)
+        lo = part_lo if lo is None else np.minimum(lo, part_lo)
+        hi = part_hi if hi is None else np.maximum(hi, part_hi)
+
+    if lo is None or hi is None:
+        return None
+    return ((lo + hi) * 0.5).astype(np.float32), ((hi - lo) * 0.5).astype(np.float32)
 
 
 _SCENE_EDIT_COMMANDS = (
@@ -477,6 +687,20 @@ class Session:
     def node(self, node_id: int) -> SceneNode | None:
         """Look up a hierarchy node by node ID."""
         return self._by_node_id.get(int(node_id))
+
+    def node_local_bounds(self, node_id: int) -> tuple[np.ndarray, np.ndarray] | None:
+        """Return finite render geometry bounds in the owning body's local frame."""
+        node = self.node(node_id)
+        return None if node is None else _node_local_bounds(self._source, self._frame, node)
+
+    def node_world_bounds(self, node_id: int) -> tuple[np.ndarray, np.ndarray] | None:
+        """Return finite selected geometry bounds in world space."""
+        node = self.node(node_id)
+        return (
+            None
+            if node is None
+            else _node_world_bounds(self._source, self._frame, node, self._nodes)
+        )
 
     def node_by_object_id(self, object_id: int) -> SceneNode | None:
         """Look up a hierarchy node by selectable object ID."""

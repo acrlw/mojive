@@ -88,6 +88,10 @@ _ZH_CN = {
     "position snap (Shift)": "位置吸附（Shift）",
     "rotation snap (Shift)": "旋转吸附（Shift）",
     "rotation tick scale": "旋转刻度大小",
+    "view selection padding": "选中项视图留白",
+    "1x is a tight fit; larger values move the view farther away": (
+        "1x 为紧密适配；数值越大，视图距离越远"
+    ),
     "perturb corner radius": "扰动轮廓圆角",
     "scene entity helpers": "场景实体辅助图形",
     "selected influence volumes": "选中实体的影响范围",

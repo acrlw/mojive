@@ -1000,6 +1000,9 @@ def test_mjspec_model_composition_preserves_matching_state(tmp_path):
     model_node = next(node for node in session.nodes if node.type is NodeType.MODEL)
     assert model_node.name == "payload" and model_node.model_id == added.entity_id
     assert any(session.node(child).name == "forge_1_payload" for child in model_node.children)
+    model_center, model_half = session.node_world_bounds(model_node.node_id)
+    assert model_center == pytest.approx((1.2, 2.0, 3.0))
+    assert model_half == pytest.approx((0.1, 0.1, 0.1))
 
     removed = session.submit(cmd.RemoveSceneModel(added.entity_id))
     assert removed.ok

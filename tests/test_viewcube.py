@@ -235,6 +235,15 @@ def test_widget_sits_inside_the_viewport_corner():
     assert abs((rect[0] + rect[2]) - (cx + outer)) - vc.MARGIN_PT < 1e-6
 
 
+def test_selection_padding_is_bounded_and_non_finite_values_reset():
+    cube = vc.ViewCube(0.1)
+    assert cube.selection_padding == vc.MIN_SELECTION_PADDING
+    cube.selection_padding = 99.0
+    assert cube.selection_padding == vc.MAX_SELECTION_PADDING
+    cube.selection_padding = float("nan")
+    assert cube.selection_padding == vc.DEFAULT_SELECTION_PADDING
+
+
 def test_view_gizmo_geometry_follows_layout_scale():
     rect = (291.0, 28.0, 680.0, 554.0)
     cube = vc.ViewCube()

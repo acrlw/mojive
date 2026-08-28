@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -75,6 +76,11 @@ def _ease_out_quad(t: float) -> float:
     return t * (2.0 - t)
 
 
+def _ease_out_quart(t: float) -> float:
+    t = min(1.0, max(0.0, t))
+    return 1.0 - (1.0 - t) ** 4
+
+
 def _wrap_deg(a: float) -> float:
     return float((a + 180.0) % 360.0 - 180.0)
 
@@ -122,6 +128,7 @@ class OrbitCamera:
         self._anim: _Anim | None = None
 
         self._anim_start: _Anim | None = None
+        self._anim_easing: Callable[[float], float] = _ease_out_quad
         self._dirty = True
 
         self._out: CameraSink | None = None
@@ -283,6 +290,7 @@ class OrbitCamera:
     def _stop_anim(self) -> None:
         self._anim = None
         self._anim_start = None
+        self._anim_easing = _ease_out_quad
 
     @property
     def dirty(self) -> bool:
@@ -362,11 +370,7 @@ class OrbitCamera:
         radius = float(np.linalg.norm(hi - lo) * 0.5)
         if not np.isfinite(radius) or radius < 1e-6:
             radius = 0.5
-
-        half_y = self._fov_y * 0.5
-        half_x = float(np.arctan(np.tan(half_y) * max(self._aspect, 1e-3)))
-
-        distance = radius / max(float(np.sin(min(half_y, half_x))), 1e-3) * FRAME_MARGIN
+        distance, ortho_height = self._framing_distance(radius, FRAME_MARGIN)
 
         if clip is None:
             near = max(1e-3, (distance - radius) * 0.25)
@@ -381,11 +385,51 @@ class OrbitCamera:
             distance=distance,
             yaw=self._yaw,
             pitch=self._pitch,
-            ortho_height=2.0 * distance * float(np.tan(half_y)),
+            ortho_height=ortho_height,
         )
         self.near, self.far = float(near), float(far)
         self._apply_goal(goal, animate=animate)
         return self.publish(sink)
+
+    def look_from_target(
+        self,
+        yaw: float,
+        pitch: float,
+        center,
+        radius: float,
+        sink: CameraSink,
+        *,
+        margin: float = FRAME_MARGIN,
+        animate: bool = True,
+    ) -> CameraView:
+        """Align to one direction while framing a selected target sphere."""
+
+        target = np.asarray(center, np.float64).reshape(3)
+        target_radius = max(float(radius), 1e-6)
+        if not np.isfinite(target).all() or not np.isfinite(target_radius):
+            return self.look_from(yaw, pitch, sink, animate=animate)
+        distance, ortho_height = self._framing_distance(target_radius, margin)
+        self.near = min(self.near, max(MIN_NEAR, (distance - target_radius) * 0.25))
+        self.far = max(self.far, (distance + target_radius) * 2.0)
+        goal = _Anim(
+            pivot=target.copy(),
+            distance=distance,
+            yaw=float(yaw),
+            pitch=float(np.clip(pitch, -PITCH_LIMIT, PITCH_LIMIT)),
+            ortho_height=ortho_height,
+        )
+        self._apply_goal(goal, animate=animate, easing=_ease_out_quart)
+        return self.publish(sink)
+
+    def _framing_distance(self, radius: float, margin: float) -> tuple[float, float]:
+        half_y = self._fov_y * 0.5
+        half_x = float(np.arctan(np.tan(half_y) * max(self._aspect, 1e-3)))
+        padding = max(1.0, float(margin))
+        distance = max(
+            MIN_DISTANCE,
+            float(radius) / max(float(np.sin(min(half_y, half_x))), 1e-3) * padding,
+        )
+        return distance, 2.0 * distance * float(np.tan(half_y))
 
     def look_from(self, yaw: float, pitch: float, sink: CameraSink, *, animate: bool = True):
         goal = _Anim(
@@ -398,7 +442,13 @@ class OrbitCamera:
         self._apply_goal(goal, animate=animate)
         return self.publish(sink)
 
-    def _apply_goal(self, goal: _Anim, *, animate: bool) -> None:
+    def _apply_goal(
+        self,
+        goal: _Anim,
+        *,
+        animate: bool,
+        easing: Callable[[float], float] = _ease_out_quad,
+    ) -> None:
         if animate:
             goal.yaw = self.yaw + _wrap_deg(goal.yaw - self.yaw)
             self._anim_start = _Anim(
@@ -409,6 +459,7 @@ class OrbitCamera:
                 ortho_height=float(self.ortho_height),
             )
             self._anim = goal
+            self._anim_easing = easing
         else:
             self._stop_anim()
             self.pivot = goal.pivot.copy()
@@ -427,7 +478,7 @@ class OrbitCamera:
         start = self._anim_start
         if anim is not None and start is not None:
             anim.elapsed += max(0.0, float(dt))
-            t = _ease_out_quad(anim.elapsed / max(anim.duration, 1e-6))
+            t = self._anim_easing(anim.elapsed / max(anim.duration, 1e-6))
             self.pivot = start.pivot + (anim.pivot - start.pivot) * t
 
             self._distance = float(
@@ -443,6 +494,7 @@ class OrbitCamera:
             if anim.elapsed >= anim.duration:
                 self._anim = None
                 self._anim_start = None
+                self._anim_easing = _ease_out_quad
         if self._dirty:
             self.publish(sink)
             return True

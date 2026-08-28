@@ -7,6 +7,7 @@ non-sRGB surface preserves the display-domain colors emitted by the renderer.
 from __future__ import annotations
 
 import ctypes
+import math
 import os
 import time
 from contextlib import suppress
@@ -68,6 +69,40 @@ def _upstream_needs_imgui_192_fix() -> bool:
     return "cmd_lists_count" in ImguiWgpuBackend.render.__code__.co_names and not hasattr(
         imgui.ImDrawData, "cmd_lists_count"
     )
+
+
+def _scissor_rect_for_target(
+    clip_rect: tuple[float, float, float, float],
+    display_pos: tuple[float, float],
+    framebuffer_scale: tuple[float, float],
+    draw_size: tuple[int, int],
+    target_size: tuple[int, int],
+) -> tuple[int, int, int, int] | None:
+    """Map an ImGui clip rectangle into the current render target.
+
+    A native resize may land after ImGui generated draw data but before the
+    command encoder is finished. In that frame, draw-space and target-space
+    dimensions differ; WGPU requires every scissor rectangle to remain inside
+    the attachment that is actually being encoded.
+    """
+
+    draw_w, draw_h = draw_size
+    target_w, target_h = target_size
+    if min(draw_w, draw_h, target_w, target_h) <= 0:
+        return None
+    clip_x0 = (float(clip_rect[0]) - float(display_pos[0])) * float(framebuffer_scale[0])
+    clip_y0 = (float(clip_rect[1]) - float(display_pos[1])) * float(framebuffer_scale[1])
+    clip_x1 = (float(clip_rect[2]) - float(display_pos[0])) * float(framebuffer_scale[0])
+    clip_y1 = (float(clip_rect[3]) - float(display_pos[1])) * float(framebuffer_scale[1])
+    target_scale_x = target_w / draw_w
+    target_scale_y = target_h / draw_h
+    x0 = max(0, min(target_w, math.floor(clip_x0 * target_scale_x)))
+    y0 = max(0, min(target_h, math.floor(clip_y0 * target_scale_y)))
+    x1 = max(0, min(target_w, math.ceil(clip_x1 * target_scale_x)))
+    y1 = max(0, min(target_h, math.ceil(clip_y1 * target_scale_y)))
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return x0, y0, x1 - x0, y1 - y0
 
 
 class _WgpuImguiBackend(ImguiWgpuBackend):
@@ -151,8 +186,15 @@ class _WgpuImguiBackend(ImguiWgpuBackend):
             tex.set_tex_id(0)
             tex.set_status(imgui.ImTextureStatus.destroyed)
 
-    def render(self, draw_data, render_pass) -> None:
-        if not _upstream_needs_imgui_192_fix():
+    def render(self, draw_data, render_pass, target_size: tuple[int, int] | None = None) -> None:
+        if draw_data is not None:
+            display_width, display_height = draw_data.display_size
+            fb_width = int(display_width * draw_data.framebuffer_scale.x)
+            fb_height = int(display_height * draw_data.framebuffer_scale.y)
+        else:
+            fb_width = fb_height = 0
+        render_size = target_size or (fb_width, fb_height)
+        if not _upstream_needs_imgui_192_fix() and render_size == (fb_width, fb_height):
             return super().render(draw_data, render_pass)
 
         self._clear_pending_textures()
@@ -160,11 +202,14 @@ class _WgpuImguiBackend(ImguiWgpuBackend):
         if draw_data is None:
             return
 
-        display_width, display_height = draw_data.display_size
-        fb_width = int(display_width * draw_data.framebuffer_scale.x)
-        fb_height = int(display_height * draw_data.framebuffer_scale.y)
-
-        if fb_width <= 0 or fb_height <= 0 or draw_data.cmd_lists.size() == 0:
+        target_width, target_height = render_size
+        if (
+            fb_width <= 0
+            or fb_height <= 0
+            or target_width <= 0
+            or target_height <= 0
+            or draw_data.cmd_lists.size() == 0
+        ):
             return
 
         if draw_data.textures is not None:
@@ -175,7 +220,7 @@ class _WgpuImguiBackend(ImguiWgpuBackend):
         self._update_vertex_buffer(draw_data)
 
         self._set_render_state(draw_data)
-        render_pass.set_viewport(0, 0, fb_width, fb_height, 0, 1)
+        render_pass.set_viewport(0, 0, target_width, target_height, 0, 1)
 
         render_pass.set_pipeline(self._render_pipeline)
         render_pass.set_vertex_buffer(0, self._vertex_buffer)
@@ -217,32 +262,17 @@ class _WgpuImguiBackend(ImguiWgpuBackend):
                 render_pass.set_bind_group(1, texture_bind_group)
 
                 clip_rect = command.clip_rect
-                clip_min = [
-                    (clip_rect.x - clip_off.x) * clip_scale.x,
-                    (clip_rect.y - clip_off.y) * clip_scale.y,
-                ]
-                clip_max = [
-                    (clip_rect.z - clip_off.x) * clip_scale.x,
-                    (clip_rect.w - clip_off.y) * clip_scale.y,
-                ]
-                if clip_min[0] < 0:
-                    clip_min[0] = 0
-                if clip_min[1] < 0:
-                    clip_min[1] = 0
-                if clip_max[0] > fb_width:
-                    clip_max[0] = fb_width
-                if clip_max[1] > fb_height:
-                    clip_max[1] = fb_height
-
-                if clip_max[0] - clip_min[0] <= 0 or clip_max[1] - clip_min[1] <= 0:
+                scissor = _scissor_rect_for_target(
+                    (clip_rect.x, clip_rect.y, clip_rect.z, clip_rect.w),
+                    (clip_off.x, clip_off.y),
+                    (clip_scale.x, clip_scale.y),
+                    (fb_width, fb_height),
+                    (target_width, target_height),
+                )
+                if scissor is None:
                     continue
 
-                render_pass.set_scissor_rect(
-                    int(clip_min[0]),
-                    int(clip_min[1]),
-                    int(clip_max[0] - clip_min[0]),
-                    int(clip_max[1] - clip_min[1]),
-                )
+                render_pass.set_scissor_rect(*scissor)
 
                 render_pass.draw_indexed(
                     command.elem_count,
@@ -530,7 +560,7 @@ class WgpuWindow(Window):
                     }
                 ]
             )
-            self._imgui_backend.render(imgui.get_draw_data(), render_pass)
+            self._imgui_backend.render(imgui.get_draw_data(), render_pass, (fb_w, fb_h))
             render_pass.end()
             try:
                 surface = self._gpu_context.get_current_texture()
