@@ -90,13 +90,15 @@ DEFAULT_ROTATION_TICK_SCALE = 1.25
 SNAP_TICK_FULL_STEPS = 5.0
 SNAP_TICK_FADE_STEPS = 10.0
 ROTATION_TICK_MIN_ALPHA = 0.5
-JOINT_RANGE_RADIUS = 0.90
-JOINT_RANGE_WIDTH_PT = 3.0
+JOINT_RANGE_RADIUS = RING_RADIUS
+JOINT_RANGE_WIDTH_PT = RING_WIDTH_PT
 JOINT_RANGE_OFFSET_PT = 13.0
-JOINT_RANGE_COLOR = (0.30, 0.78, 0.46, 0.96)
-JOINT_RANGE_UNAVAILABLE_COLOR = (0.34, 0.36, 0.40, 0.68)
+JOINT_RANGE_COLOR = tuple(float(value) for value in JOINT_HANDLE_COLOR)
+JOINT_RANGE_UNAVAILABLE_COLOR = (0.34, 0.36, 0.40, 1.0)
 JOINT_LOWER_LIMIT_COLOR = (0.30, 0.58, 1.00, 1.0)
 JOINT_UPPER_LIMIT_COLOR = (1.00, 0.34, 0.28, 1.0)
+JOINT_CURRENT_TICK_PT = 11.0
+JOINT_LIMIT_TICK_PT = 14.0
 
 
 def _with_alpha(color, alpha: float) -> tuple[float, float, float, float]:
@@ -947,28 +949,42 @@ class ObjectGizmo:
             SIZE_PT * style_scale,
         )
         segments = _rotation_dial_segments(cam, origin, rotation[:, 2])
-        full_angles = np.linspace(0.0, 2.0 * np.pi, segments, endpoint=False)
-        full_ring = dial.points(JOINT_RANGE_RADIUS, full_angles)
-        if np.all(full_ring[:, 2] > 0.0):
-            overlay.polyline(
-                full_ring[:, :2],
-                _with_alpha(JOINT_RANGE_UNAVAILABLE_COLOR, alpha),
-                JOINT_RANGE_WIDTH_PT * style_scale,
-                closed=True,
-            )
-
-        span = min(state.upper - state.lower, 2.0 * np.pi)
+        full_turn = 2.0 * np.pi
+        span = float(np.clip(state.upper - state.lower, 0.0, full_turn))
         start_angle = state.lower
-        point_count = max(2, int(np.ceil(segments * span / (2.0 * np.pi))) + 1)
-        allowed_angles = np.linspace(start_angle, start_angle + span, point_count)
-        allowed = dial.points(JOINT_RANGE_RADIUS, allowed_angles)
-        if np.all(allowed[:, 2] > 0.0):
-            overlay.polyline(
-                allowed[:, :2],
-                _with_alpha(JOINT_RANGE_COLOR, alpha),
-                JOINT_RANGE_WIDTH_PT * style_scale,
-                closed=span >= 2.0 * np.pi - 1e-6,
+        unavailable_span = full_turn - span
+        full_range = unavailable_span <= 1e-6
+        if span > 1e-6:
+            point_count = max(2, int(np.ceil(segments * span / full_turn)) + 1)
+            allowed_angles = np.linspace(
+                start_angle,
+                start_angle + span,
+                segments if full_range else point_count,
+                endpoint=not full_range,
             )
+            allowed = dial.points(JOINT_RANGE_RADIUS, allowed_angles)
+            if np.all(allowed[:, 2] > 0.0):
+                overlay.polyline(
+                    allowed[:, :2],
+                    _with_alpha(JOINT_RANGE_COLOR, alpha),
+                    JOINT_RANGE_WIDTH_PT * style_scale,
+                    closed=full_range,
+                )
+        if unavailable_span > 1e-6:
+            point_count = max(2, int(np.ceil(segments * unavailable_span / full_turn)) + 1)
+            unavailable_angles = np.linspace(
+                start_angle + span,
+                start_angle + full_turn,
+                point_count,
+            )
+            unavailable = dial.points(JOINT_RANGE_RADIUS, unavailable_angles)
+            if np.all(unavailable[:, 2] > 0.0):
+                overlay.polyline(
+                    unavailable[:, :2],
+                    _with_alpha(JOINT_RANGE_UNAVAILABLE_COLOR, alpha),
+                    JOINT_RANGE_WIDTH_PT * style_scale,
+                    closed=span <= 1e-6,
+                )
 
         self._draw_hinge_limit(
             overlay,
@@ -988,7 +1004,11 @@ class ObjectGizmo:
             style_scale,
             label_above=False,
         )
-        current_tick = dial.tick(JOINT_RANGE_RADIUS, state.current, 5.0 * style_scale)
+        current_tick = dial.tick(
+            JOINT_RANGE_RADIUS,
+            state.current,
+            JOINT_CURRENT_TICK_PT * style_scale,
+        )
         if current_tick is not None:
             overlay.line(
                 current_tick[0],
@@ -1008,7 +1028,7 @@ class ObjectGizmo:
         *,
         label_above: bool,
     ) -> None:
-        tick = dial.tick(JOINT_RANGE_RADIUS, angle, 9.0 * style_scale)
+        tick = dial.tick(JOINT_RANGE_RADIUS, angle, JOINT_LIMIT_TICK_PT * style_scale)
         if tick is None:
             return
         overlay.line(tick[0], tick[1], limit_color, 3.0 * style_scale)

@@ -52,9 +52,12 @@ from forge_viewer.ui.gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,
     DEFAULT_ROTATION_TICK_SCALE,
     DEFAULT_TRANSLATION_SNAP_M,
+    JOINT_CURRENT_TICK_PT,
+    JOINT_LIMIT_TICK_PT,
     JOINT_LOWER_LIMIT_COLOR,
     JOINT_RANGE_COLOR,
     JOINT_RANGE_RADIUS,
+    JOINT_RANGE_UNAVAILABLE_COLOR,
     JOINT_UPPER_LIMIT_COLOR,
     ObjectGizmo,
     _clip_line_to_rect,
@@ -1593,11 +1596,13 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
     overlay = RecordingDraw2D()
     gizmo.draw_overlay(cam, RECT, overlay, style_scale=1.0)
 
-    range_args = next(
+    range_args = [
         args
-        for name, args, _kwargs in overlay.calls
-        if name == range_call and np.allclose(args[2 if name == "line" else 1], JOINT_RANGE_COLOR)
-    )
+        for name, args, kwargs in overlay.calls
+        if name == range_call
+        and np.allclose(args[2 if name == "line" else 1], JOINT_RANGE_COLOR)
+        and (name == "line" or kwargs.get("closed") is False)
+    ][-1]
     lower, upper = target.joint.range
     if target.joint.type == "hinge":
         dial = _RotationDialProjector(
@@ -1669,6 +1674,103 @@ def test_hinge_joint_range_continuously_fades_before_its_projection_degenerates(
     assert 0.0 < expected_alpha < 1.0
     assert range_color[3] == pytest.approx(JOINT_RANGE_COLOR[3] * expected_alpha)
     assert [color[3] for color in limit_colors] == pytest.approx([expected_alpha, expected_alpha])
+
+
+def test_hinge_joint_range_uses_one_complementary_ring_across_180_degrees() -> None:
+    cam = CameraView(
+        eye=np.array((0.0, 0.0, 5.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 1.0, 0.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    lower, upper = np.radians((-170.0, 170.0))
+    gizmo = ObjectGizmo("rotate")
+    gizmo._joint_range = _JointRangeState("hinge", 0.0, lower, upper)
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_joint_range(overlay, cam, RECT, 1.0)
+
+    allowed = next(
+        (args, kwargs)
+        for name, args, kwargs in overlay.calls
+        if name == "polyline" and np.allclose(args[1], JOINT_RANGE_COLOR)
+    )
+    unavailable = next(
+        (args, kwargs)
+        for name, args, kwargs in overlay.calls
+        if name == "polyline" and np.allclose(args[1], JOINT_RANGE_UNAVAILABLE_COLOR)
+    )
+    assert JOINT_RANGE_RADIUS == RING_RADIUS
+    assert np.allclose(JOINT_RANGE_COLOR, JOINT_HANDLE_COLOR)
+    assert allowed[1]["closed"] is False
+    assert unavailable[1]["closed"] is False
+
+    dial = _RotationDialProjector(
+        cam,
+        RECT,
+        np.zeros(3),
+        np.array((0.0, 0.0, 1.0)),
+        np.array((1.0, 0.0, 0.0)),
+        SIZE_PT,
+    )
+    expected = dial.points(
+        JOINT_RANGE_RADIUS,
+        (lower, upper, upper, lower + 2.0 * np.pi),
+    )[:, :2]
+    assert allowed[0][0][[0, -1]] == pytest.approx(expected[:2], abs=1e-6)
+    assert unavailable[0][0][[0, -1]] == pytest.approx(expected[2:], abs=1e-6)
+
+    ticks = {
+        "current": next(
+            args
+            for name, args, _kwargs in overlay.calls
+            if name == "line" and np.allclose(args[2], HOVER_COLOR)
+        ),
+        "lower": next(
+            args
+            for name, args, _kwargs in overlay.calls
+            if name == "line" and np.allclose(args[2], JOINT_LOWER_LIMIT_COLOR)
+        ),
+        "upper": next(
+            args
+            for name, args, _kwargs in overlay.calls
+            if name == "line" and np.allclose(args[2], JOINT_UPPER_LIMIT_COLOR)
+        ),
+    }
+    assert np.linalg.norm(ticks["current"][1] - ticks["current"][0]) == pytest.approx(
+        JOINT_CURRENT_TICK_PT
+    )
+    for limit in ("lower", "upper"):
+        assert np.linalg.norm(ticks[limit][1] - ticks[limit][0]) == pytest.approx(
+            JOINT_LIMIT_TICK_PT
+        )
+
+
+def test_full_hinge_range_has_no_unavailable_overlay() -> None:
+    cam = CameraView(
+        eye=np.array((0.0, 0.0, 5.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 1.0, 0.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._joint_range = _JointRangeState("hinge", 0.0, -np.pi, np.pi)
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_joint_range(overlay, cam, RECT, 1.0)
+
+    range_calls = [
+        (args, kwargs)
+        for name, args, kwargs in overlay.calls
+        if name == "polyline"
+        and (
+            np.allclose(args[1], JOINT_RANGE_COLOR)
+            or np.allclose(args[1], JOINT_RANGE_UNAVAILABLE_COLOR)
+        )
+    ]
+    assert len(range_calls) == 1
+    assert np.allclose(range_calls[0][0][1], JOINT_RANGE_COLOR)
+    assert range_calls[0][1]["closed"] is True
 
 
 @pytest.mark.parametrize(
@@ -1760,8 +1862,10 @@ def test_hinge_joint_range_stays_fixed_while_the_current_marker_moves() -> None:
         gizmo.draw_overlay(cam, RECT, overlay, style_scale=1.0)
         allowed = next(
             args[0]
-            for name, args, _kwargs in overlay.calls
-            if name == "polyline" and np.allclose(args[1], JOINT_RANGE_COLOR)
+            for name, args, kwargs in overlay.calls
+            if name == "polyline"
+            and np.allclose(args[1], JOINT_RANGE_COLOR)
+            and kwargs.get("closed") is False
         )
         current_tick = next(
             args[:2]
