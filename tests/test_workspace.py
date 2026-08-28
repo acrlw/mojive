@@ -2436,6 +2436,8 @@ def test_deformable_flex_and_skin_components_are_structurally_editable() -> None
 
     components = session.model_components(0, "deformable")
     assert {item.subtype for item in components} == {"flex", "skin"}
+    flex = next(item for item in components if item.subtype == "flex")
+    assert {field.name: field for field in flex.fields}["body"].choices == ()
     skin = next(item for item in components if item.subtype == "skin")
     assert skin.name == "ribbon"
     assert [item.type for item in skin.path] == ["bone", "bone"]
@@ -2446,6 +2448,9 @@ def test_deformable_flex_and_skin_components_are_structurally_editable() -> None
         "vertid",
         "vertweight",
     }
+    assert {"skin_root", "skin_tip"} <= set(
+        {field.name: field for field in skin.path[0].fields}["body"].choices
+    )
     fields = tuple(
         (field.name, "0.012" if field.name == "inflate" else field.value) for field in skin.fields
     )
@@ -2930,7 +2935,15 @@ def test_schema_model_properties_batch_globals_defaults_and_assets_once() -> Non
     session = Session(document)
     assert session.submit(cmd.Pause())
     groups = {group.group_id: group for group in session.model_property_groups(0)}
-    assert {"global:compiler", "global:option", "global:option/flag"} <= groups.keys()
+    assert {
+        "global:model",
+        "global:compiler",
+        "global:option",
+        "global:option/flag",
+    } <= groups.keys()
+    assert [(field.name, field.value) for field in groups["global:model"].fields] == [
+        ("model", "schema-properties")
+    ]
     assert {field.name for field in groups["global:option"].fields} >= {
         "timestep",
         "gravity",
@@ -2966,6 +2979,7 @@ def test_schema_model_properties_batch_globals_defaults_and_assets_once() -> Non
 
     adapter._replace_model_spec = counted_replace
     updates = (
+        ("global:model", (("model", "edited-properties"),)),
         ("global:option", (("timestep", "0.005"), ("gravity", "0 0 -1"))),
         ("global:size", (("nuserdata", "8"),)),
         ("global:visual/global", (("orthographic", "true"), ("fovy", "35"))),
@@ -2981,6 +2995,7 @@ def test_schema_model_properties_batch_globals_defaults_and_assets_once() -> Non
     assert adapter.model.opt.timestep == pytest.approx(0.005)
     assert adapter.model.opt.gravity == pytest.approx((0.0, 0.0, -1.0))
     edited = {group.group_id: group for group in session.model_property_groups(0)}
+    assert edited["global:model"].fields[0].value == "edited-properties"
     assert {field.name: field.value for field in edited["global:visual/global"].fields}[
         "orthographic"
     ] == "true"

@@ -40,6 +40,7 @@ class SchemaCoverage:
 
 
 _STRUCTURED_GLOBAL_PATHS = {
+    ("mujoco",),
     ("mujoco", "compiler"),
     ("mujoco", "compiler", "lengthrange"),
     ("mujoco", "option"),
@@ -92,7 +93,11 @@ def _schema_path_coverage(path: tuple[str, ...]) -> tuple[str, str]:
                 "Assets/Inspector lifecycle exists; remaining fields use the MJCF source editor",
             )
         if path[2] == "skin":
-            return "runtime-only", "compiled and rendered; no structured skin authoring"
+            return (
+                "structured-partial",
+                "normalized to deformable/skin by MjSpec and editable in Model Components; "
+                "creation still uses the MJCF source editor",
+            )
     if len(path) >= 2 and path[1] == "(world)body":
         element = path[2] if len(path) >= 3 else path[1]
         if element in _PARTIAL_BODY_ELEMENTS:

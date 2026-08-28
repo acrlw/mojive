@@ -104,8 +104,10 @@ def test_mujoco_schema_audit_classifies_every_attributed_path():
     rows = {item["path"]: item for item in report["rows"]}
     expected = {"/".join(path) for path, fields in _MJCF_SCHEMA_ATTRIBUTES.items() if fields}
     assert set(rows) == expected
+    assert rows["mujoco"]["status"] == "structured"
     assert rows["mujoco/compiler"]["status"] == "structured"
     assert rows["mujoco/asset/hfield"]["status"] == "structured-partial"
+    assert rows["mujoco/asset/skin"]["status"] == "structured-partial"
     assert rows["mujoco/(world)body/site"]["status"] == "structured-partial"
     assert rows["mujoco/deformable/flex"]["status"] == "structured-partial"
     assert rows["mujoco/extension/plugin"]["status"] == "plugin-out-of-scope"

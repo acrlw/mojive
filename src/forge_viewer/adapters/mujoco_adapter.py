@@ -176,6 +176,7 @@ def _mjcf_schema_attributes() -> dict[tuple[str, ...], tuple[str, ...]]:
 
 _MJCF_SCHEMA_ATTRIBUTES = _mjcf_schema_attributes()
 _GLOBAL_PROPERTY_GROUPS = (
+    ("global:model", "Model", ()),
     ("global:compiler", "Compiler", ("compiler",)),
     ("global:compiler/lengthrange", "Actuator Length Range", ("compiler", "lengthrange")),
     ("global:option", "Simulation Options", ("option",)),
@@ -825,6 +826,10 @@ def _component_fields(
     }
 
     def choices(name: str) -> tuple[str, ...]:
+        if category == "deformable" and name in {"body", "node"}:
+            # Direct flex declarations accept body/node arrays rather than one
+            # model-object reference, so a single-choice combo would corrupt them.
+            return ()
         references = _field_choices(root, name, values)
         if references:
             return ("", *references)
@@ -2412,7 +2417,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         root, _xml = _component_xml(spec)
         groups: list[ModelPropertyGroup] = []
         for group_id, label, path in _GLOBAL_PROPERTY_GROUPS:
-            element = root.find("/".join(path))
+            element = root if not path else root.find("/".join(path))
             attributes = dict(element.attrib) if element is not None else {}
             schema = _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", *path), ())
             names = tuple(dict.fromkeys((*schema, *attributes)))
@@ -2833,7 +2838,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             if group_id in global_paths:
                 path = global_paths[group_id]
                 allowed = _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", *path), ())
-                element = root.find("/".join(path))
+                element = root if not path else root.find("/".join(path))
                 if element is None and any(value for _name, value in fields):
                     element = _find_or_create_xml_path(root, path)
             elif group_id.startswith("asset:"):

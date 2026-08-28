@@ -97,7 +97,35 @@ def _format_keyframe_values(values: tuple[float, ...]) -> str:
     return " ".join(f"{value:.9g}" for value in values)
 
 
-def _component_value_editor(label: str, value: str, choices: tuple[str, ...]) -> str:
+_MULTILINE_COMPONENT_FIELDS = {
+    "act",
+    "body",
+    "cellcount",
+    "ctrl",
+    "data",
+    "element",
+    "elemtexcoord",
+    "face",
+    "mpos",
+    "mquat",
+    "node",
+    "point",
+    "qpos",
+    "qvel",
+    "texcoord",
+    "vertex",
+    "vertid",
+    "vertweight",
+}
+
+
+def _component_value_editor(
+    label: str,
+    value: str,
+    choices: tuple[str, ...],
+    *,
+    multiline: bool = False,
+) -> str:
     if choices:
         if imgui.begin_combo(label, value or "select"):
             for index, choice in enumerate(choices):
@@ -107,6 +135,13 @@ def _component_value_editor(label: str, value: str, choices: tuple[str, ...]) ->
                 if selected:
                     value = choice
             imgui.end_combo()
+        return value
+    if multiline:
+        _changed, value = imgui.input_text_multiline(
+            label,
+            value,
+            imgui.ImVec2(-1.0, 68.0),
+        )
         return value
     _changed, value = imgui.input_text(label, value)
     return value
@@ -880,15 +915,36 @@ class InspectorPanel(Panel):
             imgui.end_popup()
             return
         imgui.text_disabled(f"{component.category} / {component.subtype}")
-        _changed, self._component_name = imgui.input_text("name", self._component_name)
         choices = {field.name: field.choices for field in component.fields}
-        for index, field in enumerate(self._component_fields):
-            field[1] = _component_value_editor(
-                f"{field[0]}##component-field-{index}", field[1], choices.get(field[0], ())
+        if begin_kv_table("component_fields"):
+            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
+            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.text_disabled("name")
+            imgui.table_next_column()
+            imgui.set_next_item_width(-1.0)
+            _changed, self._component_name = imgui.input_text(
+                "##component-name", self._component_name
             )
+            for index, field in enumerate(self._component_fields):
+                imgui.table_next_row()
+                imgui.table_next_column()
+                imgui.text_disabled(field[0])
+                imgui.table_next_column()
+                imgui.set_next_item_width(-1.0)
+                field[1] = _component_value_editor(
+                    f"##component-field-{index}",
+                    field[1],
+                    choices.get(field[0], ()),
+                    multiline=field[0] in _MULTILINE_COMPONENT_FIELDS or len(field[1]) > 72,
+                )
+            imgui.end_table()
         if self._component_path:
             imgui.separator()
-            imgui.text_disabled("Path")
+            imgui.text_disabled(
+                "Nested declarations" if component.category == "deformable" else "Path"
+            )
         for path_index, (element_type, fields) in enumerate(tuple(self._component_path)):
             imgui.push_id(f"path-{path_index}")
             object_type = next((value for name, value in fields if name == "objtype"), "")
@@ -908,33 +964,49 @@ class InspectorPanel(Panel):
                 imgui.end_disabled()
             imgui.same_line()
             remove = imgui.small_button("Remove")
-            for field_index, field in enumerate(fields):
-                preset = _matching_path_preset(self._component_path_presets, element_type, fields)
-                preset_fields = (
-                    {item.name: item for item in preset.fields} if preset is not None else {}
-                )
-                choices = self._component_path_choices[path_index].get(field[0], ())
-                if field[0] in preset_fields:
-                    choices = preset_fields[field[0]].choices
-                previous = field[1]
-                field[1] = _component_value_editor(
-                    f"{field[0]}##path-field-{field_index}",
-                    field[1],
-                    choices,
-                )
-                if field[0] == "objtype" and field[1] != previous:
-                    next_preset = _matching_path_preset(
+            if begin_kv_table(f"component_path_fields_{path_index}"):
+                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
+                imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+                for field_index, field in enumerate(fields):
+                    preset = _matching_path_preset(
                         self._component_path_presets, element_type, fields
                     )
-                    if next_preset is not None:
-                        default_name = next(
-                            (item.value for item in next_preset.fields if item.name == "objname"),
-                            "",
+                    preset_fields = (
+                        {item.name: item for item in preset.fields} if preset is not None else {}
+                    )
+                    choices = self._component_path_choices[path_index].get(field[0], ())
+                    if field[0] in preset_fields:
+                        choices = preset_fields[field[0]].choices
+                    imgui.table_next_row()
+                    imgui.table_next_column()
+                    imgui.text_disabled(field[0])
+                    imgui.table_next_column()
+                    imgui.set_next_item_width(-1.0)
+                    previous = field[1]
+                    field[1] = _component_value_editor(
+                        f"##path-field-{field_index}",
+                        field[1],
+                        choices,
+                        multiline=field[0] in _MULTILINE_COMPONENT_FIELDS or len(field[1]) > 72,
+                    )
+                    if field[0] == "objtype" and field[1] != previous:
+                        next_preset = _matching_path_preset(
+                            self._component_path_presets, element_type, fields
                         )
-                        for candidate in fields:
-                            if candidate[0] == "objname":
-                                candidate[1] = default_name
-                                break
+                        if next_preset is not None:
+                            default_name = next(
+                                (
+                                    item.value
+                                    for item in next_preset.fields
+                                    if item.name == "objname"
+                                ),
+                                "",
+                            )
+                            for candidate in fields:
+                                if candidate[0] == "objname":
+                                    candidate[1] = default_name
+                                    break
+                imgui.end_table()
             imgui.pop_id()
             if move_up:
                 self._component_path[path_index - 1 : path_index + 1] = reversed(
