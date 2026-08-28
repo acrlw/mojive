@@ -20,7 +20,12 @@ from forge_viewer.commands import AddModelComponent, SelectNode  # noqa: E402
 from forge_viewer.composition import build, build_editor, build_scene  # noqa: E402
 from forge_viewer.scene import Scene  # noqa: E402
 from forge_viewer.types import CameraView  # noqa: E402
-from forge_viewer.ui.app import IMAGE_FILTERS, MESH_FILTERS, MODEL_FILTERS  # noqa: E402
+from forge_viewer.ui.app import (  # noqa: E402
+    IMAGE_FILTERS,
+    MESH_FILTERS,
+    MODEL_FILTERS,
+    _ModelLoadJob,
+)
 from forge_viewer.ui.camera_preview import CameraPreview  # noqa: E402
 
 
@@ -245,9 +250,15 @@ def test_runtime_model_loading_rebuilds_gpu_scene(viewer):
     viewer.window._file_drag_active = True
     viewer.window._on_file_drop(None, [str(resolve("test_scene.xml"))])
     assert not viewer.window.file_drag_active
+    import forge_viewer.commands as cmd
+
+    assert viewer.session.submit(cmd.Play())
+    assert not viewer.session.paused
     viewer.sync()
+    assert viewer.session.paused
     viewer.app._model_load_future.result(timeout=10.0)
     viewer.sync()
+    assert viewer.session.paused
     assert viewer.session.asset_path == resolve("test_scene.xml")
 
     for name in ("test_scene.urdf",):
@@ -257,6 +268,35 @@ def test_runtime_model_loading_rebuilds_gpu_scene(viewer):
         assert viewer.session.asset_path == resolve(name)
         assert viewer.backend.stats.instances == viewer.session.source.instance_count
         assert viewer.backend.stats.instances > 0
+
+
+def test_loading_overlay_preserves_the_docked_viewport(viewer, monkeypatch):
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+
+    for _ in range(3):
+        viewer.sync()
+    before_panel = viewer.app._viewport_panel_size
+    before_rect = viewer.app._viewport_rect
+    path = resolve("test_scene.xml")
+    viewer.app._model_load_job = _ModelLoadJob("load", path, cmd.LoadAsset(path))
+    viewer.app._model_load_future = object()
+    monkeypatch.setattr(viewer.app, "_poll_model_load", lambda: True)
+    try:
+        viewer.sync()
+        loading = imgui.internal.find_window_by_name("Loading###model_loading")
+        assert loading is not None
+        assert viewer.app._viewport_panel_size == pytest.approx(before_panel, abs=1.0)
+        assert viewer.app._viewport_rect == pytest.approx(before_rect, abs=1.0)
+        x, y, width, height = viewer.app._viewport_rect
+        center = loading.pos + loading.size * 0.5
+        assert x <= center.x <= x + width
+        assert y <= center.y <= y + height
+        assert width < imgui.get_main_viewport().size.x
+    finally:
+        viewer.app._model_load_future = None
+        viewer.app._model_load_job = None
 
 
 def test_viewer_and_editor_render_the_same_loaded_model_at_the_same_state():

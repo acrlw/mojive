@@ -243,6 +243,7 @@ class ViewerApp:
         self._frame_index = 0
         self._last_time = time.perf_counter()
         self._viewport_rect = (0.0, 0.0, 640.0, 480.0)
+        self._viewport_panel_position = (0.0, 0.0)
         self._viewport_panel_size = (640.0, 480.0)
         self._viewport_image: ViewportImage | None = None
         self._dt = 0.0
@@ -500,6 +501,16 @@ class ViewerApp:
     def _start_model_load(self) -> bool:
         if self._model_load_future is not None or not self._model_load_queue:
             return self._model_load_future is not None
+        if self.session.adapter.caps.simulation and not self.session.paused:
+            paused = self.session.submit(cmd.Pause())
+            if not paused.ok:
+                job = self._model_load_queue.pop(0)
+                self._model_load_queue.clear()
+                self._report_model_error(
+                    f"Cannot {self._model_load_verb(job.action).lower()} while physics is running: "
+                    f"{paused.message}"
+                )
+                return False
         if self._model_load_executor is None:
             self._model_load_executor = ThreadPoolExecutor(
                 max_workers=1,
@@ -1419,6 +1430,8 @@ class ViewerApp:
             return
         self._draw_main_menu()
         window.begin_dockspace()
+        self._begin_viewport_panel()
+        self._sync_viewport_size()
         keys = self._poll_keys()
         self.apply_keys(keys)
 
@@ -1438,7 +1451,6 @@ class ViewerApp:
         self.backend.update(frame)
 
         self.backend.highlight(self.session.selected)
-        self._sync_viewport_size()
 
         if self.debug_bridge is not None:
             self.debug_bridge.pump()
@@ -1476,7 +1488,8 @@ class ViewerApp:
 
         self._sync_session_status()
         ctx = self._panel_context()
-        self._draw_viewport(ctx, preview_name)
+        self._draw_viewport_contents(preview_name)
+        self._draw_playback_widget()
         self.panels.draw(ctx)
         self._draw_precise_gizmo_popup()
         self._draw_rename_popup()
@@ -1491,22 +1504,48 @@ class ViewerApp:
     def _draw_model_loading_frame(self) -> None:
         """Keep the native window responsive without reading a mutating Session."""
 
+        self._draw_loading_main_menu()
         self.window.begin_dockspace()
+        self.panels.draw_shells(self.localizer.text, self.window.style_scale)
+        self._begin_viewport_panel()
+        self._sync_viewport_size()
         self._viewport_image = self.backend.render()
-        self._sync_session_status()
-        self._draw_viewport(None, session_busy=True)
+        self._draw_viewport_contents(session_busy=True)
         self._draw_model_loading_window()
+
+    def _draw_loading_main_menu(self) -> None:
+        """Preserve the menu-bar geometry without touching the loading Session."""
+
+        if not imgui.begin_main_menu_bar():
+            return
+        for label in ("File", "Edit", "Entity"):
+            imgui.begin_menu(self.localizer.text(label), False)
+        job = self._model_load_job
+        if job is not None:
+            imgui.text_disabled(job.path.name)
+        imgui.end_main_menu_bar()
 
     def _draw_model_loading_window(self) -> None:
         job = self._model_load_job
         if job is None:
             return
-        _prepare_modal(460.0)
+        x, y, viewport_width, viewport_height = self._viewport_rect
+        width = min(460.0, max(1.0, viewport_width - 32.0))
+        imgui.set_next_window_pos(
+            imgui.ImVec2(x + viewport_width * 0.5, y + viewport_height * 0.5),
+            imgui.Cond_.always.value,
+            imgui.ImVec2(0.5, 0.5),
+        )
+        imgui.set_next_window_size_constraints(
+            imgui.ImVec2(width, 0.0),
+            imgui.ImVec2(width, float(np.finfo(np.float32).max)),
+        )
         flags = (
             imgui.WindowFlags_.always_auto_resize.value
             | imgui.WindowFlags_.no_collapse.value
             | imgui.WindowFlags_.no_docking.value
             | imgui.WindowFlags_.no_move.value
+            | imgui.WindowFlags_.no_focus_on_appearing.value
             | imgui.WindowFlags_.no_saved_settings.value
         )
         visible, _ = imgui.begin("Loading###model_loading", None, flags)
@@ -2047,13 +2086,9 @@ class ViewerApp:
                 return int(node.object_id)
         return 0
 
-    def _draw_viewport(
-        self,
-        ctx: PanelContext | None,
-        preview_name: str = "",
-        *,
-        session_busy: bool = False,
-    ) -> None:
+    def _begin_viewport_panel(self) -> None:
+        """Resolve the current dock layout before sizing or rendering the scene."""
+
         title = self.localizer.text("Viewport")
         if title != "Viewport":
             title += "###Viewport"
@@ -2061,14 +2096,26 @@ class ViewerApp:
         pos = imgui.get_cursor_screen_pos()
         size = imgui.get_content_region_avail()
         panel_position = (float(pos.x), float(pos.y))
+        self._viewport_panel_position = panel_position
         self._viewport_panel_size = (max(float(size.x), 1.0), max(float(size.y), 1.0))
+        self._viewport_rect = _fit_image_rect(
+            panel_position,
+            self._viewport_panel_size,
+            self._current_viewport_render_size(),
+        )
+
+    def _draw_viewport_contents(
+        self,
+        preview_name: str = "",
+        *,
+        session_busy: bool = False,
+    ) -> None:
         image = self._viewport_image
         if image is None:
-            self._viewport_rect = (*panel_position, *self._viewport_panel_size)
             imgui.text_disabled("No viewport image is available")
         else:
             self._viewport_rect = _fit_image_rect(
-                panel_position,
+                self._viewport_panel_position,
                 self._viewport_panel_size,
                 (image.width, image.height),
             )
@@ -2125,6 +2172,8 @@ class ViewerApp:
     def _draw_joint_gizmo_picker(self) -> None:
         """Draw a compact viewport chooser for links with multiple direct joints."""
 
+        if not self.session.paused:
+            return
         joints = self.gizmo.joint_choices(self.session)
         node = self.session.selected_node
         if not joints or node is None:
@@ -2161,10 +2210,152 @@ class ViewerApp:
                 if clicked:
                     self.gizmo.select_joint(node.body_index, joint.joint_id)
                 imgui.end_disabled()
-            if not self.session.paused:
-                imgui.separator()
-                imgui.text_disabled("Pause to edit")
         imgui.end()
+
+    def _draw_playback_widget(self) -> None:
+        """Draw game-style simulation controls at the viewport's top center."""
+
+        caps = self.session.adapter.caps
+        if not caps.simulation:
+            return
+        x, y, width, _height = self._viewport_rect
+        scale = self.window.style_scale
+        imgui.set_next_window_pos(
+            imgui.ImVec2(x + width * 0.5, y + 10.0 * scale),
+            imgui.Cond_.always.value,
+            imgui.ImVec2(0.5, 0.0),
+        )
+        imgui.set_next_window_bg_alpha(0.92)
+        flags = (
+            imgui.WindowFlags_.always_auto_resize.value
+            | imgui.WindowFlags_.no_decoration.value
+            | imgui.WindowFlags_.no_docking.value
+            | imgui.WindowFlags_.no_move.value
+            | imgui.WindowFlags_.no_focus_on_appearing.value
+            | imgui.WindowFlags_.no_saved_settings.value
+        )
+        imgui.push_style_var(
+            imgui.StyleVar_.window_padding,
+            imgui.ImVec2(3.0 * scale, 3.0 * scale),
+        )
+        imgui.push_style_var(
+            imgui.StyleVar_.item_spacing,
+            imgui.ImVec2(3.0 * scale, 3.0 * scale),
+        )
+        visible, _ = imgui.begin("Playback###viewport_playback", None, flags)
+        if visible:
+            paused = self.session.paused
+            if self._playback_button(
+                "##viewport-playback-toggle",
+                "play" if paused else "pause",
+                enabled=True,
+                selected=not paused,
+            ):
+                self.session.submit(cmd.Play() if paused else cmd.Pause())
+            imgui.set_item_tooltip("Play (Space)" if paused else "Pause (Space)")
+            imgui.same_line()
+            if self._playback_button(
+                "##viewport-playback-step",
+                "step",
+                enabled=paused,
+            ):
+                self.session.submit(cmd.Step(1))
+            imgui.set_item_tooltip("Step one frame" if paused else "Pause before stepping")
+            imgui.same_line()
+            if self._playback_button(
+                "##viewport-playback-stop",
+                "stop",
+                enabled=True,
+            ):
+                if not self.session.paused:
+                    self.session.submit(cmd.Pause())
+                self.session.submit(cmd.Reset())
+            imgui.set_item_tooltip("Stop and reset")
+        imgui.end()
+        imgui.pop_style_var(2)
+
+    def _playback_button(
+        self,
+        label: str,
+        icon: str,
+        *,
+        enabled: bool,
+        selected: bool = False,
+    ) -> bool:
+        scale = self.window.style_scale
+        size = 24.0 * scale
+        position = imgui.get_cursor_screen_pos()
+        imgui.begin_disabled(not enabled)
+        clicked = imgui.invisible_button(label, imgui.ImVec2(size, size))
+        hovered = imgui.is_item_hovered()
+        active = imgui.is_item_active()
+        imgui.end_disabled()
+
+        if not enabled:
+            background = self.theme.bg_frame
+            foreground = self.theme.text_disabled
+        else:
+            background = (
+                self.theme.bg_frame_active
+                if active or selected
+                else self.theme.bg_frame_hovered
+                if hovered
+                else self.theme.bg_frame
+            )
+            foreground = self.theme.primary_bright if hovered or selected else self.theme.text
+        overlay = ImguiDraw2D()
+        lo = np.array((position.x, position.y), np.float64)
+        hi = lo + size
+        overlay.rect_filled(lo, hi, background, rounding=4.0 * scale)
+        center = (lo + hi) * 0.5
+        radius = 7.0 * scale
+
+        def point(dx: float, dy: float) -> np.ndarray:
+            return center + np.array((dx, dy), np.float64)
+
+        if icon == "play":
+            overlay.convex_fill(
+                (
+                    point(-0.55 * radius, -radius),
+                    point(-0.55 * radius, radius),
+                    point(radius, 0.0),
+                ),
+                foreground,
+            )
+        elif icon == "pause":
+            half_width = 2.0 * scale
+            gap = 3.0 * scale
+            overlay.rect_filled(
+                point(-gap - half_width, -radius),
+                point(-gap + half_width, radius),
+                foreground,
+            )
+            overlay.rect_filled(
+                point(gap - half_width, -radius),
+                point(gap + half_width, radius),
+                foreground,
+            )
+        elif icon == "step":
+            overlay.convex_fill(
+                (
+                    point(-radius, -radius),
+                    point(-radius, radius),
+                    point(0.45 * radius, 0.0),
+                ),
+                foreground,
+            )
+            overlay.rect_filled(
+                point(0.55 * radius, -radius),
+                point(0.85 * radius, radius),
+                foreground,
+            )
+        else:
+            overlay.rect_filled(
+                point(-0.72 * radius, -0.72 * radius),
+                point(0.72 * radius, 0.72 * radius),
+                foreground,
+            )
+        return bool(clicked and enabled)
 
     def _draw_model_drop_overlay(self, overlay: ImguiDraw2D) -> None:
         source = self.session.source
@@ -2345,17 +2536,31 @@ class ViewerApp:
             self._structure_generation = gen
             self.backend.set_scene(self.session.source)
 
+    def _current_viewport_render_size(self) -> tuple[int, int]:
+        target = getattr(self.backend, "target", None)
+        if target is not None and hasattr(target, "width") and hasattr(target, "height"):
+            return max(1, int(target.width)), max(1, int(target.height))
+        image = self._viewport_image
+        if image is not None:
+            return max(1, int(image.width)), max(1, int(image.height))
+        width, height = self.window.points_to_pixels(self._viewport_panel_size)
+        return max(1, int(width)), max(1, int(height))
+
     def _sync_viewport_size(self) -> None:
         if self._fixed_render_size is not None:
             self.backend.resize(*self._fixed_render_size)
             self.camera.set_aspect(self._fixed_render_size[0] / self._fixed_render_size[1])
-            return
-        settled = self.window.poll_render_size(self._viewport_panel_size)
-        if settled is None:
-            return
-        sw, sh = settled
-        self.backend.resize(sw, sh)
-        self.camera.set_aspect(max(sw, 1) / max(sh, 1))
+        else:
+            settled = self.window.poll_render_size(self._viewport_panel_size)
+            if settled is not None:
+                sw, sh = settled
+                self.backend.resize(sw, sh)
+                self.camera.set_aspect(max(sw, 1) / max(sh, 1))
+        self._viewport_rect = _fit_image_rect(
+            self._viewport_panel_position,
+            self._viewport_panel_size,
+            self._current_viewport_render_size(),
+        )
 
     def _sync_display_scale(self) -> None:
         generation = self.window.scale_generation

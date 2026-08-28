@@ -228,6 +228,40 @@ def test_native_resize_between_draw_and_submit_stays_within_wgpu_target(viewer, 
             v.sync()
 
 
+def test_viewport_target_uses_current_dock_geometry_in_the_resize_frame(viewer, monkeypatch):
+    from forge_viewer.ui import window_wgpu
+
+    v, _scene = viewer
+    window = v.window
+    original_size = window.size_points
+    target_size = (original_size[0] + 240, original_size[1] + 160)
+    sampled = []
+
+    def resize_now(viewport_points, now=None):
+        del now
+        sampled.append(tuple(viewport_points))
+        width, height = window.points_to_pixels(viewport_points)
+        return max(1, int(width)), max(1, int(height))
+
+    monkeypatch.setattr(window, "poll_render_size", resize_now)
+    try:
+        window_wgpu.glfw.set_window_size(window._window, *target_size)
+        window_wgpu.glfw.poll_events()
+        v.sync()
+
+        assert sampled[-1] == pytest.approx(v.app._viewport_panel_size)
+        expected = window.points_to_pixels(v.app._viewport_panel_size)
+        image = v.app._viewport_image
+        assert image is not None
+        assert (image.width, image.height) == tuple(max(1, int(value)) for value in expected)
+        assert v.app._viewport_rect[2] / v.app._viewport_rect[3] == pytest.approx(image.aspect)
+    finally:
+        window_wgpu.glfw.set_window_size(window._window, *original_size)
+        window_wgpu.glfw.poll_events()
+        for _ in range(3):
+            v.sync()
+
+
 def test_occluded_surface_keeps_the_frame_loop_alive(viewer):
     import wgpu
 

@@ -587,6 +587,17 @@ def test_latch_rebuilds_immediately_during_startup():
     assert latch.update((900, 700), now=0.0) is None
 
 
+def test_latch_commits_an_explicit_resize_transition_immediately():
+
+    latch = ResizeLatch()
+    _warm_up(latch)
+    before = latch.rebuilds
+
+    assert latch.update((1200, 700), now=0.0, immediate=True) == (1200, 700)
+    assert latch.rebuilds == before + 1
+    assert latch.update((1200, 700), now=0.1) is None
+
+
 def test_latch_coalesces_changes_within_a_drag():
 
     latch = ResizeLatch()

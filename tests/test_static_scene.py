@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import replace
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -40,16 +41,23 @@ from forge_viewer.types import (
 pytestmark = pytest.mark.integration
 
 
-def _model_load_app(results):
+def _model_load_app(results, *, paused: bool = True):
     from forge_viewer.ui.app import ViewerApp
 
     class RecordingSession:
         def __init__(self):
             self.calls = []
+            self.adapter = SimpleNamespace(caps=SimpleNamespace(simulation=True))
+            self.paused = paused
+            self._load_calls = 0
 
         def submit(self, command):
             self.calls.append(command)
-            result = results[len(self.calls) - 1]
+            if isinstance(command, cmd.Pause):
+                self.paused = True
+                return cmd.CommandResult.good("Simulation paused")
+            result = results[self._load_calls]
+            self._load_calls += 1
             if isinstance(result, Exception):
                 raise result
             return result
@@ -84,6 +92,9 @@ def test_model_load_jobs_execute_off_the_ui_thread(tmp_path) -> None:
     calls = []
 
     class RecordingSession:
+        adapter = SimpleNamespace(caps=SimpleNamespace(simulation=False))
+        paused = True
+
         def submit(self, command):
             calls.append((threading.get_ident(), command))
             return cmd.CommandResult.good("Loaded model.xml")
@@ -106,6 +117,21 @@ def test_model_load_jobs_execute_off_the_ui_thread(tmp_path) -> None:
     assert result.ok
     assert calls[0][0] != threading.get_ident()
     assert isinstance(calls[0][1], cmd.LoadAsset)
+
+
+def test_async_model_load_pauses_before_worker_submission_and_stays_paused(tmp_path) -> None:
+    app = _model_load_app([cmd.CommandResult.good("Loaded model.xml")], paused=False)
+    app._queue_model_load("load", tmp_path / "model.xml")
+    try:
+        assert app._start_model_load()
+        assert app.session.paused
+        assert isinstance(app.session.calls[0], cmd.Pause)
+        assert not _finish_model_load(app)
+    finally:
+        app._model_load_executor.shutdown(wait=True)
+
+    assert app.session.paused
+    assert isinstance(app.session.calls[1], cmd.LoadAsset)
 
 
 def test_async_model_load_success_finishes_and_notifies(tmp_path) -> None:

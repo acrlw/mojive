@@ -408,6 +408,7 @@ class WgpuWindow(Window):
             glfw.terminate()
             raise RuntimeError("Failed to create a GLFW window (CLIENT_API=NO_API)")
         self._window = handle
+        self._maximized = bool(glfw.get_window_attrib(handle, glfw.MAXIMIZED))
         self._shown = False
         self._destroyed = False
         self._frame_index = 0

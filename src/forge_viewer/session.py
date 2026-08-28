@@ -914,6 +914,17 @@ class Session:
         self._perturb = PerturbState()
         self._active_keyframe = -1
 
+    def _pause_before_model_change(self) -> bool:
+        """Stop simulation before an adapter replaces model-owned state."""
+
+        if not self._adapter.caps.simulation or self._paused:
+            return True
+        if not self._adapter.set_paused(True):
+            return False
+        self._paused = True
+        self._sim_time_credit = 0.0
+        return True
+
     def _dispatch(self, c: Command) -> CommandResult:
         caps = self._adapter.caps
 
@@ -966,6 +977,8 @@ class Session:
         if isinstance(c, cmd.Reload):
             if not caps.reload:
                 return CommandResult.bad(f"{caps.name} does not support reload")
+            if not self._pause_before_model_change():
+                return CommandResult.bad("physics backend rejected pause before reload")
             try:
                 self._adapter.reload()
             except Exception as exc:
@@ -995,6 +1008,8 @@ class Session:
         if isinstance(c, cmd.OpenScene):
             if not caps.scene_files:
                 return CommandResult.bad(f"{caps.name} does not support scene files")
+            if not self._pause_before_model_change():
+                return CommandResult.bad("physics backend rejected pause before opening scene")
             path = Path(c.path).expanduser().resolve()
             try:
                 self._adapter.open_scene(path)
@@ -1027,6 +1042,8 @@ class Session:
         if isinstance(c, cmd.LoadAsset):
             if not caps.asset_loading:
                 return CommandResult.bad(f"{caps.name} does not support model loading")
+            if not self._pause_before_model_change():
+                return CommandResult.bad("physics backend rejected pause before loading model")
             path = Path(c.path).expanduser().resolve()
             try:
                 self._adapter.load(path)

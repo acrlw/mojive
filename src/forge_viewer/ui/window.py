@@ -105,7 +105,13 @@ class ResizeLatch:
     def rebuilds(self) -> int:
         return self._rebuilds
 
-    def update(self, size: tuple[int, int], now: float) -> tuple[int, int] | None:
+    def update(
+        self,
+        size: tuple[int, int],
+        now: float,
+        *,
+        immediate: bool = False,
+    ) -> tuple[int, int] | None:
         self._frames += 1
         w, h = (max(1, int(size[0])), max(1, int(size[1])))
         target = (w, h)
@@ -114,7 +120,7 @@ class ResizeLatch:
             self._pending = None
             return None
 
-        if self._frames <= self.warmup_frames:
+        if immediate or self._frames <= self.warmup_frames:
             return self._commit(target)
 
         if target != self._pending:
@@ -198,6 +204,7 @@ class Window:
                 f"core context with GLFW {self._context_api}"
             )
         self._window = handle
+        self._maximized = bool(glfw.get_window_attrib(handle, glfw.MAXIMIZED))
         self._shown = False
         self._destroyed = False
         self._frame_index = 0
@@ -363,8 +370,13 @@ class Window:
         self, viewport_points: tuple[float, float], now: float | None = None
     ) -> tuple[int, int] | None:
         px = self.points_to_pixels(viewport_points)
+        maximized = bool(glfw.get_window_attrib(self._window, glfw.MAXIMIZED))
+        maximize_changed = maximized != self._maximized
+        self._maximized = maximized
         return self.latch.update(
-            (int(px[0]), int(px[1])), time.perf_counter() if now is None else now
+            (int(px[0]), int(px[1])),
+            time.perf_counter() if now is None else now,
+            immediate=maximize_changed,
         )
 
     def show(self) -> None:

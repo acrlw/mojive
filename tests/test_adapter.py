@@ -1021,6 +1021,14 @@ def test_session_loads_mjcf_and_urdf_without_losing_the_current_model_on_failure
 
     session = Session(MuJoCoAdapter(resolve("empty")), resolve("empty"))
     try:
+        adapter = session.adapter
+        original_load = adapter.load
+
+        def load_while_paused(path):
+            assert session.paused
+            return original_load(path)
+
+        adapter.load = load_while_paused
         generation = session.structure_generation
         for name in ("test_scene.xml", "test_scene.urdf"):
             assert session.submit(cmd.Play())
@@ -1038,8 +1046,10 @@ def test_session_loads_mjcf_and_urdf_without_losing_the_current_model_on_failure
         current_source = session.source
         invalid = tmp_path / "invalid.xml"
         invalid.write_text("<mujoco><worldbody>", encoding="utf-8")
+        assert session.submit(cmd.Play())
         result = session.submit(cmd.LoadAsset(invalid))
         assert not result.ok
+        assert session.paused
         assert "invalid.xml" in result.message
         assert session.asset_path == current_path
         assert session.source is current_source

@@ -10,7 +10,6 @@ from . import (
     Panel,
     PanelContext,
     begin_kv_table,
-    button_row_layout,
     button_width,
     labeled,
     value_slider,
@@ -31,50 +30,6 @@ class ControlPanel(Panel):
 
         paused = s.paused
         caps = s.adapter.caps
-        labels = ("Resume" if paused else "Pause", "Step", "Reset", "Reload")
-        widths = tuple(
-            button_width(label, width * ctx.style_scale)
-            for label, width in zip(labels, (78.0, 60.0, 60.0, 70.0), strict=True)
-        )
-        row = button_row_layout(
-            widths,
-            imgui.get_content_region_avail().x,
-            imgui.get_style().item_spacing.x,
-        )
-
-        imgui.begin_disabled(not caps.simulation)
-        if imgui.button(labels[0], imgui.ImVec2(widths[0], 0)):
-            ctx.submit(cmd.Play() if paused else cmd.Pause())
-        imgui.set_item_tooltip("Space")
-
-        if row[1]:
-            imgui.same_line()
-
-        imgui.begin_disabled(not paused)
-        if imgui.button(labels[1], imgui.ImVec2(widths[1], 0)):
-            ctx.submit(cmd.Step(1))
-        imgui.end_disabled()
-        if not paused:
-            imgui.set_item_tooltip("physics is running; pause to step")
-        imgui.end_disabled()
-
-        if row[2]:
-            imgui.same_line()
-        if imgui.button(labels[2], imgui.ImVec2(widths[2], 0)):
-            ctx.submit(cmd.Reset())
-
-        if row[3]:
-            imgui.same_line()
-        can_reload = bool(caps.reload and s.asset_path is not None and not s.dirty)
-        imgui.begin_disabled(not can_reload)
-        if imgui.button(labels[3], imgui.ImVec2(widths[3], 0)):
-            ctx.submit(cmd.Reload())
-        imgui.end_disabled()
-        if not can_reload:
-            imgui.set_item_tooltip("No saved scene or reloadable model")
-
-        imgui.separator()
-
         imgui.begin_disabled(not caps.simulation)
         edit = value_slider("speed", s.speed, 0.05, 8.0, initial=1.0, fmt="x%.2f", more_hint="none")
         if edit.changed:

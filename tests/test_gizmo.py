@@ -1783,7 +1783,10 @@ def test_active_hinge_guide_does_not_cover_the_unavailable_range() -> None:
     gizmo = ObjectGizmo("rotate")
     gizmo._active = GizmoHandle.ROTATE_Z
     gizmo._axis[:] = (0.0, 0.0, 1.0)
-    gizmo._rotation_angle = np.radians(23.0)
+    gizmo._start_basis[:] = np.eye(3)
+    gizmo._rotation_start_vec[:] = (0.0, 1.0, 0.0)
+    gizmo._start_joint_qpos = np.array((np.radians(-17.0),))
+    gizmo._rotation_angle = np.radians(40.0)
     gizmo._joint_range = _JointRangeState(
         "hinge", np.radians(23.0), np.radians(-90.0), np.radians(200.0)
     )
@@ -1809,6 +1812,19 @@ def test_active_hinge_guide_does_not_cover_the_unavailable_range() -> None:
         for name, args, kwargs in overlay.calls
     )
     assert any(name == "fringed_concave_fill" for name, _args, _kwargs in overlay.calls)
+    sector = next(
+        np.asarray(args[0]) for name, args, _kwargs in overlay.calls if name == "triangle_fan_fill"
+    )
+    stable_dial = _RotationDialProjector(
+        cam,
+        RECT,
+        gizmo._start_pos,
+        gizmo._axis,
+        gizmo._start_basis[:, 0],
+        SIZE_PT,
+    )
+    assert sector[1] == pytest.approx(stable_dial.points(RING_RADIUS, (np.radians(-17.0),))[0, :2])
+    assert sector[-1] == pytest.approx(stable_dial.points(RING_RADIUS, (np.radians(23.0),))[0, :2])
 
 
 @pytest.mark.parametrize(

@@ -94,7 +94,7 @@ JOINT_RANGE_RADIUS = RING_RADIUS
 JOINT_RANGE_WIDTH_PT = RING_WIDTH_PT
 JOINT_RANGE_OFFSET_PT = 13.0
 JOINT_RANGE_COLOR = tuple(float(value) for value in JOINT_HANDLE_COLOR)
-JOINT_RANGE_UNAVAILABLE_COLOR = (0.34, 0.36, 0.40, 1.0)
+JOINT_RANGE_UNAVAILABLE_COLOR = (0.46, 0.48, 0.53, 1.0)
 JOINT_LOWER_LIMIT_COLOR = (0.30, 0.58, 1.00, 1.0)
 JOINT_UPPER_LIMIT_COLOR = (1.00, 0.34, 0.28, 1.0)
 JOINT_CURRENT_TICK_PT = 11.0
@@ -1458,14 +1458,33 @@ class ObjectGizmo:
         )
         if projection_alpha <= 0.0:
             return
-        sweep = _rotation_sweep(self._rotation_angle)
+        joint_range = self._joint_range
+        joint_range_ring = joint_range is not None and joint_range.joint_type == "hinge"
+        if joint_range_ring:
+            dial = _RotationDialProjector(
+                cam,
+                rect,
+                self._start_pos,
+                self._axis,
+                self._start_basis[:, 0],
+                SIZE_PT * style_scale,
+            )
+            start_angle = (
+                float(self._start_joint_qpos[0])
+                if len(self._start_joint_qpos)
+                else float(joint_range.current - self._rotation_angle)
+            )
+            sweep = float(joint_range.current - start_angle)
+        else:
+            start_angle = 0.0
+            sweep = _rotation_sweep(self._rotation_angle)
         ring_radius = (
             SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
         )
 
         dial_segments = _rotation_dial_segments(cam, self._start_pos, self._axis)
         point_count = max(2, int(np.ceil(dial_segments * abs(sweep) / (2.0 * np.pi))) + 1)
-        angles = np.linspace(0.0, sweep, point_count)
+        angles = np.linspace(start_angle, start_angle + sweep, point_count)
         arc = dial.points(ring_radius, angles)
         center = project(cam, (self._start_pos,), rect)[0]
         if center[2] <= 0.0 or np.any(arc[:, 2] <= 0.0):
@@ -1479,7 +1498,6 @@ class ObjectGizmo:
         if fill_alpha > 0.0:
             fill = (1.0, 0.5, 0.06, fill_alpha)
             overlay.triangle_fan_fill(sector, fill)
-        joint_range_ring = self._joint_range is not None and self._joint_range.joint_type == "hinge"
         if not joint_range_ring:
             reference = dial.points(
                 ring_radius,
@@ -1524,7 +1542,19 @@ class ObjectGizmo:
                 SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
             )
             if dial is not None:
-                anchor = dial.points(ring_radius, (self._rotation_angle,))[0]
+                angle = self._rotation_angle
+                joint_range = self._joint_range
+                if joint_range is not None and joint_range.joint_type == "hinge":
+                    dial = _RotationDialProjector(
+                        cam,
+                        rect,
+                        self._start_pos,
+                        self._axis,
+                        self._start_basis[:, 0],
+                        SIZE_PT * style_scale,
+                    )
+                    angle = joint_range.current
+                anchor = dial.points(ring_radius, (angle,))[0]
         if anchor is None:
             anchor = project(cam, (anchor_world,), rect)[0]
         if anchor[2] <= 0.0:

@@ -251,30 +251,46 @@ class PanelSet:
             if p.modal:
                 self._draw_modal(p, ctx, title)
                 continue
-            flags = 0
-            if p.standalone:
-                viewport = imgui.get_main_viewport()
-                width, height = p.initial_size
-                if width > 0.0 and height > 0.0:
-                    imgui.set_next_window_size(
-                        imgui.ImVec2(width * ctx.style_scale, height * ctx.style_scale),
-                        imgui.Cond_.first_use_ever,
-                    )
-                imgui.set_next_window_pos(
-                    viewport.get_center(),
-                    imgui.Cond_.first_use_ever,
-                    imgui.ImVec2(0.5, 0.5),
-                )
-                flags = imgui.WindowFlags_.no_docking.value
-            elif p.dock_with:
-                self._dock_with_neighbor(p.dock_with)
-            expanded, keep_open = imgui.begin(title, True if p.closable else None, flags)
+            expanded, keep_open = self._begin_panel_window(p, title, ctx.style_scale)
             if expanded:
                 p.draw(ctx)
             p.finish_frame(ctx)
             imgui.end()
             if keep_open is not None and not keep_open:
                 p.open = False
+
+    def draw_shells(self, translate, style_scale: float) -> None:
+        """Submit docked panel windows without reading application state."""
+
+        for panel in self.panels:
+            if not panel.open or panel.modal:
+                continue
+            translated = translate(panel.name)
+            title = panel.name if translated == panel.name else f"{translated}###{panel.name}"
+            _expanded, keep_open = self._begin_panel_window(panel, title, style_scale)
+            imgui.end()
+            if keep_open is not None and not keep_open:
+                panel.open = False
+
+    def _begin_panel_window(self, panel: Panel, title: str, style_scale: float):
+        flags = 0
+        if panel.standalone:
+            viewport = imgui.get_main_viewport()
+            width, height = panel.initial_size
+            if width > 0.0 and height > 0.0:
+                imgui.set_next_window_size(
+                    imgui.ImVec2(width * style_scale, height * style_scale),
+                    imgui.Cond_.first_use_ever,
+                )
+            imgui.set_next_window_pos(
+                viewport.get_center(),
+                imgui.Cond_.first_use_ever,
+                imgui.ImVec2(0.5, 0.5),
+            )
+            flags = imgui.WindowFlags_.no_docking.value
+        elif panel.dock_with:
+            self._dock_with_neighbor(panel.dock_with)
+        return imgui.begin(title, True if panel.closable else None, flags)
 
     @staticmethod
     def _dock_with_neighbor(name: str) -> None:

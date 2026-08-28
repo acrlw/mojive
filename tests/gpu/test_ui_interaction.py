@@ -1136,8 +1136,53 @@ def test_multi_joint_viewport_picker_selects_the_gizmo_target():
         assert v.app.gizmo.selected_joint_id(node.body_index) == choices[2].joint_id
         assert v.app.gizmo.last_verdict.ok
         assert v.app.gizmo.visible
+
+        labels = []
+        original_selectable = imgui.selectable
+
+        def record_selectable(item_label, *args, **kwargs):
+            labels.append(item_label)
+            return original_selectable(item_label, *args, **kwargs)
+
+        assert v.session.submit(cmd.Play())
+        imgui.selectable = record_selectable
+        try:
+            v.sync()
+        finally:
+            imgui.selectable = original_selectable
+        assert not any("##viewport-joint-" in label for label in labels)
     finally:
+        if not v.session.paused:
+            v.session.submit(cmd.Pause())
         v.release()
+
+
+def test_viewport_playback_widget_controls_simulation(viewer):
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+
+    v = viewer
+    v.session.submit(cmd.Pause())
+    v.session.submit(cmd.Reset())
+    v.sync()
+
+    click(v, imgui.get_io(), item_rect(v, "invisible_button", "##viewport-playback-toggle"))
+    assert not v.session.paused
+
+    for _ in range(3):
+        v.sync()
+    assert v.session.frame.step > 0
+    click(v, imgui.get_io(), item_rect(v, "invisible_button", "##viewport-playback-stop"))
+    assert v.session.paused
+    v.sync()
+    assert v.session.frame.step == 0
+
+    before = v.session.frame.step
+    click(v, imgui.get_io(), item_rect(v, "invisible_button", "##viewport-playback-step"))
+    assert v.session.paused
+    v.sync()
+    assert v.session.frame.step == before + 1
 
 
 def test_gizmo_disappears_without_an_editable_body(free_body_viewer):
