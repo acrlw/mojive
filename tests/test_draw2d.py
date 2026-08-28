@@ -6,6 +6,7 @@ from __future__ import annotations
 import inspect
 
 import numpy as np
+import pytest
 
 from forge_viewer import commands as cmd
 from forge_viewer.adapters.static import StaticSceneAdapter
@@ -15,7 +16,7 @@ from forge_viewer.scene import Scene
 from forge_viewer.session import Session
 from forge_viewer.types import CameraView
 from forge_viewer.ui import viewcube as vc
-from forge_viewer.ui.draw2d import Draw2D, ImguiDraw2D
+from forge_viewer.ui.draw2d import Draw2D, ImguiDraw2D, _anti_alias_fringe_outer
 from forge_viewer.ui.gizmo import ObjectGizmo
 
 RECT = (0.0, 0.0, 800.0, 600.0)
@@ -71,6 +72,14 @@ def test_imgui_adapter_covers_the_protocol_surface() -> None:
         if not callable(getattr(ImguiDraw2D, name, None))
     ]
     assert not missing
+
+
+def test_fill_fringe_expands_outward_for_both_polygon_windings() -> None:
+    square = np.array(((0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)))
+    expected = np.array(((-1.0, -1.0), (3.0, -1.0), (3.0, 3.0), (-1.0, 3.0)))
+
+    assert _anti_alias_fringe_outer(square) == pytest.approx(expected)
+    assert _anti_alias_fringe_outer(square[::-1]) == pytest.approx(expected[::-1])
 
 
 def test_flat_gizmo_submits_handles_in_painter_order() -> None:

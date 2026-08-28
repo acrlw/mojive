@@ -312,7 +312,7 @@ def test_rotation_snap_ticks_are_clipped_to_the_reachable_hinge_arc() -> None:
         RECT,
         np.zeros(3),
         axis,
-        np.array((1.0, 0.0, 0.0)),
+        np.array((0.0, 1.0, 0.0)),
         SIZE_PT,
     )
     gizmo = ObjectGizmo("rotate")
@@ -335,6 +335,18 @@ def test_rotation_snap_ticks_are_clipped_to_the_reachable_hinge_arc() -> None:
         if name == "line" and np.allclose(args[2], GUIDE_CORE_COLOR)
     ]
     assert len(snap_ticks) == 10
+    expected_angles = np.radians((*range(0, 270, 30), 330))
+    stable_dial = _RotationDialProjector(
+        cam,
+        RECT,
+        np.zeros(3),
+        axis,
+        np.array((1.0, 0.0, 0.0)),
+        SIZE_PT,
+    )
+    assert np.asarray([tick[0] for tick in snap_ticks]) == pytest.approx(
+        stable_dial.points(RING_RADIUS, expected_angles)[:, :2]
+    )
 
 
 def camera(*, orthographic: bool = False) -> CameraView:

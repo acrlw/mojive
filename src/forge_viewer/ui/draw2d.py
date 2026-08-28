@@ -15,6 +15,30 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 
 
+def _anti_alias_fringe_outer(points) -> np.ndarray:
+    """Return a one-pixel outward miter ring for either polygon winding."""
+
+    outline = np.asarray(points, np.float64).reshape(-1, 2)
+    if len(outline) < 3:
+        return np.empty((0, 2), np.float64)
+    edges = np.roll(outline, -1, axis=0) - outline
+    lengths = np.linalg.norm(edges, axis=1)
+    if np.any(lengths < 1e-9):
+        return np.empty((0, 2), np.float64)
+    signed_area = 0.5 * float(
+        np.sum(outline[:, 0] * np.roll(outline[:, 1], -1))
+        - np.sum(outline[:, 1] * np.roll(outline[:, 0], -1))
+    )
+    if abs(signed_area) < 1e-9:
+        return np.empty((0, 2), np.float64)
+    normals = np.column_stack((edges[:, 1], -edges[:, 0])) / lengths[:, None]
+    if signed_area < 0.0:
+        normals *= -1.0
+    miters = (np.roll(normals, 1, axis=0) + normals) * 0.5
+    scale = np.minimum(1.0 / np.maximum(np.sum(miters * miters, axis=1), 1e-4), 100.0)
+    return outline + miters * scale[:, None]
+
+
 @runtime_checkable
 class Draw2D(Protocol):
     """Immediate-mode 2D primitives; later calls paint over earlier ones."""
@@ -97,6 +121,7 @@ class ImguiDraw2D:
             dl.prim_write_idx(base)
             dl.prim_write_idx(base + index)
             dl.prim_write_idx(base + index + 1)
+        self._write_anti_alias_fringe(vertices, rgba)
 
     def concave_fill(self, points, color) -> None:
         self._dl.add_concave_poly_filled([self._vec(p) for p in points], self._u32(color))
@@ -114,14 +139,19 @@ class ImguiDraw2D:
         if not (flags & aa_flag):
             return
 
-        # Builtin AA fills concave polygons with visible seams, so emit the
-        # anti-aliasing fringe by hand: one ring of alpha-gradient triangles.
-        edges = np.roll(outline, -1, axis=0) - outline
-        lengths = np.linalg.norm(edges, axis=1)
-        normals = np.column_stack((edges[:, 1], -edges[:, 0])) / lengths[:, None]
-        miters = (np.roll(normals, 1, axis=0) + normals) * 0.5
-        scale = np.minimum(1.0 / np.maximum(np.sum(miters * miters, axis=1), 1e-4), 100.0)
-        outer = outline + miters * scale[:, None]
+        self._write_anti_alias_fringe(outline, rgba)
+
+    def _write_anti_alias_fringe(self, outline, rgba: int) -> None:
+        """Emit one alpha-gradient ring around an already solid polygon fill."""
+
+        imgui = self._imgui
+        dl = self._dl
+        if not (dl.flags & imgui.ImDrawListFlags_.anti_aliased_fill.value):
+            return
+        outline = np.asarray(outline, np.float64).reshape(-1, 2)
+        outer = _anti_alias_fringe_outer(outline)
+        if len(outer) != len(outline):
+            return
 
         count = len(outline)
         base = dl._vtx_current_idx

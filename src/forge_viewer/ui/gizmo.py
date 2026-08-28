@@ -1399,6 +1399,18 @@ class ObjectGizmo:
             and joint_range is not None
             and joint_range.joint_type == "hinge"
         )
+        if limited_hinge:
+            # Joint limits, current value, drag sector, and snap ticks all use
+            # the joint's absolute angular frame. The cursor-down radial is only
+            # a drag integrator reference and must not rotate the visible ruler.
+            dial = _RotationDialProjector(
+                cam,
+                rect,
+                self._start_pos,
+                self._axis,
+                self._start_basis[:, 0],
+                SIZE_PT * style_scale,
+            )
         ticks: list[tuple[np.ndarray, np.ndarray]] = []
         for degrees in np.arange(0.0, 360.0, step):
             angle = np.radians(degrees)
