@@ -287,6 +287,56 @@ def test_rotation_snap_does_not_duplicate_the_limited_hinge_current_tick() -> No
     assert len(highlighted) == 1
 
 
+@pytest.mark.parametrize(
+    ("degrees", "reachable"),
+    ((0.0, True), (240.0, True), (260.0, True), (270.0, False), (330.0, True)),
+)
+def test_joint_range_membership_wraps_across_zero(
+    degrees: float,
+    reachable: bool,
+) -> None:
+    joint_range = _JointRangeState(
+        "hinge",
+        np.radians(70.0),
+        np.radians(-30.0),
+        np.radians(260.0),
+    )
+    assert joint_range.contains_angle(np.radians(degrees)) is reachable
+
+
+def test_rotation_snap_ticks_are_clipped_to_the_reachable_hinge_arc() -> None:
+    cam = camera()
+    axis = np.array((0.0, 0.0, 1.0))
+    dial = _RotationDialProjector(
+        cam,
+        RECT,
+        np.zeros(3),
+        axis,
+        np.array((1.0, 0.0, 0.0)),
+        SIZE_PT,
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._axis[:] = axis
+    gizmo.rotation_snap_deg = 30.0
+    gizmo._joint_range = _JointRangeState(
+        "hinge",
+        np.radians(70.0),
+        np.radians(-30.0),
+        np.radians(260.0),
+    )
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_rotation_snap_ticks(overlay, cam, RECT, 1.0, dial)
+
+    snap_ticks = [
+        args
+        for name, args, _kwargs in overlay.calls
+        if name == "line" and np.allclose(args[2], GUIDE_CORE_COLOR)
+    ]
+    assert len(snap_ticks) == 10
+
+
 def camera(*, orthographic: bool = False) -> CameraView:
     return CameraView(
         eye=np.array((4.0, -6.0, 3.0), np.float32),

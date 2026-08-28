@@ -101,6 +101,8 @@ JOINT_LOWER_LIMIT_COLOR = (0.30, 0.58, 1.00, 1.0)
 JOINT_UPPER_LIMIT_COLOR = (1.00, 0.34, 0.28, 1.0)
 JOINT_CURRENT_TICK_PT = 11.0
 JOINT_LIMIT_TICK_PT = 14.0
+_FULL_TURN = 2.0 * np.pi
+_JOINT_RANGE_EPSILON = 1e-9
 
 
 def _with_alpha(color, alpha: float) -> tuple[float, float, float, float]:
@@ -240,6 +242,24 @@ class _JointRangeState:
     current: float
     lower: float
     upper: float
+
+    @property
+    def angular_span(self) -> float:
+        """Reachable hinge span, clamped to one complete dial turn."""
+
+        return float(np.clip(self.upper - self.lower, 0.0, _FULL_TURN))
+
+    @property
+    def covers_full_turn(self) -> bool:
+        return self.angular_span >= _FULL_TURN - _JOINT_RANGE_EPSILON
+
+    def contains_angle(self, angle: float) -> bool:
+        """Return whether a dial angle belongs to the reachable hinge arc."""
+
+        if self.covers_full_turn:
+            return True
+        relative = float((angle - self.lower) % _FULL_TURN)
+        return relative <= self.angular_span + _JOINT_RANGE_EPSILON
 
 
 @dataclass(frozen=True)
@@ -1078,11 +1098,10 @@ class ObjectGizmo:
             SIZE_PT * style_scale,
         )
         segments = _rotation_dial_segments(cam, origin, rotation[:, 2])
-        full_turn = 2.0 * np.pi
-        span = float(np.clip(state.upper - state.lower, 0.0, full_turn))
+        span = state.angular_span
         start_angle = state.lower
-        unavailable_span = full_turn - span
-        full_range = unavailable_span <= 1e-6
+        unavailable_span = _FULL_TURN - span
+        full_range = state.covers_full_turn
         if self._active is GizmoHandle.ROTATE_Z:
             allowed_color = ACTIVE_HANDLE_COLOR
         elif self._interactive and self._hovered is GizmoHandle.ROTATE_Z:
@@ -1090,7 +1109,7 @@ class ObjectGizmo:
         else:
             allowed_color = JOINT_RANGE_COLOR
         if span > 1e-6:
-            point_count = max(2, int(np.ceil(segments * span / full_turn)) + 1)
+            point_count = max(2, int(np.ceil(segments * span / _FULL_TURN)) + 1)
             allowed_angles = np.linspace(
                 start_angle,
                 start_angle + span,
@@ -1106,10 +1125,13 @@ class ObjectGizmo:
                     closed=full_range,
                 )
         if unavailable_span > 1e-6:
-            point_count = max(2, int(np.ceil(segments * unavailable_span / full_turn)) + 1)
+            point_count = max(
+                2,
+                int(np.ceil(segments * unavailable_span / _FULL_TURN)) + 1,
+            )
             unavailable_angles = np.linspace(
                 start_angle + span,
-                start_angle + full_turn,
+                start_angle + _FULL_TURN,
                 point_count,
             )
             unavailable = dial.points(JOINT_RANGE_RADIUS, unavailable_angles)
@@ -1371,9 +1393,17 @@ class ObjectGizmo:
         ticks_visible = (
             self._active is GizmoHandle.ROTATE_SCREEN or projection_alpha >= ROTATION_TICK_MIN_ALPHA
         )
+        joint_range = self._joint_range
+        limited_hinge = (
+            self._active is GizmoHandle.ROTATE_Z
+            and joint_range is not None
+            and joint_range.joint_type == "hinge"
+        )
         ticks: list[tuple[np.ndarray, np.ndarray]] = []
         for degrees in np.arange(0.0, 360.0, step):
             angle = np.radians(degrees)
+            if limited_hinge and not joint_range.contains_angle(angle):
+                continue
             angle_step = np.radians(step)
             points = dial_points((angle, angle + angle_step))
             if np.any(points[:, 2] <= 0.0):
