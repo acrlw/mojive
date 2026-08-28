@@ -1375,7 +1375,10 @@ class ObjectGizmo:
                 ticks.append(segment)
 
         active_tick = None
-        if ticks_visible:
+        has_joint_current_tick = (
+            self._joint_range is not None and self._joint_range.joint_type == "hinge"
+        )
+        if ticks_visible and not has_joint_current_tick:
             angle = self._rotation_angle
             points = dial_points((angle, angle + np.radians(step)))
             spacing = float(np.linalg.norm(points[1, :2] - points[0, :2]))

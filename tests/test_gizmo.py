@@ -252,6 +252,39 @@ def test_rotation_snap_highlight_matches_the_corresponding_tick_length() -> None
     assert np.linalg.norm(end - start) == pytest.approx(4.0 * DEFAULT_ROTATION_TICK_SCALE)
 
 
+def test_rotation_snap_does_not_duplicate_the_limited_hinge_current_tick() -> None:
+    cam = camera()
+    axis = np.array((0.0, 0.0, 1.0))
+    dial = _RotationDialProjector(
+        cam,
+        RECT,
+        np.zeros(3),
+        axis,
+        np.array((1.0, 0.0, 0.0)),
+        SIZE_PT,
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._axis[:] = axis
+    gizmo._rotation_angle = np.radians(5.0)
+    gizmo._joint_range = _JointRangeState(
+        "hinge",
+        np.radians(20.0),
+        np.radians(-60.0),
+        np.radians(60.0),
+    )
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_joint_range(overlay, cam, RECT, 1.0)
+    gizmo._draw_rotation_snap_ticks(overlay, cam, RECT, 1.0, dial)
+
+    lines = [args for name, args, _kwargs in overlay.calls if name == "line"]
+    snap_ticks = [args for args in lines if np.allclose(args[2], GUIDE_CORE_COLOR)]
+    highlighted = [args for args in lines if np.allclose(args[2], HOVER_COLOR)]
+    assert snap_ticks
+    assert len(highlighted) == 1
+
+
 def camera(*, orthographic: bool = False) -> CameraView:
     return CameraView(
         eye=np.array((4.0, -6.0, 3.0), np.float32),
