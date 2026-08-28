@@ -69,9 +69,12 @@ before editing model properties.
 
 Schema-driven groups read their field inventories from the linked MuJoCo version and submit any
 number of groups through one rebuild. Blank fields retain MuJoCo defaults or default-class
-inheritance. **Edit MJCF Source...** remains the intentional escape hatch for plugin-defined
-components, raw bulk asset payloads, includes, comments, and unusual schema combinations. The
-source popup compiles before applying changes and keeps the last good model when validation fails.
+inheritance. **Edit MJCF Source...** edits normalized XML produced by `MjSpec`; it is the escape
+hatch for plugin-defined components, raw bulk asset payloads, and unusual schema combinations, but
+it is not a source-preserving text editor. `MjSpec` expands include structure and removes comments
+when it serializes the model. Keep editing the original external files when their include layout,
+comments, or formatting must remain intact. The source popup compiles before applying changes and
+keeps the last good model when validation fails.
 
 In Hierarchy, Ctrl/Cmd+click selects multiple rows. **Delete model elements** removes the selected
 top-level model elements through one `ModelEditBatch`; descendants of another selected row are
