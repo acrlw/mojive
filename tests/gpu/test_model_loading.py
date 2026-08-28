@@ -302,6 +302,13 @@ def test_model_asset_dialog_imports_standalone_and_replaces_by_name(viewer, monk
         path,
     )
 
+    viewer.app._open_model_asset_replace_dialog(4, "texture", "surface")
+    viewer.app._poll_model_asset_dialog()
+    assert opened[-1][0] == "Replace PNG texture"
+    assert opened[-1][2] == IMAGE_FILTERS
+    assert isinstance(submitted[-1], cmd.ReplaceModelAssetFile)
+    assert (submitted[-1].asset_type, submitted[-1].name) == ("texture", "surface")
+
 
 def test_runtime_model_loading_rebuilds_gpu_scene(viewer):
     viewer.sync()

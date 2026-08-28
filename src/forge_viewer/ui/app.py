@@ -766,13 +766,18 @@ class ViewerApp:
         if self._model_asset_dialog is not None:
             return
         kind = str(asset_type).strip().lower()
-        if kind not in ("mesh", "hfield") or action not in ("import", "replace"):
+        if kind not in ("mesh", "hfield", "texture") or action not in (
+            "import",
+            "replace",
+        ):
             return
         current = self.session.asset_path
         default = current.parent if current is not None else Path.cwd()
         filters = MESH_FILTERS if kind == "mesh" else IMAGE_FILTERS
         verb = "Import" if action == "import" else "Replace"
-        label = "mesh" if kind == "mesh" else "PNG height field"
+        label = (
+            "mesh" if kind == "mesh" else "PNG height field" if kind == "hfield" else "PNG texture"
+        )
         self._model_asset_dialog = portable_file_dialogs.open_file(
             f"{verb} {label}", str(default), filters
         )

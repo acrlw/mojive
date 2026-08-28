@@ -2454,6 +2454,47 @@ class MuJoCoAdapter(SceneAdapterBase):
         asset = root.find("asset")
         if asset is None:
             return ()
+        material_indices: dict[str, int] = {}
+        for material_id in range(self._m.nmat):
+            compiled_name = mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_MATERIAL, material_id)
+            owner, local_name = self._model_element_name(
+                compiled_name or f"material{material_id}", mujoco.mjtObj.mjOBJ_MATERIAL
+            )
+            if owner == int(model_id):
+                material_indices[local_name] = material_id
+        height_field_previews: dict[
+            str,
+            tuple[
+                tuple[int, int],
+                tuple[int, int],
+                tuple[float, ...],
+                tuple[float, float],
+            ],
+        ] = {}
+        for field_id in range(self._m.nhfield):
+            compiled_name = mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_HFIELD, field_id)
+            owner, local_name = self._model_element_name(
+                compiled_name or f"hfield{field_id}", mujoco.mjtObj.mjOBJ_HFIELD
+            )
+            if owner != int(model_id):
+                continue
+            rows = int(self._m.hfield_nrow[field_id])
+            columns = int(self._m.hfield_ncol[field_id])
+            address = int(self._m.hfield_adr[field_id])
+            data = np.asarray(
+                self._m.hfield_data[address : address + rows * columns], np.float32
+            ).reshape(rows, columns)
+            preview_rows = min(rows, 48)
+            preview_columns = min(columns, 48)
+            row_indices = np.rint(np.linspace(0, rows - 1, preview_rows)).astype(np.intp)
+            column_indices = np.rint(np.linspace(0, columns - 1, preview_columns)).astype(np.intp)
+            preview = data[np.ix_(row_indices, column_indices)]
+            height_field_previews[local_name] = (
+                (rows, columns),
+                (preview_rows, preview_columns),
+                tuple(float(value) for value in preview.reshape(-1)),
+                (float(np.min(data)), float(np.max(data))),
+            )
         items: list[ModelAssetInfo] = []
         for asset_type in _MODEL_ASSET_TYPES:
             for index, element in enumerate(asset.findall(asset_type)):
@@ -2466,6 +2507,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                     for field, value in attributes.items()
                     if field not in {"name", "file"}
                 )
+                preview = height_field_previews.get(name, ((0, 0), (0, 0), (), (0.0, 0.0)))
                 items.append(
                     ModelAssetInfo(
                         model_id=int(model_id),
@@ -2475,6 +2517,13 @@ class MuJoCoAdapter(SceneAdapterBase):
                         file=str(attributes.get("file", "")),
                         fields=fields,
                         references=_model_asset_references(root, asset_type, name, element),
+                        data_shape=preview[0],
+                        preview_shape=preview[1],
+                        preview_values=preview[2],
+                        preview_range=preview[3],
+                        runtime_index=(
+                            material_indices.get(name, -1) if asset_type == "material" else -1
+                        ),
                     )
                 )
         return tuple(items)
@@ -2649,7 +2698,12 @@ class MuJoCoAdapter(SceneAdapterBase):
         kind = str(asset_type).strip().lower()
         value = str(name).strip()
         source = Path(path).expanduser().resolve()
-        if spec is None or kind not in ("mesh", "hfield") or not value or not source.is_file():
+        if (
+            spec is None
+            or kind not in ("mesh", "hfield", "texture")
+            or not value
+            or not source.is_file()
+        ):
             return False
         root, _xml = _component_xml(spec)
         _asset, target = _model_asset_element(root, kind, value)
@@ -2661,8 +2715,20 @@ class MuJoCoAdapter(SceneAdapterBase):
             target.attrib.pop("nrow", None)
             target.attrib.pop("ncol", None)
             target.attrib.pop("elevation", None)
-        else:
+        elif kind == "mesh":
             for field in ("vertex", "normal", "texcoord", "face", "builtin", "params"):
+                target.attrib.pop(field, None)
+        else:
+            for field in (
+                "builtin",
+                "width",
+                "height",
+                "rgb1",
+                "rgb2",
+                "mark",
+                "markrgb",
+                "random",
+            ):
                 target.attrib.pop(field, None)
         edited = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
         return self._replace_model_spec(model_id, edited)
@@ -5698,6 +5764,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             (mujoco.mjtObj.mjOBJ_LIGHT, "lights"),
             (mujoco.mjtObj.mjOBJ_MATERIAL, "materials"),
             (mujoco.mjtObj.mjOBJ_TEXTURE, "textures"),
+            (mujoco.mjtObj.mjOBJ_HFIELD, "hfields"),
             (mujoco.mjtObj.mjOBJ_KEY, "keys"),
         )
         index: dict[tuple[int, str], tuple[int, str]] = {}
@@ -7197,6 +7264,22 @@ class MuJoCoAdapter(SceneAdapterBase):
             for index in range(self._m.ntex)
             if (name := mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_TEXTURE, index))
             and self._model_element_name(name, mujoco.mjtObj.mjOBJ_TEXTURE)[0] == int(model_id)
+        )
+
+    def create_model_material(self, model_id: int, name: str) -> int:
+        model_id = int(model_id)
+        value = str(name).strip()
+        spec = self._spec_for_model(model_id)
+        if spec is None or not value or spec.material(value) is not None:
+            return -1
+        working = spec.copy()
+        working.add_material(name=value)
+        if not self._replace_model_spec(model_id, working):
+            return -1
+        return mujoco.mj_name2id(
+            self._m,
+            mujoco.mjtObj.mjOBJ_MATERIAL,
+            f"{self._model_prefix(model_id)}{value}",
         )
 
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int:

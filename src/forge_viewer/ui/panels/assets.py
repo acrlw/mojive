@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 from imgui_bundle import imgui
 
@@ -55,6 +57,27 @@ def _parse_vector(value: str, length: int, default: tuple[float, ...]) -> np.nda
 
 def _format_vector(value) -> str:
     return " ".join(f"{float(item):.9g}" for item in value)
+
+
+def height_field_preview_color(value: float) -> tuple[float, float, float, float]:
+    """Map normalized elevation to a legible terrain-style preview color."""
+
+    t = min(1.0, max(0.0, float(value)))
+    low = (0.08, 0.18, 0.38)
+    middle = (0.12, 0.58, 0.46)
+    high = (0.96, 0.82, 0.28)
+    if t <= 0.5:
+        amount = t * 2.0
+        start, end = low, middle
+    else:
+        amount = (t - 0.5) * 2.0
+        start, end = middle, high
+    return (
+        start[0] + (end[0] - start[0]) * amount,
+        start[1] + (end[1] - start[1]) * amount,
+        start[2] + (end[2] - start[2]) * amount,
+        1.0,
+    )
 
 
 def _resize_height_field_samples(
@@ -133,6 +156,8 @@ class AssetsPanel(Panel):
         self._hfield_source_columns = 2
         self._hfield_elevation = "0 0 0 0"
         self._hfield_source_elevation = self._hfield_elevation
+        self._texture_import_type = "2d"
+        self._material_create_name = "material"
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -233,9 +258,11 @@ class AssetsPanel(Panel):
         editable = ctx.session.paused and ctx.session.adapter.caps.model_assets
         mesh_label = "Import Mesh..."
         hfield_label = "Import Height Field..."
+        texture_label = "Import Texture..."
         widths = (
             button_width(mesh_label),
             button_width(hfield_label),
+            button_width(texture_label),
         )
         inline = button_row_layout(
             widths,
@@ -254,8 +281,26 @@ class AssetsPanel(Panel):
                 "hfield",
                 (("size", _format_vector(self._hfield_import_size)),),
             )
+        if inline[2]:
+            imgui.same_line()
+        if imgui.small_button(texture_label) and ctx.request_texture_import is not None:
+            ctx.request_texture_import(self._model_id, -1, self._texture_import_type)
         if not editable:
             imgui.end_disabled()
+        if begin_kv_table("texture_import_type"):
+            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
+            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.text_disabled("texture type")
+            imgui.table_next_column()
+            texture_types = ("2d", "cube", "skybox")
+            slot = texture_types.index(self._texture_import_type)
+            imgui.set_next_item_width(-1.0)
+            changed, slot = imgui.combo("##texture-import-type", slot, ("2D", "Cube", "Skybox"))
+            if changed:
+                self._texture_import_type = texture_types[slot]
+            imgui.end_table()
         if imgui.tree_node("Height-field import size"):
             _changed, self._hfield_import_size = _hfield_size_editor(
                 "hfield-import-size", self._hfield_import_size
@@ -319,6 +364,26 @@ class AssetsPanel(Panel):
                 imgui.end_disabled()
             imgui.text_disabled("Creates editable inline nrow/ncol/elevation data.")
             imgui.tree_pop()
+        if imgui.tree_node("New material"):
+            imgui.set_next_item_width(-1.0)
+            _changed, self._material_create_name = imgui.input_text(
+                "name##new-material", self._material_create_name
+            )
+            material_name = self._material_create_name.strip()
+            if not material_name or not editable:
+                imgui.begin_disabled()
+            if imgui.small_button("Create Material"):
+                result = ctx.submit(cmd.CreateModelMaterial(self._model_id, material_name))
+                if result.ok:
+                    self._selected = (self._model_id, "material", material_name)
+                    self._selection_key = None
+                    self._material_create_name = unique_asset_name(
+                        "material", ctx.session.model_assets(self._model_id), "material"
+                    )
+            if not material_name or not editable:
+                imgui.end_disabled()
+            imgui.text_disabled("Creates an unbound material asset for later assignment.")
+            imgui.tree_pop()
         if not ctx.session.paused:
             imgui.text_disabled("Pause the simulation to edit model assets")
 
@@ -356,6 +421,8 @@ class AssetsPanel(Panel):
             imgui.end_table()
         for reference in item.references:
             imgui.bullet_text(reference)
+        if item.type == "hfield":
+            self._height_field_preview(ctx, item)
 
         editable = ctx.session.paused and ctx.session.adapter.caps.model_assets
         if not editable:
@@ -364,7 +431,7 @@ class AssetsPanel(Panel):
         _changed, self._rename = imgui.input_text("##asset-name", self._rename)
         rename = self._rename.strip()
         action_labels = ["Rename", "Duplicate"]
-        if item.type in ("mesh", "hfield"):
+        if item.type in ("mesh", "hfield", "texture"):
             action_labels.append("Replace File...")
         action_labels.append("Delete")
         inline = button_row_layout(
@@ -394,7 +461,7 @@ class AssetsPanel(Panel):
                 self._selected = (item.model_id, item.type, duplicate)
                 self._selection_key = None
         action_index += 1
-        if item.type in ("mesh", "hfield"):
+        if item.type in ("mesh", "hfield", "texture"):
             if inline[action_index]:
                 imgui.same_line()
             if (
@@ -415,10 +482,57 @@ class AssetsPanel(Panel):
 
         if item.type == "hfield":
             self._hfield_controls(ctx, item)
+        if item.type == "material":
+            self._material_controls(ctx, item)
         if item.type in ("mesh", "hfield"):
             self._assignment_control(ctx, item)
         if not editable:
             imgui.end_disabled()
+
+    @staticmethod
+    def _height_field_preview(ctx: PanelContext, item: ModelAssetInfo) -> None:
+        rows, columns = item.preview_shape
+        source_rows, source_columns = item.data_shape
+        if rows <= 0 or columns <= 0 or len(item.preview_values) != rows * columns:
+            imgui.text_disabled("height-field preview unavailable")
+            return
+
+        available = max(1.0, imgui.get_content_region_avail().x)
+        height = float(
+            np.clip(
+                available * source_rows / max(source_columns, 1),
+                72.0 * ctx.style_scale,
+                180.0 * ctx.style_scale,
+            )
+        )
+        imgui.invisible_button("##height-field-preview", imgui.ImVec2(available, height))
+        lo = imgui.get_item_rect_min()
+        hi = imgui.get_item_rect_max()
+        cell_width = (hi.x - lo.x) / columns
+        cell_height = (hi.y - lo.y) / rows
+        low, high = item.preview_range
+        span = high - low
+        draw_list = imgui.get_window_draw_list()
+        for row in range(rows):
+            for column in range(columns):
+                value = item.preview_values[row * columns + column]
+                normalized = (value - low) / span if span > 1e-12 else 0.5
+                rgba = imgui.color_convert_float4_to_u32(
+                    imgui.ImVec4(*height_field_preview_color(normalized))
+                )
+                draw_list.add_rect_filled(
+                    imgui.ImVec2(lo.x + column * cell_width, lo.y + row * cell_height),
+                    imgui.ImVec2(
+                        lo.x + (column + 1) * cell_width,
+                        lo.y + (row + 1) * cell_height,
+                    ),
+                    rgba,
+                )
+        border = imgui.color_convert_float4_to_u32(imgui.ImVec4(*ctx.theme.border))
+        draw_list.add_rect(lo, hi, border)
+        imgui.text_disabled(
+            f"{source_columns} × {source_rows} samples · normalized {low:.4g} .. {high:.4g}"
+        )
 
     def _hfield_controls(self, ctx: PanelContext, item: ModelAssetInfo) -> None:
         imgui.separator()
@@ -521,6 +635,107 @@ class AssetsPanel(Panel):
             imgui.end_disabled()
 
     @staticmethod
+    def _material_controls(ctx: PanelContext, item: ModelAssetInfo) -> None:
+        source = ctx.session.source
+        material_index = item.runtime_index
+        if source is None or not 0 <= material_index < len(source.materials):
+            imgui.text_disabled("compiled material unavailable")
+            return
+        material = source.materials[material_index]
+        rgba = material.rgba
+        emission = material.emission
+        specular = material.specular
+        shininess = material.shininess
+        reflectance = material.reflectance
+        texture = material.texture
+        tex_repeat = material.tex_repeat
+        tex_uniform = material.tex_uniform
+        changed = False
+
+        imgui.separator()
+        imgui.text_disabled("material appearance")
+        if begin_kv_table("asset_material"):
+            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
+            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.text_disabled("base color")
+            imgui.table_next_column()
+            imgui.set_next_item_width(-1.0)
+            item_changed, rgba = imgui.color_edit4("##asset-material-rgba", rgba)
+            changed |= item_changed
+
+            scalar_fields = (
+                ("emission", emission, 10.0),
+                ("specular", specular, 1.0),
+                ("shininess", shininess, 1.0),
+                ("reflectance", reflectance, 1.0),
+            )
+            edited_scalars: list[float] = []
+            for label, value, maximum in scalar_fields:
+                imgui.table_next_row()
+                imgui.table_next_column()
+                imgui.text_disabled(label)
+                imgui.table_next_column()
+                imgui.set_next_item_width(-1.0)
+                item_changed, value = imgui.drag_float(
+                    f"##asset-material-{label}", value, 0.01, 0.0, maximum, "%.2f"
+                )
+                changed |= item_changed
+                edited_scalars.append(float(value))
+            emission, specular, shininess, reflectance = edited_scalars
+
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.text_disabled("texture")
+            imgui.table_next_column()
+            imgui.set_next_item_width(-1.0)
+            if imgui.begin_combo("##asset-material-texture", texture or "none"):
+                for candidate in (None, *ctx.session.model_texture_names(item.model_id)):
+                    selected, _ = imgui.selectable(candidate or "none", candidate == texture)
+                    if selected:
+                        texture = candidate
+                        changed = True
+                imgui.end_combo()
+
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.text_disabled("texture repeat")
+            imgui.table_next_column()
+            imgui.set_next_item_width(-1.0)
+            item_changed, tex_repeat = imgui.drag_float2(
+                "##asset-material-repeat", tex_repeat, 0.05, 0.01, 1000.0, "%.2f"
+            )
+            changed |= item_changed
+
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.text_disabled("uniform scale")
+            imgui.table_next_column()
+            item_changed, tex_uniform = imgui.checkbox("##asset-material-uniform", tex_uniform)
+            changed |= item_changed
+            imgui.end_table()
+
+        if changed:
+            ctx.submit(
+                cmd.SetMaterial(
+                    material_index,
+                    replace(
+                        material,
+                        rgba=np.asarray(rgba, np.float32),
+                        emission=emission,
+                        specular=specular,
+                        shininess=shininess,
+                        reflectance=reflectance,
+                        texture=texture,
+                        tex_repeat=np.asarray(tex_repeat, np.float32),
+                        tex_uniform=bool(tex_uniform),
+                    ),
+                )
+            )
+
+    @staticmethod
     def _assignment_control(ctx: PanelContext, item: ModelAssetInfo) -> None:
         node = ctx.session.selected_node
         if node is None or node.type is not NodeType.GEOM:
@@ -541,4 +756,9 @@ class AssetsPanel(Panel):
             ctx.submit(cmd.SetGeometryShape(node.node_id, item.type, item.name))
 
 
-__all__ = ["AssetsPanel", "filter_assets", "unique_asset_name"]
+__all__ = [
+    "AssetsPanel",
+    "filter_assets",
+    "height_field_preview_color",
+    "unique_asset_name",
+]

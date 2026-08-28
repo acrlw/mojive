@@ -359,6 +359,7 @@ _SCENE_EDIT_COMMANDS = (
     cmd.ReplaceModelAssetFile,
     cmd.RemoveModelAsset,
     cmd.SetBodyProperties,
+    cmd.CreateModelMaterial,
     cmd.AddModelMaterial,
     cmd.ImportModelTexture,
     cmd.SetGeometryMaterial,
@@ -2123,8 +2124,10 @@ class Session:
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before replacing model asset files")
             asset_type = str(c.asset_type).strip().lower()
-            if asset_type not in ("mesh", "hfield"):
-                return CommandResult.bad("File replacement currently supports mesh or hfield")
+            if asset_type not in ("mesh", "hfield", "texture"):
+                return CommandResult.bad(
+                    "File replacement currently supports mesh, hfield, or texture"
+                )
             path = Path(c.path).expanduser().resolve()
             allowed_suffixes = (
                 {".stl", ".obj", ".msh", ".ply"} if asset_type == "mesh" else {".png"}
@@ -2250,6 +2253,25 @@ class Session:
                 return CommandResult.bad("Body properties could not be edited")
             self._refresh_structure()
             return CommandResult.good("")
+
+        if isinstance(c, cmd.CreateModelMaterial):
+            if not caps.model_assets:
+                return CommandResult.bad(f"{caps.name} does not support model asset editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before creating materials")
+            value = str(c.name).strip()
+            if not value:
+                return CommandResult.bad("A material name cannot be empty")
+            if any(
+                asset.type == "material" and asset.name == value
+                for asset in self._adapter.model_assets(c.model_id)
+            ):
+                return CommandResult.bad(f"Material {value!r} already exists")
+            material_index = self._adapter.create_model_material(c.model_id, value)
+            if material_index < 0:
+                return CommandResult.bad(f"Material {value!r} could not be created")
+            self._refresh_structure()
+            return CommandResult.good(f"Created material {value}", material_index)
 
         if isinstance(c, cmd.AddModelMaterial):
             if not caps.model_assets:

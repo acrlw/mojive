@@ -195,6 +195,11 @@ class ModelAssetInfo:
     file: str = ""
     fields: tuple[ModelComponentField, ...] = ()
     references: tuple[str, ...] = ()
+    data_shape: tuple[int, int] = (0, 0)
+    preview_shape: tuple[int, int] = (0, 0)
+    preview_values: tuple[float, ...] = ()
+    preview_range: tuple[float, float] = (0.0, 0.0)
+    runtime_index: int = -1
 
 
 @dataclass(frozen=True)
@@ -1135,6 +1140,10 @@ class SceneAdapterBase:
         """Return compiled texture names owned by one editable model."""
         return ()
 
+    def create_model_material(self, model_id: int, name: str) -> int:
+        """Create one unbound model-local material and return its render index."""
+        return -1
+
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int:
         """Create and bind a model-local material to one geometry or site."""
         return -1
@@ -1450,6 +1459,7 @@ class SceneAdapter(Protocol):
     def set_body_properties(self, properties: BodyProperties) -> bool: ...
     def model_material_indices(self, model_id: int) -> tuple[int, ...]: ...
     def model_texture_names(self, model_id: int) -> tuple[str, ...]: ...
+    def create_model_material(self, model_id: int, name: str) -> int: ...
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int: ...
     def import_model_texture(
         self,

@@ -669,6 +669,12 @@ class WorkspaceAdapter(SceneAdapterBase):
     def model_texture_names(self, model_id: int) -> tuple[str, ...]:
         return self.primary.model_texture_names(model_id)
 
+    def create_model_material(self, model_id: int, name: str) -> int:
+        material_index = self.primary.create_model_material(model_id, name)
+        if material_index >= 0:
+            self._invalidate()
+        return material_index
+
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int:
         return self.primary.add_model_material(node_id, name, copy_from)
 

@@ -974,6 +974,10 @@ def test_inline_height_field_lifecycle_edits_resolution_size_and_samples() -> No
     assert fields["nrow"] == "2"
     assert fields["ncol"] == "3"
     assert len(fields["elevation"].split()) == 6
+    assert asset.data_shape == (2, 3)
+    assert asset.preview_shape == (2, 3)
+    assert asset.preview_range == pytest.approx((0.0, 1.0))
+    assert len(asset.preview_values) == 6
     assert document.primary.model.nhfield == 1
 
     updated = session.submit(
@@ -1794,6 +1798,9 @@ def test_model_height_field_asset_lifecycle_is_standalone_safe_and_atomic(
     asset = session.model_assets(0)[0]
     assert (asset.type, asset.name, asset.references) == ("hfield", "terrain", ())
     assert {field.name: field.value for field in asset.fields}["size"] == "2 3 0.4 0.2"
+    assert asset.data_shape == (4, 4)
+    assert asset.preview_shape == (4, 4)
+    assert asset.preview_range == pytest.approx((0.0, 1.0))
     shape = session.geometry_shape_properties(geom.node_id)
     assert shape is not None and shape.type == "box"
     assert shape.height_field_names == ("terrain",)
@@ -1819,7 +1826,10 @@ def test_model_height_field_asset_lifecycle_is_standalone_safe_and_atomic(
     result = session.submit(cmd.ReplaceModelAssetFile(0, "hfield", "terrain_main", second_path))
     assert result.ok, result.message
     assert compile_count == 5
-    assert Path(session.model_assets(0)[0].file) == second_path
+    asset = session.model_assets(0)[0]
+    assert Path(asset.file) == second_path
+    assert asset.data_shape == (5, 5)
+    assert asset.preview_shape == (5, 5)
 
     result = session.submit(cmd.DuplicateModelAsset(0, "hfield", "terrain_main", "terrain_copy"))
     assert result.ok, result.message
@@ -1956,6 +1966,49 @@ def test_body_inertia_properties_recompile_once_and_restore_auto_derivation(
     assert restored.mass == pytest.approx(3.0)
 
 
+def test_standalone_model_material_lifecycle_does_not_require_geometry(tmp_path: Path) -> None:
+    path = tmp_path / "standalone-material.xml"
+    path.write_text(
+        '<mujoco><worldbody><body name="empty"/></worldbody></mujoco>',
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+
+    created = session.submit(cmd.CreateModelMaterial(0, "surface"))
+
+    assert created.ok, created.message
+    assert created.entity_id >= 0
+    asset = next(item for item in session.model_assets(0) if item.name == "surface")
+    assert asset.type == "material"
+    assert asset.references == ()
+    assert asset.runtime_index == created.entity_id
+    duplicate = session.submit(cmd.CreateModelMaterial(0, "surface"))
+    assert not duplicate.ok
+
+    source = session.source
+    assert source is not None
+    material = source.materials[created.entity_id]
+    edited = replace(
+        material,
+        rgba=np.array((0.2, 0.4, 0.6, 0.8), np.float32),
+        emission=0.25,
+        specular=0.75,
+    )
+    result = session.submit(cmd.SetMaterial(created.entity_id, edited))
+    assert result.ok, result.message
+    xml = document.scene_model_xml(0)
+    assert xml is not None
+    assert 'name="surface"' in xml
+    assert 'rgba="0.2 0.4 0.6 0.8"' in xml
+
+    assert session.submit(cmd.RemoveModelAsset(0, "material", "surface"))
+    assert not any(item.name == "surface" for item in session.model_assets(0))
+    assert session.submit(cmd.Undo())
+    assert any(item.name == "surface" for item in session.model_assets(0))
+
+
 def test_model_material_creation_binding_and_texture_import(tmp_path: Path, monkeypatch) -> None:
     from PIL import Image
 
@@ -1975,6 +2028,8 @@ def test_model_material_creation_binding_and_texture_import(tmp_path: Path, monk
     )
     texture_path = tmp_path / "surface.png"
     Image.fromarray(np.full((4, 6, 3), (40, 120, 200), np.uint8)).save(texture_path)
+    replacement_texture_path = tmp_path / "surface-replacement.png"
+    Image.fromarray(np.full((3, 5, 3), (200, 80, 40), np.uint8)).save(replacement_texture_path)
     cube_path = tmp_path / "studio.png"
     Image.fromarray(np.full((8, 8, 3), (20, 80, 160), np.uint8)).save(cube_path)
     document = WorkspaceAdapter(MuJoCoAdapter(path))
@@ -2035,6 +2090,24 @@ def test_model_material_creation_binding_and_texture_import(tmp_path: Path, monk
     assert "surface" not in session.model_texture_names(0)
     assert session.submit(cmd.Redo())
     assert "surface" in session.model_texture_names(0)
+
+    before_replace_compile = compile_count
+    replaced = session.submit(
+        cmd.ReplaceModelAssetFile(0, "texture", "surface", replacement_texture_path)
+    )
+    assert replaced.ok, replaced.message
+    assert compile_count == before_replace_compile + 1
+    surface_asset = next(
+        asset
+        for asset in session.model_assets(0)
+        if asset.type == "texture" and asset.name == "surface"
+    )
+    assert Path(surface_asset.file) == replacement_texture_path
+    assert session.source.textures["surface"].pixels.shape == (3, 5, 3)
+    assert session.submit(cmd.Undo())
+    assert session.source.textures["surface"].pixels.shape == (4, 6, 3)
+    assert session.submit(cmd.Redo())
+    assert session.source.textures["surface"].pixels.shape == (3, 5, 3)
 
     cube = session.submit(cmd.ImportModelTexture(0, cube_path, "studio", texture_type="cube"))
     assert cube.ok, cube.message

@@ -31,6 +31,7 @@ from forge_viewer.ui.panels import (
 from forge_viewer.ui.panels.assets import (
     _resize_height_field_samples,
     filter_assets,
+    height_field_preview_color,
     unique_asset_name,
 )
 from forge_viewer.ui.panels.camera import camera_snapshot, qpos_snapshot, reproduction_snapshot
@@ -100,6 +101,17 @@ def test_height_field_resize_preserves_the_overlapping_corner():
     resized = _resize_height_field_samples(values, 2, 3, 3, 2).reshape(3, 2)
 
     np.testing.assert_allclose(resized, ((0.0, 1.0), (3.0, 4.0), (0.0, 0.0)))
+
+
+def test_height_field_preview_color_clamps_and_spans_the_palette():
+    low = height_field_preview_color(-1.0)
+    middle = height_field_preview_color(0.5)
+    high = height_field_preview_color(2.0)
+
+    assert low == height_field_preview_color(0.0)
+    assert high == height_field_preview_color(1.0)
+    assert low != middle != high
+    assert low[3] == middle[3] == high[3] == 1.0
 
 
 def test_panel_diagnostics_are_published_to_the_persistent_session_status():

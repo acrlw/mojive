@@ -699,6 +699,14 @@ class SetBodyProperties(Command):
 
 
 @dataclass(frozen=True)
+class CreateModelMaterial(Command):
+    """Create one unbound model-local material asset."""
+
+    model_id: int
+    name: str
+
+
+@dataclass(frozen=True)
 class AddModelMaterial(Command):
     """Create a model-local material and bind it to a geometry or site node."""
 
