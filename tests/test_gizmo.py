@@ -9,6 +9,7 @@ from forge_viewer.adapters.base import FrameNeeds, NodeType
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.adapters.toy import ToyPhysicsAdapter
 from forge_viewer.gizmo import (
+    ACTIVE_COLOR,
     AXIS_START,
     CENTER_HIT_PT,
     CENTER_RADIUS,
@@ -1889,14 +1890,22 @@ def test_active_hinge_guide_does_not_cover_the_unavailable_range() -> None:
         name == "polyline" and np.allclose(args[1], JOINT_RANGE_UNAVAILABLE_COLOR)
         for name, args, _kwargs in overlay.calls
     )
+    assert any(
+        name == "polyline" and np.allclose(args[1], ACTIVE_COLOR)
+        for name, args, _kwargs in overlay.calls
+    )
     assert not any(
         name == "polyline" and kwargs.get("closed") and np.allclose(args[1], HOVER_COLOR)
         for name, args, kwargs in overlay.calls
     )
     assert any(name == "fringed_concave_fill" for name, _args, _kwargs in overlay.calls)
-    sector = next(
-        np.asarray(args[0]) for name, args, _kwargs in overlay.calls if name == "triangle_fan_fill"
+    sector_args = next(args for name, args, _kwargs in overlay.calls if name == "triangle_fan_fill")
+    sector = np.asarray(sector_args[0])
+    assert np.allclose(sector_args[1][:3], ACTIVE_COLOR[:3])
+    arc_color = next(
+        args[1] for name, args, _kwargs in overlay.calls if name == "fringed_concave_fill"
     )
+    assert np.allclose(arc_color, ACTIVE_COLOR)
     stable_dial = _RotationDialProjector(
         cam,
         RECT,
