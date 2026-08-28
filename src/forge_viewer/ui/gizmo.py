@@ -11,13 +11,16 @@ from .. import math3d
 from ..adapters.base import FrameNeeds, JointInfo, NodeType
 from ..commands import (
     BeginEditTransaction,
+    ClearSceneModelTransformPreview,
     CommandResult,
     EndEditTransaction,
+    PreviewSceneModelTransform,
     SetLight,
     SetPose,
     SetQpos,
     SetQposBatch,
     SetSceneCamera,
+    SetSceneModelTransform,
 )
 from ..gizmo import (
     ALL_HANDLE_MASK,
@@ -239,6 +242,8 @@ class ObjectGizmo:
         self._label = ""
         self._edit_started = False
         self._edit_session: Session | None = None
+        self._model_preview: tuple[int, np.ndarray, np.ndarray] | None = None
+        self._model_preview_session: Session | None = None
         self._joint_selection: dict[int, int] = {}
         self._joint_structure_generation = -1
         self._active_joint: JointInfo | None = None
@@ -517,7 +522,9 @@ class ObjectGizmo:
                 if target is not None or absolute
                 else float(np.radians(applied_amount))
             )
-        result, _position = self._submit_transform(session, node, position, rotation)
+        result, _position = self._submit_transform(
+            session, node, position, rotation, preview_model=False
+        )
         self._end()
         if not result.ok:
             self._verdict = Verdict(False, result.message)
@@ -582,10 +589,10 @@ class ObjectGizmo:
         self._style_scale = float(style_scale)
         if not claimed:
             if self._using and not left_down:
-                self._end()
+                self._end(commit=True)
             return False
         if released or not left_down:
-            self._end()
+            self._end(commit=True)
             return False
         if self._active is GizmoHandle.NONE and not self._begin(session, cam, rect, cursor):
             return False
@@ -606,7 +613,7 @@ class ObjectGizmo:
         self._style_scale = float(style_scale)
         if axis not in (0, 1, 2):
             if self._keyboard:
-                self._end()
+                self._end(commit=True)
             return False
         node = session.selected_node
         target, _reason = self._joint_target(session, node)
@@ -616,7 +623,7 @@ class ObjectGizmo:
         if not allowed & (1 << int(handle)):
             return False
         if self._keyboard and self._active is not handle:
-            self._end()
+            self._end(commit=True)
         if not self._keyboard:
             self._verdict = self.evaluate(session, node)
             if not self._verdict.ok or not self._begin_handle(session, cam, rect, cursor, handle):
@@ -1470,7 +1477,9 @@ class ObjectGizmo:
         self._label = self._format_value(pos)
         return True
 
-    def _submit_transform(self, session, node, pos, mat) -> tuple[CommandResult, np.ndarray]:
+    def _submit_transform(
+        self, session, node, pos, mat, *, preview_model: bool = True
+    ) -> tuple[CommandResult, np.ndarray]:
         """Route drag and precise edits through the same target command path."""
 
         pos = np.asarray(pos, np.float64)
@@ -1498,6 +1507,13 @@ class ObjectGizmo:
                 else:
                     pos = self._start_pos + self._axis * applied
                 command = SetQpos(joint.qpos_adr, value)
+        elif node.type is NodeType.MODEL:
+            command_type = PreviewSceneModelTransform if preview_model else SetSceneModelTransform
+            command = command_type(
+                model_id=node.model_id,
+                position=np.asarray(pos, np.float32),
+                rotation=np.asarray(mat, np.float32),
+            )
         elif node.type is NodeType.LIGHT:
             command = _set_light_from_world(session, node, pos, mat)
         elif node.type is NodeType.CAMERA:
@@ -1513,7 +1529,15 @@ class ObjectGizmo:
             return CommandResult.bad(reason), pos
         if command is None:
             return CommandResult.bad("Entity transform is unavailable"), pos
-        return session.submit(command), pos
+        result = session.submit(command)
+        if result.ok and preview_model and node.type is NodeType.MODEL:
+            self._model_preview = (
+                int(node.model_id),
+                np.asarray(pos, np.float64).copy(),
+                np.asarray(mat, np.float64).reshape(3, 3).copy(),
+            )
+            self._model_preview_session = session
+        return result, pos
 
     def _format_value(self, position) -> str:
         axis = _axis_of(self._active)
@@ -1685,7 +1709,19 @@ class ObjectGizmo:
         if result.ok:
             self._edit_session = session
 
-    def _end(self) -> None:
+    def _end(self, *, commit: bool = False) -> None:
+        if self._model_preview is not None and self._model_preview_session is not None:
+            model_id, position, rotation = self._model_preview
+            session = self._model_preview_session
+            if commit and self._edit_started:
+                result = session.submit(SetSceneModelTransform(model_id, position, rotation))
+                if not result.ok:
+                    session.submit(ClearSceneModelTransformPreview(model_id))
+                    self._verdict = Verdict(False, result.message)
+            else:
+                session.submit(ClearSceneModelTransformPreview(model_id))
+            self._model_preview = None
+            self._model_preview_session = None
         if self._edit_session is not None:
             self._edit_session.submit(EndEditTransaction())
             self._edit_session = None

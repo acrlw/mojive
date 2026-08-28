@@ -165,6 +165,21 @@ def test_translation_plane_depth_is_frozen_at_press():
     assert depths[-1] == pytest.approx(10.0, abs=1e-3)
 
 
+def test_cursor_grab_point_starts_without_a_screen_space_jump():
+    session, _adapter = make_session()
+    cam = side_camera()
+    controller = P.PerturbController()
+    origin, direction = cursor_ray(cam, ndc=(0.3, 0.15))
+    body_origin = np.zeros(3, np.float32)
+    grab = P.cursor_grab_point(cam, body_origin, origin, direction)
+
+    controller.begin(session, cam, session.selected_node, grab, "translate")
+    target_under_cursor = controller.drag_translate(session, cam, origin, direction)
+
+    assert target_under_cursor == pytest.approx(grab)
+    assert session.perturb.target_pos == pytest.approx(body_origin, abs=1e-6)
+
+
 def test_unfrozen_plane_runs_away():
 
     session, adapter = make_session()

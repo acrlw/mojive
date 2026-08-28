@@ -837,6 +837,30 @@ class Session:
             self._refresh_structure()
             return CommandResult.good("Updated model transform")
 
+        if isinstance(c, cmd.PreviewSceneModelTransform):
+            if not caps.model_composition:
+                return CommandResult.bad(f"{caps.name} does not support model composition")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before moving a model root")
+            try:
+                changed = self._adapter.preview_scene_model_transform(
+                    c.model_id, c.position, c.rotation
+                )
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if not changed:
+                return CommandResult.bad(f"Model {c.model_id} cannot be transformed")
+            return CommandResult.good()
+
+        if isinstance(c, cmd.ClearSceneModelTransformPreview):
+            try:
+                cleared = self._adapter.clear_scene_model_transform_preview(c.model_id)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if not cleared:
+                return CommandResult.bad(f"Model {c.model_id} has no transform preview")
+            return CommandResult.good()
+
         if isinstance(c, cmd.AddModelElement):
             if not caps.topology_editing:
                 return CommandResult.bad(f"{caps.name} does not support topology editing")

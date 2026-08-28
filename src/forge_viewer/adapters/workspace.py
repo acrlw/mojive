@@ -174,6 +174,12 @@ class WorkspaceAdapter(SceneAdapterBase):
             self._invalidate()
         return changed
 
+    def preview_scene_model_transform(self, model_id: int, position, rotation) -> bool:
+        return self.primary.preview_scene_model_transform(model_id, position, rotation)
+
+    def clear_scene_model_transform_preview(self, model_id: int) -> bool:
+        return self.primary.clear_scene_model_transform_preview(model_id)
+
     def add_model_element(self, parent_node_id: int, element_type: str, name: str) -> int:
         node_id = self.primary.add_model_element(parent_node_id, element_type, name)
         if node_id >= 0:

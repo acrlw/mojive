@@ -2620,3 +2620,143 @@ def test_noop_model_edits_skip_recompilation() -> None:
         (),
     )
     assert document.primary.model is compiled
+
+
+def test_model_transform_preview_moves_frames_without_recompiling(monkeypatch) -> None:
+    document = workspace()
+    model_id = document.add_scene_model(
+        ASSETS / "actuator_visuals.xml", np.array((1.0, 0.0, 0.0)), np.eye(3)
+    )
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    node = next(
+        item for item in session.nodes if item.model_id == model_id and item.body_index >= 0
+    )
+    before_frame = session.tick(FrameNeeds(poses=True), wall_dt=0.0)
+    before_position = before_frame.body_xpos[node.body_index].copy()
+    before_model = document.primary.model
+    before_revision = document.structure_revision
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+
+    for x in (1.25, 1.5, 2.0):
+        assert session.submit(
+            cmd.PreviewSceneModelTransform(model_id, np.array((x, 0.0, 0.0)), np.eye(3))
+        )
+    preview_frame = session.tick(FrameNeeds(poses=True), wall_dt=0.0)
+
+    assert compile_count == 0
+    assert document.primary.model is before_model
+    assert document.structure_revision == before_revision
+    assert not session.dirty
+    assert not session.can_undo
+    assert next(item for item in session.scene_models if item.model_id == model_id).position == (
+        2.0,
+        0.0,
+        0.0,
+    )
+    assert preview_frame.body_xpos[node.body_index] - before_position == pytest.approx(
+        (1.0, 0.0, 0.0)
+    )
+
+    assert session.submit(cmd.ClearSceneModelTransformPreview(model_id))
+    cleared_frame = session.tick(FrameNeeds(poses=True), wall_dt=0.0)
+    assert cleared_frame.body_xpos[node.body_index] == pytest.approx(before_position)
+
+
+def test_model_gizmo_commits_one_compile_after_preview(monkeypatch) -> None:
+    from forge_viewer.gizmo import GizmoHandle
+    from forge_viewer.ui.gizmo import ObjectGizmo
+
+    document = workspace()
+    model_id = document.add_scene_model(
+        ASSETS / "actuator_visuals.xml", np.array((1.0, 0.0, 0.0)), np.eye(3)
+    )
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    node = next(
+        item for item in session.nodes if item.type is NodeType.MODEL and item.model_id == model_id
+    )
+    assert session.submit(cmd.Select(node.object_id))
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    gizmo = ObjectGizmo()
+    gizmo._active = GizmoHandle.X
+    gizmo._start_edit(session)
+
+    result, _ = gizmo._submit_transform(session, node, np.array((2.0, 0.0, 0.0)), np.eye(3))
+    assert result.ok
+    gizmo._edit_started = True
+    assert compile_count == 0
+
+    gizmo._end(commit=True)
+
+    assert compile_count == 1
+    assert not session.editing
+    assert session.can_undo
+    assert next(item for item in session.scene_models if item.model_id == model_id).position == (
+        2.0,
+        0.0,
+        0.0,
+    )
+    assert session.submit(cmd.Undo())
+    assert next(item for item in session.scene_models if item.model_id == model_id).position == (
+        1.0,
+        0.0,
+        0.0,
+    )
+
+
+def test_cancelled_model_gizmo_discards_preview_without_recompiling(monkeypatch) -> None:
+    from forge_viewer.gizmo import GizmoHandle
+    from forge_viewer.ui.gizmo import ObjectGizmo
+
+    document = workspace()
+    model_id = document.add_scene_model(
+        ASSETS / "actuator_visuals.xml", np.array((1.0, 0.0, 0.0)), np.eye(3)
+    )
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    node = next(
+        item for item in session.nodes if item.type is NodeType.MODEL and item.model_id == model_id
+    )
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    gizmo = ObjectGizmo()
+    gizmo._active = GizmoHandle.X
+    gizmo._start_edit(session)
+    result, _ = gizmo._submit_transform(session, node, np.array((2.0, 0.0, 0.0)), np.eye(3))
+    assert result.ok
+    gizmo._edit_started = True
+
+    gizmo.cancel()
+
+    assert compile_count == 0
+    assert not session.editing
+    assert not session.can_undo
+    assert next(item for item in session.scene_models if item.model_id == model_id).position == (
+        1.0,
+        0.0,
+        0.0,
+    )

@@ -975,6 +975,28 @@ class _AttachedModel:
     edited: bool = False
 
 
+@dataclass
+class _ModelTransformPreview:
+    """Render-only placement while an attached model gizmo is active."""
+
+    model_id: int
+    previous_position: np.ndarray
+    previous_rotation: np.ndarray
+    position: np.ndarray
+    rotation: np.ndarray
+    delta_rotation: np.ndarray
+    body_indices: np.ndarray
+    geom_indices: np.ndarray
+    site_indices: np.ndarray
+    joint_indices: np.ndarray
+    light_mask: np.ndarray
+    camera_mask: np.ndarray
+    point_input: np.ndarray
+    point_output: np.ndarray
+    matrix_input: np.ndarray
+    matrix_output: np.ndarray
+
+
 @dataclass(frozen=True)
 class _NamedModelState:
     joints: dict[str, tuple[np.ndarray, np.ndarray]]
@@ -1039,6 +1061,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._root_spec = None
         self._root_edited = False
         self._attached_models: list[_AttachedModel] = []
+        self._model_transform_preview: _ModelTransformPreview | None = None
         self._next_model_id = 1
         self._structure_revision = 0
         self._notes: list[str] = []
@@ -1245,17 +1268,24 @@ class MuJoCoAdapter(SceneAdapterBase):
             if self._root_path is not None
             else ()
         )
-        attached = tuple(
-            SceneModelInfo(
-                item.model_id,
-                item.name,
-                item.path,
-                True,
-                tuple(float(value) for value in item.position),
-                tuple(tuple(float(value) for value in row) for row in item.rotation),
+        preview = self._model_transform_preview
+        attached = []
+        for item in self._attached_models:
+            position = item.position
+            rotation = item.rotation
+            if preview is not None and preview.model_id == item.model_id:
+                position = preview.position
+                rotation = preview.rotation
+            attached.append(
+                SceneModelInfo(
+                    item.model_id,
+                    item.name,
+                    item.path,
+                    True,
+                    tuple(float(value) for value in position),
+                    tuple(tuple(float(value) for value in row) for row in rotation),
+                )
             )
-            for item in self._attached_models
-        )
         return (*roots, *attached)
 
     def capture_edit_state(self) -> object | None:
@@ -1378,6 +1408,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         if np.array_equal(item.position, next_position) and np.array_equal(
             item.rotation, next_rotation
         ):
+            self._model_transform_preview = None
             return True
         previous_position = item.position.copy()
         previous_rotation = item.rotation.copy()
@@ -1400,6 +1431,88 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._install(model)
         self._restore_named_model_state(state)
         return True
+
+    def preview_scene_model_transform(self, model_id: int, position, rotation) -> bool:
+        """Preview placement in frame buffers; physics remains committed until release."""
+        item = next(
+            (item for item in self._attached_models if item.model_id == int(model_id)), None
+        )
+        if item is None:
+            return False
+        next_position = np.asarray(position, np.float64).reshape(3)
+        next_rotation = np.asarray(rotation, np.float64).reshape(3, 3)
+        if not np.all(np.isfinite(next_position)) or not np.all(np.isfinite(next_rotation)):
+            raise ValueError("Model transform preview must contain finite values")
+        preview = self._model_transform_preview
+        if preview is None or preview.model_id != item.model_id:
+            preview = self._make_model_transform_preview(item)
+            self._model_transform_preview = preview
+        preview.position[:] = next_position
+        preview.rotation[:] = next_rotation
+        preview.delta_rotation[:] = next_rotation @ item.rotation.T
+        return True
+
+    def clear_scene_model_transform_preview(self, model_id: int) -> bool:
+        preview = self._model_transform_preview
+        if preview is None or preview.model_id != int(model_id):
+            return False
+        self._model_transform_preview = None
+        return True
+
+    def _make_model_transform_preview(self, item: _AttachedModel) -> _ModelTransformPreview:
+        model = self._m
+        body_owner = np.zeros(model.nbody, np.int32)
+        for body in range(1, model.nbody):
+            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body) or ""
+            owner, _ = self._model_element_name(name, mujoco.mjtObj.mjOBJ_BODY)
+            body_owner[body] = owner if owner else body_owner[int(model.body_parentid[body])]
+
+        def owned_indices(object_type, count: int, body_ids=None) -> np.ndarray:
+            owned = []
+            for index in range(count):
+                name = mujoco.mj_id2name(model, object_type, index) or ""
+                owner, _ = self._model_element_name(name, object_type)
+                if not owner and body_ids is not None:
+                    owner = int(body_owner[int(body_ids[index])])
+                if owner == item.model_id:
+                    owned.append(index)
+            return np.asarray(owned, np.intp)
+
+        body_indices = np.flatnonzero(body_owner == item.model_id).astype(np.intp)
+        geom_indices = owned_indices(mujoco.mjtObj.mjOBJ_GEOM, model.ngeom, model.geom_bodyid)
+        site_indices = owned_indices(mujoco.mjtObj.mjOBJ_SITE, model.nsite, model.site_bodyid)
+        joint_indices = owned_indices(mujoco.mjtObj.mjOBJ_JOINT, model.njnt, model.jnt_bodyid)
+        light_indices = owned_indices(mujoco.mjtObj.mjOBJ_LIGHT, model.nlight, model.light_bodyid)
+        camera_indices = owned_indices(mujoco.mjtObj.mjOBJ_CAMERA, model.ncam, model.cam_bodyid)
+        light_mask = np.zeros(model.nlight, bool)
+        camera_mask = np.zeros(model.ncam, bool)
+        light_mask[light_indices] = True
+        camera_mask[camera_indices] = True
+        capacity = max(
+            1,
+            len(body_indices),
+            len(geom_indices),
+            len(site_indices),
+            len(joint_indices),
+        )
+        return _ModelTransformPreview(
+            model_id=item.model_id,
+            previous_position=item.position.copy(),
+            previous_rotation=item.rotation.copy(),
+            position=item.position.copy(),
+            rotation=item.rotation.copy(),
+            delta_rotation=np.eye(3, dtype=np.float64),
+            body_indices=body_indices,
+            geom_indices=geom_indices,
+            site_indices=site_indices,
+            joint_indices=joint_indices,
+            light_mask=light_mask,
+            camera_mask=camera_mask,
+            point_input=np.zeros((capacity, 3), np.float32),
+            point_output=np.zeros((capacity, 3), np.float32),
+            matrix_input=np.zeros((capacity, 3, 3), np.float32),
+            matrix_output=np.zeros((capacity, 3, 3), np.float32),
+        )
 
     def add_model_element(self, parent_node_id: int, element_type: str, name: str) -> int:
         if self._model_parent(int(parent_node_id)) is None or not str(name).strip():
@@ -3156,6 +3269,9 @@ class MuJoCoAdapter(SceneAdapterBase):
         mujoco.mj_forward(model, data)
 
     def _install(self, model, data=None) -> None:
+        # A compiled model is authoritative. Transient placement indices refer to
+        # the previous model layout and must never survive an install.
+        self._model_transform_preview = None
         self._m = model
         self._d = data if data is not None else mujoco.MjData(model)
         self._notes = []
@@ -3400,10 +3516,11 @@ class MuJoCoAdapter(SceneAdapterBase):
 
         if needs.poses:
             self._fill_poses()
-            f.geom_xpos = self._geom_xpos_buf
-            f.geom_xmat = self._geom_xmat_buf
             np.copyto(self._site_xpos_buf, d.site_xpos, casting="unsafe")
             np.copyto(self._site_xmat_buf, self._mj_site_xmat3, casting="unsafe")
+            self._apply_model_transform_preview_poses()
+            f.geom_xpos = self._geom_xpos_buf
+            f.geom_xmat = self._geom_xmat_buf
             f.site_xpos = self._site_xpos_buf
             f.site_xmat = self._site_xmat_buf
             f.body_xpos = self._body_xpos_buf
@@ -3490,14 +3607,105 @@ class MuJoCoAdapter(SceneAdapterBase):
             self._fill_constraint_visuals(diagnostics)
             if needs.bvh:
                 self._fill_bvh_visuals(diagnostics)
+            self._apply_model_transform_preview_diagnostics(diagnostics)
             f.diagnostics = diagnostics
             f.cameras = tuple(self.camera_view(i) for i in range(self._m.ncam))
         else:
             f.diagnostics = None
             f.cameras = None
 
-        f.lights = self._dynamic_lights() if self._lights_dynamic or self._lights_edited else None
+        f.lights = (
+            self._dynamic_lights()
+            if self._lights_dynamic
+            or self._lights_edited
+            or self._model_transform_preview is not None
+            else None
+        )
         return f
+
+    def _apply_model_transform_preview_poses(self) -> None:
+        preview = self._model_transform_preview
+        if preview is None:
+            return
+        self._transform_preview_group(
+            self._body_xpos_buf, self._body_xmat_buf, preview.body_indices
+        )
+        self._transform_preview_group(
+            self._geom_xpos_buf, self._geom_xmat_buf, preview.geom_indices
+        )
+        self._transform_preview_group(
+            self._site_xpos_buf, self._site_xmat_buf, preview.site_indices
+        )
+
+    def _apply_model_transform_preview_diagnostics(self, diagnostics: DiagnosticFrame) -> None:
+        preview = self._model_transform_preview
+        if preview is None:
+            return
+        self._transform_preview_points(diagnostics.joint_xpos, preview.joint_indices)
+        self._transform_preview_directions(diagnostics.joint_xaxis, preview.joint_indices)
+        self._transform_preview_points(diagnostics.subtree_com, preview.body_indices)
+        self._transform_preview_group(
+            diagnostics.body_xipos, diagnostics.body_ximat, preview.body_indices
+        )
+
+    def _transform_preview_group(
+        self, positions: np.ndarray, matrices: np.ndarray, indices: np.ndarray
+    ) -> None:
+        self._transform_preview_points(positions, indices)
+        self._transform_preview_matrices(matrices, indices)
+
+    def _transform_preview_points(self, values: np.ndarray, indices: np.ndarray) -> None:
+        preview = self._model_transform_preview
+        count = len(indices)
+        if preview is None or count == 0:
+            return
+        source = preview.point_input[:count]
+        target = preview.point_output[:count]
+        np.take(values, indices, axis=0, out=source)
+        source -= preview.previous_position
+        np.einsum(
+            "ij,nj->ni",
+            preview.delta_rotation,
+            source,
+            out=target,
+            casting="unsafe",
+        )
+        target += preview.position
+        values[indices] = target
+
+    def _transform_preview_directions(self, values: np.ndarray, indices: np.ndarray) -> None:
+        preview = self._model_transform_preview
+        count = len(indices)
+        if preview is None or count == 0:
+            return
+        source = preview.point_input[:count]
+        target = preview.point_output[:count]
+        np.take(values, indices, axis=0, out=source)
+        np.einsum(
+            "ij,nj->ni",
+            preview.delta_rotation,
+            source,
+            out=target,
+            casting="unsafe",
+        )
+        values[indices] = target
+
+    def _transform_preview_matrices(self, values: np.ndarray, indices: np.ndarray) -> None:
+        preview = self._model_transform_preview
+        count = len(indices)
+        if preview is None or count == 0:
+            return
+        source = preview.matrix_input[:count]
+        target = preview.matrix_output[:count]
+        np.take(values, indices, axis=0, out=source)
+        np.einsum(
+            "ij,njk->nik",
+            preview.delta_rotation,
+            source,
+            out=target,
+            casting="unsafe",
+        )
+        values[indices] = target
 
     def prepare_frame(self, needs: FrameNeeds) -> bool:
         """Build potentially huge BVH diagnostics only after they are requested."""
@@ -4912,9 +5120,18 @@ class MuJoCoAdapter(SceneAdapterBase):
 
     def _dynamic_lights(self) -> LightSet:
         d = self._d
-        return self._light_set(
-            tuple(self._light(i, d.light_xpos[i], d.light_xdir[i]) for i in range(self._m.nlight))
-        )
+        preview = self._model_transform_preview
+        lights = []
+        for i in range(self._m.nlight):
+            position = d.light_xpos[i]
+            direction = d.light_xdir[i]
+            if preview is not None and preview.light_mask[i]:
+                position = preview.position + preview.delta_rotation @ (
+                    np.asarray(position, np.float64) - preview.previous_position
+                )
+                direction = preview.delta_rotation @ np.asarray(direction, np.float64)
+            lights.append(self._light(i, position, direction))
+        return self._light_set(tuple(lights))
 
     def _light_set(self, lights: tuple[Light, ...]) -> LightSet:
         m = self._m
@@ -6232,6 +6449,13 @@ class MuJoCoAdapter(SceneAdapterBase):
             return None
         rot = np.asarray(d.cam_xmat[i], np.float32).reshape(3, 3)
         eye = np.asarray(d.cam_xpos[i], np.float32).copy()
+        preview = self._model_transform_preview
+        if preview is not None and preview.camera_mask[i]:
+            eye = (
+                preview.position
+                + preview.delta_rotation @ (np.asarray(eye, np.float64) - preview.previous_position)
+            ).astype(np.float32)
+            rot = (preview.delta_rotation @ np.asarray(rot, np.float64)).astype(np.float32)
         distance = max(float(m.stat.extent), 1e-3)
         projection = getattr(m, "cam_projection", None)
         orthographic = bool(
@@ -7131,6 +7355,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         )
 
     def release(self) -> None:
+        self._model_transform_preview = None
         self._m = None
         self._d = None
         self._root_spec = None

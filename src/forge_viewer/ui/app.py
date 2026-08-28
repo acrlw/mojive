@@ -32,7 +32,11 @@ from .draw2d import ImguiDraw2D
 from .gizmo import ObjectGizmo, PreciseGizmoInput
 from .localization import Localizer
 from .panels import PanelContext, PanelSet, button_width
-from .perturb import PerturbController, draw_fallback
+from .perturb import (
+    PerturbController,
+    cursor_grab_point,
+    draw_fallback,
+)
 from .scene_entities import SceneEntityHelpers
 from .theme import THEME, Theme
 from .viewcube import ViewCube
@@ -1851,13 +1855,22 @@ class ViewerApp:
         if node is None:
             return
         cam = self._camera_view()
+        ray = self._cursor_ray(state.cursor) if self.router.mode == "translate" else None
         if not st.active:
             pos, _ = self._node_pose(node)
+            grab_point = pos
+            if ray is not None:
+                grab_point = cursor_grab_point(cam, pos, ray[0], ray[1])
             self.perturb.begin(
-                self.session, cam, node, pos, self.router.mode, body_radius=self._body_radius(node)
+                self.session,
+                cam,
+                node,
+                grab_point,
+                self.router.mode,
+                body_radius=self._body_radius(node),
             )
         if st.mode == "translate":
-            origin, direction = self._cursor_ray(state.cursor)
+            origin, direction = ray if ray is not None else self._cursor_ray(state.cursor)
             self.perturb.drag_translate(self.session, cam, origin, direction)
         else:
             self.perturb.drag_rotate(self.session, cam, state.delta[0], state.delta[1])

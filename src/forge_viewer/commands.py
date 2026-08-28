@@ -107,6 +107,22 @@ class SetSceneModelTransform(Command):
 
 
 @dataclass(frozen=True)
+class PreviewSceneModelTransform(Command):
+    """Preview a model root transform without rebuilding its physics model."""
+
+    model_id: int
+    position: np.ndarray
+    rotation: np.ndarray
+
+
+@dataclass(frozen=True)
+class ClearSceneModelTransformPreview(Command):
+    """Discard the transient render preview for one model root."""
+
+    model_id: int
+
+
+@dataclass(frozen=True)
 class AddModelElement(Command):
     """Add a topology element beneath an editable model node."""
 

@@ -89,6 +89,21 @@ def run_benchmark(
             primary.nodes()
             node_build_ms.append((time.perf_counter() - start) * 1000.0)
 
+        preview_ms: list[float] = []
+        for index in range(max(1, int(iterations))):
+            start = time.perf_counter()
+            result = session.submit(
+                cmd.PreviewSceneModelTransform(
+                    target,
+                    np.array((target_x + (index + 1) * 0.01, 0.0, 0.0), np.float32),
+                    np.eye(3, dtype=np.float32),
+                )
+            )
+            preview_ms.append((time.perf_counter() - start) * 1000.0)
+            if not result.ok:
+                raise RuntimeError(result.message)
+        session.submit(cmd.ClearSceneModelTransformPreview(target))
+
         transform_ms: list[float] = []
         for index in range(max(1, int(iterations))):
             start = time.perf_counter()
@@ -131,7 +146,7 @@ def run_benchmark(
                 raise RuntimeError(result.message)
 
         report: dict[str, object] = {
-            "schema": 2,
+            "schema": 3,
             "platform": platform.platform(),
             "python": platform.python_version(),
             "workload": {
@@ -144,6 +159,7 @@ def run_benchmark(
             "timing": {
                 "add_model": _summary(add_ms),
                 "build_nodes": _summary(node_build_ms),
+                "preview_model_transform": _summary(preview_ms),
                 "commit_model_transform": _summary(transform_ms),
                 "add_component_ms": float(component_add_ms),
                 "update_component": _summary(component_ms),

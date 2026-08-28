@@ -85,6 +85,17 @@ def point_on_frozen_plane(cam: CameraView, origin, direction, plane_depth: float
     return (o + d * t).astype(np.float64)
 
 
+def cursor_grab_point(cam: CameraView, body_origin, ray_origin, ray_direction) -> np.ndarray:
+    """Place the initial perturb grab point under the cursor at the body's view depth."""
+
+    return point_on_frozen_plane(
+        cam,
+        ray_origin,
+        ray_direction,
+        freeze_plane_depth(cam, body_origin),
+    )
+
+
 def delta_rotvec(cam: CameraView, dx_px: float, dy_px: float) -> np.ndarray:
     right, up, _ = camera_basis(cam)
     k = float(np.deg2rad(DEG_PER_PIXEL))
