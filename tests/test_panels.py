@@ -49,7 +49,15 @@ from forge_viewer.ui.panels.inspector import (
     gizmo_refusal_reason,
 )
 from forge_viewer.ui.panels.joints import page_span
-from forge_viewer.ui.panels.keyframes import unique_keyframe_name
+from forge_viewer.ui.panels.keyframes import (
+    fitted_timeline_range,
+    neighboring_keyframe,
+    nice_timeline_step,
+    timeline_time_to_x,
+    timeline_x_to_time,
+    unique_keyframe_name,
+    zoom_timeline_range,
+)
 from forge_viewer.ui.panels.output import filter_output_entries
 from forge_viewer.ui.panels.stats import StatsPanel, _scale_ceiling
 from forge_viewer.ui.window import ResizeLatch
@@ -385,6 +393,31 @@ def test_transform_clipboard_vector_is_plain_xyz():
 def test_keyframe_names_advance_without_exposing_raw_state_arrays():
     assert unique_keyframe_name(set()) == "key1"
     assert unique_keyframe_name({"key1", "key2"}) == "key3"
+
+
+def test_keyframe_timeline_fits_isolated_and_distributed_snapshots():
+    assert fitted_timeline_range((), 4.0) == pytest.approx((3.5, 4.5))
+    assert fitted_timeline_range((10.0,)) == pytest.approx((9.5, 10.5))
+    assert fitted_timeline_range((-2.0, 8.0)) == pytest.approx((-2.8, 8.8))
+
+
+def test_keyframe_timeline_mapping_and_zoom_preserve_the_anchor():
+    x = timeline_time_to_x(2.5, 0.0, 10.0, 100.0, 500.0)
+    assert x == pytest.approx(200.0)
+    assert timeline_x_to_time(x, 0.0, 10.0, 100.0, 500.0) == pytest.approx(2.5)
+
+    start, end = zoom_timeline_range(0.0, 10.0, 2.5, 1.0)
+    assert end - start < 10.0
+    assert (2.5 - start) / (end - start) == pytest.approx(0.25)
+    assert nice_timeline_step(10.0, 900.0) == pytest.approx(1.0)
+
+
+def test_keyframe_timeline_navigation_uses_selection_then_playhead():
+    markers = ((30, 3.0), (10, 1.0), (20, 2.0))
+    assert neighboring_keyframe(markers, 20, 0.0, -1) == 10
+    assert neighboring_keyframe(markers, 20, 0.0, 1) == 30
+    assert neighboring_keyframe(markers, -1, 1.5, -1) == 10
+    assert neighboring_keyframe(markers, -1, 1.5, 1) == 20
 
 
 def test_transform_switches_to_stacked_rows_before_columns_overlap():

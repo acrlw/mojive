@@ -61,8 +61,10 @@ The structured Inspector currently covers:
 - explicit contact pairs and body exclusions;
 - non-plugin actuators, the MuJoCo sensor catalog, fixed/spatial tendon paths, and equality
   constraints through schema-driven reference fields;
-- model-local keyframe capture, naming, time metadata, loading, deletion, and Undo/Redo through the
-  dedicated **Window > Keyframes** panel.
+- model-local keyframe capture and editing through the dedicated **Window > Keyframes** Dope Sheet:
+  diamond-marker selection, exact-state loading, previous/next navigation, zoom, pan, drag retiming,
+  naming, deletion, and Undo/Redo. MuJoCo keyframes are complete snapshots, so the editor does not
+  present unsupported interpolation or property curves.
 
 The **Assets** panel is the model-level inventory; Inspector remains responsible for binding an
 asset to the selected scene element. It covers standalone mesh, PNG height-field and texture

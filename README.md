@@ -179,9 +179,11 @@ round trips. Model elements support rename and local transform editing. The Enti
 backend-neutral primitives, lights, and cameras. Selected Forge entities support duplicate,
 rename, and delete from the menu, keyboard shortcuts, and the Hierarchy context menu.
 
-`Window > Keyframes` opens the model-local keyframe window for capturing the current state,
-renaming and timestamping it, loading it, or deleting it. `Window > Assets` opens the model asset
-inventory; geometry and site material controls can replace a floor or another surface material.
+`Window > Keyframes` opens a compact model-local Dope Sheet. It captures complete MuJoCo state
+snapshots, shows them as time-positioned diamond markers, and supports selection, exact-state
+loading, previous/next navigation, ruler zoom and pan, drag retiming, rename, and deletion. It does
+not imply interpolation between snapshots. `Window > Assets` opens the model asset inventory;
+geometry and site material controls can replace a floor or another surface material.
 Compiler/default/custom/deformable declarations and bulk asset samples remain source-owned: the
 editor loads, renders, and preserves them without adding rarely used controls to its normal UI.
 
