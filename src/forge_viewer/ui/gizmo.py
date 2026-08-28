@@ -24,6 +24,7 @@ from ..commands import (
 )
 from ..gizmo import (
     ACTIVE_COLOR,
+    ACTIVE_HANDLE_COLOR,
     ALL_HANDLE_MASK,
     AXIS_COLORS,
     AXIS_END,
@@ -1033,7 +1034,7 @@ class ObjectGizmo:
 
     def _flat_color(self, handle: GizmoHandle, axis: int, alpha: float = 1.0):
         if self._active is handle and self._frame.handle_color is not None:
-            color = ACTIVE_COLOR
+            color = ACTIVE_HANDLE_COLOR
         else:
             color = HOVER_COLOR if self._hot(handle) else self._handle_color(axis)
         return float(color[0]), float(color[1]), float(color[2]), float(alpha)
@@ -1083,7 +1084,7 @@ class ObjectGizmo:
         unavailable_span = full_turn - span
         full_range = unavailable_span <= 1e-6
         if self._active is GizmoHandle.ROTATE_Z:
-            allowed_color = ACTIVE_COLOR
+            allowed_color = ACTIVE_HANDLE_COLOR
         elif self._interactive and self._hovered is GizmoHandle.ROTATE_Z:
             allowed_color = HOVER_COLOR
         else:
@@ -1512,7 +1513,9 @@ class ObjectGizmo:
             fill = _with_alpha(ACTIVE_COLOR, fill_alpha)
             overlay.triangle_fan_fill(sector, fill)
         if not joint_range_ring:
-            reference_color = ACTIVE_COLOR if self._frame.handle_color is not None else HOVER_COLOR
+            reference_color = (
+                ACTIVE_HANDLE_COLOR if self._frame.handle_color is not None else HOVER_COLOR
+            )
             reference = dial.points(
                 ring_radius,
                 np.linspace(0.0, 2.0 * np.pi, dial_segments, endpoint=False),

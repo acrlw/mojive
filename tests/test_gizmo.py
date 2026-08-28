@@ -10,6 +10,7 @@ from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.adapters.toy import ToyPhysicsAdapter
 from forge_viewer.gizmo import (
     ACTIVE_COLOR,
+    ACTIVE_HANDLE_COLOR,
     AXIS_START,
     CENTER_HIT_PT,
     CENTER_RADIUS,
@@ -1781,19 +1782,19 @@ def test_hinge_joint_range_uses_one_complementary_ring_across_180_degrees() -> N
 
 
 @pytest.mark.parametrize(
-    ("interaction", "color_name", "expected_color"),
+    ("interaction", "expected_color"),
     (
-        ("hovered", "HOVER_COLOR", np.array((0.91, 0.82, 0.13, 1.0))),
-        ("active", "ACTIVE_COLOR", np.array((0.96, 0.43, 0.09, 1.0))),
+        ("hovered", np.array((0.91, 0.82, 0.13, 1.0))),
+        ("active", ACTIVE_HANDLE_COLOR),
     ),
 )
-def test_hinge_joint_range_keeps_hover_and_active_colors_configurable(
+def test_hinge_joint_range_keeps_the_yellow_handle_color_while_active(
     monkeypatch: pytest.MonkeyPatch,
     interaction: str,
-    color_name: str,
     expected_color: np.ndarray,
 ) -> None:
-    monkeypatch.setattr(f"forge_viewer.ui.gizmo.{color_name}", expected_color)
+    if interaction == "hovered":
+        monkeypatch.setattr("forge_viewer.ui.gizmo.HOVER_COLOR", expected_color)
     cam = CameraView(
         eye=np.array((0.0, 0.0, 5.0)),
         target=np.zeros(3),
@@ -1891,7 +1892,7 @@ def test_active_hinge_guide_does_not_cover_the_unavailable_range() -> None:
         for name, args, _kwargs in overlay.calls
     )
     assert any(
-        name == "polyline" and np.allclose(args[1], ACTIVE_COLOR)
+        name == "polyline" and np.allclose(args[1], ACTIVE_HANDLE_COLOR)
         for name, args, _kwargs in overlay.calls
     )
     assert not any(

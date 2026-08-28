@@ -25,7 +25,7 @@ moderngl = pytest.importorskip("moderngl")
 from forge_viewer import math3d as M  # noqa: E402
 from forge_viewer.adapters.base import SceneSource  # noqa: E402
 from forge_viewer.gizmo import (  # noqa: E402
-    ACTIVE_COLOR,
+    ACTIVE_HANDLE_COLOR,
     AXIS_COLORS,
     CENTER_RADIUS,
     CENTER_SHELL_RADIUS,
@@ -64,7 +64,7 @@ RECT = (0.0, 0.0, float(W), float(H))
 AXIS_U8 = np.rint(AXIS_COLORS[:, :3] * 255.0)  # X red, Y green, Z blue
 HOVER_U8 = np.rint(HOVER_COLOR[:3] * 255.0)
 JOINT_U8 = np.rint(JOINT_HANDLE_COLOR[:3] * 255.0)
-ACTIVE_U8 = np.rint(ACTIVE_COLOR[:3] * 255.0)
+ACTIVE_HANDLE_U8 = np.rint(ACTIVE_HANDLE_COLOR[:3] * 255.0)
 
 # Gaze direction shared by all cameras: every axis and plane handle is fully
 # facing (alpha 1.0).
@@ -211,7 +211,7 @@ def test_scalar_joint_color_override_does_not_look_like_a_world_axis(rig):
     assert np.median(joint_pixels[:, 0] / joint_pixels[:, 2]) > 0.65
 
 
-def test_scalar_joint_handle_distinguishes_hover_and_active_colors(rig):
+def test_scalar_joint_handle_keeps_the_original_yellow_while_active(rig):
     if not rig.backend.caps.gizmo:
         pytest.skip("gizmo unsupported by this backend")
     cam = _camera()
@@ -224,10 +224,9 @@ def test_scalar_joint_handle_distinguishes_hover_and_active_colors(rig):
     frame.active = GizmoHandle.Z
     active = rig.draw(frame, cam, box=False)
 
+    assert np.allclose(ACTIVE_HANDLE_COLOR, HOVER_COLOR)
     assert _tint_mask(hovered, HOVER_U8).any()
-    assert not _tint_mask(hovered, ACTIVE_U8).any()
-    assert _tint_mask(active, ACTIVE_U8).any()
-    assert not _tint_mask(active, HOVER_U8).any()
+    assert _tint_mask(active, ACTIVE_HANDLE_U8).any()
 
 
 @pytest.mark.parametrize(
