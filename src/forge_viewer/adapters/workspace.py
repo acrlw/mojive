@@ -187,6 +187,12 @@ class WorkspaceAdapter(SceneAdapterBase):
             self._invalidate()
         return node_id
 
+    def duplicate_model_element(self, node_id: int) -> int:
+        duplicate_id = self.primary.duplicate_model_element(node_id)
+        if duplicate_id >= 0:
+            self._invalidate()
+        return duplicate_id
+
     def remove_model_element(self, node_id: int) -> bool:
         changed = self.primary.remove_model_element(node_id)
         if changed:

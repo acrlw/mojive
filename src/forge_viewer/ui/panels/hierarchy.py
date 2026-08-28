@@ -215,7 +215,15 @@ class HierarchyPanel(Panel):
                     NodeType.CAMERA,
                     NodeType.LIGHT,
                 )
+                duplicate, _ = imgui.menu_item("Duplicate", "Cmd/Ctrl+D", False, removable)
+                rename, _ = imgui.menu_item("Rename", "F2", False, removable)
                 remove, _ = imgui.menu_item("Delete from Model", "", False, removable)
+                if duplicate:
+                    result = ctx.submit(cmd.DuplicateModelElement(node.node_id))
+                    if result.ok:
+                        ctx.submit(cmd.SelectNode(result.entity_id))
+                if rename and ctx.request_model_rename is not None:
+                    ctx.request_model_rename(node.node_id)
                 if remove:
                     ctx.submit(cmd.RemoveModelElement(node.node_id))
             elif editable:

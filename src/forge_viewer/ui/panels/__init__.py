@@ -26,6 +26,7 @@ class PanelContext:
     model_camera_view: Any = None
     select_model_camera: Any = None
     request_rename: Any = None
+    request_model_rename: Any = None
     request_texture_import: Any = None
     request_geometry_resource_import: Any = None
     request_model_asset_import: Any = None

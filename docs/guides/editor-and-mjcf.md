@@ -27,6 +27,10 @@ references and resource roots, must remain editable.
 Select a model or model element in Hierarchy. Inspector exposes bodies, geometry, joints, sites,
 cameras, lights, actuators, sensors, tendons, and equality constraints. Topology edits compile a
 new MjSpec model and migrate named simulation state where dimensions remain compatible.
+Hierarchy and **Entity > Duplicate** copy a selected body subtree or leaf topology element with
+collision-free names. References between elements inside a copied body subtree follow the copies;
+assets and model-level components remain shared. Duplicate and Delete shortcuts use the same
+Undo/Redo-aware topology path and require a paused simulation.
 
 `ModelEditBatch` groups dependent topology operations into one compile and can reference an element
 created earlier in the same batch. Numeric edits that do not change derived constants use narrower
@@ -72,6 +76,9 @@ reference reporting, assignment, rename with reference repair, duplication, file
 safe deletion, Undo/Redo, and portable MJCF export. Skin assets are visible in the same inventory.
 Attached-model declarations and generator source forms must still be edited in their original
 external MJCF source because MuJoCo expands them before `MjSpec` serialization.
+Forge keeps file-backed assets from an expanded attached model resolvable during ordinary topology
+edits by writing their child compiler directories into the normalized asset paths; this does not
+reconstruct the original `asset/model` or `attach` declaration.
 
 These controls validate values, participate in Undo/Redo, persist in workspace documents, and use
 the remote typed-command boundary where the adapter exposes the capability. Pause a simulation

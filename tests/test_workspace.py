@@ -33,6 +33,7 @@ from forge_viewer.types import (
     TextureData,
     TextureType,
 )
+from forge_viewer.ui.app import ViewerApp
 from forge_viewer.workspace_io import (
     missing_resource_entries,
     missing_resources,
@@ -950,6 +951,184 @@ def test_empty_root_site_creation_is_editable_and_undoable() -> None:
     assert all(node.name != "target" for node in session.nodes)
     assert session.submit(cmd.Redo())
     assert any(node.name == "target" and node.type is NodeType.SITE for node in session.nodes)
+
+
+def test_model_element_duplication_copies_subtree_references_and_history(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "duplicate-source.xml"
+    source.write_text(
+        """
+<mujoco>
+  <asset>
+    <material name="surface" rgba="0.8 0.7 0.6 1"/>
+  </asset>
+  <worldbody>
+    <body name="fixture" pos="1 2 3">
+      <joint name="hinge" type="hinge"/>
+      <geom name="visual" type="box" size="0.1 0.2 0.3" material="surface"/>
+      <body name="tool">
+        <site name="tip" pos="0 0 0.2"/>
+        <camera name="inspection" mode="targetbody" target="tool"/>
+        <light name="task" mode="targetbody" target="tool"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(source))
+    session = Session(document, source)
+    assert session.submit(cmd.Pause())
+    fixture = next(node for node in session.nodes if node.name == "fixture")
+
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    result = session.submit(cmd.DuplicateModelElement(fixture.node_id))
+
+    assert result.ok, result.message
+    assert compile_count == 1
+    duplicate = session.node(result.entity_id)
+    assert duplicate is not None
+    assert duplicate.name == "fixture_copy"
+    names = {node.name for node in session.nodes}
+    assert {
+        "fixture_copy",
+        "hinge_copy",
+        "visual_copy",
+        "tool_copy",
+        "tip_copy",
+        "inspection_copy",
+        "task_copy",
+    } <= names
+    root = ET.fromstring(document.scene_model_source(0))
+    copied_camera = next(
+        element
+        for element in root.iter("camera")
+        if element.attrib.get("name") == "inspection_copy"
+    )
+    copied_light = next(
+        element for element in root.iter("light") if element.attrib.get("name") == "task_copy"
+    )
+    copied_geom = next(
+        element for element in root.iter("geom") if element.attrib.get("name") == "visual_copy"
+    )
+    assert copied_camera.attrib["target"] == "tool_copy"
+    assert copied_light.attrib["target"] == "tool_copy"
+    assert copied_geom.attrib["material"] == "surface"
+
+    assert session.submit(cmd.Undo())
+    assert compile_count == 2
+    assert all(node.name != "fixture_copy" for node in session.nodes)
+    assert session.submit(cmd.Redo())
+    assert compile_count == 3
+    assert any(node.name == "fixture_copy" for node in session.nodes)
+
+    workspace_path = tmp_path / "duplicate.forge.json"
+    document.save_scene(workspace_path)
+    restored = workspace()
+    restored.open_scene(workspace_path)
+    restored_names = {node.name for node in restored.nodes()}
+    assert all(
+        any(name.endswith(expected) for name in restored_names)
+        for expected in ("fixture_copy", "tool_copy", "inspection_copy")
+    )
+
+
+def test_model_element_duplication_numbers_leaf_copies_and_requires_pause() -> None:
+    document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
+    session = Session(document, ASSETS / "test_scene.xml")
+    geom = next(node for node in session.nodes if node.type is NodeType.GEOM)
+
+    running = session.submit(cmd.DuplicateModelElement(geom.node_id))
+
+    assert not running.ok
+    assert "Pause" in running.message
+    assert session.submit(cmd.Pause())
+    assert session.submit(cmd.SelectNode(geom.node_id))
+    app = ViewerApp.__new__(ViewerApp)
+    app.session = session
+    app._duplicate_selected()
+    first_node = session.selected_node
+    assert first_node is not None and first_node.name == f"{geom.name}_copy"
+    app._rename_object_id = 0
+    app._rename_model_node_id = -1
+    app._rename_value = ""
+    app._open_rename_popup = False
+    app._request_selected_rename()
+    assert app._rename_model_node_id == first_node.node_id
+    assert app._rename_value == first_node.name
+    assert app._open_rename_popup
+    second = session.submit(cmd.DuplicateModelElement(geom.node_id))
+    assert second.ok, second.message
+    second_node = session.node(second.entity_id)
+    assert second_node is not None and second_node.name == f"{geom.name}_copy2"
+    assert second_node.parent == geom.parent
+
+
+def test_topology_edit_preserves_resource_paths_from_attached_model(tmp_path: Path) -> None:
+    meshes = tmp_path / "meshes"
+    meshes.mkdir()
+    (meshes / "tetra.obj").write_text(
+        """
+v 0 0 0
+v 1 0 0
+v 0 1 0
+v 0 0 1
+f 1 3 2
+f 1 2 4
+f 1 4 3
+f 2 3 4
+""".strip(),
+        encoding="utf-8",
+    )
+    child = tmp_path / "child.xml"
+    child.write_text(
+        """
+<mujoco>
+  <compiler meshdir="meshes"/>
+  <asset><mesh name="tetra" file="tetra.obj"/></asset>
+  <worldbody>
+    <body name="part"><geom name="shape" type="mesh" mesh="tetra"/></body>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    root_path = tmp_path / "scene.xml"
+    root_path.write_text(
+        """
+<mujoco>
+  <asset><model name="child" file="child.xml"/></asset>
+  <worldbody>
+    <site name="marker"/>
+    <body name="holder"><attach model="child" body="part" prefix="attached_"/></body>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(root_path))
+    session = Session(document, root_path)
+    assert session.submit(cmd.Pause())
+    marker = next(node for node in session.nodes if node.name == "marker")
+
+    duplicated = session.submit(cmd.DuplicateModelElement(marker.node_id))
+
+    assert duplicated.ok, duplicated.message
+    xml = ET.fromstring(document.scene_model_source(0))
+    mesh = next(
+        element for element in xml.iter("mesh") if element.attrib["name"] == "attached_tetra"
+    )
+    assert mesh.attrib["file"] == "meshes/tetra.obj"
 
 
 def test_inline_height_field_lifecycle_edits_resolution_size_and_samples() -> None:

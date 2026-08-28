@@ -629,6 +629,80 @@ def _load_editable_spec(path: Path):
     return spec
 
 
+def _stabilize_editable_asset_paths(spec, root: ET.Element) -> None:
+    """Keep expanded include/model assets resolvable after MjSpec serialization.
+
+    MuJoCo keeps only one compiler mesh/texturedir on a composed MjSpec. Assets
+    expanded from ``asset/model`` declarations can therefore retain a child
+    filename while losing that child's directory. Resolve only missing relative
+    files with one unambiguous match below the model directory, then store a
+    portable model-relative path. Ordinary models whose compiler directory still
+    resolves the file are left unchanged.
+    """
+
+    model_directory = Path(str(spec.modelfiledir or ".")).resolve()
+    compiler = root.find("compiler")
+    meshdir = "" if compiler is None else str(compiler.attrib.get("meshdir", ""))
+    texturedir = "" if compiler is None else str(compiler.attrib.get("texturedir", ""))
+    asset = root.find("asset")
+    directories = {
+        "mesh": meshdir,
+        "hfield": "",
+        "skin": meshdir,
+        "texture": texturedir,
+    }
+    compiler_fields = {
+        "mesh": "meshdir",
+        "skin": "meshdir",
+        "texture": "texturedir",
+    }
+
+    def portable_path(candidate: Path) -> str:
+        resolved = candidate.resolve()
+        try:
+            return resolved.relative_to(model_directory).as_posix()
+        except ValueError:
+            return str(resolved)
+
+    unresolved: list[tuple[ET.Element, str]] = []
+    for element in asset or ():
+        filename = str(element.attrib.get("file", "")).strip()
+        if not filename or Path(filename).is_absolute():
+            continue
+        directory = directories.get(element.tag, "")
+        candidates = (
+            model_directory / directory / filename,
+            model_directory / filename,
+        )
+        if any(candidate.is_file() for candidate in candidates):
+            continue
+        finder = getattr(spec, element.tag, None)
+        semantic = finder(element.attrib.get("name", "")) if finder is not None else None
+        compiler_field = compiler_fields.get(element.tag, "")
+        semantic_compiler = getattr(semantic, "compiler", None)
+        semantic_directory = (
+            str(getattr(semantic_compiler, compiler_field, "")) if compiler_field else ""
+        )
+        semantic_candidate = model_directory / semantic_directory / filename
+        if semantic_directory and semantic_candidate.is_file():
+            element.set("file", portable_path(semantic_candidate))
+            continue
+        unresolved.append((element, filename))
+    if not unresolved:
+        return
+
+    names = {Path(filename).name for _element, filename in unresolved}
+    matches: dict[str, list[Path]] = {name: [] for name in names}
+    for candidate in model_directory.rglob("*"):
+        if candidate.is_file() and candidate.name in matches:
+            matches[candidate.name].append(candidate.resolve())
+    for element, filename in unresolved:
+        candidates = matches.get(Path(filename).name, ())
+        if len(candidates) != 1:
+            continue
+        element.set("file", portable_path(candidates[0]))
+
+
 def _normalized_urdf_source(path: Path) -> str | None:
     """Repair deterministic local URDF resource paths that MuJoCo cannot resolve.
 
@@ -745,6 +819,7 @@ def _component_xml(spec) -> tuple[ET.Element, str]:
         if element.tag in {"potential", "kinetic"}:
             element.tag = f"e_{element.tag}"
     _restore_material_texture_layers(spec, root)
+    _stabilize_editable_asset_paths(spec, root)
     return root, xml
 
 
@@ -864,6 +939,104 @@ def _named_elements(root: ET.Element, tag: str) -> tuple[str, ...]:
         for element in root.iter(tag)
         if (value := str(element.attrib.get("name", "")).strip())
     )
+
+
+_TOPOLOGY_XML_KIND = {
+    "body": "body",
+    "geom": "geom",
+    "joint": "joint",
+    "freejoint": "joint",
+    "site": "site",
+    "camera": "camera",
+    "light": "light",
+}
+_TOPOLOGY_NODE_TAGS = {
+    NodeType.ROBOT: ("body",),
+    NodeType.LINK: ("body",),
+    NodeType.GEOM: ("geom",),
+    NodeType.JOINT: ("joint", "freejoint"),
+    NodeType.SITE: ("site",),
+    NodeType.CAMERA: ("camera",),
+    NodeType.LIGHT: ("light",),
+}
+
+
+def _next_topology_copy_name(name: str, occupied: set[str]) -> str:
+    match = re.fullmatch(r"(.+)_copy(?:(\d+))?", name)
+    if match is None:
+        stem = f"{name}_copy"
+        index = 1
+    else:
+        stem = f"{match.group(1)}_copy"
+        index = int(match.group(2) or 1) + 1
+    while True:
+        candidate = stem if index == 1 else f"{stem}{index}"
+        if candidate not in occupied:
+            occupied.add(candidate)
+            return candidate
+        index += 1
+
+
+def _duplicate_topology_xml(
+    root: ET.Element, node_type: NodeType, name: str
+) -> tuple[ET.Element, str] | None:
+    """Clone one normalized topology element and namespace its owned subtree.
+
+    MuJoCo object names are unique per object type, not across the whole model.
+    Keep asset/default references shared while remapping references to bodies and
+    other topology elements that are part of the copied body subtree.
+    """
+
+    tags = _TOPOLOGY_NODE_TAGS.get(node_type, ())
+    source = next(
+        (
+            element
+            for tag in tags
+            for element in root.iter(tag)
+            if str(element.attrib.get("name", "")).strip() == name
+        ),
+        None,
+    )
+    if source is None:
+        return None
+    parent = next((element for element in root.iter() if source in tuple(element)), None)
+    if parent is None:
+        return None
+
+    occupied: dict[str, set[str]] = {kind: set() for kind in set(_TOPOLOGY_XML_KIND.values())}
+    for element in root.iter():
+        kind = _TOPOLOGY_XML_KIND.get(element.tag)
+        value = str(element.attrib.get("name", "")).strip()
+        if kind and value:
+            occupied[kind].add(value)
+
+    duplicate = deepcopy(source)
+    renamed: dict[tuple[str, str], str] = {}
+    for element in duplicate.iter():
+        kind = _TOPOLOGY_XML_KIND.get(element.tag)
+        value = str(element.attrib.get("name", "")).strip()
+        if not kind or not value:
+            continue
+        copied = _next_topology_copy_name(value, occupied[kind])
+        element.set("name", copied)
+        renamed[(kind, value)] = copied
+
+    reference_kinds = {**_REFERENCE_ELEMENT, "target": "body", "targetbody": "body"}
+    for element in duplicate.iter():
+        for field, value in tuple(element.attrib.items()):
+            kind = reference_kinds.get(field)
+            if field == "objname":
+                kind = element.attrib.get("objtype", "")
+            elif field == "refname":
+                kind = element.attrib.get("reftype", "")
+            copied = renamed.get((str(kind), value)) if kind else None
+            if copied is not None:
+                element.set(field, copied)
+
+    source_index = tuple(parent).index(source)
+    parent.insert(source_index + 1, duplicate)
+    source_kind = _TOPOLOGY_XML_KIND[source.tag]
+    return root, renamed[(source_kind, name)]
 
 
 def _object_reference_names(root: ET.Element, object_type: str) -> tuple[str, ...]:
@@ -1732,6 +1905,38 @@ class MuJoCoAdapter(SceneAdapterBase):
             (AddModelElementEdit(ModelElementRef(node_id=int(parent_node_id)), element_type, name),)
         )
         return results[0] if results else -1
+
+    def duplicate_model_element(self, node_id: int) -> int:
+        identity = self._node_element.get(int(node_id))
+        if identity is None or identity[1] not in _TOPOLOGY_NODE_TAGS:
+            return -1
+        model_id, node_type, name = identity
+        spec = self._spec_for_model(model_id)
+        if spec is None:
+            return -1
+        root, _xml = _component_xml(spec)
+        duplicated = _duplicate_topology_xml(root, node_type, name)
+        if duplicated is None:
+            return -1
+        root, duplicate_name = duplicated
+        edited = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        if not self._replace_model_spec(model_id, edited):
+            return -1
+        self.nodes()
+        body_types = {NodeType.ROBOT, NodeType.LINK}
+        return next(
+            (
+                candidate_id
+                for candidate_id, candidate in self._node_element.items()
+                if candidate[0] == model_id
+                and candidate[2] == duplicate_name
+                and (
+                    candidate[1] is node_type
+                    or (candidate[1] in body_types and node_type in body_types)
+                )
+            ),
+            -1,
+        )
 
     def remove_model_element(self, node_id: int) -> bool:
         identity = self._node_element.get(int(node_id))

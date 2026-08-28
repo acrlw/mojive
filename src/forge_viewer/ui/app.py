@@ -281,6 +281,7 @@ class ViewerApp:
         self._after_save_action: tuple[str, Path | None] | None = None
         self._pending_pose_save: tuple[Path, tuple[str, Path | None] | None] | None = None
         self._rename_object_id = 0
+        self._rename_model_node_id = -1
         self._rename_value = ""
         self._open_rename_popup = False
         self._precise_gizmo_edit: PreciseGizmoInput | None = None
@@ -1152,16 +1153,22 @@ class ViewerApp:
             if can_load:
                 reload_model |= imgui.is_key_pressed(imgui.Key.o, False) and bool(io.key_shift)
             open_settings |= imgui.is_key_pressed(imgui.Key.comma, False)
-            if can_edit and self._selected_entity() and imgui.is_key_pressed(imgui.Key.d, False):
+            editable_selected = bool(
+                self._selected_entity() or self._selected_model_element() is not None
+            )
+            if can_edit and editable_selected and imgui.is_key_pressed(imgui.Key.d, False):
                 self._duplicate_selected()
         quit_viewer |= modifier and imgui.is_key_pressed(imgui.Key.q, False)
-        if can_edit and keyboard_free and self._selected_entity():
+        editable_selected = bool(
+            self._selected_entity() or self._selected_model_element() is not None
+        )
+        if can_edit and keyboard_free and editable_selected:
             if imgui.is_key_pressed(imgui.Key.delete, False) or imgui.is_key_pressed(
                 imgui.Key.backspace, False
             ):
                 self._remove_selected()
             if imgui.is_key_pressed(imgui.Key.f2, False):
-                self.request_rename(self.session.selected)
+                self._request_selected_rename()
 
         if new_scene:
             self._request_document_action("new_scene")
@@ -1223,14 +1230,17 @@ class ViewerApp:
             if site:
                 self._add_model_site()
             imgui.end_menu()
-        selected = bool(self._selected_entity())
-        duplicate, _ = imgui.menu_item(t("Duplicate"), f"{shortcut}+D", False, selected)
-        rename, _ = imgui.menu_item(t("Rename"), "F2", False, selected)
-        remove, _ = imgui.menu_item(t("Delete"), "Delete", False, selected)
+        scene_selected = bool(self._selected_entity())
+        model_selected = self._selected_model_element() is not None
+        duplicate, _ = imgui.menu_item(
+            t("Duplicate"), f"{shortcut}+D", False, scene_selected or model_selected
+        )
+        rename, _ = imgui.menu_item(t("Rename"), "F2", False, scene_selected or model_selected)
+        remove, _ = imgui.menu_item(t("Delete"), "Delete", False, scene_selected or model_selected)
         if duplicate:
             self._duplicate_selected()
         if rename:
-            self.request_rename(self.session.selected)
+            self._request_selected_rename()
         if remove:
             self._remove_selected()
         imgui.end_menu()
@@ -1341,14 +1351,43 @@ class ViewerApp:
                 self.session.submit(cmd.Select(node.object_id))
 
     def _duplicate_selected(self) -> None:
+        node = self._selected_model_element()
+        if node is not None:
+            result = self.session.submit(cmd.DuplicateModelElement(node.node_id))
+            if result.ok:
+                self.session.submit(cmd.SelectNode(result.entity_id))
+            return
         object_id = self._selected_entity()
         if object_id:
             self.session.submit(cmd.DuplicateSceneEntity(object_id))
 
     def _remove_selected(self) -> None:
+        node = self._selected_model_element()
+        if node is not None:
+            self.session.submit(cmd.RemoveModelElement(node.node_id))
+            return
         object_id = self._selected_entity()
         if object_id:
             self.session.submit(cmd.RemoveSceneEntity(object_id))
+
+    def _selected_model_element(self) -> SceneNode | None:
+        node = self.session.selected_node
+        if (
+            node is None
+            or node.model_id < 0
+            or node.type
+            not in {
+                NodeType.ROBOT,
+                NodeType.LINK,
+                NodeType.GEOM,
+                NodeType.JOINT,
+                NodeType.SITE,
+                NodeType.CAMERA,
+                NodeType.LIGHT,
+            }
+        ):
+            return None
+        return node
 
     def _selected_entity(self) -> int:
         node = self.session.selected_node
@@ -1369,8 +1408,38 @@ class ViewerApp:
         ):
             return
         self._rename_object_id = int(object_id)
+        self._rename_model_node_id = -1
         self._rename_value = node.name
         self._open_rename_popup = True
+
+    def request_model_rename(self, node_id: int) -> None:
+        node = self.session.node(node_id)
+        if (
+            node is None
+            or node.model_id < 0
+            or node.type
+            not in {
+                NodeType.ROBOT,
+                NodeType.LINK,
+                NodeType.GEOM,
+                NodeType.JOINT,
+                NodeType.SITE,
+                NodeType.CAMERA,
+                NodeType.LIGHT,
+            }
+        ):
+            return
+        self._rename_object_id = 0
+        self._rename_model_node_id = int(node_id)
+        self._rename_value = node.name
+        self._open_rename_popup = True
+
+    def _request_selected_rename(self) -> None:
+        node = self._selected_model_element()
+        if node is not None:
+            self.request_model_rename(node.node_id)
+        else:
+            self.request_rename(self.session.selected)
 
     def _report_model_error(self, message: str) -> None:
         self._model_load_error = message
@@ -1512,9 +1581,13 @@ class ViewerApp:
             imgui.Key.escape, False
         )
         if accept and self._rename_value.strip():
-            self.session.submit(
-                cmd.RenameSceneEntity(self._rename_object_id, self._rename_value.strip())
+            value = self._rename_value.strip()
+            command = (
+                cmd.RenameModelElement(self._rename_model_node_id, value)
+                if self._rename_model_node_id >= 0
+                else cmd.RenameSceneEntity(self._rename_object_id, value)
             )
+            self.session.submit(command)
             imgui.close_current_popup()
         elif cancel:
             imgui.close_current_popup()
@@ -2731,6 +2804,7 @@ class ViewerApp:
             model_camera_view=self._model_camera_view,
             select_model_camera=self.select_model_camera,
             request_rename=self.request_rename,
+            request_model_rename=self.request_model_rename,
             request_texture_import=self._open_texture_dialog,
             request_geometry_resource_import=self._open_geometry_resource_dialog,
             request_model_asset_import=self._open_model_asset_import_dialog,

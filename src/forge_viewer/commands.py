@@ -132,6 +132,13 @@ class AddModelElement(Command):
 
 
 @dataclass(frozen=True)
+class DuplicateModelElement(Command):
+    """Duplicate one editable topology element or body subtree."""
+
+    node_id: int
+
+
+@dataclass(frozen=True)
 class RemoveModelElement(Command):
     """Remove an editable model topology element."""
 

@@ -329,6 +329,7 @@ _SCENE_EDIT_COMMANDS = (
     cmd.RemoveSceneModel,
     cmd.SetSceneModelTransform,
     cmd.AddModelElement,
+    cmd.DuplicateModelElement,
     cmd.RemoveModelElement,
     cmd.RenameModelElement,
     cmd.ModelEditBatch,
@@ -1171,6 +1172,25 @@ class Session:
                 return CommandResult.bad(f"Failed to add {c.element_type}")
             self._refresh_structure()
             return CommandResult.good(f"Added {c.name}", node_id)
+
+        if isinstance(c, cmd.DuplicateModelElement):
+            if not caps.topology_editing:
+                return CommandResult.bad(f"{caps.name} does not support topology editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before changing model topology")
+            node = self.node(c.node_id)
+            if node is None:
+                return CommandResult.bad(f"Unknown node_id={c.node_id}")
+            try:
+                node_id = self._adapter.duplicate_model_element(c.node_id)
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
+            if node_id < 0:
+                return CommandResult.bad(f"{node.name} cannot be duplicated")
+            self._selected = 0
+            self._selected_node_id = -1
+            self._refresh_structure()
+            return CommandResult.good(f"Duplicated {node.name}", node_id)
 
         if isinstance(c, cmd.RemoveModelElement):
             if not caps.topology_editing:
