@@ -60,17 +60,18 @@ The structured Inspector currently covers:
 - custom numeric arrays, text values, and typed object tuples with editable tuple weights;
 - model-local keyframe capture, full state-array editing, loading, deletion, and Undo/Redo.
 - compiler, actuator length-range, simulation option/flag, size, statistic, and all visual groups;
-- creation, inheritance, editing, and removal of default classes using the linked MuJoCo schema;
+- creation, inheritance, editing, and removal of default classes using the linked MuJoCo schema,
+  including all material texture roles without materializing inherited layers;
 - detailed mesh and height-field metadata while keeping bulk vertex/face/elevation payloads out of
   text controls.
 
-The **Assets** panel is the model-level inventory; Inspector remains responsible for the asset
-binding on the selected scene element. The first lifecycle slice covers standalone mesh and PNG
-height-field import, height-field physical dimensions, reference reporting, assignment, rename
-with reference repair, duplication, file replacement, safe deletion, Undo/Redo, and portable MJCF
-export. Materials, textures, skins, and attached model assets are visible in the same inventory;
-their specialized create and property controls remain in Inspector while their lifecycle is moved
-over incrementally.
+The **Assets** panel is the model-level inventory; Inspector remains responsible for binding an
+asset to the selected scene element. It covers standalone mesh, PNG height-field and texture
+import, inline height-field data, material creation and PBR texture roles, physical dimensions,
+reference reporting, assignment, rename with reference repair, duplication, file replacement,
+safe deletion, Undo/Redo, and portable MJCF export. Skin assets are visible in the same inventory.
+Attached-model declarations and generator source forms must still be edited in their original
+external MJCF source because MuJoCo expands them before `MjSpec` serialization.
 
 These controls validate values, participate in Undo/Redo, persist in workspace documents, and use
 the remote typed-command boundary where the adapter exposes the capability. Pause a simulation

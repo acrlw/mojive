@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import xml.etree.ElementTree as ET
 from dataclasses import fields, replace
 from pathlib import Path
 
@@ -3045,6 +3046,125 @@ def test_default_class_add_nested_edit_remove_and_undo() -> None:
     assert session.submit(cmd.Undo())
     labels = {group.label for group in session.model_property_groups(0)}
     assert {"Default base / class", "Default child / class"} <= labels
+
+
+def test_default_material_layers_edit_inherit_undo_and_round_trip(tmp_path: Path) -> None:
+    path = tmp_path / "default-material-layers.xml"
+    path.write_text(
+        """
+<mujoco model="default-layers">
+  <asset>
+    <texture name="a" type="2d" builtin="flat" width="2" height="2"/>
+    <texture name="b" type="2d" builtin="flat" width="2" height="2"/>
+    <material name="main_material"/>
+    <material name="child_material" class="child"/>
+  </asset>
+  <default>
+    <material><layer role="normal" texture="a"/></material>
+    <default class="child">
+      <material><layer role="roughness" texture="b"/></material>
+    </default>
+  </default>
+  <worldbody>
+    <geom name="main" size="0.1" material="main_material"/>
+    <geom name="child" pos="0.3 0 0" size="0.1" material="child_material"/>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+
+    groups = {group.label: group for group in session.model_property_groups(0)}
+    main_layers = {field.name: field for field in groups["Default main / material layers"].fields}
+    child_layers = {field.name: field for field in groups["Default child / material layers"].fields}
+    assert main_layers["normal"].value == "a"
+    assert main_layers["normal"].choices == ("", "a", "b")
+    assert child_layers["normal"].value == ""
+    assert child_layers["roughness"].value == "b"
+    child_group = groups["Default child / material layers"]
+
+    invalid = session.submit(
+        cmd.SetModelPropertyGroups(
+            0,
+            ((child_group.group_id, (("normal", "missing"),)),),
+        )
+    )
+    assert not invalid.ok
+
+    result = session.submit(
+        cmd.SetModelPropertyGroups(
+            0,
+            ((child_group.group_id, (("normal", "b"), ("opacity", "a"))),),
+        )
+    )
+    assert result.ok, result.message
+    edited = {
+        field.name: field.value
+        for field in next(
+            group
+            for group in session.model_property_groups(0)
+            if group.label == "Default child / material layers"
+        ).fields
+    }
+    assert edited["normal"] == "b"
+    assert edited["roughness"] == "b"
+    assert edited["opacity"] == "a"
+
+    source = document.scene_model_source(0)
+    assert source is not None
+    root = ET.fromstring(source)
+    child_default = next(
+        element for element in root.iter("default") if element.attrib.get("class") == "child"
+    )
+    assert {
+        layer.attrib["role"]: layer.attrib["texture"]
+        for layer in child_default.find("material") or ()
+    } == {"roughness": "b", "normal": "b", "opacity": "a"}
+
+    assert session.submit(cmd.Undo())
+    restored = {
+        field.name: field.value
+        for field in next(
+            group
+            for group in session.model_property_groups(0)
+            if group.label == "Default child / material layers"
+        ).fields
+    }
+    assert restored["normal"] == ""
+    assert restored["roughness"] == "b"
+    assert session.submit(cmd.Redo())
+
+    workspace_path = tmp_path / "default-material-layers.forge.json"
+    document.save_scene(workspace_path)
+    reopened = workspace()
+    reopened.open_scene(workspace_path)
+    reopened_model_id = reopened.scene_models()[0].model_id
+    reopened_layers = {
+        field.name: field.value
+        for field in next(
+            group
+            for group in reopened.model_property_groups(reopened_model_id)
+            if group.label == "Default child / material layers"
+        ).fields
+    }
+    assert reopened_layers["normal"] == "b"
+    assert reopened_layers["roughness"] == "b"
+    assert reopened_layers["opacity"] == "a"
+
+    export_path = tmp_path / "default-material-layers-export.xml"
+    document.save_scene(export_path)
+    exported = export_path.read_text(encoding="utf-8")
+    assert '<layer role="normal" texture="a"' in exported
+    assert '<layer role="normal" texture="b"' in exported
+    assert '<layer role="opacity" texture="a"' in exported
+    exported_root = ET.fromstring(exported)
+    child_material = exported_root.find("asset/material[@name='child_material']")
+    assert child_material is not None
+    assert child_material.findall("layer") == []
+    mujoco.MjModel.from_xml_path(str(export_path))
 
 
 def test_noop_model_edits_skip_recompilation() -> None:

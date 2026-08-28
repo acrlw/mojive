@@ -744,7 +744,98 @@ def _component_xml(spec) -> tuple[ET.Element, str]:
     for element in sensor or ():
         if element.tag in {"potential", "kinetic"}:
             element.tag = f"e_{element.tag}"
+    _restore_material_texture_layers(spec, root)
     return root, xml
+
+
+def _restore_material_texture_layers(spec, root: ET.Element) -> None:
+    """Restore texture-role declarations omitted by MuJoCo 3.11 XML output.
+
+    MjSpec keeps the complete inherited texture-role vector for every default
+    class, but ``to_xml()`` only emits the legacy RGB texture attribute. Compare
+    each class with its parent so inherited roles remain inherited rather than
+    being materialized as child overrides.
+    """
+
+    root_default = root.find("default")
+    if root_default is None:
+        return
+    empty = ("",) * len(MATERIAL_TEXTURE_ROLES)
+
+    def visit(element: ET.Element, inherited: tuple[str, ...], *, main: bool = False) -> None:
+        class_name = str(element.attrib.get("class", "")).strip()
+        spec_default = spec.default if main else spec.find_default(class_name)
+        if spec_default is None:
+            current = inherited
+        else:
+            textures = tuple(str(value) for value in spec_default.material.textures)
+            current = (*textures, *empty[len(textures) :])[: len(empty)]
+
+        explicit = tuple(
+            (role, texture)
+            for role, texture, parent_texture in zip(
+                MATERIAL_TEXTURE_ROLES,
+                current,
+                inherited,
+                strict=True,
+            )
+            if texture and texture != parent_texture
+        )
+        material = element.find("material")
+        if material is not None:
+            material.attrib.pop("texture", None)
+            for child in tuple(material):
+                if child.tag == "layer":
+                    material.remove(child)
+        if explicit:
+            material = material if material is not None else ET.SubElement(element, "material")
+            for role, texture in explicit:
+                ET.SubElement(material, "layer", {"role": role, "texture": texture})
+        elif material is not None and not material.attrib and not len(material):
+            element.remove(material)
+
+        for child in element.findall("default"):
+            visit(child, current)
+
+    visit(root_default, empty, main=True)
+
+    asset = root.find("asset")
+    for element in asset.findall("material") if asset is not None else ():
+        name = str(element.attrib.get("name", "")).strip()
+        material_spec = spec.material(name) if name else None
+        if material_spec is None:
+            continue
+        class_name = str(element.attrib.get("class", "")).strip()
+        default_spec = spec.find_default(class_name) if class_name else spec.default
+        inherited = (
+            tuple(str(value) for value in default_spec.material.textures)
+            if default_spec is not None
+            else empty
+        )
+        inherited = (*inherited, *empty[len(inherited) :])[: len(empty)]
+        textures = tuple(str(value) for value in material_spec.textures)
+        current = (*textures, *empty[len(textures) :])[: len(empty)]
+        explicit = tuple(
+            (role, texture)
+            for role, texture, default_texture in zip(
+                MATERIAL_TEXTURE_ROLES,
+                current,
+                inherited,
+                strict=True,
+            )
+            if texture and texture != default_texture
+        )
+        element.attrib.pop("texture", None)
+        for child in tuple(element):
+            if child.tag == "layer":
+                element.remove(child)
+        for role, texture in explicit:
+            ET.SubElement(element, "layer", {"role": role, "texture": texture})
+
+
+def _editable_spec_xml(spec) -> str:
+    root, _xml = _component_xml(spec)
+    return _serialize_component_xml(root)
 
 
 def _component_section(root: ET.Element, category: str, *, create: bool = False):
@@ -927,6 +1018,8 @@ def _model_property_choices(
         return choices
     if group_id == "global:option/flag":
         return ("", "enable", "disable")
+    if group_id.endswith(":material/layers"):
+        return ("", *_named_elements(root, "texture"))
     if group_id.startswith("asset:texture:"):
         texture_choices = {
             "type": ("", "2d", "cube", "skybox"),
@@ -1891,13 +1984,13 @@ class MuJoCoAdapter(SceneAdapterBase):
         if spec is None:
             return None
         if model_id == 0:
-            return spec.to_xml() if self._root_edited else None
+            return _editable_spec_xml(spec) if self._root_edited else None
         item = next((item for item in self._attached_models if item.model_id == model_id), None)
-        return spec.to_xml() if item is not None and item.edited else None
+        return _editable_spec_xml(spec) if item is not None and item.edited else None
 
     def scene_model_source(self, model_id: int) -> str | None:
         spec = self._spec_for_model(model_id)
-        return spec.to_xml() if spec is not None else None
+        return _editable_spec_xml(spec) if spec is not None else None
 
     def set_scene_model_xml(self, model_id: int, xml: str) -> bool:
         spec = mujoco.MjSpec.from_string(str(xml))
@@ -2467,7 +2560,11 @@ class MuJoCoAdapter(SceneAdapterBase):
                 attributes = dict(element.attrib) if element is not None else {}
                 group_id = f"default:{default_index}:{element_type}"
                 schema = _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "default", element_type), ())
-                names = tuple(dict.fromkeys((*schema, *attributes)))
+                names = tuple(
+                    name
+                    for name in dict.fromkeys((*schema, *attributes))
+                    if element_type != "material" or name != "texture"
+                )
                 groups.append(
                     ModelPropertyGroup(
                         int(model_id),
@@ -2477,6 +2574,26 @@ class MuJoCoAdapter(SceneAdapterBase):
                         _model_property_fields(root, group_id, names, attributes),
                     )
                 )
+            material = default.find("material")
+            layers = {
+                str(layer.attrib.get("role", "rgb")): str(layer.attrib.get("texture", ""))
+                for layer in (material.findall("layer") if material is not None else ())
+            }
+            layer_group = f"default:{default_index}:material/layers"
+            groups.append(
+                ModelPropertyGroup(
+                    int(model_id),
+                    layer_group,
+                    "default",
+                    f"Default {class_name} / material layers",
+                    _model_property_fields(
+                        root,
+                        layer_group,
+                        MATERIAL_TEXTURE_ROLES,
+                        layers,
+                    ),
+                )
+            )
         return tuple(groups)
 
     def model_assets(self, model_id: int) -> tuple[ModelAssetInfo, ...]:
@@ -2860,8 +2977,28 @@ class MuJoCoAdapter(SceneAdapterBase):
                 if element_type == "class":
                     element = default
                     allowed = ("class",)
+                elif element_type == "material/layers":
+                    allowed = MATERIAL_TEXTURE_ROLES
+                    texture_names = set(_named_elements(root, "texture"))
+                    unknown_textures = {
+                        value for _name, value in fields if value and value not in texture_names
+                    }
+                    if unknown_textures:
+                        raise ValueError(
+                            "Unknown material layer textures: "
+                            + ", ".join(sorted(unknown_textures))
+                        )
+                    element = default.find("material")
+                    if element is None and any(value for _name, value in fields):
+                        element = ET.SubElement(default, "material")
                 elif element_type in _DEFAULT_PROPERTY_TYPES:
-                    allowed = _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "default", element_type), ())
+                    allowed = tuple(
+                        name
+                        for name in _MJCF_SCHEMA_ATTRIBUTES.get(
+                            ("mujoco", "default", element_type), ()
+                        )
+                        if element_type != "material" or name != "texture"
+                    )
                     element = default.find(element_type)
                     if element is None and any(value for _name, value in fields):
                         element = ET.SubElement(default, element_type)
@@ -2875,11 +3012,30 @@ class MuJoCoAdapter(SceneAdapterBase):
                 raise ValueError(f"Unknown fields for {group_id}: {', '.join(sorted(unknown))}")
             if element is None:
                 continue
-            for name, value in fields:
-                if value:
-                    element.set(name, value)
-                else:
-                    element.attrib.pop(name, None)
+            if group_id.endswith(":material/layers"):
+                layers = {
+                    str(child.attrib.get("role", "rgb")): str(child.attrib.get("texture", ""))
+                    for child in element
+                    if child.tag == "layer" and str(child.attrib.get("texture", ""))
+                }
+                for role, texture in fields:
+                    if texture:
+                        layers[role] = texture
+                    else:
+                        layers.pop(role, None)
+                element.attrib.pop("texture", None)
+                for child in tuple(element):
+                    if child.tag == "layer":
+                        element.remove(child)
+                for role in MATERIAL_TEXTURE_ROLES:
+                    if texture := layers.get(role):
+                        ET.SubElement(element, "layer", {"role": role, "texture": texture})
+            else:
+                for name, value in fields:
+                    if value:
+                        element.set(name, value)
+                    else:
+                        element.attrib.pop(name, None)
             if group_id.startswith("default:") and not element.attrib and not len(element):
                 _prefix, index_text, element_type = group_id.split(":", 2)
                 if element_type != "class":
@@ -3322,7 +3478,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             _apply_environment(spec, source.lights, float(preview.stat.extent))
             spec.compile()
         assets = self._stage_mjcf_assets(spec, target)
-        xml = spec.to_xml()
+        xml = _editable_spec_xml(spec)
         for source_file, exported_file in assets:
             xml = xml.replace(
                 f'="{escape(source_file, quote=True)}"',
@@ -7334,7 +7490,10 @@ class MuJoCoAdapter(SceneAdapterBase):
             # MuJoCo 3.11 serializes MjsMaterial.textures correctly but retains
             # the old compiled texture reference in that live MjSpec. Reparse the
             # serialized spec so a later topology rebuild or export sees the edit.
-            self._store_model_spec(model_id, mujoco.MjSpec.from_string(spec.to_xml()))
+            self._store_model_spec(
+                model_id,
+                self._spec_from_component_xml(model_id, _editable_spec_xml(spec)),
+            )
         return True
 
     def model_material_indices(self, model_id: int) -> tuple[int, ...]:

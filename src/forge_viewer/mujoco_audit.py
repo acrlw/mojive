@@ -78,6 +78,8 @@ def _schema_path_coverage(path: tuple[str, ...]) -> tuple[str, str]:
         return "structured", "schema-driven Model Configuration editor"
     if path == ("mujoco", "default"):
         return "structured", "default-class lifecycle editor"
+    if path == ("mujoco", "default", "material", "layer"):
+        return "structured", "default-class material texture-role editor"
     if len(path) == 3 and path[:2] == ("mujoco", "default"):
         return "structured", "schema-driven default-class editor"
     if len(path) >= 3 and path[1] in _STRUCTURED_COMPONENT_SECTIONS:
@@ -87,6 +89,8 @@ def _schema_path_coverage(path: tuple[str, ...]) -> tuple[str, str]:
     if path == ("mujoco", "keyframe", "key"):
         return "structured", "keyframe lifecycle and full-state editor"
     if len(path) >= 3 and path[:2] == ("mujoco", "asset"):
+        if path == ("mujoco", "asset", "material", "layer"):
+            return "structured", "Assets material texture-role editor"
         if path[2] in _PARTIAL_ASSET_TYPES:
             return (
                 "structured-partial",
