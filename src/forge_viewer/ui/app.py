@@ -2313,12 +2313,13 @@ class ViewerApp:
         def point(dx: float, dy: float) -> np.ndarray:
             return center + np.array((dx, dy), np.float64)
 
+        # ImGui builds the fill fringe from clockwise screen-space vertices.
         if icon == "play":
             overlay.convex_fill(
                 (
                     point(-0.55 * radius, -radius),
-                    point(-0.55 * radius, radius),
                     point(radius, 0.0),
+                    point(-0.55 * radius, radius),
                 ),
                 foreground,
             )
@@ -2339,8 +2340,8 @@ class ViewerApp:
             overlay.convex_fill(
                 (
                     point(-radius, -radius),
-                    point(-radius, radius),
                     point(0.45 * radius, 0.0),
+                    point(-radius, radius),
                 ),
                 foreground,
             )
