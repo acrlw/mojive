@@ -20,6 +20,7 @@ class JointsPanel(Panel):
     name = "Joints"
     default_open = True
     shortcut = "F5"
+    closable = False
 
     def __init__(self) -> None:
         super().__init__()

@@ -22,6 +22,7 @@ class StatsPanel(Panel):
     name = "Stats"
     default_open = True
     shortcut = "F8"
+    closable = False
 
     def __init__(self) -> None:
         super().__init__()

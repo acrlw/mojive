@@ -21,6 +21,7 @@ class ControlPanel(Panel):
     name = "Control"
     default_open = True
     shortcut = ""
+    closable = False
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()

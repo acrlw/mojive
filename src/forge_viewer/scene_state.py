@@ -164,6 +164,25 @@ def list_named_snapshots(directory=DEFAULT_DIRECTORY) -> list[str]:
     return sorted(path.stem for path in root.glob("*.json")) if root.is_dir() else []
 
 
+def next_available_snapshot_name(name: str, directory=DEFAULT_DIRECTORY) -> str:
+    """Return a sanitized non-overwriting name for one UI snapshot save."""
+
+    base = _safe_name(name)
+    existing = set(list_named_snapshots(directory))
+    if base not in existing:
+        return base
+    numbered = re.fullmatch(r"(.*?)-(\d+)", base)
+    if numbered is None:
+        prefix, index = base, 2
+    else:
+        prefix, index = numbered.group(1), int(numbered.group(2)) + 1
+    candidate = f"{prefix}-{index}"
+    while candidate in existing:
+        index += 1
+        candidate = f"{prefix}-{index}"
+    return candidate
+
+
 def _safe_name(name: str) -> str:
     value = re.sub(r"[^A-Za-z0-9_.-]+", "-", name.strip()).strip("-.")
     if not value:

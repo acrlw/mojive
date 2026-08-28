@@ -158,6 +158,65 @@ class _RotationDialProjector:
         return start, start + radial * float(length_px)
 
 
+class _ScreenRotationDialProjector:
+    """Keep the screen-rotation dial identical to its idle pixel-space ring."""
+
+    def __init__(
+        self,
+        cam: CameraView,
+        rect: tuple[float, float, float, float],
+        center,
+        axis,
+        start_direction,
+        size_px: float,
+    ) -> None:
+        self._size_px = float(size_px)
+        projected_center = project(cam, (center,), rect)[0]
+        self._center = projected_center[:2]
+        self._depth = float(projected_center[2])
+
+        scale = world_scale(cam, center, rect[3], size_px)
+        start_world = rotation_dial(center, axis, start_direction, scale, 1.0, (0.0,))[0]
+        quarter_world = rotation_dial(
+            center,
+            axis,
+            start_direction,
+            scale,
+            1.0,
+            (0.5 * np.pi,),
+        )[0]
+        projected = project(cam, (start_world, quarter_world), rect)[:, :2] - self._center
+        start = projected[0]
+        length = float(np.linalg.norm(start))
+        self._radial = start / length if length > 1e-9 else np.array((1.0, 0.0))
+        left = np.array((-self._radial[1], self._radial[0]))
+        self._tangent = left if np.dot(left, projected[1]) >= 0.0 else -left
+
+    def points(self, radius, angles) -> np.ndarray:
+        angles = np.atleast_1d(np.asarray(angles, np.float64))
+        radii = np.broadcast_to(np.asarray(radius, np.float64), angles.shape)
+        directions = (
+            np.cos(angles)[:, None] * self._radial + np.sin(angles)[:, None] * self._tangent
+        )
+        screen = self._center + self._size_px * radii[:, None] * directions
+        return np.column_stack((screen, np.full(len(screen), self._depth)))
+
+    def tick(
+        self,
+        radius: float,
+        angle: float,
+        length_px: float,
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        if self._depth <= 0.0:
+            return None
+        start = self.points(radius, (angle,))[0, :2]
+        radial = start - self._center
+        length = float(np.linalg.norm(radial))
+        if length < 1e-9:
+            return None
+        return start, start + radial / length * float(length_px)
+
+
 @dataclass(frozen=True)
 class Verdict:
     ok: bool
@@ -720,7 +779,12 @@ class ObjectGizmo:
             self._draw_translation_guide(overlay, cam, rect, style_scale)
         rotation_dial_projector = None
         if self._using and self._active in ROTATE_HANDLES:
-            rotation_dial_projector = _RotationDialProjector(
+            projector = (
+                _ScreenRotationDialProjector
+                if self._active is GizmoHandle.ROTATE_SCREEN
+                else _RotationDialProjector
+            )
+            rotation_dial_projector = projector(
                 cam,
                 rect,
                 self._start_pos,
@@ -1124,7 +1188,7 @@ class ObjectGizmo:
         cam,
         rect,
         style_scale: float,
-        dial: _RotationDialProjector,
+        dial: _RotationDialProjector | _ScreenRotationDialProjector,
     ) -> None:
         ring_radius = (
             SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
@@ -1241,7 +1305,7 @@ class ObjectGizmo:
         cam,
         rect,
         style_scale: float,
-        dial: _RotationDialProjector,
+        dial: _RotationDialProjector | _ScreenRotationDialProjector,
     ) -> None:
         projection_alpha = (
             rotation_ring_alpha(cam, self._start_pos, self._axis)
@@ -1303,7 +1367,7 @@ class ObjectGizmo:
         cam,
         rect,
         style_scale: float,
-        dial: _RotationDialProjector | None,
+        dial: _RotationDialProjector | _ScreenRotationDialProjector | None,
     ) -> None:
         pad = 6.0 * style_scale
         gap = 14.0 * style_scale

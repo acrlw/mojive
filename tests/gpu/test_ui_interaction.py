@@ -1612,6 +1612,78 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style):
     assert abs(v.app.camera.yaw - before_yaw) < 1e-6
 
 
+@pytest.mark.parametrize("orthographic", (False, True), ids=("perspective", "orthographic"))
+def test_pressed_screen_rotation_ring_keeps_its_idle_pixel_geometry(
+    free_body_viewer,
+    orthographic,
+):
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+    from forge_viewer.gizmo import SCREEN_RING_RADIUS, SIZE_PT, GizmoHandle, project
+
+    class Recorder:
+        def __init__(self, inner):
+            self.inner = inner
+            self.closed = []
+
+        def polyline(self, points, color, width, *, closed=False):
+            if closed:
+                self.closed.append(np.asarray(points).copy())
+            return self.inner.polyline(points, color, width, closed=closed)
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+    v = free_body_viewer
+    io = imgui.get_io()
+    node = next(n for n in v.session.nodes if n.posable)
+    assert v.session.submit(cmd.Select(node.object_id))
+    v.app.gizmo.set_mode("rotate")
+    v.app.gizmo.set_style("3d")
+    v.app.gizmo.set_space("body")
+    v.app.camera.look_from(-135.0, 25.0, v.app.camera_out, animate=False)
+    v.app.camera.orthographic = orthographic
+    for _ in range(4):
+        v.sync()
+
+    cam = v.app.camera.view()
+    rect = v.app._viewport_rect
+    origin = np.asarray(v.session.frame.body_xpos[node.body_index], np.float64)
+    center = project(cam, (origin,), rect)[0, :2]
+    radius = SCREEN_RING_RADIUS * SIZE_PT * v.window.style_scale
+    cursor = center + np.array((radius, 0.0))
+    io.add_mouse_pos_event(*cursor)
+    for _ in range(2):
+        v.sync()
+    assert v.app.gizmo.hovered_handle is GizmoHandle.ROTATE_SCREEN
+
+    recorders = []
+    original = v.app.gizmo.draw_overlay
+
+    def spy(cam, rect, overlay, *, style_scale=1.0):
+        recorder = Recorder(overlay)
+        recorders.append(recorder)
+        return original(cam, rect, recorder, style_scale=style_scale)
+
+    try:
+        io.add_mouse_button_event(0, True)
+        v.sync()
+        assert v.app.gizmo.active_handle is GizmoHandle.ROTATE_SCREEN
+        v.app.gizmo.draw_overlay = spy
+        v.sync()
+    finally:
+        v.app.gizmo.draw_overlay = original
+        io.add_mouse_button_event(0, False)
+        v.sync()
+        v.app.camera.orthographic = False
+        v.sync()
+
+    reference = recorders[0].closed[0]
+    radii = np.linalg.norm(reference[:, :2] - center, axis=1)
+    assert radii == pytest.approx(np.full(len(radii), radius), abs=1e-4)
+
+
 def test_gizmo_stays_drawn_while_the_camera_is_being_dragged(free_body_viewer):
 
     from imgui_bundle import imgui

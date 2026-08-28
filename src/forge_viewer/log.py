@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import sys
-from typing import TextIO
+from contextlib import suppress
+from typing import Any, TextIO
 
 from loguru import logger
 
@@ -30,3 +31,26 @@ def configure(
         backtrace=verbose,
         diagnose=False,
     )
+
+
+def add_output_sink(sink: Any) -> int:
+    """Mirror forge runtime records into an editor-owned callable sink."""
+
+    return int(
+        logger.add(
+            sink,
+            level="DEBUG",
+            format="{message}",
+            filter=lambda record: "component" in record["extra"],
+            colorize=False,
+            backtrace=False,
+            diagnose=False,
+        )
+    )
+
+
+def remove_output_sink(sink_id: int) -> None:
+    """Detach an editor output sink if it is still registered."""
+
+    with suppress(ValueError):
+        logger.remove(int(sink_id))

@@ -16,7 +16,7 @@ from imgui_bundle import imgui, portable_file_dialogs
 
 from .. import commands as cmd
 from ..adapters.base import FrameNeeds, NodeType
-from ..log import get_logger
+from ..log import add_output_sink, get_logger, remove_output_sink
 from ..render.backend import FrameMode, LabelMode, RenderFlag
 from ..types import Light, LightType, MeshShape, ViewportImage
 from ..workspace_io import (
@@ -31,6 +31,7 @@ from .camera_preview import CameraPreview
 from .draw2d import ImguiDraw2D
 from .gizmo import ObjectGizmo, PreciseGizmoInput
 from .localization import Localizer
+from .messages import OutputBuffer
 from .panels import PanelContext, PanelSet, button_width
 from .perturb import (
     PerturbController,
@@ -127,6 +128,27 @@ def _disabled_text_wrapped(value: str) -> None:
     imgui.pop_style_color()
 
 
+def _wrap_overlay_text(value: str, overlay: ImguiDraw2D, max_width: float) -> tuple[str, ...]:
+    """Wrap short status text using the active UI font's measured width."""
+
+    lines: list[str] = []
+    for paragraph in str(value).splitlines() or ("",):
+        words = paragraph.split()
+        if not words:
+            lines.append("")
+            continue
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            if overlay.text_size(candidate)[0] <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+    return tuple(lines)
+
+
 def _toggle_angle_input(value: float, unit: str) -> tuple[float, str]:
     """Change the displayed unit without changing the represented angle."""
 
@@ -184,6 +206,7 @@ class ViewerApp:
         self.perturb = PerturbController()
         self.scene_entities = SceneEntityHelpers()
         self.router = gs.GestureRouter()
+        self.output = OutputBuffer()
         self.panels = PanelSet()
         if os.environ.get("FORGE_VIEWER_OPEN_SETTINGS") == "1":
             self.panels.open_panel("Settings")
@@ -247,6 +270,10 @@ class ViewerApp:
         self._model_drop_notice = ""
         self._model_drop_notice_until = 0.0
         self._display_scale_generation = -1
+        self._output_sink_id: int | None = None
+        self._seen_message_revision = int(getattr(session, "message_revision", 0))
+        self._status_layout_key: tuple[int, int] | None = None
+        self._status_layout_lines: tuple[str, ...] = ()
 
     def set_language(self, language: str) -> None:
         self.localizer.set_language(language)
@@ -280,6 +307,8 @@ class ViewerApp:
     def _startup(self) -> None:
         if self._started:
             return
+        if self._output_sink_id is None:
+            self._output_sink_id = add_output_sink(self.output.loguru_sink)
         if self.window is None:
             self.window = Window(WindowConfig(title=self.title))
         self._sync_structure()
@@ -340,6 +369,10 @@ class ViewerApp:
         self._release_resource(self.camera_preview, "release", "camera preview")
         self._release_resource(self.backend, "release", "render backend")
         self._release_resource(self.session, "release", "session")
+        output_sink_id = getattr(self, "_output_sink_id", None)
+        if output_sink_id is not None:
+            remove_output_sink(output_sink_id)
+            self._output_sink_id = None
 
     @staticmethod
     def _release_resource(resource: Any, operation: str, name: str) -> None:
@@ -1171,6 +1204,7 @@ class ViewerApp:
     def _report_model_error(self, message: str) -> None:
         self._model_load_error = message
         self._show_model_load_error = True
+        self.session.report_message(message, level="error", duration=10.0)
 
     def _draw_model_load_error(self) -> None:
         if self._show_model_load_error:
@@ -1405,6 +1439,7 @@ class ViewerApp:
             preview_size,
         )
 
+        self._sync_session_status()
         ctx = self._panel_context()
         self._draw_viewport(ctx, preview_name)
         self.panels.draw(ctx)
@@ -1423,6 +1458,7 @@ class ViewerApp:
 
         self.window.begin_dockspace()
         self._viewport_image = self.backend.render()
+        self._sync_session_status()
         self._draw_viewport(None, session_busy=True)
         self._draw_model_loading_window()
 
@@ -2009,6 +2045,7 @@ class ViewerApp:
                 )
                 self.view_cube.draw(overlay, self.window.style_scale)
                 self._draw_model_drop_overlay(overlay)
+            self._draw_status_overlay(overlay)
         finally:
             imgui.pop_clip_rect()
         if not session_busy:
@@ -2088,6 +2125,55 @@ class ViewerApp:
         else:
             message = notice or empty_hint
         self._draw_center_notice(overlay, message, border=dragging)
+
+    def _sync_session_status(self) -> None:
+        revision = int(getattr(self.session, "message_revision", 0))
+        if revision == self._seen_message_revision:
+            return
+        self._seen_message_revision = revision
+        self.output.publish(
+            self.session.last_message,
+            level=getattr(self.session, "last_message_level", "info"),
+            duration=getattr(self.session, "last_message_duration", 5.0),
+        )
+
+    def _draw_status_overlay(self, overlay: ImguiDraw2D) -> None:
+        status = self.output.active_status()
+        if status is None:
+            return
+        x, y, width, height = self._viewport_rect
+        scale = self.window.style_scale
+        max_text_width = max(80.0, min(520.0 * scale, width - 40.0 * scale))
+        layout_key = (status.sequence, int(max_text_width))
+        if layout_key != self._status_layout_key:
+            self._status_layout_key = layout_key
+            self._status_layout_lines = _wrap_overlay_text(
+                status.text,
+                overlay,
+                max_text_width,
+            )
+        lines = self._status_layout_lines
+        if not lines:
+            return
+        pad_x = 10.0 * scale
+        pad_y = 7.0 * scale
+        gap = 3.0 * scale
+        sizes = tuple(overlay.text_size(line) for line in lines)
+        box_width = min(max(size[0] for size in sizes), max_text_width) + 2.0 * pad_x
+        box_height = sum(size[1] for size in sizes) + gap * (len(lines) - 1) + 2.0 * pad_y
+        lo = (x + 12.0 * scale, y + height - box_height - 12.0 * scale)
+        hi = (lo[0] + box_width, lo[1] + box_height)
+        level_colors = {
+            "error": (1.0, 0.42, 0.38, 1.0),
+            "warning": (1.0, 0.72, 0.28, 1.0),
+            "success": (0.44, 0.86, 0.56, 1.0),
+        }
+        overlay.rect_filled(lo, hi, (0.06, 0.07, 0.09, 0.92), rounding=5.0 * scale)
+        color = level_colors.get(status.level, (0.94, 0.95, 0.97, 1.0))
+        cursor_y = lo[1] + pad_y
+        for line, size in zip(lines, sizes, strict=True):
+            overlay.text((lo[0] + pad_x, cursor_y), color, line)
+            cursor_y += size[1] + gap
 
     def _draw_center_notice(
         self,
@@ -2248,6 +2334,7 @@ class ViewerApp:
             set_language=self.set_language,
             set_precise_input_memory=self.set_precise_input_choice_memory,
             font_report=self.window.font_report,
+            output=self.output,
         )
 
     def _cursor_ray(self, cursor: tuple[float, float]):

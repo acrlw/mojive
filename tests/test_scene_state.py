@@ -18,6 +18,7 @@ from forge_viewer.scene_state import (
     delete_named_snapshot,
     list_named_snapshots,
     load_named_snapshot,
+    next_available_snapshot_name,
     restore_scene,
     save_named_snapshot,
 )
@@ -164,6 +165,17 @@ def test_named_snapshot_storage_overwrites_lists_and_deletes(tmp_path):
     assert load_named_snapshot("pose-one", tmp_path) == second
     delete_named_snapshot("pose-one", tmp_path)
     assert list_named_snapshots(tmp_path) == []
+
+
+def test_editor_snapshot_names_advance_without_overwriting(tmp_path):
+    assert next_available_snapshot_name("view-1", tmp_path) == "view-1"
+    save_named_snapshot("view-1", {"value": 1}, tmp_path)
+    save_named_snapshot("view-3", {"value": 3}, tmp_path)
+
+    assert next_available_snapshot_name("view-1", tmp_path) == "view-2"
+    save_named_snapshot("view-2", {"value": 2}, tmp_path)
+    assert next_available_snapshot_name("view-2", tmp_path) == "view-4"
+    assert next_available_snapshot_name("named view", tmp_path) == "named-view"
 
 
 def test_snapshot_rejects_a_different_model(state_rig):

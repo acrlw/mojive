@@ -162,10 +162,13 @@ class SettingsPanel(Panel):
                 if name in light_notes:
                     self._property(t(name))
                     imgui.text(str(light_notes[name]))
+            self._property(t("Debug view"))
+            self._debug_view(ctx)
+            self._property(t("Labels"))
+            self._label_mode(ctx)
+            self._property(t("Frames"))
+            self._frame_mode(ctx)
             imgui.end_table()
-        imgui.spacing()
-        self._debug_view(ctx)
-        self._overlay_modes(ctx)
         forge_flags = flag_groups()[-1][1]
         if forge_flags and imgui.collapsing_header(t("Forge render flags")):
             self._flag_table(ctx, "forge_render_flags", forge_flags)
@@ -433,7 +436,7 @@ class SettingsPanel(Panel):
         caps = ctx.backend.caps
         current = self.current_view(ctx.backend)
         imgui.set_next_item_width(-1)
-        if not imgui.begin_combo("##debugview", f"debug view: {current.value}"):
+        if not imgui.begin_combo("##debugview", current.value):
             return
 
         for view in DebugView:
@@ -451,11 +454,11 @@ class SettingsPanel(Panel):
                     self._message = f"debug view '{view.value}' refused by {caps.name}"
         imgui.end_combo()
 
-    def _overlay_modes(self, ctx: PanelContext) -> None:
+    def _label_mode(self, ctx: PanelContext) -> None:
         backend = ctx.backend
         label = backend.get_label_mode()
         imgui.set_next_item_width(-1)
-        if imgui.begin_combo("##label_mode", f"labels: {label.value}"):
+        if imgui.begin_combo("##label_mode", label.value):
             for mode in LabelMode:
                 supported = mode in backend.caps.label_modes
                 imgui.begin_disabled(not supported)
@@ -465,9 +468,11 @@ class SettingsPanel(Panel):
                     backend.set_label_mode(mode)
             imgui.end_combo()
 
+    def _frame_mode(self, ctx: PanelContext) -> None:
+        backend = ctx.backend
         frame = backend.get_frame_mode()
         imgui.set_next_item_width(-1)
-        if imgui.begin_combo("##frame_mode", f"frames: {frame.value}"):
+        if imgui.begin_combo("##frame_mode", frame.value):
             for mode in FrameMode:
                 supported = mode in backend.caps.frame_modes
                 imgui.begin_disabled(not supported)

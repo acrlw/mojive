@@ -17,6 +17,7 @@ from ...scene_state import (
     delete_named_snapshot,
     list_named_snapshots,
     load_named_snapshot,
+    next_available_snapshot_name,
     restore_scene,
     save_named_snapshot,
 )
@@ -71,6 +72,7 @@ class CameraPanel(Panel):
     name = "Camera"
     default_open = True
     shortcut = "F6"
+    closable = False
 
     def __init__(self) -> None:
         super().__init__()
@@ -116,65 +118,103 @@ class CameraPanel(Panel):
         view = ctx.model_camera_view if ctx.model_camera_id >= 0 else camera.view()
 
         imgui.text_disabled(ctx.tr("camera bookmark"))
+        imgui.text_disabled(f"{ctx.tr('Stored in')}: {camera_dir}")
+        imgui.set_item_tooltip(str(camera_dir.resolve()))
         _changed, self._bookmark_name = imgui.input_text("##bookmark_name", self._bookmark_name)
         if imgui.button("save##camera_bookmark"):
-            save_named_snapshot(
-                self._bookmark_name,
-                camera_bookmark(camera, view, ctx.model_camera_id),
-                camera_dir,
-            )
+            try:
+                name = next_available_snapshot_name(self._bookmark_name, camera_dir)
+                path = save_named_snapshot(
+                    name,
+                    camera_bookmark(camera, view, ctx.model_camera_id),
+                    camera_dir,
+                )
+                bookmarks = list_named_snapshots(camera_dir)
+                self._bookmark_index = bookmarks.index(path.stem)
+                self._bookmark_name = next_available_snapshot_name(path.stem, camera_dir)
+                self._snapshot_error = ""
+                ctx.report(
+                    f"Saved camera bookmark to {path.resolve()}",
+                    level="success",
+                )
+            except (OSError, TypeError, ValueError) as error:
+                self._report_storage_error(ctx, error)
         imgui.same_line()
         bookmarks = list_named_snapshots(camera_dir)
         self._bookmark_index = min(self._bookmark_index, max(len(bookmarks) - 1, 0))
         if bookmarks:
             imgui.set_next_item_width(140.0 * ctx.style_scale)
-            _changed, self._bookmark_index = imgui.combo(
+            changed, self._bookmark_index = imgui.combo(
                 "##camera_bookmarks", self._bookmark_index, bookmarks
             )
             name = bookmarks[self._bookmark_index]
-            if imgui.button("load##camera_bookmark"):
-                apply_camera_bookmark(
-                    load_named_snapshot(name, camera_dir), camera, ctx.select_model_camera
-                )
+            if changed:
+                try:
+                    apply_camera_bookmark(
+                        load_named_snapshot(name, camera_dir), camera, ctx.select_model_camera
+                    )
+                    self._snapshot_error = ""
+                    ctx.report(f"Loaded camera bookmark '{name}'", level="success")
+                except (OSError, KeyError, TypeError, ValueError) as error:
+                    self._report_storage_error(ctx, error)
             imgui.same_line()
             if imgui.button("copy##camera_bookmark"):
-                imgui.set_clipboard_text(
-                    json.dumps(load_named_snapshot(name, camera_dir), indent=2)
-                )
+                try:
+                    imgui.set_clipboard_text(
+                        json.dumps(load_named_snapshot(name, camera_dir), indent=2)
+                    )
+                except (OSError, TypeError, ValueError) as error:
+                    self._report_storage_error(ctx, error)
             imgui.same_line()
             if imgui.button("delete##camera_bookmark"):
-                delete_named_snapshot(name, camera_dir)
+                try:
+                    delete_named_snapshot(name, camera_dir)
+                    ctx.report(f"Deleted camera bookmark '{name}'", level="success")
+                except OSError as error:
+                    self._report_storage_error(ctx, error)
 
         imgui.text_disabled(ctx.tr("scene snapshot"))
+        imgui.text_disabled(f"{ctx.tr('Stored in')}: {scene_dir}")
+        imgui.set_item_tooltip(str(scene_dir.resolve()))
         _changed, self._snapshot_name = imgui.input_text(
             "##scene_snapshot_name", self._snapshot_name
         )
         state_available = ctx.session.adapter.caps.state_snapshots
         imgui.begin_disabled(not state_available)
         if imgui.button("save##scene_snapshot"):
-            save_named_snapshot(
-                self._snapshot_name,
-                capture_scene(
-                    ctx.session,
-                    ctx.backend,
-                    camera,
-                    camera_source=ctx.model_camera_id,
-                    camera_view=view,
-                ),
-                scene_dir,
-            )
+            try:
+                name = next_available_snapshot_name(self._snapshot_name, scene_dir)
+                path = save_named_snapshot(
+                    name,
+                    capture_scene(
+                        ctx.session,
+                        ctx.backend,
+                        camera,
+                        camera_source=ctx.model_camera_id,
+                        camera_view=view,
+                    ),
+                    scene_dir,
+                )
+                snapshots = list_named_snapshots(scene_dir)
+                self._snapshot_index = snapshots.index(path.stem)
+                self._snapshot_name = next_available_snapshot_name(path.stem, scene_dir)
+                self._snapshot_error = ""
+                ctx.report(f"Saved scene snapshot to {path.resolve()}", level="success")
+            except (OSError, RuntimeError, TypeError, ValueError) as error:
+                self._report_storage_error(ctx, error)
         imgui.end_disabled()
         imgui.same_line()
         snapshots = list_named_snapshots(scene_dir)
         self._snapshot_index = min(self._snapshot_index, max(len(snapshots) - 1, 0))
         if snapshots:
             imgui.set_next_item_width(140.0 * ctx.style_scale)
-            _changed, self._snapshot_index = imgui.combo(
+            imgui.begin_disabled(not ctx.session.paused)
+            changed, self._snapshot_index = imgui.combo(
                 "##scene_snapshots", self._snapshot_index, snapshots
             )
+            imgui.end_disabled()
             name = snapshots[self._snapshot_index]
-            imgui.begin_disabled(not ctx.session.paused)
-            if imgui.button("load##scene_snapshot"):
+            if changed:
                 try:
                     restore_scene(
                         load_named_snapshot(name, scene_dir),
@@ -184,20 +224,32 @@ class CameraPanel(Panel):
                         select_source=ctx.select_model_camera,
                     )
                     self._snapshot_error = ""
-                except ValueError as error:
-                    self._snapshot_error = str(error)
-                    ctx.report(self._snapshot_error)
-            imgui.end_disabled()
+                    ctx.report(f"Loaded scene snapshot '{name}'", level="success")
+                except (OSError, KeyError, TypeError, ValueError) as error:
+                    self._report_storage_error(ctx, error)
             imgui.same_line()
             if imgui.button("copy##scene_snapshot"):
-                imgui.set_clipboard_text(json.dumps(load_named_snapshot(name, scene_dir), indent=2))
+                try:
+                    imgui.set_clipboard_text(
+                        json.dumps(load_named_snapshot(name, scene_dir), indent=2)
+                    )
+                except (OSError, TypeError, ValueError) as error:
+                    self._report_storage_error(ctx, error)
             imgui.same_line()
             if imgui.button("delete##scene_snapshot"):
-                delete_named_snapshot(name, scene_dir)
+                try:
+                    delete_named_snapshot(name, scene_dir)
+                    ctx.report(f"Deleted scene snapshot '{name}'", level="success")
+                except OSError as error:
+                    self._report_storage_error(ctx, error)
         if self._snapshot_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._snapshot_error)
             if imgui.small_button("Copy error##scene_snapshot"):
                 imgui.set_clipboard_text(self._snapshot_error)
+
+    def _report_storage_error(self, ctx: PanelContext, error: Exception) -> None:
+        self._snapshot_error = str(error)
+        ctx.report(self._snapshot_error, level="error", duration=10.0)
 
     def _source(self, ctx: PanelContext) -> None:
         cameras = ctx.session.cameras

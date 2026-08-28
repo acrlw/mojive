@@ -201,6 +201,9 @@ class Session:
         self._perturb = PerturbState()
         self._camera = CameraView()
         self._last_message = ""
+        self._message_revision = 0
+        self._last_message_level = "info"
+        self._last_message_duration: float | None = 5.0
         self._undo_stack: list[_EditRecord] = []
         self._redo_stack: list[_EditRecord] = []
         self._edit_before: _DocumentState | None = None
@@ -394,9 +397,52 @@ class Session:
         """Return the latest user-facing command result message."""
         return self._last_message
 
-    def report_message(self, message: str) -> None:
-        """Publish a persistent UI or runtime diagnostic without creating a command."""
+    @property
+    def message_revision(self) -> int:
+        """Return the monotonic revision of non-empty user-facing messages."""
+        return self._message_revision
+
+    @property
+    def last_message_level(self) -> str:
+        return self._last_message_level
+
+    @property
+    def last_message_duration(self) -> float | None:
+        return self._last_message_duration
+
+    def report_message(
+        self,
+        message: str,
+        *,
+        level: str = "warning",
+        duration: float | None = 5.0,
+    ) -> None:
+        """Publish a user-facing UI or runtime diagnostic without creating a command."""
+        self._publish_message(str(message), level=level, duration=duration)
+
+    def _publish_message(
+        self,
+        message: str,
+        *,
+        level: str,
+        duration: float | None,
+    ) -> None:
         self._last_message = str(message)
+        if not self._last_message:
+            return
+        self._message_revision += 1
+        self._last_message_level = str(level)
+        self._last_message_duration = duration
+
+    def _record_result(self, result: CommandResult) -> CommandResult:
+        self._last_message = result.message
+        if result.message:
+            self._publish_message(
+                result.message,
+                level="info" if result.ok else "error",
+                duration=5.0 if result.ok else 10.0,
+            )
+        return result
 
     @property
     def dirty(self) -> bool:
@@ -500,20 +546,16 @@ class Session:
         """Apply one typed command and update edit history and status text."""
         if isinstance(command, cmd.BeginEditTransaction):
             result = self._begin_edit(command.label)
-            self._last_message = result.message
-            return result
+            return self._record_result(result)
         if isinstance(command, cmd.EndEditTransaction):
             result = self._end_edit()
-            self._last_message = result.message
-            return result
+            return self._record_result(result)
         if isinstance(command, cmd.Undo):
             result = self._undo()
-            self._last_message = result.message
-            return result
+            return self._record_result(result)
         if isinstance(command, cmd.Redo):
             result = self._redo()
-            self._last_message = result.message
-            return result
+            return self._record_result(result)
 
         scene_edit = isinstance(command, _SCENE_EDIT_COMMANDS)
         before = (
@@ -529,8 +571,7 @@ class Session:
                 self._commit_edit(type(command).__name__, before)
             else:
                 self._advance_document_revision()
-        self._last_message = result.message
-        return result
+        return self._record_result(result)
 
     def _capture_document_state(self) -> _DocumentState:
         state = self._adapter.capture_edit_state()

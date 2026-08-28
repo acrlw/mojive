@@ -19,6 +19,7 @@ class HierarchyPanel(Panel):
     name = "Hierarchy"
     default_open = True
     shortcut = "F3"
+    closable = False
 
     def __init__(self) -> None:
         super().__init__()

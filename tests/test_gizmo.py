@@ -65,6 +65,7 @@ from forge_viewer.ui.gizmo import (
     _rotation_fill_alpha,
     _rotation_sweep,
     _RotationDialProjector,
+    _ScreenRotationDialProjector,
     _snap_tick_alpha,
     _split_segment_around_point,
 )
@@ -1053,6 +1054,65 @@ def test_screen_rotation_dial_keeps_a_constant_screen_radius(orthographic: bool)
     expected = SCREEN_RING_RADIUS * SIZE_PT * 1.5
     assert radii == pytest.approx(np.full(len(angles), expected), abs=1e-5)
     assert active == pytest.approx(points, abs=1e-6)
+
+
+@pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
+def test_active_screen_rotation_matches_the_idle_pixel_ring_with_stale_aspect(
+    orthographic: bool,
+) -> None:
+    cam = camera(orthographic=orthographic).with_aspect(0.75)
+    center = np.array((0.35, -0.2, 0.4))
+    view_basis = np.asarray(cam.view_matrix())[:3, :3].T
+    angles = np.linspace(0.0, 2.0 * np.pi, RING_SEGMENTS, endpoint=False)
+    dial = _ScreenRotationDialProjector(
+        cam,
+        RECT,
+        center,
+        -cam.forward(),
+        view_basis[:, 0],
+        SIZE_PT * 1.5,
+    )
+
+    points = dial.points(SCREEN_RING_RADIUS, angles)
+    projected_center = project(cam, (center,), RECT)[0, :2]
+    radii = np.linalg.norm(points[:, :2] - projected_center, axis=1)
+
+    assert radii == pytest.approx(
+        np.full(len(angles), SCREEN_RING_RADIUS * SIZE_PT * 1.5),
+        abs=1e-6,
+    )
+
+
+@pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
+def test_screen_rotation_overlay_reference_ring_does_not_change_on_press(
+    orthographic: bool,
+) -> None:
+    cam = camera(orthographic=orthographic).with_aspect(0.75)
+    center = np.array((0.35, -0.2, 0.4))
+    view_basis = np.asarray(cam.view_matrix())[:3, :3].T
+    gizmo = ObjectGizmo("rotate")
+    gizmo.set_style("3d")
+    gizmo._visible = True
+    gizmo._using = True
+    gizmo._active = GizmoHandle.ROTATE_SCREEN
+    gizmo._start_pos[:] = center
+    gizmo._axis[:] = -cam.forward()
+    gizmo._rotation_start_vec[:] = view_basis[:, 0]
+    overlay = RecordingDraw2D()
+
+    gizmo.draw_overlay(cam, RECT, overlay, style_scale=1.0)
+
+    reference = next(
+        args[0]
+        for name, args, kwargs in overlay.calls
+        if name == "polyline" and kwargs.get("closed") is True
+    )
+    projected_center = project(cam, (center,), RECT)[0, :2]
+    radii = np.linalg.norm(np.asarray(reference)[:, :2] - projected_center, axis=1)
+    assert radii == pytest.approx(
+        np.full(len(radii), SCREEN_RING_RADIUS * SIZE_PT),
+        abs=1e-6,
+    )
 
 
 def test_screen_translation_reports_all_xyz_components() -> None:

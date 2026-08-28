@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -50,6 +51,7 @@ class PanelContext:
     set_language: Any = None
     set_precise_input_memory: Any = None
     font_report: Any = None
+    output: Any = None
 
     def submit(self, command: Any) -> Any:
         result = self.session.submit(command)
@@ -57,10 +59,16 @@ class PanelContext:
             self.status = result.message
         return result
 
-    def report(self, message: str) -> None:
+    def report(
+        self,
+        message: str,
+        *,
+        level: str = "warning",
+        duration: float | None = 5.0,
+    ) -> None:
         """Keep a panel diagnostic visible in the shared status channel."""
         self.status = str(message)
-        self.session.report_message(self.status)
+        self.session.report_message(self.status, level=level, duration=duration)
 
     def tr(self, value: str) -> str:
         return self.translate(value) if self.translate is not None else value
@@ -75,6 +83,8 @@ class Panel:
     aliases: tuple[str, ...] = ()
     standalone: bool = False
     modal: bool = False
+    closable: bool = True
+    dock_with: str = ""
     initial_size: tuple[float, float] = (0.0, 0.0)
 
     def __init__(self) -> None:
@@ -254,13 +264,24 @@ class PanelSet:
                     imgui.ImVec2(0.5, 0.5),
                 )
                 flags = imgui.WindowFlags_.no_docking.value
-            expanded, keep_open = imgui.begin(title, True, flags)
+            elif p.dock_with:
+                self._dock_with_neighbor(p.dock_with)
+            expanded, keep_open = imgui.begin(title, True if p.closable else None, flags)
             if expanded:
                 p.draw(ctx)
             p.finish_frame(ctx)
             imgui.end()
             if keep_open is not None and not keep_open:
                 p.open = False
+
+    @staticmethod
+    def _dock_with_neighbor(name: str) -> None:
+        """Place a newly introduced panel beside an established saved-layout tab."""
+
+        with suppress(AttributeError, TypeError):
+            target = imgui.internal.find_window_by_name(name)
+            if target is not None and target.dock_node is not None:
+                imgui.set_next_window_dock_id(target.dock_node.id, imgui.Cond_.first_use_ever)
 
     @staticmethod
     def _draw_modal(panel: Panel, ctx: PanelContext, title: str) -> None:
@@ -345,6 +366,7 @@ def default_panels() -> list[Panel]:
     from .info import InfoPanel
     from .inspector import InspectorPanel
     from .joints import JointsPanel
+    from .output import OutputPanel
     from .plot import PlotPanel
     from .sensors import SensorsPanel
     from .settings import SettingsPanel
@@ -358,6 +380,7 @@ def default_panels() -> list[Panel]:
         CameraPanel(),
         PlotPanel(),
         StatsPanel(),
+        OutputPanel(),
         SettingsPanel(),
         SensorsPanel(),
         HelpPanel(),

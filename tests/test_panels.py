@@ -17,6 +17,7 @@ from forge_viewer.adapters.base import (
 )
 from forge_viewer.types import MeshShape
 from forge_viewer.ui.localization import Language, Localizer, parse_language
+from forge_viewer.ui.messages import OutputBuffer
 from forge_viewer.ui.panels import (
     Panel,
     PanelContext,
@@ -54,6 +55,7 @@ EXPECTED_PANELS = {
     "Camera",
     "Plot",
     "Stats",
+    "Output",
     "Settings",
     "Sensors",
     "Help",
@@ -76,7 +78,7 @@ def test_panel_diagnostics_are_published_to_the_persistent_session_status():
         def __init__(self):
             self.last_message = ""
 
-        def report_message(self, message: str) -> None:
+        def report_message(self, message: str, **_options) -> None:
             self.last_message = message
 
     session = Messages()
@@ -85,6 +87,27 @@ def test_panel_diagnostics_are_published_to_the_persistent_session_status():
 
     assert ctx.status == "snapshot state is incompatible"
     assert session.last_message == "snapshot state is incompatible"
+
+
+def test_output_buffer_separates_history_from_transient_status(monkeypatch):
+    import forge_viewer.ui.messages as messages
+
+    now = 100.0
+    monkeypatch.setattr(messages.time, "monotonic", lambda: now)
+    output = OutputBuffer(capacity=2)
+    output.write("runtime detail", level="debug", timestamp="10:00:00")
+    status = output.publish("saved scene", level="success", duration=5.0)
+
+    assert status is not None
+    assert [entry.text for entry in output.entries()] == ["runtime detail", "saved scene"]
+    assert output.active_status(now + 4.9) == status
+    assert output.active_status(now + 5.0) is None
+    assert "[DEBUG] runtime detail" in output.copy_text()
+
+
+def test_default_workspace_panels_do_not_expose_accidental_close_buttons(panels: PanelSet):
+    fixed = {"Control", "Hierarchy", "Inspector", "Joints", "Camera", "Stats", "Output"}
+    assert all(not panels.get(name).closable for name in fixed)
 
 
 def test_large_editor_lists_are_bounded_and_large_hierarchies_start_closed():

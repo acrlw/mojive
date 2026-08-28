@@ -401,6 +401,22 @@ def test_static_session_has_pose_editing_but_no_fake_playback():
     assert np.allclose(scene.frame.geom_xpos[0], 1.0)
 
 
+def test_session_messages_expose_level_duration_and_revision():
+    session = Session(StaticSceneAdapter(Scene()))
+    revision = session.message_revision
+
+    result = session.submit(cmd.Play())
+
+    assert not result.ok
+    assert session.message_revision == revision + 1
+    assert session.last_message_level == "error"
+    assert session.last_message_duration == 10.0
+    session.report_message("saved", level="success", duration=None)
+    assert session.message_revision == revision + 2
+    assert session.last_message_level == "success"
+    assert session.last_message_duration is None
+
+
 def test_visibility_edits_reach_the_render_source():
     scene = Scene()
     obj = scene.box(name="visible")
