@@ -609,6 +609,56 @@ class ImportModelGeometryResource(Command):
 
 
 @dataclass(frozen=True)
+class ImportModelAsset(Command):
+    """Import one file-backed model asset without assigning it."""
+
+    model_id: int
+    asset_type: str
+    path: Path
+    name: str
+    fields: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class RenameModelAsset(Command):
+    """Rename one model asset and repair its local references."""
+
+    model_id: int
+    asset_type: str
+    name: str
+    new_name: str
+
+
+@dataclass(frozen=True)
+class DuplicateModelAsset(Command):
+    """Duplicate one model asset under a new name."""
+
+    model_id: int
+    asset_type: str
+    name: str
+    new_name: str
+
+
+@dataclass(frozen=True)
+class ReplaceModelAssetFile(Command):
+    """Replace one file-backed model asset source."""
+
+    model_id: int
+    asset_type: str
+    name: str
+    path: Path
+
+
+@dataclass(frozen=True)
+class RemoveModelAsset(Command):
+    """Remove one unreferenced model asset."""
+
+    model_id: int
+    asset_type: str
+    name: str
+
+
+@dataclass(frozen=True)
 class SetBodyProperties(Command):
     """Set inertial and dynamic properties for one model body."""
 

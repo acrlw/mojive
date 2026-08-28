@@ -28,6 +28,8 @@ class PanelContext:
     request_rename: Any = None
     request_texture_import: Any = None
     request_geometry_resource_import: Any = None
+    request_model_asset_import: Any = None
+    request_model_asset_replace: Any = None
 
     theme: Theme = THEME
     gizmo: Any = None
@@ -251,7 +253,12 @@ class PanelSet:
             if p.modal:
                 self._draw_modal(p, ctx, title)
                 continue
-            expanded, keep_open = self._begin_panel_window(p, title, ctx.style_scale)
+            expanded, keep_open = self._begin_panel_window(
+                p,
+                title,
+                ctx.style_scale,
+                self._translated_panel_title(ctx.tr, p.dock_with),
+            )
             if expanded:
                 p.draw(ctx)
             p.finish_frame(ctx)
@@ -267,12 +274,26 @@ class PanelSet:
                 continue
             translated = translate(panel.name)
             title = panel.name if translated == panel.name else f"{translated}###{panel.name}"
-            _expanded, keep_open = self._begin_panel_window(panel, title, style_scale)
+            _expanded, keep_open = self._begin_panel_window(
+                panel,
+                title,
+                style_scale,
+                self._translated_panel_title(translate, panel.dock_with),
+            )
             imgui.end()
             if keep_open is not None and not keep_open:
                 panel.open = False
 
-    def _begin_panel_window(self, panel: Panel, title: str, style_scale: float):
+    @staticmethod
+    def _translated_panel_title(translate, name: str) -> str:
+        if not name:
+            return ""
+        translated = translate(name)
+        return name if translated == name else f"{translated}###{name}"
+
+    def _begin_panel_window(
+        self, panel: Panel, title: str, style_scale: float, dock_neighbor_title: str = ""
+    ):
         flags = 0
         if panel.standalone:
             viewport = imgui.get_main_viewport()
@@ -289,15 +310,17 @@ class PanelSet:
             )
             flags = imgui.WindowFlags_.no_docking.value
         elif panel.dock_with:
-            self._dock_with_neighbor(panel.dock_with)
+            self._dock_with_neighbor(panel.dock_with, dock_neighbor_title)
         return imgui.begin(title, True if panel.closable else None, flags)
 
     @staticmethod
-    def _dock_with_neighbor(name: str) -> None:
+    def _dock_with_neighbor(name: str, translated_title: str = "") -> None:
         """Place a newly introduced panel beside an established saved-layout tab."""
 
         with suppress(AttributeError, TypeError):
-            target = imgui.internal.find_window_by_name(name)
+            target = imgui.internal.find_window_by_name(translated_title or name)
+            if target is None and translated_title != name:
+                target = imgui.internal.find_window_by_name(name)
             if target is not None and target.dock_node is not None:
                 imgui.set_next_window_dock_id(target.dock_node.id, imgui.Cond_.first_use_ever)
 
@@ -377,6 +400,7 @@ def validate_panels(panels: list[Panel]) -> list[str]:
 
 
 def default_panels() -> list[Panel]:
+    from .assets import AssetsPanel
     from .camera import CameraPanel
     from .control import ControlPanel
     from .help import HelpPanel
@@ -393,6 +417,7 @@ def default_panels() -> list[Panel]:
     return [
         ControlPanel(),
         HierarchyPanel(),
+        AssetsPanel(),
         InspectorPanel(),
         JointsPanel(),
         CameraPanel(),

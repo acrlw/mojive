@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from forge_viewer.adapters.base import (
+    ModelAssetInfo,
     ModelComponentField,
     ModelComponentPathItem,
     NodeType,
@@ -27,6 +28,7 @@ from forge_viewer.ui.panels import (
     slider_gesture,
     validate_panels,
 )
+from forge_viewer.ui.panels.assets import filter_assets, unique_asset_name
 from forge_viewer.ui.panels.camera import camera_snapshot, qpos_snapshot, reproduction_snapshot
 from forge_viewer.ui.panels.hierarchy import HierarchyPanel, hierarchy_open_depth
 from forge_viewer.ui.panels.inspector import (
@@ -51,6 +53,7 @@ from forge_viewer.ui.window import ResizeLatch
 EXPECTED_PANELS = {
     "Control",
     "Hierarchy",
+    "Assets",
     "Inspector",
     "Joints",
     "Camera",
@@ -72,6 +75,19 @@ def panels() -> PanelSet:
 def test_registered_panels(panels: PanelSet):
 
     assert {p.name for p in panels} == EXPECTED_PANELS
+
+
+def test_asset_panel_filters_cached_inventory_and_generates_unique_names():
+    assets = (
+        ModelAssetInfo(0, "hfield", "terrain", 0, "/tmp/terrain.png"),
+        ModelAssetInfo(0, "hfield", "terrain2", 1, "/tmp/terrain2.png"),
+        ModelAssetInfo(0, "mesh", "robot", 0, "/tmp/robot.obj"),
+    )
+
+    assert filter_assets(assets, "hfield", "terrain") == assets[:2]
+    assert filter_assets(assets, "all", "robot.obj") == (assets[2],)
+    assert unique_asset_name("terrain", assets, "hfield") == "terrain3"
+    assert unique_asset_name("terrain", assets, "mesh") == "terrain"
 
 
 def test_panel_diagnostics_are_published_to_the_persistent_session_status():

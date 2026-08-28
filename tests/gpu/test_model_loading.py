@@ -14,7 +14,11 @@ pytestmark = pytest.mark.gpu
 pytest.importorskip("glfw")
 pytest.importorskip("mujoco")
 
-from forge_viewer.adapters.base import GeometryShapeProperties, NodeType  # noqa: E402
+from forge_viewer.adapters.base import (  # noqa: E402
+    GeometryShapeProperties,
+    ModelAssetInfo,
+    NodeType,
+)
 from forge_viewer.assets import resolve  # noqa: E402
 from forge_viewer.commands import AddModelComponent, SelectNode  # noqa: E402
 from forge_viewer.composition import build, build_editor, build_scene  # noqa: E402
@@ -240,6 +244,62 @@ def test_geometry_resource_dialog_imports_and_assigns_a_unique_mesh(viewer, monk
         12,
         "mesh",
         "part2",
+    )
+
+
+def test_model_asset_dialog_imports_standalone_and_replaces_by_name(viewer, monkeypatch, tmp_path):
+    from imgui_bundle import portable_file_dialogs
+
+    import forge_viewer.commands as cmd
+
+    path = tmp_path / "terrain.png"
+    path.write_bytes(b"dialog only")
+    opened = []
+
+    class Dialog:
+        def ready(self, _timeout):
+            return True
+
+        def result(self):
+            return str(path)
+
+    def open_file(title, default_path, filters):
+        opened.append((title, default_path, filters))
+        return Dialog()
+
+    submitted = []
+    monkeypatch.setattr(portable_file_dialogs, "open_file", open_file)
+    monkeypatch.setattr(
+        viewer.session,
+        "model_assets",
+        lambda model_id: (ModelAssetInfo(model_id, "hfield", "terrain", 0),),
+    )
+    monkeypatch.setattr(
+        viewer.session,
+        "submit",
+        lambda command: submitted.append(command) or cmd.CommandResult.good(""),
+    )
+
+    fields = (("size", "2 3 0.4 0.2"),)
+    viewer.app._open_model_asset_import_dialog(4, "hfield", fields)
+    viewer.app._poll_model_asset_dialog()
+    assert opened[-1][0] == "Import PNG height field"
+    assert opened[-1][2] == IMAGE_FILTERS
+    assert isinstance(submitted[-1], cmd.ImportModelAsset)
+    assert (submitted[-1].model_id, submitted[-1].name, submitted[-1].fields) == (
+        4,
+        "terrain2",
+        fields,
+    )
+
+    viewer.app._open_model_asset_replace_dialog(4, "hfield", "terrain")
+    viewer.app._poll_model_asset_dialog()
+    assert opened[-1][0] == "Replace PNG height field"
+    assert isinstance(submitted[-1], cmd.ReplaceModelAssetFile)
+    assert (submitted[-1].model_id, submitted[-1].name, submitted[-1].path) == (
+        4,
+        "terrain",
+        path,
     )
 
 

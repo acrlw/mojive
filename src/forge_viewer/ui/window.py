@@ -437,7 +437,7 @@ class Window:
             )
             self._build_default_layout()
 
-    _LAYOUT_LEFT = ("Hierarchy", "Inspector")
+    _LAYOUT_LEFT = ("Hierarchy", "Assets", "Inspector")
     _LAYOUT_RIGHT = ("Control", "Joints", "Camera", "Sensors")
     _LAYOUT_BOTTOM = ("Stats", "Output", "Plot", "Help", "Info")
 

@@ -8,6 +8,7 @@ import shutil
 import warnings
 import xml.etree.ElementTree as ET
 from colorsys import hsv_to_rgb
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from html import escape
 from itertools import pairwise
@@ -63,6 +64,7 @@ from .base import (
     JointVisualType,
     KeyframeInfo,
     KeyframeProperties,
+    ModelAssetInfo,
     ModelComponentField,
     ModelComponentInfo,
     ModelComponentPathItem,
@@ -203,6 +205,14 @@ _ASSET_PROPERTY_FIELDS = {
         for field in _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "asset", "hfield"), ())
         if field != "elevation"
     ),
+}
+_MODEL_ASSET_TYPES = ("material", "texture", "mesh", "hfield", "skin", "model")
+_MODEL_ASSET_REFERENCE_FIELDS = {
+    "material": ("material",),
+    "texture": ("texture",),
+    "mesh": ("mesh",),
+    "hfield": ("hfield",),
+    "model": ("model",),
 }
 _MODEL_PROPERTY_CHOICES = {
     ("global:compiler", "angle"): ("", "degree", "radian"),
@@ -915,6 +925,49 @@ def _model_property_fields(
     )
 
 
+def _model_asset_references(
+    root: ET.Element, asset_type: str, name: str, target: ET.Element
+) -> tuple[str, ...]:
+    """Return stable human-readable references to one model-local asset."""
+
+    reference_fields = _MODEL_ASSET_REFERENCE_FIELDS.get(asset_type, ())
+    if not reference_fields or not name:
+        return ()
+    references: list[str] = []
+    tag_indices: dict[str, int] = {}
+    for element in root.iter():
+        tag_indices[element.tag] = tag_indices.get(element.tag, 0) + 1
+        if element is target:
+            continue
+        if not any(element.attrib.get(field) == name for field in reference_fields):
+            continue
+        element_name = str(element.attrib.get("name", "")).strip()
+        label = (
+            f"{element.tag} {element_name}"
+            if element_name
+            else f"{element.tag} #{tag_indices[element.tag]}"
+        )
+        references.append(label)
+    return tuple(references)
+
+
+def _model_asset_element(
+    root: ET.Element, asset_type: str, name: str
+) -> tuple[ET.Element | None, ET.Element | None]:
+    asset = root.find("asset")
+    if asset is None:
+        return None, None
+    target = next(
+        (
+            element
+            for element in asset.findall(asset_type)
+            if str(element.attrib.get("name", "")).strip() == name
+        ),
+        None,
+    )
+    return asset, target
+
+
 def _find_or_create_xml_path(root: ET.Element, path: tuple[str, ...]) -> ET.Element:
     element = root
     for tag in path:
@@ -928,6 +981,10 @@ def _find_or_create_xml_path(root: ET.Element, path: tuple[str, ...]) -> ET.Elem
 def _serialize_component_xml(root: ET.Element) -> str:
     ET.indent(root, space="  ")
     return ET.tostring(root, encoding="unicode")
+
+
+def _format_mjcf_values(values) -> str:
+    return " ".join(f"{float(value):.17g}" for value in values)
 
 
 def _grid_node(start: int, ny: int, nz: int, i: int, j: int, k: int) -> int:
@@ -2360,6 +2417,178 @@ class MuJoCoAdapter(SceneAdapterBase):
                     )
                 )
         return tuple(groups)
+
+    def model_assets(self, model_id: int) -> tuple[ModelAssetInfo, ...]:
+        spec = self._spec_for_model(model_id)
+        if spec is None:
+            return ()
+        root, _xml = _component_xml(spec)
+        asset = root.find("asset")
+        if asset is None:
+            return ()
+        items: list[ModelAssetInfo] = []
+        for asset_type in _MODEL_ASSET_TYPES:
+            for index, element in enumerate(asset.findall(asset_type)):
+                attributes = dict(element.attrib)
+                name = str(attributes.get("name", "")).strip()
+                if not name:
+                    continue
+                fields = tuple(
+                    ModelComponentField(field, value)
+                    for field, value in attributes.items()
+                    if field not in {"name", "file"}
+                )
+                items.append(
+                    ModelAssetInfo(
+                        model_id=int(model_id),
+                        type=asset_type,
+                        name=name,
+                        index=index,
+                        file=str(attributes.get("file", "")),
+                        fields=fields,
+                        references=_model_asset_references(root, asset_type, name, element),
+                    )
+                )
+        return tuple(items)
+
+    def import_model_asset(
+        self,
+        model_id: int,
+        asset_type: str,
+        path: Path,
+        name: str,
+        fields: tuple[tuple[str, str], ...] = (),
+    ) -> bool:
+        spec = self._spec_for_model(model_id)
+        source = Path(path).expanduser().resolve()
+        kind = str(asset_type).strip().lower()
+        value = str(name).strip()
+        if spec is None or not source.is_file() or kind not in ("mesh", "hfield") or not value:
+            return False
+        root, _xml = _component_xml(spec)
+        asset, existing = _model_asset_element(root, kind, value)
+        if existing is not None:
+            return False
+        if asset is None:
+            asset = ET.Element("asset")
+            children = tuple(root)
+            insertion = next(
+                (
+                    index
+                    for index, child in enumerate(children)
+                    if child.tag
+                    in {
+                        "worldbody",
+                        "deformable",
+                        "contact",
+                        "equality",
+                        "tendon",
+                        "actuator",
+                        "sensor",
+                        "keyframe",
+                    }
+                ),
+                len(children),
+            )
+            root.insert(insertion, asset)
+        allowed = set(_MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "asset", kind), ()))
+        attributes = {"name": value, "file": str(source)}
+        for raw_name, raw_value in fields:
+            field = str(raw_name).strip()
+            field_value = str(raw_value).strip()
+            if not field or field in {"name", "file"} or field not in allowed:
+                raise ValueError(f"Unknown {kind} asset field {field!r}")
+            if field_value:
+                attributes[field] = field_value
+        ET.SubElement(asset, kind, attributes)
+        edited = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        return self._replace_model_spec(model_id, edited)
+
+    def rename_model_asset(self, model_id: int, asset_type: str, name: str, new_name: str) -> bool:
+        spec = self._spec_for_model(model_id)
+        kind = str(asset_type).strip().lower()
+        before_name = str(name).strip()
+        after_name = str(new_name).strip()
+        if spec is None or kind not in _MODEL_ASSET_TYPES or not before_name or not after_name:
+            return False
+        root, _xml = _component_xml(spec)
+        _asset, target = _model_asset_element(root, kind, before_name)
+        _asset, collision = _model_asset_element(root, kind, after_name)
+        if target is None or collision is not None:
+            return False
+        target.set("name", after_name)
+        for element in root.iter():
+            if element is target:
+                continue
+            for field in _MODEL_ASSET_REFERENCE_FIELDS.get(kind, ()):
+                if element.attrib.get(field) == before_name:
+                    element.set(field, after_name)
+        edited = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        return self._replace_model_spec(model_id, edited)
+
+    def duplicate_model_asset(
+        self, model_id: int, asset_type: str, name: str, new_name: str
+    ) -> bool:
+        spec = self._spec_for_model(model_id)
+        kind = str(asset_type).strip().lower()
+        source_name = str(name).strip()
+        duplicate_name = str(new_name).strip()
+        if spec is None or kind not in _MODEL_ASSET_TYPES or not source_name or not duplicate_name:
+            return False
+        root, _xml = _component_xml(spec)
+        asset, target = _model_asset_element(root, kind, source_name)
+        _asset, collision = _model_asset_element(root, kind, duplicate_name)
+        if asset is None or target is None or collision is not None:
+            return False
+        duplicate = deepcopy(target)
+        duplicate.set("name", duplicate_name)
+        children = tuple(asset)
+        asset.insert(children.index(target) + 1, duplicate)
+        edited = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        return self._replace_model_spec(model_id, edited)
+
+    def replace_model_asset_file(
+        self, model_id: int, asset_type: str, name: str, path: Path
+    ) -> bool:
+        spec = self._spec_for_model(model_id)
+        kind = str(asset_type).strip().lower()
+        value = str(name).strip()
+        source = Path(path).expanduser().resolve()
+        if spec is None or kind not in ("mesh", "hfield") or not value or not source.is_file():
+            return False
+        root, _xml = _component_xml(spec)
+        _asset, target = _model_asset_element(root, kind, value)
+        if target is None:
+            return False
+        target.set("file", str(source))
+        target.attrib.pop("content_type", None)
+        if kind == "hfield":
+            target.attrib.pop("nrow", None)
+            target.attrib.pop("ncol", None)
+            target.attrib.pop("elevation", None)
+        else:
+            for field in ("vertex", "normal", "texcoord", "face", "builtin", "params"):
+                target.attrib.pop(field, None)
+        edited = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        return self._replace_model_spec(model_id, edited)
+
+    def remove_model_asset(self, model_id: int, asset_type: str, name: str) -> bool:
+        spec = self._spec_for_model(model_id)
+        kind = str(asset_type).strip().lower()
+        value = str(name).strip()
+        if spec is None or kind not in _MODEL_ASSET_TYPES or not value:
+            return False
+        root, _xml = _component_xml(spec)
+        asset, target = _model_asset_element(root, kind, value)
+        if asset is None or target is None:
+            return False
+        if _model_asset_references(root, kind, value, target):
+            return False
+        asset.remove(target)
+        if not len(asset):
+            root.remove(asset)
+        edited = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        return self._replace_model_spec(model_id, edited)
 
     def set_model_property_groups(
         self,
@@ -5936,17 +6165,13 @@ class MuJoCoAdapter(SceneAdapterBase):
         resource = str(resource_name).strip()
         if kind not in types:
             return False
-        working = source_spec.copy()
-        element = working.geom(name)
+        element = source_spec.geom(name)
         if element is None:
             return False
-        if kind == "mesh" and working.mesh(resource) is None:
+        if kind == "mesh" and source_spec.mesh(resource) is None:
             return False
-        if kind == "hfield" and working.hfield(resource) is None:
+        if kind == "hfield" and source_spec.hfield(resource) is None:
             return False
-        element.type = types[kind]
-        element.meshname = resource if kind == "mesh" else ""
-        element.hfieldname = resource if kind == "hfield" else ""
         size = np.asarray(element.size, np.float64).reshape(3).copy()
         defaults = {
             "plane": np.array((1.0, 1.0, 0.1)),
@@ -5968,10 +6193,30 @@ class MuJoCoAdapter(SceneAdapterBase):
             not np.isfinite(size[index]) or size[index] <= 0.0 for index in required
         ):
             size = defaults[kind]
-        element.size = size
+        root, _xml = _component_xml(source_spec)
+        target = next(
+            (item for item in root.iter("geom") if str(item.attrib.get("name", "")) == name),
+            None,
+        )
+        if target is None:
+            return False
+        target.set("type", kind)
+        if kind == "mesh":
+            target.set("mesh", resource)
+        else:
+            target.attrib.pop("mesh", None)
+        if kind == "hfield":
+            target.set("hfield", resource)
+        else:
+            target.attrib.pop("hfield", None)
+        if required:
+            target.set("size", _format_mjcf_values(size))
+        else:
+            target.attrib.pop("size", None)
         if kind not in ("capsule", "cylinder"):
-            element.fromto = [np.nan, 0.0, 0.0, 0.0, 0.0, 0.0]
-        return self._replace_model_spec(model_id, working)
+            target.attrib.pop("fromto", None)
+        edited = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        return self._replace_model_spec(model_id, edited)
 
     def import_model_geometry_resource(
         self, node_id: int, resource_type: str, path: Path, name: str

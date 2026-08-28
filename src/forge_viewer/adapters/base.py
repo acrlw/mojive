@@ -185,6 +185,19 @@ class ModelPropertyGroup:
 
 
 @dataclass(frozen=True)
+class ModelAssetInfo:
+    """One model-local MJCF asset and the elements that reference it."""
+
+    model_id: int
+    type: str
+    name: str
+    index: int
+    file: str = ""
+    fields: tuple[ModelComponentField, ...] = ()
+    references: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class GeometryProperties:
     """Editable MuJoCo contact parameters for one model geometry."""
 
@@ -883,6 +896,41 @@ class SceneAdapterBase:
         """Return schema-driven global, default-class, and asset properties."""
         return ()
 
+    def model_assets(self, model_id: int) -> tuple[ModelAssetInfo, ...]:
+        """Return the model-local asset inventory and reference summary."""
+        return ()
+
+    def import_model_asset(
+        self,
+        model_id: int,
+        asset_type: str,
+        path: Path,
+        name: str,
+        fields: tuple[tuple[str, str], ...] = (),
+    ) -> bool:
+        """Import one file-backed model asset without binding it to an element."""
+        return False
+
+    def rename_model_asset(self, model_id: int, asset_type: str, name: str, new_name: str) -> bool:
+        """Rename one asset and repair its model-local references."""
+        return False
+
+    def duplicate_model_asset(
+        self, model_id: int, asset_type: str, name: str, new_name: str
+    ) -> bool:
+        """Duplicate one asset while keeping the same external source."""
+        return False
+
+    def replace_model_asset_file(
+        self, model_id: int, asset_type: str, name: str, path: Path
+    ) -> bool:
+        """Replace the external source of one file-backed model asset."""
+        return False
+
+    def remove_model_asset(self, model_id: int, asset_type: str, name: str) -> bool:
+        """Remove one unreferenced model asset."""
+        return False
+
     def set_model_property_groups(
         self,
         model_id: int,
@@ -1286,6 +1334,25 @@ class SceneAdapter(Protocol):
     ) -> bool: ...
     def remove_model_component(self, model_id: int, category: str, component_id: int) -> bool: ...
     def model_property_groups(self, model_id: int) -> tuple[ModelPropertyGroup, ...]: ...
+    def model_assets(self, model_id: int) -> tuple[ModelAssetInfo, ...]: ...
+    def import_model_asset(
+        self,
+        model_id: int,
+        asset_type: str,
+        path: Path,
+        name: str,
+        fields: tuple[tuple[str, str], ...] = (),
+    ) -> bool: ...
+    def rename_model_asset(
+        self, model_id: int, asset_type: str, name: str, new_name: str
+    ) -> bool: ...
+    def duplicate_model_asset(
+        self, model_id: int, asset_type: str, name: str, new_name: str
+    ) -> bool: ...
+    def replace_model_asset_file(
+        self, model_id: int, asset_type: str, name: str, path: Path
+    ) -> bool: ...
+    def remove_model_asset(self, model_id: int, asset_type: str, name: str) -> bool: ...
     def set_model_property_groups(
         self,
         model_id: int,

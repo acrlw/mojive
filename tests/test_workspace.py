@@ -1678,6 +1678,133 @@ f 2 3 4
     assert restored is not None and restored.type == "box"
 
 
+def test_model_height_field_asset_lifecycle_is_standalone_safe_and_atomic(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from PIL import Image
+
+    path = tmp_path / "asset-lifecycle.xml"
+    path.write_text(
+        """<mujoco>
+  <worldbody><geom name="resource_geom" type="box" size="0.2 0.3 0.4"/></worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    first_path = tmp_path / "terrain.png"
+    second_path = tmp_path / "terrain-replacement.png"
+    Image.fromarray(np.arange(16, dtype=np.uint8).reshape(4, 4)).save(first_path)
+    Image.fromarray(np.arange(25, dtype=np.uint8).reshape(5, 5)).save(second_path)
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    geom = next(node for node in session.nodes if node.name == "resource_geom")
+
+    compile_count = 0
+    compile_model = document.primary._compile_composed_model
+
+    def counted_compile():
+        nonlocal compile_count
+        compile_count += 1
+        return compile_model()
+
+    monkeypatch.setattr(document.primary, "_compile_composed_model", counted_compile)
+    result = session.submit(
+        cmd.ImportModelAsset(
+            0,
+            "hfield",
+            first_path,
+            "terrain",
+            (("size", "2 3 0.4 0.2"),),
+        )
+    )
+    assert result.ok, result.message
+    assert compile_count == 1
+    asset = session.model_assets(0)[0]
+    assert (asset.type, asset.name, asset.references) == ("hfield", "terrain", ())
+    assert {field.name: field.value for field in asset.fields}["size"] == "2 3 0.4 0.2"
+    shape = session.geometry_shape_properties(geom.node_id)
+    assert shape is not None and shape.type == "box"
+    assert shape.height_field_names == ("terrain",)
+
+    result = session.submit(cmd.SetGeometryShape(geom.node_id, "hfield", "terrain"))
+    assert result.ok, result.message
+    assert compile_count == 2
+    asset = session.model_assets(0)[0]
+    assert asset.references == ("geom resource_geom",)
+
+    result = session.submit(cmd.RenameModelAsset(0, "hfield", "terrain", "terrain_main"))
+    assert result.ok, result.message
+    assert compile_count == 3
+    shape = session.geometry_shape_properties(geom.node_id)
+    assert shape is not None and shape.resource_name == "terrain_main"
+    blocked = session.submit(cmd.RemoveModelAsset(0, "hfield", "terrain_main"))
+    assert not blocked.ok
+    assert "used by 1" in blocked.message
+    assert compile_count == 3
+
+    assert session.submit(cmd.SetGeometryShape(geom.node_id, "box"))
+    assert compile_count == 4
+    result = session.submit(cmd.ReplaceModelAssetFile(0, "hfield", "terrain_main", second_path))
+    assert result.ok, result.message
+    assert compile_count == 5
+    assert Path(session.model_assets(0)[0].file) == second_path
+
+    result = session.submit(cmd.DuplicateModelAsset(0, "hfield", "terrain_main", "terrain_copy"))
+    assert result.ok, result.message
+    assert compile_count == 6
+    assert {asset.name for asset in session.model_assets(0)} == {
+        "terrain_main",
+        "terrain_copy",
+    }
+    assert session.submit(cmd.RemoveModelAsset(0, "hfield", "terrain_copy"))
+    assert session.submit(cmd.RemoveModelAsset(0, "hfield", "terrain_main"))
+    assert compile_count == 8
+    assert session.model_assets(0) == ()
+    assert session.submit(cmd.Undo())
+    assert {asset.name for asset in session.model_assets(0)} == {"terrain_main"}
+
+
+def test_model_asset_reference_graph_repairs_material_and_texture_names() -> None:
+    document = workspace()
+    assert document.set_scene_model_xml(
+        0,
+        """<mujoco>
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" width="8" height="8"/>
+    <material name="surface" texture="grid"/>
+    <material name="unused" rgba="0.2 0.3 0.4 1"/>
+  </asset>
+  <worldbody><geom name="floor" type="plane" size="1 1 0.1" material="surface"/></worldbody>
+</mujoco>""",
+    )
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    assets = {(asset.type, asset.name): asset for asset in session.model_assets(0)}
+    assert assets[("texture", "grid")].references == ("material surface",)
+    assert assets[("material", "surface")].references == ("geom floor",)
+    assert assets[("material", "unused")].references == ()
+
+    result = session.submit(cmd.RenameModelAsset(0, "texture", "grid", "grid_main"))
+    assert result.ok, result.message
+    result = session.submit(cmd.RenameModelAsset(0, "material", "surface", "surface_main"))
+    assert result.ok, result.message
+    xml = document.scene_model_xml(0)
+    assert xml is not None
+    assert 'texture="grid_main"' in xml
+    assert 'material="surface_main"' in xml
+
+    blocked = session.submit(cmd.RemoveModelAsset(0, "material", "surface_main"))
+    assert not blocked.ok
+    assert "used by 1" in blocked.message
+    result = session.submit(cmd.DuplicateModelAsset(0, "material", "surface_main", "surface_copy"))
+    assert result.ok, result.message
+    copied = next(asset for asset in session.model_assets(0) if asset.name == "surface_copy")
+    assert copied.references == ()
+    assert session.submit(cmd.RemoveModelAsset(0, "material", "surface_copy"))
+    assert session.submit(cmd.RemoveModelAsset(0, "material", "unused"))
+
+
 def test_body_inertia_properties_recompile_once_and_restore_auto_derivation(
     tmp_path: Path, monkeypatch
 ) -> None:

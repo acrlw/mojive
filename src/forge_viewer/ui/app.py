@@ -261,6 +261,14 @@ class ViewerApp:
         self._texture_import_target = (-1, -1, "2d")
         self._geometry_resource_dialog: Any | None = None
         self._geometry_resource_import_target = (-1, "")
+        self._model_asset_dialog: Any | None = None
+        self._model_asset_dialog_target: tuple[str, int, str, str, tuple[tuple[str, str], ...]] = (
+            "",
+            -1,
+            "",
+            "",
+            (),
+        )
         self._resource_repair_dialog: Any | None = None
         self._resource_repair_dialog_action = ""
         self._resource_repair_model_index = -1
@@ -732,6 +740,83 @@ class ViewerApp:
         result = self.session.submit(
             cmd.ImportModelGeometryResource(node_id, resource_type, path, name)
         )
+        if not result.ok:
+            self._report_model_error(result.message)
+
+    def _open_model_asset_import_dialog(
+        self,
+        model_id: int,
+        asset_type: str,
+        fields: tuple[tuple[str, str], ...] = (),
+    ) -> None:
+        self._open_model_asset_dialog("import", model_id, asset_type, "", fields)
+
+    def _open_model_asset_replace_dialog(self, model_id: int, asset_type: str, name: str) -> None:
+        self._open_model_asset_dialog("replace", model_id, asset_type, name, ())
+
+    def _open_model_asset_dialog(
+        self,
+        action: str,
+        model_id: int,
+        asset_type: str,
+        name: str,
+        fields: tuple[tuple[str, str], ...],
+    ) -> None:
+        if self._model_asset_dialog is not None:
+            return
+        kind = str(asset_type).strip().lower()
+        if kind not in ("mesh", "hfield") or action not in ("import", "replace"):
+            return
+        current = self.session.asset_path
+        default = current.parent if current is not None else Path.cwd()
+        filters = MESH_FILTERS if kind == "mesh" else IMAGE_FILTERS
+        verb = "Import" if action == "import" else "Replace"
+        label = "mesh" if kind == "mesh" else "PNG height field"
+        self._model_asset_dialog = portable_file_dialogs.open_file(
+            f"{verb} {label}", str(default), filters
+        )
+        self._model_asset_dialog_target = (
+            action,
+            int(model_id),
+            kind,
+            str(name),
+            tuple(fields),
+        )
+
+    def _poll_model_asset_dialog(self) -> None:
+        dialog = self._model_asset_dialog
+        if dialog is None or not dialog.ready(0):
+            return
+        self._model_asset_dialog = None
+        action, model_id, asset_type, name, fields = self._model_asset_dialog_target
+        self._model_asset_dialog_target = ("", -1, "", "", ())
+        try:
+            selected = dialog.result()
+        except Exception as exc:
+            self._report_model_error(str(exc))
+            return
+        if isinstance(selected, (list, tuple)):
+            selected = selected[0] if selected else ""
+        if not selected:
+            return
+        path = Path(selected).expanduser().resolve()
+        if action == "replace":
+            result = self.session.submit(
+                cmd.ReplaceModelAssetFile(model_id, asset_type, name, path)
+            )
+        else:
+            base = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem).strip("_.-") or asset_type
+            existing = {
+                item.name for item in self.session.model_assets(model_id) if item.type == asset_type
+            }
+            name = base
+            suffix = 2
+            while name in existing:
+                name = f"{base}{suffix}"
+                suffix += 1
+            result = self.session.submit(
+                cmd.ImportModelAsset(model_id, asset_type, path, name, fields)
+            )
         if not result.ok:
             self._report_model_error(result.message)
 
@@ -1421,6 +1506,7 @@ class ViewerApp:
         self._poll_resource_dialog()
         self._poll_texture_dialog()
         self._poll_geometry_resource_dialog()
+        self._poll_model_asset_dialog()
         self._poll_resource_repair_dialog()
         self._poll_model_drop()
         if self._start_model_load():
@@ -2607,6 +2693,8 @@ class ViewerApp:
             request_rename=self.request_rename,
             request_texture_import=self._open_texture_dialog,
             request_geometry_resource_import=self._open_geometry_resource_dialog,
+            request_model_asset_import=self._open_model_asset_import_dialog,
+            request_model_asset_replace=self._open_model_asset_replace_dialog,
             gizmo=self.gizmo,
             view_cube=self.view_cube,
             perturb=self.perturb,

@@ -64,6 +64,14 @@ The structured Inspector currently covers:
 - detailed mesh and height-field metadata while keeping bulk vertex/face/elevation payloads out of
   text controls.
 
+The **Assets** panel is the model-level inventory; Inspector remains responsible for the asset
+binding on the selected scene element. The first lifecycle slice covers standalone mesh and PNG
+height-field import, height-field physical dimensions, reference reporting, assignment, rename
+with reference repair, duplication, file replacement, safe deletion, Undo/Redo, and portable MJCF
+export. Materials, textures, skins, and attached model assets are visible in the same inventory;
+their specialized create and property controls remain in Inspector while their lifecycle is moved
+over incrementally.
+
 These controls validate values, participate in Undo/Redo, persist in workspace documents, and use
 the remote typed-command boundary where the adapter exposes the capability. Pause a simulation
 before editing model properties.
@@ -76,6 +84,13 @@ it is not a source-preserving text editor. `MjSpec` expands include structure an
 when it serializes the model. Keep editing the original external files when their include layout,
 comments, or formatting must remain intact. The source popup compiles before applying changes and
 keeps the last good model when validation fails.
+
+Core coverage treats `mj_printSchema()` as the linked-version attribute inventory, not as a reason
+to reject plugin-bearing files. Explicit plugin branches are reported separately and excluded only
+from the structured-authoring completion gate. Loading and runtime behavior still follow the
+plugins registered with MuJoCo. Source/meta elements that are not completely represented by
+`mj_printSchema()`, including include/frame/replicate behavior, are tracked separately so a clean
+schema report cannot be mistaken for source-preserving MJCF coverage.
 
 File-less MuJoCo root edits are stored inline as `root_mjcf` in `.forge.json` workspaces. This
 preserves topology and model-component edits created directly from an empty editor without
@@ -93,6 +108,7 @@ make material-authoring BACKEND=wgpu
 make contact-authoring BACKEND=wgpu
 make body-authoring BACKEND=wgpu
 make resource-authoring BACKEND=wgpu
+make asset-browser BACKEND=wgpu
 make joint-site-authoring BACKEND=wgpu
 make model-component-authoring BACKEND=wgpu
 make keyframe-authoring BACKEND=wgpu

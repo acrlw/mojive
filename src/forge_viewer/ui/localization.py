@@ -55,6 +55,7 @@ _ZH_CN = {
     "Viewport": "视口",
     "Control": "控制",
     "Hierarchy": "层级",
+    "Assets": "资源",
     "Inspector": "检查器",
     "Joints": "关节",
     "Plot": "曲线",

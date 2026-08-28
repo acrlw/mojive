@@ -21,6 +21,7 @@ from .base import (
     GeometryShapeProperties,
     JointAdvancedProperties,
     KeyframeProperties,
+    ModelAssetInfo,
     ModelPropertyGroup,
     NodeType,
     SceneAdapterBase,
@@ -252,6 +253,50 @@ class WorkspaceAdapter(SceneAdapterBase):
 
     def model_property_groups(self, model_id: int) -> tuple[ModelPropertyGroup, ...]:
         return self.primary.model_property_groups(model_id)
+
+    def model_assets(self, model_id: int) -> tuple[ModelAssetInfo, ...]:
+        return self.primary.model_assets(model_id)
+
+    def import_model_asset(
+        self,
+        model_id: int,
+        asset_type: str,
+        path: Path,
+        name: str,
+        fields: tuple[tuple[str, str], ...] = (),
+    ) -> bool:
+        changed = self.primary.import_model_asset(model_id, asset_type, path, name, fields)
+        if changed:
+            self._invalidate()
+        return changed
+
+    def rename_model_asset(self, model_id: int, asset_type: str, name: str, new_name: str) -> bool:
+        changed = self.primary.rename_model_asset(model_id, asset_type, name, new_name)
+        if changed:
+            self._invalidate()
+        return changed
+
+    def duplicate_model_asset(
+        self, model_id: int, asset_type: str, name: str, new_name: str
+    ) -> bool:
+        changed = self.primary.duplicate_model_asset(model_id, asset_type, name, new_name)
+        if changed:
+            self._invalidate()
+        return changed
+
+    def replace_model_asset_file(
+        self, model_id: int, asset_type: str, name: str, path: Path
+    ) -> bool:
+        changed = self.primary.replace_model_asset_file(model_id, asset_type, name, path)
+        if changed:
+            self._invalidate()
+        return changed
+
+    def remove_model_asset(self, model_id: int, asset_type: str, name: str) -> bool:
+        changed = self.primary.remove_model_asset(model_id, asset_type, name)
+        if changed:
+            self._invalidate()
+        return changed
 
     def set_model_property_groups(
         self,

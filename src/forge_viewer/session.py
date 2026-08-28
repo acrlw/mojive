@@ -22,6 +22,7 @@ from .adapters.base import (
     JointInfo,
     KeyframeInfo,
     KeyframeProperties,
+    ModelAssetInfo,
     ModelPropertyGroup,
     NodeType,
     PhysicsState,
@@ -350,6 +351,11 @@ _SCENE_EDIT_COMMANDS = (
     cmd.SetGeometryAdvancedProperties,
     cmd.SetGeometryShape,
     cmd.ImportModelGeometryResource,
+    cmd.ImportModelAsset,
+    cmd.RenameModelAsset,
+    cmd.DuplicateModelAsset,
+    cmd.ReplaceModelAssetFile,
+    cmd.RemoveModelAsset,
     cmd.SetBodyProperties,
     cmd.AddModelMaterial,
     cmd.ImportModelTexture,
@@ -560,6 +566,10 @@ class Session:
     def model_property_groups(self, model_id: int) -> tuple[ModelPropertyGroup, ...]:
         """Return schema-driven model, default-class, and asset properties."""
         return self._adapter.model_property_groups(model_id)
+
+    def model_assets(self, model_id: int) -> tuple[ModelAssetInfo, ...]:
+        """Return model-local assets and their current reference summaries."""
+        return self._adapter.model_assets(model_id)
 
     def model_material_indices(self, model_id: int) -> tuple[int, ...]:
         """Return render material indices owned by one editable model."""
@@ -1951,6 +1961,155 @@ class Session:
                 return CommandResult.bad(f"Geometry resource {name!r} could not be imported")
             self._refresh_structure()
             return CommandResult.good(f"Imported and assigned {resource_type} {name}")
+
+        if isinstance(c, cmd.ImportModelAsset):
+            if not caps.model_assets:
+                return CommandResult.bad(f"{caps.name} does not support model asset editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before importing model assets")
+            asset_type = str(c.asset_type).strip().lower()
+            if asset_type not in ("mesh", "hfield"):
+                return CommandResult.bad("Standalone import currently supports mesh or hfield")
+            path = Path(c.path).expanduser().resolve()
+            allowed_suffixes = (
+                {".stl", ".obj", ".msh", ".ply"} if asset_type == "mesh" else {".png"}
+            )
+            if not path.is_file():
+                return CommandResult.bad(f"Model asset file does not exist: {path}")
+            if path.suffix.lower() not in allowed_suffixes:
+                suffixes = ", ".join(sorted(allowed_suffixes))
+                return CommandResult.bad(f"{asset_type} assets must use one of: {suffixes}")
+            name = str(c.name).strip()
+            if not name:
+                return CommandResult.bad("A model asset name cannot be empty")
+            if any(
+                asset.type == asset_type and asset.name == name
+                for asset in self._adapter.model_assets(c.model_id)
+            ):
+                return CommandResult.bad(f"{asset_type} asset {name!r} already exists")
+            try:
+                changed = self._adapter.import_model_asset(
+                    c.model_id, asset_type, path, name, c.fields
+                )
+            except Exception as exc:
+                return CommandResult.bad(
+                    f"{asset_type} asset {name!r} could not be imported: {exc}"
+                )
+            if not changed:
+                return CommandResult.bad(f"{asset_type} asset {name!r} could not be imported")
+            self._refresh_structure()
+            return CommandResult.good(f"Imported {asset_type} asset {name}")
+
+        if isinstance(c, cmd.RenameModelAsset):
+            if not caps.model_assets:
+                return CommandResult.bad(f"{caps.name} does not support model asset editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before renaming model assets")
+            asset_type = str(c.asset_type).strip().lower()
+            name = str(c.name).strip()
+            new_name = str(c.new_name).strip()
+            if not name or not new_name:
+                return CommandResult.bad("Model asset names cannot be empty")
+            if any(
+                asset.type == asset_type and asset.name == new_name
+                for asset in self._adapter.model_assets(c.model_id)
+            ):
+                return CommandResult.bad(f"{asset_type} asset {new_name!r} already exists")
+            try:
+                changed = self._adapter.rename_model_asset(c.model_id, asset_type, name, new_name)
+            except Exception as exc:
+                return CommandResult.bad(f"{asset_type} asset {name!r} could not be renamed: {exc}")
+            if not changed:
+                return CommandResult.bad(f"{asset_type} asset {name!r} could not be renamed")
+            self._refresh_structure()
+            return CommandResult.good(f"Renamed {asset_type} asset {name} to {new_name}")
+
+        if isinstance(c, cmd.DuplicateModelAsset):
+            if not caps.model_assets:
+                return CommandResult.bad(f"{caps.name} does not support model asset editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before duplicating model assets")
+            asset_type = str(c.asset_type).strip().lower()
+            name = str(c.name).strip()
+            new_name = str(c.new_name).strip()
+            if not name or not new_name:
+                return CommandResult.bad("Model asset names cannot be empty")
+            if any(
+                asset.type == asset_type and asset.name == new_name
+                for asset in self._adapter.model_assets(c.model_id)
+            ):
+                return CommandResult.bad(f"{asset_type} asset {new_name!r} already exists")
+            try:
+                changed = self._adapter.duplicate_model_asset(
+                    c.model_id, asset_type, name, new_name
+                )
+            except Exception as exc:
+                return CommandResult.bad(
+                    f"{asset_type} asset {name!r} could not be duplicated: {exc}"
+                )
+            if not changed:
+                return CommandResult.bad(f"{asset_type} asset {name!r} could not be duplicated")
+            self._refresh_structure()
+            return CommandResult.good(f"Duplicated {asset_type} asset as {new_name}")
+
+        if isinstance(c, cmd.ReplaceModelAssetFile):
+            if not caps.model_assets:
+                return CommandResult.bad(f"{caps.name} does not support model asset editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before replacing model asset files")
+            asset_type = str(c.asset_type).strip().lower()
+            if asset_type not in ("mesh", "hfield"):
+                return CommandResult.bad("File replacement currently supports mesh or hfield")
+            path = Path(c.path).expanduser().resolve()
+            allowed_suffixes = (
+                {".stl", ".obj", ".msh", ".ply"} if asset_type == "mesh" else {".png"}
+            )
+            if not path.is_file():
+                return CommandResult.bad(f"Model asset file does not exist: {path}")
+            if path.suffix.lower() not in allowed_suffixes:
+                suffixes = ", ".join(sorted(allowed_suffixes))
+                return CommandResult.bad(f"{asset_type} assets must use one of: {suffixes}")
+            name = str(c.name).strip()
+            try:
+                changed = self._adapter.replace_model_asset_file(c.model_id, asset_type, name, path)
+            except Exception as exc:
+                return CommandResult.bad(
+                    f"{asset_type} asset {name!r} could not be replaced: {exc}"
+                )
+            if not changed:
+                return CommandResult.bad(f"{asset_type} asset {name!r} could not be replaced")
+            self._refresh_structure()
+            return CommandResult.good(f"Replaced source for {asset_type} asset {name}")
+
+        if isinstance(c, cmd.RemoveModelAsset):
+            if not caps.model_assets:
+                return CommandResult.bad(f"{caps.name} does not support model asset editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before removing model assets")
+            asset_type = str(c.asset_type).strip().lower()
+            name = str(c.name).strip()
+            asset = next(
+                (
+                    item
+                    for item in self._adapter.model_assets(c.model_id)
+                    if item.type == asset_type and item.name == name
+                ),
+                None,
+            )
+            if asset is None:
+                return CommandResult.bad(f"{asset_type} asset {name!r} is unavailable")
+            if asset.references:
+                return CommandResult.bad(
+                    f"{asset_type} asset {name!r} is used by {len(asset.references)} element(s)"
+                )
+            try:
+                changed = self._adapter.remove_model_asset(c.model_id, asset_type, name)
+            except Exception as exc:
+                return CommandResult.bad(f"{asset_type} asset {name!r} could not be removed: {exc}")
+            if not changed:
+                return CommandResult.bad(f"{asset_type} asset {name!r} could not be removed")
+            self._refresh_structure()
+            return CommandResult.good(f"Removed {asset_type} asset {name}")
 
         if isinstance(c, cmd.SetBodyProperties):
             if not caps.model_properties:
