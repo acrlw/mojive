@@ -50,7 +50,16 @@ class ControlPanel(Panel):
         if begin_kv_table("control_kv"):
             labeled("sim time", f"{frame.time:.3f} s")
             labeled("steps", str(frame.step))
-            labeled("state", ("paused" if paused else "running") if caps.simulation else "static")
+            state = (
+                "recording take"
+                if s.state_take_recording
+                else "replaying take"
+                if s.state_take_playing
+                else ("paused" if paused else "running")
+                if caps.simulation
+                else "static"
+            )
+            labeled("state", state)
             labeled(
                 "timestep",
                 f"{s.adapter.timestep() * 1000.0:.2f} ms" if caps.simulation else "—",

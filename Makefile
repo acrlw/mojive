@@ -34,7 +34,7 @@ help:
 		'  make asset-browser     model-local files, materials, and height-field dimensions' \
 		'  make joint-site-authoring advanced joint and site shape/endpoint properties' \
 		'  make model-component-authoring contacts, actuators, sensors, tendons, and equality' \
-		'  make keyframe-authoring snapshot Dope Sheet and exact-state recall' \
+		'  make keyframe-authoring record/replay take and snapshot Dope Sheet' \
 		'  make batch-editing      Ctrl/Cmd multi-select and one-rebuild topology deletion' \
 		'  make gizmo-gallery     enlarged 2D/3D gizmo reference images' \
 		'  make hidpi-gallery     gizmo references at explicit 200% UI scale' \
@@ -451,7 +451,7 @@ joint-site-authoring:
 model-component-authoring:
 	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
 
-## Model-local snapshot Dope Sheet, retiming, metadata, loading, and removal acceptance.
+## Simulation-take transport plus model-local snapshot Dope Sheet acceptance.
 keyframe-authoring:
 	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
 

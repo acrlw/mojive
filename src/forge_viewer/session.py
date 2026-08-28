@@ -82,6 +82,14 @@ class _EditRecord:
 
 
 @dataclass(frozen=True)
+class _StateTakeFrame:
+    """One exact, transient simulation sample used by editor take replay."""
+
+    step: int
+    state: PhysicsState
+
+
+@dataclass(frozen=True)
 class _LightOverride:
     """One render-slot edit retained against a stable scene object when available."""
 
@@ -413,6 +421,13 @@ class Session:
         self._sensor_infos: list[SensorInfo] = []
         self._equality_constraints: list[EqualityConstraintInfo] = []
         self._active_keyframe = -1
+        self._state_take: list[_StateTakeFrame] = []
+        self._state_take_times: list[float] = []
+        self._state_take_cursor = -1
+        self._state_take_recording = False
+        self._state_take_playing = False
+        self._state_take_elapsed = 0.0
+        self._state_take_signature: tuple[tuple[int, ...], ...] | None = None
         self._perturb = PerturbState()
         self._camera = CameraView()
         self._last_message = ""
@@ -523,6 +538,26 @@ class Session:
     def active_keyframe(self) -> int:
         """Return the loaded keyframe ID, or ``-1`` for the current state."""
         return self._active_keyframe
+
+    @property
+    def state_take_recording(self) -> bool:
+        """Return whether the editor is recording transient simulation samples."""
+        return self._state_take_recording
+
+    @property
+    def state_take_playing(self) -> bool:
+        """Return whether the editor is replaying its transient simulation take."""
+        return self._state_take_playing
+
+    @property
+    def state_take_cursor(self) -> int:
+        """Return the current transient take frame, or ``-1`` when no frame is active."""
+        return self._state_take_cursor
+
+    @property
+    def state_take_times(self) -> list[float]:
+        """Return recorded simulation times in take order."""
+        return self._state_take_times
 
     @property
     def sensor_infos(self) -> list[SensorInfo]:
@@ -711,6 +746,87 @@ class Session:
         """Look up a hierarchy node by selectable object ID."""
         return self._by_object_id.get(int(object_id))
 
+    @staticmethod
+    def _physics_state_signature(state: PhysicsState) -> tuple[tuple[int, ...], ...]:
+        return tuple(
+            np.shape(values)
+            for values in (
+                state.qpos,
+                state.qvel,
+                state.act,
+                state.ctrl,
+                state.mocap_pos,
+                state.mocap_quat,
+            )
+        )
+
+    def _clear_state_take(self) -> None:
+        self._state_take.clear()
+        self._state_take_times.clear()
+        self._state_take_cursor = -1
+        self._state_take_recording = False
+        self._state_take_playing = False
+        self._state_take_elapsed = 0.0
+        self._state_take_signature = None
+
+    def _append_state_take_frame(self, state: PhysicsState | None = None) -> bool:
+        if state is None:
+            state = self._adapter.capture_state()
+        if state is None:
+            return False
+        if self._state_take and self._state_take[-1].step == self._step_counter:
+            return True
+        signature = self._physics_state_signature(state)
+        if self._state_take_signature is not None and signature != self._state_take_signature:
+            return False
+        self._state_take_signature = signature
+        self._state_take.append(_StateTakeFrame(self._step_counter, state))
+        self._state_take_times.append(float(state.time))
+        self._state_take_cursor = len(self._state_take) - 1
+        return True
+
+    def _restore_state_take_frame(self, frame_index: int) -> bool:
+        index = int(frame_index)
+        if not 0 <= index < len(self._state_take):
+            return False
+        frame = self._state_take[index]
+        if not self._adapter.restore_state(frame.state):
+            return False
+        self._state_take_cursor = index
+        self._step_counter = frame.step
+        self._pending_steps = 0
+        self._sim_time_credit = 0.0
+        self._perturb = PerturbState()
+        self._active_keyframe = -1
+        return True
+
+    def _advance_state_take(self, wall_dt: float | None) -> None:
+        if not self._state_take_playing or not self._state_take:
+            return
+        dt = self._adapter.timestep() if wall_dt is None else max(0.0, float(wall_dt))
+        self._state_take_elapsed += dt * self._speed
+        last = len(self._state_take) - 1
+        while self._state_take_cursor < last:
+            current = self._state_take[self._state_take_cursor]
+            following = self._state_take[self._state_take_cursor + 1]
+            duration = float(following.state.time) - float(current.state.time)
+            if not np.isfinite(duration) or duration <= 1e-9:
+                duration = max(self._adapter.timestep(), 1.0 / 60.0)
+            if self._state_take_elapsed + 1e-12 < duration:
+                break
+            self._state_take_elapsed -= duration
+            if not self._restore_state_take_frame(self._state_take_cursor + 1):
+                self._state_take_playing = False
+                self._publish_message(
+                    "Recorded take is incompatible with the current scene",
+                    level="error",
+                    duration=10.0,
+                )
+                return
+        if self._state_take_cursor >= last:
+            self._state_take_playing = False
+            self._state_take_elapsed = 0.0
+
     def restore_physics_state(
         self, state: PhysicsState, *, active_keyframe: int = -1
     ) -> CommandResult:
@@ -729,6 +845,9 @@ class Session:
         self._pending_steps = 0
         self._sim_time_credit = 0.0
         self._perturb = PerturbState()
+        self._state_take_recording = False
+        self._state_take_playing = False
+        self._state_take_cursor = -1
         return CommandResult.good("Scene state restored")
 
     def tick(self, needs: FrameNeeds, wall_dt: float | None = None) -> SceneFrame:
@@ -738,7 +857,9 @@ class Session:
             needs: Optional dynamic arrays required by current consumers.
             wall_dt: Elapsed wall time used for real-time simulation scheduling.
         """
-        if not self._paused and not self._adapter.caps.external_clock:
+        if self._state_take_playing:
+            self._advance_state_take(wall_dt)
+        elif not self._paused and not self._adapter.caps.external_clock:
             timestep = self._adapter.timestep()
             if wall_dt is not None and timestep > 0.0:
                 self._sim_time_credit += float(wall_dt) * self._speed
@@ -769,6 +890,17 @@ class Session:
         else:
             self._frame.paused = self._paused
             self._frame.step = self._step_counter
+        if (
+            self._state_take_recording
+            and (not self._state_take or self._state_take[-1].step != self._step_counter)
+            and not self._append_state_take_frame()
+        ):
+            self._state_take_recording = False
+            self._publish_message(
+                "State-take recording stopped because the scene state changed",
+                level="error",
+                duration=10.0,
+            )
         return self._frame
 
     def submit(self, command: Command) -> CommandResult:
@@ -913,6 +1045,7 @@ class Session:
         """Request an editable pause and reset state associated with the old scene."""
 
         self._paused = not self._adapter.caps.simulation or self._adapter.set_paused(True)
+        self._clear_state_take()
         self._step_counter = 0
         self._pending_steps = 0
         self._sim_time_credit = 0.0
@@ -928,20 +1061,100 @@ class Session:
             return False
         self._paused = True
         self._sim_time_credit = 0.0
+        self._state_take_recording = False
+        self._state_take_playing = False
         return True
 
     def _dispatch(self, c: Command) -> CommandResult:
         caps = self._adapter.caps
 
+        if isinstance(c, cmd.StartStateTakeRecording):
+            if not caps.simulation or not caps.state_snapshots:
+                return CommandResult.bad(f"{caps.name} cannot record simulation-state takes")
+            state = self._adapter.capture_state()
+            if state is None:
+                return CommandResult.bad("physics backend could not capture the current state")
+            if self._paused and not self._adapter.set_paused(False):
+                return CommandResult.bad("physics backend rejected play before recording")
+            self._clear_state_take()
+            self._paused = False
+            self._sim_time_credit = 0.0
+            self._state_take_recording = True
+            if not self._append_state_take_frame(state):
+                self._state_take_recording = False
+                self._adapter.set_paused(True)
+                self._paused = True
+                return CommandResult.bad("physics backend could not start state-take recording")
+            return CommandResult.good("Recording simulation take")
+
+        if isinstance(c, cmd.StopStateTakeRecording):
+            if not self._state_take_recording:
+                return CommandResult.good("State-take recording is already stopped")
+            if not self._paused and not self._adapter.set_paused(True):
+                return CommandResult.bad("physics backend rejected pause after recording")
+            self._paused = True
+            self._sim_time_credit = 0.0
+            self._append_state_take_frame()
+            self._state_take_recording = False
+            return CommandResult.good(f"Recorded {len(self._state_take)} frame(s)")
+
+        if isinstance(c, cmd.PlayStateTake):
+            if not self._state_take:
+                return CommandResult.bad("Record a simulation take before replaying it")
+            if self._state_take_recording:
+                return CommandResult.bad("Stop recording before replaying the take")
+            if not self._paused and not self._adapter.set_paused(True):
+                return CommandResult.bad("physics backend rejected pause before take replay")
+            self._paused = True
+            index = self._state_take_cursor
+            if index < 0 or index >= len(self._state_take) - 1:
+                index = 0
+            if not self._restore_state_take_frame(index):
+                return CommandResult.bad("Recorded take is incompatible with the current scene")
+            self._state_take_elapsed = 0.0
+            self._state_take_playing = len(self._state_take) > 1
+            return CommandResult.good("Replaying simulation take")
+
+        if isinstance(c, cmd.PauseStateTake):
+            self._state_take_playing = False
+            self._state_take_elapsed = 0.0
+            return CommandResult.good("Take replay paused")
+
+        if isinstance(c, cmd.SeekStateTake):
+            if self._state_take_recording:
+                return CommandResult.bad("Stop recording before seeking the take")
+            if not self._state_take:
+                return CommandResult.bad("No recorded take is available")
+            if not self._paused and not self._adapter.set_paused(True):
+                return CommandResult.bad("physics backend rejected pause before seeking the take")
+            self._paused = True
+            self._state_take_playing = False
+            self._state_take_elapsed = 0.0
+            index = min(len(self._state_take) - 1, max(0, int(c.frame_index)))
+            if not self._restore_state_take_frame(index):
+                return CommandResult.bad("Recorded take is incompatible with the current scene")
+            return CommandResult.good(f"Take frame {index + 1}/{len(self._state_take)}")
+
+        if isinstance(c, cmd.ClearStateTake):
+            if self._state_take_recording:
+                return CommandResult.bad("Stop recording before clearing the take")
+            self._clear_state_take()
+            return CommandResult.good("Cleared recorded take")
+
         if isinstance(c, cmd.Pause):
             if not caps.simulation:
                 return CommandResult.bad(f"{caps.name} has no simulation to pause")
+            if self._state_take_playing:
+                self._state_take_playing = False
+                self._state_take_elapsed = 0.0
+                return CommandResult.good("Take replay paused")
             if self._paused:
                 return CommandResult.good("Simulation is already paused")
             if not self._adapter.set_paused(True):
                 return CommandResult.bad("physics backend rejected pause")
             self._paused = True
             self._sim_time_credit = 0.0
+            self._state_take_recording = False
             return CommandResult.good("Simulation paused")
 
         if isinstance(c, cmd.Play):
@@ -954,6 +1167,8 @@ class Session:
             self._paused = False
             self._sim_time_credit = 0.0
             self._perturb = PerturbState()
+            self._state_take_playing = False
+            self._state_take_cursor = -1
             return CommandResult.good("Simulation resumed")
 
         if isinstance(c, cmd.Step):
@@ -964,6 +1179,8 @@ class Session:
             count = int(c.count)
             if count <= 0:
                 return CommandResult.bad("step count must be positive")
+            self._state_take_playing = False
+            self._state_take_cursor = -1
             self._pending_steps += count
             return CommandResult.good(f"Stepped {count} frame(s)")
 
@@ -973,6 +1190,9 @@ class Session:
             self._sim_time_credit = 0.0
             self._perturb = PerturbState()
             self._active_keyframe = -1
+            self._state_take_recording = False
+            self._state_take_playing = False
+            self._state_take_cursor = -1
             self._equality_constraints = (
                 self._adapter.equality_constraints() if caps.equality_constraints else []
             )
@@ -1375,6 +1595,8 @@ class Session:
             self._pending_steps = 0
             self._perturb = PerturbState()
             self._active_keyframe = i
+            self._state_take_playing = False
+            self._state_take_cursor = -1
             return CommandResult.good(f"loaded {self._keyframes[slot].name}")
 
         if isinstance(c, cmd.AddModelKeyframe):
@@ -2679,6 +2901,15 @@ class Session:
                 self._selected_node_id = selected.node_id
         elif (selected := self.node(self._selected_node_id)) is None or selected.object_id:
             self._selected_node_id = -1
+        if self._state_take and self._adapter.caps.state_snapshots:
+            state = self._adapter.capture_state()
+            if state is None or self._physics_state_signature(state) != self._state_take_signature:
+                self._clear_state_take()
+                self._publish_message(
+                    "Cleared recorded take after the simulation state layout changed",
+                    level="warning",
+                    duration=5.0,
+                )
         self._adapter_revision = self._adapter.structure_revision
         self._structure_generation += 1
         self._frame = self._adapter.frame(FrameNeeds())

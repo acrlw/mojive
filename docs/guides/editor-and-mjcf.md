@@ -64,7 +64,10 @@ The structured Inspector currently covers:
 - model-local keyframe capture and editing through the dedicated **Window > Keyframes** Dope Sheet:
   diamond-marker selection, exact-state loading, previous/next navigation, zoom, pan, drag retiming,
   naming, deletion, and Undo/Redo. MuJoCo keyframes are complete snapshots, so the editor does not
-  present unsupported interpolation or property curves.
+  present unsupported interpolation or property curves. The transport can record an in-memory
+  whole-scene simulation take without recompiling MJCF, replay it with its recorded timing, seek its
+  first/previous/next/last frames, and promote the current take frame to a persistent model keyframe
+  with **Capture Snapshot**. A new recording replaces the previous transient take.
 
 The **Assets** panel is the model-level inventory; Inspector remains responsible for binding an
 asset to the selected scene element. It covers standalone mesh, PNG height-field and texture

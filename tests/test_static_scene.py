@@ -16,6 +16,7 @@ from forge_viewer.adapters.base import (
     FrameNeeds,
     KeyframeInfo,
     NodeType,
+    PhysicsState,
     SceneAdapterBase,
     SceneFrame,
     SceneSource,
@@ -146,6 +147,32 @@ def test_async_model_load_success_finishes_and_notifies(tmp_path) -> None:
     assert len(app._after_calls) == 1
     assert app._notices == ["Loaded model.xml"]
     assert app._errors == []
+
+
+def test_global_playback_controls_prioritize_recording_and_take_replay():
+    from forge_viewer.ui.app import ViewerApp
+
+    calls = []
+    app = ViewerApp.__new__(ViewerApp)
+    app.session = SimpleNamespace(
+        state_take_recording=True,
+        state_take_playing=False,
+        state_take_cursor=3,
+        paused=False,
+        submit=lambda command: calls.append(command),
+    )
+    app._toggle_playback()
+    assert isinstance(calls.pop(), cmd.StopStateTakeRecording)
+
+    app.session.state_take_recording = False
+    app.session.state_take_playing = True
+    app.session.paused = True
+    app._toggle_playback()
+    assert isinstance(calls.pop(), cmd.PauseStateTake)
+
+    app._stop_playback()
+    assert isinstance(calls[-2], cmd.PauseStateTake)
+    assert calls[-1] == cmd.SeekStateTake(0)
 
 
 def test_async_model_load_failure_clears_following_jobs(tmp_path) -> None:
@@ -808,6 +835,29 @@ class SparseControlPhysics(SceneAdapterBase):
         return constraint_id == 7
 
 
+class SnapshotToyPhysics(ToyPhysics):
+    caps = replace(ToyPhysics.caps, state_snapshots=True)
+
+    def capture_state(self):
+        value = np.array([float(self.steps)], np.float64)
+        return PhysicsState(
+            qpos=value.copy(),
+            qvel=value.copy(),
+            act=np.zeros(0),
+            ctrl=np.zeros(0),
+            time=self.steps * 0.01,
+            mocap_pos=np.zeros((0, 3)),
+            mocap_quat=np.zeros((0, 4)),
+        )
+
+    def restore_state(self, state):
+        if np.shape(state.qpos) != (1,):
+            return False
+        self.steps = round(float(state.qpos[0]))
+        self.body.set_pose((self.steps * 0.1, 0.0, 0.0))
+        return True
+
+
 class UnpausableScenePhysics(ToyPhysics):
     caps = replace(ToyPhysics.caps, scene_files=True)
 
@@ -829,6 +879,38 @@ def test_custom_physics_only_implements_its_actual_contract():
     assert frame.time == 0.01
     assert np.allclose(frame.geom_xpos[0], (0.1, 0.0, 0.0))
     assert session.nodes[1].name == "body"
+
+
+def test_state_take_records_replays_and_steps_backward_without_editing_the_scene():
+    adapter = SnapshotToyPhysics()
+    session = Session(adapter)
+    generation = session.structure_generation
+
+    assert session.submit(cmd.StartStateTakeRecording())
+    session.tick(FrameNeeds(), wall_dt=0.01)
+    session.tick(FrameNeeds(), wall_dt=0.01)
+    assert session.submit(cmd.StopStateTakeRecording())
+
+    assert session.paused
+    assert session.structure_generation == generation
+    assert not session.dirty
+    assert session.state_take_times == pytest.approx((0.0, 0.01, 0.02))
+    assert session.state_take_cursor == 2
+    assert session.submit(cmd.SeekStateTake(0))
+    assert adapter.steps == 0
+    assert session.submit(cmd.SeekStateTake(1))
+    assert adapter.steps == 1
+
+    assert session.submit(cmd.PlayStateTake())
+    session.tick(FrameNeeds(), wall_dt=0.011)
+    assert adapter.steps == 2
+    assert session.state_take_cursor == 2
+    assert not session.state_take_playing
+
+    assert session.submit(cmd.SeekStateTake(session.state_take_cursor - 1))
+    assert adapter.steps == 1
+    assert session.submit(cmd.ClearStateTake())
+    assert session.state_take_times == []
 
 
 def test_session_routes_sparse_stable_control_ids_without_using_them_as_slots():

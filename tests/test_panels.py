@@ -51,6 +51,7 @@ from forge_viewer.ui.panels.inspector import (
 from forge_viewer.ui.panels.joints import page_span
 from forge_viewer.ui.panels.keyframes import (
     fitted_timeline_range,
+    nearest_take_frame,
     neighboring_keyframe,
     nice_timeline_step,
     timeline_time_to_x,
@@ -418,6 +419,9 @@ def test_keyframe_timeline_navigation_uses_selection_then_playhead():
     assert neighboring_keyframe(markers, 20, 0.0, 1) == 30
     assert neighboring_keyframe(markers, -1, 1.5, -1) == 10
     assert neighboring_keyframe(markers, -1, 1.5, 1) == 20
+    assert nearest_take_frame((0.0, 0.2, 0.5), 0.31) == 1
+    assert nearest_take_frame((0.0, 0.2, 0.5), 0.4) == 2
+    assert nearest_take_frame((), 0.0) == -1
 
 
 def test_transform_switches_to_stacked_rows_before_columns_overlap():

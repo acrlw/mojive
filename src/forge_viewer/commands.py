@@ -70,6 +70,38 @@ class Reset(Command):
 
 
 @dataclass(frozen=True)
+class StartStateTakeRecording(Command):
+    """Record a new transient simulation-state take and start simulation playback."""
+
+
+@dataclass(frozen=True)
+class StopStateTakeRecording(Command):
+    """Stop recording the transient state take and pause simulation playback."""
+
+
+@dataclass(frozen=True)
+class PlayStateTake(Command):
+    """Replay the transient state take from its current frame."""
+
+
+@dataclass(frozen=True)
+class PauseStateTake(Command):
+    """Pause transient state-take replay at its current frame."""
+
+
+@dataclass(frozen=True)
+class SeekStateTake(Command):
+    """Restore one frame from the transient state take."""
+
+    frame_index: int
+
+
+@dataclass(frozen=True)
+class ClearStateTake(Command):
+    """Discard the transient state take without changing the current simulation state."""
+
+
+@dataclass(frozen=True)
 class Reload(Command):
     """Reload the current file-backed scene."""
 

@@ -897,6 +897,29 @@ def test_keyframes_are_listed_and_restore_the_complete_state(adapter, fixture_pa
     assert adapter.data.qpos[7:9] == pytest.approx([0.25, -0.5])
 
 
+def test_session_state_take_replays_mujoco_frames_without_recompiling(adapter, fixture_path):
+    from forge_viewer import commands as cmd
+    from forge_viewer.adapters.base import FrameNeeds
+    from forge_viewer.session import Session
+
+    session = Session(adapter, fixture_path)
+    generation = session.structure_generation
+    timestep = adapter.timestep()
+    assert session.submit(cmd.StartStateTakeRecording())
+    session.tick(FrameNeeds(), wall_dt=timestep)
+    session.tick(FrameNeeds(), wall_dt=timestep)
+    assert session.submit(cmd.StopStateTakeRecording())
+
+    assert len(session.state_take_times) == 3
+    assert session.structure_generation == generation
+    assert not session.dirty
+    final_time = adapter.data.time
+    assert session.submit(cmd.SeekStateTake(0))
+    assert adapter.data.time < final_time
+    assert session.submit(cmd.SeekStateTake(2))
+    assert adapter.data.time == pytest.approx(final_time)
+
+
 def test_sensor_metadata_addresses_the_frame_values(adapter):
     sensors = adapter.sensors()
     assert len(sensors) == 1

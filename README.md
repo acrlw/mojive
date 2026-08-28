@@ -182,7 +182,10 @@ rename, and delete from the menu, keyboard shortcuts, and the Hierarchy context 
 `Window > Keyframes` opens a compact model-local Dope Sheet. It captures complete MuJoCo state
 snapshots, shows them as time-positioned diamond markers, and supports selection, exact-state
 loading, previous/next navigation, ruler zoom and pan, drag retiming, rename, and deletion. It does
-not imply interpolation between snapshots. `Window > Assets` opens the model asset inventory;
+not imply interpolation between snapshots. Its transport records a transient whole-scene take
+without rebuilding MJCF, then provides replay, pause, stop, first/previous/next/last recorded-frame
+navigation, and timeline seeking. Seek a recorded frame and choose **Capture Snapshot** to persist
+that model-local state in MJCF. `Window > Assets` opens the model asset inventory;
 geometry and site material controls can replace a floor or another surface material.
 Compiler/default/custom/deformable declarations and bulk asset samples remain source-owned: the
 editor loads, renders, and preserves them without adding rarely used controls to its normal UI.

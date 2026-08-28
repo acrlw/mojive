@@ -2473,35 +2473,73 @@ class ViewerApp:
         )
         visible, _ = imgui.begin("Playback###viewport_playback", None, flags)
         if visible:
-            paused = self.session.paused
+            take_recording = self.session.state_take_recording
+            take_playing = self.session.state_take_playing
+            paused = self.session.paused and not take_playing
             if self._playback_button(
                 "##viewport-playback-toggle",
                 "play" if paused else "pause",
                 enabled=True,
                 selected=not paused,
             ):
-                self.session.submit(cmd.Play() if paused else cmd.Pause())
-            imgui.set_item_tooltip("Play (Space)" if paused else "Pause (Space)")
+                self._toggle_playback()
+            tooltip = (
+                "Stop recording (Space)"
+                if take_recording
+                else "Pause take replay (Space)"
+                if take_playing
+                else "Play (Space)"
+                if paused
+                else "Pause (Space)"
+            )
+            imgui.set_item_tooltip(tooltip)
             imgui.same_line()
             if self._playback_button(
                 "##viewport-playback-step",
                 "step",
-                enabled=paused,
+                enabled=paused and not take_playing,
             ):
                 self.session.submit(cmd.Step(1))
-            imgui.set_item_tooltip("Step one frame" if paused else "Pause before stepping")
+            imgui.set_item_tooltip(
+                "Step one simulation frame"
+                if paused and not take_playing
+                else "Pause playback before stepping the simulation"
+            )
             imgui.same_line()
             if self._playback_button(
                 "##viewport-playback-stop",
                 "stop",
                 enabled=True,
             ):
-                if not self.session.paused:
-                    self.session.submit(cmd.Pause())
-                self.session.submit(cmd.Reset())
-            imgui.set_item_tooltip("Stop and reset")
+                self._stop_playback()
+            imgui.set_item_tooltip(
+                "Stop recording"
+                if take_recording
+                else "Stop replay and return to its first frame"
+                if self.session.state_take_cursor >= 0
+                else "Stop and reset simulation"
+            )
         imgui.end()
         imgui.pop_style_var(2)
+
+    def _toggle_playback(self) -> None:
+        if self.session.state_take_recording:
+            self.session.submit(cmd.StopStateTakeRecording())
+        elif self.session.state_take_playing:
+            self.session.submit(cmd.PauseStateTake())
+        else:
+            self.session.submit(cmd.Play() if self.session.paused else cmd.Pause())
+
+    def _stop_playback(self) -> None:
+        if self.session.state_take_recording:
+            self.session.submit(cmd.StopStateTakeRecording())
+        elif self.session.state_take_cursor >= 0:
+            self.session.submit(cmd.PauseStateTake())
+            self.session.submit(cmd.SeekStateTake(0))
+        else:
+            if not self.session.paused:
+                self.session.submit(cmd.Pause())
+            self.session.submit(cmd.Reset())
 
     def _playback_button(
         self,
@@ -2851,7 +2889,7 @@ class ViewerApp:
 
     def apply_keys(self, keys: Keys) -> None:
         if keys.toggle_pause:
-            self.session.submit(cmd.Play() if self.session.paused else cmd.Pause())
+            self._toggle_playback()
         if keys.gizmo_translate:
             self.gizmo.set_mode("translate")
         if keys.gizmo_rotate:
