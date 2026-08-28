@@ -27,6 +27,7 @@ from ..commands import (
 )
 from ..types import (
     DEFAULT_HEADLIGHT,
+    MATERIAL_TEXTURE_ROLES,
     CameraView,
     InstancePoseSource,
     InstanceVisual,
@@ -195,15 +196,25 @@ _DEFAULT_PROPERTY_TYPES = tuple(
     and path[-1] not in {"default", "plugin"}
 )
 _ASSET_PROPERTY_FIELDS = {
+    "material": tuple(
+        field
+        for field in _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "asset", "material"), ())
+        if field not in {"name", "texture"}
+    ),
+    "texture": tuple(
+        field
+        for field in _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "asset", "texture"), ())
+        if field not in {"file", "name"}
+    ),
     "mesh": tuple(
         field
         for field in _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "asset", "mesh"), ())
-        if field not in {"face", "normal", "texcoord", "vertex"}
+        if field not in {"face", "file", "name", "normal", "texcoord", "vertex"}
     ),
     "hfield": tuple(
         field
         for field in _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "asset", "hfield"), ())
-        if field != "elevation"
+        if field not in {"elevation", "file", "name"}
     ),
 }
 _MODEL_ASSET_TYPES = ("material", "texture", "mesh", "hfield", "skin", "model")
@@ -237,6 +248,9 @@ _BOOLEAN_PROPERTY_FIELDS = {
     "saveinertial",
     "smoothnormal",
     "strippath",
+    "hflip",
+    "vflip",
+    "texuniform",
     "usethread",
 }
 _ACTUATOR_TRANSMISSION_FIELDS = (
@@ -903,6 +917,15 @@ def _model_property_choices(
         return choices
     if group_id == "global:option/flag":
         return ("", "enable", "disable")
+    if group_id.startswith("asset:texture:"):
+        texture_choices = {
+            "type": ("", "2d", "cube", "skybox"),
+            "colorspace": ("", "auto", "srgb", "linear"),
+            "builtin": ("", "gradient", "checker", "flat"),
+            "mark": ("", "none", "edge", "cross", "random"),
+        }
+        if field in texture_choices:
+            return texture_choices[field]
     if field in _BOOLEAN_PROPERTY_FIELDS:
         return ("", "true", "false")
     references = _field_choices(root, field, attributes)
@@ -2502,12 +2525,38 @@ class MuJoCoAdapter(SceneAdapterBase):
                 name = str(attributes.get("name", "")).strip()
                 if not name:
                     continue
-                fields = tuple(
-                    ModelComponentField(field, value)
-                    for field, value in attributes.items()
-                    if field not in {"name", "file"}
+                group_id = f"asset:{asset_type}:{index}"
+                field_names = _ASSET_PROPERTY_FIELDS.get(asset_type)
+                fields = (
+                    _model_property_fields(root, group_id, field_names, attributes)
+                    if field_names is not None
+                    else tuple(
+                        ModelComponentField(field, value)
+                        for field, value in attributes.items()
+                        if field not in {"name", "file"}
+                    )
                 )
+                if asset_type == "hfield" and "elevation" in attributes:
+                    fields = (
+                        *fields,
+                        ModelComponentField("elevation", attributes["elevation"]),
+                    )
                 preview = height_field_previews.get(name, ((0, 0), (0, 0), (), (0.0, 0.0)))
+                texture_layers: tuple[tuple[str, str], ...] = ()
+                if asset_type == "material":
+                    layer_map = {
+                        str(layer.attrib.get("role", "rgb")): str(layer.attrib.get("texture", ""))
+                        for layer in element.findall("layer")
+                        if str(layer.attrib.get("texture", ""))
+                    }
+                    legacy_texture = str(element.attrib.get("texture", ""))
+                    if legacy_texture and "rgb" not in layer_map:
+                        layer_map["rgb"] = legacy_texture
+                    texture_layers = tuple(
+                        (role, layer_map[role])
+                        for role in MATERIAL_TEXTURE_ROLES
+                        if role in layer_map
+                    )
                 items.append(
                     ModelAssetInfo(
                         model_id=int(model_id),
@@ -2524,6 +2573,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                         runtime_index=(
                             material_indices.get(name, -1) if asset_type == "material" else -1
                         ),
+                        texture_layers=texture_layers,
                     )
                 )
         return tuple(items)
@@ -3342,6 +3392,8 @@ class MuJoCoAdapter(SceneAdapterBase):
                 specular=material.specular,
                 shininess=material.shininess,
                 reflectance=material.reflectance,
+                metallic=material.metallic,
+                roughness=material.roughness,
                 rgba=material.rgba,
             )
             material_names.append(name)
@@ -5456,6 +5508,8 @@ class MuJoCoAdapter(SceneAdapterBase):
                     specular=float(m.mat_specular[mi]),
                     shininess=float(m.mat_shininess[mi]),
                     reflectance=float(m.mat_reflectance[mi]),
+                    metallic=float(m.mat_metallic[mi]),
+                    roughness=float(m.mat_roughness[mi]),
                     texture=tex,
                     tex_repeat=np.asarray(m.mat_texrepeat[mi], np.float32).copy(),
                     tex_uniform=bool(m.mat_texuniform[mi]),
@@ -7224,26 +7278,49 @@ class MuJoCoAdapter(SceneAdapterBase):
             if texture_model != model_id:
                 return False
 
+        current_texture_id = next(
+            (
+                int(m.mat_texid[i, role])
+                for role in (_TEXROLE_RGB, _TEXROLE_RGBA)
+                if int(m.mat_texid[i, role]) >= 0
+            ),
+            -1,
+        )
+        current_texture = (
+            mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_TEXTURE, current_texture_id) or ""
+            if current_texture_id >= 0
+            else ""
+        )
+        texture_changed = current_texture != (material.texture or "")
+
         m.mat_rgba[i] = material.rgba
         m.mat_emission[i] = material.emission
         m.mat_specular[i] = material.specular
         m.mat_shininess[i] = material.shininess
         m.mat_reflectance[i] = material.reflectance
+        m.mat_metallic[i] = material.metallic
+        m.mat_roughness[i] = material.roughness
         m.mat_texrepeat[i] = material.tex_repeat
         m.mat_texuniform[i] = material.tex_uniform
-        m.mat_texid[i, _TEXROLE_RGB] = texture_id
-        m.mat_texid[i, _TEXROLE_RGBA] = -1
+        if texture_changed:
+            m.mat_texid[i, _TEXROLE_RGB] = texture_id
+            m.mat_texid[i, _TEXROLE_RGBA] = -1
         if element is not None:
             element.rgba = material.rgba
             element.emission = material.emission
             element.specular = material.specular
             element.shininess = material.shininess
             element.reflectance = material.reflectance
+            element.metallic = material.metallic
+            element.roughness = material.roughness
             element.texrepeat = material.tex_repeat
             element.texuniform = material.tex_uniform
-            textures = [""] * int(mujoco.mjtTextureRole.mjNTEXROLE)
-            textures[_TEXROLE_RGB] = texture_name
-            element.textures = textures
+            if texture_changed:
+                textures = list(element.textures)
+                textures.extend([""] * (int(mujoco.mjtTextureRole.mjNTEXROLE) - len(textures)))
+                textures[_TEXROLE_RGB] = texture_name
+                textures[_TEXROLE_RGBA] = ""
+                element.textures = textures
             # MuJoCo 3.11 serializes MjsMaterial.textures correctly but retains
             # the old compiled texture reference in that live MjSpec. Reparse the
             # serialized spec so a later topology rebuild or export sees the edit.
@@ -7282,6 +7359,41 @@ class MuJoCoAdapter(SceneAdapterBase):
             f"{self._model_prefix(model_id)}{value}",
         )
 
+    def set_model_material_layers(
+        self, model_id: int, name: str, layers: tuple[tuple[str, str], ...]
+    ) -> bool:
+        spec = self._spec_for_model(model_id)
+        value = str(name).strip()
+        if spec is None or not value:
+            return False
+        root, _xml = _component_xml(spec)
+        asset, target = _model_asset_element(root, "material", value)
+        if asset is None or target is None:
+            return False
+        texture_names = {
+            str(element.attrib.get("name", ""))
+            for element in asset.findall("texture")
+            if str(element.attrib.get("name", ""))
+        }
+        normalized = tuple(
+            (str(role).strip().lower(), str(texture).strip()) for role, texture in layers
+        )
+        roles = tuple(role for role, _texture in normalized)
+        if (
+            len(roles) != len(set(roles))
+            or any(role not in MATERIAL_TEXTURE_ROLES for role in roles)
+            or any(texture not in texture_names for _role, texture in normalized)
+        ):
+            return False
+        target.attrib.pop("texture", None)
+        for child in tuple(target):
+            if child.tag == "layer":
+                target.remove(child)
+        for role, texture in normalized:
+            ET.SubElement(target, "layer", {"role": role, "texture": texture})
+        edited = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        return self._replace_model_spec(model_id, edited)
+
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int:
         identity = self._node_element.get(int(node_id))
         value = str(name).strip()
@@ -7291,8 +7403,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         spec = self._spec_for_model(model_id)
         if spec is None or spec.material(value) is not None:
             return -1
-        material = None
-        texture_name = ""
+        source_name = ""
         source_index = int(copy_from)
         if source_index >= 0:
             if not 0 <= source_index < self._m.nmat:
@@ -7300,36 +7411,25 @@ class MuJoCoAdapter(SceneAdapterBase):
             compiled_name = (
                 mujoco.mj_id2name(self._m, mujoco.mjtObj.mjOBJ_MATERIAL, source_index) or ""
             )
-            source_model, _source_name = self._model_element_name(
+            source_model, source_name = self._model_element_name(
                 compiled_name, mujoco.mjtObj.mjOBJ_MATERIAL
             )
             if source_model != model_id:
                 return -1
-            material = self.scene_source().materials[source_index]
-            if material.texture:
-                texture_model, texture_name = self._model_element_name(
-                    material.texture, mujoco.mjtObj.mjOBJ_TEXTURE
-                )
-                if texture_model != model_id:
-                    return -1
 
-        working = spec.copy()
-        textures = [""] * int(mujoco.mjtTextureRole.mjNTEXROLE)
-        textures[_TEXROLE_RGB] = texture_name
-        if material is None:
-            working.add_material(name=value)
+        if source_name:
+            root, _xml = _component_xml(spec)
+            asset, source_element = _model_asset_element(root, "material", source_name)
+            if asset is None or source_element is None:
+                return -1
+            duplicate = deepcopy(source_element)
+            duplicate.set("name", value)
+            children = tuple(asset)
+            asset.insert(children.index(source_element) + 1, duplicate)
+            working = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
         else:
-            working.add_material(
-                name=value,
-                textures=textures,
-                texuniform=material.tex_uniform,
-                texrepeat=material.tex_repeat,
-                emission=material.emission,
-                specular=material.specular,
-                shininess=material.shininess,
-                reflectance=material.reflectance,
-                rgba=material.rgba,
-            )
+            working = spec.copy()
+            working.add_material(name=value)
         target = getattr(working, node_type.value)(element_name)
         if target is None:
             return -1

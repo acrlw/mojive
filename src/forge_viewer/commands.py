@@ -707,6 +707,15 @@ class CreateModelMaterial(Command):
 
 
 @dataclass(frozen=True)
+class SetModelMaterialLayers(Command):
+    """Replace texture-role bindings on one model-local material."""
+
+    model_id: int
+    name: str
+    layers: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
 class AddModelMaterial(Command):
     """Create a model-local material and bind it to a geometry or site node."""
 

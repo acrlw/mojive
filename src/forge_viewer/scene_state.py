@@ -285,6 +285,8 @@ def _material_to_json(material: Material) -> dict[str, Any]:
         "specular": material.specular,
         "shininess": material.shininess,
         "reflectance": material.reflectance,
+        "metallic": material.metallic,
+        "roughness": material.roughness,
         "texture": material.texture,
         "tex_repeat": _array(material.tex_repeat),
         "tex_uniform": material.tex_uniform,
@@ -292,6 +294,10 @@ def _material_to_json(material: Material) -> dict[str, Any]:
 
 
 def _material_from_json(value: dict[str, Any]) -> Material:
+    value = value | {
+        "metallic": float(value.get("metallic", -1.0)),
+        "roughness": float(value.get("roughness", -1.0)),
+    }
     return Material(
         **(
             value

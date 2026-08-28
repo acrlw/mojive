@@ -9,6 +9,7 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, ModelAssetInfo, NodeType
+from ...types import MATERIAL_TEXTURE_ROLES
 from . import Panel, PanelContext, begin_kv_table, button_row_layout, button_width, labeled
 
 MAX_INLINE_HEIGHT_FIELD_RESOLUTION = 256
@@ -158,6 +159,8 @@ class AssetsPanel(Panel):
         self._hfield_source_elevation = self._hfield_elevation
         self._texture_import_type = "2d"
         self._material_create_name = "material"
+        self._asset_field_values: list[list[str]] = []
+        self._asset_field_error = ""
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -392,6 +395,12 @@ class AssetsPanel(Panel):
         if key != self._selection_key:
             self._selection_key = key
             self._rename = item.name
+            self._asset_field_values = [
+                [field.name, field.value]
+                for field in item.fields
+                if not (item.type == "hfield" and field.name == "elevation")
+            ]
+            self._asset_field_error = ""
             fields = {field.name: field.value for field in item.fields}
             self._hfield_size = _parse_vector(fields.get("size", ""), 4, (1.0, 1.0, 1.0, 0.1))
             self._hfield_source_size = self._hfield_size.copy()
@@ -484,6 +493,8 @@ class AssetsPanel(Panel):
             self._hfield_controls(ctx, item)
         if item.type == "material":
             self._material_controls(ctx, item)
+        if item.type in ("material", "texture", "mesh", "hfield") and item.fields:
+            self._advanced_asset_controls(ctx, item)
         if item.type in ("mesh", "hfield"):
             self._assignment_control(ctx, item)
         if not editable:
@@ -634,8 +645,7 @@ class AssetsPanel(Panel):
         if not dirty:
             imgui.end_disabled()
 
-    @staticmethod
-    def _material_controls(ctx: PanelContext, item: ModelAssetInfo) -> None:
+    def _material_controls(self, ctx: PanelContext, item: ModelAssetInfo) -> None:
         source = ctx.session.source
         material_index = item.runtime_index
         if source is None or not 0 <= material_index < len(source.materials):
@@ -647,6 +657,8 @@ class AssetsPanel(Panel):
         specular = material.specular
         shininess = material.shininess
         reflectance = material.reflectance
+        metallic = material.metallic
+        roughness = material.roughness
         texture = material.texture
         tex_repeat = material.tex_repeat
         tex_uniform = material.tex_uniform
@@ -686,6 +698,37 @@ class AssetsPanel(Panel):
                 edited_scalars.append(float(value))
             emission, specular, shininess, reflectance = edited_scalars
 
+            for label, value, default in (
+                ("metallic", metallic, 0.0),
+                ("roughness", roughness, 0.5),
+            ):
+                imgui.table_next_row()
+                imgui.table_next_column()
+                imgui.text_disabled(label)
+                imgui.table_next_column()
+                enabled = value >= 0.0
+                item_changed, enabled = imgui.checkbox(f"##asset-material-{label}-enabled", enabled)
+                if item_changed:
+                    value = default if enabled else -1.0
+                    changed = True
+                imgui.set_item_tooltip(
+                    "Toggle the MuJoCo PBR override; disabled uses classic material shading"
+                )
+                imgui.same_line()
+                if not enabled:
+                    imgui.begin_disabled()
+                imgui.set_next_item_width(-1.0)
+                item_changed, value = imgui.drag_float(
+                    f"##asset-material-{label}", value, 0.01, 0.0, 1.0, "%.2f"
+                )
+                changed |= item_changed
+                if not enabled:
+                    imgui.end_disabled()
+                if label == "metallic":
+                    metallic = float(value)
+                else:
+                    roughness = float(value)
+
             imgui.table_next_row()
             imgui.table_next_column()
             imgui.text_disabled("texture")
@@ -718,7 +761,7 @@ class AssetsPanel(Panel):
             imgui.end_table()
 
         if changed:
-            ctx.submit(
+            result = ctx.submit(
                 cmd.SetMaterial(
                     material_index,
                     replace(
@@ -728,12 +771,120 @@ class AssetsPanel(Panel):
                         specular=specular,
                         shininess=shininess,
                         reflectance=reflectance,
+                        metallic=metallic,
+                        roughness=roughness,
                         texture=texture,
                         tex_repeat=np.asarray(tex_repeat, np.float32),
                         tex_uniform=bool(tex_uniform),
                     ),
                 )
             )
+            if result.ok:
+                self._selection_key = None
+
+        if imgui.tree_node("Texture layers"):
+            texture_names = tuple(asset.name for asset in self._assets if asset.type == "texture")
+            current_layers = dict(item.texture_layers)
+            next_layers: dict[str, str] | None = None
+            if begin_kv_table("asset_material_layers"):
+                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
+                imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+                for role in MATERIAL_TEXTURE_ROLES:
+                    current = current_layers.get(role, "")
+                    imgui.table_next_row()
+                    imgui.table_next_column()
+                    imgui.text_disabled(role)
+                    imgui.table_next_column()
+                    imgui.set_next_item_width(-1.0)
+                    if imgui.begin_combo(f"##material-layer-{role}", current or "none"):
+                        for candidate in ("", *texture_names):
+                            selected, _ = imgui.selectable(
+                                candidate or "none", candidate == current
+                            )
+                            if selected and candidate != current:
+                                next_layers = dict(current_layers)
+                                if candidate:
+                                    next_layers[role] = candidate
+                                else:
+                                    next_layers.pop(role, None)
+                        imgui.end_combo()
+                imgui.end_table()
+            if next_layers is not None:
+                ordered = tuple(
+                    (role, next_layers[role])
+                    for role in MATERIAL_TEXTURE_ROLES
+                    if role in next_layers
+                )
+                result = ctx.submit(cmd.SetModelMaterialLayers(item.model_id, item.name, ordered))
+                if result.ok:
+                    self._selection_key = None
+            if not texture_names:
+                imgui.text_disabled("Import textures before assigning material layers")
+            imgui.tree_pop()
+
+    def _advanced_asset_controls(self, ctx: PanelContext, item: ModelAssetInfo) -> None:
+        if not imgui.tree_node("Advanced MJCF attributes"):
+            return
+        choices = {
+            field.name: field.choices
+            for field in item.fields
+            if not (item.type == "hfield" and field.name == "elevation")
+        }
+        if begin_kv_table("advanced_asset_fields"):
+            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
+            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+            for index, field in enumerate(self._asset_field_values):
+                name, value = field
+                imgui.table_next_row()
+                imgui.table_next_column()
+                imgui.text_disabled(name)
+                imgui.table_next_column()
+                options = choices.get(name, ())
+                imgui.set_next_item_width(-1.0)
+                if options:
+                    if value not in options:
+                        options = (*options, value)
+                    slot = options.index(value)
+                    changed, slot = imgui.combo(
+                        f"##advanced-asset-{index}",
+                        slot,
+                        tuple(option or "default" for option in options),
+                    )
+                    if changed:
+                        field[1] = options[slot]
+                else:
+                    _changed, field[1] = imgui.input_text(f"##advanced-asset-{index}", value)
+            imgui.end_table()
+        source = {
+            field.name: field.value
+            for field in item.fields
+            if not (item.type == "hfield" and field.name == "elevation")
+        }
+        dirty = any(source.get(name, "") != value for name, value in self._asset_field_values)
+        if not dirty:
+            imgui.begin_disabled()
+        if imgui.small_button("Apply Advanced Attributes"):
+            result = ctx.submit(
+                cmd.SetModelPropertyGroups(
+                    item.model_id,
+                    (
+                        (
+                            f"asset:{item.type}:{item.index}",
+                            tuple((name, value) for name, value in self._asset_field_values),
+                        ),
+                    ),
+                )
+            )
+            if result.ok:
+                self._selection_key = None
+                self._asset_field_error = ""
+            else:
+                self._asset_field_error = result.message
+        if not dirty:
+            imgui.end_disabled()
+        if self._asset_field_error:
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.danger), self._asset_field_error)
+        imgui.tree_pop()
 
     @staticmethod
     def _assignment_control(ctx: PanelContext, item: ModelAssetInfo) -> None:

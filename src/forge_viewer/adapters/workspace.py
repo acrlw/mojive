@@ -675,6 +675,14 @@ class WorkspaceAdapter(SceneAdapterBase):
             self._invalidate()
         return material_index
 
+    def set_model_material_layers(
+        self, model_id: int, name: str, layers: tuple[tuple[str, str], ...]
+    ) -> bool:
+        changed = self.primary.set_model_material_layers(model_id, name, layers)
+        if changed:
+            self._invalidate()
+        return changed
+
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int:
         return self.primary.add_model_material(node_id, name, copy_from)
 

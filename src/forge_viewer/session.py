@@ -37,6 +37,7 @@ from .adapters.base import (
 )
 from .commands import Command, CommandResult, Query
 from .types import (
+    MATERIAL_TEXTURE_ROLES,
     CameraView,
     Environment,
     InstancePoseSource,
@@ -360,6 +361,7 @@ _SCENE_EDIT_COMMANDS = (
     cmd.RemoveModelAsset,
     cmd.SetBodyProperties,
     cmd.CreateModelMaterial,
+    cmd.SetModelMaterialLayers,
     cmd.AddModelMaterial,
     cmd.ImportModelTexture,
     cmd.SetGeometryMaterial,
@@ -2272,6 +2274,37 @@ class Session:
                 return CommandResult.bad(f"Material {value!r} could not be created")
             self._refresh_structure()
             return CommandResult.good(f"Created material {value}", material_index)
+
+        if isinstance(c, cmd.SetModelMaterialLayers):
+            if not caps.model_assets:
+                return CommandResult.bad(f"{caps.name} does not support model asset editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before editing material layers")
+            name = str(c.name).strip()
+            try:
+                layers = tuple(
+                    (str(role).strip().lower(), str(texture).strip()) for role, texture in c.layers
+                )
+            except (TypeError, ValueError):
+                return CommandResult.bad("Material texture layers are malformed")
+            roles = tuple(role for role, _texture in layers)
+            if not name:
+                return CommandResult.bad("A material name cannot be empty")
+            if len(roles) != len(set(roles)):
+                return CommandResult.bad("A material texture role can only be assigned once")
+            if any(role not in MATERIAL_TEXTURE_ROLES for role in roles):
+                return CommandResult.bad("A material texture role is invalid")
+            assets = self._adapter.model_assets(c.model_id)
+            if not any(item.type == "material" and item.name == name for item in assets):
+                return CommandResult.bad(f"Material {name!r} is unavailable")
+            textures = {item.name for item in assets if item.type == "texture"}
+            missing = next((texture for _role, texture in layers if texture not in textures), None)
+            if missing is not None:
+                return CommandResult.bad(f"Texture {missing!r} is unavailable for this model")
+            if not self._adapter.set_model_material_layers(c.model_id, name, layers):
+                return CommandResult.bad(f"Material {name!r} texture layers could not be edited")
+            self._refresh_structure()
+            return CommandResult.good(f"Updated texture layers for material {name}")
 
         if isinstance(c, cmd.AddModelMaterial):
             if not caps.model_assets:

@@ -27,6 +27,8 @@ def test_forge_scene_round_trip_preserves_authored_content(tmp_path):
         name="paint",
         rgba=np.array([0.2, 0.4, 0.8, 0.9], np.float32),
         emission=0.1,
+        metallic=0.25,
+        roughness=0.65,
         texture="checker",
         tex_repeat=np.array([2.0, 3.0], np.float32),
     )
@@ -88,6 +90,8 @@ def test_forge_scene_round_trip_preserves_authored_content(tmp_path):
     assert json.loads(path.read_text())["format"] == "forge-viewer.scene"
     assert source.geom_object_id.tolist() == [first.object_id, 2]
     assert source.geom_material == [0, 0]
+    assert source.materials[0].metallic == pytest.approx(0.25)
+    assert source.materials[0].roughness == pytest.approx(0.65)
     assert np.allclose(restored.frame.geom_xpos[0], [1.0, 2.0, 3.0])
     assert np.array_equal(restored.textures["checker"].pixels, scene.textures["checker"].pixels)
     assert source.skybox == "sky"

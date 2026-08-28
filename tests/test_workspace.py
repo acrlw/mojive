@@ -1995,6 +1995,8 @@ def test_standalone_model_material_lifecycle_does_not_require_geometry(tmp_path:
         rgba=np.array((0.2, 0.4, 0.6, 0.8), np.float32),
         emission=0.25,
         specular=0.75,
+        metallic=0.4,
+        roughness=0.6,
     )
     result = session.submit(cmd.SetMaterial(created.entity_id, edited))
     assert result.ok, result.message
@@ -2002,11 +2004,91 @@ def test_standalone_model_material_lifecycle_does_not_require_geometry(tmp_path:
     assert xml is not None
     assert 'name="surface"' in xml
     assert 'rgba="0.2 0.4 0.6 0.8"' in xml
+    assert 'metallic="0.4"' in xml
+    assert 'roughness="0.6"' in xml
 
     assert session.submit(cmd.RemoveModelAsset(0, "material", "surface"))
     assert not any(item.name == "surface" for item in session.model_assets(0))
     assert session.submit(cmd.Undo())
     assert any(item.name == "surface" for item in session.model_assets(0))
+
+
+def test_material_edits_and_bound_copies_preserve_pbr_texture_layers(tmp_path: Path) -> None:
+    import xml.etree.ElementTree as ET
+
+    path = tmp_path / "layered-material.xml"
+    path.write_text(
+        """
+<mujoco>
+  <asset>
+    <texture name="rgb" type="2d" builtin="flat" width="2" height="2"/>
+    <texture name="normal" type="2d" builtin="flat" width="2" height="2"/>
+    <texture name="orm" type="2d" builtin="flat" width="2" height="2"/>
+    <material name="surface" metallic="0.3" roughness="0.7">
+      <layer role="rgb" texture="rgb"/>
+      <layer role="normal" texture="normal"/>
+      <layer role="orm" texture="orm"/>
+    </material>
+  </asset>
+  <worldbody><geom name="box" type="box" size="0.1 0.1 0.1" material="surface"/></worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    asset = next(item for item in session.model_assets(0) if item.name == "surface")
+    assert dict(asset.texture_layers) == {
+        "rgb": "rgb",
+        "normal": "normal",
+        "orm": "orm",
+    }
+    source = session.source
+    assert source is not None
+    material = source.materials[asset.runtime_index]
+    assert material.metallic == pytest.approx(0.3)
+    assert material.roughness == pytest.approx(0.7)
+
+    result = session.submit(
+        cmd.SetMaterial(
+            asset.runtime_index,
+            replace(
+                material,
+                rgba=np.array((0.2, 0.4, 0.6, 1.0), np.float32),
+                specular=0.8,
+            ),
+        )
+    )
+    assert result.ok, result.message
+    invalid = session.submit(cmd.SetModelMaterialLayers(0, "surface", (("normal", "missing"),)))
+    assert not invalid.ok
+    layers = (("rgb", "rgb"), ("roughness", "orm"), ("normal", "normal"))
+    updated = session.submit(cmd.SetModelMaterialLayers(0, "surface", layers))
+    assert updated.ok, updated.message
+    assert dict(
+        next(item for item in session.model_assets(0) if item.name == "surface").texture_layers
+    ) == dict(layers)
+    assert session.submit(cmd.Undo())
+    assert "orm" in dict(
+        next(item for item in session.model_assets(0) if item.name == "surface").texture_layers
+    )
+    assert session.submit(cmd.Redo())
+    box = next(node for node in session.nodes if node.name == "box")
+    copied = session.submit(cmd.AddModelMaterial(box.node_id, "surface_copy", asset.runtime_index))
+    assert copied.ok, copied.message
+
+    xml = document.scene_model_xml(0)
+    assert xml is not None
+    root = ET.fromstring(xml)
+    materials = {element.attrib["name"]: element for element in root.findall("asset/material")}
+    for name in ("surface", "surface_copy"):
+        element = materials[name]
+        assert float(element.attrib["metallic"]) == pytest.approx(0.3)
+        assert float(element.attrib["roughness"]) == pytest.approx(0.7)
+        assert {
+            (layer.attrib["role"], layer.attrib["texture"]) for layer in element.findall("layer")
+        } == {("rgb", "rgb"), ("normal", "normal"), ("roughness", "orm")}
 
 
 def test_model_material_creation_binding_and_texture_import(tmp_path: Path, monkeypatch) -> None:
@@ -2777,6 +2859,8 @@ def test_schema_model_properties_batch_globals_defaults_and_assets_once() -> Non
   <visual><global fovy="50"/></visual>
   <default><default class="soft"><geom friction="0.5 0.1 0.01"/><joint damping="1"/></default></default>
   <asset>
+    <texture name="checker" type="2d" builtin="checker" width="4" height="4"/>
+    <material name="paint" metallic="0.2" roughness="0.5"/>
     <mesh name="tetra" vertex="0 0 0  1 0 0  0 1 0  0 0 1"
           face="0 2 1  0 1 3  0 3 2  1 2 3"/>
     <hfield name="terrain" nrow="2" ncol="2" size="1 1 0.2 0.1"
@@ -2800,6 +2884,14 @@ def test_schema_model_properties_batch_globals_defaults_and_assets_once() -> Non
         "smoothnormal",
     }
     assert "vertex" not in {field.name for field in groups["asset:mesh:0"].fields}
+    assert {field.name for field in groups["asset:material:0"].fields} >= {
+        "metallic",
+        "roughness",
+        "texuniform",
+    }
+    texture_fields = {field.name: field for field in groups["asset:texture:0"].fields}
+    assert texture_fields["type"].choices == ("", "2d", "cube", "skybox")
+    assert texture_fields["colorspace"].choices == ("", "auto", "srgb", "linear")
     soft_geom = next(
         group
         for group in groups.values()
@@ -2822,6 +2914,8 @@ def test_schema_model_properties_batch_globals_defaults_and_assets_once() -> Non
         (soft_geom.group_id, (("friction", "0.8 0.2 0.02"), ("rgba", "0.2 0.3 0.4 1"))),
         ("asset:mesh:0", (("scale", "2 3 4"), ("smoothnormal", "true"))),
         ("asset:hfield:0", (("size", "2 3 0.4 0.2"),)),
+        ("asset:material:0", (("metallic", "0.4"), ("roughness", "0.8"))),
+        ("asset:texture:0", (("rgb1", "0.2 0.3 0.4"), ("colorspace", "linear"))),
     )
     result = session.submit(cmd.SetModelPropertyGroups(0, updates))
     assert result.ok
@@ -2833,6 +2927,12 @@ def test_schema_model_properties_batch_globals_defaults_and_assets_once() -> Non
         "orthographic"
     ] == "true"
     assert {field.name: field.value for field in edited["asset:mesh:0"].fields}["scale"] == "2 3 4"
+    assert {field.name: field.value for field in edited["asset:material:0"].fields}[
+        "roughness"
+    ] == "0.8"
+    assert {field.name: field.value for field in edited["asset:texture:0"].fields}[
+        "colorspace"
+    ] == "linear"
     assert {field.name: field.value for field in edited[soft_geom.group_id].fields}[
         "friction"
     ] == "0.8 0.2 0.02"

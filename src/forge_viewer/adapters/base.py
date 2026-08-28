@@ -200,6 +200,7 @@ class ModelAssetInfo:
     preview_values: tuple[float, ...] = ()
     preview_range: tuple[float, float] = (0.0, 0.0)
     runtime_index: int = -1
+    texture_layers: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1144,6 +1145,12 @@ class SceneAdapterBase:
         """Create one unbound model-local material and return its render index."""
         return -1
 
+    def set_model_material_layers(
+        self, model_id: int, name: str, layers: tuple[tuple[str, str], ...]
+    ) -> bool:
+        """Replace texture-role bindings on one model-local material."""
+        return False
+
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int:
         """Create and bind a model-local material to one geometry or site."""
         return -1
@@ -1460,6 +1467,9 @@ class SceneAdapter(Protocol):
     def model_material_indices(self, model_id: int) -> tuple[int, ...]: ...
     def model_texture_names(self, model_id: int) -> tuple[str, ...]: ...
     def create_model_material(self, model_id: int, name: str) -> int: ...
+    def set_model_material_layers(
+        self, model_id: int, name: str, layers: tuple[tuple[str, str], ...]
+    ) -> bool: ...
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int: ...
     def import_model_texture(
         self,

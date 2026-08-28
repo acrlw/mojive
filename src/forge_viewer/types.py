@@ -291,6 +291,20 @@ class ShadingModel(enum.StrEnum):
     MUJOCO_CLASSIC = "mujoco-classic"
 
 
+MATERIAL_TEXTURE_ROLES = (
+    "user",
+    "rgb",
+    "occlusion",
+    "roughness",
+    "metallic",
+    "normal",
+    "opacity",
+    "emissive",
+    "rgba",
+    "orm",
+)
+
+
 @dataclass(frozen=True)
 class TextureData:
     """Named uint8 texture pixels stored in a scene source."""
@@ -322,6 +336,8 @@ class Material:
     specular: float = 0.5
     shininess: float = 0.5
     reflectance: float = 0.0
+    metallic: float = -1.0
+    roughness: float = -1.0
     texture: str | None = None  # TextureData.name
     tex_repeat: np.ndarray = field(default_factory=lambda: np.ones(2, np.float32))
     tex_uniform: bool = False

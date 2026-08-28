@@ -482,7 +482,7 @@ class InspectorPanel(Panel):
             imgui.end_disabled()
         for category, label in (
             ("global", "Global Settings"),
-            ("asset", "Mesh and Height-field Assets"),
+            ("asset", "Asset Properties"),
             ("default", "Default Classes"),
         ):
             groups = tuple(
@@ -2094,6 +2094,36 @@ class InspectorPanel(Panel):
         reflectance_changed, reflectance = imgui.drag_float(
             "reflectance", reflectance, 0.01, 0.0, 1.0, "%.2f"
         )
+        metallic = material.metallic
+        metallic_toggle_changed, metallic_enabled = imgui.checkbox(
+            "metallic override", metallic >= 0.0
+        )
+        if metallic_toggle_changed:
+            metallic = 0.0 if metallic_enabled else -1.0
+        if not metallic_enabled:
+            imgui.begin_disabled()
+        metallic_changed, metallic_value = imgui.drag_float(
+            "metallic", max(0.0, metallic), 0.01, 0.0, 1.0, "%.2f"
+        )
+        if metallic_enabled:
+            metallic = float(metallic_value)
+        if not metallic_enabled:
+            imgui.end_disabled()
+        roughness = material.roughness
+        roughness_toggle_changed, roughness_enabled = imgui.checkbox(
+            "roughness override", roughness >= 0.0
+        )
+        if roughness_toggle_changed:
+            roughness = 0.5 if roughness_enabled else -1.0
+        if not roughness_enabled:
+            imgui.begin_disabled()
+        roughness_changed, roughness_value = imgui.drag_float(
+            "roughness", max(0.0, roughness), 0.01, 0.0, 1.0, "%.2f"
+        )
+        if roughness_enabled:
+            roughness = float(roughness_value)
+        if not roughness_enabled:
+            imgui.end_disabled()
         texture = material.texture
         texture_changed = False
         if imgui.begin_combo("texture", texture or "none"):
@@ -2116,6 +2146,10 @@ class InspectorPanel(Panel):
                 specular_changed,
                 shininess_changed,
                 reflectance_changed,
+                metallic_toggle_changed,
+                metallic_changed,
+                roughness_toggle_changed,
+                roughness_changed,
                 rgba_changed,
                 preset_changed,
                 texture_changed,
@@ -2134,6 +2168,8 @@ class InspectorPanel(Panel):
                         specular=float(specular),
                         shininess=float(shininess),
                         reflectance=float(reflectance),
+                        metallic=float(metallic),
+                        roughness=float(roughness),
                         texture=texture,
                         tex_repeat=np.asarray(tex_repeat, np.float32),
                         tex_uniform=bool(tex_uniform),
