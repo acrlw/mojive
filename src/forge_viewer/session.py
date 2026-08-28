@@ -394,6 +394,10 @@ class Session:
         """Return the latest user-facing command result message."""
         return self._last_message
 
+    def report_message(self, message: str) -> None:
+        """Publish a persistent UI or runtime diagnostic without creating a command."""
+        self._last_message = str(message)
+
     @property
     def dirty(self) -> bool:
         """Return whether the current document contains unsaved edits."""

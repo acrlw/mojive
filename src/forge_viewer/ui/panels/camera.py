@@ -78,6 +78,7 @@ class CameraPanel(Panel):
         self._snapshot_name = "scene-1"
         self._bookmark_index = 0
         self._snapshot_index = 0
+        self._snapshot_error = ""
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds(poses=False, qpos=True)
@@ -182,8 +183,10 @@ class CameraPanel(Panel):
                         camera,
                         select_source=ctx.select_model_camera,
                     )
+                    self._snapshot_error = ""
                 except ValueError as error:
-                    ctx.status = str(error)
+                    self._snapshot_error = str(error)
+                    ctx.report(self._snapshot_error)
             imgui.end_disabled()
             imgui.same_line()
             if imgui.button("copy##scene_snapshot"):
@@ -191,6 +194,10 @@ class CameraPanel(Panel):
             imgui.same_line()
             if imgui.button("delete##scene_snapshot"):
                 delete_named_snapshot(name, scene_dir)
+        if self._snapshot_error:
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._snapshot_error)
+            if imgui.small_button("Copy error##scene_snapshot"):
+                imgui.set_clipboard_text(self._snapshot_error)
 
     def _source(self, ctx: PanelContext) -> None:
         cameras = ctx.session.cameras

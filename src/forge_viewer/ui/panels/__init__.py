@@ -57,6 +57,11 @@ class PanelContext:
             self.status = result.message
         return result
 
+    def report(self, message: str) -> None:
+        """Keep a panel diagnostic visible in the shared status channel."""
+        self.status = str(message)
+        self.session.report_message(self.status)
+
     def tr(self, value: str) -> str:
         return self.translate(value) if self.translate is not None else value
 

@@ -14,6 +14,7 @@ from forge_viewer.types import MeshShape
 from forge_viewer.ui.localization import Language, Localizer, parse_language
 from forge_viewer.ui.panels import (
     Panel,
+    PanelContext,
     PanelSet,
     button_row_layout,
     default_panels,
@@ -61,6 +62,22 @@ def panels() -> PanelSet:
 def test_registered_panels(panels: PanelSet):
 
     assert {p.name for p in panels} == EXPECTED_PANELS
+
+
+def test_panel_diagnostics_are_published_to_the_persistent_session_status():
+    class Messages:
+        def __init__(self):
+            self.last_message = ""
+
+        def report_message(self, message: str) -> None:
+            self.last_message = message
+
+    session = Messages()
+    ctx = PanelContext(session=session, backend=SimpleNamespace())
+    ctx.report("snapshot state is incompatible")
+
+    assert ctx.status == "snapshot state is incompatible"
+    assert session.last_message == "snapshot state is incompatible"
 
 
 def test_large_editor_lists_are_bounded_and_large_hierarchies_start_closed():
