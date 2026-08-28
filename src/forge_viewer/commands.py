@@ -184,7 +184,7 @@ class SetModelSource(Command):
 
 @dataclass(frozen=True)
 class AddModelComponent(Command):
-    """Add a model-level contact, actuator, tendon, sensor, or equality component."""
+    """Add a model-level contact, actuator, sensor, tendon, equality, or custom component."""
 
     model_id: int
     category: str

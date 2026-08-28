@@ -161,7 +161,7 @@ class ModelComponentPathItem:
 
 @dataclass(frozen=True)
 class ModelComponentInfo:
-    """One model-level actuator, tendon, sensor, or equality declaration."""
+    """One model-level contact, actuator, sensor, tendon, equality, or custom declaration."""
 
     component_id: int
     model_id: int
@@ -844,7 +844,7 @@ class SceneAdapterBase:
         return False
 
     def model_components(self, model_id: int, category: str) -> tuple[ModelComponentInfo, ...]:
-        """Return editable model-level declarations in a category."""
+        """Return editable model-level component or custom declarations in a category."""
         return ()
 
     def model_component_presets(self, model_id: int, category: str) -> tuple[str, ...]:

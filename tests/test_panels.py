@@ -9,7 +9,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from forge_viewer.adapters.base import NodeType, SceneNode
+from forge_viewer.adapters.base import (
+    ModelComponentField,
+    ModelComponentPathItem,
+    NodeType,
+    SceneNode,
+)
 from forge_viewer.types import MeshShape
 from forge_viewer.ui.localization import Language, Localizer, parse_language
 from forge_viewer.ui.panels import (
@@ -30,7 +35,9 @@ from forge_viewer.ui.panels.inspector import (
     _geometry_dimensions,
     _geometry_size_from_dimensions,
     _lift_color,
+    _matching_path_preset,
     _nearest_euler_degrees,
+    _path_preset_label,
     _pose_editable,
     _unique_component_name,
     gizmo_refusal_reason,
@@ -369,6 +376,30 @@ def test_button_rows_wrap_without_clipping_items():
 def test_model_component_names_are_stable_and_unique():
     assert _unique_component_name("sensor", set()) == "sensor"
     assert _unique_component_name("sensor", {"sensor", "sensor2", "sensor4"}) == "sensor3"
+
+
+def test_tuple_path_presets_disambiguate_and_follow_object_type():
+    presets = (
+        ModelComponentPathItem(
+            "element",
+            (
+                ModelComponentField("objtype", "body", ("body", "geom")),
+                ModelComponentField("objname", "world", ("world",)),
+            ),
+        ),
+        ModelComponentPathItem(
+            "element",
+            (
+                ModelComponentField("objtype", "geom", ("body", "geom")),
+                ModelComponentField("objname", "floor", ("floor", "box")),
+            ),
+        ),
+    )
+    assert [_path_preset_label(preset) for preset in presets] == [
+        "element · body",
+        "element · geom",
+    ]
+    assert _matching_path_preset(presets, "element", [["objtype", "geom"]]) == presets[1]
 
 
 def test_transform_axis_buttons_have_distinct_hover_and_active_colors():

@@ -2076,6 +2076,85 @@ def test_structured_model_components_edit_and_round_trip(tmp_path: Path) -> None
     assert restored.model_components(model_id, "sensor") == ()
 
 
+def test_custom_numeric_text_and_tuple_authoring_round_trips(tmp_path: Path) -> None:
+    document = workspace()
+    assert document.model_component_presets(0, "custom") == ("numeric", "text", "tuple")
+    component_ids = {
+        subtype: document.add_model_component(0, "custom", subtype, "shared")
+        for subtype in ("numeric", "text", "tuple")
+    }
+    assert component_ids == {"numeric": 0, "text": 1, "tuple": 2}
+
+    components = {item.subtype: item for item in document.model_components(0, "custom")}
+    assert {field.name: field.value for field in components["numeric"].fields} == {
+        "size": "1",
+        "data": "0",
+    }
+    assert {field.name: field.value for field in components["text"].fields} == {"data": "text"}
+    tuple_item = components["tuple"]
+    assert [(field.name, field.value) for field in tuple_item.path[0].fields] == [
+        ("objtype", "body"),
+        ("objname", "world"),
+        ("prm", ""),
+    ]
+    numeric_preset = next(
+        preset
+        for preset in tuple_item.path_presets
+        if {field.name: field.value for field in preset.fields}["objtype"] == "numeric"
+    )
+    assert {field.name: field.choices for field in numeric_preset.fields}["objname"] == ("shared",)
+
+    assert document.update_model_component(
+        0,
+        "custom",
+        component_ids["numeric"],
+        "shared",
+        (("size", "3"), ("data", "1 2 3")),
+        (),
+    )
+    assert document.update_model_component(
+        0,
+        "custom",
+        component_ids["text"],
+        "shared",
+        (("data", "edited value"),),
+        (),
+    )
+    assert document.update_model_component(
+        0,
+        "custom",
+        component_ids["tuple"],
+        "shared",
+        (),
+        (
+            ("element", (("objtype", "body"), ("objname", "world"), ("prm", "1"))),
+            ("element", (("objtype", "numeric"), ("objname", "shared"), ("prm", "2"))),
+        ),
+    )
+    assert (
+        document.primary.model.nnumeric,
+        document.primary.model.ntext,
+        document.primary.model.ntuple,
+    ) == (
+        1,
+        1,
+        1,
+    )
+
+    path = tmp_path / "custom-components.forge.json"
+    document.save_scene(path)
+    restored = workspace()
+    restored.open_scene(path)
+    restored_components = {item.subtype: item for item in restored.model_components(0, "custom")}
+    assert {field.name: field.value for field in restored_components["numeric"].fields}[
+        "data"
+    ] == "1 2 3"
+    assert {field.name: field.value for field in restored_components["text"].fields}[
+        "data"
+    ] == "edited value"
+    assert len(restored_components["tuple"].path) == 2
+
+
 def test_contact_pair_and_exclude_use_structured_reference_fields(tmp_path: Path) -> None:
     document = workspace()
     model_id = document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))

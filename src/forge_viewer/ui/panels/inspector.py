@@ -18,6 +18,7 @@ from ...adapters.base import (
     JointInfo,
     KeyframeProperties,
     ModelComponentInfo,
+    ModelComponentPathItem,
     ModelPropertyGroup,
     NodeType,
     SceneNode,
@@ -108,6 +109,42 @@ def _component_value_editor(label: str, value: str, choices: tuple[str, ...]) ->
         return value
     _changed, value = imgui.input_text(label, value)
     return value
+
+
+_MODEL_COMPONENT_CATEGORIES = (
+    "contact",
+    "actuator",
+    "sensor",
+    "tendon",
+    "equality",
+    "custom",
+)
+
+
+def _path_preset_label(preset: ModelComponentPathItem) -> str:
+    object_type = next((field.value for field in preset.fields if field.name == "objtype"), "")
+    return f"{preset.type} · {object_type}" if object_type else preset.type
+
+
+def _matching_path_preset(
+    presets: tuple[ModelComponentPathItem, ...],
+    element_type: str,
+    fields: list[list[str]],
+) -> ModelComponentPathItem | None:
+    object_type = next((value for name, value in fields if name == "objtype"), "")
+    if not object_type:
+        return None
+    return next(
+        (
+            preset
+            for preset in presets
+            if preset.type == element_type
+            and any(
+                field.name == "objtype" and field.value == object_type for field in preset.fields
+            )
+        ),
+        None,
+    )
 
 
 def gizmo_refusal_reason(
@@ -691,7 +728,7 @@ class InspectorPanel(Panel):
         imgui.separator()
         imgui.text_disabled("Model Components")
         editable = ctx.session.paused
-        for category in ("contact", "actuator", "sensor", "tendon", "equality"):
+        for category in _MODEL_COMPONENT_CATEGORIES:
             components = self._component_cache[category]
             label = f"{category.capitalize()} ({len(components)})"
             if not imgui.collapsing_header(label):
@@ -739,7 +776,7 @@ class InspectorPanel(Panel):
         self._component_cache_model = model_id
         self._component_cache = {
             category: ctx.session.model_components(model_id, category)
-            for category in ("contact", "actuator", "sensor", "tendon", "equality")
+            for category in _MODEL_COMPONENT_CATEGORIES
         }
         self._component_presets = {
             category: ctx.session.model_component_presets(model_id, category)
@@ -789,7 +826,9 @@ class InspectorPanel(Panel):
             imgui.text_disabled("Path")
         for path_index, (element_type, fields) in enumerate(tuple(self._component_path)):
             imgui.push_id(f"path-{path_index}")
-            imgui.text_disabled(f"{path_index + 1}. {element_type}")
+            object_type = next((value for name, value in fields if name == "objtype"), "")
+            suffix = f" · {object_type}" if object_type else ""
+            imgui.text_disabled(f"{path_index + 1}. {element_type}{suffix}")
             imgui.same_line()
             if path_index == 0:
                 imgui.begin_disabled()
@@ -805,11 +844,32 @@ class InspectorPanel(Panel):
             imgui.same_line()
             remove = imgui.small_button("Remove")
             for field_index, field in enumerate(fields):
+                preset = _matching_path_preset(self._component_path_presets, element_type, fields)
+                preset_fields = (
+                    {item.name: item for item in preset.fields} if preset is not None else {}
+                )
+                choices = self._component_path_choices[path_index].get(field[0], ())
+                if field[0] in preset_fields:
+                    choices = preset_fields[field[0]].choices
+                previous = field[1]
                 field[1] = _component_value_editor(
                     f"{field[0]}##path-field-{field_index}",
                     field[1],
-                    self._component_path_choices[path_index].get(field[0], ()),
+                    choices,
                 )
+                if field[0] == "objtype" and field[1] != previous:
+                    next_preset = _matching_path_preset(
+                        self._component_path_presets, element_type, fields
+                    )
+                    if next_preset is not None:
+                        default_name = next(
+                            (item.value for item in next_preset.fields if item.name == "objname"),
+                            "",
+                        )
+                        for candidate in fields:
+                            if candidate[0] == "objname":
+                                candidate[1] = default_name
+                                break
             imgui.pop_id()
             if move_up:
                 self._component_path[path_index - 1 : path_index + 1] = reversed(
@@ -833,7 +893,7 @@ class InspectorPanel(Panel):
                 break
         if self._component_path_presets and imgui.begin_combo("Add path item", "select type"):
             for preset in self._component_path_presets:
-                selected, _ = imgui.selectable(preset.type, False)
+                selected, _ = imgui.selectable(_path_preset_label(preset), False)
                 if selected:
                     self._component_path.append(
                         (

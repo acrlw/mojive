@@ -57,6 +57,7 @@ The structured Inspector currently covers:
 - explicit contact pairs and body exclusions;
 - non-plugin actuators, the MuJoCo sensor catalog, fixed/spatial tendon paths, and equality
   constraints through schema-driven reference fields;
+- custom numeric arrays, text values, and typed object tuples with editable tuple weights;
 - model-local keyframe capture, full state-array editing, loading, deletion, and Undo/Redo.
 - compiler, actuator length-range, simulation option/flag, size, statistic, and all visual groups;
 - creation, inheritance, editing, and removal of default classes using the linked MuJoCo schema;
@@ -75,6 +76,10 @@ it is not a source-preserving text editor. `MjSpec` expands include structure an
 when it serializes the model. Keep editing the original external files when their include layout,
 comments, or formatting must remain intact. The source popup compiles before applying changes and
 keeps the last good model when validation fails.
+
+File-less MuJoCo root edits are stored inline as `root_mjcf` in `.forge.json` workspaces. This
+preserves topology and model-component edits created directly from an empty editor without
+inventing a temporary external XML file.
 
 In Hierarchy, Ctrl/Cmd+click selects multiple rows. **Delete model elements** removes the selected
 top-level model elements through one `ModelEditBatch`; descendants of another selected row are

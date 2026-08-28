@@ -445,14 +445,24 @@ def test_model_component_inspector_tracks_structured_edits():
         inspector = instance.app.panels.get("Inspector")
         assert inspector._component_cache["actuator"]
         assert "jointpos" in inspector._component_presets["sensor"]
+        assert inspector._component_presets["custom"] == ("numeric", "text", "tuple")
 
         assert instance.session.submit(
             AddModelComponent(model.model_id, "sensor", "jointpos", "angle")
+        )
+        assert instance.session.submit(
+            AddModelComponent(model.model_id, "custom", "tuple", "selection")
         )
         inspector._refresh_component_cache(
             SimpleNamespace(session=instance.session), model.model_id
         )
         assert [item.name for item in inspector._component_cache["sensor"]] == ["angle"]
+        custom = inspector._component_cache["custom"]
+        assert [(item.name, item.subtype) for item in custom] == [("selection", "tuple")]
+        assert custom[0].path[0].fields[0].choices[0] == "body"
+        inspector._begin_component_edit(custom[0])
+        instance.sync()
+        assert inspector._component_edit == custom[0]
     finally:
         instance.release()
 

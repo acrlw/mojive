@@ -114,7 +114,38 @@ _ACTUATOR_POSE_JOINT_BODY = 1
 _ACTUATOR_POSE_SITE = 2
 _ACTUATOR_POSE_GEOM = 3
 
-_MODEL_COMPONENT_CATEGORIES = ("contact", "actuator", "sensor", "tendon", "equality")
+_MODEL_COMPONENT_CATEGORIES = (
+    "contact",
+    "actuator",
+    "sensor",
+    "tendon",
+    "equality",
+    "custom",
+)
+_OBJECT_REFERENCE_TAGS = {
+    "body": ("body",),
+    "joint": ("joint",),
+    "geom": ("geom",),
+    "site": ("site",),
+    "camera": ("camera",),
+    "light": ("light",),
+    "flex": ("flex",),
+    "mesh": ("mesh",),
+    "skin": ("skin",),
+    "hfield": ("hfield",),
+    "texture": ("texture",),
+    "material": ("material",),
+    "pair": ("pair",),
+    "exclude": ("exclude",),
+    "equality": ("equality",),
+    "tendon": ("fixed", "spatial"),
+    "actuator": ("actuator",),
+    "sensor": ("sensor",),
+    "numeric": ("numeric",),
+    "text": ("text",),
+    "tuple": ("tuple",),
+    "key": ("key",),
+}
 
 
 def _mjcf_schema_attributes() -> dict[tuple[str, ...], tuple[str, ...]]:
@@ -270,6 +301,7 @@ _COMPONENT_OPTIONAL_FIELDS = {
         "armature",
     ),
     "equality": ("active", "solref", "solimp", "polycoef"),
+    "custom": (),
 }
 _COMPONENT_SUBTYPE_OPTIONAL_FIELDS = {
     ("contact", "pair"): (
@@ -716,6 +748,14 @@ def _named_elements(root: ET.Element, tag: str) -> tuple[str, ...]:
     )
 
 
+def _object_reference_names(root: ET.Element, object_type: str) -> tuple[str, ...]:
+    tags = _OBJECT_REFERENCE_TAGS.get(str(object_type).lower(), ())
+    names = tuple(dict.fromkeys(name for tag in tags for name in _named_elements(root, tag)))
+    if object_type == "body":
+        return ("world", *names)
+    return names
+
+
 def _field_choices(root: ET.Element, name: str, attributes: dict[str, str]) -> tuple[str, ...]:
     if name == "class":
         return tuple(
@@ -723,11 +763,17 @@ def _field_choices(root: ET.Element, name: str, attributes: dict[str, str]) -> t
             for element in root.iter("default")
             if (value := str(element.attrib.get("class", "")).strip())
         )
-    target = _REFERENCE_ELEMENT.get(name)
+    if name in {"objtype", "reftype"}:
+        return tuple(
+            object_type
+            for object_type in _OBJECT_REFERENCE_TAGS
+            if _object_reference_names(root, object_type)
+        )
     if name == "objname":
-        target = attributes.get("objtype", "").lower()
-    elif name == "refname":
-        target = attributes.get("reftype", "").lower()
+        return _object_reference_names(root, attributes.get("objtype", ""))
+    if name == "refname":
+        return _object_reference_names(root, attributes.get("reftype", ""))
+    target = _REFERENCE_ELEMENT.get(name)
     return _named_elements(root, target) if target else ()
 
 
@@ -768,6 +814,24 @@ def _component_fields(
 def _component_path_presets(
     root: ET.Element, category: str, subtype: str
 ) -> tuple[ModelComponentPathItem, ...]:
+    if category == "custom" and subtype == "tuple":
+        object_types = _field_choices(root, "objtype", {})
+        return tuple(
+            ModelComponentPathItem(
+                "element",
+                (
+                    ModelComponentField("objtype", object_type, object_types),
+                    ModelComponentField(
+                        "objname",
+                        names[0],
+                        names,
+                    ),
+                    ModelComponentField("prm", "0"),
+                ),
+            )
+            for object_type in object_types
+            if (names := _object_reference_names(root, object_type))
+        )
     if category != "tendon":
         return ()
     if subtype == "fixed":
@@ -800,6 +864,22 @@ def _component_path_presets(
         )
     presets.append(ModelComponentPathItem("pulley", (ModelComponentField("divisor", "2"),)))
     return tuple(presets)
+
+
+def _component_path_fields(
+    root: ET.Element,
+    category: str,
+    subtype: str,
+    child: ET.Element,
+) -> tuple[ModelComponentField, ...]:
+    values = dict(child.attrib)
+    if category == "custom" and subtype == "tuple":
+        for name in _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "custom", "tuple", "element"), ()):
+            values.setdefault(name, "")
+    return tuple(
+        ModelComponentField(name, value, _field_choices(root, name, values))
+        for name, value in values.items()
+    )
 
 
 def _model_property_choices(
@@ -1614,14 +1694,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             path = tuple(
                 ModelComponentPathItem(
                     child.tag,
-                    tuple(
-                        ModelComponentField(
-                            name,
-                            value,
-                            _field_choices(root, name, dict(child.attrib)),
-                        )
-                        for name, value in child.attrib.items()
-                    ),
+                    _component_path_fields(root, category, element.tag, child),
                 )
                 for child in element
             )
@@ -1674,7 +1747,9 @@ class MuJoCoAdapter(SceneAdapterBase):
                     (
                         entry
                         for entry in previous
-                        if entry.component_id not in used and entry.name == name
+                        if entry.component_id not in used
+                        and entry.name == name
+                        and (category == "actuator" or entry.subtype == subtype)
                     ),
                     None,
                 )
@@ -1842,6 +1917,8 @@ class MuJoCoAdapter(SceneAdapterBase):
                 *(("tendon",) if tendons else ()),
                 *(("flex", "flexvert", "flexstrain") if flexes else ()),
             )
+        if category == "custom":
+            return ("numeric", "text", "tuple")
         _component_section(root, category)
         return ()
 
@@ -1857,7 +1934,11 @@ class MuJoCoAdapter(SceneAdapterBase):
         section = _component_section(root, category, create=True)
         assert section is not None
         previous_entries = self._sync_model_component_ids(model_id, category, section)
-        if any(item.attrib.get("name") == value for item in section):
+        if any(
+            item.attrib.get("name") == value
+            and (category not in {"contact", "custom"} or item.tag == subtype)
+            for item in section
+        ):
             raise ValueError(f"{category} {value!r} already exists")
         element = ET.SubElement(section, subtype, {"name": value})
         joint_elements = tuple(root.iter("joint"))
@@ -1981,6 +2062,13 @@ class MuJoCoAdapter(SceneAdapterBase):
             element.set("flex", flexes[0])
             if subtype == "flexstrain":
                 element.set("cell", "0")
+        elif category == "custom" and subtype == "numeric":
+            element.set("size", "1")
+            element.set("data", "0")
+        elif category == "custom" and subtype == "text":
+            element.set("data", "text")
+        elif category == "custom":
+            ET.SubElement(element, "element", {"objtype": "body", "objname": "world"})
         new_spec = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
         if not self._replace_model_spec(model_id, new_spec):
             return -1
@@ -2017,6 +2105,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         if any(
             index != component_index and item.attrib.get("name") == value
             for index, item in enumerate(section)
+            if category not in {"contact", "custom"} or item.tag == section[component_index].tag
         ):
             raise ValueError(f"{category} {value!r} already exists")
         element = section[component_index]
@@ -2041,13 +2130,14 @@ class MuJoCoAdapter(SceneAdapterBase):
             if str(item_kind).strip()
         )
         current_path = tuple((child.tag, tuple(child.attrib.items())) for child in element)
+        path_category = category in {"tendon", "custom"}
         if dict(element.attrib) == next_attributes and (
-            category != "tendon" or current_path == next_path
+            not path_category or current_path == next_path
         ):
             return True
         element.attrib.clear()
         element.attrib.update(next_attributes)
-        if category == "tendon":
+        if path_category:
             element[:] = []
             for item_kind, item_fields in next_path:
                 ET.SubElement(element, item_kind, dict(item_fields))

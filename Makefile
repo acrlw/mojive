@@ -32,7 +32,7 @@ help:
 		'  make body-authoring     body mass, inertia, gravcomp, mocap, and sleep policy' \
 		'  make resource-authoring geometry shape, mesh/hfield, cube, and skybox import' \
 		'  make joint-site-authoring advanced joint and site shape/endpoint properties' \
-		'  make model-component-authoring contacts, actuators, sensors, tendons, and equality' \
+		'  make model-component-authoring contacts, actuators, sensors, tendons, equality, and custom' \
 		'  make keyframe-authoring capture, edit, load, and remove model keyframes' \
 		'  make model-settings-authoring global schema, defaults, mesh, and hfield properties' \
 		'  make batch-editing      Ctrl/Cmd multi-select and one-rebuild topology deletion' \
@@ -443,7 +443,7 @@ resource-authoring:
 joint-site-authoring:
 	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor joint_gizmo $(ARGS)
 
-## Contact, actuator, sensor, tendon path, and equality component acceptance.
+## Contact, actuator, sensor, tendon, equality, and custom component acceptance.
 model-component-authoring:
 	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
 

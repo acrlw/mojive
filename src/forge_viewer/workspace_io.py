@@ -61,6 +61,10 @@ def save_workspace(workspace, path: str | Path) -> Path:
         "models": models,
         "scene": scene_to_document(workspace.scene),
     }
+    if not any(item.model_id == 0 for item in workspace.scene_models()):
+        root_mjcf = workspace.scene_model_xml(0)
+        if root_mjcf is not None:
+            document["root_mjcf"] = root_mjcf
     target.write_text(json.dumps(document, indent=2), encoding="utf-8")
     return target
 
@@ -81,6 +85,8 @@ def load_workspace(workspace, path: str | Path) -> None:
         names = ", ".join(item.reference for item in missing)
         raise FileNotFoundError(f"Missing workspace resources: {names}")
     workspace.primary.new_scene()
+    if root_mjcf := document.get("root_mjcf"):
+        workspace.primary.set_scene_model_xml(0, str(root_mjcf))
     resource_roots = _document_resource_roots(document, source.parent)
     workspace.set_resource_roots(tuple(root for root in resource_roots if root != source.parent))
     for model in document.get("models", ()):
