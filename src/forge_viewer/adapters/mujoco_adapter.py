@@ -717,6 +717,12 @@ def _named_elements(root: ET.Element, tag: str) -> tuple[str, ...]:
 
 
 def _field_choices(root: ET.Element, name: str, attributes: dict[str, str]) -> tuple[str, ...]:
+    if name == "class":
+        return tuple(
+            value
+            for element in root.iter("default")
+            if (value := str(element.attrib.get("class", "")).strip())
+        )
     target = _REFERENCE_ELEMENT.get(name)
     if name == "objname":
         target = attributes.get("objtype", "").lower()
@@ -729,15 +735,34 @@ def _component_fields(
     root: ET.Element, category: str, subtype: str, attributes: dict[str, str]
 ) -> tuple[ModelComponentField, ...]:
     values = {name: value for name, value in attributes.items() if name != "name"}
-    optional = _COMPONENT_SUBTYPE_OPTIONAL_FIELDS.get(
+    curated = _COMPONENT_SUBTYPE_OPTIONAL_FIELDS.get(
         (category, subtype), _COMPONENT_OPTIONAL_FIELDS[category]
     )
+    schema = _MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", category, subtype), ())
+    optional = tuple(dict.fromkeys((*curated, *schema)))
     for name in optional:
-        values.setdefault(name, "")
-    return tuple(
-        ModelComponentField(name, value, _field_choices(root, name, values))
-        for name, value in values.items()
-    )
+        if name != "name":
+            values.setdefault(name, "")
+
+    tri_state = {
+        "actlimited",
+        "actuatorfrclimited",
+        "ctrllimited",
+        "forcelimited",
+        "limited",
+    }
+
+    def choices(name: str) -> tuple[str, ...]:
+        references = _field_choices(root, name, values)
+        if references:
+            return ("", *references)
+        if name in tri_state:
+            return ("", "false", "true", "auto")
+        if name in _BOOLEAN_PROPERTY_FIELDS:
+            return ("", "false", "true")
+        return ()
+
+    return tuple(ModelComponentField(name, value, choices(name)) for name, value in values.items())
 
 
 def _component_path_presets(
@@ -880,6 +905,14 @@ class _NamedModelState:
 
 
 @dataclass(frozen=True)
+class _ModelComponentEntry:
+    component_id: int
+    subtype: str
+    name: str
+    signature: str
+
+
+@dataclass(frozen=True)
 class _CompositionEditState:
     models: tuple[_AttachedModel, ...]
     physics: PhysicsState
@@ -887,6 +920,7 @@ class _CompositionEditState:
     root_edited: bool
     geometry_object_ids: dict[tuple[int, str], int]
     next_geometry_object_id: int
+    component_entries: dict[tuple[int, str], tuple[_ModelComponentEntry, ...]]
 
 
 class MuJoCoAdapter(SceneAdapterBase):
@@ -1001,6 +1035,8 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._model_element_names: dict[tuple[int, str], tuple[int, str]] = {}
         self._geometry_object_ids: dict[tuple[int, str], int] = {}
         self._next_geometry_object_id = GEOMETRY_OBJECT_BASE
+        self._component_entries: dict[tuple[int, str], tuple[_ModelComponentEntry, ...]] = {}
+        self._next_component_id: dict[tuple[int, str], int] = {}
         self._geom_nodes: dict[int, int] = {}
         self._site_nodes: dict[int, int] = {}
         self._flex_nodes: dict[int, int] = {}
@@ -1028,6 +1064,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._attached_models.clear()
         self._next_model_id = 1
         self._reset_geometry_object_ids()
+        self._component_entries.clear()
         self.caps = replace(self.caps, model_composition=True)
         self._install(model)
 
@@ -1039,6 +1076,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._attached_models.clear()
         self._next_model_id = 1
         self._reset_geometry_object_ids()
+        self._component_entries.clear()
         self.caps = replace(self.caps, model_composition=True)
         self._install(self._root_spec.compile())
 
@@ -1054,6 +1092,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._root_edited = False
         self._attached_models.clear()
         self._reset_geometry_object_ids()
+        self._component_entries.clear()
         self.caps = replace(self.caps, model_composition=False)
         self._install(model, data)
 
@@ -1162,6 +1201,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             self._root_edited,
             dict(self._geometry_object_ids),
             self._next_geometry_object_id,
+            dict(self._component_entries),
         )
 
     def restore_edit_state(self, state: object) -> bool:
@@ -1184,6 +1224,12 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._root_edited = state.root_edited
         self._geometry_object_ids = dict(state.geometry_object_ids)
         self._next_geometry_object_id = state.next_geometry_object_id
+        self._component_entries = dict(state.component_entries)
+        for key, entries in self._component_entries.items():
+            self._next_component_id[key] = max(
+                self._next_component_id.get(key, 0),
+                max((entry.component_id + 1 for entry in entries), default=0),
+            )
         self._next_model_id = max((item.model_id for item in state.models), default=0) + 1
         self._install(self._compile_composed_model())
         return self.restore_state(state.physics)
@@ -1559,9 +1605,11 @@ class MuJoCoAdapter(SceneAdapterBase):
         root, _xml = _component_xml(spec)
         section = _component_section(root, category)
         if section is None:
+            self._component_entries.pop((int(model_id), str(category)), None)
             return ()
+        entries = self._sync_model_component_ids(model_id, category, section)
         components = []
-        for component_id, element in enumerate(section):
+        for entry, element in zip(entries, section, strict=True):
             attributes = dict(element.attrib)
             path = tuple(
                 ModelComponentPathItem(
@@ -1579,17 +1627,93 @@ class MuJoCoAdapter(SceneAdapterBase):
             )
             components.append(
                 ModelComponentInfo(
-                    component_id,
+                    entry.component_id,
                     int(model_id),
                     category,
                     element.tag,
-                    attributes.get("name", f"{category}{component_id}"),
+                    attributes.get("name", f"{category}{entry.component_id}"),
                     _component_fields(root, category, element.tag, attributes),
                     path,
                     _component_path_presets(root, category, element.tag),
                 )
             )
         return tuple(components)
+
+    def _sync_model_component_ids(
+        self,
+        model_id: int,
+        category: str,
+        section: ET.Element,
+        forced: dict[int, int] | None = None,
+    ) -> tuple[_ModelComponentEntry, ...]:
+        """Reconcile stable runtime IDs without ever retargeting a stale ID."""
+
+        key = (int(model_id), str(category))
+        previous = self._component_entries.get(key, ())
+        descriptors = tuple(
+            (
+                element.tag,
+                str(element.attrib.get("name", "")).strip(),
+                ET.tostring(element, encoding="unicode"),
+            )
+            for element in section
+        )
+        if len(previous) == len(descriptors) and all(
+            (entry.subtype, entry.name, entry.signature) == descriptor
+            for entry, descriptor in zip(previous, descriptors, strict=True)
+        ):
+            return previous
+
+        forced = forced or {}
+        used: set[int] = set()
+        reconciled = []
+        for index, (subtype, name, signature) in enumerate(descriptors):
+            component_id = forced.get(index, -1)
+            if component_id < 0 and name:
+                match = next(
+                    (
+                        entry
+                        for entry in previous
+                        if entry.component_id not in used and entry.name == name
+                    ),
+                    None,
+                )
+                component_id = match.component_id if match is not None else -1
+            if component_id < 0 and not name:
+                matches = tuple(
+                    entry
+                    for entry in previous
+                    if entry.component_id not in used
+                    and entry.subtype == subtype
+                    and not entry.name
+                    and entry.signature == signature
+                )
+                component_id = matches[0].component_id if len(matches) == 1 else -1
+            if component_id < 0:
+                component_id = self._next_component_id.get(key, 0)
+                self._next_component_id[key] = component_id + 1
+            used.add(component_id)
+            reconciled.append(_ModelComponentEntry(component_id, subtype, name, signature))
+        result = tuple(reconciled)
+        if result:
+            self._component_entries[key] = result
+        else:
+            self._component_entries.pop(key, None)
+        return result
+
+    def _model_component_index(
+        self, model_id: int, category: str, section: ET.Element, component_id: int
+    ) -> tuple[int, tuple[_ModelComponentEntry, ...]]:
+        entries = self._sync_model_component_ids(model_id, category, section)
+        index = next(
+            (
+                index
+                for index, entry in enumerate(entries)
+                if entry.component_id == int(component_id)
+            ),
+            -1,
+        )
+        return index, entries
 
     def model_component_presets(self, model_id: int, category: str) -> tuple[str, ...]:
         spec = self._spec_for_model(model_id)
@@ -1732,6 +1856,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         root, _xml = _component_xml(spec)
         section = _component_section(root, category, create=True)
         assert section is not None
+        previous_entries = self._sync_model_component_ids(model_id, category, section)
         if any(item.attrib.get("name") == value for item in section):
             raise ValueError(f"{category} {value!r} already exists")
         element = ET.SubElement(section, subtype, {"name": value})
@@ -1859,7 +1984,13 @@ class MuJoCoAdapter(SceneAdapterBase):
         new_spec = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
         if not self._replace_model_spec(model_id, new_spec):
             return -1
-        return len(section) - 1
+        entries = self._sync_model_component_ids(
+            model_id,
+            category,
+            section,
+            {index: entry.component_id for index, entry in enumerate(previous_entries)},
+        )
+        return entries[-1].component_id
 
     def update_model_component(
         self,
@@ -1876,14 +2007,19 @@ class MuJoCoAdapter(SceneAdapterBase):
             return False
         root, _xml = _component_xml(spec)
         section = _component_section(root, category)
-        if section is None or not 0 <= int(component_id) < len(section):
+        if section is None:
+            return False
+        component_index, _entries = self._model_component_index(
+            model_id, category, section, component_id
+        )
+        if component_index < 0:
             return False
         if any(
-            index != int(component_id) and item.attrib.get("name") == value
+            index != component_index and item.attrib.get("name") == value
             for index, item in enumerate(section)
         ):
             raise ValueError(f"{category} {value!r} already exists")
-        element = section[int(component_id)]
+        element = section[component_index]
         next_attributes = {
             str(field_name).strip(): str(field_value).strip()
             for field_name, field_value in fields
@@ -1916,7 +2052,12 @@ class MuJoCoAdapter(SceneAdapterBase):
             for item_kind, item_fields in next_path:
                 ET.SubElement(element, item_kind, dict(item_fields))
         new_spec = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
-        return self._replace_model_spec(model_id, new_spec)
+        changed = self._replace_model_spec(model_id, new_spec)
+        if changed:
+            self._sync_model_component_ids(
+                model_id, category, section, {component_index: int(component_id)}
+            )
+        return changed
 
     def remove_model_component(self, model_id: int, category: str, component_id: int) -> bool:
         spec = self._spec_for_model(model_id)
@@ -1924,13 +2065,29 @@ class MuJoCoAdapter(SceneAdapterBase):
             return False
         root, _xml = _component_xml(spec)
         section = _component_section(root, category)
-        if section is None or not 0 <= int(component_id) < len(section):
+        if section is None:
             return False
-        section.remove(section[int(component_id)])
+        component_index, entries = self._model_component_index(
+            model_id, category, section, component_id
+        )
+        if component_index < 0:
+            return False
+        section.remove(section[component_index])
         if not len(section):
             root.remove(section)
         new_spec = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
-        return self._replace_model_spec(model_id, new_spec)
+        changed = self._replace_model_spec(model_id, new_spec)
+        if changed:
+            remaining = tuple(
+                entry for index, entry in enumerate(entries) if index != component_index
+            )
+            self._sync_model_component_ids(
+                model_id,
+                category,
+                section,
+                {index: entry.component_id for index, entry in enumerate(remaining)},
+            )
+        return changed
 
     def model_property_groups(self, model_id: int) -> tuple[ModelPropertyGroup, ...]:
         spec = self._spec_for_model(model_id)
@@ -6892,6 +7049,8 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._nodes.clear()
         self._node_body.clear()
         self._reset_geometry_object_ids()
+        self._component_entries.clear()
+        self._next_component_id.clear()
         self._node_model.clear()
         self._node_element.clear()
         self._geom_nodes.clear()

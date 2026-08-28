@@ -2095,11 +2095,11 @@ def test_contact_pair_and_exclude_use_structured_reference_fields(tmp_path: Path
     assert pair.subtype == "pair"
     assert pair_fields["geom1"].value == "first_geom"
     assert pair_fields["geom2"].value == "second_geom"
-    assert pair_fields["geom1"].choices == ("first_geom", "second_geom")
+    assert pair_fields["geom1"].choices == ("", "first_geom", "second_geom")
     assert "body1" not in pair_fields
     exclude_fields = {field.name: field for field in exclude.fields}
     assert exclude.subtype == "exclude"
-    assert exclude_fields["body1"].choices == ("first", "second")
+    assert exclude_fields["body1"].choices == ("", "first", "second")
     assert "geom1" not in exclude_fields
 
     edited_fields = tuple(
@@ -2170,6 +2170,13 @@ def test_non_plugin_component_presets_compile_and_energy_sensors_round_trip() ->
     }
     for index, subtype in enumerate(actuator_presets):
         assert adapter.add_model_component(0, "actuator", subtype, f"actuator{index}") == index
+    actuator = adapter.model_components(0, "actuator")[0]
+    actuator_fields = {field.name: field for field in actuator.fields}
+    assert {"class", "user", "ctrllimited", "forcelimited", "cranksite", "slidersite"} <= set(
+        actuator_fields
+    )
+    assert actuator_fields["joint"].choices == ("", "hinge", "ball")
+    assert actuator_fields["class"].choices == ()
 
     for index, subtype in enumerate(adapter.model_component_presets(0, "tendon")):
         assert adapter.add_model_component(0, "tendon", subtype, f"tendon{index}") == index
@@ -2220,6 +2227,7 @@ def test_non_plugin_component_presets_compile_and_energy_sensors_round_trip() ->
     assert "plugin" not in sensor_presets
     for index, subtype in enumerate(sensor_presets):
         assert adapter.add_model_component(0, "sensor", subtype, f"sensor{index}") == index
+    assert "user" in {field.name for field in adapter.model_components(0, "sensor")[0].fields}
 
     equality_presets = adapter.model_component_presets(0, "equality")
     assert equality_presets == ("joint", "weld", "connect", "tendon")
@@ -2259,14 +2267,58 @@ def test_structured_component_commands_participate_in_undo_redo() -> None:
     model_id = document.add_scene_model(ASSETS / "actuator_visuals.xml", np.zeros(3), np.eye(3))
     session = Session(document)
     assert session.submit(cmd.Pause())
-    assert session.submit(cmd.AddModelComponent(model_id, "sensor", "jointpos", "angle"))
+    added = session.submit(cmd.AddModelComponent(model_id, "sensor", "jointpos", "angle"))
+    assert added
     assert session.can_undo
-    assert [item.name for item in session.model_components(model_id, "sensor")] == ["angle"]
+    assert [
+        (item.component_id, item.name) for item in session.model_components(model_id, "sensor")
+    ] == [(added.entity_id, "angle")]
 
     assert session.submit(cmd.Undo())
     assert session.model_components(model_id, "sensor") == ()
     assert session.submit(cmd.Redo())
-    assert [item.name for item in session.model_components(model_id, "sensor")] == ["angle"]
+    assert [
+        (item.component_id, item.name) for item in session.model_components(model_id, "sensor")
+    ] == [(added.entity_id, "angle")]
+
+
+def test_model_component_ids_do_not_shift_or_target_a_replacement() -> None:
+    document = workspace()
+    assert document.set_scene_model_xml(
+        0,
+        """<mujoco model="component-identity">
+  <worldbody><body><joint name="hinge"/><geom size="0.1"/></body></worldbody>
+</mujoco>""",
+    )
+    first_id = document.add_model_component(0, "sensor", "jointpos", "first")
+    second_id = document.add_model_component(0, "sensor", "jointpos", "second")
+    assert first_id >= 0 and second_id > first_id
+
+    assert document.remove_model_component(0, "sensor", first_id)
+    remaining = document.model_components(0, "sensor")
+    assert [(item.component_id, item.name) for item in remaining] == [(second_id, "second")]
+
+    assert not document.remove_model_component(0, "sensor", first_id)
+    assert [(item.component_id, item.name) for item in document.model_components(0, "sensor")] == [
+        (second_id, "second")
+    ]
+
+    fields = tuple((field.name, field.value) for field in remaining[0].fields)
+    assert document.update_model_component(0, "sensor", second_id, "renamed", fields, ())
+    renamed = document.model_components(0, "sensor")
+    assert [(item.component_id, item.name) for item in renamed] == [(second_id, "renamed")]
+
+    assert document.set_scene_model_xml(
+        0,
+        """<mujoco model="replacement">
+  <worldbody><body><joint name="hinge"/><geom size="0.1"/></body></worldbody>
+  <sensor><jointpos name="replacement" joint="hinge"/></sensor>
+</mujoco>""",
+    )
+    replacement = document.model_components(0, "sensor")
+    assert len(replacement) == 1 and replacement[0].component_id != second_id
+    assert not document.remove_model_component(0, "sensor", second_id)
+    assert document.model_components(0, "sensor") == replacement
 
 
 def test_model_keyframe_authoring_captures_edits_loads_and_undoes(tmp_path: Path) -> None:
