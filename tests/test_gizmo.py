@@ -1779,6 +1779,43 @@ def test_hinge_joint_range_uses_one_complementary_ring_across_180_degrees() -> N
         )
 
 
+@pytest.mark.parametrize("interaction", ("hovered", "active"))
+def test_hinge_joint_range_uses_the_handle_hover_color_when_hot(interaction: str) -> None:
+    cam = CameraView(
+        eye=np.array((0.0, 0.0, 5.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 1.0, 0.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._joint_range = _JointRangeState("hinge", 0.0, -1.0, 1.0)
+    if interaction == "hovered":
+        gizmo._interactive = True
+        gizmo._hovered = GizmoHandle.ROTATE_Z
+    else:
+        gizmo._active = GizmoHandle.ROTATE_Z
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_joint_range(overlay, cam, RECT, 1.0)
+
+    allowed = next(
+        args
+        for name, args, kwargs in overlay.calls
+        if name == "polyline"
+        and kwargs.get("closed") is False
+        and np.allclose(args[1], HOVER_COLOR)
+    )
+    unavailable = next(
+        args
+        for name, args, kwargs in overlay.calls
+        if name == "polyline"
+        and kwargs.get("closed") is False
+        and np.allclose(args[1], JOINT_RANGE_UNAVAILABLE_COLOR)
+    )
+    assert np.allclose(allowed[1], HOVER_COLOR)
+    assert np.allclose(unavailable[1], JOINT_RANGE_UNAVAILABLE_COLOR)
+
+
 def test_full_hinge_range_has_no_unavailable_overlay() -> None:
     cam = CameraView(
         eye=np.array((0.0, 0.0, 5.0)),

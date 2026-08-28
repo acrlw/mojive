@@ -1078,6 +1078,7 @@ class ObjectGizmo:
         start_angle = state.lower
         unavailable_span = full_turn - span
         full_range = unavailable_span <= 1e-6
+        allowed_color = HOVER_COLOR if self._hot(GizmoHandle.ROTATE_Z) else JOINT_RANGE_COLOR
         if span > 1e-6:
             point_count = max(2, int(np.ceil(segments * span / full_turn)) + 1)
             allowed_angles = np.linspace(
@@ -1090,7 +1091,7 @@ class ObjectGizmo:
             if np.all(allowed[:, 2] > 0.0):
                 overlay.polyline(
                     allowed[:, :2],
-                    _with_alpha(JOINT_RANGE_COLOR, alpha),
+                    _with_alpha(allowed_color, alpha),
                     JOINT_RANGE_WIDTH_PT * style_scale,
                     closed=full_range,
                 )
