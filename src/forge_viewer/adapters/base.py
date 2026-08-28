@@ -161,7 +161,7 @@ class ModelComponentPathItem:
 
 @dataclass(frozen=True)
 class ModelComponentInfo:
-    """One model-level contact, actuator, sensor, tendon, equality, or custom declaration."""
+    """One model-level contact, actuator, sensor, tendon, or equality declaration."""
 
     component_id: int
     model_id: int
@@ -171,17 +171,6 @@ class ModelComponentInfo:
     fields: tuple[ModelComponentField, ...] = ()
     path: tuple[ModelComponentPathItem, ...] = ()
     path_presets: tuple[ModelComponentPathItem, ...] = ()
-
-
-@dataclass(frozen=True)
-class ModelPropertyGroup:
-    """One schema-driven model, default-class, or asset property group."""
-
-    model_id: int
-    group_id: str
-    category: str
-    label: str
-    fields: tuple[ModelComponentField, ...]
 
 
 @dataclass(frozen=True)
@@ -902,10 +891,6 @@ class SceneAdapterBase:
         """Remove a model-level declaration."""
         return False
 
-    def model_property_groups(self, model_id: int) -> tuple[ModelPropertyGroup, ...]:
-        """Return schema-driven global, default-class, and asset properties."""
-        return ()
-
     def model_assets(self, model_id: int) -> tuple[ModelAssetInfo, ...]:
         """Return the model-local asset inventory and reference summary."""
         return ()
@@ -921,28 +906,13 @@ class SceneAdapterBase:
         """Import one file-backed model asset without binding it to an element."""
         return False
 
-    def create_height_field(
+    def set_height_field_size(
         self,
         model_id: int,
         name: str,
-        rows: int,
-        columns: int,
         size: tuple[float, float, float, float],
-        elevation: tuple[float, ...],
     ) -> bool:
-        """Create one inline model height field."""
-        return False
-
-    def set_height_field_data(
-        self,
-        model_id: int,
-        name: str,
-        rows: int,
-        columns: int,
-        size: tuple[float, float, float, float],
-        elevation: tuple[float, ...],
-    ) -> bool:
-        """Replace an inline model height field's dimensions and samples."""
+        """Set physical dimensions for one model-local height field."""
         return False
 
     def rename_model_asset(self, model_id: int, asset_type: str, name: str, new_name: str) -> bool:
@@ -963,22 +933,6 @@ class SceneAdapterBase:
 
     def remove_model_asset(self, model_id: int, asset_type: str, name: str) -> bool:
         """Remove one unreferenced model asset."""
-        return False
-
-    def set_model_property_groups(
-        self,
-        model_id: int,
-        updates: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
-    ) -> bool:
-        """Apply one or more schema property groups with one model rebuild."""
-        return False
-
-    def add_model_default(self, model_id: int, parent_default_id: int, name: str) -> int:
-        """Add a named default class and return its schema index."""
-        return -1
-
-    def remove_model_default(self, model_id: int, default_id: int) -> bool:
-        """Remove a named default class."""
         return False
 
     def reset(self) -> None:
@@ -1148,12 +1102,6 @@ class SceneAdapterBase:
     def create_model_material(self, model_id: int, name: str) -> int:
         """Create one unbound model-local material and return its render index."""
         return -1
-
-    def set_model_material_layers(
-        self, model_id: int, name: str, layers: tuple[tuple[str, str], ...]
-    ) -> bool:
-        """Replace texture-role bindings on one model-local material."""
-        return False
 
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int:
         """Create and bind a model-local material to one geometry or site."""
@@ -1378,7 +1326,6 @@ class SceneAdapter(Protocol):
         path: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
     ) -> bool: ...
     def remove_model_component(self, model_id: int, category: str, component_id: int) -> bool: ...
-    def model_property_groups(self, model_id: int) -> tuple[ModelPropertyGroup, ...]: ...
     def model_assets(self, model_id: int) -> tuple[ModelAssetInfo, ...]: ...
     def import_model_asset(
         self,
@@ -1388,23 +1335,11 @@ class SceneAdapter(Protocol):
         name: str,
         fields: tuple[tuple[str, str], ...] = (),
     ) -> bool: ...
-    def create_height_field(
+    def set_height_field_size(
         self,
         model_id: int,
         name: str,
-        rows: int,
-        columns: int,
         size: tuple[float, float, float, float],
-        elevation: tuple[float, ...],
-    ) -> bool: ...
-    def set_height_field_data(
-        self,
-        model_id: int,
-        name: str,
-        rows: int,
-        columns: int,
-        size: tuple[float, float, float, float],
-        elevation: tuple[float, ...],
     ) -> bool: ...
     def rename_model_asset(
         self, model_id: int, asset_type: str, name: str, new_name: str
@@ -1416,13 +1351,6 @@ class SceneAdapter(Protocol):
         self, model_id: int, asset_type: str, name: str, path: Path
     ) -> bool: ...
     def remove_model_asset(self, model_id: int, asset_type: str, name: str) -> bool: ...
-    def set_model_property_groups(
-        self,
-        model_id: int,
-        updates: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
-    ) -> bool: ...
-    def add_model_default(self, model_id: int, parent_default_id: int, name: str) -> int: ...
-    def remove_model_default(self, model_id: int, default_id: int) -> bool: ...
     def reset(self) -> None: ...
     def step(self, count: int = 1) -> None: ...
     def set_paused(self, paused: bool) -> bool: ...
@@ -1472,9 +1400,6 @@ class SceneAdapter(Protocol):
     def model_material_indices(self, model_id: int) -> tuple[int, ...]: ...
     def model_texture_names(self, model_id: int) -> tuple[str, ...]: ...
     def create_model_material(self, model_id: int, name: str) -> int: ...
-    def set_model_material_layers(
-        self, model_id: int, name: str, layers: tuple[tuple[str, str], ...]
-    ) -> bool: ...
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int: ...
     def import_model_texture(
         self,

@@ -20,9 +20,8 @@ def _scale_ceiling(value: float) -> float:
 
 class StatsPanel(Panel):
     name = "Stats"
-    default_open = True
+    default_open = False
     shortcut = "F8"
-    closable = False
 
     def __init__(self) -> None:
         super().__init__()

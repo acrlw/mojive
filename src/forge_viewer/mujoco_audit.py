@@ -41,18 +41,6 @@ class SchemaCoverage:
 
 _STRUCTURED_GLOBAL_PATHS = {
     ("mujoco",),
-    ("mujoco", "compiler"),
-    ("mujoco", "compiler", "lengthrange"),
-    ("mujoco", "option"),
-    ("mujoco", "option", "flag"),
-    ("mujoco", "size"),
-    ("mujoco", "statistic"),
-    ("mujoco", "visual", "global"),
-    ("mujoco", "visual", "quality"),
-    ("mujoco", "visual", "headlight"),
-    ("mujoco", "visual", "map"),
-    ("mujoco", "visual", "scale"),
-    ("mujoco", "visual", "rgba"),
 }
 _STRUCTURED_COMPONENT_SECTIONS = {"contact", "equality", "tendon", "actuator", "sensor"}
 _PARTIAL_ASSET_TYPES = {"mesh", "hfield", "texture", "material"}
@@ -75,22 +63,18 @@ def _schema_path_coverage(path: tuple[str, ...]) -> tuple[str, str]:
             "excluded from the core completion gate; loading remains MuJoCo-dependent",
         )
     if path in _STRUCTURED_GLOBAL_PATHS:
-        return "structured", "schema-driven Model Configuration editor"
-    if path == ("mujoco", "default"):
-        return "structured", "default-class lifecycle editor"
-    if path == ("mujoco", "default", "material", "layer"):
-        return "structured", "default-class material texture-role editor"
-    if len(path) == 3 and path[:2] == ("mujoco", "default"):
-        return "structured", "schema-driven default-class editor"
+        return "structured", "model identity is editable in Inspector"
     if len(path) >= 3 and path[1] in _STRUCTURED_COMPONENT_SECTIONS:
         return "structured", "model component editor with schema-derived fields"
-    if path[:2] == ("mujoco", "custom") and len(path) >= 3:
-        return "structured", "custom numeric, text, and tuple component editor"
     if path == ("mujoco", "keyframe", "key"):
-        return "structured", "keyframe lifecycle and full-state editor"
+        return (
+            "structured-partial",
+            "keyframe window captures, loads, renames, retimes, and removes states; "
+            "raw arrays remain in MJCF source",
+        )
     if len(path) >= 3 and path[:2] == ("mujoco", "asset"):
         if path == ("mujoco", "asset", "material", "layer"):
-            return "structured", "Assets material texture-role editor"
+            return "raw-mjcf-only", "loaded and preserved; texture roles remain in MJCF source"
         if path[2] in _PARTIAL_ASSET_TYPES:
             return (
                 "structured-partial",
@@ -98,9 +82,8 @@ def _schema_path_coverage(path: tuple[str, ...]) -> tuple[str, str]:
             )
         if path[2] == "skin":
             return (
-                "structured-partial",
-                "normalized to deformable/skin by MjSpec and editable in Model Components; "
-                "creation still uses the MJCF source editor",
+                "runtime-only",
+                "loaded and rendered; skin authoring remains in MJCF source",
             )
     if len(path) >= 2 and path[1] == "(world)body":
         element = path[2] if len(path) >= 3 else path[1]
@@ -113,9 +96,8 @@ def _schema_path_coverage(path: tuple[str, ...]) -> tuple[str, str]:
             return "runtime-only", "compiled and rendered; no structured generator authoring"
     if len(path) >= 2 and path[1] == "deformable":
         return (
-            "structured-partial",
-            "flex and skin fields plus existing nested declarations are editable; "
-            "creation still uses the MJCF source editor",
+            "runtime-only",
+            "flex and skin declarations are loaded and rendered; authoring remains in MJCF source",
         )
     return "raw-mjcf-only", "editable through the model source editor without a structured form"
 

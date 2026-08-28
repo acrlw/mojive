@@ -10,7 +10,6 @@ from . import (
     Panel,
     PanelContext,
     begin_kv_table,
-    button_width,
     labeled,
     value_slider,
 )
@@ -35,33 +34,6 @@ class ControlPanel(Panel):
         if edit.changed:
             ctx.submit(cmd.SetSpeed(edit.value))
         imgui.end_disabled()
-
-        if s.keyframes:
-            imgui.separator()
-            selected = s.active_keyframe if s.active_keyframe >= 0 else 0
-            imgui.begin_disabled(not paused)
-            available = imgui.get_content_region_avail().x
-            spacing = imgui.get_style().item_spacing.x
-            load_width = button_width("Load", 60.0 * ctx.style_scale)
-            slider_min = 80.0 * ctx.style_scale
-            inline = available >= slider_min + spacing + load_width
-            imgui.set_next_item_width(available - spacing - load_width if inline else -1.0)
-            changed, selected = imgui.slider_int(
-                "##keyframe", selected, 0, len(s.keyframes) - 1, "%d"
-            )
-            if changed:
-                ctx.submit(cmd.LoadKeyframe(selected))
-            if inline:
-                imgui.same_line()
-            if imgui.button("Load", imgui.ImVec2(load_width, 0)):
-                ctx.submit(cmd.LoadKeyframe(selected))
-            imgui.end_disabled()
-            if not paused:
-                imgui.set_item_tooltip("physics is running; pause to load a keyframe")
-            key = s.keyframes[selected]
-            imgui.text_disabled(
-                f"{key.name} · {selected + 1}/{len(s.keyframes)} · t={key.time:g} s"
-            )
 
         if s.equality_constraints and imgui.collapsing_header("equality constraints"):
             for constraint in s.equality_constraints:

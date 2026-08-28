@@ -61,19 +61,16 @@ The structured Inspector currently covers:
 - explicit contact pairs and body exclusions;
 - non-plugin actuators, the MuJoCo sensor catalog, fixed/spatial tendon paths, and equality
   constraints through schema-driven reference fields;
-- custom numeric arrays, text values, and typed object tuples with editable tuple weights;
-- model-local keyframe capture, full state-array editing, loading, deletion, and Undo/Redo.
-- compiler, actuator length-range, simulation option/flag, size, statistic, and all visual groups;
-- creation, inheritance, editing, and removal of default classes using the linked MuJoCo schema,
-  including all material texture roles without materializing inherited layers;
-- detailed mesh and height-field metadata while keeping bulk vertex/face/elevation payloads out of
-  text controls.
+- model-local keyframe capture, naming, time metadata, loading, deletion, and Undo/Redo through the
+  dedicated **Window > Keyframes** panel.
 
 The **Assets** panel is the model-level inventory; Inspector remains responsible for binding an
 asset to the selected scene element. It covers standalone mesh, PNG height-field and texture
-import, inline height-field data, material creation and PBR texture roles, physical dimensions,
+import, material creation and replacement, basic appearance, height-field physical dimensions,
 reference reporting, assignment, rename with reference repair, duplication, file replacement,
-safe deletion, Undo/Redo, and portable MJCF export. Skin assets are visible in the same inventory.
+safe deletion, Undo/Redo, and portable MJCF export. Use the selected geometry's **assigned
+material** control to replace a floor or another surface material. Skin assets remain visible in
+the inventory.
 Attached-model declarations and generator source forms must still be edited in their original
 external MJCF source because MuJoCo expands them before `MjSpec` serialization.
 Forge keeps file-backed assets from an expanded attached model resolvable during ordinary topology
@@ -84,14 +81,16 @@ These controls validate values, participate in Undo/Redo, persist in workspace d
 the remote typed-command boundary where the adapter exposes the capability. Pause a simulation
 before editing model properties.
 
-Schema-driven groups read their field inventories from the linked MuJoCo version and submit any
-number of groups through one rebuild. Blank fields retain MuJoCo defaults or default-class
-inheritance. **Edit MJCF Source...** edits normalized XML produced by `MjSpec`; it is the escape
-hatch for plugin-defined components, raw bulk asset payloads, and unusual schema combinations, but
-it is not a source-preserving text editor. `MjSpec` expands include structure and removes comments
-when it serializes the model. Keep editing the original external files when their include layout,
-comments, or formatting must remain intact. The source popup compiles before applying changes and
-keeps the last good model when validation fails.
+Compiler/option/visual blocks, default classes, custom arrays and tuples, deformable declarations,
+PBR texture-role layers, and bulk mesh/height-field samples remain source-owned. Forge loads,
+renders, composes, and preserves these core MuJoCo sections, but does not duplicate their rarely
+used source-authoring surface in Inspector. **Edit MJCF Source...** edits normalized XML produced
+by `MjSpec`; it is the escape hatch for one-off source changes, plugin-defined components, raw bulk
+asset payloads, and unusual schema combinations, but it is not a source-preserving text editor.
+`MjSpec` expands include structure and removes comments when it serializes the model. Keep editing
+the original external files when their include layout, comments, or formatting must remain intact.
+The source popup compiles before applying changes and keeps the last good model when validation
+fails.
 
 Core coverage treats `mj_printSchema()` as the linked-version attribute inventory, not as a reason
 to reject plugin-bearing files. Explicit plugin branches are reported separately and excluded only
@@ -120,7 +119,6 @@ make asset-browser BACKEND=wgpu
 make joint-site-authoring BACKEND=wgpu
 make model-component-authoring BACKEND=wgpu
 make keyframe-authoring BACKEND=wgpu
-make model-settings-authoring BACKEND=wgpu
 make batch-editing BACKEND=wgpu
 make joint-gizmo BACKEND=wgpu
 ```

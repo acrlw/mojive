@@ -1129,6 +1129,19 @@ class ViewerApp:
                 open_settings, _ = imgui.menu_item(t("Settings..."), f"{shortcut}+,", False)
                 imgui.end_menu()
             self._draw_entity_menu(shortcut, can_edit)
+            if imgui.begin_menu(t("Window")):
+                for panel in self.panels:
+                    if panel.modal:
+                        continue
+                    label = t(panel.name)
+                    clicked, _ = imgui.menu_item(
+                        label,
+                        panel.shortcut,
+                        panel.open,
+                    )
+                    if clicked:
+                        panel.toggle()
+                imgui.end_menu()
             path = self.session.asset_path
             if path is not None:
                 imgui.text_disabled(path.name + (" *" if self.session.dirty else ""))

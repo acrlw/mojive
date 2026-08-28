@@ -29,12 +29,10 @@ from forge_viewer.ui.panels import (
     validate_panels,
 )
 from forge_viewer.ui.panels.assets import (
-    _resize_height_field_samples,
     filter_assets,
     height_field_preview_color,
     unique_asset_name,
 )
-from forge_viewer.ui.panels.camera import camera_snapshot, qpos_snapshot, reproduction_snapshot
 from forge_viewer.ui.panels.hierarchy import HierarchyPanel, hierarchy_open_depth
 from forge_viewer.ui.panels.inspector import (
     _compact_transform,
@@ -51,6 +49,7 @@ from forge_viewer.ui.panels.inspector import (
     gizmo_refusal_reason,
 )
 from forge_viewer.ui.panels.joints import page_span
+from forge_viewer.ui.panels.keyframes import unique_keyframe_name
 from forge_viewer.ui.panels.output import filter_output_entries
 from forge_viewer.ui.panels.stats import StatsPanel, _scale_ceiling
 from forge_viewer.ui.window import ResizeLatch
@@ -61,6 +60,7 @@ EXPECTED_PANELS = {
     "Assets",
     "Inspector",
     "Joints",
+    "Keyframes",
     "Camera",
     "Plot",
     "Stats",
@@ -93,14 +93,6 @@ def test_asset_panel_filters_cached_inventory_and_generates_unique_names():
     assert filter_assets(assets, "all", "robot.obj") == (assets[2],)
     assert unique_asset_name("terrain", assets, "hfield") == "terrain3"
     assert unique_asset_name("terrain", assets, "mesh") == "terrain"
-
-
-def test_height_field_resize_preserves_the_overlapping_corner():
-    values = np.arange(6, dtype=np.float32)
-
-    resized = _resize_height_field_samples(values, 2, 3, 3, 2).reshape(3, 2)
-
-    np.testing.assert_allclose(resized, ((0.0, 1.0), (3.0, 4.0), (0.0, 0.0)))
 
 
 def test_height_field_preview_color_clamps_and_spans_the_palette():
@@ -162,7 +154,7 @@ def test_output_filter_combines_text_component_and_severity():
 
 
 def test_default_workspace_panels_do_not_expose_accidental_close_buttons(panels: PanelSet):
-    fixed = {"Control", "Hierarchy", "Inspector", "Joints", "Camera", "Stats", "Output"}
+    fixed = {"Control", "Hierarchy", "Inspector", "Joints", "Camera", "Output"}
     assert all(not panels.get(name).closable for name in fixed)
 
 
@@ -262,11 +254,10 @@ def test_every_panel_declares_a_shortcut(panels: PanelSet):
         assert isinstance(p.aliases, tuple)
 
 
-def test_closed_by_default_panels_have_a_key(panels: PanelSet):
-
-    for p in panels:
-        if not p.default_open:
-            assert p.shortcut
+def test_occasional_authoring_panels_start_closed_and_use_the_window_menu(panels: PanelSet):
+    for name in ("Assets", "Keyframes", "Stats"):
+        panel = panels.get(name)
+        assert panel is not None and not panel.default_open
 
 
 def test_shortcuts_are_unique(panels: PanelSet):
@@ -277,7 +268,7 @@ def test_shortcuts_are_unique(panels: PanelSet):
     assert len(keys) == len(set(keys))
 
 
-def test_validate_catches_a_keyless_closed_panel():
+def test_validate_allows_a_keyless_closed_panel_reopened_from_the_window_menu():
 
     class Orphan(Panel):
         name = "Orphan"
@@ -285,9 +276,8 @@ def test_validate_catches_a_keyless_closed_panel():
         shortcut = ""
 
     problems = validate_panels([*default_panels(), Orphan()])
-    assert any("Orphan" in p for p in problems), problems
-    with pytest.raises(ValueError, match="Orphan"):
-        PanelSet([*default_panels(), Orphan()])
+    assert not problems
+    assert PanelSet([*default_panels(), Orphan()]).get("Orphan") is not None
 
 
 def test_validate_catches_a_duplicate_key():
@@ -305,9 +295,6 @@ def test_help_lists_every_panel_key(panels: PanelSet):
 
     table = panels.shortcut_table()
     assert {name for _key, name, _open in table} == EXPECTED_PANELS
-    for key, _name, default_open in table:
-        if not default_open:
-            assert key
 
 
 def test_aggregate_needs_follow_the_plot_panel(panels: PanelSet):
@@ -395,54 +382,9 @@ def test_transform_clipboard_vector_is_plain_xyz():
     assert _format_vector((1.25, -2.0, 0.0)) == "1.25, -2, 0"
 
 
-def test_qpos_clipboard_contains_the_complete_vector():
-    assert qpos_snapshot(np.array([1.0, -2.5, 0.0])) == "qpos=[+1, -2.5, +0]"
-
-
-def test_camera_snapshot_contains_exact_projection_values():
-    from forge_viewer.types import CameraView
-
-    text = camera_snapshot(CameraView(near=0.0125, far=320.0), (12.0, 24.0, 800.0, 600.0))
-    assert "near=0.0125" in text
-    assert "far=320" in text
-    assert "viewport=(+12, +24, +800, +600)" in text
-
-    intrinsic = CameraView(
-        focal_length=np.array([0.05, 0.04], np.float32),
-        sensor_size=np.array([0.036, 0.024], np.float32),
-        principal_offset=np.array([0.003, -0.002], np.float32),
-    )
-    text = camera_snapshot(intrinsic, (0.0, 0.0, 800.0, 600.0))
-    assert "focal_length=(+0.050" in text
-    assert "sensor_size=(+0.035" in text
-    assert "principal_offset=(+0.003" in text and ", -0.002" in text
-
-
-def test_reproduction_snapshot_combines_scene_qpos_and_camera():
-    from types import SimpleNamespace
-
-    from forge_viewer.types import CameraView
-
-    session = SimpleNamespace(
-        asset_path=Path("/tmp/model.xml"),
-        adapter=SimpleNamespace(caps=SimpleNamespace(name="mujoco")),
-        frame=SimpleNamespace(time=1.25, step=625, qpos=np.array([0.5, -0.25])),
-    )
-    ctx = SimpleNamespace(
-        session=session,
-        backend=SimpleNamespace(caps=SimpleNamespace(name="forge")),
-        viewport_rect=(0.0, 0.0, 800.0, 600.0),
-    )
-
-    text = reproduction_snapshot(ctx, CameraView())
-
-    assert "asset=/tmp/model.xml" in text
-    assert "physics_backend=mujoco" in text
-    assert "render_backend=forge" in text
-    assert "time=1.25" in text
-    assert "step=625" in text
-    assert "qpos=[+0.5, -0.25]" in text
-    assert "forge-viewer camera" in text
+def test_keyframe_names_advance_without_exposing_raw_state_arrays():
+    assert unique_keyframe_name(set()) == "key1"
+    assert unique_keyframe_name({"key1", "key2"}) == "key3"
 
 
 def test_transform_switches_to_stacked_rows_before_columns_overlap():

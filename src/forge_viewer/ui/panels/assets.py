@@ -9,10 +9,7 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, ModelAssetInfo, NodeType
-from ...types import MATERIAL_TEXTURE_ROLES
 from . import Panel, PanelContext, begin_kv_table, button_row_layout, button_width, labeled
-
-MAX_INLINE_HEIGHT_FIELD_RESOLUTION = 256
 
 
 def unique_asset_name(base: str, assets: tuple[ModelAssetInfo, ...], asset_type: str) -> str:
@@ -81,22 +78,6 @@ def height_field_preview_color(value: float) -> tuple[float, float, float, float
     )
 
 
-def _resize_height_field_samples(
-    values: np.ndarray, old_rows: int, old_columns: int, rows: int, columns: int
-) -> np.ndarray:
-    """Resize an authored sample grid while preserving its overlapping corner."""
-
-    resized = np.zeros((rows, columns), np.float32)
-    try:
-        source = np.asarray(values, np.float32).reshape(old_rows, old_columns)
-    except ValueError:
-        return resized.reshape(-1)
-    copied_rows = min(old_rows, rows)
-    copied_columns = min(old_columns, columns)
-    resized[:copied_rows, :copied_columns] = source[:copied_rows, :copied_columns]
-    return resized.reshape(-1)
-
-
 def _hfield_size_editor(str_id: str, value) -> tuple[bool, np.ndarray]:
     edited = np.asarray(value, np.float32).reshape(4).copy()
     changed = False
@@ -128,9 +109,8 @@ class AssetsPanel(Panel):
     """Browse model assets separately from scene-object bindings in Inspector."""
 
     name = "Assets"
-    default_open = True
+    default_open = False
     shortcut = ""
-    closable = False
     dock_with = "Hierarchy"
 
     def __init__(self) -> None:
@@ -146,21 +126,8 @@ class AssetsPanel(Panel):
         self._hfield_import_size = np.array((1.0, 1.0, 1.0, 0.1), np.float32)
         self._hfield_size = self._hfield_import_size.copy()
         self._hfield_source_size = self._hfield_import_size.copy()
-        self._hfield_create_name = "heightfield"
-        self._hfield_create_rows = 4
-        self._hfield_create_columns = 4
-        self._hfield_create_size = self._hfield_import_size.copy()
-        self._hfield_create_elevation = np.zeros(16, np.float32)
-        self._hfield_rows = 2
-        self._hfield_columns = 2
-        self._hfield_source_rows = 2
-        self._hfield_source_columns = 2
-        self._hfield_elevation = "0 0 0 0"
-        self._hfield_source_elevation = self._hfield_elevation
         self._texture_import_type = "2d"
         self._material_create_name = "material"
-        self._asset_field_values: list[list[str]] = []
-        self._asset_field_error = ""
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -310,63 +277,6 @@ class AssetsPanel(Panel):
             )
             imgui.text_disabled("Set physical dimensions before importing the PNG.")
             imgui.tree_pop()
-        if imgui.tree_node("New inline height field"):
-            imgui.set_next_item_width(-1.0)
-            _changed, self._hfield_create_name = imgui.input_text(
-                "name##inline-hfield", self._hfield_create_name
-            )
-            old_rows = self._hfield_create_rows
-            old_columns = self._hfield_create_columns
-            _changed, self._hfield_create_rows = imgui.input_int(
-                "rows##inline-hfield", self._hfield_create_rows, 1, 8
-            )
-            _changed, self._hfield_create_columns = imgui.input_int(
-                "columns##inline-hfield", self._hfield_create_columns, 1, 8
-            )
-            self._hfield_create_rows = min(
-                MAX_INLINE_HEIGHT_FIELD_RESOLUTION, max(2, self._hfield_create_rows)
-            )
-            self._hfield_create_columns = min(
-                MAX_INLINE_HEIGHT_FIELD_RESOLUTION, max(2, self._hfield_create_columns)
-            )
-            if (old_rows, old_columns) != (
-                self._hfield_create_rows,
-                self._hfield_create_columns,
-            ):
-                self._hfield_create_elevation = _resize_height_field_samples(
-                    self._hfield_create_elevation,
-                    old_rows,
-                    old_columns,
-                    self._hfield_create_rows,
-                    self._hfield_create_columns,
-                )
-            _changed, self._hfield_create_size = _hfield_size_editor(
-                "inline-hfield-size", self._hfield_create_size
-            )
-            create_name = self._hfield_create_name.strip()
-            if not create_name or not editable:
-                imgui.begin_disabled()
-            if imgui.small_button("Create Flat Height Field"):
-                result = ctx.submit(
-                    cmd.CreateHeightField(
-                        self._model_id,
-                        create_name,
-                        self._hfield_create_rows,
-                        self._hfield_create_columns,
-                        tuple(float(value) for value in self._hfield_create_size),
-                        tuple(float(value) for value in self._hfield_create_elevation),
-                    )
-                )
-                if result.ok:
-                    self._selected = (self._model_id, "hfield", create_name)
-                    self._selection_key = None
-                    self._hfield_create_name = unique_asset_name(
-                        "heightfield", ctx.session.model_assets(self._model_id), "hfield"
-                    )
-            if not create_name or not editable:
-                imgui.end_disabled()
-            imgui.text_disabled("Creates editable inline nrow/ncol/elevation data.")
-            imgui.tree_pop()
         if imgui.tree_node("New material"):
             imgui.set_next_item_width(-1.0)
             _changed, self._material_create_name = imgui.input_text(
@@ -395,28 +305,9 @@ class AssetsPanel(Panel):
         if key != self._selection_key:
             self._selection_key = key
             self._rename = item.name
-            self._asset_field_values = [
-                [field.name, field.value]
-                for field in item.fields
-                if not (item.type == "hfield" and field.name == "elevation")
-            ]
-            self._asset_field_error = ""
             fields = {field.name: field.value for field in item.fields}
             self._hfield_size = _parse_vector(fields.get("size", ""), 4, (1.0, 1.0, 1.0, 0.1))
             self._hfield_source_size = self._hfield_size.copy()
-            if item.type == "hfield" and not item.file:
-                try:
-                    rows = max(2, int(fields.get("nrow", "2")))
-                    columns = max(2, int(fields.get("ncol", "2")))
-                except ValueError:
-                    rows, columns = 2, 2
-                elevation = fields.get("elevation", "")
-                values = elevation.split()
-                if len(values) != rows * columns:
-                    elevation = _format_vector(np.zeros(rows * columns, np.float32))
-                self._hfield_rows = self._hfield_source_rows = rows
-                self._hfield_columns = self._hfield_source_columns = columns
-                self._hfield_elevation = self._hfield_source_elevation = elevation
         imgui.separator()
         imgui.text(f"{item.type}: {item.name}")
         if begin_kv_table("asset_details"):
@@ -493,8 +384,6 @@ class AssetsPanel(Panel):
             self._hfield_controls(ctx, item)
         if item.type == "material":
             self._material_controls(ctx, item)
-        if item.type in ("material", "texture", "mesh", "hfield") and item.fields:
-            self._advanced_asset_controls(ctx, item)
         if item.type in ("mesh", "hfield"):
             self._assignment_control(ctx, item)
         if not editable:
@@ -549,95 +438,15 @@ class AssetsPanel(Panel):
         imgui.separator()
         imgui.text_disabled("height-field dimensions")
         _changed, self._hfield_size = _hfield_size_editor("hfield-size", self._hfield_size)
-        if not item.file:
-            old_rows, old_columns = self._hfield_rows, self._hfield_columns
-            _changed, self._hfield_rows = imgui.input_int("rows##hfield-data", old_rows, 1, 8)
-            _changed, self._hfield_columns = imgui.input_int(
-                "columns##hfield-data", old_columns, 1, 8
-            )
-            self._hfield_rows = min(
-                max(MAX_INLINE_HEIGHT_FIELD_RESOLUTION, old_rows), max(2, self._hfield_rows)
-            )
-            self._hfield_columns = min(
-                max(MAX_INLINE_HEIGHT_FIELD_RESOLUTION, old_columns),
-                max(2, self._hfield_columns),
-            )
-            if (old_rows, old_columns) != (self._hfield_rows, self._hfield_columns):
-                try:
-                    values = np.asarray(
-                        tuple(float(value) for value in self._hfield_elevation.split()),
-                        np.float32,
-                    )
-                except ValueError:
-                    values = np.zeros(old_rows * old_columns, np.float32)
-                values = _resize_height_field_samples(
-                    values,
-                    old_rows,
-                    old_columns,
-                    self._hfield_rows,
-                    self._hfield_columns,
-                )
-                self._hfield_elevation = _format_vector(values)
-            imgui.text_disabled(
-                f"elevation ({self._hfield_rows * self._hfield_columns} samples, row-major)"
-            )
-            _changed, self._hfield_elevation = imgui.input_text_multiline(
-                "##hfield-elevation",
-                self._hfield_elevation,
-                imgui.ImVec2(-1.0, 72.0 * ctx.style_scale),
-            )
-            try:
-                elevation = tuple(float(value) for value in self._hfield_elevation.split())
-            except ValueError:
-                elevation = ()
-            valid_elevation = len(elevation) == self._hfield_rows * self._hfield_columns and bool(
-                np.all(np.isfinite(elevation))
-            )
-            if valid_elevation:
-                imgui.text_disabled(f"range {min(elevation):.6g} .. {max(elevation):.6g}")
-            else:
-                imgui.text_colored(
-                    imgui.ImVec4(*ctx.theme.warning),
-                    f"Expected {self._hfield_rows * self._hfield_columns} finite samples",
-                )
-            dirty = (
-                self._hfield_rows != self._hfield_source_rows
-                or self._hfield_columns != self._hfield_source_columns
-                or self._hfield_elevation.split() != self._hfield_source_elevation.split()
-                or not np.allclose(self._hfield_size, self._hfield_source_size)
-            )
-            if not dirty or not valid_elevation:
-                imgui.begin_disabled()
-            if imgui.small_button("Apply Inline Data"):
-                result = ctx.submit(
-                    cmd.SetHeightFieldData(
-                        item.model_id,
-                        item.name,
-                        self._hfield_rows,
-                        self._hfield_columns,
-                        tuple(float(value) for value in self._hfield_size),
-                        elevation,
-                    )
-                )
-                if result.ok:
-                    self._selection_key = None
-            if not dirty or not valid_elevation:
-                imgui.end_disabled()
-            return
-
         dirty = not np.allclose(self._hfield_size, self._hfield_source_size)
         if not dirty:
             imgui.begin_disabled()
         if imgui.small_button("Apply Dimensions"):
             result = ctx.submit(
-                cmd.SetModelPropertyGroups(
+                cmd.SetHeightFieldSize(
                     item.model_id,
-                    (
-                        (
-                            f"asset:hfield:{item.index}",
-                            (("size", _format_vector(self._hfield_size)),),
-                        ),
-                    ),
+                    item.name,
+                    tuple(float(value) for value in self._hfield_size),
                 )
             )
             if result.ok:
@@ -781,110 +590,6 @@ class AssetsPanel(Panel):
             )
             if result.ok:
                 self._selection_key = None
-
-        if imgui.tree_node("Texture layers"):
-            texture_names = tuple(asset.name for asset in self._assets if asset.type == "texture")
-            current_layers = dict(item.texture_layers)
-            next_layers: dict[str, str] | None = None
-            if begin_kv_table("asset_material_layers"):
-                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
-                imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-                for role in MATERIAL_TEXTURE_ROLES:
-                    current = current_layers.get(role, "")
-                    imgui.table_next_row()
-                    imgui.table_next_column()
-                    imgui.text_disabled(role)
-                    imgui.table_next_column()
-                    imgui.set_next_item_width(-1.0)
-                    if imgui.begin_combo(f"##material-layer-{role}", current or "none"):
-                        for candidate in ("", *texture_names):
-                            selected, _ = imgui.selectable(
-                                candidate or "none", candidate == current
-                            )
-                            if selected and candidate != current:
-                                next_layers = dict(current_layers)
-                                if candidate:
-                                    next_layers[role] = candidate
-                                else:
-                                    next_layers.pop(role, None)
-                        imgui.end_combo()
-                imgui.end_table()
-            if next_layers is not None:
-                ordered = tuple(
-                    (role, next_layers[role])
-                    for role in MATERIAL_TEXTURE_ROLES
-                    if role in next_layers
-                )
-                result = ctx.submit(cmd.SetModelMaterialLayers(item.model_id, item.name, ordered))
-                if result.ok:
-                    self._selection_key = None
-            if not texture_names:
-                imgui.text_disabled("Import textures before assigning material layers")
-            imgui.tree_pop()
-
-    def _advanced_asset_controls(self, ctx: PanelContext, item: ModelAssetInfo) -> None:
-        if not imgui.tree_node("Advanced MJCF attributes"):
-            return
-        choices = {
-            field.name: field.choices
-            for field in item.fields
-            if not (item.type == "hfield" and field.name == "elevation")
-        }
-        if begin_kv_table("advanced_asset_fields"):
-            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
-            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-            for index, field in enumerate(self._asset_field_values):
-                name, value = field
-                imgui.table_next_row()
-                imgui.table_next_column()
-                imgui.text_disabled(name)
-                imgui.table_next_column()
-                options = choices.get(name, ())
-                imgui.set_next_item_width(-1.0)
-                if options:
-                    if value not in options:
-                        options = (*options, value)
-                    slot = options.index(value)
-                    changed, slot = imgui.combo(
-                        f"##advanced-asset-{index}",
-                        slot,
-                        tuple(option or "default" for option in options),
-                    )
-                    if changed:
-                        field[1] = options[slot]
-                else:
-                    _changed, field[1] = imgui.input_text(f"##advanced-asset-{index}", value)
-            imgui.end_table()
-        source = {
-            field.name: field.value
-            for field in item.fields
-            if not (item.type == "hfield" and field.name == "elevation")
-        }
-        dirty = any(source.get(name, "") != value for name, value in self._asset_field_values)
-        if not dirty:
-            imgui.begin_disabled()
-        if imgui.small_button("Apply Advanced Attributes"):
-            result = ctx.submit(
-                cmd.SetModelPropertyGroups(
-                    item.model_id,
-                    (
-                        (
-                            f"asset:{item.type}:{item.index}",
-                            tuple((name, value) for name, value in self._asset_field_values),
-                        ),
-                    ),
-                )
-            )
-            if result.ok:
-                self._selection_key = None
-                self._asset_field_error = ""
-            else:
-                self._asset_field_error = result.message
-        if not dirty:
-            imgui.end_disabled()
-        if self._asset_field_error:
-            imgui.text_colored(imgui.ImVec4(*ctx.theme.danger), self._asset_field_error)
-        imgui.tree_pop()
 
     @staticmethod
     def _assignment_control(ctx: PanelContext, item: ModelAssetInfo) -> None:

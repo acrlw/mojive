@@ -1,9 +1,8 @@
-"""Camera controls and reproducible scene snapshots."""
+"""Camera controls and named camera bookmarks."""
 
 from __future__ import annotations
 
 import json
-import math
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -13,12 +12,10 @@ from ...adapters.base import FrameNeeds
 from ...scene_state import (
     apply_camera_bookmark,
     camera_bookmark,
-    capture_scene,
     delete_named_snapshot,
     list_named_snapshots,
     load_named_snapshot,
     next_available_snapshot_name,
-    restore_scene,
     save_named_snapshot,
 )
 from ...types import CameraView
@@ -26,10 +23,8 @@ from ..camera import DEFAULT_PITCH, DEFAULT_YAW
 from . import (
     Panel,
     PanelContext,
-    begin_kv_table,
     button_row_layout,
     button_width,
-    labeled,
     value_slider,
 )
 
@@ -77,13 +72,11 @@ class CameraPanel(Panel):
     def __init__(self) -> None:
         super().__init__()
         self._bookmark_name = "view-1"
-        self._snapshot_name = "scene-1"
         self._bookmark_index = 0
-        self._snapshot_index = 0
-        self._snapshot_error = ""
+        self._bookmark_error = ""
 
     def frame_needs(self) -> FrameNeeds:
-        return FrameNeeds(poses=False, qpos=True)
+        return FrameNeeds.none()
 
     def draw(self, ctx: PanelContext) -> None:
         camera = ctx.camera
@@ -98,8 +91,6 @@ class CameraPanel(Panel):
             ):
                 ctx.select_model_camera(-1)
             imgui.text_disabled(ctx.tr("model camera follows scene kinematics"))
-            imgui.separator()
-            self._readout_view(ctx, ctx.model_camera_view)
             return
 
         self._presets(ctx, camera)
@@ -107,14 +98,11 @@ class CameraPanel(Panel):
         self._params(ctx, camera)
         imgui.separator()
         self._stored_states(ctx, camera)
-        imgui.separator()
-        self._readout(ctx, camera)
 
     def _stored_states(self, ctx: PanelContext, camera: Any) -> None:
-        if not imgui.collapsing_header(f"{ctx.tr('bookmarks and snapshots')}###camera_states"):
+        if not imgui.collapsing_header(f"{ctx.tr('camera bookmarks')}###camera_states"):
             return
         camera_dir = Path("output/snapshots/cameras")
-        scene_dir = Path("output/snapshots/scenes")
         view = ctx.model_camera_view if ctx.model_camera_id >= 0 else camera.view()
 
         imgui.text_disabled(ctx.tr("camera bookmark"))
@@ -132,7 +120,7 @@ class CameraPanel(Panel):
                 bookmarks = list_named_snapshots(camera_dir)
                 self._bookmark_index = bookmarks.index(path.stem)
                 self._bookmark_name = next_available_snapshot_name(path.stem, camera_dir)
-                self._snapshot_error = ""
+                self._bookmark_error = ""
                 ctx.report(
                     f"Saved camera bookmark to {path.resolve()}",
                     level="success",
@@ -153,7 +141,7 @@ class CameraPanel(Panel):
                     apply_camera_bookmark(
                         load_named_snapshot(name, camera_dir), camera, ctx.select_model_camera
                     )
-                    self._snapshot_error = ""
+                    self._bookmark_error = ""
                     ctx.report(f"Loaded camera bookmark '{name}'", level="success")
                 except (OSError, KeyError, TypeError, ValueError) as error:
                     self._report_storage_error(ctx, error)
@@ -173,83 +161,14 @@ class CameraPanel(Panel):
                 except OSError as error:
                     self._report_storage_error(ctx, error)
 
-        imgui.text_disabled(ctx.tr("scene snapshot"))
-        imgui.text_disabled(f"{ctx.tr('Stored in')}: {scene_dir}")
-        imgui.set_item_tooltip(str(scene_dir.resolve()))
-        _changed, self._snapshot_name = imgui.input_text(
-            "##scene_snapshot_name", self._snapshot_name
-        )
-        state_available = ctx.session.adapter.caps.state_snapshots
-        imgui.begin_disabled(not state_available)
-        if imgui.button("save##scene_snapshot"):
-            try:
-                name = next_available_snapshot_name(self._snapshot_name, scene_dir)
-                path = save_named_snapshot(
-                    name,
-                    capture_scene(
-                        ctx.session,
-                        ctx.backend,
-                        camera,
-                        camera_source=ctx.model_camera_id,
-                        camera_view=view,
-                    ),
-                    scene_dir,
-                )
-                snapshots = list_named_snapshots(scene_dir)
-                self._snapshot_index = snapshots.index(path.stem)
-                self._snapshot_name = next_available_snapshot_name(path.stem, scene_dir)
-                self._snapshot_error = ""
-                ctx.report(f"Saved scene snapshot to {path.resolve()}", level="success")
-            except (OSError, RuntimeError, TypeError, ValueError) as error:
-                self._report_storage_error(ctx, error)
-        imgui.end_disabled()
-        imgui.same_line()
-        snapshots = list_named_snapshots(scene_dir)
-        self._snapshot_index = min(self._snapshot_index, max(len(snapshots) - 1, 0))
-        if snapshots:
-            imgui.set_next_item_width(140.0 * ctx.style_scale)
-            imgui.begin_disabled(not ctx.session.paused)
-            changed, self._snapshot_index = imgui.combo(
-                "##scene_snapshots", self._snapshot_index, snapshots
-            )
-            imgui.end_disabled()
-            name = snapshots[self._snapshot_index]
-            if changed:
-                try:
-                    restore_scene(
-                        load_named_snapshot(name, scene_dir),
-                        ctx.session,
-                        ctx.backend,
-                        camera,
-                        select_source=ctx.select_model_camera,
-                    )
-                    self._snapshot_error = ""
-                    ctx.report(f"Loaded scene snapshot '{name}'", level="success")
-                except (OSError, KeyError, TypeError, ValueError) as error:
-                    self._report_storage_error(ctx, error)
-            imgui.same_line()
-            if imgui.button("copy##scene_snapshot"):
-                try:
-                    imgui.set_clipboard_text(
-                        json.dumps(load_named_snapshot(name, scene_dir), indent=2)
-                    )
-                except (OSError, TypeError, ValueError) as error:
-                    self._report_storage_error(ctx, error)
-            imgui.same_line()
-            if imgui.button("delete##scene_snapshot"):
-                try:
-                    delete_named_snapshot(name, scene_dir)
-                    ctx.report(f"Deleted scene snapshot '{name}'", level="success")
-                except OSError as error:
-                    self._report_storage_error(ctx, error)
-        if self._snapshot_error:
-            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._snapshot_error)
-            if imgui.small_button("Copy error##scene_snapshot"):
-                imgui.set_clipboard_text(self._snapshot_error)
+        if self._bookmark_error:
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._bookmark_error)
+            if imgui.small_button("Copy error##camera_bookmark"):
+                imgui.set_clipboard_text(self._bookmark_error)
 
     def _report_storage_error(self, ctx: PanelContext, error: Exception) -> None:
-        self._snapshot_error = str(error)
-        ctx.report(self._snapshot_error, level="error", duration=10.0)
+        self._bookmark_error = str(error)
+        ctx.report(self._bookmark_error, level="error", duration=10.0)
 
     def _source(self, ctx: PanelContext) -> None:
         cameras = ctx.session.cameras
@@ -334,112 +253,3 @@ class CameraPanel(Panel):
                 imgui.set_item_tooltip(f"{ctx.backend.caps.name} has no orthographic projection")
             elif changed:
                 camera.orthographic = value
-
-    def _readout(self, ctx: PanelContext, camera: Any) -> None:
-        view = camera.view() if hasattr(camera, "view") else None
-        if view is None:
-            imgui.text_disabled("this camera exposes no view()")
-            return
-        self._readout_view(ctx, view, camera)
-
-    def _readout_view(self, ctx: PanelContext, view: CameraView, camera: Any = None) -> None:
-        snapshot = camera_snapshot(view, ctx.viewport_rect, camera)
-        if imgui.button(ctx.tr("copy camera snapshot")):
-            imgui.set_clipboard_text(snapshot)
-        imgui.set_item_tooltip("copy exact camera and viewport values for bug reproduction")
-        qpos = ctx.session.frame.qpos
-        imgui.begin_disabled(qpos is None)
-        if imgui.button(ctx.tr("copy qpos")) and qpos is not None:
-            imgui.set_clipboard_text(qpos_snapshot(qpos))
-        imgui.set_item_tooltip("copy the complete generalized position vector")
-        if imgui.button(ctx.tr("copy reproduction state")) and qpos is not None:
-            imgui.set_clipboard_text(reproduction_snapshot(ctx, view, camera))
-        imgui.set_item_tooltip("copy the model, qpos, simulation time, camera, and viewport")
-        imgui.end_disabled()
-        if begin_kv_table("cam_kv"):
-            if camera is not None:
-                labeled(
-                    "orbit",
-                    f"yaw {_get(camera, 'yaw', 0.0):+.4f}  "
-                    f"pitch {_get(camera, 'pitch', 0.0):+.4f}  "
-                    f"distance {_get(camera, 'distance', 0.0):.6g}",
-                )
-            labeled("eye", "  ".join(f"{v:+.6f}" for v in view.eye))
-            labeled("target", "  ".join(f"{v:+.6f}" for v in view.target))
-            labeled("up", "  ".join(f"{v:+.6f}" for v in view.up))
-            labeled("fov y", f"{view.fov_y:.8f} rad / {math.degrees(view.fov_y):.5f} deg")
-            labeled("near / far", f"{view.near:.8g} / {view.far:.8g}")
-            labeled("aspect", f"{view.aspect:.8f}")
-            if view.uses_intrinsics():
-                labeled("focal length", "  ".join(f"{v:.8g}" for v in view.focal_length))
-                labeled("sensor size", "  ".join(f"{v:.8g}" for v in view.sensor_size))
-                labeled(
-                    "principal offset",
-                    "  ".join(f"{v:+.8g}" for v in view.principal_offset),
-                )
-            labeled("viewport", "  ".join(f"{v:.1f}" for v in ctx.viewport_rect))
-            labeled("projection", "orthographic" if view.orthographic else "perspective")
-            imgui.end_table()
-
-
-def camera_snapshot(
-    view: CameraView,
-    viewport_rect: tuple[float, float, float, float],
-    camera: Any = None,
-) -> str:
-    def vec(values) -> str:
-        return "(" + ", ".join(f"{float(v):+.9g}" for v in values) + ")"
-
-    lines = ["forge-viewer camera"]
-    if camera is not None:
-        lines.append(
-            "orbit="
-            f"(yaw={float(_get(camera, 'yaw', 0.0)):+.9g}, "
-            f"pitch={float(_get(camera, 'pitch', 0.0)):+.9g}, "
-            f"distance={float(_get(camera, 'distance', 0.0)):.9g})"
-        )
-    lines.extend(
-        (
-            f"eye={vec(view.eye)}",
-            f"target={vec(view.target)}",
-            f"up={vec(view.up)}",
-            f"fov_y_rad={float(view.fov_y):.12g}",
-            f"near={float(view.near):.12g}",
-            f"far={float(view.far):.12g}",
-            f"aspect={float(view.aspect):.12g}",
-            f"orthographic={bool(view.orthographic)}",
-            "viewport=" + vec(viewport_rect),
-        )
-    )
-    if view.uses_intrinsics():
-        lines.extend(
-            (
-                f"focal_length={vec(view.focal_length)}",
-                f"sensor_size={vec(view.sensor_size)}",
-                f"principal_offset={vec(view.principal_offset)}",
-            )
-        )
-    return "\n".join(lines)
-
-
-def qpos_snapshot(qpos) -> str:
-    values = ", ".join(f"{float(value):+.9g}" for value in qpos)
-    return f"qpos=[{values}]"
-
-
-def reproduction_snapshot(ctx: PanelContext, view: CameraView, camera: Any = None) -> str:
-    session = ctx.session
-    frame = session.frame
-    asset = str(session.asset_path) if session.asset_path is not None else "<runtime scene>"
-    lines = [
-        "forge-viewer reproduction",
-        f"asset={asset}",
-        f"physics_backend={session.adapter.caps.name}",
-        f"render_backend={ctx.backend.caps.name}",
-        f"time={float(frame.time):.12g}",
-        f"step={int(frame.step)}",
-        qpos_snapshot(frame.qpos),
-        "",
-        camera_snapshot(view, ctx.viewport_rect, camera),
-    ]
-    return "\n".join(lines)

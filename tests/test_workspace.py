@@ -1131,23 +1131,20 @@ f 2 3 4
     assert mesh.attrib["file"] == "meshes/tetra.obj"
 
 
-def test_inline_height_field_lifecycle_edits_resolution_size_and_samples() -> None:
+def test_inline_height_field_samples_are_preserved_when_physical_size_changes() -> None:
     document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
+    assert document.set_scene_model_xml(
+        0,
+        """<mujoco>
+  <asset>
+    <hfield name="terrain" nrow="2" ncol="3" size="2 3 4 0.25"
+            elevation="0 0.2 0.4 0.6 0.8 1"/>
+  </asset>
+  <worldbody><geom type="hfield" hfield="terrain"/></worldbody>
+</mujoco>""",
+    )
     session = Session(document, ASSETS / "test_scene.xml")
     assert session.submit(cmd.Pause())
-
-    created = session.submit(
-        cmd.CreateHeightField(
-            0,
-            "terrain",
-            2,
-            3,
-            (2.0, 3.0, 4.0, 0.25),
-            (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
-        )
-    )
-
-    assert created.ok, created.message
     asset = next(item for item in session.model_assets(0) if item.name == "terrain")
     fields = {field.name: field.value for field in asset.fields}
     assert asset.type == "hfield" and not asset.file
@@ -1160,27 +1157,21 @@ def test_inline_height_field_lifecycle_edits_resolution_size_and_samples() -> No
     assert len(asset.preview_values) == 6
     assert document.primary.model.nhfield == 1
 
-    updated = session.submit(
-        cmd.SetHeightFieldData(
-            0,
-            "terrain",
-            3,
-            2,
-            (4.0, 5.0, 6.0, 0.5),
-            (0.0, 0.1, 0.2, 0.3, 0.4, 0.5),
-        )
-    )
+    updated = session.submit(cmd.SetHeightFieldSize(0, "terrain", (4.0, 5.0, 6.0, 0.5)))
 
     assert updated.ok, updated.message
     model = document.primary.model
-    assert tuple(model.hfield_nrow) == (3,)
-    assert tuple(model.hfield_ncol) == (2,)
+    assert tuple(model.hfield_nrow) == (2,)
+    assert tuple(model.hfield_ncol) == (3,)
     assert tuple(model.hfield_size[0]) == pytest.approx((4.0, 5.0, 6.0, 0.5))
+    updated_asset = next(item for item in session.model_assets(0) if item.name == "terrain")
+    assert updated_asset.preview_values == pytest.approx(asset.preview_values)
     assert session.submit(cmd.Undo())
     asset = next(item for item in session.model_assets(0) if item.name == "terrain")
     fields = {field.name: field.value for field in asset.fields}
     assert fields["nrow"] == "2"
     assert fields["ncol"] == "3"
+    assert fields["size"] == "2 3 4 0.25"
 
 
 def test_empty_root_model_edit_batch_resolves_new_body_by_key() -> None:
@@ -2241,19 +2232,9 @@ def test_material_edits_and_bound_copies_preserve_pbr_texture_layers(tmp_path: P
         )
     )
     assert result.ok, result.message
-    invalid = session.submit(cmd.SetModelMaterialLayers(0, "surface", (("normal", "missing"),)))
-    assert not invalid.ok
-    layers = (("rgb", "rgb"), ("roughness", "orm"), ("normal", "normal"))
-    updated = session.submit(cmd.SetModelMaterialLayers(0, "surface", layers))
-    assert updated.ok, updated.message
     assert dict(
         next(item for item in session.model_assets(0) if item.name == "surface").texture_layers
-    ) == dict(layers)
-    assert session.submit(cmd.Undo())
-    assert "orm" in dict(
-        next(item for item in session.model_assets(0) if item.name == "surface").texture_layers
-    )
-    assert session.submit(cmd.Redo())
+    ) == {"rgb": "rgb", "normal": "normal", "orm": "orm"}
     box = next(node for node in session.nodes if node.name == "box")
     copied = session.submit(cmd.AddModelMaterial(box.node_id, "surface_copy", asset.runtime_index))
     assert copied.ok, copied.message
@@ -2268,7 +2249,7 @@ def test_material_edits_and_bound_copies_preserve_pbr_texture_layers(tmp_path: P
         assert float(element.attrib["roughness"]) == pytest.approx(0.7)
         assert {
             (layer.attrib["role"], layer.attrib["texture"]) for layer in element.findall("layer")
-        } == {("rgb", "rgb"), ("normal", "normal"), ("roughness", "orm")}
+        } == {("rgb", "rgb"), ("normal", "normal"), ("orm", "orm")}
 
 
 def test_model_material_creation_binding_and_texture_import(tmp_path: Path, monkeypatch) -> None:
@@ -2609,123 +2590,26 @@ def test_structured_model_components_edit_and_round_trip(tmp_path: Path) -> None
     assert restored.model_components(model_id, "sensor") == ()
 
 
-def test_deformable_flex_and_skin_components_are_structurally_editable() -> None:
-    document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "deformables.xml"))
-    session = Session(document)
-    assert session.submit(cmd.Pause())
+def test_source_owned_custom_and_deformable_sections_remain_runtime_supported(
+    tmp_path: Path,
+) -> None:
+    deformable = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "deformables.xml"))
+    assert deformable.primary.model.nflex > 0
+    assert deformable.primary.model.nskin > 0
+    assert deformable.model_component_presets(0, "deformable") == ()
+    assert deformable.model_components(0, "deformable") == ()
 
-    components = session.model_components(0, "deformable")
-    assert {item.subtype for item in components} == {"flex", "skin"}
-    flex = next(item for item in components if item.subtype == "flex")
-    assert {field.name: field for field in flex.fields}["body"].choices == ()
-    skin = next(item for item in components if item.subtype == "skin")
-    assert skin.name == "ribbon"
-    assert [item.type for item in skin.path] == ["bone", "bone"]
-    assert {field.name for field in skin.path[0].fields} == {
-        "body",
-        "bindpos",
-        "bindquat",
-        "vertid",
-        "vertweight",
-    }
-    assert {"skin_root", "skin_tip"} <= set(
-        {field.name: field for field in skin.path[0].fields}["body"].choices
-    )
-    fields = tuple(
-        (field.name, "0.012" if field.name == "inflate" else field.value) for field in skin.fields
-    )
-    path = tuple(
-        (
-            item.type,
-            tuple(
-                (
-                    field.name,
-                    "0.56 0 0.85" if path_index == 0 and field.name == "bindpos" else field.value,
-                )
-                for field in item.fields
-            ),
-        )
-        for path_index, item in enumerate(skin.path)
-    )
-    edited = session.submit(
-        cmd.UpdateModelComponent(0, "deformable", skin.component_id, skin.name, fields, path)
-    )
-    assert edited.ok, edited.message
-    assert float(document.primary.model.skin_inflate[0]) == pytest.approx(0.012)
-    xml = document.scene_model_source(0)
-    assert xml is not None and 'inflate="0.012"' in xml
-    assert 'bindpos="0.56 0 0.85"' in xml
-
-    assert session.submit(cmd.Undo())
-    restored = next(
-        item for item in session.model_components(0, "deformable") if item.subtype == "skin"
-    )
-    assert {field.name: field.value for field in restored.fields}["inflate"] == "0.004"
-    assert session.submit(cmd.Redo())
-    restored = next(
-        item for item in session.model_components(0, "deformable") if item.subtype == "skin"
-    )
-    assert {field.name: field.value for field in restored.fields}["inflate"] == "0.012"
-    assert session.submit(cmd.RemoveModelComponent(0, "deformable", restored.component_id))
-    assert document.primary.model.nskin == 0
-    assert session.submit(cmd.Undo())
-    assert document.primary.model.nskin == 1
-
-
-def test_custom_numeric_text_and_tuple_authoring_round_trips(tmp_path: Path) -> None:
     document = workspace()
-    assert document.model_component_presets(0, "custom") == ("numeric", "text", "tuple")
-    component_ids = {
-        subtype: document.add_model_component(0, "custom", subtype, "shared")
-        for subtype in ("numeric", "text", "tuple")
-    }
-    assert component_ids == {"numeric": 0, "text": 1, "tuple": 2}
-
-    components = {item.subtype: item for item in document.model_components(0, "custom")}
-    assert {field.name: field.value for field in components["numeric"].fields} == {
-        "size": "1",
-        "data": "0",
-    }
-    assert {field.name: field.value for field in components["text"].fields} == {"data": "text"}
-    tuple_item = components["tuple"]
-    assert [(field.name, field.value) for field in tuple_item.path[0].fields] == [
-        ("objtype", "body"),
-        ("objname", "world"),
-        ("prm", ""),
-    ]
-    numeric_preset = next(
-        preset
-        for preset in tuple_item.path_presets
-        if {field.name: field.value for field in preset.fields}["objtype"] == "numeric"
-    )
-    assert {field.name: field.choices for field in numeric_preset.fields}["objname"] == ("shared",)
-
-    assert document.update_model_component(
+    assert document.set_scene_model_xml(
         0,
-        "custom",
-        component_ids["numeric"],
-        "shared",
-        (("size", "3"), ("data", "1 2 3")),
-        (),
-    )
-    assert document.update_model_component(
-        0,
-        "custom",
-        component_ids["text"],
-        "shared",
-        (("data", "edited value"),),
-        (),
-    )
-    assert document.update_model_component(
-        0,
-        "custom",
-        component_ids["tuple"],
-        "shared",
-        (),
-        (
-            ("element", (("objtype", "body"), ("objname", "world"), ("prm", "1"))),
-            ("element", (("objtype", "numeric"), ("objname", "shared"), ("prm", "2"))),
-        ),
+        """<mujoco>
+  <custom>
+    <numeric name="values" size="3" data="1 2 3"/>
+    <text name="label" data="source owned"/>
+    <tuple name="objects"><element objtype="body" objname="world" prm="2"/></tuple>
+  </custom>
+  <worldbody/>
+</mujoco>""",
     )
     assert (
         document.primary.model.nnumeric,
@@ -2736,19 +2620,16 @@ def test_custom_numeric_text_and_tuple_authoring_round_trips(tmp_path: Path) -> 
         1,
         1,
     )
+    assert document.model_component_presets(0, "custom") == ()
+    assert document.model_components(0, "custom") == ()
 
-    path = tmp_path / "custom-components.forge.json"
-    document.save_scene(path)
-    restored = workspace()
-    restored.open_scene(path)
-    restored_components = {item.subtype: item for item in restored.model_components(0, "custom")}
-    assert {field.name: field.value for field in restored_components["numeric"].fields}[
-        "data"
-    ] == "1 2 3"
-    assert {field.name: field.value for field in restored_components["text"].fields}[
-        "data"
-    ] == "edited value"
-    assert len(restored_components["tuple"].path) == 2
+    exported = tmp_path / "source-owned.xml"
+    document.save_scene(exported)
+    text = exported.read_text(encoding="utf-8")
+    assert '<numeric name="values" size="3" data="1 2 3"' in text
+    assert '<text name="label" data="source owned"' in text
+    assert '<tuple name="objects"' in text
+    mujoco.MjModel.from_xml_path(str(exported))
 
 
 def test_contact_pair_and_exclude_use_structured_reference_fields(tmp_path: Path) -> None:
@@ -3091,143 +2972,7 @@ def test_model_keyframe_authoring_captures_edits_loads_and_undoes(tmp_path: Path
     assert session.keyframes == []
 
 
-def test_schema_model_properties_batch_globals_defaults_and_assets_once() -> None:
-    document = workspace()
-    adapter = document.primary
-    assert document.set_scene_model_xml(
-        0,
-        """<mujoco model="schema-properties">
-  <compiler angle="degree"/>
-  <option timestep="0.01"><flag energy="enable"/></option>
-  <visual><global fovy="50"/></visual>
-  <default><default class="soft"><geom friction="0.5 0.1 0.01"/><joint damping="1"/></default></default>
-  <asset>
-    <texture name="checker" type="2d" builtin="checker" width="4" height="4"/>
-    <material name="paint" metallic="0.2" roughness="0.5"/>
-    <mesh name="tetra" vertex="0 0 0  1 0 0  0 1 0  0 0 1"
-          face="0 2 1  0 1 3  0 3 2  1 2 3"/>
-    <hfield name="terrain" nrow="2" ncol="2" size="1 1 0.2 0.1"
-            elevation="0 0 0 1"/>
-  </asset>
-  <worldbody><body><joint/><geom size="0.1"/></body></worldbody>
-</mujoco>""",
-    )
-    session = Session(document)
-    assert session.submit(cmd.Pause())
-    groups = {group.group_id: group for group in session.model_property_groups(0)}
-    assert {
-        "global:model",
-        "global:compiler",
-        "global:option",
-        "global:option/flag",
-    } <= groups.keys()
-    assert [(field.name, field.value) for field in groups["global:model"].fields] == [
-        ("model", "schema-properties")
-    ]
-    assert {field.name for field in groups["global:option"].fields} >= {
-        "timestep",
-        "gravity",
-        "solver",
-    }
-    assert {field.name for field in groups["asset:mesh:0"].fields} >= {
-        "scale",
-        "inertia",
-        "smoothnormal",
-    }
-    assert "vertex" not in {field.name for field in groups["asset:mesh:0"].fields}
-    assert {field.name for field in groups["asset:material:0"].fields} >= {
-        "metallic",
-        "roughness",
-        "texuniform",
-    }
-    texture_fields = {field.name: field for field in groups["asset:texture:0"].fields}
-    assert texture_fields["type"].choices == ("", "2d", "cube", "skybox")
-    assert texture_fields["colorspace"].choices == ("", "auto", "srgb", "linear")
-    soft_geom = next(
-        group
-        for group in groups.values()
-        if group.category == "default" and group.label == "Default soft / geom"
-    )
-
-    replace_count = 0
-    replace_model_spec = adapter._replace_model_spec
-
-    def counted_replace(model_id, spec):
-        nonlocal replace_count
-        replace_count += 1
-        return replace_model_spec(model_id, spec)
-
-    adapter._replace_model_spec = counted_replace
-    updates = (
-        ("global:model", (("model", "edited-properties"),)),
-        ("global:option", (("timestep", "0.005"), ("gravity", "0 0 -1"))),
-        ("global:size", (("nuserdata", "8"),)),
-        ("global:visual/global", (("orthographic", "true"), ("fovy", "35"))),
-        (soft_geom.group_id, (("friction", "0.8 0.2 0.02"), ("rgba", "0.2 0.3 0.4 1"))),
-        ("asset:mesh:0", (("scale", "2 3 4"), ("smoothnormal", "true"))),
-        ("asset:hfield:0", (("size", "2 3 0.4 0.2"),)),
-        ("asset:material:0", (("metallic", "0.4"), ("roughness", "0.8"))),
-        ("asset:texture:0", (("rgb1", "0.2 0.3 0.4"), ("colorspace", "linear"))),
-    )
-    result = session.submit(cmd.SetModelPropertyGroups(0, updates))
-    assert result.ok
-    assert replace_count == 1
-    assert adapter.model.opt.timestep == pytest.approx(0.005)
-    assert adapter.model.opt.gravity == pytest.approx((0.0, 0.0, -1.0))
-    edited = {group.group_id: group for group in session.model_property_groups(0)}
-    assert edited["global:model"].fields[0].value == "edited-properties"
-    assert {field.name: field.value for field in edited["global:visual/global"].fields}[
-        "orthographic"
-    ] == "true"
-    assert {field.name: field.value for field in edited["asset:mesh:0"].fields}["scale"] == "2 3 4"
-    assert {field.name: field.value for field in edited["asset:material:0"].fields}[
-        "roughness"
-    ] == "0.8"
-    assert {field.name: field.value for field in edited["asset:texture:0"].fields}[
-        "colorspace"
-    ] == "linear"
-    assert {field.name: field.value for field in edited[soft_geom.group_id].fields}[
-        "friction"
-    ] == "0.8 0.2 0.02"
-
-    assert session.submit(cmd.Undo())
-    assert adapter.model.opt.timestep == pytest.approx(0.01)
-    assert session.submit(cmd.Redo())
-    assert adapter.model.opt.timestep == pytest.approx(0.005)
-
-
-def test_default_class_add_nested_edit_remove_and_undo() -> None:
-    document = workspace()
-    session = Session(document)
-    assert session.submit(cmd.Pause())
-
-    base = session.submit(cmd.AddModelDefault(0, -1, "base"))
-    assert base.ok
-    child = session.submit(cmd.AddModelDefault(0, base.entity_id, "child"))
-    assert child.ok
-    groups = {group.label: group for group in session.model_property_groups(0)}
-    assert "Default base / class" in groups
-    child_geom = groups["Default child / geom"]
-    assert session.submit(
-        cmd.SetModelPropertyGroups(
-            0,
-            ((child_geom.group_id, (("friction", "0.7 0.2 0.03"),)),),
-        )
-    )
-    edited = {group.label: group for group in session.model_property_groups(0)}
-    assert {field.name: field.value for field in edited["Default child / geom"].fields}[
-        "friction"
-    ] == "0.7 0.2 0.03"
-
-    assert not session.submit(cmd.RemoveModelDefault(0, 0))
-    assert session.submit(cmd.RemoveModelDefault(0, base.entity_id))
-    assert all("Default base" not in group.label for group in session.model_property_groups(0))
-    assert session.submit(cmd.Undo())
-    labels = {group.label for group in session.model_property_groups(0)}
-    assert {"Default base / class", "Default child / class"} <= labels
-
-
-def test_default_material_layers_edit_inherit_undo_and_round_trip(tmp_path: Path) -> None:
+def test_source_owned_default_material_layers_round_trip(tmp_path: Path) -> None:
     path = tmp_path / "default-material-layers.xml"
     path.write_text(
         """
@@ -3255,94 +3000,28 @@ def test_default_material_layers_edit_inherit_undo_and_round_trip(tmp_path: Path
     document = WorkspaceAdapter(MuJoCoAdapter(path))
     session = Session(document)
     assert session.submit(cmd.Pause())
-
-    groups = {group.label: group for group in session.model_property_groups(0)}
-    main_layers = {field.name: field for field in groups["Default main / material layers"].fields}
-    child_layers = {field.name: field for field in groups["Default child / material layers"].fields}
-    assert main_layers["normal"].value == "a"
-    assert main_layers["normal"].choices == ("", "a", "b")
-    assert child_layers["normal"].value == ""
-    assert child_layers["roughness"].value == "b"
-    child_group = groups["Default child / material layers"]
-
-    invalid = session.submit(
-        cmd.SetModelPropertyGroups(
-            0,
-            ((child_group.group_id, (("normal", "missing"),)),),
-        )
-    )
-    assert not invalid.ok
-
+    child = next(item for item in session.model_assets(0) if item.name == "child_material")
+    source = session.source
+    assert source is not None
+    material = source.materials[child.runtime_index]
     result = session.submit(
-        cmd.SetModelPropertyGroups(
-            0,
-            ((child_group.group_id, (("normal", "b"), ("opacity", "a"))),),
+        cmd.SetMaterial(
+            child.runtime_index,
+            replace(material, rgba=np.array((0.3, 0.4, 0.5, 1.0), np.float32)),
         )
     )
     assert result.ok, result.message
-    edited = {
-        field.name: field.value
-        for field in next(
-            group
-            for group in session.model_property_groups(0)
-            if group.label == "Default child / material layers"
-        ).fields
-    }
-    assert edited["normal"] == "b"
-    assert edited["roughness"] == "b"
-    assert edited["opacity"] == "a"
-
-    source = document.scene_model_source(0)
-    assert source is not None
-    root = ET.fromstring(source)
-    child_default = next(
-        element for element in root.iter("default") if element.attrib.get("class") == "child"
-    )
-    assert {
-        layer.attrib["role"]: layer.attrib["texture"]
-        for layer in child_default.find("material") or ()
-    } == {"roughness": "b", "normal": "b", "opacity": "a"}
-
-    assert session.submit(cmd.Undo())
-    restored = {
-        field.name: field.value
-        for field in next(
-            group
-            for group in session.model_property_groups(0)
-            if group.label == "Default child / material layers"
-        ).fields
-    }
-    assert restored["normal"] == ""
-    assert restored["roughness"] == "b"
-    assert session.submit(cmd.Redo())
-
-    workspace_path = tmp_path / "default-material-layers.forge.json"
-    document.save_scene(workspace_path)
-    reopened = workspace()
-    reopened.open_scene(workspace_path)
-    reopened_model_id = reopened.scene_models()[0].model_id
-    reopened_layers = {
-        field.name: field.value
-        for field in next(
-            group
-            for group in reopened.model_property_groups(reopened_model_id)
-            if group.label == "Default child / material layers"
-        ).fields
-    }
-    assert reopened_layers["normal"] == "b"
-    assert reopened_layers["roughness"] == "b"
-    assert reopened_layers["opacity"] == "a"
 
     export_path = tmp_path / "default-material-layers-export.xml"
     document.save_scene(export_path)
     exported = export_path.read_text(encoding="utf-8")
     assert '<layer role="normal" texture="a"' in exported
-    assert '<layer role="normal" texture="b"' in exported
-    assert '<layer role="opacity" texture="a"' in exported
+    assert '<layer role="roughness" texture="b"' in exported
     exported_root = ET.fromstring(exported)
     child_material = exported_root.find("asset/material[@name='child_material']")
     assert child_material is not None
     assert child_material.findall("layer") == []
+    assert child_material.attrib["rgba"] == "0.3 0.4 0.5 1"
     mujoco.MjModel.from_xml_path(str(export_path))
 
 

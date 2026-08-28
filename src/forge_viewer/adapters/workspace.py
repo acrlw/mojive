@@ -22,7 +22,6 @@ from .base import (
     JointAdvancedProperties,
     KeyframeProperties,
     ModelAssetInfo,
-    ModelPropertyGroup,
     NodeType,
     SceneAdapterBase,
     SceneFrame,
@@ -257,9 +256,6 @@ class WorkspaceAdapter(SceneAdapterBase):
             self._invalidate()
         return changed
 
-    def model_property_groups(self, model_id: int) -> tuple[ModelPropertyGroup, ...]:
-        return self.primary.model_property_groups(model_id)
-
     def model_assets(self, model_id: int) -> tuple[ModelAssetInfo, ...]:
         return self.primary.model_assets(model_id)
 
@@ -276,30 +272,13 @@ class WorkspaceAdapter(SceneAdapterBase):
             self._invalidate()
         return changed
 
-    def create_height_field(
+    def set_height_field_size(
         self,
         model_id: int,
         name: str,
-        rows: int,
-        columns: int,
         size: tuple[float, float, float, float],
-        elevation: tuple[float, ...],
     ) -> bool:
-        changed = self.primary.create_height_field(model_id, name, rows, columns, size, elevation)
-        if changed:
-            self._invalidate()
-        return changed
-
-    def set_height_field_data(
-        self,
-        model_id: int,
-        name: str,
-        rows: int,
-        columns: int,
-        size: tuple[float, float, float, float],
-        elevation: tuple[float, ...],
-    ) -> bool:
-        changed = self.primary.set_height_field_data(model_id, name, rows, columns, size, elevation)
+        changed = self.primary.set_height_field_size(model_id, name, size)
         if changed:
             self._invalidate()
         return changed
@@ -328,28 +307,6 @@ class WorkspaceAdapter(SceneAdapterBase):
 
     def remove_model_asset(self, model_id: int, asset_type: str, name: str) -> bool:
         changed = self.primary.remove_model_asset(model_id, asset_type, name)
-        if changed:
-            self._invalidate()
-        return changed
-
-    def set_model_property_groups(
-        self,
-        model_id: int,
-        updates: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
-    ) -> bool:
-        changed = self.primary.set_model_property_groups(model_id, updates)
-        if changed:
-            self._invalidate()
-        return changed
-
-    def add_model_default(self, model_id: int, parent_default_id: int, name: str) -> int:
-        default_id = self.primary.add_model_default(model_id, parent_default_id, name)
-        if default_id >= 0:
-            self._invalidate()
-        return default_id
-
-    def remove_model_default(self, model_id: int, default_id: int) -> bool:
-        changed = self.primary.remove_model_default(model_id, default_id)
         if changed:
             self._invalidate()
         return changed
@@ -680,14 +637,6 @@ class WorkspaceAdapter(SceneAdapterBase):
         if material_index >= 0:
             self._invalidate()
         return material_index
-
-    def set_model_material_layers(
-        self, model_id: int, name: str, layers: tuple[tuple[str, str], ...]
-    ) -> bool:
-        changed = self.primary.set_model_material_layers(model_id, name, layers)
-        if changed:
-            self._invalidate()
-        return changed
 
     def add_model_material(self, node_id: int, name: str, copy_from: int = -1) -> int:
         return self.primary.add_model_material(node_id, name, copy_from)

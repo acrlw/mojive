@@ -105,13 +105,15 @@ def test_mujoco_schema_audit_classifies_every_attributed_path():
     expected = {"/".join(path) for path, fields in _MJCF_SCHEMA_ATTRIBUTES.items() if fields}
     assert set(rows) == expected
     assert rows["mujoco"]["status"] == "structured"
-    assert rows["mujoco/compiler"]["status"] == "structured"
+    assert rows["mujoco/compiler"]["status"] == "raw-mjcf-only"
     assert rows["mujoco/asset/hfield"]["status"] == "structured-partial"
-    assert rows["mujoco/asset/material/layer"]["status"] == "structured"
-    assert rows["mujoco/asset/skin"]["status"] == "structured-partial"
-    assert rows["mujoco/default/material/layer"]["status"] == "structured"
+    assert rows["mujoco/asset/material/layer"]["status"] == "raw-mjcf-only"
+    assert rows["mujoco/asset/skin"]["status"] == "runtime-only"
+    assert rows["mujoco/default/material/layer"]["status"] == "raw-mjcf-only"
     assert rows["mujoco/(world)body/site"]["status"] == "structured-partial"
-    assert rows["mujoco/deformable/flex"]["status"] == "structured-partial"
+    assert rows["mujoco/deformable/flex"]["status"] == "runtime-only"
+    assert rows["mujoco/custom/numeric"]["status"] == "raw-mjcf-only"
+    assert rows["mujoco/keyframe/key"]["status"] == "structured-partial"
     assert rows["mujoco/extension/plugin"]["status"] == "plugin-out-of-scope"
     assert rows["mujoco/actuator/plugin"]["status"] == "plugin-out-of-scope"
     assert {item["path"] for item in report["source_meta"]} == {

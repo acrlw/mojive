@@ -207,7 +207,7 @@ class SetModelSource(Command):
 
 @dataclass(frozen=True)
 class AddModelComponent(Command):
-    """Add a model-level contact, actuator, sensor, tendon, equality, or custom component."""
+    """Add a model-level contact, actuator, sensor, tendon, or equality component."""
 
     model_id: int
     category: str
@@ -234,31 +234,6 @@ class RemoveModelComponent(Command):
     model_id: int
     category: str
     component_id: int
-
-
-@dataclass(frozen=True)
-class SetModelPropertyGroups(Command):
-    """Apply schema-driven model properties in one model rebuild."""
-
-    model_id: int
-    updates: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
-
-
-@dataclass(frozen=True)
-class AddModelDefault(Command):
-    """Add a named default class below an existing default class."""
-
-    model_id: int
-    parent_default_id: int
-    name: str
-
-
-@dataclass(frozen=True)
-class RemoveModelDefault(Command):
-    """Remove a named default class by schema index."""
-
-    model_id: int
-    default_id: int
 
 
 @dataclass(frozen=True)
@@ -627,27 +602,12 @@ class ImportModelAsset(Command):
 
 
 @dataclass(frozen=True)
-class CreateHeightField(Command):
-    """Create one inline model height field."""
+class SetHeightFieldSize(Command):
+    """Set the physical dimensions of a model-local height field."""
 
     model_id: int
     name: str
-    rows: int
-    columns: int
     size: tuple[float, float, float, float]
-    elevation: tuple[float, ...]
-
-
-@dataclass(frozen=True)
-class SetHeightFieldData(Command):
-    """Replace an inline model height field's resolution, dimensions, and samples."""
-
-    model_id: int
-    name: str
-    rows: int
-    columns: int
-    size: tuple[float, float, float, float]
-    elevation: tuple[float, ...]
 
 
 @dataclass(frozen=True)
@@ -711,15 +671,6 @@ class CreateModelMaterial(Command):
 
     model_id: int
     name: str
-
-
-@dataclass(frozen=True)
-class SetModelMaterialLayers(Command):
-    """Replace texture-role bindings on one model-local material."""
-
-    model_id: int
-    name: str
-    layers: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)

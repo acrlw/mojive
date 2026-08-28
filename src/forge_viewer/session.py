@@ -23,7 +23,6 @@ from .adapters.base import (
     KeyframeInfo,
     KeyframeProperties,
     ModelAssetInfo,
-    ModelPropertyGroup,
     NodeType,
     PhysicsState,
     SceneAdapter,
@@ -37,7 +36,6 @@ from .adapters.base import (
 )
 from .commands import Command, CommandResult, Query
 from .types import (
-    MATERIAL_TEXTURE_ROLES,
     CameraView,
     Environment,
     InstancePoseSource,
@@ -340,9 +338,6 @@ _SCENE_EDIT_COMMANDS = (
     cmd.AddModelComponent,
     cmd.UpdateModelComponent,
     cmd.RemoveModelComponent,
-    cmd.SetModelPropertyGroups,
-    cmd.AddModelDefault,
-    cmd.RemoveModelDefault,
     cmd.AddResourceRoot,
     cmd.RemoveResourceRoot,
     cmd.SetPose,
@@ -354,15 +349,13 @@ _SCENE_EDIT_COMMANDS = (
     cmd.SetGeometryShape,
     cmd.ImportModelGeometryResource,
     cmd.ImportModelAsset,
-    cmd.CreateHeightField,
-    cmd.SetHeightFieldData,
+    cmd.SetHeightFieldSize,
     cmd.RenameModelAsset,
     cmd.DuplicateModelAsset,
     cmd.ReplaceModelAssetFile,
     cmd.RemoveModelAsset,
     cmd.SetBodyProperties,
     cmd.CreateModelMaterial,
-    cmd.SetModelMaterialLayers,
     cmd.AddModelMaterial,
     cmd.ImportModelTexture,
     cmd.SetGeometryMaterial,
@@ -568,10 +561,6 @@ class Session:
     def model_component_presets(self, model_id: int, category: str) -> tuple[str, ...]:
         """Return supported component subtypes for a model and category."""
         return self._adapter.model_component_presets(model_id, category)
-
-    def model_property_groups(self, model_id: int) -> tuple[ModelPropertyGroup, ...]:
-        """Return schema-driven model, default-class, and asset properties."""
-        return self._adapter.model_property_groups(model_id)
 
     def model_assets(self, model_id: int) -> tuple[ModelAssetInfo, ...]:
         """Return model-local assets and their current reference summaries."""
@@ -1354,55 +1343,6 @@ class Session:
             self._refresh_structure()
             return CommandResult.good(f"Removed {c.category}")
 
-        if isinstance(c, cmd.SetModelPropertyGroups):
-            if not caps.topology_editing:
-                return CommandResult.bad(f"{caps.name} does not support topology editing")
-            if caps.simulation and not self._paused:
-                return CommandResult.bad("Pause the simulation before changing model properties")
-            if not c.updates or len({group_id for group_id, _fields in c.updates}) != len(
-                c.updates
-            ):
-                return CommandResult.bad("Model property updates must use unique group IDs")
-            try:
-                changed = self._adapter.set_model_property_groups(c.model_id, c.updates)
-            except Exception as exc:
-                return CommandResult.bad(str(exc))
-            if not changed:
-                return CommandResult.bad("Model properties were unchanged or unavailable")
-            self._refresh_structure()
-            return CommandResult.good(f"Updated {len(c.updates)} model property group(s)")
-
-        if isinstance(c, cmd.AddModelDefault):
-            if not caps.topology_editing:
-                return CommandResult.bad(f"{caps.name} does not support topology editing")
-            if caps.simulation and not self._paused:
-                return CommandResult.bad("Pause the simulation before adding a default class")
-            name = str(c.name).strip()
-            if not name:
-                return CommandResult.bad("Default class name cannot be empty")
-            try:
-                default_id = self._adapter.add_model_default(c.model_id, c.parent_default_id, name)
-            except Exception as exc:
-                return CommandResult.bad(str(exc))
-            if default_id < 0:
-                return CommandResult.bad(f"Default class {name!r} could not be added")
-            self._refresh_structure()
-            return CommandResult.good(f"Added default class {name}", default_id)
-
-        if isinstance(c, cmd.RemoveModelDefault):
-            if not caps.topology_editing:
-                return CommandResult.bad(f"{caps.name} does not support topology editing")
-            if caps.simulation and not self._paused:
-                return CommandResult.bad("Pause the simulation before removing a default class")
-            try:
-                changed = self._adapter.remove_model_default(c.model_id, c.default_id)
-            except Exception as exc:
-                return CommandResult.bad(str(exc))
-            if not changed:
-                return CommandResult.bad(f"Default class {c.default_id} could not be removed")
-            self._refresh_structure()
-            return CommandResult.good("Removed default class")
-
         if isinstance(c, cmd.AddResourceRoot):
             if not caps.scene_files or not c.path.is_dir():
                 return CommandResult.bad(f"Resource directory is unavailable: {c.path}")
@@ -2025,24 +1965,17 @@ class Session:
             self._refresh_structure()
             return CommandResult.good(f"Imported {asset_type} asset {name}")
 
-        if isinstance(c, (cmd.CreateHeightField, cmd.SetHeightFieldData)):
+        if isinstance(c, cmd.SetHeightFieldSize):
             if not caps.model_assets:
                 return CommandResult.bad(f"{caps.name} does not support model asset editing")
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before editing height fields")
             try:
-                rows = int(c.rows)
-                columns = int(c.columns)
                 size = np.asarray(c.size, np.float64).reshape(4)
-                elevation = np.asarray(c.elevation, np.float64).reshape(-1)
             except (TypeError, ValueError, OverflowError):
-                return CommandResult.bad("Height-field data has invalid value types")
-            if rows < 2 or columns < 2:
-                return CommandResult.bad("Height-field resolution must be at least 2 by 2")
-            if elevation.size != rows * columns:
-                return CommandResult.bad(f"Height-field elevation needs {rows * columns} samples")
-            if not np.all(np.isfinite(size)) or not np.all(np.isfinite(elevation)):
-                return CommandResult.bad("Height-field values must be finite")
+                return CommandResult.bad("Height-field dimensions have invalid value types")
+            if not np.all(np.isfinite(size)):
+                return CommandResult.bad("Height-field dimensions must be finite")
             if np.any(size[:3] <= 0.0) or size[3] < 0.0:
                 return CommandResult.bad(
                     "Height-field half-sizes and elevation scale must be positive; "
@@ -2059,35 +1992,24 @@ class Session:
                 ),
                 None,
             )
-            creating = isinstance(c, cmd.CreateHeightField)
-            if creating and current is not None:
-                return CommandResult.bad(f"Height-field asset {name!r} already exists")
-            if not creating and current is None:
+            if current is None:
                 return CommandResult.bad(f"Height-field asset {name!r} is unavailable")
-            if not creating and current is not None and current.file:
-                return CommandResult.bad("File-backed height fields cannot edit inline samples")
-            method = (
-                self._adapter.create_height_field
-                if creating
-                else self._adapter.set_height_field_data
-            )
             try:
-                changed = method(
+                changed = self._adapter.set_height_field_size(
                     c.model_id,
                     name,
-                    rows,
-                    columns,
                     tuple(float(value) for value in size),
-                    tuple(float(value) for value in elevation),
                 )
             except Exception as exc:
-                return CommandResult.bad(f"Height-field asset {name!r} could not be applied: {exc}")
+                return CommandResult.bad(
+                    f"Height-field asset {name!r} dimensions could not be applied: {exc}"
+                )
             if not changed:
-                return CommandResult.bad(f"Height-field asset {name!r} could not be applied")
+                return CommandResult.bad(
+                    f"Height-field asset {name!r} dimensions could not be applied"
+                )
             self._refresh_structure()
-            verb = "Created" if creating else "Updated"
-            return CommandResult.good(f"{verb} height-field asset {name}")
-
+            return CommandResult.good(f"Updated height-field dimensions for {name}")
         if isinstance(c, cmd.RenameModelAsset):
             if not caps.model_assets:
                 return CommandResult.bad(f"{caps.name} does not support model asset editing")
@@ -2294,37 +2216,6 @@ class Session:
                 return CommandResult.bad(f"Material {value!r} could not be created")
             self._refresh_structure()
             return CommandResult.good(f"Created material {value}", material_index)
-
-        if isinstance(c, cmd.SetModelMaterialLayers):
-            if not caps.model_assets:
-                return CommandResult.bad(f"{caps.name} does not support model asset editing")
-            if caps.simulation and not self._paused:
-                return CommandResult.bad("Pause the simulation before editing material layers")
-            name = str(c.name).strip()
-            try:
-                layers = tuple(
-                    (str(role).strip().lower(), str(texture).strip()) for role, texture in c.layers
-                )
-            except (TypeError, ValueError):
-                return CommandResult.bad("Material texture layers are malformed")
-            roles = tuple(role for role, _texture in layers)
-            if not name:
-                return CommandResult.bad("A material name cannot be empty")
-            if len(roles) != len(set(roles)):
-                return CommandResult.bad("A material texture role can only be assigned once")
-            if any(role not in MATERIAL_TEXTURE_ROLES for role in roles):
-                return CommandResult.bad("A material texture role is invalid")
-            assets = self._adapter.model_assets(c.model_id)
-            if not any(item.type == "material" and item.name == name for item in assets):
-                return CommandResult.bad(f"Material {name!r} is unavailable")
-            textures = {item.name for item in assets if item.type == "texture"}
-            missing = next((texture for _role, texture in layers if texture not in textures), None)
-            if missing is not None:
-                return CommandResult.bad(f"Texture {missing!r} is unavailable for this model")
-            if not self._adapter.set_model_material_layers(c.model_id, name, layers):
-                return CommandResult.bad(f"Material {name!r} texture layers could not be edited")
-            self._refresh_structure()
-            return CommandResult.good(f"Updated texture layers for material {name}")
 
         if isinstance(c, cmd.AddModelMaterial):
             if not caps.model_assets:

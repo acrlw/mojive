@@ -62,7 +62,7 @@ class HelpPanel(Panel):
             return
         if not imgui.collapsing_header("panels", imgui.TreeNodeFlags_.default_open):
             return
-        imgui.text_disabled("a panel closed with its X can only be reopened with its key")
+        imgui.text_disabled("Open or close panels from the Window menu; shortcuts are optional.")
         if not imgui.begin_table("help_panels", 3, _FLAGS):
             return
         imgui.table_setup_column("key")

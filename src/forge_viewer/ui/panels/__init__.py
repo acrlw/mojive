@@ -388,9 +388,6 @@ def validate_panels(panels: list[Panel]) -> list[str]:
             problems.append(f"Duplicate panel name: {p.name}")
         names.add(p.name)
 
-        if not p.default_open and not p.shortcut:
-            problems.append(f"{p.name} is closed by default and has no shortcut")
-
         for spec in (p.shortcut, *p.aliases):
             if not spec:
                 continue
@@ -409,6 +406,7 @@ def default_panels() -> list[Panel]:
     from .info import InfoPanel
     from .inspector import InspectorPanel
     from .joints import JointsPanel
+    from .keyframes import KeyframesPanel
     from .output import OutputPanel
     from .plot import PlotPanel
     from .sensors import SensorsPanel
@@ -421,6 +419,7 @@ def default_panels() -> list[Panel]:
         AssetsPanel(),
         InspectorPanel(),
         JointsPanel(),
+        KeyframesPanel(),
         CameraPanel(),
         PlotPanel(),
         StatsPanel(),
