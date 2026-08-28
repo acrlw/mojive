@@ -25,6 +25,7 @@ moderngl = pytest.importorskip("moderngl")
 from forge_viewer import math3d as M  # noqa: E402
 from forge_viewer.adapters.base import SceneSource  # noqa: E402
 from forge_viewer.gizmo import (  # noqa: E402
+    ACTIVE_COLOR,
     AXIS_COLORS,
     CENTER_RADIUS,
     CENTER_SHELL_RADIUS,
@@ -63,6 +64,7 @@ RECT = (0.0, 0.0, float(W), float(H))
 AXIS_U8 = np.rint(AXIS_COLORS[:, :3] * 255.0)  # X red, Y green, Z blue
 HOVER_U8 = np.rint(HOVER_COLOR[:3] * 255.0)
 JOINT_U8 = np.rint(JOINT_HANDLE_COLOR[:3] * 255.0)
+ACTIVE_U8 = np.rint(ACTIVE_COLOR[:3] * 255.0)
 
 # Gaze direction shared by all cameras: every axis and plane handle is fully
 # facing (alpha 1.0).
@@ -116,6 +118,14 @@ def _joint_mask(img: np.ndarray) -> np.ndarray:
         & (rgb[..., 2] > 120)
         & (np.max(shaded, axis=-1) - np.min(shaded, axis=-1) < 0.18)
     )
+
+
+def _tint_mask(img: np.ndarray, target: np.ndarray) -> np.ndarray:
+    rgb = img[..., :3].astype(np.float64)
+    peak = np.max(rgb, axis=-1)
+    chroma = rgb / np.maximum(peak[..., None], 1.0)
+    target_chroma = target.astype(np.float64) / float(np.max(target))
+    return (peak > 64.0) & (np.max(np.abs(chroma - target_chroma), axis=-1) < 0.12)
 
 
 class Rig:
@@ -199,6 +209,25 @@ def test_scalar_joint_color_override_does_not_look_like_a_world_axis(rig):
     joint_pixels = patch[_joint_mask(patch), :3].astype(np.float64)
     assert len(joint_pixels) > 0
     assert np.median(joint_pixels[:, 0] / joint_pixels[:, 2]) > 0.65
+
+
+def test_scalar_joint_handle_distinguishes_hover_and_active_colors(rig):
+    if not rig.backend.caps.gizmo:
+        pytest.skip("gizmo unsupported by this backend")
+    cam = _camera()
+    frame = _frame()
+    frame.handle_mask = handle_mask(GizmoHandle.Z)
+    frame.handle_color = JOINT_HANDLE_COLOR
+    frame.hovered = GizmoHandle.Z
+    hovered = rig.draw(frame, cam, box=False)
+
+    frame.active = GizmoHandle.Z
+    active = rig.draw(frame, cam, box=False)
+
+    assert _tint_mask(hovered, HOVER_U8).any()
+    assert not _tint_mask(hovered, ACTIVE_U8).any()
+    assert _tint_mask(active, ACTIVE_U8).any()
+    assert not _tint_mask(active, HOVER_U8).any()
 
 
 @pytest.mark.parametrize(

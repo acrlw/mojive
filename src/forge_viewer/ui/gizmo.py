@@ -23,6 +23,7 @@ from ..commands import (
     SetSceneModelTransform,
 )
 from ..gizmo import (
+    ACTIVE_COLOR,
     ALL_HANDLE_MASK,
     AXIS_COLORS,
     AXIS_END,
@@ -1031,7 +1032,10 @@ class ObjectGizmo:
                 )
 
     def _flat_color(self, handle: GizmoHandle, axis: int, alpha: float = 1.0):
-        color = HOVER_COLOR if self._hot(handle) else self._handle_color(axis)
+        if self._active is handle and self._frame.handle_color is not None:
+            color = ACTIVE_COLOR
+        else:
+            color = HOVER_COLOR if self._hot(handle) else self._handle_color(axis)
         return float(color[0]), float(color[1]), float(color[2]), float(alpha)
 
     def _handle_color(self, axis: int) -> np.ndarray:
@@ -1078,7 +1082,12 @@ class ObjectGizmo:
         start_angle = state.lower
         unavailable_span = full_turn - span
         full_range = unavailable_span <= 1e-6
-        allowed_color = HOVER_COLOR if self._hot(GizmoHandle.ROTATE_Z) else JOINT_RANGE_COLOR
+        if self._active is GizmoHandle.ROTATE_Z:
+            allowed_color = ACTIVE_COLOR
+        elif self._interactive and self._hovered is GizmoHandle.ROTATE_Z:
+            allowed_color = HOVER_COLOR
+        else:
+            allowed_color = JOINT_RANGE_COLOR
         if span > 1e-6:
             point_count = max(2, int(np.ceil(segments * span / full_turn)) + 1)
             allowed_angles = np.linspace(
@@ -1496,13 +1505,14 @@ class ObjectGizmo:
         center = center[:2]
         arc = arc[:, :2]
         sector = [center, *arc]
-        border = _with_alpha((1.0, 0.5, 0.06, 1.0), projection_alpha)
+        border = _with_alpha(ACTIVE_COLOR, projection_alpha)
 
         fill_alpha = _rotation_fill_alpha(sweep) * projection_alpha
         if fill_alpha > 0.0:
-            fill = (1.0, 0.5, 0.06, fill_alpha)
+            fill = _with_alpha(ACTIVE_COLOR, fill_alpha)
             overlay.triangle_fan_fill(sector, fill)
         if not joint_range_ring:
+            reference_color = ACTIVE_COLOR if self._frame.handle_color is not None else HOVER_COLOR
             reference = dial.points(
                 ring_radius,
                 np.linspace(0.0, 2.0 * np.pi, dial_segments, endpoint=False),
@@ -1510,7 +1520,7 @@ class ObjectGizmo:
             if np.all(reference[:, 2] > 0.0):
                 overlay.polyline(
                     reference[:, :2],
-                    _with_alpha(HOVER_COLOR, projection_alpha),
+                    _with_alpha(reference_color, projection_alpha),
                     RING_WIDTH_PT * style_scale,
                     closed=True,
                 )

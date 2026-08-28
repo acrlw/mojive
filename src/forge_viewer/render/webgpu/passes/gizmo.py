@@ -6,6 +6,7 @@ import numpy as np
 import wgpu
 
 from ....gizmo import (
+    ACTIVE_COLOR,
     AXIS_COLORS,
     AXIS_HANDLES,
     CENTER_COLOR,
@@ -277,7 +278,10 @@ class GizmoPass:
 
     def _color(self, frame: GizmoFrame, handle: GizmoHandle, axis: int, alpha: float = 1.0):
         base = AXIS_COLORS[axis] if frame.handle_color is None else frame.handle_color
-        color = HOVER_COLOR.copy() if self._hot(frame, handle) else np.asarray(base).copy()
+        if frame.active is handle and frame.handle_color is not None:
+            color = ACTIVE_COLOR.copy()
+        else:
+            color = HOVER_COLOR.copy() if self._hot(frame, handle) else np.asarray(base).copy()
         color[3] = alpha
         return color
 

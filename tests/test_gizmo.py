@@ -9,6 +9,7 @@ from forge_viewer.adapters.base import FrameNeeds, NodeType
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.adapters.toy import ToyPhysicsAdapter
 from forge_viewer.gizmo import (
+    ACTIVE_COLOR,
     AXIS_START,
     CENTER_HIT_PT,
     CENTER_RADIUS,
@@ -1779,8 +1780,13 @@ def test_hinge_joint_range_uses_one_complementary_ring_across_180_degrees() -> N
         )
 
 
-@pytest.mark.parametrize("interaction", ("hovered", "active"))
-def test_hinge_joint_range_uses_the_handle_hover_color_when_hot(interaction: str) -> None:
+@pytest.mark.parametrize(
+    ("interaction", "expected_color"),
+    (("hovered", HOVER_COLOR), ("active", ACTIVE_COLOR)),
+)
+def test_hinge_joint_range_distinguishes_hover_and_active_colors(
+    interaction: str, expected_color: np.ndarray
+) -> None:
     cam = CameraView(
         eye=np.array((0.0, 0.0, 5.0)),
         target=np.zeros(3),
@@ -1803,7 +1809,7 @@ def test_hinge_joint_range_uses_the_handle_hover_color_when_hot(interaction: str
         for name, args, kwargs in overlay.calls
         if name == "polyline"
         and kwargs.get("closed") is False
-        and np.allclose(args[1], HOVER_COLOR)
+        and np.allclose(args[1], expected_color)
     )
     unavailable = next(
         args
@@ -1812,7 +1818,7 @@ def test_hinge_joint_range_uses_the_handle_hover_color_when_hot(interaction: str
         and kwargs.get("closed") is False
         and np.allclose(args[1], JOINT_RANGE_UNAVAILABLE_COLOR)
     )
-    assert np.allclose(allowed[1], HOVER_COLOR)
+    assert np.allclose(allowed[1], expected_color)
     assert np.allclose(unavailable[1], JOINT_RANGE_UNAVAILABLE_COLOR)
 
 
