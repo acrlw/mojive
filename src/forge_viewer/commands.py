@@ -620,6 +620,30 @@ class ImportModelAsset(Command):
 
 
 @dataclass(frozen=True)
+class CreateHeightField(Command):
+    """Create one inline model height field."""
+
+    model_id: int
+    name: str
+    rows: int
+    columns: int
+    size: tuple[float, float, float, float]
+    elevation: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class SetHeightFieldData(Command):
+    """Replace an inline model height field's resolution, dimensions, and samples."""
+
+    model_id: int
+    name: str
+    rows: int
+    columns: int
+    size: tuple[float, float, float, float]
+    elevation: tuple[float, ...]
+
+
+@dataclass(frozen=True)
 class RenameModelAsset(Command):
     """Rename one model asset and repair its local references."""
 

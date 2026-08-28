@@ -9,6 +9,8 @@ from ... import commands as cmd
 from ...adapters.base import FrameNeeds, ModelAssetInfo, NodeType
 from . import Panel, PanelContext, begin_kv_table, button_row_layout, button_width, labeled
 
+MAX_INLINE_HEIGHT_FIELD_RESOLUTION = 256
+
 
 def unique_asset_name(base: str, assets: tuple[ModelAssetInfo, ...], asset_type: str) -> str:
     """Return a model-local name that is unique within one MJCF asset namespace."""
@@ -53,6 +55,22 @@ def _parse_vector(value: str, length: int, default: tuple[float, ...]) -> np.nda
 
 def _format_vector(value) -> str:
     return " ".join(f"{float(item):.9g}" for item in value)
+
+
+def _resize_height_field_samples(
+    values: np.ndarray, old_rows: int, old_columns: int, rows: int, columns: int
+) -> np.ndarray:
+    """Resize an authored sample grid while preserving its overlapping corner."""
+
+    resized = np.zeros((rows, columns), np.float32)
+    try:
+        source = np.asarray(values, np.float32).reshape(old_rows, old_columns)
+    except ValueError:
+        return resized.reshape(-1)
+    copied_rows = min(old_rows, rows)
+    copied_columns = min(old_columns, columns)
+    resized[:copied_rows, :copied_columns] = source[:copied_rows, :copied_columns]
+    return resized.reshape(-1)
 
 
 def _hfield_size_editor(str_id: str, value) -> tuple[bool, np.ndarray]:
@@ -104,6 +122,17 @@ class AssetsPanel(Panel):
         self._hfield_import_size = np.array((1.0, 1.0, 1.0, 0.1), np.float32)
         self._hfield_size = self._hfield_import_size.copy()
         self._hfield_source_size = self._hfield_import_size.copy()
+        self._hfield_create_name = "heightfield"
+        self._hfield_create_rows = 4
+        self._hfield_create_columns = 4
+        self._hfield_create_size = self._hfield_import_size.copy()
+        self._hfield_create_elevation = np.zeros(16, np.float32)
+        self._hfield_rows = 2
+        self._hfield_columns = 2
+        self._hfield_source_rows = 2
+        self._hfield_source_columns = 2
+        self._hfield_elevation = "0 0 0 0"
+        self._hfield_source_elevation = self._hfield_elevation
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -233,6 +262,63 @@ class AssetsPanel(Panel):
             )
             imgui.text_disabled("Set physical dimensions before importing the PNG.")
             imgui.tree_pop()
+        if imgui.tree_node("New inline height field"):
+            imgui.set_next_item_width(-1.0)
+            _changed, self._hfield_create_name = imgui.input_text(
+                "name##inline-hfield", self._hfield_create_name
+            )
+            old_rows = self._hfield_create_rows
+            old_columns = self._hfield_create_columns
+            _changed, self._hfield_create_rows = imgui.input_int(
+                "rows##inline-hfield", self._hfield_create_rows, 1, 8
+            )
+            _changed, self._hfield_create_columns = imgui.input_int(
+                "columns##inline-hfield", self._hfield_create_columns, 1, 8
+            )
+            self._hfield_create_rows = min(
+                MAX_INLINE_HEIGHT_FIELD_RESOLUTION, max(2, self._hfield_create_rows)
+            )
+            self._hfield_create_columns = min(
+                MAX_INLINE_HEIGHT_FIELD_RESOLUTION, max(2, self._hfield_create_columns)
+            )
+            if (old_rows, old_columns) != (
+                self._hfield_create_rows,
+                self._hfield_create_columns,
+            ):
+                self._hfield_create_elevation = _resize_height_field_samples(
+                    self._hfield_create_elevation,
+                    old_rows,
+                    old_columns,
+                    self._hfield_create_rows,
+                    self._hfield_create_columns,
+                )
+            _changed, self._hfield_create_size = _hfield_size_editor(
+                "inline-hfield-size", self._hfield_create_size
+            )
+            create_name = self._hfield_create_name.strip()
+            if not create_name or not editable:
+                imgui.begin_disabled()
+            if imgui.small_button("Create Flat Height Field"):
+                result = ctx.submit(
+                    cmd.CreateHeightField(
+                        self._model_id,
+                        create_name,
+                        self._hfield_create_rows,
+                        self._hfield_create_columns,
+                        tuple(float(value) for value in self._hfield_create_size),
+                        tuple(float(value) for value in self._hfield_create_elevation),
+                    )
+                )
+                if result.ok:
+                    self._selected = (self._model_id, "hfield", create_name)
+                    self._selection_key = None
+                    self._hfield_create_name = unique_asset_name(
+                        "heightfield", ctx.session.model_assets(self._model_id), "hfield"
+                    )
+            if not create_name or not editable:
+                imgui.end_disabled()
+            imgui.text_disabled("Creates editable inline nrow/ncol/elevation data.")
+            imgui.tree_pop()
         if not ctx.session.paused:
             imgui.text_disabled("Pause the simulation to edit model assets")
 
@@ -244,13 +330,28 @@ class AssetsPanel(Panel):
             fields = {field.name: field.value for field in item.fields}
             self._hfield_size = _parse_vector(fields.get("size", ""), 4, (1.0, 1.0, 1.0, 0.1))
             self._hfield_source_size = self._hfield_size.copy()
+            if item.type == "hfield" and not item.file:
+                try:
+                    rows = max(2, int(fields.get("nrow", "2")))
+                    columns = max(2, int(fields.get("ncol", "2")))
+                except ValueError:
+                    rows, columns = 2, 2
+                elevation = fields.get("elevation", "")
+                values = elevation.split()
+                if len(values) != rows * columns:
+                    elevation = _format_vector(np.zeros(rows * columns, np.float32))
+                self._hfield_rows = self._hfield_source_rows = rows
+                self._hfield_columns = self._hfield_source_columns = columns
+                self._hfield_elevation = self._hfield_source_elevation = elevation
         imgui.separator()
         imgui.text(f"{item.type}: {item.name}")
         if begin_kv_table("asset_details"):
             labeled("source", item.file or "inline")
             labeled("references", str(len(item.references)))
             for field in item.fields:
-                if field.value:
+                if item.type == "hfield" and field.name == "elevation":
+                    labeled("elevation", f"{len(field.value.split())} inline samples")
+                elif field.value:
                     labeled(field.name, field.value)
             imgui.end_table()
         for reference in item.references:
@@ -323,6 +424,82 @@ class AssetsPanel(Panel):
         imgui.separator()
         imgui.text_disabled("height-field dimensions")
         _changed, self._hfield_size = _hfield_size_editor("hfield-size", self._hfield_size)
+        if not item.file:
+            old_rows, old_columns = self._hfield_rows, self._hfield_columns
+            _changed, self._hfield_rows = imgui.input_int("rows##hfield-data", old_rows, 1, 8)
+            _changed, self._hfield_columns = imgui.input_int(
+                "columns##hfield-data", old_columns, 1, 8
+            )
+            self._hfield_rows = min(
+                max(MAX_INLINE_HEIGHT_FIELD_RESOLUTION, old_rows), max(2, self._hfield_rows)
+            )
+            self._hfield_columns = min(
+                max(MAX_INLINE_HEIGHT_FIELD_RESOLUTION, old_columns),
+                max(2, self._hfield_columns),
+            )
+            if (old_rows, old_columns) != (self._hfield_rows, self._hfield_columns):
+                try:
+                    values = np.asarray(
+                        tuple(float(value) for value in self._hfield_elevation.split()),
+                        np.float32,
+                    )
+                except ValueError:
+                    values = np.zeros(old_rows * old_columns, np.float32)
+                values = _resize_height_field_samples(
+                    values,
+                    old_rows,
+                    old_columns,
+                    self._hfield_rows,
+                    self._hfield_columns,
+                )
+                self._hfield_elevation = _format_vector(values)
+            imgui.text_disabled(
+                f"elevation ({self._hfield_rows * self._hfield_columns} samples, row-major)"
+            )
+            _changed, self._hfield_elevation = imgui.input_text_multiline(
+                "##hfield-elevation",
+                self._hfield_elevation,
+                imgui.ImVec2(-1.0, 72.0 * ctx.style_scale),
+            )
+            try:
+                elevation = tuple(float(value) for value in self._hfield_elevation.split())
+            except ValueError:
+                elevation = ()
+            valid_elevation = len(elevation) == self._hfield_rows * self._hfield_columns and bool(
+                np.all(np.isfinite(elevation))
+            )
+            if valid_elevation:
+                imgui.text_disabled(f"range {min(elevation):.6g} .. {max(elevation):.6g}")
+            else:
+                imgui.text_colored(
+                    imgui.ImVec4(*ctx.theme.warning),
+                    f"Expected {self._hfield_rows * self._hfield_columns} finite samples",
+                )
+            dirty = (
+                self._hfield_rows != self._hfield_source_rows
+                or self._hfield_columns != self._hfield_source_columns
+                or self._hfield_elevation.split() != self._hfield_source_elevation.split()
+                or not np.allclose(self._hfield_size, self._hfield_source_size)
+            )
+            if not dirty or not valid_elevation:
+                imgui.begin_disabled()
+            if imgui.small_button("Apply Inline Data"):
+                result = ctx.submit(
+                    cmd.SetHeightFieldData(
+                        item.model_id,
+                        item.name,
+                        self._hfield_rows,
+                        self._hfield_columns,
+                        tuple(float(value) for value in self._hfield_size),
+                        elevation,
+                    )
+                )
+                if result.ok:
+                    self._selection_key = None
+            if not dirty or not valid_elevation:
+                imgui.end_disabled()
+            return
+
         dirty = not np.allclose(self._hfield_size, self._hfield_source_size)
         if not dirty:
             imgui.begin_disabled()

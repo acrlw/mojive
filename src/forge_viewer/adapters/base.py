@@ -911,6 +911,30 @@ class SceneAdapterBase:
         """Import one file-backed model asset without binding it to an element."""
         return False
 
+    def create_height_field(
+        self,
+        model_id: int,
+        name: str,
+        rows: int,
+        columns: int,
+        size: tuple[float, float, float, float],
+        elevation: tuple[float, ...],
+    ) -> bool:
+        """Create one inline model height field."""
+        return False
+
+    def set_height_field_data(
+        self,
+        model_id: int,
+        name: str,
+        rows: int,
+        columns: int,
+        size: tuple[float, float, float, float],
+        elevation: tuple[float, ...],
+    ) -> bool:
+        """Replace an inline model height field's dimensions and samples."""
+        return False
+
     def rename_model_asset(self, model_id: int, asset_type: str, name: str, new_name: str) -> bool:
         """Rename one asset and repair its model-local references."""
         return False
@@ -1342,6 +1366,24 @@ class SceneAdapter(Protocol):
         path: Path,
         name: str,
         fields: tuple[tuple[str, str], ...] = (),
+    ) -> bool: ...
+    def create_height_field(
+        self,
+        model_id: int,
+        name: str,
+        rows: int,
+        columns: int,
+        size: tuple[float, float, float, float],
+        elevation: tuple[float, ...],
+    ) -> bool: ...
+    def set_height_field_data(
+        self,
+        model_id: int,
+        name: str,
+        rows: int,
+        columns: int,
+        size: tuple[float, float, float, float],
+        elevation: tuple[float, ...],
     ) -> bool: ...
     def rename_model_asset(
         self, model_id: int, asset_type: str, name: str, new_name: str

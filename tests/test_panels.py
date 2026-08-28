@@ -28,7 +28,11 @@ from forge_viewer.ui.panels import (
     slider_gesture,
     validate_panels,
 )
-from forge_viewer.ui.panels.assets import filter_assets, unique_asset_name
+from forge_viewer.ui.panels.assets import (
+    _resize_height_field_samples,
+    filter_assets,
+    unique_asset_name,
+)
 from forge_viewer.ui.panels.camera import camera_snapshot, qpos_snapshot, reproduction_snapshot
 from forge_viewer.ui.panels.hierarchy import HierarchyPanel, hierarchy_open_depth
 from forge_viewer.ui.panels.inspector import (
@@ -88,6 +92,14 @@ def test_asset_panel_filters_cached_inventory_and_generates_unique_names():
     assert filter_assets(assets, "all", "robot.obj") == (assets[2],)
     assert unique_asset_name("terrain", assets, "hfield") == "terrain3"
     assert unique_asset_name("terrain", assets, "mesh") == "terrain"
+
+
+def test_height_field_resize_preserves_the_overlapping_corner():
+    values = np.arange(6, dtype=np.float32)
+
+    resized = _resize_height_field_samples(values, 2, 3, 3, 2).reshape(3, 2)
+
+    np.testing.assert_allclose(resized, ((0.0, 1.0), (3.0, 4.0), (0.0, 0.0)))
 
 
 def test_panel_diagnostics_are_published_to_the_persistent_session_status():

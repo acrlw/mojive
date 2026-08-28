@@ -44,6 +44,7 @@ from .viewcube import DEFAULT_SELECTION_PADDING, ViewCube
 from .window import Window, WindowConfig
 
 if TYPE_CHECKING:
+    from ..adapters.base import SceneNode
     from ..commands import CommandResult
     from ..session import Session
 
@@ -1207,10 +1208,15 @@ class ViewerApp:
             imgui.separator()
             point_light, _ = imgui.menu_item(t("Point Light"), "", False)
             camera, _ = imgui.menu_item(t("Camera"), "", False)
+            site, _ = imgui.menu_item(
+                t("Site"), "", False, self.session.adapter.caps.topology_editing
+            )
             if point_light:
                 self._add_scene_light()
             if camera:
                 self._add_scene_camera()
+            if site:
+                self._add_model_site()
             imgui.end_menu()
         selected = bool(self._selected_entity())
         duplicate, _ = imgui.menu_item(t("Duplicate"), f"{shortcut}+D", False, selected)
@@ -1232,6 +1238,35 @@ class ViewerApp:
         while f"{base} {index}" in names:
             index += 1
         return f"{base} {index}"
+
+    def _model_child_parent(self) -> SceneNode | None:
+        """Resolve the owning MuJoCo body for a top-level create action."""
+        node = self.session.selected_node
+        while node is not None:
+            if node.type in (NodeType.MODEL, NodeType.WORLD, NodeType.LINK, NodeType.ROBOT) and (
+                node.type is NodeType.WORLD or node.model_id >= 0
+            ):
+                return node
+            node = self.session.node(node.parent)
+        return next(
+            (
+                node
+                for node in self.session.nodes
+                if node.type is NodeType.WORLD and node.parent < 0
+            ),
+            None,
+        )
+
+    def _add_model_site(self) -> None:
+        parent = self._model_child_parent()
+        if parent is None:
+            self.session.report_message("Select a model or body before creating a site")
+            return
+        result = self.session.submit(
+            cmd.AddModelElement(parent.node_id, "site", self._entity_name("site"))
+        )
+        if result.ok:
+            self.session.submit(cmd.SelectNode(result.entity_id))
 
     def _add_scene_object(self, shape: MeshShape, base_name: str) -> None:
         if shape is MeshShape.PLANE and self.session.adapter.caps.topology_editing:

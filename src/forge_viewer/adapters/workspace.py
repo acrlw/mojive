@@ -270,6 +270,34 @@ class WorkspaceAdapter(SceneAdapterBase):
             self._invalidate()
         return changed
 
+    def create_height_field(
+        self,
+        model_id: int,
+        name: str,
+        rows: int,
+        columns: int,
+        size: tuple[float, float, float, float],
+        elevation: tuple[float, ...],
+    ) -> bool:
+        changed = self.primary.create_height_field(model_id, name, rows, columns, size, elevation)
+        if changed:
+            self._invalidate()
+        return changed
+
+    def set_height_field_data(
+        self,
+        model_id: int,
+        name: str,
+        rows: int,
+        columns: int,
+        size: tuple[float, float, float, float],
+        elevation: tuple[float, ...],
+    ) -> bool:
+        changed = self.primary.set_height_field_data(model_id, name, rows, columns, size, elevation)
+        if changed:
+            self._invalidate()
+        return changed
+
     def rename_model_asset(self, model_id: int, asset_type: str, name: str, new_name: str) -> bool:
         changed = self.primary.rename_model_asset(model_id, asset_type, name, new_name)
         if changed:

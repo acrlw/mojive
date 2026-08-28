@@ -928,6 +928,77 @@ def test_empty_root_body_addition_keeps_diagnostics_finite() -> None:
     assert np.isfinite(diagnostics.contact_force_scale)
 
 
+def test_empty_root_site_creation_is_editable_and_undoable() -> None:
+    document = workspace()
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    world = next(node for node in session.nodes if node.type is NodeType.WORLD)
+
+    result = session.submit(cmd.AddModelElement(world.node_id, "site", "target"))
+
+    assert result.ok, result.message
+    site = session.node(result.entity_id)
+    assert site is not None
+    assert site.type is NodeType.SITE
+    assert session.site_properties(site.node_id) is not None
+    assert session.submit(cmd.SelectNode(site.node_id))
+    assert session.selected_node is not None
+    assert session.selected_node.name == "target"
+
+    assert session.submit(cmd.Undo())
+    assert all(node.name != "target" for node in session.nodes)
+    assert session.submit(cmd.Redo())
+    assert any(node.name == "target" and node.type is NodeType.SITE for node in session.nodes)
+
+
+def test_inline_height_field_lifecycle_edits_resolution_size_and_samples() -> None:
+    document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
+    session = Session(document, ASSETS / "test_scene.xml")
+    assert session.submit(cmd.Pause())
+
+    created = session.submit(
+        cmd.CreateHeightField(
+            0,
+            "terrain",
+            2,
+            3,
+            (2.0, 3.0, 4.0, 0.25),
+            (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+        )
+    )
+
+    assert created.ok, created.message
+    asset = next(item for item in session.model_assets(0) if item.name == "terrain")
+    fields = {field.name: field.value for field in asset.fields}
+    assert asset.type == "hfield" and not asset.file
+    assert fields["nrow"] == "2"
+    assert fields["ncol"] == "3"
+    assert len(fields["elevation"].split()) == 6
+    assert document.primary.model.nhfield == 1
+
+    updated = session.submit(
+        cmd.SetHeightFieldData(
+            0,
+            "terrain",
+            3,
+            2,
+            (4.0, 5.0, 6.0, 0.5),
+            (0.0, 0.1, 0.2, 0.3, 0.4, 0.5),
+        )
+    )
+
+    assert updated.ok, updated.message
+    model = document.primary.model
+    assert tuple(model.hfield_nrow) == (3,)
+    assert tuple(model.hfield_ncol) == (2,)
+    assert tuple(model.hfield_size[0]) == pytest.approx((4.0, 5.0, 6.0, 0.5))
+    assert session.submit(cmd.Undo())
+    asset = next(item for item in session.model_assets(0) if item.name == "terrain")
+    fields = {field.name: field.value for field in asset.fields}
+    assert fields["nrow"] == "2"
+    assert fields["ncol"] == "3"
+
+
 def test_empty_root_model_edit_batch_resolves_new_body_by_key() -> None:
     document = workspace()
     session = Session(document)

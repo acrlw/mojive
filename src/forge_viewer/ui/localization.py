@@ -49,6 +49,7 @@ _ZH_CN = {
     "Cylinder": "圆柱体",
     "Cone": "圆锥体",
     "Plane": "平面",
+    "Site": "站点",
     "Point Light": "点光源",
     "Camera": "相机",
     "Untitled": "未命名",

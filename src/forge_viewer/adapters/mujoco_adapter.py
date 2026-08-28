@@ -968,6 +968,34 @@ def _model_asset_element(
     return asset, target
 
 
+def _ensure_model_asset_section(root: ET.Element) -> ET.Element:
+    asset = root.find("asset")
+    if asset is not None:
+        return asset
+    asset = ET.Element("asset")
+    children = tuple(root)
+    insertion = next(
+        (
+            index
+            for index, child in enumerate(children)
+            if child.tag
+            in {
+                "worldbody",
+                "deformable",
+                "contact",
+                "equality",
+                "tendon",
+                "actuator",
+                "sensor",
+                "keyframe",
+            }
+        ),
+        len(children),
+    )
+    root.insert(insertion, asset)
+    return asset
+
+
 def _find_or_create_xml_path(root: ET.Element, path: tuple[str, ...]) -> ET.Element:
     element = root
     for tag in path:
@@ -2470,27 +2498,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         if existing is not None:
             return False
         if asset is None:
-            asset = ET.Element("asset")
-            children = tuple(root)
-            insertion = next(
-                (
-                    index
-                    for index, child in enumerate(children)
-                    if child.tag
-                    in {
-                        "worldbody",
-                        "deformable",
-                        "contact",
-                        "equality",
-                        "tendon",
-                        "actuator",
-                        "sensor",
-                        "keyframe",
-                    }
-                ),
-                len(children),
-            )
-            root.insert(insertion, asset)
+            asset = _ensure_model_asset_section(root)
         allowed = set(_MJCF_SCHEMA_ATTRIBUTES.get(("mujoco", "asset", kind), ()))
         attributes = {"name": value, "file": str(source)}
         for raw_name, raw_value in fields:
@@ -2501,6 +2509,93 @@ class MuJoCoAdapter(SceneAdapterBase):
             if field_value:
                 attributes[field] = field_value
         ET.SubElement(asset, kind, attributes)
+        edited = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        return self._replace_model_spec(model_id, edited)
+
+    def create_height_field(
+        self,
+        model_id: int,
+        name: str,
+        rows: int,
+        columns: int,
+        size: tuple[float, float, float, float],
+        elevation: tuple[float, ...],
+    ) -> bool:
+        spec = self._spec_for_model(model_id)
+        value = str(name).strip()
+        try:
+            samples = np.asarray(elevation, np.float64).reshape(-1)
+            dimensions = np.asarray(size, np.float64).reshape(4)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if (
+            spec is None
+            or not value
+            or int(rows) < 2
+            or int(columns) < 2
+            or samples.size != int(rows) * int(columns)
+            or not np.all(np.isfinite(samples))
+            or not np.all(np.isfinite(dimensions))
+            or np.any(dimensions[:3] <= 0.0)
+            or dimensions[3] < 0.0
+        ):
+            return False
+        root, _xml = _component_xml(spec)
+        _asset, existing = _model_asset_element(root, "hfield", value)
+        if existing is not None:
+            return False
+        asset = _ensure_model_asset_section(root)
+        ET.SubElement(
+            asset,
+            "hfield",
+            {
+                "name": value,
+                "nrow": str(int(rows)),
+                "ncol": str(int(columns)),
+                "size": _format_mjcf_values(dimensions),
+                "elevation": _format_mjcf_values(samples),
+            },
+        )
+        edited = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
+        return self._replace_model_spec(model_id, edited)
+
+    def set_height_field_data(
+        self,
+        model_id: int,
+        name: str,
+        rows: int,
+        columns: int,
+        size: tuple[float, float, float, float],
+        elevation: tuple[float, ...],
+    ) -> bool:
+        spec = self._spec_for_model(model_id)
+        value = str(name).strip()
+        try:
+            samples = np.asarray(elevation, np.float64).reshape(-1)
+            dimensions = np.asarray(size, np.float64).reshape(4)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if (
+            spec is None
+            or not value
+            or int(rows) < 2
+            or int(columns) < 2
+            or samples.size != int(rows) * int(columns)
+            or not np.all(np.isfinite(samples))
+            or not np.all(np.isfinite(dimensions))
+            or np.any(dimensions[:3] <= 0.0)
+            or dimensions[3] < 0.0
+        ):
+            return False
+        root, _xml = _component_xml(spec)
+        _asset, target = _model_asset_element(root, "hfield", value)
+        if target is None or str(target.attrib.get("file", "")).strip():
+            return False
+        target.set("nrow", str(int(rows)))
+        target.set("ncol", str(int(columns)))
+        target.set("size", _format_mjcf_values(dimensions))
+        target.set("elevation", _format_mjcf_values(samples))
+        target.attrib.pop("content_type", None)
         edited = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
         return self._replace_model_spec(model_id, edited)
 

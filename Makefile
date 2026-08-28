@@ -31,7 +31,7 @@ help:
 		'  make contact-authoring  geometry contact, mass, group, and fluid properties' \
 		'  make body-authoring     body mass, inertia, gravcomp, mocap, and sleep policy' \
 		'  make resource-authoring geometry shape, mesh/hfield, cube, and skybox import' \
-		'  make asset-browser     model-local asset inventory and height-field lifecycle' \
+		'  make asset-browser     model-local assets and file/inline height-field lifecycle' \
 		'  make joint-site-authoring advanced joint and site shape/endpoint properties' \
 		'  make model-component-authoring contacts, actuators, sensors, tendons, equality, and custom' \
 		'  make keyframe-authoring capture, edit, load, and remove model keyframes' \
@@ -101,7 +101,7 @@ help:
 		'  make material-parity   material and dense-scene image baselines' \
 		'  make shadow-scheduling deterministic light and shadow selection' \
 		'  make doctor            window-path smoke test' \
-		'  make mujoco-audit      MuJoCo visualization coverage' \
+		'  make mujoco-audit      MuJoCo visualization and core schema coverage' \
 		'  make mujoco-model-suite compile, adapt, and render MuJoCo model collections' \
 		'  make adapter-conformance  adapter contract report' \
 		'  make docs              build the API and user guide under output/site' \
@@ -440,7 +440,7 @@ body-authoring:
 resource-authoring:
 	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
 
-## Model-local inventory plus standalone mesh and height-field lifecycle acceptance.
+## Model-local inventory plus standalone mesh and file/inline height-field lifecycle acceptance.
 asset-browser:
 	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
 
@@ -496,7 +496,7 @@ AUDIT_SCENE ?= mujoco_visuals
 mujoco-physics:
 	$(PYTEST) -q -m physics
 
-## Headless MuJoCo visualization coverage report.
+## Headless MuJoCo visualization and exact linked-schema coverage report.
 mujoco-audit:
 	$(PY) -m forge_viewer.cli audit $(AUDIT_SCENE) --strict
 

@@ -352,6 +352,8 @@ _SCENE_EDIT_COMMANDS = (
     cmd.SetGeometryShape,
     cmd.ImportModelGeometryResource,
     cmd.ImportModelAsset,
+    cmd.CreateHeightField,
+    cmd.SetHeightFieldData,
     cmd.RenameModelAsset,
     cmd.DuplicateModelAsset,
     cmd.ReplaceModelAssetFile,
@@ -1999,6 +2001,69 @@ class Session:
                 return CommandResult.bad(f"{asset_type} asset {name!r} could not be imported")
             self._refresh_structure()
             return CommandResult.good(f"Imported {asset_type} asset {name}")
+
+        if isinstance(c, (cmd.CreateHeightField, cmd.SetHeightFieldData)):
+            if not caps.model_assets:
+                return CommandResult.bad(f"{caps.name} does not support model asset editing")
+            if caps.simulation and not self._paused:
+                return CommandResult.bad("Pause the simulation before editing height fields")
+            try:
+                rows = int(c.rows)
+                columns = int(c.columns)
+                size = np.asarray(c.size, np.float64).reshape(4)
+                elevation = np.asarray(c.elevation, np.float64).reshape(-1)
+            except (TypeError, ValueError, OverflowError):
+                return CommandResult.bad("Height-field data has invalid value types")
+            if rows < 2 or columns < 2:
+                return CommandResult.bad("Height-field resolution must be at least 2 by 2")
+            if elevation.size != rows * columns:
+                return CommandResult.bad(f"Height-field elevation needs {rows * columns} samples")
+            if not np.all(np.isfinite(size)) or not np.all(np.isfinite(elevation)):
+                return CommandResult.bad("Height-field values must be finite")
+            if np.any(size[:3] <= 0.0) or size[3] < 0.0:
+                return CommandResult.bad(
+                    "Height-field half-sizes and elevation scale must be positive; "
+                    "base depth cannot be negative"
+                )
+            name = str(c.name).strip()
+            if not name:
+                return CommandResult.bad("A height-field name cannot be empty")
+            current = next(
+                (
+                    asset
+                    for asset in self._adapter.model_assets(c.model_id)
+                    if asset.type == "hfield" and asset.name == name
+                ),
+                None,
+            )
+            creating = isinstance(c, cmd.CreateHeightField)
+            if creating and current is not None:
+                return CommandResult.bad(f"Height-field asset {name!r} already exists")
+            if not creating and current is None:
+                return CommandResult.bad(f"Height-field asset {name!r} is unavailable")
+            if not creating and current is not None and current.file:
+                return CommandResult.bad("File-backed height fields cannot edit inline samples")
+            method = (
+                self._adapter.create_height_field
+                if creating
+                else self._adapter.set_height_field_data
+            )
+            try:
+                changed = method(
+                    c.model_id,
+                    name,
+                    rows,
+                    columns,
+                    tuple(float(value) for value in size),
+                    tuple(float(value) for value in elevation),
+                )
+            except Exception as exc:
+                return CommandResult.bad(f"Height-field asset {name!r} could not be applied: {exc}")
+            if not changed:
+                return CommandResult.bad(f"Height-field asset {name!r} could not be applied")
+            self._refresh_structure()
+            verb = "Created" if creating else "Updated"
+            return CommandResult.good(f"{verb} height-field asset {name}")
 
         if isinstance(c, cmd.RenameModelAsset):
             if not caps.model_assets:
