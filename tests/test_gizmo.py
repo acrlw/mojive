@@ -2023,8 +2023,7 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
         arrows = [
             args
             for name, args, _kwargs in overlay.calls
-            if name == "fringed_concave_fill"
-            and np.allclose(args[1][:3], JOINT_HANDLE_COLOR[:3])
+            if name == "fringed_concave_fill" and np.allclose(args[1][:3], JOINT_HANDLE_COLOR[:3])
         ]
         assert len(arrows) == 1
         slide = gizmo._slide_range_projection(
