@@ -1409,7 +1409,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._root_spec = spec
         self._root_edited = False
         self._attached_models.clear()
-        self._next_model_id = 1
+        self._reset_next_model_id()
         self._reset_geometry_object_ids()
         self._component_entries.clear()
         self.caps = replace(self.caps, model_composition=True)
@@ -1421,7 +1421,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         self._root_spec = mujoco.MjSpec()
         self._root_edited = False
         self._attached_models.clear()
-        self._next_model_id = 1
+        self._reset_next_model_id()
         self._reset_geometry_object_ids()
         self._component_entries.clear()
         self.caps = replace(self.caps, model_composition=True)
@@ -1584,7 +1584,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                 self._next_component_id.get(key, 0),
                 max((entry.component_id + 1 for entry in entries), default=0),
             )
-        self._next_model_id = max((item.model_id for item in state.models), default=0) + 1
+        self._reset_next_model_id()
         self._install(self._compile_composed_model())
         return self.restore_state(state.physics)
 
@@ -1592,7 +1592,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         if self._root_spec is None:
             return -1
         path = Path(path).expanduser().resolve()
-        model_id = self._next_model_id
+        model_id = self._allocate_model_id()
         spec = _load_editable_spec(path)
         # MjSpec.copy() can omit unresolved declarations originating in an include.
         # Compiling keyed models once resolves their full actuator/state layout before
@@ -1614,9 +1614,25 @@ class MuJoCoAdapter(SceneAdapterBase):
         except Exception as exc:
             self._attached_models.pop()
             raise RuntimeError(f"Failed to add {path}: {exc}") from exc
-        self._next_model_id += 1
         self._install(model)
         self._restore_named_model_state(state)
+        return model_id
+
+    def _reset_next_model_id(self) -> None:
+        """Advance the composition namespace past IDs already present in the document."""
+        used = {item.model_id for item in self._attached_models}
+        if self._root_spec is not None:
+            used.update(
+                int(match.group(1))
+                for frame in self._root_spec.frames
+                if (match := re.fullmatch(r"forge_model_(\d+)", frame.name or ""))
+            )
+        self._next_model_id = max(used, default=0) + 1
+
+    def _allocate_model_id(self) -> int:
+        """Reserve the next collision-free namespace for an attached model."""
+        model_id = self._next_model_id
+        self._next_model_id += 1
         return model_id
 
     def remove_scene_model(self, model_id: int) -> bool:

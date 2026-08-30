@@ -44,6 +44,23 @@ class PreviewSession:
         return self.camera if camera_id == 42 else None
 
 
+def test_camera_preview_is_disabled_until_explicitly_enabled() -> None:
+    session = PreviewSession(CameraView())
+    preview = CameraPreview()
+
+    assert not preview.enabled
+    assert preview.selected_camera(session) == ("", None)
+
+    preview.set_enabled(True)
+    assert preview.selected_camera(session)[0] == "inspection"
+
+    preview.set_enabled(False)
+    assert not preview.enabled
+    assert not preview.pinned
+    assert not preview.locked
+    assert preview.selected_camera(session) == ("", None)
+
+
 def visible_height_at_target(view) -> float:
 
     v, p = view.view_matrix(), view.proj_matrix()
@@ -490,6 +507,7 @@ def test_pinned_camera_preview_keeps_camera_and_selection() -> None:
     camera = CameraView(eye=np.array((2.0, -3.0, 1.0), np.float32))
     session = PreviewSession(camera)
     preview = CameraPreview()
+    preview.set_enabled(True)
 
     name, pinned_view = preview.selected_camera(session)
     assert name == "inspection"
@@ -511,6 +529,7 @@ def test_locked_camera_preview_tracks_camera_after_selection_changes() -> None:
     camera = CameraView(eye=np.array((2.0, -3.0, 1.0), np.float32))
     session = PreviewSession(camera)
     preview = CameraPreview()
+    preview.set_enabled(True)
 
     assert preview.selected_camera(session)[0] == "inspection"
     preview.set_locked(True)
@@ -597,6 +616,7 @@ def test_camera_preview_copies_the_main_render_state() -> None:
             return 3
 
     preview = CameraPreview()
+    preview.set_enabled(True)
     preview.update(Main(), SceneSource(), 1, SceneFrame(), CameraView(), (320, 180))
 
     assert peer.flags == {RenderFlag.HAZE: True, RenderFlag.SHADOW: False}

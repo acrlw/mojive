@@ -14,6 +14,9 @@ from ..types import CameraView, ViewportImage
 
 class CameraPreview:
     def __init__(self) -> None:
+        # A selected camera must not automatically cover the viewport.  The
+        # preview is an explicit inspection aid, controlled from Inspector.
+        self._enabled = False
         self._backend: Any | None = None
         self._image: ViewportImage | None = None
         self._source_generation = -1
@@ -33,7 +36,7 @@ class CameraPreview:
         camera: CameraView | None,
         size: tuple[int, int],
     ) -> None:
-        if source is None or camera is None:
+        if not self._enabled or source is None or camera is None:
             self._image = None
             return
         backend = self._ensure_backend(main_backend, size)
@@ -59,6 +62,8 @@ class CameraPreview:
         camera_name: str,
         translate: Any = None,
     ) -> None:
+        if not self._enabled:
+            return
         image = self._image
         if image is None:
             return
@@ -122,6 +127,18 @@ class CameraPreview:
         imgui.end_child()
 
     @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._enabled = bool(enabled)
+        if self._enabled:
+            return
+        self._image = None
+        self._pinned = False
+        self._locked = False
+
+    @property
     def pinned(self) -> bool:
         return self._pinned
 
@@ -140,6 +157,8 @@ class CameraPreview:
             self._pinned = False
 
     def selected_camera(self, session) -> tuple[str, CameraView | None]:
+        if not self._enabled:
+            return "", None
         if self._pinned:
             return self._camera_name, self._camera
         if self._locked:

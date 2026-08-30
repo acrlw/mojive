@@ -78,6 +78,7 @@ from .camera import ndc_from_viewport, unproject
 from .draw2d import Draw2D
 from .panels.inspector import gizmo_refusal_reason
 from .scene_entities import camera_rotation, direction_basis
+from .theme import THEME
 
 if TYPE_CHECKING:
     from ..adapters.base import SceneNode
@@ -94,12 +95,12 @@ SNAP_TICK_FADE_STEPS = 10.0
 ROTATION_TICK_MIN_ALPHA = 0.5
 JOINT_RANGE_RADIUS = RING_RADIUS
 JOINT_RANGE_WIDTH_PT = RING_WIDTH_PT
-JOINT_RANGE_OFFSET_PT = 13.0
-JOINT_RANGE_COLOR = tuple(float(value) for value in JOINT_HANDLE_COLOR)
-JOINT_RANGE_UNAVAILABLE_COLOR = (0.46, 0.48, 0.53, 1.0)
-JOINT_LOWER_LIMIT_COLOR = (0.30, 0.58, 1.00, 1.0)
-JOINT_UPPER_LIMIT_COLOR = (1.00, 0.34, 0.28, 1.0)
-JOINT_CURRENT_TICK_PT = 11.0
+JOINT_RANGE_OFFSET_PT = 0.0
+JOINT_RANGE_COLOR = (175 / 255, 132 / 255, 183 / 255, 1.0)
+JOINT_LOWER_LIMIT_COLOR = THEME.axis_color("z")
+JOINT_UPPER_LIMIT_COLOR = THEME.axis_color("x")
+JOINT_CURRENT_COLOR = THEME.primary_bright
+JOINT_CURRENT_TICK_PT = 20.0
 JOINT_LIMIT_TICK_PT = 14.0
 _FULL_TURN = 2.0 * np.pi
 _JOINT_RANGE_EPSILON = 1e-9
@@ -112,6 +113,71 @@ def _with_alpha(color, alpha: float) -> tuple[float, float, float, float]:
         float(color[2]),
         float(color[3]) * float(alpha),
     )
+
+
+def _joint_drag_label_color(state: _JointRangeState | None):
+    """Return the live joint label dot color, including endpoint clamping."""
+
+    if state is None:
+        return JOINT_CURRENT_COLOR
+    tolerance = max(
+        _JOINT_RANGE_EPSILON,
+        abs(float(state.upper) - float(state.lower)) * 1e-6,
+    )
+    if float(state.current) <= float(state.lower) + tolerance:
+        return JOINT_LOWER_LIMIT_COLOR
+    if float(state.current) >= float(state.upper) - tolerance:
+        return JOINT_UPPER_LIMIT_COLOR
+    return JOINT_CURRENT_COLOR
+
+
+def joint_slide_arrow_polygon(current, tangent, style_scale: float) -> np.ndarray:
+    """Return the shared, axis-aligned slide-joint handle silhouette."""
+
+    current = np.asarray(current, np.float64).reshape(2)
+    tangent = np.asarray(tangent, np.float64).reshape(2)
+    length = float(np.linalg.norm(tangent))
+    if length < 1e-6:
+        return np.empty((0, 2), np.float64)
+    tangent = tangent / length
+    start = current + tangent * 9.0 * style_scale
+    end = current + tangent * 48.0 * style_scale
+    return axis_arrow_polygon(start, end, style_scale)
+
+
+def _screen_polygon_distance(point, polygon) -> float:
+    """Distance to a small screen polygon, including its filled interior."""
+
+    point = np.asarray(point, np.float64)
+    polygon = np.asarray(polygon, np.float64).reshape(-1, 2)
+    if len(polygon) < 3:
+        return float("inf")
+    x, y = point
+    inside = False
+    previous = polygon[-1]
+    for current in polygon:
+        if (current[1] > y) != (previous[1] > y):
+            intersection = current[0] + (previous[0] - current[0]) * (y - current[1]) / (
+                previous[1] - current[1]
+            )
+            if x < intersection:
+                inside = not inside
+        previous = current
+    if inside:
+        return 0.0
+
+    distance = float("inf")
+    for index, start in enumerate(polygon):
+        end = polygon[(index + 1) % len(polygon)]
+        edge = end - start
+        denominator = float(np.dot(edge, edge))
+        t = (
+            float(np.clip(np.dot(point - start, edge) / denominator, 0.0, 1.0))
+            if denominator > 1e-12
+            else 0.0
+        )
+        distance = min(distance, float(np.linalg.norm(point - (start + edge * t))))
+    return distance
 
 
 class _RotationDialProjector:
@@ -242,6 +308,8 @@ class _JointRangeState:
     current: float
     lower: float
     upper: float
+    joint_id: int = -1
+    qpos_adr: int = -1
 
     @property
     def angular_span(self) -> float:
@@ -250,8 +318,18 @@ class _JointRangeState:
         return float(np.clip(self.upper - self.lower, 0.0, _FULL_TURN))
 
     @property
+    def raw_angular_span(self) -> float:
+        return max(0.0, float(self.upper - self.lower))
+
+    @property
     def covers_full_turn(self) -> bool:
         return self.angular_span >= _FULL_TURN - _JOINT_RANGE_EPSILON
+
+    @property
+    def has_ambiguous_dial_limits(self) -> bool:
+        """Whether a circular dial cannot uniquely place both scalar limits."""
+
+        return self.raw_angular_span >= _FULL_TURN - _JOINT_RANGE_EPSILON
 
     def contains_angle(self, angle: float) -> bool:
         """Return whether a dial angle belongs to the reachable hinge arc."""
@@ -260,6 +338,16 @@ class _JointRangeState:
             return True
         relative = float((angle - self.lower) % _FULL_TURN)
         return relative <= self.angular_span + _JOINT_RANGE_EPSILON
+
+
+@dataclass(frozen=True)
+class _SlideRangeProjection:
+    lower: np.ndarray
+    current: np.ndarray
+    upper: np.ndarray
+    tangent: np.ndarray
+    normal: np.ndarray
+    alpha: float
 
 
 @dataclass(frozen=True)
@@ -276,6 +364,18 @@ class PreciseGizmoInput:
     space: str
     absolute_value: float | None
     absolute_label: str
+
+
+@dataclass(frozen=True)
+class JointLimitHit:
+    """One screen-space joint endpoint label with its stable write target."""
+
+    joint_id: int
+    qpos_adr: int
+    value: float
+    label: str
+    rect: tuple[float, float, float, float]
+    semantic_color: tuple[float, float, float, float]
 
 
 def verdict(paused: bool, node: SceneNode | None) -> Verdict:
@@ -308,6 +408,7 @@ class ObjectGizmo:
         self._style_scale = 1.0
 
         self._start_pos = np.zeros(3, np.float64)
+        self._drag_origin_pos = np.zeros(3, np.float64)
         self._start_mat = np.eye(3, dtype=np.float64)
         self._start_basis = np.eye(3, dtype=np.float64)
         self._current_mat = np.eye(3, dtype=np.float64)
@@ -335,7 +436,9 @@ class ObjectGizmo:
         self._joint_structure_generation = -1
         self._active_joint: JointInfo | None = None
         self._joint_range: _JointRangeState | None = None
+        self._joint_limit_hits: tuple[JointLimitHit, ...] = ()
         self._start_joint_qpos = np.zeros(0, np.float64)
+        self._joint_drag_origin_qpos = np.zeros(0, np.float64)
         self.translation_snap_m = DEFAULT_TRANSLATION_SNAP_M
         self.rotation_snap_deg = DEFAULT_ROTATION_SNAP_DEG
         self.rotation_tick_scale = DEFAULT_ROTATION_TICK_SCALE
@@ -384,6 +487,10 @@ class ObjectGizmo:
     @property
     def hovered_handle(self) -> GizmoHandle:
         return self._hovered
+
+    @property
+    def joint_limit_hits(self) -> tuple[JointLimitHit, ...]:
+        return self._joint_limit_hits
 
     @property
     def active_handle(self) -> GizmoHandle:
@@ -768,6 +875,25 @@ class ObjectGizmo:
         pos, mat = pose
         mode = target.mode if target is not None else self._mode
         self._handle_mask = target.handles if target is not None else ALL_HANDLE_MASK
+        range_state = self._joint_range_state(session, target)
+        if target is not None and target.joint.type == "slide" and range_state is not None:
+            basis = self._target_basis(mat, target)
+            scale = world_scale(cam, pos, rect[3], SIZE_PT * self._style_scale)
+            self._axis_mask, self._plane_mask = visibility(cam, pos, basis, rect, scale)
+            slide = self._slide_range_projection(
+                cam,
+                rect,
+                self._style_scale,
+                range_state,
+                pos,
+                basis,
+            )
+            self._hovered = GizmoHandle.NONE
+            if slide is not None:
+                polygon = self._slide_arrow_polygon(slide, self._style_scale)
+                if _screen_polygon_distance(cursor, polygon) <= 4.0 * self._style_scale:
+                    self._hovered = GizmoHandle.Z
+            return self._hovered
         self._hovered, self._axis_mask, self._plane_mask = hit_test(
             cam,
             pos,
@@ -912,6 +1038,7 @@ class ObjectGizmo:
         return self._drawn
 
     def draw_overlay(self, cam, rect, overlay: Draw2D, *, style_scale: float = 1.0) -> None:
+        self._joint_limit_hits = ()
         if not self._visible:
             return
         if self._keyboard and not self._snapping:
@@ -919,7 +1046,14 @@ class ObjectGizmo:
         if self._style is GizmoStyle.FLAT:
             self._draw_flat(overlay, cam, rect, style_scale)
             self._drawn = True
-        if self._joint_range is not None:
+        joint_range_below_dial = bool(
+            self._joint_range is not None
+            and self._joint_range.joint_type == "hinge"
+            and self._using
+            and self._snapping
+            and self._active in ROTATE_HANDLES
+        )
+        if self._joint_range is not None and not joint_range_below_dial:
             self._draw_joint_range(overlay, cam, rect, style_scale)
         if self._using and self._snapping and self._active in AXIS_HANDLES:
             self._draw_translation_snap_ruler(overlay, cam, rect, style_scale)
@@ -944,11 +1078,20 @@ class ObjectGizmo:
                 self._draw_rotation_snap_ticks(
                     overlay, cam, rect, style_scale, rotation_dial_projector
                 )
+            if joint_range_below_dial:
+                # Snap ticks are a ruler beneath the joint arc, not spikes
+                # painted over its silhouette.
+                self._draw_joint_range(overlay, cam, rect, style_scale)
             self._draw_rotation_guide(overlay, cam, rect, style_scale, rotation_dial_projector)
         if self._using and self._label:
             self._draw_value_label(overlay, cam, rect, style_scale, rotation_dial_projector)
 
     def _draw_flat(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
+        # Scalar joint manipulation is represented by its range axis or arc.
+        # Slide joints add their translation arrow after the range so the
+        # visible affordance and the regular axis hit region stay in sync.
+        if self._joint_range is not None:
+            return
         frame = self._frame
         origin = np.asarray(frame.position, np.float64)
         rotation = np.asarray(frame.rotation, np.float64)
@@ -1100,12 +1243,11 @@ class ObjectGizmo:
         segments = _rotation_dial_segments(cam, origin, rotation[:, 2])
         span = state.angular_span
         start_angle = state.lower
-        unavailable_span = _FULL_TURN - span
         full_range = state.covers_full_turn
-        if self._active is GizmoHandle.ROTATE_Z:
-            allowed_color = ACTIVE_HANDLE_COLOR
-        elif self._interactive and self._hovered is GizmoHandle.ROTATE_Z:
-            allowed_color = HOVER_COLOR
+        if self._active is GizmoHandle.ROTATE_Z or (
+            self._interactive and self._hovered is GizmoHandle.ROTATE_Z
+        ):
+            allowed_color = JOINT_CURRENT_COLOR
         else:
             allowed_color = JOINT_RANGE_COLOR
         if span > 1e-6:
@@ -1124,42 +1266,60 @@ class ObjectGizmo:
                     JOINT_RANGE_WIDTH_PT * style_scale,
                     closed=full_range,
                 )
-        if unavailable_span > 1e-6:
-            point_count = max(
-                2,
-                int(np.ceil(segments * unavailable_span / _FULL_TURN)) + 1,
-            )
-            unavailable_angles = np.linspace(
-                start_angle + span,
-                start_angle + _FULL_TURN,
-                point_count,
-            )
-            unavailable = dial.points(JOINT_RANGE_RADIUS, unavailable_angles)
-            if np.all(unavailable[:, 2] > 0.0):
-                overlay.polyline(
-                    unavailable[:, :2],
-                    _with_alpha(JOINT_RANGE_UNAVAILABLE_COLOR, alpha),
-                    JOINT_RANGE_WIDTH_PT * style_scale,
-                    closed=span <= 1e-6,
+        lower_label = _joint_limit_label("MIN", state.lower, "hinge")
+        upper_label = _joint_limit_label("MAX", state.upper, "hinge")
+        if state.has_ambiguous_dial_limits:
+            # A full- or multi-turn scalar range has no unique pair of
+            # endpoint directions on a circular dial.  Ticks would imply a
+            # false geometric meaning.  Keep the exact numeric limits as a
+            # stable stacked badge while idle, then get it out of the way of
+            # the live value during a drag.
+            lower_rect = upper_rect = None
+            if not self._using:
+                anchor = dial.points(JOINT_RANGE_RADIUS, (np.pi,))[0, :2]
+                lower_rect = _draw_joint_value_label(
+                    overlay,
+                    anchor,
+                    _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha),
+                    lower_label,
+                    style_scale,
+                    above=True,
+                    align_right=True,
                 )
-
-        self._draw_hinge_limit(
-            overlay,
-            dial,
-            start_angle,
-            _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha),
-            _joint_limit_label("MIN", state.lower, "hinge"),
-            style_scale,
-            label_above=True,
-        )
-        self._draw_hinge_limit(
-            overlay,
-            dial,
-            start_angle + span,
-            _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha),
-            _joint_limit_label("MAX", state.upper, "hinge"),
-            style_scale,
-            label_above=False,
+                upper_rect = _draw_joint_value_label(
+                    overlay,
+                    anchor,
+                    _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha),
+                    upper_label,
+                    style_scale,
+                    above=False,
+                    align_right=True,
+                )
+        else:
+            lower_rect = self._draw_hinge_limit(
+                overlay,
+                dial,
+                start_angle,
+                _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha),
+                lower_label,
+                style_scale,
+                label_above=True,
+            )
+            upper_rect = self._draw_hinge_limit(
+                overlay,
+                dial,
+                state.upper,
+                _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha),
+                upper_label,
+                style_scale,
+                label_above=False,
+            )
+        self._set_joint_limit_hits(
+            state,
+            (
+                (state.lower, lower_label, lower_rect, JOINT_LOWER_LIMIT_COLOR),
+                (state.upper, upper_label, upper_rect, JOINT_UPPER_LIMIT_COLOR),
+            ),
         )
         current_tick = dial.tick(
             JOINT_RANGE_RADIUS,
@@ -1170,9 +1330,69 @@ class ObjectGizmo:
             overlay.line(
                 current_tick[0],
                 current_tick[1],
-                _with_alpha(HOVER_COLOR, alpha),
-                2.4 * style_scale,
+                _with_alpha(_joint_drag_label_color(state), alpha),
+                4.0 * style_scale,
             )
+
+    def _draw_slide_handle(
+        self,
+        overlay: Draw2D,
+        style_scale: float,
+        current: np.ndarray,
+        tangent: np.ndarray,
+        normal: np.ndarray,
+        alpha: float,
+    ) -> None:
+        """Draw the single external arrow that owns slide-joint interaction."""
+
+        slide = _SlideRangeProjection(current, current, current, tangent, normal, alpha)
+        points = self._slide_arrow_polygon(slide, style_scale)
+        color = self._flat_color(GizmoHandle.Z, 2, alpha)
+        if len(points):
+            overlay.fringed_concave_fill(points, color)
+
+    @staticmethod
+    def _slide_arrow_polygon(
+        slide: _SlideRangeProjection,
+        style_scale: float,
+    ) -> np.ndarray:
+        return joint_slide_arrow_polygon(slide.current, slide.tangent, style_scale)
+
+    @staticmethod
+    def _slide_range_projection(
+        cam,
+        rect,
+        style_scale: float,
+        state: _JointRangeState,
+        position,
+        rotation,
+    ) -> _SlideRangeProjection | None:
+        origin = np.asarray(position, np.float64)
+        axis = np.asarray(rotation, np.float64).reshape(3, 3)[:, 2]
+        alpha = axis_handle_alpha(cam, origin, axis)
+        if alpha <= 0.0:
+            return None
+        values = np.array((state.lower, state.current, state.upper), np.float64)
+        positions = origin + (values - state.current)[:, None] * axis
+        projected = project(cam, positions, rect)
+        if np.any(projected[:, 2] <= 0.0):
+            return None
+        lower, current, upper = projected[:, :2]
+        direction = upper - lower
+        length = float(np.linalg.norm(direction))
+        if length < 1e-6:
+            return None
+        tangent = direction / length
+        normal = np.array((-tangent[1], tangent[0]))
+        offset = normal * JOINT_RANGE_OFFSET_PT * style_scale
+        return _SlideRangeProjection(
+            lower + offset,
+            current + offset,
+            upper + offset,
+            tangent,
+            normal,
+            alpha,
+        )
 
     @staticmethod
     def _draw_hinge_limit(
@@ -1184,13 +1404,20 @@ class ObjectGizmo:
         style_scale: float,
         *,
         label_above: bool,
-    ) -> None:
+    ) -> tuple[float, float, float, float] | None:
         tick = dial.tick(JOINT_RANGE_RADIUS, angle, JOINT_LIMIT_TICK_PT * style_scale)
         if tick is None:
-            return
+            return None
         overlay.line(tick[0], tick[1], limit_color, 3.0 * style_scale)
-        label_offset = np.array((4.0, -14.0 if label_above else 2.0)) * style_scale
-        overlay.text(tick[1] + label_offset, limit_color, label)
+        return _draw_joint_value_label(
+            overlay,
+            tick[1],
+            limit_color,
+            label,
+            style_scale,
+            above=label_above,
+            align_right=not label_above,
+        )
 
     def _draw_slide_range(
         self,
@@ -1200,30 +1427,32 @@ class ObjectGizmo:
         style_scale: float,
         state: _JointRangeState,
     ) -> None:
-        origin = np.asarray(self._frame.position, np.float64)
-        axis = np.asarray(self._frame.rotation, np.float64)[:, 2]
-        alpha = axis_handle_alpha(cam, origin, axis)
-        if alpha <= 0.0:
+        slide = self._slide_range_projection(
+            cam,
+            rect,
+            style_scale,
+            state,
+            self._frame.position,
+            self._frame.rotation,
+        )
+        if slide is None:
             return
+        alpha = slide.alpha
         range_color = _with_alpha(JOINT_RANGE_COLOR, alpha)
         lower_color = _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha)
         upper_color = _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha)
-        current_color = _with_alpha(HOVER_COLOR, alpha)
-        values = np.array((state.lower, state.current, state.upper), np.float64)
-        positions = origin + (values - state.current)[:, None] * axis
-        projected = project(cam, positions, rect)
-        if np.any(projected[:, 2] <= 0.0):
-            return
-        lower, current, upper = projected[:, :2]
-        direction = upper - lower
-        length = float(np.linalg.norm(direction))
-        if length < 1e-6:
-            return
-        tangent = direction / length
-        normal = np.array((-tangent[1], tangent[0]))
-        offset = normal * JOINT_RANGE_OFFSET_PT * style_scale
-        lower, current, upper = lower + offset, current + offset, upper + offset
+        current_color = _with_alpha(_joint_drag_label_color(state), alpha)
+        lower, current, upper = slide.lower, slide.current, slide.upper
+        tangent, normal = slide.tangent, slide.normal
         overlay.line(lower, upper, range_color, JOINT_RANGE_WIDTH_PT * style_scale)
+        self._draw_slide_handle(
+            overlay,
+            style_scale,
+            current,
+            tangent,
+            normal,
+            alpha,
+        )
 
         half_tick = 6.0 * style_scale
         for point, limit_color in (
@@ -1237,21 +1466,62 @@ class ObjectGizmo:
                 3.0 * style_scale,
             )
         overlay.line(
-            current - normal * 4.0 * style_scale,
-            current + normal * 4.0 * style_scale,
+            current - normal * 10.0 * style_scale,
+            current + normal * 10.0 * style_scale,
             current_color,
-            2.4 * style_scale,
+            4.0 * style_scale,
         )
-        overlay.text(
-            lower + np.array((4.0, -16.0)) * style_scale,
+        lower_label = _joint_limit_label("MIN", state.lower, "slide")
+        _draw_joint_value_label(
+            overlay,
+            lower,
             lower_color,
-            _joint_limit_label("MIN", state.lower, "slide"),
+            lower_label,
+            style_scale,
+            above=True,
+            align_right=True,
         )
-        overlay.text(
-            upper + np.array((4.0, 3.0)) * style_scale,
+        upper_label = _joint_limit_label("MAX", state.upper, "slide")
+        _draw_joint_value_label(
+            overlay,
+            upper,
             upper_color,
-            _joint_limit_label("MAX", state.upper, "slide"),
+            upper_label,
+            style_scale,
+            above=False,
+            align_right=False,
         )
+        # Slide ticks and endpoint labels are read-only scale context. The one
+        # external arrow is deliberately the only pointer target.
+
+    def _set_joint_limit_hits(self, state: _JointRangeState, entries) -> None:
+        if state.joint_id < 0 or state.qpos_adr < 0:
+            return
+        self._joint_limit_hits = tuple(
+            JointLimitHit(
+                joint_id=state.joint_id,
+                qpos_adr=state.qpos_adr,
+                value=float(value),
+                label=label,
+                rect=rect,
+                semantic_color=semantic_color,
+            )
+            for value, label, rect, semantic_color in entries
+            if rect is not None
+        )
+
+    def apply_joint_limit(self, session: Session, hit: JointLimitHit) -> CommandResult:
+        """Move the selected scalar joint to the endpoint represented by a label."""
+
+        if not session.paused:
+            return CommandResult.bad("Pause the simulation before editing a joint")
+        target, reason = self._joint_target(session, session.selected_node)
+        if target is None:
+            return CommandResult.bad(reason or "The joint target is no longer available")
+        joint = target.joint
+        if int(joint.joint_id) != hit.joint_id or int(joint.qpos_adr) != hit.qpos_adr:
+            return CommandResult.bad("The joint target changed; choose the endpoint again")
+        return session.submit(SetQpos(hit.qpos_adr, hit.value))
 
     def _draw_axis_constraint(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         axis = _axis_of(self._active)
@@ -1276,8 +1546,21 @@ class ObjectGizmo:
         axis_index = _axis_of(self._active)
         if axis_index < 0:
             return
-        axis = self._start_basis[:, axis_index]
-        projected = project(cam, (self._start_pos, self._start_pos + axis), rect)
+        start_axis = self._start_basis[:, axis_index]
+        current_position = np.asarray(self._frame.position, np.float64)
+        # Anchor the visible ruler to the same current pose and basis used by
+        # the arrow.  The drag origin still defines snap values, but must not
+        # define a second parallel screen line when the displayed frame trails
+        # or is corrected by an adapter.
+        # The active arrow is frozen to the drag-start basis. Use that exact
+        # axis here as well instead of consulting the live target rotation.
+        axis = np.asarray(start_axis, np.float64)
+        arrow_scale = world_scale(cam, current_position, rect[3], SIZE_PT * style_scale)
+        projected = project(
+            cam,
+            (current_position, current_position + axis * arrow_scale * AXIS_END),
+            rect,
+        )
         if np.any(projected[:, 2] <= 0.0):
             return
         origin = projected[0, :2]
@@ -1292,7 +1575,7 @@ class ObjectGizmo:
 
         bounds = _projected_line_parameters(
             cam,
-            self._start_pos,
+            current_position,
             axis,
             segment,
             rect,
@@ -1302,7 +1585,8 @@ class ObjectGizmo:
 
         axis_color = self._handle_color(axis_index)
         step = float(self.translation_snap_m)
-        current_distance = float(np.dot(self._frame.position - self._start_pos, axis))
+        current_distance = float(np.dot(current_position - self._start_pos, start_axis))
+        bounds = (bounds[0] + current_distance, bounds[1] + current_distance)
         current_step = current_distance / step
         lo = max(
             int(np.ceil(min(bounds) / step)),
@@ -1320,7 +1604,7 @@ class ObjectGizmo:
         ticks: list[tuple[np.ndarray, np.ndarray, float, bool]] = []
         for index in range(lo, hi + 1):
             distance = index * step
-            world = self._start_pos + axis * distance
+            world = current_position + axis * (distance - current_distance)
             point = project(cam, (world,), rect)[0]
             if point[2] <= 0.0:
                 continue
@@ -1333,7 +1617,7 @@ class ObjectGizmo:
             b = point[:2] + normal * half_length
             ticks.append((a, b, alpha, False))
 
-        current = project(cam, (self._frame.position,), rect)[0]
+        current = projected[0]
         mask_radius = CENTER_SHELL_RADIUS * SIZE_PT * style_scale
         if current[2] > 0.0:
             half_length = 14.0 * style_scale
@@ -1345,8 +1629,20 @@ class ObjectGizmo:
                     True,
                 )
             )
-        axis_segments = _split_segment_around_point(
-            segment[0], segment[1], current[:2], mask_radius
+        # The ImGui ruler is composited above the rendered 3D arrow. Do not
+        # paint it through the shaft and cone: an oblique cone has an
+        # asymmetric projected silhouette, which makes a mathematically
+        # centered line look visibly off-axis. Resume the ruler just beyond
+        # the arrow tip, where both geometries meet on the same centerline.
+        arrow_extent = float(np.linalg.norm(projected[1, :2] - current[:2]))
+        arrow_clearance = 0.0
+        axis_segments = _split_segment_around_interval(
+            segment[0],
+            segment[1],
+            current[:2],
+            direction,
+            -mask_radius,
+            arrow_extent + arrow_clearance,
         )
 
         def color(value, alpha: float):
@@ -1355,6 +1651,9 @@ class ObjectGizmo:
         for start, end in axis_segments:
             overlay.line(start, end, color((*axis_color, 1.0), 0.92), 1.2 * style_scale)
         for a, b, alpha, is_active in ticks:
+            along = float(np.dot((a + b) * 0.5 - current[:2], direction))
+            if not is_active and -mask_radius <= along <= arrow_extent + arrow_clearance:
+                continue
             tick_color = color(HOVER_COLOR if is_active else (*axis_color, 1.0), alpha)
             for start, end in _split_segment_around_point(a, b, current[:2], mask_radius):
                 overlay.line(start, end, tick_color, (2.2 if is_active else 1.2) * style_scale)
@@ -1454,7 +1753,7 @@ class ObjectGizmo:
             )
 
     def _draw_translation_guide(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
-        screen = project(cam, (self._start_pos, self._frame.position), rect)
+        screen = project(cam, (self._drag_origin_pos, self._frame.position), rect)
         if np.any(screen[:, 2] <= 0.0):
             return
         start, end = screen[:, :2]
@@ -1483,7 +1782,7 @@ class ObjectGizmo:
             return
         dd.layer(DRAG_LAYER, Occlusion.ALWAYS).drag_link(
             "gizmo.drag",
-            self._start_pos,
+            self._drag_origin_pos,
             self._frame.position,
             GUIDE_CORE_COLOR,
             CONTRAST_EDGE_COLOR,
@@ -1525,12 +1824,21 @@ class ObjectGizmo:
                 self._start_basis[:, 0],
                 SIZE_PT * style_scale,
             )
-            start_angle = (
-                float(self._start_joint_qpos[0])
-                if len(self._start_joint_qpos)
-                else float(joint_range.current - self._rotation_angle)
-            )
-            sweep = float(joint_range.current - start_angle)
+            # Limit rebasing updates the numeric drag baseline to discard
+            # pointer over-travel. Keep the visible sector anchored at the
+            # original mouse-down value until release.
+            if len(self._joint_drag_origin_qpos):
+                start_angle = float(self._joint_drag_origin_qpos[0])
+            elif len(self._start_joint_qpos):
+                start_angle = float(self._start_joint_qpos[0])
+            else:
+                start_angle = float(joint_range.current - self._rotation_angle)
+            # The absolute label retains the scalar turn count.  A multi-turn
+            # range cannot encode that count on one dial, so show the shortest
+            # equivalent sector instead of an almost-full, misleading disk.
+            sweep = _rotation_sweep(float(joint_range.current - start_angle))
+            if joint_range.has_ambiguous_dial_limits:
+                sweep = _shortest_rotation_sweep(sweep)
         else:
             start_angle = 0.0
             sweep = _rotation_sweep(self._rotation_angle)
@@ -1619,7 +1927,13 @@ class ObjectGizmo:
         if anchor[2] <= 0.0:
             return
         width_f, height_f = overlay.text_size(self._label)
-        width, height = width_f + 2.0 * pad, height_f + 2.0 * pad
+        semantic_color = (
+            _joint_drag_label_color(self._joint_range) if self._active_joint is not None else None
+        )
+        dot_radius = 3.0 * style_scale if semantic_color is not None else 0.0
+        dot_gap = 6.0 * style_scale if semantic_color is not None else 0.0
+        prefix_width = dot_radius * 2.0 + dot_gap
+        width, height = width_f + 2.0 * pad + prefix_width, height_f + 2.0 * pad
         x = float(np.clip(anchor[0] + gap, rect[0] + 4.0, rect[0] + rect[2] - width - 4.0))
         y = float(np.clip(anchor[1] + gap, rect[1] + 4.0, rect[1] + rect[3] - height - 4.0))
         overlay.rect_filled(
@@ -1628,7 +1942,16 @@ class ObjectGizmo:
             (0.08, 0.09, 0.11, 0.92),
             rounding=4.0 * style_scale,
         )
-        overlay.text((x + pad, y + pad), (0.96, 0.96, 0.97, 1.0), self._label)
+        text_x = x + pad
+        if semantic_color is not None:
+            overlay.circle_filled(
+                (text_x + dot_radius, y + height * 0.5),
+                dot_radius,
+                semantic_color,
+                segments=16,
+            )
+            text_x += prefix_width
+        overlay.text((text_x, y + pad), (0.96, 0.96, 0.97, 1.0), self._label)
 
     def _begin(self, session, cam, rect, cursor) -> bool:
         return self._begin_handle(session, cam, rect, cursor, self._hovered)
@@ -1657,8 +1980,10 @@ class ObjectGizmo:
             if len(self._start_joint_qpos) != count:
                 self._active_joint = None
                 return False
+            self._joint_drag_origin_qpos = self._start_joint_qpos.copy()
         self._active = handle
         np.copyto(self._start_pos, pos)
+        np.copyto(self._drag_origin_pos, pos)
         np.copyto(self._start_mat, mat)
         np.copyto(self._start_basis, self._target_basis(mat, target))
         np.copyto(self._current_mat, mat)
@@ -1767,14 +2092,57 @@ class ObjectGizmo:
         if node is None:
             self._end()
             return False
+        requested_joint_value = None
+        if self._active_joint is not None and self._active_joint.type in ("hinge", "slide"):
+            requested_delta = (
+                self._rotation_angle
+                if self._active_joint.type == "hinge"
+                else float(np.dot(pos - self._start_pos, self._axis))
+            )
+            requested_joint_value = float(self._start_joint_qpos[0]) + requested_delta
         result, pos = self._submit_transform(session, node, pos, mat)
         if not result.ok:
             self._verdict = Verdict(False, result.message)
             self._end()
             return False
+        joint = self._active_joint
+        if (
+            requested_joint_value is not None
+            and joint is not None
+            and joint.limited
+            and joint.range[1] > joint.range[0]
+            and not np.isclose(
+                requested_joint_value,
+                np.clip(requested_joint_value, joint.range[0], joint.range[1]),
+                atol=1e-12,
+                rtol=0.0,
+            )
+        ):
+            self._rebase_clamped_joint_drag(cursor, pos)
         self._edit_started = True
         self._label = self._format_value(pos)
         return True
+
+    def _rebase_clamped_joint_drag(self, cursor, position) -> None:
+        """Discard pointer over-travel when a scalar joint reaches a limit."""
+
+        joint = self._active_joint
+        if joint is None or not len(self._start_joint_qpos):
+            return
+        if joint.type == "hinge":
+            applied = float(self._rotation_angle)
+            self._start_joint_qpos[0] += applied
+            self._start_mat[:] = math3d.rotvec_to_mat3(self._axis * applied) @ self._start_mat
+            self._current_mat[:] = self._start_mat
+            self._rotation_start_vec[:] = self._last_rot_vec
+            self._rotation_raw_angle = 0.0
+            self._rotation_angle = 0.0
+            return
+        if joint.type == "slide":
+            applied = float(np.dot(np.asarray(position) - self._start_pos, self._axis))
+            self._start_joint_qpos[0] += applied
+            self._start_pos[:] = position
+            self._start_cursor[:] = cursor
 
     def _submit_transform(
         self, session, node, pos, mat, *, preview_model: bool = True
@@ -1843,7 +2211,10 @@ class ObjectGizmo:
         if self._active_joint is not None and self._active_joint.type in ("hinge", "slide"):
             name = self._active_joint.name or self._active_joint.type
         if self._active in ROTATE_HANDLES:
-            degrees = round(float(np.degrees(self._rotation_angle)), 1)
+            angle = self._rotation_angle
+            if self._active_joint is not None and len(self._start_joint_qpos):
+                angle += float(self._start_joint_qpos[0])
+            degrees = round(float(np.degrees(angle)), 1)
             turns = int(abs(degrees) // 360.0)
             suffix = f" · {turns}×360°" if turns else ""
             snap = f" · SNAP {_format_step(self.rotation_snap_deg)}°" if self._snapping else ""
@@ -1851,7 +2222,10 @@ class ObjectGizmo:
         delta = np.asarray(position, np.float64) - self._start_pos
         local = self._start_basis.T @ delta
         if self._active in AXIS_HANDLES:
-            value = f"{name} {local[axis]:+.3f} m"
+            amount = float(local[axis])
+            if self._active_joint is not None and len(self._start_joint_qpos):
+                amount += float(self._start_joint_qpos[0])
+            value = f"{name} {amount:+.3f} m"
             return self._with_translation_snap(value)
         plane_axes = {
             GizmoHandle.YZ: (1, 2),
@@ -1917,7 +2291,14 @@ class ObjectGizmo:
         current = float(qpos[joint.qpos_adr])
         if not np.isfinite(current):
             return None
-        return _JointRangeState(joint.type, current, lower, upper)
+        return _JointRangeState(
+            joint.type,
+            current,
+            lower,
+            upper,
+            int(joint.joint_id),
+            int(joint.qpos_adr),
+        )
 
     def _target_pose(
         self, session: Session, node: SceneNode, target: _JointTarget | None
@@ -2039,6 +2420,7 @@ class ObjectGizmo:
         self._active = GizmoHandle.NONE
         self._active_joint = None
         self._start_joint_qpos = np.zeros(0, np.float64)
+        self._joint_drag_origin_qpos = np.zeros(0, np.float64)
         self._label = ""
         self._edit_started = False
 
@@ -2080,6 +2462,63 @@ def _format_step(value: float) -> str:
     return f"{float(value):g}"
 
 
+def _draw_joint_value_label(
+    overlay: Draw2D,
+    anchor,
+    semantic_color,
+    label: str,
+    style_scale: float,
+    *,
+    above: bool,
+    align_right: bool,
+) -> tuple[float, float, float, float]:
+    """Draw a translucent semantic-dot label without coloring the value text."""
+
+    measured = overlay.text_size(label)
+    if measured is None:  # permissive for recording/test Draw2D adapters
+        text_width, text_height = len(label) * 8.0 * style_scale, 14.0 * style_scale
+    else:
+        text_width, text_height = measured
+    padding_x = 8.0 * style_scale
+    padding_y = 5.0 * style_scale
+    dot_radius = 3.0 * style_scale
+    dot_gap = 6.0 * style_scale
+    width = padding_x * 2.0 + dot_radius * 2.0 + dot_gap + text_width
+    height = max(26.0 * style_scale, text_height + padding_y * 2.0)
+    margin = 8.0 * style_scale
+    x = float(anchor[0]) - width - margin if align_right else float(anchor[0]) + margin
+    y = float(anchor[1]) - height - margin if above else float(anchor[1]) + margin
+    overlay.rect_filled(
+        (x, y),
+        (x + width, y + height),
+        (*THEME.bg_popup[:3], 0.92),
+        rounding=3.0 * style_scale,
+    )
+    overlay.rect(
+        (x, y),
+        (x + width, y + height),
+        THEME.border,
+        1.0 * style_scale,
+        rounding=3.0 * style_scale,
+    )
+    center_y = y + height * 0.5
+    overlay.circle_filled(
+        (x + padding_x + dot_radius, center_y),
+        dot_radius,
+        semantic_color,
+        segments=16,
+    )
+    overlay.text(
+        (
+            x + padding_x + dot_radius * 2.0 + dot_gap,
+            y + (height - text_height) * 0.5,
+        ),
+        THEME.text,
+        label,
+    )
+    return (x, y, x + width, y + height)
+
+
 def _joint_limit_label(prefix: str, value: float, joint_type: str) -> str:
     if joint_type == "hinge":
         return f"{prefix} {np.degrees(value):+.1f}°"
@@ -2091,8 +2530,17 @@ def _rotation_sweep(angle: float) -> float:
     return float(np.copysign(np.fmod(abs(shown), 2.0 * np.pi), shown))
 
 
+def _shortest_rotation_sweep(angle: float) -> float:
+    """Return the equivalent dial sweep in the compact [-pi, pi] interval."""
+
+    wrapped = float((angle + np.pi) % _FULL_TURN - np.pi)
+    if abs(wrapped + np.pi) <= _JOINT_RANGE_EPSILON and angle > 0.0:
+        return float(np.pi)
+    return wrapped
+
+
 def _rotation_fill_alpha(sweep: float) -> float:
-    return 0.28 if abs(float(sweep)) > 1e-6 else 0.0
+    return 0.24 if abs(float(sweep)) > 1e-6 else 0.0
 
 
 def _rotation_tick_length_pt(degrees: float) -> float:
@@ -2204,6 +2652,39 @@ def _snap_tick_alpha(offset_steps: float) -> float:
         return 0.0
     t = (distance - SNAP_TICK_FULL_STEPS) / (SNAP_TICK_FADE_STEPS - SNAP_TICK_FULL_STEPS)
     return float(1.0 - t * t * (3.0 - 2.0 * t))
+
+
+def _split_segment_around_interval(
+    start,
+    end,
+    origin,
+    direction,
+    lower: float,
+    upper: float,
+) -> tuple[tuple[np.ndarray, np.ndarray], ...]:
+    """Remove one directed interval from a collinear screen-space segment."""
+
+    start = np.asarray(start, np.float64)
+    end = np.asarray(end, np.float64)
+    origin = np.asarray(origin, np.float64)
+    direction = np.asarray(direction, np.float64)
+    direction_length = float(np.linalg.norm(direction))
+    if direction_length < 1e-9 or lower >= upper:
+        return ((start, end),)
+    direction /= direction_length
+    start_t = float(np.dot(start - origin, direction))
+    end_t = float(np.dot(end - origin, direction))
+    if start_t > end_t:
+        start, end = end, start
+        start_t, end_t = end_t, start_t
+    segments = []
+    if start_t < lower:
+        stop_t = min(lower, end_t)
+        segments.append((start, origin + direction * stop_t))
+    if end_t > upper:
+        begin_t = max(upper, start_t)
+        segments.append((origin + direction * begin_t, end))
+    return tuple(segments)
 
 
 def _split_segment_around_point(

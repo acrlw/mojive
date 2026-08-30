@@ -2,17 +2,39 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 
 from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, NodeType, SceneNode
-from ..draw2d import ImguiDraw2D, ink_box
-from . import Panel, PanelContext
+from ..draw2d import ImguiDraw2D
+from . import Panel, PanelContext, search_input
 
 _LARGE_SCENE_NODES = 2_000
 _VISIBLE_ROW_BUDGET = 512
+_TYPE_FILTERS = ("all", "link", "geom", "joint", "site", "camera", "light", "robot", "flex")
+
+
+def disclosure_triangle(
+    center: tuple[float, float],
+    radius: float,
+    *,
+    opened: bool,
+) -> tuple[tuple[float, float], ...]:
+    """Return one canonical right triangle, rigidly rotated when expanded."""
+
+    cx, cy = center
+    canonical = (
+        (-0.55 * radius, -radius),
+        (-0.55 * radius, radius),
+        (0.65 * radius, 0.0),
+    )
+    if not opened:
+        return tuple((cx + x, cy + y) for x, y in canonical)
+    # Screen Y grows downward, so a positive quarter turn maps right to down.
+    return tuple((cx - y, cy + x) for x, y in canonical)
 
 
 class HierarchyPanel(Panel):
@@ -24,6 +46,7 @@ class HierarchyPanel(Panel):
     def __init__(self) -> None:
         super().__init__()
         self._filter = ""
+        self._type_filter = "all"
         self._cache_generation = -1
         self._roots: list[SceneNode] = []
         self._by_id: dict[int, SceneNode] = {}
@@ -32,8 +55,8 @@ class HierarchyPanel(Panel):
         self._row_budget = _VISIBLE_ROW_BUDGET
         self._rows_drawn = 0
         self._rows_truncated = False
-        self._ink_center_cache: dict[tuple[float, str], float] = {}
         self._batch_selected: set[int] = set()
+        self._open_state: dict[int, bool] = {}
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -43,9 +66,15 @@ class HierarchyPanel(Panel):
         self._refresh(ctx)
 
         imgui.set_next_item_width(-1)
-        _changed, self._filter = imgui.input_text("##filter", self._filter)
-        if not self._filter:
-            imgui.set_item_tooltip("filter by name")
+        _changed, self._filter = search_input(
+            "##filter",
+            self._filter,
+            hint=ctx.tr("Search hierarchy"),
+            search_tooltip=ctx.tr("Search hierarchy"),
+            clear_tooltip=ctx.tr("Clear search"),
+        )
+
+        self._draw_type_filters(ctx)
 
         removable = self._batch_removable_roots()
         if len(self._batch_selected) > 1:
@@ -75,27 +104,31 @@ class HierarchyPanel(Panel):
             return
 
         table_flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
-        if not imgui.begin_table("hierarchy_rows", 2, table_flags):
+        if not imgui.begin_table("hierarchy_rows", 3, table_flags):
             imgui.end_child()
             return
-        imgui.table_setup_column("node", imgui.TableColumnFlags_.width_stretch)
+        imgui.table_setup_column("node", imgui.TableColumnFlags_.width_stretch, 1.0)
+        imgui.table_setup_column(
+            "type", imgui.TableColumnFlags_.width_fixed, 72.0 * ctx.style_scale
+        )
         imgui.table_setup_column(
             "visible", imgui.TableColumnFlags_.width_fixed, 24.0 * ctx.style_scale
         )
 
         self._rows_drawn = 0
         self._rows_truncated = False
-        if self._filter:
+        if self._filter or self._type_filter != "all":
             needle = self._filter.casefold()
             hits = []
             for node, name in zip(s.nodes, self._search_names, strict=True):
-                if needle in name:
+                type_matches = self._type_filter == "all" or node.type.value == self._type_filter
+                if type_matches and needle in name:
                     if len(hits) >= self._row_budget:
                         self._rows_truncated = True
                         break
                     hits.append(node)
             for node in hits:
-                self._row(ctx, node, leaf=True)
+                self._row(ctx, node, leaf=True, depth=0)
             if not hits:
                 imgui.table_next_row()
                 imgui.table_next_column()
@@ -117,6 +150,51 @@ class HierarchyPanel(Panel):
         imgui.end_table()
         imgui.end_child()
 
+    def _draw_type_filters(self, ctx: PanelContext) -> None:
+        style = imgui.get_style()
+        spacing = float(style.item_spacing.x)
+        padding = float(style.frame_padding.x)
+        total_width = sum(imgui.calc_text_size(label).x + padding * 2.0 for label in _TYPE_FILTERS)
+        total_width += spacing * (len(_TYPE_FILTERS) - 1)
+        height = imgui.get_frame_height() + imgui.get_style().scrollbar_size + 3.0 * ctx.style_scale
+        imgui.set_next_window_content_size(imgui.ImVec2(total_width, 0.0))
+        child_flags = imgui.ChildFlags_.none.value
+        window_flags = imgui.WindowFlags_.horizontal_scrollbar.value
+        if not imgui.begin_child(
+            "hierarchy_type_filters",
+            imgui.ImVec2(0.0, height),
+            child_flags,
+            window_flags,
+        ):
+            imgui.end_child()
+            return
+        imgui.push_style_var(imgui.StyleVar_.frame_rounding, 3.0 * ctx.style_scale)
+        for index, label in enumerate(_TYPE_FILTERS):
+            selected = label == self._type_filter
+            imgui.push_style_color(
+                imgui.Col_.button,
+                imgui.ImVec4(*(ctx.theme.bg_frame_active if selected else ctx.theme.bg_frame)),
+            )
+            imgui.push_style_color(
+                imgui.Col_.button_hovered,
+                imgui.ImVec4(*ctx.theme.bg_frame_hovered),
+            )
+            imgui.push_style_color(
+                imgui.Col_.button_active,
+                imgui.ImVec4(*ctx.theme.bg_frame_active),
+            )
+            imgui.push_style_color(
+                imgui.Col_.text,
+                imgui.ImVec4(*(ctx.theme.primary_bright if selected else ctx.theme.text_disabled)),
+            )
+            if imgui.button(label):
+                self._type_filter = label
+            imgui.pop_style_color(4)
+            if index + 1 < len(_TYPE_FILTERS):
+                imgui.same_line()
+        imgui.pop_style_var()
+        imgui.end_child()
+
     def _refresh(self, ctx: PanelContext) -> None:
         gen = ctx.session.structure_generation
         if gen == self._cache_generation:
@@ -131,7 +209,9 @@ class HierarchyPanel(Panel):
         self._row_budget = (
             _VISIBLE_ROW_BUDGET if len(nodes) >= _LARGE_SCENE_NODES else len(nodes) + 1
         )
-        self._ink_center_cache.clear()
+        self._open_state = {
+            node_id: value for node_id, value in self._open_state.items() if node_id in self._by_id
+        }
 
     def _subtree(self, ctx: PanelContext, node: SceneNode, depth: int) -> None:
         if self._rows_drawn >= self._row_budget:
@@ -139,7 +219,11 @@ class HierarchyPanel(Panel):
             return
         children = [self._by_id[c] for c in node.children if c in self._by_id]
         opened = self._row(
-            ctx, node, leaf=not children, default_open=depth < self._default_open_depth
+            ctx,
+            node,
+            leaf=not children,
+            depth=depth,
+            default_open=depth < self._default_open_depth,
         )
         if children and opened:
             for child in children:
@@ -147,48 +231,80 @@ class HierarchyPanel(Panel):
                     self._rows_truncated = True
                     break
                 self._subtree(ctx, child, depth + 1)
-            imgui.tree_pop()
 
     def _row(
-        self, ctx: PanelContext, node: SceneNode, leaf: bool, default_open: bool = False
+        self,
+        ctx: PanelContext,
+        node: SceneNode,
+        leaf: bool,
+        depth: int,
+        default_open: bool = False,
     ) -> bool:
         self._rows_drawn += 1
-        imgui.table_next_row()
+        row_height = max(imgui.get_frame_height(), 26.0 * ctx.style_scale)
+        imgui.table_next_row(0, row_height)
         imgui.table_next_column()
-        flags = imgui.TreeNodeFlags_.open_on_arrow | imgui.TreeNodeFlags_.span_avail_width
-        if leaf:
-            flags |= imgui.TreeNodeFlags_.leaf | imgui.TreeNodeFlags_.no_tree_push_on_open
-        if default_open:
-            flags |= imgui.TreeNodeFlags_.default_open
         selected = ctx.session.selected_node
-        if node.node_id in self._batch_selected or (
+        is_selected = node.node_id in self._batch_selected or (
             selected is not None and node.node_id == selected.node_id
-        ):
-            flags |= imgui.TreeNodeFlags_.selected
-
-        color = ctx.theme.node_color(node.type)
-        if not node.visible:
-            color = (color[0] * 0.5, color[1] * 0.5, color[2] * 0.5, 1.0)
-
-        imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*color))
-        opened = imgui.tree_node_ex(f"{node.name or '?'}##n{node.node_id}", flags)
-        imgui.pop_style_color()
-
-        if imgui.is_item_clicked() and not imgui.is_item_toggled_open():
-            io = imgui.get_io()
-            if io.key_ctrl or io.key_super:
-                if node.node_id in self._batch_selected:
-                    self._batch_selected.remove(node.node_id)
-                    if self._batch_selected:
-                        ctx.submit(cmd.SelectNode(next(reversed(tuple(self._batch_selected)))))
-                    else:
-                        ctx.submit(cmd.Select(0))
-                else:
-                    self._batch_selected.add(node.node_id)
-                    ctx.submit(cmd.SelectNode(node.node_id))
+        )
+        row_start = imgui.get_cursor_screen_pos()
+        width = imgui.get_content_region_avail().x
+        imgui.invisible_button(
+            f"##hierarchy-node-{node.node_id}",
+            imgui.ImVec2(max(1.0, width), row_height),
+        )
+        hovered = imgui.is_item_hovered()
+        draw = ImguiDraw2D()
+        if is_selected or hovered:
+            color = ctx.theme.bg_header if is_selected else ctx.theme.bg_frame
+            imgui.table_set_bg_color(
+                imgui.TableBgTarget_.row_bg0,
+                imgui.color_convert_float4_to_u32(imgui.ImVec4(*color)),
+            )
+        indent = depth * 18.0 * ctx.style_scale
+        arrow_center = (
+            row_start.x + indent + 7.0 * ctx.style_scale,
+            row_start.y + row_height * 0.5,
+        )
+        opened = self._open_state.get(node.node_id, default_open)
+        if not leaf:
+            radius = 5.0 * ctx.style_scale
+            draw.fringed_concave_fill(
+                disclosure_triangle(arrow_center, radius, opened=opened),
+                ctx.theme.text,
+            )
+        name = node.name or "?"
+        text_height = imgui.calc_text_size(name).y
+        text_color = ctx.theme.text if node.visible else ctx.theme.text_disabled
+        draw.text(
+            (
+                row_start.x + indent + 20.0 * ctx.style_scale,
+                row_start.y + (row_height - text_height) * 0.5,
+            ),
+            text_color,
+            name,
+        )
+        if imgui.is_item_clicked():
+            mouse_x = imgui.get_io().mouse_pos.x
+            if not leaf and mouse_x <= row_start.x + indent + 16.0 * ctx.style_scale:
+                opened = not opened
+                self._open_state[node.node_id] = opened
             else:
-                self._batch_selected = {node.node_id}
-                ctx.submit(cmd.SelectNode(node.node_id))
+                io = imgui.get_io()
+                if io.key_ctrl or io.key_super:
+                    if node.node_id in self._batch_selected:
+                        self._batch_selected.remove(node.node_id)
+                        if self._batch_selected:
+                            ctx.submit(cmd.SelectNode(next(reversed(tuple(self._batch_selected)))))
+                        else:
+                            ctx.submit(cmd.Select(0))
+                    else:
+                        self._batch_selected.add(node.node_id)
+                        ctx.submit(cmd.SelectNode(node.node_id))
+                else:
+                    self._batch_selected = {node.node_id}
+                    ctx.submit(cmd.SelectNode(node.node_id))
 
         editable = bool(
             ctx.session.adapter.caps.scene_authoring
@@ -241,11 +357,16 @@ class HierarchyPanel(Panel):
                 imgui.text_disabled("Read-only entity")
             imgui.end_popup()
 
-        imgui.same_line()
+        imgui.table_next_column()
+        type_pos = imgui.get_cursor_screen_pos()
+        type_height = imgui.calc_text_size(str(node.type)).y
+        imgui.set_cursor_screen_pos(
+            imgui.ImVec2(type_pos.x, row_start.y + (row_height - type_height) * 0.5)
+        )
         imgui.text_disabled(str(node.type))
 
         imgui.table_next_column()
-        self._visibility_toggle(ctx, node)
+        self._visibility_toggle(ctx, node, row_start.y, row_height)
         return opened
 
     def _batch_removable_roots(self) -> tuple[int, ...]:
@@ -308,7 +429,13 @@ class HierarchyPanel(Panel):
                 ctx.submit(cmd.AddModelElement(node.node_id, element_type, name))
         imgui.end_menu()
 
-    def _visibility_toggle(self, ctx: PanelContext, node: SceneNode) -> None:
+    def _visibility_toggle(
+        self,
+        ctx: PanelContext,
+        node: SceneNode,
+        row_y: float,
+        row_height: float,
+    ) -> None:
         if node.type in (NodeType.ENVIRONMENT, NodeType.MODEL):
             return
         size = imgui.get_frame_height()
@@ -317,27 +444,33 @@ class HierarchyPanel(Panel):
         pressed = imgui.invisible_button(f"##vis{node.node_id}", imgui.ImVec2(size, size))
         hovered = imgui.is_item_hovered()
         lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        # The frame is taller than the label's ink box, so centering on the
-        # frame leaves the mark a few pixels low; center on the row's ink.
-        label = f"{node.name or '?'} {node.type}"
-        font = imgui.get_font()
-        font_size = imgui.get_font_size()
-        cache_key = (round(font_size, 3), label)
-        center_offset = self._ink_center_cache.get(cache_key)
-        if center_offset is None:
-            box = ink_box(font, font_size, label)
-            center_offset = (box[1] + box[3]) * 0.5 if box else (hi.y - lo.y) * 0.5
-            self._ink_center_cache[cache_key] = center_offset
-        center_y = lo.y + center_offset
-        center = ((lo.x + hi.x) * 0.5, center_y)
-        radius = 4.0 * ctx.style_scale
+        center = ((lo.x + hi.x) * 0.5, row_y + row_height * 0.5)
+        radius_x = 6.5 * ctx.style_scale
+        radius_y = 3.6 * ctx.style_scale
         base = ctx.theme.primary_bright if hovered else ctx.theme.primary
-        alpha = 1.0 if node.visible else 0.45
+        alpha = 1.0 if hovered else 0.58 if node.visible else 0.24
         color = (*base[:3], alpha)
         draw = ImguiDraw2D()
-        draw.circle(center, radius, color, 1.4 * ctx.style_scale, segments=16)
+        top = tuple(
+            (
+                center[0] - radius_x + radius_x * 2.0 * index / 8.0,
+                center[1] - math.sin(math.pi * index / 8.0) * radius_y,
+            )
+            for index in range(9)
+        )
+        bottom = tuple(
+            (
+                center[0] + radius_x - radius_x * 2.0 * index / 8.0,
+                center[1] + math.sin(math.pi * index / 8.0) * radius_y,
+            )
+            for index in range(9)
+        )
+        # Do not submit the shared left/right endpoints twice: overlapping
+        # antialiased strokes made the old almond look as if its arcs crossed.
+        outline = (*top, *bottom[1:-1])
+        draw.polyline(outline, color, 1.35 * ctx.style_scale, closed=True)
         if node.visible:
-            draw.circle_filled(center, radius * 0.42, color, segments=12)
+            draw.circle(center, 1.8 * ctx.style_scale, color, 1.2 * ctx.style_scale, segments=16)
         if pressed:
             if node.type is NodeType.LIGHT and node.light_index >= 0:
                 source = ctx.session.source

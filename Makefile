@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring asset-browser joint-site-authoring model-component-authoring keyframe-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery ui-feasibility ui-runtime ui-frame-profile ui-gallery gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept texture-minification local-shadow-precision shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance inspector gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring asset-browser joint-site-authoring model-component-authoring keyframe-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -13,7 +13,7 @@ help:
 		'  make hidpi              viewer with an explicit 200% UI scale' \
 		'  make empty              empty viewer; load MJCF or URDF from File menu' \
 		'  make editor             empty Forge workspace; combine MJCF/URDF and entities' \
-		'  make settings           editor with the modal Settings panel open' \
+		'  make settings           editor with the dockable Settings panel open' \
 		'  make workspace-edit     workspace, MjSpec topology, camera and light acceptance' \
 		'  make model-loading      empty, MJCF, and URDF loading reference images' \
 		'  make model-composition  add and remove MJCF/URDF models at runtime' \
@@ -24,6 +24,9 @@ help:
 		'  make format-validation  current scene snapshot and recording formats' \
 		'  make robot             Unitree Go2; downloads on first run' \
 		'  make outline           selection and antialiased outline' \
+		'  make inspector         compact Inspector transform reference image' \
+		'  make ui-feasibility    interactive M1-M18 UI feasibility probe' \
+		'  make ui-gallery        deterministic UI feasibility acceptance pages' \
 		'  make gizmo             2D/3D position/rotation gizmo' \
 		'  make joint-gizmo       numbered joint-gizmo acceptance scene' \
 		'  make primitive-authoring  fixed transforms and primitive dimensions' \
@@ -59,6 +62,8 @@ help:
 		'  make image-light       MuJoCo cube-map environment light' \
 		'  make many-lights       16-light and 24-light reference images' \
 		'  make material-parity   texture, transparency, tendon, deformable, and dense scenes' \
+		'  make texture-minification  near/far textured-plane filtering acceptance' \
+		'  make local-shadow-precision  anymal-c spotlight receiver precision acceptance' \
 		'  make shadow-scheduling deterministic light and shadow-slot report' \
 		'  make scene-icons       camera and light scene icons' \
 		'  make reflect           multiple planar reflections' \
@@ -214,6 +219,29 @@ calibrate:
 gallery:
 	$(PY) -m forge_viewer.tools.gallery
 
+ui-feasibility:
+	$(PY) design/tools/render_ui_feasibility.py --interactive $(ARGS)
+
+ui-runtime:
+	$(PY) -m forge_viewer.tools.ui_runtime $(ARGS)
+
+## Profile production viewport chrome and enforce its incremental frame budget.
+ui-frame-profile:
+	$(PY) -m forge_viewer.tools.ui_frame_profile $(ARGS)
+
+ui-gallery:
+	$(PY) design/tools/render_ui_feasibility.py --page workspace -o output/ui-workspace.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab playback -o output/ui-geometry-playback.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab tools -o output/ui-geometry-tools.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab hints -o output/ui-geometry-hints.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab gizmos -o output/ui-geometry-transform-gizmos.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab helpers -o output/ui-geometry-joint-helpers.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab status -o output/ui-geometry-status.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab shell -o output/ui-geometry-shell.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab panels -o output/ui-geometry-panels.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab workspaces -o output/ui-geometry-workspaces.png
+	$(PY) -m forge_viewer.tools.ui_runtime -o output/ui-runtime
+
 gizmo-gallery:
 	$(PY) -m forge_viewer.tools.gizmo_gallery $(ARGS)
 
@@ -229,7 +257,7 @@ model-composition:
 	$(PY) -m forge_viewer.tools.model_composition $(ARGS)
 
 editor-performance:
-	$(PYTEST) -q tests/test_editor_performance.py
+	$(PYTEST) -q -m physics tests/test_editor_performance.py
 	$(PY) -m forge_viewer.tools.editor_performance $(ARGS)
 
 stability: rpc-soak format-validation
@@ -411,6 +439,10 @@ rpc: cli
 	$(PYTEST) -q -m "gpu or physics" tests/gpu/test_control_rpc_capture.py
 	$(PY) -m forge_viewer.tools.control_rpc
 
+## Compact Inspector transform acceptance image.
+inspector:
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.tools.inspector $(ARGS)
+
 ## Native gizmo acceptance: G position, R rotation, T frame, F9 settings.
 gizmo:
 	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli view gizmo --paused $(ARGS)
@@ -459,7 +491,7 @@ keyframe-authoring:
 batch-editing:
 	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
 
-## Centered modal Settings acceptance. Close it to continue editing the scene.
+## Dockable non-modal Settings acceptance.
 settings:
 	FORGE_VIEWER_OPEN_SETTINGS=1 FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor $(ARGS)
 
@@ -485,6 +517,26 @@ robot:
 	fi
 	@git -C "$(MENAGERIE_DIR)" sparse-checkout add assets "$(ROBOT)"
 	$(PY) -m forge_viewer.cli view "$(MENAGERIE_DIR)/$(ROBOT)/scene.xml" $(ARGS)
+
+TEXTURE_MINIFICATION_SCENE ?= $(MENAGERIE_DIR)/anybotics_anymal_c/scene.xml
+texture-minification:
+	@test -f "$(TEXTURE_MINIFICATION_SCENE)" || { \
+		echo "missing scene: $(TEXTURE_MINIFICATION_SCENE)"; \
+		echo "set TEXTURE_MINIFICATION_SCENE=/path/to/anybotics_anymal_c/scene.xml"; \
+		exit 2; \
+	}
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.tools.texture_minification \
+		"$(TEXTURE_MINIFICATION_SCENE)"
+
+LOCAL_SHADOW_SCENE ?= $(MENAGERIE_DIR)/anybotics_anymal_c/scene.xml
+local-shadow-precision:
+	@test -f "$(LOCAL_SHADOW_SCENE)" || { \
+		echo "missing scene: $(LOCAL_SHADOW_SCENE)"; \
+		echo "set LOCAL_SHADOW_SCENE=/path/to/anybotics_anymal_c/scene.xml"; \
+		exit 2; \
+	}
+	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.tools.local_shadow_precision \
+		"$(LOCAL_SHADOW_SCENE)"
 
 AUDIT_SCENE ?= mujoco_visuals
 ## Full MuJoCo adapter and simulation regression suite.

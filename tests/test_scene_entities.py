@@ -10,7 +10,7 @@ from forge_viewer import commands as cmd
 from forge_viewer import math3d
 from forge_viewer.adapters.base import FrameNeeds, NodeType, SceneFrame, SceneNode, SceneSource
 from forge_viewer.adapters.static import StaticSceneAdapter
-from forge_viewer.gizmo import project
+from forge_viewer.gizmo import camera_icon_segments, project
 from forge_viewer.render.backend import BackendCaps
 from forge_viewer.render.debugdraw import DebugDraw, PrimitiveType
 from forge_viewer.scene import Scene
@@ -23,10 +23,13 @@ from forge_viewer.ui.gizmo import (
     _set_light_from_world,
 )
 from forge_viewer.ui.scene_entities import (
+    CAMERA_HELPER_SIZE_PT,
     HELPER_LAYER,
+    LIGHT_HELPER_SCALE_PT,
     SceneEntityHelpers,
     camera_frustum_segments,
     camera_rotation,
+    light_icon_segments,
     spot_cone_segments,
     spot_helper_length,
 )
@@ -50,6 +53,27 @@ def test_perspective_frustum_uses_camera_projection_planes() -> None:
     assert np.unique(np.abs(near[:, 1])) == pytest.approx([1.0])
     assert np.unique(np.abs(far[:, 0])) == pytest.approx([6.0])
     assert np.unique(np.abs(far[:, 1])) == pytest.approx([3.0])
+
+
+def test_camera_helper_is_a_screen_facing_camera_glyph() -> None:
+    editor = CameraView(
+        eye=np.array((0.0, -5.0, 2.0), np.float32),
+        target=np.array((0.0, 0.0, 1.0), np.float32),
+        aspect=1.5,
+    )
+    eye = np.array((0.0, 0.0, 1.0), np.float32)
+    views = (
+        CameraView(eye=eye, target=np.array((1.0, 0.0, 1.0), np.float32)),
+        CameraView(eye=eye, target=np.array((0.0, 1.0, 1.0), np.float32)),
+    )
+
+    starts, ends = camera_icon_segments(views, editor, 800.0, 26.0)
+
+    assert starts.shape == ends.shape == (48, 3)
+    # The editor glyph does not collapse or turn into a projection triangle
+    # when the represented camera points in a different direction.
+    assert starts[:24] == pytest.approx(starts[24:])
+    assert ends[:24] == pytest.approx(ends[24:])
 
 
 def test_spot_influence_uses_range_and_cutoff() -> None:
@@ -200,8 +224,9 @@ def test_helpers_publish_selected_frustum_and_pick_camera_anchor() -> None:
     helpers = SceneEntityHelpers()
     helpers.publish(backend, session, editor_camera, 800.0, 1.0)
     layer = backend.debug.layer(HELPER_LAYER)
-    assert layer.count_of(PrimitiveType.LINE) == 20
-    assert layer.count_of(PrimitiveType.POINT) == 1
+    # 24 screen-facing camera-glyph segments plus the 12 selected frustum edges.
+    assert layer.count_of(PrimitiveType.LINE) == 36
+    assert layer.count_of(PrimitiveType.POINT) == 0
 
     hit = helpers.pick(session, editor_camera, (0.0, 0.0, 1000.0, 800.0), (500.0, 400.0), 1.0)
     assert hit == node.object_id
@@ -280,7 +305,7 @@ def test_view_through_camera_hides_editor_helpers() -> None:
     assert helpers.pick(session, view, (0.0, 0.0, 1000.0, 800.0), (500.0, 400.0), 1.0, True) == 0
 
 
-def test_light_helpers_use_one_anchor_and_direction_batch() -> None:
+def test_unselected_light_helpers_use_semantic_icons_without_direction_clutter() -> None:
     scene = Scene()
     for index, light_type in enumerate((LightType.POINT, LightType.DIRECTIONAL, LightType.SPOT)):
         scene.add_light(
@@ -297,9 +322,55 @@ def test_light_helpers_use_one_anchor_and_direction_batch() -> None:
     SceneEntityHelpers(show_influence=False).publish(backend, session, CameraView(), 800.0, 1.0)
 
     layer = backend.debug.layer(HELPER_LAYER)
-    assert layer.count_of(PrimitiveType.POINT) == 3
-    assert layer.count_of(PrimitiveType.ARROW) == 2
-    assert set(layer._index) == {"lights:anchors", "lights:directions"}
+    assert layer.count_of(PrimitiveType.POINT) == 0
+    assert layer.count_of(PrimitiveType.ARROW) == 0
+    assert layer.count_of(PrimitiveType.LINE) == 66
+    assert set(layer._index) == {"lights:icons"}
+
+
+def test_selected_spot_light_publishes_icon_direction_and_influence() -> None:
+    scene = Scene()
+    scene.add_light(
+        "key",
+        Light(
+            type=LightType.SPOT,
+            position=np.array((0.0, 0.0, 1.0), np.float32),
+            direction=np.array((0.0, 1.0, -0.25), np.float32),
+            range=2.0,
+            cutoff=30.0,
+        ),
+    )
+    session = Session(StaticSceneAdapter(scene))
+    node = next(node for node in session.nodes if node.type is NodeType.LIGHT)
+    assert session.submit(cmd.Select(node.object_id))
+    backend = SimpleNamespace(debug=DebugDraw())
+    camera = CameraView(
+        eye=np.array((0.0, -5.0, 2.0), np.float32),
+        target=np.array((0.0, 0.0, 1.0), np.float32),
+    )
+
+    SceneEntityHelpers().publish(backend, session, camera, 800.0, 1.0)
+
+    layer = backend.debug.layer(HELPER_LAYER)
+    assert {"lights:icons", "lights:directions", f"light:{node.object_id}:range"} <= set(
+        layer._index
+    )
+
+
+def test_light_helper_icon_geometry_is_screen_facing_and_batched() -> None:
+    positions = np.asarray(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)), np.float32)
+    starts, ends = light_icon_segments(positions, CameraView(), 800.0)
+    assert starts.shape == ends.shape == (44, 3)
+    assert np.all(np.isfinite(starts))
+
+
+def test_camera_and_light_helper_sizes_are_visually_balanced() -> None:
+    assert pytest.approx(24.0) == CAMERA_HELPER_SIZE_PT
+    assert pytest.approx(1.2) == LIGHT_HELPER_SCALE_PT
+    # The light's outer ray diameter is 15.6 authored units. Keep it close to
+    # the camera icon without making two different helper types identical.
+    light_diameter = 15.6 * LIGHT_HELPER_SCALE_PT
+    assert 1.15 < CAMERA_HELPER_SIZE_PT / light_diameter < 1.4
 
 
 def test_scene_entity_helpers_index_large_hierarchies_once_per_structure() -> None:

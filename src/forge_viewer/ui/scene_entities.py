@@ -12,13 +12,15 @@ from ..gizmo import camera_icon_segments, project, screen_constant_world_sizes, 
 from ..render.debugdraw import Occlusion
 from ..types import CameraView, Light, LightType
 from .camera import camera_basis
+from .theme import THEME
 
 HELPER_LAYER = "ui.scene_entities"
-CAMERA_COLOR = np.array((0.34, 0.72, 1.0, 0.95), np.float32)
-LIGHT_COLOR = np.array((1.0, 0.76, 0.24, 0.95), np.float32)
-SELECTED_COLOR = np.array((1.0, 0.58, 0.12, 1.0), np.float32)
+HELPER_COLOR = np.array((*THEME.text_disabled[:3], 0.82), np.float32)
+SELECTED_COLOR = np.array(THEME.primary_bright, np.float32)
 ANCHOR_RADIUS_PT = 6.0
 PICK_RADIUS_PT = 13.0
+CAMERA_HELPER_SIZE_PT = 24.0
+LIGHT_HELPER_SCALE_PT = 1.2
 _CIRCLE_SEGMENTS = 48
 _SPOT_HELPER_LENGTH_PT = 180.0
 _SPOT_HELPER_RADIUS_PT = 120.0
@@ -127,23 +129,22 @@ class SceneEntityHelpers:
             return
         views = [view for _, view, _ in helpers]
         colors = np.asarray(
-            [SELECTED_COLOR if selected else CAMERA_COLOR for _, _, selected in helpers],
+            [SELECTED_COLOR if selected else HELPER_COLOR for _, _, selected in helpers],
             np.float32,
         )
-        layer.points(
-            "cameras:anchors",
-            np.asarray([view.eye for view in views], np.float32),
-            colors,
-            ANCHOR_RADIUS_PT * ui_scale,
-        )
         starts, ends = camera_icon_segments(
-            views, editor_camera, viewport_height, 26.0, visible_only=True
+            views,
+            editor_camera,
+            viewport_height,
+            CAMERA_HELPER_SIZE_PT,
+            visible_only=True,
         )
+        segments_per_icon = len(starts) // len(helpers)
         layer.lines(
             "cameras:icons",
             starts,
             ends,
-            np.repeat(colors, 8, axis=0),
+            np.repeat(colors, segments_per_icon, axis=0),
             1.6 * ui_scale,
         )
         if self.show_influence:
@@ -170,12 +171,27 @@ class SceneEntityHelpers:
             return
         positions = np.asarray([light.position for _, light, _ in helpers], np.float32)
         colors = np.asarray(
-            [SELECTED_COLOR if selected else LIGHT_COLOR for _, _, selected in helpers],
+            [SELECTED_COLOR if selected else HELPER_COLOR for _, _, selected in helpers],
             np.float32,
         )
-        layer.points("lights:anchors", positions, colors, ANCHOR_RADIUS_PT * ui_scale)
+        starts, ends = light_icon_segments(
+            positions,
+            editor_camera,
+            viewport_height,
+        )
+        segments_per_icon = len(starts) // max(len(helpers), 1)
+        layer.lines(
+            "lights:icons",
+            starts,
+            ends,
+            np.repeat(colors, segments_per_icon, axis=0),
+            1.4 * ui_scale,
+        )
 
-        directed = np.asarray([light.type is not LightType.POINT for _, light, _ in helpers], bool)
+        directed = np.asarray(
+            [selected and light.type is not LightType.POINT for _, light, selected in helpers],
+            bool,
+        )
         if np.any(directed):
             starts = positions[directed]
             directions = np.asarray(
@@ -230,6 +246,59 @@ class SceneEntityHelpers:
         elif light.type is LightType.AREA and light.area_radius > 0.0:
             points = oriented_circle(position, direction, light.area_radius)
             layer.polyline(f"{ident}:area", points, color, 1.4 * ui_scale, closed=True)
+
+
+_LIGHT_RING_ANGLES = np.linspace(0.0, 2.0 * np.pi, 12, endpoint=False)
+_LIGHT_RAY_ANGLES = np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False)
+_LIGHT_RING_UNIT = np.column_stack((np.cos(_LIGHT_RING_ANGLES), np.sin(_LIGHT_RING_ANGLES)))
+_LIGHT_RAY_UNIT = np.column_stack((np.cos(_LIGHT_RAY_ANGLES), np.sin(_LIGHT_RAY_ANGLES)))
+_LIGHT_ICON_STARTS_2D = np.concatenate(
+    (
+        _LIGHT_RING_UNIT * 4.3,
+        np.asarray(((-2.6, -5.2), (-1.9, -6.9)), np.float64),
+        _LIGHT_RAY_UNIT * 5.9,
+    )
+)
+_LIGHT_ICON_ENDS_2D = np.concatenate(
+    (
+        np.roll(_LIGHT_RING_UNIT, -1, axis=0) * 4.3,
+        np.asarray(((2.6, -5.2), (1.9, -6.9)), np.float64),
+        _LIGHT_RAY_UNIT * 7.8,
+    )
+)
+
+
+def light_icon_segments(
+    positions: np.ndarray,
+    editor_camera: CameraView,
+    viewport_height: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return screen-facing 16px bulb icons for scene light helpers."""
+
+    positions = np.asarray(positions, np.float64).reshape(-1, 3)
+    if not len(positions):
+        empty = np.empty((0, 3), np.float32)
+        return empty, empty
+    units = screen_constant_world_sizes(
+        editor_camera,
+        positions,
+        viewport_height,
+        LIGHT_HELPER_SCALE_PT,
+        visible_only=True,
+    )
+    view_rotation = np.asarray(editor_camera.view_matrix(), np.float64)[:3, :3]
+    right = view_rotation[0]
+    up = view_rotation[1]
+
+    def transform(points: np.ndarray) -> np.ndarray:
+        offsets = (
+            points[None, :, 0, None] * right[None, None, :]
+            + points[None, :, 1, None] * up[None, None, :]
+        )
+        values = positions[:, None, :] + units[:, None, None] * offsets
+        return values.reshape(-1, 3).astype(np.float32)
+
+    return transform(_LIGHT_ICON_STARTS_2D), transform(_LIGHT_ICON_ENDS_2D)
 
 
 def camera_rotation(view: CameraView) -> np.ndarray:

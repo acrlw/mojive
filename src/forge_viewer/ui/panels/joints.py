@@ -8,8 +8,8 @@ import numpy as np
 from imgui_bundle import imgui
 
 from ... import commands as cmd
-from ...adapters.base import ActuatorInfo, FrameNeeds, JointInfo
-from . import Panel, PanelContext, value_slider
+from ...adapters.base import FrameNeeds, JointInfo
+from . import Panel, PanelContext, search_input, value_slider
 
 _SCALAR_KINDS = ("hinge", "slide")
 _BROWSE_THRESHOLD = 256
@@ -25,13 +25,12 @@ class JointsPanel(Panel):
     def __init__(self) -> None:
         super().__init__()
         self._initial_qpos = np.zeros(0, np.float64)
-        self._initial_ctrl = np.zeros(0, np.float64)
         self._snapshot_generation = -1
         self._joint_page = 0
-        self._actuator_page = 0
+        self._search = ""
 
     def frame_needs(self) -> FrameNeeds:
-        return FrameNeeds(poses=False, qpos=True, actuator=True)
+        return FrameNeeds(poses=False, qpos=True)
 
     def draw(self, ctx: PanelContext) -> None:
         s = ctx.session
@@ -41,142 +40,106 @@ class JointsPanel(Panel):
         caps = s.adapter.caps
         if not caps.write_qpos:
             imgui.text_colored(
-                imgui.ImVec4(*ctx.theme.warning), f"{caps.name} cannot write joint positions"
+                imgui.ImVec4(*ctx.theme.warning),
+                f"{caps.name} {ctx.tr('cannot write joint positions')}",
             )
         elif not s.paused:
             imgui.text_colored(
                 imgui.ImVec4(*ctx.theme.warning),
-                "Pause simulation to edit joint positions",
+                ctx.tr("Pause simulation to edit joint positions"),
             )
 
-        if imgui.collapsing_header("joints", imgui.TreeNodeFlags_.default_open):
-            if frame.qpos is None:
-                imgui.text_disabled("qpos not produced this frame")
-            elif not s.joints:
-                imgui.text_disabled("no joints")
-            else:
-                imgui.begin_disabled(not caps.write_qpos or not s.paused)
-                selected = s.selected_node
-                selected_joints = (
-                    s.joints_for_body(selected.body_index) if selected is not None else ()
-                )
-                if selected_joints:
-                    imgui.text_disabled(f"{selected.name} · direct joints")
-                    for joint in selected_joints:
-                        self._joint_row(ctx, joint)
-                    if len(s.joints) <= _BROWSE_THRESHOLD and len(selected_joints) != len(s.joints):
-                        imgui.separator()
-                        imgui.text_disabled("all joints")
-                if len(s.joints) > _BROWSE_THRESHOLD:
-                    if not selected_joints:
-                        imgui.text_disabled("select a link to show its direct joints")
-                    self._browse_joints(ctx)
-                else:
-                    selected_ids = {joint.joint_id for joint in selected_joints}
-                    for joint in s.joints:
-                        if joint.joint_id not in selected_ids:
-                            self._joint_row(ctx, joint)
-                imgui.end_disabled()
-
-        if imgui.collapsing_header("actuators", imgui.TreeNodeFlags_.default_open):
-            if not s.actuators:
-                imgui.text_disabled("no actuators")
-            elif frame.ctrl is None:
-                imgui.text_disabled("ctrl not produced this frame")
-            elif len(s.actuators) > _BROWSE_THRESHOLD:
-                self._browse_actuators(ctx)
-            else:
-                for a in s.actuators:
-                    self._actuator_row(ctx, a)
-
-    def _browse_joints(self, ctx: PanelContext) -> None:
-        joints = ctx.session.joints
-        imgui.text_disabled(f"{len(joints)} joints total")
-        if not imgui.collapsing_header("browse all joints"):
+        if frame.qpos is None:
+            imgui.text_disabled(ctx.tr("qpos not produced this frame"))
             return
-        self._joint_page, start, stop = _page_controls("joints", len(joints), self._joint_page)
-        for joint in joints[start:stop]:
-            self._joint_row(ctx, joint)
-
-    def _browse_actuators(self, ctx: PanelContext) -> None:
-        actuators = ctx.session.actuators
-        imgui.text_disabled(f"{len(actuators)} actuators total")
-        if not imgui.collapsing_header("browse all actuators"):
+        if not s.joints:
+            imgui.text_disabled(ctx.tr("no joints"))
             return
-        self._actuator_page, start, stop = _page_controls(
-            "actuators", len(actuators), self._actuator_page
+
+        imgui.set_next_item_width(-1.0)
+        changed, self._search = search_input(
+            "##joint_search",
+            self._search,
+            hint=ctx.tr("Search joints"),
+            search_tooltip=ctx.tr("Search joints"),
+            clear_tooltip=ctx.tr("Clear search"),
         )
-        for actuator in actuators[start:stop]:
-            self._actuator_row(ctx, actuator)
+        if changed:
+            self._joint_page = 0
+
+        filtered = filter_joints(s.joints, self._search)
+        if not filtered:
+            imgui.text_disabled(ctx.tr("No matching joints"))
+            return
+
+        selected = s.selected_node
+        selected_ids = {
+            joint.joint_id
+            for joint in (s.joints_for_body(selected.body_index) if selected is not None else ())
+        }
+        ordered = tuple(joint for joint in filtered if joint.joint_id in selected_ids) + tuple(
+            joint for joint in filtered if joint.joint_id not in selected_ids
+        )
+        if selected_ids and any(joint.joint_id in selected_ids for joint in filtered):
+            imgui.text_disabled(f"{ctx.tr('Selected link')} · {selected.name}")
+        if len(ordered) > _BROWSE_THRESHOLD:
+            imgui.text_disabled(f"{len(ordered)} {ctx.tr('joints total')}")
+            self._joint_page, start, stop = _page_controls(
+                ctx, "joints", len(ordered), self._joint_page
+            )
+            ordered = ordered[start:stop]
+
+        imgui.begin_disabled(not caps.write_qpos or not s.paused)
+        self._joint_table(ctx, ordered)
+        imgui.end_disabled()
+
+    def _joint_table(self, ctx: PanelContext, joints) -> None:
+        flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
+        if not imgui.begin_table("joint_values", 2, flags):
+            return
+        imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.36)
+        imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch, 0.64)
+        for joint in joints:
+            self._joint_row(ctx, joint)
+        imgui.end_table()
 
     def _joint_row(self, ctx: PanelContext, j: JointInfo) -> None:
         qpos = ctx.session.frame.qpos
         if qpos is None or j.qpos_adr >= len(qpos):
             return
+        name = j.name or f"joint{j.joint_id}"
+        imgui.table_next_row()
+        imgui.table_next_column()
+        imgui.align_text_to_frame_padding()
+        imgui.text_disabled(name)
         direct_joints = ctx.session.joints_for_body(j.body)
         if ctx.gizmo is not None and len(direct_joints) > 1 and j.type in (*_SCALAR_KINDS, "ball"):
             selected = ctx.gizmo.selected_joint_id(j.body) == j.joint_id
-            label = "Using gizmo" if selected else "Use gizmo"
+            label = ctx.tr("Using gizmo") if selected else ctx.tr("Use gizmo")
+            imgui.same_line()
             if imgui.small_button(f"{label}##joint-gizmo-{j.joint_id}"):
                 ctx.gizmo.select_joint(j.body, j.joint_id)
-            imgui.set_item_tooltip("Choose which direct joint the viewport gizmo edits")
-            imgui.same_line()
+            imgui.set_item_tooltip(ctx.tr("Choose which direct joint the viewport gizmo edits"))
+        imgui.table_next_column()
         if j.type not in _SCALAR_KINDS:
-            imgui.text_disabled(f"{j.name or f'joint{j.joint_id}'}  ({j.type}, {j.dof} dof)")
+            imgui.align_text_to_frame_padding()
+            imgui.text_disabled(f"{ctx.tr(f'{j.type.title()} joint')} · {j.dof} {ctx.tr('dof')}")
             return
 
         value = float(qpos[j.qpos_adr])
         lo, hi = _joint_range(j)
-        label = f"{j.name or f'joint{j.joint_id}'}##q{j.qpos_adr}"
+        imgui.set_next_item_width(-1.0)
         edit = value_slider(
-            label,
+            f"##joint-qpos-{j.qpos_adr}",
             value,
             lo,
             hi,
             initial=_initial_value(self._initial_qpos, j.qpos_adr, value),
             fmt="%.4f",
-            more_hint="show actuator gain",
+            more_hint="",
         )
         if edit.changed:
             ctx.submit(cmd.SetQpos(j.qpos_adr, edit.value))
-        if edit.expanded:
-            self._drive_detail(ctx, j)
-
-    def _drive_detail(self, ctx: PanelContext, j: JointInfo) -> None:
-        drivers = ctx.session.actuators_for_joint(j.joint_id)
-        imgui.indent()
-        if not drivers:
-            imgui.text_disabled("no actuator drives this joint")
-        for a in drivers:
-            imgui.text_disabled(f"{a.name or f'act{a.actuator_id}'}  gain {a.gain:g}")
-
-            self._actuator_row(ctx, a, prefix="  ctrl ")
-        imgui.unindent()
-
-    def _actuator_row(self, ctx: PanelContext, a: ActuatorInfo, prefix: str = "") -> None:
-        ctrl = ctx.session.frame.ctrl
-        if ctrl is None:
-            return
-        lo, hi = a.ctrl_range if a.ctrl_limited else (-1.0, 1.0)
-        if hi <= lo:
-            lo, hi = -1.0, 1.0
-        name = a.name or f"act{a.actuator_id}"
-        for component in range(a.ctrl_count):
-            address = a.ctrl_address + component
-            if address >= len(ctrl):
-                continue
-            suffix = f"[{component}]" if a.ctrl_count > 1 else ""
-            edit = value_slider(
-                f"{prefix}{name}{suffix}##c{address}",
-                float(ctrl[address]),
-                lo,
-                hi,
-                initial=_initial_value(self._initial_ctrl, address, float(ctrl[address])),
-                fmt="%.4f",
-                more_hint="none",
-            )
-            if edit.changed:
-                ctx.submit(cmd.SetCtrl(address, edit.value))
 
     def _snapshot(self, ctx: PanelContext) -> None:
         gen = ctx.session.structure_generation
@@ -184,28 +147,36 @@ class JointsPanel(Panel):
         if gen != self._snapshot_generation:
             self._snapshot_generation = gen
             self._initial_qpos = np.zeros(0, np.float64)
-            self._initial_ctrl = np.zeros(0, np.float64)
             self._joint_page = 0
-            self._actuator_page = 0
+            self._search = ""
         if frame.qpos is not None and len(self._initial_qpos) != len(frame.qpos):
             self._initial_qpos = np.asarray(frame.qpos, np.float64).copy()
-        if frame.ctrl is not None and len(self._initial_ctrl) != len(frame.ctrl):
-            self._initial_ctrl = np.asarray(frame.ctrl, np.float64).copy()
 
 
-def _page_controls(label: str, count: int, page: int) -> tuple[int, int, int]:
+def _page_controls(ctx: PanelContext, label: str, count: int, page: int) -> tuple[int, int, int]:
     page, pages, start, stop = page_span(count, page)
     if pages <= 1:
         return page, start, stop
-    if imgui.button(f"Previous##{label}"):
+    if imgui.button(f"{ctx.tr('Previous')}##{label}"):
         page -= 1
     imgui.same_line()
-    if imgui.button(f"Next##{label}"):
+    if imgui.button(f"{ctx.tr('Next')}##{label}"):
         page += 1
     page, pages, start, stop = page_span(count, page)
     imgui.same_line()
-    imgui.text_disabled(f"page {page + 1}/{pages} · {start + 1}-{stop}")
+    imgui.text_disabled(f"{ctx.tr('page')} {page + 1}/{pages} · {start + 1}-{stop}")
     return page, start, stop
+
+
+def filter_joints(joints, query: str) -> tuple[JointInfo, ...]:
+    """Return joints whose stable display name contains ``query``."""
+
+    needle = str(query).strip().casefold()
+    if not needle:
+        return tuple(joints)
+    return tuple(
+        joint for joint in joints if needle in (joint.name or f"joint{joint.joint_id}").casefold()
+    )
 
 
 def page_span(count: int, page: int, page_size: int = _PAGE_SIZE) -> tuple[int, int, int, int]:

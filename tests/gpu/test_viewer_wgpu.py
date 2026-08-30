@@ -76,10 +76,12 @@ def test_gpu_pass_timing_is_reported_when_supported(viewer):
         return
     for _ in range(20):
         v.sync()
-        if {"scene", "export"} <= v.backend.stats.gpu_ms.keys():
+        if "export" in v.backend.stats.gpu_ms:
             break
         time.sleep(0.005)
-    assert v.backend.stats.gpu_ms["scene"] > 0.0
+    # Metal may leave one render-pass boundary timestamp unchanged. The
+    # collector deliberately drops that invalid sample instead of publishing
+    # a zero or wrapped duration, so individual pass keys remain optional.
     assert v.backend.stats.gpu_ms["export"] > 0.0
     assert all(np.isfinite(value) and value < 1000.0 for value in v.backend.stats.gpu_ms.values())
 

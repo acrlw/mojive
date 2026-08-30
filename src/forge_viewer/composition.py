@@ -267,9 +267,11 @@ def _compose(
     from .bridge import DebugBridge
     from .session import Session
     from .ui.app import ViewerApp
-    from .ui.window import WindowConfig
+    from .ui.window import WindowConfig, layout_settings_path
 
-    ini = "imgui.ini" if vsync else ""
+    ini = str(layout_settings_path()) if vsync else ""
+    if ini:
+        Path(ini).parent.mkdir(parents=True, exist_ok=True)
     config = WindowConfig(
         title=title,
         width=width,

@@ -20,6 +20,16 @@ def press(**kw) -> InputState:
     return InputState(**{"over_viewport": True, "has_selection": True, "left": True, **kw})
 
 
+def test_blocking_prompt_aborts_an_existing_viewport_claim():
+    router = GestureRouter()
+    assert router.update(press(gizmo_available=True, gizmo_hovered=True)) is Claim.OBJECT_GIZMO
+    assert router.held
+
+    assert router.update(InputState(blocked=True, left=True)) is Claim.UI
+    assert not router.held
+    assert not router.wants_gizmo()
+
+
 def test_camera_and_perturb_are_never_both_active():
 
     flags = (False, True)
@@ -151,24 +161,26 @@ def test_floating_panels_block_input_even_when_they_overlap_the_viewport_rect():
 
 
 def test_help_panel_lists_every_key_the_main_loop_polls():
-
-    import ast
-    from pathlib import Path
-
+    from forge_viewer.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
     from forge_viewer.ui.panels.help import KEYS
 
-    src = Path(__file__).resolve().parents[1] / "src" / "forge_viewer" / "ui" / "app.py"
-    tree = ast.parse(src.read_text(encoding="utf-8"))
-    fn = next(
-        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_poll_keys"
+    polled_actions = (
+        InputAction.TOGGLE_PAUSE,
+        InputAction.FRAME_SCENE,
+        InputAction.GIZMO_TRANSLATE,
+        InputAction.GIZMO_ROTATE,
+        InputAction.GIZMO_SPACE,
+        InputAction.AXIS_X,
+        InputAction.AXIS_Y,
+        InputAction.AXIS_Z,
+        InputAction.FLY_FORWARD,
+        InputAction.FLY_BACK,
+        InputAction.FLY_RIGHT,
+        InputAction.FLY_LEFT,
+        InputAction.FLY_UP,
+        InputAction.FLY_DOWN,
     )
-    polled = {
-        node.attr
-        for node in ast.walk(fn)
-        if isinstance(node, ast.Attribute)
-        and isinstance(node.value, ast.Name)
-        and node.value.id == "k"
-    }
+    polled = {DEFAULT_INPUT_BINDINGS.label(action).casefold() for action in polled_actions}
     documented: set[str] = set()
     for keys, _text in KEYS:
         documented.update(t.lower() for t in re.split(r"[^A-Za-z0-9]+", keys) if t)

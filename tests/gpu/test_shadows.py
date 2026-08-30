@@ -132,7 +132,7 @@ def _scene(
     return b.build(camera, lights, extent, np.zeros(3, np.float32))
 
 
-def _spot_scene(camera: CameraView, cast: bool = True):
+def _spot_scene(camera: CameraView, cast: bool = True, with_box: bool = True):
     b = SceneBuilder()
     mid = b.material_id(Material(name="spot-test"))
     material = np.array([0.0, 0.0, 0.3, 0.0], np.float32)
@@ -144,14 +144,15 @@ def _spot_scene(camera: CameraView, cast: bool = True):
         material,
         1,
     )
-    b.add(
-        BOX,
-        mid,
-        _placed(BOX_HALF, BOX_HALF, BOX_HALF, BOX_CENTER),
-        np.array([0.8, 0.25, 0.2, 1.0], np.float32),
-        material,
-        2,
-    )
+    if with_box:
+        b.add(
+            BOX,
+            mid,
+            _placed(BOX_HALF, BOX_HALF, BOX_HALF, BOX_CENTER),
+            np.array([0.8, 0.25, 0.2, 1.0], np.float32),
+            material,
+            2,
+        )
     spot = Light(
         type=LightType.SPOT,
         position=SPOT_POS,
@@ -217,10 +218,10 @@ def _render(backend, camera=VIEW, shadow=True, **kw) -> np.ndarray:
     return backend.target.read_color(flip=True)[..., :3].astype(np.int16)
 
 
-def _render_spot(backend, shadow=True, cast=True) -> np.ndarray:
+def _render_spot(backend, shadow=True, cast=True, with_box=True) -> np.ndarray:
     backend.set_flag(RenderFlag.SHADOW, bool(shadow))
     backend.set_camera(VIEW)
-    backend.set_render_scene(_spot_scene(VIEW, cast=cast))
+    backend.set_render_scene(_spot_scene(VIEW, cast=cast, with_box=with_box))
     backend.render()
     return backend.target.read_color(flip=True)[..., :3].astype(np.int16)
 
@@ -395,6 +396,13 @@ def test_spot_shadow_uses_its_perspective_distance_map(backend):
     px, py = _to_pixel(VIEW, hit)
     ys, xs = np.nonzero(mask)
     assert float(np.hypot(xs.mean() - px, ys.mean() - py)) < 16.0
+
+
+def test_spot_shadow_distance_quantization_does_not_ring_on_its_receiver(backend):
+    unshadowed = _render_spot(backend, shadow=False, with_box=False)
+    shadowed = _render_spot(backend, shadow=True, with_box=False)
+
+    assert np.array_equal(shadowed, unshadowed)
 
 
 def test_point_shadow_uses_all_six_cube_faces(backend):

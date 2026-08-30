@@ -178,10 +178,15 @@ def test_interactive_viewport_does_not_composite_haze_twice(tmp_path):
 
         assert viewport.shape == (*target.shape[:2], 3)
         assert np.all(target[..., 3] == 255)
-        # The view cube and transient UI live on the right/center. The left sky
-        # is an unobstructed probe of the exact texture-to-ImGui composition.
-        probe_width = target.shape[1] // 4
-        np.testing.assert_array_equal(viewport[:, :probe_width], target[:, :probe_width, :3])
+        # Persistent viewport chrome occupies the left edge, top center, and
+        # bottom center.  This upper-left patch sits between the tool column and
+        # playback capsule and remains an unobstructed composition probe.
+        y0, y1 = 8, max(16, target.shape[0] // 8)
+        x0, x1 = target.shape[1] // 8, target.shape[1] // 4
+        np.testing.assert_array_equal(
+            viewport[y0:y1, x0:x1],
+            target[y0:y1, x0:x1, :3],
+        )
     finally:
         viewer.release()
 

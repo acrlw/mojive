@@ -13,6 +13,10 @@
 
 const vec2 FORGE_SHADOW_BIAS = vec2(1.0, 2.5);
 const float FORGE_SHADOW_MIN_NDL = 0.15;
+// Local distance maps are R16F.  One relative half-float ULP prevents a
+// receiver from alternately falling above and below its quantized floor
+// distance, which otherwise appears as concentric self-shadow rings.
+const float LOCAL_DISTANCE_QUANTIZATION_BIAS = 1.0 / 1024.0;
 
 float pcf_tent_weight(int offset, int radius) {
     return float(radius + 1 - abs(offset));
@@ -92,7 +96,10 @@ float local_bias(int slot, float dist, vec3 normal, vec3 l) {
     float ndl = max(dot(normalize(normal), l), FORGE_SHADOW_MIN_NDL);
     float tan_theta = sqrt(max(1.0 - ndl * ndl, 0.0)) / ndl;
     vec2 k = (u_shadow_bias.x > 0.0) ? u_shadow_bias : FORGE_SHADOW_BIAS;
-    return dist * u_local_texel[slot] * (k.x + k.y * tan_theta);
+    return dist * (
+        u_local_texel[slot] * (k.x + k.y * tan_theta)
+        + LOCAL_DISTANCE_QUANTIZATION_BIAS
+    );
 }
 
 float local_spot_shadow(int slot, vec3 world_pos, vec3 normal) {

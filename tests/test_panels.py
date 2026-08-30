@@ -29,26 +29,32 @@ from forge_viewer.ui.panels import (
     validate_panels,
 )
 from forge_viewer.ui.panels.assets import (
+    AssetsPanel,
     filter_assets,
     height_field_preview_color,
     unique_asset_name,
 )
-from forge_viewer.ui.panels.hierarchy import HierarchyPanel, hierarchy_open_depth
+from forge_viewer.ui.panels.control import filter_actuators
+from forge_viewer.ui.panels.hierarchy import (
+    HierarchyPanel,
+    disclosure_triangle,
+    hierarchy_open_depth,
+)
 from forge_viewer.ui.panels.inspector import (
     _compact_transform,
     _format_vector,
     _free_velocity,
     _geometry_dimensions,
     _geometry_size_from_dimensions,
-    _lift_color,
     _matching_path_preset,
+    _mix_color,
     _nearest_euler_degrees,
     _path_preset_label,
     _pose_editable,
     _unique_component_name,
     gizmo_refusal_reason,
 )
-from forge_viewer.ui.panels.joints import page_span
+from forge_viewer.ui.panels.joints import filter_joints, page_span
 from forge_viewer.ui.panels.keyframes import (
     fitted_timeline_range,
     nearest_take_frame,
@@ -60,7 +66,10 @@ from forge_viewer.ui.panels.keyframes import (
     zoom_timeline_range,
 )
 from forge_viewer.ui.panels.output import filter_output_entries
+from forge_viewer.ui.panels.plot import PlotPanel
+from forge_viewer.ui.panels.settings import settings_category_matches
 from forge_viewer.ui.panels.stats import StatsPanel, _scale_ceiling
+from forge_viewer.ui.viewport_widgets import capsule_points, playback_size, tool_column_size
 from forge_viewer.ui.window import ResizeLatch
 
 EXPECTED_PANELS = {
@@ -81,6 +90,18 @@ EXPECTED_PANELS = {
 }
 
 
+def test_hierarchy_disclosure_is_one_rigidly_rotated_antialiased_shape() -> None:
+    closed = np.asarray(disclosure_triangle((13.0, 17.0), 5.0, opened=False))
+    opened = np.asarray(disclosure_triangle((13.0, 17.0), 5.0, opened=True))
+    center = np.array((13.0, 17.0))
+    expected = np.column_stack((-(closed - center)[:, 1], (closed - center)[:, 0])) + center
+
+    assert opened == pytest.approx(expected)
+    assert np.linalg.norm(opened - np.roll(opened, -1, axis=0), axis=1) == pytest.approx(
+        np.linalg.norm(closed - np.roll(closed, -1, axis=0), axis=1)
+    )
+
+
 @pytest.fixture
 def panels() -> PanelSet:
     return PanelSet()
@@ -89,6 +110,45 @@ def panels() -> PanelSet:
 def test_registered_panels(panels: PanelSet):
 
     assert {p.name for p in panels} == EXPECTED_PANELS
+
+
+def test_settings_search_routes_queries_across_categories() -> None:
+    assert settings_category_matches("Interaction", "selection padding")
+    assert settings_category_matches("Rendering", "shadow casters")
+    assert settings_category_matches("MuJoCo Visuals", "contact force")
+    assert not settings_category_matches("General", "contact force")
+
+
+def test_joint_and_actuator_search_matches_names_case_insensitively() -> None:
+    joints = (
+        SimpleNamespace(joint_id=0, name="LF_HFE"),
+        SimpleNamespace(joint_id=1, name="RH_KFE"),
+        SimpleNamespace(joint_id=2, name=""),
+    )
+    actuators = (
+        SimpleNamespace(actuator_id=0, name="LF_HFE"),
+        SimpleNamespace(actuator_id=1, name="wheel_motor"),
+        SimpleNamespace(actuator_id=2, name=""),
+    )
+
+    assert filter_joints(joints, "hfe") == (joints[0],)
+    assert filter_joints(joints, "JOINT2") == (joints[2],)
+    assert filter_actuators(actuators, "MOTOR") == (actuators[1],)
+    assert filter_actuators(actuators, "act2") == (actuators[2],)
+    assert filter_joints(joints, "") == joints
+    assert filter_actuators(actuators, "") == actuators
+
+
+def test_plot_sensor_deep_link_requests_sensor_frames() -> None:
+    panel = PlotPanel()
+
+    panel.focus_sensor(3, 7)
+
+    assert panel.source == "sensor"
+    assert (panel.sensor_index, panel.sensor_component) == (3, 7)
+    needs = panel.frame_needs()
+    assert needs.sensors
+    assert not needs.qpos and not needs.qvel and not needs.contacts
 
 
 def test_asset_panel_filters_cached_inventory_and_generates_unique_names():
@@ -102,6 +162,17 @@ def test_asset_panel_filters_cached_inventory_and_generates_unique_names():
     assert filter_assets(assets, "all", "robot.obj") == (assets[2],)
     assert unique_asset_name("terrain", assets, "hfield") == "terrain3"
     assert unique_asset_name("terrain", assets, "mesh") == "terrain"
+
+
+def test_asset_panel_focus_opens_and_selects_the_requested_asset() -> None:
+    panel = AssetsPanel()
+
+    panel.focus(4, "mesh", "robot_shell")
+
+    assert panel.open
+    assert panel._model_id == 4
+    assert panel._asset_type == "mesh"
+    assert panel._selected == (4, "mesh", "robot_shell")
 
 
 def test_height_field_preview_color_clamps_and_spans_the_palette():
@@ -189,12 +260,25 @@ def test_hierarchy_batch_delete_collapses_selected_descendants_and_skips_scene_e
     assert panel._batch_removable_roots() == (1, 3)
 
 
-def test_settings_is_a_modal_dialog(panels: PanelSet):
+def test_settings_is_a_dockable_panel(panels: PanelSet):
     settings = panels.get("Settings")
     assert settings is not None
-    assert settings.modal
+    assert not settings.modal
     assert not settings.standalone
     assert not settings.default_open
+    assert settings.dock_with == "Camera"
+
+
+def test_viewport_chrome_uses_exact_capsule_geometry_and_spacing():
+    assert playback_size(1.0) == pytest.approx((116.0, 44.0))
+    assert tool_column_size(1.0) == pytest.approx((44.0, 174.0))
+
+    horizontal = np.asarray(capsule_points(10.0, 20.0, 116.0, 44.0))
+    vertical = np.asarray(capsule_points(10.0, 20.0, 44.0, 174.0))
+    assert horizontal.min(axis=0) == pytest.approx((10.0, 20.0))
+    assert horizontal.max(axis=0) == pytest.approx((126.0, 64.0))
+    assert vertical.min(axis=0) == pytest.approx((10.0, 20.0))
+    assert vertical.max(axis=0) == pytest.approx((54.0, 194.0))
 
 
 def test_language_preference_round_trip(tmp_path, monkeypatch):
@@ -243,6 +327,51 @@ def test_viewer_restores_precise_input_preferences(tmp_path, monkeypatch):
 
     app.set_view_selection_padding(2.25)
     assert Localizer.load().preference("view_selection_padding") == pytest.approx(2.25)
+
+
+def test_viewer_restores_and_persists_viewport_input_bindings(tmp_path, monkeypatch):
+    from forge_viewer.ui.app import ViewerApp
+    from forge_viewer.ui.input_bindings import InputAction
+
+    path = tmp_path / "settings.json"
+    monkeypatch.setenv("FORGE_VIEWER_SETTINGS", str(path))
+    Localizer.load().set_preferences(
+        {
+            "input_bindings": {
+                InputAction.FRAME_SCENE.value: "g",
+            }
+        }
+    )
+
+    app = ViewerApp(SimpleNamespace(), SimpleNamespace())
+
+    assert app.input_bindings.key_id(InputAction.FRAME_SCENE) == "g"
+    assert app.input_bindings.key_id(InputAction.GIZMO_TRANSLATE) == "f"
+    app.set_input_binding(InputAction.SNAP, "x")
+
+    saved = Localizer.load().preference("input_bindings")
+    assert isinstance(saved, dict)
+    assert saved[InputAction.SNAP.value] == "x"
+    assert saved[InputAction.AXIS_X.value] == "shift"
+
+
+def test_viewer_restores_and_persists_status_metric(tmp_path, monkeypatch):
+    from forge_viewer.ui.app import ViewerApp
+
+    path = tmp_path / "settings.json"
+    monkeypatch.setenv("FORGE_VIEWER_SETTINGS", str(path))
+    Localizer.load().set_preferences({"status_metric": "steps"})
+
+    app = ViewerApp(SimpleNamespace(), SimpleNamespace())
+    assert app._status_metric_mode == "steps"
+
+    app._toggle_status_metric()
+    assert app._status_metric_mode == "time"
+    assert Localizer.load().preference("status_metric") == "time"
+
+    app.set_language("zh_CN")
+    assert app._viewport_labels.snap == "吸附"
+    assert app._viewport_labels.type_value == "输入数值"
 
 
 @pytest.mark.parametrize("value", ["zh_CN", "zh-CN", "zh_CN.UTF-8", "zh_CN:zh"])
@@ -424,10 +553,10 @@ def test_keyframe_timeline_navigation_uses_selection_then_playhead():
     assert nearest_take_frame((), 0.0) == -1
 
 
-def test_transform_switches_to_stacked_rows_before_columns_overlap():
-    assert _compact_transform(360.0, 1.0)
-    assert not _compact_transform(520.0, 1.0)
-    assert _compact_transform(700.0, 2.0)
+def test_transform_keeps_axis_groups_inline_until_the_panel_is_truly_narrow():
+    assert _compact_transform(190.0, 1.0)
+    assert not _compact_transform(240.0, 1.0)
+    assert _compact_transform(400.0, 2.0)
 
 
 def test_button_rows_wrap_without_clipping_items():
@@ -465,12 +594,15 @@ def test_tuple_path_presets_disambiguate_and_follow_object_type():
     assert _matching_path_preset(presets, "element", [["objtype", "geom"]]) == presets[1]
 
 
-def test_transform_axis_buttons_have_distinct_hover_and_active_colors():
-    color = (0.4, 0.6, 0.8, 1.0)
-    hovered = _lift_color(color, 0.20)
-    active = _lift_color(color, 0.32)
-    assert color != hovered != active
-    assert all(a > h > c for c, h, a in zip(color[:3], hovered[:3], active[:3], strict=True))
+def test_transform_axis_badges_mix_semantic_color_into_panel_surfaces():
+    axis = (0.8, 0.4, 0.3, 1.0)
+    background = (0.1, 0.1, 0.1, 1.0)
+    muted = _mix_color(background, axis, 0.56)
+    active = _mix_color(background, axis, 0.88)
+
+    assert muted != axis
+    assert muted != active
+    assert all(m < a < source for m, a, source in zip(muted[:3], active[:3], axis[:3], strict=True))
 
 
 @pytest.mark.parametrize("y", (91.0, -91.0, 271.0, 449.0))

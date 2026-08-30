@@ -121,8 +121,8 @@ CASES = [
     ),
     (
         "src/forge_viewer/render/scene.py",
-        "        keyed.sort(key=lambda t: -t[0])",
-        "        keyed.sort(key=lambda t: t[0])",
+        '            order = np.argsort(-distance2, kind="stable")',
+        '            order = np.argsort(distance2, kind="stable")',
         "test_transparent_buckets_draw_far_to_near",
         CPU_TESTS,
     ),
@@ -205,8 +205,8 @@ CASES = [
     ),
     (
         "src/forge_viewer/ui/app.py",
-        "hovered_ball = self.view_cube.update(view, rect, cursor, self.window.style_scale)",
-        "hovered_ball = self.view_cube.update(view, rect, cursor, self.window.style_scale * 3.0)",
+        "            self.window.style_scale,\n            enabled=over_viewport,",
+        "            self.window.style_scale * 3.0,\n            enabled=over_viewport,",
         "test_view_gizmo_fits_the_corner",
         UI_TESTS,
     ),
@@ -327,7 +327,7 @@ CASES = [
     ),
     (
         "src/forge_viewer/ui/theme.py",
-        '    "x": rgb8(239, 110, 106),',
+        '    "x": rgb8(220, 119, 115),',
         '    "x": (0.666, 0.0, 0.0, 1.0),',
         "test_axis_colors_are_luminance_balanced",
         "tests/test_theme.py",

@@ -242,7 +242,7 @@ def test_camera_and_light_entities_reach_the_debug_pass(backend_name, request):
         frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True))
         backend.update(frame)
 
-        assert backend.debug.layer("scene.cameras").count_of(PrimitiveType.LINE) == 8 * len(
+        assert backend.debug.layer("scene.cameras").count_of(PrimitiveType.LINE) == 24 * len(
             source.cameras
         )
         light_set = frame.lights if frame.lights is not None else source.lights

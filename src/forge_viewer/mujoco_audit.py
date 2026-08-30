@@ -374,7 +374,7 @@ def audit_model(model) -> dict:
                 "actuator control",
                 "supported",
                 model.nactuator,
-                "live control values and model ranges are available in the Joints panel",
+                "live control values and model ranges are available in the Control panel",
             )
         )
         visual_transmissions = {

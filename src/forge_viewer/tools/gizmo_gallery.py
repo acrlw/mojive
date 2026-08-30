@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +25,15 @@ def main(argv: list[str] | None = None) -> int:
 
     viewer = build(resolve("gizmo"), paused=True, vsync=False, width=1600, height=1000)
     try:
+        # GLFW reports the real mouse buttons every frame.  A gallery needs a
+        # deterministic held-button source independent of the operator's hand.
+        native_input_state = viewer.app._input_state
+        viewer.app._gallery_left_down = False
+
+        def gallery_input_state():
+            return replace(native_input_state(), left=viewer.app._gallery_left_down)
+
+        viewer.app._input_state = gallery_input_state
         node = next(node for node in viewer.session.nodes if node.posable)
         viewer.session.submit(cmd.Select(node.object_id))
         viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
@@ -56,7 +66,7 @@ def _position(viewer, node, style: str, output: Path) -> None:
         cursor = _axis_cursor(viewer, camera, rect, origin, rotation, scale)
         io.add_mouse_pos_event(*cursor)
         viewer.sync()
-        io.add_mouse_button_event(0, True)
+        viewer.app._gallery_left_down = True
         viewer.sync()
         axis = project(camera, (origin, origin + rotation[:, 2] * scale), rect)[:, :2]
         direction = axis[1] - axis[0]
@@ -65,14 +75,25 @@ def _position(viewer, node, style: str, output: Path) -> None:
         viewer.sync()
         _save(viewer, node, output / f"position-drag{suffix}-{style}.png")
         viewer.app.gizmo.translation_snap_m = 0.5
-        io.add_key_event(imgui.Key.mod_shift, True)
+        # The gallery is a deterministic visual target.  GLFW refreshes real
+        # modifier state during begin_frame, so use the production Snap latch
+        # instead of racing a synthetic Shift event against the backend.
+        viewer.app._snap_latched = True
         io.add_mouse_pos_event(*(cursor + direction * 57.0))
         viewer.sync()
         if not viewer.app.gizmo.snapping:
-            raise RuntimeError("position snap input was not applied")
+            raise RuntimeError(
+                "position snap input was not applied "
+                f"(latched={viewer.app._snap_latched}, using={viewer.app.gizmo.using}, "
+                f"active={viewer.app.gizmo.active_handle!s}, left={viewer.app._state.left}, "
+                f"over={viewer.app._state.over_viewport}, "
+                f"hovered={viewer.app._state.gizmo_hovered}, "
+                f"handle={viewer.app.gizmo.hovered_handle!s}, "
+                f"claimed={viewer.app.router.wants_gizmo()})"
+            )
         _save(viewer, node, output / f"position-snap{suffix}-{style}.png")
-        io.add_key_event(imgui.Key.mod_shift, False)
-        io.add_mouse_button_event(0, False)
+        viewer.app._snap_latched = False
+        viewer.app._gallery_left_down = False
         viewer.sync()
         viewer.session.submit(cmd.Reset())
         viewer.sync()
@@ -124,7 +145,7 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
         )
         io.add_mouse_pos_event(*start)
         viewer.sync()
-        io.add_mouse_button_event(0, True)
+        viewer.app._gallery_left_down = True
         viewer.sync()
         small = project(
             camera,
@@ -141,7 +162,7 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
         io.add_mouse_pos_event(*small)
         viewer.sync()
         _save(viewer, node, output / f"rotation-drag{suffix}-small-{style}.png")
-        io.add_key_event(imgui.Key.mod_shift, True)
+        viewer.app._snap_latched = True
         io.add_mouse_pos_event(*small)
         viewer.sync()
         if not viewer.app.gizmo.snapping:
@@ -162,7 +183,7 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
         io.add_mouse_pos_event(*negative)
         viewer.sync()
         _save(viewer, node, output / f"rotation-snap{suffix}-negative-{style}.png")
-        io.add_key_event(imgui.Key.mod_shift, False)
+        viewer.app._snap_latched = False
         viewer.sync()
         end = project(
             camera,
@@ -189,7 +210,7 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
             viewer.sync()
         camera, rect, origin, _rotation, scale = _state(viewer, node)
         viewer.app.gizmo.rotation_snap_deg = 5.0
-        io.add_key_event(imgui.Key.mod_shift, True)
+        viewer.app._snap_latched = True
         snapped = project(
             camera,
             (
@@ -260,8 +281,8 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
         for _ in range(3):
             viewer.sync()
         _save(viewer, node, output / f"rotation-snap{suffix}-edge-{style}.png")
-        io.add_key_event(imgui.Key.mod_shift, False)
-        io.add_mouse_button_event(0, False)
+        viewer.app._snap_latched = False
+        viewer.app._gallery_left_down = False
         viewer.sync()
         viewer.session.submit(cmd.Reset())
         viewer.sync()
@@ -309,6 +330,7 @@ def _axis_cursor(viewer, camera, rect, origin, rotation, scale) -> np.ndarray:
 
 
 def _save(viewer, node, path: Path) -> None:
+    # The front buffer trails the interaction update by one frame.
     viewer.sync()
     pixels = viewer.window.read_frame()[::-1, :, :3]
     camera, rect, origin, _rotation, _scale = _state(viewer, node)

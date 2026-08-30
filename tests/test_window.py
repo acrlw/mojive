@@ -8,9 +8,54 @@ import numpy as np
 import pytest
 from imgui_bundle import imgui
 
-from forge_viewer.ui.app import _fit_image_rect, _prepare_modal, _toggle_angle_input
-from forge_viewer.ui.window import layout_scale, resolve_context_api, resolve_ui_scales
+from forge_viewer.ui import window as window_module
+from forge_viewer.ui.app import (
+    ViewerApp,
+    _compact_status_for_selection,
+    _fit_image_rect,
+    _FrameRateDisplay,
+    _middle_elide_text,
+    _prepare_modal,
+    _status_message_for_bar,
+    _toggle_angle_input,
+)
+from forge_viewer.ui.window import (
+    Window,
+    layout_scale,
+    layout_settings_path,
+    resolve_context_api,
+    resolve_ui_scales,
+)
 from forge_viewer.ui.window_wgpu import _scissor_rect_for_target
+
+
+@pytest.mark.parametrize(
+    ("message", "selected", "expected"),
+    (
+        ("02_prismatic", "02_prismatic", ""),
+        ("Selected 02_prismatic", "02_prismatic", ""),
+        ("02_prismatic · +0.236 m", "02_prismatic", "+0.236 m"),
+        ("Selection cleared", "no selection", ""),
+        ("Saved viewport", "02_prismatic", "Saved viewport"),
+    ),
+)
+def test_status_removes_selection_semantics_already_shown(message, selected, expected):
+    assert _compact_status_for_selection(message, selected) == expected
+
+
+@pytest.mark.parametrize(
+    ("message", "level", "expected"),
+    (
+        ("Simulation resumed", "info", ""),
+        ("Simulation paused", "info", ""),
+        ("Stepped 1 frame(s)", "info", ""),
+        ("Saved scene.xml", "info", "Saved scene.xml"),
+        ("Viewport capture failed", "error", "Viewport capture failed"),
+        ("02_prismatic · +0.236 m", "warning", "+0.236 m"),
+    ),
+)
+def test_status_bar_keeps_only_actions_and_diagnostics(message, level, expected):
+    assert _status_message_for_bar(message, "02_prismatic", level) == expected
 
 
 @pytest.mark.parametrize(
@@ -64,6 +109,110 @@ def test_resolve_context_api(requested: str, expected: str) -> None:
 def test_resolve_context_api_rejects_unknown_backend() -> None:
     with pytest.raises(ValueError, match="Unsupported FORGE_VIEWER_GL"):
         resolve_context_api("gles")
+
+
+def test_status_frame_rate_is_smoothed_and_rate_limited() -> None:
+    display = _FrameRateDisplay()
+
+    first = display.update(1.0 / 30.0)
+    for _ in range(6):
+        assert display.update(1.0 / 30.0) == first
+    changed = display.update(1.0 / 30.0)
+
+    assert 30.0 < changed < 60.0
+    previous = changed
+    for _ in range(7):
+        assert display.update(1.0 / 60.0) == previous
+
+
+def test_dynamic_popover_title_elides_the_middle() -> None:
+    value = "Rotate 01_revolute_y_with_a_long_joint_name"
+    shown = _middle_elide_text(value, 18.0, len)
+
+    assert len(shown) <= 18
+    assert shown.startswith("Rotate")
+    assert shown.endswith("name")
+    assert "…" in shown
+
+
+def test_viewport_recording_streams_and_finalizes_frames(monkeypatch) -> None:
+    import forge_viewer.recording as recording
+
+    events = []
+
+    class Recorder:
+        def __init__(self, path, size, fps):
+            self.path, self.size, self.fps = path, size, fps
+            self.frames = 0
+            self.closed = False
+
+        def append(self, frame):
+            assert frame.shape == (1, 2, 3)
+            self.frames += 1
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(recording, "VideoRecorder", Recorder)
+    target = SimpleNamespace(
+        width=2,
+        height=1,
+        read_color=lambda flip: np.zeros((1, 2, 4), np.uint8),
+    )
+    app = ViewerApp.__new__(ViewerApp)
+    app.backend = SimpleNamespace(target=target)
+    app.session = SimpleNamespace(
+        report_message=lambda message, level: events.append((message, level))
+    )
+    app._viewport_recorder = None
+    app._viewport_recording_path = None
+    app._viewport_record_elapsed = 0.0
+
+    app._toggle_viewport_recording()
+    recorder = app._viewport_recorder
+    assert recorder is not None and recorder.size == (2, 1) and recorder.fps == 30.0
+    app._record_viewport_frame(0.0)
+    assert recorder.frames == 1
+    app._toggle_viewport_recording()
+
+    assert recorder.closed
+    assert app._viewport_recorder is None
+    assert events[-1][1] == "success"
+
+
+def test_layout_settings_path_honors_exact_override(monkeypatch, tmp_path) -> None:
+    target = tmp_path / "custom-layout.ini"
+    monkeypatch.setenv("FORGE_VIEWER_IMGUI_INI", str(target))
+    assert layout_settings_path() == target
+
+
+def test_layout_settings_path_honors_config_directory(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("FORGE_VIEWER_IMGUI_INI", raising=False)
+    monkeypatch.setenv("FORGE_VIEWER_CONFIG_DIR", str(tmp_path))
+    assert layout_settings_path() == tmp_path / "imgui.ini"
+
+
+def test_reset_layout_rebuilds_and_persists_immediately(monkeypatch, tmp_path) -> None:
+    target = tmp_path / "nested" / "imgui.ini"
+    events: list[object] = []
+    fake_imgui = SimpleNamespace(
+        load_ini_settings_from_memory=lambda value: events.append(("load", value)),
+        save_ini_settings_to_disk=lambda value: events.append(("save", value)),
+    )
+    monkeypatch.setattr(window_module, "imgui", fake_imgui)
+
+    window = Window.__new__(Window)
+    window.config = SimpleNamespace(docking=True, ini_path=str(target))
+    window.dockspace_id = 42
+    window._ini_existed = True
+    window._layout_done = True
+    window._build_default_layout = lambda: events.append("build")
+
+    window.reset_layout()
+
+    assert events == [("load", ""), "build", ("save", str(target))]
+    assert target.parent.is_dir()
+    assert window._ini_existed is True
 
 
 def test_viewport_image_is_aspect_fitted_while_render_target_resize_is_pending() -> None:

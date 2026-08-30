@@ -106,6 +106,18 @@ def activate_panel(v, name):
     click(v, imgui.get_io(), point)
 
 
+def _scroll_panel(v, name, wheel_y):
+    from imgui_bundle import imgui
+
+    window = imgui.internal.find_window_by_name(name)
+    assert window is not None
+    io = imgui.get_io()
+    io.add_mouse_pos_event(window.pos.x + window.size.x * 0.5, window.pos.y + window.size.y * 0.7)
+    io.add_mouse_wheel_event(0.0, wheel_y)
+    for _ in range(3):
+        v.sync()
+
+
 def item_rect(v, function_name, label):
 
     from imgui_bundle import imgui
@@ -118,6 +130,29 @@ def item_rect(v, function_name, label):
         if item_label == label:
             lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
             found.append(((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5))
+        return result
+
+    setattr(imgui, function_name, spy)
+    try:
+        v.sync()
+    finally:
+        setattr(imgui, function_name, original)
+    assert found
+    return found[-1]
+
+
+def item_bounds(v, function_name, label):
+
+    from imgui_bundle import imgui
+
+    original = getattr(imgui, function_name)
+    found = []
+
+    def spy(item_label, *args, **kwargs):
+        result = original(item_label, *args, **kwargs)
+        if item_label == label:
+            lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+            found.append((lo.x, lo.y, hi.x, hi.y))
         return result
 
     setattr(imgui, function_name, spy)
@@ -154,14 +189,17 @@ def test_all_panels_docked_not_stacked(viewer):
 
     from forge_viewer.ui.window import Window
 
-    laid_out = set(Window._LAYOUT_LEFT + Window._LAYOUT_RIGHT + Window._LAYOUT_BOTTOM)
+    laid_out = set(
+        Window._LAYOUT_LEFT
+        + Window._LAYOUT_RIGHT_TOP
+        + Window._LAYOUT_RIGHT_BOTTOM
+        + Window._LAYOUT_BOTTOM
+    )
     declared = {p.name for p in viewer.app.panels.panels if not p.standalone and not p.modal}
     assert declared <= laid_out
 
 
 def test_output_panel_filters_visible_messages(viewer):
-    from imgui_bundle import imgui
-
     panel = viewer.app.panels.get("Output")
     output = viewer.app.output
     output.clear()
@@ -172,28 +210,32 @@ def test_output_panel_filters_visible_messages(viewer):
     panel._filter_cache_key = None
     activate_panel(viewer, "Output")
 
-    visible: list[str] = []
-    original = imgui.text
-
-    def spy(value, *args, **kwargs):
-        if "FILTER_" in value:
-            visible.append(value)
-        return original(value, *args, **kwargs)
-
-    imgui.text = spy
     try:
         viewer.sync()
         item_rect(viewer, "input_text_with_hint", "##output-filter")
         item_rect(viewer, "combo", "##output-level")
     finally:
-        imgui.text = original
         panel._filter_text = ""
         panel._level_filter = 0
         panel._filter_cache_key = None
         output.clear()
 
-    assert any("FILTER_KEEP" in value for value in visible)
-    assert all("FILTER_HIDE" not in value for value in visible)
+    assert [entry.text for entry in panel._filtered_entries] == ["[forge/ui] FILTER_KEEP"]
+
+
+def test_hierarchy_search_clear_button_resets_filter(viewer):
+    from imgui_bundle import imgui
+
+    panel = viewer.app.panels.get("Hierarchy")
+    panel._filter = "revolute"
+    activate_panel(viewer, "Hierarchy")
+
+    try:
+        point = item_rect(viewer, "invisible_button", "##clear_filter")
+        click(viewer, imgui.get_io(), point)
+        assert panel._filter == ""
+    finally:
+        panel._filter = ""
 
 
 def test_hierarchy_visibility_toggle_does_not_select_the_row(viewer):
@@ -231,6 +273,7 @@ def test_environment_inspector_controls_render_flags(viewer):
     activate_panel(viewer, "Inspector")
     item_rect(viewer, "combo", "texture##skybox")
     item_rect(viewer, "combo", "mode##haze")
+    _scroll_panel(viewer, "Inspector", -7.0)
     point = item_rect(viewer, "checkbox", "enabled##fog")
     before = viewer.backend.get_flag(RenderFlag.FOG)
 
@@ -255,13 +298,16 @@ def test_material_inspector_exposes_instance_and_shared_controls(viewer):
     )
     viewer.session.submit(cmd.Select(target.object_id))
     activate_panel(viewer, "Inspector")
+    _scroll_panel(viewer, "Inspector", 100.0)
     header = item_rect(viewer, "collapsing_header", "material")
     click(viewer, imgui.get_io(), header)
 
     item_rect(viewer, "input_text", "##entity_name")
     item_rect(viewer, "color_edit4", "instance color")
+    _scroll_panel(viewer, "Inspector", -6.0)
     contact = item_rect(viewer, "collapsing_header", "contact properties")
     click(viewer, imgui.get_io(), contact)
+    _scroll_panel(viewer, "Inspector", -5.0)
     item_rect(viewer, "drag_float3", "friction (slide spin roll)")
     item_rect(viewer, "combo", "contact dimension")
     item_rect(viewer, "input_int", "collision type mask")
@@ -966,6 +1012,35 @@ def test_inspector_transform_resets_and_copies_without_gesture_conflicts(free_bo
         v.sync()
 
     activate_panel(v, "Inspector")
+    position_label = item_bounds(v, "text", "position")
+    x_axis = item_bounds(v, "button", f"X##position_0_{node.node_id}")
+    x_value = item_bounds(v, "drag_float", f"##position_0_{node.node_id}")
+    assert position_label[2] < x_axis[0]
+    assert (position_label[1] + position_label[3]) * 0.5 == pytest.approx(
+        (x_axis[1] + x_axis[3]) * 0.5,
+        abs=0.1,
+    )
+    assert 2.0 <= x_value[0] - x_axis[2] <= 6.0
+
+    from forge_viewer.ui.panels.inspector import _mix_color
+    from forge_viewer.ui.theme import THEME
+
+    readonly_x = item_bounds(v, "button", f"X##linear velocity_0_{node.node_id}")
+    image = snap(v)
+    expected_axis = np.rint(
+        np.asarray(_mix_color(THEME.bg_frame, THEME.axis_color(0), 0.56)[:3]) * 255.0
+    ).astype(np.int16)
+    center_y = (readonly_x[1] + readonly_x[3]) * 0.5
+    for x0, x1 in (
+        (readonly_x[0] + 3.0, readonly_x[0] + 7.0),
+        (readonly_x[2] - 2.5, readonly_x[2] - 0.5),
+    ):
+        px0, py0 = v.window.points_to_pixels((x0, center_y - 3.0))
+        px1, py1 = v.window.points_to_pixels((x1, center_y + 3.0))
+        sample = image[round(py0) : round(py1), round(px0) : round(px1)].astype(np.int16)
+        median = np.median(sample.reshape(-1, 3), axis=0)
+        assert np.max(np.abs(median - expected_axis)) <= 2
+
     x_reset = item_rect(v, "button", f"X##position_0_{node.node_id}")
     click(v, io, x_reset)
     v.sync()
@@ -1119,6 +1194,31 @@ def test_gizmo_is_live_for_a_free_body(free_body_viewer):
     assert not v.app.gizmo.hovered
 
 
+def test_tool_column_hides_without_actions_and_centers_when_available(free_body_viewer):
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+
+    v = free_body_viewer
+    assert v.session.submit(cmd.Select(0))
+    for _ in range(3):
+        v.sync()
+    tools = imgui.internal.find_window_by_name("Tools###viewport_tools")
+    assert tools is None or not tools.active
+
+    node = next(item for item in v.session.nodes if item.posable)
+    assert v.session.submit(cmd.Select(node.object_id))
+    for _ in range(3):
+        v.sync()
+    tools = imgui.internal.find_window_by_name("Tools###viewport_tools")
+    assert tools is not None and tools.active
+    _x, viewport_y, _width, viewport_height = v.app._viewport_rect
+    assert tools.pos.y + tools.size.y * 0.5 == pytest.approx(
+        viewport_y + viewport_height * 0.5,
+        abs=2.0,
+    )
+
+
 @pytest.mark.parametrize("workspace", (False, True), ids=("viewer", "editor"))
 def test_joint_gizmo_is_live_in_the_real_viewer_pipeline(workspace):
     """Viewer and editor must retain the diagnostics requested by a joint gizmo."""
@@ -1150,6 +1250,256 @@ def test_joint_gizmo_is_live_in_the_real_viewer_pipeline(workspace):
         v.release()
 
 
+def test_joint_limit_label_click_sets_the_endpoint_in_the_real_viewer() -> None:
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+
+    v = build(
+        resolve("joint_types"),
+        "mujoco",
+        paused=True,
+        vsync=False,
+        width=W,
+        height=H,
+    )
+    try:
+        for _ in range(10):
+            v.sync()
+        node = next(item for item in v.session.nodes if item.name == "hinge_body")
+        assert v.session.submit(cmd.Select(node.object_id))
+        for _ in range(4):
+            v.sync()
+
+        target, reason = v.app.gizmo._joint_target(v.session, node)
+        assert target is not None, reason
+        lower_hit, upper_hit = v.app.gizmo.joint_limit_hits
+        assert lower_hit.value == pytest.approx(target.joint.range[0])
+        assert upper_hit.value == pytest.approx(target.joint.range[1])
+        x0, y0, x1, y1 = lower_hit.rect
+        click(v, imgui.get_io(), ((x0 + x1) * 0.5, (y0 + y1) * 0.5))
+        for _ in range(2):
+            v.sync()
+
+        assert v.session.frame.qpos is not None
+        assert v.session.frame.qpos[target.joint.qpos_adr] == pytest.approx(target.joint.range[0])
+    finally:
+        v.release()
+
+
+def test_limited_hinge_drag_keeps_feedback_and_claim_until_mouse_release() -> None:
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+    from forge_viewer.gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, project, world_scale
+
+    v = build(
+        resolve("joint_types"),
+        "mujoco",
+        paused=True,
+        vsync=False,
+        width=W,
+        height=H,
+    )
+    io = imgui.get_io()
+    try:
+        for _ in range(8):
+            v.sync()
+        node = next(item for item in v.session.nodes if item.name == "hinge_body")
+        assert v.session.submit(cmd.Select(node.object_id))
+        for _ in range(4):
+            v.sync()
+
+        target, reason = v.app.gizmo._joint_target(v.session, node)
+        assert target is not None, reason
+        pose = v.app.gizmo._target_pose(v.session, node, target)
+        assert pose is not None
+        position, basis = pose
+        cam = v.app._camera_view()
+        rect = v.app._viewport_rect
+        scale = world_scale(cam, position, rect[3], SIZE_PT)
+
+        def cursor(angle: float) -> np.ndarray:
+            world = (
+                position
+                + (basis[:, 0] * np.cos(angle) + basis[:, 1] * np.sin(angle)) * scale * RING_RADIUS
+            )
+            return project(cam, (world,), rect)[0, :2]
+
+        start_angle = next(
+            angle
+            for angle in np.linspace(0.0, 2.0 * np.pi, 64, endpoint=False)
+            if v.app.gizmo.update_hover(
+                v.session,
+                cam,
+                rect,
+                tuple(cursor(angle)),
+            )
+            is GizmoHandle.ROTATE_Z
+        )
+        start = cursor(start_angle)
+        io.add_mouse_pos_event(*start)
+        v.sync()
+        io.add_mouse_button_event(0, True)
+        v.sync()
+        assert v.app.gizmo.using
+
+        qpos = v.session.frame.qpos
+        assert qpos is not None
+        origin = float(qpos[target.joint.qpos_adr])
+        lower = float(target.joint.range[0])
+        overtravel = lower - origin - 0.35
+        for delta in np.linspace(0.0, overtravel, 40)[1:]:
+            io.add_mouse_pos_event(*cursor(start_angle + delta))
+            v.sync()
+        v.sync()
+
+        assert v.app.gizmo.using
+        assert v.app.gizmo.active_handle is GizmoHandle.ROTATE_Z
+        assert v.session.frame.qpos is not None
+        assert v.session.frame.qpos[target.joint.qpos_adr] == pytest.approx(lower)
+
+        class Recorder:
+            def __init__(self, inner):
+                self.inner = inner
+                self.fans = 0
+
+            def triangle_fan_fill(self, points, color):
+                self.fans += 1
+                return self.inner.triangle_fan_fill(points, color)
+
+            def __getattr__(self, name):
+                return getattr(self.inner, name)
+
+        original_draw = v.app.gizmo.draw_overlay
+        recorders = []
+
+        def spy(cam, rect, overlay, *, style_scale=1.0):
+            recorder = Recorder(overlay)
+            recorders.append(recorder)
+            return original_draw(cam, rect, recorder, style_scale=style_scale)
+
+        v.app.gizmo.draw_overlay = spy
+        try:
+            v.sync()
+        finally:
+            v.app.gizmo.draw_overlay = original_draw
+        assert recorders and recorders[-1].fans == 1
+        assert v.app.gizmo.using
+
+        io.add_mouse_pos_event(*cursor(start_angle + overtravel + 0.05))
+        v.sync()
+        v.sync()
+        assert v.session.frame.qpos is not None
+        returned = float(v.session.frame.qpos[target.joint.qpos_adr])
+        assert lower + 0.03 < returned < lower + 0.07
+        assert v.app.gizmo.using
+
+        io.add_mouse_button_event(0, False)
+        v.sync()
+        assert not v.app.gizmo.using
+    finally:
+        if imgui.is_mouse_down(0):
+            io.add_mouse_button_event(0, False)
+            v.sync()
+        v.release()
+
+
+def test_limited_slide_drag_keeps_feedback_and_claim_until_mouse_release() -> None:
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+    from forge_viewer.gizmo import GizmoHandle
+
+    v = build(
+        resolve("joint_types"),
+        "mujoco",
+        paused=True,
+        vsync=False,
+        width=W,
+        height=H,
+    )
+    io = imgui.get_io()
+    try:
+        for _ in range(8):
+            v.sync()
+        node = next(item for item in v.session.nodes if item.name == "slide_body")
+        assert v.session.submit(cmd.Select(node.object_id))
+        for _ in range(4):
+            v.sync()
+
+        target, reason = v.app.gizmo._joint_target(v.session, node)
+        assert target is not None, reason
+        pose = v.app.gizmo._target_pose(v.session, node, target)
+        assert pose is not None
+        position, basis = pose
+        cam = v.app._camera_view()
+        rect = v.app._viewport_rect
+        state = v.app.gizmo._joint_range_state(v.session, target)
+        assert state is not None
+        slide = v.app.gizmo._slide_range_projection(
+            cam,
+            rect,
+            v.window.style_scale,
+            state,
+            position,
+            basis,
+        )
+        assert slide is not None
+        arrow = v.app.gizmo._slide_arrow_polygon(slide, v.window.style_scale)
+        start = np.mean(arrow, axis=0)
+        io.add_mouse_pos_event(*start)
+        v.sync()
+        assert v.app.gizmo.hovered_handle is GizmoHandle.Z
+        io.add_mouse_button_event(0, True)
+        v.sync()
+        assert v.app.gizmo.using
+        drag_origin = v.app.gizmo._drag_origin_pos.copy()
+
+        qpos = v.session.frame.qpos
+        assert qpos is not None
+        origin = float(qpos[target.joint.qpos_adr])
+        lower = float(target.joint.range[0])
+        overtravel = lower - origin - 0.12
+        end = start + v.app.gizmo._axis_screen * (overtravel / v.app.gizmo._world_per_pt)
+        for cursor in np.linspace(start, end, 32)[1:]:
+            io.add_mouse_pos_event(*cursor)
+            v.sync()
+        v.sync()
+
+        assert v.app.gizmo.using
+        assert v.app.gizmo.active_handle is GizmoHandle.Z
+        assert v.session.frame.qpos is not None
+        assert v.session.frame.qpos[target.joint.qpos_adr] == pytest.approx(lower)
+        assert v.app.gizmo._drag_origin_pos == pytest.approx(drag_origin)
+        assert np.linalg.norm(v.app.gizmo._start_pos - drag_origin) > 0.1
+
+        farther = end - v.app.gizmo._axis_screen * (0.08 / v.app.gizmo._world_per_pt)
+        io.add_mouse_pos_event(*farther)
+        v.sync()
+        assert v.app.gizmo.using
+        assert v.session.frame.qpos is not None
+        assert v.session.frame.qpos[target.joint.qpos_adr] == pytest.approx(lower)
+
+        inward = farther + v.app.gizmo._axis_screen * (0.02 / v.app.gizmo._world_per_pt)
+        io.add_mouse_pos_event(*inward)
+        v.sync()
+        v.sync()
+        assert v.session.frame.qpos is not None
+        returned = float(v.session.frame.qpos[target.joint.qpos_adr])
+        assert lower + 0.01 < returned < lower + 0.025
+        assert v.app.gizmo.using
+
+        io.add_mouse_button_event(0, False)
+        v.sync()
+        assert not v.app.gizmo.using
+    finally:
+        if imgui.is_mouse_down(0):
+            io.add_mouse_button_event(0, False)
+            v.sync()
+        v.release()
+
+
 def test_multi_joint_viewport_picker_selects_the_gizmo_target():
     from imgui_bundle import imgui
 
@@ -1167,6 +1517,8 @@ def test_multi_joint_viewport_picker_selects_the_gizmo_target():
         for _ in range(10):
             v.sync()
         node = next(item for item in v.session.nodes if item.name == "05_multi_joint")
+        vx, vy, vw, vh = v.app._viewport_rect
+        imgui.get_io().add_mouse_pos_event(vx + vw * 0.55, vy + vh * 0.45)
         assert v.session.submit(cmd.Select(node.object_id))
         for _ in range(3):
             v.sync()
@@ -1178,6 +1530,11 @@ def test_multi_joint_viewport_picker_selects_the_gizmo_target():
             "05_multi_revolute_z",
         ]
         assert not v.app.gizmo.last_verdict.ok
+        picker = imgui.internal.find_window_by_name("Joint gizmo###viewport_joint_gizmo")
+        assert picker is not None and picker.active
+        assert not picker.flags & imgui.WindowFlags_.no_move.value
+        assert abs(picker.pos.x - (vx + vw * 0.55)) < 320.0
+        assert abs(picker.pos.y - (vy + vh * 0.45)) < 240.0
         label = f"05_multi_revolute_z  (hinge)##viewport-joint-{choices[2].joint_id}"
         click(v, imgui.get_io(), item_rect(v, "selectable", label))
         for _ in range(3):
@@ -1233,6 +1590,31 @@ def test_viewport_playback_widget_controls_simulation(viewer):
     assert v.session.paused
     v.sync()
     assert v.session.frame.step == before + 1
+
+
+def test_status_simulation_metric_switches_and_copies_exact_value(viewer):
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+
+    v = viewer
+    v.session.submit(cmd.Pause())
+    v.app._status_metric_mode = "time"
+    v.sync()
+
+    metric = item_rect(v, "invisible_button", "##status_simulation_metric")
+    click(v, imgui.get_io(), metric)
+    assert v.app._status_metric_mode == "steps"
+
+    copied = []
+    original = imgui.set_clipboard_text
+    imgui.set_clipboard_text = copied.append
+    try:
+        metric = item_rect(v, "invisible_button", "##status_simulation_metric")
+        click(v, imgui.get_io(), metric, button=1)
+    finally:
+        imgui.set_clipboard_text = original
+    assert copied == [str(v.session.frame.step)]
 
 
 def test_gizmo_disappears_without_an_editable_body(free_body_viewer):
@@ -1306,6 +1688,7 @@ def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(
     from forge_viewer.gizmo import SIZE_PT, GizmoHandle, project, world_scale
 
     v = free_body_viewer
+    v.sync()
     io = imgui.get_io()
     node = next(n for n in v.session.nodes if n.posable)
     assert v.session.submit(cmd.Select(node.object_id))
@@ -1339,46 +1722,114 @@ def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(
     assert v.session.frame.body_xpos[node.body_index] == pytest.approx(before, abs=1e-7)
     assert abs(v.app.camera.yaw - before_yaw) < 1e-6
 
-    wrapped = []
     input_bounds = []
-    original_text_wrapped = imgui.text_wrapped
+    input_flags = []
+    popup_bounds = []
+    title_bounds = []
     original_input_double = imgui.input_double
-
-    def record_wrapped(value):
-        result = original_text_wrapped(value)
-        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        wrapped.append((value, lo.x, hi.x))
-        return result
+    original_text = imgui.text
 
     def record_input(*args, **kwargs):
         result = original_input_double(*args, **kwargs)
+        input_flags.append(args[5] if len(args) > 5 else kwargs.get("flags", 0))
         lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         input_bounds.append((lo.x, hi.x))
+        window_pos = imgui.get_window_pos()
+        window_size = imgui.get_window_size()
+        popup_bounds.append((window_pos.x, window_size.x))
         return result
 
-    monkeypatch.setattr(imgui, "text_wrapped", record_wrapped)
+    def record_text(value, *args, **kwargs):
+        result = original_text(value, *args, **kwargs)
+        if str(value).startswith("Move "):
+            lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+            title_bounds.append((lo.x, hi.x))
+        return result
+
     monkeypatch.setattr(imgui, "input_double", record_input)
+    monkeypatch.setattr(imgui, "text", record_text)
     v.app._precise_gizmo_edit = replace(
         edit,
         label="01_revolute_y_with_a_long_joint_name",
         joint_id=123,
     )
     v.sync()
-    popup = imgui.internal.find_window_by_name("Precise Gizmo Input")
-    assert popup is not None
-    content_right = popup.pos.x + popup.size.x - imgui.get_style().window_padding.x
-    assert len(wrapped) == 4
-    assert all(right <= content_right + 1.0 for _value, _left, right in wrapped)
+    popup_left, popup_width = popup_bounds[-1]
+    content_right = popup_left + popup_width - imgui.get_style().window_padding.x
+    assert popup_width == pytest.approx(204.0 * v.window.style_scale, abs=2.0)
     assert input_bounds[-1][1] <= content_right + 1.0
+    assert input_flags[-1] & imgui.InputTextFlags_.auto_select_all.value
+    assert title_bounds[-1][0] >= popup_left + imgui.get_style().window_padding.x - 1.0
+    assert title_bounds[-1][1] <= content_right + 1.0
     v.app._precise_gizmo_edit = edit
-    monkeypatch.setattr(imgui, "text_wrapped", original_text_wrapped)
     monkeypatch.setattr(imgui, "input_double", original_input_double)
+    monkeypatch.setattr(imgui, "text", original_text)
     for _ in range(2):
         v.sync()
 
-    v.app._precise_gizmo_value = 0.125
-    apply = item_rect(v, "button", "Apply")
-    click(v, io, apply)
+    input_center = item_rect(v, "input_double", "##precise_gizmo_value")
+    click(v, io, input_center)
+    assert v.app._precise_gizmo_edit is not None
+    active = []
+    original_input_double = imgui.input_double
+
+    def record_active(*args, **kwargs):
+        result = original_input_double(*args, **kwargs)
+        if args[0] == "##precise_gizmo_value":
+            active.append(imgui.is_item_active())
+        return result
+
+    monkeypatch.setattr(imgui, "input_double", record_active)
+    v.sync()
+    monkeypatch.setattr(imgui, "input_double", original_input_double)
+    assert active[-1]
+
+    # Clicking elsewhere dismisses Type Value, but that physical click is
+    # consumed by the popup.  It must not fall through to scene picking and
+    # clear the joint/body selection that the user intends to keep editing.
+    selected_before_dismiss = v.session.selected
+    pick_calls = []
+    original_pick = v.app._pick_at
+
+    def record_pick(point):
+        pick_calls.append(point)
+        return original_pick(point)
+
+    monkeypatch.setattr(v.app, "_pick_at", record_pick)
+    x, y, width, height = v.app._viewport_rect
+    click(v, io, (x + width - 24.0, y + height - 48.0))
+    monkeypatch.setattr(v.app, "_pick_at", original_pick)
+    assert v.app._precise_gizmo_edit is None
+    assert v.session.selected == selected_before_dismiss
+    assert not pick_calls
+
+    # Escape remains a distinct cancellation route and likewise preserves the
+    # stable target.  Reopen directly so both dismissal paths are covered.
+    v.app._begin_precise_gizmo_input(edit)
+    v.sync()
+    io.add_key_event(imgui.Key.escape, True)
+    v.sync()
+    io.add_key_event(imgui.Key.escape, False)
+    v.sync()
+    assert v.app._precise_gizmo_edit is None
+    assert v.session.selected == selected_before_dismiss
+    io.add_mouse_pos_event(*cursor)
+    for _ in range(2):
+        v.sync()
+    assert v.app.gizmo.hovered_handle is GizmoHandle.Z
+
+    # Reopening focuses and selects the value. Model one Enter-returning edit
+    # after separately verifying that clicking the real input keeps it active.
+    v.app._begin_precise_gizmo_input(edit)
+    original_input_double = imgui.input_double
+
+    def submit_value(*args, **kwargs):
+        original_input_double(*args, **kwargs)
+        return True, 0.125
+
+    monkeypatch.setattr(imgui, "input_double", submit_value)
+    v.sync()
+    monkeypatch.setattr(imgui, "input_double", original_input_double)
     for _ in range(2):
         v.sync()
 
@@ -1411,22 +1862,21 @@ def test_precise_input_error_has_copy_button(free_body_viewer, monkeypatch):
 
     copied = []
     original_small_button = imgui.small_button
-    original_button = imgui.button
 
     def press_copy_error(label, *args, **kwargs):
         shown = original_small_button(label, *args, **kwargs)
         return True if label == "Copy error##precise-gizmo" else shown
 
-    def press_cancel(label, *args, **kwargs):
-        shown = original_button(label, *args, **kwargs)
-        return True if label == "Cancel" else shown
-
     monkeypatch.setattr(imgui, "set_clipboard_text", copied.append)
     monkeypatch.setattr(imgui, "small_button", press_copy_error)
-    monkeypatch.setattr(imgui, "button", press_cancel)
     v.sync()
 
     assert copied == ["Enter a finite numeric value"]
+    io = imgui.get_io()
+    io.add_key_event(imgui.Key.escape, True)
+    v.sync()
+    io.add_key_event(imgui.Key.escape, False)
+    v.sync()
     assert v.app._precise_gizmo_edit is None
 
 
@@ -1466,8 +1916,9 @@ def test_precise_rotation_input_switches_to_radians_with_u(free_body_viewer):
     assert v.app._precise_gizmo_angle_unit == "radians"
     assert v.app._precise_gizmo_value == pytest.approx(np.pi)
 
-    apply = item_rect(v, "button", "Apply")
-    click(v, io, apply)
+    io.add_key_event(imgui.Key.enter, True)
+    v.sync()
+    io.add_key_event(imgui.Key.enter, False)
     for _ in range(2):
         v.sync()
 
@@ -1626,7 +2077,7 @@ def test_gizmo_drag_feedback_matches_in_2d_and_3d(free_body_viewer, style, arrow
 
 
 @pytest.mark.parametrize("style", ("2d", "3d"))
-def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style):
+def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style, monkeypatch):
 
     from imgui_bundle import imgui
 
@@ -1644,6 +2095,10 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style):
     v = free_body_viewer
     imgui.set_current_context(v.window._imgui_context)
     io = imgui.get_io()
+    # Both parameter cases reuse one Viewer and run faster than a human double
+    # click. Disable double-click recognition so the second synthetic drag does
+    # not open precise input and leave a modal active for later interaction tests.
+    monkeypatch.setattr(io, "mouse_double_click_time", 0.0)
     node = next(n for n in v.session.nodes if n.posable)
     v.session.submit(cmd.Select(node.object_id))
     v.app.gizmo.set_mode("rotate")
@@ -1941,8 +2396,20 @@ def test_holding_axis_key_uses_the_exact_gizmo_axis_without_a_mouse_click(free_b
     finally:
         imgui.get_window_draw_list = real
 
-    constraint = recorders[0].lines[0]
-    line = np.array(((constraint[0].x, constraint[0].y), (constraint[1].x, constraint[1].y)))
+    candidates = []
+    for recorder in recorders:
+        for candidate in recorder.lines:
+            segment = np.array(((candidate[0].x, candidate[0].y), (candidate[1].x, candidate[1].y)))
+            inside = (
+                np.all(segment[:, 0] >= rect[0] - 1.0)
+                and np.all(segment[:, 0] <= rect[0] + rect[2] + 1.0)
+                and np.all(segment[:, 1] >= rect[1] - 1.0)
+                and np.all(segment[:, 1] <= rect[1] + rect[3] + 1.0)
+            )
+            if inside and np.linalg.norm(segment[1] - segment[0]) > min(rect[2], rect[3]):
+                candidates.append(segment)
+    assert candidates
+    line = max(candidates, key=lambda segment: np.linalg.norm(segment[1] - segment[0]))
     cam = v.app.camera.view()
     axis = project(cam, (np.zeros(3), turn_z_90[:, 0]), rect)[:, :2]
     line_dir = line[1] - line[0]
@@ -2010,6 +2477,58 @@ def test_the_keyboard_shortcuts_are_not_swallowed(free_body_viewer):
     for _ in range(120):
         v.sync()
     assert v.app.camera.distance < 50.0
+
+
+def test_blocking_modal_owns_all_viewport_input_and_hides_context_hint(
+    free_body_viewer,
+) -> None:
+    from imgui_bundle import imgui
+
+    import forge_viewer.commands as cmd
+
+    v = free_body_viewer
+    io = imgui.get_io()
+    node = next(item for item in v.session.nodes if item.posable)
+    assert v.session.submit(cmd.Pause())
+    assert v.session.submit(cmd.Select(node.object_id))
+    for _ in range(3):
+        v.sync()
+    hint = imgui.internal.find_window_by_name("Hints###viewport_hints")
+    assert hint is not None and hint.active
+    camera_eye = np.asarray(v.app._camera_view().eye, np.float64).copy()
+
+    try:
+        v.app._pending_document_action = ("new_scene", None)
+        for _ in range(2):
+            v.sync()
+        popup = imgui.internal.find_window_by_name("Unsaved changes")
+        assert popup is not None and popup.active
+        hint = imgui.internal.find_window_by_name("Hints###viewport_hints")
+        assert hint is None or not hint.active
+
+        x, y, width, height = v.app._viewport_rect
+        io.add_mouse_pos_event(x + width * 0.5, y + height * 0.5)
+        io.add_key_event(imgui.Key.left_ctrl, True)
+        io.add_key_event(imgui.Key.space, True)
+        io.add_mouse_button_event(0, True)
+        io.add_mouse_pos_event(x + width * 0.6, y + height * 0.6)
+        v.sync()
+
+        assert v.session.paused
+        assert not v.app.gizmo.using
+        assert not v.session.perturb.active
+        assert v.app.view_cube.hovered is None
+        assert np.asarray(v.app._camera_view().eye, np.float64) == pytest.approx(camera_eye)
+        hint = imgui.internal.find_window_by_name("Hints###viewport_hints")
+        assert hint is None or not hint.active
+    finally:
+        io.add_mouse_button_event(0, False)
+        io.add_key_event(imgui.Key.space, False)
+        io.add_key_event(imgui.Key.left_ctrl, False)
+        io.add_key_event(imgui.Key.escape, True)
+        v.sync()
+        io.add_key_event(imgui.Key.escape, False)
+        v.sync()
 
 
 def test_g_and_r_switch_modes_and_there_is_no_scale(free_body_viewer):

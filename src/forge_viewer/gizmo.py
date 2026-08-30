@@ -40,17 +40,17 @@ RING_SEGMENTS = 64
 
 AXIS_COLORS = np.array(
     (
-        (239 / 255, 110 / 255, 106 / 255, 1.0),
-        (84 / 255, 168 / 255, 83 / 255, 1.0),
-        (105 / 255, 147 / 255, 246 / 255, 1.0),
+        (220 / 255, 119 / 255, 115 / 255, 1.0),
+        (82 / 255, 170 / 255, 92 / 255, 1.0),
+        (111 / 255, 148 / 255, 229 / 255, 1.0),
     ),
     np.float32,
 )
-HOVER_COLOR = np.array((1.0, 0.72, 0.12, 1.0), np.float32)
+HOVER_COLOR = np.array((184 / 255, 210 / 255, 172 / 255, 1.0), np.float32)
 # Keep active and hover separate so either interaction state can be tuned independently.
-ACTIVE_HANDLE_COLOR = np.array((1.0, 0.72, 0.12, 1.0), np.float32)
-ACTIVE_COLOR = np.array((1.0, 0.5, 0.06, 1.0), np.float32)
-JOINT_HANDLE_COLOR = np.array((0.72, 0.48, 0.95, 1.0), np.float32)
+ACTIVE_HANDLE_COLOR = np.array((184 / 255, 210 / 255, 172 / 255, 1.0), np.float32)
+ACTIVE_COLOR = np.array((103 / 255, 135 / 255, 90 / 255, 1.0), np.float32)
+JOINT_HANDLE_COLOR = np.array((175 / 255, 132 / 255, 183 / 255, 1.0), np.float32)
 CENTER_COLOR = np.array((0.92, 0.92, 0.92, 1.0), np.float32)
 CONTRAST_EDGE_COLOR = np.array((0.68, 0.71, 0.76, 1.0), np.float32)
 GUIDE_CORE_COLOR = np.array((0.98, 0.98, 0.99, 1.0), np.float32)
@@ -184,6 +184,38 @@ def screen_constant_world_sizes(
     return result
 
 
+_CAMERA_ICON_BODY_2D = np.asarray(
+    (
+        (-0.50, -0.25),
+        (-0.43, -0.34),
+        (0.43, -0.34),
+        (0.50, -0.25),
+        (0.50, 0.25),
+        (0.43, 0.34),
+        (-0.43, 0.34),
+        (-0.50, 0.25),
+    ),
+    np.float64,
+)
+_CAMERA_ICON_BUMP_2D = np.asarray(
+    ((-0.26, 0.34), (-0.17, 0.50), (0.12, 0.50), (0.21, 0.34)), np.float64
+)
+_CAMERA_ICON_ANGLES = np.linspace(0.0, 2.0 * np.pi, 12, endpoint=False)
+_CAMERA_ICON_LENS_2D = np.column_stack(
+    (0.16 * np.cos(_CAMERA_ICON_ANGLES), 0.16 * np.sin(_CAMERA_ICON_ANGLES))
+)
+_CAMERA_ICON_STARTS_2D = np.concatenate(
+    (_CAMERA_ICON_BODY_2D, _CAMERA_ICON_BUMP_2D, _CAMERA_ICON_LENS_2D)
+)
+_CAMERA_ICON_ENDS_2D = np.concatenate(
+    (
+        np.roll(_CAMERA_ICON_BODY_2D, -1, axis=0),
+        np.roll(_CAMERA_ICON_BUMP_2D, -1, axis=0),
+        np.roll(_CAMERA_ICON_LENS_2D, -1, axis=0),
+    )
+)
+
+
 def camera_icon_segments(
     views: tuple[CameraView, ...] | list[CameraView],
     editor_camera: CameraView,
@@ -192,44 +224,32 @@ def camera_icon_segments(
     *,
     visible_only: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Build compact screen-constant camera icons for one debug-draw batch."""
+    """Build screen-facing, screen-constant camera glyphs for one draw batch.
+
+    The helper is an editor icon, not a second projection frustum.  Keeping the
+    body, viewfinder bump, and lens circle in the editor-camera plane makes it
+    read as a camera from every view direction; the selected camera's actual
+    orientation remains available through its separate frustum helper.
+    """
     if not views:
         empty = np.empty((0, 3), np.float32)
         return empty, empty
     eyes = np.asarray([view.eye for view in views], np.float64)
-    targets = np.asarray([view.target for view in views], np.float64)
-    ups = np.asarray([view.up for view in views], np.float64)
-    forward = _normalize_rows(targets - eyes, (0.0, 0.0, -1.0))
-    right = np.cross(forward, ups)
-    degenerate = np.linalg.norm(right, axis=1) <= 1e-9
-    if np.any(degenerate):
-        reference = np.zeros((int(np.count_nonzero(degenerate)), 3), np.float64)
-        reference[:, 2] = 1.0
-        reference[np.abs(forward[degenerate, 2]) >= 0.95] = (0.0, 1.0, 0.0)
-        right[degenerate] = np.cross(forward[degenerate], reference)
-    right = _normalize_rows(right, (1.0, 0.0, 0.0))
-    up = np.cross(right, forward)
     lengths = screen_constant_world_sizes(
         editor_camera, eyes, viewport_height, pixels, visible_only=visible_only
     )
-    centers = eyes + forward * lengths[:, None]
-    half_height = lengths * 0.45
-    half_width = half_height * np.clip(
-        np.asarray([view.aspect for view in views], np.float64), 0.75, 1.8
+
+    view_rotation = np.asarray(editor_camera.view_matrix(), np.float64)[:3, :3]
+    right = view_rotation[0]
+    up = view_rotation[1]
+    starts = eyes[:, None, :] + lengths[:, None, None] * (
+        _CAMERA_ICON_STARTS_2D[None, :, 0, None] * right[None, None, :]
+        + _CAMERA_ICON_STARTS_2D[None, :, 1, None] * up[None, None, :]
     )
-    horizontal = right * half_width[:, None]
-    vertical = up * half_height[:, None]
-    corners = np.stack(
-        (
-            centers - horizontal - vertical,
-            centers + horizontal - vertical,
-            centers + horizontal + vertical,
-            centers - horizontal + vertical,
-        ),
-        axis=1,
+    ends = eyes[:, None, :] + lengths[:, None, None] * (
+        _CAMERA_ICON_ENDS_2D[None, :, 0, None] * right[None, None, :]
+        + _CAMERA_ICON_ENDS_2D[None, :, 1, None] * up[None, None, :]
     )
-    starts = np.concatenate((np.repeat(eyes[:, None], 4, axis=1), corners), axis=1)
-    ends = np.concatenate((corners, np.roll(corners, -1, axis=1)), axis=1)
     return starts.reshape(-1, 3).astype(np.float32), ends.reshape(-1, 3).astype(np.float32)
 
 

@@ -78,9 +78,9 @@ def pack_u32(color: RGBA) -> int:
     return r | (g << 8) | (b << 16) | (a << 24)
 
 
-PRIMARY: RGBA = rgb8(159, 174, 137)
-PRIMARY_BRIGHT: RGBA = rgb8(184, 198, 163)
-PRIMARY_DIM: RGBA = rgb8(104, 116, 88)
+PRIMARY: RGBA = rgb8(156, 191, 141)
+PRIMARY_BRIGHT: RGBA = rgb8(184, 210, 172)
+PRIMARY_DIM: RGBA = rgb8(103, 135, 90)
 
 
 DANGER: RGBA = rgb8(208, 103, 68)
@@ -122,9 +122,9 @@ def node_color(node_type: NodeType | str) -> RGBA:
 
 
 AXIS_COLORS: dict[str, RGBA] = {
-    "x": rgb8(239, 110, 106),
-    "y": rgb8(84, 168, 83),
-    "z": rgb8(105, 147, 246),
+    "x": rgb8(220, 119, 115),
+    "y": rgb8(82, 170, 92),
+    "z": rgb8(111, 148, 229),
 }
 AXIS_ORDER: tuple[str, str, str] = ("x", "y", "z")
 
@@ -199,10 +199,10 @@ def apply(imgui: Any, theme: Theme = THEME, ui_scale: float = 1.0) -> None:
     put(col.slider_grab_active, theme.primary)
     put(col.button, theme.bg_frame)
     put(col.button_hovered, theme.bg_frame_hovered)
-    put(col.button_active, theme.primary_dim)
+    put(col.button_active, theme.bg_frame_active)
     put(col.header, theme.bg_header)
-    put(col.header_hovered, theme.bg_frame_active)
-    put(col.header_active, theme.primary_dim)
+    put(col.header_hovered, theme.bg_frame_hovered)
+    put(col.header_active, theme.bg_frame_active)
     put(col.separator, theme.border)
     put(col.separator_hovered, theme.primary_dim)
     put(col.separator_active, theme.primary)
@@ -212,7 +212,7 @@ def apply(imgui: Any, theme: Theme = THEME, ui_scale: float = 1.0) -> None:
     put(col.tab, theme.bg_child)
     put(col.tab_hovered, theme.primary_dim)
     put(col.tab_selected, theme.bg_header)
-    put(col.tab_selected_overline, theme.primary)
+    put(col.tab_selected_overline, (0.0, 0.0, 0.0, 0.0))
     put(col.tab_dimmed, theme.bg_child)
     put(col.tab_dimmed_selected, theme.bg_frame)
     put(col.docking_preview, with_alpha(theme.primary, 0.55))
@@ -225,7 +225,7 @@ def apply(imgui: Any, theme: Theme = THEME, ui_scale: float = 1.0) -> None:
     put(col.table_border_strong, theme.border)
     put(col.table_border_light, theme.bg_frame)
     put(col.table_row_bg, (0.0, 0.0, 0.0, 0.0))
-    put(col.table_row_bg_alt, (1.0, 1.0, 1.0, 0.025))
+    put(col.table_row_bg_alt, (0.0, 0.0, 0.0, 0.0))
     put(col.text_selected_bg, with_alpha(theme.primary, 0.35))
     put(col.nav_cursor, theme.primary)
     put(col.drag_drop_target, theme.warning)

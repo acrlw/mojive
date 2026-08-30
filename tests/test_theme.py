@@ -118,8 +118,8 @@ def test_primary_is_desaturated():
 
     sat = _hsl_saturation(theme.PRIMARY)
     hue = _hue_deg(theme.PRIMARY)
-    assert sat < 0.25
-    assert 70.0 <= hue <= 100.0
+    assert sat < 0.30
+    assert 70.0 <= hue <= 105.0
 
 
 def test_danger_is_orange_red_not_pure_red():
@@ -136,7 +136,7 @@ def test_danger_primary_luma_gap():
     assert gap >= MIN_DANGER_PRIMARY_LUMA_GAP
 
     assert danger == pytest.approx(130.0, abs=6.0)
-    assert primary == pytest.approx(165.0, abs=6.0)
+    assert primary == pytest.approx(175.0, abs=6.0)
 
 
 def test_axis_colors_are_luminance_balanced():

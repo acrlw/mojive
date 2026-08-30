@@ -486,6 +486,7 @@ def test_repeated_model_replacement_matches_fresh_renderer_state():
 def test_camera_preview_matches_the_main_backend_for_the_same_camera_and_size():
     instance = build(resolve("parity_scene"), paused=True, vsync=False, width=960, height=640)
     preview = CameraPreview()
+    preview.set_enabled(True)
     try:
         instance.app.set_fixed_render_size(640, 480)
         instance.sync()
@@ -524,6 +525,8 @@ def test_dragging_camera_preview_does_not_orbit_scene_camera():
         assert instance.session.submit(SelectNode(camera_node.node_id))
         instance.sync()
         preview = instance.app.camera_preview
+        preview.set_enabled(True)
+        instance.sync()
         assert preview._position is not None
         before_position = preview._position
         before_camera = instance.app.camera.view()

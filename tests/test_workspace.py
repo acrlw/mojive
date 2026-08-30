@@ -666,6 +666,22 @@ def test_workspace_exports_formatted_re_loadable_mjcf(tmp_path: Path) -> None:
     assert sum(node.type is NodeType.GEOM for node in source.nodes) == model.ngeom
 
 
+def test_exported_composition_reserves_existing_model_namespaces(tmp_path: Path) -> None:
+    """Reopened flat MJCF exports must not reuse generated model frame names."""
+    document = workspace()
+    document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
+    path = tmp_path / "composed.xml"
+    document.save_scene(path)
+
+    restored = WorkspaceAdapter(MuJoCoAdapter(path))
+    model_id = restored.add_scene_model(
+        ASSETS / "test_scene.xml", np.array((2.0, 0.0, 0.0)), np.eye(3)
+    )
+
+    assert model_id == 2
+    assert restored.primary.model.body("forge_2_mark_box").id > 0
+
+
 def test_workspace_mjcf_export_stages_file_assets_with_relative_paths(tmp_path: Path) -> None:
     source = tmp_path / "source"
     (source / "meshes").mkdir(parents=True)

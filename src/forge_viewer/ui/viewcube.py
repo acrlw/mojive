@@ -128,11 +128,17 @@ class ViewCube:
         return self._balls
 
     def update(
-        self, cam: CameraView, rect: tuple[float, float, float, float], cursor, style_scale: float
+        self,
+        cam: CameraView,
+        rect: tuple[float, float, float, float],
+        cursor,
+        style_scale: float,
+        *,
+        enabled: bool = True,
     ) -> Ball | None:
         self._center = widget_center(rect, style_scale)
         self._balls = layout(cam, self._center, RADIUS_PT * style_scale, BALL_PT * style_scale)
-        self._hover = hit_test(self._balls, cursor)
+        self._hover = hit_test(self._balls, cursor) if enabled else None
         return self._hover
 
     @property

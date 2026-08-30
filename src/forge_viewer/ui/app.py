@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import time
+import webbrowser
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,9 +31,10 @@ from .camera import CameraOut, OrbitCamera, ndc_from_viewport, unproject
 from .camera_preview import CameraPreview
 from .draw2d import ImguiDraw2D
 from .gizmo import ObjectGizmo, PreciseGizmoInput
+from .input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
 from .localization import Localizer
 from .messages import OutputBuffer
-from .panels import PanelContext, PanelSet, button_width
+from .panels import PanelContext, PanelSet, button_width, segmented_control
 from .perturb import (
     PerturbController,
     cursor_grab_point,
@@ -41,6 +43,24 @@ from .perturb import (
 from .scene_entities import SceneEntityHelpers
 from .theme import THEME, Theme
 from .viewcube import DEFAULT_SELECTION_PADDING, ViewCube
+from .viewport_widgets import (
+    DEFAULT_VIEWPORT_OVERLAY_SCALE,
+    HINT_CHROME_SCALE,
+    MAX_VIEWPORT_OVERLAY_SCALE,
+    MIN_VIEWPORT_OVERLAY_SCALE,
+    OVERLAY_CLIP_PADDING,
+    PLAYBACK_CHROME_SCALE,
+    TOOL_CHROME_SCALE,
+    draw_hint,
+    draw_playback,
+    draw_status,
+    draw_tool_column,
+    hint_size,
+    localized_viewport_labels,
+    playback_size,
+    tool_column_size,
+    viewport_chrome_scale,
+)
 from .window import Window, WindowConfig
 
 if TYPE_CHECKING:
@@ -49,6 +69,7 @@ if TYPE_CHECKING:
     from ..session import Session
 
 CLICK_SLOP_PT = 4.0
+PRECISE_GIZMO_WIDTH_PT = 204.0
 log = get_logger("ui")
 
 
@@ -134,12 +155,37 @@ def _prepare_modal(width_pt: float) -> None:
     )
 
 
-def _equal_button_width(labels: tuple[str, ...]) -> float:
-    """Fill one dialog row while retaining enough room for every label."""
+def _equal_modal_buttons(
+    labels: tuple[str, ...],
+    theme: Theme,
+    *,
+    primary: int = -1,
+) -> tuple[bool, ...]:
+    """Draw a full-width modal action row with equal, predictable targets."""
+
     spacing = float(imgui.get_style().item_spacing.x)
     available = float(imgui.get_content_region_avail().x)
-    shared = (available - spacing * max(0, len(labels) - 1)) / max(1, len(labels))
-    return max(shared, *(button_width(label) for label in labels))
+    width = max(1.0, (available - spacing * max(0, len(labels) - 1)) / max(1, len(labels)))
+    clicked: list[bool] = []
+    for index, label in enumerate(labels):
+        if index:
+            imgui.same_line()
+        clicked.append(
+            _primary_button(label, width, theme)
+            if index == primary
+            else bool(imgui.button(label, imgui.ImVec2(width, 0.0)))
+        )
+    return tuple(clicked)
+
+
+def _primary_button(label: str, width: float, theme: Theme) -> bool:
+    """Draw the committing action with the shared selected-control colors."""
+
+    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(*theme.bg_frame_active))
+    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*theme.primary_bright))
+    clicked = imgui.button(label, imgui.ImVec2(width, 0.0))
+    imgui.pop_style_color(2)
+    return clicked
 
 
 def _disabled_text_wrapped(value: str) -> None:
@@ -150,25 +196,20 @@ def _disabled_text_wrapped(value: str) -> None:
     imgui.pop_style_color()
 
 
-def _wrap_overlay_text(value: str, overlay: ImguiDraw2D, max_width: float) -> tuple[str, ...]:
-    """Wrap short status text using the active UI font's measured width."""
+def _middle_elide_text(value: str, max_width: float, measure) -> str:
+    """Keep both ends of a dynamic name inside one fixed-width line."""
 
-    lines: list[str] = []
-    for paragraph in str(value).splitlines() or ("",):
-        words = paragraph.split()
-        if not words:
-            lines.append("")
-            continue
-        current = words[0]
-        for word in words[1:]:
-            candidate = f"{current} {word}"
-            if overlay.text_size(candidate)[0] <= max_width:
-                current = candidate
-            else:
-                lines.append(current)
-                current = word
-        lines.append(current)
-    return tuple(lines)
+    value = str(value)
+    if measure(value) <= max_width:
+        return value
+    ellipsis = "…"
+    for count in range(max(0, len(value) - 1), -1, -1):
+        left = (count + 1) // 2
+        right = count // 2
+        candidate = f"{value[:left]}{ellipsis}{value[len(value) - right :]}"
+        if measure(candidate) <= max_width:
+            return candidate
+    return ellipsis
 
 
 def _toggle_angle_input(value: float, unit: str) -> tuple[float, str]:
@@ -177,6 +218,67 @@ def _toggle_angle_input(value: float, unit: str) -> tuple[float, str]:
     if unit == "degrees":
         return float(np.radians(value)), "radians"
     return float(np.degrees(value)), "degrees"
+
+
+def _compact_status_for_selection(message: str, selected: str) -> str:
+    """Remove selection wording already represented by the status bar's first field."""
+
+    message = " ".join(str(message).split())
+    selected = " ".join(str(selected).split())
+    if not message:
+        return ""
+    if selected == "no selection" and message.casefold() == "selection cleared":
+        return ""
+    if message.casefold() in {
+        selected.casefold(),
+        f"selected {selected}".casefold(),
+        f"{selected} selected".casefold(),
+    }:
+        return ""
+    prefix = re.match(rf"^{re.escape(selected)}\s*(?:[|:·—-]\s*)?(.*)$", message, re.I)
+    if prefix is not None:
+        remainder = prefix.group(1).strip()
+        return "" if remainder.casefold() == "selected" else remainder
+    return message
+
+
+_STATUS_ACTION_PREFIXES = (
+    "saved ",
+    "opened ",
+    "loaded ",
+    "added ",
+    "removed ",
+    "renamed ",
+    "duplicated ",
+    "imported ",
+    "applied ",
+    "undo ",
+    "redo ",
+    "recorded ",
+    "recording ",
+    "replaying ",
+    "cleared ",
+    "scene reset",
+    "scene reloaded",
+    "scene state restored",
+    "new scene",
+    "cancelled ",
+    "model placement unlocked",
+    "viewport ",
+)
+
+
+def _status_message_for_bar(message: str, selected: str, level: str) -> str:
+    """Keep only actionable results and diagnostics in the transient status slot."""
+
+    compact = _compact_status_for_selection(message, selected)
+    if not compact:
+        return ""
+    severity = str(level).casefold()
+    if severity in {"error", "warning", "success"}:
+        return compact
+    folded = compact.casefold()
+    return compact if folded.startswith(_STATUS_ACTION_PREFIXES) else ""
 
 
 @dataclass
@@ -197,6 +299,27 @@ class _ModelLoadJob:
     command: Any
 
 
+@dataclass
+class _FrameRateDisplay:
+    """Low-pass and rate-limit the status-bar FPS readout."""
+
+    smoothed_dt: float = 1.0 / 60.0
+    value: float = 60.0
+    elapsed: float = 0.0
+
+    def update(self, dt: float) -> float:
+        dt = min(0.1, max(float(dt), 1e-6))
+        # A half-second time constant follows sustained performance changes
+        # without turning normal frame-time jitter into flashing text.
+        alpha = 1.0 - float(np.exp(-dt / 0.5))
+        self.smoothed_dt += alpha * (dt - self.smoothed_dt)
+        self.elapsed += dt
+        if self.elapsed >= 0.25:
+            self.value = 1.0 / max(self.smoothed_dt, 1e-6)
+            self.elapsed %= 0.25
+        return self.value
+
+
 class ViewerApp:
     def __init__(
         self,
@@ -215,6 +338,9 @@ class ViewerApp:
         self.theme = theme or THEME
         self.debug_bridge = debug_bridge
         self.localizer = Localizer.load()
+        self._viewport_labels = localized_viewport_labels(self.localizer.text)
+        metric_mode = self.localizer.preference("status_metric", "time")
+        self._status_metric_mode = "steps" if metric_mode == "steps" else "time"
         self.camera = OrbitCamera()
 
         self.camera_out = CameraOut(backend=backend, session=session)
@@ -235,6 +361,9 @@ class ViewerApp:
         self.perturb = PerturbController()
         self.scene_entities = SceneEntityHelpers()
         self.router = gs.GestureRouter()
+        self.input_bindings = InputBindings.from_preferences(
+            self.localizer.preference("input_bindings", {})
+        )
         self.output = OutputBuffer()
         self.panels = PanelSet()
         if os.environ.get("FORGE_VIEWER_OPEN_SETTINGS") == "1":
@@ -248,6 +377,7 @@ class ViewerApp:
         self._viewport_panel_size = (640.0, 480.0)
         self._viewport_image: ViewportImage | None = None
         self._dt = 0.0
+        self._frame_rate = _FrameRateDisplay()
         self._structure_generation = -1
         self._state = gs.InputState()
         self._model_camera_id = -1
@@ -297,6 +427,11 @@ class ViewerApp:
         )
         self._precise_gizmo_error = ""
         self._open_precise_gizmo_popup = False
+        # When an outside click dismisses precise input, keep ownership until
+        # that physical press has fully ended.  The same click must never fall
+        # through to viewport picking and clear the selected joint.
+        self._consume_scene_pointer_until_release = False
+        self._joint_picker_node_id = -1
         self._window_title = ""
         self._closing_without_save = False
         self._model_load_error = ""
@@ -312,11 +447,30 @@ class ViewerApp:
         self._display_scale_generation = -1
         self._output_sink_id: int | None = None
         self._seen_message_revision = int(getattr(session, "message_revision", 0))
-        self._status_layout_key: tuple[int, int] | None = None
-        self._status_layout_lines: tuple[str, ...] = ()
+        self._snap_latched = False
+        self._capture_viewport_requested = False
+        self._viewport_recorder: Any | None = None
+        self._viewport_recording_path: Path | None = None
+        self._viewport_record_elapsed = 0.0
+        overlay_scale = self.localizer.preference(
+            "viewport_overlay_scale", DEFAULT_VIEWPORT_OVERLAY_SCALE
+        )
+        try:
+            overlay_scale = float(overlay_scale)
+        except (TypeError, ValueError):
+            overlay_scale = DEFAULT_VIEWPORT_OVERLAY_SCALE
+        self._viewport_overlay_scale = min(
+            MAX_VIEWPORT_OVERLAY_SCALE,
+            max(MIN_VIEWPORT_OVERLAY_SCALE, overlay_scale),
+        )
 
     def set_language(self, language: str) -> None:
         self.localizer.set_language(language)
+        self._viewport_labels = localized_viewport_labels(self.localizer.text)
+
+    def _toggle_status_metric(self) -> None:
+        self._status_metric_mode = "steps" if self._status_metric_mode == "time" else "time"
+        self.localizer.set_preferences({"status_metric": self._status_metric_mode})
 
     def set_precise_input_choice_memory(self, enabled: bool) -> None:
         self.gizmo.remember_precise_input_choices = bool(enabled)
@@ -331,6 +485,24 @@ class ViewerApp:
     def set_view_selection_padding(self, value: float) -> None:
         self.view_cube.selection_padding = value
         self.localizer.set_preferences({"view_selection_padding": self.view_cube.selection_padding})
+
+    def set_viewport_overlay_scale(self, value: float, *, persist: bool = True) -> None:
+        self._viewport_overlay_scale = min(
+            MAX_VIEWPORT_OVERLAY_SCALE,
+            max(MIN_VIEWPORT_OVERLAY_SCALE, float(value)),
+        )
+        if persist:
+            self.localizer.set_preferences({"viewport_overlay_scale": self._viewport_overlay_scale})
+
+    def set_input_binding(self, action: InputAction, key_id: str) -> None:
+        """Atomically remap one viewport action and persist the whole map."""
+
+        self.input_bindings = self.input_bindings.remap(action, key_id)
+        self.localizer.set_preferences({"input_bindings": self.input_bindings.preferences()})
+
+    def reset_input_bindings(self) -> None:
+        self.input_bindings = DEFAULT_INPUT_BINDINGS
+        self.localizer.set_preferences({"input_bindings": self.input_bindings.preferences()})
 
     def set_fixed_render_size(self, width: int, height: int) -> None:
         self._fixed_render_size = (max(1, int(width)), max(1, int(height)))
@@ -411,6 +583,7 @@ class ViewerApp:
         if self.debug_bridge is not None:
             self._release_resource(self.debug_bridge, "close", "debug bridge")
             self.debug_bridge = None
+        self._stop_viewport_recording(report=False)
         self._release_resource(self.camera_preview, "release", "camera preview")
         self._release_resource(self.backend, "release", "render backend")
         self._release_resource(self.session, "release", "session")
@@ -917,7 +1090,7 @@ class ViewerApp:
             imgui.open_popup("Missing Resources")
             self._open_resource_repair_popup = False
         if imgui.is_popup_open("Missing Resources"):
-            _prepare_modal(560.0)
+            _prepare_modal(480.0)
         visible, _ = imgui.begin_popup_modal(
             "Missing Resources", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -949,7 +1122,7 @@ class ViewerApp:
         elif search:
             self._open_resource_repair_dialog("search")
             imgui.close_current_popup()
-        elif cancel:
+        elif cancel or imgui.is_key_pressed(imgui.Key.escape, False):
             self._resource_repair_path = None
             self._missing_resources = ()
             self._resource_repair_status = ""
@@ -1054,6 +1227,13 @@ class ViewerApp:
         undo = False
         redo = False
         open_settings = False
+        frame_scene = False
+        capture_viewport = False
+        toggle_viewport_recording = False
+        reset_layout = False
+        open_help = False
+        open_documentation = False
+        open_about = False
         quit_viewer = False
         if imgui.begin_main_menu_bar():
             if imgui.begin_menu(t("File")):
@@ -1129,6 +1309,35 @@ class ViewerApp:
                 open_settings, _ = imgui.menu_item(t("Settings..."), f"{shortcut}+,", False)
                 imgui.end_menu()
             self._draw_entity_menu(shortcut, can_edit)
+            if imgui.begin_menu(t("View")):
+                frame_scene, _ = imgui.menu_item(t("Frame All"), "F", False)
+                capture_viewport, _ = imgui.menu_item(
+                    t("Capture Viewport"), f"{shortcut}+Shift+P", False
+                )
+                toggle_viewport_recording, _ = imgui.menu_item(
+                    t(
+                        "Stop Viewport Recording"
+                        if self._viewport_recorder is not None
+                        else "Record Viewport"
+                    ),
+                    f"{shortcut}+Shift+R",
+                    self._viewport_recorder is not None,
+                )
+                imgui.separator()
+                helpers, _ = imgui.menu_item(
+                    t("Scene Helpers"), "", bool(self.scene_entities.visible)
+                )
+                if helpers:
+                    self.scene_entities.visible = not self.scene_entities.visible
+                influence, _ = imgui.menu_item(
+                    t("Influence Volumes"),
+                    "",
+                    bool(self.scene_entities.show_influence),
+                    bool(self.scene_entities.visible),
+                )
+                if influence:
+                    self.scene_entities.show_influence = not self.scene_entities.show_influence
+                imgui.end_menu()
             if imgui.begin_menu(t("Window")):
                 for panel in self.panels:
                     if panel.modal:
@@ -1141,12 +1350,25 @@ class ViewerApp:
                     )
                     if clicked:
                         panel.toggle()
+                imgui.separator()
+                reset_layout, _ = imgui.menu_item(t("Reset Layout"), "", False)
+                imgui.end_menu()
+            if imgui.begin_menu(t("Help")):
+                open_help, _ = imgui.menu_item(t("Interaction Reference"), "F1", False)
+                open_documentation, _ = imgui.menu_item(t("Documentation"), "", False)
+                imgui.separator()
+                open_about, _ = imgui.menu_item(t("About"), "", False)
                 imgui.end_menu()
             path = self.session.asset_path
+            document = ""
             if path is not None:
-                imgui.text_disabled(path.name + (" *" if self.session.dirty else ""))
+                document = path.name + (" ●" if self.session.dirty else "")
             elif can_scene_files:
-                imgui.text_disabled(t("Untitled") + (" *" if self.session.dirty else ""))
+                document = t("Untitled") + (" ●" if self.session.dirty else "")
+            if document:
+                target_x = imgui.get_window_width() - imgui.calc_text_size(document).x - 10.0
+                imgui.set_cursor_pos_x(max(imgui.get_cursor_pos_x(), target_x))
+                imgui.text_disabled(document)
             imgui.end_main_menu_bar()
 
         io = imgui.get_io()
@@ -1166,6 +1388,10 @@ class ViewerApp:
             if can_load:
                 reload_model |= imgui.is_key_pressed(imgui.Key.o, False) and bool(io.key_shift)
             open_settings |= imgui.is_key_pressed(imgui.Key.comma, False)
+            capture_viewport |= bool(io.key_shift) and imgui.is_key_pressed(imgui.Key.p, False)
+            toggle_viewport_recording |= bool(io.key_shift) and imgui.is_key_pressed(
+                imgui.Key.r, False
+            )
             editable_selected = bool(
                 self._selected_entity() or self._selected_model_element() is not None
             )
@@ -1191,6 +1417,21 @@ class ViewerApp:
             self.session.submit(cmd.Redo())
         if open_settings:
             self.panels.open_panel("Settings")
+        if frame_scene:
+            self._leave_model_camera()
+            self._frame_scene(animate=True)
+        if capture_viewport:
+            self._capture_viewport_requested = True
+        if toggle_viewport_recording:
+            self._toggle_viewport_recording()
+        if reset_layout:
+            self.window.reset_layout()
+        if open_help:
+            self.panels.open_panel("Help")
+        if open_documentation:
+            webbrowser.open("https://github.com/acrlw/forge-viewer#readme")
+        if open_about:
+            self.panels.open_panel("Info")
         if open_scene:
             self._open_scene_dialog("open")
         if save_scene:
@@ -1464,7 +1705,7 @@ class ViewerApp:
             imgui.open_popup("File operation failed")
             self._show_model_load_error = False
         if imgui.is_popup_open("File operation failed"):
-            _prepare_modal(440.0)
+            _prepare_modal(360.0)
         visible, _ = imgui.begin_popup_modal(
             "File operation failed", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -1475,7 +1716,9 @@ class ViewerApp:
         if imgui.button("Copy error", imgui.ImVec2(button_width("Copy error", 110.0), 0.0)):
             imgui.set_clipboard_text(self._model_load_error)
         imgui.same_line()
-        if imgui.button("OK", imgui.ImVec2(button_width("OK", 88.0), 0.0)):
+        if imgui.button("OK", imgui.ImVec2(button_width("OK", 88.0), 0.0)) or imgui.is_key_pressed(
+            imgui.Key.escape, False
+        ):
             imgui.close_current_popup()
         imgui.end_popup()
 
@@ -1504,7 +1747,7 @@ class ViewerApp:
         if pending is None:
             return
         imgui.open_popup("Unsaved changes")
-        _prepare_modal(400.0)
+        _prepare_modal(360.0)
         visible, _ = imgui.begin_popup_modal(
             "Unsaved changes", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -1514,8 +1757,10 @@ class ViewerApp:
         imgui.text("Save changes to this file?")
         imgui.text_wrapped(name)
         imgui.spacing()
-        width = _equal_button_width(("Save", "Discard", "Cancel"))
-        if imgui.button("Save", imgui.ImVec2(width, 0.0)):
+        cancel, discard, save = _equal_modal_buttons(
+            ("Cancel", "Discard", "Save"), self.theme, primary=2
+        )
+        if save:
             if self.session.asset_path is None:
                 self._after_save_action = pending
                 self._pending_document_action = None
@@ -1524,13 +1769,11 @@ class ViewerApp:
                 self._pending_document_action = None
                 self._request_scene_save(self.session.asset_path, pending)
             imgui.close_current_popup()
-        imgui.same_line()
-        if imgui.button("Discard", imgui.ImVec2(width, 0.0)):
+        elif discard:
             self._pending_document_action = None
             self._execute_document_action(*pending)
             imgui.close_current_popup()
-        imgui.same_line()
-        if imgui.button("Cancel", imgui.ImVec2(width, 0.0)):
+        elif cancel or imgui.is_key_pressed(imgui.Key.escape, False):
             self._pending_document_action = None
             imgui.close_current_popup()
         imgui.end_popup()
@@ -1539,8 +1782,9 @@ class ViewerApp:
         pending = self._pending_pose_save
         if pending is None:
             return
+        labels = ("Cancel", "Save without keyframe", "Save as key0")
         imgui.open_popup("Save current pose")
-        _prepare_modal(500.0)
+        _prepare_modal(360.0)
         visible, _ = imgui.begin_popup_modal(
             "Save current pose", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -1552,19 +1796,18 @@ class ViewerApp:
         )
         imgui.spacing()
         target, after = pending
-        if imgui.button("Save as key0", imgui.ImVec2(130.0, 0.0)):
+        cancel, without_key, save_key = _equal_modal_buttons(labels, self.theme, primary=2)
+        if save_key:
             self._pending_pose_save = None
             if self.save_scene(target, current_pose_keyframe="key0").ok and after is not None:
                 self._execute_document_action(*after)
             imgui.close_current_popup()
-        imgui.same_line()
-        if imgui.button("Save without keyframe", imgui.ImVec2(190.0, 0.0)):
+        elif without_key:
             self._pending_pose_save = None
             if self.save_scene(target).ok and after is not None:
                 self._execute_document_action(*after)
             imgui.close_current_popup()
-        imgui.same_line()
-        if imgui.button("Cancel", imgui.ImVec2(90.0, 0.0)):
+        elif cancel or imgui.is_key_pressed(imgui.Key.escape, False):
             self._pending_pose_save = None
             imgui.close_current_popup()
         imgui.end_popup()
@@ -1573,27 +1816,26 @@ class ViewerApp:
         if self._open_rename_popup:
             imgui.open_popup("Rename Entity")
             self._open_rename_popup = False
-        if imgui.is_popup_open("Rename Entity"):
-            _prepare_modal(360.0)
-        visible, _ = imgui.begin_popup_modal(
-            "Rename Entity", None, imgui.WindowFlags_.always_auto_resize.value
+        width = min(220.0, max(1.0, float(imgui.get_main_viewport().work_size.x) - 32.0))
+        imgui.set_next_window_size_constraints(
+            imgui.ImVec2(width, 0.0),
+            imgui.ImVec2(width, float(np.finfo(np.float32).max)),
         )
+        visible = imgui.begin_popup("Rename Entity", imgui.WindowFlags_.always_auto_resize.value)
         if not visible:
             return
-        imgui.set_next_item_width(320.0)
+        imgui.text_disabled("Rename")
+        imgui.separator()
+        imgui.set_next_item_width(-1.0)
         submitted, self._rename_value = imgui.input_text(
             "##entity_name",
             self._rename_value,
-            imgui.InputTextFlags_.enter_returns_true.value,
+            imgui.InputTextFlags_.enter_returns_true.value
+            | imgui.InputTextFlags_.auto_select_all.value,
         )
         if imgui.is_window_appearing():
             imgui.set_keyboard_focus_here(-1)
-        accept = submitted or imgui.button("Rename", imgui.ImVec2(100.0, 0.0))
-        imgui.same_line()
-        cancel = imgui.button("Cancel", imgui.ImVec2(100.0, 0.0)) or imgui.is_key_pressed(
-            imgui.Key.escape, False
-        )
-        if accept and self._rename_value.strip():
+        if submitted and self._rename_value.strip():
             value = self._rename_value.strip()
             command = (
                 cmd.RenameModelElement(self._rename_model_node_id, value)
@@ -1602,7 +1844,7 @@ class ViewerApp:
             )
             self.session.submit(command)
             imgui.close_current_popup()
-        elif cancel:
+        elif imgui.is_key_pressed(imgui.Key.escape, False):
             imgui.close_current_popup()
         imgui.end_popup()
 
@@ -1619,6 +1861,7 @@ class ViewerApp:
         now = time.perf_counter()
         dt = self._dt = min(0.1, now - self._last_time)
         self._last_time = now
+        self._frame_rate.update(dt)
 
         window.begin_frame()
         self._sync_display_scale()
@@ -1641,6 +1884,7 @@ class ViewerApp:
             self._frame_index += 1
             return
         self._draw_main_menu()
+        self._draw_application_status_bar()
         window.begin_dockspace()
         self._begin_viewport_panel()
         self._sync_viewport_size()
@@ -1656,6 +1900,7 @@ class ViewerApp:
         self._poll_perturb(state)
         self._poll_pick(state)
         self._advance_camera(dt)
+        self._finish_consumed_scene_pointer()
 
         frame = self.session.tick(self.frame_needs(), wall_dt=dt)
         self._sync_structure()
@@ -1689,6 +1934,9 @@ class ViewerApp:
         self._publish_gizmo()
 
         self._viewport_image = self.backend.render()
+        self._record_viewport_frame(dt)
+        if self._capture_viewport_requested:
+            self._capture_viewport()
         self.camera_preview.update(
             self.backend,
             self.session.source,
@@ -1702,6 +1950,8 @@ class ViewerApp:
         ctx = self._panel_context()
         self._draw_viewport_contents(preview_name)
         self._draw_playback_widget()
+        self._draw_tool_column_widget()
+        self._draw_context_hint_widget()
         self.panels.draw(ctx)
         self._draw_precise_gizmo_popup()
         self._draw_rename_popup()
@@ -1717,6 +1967,7 @@ class ViewerApp:
         """Keep the native window responsive without reading a mutating Session."""
 
         self._draw_loading_main_menu()
+        self._draw_application_status_bar(loading=True)
         self.window.begin_dockspace()
         self.panels.draw_shells(self.localizer.text, self.window.style_scale)
         self._begin_viewport_panel()
@@ -1776,9 +2027,48 @@ class ViewerApp:
             imgui.text_disabled("The loader does not expose reliable stage progress.")
         imgui.end()
 
-    def _poll_keys(self) -> Keys:
-        k = imgui.Key
+    def _scene_input_blocked(self) -> bool:
+        """Return whether UI owns the whole interaction frame.
+
+        This check runs before gesture classification so a modal cannot leave
+        an old camera, gizmo, or perturb claim alive underneath it.
+        """
+
+        pending_prompt = bool(
+            self._pending_document_action is not None
+            or self._pending_pose_save is not None
+            or self._show_model_load_error
+            or self._open_resource_repair_popup
+            or self._open_rename_popup
+            or self._precise_gizmo_edit is not None
+        )
+        native_dialog = any(
+            dialog is not None
+            for dialog in (
+                self._model_dialog,
+                self._scene_dialog,
+                self._resource_dialog,
+                self._texture_dialog,
+                self._geometry_resource_dialog,
+                self._model_asset_dialog,
+                self._resource_repair_dialog,
+            )
+        )
+        popup_flags = imgui.PopupFlags_.any_popup_id.value | imgui.PopupFlags_.any_popup_level.value
+        any_popup = bool(imgui.is_popup_open("", popup_flags))
         io = imgui.get_io()
+        return bool(
+            pending_prompt
+            or native_dialog
+            or any_popup
+            or io.want_text_input
+            or self._consume_scene_pointer_until_release
+        )
+
+    def _poll_keys(self) -> Keys:
+        io = imgui.get_io()
+        if self._scene_input_blocked():
+            return Keys()
         self.panels.poll_shortcuts()
 
         if io.want_text_input:
@@ -1786,27 +2076,39 @@ class ViewerApp:
         if io.key_ctrl or io.key_super:
             return Keys()
 
-        def down(key) -> float:
-            return 1.0 if imgui.is_key_down(key) else 0.0
+        bindings = self.input_bindings
 
-        axis = next((i for i, key in enumerate((k.x, k.y, k.z)) if imgui.is_key_down(key)), -1)
+        def down(action: InputAction) -> float:
+            return 1.0 if bindings.down(action) else 0.0
+
+        axis = next(
+            (
+                index
+                for index, action in enumerate(
+                    (InputAction.AXIS_X, InputAction.AXIS_Y, InputAction.AXIS_Z)
+                )
+                if bindings.down(action)
+            ),
+            -1,
+        )
 
         return Keys(
             fly=(
-                down(k.w) - down(k.s),
-                down(k.d) - down(k.a),
-                down(k.q) - down(k.e),
+                down(InputAction.FLY_FORWARD) - down(InputAction.FLY_BACK),
+                down(InputAction.FLY_RIGHT) - down(InputAction.FLY_LEFT),
+                down(InputAction.FLY_UP) - down(InputAction.FLY_DOWN),
             ),
-            toggle_pause=imgui.is_key_pressed(k.space, False),
-            frame_scene=imgui.is_key_pressed(k.f, False),
-            gizmo_translate=imgui.is_key_pressed(k.g, False),
-            gizmo_rotate=imgui.is_key_pressed(k.r, False),
-            gizmo_space=imgui.is_key_pressed(k.t, False),
+            toggle_pause=bindings.pressed(InputAction.TOGGLE_PAUSE),
+            frame_scene=bindings.pressed(InputAction.FRAME_SCENE),
+            gizmo_translate=bindings.pressed(InputAction.GIZMO_TRANSLATE),
+            gizmo_rotate=bindings.pressed(InputAction.GIZMO_ROTATE),
+            gizmo_space=bindings.pressed(InputAction.GIZMO_SPACE),
             gizmo_axis=axis,
         )
 
     def _input_state(self) -> gs.InputState:
         io = imgui.get_io()
+        blocked = self._scene_input_blocked()
         cursor = (float(io.mouse_pos.x), float(io.mouse_pos.y))
         rect = self._viewport_rect
         inside = (
@@ -1815,9 +2117,19 @@ class ViewerApp:
         hovered_window = imgui.get_current_context().hovered_window
         hovered_name = None if hovered_window is None else str(hovered_window.name)
         viewport_window_busy = self._viewport_window_is_being_manipulated()
-        over_viewport = gs.viewport_input_allowed(inside, hovered_name) and not viewport_window_busy
+        over_viewport = (
+            gs.viewport_input_allowed(inside, hovered_name)
+            and not viewport_window_busy
+            and not blocked
+        )
         view = self._camera_view()
-        hovered_ball = self.view_cube.update(view, rect, cursor, self.window.style_scale)
+        hovered_ball = self.view_cube.update(
+            view,
+            rect,
+            cursor,
+            self.window.style_scale,
+            enabled=over_viewport,
+        )
         self.gizmo.update_hover(
             self.session,
             view,
@@ -1828,11 +2140,12 @@ class ViewerApp:
         )
         node = self.session.selected_node
         return gs.InputState(
+            blocked=blocked,
             left=imgui.is_mouse_down(0),
             right=imgui.is_mouse_down(1),
             middle=imgui.is_mouse_down(2),
-            ctrl=io.key_ctrl,
-            shift=io.key_shift,
+            ctrl=self.input_bindings.down(InputAction.PERTURB),
+            shift=self.input_bindings.down(InputAction.SNAP),
             alt=io.key_alt,
             wheel=float(io.mouse_wheel),
             cursor=cursor,
@@ -1844,7 +2157,9 @@ class ViewerApp:
             gizmo_hovered=over_viewport and self.gizmo.hovered,
             has_selection=node is not None,
             perturbing=self.session.perturb.active,
-            ui_wants_mouse=viewport_window_busy or (io.want_capture_mouse and not over_viewport),
+            ui_wants_mouse=blocked
+            or viewport_window_busy
+            or (io.want_capture_mouse and not over_viewport),
         )
 
     @staticmethod
@@ -1867,6 +2182,12 @@ class ViewerApp:
         return self.router.update(state)
 
     def _poll_gizmo(self, state: gs.InputState, keys: Keys) -> None:
+        if state.blocked:
+            self.gizmo.cancel()
+            return
+        if self._precise_gizmo_edit is not None:
+            self.gizmo.cancel()
+            return
         if self._viewing_selected_camera():
             self.gizmo.keyboard_interact(
                 self.session,
@@ -1898,7 +2219,7 @@ class ViewerApp:
                 self._viewport_rect,
                 state.cursor,
                 axis,
-                snap=state.shift,
+                snap=state.shift or self._snap_latched,
                 style_scale=self.window.style_scale,
             )
             return
@@ -1917,7 +2238,7 @@ class ViewerApp:
             claimed=self.router.wants_gizmo(),
             left_down=state.left,
             released=self.router.released,
-            snap=state.shift,
+            snap=state.shift or self._snap_latched,
             style_scale=self.window.style_scale,
         )
 
@@ -1938,48 +2259,127 @@ class ViewerApp:
 
     def _draw_precise_gizmo_popup(self) -> None:
         edit = self._precise_gizmo_edit
-        if self._open_precise_gizmo_popup and edit is not None:
-            imgui.open_popup("Precise Gizmo Input")
-            self._open_precise_gizmo_popup = False
         if edit is None:
             return
-        if imgui.is_popup_open("Precise Gizmo Input"):
-            _prepare_modal(400.0)
-        visible, _ = imgui.begin_popup_modal(
-            "Precise Gizmo Input", None, imgui.WindowFlags_.always_auto_resize.value
+        scale = self.window.style_scale
+        just_opened = self._open_precise_gizmo_popup
+        popup_name = f"{self.localizer.text('Type value')}###precise_gizmo_input"
+        if just_opened:
+            x, y, width, height = self._viewport_rect
+            mouse = imgui.get_io().mouse_pos
+            window_width = PRECISE_GIZMO_WIDTH_PT * scale
+            estimated_height = 118.0 * scale
+            min_x = x + 8.0 * scale
+            min_y = y + 8.0 * scale
+            max_x = max(min_x, x + width - window_width - 8.0 * scale)
+            max_y = max(min_y, y + height - estimated_height - 8.0 * scale)
+            imgui.set_next_window_pos(
+                imgui.ImVec2(
+                    min(max(min_x, mouse.x + 12.0 * scale), max_x),
+                    min(max(min_y, mouse.y + 12.0 * scale), max_y),
+                ),
+                imgui.Cond_.always,
+            )
+            imgui.set_next_window_focus()
+            imgui.open_popup(popup_name)
+            self._open_precise_gizmo_popup = False
+        imgui.set_next_window_size_constraints(
+            imgui.ImVec2(PRECISE_GIZMO_WIDTH_PT * scale, 0.0),
+            imgui.ImVec2(
+                PRECISE_GIZMO_WIDTH_PT * scale,
+                float(np.finfo(np.float32).max),
+            ),
+        )
+        visible = imgui.begin_popup(
+            popup_name,
+            imgui.WindowFlags_.always_auto_resize.value
+            | imgui.WindowFlags_.no_decoration.value
+            | imgui.WindowFlags_.no_docking.value
+            | imgui.WindowFlags_.no_move.value
+            | imgui.WindowFlags_.no_scrollbar.value
+            | imgui.WindowFlags_.no_scroll_with_mouse.value
+            | imgui.WindowFlags_.no_saved_settings.value,
         )
         if not visible:
+            if not just_opened:
+                self._consume_scene_pointer_until_release = bool(
+                    self._consume_scene_pointer_until_release
+                    or imgui.is_mouse_down(imgui.MouseButton_.left)
+                    or imgui.is_mouse_down(imgui.MouseButton_.right)
+                    or imgui.is_mouse_down(imgui.MouseButton_.middle)
+                    or imgui.is_mouse_clicked(imgui.MouseButton_.left)
+                    or imgui.is_mouse_clicked(imgui.MouseButton_.right)
+                    or imgui.is_mouse_clicked(imgui.MouseButton_.middle)
+                )
+                self.router.abort()
+                self.gizmo.cancel()
+                self._precise_gizmo_edit = None
+                self._precise_gizmo_error = ""
             return
+        imgui.set_scroll_x(0.0)
+        appearing = imgui.is_window_appearing()
 
         angular = edit.unit == "°"
         if angular and imgui.is_key_pressed(imgui.Key.u, False):
             self._toggle_precise_gizmo_angle_unit()
         unit = "rad" if angular and self._precise_gizmo_angle_unit == "radians" else edit.unit
-        imgui.text_wrapped(f"{edit.action} {edit.label}")
-        modes = ("Relative", "Absolute") if edit.absolute_value is not None else ("Relative",)
-        mode_index = 1 if self._precise_gizmo_absolute and len(modes) > 1 else 0
-        imgui.set_next_item_width(-1.0)
-        changed, mode_index = imgui.combo("##precise_gizmo_mode", mode_index, modes)
-        if changed:
-            self._set_precise_gizmo_absolute(edit, bool(mode_index))
-        if self._precise_gizmo_absolute:
-            _disabled_text_wrapped(f"Enter the {edit.absolute_label}.")
-        else:
-            _disabled_text_wrapped("Enter a relative delta; negative values reverse direction.")
-        if edit.absolute_value is None:
-            _disabled_text_wrapped(
-                "Absolute input requires a scalar joint or a world-frame axis handle."
+        title = f"{self.localizer.text(edit.action)} {edit.label}"
+        # Some popup placements preserve a negative horizontal cursor offset
+        # from the activating item. Clamp the first line to the popup's own
+        # content padding so the beginning of "Rotate" cannot be clipped.
+        imgui.set_cursor_pos_x(
+            max(
+                float(imgui.get_cursor_pos_x()),
+                float(imgui.get_style().window_padding.x),
             )
+        )
+        title_width = max(1.0, float(imgui.get_content_region_avail().x))
+        shown_title = _middle_elide_text(
+            title,
+            title_width,
+            lambda value: float(imgui.calc_text_size(value).x),
+        )
+        imgui.text(shown_title)
+        if shown_title != title:
+            imgui.set_item_tooltip(title)
+        imgui.separator()
+        modes = (
+            (
+                self.localizer.text("Relative"),
+                self.localizer.text("Absolute"),
+            )
+            if edit.absolute_value is not None
+            else (self.localizer.text("Relative"),)
+        )
+        mode_index = 1 if self._precise_gizmo_absolute and len(modes) > 1 else 0
+        if len(modes) > 1:
+            imgui.text_disabled(self.localizer.text("Mode"))
+            next_mode = segmented_control(
+                "precise-gizmo-mode",
+                modes,
+                mode_index,
+                theme=self.theme,
+            )
+        else:
+            next_mode = 0
+        if next_mode != mode_index:
+            mode_index = next_mode
+            self._set_precise_gizmo_absolute(edit, bool(mode_index))
         imgui.spacing()
-        unit_width = float(imgui.calc_text_size(unit).x)
-        if angular:
+        if edit.absolute_value is None:
+            imgui.text("Δ")
+            imgui.same_line()
+        unit_width = 82.0 * scale if angular else float(imgui.calc_text_size(unit).x)
+        if not angular:
             unit_width += 2.0 * float(imgui.get_style().frame_padding.x)
         input_width = max(
-            120.0,
+            72.0 * scale,
             float(imgui.get_content_region_avail().x)
             - float(imgui.get_style().item_spacing.x)
             - unit_width,
         )
+        if appearing:
+            imgui.set_keyboard_focus_here()
         imgui.set_next_item_width(input_width)
         submitted, self._precise_gizmo_value = imgui.input_double(
             "##precise_gizmo_value",
@@ -1987,33 +2387,30 @@ class ViewerApp:
             0.0,
             0.0,
             "%.6f" if edit.unit == "m" or unit == "rad" else "%.3f",
-            imgui.InputTextFlags_.enter_returns_true.value,
+            imgui.InputTextFlags_.enter_returns_true.value
+            | imgui.InputTextFlags_.auto_select_all.value,
         )
         imgui.same_line()
         if angular:
-            if imgui.small_button(f"{unit}##precise_gizmo_angle_unit"):
+            next_unit = segmented_control(
+                "precise-gizmo-angle-unit",
+                ("°", "rad"),
+                1 if self._precise_gizmo_angle_unit == "radians" else 0,
+                width=unit_width,
+                theme=self.theme,
+            )
+            if next_unit != (1 if self._precise_gizmo_angle_unit == "radians" else 0):
                 self._toggle_precise_gizmo_angle_unit()
-            imgui.set_item_tooltip("Click or press U to switch degrees / radians")
         else:
             imgui.text(unit)
-        if imgui.is_window_appearing():
-            imgui.set_keyboard_focus_here(-1)
-        if angular:
-            _disabled_text_wrapped("U or click the unit to switch degrees / radians.")
-        if edit.joint_id >= 0:
-            _disabled_text_wrapped("Joint limits are applied when this value exceeds the range.")
         if self._precise_gizmo_error:
             imgui.spacing()
             imgui.text_wrapped(self._precise_gizmo_error)
-            if imgui.small_button("Copy error##precise-gizmo"):
+            if imgui.small_button(f"{self.localizer.text('Copy error')}##precise-gizmo"):
                 imgui.set_clipboard_text(self._precise_gizmo_error)
-        imgui.spacing()
-        apply = submitted or imgui.button("Apply", imgui.ImVec2(100.0, 0.0))
-        imgui.same_line()
-        cancel = imgui.button("Cancel", imgui.ImVec2(100.0, 0.0)) or imgui.is_key_pressed(
-            imgui.Key.escape, False
-        )
-        if apply:
+        submit_requested = submitted or imgui.is_key_pressed(imgui.Key.enter, False)
+        cancel = imgui.is_key_pressed(imgui.Key.escape, False)
+        if submit_requested:
             value = self._precise_gizmo_value
             if angular and self._precise_gizmo_angle_unit == "radians":
                 value = float(np.degrees(value))
@@ -2025,16 +2422,25 @@ class ViewerApp:
                 absolute=self._precise_gizmo_absolute,
             )
             if result.ok:
+                imgui.close_current_popup()
                 self._precise_gizmo_edit = None
                 self._precise_gizmo_error = ""
-                imgui.close_current_popup()
             else:
                 self._precise_gizmo_error = result.message
         elif cancel:
+            imgui.close_current_popup()
             self._precise_gizmo_edit = None
             self._precise_gizmo_error = ""
-            imgui.close_current_popup()
         imgui.end_popup()
+
+    def _finish_consumed_scene_pointer(self) -> None:
+        """Release a dismissed-popup pointer latch after one clean frame."""
+
+        if not self._consume_scene_pointer_until_release:
+            return
+        if any(imgui.is_mouse_down(button) for button in range(3)):
+            return
+        self._consume_scene_pointer_until_release = False
 
     def _precise_gizmo_reference(self, edit: PreciseGizmoInput) -> float:
         value = float(edit.absolute_value or 0.0)
@@ -2384,7 +2790,6 @@ class ViewerApp:
                 )
                 self.view_cube.draw(overlay, self.window.style_scale)
                 self._draw_model_drop_overlay(overlay)
-            self._draw_status_overlay(overlay)
         finally:
             imgui.pop_clip_rect()
         if not session_busy:
@@ -2396,36 +2801,138 @@ class ViewerApp:
             )
         imgui.end()
         if not session_busy:
+            self._draw_joint_limit_controls()
             self._draw_joint_gizmo_picker()
 
+    def _draw_joint_limit_controls(self) -> None:
+        """Make the rendered MIN/MAX joint labels direct endpoint controls."""
+
+        if not self.session.paused:
+            return
+        flags = (
+            imgui.WindowFlags_.no_decoration.value
+            | imgui.WindowFlags_.no_docking.value
+            | imgui.WindowFlags_.no_move.value
+            | imgui.WindowFlags_.no_focus_on_appearing.value
+            | imgui.WindowFlags_.no_saved_settings.value
+            | imgui.WindowFlags_.no_background.value
+            | imgui.WindowFlags_.no_scrollbar.value
+        )
+        for hit in self.gizmo.joint_limit_hits:
+            x0, y0, x1, y1 = hit.rect
+            width = max(x1 - x0, 1.0)
+            height = max(y1 - y0, 1.0)
+            # Keep the host window clip outside the rounded label. Otherwise
+            # its antialiased right/bottom edge is cut exactly at the window
+            # boundary and reads as a one-pixel seam in the hover state.
+            clip_pad = 2.0 * self.window.style_scale
+            imgui.set_next_window_pos(
+                imgui.ImVec2(x0 - clip_pad, y0 - clip_pad),
+                imgui.Cond_.always,
+            )
+            imgui.set_next_window_size(
+                imgui.ImVec2(width + clip_pad * 2.0, height + clip_pad * 2.0),
+                imgui.Cond_.always,
+            )
+            imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
+            visible, _ = imgui.begin(
+                f"Joint {hit.label}###joint_limit_{hit.joint_id}_{hit.label[:3]}",
+                None,
+                flags,
+            )
+            if visible:
+                imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
+                clicked = imgui.invisible_button(
+                    f"##joint_limit_hit_{hit.joint_id}_{hit.label[:3]}",
+                    imgui.ImVec2(width, height),
+                )
+                hovered = imgui.is_item_hovered()
+                active = imgui.is_item_active()
+                if hovered or active:
+                    self._draw_joint_limit_feedback(hit, active=active)
+                if clicked:
+                    result = self.gizmo.apply_joint_limit(self.session, hit)
+                    if not result.ok:
+                        self.session.report_message(result.message, level="warning")
+            imgui.end()
+            imgui.pop_style_var()
+
+    def _draw_joint_limit_feedback(self, hit, *, active: bool) -> None:
+        """Redraw a joint endpoint label with its button interaction state."""
+
+        x0, y0, x1, y1 = hit.rect
+        scale = self.window.style_scale
+        draw = ImguiDraw2D()
+        background = self.theme.bg_frame_active if active else self.theme.bg_frame_hovered
+        draw.rect_filled((x0, y0), (x1, y1), background, rounding=3.0 * scale)
+        draw.rect(
+            (x0, y0),
+            (x1, y1),
+            self.theme.border,
+            1.0 * scale,
+            rounding=3.0 * scale,
+        )
+        padding_x = 8.0 * scale
+        dot_radius = 3.0 * scale
+        dot_gap = 6.0 * scale
+        center_y = (y0 + y1) * 0.5
+        draw.circle_filled(
+            (x0 + padding_x + dot_radius, center_y),
+            dot_radius,
+            hit.semantic_color,
+            segments=16,
+        )
+        text_height = imgui.calc_text_size(hit.label).y
+        draw.text(
+            (
+                x0 + padding_x + dot_radius * 2.0 + dot_gap,
+                center_y - text_height * 0.5,
+            ),
+            self.theme.primary_bright,
+            hit.label,
+        )
+
     def _draw_joint_gizmo_picker(self) -> None:
-        """Draw a compact viewport chooser for links with multiple direct joints."""
+        """Draw a movable chooser near the click that selected a multi-joint link."""
 
         if not self.session.paused:
             return
         joints = self.gizmo.joint_choices(self.session)
         node = self.session.selected_node
         if not joints or node is None:
+            self._joint_picker_node_id = -1
             return
-        x, y, _w, _h = self._viewport_rect
+        x, y, width, height = self._viewport_rect
         scale = self.window.style_scale
-        imgui.set_next_window_pos(
-            imgui.ImVec2(x + 12.0 * scale, y + 12.0 * scale),
-            imgui.Cond_.always,
-        )
+        if node.node_id != self._joint_picker_node_id:
+            mouse = imgui.get_io().mouse_pos
+            inside = x <= mouse.x <= x + width and y <= mouse.y <= y + height
+            desired_x = mouse.x + 14.0 * scale if inside else x + 18.0 * scale
+            desired_y = mouse.y + 14.0 * scale if inside else y + 18.0 * scale
+            estimate_width = 280.0 * scale
+            estimate_height = (74.0 + 28.0 * len(joints)) * scale
+            min_x = x + 8.0 * scale
+            min_y = y + 8.0 * scale
+            max_x = max(min_x, x + width - estimate_width)
+            max_y = max(min_y, y + height - estimate_height)
+            imgui.set_next_window_pos(
+                imgui.ImVec2(
+                    min(max(min_x, desired_x), max_x),
+                    min(max(min_y, desired_y), max_y),
+                ),
+                imgui.Cond_.always,
+            )
+            self._joint_picker_node_id = node.node_id
         imgui.set_next_window_bg_alpha(0.92)
         flags = (
             imgui.WindowFlags_.always_auto_resize.value
             | imgui.WindowFlags_.no_collapse.value
-            | imgui.WindowFlags_.no_decoration.value
             | imgui.WindowFlags_.no_docking.value
-            | imgui.WindowFlags_.no_move.value
             | imgui.WindowFlags_.no_saved_settings.value
         )
         visible, _ = imgui.begin("Joint gizmo###viewport_joint_gizmo", None, flags)
         if visible:
-            imgui.text_disabled("Joint gizmo")
-            imgui.text(node.name)
+            imgui.text_disabled(node.name)
             imgui.separator()
             selected = self.gizmo.selected_joint_id(node.body_index)
             for joint in joints:
@@ -2442,85 +2949,418 @@ class ViewerApp:
         imgui.end()
 
     def _draw_playback_widget(self) -> None:
-        """Draw game-style simulation controls at the viewport's top center."""
+        """Draw the final playback capsule at the viewport's top center."""
 
         caps = self.session.adapter.caps
-        if not caps.simulation:
+        if not caps.simulation or not self._has_scene_content():
             return
         x, y, width, _height = self._viewport_rect
-        scale = self.window.style_scale
+        style_scale = self.window.style_scale
+        scale = viewport_chrome_scale(
+            style_scale,
+            self._viewport_overlay_scale,
+            PLAYBACK_CHROME_SCALE,
+        )
+        widget_width, widget_height = playback_size(scale)
+        clip_pad = OVERLAY_CLIP_PADDING * scale
         imgui.set_next_window_pos(
-            imgui.ImVec2(x + width * 0.5, y + 10.0 * scale),
+            imgui.ImVec2(x + width * 0.5, y + 12.0 * style_scale - clip_pad),
             imgui.Cond_.always.value,
             imgui.ImVec2(0.5, 0.0),
         )
-        imgui.set_next_window_bg_alpha(0.92)
+        imgui.set_next_window_size(
+            imgui.ImVec2(widget_width + clip_pad * 2.0, widget_height + clip_pad * 2.0),
+            imgui.Cond_.always,
+        )
         flags = (
-            imgui.WindowFlags_.always_auto_resize.value
-            | imgui.WindowFlags_.no_decoration.value
+            imgui.WindowFlags_.no_decoration.value
             | imgui.WindowFlags_.no_docking.value
             | imgui.WindowFlags_.no_move.value
             | imgui.WindowFlags_.no_focus_on_appearing.value
             | imgui.WindowFlags_.no_saved_settings.value
+            | imgui.WindowFlags_.no_background.value
+            | imgui.WindowFlags_.no_scrollbar.value
         )
         imgui.push_style_var(
             imgui.StyleVar_.window_padding,
-            imgui.ImVec2(3.0 * scale, 3.0 * scale),
+            imgui.ImVec2(0.0, 0.0),
         )
         imgui.push_style_var(
             imgui.StyleVar_.item_spacing,
-            imgui.ImVec2(3.0 * scale, 3.0 * scale),
+            imgui.ImVec2(0.0, 0.0),
         )
         visible, _ = imgui.begin("Playback###viewport_playback", None, flags)
         if visible:
-            take_recording = self.session.state_take_recording
             take_playing = self.session.state_take_playing
             paused = self.session.paused and not take_playing
-            if self._playback_button(
-                "##viewport-playback-toggle",
-                "play" if paused else "pause",
-                enabled=True,
-                selected=not paused,
-            ):
+            window_origin = imgui.get_window_pos()
+            origin = imgui.ImVec2(window_origin.x + clip_pad, window_origin.y + clip_pad)
+            action = draw_playback(
+                ImguiDraw2D(),
+                (origin.x, origin.y),
+                self.theme,
+                scale,
+                playing=not paused,
+                step_enabled=paused and not take_playing,
+                enabled=not self._scene_input_blocked(),
+                bindings=self.input_bindings,
+                labels=self._viewport_labels,
+            )
+            if action == "toggle":
                 self._toggle_playback()
-            tooltip = (
-                "Stop recording (Space)"
-                if take_recording
-                else "Pause take replay (Space)"
-                if take_playing
-                else "Play (Space)"
-                if paused
-                else "Pause (Space)"
-            )
-            imgui.set_item_tooltip(tooltip)
-            imgui.same_line()
-            if self._playback_button(
-                "##viewport-playback-step",
-                "step",
-                enabled=paused and not take_playing,
-            ):
+            elif action == "step":
                 self.session.submit(cmd.Step(1))
-            imgui.set_item_tooltip(
-                "Step one simulation frame"
-                if paused and not take_playing
-                else "Pause playback before stepping the simulation"
-            )
-            imgui.same_line()
-            if self._playback_button(
-                "##viewport-playback-stop",
-                "stop",
-                enabled=True,
-            ):
+            elif action == "stop":
                 self._stop_playback()
-            imgui.set_item_tooltip(
-                "Stop recording"
-                if take_recording
-                else "Stop replay and return to its first frame"
-                if self.session.state_take_cursor >= 0
-                else "Stop and reset simulation"
-            )
         imgui.end()
         imgui.pop_style_var(2)
+
+    def _draw_tool_column_widget(self) -> None:
+        """Draw the viewport tool capsule without construction geometry."""
+
+        if not self._has_scene_content():
+            return
+        enabled = bool(self._state.has_selection and self._state.gizmo_available)
+        # A column made entirely of disabled tools is visual noise and can
+        # obscure joint selection. It returns as soon as one tool is usable.
+        if not enabled:
+            return
+        x, y, _width, height = self._viewport_rect
+        style_scale = self.window.style_scale
+        scale = viewport_chrome_scale(
+            style_scale,
+            self._viewport_overlay_scale,
+            TOOL_CHROME_SCALE,
+        )
+        widget_width, widget_height = tool_column_size(scale)
+        clip_pad = OVERLAY_CLIP_PADDING * scale
+        if height < widget_height + 120.0 * style_scale:
+            return
+        imgui.set_next_window_pos(
+            imgui.ImVec2(
+                x + 12.0 * style_scale - clip_pad,
+                y + (height - widget_height) * 0.5 - clip_pad,
+            ),
+            imgui.Cond_.always,
+        )
+        imgui.set_next_window_size(
+            imgui.ImVec2(widget_width + clip_pad * 2.0, widget_height + clip_pad * 2.0),
+            imgui.Cond_.always,
+        )
+        flags = (
+            imgui.WindowFlags_.no_decoration.value
+            | imgui.WindowFlags_.no_docking.value
+            | imgui.WindowFlags_.no_move.value
+            | imgui.WindowFlags_.no_focus_on_appearing.value
+            | imgui.WindowFlags_.no_saved_settings.value
+            | imgui.WindowFlags_.no_background.value
+            | imgui.WindowFlags_.no_scrollbar.value
+        )
+        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
+        visible, _ = imgui.begin("Tools###viewport_tools", None, flags)
+        if visible:
+            window_origin = imgui.get_window_pos()
+            origin = imgui.ImVec2(window_origin.x + clip_pad, window_origin.y + clip_pad)
+            action = draw_tool_column(
+                ImguiDraw2D(),
+                (origin.x, origin.y),
+                self.theme,
+                scale,
+                mode=self.gizmo.mode,
+                space=self.gizmo.space,
+                snap=self._snap_latched or self.gizmo.snapping,
+                enabled=not self._scene_input_blocked(),
+                bindings=self.input_bindings,
+                labels=self._viewport_labels,
+            )
+            if action == "move":
+                self.gizmo.set_mode("translate")
+            elif action == "rotate":
+                self.gizmo.set_mode("rotate")
+            elif action == "frame":
+                self.gizmo.toggle_space()
+            elif action == "snap":
+                self._snap_latched = not self._snap_latched
+        imgui.end()
+        imgui.pop_style_var()
+
+    def _draw_context_hint_widget(self) -> None:
+        """Draw the one context-specific input grammar that is currently valid."""
+
+        if self._scene_input_blocked() or not self._has_scene_content():
+            return
+        state = self._state
+        if state.ctrl or self.session.perturb.active:
+            variant = "perturb"
+        elif self.gizmo.using:
+            variant = "dragging"
+        elif not state.has_selection or not state.gizmo_available:
+            variant = "camera"
+        else:
+            variant = "ready"
+        x, y, width, height = self._viewport_rect
+        style_scale = self.window.style_scale
+        scale = viewport_chrome_scale(
+            style_scale,
+            self._viewport_overlay_scale,
+            HINT_CHROME_SCALE,
+        )
+        hint_font_scale = scale / max(style_scale, 1e-6)
+        imgui.push_font(None, imgui.get_font_size() * hint_font_scale)
+        measure = ImguiDraw2D(imgui.get_foreground_draw_list())
+        widget_width, widget_height = hint_size(
+            measure,
+            scale,
+            variant,
+            space=self.gizmo.space,
+            bindings=self.input_bindings,
+            labels=self._viewport_labels,
+        )
+        clip_pad = OVERLAY_CLIP_PADDING * scale
+        if widget_width > width - 24.0 * style_scale:
+            variant = (
+                "dragging"
+                if self.gizmo.using
+                else "ready_minimal"
+                if state.has_selection and state.gizmo_available
+                else "camera"
+            )
+            widget_width, widget_height = hint_size(
+                measure,
+                scale,
+                variant,
+                space=self.gizmo.space,
+                bindings=self.input_bindings,
+                labels=self._viewport_labels,
+            )
+        imgui.set_next_window_pos(
+            imgui.ImVec2(
+                x + width * 0.5,
+                y + height - widget_height - 16.0 * style_scale - clip_pad,
+            ),
+            imgui.Cond_.always,
+            imgui.ImVec2(0.5, 0.0),
+        )
+        imgui.set_next_window_size(
+            imgui.ImVec2(widget_width + clip_pad * 2.0, widget_height + clip_pad * 2.0),
+            imgui.Cond_.always,
+        )
+        flags = (
+            imgui.WindowFlags_.no_decoration.value
+            | imgui.WindowFlags_.no_docking.value
+            | imgui.WindowFlags_.no_move.value
+            | imgui.WindowFlags_.no_focus_on_appearing.value
+            | imgui.WindowFlags_.no_saved_settings.value
+            | imgui.WindowFlags_.no_background.value
+            | imgui.WindowFlags_.no_scrollbar.value
+            | imgui.WindowFlags_.no_inputs.value
+        )
+        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
+        visible, _ = imgui.begin("Hints###viewport_hints", None, flags)
+        if visible:
+            window_origin = imgui.get_window_pos()
+            origin = imgui.ImVec2(window_origin.x + clip_pad, window_origin.y + clip_pad)
+            draw_hint(
+                ImguiDraw2D(),
+                (origin.x, origin.y),
+                self.theme,
+                scale,
+                variant,
+                space=self.gizmo.space,
+                bindings=self.input_bindings,
+                labels=self._viewport_labels,
+                size=(widget_width, widget_height),
+            )
+        imgui.end()
+        imgui.pop_style_var()
+        imgui.pop_font()
+
+    def _has_scene_content(self) -> bool:
+        source = self.session.source
+        if source is None:
+            return False
+        lights = getattr(getattr(source, "lights", None), "lights", ())
+        cameras = getattr(source, "cameras", ())
+        return bool(getattr(source, "instance_count", 0) or lights or cameras)
+
+    def _draw_application_status_bar(self, *, loading: bool = False) -> None:
+        """Draw persistent selection, simulation, backend, and frame-rate status."""
+
+        viewport = imgui.get_main_viewport()
+        scale = self.window.style_scale
+        height = 28.0 * scale
+        flags = (
+            imgui.WindowFlags_.no_decoration.value
+            | imgui.WindowFlags_.no_docking.value
+            | imgui.WindowFlags_.no_move.value
+            | imgui.WindowFlags_.no_saved_settings.value
+            | imgui.WindowFlags_.no_scrollbar.value
+            | imgui.WindowFlags_.no_nav_focus.value
+            | imgui.WindowFlags_.no_bring_to_front_on_focus.value
+        )
+        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
+        imgui.push_style_var(imgui.StyleVar_.window_border_size, 0.0)
+        visible = imgui.internal.begin_viewport_side_bar(
+            "Status###application_status",
+            viewport,
+            imgui.Dir.down,
+            height,
+            flags,
+        )
+        if visible:
+            origin = imgui.get_window_pos()
+            size = imgui.get_window_size()
+            if loading:
+                selected_name = "no selection"
+                has_selection = False
+                state = "static"
+                sim_time = 0.0
+                sim_step = 0
+            else:
+                selected = self.session.selected_node
+                selected_name = selected.name if selected is not None else "no selection"
+                has_selection = selected is not None
+                caps = self.session.adapter.caps
+                state = (
+                    "static"
+                    if not caps.simulation
+                    else "paused"
+                    if self.session.paused and not self.session.state_take_playing
+                    else "running"
+                )
+                sim_time = float(self.session.frame.time)
+                sim_step = int(self.session.frame.step)
+            active_status = None if loading else self.output.active_status()
+            status_text = (
+                ""
+                if active_status is None
+                else _status_message_for_bar(
+                    active_status.text,
+                    selected_name,
+                    active_status.level,
+                )
+            )
+            status_layout = draw_status(
+                ImguiDraw2D(),
+                (origin.x, origin.y),
+                size.x,
+                size.y,
+                self.theme,
+                scale,
+                selected=(selected_name if has_selection else self._viewport_labels.no_selection),
+                has_selection=has_selection,
+                state=state,
+                sim_time=sim_time,
+                step=sim_step,
+                metric_mode=self._status_metric_mode,
+                backend=(
+                    "OpenGL" if self.backend.caps.name == "forge" else str(self.backend.caps.name)
+                ),
+                dt=self._dt,
+                fps=self._frame_rate.value,
+                status=status_text,
+                status_level="info" if active_status is None else active_status.level,
+                labels=self._viewport_labels,
+            )
+            if status_layout.metric_rect is not None and not loading:
+                x0, y0, x1, y1 = status_layout.metric_rect
+                imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
+                if imgui.invisible_button(
+                    "##status_simulation_metric",
+                    imgui.ImVec2(x1 - x0, y1 - y0),
+                ):
+                    self._toggle_status_metric()
+                hovered = imgui.is_item_hovered()
+                if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                    imgui.set_clipboard_text(status_layout.metric_exact)
+                if hovered:
+                    switch = (
+                        self._viewport_labels.show_steps
+                        if self._status_metric_mode == "time"
+                        else self._viewport_labels.show_time
+                    )
+                    imgui.set_tooltip(f"{switch} · {self._viewport_labels.copy_exact}")
+        imgui.end()
+        imgui.pop_style_var(2)
+
+    def _capture_viewport(self) -> None:
+        self._capture_viewport_requested = False
+        output = Path("output") / f"viewport-{time.strftime('%Y%m%d-%H%M%S')}.png"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            captured = bool(self.backend.capture(output))
+        except Exception as exc:
+            self.session.report_message(f"Viewport capture failed: {exc}", level="error")
+            return
+        if captured:
+            self.session.report_message(f"Saved viewport capture to {output}", level="success")
+        else:
+            self.session.report_message("Viewport capture failed", level="error")
+
+    def _toggle_viewport_recording(self) -> None:
+        if self._viewport_recorder is not None:
+            self._stop_viewport_recording()
+            return
+        from ..recording import VideoRecorder
+
+        target = getattr(self.backend, "target", None)
+        if target is None or not hasattr(target, "read_color"):
+            self.session.report_message("Viewport recording is unavailable", level="error")
+            return
+        output = Path("output") / f"viewport-{time.strftime('%Y%m%d-%H%M%S')}.mp4"
+        try:
+            recorder = VideoRecorder(
+                output,
+                (max(1, int(target.width)), max(1, int(target.height))),
+                fps=30.0,
+            )
+        except Exception as exc:
+            self.session.report_message(f"Viewport recording failed: {exc}", level="error")
+            return
+        self._viewport_recorder = recorder
+        self._viewport_recording_path = output
+        self._viewport_record_elapsed = 1.0 / 30.0
+        self.session.report_message(f"Recording viewport to {output}", level="success")
+
+    def _record_viewport_frame(self, dt: float) -> None:
+        recorder = self._viewport_recorder
+        if recorder is None:
+            return
+        period = 1.0 / 30.0
+        self._viewport_record_elapsed += max(0.0, min(float(dt), 0.1))
+        frames = min(3, int(self._viewport_record_elapsed / period))
+        if frames <= 0:
+            return
+        try:
+            image = self.backend.target.read_color(flip=True)[..., :3]
+            for _ in range(frames):
+                recorder.append(image)
+        except Exception as exc:
+            self._stop_viewport_recording(report=False)
+            self.session.report_message(f"Viewport recording stopped: {exc}", level="error")
+            return
+        self._viewport_record_elapsed -= frames * period
+
+    def _stop_viewport_recording(self, *, report: bool = True) -> None:
+        recorder = getattr(self, "_viewport_recorder", None)
+        if recorder is None:
+            return
+        path = self._viewport_recording_path
+        frames = int(getattr(recorder, "frames", 0))
+        self._viewport_recorder = None
+        self._viewport_recording_path = None
+        self._viewport_record_elapsed = 0.0
+        try:
+            recorder.close()
+        except Exception as exc:
+            if report:
+                self.session.report_message(f"Viewport recording failed: {exc}", level="error")
+            return
+        if report and path is not None:
+            self.session.report_message(
+                f"Saved {frames} viewport frame(s) to {path}",
+                level="success",
+            )
 
     def _toggle_playback(self) -> None:
         if self.session.state_take_recording:
@@ -2540,90 +3380,6 @@ class ViewerApp:
             if not self.session.paused:
                 self.session.submit(cmd.Pause())
             self.session.submit(cmd.Reset())
-
-    def _playback_button(
-        self,
-        label: str,
-        icon: str,
-        *,
-        enabled: bool,
-        selected: bool = False,
-    ) -> bool:
-        scale = self.window.style_scale
-        size = 24.0 * scale
-        position = imgui.get_cursor_screen_pos()
-        imgui.begin_disabled(not enabled)
-        clicked = imgui.invisible_button(label, imgui.ImVec2(size, size))
-        hovered = imgui.is_item_hovered()
-        active = imgui.is_item_active()
-        imgui.end_disabled()
-
-        if not enabled:
-            background = self.theme.bg_frame
-            foreground = self.theme.text_disabled
-        else:
-            background = (
-                self.theme.bg_frame_active
-                if active or selected
-                else self.theme.bg_frame_hovered
-                if hovered
-                else self.theme.bg_frame
-            )
-            foreground = self.theme.primary_bright if hovered or selected else self.theme.text
-        overlay = ImguiDraw2D()
-        lo = np.array((position.x, position.y), np.float64)
-        hi = lo + size
-        overlay.rect_filled(lo, hi, background, rounding=4.0 * scale)
-        center = (lo + hi) * 0.5
-        radius = 7.0 * scale
-
-        def point(dx: float, dy: float) -> np.ndarray:
-            return center + np.array((dx, dy), np.float64)
-
-        # ImGui builds the fill fringe from clockwise screen-space vertices.
-        if icon == "play":
-            overlay.convex_fill(
-                (
-                    point(-0.55 * radius, -radius),
-                    point(radius, 0.0),
-                    point(-0.55 * radius, radius),
-                ),
-                foreground,
-            )
-        elif icon == "pause":
-            half_width = 2.0 * scale
-            gap = 3.0 * scale
-            overlay.rect_filled(
-                point(-gap - half_width, -radius),
-                point(-gap + half_width, radius),
-                foreground,
-            )
-            overlay.rect_filled(
-                point(gap - half_width, -radius),
-                point(gap + half_width, radius),
-                foreground,
-            )
-        elif icon == "step":
-            overlay.convex_fill(
-                (
-                    point(-radius, -radius),
-                    point(0.45 * radius, 0.0),
-                    point(-radius, radius),
-                ),
-                foreground,
-            )
-            overlay.rect_filled(
-                point(0.55 * radius, -radius),
-                point(0.85 * radius, radius),
-                foreground,
-            )
-        else:
-            overlay.rect_filled(
-                point(-0.72 * radius, -0.72 * radius),
-                point(0.72 * radius, 0.72 * radius),
-                foreground,
-            )
-        return bool(clicked and enabled)
 
     def _draw_model_drop_overlay(self, overlay: ImguiDraw2D) -> None:
         source = self.session.source
@@ -2658,44 +3414,6 @@ class ViewerApp:
             level=getattr(self.session, "last_message_level", "info"),
             duration=getattr(self.session, "last_message_duration", 5.0),
         )
-
-    def _draw_status_overlay(self, overlay: ImguiDraw2D) -> None:
-        status = self.output.active_status()
-        if status is None:
-            return
-        x, y, width, height = self._viewport_rect
-        scale = self.window.style_scale
-        max_text_width = max(80.0, min(520.0 * scale, width - 40.0 * scale))
-        layout_key = (status.sequence, int(max_text_width))
-        if layout_key != self._status_layout_key:
-            self._status_layout_key = layout_key
-            self._status_layout_lines = _wrap_overlay_text(
-                status.text,
-                overlay,
-                max_text_width,
-            )
-        lines = self._status_layout_lines
-        if not lines:
-            return
-        pad_x = 10.0 * scale
-        pad_y = 7.0 * scale
-        gap = 3.0 * scale
-        sizes = tuple(overlay.text_size(line) for line in lines)
-        box_width = min(max(size[0] for size in sizes), max_text_width) + 2.0 * pad_x
-        box_height = sum(size[1] for size in sizes) + gap * (len(lines) - 1) + 2.0 * pad_y
-        lo = (x + 12.0 * scale, y + height - box_height - 12.0 * scale)
-        hi = (lo[0] + box_width, lo[1] + box_height)
-        level_colors = {
-            "error": (1.0, 0.42, 0.38, 1.0),
-            "warning": (1.0, 0.72, 0.28, 1.0),
-            "success": (0.44, 0.86, 0.56, 1.0),
-        }
-        overlay.rect_filled(lo, hi, (0.06, 0.07, 0.09, 0.92), rounding=5.0 * scale)
-        color = level_colors.get(status.level, (0.94, 0.95, 0.97, 1.0))
-        cursor_y = lo[1] + pad_y
-        for line, size in zip(lines, sizes, strict=True):
-            overlay.text((lo[0] + pad_x, cursor_y), color, line)
-            cursor_y += size[1] + gap
 
     def _draw_center_notice(
         self,
@@ -2864,6 +3582,8 @@ class ViewerApp:
             view_cube=self.view_cube,
             perturb=self.perturb,
             scene_entities=self.scene_entities,
+            camera_preview=self.camera_preview,
+            panels=self.panels,
             theme=self.theme,
             style_scale=self.window.style_scale,
             viewport_rect=self._viewport_rect,
@@ -2874,6 +3594,11 @@ class ViewerApp:
             set_language=self.set_language,
             set_precise_input_memory=self.set_precise_input_choice_memory,
             set_view_selection_padding=self.set_view_selection_padding,
+            viewport_overlay_scale=self._viewport_overlay_scale,
+            set_viewport_overlay_scale=self.set_viewport_overlay_scale,
+            input_bindings=self.input_bindings,
+            set_input_binding=self.set_input_binding,
+            reset_input_bindings=self.reset_input_bindings,
             font_report=self.window.font_report,
             output=self.output,
         )

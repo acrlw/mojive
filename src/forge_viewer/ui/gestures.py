@@ -17,6 +17,9 @@ class Claim(enum.StrEnum):
 
 @dataclass(frozen=True)
 class InputState:
+    # Blocking prompts own the entire interaction frame, including modifiers
+    # that would otherwise alter viewport hints without moving the scene.
+    blocked: bool = False
     left: bool = False
     right: bool = False
     middle: bool = False
@@ -57,6 +60,8 @@ def gizmo_yields(state: InputState) -> bool:
 
 
 def claim_for(state: InputState) -> Claim:
+    if state.blocked:
+        return Claim.UI
     if state.ui_wants_mouse:
         return Claim.UI
 
@@ -132,6 +137,10 @@ class GestureRouter:
         return self._press_cursor
 
     def update(self, state: InputState) -> Claim:
+        if state.blocked:
+            self.abort()
+            self._claim = Claim.UI
+            return self._claim
         if self._held:
             if state.any_button:
                 self._travel += abs(state.delta[0]) + abs(state.delta[1])

@@ -265,7 +265,7 @@ def test_editor_modals_are_readable_and_follow_the_resized_window_center(monkeyp
         for _ in range(3):
             viewer.sync()
         error, center, expected = geometry("File operation failed")
-        assert error.size.x == pytest.approx(440.0)
+        assert error.size.x == pytest.approx(360.0)
         assert error.size.x > error.size.y
         assert center == pytest.approx(expected, abs=1.0)
 
@@ -311,7 +311,7 @@ def test_editor_undo_redo_updates_the_render_backend():
         viewer.release()
 
 
-def test_settings_window_is_modal_and_centered(canvas):
+def test_settings_window_docks_with_camera(canvas):
     from imgui_bundle import imgui
 
     viewer, _scene = canvas
@@ -325,26 +325,25 @@ def test_settings_window_is_modal_and_centered(canvas):
         title = settings.name if translated == settings.name else f"{translated}###{settings.name}"
         window = imgui.internal.find_window_by_name(title)
         assert window is not None
-        assert window.dock_node is None
-        center = window.pos + window.size * 0.5
-        expected = imgui.get_main_viewport().get_center()
-        assert center.x == pytest.approx(expected.x, abs=1.0)
-        assert center.y == pytest.approx(expected.y, abs=1.0)
+        camera = imgui.internal.find_window_by_name("Camera")
+        assert window.dock_node is not None
+        assert camera is not None and camera.dock_node is not None
+        assert window.dock_node.id_ == camera.dock_node.id_
     finally:
         settings.open = False
 
 
 def test_settings_controls_precise_input_choice_memory(canvas, monkeypatch):
-    from imgui_bundle import imgui
+    from forge_viewer.ui.panels import settings as settings_module
 
     viewer, _scene = canvas
     settings = viewer.app.panels.get("Settings")
     assert settings is not None
-    original_checkbox = imgui.checkbox
+    original_checkbox = settings_module.themed_checkbox
     toggled = []
 
-    def toggle_memory(label, value):
-        changed, current = original_checkbox(label, value)
+    def toggle_memory(label, value, theme):
+        changed, current = original_checkbox(label, value, theme)
         if label == "##remember_precise_input_choices" and not toggled:
             toggled.append(True)
             return True, not value
@@ -354,13 +353,45 @@ def test_settings_controls_precise_input_choice_memory(canvas, monkeypatch):
         viewer.app.gizmo.remember_precise_input_choices = True
         settings._category = "Interaction"
         settings.open = True
-        monkeypatch.setattr(imgui, "checkbox", toggle_memory)
+        monkeypatch.setattr(settings_module, "themed_checkbox", toggle_memory)
         viewer.sync()
         assert toggled
         assert not viewer.app.gizmo.remember_precise_input_choices
         assert viewer.app.localizer.preference("remember_precise_input_choices") is False
     finally:
         viewer.app.set_precise_input_choice_memory(True)
+        settings.open = False
+
+
+def test_settings_remaps_viewport_shortcuts_without_conflicts(canvas, monkeypatch):
+    from imgui_bundle import imgui
+
+    from forge_viewer.ui.input_bindings import InputAction, key_choices
+
+    viewer, _scene = canvas
+    settings = viewer.app.panels.get("Settings")
+    assert settings is not None
+    original_combo = imgui.combo
+    changed = []
+    choice_ids = tuple(choice.identifier for choice in key_choices())
+
+    def remap_frame(label, current, choices, *args, **kwargs):
+        result = original_combo(label, current, choices, *args, **kwargs)
+        if label == "##shortcut_frame_scene" and not changed:
+            changed.append(True)
+            return True, choice_ids.index("g")
+        return result
+
+    try:
+        settings._category = "Interaction"
+        settings.open = True
+        monkeypatch.setattr(imgui, "combo", remap_frame)
+        viewer.sync()
+        assert changed
+        assert viewer.app.input_bindings.key_id(InputAction.FRAME_SCENE) == "g"
+        assert viewer.app.input_bindings.key_id(InputAction.GIZMO_TRANSLATE) == "f"
+    finally:
+        viewer.app.reset_input_bindings()
         settings.open = False
 
 
@@ -437,12 +468,15 @@ def test_scene_camera_helper_is_pickable_and_transformable():
         assert viewer.app._pick_at((float(screen[0]), float(screen[1]))) == node.object_id
 
         viewer.session.submit(cmd.Select(node.object_id))
+        viewer.app.camera_preview.set_enabled(True)
         viewer.sync()
         assert viewer.app.camera_preview._image is not None
         assert viewer.app.camera_preview._image.aspect == pytest.approx(16.0 / 9.0, rel=0.01)
         layer = viewer.backend.debug.layer(HELPER_LAYER)
-        assert layer.count_of(PrimitiveType.POINT) == 1
-        assert layer.count_of(PrimitiveType.LINE) == 20
+        # Camera helpers are now semantic line icons; picking still uses the
+        # projected anchor but no legacy point primitive is rendered.
+        assert layer.count_of(PrimitiveType.POINT) == 0
+        assert layer.count_of(PrimitiveType.LINE) == 36
 
         viewer.app.gizmo.set_mode("translate")
         viewer.app.gizmo.set_space("world")

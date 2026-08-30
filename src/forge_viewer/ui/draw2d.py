@@ -10,9 +10,19 @@ window and portable to a future non-imgui overlay renderer.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Protocol, runtime_checkable
 
 import numpy as np
+
+
+@lru_cache(maxsize=512)
+def _cached_imgui_points(points: tuple[tuple[float, float], ...]):
+    """Reuse immutable ImVec2 paths submitted by screen-space UI widgets."""
+
+    from imgui_bundle import imgui
+
+    return tuple(imgui.ImVec2(float(x), float(y)) for x, y in points)
 
 
 def _anti_alias_fringe_outer(points) -> np.ndarray:
@@ -89,6 +99,14 @@ class ImguiDraw2D:
         imgui = self._imgui
         return imgui.ImVec2(float(p[0]), float(p[1]))
 
+    def _vecs(self, points):
+        if isinstance(points, tuple):
+            try:
+                return _cached_imgui_points(points)
+            except (TypeError, ValueError):
+                pass
+        return [self._vec(point) for point in points]
+
     def _u32(self, color) -> int:
         imgui = self._imgui
         return imgui.color_convert_float4_to_u32(imgui.ImVec4(*(float(c) for c in color)))
@@ -99,12 +117,10 @@ class ImguiDraw2D:
     def polyline(self, points, color, width: float, *, closed: bool = False) -> None:
         imgui = self._imgui
         flags = imgui.ImDrawFlags_.closed if closed else imgui.ImDrawFlags_.none
-        self._dl.add_polyline(
-            [self._vec(p) for p in points], self._u32(color), float(width), flags.value
-        )
+        self._dl.add_polyline(self._vecs(points), self._u32(color), float(width), flags.value)
 
     def convex_fill(self, points, color) -> None:
-        self._dl.add_convex_poly_filled([self._vec(p) for p in points], self._u32(color))
+        self._dl.add_convex_poly_filled(self._vecs(points), self._u32(color))
 
     def triangle_fan_fill(self, points, color) -> None:
         vertices = np.asarray(points, np.float64).reshape(-1, 2)
@@ -124,7 +140,7 @@ class ImguiDraw2D:
         self._write_anti_alias_fringe(vertices, rgba)
 
     def concave_fill(self, points, color) -> None:
-        self._dl.add_concave_poly_filled([self._vec(p) for p in points], self._u32(color))
+        self._dl.add_concave_poly_filled(self._vecs(points), self._u32(color))
 
     def fringed_concave_fill(self, points, color) -> None:
         imgui = self._imgui

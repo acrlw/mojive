@@ -23,8 +23,7 @@ from ..camera import DEFAULT_PITCH, DEFAULT_YAW
 from . import (
     Panel,
     PanelContext,
-    button_row_layout,
-    button_width,
+    segmented_control,
     value_slider,
 )
 
@@ -198,58 +197,78 @@ class CameraPanel(Panel):
         has_setter = hasattr(camera, "set_preset") or (
             hasattr(camera, "yaw") and hasattr(camera, "pitch")
         )
-        widths = tuple(
-            button_width(ctx.tr(label), 64.0 * ctx.style_scale) for label, _yaw, _pitch in PRESETS
-        )
-        row = button_row_layout(
-            widths,
-            imgui.get_content_region_avail().x,
-            imgui.get_style().item_spacing.x,
-        )
-        imgui.begin_disabled(not has_setter)
-        for i, (label, yaw, pitch) in enumerate(PRESETS):
-            if row[i]:
-                imgui.same_line()
-            if imgui.button(ctx.tr(label), imgui.ImVec2(widths[i], 0)):
-                if hasattr(camera, "set_preset"):
+        can_frame = hasattr(camera, "frame_all")
+        entries = (*PRESETS, ("frame all", 0.0, 0.0))
+        flags = imgui.TableFlags_.sizing_stretch_same | imgui.TableFlags_.no_pad_outer_x
+        if not imgui.begin_table("camera_presets", 4, flags):
+            return
+        for index, (label, yaw, pitch) in enumerate(entries):
+            if index % 4 == 0:
+                imgui.table_next_row()
+            imgui.table_next_column()
+            enabled = can_frame if label == "frame all" else has_setter
+            imgui.begin_disabled(not enabled)
+            if imgui.button(ctx.tr(label), imgui.ImVec2(-1.0, 0.0)):
+                if label == "frame all":
+                    lo, hi = ctx.session.bounds()
+                    camera.frame_all(lo, hi)
+                elif hasattr(camera, "set_preset"):
                     camera.set_preset(label)
                 else:
                     camera.yaw = yaw
                     camera.pitch = pitch
-        imgui.end_disabled()
-        if not has_setter:
-            imgui.set_item_tooltip("this camera exposes neither set_preset() nor yaw/pitch")
-
-        can_frame = hasattr(camera, "frame_all")
-        frame_width = button_width(ctx.tr("frame all"), 84.0 * ctx.style_scale)
-        imgui.begin_disabled(not can_frame)
-        if imgui.button(ctx.tr("frame all"), imgui.ImVec2(frame_width, 0)):
-            lo, hi = ctx.session.bounds()
-            camera.frame_all(lo, hi)
-        imgui.end_disabled()
-        if not can_frame:
-            imgui.set_item_tooltip("this camera has no frame_all()")
+            imgui.end_disabled()
+        imgui.end_table()
 
     def _params(self, ctx: PanelContext, camera: Any) -> None:
+        flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
+        if not imgui.begin_table("camera_properties", 2, flags):
+            return
+        imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.38)
+        imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch, 0.62)
         for attr, lo, hi, fmt, initial in PARAM_SLIDERS:
             current = _get(camera, attr)
             if current is None:
                 continue
+            self._property_label(attr)
+            imgui.set_next_item_width(-1.0)
             edit = value_slider(
-                f"{attr}##cam", float(current), lo, hi, initial=initial, fmt=fmt, more_hint="none"
+                f"##camera-{attr}",
+                float(current),
+                lo,
+                hi,
+                initial=initial,
+                fmt=fmt,
+                more_hint="none",
             )
             if edit.changed:
                 setattr(camera, attr, edit.value)
 
         ortho = _get(camera, "orthographic")
         if ortho is not None:
+            self._property_label(ctx.tr("projection"))
             supported = ctx.backend.caps.orthographic
             imgui.begin_disabled(not supported)
-            changed, value = imgui.checkbox(
-                f"{ctx.tr('orthographic')}##editor_camera_orthographic", bool(ortho)
+            selected = segmented_control(
+                "camera-projection",
+                (ctx.tr("persp"), ctx.tr("ortho")),
+                1 if bool(ortho) else 0,
+                theme=ctx.theme,
             )
             imgui.end_disabled()
             if not supported:
                 imgui.set_item_tooltip(f"{ctx.backend.caps.name} has no orthographic projection")
-            elif changed:
-                camera.orthographic = value
+            else:
+                camera.orthographic = selected == 1
+        imgui.end_table()
+
+    @staticmethod
+    def _property_label(label: str) -> None:
+        imgui.table_next_row()
+        imgui.table_next_column()
+        imgui.align_text_to_frame_padding()
+        available = imgui.get_content_region_avail().x
+        width = imgui.calc_text_size(label).x
+        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, available - width))
+        imgui.text_disabled(label)
+        imgui.table_next_column()

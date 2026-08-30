@@ -120,7 +120,7 @@ class TextureStore:
                 tex.repeat_x = tex.repeat_y = True
                 tex.build_mipmaps()
                 tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
-                tex.anisotropy = 8.0
+                tex.anisotropy = 16.0
             else:
                 size = pixels.shape[1]
                 tex = self._make_cube(size, comps, pixels, fmt)

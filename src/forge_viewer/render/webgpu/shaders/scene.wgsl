@@ -87,6 +87,10 @@ struct Lights {
 @group(4) @binding(3) var reflection3: texture_2d<f32>;
 @group(4) @binding(4) var reflection_sampler: sampler;
 
+// Match the OpenGL albedo path: choose the next mip slightly early for
+// sub-pixel repeated textures, while anisotropy retains along-surface detail.
+const ALBEDO_MINIFICATION_LOD_BIAS: f32 = 1.0;
+
 const FORGE_GAMMA: f32 = 2.2;
 const FORGE_KNEE: f32 = 0.8;
 
@@ -343,7 +347,12 @@ fn scene_surface(in: SceneOut) -> SurfaceSample {
     if in.cube_on > 0.5 {
         texel = textureSample(cube_albedo_tex, cube_albedo_sampler, in.cube);
     } else {
-        texel = textureSample(albedo_tex, albedo_sampler, in.uv);
+        texel = textureSampleBias(
+            albedo_tex,
+            albedo_sampler,
+            in.uv,
+            ALBEDO_MINIFICATION_LOD_BIAS,
+        );
     }
     var surface = in.color.rgb;
     if frame.flags.z > 0.5 {

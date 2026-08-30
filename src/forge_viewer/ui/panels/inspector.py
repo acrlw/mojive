@@ -751,9 +751,15 @@ class InspectorPanel(Panel):
             imgui.end_table()
 
     def _transform(self, ctx: PanelContext, node: SceneNode) -> None:
+        style = imgui.get_style()
+        imgui.push_style_var(
+            imgui.StyleVar_.item_spacing,
+            imgui.ImVec2(style.item_spacing.x, 0.0),
+        )
         self.show_transform = imgui.collapsing_header(
             "transform", imgui.TreeNodeFlags_.default_open
         )
+        imgui.pop_style_var()
         if not self.show_transform:
             return
         frame = ctx.session.frame
@@ -766,76 +772,96 @@ class InspectorPanel(Panel):
         editable = _pose_editable(
             ctx.session.adapter.caps.write_pose, ctx.session.paused, node.posable
         )
-
-        compact = _compact_transform(imgui.get_content_region_avail().x, ctx.style_scale)
-        flags = (
-            imgui.TableFlags_.sizing_stretch_same
-            | imgui.TableFlags_.no_saved_settings
-            | imgui.TableFlags_.no_pad_inner_x
-            | imgui.TableFlags_.no_pad_outer_x
-        )
-        columns = 1 if compact else 7
-        if not imgui.begin_table("insp_transform", columns, flags):
-            return
-        if compact:
-            imgui.table_setup_column("transform", imgui.TableColumnFlags_.width_stretch)
-        else:
-            imgui.table_setup_column(
-                "value", imgui.TableColumnFlags_.width_fixed, 96.0 * ctx.style_scale
-            )
-            for axis in "xyz":
-                imgui.table_setup_column(
-                    axis, imgui.TableColumnFlags_.width_fixed, 20.0 * ctx.style_scale
-                )
-                imgui.table_setup_column(
-                    f"{axis} value", imgui.TableColumnFlags_.width_stretch, 1.0
-                )
-
-        pos_changed, new_pos = _vector_row(
-            ctx,
-            node,
-            "position",
-            np.asarray(pos, np.float64),
-            editable=editable,
-            speed=0.01,
-            fmt="%.3f",
-            compact=compact,
-        )
-        rot_changed, new_euler = _vector_row(
-            ctx,
-            node,
-            "rotation",
-            euler,
-            editable=editable,
-            speed=0.5,
-            fmt="%.1f",
-            compact=compact,
-        )
-
         self._transform_velocity = _has_free_velocity(ctx.session.joints, node.body_index)
         velocity = _free_velocity(ctx.session.frame.qvel, ctx.session.joints, node.body_index)
-        if velocity is not None:
-            _vector_row(
-                ctx,
-                node,
-                "linear velocity",
-                velocity[0],
-                editable=False,
-                speed=0.0,
-                fmt="%.3f",
-                compact=compact,
+
+        pos_changed = rot_changed = False
+        new_pos = np.asarray(pos, np.float64).copy()
+        new_euler = euler.copy()
+        compact = _compact_transform(
+            imgui.get_content_region_avail().x - 12.0 * ctx.style_scale,
+            ctx.style_scale,
+        )
+        body_height = (96.0 if compact else 52.0) + (104.0 if self._transform_velocity else 0.0)
+
+        imgui.push_style_color(imgui.Col_.child_bg, imgui.ImVec4(*ctx.theme.bg_popup))
+        imgui.push_style_var(
+            imgui.StyleVar_.window_padding,
+            imgui.ImVec2(6.0 * ctx.style_scale, 4.0 * ctx.style_scale),
+        )
+        child_flags = imgui.ChildFlags_.always_use_window_padding
+        window_flags = imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse
+        child_visible = imgui.begin_child(
+            f"##transform_body_{node.node_id}",
+            imgui.ImVec2(0.0, body_height * ctx.style_scale),
+            child_flags.value,
+            window_flags.value,
+        )
+        if child_visible:
+            imgui.push_font(None, 12.0 * ctx.style_scale)
+            flags = (
+                imgui.TableFlags_.sizing_stretch_same
+                | imgui.TableFlags_.no_saved_settings
+                | imgui.TableFlags_.no_pad_inner_x
+                | imgui.TableFlags_.no_pad_outer_x
             )
-            _vector_row(
-                ctx,
-                node,
-                "angular velocity",
-                velocity[1],
-                editable=False,
-                speed=0.0,
-                fmt="%.3f",
-                compact=compact,
-            )
-        imgui.end_table()
+            columns = 1 if compact else 4
+            if imgui.begin_table("insp_transform", columns, flags):
+                if compact:
+                    imgui.table_setup_column("transform", imgui.TableColumnFlags_.width_stretch)
+                else:
+                    imgui.table_setup_column(
+                        "value",
+                        imgui.TableColumnFlags_.width_fixed,
+                        60.0 * ctx.style_scale,
+                    )
+                    for axis in "xyz":
+                        imgui.table_setup_column(axis, imgui.TableColumnFlags_.width_stretch, 1.0)
+
+                pos_changed, new_pos = _vector_row(
+                    ctx,
+                    node,
+                    "position",
+                    np.asarray(pos, np.float64),
+                    editable=editable,
+                    speed=0.01,
+                    fmt="%.3f",
+                    compact=compact,
+                )
+                rot_changed, new_euler = _vector_row(
+                    ctx,
+                    node,
+                    "rotation",
+                    euler,
+                    editable=editable,
+                    speed=0.5,
+                    fmt="%.1f",
+                    compact=compact,
+                )
+
+                imgui.end_table()
+
+            if velocity is not None and imgui.begin_table("insp_transform_velocity", 1, flags):
+                imgui.table_setup_column("velocity", imgui.TableColumnFlags_.width_stretch)
+                for name, values in (
+                    ("linear velocity", velocity[0]),
+                    ("angular velocity", velocity[1]),
+                ):
+                    _vector_row(
+                        ctx,
+                        node,
+                        name,
+                        values,
+                        editable=False,
+                        speed=0.0,
+                        fmt="%.3f",
+                        compact=True,
+                    )
+                imgui.end_table()
+            imgui.pop_font()
+        imgui.end_child()
+        imgui.pop_style_var()
+        imgui.pop_style_color()
 
         if pos_changed or rot_changed:
             rotation = math3d.euler_xyz_to_mat3(np.radians(new_euler))
@@ -1707,6 +1733,7 @@ class InspectorPanel(Panel):
             asset_editable = bool(not ctx.session.adapter.caps.simulation or ctx.session.paused)
             assigned = material_index in compatible_materials
             assignment_label = material.name if assigned else "inline appearance"
+            prefix = f"forge_{model_id}_"
             if not asset_editable:
                 imgui.begin_disabled()
             if imgui.begin_combo("assigned material", assignment_label):
@@ -1733,7 +1760,11 @@ class InspectorPanel(Panel):
                         return
                 imgui.end_combo()
 
-            prefix = f"forge_{model_id}_"
+            if assigned and ctx.panels is not None and imgui.small_button("Open in Assets"):
+                panel = ctx.panels.get("Assets")
+                focus = getattr(panel, "focus", None)
+                if focus is not None:
+                    focus(model_id, "material", material.name.removeprefix(prefix))
             existing_materials = {
                 src.materials[index].name.removeprefix(prefix) for index in compatible_materials
             }
@@ -1962,6 +1993,18 @@ class InspectorPanel(Panel):
         if not editable:
             imgui.end_disabled()
             imgui.text_disabled("Pause the simulation to edit model geometry shape")
+
+        if (
+            geom_type in ("mesh", "hfield")
+            and edited.resource_name
+            and ctx.panels is not None
+            and imgui.small_button("Open in Assets##geometry-resource")
+        ):
+            panel = ctx.panels.get("Assets")
+            focus = getattr(panel, "focus", None)
+            node = ctx.session.node(edited.node_id)
+            if focus is not None and node is not None:
+                focus(node.model_id, geom_type, edited.resource_name)
 
         self._geometry_shape_edit = edited
         dirty = edited.type != current.type or edited.resource_name != current.resource_name
@@ -2551,6 +2594,14 @@ class InspectorPanel(Panel):
 
         self._entity_gizmo_lock(ctx, node)
 
+        if ctx.camera_preview is not None:
+            changed, enabled = imgui.checkbox(
+                f"{ctx.tr('Show Camera Preview')}##camera_preview_enabled",
+                bool(ctx.camera_preview.enabled),
+            )
+            if changed:
+                ctx.camera_preview.set_enabled(enabled)
+
         if ctx.select_model_camera is not None:
             active = ctx.model_camera_id == info.camera_id
             label = "Return to Editor Camera" if active else "View Through Camera"
@@ -2702,7 +2753,7 @@ def _has_free_velocity(joints, body_index: int) -> bool:
 
 
 def _compact_transform(width: float, style_scale: float) -> bool:
-    return float(width) < 420.0 * float(style_scale)
+    return float(width) < 210.0 * float(style_scale)
 
 
 def _vector_fields(
@@ -2713,14 +2764,14 @@ def _vector_fields(
     *,
     editable: bool = True,
 ) -> tuple[tuple[bool, np.ndarray], ...]:
-    compact = _compact_transform(imgui.get_content_region_avail().x, ctx.style_scale)
+    compact = float(imgui.get_content_region_avail().x) < 420.0 * float(ctx.style_scale)
     flags = (
         imgui.TableFlags_.sizing_stretch_same
         | imgui.TableFlags_.no_saved_settings
         | imgui.TableFlags_.no_pad_inner_x
         | imgui.TableFlags_.no_pad_outer_x
     )
-    columns = 1 if compact else 7
+    columns = 1 if compact else 4
     if not imgui.begin_table(table_id, columns, flags):
         return tuple((False, np.asarray(row[1], np.float64).copy()) for row in rows)
     if compact:
@@ -2730,10 +2781,7 @@ def _vector_fields(
             "value", imgui.TableColumnFlags_.width_fixed, 96.0 * ctx.style_scale
         )
         for axis in "xyz":
-            imgui.table_setup_column(
-                axis, imgui.TableColumnFlags_.width_fixed, 20.0 * ctx.style_scale
-            )
-            imgui.table_setup_column(f"{axis} value", imgui.TableColumnFlags_.width_stretch, 1.0)
+            imgui.table_setup_column(axis, imgui.TableColumnFlags_.width_stretch, 1.0)
     result = tuple(
         _vector_row(
             ctx,
@@ -2773,12 +2821,14 @@ def _vector_row(
     imgui.table_next_row()
     imgui.table_next_column()
     imgui.align_text_to_frame_padding()
+    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ctx.theme.text_disabled))
     imgui.text(name)
+    imgui.pop_style_color()
     group_hovered = imgui.is_item_hovered()
     if group_hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
         imgui.set_clipboard_text(_format_vector(out))
     if group_hovered:
-        imgui.set_tooltip("right-click: copy XYZ")
+        imgui.set_tooltip(ctx.tr("Right-click to copy XYZ"))
 
     if compact:
         row_flags = (
@@ -2787,50 +2837,28 @@ def _vector_row(
             | imgui.TableFlags_.no_pad_inner_x
             | imgui.TableFlags_.no_pad_outer_x
         )
-        if not imgui.begin_table(f"##{name}_axes_{node.node_id}", 6, row_flags):
+        if not imgui.begin_table(f"##{name}_axes_{node.node_id}", 3, row_flags):
             return False, out
         for axis in "xyz":
-            imgui.table_setup_column(
-                axis, imgui.TableColumnFlags_.width_fixed, 20.0 * ctx.style_scale
-            )
-            imgui.table_setup_column(f"{axis} value", imgui.TableColumnFlags_.width_stretch, 1.0)
+            imgui.table_setup_column(axis, imgui.TableColumnFlags_.width_stretch, 1.0)
 
     changed = False
     for axis, label in enumerate("XYZ"):
         imgui.table_next_column()
-        color = ctx.theme.axis_color(axis)
-        hovered_color = _lift_color(color, 0.20)
-        active_color = _lift_color(color, 0.32)
-        imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(*color))
-        imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(*hovered_color))
-        imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(*active_color))
-        imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ctx.theme.bg_child))
-        imgui.begin_disabled(not editable)
-        reset = imgui.button(
-            f"{label}##{name}_{axis}_{node.node_id}",
-            imgui.ImVec2(imgui.get_content_region_avail().x, 0.0),
+        reset, edited, value = _axis_field(
+            ctx,
+            node,
+            name,
+            axis,
+            label,
+            float(out[axis]),
+            editable=editable,
+            speed=speed,
+            fmt=fmt,
         )
-        imgui.end_disabled()
-        imgui.pop_style_color(4)
-        if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-            imgui.set_tooltip("click: reset to 0" if editable else "read only")
         if reset:
             out[axis] = resets[axis]
             changed = True
-
-        imgui.table_next_column()
-        imgui.set_next_item_width(-1.0)
-        imgui.begin_disabled(not editable)
-        edited, value = imgui.drag_float(
-            f"##{name}_{axis}_{node.node_id}", float(out[axis]), speed, 0.0, 0.0, fmt
-        )
-        imgui.end_disabled()
-        hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
-        if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
-            imgui.set_clipboard_text(fmt % out[axis])
-        if hovered:
-            hint = "drag: edit · right-click: copy" if editable else "read only · right-click: copy"
-            imgui.set_tooltip(hint)
         if edited:
             out[axis] = value
             changed = True
@@ -2839,9 +2867,82 @@ def _vector_row(
     return changed, out
 
 
+def _axis_field(
+    ctx: PanelContext,
+    node: SceneNode,
+    name: str,
+    axis: int,
+    label: str,
+    value: float,
+    *,
+    editable: bool,
+    speed: float,
+    fmt: str,
+) -> tuple[bool, bool, float]:
+    axis_color = ctx.theme.axis_color(axis)
+    color = _mix_color(ctx.theme.bg_frame, axis_color, 0.56)
+    hovered_color = _mix_color(ctx.theme.bg_frame_hovered, axis_color, 0.72)
+    active_color = _mix_color(ctx.theme.bg_frame_active, axis_color, 0.88)
+    axis_width = min(
+        22.0 * ctx.style_scale,
+        max(1.0, imgui.get_content_region_avail().x * 0.4),
+    )
+
+    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(*color))
+    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(*hovered_color))
+    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(*active_color))
+    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 1.0, 1.0, 1.0))
+    if not editable:
+        imgui.push_style_var(imgui.StyleVar_.disabled_alpha, 1.0)
+    imgui.begin_disabled(not editable)
+    reset = imgui.button(
+        f"{label}##{name}_{axis}_{node.node_id}",
+        imgui.ImVec2(axis_width, 0.0),
+    )
+    imgui.end_disabled()
+    if not editable:
+        imgui.pop_style_var()
+    button_hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
+    imgui.pop_style_color(4)
+    if button_hovered:
+        imgui.set_tooltip(ctx.tr("Click to reset to 0") if editable else ctx.tr("Read only"))
+
+    # The badge and value are deliberately separate controls. Joining two
+    # independently rounded ImGui frames and painting over their seam creates
+    # a false divider at fractional UI scales and makes the badge look clipped.
+    badge_gap = 4.0 * ctx.style_scale
+    group_gap = 5.0 * ctx.style_scale if axis < 2 else 0.0
+    imgui.same_line(0.0, badge_gap)
+    imgui.set_next_item_width(max(1.0, imgui.get_content_region_avail().x - group_gap))
+    imgui.begin_disabled(not editable)
+    edited, next_value = imgui.drag_float(
+        f"##{name}_{axis}_{node.node_id}", value, speed, 0.0, 0.0, fmt
+    )
+    imgui.end_disabled()
+    field_hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
+    if field_hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+        imgui.set_clipboard_text(fmt % value)
+    if field_hovered:
+        hint = (
+            ctx.tr("Drag to edit · right-click to copy")
+            if editable
+            else ctx.tr("Read only · right-click to copy")
+        )
+        imgui.set_tooltip(hint)
+
+    return reset, edited, next_value
+
+
 def _format_vector(values) -> str:
     return ", ".join(f"{float(value):.6g}" for value in values)
 
 
-def _lift_color(color, amount: float):
-    return (*(c + (1.0 - c) * amount for c in color[:3]), color[3])
+def _mix_color(background, foreground, amount: float):
+    weight = min(1.0, max(0.0, float(amount)))
+    return (
+        *(
+            background[index] + (foreground[index] - background[index]) * weight
+            for index in range(3)
+        ),
+        foreground[3],
+    )

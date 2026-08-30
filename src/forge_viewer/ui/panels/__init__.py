@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from imgui_bundle import imgui
 
 from ...adapters.base import FrameNeeds
+from ..draw2d import ImguiDraw2D
 from ..theme import THEME, Theme
 
 if TYPE_CHECKING:
@@ -37,6 +38,7 @@ class PanelContext:
     view_cube: Any = None
     perturb: Any = None
     scene_entities: Any = None
+    camera_preview: Any = None
 
     style_scale: float = 1.0
 
@@ -55,6 +57,11 @@ class PanelContext:
     set_language: Any = None
     set_precise_input_memory: Any = None
     set_view_selection_padding: Any = None
+    viewport_overlay_scale: float = 1.0
+    set_viewport_overlay_scale: Any = None
+    input_bindings: Any = None
+    set_input_binding: Any = None
+    reset_input_bindings: Any = None
     font_report: Any = None
     output: Any = None
 
@@ -166,14 +173,17 @@ def value_slider(
     elif action == "copy":
         imgui.set_clipboard_text(fmt % value)
         out.copied = True
-    elif action == "expand":
+    elif action == "expand" and more_hint:
         if label in _EXPANDED:
             _EXPANDED.discard(label)
         else:
             _EXPANDED.add(label)
         out.expanded = label in _EXPANDED
 
-    imgui.set_item_tooltip(f"Right-click reset · Double-click copy · Shift+right-click {more_hint}")
+    tooltip = "Right-click reset · Double-click copy"
+    if more_hint:
+        tooltip += f" · Shift+right-click {more_hint}"
+    imgui.set_item_tooltip(tooltip)
     return out
 
 
@@ -185,18 +195,178 @@ def colored_text(color: tuple[float, float, float, float], text: str) -> None:
     imgui.text_colored(imgui.ImVec4(*color), text)
 
 
+def search_input(
+    str_id: str,
+    value: str,
+    *,
+    hint: str = "",
+    search_tooltip: str = "Search",
+    clear_tooltip: str = "Clear search",
+) -> tuple[bool, str]:
+    """Draw a search field with consistent search and clear affordances."""
+
+    if value:
+        imgui.set_next_item_allow_overlap()
+    if hint:
+        changed, value = imgui.input_text_with_hint(str_id, hint, value)
+    else:
+        changed, value = imgui.input_text(str_id, value)
+
+    lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+    cursor_after_input = imgui.get_cursor_screen_pos()
+    color = imgui.color_convert_float4_to_u32(imgui.get_style_color_vec4(imgui.Col_.text_disabled))
+    radius = max(2.5, (hi.y - lo.y) * 0.16)
+    icon_step = max(radius * 3.6, hi.y - lo.y)
+    search_center = imgui.ImVec2(
+        hi.x - radius * 2.7,
+        (lo.y + hi.y) * 0.5 - radius * 0.2,
+    )
+    draw_list = imgui.get_window_draw_list()
+    draw_list.add_circle(search_center, radius, color, 12, 1.2)
+    draw_list.add_line(
+        imgui.ImVec2(
+            search_center.x + radius * 0.70,
+            search_center.y + radius * 0.70,
+        ),
+        imgui.ImVec2(
+            search_center.x + radius * 1.55,
+            search_center.y + radius * 1.55,
+        ),
+        color,
+        1.2,
+    )
+    search_lo = imgui.ImVec2(search_center.x - icon_step * 0.5, lo.y)
+    search_hi = imgui.ImVec2(search_center.x + icon_step * 0.5, hi.y)
+    if imgui.is_mouse_hovering_rect(search_lo, search_hi):
+        imgui.set_tooltip(search_tooltip)
+
+    if value:
+        clear_center = imgui.ImVec2(
+            search_center.x - icon_step,
+            (lo.y + hi.y) * 0.5,
+        )
+        clear_lo = imgui.ImVec2(clear_center.x - icon_step * 0.5, lo.y)
+        clear_hi = imgui.ImVec2(clear_center.x + icon_step * 0.5, hi.y)
+        imgui.set_cursor_screen_pos(clear_lo)
+        identifier = str_id.partition("##")[2] or str_id
+        clear_clicked = imgui.invisible_button(
+            f"##clear_{identifier}",
+            imgui.ImVec2(clear_hi.x - clear_lo.x, clear_hi.y - clear_lo.y),
+        )
+        clear_hovered = imgui.is_item_hovered()
+        imgui.set_cursor_screen_pos(cursor_after_input)
+        clear_color = (
+            imgui.color_convert_float4_to_u32(imgui.get_style_color_vec4(imgui.Col_.text))
+            if clear_hovered
+            else color
+        )
+        arm = radius * 0.88
+        draw_list.add_line(
+            imgui.ImVec2(clear_center.x - arm, clear_center.y - arm),
+            imgui.ImVec2(clear_center.x + arm, clear_center.y + arm),
+            clear_color,
+            1.4,
+        )
+        draw_list.add_line(
+            imgui.ImVec2(clear_center.x + arm, clear_center.y - arm),
+            imgui.ImVec2(clear_center.x - arm, clear_center.y + arm),
+            clear_color,
+            1.4,
+        )
+        if clear_hovered:
+            imgui.set_mouse_cursor(imgui.MouseCursor_.hand)
+            imgui.set_tooltip(clear_tooltip)
+        if clear_clicked:
+            value = ""
+            changed = True
+            imgui.set_keyboard_focus_here(-1)
+    return changed, value
+
+
 def labeled(label: str, value: str) -> None:
     imgui.table_next_row()
     imgui.table_next_column()
+    imgui.align_text_to_frame_padding()
     imgui.text_disabled(label)
     imgui.table_next_column()
+    imgui.align_text_to_frame_padding()
     imgui.text(value)
 
 
 def begin_kv_table(str_id: str) -> bool:
-    return imgui.begin_table(
-        str_id, 2, imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.row_bg
+    return imgui.begin_table(str_id, 2, imgui.TableFlags_.sizing_stretch_prop)
+
+
+def themed_checkbox(
+    label: str,
+    value: bool,
+    theme: Theme = THEME,
+) -> tuple[bool, bool]:
+    """Draw a neutral checkbox without the platform/default blue selected fill."""
+
+    visible_label = label.partition("##")[0]
+    size = imgui.get_frame_height()
+    clicked = imgui.invisible_button(label, imgui.ImVec2(size, size))
+    hovered = imgui.is_item_hovered()
+    active = imgui.is_item_active()
+    lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+    surface = (
+        theme.bg_frame_active
+        if active or value
+        else theme.bg_frame_hovered
+        if hovered
+        else theme.bg_frame
     )
+    draw = ImguiDraw2D()
+    rounding = min(imgui.get_style().frame_rounding, size * 0.24)
+    draw.rect_filled((lo.x, lo.y), (hi.x, hi.y), surface, rounding=rounding)
+    draw.rect((lo.x, lo.y), (hi.x, hi.y), theme.border, 1.0, rounding=rounding)
+    if value:
+        draw.polyline(
+            (
+                (lo.x + size * 0.22, lo.y + size * 0.52),
+                (lo.x + size * 0.43, lo.y + size * 0.72),
+                (lo.x + size * 0.80, lo.y + size * 0.29),
+            ),
+            theme.primary_bright,
+            max(1.5, size * 0.11),
+        )
+    if visible_label:
+        imgui.same_line()
+        imgui.align_text_to_frame_padding()
+        imgui.text(visible_label)
+    return clicked, not value if clicked else value
+
+
+def segmented_control(
+    str_id: str,
+    labels: tuple[str, ...],
+    selected: int,
+    *,
+    width: float = 0.0,
+    theme: Theme = THEME,
+) -> int:
+    """Draw a compact mutually exclusive button row and return its selected index."""
+
+    if not labels:
+        return 0
+    spacing = imgui.get_style().item_spacing.x
+    available = width if width > 0.0 else imgui.get_content_region_avail().x
+    item_width = max(1.0, (available - spacing * (len(labels) - 1)) / len(labels))
+    result = min(max(0, int(selected)), len(labels) - 1)
+    for index, label in enumerate(labels):
+        if index:
+            imgui.same_line()
+        is_selected = index == result
+        if is_selected:
+            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(*theme.bg_frame_active))
+            imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*theme.primary_bright))
+        clicked = imgui.button(f"{label}##{str_id}-{index}", imgui.ImVec2(item_width, 0.0))
+        if is_selected:
+            imgui.pop_style_color(2)
+        if clicked:
+            result = index
+    return result
 
 
 def button_width(label: str, minimum: float = 0.0) -> float:
@@ -323,7 +493,7 @@ class PanelSet:
             if target is None and translated_title != name:
                 target = imgui.internal.find_window_by_name(name)
             if target is not None and target.dock_node is not None:
-                imgui.set_next_window_dock_id(target.dock_node.id, imgui.Cond_.first_use_ever)
+                imgui.set_next_window_dock_id(target.dock_node.id_, imgui.Cond_.first_use_ever)
 
     @staticmethod
     def _draw_modal(panel: Panel, ctx: PanelContext, title: str) -> None:
@@ -441,7 +611,10 @@ __all__ = [
     "default_panels",
     "is_expanded",
     "labeled",
+    "search_input",
+    "segmented_control",
     "slider_gesture",
+    "themed_checkbox",
     "validate_panels",
     "value_slider",
 ]

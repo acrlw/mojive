@@ -9,7 +9,15 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, ModelAssetInfo, NodeType
-from . import Panel, PanelContext, begin_kv_table, button_row_layout, button_width, labeled
+from . import (
+    Panel,
+    PanelContext,
+    begin_kv_table,
+    button_row_layout,
+    button_width,
+    labeled,
+    search_input,
+)
 
 
 def unique_asset_name(base: str, assets: tuple[ModelAssetInfo, ...], asset_type: str) -> str:
@@ -132,6 +140,16 @@ class AssetsPanel(Panel):
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
 
+    def focus(self, model_id: int, asset_type: str, name: str) -> None:
+        """Open this panel with one model-local asset selected."""
+
+        self.open = True
+        self._model_id = int(model_id)
+        self._asset_type = str(asset_type)
+        self._filter = ""
+        self._selected = (self._model_id, self._asset_type, str(name))
+        self._cache_generation = -1
+
     def draw(self, ctx: PanelContext) -> None:
         models = ctx.session.scene_models
         if not models:
@@ -165,8 +183,12 @@ class AssetsPanel(Panel):
         imgui.separator()
 
         imgui.set_next_item_width(-1.0)
-        _changed, self._filter = imgui.input_text_with_hint(
-            "##asset-filter", "Filter assets...", self._filter
+        _changed, self._filter = search_input(
+            "##asset-filter",
+            self._filter,
+            hint=ctx.tr("Filter assets..."),
+            search_tooltip=ctx.tr("Search assets"),
+            clear_tooltip=ctx.tr("Clear search"),
         )
         types = ("all", *tuple(dict.fromkeys(item.type for item in self._assets)))
         if self._asset_type not in types:

@@ -24,6 +24,9 @@ const LOCAL_PCF_RADIUS: i32 = 1;
 const AREA_PCF_RADIUS: i32 = 3;
 const FORGE_SHADOW_BIAS: vec2f = vec2f(1.0, 2.5);
 const FORGE_SHADOW_MIN_NDL: f32 = 0.15;
+// Local distance maps are R16F. One relative half-float ULP keeps a receiver
+// on the lit side of its quantized floor distance instead of producing rings.
+const LOCAL_DISTANCE_QUANTIZATION_BIAS: f32 = 1.0 / 1024.0;
 
 @group(3) @binding(0) var shadow_atlas: texture_depth_2d;
 @group(3) @binding(1) var local_shadow: texture_2d_array<f32>;
@@ -114,7 +117,10 @@ fn local_bias(slot: i32, dist: f32, normal: vec3f, l: vec3f) -> f32 {
     let ndl = max(dot(normalize(normal), l), FORGE_SHADOW_MIN_NDL);
     let tan_theta = sqrt(max(1.0 - ndl * ndl, 0.0)) / ndl;
     let k = shadow_bias_factors();
-    return dist * lights.local_texel[slot] * (k.x + k.y * tan_theta);
+    return dist * (
+        lights.local_texel[slot] * (k.x + k.y * tan_theta)
+        + LOCAL_DISTANCE_QUANTIZATION_BIAS
+    );
 }
 
 // shadow_sample.glsl local_spot_shadow(): perspective-projected distance map.

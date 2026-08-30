@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 -10 20 20">
+  <!--
+    Design source only. The application never parses this file at runtime.
+    Every icon uses the shared 20 x 20 logical box and currentColor.
+  -->
+  <g id="play" fill="currentColor">
+    <polygon points="-4,-7 7,0 -4,7" />
+  </g>
+  <g id="pause" fill="currentColor">
+    <rect x="-5.5" y="-7" width="4" height="14" rx="0.7" />
+    <rect x="1.5" y="-7" width="4" height="14" rx="0.7" />
+  </g>
+  <g id="step" fill="currentColor">
+    <polygon points="-6,-7 4,0 -6,7" />
+    <rect x="5.5" y="-7" width="2" height="14" rx="0.5" />
+  </g>
+  <g id="stop" fill="currentColor">
+    <rect x="-6" y="-6" width="12" height="12" rx="1.5" />
+  </g>
+  <g id="camera" fill="none" stroke="currentColor" stroke-width="1.4">
+    <rect x="-8" y="-5" width="16" height="11" rx="1.8" />
+    <polyline points="-4.5,-5 -2.4,-8 3.2,-8 5.2,-5" />
+    <circle cx="0.5" cy="0.5" r="3.2" />
+  </g>
+  <g id="light" fill="none" stroke="currentColor" stroke-width="1.35">
+    <circle cx="0" cy="-1.5" r="4.1" />
+    <polyline points="-2.8,2 2.8,2 2,5 -2,5 -2.8,2" />
+    <line x1="0" y1="-8.5" x2="0" y2="-6.2" />
+    <line x1="5" y1="-6.5" x2="6.8" y2="-8.3" />
+    <line x1="-5" y1="-6.5" x2="-6.8" y2="-8.3" />
+    <line x1="6.8" y1="-1.5" x2="9.2" y2="-1.5" />
+    <line x1="-6.8" y1="-1.5" x2="-9.2" y2="-1.5" />
+  </g>
+</svg>

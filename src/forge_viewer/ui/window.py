@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +29,24 @@ glfw: Any = None
 gl: Any = None
 imgui: Any = None
 GlfwRenderer: Any = None
+
+
+def layout_settings_path() -> Path:
+    """Return the persistent ImGui layout file outside the working tree."""
+
+    override = os.environ.get("FORGE_VIEWER_IMGUI_INI")
+    if override:
+        return Path(override).expanduser()
+    config_override = os.environ.get("FORGE_VIEWER_CONFIG_DIR")
+    if config_override:
+        root = Path(config_override).expanduser()
+    elif sys.platform == "darwin":
+        root = Path.home() / "Library" / "Application Support" / "forge-viewer"
+    elif os.name == "nt":
+        root = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "forge-viewer"
+    else:
+        root = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "forge-viewer"
+    return root / "imgui.ini"
 
 
 def layout_scale(ui_scale: float, framebuffer_scale: float) -> float:
@@ -437,8 +456,35 @@ class Window:
             )
             self._build_default_layout()
 
-    _LAYOUT_LEFT = ("Hierarchy", "Assets", "Inspector")
-    _LAYOUT_RIGHT = ("Control", "Joints", "Camera", "Sensors")
+    def reset_layout(self) -> None:
+        """Discard the active docking arrangement and rebuild the product default."""
+
+        if not self.config.docking:
+            return
+        imgui.load_ini_settings_from_memory("")
+        self._ini_existed = False
+        self._layout_done = False
+        if self.dockspace_id:
+            self._build_default_layout()
+            self._save_layout_settings()
+
+    def _save_layout_settings(self) -> None:
+        """Persist an explicit layout reset without waiting for a later ImGui frame."""
+
+        ini = self.config.ini_path or ""
+        if not ini:
+            return
+        try:
+            target = Path(ini)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            imgui.save_ini_settings_to_disk(str(target))
+            self._ini_existed = True
+        except Exception as exc:
+            log.error("Dock layout save failed: {}", exc)
+
+    _LAYOUT_LEFT = ("Hierarchy", "Assets")
+    _LAYOUT_RIGHT_TOP = ("Control", "Joints", "Camera", "Settings", "Sensors")
+    _LAYOUT_RIGHT_BOTTOM = ("Inspector",)
     _LAYOUT_BOTTOM = ("Stats", "Output", "Keyframes", "Plot", "Help", "Info")
 
     def _build_default_layout(self) -> None:
@@ -459,12 +505,19 @@ class Window:
             _, left, rest = ii.dock_builder_split_node_py(root, imgui.Dir.left, 0.22)
             _, right, rest = ii.dock_builder_split_node_py(rest, imgui.Dir.right, 0.30)
             _, bottom, center = ii.dock_builder_split_node_py(rest, imgui.Dir.down, 0.26)
+            _, right_bottom, right_top = ii.dock_builder_split_node_py(
+                right,
+                imgui.Dir.down,
+                0.50,
+            )
 
             ii.dock_builder_dock_window("Viewport", center)
             for name in self._LAYOUT_LEFT:
                 ii.dock_builder_dock_window(name, left)
-            for name in self._LAYOUT_RIGHT:
-                ii.dock_builder_dock_window(name, right)
+            for name in self._LAYOUT_RIGHT_TOP:
+                ii.dock_builder_dock_window(name, right_top)
+            for name in self._LAYOUT_RIGHT_BOTTOM:
+                ii.dock_builder_dock_window(name, right_bottom)
             for name in self._LAYOUT_BOTTOM:
                 ii.dock_builder_dock_window(name, bottom)
             ii.dock_builder_finish(root)

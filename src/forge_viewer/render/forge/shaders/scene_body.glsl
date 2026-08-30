@@ -40,6 +40,12 @@ uniform sampler2D u_reflection0;
 uniform sampler2D u_reflection1;
 uniform sampler2D u_reflection2;
 uniform sampler2D u_reflection3;
+
+// A small positive bias moves grazing, high-frequency surfaces toward the
+// next trilinear mip level before their texels become sub-pixel.  This avoids
+// the large moire bands produced by repeated floor textures while preserving
+// anisotropic detail along the surface.
+const float ALBEDO_MINIFICATION_LOD_BIAS = 1.0;
 uniform vec2 u_reflection_size;
 uniform int u_linear_out;
 uniform vec4 u_fog;              // start, end, fog enabled, haze density
@@ -48,7 +54,9 @@ uniform vec3 u_haze_color;
 
 
 void main() {
-    vec4 texel = v.cube_on > 0.5 ? texture(u_cube_texture, v.cube) : texture(u_texture, v.uv);
+    vec4 texel = v.cube_on > 0.5
+        ? texture(u_cube_texture, v.cube)
+        : texture(u_texture, v.uv, ALBEDO_MINIFICATION_LOD_BIAS);
     vec3 surface = v.color.rgb;
     if (u_classic_lighting != 0) {
         surface = gamma_encode(surface);

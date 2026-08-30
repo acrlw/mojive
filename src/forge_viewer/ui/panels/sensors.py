@@ -33,13 +33,39 @@ class SensorsPanel(Panel):
         _changed, self.sensor_index = imgui.combo("##sensor", self.sensor_index, names)
         sensor = infos[self.sensor_index]
         values = ctx.session.frame.sensors
+        value = (
+            None
+            if values is None
+            else np.asarray(values[sensor.data_adr : sensor.data_adr + sensor.dim])
+        )
 
         if begin_kv_table("sensor_kv"):
             labeled("type", sensor.type.removeprefix("mjSENS_").lower())
             labeled("dimension", str(sensor.dim))
-            if values is None:
+            if value is None:
                 labeled("value", "not produced this frame")
-            else:
-                value = np.asarray(values[sensor.data_adr : sensor.data_adr + sensor.dim])
+            elif sensor.dim <= 6:
                 labeled("value", np.array2string(value, precision=6, separator=", "))
             imgui.end_table()
+        if value is not None and sensor.dim > 6:
+            imgui.separator()
+            imgui.text_disabled("value")
+            formatted = np.array2string(
+                value,
+                precision=6,
+                separator=", ",
+                max_line_width=72,
+            )
+            if imgui.small_button("Copy"):
+                imgui.set_clipboard_text(formatted)
+            imgui.same_line()
+            if imgui.small_button("Open in Plot") and ctx.panels is not None:
+                panel = ctx.panels.get("Plot")
+                focus = getattr(panel, "focus_sensor", None)
+                if callable(focus):
+                    focus(self.sensor_index)
+                ctx.panels.open_panel("Plot")
+            height = min(150.0, 38.0 + 18.0 * max(1, formatted.count("\n") + 1))
+            if imgui.begin_child("sensor_value_block", imgui.ImVec2(0.0, height), 1):
+                imgui.text_wrapped(formatted)
+            imgui.end_child()

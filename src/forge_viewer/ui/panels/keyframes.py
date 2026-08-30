@@ -15,6 +15,8 @@ from ..theme import with_alpha
 from . import Panel, PanelContext, begin_kv_table
 
 _MIN_TIMELINE_SPAN = 1e-6
+_COMMAND_HEIGHT_PT = 28.0
+_COMMAND_ICON_PT = 16.0
 
 
 def unique_keyframe_name(existing: set[str]) -> str:
@@ -108,6 +110,131 @@ def nearest_take_frame(times: Sequence[float], time: float) -> int:
     return slot - 1 if abs(times[slot - 1] - time) <= abs(times[slot] - time) else slot
 
 
+def _draw_command_icon(draw, center, kind: str, color, scale: float) -> None:
+    """Draw one 16 pt transport or keyframe glyph."""
+
+    x, y = (float(center[0]), float(center[1]))
+    s = float(scale)
+    if kind == "record":
+        draw.circle_filled((x, y), 4.5 * s, color, segments=20)
+    elif kind == "play":
+        draw.convex_fill(
+            ((x - 4.5 * s, y - 6.0 * s), (x + 6.0 * s, y), (x - 4.5 * s, y + 6.0 * s)),
+            color,
+        )
+    elif kind == "pause":
+        draw.rect_filled((x - 5.0 * s, y - 6.0 * s), (x - 1.5 * s, y + 6.0 * s), color)
+        draw.rect_filled((x + 1.5 * s, y - 6.0 * s), (x + 5.0 * s, y + 6.0 * s), color)
+    elif kind == "stop":
+        draw.rect_filled((x - 5.5 * s, y - 5.5 * s), (x + 5.5 * s, y + 5.5 * s), color)
+    elif kind in ("first", "previous"):
+        draw.convex_fill(
+            ((x - 5.5 * s, y), (x + 3.5 * s, y - 6.0 * s), (x + 3.5 * s, y + 6.0 * s)),
+            color,
+        )
+        if kind == "first":
+            draw.rect_filled((x - 7.0 * s, y - 6.0 * s), (x - 5.2 * s, y + 6.0 * s), color)
+    elif kind in ("next", "last"):
+        draw.convex_fill(
+            ((x + 5.5 * s, y), (x - 3.5 * s, y - 6.0 * s), (x - 3.5 * s, y + 6.0 * s)),
+            color,
+        )
+        if kind == "last":
+            draw.rect_filled((x + 5.2 * s, y - 6.0 * s), (x + 7.0 * s, y + 6.0 * s), color)
+    elif kind == "clear":
+        draw.line((x - 5.0 * s, y - 5.0 * s), (x + 5.0 * s, y + 5.0 * s), color, 1.8 * s)
+        draw.line((x + 5.0 * s, y - 5.0 * s), (x - 5.0 * s, y + 5.0 * s), color, 1.8 * s)
+    elif kind in ("key-previous", "key-next"):
+        direction = -1.0 if kind == "key-previous" else 1.0
+        diamond_x = x - direction * 2.5 * s
+        draw.convex_fill(
+            (
+                (diamond_x, y - 4.5 * s),
+                (diamond_x + 4.5 * s, y),
+                (diamond_x, y + 4.5 * s),
+                (diamond_x - 4.5 * s, y),
+            ),
+            color,
+        )
+        draw.convex_fill(
+            (
+                (x + direction * 7.0 * s, y),
+                (x + direction * 3.5 * s, y - 3.5 * s),
+                (x + direction * 3.5 * s, y + 3.5 * s),
+            ),
+            color,
+        )
+    elif kind == "view":
+        draw.rect(
+            (x - 7.0 * s, y - 5.0 * s), (x + 7.0 * s, y + 5.0 * s), color, 1.5 * s, rounding=1.5 * s
+        )
+        draw.circle_filled((x, y), 2.0 * s, color, segments=16)
+    else:
+        draw.convex_fill(
+            ((x, y - 6.0 * s), (x + 6.0 * s, y), (x, y + 6.0 * s), (x - 6.0 * s, y)),
+            color,
+        )
+
+
+def _command_button(
+    item_id: str,
+    kind: str,
+    tooltip: str,
+    theme,
+    scale: float,
+    *,
+    label: str = "",
+    enabled: bool = True,
+    selected: bool = False,
+) -> bool:
+    """Render a compact 28 pt semantic button with a vector glyph."""
+
+    scale = float(scale)
+    height = _COMMAND_HEIGHT_PT * scale
+    icon_size = _COMMAND_ICON_PT * scale
+    text_width = float(imgui.calc_text_size(label).x) if label else 0.0
+    width = height if not label else max(92.0 * scale, text_width + icon_size + 24.0 * scale)
+    if not enabled:
+        imgui.begin_disabled()
+    origin = imgui.get_cursor_screen_pos()
+    clicked = imgui.invisible_button(item_id, imgui.ImVec2(width, height))
+    hovered = enabled and imgui.is_item_hovered()
+    active = enabled and imgui.is_item_active()
+    if not enabled:
+        imgui.end_disabled()
+
+    background = (
+        theme.bg_frame_active
+        if selected or active
+        else theme.bg_frame_hovered
+        if hovered
+        else theme.bg_frame
+    )
+    foreground = (
+        theme.text_disabled
+        if not enabled
+        else theme.primary_bright
+        if hovered or selected
+        else theme.text
+    )
+    draw = ImguiDraw2D()
+    lo = (float(origin.x), float(origin.y))
+    hi = (lo[0] + width, lo[1] + height)
+    draw.rect_filled(lo, hi, background, rounding=3.0 * scale)
+    icon_center = (lo[0] + 14.0 * scale, lo[1] + height * 0.5)
+    icon_color = theme.danger if kind == "record" and enabled else foreground
+    _draw_command_icon(draw, icon_center, kind, icon_color, scale)
+    if label:
+        text_height = float(imgui.calc_text_size(label).y)
+        draw.text(
+            (lo[0] + 31.0 * scale, lo[1] + (height - text_height) * 0.5),
+            foreground,
+            label,
+        )
+    imgui.set_item_tooltip(tooltip)
+    return bool(clicked and enabled)
+
+
 class KeyframesPanel(Panel):
     """Edit whole-model state snapshots on a Blender-style time ruler."""
 
@@ -194,66 +321,96 @@ class KeyframesPanel(Panel):
         playing = session.state_take_playing
         cursor = session.state_take_cursor
 
-        imgui.begin_disabled(not supported)
-        if recording:
-            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(*ctx.theme.danger))
-        if imgui.button("Stop Recording" if recording else "Record New Take"):
+        scale = ctx.style_scale
+        imgui.push_style_var(
+            imgui.StyleVar_.item_spacing,
+            imgui.ImVec2(3.0 * scale, 4.0 * scale),
+        )
+        if _command_button(
+            "##take-record",
+            "stop" if recording else "record",
+            "Stop recording" if recording else "Record new take",
+            ctx.theme,
+            scale,
+            label="Stop Recording" if recording else "Record New Take",
+            enabled=supported,
+            selected=recording,
+        ):
             result = ctx.submit(
                 cmd.StopStateTakeRecording() if recording else cmd.StartStateTakeRecording()
             )
             self._error = "" if result.ok else result.message
             if result.ok:
                 self._view_needs_fit = not recording
-        imgui.set_item_tooltip(
-            "Stop recording and pause simulation"
-            if recording
-            else "Start simulation and record a new whole-scene take; replaces the previous take"
-        )
-        if recording:
-            imgui.pop_style_color()
-        imgui.same_line()
-
-        if not take_times or recording:
-            imgui.begin_disabled()
-        for label, target, tooltip in (
-            ("|<##take-first", 0, "First recorded frame"),
-            ("<##take-previous", cursor - 1, "Previous recorded frame"),
+        transport_enabled = bool(supported and take_times and not recording)
+        for kind, target, tooltip in (
+            ("first", 0, "First frame"),
+            ("previous", cursor - 1, "Previous frame"),
         ):
-            if imgui.button(label):
+            imgui.same_line()
+            if _command_button(
+                f"##take-{kind}",
+                kind,
+                tooltip,
+                ctx.theme,
+                scale,
+                enabled=transport_enabled,
+            ):
                 result = ctx.submit(cmd.SeekStateTake(target))
                 self._error = "" if result.ok else result.message
-            imgui.set_item_tooltip(tooltip)
-            imgui.same_line()
-        if imgui.button("Pause" if playing else "Replay"):
+        imgui.same_line()
+        if _command_button(
+            "##take-play-pause",
+            "pause" if playing else "play",
+            "Pause" if playing else "Replay",
+            ctx.theme,
+            scale,
+            enabled=transport_enabled,
+            selected=playing,
+        ):
             result = ctx.submit(cmd.PauseStateTake() if playing else cmd.PlayStateTake())
             self._error = "" if result.ok else result.message
-        imgui.set_item_tooltip("Pause take replay" if playing else "Replay the recorded take")
         imgui.same_line()
-        if imgui.button("Stop##take"):
+        if _command_button(
+            "##take-stop",
+            "stop",
+            "Stop",
+            ctx.theme,
+            scale,
+            enabled=transport_enabled,
+        ):
             result = ctx.submit(cmd.PauseStateTake())
             if result.ok and take_times:
                 result = ctx.submit(cmd.SeekStateTake(0))
             self._error = "" if result.ok else result.message
-        imgui.set_item_tooltip("Stop replay and return to the first recorded frame")
-        imgui.same_line()
-
-        for label, target, tooltip in (
-            (">##take-next", cursor + 1, "Next recorded frame"),
-            (">|##take-last", len(take_times) - 1, "Last recorded frame"),
+        for kind, target, tooltip in (
+            ("next", cursor + 1, "Next frame"),
+            ("last", len(take_times) - 1, "Last frame"),
         ):
-            if imgui.button(label):
+            imgui.same_line()
+            if _command_button(
+                f"##take-{kind}",
+                kind,
+                tooltip,
+                ctx.theme,
+                scale,
+                enabled=transport_enabled,
+            ):
                 result = ctx.submit(cmd.SeekStateTake(target))
                 self._error = "" if result.ok else result.message
-            imgui.set_item_tooltip(tooltip)
-            imgui.same_line()
-        if imgui.button("Clear Take"):
+        imgui.same_line()
+        if _command_button(
+            "##take-clear",
+            "clear",
+            "Clear take",
+            ctx.theme,
+            scale,
+            enabled=transport_enabled,
+        ):
             result = ctx.submit(cmd.ClearStateTake())
             self._error = "" if result.ok else result.message
             if result.ok:
                 self._view_needs_fit = True
-        if not take_times or recording:
-            imgui.end_disabled()
-        imgui.end_disabled()
 
         recording = session.state_take_recording
         playing = session.state_take_playing
@@ -279,13 +436,25 @@ class KeyframesPanel(Panel):
             imgui.text_disabled("no recorded take")
         else:
             imgui.text_disabled("state recording unavailable")
+        imgui.pop_style_var()
 
     def _draw_keyframe_toolbar(
         self, ctx: PanelContext, keyframes: tuple[KeyframeInfo, ...], editable: bool
     ) -> None:
-        if not editable:
-            imgui.begin_disabled()
-        if imgui.button("Capture Snapshot"):
+        scale = ctx.style_scale
+        imgui.push_style_var(
+            imgui.StyleVar_.item_spacing,
+            imgui.ImVec2(3.0 * scale, 4.0 * scale),
+        )
+        if _command_button(
+            "##capture-snapshot",
+            "key",
+            "Capture snapshot" if editable else "Pause to edit (Space)",
+            ctx.theme,
+            scale,
+            label="Capture Snapshot",
+            enabled=editable,
+        ):
             name = unique_keyframe_name({key.name for key in keyframes})
             result = ctx.submit(cmd.AddModelKeyframe(self._model_id, name))
             if result.ok:
@@ -295,27 +464,33 @@ class KeyframesPanel(Panel):
                 self._error = ""
             else:
                 self._error = result.message
-        imgui.set_item_tooltip("Persist the current state as a keyframe for the selected model")
-        if not editable:
-            imgui.end_disabled()
-            imgui.set_item_tooltip("Pause the simulation before capturing a keyframe")
-
+        navigation_enabled = bool(keyframes and editable)
+        for kind, direction, tooltip in (
+            ("key-previous", -1, "Previous key"),
+            ("key-next", 1, "Next key"),
+        ):
+            imgui.same_line()
+            if _command_button(
+                f"##{kind}",
+                kind,
+                tooltip if editable else "Pause to edit (Space)",
+                ctx.theme,
+                scale,
+                enabled=navigation_enabled,
+            ):
+                self._load_neighbor(ctx, keyframes, direction)
         imgui.same_line()
-        if not keyframes or not editable:
-            imgui.begin_disabled()
-        if imgui.button("Previous Key"):
-            self._load_neighbor(ctx, keyframes, -1)
-        imgui.same_line()
-        if imgui.button("Next Key"):
-            self._load_neighbor(ctx, keyframes, 1)
-        if not keyframes or not editable:
-            imgui.end_disabled()
-
-        imgui.same_line()
-        if imgui.button("View All"):
+        if _command_button(
+            "##key-view-all",
+            "view",
+            "View all",
+            ctx.theme,
+            scale,
+        ):
             self._view_needs_fit = True
         imgui.same_line()
         imgui.text_disabled(f"{self._playhead:g} s  ·  {len(keyframes)} snapshot(s)")
+        imgui.pop_style_var()
 
     def _draw_dope_sheet(
         self,
