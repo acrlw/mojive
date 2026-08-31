@@ -19,6 +19,7 @@ from imgui_bundle import imgui
 from PIL import Image
 
 from forge_viewer import gizmo as gizmo_geometry
+from forge_viewer.tools.tool_icons import render_rotate_shell_icon
 from forge_viewer.types import CameraView
 from forge_viewer.ui import gizmo as gizmo_ui
 from forge_viewer.ui import theme as theme_mod
@@ -94,6 +95,11 @@ OVERLAY_ICON_RADIUS = 10.0
 OVERLAY_STATE_RADIUS = 16.0
 OVERLAY_SHELL_RADIUS = 22.0
 OVERLAY_CENTER_STEP = 34.0
+ROTATE_TEXTURE_SIZE = 256
+ROTATE_TEXTURE_CANVAS = 32.0
+
+_rotate_texture_key: tuple[float, float, str] | None = None
+_rotate_texture_id: int | None = None
 
 # Accepted M8 hinge specimen. The arc is sampled once at import; each frame
 # performs only scale + translation before handing the points to Draw2D.
@@ -379,6 +385,16 @@ def _draw_tool_icon(
     surface_color,
     frame_space: str,
 ) -> None:
+    if kind == "rotate":
+        _draw_rotate_shell_texture(
+            center,
+            color,
+            scale,
+            stroke_width,
+            rotate_ring_gap,
+            rotate_ring_cap,
+        )
+        return
     draw_tool_glyph(
         draw,
         center,
@@ -394,6 +410,97 @@ def _draw_tool_icon(
             rotate_ring_cap=rotate_ring_cap,
         ),
     )
+
+
+def _rotate_shell_texture(
+    stroke_width: float,
+    rotate_ring_gap: float,
+    rotate_ring_cap: str,
+) -> int:
+    """Upload the exact transparent-shell composite used by the icon exporter."""
+
+    global _rotate_texture_id, _rotate_texture_key
+    key = (float(stroke_width), float(rotate_ring_gap), str(rotate_ring_cap))
+    if _rotate_texture_id is not None and _rotate_texture_key == key:
+        return _rotate_texture_id
+
+    from OpenGL import GL as gl
+
+    if _rotate_texture_id is not None:
+        gl.glDeleteTextures([_rotate_texture_id])
+    geometry = replace(
+        OVERLAY_GEOMETRY,
+        tool_stroke=stroke_width,
+        rotate_ring_gap=rotate_ring_gap,
+        rotate_ring_cap=rotate_ring_cap,
+    )
+    image = render_rotate_shell_icon(
+        ROTATE_TEXTURE_SIZE,
+        geometry,
+        foreground=(255, 255, 255, 255),
+    )
+    pixels = np.ascontiguousarray(image, dtype=np.uint8)
+    texture_id = int(gl.glGenTextures(1))
+    previous_texture = int(gl.glGetIntegerv(gl.GL_TEXTURE_BINDING_2D))
+    previous_unpack = int(gl.glGetIntegerv(gl.GL_UNPACK_ALIGNMENT))
+    try:
+        gl.glBindTexture(gl.GL_TEXTURE_2D, texture_id)
+        gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexImage2D(
+            gl.GL_TEXTURE_2D,
+            0,
+            gl.GL_RGBA8,
+            ROTATE_TEXTURE_SIZE,
+            ROTATE_TEXTURE_SIZE,
+            0,
+            gl.GL_RGBA,
+            gl.GL_UNSIGNED_BYTE,
+            pixels,
+        )
+    finally:
+        gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, previous_unpack)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, previous_texture)
+    _rotate_texture_key = key
+    _rotate_texture_id = texture_id
+    return texture_id
+
+
+def _draw_rotate_shell_texture(
+    center,
+    color,
+    scale: float,
+    stroke_width: float,
+    rotate_ring_gap: float,
+    rotate_ring_cap: str,
+) -> None:
+    texture_id = _rotate_shell_texture(stroke_width, rotate_ring_gap, rotate_ring_cap)
+    half_size = ROTATE_TEXTURE_CANVAS * 0.5 * scale
+    lo = imgui.ImVec2(center[0] - half_size, center[1] - half_size)
+    hi = imgui.ImVec2(center[0] + half_size, center[1] + half_size)
+    tint = imgui.color_convert_float4_to_u32(imgui.ImVec4(*color))
+    imgui.get_window_draw_list().add_image(
+        imgui.ImTextureRef(texture_id),
+        lo,
+        hi,
+        imgui.ImVec2(0.0, 0.0),
+        imgui.ImVec2(1.0, 1.0),
+        tint,
+    )
+
+
+def _release_rotate_shell_texture() -> None:
+    global _rotate_texture_id, _rotate_texture_key
+    if _rotate_texture_id is None:
+        return
+    from OpenGL import GL as gl
+
+    gl.glDeleteTextures([_rotate_texture_id])
+    _rotate_texture_id = None
+    _rotate_texture_key = None
 
 
 def _draw_tool_column(draw: ImguiDraw2D, origin, scale: float, state: ProbeState) -> None:
@@ -3373,12 +3480,12 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         draw.text(
             (labels_x, content_y + 4.0),
             title_color,
-            "Runtime glyph paths · 1.8× inspection",
+            "Product scale · 1.8× inspection",
         )
         draw.text(
             (labels_x, content_y + 24.0 * scale),
             note_color,
-            "Same shared paths; only the inspection magnification differs.",
+            "Rotate uses the cyclic transparent-shell composite.",
         )
         product_centers = (
             shell_radius,
@@ -3893,6 +4000,7 @@ def render(
         output.parent.mkdir(parents=True, exist_ok=True)
         image.save(output)
     finally:
+        _release_rotate_shell_texture()
         window.close()
 
 

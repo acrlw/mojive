@@ -15,6 +15,7 @@ from ..ui.viewport_widgets import (
     FILLED_GLYPH_STROKE_SCALE,
     OVERLAY_GEOMETRY,
     TOOL_GLYPH_SCALE,
+    OverlayGeometry,
     _rotate_stroke_outline,
     _transform_path,
     draw_tool_glyph,
@@ -113,6 +114,84 @@ class _PillowDraw2D:
         self.draw.text((x, y), text, fill=_rgba(color), font=font)
 
 
+def render_rotate_shell_icon(
+    size: int,
+    geometry: OverlayGeometry = OVERLAY_GEOMETRY,
+    *,
+    foreground: tuple[int, int, int, int] = _FOREGROUND,
+    shell: tuple[int, int, int, int] | None = None,
+) -> Image.Image:
+    """Render the cyclic rotate glyph with either visible or transparent shells."""
+
+    working_size = int(size) * _SUPERSAMPLE
+    scale = working_size * _GLYPH_SCALE_FOR_CANVAS
+    center = (working_size * 0.5, working_size * 0.5)
+    glyph_scale = scale * TOOL_GLYPH_SCALE
+    inner_core_stroke = geometry.tool_stroke * FILLED_GLYPH_STROKE_SCALE
+    core_local_width = inner_core_stroke / TOOL_GLYPH_SCALE
+    shell_local_width = (inner_core_stroke + 2.0 * geometry.rotate_ring_gap) / TOOL_GLYPH_SCALE
+
+    states = []
+    for path in _ROTATE_HALF_RINGS:
+        core_mask = Image.new("L", (working_size, working_size), 0)
+        shell_mask = Image.new("L", (working_size, working_size), 0)
+        core_path = _transform_path(
+            _rotate_stroke_outline(path, core_local_width, geometry.rotate_ring_cap),
+            center[0],
+            center[1],
+            glyph_scale,
+        )
+        shell_path = _transform_path(
+            _rotate_stroke_outline(path, shell_local_width, geometry.rotate_ring_cap),
+            center[0],
+            center[1],
+            glyph_scale,
+        )
+        ImageDraw.Draw(core_mask).polygon(core_path, fill=255)
+        ImageDraw.Draw(shell_mask).polygon(shell_path, fill=255)
+        core_pixels = np.asarray(core_mask) > 0
+        shell_pixels = np.asarray(shell_mask) > 0
+        states.append(np.where(core_pixels, 2, shell_pixels).astype(np.uint8))
+
+    ring_states = np.stack(states)
+    active = ring_states > 0
+    active_count = np.sum(active, axis=0)
+    composed = np.zeros((working_size, working_size), np.uint8)
+    for index in range(3):
+        only_ring = (active_count == 1) & active[index]
+        composed[only_ring] = ring_states[index][only_ring]
+    # Path order is Y, X, Z. Each tuple is (front, back).
+    for front, back in ((0, 1), (1, 2), (2, 0)):
+        crossing = (active_count == 2) & active[front] & active[back]
+        composed[crossing] = ring_states[front][crossing]
+    triple_overlap = active_count == 3
+    composed[triple_overlap] = np.max(ring_states[:, triple_overlap], axis=0)
+
+    image = Image.new("RGBA", (working_size, working_size), _TRANSPARENT)
+    draw = _PillowDraw2D(image, scale)
+    color = tuple(channel / 255.0 for channel in foreground)
+    draw.circle(
+        center,
+        10.0 * glyph_scale,
+        color,
+        geometry.tool_stroke * scale,
+        segments=48,
+    )
+    image_bounds = (0, 0, working_size, working_size)
+    if shell is not None:
+        shell_mask = Image.fromarray(
+            np.where(composed == 1, 255, 0).astype(np.uint8),
+            "L",
+        )
+        image.paste(shell, image_bounds, shell_mask)
+    visible_mask = Image.fromarray(
+        np.where(composed == 2, 255, 0).astype(np.uint8),
+        "L",
+    )
+    image.paste(foreground, image_bounds, visible_mask)
+    return image.resize((size, size), Image.Resampling.LANCZOS)
+
+
 def export_icons(output: Path, size: int = 1024) -> tuple[Path, ...]:
     """Write each production glyph to its own transparent square canvas."""
 
@@ -174,69 +253,12 @@ def export_icons(output: Path, size: int = 1024) -> tuple[Path, ...]:
         checker.alpha_composite(icon)
         return checker
 
-    # Design probes: compose complete shell/core strokes with local cyclic
-    # depth (Y over X, X over Z, Z over Y), then either show shell pixels in
-    # black or leave those same pixels transparent.
-    glyph_scale = scale * TOOL_GLYPH_SCALE
-    core_width = OVERLAY_GEOMETRY.tool_stroke * scale
-    inner_core_stroke = OVERLAY_GEOMETRY.tool_stroke * FILLED_GLYPH_STROKE_SCALE
-    core_local_width = inner_core_stroke / TOOL_GLYPH_SCALE
-    shell_local_width = (
-        inner_core_stroke + 2.0 * OVERLAY_GEOMETRY.rotate_ring_gap
-    ) / TOOL_GLYPH_SCALE
-    image_bounds = (0, 0, working_size, working_size)
+    # Design probes: show the same local cyclic shell composition with the
+    # shell pixels either black or transparent.
     for cap in ("butt", "round"):
-        states = []
-        for path in _ROTATE_HALF_RINGS:
-            core_mask = Image.new("L", (working_size, working_size), 0)
-            shell_mask = Image.new("L", (working_size, working_size), 0)
-            core_path = _transform_path(
-                _rotate_stroke_outline(path, core_local_width, cap),
-                center[0],
-                center[1],
-                glyph_scale,
-            )
-            shell_path = _transform_path(
-                _rotate_stroke_outline(path, shell_local_width, cap),
-                center[0],
-                center[1],
-                glyph_scale,
-            )
-            ImageDraw.Draw(core_mask).polygon(core_path, fill=255)
-            ImageDraw.Draw(shell_mask).polygon(shell_path, fill=255)
-            core_pixels = np.asarray(core_mask) > 0
-            shell_pixels = np.asarray(shell_mask) > 0
-            states.append(np.where(core_pixels, 2, shell_pixels).astype(np.uint8))
-
-        ring_states = np.stack(states)
-        active = ring_states > 0
-        active_count = np.sum(active, axis=0)
-        composed = np.zeros((working_size, working_size), np.uint8)
-        for index in range(3):
-            only_ring = (active_count == 1) & active[index]
-            composed[only_ring] = ring_states[index][only_ring]
-        # Path order is Y, X, Z. Each tuple is (front, back).
-        for front, back in ((0, 1), (1, 2), (2, 0)):
-            crossing = (active_count == 2) & active[front] & active[back]
-            composed[crossing] = ring_states[front][crossing]
-        triple_overlap = active_count == 3
-        composed[triple_overlap] = np.max(ring_states[:, triple_overlap], axis=0)
-
-        black_mask = Image.fromarray(np.where(composed == 1, 255, 0).astype(np.uint8), "L")
-        visible_mask = Image.fromarray(np.where(composed == 2, 255, 0).astype(np.uint8), "L")
-
-        shell = Image.new("RGBA", (working_size, working_size), _TRANSPARENT)
-        shell_draw2d = _PillowDraw2D(shell, scale)
-        shell_draw2d.circle(center, 10.0 * glyph_scale, foreground, core_width, segments=48)
-        shell.paste(_BLACK, image_bounds, black_mask)
-        shell.paste(_FOREGROUND, image_bounds, visible_mask)
-
-        keyed_image = Image.new("RGBA", (working_size, working_size), _TRANSPARENT)
-        keyed_draw2d = _PillowDraw2D(keyed_image, scale)
-        keyed_draw2d.circle(center, 10.0 * glyph_scale, foreground, core_width, segments=48)
-        keyed_image.paste(_FOREGROUND, image_bounds, visible_mask)
-        shell = shell.resize((size, size), Image.Resampling.LANCZOS)
-        keyed_image = keyed_image.resize((size, size), Image.Resampling.LANCZOS)
+        geometry = replace(OVERLAY_GEOMETRY, rotate_ring_cap=cap)
+        shell = render_rotate_shell_icon(size, geometry, shell=_BLACK)
+        keyed_image = render_rotate_shell_icon(size, geometry)
         for stem, icon in (
             (f"rotate-black-shell-{cap}", shell),
             (f"rotate-transparent-shell-{cap}", keyed_image),
