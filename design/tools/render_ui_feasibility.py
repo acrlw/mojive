@@ -223,7 +223,7 @@ class ProbeState:
     construction_playback_scale: float = 3.0
     construction_tool_scale: float = 1.5
     tool_stroke_width: float = OVERLAY_GEOMETRY.tool_stroke
-    rotate_ring_gap: float = OVERLAY_GEOMETRY.rotate_ring_gap
+    rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio
     rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap
     hint_control_height: int = int(OVERLAY_GEOMETRY.hint_control_height)
     hint_padding_x: int = int(OVERLAY_GEOMETRY.hint_padding_x)
@@ -373,7 +373,7 @@ def _draw_tool_icon(
     scale: float,
     kind: str,
     stroke_width: float,
-    rotate_ring_gap: float,
+    rotate_ring_gap_ratio: float,
     rotate_ring_cap: str,
     surface_color,
     frame_space: str,
@@ -389,7 +389,7 @@ def _draw_tool_icon(
         replace(
             OVERLAY_GEOMETRY,
             tool_stroke=stroke_width,
-            rotate_ring_gap=rotate_ring_gap,
+            rotate_ring_gap_ratio=rotate_ring_gap_ratio,
             rotate_ring_cap=rotate_ring_cap,
         ),
     )
@@ -444,7 +444,7 @@ def _draw_tool_column(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                 icon_scale,
                 current,
                 state.tool_stroke_width,
-                state.rotate_ring_gap,
+                state.rotate_ring_gap_ratio,
                 state.rotate_ring_cap,
                 surface_color,
                 state.gizmo_space,
@@ -3065,13 +3065,13 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
             2.2,
             "%.2f px",
         )
-        _property_label("Ring gap")
-        _, state.rotate_ring_gap = imgui.slider_float(
-            "##geometry-ring-gap",
-            state.rotate_ring_gap,
-            0.3,
-            1.0,
-            "%.2f px",
+        _property_label("Gap / stroke")
+        _, state.rotate_ring_gap_ratio = imgui.slider_float(
+            "##geometry-ring-gap-ratio",
+            state.rotate_ring_gap_ratio,
+            0.25,
+            0.9,
+            "%.2fx",
         )
         _property_label("Ring caps")
         cap_index = 1 if state.rotate_ring_cap == "round" else 0
@@ -3131,7 +3131,7 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         state.construction_playback_scale = 3.0
         state.construction_tool_scale = 1.5
         state.tool_stroke_width = OVERLAY_GEOMETRY.tool_stroke
-        state.rotate_ring_gap = OVERLAY_GEOMETRY.rotate_ring_gap
+        state.rotate_ring_gap_ratio = OVERLAY_GEOMETRY.rotate_ring_gap_ratio
         state.rotate_ring_cap = OVERLAY_GEOMETRY.rotate_ring_cap
         state.hint_control_height = int(OVERLAY_GEOMETRY.hint_control_height)
         state.hint_padding_x = int(OVERLAY_GEOMETRY.hint_padding_x)
@@ -3415,7 +3415,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                 product_tool_scale,
                 "frame",
                 state.tool_stroke_width,
-                state.rotate_ring_gap,
+                state.rotate_ring_gap_ratio,
                 state.rotate_ring_cap,
                 CONCEPT_THEME.bg_child,
                 space,

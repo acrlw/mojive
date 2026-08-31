@@ -82,7 +82,7 @@ def test_default_overlay_scale_preserves_shared_radial_steps():
         geometry.divider_width,
         geometry.tool_stroke,
         geometry.rotate_ring_gap,
-    ) == pytest.approx((10.0, 8.0, 42.0, 42.0, 10.0, 20.0, 1.46, 0.5))
+    ) == pytest.approx((10.0, 8.0, 42.0, 42.0, 10.0, 20.0, 1.46, 0.73))
     assert geometry.rotate_ring_cap == "round"
     assert geometry.state_radius - geometry.icon_radius == pytest.approx(geometry.radial_step)
     assert geometry.shell_radius - geometry.state_radius == pytest.approx(geometry.radial_step)
@@ -221,9 +221,23 @@ def test_rotate_glyph_uses_antialiased_transparent_knockout_breaks():
 def test_rotate_glyph_uses_cyclic_axis_occlusion():
     rings = _rotate_visible_ring_polygons(
         OVERLAY_GEOMETRY.tool_stroke,
-        OVERLAY_GEOMETRY.rotate_ring_gap,
+        OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
         "butt",
     )
+
+    assert tuple(len(ring) for ring in rings) == (2, 2, 2)
+    assert all(_polygon_area(polygon) > 0.0 for ring in rings for polygon in ring)
+    assert OVERLAY_GEOMETRY.rotate_ring_gap_ratio == pytest.approx(0.5)
+    assert OVERLAY_GEOMETRY.rotate_ring_gap == pytest.approx(OVERLAY_GEOMETRY.tool_stroke * 0.5)
+    custom = replace(OVERLAY_GEOMETRY, tool_stroke=2.0, rotate_ring_gap_ratio=0.25)
+    assert custom.rotate_ring_gap == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("stroke", (1.0, 1.44, 2.2))
+@pytest.mark.parametrize("gap_ratio", (0.25, 0.5, 0.9))
+@pytest.mark.parametrize("cap", ("butt", "round"))
+def test_rotate_shell_subtraction_supports_geometry_controls(stroke, gap_ratio, cap):
+    rings = _rotate_visible_ring_polygons(stroke, gap_ratio, cap)
 
     assert tuple(len(ring) for ring in rings) == (2, 2, 2)
     assert all(_polygon_area(polygon) > 0.0 for ring in rings for polygon in ring)

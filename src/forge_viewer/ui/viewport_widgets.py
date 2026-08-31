@@ -31,7 +31,7 @@ class OverlayGeometry:
     tool_group_gap: float = 10.0
     divider_width: float = 20.0
     tool_stroke: float = 1.46
-    rotate_ring_gap: float = 0.5
+    rotate_ring_gap_ratio: float = 0.5
     rotate_ring_cap: str = "round"
     hint_control_height: float = 18.0
     hint_padding_x: float = 16.0
@@ -51,6 +51,10 @@ class OverlayGeometry:
     @property
     def shell_radius(self) -> float:
         return self.state_radius + self.radial_step
+
+    @property
+    def rotate_ring_gap(self) -> float:
+        return self.tool_stroke * self.rotate_ring_gap_ratio
 
 
 @dataclass(frozen=True)
@@ -337,24 +341,28 @@ def _cross2(a, b) -> float:
     return a[0] * b[1] - a[1] * b[0]
 
 
-def _segment_intersection_on_first(start, end, other_start, other_end):
+def _segment_intersection(start, end, other_start, other_end):
     direction = (end[0] - start[0], end[1] - start[1])
     other_direction = (
         other_end[0] - other_start[0],
         other_end[1] - other_start[1],
     )
     denominator = _cross2(direction, other_direction)
-    length = math.hypot(*direction)
-    other_length = math.hypot(*other_direction)
-    if abs(denominator) <= 1e-9 or length <= 1e-9 or other_length <= 1e-9:
+    if abs(denominator) <= 1e-9:
         return None
     offset = (other_start[0] - start[0], other_start[1] - start[1])
     amount = _cross2(offset, other_direction) / denominator
     other_amount = _cross2(offset, direction) / denominator
-    if not (-1e-9 <= amount <= 1.0 + 1e-9 and -1e-9 <= other_amount <= 1.0 + 1e-9):
+    if not (1e-9 < amount < 1.0 - 1e-9 and 1e-9 < other_amount < 1.0 - 1e-9):
         return None
-    crossing_sine = abs(denominator) / (length * other_length)
-    return max(0.0, min(1.0, amount)), crossing_sine
+    return (
+        amount,
+        other_amount,
+        (
+            start[0] + direction[0] * amount,
+            start[1] + direction[1] * amount,
+        ),
+    )
 
 
 def _polygon_area(points) -> float:
@@ -429,94 +437,116 @@ def _rotate_stroke_outline(
     return _counterclockwise(rounded)
 
 
-def _clip_polygon_halfplane(points, origin, normal, threshold: float):
-    """Clip a polygon to the side whose signed distance is at least ``threshold``."""
-
-    if not points:
-        return ()
-
-    def distance(point) -> float:
-        return (point[0] - origin[0]) * normal[0] + (point[1] - origin[1]) * normal[1] - threshold
-
-    clipped = []
-    previous = points[-1]
-    previous_distance = distance(previous)
-    for current in points:
-        current_distance = distance(current)
-        previous_inside = previous_distance >= -1e-9
-        current_inside = current_distance >= -1e-9
-        if previous_inside != current_inside:
-            amount = previous_distance / (previous_distance - current_distance)
-            clipped.append(
-                (
-                    previous[0] + (current[0] - previous[0]) * amount,
-                    previous[1] + (current[1] - previous[1]) * amount,
-                )
-            )
-        if current_inside:
-            clipped.append(current)
+def _point_in_polygon(point, polygon) -> bool:
+    x, y = point
+    inside = False
+    previous = polygon[-1]
+    for current in polygon:
+        if (current[1] > y) != (previous[1] > y):
+            crossing_x = (previous[0] - current[0]) * (y - current[1]) / (
+                previous[1] - current[1]
+            ) + current[0]
+            if x < crossing_x:
+                inside = not inside
         previous = current
-        previous_distance = current_distance
-    if len(clipped) < 3:
-        return ()
-    return _counterclockwise(clipped)
+    return inside
 
 
-def _rotate_crossing(back_path, front_path):
-    for start, end in pairwise(back_path):
-        for front_start, front_end in pairwise(front_path):
-            intersection = _segment_intersection_on_first(
-                start,
-                end,
-                front_start,
-                front_end,
-            )
+def _polygon_difference(subject, clip):
+    """Return simple boundaries for ``subject`` minus one crossing clip polygon."""
+
+    subject_breaks = [[] for _ in subject]
+    clip_breaks = [[] for _ in clip]
+    for subject_index, start in enumerate(subject):
+        end = subject[(subject_index + 1) % len(subject)]
+        for clip_index, clip_start in enumerate(clip):
+            clip_end = clip[(clip_index + 1) % len(clip)]
+            intersection = _segment_intersection(start, end, clip_start, clip_end)
             if intersection is None:
                 continue
-            amount, _crossing_sine = intersection
-            direction = (
-                front_end[0] - front_start[0],
-                front_end[1] - front_start[1],
-            )
-            length = math.hypot(*direction)
-            return (
-                (
-                    start[0] + (end[0] - start[0]) * amount,
-                    start[1] + (end[1] - start[1]) * amount,
-                ),
-                (direction[0] / length, direction[1] / length),
-            )
-    raise RuntimeError("rotate ring paths do not cross")
+            amount, clip_amount, point = intersection
+            subject_breaks[subject_index].append((amount, point))
+            clip_breaks[clip_index].append((clip_amount, point))
+
+    if not any(subject_breaks):
+        return () if _point_in_polygon(subject[0], clip) else (_counterclockwise(subject),)
+
+    edges = []
+
+    def append_boundary(polygon, breaks, other, *, keep_inside: bool, reverse: bool) -> None:
+        for index, start in enumerate(polygon):
+            end = polygon[(index + 1) % len(polygon)]
+            cuts = [(0.0, start), *breaks[index], (1.0, end)]
+            cuts.sort(key=lambda item: item[0])
+            for (_, first), (_, second) in pairwise(cuts):
+                midpoint = (
+                    (first[0] + second[0]) * 0.5,
+                    (first[1] + second[1]) * 0.5,
+                )
+                if _point_in_polygon(midpoint, other) != keep_inside:
+                    continue
+                edges.append((second, first) if reverse else (first, second))
+
+    # Keep subject edges outside the shell. Shell edges inside the subject are
+    # traversed backwards so the remaining visible region stays on the left.
+    append_boundary(subject, subject_breaks, clip, keep_inside=False, reverse=False)
+    append_boundary(clip, clip_breaks, subject, keep_inside=True, reverse=True)
+
+    def key(point) -> tuple[float, float]:
+        return round(point[0], 8), round(point[1], 8)
+
+    outgoing = {}
+    for index, (start, _end) in enumerate(edges):
+        outgoing.setdefault(key(start), []).append(index)
+
+    unused = set(range(len(edges)))
+    polygons = []
+    while unused:
+        edge_index = next(iter(unused))
+        start_key = key(edges[edge_index][0])
+        points = []
+        while True:
+            unused.remove(edge_index)
+            start, end = edges[edge_index]
+            if not points:
+                points.append(start)
+            points.append(end)
+            end_key = key(end)
+            if end_key == start_key:
+                break
+            candidates = [
+                candidate for candidate in outgoing.get(end_key, ()) if candidate in unused
+            ]
+            if len(candidates) != 1:
+                raise RuntimeError("rotate shell subtraction produced an open boundary")
+            edge_index = candidates[0]
+        points.pop()
+        if len(points) >= 3:
+            polygons.append(_counterclockwise(points))
+    return tuple(polygons)
 
 
 @lru_cache(maxsize=32)
 def _rotate_visible_ring_polygons(
     tool_stroke: float,
-    ring_gap: float,
+    ring_gap_ratio: float,
     cap: str,
 ) -> tuple[tuple[tuple[tuple[float, float], ...], ...], ...]:
-    """Cut each ring under one neighbour to produce cyclic local occlusion."""
+    """Subtract each front shell from the ring behind it for cyclic occlusion."""
 
     local_width = tool_stroke / TOOL_GLYPH_SCALE
-    shell_half_width = (0.5 * tool_stroke + ring_gap) / TOOL_GLYPH_SCALE
+    shell_width = tool_stroke * (1.0 + 2.0 * ring_gap_ratio) / TOOL_GLYPH_SCALE
     # Path order is Y, X, Z. These occluders produce Y > X, X > Z, Z > Y.
     occluder_by_ring = (2, 0, 1)
     result = []
     for index, path in enumerate(_ROTATE_HALF_RINGS):
         outline = _rotate_stroke_outline(path, local_width, cap)
-        crossing, front_tangent = _rotate_crossing(
-            path,
+        shell = _rotate_stroke_outline(
             _ROTATE_HALF_RINGS[occluder_by_ring[index]],
+            shell_width,
+            cap,
         )
-        normal = (-front_tangent[1], front_tangent[0])
-        positive = _clip_polygon_halfplane(outline, crossing, normal, shell_half_width)
-        negative = _clip_polygon_halfplane(
-            outline,
-            crossing,
-            (-normal[0], -normal[1]),
-            shell_half_width,
-        )
-        result.append(tuple(polygon for polygon in (positive, negative) if polygon))
+        result.append(_polygon_difference(outline, shell))
     return tuple(result)
 
 
@@ -1065,7 +1095,6 @@ def draw_tool_glyph(
         )
     elif kind == "rotate":
         ring_stroke = stroke
-        inner_ring_stroke = geometry.tool_stroke
         # The screen-rotation path itself is the Tool glyph envelope. Keep its
         # centerline on the construction bound; subtracting half the stroke
         # makes the ring read smaller even when its outer edge is technically
@@ -1073,8 +1102,8 @@ def draw_tool_glyph(
         radius = 10.0 * glyph_scale
         draw.circle(center, radius, color, ring_stroke, segments=48)
         for ring in _rotate_visible_ring_polygons(
-            inner_ring_stroke,
-            geometry.rotate_ring_gap,
+            geometry.tool_stroke,
+            geometry.rotate_ring_gap_ratio,
             geometry.rotate_ring_cap,
         ):
             for local in ring:

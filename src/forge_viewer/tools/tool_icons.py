@@ -107,8 +107,17 @@ class _PillowDraw2D:
     ) -> None:
         del segments
         x, y = center
-        bounds = (x - radius, y - radius, x + radius, y + radius)
-        self.draw.ellipse(bounds, outline=_rgba(color), width=self._width(width))
+        half_width = float(width) * 0.5
+        outer = radius + half_width
+        inner = max(0.0, radius - half_width)
+        self.draw.ellipse(
+            (x - outer, y - outer, x + outer, y + outer),
+            fill=_rgba(color),
+        )
+        self.draw.ellipse(
+            (x - inner, y - inner, x + inner, y + inner),
+            fill=_TRANSPARENT,
+        )
 
     def circle_filled(self, center, radius: float, color, *, segments: int = 0) -> None:
         del segments
@@ -142,9 +151,8 @@ def render_rotate_shell_icon(
     scale = working_size * _GLYPH_SCALE_FOR_CANVAS
     center = (working_size * 0.5, working_size * 0.5)
     glyph_scale = scale * TOOL_GLYPH_SCALE
-    inner_core_stroke = geometry.tool_stroke
-    core_local_width = inner_core_stroke / TOOL_GLYPH_SCALE
-    shell_local_width = (inner_core_stroke + 2.0 * geometry.rotate_ring_gap) / TOOL_GLYPH_SCALE
+    core_local_width = geometry.tool_stroke / TOOL_GLYPH_SCALE
+    shell_local_width = (geometry.tool_stroke + 2.0 * geometry.rotate_ring_gap) / TOOL_GLYPH_SCALE
 
     states = []
     for path in _ROTATE_HALF_RINGS:

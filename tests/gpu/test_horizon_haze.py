@@ -8,6 +8,11 @@ import pytest
 from forge_viewer.render.backend import RenderFlag
 from forge_viewer.tools._harness import OffscreenHarness
 from forge_viewer.types import CameraView
+from forge_viewer.ui.viewport_widgets import (
+    PLAYBACK_CHROME_SCALE,
+    playback_size,
+    viewport_chrome_scale,
+)
 
 pytestmark = pytest.mark.gpu
 
@@ -178,11 +183,29 @@ def test_interactive_viewport_does_not_composite_haze_twice(tmp_path):
 
         assert viewport.shape == (*target.shape[:2], 3)
         assert np.all(target[..., 3] == 255)
-        # Persistent viewport chrome occupies the left edge, top center, and
-        # bottom center.  This upper-left patch sits between the tool column and
-        # playback capsule and remains an unobstructed composition probe.
+        # This upper-left probe sits above the vertically centered Tool Column
+        # and left of the playback capsule. Derive its right edge from current
+        # playback geometry so chrome antialiasing cannot enter the sample when
+        # the overlay proportions change.
         y0, y1 = 8, max(16, target.shape[0] // 8)
-        x0, x1 = target.shape[1] // 8, target.shape[1] // 4
+        style_scale = viewer.window.style_scale
+        overlay_scale = viewer.app._viewport_overlay_scale
+        point_to_pixel = target.shape[1] / viewer.app._viewport_rect[2]
+        playback_scale = viewport_chrome_scale(
+            style_scale,
+            overlay_scale,
+            PLAYBACK_CHROME_SCALE,
+        )
+        playback_width, _ = playback_size(
+            playback_scale,
+            viewer.app.viewport_chrome.playback_controls,
+        )
+        guard = 4.0 * style_scale
+        x0 = round(guard * point_to_pixel)
+        x1 = round(
+            (viewer.app._viewport_rect[2] * 0.5 - playback_width * 0.5 - guard) * point_to_pixel
+        )
+        assert x1 > x0
         np.testing.assert_array_equal(
             viewport[y0:y1, x0:x1],
             target[y0:y1, x0:x1, :3],
