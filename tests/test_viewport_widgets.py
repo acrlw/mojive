@@ -8,6 +8,7 @@ from forge_viewer.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
 from forge_viewer.ui.viewport_widgets import (
     DEFAULT_VIEWPORT_LABELS,
     DEFAULT_VIEWPORT_OVERLAY_SCALE,
+    FILLED_GLYPH_STROKE_SCALE,
     HINT_CHROME_SCALE,
     OVERLAY_CLIP_PADDING,
     OVERLAY_GEOMETRY,
@@ -175,7 +176,9 @@ def test_tool_glyphs_share_one_optical_stroke_standard():
     move_shaft_width = math.dist(move_path[2], move_path[-2])
     move_head_width = math.dist(move_path[1], move_path[-1])
     frame_head_width = math.dist(frame.fills[0][1], frame.fills[0][2])
-    assert move_shaft_width == pytest.approx(OVERLAY_GEOMETRY.tool_stroke * 0.84)
+    assert move_shaft_width == pytest.approx(
+        OVERLAY_GEOMETRY.tool_stroke * FILLED_GLYPH_STROKE_SCALE
+    )
     assert len(rotate.circles) == 1
     assert rotate.circles[0][0][3] == pytest.approx(OVERLAY_GEOMETRY.tool_stroke)
     assert len(rotate.paths) == 6
@@ -206,7 +209,7 @@ def test_rotate_glyph_uses_antialiased_transparent_knockout_breaks():
 
 def test_rotate_glyph_uses_cyclic_axis_occlusion():
     rings = _rotate_visible_ring_polygons(
-        OVERLAY_GEOMETRY.tool_stroke,
+        OVERLAY_GEOMETRY.tool_stroke * FILLED_GLYPH_STROKE_SCALE,
         OVERLAY_GEOMETRY.rotate_ring_gap,
         "butt",
     )

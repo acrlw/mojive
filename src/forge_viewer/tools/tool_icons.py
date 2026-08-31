@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..ui.draw2d import _open_polyline_ribbon
 from ..ui.viewport_widgets import (
+    FILLED_GLYPH_STROKE_SCALE,
     OVERLAY_GEOMETRY,
     TOOL_GLYPH_SCALE,
     _rotate_visible_ring_polygons,
@@ -185,7 +186,7 @@ def export_icons(output: Path, size: int = 1024) -> tuple[Path, ...]:
         paths = tuple(
             _transform_path(local, center[0], center[1], glyph_scale)
             for ring in _rotate_visible_ring_polygons(
-                OVERLAY_GEOMETRY.tool_stroke,
+                OVERLAY_GEOMETRY.tool_stroke * FILLED_GLYPH_STROKE_SCALE,
                 OVERLAY_GEOMETRY.rotate_ring_gap,
                 cap,
             )

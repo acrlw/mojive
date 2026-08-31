@@ -30,8 +30,8 @@ class OverlayGeometry:
     tool_center_step: float = 40.0
     tool_group_gap: float = 10.0
     divider_width: float = 20.0
-    tool_stroke: float = 1.42
-    rotate_ring_gap: float = 1.0
+    tool_stroke: float = 1.44
+    rotate_ring_gap: float = 0.66
     rotate_ring_cap: str = "round"
     hint_control_height: float = 18.0
     hint_padding_x: float = 16.0
@@ -216,6 +216,9 @@ OVERLAY_CLIP_PADDING = 5.0
 # This scale changes only their authored paths; hit regions, state circles, and
 # capsule spacing continue to use the shared overlay geometry.
 TOOL_GLYPH_SCALE = 1.18
+# Filled silhouettes receive AA coverage on both edges and read heavier than
+# stroked axes at the same numeric width. Apply one shared optical correction.
+FILLED_GLYPH_STROKE_SCALE = 0.84
 FRAME_LABEL_MAX_WIDTH = 4.4
 CAPSULE_SURFACE_ALPHA = 0.92
 
@@ -1059,15 +1062,13 @@ def draw_tool_glyph(
                 5.0,
                 9.0,
                 1.75,
-                # A filled silhouette receives AA coverage on both edges and
-                # reads heavier than a stroked path at the same numeric width.
-                # This optical correction matches Rotate and Frame on screen.
-                geometry.tool_stroke * 0.42 / TOOL_GLYPH_SCALE,
+                geometry.tool_stroke * FILLED_GLYPH_STROKE_SCALE * 0.5 / TOOL_GLYPH_SCALE,
             ),
             color,
         )
     elif kind == "rotate":
         ring_stroke = stroke
+        inner_ring_stroke = geometry.tool_stroke * FILLED_GLYPH_STROKE_SCALE
         # The screen-rotation path itself is the Tool glyph envelope. Keep its
         # centerline on the construction bound; subtracting half the stroke
         # makes the ring read smaller even when its outer edge is technically
@@ -1075,7 +1076,7 @@ def draw_tool_glyph(
         radius = 10.0 * glyph_scale
         draw.circle(center, radius, color, ring_stroke, segments=48)
         for ring in _rotate_visible_ring_polygons(
-            geometry.tool_stroke,
+            inner_ring_stroke,
             geometry.rotate_ring_gap,
             geometry.rotate_ring_cap,
         ):
