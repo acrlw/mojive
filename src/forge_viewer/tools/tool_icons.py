@@ -12,8 +12,8 @@ from PIL import Image, ImageDraw, ImageFont
 from ..ui.draw2d import _open_polyline_ribbon
 from ..ui.viewport_widgets import (
     _ROTATE_HALF_RINGS,
-    FILLED_GLYPH_STROKE_SCALE,
     OVERLAY_GEOMETRY,
+    ROTATE_INNER_STROKE_SCALE,
     TOOL_GLYPH_SCALE,
     OverlayGeometry,
     _rotate_stroke_outline,
@@ -127,7 +127,7 @@ def render_rotate_shell_icon(
     scale = working_size * _GLYPH_SCALE_FOR_CANVAS
     center = (working_size * 0.5, working_size * 0.5)
     glyph_scale = scale * TOOL_GLYPH_SCALE
-    inner_core_stroke = geometry.tool_stroke * FILLED_GLYPH_STROKE_SCALE
+    inner_core_stroke = geometry.tool_stroke * ROTATE_INNER_STROKE_SCALE
     core_local_width = inner_core_stroke / TOOL_GLYPH_SCALE
     shell_local_width = (inner_core_stroke + 2.0 * geometry.rotate_ring_gap) / TOOL_GLYPH_SCALE
 

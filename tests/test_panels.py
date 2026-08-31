@@ -327,15 +327,15 @@ def test_settings_is_a_dockable_panel(panels: PanelSet):
 
 
 def test_viewport_chrome_uses_exact_capsule_geometry_and_spacing():
-    assert playback_size(1.0) == pytest.approx((116.0, 44.0))
-    assert tool_column_size(1.0) == pytest.approx((44.0, 174.0))
+    assert playback_size(1.0) == pytest.approx((136.0, 52.0))
+    assert tool_column_size(1.0) == pytest.approx((52.0, 188.0))
 
-    horizontal = np.asarray(capsule_points(10.0, 20.0, 116.0, 44.0))
-    vertical = np.asarray(capsule_points(10.0, 20.0, 44.0, 174.0))
+    horizontal = np.asarray(capsule_points(10.0, 20.0, 136.0, 52.0))
+    vertical = np.asarray(capsule_points(10.0, 20.0, 52.0, 188.0))
     assert horizontal.min(axis=0) == pytest.approx((10.0, 20.0))
-    assert horizontal.max(axis=0) == pytest.approx((126.0, 64.0))
+    assert horizontal.max(axis=0) == pytest.approx((146.0, 72.0))
     assert vertical.min(axis=0) == pytest.approx((10.0, 20.0))
-    assert vertical.max(axis=0) == pytest.approx((54.0, 194.0))
+    assert vertical.max(axis=0) == pytest.approx((62.0, 208.0))
 
 
 def test_language_preference_round_trip(tmp_path, monkeypatch):

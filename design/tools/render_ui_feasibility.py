@@ -228,7 +228,7 @@ class ProbeState:
     tool_group_gap: int = int(OVERLAY_GEOMETRY.tool_group_gap)
     divider_width: int = int(OVERLAY_GEOMETRY.divider_width)
     construction_playback_scale: float = 3.0
-    construction_tool_scale: float = 2.4
+    construction_tool_scale: float = 1.5
     tool_stroke_width: float = OVERLAY_GEOMETRY.tool_stroke
     rotate_ring_gap: float = OVERLAY_GEOMETRY.rotate_ring_gap
     rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap
@@ -3237,7 +3237,7 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         state.tool_group_gap = int(OVERLAY_GEOMETRY.tool_group_gap)
         state.divider_width = int(OVERLAY_GEOMETRY.divider_width)
         state.construction_playback_scale = 3.0
-        state.construction_tool_scale = 2.4
+        state.construction_tool_scale = 1.5
         state.tool_stroke_width = OVERLAY_GEOMETRY.tool_stroke
         state.rotate_ring_gap = OVERLAY_GEOMETRY.rotate_ring_gap
         state.rotate_ring_cap = OVERLAY_GEOMETRY.rotate_ring_cap

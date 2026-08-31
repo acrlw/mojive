@@ -13,6 +13,7 @@ from forge_viewer.ui.viewport_widgets import (
     OVERLAY_CLIP_PADDING,
     OVERLAY_GEOMETRY,
     PLAYBACK_CHROME_SCALE,
+    ROTATE_INNER_STROKE_SCALE,
     TOOL_CHROME_SCALE,
     TOOL_GLYPH_SCALE,
     ToolHint,
@@ -74,10 +75,21 @@ def test_capsule_points_keep_exact_bounds_and_circular_ends(width, height):
 
 def test_default_overlay_scale_preserves_shared_radial_steps():
     geometry = OVERLAY_GEOMETRY
+    assert (
+        geometry.icon_radius,
+        geometry.radial_step,
+        geometry.center_step,
+        geometry.tool_center_step,
+        geometry.tool_group_gap,
+        geometry.divider_width,
+        geometry.tool_stroke,
+        geometry.rotate_ring_gap,
+    ) == pytest.approx((10.0, 8.0, 42.0, 42.0, 10.0, 20.0, 1.46, 1.0))
+    assert geometry.rotate_ring_cap == "round"
     assert geometry.state_radius - geometry.icon_radius == pytest.approx(geometry.radial_step)
     assert geometry.shell_radius - geometry.state_radius == pytest.approx(geometry.radial_step)
-    assert playback_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((145.0, 55.0))
-    assert tool_column_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((55.0, 217.5))
+    assert playback_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((170.0, 65.0))
+    assert tool_column_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((65.0, 235.0))
     assert OVERLAY_GEOMETRY.tool_center_step > OVERLAY_GEOMETRY.state_radius * 2.0
 
 
@@ -179,6 +191,7 @@ def test_tool_glyphs_share_one_optical_stroke_standard():
     assert move_shaft_width == pytest.approx(
         OVERLAY_GEOMETRY.tool_stroke * FILLED_GLYPH_STROKE_SCALE
     )
+    assert ROTATE_INNER_STROKE_SCALE < FILLED_GLYPH_STROKE_SCALE
     assert len(rotate.circles) == 1
     assert rotate.circles[0][0][3] == pytest.approx(OVERLAY_GEOMETRY.tool_stroke)
     assert len(rotate.paths) == 6
@@ -209,7 +222,7 @@ def test_rotate_glyph_uses_antialiased_transparent_knockout_breaks():
 
 def test_rotate_glyph_uses_cyclic_axis_occlusion():
     rings = _rotate_visible_ring_polygons(
-        OVERLAY_GEOMETRY.tool_stroke * FILLED_GLYPH_STROKE_SCALE,
+        OVERLAY_GEOMETRY.tool_stroke * ROTATE_INNER_STROKE_SCALE,
         OVERLAY_GEOMETRY.rotate_ring_gap,
         "butt",
     )

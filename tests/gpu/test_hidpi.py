@@ -142,6 +142,8 @@ def test_hidpi_viewport_overlays_keep_a_hard_clip_after_splitter_collapse(monkey
         viewport_right = viewport_x + viewport_width
         viewport_bottom = viewport_y + viewport_height
         assert viewport_width < 80.0
+        clip_left, clip_top = viewer.window.points_to_pixels((viewport_x, viewport_y))
+        clip_right, clip_bottom = viewer.window.points_to_pixels((viewport_right, viewport_bottom))
 
         clipped_windows = [imgui.internal.find_window_by_name("Playback###viewport_playback")]
         for hit in viewer.app.gizmo.joint_limit_hits:
@@ -155,10 +157,10 @@ def test_hidpi_viewport_overlays_keep_a_hard_clip_after_splitter_collapse(monkey
             commands = [item for item in window.draw_list.cmd_buffer if item.elem_count]
             assert commands
             for item in commands:
-                assert item.clip_rect.x >= viewport_x - 1.0
-                assert item.clip_rect.y >= viewport_y - 1.0
-                assert item.clip_rect.z <= viewport_right + 1.0
-                assert item.clip_rect.w <= viewport_bottom + 1.0
+                assert item.clip_rect.x >= clip_left - 1.0
+                assert item.clip_rect.y >= clip_top - 1.0
+                assert item.clip_rect.z <= clip_right + 1.0
+                assert item.clip_rect.w <= clip_bottom + 1.0
     finally:
         io.add_mouse_button_event(0, False)
         viewer.release()

@@ -25,13 +25,13 @@ class OverlayGeometry:
     """Shared logical-pixel geometry for viewport chrome and its design probe."""
 
     icon_radius: float = 10.0
-    radial_step: float = 6.0
-    center_step: float = 36.0
-    tool_center_step: float = 40.0
+    radial_step: float = 8.0
+    center_step: float = 42.0
+    tool_center_step: float = 42.0
     tool_group_gap: float = 10.0
     divider_width: float = 20.0
-    tool_stroke: float = 1.44
-    rotate_ring_gap: float = 0.66
+    tool_stroke: float = 1.46
+    rotate_ring_gap: float = 1.0
     rotate_ring_cap: str = "round"
     hint_control_height: float = 18.0
     hint_padding_x: float = 16.0
@@ -219,6 +219,10 @@ TOOL_GLYPH_SCALE = 1.18
 # Filled silhouettes receive AA coverage on both edges and read heavier than
 # stroked axes at the same numeric width. Apply one shared optical correction.
 FILLED_GLYPH_STROKE_SCALE = 0.84
+# Three crossing curves concentrate more edge coverage than a single filled
+# arrow shaft. Keep the same Tool stroke source while compensating the rotate
+# cage so its final raster weight matches Move at product scale.
+ROTATE_INNER_STROKE_SCALE = 0.64
 FRAME_LABEL_MAX_WIDTH = 4.4
 CAPSULE_SURFACE_ALPHA = 0.92
 
@@ -1068,7 +1072,7 @@ def draw_tool_glyph(
         )
     elif kind == "rotate":
         ring_stroke = stroke
-        inner_ring_stroke = geometry.tool_stroke * FILLED_GLYPH_STROKE_SCALE
+        inner_ring_stroke = geometry.tool_stroke * ROTATE_INNER_STROKE_SCALE
         # The screen-rotation path itself is the Tool glyph envelope. Keep its
         # centerline on the construction bound; subtracting half the stroke
         # makes the ring read smaller even when its outer edge is technically
