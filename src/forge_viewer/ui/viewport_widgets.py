@@ -31,7 +31,7 @@ class OverlayGeometry:
     tool_group_gap: float = 10.0
     divider_width: float = 20.0
     tool_stroke: float = 1.46
-    rotate_ring_gap: float = 1.0
+    rotate_ring_gap: float = 0.5
     rotate_ring_cap: str = "round"
     hint_control_height: float = 18.0
     hint_padding_x: float = 16.0

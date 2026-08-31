@@ -82,7 +82,7 @@ def test_default_overlay_scale_preserves_shared_radial_steps():
         geometry.divider_width,
         geometry.tool_stroke,
         geometry.rotate_ring_gap,
-    ) == pytest.approx((10.0, 8.0, 42.0, 42.0, 10.0, 20.0, 1.46, 1.0))
+    ) == pytest.approx((10.0, 8.0, 42.0, 42.0, 10.0, 20.0, 1.46, 0.5))
     assert geometry.rotate_ring_cap == "round"
     assert geometry.state_radius - geometry.icon_radius == pytest.approx(geometry.radial_step)
     assert geometry.shell_radius - geometry.state_radius == pytest.approx(geometry.radial_step)

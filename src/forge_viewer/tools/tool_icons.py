@@ -22,10 +22,23 @@ from ..ui.viewport_widgets import (
 
 _SUPERSAMPLE = 4
 _GLYPH_SCALE_FOR_CANVAS = 0.03125
-_FONT_PATH = Path("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf")
+_FONT_PATHS = (
+    Path("/System/Library/Fonts/SFNSMono.ttf"),
+    Path("/System/Library/Fonts/Menlo.ttc"),
+    Path("/System/Library/Fonts/Monaco.ttf"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"),
+    Path("C:/Windows/Fonts/consola.ttf"),
+)
 _FOREGROUND = (220, 223, 227, 255)
 _TRANSPARENT = (0, 0, 0, 0)
 _BLACK = (0, 0, 0, 255)
+
+
+def _mono_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    for path in _FONT_PATHS:
+        if path.is_file():
+            return ImageFont.truetype(str(path), size)
+    return ImageFont.load_default(size=size)
 
 
 def _rgba(color) -> tuple[int, int, int, int]:
@@ -77,6 +90,9 @@ class _PillowDraw2D:
     def convex_fill(self, points, color) -> None:
         self.draw.polygon(self._points(points), fill=_rgba(color))
 
+    def concave_fill(self, points, color) -> None:
+        self.draw.polygon(self._points(points), fill=_rgba(color))
+
     def fringed_concave_fill(self, points, color) -> None:
         self.draw.polygon(self._points(points), fill=_rgba(color))
 
@@ -101,12 +117,12 @@ class _PillowDraw2D:
 
     def centered_label(self, text: str, center, color, max_width: float) -> None:
         font_size = max(1, round(6.4 * self.scale))
-        font = ImageFont.truetype(str(_FONT_PATH), font_size)
+        font = _mono_font(font_size)
         bounds = self.draw.textbbox((0, 0), text, font=font)
         width = bounds[2] - bounds[0]
         if width > max_width:
             font_size = max(1, round(font_size * max_width / width))
-            font = ImageFont.truetype(str(_FONT_PATH), font_size)
+            font = _mono_font(font_size)
             bounds = self.draw.textbbox((0, 0), text, font=font)
         x = center[0] - (bounds[2] + bounds[0]) * 0.5
         y = center[1] - (bounds[3] + bounds[1]) * 0.5
