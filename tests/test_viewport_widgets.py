@@ -8,12 +8,10 @@ from forge_viewer.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
 from forge_viewer.ui.viewport_widgets import (
     DEFAULT_VIEWPORT_LABELS,
     DEFAULT_VIEWPORT_OVERLAY_SCALE,
-    FILLED_GLYPH_STROKE_SCALE,
     HINT_CHROME_SCALE,
     OVERLAY_CLIP_PADDING,
     OVERLAY_GEOMETRY,
     PLAYBACK_CHROME_SCALE,
-    ROTATE_INNER_STROKE_SCALE,
     TOOL_CHROME_SCALE,
     TOOL_GLYPH_SCALE,
     ToolHint,
@@ -138,6 +136,9 @@ class _RecordedGlyph:
     def fringed_concave_fill(self, points, _color):
         self.paths.append(tuple(points))
 
+    def concave_fill(self, points, _color):
+        self.paths.append(tuple(points))
+
     def circle_filled(self, *args, **kwargs):
         self.filled_circles.append((args, kwargs))
 
@@ -172,7 +173,7 @@ def test_move_glyph_is_one_connected_antialiased_outline():
     assert math.dist(tips[0], center) == pytest.approx(math.dist(tips[3], center))
 
 
-def test_tool_glyphs_share_one_optical_stroke_standard():
+def test_tool_glyphs_use_the_configured_stroke_without_hidden_scales():
     center = (20.0, 30.0)
     color = (1.0, 1.0, 1.0, 1.0)
     surface = (0.0,) * 4
@@ -188,10 +189,7 @@ def test_tool_glyphs_share_one_optical_stroke_standard():
     move_shaft_width = math.dist(move_path[2], move_path[-2])
     move_head_width = math.dist(move_path[1], move_path[-1])
     frame_head_width = math.dist(frame.fills[0][1], frame.fills[0][2])
-    assert move_shaft_width == pytest.approx(
-        OVERLAY_GEOMETRY.tool_stroke * FILLED_GLYPH_STROKE_SCALE
-    )
-    assert ROTATE_INNER_STROKE_SCALE < FILLED_GLYPH_STROKE_SCALE
+    assert move_shaft_width == pytest.approx(OVERLAY_GEOMETRY.tool_stroke)
     assert len(rotate.circles) == 1
     assert rotate.circles[0][0][3] == pytest.approx(OVERLAY_GEOMETRY.tool_stroke)
     assert len(rotate.paths) == 6
@@ -222,7 +220,7 @@ def test_rotate_glyph_uses_antialiased_transparent_knockout_breaks():
 
 def test_rotate_glyph_uses_cyclic_axis_occlusion():
     rings = _rotate_visible_ring_polygons(
-        OVERLAY_GEOMETRY.tool_stroke * ROTATE_INNER_STROKE_SCALE,
+        OVERLAY_GEOMETRY.tool_stroke,
         OVERLAY_GEOMETRY.rotate_ring_gap,
         "butt",
     )

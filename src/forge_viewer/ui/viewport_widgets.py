@@ -216,13 +216,6 @@ OVERLAY_CLIP_PADDING = 5.0
 # This scale changes only their authored paths; hit regions, state circles, and
 # capsule spacing continue to use the shared overlay geometry.
 TOOL_GLYPH_SCALE = 1.18
-# Filled silhouettes receive AA coverage on both edges and read heavier than
-# stroked axes at the same numeric width. Apply one shared optical correction.
-FILLED_GLYPH_STROKE_SCALE = 0.84
-# Three crossing curves concentrate more edge coverage than a single filled
-# arrow shaft. Keep the same Tool stroke source while compensating the rotate
-# cage so its final raster weight matches Move at product scale.
-ROTATE_INNER_STROKE_SCALE = 0.64
 FRAME_LABEL_MAX_WIDTH = 4.4
 CAPSULE_SURFACE_ALPHA = 0.92
 
@@ -1066,13 +1059,13 @@ def draw_tool_glyph(
                 5.0,
                 9.0,
                 1.75,
-                geometry.tool_stroke * FILLED_GLYPH_STROKE_SCALE * 0.5 / TOOL_GLYPH_SCALE,
+                geometry.tool_stroke * 0.5 / TOOL_GLYPH_SCALE,
             ),
             color,
         )
     elif kind == "rotate":
         ring_stroke = stroke
-        inner_ring_stroke = geometry.tool_stroke * ROTATE_INNER_STROKE_SCALE
+        inner_ring_stroke = geometry.tool_stroke
         # The screen-rotation path itself is the Tool glyph envelope. Keep its
         # centerline on the construction bound; subtracting half the stroke
         # makes the ring read smaller even when its outer edge is technically
@@ -1086,7 +1079,7 @@ def draw_tool_glyph(
         ):
             for local in ring:
                 path = _transform_path(local, x, y, glyph_scale)
-                draw.fringed_concave_fill(path, color)
+                draw.concave_fill(path, color)
     elif kind == "frame":
         for direction in _FRAME_AXES:
             _draw_axis_arrow_glyph(
