@@ -11,10 +11,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..ui.draw2d import _open_polyline_ribbon
 from ..ui.viewport_widgets import (
+    _ROTATE_HALF_RINGS,
     FILLED_GLYPH_STROKE_SCALE,
     OVERLAY_GEOMETRY,
     TOOL_GLYPH_SCALE,
-    _rotate_visible_ring_polygons,
+    _rotate_stroke_outline,
     _transform_path,
     draw_tool_glyph,
 )
@@ -173,34 +174,67 @@ def export_icons(output: Path, size: int = 1024) -> tuple[Path, ...]:
         checker.alpha_composite(icon)
         return checker
 
-    # Design probes: show the invisible shell in black around the same cyclic
-    # production polygons, then key black to alpha before downsampling.
+    # Design probes: compose complete shell/core strokes with local cyclic
+    # depth (Y over X, X over Z, Z over Y), then either show shell pixels in
+    # black or leave those same pixels transparent.
     glyph_scale = scale * TOOL_GLYPH_SCALE
     core_width = OVERLAY_GEOMETRY.tool_stroke * scale
-    shell_outline = max(1, round(2.0 * OVERLAY_GEOMETRY.rotate_ring_gap * scale))
-    black = tuple(channel / 255.0 for channel in _BLACK)
+    inner_core_stroke = OVERLAY_GEOMETRY.tool_stroke * FILLED_GLYPH_STROKE_SCALE
+    core_local_width = inner_core_stroke / TOOL_GLYPH_SCALE
+    shell_local_width = (
+        inner_core_stroke + 2.0 * OVERLAY_GEOMETRY.rotate_ring_gap
+    ) / TOOL_GLYPH_SCALE
+    image_bounds = (0, 0, working_size, working_size)
     for cap in ("butt", "round"):
-        shell = Image.new("RGBA", (working_size, working_size), _TRANSPARENT)
-        draw = _PillowDraw2D(shell, scale)
-        draw.circle(center, 10.0 * glyph_scale, foreground, core_width, segments=48)
-        paths = tuple(
-            _transform_path(local, center[0], center[1], glyph_scale)
-            for ring in _rotate_visible_ring_polygons(
-                OVERLAY_GEOMETRY.tool_stroke * FILLED_GLYPH_STROKE_SCALE,
-                OVERLAY_GEOMETRY.rotate_ring_gap,
-                cap,
+        states = []
+        for path in _ROTATE_HALF_RINGS:
+            core_mask = Image.new("L", (working_size, working_size), 0)
+            shell_mask = Image.new("L", (working_size, working_size), 0)
+            core_path = _transform_path(
+                _rotate_stroke_outline(path, core_local_width, cap),
+                center[0],
+                center[1],
+                glyph_scale,
             )
-            for local in ring
-        )
-        for path in paths:
-            draw.draw.line((*path, path[0]), fill=_rgba(black), width=shell_outline, joint="curve")
-        for path in paths:
-            draw.draw.polygon(path, fill=_rgba(foreground))
+            shell_path = _transform_path(
+                _rotate_stroke_outline(path, shell_local_width, cap),
+                center[0],
+                center[1],
+                glyph_scale,
+            )
+            ImageDraw.Draw(core_mask).polygon(core_path, fill=255)
+            ImageDraw.Draw(shell_mask).polygon(shell_path, fill=255)
+            core_pixels = np.asarray(core_mask) > 0
+            shell_pixels = np.asarray(shell_mask) > 0
+            states.append(np.where(core_pixels, 2, shell_pixels).astype(np.uint8))
 
-        keyed = np.asarray(shell).copy()
-        black_pixels = (keyed[:, :, 3] > 0) & np.all(keyed[:, :, :3] == 0, axis=2)
-        keyed[black_pixels] = 0
-        keyed_image = Image.fromarray(keyed, "RGBA")
+        ring_states = np.stack(states)
+        active = ring_states > 0
+        active_count = np.sum(active, axis=0)
+        composed = np.zeros((working_size, working_size), np.uint8)
+        for index in range(3):
+            only_ring = (active_count == 1) & active[index]
+            composed[only_ring] = ring_states[index][only_ring]
+        # Path order is Y, X, Z. Each tuple is (front, back).
+        for front, back in ((0, 1), (1, 2), (2, 0)):
+            crossing = (active_count == 2) & active[front] & active[back]
+            composed[crossing] = ring_states[front][crossing]
+        triple_overlap = active_count == 3
+        composed[triple_overlap] = np.max(ring_states[:, triple_overlap], axis=0)
+
+        black_mask = Image.fromarray(np.where(composed == 1, 255, 0).astype(np.uint8), "L")
+        visible_mask = Image.fromarray(np.where(composed == 2, 255, 0).astype(np.uint8), "L")
+
+        shell = Image.new("RGBA", (working_size, working_size), _TRANSPARENT)
+        shell_draw2d = _PillowDraw2D(shell, scale)
+        shell_draw2d.circle(center, 10.0 * glyph_scale, foreground, core_width, segments=48)
+        shell.paste(_BLACK, image_bounds, black_mask)
+        shell.paste(_FOREGROUND, image_bounds, visible_mask)
+
+        keyed_image = Image.new("RGBA", (working_size, working_size), _TRANSPARENT)
+        keyed_draw2d = _PillowDraw2D(keyed_image, scale)
+        keyed_draw2d.circle(center, 10.0 * glyph_scale, foreground, core_width, segments=48)
+        keyed_image.paste(_FOREGROUND, image_bounds, visible_mask)
         shell = shell.resize((size, size), Image.Resampling.LANCZOS)
         keyed_image = keyed_image.resize((size, size), Image.Resampling.LANCZOS)
         for stem, icon in (
