@@ -32,7 +32,10 @@ void main() {
     v_radius = in_radius;
     v_edge = in_edge;
 
-    float pad = in_radius + in_edge + 2.0;
+    // The hollow start ring extends half a core stroke beyond its radius.
+    // Include that stroke as well as the contrast edge and AA guard in the
+    // primitive quad; otherwise large UI scales clip the ring at the quad.
+    float pad = in_radius + 0.5 * in_width + in_edge + 2.0;
     vec2 lo = min(v_a, v_b) - pad;
     vec2 hi = max(v_a, v_b) + pad;
     const vec2 C[6] = vec2[6](

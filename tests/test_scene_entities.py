@@ -12,7 +12,7 @@ from forge_viewer.adapters.base import FrameNeeds, NodeType, SceneFrame, SceneNo
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.gizmo import camera_icon_segments, project
 from forge_viewer.render.backend import BackendCaps
-from forge_viewer.render.debugdraw import DebugDraw, PrimitiveType
+from forge_viewer.render.debugdraw import DebugDraw, Occlusion, PrimitiveType
 from forge_viewer.scene import Scene
 from forge_viewer.session import Session
 from forge_viewer.types import CameraView, Light, LightSet, LightType
@@ -24,6 +24,7 @@ from forge_viewer.ui.gizmo import (
 )
 from forge_viewer.ui.scene_entities import (
     CAMERA_HELPER_SIZE_PT,
+    HELPER_ICON_LAYER,
     HELPER_LAYER,
     LIGHT_HELPER_SCALE_PT,
     SceneEntityHelpers,
@@ -224,8 +225,11 @@ def test_helpers_publish_selected_frustum_and_pick_camera_anchor() -> None:
     helpers = SceneEntityHelpers()
     helpers.publish(backend, session, editor_camera, 800.0, 1.0)
     layer = backend.debug.layer(HELPER_LAYER)
-    # 24 screen-facing camera-glyph segments plus the 12 selected frustum edges.
-    assert layer.count_of(PrimitiveType.LINE) == 36
+    icon_layer = backend.debug.layer(HELPER_ICON_LAYER)
+    assert layer.occlusion is Occlusion.GHOST
+    assert icon_layer.occlusion is Occlusion.ALWAYS
+    assert layer.count_of(PrimitiveType.LINE) == 12
+    assert icon_layer.count_of(PrimitiveType.STROKE) == 24
     assert layer.count_of(PrimitiveType.POINT) == 0
 
     hit = helpers.pick(session, editor_camera, (0.0, 0.0, 1000.0, 800.0), (500.0, 400.0), 1.0)
@@ -300,8 +304,11 @@ def test_view_through_camera_hides_editor_helpers() -> None:
     helpers.publish(backend, session, view, 800.0, 1.0, True)
 
     layer = backend.debug.layer(HELPER_LAYER)
+    icon_layer = backend.debug.layer(HELPER_ICON_LAYER)
     assert layer.count_of(PrimitiveType.LINE) == 0
     assert layer.count_of(PrimitiveType.POINT) == 0
+    assert icon_layer.count_of(PrimitiveType.LINE) == 0
+    assert icon_layer.count_of(PrimitiveType.STROKE) == 0
     assert helpers.pick(session, view, (0.0, 0.0, 1000.0, 800.0), (500.0, 400.0), 1.0, True) == 0
 
 
@@ -322,10 +329,17 @@ def test_unselected_light_helpers_use_semantic_icons_without_direction_clutter()
     SceneEntityHelpers(show_influence=False).publish(backend, session, CameraView(), 800.0, 1.0)
 
     layer = backend.debug.layer(HELPER_LAYER)
+    icon_layer = backend.debug.layer(HELPER_ICON_LAYER)
     assert layer.count_of(PrimitiveType.POINT) == 0
     assert layer.count_of(PrimitiveType.ARROW) == 0
-    assert layer.count_of(PrimitiveType.LINE) == 66
-    assert set(layer._index) == {"lights:icons"}
+    assert layer.count_of(PrimitiveType.LINE) == 0
+    assert icon_layer.count_of(PrimitiveType.LINE) == 30
+    assert icon_layer.count_of(PrimitiveType.STROKE) == 36
+    assert set(icon_layer._index) == {
+        f"light:{object_id}:{part}"
+        for object_id in (node.object_id for node in session.nodes if node.type is NodeType.LIGHT)
+        for part in ("ring", "details")
+    }
 
 
 def test_selected_spot_light_publishes_icon_direction_and_influence() -> None:
@@ -352,8 +366,10 @@ def test_selected_spot_light_publishes_icon_direction_and_influence() -> None:
     SceneEntityHelpers().publish(backend, session, camera, 800.0, 1.0)
 
     layer = backend.debug.layer(HELPER_LAYER)
-    assert {"lights:icons", "lights:directions", f"light:{node.object_id}:range"} <= set(
-        layer._index
+    icon_layer = backend.debug.layer(HELPER_ICON_LAYER)
+    assert {"lights:directions", f"light:{node.object_id}:range"} <= set(layer._index)
+    assert {f"light:{node.object_id}:ring", f"light:{node.object_id}:details"} == set(
+        icon_layer._index
     )
 
 
@@ -362,6 +378,45 @@ def test_light_helper_icon_geometry_is_screen_facing_and_batched() -> None:
     starts, ends = light_icon_segments(positions, CameraView(), 800.0)
     assert starts.shape == ends.shape == (44, 3)
     assert np.all(np.isfinite(starts))
+
+
+def test_scene_entity_icon_geometry_scales_with_its_stroke_width() -> None:
+    camera = CameraView(
+        eye=np.array((0.0, -5.0, 2.0), np.float32),
+        target=np.array((0.0, 0.0, 1.0), np.float32),
+        aspect=1.5,
+    )
+    position = np.array((0.0, 0.0, 1.0), np.float32)
+    represented = CameraView(
+        eye=position,
+        target=np.array((1.0, 0.0, 1.0), np.float32),
+    )
+    rect = (0.0, 0.0, 1200.0, 800.0)
+
+    camera_sizes = []
+    light_sizes = []
+    for ui_scale in (1.0, 3.0):
+        starts, ends = camera_icon_segments(
+            (represented,),
+            camera,
+            rect[3],
+            CAMERA_HELPER_SIZE_PT * ui_scale,
+            visible_only=True,
+        )
+        screen = project(camera, np.concatenate((starts, ends)), rect)
+        camera_sizes.append(float(np.ptp(screen[:, :2], axis=0).max()))
+
+        starts, ends = light_icon_segments(
+            position[None, :],
+            camera,
+            rect[3],
+            ui_scale,
+        )
+        screen = project(camera, np.concatenate((starts, ends)), rect)
+        light_sizes.append(float(np.ptp(screen[:, :2], axis=0).max()))
+
+    assert camera_sizes[1] / camera_sizes[0] == pytest.approx(3.0)
+    assert light_sizes[1] / light_sizes[0] == pytest.approx(3.0)
 
 
 def test_camera_and_light_helper_sizes_are_visually_balanced() -> None:

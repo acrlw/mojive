@@ -10,11 +10,21 @@ from imgui_bundle import imgui
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, NodeType, SceneNode
 from ..draw2d import ImguiDraw2D
-from . import Panel, PanelContext, search_input
+from . import Panel, PanelContext, horizontal_wheel_scroll, search_input
 
 _LARGE_SCENE_NODES = 2_000
 _VISIBLE_ROW_BUDGET = 512
 _TYPE_FILTERS = ("all", "link", "geom", "joint", "site", "camera", "light", "robot", "flex")
+_TYPE_COLUMN_WIDTH_PT = 72.0
+_VISIBILITY_COLUMN_WIDTH_PT = 24.0
+_MIN_NODE_COLUMN_WIDTH_PT = 144.0
+
+
+def hierarchy_shows_type_column(available_width: float, style_scale: float) -> bool:
+    """Keep the node cell wide enough for disclosure and indented names."""
+
+    fixed_width = _TYPE_COLUMN_WIDTH_PT + _VISIBILITY_COLUMN_WIDTH_PT
+    return available_width >= (fixed_width + _MIN_NODE_COLUMN_WIDTH_PT) * style_scale
 
 
 def disclosure_triangle(
@@ -57,6 +67,7 @@ class HierarchyPanel(Panel):
         self._rows_truncated = False
         self._batch_selected: set[int] = set()
         self._open_state: dict[int, bool] = {}
+        self._show_type_column = True
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -104,15 +115,26 @@ class HierarchyPanel(Panel):
             return
 
         table_flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
-        if not imgui.begin_table("hierarchy_rows", 3, table_flags):
+        available_width = float(imgui.get_content_region_avail().x)
+        self._show_type_column = hierarchy_shows_type_column(
+            available_width,
+            ctx.style_scale,
+        )
+        column_count = 3 if self._show_type_column else 2
+        if not imgui.begin_table("hierarchy_rows", column_count, table_flags):
             imgui.end_child()
             return
         imgui.table_setup_column("node", imgui.TableColumnFlags_.width_stretch, 1.0)
+        if self._show_type_column:
+            imgui.table_setup_column(
+                "type",
+                imgui.TableColumnFlags_.width_fixed,
+                _TYPE_COLUMN_WIDTH_PT * ctx.style_scale,
+            )
         imgui.table_setup_column(
-            "type", imgui.TableColumnFlags_.width_fixed, 72.0 * ctx.style_scale
-        )
-        imgui.table_setup_column(
-            "visible", imgui.TableColumnFlags_.width_fixed, 24.0 * ctx.style_scale
+            "visible",
+            imgui.TableColumnFlags_.width_fixed,
+            _VISIBILITY_COLUMN_WIDTH_PT * ctx.style_scale,
         )
 
         self._rows_drawn = 0
@@ -193,6 +215,7 @@ class HierarchyPanel(Panel):
             if index + 1 < len(_TYPE_FILTERS):
                 imgui.same_line()
         imgui.pop_style_var()
+        horizontal_wheel_scroll(step=56.0 * ctx.style_scale)
         imgui.end_child()
 
     def _refresh(self, ctx: PanelContext) -> None:
@@ -357,13 +380,14 @@ class HierarchyPanel(Panel):
                 imgui.text_disabled("Read-only entity")
             imgui.end_popup()
 
-        imgui.table_next_column()
-        type_pos = imgui.get_cursor_screen_pos()
-        type_height = imgui.calc_text_size(str(node.type)).y
-        imgui.set_cursor_screen_pos(
-            imgui.ImVec2(type_pos.x, row_start.y + (row_height - type_height) * 0.5)
-        )
-        imgui.text_disabled(str(node.type))
+        if self._show_type_column:
+            imgui.table_next_column()
+            type_pos = imgui.get_cursor_screen_pos()
+            type_height = imgui.calc_text_size(str(node.type)).y
+            imgui.set_cursor_screen_pos(
+                imgui.ImVec2(type_pos.x, row_start.y + (row_height - type_height) * 0.5)
+            )
+            imgui.text_disabled(str(node.type))
 
         imgui.table_next_column()
         self._visibility_toggle(ctx, node, row_start.y, row_height)
@@ -447,8 +471,14 @@ class HierarchyPanel(Panel):
         center = ((lo.x + hi.x) * 0.5, row_y + row_height * 0.5)
         radius_x = 6.5 * ctx.style_scale
         radius_y = 3.6 * ctx.style_scale
-        base = ctx.theme.primary_bright if hovered else ctx.theme.primary
-        alpha = 1.0 if hovered else 0.58 if node.visible else 0.24
+        base = (
+            ctx.theme.primary_bright
+            if hovered
+            else ctx.theme.primary
+            if node.visible
+            else ctx.theme.text_disabled
+        )
+        alpha = 1.0 if hovered else 0.58
         color = (*base[:3], alpha)
         draw = ImguiDraw2D()
         top = tuple(
@@ -465,12 +495,33 @@ class HierarchyPanel(Panel):
             )
             for index in range(9)
         )
-        # Do not submit the shared left/right endpoints twice: overlapping
-        # antialiased strokes made the old almond look as if its arcs crossed.
-        outline = (*top, *bottom[1:-1])
-        draw.polyline(outline, color, 1.35 * ctx.style_scale, closed=True)
         if node.visible:
+            # Do not submit the shared left/right endpoints twice: overlapping
+            # antialiased strokes made the old almond look as if its arcs crossed.
+            outline = (*top, *bottom[1:-1])
+            draw.polyline(outline, color, 1.35 * ctx.style_scale, closed=True)
             draw.circle(center, 1.8 * ctx.style_scale, color, 1.2 * ctx.style_scale, segments=16)
+        else:
+            lid = tuple(
+                (
+                    center[0] - radius_x + radius_x * 2.0 * index / 8.0,
+                    center[1] + math.sin(math.pi * index / 8.0) * radius_y * 0.72,
+                )
+                for index in range(9)
+            )
+            draw.polyline(lid, color, 1.45 * ctx.style_scale)
+            for offset in (-0.52, 0.0, 0.52):
+                lash_x = center[0] + radius_x * offset
+                lash_y = center[1] + radius_y * 0.72 * math.sqrt(max(0.0, 1.0 - offset**2))
+                draw.line(
+                    (lash_x, lash_y),
+                    (
+                        lash_x + offset * 1.6 * ctx.style_scale,
+                        lash_y + 2.2 * ctx.style_scale,
+                    ),
+                    color,
+                    1.15 * ctx.style_scale,
+                )
         if pressed:
             if node.type is NodeType.LIGHT and node.light_index >= 0:
                 source = ctx.session.source

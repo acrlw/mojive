@@ -20,15 +20,19 @@ from ....gizmo import (
     PLANE_HANDLES,
     ROTATE_AXIS_HANDLES,
     SIZE_PT,
+    TRACKBALL_RADIUS,
     GizmoFrame,
     GizmoHandle,
     GizmoMode,
+    axis_hover_color,
     axis_rotation,
     display_handles,
     handle_projection_alpha,
     rotation_half_basis,
+    rotation_handle_color,
     rotation_ring_is_full,
     screen_rotation_basis,
+    trackball_color,
 )
 from ....types import CameraView, MeshKey, MeshShape
 from ...mesh import builtin_mesh, gizmo_mesh
@@ -65,7 +69,16 @@ _PIPE_PLANE = ("less", False, "none")
 _PIPE_HANDLE = ("less", True, "back")
 _PIPE_OVERLAY = ("always", False, "back")
 
-_MESHES = ("arrow", "plane", "ring", "half_ring", "screen_ring", "screen_ring_edge", "center")
+_MESHES = (
+    "arrow",
+    "plane",
+    "ring",
+    "half_ring",
+    "screen_ring",
+    "screen_ring_edge",
+    "trackball",
+    "center",
+)
 
 
 class GizmoPass:
@@ -112,7 +125,8 @@ class GizmoPass:
             ],
         )
         self._block = np.zeros((), _SLOT_DTYPE)
-        data = {name: gizmo_mesh(name) for name in _MESHES[:-1]}
+        data = {name: gizmo_mesh(name) for name in _MESHES if name not in {"trackball", "center"}}
+        data["trackball"] = builtin_mesh(MeshKey(MeshShape.DISK))
         data["center"] = builtin_mesh(MeshKey(MeshShape.SPHERE))
         self._meshes = {name: GpuMesh(device, m) for name, m in data.items()}
         # Planned draws: (mesh name, pipeline key) in forge's order.
@@ -222,6 +236,20 @@ class GizmoPass:
     def _plan_rotate(self, frame: GizmoFrame, camera: CameraView, scale: float) -> list:
         visible = display_handles(frame)
         plans = []
+        if GizmoHandle.ROTATE_TRACKBALL in visible:
+            plans.append(
+                (
+                    "trackball",
+                    _PIPE_OVERLAY,
+                    _model(
+                        frame.position,
+                        screen_rotation_basis(camera),
+                        scale * TRACKBALL_RADIUS,
+                    ),
+                    trackball_color(frame),
+                    0.0,
+                )
+            )
         for axis, handle in enumerate(ROTATE_AXIS_HANDLES):
             if handle not in visible:
                 continue
@@ -244,7 +272,7 @@ class GizmoPass:
                         else rotation_half_basis(camera, frame.position, frame.rotation, axis),
                         scale,
                     ),
-                    self._color(frame, handle, axis, alpha),
+                    rotation_handle_color(frame, handle, axis, alpha),
                     0.0,
                 )
             )
@@ -278,8 +306,10 @@ class GizmoPass:
 
     def _color(self, frame: GizmoFrame, handle: GizmoHandle, axis: int, alpha: float = 1.0):
         base = AXIS_COLORS[axis] if frame.handle_color is None else frame.handle_color
-        if frame.active is handle and frame.handle_color is not None:
+        if frame.handle_color is not None and frame.active is handle:
             color = ACTIVE_HANDLE_COLOR.copy()
+        elif frame.handle_color is not None and frame.hovered is handle:
+            color = np.asarray(axis_hover_color(base), np.float32)
         else:
             color = HOVER_COLOR.copy() if self._hot(frame, handle) else np.asarray(base).copy()
         color[3] = alpha

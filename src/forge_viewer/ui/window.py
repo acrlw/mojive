@@ -31,6 +31,33 @@ imgui: Any = None
 GlfwRenderer: Any = None
 
 
+def _is_dock_tab_nav_target(nav_id: int, tab_id: int, docked: bool) -> bool:
+    """Return whether ImGui navigation currently points at a dock tab."""
+
+    return bool(docked and int(tab_id) != 0 and int(nav_id) == int(tab_id))
+
+
+def _suppress_dock_tab_nav_cursor() -> bool:
+    """Hide tab-only keyboard focus chrome before the dock host renders.
+
+    Controls retain their normal navigation cursor because their IDs differ
+    from the owning window's dock-tab ID.
+    """
+
+    if imgui is None:
+        return False
+    context = imgui.get_current_context()
+    nav_window = context.nav_window
+    if nav_window is None or not _is_dock_tab_nav_target(
+        context.nav_id,
+        nav_window.tab_id,
+        nav_window.dock_node is not None,
+    ):
+        return False
+    context.nav_cursor_visible = False
+    return True
+
+
 def layout_settings_path() -> Path:
     """Return the persistent ImGui layout file outside the working tree."""
 
@@ -449,6 +476,7 @@ class Window:
 
     def begin_dockspace(self) -> None:
         if self.config.docking:
+            _suppress_dock_tab_nav_cursor()
             self.dockspace_id = imgui.dock_space_over_viewport(
                 0,
                 imgui.get_main_viewport(),

@@ -8,13 +8,19 @@ import numpy as np
 
 from .. import math3d
 from ..adapters.base import NodeType, SceneNode
-from ..gizmo import camera_icon_segments, project, screen_constant_world_sizes, world_scale
+from ..gizmo import (
+    camera_icon_paths,
+    project,
+    screen_constant_world_sizes,
+    world_scale,
+)
 from ..render.debugdraw import Occlusion
 from ..types import CameraView, Light, LightType
 from .camera import camera_basis
 from .theme import THEME
 
 HELPER_LAYER = "ui.scene_entities"
+HELPER_ICON_LAYER = "ui.scene_entity_icons"
 HELPER_COLOR = np.array((*THEME.text_disabled[:3], 0.82), np.float32)
 SELECTED_COLOR = np.array(THEME.primary_bright, np.float32)
 ANCHOR_RADIUS_PT = 6.0
@@ -51,7 +57,9 @@ class SceneEntityHelpers:
         if debug is None:
             return
         layer = debug.layer(HELPER_LAYER, Occlusion.GHOST)
+        icon_layer = debug.layer(HELPER_ICON_LAYER, Occlusion.ALWAYS)
         layer.clear()
+        icon_layer.clear()
         if view_through_camera or not self.visible or session.source is None:
             return
         self._refresh_nodes(session)
@@ -63,7 +71,7 @@ class SceneEntityHelpers:
                 if selected == node.object_id and selected_camera_aspect is not None:
                     view = view.with_aspect(selected_camera_aspect)
                 camera_helpers.append((node.object_id, view, selected == node.object_id))
-        self._cameras(layer, camera_helpers, camera, viewport_height, ui_scale)
+        self._cameras(icon_layer, layer, camera_helpers, camera, viewport_height, ui_scale)
 
         frame = session.frame
         light_set = frame.lights if frame.lights is not None else session.source.lights
@@ -73,7 +81,7 @@ class SceneEntityHelpers:
                 light = light_set.lights[node.light_index]
                 if light.active and light.type is not LightType.IMAGE:
                     light_helpers.append((node.object_id, light, selected == node.object_id))
-        self._lights(layer, light_helpers, camera, viewport_height, ui_scale)
+        self._lights(icon_layer, layer, light_helpers, camera, viewport_height, ui_scale)
 
     def pick(
         self,
@@ -119,6 +127,7 @@ class SceneEntityHelpers:
 
     def _cameras(
         self,
+        icon_layer,
         layer,
         helpers: list[tuple[int, CameraView, bool]],
         editor_camera: CameraView,
@@ -128,25 +137,29 @@ class SceneEntityHelpers:
         if not helpers:
             return
         views = [view for _, view, _ in helpers]
-        colors = np.asarray(
-            [SELECTED_COLOR if selected else HELPER_COLOR for _, _, selected in helpers],
-            np.float32,
-        )
-        starts, ends = camera_icon_segments(
+        outlines, lenses = camera_icon_paths(
             views,
             editor_camera,
             viewport_height,
-            CAMERA_HELPER_SIZE_PT,
+            CAMERA_HELPER_SIZE_PT * ui_scale,
             visible_only=True,
         )
-        segments_per_icon = len(starts) // len(helpers)
-        layer.lines(
-            "cameras:icons",
-            starts,
-            ends,
-            np.repeat(colors, segments_per_icon, axis=0),
-            1.6 * ui_scale,
-        )
+        for index, (object_id, _view, selected) in enumerate(helpers):
+            color = SELECTED_COLOR if selected else HELPER_COLOR
+            icon_layer.polyline(
+                f"camera:{object_id}:outline",
+                outlines[index],
+                color,
+                1.6 * ui_scale,
+                closed=True,
+            )
+            icon_layer.polyline(
+                f"camera:{object_id}:lens",
+                lenses[index],
+                color,
+                1.6 * ui_scale,
+                closed=True,
+            )
         if self.show_influence:
             for object_id, view, selected in helpers:
                 if selected:
@@ -161,6 +174,7 @@ class SceneEntityHelpers:
 
     def _lights(
         self,
+        icon_layer,
         layer,
         helpers: list[tuple[int, Light, bool]],
         editor_camera: CameraView,
@@ -174,19 +188,27 @@ class SceneEntityHelpers:
             [SELECTED_COLOR if selected else HELPER_COLOR for _, _, selected in helpers],
             np.float32,
         )
-        starts, ends = light_icon_segments(
+        rings, detail_starts, detail_ends = _light_icon_geometry(
             positions,
             editor_camera,
             viewport_height,
+            ui_scale,
         )
-        segments_per_icon = len(starts) // max(len(helpers), 1)
-        layer.lines(
-            "lights:icons",
-            starts,
-            ends,
-            np.repeat(colors, segments_per_icon, axis=0),
-            1.4 * ui_scale,
-        )
+        for index, (object_id, _light, _selected) in enumerate(helpers):
+            icon_layer.polyline(
+                f"light:{object_id}:ring",
+                rings[index],
+                colors[index],
+                1.4 * ui_scale,
+                closed=True,
+            )
+            icon_layer.lines(
+                f"light:{object_id}:details",
+                detail_starts[index],
+                detail_ends[index],
+                colors[index],
+                1.4 * ui_scale,
+            )
 
         directed = np.asarray(
             [selected and light.type is not LightType.POINT for _, light, selected in helpers],
@@ -252,38 +274,38 @@ _LIGHT_RING_ANGLES = np.linspace(0.0, 2.0 * np.pi, 12, endpoint=False)
 _LIGHT_RAY_ANGLES = np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False)
 _LIGHT_RING_UNIT = np.column_stack((np.cos(_LIGHT_RING_ANGLES), np.sin(_LIGHT_RING_ANGLES)))
 _LIGHT_RAY_UNIT = np.column_stack((np.cos(_LIGHT_RAY_ANGLES), np.sin(_LIGHT_RAY_ANGLES)))
-_LIGHT_ICON_STARTS_2D = np.concatenate(
+_LIGHT_DETAIL_STARTS_2D = np.concatenate(
     (
-        _LIGHT_RING_UNIT * 4.3,
         np.asarray(((-2.6, -5.2), (-1.9, -6.9)), np.float64),
         _LIGHT_RAY_UNIT * 5.9,
     )
 )
-_LIGHT_ICON_ENDS_2D = np.concatenate(
+_LIGHT_DETAIL_ENDS_2D = np.concatenate(
     (
-        np.roll(_LIGHT_RING_UNIT, -1, axis=0) * 4.3,
         np.asarray(((2.6, -5.2), (1.9, -6.9)), np.float64),
         _LIGHT_RAY_UNIT * 7.8,
     )
 )
 
 
-def light_icon_segments(
+def _light_icon_geometry(
     positions: np.ndarray,
     editor_camera: CameraView,
     viewport_height: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return screen-facing 16px bulb icons for scene light helpers."""
-
+    ui_scale: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     positions = np.asarray(positions, np.float64).reshape(-1, 3)
     if not len(positions):
-        empty = np.empty((0, 3), np.float32)
-        return empty, empty
+        return (
+            np.empty((0, len(_LIGHT_RING_UNIT), 3), np.float32),
+            np.empty((0, len(_LIGHT_DETAIL_STARTS_2D), 3), np.float32),
+            np.empty((0, len(_LIGHT_DETAIL_ENDS_2D), 3), np.float32),
+        )
     units = screen_constant_world_sizes(
         editor_camera,
         positions,
         viewport_height,
-        LIGHT_HELPER_SCALE_PT,
+        LIGHT_HELPER_SCALE_PT * ui_scale,
         visible_only=True,
     )
     view_rotation = np.asarray(editor_camera.view_matrix(), np.float64)[:3, :3]
@@ -295,10 +317,35 @@ def light_icon_segments(
             points[None, :, 0, None] * right[None, None, :]
             + points[None, :, 1, None] * up[None, None, :]
         )
-        values = positions[:, None, :] + units[:, None, None] * offsets
-        return values.reshape(-1, 3).astype(np.float32)
+        return (positions[:, None, :] + units[:, None, None] * offsets).astype(np.float32)
 
-    return transform(_LIGHT_ICON_STARTS_2D), transform(_LIGHT_ICON_ENDS_2D)
+    return (
+        transform(_LIGHT_RING_UNIT * 4.3),
+        transform(_LIGHT_DETAIL_STARTS_2D),
+        transform(_LIGHT_DETAIL_ENDS_2D),
+    )
+
+
+def light_icon_segments(
+    positions: np.ndarray,
+    editor_camera: CameraView,
+    viewport_height: float,
+    ui_scale: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return screen-facing bulb icons scaled with the rest of the UI."""
+
+    rings, detail_starts, detail_ends = _light_icon_geometry(
+        positions,
+        editor_camera,
+        viewport_height,
+        ui_scale,
+    )
+    if not len(rings):
+        empty = np.empty((0, 3), np.float32)
+        return empty, empty
+    starts = np.concatenate((rings, detail_starts), axis=1)
+    ends = np.concatenate((np.roll(rings, -1, axis=1), detail_ends), axis=1)
+    return starts.reshape(-1, 3), ends.reshape(-1, 3)
 
 
 def camera_rotation(view: CameraView) -> np.ndarray:

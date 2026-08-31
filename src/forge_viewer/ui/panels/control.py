@@ -7,7 +7,7 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import ActuatorInfo, FrameNeeds
-from . import Panel, PanelContext, search_input, themed_checkbox, value_slider
+from . import Panel, PanelContext, searchable_ordered_list_header, themed_checkbox, value_slider
 
 
 class ControlPanel(Panel):
@@ -21,6 +21,7 @@ class ControlPanel(Panel):
         self._initial_ctrl = np.zeros(0, np.float64)
         self._snapshot_generation = -1
         self._search = ""
+        self._sort_by_name = False
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds(poses=False, actuator=True)
@@ -42,15 +43,20 @@ class ControlPanel(Panel):
         if session.frame.ctrl is None:
             imgui.text_disabled(ctx.tr("ctrl not produced this frame"))
             return
-        imgui.set_next_item_width(-1.0)
-        _changed, self._search = search_input(
+        _changed, self._search, _sort_changed, self._sort_by_name = searchable_ordered_list_header(
             "##actuator_search",
             self._search,
+            self._sort_by_name,
             hint=ctx.tr("Search actuators"),
             search_tooltip=ctx.tr("Search actuators"),
             clear_tooltip=ctx.tr("Clear search"),
+            state_order="ctrl / act",
+            translate=ctx.tr,
         )
-        actuators = filter_actuators(session.actuators, self._search)
+        actuators = sort_actuators(
+            filter_actuators(session.actuators, self._search),
+            by_name=self._sort_by_name,
+        )
         if not actuators:
             imgui.text_disabled(ctx.tr("No matching actuators"))
             return
@@ -147,3 +153,23 @@ def filter_actuators(actuators, query: str) -> tuple[ActuatorInfo, ...]:
         for actuator in actuators
         if needle in (actuator.name or f"act{actuator.actuator_id}").casefold()
     )
+
+
+def sort_actuators(actuators, *, by_name: bool) -> tuple[ActuatorInfo, ...]:
+    """Order actuators by control/activation address or stable display name."""
+
+    def state_key(actuator: ActuatorInfo) -> tuple[int, int, int]:
+        act_address = int(actuator.act_address)
+        return int(actuator.ctrl_address), act_address, int(actuator.actuator_id)
+
+    if by_name:
+        return tuple(
+            sorted(
+                actuators,
+                key=lambda actuator: (
+                    (actuator.name or f"act{actuator.actuator_id}").casefold(),
+                    *state_key(actuator),
+                ),
+            )
+        )
+    return tuple(sorted(actuators, key=state_key))

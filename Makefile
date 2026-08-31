@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery ui-feasibility ui-runtime ui-frame-profile ui-gallery gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept texture-minification local-shadow-precision shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance inspector gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring asset-browser joint-site-authoring model-component-authoring keyframe-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery ui-feasibility ui-runtime ui-frame-profile ui-gallery tool-icons gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept texture-minification local-shadow-precision shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance inspector gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring asset-browser joint-site-authoring model-component-authoring keyframe-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -27,6 +27,7 @@ help:
 		'  make inspector         compact Inspector transform reference image' \
 		'  make ui-feasibility    interactive M1-M18 UI feasibility probe' \
 		'  make ui-gallery        deterministic UI feasibility acceptance pages' \
+		'  make tool-icons        transparent 1024px Tool Column icon sources' \
 		'  make gizmo             2D/3D position/rotation gizmo' \
 		'  make joint-gizmo       numbered joint-gizmo acceptance scene' \
 		'  make primitive-authoring  fixed transforms and primitive dimensions' \
@@ -224,6 +225,10 @@ ui-feasibility:
 
 ui-runtime:
 	$(PY) -m forge_viewer.tools.ui_runtime $(ARGS)
+
+## Export production Tool Column geometry on transparent 1024px canvases.
+tool-icons:
+	$(PY) -m forge_viewer.tools.tool_icons $(ARGS)
 
 ## Profile production viewport chrome and enforce its incremental frame budget.
 ui-frame-profile:

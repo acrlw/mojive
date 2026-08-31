@@ -216,6 +216,31 @@ def test_every_primitive_kind_reaches_the_screen(rig):
     assert rig.debug_pass().draw_calls == 5
 
 
+def test_large_drag_link_quad_contains_the_complete_start_ring(rig):
+    """Large UI-scale drag links must not clip the hollow ring to their quad."""
+
+    width_px = 16.0
+    radius_px = 40.0
+    edge_px = 8.0
+    rig.backend.debug.layer("drag", Occlusion.ALWAYS).drag_link(
+        "drag",
+        (-0.8, 0.0, 0.0),
+        (0.8, 0.0, 0.0),
+        (1.0, 1.0, 1.0, 1.0),
+        (0.55, 0.58, 0.63, 1.0),
+        width_px=width_px,
+        radius_px=radius_px,
+        edge_px=edge_px,
+    )
+
+    pixels = rig.draw()
+    visible = np.argwhere(pixels[:, :, :3].max(axis=2) > 20)
+    assert len(visible)
+    visible_height = int(np.ptp(visible[:, 0])) + 1
+    expected_diameter = 2.0 * (radius_px + 0.5 * width_px + edge_px)
+    assert visible_height >= expected_diameter - 4.0
+
+
 def test_world_text_renders_over_the_scene(rig):
     rig.backend.configure_text(size_px=16.0)
     layer = rig.backend.debug.layer("labels", Occlusion.ALWAYS)

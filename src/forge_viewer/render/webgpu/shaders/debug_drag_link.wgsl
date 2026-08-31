@@ -40,7 +40,10 @@ fn vs_debug_drag_link(in: DebugDragLinkIn, @builtin(vertex_index) v: u32) -> Deb
     out.radius = in.radius;
     out.edge = in.edge;
 
-    let pad = in.radius + in.edge + 2.0;
+    // The hollow start ring extends half a core stroke beyond its radius.
+    // Include that stroke as well as the contrast edge and AA guard in the
+    // primitive quad; otherwise large UI scales clip the ring at the quad.
+    let pad = in.radius + 0.5 * in.width + in.edge + 2.0;
     let lo = min(out.a, out.b) - vec2f(pad);
     let hi = max(out.a, out.b) + vec2f(pad);
     var C = array<vec2f, 6>(

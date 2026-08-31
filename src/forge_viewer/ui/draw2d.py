@@ -10,7 +10,9 @@ window and portable to a future non-imgui overlay renderer.
 
 from __future__ import annotations
 
+import math
 from functools import lru_cache
+from itertools import pairwise
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -47,6 +49,52 @@ def _anti_alias_fringe_outer(points) -> np.ndarray:
     miters = (np.roll(normals, 1, axis=0) + normals) * 0.5
     scale = np.minimum(1.0 / np.maximum(np.sum(miters * miters, axis=1), 1e-4), 100.0)
     return outline + miters * scale[:, None]
+
+
+@lru_cache(maxsize=256)
+def _open_polyline_ribbon(
+    path: tuple[tuple[float, float], ...],
+    width: float,
+) -> tuple[
+    tuple[tuple[float, float], ...],
+    tuple[tuple[float, float], ...],
+    tuple[tuple[float, float], ...],
+]:
+    """Build cached left/right edges and the complete boundary of an open stroke."""
+
+    if len(path) < 2 or width <= 0.0:
+        return (), (), ()
+    points = tuple((float(x), float(y)) for x, y in path)
+    directions = []
+    for start, end in pairwise(points):
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length = math.hypot(dx, dy)
+        if length <= 1e-9:
+            return (), (), ()
+        directions.append((dx / length, dy / length))
+    normals = tuple((-dy, dx) for dx, dy in directions)
+    half_width = 0.5 * float(width)
+    offsets = []
+    for index in range(len(points)):
+        if index == 0:
+            offsets.append((normals[0][0] * half_width, normals[0][1] * half_width))
+            continue
+        if index == len(points) - 1:
+            offsets.append((normals[-1][0] * half_width, normals[-1][1] * half_width))
+            continue
+        mx = normals[index - 1][0] + normals[index][0]
+        my = normals[index - 1][1] + normals[index][1]
+        miter_length = math.hypot(mx, my)
+        if miter_length <= 1e-9:
+            offsets.append((normals[index][0] * half_width, normals[index][1] * half_width))
+            continue
+        mx, my = mx / miter_length, my / miter_length
+        projection = max(mx * normals[index][0] + my * normals[index][1], 0.5)
+        miter_scale = half_width / projection
+        offsets.append((mx * miter_scale, my * miter_scale))
+    left = tuple((p[0] + o[0], p[1] + o[1]) for p, o in zip(points, offsets, strict=True))
+    right = tuple((p[0] - o[0], p[1] - o[1]) for p, o in zip(points, offsets, strict=True))
+    return left, right, left + tuple(reversed(right))
 
 
 @runtime_checkable

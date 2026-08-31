@@ -223,6 +223,26 @@ def test_output_panel_filters_visible_messages(viewer):
     assert [entry.text for entry in panel._filtered_entries] == ["[forge/ui] FILTER_KEEP"]
 
 
+def test_output_row_hover_does_not_repeat_the_message_as_a_tooltip(viewer, monkeypatch):
+    from imgui_bundle import imgui
+
+    output = viewer.app.output
+    output.clear()
+    output.write("NO_DUPLICATE_TOOLTIP", level="info", timestamp="10:00:02")
+    entry = output.entries()[0]
+    activate_panel(viewer, "Output")
+
+    try:
+        point = item_rect(viewer, "invisible_button", f"##output-row-{entry.sequence}")
+        imgui.get_io().add_mouse_pos_event(*point)
+        tooltips = []
+        monkeypatch.setattr(imgui, "set_tooltip", tooltips.append)
+        viewer.sync()
+        assert entry.text not in tooltips
+    finally:
+        output.clear()
+
+
 def test_hierarchy_search_clear_button_resets_filter(viewer):
     from imgui_bundle import imgui
 
@@ -258,6 +278,32 @@ def test_hierarchy_visibility_toggle_does_not_select_the_row(viewer):
     click(viewer, imgui.get_io(), point)
     assert target.visible
     viewer.session.submit(cmd.Select(selected_before))
+
+
+def test_hierarchy_filter_strip_accepts_the_ordinary_mouse_wheel(viewer):
+    from imgui_bundle import imgui
+
+    activate_panel(viewer, "Hierarchy")
+    point = item_rect(viewer, "button", "all")
+    io = imgui.get_io()
+    io.add_mouse_pos_event(*point)
+    viewer.sync()
+
+    targets = []
+    original = imgui.set_scroll_x
+
+    def record(value):
+        targets.append(float(value))
+        original(value)
+
+    imgui.set_scroll_x = record
+    try:
+        io.add_mouse_wheel_event(0.0, -1.0)
+        viewer.sync()
+    finally:
+        imgui.set_scroll_x = original
+
+    assert targets and targets[-1] > 0.0
 
 
 def test_environment_inspector_controls_render_flags(viewer):
@@ -303,21 +349,39 @@ def test_material_inspector_exposes_instance_and_shared_controls(viewer):
     click(viewer, imgui.get_io(), header)
 
     item_rect(viewer, "input_text", "##entity_name")
-    item_rect(viewer, "color_edit4", "instance color")
+    item_rect(viewer, "color_edit4", "##geometry_instance_color")
     _scroll_panel(viewer, "Inspector", -6.0)
     contact = item_rect(viewer, "collapsing_header", "contact properties")
     click(viewer, imgui.get_io(), contact)
     _scroll_panel(viewer, "Inspector", -5.0)
-    item_rect(viewer, "drag_float3", "friction (slide spin roll)")
-    item_rect(viewer, "combo", "contact dimension")
-    item_rect(viewer, "input_int", "collision type mask")
-    item_rect(viewer, "begin_combo", "assigned material")
-    item_rect(viewer, "small_button", "New material")
-    item_rect(viewer, "small_button", "Duplicate material")
-    item_rect(viewer, "small_button", "Import texture")
-    item_rect(viewer, "color_edit4", "base color")
-    item_rect(viewer, "begin_combo", "preset")
-    item_rect(viewer, "drag_float", "specular")
+    item_rect(viewer, "drag_float3", "##contact_friction")
+    item_rect(viewer, "combo", "##contact_dimension")
+    item_rect(viewer, "input_int", "##collision_type_mask")
+    item_rect(viewer, "begin_combo", "##assigned_material")
+    item_rect(viewer, "small_button", "New material##create material-0")
+    item_rect(viewer, "small_button", "Duplicate material##material actions-0")
+    item_rect(viewer, "small_button", "Import texture##texture import-0")
+    item_rect(viewer, "color_edit4", "##material_base_color")
+    item_rect(viewer, "begin_combo", "##material_preset")
+    item_rect(viewer, "drag_float", "##material_specular")
+    viewer.session.submit(cmd.Select(selected_before))
+
+
+def test_light_inspector_groups_property_tables_and_joined_vectors(viewer):
+    import forge_viewer.commands as cmd
+    from forge_viewer.adapters.base import NodeType
+
+    selected_before = viewer.session.selected
+    target = next(node for node in viewer.session.nodes if node.type is NodeType.LIGHT)
+    viewer.session.submit(cmd.Select(target.object_id))
+    activate_panel(viewer, "Inspector")
+
+    item_rect(viewer, "collapsing_header", "light properties")
+    item_rect(viewer, "checkbox", "##light_enabled")
+    item_rect(viewer, "combo", "##light_type")
+    item_rect(viewer, "collapsing_header", "light transform")
+    item_rect(viewer, "button", f"X##light_position_0_{target.node_id}")
+    item_rect(viewer, "button", f"X##light_direction_0_{target.node_id}")
     viewer.session.submit(cmd.Select(selected_before))
 
 
@@ -1020,7 +1084,9 @@ def test_inspector_transform_resets_and_copies_without_gesture_conflicts(free_bo
         (x_axis[1] + x_axis[3]) * 0.5,
         abs=0.1,
     )
-    assert 2.0 <= x_value[0] - x_axis[2] <= 6.0
+    # The axis badge and value are one compound field: their square inner
+    # corners meet exactly, while only the outer corners stay rounded.
+    assert x_value[0] - x_axis[2] == pytest.approx(0.0, abs=0.1)
 
     from forge_viewer.ui.panels.inspector import _mix_color
     from forge_viewer.ui.theme import THEME
@@ -1446,7 +1512,7 @@ def test_limited_slide_drag_keeps_feedback_and_claim_until_mouse_release() -> No
             basis,
         )
         assert slide is not None
-        arrow = v.app.gizmo._slide_arrow_polygon(slide, v.window.style_scale)
+        arrow = v.app.gizmo._slide_arrow_polygons(slide, v.window.style_scale)[0]
         start = np.mean(arrow, axis=0)
         io.add_mouse_pos_event(*start)
         v.sync()
@@ -1543,6 +1609,50 @@ def test_multi_joint_viewport_picker_selects_the_gizmo_target():
         assert v.app.gizmo.selected_joint_id(node.body_index) == choices[2].joint_id
         assert v.app.gizmo.last_verdict.ok
         assert v.app.gizmo.visible
+
+        activate_panel(v, "Joints")
+        for _ in range(2):
+            v.sync()
+        row_labels = [f"{joint.name}##joint-select-{joint.joint_id}" for joint in choices]
+        before_y = [item_rect(v, "selectable", label)[1] for label in row_labels]
+        click(v, imgui.get_io(), item_rect(v, "selectable", row_labels[1]))
+        after_y = [item_rect(v, "selectable", label)[1] for label in row_labels]
+        assert after_y == pytest.approx(before_y)
+        assert v.session.selected_node is not None
+        assert v.session.selected_node.joint_index == choices[1].joint_id
+        assert v.app.gizmo.visible
+        assert v.app.gizmo.selected_joint_id(node.body_index) == choices[1].joint_id
+
+        assert v.session.submit(cmd.Select(node.object_id))
+        for _ in range(2):
+            v.sync()
+        slider_joint = choices[0]
+        click(
+            v,
+            imgui.get_io(),
+            item_rect(v, "slider_float", f"##joint-qpos-{slider_joint.qpos_adr}"),
+        )
+        assert v.session.selected_node is not None
+        assert v.session.selected_node.joint_index == slider_joint.joint_id
+        assert v.app.gizmo.visible
+        assert v.app.gizmo.selected_joint_id(node.body_index) == slider_joint.joint_id
+        selected_joint_node = v.session.selected_node
+
+        activate_panel(v, "Inspector")
+        item_rect(
+            v,
+            "button",
+            f"X##joint_axis_0_{selected_joint_node.node_id}",
+        )
+        item_rect(v, "checkbox", "##joint_limited")
+        item_rect(v, "drag_float2", "##joint_range")
+        item_rect(v, "drag_float", "##joint_damping")
+        item_rect(v, "combo", "##joint_advanced_group")
+        item_rect(v, "drag_float2", "##joint_limit_solver_reference")
+
+        assert v.session.submit(cmd.Select(node.object_id))
+        for _ in range(2):
+            v.sync()
 
         labels = []
         original_selectable = imgui.selectable
@@ -2226,7 +2336,10 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style, monkeyp
     assert gizmo_draw.arc_strokes == 1
     assert gizmo_draw.open_arcs == 0
     assert all(draw.closed_arcs == gizmo_draw.closed_arcs for draw in recorders[1:])
-    assert gizmo_draw.radials == 0
+    # Axis rotations add one finite viewport-clipped guide; the sector itself
+    # still has no center-to-arc radial strokes.
+    assert gizmo_draw.radials == 1
+    assert all(draw.radials == 1 for draw in recorders[1:])
     assert gizmo_draw.center_dots == 0
     assert any(text.startswith("Z ") and text.endswith("°") for text in gizmo_draw.texts)
     assert after_pos == pytest.approx(before_pos, abs=1e-5)
@@ -2485,9 +2598,15 @@ def test_blocking_modal_owns_all_viewport_input_and_hides_context_hint(
     from imgui_bundle import imgui
 
     import forge_viewer.commands as cmd
+    from forge_viewer.ui.viewport_widgets import ToolHint
 
     v = free_body_viewer
     io = imgui.get_io()
+    v.app.tool_hints.add(
+        "modal.scene",
+        ToolHint("mouse", "left", "Scene hint"),
+        surface="scene",
+    )
     node = next(item for item in v.session.nodes if item.posable)
     assert v.session.submit(cmd.Pause())
     assert v.session.submit(cmd.Select(node.object_id))
@@ -2522,6 +2641,8 @@ def test_blocking_modal_owns_all_viewport_input_and_hides_context_hint(
         hint = imgui.internal.find_window_by_name("Hints###viewport_hints")
         assert hint is None or not hint.active
     finally:
+        v.app.tool_hints.remove("modal.scene", surface="scene")
+        v.app.tool_hints.restore("modal.scene", surface="scene")
         io.add_mouse_button_event(0, False)
         io.add_key_event(imgui.Key.space, False)
         io.add_key_event(imgui.Key.left_ctrl, False)

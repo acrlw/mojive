@@ -23,9 +23,16 @@ CENTER_RADIUS = 0.075
 CENTER_SHELL_RADIUS = 0.11
 RING_RADIUS = 0.78
 SCREEN_RING_RADIUS = 0.96
+TRACKBALL_RADIUS = RING_RADIUS
 RING_WIDTH_PT = 3.5
 SCREEN_RING_WIDTH_PT = 2.5
 CONTRAST_EDGE_PT = 0.75
+ROTATE_RING_ALPHA = 0.68
+ROTATE_RING_HOVER_ALPHA = 0.88
+ROTATE_RING_ACTIVE_ALPHA = 0.96
+TRACKBALL_ALPHA = 0.035
+TRACKBALL_HOVER_ALPHA = 0.16
+TRACKBALL_ACTIVE_ALPHA = 0.22
 
 RING_TUBE = RING_WIDTH_PT / (2.0 * SIZE_PT)
 SCREEN_RING_TUBE = SCREEN_RING_WIDTH_PT / (2.0 * SIZE_PT)
@@ -47,13 +54,36 @@ AXIS_COLORS = np.array(
     np.float32,
 )
 HOVER_COLOR = np.array((184 / 255, 210 / 255, 172 / 255, 1.0), np.float32)
-# Keep active and hover separate so either interaction state can be tuned independently.
-ACTIVE_HANDLE_COLOR = np.array((184 / 255, 210 / 255, 172 / 255, 1.0), np.float32)
+# Scalar-joint handles keep their semantic purple through hover and press, so
+# application accent customization cannot change their established identity.
+ACTIVE_HANDLE_COLOR = np.array((199 / 255, 180 / 255, 207 / 255, 1.0), np.float32)
 ACTIVE_COLOR = np.array((103 / 255, 135 / 255, 90 / 255, 1.0), np.float32)
-JOINT_HANDLE_COLOR = np.array((175 / 255, 132 / 255, 183 / 255, 1.0), np.float32)
+JOINT_HANDLE_COLOR = np.array((173 / 255, 150 / 255, 184 / 255, 1.0), np.float32)
 CENTER_COLOR = np.array((0.92, 0.92, 0.92, 1.0), np.float32)
+TRACKBALL_COLOR = np.array((0.70, 0.70, 0.70, 1.0), np.float32)
 CONTRAST_EDGE_COLOR = np.array((0.68, 0.71, 0.76, 1.0), np.float32)
 GUIDE_CORE_COLOR = np.array((0.98, 0.98, 0.99, 1.0), np.float32)
+
+
+def axis_hover_color(color) -> tuple[float, float, float, float]:
+    """Return a brighter interaction color that preserves the source axis hue."""
+
+    rgba = tuple(float(value) for value in color)
+    return (*(value + (1.0 - value) * 0.20 for value in rgba[:3]), rgba[3])
+
+
+def axis_active_color(color) -> tuple[float, float, float, float]:
+    """Return the pressed color for one axis without replacing it with primary."""
+
+    rgba = tuple(float(value) for value in color)
+    return (*(value + (1.0 - value) * 0.36 for value in rgba[:3]), rgba[3])
+
+
+def axis_dark_color(color) -> tuple[float, float, float, float]:
+    """Return the dark companion used by active rotation arcs and back rings."""
+
+    rgba = tuple(float(value) for value in color)
+    return (*(value * 0.58 for value in rgba[:3]), rgba[3])
 
 
 class GizmoMode(enum.StrEnum):
@@ -84,12 +114,17 @@ class GizmoHandle(enum.IntEnum):
     ROTATE_Y = 9
     ROTATE_Z = 10
     ROTATE_SCREEN = 11
+    ROTATE_TRACKBALL = 12
 
 
 AXIS_HANDLES = (GizmoHandle.X, GizmoHandle.Y, GizmoHandle.Z)
 PLANE_HANDLES = (GizmoHandle.YZ, GizmoHandle.ZX, GizmoHandle.XY)
 ROTATE_AXIS_HANDLES = (GizmoHandle.ROTATE_X, GizmoHandle.ROTATE_Y, GizmoHandle.ROTATE_Z)
-ROTATE_HANDLES = (*ROTATE_AXIS_HANDLES, GizmoHandle.ROTATE_SCREEN)
+ROTATE_HANDLES = (
+    *ROTATE_AXIS_HANDLES,
+    GizmoHandle.ROTATE_SCREEN,
+    GizmoHandle.ROTATE_TRACKBALL,
+)
 ALL_HANDLE_MASK = sum(1 << int(handle) for handle in GizmoHandle if handle is not GizmoHandle.NONE)
 
 
@@ -113,6 +148,42 @@ class GizmoFrame:
     handle_mask: int = ALL_HANDLE_MASK
     handle_color: np.ndarray | None = None
     active_projection_fade: bool = False
+
+
+def rotation_handle_color(
+    frame: GizmoFrame,
+    handle: GizmoHandle,
+    axis: int,
+    projection_alpha: float = 1.0,
+) -> np.ndarray:
+    """Resolve one axis ring without replacing its semantic hue with primary."""
+
+    base = AXIS_COLORS[axis] if frame.handle_color is None else frame.handle_color
+    if frame.active is handle:
+        color = ACTIVE_HANDLE_COLOR if frame.handle_color is not None else axis_active_color(base)
+        opacity = ROTATE_RING_ACTIVE_ALPHA
+    elif frame.hovered is handle:
+        color = axis_hover_color(base)
+        opacity = ROTATE_RING_HOVER_ALPHA
+    else:
+        color = base
+        opacity = ROTATE_RING_ALPHA
+    result = np.asarray(color, np.float32).copy()
+    result[3] *= float(projection_alpha) * opacity
+    return result
+
+
+def trackball_color(frame: GizmoFrame) -> np.ndarray:
+    """Resolve Blender-style low-opacity trackball background feedback."""
+
+    color = TRACKBALL_COLOR.copy()
+    if frame.active is GizmoHandle.ROTATE_TRACKBALL:
+        color[3] = TRACKBALL_ACTIVE_ALPHA
+    elif frame.hovered is GizmoHandle.ROTATE_TRACKBALL:
+        color[3] = TRACKBALL_HOVER_ALPHA
+    else:
+        color[3] = TRACKBALL_ALPHA
+    return color
 
 
 def display_handles(frame: GizmoFrame) -> tuple[GizmoHandle, ...]:
@@ -184,7 +255,7 @@ def screen_constant_world_sizes(
     return result
 
 
-_CAMERA_ICON_BODY_2D = np.asarray(
+_CAMERA_ICON_OUTLINE_2D = np.asarray(
     (
         (-0.50, -0.25),
         (-0.43, -0.34),
@@ -192,28 +263,52 @@ _CAMERA_ICON_BODY_2D = np.asarray(
         (0.50, -0.25),
         (0.50, 0.25),
         (0.43, 0.34),
+        (0.21, 0.34),
+        (0.12, 0.50),
+        (-0.17, 0.50),
+        (-0.26, 0.34),
         (-0.43, 0.34),
         (-0.50, 0.25),
     ),
     np.float64,
 )
-_CAMERA_ICON_BUMP_2D = np.asarray(
-    ((-0.26, 0.34), (-0.17, 0.50), (0.12, 0.50), (0.21, 0.34)), np.float64
-)
 _CAMERA_ICON_ANGLES = np.linspace(0.0, 2.0 * np.pi, 12, endpoint=False)
 _CAMERA_ICON_LENS_2D = np.column_stack(
     (0.16 * np.cos(_CAMERA_ICON_ANGLES), 0.16 * np.sin(_CAMERA_ICON_ANGLES))
 )
-_CAMERA_ICON_STARTS_2D = np.concatenate(
-    (_CAMERA_ICON_BODY_2D, _CAMERA_ICON_BUMP_2D, _CAMERA_ICON_LENS_2D)
-)
-_CAMERA_ICON_ENDS_2D = np.concatenate(
-    (
-        np.roll(_CAMERA_ICON_BODY_2D, -1, axis=0),
-        np.roll(_CAMERA_ICON_BUMP_2D, -1, axis=0),
-        np.roll(_CAMERA_ICON_LENS_2D, -1, axis=0),
+
+
+def camera_icon_paths(
+    views: tuple[CameraView, ...] | list[CameraView],
+    editor_camera: CameraView,
+    viewport_height: float,
+    pixels: float,
+    *,
+    visible_only: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build joined screen-facing camera outline and lens paths."""
+
+    if not views:
+        return (
+            np.empty((0, len(_CAMERA_ICON_OUTLINE_2D), 3), np.float32),
+            np.empty((0, len(_CAMERA_ICON_LENS_2D), 3), np.float32),
+        )
+    eyes = np.asarray([view.eye for view in views], np.float64)
+    lengths = screen_constant_world_sizes(
+        editor_camera, eyes, viewport_height, pixels, visible_only=visible_only
     )
-)
+    view_rotation = np.asarray(editor_camera.view_matrix(), np.float64)[:3, :3]
+    right = view_rotation[0]
+    up = view_rotation[1]
+
+    def transform(points: np.ndarray) -> np.ndarray:
+        values = eyes[:, None, :] + lengths[:, None, None] * (
+            points[None, :, 0, None] * right[None, None, :]
+            + points[None, :, 1, None] * up[None, None, :]
+        )
+        return values.astype(np.float32)
+
+    return transform(_CAMERA_ICON_OUTLINE_2D), transform(_CAMERA_ICON_LENS_2D)
 
 
 def camera_icon_segments(
@@ -231,25 +326,18 @@ def camera_icon_segments(
     read as a camera from every view direction; the selected camera's actual
     orientation remains available through its separate frustum helper.
     """
+    paths = camera_icon_paths(
+        views,
+        editor_camera,
+        viewport_height,
+        pixels,
+        visible_only=visible_only,
+    )
     if not views:
         empty = np.empty((0, 3), np.float32)
         return empty, empty
-    eyes = np.asarray([view.eye for view in views], np.float64)
-    lengths = screen_constant_world_sizes(
-        editor_camera, eyes, viewport_height, pixels, visible_only=visible_only
-    )
-
-    view_rotation = np.asarray(editor_camera.view_matrix(), np.float64)[:3, :3]
-    right = view_rotation[0]
-    up = view_rotation[1]
-    starts = eyes[:, None, :] + lengths[:, None, None] * (
-        _CAMERA_ICON_STARTS_2D[None, :, 0, None] * right[None, None, :]
-        + _CAMERA_ICON_STARTS_2D[None, :, 1, None] * up[None, None, :]
-    )
-    ends = eyes[:, None, :] + lengths[:, None, None] * (
-        _CAMERA_ICON_ENDS_2D[None, :, 0, None] * right[None, None, :]
-        + _CAMERA_ICON_ENDS_2D[None, :, 1, None] * up[None, None, :]
-    )
+    starts = np.concatenate(paths, axis=1)
+    ends = np.concatenate(tuple(np.roll(path, -1, axis=1) for path in paths), axis=1)
     return starts.reshape(-1, 3).astype(np.float32), ends.reshape(-1, 3).astype(np.float32)
 
 
@@ -582,7 +670,13 @@ def hit_test(
         ):
             best_distance = distance
             best_handle = handle
-    return best_handle, axis_mask, plane_mask
+    if best_handle is not GizmoHandle.NONE:
+        return best_handle, axis_mask, plane_mask
+    if allowed(GizmoHandle.ROTATE_TRACKBALL) and (
+        np.linalg.norm(p - center) <= TRACKBALL_RADIUS * SIZE_PT * style_scale
+    ):
+        return GizmoHandle.ROTATE_TRACKBALL, axis_mask, plane_mask
+    return GizmoHandle.NONE, axis_mask, plane_mask
 
 
 def _polygon_distance(point: np.ndarray, polygon: np.ndarray) -> float:

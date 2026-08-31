@@ -38,6 +38,7 @@ from forge_viewer.gizmo import (  # noqa: E402
     GizmoFrame,
     GizmoHandle,
     GizmoMode,
+    axis_hover_color,
     handle_mask,
     project,
     world_scale,
@@ -64,6 +65,7 @@ RECT = (0.0, 0.0, float(W), float(H))
 AXIS_U8 = np.rint(AXIS_COLORS[:, :3] * 255.0)  # X red, Y green, Z blue
 HOVER_U8 = np.rint(HOVER_COLOR[:3] * 255.0)
 JOINT_U8 = np.rint(JOINT_HANDLE_COLOR[:3] * 255.0)
+JOINT_HOVER_U8 = np.rint(np.asarray(axis_hover_color(JOINT_HANDLE_COLOR)[:3]) * 255.0)
 ACTIVE_HANDLE_U8 = np.rint(ACTIVE_HANDLE_COLOR[:3] * 255.0)
 
 # Gaze direction shared by all cameras: every axis and plane handle is fully
@@ -211,7 +213,7 @@ def test_scalar_joint_color_override_does_not_look_like_a_world_axis(rig):
     assert np.median(joint_pixels[:, 0] / joint_pixels[:, 2]) > 0.65
 
 
-def test_scalar_joint_handle_keeps_the_original_yellow_while_active(rig):
+def test_scalar_joint_handle_keeps_semantic_purple_for_hover_and_press(rig):
     if not rig.backend.caps.gizmo:
         pytest.skip("gizmo unsupported by this backend")
     cam = _camera()
@@ -224,8 +226,8 @@ def test_scalar_joint_handle_keeps_the_original_yellow_while_active(rig):
     frame.active = GizmoHandle.Z
     active = rig.draw(frame, cam, box=False)
 
-    assert np.allclose(ACTIVE_HANDLE_COLOR, HOVER_COLOR)
-    assert _tint_mask(hovered, HOVER_U8).any()
+    assert not np.allclose(ACTIVE_HANDLE_COLOR, HOVER_COLOR)
+    assert _tint_mask(hovered, JOINT_HOVER_U8).any()
     assert _tint_mask(active, ACTIVE_HANDLE_U8).any()
 
 
@@ -345,6 +347,26 @@ def test_rotate_mode_draws_axis_and_screen_rings(rig):
     assert hits >= 12
 
 
+def test_rotate_mode_draws_the_trackball_fill_behind_axis_rings(rig):
+    if not rig.backend.caps.gizmo:
+        pytest.skip("gizmo unsupported by this backend")
+    cam = _camera()
+    frame = _frame(GizmoMode.ROTATE)
+    frame.hovered = GizmoHandle.ROTATE_TRACKBALL
+    with_trackball = rig.draw(frame, cam, box=False)
+
+    frame.handle_mask &= ~(1 << int(GizmoHandle.ROTATE_TRACKBALL))
+    frame.hovered = GizmoHandle.NONE
+    without_trackball = rig.draw(frame, cam, box=False)
+
+    cx, cy = _project(cam, ORIGIN)
+    difference = np.abs(
+        with_trackball[cy - 2 : cy + 3, cx - 2 : cx + 3, :3].astype(int)
+        - without_trackball[cy - 2 : cy + 3, cx - 2 : cx + 3, :3].astype(int)
+    )
+    assert difference.max() >= 8
+
+
 def test_idle_single_axis_rotation_draws_a_full_ring(rig):
     if not rig.backend.caps.gizmo:
         pytest.skip("gizmo unsupported by this backend")
@@ -378,7 +400,7 @@ def test_edge_on_active_rotation_ring_has_a_rounded_silhouette(rig):
     frame = _frame(GizmoMode.ROTATE)
     frame.active = GizmoHandle.ROTATE_Z
     img = rig.draw(frame, cam, box=False)
-    ys, xs = np.nonzero(_hover_mask(img))
+    ys, xs = np.nonzero(_axis_mask(img, 2))
     assert len(xs) > 100
     expected_span = 2.0 * RING_RADIUS * SIZE_PT
     assert np.ptp(xs) == pytest.approx(expected_span, abs=6.0)

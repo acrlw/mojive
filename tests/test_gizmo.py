@@ -9,8 +9,10 @@ from forge_viewer.adapters.base import FrameNeeds, NodeType
 from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.adapters.toy import ToyPhysicsAdapter
 from forge_viewer.gizmo import (
-    ACTIVE_COLOR,
+    ACTIVE_HANDLE_COLOR,
+    AXIS_COLORS,
     AXIS_START,
+    CENTER_COLOR,
     CENTER_HIT_PT,
     CENTER_RADIUS,
     CENTER_SHELL_RADIUS,
@@ -21,13 +23,24 @@ from forge_viewer.gizmo import (
     RING_RADIUS,
     RING_SEGMENTS,
     RING_WIDTH_PT,
+    ROTATE_AXIS_HANDLES,
+    ROTATE_RING_ACTIVE_ALPHA,
+    ROTATE_RING_ALPHA,
+    ROTATE_RING_HOVER_ALPHA,
     SCREEN_RING_RADIUS,
     SIZE_PT,
+    TRACKBALL_ACTIVE_ALPHA,
+    TRACKBALL_ALPHA,
+    TRACKBALL_COLOR,
+    TRACKBALL_HOVER_ALPHA,
+    TRACKBALL_RADIUS,
     GizmoFrame,
     GizmoHandle,
     GizmoMode,
     GizmoSpace,
+    axis_active_color,
     axis_handle_alpha,
+    axis_hover_color,
     axis_rotation,
     display_handles,
     handle_mask,
@@ -40,9 +53,11 @@ from forge_viewer.gizmo import (
     plane_handle_alpha,
     project,
     rotation_dial,
+    rotation_handle_color,
     rotation_ring,
     rotation_ring_alpha,
     rotation_ring_is_full,
+    trackball_color,
     world_scale,
 )
 from forge_viewer.render.backend import BackendCaps
@@ -53,17 +68,25 @@ from forge_viewer.ui.gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,
     DEFAULT_ROTATION_TICK_SCALE,
     DEFAULT_TRANSLATION_SNAP_M,
+    JOINT_ACTIVE_DARK_COLOR,
     JOINT_CURRENT_COLOR,
     JOINT_CURRENT_TICK_PT,
+    JOINT_DRAG_START_TICK_HALF_PT,
     JOINT_LIMIT_TICK_PT,
     JOINT_LOWER_LIMIT_COLOR,
     JOINT_RANGE_COLOR,
     JOINT_RANGE_RADIUS,
+    JOINT_RANGE_WIDTH_PT,
+    JOINT_SLIDE_ARROW_OFFSET_PT,
     JOINT_UPPER_LIMIT_COLOR,
+    TRACKBALL_RAD_PER_PT,
+    TRANSLATION_GUIDE_RADIUS_PT,
     ObjectGizmo,
     _clip_line_to_rect,
+    _clip_segment_to_rect,
     _joint_drag_label_color,
     _JointRangeState,
+    _project_finite_axis_segment,
     _project_rotation_dial,
     _project_rotation_tick,
     _projected_line_parameters,
@@ -93,6 +116,118 @@ class RecordingDraw2D:
 
     def text_size(self, text: str) -> tuple[float, float]:
         return (8.0 * len(text), 14.0)
+
+
+@pytest.mark.parametrize(
+    ("state", "expected_color", "expected_alpha"),
+    (
+        ("idle", AXIS_COLORS[0], ROTATE_RING_ALPHA),
+        ("hovered", axis_hover_color(AXIS_COLORS[0]), ROTATE_RING_HOVER_ALPHA),
+        ("active", axis_active_color(AXIS_COLORS[0]), ROTATE_RING_ACTIVE_ALPHA),
+    ),
+)
+def test_rotation_ring_interaction_preserves_axis_hue_and_uses_transparency(
+    state: str,
+    expected_color,
+    expected_alpha: float,
+) -> None:
+    frame = GizmoFrame(mode=GizmoMode.ROTATE)
+    if state == "hovered":
+        frame.hovered = GizmoHandle.ROTATE_X
+    elif state == "active":
+        frame.active = GizmoHandle.ROTATE_X
+
+    color = rotation_handle_color(frame, GizmoHandle.ROTATE_X, 0)
+
+    assert np.allclose(color[:3], expected_color[:3])
+    assert color[0] > color[1] and color[0] > color[2]
+    assert color[3] == pytest.approx(expected_alpha)
+    assert color[3] < 1.0
+
+
+def test_rotation_ring_color_respects_scalar_joint_override() -> None:
+    frame = GizmoFrame(
+        mode=GizmoMode.ROTATE,
+        hovered=GizmoHandle.ROTATE_Z,
+        handle_color=JOINT_HANDLE_COLOR,
+    )
+
+    color = rotation_handle_color(frame, GizmoHandle.ROTATE_Z, 2, 0.5)
+
+    assert np.allclose(color[:3], axis_hover_color(JOINT_HANDLE_COLOR)[:3])
+    assert color[3] == pytest.approx(0.5 * ROTATE_RING_HOVER_ALPHA)
+
+
+def test_pressed_scalar_joint_rotation_ring_keeps_its_semantic_purple() -> None:
+    frame = GizmoFrame(
+        mode=GizmoMode.ROTATE,
+        active=GizmoHandle.ROTATE_Z,
+        handle_color=JOINT_HANDLE_COLOR,
+    )
+
+    color = rotation_handle_color(frame, GizmoHandle.ROTATE_Z, 2)
+
+    assert np.allclose(color[:3], ACTIVE_HANDLE_COLOR[:3])
+    assert color[0] > color[1] and color[2] > color[1]
+    assert color[3] == pytest.approx(ROTATE_RING_ACTIVE_ALPHA)
+
+
+@pytest.mark.parametrize(
+    ("interaction", "alpha"),
+    (
+        ("idle", TRACKBALL_ALPHA),
+        ("hovered", TRACKBALL_HOVER_ALPHA),
+        ("active", TRACKBALL_ACTIVE_ALPHA),
+    ),
+)
+def test_trackball_feedback_uses_neutral_gray_for_every_interaction(interaction, alpha) -> None:
+    frame = GizmoFrame(
+        mode=GizmoMode.ROTATE,
+        hovered=(GizmoHandle.ROTATE_TRACKBALL if interaction == "hovered" else GizmoHandle.NONE),
+        active=GizmoHandle.ROTATE_TRACKBALL if interaction == "active" else GizmoHandle.NONE,
+    )
+
+    color = trackball_color(frame)
+
+    assert np.allclose(color[:3], TRACKBALL_COLOR[:3])
+    assert np.all(color[:3] < CENTER_COLOR[:3])
+    assert color[3] == pytest.approx(alpha)
+
+
+def test_ball_rotation_value_label_uses_the_active_axis_color() -> None:
+    cam = camera()
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._active_joint = object()
+    gizmo._axis[:] = (0.0, 0.0, 1.0)
+    gizmo._rotation_angle = np.radians(15.0)
+    gizmo._label = "Z +15.0°"
+    dial = _RotationDialProjector(
+        cam,
+        RECT,
+        np.zeros(3),
+        gizmo._axis,
+        np.array((1.0, 0.0, 0.0)),
+        SIZE_PT,
+    )
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_value_label(overlay, cam, RECT, 1.0, dial)
+
+    dot_color = next(args[2] for name, args, _kwargs in overlay.calls if name == "circle_filled")
+    assert np.allclose(dot_color, axis_active_color(AXIS_COLORS[2]))
+
+
+def test_trackball_value_label_has_no_joint_semantic_dot() -> None:
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_TRACKBALL
+    gizmo._active_joint = object()
+    gizmo._label = "Trackball +12.0° -4.0°"
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_value_label(overlay, camera(), RECT, 1.0, None)
+
+    assert not any(name == "circle_filled" for name, _args, _kwargs in overlay.calls)
 
 
 @pytest.mark.parametrize(
@@ -287,7 +422,9 @@ def test_rotation_snap_highlight_matches_the_corresponding_tick_length() -> None
 
     lines = [args for name, args, _kwargs in overlay.calls if name == "line"]
     core = [args for args in lines if np.allclose(args[2], GUIDE_CORE_COLOR)]
-    highlighted = [args for args in lines if np.allclose(args[2], HOVER_COLOR)]
+    highlighted = [
+        args for args in lines if np.allclose(args[2], axis_active_color(AXIS_COLORS[2]))
+    ]
     assert core
     assert len(highlighted) == 1
     start, end = highlighted[0][:2]
@@ -321,10 +458,42 @@ def test_rotation_snap_does_not_duplicate_the_limited_hinge_current_tick() -> No
     gizmo._draw_rotation_snap_ticks(overlay, cam, RECT, 1.0, dial)
 
     lines = [args for name, args, _kwargs in overlay.calls if name == "line"]
-    snap_ticks = [args for args in lines if np.allclose(args[2], GUIDE_CORE_COLOR)]
-    highlighted = [args for args in lines if np.allclose(args[2], JOINT_CURRENT_COLOR)]
+    snap_ticks = [
+        args
+        for args in lines
+        if np.allclose(args[2], ACTIVE_HANDLE_COLOR) and args[3] == pytest.approx(1.1)
+    ]
+    current_ticks = [
+        args
+        for args in lines
+        if np.allclose(args[2], ACTIVE_HANDLE_COLOR) and args[3] == pytest.approx(4.0)
+    ]
     assert snap_ticks
-    assert len(highlighted) == 1
+    assert len(current_ticks) == 1
+
+
+def test_rotation_snap_does_not_add_primary_current_tick_for_a_joint() -> None:
+    cam = camera()
+    axis = np.array((0.0, 0.0, 1.0))
+    dial = _RotationDialProjector(
+        cam,
+        RECT,
+        np.zeros(3),
+        axis,
+        np.array((1.0, 0.0, 0.0)),
+        SIZE_PT,
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._active_joint = object()
+    gizmo._axis[:] = axis
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_rotation_snap_ticks(overlay, cam, RECT, 1.0, dial)
+
+    assert not any(
+        name == "line" and args[3] == pytest.approx(2.2) for name, args, _kwargs in overlay.calls
+    )
 
 
 @pytest.mark.parametrize(
@@ -372,7 +541,7 @@ def test_rotation_snap_ticks_are_clipped_to_the_reachable_hinge_arc() -> None:
     snap_ticks = [
         args
         for name, args, _kwargs in overlay.calls
-        if name == "line" and np.allclose(args[2], GUIDE_CORE_COLOR)
+        if name == "line" and np.allclose(args[2], ACTIVE_HANDLE_COLOR)
     ]
     assert len(snap_ticks) == 10
     expected_angles = np.radians((*range(0, 270, 30), 330))
@@ -673,6 +842,76 @@ def test_rotation_idle_uses_front_half_rings_and_an_interactive_outer_ring() -> 
     assert rotation_ring_alpha(edge_cam, origin, rotation[:, 2]) == 0.0
 
 
+def test_rotation_inner_disk_is_a_background_trackball_hit() -> None:
+    cam = camera()
+    origin = np.zeros(3)
+    rotation = np.eye(3)
+    center = project(cam, (origin,), RECT)[0, :2]
+
+    assert hit_test(cam, origin, rotation, RECT, center, GizmoMode.ROTATE)[0] is (
+        GizmoHandle.ROTATE_TRACKBALL
+    )
+
+    scale = world_scale(cam, origin, RECT[3])
+    ring_points = project(
+        cam,
+        rotation_ring(cam, origin, rotation, scale, 2, full=False),
+        RECT,
+    )[:, :2]
+    axis_point = next(
+        point
+        for point in ring_points
+        if np.linalg.norm(point - center) <= TRACKBALL_RADIUS * SIZE_PT
+        and hit_test(cam, origin, rotation, RECT, point, GizmoMode.ROTATE)[0] in ROTATE_AXIS_HANDLES
+    )
+    axis_hit = hit_test(cam, origin, rotation, RECT, axis_point, GizmoMode.ROTATE)[0]
+    assert axis_hit in ROTATE_AXIS_HANDLES
+
+
+def test_trackball_drag_matches_blender_view_axis_mapping() -> None:
+    session, node = session_at()
+    gizmo = ObjectGizmo("rotate")
+    cam = camera()
+    start = project(cam, (np.zeros(3),), RECT)[0, :2]
+    screen_delta = np.array((24.0, -13.0))
+    end = start + screen_delta
+
+    assert gizmo.update_hover(session, cam, RECT, tuple(start)) is (GizmoHandle.ROTATE_TRACKBALL)
+    assert gizmo.interact(
+        session,
+        cam,
+        RECT,
+        tuple(start),
+        claimed=True,
+        left_down=True,
+        released=False,
+    )
+    assert gizmo.interact(
+        session,
+        cam,
+        RECT,
+        tuple(end),
+        claimed=True,
+        left_down=True,
+        released=False,
+    )
+
+    angles = np.array((screen_delta[1], screen_delta[0])) * TRACKBALL_RAD_PER_PT
+    view_basis = np.asarray(cam.view_matrix(), np.float64)[:3, :3].T
+    rotvec = view_basis[:, 0] * angles[0] + view_basis[:, 1] * angles[1]
+    expected = math3d.rotvec_to_mat3(rotvec)
+    assert session.frame.body_xmat[node.body_index] == pytest.approx(expected, abs=1e-6)
+    assert gizmo.value_label.startswith("Trackball ")
+
+
+def test_trackball_does_not_offer_scalar_precise_input() -> None:
+    session, _node = session_at()
+    gizmo = ObjectGizmo("rotate")
+    gizmo._hovered = GizmoHandle.ROTATE_TRACKBALL
+
+    assert gizmo.precise_input(session) is None
+
+
 def test_single_axis_rotation_uses_and_hits_the_full_ring() -> None:
     cam = camera()
     origin = np.zeros(3)
@@ -885,6 +1124,7 @@ def test_flat_is_default_and_active_handle_hides_the_rest() -> None:
         GizmoHandle.ROTATE_Y,
         GizmoHandle.ROTATE_Z,
         GizmoHandle.ROTATE_SCREEN,
+        GizmoHandle.ROTATE_TRACKBALL,
     }
     frame.active = GizmoHandle.ROTATE_Z
     assert display_handles(frame) == (GizmoHandle.ROTATE_Z,)
@@ -925,6 +1165,19 @@ def test_multiple_direct_joints_require_an_explicit_gizmo_target() -> None:
     assert target is not None and target.joint is joints[1]
     assert target.mode is GizmoMode.TRANSLATE
     assert target.handles == handle_mask(GizmoHandle.Z)
+
+    joint_node = SceneNode(
+        3,
+        "yaw",
+        NodeType.JOINT,
+        body_index=2,
+        joint_index=joints[0].joint_id,
+    )
+    session.selected_node = joint_node
+    target, reason = gizmo._joint_target(session, joint_node)
+    assert not reason
+    assert target is not None and target.joint is joints[0]
+    assert gizmo.selected_joint_id(joint_node.body_index) == joints[0].joint_id
 
 
 def test_axis_drag_moves_the_body_but_not_across_other_local_axes() -> None:
@@ -1020,6 +1273,142 @@ def test_translation_snap_ruler_is_centered_on_the_current_arrow_axis() -> None:
     for point in ruler[:2]:
         offset = np.asarray(point) - arrow_axis[0]
         assert abs(direction[0] * offset[1] - direction[1] * offset[0]) < 1e-6
+
+
+def test_translation_snap_ruler_does_not_add_primary_current_tick_for_a_joint() -> None:
+    gizmo = ObjectGizmo()
+    gizmo._active = GizmoHandle.Z
+    gizmo._active_joint = object()
+    gizmo.translation_snap_m = 0.25
+    gizmo._start_basis[:] = np.eye(3)
+    gizmo._frame.position[:] = (0.0, 0.0, 0.5)
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_translation_snap_ruler(overlay, camera(), RECT, 1.0)
+
+    assert not any(
+        name == "line" and np.allclose(args[2], HOVER_COLOR)
+        for name, args, _kwargs in overlay.calls
+    )
+
+
+def test_translation_snap_guide_draws_smaller_endpoints_above_its_connector() -> None:
+    gizmo = ObjectGizmo()
+    gizmo._drag_origin_pos[:] = (0.0, 0.0, 0.0)
+    gizmo._frame.position[:] = (0.0, 0.0, 0.5)
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_translation_guide(overlay, camera(), RECT, 1.0)
+
+    rings = [call for call in overlay.calls if call[0] == "circle"]
+    dots = [call for call in overlay.calls if call[0] == "circle_filled"]
+    assert [call[0] for call in overlay.calls] == [
+        "line",
+        "circle",
+        "circle_filled",
+        "line",
+        "circle",
+        "circle_filled",
+    ]
+    assert len(rings) == 2
+    assert len(dots) == 2
+    assert all(call[1][1] == pytest.approx(TRANSLATION_GUIDE_RADIUS_PT) for call in rings)
+    assert dots[-1][1][1] == pytest.approx(TRANSLATION_GUIDE_RADIUS_PT)
+
+
+def test_joint_translation_guide_is_a_dark_purple_segment_with_asymmetric_ticks() -> None:
+    gizmo = ObjectGizmo()
+    gizmo._drag_origin_pos[:] = (0.0, 0.0, 0.0)
+    gizmo._frame.position[:] = (0.0, 0.0, 0.5)
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_joint_translation_guide(overlay, camera(), RECT, 1.0)
+
+    assert [name for name, _args, _kwargs in overlay.calls] == ["line"] * 3
+    connector, start_tick, end_tick = (args for _name, args, _kwargs in overlay.calls)
+    assert np.allclose(connector[2], JOINT_ACTIVE_DARK_COLOR)
+    assert np.allclose(start_tick[2], JOINT_ACTIVE_DARK_COLOR)
+    assert np.allclose(end_tick[2], ACTIVE_HANDLE_COLOR)
+    assert connector[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
+    assert np.linalg.norm(start_tick[1] - start_tick[0]) == pytest.approx(
+        2.0 * JOINT_DRAG_START_TICK_HALF_PT
+    )
+    assert np.linalg.norm(end_tick[1] - end_tick[0]) == pytest.approx(JOINT_CURRENT_TICK_PT)
+    assert end_tick[3] == pytest.approx(4.0)
+
+
+def test_joint_translation_guide_stays_in_the_final_overlay_without_dots() -> None:
+    from types import SimpleNamespace
+
+    gizmo = ObjectGizmo()
+    gizmo._visible = True
+    gizmo._using = True
+    gizmo._active = GizmoHandle.Z
+    gizmo._active_joint = SimpleNamespace(type="slide")
+    gizmo._frame.active = GizmoHandle.Z
+    gizmo._frame.position[:] = (0.0, 0.0, 0.5)
+    gizmo._drag_origin_pos[:] = 0.0
+    overlay = RecordingDraw2D()
+
+    gizmo.draw_overlay(camera(), RECT, overlay, style_scale=1.0)
+
+    assert not any(name in {"circle", "circle_filled"} for name, _args, _kwargs in overlay.calls)
+    assert [name for name, _args, _kwargs in overlay.calls[-3:]] == ["line"] * 3
+
+
+def test_translation_snap_guide_is_the_last_axis_overlay_group() -> None:
+    gizmo = ObjectGizmo()
+    gizmo._visible = True
+    gizmo._using = True
+    gizmo._snapping = True
+    gizmo._active = GizmoHandle.Z
+    gizmo._frame.active = GizmoHandle.Z
+    gizmo._frame.position[:] = (0.0, 0.0, 0.5)
+    gizmo._start_basis[:] = np.eye(3)
+    gizmo._drag_origin_pos[:] = 0.0
+    overlay = RecordingDraw2D()
+
+    gizmo.draw_overlay(camera(), RECT, overlay, style_scale=1.0)
+
+    assert [call[0] for call in overlay.calls[-6:]] == [
+        "line",
+        "circle",
+        "circle_filled",
+        "line",
+        "circle",
+        "circle_filled",
+    ]
+
+
+def test_translation_snap_guide_does_not_stay_in_the_gpu_layer() -> None:
+    class Layer:
+        def __init__(self) -> None:
+            self.cleared = False
+
+        def clear(self) -> None:
+            self.cleared = True
+
+    class Debug:
+        def __init__(self) -> None:
+            self.value = Layer()
+
+        def layer(self, *_args, **_kwargs):
+            return self.value
+
+    class Backend:
+        caps = BackendCaps(name="test", debug_draw=True)
+        debug = Debug()
+
+    gizmo = ObjectGizmo()
+    gizmo._using = True
+    gizmo._snapping = True
+    gizmo._active = GizmoHandle.Z
+    gizmo._guide_gpu = True
+
+    gizmo._publish_translation_guide(Backend(), 1.0)
+
+    assert not gizmo._guide_gpu
+    assert Backend.debug.value.cleared
 
 
 def test_shift_snaps_rotation_from_the_drag_origin() -> None:
@@ -1360,6 +1749,71 @@ def test_keyboard_constraint_line_keeps_the_exact_projected_axis_direction() -> 
     assert end == pytest.approx((100.0, 75.0))
     delta = end - start
     assert delta[0] - 2.0 * delta[1] == pytest.approx(0.0)
+
+
+def test_finite_segment_clip_does_not_extend_past_its_world_endpoints() -> None:
+    segment = _clip_segment_to_rect((20.0, 50.0), (80.0, 50.0), RECT)
+    assert segment is not None
+    assert segment[0] == pytest.approx((20.0, 50.0))
+    assert segment[1] == pytest.approx((80.0, 50.0))
+
+    clipped = _clip_segment_to_rect((-20.0, 50.0), (80.0, 50.0), RECT)
+    assert clipped is not None
+    assert clipped[0] == pytest.approx((0.0, 50.0))
+    assert clipped[1] == pytest.approx((80.0, 50.0))
+
+
+def test_rotation_axis_guide_is_long_for_multi_axis_rotation_and_short_for_hinge() -> None:
+    cam = CameraView(
+        eye=np.array((0.0, -5.0, 0.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 0.0, 1.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._axis[:] = (0.0, 0.0, 1.0)
+
+    overlay = RecordingDraw2D()
+    gizmo._draw_rotation_axis_guide(overlay, cam, RECT, 1.0)
+    long_line = next(args for name, args, _kwargs in overlay.calls if name == "line")
+    long_length = float(np.linalg.norm(long_line[1] - long_line[0]))
+    assert long_length > RECT[3] * 0.8
+    assert np.allclose(long_line[2][:3], axis_active_color(AXIS_COLORS[2])[:3])
+
+    gizmo._joint_range = _JointRangeState("hinge", 0.0, -1.0, 1.0)
+    overlay = RecordingDraw2D()
+    gizmo._draw_rotation_axis_guide(overlay, cam, RECT, 1.0)
+    short_line = next(args for name, args, _kwargs in overlay.calls if name == "line")
+    short_length = float(np.linalg.norm(short_line[1] - short_line[0]))
+    assert short_length < long_length * 0.5
+    assert np.allclose(short_line[2][:3], ACTIVE_HANDLE_COLOR[:3])
+
+
+def test_rotation_axis_guide_fades_out_at_a_view_aligned_extreme() -> None:
+    cam = CameraView(
+        eye=np.array((0.0, 0.0, 5.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 1.0, 0.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    segment = _project_finite_axis_segment(
+        cam,
+        np.zeros(3),
+        (0.0, 0.0, 1.0),
+        10.0,
+        RECT,
+        inset=6.0,
+    )
+    assert segment is not None
+    assert np.linalg.norm(segment[1] - segment[0]) < 1e-6
+
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._axis[:] = (0.0, 0.0, 1.0)
+    overlay = RecordingDraw2D()
+    gizmo._draw_rotation_axis_guide(overlay, cam, RECT, 1.0)
+    assert overlay.calls == []
 
 
 @pytest.mark.parametrize("orthographic", [False, True])
@@ -2025,7 +2479,7 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
             for name, args, _kwargs in overlay.calls
             if name == "fringed_concave_fill" and np.allclose(args[1][:3], JOINT_HANDLE_COLOR[:3])
         ]
-        assert len(arrows) == 1
+        assert len(arrows) == 2
         slide = gizmo._slide_range_projection(
             cam,
             RECT,
@@ -2035,10 +2489,34 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
             gizmo._frame.rotation,
         )
         assert slide is not None
-        arrow_cursor = slide.current + slide.tangent * 28.0
+        arrow_polygons = gizmo._slide_arrow_polygons(slide, 1.0)
+        signed_offsets = [
+            float(np.dot(np.mean(points, axis=0) - slide.current, slide.normal))
+            for points in arrow_polygons
+        ]
+        assert signed_offsets[0] > 0.0
+        assert signed_offsets[1] > 0.0
+        assert signed_offsets == pytest.approx([JOINT_SLIDE_ARROW_OFFSET_PT] * 2)
+        assert min(signed_offsets) > JOINT_CURRENT_TICK_PT * 0.5 + 4.0
+        longitudinal_offsets = [
+            float(np.dot(np.mean(points, axis=0) - slide.current, slide.tangent))
+            for points in arrow_polygons
+        ]
+        assert longitudinal_offsets[0] > 0.0
+        assert longitudinal_offsets[1] < 0.0
+        arrow_cursor = np.mean(arrow_polygons[0], axis=0)
         assert gizmo.update_hover(session, cam, RECT, tuple(arrow_cursor)) is GizmoHandle.Z
-        assert gizmo.update_hover(session, cam, RECT, tuple(slide.current)) is GizmoHandle.NONE
-        assert gizmo.joint_limit_hits == ()
+        assert gizmo.update_hover(session, cam, RECT, tuple(slide.current)) is GizmoHandle.Z
+        highlighted = RecordingDraw2D()
+        gizmo.draw_overlay(cam, RECT, highlighted, style_scale=1.0)
+        assert any(
+            name == "line"
+            and np.allclose(args[0], slide.lower)
+            and np.allclose(args[1], slide.upper)
+            and np.allclose(args[2], axis_hover_color(JOINT_RANGE_COLOR))
+            for name, args, _kwargs in highlighted.calls
+        )
+        assert {hit.label for hit in gizmo.joint_limit_hits} == labels
 
     range_args = [
         args
@@ -2084,17 +2562,29 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
     assert all(
         np.allclose(color, (220 / 255, 223 / 255, 227 / 255, 1.0)) for color in texts.values()
     )
+    label_indices = [
+        index
+        for index, (name, args, _kwargs) in enumerate(overlay.calls)
+        if name == "text" and args[2] in labels
+    ]
+    geometry_indices = [
+        index
+        for index, (name, _args, _kwargs) in enumerate(overlay.calls)
+        if name in {"line", "polyline", "fringed_concave_fill", "triangle_fan_fill"}
+    ]
+    assert min(label_indices) > max(geometry_indices)
 
 
 @pytest.mark.physics
-def test_hinge_joint_limit_labels_write_the_selected_endpoint() -> None:
+@pytest.mark.parametrize("body_name", ("hinge_body", "slide_body"))
+def test_joint_limit_labels_write_the_selected_endpoint(body_name: str) -> None:
     from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
     from forge_viewer.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
     assert session.submit(cmd.Pause())
-    node = next(item for item in session.nodes if item.name == "hinge_body")
+    node = next(item for item in session.nodes if item.name == body_name)
     assert session.submit(cmd.Select(node.object_id))
     gizmo = ObjectGizmo()
     session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
@@ -2179,7 +2669,7 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
         if name == "polyline" and np.allclose(args[1], JOINT_RANGE_COLOR)
     )
     assert JOINT_RANGE_RADIUS == RING_RADIUS
-    assert np.allclose(JOINT_RANGE_COLOR, (175 / 255, 132 / 255, 183 / 255, 1.0))
+    assert np.allclose(JOINT_RANGE_COLOR, (173 / 255, 150 / 255, 184 / 255, 1.0))
     assert allowed[1]["closed"] is False
 
     dial = _RotationDialProjector(
@@ -2226,7 +2716,7 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
 
 
 @pytest.mark.parametrize("interaction", ("hovered", "active"))
-def test_hinge_joint_range_uses_primary_bright_for_interaction(interaction: str) -> None:
+def test_hinge_joint_range_keeps_semantic_purple_for_hover_and_press(interaction: str) -> None:
     cam = CameraView(
         eye=np.array((0.0, 0.0, 5.0)),
         target=np.zeros(3),
@@ -2244,14 +2734,15 @@ def test_hinge_joint_range_uses_primary_bright_for_interaction(interaction: str)
 
     gizmo._draw_joint_range(overlay, cam, RECT, 1.0)
 
+    expected = (
+        axis_hover_color(JOINT_RANGE_COLOR) if interaction == "hovered" else ACTIVE_HANDLE_COLOR
+    )
     allowed = next(
         args
         for name, args, kwargs in overlay.calls
-        if name == "polyline"
-        and kwargs.get("closed") is False
-        and np.allclose(args[1], JOINT_CURRENT_COLOR)
+        if name == "polyline" and kwargs.get("closed") is False and np.allclose(args[1], expected)
     )
-    assert np.allclose(allowed[1], JOINT_CURRENT_COLOR)
+    assert np.allclose(allowed[1], expected)
 
 
 def test_full_hinge_range_has_no_unavailable_overlay() -> None:
@@ -2323,11 +2814,11 @@ def test_active_hinge_guide_keeps_one_allowed_range_arc() -> None:
     assert any(name == "fringed_concave_fill" for name, _args, _kwargs in overlay.calls)
     sector_args = next(args for name, args, _kwargs in overlay.calls if name == "triangle_fan_fill")
     sector = np.asarray(sector_args[0])
-    assert np.allclose(sector_args[1][:3], ACTIVE_COLOR[:3])
+    assert np.allclose(sector_args[1][:3], ACTIVE_HANDLE_COLOR[:3])
     arc_color = next(
         args[1] for name, args, _kwargs in overlay.calls if name == "fringed_concave_fill"
     )
-    assert np.allclose(arc_color, ACTIVE_COLOR)
+    assert np.allclose(arc_color, JOINT_ACTIVE_DARK_COLOR)
     stable_dial = _RotationDialProjector(
         cam,
         RECT,
@@ -2621,7 +3112,7 @@ def test_unlimited_joint_gizmo_does_not_invent_limits() -> None:
 
 
 @pytest.mark.physics
-def test_inspector_reports_the_actual_hinge_joint_gizmo(monkeypatch) -> None:
+def test_inspector_omits_redundant_active_gizmo_status(monkeypatch) -> None:
     from types import SimpleNamespace
 
     from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
@@ -2648,4 +3139,4 @@ def test_inspector_reports_the_actual_hinge_joint_gizmo(monkeypatch) -> None:
 
     InspectorPanel()._gizmo_reason(PanelContext(session, None, gizmo=gizmo), node)
 
-    assert lines == ["gizmo: active (hinge / revolute joint; rotate about its axis)"]
+    assert lines == []

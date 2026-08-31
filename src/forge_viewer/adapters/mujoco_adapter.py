@@ -6508,6 +6508,8 @@ class MuJoCoAdapter(SceneAdapterBase):
                     ctrl_limited=bool(m.actuator_ctrllimited[ai]),
                     ctrl_address=int(m.actuator_ctrladr[ai]),
                     ctrl_count=int(m.actuator_ctrlnum[ai]),
+                    act_address=int(m.actuator_actadr[ai]),
+                    act_count=int(m.actuator_actnum[ai]),
                     gain=float(m.actuator_gainprm[ai][0]),
                     joint=joint,
                 )

@@ -283,6 +283,142 @@ def search_input(
     return changed, value
 
 
+def sort_order_glyph(
+    rect: tuple[float, float, float, float],
+) -> tuple[tuple[tuple[float, float], tuple[float, float]], ...]:
+    """Return a compact list-and-arrow sorting glyph inside ``rect``."""
+
+    x0, y0, x1, y1 = rect
+    width, height = x1 - x0, y1 - y0
+    left = x0 + width * 0.24
+    arrow_x = x0 + width * 0.72
+    ys = (y0 + height * 0.32, y0 + height * 0.50, y0 + height * 0.68)
+    bars = tuple(
+        ((left, y), (left + width * length, y))
+        for y, length in zip(ys, (0.28, 0.21, 0.14), strict=True)
+    )
+    arrow_top = y0 + height * 0.28
+    arrow_bottom = y0 + height * 0.70
+    wing = width * 0.09
+    return (
+        *bars,
+        ((arrow_x, arrow_top), (arrow_x, arrow_bottom)),
+        ((arrow_x - wing, arrow_bottom - wing), (arrow_x, arrow_bottom)),
+        ((arrow_x + wing, arrow_bottom - wing), (arrow_x, arrow_bottom)),
+    )
+
+
+def sort_order_tooltip(
+    by_name: bool,
+    state_order: str,
+    translate=lambda value: value,
+) -> str:
+    """Describe only the active order; the button itself communicates switching."""
+
+    current = translate("Name") if by_name else state_order
+    return f"{translate('Order')}: {current}"
+
+
+def sort_order_button(
+    str_id: str,
+    by_name: bool,
+    *,
+    state_order: str,
+    translate=lambda value: value,
+) -> tuple[bool, bool]:
+    """Draw a compact state/name order toggle beside a search field."""
+
+    size = imgui.get_frame_height()
+    left_clicked = imgui.button(f"##sort_order_{str_id}", imgui.ImVec2(size, 0.0))
+    hovered = imgui.is_item_hovered()
+    right_clicked = hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right)
+    lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+    color_value = imgui.get_style_color_vec4(imgui.Col_.check_mark if by_name else imgui.Col_.text)
+    color = imgui.color_convert_float4_to_u32(color_value)
+    thickness = max(1.0, size * 0.045)
+    draw = imgui.get_window_draw_list()
+    for start, end in sort_order_glyph((lo.x, lo.y, hi.x, hi.y)):
+        draw.add_line(imgui.ImVec2(*start), imgui.ImVec2(*end), color, thickness)
+    imgui.set_item_tooltip(sort_order_tooltip(by_name, state_order, translate))
+    changed = bool(left_clicked or right_clicked)
+    return changed, (not by_name if changed else by_name)
+
+
+def searchable_ordered_list_header(
+    str_id: str,
+    value: str,
+    by_name: bool,
+    *,
+    hint: str,
+    search_tooltip: str,
+    clear_tooltip: str,
+    state_order: str,
+    translate=lambda text: text,
+) -> tuple[bool, str, bool, bool]:
+    """Draw one responsive search field followed by its list-order button."""
+
+    spacing = imgui.get_style().item_spacing.x
+    button_width = imgui.get_frame_height()
+    available = imgui.get_content_region_avail().x
+    imgui.set_next_item_width(max(1.0, available - spacing - button_width))
+    search_changed, value = search_input(
+        str_id,
+        value,
+        hint=hint,
+        search_tooltip=search_tooltip,
+        clear_tooltip=clear_tooltip,
+    )
+    imgui.same_line()
+    sort_changed, by_name = sort_order_button(
+        str_id,
+        by_name,
+        state_order=state_order,
+        translate=translate,
+    )
+    return search_changed, value, sort_changed, by_name
+
+
+def horizontal_wheel_target(
+    current: float,
+    maximum: float,
+    wheel: float,
+    wheel_horizontal: float = 0.0,
+    *,
+    step: float = 48.0,
+) -> float:
+    """Map ordinary wheel input onto a bounded horizontal scroll position."""
+
+    delta = float(wheel_horizontal) - float(wheel)
+    return min(max(0.0, float(current) + delta * float(step)), max(0.0, float(maximum)))
+
+
+def horizontal_wheel_scroll(*, step: float = 48.0) -> bool:
+    """Scroll the current horizontal child with either wheel axis."""
+
+    if not imgui.is_window_hovered(imgui.HoveredFlags_.child_windows):
+        return False
+    maximum = float(imgui.get_scroll_max_x())
+    if maximum <= 0.0:
+        return False
+    io = imgui.get_io()
+    wheel = float(io.mouse_wheel)
+    wheel_horizontal = float(io.mouse_wheel_h)
+    if wheel == 0.0 and wheel_horizontal == 0.0:
+        return False
+    current = float(imgui.get_scroll_x())
+    target = horizontal_wheel_target(
+        current,
+        maximum,
+        wheel,
+        wheel_horizontal,
+        step=step,
+    )
+    if target == current:
+        return False
+    imgui.set_scroll_x(target)
+    return True
+
+
 def labeled(label: str, value: str) -> None:
     imgui.table_next_row()
     imgui.table_next_column()
@@ -482,7 +618,8 @@ class PanelSet:
             flags = imgui.WindowFlags_.no_docking.value
         elif panel.dock_with:
             self._dock_with_neighbor(panel.dock_with, dock_neighbor_title)
-        return imgui.begin(title, True if panel.closable else None, flags)
+        result = imgui.begin(title, True if panel.closable else None, flags)
+        return result
 
     @staticmethod
     def _dock_with_neighbor(name: str, translated_title: str = "") -> None:

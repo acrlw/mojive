@@ -20,14 +20,18 @@ from ....gizmo import (
     PLANE_HANDLES,
     ROTATE_AXIS_HANDLES,
     SIZE_PT,
+    TRACKBALL_RADIUS,
     GizmoHandle,
     GizmoMode,
+    axis_hover_color,
     axis_rotation,
     display_handles,
     handle_projection_alpha,
     rotation_half_basis,
+    rotation_handle_color,
     rotation_ring_is_full,
     screen_rotation_basis,
+    trackball_color,
 )
 from ....log import get_logger
 from ....types import MeshKey, MeshShape
@@ -111,6 +115,7 @@ class GizmoPass(BasePass):
                     "half_ring": gizmo_mesh("half_ring"),
                     "screen_ring": gizmo_mesh("screen_ring"),
                     "screen_ring_edge": gizmo_mesh("screen_ring_edge"),
+                    "trackball": builtin_mesh(MeshKey(MeshShape.DISK)),
                     "center": builtin_mesh(MeshKey(MeshShape.SPHERE)),
                 }
                 self._meshes = {
@@ -216,6 +221,21 @@ class GizmoPass(BasePass):
         ctx.ctx.front_face = "ccw"
         ctx.ctx.cull_face = "back"
         try:
+            if GizmoHandle.ROTATE_TRACKBALL in visible:
+                ctx.target.fbo.depth_mask = False
+                ctx.ctx.disable(moderngl.DEPTH_TEST)
+                try:
+                    self._draw(
+                        ctx,
+                        "trackball",
+                        frame.position,
+                        screen_rotation_basis(ctx.camera),
+                        scale * TRACKBALL_RADIUS,
+                        trackball_color(frame),
+                    )
+                finally:
+                    ctx.ctx.enable(moderngl.DEPTH_TEST)
+                    ctx.target.fbo.depth_mask = True
             for axis, handle in enumerate(ROTATE_AXIS_HANDLES):
                 if handle not in visible:
                     continue
@@ -237,7 +257,7 @@ class GizmoPass(BasePass):
                         else rotation_half_basis(ctx.camera, frame.position, frame.rotation, axis)
                     ),
                     scale,
-                    self._color(frame, handle, axis, alpha),
+                    rotation_handle_color(frame, handle, axis, alpha),
                 )
             if GizmoHandle.ROTATE_SCREEN in visible and not (
                 frame.active_rotation_overlay and frame.active is GizmoHandle.ROTATE_SCREEN
@@ -274,8 +294,10 @@ class GizmoPass(BasePass):
 
     def _color(self, frame, handle: GizmoHandle, axis: int, alpha: float = 1.0):
         base = AXIS_COLORS[axis] if frame.handle_color is None else frame.handle_color
-        if frame.active is handle and frame.handle_color is not None:
+        if frame.handle_color is not None and frame.active is handle:
             color = ACTIVE_HANDLE_COLOR.copy()
+        elif frame.handle_color is not None and frame.hovered is handle:
+            color = np.asarray(axis_hover_color(base), np.float32)
         else:
             color = HOVER_COLOR.copy() if self._hot(frame, handle) else np.asarray(base).copy()
         color[3] = alpha

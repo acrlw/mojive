@@ -25,7 +25,15 @@ from ...adapters.base import (
 )
 from ...render.backend import RenderFlag
 from ...types import DEFAULT_HEADLIGHT, Environment, LightType, MeshShape, TextureType
-from . import Panel, PanelContext, begin_kv_table, labeled
+from . import (
+    Panel,
+    PanelContext,
+    begin_kv_table,
+    button_row_layout,
+    button_width,
+    labeled,
+    segmented_control,
+)
 
 GIZMO_REFUSAL_RUNNING = "Physics is running; pause to move things"
 GIZMO_REFUSAL_DRIVEN = "This link is joint-driven; use its joint gizmo or the Joints panel"
@@ -274,8 +282,8 @@ class InspectorPanel(Panel):
         node = s.selected_node
         if node is None:
             self._transform_velocity = False
-            imgui.text_disabled("nothing selected")
-            imgui.text_disabled("click an object in the viewport or the Hierarchy panel")
+            imgui.text_disabled(ctx.tr("nothing selected"))
+            imgui.text_disabled(ctx.tr("click an object in the viewport or the Hierarchy panel"))
             return
 
         color = ctx.theme.node_color(node.type)
@@ -283,7 +291,7 @@ class InspectorPanel(Panel):
         imgui.same_line()
         imgui.text_disabled(f"({node.type})")
 
-        self._identity(node)
+        self._identity(ctx, node)
         self._name_editor(ctx, node)
         if node.type is NodeType.MODEL:
             self._model(ctx, node)
@@ -330,7 +338,7 @@ class InspectorPanel(Panel):
             imgui.InputTextFlags_.enter_returns_true.value,
         )
         imgui.same_line()
-        apply = imgui.button("Apply##name")
+        apply = imgui.button(f"{ctx.tr('Apply')}##name")
         value = self._model_name.strip()
         if (entered or apply) and value:
             command = (
@@ -742,12 +750,15 @@ class InspectorPanel(Panel):
             imgui.close_current_popup()
         imgui.end_popup()
 
-    def _identity(self, node: SceneNode) -> None:
+    def _identity(self, ctx: PanelContext, node: SceneNode) -> None:
         if begin_kv_table("insp_id"):
-            labeled("node id", str(node.node_id))
-            labeled("object id", str(node.object_id) if node.object_id else "— (not pickable)")
-            labeled("body", str(node.body_index) if node.body_index >= 0 else "—")
-            labeled("posable", "yes" if node.posable else "no")
+            labeled(ctx.tr("node id"), str(node.node_id))
+            labeled(
+                ctx.tr("object id"),
+                str(node.object_id) if node.object_id else f"— ({ctx.tr('not pickable')})",
+            )
+            labeled(ctx.tr("body"), str(node.body_index) if node.body_index >= 0 else "—")
+            labeled(ctx.tr("posable"), ctx.tr("yes") if node.posable else ctx.tr("no"))
             imgui.end_table()
 
     def _transform(self, ctx: PanelContext, node: SceneNode) -> None:
@@ -757,7 +768,7 @@ class InspectorPanel(Panel):
             imgui.ImVec2(style.item_spacing.x, 0.0),
         )
         self.show_transform = imgui.collapsing_header(
-            "transform", imgui.TreeNodeFlags_.default_open
+            ctx.tr("transform"), imgui.TreeNodeFlags_.default_open
         )
         imgui.pop_style_var()
         if not self.show_transform:
@@ -765,7 +776,7 @@ class InspectorPanel(Panel):
         frame = ctx.session.frame
         pos, mat = _node_pose(frame, node)
         if pos is None:
-            imgui.text_disabled("no pose this frame")
+            imgui.text_disabled(ctx.tr("no pose this frame"))
             return
         mat = np.eye(3, dtype=np.float32) if mat is None else np.asarray(mat).reshape(3, 3)
         euler = self._continuous_euler(node.node_id, mat)
@@ -821,7 +832,7 @@ class InspectorPanel(Panel):
                 pos_changed, new_pos = _vector_row(
                     ctx,
                     node,
-                    "position",
+                    ctx.tr("position"),
                     np.asarray(pos, np.float64),
                     editable=editable,
                     speed=0.01,
@@ -831,7 +842,7 @@ class InspectorPanel(Panel):
                 rot_changed, new_euler = _vector_row(
                     ctx,
                     node,
-                    "rotation",
+                    ctx.tr("rotation"),
                     euler,
                     editable=editable,
                     speed=0.5,
@@ -844,8 +855,8 @@ class InspectorPanel(Panel):
             if velocity is not None and imgui.begin_table("insp_transform_velocity", 1, flags):
                 imgui.table_setup_column("velocity", imgui.TableColumnFlags_.width_stretch)
                 for name, values in (
-                    ("linear velocity", velocity[0]),
-                    ("angular velocity", velocity[1]),
+                    (ctx.tr("linear velocity"), velocity[0]),
+                    (ctx.tr("angular velocity"), velocity[1]),
                 ):
                     _vector_row(
                         ctx,
@@ -896,8 +907,8 @@ class InspectorPanel(Panel):
             if availability is not None
             else gizmo_refusal_reason(ctx.session.paused, node.posable)
         )
-        imgui.separator()
         if availability is None and not caps.write_pose:
+            imgui.separator()
             imgui.text_colored(
                 imgui.ImVec4(*ctx.theme.warning),
                 f"{caps.name} cannot edit this transform",
@@ -905,34 +916,13 @@ class InspectorPanel(Panel):
             return
         active = availability.ok if availability is not None else reason is None
         if active:
-            direct_joints = ctx.session.joints_for_body(node.body_index)
-            joint = None
-            if not node.posable and direct_joints:
-                selected = ctx.gizmo.selected_joint_id(node.body_index)
-                joint = next(
-                    (item for item in direct_joints if item.joint_id == selected),
-                    direct_joints[0] if len(direct_joints) == 1 else None,
-                )
-            detail = (
-                "hinge / revolute joint; rotate about its axis"
-                if joint is not None and joint.type == "hinge"
-                else (
-                    f"{joint.type} joint; joint-axis control"
-                    if joint is not None
-                    else f"{ctx.gizmo.space if ctx.gizmo is not None else 'body'} frame; "
-                    "g/r mode, t frame"
-                )
-            )
-            imgui.text_colored(
-                imgui.ImVec4(*ctx.theme.primary),
-                f"gizmo: active ({detail})",
-            )
             return
-        imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), "gizmo hidden")
+        imgui.separator()
+        imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), ctx.tr("gizmo hidden"))
         imgui.text_wrapped(reason)
 
     def _velocity(self, ctx: PanelContext, node: SceneNode) -> None:
-        self.show_velocity = imgui.collapsing_header("velocity")
+        self.show_velocity = imgui.collapsing_header(ctx.tr("velocity"))
         if not self.show_velocity:
             return
         qvel = ctx.session.frame.qvel
@@ -968,7 +958,7 @@ class InspectorPanel(Panel):
             )
             self._body_property_error = ""
         properties = self._body_property_edit
-        if properties is None or not imgui.collapsing_header("body inertial and dynamics"):
+        if properties is None or not imgui.collapsing_header(ctx.tr("body inertial and dynamics")):
             return
         editable = bool(
             ctx.session.adapter.caps.model_properties
@@ -980,85 +970,19 @@ class InspectorPanel(Panel):
         inertia_modes = ("auto from geoms", "diagonal", "full tensor")
         mode_values = ("auto", "diagonal", "full")
         mode = mode_values.index(properties.inertia_mode)
-        mode_changed, mode = imgui.combo("inertia mode", mode, inertia_modes)
-        inertia_mode = mode_values[mode]
-        edited = replace(properties, inertia_mode=inertia_mode) if mode_changed else properties
-
-        derived = inertia_mode == "auto"
-        if derived:
-            imgui.begin_disabled()
-        mass_changed, mass = imgui.drag_float(
-            "mass", float(edited.mass), 0.01, 0.000001, 1000000000.0, "%.6g kg"
-        )
-        position_changed, inertial_position = imgui.drag_float3(
-            "inertial position",
-            np.asarray(edited.inertial_position, np.float32),
-            0.001,
-            -1000000.0,
-            1000000.0,
-            "%.5f m",
-        )
-        rotation_disabled = derived or inertia_mode == "full"
-        if rotation_disabled and not derived:
-            imgui.begin_disabled()
-        rotation_changed, inertial_euler = imgui.drag_float3(
-            "inertial rotation",
-            self._body_inertial_euler.astype(np.float32),
-            0.25,
-            -360000.0,
-            360000.0,
-            "%.2f°",
-        )
-        imgui.set_item_tooltip(
-            "Body-frame rotation of diagonal principal axes; full tensors derive this rotation"
-        )
-        if rotation_disabled and not derived:
-            imgui.end_disabled()
-        if inertia_mode in ("auto", "diagonal"):
-            diagonal_changed, diagonal_inertia = imgui.drag_float3(
-                "diagonal inertia",
-                np.asarray(edited.diagonal_inertia, np.float32),
-                0.001,
-                0.000000001,
-                1000000000000.0,
-                "%.6g",
-            )
-            full_diagonal_changed = False
-            full_cross_changed = False
-            full_diagonal = np.asarray(edited.full_inertia[:3], np.float32)
-            full_cross = np.asarray(edited.full_inertia[3:], np.float32)
-        else:
-            diagonal_changed = False
-            diagonal_inertia = np.asarray(edited.diagonal_inertia, np.float32)
-            full_diagonal_changed, full_diagonal = imgui.drag_float3(
-                "tensor xx / yy / zz",
-                np.asarray(edited.full_inertia[:3], np.float32),
-                0.001,
-                -1000000000000.0,
-                1000000000000.0,
-                "%.6g",
-            )
-            full_cross_changed, full_cross = imgui.drag_float3(
-                "tensor xy / xz / yz",
-                np.asarray(edited.full_inertia[3:], np.float32),
-                0.001,
-                -1000000000000.0,
-                1000000000000.0,
-                "%.6g",
-            )
-        if derived:
-            imgui.end_disabled()
-            imgui.text_disabled("Mass and inertia are derived from attached geoms")
-
-        gravity_changed, gravity_compensation = imgui.drag_float(
-            "gravity compensation",
-            float(edited.gravity_compensation),
-            0.01,
-            -1000000.0,
-            1000000.0,
-            "%.4f",
-        )
-        mocap_changed, mocap = imgui.checkbox("mocap body", bool(edited.mocap))
+        inertia_mode = properties.inertia_mode
+        edited = properties
+        mode_changed = mass_changed = position_changed = rotation_changed = False
+        diagonal_changed = full_diagonal_changed = full_cross_changed = False
+        gravity_changed = mocap_changed = sleep_changed = False
+        mass = float(edited.mass)
+        inertial_position = np.asarray(edited.inertial_position, np.float64)
+        inertial_euler = self._body_inertial_euler.copy()
+        diagonal_inertia = np.asarray(edited.diagonal_inertia, np.float64)
+        full_diagonal = np.asarray(edited.full_inertia[:3], np.float64)
+        full_cross = np.asarray(edited.full_inertia[3:], np.float64)
+        gravity_compensation = float(edited.gravity_compensation)
+        mocap = bool(edited.mocap)
         parent = ctx.session.node(node.parent)
         root_body = parent is not None and parent.type in (NodeType.WORLD, NodeType.MODEL)
         movable_root = root_body and bool(ctx.session.joints_for_body(node.body_index))
@@ -1067,17 +991,125 @@ class InspectorPanel(Panel):
         sleep_policy = (
             sleep_values.index(edited.sleep_policy) if edited.sleep_policy in sleep_values else 0
         )
-        if not movable_root:
-            imgui.begin_disabled()
-        sleep_changed, sleep_policy = imgui.combo("sleep policy", sleep_policy, sleep_labels)
-        if not movable_root:
-            imgui.end_disabled()
-            imgui.set_item_tooltip("MuJoCo sleep policies apply only to movable root bodies")
+        if _begin_property_table("body_inertial_properties"):
+            _property_control_row(ctx, "inertia mode")
+            mode_changed, mode = imgui.combo(
+                "##body-inertia-mode", mode, tuple(ctx.tr(label) for label in inertia_modes)
+            )
+            inertia_mode = mode_values[mode]
+            edited = replace(properties, inertia_mode=inertia_mode) if mode_changed else properties
+
+            derived = inertia_mode == "auto"
+            if derived:
+                imgui.begin_disabled()
+            _property_control_row(ctx, "mass")
+            mass_changed, mass = imgui.drag_float(
+                "##body-mass", float(edited.mass), 0.01, 0.000001, 1000000000.0, "%.6g kg"
+            )
+            position_changed, inertial_position = _property_vector_row(
+                ctx,
+                node,
+                "inertial position",
+                "body_inertial_position",
+                edited.inertial_position,
+                editable=not derived,
+                speed=0.001,
+                lo=-1000000.0,
+                hi=1000000.0,
+                fmt="%.5f m",
+                reset_values=current.inertial_position,
+            )
+            rotation_disabled = derived or inertia_mode == "full"
+            rotation_changed, inertial_euler = _property_vector_row(
+                ctx,
+                node,
+                "inertial rotation",
+                "body_inertial_rotation",
+                self._body_inertial_euler,
+                editable=not rotation_disabled,
+                speed=0.25,
+                lo=-360000.0,
+                hi=360000.0,
+                fmt="%.2f°",
+                reset_values=_nearest_euler_degrees(
+                    math3d.quat_to_mat3(current.inertial_quaternion), None
+                ),
+            )
+            imgui.set_item_tooltip(
+                ctx.tr(
+                    "Body-frame rotation of diagonal principal axes; full tensors derive this rotation"
+                )
+            )
+            if inertia_mode in ("auto", "diagonal"):
+                diagonal_changed, diagonal_inertia = _property_vector_row(
+                    ctx,
+                    node,
+                    "diagonal inertia",
+                    "body_diagonal_inertia",
+                    edited.diagonal_inertia,
+                    editable=not derived,
+                    speed=0.001,
+                    lo=0.000000001,
+                    hi=1000000000000.0,
+                    fmt="%.6g",
+                    reset_values=current.diagonal_inertia,
+                )
+            else:
+                _property_control_row(ctx, "tensor xx / yy / zz")
+                full_diagonal_changed, full_diagonal = imgui.drag_float3(
+                    "##body-full-diagonal",
+                    np.asarray(edited.full_inertia[:3], np.float32),
+                    0.001,
+                    -1000000000000.0,
+                    1000000000000.0,
+                    "%.6g",
+                )
+                _property_control_row(ctx, "tensor xy / xz / yz")
+                full_cross_changed, full_cross = imgui.drag_float3(
+                    "##body-full-cross",
+                    np.asarray(edited.full_inertia[3:], np.float32),
+                    0.001,
+                    -1000000000000.0,
+                    1000000000000.0,
+                    "%.6g",
+                )
+            if derived:
+                imgui.end_disabled()
+
+            _property_control_row(ctx, "gravity compensation")
+            gravity_changed, gravity_compensation = imgui.drag_float(
+                "##body-gravity-compensation",
+                float(edited.gravity_compensation),
+                0.01,
+                -1000000.0,
+                1000000.0,
+                "%.4f",
+            )
+            _property_control_row(ctx, "mocap body")
+            mocap_changed, mocap = imgui.checkbox("##body-mocap", bool(edited.mocap))
+            _property_control_row(ctx, "sleep policy")
+            if not movable_root:
+                imgui.begin_disabled()
+            sleep_changed, sleep_policy = imgui.combo(
+                "##body-sleep-policy",
+                sleep_policy,
+                tuple(ctx.tr(label) for label in sleep_labels),
+            )
+            if not movable_root:
+                imgui.end_disabled()
+                imgui.set_item_tooltip(
+                    ctx.tr("MuJoCo sleep policies apply only to movable root bodies")
+                )
+            imgui.end_table()
+        derived = inertia_mode == "auto"
+        rotation_disabled = derived or inertia_mode == "full"
+        if derived:
+            imgui.text_disabled(ctx.tr("Mass and inertia are derived from attached geoms"))
         sleep_policy_value = sleep_values[sleep_policy]
 
         if not editable:
             imgui.end_disabled()
-            imgui.text_disabled("Pause the simulation to edit model body properties")
+            imgui.text_disabled(ctx.tr("Pause the simulation to edit model body properties"))
 
         if mass_changed:
             edited = replace(edited, mass=float(mass))
@@ -1115,7 +1147,7 @@ class InspectorPanel(Panel):
         dirty = edited != current
         if not editable or not dirty:
             imgui.begin_disabled()
-        if imgui.button("Apply##body-properties"):
+        if imgui.button(f"{ctx.tr('Apply')}##body-properties"):
             result = ctx.submit(
                 cmd.SetBodyProperties(
                     node_id=edited.node_id,
@@ -1138,14 +1170,14 @@ class InspectorPanel(Panel):
         if not editable or not dirty:
             imgui.end_disabled()
         imgui.same_line()
-        if imgui.button("Revert##body-properties"):
+        if imgui.button(f"{ctx.tr('Revert')}##body-properties"):
             self._body_property_edit = current
             self._body_inertial_euler = _nearest_euler_degrees(
                 math3d.quat_to_mat3(current.inertial_quaternion), None
             )
             self._body_property_error = ""
         imgui.same_line()
-        imgui.text_disabled("Apply rebuilds the model once")
+        imgui.text_disabled(ctx.tr("Apply rebuilds the model once"))
         if self._body_property_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._body_property_error)
             if imgui.small_button("Copy error##body-properties"):
@@ -1158,16 +1190,21 @@ class InspectorPanel(Panel):
         if joint is None:
             imgui.text_disabled("joint metadata is unavailable")
             return
-        if begin_kv_table("joint_identity"):
-            labeled("type", joint.type)
-            labeled("qpos address", str(joint.qpos_adr))
-            labeled("dof", str(joint.dof))
+        if _begin_property_table("joint_identity"):
+            for label, value in (
+                ("type", joint.type),
+                ("qpos address", str(joint.qpos_adr)),
+                ("dof", str(joint.dof)),
+            ):
+                _property_control_row(ctx, label)
+                imgui.align_text_to_frame_padding()
+                imgui.text(value)
             imgui.end_table()
-        if imgui.collapsing_header("joint properties", imgui.TreeNodeFlags_.default_open):
-            self._joint_properties(ctx, joint)
+        if _property_section(ctx, "joint properties"):
+            self._joint_properties(ctx, node, joint)
         self._joint_advanced_properties(ctx, joint)
 
-    def _joint_properties(self, ctx: PanelContext, joint: JointInfo) -> None:
+    def _joint_properties(self, ctx: PanelContext, node: SceneNode, joint: JointInfo) -> None:
         editable = bool(
             ctx.session.adapter.caps.model_properties
             and ctx.session.paused
@@ -1177,14 +1214,13 @@ class InspectorPanel(Panel):
             imgui.begin_disabled()
         axis = np.asarray(joint.axis, np.float32)
         axis_changed = False
-        if joint.type in ("hinge", "slide"):
-            axis_changed, axis = imgui.drag_float3(
-                "axis (body frame)", axis, 0.01, -1.0, 1.0, "%.4f"
-            )
-
         limited = bool(joint.limited)
         limited_changed = False
         range_changed = False
+        damping_changed = False
+        damping = float(joint.damping)
+        stiffness_changed = False
+        stiffness = float(joint.stiffness)
         value_range = np.asarray(joint.range, np.float64).copy()
         range_valid = (
             value_range[1] > 0.0 if joint.type == "ball" else value_range[1] > value_range[0]
@@ -1196,34 +1232,63 @@ class InspectorPanel(Panel):
             np.float64,
         )
         displayed_range = value_range.copy() if range_valid else default_range
-        if joint.type in ("hinge", "slide", "ball"):
-            limited_changed, limited = imgui.checkbox("limited", limited)
-            if joint.type == "ball":
-                upper_deg = float(np.degrees(displayed_range[1]))
-                range_changed, upper_deg = imgui.drag_float(
-                    "limit angle", upper_deg, 0.5, 0.001, 360.0, "%.2f deg"
+        if _begin_property_table("joint_properties_table"):
+            if joint.type in ("hinge", "slide"):
+                axis_changed, axis = _property_vector_row(
+                    ctx,
+                    node,
+                    "axis",
+                    "joint_axis",
+                    axis,
+                    editable=editable,
+                    speed=0.01,
+                    lo=-1000000.0,
+                    hi=1000000.0,
+                    fmt="%.4f",
+                    reset_values=joint.axis,
+                    label_tooltip="Axis is expressed in the body frame",
                 )
-                displayed_range[:] = (0.0, np.radians(upper_deg))
-            elif joint.type == "hinge":
-                degrees = np.degrees(displayed_range)
-                range_changed, degrees = imgui.drag_float2(
-                    "range", degrees, 0.5, -36000.0, 36000.0, "%.2f deg"
-                )
-                displayed_range[:] = np.radians(degrees)
-            else:
-                range_changed, displayed_range = imgui.drag_float2(
-                    "range", displayed_range, 0.01, -1000000.0, 1000000.0, "%.4f m"
-                )
-                displayed_range = np.asarray(displayed_range, np.float64)
-            if range_changed or (limited_changed and limited and not range_valid):
-                value_range = displayed_range
 
-        damping_changed, damping = imgui.drag_float(
-            "damping", float(joint.damping), 0.01, 0.0, 1000000.0, "%.4f"
-        )
-        stiffness_changed, stiffness = imgui.drag_float(
-            "stiffness", float(joint.stiffness), 0.01, 0.0, 1000000.0, "%.4f"
-        )
+            if joint.type in ("hinge", "slide", "ball"):
+                _property_control_row(ctx, "limited")
+                limited_changed, limited = imgui.checkbox("##joint_limited", limited)
+                if joint.type == "ball":
+                    upper_deg = float(np.degrees(displayed_range[1]))
+                    _property_control_row(ctx, "limit angle")
+                    range_changed, upper_deg = imgui.drag_float(
+                        "##joint_limit_angle", upper_deg, 0.5, 0.001, 360.0, "%.2f deg"
+                    )
+                    displayed_range[:] = (0.0, np.radians(upper_deg))
+                elif joint.type == "hinge":
+                    degrees = np.degrees(displayed_range)
+                    _property_control_row(ctx, "range")
+                    range_changed, degrees = imgui.drag_float2(
+                        "##joint_range", degrees, 0.5, -36000.0, 36000.0, "%.2f deg"
+                    )
+                    displayed_range[:] = np.radians(degrees)
+                else:
+                    _property_control_row(ctx, "range")
+                    range_changed, displayed_range = imgui.drag_float2(
+                        "##joint_range",
+                        displayed_range,
+                        0.01,
+                        -1000000.0,
+                        1000000.0,
+                        "%.4f m",
+                    )
+                    displayed_range = np.asarray(displayed_range, np.float64)
+                if range_changed or (limited_changed and limited and not range_valid):
+                    value_range = displayed_range
+
+            _property_control_row(ctx, "damping")
+            damping_changed, damping = imgui.drag_float(
+                "##joint_damping", damping, 0.01, 0.0, 1000000.0, "%.4f"
+            )
+            _property_control_row(ctx, "stiffness")
+            stiffness_changed, stiffness = imgui.drag_float(
+                "##joint_stiffness", stiffness, 0.01, 0.0, 1000000.0, "%.4f"
+            )
+            imgui.end_table()
         if not editable:
             imgui.end_disabled()
             reason = (
@@ -1282,7 +1347,7 @@ class InspectorPanel(Panel):
             self._joint_advanced_edit = current
             self._joint_advanced_error = ""
         properties = self._joint_advanced_edit
-        if properties is None or not imgui.collapsing_header("advanced joint properties"):
+        if properties is None or not _property_section(ctx, "advanced joint properties"):
             return
         editable = bool(
             ctx.session.adapter.caps.model_properties
@@ -1291,16 +1356,10 @@ class InspectorPanel(Panel):
         if not editable:
             imgui.begin_disabled()
 
-        group_changed, group = imgui.combo(
-            "group", int(properties.group), tuple(str(value) for value in range(6))
-        )
-        armature_changed, armature = imgui.drag_float(
-            "armature", properties.armature, 0.001, 0.0, 1000000000.0, "%.6g"
-        )
-        friction_changed, friction_loss = imgui.drag_float(
-            "friction loss", properties.friction_loss, 0.001, 0.0, 1000000000.0, "%.6g"
-        )
         rotational = joint.type in ("hinge", "ball")
+        group_changed, group = False, int(properties.group)
+        armature_changed, armature = False, float(properties.armature)
+        friction_changed, friction_loss = False, float(properties.friction_loss)
         reference = (
             float(np.degrees(properties.reference)) if rotational else float(properties.reference)
         )
@@ -1309,94 +1368,147 @@ class InspectorPanel(Panel):
             if rotational
             else float(properties.spring_reference)
         )
-        reference_changed, reference = imgui.drag_float(
-            "reference",
-            reference,
-            0.25 if rotational else 0.001,
-            -360000.0 if rotational else -1000000.0,
-            360000.0 if rotational else 1000000.0,
-            "%.3f deg" if rotational else "%.6g m",
-        )
-        spring_reference_changed, spring_reference = imgui.drag_float(
-            "spring reference",
-            spring_reference,
-            0.25 if rotational else 0.001,
-            -360000.0 if rotational else -1000000.0,
-            360000.0 if rotational else 1000000.0,
-            "%.3f deg" if rotational else "%.6g m",
-        )
-        margin_changed, margin = imgui.drag_float(
-            "limit margin", properties.margin, 0.001, 0.0, 1000000.0, "%.6g"
-        )
-
-        limit_reference_changed, limit_reference = imgui.drag_float2(
-            "limit solver reference",
-            np.asarray(properties.limit_solver_reference, np.float32),
-            0.001,
-            -1000000.0,
-            1000000.0,
-            "%.5g",
-        )
-        limit_impedance_first_changed, limit_impedance_first = imgui.drag_float3(
-            "limit impedance min / max / width",
-            np.asarray(properties.limit_solver_impedance[:3], np.float32),
-            0.001,
-            0.0,
-            1.0,
-            "%.5g",
-        )
-        limit_impedance_shape_changed, limit_impedance_shape = imgui.drag_float2(
-            "limit impedance midpoint / power",
-            np.asarray(properties.limit_solver_impedance[3:], np.float32),
-            0.01,
-            0.0,
-            1000.0,
-            "%.4g",
-        )
-        friction_reference_changed, friction_reference = imgui.drag_float2(
-            "friction solver reference",
-            np.asarray(properties.friction_solver_reference, np.float32),
-            0.001,
-            -1000000.0,
-            1000000.0,
-            "%.5g",
-        )
-        friction_impedance_first_changed, friction_impedance_first = imgui.drag_float3(
-            "friction impedance min / max / width",
-            np.asarray(properties.friction_solver_impedance[:3], np.float32),
-            0.001,
-            0.0,
-            1.0,
-            "%.5g",
-        )
-        friction_impedance_shape_changed, friction_impedance_shape = imgui.drag_float2(
-            "friction impedance midpoint / power",
-            np.asarray(properties.friction_solver_impedance[3:], np.float32),
-            0.01,
-            0.0,
-            1000.0,
-            "%.4g",
-        )
-
+        reference_changed = False
+        spring_reference_changed = False
+        margin_changed, margin = False, float(properties.margin)
+        limit_reference_changed = False
+        limit_reference = np.asarray(properties.limit_solver_reference, np.float32)
+        limit_impedance_first_changed = False
+        limit_impedance_first = np.asarray(properties.limit_solver_impedance[:3], np.float32)
+        limit_impedance_shape_changed = False
+        limit_impedance_shape = np.asarray(properties.limit_solver_impedance[3:], np.float32)
+        friction_reference_changed = False
+        friction_reference = np.asarray(properties.friction_solver_reference, np.float32)
+        friction_impedance_first_changed = False
+        friction_impedance_first = np.asarray(properties.friction_solver_impedance[:3], np.float32)
+        friction_impedance_shape_changed = False
+        friction_impedance_shape = np.asarray(properties.friction_solver_impedance[3:], np.float32)
         force_modes = ("auto", "unlimited", "limited")
         force_mode = force_modes.index(properties.actuator_force_limit_mode)
-        force_mode_changed, force_mode = imgui.combo(
-            "actuator force limit", force_mode, force_modes
-        )
-        force_range_changed, force_range = imgui.drag_float2(
-            "actuator force range",
-            np.asarray(properties.actuator_force_range, np.float32),
-            0.01,
-            -1000000000.0,
-            1000000000.0,
-            "%.6g N",
-        )
-        imgui.set_item_tooltip(
-            "Auto enables the limit when a valid range is authored; unlimited ignores the range"
-        )
-        gravity_changed, gravity_compensation = imgui.checkbox(
-            "actuator gravity compensation", properties.actuator_gravity_compensation
-        )
+        force_mode_changed = False
+        force_range_changed = False
+        force_range = np.asarray(properties.actuator_force_range, np.float32)
+        gravity_changed = False
+        gravity_compensation = properties.actuator_gravity_compensation
+
+        if _begin_property_table("joint_advanced_properties_table"):
+            _property_control_row(ctx, "group")
+            group_changed, group = imgui.combo(
+                "##joint_advanced_group", group, tuple(str(value) for value in range(6))
+            )
+            _property_control_row(ctx, "armature")
+            armature_changed, armature = imgui.drag_float(
+                "##joint_armature", armature, 0.001, 0.0, 1000000000.0, "%.6g"
+            )
+            _property_control_row(ctx, "friction loss")
+            friction_changed, friction_loss = imgui.drag_float(
+                "##joint_friction_loss",
+                friction_loss,
+                0.001,
+                0.0,
+                1000000000.0,
+                "%.6g",
+            )
+            _property_control_row(ctx, "reference")
+            reference_changed, reference = imgui.drag_float(
+                "##joint_reference",
+                reference,
+                0.25 if rotational else 0.001,
+                -360000.0 if rotational else -1000000.0,
+                360000.0 if rotational else 1000000.0,
+                "%.3f deg" if rotational else "%.6g m",
+            )
+            _property_control_row(ctx, "spring reference")
+            spring_reference_changed, spring_reference = imgui.drag_float(
+                "##joint_spring_reference",
+                spring_reference,
+                0.25 if rotational else 0.001,
+                -360000.0 if rotational else -1000000.0,
+                360000.0 if rotational else 1000000.0,
+                "%.3f deg" if rotational else "%.6g m",
+            )
+            _property_control_row(ctx, "limit margin")
+            margin_changed, margin = imgui.drag_float(
+                "##joint_limit_margin", margin, 0.001, 0.0, 1000000.0, "%.6g"
+            )
+            _property_control_row(ctx, "limit solver reference")
+            limit_reference_changed, limit_reference = imgui.drag_float2(
+                "##joint_limit_solver_reference",
+                limit_reference,
+                0.001,
+                -1000000.0,
+                1000000.0,
+                "%.5g",
+            )
+            _property_control_row(ctx, "limit impedance min / max / width")
+            limit_impedance_first_changed, limit_impedance_first = imgui.drag_float3(
+                "##joint_limit_impedance_first",
+                limit_impedance_first,
+                0.001,
+                0.0,
+                1.0,
+                "%.5g",
+            )
+            _property_control_row(ctx, "limit impedance midpoint / power")
+            limit_impedance_shape_changed, limit_impedance_shape = imgui.drag_float2(
+                "##joint_limit_impedance_shape",
+                limit_impedance_shape,
+                0.01,
+                0.0,
+                1000.0,
+                "%.4g",
+            )
+            _property_control_row(ctx, "friction solver reference")
+            friction_reference_changed, friction_reference = imgui.drag_float2(
+                "##joint_friction_solver_reference",
+                friction_reference,
+                0.001,
+                -1000000.0,
+                1000000.0,
+                "%.5g",
+            )
+            _property_control_row(ctx, "friction impedance min / max / width")
+            friction_impedance_first_changed, friction_impedance_first = imgui.drag_float3(
+                "##joint_friction_impedance_first",
+                friction_impedance_first,
+                0.001,
+                0.0,
+                1.0,
+                "%.5g",
+            )
+            _property_control_row(ctx, "friction impedance midpoint / power")
+            friction_impedance_shape_changed, friction_impedance_shape = imgui.drag_float2(
+                "##joint_friction_impedance_shape",
+                friction_impedance_shape,
+                0.01,
+                0.0,
+                1000.0,
+                "%.4g",
+            )
+            _property_control_row(ctx, "actuator force limit")
+            force_mode_changed, force_mode = imgui.combo(
+                "##joint_actuator_force_limit", force_mode, force_modes
+            )
+            _property_control_row(ctx, "actuator force range")
+            force_range_changed, force_range = imgui.drag_float2(
+                "##joint_actuator_force_range",
+                force_range,
+                0.01,
+                -1000000000.0,
+                1000000000.0,
+                "%.6g N",
+            )
+            imgui.set_item_tooltip(
+                ctx.tr(
+                    "Auto enables the limit when a valid range is authored; "
+                    "unlimited ignores the range"
+                )
+            )
+            _property_control_row(ctx, "actuator gravity compensation")
+            gravity_changed, gravity_compensation = imgui.checkbox(
+                "##joint_actuator_gravity_compensation", gravity_compensation
+            )
+            imgui.end_table()
         if not editable:
             imgui.end_disabled()
             imgui.text_disabled("Pause the simulation to edit advanced joint properties")
@@ -1467,9 +1579,21 @@ class InspectorPanel(Panel):
                 imgui.ImVec4(*ctx.theme.warning),
                 "Actuator force upper bound must exceed its lower bound",
             )
-        if not editable or not dirty or invalid_force_range:
-            imgui.begin_disabled()
-        if imgui.button("Apply##joint-advanced"):
+        apply_clicked = False
+        revert_clicked = False
+        if _begin_property_table("joint_advanced_actions"):
+            _property_control_row(ctx, "changes")
+            if not editable or not dirty or invalid_force_range:
+                imgui.begin_disabled()
+            apply_clicked = imgui.small_button(f"{ctx.tr('Apply')}##joint-advanced")
+            if not editable or not dirty or invalid_force_range:
+                imgui.end_disabled()
+            imgui.same_line()
+            revert_clicked = imgui.small_button(f"{ctx.tr('Revert')}##joint-advanced")
+            imgui.same_line()
+            imgui.text_disabled(ctx.tr("Apply rebuilds the model once"))
+            imgui.end_table()
+        if apply_clicked:
             result = ctx.submit(
                 cmd.SetJointAdvancedProperties(
                     joint_id=edited.joint_id,
@@ -1493,14 +1617,9 @@ class InspectorPanel(Panel):
                 self._joint_advanced_error = ""
             else:
                 self._joint_advanced_error = result.message
-        if not editable or not dirty or invalid_force_range:
-            imgui.end_disabled()
-        imgui.same_line()
-        if imgui.button("Revert##joint-advanced"):
+        if revert_clicked:
             self._joint_advanced_edit = current
             self._joint_advanced_error = ""
-        imgui.same_line()
-        imgui.text_disabled("Apply rebuilds the model once")
         if self._joint_advanced_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._joint_advanced_error)
             if imgui.small_button("Copy error##joint-advanced"):
@@ -1548,21 +1667,15 @@ class InspectorPanel(Panel):
         from_to = np.asarray(properties.from_to, np.float32)
         first_changed = second_changed = False
         if use_from_to:
-            first_changed, first = imgui.drag_float3(
-                "endpoint A (body frame)",
-                from_to[:3],
-                0.001,
-                -1000000.0,
-                1000000.0,
-                "%.5f m",
-            )
-            second_changed, second = imgui.drag_float3(
-                "endpoint B (body frame)",
-                from_to[3:],
-                0.001,
-                -1000000.0,
-                1000000.0,
-                "%.5f m",
+            (first_changed, first), (second_changed, second) = _vector_fields(
+                ctx,
+                node,
+                "site_endpoints",
+                (
+                    ("endpoint A (body frame)", from_to[:3], 0.001, "%.5f m", from_to[:3]),
+                    ("endpoint B (body frame)", from_to[3:], 0.001, "%.5f m", from_to[3:]),
+                ),
+                editable=editable,
             )
             from_to = np.asarray((*first, *second), np.float32)
         if not editable:
@@ -1623,7 +1736,7 @@ class InspectorPanel(Panel):
                 imgui.set_clipboard_text(self._site_property_error)
 
     def _material(self, ctx: PanelContext, node: SceneNode) -> None:
-        if not imgui.collapsing_header("material"):
+        if not imgui.collapsing_header(ctx.tr("material")):
             return
         src = ctx.session.source
         if src is None or node.body_index < 0 or len(src.geom_body) == 0:
@@ -1680,28 +1793,58 @@ class InspectorPanel(Panel):
         )
         if infinite_plane:
             imgui.text_disabled("infinite plane")
-        elif size_editor is not None:
+        elif size_editor is not None and _property_section(ctx, "geometry dimensions"):
             if not editable_size:
                 imgui.begin_disabled()
             dimension_label, dimensions = size_editor
-            if len(dimensions) == 1:
-                size_changed, scalar = imgui.drag_float(
-                    dimension_label,
-                    float(dimensions[0]),
-                    0.05,
-                    0.002,
-                    1000000.0,
-                    "%.3f",
-                )
-                dimensions = np.array((scalar,), np.float32)
-            elif len(dimensions) == 2:
-                size_changed, dimensions = imgui.drag_float2(
-                    dimension_label, dimensions, 0.05, 0.002, 1000000.0, "%.3f"
-                )
-            else:
-                size_changed, dimensions = imgui.drag_float3(
-                    dimension_label, dimensions, 0.05, 0.002, 1000000.0, "%.3f"
-                )
+            size_changed = False
+            if _begin_property_table("insp_geometry_dimensions"):
+                if len(dimensions) == 1:
+                    _property_control_row(ctx, dimension_label)
+                    size_changed, scalar = imgui.drag_float(
+                        "##geometry_dimension",
+                        float(dimensions[0]),
+                        0.05,
+                        0.002,
+                        1000000.0,
+                        "%.3f",
+                    )
+                    dimensions = np.array((scalar,), np.float32)
+                elif len(dimensions) == 2:
+                    _property_control_row(ctx, dimension_label)
+                    size_changed, dimensions = imgui.drag_float2(
+                        "##geometry_dimensions_2d",
+                        dimensions,
+                        0.05,
+                        0.002,
+                        1000000.0,
+                        "%.3f",
+                    )
+                elif scene_node is not None:
+                    size_changed, dimensions = _property_vector_row(
+                        ctx,
+                        scene_node,
+                        dimension_label,
+                        "geometry_dimensions",
+                        dimensions,
+                        editable=editable_size,
+                        speed=0.05,
+                        lo=0.002,
+                        hi=1000000.0,
+                        fmt="%.3f",
+                        reset_values=np.ones(3, np.float64),
+                    )
+                else:
+                    _property_control_row(ctx, dimension_label)
+                    size_changed, dimensions = imgui.drag_float3(
+                        "##geometry_dimensions_3d",
+                        dimensions,
+                        0.05,
+                        0.002,
+                        1000000.0,
+                        "%.3f",
+                    )
+                imgui.end_table()
             if not editable_size:
                 imgui.end_disabled()
             hint = (
@@ -1722,166 +1865,223 @@ class InspectorPanel(Panel):
         self._geometry_contact_properties(ctx, node_id)
         self._geometry_advanced_properties(ctx, node_id)
 
-        color_changed, rgba = imgui.color_edit4("instance color", src.geom_rgba[first])
-        if color_changed and node_id >= 0:
-            self._submit_edit(ctx, cmd.SetGeometryColor(node_id, np.asarray(rgba, np.float32)))
-
         model_id = scene_node.model_id if scene_node is not None else -1
         model_assets = bool(model_id >= 0 and ctx.session.adapter.caps.model_assets)
-        if model_assets:
-            compatible_materials = ctx.session.model_material_indices(model_id)
-            asset_editable = bool(not ctx.session.adapter.caps.simulation or ctx.session.paused)
-            assigned = material_index in compatible_materials
-            assignment_label = material.name if assigned else "inline appearance"
-            prefix = f"forge_{model_id}_"
-            if not asset_editable:
-                imgui.begin_disabled()
-            if imgui.begin_combo("assigned material", assignment_label):
-                selected, _ = imgui.selectable("inline appearance", not assigned)
-                if selected and assigned:
-                    self._submit_edit(ctx, cmd.SetGeometryMaterial(node_id, -1))
-                    imgui.end_combo()
-                    if not asset_editable:
-                        imgui.end_disabled()
-                    imgui.pop_id()
-                    return
-                for candidate in compatible_materials:
-                    candidate_material = src.materials[candidate]
-                    selected, _ = imgui.selectable(
-                        candidate_material.name or f"material {candidate}",
-                        candidate == material_index,
-                    )
-                    if selected and candidate != material_index:
-                        self._submit_edit(ctx, cmd.SetGeometryMaterial(node_id, candidate))
-                        imgui.end_combo()
-                        if not asset_editable:
-                            imgui.end_disabled()
-                        imgui.pop_id()
-                        return
-                imgui.end_combo()
-
-            if assigned and ctx.panels is not None and imgui.small_button("Open in Assets"):
-                panel = ctx.panels.get("Assets")
-                focus = getattr(panel, "focus", None)
-                if focus is not None:
-                    focus(model_id, "material", material.name.removeprefix(prefix))
-            existing_materials = {
-                src.materials[index].name.removeprefix(prefix) for index in compatible_materials
-            }
-            new_name = _unique_component_name("material", existing_materials)
-            create = imgui.small_button("New material")
-            imgui.same_line()
-            if not assigned:
-                imgui.begin_disabled()
-            duplicate = imgui.small_button("Duplicate material")
-            if not assigned:
-                imgui.end_disabled()
-            imgui.same_line()
-            can_import = assigned and ctx.request_texture_import is not None
-            if not can_import:
-                imgui.begin_disabled()
-            import_texture = imgui.small_button("Import texture")
-            if not can_import:
-                imgui.end_disabled()
-            if not asset_editable:
-                imgui.end_disabled()
-            if create or duplicate:
-                ctx.submit(
-                    cmd.AddModelMaterial(
-                        node_id,
-                        new_name,
-                        material_index if duplicate and assigned else -1,
-                    )
-                )
-                imgui.pop_id()
-                return
-            if import_texture and can_import:
-                ctx.request_texture_import(model_id, material_index)
-
-            can_import_environment = bool(asset_editable and ctx.request_texture_import is not None)
-            if not can_import_environment:
-                imgui.begin_disabled()
-            if imgui.small_button("Import cube texture") and can_import_environment:
-                ctx.request_texture_import(model_id, -1, "cube")
-            imgui.same_line()
-            if imgui.small_button("Import skybox texture") and can_import_environment:
-                ctx.request_texture_import(model_id, -1, "skybox")
-            if not can_import_environment:
-                imgui.end_disabled()
-
-            if not assigned:
-                imgui.text_disabled("Create or assign a shared material to edit its properties")
-                imgui.pop_id()
-                return
-
-        imgui.text_disabled(f"shared material: {material.name or material_index}")
-        rgba_changed, material_rgba = imgui.color_edit4("base color", material.rgba)
+        compatible_materials = ctx.session.model_material_indices(model_id) if model_assets else ()
+        asset_editable = bool(
+            not model_assets or not ctx.session.adapter.caps.simulation or ctx.session.paused
+        )
+        assigned = not model_assets or material_index in compatible_materials
+        prefix = f"forge_{model_id}_" if model_assets else ""
+        assignment_choice: int | None = None
+        color_changed = rgba_changed = preset_changed = False
+        emission_changed = specular_changed = shininess_changed = False
+        reflectance_changed = metallic_toggle_changed = metallic_changed = False
+        roughness_toggle_changed = roughness_changed = texture_changed = False
+        repeat_changed = uniform_changed = False
+        rgba = np.asarray(src.geom_rgba[first], np.float32)
+        material_rgba = np.asarray(material.rgba, np.float32)
         emission = material.emission
         specular = material.specular
         shininess = material.shininess
         reflectance = material.reflectance
-        preset_changed = False
-        if imgui.begin_combo("preset", "Presets..."):
-            for preset, values in _MATERIAL_PRESETS.items():
-                selected, _ = imgui.selectable(preset, False)
-                if selected:
-                    emission, specular, shininess, reflectance = values
-                    preset_changed = True
-            imgui.end_combo()
-        emission_changed, emission = imgui.drag_float("emission", emission, 0.01, 0.0, 10.0, "%.2f")
-        specular_changed, specular = imgui.drag_float("specular", specular, 0.01, 0.0, 1.0, "%.2f")
-        shininess_changed, shininess = imgui.drag_float(
-            "shininess", shininess, 0.01, 0.0, 1.0, "%.2f"
-        )
-        reflectance_changed, reflectance = imgui.drag_float(
-            "reflectance", reflectance, 0.01, 0.0, 1.0, "%.2f"
-        )
         metallic = material.metallic
-        metallic_toggle_changed, metallic_enabled = imgui.checkbox(
-            "metallic override", metallic >= 0.0
-        )
-        if metallic_toggle_changed:
-            metallic = 0.0 if metallic_enabled else -1.0
-        if not metallic_enabled:
-            imgui.begin_disabled()
-        metallic_changed, metallic_value = imgui.drag_float(
-            "metallic", max(0.0, metallic), 0.01, 0.0, 1.0, "%.2f"
-        )
-        if metallic_enabled:
-            metallic = float(metallic_value)
-        if not metallic_enabled:
-            imgui.end_disabled()
         roughness = material.roughness
-        roughness_toggle_changed, roughness_enabled = imgui.checkbox(
-            "roughness override", roughness >= 0.0
-        )
-        if roughness_toggle_changed:
-            roughness = 0.5 if roughness_enabled else -1.0
-        if not roughness_enabled:
-            imgui.begin_disabled()
-        roughness_changed, roughness_value = imgui.drag_float(
-            "roughness", max(0.0, roughness), 0.01, 0.0, 1.0, "%.2f"
-        )
-        if roughness_enabled:
-            roughness = float(roughness_value)
-        if not roughness_enabled:
-            imgui.end_disabled()
         texture = material.texture
-        texture_changed = False
-        if imgui.begin_combo("texture", texture or "none"):
-            compatible_textures = (
-                ctx.session.model_texture_names(model_id) if model_assets else tuple(src.textures)
+        tex_repeat = np.asarray(material.tex_repeat, np.float32)
+        tex_uniform = material.tex_uniform
+        create = duplicate = import_texture = False
+        import_cube = import_skybox = open_assets = False
+
+        if _property_section(ctx, "appearance") and _begin_property_table(
+            "insp_geometry_appearance"
+        ):
+            _property_control_row(ctx, "instance color")
+            color_changed, rgba = _property_color_edit4(ctx, "##geometry_instance_color", rgba)
+
+            if model_assets:
+                assignment_label = material.name if assigned else ctx.tr("inline appearance")
+                if not asset_editable:
+                    imgui.begin_disabled()
+                _property_control_row(ctx, "assigned material")
+                if imgui.begin_combo("##assigned_material", assignment_label):
+                    selected, _ = imgui.selectable(ctx.tr("inline appearance"), not assigned)
+                    if selected and assigned:
+                        assignment_choice = -1
+                    for candidate in compatible_materials:
+                        candidate_material = src.materials[candidate]
+                        selected, _ = imgui.selectable(
+                            candidate_material.name or f"material {candidate}",
+                            candidate == material_index,
+                        )
+                        if selected and candidate != material_index:
+                            assignment_choice = candidate
+                    imgui.end_combo()
+
+                if assigned and ctx.panels is not None:
+                    (open_assets,) = _property_button_row(ctx, "asset browser", ("Open in Assets",))
+                existing_materials = {
+                    src.materials[index].name.removeprefix(prefix) for index in compatible_materials
+                }
+                new_name = _unique_component_name("material", existing_materials)
+                (create,) = _property_button_row(ctx, "create material", ("New material",))
+                if not assigned:
+                    imgui.begin_disabled()
+                (duplicate,) = _property_button_row(
+                    ctx, "material actions", ("Duplicate material",)
+                )
+                if not assigned:
+                    imgui.end_disabled()
+                can_import_texture = assigned and ctx.request_texture_import is not None
+                if not can_import_texture:
+                    imgui.begin_disabled()
+                (import_texture,) = _property_button_row(ctx, "texture import", ("Import texture",))
+                if not can_import_texture:
+                    imgui.end_disabled()
+                can_import_environment = ctx.request_texture_import is not None
+                if not can_import_environment:
+                    imgui.begin_disabled()
+                import_cube, import_skybox = _property_button_row(
+                    ctx,
+                    "environment textures",
+                    ("Import cube texture", "Import skybox texture"),
+                )
+                if not can_import_environment:
+                    imgui.end_disabled()
+                if not asset_editable:
+                    imgui.end_disabled()
+
+            if assigned:
+                _property_control_row(ctx, "shared material")
+                imgui.align_text_to_frame_padding()
+                imgui.text(material.name or str(material_index))
+                _property_control_row(ctx, "base color")
+                rgba_changed, material_rgba = _property_color_edit4(
+                    ctx, "##material_base_color", material.rgba
+                )
+                _property_control_row(ctx, "preset")
+                if imgui.begin_combo("##material_preset", ctx.tr("Presets...")):
+                    for preset, values in _MATERIAL_PRESETS.items():
+                        selected, _ = imgui.selectable(preset, False)
+                        if selected:
+                            emission, specular, shininess, reflectance = values
+                            preset_changed = True
+                    imgui.end_combo()
+                _property_control_row(ctx, "emission")
+                emission_changed, emission = imgui.drag_float(
+                    "##material_emission", emission, 0.01, 0.0, 10.0, "%.2f"
+                )
+                _property_control_row(ctx, "specular")
+                specular_changed, specular = imgui.drag_float(
+                    "##material_specular", specular, 0.01, 0.0, 1.0, "%.2f"
+                )
+                _property_control_row(ctx, "shininess")
+                shininess_changed, shininess = imgui.drag_float(
+                    "##material_shininess", shininess, 0.01, 0.0, 1.0, "%.2f"
+                )
+                _property_control_row(ctx, "reflectance")
+                reflectance_changed, reflectance = imgui.drag_float(
+                    "##material_reflectance", reflectance, 0.01, 0.0, 1.0, "%.2f"
+                )
+                _property_control_row(ctx, "metallic override")
+                metallic_toggle_changed, metallic_enabled = imgui.checkbox(
+                    "##material_metallic_override", metallic >= 0.0
+                )
+                if metallic_toggle_changed:
+                    metallic = 0.0 if metallic_enabled else -1.0
+                _property_control_row(ctx, "metallic")
+                if not metallic_enabled:
+                    imgui.begin_disabled()
+                metallic_changed, metallic_value = imgui.drag_float(
+                    "##material_metallic", max(0.0, metallic), 0.01, 0.0, 1.0, "%.2f"
+                )
+                if metallic_enabled:
+                    metallic = float(metallic_value)
+                if not metallic_enabled:
+                    imgui.end_disabled()
+                _property_control_row(ctx, "roughness override")
+                roughness_toggle_changed, roughness_enabled = imgui.checkbox(
+                    "##material_roughness_override", roughness >= 0.0
+                )
+                if roughness_toggle_changed:
+                    roughness = 0.5 if roughness_enabled else -1.0
+                _property_control_row(ctx, "roughness")
+                if not roughness_enabled:
+                    imgui.begin_disabled()
+                roughness_changed, roughness_value = imgui.drag_float(
+                    "##material_roughness", max(0.0, roughness), 0.01, 0.0, 1.0, "%.2f"
+                )
+                if roughness_enabled:
+                    roughness = float(roughness_value)
+                if not roughness_enabled:
+                    imgui.end_disabled()
+                _property_control_row(ctx, "texture")
+                if imgui.begin_combo("##material_texture", texture or ctx.tr("none")):
+                    compatible_textures = (
+                        ctx.session.model_texture_names(model_id)
+                        if model_assets
+                        else tuple(src.textures)
+                    )
+                    for candidate in (None, *compatible_textures):
+                        selected, _ = imgui.selectable(
+                            candidate or ctx.tr("none"), candidate == texture
+                        )
+                        if selected:
+                            texture = candidate
+                            texture_changed = True
+                    imgui.end_combo()
+                _property_control_row(ctx, "texture repeat")
+                repeat_changed, tex_repeat = imgui.drag_float2(
+                    "##material_texture_repeat",
+                    material.tex_repeat,
+                    0.05,
+                    0.01,
+                    1000.0,
+                    "%.2f",
+                )
+                _property_control_row(ctx, "uniform texture scale")
+                uniform_changed, tex_uniform = imgui.checkbox(
+                    "##material_texture_uniform", material.tex_uniform
+                )
+            else:
+                _property_control_row(ctx, "material properties")
+                imgui.text_disabled(
+                    ctx.tr("Create or assign a shared material to edit its properties")
+                )
+            imgui.end_table()
+
+        if color_changed and node_id >= 0:
+            self._submit_edit(ctx, cmd.SetGeometryColor(node_id, np.asarray(rgba, np.float32)))
+        if assignment_choice is not None:
+            self._submit_edit(ctx, cmd.SetGeometryMaterial(node_id, assignment_choice))
+            imgui.pop_id()
+            return
+        if open_assets and ctx.panels is not None:
+            panel = ctx.panels.get("Assets")
+            focus = getattr(panel, "focus", None)
+            if focus is not None:
+                focus(model_id, "material", material.name.removeprefix(prefix))
+        if create or duplicate:
+            ctx.submit(
+                cmd.AddModelMaterial(
+                    node_id,
+                    new_name,
+                    material_index if duplicate and assigned else -1,
+                )
             )
-            for candidate in (None, *compatible_textures):
-                selected, _ = imgui.selectable(candidate or "none", candidate == texture)
-                if selected:
-                    texture = candidate
-                    texture_changed = True
-            imgui.end_combo()
-        repeat_changed, tex_repeat = imgui.drag_float2(
-            "texture repeat", material.tex_repeat, 0.05, 0.01, 1000.0, "%.2f"
-        )
-        uniform_changed, tex_uniform = imgui.checkbox("uniform texture scale", material.tex_uniform)
+            imgui.pop_id()
+            return
+        can_import = bool(assigned and asset_editable and ctx.request_texture_import is not None)
+        if import_texture and can_import:
+            ctx.request_texture_import(model_id, material_index)
+        if import_cube and asset_editable and ctx.request_texture_import is not None:
+            ctx.request_texture_import(model_id, -1, "cube")
+        if import_skybox and asset_editable and ctx.request_texture_import is not None:
+            ctx.request_texture_import(model_id, -1, "skybox")
+
+        if not assigned:
+            imgui.pop_id()
+            return
         if any(
             (
                 emission_changed,
@@ -1935,14 +2135,12 @@ class InspectorPanel(Panel):
             self._geometry_shape_edit = current
             self._geometry_shape_error = ""
         properties = self._geometry_shape_edit
-        if properties is None or not imgui.collapsing_header("geometry shape and resource"):
+        if properties is None or not imgui.collapsing_header(ctx.tr("geometry shape and resource")):
             return
         editable = bool(
             ctx.session.adapter.caps.model_properties
             and (not ctx.session.adapter.caps.simulation or ctx.session.paused)
         )
-        if not editable:
-            imgui.begin_disabled()
         types = (
             "plane",
             "hfield",
@@ -1954,93 +2152,113 @@ class InspectorPanel(Panel):
             "mesh",
         )
         type_index = types.index(properties.type)
-        type_changed, type_index = imgui.combo("geometry type", type_index, types)
-        geom_type = types[type_index]
+        type_changed = False
+        resource_changed = False
         edited = properties
-        if type_changed:
-            choices = (
+        if not editable:
+            imgui.begin_disabled()
+        if _begin_property_table("insp_geometry_shape"):
+            _property_control_row(ctx, "geometry type")
+            type_changed, type_index = imgui.combo("##geometry_type", type_index, types)
+            geom_type = types[type_index]
+            if type_changed:
+                choices = (
+                    properties.mesh_names
+                    if geom_type == "mesh"
+                    else properties.height_field_names
+                    if geom_type == "hfield"
+                    else ()
+                )
+                edited = replace(
+                    edited,
+                    type=geom_type,
+                    resource_name=choices[0] if choices else "",
+                )
+            resources = (
                 properties.mesh_names
                 if geom_type == "mesh"
                 else properties.height_field_names
                 if geom_type == "hfield"
                 else ()
             )
-            edited = replace(
-                edited,
-                type=geom_type,
-                resource_name=choices[0] if choices else "",
-            )
-        resources = (
-            properties.mesh_names
-            if geom_type == "mesh"
-            else properties.height_field_names
-            if geom_type == "hfield"
-            else ()
-        )
-        if geom_type in ("mesh", "hfield"):
-            current_resource = edited.resource_name
-            resource_index = (
-                resources.index(current_resource) if current_resource in resources else 0
-            )
-            if resources:
-                resource_changed, resource_index = imgui.combo(
-                    "resource", resource_index, resources
+            if geom_type in ("mesh", "hfield"):
+                _property_control_row(ctx, "resource")
+                current_resource = edited.resource_name
+                resource_index = (
+                    resources.index(current_resource) if current_resource in resources else 0
                 )
-                if resource_changed or not current_resource:
-                    edited = replace(edited, resource_name=resources[resource_index])
-            else:
-                imgui.text_disabled(f"no {geom_type} resources in this model")
+                if resources:
+                    resource_changed, resource_index = imgui.combo(
+                        "##geometry_resource", resource_index, resources
+                    )
+                    if resource_changed or not current_resource:
+                        edited = replace(edited, resource_name=resources[resource_index])
+                else:
+                    imgui.text_disabled(ctx.tr(f"no {geom_type} resources in this model"))
+            imgui.end_table()
+        else:
+            geom_type = types[type_index]
+            resources = (
+                properties.mesh_names
+                if geom_type == "mesh"
+                else properties.height_field_names
+                if geom_type == "hfield"
+                else ()
+            )
         if not editable:
             imgui.end_disabled()
-            imgui.text_disabled("Pause the simulation to edit model geometry shape")
-
-        if (
-            geom_type in ("mesh", "hfield")
-            and edited.resource_name
-            and ctx.panels is not None
-            and imgui.small_button("Open in Assets##geometry-resource")
-        ):
-            panel = ctx.panels.get("Assets")
-            focus = getattr(panel, "focus", None)
-            node = ctx.session.node(edited.node_id)
-            if focus is not None and node is not None:
-                focus(node.model_id, geom_type, edited.resource_name)
+            imgui.text_disabled(ctx.tr("Pause the simulation to edit model geometry shape"))
 
         self._geometry_shape_edit = edited
         dirty = edited.type != current.type or edited.resource_name != current.resource_name
         ready = geom_type not in ("mesh", "hfield") or edited.resource_name in resources
-        if not editable or not dirty or not ready:
-            imgui.begin_disabled()
-        if imgui.button("Apply##geometry-shape"):
-            result = ctx.submit(
-                cmd.SetGeometryShape(edited.node_id, edited.type, edited.resource_name)
-            )
-            if result.ok:
-                self._geometry_shape_generation = -1
-                self._geometry_shape_error = ""
-            else:
-                self._geometry_shape_error = result.message
-        if not editable or not dirty or not ready:
-            imgui.end_disabled()
-        imgui.same_line()
-        if imgui.button("Revert##geometry-shape"):
-            self._geometry_shape_edit = current
-            self._geometry_shape_error = ""
-
         can_import = bool(
             editable
             and ctx.session.adapter.caps.model_assets
             and ctx.request_geometry_resource_import is not None
         )
-        if not can_import:
-            imgui.begin_disabled()
-        if imgui.small_button("Import and assign mesh") and can_import:
-            ctx.request_geometry_resource_import(node_id, "mesh")
-        imgui.same_line()
-        if imgui.small_button("Import and assign height field") and can_import:
-            ctx.request_geometry_resource_import(node_id, "hfield")
-        if not can_import:
-            imgui.end_disabled()
+        if _begin_property_table("insp_geometry_shape_actions"):
+            if geom_type in ("mesh", "hfield") and edited.resource_name and ctx.panels is not None:
+                (open_assets,) = _property_button_row(ctx, "resource actions", ("Open in Assets",))
+                if open_assets:
+                    panel = ctx.panels.get("Assets")
+                    focus = getattr(panel, "focus", None)
+                    node = ctx.session.node(edited.node_id)
+                    if focus is not None and node is not None:
+                        focus(node.model_id, geom_type, edited.resource_name)
+
+            if not editable or not dirty or not ready:
+                imgui.begin_disabled()
+            apply, revert = _property_button_row(ctx, "changes", ("Apply", "Revert"))
+            if not editable or not dirty or not ready:
+                imgui.end_disabled()
+            if apply:
+                result = ctx.submit(
+                    cmd.SetGeometryShape(edited.node_id, edited.type, edited.resource_name)
+                )
+                if result.ok:
+                    self._geometry_shape_generation = -1
+                    self._geometry_shape_error = ""
+                else:
+                    self._geometry_shape_error = result.message
+            if revert:
+                self._geometry_shape_edit = current
+                self._geometry_shape_error = ""
+
+            if not can_import:
+                imgui.begin_disabled()
+            import_mesh, import_hfield = _property_button_row(
+                ctx,
+                "import",
+                ("Import and assign mesh", "Import and assign height field"),
+            )
+            if not can_import:
+                imgui.end_disabled()
+            if import_mesh and can_import:
+                ctx.request_geometry_resource_import(node_id, "mesh")
+            if import_hfield and can_import:
+                ctx.request_geometry_resource_import(node_id, "hfield")
+            imgui.end_table()
         if self._geometry_shape_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._geometry_shape_error)
             if imgui.small_button("Copy error##geometry-shape"):
@@ -2048,22 +2266,32 @@ class InspectorPanel(Panel):
 
     def _geometry_contact_properties(self, ctx: PanelContext, node_id: int) -> None:
         properties = ctx.session.geometry_properties(node_id)
-        if properties is None or not imgui.collapsing_header("contact properties"):
+        if properties is None or not imgui.collapsing_header(ctx.tr("contact properties")):
             return
         editable = bool(
             ctx.session.adapter.caps.model_properties
             and (not ctx.session.adapter.caps.simulation or ctx.session.paused)
         )
+        friction = np.asarray(properties.friction, np.float32)
+        dimension = 1
+        type_mask = properties.collision_type_mask
+        affinity_mask = properties.collision_affinity_mask
+        priority = properties.contact_priority
+        margin = properties.margin
+        gap = properties.gap
+        solver_mix = properties.solver_mix
+        solver_reference = np.asarray(properties.solver_reference, np.float32)
+        impedance_first = np.asarray(properties.solver_impedance[:3], np.float32)
+        impedance_shape = np.asarray(properties.solver_impedance[3:], np.float32)
+        adhesion = properties.adhesion
+        friction_changed = dimension_changed = type_changed = affinity_changed = False
+        priority_changed = margin_changed = gap_changed = mix_changed = False
+        reference_changed = impedance_first_changed = impedance_shape_changed = False
+        adhesion_changed = linear_velocity_changed = angular_velocity_changed = False
+        linear_velocity = np.asarray(properties.surface_velocity[:3], np.float32)
+        angular_velocity = np.asarray(properties.surface_velocity[3:], np.float32)
         if not editable:
             imgui.begin_disabled()
-        friction_changed, friction = imgui.drag_float3(
-            "friction (slide spin roll)",
-            np.asarray(properties.friction, np.float32),
-            0.005,
-            0.0,
-            1000000.0,
-            "%.5f",
-        )
         dimensions = (1, 3, 4, 6)
         dimension_labels = (
             "1 · frictionless",
@@ -2076,74 +2304,95 @@ class InspectorPanel(Panel):
             if properties.contact_dimension in dimensions
             else 1
         )
-        dimension_changed, dimension = imgui.combo("contact dimension", dimension, dimension_labels)
-        type_changed, type_mask = imgui.input_int(
-            "collision type mask", properties.collision_type_mask, 1, 16
-        )
-        imgui.set_item_tooltip("Decimal MuJoCo contype bitmask")
-        affinity_changed, affinity_mask = imgui.input_int(
-            "collision affinity mask", properties.collision_affinity_mask, 1, 16
-        )
-        imgui.set_item_tooltip("Decimal MuJoCo conaffinity bitmask")
-        priority_changed, priority = imgui.drag_int(
-            "contact priority", properties.contact_priority, 1.0, 0, 2147483647, "%d"
-        )
-        margin_changed, margin = imgui.drag_float(
-            "contact margin", properties.margin, 0.001, 0.0, 1000000.0, "%.5f m"
-        )
-        gap_changed, gap = imgui.drag_float(
-            "contact gap", properties.gap, 0.001, 0.0, 1000000.0, "%.5f m"
-        )
-        mix_changed, solver_mix = imgui.drag_float(
-            "solver mix", properties.solver_mix, 0.01, 0.0, 1.0, "%.3f"
-        )
-        reference_changed, solver_reference = imgui.drag_float2(
-            "solver reference",
-            np.asarray(properties.solver_reference, np.float32),
-            0.001,
-            -1000000.0,
-            1000000.0,
-            "%.5g",
-        )
-        imgui.set_item_tooltip(
-            "Positive values use time-constant/damping-ratio format; non-positive values use "
-            "direct stiffness/damping format"
-        )
-        impedance_first_changed, impedance_first = imgui.drag_float3(
-            "impedance min / max / width",
-            np.asarray(properties.solver_impedance[:3], np.float32),
-            0.001,
-            0.0,
-            1.0,
-            "%.5g",
-        )
-        impedance_shape_changed, impedance_shape = imgui.drag_float2(
-            "impedance midpoint / power",
-            np.asarray(properties.solver_impedance[3:], np.float32),
-            0.01,
-            0.0,
-            1000.0,
-            "%.4g",
-        )
-        adhesion_changed, adhesion = imgui.drag_float(
-            "adhesion", properties.adhesion, 0.01, 0.0, 1000000000.0, "%.5g"
-        )
-        linear_velocity_changed, linear_velocity = imgui.drag_float3(
-            "surface linear velocity",
-            np.asarray(properties.surface_velocity[:3], np.float32),
-            0.01,
-            -1000000.0,
-            1000000.0,
-            "%.4g",
-        )
-        angular_velocity_changed, angular_velocity = imgui.drag_float3(
-            "surface angular velocity",
-            np.asarray(properties.surface_velocity[3:], np.float32),
-            0.01,
-            -1000000.0,
-            1000000.0,
-            "%.4g",
-        )
+        scene_node = ctx.session.node(node_id)
+        if _begin_property_table("insp_geometry_contact"):
+            _property_control_row(ctx, "friction (slide spin roll)")
+            friction_changed, friction = imgui.drag_float3(
+                "##contact_friction", friction, 0.005, 0.0, 1000000.0, "%.5f"
+            )
+            _property_control_row(ctx, "contact dimension")
+            dimension_changed, dimension = imgui.combo(
+                "##contact_dimension", dimension, dimension_labels
+            )
+            _property_control_row(ctx, "collision type mask")
+            type_changed, type_mask = imgui.input_int(
+                "##collision_type_mask", properties.collision_type_mask, 1, 16
+            )
+            imgui.set_item_tooltip("Decimal MuJoCo contype bitmask")
+            _property_control_row(ctx, "collision affinity mask")
+            affinity_changed, affinity_mask = imgui.input_int(
+                "##collision_affinity_mask", properties.collision_affinity_mask, 1, 16
+            )
+            imgui.set_item_tooltip("Decimal MuJoCo conaffinity bitmask")
+            _property_control_row(ctx, "contact priority")
+            priority_changed, priority = imgui.drag_int(
+                "##contact_priority", properties.contact_priority, 1.0, 0, 2147483647, "%d"
+            )
+            _property_control_row(ctx, "contact margin")
+            margin_changed, margin = imgui.drag_float(
+                "##contact_margin", properties.margin, 0.001, 0.0, 1000000.0, "%.5f m"
+            )
+            _property_control_row(ctx, "contact gap")
+            gap_changed, gap = imgui.drag_float(
+                "##contact_gap", properties.gap, 0.001, 0.0, 1000000.0, "%.5f m"
+            )
+            _property_control_row(ctx, "solver mix")
+            mix_changed, solver_mix = imgui.drag_float(
+                "##contact_solver_mix", properties.solver_mix, 0.01, 0.0, 1.0, "%.3f"
+            )
+            _property_control_row(ctx, "solver reference")
+            reference_changed, solver_reference = imgui.drag_float2(
+                "##contact_solver_reference",
+                solver_reference,
+                0.001,
+                -1000000.0,
+                1000000.0,
+                "%.5g",
+            )
+            imgui.set_item_tooltip(
+                "Positive values use time-constant/damping-ratio format; non-positive values use "
+                "direct stiffness/damping format"
+            )
+            _property_control_row(ctx, "impedance min / max / width")
+            impedance_first_changed, impedance_first = imgui.drag_float3(
+                "##contact_impedance_first", impedance_first, 0.001, 0.0, 1.0, "%.5g"
+            )
+            _property_control_row(ctx, "impedance midpoint / power")
+            impedance_shape_changed, impedance_shape = imgui.drag_float2(
+                "##contact_impedance_shape", impedance_shape, 0.01, 0.0, 1000.0, "%.4g"
+            )
+            _property_control_row(ctx, "adhesion")
+            adhesion_changed, adhesion = imgui.drag_float(
+                "##contact_adhesion", properties.adhesion, 0.01, 0.0, 1000000000.0, "%.5g"
+            )
+            if scene_node is not None:
+                linear_velocity_changed, linear_velocity = _property_vector_row(
+                    ctx,
+                    scene_node,
+                    "surface linear velocity",
+                    "contact_surface_linear_velocity",
+                    properties.surface_velocity[:3],
+                    editable=editable,
+                    speed=0.01,
+                    lo=0.0,
+                    hi=0.0,
+                    fmt="%.4g",
+                    reset_values=properties.surface_velocity[:3],
+                )
+                angular_velocity_changed, angular_velocity = _property_vector_row(
+                    ctx,
+                    scene_node,
+                    "surface angular velocity",
+                    "contact_surface_angular_velocity",
+                    properties.surface_velocity[3:],
+                    editable=editable,
+                    speed=0.01,
+                    lo=0.0,
+                    hi=0.0,
+                    fmt="%.4g",
+                    reset_values=properties.surface_velocity[3:],
+                )
+            imgui.end_table()
         if not editable:
             imgui.end_disabled()
             imgui.text_disabled("Pause the simulation to edit model contact properties")
@@ -2206,58 +2455,77 @@ class InspectorPanel(Panel):
             self._geometry_advanced_edit = current
             self._geometry_advanced_error = ""
         properties = self._geometry_advanced_edit
-        if properties is None or not imgui.collapsing_header("mass, group, and fluid"):
+        if properties is None or not imgui.collapsing_header(ctx.tr("mass, group, and fluid")):
             return
         editable = bool(
             ctx.session.adapter.caps.model_properties
             and (not ctx.session.adapter.caps.simulation or ctx.session.paused)
         )
-        if not editable:
-            imgui.begin_disabled()
-        group_changed, visual_group = imgui.combo(
-            "visual group", int(properties.visual_group), tuple(str(value) for value in range(6))
-        )
-        imgui.set_item_tooltip("MuJoCo geom group used by visibility filters")
+        visual_group = int(properties.visual_group)
         mass_values = ("density", "mass")
         mass_mode = mass_values.index(properties.mass_mode)
-        mass_mode_changed, mass_mode = imgui.combo(
-            "mass source", mass_mode, ("density", "explicit mass")
-        )
-        mass_mode_value = mass_values[mass_mode]
-        if mass_mode_value == "density":
-            mass_value_changed, density = imgui.drag_float(
-                "density", properties.density, 1.0, 0.000001, 1000000000000.0, "%.6g kg/m³"
-            )
-            mass = properties.mass
-        else:
-            mass_value_changed, mass = imgui.drag_float(
-                "mass", properties.mass, 0.01, 0.000001, 1000000000000.0, "%.6g kg"
-            )
-            density = properties.density
+        mass_mode_value = properties.mass_mode
+        density = properties.density
+        mass = properties.mass
         inertia_values = ("volume", "shell")
         inertia_mode = inertia_values.index(properties.inertia_mode)
-        inertia_changed, inertia_mode = imgui.combo(
-            "inertia distribution", inertia_mode, inertia_values
-        )
-        fluid_changed, fluid_ellipsoid = imgui.checkbox(
-            "ellipsoid fluid interaction", properties.fluid_ellipsoid
-        )
-        first_fluid_changed, first_fluid = imgui.drag_float3(
-            "fluid blunt / slender / angular",
-            np.asarray(properties.fluid_coefficients[:3], np.float32),
-            0.01,
-            0.0,
-            1000000.0,
-            "%.4g",
-        )
-        last_fluid_changed, last_fluid = imgui.drag_float2(
-            "fluid Kutta / Magnus",
-            np.asarray(properties.fluid_coefficients[3:], np.float32),
-            0.01,
-            0.0,
-            1000000.0,
-            "%.4g",
-        )
+        fluid_ellipsoid = properties.fluid_ellipsoid
+        first_fluid = np.asarray(properties.fluid_coefficients[:3], np.float32)
+        last_fluid = np.asarray(properties.fluid_coefficients[3:], np.float32)
+        group_changed = mass_mode_changed = mass_value_changed = False
+        inertia_changed = fluid_changed = first_fluid_changed = last_fluid_changed = False
+        if not editable:
+            imgui.begin_disabled()
+        if _begin_property_table("insp_geometry_advanced"):
+            _property_control_row(ctx, "visual group")
+            group_changed, visual_group = imgui.combo(
+                "##geometry_visual_group",
+                int(properties.visual_group),
+                tuple(str(value) for value in range(6)),
+            )
+            imgui.set_item_tooltip("MuJoCo geom group used by visibility filters")
+            _property_control_row(ctx, "mass source")
+            mass_mode_changed, mass_mode = imgui.combo(
+                "##geometry_mass_source", mass_mode, ("density", "explicit mass")
+            )
+            mass_mode_value = mass_values[mass_mode]
+            if mass_mode_value == "density":
+                _property_control_row(ctx, "density")
+                mass_value_changed, density = imgui.drag_float(
+                    "##geometry_density",
+                    properties.density,
+                    1.0,
+                    0.000001,
+                    1000000000000.0,
+                    "%.6g kg/m³",
+                )
+            else:
+                _property_control_row(ctx, "mass")
+                mass_value_changed, mass = imgui.drag_float(
+                    "##geometry_mass",
+                    properties.mass,
+                    0.01,
+                    0.000001,
+                    1000000000000.0,
+                    "%.6g kg",
+                )
+            _property_control_row(ctx, "inertia distribution")
+            inertia_changed, inertia_mode = imgui.combo(
+                "##geometry_inertia_distribution", inertia_mode, inertia_values
+            )
+            _property_control_row(ctx, "ellipsoid fluid interaction")
+            fluid_changed, fluid_ellipsoid = imgui.checkbox(
+                "##geometry_fluid_ellipsoid", properties.fluid_ellipsoid
+            )
+            _property_control_row(ctx, "fluid blunt / slender / angular")
+            first_fluid_changed, first_fluid = imgui.drag_float3(
+                "##geometry_fluid_first", first_fluid, 0.01, 0.0, 1000000.0, "%.4g"
+            )
+            _property_control_row(ctx, "fluid Kutta / Magnus")
+            last_fluid_changed, last_fluid = imgui.drag_float2(
+                "##geometry_fluid_last", last_fluid, 0.01, 0.0, 1000000.0, "%.4g"
+            )
+            imgui.end_table()
         if not editable:
             imgui.end_disabled()
             imgui.text_disabled("Pause the simulation to edit model geometry properties")
@@ -2284,34 +2552,35 @@ class InspectorPanel(Panel):
             )
         self._geometry_advanced_edit = edited
         dirty = edited != current
-        if not editable or not dirty:
-            imgui.begin_disabled()
-        if imgui.button("Apply##geometry-advanced"):
-            result = ctx.submit(
-                cmd.SetGeometryAdvancedProperties(
-                    node_id=edited.node_id,
-                    visual_group=edited.visual_group,
-                    mass_mode=edited.mass_mode,
-                    mass=edited.mass,
-                    density=edited.density,
-                    inertia_mode=edited.inertia_mode,
-                    fluid_ellipsoid=edited.fluid_ellipsoid,
-                    fluid_coefficients=edited.fluid_coefficients,
+        if _begin_property_table("insp_geometry_advanced_actions"):
+            if not editable or not dirty:
+                imgui.begin_disabled()
+            apply, revert = _property_button_row(ctx, "changes", ("Apply", "Revert"))
+            if not editable or not dirty:
+                imgui.end_disabled()
+            imgui.end_table()
+            if apply:
+                result = ctx.submit(
+                    cmd.SetGeometryAdvancedProperties(
+                        node_id=edited.node_id,
+                        visual_group=edited.visual_group,
+                        mass_mode=edited.mass_mode,
+                        mass=edited.mass,
+                        density=edited.density,
+                        inertia_mode=edited.inertia_mode,
+                        fluid_ellipsoid=edited.fluid_ellipsoid,
+                        fluid_coefficients=edited.fluid_coefficients,
+                    )
                 )
-            )
-            if result.ok:
-                self._geometry_advanced_generation = -1
+                if result.ok:
+                    self._geometry_advanced_generation = -1
+                    self._geometry_advanced_error = ""
+                else:
+                    self._geometry_advanced_error = result.message
+            if revert:
+                self._geometry_advanced_edit = current
                 self._geometry_advanced_error = ""
-            else:
-                self._geometry_advanced_error = result.message
-        if not editable or not dirty:
-            imgui.end_disabled()
-        imgui.same_line()
-        if imgui.button("Revert##geometry-advanced"):
-            self._geometry_advanced_edit = current
-            self._geometry_advanced_error = ""
-        imgui.same_line()
-        imgui.text_disabled("Apply rebuilds the model once")
+        imgui.text_disabled(ctx.tr("Apply rebuilds the model once"))
         if self._geometry_advanced_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._geometry_advanced_error)
             if imgui.small_button("Copy error##geometry-advanced"):
@@ -2324,15 +2593,10 @@ class InspectorPanel(Panel):
             imgui.text_disabled("light data is unavailable")
             return
         light = source.lights.lights[index]
-        self._entity_gizmo_lock(ctx, node)
-
-        changed, active = imgui.checkbox("enabled", light.active)
-        kind_changed, kind_index = imgui.combo(
-            "type", int(light.type), ["directional", "point", "spot", "area", "image"]
-        )
-        changed |= kind_changed
-        light_type = LightType(kind_index)
-
+        changed = False
+        active = light.active
+        kind_index = int(light.type)
+        light_type = light.type
         diffuse = light.diffuse
         specular = light.specular
         ambient = light.ambient
@@ -2340,100 +2604,169 @@ class InspectorPanel(Panel):
         direction = light.direction
         image_intensity = light.intensity
         texture = light.texture
+        cast_shadow = light.cast_shadow
 
-        if light_type is LightType.IMAGE:
-            intensity_changed, image_intensity = imgui.drag_float(
-                "intensity", light.intensity, 50.0, 0.0, 100000.0, "%.0f"
+        if _property_section(ctx, "light properties") and _begin_property_table(
+            "insp_light_properties"
+        ):
+            _property_control_row(ctx, "enabled")
+            active_changed, active = imgui.checkbox("##light_enabled", light.active)
+            _property_control_row(ctx, "type")
+            kind_changed, kind_index = imgui.combo(
+                "##light_type",
+                int(light.type),
+                ["directional", "point", "spot", "area", "image"],
             )
-            textures = [
-                name
-                for name, item in source.textures.items()
-                if item.type in (TextureType.CUBE, TextureType.SKYBOX)
-            ]
-            texture_index = textures.index(light.texture) if light.texture in textures else 0
-            texture_changed = False
-            if textures:
-                texture_changed, texture_index = imgui.combo("texture", texture_index, textures)
-                texture = textures[texture_index]
+            changed |= active_changed or kind_changed
+            light_type = LightType(kind_index)
+
+            if light_type is LightType.IMAGE:
+                _property_control_row(ctx, "intensity")
+                intensity_changed, image_intensity = imgui.drag_float(
+                    "##light_intensity", light.intensity, 50.0, 0.0, 100000.0, "%.0f"
+                )
+                textures = [
+                    name
+                    for name, item in source.textures.items()
+                    if item.type in (TextureType.CUBE, TextureType.SKYBOX)
+                ]
+                texture_index = textures.index(light.texture) if light.texture in textures else 0
+                texture_changed = False
+                _property_control_row(ctx, "texture")
+                if textures:
+                    texture_changed, texture_index = imgui.combo(
+                        "##light_texture", texture_index, textures
+                    )
+                    texture = textures[texture_index]
+                else:
+                    imgui.text_disabled(ctx.tr("add a cube texture to illuminate the scene"))
+                changed |= intensity_changed or texture_changed
             else:
-                imgui.text_disabled("add a cube texture to illuminate the scene")
-            changed |= intensity_changed or texture_changed
-        else:
-            intensity = float(np.max(light.diffuse))
-            color = light.diffuse / intensity if intensity > 0.0 else np.ones(3, np.float32)
-            color_changed, color = imgui.color_edit3("color", color)
-            intensity_changed, intensity = imgui.drag_float(
-                "intensity", intensity, 0.01, 0.0, 10.0, "%.2f"
+                intensity = float(np.max(light.diffuse))
+                color = light.diffuse / intensity if intensity > 0.0 else np.ones(3, np.float32)
+                _property_control_row(ctx, "color")
+                color_changed, color = _property_color_edit3(ctx, "##light_color", color)
+                _property_control_row(ctx, "intensity")
+                intensity_changed, intensity = imgui.drag_float(
+                    "##light_intensity", intensity, 0.01, 0.0, 10.0, "%.2f"
+                )
+                diffuse = np.asarray(color, np.float32) * intensity
+                _property_control_row(ctx, "specular")
+                specular_changed, specular = _property_color_edit3(
+                    ctx, "##light_specular", light.specular
+                )
+                _property_control_row(ctx, "ambient")
+                ambient_changed, ambient = _property_color_edit3(
+                    ctx, "##light_ambient", light.ambient
+                )
+                _property_control_row(ctx, "cast shadow")
+                shadow_changed, cast_shadow = imgui.checkbox(
+                    "##light_cast_shadow", light.cast_shadow
+                )
+                changed |= (
+                    color_changed
+                    or intensity_changed
+                    or specular_changed
+                    or ambient_changed
+                    or shadow_changed
+                )
+            imgui.end_table()
+
+        if _property_section(ctx, "light transform") and _begin_property_table(
+            "insp_light_transform"
+        ):
+            pos_changed, position = _property_vector_row(
+                ctx,
+                node,
+                "position (local)",
+                "light_position",
+                position,
+                editable=True,
+                speed=0.01,
+                lo=0.0,
+                hi=0.0,
+                fmt="%.3f",
             )
-            changed |= color_changed or intensity_changed
-            diffuse = np.asarray(color, np.float32) * intensity
-
-            specular_changed, specular = imgui.color_edit3("specular", light.specular)
-            ambient_changed, ambient = imgui.color_edit3("ambient", light.ambient)
-            changed |= specular_changed or ambient_changed
-
-        (pos_changed, position), (dir_changed, direction) = _vector_fields(
-            ctx,
-            node,
-            "insp_light_pose",
-            (
-                ("position (local)", position, 0.01, "%.3f", None),
-                (
-                    "direction (local)",
-                    direction,
-                    0.01,
-                    "%.3f",
-                    np.array((0.0, 0.0, -1.0)),
-                ),
-            ),
-        )
-        changed |= pos_changed or dir_changed
+            dir_changed, direction = _property_vector_row(
+                ctx,
+                node,
+                "direction (local)",
+                "light_direction",
+                direction,
+                editable=True,
+                speed=0.01,
+                lo=0.0,
+                hi=0.0,
+                fmt="%.3f",
+                reset_values=np.array((0.0, 0.0, -1.0)),
+            )
+            imgui.end_table()
+            changed |= pos_changed or dir_changed
 
         range_changed = cutoff_changed = exponent_changed = attenuation_changed = False
         area_changed = False
         light_range, cutoff, exponent = light.range, light.cutoff, light.exponent
         area_radius = light.area_radius
         attenuation = light.attenuation
-        if light_type in (LightType.POINT, LightType.SPOT, LightType.AREA):
+        local_light = light_type in (LightType.POINT, LightType.SPOT, LightType.AREA)
+        if (
+            local_light
+            and _property_section(ctx, "light attenuation")
+            and _begin_property_table("insp_light_attenuation")
+        ):
+            _property_control_row(ctx, "range")
             range_changed, light_range = imgui.drag_float(
-                "range (0 = unlimited)", light.range, 0.05, 0.0, 10000.0, "%.2f"
+                "##light_range", light.range, 0.05, 0.0, 10000.0, "%.2f"
             )
-            ((attenuation_changed, attenuation),) = _vector_fields(
+            imgui.set_item_tooltip(ctx.tr("0 means unlimited"))
+            attenuation_changed, attenuation = _property_vector_row(
                 ctx,
                 node,
-                "insp_light_attenuation",
-                (
-                    (
-                        "attenuation",
-                        light.attenuation,
-                        0.01,
-                        "%.3f",
-                        np.array((1.0, 0.0, 0.0)),
-                    ),
-                ),
+                "attenuation",
+                "light_attenuation",
+                light.attenuation,
+                editable=True,
+                speed=0.01,
+                lo=0.0,
+                hi=100.0,
+                fmt="%.3f",
+                reset_values=np.array((1.0, 0.0, 0.0)),
             )
-        if light_type is LightType.SPOT:
-            cutoff_changed, cutoff = imgui.drag_float(
-                "cutoff", light.cutoff, 0.25, 0.1, 89.9, "%.1f deg"
+            if light_type is LightType.SPOT:
+                _property_control_row(ctx, "cutoff")
+                cutoff_changed, cutoff = imgui.drag_float(
+                    "##light_cutoff", light.cutoff, 0.25, 0.1, 89.9, "%.1f deg"
+                )
+                _property_control_row(ctx, "falloff exponent")
+                exponent_changed, exponent = imgui.drag_float(
+                    "##light_exponent", light.exponent, 0.1, 0.0, 100.0, "%.1f"
+                )
+            if light_type is LightType.AREA:
+                _property_control_row(ctx, "source radius")
+                area_changed, area_radius = imgui.drag_float(
+                    "##light_area_radius", light.area_radius, 0.01, 0.0, 1000.0, "%.3f"
+                )
+            imgui.end_table()
+
+        if (
+            ctx.session.adapter.caps.simulation
+            and _property_section(ctx, "light behavior")
+            and _begin_property_table("insp_light_behavior")
+        ):
+            _property_control_row(ctx, "gizmo lock")
+            lock_changed, locked = imgui.checkbox(
+                "##light_gizmo_lock", ctx.session.entity_gizmo_lock_enabled(node)
             )
-            exponent_changed, exponent = imgui.drag_float(
-                "falloff exponent", light.exponent, 0.1, 0.0, 100.0, "%.1f"
-            )
-        if light_type is LightType.AREA:
-            area_changed, area_radius = imgui.drag_float(
-                "source radius", light.area_radius, 0.01, 0.0, 1000.0, "%.3f"
-            )
-        shadow_changed = False
-        cast_shadow = light.cast_shadow
-        if light_type is not LightType.IMAGE:
-            shadow_changed, cast_shadow = imgui.checkbox("cast shadow", light.cast_shadow)
+            if lock_changed:
+                ctx.session.set_entity_gizmo_lock(node, locked)
+            imgui.set_item_tooltip(ctx.tr("Lock gizmo while simulation runs"))
+            imgui.end_table()
         changed |= (
             range_changed
             or cutoff_changed
             or exponent_changed
             or attenuation_changed
             or area_changed
-            or shadow_changed
         )
         if changed:
             self._submit_edit(
@@ -2592,76 +2925,132 @@ class InspectorPanel(Panel):
             imgui.text_disabled("camera view is unavailable")
             return
 
-        self._entity_gizmo_lock(ctx, node)
-
-        if ctx.camera_preview is not None:
-            changed, enabled = imgui.checkbox(
-                f"{ctx.tr('Show Camera Preview')}##camera_preview_enabled",
-                bool(ctx.camera_preview.enabled),
-            )
-            if changed:
-                ctx.camera_preview.set_enabled(enabled)
-
-        if ctx.select_model_camera is not None:
-            active = ctx.model_camera_id == info.camera_id
-            label = "Return to Editor Camera" if active else "View Through Camera"
-            if imgui.button(ctx.tr(label)):
-                ctx.select_model_camera(-1 if active else info.camera_id)
-
-        (eye_changed, eye), (target_changed, target), (up_changed, up) = _vector_fields(
-            ctx,
-            node,
-            "insp_camera_pose",
-            (
-                (ctx.tr("position"), view.eye, 0.01, "%.4f", None),
-                (ctx.tr("target"), view.target, 0.01, "%.4f", None),
-                (
-                    ctx.tr("up"),
-                    view.up,
-                    0.01,
-                    "%.4f",
-                    np.array((0.0, 0.0, 1.0)),
-                ),
-            ),
-        )
-        fov_changed, fov = imgui.drag_float(
-            f"{ctx.tr('vertical fov')}##camera_fov",
-            float(np.degrees(view.fov_y)),
-            0.1,
-            1.0,
-            179.0,
-            "%.2f deg",
-        )
-        near_changed, near = imgui.drag_float(
-            f"{ctx.tr('near')}##camera_near",
-            float(view.near),
-            0.001,
-            1e-5,
-            float(view.far),
-            "%.6f",
-        )
-        far_changed, far = imgui.drag_float(
-            f"{ctx.tr('far')}##camera_far",
-            float(view.far),
-            0.1,
-            float(near),
-            1e7,
-            "%.3f",
-        )
-        ortho_changed, orthographic = imgui.checkbox(
-            f"{ctx.tr('orthographic')}##camera_orthographic", view.orthographic
-        )
+        eye = np.asarray(view.eye, np.float64).copy()
+        target = np.asarray(view.target, np.float64).copy()
+        up = np.asarray(view.up, np.float64).copy()
+        eye_changed = target_changed = up_changed = False
+        fov_changed = near_changed = far_changed = ortho_changed = False
+        fov = float(np.degrees(view.fov_y))
+        near = float(view.near)
+        far = float(view.far)
+        orthographic = view.orthographic
         height_changed = False
         ortho_height = view.ortho_height
-        if orthographic:
-            height_changed, ortho_height = imgui.drag_float(
-                f"{ctx.tr('ortho height')}##camera_ortho_height",
-                float(view.ortho_height),
-                0.01,
-                1e-4,
-                1e6,
-                "%.4f",
+
+        if _property_section(ctx, "camera transform") and _begin_property_table(
+            "insp_camera_transform"
+        ):
+            eye_changed, eye = _property_vector_row(
+                ctx,
+                node,
+                "position",
+                "camera_position",
+                eye,
+                editable=True,
+                speed=0.01,
+                lo=0.0,
+                hi=0.0,
+                fmt="%.4f",
             )
+            target_changed, target = _property_vector_row(
+                ctx,
+                node,
+                "target",
+                "camera_target",
+                target,
+                editable=True,
+                speed=0.01,
+                lo=0.0,
+                hi=0.0,
+                fmt="%.4f",
+            )
+            up_changed, up = _property_vector_row(
+                ctx,
+                node,
+                "up",
+                "camera_up",
+                up,
+                editable=True,
+                speed=0.01,
+                lo=0.0,
+                hi=0.0,
+                fmt="%.4f",
+                reset_values=np.array((0.0, 0.0, 1.0)),
+            )
+            imgui.end_table()
+
+        if _property_section(ctx, "camera projection") and _begin_property_table(
+            "insp_camera_projection"
+        ):
+            _property_control_row(ctx, "vertical fov")
+            fov_changed, fov = imgui.drag_float("##camera_fov", fov, 0.1, 1.0, 179.0, "%.2f deg")
+            _property_control_row(ctx, "near")
+            near_changed, near = imgui.drag_float(
+                "##camera_near", near, 0.001, 1e-5, float(view.far), "%.6f"
+            )
+            _property_control_row(ctx, "far")
+            far_changed, far = imgui.drag_float("##camera_far", far, 0.1, float(near), 1e7, "%.3f")
+            _property_control_row(ctx, "projection")
+            projection = 1 if orthographic else 0
+            supported = ctx.backend.caps.orthographic
+            imgui.begin_disabled(not supported)
+            selected_projection = segmented_control(
+                f"camera-inspector-projection-{node.node_id}",
+                (ctx.tr("persp"), ctx.tr("ortho")),
+                projection,
+                theme=ctx.theme,
+            )
+            imgui.end_disabled()
+            if not supported:
+                imgui.set_item_tooltip(f"{ctx.backend.caps.name} has no orthographic projection")
+            elif selected_projection != projection:
+                orthographic = selected_projection == 1
+                ortho_changed = True
+            if orthographic:
+                _property_control_row(ctx, "ortho height")
+                height_changed, ortho_height = imgui.drag_float(
+                    "##camera_ortho_height",
+                    float(view.ortho_height),
+                    0.01,
+                    1e-4,
+                    1e6,
+                    "%.4f",
+                )
+            imgui.end_table()
+
+        if _property_section(ctx, "camera behavior") and _begin_property_table(
+            "insp_camera_behavior"
+        ):
+            if ctx.select_model_camera is not None:
+                active = ctx.model_camera_id == info.camera_id
+                label = "Editor Camera" if active else "View Camera"
+                _property_control_row(ctx, "camera view")
+                if imgui.button(ctx.tr(label), imgui.ImVec2(-1.0, 0.0)):
+                    ctx.select_model_camera(-1 if active else info.camera_id)
+                imgui.set_item_tooltip(
+                    ctx.tr("Return to Editor Camera" if active else "View Through Camera")
+                )
+
+            if ctx.session.adapter.caps.simulation:
+                _property_control_row(ctx, "gizmo lock")
+                changed, locked = imgui.checkbox(
+                    "##camera-gizmo-lock",
+                    ctx.session.entity_gizmo_lock_enabled(node),
+                )
+                imgui.set_item_tooltip(ctx.tr("Lock gizmo while simulation runs"))
+                if changed:
+                    ctx.session.set_entity_gizmo_lock(node, locked)
+
+            if ctx.camera_preview is not None:
+                _property_control_row(ctx, "preview")
+                changed, enabled = imgui.checkbox(
+                    "##camera_preview_enabled",
+                    bool(ctx.camera_preview.enabled),
+                )
+                imgui.set_item_tooltip(ctx.tr("Show Camera Preview"))
+                if changed:
+                    ctx.camera_preview.set_enabled(enabled)
+            imgui.end_table()
 
         if any(
             (
@@ -2756,6 +3145,163 @@ def _compact_transform(width: float, style_scale: float) -> bool:
     return float(width) < 210.0 * float(style_scale)
 
 
+def _begin_property_table(table_id: str) -> bool:
+    flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
+    if not imgui.begin_table(table_id, 2, flags):
+        return False
+    imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.38)
+    imgui.table_setup_column("control", imgui.TableColumnFlags_.width_stretch, 0.62)
+    return True
+
+
+def _property_section(ctx: PanelContext, label: str) -> bool:
+    """Draw one translated, initially open Inspector property group."""
+
+    return imgui.collapsing_header(
+        ctx.tr(label),
+        imgui.TreeNodeFlags_.default_open,
+    )
+
+
+def _property_control_row(
+    ctx: PanelContext,
+    label: str,
+    *,
+    tooltip: str = "",
+) -> None:
+    """Advance a property table to one left-label/right-control row."""
+
+    imgui.table_next_row()
+    imgui.table_next_column()
+    imgui.align_text_to_frame_padding()
+    translated = ctx.tr(label)
+    available = imgui.get_content_region_avail().x
+    shown = translated
+    width = imgui.calc_text_size(shown).x
+    truncated = width > available
+    if truncated:
+        ellipsis = "…"
+        while shown and imgui.calc_text_size(f"{shown}{ellipsis}").x > available:
+            shown = shown[:-1]
+        shown = f"{shown.rstrip()}{ellipsis}" if shown else ellipsis
+        width = imgui.calc_text_size(shown).x
+    # Keep the label's right edge attached to the control boundary. On narrow
+    # HiDPI panels a long label is ellipsized inside the label cell rather than
+    # being clipped at the panel's left edge or drifting into the control.
+    imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, available - width))
+    imgui.text_disabled(shown)
+    if (tooltip or truncated) and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+        imgui.set_tooltip(ctx.tr(tooltip) if tooltip else translated)
+    imgui.table_next_column()
+    imgui.set_next_item_width(-1.0)
+
+
+def _property_button_row(
+    ctx: PanelContext,
+    label: str,
+    buttons: tuple[str, ...],
+) -> tuple[bool, ...]:
+    """Draw a wrapping row of compact property actions."""
+
+    _property_control_row(ctx, label)
+    translated = tuple(ctx.tr(button) for button in buttons)
+    widths = tuple(button_width(button) for button in translated)
+    layout = button_row_layout(
+        widths,
+        imgui.get_content_region_avail().x,
+        imgui.get_style().item_spacing.x,
+    )
+    pressed: list[bool] = []
+    for index, button in enumerate(translated):
+        if layout[index]:
+            imgui.same_line()
+        pressed.append(imgui.small_button(f"{button}##{label}-{index}"))
+    return tuple(pressed)
+
+
+def _property_color_edit3(ctx: PanelContext, item_id: str, value):
+    """Keep RGB editors usable when a scaled control column becomes narrow."""
+
+    flags = imgui.ColorEditFlags_.none
+    if imgui.get_content_region_avail().x < 150.0 * ctx.style_scale:
+        flags |= imgui.ColorEditFlags_.no_inputs
+    return imgui.color_edit3(item_id, value, flags)
+
+
+def _property_color_edit4(ctx: PanelContext, item_id: str, value):
+    """Keep RGBA editors usable when a scaled control column becomes narrow."""
+
+    flags = imgui.ColorEditFlags_.none
+    if imgui.get_content_region_avail().x < 190.0 * ctx.style_scale:
+        flags |= imgui.ColorEditFlags_.no_inputs
+    return imgui.color_edit4(item_id, value, flags)
+
+
+def _property_vector_row(
+    ctx: PanelContext,
+    node: SceneNode,
+    label: str,
+    name: str,
+    values,
+    *,
+    editable: bool,
+    speed: float,
+    lo: float,
+    hi: float,
+    fmt: str,
+    reset_values=None,
+    label_tooltip: str = "",
+) -> tuple[bool, np.ndarray]:
+    """Draw one XYZ triplet as a property-table control with joined axis fields."""
+
+    out = np.asarray(values, np.float64).copy()
+    resets = (
+        np.zeros(3, np.float64)
+        if reset_values is None
+        else np.asarray(reset_values, np.float64).reshape(3)
+    )
+    _property_control_row(ctx, label, tooltip=label_tooltip)
+    compact = _compact_transform(imgui.get_content_region_avail().x, ctx.style_scale)
+    flags = (
+        imgui.TableFlags_.sizing_stretch_same
+        | imgui.TableFlags_.no_saved_settings
+        | imgui.TableFlags_.no_pad_inner_x
+        | imgui.TableFlags_.no_pad_outer_x
+    )
+    columns = 1 if compact else 3
+    if not imgui.begin_table(f"##{name}_property_axes_{node.node_id}", columns, flags):
+        return False, out
+    for axis in "xyz"[:columns]:
+        imgui.table_setup_column(axis, imgui.TableColumnFlags_.width_stretch, 1.0)
+    changed = False
+    for axis, axis_label in enumerate("XYZ"):
+        if compact:
+            imgui.table_next_row()
+        imgui.table_next_column()
+        reset, edited, value = _axis_field(
+            ctx,
+            node,
+            name,
+            axis,
+            axis_label,
+            float(out[axis]),
+            editable=editable,
+            speed=speed,
+            lo=lo,
+            hi=hi,
+            fmt=fmt,
+            grouped=not compact,
+        )
+        if reset:
+            out[axis] = resets[axis]
+            changed = True
+        if edited:
+            out[axis] = value
+            changed = True
+    imgui.end_table()
+    return changed, out
+
+
 def _vector_fields(
     ctx: PanelContext,
     node: SceneNode,
@@ -2764,7 +3310,7 @@ def _vector_fields(
     *,
     editable: bool = True,
 ) -> tuple[tuple[bool, np.ndarray], ...]:
-    compact = float(imgui.get_content_region_avail().x) < 420.0 * float(ctx.style_scale)
+    compact = _compact_transform(imgui.get_content_region_avail().x, ctx.style_scale)
     flags = (
         imgui.TableFlags_.sizing_stretch_same
         | imgui.TableFlags_.no_saved_settings
@@ -2878,6 +3424,9 @@ def _axis_field(
     editable: bool,
     speed: float,
     fmt: str,
+    lo: float = 0.0,
+    hi: float = 0.0,
+    grouped: bool = True,
 ) -> tuple[bool, bool, float]:
     axis_color = ctx.theme.axis_color(axis)
     color = _mix_color(ctx.theme.bg_frame, axis_color, 0.56)
@@ -2903,23 +3452,45 @@ def _axis_field(
     if not editable:
         imgui.pop_style_var()
     button_hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
+    button_active = imgui.is_item_active()
+    button_lo, button_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
     imgui.pop_style_color(4)
     if button_hovered:
         imgui.set_tooltip(ctx.tr("Click to reset to 0") if editable else ctx.tr("Read only"))
 
-    # The badge and value are deliberately separate controls. Joining two
-    # independently rounded ImGui frames and painting over their seam creates
-    # a false divider at fractional UI scales and makes the badge look clipped.
-    badge_gap = 4.0 * ctx.style_scale
-    group_gap = 5.0 * ctx.style_scale if axis < 2 else 0.0
-    imgui.same_line(0.0, badge_gap)
+    group_gap = 5.0 * ctx.style_scale if grouped and axis < 2 else 0.0
+    imgui.same_line(0.0, 0.0)
     imgui.set_next_item_width(max(1.0, imgui.get_content_region_avail().x - group_gap))
     imgui.begin_disabled(not editable)
     edited, next_value = imgui.drag_float(
-        f"##{name}_{axis}_{node.node_id}", value, speed, 0.0, 0.0, fmt
+        f"##{name}_{axis}_{node.node_id}", value, speed, lo, hi, fmt
     )
     imgui.end_disabled()
     field_hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
+    field_active = imgui.is_item_active()
+    field_lo, field_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+    _fill_axis_field_seam(
+        ctx,
+        button_lo,
+        button_hi,
+        field_lo,
+        field_hi,
+        badge_color=(
+            active_color
+            if button_active and editable
+            else hovered_color
+            if button_hovered and editable
+            else color
+        ),
+        field_color=(
+            ctx.theme.bg_frame_active
+            if field_active
+            else ctx.theme.bg_frame_hovered
+            if field_hovered and editable
+            else ctx.theme.bg_frame
+        ),
+        editable=editable,
+    )
     if field_hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
         imgui.set_clipboard_text(fmt % value)
     if field_hovered:
@@ -2931,6 +3502,52 @@ def _axis_field(
         imgui.set_tooltip(hint)
 
     return reset, edited, next_value
+
+
+def _fill_axis_field_seam(
+    ctx: PanelContext,
+    button_lo,
+    button_hi,
+    field_lo,
+    field_hi,
+    *,
+    badge_color,
+    field_color,
+    editable: bool,
+) -> None:
+    """Square the joined edges while preserving only the pair's outer corners."""
+
+    rounding = min(
+        float(imgui.get_style().frame_rounding),
+        max(0.0, (float(button_hi.y) - float(button_lo.y)) * 0.5),
+    )
+    if rounding <= 0.0:
+        return
+    style = imgui.get_style()
+
+    def packed(value, opacity: float) -> int:
+        background = ctx.theme.bg_popup
+        mixed = tuple(
+            background[index] + (value[index] - background[index]) * opacity for index in range(3)
+        )
+        return imgui.color_convert_float4_to_u32(imgui.ImVec4(*mixed, 1.0))
+
+    draw_list = imgui.get_window_draw_list()
+    draw_list.add_rect_filled(
+        imgui.ImVec2(button_hi.x - rounding, button_lo.y),
+        button_hi,
+        packed(badge_color, float(style.alpha)),
+    )
+    field_opacity = float(style.alpha) * (1.0 if editable else float(style.disabled_alpha))
+    for y0, y1 in (
+        (field_lo.y, field_lo.y + rounding),
+        (field_hi.y - rounding, field_hi.y),
+    ):
+        draw_list.add_rect_filled(
+            imgui.ImVec2(field_lo.x, y0),
+            imgui.ImVec2(field_lo.x + rounding, y1),
+            packed(field_color, field_opacity),
+        )
 
 
 def _format_vector(values) -> str:

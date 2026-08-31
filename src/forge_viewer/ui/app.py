@@ -8,6 +8,7 @@ import sys
 import time
 import webbrowser
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -34,7 +35,12 @@ from .gizmo import ObjectGizmo, PreciseGizmoInput
 from .input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
 from .localization import Localizer
 from .messages import OutputBuffer
-from .panels import PanelContext, PanelSet, button_width, segmented_control
+from .panels import (
+    PanelContext,
+    PanelSet,
+    button_width,
+    segmented_control,
+)
 from .perturb import (
     PerturbController,
     cursor_grab_point,
@@ -49,16 +55,21 @@ from .viewport_widgets import (
     MAX_VIEWPORT_OVERLAY_SCALE,
     MIN_VIEWPORT_OVERLAY_SCALE,
     OVERLAY_CLIP_PADDING,
+    OVERLAY_GEOMETRY,
     PLAYBACK_CHROME_SCALE,
     TOOL_CHROME_SCALE,
-    draw_hint,
+    ToolHint,
+    ViewportChromeRegistry,
+    default_tool_hints,
     draw_playback,
+    draw_scene_tool_hints,
     draw_status,
     draw_tool_column,
-    hint_size,
+    fitting_tool_hints,
     localized_viewport_labels,
     playback_size,
     tool_column_size,
+    tool_hints_size,
     viewport_chrome_scale,
 )
 from .window import Window, WindowConfig
@@ -137,7 +148,7 @@ def _scene_save_target(path: str | Path) -> Path:
     return target.with_name(target.name + SCENE_SUFFIX)
 
 
-def _prepare_modal(width_pt: float) -> None:
+def _prepare_modal(width_pt: float, style_scale: float = 1.0) -> None:
     """Keep blocking prompts readable and centered as the host window resizes."""
 
     viewport = imgui.get_main_viewport()
@@ -146,13 +157,54 @@ def _prepare_modal(width_pt: float) -> None:
         imgui.Cond_.always.value,
         imgui.ImVec2(0.5, 0.5),
     )
-    # ImGui's font and style are already expressed in layout coordinates. Clamp
-    # fixed-width dialogs to the current work area so centering survives resizes.
-    width = min(float(width_pt), max(1.0, float(viewport.work_size.x) - 32.0))
+    # ``width_pt`` is an authored logical size while ImGui layout coordinates
+    # follow the platform style scale. This differs from framebuffer scaling:
+    # an Ubuntu 2x override enlarges the font and must enlarge the dialog too.
+    scale = max(float(style_scale), 1e-6)
+    margin = 32.0 * scale
+    width = min(float(width_pt) * scale, max(1.0, float(viewport.work_size.x) - margin))
+    max_height = max(1.0, float(viewport.work_size.y) - margin)
     imgui.set_next_window_size_constraints(
         imgui.ImVec2(width, 0.0),
-        imgui.ImVec2(width, float(np.finfo(np.float32).max)),
+        imgui.ImVec2(width, max_height),
     )
+
+
+def _clipped_overlay_host_rect(
+    viewport_rect: tuple[float, float, float, float],
+    content_rect: tuple[float, float, float, float],
+    padding: float,
+) -> tuple[float, float, float, float] | None:
+    """Intersect one overlay host with the viewport while retaining its authored origin."""
+
+    viewport_x, viewport_y, viewport_width, viewport_height = viewport_rect
+    content_x0, content_y0, content_x1, content_y1 = content_rect
+    pad = max(0.0, float(padding))
+    x0 = max(float(viewport_x), float(content_x0) - pad)
+    y0 = max(float(viewport_y), float(content_y0) - pad)
+    x1 = min(float(viewport_x + viewport_width), float(content_x1) + pad)
+    y1 = min(float(viewport_y + viewport_height), float(content_y1) + pad)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return x0, y0, x1 - x0, y1 - y0
+
+
+@contextmanager
+def _clipped_overlay_draw(
+    viewport_rect: tuple[float, float, float, float],
+):
+    """Yield the current window draw list with a hard viewport clip rect."""
+
+    x, y, width, height = viewport_rect
+    imgui.push_clip_rect(
+        imgui.ImVec2(x, y),
+        imgui.ImVec2(x + width, y + height),
+        True,
+    )
+    try:
+        yield ImguiDraw2D(imgui.get_window_draw_list())
+    finally:
+        imgui.pop_clip_rect()
 
 
 def _equal_modal_buttons(
@@ -281,6 +333,16 @@ def _status_message_for_bar(message: str, selected: str, level: str) -> str:
     return compact if folded.startswith(_STATUS_ACTION_PREFIXES) else ""
 
 
+def _rectangles_overlap(a, b) -> bool:
+    return bool(a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3])
+
+
+def _simulation_timestep(adapter, *, loading: bool = False) -> float:
+    """Return the fixed scene step, never the variable UI frame duration."""
+
+    return 0.0 if loading else float(adapter.timestep())
+
+
 @dataclass
 class Keys:
     fly: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -364,6 +426,9 @@ class ViewerApp:
         self.input_bindings = InputBindings.from_preferences(
             self.localizer.preference("input_bindings", {})
         )
+        self.viewport_chrome = ViewportChromeRegistry()
+        # Kept as a direct public alias for callers that only customize hints.
+        self.tool_hints = self.viewport_chrome.tool_hints
         self.output = OutputBuffer()
         self.panels = PanelSet()
         if os.environ.get("FORGE_VIEWER_OPEN_SETTINGS") == "1":
@@ -1090,7 +1155,7 @@ class ViewerApp:
             imgui.open_popup("Missing Resources")
             self._open_resource_repair_popup = False
         if imgui.is_popup_open("Missing Resources"):
-            _prepare_modal(480.0)
+            _prepare_modal(480.0, self.window.style_scale)
         visible, _ = imgui.begin_popup_modal(
             "Missing Resources", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -1705,7 +1770,7 @@ class ViewerApp:
             imgui.open_popup("File operation failed")
             self._show_model_load_error = False
         if imgui.is_popup_open("File operation failed"):
-            _prepare_modal(360.0)
+            _prepare_modal(360.0, self.window.style_scale)
         visible, _ = imgui.begin_popup_modal(
             "File operation failed", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -1747,7 +1812,7 @@ class ViewerApp:
         if pending is None:
             return
         imgui.open_popup("Unsaved changes")
-        _prepare_modal(360.0)
+        _prepare_modal(360.0, self.window.style_scale)
         visible, _ = imgui.begin_popup_modal(
             "Unsaved changes", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -1784,7 +1849,7 @@ class ViewerApp:
             return
         labels = ("Cancel", "Save without keyframe", "Save as key0")
         imgui.open_popup("Save current pose")
-        _prepare_modal(360.0)
+        _prepare_modal(360.0, self.window.style_scale)
         visible, _ = imgui.begin_popup_modal(
             "Save current pose", None, imgui.WindowFlags_.always_auto_resize.value
         )
@@ -1927,9 +1992,10 @@ class ViewerApp:
             self._viewport_rect[3],
             self.window.ui_scale,
             view_through_camera=self._model_camera_id >= 0,
-            selected_camera_aspect=(
-                preview_size[0] / preview_size[1] if preview_camera is not None else None
-            ),
+            # The selected camera helper represents the fixed 16:9 inspector
+            # preview surface even while that surface is hidden. A checkbox
+            # must not change authored camera helper geometry.
+            selected_camera_aspect=preview_size[0] / preview_size[1],
         )
         self._publish_gizmo()
 
@@ -2820,18 +2886,23 @@ class ViewerApp:
         )
         for hit in self.gizmo.joint_limit_hits:
             x0, y0, x1, y1 = hit.rect
-            width = max(x1 - x0, 1.0)
-            height = max(y1 - y0, 1.0)
             # Keep the host window clip outside the rounded label. Otherwise
             # its antialiased right/bottom edge is cut exactly at the window
             # boundary and reads as a one-pixel seam in the hover state.
             clip_pad = 2.0 * self.window.style_scale
+            host_rect = _clipped_overlay_host_rect(
+                self._viewport_rect,
+                (x0, y0, x1, y1),
+                clip_pad,
+            )
+            if host_rect is None:
+                continue
             imgui.set_next_window_pos(
-                imgui.ImVec2(x0 - clip_pad, y0 - clip_pad),
+                imgui.ImVec2(host_rect[0], host_rect[1]),
                 imgui.Cond_.always,
             )
             imgui.set_next_window_size(
-                imgui.ImVec2(width + clip_pad * 2.0, height + clip_pad * 2.0),
+                imgui.ImVec2(host_rect[2], host_rect[3]),
                 imgui.Cond_.always,
             )
             imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
@@ -2841,56 +2912,74 @@ class ViewerApp:
                 flags,
             )
             if visible:
-                imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
-                clicked = imgui.invisible_button(
-                    f"##joint_limit_hit_{hit.joint_id}_{hit.label[:3]}",
-                    imgui.ImVec2(width, height),
+                viewport_x, viewport_y, viewport_width, viewport_height = self._viewport_rect
+                imgui.push_clip_rect(
+                    imgui.ImVec2(viewport_x, viewport_y),
+                    imgui.ImVec2(viewport_x + viewport_width, viewport_y + viewport_height),
+                    True,
                 )
-                hovered = imgui.is_item_hovered()
-                active = imgui.is_item_active()
-                if hovered or active:
-                    self._draw_joint_limit_feedback(hit, active=active)
-                if clicked:
-                    result = self.gizmo.apply_joint_limit(self.session, hit)
-                    if not result.ok:
-                        self.session.report_message(result.message, level="warning")
+                try:
+                    imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
+                    clicked = imgui.invisible_button(
+                        f"##joint_limit_hit_{hit.joint_id}_{hit.label[:3]}",
+                        imgui.ImVec2(max(x1 - x0, 1.0), max(y1 - y0, 1.0)),
+                    )
+                    hovered = imgui.is_item_hovered()
+                    active = imgui.is_item_active()
+                    # This window is submitted after the viewport and camera
+                    # preview. Repaint every state so the endpoint control stays
+                    # above all range geometry instead of only rising on hover.
+                    self._draw_joint_limit_feedback(hit, hovered=hovered, active=active)
+                    if clicked:
+                        result = self.gizmo.apply_joint_limit(self.session, hit)
+                        if not result.ok:
+                            self.session.report_message(result.message, level="warning")
+                finally:
+                    imgui.pop_clip_rect()
             imgui.end()
             imgui.pop_style_var()
 
-    def _draw_joint_limit_feedback(self, hit, *, active: bool) -> None:
+    def _draw_joint_limit_feedback(self, hit, *, hovered: bool, active: bool) -> None:
         """Redraw a joint endpoint label with its button interaction state."""
 
         x0, y0, x1, y1 = hit.rect
         scale = self.window.style_scale
-        draw = ImguiDraw2D()
-        background = self.theme.bg_frame_active if active else self.theme.bg_frame_hovered
-        draw.rect_filled((x0, y0), (x1, y1), background, rounding=3.0 * scale)
-        draw.rect(
-            (x0, y0),
-            (x1, y1),
-            self.theme.border,
-            1.0 * scale,
-            rounding=3.0 * scale,
-        )
-        padding_x = 8.0 * scale
-        dot_radius = 3.0 * scale
-        dot_gap = 6.0 * scale
-        center_y = (y0 + y1) * 0.5
-        draw.circle_filled(
-            (x0 + padding_x + dot_radius, center_y),
-            dot_radius,
-            hit.semantic_color,
-            segments=16,
-        )
-        text_height = imgui.calc_text_size(hit.label).y
-        draw.text(
-            (
-                x0 + padding_x + dot_radius * 2.0 + dot_gap,
-                center_y - text_height * 0.5,
-            ),
-            self.theme.primary_bright,
-            hit.label,
-        )
+        with _clipped_overlay_draw(self._viewport_rect) as draw:
+            background = (
+                self.theme.bg_frame_active
+                if active
+                else self.theme.bg_frame_hovered
+                if hovered
+                else (*self.theme.bg_popup[:3], 0.92)
+            )
+            foreground = self.theme.primary_bright if hovered or active else self.theme.text
+            draw.rect_filled((x0, y0), (x1, y1), background, rounding=3.0 * scale)
+            draw.rect(
+                (x0, y0),
+                (x1, y1),
+                self.theme.border,
+                1.0 * scale,
+                rounding=3.0 * scale,
+            )
+            padding_x = 8.0 * scale
+            dot_radius = 3.0 * scale
+            dot_gap = 6.0 * scale
+            center_y = (y0 + y1) * 0.5
+            draw.circle_filled(
+                (x0 + padding_x + dot_radius, center_y),
+                dot_radius,
+                hit.semantic_color,
+                segments=16,
+            )
+            text_height = imgui.calc_text_size(hit.label).y
+            draw.text(
+                (
+                    x0 + padding_x + dot_radius * 2.0 + dot_gap,
+                    center_y - text_height * 0.5,
+                ),
+                foreground,
+                hit.label,
+            )
 
     def _draw_joint_gizmo_picker(self) -> None:
         """Draw a movable chooser near the click that selected a multi-joint link."""
@@ -2930,7 +3019,11 @@ class ViewerApp:
             | imgui.WindowFlags_.no_docking.value
             | imgui.WindowFlags_.no_saved_settings.value
         )
-        visible, _ = imgui.begin("Joint gizmo###viewport_joint_gizmo", None, flags)
+        visible, _ = imgui.begin(
+            f"{self.localizer.text('Joint gizmo')}###viewport_joint_gizmo",
+            None,
+            flags,
+        )
         if visible:
             imgui.text_disabled(node.name)
             imgui.separator()
@@ -2961,15 +3054,31 @@ class ViewerApp:
             self._viewport_overlay_scale,
             PLAYBACK_CHROME_SCALE,
         )
-        widget_width, widget_height = playback_size(scale)
+        widget_width, widget_height = playback_size(scale, self.viewport_chrome.playback_controls)
+        if widget_width <= 0.0 or widget_height <= 0.0:
+            return
+        widget_rect = (
+            x + (width - widget_width) * 0.5,
+            y + 12.0 * style_scale,
+            x + (width + widget_width) * 0.5,
+            y + 12.0 * style_scale + widget_height,
+        )
+        preview_rect = self.camera_preview.bounds
+        if preview_rect is not None and _rectangles_overlap(widget_rect, preview_rect):
+            # A tiny HiDPI viewport cannot expose two large overlays at once.
+            # Keep the camera preview header reachable so it can be moved or
+            # disabled instead of placing playback above its drag target.
+            return
         clip_pad = OVERLAY_CLIP_PADDING * scale
+        host_rect = _clipped_overlay_host_rect(self._viewport_rect, widget_rect, clip_pad)
+        if host_rect is None:
+            return
         imgui.set_next_window_pos(
-            imgui.ImVec2(x + width * 0.5, y + 12.0 * style_scale - clip_pad),
+            imgui.ImVec2(host_rect[0], host_rect[1]),
             imgui.Cond_.always.value,
-            imgui.ImVec2(0.5, 0.0),
         )
         imgui.set_next_window_size(
-            imgui.ImVec2(widget_width + clip_pad * 2.0, widget_height + clip_pad * 2.0),
+            imgui.ImVec2(host_rect[2], host_rect[3]),
             imgui.Cond_.always,
         )
         flags = (
@@ -2993,20 +3102,22 @@ class ViewerApp:
         if visible:
             take_playing = self.session.state_take_playing
             paused = self.session.paused and not take_playing
-            window_origin = imgui.get_window_pos()
-            origin = imgui.ImVec2(window_origin.x + clip_pad, window_origin.y + clip_pad)
-            action = draw_playback(
-                ImguiDraw2D(),
-                (origin.x, origin.y),
-                self.theme,
-                scale,
-                playing=not paused,
-                step_enabled=paused and not take_playing,
-                enabled=not self._scene_input_blocked(),
-                bindings=self.input_bindings,
-                labels=self._viewport_labels,
-            )
-            if action == "toggle":
+            with _clipped_overlay_draw(self._viewport_rect) as draw:
+                action = draw_playback(
+                    draw,
+                    (widget_rect[0], widget_rect[1]),
+                    self.theme,
+                    scale,
+                    playing=not paused,
+                    step_enabled=paused and not take_playing,
+                    enabled=not self._scene_input_blocked(),
+                    bindings=self.input_bindings,
+                    labels=self._viewport_labels,
+                    control_specs=self.viewport_chrome.playback_controls,
+                )
+            if action and self.viewport_chrome.dispatch("playback", action):
+                pass
+            elif action == "toggle":
                 self._toggle_playback()
             elif action == "step":
                 self.session.submit(cmd.Step(1))
@@ -3032,19 +3143,27 @@ class ViewerApp:
             self._viewport_overlay_scale,
             TOOL_CHROME_SCALE,
         )
-        widget_width, widget_height = tool_column_size(scale)
+        widget_width, widget_height = tool_column_size(scale, self.viewport_chrome.tool_groups)
+        if widget_width <= 0.0 or widget_height <= 0.0:
+            return
         clip_pad = OVERLAY_CLIP_PADDING * scale
         if height < widget_height + 120.0 * style_scale:
             return
+        widget_rect = (
+            x + 12.0 * style_scale,
+            y + (height - widget_height) * 0.5,
+            x + 12.0 * style_scale + widget_width,
+            y + (height + widget_height) * 0.5,
+        )
+        host_rect = _clipped_overlay_host_rect(self._viewport_rect, widget_rect, clip_pad)
+        if host_rect is None:
+            return
         imgui.set_next_window_pos(
-            imgui.ImVec2(
-                x + 12.0 * style_scale - clip_pad,
-                y + (height - widget_height) * 0.5 - clip_pad,
-            ),
+            imgui.ImVec2(host_rect[0], host_rect[1]),
             imgui.Cond_.always,
         )
         imgui.set_next_window_size(
-            imgui.ImVec2(widget_width + clip_pad * 2.0, widget_height + clip_pad * 2.0),
+            imgui.ImVec2(host_rect[2], host_rect[3]),
             imgui.Cond_.always,
         )
         flags = (
@@ -3059,21 +3178,23 @@ class ViewerApp:
         imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
         visible, _ = imgui.begin("Tools###viewport_tools", None, flags)
         if visible:
-            window_origin = imgui.get_window_pos()
-            origin = imgui.ImVec2(window_origin.x + clip_pad, window_origin.y + clip_pad)
-            action = draw_tool_column(
-                ImguiDraw2D(),
-                (origin.x, origin.y),
-                self.theme,
-                scale,
-                mode=self.gizmo.mode,
-                space=self.gizmo.space,
-                snap=self._snap_latched or self.gizmo.snapping,
-                enabled=not self._scene_input_blocked(),
-                bindings=self.input_bindings,
-                labels=self._viewport_labels,
-            )
-            if action == "move":
+            with _clipped_overlay_draw(self._viewport_rect) as draw:
+                action = draw_tool_column(
+                    draw,
+                    (widget_rect[0], widget_rect[1]),
+                    self.theme,
+                    scale,
+                    mode=self.gizmo.mode,
+                    space=self.gizmo.space,
+                    snap=self._snap_latched or self.gizmo.snapping,
+                    enabled=not self._scene_input_blocked(),
+                    bindings=self.input_bindings,
+                    labels=self._viewport_labels,
+                    groups=self.viewport_chrome.tool_groups,
+                )
+            if action and self.viewport_chrome.dispatch("tool", action):
+                pass
+            elif action == "move":
                 self.gizmo.set_mode("translate")
             elif action == "rotate":
                 self.gizmo.set_mode("rotate")
@@ -3085,19 +3206,13 @@ class ViewerApp:
         imgui.pop_style_var()
 
     def _draw_context_hint_widget(self) -> None:
-        """Draw the one context-specific input grammar that is currently valid."""
+        """Draw caller-defined scene hints; defaults live in the status bar."""
 
         if self._scene_input_blocked() or not self._has_scene_content():
             return
-        state = self._state
-        if state.ctrl or self.session.perturb.active:
-            variant = "perturb"
-        elif self.gizmo.using:
-            variant = "dragging"
-        elif not state.has_selection or not state.gizmo_available:
-            variant = "camera"
-        else:
-            variant = "ready"
+        hints = self.tool_hints.resolve(surface="scene")
+        if not hints:
+            return
         x, y, width, height = self._viewport_rect
         style_scale = self.window.style_scale
         scale = viewport_chrome_scale(
@@ -3108,41 +3223,52 @@ class ViewerApp:
         hint_font_scale = scale / max(style_scale, 1e-6)
         imgui.push_font(None, imgui.get_font_size() * hint_font_scale)
         measure = ImguiDraw2D(imgui.get_foreground_draw_list())
-        widget_width, widget_height = hint_size(
+        widget_width, widget_height = tool_hints_size(
             measure,
             scale,
-            variant,
-            space=self.gizmo.space,
-            bindings=self.input_bindings,
+            hints,
             labels=self._viewport_labels,
+            padding=True,
         )
         clip_pad = OVERLAY_CLIP_PADDING * scale
         if widget_width > width - 24.0 * style_scale:
-            variant = (
-                "dragging"
-                if self.gizmo.using
-                else "ready_minimal"
-                if state.has_selection and state.gizmo_available
-                else "camera"
+            content_width = max(
+                0.0,
+                width - 24.0 * style_scale - 2.0 * OVERLAY_GEOMETRY.hint_padding_x * scale,
             )
-            widget_width, widget_height = hint_size(
+            hints = fitting_tool_hints(
                 measure,
                 scale,
-                variant,
-                space=self.gizmo.space,
-                bindings=self.input_bindings,
+                hints,
+                content_width,
                 labels=self._viewport_labels,
             )
+            if not hints:
+                imgui.pop_font()
+                return
+            widget_width, widget_height = tool_hints_size(
+                measure,
+                scale,
+                hints,
+                labels=self._viewport_labels,
+                padding=True,
+            )
+        widget_rect = (
+            x + (width - widget_width) * 0.5,
+            y + height - widget_height - 16.0 * style_scale,
+            x + (width + widget_width) * 0.5,
+            y + height - 16.0 * style_scale,
+        )
+        host_rect = _clipped_overlay_host_rect(self._viewport_rect, widget_rect, clip_pad)
+        if host_rect is None:
+            imgui.pop_font()
+            return
         imgui.set_next_window_pos(
-            imgui.ImVec2(
-                x + width * 0.5,
-                y + height - widget_height - 16.0 * style_scale - clip_pad,
-            ),
+            imgui.ImVec2(host_rect[0], host_rect[1]),
             imgui.Cond_.always,
-            imgui.ImVec2(0.5, 0.0),
         )
         imgui.set_next_window_size(
-            imgui.ImVec2(widget_width + clip_pad * 2.0, widget_height + clip_pad * 2.0),
+            imgui.ImVec2(host_rect[2], host_rect[3]),
             imgui.Cond_.always,
         )
         flags = (
@@ -3158,22 +3284,41 @@ class ViewerApp:
         imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
         visible, _ = imgui.begin("Hints###viewport_hints", None, flags)
         if visible:
-            window_origin = imgui.get_window_pos()
-            origin = imgui.ImVec2(window_origin.x + clip_pad, window_origin.y + clip_pad)
-            draw_hint(
-                ImguiDraw2D(),
-                (origin.x, origin.y),
-                self.theme,
-                scale,
-                variant,
-                space=self.gizmo.space,
-                bindings=self.input_bindings,
-                labels=self._viewport_labels,
-                size=(widget_width, widget_height),
-            )
+            with _clipped_overlay_draw(self._viewport_rect) as draw:
+                draw_scene_tool_hints(
+                    draw,
+                    (widget_rect[0], widget_rect[1]),
+                    self.theme,
+                    scale,
+                    hints,
+                    labels=self._viewport_labels,
+                    size=(widget_width, widget_height),
+                )
         imgui.end()
         imgui.pop_style_var()
         imgui.pop_font()
+
+    def _context_tool_hint_variant(self) -> str:
+        """Return the active input grammar independently of its surface."""
+
+        state = self._state
+        if state.ctrl or self.session.perturb.active:
+            return "perturb"
+        if self.gizmo.using:
+            return "dragging"
+        if not state.has_selection or not state.gizmo_available:
+            return "camera"
+        return "ready"
+
+    def _status_tool_hints(self, *, loading: bool) -> tuple[ToolHint, ...]:
+        if loading or self._scene_input_blocked() or not self._has_scene_content():
+            return ()
+        defaults = default_tool_hints(
+            self._context_tool_hint_variant(),
+            self.input_bindings,
+            self._viewport_labels,
+        )
+        return self.tool_hints.resolve(defaults, surface="status")
 
     def _has_scene_content(self) -> bool:
         source = self.session.source
@@ -3256,10 +3401,11 @@ class ViewerApp:
                 backend=(
                     "OpenGL" if self.backend.caps.name == "forge" else str(self.backend.caps.name)
                 ),
-                dt=self._dt,
+                dt=_simulation_timestep(self.session.adapter, loading=loading),
                 fps=self._frame_rate.value,
                 status=status_text,
                 status_level="info" if active_status is None else active_status.level,
+                tool_hints=self._status_tool_hints(loading=loading),
                 labels=self._viewport_labels,
             )
             if status_layout.metric_rect is not None and not loading:

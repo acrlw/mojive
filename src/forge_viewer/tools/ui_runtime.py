@@ -10,6 +10,7 @@ from imgui_bundle import imgui
 from PIL import Image
 
 from .. import commands as cmd
+from ..adapters.base import NodeType
 from ..assets import resolve
 from ..composition import build, build_editor
 from ..gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, project, world_scale
@@ -23,6 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "d2-tools-disabled-closeup.png").unlink(missing_ok=True)
     (args.output / "joint-slide-external-arrows.png").unlink(missing_ok=True)
+    (args.output / "joint-slide-single-arrow.png").unlink(missing_ok=True)
 
     _capture_empty_workspace(args.output)
 
@@ -36,13 +38,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         _settle(viewer)
+        _capture_dock_tab_without_nav_cursor(viewer, args.output)
         _park_cursor(viewer)
         viewer.sync()
         _save(viewer, args.output / "d2-default-paused.png")
         _save_window_crop(
             viewer,
-            "Hints###viewport_hints",
+            "Status###application_status",
             args.output / "camera-hint-closeup.png",
+            padding=0.0,
         )
 
         selected = next(node for node in viewer.session.nodes if node.posable)
@@ -52,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         viewer.sync()
         _save(viewer, args.output / "paused.png")
         _save(viewer, args.output / "d3-selected-edit.png")
+        _capture_position_snap_guide(viewer, selected, args.output)
         _save_window_crop(
             viewer,
             "Playback###viewport_playback",
@@ -59,8 +64,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         _save_window_crop(
             viewer,
-            "Hints###viewport_hints",
+            "Status###application_status",
             args.output / "ready-hint-closeup.png",
+            padding=0.0,
         )
         if selected.model_id >= 0:
             viewer.app.request_model_rename(selected.node_id)
@@ -101,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
 
         viewer.session.submit(cmd.Pause())
         viewer.app.gizmo.set_mode("rotate")
+        _capture_trackball(viewer, selected, args.output)
         viewer.app._snap_latched = True
         _settle(viewer, 8)
         _save(viewer, args.output / "rotate-snap.png")
@@ -263,6 +270,16 @@ def _click(viewer, point: tuple[float, float]) -> None:
     viewer.sync()
 
 
+def _right_click(viewer, point: tuple[float, float]) -> None:
+    io = imgui.get_io()
+    io.add_mouse_pos_event(*point)
+    viewer.sync()
+    io.add_mouse_button_event(1, True)
+    viewer.sync()
+    io.add_mouse_button_event(1, False)
+    viewer.sync()
+
+
 def _item_center(viewer, function_name: str, label: str) -> tuple[float, float]:
     original = getattr(imgui, function_name)
     found: list[tuple[float, float]] = []
@@ -283,9 +300,49 @@ def _item_center(viewer, function_name: str, label: str) -> tuple[float, float]:
     return found[-1]
 
 
+def _open_collapsing_header(viewer, label: str) -> None:
+    original = imgui.collapsing_header
+    found: list[bool] = []
+
+    def force_open(item_label, *args, **kwargs):
+        if item_label == label:
+            imgui.set_next_item_open(True, imgui.Cond_.always)
+            found.append(True)
+        return original(item_label, *args, **kwargs)
+
+    imgui.collapsing_header = force_open
+    try:
+        viewer.sync()
+    finally:
+        imgui.collapsing_header = original
+    assert found
+
+
 def _park_cursor(viewer) -> None:
     x, y, width, height = viewer.app._viewport_rect
     imgui.get_io().add_mouse_pos_event(x + width * 0.68, y + height * 0.32)
+
+
+def _capture_dock_tab_without_nav_cursor(viewer, output: Path) -> None:
+    """Exercise the keyboard-nav tab state while accepting no tab outline."""
+
+    window = imgui.internal.find_window_by_name("Viewport")
+    if window is None or window.dock_node is None or window.tab_id == 0:
+        return
+    context = imgui.get_current_context()
+    context.nav_window = window
+    context.nav_id = window.tab_id
+    context.nav_cursor_visible = True
+    viewer.sync()
+    assert not context.nav_cursor_visible
+    _save_window_crop(
+        viewer,
+        "Viewport",
+        output / "viewport-tab-no-nav-outline.png",
+        padding=0.0,
+        max_height=72.0,
+    )
+    context.nav_id = 0
 
 
 def _activate_panel(viewer, name: str) -> None:
@@ -598,6 +655,68 @@ def _capture_joint_gizmos(output: Path) -> None:
                 _item_center(viewer, "invisible_button", "##clear_joint_search"),
             )
             assert joints._search == ""
+            _right_click(
+                viewer,
+                _item_center(viewer, "button", "##sort_order_##joint_search"),
+            )
+            assert joints._sort_by_name
+            _settle(viewer, 45)
+            _save(viewer, output / "joints-sort-tooltip.png")
+            _save_window_crop(
+                viewer,
+                "Joints",
+                output / "joints-name-order.png",
+                padding=8.0,
+                max_height=520.0,
+            )
+            _right_click(
+                viewer,
+                _item_center(viewer, "button", "##sort_order_##joint_search"),
+            )
+            assert not joints._sort_by_name
+            slide_joint = next(joint for joint in viewer.session.joints if joint.name == "slide")
+            slide_joint_node = next(
+                node
+                for node in viewer.session.nodes
+                if node.type is NodeType.JOINT and node.joint_index == slide_joint.joint_id
+            )
+            _click(
+                viewer,
+                _item_center(
+                    viewer,
+                    "selectable",
+                    f"slide##joint-select-{slide_joint.joint_id}",
+                ),
+            )
+            assert viewer.session.selected_node is slide_joint_node
+            _settle(viewer, 3)
+            assert viewer.app.gizmo.visible
+            _save(viewer, output / "joints-viewport-selection.png")
+            _save_window_crop(
+                viewer,
+                "Joints",
+                output / "joints-selected.png",
+                padding=8.0,
+                max_height=520.0,
+            )
+            _activate_panel(viewer, "Inspector")
+            _settle(viewer, 2)
+            _scroll_panel(viewer, "Inspector", -2.0)
+            _save_window_crop(
+                viewer,
+                "Inspector",
+                output / "joint-inspector-properties.png",
+                padding=8.0,
+                max_height=880.0,
+            )
+            _scroll_panel(viewer, "Inspector", -24.0)
+            _save_window_crop(
+                viewer,
+                "Inspector",
+                output / "joint-inspector-advanced.png",
+                padding=8.0,
+                max_height=880.0,
+            )
         for body_name, filename in (
             ("hinge_body", "joint-hinge-closeup.png"),
             ("slide_body", "joint-slide-closeup.png"),
@@ -615,6 +734,19 @@ def _capture_joint_gizmos(output: Path) -> None:
                 max_height=700.0,
             )
             if body_name == "hinge_body":
+                _activate_panel(viewer, "Inspector")
+                _open_collapsing_header(
+                    viewer,
+                    viewer.app.localizer.text("body inertial and dynamics"),
+                )
+                _scroll_panel(viewer, "Inspector", -24.0)
+                _save_window_crop(
+                    viewer,
+                    "Inspector",
+                    output / "body-inertial-inspector.png",
+                    padding=8.0,
+                    max_height=880.0,
+                )
                 _save(viewer, output / "d7-joint-pose.png")
                 _capture_hinge_held_at_limit(viewer, node, output)
                 viewer.session.submit(cmd.Reset())
@@ -646,6 +778,10 @@ def _capture_joint_gizmos(output: Path) -> None:
                 _settle(viewer, 2)
             if body_name == "slide_body":
                 _capture_slide_held_at_limit(viewer, node, output)
+                viewer.session.submit(cmd.Reset())
+                viewer.session.submit(cmd.Select(node.object_id))
+                _settle(viewer, 5)
+                _capture_slide_drag_guide(viewer, node, output)
                 viewer.session.submit(cmd.Reset())
                 viewer.session.submit(cmd.Select(node.object_id))
                 _settle(viewer, 5)
@@ -694,7 +830,8 @@ def _capture_hinge_held_at_limit(viewer, node, output: Path) -> None:
     position, basis = pose
     cam = viewer.app._camera_view()
     rect = viewer.app._viewport_rect
-    scale = world_scale(cam, position, rect[3], SIZE_PT)
+    style_scale = viewer.window.style_scale
+    scale = world_scale(cam, position, rect[3], SIZE_PT * style_scale)
 
     def cursor(angle: float) -> np.ndarray:
         world = (
@@ -711,6 +848,7 @@ def _capture_hinge_held_at_limit(viewer, node, output: Path) -> None:
             cam,
             rect,
             tuple(cursor(angle)),
+            style_scale=style_scale,
         )
         is GizmoHandle.ROTATE_Z
     )
@@ -765,6 +903,49 @@ def _capture_hinge_held_at_limit(viewer, node, output: Path) -> None:
     assert not viewer.app.gizmo.using
 
 
+def _capture_position_snap_guide(viewer, node, output: Path) -> None:
+    """Capture the final-overlay snap link above a regular position gizmo."""
+
+    viewer.app.gizmo.set_mode("translate")
+    viewer.app.gizmo.set_style("2d")
+    viewer.session.submit(cmd.SelectNode(node.node_id))
+    _settle(viewer, 3)
+    position, rotation = viewer.app._node_pose(node)
+    cam = viewer.app._camera_view()
+    rect = viewer.app._viewport_rect
+    style_scale = viewer.window.style_scale
+    scale = world_scale(cam, position, rect[3], SIZE_PT * style_scale)
+    axis = np.asarray(rotation, np.float64).reshape(3, 3)[:, 2]
+    start = project(cam, (position + axis * scale * 0.55,), rect)[0, :2]
+    projected_axis = project(cam, (position, position + axis * scale), rect)[:, :2]
+    direction = projected_axis[1] - projected_axis[0]
+    direction /= np.linalg.norm(direction)
+    io = imgui.get_io()
+    viewer.app._snap_latched = True
+    io.add_mouse_pos_event(*start)
+    viewer.sync()
+    io.add_mouse_button_event(0, True)
+    viewer.sync()
+    assert viewer.app.gizmo.using
+    io.add_mouse_pos_event(*(start + direction * 52.0 * style_scale))
+    _settle(viewer, 2)
+    assert viewer.app.gizmo.snapping
+    anchor = project(cam, (viewer.app.gizmo._drag_origin_pos,), rect)[0, :2]
+    _save_point_crop(
+        viewer,
+        output / "position-snap-guide-closeup.png",
+        tuple(anchor),
+        width=560.0,
+        height=420.0,
+    )
+    io.add_mouse_button_event(0, False)
+    viewer.sync()
+    viewer.app._snap_latched = False
+    viewer.session.submit(cmd.Reset())
+    viewer.session.submit(cmd.SelectNode(node.node_id))
+    _settle(viewer, 3)
+
+
 def _capture_slide_held_at_limit(viewer, node, output: Path) -> None:
     """Keep the slide guide active while its value is clamped at MIN."""
 
@@ -786,9 +967,22 @@ def _capture_slide_held_at_limit(viewer, node, output: Path) -> None:
         basis,
     )
     assert slide is not None
-    arrow = viewer.app.gizmo._slide_arrow_polygon(slide, viewer.window.style_scale)
-    start = np.mean(arrow, axis=0)
+    start = next(
+        np.mean(arrow, axis=0)
+        for arrow in reversed(
+            viewer.app.gizmo._slide_arrow_polygons(slide, viewer.window.style_scale)
+        )
+        if viewer.app.gizmo.update_hover(
+            viewer.session,
+            cam,
+            rect,
+            tuple(np.mean(arrow, axis=0)),
+            style_scale=viewer.window.style_scale,
+        )
+        is GizmoHandle.Z
+    )
     io = imgui.get_io()
+    viewer.app._snap_latched = True
     io.add_mouse_pos_event(*start)
     viewer.sync()
     io.add_mouse_button_event(0, True)
@@ -816,22 +1010,135 @@ def _capture_slide_held_at_limit(viewer, node, output: Path) -> None:
         width=660.0,
         height=420.0,
     )
+    _save_point_crop(
+        viewer,
+        output / "joint-slide-snap-guide-closeup.png",
+        tuple(projected_center),
+        width=660.0,
+        height=420.0,
+    )
+    viewer.app._snap_latched = False
 
     farther = end - viewer.app.gizmo._axis_screen * (0.08 / viewer.app.gizmo._world_per_pt)
     io.add_mouse_pos_event(*farther)
     viewer.sync()
-    inward = farther + viewer.app.gizmo._axis_screen * (0.02 / viewer.app.gizmo._world_per_pt)
+    # Keep the return motion at least three screen pixels. Hidden GLFW test
+    # windows quantize synthetic cursor positions to integer pixels, which is
+    # otherwise larger than a 0.02 m move for this HiDPI camera.
+    return_distance = max(0.02, abs(viewer.app.gizmo._world_per_pt) * 3.0)
+    inward = farther + viewer.app.gizmo._axis_screen * (
+        return_distance / viewer.app.gizmo._world_per_pt
+    )
     io.add_mouse_pos_event(*inward)
     viewer.sync()
     viewer.sync()
     assert viewer.session.frame.qpos is not None
     returned = float(viewer.session.frame.qpos[target.joint.qpos_adr])
-    assert lower + 0.01 < returned < lower + 0.025
+    tolerance = abs(viewer.app.gizmo._world_per_pt) * 0.75
+    assert return_distance - tolerance < returned - lower < return_distance + tolerance
     assert viewer.app.gizmo.using
 
     io.add_mouse_button_event(0, False)
     viewer.sync()
     assert not viewer.app.gizmo.using
+
+
+def _capture_slide_drag_guide(viewer, node, output: Path) -> None:
+    """Capture the non-snap slide segment and its two tick endpoints."""
+
+    target, reason = viewer.app.gizmo._joint_target(viewer.session, node)
+    assert target is not None, reason
+    pose = viewer.app.gizmo._target_pose(viewer.session, node, target)
+    assert pose is not None
+    position, basis = pose
+    cam = viewer.app._camera_view()
+    rect = viewer.app._viewport_rect
+    state = viewer.app.gizmo._joint_range_state(viewer.session, target)
+    assert state is not None
+    slide = viewer.app.gizmo._slide_range_projection(
+        cam,
+        rect,
+        viewer.window.style_scale,
+        state,
+        position,
+        basis,
+    )
+    assert slide is not None
+    start = next(
+        np.mean(arrow, axis=0)
+        for arrow in viewer.app.gizmo._slide_arrow_polygons(slide, viewer.window.style_scale)
+        if viewer.app.gizmo.update_hover(
+            viewer.session,
+            cam,
+            rect,
+            tuple(np.mean(arrow, axis=0)),
+            style_scale=viewer.window.style_scale,
+        )
+        is GizmoHandle.Z
+    )
+    io = imgui.get_io()
+    viewer.app._snap_latched = False
+    io.add_mouse_pos_event(*start)
+    viewer.sync()
+    io.add_mouse_button_event(0, True)
+    viewer.sync()
+    assert viewer.app.gizmo.using
+    end = start + viewer.app.gizmo._axis_screen * (0.12 / viewer.app.gizmo._world_per_pt)
+    io.add_mouse_pos_event(*end)
+    _settle(viewer, 2)
+    assert viewer.app.gizmo.using and not viewer.app.gizmo.snapping
+    projected_center = project(cam, (position,), rect)[0, :2]
+    _save_point_crop(
+        viewer,
+        output / "joint-slide-drag-guide-closeup.png",
+        tuple(projected_center),
+        width=660.0,
+        height=420.0,
+    )
+    io.add_mouse_button_event(0, False)
+    viewer.sync()
+    assert not viewer.app.gizmo.using
+
+
+def _capture_trackball(viewer, node, output: Path) -> None:
+    """Capture the inner background handle in hover and active states."""
+
+    position, _rotation = viewer.app._node_pose(node)
+    cam = viewer.app._camera_view()
+    rect = viewer.app._viewport_rect
+    center = project(cam, (position,), rect)[0, :2]
+    io = imgui.get_io()
+    viewer.app._snap_latched = False
+    io.add_mouse_pos_event(*center)
+    _settle(viewer, 2)
+    assert viewer.app.gizmo.hovered_handle is GizmoHandle.ROTATE_TRACKBALL
+    _save_point_crop(
+        viewer,
+        output / "rotate-trackball-hover-closeup.png",
+        tuple(center),
+        width=520.0,
+        height=420.0,
+    )
+    io.add_mouse_button_event(0, True)
+    viewer.sync()
+    io.add_mouse_pos_event(
+        center[0] + 34.0 * viewer.window.style_scale,
+        center[1] - 22.0 * viewer.window.style_scale,
+    )
+    _settle(viewer, 2)
+    assert viewer.app.gizmo.active_handle is GizmoHandle.ROTATE_TRACKBALL
+    _save_point_crop(
+        viewer,
+        output / "rotate-trackball-active-closeup.png",
+        tuple(center),
+        width=520.0,
+        height=420.0,
+    )
+    io.add_mouse_button_event(0, False)
+    viewer.sync()
+    viewer.session.submit(cmd.Reset())
+    viewer.session.submit(cmd.Select(node.object_id))
+    _settle(viewer, 3)
 
 
 def _capture_joint_gizmo_scene(output: Path) -> None:
@@ -858,7 +1165,7 @@ def _capture_joint_gizmo_scene(output: Path) -> None:
         _save_window_crop(
             viewer,
             "Viewport",
-            output / "joint-slide-single-arrow.png",
+            output / "joint-slide-handles.png",
             padding=0.0,
         )
         viewer.app.set_language("zh_CN")
@@ -875,14 +1182,17 @@ def _capture_joint_gizmo_scene(output: Path) -> None:
         )
         _save_window_crop(
             viewer,
-            "Hints###viewport_hints",
+            "Status###application_status",
             output / "tool-hint-zh-closeup.png",
+            padding=0.0,
         )
-        imgui.get_io().add_mouse_pos_event(
-            *_item_center(viewer, "invisible_button", "##viewport-tool-snap")
-        )
-        _settle(viewer, 2)
-        _save(viewer, output / "tool-column-tooltip-zh.png")
+        tool_window = imgui.internal.find_window_by_name("Tools###viewport_tools")
+        if tool_window is not None and tool_window.active:
+            imgui.get_io().add_mouse_pos_event(
+                *_item_center(viewer, "invisible_button", "##viewport-tool-snap")
+            )
+            _settle(viewer, 2)
+            _save(viewer, output / "tool-column-tooltip-zh.png")
         _park_cursor(viewer)
         viewer.app.set_language("en")
         _settle(viewer, 2)
@@ -929,6 +1239,10 @@ def _capture_joint_gizmo_scene(output: Path) -> None:
         ball = next(item for item in viewer.session.nodes if item.name == "03_ball")
         viewer.session.submit(cmd.Select(ball.object_id))
         _settle(viewer, 5)
+        _capture_ball_rotation_axis(viewer, ball, output)
+        viewer.session.submit(cmd.Reset())
+        viewer.session.submit(cmd.Select(ball.object_id))
+        _settle(viewer, 4)
         viewer.app.gizmo._hovered = GizmoHandle.ROTATE_Z
         edit = viewer.app.gizmo.precise_input(viewer.session)
         if edit is not None:
@@ -980,8 +1294,83 @@ def _capture_joint_gizmo_scene(output: Path) -> None:
         _park_cursor(viewer)
         viewer.sync()
         _save(viewer, output / "camera-helper-selected.png")
+        _save_window_crop(
+            viewer,
+            "Inspector",
+            output / "camera-inspector-closeup.png",
+            padding=8.0,
+            max_height=880.0,
+        )
+        _scroll_panel(viewer, "Inspector", -10.0)
+        _save_window_crop(
+            viewer,
+            "Inspector",
+            output / "camera-inspector-fields.png",
+            padding=8.0,
+            max_height=880.0,
+        )
+        viewer.app.camera_preview.set_enabled(True)
+        _settle(viewer, 4)
+        _park_cursor(viewer)
+        viewer.sync()
+        _save(viewer, output / "camera-helper-preview.png")
+        viewer.app.camera_preview.set_enabled(False)
     finally:
         viewer.release()
+
+
+def _capture_ball_rotation_axis(viewer, node, output: Path) -> None:
+    """Keep a ball-joint axis rotation active for visual acceptance."""
+
+    target, reason = viewer.app.gizmo._joint_target(viewer.session, node)
+    assert target is not None, reason
+    pose = viewer.app.gizmo._target_pose(viewer.session, node, target)
+    assert pose is not None
+    position, basis = pose
+    cam = viewer.app._camera_view()
+    rect = viewer.app._viewport_rect
+    style_scale = viewer.window.style_scale
+    scale = world_scale(cam, position, rect[3], SIZE_PT * style_scale)
+
+    def cursor(angle: float) -> np.ndarray:
+        world = (
+            position
+            + (basis[:, 0] * np.cos(angle) + basis[:, 1] * np.sin(angle)) * scale * RING_RADIUS
+        )
+        return project(cam, (world,), rect)[0, :2]
+
+    start_angle = next(
+        angle
+        for angle in np.linspace(0.0, 2.0 * np.pi, 96, endpoint=False)
+        if viewer.app.gizmo.update_hover(
+            viewer.session,
+            cam,
+            rect,
+            tuple(cursor(angle)),
+            style_scale=style_scale,
+        )
+        is GizmoHandle.ROTATE_Z
+    )
+    io = imgui.get_io()
+    io.add_mouse_pos_event(*cursor(start_angle))
+    viewer.sync()
+    io.add_mouse_button_event(0, True)
+    viewer.sync()
+    assert viewer.app.gizmo.using
+    io.add_mouse_pos_event(*cursor(start_angle + np.radians(38.0)))
+    viewer.sync()
+    viewer.sync()
+    assert viewer.app.gizmo.using
+    _save_window_crop(
+        viewer,
+        "Viewport",
+        output / "joint-ball-rotation-axis.png",
+        padding=0.0,
+        max_height=700.0,
+    )
+    io.add_mouse_button_event(0, False)
+    viewer.sync()
+    assert not viewer.app.gizmo.using
 
 
 def _capture_light_helpers(output: Path) -> None:

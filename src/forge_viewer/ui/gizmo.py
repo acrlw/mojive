@@ -46,16 +46,21 @@ from ..gizmo import (
     RING_WIDTH_PT,
     ROTATE_AXIS_HANDLES,
     ROTATE_HANDLES,
+    ROTATE_RING_ACTIVE_ALPHA,
     SCREEN_RING_RADIUS,
     SCREEN_RING_WIDTH_PT,
     SIZE_PT,
+    TRACKBALL_RADIUS,
     GizmoFrame,
     GizmoHandle,
     GizmoMode,
     GizmoSpace,
     GizmoStyle,
+    axis_active_color,
     axis_arrow_polygon,
+    axis_dark_color,
     axis_handle_alpha,
+    axis_hover_color,
     display_handles,
     handle_mask,
     handle_projection_alpha,
@@ -66,9 +71,11 @@ from ..gizmo import (
     plane_direction,
     project,
     rotation_dial,
+    rotation_handle_color,
     rotation_ring,
     rotation_ring_alpha,
     rotation_ring_is_full,
+    trackball_color,
     visibility,
     world_scale,
 )
@@ -96,12 +103,18 @@ ROTATION_TICK_MIN_ALPHA = 0.5
 JOINT_RANGE_RADIUS = RING_RADIUS
 JOINT_RANGE_WIDTH_PT = RING_WIDTH_PT
 JOINT_RANGE_OFFSET_PT = 0.0
-JOINT_RANGE_COLOR = (175 / 255, 132 / 255, 183 / 255, 1.0)
+JOINT_RANGE_COLOR = (173 / 255, 150 / 255, 184 / 255, 1.0)
+JOINT_ACTIVE_DARK_COLOR = (141 / 255, 120 / 255, 152 / 255, 1.0)
 JOINT_LOWER_LIMIT_COLOR = THEME.axis_color("z")
 JOINT_UPPER_LIMIT_COLOR = THEME.axis_color("x")
-JOINT_CURRENT_COLOR = THEME.primary_bright
+JOINT_CURRENT_COLOR = axis_hover_color(JOINT_RANGE_COLOR)
 JOINT_CURRENT_TICK_PT = 20.0
 JOINT_LIMIT_TICK_PT = 14.0
+JOINT_SLIDE_ARROW_OFFSET_PT = 17.0
+JOINT_SLIDE_AXIS_HIT_PT = 7.0
+TRANSLATION_GUIDE_RADIUS_PT = 5.0
+TRACKBALL_RAD_PER_PT = 0.01
+JOINT_DRAG_START_TICK_HALF_PT = 6.0
 _FULL_TURN = 2.0 * np.pi
 _JOINT_RANGE_EPSILON = 1e-9
 
@@ -115,9 +128,11 @@ def _with_alpha(color, alpha: float) -> tuple[float, float, float, float]:
     )
 
 
-def _joint_drag_label_color(state: _JointRangeState | None):
+def _joint_drag_label_color(state: _JointRangeState | None, *, active: bool = False):
     """Return the live joint label dot color, including endpoint clamping."""
 
+    if active:
+        return ACTIVE_HANDLE_COLOR
     if state is None:
         return JOINT_CURRENT_COLOR
     tolerance = max(
@@ -131,18 +146,42 @@ def _joint_drag_label_color(state: _JointRangeState | None):
     return JOINT_CURRENT_COLOR
 
 
-def joint_slide_arrow_polygon(current, tangent, style_scale: float) -> np.ndarray:
-    """Return the shared, axis-aligned slide-joint handle silhouette."""
+def joint_slide_arrow_polygons(
+    current, tangent, style_scale: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return opposing slide handles together on one side of the range axis."""
 
     current = np.asarray(current, np.float64).reshape(2)
     tangent = np.asarray(tangent, np.float64).reshape(2)
     length = float(np.linalg.norm(tangent))
     if length < 1e-6:
-        return np.empty((0, 2), np.float64)
+        empty = np.empty((0, 2), np.float64)
+        return empty, empty
     tangent = tangent / length
-    start = current + tangent * 9.0 * style_scale
-    end = current + tangent * 48.0 * style_scale
-    return axis_arrow_polygon(start, end, style_scale)
+    normal = np.array((-tangent[1], tangent[0]))
+    offset = normal * JOINT_SLIDE_ARROW_OFFSET_PT * style_scale
+    # Keep both affordances clear of the value axis. Their opposing directions
+    # communicate bidirectional motion without making the axis itself look cut.
+    inset = tangent * 9.0 * style_scale
+    extent = tangent * 48.0 * style_scale
+    return (
+        axis_arrow_polygon(current + offset + inset, current + offset + extent, style_scale),
+        axis_arrow_polygon(current + offset - inset, current + offset - extent, style_scale),
+    )
+
+
+def _screen_segment_distance(point, start, end) -> float:
+    point = np.asarray(point, np.float64).reshape(2)
+    start = np.asarray(start, np.float64).reshape(2)
+    end = np.asarray(end, np.float64).reshape(2)
+    edge = end - start
+    denominator = float(np.dot(edge, edge))
+    amount = (
+        float(np.clip(np.dot(point - start, edge) / denominator, 0.0, 1.0))
+        if denominator > 1e-12
+        else 0.0
+    )
+    return float(np.linalg.norm(point - (start + edge * amount)))
 
 
 def _screen_polygon_distance(point, polygon) -> float:
@@ -422,6 +461,7 @@ class ObjectGizmo:
         self._last_rot_vec = np.zeros(3, np.float64)
         self._rotation_raw_angle = 0.0
         self._rotation_angle = 0.0
+        self._trackball_angles = np.zeros(2, np.float64)
         self._snapping = False
         self._label = ""
         self._edit_started = False
@@ -672,6 +712,8 @@ class ObjectGizmo:
         handle = self._hovered
         if node is None or handle not in (*AXIS_HANDLES, *ROTATE_HANDLES):
             return None
+        if handle is GizmoHandle.ROTATE_TRACKBALL:
+            return None
         if not self.evaluate(session, node).ok:
             return None
         target, _reason = self._joint_target(session, node)
@@ -890,8 +932,15 @@ class ObjectGizmo:
             )
             self._hovered = GizmoHandle.NONE
             if slide is not None:
-                polygon = self._slide_arrow_polygon(slide, self._style_scale)
-                if _screen_polygon_distance(cursor, polygon) <= 4.0 * self._style_scale:
+                polygons = self._slide_arrow_polygons(slide, self._style_scale)
+                arrow_hit = any(
+                    _screen_polygon_distance(cursor, polygon) <= 4.0 * self._style_scale
+                    for polygon in polygons
+                )
+                axis_hit = _screen_segment_distance(cursor, slide.lower, slide.upper) <= (
+                    JOINT_SLIDE_AXIS_HIT_PT * self._style_scale
+                )
+                if arrow_hit or axis_hit:
                     self._hovered = GizmoHandle.Z
             return self._hovered
         self._hovered, self._axis_mask, self._plane_mask = hit_test(
@@ -1054,13 +1103,24 @@ class ObjectGizmo:
             and self._active in ROTATE_HANDLES
         )
         if self._joint_range is not None and not joint_range_below_dial:
-            self._draw_joint_range(overlay, cam, rect, style_scale)
+            self._draw_joint_range(overlay, cam, rect, style_scale, phase="geometry")
         if self._using and self._snapping and self._active in AXIS_HANDLES:
             self._draw_translation_snap_ruler(overlay, cam, rect, style_scale)
         if self._using and self._active not in ROTATE_HANDLES and not self._guide_gpu:
-            self._draw_translation_guide(overlay, cam, rect, style_scale)
+            if (
+                self._active_joint is not None
+                and self._active_joint.type == "slide"
+                and not self._snapping
+            ):
+                self._draw_joint_translation_guide(overlay, cam, rect, style_scale)
+            else:
+                self._draw_translation_guide(overlay, cam, rect, style_scale)
         rotation_dial_projector = None
-        if self._using and self._active in ROTATE_HANDLES:
+        if (
+            self._using
+            and self._active in ROTATE_HANDLES
+            and self._active is not GizmoHandle.ROTATE_TRACKBALL
+        ):
             projector = (
                 _ScreenRotationDialProjector
                 if self._active is GizmoHandle.ROTATE_SCREEN
@@ -1074,6 +1134,7 @@ class ObjectGizmo:
                 self._rotation_start_vec,
                 SIZE_PT * style_scale,
             )
+            self._draw_rotation_axis_guide(overlay, cam, rect, style_scale)
             if self._snapping:
                 self._draw_rotation_snap_ticks(
                     overlay, cam, rect, style_scale, rotation_dial_projector
@@ -1081,10 +1142,15 @@ class ObjectGizmo:
             if joint_range_below_dial:
                 # Snap ticks are a ruler beneath the joint arc, not spikes
                 # painted over its silhouette.
-                self._draw_joint_range(overlay, cam, rect, style_scale)
+                self._draw_joint_range(overlay, cam, rect, style_scale, phase="geometry")
             self._draw_rotation_guide(overlay, cam, rect, style_scale, rotation_dial_projector)
         if self._using and self._label:
             self._draw_value_label(overlay, cam, rect, style_scale, rotation_dial_projector)
+        if self._joint_range is not None:
+            # Endpoint labels are interactive buttons. Submit them after every
+            # ruler, sector, tick, and live value so no gizmo primitive can
+            # paint over their surface.
+            self._draw_joint_range(overlay, cam, rect, style_scale, phase="labels")
 
     def _draw_flat(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         # Scalar joint manipulation is represented by its range axis or arc.
@@ -1153,6 +1219,16 @@ class ObjectGizmo:
                 )
                 overlay.circle_filled(center[:2], radius, color, segments=24)
 
+        if GizmoHandle.ROTATE_TRACKBALL in visible:
+            center = project(cam, (origin,), rect)[0]
+            if center[2] > 0.0:
+                overlay.circle_filled(
+                    center[:2],
+                    TRACKBALL_RADIUS * SIZE_PT * style_scale,
+                    trackball_color(frame),
+                    segments=RING_SEGMENTS,
+                )
+
         for axis, handle in enumerate(ROTATE_AXIS_HANDLES):
             if handle not in visible:
                 continue
@@ -1168,7 +1244,7 @@ class ObjectGizmo:
                 continue
             overlay.polyline(
                 screen[:, :2],
-                self._flat_color(handle, axis, alpha),
+                rotation_handle_color(frame, handle, axis, alpha),
                 RING_WIDTH_PT * style_scale,
                 closed=full,
             )
@@ -1196,27 +1272,50 @@ class ObjectGizmo:
                 )
 
     def _flat_color(self, handle: GizmoHandle, axis: int, alpha: float = 1.0):
-        if self._active is handle and self._frame.handle_color is not None:
+        base = self._handle_color(axis)
+        if self._frame.handle_color is not None and self._active is handle:
             color = ACTIVE_HANDLE_COLOR
+        elif self._frame.handle_color is not None and self._interactive and self._hovered is handle:
+            color = axis_hover_color(base)
         else:
-            color = HOVER_COLOR if self._hot(handle) else self._handle_color(axis)
+            color = HOVER_COLOR if self._hot(handle) else base
         return float(color[0]), float(color[1]), float(color[2]), float(alpha)
 
     def _handle_color(self, axis: int) -> np.ndarray:
         color = self._frame.handle_color
         return AXIS_COLORS[axis] if color is None else np.asarray(color, np.float32)
 
+    def _active_rotation_palette(self):
+        """Return fill, pressed, and dark colors for the active rotation handle."""
+
+        axis = _axis_of(self._active)
+        if axis < 0:
+            return ACTIVE_COLOR, HOVER_COLOR, ACTIVE_COLOR
+        if self._joint_range is not None and self._joint_range.joint_type == "hinge":
+            active_joint = np.asarray(ACTIVE_HANDLE_COLOR, np.float32)
+            return active_joint, active_joint, JOINT_ACTIVE_DARK_COLOR
+        base = self._handle_color(axis)
+        return base, axis_active_color(base), axis_dark_color(base)
+
     def _hot(self, handle: GizmoHandle) -> bool:
         return self._active is handle or (self._interactive and self._hovered is handle)
 
-    def _draw_joint_range(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
+    def _draw_joint_range(
+        self,
+        overlay: Draw2D,
+        cam,
+        rect,
+        style_scale: float,
+        *,
+        phase: str = "all",
+    ) -> None:
         state = self._joint_range
         if state is None:
             return
         if state.joint_type == "hinge":
-            self._draw_hinge_range(overlay, cam, rect, style_scale, state)
+            self._draw_hinge_range(overlay, cam, rect, style_scale, state, phase=phase)
         elif state.joint_type == "slide":
-            self._draw_slide_range(overlay, cam, rect, style_scale, state)
+            self._draw_slide_range(overlay, cam, rect, style_scale, state, phase=phase)
 
     def _draw_hinge_range(
         self,
@@ -1225,6 +1324,8 @@ class ObjectGizmo:
         rect,
         style_scale: float,
         state: _JointRangeState,
+        *,
+        phase: str = "all",
     ) -> None:
         frame = self._frame
         origin = np.asarray(frame.position, np.float64)
@@ -1244,13 +1345,13 @@ class ObjectGizmo:
         span = state.angular_span
         start_angle = state.lower
         full_range = state.covers_full_turn
-        if self._active is GizmoHandle.ROTATE_Z or (
-            self._interactive and self._hovered is GizmoHandle.ROTATE_Z
-        ):
-            allowed_color = JOINT_CURRENT_COLOR
+        if self._active is GizmoHandle.ROTATE_Z:
+            allowed_color = ACTIVE_HANDLE_COLOR
+        elif self._interactive and self._hovered is GizmoHandle.ROTATE_Z:
+            allowed_color = axis_hover_color(JOINT_RANGE_COLOR)
         else:
             allowed_color = JOINT_RANGE_COLOR
-        if span > 1e-6:
+        if phase != "labels" and span > 1e-6:
             point_count = max(2, int(np.ceil(segments * span / _FULL_TURN)) + 1)
             allowed_angles = np.linspace(
                 start_angle,
@@ -1266,72 +1367,103 @@ class ObjectGizmo:
                     JOINT_RANGE_WIDTH_PT * style_scale,
                     closed=full_range,
                 )
-        lower_label = _joint_limit_label("MIN", state.lower, "hinge")
-        upper_label = _joint_limit_label("MAX", state.upper, "hinge")
-        if state.has_ambiguous_dial_limits:
-            # A full- or multi-turn scalar range has no unique pair of
-            # endpoint directions on a circular dial.  Ticks would imply a
-            # false geometric meaning.  Keep the exact numeric limits as a
-            # stable stacked badge while idle, then get it out of the way of
-            # the live value during a drag.
-            lower_rect = upper_rect = None
-            if not self._using:
-                anchor = dial.points(JOINT_RANGE_RADIUS, (np.pi,))[0, :2]
-                lower_rect = _draw_joint_value_label(
+        if phase != "labels":
+            current_tick = dial.tick(
+                JOINT_RANGE_RADIUS,
+                state.current,
+                JOINT_CURRENT_TICK_PT * style_scale,
+            )
+            if current_tick is not None:
+                overlay.line(
+                    current_tick[0],
+                    current_tick[1],
+                    _with_alpha(
+                        _joint_drag_label_color(
+                            state,
+                            active=self._active is GizmoHandle.ROTATE_Z,
+                        ),
+                        alpha,
+                    ),
+                    4.0 * style_scale,
+                )
+            if not state.has_ambiguous_dial_limits:
+                self._draw_hinge_limit(
                     overlay,
-                    anchor,
+                    dial,
+                    start_angle,
+                    _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha),
+                    "",
+                    style_scale,
+                    label_above=True,
+                    draw_label=False,
+                )
+                self._draw_hinge_limit(
+                    overlay,
+                    dial,
+                    state.upper,
+                    _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha),
+                    "",
+                    style_scale,
+                    label_above=False,
+                    draw_label=False,
+                )
+        if phase != "geometry":
+            lower_label = _joint_limit_label("MIN", state.lower, "hinge")
+            upper_label = _joint_limit_label("MAX", state.upper, "hinge")
+            if state.has_ambiguous_dial_limits:
+                # A full- or multi-turn scalar range has no unique pair of
+                # endpoint directions on a circular dial. Ticks would imply a
+                # false geometric meaning. Keep exact limits as stacked badges.
+                lower_rect = upper_rect = None
+                if not self._using:
+                    anchor = dial.points(JOINT_RANGE_RADIUS, (np.pi,))[0, :2]
+                    lower_rect = _draw_joint_value_label(
+                        overlay,
+                        anchor,
+                        _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha),
+                        lower_label,
+                        style_scale,
+                        above=True,
+                        align_right=True,
+                    )
+                    upper_rect = _draw_joint_value_label(
+                        overlay,
+                        anchor,
+                        _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha),
+                        upper_label,
+                        style_scale,
+                        above=False,
+                        align_right=True,
+                    )
+            else:
+                # Tick marks were submitted in the geometry phase. Labels
+                # stay in one uninterrupted top-layer pass.
+                lower_rect = self._draw_hinge_limit(
+                    overlay,
+                    dial,
+                    start_angle,
                     _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha),
                     lower_label,
                     style_scale,
-                    above=True,
-                    align_right=True,
+                    label_above=True,
+                    draw_tick=False,
                 )
-                upper_rect = _draw_joint_value_label(
+                upper_rect = self._draw_hinge_limit(
                     overlay,
-                    anchor,
+                    dial,
+                    state.upper,
                     _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha),
                     upper_label,
                     style_scale,
-                    above=False,
-                    align_right=True,
+                    label_above=False,
+                    draw_tick=False,
                 )
-        else:
-            lower_rect = self._draw_hinge_limit(
-                overlay,
-                dial,
-                start_angle,
-                _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha),
-                lower_label,
-                style_scale,
-                label_above=True,
-            )
-            upper_rect = self._draw_hinge_limit(
-                overlay,
-                dial,
-                state.upper,
-                _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha),
-                upper_label,
-                style_scale,
-                label_above=False,
-            )
-        self._set_joint_limit_hits(
-            state,
-            (
-                (state.lower, lower_label, lower_rect, JOINT_LOWER_LIMIT_COLOR),
-                (state.upper, upper_label, upper_rect, JOINT_UPPER_LIMIT_COLOR),
-            ),
-        )
-        current_tick = dial.tick(
-            JOINT_RANGE_RADIUS,
-            state.current,
-            JOINT_CURRENT_TICK_PT * style_scale,
-        )
-        if current_tick is not None:
-            overlay.line(
-                current_tick[0],
-                current_tick[1],
-                _with_alpha(_joint_drag_label_color(state), alpha),
-                4.0 * style_scale,
+            self._set_joint_limit_hits(
+                state,
+                (
+                    (state.lower, lower_label, lower_rect, JOINT_LOWER_LIMIT_COLOR),
+                    (state.upper, upper_label, upper_rect, JOINT_UPPER_LIMIT_COLOR),
+                ),
             )
 
     def _draw_slide_handle(
@@ -1343,20 +1475,20 @@ class ObjectGizmo:
         normal: np.ndarray,
         alpha: float,
     ) -> None:
-        """Draw the single external arrow that owns slide-joint interaction."""
+        """Draw opposing external arrows for slide-joint interaction."""
 
         slide = _SlideRangeProjection(current, current, current, tangent, normal, alpha)
-        points = self._slide_arrow_polygon(slide, style_scale)
         color = self._flat_color(GizmoHandle.Z, 2, alpha)
-        if len(points):
-            overlay.fringed_concave_fill(points, color)
+        for points in self._slide_arrow_polygons(slide, style_scale):
+            if len(points):
+                overlay.fringed_concave_fill(points, color)
 
     @staticmethod
-    def _slide_arrow_polygon(
+    def _slide_arrow_polygons(
         slide: _SlideRangeProjection,
         style_scale: float,
-    ) -> np.ndarray:
-        return joint_slide_arrow_polygon(slide.current, slide.tangent, style_scale)
+    ) -> tuple[np.ndarray, np.ndarray]:
+        return joint_slide_arrow_polygons(slide.current, slide.tangent, style_scale)
 
     @staticmethod
     def _slide_range_projection(
@@ -1404,11 +1536,16 @@ class ObjectGizmo:
         style_scale: float,
         *,
         label_above: bool,
+        draw_tick: bool = True,
+        draw_label: bool = True,
     ) -> tuple[float, float, float, float] | None:
         tick = dial.tick(JOINT_RANGE_RADIUS, angle, JOINT_LIMIT_TICK_PT * style_scale)
         if tick is None:
             return None
-        overlay.line(tick[0], tick[1], limit_color, 3.0 * style_scale)
+        if draw_tick:
+            overlay.line(tick[0], tick[1], limit_color, 3.0 * style_scale)
+        if not draw_label:
+            return None
         return _draw_joint_value_label(
             overlay,
             tick[1],
@@ -1426,6 +1563,8 @@ class ObjectGizmo:
         rect,
         style_scale: float,
         state: _JointRangeState,
+        *,
+        phase: str = "all",
     ) -> None:
         slide = self._slide_range_projection(
             cam,
@@ -1438,61 +1577,72 @@ class ObjectGizmo:
         if slide is None:
             return
         alpha = slide.alpha
-        range_color = _with_alpha(JOINT_RANGE_COLOR, alpha)
+        range_color = self._flat_color(GizmoHandle.Z, 2, alpha)
         lower_color = _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha)
         upper_color = _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha)
-        current_color = _with_alpha(_joint_drag_label_color(state), alpha)
-        lower, current, upper = slide.lower, slide.current, slide.upper
-        tangent, normal = slide.tangent, slide.normal
-        overlay.line(lower, upper, range_color, JOINT_RANGE_WIDTH_PT * style_scale)
-        self._draw_slide_handle(
-            overlay,
-            style_scale,
-            current,
-            tangent,
-            normal,
+        current_color = _with_alpha(
+            _joint_drag_label_color(state, active=self._active is GizmoHandle.Z),
             alpha,
         )
-
-        half_tick = 6.0 * style_scale
-        for point, limit_color in (
-            (lower, lower_color),
-            (upper, upper_color),
-        ):
-            overlay.line(
-                point - normal * half_tick,
-                point + normal * half_tick,
-                limit_color,
-                3.0 * style_scale,
+        lower, current, upper = slide.lower, slide.current, slide.upper
+        tangent, normal = slide.tangent, slide.normal
+        if phase != "labels":
+            overlay.line(lower, upper, range_color, JOINT_RANGE_WIDTH_PT * style_scale)
+            self._draw_slide_handle(
+                overlay,
+                style_scale,
+                current,
+                tangent,
+                normal,
+                alpha,
             )
-        overlay.line(
-            current - normal * 10.0 * style_scale,
-            current + normal * 10.0 * style_scale,
-            current_color,
-            4.0 * style_scale,
-        )
-        lower_label = _joint_limit_label("MIN", state.lower, "slide")
-        _draw_joint_value_label(
-            overlay,
-            lower,
-            lower_color,
-            lower_label,
-            style_scale,
-            above=True,
-            align_right=True,
-        )
-        upper_label = _joint_limit_label("MAX", state.upper, "slide")
-        _draw_joint_value_label(
-            overlay,
-            upper,
-            upper_color,
-            upper_label,
-            style_scale,
-            above=False,
-            align_right=False,
-        )
-        # Slide ticks and endpoint labels are read-only scale context. The one
-        # external arrow is deliberately the only pointer target.
+
+            half_tick = 6.0 * style_scale
+            for point, limit_color in (
+                (lower, lower_color),
+                (upper, upper_color),
+            ):
+                overlay.line(
+                    point - normal * half_tick,
+                    point + normal * half_tick,
+                    limit_color,
+                    3.0 * style_scale,
+                )
+            if not (self._using and self._active is GizmoHandle.Z and not self._snapping):
+                overlay.line(
+                    current - normal * 10.0 * style_scale,
+                    current + normal * 10.0 * style_scale,
+                    current_color,
+                    4.0 * style_scale,
+                )
+        if phase != "geometry":
+            lower_label = _joint_limit_label("MIN", state.lower, "slide")
+            lower_rect = _draw_joint_value_label(
+                overlay,
+                lower,
+                lower_color,
+                lower_label,
+                style_scale,
+                above=True,
+                align_right=True,
+            )
+            upper_label = _joint_limit_label("MAX", state.upper, "slide")
+            upper_rect = _draw_joint_value_label(
+                overlay,
+                upper,
+                upper_color,
+                upper_label,
+                style_scale,
+                above=False,
+                align_right=False,
+            )
+            self._set_joint_limit_hits(
+                state,
+                (
+                    (state.lower, lower_label, lower_rect, JOINT_LOWER_LIMIT_COLOR),
+                    (state.upper, upper_label, upper_rect, JOINT_UPPER_LIMIT_COLOR),
+                ),
+            )
 
     def _set_joint_limit_hits(self, state: _JointRangeState, entries) -> None:
         if state.joint_id < 0 or state.qpos_adr < 0:
@@ -1534,7 +1684,11 @@ class ObjectGizmo:
         segment = _clip_line_to_rect(screen[0, :2], screen[1, :2] - screen[0, :2], rect)
         if segment is None:
             return
-        color = self._handle_color(axis)
+        color = (
+            ACTIVE_HANDLE_COLOR
+            if self._frame.handle_color is not None
+            else self._handle_color(axis)
+        )
         overlay.line(
             segment[0],
             segment[1],
@@ -1583,7 +1737,11 @@ class ObjectGizmo:
         if bounds is None:
             return
 
-        axis_color = self._handle_color(axis_index)
+        axis_color = (
+            ACTIVE_HANDLE_COLOR
+            if self._frame.handle_color is not None
+            else self._handle_color(axis_index)
+        )
         step = float(self.translation_snap_m)
         current_distance = float(np.dot(current_position - self._start_pos, start_axis))
         bounds = (bounds[0] + current_distance, bounds[1] + current_distance)
@@ -1619,7 +1777,7 @@ class ObjectGizmo:
 
         current = projected[0]
         mask_radius = CENTER_SHELL_RADIUS * SIZE_PT * style_scale
-        if current[2] > 0.0:
+        if current[2] > 0.0 and self._active_joint is None:
             half_length = 14.0 * style_scale
             ticks.append(
                 (
@@ -1675,7 +1833,13 @@ class ObjectGizmo:
             if self._frame.active_projection_fade and self._active is not GizmoHandle.ROTATE_SCREEN
             else 1.0
         )
-        core = _with_alpha(GUIDE_CORE_COLOR, projection_alpha)
+        joint_range = self._joint_range
+        core = _with_alpha(
+            ACTIVE_HANDLE_COLOR
+            if joint_range is not None and joint_range.joint_type == "hinge"
+            else GUIDE_CORE_COLOR,
+            projection_alpha,
+        )
 
         tick_radius = ring_radius
 
@@ -1692,7 +1856,6 @@ class ObjectGizmo:
         ticks_visible = (
             self._active is GizmoHandle.ROTATE_SCREEN or projection_alpha >= ROTATION_TICK_MIN_ALPHA
         )
-        joint_range = self._joint_range
         limited_hinge = (
             self._active is GizmoHandle.ROTATE_Z
             and joint_range is not None
@@ -1730,7 +1893,7 @@ class ObjectGizmo:
         has_joint_current_tick = (
             self._joint_range is not None and self._joint_range.joint_type == "hinge"
         )
-        if ticks_visible and not has_joint_current_tick:
+        if ticks_visible and self._active_joint is None and not has_joint_current_tick:
             angle = self._rotation_angle
             points = dial_points((angle, angle + np.radians(step)))
             spacing = float(np.linalg.norm(points[1, :2] - points[0, :2]))
@@ -1745,12 +1908,61 @@ class ObjectGizmo:
         for inner, outer in ticks:
             overlay.line(inner, outer, core, 1.1 * style_scale)
         if active_tick is not None:
+            _fill, pressed, _dark = self._active_rotation_palette()
             overlay.line(
                 active_tick[0],
                 active_tick[1],
-                _with_alpha(HOVER_COLOR, projection_alpha),
+                _with_alpha(pressed, projection_alpha),
                 2.2 * style_scale,
             )
+
+    def _draw_rotation_axis_guide(
+        self,
+        overlay: Draw2D,
+        cam: CameraView,
+        rect,
+        style_scale: float,
+    ) -> None:
+        """Draw the finite world axis used by an active axis rotation."""
+
+        axis_index = _axis_of(self._active)
+        if axis_index < 0:
+            return
+        origin = np.asarray(self._start_pos, np.float64)
+        axis = np.asarray(self._axis, np.float64)
+        scale = world_scale(cam, origin, rect[3], SIZE_PT * style_scale)
+        if scale <= 0.0:
+            return
+        short_joint_axis = bool(
+            self._joint_range is not None and self._joint_range.joint_type == "hinge"
+        )
+        if short_joint_axis:
+            extent = scale * 1.05
+        elif cam.orthographic:
+            extent = max(
+                scale * 8.0,
+                float(cam.ortho_height) * 0.75 * np.hypot(float(cam.aspect), 1.0),
+            )
+        else:
+            depth = float(np.dot(origin - np.asarray(cam.eye, np.float64), cam.forward()))
+            extent = max(scale * 8.0, depth * 2.4)
+        segment = _project_finite_axis_segment(
+            cam,
+            origin,
+            axis,
+            extent,
+            rect,
+            inset=min(6.0 * style_scale, 0.1 * min(float(rect[2]), float(rect[3]))),
+        )
+        if segment is None or float(np.linalg.norm(segment[1] - segment[0])) < 8.0 * style_scale:
+            return
+        _fill, pressed, _dark = self._active_rotation_palette()
+        overlay.line(
+            segment[0],
+            segment[1],
+            _with_alpha(pressed, 0.82),
+            1.6 * style_scale,
+        )
 
     def _draw_translation_guide(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         screen = project(cam, (self._drag_origin_pos, self._frame.position), rect)
@@ -1761,22 +1973,75 @@ class ObjectGizmo:
         distance = float(np.linalg.norm(delta))
         edge = CONTRAST_EDGE_COLOR
         core = GUIDE_CORE_COLOR
-        radius = 6.0 * style_scale
+        radius = TRANSLATION_GUIDE_RADIUS_PT * style_scale
         core_width = 2.0 * style_scale
         edge_width = core_width + 2.0 * CONTRAST_EDGE_PT * style_scale
         if distance > 2.0 * radius:
             direction = delta / distance
-            a = start + direction * radius
-            b = end - direction * radius
-            overlay.line(a, b, edge, edge_width)
-            overlay.line(a, b, core, core_width)
-        for point in (start, end):
-            overlay.circle(point, radius, edge, edge_width, segments=24)
-            overlay.circle(point, radius, core, core_width, segments=24)
+            edge_a = start + direction * (radius - edge_width * 0.5)
+            edge_b = end - direction * (radius - edge_width * 0.5)
+            core_a = start + direction * (radius - core_width * 0.5)
+            core_b = end - direction * (radius - core_width * 0.5)
+            overlay.line(edge_a, edge_b, edge, edge_width)
+        overlay.circle(start, radius, edge, edge_width, segments=24)
+        overlay.circle_filled(
+            end,
+            radius + CONTRAST_EDGE_PT * style_scale,
+            edge,
+            segments=24,
+        )
+        if distance > 2.0 * radius:
+            overlay.line(core_a, core_b, core, core_width)
+        overlay.circle(start, radius, core, core_width, segments=24)
+        overlay.circle_filled(end, radius, core, segments=24)
+
+    def _draw_joint_translation_guide(
+        self,
+        overlay: Draw2D,
+        cam,
+        rect,
+        style_scale: float,
+    ) -> None:
+        """Draw a slide drag as one purple segment with tick endpoints."""
+
+        screen = project(cam, (self._drag_origin_pos, self._frame.position), rect)
+        if np.any(screen[:, 2] <= 0.0):
+            return
+        start, end = screen[:, :2]
+        delta = end - start
+        distance = float(np.linalg.norm(delta))
+        tangent = delta / distance if distance > 1e-6 else self._axis_screen
+        if float(np.linalg.norm(tangent)) < 1e-6:
+            return
+        normal = np.array((-tangent[1], tangent[0]))
+        start_half_tick = JOINT_DRAG_START_TICK_HALF_PT * style_scale
+        end_half_tick = JOINT_CURRENT_TICK_PT * 0.5 * style_scale
+        color = JOINT_ACTIVE_DARK_COLOR
+        if distance > 1e-6:
+            overlay.line(start, end, color, JOINT_RANGE_WIDTH_PT * style_scale)
+            overlay.line(
+                start - normal * start_half_tick,
+                start + normal * start_half_tick,
+                color,
+                JOINT_RANGE_WIDTH_PT * style_scale,
+            )
+        overlay.line(
+            end - normal * end_half_tick,
+            end + normal * end_half_tick,
+            ACTIVE_HANDLE_COLOR,
+            4.0 * style_scale,
+        )
 
     def _publish_translation_guide(self, backend: Any, ui_scale: float) -> None:
         dd = getattr(backend, "debug", None)
-        active = self._using and self._active not in ROTATE_HANDLES
+        # Snap feedback is drawn in the final UI overlay so its connector and
+        # endpoints stay above both 2D and 3D gizmo axes.
+        active = (
+            self._using
+            and self._active not in ROTATE_HANDLES
+            and not self._snapping
+            and not (self._active_joint is not None and self._active_joint.type == "slide")
+        )
         if not active or not backend.caps.debug_draw or dd is None:
             self._clear_translation_guide(backend)
             return
@@ -1787,7 +2052,7 @@ class ObjectGizmo:
             GUIDE_CORE_COLOR,
             CONTRAST_EDGE_COLOR,
             width_px=2.0 * ui_scale,
-            radius_px=6.0 * ui_scale,
+            radius_px=TRANSLATION_GUIDE_RADIUS_PT * ui_scale,
             edge_px=CONTRAST_EDGE_PT * ui_scale,
         )
         self._guide_gpu = True
@@ -1856,16 +2121,14 @@ class ObjectGizmo:
         center = center[:2]
         arc = arc[:, :2]
         sector = [center, *arc]
-        border = _with_alpha(ACTIVE_COLOR, projection_alpha)
+        fill_color, pressed_color, dark_color = self._active_rotation_palette()
+        border = _with_alpha(dark_color, projection_alpha)
 
         fill_alpha = _rotation_fill_alpha(sweep) * projection_alpha
         if fill_alpha > 0.0:
-            fill = _with_alpha(ACTIVE_COLOR, fill_alpha)
+            fill = _with_alpha(fill_color, fill_alpha)
             overlay.triangle_fan_fill(sector, fill)
         if not joint_range_ring:
-            reference_color = (
-                ACTIVE_HANDLE_COLOR if self._frame.handle_color is not None else HOVER_COLOR
-            )
             reference = dial.points(
                 ring_radius,
                 np.linspace(0.0, 2.0 * np.pi, dial_segments, endpoint=False),
@@ -1873,7 +2136,10 @@ class ObjectGizmo:
             if np.all(reference[:, 2] > 0.0):
                 overlay.polyline(
                     reference[:, :2],
-                    _with_alpha(reference_color, projection_alpha),
+                    _with_alpha(
+                        pressed_color,
+                        projection_alpha * ROTATE_RING_ACTIVE_ALPHA,
+                    ),
                     RING_WIDTH_PT * style_scale,
                     closed=True,
                 )
@@ -1927,9 +2193,15 @@ class ObjectGizmo:
         if anchor[2] <= 0.0:
             return
         width_f, height_f = overlay.text_size(self._label)
-        semantic_color = (
-            _joint_drag_label_color(self._joint_range) if self._active_joint is not None else None
-        )
+        if self._active_joint is None or self._active is GizmoHandle.ROTATE_TRACKBALL:
+            semantic_color = None
+        elif self._active in ROTATE_AXIS_HANDLES and self._joint_range is None:
+            _fill, semantic_color, _dark = self._active_rotation_palette()
+        else:
+            semantic_color = _joint_drag_label_color(
+                self._joint_range,
+                active=self._joint_range is not None,
+            )
         dot_radius = 3.0 * style_scale if semantic_color is not None else 0.0
         dot_gap = 6.0 * style_scale if semantic_color is not None else 0.0
         prefix_width = dot_radius * 2.0 + dot_gap
@@ -1990,6 +2262,7 @@ class ObjectGizmo:
         self._start_cursor[:] = cursor
         self._rotation_raw_angle = 0.0
         self._rotation_angle = 0.0
+        self._trackball_angles[:] = 0.0
         self._snapping = False
         self._edit_started = False
         self._label = self._format_value(self._start_pos)
@@ -2010,6 +2283,10 @@ class ObjectGizmo:
                 return False
             self._axis_screen[:] = delta / length
             self._world_per_pt = scale / length
+            self._start_edit(session)
+            return True
+
+        if self._active is GizmoHandle.ROTATE_TRACKBALL:
             self._start_edit(session)
             return True
 
@@ -2047,6 +2324,26 @@ class ObjectGizmo:
             if hit is None:
                 return False
             pos += hit - self._plane_start
+        elif handle is GizmoHandle.ROTATE_TRACKBALL:
+            screen_delta = (np.asarray(cursor, np.float64) - self._start_cursor) / max(
+                self._style_scale, 1e-6
+            )
+            angles = np.array((screen_delta[1], screen_delta[0]), np.float64)
+            angles *= TRACKBALL_RAD_PER_PT
+            if snap:
+                step = np.radians(self.rotation_snap_deg)
+                angles = np.array([_snap_value(value, step) for value in angles])
+            self._trackball_angles[:] = angles
+            view_basis = np.asarray(cam.view_matrix(), np.float64)[:3, :3].T
+            rotvec = view_basis[:, 0] * angles[0] + view_basis[:, 1] * angles[1]
+            self._rotation_angle = float(np.linalg.norm(rotvec))
+            if self._rotation_angle > 1e-12:
+                self._axis[:] = rotvec / self._rotation_angle
+                self._current_mat[:] = math3d.rotvec_to_mat3(rotvec) @ self._start_mat
+            else:
+                self._axis[:] = 0.0
+                self._current_mat[:] = self._start_mat
+            mat = self._current_mat
         else:
             hit = _cursor_plane(cam, rect, cursor, self._start_pos, self._plane_normal)
             if hit is None:
@@ -2203,6 +2500,10 @@ class ObjectGizmo:
 
     def _format_value(self, position) -> str:
         axis = _axis_of(self._active)
+        if self._active is GizmoHandle.ROTATE_TRACKBALL:
+            degrees = np.degrees(self._trackball_angles)
+            snap = f" · SNAP {_format_step(self.rotation_snap_deg)}°" if self._snapping else ""
+            return f"Trackball {degrees[0]:+.1f}° {degrees[1]:+.1f}°{snap}"
         name = (
             "Screen"
             if self._active is GizmoHandle.ROTATE_SCREEN
@@ -2252,13 +2553,28 @@ class ObjectGizmo:
         elif self._joint_structure_generation != session.structure_generation:
             self._joint_structure_generation = session.structure_generation
             self._joint_selection.clear()
-        if node is None or node.posable or node.type not in (NodeType.LINK, NodeType.ROBOT):
+        if (
+            node is None
+            or node.posable
+            or node.type
+            not in (
+                NodeType.LINK,
+                NodeType.ROBOT,
+                NodeType.JOINT,
+            )
+        ):
             return None, ""
         joints = session.joints_for_body(node.body_index)
         if not joints:
             return None, "this link has no editable direct joint"
-        selected = self._joint_selection.get(int(node.body_index), -1)
-        joint = next((item for item in joints if item.joint_id == selected), None)
+        if node.type is NodeType.JOINT:
+            joint = next((item for item in joints if item.joint_id == node.joint_index), None)
+            if joint is None:
+                return None, "this joint is unavailable"
+            self.select_joint(node.body_index, joint.joint_id)
+        else:
+            selected = self._joint_selection.get(int(node.body_index), -1)
+            joint = next((item for item in joints if item.joint_id == selected), None)
         if joint is None:
             if len(joints) != 1:
                 return None, ("choose one direct joint in the viewport picker or the Joints panel")
@@ -2354,7 +2670,16 @@ class ObjectGizmo:
         ):
             return Verdict(False, "Model placement is locked; use Edit Placement in the Inspector")
         target, reason = self._joint_target(session, node)
-        if node is not None and not node.posable and node.type in (NodeType.LINK, NodeType.ROBOT):
+        if (
+            node is not None
+            and not node.posable
+            and node.type
+            in (
+                NodeType.LINK,
+                NodeType.ROBOT,
+                NodeType.JOINT,
+            )
+        ):
             if not session.paused:
                 return Verdict(False, gizmo_refusal_reason(False, False) or "")
             if not session.adapter.caps.write_qpos:
@@ -2421,6 +2746,7 @@ class ObjectGizmo:
         self._active_joint = None
         self._start_joint_qpos = np.zeros(0, np.float64)
         self._joint_drag_origin_qpos = np.zeros(0, np.float64)
+        self._trackball_angles[:] = 0.0
         self._label = ""
         self._edit_started = False
 
@@ -2620,6 +2946,72 @@ def _clip_line_to_rect(origin, direction, rect) -> tuple[np.ndarray, np.ndarray]
     if lo > hi:
         return None
     return origin + lo * direction, origin + hi * direction
+
+
+def _clip_segment_to_rect(start, end, rect) -> tuple[np.ndarray, np.ndarray] | None:
+    """Clip a finite screen segment to a viewport rectangle."""
+
+    start = np.asarray(start, np.float64)
+    delta = np.asarray(end, np.float64) - start
+    x, y, width, height = rect
+    limits = ((float(x), float(x + width)), (float(y), float(y + height)))
+    lo, hi = 0.0, 1.0
+    for axis in range(2):
+        if abs(float(delta[axis])) < 1e-9:
+            if not limits[axis][0] <= start[axis] <= limits[axis][1]:
+                return None
+            continue
+        t0 = (limits[axis][0] - start[axis]) / delta[axis]
+        t1 = (limits[axis][1] - start[axis]) / delta[axis]
+        lo, hi = max(lo, min(t0, t1)), min(hi, max(t0, t1))
+    if lo > hi:
+        return None
+    return start + lo * delta, start + hi * delta
+
+
+def _project_finite_axis_segment(
+    cam: CameraView,
+    origin,
+    axis,
+    extent: float,
+    rect,
+    *,
+    inset: float = 0.0,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Project a finite world axis, clipping its near end and viewport bounds."""
+
+    origin = np.asarray(origin, np.float64).reshape(3)
+    axis = np.asarray(axis, np.float64).reshape(3)
+    length = float(np.linalg.norm(axis))
+    if length < 1e-9 or extent <= 0.0:
+        return None
+    axis /= length
+    lo, hi = -float(extent), float(extent)
+    if not cam.orthographic:
+        forward = np.asarray(cam.forward(), np.float64)
+        origin_depth = float(np.dot(origin - np.asarray(cam.eye, np.float64), forward))
+        axis_depth = float(np.dot(axis, forward))
+        near_depth = max(float(cam.near) * 1.5, 1e-4)
+        if origin_depth <= near_depth:
+            return None
+        if axis_depth > 1e-9:
+            lo = max(lo, (near_depth - origin_depth) / axis_depth)
+        elif axis_depth < -1e-9:
+            hi = min(hi, (near_depth - origin_depth) / axis_depth)
+        if lo >= hi:
+            return None
+    screen = project(cam, (origin + axis * lo, origin + axis * hi), rect)
+    if np.any(screen[:, 2] <= 0.0):
+        return None
+    x, y, width, height = (float(value) for value in rect)
+    inset = max(0.0, min(float(inset), 0.5 * min(width, height)))
+    clipped_rect = (
+        x + inset,
+        y + inset,
+        max(0.0, width - 2.0 * inset),
+        max(0.0, height - 2.0 * inset),
+    )
+    return _clip_segment_to_rect(screen[0, :2], screen[1, :2], clipped_rect)
 
 
 def _projected_line_parameters(cam, origin, axis, segment, rect) -> tuple[float, float] | None:

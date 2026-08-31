@@ -23,16 +23,18 @@ from forge_viewer.types import CameraView
 from forge_viewer.ui import gizmo as gizmo_ui
 from forge_viewer.ui import theme as theme_mod
 from forge_viewer.ui.draw2d import ImguiDraw2D
+from forge_viewer.ui.input_bindings import DEFAULT_INPUT_BINDINGS
 from forge_viewer.ui.theme import THEME, rgb8
 from forge_viewer.ui.viewport_widgets import (
     CAPSULE_SURFACE_ALPHA,
     OVERLAY_GEOMETRY,
     TOOL_GLYPH_SCALE,
     capsule_points,
+    default_tool_hints,
     draw_playback_glyph,
     draw_status,
     draw_tool_glyph,
-    mouse_button_fill_points,
+    mouse_button_fill_geometry,
 )
 from forge_viewer.ui.window import Window, WindowConfig
 
@@ -92,95 +94,6 @@ OVERLAY_ICON_RADIUS = 10.0
 OVERLAY_STATE_RADIUS = 16.0
 OVERLAY_SHELL_RADIUS = 22.0
 OVERLAY_CENTER_STEP = 34.0
-
-# Fixed ISO-orthographic Rotate geometry. These three front half-rings were
-# projected offline at yaw -135° / pitch 30° and sampled once. The paint path
-# therefore performs only DPI scale + screen translation—no trigonometry,
-# projection, or per-frame tessellation. Draw order is Y, X, Z.
-ROTATE_SCREEN_OUTER_RADIUS = 10.0
-ROTATE_HALF_RING_PATHS = (
-    (
-        (3.177, 4.765),
-        (3.488, 4.386),
-        (3.740, 3.931),
-        (3.928, 3.410),
-        (4.048, 2.830),
-        (4.099, 2.201),
-        (4.080, 1.535),
-        (3.992, 0.843),
-        (3.835, 0.136),
-        (3.612, -0.573),
-        (3.328, -1.272),
-        (2.986, -1.950),
-        (2.594, -2.594),
-        (2.157, -3.194),
-        (1.683, -3.739),
-        (1.181, -4.220),
-        (0.658, -4.629),
-        (0.124, -4.959),
-        (-0.412, -5.204),
-        (-0.941, -5.360),
-        (-1.454, -5.424),
-        (-1.942, -5.395),
-        (-2.397, -5.274),
-        (-2.811, -5.063),
-        (-3.177, -4.765),
-    ),
-    (
-        (-3.177, 4.765),
-        (-3.488, 4.386),
-        (-3.740, 3.931),
-        (-3.928, 3.410),
-        (-4.048, 2.830),
-        (-4.099, 2.201),
-        (-4.080, 1.535),
-        (-3.992, 0.843),
-        (-3.835, 0.136),
-        (-3.612, -0.573),
-        (-3.328, -1.272),
-        (-2.986, -1.950),
-        (-2.594, -2.594),
-        (-2.157, -3.194),
-        (-1.683, -3.739),
-        (-1.181, -4.220),
-        (-0.658, -4.629),
-        (-0.124, -4.959),
-        (0.412, -5.204),
-        (0.941, -5.360),
-        (1.454, -5.424),
-        (1.942, -5.395),
-        (2.397, -5.274),
-        (2.811, -5.063),
-        (3.177, -4.765),
-    ),
-    (
-        (5.800, 0.000),
-        (5.750, 0.379),
-        (5.602, 0.751),
-        (5.359, 1.110),
-        (5.023, 1.450),
-        (4.601, 1.765),
-        (4.101, 2.051),
-        (3.531, 2.301),
-        (2.900, 2.511),
-        (2.220, 2.679),
-        (1.501, 2.801),
-        (0.757, 2.875),
-        (0.000, 2.900),
-        (-0.757, 2.875),
-        (-1.501, 2.801),
-        (-2.220, 2.679),
-        (-2.900, 2.511),
-        (-3.531, 2.301),
-        (-4.101, 2.051),
-        (-4.601, 1.765),
-        (-5.023, 1.450),
-        (-5.359, 1.110),
-        (-5.602, 0.751),
-        (-5.750, 0.379),
-        (-5.800, 0.000),
-    ),
-)
 
 # Accepted M8 hinge specimen. The arc is sampled once at import; each frame
 # performs only scale + translation before handing the points to Draw2D.
@@ -283,7 +196,9 @@ class ProbeState:
     hierarchy_filter: str = ""
     hierarchy_kind: int = 0
     hierarchy_selection: int = 2
-    hierarchy_visibility: list[bool] = field(default_factory=lambda: [True] * 6)
+    hierarchy_visibility: list[bool] = field(
+        default_factory=lambda: [True, True, False, True, True, True]
+    )
     asset_selection: int = 1
     helper_selection: int = 1
     camera_projection: int = 0
@@ -310,6 +225,7 @@ class ProbeState:
     construction_tool_scale: float = 2.4
     tool_stroke_width: float = OVERLAY_GEOMETRY.tool_stroke
     rotate_ring_gap: float = OVERLAY_GEOMETRY.rotate_ring_gap
+    rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap
     hint_control_height: int = int(OVERLAY_GEOMETRY.hint_control_height)
     hint_padding_x: int = int(OVERLAY_GEOMETRY.hint_padding_x)
     hint_padding_y: int = int(OVERLAY_GEOMETRY.hint_padding_y)
@@ -459,6 +375,7 @@ def _draw_tool_icon(
     kind: str,
     stroke_width: float,
     rotate_ring_gap: float,
+    rotate_ring_cap: str,
     surface_color,
     frame_space: str,
 ) -> None:
@@ -474,6 +391,7 @@ def _draw_tool_icon(
             OVERLAY_GEOMETRY,
             tool_stroke=stroke_width,
             rotate_ring_gap=rotate_ring_gap,
+            rotate_ring_cap=rotate_ring_cap,
         ),
     )
 
@@ -528,6 +446,7 @@ def _draw_tool_column(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                 current,
                 state.tool_stroke_width,
                 state.rotate_ring_gap,
+                state.rotate_ring_cap,
                 surface_color,
                 state.gizmo_space,
             )
@@ -577,23 +496,18 @@ def _draw_mouse_input(
 ) -> float:
     width, height = width * scale, height * scale
     y = center_y - height * 0.5
-    button_split = y + height * 0.44
-    corner_radius = min(width * 0.5, height * 0.32)
+    corner_radius = min(width * 0.22, height * 0.18)
 
-    outline_width = 1.5 * scale
-    divider_width = 1.2 * scale
-    button_region = mouse_button_fill_points(
+    outline_width = 1.25 * scale
+    button_fill = mouse_button_fill_geometry(
         x,
         y,
         width,
         height,
         button,
         outline_width=outline_width,
-        divider_width=divider_width,
-        safety_inset=0.18 * scale,
+        safety_inset=0.85 * scale,
     )
-    if button_region:
-        draw.convex_fill(button_region, CONCEPT_THEME.primary_dim)
     draw.rect(
         (x, y),
         (x + width, y + height),
@@ -601,26 +515,18 @@ def _draw_mouse_input(
         outline_width,
         rounding=corner_radius,
     )
-    draw.line(
-        (x + width * 0.5, y + 1.0 * scale),
-        (x + width * 0.5, button_split),
-        CONCEPT_THEME.text,
-        divider_width,
-    )
-    draw.line(
-        (x + 1.0 * scale, button_split),
-        (x + width - 1.0 * scale, button_split),
-        CONCEPT_THEME.text,
-        divider_width,
-    )
+    if button_fill is not None:
+        mask, fill = button_fill
+        draw.convex_fill(mask, (*CONCEPT_THEME.bg_child[:3], 1.0))
+        draw.convex_fill(fill, CONCEPT_THEME.primary)
+    wheel_lo = (x + width * 0.36, y + 1.35 * scale)
+    wheel_hi = (x + width * 0.64, y + 8.35 * scale)
     if button == "wheel":
-        wheel_width = max(2.0 * scale, width * 0.20)
-        wheel_height = min(6.0 * scale, height * 0.34)
         draw.rect_filled(
-            (x + (width - wheel_width) * 0.5, y + 2.0 * scale),
-            (x + (width + wheel_width) * 0.5, y + 2.0 * scale + wheel_height),
-            CONCEPT_THEME.primary_bright,
-            rounding=wheel_width * 0.5,
+            wheel_lo,
+            wheel_hi,
+            CONCEPT_THEME.primary,
+            rounding=1.2 * scale,
         )
     if not suffix:
         return width
@@ -947,19 +853,23 @@ def _draw_joint_gizmo(
         CONCEPT_THEME.primary_bright,
         4.0 * scale,
     )
-    # Only this external, axis-parallel arrow is interactive. The range line,
-    # current tick, and endpoint labels are read-only scale context.
-    arrow = gizmo_ui.joint_slide_arrow_polygon(
+    # Opposing drag handles sit off the scale line; the line itself shares the
+    # same pointer target so the control remains discoverable.
+    arrows = gizmo_ui.joint_slide_arrow_polygons(
         np.asarray((current_x, slide_y)),
         np.asarray((1.0, 0.0)),
         scale,
     )
-    draw.fringed_concave_fill(
-        tuple((float(point[0]), float(point[1])) for point in arrow),
-        JOINT_COLOR,
+    for arrow in arrows:
+        draw.fringed_concave_fill(
+            tuple((float(point[0]), float(point[1])) for point in arrow),
+            JOINT_COLOR,
+        )
+    arrow_points = np.concatenate(
+        (*arrows, np.asarray(((slide_min, slide_y), (slide_max, slide_y))))
     )
-    arrow_lo = np.min(arrow, axis=0)
-    arrow_hi = np.max(arrow, axis=0)
+    arrow_lo = np.min(arrow_points, axis=0)
+    arrow_hi = np.max(arrow_points, axis=0)
     if state is not None and _joint_double_click(
         f"##{item_id}-slide-arrow",
         (arrow_lo[0] - 4.0 * scale, arrow_lo[1] - 4.0 * scale),
@@ -975,7 +885,6 @@ def _draw_joint_gizmo(
         "m",
         CONCEPT_THEME.axis_color(2),
         scale,
-        interactive=False,
     )
     _draw_label_button(
         draw,
@@ -986,7 +895,6 @@ def _draw_joint_gizmo(
         "m",
         CONCEPT_THEME.axis_color(0),
         scale,
-        interactive=False,
     )
 
     # Hinge: a single clean purple arc. Endpoint ticks are radial and use the
@@ -2272,7 +2180,6 @@ def _draw_control_gallery(size, state: ProbeState) -> None:
 def _draw_joints_gallery(size, state: ProbeState) -> None:
     opened = _begin_gallery_panel("Joints", "ProbeJoints", size)
     if opened:
-        imgui.text_disabled("Selected link · hinge_body")
         if _begin_gallery_properties("##probe-direct-joints"):
             _property_label("hinge_limited")
             _, state.hinge_position = imgui.slider_float(
@@ -2453,52 +2360,32 @@ def _probe_fill_axis_field_seam(
         )
 
 
-def _probe_transform_row(
+def _probe_property_vector_row(
     name: str,
     values: tuple[float, float, float],
     fmt: str,
     scale: float,
 ) -> None:
-    _table_next_control_row()
-    imgui.table_next_column()
-    _table_text(name, disabled=True)
-    for axis, label in enumerate("XYZ"):
-        imgui.table_next_column()
-        _probe_axis_field(label, f"probe-{name}-{axis}", values[axis], axis, fmt, scale)
+    """Mirror the Inspector's responsive label/control XYZ property row."""
 
-
-def _probe_compact_transform_row(
-    name: str,
-    values: tuple[float, float, float],
-    fmt: str,
-    scale: float,
-) -> None:
-    """Mirror the current free-body velocity rows inside the transform child."""
-
-    _table_next_control_row()
-    imgui.table_next_column()
-    _table_text(name, disabled=True)
+    _property_label(name)
+    compact = imgui.get_content_region_avail().x < 210.0 * scale
     flags = _flags(
         imgui.TableFlags_.sizing_stretch_same,
         imgui.TableFlags_.no_saved_settings,
         imgui.TableFlags_.no_pad_inner_x,
         imgui.TableFlags_.no_pad_outer_x,
     )
-    if not imgui.begin_table(f"##probe-{name}-axes", 3, flags):
+    columns = 1 if compact else 3
+    if not imgui.begin_table(f"##probe-{name}-property-axes", columns, flags):
         return
-    for axis in "xyz":
+    for axis in "xyz"[:columns]:
         imgui.table_setup_column(axis, imgui.TableColumnFlags_.width_stretch.value, 1.0)
     for axis, label in enumerate("XYZ"):
+        if compact:
+            imgui.table_next_row()
         imgui.table_next_column()
-        _probe_axis_field(
-            label,
-            f"probe-{name}-{axis}",
-            values[axis],
-            axis,
-            fmt,
-            scale,
-            editable=False,
-        )
+        _probe_axis_field(label, f"probe-{name}-{axis}", values[axis], axis, fmt, scale)
     imgui.end_table()
 
 
@@ -2533,29 +2420,9 @@ def _draw_inspector_gallery(size, scale: float) -> None:
             )
             if child_visible:
                 imgui.push_font(None, 12.0 * scale)
-                flags = _flags(
-                    imgui.TableFlags_.sizing_stretch_same,
-                    imgui.TableFlags_.no_saved_settings,
-                    imgui.TableFlags_.no_pad_inner_x,
-                    imgui.TableFlags_.no_pad_outer_x,
-                )
-                if imgui.begin_table("##probe-transform", 4, flags):
-                    imgui.table_setup_column(
-                        "value", imgui.TableColumnFlags_.width_fixed.value, 60.0 * scale
-                    )
-                    for axis in "xyz":
-                        imgui.table_setup_column(
-                            axis, imgui.TableColumnFlags_.width_stretch.value, 1.0
-                        )
-                    _probe_transform_row("position", (0.193, 0.047, 0.445), "%.3f", scale)
-                    _probe_transform_row("rotation", (0.0, -0.0, 0.0), "%.1f", scale)
-                    imgui.end_table()
-                if imgui.begin_table("##probe-transform-velocity", 1, flags):
-                    imgui.table_setup_column(
-                        "velocity", imgui.TableColumnFlags_.width_stretch.value
-                    )
-                    _probe_compact_transform_row("linear velocity", (0.0, 0.0, 0.0), "%.3f", scale)
-                    _probe_compact_transform_row("angular velocity", (0.0, 0.0, 0.0), "%.3f", scale)
+                if _begin_gallery_properties("##probe-transform"):
+                    _probe_property_vector_row("position", (0.193, 0.047, 0.445), "%.3f", scale)
+                    _probe_property_vector_row("rotation", (0.0, -0.0, 0.0), "%.1f", scale)
                     imgui.end_table()
                 imgui.pop_font()
             imgui.end_child()
@@ -2701,21 +2568,56 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
                     imgui.ImVec2(button_size, button_size),
                 ):
                     state.hierarchy_visibility[index] = not state.hierarchy_visibility[index]
-                if hovered or state.hierarchy_selection == index:
-                    visible_lo = imgui.get_item_rect_min()
-                    visible_hi = imgui.get_item_rect_max()
-                    center = (
-                        (visible_lo.x + visible_hi.x) * 0.5,
-                        (visible_lo.y + visible_hi.y) * 0.5,
+                visible_lo = imgui.get_item_rect_min()
+                visible_hi = imgui.get_item_rect_max()
+                center = (
+                    (visible_lo.x + visible_hi.x) * 0.5,
+                    (visible_lo.y + visible_hi.y) * 0.5,
+                )
+                radius_x = 6.5 * scale
+                radius_y = 3.6 * scale
+                color = (
+                    CONCEPT_THEME.primary_bright
+                    if hovered or state.hierarchy_selection == index
+                    else CONCEPT_THEME.primary
+                    if state.hierarchy_visibility[index]
+                    else CONCEPT_THEME.text_disabled
+                )
+                if state.hierarchy_visibility[index]:
+                    top = tuple(
+                        (
+                            center[0] - radius_x + radius_x * 2.0 * point / 8.0,
+                            center[1] - math.sin(math.pi * point / 8.0) * radius_y,
+                        )
+                        for point in range(9)
                     )
-                    color = (
-                        CONCEPT_THEME.primary_bright
-                        if state.hierarchy_visibility[index]
-                        else CONCEPT_THEME.text_disabled
+                    bottom = tuple(
+                        (
+                            center[0] + radius_x - radius_x * 2.0 * point / 8.0,
+                            center[1] + math.sin(math.pi * point / 8.0) * radius_y,
+                        )
+                        for point in range(9)
                     )
-                    row_draw.circle(center, 6.0 * scale, color, 1.5 * scale, segments=24)
-                    if state.hierarchy_visibility[index]:
-                        row_draw.circle_filled(center, 2.5 * scale, color, segments=16)
+                    row_draw.polyline((*top, *bottom[1:-1]), color, 1.35 * scale, closed=True)
+                    row_draw.circle(center, 1.8 * scale, color, 1.2 * scale, segments=16)
+                else:
+                    lid = tuple(
+                        (
+                            center[0] - radius_x + radius_x * 2.0 * point / 8.0,
+                            center[1] + math.sin(math.pi * point / 8.0) * radius_y * 0.72,
+                        )
+                        for point in range(9)
+                    )
+                    row_draw.polyline(lid, color, 1.45 * scale)
+                    for offset in (-0.52, 0.0, 0.52):
+                        lash_x = center[0] + radius_x * offset
+                        lash_y = center[1] + radius_y * 0.72 * math.sqrt(max(0.0, 1.0 - offset**2))
+                        row_draw.line(
+                            (lash_x, lash_y),
+                            (lash_x + offset * 1.6 * scale, lash_y + 2.2 * scale),
+                            color,
+                            1.15 * scale,
+                        )
             imgui.end_table()
     imgui.end_child()
 
@@ -2866,8 +2768,12 @@ def _draw_status_strip(
         step=1204,
         metric_mode="time",
         backend="OpenGL",
-        dt=1.0 / max(rate, 1e-6),
+        dt=0.002,
         fps=rate,
+        tool_hints=default_tool_hints(
+            "ready" if selected != "no selection" else "camera",
+            DEFAULT_INPUT_BINDINGS,
+        ),
     )
 
 
@@ -3168,6 +3074,14 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
             1.0,
             "%.2f px",
         )
+        _property_label("Ring caps")
+        cap_index = 1 if state.rotate_ring_cap == "round" else 0
+        _, cap_index = imgui.combo(
+            "##geometry-ring-cap",
+            cap_index,
+            ("Butt", "Round"),
+        )
+        state.rotate_ring_cap = ("butt", "round")[cap_index]
         imgui.end_table()
 
     icon_radius = state.overlay_icon_radius
@@ -3219,6 +3133,7 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         state.construction_tool_scale = 2.4
         state.tool_stroke_width = OVERLAY_GEOMETRY.tool_stroke
         state.rotate_ring_gap = OVERLAY_GEOMETRY.rotate_ring_gap
+        state.rotate_ring_cap = OVERLAY_GEOMETRY.rotate_ring_cap
         state.hint_control_height = int(OVERLAY_GEOMETRY.hint_control_height)
         state.hint_padding_x = int(OVERLAY_GEOMETRY.hint_padding_x)
         state.hint_padding_y = int(OVERLAY_GEOMETRY.hint_padding_y)
@@ -3430,6 +3345,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                 f"GROUP STEP   {int(group_step)}",
                 f"RADIAL STEP  {state.overlay_radial_step:2d}",
                 f"DIVIDER      {state.divider_width}",
+                f"RING CAPS    {state.rotate_ring_cap.upper()}",
             )
         ):
             color = (
@@ -3501,6 +3417,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                 "frame",
                 state.tool_stroke_width,
                 state.rotate_ring_gap,
+                state.rotate_ring_cap,
                 CONCEPT_THEME.bg_child,
                 space,
             )
@@ -3513,12 +3430,11 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
 
     elif active_tab == "Hints & input":
         hint_label_x = x0 + 54.0
-        hint_x = hint_label_x + 252.0 * scale
         draw.text((hint_label_x, content_y + 4.0), title_color, "Context hint states")
         draw.text(
             (hint_label_x, content_y + 28.0),
             note_color,
-            "Only the active viewport context is shown; Help keeps the complete reference.",
+            "Defaults are composed into Status; each whole group is dropped when space runs out.",
         )
         for index, (label, variant) in enumerate(
             (
@@ -3529,15 +3445,33 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             )
         ):
             row_y = content_y + 70.0 + index * 58.0 * scale
-            draw.text((hint_label_x, row_y + 9.0 * scale), note_color, label)
-            _draw_hint_bar(draw, (hint_x, row_y), scale, state, variant)
+            draw_status(
+                draw,
+                (hint_label_x, row_y),
+                size.x * 0.75,
+                28.0 * scale,
+                CONCEPT_THEME,
+                scale,
+                selected=label,
+                has_selection=variant != "camera",
+                state="paused",
+                sim_time=1.204,
+                step=1204,
+                metric_mode="time",
+                backend="OpenGL",
+                dt=0.002,
+                fps=60.0,
+                tool_hints=default_tool_hints(variant, DEFAULT_INPUT_BINDINGS),
+            )
 
         draw.text(
             (hint_label_x, content_y + 306.0 * scale),
             note_color,
-            "View Cube: no persistent hint; hover tooltip names the hovered face or action.",
+            "Reusable scene surface (custom hint providers can opt in):",
         )
-        card_y = content_y + 346.0 * scale
+        hint_x = hint_label_x
+        _draw_hint_bar(draw, (hint_x, content_y + 332.0 * scale), scale, state, "camera")
+        card_y = content_y + 396.0 * scale
         draw.text((hint_label_x, card_y), title_color, "Value input · M10")
         _draw_value_input_card(
             (hint_x, card_y),
@@ -3548,7 +3482,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         draw.text(
             (hint_x, card_y + 154.0 * scale),
             note_color,
-            "Popup open: the hint bar is hidden; Enter commits, Esc or outside click cancels.",
+            "Popup open: context hints are hidden; Enter commits, Esc or outside click cancels.",
         )
 
     elif active_tab == "Transform gizmos":
@@ -3899,6 +3833,7 @@ def render(
     interactive: bool,
     initial_page: str,
     initial_geometry_tab: str,
+    initial_rotate_cap: str,
     ui_scale: float,
     interactive_fps: float,
 ) -> None:
@@ -3919,7 +3854,11 @@ def render(
     )
     try:
         _apply_concept_theme(window.style_scale)
-        state = ProbeState(page=initial_page, geometry_tab=initial_geometry_tab)
+        state = ProbeState(
+            page=initial_page,
+            geometry_tab=initial_geometry_tab,
+            rotate_ring_cap=initial_rotate_cap,
+        )
         if interactive:
             window.show()
             frame_period = 1.0 / interactive_fps
@@ -3991,6 +3930,12 @@ def main() -> None:
         help="Initial non-closeable tab on the geometry page",
     )
     parser.add_argument(
+        "--rotate-cap",
+        choices=("butt", "round"),
+        default=OVERLAY_GEOMETRY.rotate_ring_cap,
+        help="Initial Rotate inner-ring cap style",
+    )
+    parser.add_argument(
         "--interactive",
         action="store_true",
         help="Open a real ImGui window and run until it is closed",
@@ -4002,8 +3947,8 @@ def main() -> None:
         help="Maximum interactive refresh rate (default: 30)",
     )
     args = parser.parse_args()
-    if not 0.75 <= args.ui_scale <= 2.0:
-        parser.error("--ui-scale must be between 0.75 and 2.0")
+    if not 0.75 <= args.ui_scale <= 4.0:
+        parser.error("--ui-scale must be between 0.75 and 4.0")
     if not 15.0 <= args.fps <= 240.0:
         parser.error("--fps must be between 15 and 240")
     output = args.output.resolve()
@@ -4024,6 +3969,7 @@ def main() -> None:
             "panels": "Panels",
             "workspaces": "Workspaces",
         }[args.geometry_tab],
+        initial_rotate_cap=args.rotate_cap,
         ui_scale=args.ui_scale,
         interactive_fps=args.fps,
     )

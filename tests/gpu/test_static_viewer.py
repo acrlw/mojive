@@ -15,19 +15,24 @@ from forge_viewer import commands as cmd  # noqa: E402
 from forge_viewer.bridge import DebugClient  # noqa: E402
 from forge_viewer.composition import build_scene  # noqa: E402
 from forge_viewer.demos import canvas_scene  # noqa: E402
-from forge_viewer.gizmo import SIZE_PT, project, world_scale  # noqa: E402
+from forge_viewer.gizmo import SIZE_PT, GizmoHandle, project, world_scale  # noqa: E402
 from forge_viewer.render.debugdraw import PrimitiveType  # noqa: E402
 from forge_viewer.scene import Scene  # noqa: E402
 from forge_viewer.types import DEFAULT_MATERIAL, CameraView, Material, MeshShape  # noqa: E402
-from forge_viewer.ui.scene_entities import HELPER_LAYER  # noqa: E402
+from forge_viewer.ui.scene_entities import HELPER_ICON_LAYER, HELPER_LAYER  # noqa: E402
 
 
 @pytest.fixture(autouse=True, scope="module")
 def _isolated_settings(tmp_path_factory):
     previous = os.environ.get("FORGE_VIEWER_SETTINGS")
+    previous_ui_scale = os.environ.get("FORGE_VIEWER_UI_SCALE")
     os.environ["FORGE_VIEWER_SETTINGS"] = str(
         tmp_path_factory.mktemp("static-viewer-settings") / "settings.json"
     )
+    # Pixel-difference and compact-panel assertions in this module use the
+    # authored scale-1 geometry. HiDPI behavior is opted into explicitly by
+    # the camera-helper regression below and by test_hidpi.py.
+    os.environ["FORGE_VIEWER_UI_SCALE"] = "1"
     try:
         yield
     finally:
@@ -35,6 +40,10 @@ def _isolated_settings(tmp_path_factory):
             del os.environ["FORGE_VIEWER_SETTINGS"]
         else:
             os.environ["FORGE_VIEWER_SETTINGS"] = previous
+        if previous_ui_scale is None:
+            del os.environ["FORGE_VIEWER_UI_SCALE"]
+        else:
+            os.environ["FORGE_VIEWER_UI_SCALE"] = previous_ui_scale
 
 
 @pytest.fixture(scope="module")
@@ -425,9 +434,10 @@ def test_settings_exposes_view_selection_padding(canvas, monkeypatch):
         settings.open = False
 
 
-def test_scene_camera_helper_is_pickable_and_transformable():
+def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
     from imgui_bundle import imgui
 
+    monkeypatch.setenv("FORGE_VIEWER_UI_SCALE", "2")
     scene = Scene()
     camera_id = scene.add_camera(
         "shot",
@@ -468,15 +478,111 @@ def test_scene_camera_helper_is_pickable_and_transformable():
         assert viewer.app._pick_at((float(screen[0]), float(screen[1]))) == node.object_id
 
         viewer.session.submit(cmd.Select(node.object_id))
+        viewer.sync()
+
+        captured = {}
+        original_button = imgui.button
+        original_checkbox = imgui.checkbox
+        original_drag_float = imgui.drag_float
+        original_text_disabled = imgui.text_disabled
+
+        def remember(name):
+            lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+            captured[name] = (lo.x, lo.y, hi.x, hi.y)
+
+        def record_button(label, *args, **kwargs):
+            result = original_button(label, *args, **kwargs)
+            if label in {
+                f"X##camera_position_0_{node.node_id}",
+                f"X##camera_target_0_{node.node_id}",
+                f"X##camera_up_0_{node.node_id}",
+                f"persp##camera-inspector-projection-{node.node_id}-0",
+                "View Camera",
+            }:
+                remember(label)
+            return result
+
+        def record_checkbox(label, *args, **kwargs):
+            result = original_checkbox(label, *args, **kwargs)
+            if label == "##camera_preview_enabled":
+                remember(label)
+            return result
+
+        def record_drag_float(label, *args, **kwargs):
+            result = original_drag_float(label, *args, **kwargs)
+            if label == "##camera_fov":
+                remember(label)
+            return result
+
+        def record_text_disabled(label, *args, **kwargs):
+            result = original_text_disabled(label, *args, **kwargs)
+            for semantic in ("position", "target", "up", "vertical fov"):
+                if label == semantic or (
+                    label.endswith("…") and semantic.startswith(label.removesuffix("…"))
+                ):
+                    remember(f"label:{semantic}")
+                    break
+            return result
+
+        monkeypatch.setattr(imgui, "button", record_button)
+        monkeypatch.setattr(imgui, "checkbox", record_checkbox)
+        monkeypatch.setattr(imgui, "drag_float", record_drag_float)
+        monkeypatch.setattr(imgui, "text_disabled", record_text_disabled)
+        viewer.sync()
+        monkeypatch.setattr(imgui, "button", original_button)
+        monkeypatch.setattr(imgui, "checkbox", original_checkbox)
+        monkeypatch.setattr(imgui, "drag_float", original_drag_float)
+        monkeypatch.setattr(imgui, "text_disabled", original_text_disabled)
+
+        labels = [
+            captured[f"label:{label}"] for label in ("position", "target", "up", "vertical fov")
+        ]
+        assert max(rect[2] for rect in labels) - min(rect[2] for rect in labels) <= 1.0, labels
+        control_starts = [
+            captured[f"X##camera_{name}_0_{node.node_id}"][0]
+            for name in ("position", "target", "up")
+        ]
+        control_starts.extend(
+            (
+                captured["##camera_fov"][0],
+                captured[f"persp##camera-inspector-projection-{node.node_id}-0"][0],
+            )
+        )
+        assert max(control_starts) - min(control_starts) <= 1.0
+        projection_y = captured[f"persp##camera-inspector-projection-{node.node_id}-0"][1]
+        assert projection_y < captured["View Camera"][1]
+        assert captured["View Camera"][1] < captured["##camera_preview_enabled"][1]
+
+        def choose_orthographic(label, *args, **kwargs):
+            clicked = original_button(label, *args, **kwargs)
+            return clicked or label == f"ortho##camera-inspector-projection-{node.node_id}-1"
+
+        monkeypatch.setattr(imgui, "button", choose_orthographic)
+        viewer.sync()
+        monkeypatch.setattr(imgui, "button", original_button)
+        assert viewer.session.camera_view(camera_id).orthographic
+        viewer.sync()
+
+        helper_layer = viewer.backend.debug.layer(HELPER_LAYER)
+        helper_store = helper_layer._stores[PrimitiveType.LINE]
+        frustum_before_preview = helper_store.positions[: helper_store.count].copy()
         viewer.app.camera_preview.set_enabled(True)
         viewer.sync()
         assert viewer.app.camera_preview._image is not None
         assert viewer.app.camera_preview._image.aspect == pytest.approx(16.0 / 9.0, rel=0.01)
         layer = viewer.backend.debug.layer(HELPER_LAYER)
-        # Camera helpers are now semantic line icons; picking still uses the
-        # projected anchor but no legacy point primitive is rendered.
+        icon_layer = viewer.backend.debug.layer(HELPER_ICON_LAYER)
+        # Camera icons use joined overlay strokes; picking still uses the
+        # projected anchor, while the selected frustum remains depth-aware.
         assert layer.count_of(PrimitiveType.POINT) == 0
-        assert layer.count_of(PrimitiveType.LINE) == 36
+        assert layer.count_of(PrimitiveType.LINE) == 12
+        assert icon_layer.count_of(PrimitiveType.STROKE) == 24
+        store = layer._stores[PrimitiveType.LINE]
+        assert store.positions[: store.count] == pytest.approx(frustum_before_preview)
+        # The preview intentionally owns pointer input over its rectangle.
+        # Hide it before exercising the gizmo that sits beneath it.
+        viewer.app.camera_preview.set_enabled(False)
+        viewer.sync()
 
         viewer.app.gizmo.set_mode("translate")
         viewer.app.gizmo.set_space("world")
@@ -495,8 +601,10 @@ def test_scene_camera_helper_is_pickable_and_transformable():
         io = imgui.get_io()
         io.add_mouse_pos_event(*cursor)
         viewer.sync()
+        assert viewer.app.gizmo.hovered_handle is GizmoHandle.Z
         io.add_mouse_button_event(0, True)
         viewer.sync()
+        assert viewer.app.gizmo.using
         axis_screen = project(
             viewer.app._camera_view(), (before, before + axis * scale), viewer.app._viewport_rect
         )[:, :2]

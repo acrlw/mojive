@@ -25,7 +25,10 @@ from forge_viewer.ui.panels import (
     PanelSet,
     button_row_layout,
     default_panels,
+    horizontal_wheel_target,
     slider_gesture,
+    sort_order_glyph,
+    sort_order_tooltip,
     validate_panels,
 )
 from forge_viewer.ui.panels.assets import (
@@ -34,11 +37,12 @@ from forge_viewer.ui.panels.assets import (
     height_field_preview_color,
     unique_asset_name,
 )
-from forge_viewer.ui.panels.control import filter_actuators
+from forge_viewer.ui.panels.control import filter_actuators, sort_actuators
 from forge_viewer.ui.panels.hierarchy import (
     HierarchyPanel,
     disclosure_triangle,
     hierarchy_open_depth,
+    hierarchy_shows_type_column,
 )
 from forge_viewer.ui.panels.inspector import (
     _compact_transform,
@@ -54,7 +58,7 @@ from forge_viewer.ui.panels.inspector import (
     _unique_component_name,
     gizmo_refusal_reason,
 )
-from forge_viewer.ui.panels.joints import filter_joints, page_span
+from forge_viewer.ui.panels.joints import filter_joints, page_span, sort_joints
 from forge_viewer.ui.panels.keyframes import (
     fitted_timeline_range,
     nearest_take_frame,
@@ -102,6 +106,12 @@ def test_hierarchy_disclosure_is_one_rigidly_rotated_antialiased_shape() -> None
     )
 
 
+def test_hierarchy_hides_type_column_before_it_overlaps_scaled_node_names() -> None:
+    assert hierarchy_shows_type_column(300.0, 1.0)
+    assert not hierarchy_shows_type_column(600.0, 4.0)
+    assert hierarchy_shows_type_column(960.0, 4.0)
+
+
 @pytest.fixture
 def panels() -> PanelSet:
     return PanelSet()
@@ -137,6 +147,53 @@ def test_joint_and_actuator_search_matches_names_case_insensitively() -> None:
     assert filter_actuators(actuators, "act2") == (actuators[2],)
     assert filter_joints(joints, "") == joints
     assert filter_actuators(actuators, "") == actuators
+
+
+def test_joint_and_actuator_lists_toggle_between_state_and_name_order() -> None:
+    joints = (
+        SimpleNamespace(joint_id=8, name="z_joint", qpos_adr=0, qvel_adr=1),
+        SimpleNamespace(joint_id=2, name="A_joint", qpos_adr=7, qvel_adr=6),
+        SimpleNamespace(joint_id=4, name="m_joint", qpos_adr=3, qvel_adr=2),
+    )
+    actuators = (
+        SimpleNamespace(actuator_id=8, name="z_motor", ctrl_address=0, act_address=3),
+        SimpleNamespace(actuator_id=2, name="A_motor", ctrl_address=5, act_address=1),
+        SimpleNamespace(actuator_id=4, name="m_motor", ctrl_address=2, act_address=2),
+    )
+
+    assert sort_joints(joints, by_name=False) == (joints[0], joints[2], joints[1])
+    assert sort_joints(joints, by_name=True) == (joints[1], joints[2], joints[0])
+    assert sort_actuators(actuators, by_name=False) == (actuators[0], actuators[2], actuators[1])
+    assert sort_actuators(actuators, by_name=True) == (actuators[1], actuators[2], actuators[0])
+
+
+def test_sort_button_uses_a_bounded_list_and_arrow_glyph() -> None:
+    segments = sort_order_glyph((10.0, 20.0, 42.0, 52.0))
+
+    assert len(segments) == 6
+    assert all(
+        10.0 <= coordinate <= 42.0
+        for segment in segments
+        for point in segment
+        for coordinate in (point[0],)
+    )
+    assert all(
+        20.0 <= coordinate <= 52.0
+        for segment in segments
+        for point in segment
+        for coordinate in (point[1],)
+    )
+
+
+def test_sort_tooltip_names_only_the_active_order() -> None:
+    assert sort_order_tooltip(False, "qpos / qvel") == "Order: qpos / qvel"
+    assert sort_order_tooltip(True, "qpos / qvel") == "Order: Name"
+
+
+def test_horizontal_wheel_maps_vertical_input_and_clamps_to_content() -> None:
+    assert horizontal_wheel_target(20.0, 200.0, -1.0, step=48.0) == 68.0
+    assert horizontal_wheel_target(20.0, 200.0, 1.0, step=48.0) == 0.0
+    assert horizontal_wheel_target(190.0, 200.0, -1.0, step=48.0) == 200.0
 
 
 def test_plot_sensor_deep_link_requests_sensor_frames() -> None:

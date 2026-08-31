@@ -106,6 +106,8 @@ class ActuatorInfo:
     ctrl_limited: bool
     ctrl_address: int = 0
     ctrl_count: int = 1
+    act_address: int = -1
+    act_count: int = 0
     gain: float = 1.0
     joint: int = -1
 

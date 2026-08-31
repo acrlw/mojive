@@ -202,8 +202,6 @@ class OutputPanel(Panel):
                     imgui.color_convert_float4_to_u32(imgui.ImVec4(*color)),
                     row,
                 )
-                if hovered:
-                    imgui.set_tooltip(entry.text)
         clipper.end()
         io = imgui.get_io()
         if (io.key_ctrl or io.key_super) and imgui.is_key_pressed(imgui.Key.c, False):

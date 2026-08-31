@@ -1377,6 +1377,8 @@ def test_actuator_visual_metadata_and_controls_follow_mujoco_addresses():
         assert len(actuators) == model.nactuator == 4
         assert [item.ctrl_address for item in actuators] == model.actuator_ctrladr.tolist()
         assert [item.ctrl_count for item in actuators] == model.actuator_ctrlnum.tolist()
+        assert [item.act_address for item in actuators] == model.actuator_actadr.tolist()
+        assert [item.act_count for item in actuators] == model.actuator_actnum.tolist()
         assert source.actuator_ctrl_address.tolist() == model.actuator_ctrladr.tolist()
         assert source.actuator_ctrl_range == pytest.approx(model.actuator_ctrlrange)
 

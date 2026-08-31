@@ -26,6 +26,7 @@ class CameraPreview:
         self._camera_name = ""
         self._camera_id = -1
         self._camera: CameraView | None = None
+        self._bounds: tuple[float, float, float, float] | None = None
 
     def update(
         self,
@@ -63,9 +64,11 @@ class CameraPreview:
         translate: Any = None,
     ) -> None:
         if not self._enabled:
+            self._bounds = None
             return
         image = self._image
         if image is None:
+            self._bounds = None
             return
         translate = translate or str
         x, y, width, height = viewport
@@ -85,6 +88,7 @@ class CameraPreview:
         px = min(max(self._position[0], x + margin), x + width - panel_width - margin)
         py = min(max(self._position[1], y + margin), y + height - panel_height - margin)
         self._position = (px, py)
+        self._bounds = (px, py, px + panel_width, py + panel_height)
 
         imgui.set_cursor_screen_pos(imgui.ImVec2(px, py))
         child_flags = imgui.ChildFlags_.borders.value
@@ -135,8 +139,13 @@ class CameraPreview:
         if self._enabled:
             return
         self._image = None
+        self._bounds = None
         self._pinned = False
         self._locked = False
+
+    @property
+    def bounds(self) -> tuple[float, float, float, float] | None:
+        return self._bounds
 
     @property
     def pinned(self) -> bool:

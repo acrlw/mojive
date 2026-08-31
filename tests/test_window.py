@@ -11,22 +11,32 @@ from imgui_bundle import imgui
 from forge_viewer.ui import window as window_module
 from forge_viewer.ui.app import (
     ViewerApp,
+    _clipped_overlay_host_rect,
     _compact_status_for_selection,
     _fit_image_rect,
     _FrameRateDisplay,
     _middle_elide_text,
     _prepare_modal,
+    _simulation_timestep,
     _status_message_for_bar,
     _toggle_angle_input,
 )
 from forge_viewer.ui.window import (
     Window,
+    _is_dock_tab_nav_target,
     layout_scale,
     layout_settings_path,
     resolve_context_api,
     resolve_ui_scales,
 )
 from forge_viewer.ui.window_wgpu import _scissor_rect_for_target
+
+
+def test_only_a_docked_window_tab_owns_the_suppressed_nav_cursor() -> None:
+    assert _is_dock_tab_nav_target(42, 42, True)
+    assert not _is_dock_tab_nav_target(41, 42, True)
+    assert not _is_dock_tab_nav_target(42, 42, False)
+    assert not _is_dock_tab_nav_target(0, 0, True)
 
 
 @pytest.mark.parametrize(
@@ -56,6 +66,13 @@ def test_status_removes_selection_semantics_already_shown(message, selected, exp
 )
 def test_status_bar_keeps_only_actions_and_diagnostics(message, level, expected):
     assert _status_message_for_bar(message, "02_prismatic", level) == expected
+
+
+def test_status_bar_uses_the_adapter_simulation_timestep() -> None:
+    adapter = SimpleNamespace(timestep=lambda: 0.002)
+
+    assert _simulation_timestep(adapter) == pytest.approx(0.002)
+    assert _simulation_timestep(None, loading=True) == 0.0
 
 
 @pytest.mark.parametrize(
@@ -285,4 +302,48 @@ def test_modal_layout_tracks_the_current_viewport_and_enforces_readable_width(
     minimum, maximum = constraints[0]
     assert (minimum.x, minimum.y) == pytest.approx((440.0, 0.0))
     assert maximum.x == pytest.approx(440.0)
-    assert maximum.y > 1e30
+    assert maximum.y == pytest.approx(568.0)
+
+
+def test_modal_layout_scales_authored_width_and_clamps_to_work_area(monkeypatch) -> None:
+    constraints = []
+    viewport = SimpleNamespace(
+        get_center=lambda: imgui.ImVec2(400.0, 300.0),
+        work_size=imgui.ImVec2(800.0, 600.0),
+    )
+    monkeypatch.setattr(imgui, "get_main_viewport", lambda: viewport)
+    monkeypatch.setattr(imgui, "set_next_window_pos", lambda *_args: None)
+    monkeypatch.setattr(
+        imgui,
+        "set_next_window_size_constraints",
+        lambda *args: constraints.append(args),
+    )
+
+    _prepare_modal(360.0, 2.25)
+
+    minimum, maximum = constraints[0]
+    assert (minimum.x, minimum.y) == pytest.approx((728.0, 0.0))
+    assert (maximum.x, maximum.y) == pytest.approx((728.0, 528.0))
+
+
+def test_overlay_host_is_the_padded_content_intersection_with_the_viewport() -> None:
+    viewport = (100.0, 50.0, 200.0, 120.0)
+
+    assert _clipped_overlay_host_rect(
+        viewport,
+        (70.0, 60.0, 330.0, 120.0),
+        4.0,
+    ) == pytest.approx((100.0, 56.0, 200.0, 68.0))
+    assert _clipped_overlay_host_rect(
+        viewport,
+        (120.0, 80.0, 180.0, 110.0),
+        4.0,
+    ) == pytest.approx((116.0, 76.0, 68.0, 38.0))
+    assert (
+        _clipped_overlay_host_rect(
+            viewport,
+            (10.0, 10.0, 20.0, 20.0),
+            4.0,
+        )
+        is None
+    )

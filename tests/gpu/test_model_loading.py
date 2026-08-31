@@ -531,7 +531,11 @@ def test_dragging_camera_preview_does_not_orbit_scene_camera():
         before_position = preview._position
         before_camera = instance.app.camera.view()
         scale = instance.window.style_scale
-        start = (before_position[0] + 48.0 * scale, before_position[1] + 12.0 * scale)
+        start = _item_center(
+            instance,
+            "button",
+            f"{instance.app.localizer.text('Camera')} · {camera_node.name}",
+        )
         io = imgui.get_io()
         io.add_mouse_pos_event(*start)
         instance.sync()
