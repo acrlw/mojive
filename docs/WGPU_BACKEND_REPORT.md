@@ -1,6 +1,6 @@
 # wgpu Backend Report
 
-Date: 2026-08-24
+Status reviewed: 2026-09-02
 
 ## Status
 
@@ -18,9 +18,13 @@ OpenGL stays the default backend.
 ## Usage
 
 ```bash
-pip install mojive[wgpu]
-MOJIVE_BACKEND=wgpu mojive
+uv sync --extra wgpu
+MOJIVE_BACKEND=wgpu uv run mojive view test_scene
+MOJIVE_BACKEND=wgpu uv run mojive editor
 ```
+
+`MOJIVE_BACKEND` selects the renderer. A command's `-b/--backend` option still selects the
+scene/physics adapter and should normally remain `mujoco` for MJCF/URDF.
 
 Run the acceptance suites with:
 

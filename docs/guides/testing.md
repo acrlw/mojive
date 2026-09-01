@@ -7,7 +7,7 @@ change while iterating, then run the required acceptance targets before handoff.
 |---|---|---|
 | Fast | `make test-fast` | pure CPU behavior and module contracts |
 | Examples | `make examples-check` | example syntax and import-independent entry points |
-| Documentation | `make docs-check` | public docstrings, example catalog, snippets, strict site build |
+| Documentation | `make docs-check` | public docstrings, CLI/config reference, both example catalogs, asset paths, snippets, strict site build |
 | Integration | `make test-integration` | files, serialization, protocols, processes, composition |
 | Physics | `make test-physics` | model compilation and live physics worlds |
 | OpenGL GPU | `make gpu` | real OpenGL contexts and rendered output |
@@ -39,7 +39,10 @@ Build the user guide and generated API reference with:
 make docs-check
 ```
 
-The strict build rejects broken links, unresolved API modules, and documentation warnings.
+The focused checker also compares the CLI reference with the live parser, verifies render/debug
+enum values and core `MOJIVE_*` variables, requires every example in both catalogs, and rejects
+missing snippet or asset paths. The strict site build rejects broken links, unresolved API modules,
+and documentation warnings.
 
 ## MuJoCo model corpus
 

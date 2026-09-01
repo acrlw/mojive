@@ -30,7 +30,7 @@ def main() -> None:
     publisher.publish_structure(snapshot_structure(session))
     period = 1.0 / max(args.hz, 1.0)
     started = time.perf_counter()
-    print(f"Publishing on {args.host}:{args.port}; attach with mojive attach")
+    print(f"Publishing on {args.host}:{args.port}; attach with uv run mojive attach")
     try:
         while True:
             frame_start = time.perf_counter()

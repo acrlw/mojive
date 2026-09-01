@@ -27,8 +27,9 @@ constructions for the GL-only pieces: picking/segmentation/depth readback comes 
 single-sampled export MRT pass that re-rasterizes the scene instead of an MSAA blit resolve
 (WebGPU cannot resolve integer or depth MSAA), wireframe carries barycentrics in a lazily
 built vertex attribute instead of a geometry shader, and reflection clipping is a fragment
-discard on a plane equation instead of `gl_ClipDistance`. MSAA sample counts are fixed at
-construction in both backends.
+discard on a plane equation instead of `gl_ClipDistance`. The `msaa` render flag switches the
+active targets between 1× and the configured multisample count; sample-count-dependent resources
+are rebuilt through the backend's normal option path.
 
 ## Color pipeline
 
@@ -73,7 +74,7 @@ space, and bypasses OpenGL tone mapping. Other adapters retain the linear pipeli
 | Reflections | Mirrored camera, oblique clipping, and surface sampling |
 | Wide lines | Screen-space triangle strips |
 | Text | GPU glyph atlas shared with UI font configuration |
-| Timing | CPU measurements on both backends; GPU measurements on OpenGL when timer queries exist |
+| Timing | CPU measurements on both backends; GPU measurements on OpenGL and optional asynchronous timestamp queries on wgpu |
 
 ## Transparency
 

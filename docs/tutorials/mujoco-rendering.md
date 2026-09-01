@@ -1,18 +1,18 @@
 # MuJoCo rendering
 
 `Renderer` matches the shape and control flow of `mujoco.Renderer` while sending scene data through
-the OpenGL render pipeline. One renderer instance owns reusable targets for RGB, metric depth, and
-segmentation output.
+the selected Mojive render backend. One renderer instance owns reusable targets for RGB, metric
+depth, and segmentation output.
 
 ## RGB, depth, and segmentation
 
 ```bash
-.venv/bin/python examples/mujoco_render.py assets/test_scene.xml \
+uv run python examples/mujoco_render.py assets/test_scene.xml \
   --output output/examples/render
 ```
 
-Select WebGPU with `--backend wgpu`. On Linux, the OpenGL backend creates an EGL context for
-offscreen rendering by default.
+This example exposes `--backend opengl|wgpu` for convenience. Library code selects the same backend
+with `MOJIVE_BACKEND`. On Linux, offscreen OpenGL creates an EGL context by default.
 
 ```python
 --8<-- "examples/mujoco_render.py"
@@ -23,7 +23,7 @@ offscreen rendering by default.
 The same renderer can update and render each fixed camera without rebuilding model structure:
 
 ```bash
-.venv/bin/python examples/multi_camera_render.py assets/humanoid.xml \
+uv run python examples/multi_camera_render.py assets/showcase.xml \
   --output output/examples/cameras
 ```
 

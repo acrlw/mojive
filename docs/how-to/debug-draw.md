@@ -13,7 +13,7 @@ Occlusion modes:
 ## Interactive example
 
 ```bash
-.venv/bin/python examples/debug_draw.py
+uv run python examples/debug_draw.py
 ```
 
 ```python

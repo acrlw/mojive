@@ -1,4 +1,4 @@
-"""Control a running mojive RPC service from Python."""
+"""Control a running Mojive RPC service from Python."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def main() -> None:
         print(f"asset={state['asset']}")
         print(f"paused={state['paused']} time={state['physics']['time']:.6f}")
         if args.capture is not None:
-            result = client.call("capture", {"path": str(args.capture)})
+            result = client.call("capture", {"output": str(args.capture)})
             print(result["path"])
 
 

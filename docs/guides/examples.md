@@ -3,6 +3,10 @@
 The `examples/` programs are executable API documentation. Tutorial pages embed their source
 directly, so the guide and runnable code stay synchronized.
 
+The [runnable examples README](https://github.com/acrlw/mojive/tree/main/examples) contains exact
+commands, required assets, and generated outputs. Commands use `uv run`, so activating `.venv` is
+not required.
+
 ## Start here
 
 | Goal | Tutorial | Primary interfaces |

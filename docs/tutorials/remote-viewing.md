@@ -9,9 +9,9 @@ keeps an independent camera and render configuration.
 Start the publisher and attach viewers in separate terminals:
 
 ```bash
-.venv/bin/python examples/remote_publish.py
-.venv/bin/mojive attach --title effect
-.venv/bin/mojive attach --title debug --debug-view normal
+uv run python examples/remote_publish.py
+uv run mojive attach --title effect
+uv run mojive attach --title debug --debug-view normal
 ```
 
 ```python
@@ -23,9 +23,10 @@ Start the publisher and attach viewers in separate terminals:
 Create a deterministic snapshot stream:
 
 ```bash
-.venv/bin/python examples/record_replay.py \
+uv run python examples/record_replay.py \
   --output output/examples/orbit.fvs --frames 300 --fps 60
-.venv/bin/mojive replay output/examples/orbit.fvs
+uv run mojive replay output/examples/orbit.fvs
+uv run mojive attach
 ```
 
 ```python
@@ -33,7 +34,8 @@ Create a deterministic snapshot stream:
 ```
 
 A recording stores the same `RemoteStructure` and `RemoteFrame` packets consumed by a remote
-viewer. Replay timing uses frame timestamps and supports speed control and looping.
+viewer. `replay` republishes those packets; an `attach` process is still required to display them.
+Replay timing uses frame timestamps and supports speed control and looping.
 
 The publisher retains one bootstrap frame for viewers that connect later, but avoids repeatedly
 serializing frames while no viewer is attached. Once a viewer is connected, each

@@ -1,222 +1,127 @@
 # Mojive
 
-Mojive is an interactive 3D viewer for robotics, simulation, and rendering tools. Its default
-OpenGL backend consumes a backend-neutral scene protocol, so MuJoCo, custom physics engines,
-static canvases, remote processes, and recorded snapshots share one rendering and UI stack.
+Mojive is an interactive 3D viewer, editor, and renderer for robotics and simulation. MuJoCo
+models, programmatic scenes, custom adapters, remote publishers, and recorded snapshots all use
+the same scene contract, rendering pipeline, and UI.
 
-Core workflows include scene inspection, object selection, transform gizmos, physical
-perturbation, debug drawing, camera and light editing, render diagnostics, capture, and video.
+Mojive currently provides:
 
-The project is under active development. The P0/P1 baseline includes the public Renderer API,
-MuJoCo visualization semantics, persistent scene state, local control, and visual regression gates.
+- an editor for composing MJCF and URDF models with authored geometry, materials, cameras, lights,
+  and environment settings;
+- interactive selection, transform and joint gizmos, physical perturbation, debug drawing,
+  diagnostics, capture, and video recording;
+- a `mujoco.Renderer`-style offscreen API for RGB, metric depth, and segmentation output;
+- OpenGL and wgpu render backends; and
+- live remote viewing, snapshot replay, and local RPC automation.
 
-## Requirements
+The project is under active development. File formats are versioned, but pre-1.0 APIs and editor
+workflows may still change.
 
-- Python 3.11 or newer
-- An OpenGL 3.3 core-profile driver for the default backend, or a Metal/Vulkan adapter for wgpu
-- A desktop session for interactive windows
-- MuJoCo 3.1 or newer for MJCF, URDF, simulation, and physics tools
+## Install
 
-The OpenGL backend targets macOS on Apple Silicon and Linux with a desktop OpenGL 3.3 driver. The wgpu backend
-is validated on macOS Metal and Linux Vulkan. `uv` is the recommended environment and dependency
-manager.
+Mojive requires Python 3.11 or newer. The default interactive backend needs an OpenGL 3.3 core
+profile. The wgpu extra uses Metal, Vulkan, or DX12. MuJoCo is optional unless you load MJCF/URDF
+or use the compatible `Renderer` API.
 
-## Quick start
-
-Install `uv` on macOS, then clone and run the default MuJoCo scene:
+From a source checkout:
 
 ```bash
-brew install uv
 git clone https://github.com/acrlw/mojive.git
 cd mojive
-uv sync --python 3.11 --extra mujoco
+uv sync --python 3.11 --extra mujoco --extra wgpu
+```
+
+For development, install the test and documentation dependencies as well:
+
+```bash
+make setup
+```
+
+A standard virtual environment also works:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[mujoco,wgpu]"
+```
+
+## Start the application
+
+Open an empty workspace:
+
+```bash
+uv run mojive editor
+```
+
+Open a bundled scene or a model file directly:
+
+```bash
 uv run mojive view test_scene
-```
-
-The first sync creates `.venv`, installs mojive in editable mode, and resolves the versions
-recorded in `uv.lock`. The `mujoco` extra installs the physics backend. Mojive scenes and the toy
-physics adapter can use the core installation without that extra.
-
-From a source checkout, `make viewer` opens the same default scene.
-
-### Display scaling
-
-The viewer reads the GLFW content scale and keeps ImGui, fonts, 2D and 3D gizmos, perturbation
-marks, picking, and world-space labels at the same physical size. Linux X11, Linux Wayland,
-Windows, and macOS use their native framebuffer coordinate models.
-
-Use an explicit scale when the desktop session reports an incorrect value:
-
-```bash
-MOJIVE_UI_SCALE=2 make viewer
-make hidpi
-make hidpi BACKEND=wgpu UI_SCALE=2
-```
-
-`make hidpi` opens the gizmo scene at a 200% UI scale. Set `UI_SCALE=1.5` to inspect fractional
-scaling.
-
-### Language and settings
-
-Open `Edit > Settings...` or press `F9` to use the centered modal Settings panel. The editor stays
-inactive until the panel closes. The language choice is stored in the platform application-settings
-directory. Start directly in Simplified Chinese with:
-
-```bash
-make editor LANGUAGE=zh_CN
-```
-
-The UI atlas combines JetBrains Mono with Noto Sans SC. Noto is loaded from the system or downloaded
-to the application cache with checksum verification. `MOJIVE_CJK_FONT=/path/to/font.otf`
-selects a different CJK font file.
-
-### Linux OpenGL contexts
-
-Interactive windows use the native GLFW context API. On Wayland this is EGL; on X11 it is GLX.
-Force GLFW EGL explicitly to verify that path:
-
-```bash
-make egl-viewer
-make egl
-```
-
-The offscreen `Renderer` uses EGL by default on Linux. `MOJIVE_GL=native` selects a hidden
-GLFW context. Both paths create desktop OpenGL 3.3 core contexts.
-
-Open a local MJCF or URDF model directly:
-
-```bash
 uv run mojive view path/to/model.xml --paused
 uv run mojive view path/to/model.urdf --paused
 ```
 
-Start with an empty viewport and load a model from the File menu or by dropping it into the window:
+Use the wgpu renderer instead of OpenGL:
 
 ```bash
-make empty
+MOJIVE_BACKEND=wgpu uv run mojive editor
+MOJIVE_BACKEND=wgpu uv run mojive view test_scene
 ```
 
-Pause the simulation to compose models. `File > Add Model...` attaches another MJCF or URDF at
-the current camera target. Dropping several model files opens the first and adds the rest. Attached
-models appear as model groups in the Hierarchy and can be removed from the File menu, Hierarchy
-context menu, or Inspector. Topology rebuilds preserve matching joint, actuator, mocap, equality,
-and simulation-time state.
-
-### pip installation
-
-`pyproject.toml` is the canonical dependency specification. A standard virtual environment works
-without `uv`:
+`MOJIVE_BACKEND` selects the **render backend** (`opengl` or `wgpu`). The CLI option
+`--backend` selects the **scene/physics adapter** (`mujoco`, `toy`, or another registered adapter).
+These are independent choices. Run these discovery commands to inspect the current installation:
 
 ```bash
-git clone https://github.com/acrlw/mojive.git
-cd mojive
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[mujoco]"
-mojive view test_scene
+uv run mojive backends
+uv run mojive assets --quick
+uv run mojive --help
 ```
 
-### Development installation
+The editor opens and saves `.mojive.json` workspaces. A workspace can combine multiple MJCF or
+URDF models with Mojive-authored entities and resource directories. Use **File > Save As** and
+choose MJCF/XML to export a portable MuJoCo model. See the
+[editor and MJCF guide](docs/guides/editor-and-mjcf.md) for topology editing, assets, keyframes,
+resource repair, and export behavior.
+
+## Basic interaction
+
+- `G`: position gizmo
+- `R`: rotation gizmo
+- `T`: switch body/world frame
+- `Shift` while dragging: snap to the configured position or rotation step
+- `Ctrl` + left/right drag: MuJoCo translation/rotation perturbation
+- `F`: frame the scene
+- `F9`: open the dockable Settings panel
+
+Camera preview is off by default. Select a camera and enable **preview** in Inspector when needed.
+The preview can then be pinned to its current view or locked to the camera entity.
+
+The UI follows the display content scale. Override it only when the desktop reports the wrong
+value:
 
 ```bash
-make setup
-make check
-make gpu
+MOJIVE_UI_SCALE=1.5 uv run mojive editor
+MOJIVE_LANGUAGE=zh_CN uv run mojive editor
 ```
 
-`make setup` installs the `dev` and `mujoco` extras. Generated captures, recordings, downloaded
-robot models, caches, and local UI state stay under ignored paths and are not part of the source
-distribution.
-
-Useful discovery commands:
-
-```bash
-mojive assets
-mojive backends
-mojive probe
-```
-
-## Command line
-
-```text
-mojive view <asset> [--paused] [-b BACKEND]
-mojive editor [--no-vsync]
-mojive canvas [--demo empty|canvas|lighting|text]
-mojive toy
-mojive conformance [BACKEND] [--asset ASSET]
-mojive serve <asset> [--host HOST] [--port PORT]
-mojive attach [--host HOST] [--port PORT]
-mojive replay <snapshot> [--loop] [--speed FACTOR]
-mojive doctor <asset>
-mojive inspect <asset> [--json]
-mojive capture <asset> -o output/image.png
-mojive record <asset> -o output/video.mp4 [--frames N] [--fps FPS]
-mojive audit <asset> [--json] [--strict]
-mojive rpc-serve <asset> [--socket output/mojive.sock]
-mojive control <method> [--params JSON] [--json]
-```
-
-JSON commands reserve stdout for the JSON document and send logs to stderr.
-
-The main menu and window file drop open MJCF, XML, and URDF models at runtime. `File > Reload
-Model` recompiles the current model and rebuilds GPU scene resources.
-
-`make editor` starts an empty Mojive workspace. A `.mojive.json` workspace combines MJCF and URDF
-models with Mojive-authored geometry, materials, lights, cameras, and environment settings. Model
-paths resolve from the workspace directory and its resource directories. Every model has an
-editable root position and rotation. URDF enters as an import format and is stored as editable
-MJCF when its topology changes.
-
-The File menu creates, opens, and saves workspaces. `Add Model...` and file drop compose robots and
-scene assets. `File > Resource Directories` manages reusable asset search paths. Opening a
-workspace with missing models shows a repair dialog: locate one file directly or search a
-directory to rewrite every unambiguous path before loading. The Hierarchy
-context menu adds and removes MJCF bodies, geometry, joints, sites, cameras, and lights through
-MjSpec. Selecting a model exposes structured actuator, sensor, tendon, and equality components in
-Inspector; edits use model-local reference choices, MjSpec validation, undo/redo, and workspace
-round trips. Model elements support rename and local transform editing. The Entity menu creates
-backend-neutral primitives, lights, and cameras. Selected Mojive entities support duplicate,
-rename, and delete from the menu, keyboard shortcuts, and the Hierarchy context menu.
-
-`Window > Keyframes` opens a compact model-local Dope Sheet. It captures complete MuJoCo state
-snapshots, shows them as time-positioned diamond markers, and supports selection, exact-state
-loading, previous/next navigation, ruler zoom and pan, drag retiming, rename, and deletion. It does
-not imply interpolation between snapshots. Its transport records a transient whole-scene take
-without rebuilding MJCF, then provides replay, pause, stop, first/previous/next/last recorded-frame
-navigation, and timeline seeking. Seek a recorded frame and choose **Capture Snapshot** to persist
-that model-local state in MJCF. `Window > Assets` opens the model asset inventory;
-geometry and site material controls can replace a floor or another surface material.
-Compiler/default/custom/deformable declarations and bulk asset samples remain source-owned: the
-editor loads, renders, and preserves them without adding rarely used controls to its normal UI.
-
-Cameras and lights are selectable in the viewport. Their position and rotation gizmos edit world
-transforms; selected helpers show camera frustums and light influence volumes. Selecting a camera
-also opens a draggable live preview in the lower-right corner of the viewport. **Pin** freezes the
-current preview camera and widget position. **Lock** keeps the widget attached to that camera entity
-and follows its live pose after selection changes. Camera and light gizmos lock by default while
-simulation runs; Inspector can unlock an entity for runtime editing.
-The Settings panel controls helper and influence visibility. `View Through Camera` switches to the
-selected scene camera, and `Return to Editor Camera` restores the previous editor orbit view.
-Unsaved workspaces display an asterisk in the title and prompt before replacement or exit.
-
-Runnable integrations from basic scene construction through MuJoCo rendering, model composition,
-and remote publishing live in [`examples/`](examples/README.md).
+All supported runtime settings and persistence paths are listed in the
+[configuration reference](docs/reference/configuration.md).
 
 ## Programmatic rendering
 
-`mojive.Renderer` provides the MuJoCo-style offscreen workflow through OpenGL. It supports
-RGB, metric depth, segmentation, free and fixed cameras, named cameras, `MjvCamera`, `MjvOption`,
-caller-owned output arrays, multiple contexts, and deterministic resource release.
+`mojive.Renderer` follows the common `mujoco.Renderer` workflow while adding explicit backend
+selection through `MOJIVE_BACKEND`:
 
 ```python
 import mujoco
+
 from mojive import Renderer
 
 model = mujoco.MjModel.from_xml_path("model.xml")
 data = mujoco.MjData(model)
 
-with Renderer(model, height=480, width=640) as renderer:
+with Renderer(model, width=640, height=480) as renderer:
     mujoco.mj_forward(model, data)
     renderer.update_scene(data, camera=-1)
     rgb = renderer.render()
@@ -228,145 +133,14 @@ with Renderer(model, height=480, width=640) as renderer:
     object_id_and_type = renderer.render()
 ```
 
-Run the public contract and real-OpenGL comparison gallery with `make renderer-api`.
+The API supports free, fixed, named, and `MjvCamera` cameras, `MjvOption`, caller-owned output
+arrays, multiple contexts, and deterministic release. See the
+[MuJoCo rendering tutorial](docs/tutorials/mujoco-rendering.md) and
+[rendering API reference](docs/api/rendering.md).
 
-### wgpu backend
+## Programmatic scenes and adapters
 
-The Renderer API can run on [wgpu](https://wgpu.rs/) (Vulkan/Metal/DX12) instead of OpenGL,
-which removes the EGL/GLFW context requirement for offscreen rendering:
-
-```bash
-pip install mojive[wgpu]
-MOJIVE_BACKEND=wgpu python your_script.py
-```
-
-Validate the installation with `make renderer-api-wgpu` and the backend-parameterized GPU
-suite with `make gpu-wgpu`. The full interactive viewer also runs on wgpu:
-
-```bash
-make viewer BACKEND=wgpu
-```
-
-The wgpu backend supports the interactive viewer and the public Renderer API on Metal and
-Vulkan. It includes render flags, debug views, shadows, planar reflections, skybox/IBL,
-tendons, debug draw, selection outlines, and the native gizmo. `backend.caps.notes` reports
-backend-specific limits such as optional GPU timing and single-sample ID/depth export.
-
-## Visual acceptance
-
-Every user-facing feature has a reproducible Make target.
-
-| Target | Purpose |
-|---|---|
-| `make viewer` | Open the default MuJoCo scene |
-| `make egl-viewer` | Open the Linux viewer through GLFW EGL |
-| `make hidpi` | Inspect UI, fonts, and gizmos at an explicit 200% scale |
-| `make hidpi-gallery` | Capture enlarged 2D/3D gizmo references at 200% UI scale |
-| `make empty` | Open an empty viewer and load MJCF or URDF from the File menu |
-| `make model-loading` | Capture empty, MJCF, and URDF runtime-loading references |
-| `make model-composition` | Validate MjSpec state migration and capture add/remove references |
-| `make editor-performance` | Record large composition editing timings under `output/` |
-| `make stability BACKEND=wgpu` | Run long-frame, large-model lifecycle, and multi-camera gates |
-| `make outline` | Selection, x-ray outline, and outline antialiasing |
-| `make gizmo` | Native 2D and 3D transform gizmos |
-| `make gizmo-gallery` | Enlarged position, rotation, and snap reference images |
-| `make perturb` | MuJoCo translation and rotation perturbation |
-| `make text-overlay` | GPU world-space text |
-| `make lighting` | Editable lights and Environment controls for ambient light, fog, haze, and headlight |
-| `make image-light` | MuJoCo cube-map environment light with editable intensity and texture |
-| `make many-lights` | 16-light and 24-light MuJoCo reference images |
-| `make scene-icons` | Camera and light scene icons |
-| `make scene-entities` | Selectable camera and light helpers, transforms, frustums, and influence volumes |
-| `make reflect` | Planar reflections |
-| `make additive` | Standard and additive transparency reference images |
-| `make cameras` | Free, named, and orthographic cameras |
-| `make mujoco-visuals` | Height fields, sites, tendons, and contacts |
-| `make mujoco-debug` | Joint, center-of-mass, and inertia overlays |
-| `make mujoco-actuators` | Actuator and activation overlays |
-| `make mujoco-islands` | Constraint-island material and color comparison |
-| `make mujoco-bvh` | Body, mesh, and flex bounding-volume hierarchies |
-| `make mujoco-convex-hull` | Original collision meshes and MuJoCo compiled convex hulls |
-| `make mujoco-rangefinder` | Rangefinder rays, hits, and normals |
-| `make mujoco-constraints` | Equality constraint markers |
-| `make mujoco-editing` | Mocap pose and equality controls |
-| `make deformables` | Flex and skin dynamic meshes |
-| `make robot` | Download and open a MuJoCo Menagerie robot |
-| `make editor` | Empty authored workspace with scene files and Entity editing |
-| `make settings` | Open the editor with the centered modal Settings panel |
-| `make workspace-edit` | Workspace composition, resource repair, structured MJCF, camera and light acceptance |
-| `make editor-files` | Scene document workflow acceptance and capture |
-| `make entity-edit` | Entity lifecycle CPU and GPU acceptance |
-| `make canvas` | Standalone scene authoring with editable transforms, materials, and Mojive entities |
-| `make scene-io` | Save, reload, and capture a `.mojive.json` scene |
-| `make toy-physics` | Minimal physics backend independent of MuJoCo |
-| `make live-view` | One publisher and two independent remote viewers |
-| `make capture` | Write a PNG under `output/` |
-| `make record` | Stream an MP4 under `output/` |
-
-Examples:
-
-```bash
-make viewer SCENE=humanoid ARGS="--paused"
-make empty
-make robot ROBOT=unitree_g1
-make capture SCENE=deformables SCREENSHOT=output/deformables.png
-make record SCENE=humanoid OUTPUT=output/humanoid.mp4 ARGS="--frames 240"
-```
-
-## Verification
-
-| Target | Coverage |
-|---|---|
-| `make p0` | Complete public Renderer compatibility gate |
-| `make p1` | Complete P0 and P1 non-interactive acceptance gate |
-| `make check` | Lint, formatting, and CPU tests |
-| `make gpu` | Isolated real-OpenGL test files |
-| `make egl` | Linux EGL Renderer and geometry-shader wireframe contract |
-| `make renderer-api` | Public Renderer RGB, depth, segmentation, camera, option, and lifecycle contract |
-| `make mujoco-physics` | Full MuJoCo adapter and simulation regression suite |
-| `make camera-state` | Camera bookmark serialization and restore |
-| `make scene-snapshot` | Complete physics, selection, option, light, environment, and material state |
-| `make cli` | Typed local control command contract |
-| `make rpc` | Versioned local RPC and RGB/depth/segmentation capture artifacts |
-| `make material-parity` | Texture, transparency, tendon, deformable, and dense-scene baselines |
-| `make shadow-scheduling` | Deterministic 100-light and 8-shadow-slot scheduling |
-| `make golden` | Golden-image comparison |
-| `make reverse` | Mutation checks for regression assertions |
-| `make doctor` | Window-path smoke test |
-| `make mujoco-audit` | MuJoCo feature coverage for one model |
-| `make adapter-conformance` | Backend-neutral scene contract |
-| `make bench` | Median CPU and GPU pass timing |
-| `make editor-performance` | Composition compile and structured-edit timing baseline |
-| `make stability BACKEND=wgpu` | Memory, lifecycle, and interleaved multi-camera stability |
-| `make parity` | OpenGL and MuJoCo reference renders |
-| `make calibrate` | Reference-lighting calibration |
-| `make probe` | OpenGL capability report |
-
-`make golden-accept` updates golden images for reviewed visual changes.
-
-## Transform tools
-
-Select a movable object and pause simulation to edit its pose.
-
-- `G`: position gizmo
-- `R`: rotation gizmo
-- `T`: body or world frame
-- `F9`: 2D or 3D gizmo setting
-- `Shift`: snap while dragging
-- `X`, `Y`, `Z`: constrain the active transform to one axis
-
-Position snapping defaults to 0.5 m. Its axis ruler marks every snap interval and enlarges
-whole-meter ticks. Rotation snapping defaults to 5 degrees. Its outer ring marks 5, 15, 45,
-and 90 degree intervals. Both values are editable in Settings.
-
-MuJoCo perturbation uses `Ctrl` + left drag for translation and `Ctrl` + right drag for
-rotation.
-
-## Backend-neutral scenes
-
-`SceneSource` defines stable structure, meshes, materials, entities, and render metadata.
-`SceneFrame` carries poses, dynamic meshes, lights, sensors, and debug commands. A backend
-implements `scene_source()`, `frame()`, and `step()` through `SceneAdapterBase`.
+Use `Scene` for geometry, cameras, lights, and materials created in Python:
 
 ```python
 from mojive import Light, Scene, build_scene
@@ -384,57 +158,63 @@ key.remove()
 viewer.release()
 ```
 
-Mojive scene entities own cameras and lights. Physics adapters provide dynamic transforms and
-write-back capabilities. Hierarchy and Inspector present the same editing workflow across
-programmatic scenes, MuJoCo, remote viewers, and snapshot replay.
+Custom simulations implement `SceneAdapterBase`: `scene_source()` publishes stable structure,
+`frame()` publishes dynamic data, and `AdapterCaps` declares optional commands. The
+[custom adapter guide](docs/how-to/custom-adapter.md) and [`examples/`](examples/README.md) cover
+the supported integration paths.
 
-`ToyPhysicsAdapter` exercises the public adapter contract with gravity, ground collision,
-simulation controls, and pose editing. `check_adapter()` produces the same conformance report
-used by MuJoCo.
+## Remote viewing, replay, and control
 
-## Remote viewing and replay
-
-`make live-view` starts one headless simulation publisher and two viewer processes. Each viewer owns
-its window, camera, layout, and rendering context. Structure revisions are delivered reliably;
-frame transport keeps the latest state. Camera, light, environment, material, geometry color,
-physics, perturbation, and scene-authoring commands use a separate request and response channel.
+Run a headless publisher and attach one or more independent viewers:
 
 ```bash
-make serve LIVE_SCENE=deformables
-make attach ARGS="--title effect"
-make attach ARGS="--title normals --debug-view normal"
-make remote-authoring
+uv run mojive serve deformables --host 127.0.0.1 --port 47650
+uv run mojive attach --host 127.0.0.1 --port 47650
 ```
 
-Runtime creation returns the stable object, light, or camera ID:
-
-```python
-from mojive import MeshShape, commands as cmd
-
-result = viewer.session.submit(
-    cmd.AddSceneObject(MeshShape.BOX, "tool marker", position=(1.0, 0.0, 0.5))
-)
-viewer.session.submit(cmd.RemoveSceneObject(result.entity_id))
-```
-
-Snapshot recording stores structure, frames, and debug commands in versioned `.fvs` files:
+Record the published stream with `--record-snapshot output/session.fvs`, then start replay and
+attach in separate terminals:
 
 ```bash
-make snapshot-record LIVE_SCENE=gizmo SNAPSHOT=output/session.fvs
-make snapshot-replay SNAPSHOT=output/bug.fvs
+uv run mojive replay output/session.fvs --loop
+uv run mojive attach
 ```
 
-Camera bookmarks and complete scene snapshots use versioned JSON under `output/snapshots/`.
-`make camera-state` and `make scene-snapshot` generate acceptance artifacts there.
-
-Local automation uses a versioned AF_UNIX control service. Clients keep the connection open across
-requests and reconnect after a timeout or transport failure:
+Local automation uses a versioned AF_UNIX service:
 
 ```bash
-mojive rpc-serve humanoid
-mojive control get_state --json
-mojive control capture --params '{"mode":"depth","output":"output/depth.npy"}'
+MOJIVE_BACKEND=wgpu uv run mojive rpc-serve test_scene --socket output/mojive.sock
+uv run mojive control get_state --socket output/mojive.sock --json
+uv run mojive control capture \
+  --socket output/mojive.sock \
+  --params '{"mode":"depth","output":"output/depth.npy"}'
 ```
+
+The wgpu selection keeps capture portable on macOS, where an OpenGL context cannot be created in
+the RPC request worker. Linux may use the default OpenGL renderer for the same service.
+
+See the [CLI reference](docs/reference/cli.md),
+[remote viewing tutorial](docs/tutorials/remote-viewing.md), and
+[RPC guide](docs/how-to/rpc-control.md) for the complete workflows.
+
+## Development and verification
+
+Use the smallest relevant target while iterating, then run the required repository gate:
+
+```bash
+make check
+```
+
+Rendering changes additionally require:
+
+```bash
+make gpu
+```
+
+Useful focused targets include `make renderer-api`, `make gpu-wgpu`, `make mujoco-audit`,
+`make adapter-conformance`, `make docs-check`, `make gizmo-gallery`, and `make showcase`. Run
+`make help` for the maintained target catalog. Generated captures, recordings, reports, and the
+documentation site are written under `output/`.
 
 ## Architecture
 
@@ -442,30 +222,34 @@ mojive control capture --params '{"mode":"depth","output":"output/depth.npy"}'
 src/mojive/
 ├── types.py, math3d.py, commands.py   shared contracts
 ├── session.py                         application state and command routing
-├── scene.py                           programmatic Mojive scenes
+├── scene.py                           programmatic scenes
 ├── adapters/                          MuJoCo, static, toy, and remote sources
 ├── render/
 │   ├── scene.py                       renderer scene representation
 │   ├── backend.py                     rendering backend protocol
-│   ├── opengl/                         OpenGL renderer, passes, and shaders
-│   └── webgpu/                        wgpu renderer, passes, and WGSL shaders
+│   ├── opengl/                        OpenGL passes and shaders
+│   └── webgpu/                        wgpu passes and WGSL shaders
 └── ui/                                window, panels, gestures, and gizmos
 ```
 
-Renderer code depends on shared scene contracts. Physics integration lives in adapters. UI code
-depends on protocols and session state. `tests/test_layering.py` enforces these boundaries.
-
-Renderer contracts use row-major matrices in Python. Each backend applies its GPU upload
-convention. World coordinates use Z-up.
+Python matrices are row-major with translation in `matrix[:3, 3]`. World coordinates use Z-up.
+Renderer code consumes shared scene contracts; physics-specific state remains in adapters;
+`Session` owns selection, overrides, history, and command routing.
 
 ## Documentation
 
+- [User guide](docs/index.md)
+- [Getting started](docs/getting-started.md)
+- [CLI reference](docs/reference/cli.md)
+- [Configuration reference](docs/reference/configuration.md)
+- [Examples](examples/README.md)
+- [Architecture](docs/concepts/architecture.md)
 - [Renderer design](docs/RENDERER.md)
-- [wgpu backend report](docs/WGPU_BACKEND_REPORT.md)
-- [Platform measurements](docs/PLATFORM.md)
-- [Implementation decisions](docs/DECISIONS.md)
+- [API map](docs/api/index.md)
+- [Testing guide](docs/guides/testing.md)
 
-Development plans live in [plan/](plan/README.md).
+Current priorities are tracked in [`plan/STATUS.md`](plan/STATUS.md). Completed implementation
+plans are retained in [`plan/`](plan/README.md) as historical engineering records.
 
 ## License
 

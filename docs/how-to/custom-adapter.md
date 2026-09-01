@@ -16,7 +16,7 @@ and command paths.
 ## Minimal simulation adapter
 
 ```bash
-.venv/bin/python examples/custom_adapter.py
+uv run python examples/custom_adapter.py
 ```
 
 ```python

@@ -42,7 +42,7 @@ def main() -> None:
         session.release()
     path = args.output.expanduser().resolve()
     print(path)
-    print(f"Replay with: mojive replay {path}")
+    print(f"Replay with: uv run mojive replay {path}")
 
 
 if __name__ == "__main__":

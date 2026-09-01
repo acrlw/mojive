@@ -7,7 +7,7 @@ models.
 ## Run the example
 
 ```bash
-.venv/bin/python examples/programmatic_scene.py
+uv run python examples/programmatic_scene.py
 ```
 
 The scene owns stable geometry and entity metadata. `build_scene()` wraps it with a static scene
@@ -21,7 +21,8 @@ adapter and composes the standard editor window.
 
 ## Save and load
 
-Programmatic scenes use the Mojive JSON scene format:
+Programmatic scenes use the Mojive JSON scene format. The destination directory must already be
+writable; the example below uses the repository's ignored `output/` tree:
 
 ```python
 scene.save("output/examples/workcell.mojive.json")

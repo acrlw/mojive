@@ -16,10 +16,10 @@ resource paths, and recompiles the document before completing the save. The XML 
 asset directory can be moved together.
 
 The exporter preserves directional, point, spot, area, and image lights plus 2D, cube, and skybox
-textures. MuJoCo has no native area-light enum, so OpenGL writes a point-light fallback with bulb
+textures. MuJoCo has no native area-light enum, so Mojive writes a point-light fallback with bulb
 radius and private text metadata that restores the area semantic when the file is reopened through
-OpenGL. Image lights require a cube or skybox texture; export reports an error instead of silently
-dropping an invalid reference. Save `.mojive.json` when the OpenGL composition itself, including model
+Mojive. Image lights require a cube or skybox texture; export reports an error instead of silently
+dropping an invalid reference. Save `.mojive.json` when the Mojive composition itself, including model
 references and resource roots, must remain editable.
 
 ## Editing model topology
@@ -78,7 +78,7 @@ material** control to replace a floor or another surface material. Skin assets r
 the inventory.
 Attached-model declarations and generator source forms must still be edited in their original
 external MJCF source because MuJoCo expands them before `MjSpec` serialization.
-OpenGL keeps file-backed assets from an expanded attached model resolvable during ordinary topology
+Mojive keeps file-backed assets from an expanded attached model resolvable during ordinary topology
 edits by writing their child compiler directories into the normalized asset paths; this does not
 reconstruct the original `asset/model` or `attach` declaration.
 
@@ -87,7 +87,7 @@ the remote typed-command boundary where the adapter exposes the capability. Paus
 before editing model properties.
 
 Compiler/option/visual blocks, default classes, custom arrays and tuples, deformable declarations,
-PBR texture-role layers, and bulk mesh/height-field samples remain source-owned. OpenGL loads,
+PBR texture-role layers, and bulk mesh/height-field samples remain source-owned. Mojive loads,
 renders, composes, and preserves these core MuJoCo sections, but does not duplicate their rarely
 used source-authoring surface in Inspector. **Edit MJCF Source...** edits normalized XML produced
 by `MjSpec`; it is the escape hatch for one-off source changes, plugin-defined components, raw bulk
@@ -148,13 +148,14 @@ geometry, and current-pose keyframes.
 
 ## Runtime entity tools
 
-Camera and light transform gizmos lock while simulation runs. Use **Lock gizmo while simulation
-runs** in Inspector to enable runtime editing for one entity. This keeps physical perturbation on
-nearby bodies unambiguous.
+Camera and light transform gizmos lock while simulation runs. Clear **Lock gizmo while simulation
+runs** in Inspector to enable runtime editing for one entity. Keeping the default lock makes
+physical perturbation on nearby bodies unambiguous.
 
-Selecting a camera opens its live preview in the viewport. **Pin** freezes the preview camera and
-widget position while the scene continues to update. **Lock** keeps the widget attached to that
-camera entity and follows its live pose after selection changes.
+Camera preview is disabled by default so selecting a camera does not cover the viewport. Select a
+camera and enable **preview** in Inspector to show it. **Pin** freezes the preview camera and widget
+position while the scene continues to update. **Lock** keeps the widget attached to that camera
+entity and follows its live pose after selection changes.
 
-Open **Edit > Settings...**, press `F9`, or run `make settings`. Settings is a centered modal; scene
-interaction resumes after the panel closes.
+Open **Edit > Settings...**, choose **Window > Settings**, press `F9`, or run `make settings`.
+Settings is a dockable, non-modal panel and can remain open while the viewport is used.
