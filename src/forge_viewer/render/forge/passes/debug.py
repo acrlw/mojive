@@ -7,7 +7,14 @@ import numpy as np
 
 from ....log import get_logger
 from ....types import MeshKey
-from ...debugdraw import RECORD_FLOATS, DebugDraw, DrawPath, Occlusion, PackedFrame
+from ...debugdraw import (
+    ARROW_CORNER_RADIUS_RATIO,
+    RECORD_FLOATS,
+    DebugDraw,
+    DrawPath,
+    Occlusion,
+    PackedFrame,
+)
 from .. import gl_native as G
 from ..backend import register_pass
 from ..instances import GpuMesh
@@ -29,6 +36,15 @@ GHOST_ALPHA = 0.28
 
 _SPECS = {
     DrawPath.SEGMENT: ProgramSpec("debug_line", "debug_line.vert", "debug_line.frag"),
+    DrawPath.ARROW: ProgramSpec(
+        "debug_line",
+        "debug_line.vert",
+        "debug_line.frag",
+        defines={
+            "ROUND_ARROW": 1,
+            "ARROW_CORNER_RADIUS_RATIO": ARROW_CORNER_RADIUS_RATIO,
+        },
+    ),
     DrawPath.STROKE: ProgramSpec(
         "debug_stroke",
         "debug_stroke.vert",
@@ -49,6 +65,7 @@ _SPECS = {
 }
 _LAYOUT: dict[DrawPath, str] = {
     DrawPath.SEGMENT: "3f 3f 4f 1f 1f 1f/i",
+    DrawPath.ARROW: "3f 3f 4f 1f 1f 1f/i",
     DrawPath.STROKE: "3f 3f 3f 4f 1f/i",
     DrawPath.POINT: "3f 4f 1f/i",
     DrawPath.DRAG_LINK: "3f 3f 4f 4f 1f 1f 1f/i",
@@ -57,6 +74,14 @@ _LAYOUT: dict[DrawPath, str] = {
 }
 _ATTRS: dict[DrawPath, tuple[tuple[str, int, int], ...]] = {
     DrawPath.SEGMENT: (
+        ("in_a", 3, 0),
+        ("in_b", 3, 12),
+        ("in_color", 4, 24),
+        ("in_width", 1, 40),
+        ("in_head", 1, 44),
+        ("in_start_mask", 1, 48),
+    ),
+    DrawPath.ARROW: (
         ("in_a", 3, 0),
         ("in_b", 3, 12),
         ("in_color", 4, 24),
@@ -97,7 +122,8 @@ _ATTRS: dict[DrawPath, tuple[tuple[str, int, int], ...]] = {
     ),
 }
 _VERTICES: dict[DrawPath, int] = {
-    DrawPath.SEGMENT: 15,
+    DrawPath.SEGMENT: 6,
+    DrawPath.ARROW: 15,
     DrawPath.STROKE: 6 + 3 * STROKE_JOIN_SEGMENTS,
     DrawPath.POINT: 6,
     DrawPath.DRAG_LINK: 6,

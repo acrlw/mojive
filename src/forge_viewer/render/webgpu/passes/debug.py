@@ -35,7 +35,8 @@ _UNIFORM_SLOTS = 2
 _UNIFORM_SLOT_BYTES = 256
 
 _VERTICES: dict[DrawPath, int] = {
-    DrawPath.SEGMENT: 15,
+    DrawPath.SEGMENT: 6,
+    DrawPath.ARROW: 15,
     DrawPath.STROKE: 6 + 3 * STROKE_JOIN_SEGMENTS,
     DrawPath.POINT: 6,
     DrawPath.DRAG_LINK: 6,
@@ -44,6 +45,7 @@ _VERTICES: dict[DrawPath, int] = {
 
 _ENTRIES: dict[DrawPath, tuple[str, str]] = {
     DrawPath.SEGMENT: ("vs_debug_line", "fs_debug_line"),
+    DrawPath.ARROW: ("vs_debug_arrow", "fs_debug_arrow"),
     DrawPath.STROKE: ("vs_debug_stroke", "fs_debug_line"),
     DrawPath.POINT: ("vs_debug_point", "fs_debug_point"),
     DrawPath.DRAG_LINK: ("vs_debug_drag_link", "fs_debug_drag_link"),
@@ -68,6 +70,17 @@ _LAYOUTS: dict[DrawPath, list[dict]] = {
     DrawPath.SEGMENT: [
         _instanced(
             DrawPath.SEGMENT,
+            ("float32x3", 0),
+            ("float32x3", 12),
+            ("float32x4", 24),
+            ("float32", 40),
+            ("float32", 44),
+            ("float32", 48),
+        )
+    ],
+    DrawPath.ARROW: [
+        _instanced(
+            DrawPath.ARROW,
             ("float32x3", 0),
             ("float32x3", 12),
             ("float32x4", 24),

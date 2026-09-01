@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..gizmo import AXIS_HEAD_LENGTH_PT, AXIS_SHAFT_HALF_PT
+from ..gizmo import ARROW_CORNER_RADIUS_PT, AXIS_HEAD_LENGTH_PT, AXIS_SHAFT_HALF_PT
 from ..log import get_logger
 from ..types import MeshKey, MeshShape
 
@@ -66,6 +66,7 @@ class DrawPath(enum.StrEnum):
     """Packed GPU stream used by a debug primitive family."""
 
     SEGMENT = "segment"
+    ARROW = "arrow"
 
     POINT = "point"
     STROKE = "stroke"
@@ -78,7 +79,7 @@ class DrawPath(enum.StrEnum):
 
 PRIMITIVE_PATH: dict[PrimitiveType, DrawPath] = {
     PrimitiveType.LINE: DrawPath.SEGMENT,
-    PrimitiveType.ARROW: DrawPath.SEGMENT,
+    PrimitiveType.ARROW: DrawPath.ARROW,
     PrimitiveType.FRAME: DrawPath.SEGMENT,
     PrimitiveType.POINT: DrawPath.POINT,
     PrimitiveType.BOX: DrawPath.SOLID,
@@ -101,7 +102,8 @@ PRIMITIVE_MESH: dict[PrimitiveType, MeshKey] = {
 
 
 RECORD_FLOATS: dict[DrawPath, int] = {
-    DrawPath.SEGMENT: 13,  # a(3) b(3) rgba(4) width_px(1) head_px(1) start_mask_px(1)
+    DrawPath.SEGMENT: 13,  # a(3) b(3) rgba(4) width_px(1) unused(2)
+    DrawPath.ARROW: 13,  # a(3) b(3) rgba(4) width_px(1) head_px(1) start_mask_px(1)
     DrawPath.POINT: 8,  # p(3) rgba(4) radius_px(1)
     DrawPath.SOLID: 20,
     DrawPath.SECTOR: 14,  # center(3) rotvec_end(3) ref_end(3) rgba(4) radius_px(1)
@@ -122,6 +124,9 @@ FRAME_WIDTH_PX = 2.0
 
 
 ARROW_HEAD_RATIO = AXIS_HEAD_LENGTH_PT / (2.0 * AXIS_SHAFT_HALF_PT)
+
+
+ARROW_CORNER_RADIUS_RATIO = ARROW_CORNER_RADIUS_PT / (2.0 * AXIS_SHAFT_HALF_PT)
 
 
 DEFAULT_LIMIT = 500_000
@@ -851,7 +856,15 @@ class DebugDraw:
                 occ,
                 layers,
                 DrawPath.SEGMENT,
-                (PrimitiveType.LINE, PrimitiveType.ARROW, PrimitiveType.FRAME),
+                (PrimitiveType.LINE, PrimitiveType.FRAME),
+                self._pack_segment,
+            )
+            self._batch(
+                frame,
+                occ,
+                layers,
+                DrawPath.ARROW,
+                (PrimitiveType.ARROW,),
                 self._pack_segment,
             )
             self._batch(

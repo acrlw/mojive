@@ -101,6 +101,21 @@ def main(argv: list[str] | None = None) -> int:
         _save(viewer, args.output / "d4-running-perturb.png")
         viewer.app._poll_perturb = poll_perturb
         viewer.app.perturb.end(viewer.session)
+        position, _rotation = viewer.app._node_pose(selected)
+        viewer.app.perturb.begin(
+            viewer.session,
+            viewer.app._camera_view(),
+            selected,
+            position,
+            "rotate",
+            local_bounds=viewer.session.node_local_bounds(selected.node_id),
+        )
+        viewer.app.perturb.drag_rotate(viewer.session, viewer.app._camera_view(), 42.0, -26.0)
+        viewer.app._poll_perturb = lambda _state: None
+        _settle(viewer, 2)
+        _save(viewer, args.output / "d4-running-rotation-perturb.png")
+        viewer.app._poll_perturb = poll_perturb
+        viewer.app.perturb.end(viewer.session)
         _save_window_crop(
             viewer,
             "Playback###viewport_playback",

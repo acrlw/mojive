@@ -17,6 +17,7 @@ import pytest
 from forge_viewer.bridge import APP, DebugBridge, socket_path
 from forge_viewer.render.backend import BackendCaps, NullBackend
 from forge_viewer.render.debugdraw import (
+    ARROW_CORNER_RADIUS_RATIO,
     ARROW_HEAD_RATIO,
     AXIS_COLORS,
     PRIMITIVE_PATH,
@@ -95,23 +96,28 @@ def test_batch_points_and_arrows_keep_one_id_and_per_item_colors():
     assert layer.count_of(PrimitiveType.ARROW) == 2
     frame = dd.build()
     point_stream = frame.stream(DrawPath.POINT)
-    segment_stream = frame.stream(DrawPath.SEGMENT)
+    arrow_stream = frame.stream(DrawPath.ARROW)
     assert point_stream[:, 3:7] == pytest.approx(colors)
-    assert segment_stream[:, 6:10] == pytest.approx(colors)
-    assert segment_stream[:, 11] == pytest.approx(2.0 * ARROW_HEAD_RATIO)
+    assert arrow_stream[:, 6:10] == pytest.approx(colors)
+    assert arrow_stream[:, 11] == pytest.approx(2.0 * ARROW_HEAD_RATIO)
 
 
 def test_debug_arrow_uses_the_position_gizmo_head_proportion():
-    from forge_viewer.gizmo import AXIS_HEAD_LENGTH_PT, AXIS_SHAFT_HALF_PT
+    from forge_viewer.gizmo import (
+        ARROW_CORNER_RADIUS_PT,
+        AXIS_HEAD_LENGTH_PT,
+        AXIS_SHAFT_HALF_PT,
+    )
 
     shaft_width = 2.0 * AXIS_SHAFT_HALF_PT
     assert shaft_width * ARROW_HEAD_RATIO == pytest.approx(AXIS_HEAD_LENGTH_PT)
+    assert shaft_width * ARROW_CORNER_RADIUS_RATIO == pytest.approx(ARROW_CORNER_RADIUS_PT)
 
 
 def test_arrow_start_mask_is_packed_in_screen_pixels():
     dd = DebugDraw()
     dd.layer("gizmo", Occlusion.ALWAYS).arrow("axis", A, B, RED, 4.4, start_mask_px=9.68)
-    stream = dd.build().stream(DrawPath.SEGMENT)
+    stream = dd.build().stream(DrawPath.ARROW)
     assert stream.shape == (1, 13)
     assert stream[0, 12] == pytest.approx(9.68)
 
@@ -124,7 +130,7 @@ def test_batched_arrows_keep_per_item_order_and_start_mask():
     dd.layer("gizmo", Occlusion.ALWAYS).arrows(
         "axes", starts, ends, colors, 4.4, start_mask_px=9.68
     )
-    stream = dd.build().stream(DrawPath.SEGMENT)
+    stream = dd.build().stream(DrawPath.ARROW)
     assert stream[:, 3:6] == pytest.approx(ends)
     assert stream[:, 6:10] == pytest.approx(colors)
     assert stream[:, 12] == pytest.approx(9.68)
@@ -255,7 +261,7 @@ def test_closed_polyline_packs_shared_neighbors_for_continuous_joins():
     assert np.all(stroke[:, 13] == 4.0)
 
 
-def test_frame_is_three_independent_segments_on_the_arrow_path():
+def test_frame_is_three_independent_segments_and_arrows_have_their_own_path():
 
     dd = DebugDraw()
     layer = dd.layer("axes", Occlusion.ALWAYS)
@@ -273,22 +279,19 @@ def test_frame_is_three_independent_segments_on_the_arrow_path():
     layer.arrow("a", A, B, RED, 2.0)
     frame = dd.build()
     segs = [b for b in frame.active() if b.path is DrawPath.SEGMENT]
-    assert (
-        PRIMITIVE_PATH[PrimitiveType.FRAME]
-        is PRIMITIVE_PATH[PrimitiveType.ARROW]
-        is DrawPath.SEGMENT
-    )
+    arrows = [b for b in frame.active() if b.path is DrawPath.ARROW]
+    assert PRIMITIVE_PATH[PrimitiveType.FRAME] is DrawPath.SEGMENT
+    assert PRIMITIVE_PATH[PrimitiveType.ARROW] is DrawPath.ARROW
     assert len(segs) == 1
-    assert segs[0].count == 4
+    assert segs[0].count == 3
+    assert len(arrows) == 1
+    assert arrows[0].count == 1
 
     stream = frame.stream(DrawPath.SEGMENT)
     assert stream.shape[1] == 13
-
-    heads = stream[:, 11]
-    assert int(np.count_nonzero(heads > 0.0)) == 1
-    axes = stream[heads == 0.0]
     for k in range(3):
-        assert axes[k, 6:10] == pytest.approx(AXIS_COLORS[k])
+        assert stream[k, 6:10] == pytest.approx(AXIS_COLORS[k])
+    assert frame.stream(DrawPath.ARROW)[0, 11] > 0.0
 
 
 def test_axis_length_ignores_scale_baked_into_the_transform():
@@ -452,7 +455,7 @@ def test_interaction_axes_and_points_are_drawn_after_the_closed_outline():
     frame = dd.build()
     assert [batch.path for batch in frame.active()] == [
         DrawPath.STROKE,
-        DrawPath.SEGMENT,
+        DrawPath.ARROW,
         DrawPath.POINT,
     ]
 

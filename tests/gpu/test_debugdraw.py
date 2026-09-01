@@ -22,7 +22,11 @@ moderngl = pytest.importorskip("moderngl")
 
 from forge_viewer import math3d as M  # noqa: E402
 from forge_viewer.adapters.base import SceneSource  # noqa: E402
-from forge_viewer.render.debugdraw import Occlusion  # noqa: E402
+from forge_viewer.render.debugdraw import (  # noqa: E402
+    ARROW_CORNER_RADIUS_RATIO,
+    ARROW_HEAD_RATIO,
+    Occlusion,
+)
 from forge_viewer.render.scene import SceneBuilder  # noqa: E402
 from forge_viewer.types import (  # noqa: E402
     CameraView,
@@ -213,7 +217,32 @@ def test_every_primitive_kind_reaches_the_screen(rig):
     assert draw.stats().dropped == 0
     assert lit > 2000
 
-    assert rig.debug_pass().draw_calls == 5
+    assert rig.debug_pass().draw_calls == 6
+
+
+def test_arrow_head_uses_the_gizmo_corner_radius(rig):
+    a = np.array([-1.5, 0.0, 0.0], np.float32)
+    b = np.array([1.5, 0.0, 0.0], np.float32)
+    width_px = 17.6
+    rig.backend.debug.layer("arrow", Occlusion.ALWAYS).arrow("a", a, b, LINE_RGBA, width_px)
+    pixels = rig.draw()
+
+    points = np.column_stack((np.stack((a, b)), np.ones(2)))
+    view_proj = rig.camera.proj_matrix() @ rig.camera.view_matrix()
+    clip = points @ view_proj.T
+    screen = (clip[:, :2] / clip[:, 3:4] * 0.5 + 0.5) * np.array((W, H))
+    direction = screen[1] - screen[0]
+    direction /= np.linalg.norm(direction)
+    side = np.array((-direction[1], direction[0]))
+    head = width_px * ARROW_HEAD_RATIO
+    wing = head * (7.0 / 12.0)
+    radius = width_px * ARROW_CORNER_RADIUS_RATIO
+    lower_wing = screen[1] - direction * head - side * wing
+
+    clipped = np.rint(lower_wing + (direction + side) * radius * 0.45).astype(int)
+    retained = np.rint(lower_wing + (direction + side) * radius * 1.55).astype(int)
+    assert pixels[clipped[1], clipped[0], 0] < 180
+    assert pixels[retained[1], retained[0], 0] > 200
 
 
 def test_large_drag_link_quad_contains_the_complete_start_ring(rig):

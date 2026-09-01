@@ -12,6 +12,10 @@ uniform vec2 u_viewport;
 uniform float u_alpha;
 
 out vec4 v_color;
+#ifdef ROUND_ARROW
+out vec2 v_arrow_pos;
+flat out vec4 v_arrow_shape; // head length, shaft half-width, wing half-width, corner radius
+#endif
 
 vec2 screen_pos(vec4 clip) {
     vec2 ndc = clip.xy / clip.w;
@@ -25,6 +29,10 @@ vec4 place(vec4 clip, vec2 screen) {
 
 void main() {
     v_color = vec4(in_color.rgb, in_color.a * u_alpha);
+#ifdef ROUND_ARROW
+    v_arrow_pos = vec2(0.0);
+    v_arrow_shape = vec4(0.0);
+#endif
 
     vec4 c_a = u_view_proj * vec4(in_a, 1.0);
     vec4 c_b = u_view_proj * vec4(in_b, 1.0);
@@ -69,12 +77,26 @@ void main() {
     vec2 base = s_b - direction * head;
     float shaft = 0.5 * in_width;
     float wing = in_head * (7.0 / 12.0);
+    vec2 local;
     if (p == 3) {
+        local = vec2(head, 0.0);
         gl_Position = c_b;
     } else if (p == 0 || p == 6) {
-        gl_Position = place(start_clip, start + side * (p == 0 ? -shaft : shaft));
+        float offset = p == 0 ? -shaft : shaft;
+        local = vec2(-length(start - base), offset);
+        gl_Position = place(start_clip, start + side * offset);
     } else {
         float offset = p == 1 ? -shaft : p == 2 ? -wing : p == 4 ? wing : shaft;
+        local = vec2(0.0, offset);
         gl_Position = place(base_clip, base + side * offset);
     }
+#ifdef ROUND_ARROW
+    v_arrow_pos = local;
+    v_arrow_shape = vec4(
+        head,
+        shaft,
+        wing,
+        in_width * ARROW_CORNER_RADIUS_RATIO
+    );
+#endif
 }

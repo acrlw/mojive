@@ -10,7 +10,11 @@ pytestmark = pytest.mark.gpu
 moderngl = pytest.importorskip("moderngl")
 
 from forge_viewer.math3d import look_at, perspective  # noqa: E402
-from forge_viewer.render.debugdraw import Occlusion  # noqa: E402
+from forge_viewer.render.debugdraw import (  # noqa: E402
+    ARROW_CORNER_RADIUS_RATIO,
+    ARROW_HEAD_RATIO,
+    Occlusion,
+)
 from forge_viewer.render.forge import gl_native as G  # noqa: E402
 from forge_viewer.render.forge.instances import InstanceStore  # noqa: E402
 from forge_viewer.render.forge.passes.base import PassContext  # noqa: E402
@@ -319,6 +323,32 @@ def test_arrow_head_shape_is_identical_when_depth_direction_is_reversed(rig):
     assert np.array_equal(shapes[0], shapes[1])
 
 
+def test_arrow_head_uses_the_gizmo_corner_radius(rig):
+    a = np.array([-1.5, 0.0, 0.0], np.float32)
+    b = np.array([1.5, 0.0, 0.0], np.float32)
+    width_px = 17.6
+    rig.draw.layer("arrow", Occlusion.ALWAYS).arrow("a", a, b, LINE_RGBA, width_px)
+    rig.render()
+    pixels = rig.pixels()
+
+    ctx = rig.context()
+    points = np.column_stack((np.stack((a, b)), np.ones(2)))
+    clip = points @ ctx.view_proj.T
+    screen = (clip[:, :2] / clip[:, 3:4] * 0.5 + 0.5) * np.array((WIDTH, HEIGHT))
+    direction = screen[1] - screen[0]
+    direction /= np.linalg.norm(direction)
+    side = np.array((-direction[1], direction[0]))
+    head = width_px * ARROW_HEAD_RATIO
+    wing = head * (7.0 / 12.0)
+    radius = width_px * ARROW_CORNER_RADIUS_RATIO
+    lower_wing = screen[1] - direction * head - side * wing
+
+    clipped = np.rint(lower_wing + (direction + side) * radius * 0.45).astype(int)
+    retained = np.rint(lower_wing + (direction + side) * radius * 1.55).astype(int)
+    assert pixels[clipped[1], clipped[0], 0] < 180
+    assert pixels[retained[1], retained[0], 0] > 200
+
+
 def test_faded_arrow_is_one_continuous_silhouette(rig):
 
     a = np.array([-1.5, 0.0, 0.0], np.float32)
@@ -418,7 +448,7 @@ def test_every_primitive_kind_reaches_the_screen(rig):
     assert rig.draw.stats().dropped == 0
     assert lit > 2000
 
-    assert rig.pass_.draw_calls == 5
+    assert rig.pass_.draw_calls == 6
 
 
 class _NoAttribPointer:
