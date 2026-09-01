@@ -1787,20 +1787,25 @@ class ObjectGizmo:
                     True,
                 )
             )
-        # The ImGui ruler is composited above the rendered 3D arrow. Do not
-        # paint it through the shaft and cone: an oblique cone has an
-        # asymmetric projected silhouette, which makes a mathematically
-        # centered line look visibly off-axis. Resume the ruler just beyond
-        # the arrow tip, where both geometries meet on the same centerline.
+        # A regular position gizmo lets the rendered 3D arrow own the interval
+        # from its center shell through its tip. A slide joint is different:
+        # its range and snap ruler are the final, authoritative axis overlay.
+        # Keeping the generic arrow-sized hole there can expose a large gap
+        # whenever scene depth occludes only part of the underlying 3D arrow.
         arrow_extent = float(np.linalg.norm(projected[1, :2] - current[:2]))
-        arrow_clearance = 0.0
-        axis_segments = _split_segment_around_interval(
-            segment[0],
-            segment[1],
-            current[:2],
-            direction,
-            -mask_radius,
-            arrow_extent + arrow_clearance,
+        slide_joint_ruler = getattr(self._active_joint, "type", None) == "slide"
+        hidden_interval = None if slide_joint_ruler else (-mask_radius, arrow_extent)
+        axis_segments = (
+            (segment,)
+            if hidden_interval is None
+            else _split_segment_around_interval(
+                segment[0],
+                segment[1],
+                current[:2],
+                direction,
+                hidden_interval[0],
+                hidden_interval[1],
+            )
         )
 
         def color(value, alpha: float):
@@ -1810,7 +1815,11 @@ class ObjectGizmo:
             overlay.line(start, end, color((*axis_color, 1.0), 0.92), 1.2 * style_scale)
         for a, b, alpha, is_active in ticks:
             along = float(np.dot((a + b) * 0.5 - current[:2], direction))
-            if not is_active and -mask_radius <= along <= arrow_extent + arrow_clearance:
+            if (
+                not is_active
+                and hidden_interval is not None
+                and hidden_interval[0] <= along <= hidden_interval[1]
+            ):
                 continue
             tick_color = color(HOVER_COLOR if is_active else (*axis_color, 1.0), alpha)
             for start, end in _split_segment_around_point(a, b, current[:2], mask_radius):

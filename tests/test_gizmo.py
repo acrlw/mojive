@@ -11,6 +11,7 @@ from forge_viewer.adapters.toy import ToyPhysicsAdapter
 from forge_viewer.gizmo import (
     ACTIVE_HANDLE_COLOR,
     AXIS_COLORS,
+    AXIS_END,
     AXIS_START,
     CENTER_COLOR,
     CENTER_HIT_PT,
@@ -1290,6 +1291,78 @@ def test_translation_snap_ruler_does_not_add_primary_current_tick_for_a_joint() 
         name == "line" and np.allclose(args[2], HOVER_COLOR)
         for name, args, _kwargs in overlay.calls
     )
+
+
+@pytest.mark.parametrize("style_scale", (1.0, 2.0, 4.0))
+def test_slide_joint_snap_ruler_is_one_continuous_final_axis_overlay(style_scale: float) -> None:
+    from types import SimpleNamespace
+
+    gizmo = ObjectGizmo()
+    gizmo._active = GizmoHandle.Z
+    gizmo._active_joint = SimpleNamespace(type="slide")
+    gizmo.translation_snap_m = 0.25
+    gizmo._start_basis[:] = np.eye(3)
+    gizmo._frame.position[:] = (0.0, 0.0, 0.5)
+    overlay = RecordingDraw2D()
+
+    cam = camera()
+    gizmo._draw_translation_snap_ruler(overlay, cam, RECT, style_scale)
+
+    axis_lines = [
+        args
+        for name, args, _kwargs in overlay.calls
+        if name == "line"
+        and args[3] == pytest.approx(1.2 * style_scale)
+        and args[2][3] == pytest.approx(0.92)
+    ]
+    assert len(axis_lines) == 1
+    center = project(cam, (gizmo._frame.position,), RECT)[0, :2]
+    direction = project(
+        cam,
+        (gizmo._frame.position, gizmo._frame.position + gizmo._start_basis[:, 2]),
+        RECT,
+    )[:, :2]
+    direction = direction[1] - direction[0]
+    direction /= np.linalg.norm(direction)
+    along = sorted(
+        float(np.dot(np.asarray(point) - center, direction)) for point in axis_lines[0][:2]
+    )
+    assert along[0] < 0.0 < along[1]
+    arrow_scale = world_scale(cam, gizmo._frame.position, RECT[3], SIZE_PT * style_scale)
+    arrow_tip = project(
+        cam,
+        (gizmo._frame.position + gizmo._start_basis[:, 2] * arrow_scale * AXIS_END,),
+        RECT,
+    )[0, :2]
+    arrow_extent = float(np.linalg.norm(arrow_tip - center))
+    positive_tick_offsets = []
+    for name, args, _kwargs in overlay.calls:
+        if name != "line" or args[3] != pytest.approx(1.2 * style_scale):
+            continue
+        tick_direction = np.asarray(args[1]) - np.asarray(args[0])
+        if abs(float(np.dot(tick_direction, direction))) > 1e-6:
+            continue
+        midpoint = (np.asarray(args[0]) + np.asarray(args[1])) * 0.5
+        positive_tick_offsets.append(float(np.dot(midpoint - center, direction)))
+    assert any(0.0 < offset < arrow_extent for offset in positive_tick_offsets)
+
+
+def test_position_snap_ruler_keeps_the_3d_arrow_owned_interval() -> None:
+    gizmo = ObjectGizmo()
+    gizmo._active = GizmoHandle.Z
+    gizmo.translation_snap_m = 0.25
+    gizmo._start_basis[:] = np.eye(3)
+    gizmo._frame.position[:] = (0.0, 0.0, 0.5)
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_translation_snap_ruler(overlay, camera(), RECT, 1.0)
+
+    axis_lines = [
+        args
+        for name, args, _kwargs in overlay.calls
+        if name == "line" and args[3] == pytest.approx(1.2) and args[2][3] == pytest.approx(0.92)
+    ]
+    assert len(axis_lines) == 2
 
 
 def test_translation_snap_guide_draws_smaller_endpoints_above_its_connector() -> None:
