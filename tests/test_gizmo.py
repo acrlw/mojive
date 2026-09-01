@@ -10,8 +10,11 @@ from forge_viewer.adapters.static import StaticSceneAdapter
 from forge_viewer.adapters.toy import ToyPhysicsAdapter
 from forge_viewer.gizmo import (
     ACTIVE_HANDLE_COLOR,
+    ARROW_CORNER_RADIUS_PT,
     AXIS_COLORS,
     AXIS_END,
+    AXIS_HEAD_LENGTH_PT,
+    AXIS_SHAFT_HALF_PT,
     AXIS_START,
     CENTER_COLOR,
     CENTER_HIT_PT,
@@ -41,7 +44,9 @@ from forge_viewer.gizmo import (
     GizmoHandle,
     GizmoMode,
     GizmoSpace,
+    _rounded_polygon_corners,
     axis_active_color,
+    axis_arrow_polygon,
     axis_handle_alpha,
     axis_hover_color,
     axis_rotation,
@@ -939,6 +944,36 @@ def test_translation_center_shell_masks_continuous_axes_but_not_planes() -> None
     visible_radius = CENTER_RADIUS + CONTRAST_EDGE_PT / SIZE_PT
     assert AXIS_START < CENTER_RADIUS < visible_radius < CENTER_SHELL_RADIUS < PLANE_INNER
     assert np.allclose(masked_axis_start(np.zeros(2), np.array((20.0, 0.0)), 7.0), (7, 0))
+
+
+def test_rounded_polygon_corner_is_a_tangent_circular_fillet() -> None:
+    rounded = _rounded_polygon_corners(
+        ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)),
+        2.0,
+        (1,),
+    )
+    arc = rounded[1:8]
+
+    assert arc[0] == pytest.approx((8.0, 0.0))
+    assert arc[-1] == pytest.approx((10.0, 2.0))
+    assert np.linalg.norm(arc - np.array((8.0, 2.0)), axis=1) == pytest.approx(2.0)
+    assert arc[len(arc) // 2] == pytest.approx((8.0 + np.sqrt(2.0), 2.0 - np.sqrt(2.0)))
+
+
+def test_flat_axis_arrow_rounds_only_the_head_and_scales_with_hidpi() -> None:
+    start = np.array((5.0, 7.0))
+    end = np.array((65.0, 7.0))
+    polygon = axis_arrow_polygon(start, end)
+
+    assert len(polygon) > 7
+    assert polygon[0] == pytest.approx(start + np.array((0.0, -AXIS_SHAFT_HALF_PT)))
+    assert polygon[-1] == pytest.approx(start + np.array((0.0, AXIS_SHAFT_HALF_PT)))
+    assert not np.any(np.all(np.isclose(polygon, end), axis=1))
+    assert end[0] - polygon[:, 0].max() < ARROW_CORNER_RADIUS_PT
+    assert np.any(np.isclose(polygon[:, 0], end[0] - AXIS_HEAD_LENGTH_PT))
+
+    scaled = axis_arrow_polygon(start * 4.0, end * 4.0, style_scale=4.0)
+    assert scaled / 4.0 == pytest.approx(polygon)
 
 
 def test_active_3d_translation_axis_keeps_the_center_shell_mask() -> None:
@@ -2873,6 +2908,7 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
         )
         assert slide is not None
         arrow_polygons = gizmo._slide_arrow_polygons(slide, 1.0)
+        arrow_targets = gizmo._slide_arrow_targets(slide, 1.0)
         signed_offsets = [
             float(np.dot(np.mean(points, axis=0) - slide.current, slide.normal))
             for points in arrow_polygons
@@ -2882,12 +2918,11 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
         assert signed_offsets == pytest.approx([JOINT_SLIDE_ARROW_OFFSET_PT] * 2)
         assert min(signed_offsets) > JOINT_CURRENT_TICK_PT * 0.5 + 4.0
         longitudinal_offsets = [
-            float(np.dot(np.mean(points, axis=0) - slide.current, slide.tangent))
-            for points in arrow_polygons
+            float(np.dot(point - slide.current, slide.tangent)) for point in arrow_targets
         ]
         assert longitudinal_offsets[0] > 0.0
         assert longitudinal_offsets[1] < 0.0
-        arrow_cursor = np.mean(arrow_polygons[0], axis=0)
+        arrow_cursor = arrow_targets[0]
         assert gizmo.update_hover(session, cam, RECT, tuple(arrow_cursor)) is GizmoHandle.Z
         assert gizmo.update_hover(session, cam, RECT, tuple(slide.current)) is GizmoHandle.Z
         highlighted = RecordingDraw2D()

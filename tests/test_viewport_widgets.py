@@ -6,6 +6,10 @@ import pytest
 
 from forge_viewer.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
 from forge_viewer.ui.viewport_widgets import (
+    _FRAME_ARROW_CORNER_RADIUS_PT,
+    _MOVE_ARROW_BASE,
+    _MOVE_ARROW_TIP,
+    _MOVE_ARROW_WING,
     DEFAULT_VIEWPORT_LABELS,
     DEFAULT_VIEWPORT_OVERLAY_SCALE,
     HINT_CHROME_SCALE,
@@ -159,7 +163,7 @@ class _RecordedGlyph:
         self.polylines.append((args, kwargs))
 
 
-def test_move_glyph_is_one_connected_antialiased_outline():
+def test_move_glyph_is_one_connected_rounded_antialiased_outline():
     draw = _RecordedGlyph()
     center = (20.0, 30.0)
 
@@ -167,11 +171,26 @@ def test_move_glyph_is_one_connected_antialiased_outline():
 
     assert len(draw.paths) == 1
     path = draw.paths[0]
-    assert len(path) == 24
-    tips = (path[0], path[6], path[12], path[18])
-    assert math.dist(tips[0], center) == pytest.approx(math.dist(tips[1], center))
-    assert math.dist(tips[0], center) == pytest.approx(math.dist(tips[2], center))
-    assert math.dist(tips[0], center) == pytest.approx(math.dist(tips[3], center))
+    assert len(path) > 24
+    xs = tuple(point[0] for point in path)
+    ys = tuple(point[1] for point in path)
+    assert center[0] - min(xs) == pytest.approx(max(xs) - center[0])
+    assert center[1] - min(ys) == pytest.approx(max(ys) - center[1])
+    assert max(xs) - min(xs) == pytest.approx(max(ys) - min(ys))
+    sharp_tip = 9.0 * TOOL_GLYPH_SCALE
+    assert all(
+        not any(point == pytest.approx(expected) for point in path)
+        for expected in (
+            (center[0], center[1] - sharp_tip),
+            (center[0] + sharp_tip, center[1]),
+            (center[0], center[1] + sharp_tip),
+            (center[0] - sharp_tip, center[1]),
+        )
+    )
+    assert _polygon_area(path) > 0.0
+    assert pytest.approx((_MOVE_ARROW_TIP - _MOVE_ARROW_BASE) / math.sqrt(3.0)) == (
+        _MOVE_ARROW_WING
+    )
 
 
 def test_tool_glyphs_use_the_configured_stroke_without_hidden_scales():
@@ -187,15 +206,28 @@ def test_tool_glyphs_use_the_configured_stroke_without_hidden_scales():
     draw_tool_glyph(frame, center, color, 1.0, "frame", surface, "world")
 
     move_path = move.paths[0]
-    move_shaft_width = math.dist(move_path[2], move_path[-2])
-    move_head_width = math.dist(move_path[1], move_path[-1])
-    frame_head_width = math.dist(frame.fills[0][1], frame.fills[0][2])
+    move_shaft_half = OVERLAY_GEOMETRY.tool_stroke * 0.5
+    move_shaft_corner = (
+        center[0] + move_shaft_half,
+        center[1] - 5.0 * TOOL_GLYPH_SCALE,
+    )
+    assert any(point == pytest.approx(move_shaft_corner) for point in move_path)
+    move_shaft_width = move_shaft_half * 2.0
+    move_top_head = [point for point in move_path if point[1] <= center[1] - 4.5 * TOOL_GLYPH_SCALE]
+    move_head_width = max(point[0] for point in move_top_head) - min(
+        point[0] for point in move_top_head
+    )
+    frame_head_width = max(point[0] for point in frame.paths[1]) - min(
+        point[0] for point in frame.paths[1]
+    )
     assert move_shaft_width == pytest.approx(OVERLAY_GEOMETRY.tool_stroke)
     assert len(rotate.circles) == 1
     assert rotate.circles[0][0][3] == pytest.approx(OVERLAY_GEOMETRY.tool_stroke)
     assert len(rotate.paths) == 6
-    assert all(args[3] == pytest.approx(OVERLAY_GEOMETRY.tool_stroke) for args, _ in frame.lines)
-    assert move_head_width <= frame_head_width * 1.05
+    assert not frame.lines
+    assert move_shaft_width < min(move_head_width, frame_head_width)
+    assert move_head_width < 2.0 * _MOVE_ARROW_WING * TOOL_GLYPH_SCALE
+    assert frame_head_width < 2.0 * 1.8 * TOOL_GLYPH_SCALE
 
 
 def test_rotate_glyph_uses_antialiased_transparent_knockout_breaks():
@@ -274,52 +306,39 @@ def test_rotate_glyph_supports_butt_and_round_authored_caps():
     assert sum(map(len, rounded.paths)) > sum(map(len, butt.paths))
 
 
-def test_frame_arrows_use_separate_axis_shafts_and_triangular_heads():
+def test_frame_arrows_use_separate_axis_shafts_and_rounded_heads():
     draw = _RecordedGlyph()
     center = (20.0, 30.0)
 
     draw_tool_glyph(draw, center, (1.0, 1.0, 1.0, 1.0), 1.0, "frame", (0.0,) * 4, "world")
 
-    assert not draw.paths
-    assert len(draw.lines) == 3
-    assert len(draw.fills) == 3
-    head_edges = []
-    areas = []
-    for path in draw.fills:
-        assert len(path) == 3
-        head_edges.append(
-            (
-                math.dist(path[0], path[1]),
-                math.dist(path[0], path[2]),
-                math.dist(path[1], path[2]),
-            )
-        )
-        areas.append(
-            abs(
-                sum(
-                    a[0] * b[1] - a[1] * b[0]
-                    for a, b in zip(path, (*path[1:], path[0]), strict=True)
-                )
-            )
-            * 0.5
-        )
-    for edges in head_edges[1:]:
-        assert edges == pytest.approx(head_edges[0])
-    assert areas == pytest.approx([areas[0]] * 3)
-    expected_start = (
-        OVERLAY_GEOMETRY.frame_center_shell_radius * TOOL_GLYPH_SCALE
-        + OVERLAY_GEOMETRY.tool_stroke * 0.5
+    assert len(draw.paths) == 6
+    assert not draw.lines
+    assert not draw.fills
+    shafts = draw.paths[0::2]
+    heads = draw.paths[1::2]
+    head_areas = []
+    for path in heads:
+        assert len(path) > 3
+        assert max(math.dist(point, center) for point in path) < 10.0 * TOOL_GLYPH_SCALE
+        head_areas.append(abs(_polygon_area(path)))
+    assert head_areas == pytest.approx([head_areas[0]] * 3)
+    clear_radius = (
+        OVERLAY_GEOMETRY.frame_center_radius * TOOL_GLYPH_SCALE
+        + OVERLAY_GEOMETRY.tool_stroke * OVERLAY_GEOMETRY.frame_center_gap_ratio
     )
     assert all(
-        math.dist(line[0][0], center) == pytest.approx(expected_start) for line in draw.lines
+        min(math.dist(point, center) for point in shaft) == pytest.approx(clear_radius)
+        for shaft in shafts
     )
+    assert _FRAME_ARROW_CORNER_RADIUS_PT < 0.5
     assert len(draw.filled_circles) == 1
     center_args, center_kwargs = draw.filled_circles[0]
     assert center_args[0] == center
     assert center_args[1] == pytest.approx(OVERLAY_GEOMETRY.frame_center_radius * TOOL_GLYPH_SCALE)
+    assert center_args[1] * 2.0 > OVERLAY_GEOMETRY.tool_stroke
     assert center_args[2] == (1.0, 1.0, 1.0, 1.0)
     assert center_kwargs["segments"] == 16
-    assert draw.fills[1][0][1] == pytest.approx(draw.fills[2][0][1])
 
 
 def test_status_backend_and_fps_use_independent_stable_columns():

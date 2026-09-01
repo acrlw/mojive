@@ -1093,15 +1093,15 @@ def _capture_slide_held_at_limit(viewer, node, output: Path) -> None:
     )
     assert slide is not None
     start = next(
-        np.mean(arrow, axis=0)
-        for arrow in reversed(
-            viewer.app.gizmo._slide_arrow_polygons(slide, viewer.window.style_scale)
+        center
+        for center in reversed(
+            viewer.app.gizmo._slide_arrow_targets(slide, viewer.window.style_scale)
         )
         if viewer.app.gizmo.update_hover(
             viewer.session,
             cam,
             rect,
-            tuple(np.mean(arrow, axis=0)),
+            tuple(center),
             style_scale=viewer.window.style_scale,
         )
         is GizmoHandle.Z
@@ -1190,13 +1190,13 @@ def _capture_slide_drag_guide(viewer, node, output: Path) -> None:
     )
     assert slide is not None
     start = next(
-        np.mean(arrow, axis=0)
-        for arrow in viewer.app.gizmo._slide_arrow_polygons(slide, viewer.window.style_scale)
+        center
+        for center in viewer.app.gizmo._slide_arrow_targets(slide, viewer.window.style_scale)
         if viewer.app.gizmo.update_hover(
             viewer.session,
             cam,
             rect,
-            tuple(np.mean(arrow, axis=0)),
+            tuple(center),
             style_scale=viewer.window.style_scale,
         )
         is GizmoHandle.Z

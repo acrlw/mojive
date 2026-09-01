@@ -29,6 +29,7 @@ from ..gizmo import (
     AXIS_COLORS,
     AXIS_END,
     AXIS_HANDLES,
+    AXIS_HEAD_LENGTH_PT,
     AXIS_START,
     CENTER_COLOR,
     CENTER_RADIUS,
@@ -112,6 +113,13 @@ JOINT_CURRENT_COLOR = axis_hover_color(JOINT_RANGE_COLOR)
 JOINT_CURRENT_TICK_PT = 20.0
 JOINT_LIMIT_TICK_PT = 14.0
 JOINT_SLIDE_ARROW_OFFSET_PT = 17.0
+JOINT_SLIDE_ARROW_INSET_PT = 9.0
+JOINT_SLIDE_ARROW_EXTENT_PT = 48.0
+JOINT_SLIDE_ARROW_TARGET_PT = (
+    2.0 * JOINT_SLIDE_ARROW_INSET_PT
+    + 4.0 * (JOINT_SLIDE_ARROW_EXTENT_PT - AXIS_HEAD_LENGTH_PT)
+    + JOINT_SLIDE_ARROW_EXTENT_PT
+) / 7.0
 JOINT_SLIDE_AXIS_HIT_PT = 7.0
 TRANSLATION_GUIDE_RADIUS_PT = 5.0
 TRACKBALL_RAD_PER_PT = 0.01
@@ -185,12 +193,29 @@ def joint_slide_arrow_polygons(
     offset = normal * JOINT_SLIDE_ARROW_OFFSET_PT * style_scale
     # Keep both affordances clear of the value axis. Their opposing directions
     # communicate bidirectional motion without making the axis itself look cut.
-    inset = tangent * 9.0 * style_scale
-    extent = tangent * 48.0 * style_scale
+    inset = tangent * JOINT_SLIDE_ARROW_INSET_PT * style_scale
+    extent = tangent * JOINT_SLIDE_ARROW_EXTENT_PT * style_scale
     return (
         axis_arrow_polygon(current + offset + inset, current + offset + extent, style_scale),
         axis_arrow_polygon(current + offset - inset, current + offset - extent, style_scale),
     )
+
+
+def joint_slide_arrow_targets(
+    current, tangent, style_scale: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return stable interaction targets independent of arrow tessellation."""
+
+    current = np.asarray(current, np.float64).reshape(2)
+    tangent = np.asarray(tangent, np.float64).reshape(2)
+    length = float(np.linalg.norm(tangent))
+    if length < 1e-6:
+        return current.copy(), current.copy()
+    tangent = tangent / length
+    normal = np.array((-tangent[1], tangent[0]))
+    center = current + normal * JOINT_SLIDE_ARROW_OFFSET_PT * style_scale
+    along = tangent * JOINT_SLIDE_ARROW_TARGET_PT * style_scale
+    return center + along, center - along
 
 
 def _screen_segment_distance(point, start, end) -> float:
@@ -1568,6 +1593,13 @@ class ObjectGizmo:
         style_scale: float,
     ) -> tuple[np.ndarray, np.ndarray]:
         return joint_slide_arrow_polygons(slide.current, slide.tangent, style_scale)
+
+    @staticmethod
+    def _slide_arrow_targets(
+        slide: _SlideRangeProjection,
+        style_scale: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        return joint_slide_arrow_targets(slide.current, slide.tangent, style_scale)
 
     @staticmethod
     def _slide_range_projection(

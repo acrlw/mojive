@@ -1544,8 +1544,7 @@ def test_limited_slide_drag_keeps_feedback_and_claim_until_mouse_release() -> No
             basis,
         )
         assert slide is not None
-        arrow = v.app.gizmo._slide_arrow_polygons(slide, v.window.style_scale)[0]
-        start = np.mean(arrow, axis=0)
+        start = v.app.gizmo._slide_arrow_targets(slide, v.window.style_scale)[0]
         io.add_mouse_pos_event(*start)
         v.sync()
         assert v.app.gizmo.hovered_handle is GizmoHandle.Z

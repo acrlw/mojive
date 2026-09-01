@@ -15,6 +15,7 @@ from itertools import pairwise
 
 from imgui_bundle import imgui
 
+from ..gizmo import ARROW_CORNER_RADIUS_PT, _rounded_polygon_corners
 from .draw2d import Draw2D, _open_polyline_ribbon
 from .input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
 from .theme import Theme
@@ -48,8 +49,8 @@ class OverlayGeometry:
     hint_mouse_wheel_width_ratio: float = 0.28
     hint_mouse_wheel_height_ratio: float = 7.0 / 18.0
     hint_mouse_wheel_gap_ratio: float = 0.25
-    frame_center_radius: float = 1.05
-    frame_center_shell_radius: float = 2.2
+    frame_center_radius: float = 1.45
+    frame_center_gap_ratio: float = 0.7
     tooltip_padding_x: float = 7.0
     tooltip_padding_y: float = 4.0
 
@@ -229,6 +230,10 @@ OVERLAY_CLIP_PADDING = 5.0
 # This scale changes only their authored paths; hit regions, state circles, and
 # capsule spacing continue to use the shared overlay geometry.
 TOOL_GLYPH_SCALE = 1.18
+_MOVE_ARROW_BASE = 5.0
+_MOVE_ARROW_TIP = 9.0
+_MOVE_ARROW_WING = (_MOVE_ARROW_TIP - _MOVE_ARROW_BASE) / math.sqrt(3.0)
+_FRAME_ARROW_CORNER_RADIUS_PT = 0.25
 FRAME_LABEL_MAX_WIDTH = 4.4
 CAPSULE_SURFACE_ALPHA = 0.92
 
@@ -962,7 +967,7 @@ def _arrow_silhouette_path(
             y + (uy * along + ny * across) * scale,
         )
 
-    return (
+    polygon = (
         point(0.0, shaft_half),
         point(base, shaft_half),
         point(base, wing),
@@ -970,6 +975,16 @@ def _arrow_silhouette_path(
         point(base, -wing),
         point(base, -shaft_half),
         point(0.0, -shaft_half),
+    )
+    return tuple(
+        map(
+            tuple,
+            _rounded_polygon_corners(
+                polygon,
+                ARROW_CORNER_RADIUS_PT * scale,
+                (2, 3, 4),
+            ),
+        )
     )
 
 
@@ -1011,7 +1026,17 @@ def _move_glyph_path(
         (-shaft_half, -base),
         (-wing, -base),
     )
-    return tuple((x + px * scale, y + py * scale) for px, py in local)
+    polygon = tuple((x + px * scale, y + py * scale) for px, py in local)
+    return tuple(
+        map(
+            tuple,
+            _rounded_polygon_corners(
+                polygon,
+                ARROW_CORNER_RADIUS_PT * scale,
+                (23, 0, 1, 5, 6, 7, 11, 12, 13, 17, 18, 19),
+            ),
+        )
+    )
 
 
 def _draw_arrow_glyph(
@@ -1052,12 +1077,13 @@ def _draw_axis_arrow_glyph(
     geometry_scale: float,
     stroke_width: float,
     *,
-    start: float = 0.0,
+    clear_radius: float,
     base: float,
     tip: float,
     wing: float,
+    corner_radius: float,
 ) -> None:
-    """Draw a coordinate axis as a distinct shaft and triangular arrowhead."""
+    """Draw a coordinate axis with a distinct shaft and rounded arrowhead."""
 
     ux, uy = (float(value) for value in direction)
     length = math.hypot(ux, uy)
@@ -1065,14 +1091,84 @@ def _draw_axis_arrow_glyph(
     nx, ny = -uy, ux
     x, y = (float(value) for value in center)
 
-    def point(along: float, across: float = 0.0) -> tuple[float, float]:
-        return (
-            x + (ux * along + nx * across) * geometry_scale,
-            y + (uy * along + ny * across) * geometry_scale,
-        )
+    shaft = _axis_shaft_with_circular_start(
+        (base + 0.25) * geometry_scale,
+        stroke_width * 0.5,
+        clear_radius,
+    )
+    draw.fringed_concave_fill(
+        tuple(
+            (x + ux * along + nx * across, y + uy * along + ny * across) for along, across in shaft
+        ),
+        color,
+    )
+    draw.fringed_concave_fill(
+        tuple(
+            (
+                x + ux * along + nx * across,
+                y + uy * along + ny * across,
+            )
+            for along, across in _rounded_axis_head_path(
+                base,
+                tip,
+                wing,
+                geometry_scale,
+                corner_radius,
+            )
+        ),
+        color,
+    )
 
-    draw.line(point(start), point(base + 0.25), color, stroke_width)
-    draw.convex_fill((point(tip), point(base, wing), point(base, -wing)), color)
+
+@lru_cache(maxsize=64)
+def _axis_shaft_with_circular_start(
+    end: float,
+    half_width: float,
+    clear_radius: float,
+    segments: int = 6,
+) -> tuple[tuple[float, float], ...]:
+    """Build a shaft whose inner edge follows one transparent circular shell."""
+
+    radius = max(float(clear_radius), float(half_width) + 1e-6)
+    angle = math.asin(min(1.0, float(half_width) / radius))
+    cut = radius * math.cos(angle)
+    path = [
+        (cut, float(half_width)),
+        (float(end), float(half_width)),
+        (float(end), -float(half_width)),
+        (cut, -float(half_width)),
+    ]
+    for index in range(1, segments):
+        amount = index / segments
+        arc = -angle + 2.0 * angle * amount
+        path.append((radius * math.cos(arc), radius * math.sin(arc)))
+    return tuple(path)
+
+
+@lru_cache(maxsize=64)
+def _rounded_axis_head_path(
+    base: float,
+    tip: float,
+    wing: float,
+    geometry_scale: float,
+    corner_radius: float,
+) -> tuple[tuple[float, float], ...]:
+    """Cache one local Tool Column arrowhead at its effective UI scale."""
+
+    return tuple(
+        map(
+            tuple,
+            _rounded_polygon_corners(
+                (
+                    (tip * geometry_scale, 0.0),
+                    (base * geometry_scale, wing * geometry_scale),
+                    (base * geometry_scale, -wing * geometry_scale),
+                ),
+                corner_radius,
+                (0, 1, 2),
+            ),
+        )
+    )
 
 
 def draw_tool_glyph(
@@ -1096,9 +1192,9 @@ def draw_tool_glyph(
                 float(x),
                 float(y),
                 float(glyph_scale),
-                5.0,
-                9.0,
-                1.75,
+                _MOVE_ARROW_BASE,
+                _MOVE_ARROW_TIP,
+                _MOVE_ARROW_WING,
                 geometry.tool_stroke * 0.5 / TOOL_GLYPH_SCALE,
             ),
             color,
@@ -1120,8 +1216,9 @@ def draw_tool_glyph(
                 path = _transform_path(local, x, y, glyph_scale)
                 draw.concave_fill(path, color)
     elif kind == "frame":
-        frame_shaft_start = geometry.frame_center_shell_radius + (
-            geometry.tool_stroke * 0.5 / TOOL_GLYPH_SCALE
+        clear_radius = (
+            geometry.frame_center_radius * glyph_scale
+            + geometry.tool_stroke * geometry.frame_center_gap_ratio * scale
         )
         for direction in _FRAME_AXES:
             _draw_axis_arrow_glyph(
@@ -1131,13 +1228,14 @@ def draw_tool_glyph(
                 color,
                 glyph_scale,
                 geometry.tool_stroke * scale,
-                start=frame_shaft_start,
+                clear_radius=clear_radius,
                 base=7.6,
                 tip=10.0,
                 wing=1.8,
+                corner_radius=_FRAME_ARROW_CORNER_RADIUS_PT * scale,
             )
-        # The shafts start outside this center shell, leaving a genuine
-        # transparent knockout instead of repainting an assumed surface color.
+        # The curved shaft cut follows the dot's transparent shell exactly;
+        # drawing the dot last supplies the visible white origin inside it.
         draw.circle_filled(
             center,
             geometry.frame_center_radius * glyph_scale,

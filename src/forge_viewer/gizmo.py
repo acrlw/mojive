@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import enum
+import math
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import numpy as np
 
@@ -15,6 +17,7 @@ AXIS_END = 1.0
 AXIS_SHAFT_HALF_PT = 2.2
 AXIS_HEAD_HALF_PT = 7.0
 AXIS_HEAD_LENGTH_PT = 12.0
+ARROW_CORNER_RADIUS_PT = 0.5
 PLANE_INNER = 0.22
 PLANE_OUTER = 0.40
 PLANE_ALPHA = 0.42
@@ -550,8 +553,114 @@ def masked_axis_start(origin, end, radius: float) -> np.ndarray:
     return origin + direction * (float(radius) / length)
 
 
+def _rounded_polygon_corners(
+    points,
+    radius: float,
+    corners: tuple[int, ...],
+    *,
+    segments: int = 6,
+) -> np.ndarray:
+    """Replace selected convex polygon corners with tangent circular fillets.
+
+    ``radius`` is the desired screen-space radius. Edge trimming is derived from
+    the corner angle and clamped to the available edge lengths. Sampling includes
+    the arc midpoint, so symmetric arrow tips have one rounded apex rather than a
+    short flat segment.
+    """
+
+    polygon = np.asarray(points, np.float64).reshape(-1, 2)
+    count = len(polygon)
+    if count < 3 or radius <= 0.0 or segments < 1:
+        return polygon.copy()
+    selected = {int(index) % count for index in corners}
+    signed_area = 0.5 * float(
+        np.sum(
+            polygon[:, 0] * np.roll(polygon[:, 1], -1) - polygon[:, 1] * np.roll(polygon[:, 0], -1)
+        )
+    )
+    winding = 1.0 if signed_area >= 0.0 else -1.0
+    rounded: list[np.ndarray] = []
+    for index, point in enumerate(polygon):
+        if index not in selected:
+            rounded.append(point)
+            continue
+        incoming_edge = point - polygon[index - 1]
+        outgoing_edge = polygon[(index + 1) % count] - point
+        turn = incoming_edge[0] * outgoing_edge[1] - incoming_edge[1] * outgoing_edge[0]
+        if turn * winding <= 1e-9:
+            rounded.append(point)
+            continue
+        incoming = polygon[index - 1] - point
+        outgoing = polygon[(index + 1) % count] - point
+        incoming_length = float(np.linalg.norm(incoming))
+        outgoing_length = float(np.linalg.norm(outgoing))
+        if incoming_length < 1e-9 or outgoing_length < 1e-9:
+            rounded.append(point)
+            continue
+        incoming /= incoming_length
+        outgoing /= outgoing_length
+        angle = float(np.arccos(np.clip(np.dot(incoming, outgoing), -1.0, 1.0)))
+        half_angle = angle * 0.5
+        tangent = float(radius) / max(float(np.tan(half_angle)), 1e-6)
+        tangent = min(tangent, incoming_length * 0.45, outgoing_length * 0.45)
+        effective_radius = tangent * float(np.tan(half_angle))
+        bisector = incoming + outgoing
+        bisector_length = float(np.linalg.norm(bisector))
+        if bisector_length < 1e-9 or effective_radius < 1e-9:
+            rounded.append(point)
+            continue
+        center = point + bisector / bisector_length * (
+            effective_radius / max(float(np.sin(half_angle)), 1e-6)
+        )
+        start = point + incoming * tangent
+        end = point + outgoing * tangent
+        start_angle = math.atan2(start[1] - center[1], start[0] - center[0])
+        end_angle = math.atan2(end[1] - center[1], end[0] - center[0])
+        if winding > 0.0:
+            sweep = (end_angle - start_angle) % (2.0 * math.pi)
+        else:
+            sweep = -((start_angle - end_angle) % (2.0 * math.pi))
+        for step in range(segments + 1):
+            amount = step / segments
+            rounded.append(
+                center
+                + effective_radius
+                * np.asarray(
+                    (
+                        math.cos(start_angle + sweep * amount),
+                        math.sin(start_angle + sweep * amount),
+                    )
+                )
+            )
+    return np.asarray(rounded, np.float64)
+
+
+@lru_cache(maxsize=32)
+def _rounded_arrow_head(
+    head: float,
+    shaft: float,
+    wing: float,
+    radius: float,
+) -> np.ndarray:
+    """Cache the invariant local head while the projected shaft length changes."""
+
+    path = _rounded_polygon_corners(
+        (
+            (0.0, -shaft),
+            (0.0, -wing),
+            (head, 0.0),
+            (0.0, wing),
+            (0.0, shaft),
+        ),
+        radius,
+        (1, 2, 3),
+    )
+    path.flags.writeable = False
+    return path
+
+
 def axis_arrow_polygon(start, end, style_scale: float = 1.0) -> np.ndarray:
-    """Return the exact screen-space silhouette used by a flat axis handle."""
+    """Return the rounded screen-space silhouette used by a flat axis handle."""
     start = np.asarray(start, np.float64)
     end = np.asarray(end, np.float64)
     direction = end - start
@@ -564,17 +673,19 @@ def axis_arrow_polygon(start, end, style_scale: float = 1.0) -> np.ndarray:
     head = min(AXIS_HEAD_LENGTH_PT * float(style_scale), length * 0.42)
     wing = AXIS_HEAD_HALF_PT * float(style_scale)
     neck = end - direction * head
-    return np.asarray(
+    local_head = _rounded_arrow_head(
+        head,
+        shaft,
+        wing,
+        ARROW_CORNER_RADIUS_PT * float(style_scale),
+    )
+    screen_head = neck + local_head[:, :1] * direction[None, :] + local_head[:, 1:] * side[None, :]
+    return np.concatenate(
         (
-            start - side * shaft,
-            neck - side * shaft,
-            neck - side * wing,
-            end,
-            neck + side * wing,
-            neck + side * shaft,
-            start + side * shaft,
-        ),
-        np.float64,
+            (start - side * shaft)[None, :],
+            screen_head,
+            (start + side * shaft)[None, :],
+        )
     )
 
 

@@ -32,6 +32,7 @@ _FONT_PATHS = (
 _FOREGROUND = (220, 223, 227, 255)
 _TRANSPARENT = (0, 0, 0, 0)
 _BLACK = (0, 0, 0, 255)
+_TOOL_SHELL_GAP_RATIO = 0.5
 
 
 def _mono_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -188,6 +189,143 @@ class _PillowDraw2D:
         self.draw.text((x, y), text, fill=_rgba(color), font=font)
 
 
+class _ToolShellMaskDraw2D:
+    """Rasterize the union of Tool glyph primitives expanded by one shell gap."""
+
+    def __init__(self, mask: Image.Image, gap: float) -> None:
+        self.draw = ImageDraw.Draw(mask)
+        self.gap = float(gap)
+
+    @staticmethod
+    def _points(points):
+        return tuple((float(x), float(y)) for x, y in points)
+
+    @staticmethod
+    def _width(width: float) -> int:
+        return max(1, round(float(width)))
+
+    def line(self, a, b, _color, width: float, *, cap: str = "butt") -> None:
+        expanded = self._width(float(width) + 2.0 * self.gap)
+        self.draw.line((tuple(a), tuple(b)), fill=255, width=expanded)
+        if cap in {"round", "round_start", "round_end"}:
+            radius = expanded * 0.5
+            endpoints = (a,) if cap == "round_start" else (b,) if cap == "round_end" else (a, b)
+            for x, y in endpoints:
+                self.draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=255)
+
+    def _filled_polygon(self, points) -> None:
+        path = self._points(points)
+        if not path:
+            return
+        self.draw.polygon(path, fill=255)
+        width = self._width(2.0 * self.gap)
+        radius = width * 0.5
+        for start, end in zip(path, (*path[1:], path[0]), strict=True):
+            self.draw.line((start, end), fill=255, width=width)
+        # Pillow's closed-path curve join can leave a one-segment slit at the
+        # closing vertex.  Explicit vertex disks form the actual rounded
+        # Minkowski shell and keep this diagnostic free of rasterizer seams.
+        for x, y in path:
+            self.draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=255)
+
+    def convex_fill(self, points, _color) -> None:
+        self._filled_polygon(points)
+
+    def concave_fill(self, points, _color) -> None:
+        self._filled_polygon(points)
+
+    def fringed_concave_fill(self, points, _color) -> None:
+        self._filled_polygon(points)
+
+    def circle_filled(self, center, radius: float, _color, *, segments: int = 0) -> None:
+        del segments
+        x, y = center
+        expanded = float(radius) + self.gap
+        self.draw.ellipse(
+            (x - expanded, y - expanded, x + expanded, y + expanded),
+            fill=255,
+        )
+
+    def centered_label(self, *_args, **_kwargs) -> None:
+        # The W/B label is typography, not part of the arrow-shell diagnostic.
+        pass
+
+
+def render_tool_shell_icon(
+    size: int,
+    kind: str,
+    space: str,
+    geometry: OverlayGeometry = OVERLAY_GEOMETRY,
+    *,
+    foreground: tuple[int, int, int, int] = _FOREGROUND,
+    shell: tuple[int, int, int, int] | None = None,
+) -> Image.Image:
+    """Render a filled Tool glyph with a relative black or transparent shell."""
+
+    working_size = int(size) * _SUPERSAMPLE
+    scale = working_size * _GLYPH_SCALE_FOR_CANVAS
+    center = (working_size * 0.5, working_size * 0.5)
+    color = tuple(channel / 255.0 for channel in foreground)
+    transparent = tuple(channel / 255.0 for channel in _TRANSPARENT)
+    core = Image.new("RGBA", (working_size, working_size), _TRANSPARENT)
+    draw_tool_glyph(
+        _PillowDraw2D(core, scale),
+        center,
+        color,
+        scale,
+        kind,
+        transparent,
+        space,
+        geometry,
+    )
+    image = Image.new("RGBA", (working_size, working_size), _TRANSPARENT)
+    if shell is not None:
+        gap_ratio = geometry.frame_center_gap_ratio if kind == "frame" else _TOOL_SHELL_GAP_RATIO
+        shell_gap = geometry.tool_stroke * gap_ratio * scale
+        shell_mask = Image.new("L", (working_size, working_size), 0)
+        draw_tool_glyph(
+            _ToolShellMaskDraw2D(
+                shell_mask,
+                shell_gap,
+            ),
+            center,
+            color,
+            scale,
+            kind,
+            transparent,
+            space,
+            geometry,
+        )
+        image.paste(shell, (0, 0, working_size, working_size), shell_mask)
+    image.alpha_composite(core)
+    if shell is not None and kind == "frame":
+        # Keep the center dot legible as an independently outlined origin.
+        # The arrow shafts pass underneath it, so their visible starts still
+        # meet the outside of this ring without exposing background wedges.
+        glyph_scale = scale * TOOL_GLYPH_SCALE
+        radius = geometry.frame_center_radius * glyph_scale
+        draw = ImageDraw.Draw(image)
+        draw.ellipse(
+            (
+                center[0] - radius - shell_gap,
+                center[1] - radius - shell_gap,
+                center[0] + radius + shell_gap,
+                center[1] + radius + shell_gap,
+            ),
+            fill=shell,
+        )
+        draw.ellipse(
+            (
+                center[0] - radius,
+                center[1] - radius,
+                center[0] + radius,
+                center[1] + radius,
+            ),
+            fill=foreground,
+        )
+    return image.resize((size, size), Image.Resampling.LANCZOS)
+
+
 def render_rotate_shell_icon(
     size: int,
     geometry: OverlayGeometry = OVERLAY_GEOMETRY,
@@ -325,6 +463,24 @@ def export_icons(output: Path, size: int = 1024) -> tuple[Path, ...]:
                 )
         checker.alpha_composite(icon)
         return checker
+
+    for stem, kind, space in (
+        ("move", "move", "world"),
+        ("frame-world", "frame", "world"),
+        ("frame-body", "frame", "body"),
+    ):
+        black_shell = render_tool_shell_icon(size, kind, space, shell=_BLACK)
+        transparent_shell = render_tool_shell_icon(size, kind, space)
+        for suffix, icon in (
+            ("black-shell", black_shell),
+            ("transparent-shell", transparent_shell),
+        ):
+            path = output / f"{stem}-{suffix}.png"
+            icon.save(path)
+            written.append(path)
+            preview_path = output / f"{stem}-{suffix}-preview.png"
+            checker_preview(icon).save(preview_path)
+            written.append(preview_path)
 
     # Design probes: show the same local cyclic shell composition with the
     # shell pixels either black or transparent.
