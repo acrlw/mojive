@@ -1,4 +1,4 @@
-"""Compose MJCF or URDF models and save a Forge workspace or MJCF."""
+"""Compose MJCF or URDF models and save a Mojive workspace or MJCF."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from pathlib import Path
 
 import numpy as np
 
-from forge_viewer import CameraView, Light, LightType, MuJoCoAdapter
-from forge_viewer.adapters.workspace import WorkspaceAdapter
+from mojive import CameraView, Light, LightType, MuJoCoAdapter
+from mojive.adapters.workspace import WorkspaceAdapter
 
 
 def parse_args() -> argparse.Namespace:

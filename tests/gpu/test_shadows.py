@@ -8,13 +8,13 @@ pytestmark = pytest.mark.gpu
 glfw = pytest.importorskip("glfw")
 moderngl = pytest.importorskip("moderngl")
 
-from forge_viewer.render.backend import RenderFlag  # noqa: E402
-from forge_viewer.render.forge import gl_native as G  # noqa: E402
-from forge_viewer.render.forge import passes as _passes  # noqa: E402
-from forge_viewer.render.forge.backend import ForgeBackend, registered  # noqa: E402
-from forge_viewer.render.mesh import builtin_mesh  # noqa: E402
-from forge_viewer.render.scene import SceneBuilder  # noqa: E402
-from forge_viewer.types import (  # noqa: E402
+from mojive.render.backend import RenderFlag  # noqa: E402
+from mojive.render.mesh import builtin_mesh  # noqa: E402
+from mojive.render.opengl import gl_native as G  # noqa: E402
+from mojive.render.opengl import passes as _passes  # noqa: E402
+from mojive.render.opengl.backend import OpenGLBackend, registered  # noqa: E402
+from mojive.render.scene import SceneBuilder  # noqa: E402
+from mojive.types import (  # noqa: E402
     CameraView,
     Light,
     LightSet,
@@ -56,9 +56,9 @@ POINT_POS = np.array([2.5, -3.0, 4.0], np.float32)
 
 @pytest.fixture
 def backend(backend_name, request):
-    """Build the backend selected by FORGE_VIEWER_BACKEND; GL stays lazy."""
+    """Build the backend selected by MOJIVE_BACKEND; GL stays lazy."""
     if backend_name == "wgpu":
-        from forge_viewer.render.webgpu.backend import WgpuBackend
+        from mojive.render.webgpu.backend import WgpuBackend
 
         be = WgpuBackend(W, H, samples=4)
     else:
@@ -67,7 +67,7 @@ def backend(backend_name, request):
             pytest.skip(
                 f"shadow pass unavailable: {_passes.failed().get('shadow', 'unregistered')}"
             )
-        be = ForgeBackend(request.getfixturevalue("gl_ctx"), W, H, samples=4)
+        be = OpenGLBackend(request.getfixturevalue("gl_ctx"), W, H, samples=4)
     if not be.caps.shadows:
         be.release()
         pytest.skip("backend does not support shadows")
@@ -280,9 +280,9 @@ def _high_frequency(y: np.ndarray) -> float:
 def test_shadow_pass_actually_ran(backend):
 
     if backend.caps.name == "wgpu":
-        # Per-pass CPU timings and the pass registry are forge implementation
+        # Per-pass CPU timings and the pass registry are opengl implementation
         # details; the wgpu backend reports frame_cpu_ms only.
-        pytest.skip("per-pass timing table is a forge implementation detail")
+        pytest.skip("per-pass timing table is a opengl implementation detail")
     _render(backend, shadow=True)
     order = list(backend.stats.cpu_ms)
     assert "shadow" in order
@@ -373,9 +373,9 @@ def test_every_cascade_addresses_its_own_tile_and_texel(backend):
 def test_render_leaves_no_gl_error(backend):
 
     if backend.caps.name == "wgpu":
-        # GL error state and backend.ctx are forge internals; WebGPU reports
+        # GL error state and backend.ctx are opengl internals; WebGPU reports
         # validation failures through device error scopes instead.
-        pytest.skip("GL error state is a forge implementation detail")
+        pytest.skip("GL error state is a opengl implementation detail")
     G.native().drain_errors()
     _render(backend, shadow=True)
     assert backend.ctx.error == "GL_NO_ERROR"
@@ -464,7 +464,7 @@ def test_eight_local_lights_cast_simultaneously(backend):
     for _ in range(6):
         _render_many_spots(backend, 8)
     if backend.caps.pass_timing:
-        # Per-pass CPU timing is forge-only; the pixel assertions above are
+        # Per-pass CPU timing is opengl-only; the pixel assertions above are
         # the backend-neutral part of this test.
         assert backend.stats.cpu_ms["shadow"] < 16.7
 

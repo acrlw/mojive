@@ -1,4 +1,4 @@
-<mujoco model="forge rangefinder visuals">
+<mujoco model="opengl rangefinder visuals">
   <visual>
     <global azimuth="135" elevation="-24" fovy="45"/>
     <rgba rangefinder="1 .45 .12 1"/>

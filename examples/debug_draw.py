@@ -1,10 +1,10 @@
-"""Draw retained world-space diagnostics in an interactive Forge scene."""
+"""Draw retained world-space diagnostics in an interactive Mojive scene."""
 
 from __future__ import annotations
 
 import numpy as np
 
-from forge_viewer import Occlusion, Scene, build_scene
+from mojive import Occlusion, Scene, build_scene
 
 
 def add_diagnostics(viewer) -> None:
@@ -37,7 +37,7 @@ def main() -> None:
     scene = Scene()
     scene.plane(name="floor", size=(4.0, 4.0, 0.04), color=(0.18, 0.21, 0.25, 1.0))
     scene.box(name="body", size=(0.4, 0.3, 0.5), position=(0.0, 0.0, 0.5))
-    viewer = build_scene(scene, title="forge debug draw")
+    viewer = build_scene(scene, title="Mojive debug draw")
     try:
         add_diagnostics(viewer)
         viewer.run()

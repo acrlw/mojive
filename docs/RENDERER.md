@@ -1,6 +1,6 @@
 # Renderer design
 
-forge-viewer provides the OpenGL Forge backend and the cross-platform wgpu backend. Both consume
+Mojive provides the OpenGL backend and the cross-platform wgpu backend. Both consume
 backend-neutral scene data and implement the same linear-light, bucketed render pipeline.
 
 ## Frame pipeline
@@ -22,7 +22,7 @@ gizmo
 The ID pass shares scene visibility with opaque rendering and supplies picking, segmentation,
 and selection outlines. Debug and gizmo passes consume generic commands and UI state.
 
-The wgpu backend (`FORGE_VIEWER_BACKEND=wgpu`) runs the same pass order with WebGPU
+The wgpu backend (`MOJIVE_BACKEND=wgpu`) runs the same pass order with WebGPU
 constructions for the GL-only pieces: picking/segmentation/depth readback comes from a
 single-sampled export MRT pass that re-rasterizes the scene instead of an MSAA blit resolve
 (WebGPU cannot resolve integer or depth MSAA), wireframe carries barycentrics in a lazily
@@ -32,13 +32,13 @@ construction in both backends.
 
 ## Color pipeline
 
-Texture sampling uses sRGB formats. Forge-native scene sources combine lighting, reflection, fog,
+Texture sampling uses sRGB formats. Mojive-native scene sources combine lighting, reflection, fog,
 haze, emission, and selection highlight in linear light, then apply a soft tone-mapping knee at
 0.8 before display encoding.
 
 MuJoCo scene sources select the `mujoco-classic` shading model. It reconstructs display-domain
 material and texture values, combines the classic renderer's light contributions in display
-space, and bypasses Forge tone mapping. Other adapters retain the linear pipeline by default.
+space, and bypasses OpenGL tone mapping. Other adapters retain the linear pipeline by default.
 
 `make calibrate` measures individual terms. `make parity` evaluates the complete scene.
 
@@ -55,10 +55,10 @@ space, and bypasses Forge tone mapping. Other adapters retain the linear pipelin
   spotlight attenuation, avoiding the hard per-fragment boundary produced by a two-triangle proxy
   plane.
 - Classic fixed-function specular is modulated by the surface texture together with ambient and
-  diffuse lighting; Forge-native scenes retain the untextured specular path.
+  diffuse lighting; Mojive-native scenes retain the untextured specular path.
 - Texture surfaces receive lighting.
 - Image lights sample cube-map diffuse radiance and roughness-aware specular mip levels. An
-  intensity of 5000 maps to unit radiance in the Forge lighting model.
+  intensity of 5000 maps to unit radiance in the OpenGL lighting model.
 - Tendons use their model material, RGBA, width, texture, and transparency.
 
 ## Renderer diagnostics
@@ -73,7 +73,7 @@ space, and bypasses Forge tone mapping. Other adapters retain the linear pipelin
 | Reflections | Mirrored camera, oblique clipping, and surface sampling |
 | Wide lines | Screen-space triangle strips |
 | Text | GPU glyph atlas shared with UI font configuration |
-| Timing | CPU measurements on both backends; GPU measurements on Forge when timer queries exist |
+| Timing | CPU measurements on both backends; GPU measurements on OpenGL when timer queries exist |
 
 ## Transparency
 

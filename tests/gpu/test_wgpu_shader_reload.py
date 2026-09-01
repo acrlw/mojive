@@ -1,7 +1,7 @@
 """WGSL hot-reload coverage for the wgpu backend's scene shader module.
 
-wgpu-side counterpart of forge's ProgramCache reload test in
-test_forge_core.py; runs only under ``FORGE_VIEWER_BACKEND=wgpu`` (see
+wgpu-side counterpart of opengl's ProgramCache reload test in
+test_opengl_core.py; runs only under ``MOJIVE_BACKEND=wgpu`` (see
 Makefile ``gpu-wgpu``).
 """
 
@@ -17,11 +17,11 @@ pytestmark = pytest.mark.gpu
 
 pytest.importorskip("wgpu")
 
-from forge_viewer.adapters.base import SceneSource  # noqa: E402
-from forge_viewer.render.scene import SceneBuilder  # noqa: E402
-from forge_viewer.render.webgpu import programs  # noqa: E402
-from forge_viewer.render.webgpu.backend import WgpuBackend  # noqa: E402
-from forge_viewer.types import (  # noqa: E402
+from mojive.adapters.base import SceneSource  # noqa: E402
+from mojive.render.scene import SceneBuilder  # noqa: E402
+from mojive.render.webgpu import programs  # noqa: E402
+from mojive.render.webgpu.backend import WgpuBackend  # noqa: E402
+from mojive.types import (  # noqa: E402
     CameraView,
     LightSet,
     Material,
@@ -84,7 +84,7 @@ def _write(path, text: str) -> None:
 
 def test_scene_shader_hot_reload_keeps_last_good_module(backend_name, tmp_path, monkeypatch):
     if backend_name != "wgpu":
-        pytest.skip("wgpu shader hot reload; run with FORGE_VIEWER_BACKEND=wgpu")
+        pytest.skip("wgpu shader hot reload; run with MOJIVE_BACKEND=wgpu")
     shader_copy = tmp_path / "shaders"
     shutil.copytree(programs._SHADER_DIR, shader_copy)
     monkeypatch.setattr(programs, "_SHADER_DIR", shader_copy)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from forge_viewer.tools.tool_icons import render_tool_shell_icon
+from mojive.tools.tool_icons import render_tool_shell_icon
 
 
 @pytest.mark.parametrize(

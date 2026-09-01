@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from forge_viewer.render.forge.passes.outline import OUTLINE_RADIUS, circular_offsets
-from forge_viewer.render.forge.picking import (
+from mojive.render.opengl.passes.outline import OUTLINE_RADIUS, circular_offsets
+from mojive.render.opengl.picking import (
     pick,
     viewport_point_to_ndc,
     viewport_point_to_target_pixel,
@@ -150,8 +150,8 @@ def test_neighborhood_is_circular_not_square():
 
 def test_the_two_passes_register_themselves_under_the_right_names():
 
-    from forge_viewer.render.forge import backend as fb
-    from forge_viewer.render.forge.passes import idbuffer, outline  # noqa: F401
+    from mojive.render.opengl import backend as fb
+    from mojive.render.opengl.passes import idbuffer, outline  # noqa: F401
 
     reg = fb.registered()
     assert reg["id"]().name == "id"

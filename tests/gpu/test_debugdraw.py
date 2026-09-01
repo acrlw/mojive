@@ -1,12 +1,12 @@
 """Backend-neutral debug-draw and world-text tests.
 
 Runs under both backends via the ``backend_name`` fixture (conftest.py); the
-forge pass-level tests live in test_debugdraw_gpu.py.  Geometry mirrors that
+opengl pass-level tests live in test_debugdraw_gpu.py.  Geometry mirrors that
 file: the camera sits at -Y looking at the origin with +Z up, debug lines span
 X across the screen center, and occlusion tests insert a thin wall box halfway
 between camera and line covering the left half of the screen.
 
-Unlike the forge rig the occluder here is a real scene instance, so both
+Unlike the opengl rig the occluder here is a real scene instance, so both
 backends run their full pipeline (scene pass plus debug pass) end to end.
 """
 
@@ -20,15 +20,15 @@ pytestmark = pytest.mark.gpu
 glfw = pytest.importorskip("glfw")
 moderngl = pytest.importorskip("moderngl")
 
-from forge_viewer import math3d as M  # noqa: E402
-from forge_viewer.adapters.base import SceneSource  # noqa: E402
-from forge_viewer.render.debugdraw import (  # noqa: E402
+from mojive import math3d as M  # noqa: E402
+from mojive.adapters.base import SceneSource  # noqa: E402
+from mojive.render.debugdraw import (  # noqa: E402
     ARROW_CORNER_RADIUS_RATIO,
     ARROW_HEAD_RATIO,
     Occlusion,
 )
-from forge_viewer.render.scene import SceneBuilder  # noqa: E402
-from forge_viewer.types import (  # noqa: E402
+from mojive.render.scene import SceneBuilder  # noqa: E402
+from mojive.types import (  # noqa: E402
     CameraView,
     LightSet,
     Material,
@@ -91,16 +91,16 @@ class Rig:
 
 
 def _make_backend(backend_name: str, request, samples: int = 4):
-    """Build the backend selected by FORGE_VIEWER_BACKEND; GL stays lazy."""
+    """Build the backend selected by MOJIVE_BACKEND; GL stays lazy."""
     if backend_name == "wgpu":
-        from forge_viewer.render.webgpu.backend import WgpuBackend
+        from mojive.render.webgpu.backend import WgpuBackend
 
         return WgpuBackend(W, H, samples=samples)
-    from forge_viewer.render.forge import passes
-    from forge_viewer.render.forge.backend import ForgeBackend
+    from mojive.render.opengl import passes
+    from mojive.render.opengl.backend import OpenGLBackend
 
     passes.load_all()
-    return ForgeBackend(request.getfixturevalue("gl_ctx"), W, H, samples=samples)
+    return OpenGLBackend(request.getfixturevalue("gl_ctx"), W, H, samples=samples)
 
 
 @pytest.fixture
@@ -297,7 +297,7 @@ def test_ten_thousand_lines_render_without_dropping(rig):
     for _ in range(30):
         rig.draw()
 
-    # No per-frame budget assertion here (unlike the forge-only rig): the two
+    # No per-frame budget assertion here (unlike the opengl-only rig): the two
     # backends time frames differently; this checks correctness of the path.
     assert rig.backend.debug.stats().primitives == n
     assert rig.debug_pass().draw_calls == 1

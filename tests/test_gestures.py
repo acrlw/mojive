@@ -3,7 +3,7 @@ from __future__ import annotations
 import itertools
 import re
 
-from forge_viewer.ui.gestures import (
+from mojive.ui.gestures import (
     CameraGesture,
     Claim,
     GestureRouter,
@@ -161,8 +161,8 @@ def test_floating_panels_block_input_even_when_they_overlap_the_viewport_rect():
 
 
 def test_help_panel_lists_every_key_the_main_loop_polls():
-    from forge_viewer.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
-    from forge_viewer.ui.panels.help import KEYS
+    from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
+    from mojive.ui.panels.help import KEYS
 
     polled_actions = (
         InputAction.TOGGLE_PAUSE,

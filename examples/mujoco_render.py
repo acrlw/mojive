@@ -1,4 +1,4 @@
-"""Render MuJoCo images through the Forge Renderer API."""
+"""Render MuJoCo images through the Mojive Renderer API."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("model", type=Path)
     parser.add_argument("--output", type=Path, default=Path("output/examples"))
-    parser.add_argument("--backend", choices=("forge", "wgpu"), default="forge")
+    parser.add_argument("--backend", choices=("opengl", "wgpu"), default="opengl")
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     return parser.parse_args()
@@ -23,8 +23,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    os.environ["FORGE_VIEWER_BACKEND"] = args.backend
-    from forge_viewer import Renderer
+    os.environ["MOJIVE_BACKEND"] = args.backend
+    from mojive import Renderer
 
     model = mujoco.MjModel.from_xml_path(str(args.model.resolve()))
     data = mujoco.MjData(model)

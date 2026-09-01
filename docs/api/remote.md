@@ -2,11 +2,11 @@
 
 ## Remote transport
 
-::: forge_viewer.remote
+::: mojive.remote
 
 ## Snapshot and video streams
 
-::: forge_viewer.recording
+::: mojive.recording
 
 `.fvs` begins with a format header and stores the packet sequence consumed by
 `RemoteSceneAdapter`. The reader accepts the current format and reports mismatched versions and
@@ -14,7 +14,7 @@ truncated packets before replay.
 
 ## Local control RPC
 
-::: forge_viewer.control_rpc
+::: mojive.control_rpc
 
 `RpcClient` reuses one AF_UNIX connection for sequential requests. `ControlServer` handles
 multiple clients concurrently and continues after malformed requests. A timeout closes the client

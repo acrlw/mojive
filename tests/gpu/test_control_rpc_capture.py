@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-from forge_viewer.control_rpc import ControlService
+from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+from mojive.control_rpc import ControlService
 
 pytestmark = [pytest.mark.gpu, pytest.mark.physics]
 

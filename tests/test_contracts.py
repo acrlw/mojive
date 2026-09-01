@@ -5,8 +5,8 @@ import pytest
 
 
 def test_adapter_and_render_extension_types_are_public():
-    """A custom physics adapter or tool should not need forge's internal module layout."""
-    import forge_viewer as fv
+    """A custom physics adapter or tool should not need opengl's internal module layout."""
+    import mojive as fv
 
     for name in (
         "ActuatorInfo",
@@ -49,8 +49,8 @@ def test_adapter_and_render_extension_types_are_public():
 
 
 def test_null_backend_can_render_after_an_explicit_update():
-    from forge_viewer.adapters.base import SceneFrame
-    from forge_viewer.render.backend import NullBackend, RenderBackend
+    from mojive.adapters.base import SceneFrame
+    from mojive.render.backend import NullBackend, RenderBackend
 
     backend = NullBackend()
     backend.update(SceneFrame())
@@ -64,7 +64,7 @@ def test_null_backend_can_render_after_an_explicit_update():
 
 
 def test_debug_outputs_are_not_exposed_as_independent_render_flags():
-    from forge_viewer.render.backend import DebugView, RenderFlag
+    from mojive.render.backend import DebugView, RenderFlag
 
     debug_only = {view.value for view in DebugView} - {DebugView.WIREFRAME.value}
     assert debug_only.isdisjoint(flag.value for flag in RenderFlag)
@@ -73,7 +73,7 @@ def test_debug_outputs_are_not_exposed_as_independent_render_flags():
 def test_mujoco_visual_audit_covers_every_enum_flag():
     mujoco = pytest.importorskip("mujoco")
 
-    from forge_viewer.mujoco_audit import visual_coverage
+    from mojive.mujoco_audit import visual_coverage
 
     coverage = visual_coverage()
     actual_rnd = {item["feature"] for item in coverage["mjtRndFlag"]}
@@ -97,8 +97,8 @@ def test_mujoco_visual_audit_covers_every_enum_flag():
 
 
 def test_mujoco_schema_audit_classifies_every_attributed_path():
-    from forge_viewer.adapters.mujoco_adapter import _MJCF_SCHEMA_ATTRIBUTES
-    from forge_viewer.mujoco_audit import schema_coverage
+    from mojive.adapters.mujoco_adapter import _MJCF_SCHEMA_ATTRIBUTES
+    from mojive.mujoco_audit import schema_coverage
 
     report = schema_coverage()
     rows = {item["path"]: item for item in report["rows"]}
@@ -125,8 +125,8 @@ def test_mujoco_schema_audit_classifies_every_attributed_path():
 
 def test_camera_preset_tables_agree_on_which_way_is_up():
 
-    from forge_viewer.ui.camera import PRESETS as CAM
-    from forge_viewer.ui.panels.camera import PRESETS as PANEL
+    from mojive.ui.camera import PRESETS as CAM
+    from mojive.ui.panels.camera import PRESETS as PANEL
 
     panel = {name: (yaw, pitch) for name, yaw, pitch in PANEL}
     assert set(panel) == set(CAM)
@@ -139,8 +139,8 @@ def test_camera_preset_tables_agree_on_which_way_is_up():
 
 def test_camera_slider_reset_matches_the_default_camera():
 
-    from forge_viewer.ui.camera import OrbitCamera
-    from forge_viewer.ui.panels.camera import PARAM_SLIDERS
+    from mojive.ui.camera import OrbitCamera
+    from mojive.ui.panels.camera import PARAM_SLIDERS
 
     initial = {attr: init for attr, _lo, _hi, _fmt, init in PARAM_SLIDERS}
     camera = OrbitCamera()
@@ -150,8 +150,8 @@ def test_camera_slider_reset_matches_the_default_camera():
 
 def test_the_two_picking_coordinate_paths_agree():
 
-    from forge_viewer.render.forge.picking import viewport_point_to_target_pixel
-    from forge_viewer.types import ViewportImage
+    from mojive.render.opengl.picking import viewport_point_to_target_pixel
+    from mojive.types import ViewportImage
 
     rect = (12.0, 40.0, 800.0, 450.0)
     img = ViewportImage(texture_id=1, width=1600, height=900)
@@ -171,7 +171,7 @@ def test_the_two_picking_coordinate_paths_agree():
 
 def test_picking_flips_y_and_uses_the_target_over_rect_ratio():
 
-    from forge_viewer.types import ViewportImage
+    from mojive.types import ViewportImage
 
     rect = (0.0, 0.0, 400.0, 300.0)
     img = ViewportImage(texture_id=1, width=800, height=600)
@@ -191,12 +191,12 @@ def test_picking_flips_y_and_uses_the_target_over_rect_ratio():
 
 def test_instance_layout_matches_the_documented_stride():
 
-    from forge_viewer.render.forge.instances import (
+    from mojive.render.opengl.instances import (
         INSTANCE_ATTRIBUTES,
         INSTANCE_BYTES,
         INSTANCE_WORDS,
     )
-    from forge_viewer.render.scene import INSTANCE_FLOATS, INSTANCE_STRIDE
+    from mojive.render.scene import INSTANCE_FLOATS, INSTANCE_STRIDE
 
     assert INSTANCE_FLOATS == 32, "transform 16 + color 4 + material 4 + tex_coef 4 + cube_coef 4"
     assert INSTANCE_WORDS == 33
@@ -212,8 +212,8 @@ def test_instance_layout_matches_the_documented_stride():
 
 def test_object_id_attribute_is_an_integer_type():
 
-    from forge_viewer.render.forge import gl_native as G
-    from forge_viewer.render.forge.instances import INSTANCE_ATTRIBUTES
+    from mojive.render.opengl import gl_native as G
+    from mojive.render.opengl.instances import INSTANCE_ATTRIBUTES
 
     ids = [a for a in INSTANCE_ATTRIBUTES if a[0] == "in_object_id"]
     assert len(ids) == 1
@@ -225,9 +225,9 @@ def test_object_id_attribute_is_an_integer_type():
 
 def test_shadow_clip_survives_the_whole_pathway():
 
-    from forge_viewer.adapters.base import SceneSource
-    from forge_viewer.render.forge.cascades import DEFAULT_SHADOW_CLIP, cascade_radii
-    from forge_viewer.render.scene import RenderScene
+    from mojive.adapters.base import SceneSource
+    from mojive.render.opengl.cascades import DEFAULT_SHADOW_CLIP, cascade_radii
+    from mojive.render.scene import RenderScene
 
     assert hasattr(SceneSource(), "shadow_clip")
     assert hasattr(RenderScene(), "shadow_clip")
@@ -241,7 +241,7 @@ def test_shadow_clip_survives_the_whole_pathway():
 
 def test_pass_order_is_the_one_the_spec_pins():
 
-    from forge_viewer.render.forge.registry import PASS_ORDER
+    from mojive.render.opengl.registry import PASS_ORDER
 
     assert PASS_ORDER == (
         "shadow",
@@ -260,7 +260,7 @@ def test_pass_order_is_the_one_the_spec_pins():
 
 def test_registering_an_unknown_pass_name_is_refused():
 
-    from forge_viewer.render.forge.registry import register_pass
+    from mojive.render.opengl.registry import register_pass
 
     with pytest.raises(ValueError, match="Unknown pass"):
         register_pass("bloom", lambda: None)
@@ -268,7 +268,7 @@ def test_registering_an_unknown_pass_name_is_refused():
 
 def test_render_flags_cover_the_reference_renderer_feature_switches():
 
-    from forge_viewer.render.backend import DebugView, RenderFlag
+    from mojive.render.backend import DebugView, RenderFlag
 
     names = {f.value for f in RenderFlag}
     for required in (
@@ -304,7 +304,7 @@ def test_debug_view_combo_lists_every_enum_member():
     import inspect
     import textwrap
 
-    from forge_viewer.ui.panels import settings as settings_panel
+    from mojive.ui.panels import settings as settings_panel
 
     src = textwrap.dedent(inspect.getsource(settings_panel.SettingsPanel._debug_view))
     tree = ast.parse(src)
@@ -316,8 +316,8 @@ def test_debug_view_combo_lists_every_enum_member():
 
 def test_settings_panel_reads_the_debug_view_from_the_backend():
 
-    from forge_viewer.render.backend import DebugView, NullBackend
-    from forge_viewer.ui.panels.settings import SettingsPanel
+    from mojive.render.backend import DebugView, NullBackend
+    from mojive.ui.panels.settings import SettingsPanel
 
     panel = SettingsPanel()
     backend = NullBackend()

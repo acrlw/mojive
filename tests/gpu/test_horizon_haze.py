@@ -5,10 +5,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from forge_viewer.render.backend import RenderFlag
-from forge_viewer.tools._harness import OffscreenHarness
-from forge_viewer.types import CameraView
-from forge_viewer.ui.viewport_widgets import (
+from mojive.render.backend import RenderFlag
+from mojive.tools._harness import OffscreenHarness
+from mojive.types import CameraView
+from mojive.ui.viewport_widgets import (
     PLAYBACK_CHROME_SCALE,
     playback_size,
     viewport_chrome_scale,
@@ -145,7 +145,7 @@ def test_mujoco_haze_changes_sky_below_horizon_without_fogging_objects(tmp_path)
 
 def test_interactive_viewport_does_not_composite_haze_twice(tmp_path):
     pytest.importorskip("glfw")
-    from forge_viewer.composition import build
+    from mojive.composition import build
 
     scene = tmp_path / "interactive-haze.xml"
     scene.write_text(

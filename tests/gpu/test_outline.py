@@ -1,11 +1,11 @@
 """Backend-neutral selection-outline and present-mode (SEGMENT/IDCOLOR) tests.
 
 Runs under both backends via the ``backend_name`` fixture (conftest.py); the
-GL-internals outline tests live in test_id_outline.py (forge only).  Scene
+GL-internals outline tests live in test_id_outline.py (opengl only).  Scene
 setup follows test_id_outline.py: an orthographic camera looking straight at
 Z=0 boxes so silhouettes map to axis-aligned rectangles.
 
-Tolerances account for the deliberate mask difference: forge rasterizes the
+Tolerances account for the deliberate mask difference: opengl rasterizes the
 selection mask into 4x MSAA (subpixel coverage), the wgpu backend uses a
 single-sampled mask (see webgpu/shaders/outline.wgsl).  Both backends
 antialias the ring's outer edge in the dilation shader, so only the ring's
@@ -22,11 +22,11 @@ pytestmark = pytest.mark.gpu
 glfw = pytest.importorskip("glfw")
 moderngl = pytest.importorskip("moderngl")
 
-from forge_viewer import math3d as M  # noqa: E402
-from forge_viewer.adapters.base import SceneSource  # noqa: E402
-from forge_viewer.render.backend import DebugView  # noqa: E402
-from forge_viewer.render.scene import SceneBuilder  # noqa: E402
-from forge_viewer.types import (  # noqa: E402
+from mojive import math3d as M  # noqa: E402
+from mojive.adapters.base import SceneSource  # noqa: E402
+from mojive.render.backend import DebugView  # noqa: E402
+from mojive.render.scene import SceneBuilder  # noqa: E402
+from mojive.types import (  # noqa: E402
     CameraView,
     LightSet,
     Material,
@@ -44,7 +44,7 @@ SEL = 7
 BACKGROUND = (0.05, 0.05, 0.08, 1.0)
 OUTLINE_COLOR = (1.0, 0.63, 0.20, 1.0)  # both backends' default
 CUSTOM_COLOR = (1.0, 0.0, 1.0, 1.0)
-OUTLINE_RADIUS = 3  # forge outline.OUTLINE_RADIUS
+OUTLINE_RADIUS = 3  # opengl outline.OUTLINE_RADIUS
 
 MATERIAL = np.array([0.0, 0.0, 0.5, 0.0], np.float32)
 AMBIENT = np.full(3, 0.3, np.float32)
@@ -107,16 +107,16 @@ class Rig:
 
 
 def _make_backend(backend_name: str, request, samples: int = 4):
-    """Build the backend selected by FORGE_VIEWER_BACKEND; GL stays lazy."""
+    """Build the backend selected by MOJIVE_BACKEND; GL stays lazy."""
     if backend_name == "wgpu":
-        from forge_viewer.render.webgpu.backend import WgpuBackend
+        from mojive.render.webgpu.backend import WgpuBackend
 
         return WgpuBackend(W, H, samples=samples)
-    from forge_viewer.render.forge import passes
-    from forge_viewer.render.forge.backend import ForgeBackend
+    from mojive.render.opengl import passes
+    from mojive.render.opengl.backend import OpenGLBackend
 
     passes.load_all()
-    return ForgeBackend(request.getfixturevalue("gl_ctx"), W, H, samples=samples)
+    return OpenGLBackend(request.getfixturevalue("gl_ctx"), W, H, samples=samples)
 
 
 @pytest.fixture
@@ -201,7 +201,7 @@ def test_outline_hugs_the_viewport_edge_when_clipped(rig):
     # Half of the box sticks out beyond the left viewport edge.
     img = rig.draw(_box(center_x=-1.1, half=(0.5, 0.4, 0.1)), selected=SEL)
     ids, out = rig.ids(), rig.outline_mask(img)
-    # forge's MSAA id resolve loses the outermost columns on some drivers (a
+    # opengl's MSAA id resolve loses the outermost columns on some drivers (a
     # pre-existing test_id_outline.py failure), so the silhouette check
     # tolerates a small inset; the band check below carries the semantics.
     assert (ids[:, : OUTLINE_RADIUS + 1] == SEL).any()

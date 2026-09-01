@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from forge_viewer.ui import fonts
+from mojive.ui import fonts
 
 
 def test_explicit_cjk_font_has_priority(tmp_path):

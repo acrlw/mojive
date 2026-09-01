@@ -7,8 +7,8 @@ import pytest
 
 pytest.importorskip("wgpu")
 
-from forge_viewer.render.scene import RenderScene
-from forge_viewer.render.webgpu.instances import InstanceStore
+from mojive.render.scene import RenderScene
+from mojive.render.webgpu.instances import InstanceStore
 
 
 class _Buffer:

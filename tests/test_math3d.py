@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from forge_viewer import math3d
+from mojive import math3d
 
 
 @pytest.mark.parametrize(

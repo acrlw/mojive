@@ -1,4 +1,4 @@
-from forge_viewer.render.text import TextLayout
+from mojive.render.text import TextLayout
 
 
 def test_text_atlas_keeps_pil_top_at_the_glyph_top():

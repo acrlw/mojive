@@ -7,10 +7,10 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from forge_viewer.adapters.base import NodeType as NK
-from forge_viewer.adapters.base import SceneFrame, SceneNode, SceneSource
-from forge_viewer.render.builder import SceneSourceBuilder
-from forge_viewer.types import (
+from mojive.adapters.base import NodeType as NK
+from mojive.adapters.base import SceneFrame, SceneNode, SceneSource
+from mojive.render.builder import SceneSourceBuilder
+from mojive.types import (
     CameraView,
     InstanceVisual,
     Material,
@@ -548,7 +548,7 @@ def test_island_colors_replace_dynamic_instance_color_and_texture():
 
 def test_stats_reports_batching_numbers():
 
-    mesh = pytest.importorskip("forge_viewer.render.mesh", reason="built-in meshes are unavailable")
+    mesh = pytest.importorskip("mojive.render.mesh", reason="built-in meshes are unavailable")
     src = make_source(bodies=10)
     b = SceneSourceBuilder()
     scene = b.set_source(src, CameraView())

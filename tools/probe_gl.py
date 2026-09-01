@@ -11,10 +11,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from forge_viewer.render.forge import gl_native as G
-from forge_viewer.render.forge.context import probe
-from forge_viewer.render.forge.state_guard import GLStateGuard
-from forge_viewer.render.forge.targets import IdLayout, RenderTarget, probe_id_layout
+from mojive.render.opengl import gl_native as G
+from mojive.render.opengl.context import probe
+from mojive.render.opengl.state_guard import GLStateGuard
+from mojive.render.opengl.targets import IdLayout, RenderTarget, probe_id_layout
 
 OK, BAD = "✓", "✗"
 
@@ -35,7 +35,7 @@ def main() -> int:
         (glfw.VISIBLE, False),
     ):
         glfw.window_hint(k, v)
-    win = glfw.create_window(320, 240, "forge probe", None, None)
+    win = glfw.create_window(320, 240, "opengl probe", None, None)
     if not win:
         print("OpenGL 3.3 core context creation failed")
         glfw.terminate()
@@ -135,7 +135,7 @@ def main() -> int:
         tgt.clear_id(v)
         ok_clear &= int(np.unique(tgt.read_ids())[0]) == v
     row(
-        "forge integer clear",
+        "opengl integer clear",
         f"{OK} exact" if ok_clear else f"{BAD} inexact",
         "verified with 0, 77, and 4e9",
     )

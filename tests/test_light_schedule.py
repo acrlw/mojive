@@ -1,11 +1,11 @@
 """Deterministic scene-light and shadow-slot scheduling."""
 
-from forge_viewer.render.forge.passes.base import (
+from mojive.render.opengl.passes.base import (
     LOCAL_SHADOW_SLOTS,
     MAX_SCENE_LIGHTS,
     schedule_lights,
 )
-from forge_viewer.types import Light, LightSet, LightType
+from mojive.types import Light, LightSet, LightType
 
 
 def test_light_schedule_caps_scene_and_local_shadow_slots():

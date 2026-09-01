@@ -17,8 +17,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from forge_viewer import commands as cmd
-from forge_viewer.composition import build
+from mojive import commands as cmd
+from mojive.composition import build
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = ROOT / "output" / "ui-design-baseline"

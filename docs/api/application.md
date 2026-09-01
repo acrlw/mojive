@@ -5,12 +5,12 @@ adapter, debug bridge, and editor UI as one owned `Viewer`.
 
 ## Viewer lifecycle and capture
 
-::: forge_viewer.composition
+::: mojive.composition
 
 ## Backend discovery
 
-::: forge_viewer.backends
+::: mojive.backends
 
 ## Built-in programmatic scenes
 
-::: forge_viewer.demos
+::: mojive.demos

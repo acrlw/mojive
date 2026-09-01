@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the UI feasibility probe through Forge Viewer's real ImGui backend.
+"""Render the UI feasibility probe through Mojive's real ImGui backend.
 
 The image is captured from the OpenGL framebuffer. Standard controls are real
 ImGui widgets; icons, capsules, viewport labels, and the timeline use the same
@@ -18,16 +18,16 @@ import numpy as np
 from imgui_bundle import imgui
 from PIL import Image
 
-from forge_viewer import gizmo as gizmo_geometry
-from forge_viewer.types import CameraView
-from forge_viewer.ui import gizmo as gizmo_ui
-from forge_viewer.ui import theme as theme_mod
-from forge_viewer.ui.compound_fields import draw_joined_field_frame
-from forge_viewer.ui.draw2d import ImguiDraw2D
-from forge_viewer.ui.input_bindings import DEFAULT_INPUT_BINDINGS
-from forge_viewer.ui.panels.settings import settings_uses_stacked_layout
-from forge_viewer.ui.theme import THEME, rgb8
-from forge_viewer.ui.viewport_widgets import (
+from mojive import gizmo as gizmo_geometry
+from mojive.types import CameraView
+from mojive.ui import gizmo as gizmo_ui
+from mojive.ui import theme as theme_mod
+from mojive.ui.compound_fields import draw_joined_field_frame
+from mojive.ui.draw2d import ImguiDraw2D
+from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
+from mojive.ui.panels.settings import settings_uses_stacked_layout
+from mojive.ui.theme import THEME, rgb8
+from mojive.ui.viewport_widgets import (
     CAPSULE_SURFACE_ALPHA,
     OVERLAY_GEOMETRY,
     TOOL_GLYPH_SCALE,
@@ -38,7 +38,7 @@ from forge_viewer.ui.viewport_widgets import (
     draw_status,
     draw_tool_glyph,
 )
-from forge_viewer.ui.window import Window, WindowConfig
+from mojive.ui.window import Window, WindowConfig
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = ROOT / "output" / "ui-drawing-feasibility.png"
@@ -1436,7 +1436,7 @@ def _draw_settings_interaction(state: ProbeState) -> None:
 
 
 def _draw_settings_rendering(state: ProbeState) -> None:
-    imgui.text("Forge")
+    imgui.text("OpenGL")
     imgui.separator()
     if _settings_properties("##probe-settings-rendering"):
         for label, attribute in (
@@ -1485,7 +1485,7 @@ def _draw_settings_rendering(state: ProbeState) -> None:
         )
         imgui.end_table()
     imgui.separator()
-    imgui.text_disabled("Backend  Forge / OpenGL")
+    imgui.text_disabled("Backend  OpenGL / OpenGL")
     imgui.text_disabled("Device  system renderer")
 
 
@@ -2114,7 +2114,7 @@ def _draw_output(size, state: ProbeState) -> None:
             ("09:44:09", "INFO", "sacrum"),
             ("09:44:13", "WARN", "femur_r limit reached"),
             ("09:44:25", "INFO", "Loaded scene.xml"),
-            ("09:44:54", "INFO", "[forge/ui] Loading model /assets/joint_types.xml"),
+            ("09:44:54", "INFO", "[mojive/ui] Loading model /assets/joint_types.xml"),
         )
     )
     imgui.text_disabled(f"{len(rows)} messages · select a row, then right-click or press Ctrl+C")
@@ -2955,8 +2955,8 @@ def _draw_info_aux(size) -> None:
     imgui.separator()
     if _settings_properties("##probe-info"):
         for label, value in (
-            ("Viewer", "forge-viewer"),
-            ("Backend", "Forge / OpenGL"),
+            ("Viewer", "mojive"),
+            ("Backend", "OpenGL / OpenGL"),
             ("Scene source", "MuJoCo"),
             ("Document", "joint_types.xml"),
         ):
@@ -3735,7 +3735,7 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
         imgui.WindowFlags_.no_saved_settings,
         imgui.WindowFlags_.menu_bar,
     )
-    opened, _ = imgui.begin("Forge Viewer UI Probe", True, flags)
+    opened, _ = imgui.begin("Mojive UI Probe", True, flags)
     if not opened:
         imgui.end()
         return
@@ -3885,7 +3885,7 @@ def render(
 ) -> None:
     window = Window(
         WindowConfig(
-            title="Forge Viewer UI feasibility",
+            title="Mojive UI feasibility",
             width=width,
             height=height,
             # The probe is UI, not a GPU benchmark. Interactive mode is paced,

@@ -14,9 +14,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from forge_viewer.bridge import APP, DebugBridge, socket_path
-from forge_viewer.render.backend import BackendCaps, NullBackend
-from forge_viewer.render.debugdraw import (
+from mojive.bridge import APP, DebugBridge, socket_path
+from mojive.render.backend import BackendCaps, NullBackend
+from mojive.render.debugdraw import (
     ARROW_CORNER_RADIUS_RATIO,
     ARROW_HEAD_RATIO,
     AXIS_COLORS,
@@ -103,7 +103,7 @@ def test_batch_points_and_arrows_keep_one_id_and_per_item_colors():
 
 
 def test_debug_arrow_uses_the_position_gizmo_head_proportion():
-    from forge_viewer.gizmo import (
+    from mojive.gizmo import (
         ARROW_CORNER_RADIUS_PT,
         AXIS_HEAD_LENGTH_PT,
         AXIS_SHAFT_HALF_PT,
@@ -465,8 +465,8 @@ def test_layers_share_one_px_scale():
     pytest.importorskip("moderngl")
     from types import SimpleNamespace
 
-    from forge_viewer.math3d import perspective
-    from forge_viewer.render.forge.passes.base import PassContext
+    from mojive.math3d import perspective
+    from mojive.render.opengl.passes.base import PassContext
 
     dd = DebugDraw()
     dd.layer("near", Occlusion.DEPTH).line("l", A, B, RED, 4.0)
@@ -621,10 +621,10 @@ def test_bridge_reports_commands_dropped_by_the_per_frame_budget() -> None:
 
 
 def test_selection_label_uses_the_structure_object_index() -> None:
-    from forge_viewer.adapters.base import NodeType, SceneFrame, SceneNode, SceneSource
-    from forge_viewer.render.backend import FrameMode, LabelMode
-    from forge_viewer.render.overlay import OverlayPublisher, OverlayState
-    from forge_viewer.types import CameraView
+    from mojive.adapters.base import NodeType, SceneFrame, SceneNode, SceneSource
+    from mojive.render.backend import FrameMode, LabelMode
+    from mojive.render.overlay import OverlayPublisher, OverlayState
+    from mojive.types import CameraView
 
     node = SceneNode(1, "selected", NodeType.LINK, object_id=17, body_index=0)
     source = SceneSource(nodes=[node])
@@ -647,8 +647,8 @@ def test_selection_label_uses_the_structure_object_index() -> None:
 
 
 def test_tendon_labels_group_segments_in_one_indexed_pass() -> None:
-    from forge_viewer.adapters.base import SceneFrame, SceneSource
-    from forge_viewer.render.overlay import OverlayPublisher
+    from mojive.adapters.base import SceneFrame, SceneSource
+    from mojive.render.overlay import OverlayPublisher
 
     source = SceneSource(tendon_names=("first", "second"))
     frame = SceneFrame(
@@ -676,8 +676,8 @@ def test_tendon_labels_group_segments_in_one_indexed_pass() -> None:
 def test_pass_is_registered_and_hands_its_draw_to_the_backend():
 
     pytest.importorskip("moderngl")
-    from forge_viewer.render.forge import passes
-    from forge_viewer.render.forge.backend import registered
+    from mojive.render.opengl import passes
+    from mojive.render.opengl.backend import registered
 
     passes.load_all()
     assert "debug" not in passes.failed(), passes.failed().get("debug")
@@ -689,9 +689,9 @@ def test_pass_is_registered_and_hands_its_draw_to_the_backend():
 def test_perturbation_feedback_lands_on_the_layers_it_asks_for():
 
     pytest.importorskip("moderngl")
-    from forge_viewer.session import PerturbState
-    from forge_viewer.types import CameraView
-    from forge_viewer.ui.perturb import MarkBudget, PerturbController
+    from mojive.session import PerturbState
+    from mojive.types import CameraView
+    from mojive.ui.perturb import MarkBudget, PerturbController
 
     ctrl = PerturbController()
     dd = DebugDraw()

@@ -9,17 +9,17 @@ glfw = pytest.importorskip("glfw")
 moderngl = pytest.importorskip("moderngl")
 pytest.importorskip("mujoco")
 
-from forge_viewer.adapters.base import FrameNeeds  # noqa: E402
-from forge_viewer.assets import resolve  # noqa: E402
-from forge_viewer.backends import make_adapter  # noqa: E402
-from forge_viewer.render.backend import DebugView, RenderFlag  # noqa: E402
-from forge_viewer.render.builder import SceneSourceBuilder  # noqa: E402
-from forge_viewer.render.debugdraw import Occlusion, PrimitiveType  # noqa: E402
-from forge_viewer.render.forge import gl_native as G  # noqa: E402
-from forge_viewer.render.forge import passes as _passes  # noqa: E402
-from forge_viewer.render.forge.backend import PASS_ORDER, ForgeBackend, registered  # noqa: E402
-from forge_viewer.render.forge.state_guard import GLStateGuard  # noqa: E402
-from forge_viewer.types import CameraView  # noqa: E402
+from mojive.adapters.base import FrameNeeds  # noqa: E402
+from mojive.assets import resolve  # noqa: E402
+from mojive.backends import make_adapter  # noqa: E402
+from mojive.render.backend import DebugView, RenderFlag  # noqa: E402
+from mojive.render.builder import SceneSourceBuilder  # noqa: E402
+from mojive.render.debugdraw import Occlusion, PrimitiveType  # noqa: E402
+from mojive.render.opengl import gl_native as G  # noqa: E402
+from mojive.render.opengl import passes as _passes  # noqa: E402
+from mojive.render.opengl.backend import PASS_ORDER, OpenGLBackend, registered  # noqa: E402
+from mojive.render.opengl.state_guard import GLStateGuard  # noqa: E402
+from mojive.types import CameraView  # noqa: E402
 
 WIDTH, HEIGHT = 480, 360
 
@@ -48,13 +48,13 @@ def gl():
 
 
 def _make_backend(backend_name: str, request, samples: int = 4):
-    """Build the backend selected by FORGE_VIEWER_BACKEND; GL stays lazy."""
+    """Build the backend selected by MOJIVE_BACKEND; GL stays lazy."""
     if backend_name == "wgpu":
-        from forge_viewer.render.webgpu.backend import WgpuBackend
+        from mojive.render.webgpu.backend import WgpuBackend
 
         return WgpuBackend(WIDTH, HEIGHT, samples=samples)
     _passes.load_all()
-    return ForgeBackend(request.getfixturevalue("gl"), WIDTH, HEIGHT, samples=samples)
+    return OpenGLBackend(request.getfixturevalue("gl"), WIDTH, HEIGHT, samples=samples)
 
 
 def _tendon_pass(backend):
@@ -86,7 +86,7 @@ def rendered(backend_name, request):
 
     adapter = make_adapter("mujoco", path)
     backend = _make_backend(backend_name, request)
-    is_forge = backend_name == "forge"
+    is_opengl = backend_name == "opengl"
     builder = SceneSourceBuilder()
     source = adapter.scene_source()
     backend.set_scene(source)
@@ -104,8 +104,8 @@ def rendered(backend_name, request):
     backend.set_camera(camera)
     builder.set_source(source, camera)
 
-    guard = GLStateGuard() if is_forge else None
-    if is_forge:
+    guard = GLStateGuard() if is_opengl else None
+    if is_opengl:
         G.native().drain_errors()
     for _ in range(4):
         adapter.step(1)
@@ -113,13 +113,13 @@ def rendered(backend_name, request):
         backend.render(None)
 
     before = guard.snapshot() if guard is not None else None
-    err_before = G.native().drain_errors() if is_forge else 0
+    err_before = G.native().drain_errors() if is_opengl else 0
     frame = adapter.frame(FrameNeeds(poses=True))
     scene = builder.update(frame, camera)
     backend.set_render_scene(scene)
     image = backend.render(frame)
     after = guard.snapshot() if guard is not None else None
-    err_after = G.native().drain_errors() if is_forge else 0
+    err_after = G.native().drain_errors() if is_opengl else 0
 
     yield {
         "backend": backend,
@@ -151,7 +151,7 @@ def _bounds(adapter, source):
 
 
 def _require(backend_name: str, *names: str) -> None:
-    if backend_name != "forge":
+    if backend_name != "opengl":
         return  # wgpu wires its passes statically; there is no registry.
     _passes.load_all()
     missing = [n for n in names if n not in registered()]
@@ -160,7 +160,7 @@ def _require(backend_name: str, *names: str) -> None:
 
 
 def test_msaa_flag_updates_the_backend_sample_state(backend_name, request):
-    """Forge toggles rasterization state; wgpu rebuilds sample-count state."""
+    """OpenGL toggles rasterization state; wgpu rebuilds sample-count state."""
     backend = _make_backend(backend_name, request)
     try:
         assert RenderFlag.MSAA in backend.caps.render_flags
@@ -413,7 +413,7 @@ def test_contact_split_and_autoconnect_reach_the_gpu_pipeline(backend_name, requ
 
 
 def test_bvh_boxes_reach_the_gpu_pipeline(backend_name, request):
-    from forge_viewer.adapters.base import BvhType
+    from mojive.adapters.base import BvhType
 
     adapter = make_adapter("mujoco", resolve("deformables"))
     backend = _make_backend(backend_name, request, samples=1)
@@ -441,7 +441,7 @@ def test_bvh_boxes_reach_the_gpu_pipeline(backend_name, request):
 
 
 def test_interpolated_flex_control_cage_reaches_the_gpu_pipeline(backend_name, request):
-    from forge_viewer.adapters.base import BvhType
+    from mojive.adapters.base import BvhType
 
     adapter = make_adapter("mujoco", resolve("interpolated_flex"))
     backend = _make_backend(backend_name, request, samples=1)
@@ -471,7 +471,7 @@ def test_deformable_vertices_update_without_rebuilding_the_scene(backend_name, r
 
     import mujoco
 
-    from forge_viewer.types import MeshKey, MeshShape
+    from mojive.types import MeshKey, MeshShape
 
     adapter = make_adapter("mujoco", resolve("deformables"))
     backend = _make_backend(backend_name, request, samples=1)
@@ -508,7 +508,7 @@ def test_deformable_wireframe_view_follows_vertex_updates(backend_name, request)
     """The wireframe debug view must track in-place deformable vertex updates.
 
     The wgpu mesh store expands indexed triangles into a barycentric wire
-    stream that GpuMesh.update refreshes in place; forge injects barycentrics
+    stream that GpuMesh.update refreshes in place; opengl injects barycentrics
     in a geometry stage over the same VBO.  A stale wire stream would keep
     drawing the rest pose, which the pixel assertions below catch on both
     backends.
@@ -516,7 +516,7 @@ def test_deformable_wireframe_view_follows_vertex_updates(backend_name, request)
 
     import mujoco
 
-    from forge_viewer.adapters.base import NodeType
+    from mojive.adapters.base import NodeType
 
     adapter = make_adapter("mujoco", resolve("deformables"))
     backend = _make_backend(backend_name, request, samples=1)
@@ -566,7 +566,7 @@ def test_deformable_wireframe_view_follows_vertex_updates(backend_name, request)
 
 
 def test_deformables_are_pickable_and_use_the_normal_outline_pass(backend_name, request):
-    from forge_viewer.adapters.base import NodeType
+    from mojive.adapters.base import NodeType
 
     adapter = make_adapter("mujoco", resolve("deformables"))
     backend = _make_backend(backend_name, request)
@@ -599,8 +599,8 @@ def test_deformables_are_pickable_and_use_the_normal_outline_pass(backend_name, 
 
 
 def test_deformable_visibility_flags_rebuild_the_scene(backend_name, request):
-    from forge_viewer.render.backend import RenderFlag
-    from forge_viewer.types import InstanceVisual
+    from mojive.render.backend import RenderFlag
+    from mojive.types import InstanceVisual
 
     adapter = make_adapter("mujoco", resolve("deformables"))
     backend = _make_backend(backend_name, request, samples=1)
@@ -637,7 +637,7 @@ def test_deformable_visibility_flags_rebuild_the_scene(backend_name, request):
 
 
 def test_mujoco_flex_labels_and_frames_use_gpu_debug_layers(backend_name, request):
-    from forge_viewer.render.backend import FrameMode, LabelMode, RenderFlag
+    from mojive.render.backend import FrameMode, LabelMode, RenderFlag
 
     adapter = make_adapter("mujoco", resolve("deformables"))
     backend = _make_backend(backend_name, request, samples=1)
@@ -697,19 +697,19 @@ def test_world_text_is_rendered_into_the_target_without_imgui(backend_name, requ
         adapter.release()
 
 
-def test_render_returns_an_image(rendered, require_forge):
+def test_render_returns_an_image(rendered, require_opengl):
     img = rendered["image"]
     assert img is not None
     assert (img.width, img.height) == (WIDTH, HEIGHT)
     assert img.texture_id > 0
 
 
-def test_flip_y_is_declared_and_true_for_gl(rendered, require_forge):
+def test_flip_y_is_declared_and_true_for_gl(rendered, require_opengl):
 
     assert rendered["image"].flip_y is True
 
 
-def test_global_gl_state_is_unchanged_and_no_errors(rendered, require_forge):
+def test_global_gl_state_is_unchanged_and_no_errors(rendered, require_opengl):
 
     assert rendered["err_before"] == 0
     diff = {
@@ -721,7 +721,7 @@ def test_global_gl_state_is_unchanged_and_no_errors(rendered, require_forge):
     assert rendered["err_after"] == 0
 
 
-def test_every_registered_pass_actually_ran(rendered, require_forge):
+def test_every_registered_pass_actually_ran(rendered, require_opengl):
 
     stats = rendered["backend"].stats
     ran = set(stats.cpu_ms)
@@ -777,7 +777,7 @@ def test_batching_actually_happened(rendered):
     assert s.triangles > 0
     if rendered["backend_name"] == "wgpu":
         # The wgpu shadow pass encodes one draw per CSM cascade tile per
-        # bucket (forge batches its cascades), so with one directional light
+        # bucket (opengl batches its cascades), so with one directional light
         # the bound grows by the three cascade tiles.
         assert s.draw_calls <= s.buckets * 5 + 4
     else:

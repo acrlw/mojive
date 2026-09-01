@@ -11,39 +11,39 @@ pytestmark = pytest.mark.gpu
 
 glfw = pytest.importorskip("glfw")
 
-from forge_viewer import commands as cmd  # noqa: E402
-from forge_viewer.bridge import DebugClient  # noqa: E402
-from forge_viewer.composition import build_scene  # noqa: E402
-from forge_viewer.demos import canvas_scene  # noqa: E402
-from forge_viewer.gizmo import SIZE_PT, GizmoHandle, project, world_scale  # noqa: E402
-from forge_viewer.render.debugdraw import PrimitiveType  # noqa: E402
-from forge_viewer.scene import Scene  # noqa: E402
-from forge_viewer.types import DEFAULT_MATERIAL, CameraView, Material, MeshShape  # noqa: E402
-from forge_viewer.ui.scene_entities import HELPER_ICON_LAYER, HELPER_LAYER  # noqa: E402
+from mojive import commands as cmd  # noqa: E402
+from mojive.bridge import DebugClient  # noqa: E402
+from mojive.composition import build_scene  # noqa: E402
+from mojive.demos import canvas_scene  # noqa: E402
+from mojive.gizmo import SIZE_PT, GizmoHandle, project, world_scale  # noqa: E402
+from mojive.render.debugdraw import PrimitiveType  # noqa: E402
+from mojive.scene import Scene  # noqa: E402
+from mojive.types import DEFAULT_MATERIAL, CameraView, Material, MeshShape  # noqa: E402
+from mojive.ui.scene_entities import HELPER_ICON_LAYER, HELPER_LAYER  # noqa: E402
 
 
 @pytest.fixture(autouse=True, scope="module")
 def _isolated_settings(tmp_path_factory):
-    previous = os.environ.get("FORGE_VIEWER_SETTINGS")
-    previous_ui_scale = os.environ.get("FORGE_VIEWER_UI_SCALE")
-    os.environ["FORGE_VIEWER_SETTINGS"] = str(
+    previous = os.environ.get("MOJIVE_SETTINGS")
+    previous_ui_scale = os.environ.get("MOJIVE_UI_SCALE")
+    os.environ["MOJIVE_SETTINGS"] = str(
         tmp_path_factory.mktemp("static-viewer-settings") / "settings.json"
     )
     # Pixel-difference and compact-panel assertions in this module use the
     # authored scale-1 geometry. HiDPI behavior is opted into explicitly by
     # the camera-helper regression below and by test_hidpi.py.
-    os.environ["FORGE_VIEWER_UI_SCALE"] = "1"
+    os.environ["MOJIVE_UI_SCALE"] = "1"
     try:
         yield
     finally:
         if previous is None:
-            del os.environ["FORGE_VIEWER_SETTINGS"]
+            del os.environ["MOJIVE_SETTINGS"]
         else:
-            os.environ["FORGE_VIEWER_SETTINGS"] = previous
+            os.environ["MOJIVE_SETTINGS"] = previous
         if previous_ui_scale is None:
-            del os.environ["FORGE_VIEWER_UI_SCALE"]
+            del os.environ["MOJIVE_UI_SCALE"]
         else:
-            os.environ["FORGE_VIEWER_UI_SCALE"] = previous_ui_scale
+            os.environ["MOJIVE_UI_SCALE"] = previous_ui_scale
 
 
 @pytest.fixture(scope="module")
@@ -70,7 +70,7 @@ def viewport_snap(viewer) -> np.ndarray:
 
     The docked stats panel redraws its frame-time plot every sync, so a
     whole-window diff measures UI churn instead of the scene edit — and the
-    churn differs between the forge and wgpu frame loops.
+    churn differs between the opengl and wgpu frame loops.
     """
     image = snap(viewer)
     x, y, w, h = viewer.window.points_to_pixels(viewer.app._viewport_rect)
@@ -185,7 +185,7 @@ def test_canvas_records_streaming_video(canvas, tmp_path):
 
 def test_editor_actions_save_and_restore_an_authored_scene(tmp_path, monkeypatch):
     viewer = build_scene(Scene(), vsync=False, width=960, height=640)
-    document = tmp_path / "editor.forge.json"
+    document = tmp_path / "editor.mojive.json"
     try:
         viewer.sync()
         viewer.app._add_scene_object(MeshShape.BOX, "box")
@@ -343,7 +343,7 @@ def test_settings_window_docks_with_camera(canvas):
 
 
 def test_settings_controls_precise_input_choice_memory(canvas, monkeypatch):
-    from forge_viewer.ui.panels import settings as settings_module
+    from mojive.ui.panels import settings as settings_module
 
     viewer, _scene = canvas
     settings = viewer.app.panels.get("Settings")
@@ -375,7 +375,7 @@ def test_settings_controls_precise_input_choice_memory(canvas, monkeypatch):
 def test_settings_remaps_viewport_shortcuts_without_conflicts(canvas, monkeypatch):
     from imgui_bundle import imgui
 
-    from forge_viewer.ui.input_bindings import InputAction, key_choices
+    from mojive.ui.input_bindings import InputAction, key_choices
 
     viewer, _scene = canvas
     settings = viewer.app.panels.get("Settings")
@@ -407,7 +407,7 @@ def test_settings_remaps_viewport_shortcuts_without_conflicts(canvas, monkeypatc
 def test_settings_exposes_view_selection_padding(canvas, monkeypatch):
     from imgui_bundle import imgui
 
-    from forge_viewer.ui.viewcube import DEFAULT_SELECTION_PADDING
+    from mojive.ui.viewcube import DEFAULT_SELECTION_PADDING
 
     viewer, _scene = canvas
     settings = viewer.app.panels.get("Settings")
@@ -437,7 +437,7 @@ def test_settings_exposes_view_selection_padding(canvas, monkeypatch):
 def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
     from imgui_bundle import imgui
 
-    monkeypatch.setenv("FORGE_VIEWER_UI_SCALE", "2")
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "2")
     scene = Scene()
     camera_id = scene.add_camera(
         "shot",

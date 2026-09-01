@@ -1,13 +1,13 @@
-"""Control and step a MuJoCo model through a forge session."""
+"""Control and step a MuJoCo model through a Mojive session."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from forge_viewer import FrameNeeds, MuJoCoAdapter
-from forge_viewer import commands as cmd
-from forge_viewer.session import Session
+from mojive import FrameNeeds, MuJoCoAdapter
+from mojive import commands as cmd
+from mojive.session import Session
 
 
 def parse_args() -> argparse.Namespace:

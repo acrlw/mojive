@@ -9,21 +9,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_MODULES = (
-    "src/forge_viewer/types.py",
-    "src/forge_viewer/commands.py",
-    "src/forge_viewer/adapters/base.py",
-    "src/forge_viewer/adapters/conformance.py",
-    "src/forge_viewer/scene.py",
-    "src/forge_viewer/composition.py",
-    "src/forge_viewer/session.py",
-    "src/forge_viewer/renderer.py",
-    "src/forge_viewer/render/backend.py",
-    "src/forge_viewer/render/debugdraw.py",
-    "src/forge_viewer/recording.py",
-    "src/forge_viewer/remote.py",
-    "src/forge_viewer/control_rpc.py",
-    "src/forge_viewer/scene_io.py",
-    "src/forge_viewer/workspace_io.py",
+    "src/mojive/types.py",
+    "src/mojive/commands.py",
+    "src/mojive/adapters/base.py",
+    "src/mojive/adapters/conformance.py",
+    "src/mojive/scene.py",
+    "src/mojive/composition.py",
+    "src/mojive/session.py",
+    "src/mojive/renderer.py",
+    "src/mojive/render/backend.py",
+    "src/mojive/render/debugdraw.py",
+    "src/mojive/recording.py",
+    "src/mojive/remote.py",
+    "src/mojive/control_rpc.py",
+    "src/mojive/scene_io.py",
+    "src/mojive/workspace_io.py",
 )
 SNIPPET = re.compile(r'--8<--\s+["\']([^"\']+)["\']')
 

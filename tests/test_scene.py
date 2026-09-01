@@ -6,9 +6,9 @@ import tracemalloc
 import numpy as np
 import pytest
 
-from forge_viewer import math3d as M
-from forge_viewer.render.scene import BACKGROUND_ID, INSTANCE_FLOATS, RenderScene, SceneBuilder
-from forge_viewer.types import CameraView, LightSet, Material, MeshKey, MeshShape
+from mojive import math3d as M
+from mojive.render.scene import BACKGROUND_ID, INSTANCE_FLOATS, RenderScene, SceneBuilder
+from mojive.types import CameraView, LightSet, Material, MeshKey, MeshShape
 
 OPAQUE = [1.0, 1.0, 1.0, 1.0]
 GLASS = [1.0, 1.0, 1.0, 0.4]

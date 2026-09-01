@@ -1,20 +1,20 @@
 # API map
 
 The public package exports the common scene, rendering, adapter, remote, and recording types from
-`forge_viewer`. Advanced integrations may import the owning module directly.
+`mojive`. Advanced integrations may import the owning module directly.
 
 | Module | Purpose | Primary interfaces |
 |---|---|---|
-| `forge_viewer.types` | Backend-neutral value types | `CameraView`, `Light`, `Material`, `MeshData` |
-| `forge_viewer.adapters.base` | Adapter contracts | `SceneSource`, `SceneFrame`, `SceneAdapterBase` |
-| `forge_viewer.commands` | Typed application operations | `Command`, `Query`, scene and simulation commands |
-| `forge_viewer.scene` | Programmatic authored scenes | `Scene`, `SceneObject`, `SceneLight` |
-| `forge_viewer.session` | Application state and routing | `Session`, `PerturbState` |
-| `forge_viewer.renderer` | MuJoCo-compatible offscreen rendering | `Renderer` |
-| `forge_viewer.render.debugdraw` | Debug primitives and layers | `DebugDraw`, `Layer`, `Occlusion` |
-| `forge_viewer.remote` | Live structure, frame, and command transport | `SnapshotPublisher`, `RemoteSceneAdapter` |
-| `forge_viewer.recording` | Video and snapshot streams | `VideoRecorder`, `SnapshotWriter` |
-| `forge_viewer.control_rpc` | Local process control | `ControlServer`, `ControlService`, `RpcClient` |
+| `mojive.types` | Backend-neutral value types | `CameraView`, `Light`, `Material`, `MeshData` |
+| `mojive.adapters.base` | Adapter contracts | `SceneSource`, `SceneFrame`, `SceneAdapterBase` |
+| `mojive.commands` | Typed application operations | `Command`, `Query`, scene and simulation commands |
+| `mojive.scene` | Programmatic authored scenes | `Scene`, `SceneObject`, `SceneLight` |
+| `mojive.session` | Application state and routing | `Session`, `PerturbState` |
+| `mojive.renderer` | MuJoCo-compatible offscreen rendering | `Renderer` |
+| `mojive.render.debugdraw` | Debug primitives and layers | `DebugDraw`, `Layer`, `Occlusion` |
+| `mojive.remote` | Live structure, frame, and command transport | `SnapshotPublisher`, `RemoteSceneAdapter` |
+| `mojive.recording` | Video and snapshot streams | `VideoRecorder`, `SnapshotWriter` |
+| `mojive.control_rpc` | Local process control | `ControlServer`, `ControlService`, `RpcClient` |
 
 ## Integration paths
 
@@ -31,6 +31,6 @@ list signatures, types, and public members generated from the source documentati
 
 ## Stability
 
-Names exported from `forge_viewer.__all__` form the supported public surface. Adapter
+Names exported from `mojive.__all__` form the supported public surface. Adapter
 implementations and render-pass modules expose extension points with a narrower compatibility
 scope. Shader resources and UI internals are implementation details.

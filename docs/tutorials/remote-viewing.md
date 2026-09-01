@@ -10,8 +10,8 @@ Start the publisher and attach viewers in separate terminals:
 
 ```bash
 .venv/bin/python examples/remote_publish.py
-.venv/bin/forge-viewer attach --title effect
-.venv/bin/forge-viewer attach --title debug --debug-view normal
+.venv/bin/mojive attach --title effect
+.venv/bin/mojive attach --title debug --debug-view normal
 ```
 
 ```python
@@ -25,7 +25,7 @@ Create a deterministic snapshot stream:
 ```bash
 .venv/bin/python examples/record_replay.py \
   --output output/examples/orbit.fvs --frames 300 --fps 60
-.venv/bin/forge-viewer replay output/examples/orbit.fvs
+.venv/bin/mojive replay output/examples/orbit.fvs
 ```
 
 ```python

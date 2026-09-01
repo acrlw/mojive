@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from forge_viewer import commands as cmd
-from forge_viewer.adapters.base import (
+from mojive import commands as cmd
+from mojive.adapters.base import (
     CAMERA_OBJECT_BASE,
     LIGHT_OBJECT_BASE,
     AdapterCaps,
@@ -21,11 +21,11 @@ from forge_viewer.adapters.base import (
     SceneFrame,
     SceneSource,
 )
-from forge_viewer.adapters.static import StaticSceneAdapter
-from forge_viewer.render.builder import SceneSourceBuilder
-from forge_viewer.scene import Scene
-from forge_viewer.session import Session
-from forge_viewer.types import (
+from mojive.adapters.static import StaticSceneAdapter
+from mojive.render.builder import SceneSourceBuilder
+from mojive.scene import Scene
+from mojive.session import Session
+from mojive.types import (
     DEFAULT_MATERIAL,
     CameraView,
     Environment,
@@ -43,7 +43,7 @@ pytestmark = pytest.mark.integration
 
 
 def _model_load_app(results, *, paused: bool = True):
-    from forge_viewer.ui.app import ViewerApp
+    from mojive.ui.app import ViewerApp
 
     class RecordingSession:
         def __init__(self):
@@ -88,7 +88,7 @@ def _finish_model_load(app) -> bool:
 
 
 def test_model_load_jobs_execute_off_the_ui_thread(tmp_path) -> None:
-    from forge_viewer.ui.app import ViewerApp
+    from mojive.ui.app import ViewerApp
 
     calls = []
 
@@ -150,7 +150,7 @@ def test_async_model_load_success_finishes_and_notifies(tmp_path) -> None:
 
 
 def test_global_playback_controls_prioritize_recording_and_take_replay():
-    from forge_viewer.ui.app import ViewerApp
+    from mojive.ui.app import ViewerApp
 
     calls = []
     app = ViewerApp.__new__(ViewerApp)
@@ -303,7 +303,7 @@ def test_scene_authoring_commands_return_stable_entity_ids():
 def test_static_scene_document_commands_track_dirty_state(tmp_path):
     scene = Scene()
     session = Session(StaticSceneAdapter(scene))
-    path = tmp_path / "workspace.forge.json"
+    path = tmp_path / "workspace.mojive.json"
 
     added = session.submit(cmd.AddSceneObject(MeshShape.BOX, "box"))
     assert added.ok and session.dirty
@@ -358,7 +358,7 @@ def test_static_scene_entity_lifecycle_commands_use_selection_identity():
 
 def test_static_scene_undo_redo_restores_entities_and_saved_revision(tmp_path):
     session = Session(StaticSceneAdapter(Scene()))
-    path = tmp_path / "history.forge.json"
+    path = tmp_path / "history.mojive.json"
 
     added = session.submit(cmd.AddSceneObject(MeshShape.BOX, "box"))
     assert added.ok and session.can_undo and session.dirty
@@ -482,7 +482,7 @@ def test_visibility_edits_reach_the_render_source():
     assert not source_node.visible
 
 
-def test_lights_are_editable_forge_entities_without_physics():
+def test_lights_are_editable_opengl_entities_without_physics():
     light = Light(type=LightType.POINT, position=np.array([1.0, 2.0, 3.0], np.float32))
     scene = Scene(lights=LightSet(lights=(light,)))
     session = Session(StaticSceneAdapter(scene))
@@ -635,7 +635,7 @@ def test_material_components_support_shared_and_instance_edits():
     assert session.source.materials[session.source.geom_material[1]].specular == 0.8
 
 
-def test_cameras_are_editable_forge_entities_without_physics():
+def test_cameras_are_editable_opengl_entities_without_physics():
     initial = CameraView(
         eye=np.array([2.0, -4.0, 3.0], np.float32),
         target=np.array([0.0, 0.0, 0.5], np.float32),
@@ -676,7 +676,7 @@ def test_cameras_can_be_added_and_removed_after_session_creation():
     assert scene.camera is scene.camera_view(second)
 
 
-def test_backend_cannot_veto_a_forge_light_edit():
+def test_backend_cannot_veto_a_mojive_light_edit():
     class ReadOnlyLights(ToyPhysics):
         def __init__(self):
             super().__init__()
@@ -749,7 +749,7 @@ def test_read_only_camera_override_follows_its_stable_id_after_removal():
 def test_many_authored_geometry_colors_are_applied_in_one_instance_pass():
     from types import SimpleNamespace
 
-    from forge_viewer.session import _apply_geometry_color_overrides
+    from mojive.session import _apply_geometry_color_overrides
 
     source = SimpleNamespace(
         geom_node=np.array([0, 15, 99, 7], np.int32),

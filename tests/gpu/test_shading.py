@@ -8,14 +8,14 @@ pytestmark = pytest.mark.gpu
 glfw = pytest.importorskip("glfw")
 moderngl = pytest.importorskip("moderngl")
 
-from forge_viewer.adapters.base import SceneSource  # noqa: E402
-from forge_viewer.render.backend import DebugView, RenderFlag  # noqa: E402
-from forge_viewer.render.forge import color, passes  # noqa: E402
-from forge_viewer.render.forge.backend import ForgeBackend  # noqa: E402
-from forge_viewer.render.forge.passes import opaque as opaque_pass  # noqa: E402
-from forge_viewer.render.forge.passes.base import MAX_SCENE_LIGHTS  # noqa: E402
-from forge_viewer.render.scene import SceneBuilder  # noqa: E402
-from forge_viewer.types import (  # noqa: E402
+from mojive.adapters.base import SceneSource  # noqa: E402
+from mojive.render.backend import DebugView, RenderFlag  # noqa: E402
+from mojive.render.opengl import color, passes  # noqa: E402
+from mojive.render.opengl.backend import OpenGLBackend  # noqa: E402
+from mojive.render.opengl.passes import opaque as opaque_pass  # noqa: E402
+from mojive.render.opengl.passes.base import MAX_SCENE_LIGHTS  # noqa: E402
+from mojive.render.scene import SceneBuilder  # noqa: E402
+from mojive.types import (  # noqa: E402
     CameraView,
     Light,
     LightSet,
@@ -110,13 +110,13 @@ class Rig:
 
 
 def _make_backend(backend_name: str, request, samples: int = 4):
-    """Build the backend selected by FORGE_VIEWER_BACKEND; GL stays lazy."""
+    """Build the backend selected by MOJIVE_BACKEND; GL stays lazy."""
     if backend_name == "wgpu":
-        from forge_viewer.render.webgpu.backend import WgpuBackend
+        from mojive.render.webgpu.backend import WgpuBackend
 
         return WgpuBackend(WIDTH, HEIGHT, samples=samples)
     passes.load_all()
-    return ForgeBackend(request.getfixturevalue("gl_ctx"), WIDTH, HEIGHT, samples=samples)
+    return OpenGLBackend(request.getfixturevalue("gl_ctx"), WIDTH, HEIGHT, samples=samples)
 
 
 @pytest.fixture
@@ -321,7 +321,7 @@ def test_transparent_leaves_depth_mask_on(rig):
     shots = []
     for _ in range(3):
         img = rig.draw([opaque_quad, glass], ambient=[0.3] * 3)
-        if rig.backend.caps.name == "forge":
+        if rig.backend.caps.name == "opengl":
             assert rig.backend.target.fbo.depth_mask is True
 
         assert Rig.corner(img)[:3].max() > 60
@@ -519,12 +519,12 @@ def test_normals_survive_non_uniform_scale(backend_name, request):
         backend.release()
 
 
-def test_shared_id_layout_is_not_polluted_by_shading_passes(require_forge, gl_ctx):
+def test_shared_id_layout_is_not_polluted_by_shading_passes(require_opengl, gl_ctx):
 
     passes.load_all()
-    backend = ForgeBackend(gl_ctx, WIDTH, HEIGHT, samples=0)
+    backend = OpenGLBackend(gl_ctx, WIDTH, HEIGHT, samples=0)
     try:
-        from forge_viewer.render.forge.targets import IdLayout
+        from mojive.render.opengl.targets import IdLayout
 
         if backend.target.id_layout is not IdLayout.SHARED:
             pytest.skip("integer attachments are unavailable even without MSAA")
@@ -552,7 +552,7 @@ def test_highlight_needs_the_emission_term(rig, monkeypatch):
     lit = float(Rig.center(rig.draw([quad], ambient=dark, selected=1))[:3].mean())
 
     if rig.backend.caps.name == "wgpu":
-        from forge_viewer.render.webgpu import backend as webgpu_backend
+        from mojive.render.webgpu import backend as webgpu_backend
 
         monkeypatch.setattr(webgpu_backend, "HIGHLIGHT_EMISSION", 0.0)
     else:

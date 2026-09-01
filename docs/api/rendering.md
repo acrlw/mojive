@@ -2,12 +2,12 @@
 
 ## MuJoCo-compatible renderer
 
-::: forge_viewer.renderer.Renderer
+::: mojive.renderer.Renderer
 
 ## Backend contracts
 
-::: forge_viewer.render.backend
+::: mojive.render.backend
 
 ## Debug drawing
 
-::: forge_viewer.render.debugdraw
+::: mojive.render.debugdraw

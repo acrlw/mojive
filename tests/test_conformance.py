@@ -5,15 +5,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from forge_viewer import commands as cmd
-from forge_viewer.adapters.base import FrameNeeds
-from forge_viewer.adapters.conformance import check_adapter
-from forge_viewer.adapters.static import StaticSceneAdapter
-from forge_viewer.adapters.toy import ToyPhysicsAdapter
-from forge_viewer.backends import available_backends, make_adapter
-from forge_viewer.scene import Scene
-from forge_viewer.session import Session
-from forge_viewer.types import Light, LightSet
+from mojive import commands as cmd
+from mojive.adapters.base import FrameNeeds
+from mojive.adapters.conformance import check_adapter
+from mojive.adapters.static import StaticSceneAdapter
+from mojive.adapters.toy import ToyPhysicsAdapter
+from mojive.backends import available_backends, make_adapter
+from mojive.scene import Scene
+from mojive.session import Session
+from mojive.types import Light, LightSet
 
 pytestmark = pytest.mark.integration
 
@@ -74,7 +74,7 @@ def test_conformance_requires_every_light_to_be_an_entity():
 
 
 def test_conformance_requires_every_camera_to_be_an_entity():
-    from forge_viewer.types import CameraView
+    from mojive.types import CameraView
 
     scene = Scene(camera=CameraView())
     source = scene.source

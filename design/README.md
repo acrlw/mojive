@@ -1,4 +1,4 @@
-# forge-viewer UI 设计稿
+# Mojive UI 设计稿
 
 用浏览器打开 `index.html` 即可阅读（支持 `file://` 直接打开，无外部依赖）。
 `output/ui-design-baseline/` 是本机生成的基线运行截图目录（1920×1080，菜单截图为 1600×1000 实机）。截图不提交到源码目录；运行 `tools/capture_states.py` 可重新生成。截图保留采集时的本地化状态，仅用于现状审计，不作为当前功能清单或新 UI 文案的来源。
@@ -90,9 +90,9 @@ Snap 图标按“两条直线 + 一个精确半圆”绘制；鼠标左键填充
 
 关闭窗口或连续按两次 `Esc` 退出（第一次关闭数值输入窗口）；也可以在终端按 `Ctrl+C`。
 页面结构：封面 / 现状切片 / 交互地图 / 动线分析 / 问题清单 / 概念设计 / 落地路线。
-概念稿色板以 `index.html` §5 为准；运行时 `src/forge_viewer/ui/theme.py` 已同步通用 Primary、surface、
+概念稿色板以 `index.html` §5 为准；运行时 `src/mojive/ui/theme.py` 已同步通用 Primary、surface、
 checkbox 与 Inspector badge token；场景内 XYZ gizmo 的默认轴色仍按人工验收结论单独决定，不在本轮暗改。
-UI 字体栈取自 `src/forge_viewer/ui/fonts.py`：JetBrains Mono 优先，并保留项目当前的等宽回退链。
+UI 字体栈取自 `src/mojive/ui/fonts.py`：JetBrains Mono 优先，并保留项目当前的等宽回退链。
 
 设计文档的说明文字使用中文；所有概念稿与详细原型中的产品 UI 文案统一使用英文。
 英文是设计与实现的 source language，后续再按明确的 localization key 清单决定哪些文案提供中文翻译。源码文案是功能审计基线；设计稿明确标出的精简文案与动态标题是下一版 approved source copy，实现必须同步，不能为了沿用旧字符串而保留冗长 UI。新增控件尽量用图标；可从控件本身读懂的行为不再附加说明句。

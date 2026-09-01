@@ -2,12 +2,12 @@
 
 ## Install
 
-forge-viewer requires Python 3.11 or newer. Install the core package with MuJoCo and WebGPU
+Mojive requires Python 3.11 or newer. Install the core package with MuJoCo and WebGPU
 support from a source checkout:
 
 ```bash
-git clone https://github.com/acrlw/forge-viewer.git
-cd forge-viewer
+git clone https://github.com/acrlw/mojive.git
+cd mojive
 uv sync --python 3.11 --extra dev --extra mujoco --extra wgpu
 ```
 
@@ -35,15 +35,15 @@ make editor BACKEND=wgpu
 The application reads the native content scale. An explicit value is useful for HiDPI testing:
 
 ```bash
-FORGE_VIEWER_UI_SCALE=2 make editor
+MOJIVE_UI_SCALE=2 make editor
 make editor LANGUAGE=zh_CN
 ```
 
 ## Load a model directly
 
 ```bash
-uv run forge-viewer view path/to/model.xml --paused
-uv run forge-viewer view path/to/model.urdf --paused
+uv run mojive view path/to/model.xml --paused
+uv run mojive view path/to/model.urdf --paused
 ```
 
 ## Render with the MuJoCo-compatible API
@@ -51,7 +51,7 @@ uv run forge-viewer view path/to/model.urdf --paused
 ```python
 import mujoco
 
-from forge_viewer import Renderer
+from mojive import Renderer
 
 model = mujoco.MjModel.from_xml_path("model.xml")
 data = mujoco.MjData(model)

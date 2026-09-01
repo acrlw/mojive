@@ -10,8 +10,8 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from forge_viewer import commands as cmd
-from forge_viewer.adapters.base import (
+from mojive import commands as cmd
+from mojive.adapters.base import (
     CAMERA_OBJECT_BASE,
     LIGHT_OBJECT_BASE,
     AdapterCaps,
@@ -25,17 +25,17 @@ from forge_viewer.adapters.base import (
     SceneAdapterBase,
     SiteProperties,
 )
-from forge_viewer.adapters.static import StaticSceneAdapter
-from forge_viewer.commands import CommandResult
-from forge_viewer.remote import (
+from mojive.adapters.static import StaticSceneAdapter
+from mojive.commands import CommandResult
+from mojive.remote import (
     RemoteSceneAdapter,
     SnapshotPublisher,
     handle_session_command,
     snapshot_structure,
 )
-from forge_viewer.scene import Scene
-from forge_viewer.session import Session
-from forge_viewer.types import CameraView, Environment, Light, Material, MeshShape
+from mojive.scene import Scene
+from mojive.session import Session
+from mojive.types import CameraView, Environment, Light, Material, MeshShape
 
 pytestmark = pytest.mark.integration
 
@@ -189,7 +189,7 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
 
 
 def test_publisher_does_not_serialize_every_frame_before_a_viewer_connects(monkeypatch):
-    import forge_viewer.remote as remote_module
+    import mojive.remote as remote_module
 
     source_session = Session(StaticSceneAdapter(Scene()))
     port = _port_pair()
@@ -706,7 +706,7 @@ def test_two_viewers_receive_the_same_latest_frame_independently():
 
 
 def test_pause_round_trip_changes_the_source_session():
-    from forge_viewer.adapters.toy import ToyPhysicsAdapter
+    from mojive.adapters.toy import ToyPhysicsAdapter
 
     source = Session(ToyPhysicsAdapter())
     port = _port_pair()

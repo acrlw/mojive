@@ -1,8 +1,8 @@
-site_name: forge-viewer
+site_name: Mojive
 site_description: Backend-neutral 3D viewer and renderer for robotics and simulation
-site_url: https://acrlw.github.io/forge-viewer/
-repo_url: https://github.com/acrlw/forge-viewer
-repo_name: acrlw/forge-viewer
+site_url: https://acrlw.github.io/mojive/
+repo_url: https://github.com/acrlw/mojive
+repo_name: acrlw/mojive
 docs_dir: docs
 theme:
   name: material

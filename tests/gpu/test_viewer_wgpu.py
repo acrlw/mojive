@@ -1,6 +1,6 @@
 """Window-stack smoke tests for the wgpu viewer path.
 
-Runs only under ``FORGE_VIEWER_BACKEND=wgpu`` (see Makefile ``gpu-wgpu``);
+Runs only under ``MOJIVE_BACKEND=wgpu`` (see Makefile ``gpu-wgpu``);
 like the GL window tests it needs a display server for GLFW.
 """
 
@@ -20,17 +20,17 @@ pytest.importorskip("glfw")
 pytest.importorskip("wgpu")
 pytest.importorskip("rendercanvas")
 
-from forge_viewer.composition import build_scene  # noqa: E402
-from forge_viewer.demos import canvas_scene  # noqa: E402
-from forge_viewer.render.backend import RenderFlag  # noqa: E402
-from forge_viewer.render.webgpu.backend import WgpuBackend  # noqa: E402
-from forge_viewer.ui.window_wgpu import WgpuWindow  # noqa: E402
+from mojive.composition import build_scene  # noqa: E402
+from mojive.demos import canvas_scene  # noqa: E402
+from mojive.render.backend import RenderFlag  # noqa: E402
+from mojive.render.webgpu.backend import WgpuBackend  # noqa: E402
+from mojive.ui.window_wgpu import WgpuWindow  # noqa: E402
 
 
 @pytest.fixture(scope="module")
 def viewer(backend_name):
     if backend_name != "wgpu":
-        pytest.skip("wgpu window-stack test; run with FORGE_VIEWER_BACKEND=wgpu")
+        pytest.skip("wgpu window-stack test; run with MOJIVE_BACKEND=wgpu")
     scene = canvas_scene()
     instance = build_scene(scene, vsync=False, width=960, height=640)
     try:
@@ -88,7 +88,7 @@ def test_gpu_pass_timing_is_reported_when_supported(viewer):
 
 def test_window_dependencies_use_the_imgui_glfw_library(backend_name):
     if backend_name != "wgpu":
-        pytest.skip("wgpu window-stack test; run with FORGE_VIEWER_BACKEND=wgpu")
+        pytest.skip("wgpu window-stack test; run with MOJIVE_BACKEND=wgpu")
 
     env = os.environ.copy()
     env.pop("PYGLFW_LIBRARY", None)
@@ -96,7 +96,7 @@ def test_window_dependencies_use_the_imgui_glfw_library(backend_name):
         [
             sys.executable,
             "-c",
-            "from forge_viewer.ui.window_wgpu import _load_window_deps; _load_window_deps()",
+            "from mojive.ui.window_wgpu import _load_window_deps; _load_window_deps()",
         ],
         capture_output=True,
         check=False,
@@ -184,7 +184,7 @@ def test_injected_mouse_drag_rotates_the_camera(viewer):
 
 
 def test_vendored_imgui_render_path(viewer, monkeypatch):
-    from forge_viewer.ui import window_wgpu
+    from mojive.ui import window_wgpu
 
     # Force the vendored imgui-1.92 draw-data fix even where the installed
     # wgpu no longer needs it, so the vendored code path stays exercised.
@@ -195,7 +195,7 @@ def test_vendored_imgui_render_path(viewer, monkeypatch):
 
 
 def test_native_resize_between_draw_and_submit_stays_within_wgpu_target(viewer, monkeypatch):
-    from forge_viewer.ui import window_wgpu
+    from mojive.ui import window_wgpu
 
     v, _scene = viewer
     window = v.window
@@ -231,7 +231,7 @@ def test_native_resize_between_draw_and_submit_stays_within_wgpu_target(viewer, 
 
 
 def test_viewport_target_uses_current_dock_geometry_in_the_resize_frame(viewer, monkeypatch):
-    from forge_viewer.ui import window_wgpu
+    from mojive.ui import window_wgpu
 
     v, _scene = viewer
     window = v.window
@@ -289,7 +289,7 @@ def test_occluded_surface_keeps_the_frame_loop_alive(viewer):
 
 def test_windows_keep_independent_imgui_contexts(backend_name):
     if backend_name != "wgpu":
-        pytest.skip("wgpu window-stack test; run with FORGE_VIEWER_BACKEND=wgpu")
+        pytest.skip("wgpu window-stack test; run with MOJIVE_BACKEND=wgpu")
 
     left = build_scene(canvas_scene(), vsync=False, width=480, height=360)
     right = build_scene(canvas_scene(), vsync=False, width=640, height=420)

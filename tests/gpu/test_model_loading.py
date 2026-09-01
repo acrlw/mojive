@@ -14,23 +14,23 @@ pytestmark = pytest.mark.gpu
 pytest.importorskip("glfw")
 pytest.importorskip("mujoco")
 
-from forge_viewer.adapters.base import (  # noqa: E402
+from mojive.adapters.base import (  # noqa: E402
     GeometryShapeProperties,
     ModelAssetInfo,
     NodeType,
 )
-from forge_viewer.assets import resolve  # noqa: E402
-from forge_viewer.commands import AddModelComponent, SelectNode  # noqa: E402
-from forge_viewer.composition import build, build_editor, build_scene  # noqa: E402
-from forge_viewer.scene import Scene  # noqa: E402
-from forge_viewer.types import CameraView  # noqa: E402
-from forge_viewer.ui.app import (  # noqa: E402
+from mojive.assets import resolve  # noqa: E402
+from mojive.commands import AddModelComponent, SelectNode  # noqa: E402
+from mojive.composition import build, build_editor, build_scene  # noqa: E402
+from mojive.scene import Scene  # noqa: E402
+from mojive.types import CameraView  # noqa: E402
+from mojive.ui.app import (  # noqa: E402
     IMAGE_FILTERS,
     MESH_FILTERS,
     MODEL_FILTERS,
     _ModelLoadJob,
 )
-from forge_viewer.ui.camera_preview import CameraPreview  # noqa: E402
+from mojive.ui.camera_preview import CameraPreview  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -160,7 +160,7 @@ def test_add_model_dialog_filters_formats_and_accepts_multiple_files(viewer, mon
 def test_texture_dialog_uses_image_filters_and_unique_model_name(viewer, monkeypatch, tmp_path):
     from imgui_bundle import portable_file_dialogs
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     path = tmp_path / "surface.png"
     path.write_bytes(b"dialog only")
@@ -203,7 +203,7 @@ def test_texture_dialog_uses_image_filters_and_unique_model_name(viewer, monkeyp
 def test_geometry_resource_dialog_imports_and_assigns_a_unique_mesh(viewer, monkeypatch, tmp_path):
     from imgui_bundle import portable_file_dialogs
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     path = tmp_path / "part.obj"
     path.write_bytes(b"dialog only")
@@ -250,7 +250,7 @@ def test_geometry_resource_dialog_imports_and_assigns_a_unique_mesh(viewer, monk
 def test_model_asset_dialog_imports_standalone_and_replaces_by_name(viewer, monkeypatch, tmp_path):
     from imgui_bundle import portable_file_dialogs
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     path = tmp_path / "terrain.png"
     path.write_bytes(b"dialog only")
@@ -317,7 +317,7 @@ def test_runtime_model_loading_rebuilds_gpu_scene(viewer):
     viewer.window._file_drag_active = True
     viewer.window._on_file_drop(None, [str(resolve("test_scene.xml"))])
     assert not viewer.window.file_drag_active
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     assert viewer.session.submit(cmd.Play())
     assert not viewer.session.paused
@@ -340,7 +340,7 @@ def test_runtime_model_loading_rebuilds_gpu_scene(viewer):
 def test_loading_overlay_preserves_the_docked_viewport(viewer, monkeypatch):
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     for _ in range(3):
         viewer.sync()
@@ -614,7 +614,7 @@ def test_model_component_inspector_tracks_structured_edits():
 
 
 def test_model_placement_requires_explicit_unlock_and_apply(monkeypatch):
-    monkeypatch.setenv("FORGE_VIEWER_UI_SCALE", "1")
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
     instance = build_editor(vsync=False, width=1280, height=800)
     try:
         assert instance.app.add_model(resolve("actuator_visuals"))
@@ -674,7 +674,7 @@ def test_model_placement_requires_explicit_unlock_and_apply(monkeypatch):
 
 def test_missing_workspace_resources_can_be_repaired_from_directory(tmp_path):
     instance = build_editor(vsync=False, width=960, height=640)
-    document = tmp_path / "workspace" / "repair.forge.json"
+    document = tmp_path / "workspace" / "repair.mojive.json"
     replacement = tmp_path / "recovered" / "robot.xml"
     try:
         assert instance.app.add_model(resolve("test_scene.xml"))

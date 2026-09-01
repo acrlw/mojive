@@ -1,7 +1,7 @@
 # MuJoCo rendering
 
 `Renderer` matches the shape and control flow of `mujoco.Renderer` while sending scene data through
-the Forge render pipeline. One renderer instance owns reusable targets for RGB, metric depth, and
+the OpenGL render pipeline. One renderer instance owns reusable targets for RGB, metric depth, and
 segmentation output.
 
 ## RGB, depth, and segmentation

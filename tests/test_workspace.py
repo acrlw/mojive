@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from forge_viewer import commands as cmd
-from forge_viewer import math3d
-from forge_viewer.adapters.base import (
+from mojive import commands as cmd
+from mojive import math3d
+from mojive.adapters.base import (
     AdapterCaps,
     FrameNeeds,
     NodeType,
@@ -20,10 +20,10 @@ from forge_viewer.adapters.base import (
     SceneSaveOptions,
     SceneSource,
 )
-from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-from forge_viewer.adapters.workspace import WorkspaceAdapter
-from forge_viewer.session import Session
-from forge_viewer.types import (
+from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+from mojive.adapters.workspace import WorkspaceAdapter
+from mojive.session import Session
+from mojive.types import (
     DEFAULT_MATERIAL,
     CameraView,
     Environment,
@@ -33,8 +33,8 @@ from forge_viewer.types import (
     TextureData,
     TextureType,
 )
-from forge_viewer.ui.app import ViewerApp
-from forge_viewer.workspace_io import (
+from mojive.ui.app import ViewerApp
+from mojive.workspace_io import (
     missing_resource_entries,
     missing_resources,
     relocate_workspace_resource,
@@ -394,11 +394,11 @@ def test_model_element_ownership_is_typed_exact_and_preindexed(tmp_path: Path) -
     root = tmp_path / "root.xml"
     root.write_text(
         """<mujoco>
-  <asset><material name="forge_1_root_paint"/></asset>
+  <asset><material name="opengl_1_root_paint"/></asset>
   <worldbody>
-    <body name="forge_1_root_body">
-      <geom name="forge_1_root_geom" type="box" size=".1 .1 .1"
-            material="forge_1_root_paint"/>
+    <body name="opengl_1_root_body">
+      <geom name="opengl_1_root_geom" type="box" size=".1 .1 .1"
+            material="opengl_1_root_paint"/>
     </body>
   </worldbody>
 </mujoco>
@@ -408,13 +408,13 @@ def test_model_element_ownership_is_typed_exact_and_preindexed(tmp_path: Path) -
     adapter = MuJoCoAdapter(root)
     attached = adapter.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
     try:
-        root_body = next(node for node in adapter.nodes() if node.name == "forge_1_root_body")
-        root_geom = next(node for node in adapter.nodes() if node.name == "forge_1_root_geom")
-        child_body = next(node for node in adapter.nodes() if node.name == "forge_1_frame")
+        root_body = next(node for node in adapter.nodes() if node.name == "opengl_1_root_body")
+        root_geom = next(node for node in adapter.nodes() if node.name == "opengl_1_root_geom")
+        child_body = next(node for node in adapter.nodes() if node.name == "opengl_1_frame")
         assert (root_body.model_id, root_geom.model_id, child_body.model_id) == (0, 0, attached)
 
         root_material = mujoco.mj_name2id(
-            adapter.model, mujoco.mjtObj.mjOBJ_MATERIAL, "forge_1_root_paint"
+            adapter.model, mujoco.mjtObj.mjOBJ_MATERIAL, "opengl_1_root_paint"
         )
         assert root_material in adapter.model_material_indices(0)
         assert root_material not in adapter.model_material_indices(attached)
@@ -426,7 +426,7 @@ def test_model_element_ownership_is_typed_exact_and_preindexed(tmp_path: Path) -
         models = adapter._attached_models
         adapter._attached_models = NoModelScan(models)
         try:
-            assert adapter._model_element_name("forge_1_frame", mujoco.mjtObj.mjOBJ_BODY) == (
+            assert adapter._model_element_name("opengl_1_frame", mujoco.mjtObj.mjOBJ_BODY) == (
                 attached,
                 "frame",
             )
@@ -511,7 +511,7 @@ def test_workspace_authored_plane_size_is_editable_and_finite() -> None:
 
 
 def test_editor_plane_is_a_static_mujoco_ground_during_model_composition() -> None:
-    from forge_viewer.ui.app import ViewerApp
+    from mojive.ui.app import ViewerApp
 
     document = workspace()
     session = Session(document)
@@ -600,7 +600,7 @@ def test_workspace_round_trip_preserves_models_resources_and_entities(tmp_path: 
         ),
     )
 
-    path = tmp_path / "workcell.forge.json"
+    path = tmp_path / "workcell.mojive.json"
     document.save_scene(path)
     restored = workspace()
     restored.open_scene(path)
@@ -649,9 +649,9 @@ def test_workspace_exports_formatted_re_loadable_mjcf(tmp_path: Path) -> None:
     document.save_scene(path)
     xml = path.read_text(encoding="utf-8")
     assert xml.endswith("\n")
-    assert '\n    <camera name="forge_camera_0_inspection_camera"' in xml
-    assert 'name="forge_light_0_inspection_light"' in xml
-    assert 'name="forge_object_0_inspection_cone"' in xml
+    assert '\n    <camera name="mojive_camera_0_inspection_camera"' in xml
+    assert 'name="mojive_light_0_inspection_light"' in xml
+    assert 'name="mojive_object_0_inspection_cone"' in xml
 
     model = mujoco.MjModel.from_xml_path(str(path))
     restored = MuJoCoAdapter(path)
@@ -679,7 +679,7 @@ def test_exported_composition_reserves_existing_model_namespaces(tmp_path: Path)
     )
 
     assert model_id == 2
-    assert restored.primary.model.body("forge_2_mark_box").id > 0
+    assert restored.primary.model.body("opengl_2_mark_box").id > 0
 
 
 def test_workspace_mjcf_export_stages_file_assets_with_relative_paths(tmp_path: Path) -> None:
@@ -721,7 +721,7 @@ f 2 3 4
     assert mujoco.MjModel.from_xml_path(str(moved / "portable.xml")).ngeom == 1
 
 
-def test_workspace_mjcf_export_roundtrips_forge_render_properties(tmp_path: Path) -> None:
+def test_workspace_mjcf_export_roundtrips_opengl_render_properties(tmp_path: Path) -> None:
     document = workspace()
     pixels = np.full((6, 4, 4, 3), 96, np.uint8)
     document.scene.add_texture(TextureData("sky", TextureType.CUBE, pixels))
@@ -835,7 +835,7 @@ def test_workspace_resolves_models_from_resource_roots(tmp_path: Path) -> None:
     document.set_resource_roots((resources,))
     document.add_scene_model(model_path, np.zeros(3), np.eye(3))
 
-    path = tmp_path / "workspace" / "cell.forge.json"
+    path = tmp_path / "workspace" / "cell.mojive.json"
     document.save_scene(path)
     payload = path.read_text(encoding="utf-8")
     assert '"path": "robot.xml"' in payload
@@ -849,7 +849,7 @@ def test_workspace_resolves_models_from_resource_roots(tmp_path: Path) -> None:
 def test_workspace_relocates_one_missing_resource_and_reopens(tmp_path: Path) -> None:
     document = workspace()
     document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
-    path = tmp_path / "workspace" / "cell.forge.json"
+    path = tmp_path / "workspace" / "cell.mojive.json"
     document.save_scene(path)
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload["models"][0]["path"] = "missing/robot.xml"
@@ -878,7 +878,7 @@ def test_workspace_repairs_unambiguous_resources_from_directory(tmp_path: Path) 
     document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
     document.add_scene_model(ASSETS / "test_scene.xml", np.ones(3), np.eye(3))
     document.add_scene_model(ASSETS / "test_scene.xml", np.full(3, 2.0), np.eye(3))
-    path = tmp_path / "workspace" / "cell.forge.json"
+    path = tmp_path / "workspace" / "cell.mojive.json"
     document.save_scene(path)
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload["models"][0]["path"] = "old/robots/arm.xml"
@@ -918,11 +918,11 @@ def test_mjspec_topology_edits_round_trip_in_workspace(tmp_path: Path) -> None:
     assert body_id >= 0 and geom_id >= 0
     assert document.rename_model_element(body_id, "fixture_root")
     geom_id = next(
-        node.node_id for node in document.nodes() if node.name == "forge_1_fixture_visual"
+        node.node_id for node in document.nodes() if node.name == "opengl_1_fixture_visual"
     )
     assert document.remove_model_element(geom_id)
 
-    path = tmp_path / "topology.forge.json"
+    path = tmp_path / "topology.mojive.json"
     document.save_scene(path)
     restored = workspace()
     restored.open_scene(path)
@@ -1048,7 +1048,7 @@ def test_model_element_duplication_copies_subtree_references_and_history(
     assert compile_count == 3
     assert any(node.name == "fixture_copy" for node in session.nodes)
 
-    workspace_path = tmp_path / "duplicate.forge.json"
+    workspace_path = tmp_path / "duplicate.mojive.json"
     document.save_scene(workspace_path)
     restored = workspace()
     restored.open_scene(workspace_path)
@@ -2387,17 +2387,17 @@ def test_model_material_creation_binding_and_texture_import(tmp_path: Path, monk
     texture = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_TEXTURE, "surface")
     assert int(model.mat_texid[textured_copy.entity_id, 1]) == texture
 
-    workspace_path = tmp_path / "material-assets.forge.json"
+    workspace_path = tmp_path / "material-assets.mojive.json"
     document.save_scene(workspace_path)
     restored = workspace()
     restored.open_scene(workspace_path)
     assert any(name.endswith("surface") for name in restored.model_texture_names(1))
     restored_model = restored.primary.model
     restored_copy = mujoco.mj_name2id(
-        restored_model, mujoco.mjtObj.mjOBJ_MATERIAL, "forge_1_paint_copy"
+        restored_model, mujoco.mjtObj.mjOBJ_MATERIAL, "opengl_1_paint_copy"
     )
     restored_texture = mujoco.mj_name2id(
-        restored_model, mujoco.mjtObj.mjOBJ_TEXTURE, "forge_1_surface"
+        restored_model, mujoco.mjtObj.mjOBJ_TEXTURE, "opengl_1_surface"
     )
     assert int(restored_model.mat_texid[restored_copy, 1]) == restored_texture
 
@@ -2416,8 +2416,8 @@ def test_model_material_and_texture_choices_stay_model_local() -> None:
     assert first_materials
     assert second_materials
     assert first_materials.isdisjoint(second_materials)
-    assert all(name.startswith(f"forge_{first}_") for name in session.model_texture_names(first))
-    assert all(name.startswith(f"forge_{second}_") for name in session.model_texture_names(second))
+    assert all(name.startswith(f"opengl_{first}_") for name in session.model_texture_names(first))
+    assert all(name.startswith(f"opengl_{second}_") for name in session.model_texture_names(second))
 
     geometry = next(
         node for node in session.nodes if node.model_id == first and node.type is NodeType.GEOM
@@ -2436,14 +2436,14 @@ def test_mjspec_element_pose_edits_round_trip_in_workspace(tmp_path: Path) -> No
     )
     model_node = next(node for node in document.nodes() if node.type is NodeType.MODEL)
     document.add_model_element(model_node.node_id, "body", "fixture")
-    body = next(node for node in document.nodes() if node.name == "forge_1_fixture")
+    body = next(node for node in document.nodes() if node.name == "opengl_1_fixture")
     document.add_model_element(body.node_id, "geom:box", "fixture_visual")
-    body = next(node for node in document.nodes() if node.name == "forge_1_fixture")
-    geom = next(node for node in document.nodes() if node.name == "forge_1_fixture_visual")
+    body = next(node for node in document.nodes() if node.name == "opengl_1_fixture")
+    geom = next(node for node in document.nodes() if node.name == "opengl_1_fixture_visual")
     assert document.set_pose(body.node_id, np.array((3.0, 0.0, 0.0)), np.eye(3))
     assert document.set_pose(geom.node_id, np.array((3.0, 1.0, 0.0)), np.eye(3))
 
-    path = tmp_path / "poses.forge.json"
+    path = tmp_path / "poses.mojive.json"
     document.save_scene(path)
     restored = workspace()
     restored.open_scene(path)
@@ -2469,7 +2469,7 @@ def test_mjcf_camera_and_light_edits_persist_with_model(tmp_path: Path) -> None:
     light = document.scene_source().lights.lights[0]
     assert document.set_light(0, replace(light, range=13.0))
 
-    path = tmp_path / "camera-light.forge.json"
+    path = tmp_path / "camera-light.mojive.json"
     document.save_scene(path)
     restored = workspace()
     restored.open_scene(path)
@@ -2530,7 +2530,7 @@ def test_model_source_supports_complete_mjcf_topology(tmp_path: Path) -> None:
     model = document.primary.model
     assert (model.ntendon, model.nu, model.nsensor, model.neq) == (1, 1, 1, 1)
 
-    path = tmp_path / "full-topology.forge.json"
+    path = tmp_path / "full-topology.mojive.json"
     document.save_scene(path)
     restored = workspace()
     restored.open_scene(path)
@@ -2597,7 +2597,7 @@ def test_structured_model_components_edit_and_round_trip(tmp_path: Path) -> None
     model = document.primary.model
     assert (model.ntendon, model.nu, model.nsensor, model.neq) == (1, 1, 0, 1)
     assert model.actuator_ctrlrange[0] == pytest.approx((-2.0, 2.0))
-    path = tmp_path / "structured-components.forge.json"
+    path = tmp_path / "structured-components.mojive.json"
     document.save_scene(path)
     restored = workspace()
     restored.open_scene(path)
@@ -2693,7 +2693,7 @@ def test_contact_pair_and_exclude_use_structured_reference_fields(tmp_path: Path
     assert int(document.primary.model.pair_dim[0]) == 4
     assert document.primary.model.pair_friction[0] == pytest.approx((1.0, 0.1, 0.01, 0.2, 0.3))
 
-    path = tmp_path / "contacts.forge.json"
+    path = tmp_path / "contacts.mojive.json"
     document.save_scene(path)
     restored = workspace()
     restored.open_scene(path)
@@ -2917,7 +2917,7 @@ def test_model_keyframe_authoring_captures_edits_loads_and_undoes(tmp_path: Path
     session = Session(document)
     assert session.submit(cmd.Pause())
 
-    joint = mujoco.mj_name2id(document.primary.model, mujoco.mjtObj.mjOBJ_JOINT, "forge_1_hinge")
+    joint = mujoco.mj_name2id(document.primary.model, mujoco.mjtObj.mjOBJ_JOINT, "opengl_1_hinge")
     unnamed_joint = next(index for index in range(document.primary.model.njnt) if index != joint)
     actuator = 0
     body = next(
@@ -3110,8 +3110,8 @@ def test_model_transform_preview_moves_frames_without_recompiling(monkeypatch) -
 
 
 def test_model_placement_stays_preview_only_until_explicit_apply(monkeypatch) -> None:
-    from forge_viewer.gizmo import GizmoHandle
-    from forge_viewer.ui.gizmo import ObjectGizmo
+    from mojive.gizmo import GizmoHandle
+    from mojive.ui.gizmo import ObjectGizmo
 
     document = workspace()
     model_id = document.add_scene_model(
@@ -3179,8 +3179,8 @@ def test_model_placement_stays_preview_only_until_explicit_apply(monkeypatch) ->
 
 
 def test_cancelled_model_placement_discards_preview_without_recompiling(monkeypatch) -> None:
-    from forge_viewer.gizmo import GizmoHandle
-    from forge_viewer.ui.gizmo import ObjectGizmo
+    from mojive.gizmo import GizmoHandle
+    from mojive.ui.gizmo import ObjectGizmo
 
     document = workspace()
     model_id = document.add_scene_model(
@@ -3230,7 +3230,7 @@ def test_cancelled_model_placement_discards_preview_without_recompiling(monkeypa
 
 
 def test_unchanged_model_placement_exits_without_recompiling(monkeypatch) -> None:
-    from forge_viewer.ui.gizmo import ObjectGizmo
+    from mojive.ui.gizmo import ObjectGizmo
 
     document = workspace()
     model_id = document.add_scene_model(

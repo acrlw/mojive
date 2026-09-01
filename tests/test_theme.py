@@ -10,8 +10,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from forge_viewer.adapters.base import NodeType
-from forge_viewer.ui import theme
+from mojive.adapters.base import NodeType
+from mojive.ui import theme
 
 MAX_NODE_SATURATION = 0.40
 
@@ -149,7 +149,7 @@ def test_axis_colors_are_luminance_balanced():
 
 def test_native_gizmo_uses_theme_axis_colors():
 
-    from forge_viewer.gizmo import AXIS_COLORS as GIZMO_COLORS
+    from mojive.gizmo import AXIS_COLORS as GIZMO_COLORS
 
     expected = [theme.AXIS_COLORS[k] for k in theme.AXIS_ORDER]
     for actual, want in zip(GIZMO_COLORS, expected, strict=True):

@@ -9,20 +9,20 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from forge_viewer.adapters.base import (
+from mojive.adapters.base import (
     ActuatorVisualType,
     BvhType,
     FrameNeeds,
     JointVisualType,
     NodeType,
 )
-from forge_viewer.types import ShadingModel
+from mojive.types import ShadingModel
 
 pytestmark = pytest.mark.physics
 
 mujoco = pytest.importorskip("mujoco", reason="MuJoCo is required")
 
-from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter  # noqa: E402
+from mojive.adapters.mujoco_adapter import MuJoCoAdapter  # noqa: E402
 
 FIXTURE_XML = """
 <mujoco model="adapter_fixture">
@@ -111,9 +111,7 @@ def test_scene_source_arrays_agree(adapter):
 
 def test_bundled_test_scene_loads(fixture_path):
 
-    resolve = pytest.importorskip(
-        "forge_viewer.assets", reason="asset registry unavailable"
-    ).resolve
+    resolve = pytest.importorskip("mojive.assets", reason="asset registry unavailable").resolve
     a = MuJoCoAdapter(resolve("test_scene"))
     src = a.scene_source()
     n = src.instance_count
@@ -264,7 +262,7 @@ def test_square_cube_texture_repeats_one_image_on_every_face(tmp_path):
 def test_flex_uv_indices_can_reference_texture_coordinates_beyond_vertex_count():
     from types import SimpleNamespace
 
-    from forge_viewer.adapters.mujoco_deformables import _SurfaceFlex
+    from mojive.adapters.mujoco_deformables import _SurfaceFlex
 
     surface = object.__new__(_SurfaceFlex)
     surface._corner_ids = np.array([0, 1, 2, 0, 2, 1], np.int32)
@@ -347,8 +345,8 @@ def test_material_and_lights(adapter):
 
 
 def test_material_texture_roundtrip_preserves_relative_mesh_directory(tmp_path):
-    from forge_viewer import commands as cmd
-    from forge_viewer.session import Session
+    from mojive import commands as cmd
+    from mojive.session import Session
 
     meshes = tmp_path / "meshes"
     meshes.mkdir()
@@ -464,10 +462,10 @@ def test_trackcom_light_edit_updates_while_simulation_is_paused(tmp_path):
         tracking_adapter.release()
 
 
-def test_forge_area_light_survives_mujoco_writeback(adapter, fixture_path):
-    from forge_viewer import commands as cmd
-    from forge_viewer.session import Session
-    from forge_viewer.types import LightType
+def test_opengl_area_light_survives_mujoco_writeback(adapter, fixture_path):
+    from mojive import commands as cmd
+    from mojive.session import Session
+    from mojive.types import LightType
 
     session = Session(adapter, fixture_path)
     source_light = session.source.lights.lights[0]
@@ -483,7 +481,7 @@ def test_forge_area_light_survives_mujoco_writeback(adapter, fixture_path):
 
 
 def test_image_light_preserves_its_cube_texture_and_intensity(tmp_path):
-    from forge_viewer.types import LightType
+    from mojive.types import LightType
 
     path = tmp_path / "image_light.xml"
     path.write_text(
@@ -521,8 +519,8 @@ def test_image_light_preserves_its_cube_texture_and_intensity(tmp_path):
 
 
 def test_attached_image_light_writes_its_local_texture_name(tmp_path):
-    from forge_viewer import commands as cmd
-    from forge_viewer.session import Session
+    from mojive import commands as cmd
+    from mojive.session import Session
 
     root = tmp_path / "root.xml"
     root.write_text('<mujoco model="root"><worldbody/></mujoco>')
@@ -548,7 +546,7 @@ def test_attached_image_light_writes_its_local_texture_name(tmp_path):
         assert session.submit(cmd.Pause())
         assert session.submit(cmd.AddSceneModel(child, np.zeros(3, np.float32)))
         light = session.source.lights.lights[0]
-        assert light.texture == "forge_1_studio"
+        assert light.texture == "opengl_1_studio"
         assert image_adapter.set_light(0, replace(light, intensity=3200.0))
 
         exported = tmp_path / "exported.xml"
@@ -729,9 +727,7 @@ def test_set_qpos_takes_a_qpos_address(adapter):
 
 def test_set_qpos_on_joint_types_scene():
 
-    resolve = pytest.importorskip(
-        "forge_viewer.assets", reason="asset registry unavailable"
-    ).resolve
+    resolve = pytest.importorskip("mojive.assets", reason="asset registry unavailable").resolve
     a = MuJoCoAdapter(resolve("joint_types"))
     joints = {j.name: j for j in a.joints()}
     assert joints["free"].qpos_adr == 0 and joints["free"].dof == 6
@@ -781,7 +777,7 @@ def test_set_pose_on_free_body_resets_velocity(adapter):
 
 
 def test_mocap_bodies_use_the_shared_pose_editing_contract():
-    from forge_viewer.assets import resolve
+    from mojive.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("mocap_equality"))
     try:
@@ -799,9 +795,9 @@ def test_mocap_bodies_use_the_shared_pose_editing_contract():
 
 
 def test_equality_constraints_are_listed_and_switchable():
-    from forge_viewer import commands as cmd
-    from forge_viewer.assets import resolve
-    from forge_viewer.session import Session
+    from mojive import commands as cmd
+    from mojive.assets import resolve
+    from mojive.session import Session
 
     adapter = MuJoCoAdapter(resolve("mocap_equality"))
     session = Session(adapter)
@@ -876,8 +872,8 @@ def test_caps_report_what_is_not_there(adapter):
 
 
 def test_keyframes_are_listed_and_restore_the_complete_state(adapter, fixture_path):
-    from forge_viewer import commands as cmd
-    from forge_viewer.session import Session
+    from mojive import commands as cmd
+    from mojive.session import Session
 
     keys = adapter.keyframes()
     assert [(k.keyframe_id, k.name, k.time) for k in keys] == [(0, "pose", 1.25)]
@@ -898,9 +894,9 @@ def test_keyframes_are_listed_and_restore_the_complete_state(adapter, fixture_pa
 
 
 def test_session_state_take_replays_mujoco_frames_without_recompiling(adapter, fixture_path):
-    from forge_viewer import commands as cmd
-    from forge_viewer.adapters.base import FrameNeeds
-    from forge_viewer.session import Session
+    from mojive import commands as cmd
+    from mojive.adapters.base import FrameNeeds
+    from mojive.session import Session
 
     session = Session(adapter, fixture_path)
     generation = session.structure_generation
@@ -973,8 +969,8 @@ def test_reload_and_reset(adapter, fixture_path):
 
 
 def test_mjspec_model_composition_preserves_matching_state(tmp_path):
-    from forge_viewer import commands as cmd
-    from forge_viewer.session import Session
+    from mojive import commands as cmd
+    from mojive.session import Session
 
     root = tmp_path / "root.xml"
     root.write_text(
@@ -1019,10 +1015,10 @@ def test_mjspec_model_composition_preserves_matching_state(tmp_path):
     assert adapter.data.qvel[0] == pytest.approx(-0.2)
     assert adapter.data.ctrl[0] == pytest.approx(0.6)
     assert adapter.data.time == pytest.approx(2.5)
-    assert adapter.model.body("forge_1_payload").id > 0
+    assert adapter.model.body("opengl_1_payload").id > 0
     model_node = next(node for node in session.nodes if node.type is NodeType.MODEL)
     assert model_node.name == "payload" and model_node.model_id == added.entity_id
-    assert any(session.node(child).name == "forge_1_payload" for child in model_node.children)
+    assert any(session.node(child).name == "opengl_1_payload" for child in model_node.children)
     model_center, model_half = session.node_world_bounds(model_node.node_id)
     assert model_center == pytest.approx((1.2, 2.0, 3.0))
     assert model_half == pytest.approx((0.1, 0.1, 0.1))
@@ -1038,9 +1034,9 @@ def test_mjspec_model_composition_preserves_matching_state(tmp_path):
 
 
 def test_session_loads_mjcf_and_urdf_without_losing_the_current_model_on_failure(tmp_path):
-    from forge_viewer import commands as cmd
-    from forge_viewer.assets import resolve
-    from forge_viewer.session import Session
+    from mojive import commands as cmd
+    from mojive.assets import resolve
+    from mojive.session import Session
 
     session = Session(MuJoCoAdapter(resolve("empty")), resolve("empty"))
     try:
@@ -1116,7 +1112,7 @@ def test_urdf_loader_normalizes_repeated_compiler_mesh_directory(tmp_path: Path)
 
 
 def test_urdf_loader_preserves_an_explicit_repeated_mesh_directory(tmp_path: Path) -> None:
-    from forge_viewer.adapters.mujoco_adapter import _normalized_urdf_source
+    from mojive.adapters.mujoco_adapter import _normalized_urdf_source
 
     meshes = tmp_path / "meshes" / "meshes"
     meshes.mkdir(parents=True)
@@ -1191,7 +1187,7 @@ f 2 3 4
 
 
 def test_urdf_loader_does_not_guess_between_ambiguous_meshes(tmp_path: Path) -> None:
-    from forge_viewer.adapters.mujoco_adapter import _normalized_urdf_source
+    from mojive.adapters.mujoco_adapter import _normalized_urdf_source
 
     for directory in (tmp_path / "first", tmp_path / "second"):
         directory.mkdir()
@@ -1211,7 +1207,7 @@ def test_urdf_loader_does_not_guess_between_ambiguous_meshes(tmp_path: Path) -> 
 def test_urdf_loader_scales_only_tiny_positive_definite_inertia(tmp_path: Path) -> None:
     import xml.etree.ElementTree as ET
 
-    from forge_viewer.adapters.mujoco_adapter import _normalized_urdf_source
+    from mojive.adapters.mujoco_adapter import _normalized_urdf_source
 
     path = tmp_path / "tiny-inertia.urdf"
     path.write_text(
@@ -1253,9 +1249,9 @@ def test_camera_hint_frames_the_scene(adapter):
 
 
 def test_session_indexes_selected_body_joints_and_requires_pause() -> None:
-    from forge_viewer import commands as cmd
-    from forge_viewer.assets import resolve
-    from forge_viewer.session import Session
+    from mojive import commands as cmd
+    from mojive.assets import resolve
+    from mojive.session import Session
 
     session = Session(MuJoCoAdapter(resolve("joint_types")))
     joint = session.joints[0]
@@ -1269,9 +1265,9 @@ def test_session_indexes_selected_body_joints_and_requires_pause() -> None:
 
 
 def test_qpos_batch_validates_atomically_and_forwards_once(monkeypatch) -> None:
-    from forge_viewer import commands as cmd
-    from forge_viewer.assets import resolve
-    from forge_viewer.session import Session
+    from mojive import commands as cmd
+    from mojive.assets import resolve
+    from mojive.session import Session
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -1301,10 +1297,10 @@ def test_qpos_batch_validates_atomically_and_forwards_once(monkeypatch) -> None:
 
 
 def test_mujoco_visuals_cover_heightfield_sites_and_tendon():
-    from forge_viewer.assets import resolve
-    from forge_viewer.mujoco_audit import audit_model
-    from forge_viewer.render.builder import SceneSourceBuilder
-    from forge_viewer.types import CameraView, InstancePoseSource, MeshShape
+    from mojive.assets import resolve
+    from mojive.mujoco_audit import audit_model
+    from mojive.render.builder import SceneSourceBuilder
+    from mojive.types import CameraView, InstancePoseSource, MeshShape
 
     a = MuJoCoAdapter(resolve("mujoco_visuals"))
     try:
@@ -1347,8 +1343,8 @@ def test_mujoco_visuals_cover_heightfield_sites_and_tendon():
 
 
 def test_collision_mesh_exposes_mujoco_compiled_convex_hull():
-    from forge_viewer.assets import resolve
-    from forge_viewer.types import MeshShape
+    from mojive.assets import resolve
+    from mojive.types import MeshShape
 
     adapter = MuJoCoAdapter(resolve("convex_hull"))
     try:
@@ -1366,8 +1362,8 @@ def test_collision_mesh_exposes_mujoco_compiled_convex_hull():
 
 
 def test_actuator_visual_metadata_and_controls_follow_mujoco_addresses():
-    from forge_viewer.assets import resolve
-    from forge_viewer.mujoco_audit import audit_model
+    from mojive.assets import resolve
+    from mojive.mujoco_audit import audit_model
 
     a = MuJoCoAdapter(resolve("actuator_visuals"))
     try:
@@ -1400,7 +1396,7 @@ def test_actuator_visual_metadata_and_controls_follow_mujoco_addresses():
 
 
 def test_slider_crank_visuals_match_mujoco_linkage_geometry():
-    from forge_viewer.assets import resolve
+    from mojive.assets import resolve
 
     a = MuJoCoAdapter(resolve("slider_crank"))
     try:
@@ -1424,7 +1420,7 @@ def test_slider_crank_visuals_match_mujoco_linkage_geometry():
 
 
 def test_contact_force_components_and_autoconnect_segments_match_mujoco():
-    from forge_viewer.assets import resolve
+    from mojive.assets import resolve
 
     contacts = MuJoCoAdapter(resolve("mujoco_visuals"))
     chain = MuJoCoAdapter(resolve("joint_types"))
@@ -1455,7 +1451,7 @@ def test_contact_force_components_and_autoconnect_segments_match_mujoco():
 
 
 def test_island_colors_match_mujocos_visualizer():
-    from forge_viewer.assets import resolve
+    from mojive.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("mujoco_visuals"))
     try:
@@ -1518,7 +1514,7 @@ def test_island_colors_match_mujocos_visualizer():
     ),
 )
 def test_bvh_boxes_match_mujocos_visualizer(asset, flag, bvh_type, depth, show_inactive):
-    from forge_viewer.assets import resolve
+    from mojive.assets import resolve
 
     adapter = MuJoCoAdapter(resolve(asset))
     try:
@@ -1568,8 +1564,8 @@ def test_bvh_boxes_match_mujocos_visualizer(asset, flag, bvh_type, depth, show_i
 
 
 def test_bvh_metadata_is_materialized_only_when_a_frame_requests_it():
-    from forge_viewer.assets import resolve
-    from forge_viewer.session import Session
+    from mojive.assets import resolve
+    from mojive.session import Session
 
     adapter = MuJoCoAdapter(resolve("dense_mesh"))
     session = Session(adapter)
@@ -1674,10 +1670,10 @@ def test_tendon_material_matches_mujocos_final_color_and_scalars(tmp_path):
 
 def test_deformables_match_mujocos_abstract_visualization():
 
-    from forge_viewer.assets import resolve
-    from forge_viewer.mujoco_audit import audit_model
-    from forge_viewer.render.builder import SceneSourceBuilder
-    from forge_viewer.types import InstancePoseSource, InstanceVisual, MeshKey, MeshShape
+    from mojive.assets import resolve
+    from mojive.mujoco_audit import audit_model
+    from mojive.render.builder import SceneSourceBuilder
+    from mojive.types import InstancePoseSource, InstanceVisual, MeshKey, MeshShape
 
     a = MuJoCoAdapter(resolve("deformables"))
     try:
@@ -1820,8 +1816,8 @@ def test_deformables_match_mujocos_abstract_visualization():
 
 
 def test_deformables_contribute_to_session_bounds():
-    from forge_viewer.assets import resolve
-    from forge_viewer.session import Session
+    from mojive.assets import resolve
+    from mojive.session import Session
 
     session = Session(MuJoCoAdapter(resolve("deformables")))
     try:
@@ -1836,7 +1832,7 @@ def test_deformables_contribute_to_session_bounds():
 
 
 def test_mujoco_model_cameras_follow_forward_kinematics():
-    from forge_viewer.assets import resolve
+    from mojive.assets import resolve
 
     a = MuJoCoAdapter(resolve("mujoco_visuals"))
     try:
@@ -1868,7 +1864,7 @@ def test_mujoco_model_cameras_follow_forward_kinematics():
 
 
 def test_mujoco_camera_intrinsics_preserve_principal_point(tmp_path):
-    from forge_viewer.mujoco_audit import audit_model
+    from mojive.mujoco_audit import audit_model
 
     path = tmp_path / "intrinsic_camera.xml"
     path.write_text(
@@ -1926,8 +1922,8 @@ def test_mujoco_camera_switch_to_fov_clears_persisted_intrinsics(tmp_path):
 
 
 def test_many_lights_audit_matches_the_renderer_capacity():
-    from forge_viewer.assets import resolve
-    from forge_viewer.mujoco_audit import audit_model
+    from mojive.assets import resolve
+    from mojive.mujoco_audit import audit_model
 
     adapter = MuJoCoAdapter(resolve("many_lights"))
     try:
@@ -1938,7 +1934,7 @@ def test_many_lights_audit_matches_the_renderer_capacity():
 
 
 def test_site_and_camera_rangefinders_publish_generic_diagnostics():
-    from forge_viewer.assets import resolve
+    from mojive.assets import resolve
 
     a = MuJoCoAdapter(resolve("rangefinder"))
     try:
@@ -1970,7 +1966,7 @@ def test_site_and_camera_rangefinders_publish_generic_diagnostics():
 
 
 def test_connect_and_weld_constraints_publish_mujoco_endpoint_markers():
-    from forge_viewer.assets import resolve
+    from mojive.assets import resolve
 
     a = MuJoCoAdapter(resolve("constraints"))
     try:
@@ -2001,7 +1997,7 @@ def test_connect_and_weld_constraints_publish_mujoco_endpoint_markers():
 
 
 def test_mujoco_geom_groups_rebuild_scene_nodes_and_raycast_mask():
-    from forge_viewer.assets import resolve
+    from mojive.assets import resolve
 
     a = MuJoCoAdapter(resolve("mujoco_visuals"))
     try:

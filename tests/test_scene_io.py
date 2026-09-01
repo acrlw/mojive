@@ -5,10 +5,10 @@ import json
 import numpy as np
 import pytest
 
-from forge_viewer.adapters.base import LIGHT_OBJECT_BASE
-from forge_viewer.render.builder import SceneSourceBuilder
-from forge_viewer.scene import Scene
-from forge_viewer.types import (
+from mojive.adapters.base import LIGHT_OBJECT_BASE
+from mojive.render.builder import SceneSourceBuilder
+from mojive.scene import Scene
+from mojive.types import (
     CameraView,
     Environment,
     Light,
@@ -22,7 +22,7 @@ from forge_viewer.types import (
 pytestmark = pytest.mark.integration
 
 
-def test_forge_scene_round_trip_preserves_authored_content(tmp_path):
+def test_mojive_scene_round_trip_preserves_authored_content(tmp_path):
     shared = Material(
         name="paint",
         rgba=np.array([0.2, 0.4, 0.8, 0.9], np.float32),
@@ -82,12 +82,12 @@ def test_forge_scene_round_trip_preserves_authored_content(tmp_path):
     camera = scene.add_camera("shot", CameraView(eye=np.array([5.0, -4.0, 3.0], np.float32)))
     scene.remove_camera(removed_camera)
 
-    path = scene.save(tmp_path / "authored.forge.json")
+    path = scene.save(tmp_path / "authored.mojive.json")
     restored = Scene.load(path)
     source = restored.source
     rendered = SceneSourceBuilder().set_source(source)
 
-    assert json.loads(path.read_text())["format"] == "forge-viewer.scene"
+    assert json.loads(path.read_text())["format"] == "mojive.scene"
     assert source.geom_object_id.tolist() == [first.object_id, 2]
     assert source.geom_material == [0, 0]
     assert source.materials[0].metallic == pytest.approx(0.25)
@@ -108,3 +108,16 @@ def test_forge_scene_round_trip_preserves_authored_content(tmp_path):
     assert [info.camera_id for info in restored.camera_infos()] == [camera]
     assert restored.camera_infos()[0].name == "shot"
     assert rendered.count == 2
+
+
+def test_legacy_scene_format_remains_readable(tmp_path):
+    scene = Scene()
+    scene.box(name="legacy box")
+    path = scene.save(tmp_path / "legacy.forge.json")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["format"] = "forge-viewer.scene"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    restored = Scene.load(path)
+
+    assert any(node.name == "legacy box" for node in restored.source.nodes)

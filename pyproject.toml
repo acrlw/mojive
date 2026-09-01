@@ -1,5 +1,5 @@
 [project]
-name = "forge-viewer"
+name = "mojive"
 version = "0.1.0"
 description = "Backend-neutral 3D viewer and renderer for robotics and simulation"
 readme = "README.md"
@@ -29,26 +29,26 @@ docs = [
 ]
 
 [project.scripts]
-forge-viewer = "forge_viewer.cli:main"
+mojive = "mojive.cli:main"
 
 [project.urls]
-Repository = "https://github.com/acrlw/forge-viewer"
-Issues = "https://github.com/acrlw/forge-viewer/issues"
+Repository = "https://github.com/acrlw/mojive"
+Issues = "https://github.com/acrlw/mojive/issues"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/forge_viewer"]
+packages = ["src/mojive"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"assets" = "forge_viewer/data/assets"
+"assets" = "mojive/data/assets"
 
 [tool.hatch.build]
 artifacts = [
-    "src/forge_viewer/render/forge/shaders/*.glsl",
-    "src/forge_viewer/render/webgpu/shaders/*.wgsl",
+    "src/mojive/render/opengl/shaders/*.glsl",
+    "src/mojive/render/webgpu/shaders/*.wgsl",
 ]
 
 [tool.ruff]

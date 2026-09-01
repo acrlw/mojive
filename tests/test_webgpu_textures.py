@@ -8,7 +8,7 @@ wgpu = pytest.importorskip("wgpu")
 
 import numpy as np  # noqa: E402
 
-from forge_viewer.render.webgpu.textures import TextureStore, _mip_chain  # noqa: E402
+from mojive.render.webgpu.textures import TextureStore, _mip_chain  # noqa: E402
 
 
 @pytest.mark.parametrize("components", (3, 4))

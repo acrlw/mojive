@@ -9,26 +9,26 @@ pytestmark = pytest.mark.gpu
 
 moderngl = pytest.importorskip("moderngl")
 
-from forge_viewer.math3d import look_at, perspective  # noqa: E402
-from forge_viewer.render.debugdraw import (  # noqa: E402
+from mojive.math3d import look_at, perspective  # noqa: E402
+from mojive.render.debugdraw import (  # noqa: E402
     ARROW_CORNER_RADIUS_RATIO,
     ARROW_HEAD_RATIO,
     Occlusion,
 )
-from forge_viewer.render.forge import gl_native as G  # noqa: E402
-from forge_viewer.render.forge.instances import InstanceStore  # noqa: E402
-from forge_viewer.render.forge.passes.base import PassContext  # noqa: E402
-from forge_viewer.render.forge.passes.debug import DebugPass  # noqa: E402
-from forge_viewer.render.forge.programs import ProgramCache  # noqa: E402
-from forge_viewer.render.forge.resources import TextureStore  # noqa: E402
-from forge_viewer.render.forge.targets import RenderTarget  # noqa: E402
-from forge_viewer.render.forge.timing import FrameTiming  # noqa: E402
-from forge_viewer.render.scene import RenderScene  # noqa: E402
-from forge_viewer.types import CameraView  # noqa: E402
+from mojive.render.opengl import gl_native as G  # noqa: E402
+from mojive.render.opengl.instances import InstanceStore  # noqa: E402
+from mojive.render.opengl.passes.base import PassContext  # noqa: E402
+from mojive.render.opengl.passes.debug import DebugPass  # noqa: E402
+from mojive.render.opengl.programs import ProgramCache  # noqa: E402
+from mojive.render.opengl.resources import TextureStore  # noqa: E402
+from mojive.render.opengl.targets import RenderTarget  # noqa: E402
+from mojive.render.opengl.timing import FrameTiming  # noqa: E402
+from mojive.render.scene import RenderScene  # noqa: E402
+from mojive.types import CameraView  # noqa: E402
 
 
 @pytest.fixture(autouse=True, scope="module")
-def _forge_backend_only(require_forge):
+def _opengl_backend_only(require_opengl):
     pass
 
 

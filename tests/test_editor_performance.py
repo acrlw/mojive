@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from forge_viewer.tools.editor_performance import run_benchmark
+from mojive.tools.editor_performance import run_benchmark
 
 pytest.importorskip("mujoco")
 pytestmark = [pytest.mark.integration, pytest.mark.physics]

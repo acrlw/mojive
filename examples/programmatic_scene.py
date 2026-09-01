@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from forge_viewer import CameraView, Light, LightType, Scene, build_scene
+from mojive import CameraView, Light, LightType, Scene, build_scene
 
 
 def create_scene() -> Scene:
@@ -33,7 +33,7 @@ def create_scene() -> Scene:
 
 
 def main() -> None:
-    viewer = build_scene(create_scene(), title="forge programmatic scene")
+    viewer = build_scene(create_scene(), title="Mojive programmatic scene")
     try:
         viewer.run()
     finally:

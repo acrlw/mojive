@@ -12,7 +12,7 @@ help:
 		'  make egl-viewer         Linux viewer with a GLFW EGL context' \
 		'  make hidpi              viewer with an explicit 200% UI scale' \
 		'  make empty              empty viewer; load MJCF or URDF from File menu' \
-		'  make editor             empty Forge workspace; combine MJCF/URDF and entities' \
+		'  make editor             empty Mojive workspace; combine MJCF/URDF and entities' \
 		'  make settings           editor with the dockable Settings panel open' \
 		'  make workspace-edit     workspace, MjSpec topology, camera and light acceptance' \
 		'  make model-loading      empty, MJCF, and URDF loading reference images' \
@@ -77,7 +77,7 @@ help:
 		'' \
 		'Backends and remote viewing:' \
 		'  make canvas            standalone scene and material editor' \
-		'  make scene-io          save, load, and capture a Forge scene' \
+		'  make scene-io          save, load, and capture a Mojive scene' \
 		'  make editor-files      scene document workflow acceptance' \
 		'  make entity-edit       Entity lifecycle acceptance' \
 		'  make undo-redo        editor history and continuous edit acceptance' \
@@ -118,13 +118,13 @@ help:
 		'Display and backend options:' \
 		'  make editor BACKEND=wgpu' \
 		'  make editor LANGUAGE=zh_CN                 simplified Chinese UI' \
-		'  FORGE_VIEWER_UI_SCALE=2 make editor' \
-		'  FORGE_VIEWER_CJK_FONT=/path/font.otf make editor' \
+		'  MOJIVE_UI_SCALE=2 make editor' \
+		'  MOJIVE_CJK_FONT=/path/font.otf make editor' \
 		'  make hidpi BACKEND=wgpu UI_SCALE=2' \
-		'  FORGE_VIEWER_UI_SCALE=1.5 make viewer BACKEND=wgpu SCENE=gizmo ARGS="--paused"' \
-		'  FORGE_VIEWER_GL=egl make viewer          Linux GLFW EGL context' \
+		'  MOJIVE_UI_SCALE=1.5 make viewer BACKEND=wgpu SCENE=gizmo ARGS="--paused"' \
+		'  MOJIVE_GL=egl make viewer          Linux GLFW EGL context' \
 		'' \
-		'BACKEND accepts forge (OpenGL) or wgpu. Leave UI scale unset for automatic scaling.'
+		'BACKEND accepts opengl (OpenGL) or wgpu. Leave UI scale unset for automatic scaling.'
 
 setup:
 	uv sync --python 3.11 --extra dev --extra mujoco --extra wgpu
@@ -180,22 +180,22 @@ GPU_WGPU_FILES := tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capt
 ## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
 gpu-wgpu:
-	@export FORGE_VIEWER_BACKEND=wgpu; for f in $(GPU_WGPU_FILES); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
+	@export MOJIVE_BACKEND=wgpu; for f in $(GPU_WGPU_FILES); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
 
 egl:
 	@test "$$(uname -s)" = Linux || { echo 'make egl requires Linux'; exit 2; }
-	FORGE_VIEWER_GL=egl $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
+	MOJIVE_GL=egl $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
 
 renderer-api:
 	$(PYTEST) -q tests/test_renderer_api.py
 	$(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
-	$(PY) -m forge_viewer.tools.renderer_api
+	$(PY) -m mojive.tools.renderer_api
 
 ## Same Renderer API checks against the wgpu backend.
 renderer-api-wgpu:
-	FORGE_VIEWER_BACKEND=wgpu $(PYTEST) -q tests/test_renderer_api.py
-	FORGE_VIEWER_BACKEND=wgpu $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
-	FORGE_VIEWER_BACKEND=wgpu $(PY) -m forge_viewer.tools.renderer_api
+	MOJIVE_BACKEND=wgpu $(PYTEST) -q tests/test_renderer_api.py
+	MOJIVE_BACKEND=wgpu $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
+	MOJIVE_BACKEND=wgpu $(PY) -m mojive.tools.renderer_api
 
 p0: renderer-api
 
@@ -204,40 +204,40 @@ p1: check p0 renderer-api-wgpu mujoco-physics camera-state scene-snapshot rpc ma
 
 ## Compare golden images. Use golden-accept after visual review.
 golden:
-	$(PY) -m forge_viewer.tools.golden
+	$(PY) -m mojive.tools.golden
 
 golden-accept:
-	$(PY) -m forge_viewer.tools.golden --accept
+	$(PY) -m mojive.tools.golden --accept
 
-## Render Forge and the MuJoCo reference from one camera. The reference uses a subprocess.
+## Render OpenGL and the MuJoCo reference from one camera. The reference uses a subprocess.
 parity:
-	$(PY) -m forge_viewer.tools.parity $(ARGS)
+	$(PY) -m mojive.tools.parity $(ARGS)
 
 ## Calibrate diffuse, headlight, ambient, and texture lighting against MuJoCo.
 calibrate:
-	$(PY) -m forge_viewer.tools.calibrate
+	$(PY) -m mojive.tools.calibrate
 
 ## Render the scene gallery for visual review.
 gallery:
-	$(PY) -m forge_viewer.tools.gallery
+	$(PY) -m mojive.tools.gallery
 
 ui-feasibility:
 	$(PY) design/tools/render_ui_feasibility.py --interactive $(ARGS)
 
 ui-runtime:
-	$(PY) -m forge_viewer.tools.ui_runtime $(ARGS)
+	$(PY) -m mojive.tools.ui_runtime $(ARGS)
 
 ## Export production Tool Column geometry on transparent 1024px canvases.
 tool-icons:
-	$(PY) -m forge_viewer.tools.tool_icons $(ARGS)
+	$(PY) -m mojive.tools.tool_icons $(ARGS)
 
 ## Export production mouse hint geometry with black and transparent shells.
 mouse-icons:
-	$(PY) -m forge_viewer.tools.mouse_hint_icons $(ARGS)
+	$(PY) -m mojive.tools.mouse_hint_icons $(ARGS)
 
 ## Profile production viewport chrome and enforce its incremental frame budget.
 ui-frame-profile:
-	$(PY) -m forge_viewer.tools.ui_frame_profile $(ARGS)
+	$(PY) -m mojive.tools.ui_frame_profile $(ARGS)
 
 ui-gallery:
 	$(PY) design/tools/render_ui_feasibility.py --page workspace -o output/ui-workspace.png
@@ -250,30 +250,30 @@ ui-gallery:
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab shell -o output/ui-geometry-shell.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab panels -o output/ui-geometry-panels.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab workspaces -o output/ui-geometry-workspaces.png
-	$(PY) -m forge_viewer.tools.ui_runtime -o output/ui-runtime
+	$(PY) -m mojive.tools.ui_runtime -o output/ui-runtime
 
 gizmo-gallery:
-	$(PY) -m forge_viewer.tools.gizmo_gallery $(ARGS)
+	$(PY) -m mojive.tools.gizmo_gallery $(ARGS)
 
 hidpi-gallery:
-	FORGE_VIEWER_UI_SCALE=$(UI_SCALE) $(PY) -m forge_viewer.tools.gizmo_gallery \
+	MOJIVE_UI_SCALE=$(UI_SCALE) $(PY) -m mojive.tools.gizmo_gallery \
 		-o output/gizmo-gallery-hidpi $(ARGS)
 
 model-loading:
-	$(PY) -m forge_viewer.tools.model_loading $(ARGS)
+	$(PY) -m mojive.tools.model_loading $(ARGS)
 
 model-composition:
 	$(PYTEST) -q -m physics tests/test_adapter.py -k 'mjspec_model_composition'
-	$(PY) -m forge_viewer.tools.model_composition $(ARGS)
+	$(PY) -m mojive.tools.model_composition $(ARGS)
 
 editor-performance:
 	$(PYTEST) -q -m physics tests/test_editor_performance.py
-	$(PY) -m forge_viewer.tools.editor_performance $(ARGS)
+	$(PY) -m mojive.tools.editor_performance $(ARGS)
 
 stability: rpc-soak format-validation
 	$(PYTEST) -q -m physics tests/test_stability.py
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py -k 'multi_camera_concurrency'
-	$(PY) -m forge_viewer.tools.stability $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py -k 'multi_camera_concurrency'
+	$(PY) -m mojive.tools.stability $(ARGS)
 
 rpc-soak:
 	$(PYTEST) -q -m physics tests/test_control_rpc.py -k 'reuses_one_connection or recovers_after_invalid or idle_connection or reconnects_on_the_call'
@@ -283,11 +283,11 @@ format-validation:
 	$(PYTEST) -q -m physics tests/test_scene_state.py -k 'version or current or future'
 
 scene-io:
-	$(PY) -m forge_viewer.tools.scene_io $(ARGS)
+	$(PY) -m mojive.tools.scene_io $(ARGS)
 
 editor-files:
 	$(PYTEST) -q tests/test_static_scene.py -k 'document_commands'
-	$(PY) -m forge_viewer.tools.scene_io $(ARGS)
+	$(PY) -m mojive.tools.scene_io $(ARGS)
 
 entity-edit:
 	$(PYTEST) -q tests/test_static_scene.py -k 'entity_lifecycle'
@@ -298,16 +298,16 @@ undo-redo:
 	$(PYTEST) -q -m gpu tests/gpu/test_static_viewer.py -k 'undo_redo'
 
 remote-authoring:
-	$(PY) -m forge_viewer.tools.remote_authoring $(ARGS)
+	$(PY) -m mojive.tools.remote_authoring $(ARGS)
 
 additive:
-	$(PY) -m forge_viewer.tools.additive $(ARGS)
+	$(PY) -m mojive.tools.additive $(ARGS)
 
 bench:
-	$(PY) -m forge_viewer.tools.bench
+	$(PY) -m mojive.tools.bench
 
 showcase:
-	$(PY) -m forge_viewer.tools.showcase
+	$(PY) -m mojive.tools.showcase
 
 ## Refresh the measurements recorded in docs/PLATFORM.md.
 probe:
@@ -320,202 +320,202 @@ reverse:
 ## Open an asset. Pass viewer flags through ARGS.
 SCENE ?= test_scene
 ARGS  ?=
-BACKEND ?= forge
-LANGUAGE ?= $(FORGE_VIEWER_LANGUAGE)
+BACKEND ?= opengl
+LANGUAGE ?= $(MOJIVE_LANGUAGE)
 viewer:
-	FORGE_VIEWER_BACKEND=$(BACKEND) FORGE_VIEWER_LANGUAGE=$(LANGUAGE) $(PY) -m forge_viewer.cli view $(SCENE) $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) $(PY) -m mojive.cli view $(SCENE) $(ARGS)
 
 egl-viewer:
 	@test "$$(uname -s)" = Linux || { echo 'make egl-viewer requires Linux'; exit 2; }
-	FORGE_VIEWER_GL=egl $(PY) -m forge_viewer.cli view $(SCENE) $(ARGS)
+	MOJIVE_GL=egl $(PY) -m mojive.cli view $(SCENE) $(ARGS)
 
 UI_SCALE ?= 2
 hidpi:
-	FORGE_VIEWER_BACKEND=$(BACKEND) FORGE_VIEWER_LANGUAGE=$(LANGUAGE) FORGE_VIEWER_UI_SCALE=$(UI_SCALE) $(PY) -m forge_viewer.cli view gizmo --paused $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) MOJIVE_UI_SCALE=$(UI_SCALE) $(PY) -m mojive.cli view gizmo --paused $(ARGS)
 
 ## Open an empty MuJoCo scene and load MJCF or URDF from File > Open Model.
 empty:
-	FORGE_VIEWER_BACKEND=$(BACKEND) FORGE_VIEWER_LANGUAGE=$(LANGUAGE) $(PY) -m forge_viewer.cli view empty --paused $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) $(PY) -m mojive.cli view empty --paused $(ARGS)
 
 ## Empty authored scene with New/Open/Save and Entity creation workflows.
 editor:
-	FORGE_VIEWER_BACKEND=$(BACKEND) FORGE_VIEWER_LANGUAGE=$(LANGUAGE) $(PY) -m forge_viewer.cli editor $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) $(PY) -m mojive.cli editor $(ARGS)
 
 workspace-edit:
 	$(PYTEST) -q tests/test_workspace.py tests/test_scene_entities.py
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor $(ARGS)
 
-## Programmatic scene, Forge rendering, and the standard UI.
+## Programmatic scene, OpenGL rendering, and the standard UI.
 canvas:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli canvas $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli canvas $(ARGS)
 
 ## Independent physics adapter with gravity, collision, controls, and pose editing.
 toy-physics:
-	$(PY) -m forge_viewer.cli toy $(ARGS)
+	$(PY) -m mojive.cli toy $(ARGS)
 
 ADAPTER ?= toy
 CONFORMANCE_ASSET ?=
 ## Headless contract report for third-party adapters. MuJoCo example:
 ## make adapter-conformance ADAPTER=mujoco CONFORMANCE_ASSET=test_scene
 adapter-conformance:
-	$(PY) -m forge_viewer.cli conformance $(ADAPTER) $(if $(CONFORMANCE_ASSET),--asset $(CONFORMANCE_ASSET),) $(ARGS)
+	$(PY) -m mojive.cli conformance $(ADAPTER) $(if $(CONFORMANCE_ASSET),--asset $(CONFORMANCE_ASSET),) $(ARGS)
 
 ## Editable lights and Environment controls for ambient light, fog, haze, and headlight.
 lighting:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli canvas --demo lighting $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli canvas --demo lighting $(ARGS)
 
 image-light:
-	$(PY) -m forge_viewer.cli view assets/image_light.xml --paused $(ARGS)
+	$(PY) -m mojive.cli view assets/image_light.xml --paused $(ARGS)
 
 many-lights:
-	$(PY) -m forge_viewer.tools.mujoco_many_lights $(ARGS)
+	$(PY) -m mojive.tools.mujoco_many_lights $(ARGS)
 
 material-parity:
 	$(PYTEST) -q tests/test_builder.py tests/test_scene.py
-	$(PY) -m forge_viewer.tools.material_parity $(ARGS)
+	$(PY) -m mojive.tools.material_parity $(ARGS)
 
 material-parity-accept:
-	$(PY) -m forge_viewer.tools.material_parity --accept $(ARGS)
+	$(PY) -m mojive.tools.material_parity --accept $(ARGS)
 
 shadow-scheduling:
 	$(PYTEST) -q tests/test_light_schedule.py
 	$(PYTEST) -q -m gpu tests/gpu/test_shadows.py -k 'eight_local or local_light_indices'
-	$(PY) -m forge_viewer.tools.shadow_scheduling $(ARGS)
+	$(PY) -m mojive.tools.shadow_scheduling $(ARGS)
 
 scene-icons:
-	$(PY) -m forge_viewer.cli canvas --demo lighting \
+	$(PY) -m mojive.cli canvas --demo lighting \
 		--enable-render camera --enable-render light $(ARGS)
 
 scene-entities:
 	$(PYTEST) -q tests/test_scene_entities.py
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.tools.scene_entities $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.tools.scene_entities $(ARGS)
 
 ## World anchors, screen offsets, alignment, and depth modes with the UI font.
 text-overlay:
-	$(PY) -m forge_viewer.cli canvas --demo text $(ARGS)
+	$(PY) -m mojive.cli canvas --demo text $(ARGS)
 
 OUTPUT ?= output/recording.mp4
 SCREENSHOT ?= output/capture.png
 ## Capture at any resolution. Example: make capture SCENE=humanoid ARGS="--width 1920 --height 1080".
 capture:
-	$(PY) -m forge_viewer.cli capture $(SCENE) -o $(SCREENSHOT) $(ARGS)
+	$(PY) -m mojive.cli capture $(SCENE) -o $(SCREENSHOT) $(ARGS)
 
 ## Stream video encoding. Example: make record SCENE=humanoid ARGS="--frames 120".
 record:
-	$(PY) -m forge_viewer.cli record $(SCENE) -o $(OUTPUT) $(ARGS)
+	$(PY) -m mojive.cli record $(SCENE) -o $(OUTPUT) $(ARGS)
 
 LIVE_HOST ?= 127.0.0.1
 LIVE_PORT ?= 47650
 LIVE_SCENE ?= gizmo
 ## Run physics headlessly and publish the latest snapshot.
 serve:
-	$(PY) -m forge_viewer.cli serve $(LIVE_SCENE) --host $(LIVE_HOST) --port $(LIVE_PORT) $(ARGS)
+	$(PY) -m mojive.cli serve $(LIVE_SCENE) --host $(LIVE_HOST) --port $(LIVE_PORT) $(ARGS)
 
 ## Open an independent remote viewer.
 attach:
-	$(PY) -m forge_viewer.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) $(ARGS)
+	$(PY) -m mojive.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) $(ARGS)
 
 ## Start one physics publisher, one effect viewer, and one normal-debug viewer.
 live-view:
-	@$(PY) -m forge_viewer.cli serve $(LIVE_SCENE) --host $(LIVE_HOST) --port $(LIVE_PORT) $(ARGS) & server=$$!; \
-	$(PY) -m forge_viewer.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) --title "forge effect" & effect=$$!; \
-	$(PY) -m forge_viewer.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) --title "forge debug" --debug-view normal & debug=$$!; \
+	@$(PY) -m mojive.cli serve $(LIVE_SCENE) --host $(LIVE_HOST) --port $(LIVE_PORT) $(ARGS) & server=$$!; \
+	$(PY) -m mojive.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) --title "Mojive effect" & effect=$$!; \
+	$(PY) -m mojive.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) --title "Mojive debug" --debug-view normal & debug=$$!; \
 	trap 'kill $$effect $$debug $$server 2>/dev/null || true' EXIT INT TERM; \
 	wait $$effect; wait $$debug
 
 SNAPSHOT ?= output/session.fvs
 ## Record structure revisions, physics frames, and debug commands.
 snapshot-record:
-	$(PY) -m forge_viewer.cli serve $(LIVE_SCENE) --host $(LIVE_HOST) --port $(LIVE_PORT) --record-snapshot $(SNAPSHOT) $(ARGS)
+	$(PY) -m mojive.cli serve $(LIVE_SCENE) --host $(LIVE_HOST) --port $(LIVE_PORT) --record-snapshot $(SNAPSHOT) $(ARGS)
 
 ## Replay a snapshot loop through the remote protocol.
 snapshot-replay:
-	@$(PY) -m forge_viewer.cli replay $(SNAPSHOT) --host $(LIVE_HOST) --port $(LIVE_PORT) --loop & server=$$!; \
+	@$(PY) -m mojive.cli replay $(SNAPSHOT) --host $(LIVE_HOST) --port $(LIVE_PORT) --loop & server=$$!; \
 	trap 'kill $$server 2>/dev/null || true' EXIT INT TERM; \
-	$(PY) -m forge_viewer.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) --title "forge replay" $(ARGS)
+	$(PY) -m mojive.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) --title "Mojive replay" $(ARGS)
 
 camera-state:
 	$(PY) -m pytest -q -m physics tests/test_scene_state.py -k camera
-	$(PY) -m forge_viewer.tools.scene_state $(ARGS)
+	$(PY) -m mojive.tools.scene_state $(ARGS)
 
 scene-snapshot:
 	$(PY) -m pytest -q -m physics tests/test_scene_state.py
-	$(PY) -m forge_viewer.tools.scene_state $(ARGS)
+	$(PY) -m mojive.tools.scene_state $(ARGS)
 
 cli:
 	$(PYTEST) -q -m physics tests/test_control_rpc.py
 
 rpc: cli
 	$(PYTEST) -q -m "gpu or physics" tests/gpu/test_control_rpc_capture.py
-	$(PY) -m forge_viewer.tools.control_rpc
+	$(PY) -m mojive.tools.control_rpc
 
 ## Compact Inspector transform acceptance image.
 inspector:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.tools.inspector $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.tools.inspector $(ARGS)
 
 ## Native gizmo acceptance: G position, R rotation, T frame, F9 settings.
 gizmo:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli view gizmo --paused $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli view gizmo --paused $(ARGS)
 
 ## Numbered revolute, prismatic, ball, free, and multi-joint gizmo acceptance.
 joint-gizmo:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor joint_gizmo $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor joint_gizmo $(ARGS)
 
 ## Fixed-body transform and sphere/box/cylinder/capsule dimension authoring acceptance.
 primitive-authoring:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Material creation/copy/binding and 2D image import acceptance.
 material-authoring:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Geometry contact, solver, surface, mass, group, inertia, and fluid acceptance.
 contact-authoring:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Body auto/explicit inertia, gravcomp, mocap, and sleep-policy acceptance.
 body-authoring:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Geometry shape switching plus mesh, height-field, cube, and skybox import acceptance.
 resource-authoring:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Model-local files, materials, and height-field physical-dimension acceptance.
 asset-browser:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Joint dynamics/solver/force limits and site shape/group/endpoints acceptance.
 joint-site-authoring:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor joint_gizmo $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor joint_gizmo $(ARGS)
 
 ## Contact, actuator, sensor, tendon, and equality component acceptance.
 model-component-authoring:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Simulation-take transport plus model-local snapshot Dope Sheet acceptance.
 keyframe-authoring:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Ctrl/Cmd multi-selection and one-rebuild model topology deletion acceptance.
 batch-editing:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor test_scene $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Dockable non-modal Settings acceptance.
 settings:
-	FORGE_VIEWER_OPEN_SETTINGS=1 FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli editor $(ARGS)
+	MOJIVE_OPEN_SETTINGS=1 MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor $(ARGS)
 
 ## Perturbation acceptance: Ctrl+left translates and Ctrl+right rotates a selected free body.
 perturb:
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.cli view gizmo $(ARGS)
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli view gizmo $(ARGS)
 
 ## Selection outline acceptance across multiple geoms and occlusion.
 outline:
-	$(PY) -m forge_viewer.cli view outline --paused
+	$(PY) -m mojive.cli view outline --paused
 
 ## Multiple planar reflection acceptance for height, clipping, and winding.
 reflect:
-	$(PY) -m forge_viewer.cli view reflection_multiple --paused
+	$(PY) -m mojive.cli view reflection_multiple --paused
 
 ## Sparse checkout of one Google DeepMind MuJoCo Menagerie model.
 ROBOT ?= unitree_go2
@@ -526,7 +526,7 @@ robot:
 			https://github.com/google-deepmind/mujoco_menagerie.git "$(MENAGERIE_DIR)"; \
 	fi
 	@git -C "$(MENAGERIE_DIR)" sparse-checkout add assets "$(ROBOT)"
-	$(PY) -m forge_viewer.cli view "$(MENAGERIE_DIR)/$(ROBOT)/scene.xml" $(ARGS)
+	$(PY) -m mojive.cli view "$(MENAGERIE_DIR)/$(ROBOT)/scene.xml" $(ARGS)
 
 TEXTURE_MINIFICATION_SCENE ?= $(MENAGERIE_DIR)/anybotics_anymal_c/scene.xml
 texture-minification:
@@ -535,7 +535,7 @@ texture-minification:
 		echo "set TEXTURE_MINIFICATION_SCENE=/path/to/anybotics_anymal_c/scene.xml"; \
 		exit 2; \
 	}
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.tools.texture_minification \
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.tools.texture_minification \
 		"$(TEXTURE_MINIFICATION_SCENE)"
 
 LOCAL_SHADOW_SCENE ?= $(MENAGERIE_DIR)/anybotics_anymal_c/scene.xml
@@ -545,7 +545,7 @@ local-shadow-precision:
 		echo "set LOCAL_SHADOW_SCENE=/path/to/anybotics_anymal_c/scene.xml"; \
 		exit 2; \
 	}
-	FORGE_VIEWER_BACKEND=$(BACKEND) $(PY) -m forge_viewer.tools.local_shadow_precision \
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.tools.local_shadow_precision \
 		"$(LOCAL_SHADOW_SCENE)"
 
 AUDIT_SCENE ?= mujoco_visuals
@@ -555,85 +555,85 @@ mujoco-physics:
 
 ## Headless MuJoCo visualization and exact linked-schema coverage report.
 mujoco-audit:
-	$(PY) -m forge_viewer.cli audit $(AUDIT_SCENE) --strict
+	$(PY) -m mojive.cli audit $(AUDIT_SCENE) --strict
 
 MUJOCO_MODEL_ROOTS ?= $(HOME)/Downloads/mujoco/model $(HOME)/Projects/PhysicsEngines/mujoco/model
 MUJOCO_MODEL_REPORT ?= output/mujoco-model-suite.json
 MUJOCO_MODEL_JOBS ?= 4
 ## Compile, adapt, and render every XML below the configured MuJoCo model roots.
 mujoco-model-suite:
-	$(PY) -m forge_viewer.tools.mujoco_model_suite $(MUJOCO_MODEL_ROOTS) \
+	$(PY) -m mojive.tools.mujoco_model_suite $(MUJOCO_MODEL_ROOTS) \
 		--jobs $(MUJOCO_MODEL_JOBS) --report $(MUJOCO_MODEL_REPORT) $(ARGS)
 
 ## Interactive heightfield, site, tendon, and contact scene.
 mujoco-visuals:
-	$(PY) -m forge_viewer.cli view mujoco_visuals \
+	$(PY) -m mojive.cli view mujoco_visuals \
 		--enable-render tendon --enable-render contactpoint --enable-render contactforce $(ARGS)
 
 ## MuJoCo joint markers, root subtree COM and body inertia boxes.
 mujoco-debug:
-	$(PY) -m forge_viewer.cli view joint_types --paused \
+	$(PY) -m mojive.cli view joint_types --paused \
 		--enable-render joint --enable-render com --enable-render inertia $(ARGS)
 
 mujoco-actuators:
-	$(PY) -m forge_viewer.cli view actuator_visuals --paused \
+	$(PY) -m mojive.cli view actuator_visuals --paused \
 		--camera overview --enable-render actuator --enable-render activation $(ARGS)
 
 mujoco-slider-crank:
-	$(PY) -m forge_viewer.tools.mujoco_slider_crank
+	$(PY) -m mojive.tools.mujoco_slider_crank
 
 mujoco-solver-diagnostics:
-	$(PY) -m forge_viewer.tools.mujoco_solver_diagnostics
+	$(PY) -m mojive.tools.mujoco_solver_diagnostics
 
 mujoco-islands:
-	$(PY) -m forge_viewer.tools.mujoco_islands
+	$(PY) -m mojive.tools.mujoco_islands
 
 mujoco-bvh:
-	$(PY) -m forge_viewer.tools.mujoco_bvh $(ARGS)
+	$(PY) -m mojive.tools.mujoco_bvh $(ARGS)
 
 mujoco-convex-hull:
-	$(PY) -m forge_viewer.tools.mujoco_convex_hull $(ARGS)
+	$(PY) -m mojive.tools.mujoco_convex_hull $(ARGS)
 
 mujoco-rangefinder:
-	$(PY) -m forge_viewer.cli view rangefinder --paused \
+	$(PY) -m mojive.cli view rangefinder --paused \
 		--enable-render rangefinder $(ARGS)
 
 mujoco-constraints:
-	$(PY) -m forge_viewer.cli view constraints --paused \
+	$(PY) -m mojive.cli view constraints --paused \
 		--camera overview --enable-render constraint $(ARGS)
 
 mujoco-editing:
-	$(PY) -m forge_viewer.cli view mocap_equality --paused $(ARGS)
+	$(PY) -m mojive.cli view mocap_equality --paused $(ARGS)
 
 ## Open Camera with F6; calibrated_shift demonstrates an off-center principal point.
 cameras:
-	$(PY) -m forge_viewer.cli view mujoco_visuals $(ARGS)
+	$(PY) -m mojive.cli view mujoco_visuals $(ARGS)
 
 camera-intrinsics:
-	$(PY) -m forge_viewer.cli capture mujoco_visuals --camera calibrated_shift \
+	$(PY) -m mojive.cli capture mujoco_visuals --camera calibrated_shift \
 		--width 1600 --height 1000 -o output/cameras/calibrated-shift.png $(ARGS)
 
 ## Inspect MuJoCo visual groups and synchronized picking filters in Settings.
 geom-groups:
-	$(PY) -m forge_viewer.cli view mujoco_visuals --paused $(ARGS)
+	$(PY) -m mojive.cli view mujoco_visuals --paused $(ARGS)
 
 ## Inspect 1D, 2D, and 3D flex geometry plus skinned meshes.
 deformables:
-	$(PY) -m forge_viewer.cli view deformables --paused $(ARGS)
+	$(PY) -m mojive.cli view deformables --paused $(ARGS)
 
 ## Capture flex topology, scene labels, and coordinate-frame overlays.
 mujoco-overlays:
-	$(PY) -m forge_viewer.tools.mujoco_overlays $(ARGS)
+	$(PY) -m mojive.tools.mujoco_overlays $(ARGS)
 
 ## List assets, free-body metadata, and optional dependency status.
 assets:
-	$(PY) -m forge_viewer.cli assets
+	$(PY) -m mojive.cli assets
 
 backends:
-	$(PY) -m forge_viewer.cli backends
+	$(PY) -m mojive.cli backends
 
 doctor:
-	$(PY) -m forge_viewer.cli doctor $(SCENE) $(ARGS)
+	$(PY) -m mojive.cli doctor $(SCENE) $(ARGS)
 
 clean:
 	rm -rf out .pytest_cache **/__pycache__

@@ -23,13 +23,13 @@ Metal, and GLSL 410. Run `make probe` to refresh the report.
 
 ## Display scaling
 
-GLFW reports the desktop content scale and the framebuffer-to-window ratio independently. Forge
+GLFW reports the desktop content scale and the framebuffer-to-window ratio independently. OpenGL
 uses the content scale for physical UI size and GPU overlay dimensions. ImGui layout coordinates
 use `content scale / framebuffer scale`, which aligns X11, Wayland, Windows, and macOS behavior.
 The same scale reaches UI fonts, world-space text, view controls, gizmos, perturbation marks, and
 their hit regions.
 
-`FORGE_VIEWER_UI_SCALE` sets the logical UI scale directly. Physical overlay dimensions combine
+`MOJIVE_UI_SCALE` sets the logical UI scale directly. Physical overlay dimensions combine
 that value with the framebuffer scale. `make hidpi` uses a value of `2` for visual acceptance.
 
 ## Render-target layout
@@ -46,7 +46,7 @@ Apple M5 selects `SPLIT`. Picking, outline, and segmentation access the selected
 
 ## Instance-buffer offsets
 
-ModernGL 5.12 omits byte offsets from its instance layout API. Forge creates the VAO
+ModernGL 5.12 omits byte offsets from its instance layout API. OpenGL creates the VAO
 through ModernGL and rebinds instance pointers with `glVertexAttribPointer`,
 `glVertexAttribIPointer`, and `glVertexAttribDivisor`. This work occurs during scene setup.
 
@@ -82,7 +82,7 @@ declared integer attribute type. The implementation follows the OpenGL integer-i
 
 ## MuJoCo reference rendering
 
-MuJoCo's classic renderer uses a legacy OpenGL context. Forge uses a core context. Parity and
+MuJoCo's classic renderer uses a legacy OpenGL context. OpenGL uses a core context. Parity and
 calibration launch the reference renderer in a subprocess with its own context:
 
 ```bash
@@ -92,6 +92,6 @@ make calibrate
 
 ## Planar reflections
 
-ModernGL 5.12 exposes pure depth attachments through its framebuffer API. Forge renders a
+ModernGL 5.12 exposes pure depth attachments through its framebuffer API. OpenGL renders a
 mirrored camera into an offscreen texture and samples it from reflective surface fragments.
 Oblique clipping and winding reversal preserve the reflected scene boundary.

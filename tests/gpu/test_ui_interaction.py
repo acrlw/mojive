@@ -10,8 +10,8 @@ pytestmark = [pytest.mark.gpu, pytest.mark.physics]
 pytest.importorskip("glfw")
 pytest.importorskip("mujoco")
 
-from forge_viewer.assets import resolve  # noqa: E402
-from forge_viewer.composition import build, build_workspace  # noqa: E402
+from mojive.assets import resolve  # noqa: E402
+from mojive.composition import build, build_workspace  # noqa: E402
 
 W, H = 1280, 800
 
@@ -20,23 +20,23 @@ W, H = 1280, 800
 def _pin_ui_scale(tmp_path_factory):
     # These tests assume scale-1 layout geometry (CI displays); pin the UI
     # scale so HiDPI machines produce the same coordinates.
-    old = os.environ.get("FORGE_VIEWER_UI_SCALE")
-    old_settings = os.environ.get("FORGE_VIEWER_SETTINGS")
-    os.environ["FORGE_VIEWER_UI_SCALE"] = "1"
-    os.environ["FORGE_VIEWER_SETTINGS"] = str(
+    old = os.environ.get("MOJIVE_UI_SCALE")
+    old_settings = os.environ.get("MOJIVE_SETTINGS")
+    os.environ["MOJIVE_UI_SCALE"] = "1"
+    os.environ["MOJIVE_SETTINGS"] = str(
         tmp_path_factory.mktemp("ui-interaction-settings") / "settings.json"
     )
     try:
         yield
     finally:
         if old is None:
-            del os.environ["FORGE_VIEWER_UI_SCALE"]
+            del os.environ["MOJIVE_UI_SCALE"]
         else:
-            os.environ["FORGE_VIEWER_UI_SCALE"] = old
+            os.environ["MOJIVE_UI_SCALE"] = old
         if old_settings is None:
-            del os.environ["FORGE_VIEWER_SETTINGS"]
+            del os.environ["MOJIVE_SETTINGS"]
         else:
-            os.environ["FORGE_VIEWER_SETTINGS"] = old_settings
+            os.environ["MOJIVE_SETTINGS"] = old_settings
 
 
 @pytest.fixture(scope="module")
@@ -187,7 +187,7 @@ def test_interactive_entry_uses_adapter_camera_hint(viewer):
 
 def test_all_panels_docked_not_stacked(viewer):
 
-    from forge_viewer.ui.window import Window
+    from mojive.ui.window import Window
 
     laid_out = set(
         Window._LAYOUT_LEFT
@@ -203,9 +203,9 @@ def test_output_panel_filters_visible_messages(viewer):
     panel = viewer.app.panels.get("Output")
     output = viewer.app.output
     output.clear()
-    output.write("[forge/ui] FILTER_KEEP", level="warning", timestamp="10:00:00")
-    output.write("[forge/window] FILTER_HIDE", level="info", timestamp="10:00:01")
-    panel._filter_text = "forge/ui"
+    output.write("[mojive/ui] FILTER_KEEP", level="warning", timestamp="10:00:00")
+    output.write("[mojive/window] FILTER_HIDE", level="info", timestamp="10:00:01")
+    panel._filter_text = "mojive/ui"
     panel._level_filter = 0
     panel._filter_cache_key = None
     activate_panel(viewer, "Output")
@@ -220,7 +220,7 @@ def test_output_panel_filters_visible_messages(viewer):
         panel._filter_cache_key = None
         output.clear()
 
-    assert [entry.text for entry in panel._filtered_entries] == ["[forge/ui] FILTER_KEEP"]
+    assert [entry.text for entry in panel._filtered_entries] == ["[mojive/ui] FILTER_KEEP"]
 
 
 def test_output_row_hover_does_not_repeat_the_message_as_a_tooltip(viewer, monkeypatch):
@@ -262,7 +262,7 @@ def test_hierarchy_visibility_toggle_does_not_select_the_row(viewer):
 
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     activate_panel(viewer, "Hierarchy")
     target = next(n for n in viewer.session.nodes if n.object_id and n.visible)
@@ -341,9 +341,9 @@ def test_keyframe_timeline_owns_the_wheel_while_zooming(viewer):
 def test_environment_inspector_controls_render_flags(viewer):
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.adapters.base import NodeType
-    from forge_viewer.render.backend import RenderFlag
+    import mojive.commands as cmd
+    from mojive.adapters.base import NodeType
+    from mojive.render.backend import RenderFlag
 
     selected_before = viewer.session.selected
     environment = next(n for n in viewer.session.nodes if n.type is NodeType.ENVIRONMENT)
@@ -365,8 +365,8 @@ def test_environment_inspector_controls_render_flags(viewer):
 def test_material_inspector_exposes_instance_and_shared_controls(viewer):
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.adapters.base import NodeType
+    import mojive.commands as cmd
+    from mojive.adapters.base import NodeType
 
     selected_before = viewer.session.selected
     target = next(
@@ -400,8 +400,8 @@ def test_material_inspector_exposes_instance_and_shared_controls(viewer):
 
 
 def test_light_inspector_groups_property_tables_and_joined_vectors(viewer):
-    import forge_viewer.commands as cmd
-    from forge_viewer.adapters.base import NodeType
+    import mojive.commands as cmd
+    from mojive.adapters.base import NodeType
 
     selected_before = viewer.session.selected
     target = next(node for node in viewer.session.nodes if node.type is NodeType.LIGHT)
@@ -635,7 +635,7 @@ def test_click_picks_the_object_actually_under_the_cursor(viewer):
 
 def test_selection_reaches_the_outline_in_the_window(viewer):
 
-    from forge_viewer import commands as cmd
+    from mojive import commands as cmd
 
     target = next(n for n in viewer.session.nodes if n.name == "cluster")
     viewer.session.submit(cmd.Select(0))
@@ -706,8 +706,8 @@ def test_view_gizmo_click_snaps_to_that_axis(viewer, axis, sign, yaw, pitch):
 def test_view_gizmo_click_frames_the_selected_object(viewer):
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.adapters.base import NodeType
+    import mojive.commands as cmd
+    from mojive.adapters.base import NodeType
 
     node = next(
         node
@@ -743,7 +743,7 @@ def test_view_gizmo_axis_points_at_you_when_you_look_down_it(viewer):
     viewer.app.camera.look_from(0.0, 0.0, viewer.app.camera_out, animate=False)
     viewer.sync()
 
-    from forge_viewer.ui import viewcube as vc
+    from mojive.ui import viewcube as vc
 
     s = viewer.window.style_scale
     cx, cy = vc.widget_center(viewer.app._viewport_rect, s)
@@ -991,8 +991,8 @@ def test_hover_does_not_resize_the_ball(viewer):
 
 def test_top_view_is_canonical_x_right_y_up(viewer):
 
-    from forge_viewer.ui import viewcube as vc
-    from forge_viewer.ui.camera import camera_basis
+    from mojive.ui import viewcube as vc
+    from mojive.ui.camera import camera_basis
 
     yaw, pitch = vc.yaw_pitch_for(2, 1.0, 37.0)
     viewer.app.camera.look_from(yaw, pitch, viewer.app.camera_out, animate=False)
@@ -1006,7 +1006,7 @@ def test_clicking_during_a_transition_does_not_strand_the_camera(viewer):
 
     from imgui_bundle import imgui
 
-    from forge_viewer.ui import viewcube as vc
+    from mojive.ui import viewcube as vc
 
     io = imgui.get_io()
     viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
@@ -1090,7 +1090,7 @@ def test_inspector_transform_resets_and_copies_without_gesture_conflicts(free_bo
 
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     v = free_body_viewer
     io = imgui.get_io()
@@ -1120,8 +1120,8 @@ def test_inspector_transform_resets_and_copies_without_gesture_conflicts(free_bo
     # corners meet exactly, while only the outer corners stay rounded.
     assert x_value[0] - x_axis[2] == pytest.approx(0.0, abs=0.1)
 
-    from forge_viewer.ui.panels.inspector import _mix_color
-    from forge_viewer.ui.theme import THEME
+    from mojive.ui.panels.inspector import _mix_color
+    from mojive.ui.theme import THEME
 
     readonly_x = item_bounds(v, "button", f"X##linear velocity_0_{node.node_id}")
     image = snap(v)
@@ -1170,7 +1170,7 @@ def test_inspector_drag_stays_ui_owned_after_crossing_into_viewport(free_body_vi
 
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     v = free_body_viewer
     io = imgui.get_io()
@@ -1216,8 +1216,8 @@ def test_inspector_rotation_y_drags_continuously_past_gimbal_lock(free_body_view
 
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer import math3d
+    import mojive.commands as cmd
+    from mojive import math3d
 
     v = free_body_viewer
     io = imgui.get_io()
@@ -1263,7 +1263,7 @@ def test_gizmo_is_live_for_a_free_body(free_body_viewer):
 
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     v = free_body_viewer
     io = imgui.get_io()
@@ -1295,7 +1295,7 @@ def test_gizmo_is_live_for_a_free_body(free_body_viewer):
 def test_tool_column_hides_without_actions_and_centers_when_available(free_body_viewer):
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     v = free_body_viewer
     assert v.session.submit(cmd.Select(0))
@@ -1321,7 +1321,7 @@ def test_tool_column_hides_without_actions_and_centers_when_available(free_body_
 def test_joint_gizmo_is_live_in_the_real_viewer_pipeline(workspace):
     """Viewer and editor must retain the diagnostics requested by a joint gizmo."""
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     factory = build_workspace if workspace else build
     v = factory(
@@ -1351,7 +1351,7 @@ def test_joint_gizmo_is_live_in_the_real_viewer_pipeline(workspace):
 def test_joint_limit_label_click_sets_the_endpoint_in_the_real_viewer() -> None:
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     v = build(
         resolve("joint_types"),
@@ -1388,8 +1388,8 @@ def test_joint_limit_label_click_sets_the_endpoint_in_the_real_viewer() -> None:
 def test_limited_hinge_drag_keeps_feedback_and_claim_until_mouse_release() -> None:
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, project, world_scale
+    import mojive.commands as cmd
+    from mojive.gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, project, world_scale
 
     v = build(
         resolve("joint_types"),
@@ -1506,8 +1506,8 @@ def test_limited_hinge_drag_keeps_feedback_and_claim_until_mouse_release() -> No
 def test_limited_slide_drag_keeps_feedback_and_claim_until_mouse_release() -> None:
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.gizmo import GizmoHandle
+    import mojive.commands as cmd
+    from mojive.gizmo import GizmoHandle
 
     v = build(
         resolve("joint_types"),
@@ -1600,7 +1600,7 @@ def test_limited_slide_drag_keeps_feedback_and_claim_until_mouse_release() -> No
 def test_multi_joint_viewport_picker_selects_the_gizmo_target():
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     v = build(
         resolve("joint_gizmo"),
@@ -1708,7 +1708,7 @@ def test_multi_joint_viewport_picker_selects_the_gizmo_target():
 def test_viewport_playback_widget_controls_simulation(viewer):
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     v = viewer
     v.session.submit(cmd.Pause())
@@ -1736,7 +1736,7 @@ def test_viewport_playback_widget_controls_simulation(viewer):
 def test_status_simulation_metric_switches_and_copies_exact_value(viewer):
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     v = viewer
     v.session.submit(cmd.Pause())
@@ -1760,8 +1760,8 @@ def test_status_simulation_metric_switches_and_copies_exact_value(viewer):
 
 def test_gizmo_disappears_without_an_editable_body(free_body_viewer):
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.adapters.base import NodeType
+    import mojive.commands as cmd
+    from mojive.adapters.base import NodeType
 
     v = free_body_viewer
     node = next(n for n in v.session.nodes if n.type is NodeType.WORLD)
@@ -1778,8 +1778,8 @@ def test_dragging_the_gizmo_moves_the_object_not_the_camera(free_body_viewer):
 
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.gizmo import SIZE_PT, project, world_scale
+    import mojive.commands as cmd
+    from mojive.gizmo import SIZE_PT, project, world_scale
 
     v = free_body_viewer
     io = imgui.get_io()
@@ -1825,8 +1825,8 @@ def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(
 
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.gizmo import SIZE_PT, GizmoHandle, project, world_scale
+    import mojive.commands as cmd
+    from mojive.gizmo import SIZE_PT, GizmoHandle, project, world_scale
 
     v = free_body_viewer
     v.sync()
@@ -1988,8 +1988,8 @@ def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(
 def test_precise_input_error_has_copy_button(free_body_viewer, monkeypatch):
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.gizmo import GizmoHandle
+    import mojive.commands as cmd
+    from mojive.gizmo import GizmoHandle
 
     v = free_body_viewer
     node = next(n for n in v.session.nodes if n.posable)
@@ -2025,9 +2025,9 @@ def test_precise_input_error_has_copy_button(free_body_viewer, monkeypatch):
 def test_precise_rotation_input_switches_to_radians_with_u(free_body_viewer):
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer import math3d
-    from forge_viewer.gizmo import GizmoHandle
+    import mojive.commands as cmd
+    from mojive import math3d
+    from mojive.gizmo import GizmoHandle
 
     v = free_body_viewer
     io = imgui.get_io()
@@ -2079,8 +2079,8 @@ def test_precise_rotation_input_switches_to_radians_with_u(free_body_viewer):
 
 
 def test_precise_input_choice_memory_can_be_disabled(free_body_viewer):
-    import forge_viewer.commands as cmd
-    from forge_viewer.gizmo import GizmoHandle
+    import mojive.commands as cmd
+    from mojive.gizmo import GizmoHandle
 
     v = free_body_viewer
     node = next(n for n in v.session.nodes if n.posable)
@@ -2134,9 +2134,9 @@ def test_gizmo_drag_feedback_matches_in_2d_and_3d(free_body_viewer, style, arrow
     """2D/3D share one compound GPU drag link and the same value label."""
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.gizmo import SIZE_PT, project, world_scale
-    from forge_viewer.render.debugdraw import PrimitiveType
+    import mojive.commands as cmd
+    from mojive.gizmo import SIZE_PT, project, world_scale
+    from mojive.render.debugdraw import PrimitiveType
 
     class Recorder:
         """Counts the gizmo's Draw2D calls while forwarding to the real overlay."""
@@ -2226,8 +2226,8 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style, monkeyp
 
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.gizmo import (
+    import mojive.commands as cmd
+    from mojive.gizmo import (
         RING_RADIUS,
         SIZE_PT,
         GizmoHandle,
@@ -2389,8 +2389,8 @@ def test_pressed_screen_rotation_ring_keeps_its_idle_pixel_geometry(
 ):
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.gizmo import SCREEN_RING_RADIUS, SIZE_PT, GizmoHandle, project
+    import mojive.commands as cmd
+    from mojive.gizmo import SCREEN_RING_RADIUS, SIZE_PT, GizmoHandle, project
 
     class Recorder:
         def __init__(self, inner):
@@ -2458,7 +2458,7 @@ def test_gizmo_stays_drawn_while_the_camera_is_being_dragged(free_body_viewer):
 
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     v = free_body_viewer
     io = imgui.get_io()
@@ -2489,8 +2489,8 @@ def test_gizmo_stays_drawn_while_the_camera_is_being_dragged(free_body_viewer):
 def test_holding_axis_key_uses_the_exact_gizmo_axis_without_a_mouse_click(free_body_viewer):
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.gizmo import GizmoHandle, project
+    import mojive.commands as cmd
+    from mojive.gizmo import GizmoHandle, project
 
     class Recorder:
         def __init__(self, inner):
@@ -2589,7 +2589,7 @@ def test_the_keyboard_shortcuts_are_not_swallowed(free_body_viewer):
 
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
+    import mojive.commands as cmd
 
     v = free_body_viewer
     io = imgui.get_io()
@@ -2636,8 +2636,8 @@ def test_blocking_modal_owns_all_viewport_input_and_hides_context_hint(
 ) -> None:
     from imgui_bundle import imgui
 
-    import forge_viewer.commands as cmd
-    from forge_viewer.ui.viewport_widgets import ToolHint
+    import mojive.commands as cmd
+    from mojive.ui.viewport_widgets import ToolHint
 
     v = free_body_viewer
     io = imgui.get_io()
@@ -2707,7 +2707,7 @@ def test_closing_one_window_leaves_glfw_alive_for_the_other():
 
     import glfw as _glfw
 
-    from forge_viewer.ui.window import Window, WindowConfig
+    from mojive.ui.window import Window, WindowConfig
 
     a = Window(WindowConfig(title="a", width=320, height=240, vsync=False, ini_path=""))
     b = Window(WindowConfig(title="b", width=320, height=240, vsync=False, ini_path=""))

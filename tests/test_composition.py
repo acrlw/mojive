@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from forge_viewer.composition import Viewer
+from mojive.composition import Viewer
 
 
 class Resource:
@@ -123,7 +123,7 @@ def test_viewer_record_restores_the_previous_render_size_on_failure(tmp_path, pr
 
 
 def test_viewer_record_restores_render_size_after_success(tmp_path, monkeypatch):
-    from forge_viewer import recording
+    from mojive import recording
 
     viewer, app, backend, *_ = _viewer()
     backend.target = type(

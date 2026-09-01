@@ -4,8 +4,8 @@ from itertools import pairwise
 
 import pytest
 
-from forge_viewer.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
-from forge_viewer.ui.viewport_widgets import (
+from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
+from mojive.ui.viewport_widgets import (
     _FRAME_ARROW_CORNER_RADIUS_PT,
     _MOVE_ARROW_BASE,
     _MOVE_ARROW_TIP,
@@ -372,7 +372,7 @@ class _RecordedStatus(_MeasuredText):
 
 
 def test_status_places_simulation_state_before_selection():
-    from forge_viewer.ui.theme import THEME
+    from mojive.ui.theme import THEME
 
     draw = _RecordedStatus()
     draw_status(
@@ -400,7 +400,7 @@ def test_status_places_simulation_state_before_selection():
 
 
 def test_right_aligned_telemetry_has_no_separator_against_empty_space():
-    from forge_viewer.ui.theme import THEME
+    from mojive.ui.theme import THEME
 
     draw = _RecordedStatus()
     draw_status(
@@ -430,7 +430,7 @@ def test_right_aligned_telemetry_has_no_separator_against_empty_space():
 
 
 def test_status_renders_context_hints_after_core_simulation_fields():
-    from forge_viewer.ui.theme import THEME
+    from mojive.ui.theme import THEME
 
     draw = _RecordedStatus()
     draw_status(
@@ -460,7 +460,7 @@ def test_status_renders_context_hints_after_core_simulation_fields():
 
 @pytest.mark.parametrize("width", (48.0, 80.0, 140.0, 220.0, 300.0, 400.0, 520.0))
 def test_status_progressively_collapses_without_text_overlap(width):
-    from forge_viewer.ui.theme import THEME
+    from mojive.ui.theme import THEME
 
     draw = _RecordedStatus()
     layout = draw_status(
@@ -544,7 +544,7 @@ class _RecordedMouse(_MeasuredText):
 def test_mouse_hint_button_replaces_its_part_of_the_blender_style_shell(
     scale: float, button: str
 ) -> None:
-    from forge_viewer.ui.theme import THEME
+    from mojive.ui.theme import THEME
 
     draw = _RecordedMouse()
     width = draw_mouse_hint_glyph(draw, 10.0, 30.0, button, "", THEME, scale)
@@ -596,7 +596,7 @@ def test_mouse_wheel_uses_a_quarter_stroke_gap_with_a_physical_pixel_minimum(
     scale: float,
     pixel_size: float,
 ) -> None:
-    from forge_viewer.ui.theme import THEME
+    from mojive.ui.theme import THEME
 
     draw = _RecordedMouse()
     draw_mouse_hint_glyph(
@@ -671,7 +671,7 @@ def test_mouse_wheel_geometry_scales_after_the_physical_gap_floor_is_inactive() 
 
 
 def test_toolhint_separates_each_group_with_one_subtle_short_rule():
-    from forge_viewer.ui.theme import THEME
+    from mojive.ui.theme import THEME
 
     draw = _RecordedHint()
     draw_hint(draw, (0.0, 0.0), THEME, 1.0, "ready")
@@ -732,7 +732,7 @@ def test_viewport_chrome_registry_dispatches_custom_actions_and_allows_removal()
 
 
 def test_tool_hint_and_chrome_extension_types_are_public_ui_api():
-    from forge_viewer import ui
+    from mojive import ui
 
     assert ui.ToolHint is ToolHint
     assert ui.ToolHintRegistry is ToolHintRegistry
@@ -741,7 +741,7 @@ def test_tool_hint_and_chrome_extension_types_are_public_ui_api():
 
 
 def test_single_group_toolhint_has_no_separator_rule():
-    from forge_viewer.ui.theme import THEME
+    from mojive.ui.theme import THEME
 
     draw = _RecordedHint()
     draw_hint(draw, (0.0, 0.0), THEME, 1.0, "dragging")

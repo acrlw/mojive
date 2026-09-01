@@ -11,19 +11,19 @@ from imgui_bundle import imgui
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from forge_viewer.adapters.base import (
+from mojive.adapters.base import (
     ModelAssetInfo,
     ModelComponentField,
     ModelComponentPathItem,
     NodeType,
     SceneNode,
 )
-from forge_viewer.render.backend import RenderFlag
-from forge_viewer.types import MeshShape
-from forge_viewer.ui.compound_fields import draw_joined_field_frame
-from forge_viewer.ui.localization import _ZH_CN, Language, Localizer, parse_language
-from forge_viewer.ui.messages import OutputBuffer
-from forge_viewer.ui.panels import (
+from mojive.render.backend import RenderFlag
+from mojive.types import MeshShape
+from mojive.ui.compound_fields import draw_joined_field_frame
+from mojive.ui.localization import _ZH_CN, Language, Localizer, parse_language
+from mojive.ui.messages import OutputBuffer
+from mojive.ui.panels import (
     Panel,
     PanelContext,
     PanelSet,
@@ -35,21 +35,21 @@ from forge_viewer.ui.panels import (
     sort_order_tooltip,
     validate_panels,
 )
-from forge_viewer.ui.panels.assets import (
+from mojive.ui.panels.assets import (
     AssetsPanel,
     filter_assets,
     height_field_preview_color,
     unique_asset_name,
 )
-from forge_viewer.ui.panels.control import ControlPanel, filter_actuators, sort_actuators
-from forge_viewer.ui.panels.help import KEYS, MOUSE_GESTURES, VALUE_GESTURES
-from forge_viewer.ui.panels.hierarchy import (
+from mojive.ui.panels.control import ControlPanel, filter_actuators, sort_actuators
+from mojive.ui.panels.help import KEYS, MOUSE_GESTURES, VALUE_GESTURES
+from mojive.ui.panels.hierarchy import (
     HierarchyPanel,
     disclosure_triangle,
     hierarchy_open_depth,
     hierarchy_shows_type_column,
 )
-from forge_viewer.ui.panels.inspector import (
+from mojive.ui.panels.inspector import (
     _compact_transform,
     _format_vector,
     _free_velocity,
@@ -63,8 +63,8 @@ from forge_viewer.ui.panels.inspector import (
     _unique_component_name,
     gizmo_refusal_reason,
 )
-from forge_viewer.ui.panels.joints import JointsPanel, filter_joints, page_span, sort_joints
-from forge_viewer.ui.panels.keyframes import (
+from mojive.ui.panels.joints import JointsPanel, filter_joints, page_span, sort_joints
+from mojive.ui.panels.keyframes import (
     KeyframesPanel,
     decimated_marker_ids,
     fitted_timeline_range,
@@ -77,17 +77,17 @@ from forge_viewer.ui.panels.keyframes import (
     unique_keyframe_name,
     zoom_timeline_range,
 )
-from forge_viewer.ui.panels.output import filter_output_entries
-from forge_viewer.ui.panels.plot import PlotPanel
-from forge_viewer.ui.panels.settings import (
+from mojive.ui.panels.output import filter_output_entries
+from mojive.ui.panels.plot import PlotPanel
+from mojive.ui.panels.settings import (
     render_flag_label,
     responsive_flag_groups,
     settings_category_matches,
     settings_uses_stacked_layout,
 )
-from forge_viewer.ui.panels.stats import StatsPanel, _scale_ceiling
-from forge_viewer.ui.viewport_widgets import capsule_points, playback_size, tool_column_size
-from forge_viewer.ui.window import ResizeLatch
+from mojive.ui.panels.stats import StatsPanel, _scale_ceiling
+from mojive.ui.viewport_widgets import capsule_points, playback_size, tool_column_size
+from mojive.ui.window import ResizeLatch
 
 EXPECTED_PANELS = {
     "Control",
@@ -375,7 +375,7 @@ def test_panel_diagnostics_are_published_to_the_persistent_session_status():
 
 
 def test_output_buffer_separates_history_from_transient_status(monkeypatch):
-    import forge_viewer.ui.messages as messages
+    import mojive.ui.messages as messages
 
     now = 100.0
     monkeypatch.setattr(messages.time, "monotonic", lambda: now)
@@ -392,15 +392,15 @@ def test_output_buffer_separates_history_from_transient_status(monkeypatch):
 
 def test_output_filter_combines_text_component_and_severity():
     output = OutputBuffer()
-    output.write("[forge/window] cache detail", level="debug", timestamp="10:00:00")
-    loading = output.write("[forge/ui] Loading robot model", level="info", timestamp="10:00:01")
-    warning = output.write("[forge/window] Font fallback", level="warning", timestamp="10:00:02")
-    error = output.write("[forge/ui] Model load failed", level="error", timestamp="10:00:03")
+    output.write("[mojive/window] cache detail", level="debug", timestamp="10:00:00")
+    loading = output.write("[mojive/ui] Loading robot model", level="info", timestamp="10:00:01")
+    warning = output.write("[mojive/window] Font fallback", level="warning", timestamp="10:00:02")
+    error = output.write("[mojive/ui] Model load failed", level="error", timestamp="10:00:03")
     entries = output.entries()
 
-    assert filter_output_entries(entries, "forge/ui loading", 0) == (loading,)
+    assert filter_output_entries(entries, "mojive/ui loading", 0) == (loading,)
     assert filter_output_entries(entries, "", 30) == (warning, error)
-    assert filter_output_entries(entries, "forge/ui", 40) == (error,)
+    assert filter_output_entries(entries, "mojive/ui", 40) == (error,)
     assert "Font fallback" in output.copy_text(filter_output_entries(entries, "", 30))
     assert "cache detail" not in output.copy_text(filter_output_entries(entries, "", 30))
 
@@ -424,7 +424,7 @@ def test_hierarchy_batch_delete_collapses_selected_descendants_and_skips_scene_e
         SceneNode(1, "body", NodeType.LINK, model_id=0),
         SceneNode(2, "child geom", NodeType.GEOM, parent=1, model_id=0),
         SceneNode(3, "sibling geom", NodeType.GEOM, model_id=0),
-        SceneNode(4, "forge object", NodeType.LINK, model_id=-1),
+        SceneNode(4, "opengl object", NodeType.LINK, model_id=-1),
     )
     panel._by_id = {node.node_id: node for node in nodes}
     panel._batch_selected = {1, 2, 3, 4}
@@ -455,8 +455,8 @@ def test_viewport_chrome_uses_exact_capsule_geometry_and_spacing():
 
 def test_language_preference_round_trip(tmp_path, monkeypatch):
     path = tmp_path / "settings.json"
-    monkeypatch.setenv("FORGE_VIEWER_SETTINGS", str(path))
-    monkeypatch.delenv("FORGE_VIEWER_LANGUAGE", raising=False)
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(path))
+    monkeypatch.delenv("MOJIVE_LANGUAGE", raising=False)
 
     localizer = Localizer.load()
     assert localizer.language is Language.ENGLISH
@@ -477,7 +477,7 @@ def test_language_preference_round_trip(tmp_path, monkeypatch):
 
 
 def test_every_literal_translation_source_has_a_simplified_chinese_entry() -> None:
-    ui_root = Path(__file__).resolve().parents[1] / "src" / "forge_viewer" / "ui"
+    ui_root = Path(__file__).resolve().parents[1] / "src" / "mojive" / "ui"
     sources: dict[str, list[str]] = {}
 
     def literal_options(node: ast.AST) -> tuple[str, ...]:
@@ -516,7 +516,7 @@ def test_every_literal_translation_source_has_a_simplified_chinese_entry() -> No
 
 
 def test_fixed_imgui_copy_uses_the_localization_boundary() -> None:
-    ui_root = Path(__file__).resolve().parents[1] / "src" / "forge_viewer" / "ui"
+    ui_root = Path(__file__).resolve().parents[1] / "src" / "mojive" / "ui"
     visible_calls = {
         "begin_combo",
         "begin",
@@ -602,17 +602,17 @@ def test_render_flag_table_reduces_columns_before_hidpi_labels_clip() -> None:
     assert responsive_flag_groups(3, 360.0, 4.0) == 1
 
 
-def test_mujoco_flag_tokens_stay_english_while_forge_flags_can_localize() -> None:
+def test_mujoco_flag_tokens_stay_english_while_opengl_flags_can_localize() -> None:
     localizer = Localizer(Language.SIMPLIFIED_CHINESE)
     assert render_flag_label(RenderFlag.SHADOW, localizer.text, localized=False) == "shadow"
     assert render_flag_label(RenderFlag.OUTLINE, localizer.text, localized=True) == "轮廓"
 
 
 def test_viewer_restores_precise_input_preferences(tmp_path, monkeypatch):
-    from forge_viewer.ui.app import ViewerApp
+    from mojive.ui.app import ViewerApp
 
     path = tmp_path / "settings.json"
-    monkeypatch.setenv("FORGE_VIEWER_SETTINGS", str(path))
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(path))
     Localizer.load().set_preferences(
         {
             "remember_precise_input_choices": False,
@@ -634,11 +634,11 @@ def test_viewer_restores_precise_input_preferences(tmp_path, monkeypatch):
 
 
 def test_viewer_restores_and_persists_viewport_input_bindings(tmp_path, monkeypatch):
-    from forge_viewer.ui.app import ViewerApp
-    from forge_viewer.ui.input_bindings import InputAction
+    from mojive.ui.app import ViewerApp
+    from mojive.ui.input_bindings import InputAction
 
     path = tmp_path / "settings.json"
-    monkeypatch.setenv("FORGE_VIEWER_SETTINGS", str(path))
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(path))
     Localizer.load().set_preferences(
         {
             "input_bindings": {
@@ -660,10 +660,10 @@ def test_viewer_restores_and_persists_viewport_input_bindings(tmp_path, monkeypa
 
 
 def test_viewer_restores_and_persists_status_metric(tmp_path, monkeypatch):
-    from forge_viewer.ui.app import ViewerApp
+    from mojive.ui.app import ViewerApp
 
     path = tmp_path / "settings.json"
-    monkeypatch.setenv("FORGE_VIEWER_SETTINGS", str(path))
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(path))
     Localizer.load().set_preferences({"status_metric": "steps"})
 
     app = ViewerApp(SimpleNamespace(), SimpleNamespace())
@@ -684,8 +684,8 @@ def test_simplified_chinese_locale_variants(value):
 
 
 def test_linux_language_environment_is_normalized(tmp_path, monkeypatch):
-    monkeypatch.setenv("FORGE_VIEWER_SETTINGS", str(tmp_path / "settings.json"))
-    monkeypatch.setenv("FORGE_VIEWER_LANGUAGE", "zh_CN.UTF-8")
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MOJIVE_LANGUAGE", "zh_CN.UTF-8")
     assert Localizer.load().language is Language.SIMPLIFIED_CHINESE
 
 
@@ -922,7 +922,7 @@ def test_transform_axis_badges_mix_semantic_color_into_panel_surfaces():
 
 @pytest.mark.parametrize("y", (91.0, -91.0, 271.0, 449.0))
 def test_inspector_euler_y_stays_on_the_dragged_branch_past_gimbal_lock(y):
-    from forge_viewer import math3d
+    from mojive import math3d
 
     expected = np.array((12.0, y, -25.0))
     matrix = math3d.euler_xyz_to_mat3(np.radians(expected))
@@ -957,9 +957,9 @@ def test_closed_panels_ask_for_nothing(panels: PanelSet):
 def test_app_frame_needs_preserves_consumer_requests():
     """Backend visualization choices must not erase panel or gizmo requirements."""
 
-    from forge_viewer.adapters.base import FrameNeeds
-    from forge_viewer.render.backend import FrameMode, LabelMode
-    from forge_viewer.ui.app import ViewerApp
+    from mojive.adapters.base import FrameNeeds
+    from mojive.render.backend import FrameMode, LabelMode
+    from mojive.ui.app import ViewerApp
 
     requested = FrameNeeds(
         poses=False,
@@ -1134,6 +1134,6 @@ def test_latch_ignores_a_size_that_comes_back():
 
 def test_latch_needs_no_gl():
 
-    from forge_viewer.ui import window as win
+    from mojive.ui import window as win
 
     assert win.glfw is None and win.gl is None and win.imgui is None

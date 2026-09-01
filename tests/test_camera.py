@@ -3,13 +3,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from forge_viewer import math3d
-from forge_viewer.adapters.base import CameraInfo, NodeType, SceneFrame, SceneNode, SceneSource
-from forge_viewer.commands import SetCamera
-from forge_viewer.render.backend import DebugView, FrameMode, LabelMode, RenderFlag
-from forge_viewer.types import CameraView
-from forge_viewer.ui.camera import CameraOut, OrbitCamera, camera_basis
-from forge_viewer.ui.camera_preview import CameraPreview
+from mojive import math3d
+from mojive.adapters.base import CameraInfo, NodeType, SceneFrame, SceneNode, SceneSource
+from mojive.commands import SetCamera
+from mojive.render.backend import DebugView, FrameMode, LabelMode, RenderFlag
+from mojive.types import CameraView
+from mojive.ui.camera import CameraOut, OrbitCamera, camera_basis
+from mojive.ui.camera_preview import CameraPreview
 
 
 class RecordingSink:
@@ -334,7 +334,7 @@ def test_look_from_target_updates_orthographic_framing_height():
 
 
 def test_look_from_target_uses_fast_ease_out_quart():
-    from forge_viewer.ui.camera import FRAME_DURATION, _ease_out_quart
+    from mojive.ui.camera import FRAME_DURATION, _ease_out_quart
 
     cam = OrbitCamera(pivot=np.zeros(3))
     sink = RecordingSink()
@@ -446,7 +446,7 @@ def test_easing_is_ease_out_not_ease_in_out():
 
     import itertools
 
-    from forge_viewer.ui.camera import _ease_out_quad as ease
+    from mojive.ui.camera import _ease_out_quad as ease
 
     assert ease(0.0) == 0.0 and ease(1.0) == 1.0
     assert ease(0.3) > 0.45

@@ -1,7 +1,7 @@
-# forge-viewer
+# Mojive
 
-forge-viewer is an interactive 3D viewer for robotics, simulation, and rendering tools. Its
-Forge renderer consumes a backend-neutral scene protocol, so MuJoCo, custom physics engines,
+Mojive is an interactive 3D viewer for robotics, simulation, and rendering tools. Its default
+OpenGL backend consumes a backend-neutral scene protocol, so MuJoCo, custom physics engines,
 static canvases, remote processes, and recorded snapshots share one rendering and UI stack.
 
 Core workflows include scene inspection, object selection, transform gizmos, physical
@@ -13,11 +13,11 @@ MuJoCo visualization semantics, persistent scene state, local control, and visua
 ## Requirements
 
 - Python 3.11 or newer
-- An OpenGL 3.3 core-profile driver for Forge, or a Metal/Vulkan adapter for wgpu
+- An OpenGL 3.3 core-profile driver for the default backend, or a Metal/Vulkan adapter for wgpu
 - A desktop session for interactive windows
 - MuJoCo 3.1 or newer for MJCF, URDF, simulation, and physics tools
 
-Forge targets macOS on Apple Silicon and Linux with a desktop OpenGL 3.3 driver. The wgpu backend
+The OpenGL backend targets macOS on Apple Silicon and Linux with a desktop OpenGL 3.3 driver. The wgpu backend
 is validated on macOS Metal and Linux Vulkan. `uv` is the recommended environment and dependency
 manager.
 
@@ -27,14 +27,14 @@ Install `uv` on macOS, then clone and run the default MuJoCo scene:
 
 ```bash
 brew install uv
-git clone https://github.com/acrlw/forge-viewer.git
-cd forge-viewer
+git clone https://github.com/acrlw/mojive.git
+cd mojive
 uv sync --python 3.11 --extra mujoco
-uv run forge-viewer view test_scene
+uv run mojive view test_scene
 ```
 
-The first sync creates `.venv`, installs forge-viewer in editable mode, and resolves the versions
-recorded in `uv.lock`. The `mujoco` extra installs the physics backend. Forge scenes and the toy
+The first sync creates `.venv`, installs mojive in editable mode, and resolves the versions
+recorded in `uv.lock`. The `mujoco` extra installs the physics backend. Mojive scenes and the toy
 physics adapter can use the core installation without that extra.
 
 From a source checkout, `make viewer` opens the same default scene.
@@ -48,7 +48,7 @@ Windows, and macOS use their native framebuffer coordinate models.
 Use an explicit scale when the desktop session reports an incorrect value:
 
 ```bash
-FORGE_VIEWER_UI_SCALE=2 make viewer
+MOJIVE_UI_SCALE=2 make viewer
 make hidpi
 make hidpi BACKEND=wgpu UI_SCALE=2
 ```
@@ -67,7 +67,7 @@ make editor LANGUAGE=zh_CN
 ```
 
 The UI atlas combines JetBrains Mono with Noto Sans SC. Noto is loaded from the system or downloaded
-to the application cache with checksum verification. `FORGE_VIEWER_CJK_FONT=/path/to/font.otf`
+to the application cache with checksum verification. `MOJIVE_CJK_FONT=/path/to/font.otf`
 selects a different CJK font file.
 
 ### Linux OpenGL contexts
@@ -80,14 +80,14 @@ make egl-viewer
 make egl
 ```
 
-The offscreen `Renderer` uses EGL by default on Linux. `FORGE_VIEWER_GL=native` selects a hidden
+The offscreen `Renderer` uses EGL by default on Linux. `MOJIVE_GL=native` selects a hidden
 GLFW context. Both paths create desktop OpenGL 3.3 core contexts.
 
 Open a local MJCF or URDF model directly:
 
 ```bash
-uv run forge-viewer view path/to/model.xml --paused
-uv run forge-viewer view path/to/model.urdf --paused
+uv run mojive view path/to/model.xml --paused
+uv run mojive view path/to/model.urdf --paused
 ```
 
 Start with an empty viewport and load a model from the File menu or by dropping it into the window:
@@ -108,13 +108,13 @@ and simulation-time state.
 without `uv`:
 
 ```bash
-git clone https://github.com/acrlw/forge-viewer.git
-cd forge-viewer
+git clone https://github.com/acrlw/mojive.git
+cd mojive
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[mujoco]"
-forge-viewer view test_scene
+mojive view test_scene
 ```
 
 ### Development installation
@@ -132,29 +132,29 @@ distribution.
 Useful discovery commands:
 
 ```bash
-forge-viewer assets
-forge-viewer backends
-forge-viewer probe
+mojive assets
+mojive backends
+mojive probe
 ```
 
 ## Command line
 
 ```text
-forge-viewer view <asset> [--paused] [-b BACKEND]
-forge-viewer editor [--no-vsync]
-forge-viewer canvas [--demo empty|canvas|lighting|text]
-forge-viewer toy
-forge-viewer conformance [BACKEND] [--asset ASSET]
-forge-viewer serve <asset> [--host HOST] [--port PORT]
-forge-viewer attach [--host HOST] [--port PORT]
-forge-viewer replay <snapshot> [--loop] [--speed FACTOR]
-forge-viewer doctor <asset>
-forge-viewer inspect <asset> [--json]
-forge-viewer capture <asset> -o output/image.png
-forge-viewer record <asset> -o output/video.mp4 [--frames N] [--fps FPS]
-forge-viewer audit <asset> [--json] [--strict]
-forge-viewer rpc-serve <asset> [--socket output/forge-viewer.sock]
-forge-viewer control <method> [--params JSON] [--json]
+mojive view <asset> [--paused] [-b BACKEND]
+mojive editor [--no-vsync]
+mojive canvas [--demo empty|canvas|lighting|text]
+mojive toy
+mojive conformance [BACKEND] [--asset ASSET]
+mojive serve <asset> [--host HOST] [--port PORT]
+mojive attach [--host HOST] [--port PORT]
+mojive replay <snapshot> [--loop] [--speed FACTOR]
+mojive doctor <asset>
+mojive inspect <asset> [--json]
+mojive capture <asset> -o output/image.png
+mojive record <asset> -o output/video.mp4 [--frames N] [--fps FPS]
+mojive audit <asset> [--json] [--strict]
+mojive rpc-serve <asset> [--socket output/mojive.sock]
+mojive control <method> [--params JSON] [--json]
 ```
 
 JSON commands reserve stdout for the JSON document and send logs to stderr.
@@ -162,8 +162,8 @@ JSON commands reserve stdout for the JSON document and send logs to stderr.
 The main menu and window file drop open MJCF, XML, and URDF models at runtime. `File > Reload
 Model` recompiles the current model and rebuilds GPU scene resources.
 
-`make editor` starts an empty Forge workspace. A `.forge.json` workspace combines MJCF and URDF
-models with Forge-authored geometry, materials, lights, cameras, and environment settings. Model
+`make editor` starts an empty Mojive workspace. A `.mojive.json` workspace combines MJCF and URDF
+models with Mojive-authored geometry, materials, lights, cameras, and environment settings. Model
 paths resolve from the workspace directory and its resource directories. Every model has an
 editable root position and rotation. URDF enters as an import format and is stored as editable
 MJCF when its topology changes.
@@ -176,7 +176,7 @@ context menu adds and removes MJCF bodies, geometry, joints, sites, cameras, and
 MjSpec. Selecting a model exposes structured actuator, sensor, tendon, and equality components in
 Inspector; edits use model-local reference choices, MjSpec validation, undo/redo, and workspace
 round trips. Model elements support rename and local transform editing. The Entity menu creates
-backend-neutral primitives, lights, and cameras. Selected Forge entities support duplicate,
+backend-neutral primitives, lights, and cameras. Selected Mojive entities support duplicate,
 rename, and delete from the menu, keyboard shortcuts, and the Hierarchy context menu.
 
 `Window > Keyframes` opens a compact model-local Dope Sheet. It captures complete MuJoCo state
@@ -205,13 +205,13 @@ and remote publishing live in [`examples/`](examples/README.md).
 
 ## Programmatic rendering
 
-`forge_viewer.Renderer` provides the MuJoCo-style offscreen workflow through Forge. It supports
+`mojive.Renderer` provides the MuJoCo-style offscreen workflow through OpenGL. It supports
 RGB, metric depth, segmentation, free and fixed cameras, named cameras, `MjvCamera`, `MjvOption`,
 caller-owned output arrays, multiple contexts, and deterministic resource release.
 
 ```python
 import mujoco
-from forge_viewer import Renderer
+from mojive import Renderer
 
 model = mujoco.MjModel.from_xml_path("model.xml")
 data = mujoco.MjData(model)
@@ -236,8 +236,8 @@ The Renderer API can run on [wgpu](https://wgpu.rs/) (Vulkan/Metal/DX12) instead
 which removes the EGL/GLFW context requirement for offscreen rendering:
 
 ```bash
-pip install forge-viewer[wgpu]
-FORGE_VIEWER_BACKEND=wgpu python your_script.py
+pip install mojive[wgpu]
+MOJIVE_BACKEND=wgpu python your_script.py
 ```
 
 Validate the installation with `make renderer-api-wgpu` and the backend-parameterized GPU
@@ -296,8 +296,8 @@ Every user-facing feature has a reproducible Make target.
 | `make workspace-edit` | Workspace composition, resource repair, structured MJCF, camera and light acceptance |
 | `make editor-files` | Scene document workflow acceptance and capture |
 | `make entity-edit` | Entity lifecycle CPU and GPU acceptance |
-| `make canvas` | Standalone scene authoring with editable transforms, materials, and Forge entities |
-| `make scene-io` | Save, reload, and capture a `.forge.json` scene |
+| `make canvas` | Standalone scene authoring with editable transforms, materials, and Mojive entities |
+| `make scene-io` | Save, reload, and capture a `.mojive.json` scene |
 | `make toy-physics` | Minimal physics backend independent of MuJoCo |
 | `make live-view` | One publisher and two independent remote viewers |
 | `make capture` | Write a PNG under `output/` |
@@ -338,7 +338,7 @@ make record SCENE=humanoid OUTPUT=output/humanoid.mp4 ARGS="--frames 240"
 | `make bench` | Median CPU and GPU pass timing |
 | `make editor-performance` | Composition compile and structured-edit timing baseline |
 | `make stability BACKEND=wgpu` | Memory, lifecycle, and interleaved multi-camera stability |
-| `make parity` | Forge and MuJoCo reference renders |
+| `make parity` | OpenGL and MuJoCo reference renders |
 | `make calibrate` | Reference-lighting calibration |
 | `make probe` | OpenGL capability report |
 
@@ -369,7 +369,7 @@ rotation.
 implements `scene_source()`, `frame()`, and `step()` through `SceneAdapterBase`.
 
 ```python
-from forge_viewer import Light, Scene, build_scene
+from mojive import Light, Scene, build_scene
 
 scene = Scene()
 ball = scene.sphere(name="ball", position=(0.0, 0.0, 0.5))
@@ -384,7 +384,7 @@ key.remove()
 viewer.release()
 ```
 
-Forge scene entities own cameras and lights. Physics adapters provide dynamic transforms and
+Mojive scene entities own cameras and lights. Physics adapters provide dynamic transforms and
 write-back capabilities. Hierarchy and Inspector present the same editing workflow across
 programmatic scenes, MuJoCo, remote viewers, and snapshot replay.
 
@@ -409,7 +409,7 @@ make remote-authoring
 Runtime creation returns the stable object, light, or camera ID:
 
 ```python
-from forge_viewer import MeshShape, commands as cmd
+from mojive import MeshShape, commands as cmd
 
 result = viewer.session.submit(
     cmd.AddSceneObject(MeshShape.BOX, "tool marker", position=(1.0, 0.0, 0.5))
@@ -431,23 +431,23 @@ Local automation uses a versioned AF_UNIX control service. Clients keep the conn
 requests and reconnect after a timeout or transport failure:
 
 ```bash
-forge-viewer rpc-serve humanoid
-forge-viewer control get_state --json
-forge-viewer control capture --params '{"mode":"depth","output":"output/depth.npy"}'
+mojive rpc-serve humanoid
+mojive control get_state --json
+mojive control capture --params '{"mode":"depth","output":"output/depth.npy"}'
 ```
 
 ## Architecture
 
 ```text
-src/forge_viewer/
+src/mojive/
 ├── types.py, math3d.py, commands.py   shared contracts
 ├── session.py                         application state and command routing
-├── scene.py                           programmatic Forge scenes
+├── scene.py                           programmatic Mojive scenes
 ├── adapters/                          MuJoCo, static, toy, and remote sources
 ├── render/
 │   ├── scene.py                       renderer scene representation
 │   ├── backend.py                     rendering backend protocol
-│   ├── forge/                         OpenGL renderer, passes, and shaders
+│   ├── opengl/                         OpenGL renderer, passes, and shaders
 │   └── webgpu/                        wgpu renderer, passes, and WGSL shaders
 └── ui/                                window, panels, gestures, and gizmos
 ```
@@ -469,4 +469,4 @@ Development plans live in [plan/](plan/README.md).
 
 ## License
 
-forge-viewer is available under the [MIT License](LICENSE).
+Mojive is available under the [MIT License](LICENSE).

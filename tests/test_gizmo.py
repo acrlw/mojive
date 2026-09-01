@@ -3,12 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from forge_viewer import commands as cmd
-from forge_viewer import math3d
-from forge_viewer.adapters.base import FrameNeeds, NodeType
-from forge_viewer.adapters.static import StaticSceneAdapter
-from forge_viewer.adapters.toy import ToyPhysicsAdapter
-from forge_viewer.gizmo import (
+from mojive import commands as cmd
+from mojive import math3d
+from mojive.adapters.base import FrameNeeds, NodeType
+from mojive.adapters.static import StaticSceneAdapter
+from mojive.adapters.toy import ToyPhysicsAdapter
+from mojive.gizmo import (
     ACTIVE_HANDLE_COLOR,
     ARROW_CORNER_RADIUS_PT,
     AXIS_COLORS,
@@ -70,11 +70,11 @@ from forge_viewer.gizmo import (
     visibility,
     world_scale,
 )
-from forge_viewer.render.backend import BackendCaps
-from forge_viewer.scene import Scene
-from forge_viewer.session import Session
-from forge_viewer.types import CameraView
-from forge_viewer.ui.gizmo import (
+from mojive.render.backend import BackendCaps
+from mojive.scene import Scene
+from mojive.session import Session
+from mojive.types import CameraView
+from mojive.ui.gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,
     DEFAULT_ROTATION_TICK_SCALE,
     DEFAULT_TRANSLATION_SNAP_M,
@@ -939,7 +939,7 @@ def test_overlapping_axis_hit_matches_the_topmost_drawn_handle() -> None:
 
 
 def test_translation_center_shell_masks_continuous_axes_but_not_planes() -> None:
-    from forge_viewer.gizmo import CONTRAST_EDGE_PT, SIZE_PT
+    from mojive.gizmo import CONTRAST_EDGE_PT, SIZE_PT
 
     visible_radius = CENTER_RADIUS + CONTRAST_EDGE_PT / SIZE_PT
     assert AXIS_START < CENTER_RADIUS < visible_radius < CENTER_SHELL_RADIUS < PLANE_INNER
@@ -979,7 +979,7 @@ def test_flat_axis_arrow_rounds_only_the_head_and_scales_with_hidpi() -> None:
 def test_active_3d_translation_axis_keeps_the_center_shell_mask() -> None:
     from types import SimpleNamespace
 
-    from forge_viewer.render.forge.passes.gizmo import GizmoPass
+    from mojive.render.opengl.passes.gizmo import GizmoPass
 
     frame = GizmoFrame()
     frame.active = GizmoHandle.X
@@ -1365,7 +1365,7 @@ def test_flat_is_default_and_active_handle_hides_the_rest() -> None:
 
 
 def test_multiple_direct_joints_require_an_explicit_gizmo_target() -> None:
-    from forge_viewer.adapters.base import JointInfo, SceneNode
+    from mojive.adapters.base import JointInfo, SceneNode
 
     joints = (
         JointInfo(3, "yaw", "hinge", False, (0.0, 0.0), 5, 4, 1, body=2),
@@ -2412,8 +2412,8 @@ def test_outer_ring_rotates_around_the_camera_axis() -> None:
 def test_joint_gizmo_edits_only_the_selected_joint_dof(
     body_name: str, handle: GizmoHandle, amount: float
 ) -> None:
-    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-    from forge_viewer.assets import resolve
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -2472,8 +2472,8 @@ def test_joint_gizmo_edits_only_the_selected_joint_dof(
 
 @pytest.mark.physics
 def test_slide_joint_drag_rebases_at_a_clamped_limit() -> None:
-    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-    from forge_viewer.assets import resolve
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -2558,8 +2558,8 @@ def test_slide_joint_drag_rebases_at_a_clamped_limit() -> None:
 
 @pytest.mark.physics
 def test_hinge_joint_drag_rebases_at_a_clamped_limit() -> None:
-    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-    from forge_viewer.assets import resolve
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -2674,8 +2674,8 @@ def test_scalar_joint_drag_label_reports_the_absolute_current_value(
     delta: float,
     expected: str,
 ) -> None:
-    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-    from forge_viewer.assets import resolve
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -2731,8 +2731,8 @@ def test_precise_joint_input_uses_display_units_and_clamps_to_the_range(
     amount: float,
     unit: str,
 ) -> None:
-    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-    from forge_viewer.assets import resolve
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -2770,8 +2770,8 @@ def test_precise_joint_input_accepts_an_absolute_qpos(
     requested: float,
     expected_display: float,
 ) -> None:
-    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-    from forge_viewer.assets import resolve
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -2822,8 +2822,8 @@ def test_precise_joint_relative_input_keeps_display_units(
     delta: float,
     expected: float,
 ) -> None:
-    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-    from forge_viewer.assets import resolve
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -2862,8 +2862,8 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
     labels: set[str],
     current_value: float,
 ) -> None:
-    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-    from forge_viewer.assets import resolve
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
 
     session = Session(MuJoCoAdapter(resolve("joint_types")))
     assert session.submit(cmd.Pause())
@@ -2996,8 +2996,8 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
 @pytest.mark.physics
 @pytest.mark.parametrize("body_name", ("hinge_body", "slide_body"))
 def test_joint_limit_labels_write_the_selected_endpoint(body_name: str) -> None:
-    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-    from forge_viewer.assets import resolve
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -3420,8 +3420,8 @@ def test_active_joint_rotation_guide_is_hidden_when_the_ring_is_edge_on() -> Non
 
 @pytest.mark.physics
 def test_hinge_joint_range_stays_fixed_while_the_current_marker_moves() -> None:
-    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-    from forge_viewer.assets import resolve
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
 
     session = Session(MuJoCoAdapter(resolve("joint_types")))
     assert session.submit(cmd.Pause())
@@ -3472,8 +3472,8 @@ def test_hinge_joint_range_stays_fixed_while_the_current_marker_moves() -> None:
 @pytest.mark.physics
 @pytest.mark.parametrize("body_name", ("hinge_body", "slide_body"))
 def test_scalar_joint_gizmo_uses_a_joint_color_instead_of_xyz(body_name: str) -> None:
-    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-    from forge_viewer.assets import resolve
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
 
     session = Session(MuJoCoAdapter(resolve("joint_types")))
     assert session.submit(cmd.Pause())
@@ -3501,8 +3501,8 @@ def test_scalar_joint_gizmo_uses_a_joint_color_instead_of_xyz(body_name: str) ->
 
 @pytest.mark.physics
 def test_unlimited_joint_gizmo_does_not_invent_limits() -> None:
-    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-    from forge_viewer.assets import resolve
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
 
     session = Session(MuJoCoAdapter(resolve("joint_types")))
     assert session.submit(cmd.Pause())
@@ -3538,11 +3538,11 @@ def test_unlimited_joint_gizmo_does_not_invent_limits() -> None:
 def test_inspector_omits_redundant_active_gizmo_status(monkeypatch) -> None:
     from types import SimpleNamespace
 
-    from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-    from forge_viewer.assets import resolve
-    from forge_viewer.ui.panels import PanelContext
-    from forge_viewer.ui.panels import inspector as inspector_module
-    from forge_viewer.ui.panels.inspector import InspectorPanel
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
+    from mojive.ui.panels import PanelContext
+    from mojive.ui.panels import inspector as inspector_module
+    from mojive.ui.panels.inspector import InspectorPanel
 
     session = Session(MuJoCoAdapter(resolve("joint_types")))
     assert session.submit(cmd.Pause())

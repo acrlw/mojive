@@ -2,22 +2,22 @@
 
 ## Shared value types
 
-::: forge_viewer.types
+::: mojive.types
 
 ## Stable and dynamic scene data
 
-::: forge_viewer.adapters.base.SceneSource
+::: mojive.adapters.base.SceneSource
 
-::: forge_viewer.adapters.base.SceneFrame
+::: mojive.adapters.base.SceneFrame
 
-::: forge_viewer.adapters.base.SceneNode
+::: mojive.adapters.base.SceneNode
 
-::: forge_viewer.adapters.base.FrameNeeds
+::: mojive.adapters.base.FrameNeeds
 
 ## Programmatic scenes
 
-::: forge_viewer.scene.Scene
+::: mojive.scene.Scene
 
-::: forge_viewer.scene.SceneObject
+::: mojive.scene.SceneObject
 
-::: forge_viewer.scene.SceneLight
+::: mojive.scene.SceneLight

@@ -2,7 +2,7 @@
 
 ## Scene documents
 
-Use `.forge.json` while composing multiple models and Forge entities. The document stores:
+Use `.mojive.json` while composing multiple models and Mojive entities. The document stores:
 
 - MJCF and URDF model references
 - model root position and rotation
@@ -16,10 +16,10 @@ resource paths, and recompiles the document before completing the save. The XML 
 asset directory can be moved together.
 
 The exporter preserves directional, point, spot, area, and image lights plus 2D, cube, and skybox
-textures. MuJoCo has no native area-light enum, so Forge writes a point-light fallback with bulb
+textures. MuJoCo has no native area-light enum, so OpenGL writes a point-light fallback with bulb
 radius and private text metadata that restores the area semantic when the file is reopened through
-Forge. Image lights require a cube or skybox texture; export reports an error instead of silently
-dropping an invalid reference. Save `.forge.json` when the Forge composition itself, including model
+OpenGL. Image lights require a cube or skybox texture; export reports an error instead of silently
+dropping an invalid reference. Save `.mojive.json` when the OpenGL composition itself, including model
 references and resource roots, must remain editable.
 
 ## Editing model topology
@@ -78,7 +78,7 @@ material** control to replace a floor or another surface material. Skin assets r
 the inventory.
 Attached-model declarations and generator source forms must still be edited in their original
 external MJCF source because MuJoCo expands them before `MjSpec` serialization.
-Forge keeps file-backed assets from an expanded attached model resolvable during ordinary topology
+OpenGL keeps file-backed assets from an expanded attached model resolvable during ordinary topology
 edits by writing their child compiler directories into the normalized asset paths; this does not
 reconstruct the original `asset/model` or `attach` declaration.
 
@@ -87,7 +87,7 @@ the remote typed-command boundary where the adapter exposes the capability. Paus
 before editing model properties.
 
 Compiler/option/visual blocks, default classes, custom arrays and tuples, deformable declarations,
-PBR texture-role layers, and bulk mesh/height-field samples remain source-owned. Forge loads,
+PBR texture-role layers, and bulk mesh/height-field samples remain source-owned. OpenGL loads,
 renders, composes, and preserves these core MuJoCo sections, but does not duplicate their rarely
 used source-authoring surface in Inspector. **Edit MJCF Source...** edits normalized XML produced
 by `MjSpec`; it is the escape hatch for one-off source changes, plugin-defined components, raw bulk
@@ -104,7 +104,7 @@ plugins registered with MuJoCo. Source/meta elements that are not completely rep
 `mj_printSchema()`, including include/frame/replicate behavior, are tracked separately so a clean
 schema report cannot be mistaken for source-preserving MJCF coverage.
 
-File-less MuJoCo root edits are stored inline as `root_mjcf` in `.forge.json` workspaces. This
+File-less MuJoCo root edits are stored inline as `root_mjcf` in `.mojive.json` workspaces. This
 preserves topology and model-component edits created directly from an empty editor without
 inventing a temporary external XML file.
 

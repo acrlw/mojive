@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-from forge_viewer.tools.stability import run_stability
+from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+from mojive.tools.stability import run_stability
 
 pytest.importorskip("mujoco")
 pytestmark = [pytest.mark.integration, pytest.mark.physics]

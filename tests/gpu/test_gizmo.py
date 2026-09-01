@@ -5,7 +5,7 @@ CPU-side gizmo geometry/hit-test coverage lives in tests/test_gizmo.py.  The
 scene is a single box at the origin with the gizmo on top of it, which also
 proves the near-plane depth pinning draws handles over scene geometry.
 
-Expected screen positions come from the shared ``forge_viewer.gizmo``
+Expected screen positions come from the shared ``mojive.gizmo``
 projection helpers (its ``project`` matches both backends in xy; only clip z
 conventions differ), so both backends assert identical geometry.  Tolerances
 only cover MSAA and shading rounding (the gizmo shader multiplies the handle
@@ -22,9 +22,9 @@ pytestmark = pytest.mark.gpu
 glfw = pytest.importorskip("glfw")
 moderngl = pytest.importorskip("moderngl")
 
-from forge_viewer import math3d as M  # noqa: E402
-from forge_viewer.adapters.base import SceneSource  # noqa: E402
-from forge_viewer.gizmo import (  # noqa: E402
+from mojive import math3d as M  # noqa: E402
+from mojive.adapters.base import SceneSource  # noqa: E402
+from mojive.gizmo import (  # noqa: E402
     ACTIVE_HANDLE_COLOR,
     AXIS_COLORS,
     CENTER_RADIUS,
@@ -43,8 +43,8 @@ from forge_viewer.gizmo import (  # noqa: E402
     project,
     world_scale,
 )
-from forge_viewer.render.scene import SceneBuilder  # noqa: E402
-from forge_viewer.types import (  # noqa: E402
+from mojive.render.scene import SceneBuilder  # noqa: E402
+from mojive.types import (  # noqa: E402
     CameraView,
     LightSet,
     Material,
@@ -157,16 +157,16 @@ class Rig:
 
 
 def _make_backend(backend_name: str, request, samples: int = 4):
-    """Build the backend selected by FORGE_VIEWER_BACKEND; GL stays lazy."""
+    """Build the backend selected by MOJIVE_BACKEND; GL stays lazy."""
     if backend_name == "wgpu":
-        from forge_viewer.render.webgpu.backend import WgpuBackend
+        from mojive.render.webgpu.backend import WgpuBackend
 
         return WgpuBackend(W, H, samples=samples)
-    from forge_viewer.render.forge import passes
-    from forge_viewer.render.forge.backend import ForgeBackend
+    from mojive.render.opengl import passes
+    from mojive.render.opengl.backend import OpenGLBackend
 
     passes.load_all()
-    return ForgeBackend(request.getfixturevalue("gl_ctx"), W, H, samples=samples)
+    return OpenGLBackend(request.getfixturevalue("gl_ctx"), W, H, samples=samples)
 
 
 @pytest.fixture

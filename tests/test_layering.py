@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "forge_viewer"
+SRC = Path(__file__).resolve().parents[1] / "src" / "mojive"
 
 
 def _module_name(path: Path) -> str:
@@ -18,7 +18,7 @@ def _module_name(path: Path) -> str:
     parts = list(rel.parts)
     if parts[-1] == "__init__":
         parts.pop()
-    return ".".join(["forge_viewer", *parts])
+    return ".".join(["mojive", *parts])
 
 
 def _imports(path: Path) -> set[str]:
@@ -67,7 +67,7 @@ def test_render_layer_does_not_import_ui():
 
     bad = {}
     for path in _files("render"):
-        hit = _hits(_imports(path), "forge_viewer.ui")
+        hit = _hits(_imports(path), "mojive.ui")
         if hit:
             bad[str(path.relative_to(SRC))] = sorted(hit)
     assert not bad
@@ -76,13 +76,13 @@ def test_render_layer_does_not_import_ui():
 def test_ui_layer_does_not_import_concrete_backend():
     """UI modules depend on render contracts instead of backend internals."""
 
-    allowed_prefixes = ("forge_viewer.render.backend", "forge_viewer.render.debugdraw")
+    allowed_prefixes = ("mojive.render.backend", "mojive.render.debugdraw")
     bad = {}
     for path in _files("ui"):
-        hit = _hits(_imports(path), "forge_viewer.render")
+        hit = _hits(_imports(path), "mojive.render")
         hit = {h for h in hit if not h.startswith(allowed_prefixes)}
 
-        hit = {h for h in hit if h != "forge_viewer.render"}
+        hit = {h for h in hit if h != "mojive.render"}
         if hit:
             bad[str(path.relative_to(SRC))] = sorted(hit)
     assert not bad
@@ -104,9 +104,9 @@ def test_shared_vocabulary_is_dependency_free():
     """Shared contracts remain importable without window or render dependencies."""
 
     forbidden = (
-        "forge_viewer.render",
-        "forge_viewer.ui",
-        "forge_viewer.adapters",
+        "mojive.render",
+        "mojive.ui",
+        "mojive.adapters",
         "moderngl",
         "glfw",
         "imgui",
@@ -127,7 +127,7 @@ def test_adapters_do_not_import_render_internals():
 
     bad = {}
     for path in _files("adapters"):
-        hit = _hits(_imports(path), "forge_viewer.render.forge")
+        hit = _hits(_imports(path), "mojive.render.opengl")
         if hit:
             bad[str(path.relative_to(SRC))] = sorted(hit)
     assert not bad

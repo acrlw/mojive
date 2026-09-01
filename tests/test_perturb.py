@@ -9,8 +9,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from forge_viewer import math3d
-from forge_viewer.adapters.base import (
+from mojive import math3d
+from mojive.adapters.base import (
     AdapterCaps,
     FrameNeeds,
     NodeType,
@@ -18,13 +18,13 @@ from forge_viewer.adapters.base import (
     SceneNode,
     SceneSource,
 )
-from forge_viewer.commands import ClearPerturb, Select
-from forge_viewer.log import configure
-from forge_viewer.session import Session, _node_local_bounds, _node_world_bounds
-from forge_viewer.types import CameraView, InstancePoseSource, MeshData, MeshKey, MeshShape
-from forge_viewer.ui import perturb as P
+from mojive.commands import ClearPerturb, Select
+from mojive.log import configure
+from mojive.session import Session, _node_local_bounds, _node_world_bounds
+from mojive.types import CameraView, InstancePoseSource, MeshData, MeshKey, MeshShape
+from mojive.ui import perturb as P
 
-APP_PATH = Path(__file__).resolve().parents[1] / "src" / "forge_viewer" / "ui" / "app.py"
+APP_PATH = Path(__file__).resolve().parents[1] / "src" / "mojive" / "ui" / "app.py"
 
 
 class FakeAdapter:
@@ -776,14 +776,14 @@ def load_app_module():
     saved = {}
     for name, attrs in (
         (
-            "forge_viewer.ui.window",
+            "mojive.ui.window",
             {
                 "Window": type("Window", (), {}),
                 "WindowConfig": type("WindowConfig", (), {}),
             },
         ),
         (
-            "forge_viewer.ui.theme",
+            "mojive.ui.theme",
             {
                 "AXIS_COLORS": {"x": (1, 0, 0, 1), "y": (0, 1, 0, 1), "z": (0, 0, 1, 1)},
                 "THEME": object(),
@@ -791,7 +791,7 @@ def load_app_module():
             },
         ),
         (
-            "forge_viewer.ui.panels",
+            "mojive.ui.panels",
             {"PanelContext": type("PanelContext", (), {}), "PanelSet": type("PanelSet", (), {})},
         ),
     ):
@@ -804,7 +804,7 @@ def load_app_module():
         saved[name] = sys.modules.get(name)
         sys.modules[name] = _stub(name, **attrs)
     try:
-        return importlib.import_module("forge_viewer.ui.app")
+        return importlib.import_module("mojive.ui.app")
     finally:
         for name, previous in saved.items():
             if previous is None:

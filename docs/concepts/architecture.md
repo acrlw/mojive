@@ -27,17 +27,17 @@ model / physics / remote stream
 | `SceneSource` | meshes, materials, entity identities, stable render metadata |
 | `SceneFrame` | poses, controls, contacts, tendons, sensors, dynamic meshes |
 | `Session` | selection, history, editor state, command routing |
-| Forge `Scene` | authored geometry, cameras, lights, materials, environment |
+| Mojive `Scene` | authored geometry, cameras, lights, materials, environment |
 | Physics adapter | simulation state, topology, capability-specific write-back |
 | Render backend | GPU resources, render passes, output images |
 
-`WorkspaceAdapter` combines one physics/model adapter with a Forge-authored scene. Model topology
+`WorkspaceAdapter` combines one physics/model adapter with a Mojive-authored scene. Model topology
 and dynamic state remain in the primary adapter. Editor entities remain backend-neutral.
 
 ## Composition and export
 
-`.forge.json` is the editor document. It records model paths, model root transforms, resource
-directories, edited model XML, and Forge entities. MJCF export composes model specs and authored
+`.mojive.json` is the editor document. It records model paths, model root transforms, resource
+directories, edited model XML, and Mojive entities. MJCF export composes model specs and authored
 entities into one formatted XML document, compiles it for validation, and writes it to disk.
 
 ## Coordinates

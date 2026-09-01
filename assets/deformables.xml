@@ -1,4 +1,4 @@
-<mujoco model="forge deformables">
+<mujoco model="opengl deformables">
   <compiler angle="degree"/>
   <option timestep="0.001" integrator="implicitfast" gravity="0 0 -9.81"/>
 

@@ -5,7 +5,7 @@ Date: 2026-08-24
 ## Status
 
 The wgpu backend implements the public Renderer API and the interactive viewer. It consumes
-the same scene contracts as Forge and runs the same UI, session, adapter, debug-draw, overlay,
+the same scene contracts as OpenGL and runs the same UI, session, adapter, debug-draw, overlay,
 and gizmo layers.
 
 Validated platforms:
@@ -13,13 +13,13 @@ Validated platforms:
 - macOS with Metal
 - Linux with Vulkan
 
-Forge stays the default backend.
+OpenGL stays the default backend.
 
 ## Usage
 
 ```bash
-pip install forge-viewer[wgpu]
-FORGE_VIEWER_BACKEND=wgpu forge-viewer
+pip install mojive[wgpu]
+MOJIVE_BACKEND=wgpu mojive
 ```
 
 Run the acceptance suites with:

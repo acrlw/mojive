@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from forge_viewer.assets import (
+from mojive.assets import (
     ASSET_SUFFIXES,
     AssetNotFoundError,
     assets_dir,

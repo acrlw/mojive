@@ -8,22 +8,22 @@ import inspect
 import numpy as np
 import pytest
 
-from forge_viewer import commands as cmd
-from forge_viewer.adapters.static import StaticSceneAdapter
-from forge_viewer.gizmo import AXIS_COLORS, paint_order, plane_direction
-from forge_viewer.render.backend import BackendCaps
-from forge_viewer.scene import Scene
-from forge_viewer.session import Session
-from forge_viewer.types import CameraView
-from forge_viewer.ui import viewcube as vc
-from forge_viewer.ui.draw2d import (
+from mojive import commands as cmd
+from mojive.adapters.static import StaticSceneAdapter
+from mojive.gizmo import AXIS_COLORS, paint_order, plane_direction
+from mojive.render.backend import BackendCaps
+from mojive.scene import Scene
+from mojive.session import Session
+from mojive.types import CameraView
+from mojive.ui import viewcube as vc
+from mojive.ui.draw2d import (
     Draw2D,
     ImguiDraw2D,
     _anti_alias_fringe_outer,
     _capped_polyline_outline,
     _round_cap_polyline_outline,
 )
-from forge_viewer.ui.gizmo import ObjectGizmo
+from mojive.ui.gizmo import ObjectGizmo
 
 RECT = (0.0, 0.0, 800.0, 600.0)
 

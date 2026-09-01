@@ -7,15 +7,15 @@ and reconnects after a transport failure.
 ## Start a service
 
 ```bash
-.venv/bin/forge-viewer rpc-serve assets/test_scene.xml \
-  --socket output/forge-viewer.sock
+.venv/bin/mojive rpc-serve assets/test_scene.xml \
+  --socket output/mojive.sock
 ```
 
 ## Run the Python client
 
 ```bash
 .venv/bin/python examples/control_client.py \
-  --socket output/forge-viewer.sock \
+  --socket output/mojive.sock \
   --steps 120 \
   --capture output/examples/rpc.png
 ```
@@ -27,5 +27,5 @@ and reconnects after a transport failure.
 The command-line client provides the same protocol for scripts and shell automation:
 
 ```bash
-.venv/bin/forge-viewer control get_state --socket output/forge-viewer.sock
+.venv/bin/mojive control get_state --socket output/mojive.sock
 ```

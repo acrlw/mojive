@@ -7,24 +7,24 @@ pytestmark = pytest.mark.gpu
 
 moderngl = pytest.importorskip("moderngl")
 
-from forge_viewer import math3d as M  # noqa: E402
-from forge_viewer.render.backend import RenderFlag  # noqa: E402
-from forge_viewer.render.forge import gl_native as G  # noqa: E402
-from forge_viewer.render.forge.instances import InstanceStore, Strategy  # noqa: E402
-from forge_viewer.render.forge.passes.base import PassContext, state_opaque  # noqa: E402
-from forge_viewer.render.forge.passes.idbuffer import IdBufferPass  # noqa: E402
-from forge_viewer.render.forge.passes.outline import OUTLINE_RADIUS, OutlinePass  # noqa: E402
-from forge_viewer.render.forge.programs import ProgramCache  # noqa: E402
-from forge_viewer.render.forge.resources import MeshStore, TextureStore  # noqa: E402
-from forge_viewer.render.forge.targets import IdLayout, RenderTarget, probe_id_layout  # noqa: E402
-from forge_viewer.render.forge.timing import FrameTiming  # noqa: E402
-from forge_viewer.render.mesh import all_builtin  # noqa: E402
-from forge_viewer.render.scene import SceneBuilder  # noqa: E402
-from forge_viewer.types import CameraView, LightSet, Material, MeshKey, MeshShape  # noqa: E402
+from mojive import math3d as M  # noqa: E402
+from mojive.render.backend import RenderFlag  # noqa: E402
+from mojive.render.mesh import all_builtin  # noqa: E402
+from mojive.render.opengl import gl_native as G  # noqa: E402
+from mojive.render.opengl.instances import InstanceStore, Strategy  # noqa: E402
+from mojive.render.opengl.passes.base import PassContext, state_opaque  # noqa: E402
+from mojive.render.opengl.passes.idbuffer import IdBufferPass  # noqa: E402
+from mojive.render.opengl.passes.outline import OUTLINE_RADIUS, OutlinePass  # noqa: E402
+from mojive.render.opengl.programs import ProgramCache  # noqa: E402
+from mojive.render.opengl.resources import MeshStore, TextureStore  # noqa: E402
+from mojive.render.opengl.targets import IdLayout, RenderTarget, probe_id_layout  # noqa: E402
+from mojive.render.opengl.timing import FrameTiming  # noqa: E402
+from mojive.render.scene import SceneBuilder  # noqa: E402
+from mojive.types import CameraView, LightSet, Material, MeshKey, MeshShape  # noqa: E402
 
 
 @pytest.fixture(autouse=True, scope="module")
-def _forge_backend_only(require_forge):
+def _opengl_backend_only(require_opengl):
     pass
 
 

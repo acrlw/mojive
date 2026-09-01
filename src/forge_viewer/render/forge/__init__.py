@@ -1,1 +1,0 @@
-"""Forge OpenGL renderer implementation."""

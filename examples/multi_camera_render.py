@@ -1,4 +1,4 @@
-"""Render every named MuJoCo camera through one Forge Renderer."""
+"""Render every named MuJoCo camera through one Mojive Renderer."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("model", type=Path)
     parser.add_argument("--output", type=Path, default=Path("output/examples/cameras"))
-    parser.add_argument("--backend", choices=("forge", "wgpu"), default="forge")
+    parser.add_argument("--backend", choices=("opengl", "wgpu"), default="opengl")
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     return parser.parse_args()
@@ -33,8 +33,8 @@ def camera_names(model: mujoco.MjModel) -> list[str]:
 def main() -> None:
     """Render the free camera and each named fixed camera to PNG."""
     args = parse_args()
-    os.environ["FORGE_VIEWER_BACKEND"] = args.backend
-    from forge_viewer import Renderer
+    os.environ["MOJIVE_BACKEND"] = args.backend
+    from mojive import Renderer
 
     model = mujoco.MjModel.from_xml_path(str(args.model.expanduser().resolve()))
     data = mujoco.MjData(model)

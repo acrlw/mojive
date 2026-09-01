@@ -1,7 +1,7 @@
 import numpy as np
 from PIL import Image
 
-from forge_viewer.tools.mouse_hint_icons import export_icons
+from mojive.tools.mouse_hint_icons import export_icons
 
 
 def test_mouse_icon_export_writes_black_and_true_transparent_shell_variants(tmp_path) -> None:

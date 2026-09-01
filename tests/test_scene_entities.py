@@ -6,23 +6,23 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from forge_viewer import commands as cmd
-from forge_viewer import math3d
-from forge_viewer.adapters.base import FrameNeeds, NodeType, SceneFrame, SceneNode, SceneSource
-from forge_viewer.adapters.static import StaticSceneAdapter
-from forge_viewer.gizmo import camera_icon_segments, project
-from forge_viewer.render.backend import BackendCaps
-from forge_viewer.render.debugdraw import DebugDraw, Occlusion, PrimitiveType
-from forge_viewer.scene import Scene
-from forge_viewer.session import Session
-from forge_viewer.types import CameraView, Light, LightSet, LightType
-from forge_viewer.ui.gizmo import (
+from mojive import commands as cmd
+from mojive import math3d
+from mojive.adapters.base import FrameNeeds, NodeType, SceneFrame, SceneNode, SceneSource
+from mojive.adapters.static import StaticSceneAdapter
+from mojive.gizmo import camera_icon_segments, project
+from mojive.render.backend import BackendCaps
+from mojive.render.debugdraw import DebugDraw, Occlusion, PrimitiveType
+from mojive.scene import Scene
+from mojive.session import Session
+from mojive.types import CameraView, Light, LightSet, LightType
+from mojive.ui.gizmo import (
     ObjectGizmo,
     _node_pose,
     _set_camera_from_world,
     _set_light_from_world,
 )
-from forge_viewer.ui.scene_entities import (
+from mojive.ui.scene_entities import (
     CAMERA_HELPER_SIZE_PT,
     HELPER_ICON_LAYER,
     HELPER_LAYER,

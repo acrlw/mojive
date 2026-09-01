@@ -6,9 +6,9 @@ import math
 import numpy as np
 import pytest
 
-from forge_viewer.render import mesh as mesh_mod
-from forge_viewer.render.mesh import BUILTIN_SHAPES, all_builtin, builtin_mesh, gizmo_mesh
-from forge_viewer.types import MeshData, MeshKey, MeshShape
+from mojive.render import mesh as mesh_mod
+from mojive.render.mesh import BUILTIN_SHAPES, all_builtin, builtin_mesh, gizmo_mesh
+from mojive.types import MeshData, MeshKey, MeshShape
 
 CLOSED_VOLUME = {
     MeshShape.SPHERE: 4.0 * math.pi / 3.0,
@@ -223,7 +223,7 @@ def test_gizmo_mesh_winding_matches_its_normals(name: str) -> None:
 
 def test_gizmo_arrow_is_one_continuous_silhouette() -> None:
 
-    from forge_viewer.gizmo import (
+    from mojive.gizmo import (
         AXIS_HEAD_HALF_PT,
         AXIS_HEAD_LENGTH_PT,
         AXIS_SHAFT_HALF_PT,
@@ -240,7 +240,7 @@ def test_gizmo_arrow_is_one_continuous_silhouette() -> None:
 
 
 def test_solid_gizmo_ring_widths_match_the_flat_overlay() -> None:
-    from forge_viewer.gizmo import CONTRAST_EDGE_PT, RING_WIDTH_PT, SCREEN_RING_WIDTH_PT, SIZE_PT
+    from mojive.gizmo import CONTRAST_EDGE_PT, RING_WIDTH_PT, SCREEN_RING_WIDTH_PT, SIZE_PT
 
     for name, width in (
         ("ring", RING_WIDTH_PT),
@@ -253,7 +253,7 @@ def test_solid_gizmo_ring_widths_match_the_flat_overlay() -> None:
 
 
 def test_solid_gizmo_half_ring_has_round_caps() -> None:
-    from forge_viewer.gizmo import RING_TUBE
+    from mojive.gizmo import RING_TUBE
 
     points = gizmo_mesh("half_ring").positions
 

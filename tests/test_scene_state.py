@@ -5,10 +5,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from forge_viewer import commands as cmd
-from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-from forge_viewer.render.backend import RenderFlag
-from forge_viewer.scene_state import (
+from mojive import commands as cmd
+from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+from mojive.render.backend import RenderFlag
+from mojive.scene_state import (
     CAMERA_BOOKMARK_FORMAT,
     FORMAT_VERSION,
     SCENE_SNAPSHOT_FORMAT,
@@ -22,9 +22,9 @@ from forge_viewer.scene_state import (
     restore_scene,
     save_named_snapshot,
 )
-from forge_viewer.session import Session
-from forge_viewer.types import CameraView
-from forge_viewer.ui.camera import OrbitCamera
+from mojive.session import Session
+from mojive.types import CameraView
+from mojive.ui.camera import OrbitCamera
 
 pytestmark = [pytest.mark.integration, pytest.mark.physics]
 

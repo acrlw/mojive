@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 from imgui_bundle import imgui
 
-from forge_viewer.ui import window as window_module
-from forge_viewer.ui.app import (
+from mojive.ui import window as window_module
+from mojive.ui.app import (
     MODEL_FILTERS,
     ViewerApp,
     _clipped_overlay_host_rect,
@@ -24,7 +24,7 @@ from forge_viewer.ui.app import (
     _translated_file_filters,
     precise_input_status_hints,
 )
-from forge_viewer.ui.window import (
+from mojive.ui.window import (
     Window,
     _is_dock_tab_nav_target,
     layout_scale,
@@ -32,7 +32,7 @@ from forge_viewer.ui.window import (
     resolve_context_api,
     resolve_ui_scales,
 )
-from forge_viewer.ui.window_wgpu import _scissor_rect_for_target
+from mojive.ui.window_wgpu import _scissor_rect_for_target
 
 
 def test_only_a_docked_window_tab_owns_the_suppressed_nav_cursor() -> None:
@@ -144,7 +144,7 @@ def test_resolve_context_api(requested: str, expected: str) -> None:
 
 
 def test_resolve_context_api_rejects_unknown_backend() -> None:
-    with pytest.raises(ValueError, match="Unsupported FORGE_VIEWER_GL"):
+    with pytest.raises(ValueError, match="Unsupported MOJIVE_GL"):
         resolve_context_api("gles")
 
 
@@ -173,7 +173,7 @@ def test_dynamic_popover_title_elides_the_middle() -> None:
 
 
 def test_viewport_recording_streams_and_finalizes_frames(monkeypatch) -> None:
-    import forge_viewer.recording as recording
+    import mojive.recording as recording
 
     events = []
 
@@ -226,13 +226,13 @@ def test_file_dialog_filters_translate_descriptions_without_touching_globs() -> 
 
 def test_layout_settings_path_honors_exact_override(monkeypatch, tmp_path) -> None:
     target = tmp_path / "custom-layout.ini"
-    monkeypatch.setenv("FORGE_VIEWER_IMGUI_INI", str(target))
+    monkeypatch.setenv("MOJIVE_IMGUI_INI", str(target))
     assert layout_settings_path() == target
 
 
 def test_layout_settings_path_honors_config_directory(monkeypatch, tmp_path) -> None:
-    monkeypatch.delenv("FORGE_VIEWER_IMGUI_INI", raising=False)
-    monkeypatch.setenv("FORGE_VIEWER_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("MOJIVE_IMGUI_INI", raising=False)
+    monkeypatch.setenv("MOJIVE_CONFIG_DIR", str(tmp_path))
     assert layout_settings_path() == tmp_path / "imgui.ini"
 
 

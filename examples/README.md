@@ -4,7 +4,7 @@ Run examples from the repository root after `make setup` or an editable installa
 
 | Example | Workflow |
 |---|---|
-| `programmatic_scene.py` | Build an interactive Forge scene without a physics backend |
+| `programmatic_scene.py` | Build an interactive Mojive scene without a physics backend |
 | `debug_draw.py` | Draw retained diagnostics and world-space labels |
 | `custom_adapter.py` | Integrate a small independent simulation backend |
 | `mujoco_render.py` | Render MuJoCo RGB, depth, and segmentation images offscreen |
@@ -43,7 +43,7 @@ Run examples from the repository root after `make setup` or an editable installa
 ```bash
 .venv/bin/python examples/compose_scene.py \
   assets/test_scene.xml assets/test_scene.urdf \
-  --output output/examples/workcell.forge.json
+  --output output/examples/workcell.mojive.json
 
 .venv/bin/python examples/compose_scene.py \
   assets/test_scene.xml assets/test_scene.urdf \
@@ -51,7 +51,7 @@ Run examples from the repository root after `make setup` or an editable installa
 ```
 
 MJCF export validates the model, copies file-backed assets into a sibling asset directory, and
-writes relative paths. Forge-only light and texture types that MJCF cannot preserve produce an
+writes relative paths. Mojive-only light and texture types that MJCF cannot preserve produce an
 explicit error.
 
 ## Remote viewing
@@ -60,8 +60,8 @@ Start the publisher and attach one or more viewers in separate terminals:
 
 ```bash
 .venv/bin/python examples/remote_publish.py
-.venv/bin/forge-viewer attach --title effect
-.venv/bin/forge-viewer attach --title normals --debug-view normal
+.venv/bin/mojive attach --title effect
+.venv/bin/mojive attach --title normals --debug-view normal
 ```
 
 Scene structure uses reliable delivery. Dynamic frames keep the latest state so a slow viewer
@@ -71,12 +71,12 @@ Record and replay the same packet format without a live publisher:
 
 ```bash
 .venv/bin/python examples/record_replay.py --output output/examples/orbit.fvs
-.venv/bin/forge-viewer replay output/examples/orbit.fvs
+.venv/bin/mojive replay output/examples/orbit.fvs
 ```
 
 ## Local control
 
 ```bash
-.venv/bin/forge-viewer rpc-serve assets/test_scene.xml --socket output/forge-viewer.sock
-.venv/bin/python examples/control_client.py --socket output/forge-viewer.sock --steps 120
+.venv/bin/mojive rpc-serve assets/test_scene.xml --socket output/mojive.sock
+.venv/bin/python examples/control_client.py --socket output/mojive.sock --steps 120
 ```

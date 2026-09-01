@@ -3,13 +3,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from forge_viewer import math3d
-from forge_viewer.types import MeshKey, MeshShape
+from mojive import math3d
+from mojive.types import MeshKey, MeshShape
 
 moderngl = pytest.importorskip("moderngl")
 
-from forge_viewer.render.forge.passes.reflect import ReflectPass  # noqa: E402
-from forge_viewer.render.scene import RenderScene  # noqa: E402
+from mojive.render.opengl.passes.reflect import ReflectPass  # noqa: E402
+from mojive.render.scene import RenderScene  # noqa: E402
 
 
 @pytest.mark.parametrize(

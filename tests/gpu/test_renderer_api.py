@@ -9,8 +9,8 @@ import pytest
 
 mujoco = pytest.importorskip("mujoco")
 
-from forge_viewer import Renderer  # noqa: E402
-from forge_viewer.render.backend import (  # noqa: E402
+from mojive import Renderer  # noqa: E402
+from mojive.render.backend import (  # noqa: E402
     DebugView,
     FrameMode,
     LabelMode,
@@ -167,7 +167,7 @@ def test_renderer_depth_is_metric_for_perspective_and_orthographic(projection):
     assert depth[0, 0] > depth[40, 40]
 
 
-def test_renderer_maps_mjv_options_to_forge_state():
+def test_renderer_maps_mjv_options_to_opengl_state():
     model = _model()
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
@@ -198,7 +198,7 @@ def test_renderer_maps_mjv_options_to_forge_state():
         assert np.all(renderer._source.geom_rgba[dynamic, 3] <= 0.3)
 
 
-def test_renderer_max_geom_limits_mujoco_and_forge_scenes():
+def test_renderer_max_geom_limits_mujoco_and_opengl_scenes():
     model = _model()
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)

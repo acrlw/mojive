@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from forge_viewer.ui.input_bindings import (
+from mojive.ui.input_bindings import (
     DEFAULT_INPUT_BINDINGS,
     InputAction,
     InputBindings,

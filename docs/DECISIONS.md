@@ -88,7 +88,7 @@ MuJoCo 3.11 measurements establish these lighting rules:
 | Scene-light ambient 0.4 | 97 |
 | Both ambient terms at 0.4 | 194 |
 
-Forge adds active ambient terms and uses an ambient gain of 1.0. A 0.6 texture sample scales to
+OpenGL adds active ambient terms and uses an ambient gain of 1.0. A 0.6 texture sample scales to
 38, 77, and 153 under ambient values 0.25, 0.5, and 1.0.
 
 MuJoCo image-light intensity 5000 maps to unit cube radiance. Diffuse lighting samples the

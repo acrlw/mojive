@@ -11,10 +11,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from forge_viewer.adapters.base import FrameNeeds
-from forge_viewer.render.backend import RenderFlag
-from forge_viewer.tools._harness import OffscreenHarness
-from forge_viewer.types import CameraView
+from mojive.adapters.base import FrameNeeds
+from mojive.render.backend import RenderFlag
+from mojive.tools._harness import OffscreenHarness
+from mojive.types import CameraView
 
 pytestmark = pytest.mark.gpu
 
@@ -60,7 +60,7 @@ def harness(tmp_path, backend_name):
     scene = tmp_path / "tendon.xml"
     scene.write_text(MJCF, encoding="utf-8")
     with OffscreenHarness(scene, W, H) as h:
-        assert h.backend.caps.name == ("wgpu" if backend_name == "wgpu" else "forge")
+        assert h.backend.caps.name == ("wgpu" if backend_name == "wgpu" else "opengl")
         h.needs = FrameNeeds(poses=True, tendons=True)
         camera = _camera()
         h.camera = camera

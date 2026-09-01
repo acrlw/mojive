@@ -8,18 +8,18 @@ pytestmark = pytest.mark.gpu
 
 pytest.importorskip("glfw")
 
-from forge_viewer import commands as cmd  # noqa: E402
-from forge_viewer.assets import resolve  # noqa: E402
-from forge_viewer.composition import build, build_scene  # noqa: E402
-from forge_viewer.scene import Scene  # noqa: E402
-from forge_viewer.ui import viewcube  # noqa: E402
-from forge_viewer.ui.viewport_widgets import ToolHint  # noqa: E402
+from mojive import commands as cmd  # noqa: E402
+from mojive.assets import resolve  # noqa: E402
+from mojive.composition import build, build_scene  # noqa: E402
+from mojive.scene import Scene  # noqa: E402
+from mojive.ui import viewcube  # noqa: E402
+from mojive.ui.viewport_widgets import ToolHint  # noqa: E402
 
 
 def test_view_gizmo_and_font_share_the_explicit_ui_scale(monkeypatch):
     from imgui_bundle import imgui
 
-    monkeypatch.setenv("FORGE_VIEWER_UI_SCALE", "2")
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "2")
     viewer = build_scene(Scene(), vsync=False, width=960, height=640)
     try:
         viewer.sync()
@@ -40,7 +40,7 @@ def test_view_gizmo_and_font_share_the_explicit_ui_scale(monkeypatch):
 def test_hidpi_capsule_hosts_are_clipped_and_modal_width_tracks_layout_scale(monkeypatch):
     from imgui_bundle import imgui
 
-    monkeypatch.setenv("FORGE_VIEWER_UI_SCALE", "2.25")
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "2.25")
     viewer = build(
         resolve("joint_gizmo"),
         "mujoco",
@@ -108,7 +108,7 @@ def test_hidpi_capsule_hosts_are_clipped_and_modal_width_tracks_layout_scale(mon
 def test_hidpi_viewport_overlays_keep_a_hard_clip_after_splitter_collapse(monkeypatch):
     from imgui_bundle import imgui
 
-    monkeypatch.setenv("FORGE_VIEWER_UI_SCALE", "2.25")
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "2.25")
     viewer = build(
         resolve("joint_gizmo"),
         "mujoco",

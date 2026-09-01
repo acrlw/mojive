@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from forge_viewer.render.forge import gl_native as G
+from mojive.render.opengl import gl_native as G
 
 
 def _load_glfw():
@@ -23,7 +23,7 @@ glfw = _load_glfw()
 def _keep_composed_windows_hidden():
     """Prevent automated UI tests from interrupting the active desktop."""
 
-    from forge_viewer import composition
+    from mojive import composition
 
     original = composition._compose
 
@@ -46,29 +46,29 @@ except ImportError:  # pragma: no cover
 
 @pytest.fixture(autouse=True, scope="session")
 def _english_ui():
-    previous = os.environ.get("FORGE_VIEWER_LANGUAGE")
-    os.environ["FORGE_VIEWER_LANGUAGE"] = "en"
+    previous = os.environ.get("MOJIVE_LANGUAGE")
+    os.environ["MOJIVE_LANGUAGE"] = "en"
     yield
     if previous is None:
-        del os.environ["FORGE_VIEWER_LANGUAGE"]
+        del os.environ["MOJIVE_LANGUAGE"]
     else:
-        os.environ["FORGE_VIEWER_LANGUAGE"] = previous
+        os.environ["MOJIVE_LANGUAGE"] = previous
 
 
 @pytest.fixture(scope="session")
 def backend_name():
 
-    requested = os.environ.get("FORGE_VIEWER_BACKEND", "").strip().lower()
+    requested = os.environ.get("MOJIVE_BACKEND", "").strip().lower()
     if requested == "webgpu":
         requested = "wgpu"
-    return requested or "forge"
+    return requested or "opengl"
 
 
 @pytest.fixture(scope="session")
-def require_forge(backend_name):
+def require_opengl(backend_name):
 
-    if backend_name != "forge":
-        pytest.skip("GL-internals test, forge backend only")
+    if backend_name != "opengl":
+        pytest.skip("GL-internals test, opengl backend only")
 
 
 @pytest.fixture(scope="session")
@@ -86,7 +86,7 @@ def _gl_session():
         (glfw.VISIBLE, False),
     ):
         glfw.window_hint(hint, value)
-    window = glfw.create_window(256, 192, "forge gpu tests", None, None)
+    window = glfw.create_window(256, 192, "opengl gpu tests", None, None)
     if not window:
         glfw.terminate()
         pytest.skip("OpenGL 3.3 core context unavailable")

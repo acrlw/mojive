@@ -2,7 +2,7 @@
 
 ## Project scope
 
-forge-viewer is a backend-neutral 3D viewer for simulation and tooling. Forge is the rendering
+Mojive is a backend-neutral 3D viewer for simulation and tooling. OpenGL is the rendering
 backend. MuJoCo, custom physics engines, programmatic scenes, remote publishers, and snapshot
 replay enter through scene adapters.
 
@@ -13,7 +13,7 @@ replay enter through scene adapters.
 - Render code imports shared contracts only.
 - UI code imports session state and protocols.
 - `Session` owns application state, selection, overrides, and command routing.
-- Forge scene entities own cameras, lights, materials, and authoring metadata.
+- Mojive scene entities own cameras, lights, materials, and authoring metadata.
 - Physics adapters own simulation state and capability-specific write-back.
 - `tests/test_layering.py` enforces dependency boundaries.
 

@@ -1,4 +1,4 @@
-<mujoco model="forge MuJoCo visuals">
+<mujoco model="opengl MuJoCo visuals">
   <option timestep="0.002" gravity="0 0 -9.81"/>
   <visual>
     <global azimuth="135" elevation="-24" fovy="48"/>

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from forge_viewer.render.forge import color
+from mojive.render.opengl import color
 
 
 def _wrong_ambient_in_linear_domain(a, gain=2.0):

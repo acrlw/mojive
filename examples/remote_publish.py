@@ -1,4 +1,4 @@
-"""Publish a moving Forge scene to independent remote viewers."""
+"""Publish a moving Mojive scene to independent remote viewers."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ import argparse
 import math
 import time
 
-from forge_viewer import FrameNeeds, Scene, SnapshotPublisher
-from forge_viewer.adapters.static import StaticSceneAdapter
-from forge_viewer.remote import handle_session_command, snapshot_structure
-from forge_viewer.session import Session
+from mojive import FrameNeeds, Scene, SnapshotPublisher
+from mojive.adapters.static import StaticSceneAdapter
+from mojive.remote import handle_session_command, snapshot_structure
+from mojive.session import Session
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,7 +30,7 @@ def main() -> None:
     publisher.publish_structure(snapshot_structure(session))
     period = 1.0 / max(args.hz, 1.0)
     started = time.perf_counter()
-    print(f"Publishing on {args.host}:{args.port}; attach with forge-viewer attach")
+    print(f"Publishing on {args.host}:{args.port}; attach with mojive attach")
     try:
         while True:
             frame_start = time.perf_counter()

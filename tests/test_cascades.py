@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from forge_viewer.render.forge import cascades as C
+from mojive.render.opengl import cascades as C
 
 ATLAS = 4096
 TILES = 2
@@ -179,9 +179,9 @@ def test_glsl_pcf_radius_matches_python():
 
 def test_glsl_bias_default_matches_python():
 
-    from forge_viewer.render.forge.passes import shadow as S
+    from mojive.render.opengl.passes import shadow as S
 
     src = _SHADER.read_text(encoding="utf-8")
-    m = re.search(r"FORGE_SHADOW_BIAS\s*=\s*vec2\(\s*([\d.]+)\s*,\s*([\d.]+)\s*\)", src)
+    m = re.search(r"MOJIVE_SHADOW_BIAS\s*=\s*vec2\(\s*([\d.]+)\s*,\s*([\d.]+)\s*\)", src)
     assert m
     assert (float(m.group(1)), float(m.group(2))) == pytest.approx(S.SHADOW_BIAS)

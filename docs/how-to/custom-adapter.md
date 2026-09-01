@@ -24,4 +24,4 @@ and command paths.
 ```
 
 Use `make adapter-conformance ADAPTER=<name>` after registering an adapter with
-`forge_viewer.backends.make_adapter`.
+`mojive.backends.make_adapter`.

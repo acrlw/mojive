@@ -6,10 +6,10 @@ import argparse
 import math
 from pathlib import Path
 
-from forge_viewer import FrameNeeds, Scene, SnapshotWriter
-from forge_viewer.adapters.static import StaticSceneAdapter
-from forge_viewer.remote import RemoteFrame, snapshot_structure
-from forge_viewer.session import Session
+from mojive import FrameNeeds, Scene, SnapshotWriter
+from mojive.adapters.static import StaticSceneAdapter
+from mojive.remote import RemoteFrame, snapshot_structure
+from mojive.session import Session
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,7 +42,7 @@ def main() -> None:
         session.release()
     path = args.output.expanduser().resolve()
     print(path)
-    print(f"Replay with: forge-viewer replay {path}")
+    print(f"Replay with: mojive replay {path}")
 
 
 if __name__ == "__main__":

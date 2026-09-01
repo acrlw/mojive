@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from forge_viewer.tools.mujoco_model_suite import (
+from mojive.tools.mujoco_model_suite import (
     ModelAuditResult,
     ModelAuditStatus,
     build_report,

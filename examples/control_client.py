@@ -1,11 +1,11 @@
-"""Control a running forge-viewer RPC service from Python."""
+"""Control a running mojive RPC service from Python."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from forge_viewer.control_rpc import DEFAULT_SOCKET, RpcClient
+from mojive.control_rpc import DEFAULT_SOCKET, RpcClient
 
 
 def parse_args() -> argparse.Namespace:

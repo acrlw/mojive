@@ -8,9 +8,9 @@ import pytest
 
 mujoco = pytest.importorskip("mujoco")
 
-import forge_viewer  # noqa: E402
-import forge_viewer.renderer as renderer_module  # noqa: E402
-from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter  # noqa: E402
+import mojive  # noqa: E402
+import mojive.renderer as renderer_module  # noqa: E402
+from mojive.adapters.mujoco_adapter import MuJoCoAdapter  # noqa: E402
 
 
 def _model(*, width: int = 64, height: int = 48):
@@ -25,7 +25,7 @@ def _model(*, width: int = 64, height: int = 48):
 
 
 def test_renderer_is_exported_with_mujoco_compatible_constructor():
-    signature = inspect.signature(forge_viewer.Renderer)
+    signature = inspect.signature(mojive.Renderer)
 
     assert list(signature.parameters) == [
         "model",
@@ -49,7 +49,7 @@ def test_renderer_is_exported_with_mujoco_compatible_constructor():
 )
 def test_renderer_rejects_dimensions_larger_than_mujoco_framebuffer(width, height, message):
     with pytest.raises(ValueError, match=message):
-        forge_viewer.Renderer(_model(), width=width, height=height)
+        mojive.Renderer(_model(), width=width, height=height)
 
 
 def test_adapter_binds_programmatic_model_data():

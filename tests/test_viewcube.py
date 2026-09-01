@@ -5,8 +5,8 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from forge_viewer.types import CameraView
-from forge_viewer.ui import viewcube as vc
+from mojive.types import CameraView
+from mojive.ui import viewcube as vc
 
 
 def cam(eye, target=(0.0, 0.0, 0.0)) -> CameraView:
@@ -207,7 +207,7 @@ def test_click_target_is_the_axis_you_clicked(axis, sign, yaw, pitch):
 
 def test_top_view_yaw_matches_the_camera_preset():
 
-    from forge_viewer.ui.camera import PRESETS
+    from mojive.ui.camera import PRESETS
 
     assert vc.yaw_pitch_for(2, 1.0, 0.0) == PRESETS["top"]
     assert vc.yaw_pitch_for(2, -1.0, 0.0) == PRESETS["bottom"]
@@ -215,7 +215,7 @@ def test_top_view_yaw_matches_the_camera_preset():
 
 def test_top_view_is_right_handed_x_right_y_up():
 
-    from forge_viewer.ui.camera import camera_basis
+    from mojive.ui.camera import camera_basis
 
     yaw, pitch = vc.yaw_pitch_for(2, 1.0, 0.0)
     y, p = np.radians(yaw), np.radians(pitch)

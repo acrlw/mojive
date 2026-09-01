@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from forge_viewer import AdapterCaps, FrameNeeds, Scene, SceneAdapterBase, build_from_adapter
-from forge_viewer.adapters.base import SceneFrame, SceneSource
+from mojive import AdapterCaps, FrameNeeds, Scene, SceneAdapterBase, build_from_adapter
+from mojive.adapters.base import SceneFrame, SceneSource
 
 
 class OscillatorAdapter(SceneAdapterBase):
@@ -67,7 +67,7 @@ class OscillatorAdapter(SceneAdapterBase):
 
 def main() -> None:
     """Run the custom adapter in the standard interactive viewer."""
-    viewer = build_from_adapter(OscillatorAdapter(), title="forge custom adapter")
+    viewer = build_from_adapter(OscillatorAdapter(), title="Mojive custom adapter")
     try:
         viewer.run()
     finally:

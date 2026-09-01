@@ -12,9 +12,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from forge_viewer.adapters.mujoco_adapter import MuJoCoAdapter
-from forge_viewer.cli import main
-from forge_viewer.control_rpc import (
+from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+from mojive.cli import main
+from mojive.control_rpc import (
     PROTOCOL_VERSION,
     ControlServer,
     ControlService,
@@ -22,7 +22,7 @@ from forge_viewer.control_rpc import (
     RpcError,
     _mujoco_camera,
 )
-from forge_viewer.types import CameraView
+from mojive.types import CameraView
 
 pytestmark = pytest.mark.physics
 

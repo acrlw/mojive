@@ -21,11 +21,11 @@ adapter and composes the standard editor window.
 
 ## Save and load
 
-Programmatic scenes use the Forge JSON scene format:
+Programmatic scenes use the Mojive JSON scene format:
 
 ```python
-scene.save("output/examples/workcell.forge.json")
-restored = Scene.load("output/examples/workcell.forge.json")
+scene.save("output/examples/workcell.mojive.json")
+restored = Scene.load("output/examples/workcell.mojive.json")
 ```
 
 Use `WorkspaceAdapter` when one document combines authored entities with MJCF or URDF models.

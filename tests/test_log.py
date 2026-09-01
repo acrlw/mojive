@@ -4,7 +4,7 @@ import ast
 from io import StringIO
 from pathlib import Path
 
-from forge_viewer.log import configure, get_logger
+from mojive.log import configure, get_logger
 
 
 def test_loguru_output_is_compact_and_component_scoped():
@@ -14,14 +14,14 @@ def test_loguru_output_is_compact_and_component_scoped():
     get_logger("test").info("Ready with {} object", 1)
 
     line = stream.getvalue()
-    assert "[forge/test]" in line
+    assert "[mojive/test]" in line
     assert "INFO" in line
     assert "Ready with 1 object" in line
     assert "20" not in line  # no timestamp noise
 
 
 def test_runtime_does_not_fall_back_to_standard_logging():
-    root = Path(__file__).parents[1] / "src" / "forge_viewer"
+    root = Path(__file__).parents[1] / "src" / "mojive"
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         uses_logging = any(

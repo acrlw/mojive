@@ -1,7 +1,7 @@
-# forge-viewer
+# Mojive
 
-forge-viewer is a backend-neutral 3D viewer and renderer for robotics, simulation, and tooling.
-The Forge renderers consume stable scene structure and dynamic frame data from MuJoCo,
+Mojive is a backend-neutral 3D viewer and renderer for robotics, simulation, and tooling.
+The OpenGL renderers consume stable scene structure and dynamic frame data from MuJoCo,
 programmatic scenes, custom physics engines, remote publishers, and snapshot recordings.
 
 The project provides three primary workflows:
