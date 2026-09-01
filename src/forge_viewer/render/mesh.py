@@ -462,7 +462,37 @@ def _make_gizmo_ring(
         axis=-1,
     ).reshape(-1, 2)
     indices = _grid_indices(major + 1, minor + 1).reshape(-1, 3)[:, ::-1].reshape(-1)
-    return _finish(pos, nrm, uv, indices)
+    ring = (pos, nrm, uv, indices)
+    if not half:
+        return _finish(*ring)
+
+    def rounded_cap(theta: float, tangent_sign: float):
+        cap_pos, cap_nrm, cap_uv, cap_indices = _sphere_band(
+            np.pi / 2.0,
+            np.pi,
+            CAP_RINGS,
+            minor,
+            0.0,
+            1.0,
+        )
+        radial = np.array((np.cos(theta), np.sin(theta), 0.0))
+        vertical = np.array((0.0, 0.0, 1.0))
+        tangent = tangent_sign * np.array((-np.sin(theta), np.cos(theta), 0.0))
+        basis = np.column_stack((radial, vertical, tangent))
+        center = radius * radial
+        cap_pos = center + tube * (cap_pos @ basis.T)
+        cap_nrm = cap_nrm @ basis.T
+        if np.linalg.det(basis) < 0.0:
+            cap_indices = cap_indices.reshape(-1, 3)[:, ::-1].reshape(-1)
+        return cap_pos, cap_nrm, cap_uv, cap_indices
+
+    return _finish(
+        *_merge(
+            ring,
+            rounded_cap(0.0, -1.0),
+            rounded_cap(np.pi, 1.0),
+        )
+    )
 
 
 _GENERATORS = {

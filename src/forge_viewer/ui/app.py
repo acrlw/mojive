@@ -3293,6 +3293,7 @@ class ViewerApp:
                     hints,
                     labels=self._viewport_labels,
                     size=(widget_width, widget_height),
+                    pixel_size=self.window.pixels_to_points(1.0),
                 )
         imgui.end()
         imgui.pop_style_var()
@@ -3407,6 +3408,7 @@ class ViewerApp:
                 status_level="info" if active_status is None else active_status.level,
                 tool_hints=self._status_tool_hints(loading=loading),
                 labels=self._viewport_labels,
+                pixel_size=self.window.pixels_to_points(1.0),
             )
             if status_layout.metric_rect is not None and not loading:
                 x0, y0, x1, y1 = status_layout.metric_rect

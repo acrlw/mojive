@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from ..ui.draw2d import _open_polyline_ribbon
+from ..ui.draw2d import _capped_polyline_outline, _open_polyline_ribbon
 from ..ui.viewport_widgets import (
     _ROTATE_HALF_RINGS,
     OVERLAY_GEOMETRY,
@@ -61,30 +61,41 @@ class _PillowDraw2D:
     def _width(width: float) -> int:
         return max(1, round(float(width)))
 
-    def line(self, a, b, color, width: float) -> None:
-        self.draw.line((tuple(a), tuple(b)), fill=_rgba(color), width=self._width(width))
+    def line(self, a, b, color, width: float, *, cap: str = "butt") -> None:
+        self.polyline((a, b), color, width, cap=cap)
 
-    def polyline(self, points, color, width: float, *, closed: bool = False) -> None:
+    def polyline(
+        self,
+        points,
+        color,
+        width: float,
+        *,
+        closed: bool = False,
+        cap: str = "butt",
+    ) -> None:
         path = self._points(points)
         if closed and path:
             path = (*path, path[0])
-        self.capped_polyline(path, color, width, cap="butt")
+        self.capped_polyline(path, color, width, cap=cap)
 
     def capped_polyline(self, points, color, width: float, *, cap: str) -> None:
         path = self._points(points)
+        if cap in {"round", "round_start", "round_end"}:
+            outline = _capped_polyline_outline(
+                path,
+                float(width),
+                round_start=cap in {"round", "round_start"},
+                round_end=cap in {"round", "round_end"},
+            )
+            if outline:
+                self.draw.polygon(outline, fill=_rgba(color))
+            return
         left, right, outline = _open_polyline_ribbon(path, float(width))
         if not outline:
             return
         fill = _rgba(color)
         self.draw.polygon((*left, *reversed(right)), fill=fill)
-        if cap == "round":
-            radius = float(width) * 0.5
-            for x, y in (path[0], path[-1]):
-                self.draw.ellipse(
-                    (x - radius, y - radius, x + radius, y + radius),
-                    fill=fill,
-                )
-        elif cap != "butt":
+        if cap != "butt":
             raise ValueError(f"unknown polyline cap: {cap!r}")
 
     def convex_fill(self, points, color) -> None:
@@ -123,6 +134,45 @@ class _PillowDraw2D:
         del segments
         x, y = center
         self.draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=_rgba(color))
+
+    def rect(self, lo, hi, color, width: float = 1.0, *, rounding: float = 0.0) -> None:
+        half_width = float(width) * 0.5
+        self.draw.rounded_rectangle(
+            (
+                float(lo[0]) - half_width,
+                float(lo[1]) - half_width,
+                float(hi[0]) + half_width,
+                float(hi[1]) + half_width,
+            ),
+            radius=float(rounding) + half_width,
+            fill=_rgba(color),
+        )
+        self.draw.rounded_rectangle(
+            (
+                float(lo[0]) + half_width,
+                float(lo[1]) + half_width,
+                float(hi[0]) - half_width,
+                float(hi[1]) - half_width,
+            ),
+            radius=max(0.0, float(rounding) - half_width),
+            fill=_TRANSPARENT,
+        )
+
+    def rect_filled(self, lo, hi, color, *, rounding: float = 0.0) -> None:
+        self.draw.rounded_rectangle(
+            (*lo, *hi),
+            radius=float(rounding),
+            fill=_rgba(color),
+        )
+
+    def text(self, pos, color, text: str) -> None:
+        self.draw.text(
+            tuple(pos), text, fill=_rgba(color), font=_mono_font(round(6.4 * self.scale))
+        )
+
+    def text_size(self, text: str) -> tuple[float, float]:
+        bounds = self.draw.textbbox((0, 0), text, font=_mono_font(round(6.4 * self.scale)))
+        return float(bounds[2] - bounds[0]), float(bounds[3] - bounds[1])
 
     def centered_label(self, text: str, center, color, max_width: float) -> None:
         font_size = max(1, round(6.4 * self.scale))

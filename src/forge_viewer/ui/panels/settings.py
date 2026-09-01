@@ -68,6 +68,9 @@ _VIS_FLAGS: tuple[RenderFlag, ...] = (
 )
 
 _CATEGORIES = ("General", "Interaction", "Rendering", "MuJoCo Visuals")
+_CATEGORY_WIDTH_PT = 132.0
+_PAGE_MIN_WIDTH_PT = 224.0
+_COLUMN_GAP_PT = 8.0
 _CATEGORY_SEARCH_TERMS = {
     "General": ("language", "ui font", "cjk font"),
     "Interaction": (
@@ -105,6 +108,13 @@ def settings_category_matches(category: str, query: str) -> bool:
     return all(token in searchable for token in tokens)
 
 
+def settings_uses_stacked_layout(available_width: float, style_scale: float) -> bool:
+    """Keep the settings page usable when scaled columns no longer fit side by side."""
+
+    minimum_width = _CATEGORY_WIDTH_PT + _COLUMN_GAP_PT + _PAGE_MIN_WIDTH_PT
+    return float(available_width) < minimum_width * float(style_scale)
+
+
 def flag_groups() -> tuple[tuple[str, tuple[RenderFlag, ...]], ...]:
     rest = tuple(f for f in RenderFlag if f not in _RND_FLAGS and f not in _VIS_FLAGS)
     return (
@@ -133,27 +143,33 @@ class SettingsPanel(Panel):
 
     def draw(self, ctx: PanelContext) -> None:
         scale = ctx.style_scale
-        imgui.begin_child(
-            "settings_categories",
-            imgui.ImVec2(132.0 * scale, 0.0),
-            0,
+        stacked = settings_uses_stacked_layout(
+            imgui.get_content_region_avail().x,
+            scale,
         )
-        for category in _CATEGORIES:
-            matched = settings_category_matches(category, self._search)
-            imgui.begin_disabled(not matched)
-            selected, _ = imgui.selectable(
-                f"{ctx.tr(category)}##settings_{category}", self._category == category
-            )
-            if selected:
-                self._category = category
-            imgui.end_disabled()
-        imgui.end_child()
+        if stacked:
+            imgui.set_next_item_width(-1.0)
+            if imgui.begin_combo("##settings_category", ctx.tr(self._category)):
+                for category in _CATEGORIES:
+                    matched = settings_category_matches(category, self._search)
+                    imgui.begin_disabled(not matched)
+                    selected, _ = imgui.selectable(
+                        f"{ctx.tr(category)}##settings_{category}",
+                        self._category == category,
+                    )
+                    if selected:
+                        self._category = category
+                    imgui.end_disabled()
+                imgui.end_combo()
+            imgui.spacing()
+        else:
+            self._draw_category_rail(ctx, scale)
+            imgui.same_line()
 
-        imgui.same_line()
         imgui.begin_child(
             "settings_page",
             imgui.ImVec2(0.0, 0.0),
-            0,
+            imgui.ChildFlags_.always_use_window_padding,
         )
         imgui.set_next_item_width(-1.0)
         changed, self._search = search_input(
@@ -187,6 +203,28 @@ class SettingsPanel(Panel):
             self._rendering(ctx)
         else:
             self._mujoco_visuals(ctx)
+        imgui.end_child()
+
+    def _draw_category_rail(self, ctx: PanelContext, scale: float) -> None:
+        imgui.begin_child(
+            "settings_categories",
+            imgui.ImVec2(_CATEGORY_WIDTH_PT * scale, 0.0),
+            0,
+        )
+        imgui.push_style_var(
+            imgui.StyleVar_.selectable_text_align,
+            imgui.ImVec2(0.5, 0.5),
+        )
+        for category in _CATEGORIES:
+            matched = settings_category_matches(category, self._search)
+            imgui.begin_disabled(not matched)
+            selected, _ = imgui.selectable(
+                f"{ctx.tr(category)}##settings_{category}", self._category == category
+            )
+            if selected:
+                self._category = category
+            imgui.end_disabled()
+        imgui.pop_style_var()
         imgui.end_child()
 
     def _general(self, ctx: PanelContext) -> None:

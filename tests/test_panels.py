@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from imgui_bundle import imgui
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -17,6 +18,7 @@ from forge_viewer.adapters.base import (
     SceneNode,
 )
 from forge_viewer.types import MeshShape
+from forge_viewer.ui.compound_fields import draw_joined_field_frame
 from forge_viewer.ui.localization import Language, Localizer, parse_language
 from forge_viewer.ui.messages import OutputBuffer
 from forge_viewer.ui.panels import (
@@ -71,7 +73,10 @@ from forge_viewer.ui.panels.keyframes import (
 )
 from forge_viewer.ui.panels.output import filter_output_entries
 from forge_viewer.ui.panels.plot import PlotPanel
-from forge_viewer.ui.panels.settings import settings_category_matches
+from forge_viewer.ui.panels.settings import (
+    settings_category_matches,
+    settings_uses_stacked_layout,
+)
 from forge_viewer.ui.panels.stats import StatsPanel, _scale_ceiling
 from forge_viewer.ui.viewport_widgets import capsule_points, playback_size, tool_column_size
 from forge_viewer.ui.window import ResizeLatch
@@ -92,6 +97,42 @@ EXPECTED_PANELS = {
     "Help",
     "Info",
 }
+
+
+def test_joined_field_uses_one_outer_surface_and_a_left_rounded_badge() -> None:
+    calls = []
+
+    class DrawList:
+        def add_rect_filled(self, *args):
+            calls.append(args)
+
+    draw_joined_field_frame(
+        DrawList(),
+        imgui.ImVec2(10.0, 20.0),
+        imgui.ImVec2(32.0, 44.0),
+        imgui.ImVec2(32.0, 20.0),
+        imgui.ImVec2(80.0, 44.0),
+        badge_color=(0.8, 0.2, 0.2, 1.0),
+        field_color=(0.2, 0.2, 0.2, 1.0),
+        rounding=5.0,
+    )
+
+    assert len(calls) == 2
+    outer, badge = calls
+    assert (outer[0].x, outer[0].y, outer[1].x, outer[1].y) == (
+        10.0,
+        20.0,
+        80.0,
+        44.0,
+    )
+    assert outer[3:] == (5.0, imgui.ImDrawFlags_.round_corners_all.value)
+    assert (badge[0].x, badge[0].y, badge[1].x, badge[1].y) == (
+        10.0,
+        20.0,
+        32.0,
+        44.0,
+    )
+    assert badge[3:] == (5.0, imgui.ImDrawFlags_.round_corners_left.value)
 
 
 def test_hierarchy_disclosure_is_one_rigidly_rotated_antialiased_shape() -> None:
@@ -127,6 +168,12 @@ def test_settings_search_routes_queries_across_categories() -> None:
     assert settings_category_matches("Rendering", "shadow casters")
     assert settings_category_matches("MuJoCo Visuals", "contact force")
     assert not settings_category_matches("General", "contact force")
+
+
+def test_settings_stacks_categories_before_the_scaled_page_becomes_unusable() -> None:
+    assert not settings_uses_stacked_layout(450.0, 1.0)
+    assert settings_uses_stacked_layout(900.0, 4.0)
+    assert not settings_uses_stacked_layout(1600.0, 4.0)
 
 
 def test_joint_and_actuator_search_matches_names_case_insensitively() -> None:

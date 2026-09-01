@@ -45,6 +45,11 @@ class OverlayGeometry:
     hint_mouse_button_width_ratio: float = 0.44
     hint_mouse_button_shell_ratio: float = 0.75
     hint_mouse_button_height_ratio: float = 0.40
+    hint_mouse_wheel_width_ratio: float = 0.28
+    hint_mouse_wheel_height_ratio: float = 7.0 / 18.0
+    hint_mouse_wheel_gap_ratio: float = 0.25
+    frame_center_radius: float = 1.05
+    frame_center_shell_radius: float = 2.2
     tooltip_padding_x: float = 7.0
     tooltip_padding_y: float = 4.0
 
@@ -1047,6 +1052,7 @@ def _draw_axis_arrow_glyph(
     geometry_scale: float,
     stroke_width: float,
     *,
+    start: float = 0.0,
     base: float,
     tip: float,
     wing: float,
@@ -1065,7 +1071,7 @@ def _draw_axis_arrow_glyph(
             y + (uy * along + ny * across) * geometry_scale,
         )
 
-    draw.line(center, point(base + 0.25), color, stroke_width)
+    draw.line(point(start), point(base + 0.25), color, stroke_width)
     draw.convex_fill((point(tip), point(base, wing), point(base, -wing)), color)
 
 
@@ -1114,6 +1120,9 @@ def draw_tool_glyph(
                 path = _transform_path(local, x, y, glyph_scale)
                 draw.concave_fill(path, color)
     elif kind == "frame":
+        frame_shaft_start = geometry.frame_center_shell_radius + (
+            geometry.tool_stroke * 0.5 / TOOL_GLYPH_SCALE
+        )
         for direction in _FRAME_AXES:
             _draw_axis_arrow_glyph(
                 draw,
@@ -1122,12 +1131,19 @@ def draw_tool_glyph(
                 color,
                 glyph_scale,
                 geometry.tool_stroke * scale,
+                start=frame_shaft_start,
                 base=7.6,
                 tip=10.0,
                 wing=1.8,
             )
-        draw.circle_filled(center, 2.2 * glyph_scale, surface, segments=20)
-        draw.circle_filled(center, 1.05 * glyph_scale, color, segments=16)
+        # The shafts start outside this center shell, leaving a genuine
+        # transparent knockout instead of repainting an assumed surface color.
+        draw.circle_filled(
+            center,
+            geometry.frame_center_radius * glyph_scale,
+            color,
+            segments=16,
+        )
         draw.centered_label(
             "W" if space == "world" else "B",
             (x + 5.25 * glyph_scale, y - 5.1 * glyph_scale),
@@ -1256,6 +1272,16 @@ class MouseButtonGeometry:
     fill: tuple[tuple[float, float], ...]
 
 
+@dataclass(frozen=True)
+class MouseWheelGeometry:
+    """A highlighted wheel separated from the shell by a physical-pixel gap."""
+
+    lo: tuple[float, float]
+    hi: tuple[float, float]
+    rounding: float
+    gap: float
+
+
 @lru_cache(maxsize=128)
 def mouse_button_geometry(
     x: float,
@@ -1265,19 +1291,20 @@ def mouse_button_geometry(
     button: str,
     *,
     outline_width: float,
+    geometry: OverlayGeometry = OVERLAY_GEOMETRY,
 ) -> MouseButtonGeometry | None:
     """Return true-knockout shell and fill geometry for one mouse button."""
 
     if button not in {"left", "right"}:
         return None
     half_stroke = outline_width * 0.5
-    shell_gap = outline_width * OVERLAY_GEOMETRY.hint_mouse_button_shell_ratio
-    button_bottom = y + height * OVERLAY_GEOMETRY.hint_mouse_button_height_ratio
+    shell_gap = outline_width * geometry.hint_mouse_button_shell_ratio
+    button_bottom = y + height * geometry.hint_mouse_button_height_ratio
     shell_radius = min(width * 0.22, height * 0.18)
     outer_radius = shell_radius + half_stroke
     outer_left = x - half_stroke
     outer_top = y - half_stroke
-    button_width = (width + outline_width) * OVERLAY_GEOMETRY.hint_mouse_button_width_ratio
+    button_width = (width + outline_width) * geometry.hint_mouse_button_width_ratio
     inner_edge = outer_left + button_width
     arc_steps = 12
 
@@ -1345,6 +1372,35 @@ def mouse_button_geometry(
     return MouseButtonGeometry(visible_shell, fill)
 
 
+@lru_cache(maxsize=128)
+def mouse_wheel_geometry(
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    *,
+    outline_width: float,
+    pixel_size: float,
+    geometry: OverlayGeometry = OVERLAY_GEOMETRY,
+) -> MouseWheelGeometry:
+    """Return wheel geometry with a scalable gap and one-pixel minimum."""
+
+    gap = max(
+        outline_width * geometry.hint_mouse_wheel_gap_ratio,
+        max(float(pixel_size), 1e-6),
+    )
+    top = y + outline_width * 0.5 + gap
+    wheel_width = width * geometry.hint_mouse_wheel_width_ratio
+    wheel_height = height * geometry.hint_mouse_wheel_height_ratio
+    center_x = x + width * 0.5
+    return MouseWheelGeometry(
+        (center_x - wheel_width * 0.5, top),
+        (center_x + wheel_width * 0.5, top + wheel_height),
+        wheel_width * 0.42,
+        gap,
+    )
+
+
 def draw_mouse_hint_glyph(
     draw: Draw2D,
     x: float,
@@ -1355,18 +1411,20 @@ def draw_mouse_hint_glyph(
     scale: float,
     *,
     size: tuple[float, float] | None = None,
+    pixel_size: float = 1.0,
+    geometry: OverlayGeometry = OVERLAY_GEOMETRY,
 ) -> float:
     """Draw a Blender-style mouse shell with one semantic control highlighted."""
 
     logical_width, logical_height = size or (
-        OVERLAY_GEOMETRY.hint_mouse_width,
-        OVERLAY_GEOMETRY.hint_control_height,
+        geometry.hint_mouse_width,
+        geometry.hint_control_height,
     )
     width = logical_width * scale
     height = logical_height * scale
     y = center_y - height * 0.5
     radius = min(width * 0.22, height * 0.18)
-    outline_width = OVERLAY_GEOMETRY.hint_mouse_stroke * scale
+    outline_width = geometry.hint_mouse_stroke * scale
     button_geometry = mouse_button_geometry(
         x,
         y,
@@ -1374,6 +1432,7 @@ def draw_mouse_hint_glyph(
         height,
         button,
         outline_width=outline_width,
+        geometry=geometry,
     )
     if button_geometry is None:
         draw.rect((x, y), (x + width, y + height), theme.text, outline_width, rounding=radius)
@@ -1383,16 +1442,21 @@ def draw_mouse_hint_glyph(
         # genuine knockout over translucent chrome and arbitrary viewports.
         draw.polyline(button_geometry.visible_shell, theme.text, outline_width)
         draw.convex_fill(button_geometry.fill, theme.primary)
-    wheel_rect = (
-        (x + width * 0.36, y + 1.35 * scale + 1.0),
-        (x + width * 0.64, y + 8.35 * scale + 1.0),
-    )
     if button == "wheel":
+        wheel = mouse_wheel_geometry(
+            x,
+            y,
+            width,
+            height,
+            outline_width=outline_width,
+            pixel_size=pixel_size,
+            geometry=geometry,
+        )
         draw.rect_filled(
-            wheel_rect[0],
-            wheel_rect[1],
+            wheel.lo,
+            wheel.hi,
             theme.primary,
-            rounding=1.2 * scale,
+            rounding=wheel.rounding,
         )
     if not suffix:
         return width
@@ -1592,6 +1656,7 @@ def draw_tool_hints(
     hints: Sequence[ToolHint],
     *,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
+    pixel_size: float = 1.0,
 ) -> float:
     """Draw tool hints inline and return their consumed width."""
 
@@ -1621,6 +1686,7 @@ def draw_tool_hints(
                 suffix,
                 theme,
                 scale,
+                pixel_size=pixel_size,
             )
             + input_gap
         )
@@ -1668,6 +1734,7 @@ def draw_scene_tool_hints(
     *,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
     size: tuple[float, float] | None = None,
+    pixel_size: float = 1.0,
 ) -> None:
     """Render arbitrary hints in the original viewport capsule surface."""
 
@@ -1683,6 +1750,7 @@ def draw_scene_tool_hints(
         scale,
         hints,
         labels=labels,
+        pixel_size=pixel_size,
     )
 
 
@@ -1697,6 +1765,7 @@ def draw_hint(
     bindings: InputBindings = DEFAULT_INPUT_BINDINGS,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
     size: tuple[float, float] | None = None,
+    pixel_size: float = 1.0,
 ) -> None:
     del space
     draw_scene_tool_hints(
@@ -1707,6 +1776,7 @@ def draw_hint(
         default_tool_hints(variant, bindings, labels),
         labels=labels,
         size=size,
+        pixel_size=pixel_size,
     )
 
 
@@ -1877,6 +1947,7 @@ def draw_status(
     status_level: str = "info",
     tool_hints: Sequence[ToolHint] = (),
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
+    pixel_size: float = 1.0,
 ) -> StatusLayout:
     x, y = origin
     running = state == "running"
@@ -1999,6 +2070,7 @@ def draw_status(
             scale,
             fitted_hints,
             labels=labels,
+            pixel_size=pixel_size,
         )
         left_neighbor_end = cursor + hint_width
 

@@ -17,10 +17,12 @@ from forge_viewer.gizmo import (
     CENTER_HIT_PT,
     CENTER_RADIUS,
     CENTER_SHELL_RADIUS,
+    CONTRAST_EDGE_PT,
     GUIDE_CORE_COLOR,
     HOVER_COLOR,
     JOINT_HANDLE_COLOR,
     PLANE_INNER,
+    RING_HIT_PT,
     RING_RADIUS,
     RING_SEGMENTS,
     RING_WIDTH_PT,
@@ -85,12 +87,15 @@ from forge_viewer.ui.gizmo import (
     ObjectGizmo,
     _clip_line_to_rect,
     _clip_segment_to_rect,
+    _joint_current_tick_color,
     _joint_drag_label_color,
     _JointRangeState,
     _project_finite_axis_segment,
     _project_rotation_dial,
     _project_rotation_tick,
     _projected_line_parameters,
+    _revolute_tick_underlap,
+    _rotation_arc_stroke,
     _rotation_fill_alpha,
     _rotation_sweep,
     _RotationDialProjector,
@@ -244,28 +249,80 @@ def test_joint_drag_label_dot_uses_endpoint_semantics(current, expected) -> None
     assert np.allclose(_joint_drag_label_color(state), expected)
 
 
+@pytest.mark.parametrize(
+    ("current", "endpoint_color"),
+    ((-1.0, JOINT_LOWER_LIMIT_COLOR), (0.25, None), (1.0, JOINT_UPPER_LIMIT_COLOR)),
+)
+def test_hinge_value_label_dot_matches_the_current_tick_color(current, endpoint_color) -> None:
+    cam = camera()
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._active_joint = object()
+    gizmo._joint_range = _JointRangeState("hinge", current, -1.0, 1.0)
+    gizmo._axis[:] = (0.0, 0.0, 1.0)
+    gizmo._start_basis[:] = np.eye(3)
+    gizmo._label = f"hinge {current:+.1f}"
+    dial = _RotationDialProjector(
+        cam,
+        RECT,
+        np.zeros(3),
+        gizmo._axis,
+        np.array((1.0, 0.0, 0.0)),
+        SIZE_PT,
+    )
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_value_label(overlay, cam, RECT, 1.0, dial)
+
+    dot_color = next(args[2] for name, args, _kwargs in overlay.calls if name == "circle_filled")
+    alpha = rotation_ring_alpha(cam, gizmo._start_pos, gizmo._axis)
+    range_color = (*ACTIVE_HANDLE_COLOR[:3], ACTIVE_HANDLE_COLOR[3] * alpha)
+    expected = _joint_current_tick_color(gizmo._joint_range, range_color)
+    assert np.allclose(dot_color, expected)
+    if endpoint_color is not None:
+        assert np.allclose(dot_color[:3], endpoint_color[:3])
+
+
 @pytest.mark.parametrize("joint_type", ("hinge", "slide"))
 @pytest.mark.parametrize(
-    ("current", "expected"),
-    ((-1.0, JOINT_LOWER_LIMIT_COLOR), (1.0, JOINT_UPPER_LIMIT_COLOR)),
+    ("current", "endpoint_color"),
+    ((-1.0, JOINT_LOWER_LIMIT_COLOR), (0.25, None), (1.0, JOINT_UPPER_LIMIT_COLOR)),
 )
-def test_joint_current_tick_changes_to_the_reached_endpoint_color(
+def test_joint_current_tick_matches_range_width_and_endpoint_color_semantics(
     joint_type: str,
     current: float,
-    expected,
+    endpoint_color,
 ) -> None:
     gizmo = ObjectGizmo("rotate" if joint_type == "hinge" else "translate")
     gizmo._joint_range = _JointRangeState(joint_type, current, -1.0, 1.0)
+    gizmo._frame.handle_color = JOINT_HANDLE_COLOR
     overlay = RecordingDraw2D()
 
     gizmo._draw_joint_range(overlay, camera(), RECT, 1.0)
 
-    current_tick = next(
-        args
-        for name, args, _kwargs in overlay.calls
-        if name == "line" and args[3] == pytest.approx(4.0)
+    current_tick, tick_kwargs = next(
+        (args, kwargs)
+        for name, args, kwargs in overlay.calls
+        if name == "line"
+        and args[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
+        and kwargs.get("cap") == ("round_end" if joint_type == "hinge" else "round")
     )
+    if joint_type == "hinge":
+        range_color = next(args[1] for name, args, _kwargs in overlay.calls if name == "polyline")
+    else:
+        range_color = next(
+            args[2]
+            for name, args, kwargs in overlay.calls
+            if name == "line" and "cap" not in kwargs
+        )
+    expected = range_color if endpoint_color is None else (*endpoint_color[:3], range_color[3])
     assert np.allclose(current_tick[2], expected)
+    assert current_tick[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
+    assert tick_kwargs["cap"] == ("round_end" if joint_type == "hinge" else "round")
+    expected_length = JOINT_CURRENT_TICK_PT + (
+        0.5 * JOINT_RANGE_WIDTH_PT if joint_type == "hinge" else 0.0
+    )
+    assert np.linalg.norm(current_tick[1] - current_tick[0]) == pytest.approx(expected_length)
 
 
 @pytest.mark.parametrize(
@@ -369,6 +426,21 @@ def test_rotation_guide_keeps_the_sector_and_arc_without_center_strokes(
     assert all(name != "line" for name, _args, _kwargs in overlay.calls)
 
 
+def test_rotation_arc_round_caps_are_part_of_one_stroke_silhouette() -> None:
+    points = np.array(((0.0, 0.0), (5.0, 0.0), (10.0, 0.0)))
+
+    flat = _rotation_arc_stroke(points, None, None, 4.0)
+    rounded = _rotation_arc_stroke(points, None, None, 4.0, round_caps=True)
+
+    assert np.min(flat[:, 0]) == pytest.approx(0.0)
+    assert np.max(flat[:, 0]) == pytest.approx(10.0)
+    assert np.min(rounded[:, 0]) == pytest.approx(-2.0)
+    assert np.max(rounded[:, 0]) == pytest.approx(12.0)
+    assert np.min(rounded[:, 1]) == pytest.approx(-2.0)
+    assert np.max(rounded[:, 1]) == pytest.approx(2.0)
+    assert len(rounded) > len(flat)
+
+
 @pytest.mark.parametrize("degrees", [285.0, -285.0])
 def test_rotation_guide_uses_an_oriented_triangle_fan_for_reflex_sectors(
     degrees: float,
@@ -421,11 +493,12 @@ def test_rotation_snap_highlight_matches_the_corresponding_tick_length() -> None
 
     gizmo._draw_rotation_snap_ticks(overlay, cam, RECT, 1.0, dial)
 
-    lines = [args for name, args, _kwargs in overlay.calls if name == "line"]
-    core = [args for args in lines if np.allclose(args[2], GUIDE_CORE_COLOR)]
+    lines = [(args, kwargs) for name, args, kwargs in overlay.calls if name == "line"]
+    core = [args for args, _kwargs in lines if np.allclose(args[2], GUIDE_CORE_COLOR)]
     highlighted = [
-        args for args in lines if np.allclose(args[2], axis_active_color(AXIS_COLORS[2]))
+        args for args, _kwargs in lines if np.allclose(args[2], axis_active_color(AXIS_COLORS[2]))
     ]
+    assert all(kwargs["cap"] == "round" for _args, kwargs in lines)
     assert core
     assert len(highlighted) == 1
     start, end = highlighted[0][:2]
@@ -467,7 +540,8 @@ def test_rotation_snap_does_not_duplicate_the_limited_hinge_current_tick() -> No
     current_ticks = [
         args
         for args in lines
-        if np.allclose(args[2], ACTIVE_HANDLE_COLOR) and args[3] == pytest.approx(4.0)
+        if np.allclose(args[2], ACTIVE_HANDLE_COLOR)
+        and args[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
     ]
     assert snap_ticks
     assert len(current_ticks) == 1
@@ -545,6 +619,9 @@ def test_rotation_snap_ticks_are_clipped_to_the_reachable_hinge_arc() -> None:
         if name == "line" and np.allclose(args[2], ACTIVE_HANDLE_COLOR)
     ]
     assert len(snap_ticks) == 10
+    assert all(
+        kwargs["cap"] == "round_end" for name, _args, kwargs in overlay.calls if name == "line"
+    )
     expected_angles = np.radians((*range(0, 270, 30), 330))
     stable_dial = _RotationDialProjector(
         cam,
@@ -554,8 +631,12 @@ def test_rotation_snap_ticks_are_clipped_to_the_reachable_hinge_arc() -> None:
         np.array((1.0, 0.0, 0.0)),
         SIZE_PT,
     )
+    expected_starts = [
+        _revolute_tick_underlap(stable_dial.tick(RING_RADIUS, angle, 4.0), 1.0)[0]
+        for angle in expected_angles
+    ]
     assert np.asarray([tick[0] for tick in snap_ticks]) == pytest.approx(
-        stable_dial.points(RING_RADIUS, expected_angles)[:, :2]
+        np.asarray(expected_starts)
     )
     for ring, outside, *_rest in snap_ticks:
         center = stable_dial.points(0.0, (0.0,))[0, :2]
@@ -867,6 +948,37 @@ def test_rotation_inner_disk_is_a_background_trackball_hit() -> None:
     )
     axis_hit = hit_test(cam, origin, rotation, RECT, axis_point, GizmoMode.ROTATE)[0]
     assert axis_hit in ROTATE_AXIS_HANDLES
+
+
+def test_rotation_ring_crossing_keeps_the_previously_hovered_axis() -> None:
+    cam = camera()
+    origin = np.zeros(3)
+    rotation = np.eye(3)
+    cursor = np.array((398.5, 229.0))
+
+    # This projected point lies inside both the X and Y hit tubes. Distance
+    # alone chooses Y, while hover continuity must retain X until X is exited.
+    assert pytest.approx(5.5) == RING_HIT_PT
+    assert hit_test(cam, origin, rotation, RECT, cursor, GizmoMode.ROTATE)[0] is (
+        GizmoHandle.ROTATE_Y
+    )
+    assert (
+        hit_test(
+            cam,
+            origin,
+            rotation,
+            RECT,
+            cursor,
+            GizmoMode.ROTATE,
+            preferred_handle=GizmoHandle.ROTATE_X,
+        )[0]
+        is GizmoHandle.ROTATE_X
+    )
+
+    session, _node = session_at()
+    gizmo = ObjectGizmo("rotate")
+    gizmo._hovered = GizmoHandle.ROTATE_X
+    assert gizmo.update_hover(session, cam, RECT, tuple(cursor)) is GizmoHandle.ROTATE_X
 
 
 def test_trackball_drag_matches_blender_view_axis_mapping() -> None:
@@ -1345,6 +1457,9 @@ def test_slide_joint_snap_ruler_is_one_continuous_final_axis_overlay(style_scale
         midpoint = (np.asarray(args[0]) + np.asarray(args[1])) * 0.5
         positive_tick_offsets.append(float(np.dot(midpoint - center, direction)))
     assert any(0.0 < offset < arrow_extent for offset in positive_tick_offsets)
+    assert any(
+        name == "line" and kwargs.get("cap") == "round" for name, _args, kwargs in overlay.calls
+    )
 
 
 def test_position_snap_ruler_keeps_the_3d_arrow_owned_interval() -> None:
@@ -1389,6 +1504,49 @@ def test_translation_snap_guide_draws_smaller_endpoints_above_its_connector() ->
     assert dots[-1][1][1] == pytest.approx(TRANSLATION_GUIDE_RADIUS_PT)
 
 
+@pytest.mark.parametrize(
+    "position",
+    (
+        (1.0, 0.0, 0.0),
+        (-1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, -1.0, 0.0),
+    ),
+    ids=("screen-right", "screen-left", "screen-up", "screen-down"),
+)
+def test_scale4_translation_guide_connectors_stay_beneath_both_endpoint_markers(
+    position,
+) -> None:
+    gizmo = ObjectGizmo()
+    gizmo._drag_origin_pos[:] = (0.0, 0.0, 0.0)
+    gizmo._frame.position[:] = position
+    overlay = RecordingDraw2D()
+    scale = 4.0
+
+    gizmo._draw_translation_guide(overlay, camera(), RECT, scale)
+
+    assert [call[0] for call in overlay.calls] == [
+        "line",
+        "circle",
+        "circle_filled",
+        "line",
+        "circle",
+        "circle_filled",
+    ]
+    screen = project(camera(), (gizmo._drag_origin_pos, gizmo._frame.position), RECT)
+    start, end = screen[:, :2]
+    direction = (end - start) / np.linalg.norm(end - start)
+    radius = TRANSLATION_GUIDE_RADIUS_PT * scale
+    edge_width = (2.0 + 2.0 * CONTRAST_EDGE_PT) * scale
+    core_width = 2.0 * scale
+    edge_line = overlay.calls[0][1]
+    core_line = overlay.calls[3][1]
+    assert np.dot(edge_line[0] - start, direction) == pytest.approx(radius - edge_width * 0.5)
+    assert np.dot(end - edge_line[1], direction) == pytest.approx(radius - edge_width * 0.5)
+    assert np.dot(core_line[0] - start, direction) == pytest.approx(radius - core_width * 0.5)
+    assert np.dot(end - core_line[1], direction) == pytest.approx(radius - core_width * 0.5)
+
+
 def test_joint_translation_guide_is_a_dark_purple_segment_with_asymmetric_ticks() -> None:
     gizmo = ObjectGizmo()
     gizmo._drag_origin_pos[:] = (0.0, 0.0, 0.0)
@@ -1399,6 +1557,7 @@ def test_joint_translation_guide_is_a_dark_purple_segment_with_asymmetric_ticks(
 
     assert [name for name, _args, _kwargs in overlay.calls] == ["line"] * 3
     connector, start_tick, end_tick = (args for _name, args, _kwargs in overlay.calls)
+    connector_kwargs, start_kwargs, end_kwargs = (kwargs for _name, _args, kwargs in overlay.calls)
     assert np.allclose(connector[2], JOINT_ACTIVE_DARK_COLOR)
     assert np.allclose(start_tick[2], JOINT_ACTIVE_DARK_COLOR)
     assert np.allclose(end_tick[2], ACTIVE_HANDLE_COLOR)
@@ -1408,6 +1567,32 @@ def test_joint_translation_guide_is_a_dark_purple_segment_with_asymmetric_ticks(
     )
     assert np.linalg.norm(end_tick[1] - end_tick[0]) == pytest.approx(JOINT_CURRENT_TICK_PT)
     assert end_tick[3] == pytest.approx(4.0)
+    assert "cap" not in connector_kwargs
+    assert start_kwargs["cap"] == end_kwargs["cap"] == "round"
+
+
+@pytest.mark.parametrize(
+    ("current", "expected_color"),
+    (
+        (-1.0, JOINT_LOWER_LIMIT_COLOR),
+        (0.25, ACTIVE_HANDLE_COLOR),
+        (1.0, JOINT_UPPER_LIMIT_COLOR),
+    ),
+)
+def test_joint_translation_guide_end_tick_uses_limit_color(
+    current: float,
+    expected_color,
+) -> None:
+    gizmo = ObjectGizmo()
+    gizmo._joint_range = _JointRangeState("slide", current, -1.0, 1.0)
+    gizmo._drag_origin_pos[:] = (0.0, 0.0, 0.0)
+    gizmo._frame.position[:] = (0.0, 0.0, 0.5)
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_joint_translation_guide(overlay, camera(), RECT, 1.0)
+
+    end_tick = overlay.calls[-1][1]
+    assert np.allclose(end_tick[2], expected_color)
 
 
 def test_joint_translation_guide_stays_in_the_final_overlay_without_dots() -> None:
@@ -2744,6 +2929,7 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
     assert JOINT_RANGE_RADIUS == RING_RADIUS
     assert np.allclose(JOINT_RANGE_COLOR, (173 / 255, 150 / 255, 184 / 255, 1.0))
     assert allowed[1]["closed"] is False
+    assert allowed[1]["cap"] == "butt"
 
     dial = _RotationDialProjector(
         cam,
@@ -2766,7 +2952,7 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
         "current": next(
             args
             for name, args, _kwargs in overlay.calls
-            if name == "line" and np.allclose(args[2], JOINT_CURRENT_COLOR)
+            if name == "line" and args[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
         ),
         "lower": next(
             args
@@ -2779,12 +2965,16 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
             if name == "line" and np.allclose(args[2], JOINT_UPPER_LIMIT_COLOR)
         ),
     }
-    assert np.linalg.norm(ticks["current"][1] - ticks["current"][0]) == pytest.approx(
-        JOINT_CURRENT_TICK_PT
+    assert all(
+        kwargs["cap"] == "round_end" for name, _args, kwargs in overlay.calls if name == "line"
     )
+    assert np.linalg.norm(ticks["current"][1] - ticks["current"][0]) == pytest.approx(
+        JOINT_CURRENT_TICK_PT + 0.5 * JOINT_RANGE_WIDTH_PT
+    )
+    assert np.allclose(ticks["current"][2], JOINT_RANGE_COLOR)
     for limit in ("lower", "upper"):
         assert np.linalg.norm(ticks[limit][1] - ticks[limit][0]) == pytest.approx(
-            JOINT_LIMIT_TICK_PT
+            JOINT_LIMIT_TICK_PT + 0.5 * JOINT_RANGE_WIDTH_PT
         )
 
 
@@ -3111,7 +3301,7 @@ def test_hinge_joint_range_stays_fixed_while_the_current_marker_moves() -> None:
         current_tick = next(
             args[:2]
             for name, args, _kwargs in overlay.calls
-            if name == "line" and np.allclose(args[2], JOINT_CURRENT_COLOR)
+            if name == "line" and args[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
         )
         samples.append((allowed[[0, -1]].copy(), np.asarray(current_tick).copy()))
 

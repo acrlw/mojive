@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +14,7 @@ from .. import commands as cmd
 from ..adapters.base import NodeType
 from ..assets import resolve
 from ..composition import build, build_editor
-from ..gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, project, world_scale
+from ..gizmo import RING_RADIUS, SIZE_PT, TRACKBALL_RADIUS, GizmoHandle, project, world_scale
 from ..types import CameraView
 
 
@@ -28,12 +29,13 @@ def main(argv: list[str] | None = None) -> int:
 
     _capture_empty_workspace(args.output)
 
+    width, height = _capture_size(1920, 1080)
     viewer = build(
         resolve("gizmo"),
         paused=True,
         vsync=False,
-        width=1920,
-        height=1080,
+        width=width,
+        height=height,
         show_window=False,
     )
     try:
@@ -245,7 +247,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _capture_empty_workspace(output: Path) -> None:
-    viewer = build_editor(vsync=False, width=1600, height=1000, show_window=False)
+    width, height = _capture_size(1600, 1000)
+    viewer = build_editor(vsync=False, width=width, height=height, show_window=False)
     try:
         _settle(viewer, 8)
         _park_cursor(viewer)
@@ -258,6 +261,17 @@ def _capture_empty_workspace(output: Path) -> None:
 def _settle(viewer, frames: int = 7) -> None:
     for _ in range(frames):
         viewer.sync()
+
+
+def _capture_size(width: int, height: int) -> tuple[int, int]:
+    """Keep the gallery workspace usable under extreme explicit UI scales."""
+
+    try:
+        ui_scale = float(os.environ.get("FORGE_VIEWER_UI_SCALE", "1"))
+    except ValueError:
+        ui_scale = 1.0
+    factor = max(1.0, ui_scale / 2.0)
+    return round(width * factor), round(height * factor)
 
 
 def _click(viewer, point: tuple[float, float]) -> None:
@@ -278,6 +292,23 @@ def _right_click(viewer, point: tuple[float, float]) -> None:
     viewer.sync()
     io.add_mouse_button_event(1, False)
     viewer.sync()
+
+
+def _hover_gizmo_candidate(
+    viewer,
+    candidates,
+    handle: GizmoHandle,
+) -> tuple[int, np.ndarray]:
+    """Return the first candidate owned by the real viewport input pipeline."""
+
+    io = imgui.get_io()
+    for index, candidate in enumerate(candidates):
+        point = np.asarray(candidate, np.float64)
+        io.add_mouse_pos_event(float(point[0]), float(point[1]))
+        viewer.sync()
+        if viewer.app.gizmo.hovered_handle is handle:
+            return index, point
+    raise AssertionError(f"no interactive {handle.name} gizmo candidate")
 
 
 def _item_center(viewer, function_name: str, label: str) -> tuple[float, float]:
@@ -470,12 +501,13 @@ def _save_point_crop(
 
 
 def _capture_control(output: Path, asset: str, filename: str) -> None:
+    width, height = _capture_size(1280, 900)
     viewer = build(
         resolve(asset),
         paused=True,
         vsync=False,
-        width=1280,
-        height=900,
+        width=width,
+        height=height,
         show_window=False,
     )
     try:
@@ -511,12 +543,13 @@ def _capture_control(output: Path, asset: str, filename: str) -> None:
 
 
 def _capture_keyframes(output: Path) -> None:
+    width, height = _capture_size(1600, 1000)
     viewer = build(
         resolve("deformables"),
         paused=True,
         vsync=False,
-        width=1600,
-        height=1000,
+        width=width,
+        height=height,
         show_window=False,
     )
     try:
@@ -583,12 +616,13 @@ def _capture_keyframes(output: Path) -> None:
 
 
 def _capture_sensors(output: Path) -> None:
+    width, height = _capture_size(1440, 900)
     viewer = build(
         resolve("rangefinder"),
         paused=True,
         vsync=False,
-        width=1440,
-        height=900,
+        width=width,
+        height=height,
         show_window=False,
     )
     try:
@@ -626,12 +660,13 @@ def _capture_sensors(output: Path) -> None:
 
 
 def _capture_joint_gizmos(output: Path) -> None:
+    width, height = _capture_size(1440, 900)
     viewer = build(
         resolve("joint_types"),
         paused=True,
         vsync=False,
-        width=1440,
-        height=900,
+        width=width,
+        height=height,
         show_window=False,
     )
     try:
@@ -916,14 +951,16 @@ def _capture_position_snap_guide(viewer, node, output: Path) -> None:
     style_scale = viewer.window.style_scale
     scale = world_scale(cam, position, rect[3], SIZE_PT * style_scale)
     axis = np.asarray(rotation, np.float64).reshape(3, 3)[:, 2]
-    start = project(cam, (position + axis * scale * 0.55,), rect)[0, :2]
+    fractions = np.linspace(0.15, 0.95, 33)
+    candidates = tuple(
+        project(cam, (position + axis * scale * fraction,), rect)[0, :2] for fraction in fractions
+    )
+    _candidate_index, start = _hover_gizmo_candidate(viewer, candidates, GizmoHandle.Z)
     projected_axis = project(cam, (position, position + axis * scale), rect)[:, :2]
     direction = projected_axis[1] - projected_axis[0]
     direction /= np.linalg.norm(direction)
     io = imgui.get_io()
     viewer.app._snap_latched = True
-    io.add_mouse_pos_event(*start)
-    viewer.sync()
     io.add_mouse_button_event(0, True)
     viewer.sync()
     assert viewer.app.gizmo.using
@@ -1107,11 +1144,24 @@ def _capture_trackball(viewer, node, output: Path) -> None:
     cam = viewer.app._camera_view()
     rect = viewer.app._viewport_rect
     center = project(cam, (position,), rect)[0, :2]
+    radius = TRACKBALL_RADIUS * SIZE_PT * viewer.window.style_scale
+    offsets = (
+        (0.0, 0.0),
+        *(
+            (x, y)
+            for y in np.linspace(-0.65, 0.65, 14)
+            for x in np.linspace(-0.65, 0.65, 14)
+            if x * x + y * y <= 0.65**2
+        ),
+    )
+    candidates = tuple(center + np.asarray(offset) * radius for offset in offsets)
     io = imgui.get_io()
     viewer.app._snap_latched = False
-    io.add_mouse_pos_event(*center)
-    _settle(viewer, 2)
-    assert viewer.app.gizmo.hovered_handle is GizmoHandle.ROTATE_TRACKBALL
+    _candidate_index, start = _hover_gizmo_candidate(
+        viewer,
+        candidates,
+        GizmoHandle.ROTATE_TRACKBALL,
+    )
     _save_point_crop(
         viewer,
         output / "rotate-trackball-hover-closeup.png",
@@ -1122,8 +1172,8 @@ def _capture_trackball(viewer, node, output: Path) -> None:
     io.add_mouse_button_event(0, True)
     viewer.sync()
     io.add_mouse_pos_event(
-        center[0] + 34.0 * viewer.window.style_scale,
-        center[1] - 22.0 * viewer.window.style_scale,
+        start[0] + 34.0 * viewer.window.style_scale,
+        start[1] - 22.0 * viewer.window.style_scale,
     )
     _settle(viewer, 2)
     assert viewer.app.gizmo.active_handle is GizmoHandle.ROTATE_TRACKBALL
@@ -1144,12 +1194,13 @@ def _capture_trackball(viewer, node, output: Path) -> None:
 def _capture_joint_gizmo_scene(output: Path) -> None:
     """Capture the production multi-joint chooser and ball precise-input state."""
 
+    width, height = _capture_size(1920, 1080)
     viewer = build(
         resolve("joint_gizmo"),
         paused=True,
         vsync=False,
-        width=1920,
-        height=1080,
+        width=width,
+        height=height,
         show_window=False,
     )
     try:
@@ -1374,12 +1425,13 @@ def _capture_ball_rotation_axis(viewer, node, output: Path) -> None:
 
 
 def _capture_light_helpers(output: Path) -> None:
+    width, height = _capture_size(1600, 1000)
     viewer = build(
         resolve("many_lights"),
         paused=True,
         vsync=False,
-        width=1600,
-        height=1000,
+        width=width,
+        height=height,
         show_window=False,
     )
     try:

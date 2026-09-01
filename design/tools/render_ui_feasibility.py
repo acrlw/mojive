@@ -22,8 +22,10 @@ from forge_viewer import gizmo as gizmo_geometry
 from forge_viewer.types import CameraView
 from forge_viewer.ui import gizmo as gizmo_ui
 from forge_viewer.ui import theme as theme_mod
+from forge_viewer.ui.compound_fields import draw_joined_field_frame
 from forge_viewer.ui.draw2d import ImguiDraw2D
 from forge_viewer.ui.input_bindings import DEFAULT_INPUT_BINDINGS
+from forge_viewer.ui.panels.settings import settings_uses_stacked_layout
 from forge_viewer.ui.theme import THEME, rgb8
 from forge_viewer.ui.viewport_widgets import (
     CAPSULE_SURFACE_ALPHA,
@@ -233,6 +235,13 @@ class ProbeState:
     hint_chord_gap: int = int(OVERLAY_GEOMETRY.hint_chord_gap)
     hint_key_padding_x: int = int(OVERLAY_GEOMETRY.hint_key_padding_x)
     hint_mouse_width: int = int(OVERLAY_GEOMETRY.hint_mouse_width)
+    hint_mouse_stroke: float = OVERLAY_GEOMETRY.hint_mouse_stroke
+    hint_mouse_button_width_ratio: float = OVERLAY_GEOMETRY.hint_mouse_button_width_ratio
+    hint_mouse_button_shell_ratio: float = OVERLAY_GEOMETRY.hint_mouse_button_shell_ratio
+    hint_mouse_button_height_ratio: float = OVERLAY_GEOMETRY.hint_mouse_button_height_ratio
+    hint_mouse_wheel_width_ratio: float = OVERLAY_GEOMETRY.hint_mouse_wheel_width_ratio
+    hint_mouse_wheel_height_ratio: float = OVERLAY_GEOMETRY.hint_mouse_wheel_height_ratio
+    hint_mouse_wheel_gap_ratio: float = OVERLAY_GEOMETRY.hint_mouse_wheel_gap_ratio
 
 
 def _apply_concept_theme(scale: float) -> None:
@@ -492,6 +501,7 @@ def _draw_mouse_input(
     height: float,
     button: str,
     suffix: str,
+    state: ProbeState,
 ) -> float:
     return draw_mouse_hint_glyph(
         draw,
@@ -502,6 +512,18 @@ def _draw_mouse_input(
         CONCEPT_THEME,
         scale,
         size=(width, height),
+        geometry=replace(
+            OVERLAY_GEOMETRY,
+            hint_mouse_width=width,
+            hint_control_height=height,
+            hint_mouse_stroke=state.hint_mouse_stroke,
+            hint_mouse_button_width_ratio=state.hint_mouse_button_width_ratio,
+            hint_mouse_button_shell_ratio=state.hint_mouse_button_shell_ratio,
+            hint_mouse_button_height_ratio=state.hint_mouse_button_height_ratio,
+            hint_mouse_wheel_width_ratio=state.hint_mouse_wheel_width_ratio,
+            hint_mouse_wheel_height_ratio=state.hint_mouse_wheel_height_ratio,
+            hint_mouse_wheel_gap_ratio=state.hint_mouse_wheel_gap_ratio,
+        ),
     )
 
 
@@ -646,6 +668,7 @@ def _draw_hint_bar(
             height=float(state.hint_control_height),
             button=button,
             suffix=suffix,
+            state=state,
         )
         cursor += input_gap
         cursor += _draw_inline_text(draw, cursor, center_y, label, CONCEPT_THEME.text)
@@ -1548,97 +1571,139 @@ def _draw_settings_mujoco(state: ProbeState) -> None:
         )
 
 
-def _draw_settings(size, state: ProbeState) -> None:
+def _draw_settings(size, state: ProbeState, scale: float) -> None:
     if not imgui.begin_child("Settings###ProbeSettings", size, imgui.ChildFlags_.borders.value):
         imgui.end_child()
         return
     imgui.text("Settings")
     imgui.separator()
     available = imgui.get_content_region_avail()
-    nav_width = min(176.0, max(132.0, available.x * 0.22))
-    if imgui.begin_table("##probe-settings-layout", 2, imgui.TableFlags_.borders_inner_v.value):
-        imgui.table_setup_column("categories", imgui.TableColumnFlags_.width_fixed.value, nav_width)
+    categories = ("General", "Interaction", "Rendering", "MuJoCo Visuals")
+    stacked = settings_uses_stacked_layout(available.x, scale)
+    table_open = False
+    if stacked:
+        imgui.set_next_item_width(-1.0)
+        if imgui.begin_combo("##probe-settings-category", categories[state.settings_page]):
+            for index, label in enumerate(categories):
+                clicked, _ = imgui.selectable(
+                    f"{label}##probe-settings-category-{index}",
+                    state.settings_page == index,
+                )
+                if clicked:
+                    state.settings_page = index
+            imgui.end_combo()
+        imgui.spacing()
+    else:
+        nav_width = 132.0 * scale
+        table_open = imgui.begin_table(
+            "##probe-settings-layout",
+            2,
+            imgui.TableFlags_.borders_inner_v.value,
+        )
+        if not table_open:
+            imgui.end_child()
+            return
+        imgui.table_setup_column(
+            "categories",
+            imgui.TableColumnFlags_.width_fixed.value,
+            nav_width,
+        )
         imgui.table_setup_column("page", imgui.TableColumnFlags_.width_stretch.value)
         imgui.table_next_row()
         imgui.table_next_column()
-        categories = ("General", "Interaction", "Rendering", "MuJoCo Visuals")
+        imgui.push_style_var(
+            imgui.StyleVar_.selectable_text_align,
+            imgui.ImVec2(0.5, 0.5),
+        )
         for index, label in enumerate(categories):
             clicked, _ = imgui.selectable(
                 f"{label}##probe-settings-category-{index}", state.settings_page == index
             )
             if clicked:
                 state.settings_page = index
-
+        imgui.pop_style_var()
         imgui.table_next_column()
-        imgui.set_next_item_width(-1.0)
-        if state.settings_filter:
-            imgui.set_next_item_allow_overlap()
-        _, state.settings_filter = imgui.input_text(
-            "##probe-settings-filter", state.settings_filter
+
+    page_open = imgui.begin_child(
+        "##probe-settings-page",
+        imgui.ImVec2(0.0, 0.0),
+        imgui.ChildFlags_.always_use_window_padding.value,
+    )
+    if not page_open:
+        imgui.end_child()
+        if table_open:
+            imgui.end_table()
+        imgui.end_child()
+        return
+    imgui.set_next_item_width(-1.0)
+    if state.settings_filter:
+        imgui.set_next_item_allow_overlap()
+    _, state.settings_filter = imgui.input_text("##probe-settings-filter", state.settings_filter)
+    lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+    cursor_after_input = imgui.get_cursor_screen_pos()
+    icon_color = imgui.color_convert_float4_to_u32(
+        imgui.get_style_color_vec4(imgui.Col_.text_disabled)
+    )
+    radius = max(2.5, (hi.y - lo.y) * 0.16)
+    icon_step = max(radius * 3.6, hi.y - lo.y)
+    center = imgui.ImVec2(hi.x - radius * 2.7, (lo.y + hi.y) * 0.5 - radius * 0.2)
+    draw_list = imgui.get_window_draw_list()
+    draw_list.add_circle(center, radius, icon_color, 12, 1.2)
+    draw_list.add_line(
+        imgui.ImVec2(center.x + radius * 0.70, center.y + radius * 0.70),
+        imgui.ImVec2(center.x + radius * 1.55, center.y + radius * 1.55),
+        icon_color,
+        1.2,
+    )
+    search_lo = imgui.ImVec2(center.x - icon_step * 0.5, lo.y)
+    search_hi = imgui.ImVec2(center.x + icon_step * 0.5, hi.y)
+    if imgui.is_mouse_hovering_rect(search_lo, search_hi):
+        imgui.set_tooltip("Search settings")
+    if state.settings_filter:
+        clear_center = imgui.ImVec2(center.x - icon_step, (lo.y + hi.y) * 0.5)
+        clear_lo = imgui.ImVec2(clear_center.x - icon_step * 0.5, lo.y)
+        clear_hi = imgui.ImVec2(clear_center.x + icon_step * 0.5, hi.y)
+        imgui.set_cursor_screen_pos(clear_lo)
+        clear_clicked = imgui.invisible_button(
+            "##probe-clear-settings-search",
+            imgui.ImVec2(clear_hi.x - clear_lo.x, clear_hi.y - clear_lo.y),
         )
-        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        cursor_after_input = imgui.get_cursor_screen_pos()
-        icon_color = imgui.color_convert_float4_to_u32(
-            imgui.get_style_color_vec4(imgui.Col_.text_disabled)
+        clear_hovered = imgui.is_item_hovered()
+        imgui.set_cursor_screen_pos(cursor_after_input)
+        clear_color = (
+            imgui.color_convert_float4_to_u32(imgui.get_style_color_vec4(imgui.Col_.text))
+            if clear_hovered
+            else icon_color
         )
-        radius = max(2.5, (hi.y - lo.y) * 0.16)
-        icon_step = max(radius * 3.6, hi.y - lo.y)
-        center = imgui.ImVec2(hi.x - radius * 2.7, (lo.y + hi.y) * 0.5 - radius * 0.2)
-        draw_list = imgui.get_window_draw_list()
-        draw_list.add_circle(center, radius, icon_color, 12, 1.2)
+        arm = radius * 0.88
         draw_list.add_line(
-            imgui.ImVec2(center.x + radius * 0.70, center.y + radius * 0.70),
-            imgui.ImVec2(center.x + radius * 1.55, center.y + radius * 1.55),
-            icon_color,
-            1.2,
+            imgui.ImVec2(clear_center.x - arm, clear_center.y - arm),
+            imgui.ImVec2(clear_center.x + arm, clear_center.y + arm),
+            clear_color,
+            1.4,
         )
-        search_lo = imgui.ImVec2(center.x - icon_step * 0.5, lo.y)
-        search_hi = imgui.ImVec2(center.x + icon_step * 0.5, hi.y)
-        if imgui.is_mouse_hovering_rect(search_lo, search_hi):
-            imgui.set_tooltip("Search settings")
-        if state.settings_filter:
-            clear_center = imgui.ImVec2(center.x - icon_step, (lo.y + hi.y) * 0.5)
-            clear_lo = imgui.ImVec2(clear_center.x - icon_step * 0.5, lo.y)
-            clear_hi = imgui.ImVec2(clear_center.x + icon_step * 0.5, hi.y)
-            imgui.set_cursor_screen_pos(clear_lo)
-            clear_clicked = imgui.invisible_button(
-                "##probe-clear-settings-search",
-                imgui.ImVec2(clear_hi.x - clear_lo.x, clear_hi.y - clear_lo.y),
-            )
-            clear_hovered = imgui.is_item_hovered()
-            imgui.set_cursor_screen_pos(cursor_after_input)
-            clear_color = (
-                imgui.color_convert_float4_to_u32(imgui.get_style_color_vec4(imgui.Col_.text))
-                if clear_hovered
-                else icon_color
-            )
-            arm = radius * 0.88
-            draw_list.add_line(
-                imgui.ImVec2(clear_center.x - arm, clear_center.y - arm),
-                imgui.ImVec2(clear_center.x + arm, clear_center.y + arm),
-                clear_color,
-                1.4,
-            )
-            draw_list.add_line(
-                imgui.ImVec2(clear_center.x + arm, clear_center.y - arm),
-                imgui.ImVec2(clear_center.x - arm, clear_center.y + arm),
-                clear_color,
-                1.4,
-            )
-            if clear_hovered:
-                imgui.set_mouse_cursor(imgui.MouseCursor_.hand)
-                imgui.set_tooltip("Clear search")
-            if clear_clicked:
-                state.settings_filter = ""
-        imgui.separator()
-        if state.settings_page == 0:
-            _draw_settings_general(state)
-        elif state.settings_page == 1:
-            _draw_settings_interaction(state)
-        elif state.settings_page == 2:
-            _draw_settings_rendering(state)
-        else:
-            _draw_settings_mujoco(state)
+        draw_list.add_line(
+            imgui.ImVec2(clear_center.x + arm, clear_center.y - arm),
+            imgui.ImVec2(clear_center.x - arm, clear_center.y + arm),
+            clear_color,
+            1.4,
+        )
+        if clear_hovered:
+            imgui.set_mouse_cursor(imgui.MouseCursor_.hand)
+            imgui.set_tooltip("Clear search")
+        if clear_clicked:
+            state.settings_filter = ""
+    imgui.separator()
+    if state.settings_page == 0:
+        _draw_settings_general(state)
+    elif state.settings_page == 1:
+        _draw_settings_interaction(state)
+    elif state.settings_page == 2:
+        _draw_settings_rendering(state)
+    else:
+        _draw_settings_mujoco(state)
+    imgui.end_child()
+    if table_open:
         imgui.end_table()
     imgui.end_child()
 
@@ -2238,9 +2303,14 @@ def _probe_axis_field(
     hovered_color = AXIS_BADGE_HOVERED[axis]
     active_color = AXIS_BADGE_ACTIVE[axis]
     axis_width = 18.0 * scale
-    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(*color))
-    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(*hovered_color))
-    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(*active_color))
+    draw_list = imgui.get_window_draw_list()
+    splitter = imgui.ImDrawListSplitter()
+    splitter.split(draw_list, 2)
+    splitter.set_current_channel(draw_list, 1)
+    transparent = imgui.ImVec4(0.0, 0.0, 0.0, 0.0)
+    imgui.push_style_color(imgui.Col_.button, transparent)
+    imgui.push_style_color(imgui.Col_.button_hovered, transparent)
+    imgui.push_style_color(imgui.Col_.button_active, transparent)
     imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*AXIS_BADGE_TEXT))
     if not editable:
         imgui.push_style_var(imgui.StyleVar_.disabled_alpha, 1.0)
@@ -2256,78 +2326,43 @@ def _probe_axis_field(
     imgui.same_line(0.0, 0.0)
     group_gap = 3.0 * scale if axis < 2 else 0.0
     imgui.set_next_item_width(max(1.0, imgui.get_content_region_avail().x - group_gap))
+    imgui.push_style_color(imgui.Col_.frame_bg, transparent)
+    imgui.push_style_color(imgui.Col_.frame_bg_hovered, transparent)
+    imgui.push_style_color(imgui.Col_.frame_bg_active, transparent)
     imgui.begin_disabled(not editable)
     imgui.drag_float(f"##{item_id}-value", value, 0.01 if editable else 0.0, 0.0, 0.0, fmt)
     imgui.end_disabled()
+    imgui.pop_style_color(3)
     field_hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
     field_active = imgui.is_item_active()
     field_lo, field_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-    _probe_fill_axis_field_seam(
+    splitter.set_current_channel(draw_list, 0)
+    draw_joined_field_frame(
+        draw_list,
         button_lo,
         button_hi,
         field_lo,
         field_hi,
-        color=(
+        badge_color=(
             active_color
             if button_active and editable
             else hovered_color
             if button_hovered and editable
             else color
         ),
-        frame_color=(
+        field_color=(
             CONCEPT_THEME.bg_frame_active
             if field_active
             else CONCEPT_THEME.bg_frame_hovered
             if field_hovered and editable
             else CONCEPT_THEME.bg_frame
         ),
-        editable=editable,
+        rounding=float(imgui.get_style().frame_rounding),
+        badge_opacity=float(imgui.get_style().alpha),
+        field_opacity=float(imgui.get_style().alpha)
+        * (1.0 if editable else float(imgui.get_style().disabled_alpha)),
     )
-
-
-def _probe_fill_axis_field_seam(
-    button_lo,
-    button_hi,
-    field_lo,
-    field_hi,
-    *,
-    color,
-    frame_color,
-    editable: bool,
-) -> None:
-    """Cover the two inner rounded corners so the pair reads as one field."""
-
-    rounding = min(
-        float(imgui.get_style().frame_rounding),
-        max(0.0, (float(button_hi.y) - float(button_lo.y)) * 0.5),
-    )
-    if rounding <= 0.0:
-        return
-    style = imgui.get_style()
-
-    def packed(value, opacity: float) -> int:
-        background = CONCEPT_THEME.bg_popup
-        mixed = tuple(
-            background[index] + (value[index] - background[index]) * opacity for index in range(3)
-        )
-        return imgui.color_convert_float4_to_u32(imgui.ImVec4(*mixed, 1.0))
-
-    draw_list = imgui.get_window_draw_list()
-    draw_list.add_rect_filled(
-        imgui.ImVec2(button_hi.x - rounding, button_lo.y),
-        button_hi,
-        packed(color, float(style.alpha)),
-    )
-    field_opacity = float(style.alpha) * (1.0 if editable else float(style.disabled_alpha))
-    for y0, y1 in (
-        (field_lo.y, field_lo.y + rounding),
-        (field_hi.y - rounding, field_hi.y),
-    ):
-        draw_list.add_rect_filled(
-            imgui.ImVec2(field_lo.x, y0),
-            imgui.ImVec2(field_lo.x + rounding, y1),
-            packed(frame_color, field_opacity),
-        )
+    splitter.merge(draw_list)
 
 
 def _probe_property_vector_row(
@@ -2818,7 +2853,11 @@ def _draw_shell_settings_tab(available, scale: float, state: ProbeState) -> None
         imgui.dummy(imgui.ImVec2(width, height))
     imgui.end_child()
     imgui.same_line()
-    _draw_settings(imgui.ImVec2(available.x - shell_width - spacing.x, available.y), state)
+    _draw_settings(
+        imgui.ImVec2(available.x - shell_width - spacing.x, available.y),
+        state,
+        scale,
+    )
 
 
 def _draw_status_tab(available, scale: float) -> None:
@@ -3088,6 +3127,34 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         )
         _property_label("Mouse width")
         state.hint_mouse_width = _even_slider("##hint-mouse-width", state.hint_mouse_width, 12, 24)
+        _property_label("Mouse stroke")
+        _, state.hint_mouse_stroke = imgui.slider_float(
+            "##hint-mouse-stroke", state.hint_mouse_stroke, 0.75, 2.5, "%.2f px"
+        )
+        _property_label("Button width")
+        _, state.hint_mouse_button_width_ratio = imgui.slider_float(
+            "##hint-button-width", state.hint_mouse_button_width_ratio, 0.30, 0.55, "%.2fx"
+        )
+        _property_label("Button shell")
+        _, state.hint_mouse_button_shell_ratio = imgui.slider_float(
+            "##hint-button-shell", state.hint_mouse_button_shell_ratio, 0.25, 1.25, "%.2fx"
+        )
+        _property_label("Button height")
+        _, state.hint_mouse_button_height_ratio = imgui.slider_float(
+            "##hint-button-height", state.hint_mouse_button_height_ratio, 0.30, 0.55, "%.2fx"
+        )
+        _property_label("Wheel width")
+        _, state.hint_mouse_wheel_width_ratio = imgui.slider_float(
+            "##hint-wheel-width", state.hint_mouse_wheel_width_ratio, 0.18, 0.38, "%.2fx"
+        )
+        _property_label("Wheel height")
+        _, state.hint_mouse_wheel_height_ratio = imgui.slider_float(
+            "##hint-wheel-height", state.hint_mouse_wheel_height_ratio, 0.25, 0.50, "%.2fx"
+        )
+        _property_label("Wheel top gap")
+        _, state.hint_mouse_wheel_gap_ratio = imgui.slider_float(
+            "##hint-wheel-gap", state.hint_mouse_wheel_gap_ratio, 0.10, 0.75, "%.2fx"
+        )
         imgui.end_table()
     hint_height = state.hint_control_height + state.hint_padding_y * 2
     imgui.text_disabled(f"Single row  ·  shell height {hint_height}")
@@ -3112,6 +3179,13 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         state.hint_chord_gap = int(OVERLAY_GEOMETRY.hint_chord_gap)
         state.hint_key_padding_x = int(OVERLAY_GEOMETRY.hint_key_padding_x)
         state.hint_mouse_width = int(OVERLAY_GEOMETRY.hint_mouse_width)
+        state.hint_mouse_stroke = OVERLAY_GEOMETRY.hint_mouse_stroke
+        state.hint_mouse_button_width_ratio = OVERLAY_GEOMETRY.hint_mouse_button_width_ratio
+        state.hint_mouse_button_shell_ratio = OVERLAY_GEOMETRY.hint_mouse_button_shell_ratio
+        state.hint_mouse_button_height_ratio = OVERLAY_GEOMETRY.hint_mouse_button_height_ratio
+        state.hint_mouse_wheel_width_ratio = OVERLAY_GEOMETRY.hint_mouse_wheel_width_ratio
+        state.hint_mouse_wheel_height_ratio = OVERLAY_GEOMETRY.hint_mouse_wheel_height_ratio
+        state.hint_mouse_wheel_gap_ratio = OVERLAY_GEOMETRY.hint_mouse_wheel_gap_ratio
 
     imgui.end_child()
 
@@ -3756,7 +3830,7 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
     viewport_rect = _draw_viewport(imgui.ImVec2(viewport_width, top_height), scale, state)
     if state.show_settings:
         imgui.same_line()
-        _draw_settings(imgui.ImVec2(right_width, top_height), state)
+        _draw_settings(imgui.ImVec2(right_width, top_height), state, scale)
 
     if state.show_keyframes:
         keyframes_width = available.x * 0.63 if state.show_output else available.x

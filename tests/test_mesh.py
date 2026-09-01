@@ -250,3 +250,11 @@ def test_solid_gizmo_ring_widths_match_the_flat_overlay() -> None:
         p = gizmo_mesh(name).positions
         radial = np.linalg.norm(p[:, :2], axis=1)
         assert (radial.max() - radial.min()) * SIZE_PT == pytest.approx(width, abs=1e-5)
+
+
+def test_solid_gizmo_half_ring_has_round_caps() -> None:
+    from forge_viewer.gizmo import RING_TUBE
+
+    points = gizmo_mesh("half_ring").positions
+
+    assert points[:, 1].min() == pytest.approx(-RING_TUBE, abs=1e-6)

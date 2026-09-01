@@ -97,13 +97,79 @@ def _open_polyline_ribbon(
     return left, right, left + tuple(reversed(right))
 
 
+def _capped_polyline_outline(
+    points,
+    width: float,
+    *,
+    round_start: bool,
+    round_end: bool,
+) -> tuple[tuple[float, float], ...]:
+    """Build one non-overlapping silhouette with independent endpoint caps."""
+
+    path = tuple((float(point[0]), float(point[1])) for point in points)
+    left, right, _outline = _open_polyline_ribbon(path, float(width))
+    if not left:
+        return ()
+
+    start_direction = np.asarray(path[1], np.float64) - np.asarray(path[0], np.float64)
+    end_direction = np.asarray(path[-1], np.float64) - np.asarray(path[-2], np.float64)
+    start_direction /= np.linalg.norm(start_direction)
+    end_direction /= np.linalg.norm(end_direction)
+    start_normal = np.array((-start_direction[1], start_direction[0]))
+    end_normal = np.array((-end_direction[1], end_direction[0]))
+    half_width = 0.5 * float(width)
+    cap_segments = max(8, min(16, math.ceil(math.pi * half_width)))
+    angles = np.linspace(0.0, math.pi, cap_segments + 1)
+    if round_end:
+        end = np.asarray(path[-1], np.float64)
+        end_boundary = end + half_width * (
+            end_normal[None, :] * np.cos(angles)[:, None]
+            + end_direction[None, :] * np.sin(angles)[:, None]
+        )
+        end_boundary = tuple(tuple(point) for point in end_boundary[1:])
+    else:
+        end_boundary = (right[-1],)
+    if round_start:
+        start = np.asarray(path[0], np.float64)
+        start_boundary = start + half_width * (
+            -start_normal[None, :] * np.cos(angles)[:, None]
+            - start_direction[None, :] * np.sin(angles)[:, None]
+        )
+        start_boundary = tuple(tuple(point) for point in start_boundary[1:-1])
+    else:
+        start_boundary = ()
+    outline = (
+        *left,
+        *end_boundary,
+        *reversed(right[:-1]),
+        *start_boundary,
+    )
+    # ImGui's concave fill triangulator expects clockwise screen-space input.
+    # The ribbon construction above naturally produces the opposite winding.
+    return (*reversed(outline),)
+
+
+def _round_cap_polyline_outline(points, width: float) -> tuple[tuple[float, float], ...]:
+    """Build one non-overlapping silhouette for an open round-capped stroke."""
+
+    return _capped_polyline_outline(points, width, round_start=True, round_end=True)
+
+
 @runtime_checkable
 class Draw2D(Protocol):
     """Immediate-mode 2D primitives; later calls paint over earlier ones."""
 
-    def line(self, a, b, color, width: float) -> None: ...
+    def line(self, a, b, color, width: float, *, cap: str = "butt") -> None: ...
 
-    def polyline(self, points, color, width: float, *, closed: bool = False) -> None: ...
+    def polyline(
+        self,
+        points,
+        color,
+        width: float,
+        *,
+        closed: bool = False,
+        cap: str = "butt",
+    ) -> None: ...
 
     def convex_fill(self, points, color) -> None: ...
 
@@ -159,10 +225,35 @@ class ImguiDraw2D:
         imgui = self._imgui
         return imgui.color_convert_float4_to_u32(imgui.ImVec4(*(float(c) for c in color)))
 
-    def line(self, a, b, color, width: float) -> None:
+    def line(self, a, b, color, width: float, *, cap: str = "butt") -> None:
+        if cap in {"round", "round_start", "round_end"}:
+            self.polyline((a, b), color, width, cap=cap)
+            return
+        if cap != "butt":
+            raise ValueError(f"unknown line cap: {cap!r}")
         self._dl.add_line(self._vec(a), self._vec(b), self._u32(color), float(width))
 
-    def polyline(self, points, color, width: float, *, closed: bool = False) -> None:
+    def polyline(
+        self,
+        points,
+        color,
+        width: float,
+        *,
+        closed: bool = False,
+        cap: str = "butt",
+    ) -> None:
+        if cap not in {"butt", "round", "round_start", "round_end"}:
+            raise ValueError(f"unknown polyline cap: {cap!r}")
+        if not closed and cap != "butt":
+            outline = _capped_polyline_outline(
+                points,
+                width,
+                round_start=cap in {"round", "round_start"},
+                round_end=cap in {"round", "round_end"},
+            )
+            if outline:
+                self.fringed_concave_fill(outline, color)
+            return
         imgui = self._imgui
         flags = imgui.ImDrawFlags_.closed if closed else imgui.ImDrawFlags_.none
         self._dl.add_polyline(self._vecs(points), self._u32(color), float(width), flags.value)

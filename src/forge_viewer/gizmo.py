@@ -583,6 +583,7 @@ def hit_test(
     mode: GizmoMode,
     style_scale: float = 1.0,
     allowed_handles: int = ALL_HANDLE_MASK,
+    preferred_handle: GizmoHandle = GizmoHandle.NONE,
 ) -> tuple[GizmoHandle, int, int]:
     o = np.asarray(origin, np.float64)
     r = np.asarray(rotation, np.float64).reshape(3, 3)
@@ -651,6 +652,7 @@ def hit_test(
 
     best_distance = RING_HIT_PT * style_scale
     best_handle = GizmoHandle.NONE
+    preferred_distance = float("inf")
     full_axis_ring = sum(allowed(handle) for handle in ROTATE_AXIS_HANDLES) == 1
     for axis, handle in enumerate(ROTATE_AXIS_HANDLES):
         if not allowed(handle):
@@ -665,11 +667,18 @@ def hit_test(
             _segment_distance(p, screen[i, :2], screen[(i + 1) % len(screen), :2])
             for i in range(len(screen) if full_axis_ring else len(screen) - 1)
         )
+        if handle is preferred_handle:
+            preferred_distance = distance
         if distance < best_distance - 1e-6 or (
             abs(distance - best_distance) <= 1e-6 and handle > best_handle
         ):
             best_distance = distance
             best_handle = handle
+    # Axis rings necessarily overlap at their projected crossings. Keep the
+    # current ring while the pointer remains inside its hit tube so sub-pixel
+    # cursor jitter cannot alternate the selected axis from frame to frame.
+    if preferred_distance <= RING_HIT_PT * style_scale:
+        return preferred_handle, axis_mask, plane_mask
     if best_handle is not GizmoHandle.NONE:
         return best_handle, axis_mask, plane_mask
     if allowed(GizmoHandle.ROTATE_TRACKBALL) and (

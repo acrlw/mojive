@@ -16,7 +16,13 @@ from forge_viewer.scene import Scene
 from forge_viewer.session import Session
 from forge_viewer.types import CameraView
 from forge_viewer.ui import viewcube as vc
-from forge_viewer.ui.draw2d import Draw2D, ImguiDraw2D, _anti_alias_fringe_outer
+from forge_viewer.ui.draw2d import (
+    Draw2D,
+    ImguiDraw2D,
+    _anti_alias_fringe_outer,
+    _capped_polyline_outline,
+    _round_cap_polyline_outline,
+)
 from forge_viewer.ui.gizmo import ObjectGizmo
 
 RECT = (0.0, 0.0, 800.0, 600.0)
@@ -80,6 +86,45 @@ def test_fill_fringe_expands_outward_for_both_polygon_windings() -> None:
 
     assert _anti_alias_fringe_outer(square) == pytest.approx(expected)
     assert _anti_alias_fringe_outer(square[::-1]) == pytest.approx(expected[::-1])
+
+
+def test_round_cap_polyline_is_one_capsule_silhouette() -> None:
+    outline = np.asarray(_round_cap_polyline_outline(((0.0, 0.0), (10.0, 0.0)), 4.0))
+
+    assert outline[:, 0].min() == pytest.approx(-2.0)
+    assert outline[:, 0].max() == pytest.approx(12.0)
+    assert outline[:, 1].min() == pytest.approx(-2.0)
+    assert outline[:, 1].max() == pytest.approx(2.0)
+    assert len(outline) > 4
+
+
+def test_asymmetric_cap_polyline_is_flat_at_start_and_round_at_end() -> None:
+    outline = np.asarray(
+        _capped_polyline_outline(
+            ((0.0, 0.0), (10.0, 0.0)),
+            4.0,
+            round_start=False,
+            round_end=True,
+        )
+    )
+
+    assert outline[:, 0].min() == pytest.approx(0.0)
+    assert outline[:, 0].max() == pytest.approx(12.0)
+    assert outline[:, 1].min() == pytest.approx(-2.0)
+    assert outline[:, 1].max() == pytest.approx(2.0)
+
+
+def test_round_cap_polyline_keeps_clockwise_screen_winding_for_a_reflex_arc() -> None:
+    angles = np.linspace(0.0, np.radians(240.0), 80)
+    path = np.column_stack((100.0 * np.cos(angles), 100.0 * np.sin(angles)))
+
+    outline = np.asarray(_round_cap_polyline_outline(path, 4.0))
+    signed_area = 0.5 * np.sum(
+        outline[:, 0] * np.roll(outline[:, 1], -1) - outline[:, 1] * np.roll(outline[:, 0], -1)
+    )
+
+    assert signed_area > 0.0
+    assert signed_area == pytest.approx(np.radians(240.0) * 100.0 * 4.0, rel=0.02)
 
 
 def test_flat_gizmo_submits_handles_in_painter_order() -> None:

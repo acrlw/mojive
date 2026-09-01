@@ -35,6 +35,7 @@ from forge_viewer.ui.viewport_widgets import (
     format_simulation_time,
     hint_size,
     mouse_button_geometry,
+    mouse_wheel_geometry,
     playback_size,
     tool_column_size,
     tool_hints_size,
@@ -305,7 +306,19 @@ def test_frame_arrows_use_separate_axis_shafts_and_triangular_heads():
     for edges in head_edges[1:]:
         assert edges == pytest.approx(head_edges[0])
     assert areas == pytest.approx([areas[0]] * 3)
-    assert all(line[0][0] == center for line in draw.lines)
+    expected_start = (
+        OVERLAY_GEOMETRY.frame_center_shell_radius * TOOL_GLYPH_SCALE
+        + OVERLAY_GEOMETRY.tool_stroke * 0.5
+    )
+    assert all(
+        math.dist(line[0][0], center) == pytest.approx(expected_start) for line in draw.lines
+    )
+    assert len(draw.filled_circles) == 1
+    center_args, center_kwargs = draw.filled_circles[0]
+    assert center_args[0] == center
+    assert center_args[1] == pytest.approx(OVERLAY_GEOMETRY.frame_center_radius * TOOL_GLYPH_SCALE)
+    assert center_args[2] == (1.0, 1.0, 1.0, 1.0)
+    assert center_kwargs["segments"] == 16
     assert draw.fills[1][0][1] == pytest.approx(draw.fills[2][0][1])
 
 
@@ -556,19 +569,86 @@ def test_mouse_hint_button_replaces_its_part_of_the_blender_style_shell(
         assert shell_points[-1] == pytest.approx((x + mouse_width, button_bottom + shell_gap))
 
 
-@pytest.mark.parametrize("scale", (1.0, 2.0, 2.25))
-def test_mouse_wheel_is_shifted_down_one_fixed_pixel(scale: float) -> None:
+@pytest.mark.parametrize(
+    ("scale", "pixel_size"),
+    ((1.0, 1.0), (1.0, 0.5), (2.0, 1.0), (4.0, 1.0)),
+)
+def test_mouse_wheel_uses_a_quarter_stroke_gap_with_a_physical_pixel_minimum(
+    scale: float,
+    pixel_size: float,
+) -> None:
     from forge_viewer.ui.theme import THEME
 
     draw = _RecordedMouse()
-    draw_mouse_hint_glyph(draw, 10.0, 30.0, "wheel", "", THEME, scale)
+    draw_mouse_hint_glyph(
+        draw,
+        10.0,
+        30.0,
+        "wheel",
+        "",
+        THEME,
+        scale,
+        pixel_size=pixel_size,
+    )
 
     shell_lo, _shell_hi = draw.rects[0][0][:2]
     wheel_args, wheel_kwargs = draw.filled_rects[0]
     wheel_lo, wheel_hi = wheel_args[:2]
-    assert wheel_lo[1] == pytest.approx(shell_lo[1] + 1.35 * scale + 1.0)
-    assert wheel_hi[1] - wheel_lo[1] == pytest.approx(7.0 * scale)
-    assert wheel_kwargs["rounding"] == pytest.approx(1.2 * scale)
+    stroke = OVERLAY_GEOMETRY.hint_mouse_stroke * scale
+    expected_gap = max(stroke * OVERLAY_GEOMETRY.hint_mouse_wheel_gap_ratio, pixel_size)
+    assert wheel_lo[1] == pytest.approx(shell_lo[1] + stroke * 0.5 + expected_gap)
+    assert wheel_hi[1] - wheel_lo[1] == pytest.approx(
+        OVERLAY_GEOMETRY.hint_control_height
+        * scale
+        * OVERLAY_GEOMETRY.hint_mouse_wheel_height_ratio
+    )
+    assert wheel_kwargs["rounding"] == pytest.approx(
+        OVERLAY_GEOMETRY.hint_mouse_width
+        * scale
+        * OVERLAY_GEOMETRY.hint_mouse_wheel_width_ratio
+        * 0.42
+    )
+
+
+def test_mouse_wheel_geometry_scales_after_the_physical_gap_floor_is_inactive() -> None:
+    geometry = mouse_wheel_geometry(
+        10.0,
+        20.0,
+        14.0,
+        18.0,
+        outline_width=5.0,
+        pixel_size=0.5,
+    )
+    scaled = mouse_wheel_geometry(
+        30.0,
+        60.0,
+        42.0,
+        54.0,
+        outline_width=15.0,
+        pixel_size=0.5,
+    )
+
+    assert geometry.gap == pytest.approx(1.25)
+    assert scaled.gap == pytest.approx(3.75)
+    assert scaled.lo == pytest.approx(tuple(value * 3.0 for value in geometry.lo))
+    assert scaled.hi == pytest.approx(tuple(value * 3.0 for value in geometry.hi))
+
+    custom = replace(
+        OVERLAY_GEOMETRY,
+        hint_mouse_wheel_width_ratio=0.36,
+        hint_mouse_wheel_gap_ratio=0.5,
+    )
+    customized = mouse_wheel_geometry(
+        10.0,
+        20.0,
+        14.0,
+        18.0,
+        outline_width=5.0,
+        pixel_size=0.5,
+        geometry=custom,
+    )
+    assert customized.hi[0] - customized.lo[0] == pytest.approx(14.0 * 0.36)
+    assert customized.gap == pytest.approx(2.5)
 
 
 def test_toolhint_separates_each_group_with_one_subtle_short_rule():

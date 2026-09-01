@@ -28,6 +28,7 @@ help:
 		'  make ui-feasibility    interactive M1-M18 UI feasibility probe' \
 		'  make ui-gallery        deterministic UI feasibility acceptance pages' \
 		'  make tool-icons        transparent 1024px Tool Column icon sources' \
+		'  make mouse-icons       black/transparent 1024px mouse hint sources' \
 		'  make gizmo             2D/3D position/rotation gizmo' \
 		'  make joint-gizmo       numbered joint-gizmo acceptance scene' \
 		'  make primitive-authoring  fixed transforms and primitive dimensions' \
@@ -229,6 +230,10 @@ ui-runtime:
 ## Export production Tool Column geometry on transparent 1024px canvases.
 tool-icons:
 	$(PY) -m forge_viewer.tools.tool_icons $(ARGS)
+
+## Export production mouse hint geometry with black and transparent shells.
+mouse-icons:
+	$(PY) -m forge_viewer.tools.mouse_hint_icons $(ARGS)
 
 ## Profile production viewport chrome and enforce its incremental frame budget.
 ui-frame-profile:

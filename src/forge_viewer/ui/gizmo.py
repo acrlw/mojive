@@ -133,8 +133,14 @@ def _joint_drag_label_color(state: _JointRangeState | None, *, active: bool = Fa
 
     if active:
         return ACTIVE_HANDLE_COLOR
+    return _joint_endpoint_color(state) or JOINT_CURRENT_COLOR
+
+
+def _joint_endpoint_color(state: _JointRangeState | None):
+    """Return the semantic limit color only while a scalar joint is clamped."""
+
     if state is None:
-        return JOINT_CURRENT_COLOR
+        return None
     tolerance = max(
         _JOINT_RANGE_EPSILON,
         abs(float(state.upper) - float(state.lower)) * 1e-6,
@@ -143,7 +149,33 @@ def _joint_drag_label_color(state: _JointRangeState | None, *, active: bool = Fa
         return JOINT_LOWER_LIMIT_COLOR
     if float(state.current) >= float(state.upper) - tolerance:
         return JOINT_UPPER_LIMIT_COLOR
-    return JOINT_CURRENT_COLOR
+    return None
+
+
+def _joint_current_tick_color(state: _JointRangeState, range_color):
+    """Match the range stroke except when the current value reaches a limit."""
+
+    endpoint_color = _joint_endpoint_color(state)
+    if endpoint_color is None:
+        return tuple(float(channel) for channel in range_color)
+    return (
+        float(endpoint_color[0]),
+        float(endpoint_color[1]),
+        float(endpoint_color[2]),
+        float(range_color[3]),
+    )
+
+
+def _revolute_tick_underlap(tick, style_scale: float) -> tuple[np.ndarray, np.ndarray]:
+    """Hide a radial tick's flat inner seam beneath half of the range stroke."""
+
+    start, end = (np.asarray(point, np.float64) for point in tick)
+    direction = end - start
+    length = float(np.linalg.norm(direction))
+    if length < 1e-6:
+        return start, end
+    inset = 0.5 * JOINT_RANGE_WIDTH_PT * float(style_scale)
+    return start - direction * (inset / length), end
 
 
 def joint_slide_arrow_polygons(
@@ -952,6 +984,7 @@ class ObjectGizmo:
             mode,
             self._style_scale,
             self._handle_mask,
+            self._hovered,
         )
         return self._hovered
 
@@ -1242,12 +1275,29 @@ class ObjectGizmo:
             screen = project(cam, ring, rect)
             if np.any(screen[:, 2] <= 0.0):
                 continue
-            overlay.polyline(
+            ring_color = rotation_handle_color(frame, handle, axis, alpha)
+            ring_width = RING_WIDTH_PT * style_scale
+            if full:
+                overlay.polyline(
+                    screen[:, :2],
+                    ring_color,
+                    ring_width,
+                    closed=True,
+                )
+                continue
+            stroke = _rotation_arc_stroke(
                 screen[:, :2],
-                rotation_handle_color(frame, handle, axis, alpha),
-                RING_WIDTH_PT * style_scale,
-                closed=full,
+                None,
+                None,
+                ring_width,
+                round_caps=True,
             )
+            if len(stroke):
+                # Submit the translucent ribbon and both caps as one fill so
+                # their overlap cannot accumulate alpha at either endpoint.
+                overlay.fringed_concave_fill(stroke, ring_color)
+            else:
+                overlay.polyline(screen[:, :2], ring_color, ring_width, cap="round")
 
         if GizmoHandle.ROTATE_SCREEN in visible and not (
             frame.active_rotation_overlay and frame.active is GizmoHandle.ROTATE_SCREEN
@@ -1297,6 +1347,13 @@ class ObjectGizmo:
         base = self._handle_color(axis)
         return base, axis_active_color(base), axis_dark_color(base)
 
+    def _hinge_range_color(self):
+        if self._active is GizmoHandle.ROTATE_Z:
+            return ACTIVE_HANDLE_COLOR
+        if self._interactive and self._hovered is GizmoHandle.ROTATE_Z:
+            return axis_hover_color(JOINT_RANGE_COLOR)
+        return JOINT_RANGE_COLOR
+
     def _hot(self, handle: GizmoHandle) -> bool:
         return self._active is handle or (self._interactive and self._hovered is handle)
 
@@ -1345,12 +1402,8 @@ class ObjectGizmo:
         span = state.angular_span
         start_angle = state.lower
         full_range = state.covers_full_turn
-        if self._active is GizmoHandle.ROTATE_Z:
-            allowed_color = ACTIVE_HANDLE_COLOR
-        elif self._interactive and self._hovered is GizmoHandle.ROTATE_Z:
-            allowed_color = axis_hover_color(JOINT_RANGE_COLOR)
-        else:
-            allowed_color = JOINT_RANGE_COLOR
+        allowed_color = self._hinge_range_color()
+        range_color = _with_alpha(allowed_color, alpha)
         if phase != "labels" and span > 1e-6:
             point_count = max(2, int(np.ceil(segments * span / _FULL_TURN)) + 1)
             allowed_angles = np.linspace(
@@ -1363,9 +1416,10 @@ class ObjectGizmo:
             if np.all(allowed[:, 2] > 0.0):
                 overlay.polyline(
                     allowed[:, :2],
-                    _with_alpha(allowed_color, alpha),
+                    range_color,
                     JOINT_RANGE_WIDTH_PT * style_scale,
                     closed=full_range,
+                    cap="butt",
                 )
         if phase != "labels":
             current_tick = dial.tick(
@@ -1374,17 +1428,13 @@ class ObjectGizmo:
                 JOINT_CURRENT_TICK_PT * style_scale,
             )
             if current_tick is not None:
+                current_tick = _revolute_tick_underlap(current_tick, style_scale)
                 overlay.line(
                     current_tick[0],
                     current_tick[1],
-                    _with_alpha(
-                        _joint_drag_label_color(
-                            state,
-                            active=self._active is GizmoHandle.ROTATE_Z,
-                        ),
-                        alpha,
-                    ),
-                    4.0 * style_scale,
+                    _joint_current_tick_color(state, range_color),
+                    JOINT_RANGE_WIDTH_PT * style_scale,
+                    cap="round_end",
                 )
             if not state.has_ambiguous_dial_limits:
                 self._draw_hinge_limit(
@@ -1542,8 +1592,15 @@ class ObjectGizmo:
         tick = dial.tick(JOINT_RANGE_RADIUS, angle, JOINT_LIMIT_TICK_PT * style_scale)
         if tick is None:
             return None
+        tick = _revolute_tick_underlap(tick, style_scale)
         if draw_tick:
-            overlay.line(tick[0], tick[1], limit_color, 3.0 * style_scale)
+            overlay.line(
+                tick[0],
+                tick[1],
+                limit_color,
+                3.0 * style_scale,
+                cap="round_end",
+            )
         if not draw_label:
             return None
         return _draw_joint_value_label(
@@ -1580,10 +1637,6 @@ class ObjectGizmo:
         range_color = self._flat_color(GizmoHandle.Z, 2, alpha)
         lower_color = _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha)
         upper_color = _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha)
-        current_color = _with_alpha(
-            _joint_drag_label_color(state, active=self._active is GizmoHandle.Z),
-            alpha,
-        )
         lower, current, upper = slide.lower, slide.current, slide.upper
         tangent, normal = slide.tangent, slide.normal
         if phase != "labels":
@@ -1607,13 +1660,15 @@ class ObjectGizmo:
                     point + normal * half_tick,
                     limit_color,
                     3.0 * style_scale,
+                    cap="round",
                 )
             if not (self._using and self._active is GizmoHandle.Z and not self._snapping):
                 overlay.line(
                     current - normal * 10.0 * style_scale,
                     current + normal * 10.0 * style_scale,
-                    current_color,
-                    4.0 * style_scale,
+                    _joint_current_tick_color(state, range_color),
+                    JOINT_RANGE_WIDTH_PT * style_scale,
+                    cap="round",
                 )
         if phase != "geometry":
             lower_label = _joint_limit_label("MIN", state.lower, "slide")
@@ -1823,7 +1878,13 @@ class ObjectGizmo:
                 continue
             tick_color = color(HOVER_COLOR if is_active else (*axis_color, 1.0), alpha)
             for start, end in _split_segment_around_point(a, b, current[:2], mask_radius):
-                overlay.line(start, end, tick_color, (2.2 if is_active else 1.2) * style_scale)
+                overlay.line(
+                    start,
+                    end,
+                    tick_color,
+                    (2.2 if is_active else 1.2) * style_scale,
+                    cap="round",
+                )
 
     def _draw_rotation_snap_ticks(
         self,
@@ -1896,6 +1957,8 @@ class ObjectGizmo:
                 continue
             segment = tick_segment(angle, _rotation_tick_length_pt(degrees))
             if segment is not None:
+                if limited_hinge:
+                    segment = _revolute_tick_underlap(segment, style_scale)
                 ticks.append(segment)
 
         active_tick = None
@@ -1915,7 +1978,13 @@ class ObjectGizmo:
                 )
 
         for inner, outer in ticks:
-            overlay.line(inner, outer, core, 1.1 * style_scale)
+            overlay.line(
+                inner,
+                outer,
+                core,
+                1.1 * style_scale,
+                cap="round_end" if limited_hinge else "round",
+            )
         if active_tick is not None:
             _fill, pressed, _dark = self._active_rotation_palette()
             overlay.line(
@@ -1923,6 +1992,7 @@ class ObjectGizmo:
                 active_tick[1],
                 _with_alpha(pressed, projection_alpha),
                 2.2 * style_scale,
+                cap="round",
             )
 
     def _draw_rotation_axis_guide(
@@ -2033,12 +2103,17 @@ class ObjectGizmo:
                 start + normal * start_half_tick,
                 color,
                 JOINT_RANGE_WIDTH_PT * style_scale,
+                cap="round",
             )
+        end_color = ACTIVE_HANDLE_COLOR
+        if self._joint_range is not None and self._joint_range.joint_type == "slide":
+            end_color = _joint_current_tick_color(self._joint_range, end_color)
         overlay.line(
             end - normal * end_half_tick,
             end + normal * end_half_tick,
-            ACTIVE_HANDLE_COLOR,
+            end_color,
             4.0 * style_scale,
+            cap="round",
         )
 
     def _publish_translation_guide(self, backend: Any, ui_scale: float) -> None:
@@ -2204,13 +2279,21 @@ class ObjectGizmo:
         width_f, height_f = overlay.text_size(self._label)
         if self._active_joint is None or self._active is GizmoHandle.ROTATE_TRACKBALL:
             semantic_color = None
+        elif self._joint_range is not None:
+            state = self._joint_range
+            if state.joint_type == "hinge":
+                alpha = rotation_ring_alpha(cam, self._start_pos, self._axis)
+                range_color = _with_alpha(self._hinge_range_color(), alpha)
+            else:
+                origin = np.asarray(self._frame.position, np.float64)
+                axis = np.asarray(self._frame.rotation, np.float64).reshape(3, 3)[:, 2]
+                alpha = axis_handle_alpha(cam, origin, axis)
+                range_color = self._flat_color(GizmoHandle.Z, 2, alpha)
+            semantic_color = _joint_current_tick_color(state, range_color)
         elif self._active in ROTATE_AXIS_HANDLES and self._joint_range is None:
             _fill, semantic_color, _dark = self._active_rotation_palette()
         else:
-            semantic_color = _joint_drag_label_color(
-                self._joint_range,
-                active=self._joint_range is not None,
-            )
+            semantic_color = _joint_drag_label_color(None)
         dot_radius = 3.0 * style_scale if semantic_color is not None else 0.0
         dot_gap = 6.0 * style_scale if semantic_color is not None else 0.0
         prefix_width = dot_radius * 2.0 + dot_gap
@@ -2890,8 +2973,15 @@ def _rotation_tick_length_pt(degrees: float) -> float:
     return 4.0
 
 
-def _rotation_arc_stroke(points, start_radial, end_radial, width: float) -> np.ndarray:
-    """Build a constant-width arc whose flat caps follow projected dial radii."""
+def _rotation_arc_stroke(
+    points,
+    start_radial,
+    end_radial,
+    width: float,
+    *,
+    round_caps: bool = False,
+) -> np.ndarray:
+    """Build one constant-width arc silhouette with flat or round caps."""
     points = np.asarray(points, np.float64).reshape(-1, 2)
     width = float(width)
     if len(points) < 2 or width <= 0.0:
@@ -2933,6 +3023,25 @@ def _rotation_arc_stroke(points, start_radial, end_radial, width: float) -> np.n
     half_width = 0.5 * width
     side_a = points - offsets * half_width
     side_b = points + offsets * half_width
+    if round_caps:
+        cap_segments = max(8, int(np.ceil(np.pi * half_width)))
+        angles = np.linspace(0.0, np.pi, cap_segments + 1)
+        end_cap = points[-1] + half_width * (
+            -offsets[-1][None, :] * np.cos(angles)[:, None]
+            + tangents[-1][None, :] * np.sin(angles)[:, None]
+        )
+        start_cap = points[0] + half_width * (
+            offsets[0][None, :] * np.cos(angles)[:, None]
+            - tangents[0][None, :] * np.sin(angles)[:, None]
+        )
+        return np.vstack(
+            (
+                side_a,
+                end_cap[1:],
+                side_b[-2::-1],
+                start_cap[1:-1],
+            )
+        )
     return np.vstack((side_a, side_b[::-1]))
 
 

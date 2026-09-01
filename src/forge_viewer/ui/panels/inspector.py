@@ -25,6 +25,7 @@ from ...adapters.base import (
 )
 from ...render.backend import RenderFlag
 from ...types import DEFAULT_HEADLIGHT, Environment, LightType, MeshShape, TextureType
+from ..compound_fields import draw_joined_field_frame
 from . import (
     Panel,
     PanelContext,
@@ -3437,9 +3438,14 @@ def _axis_field(
         max(1.0, imgui.get_content_region_avail().x * 0.4),
     )
 
-    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(*color))
-    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(*hovered_color))
-    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(*active_color))
+    draw_list = imgui.get_window_draw_list()
+    splitter = imgui.ImDrawListSplitter()
+    splitter.split(draw_list, 2)
+    splitter.set_current_channel(draw_list, 1)
+    transparent = imgui.ImVec4(0.0, 0.0, 0.0, 0.0)
+    imgui.push_style_color(imgui.Col_.button, transparent)
+    imgui.push_style_color(imgui.Col_.button_hovered, transparent)
+    imgui.push_style_color(imgui.Col_.button_active, transparent)
     imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 1.0, 1.0, 1.0))
     if not editable:
         imgui.push_style_var(imgui.StyleVar_.disabled_alpha, 1.0)
@@ -3461,16 +3467,21 @@ def _axis_field(
     group_gap = 5.0 * ctx.style_scale if grouped and axis < 2 else 0.0
     imgui.same_line(0.0, 0.0)
     imgui.set_next_item_width(max(1.0, imgui.get_content_region_avail().x - group_gap))
+    imgui.push_style_color(imgui.Col_.frame_bg, transparent)
+    imgui.push_style_color(imgui.Col_.frame_bg_hovered, transparent)
+    imgui.push_style_color(imgui.Col_.frame_bg_active, transparent)
     imgui.begin_disabled(not editable)
     edited, next_value = imgui.drag_float(
         f"##{name}_{axis}_{node.node_id}", value, speed, lo, hi, fmt
     )
     imgui.end_disabled()
+    imgui.pop_style_color(3)
     field_hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
     field_active = imgui.is_item_active()
     field_lo, field_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-    _fill_axis_field_seam(
-        ctx,
+    splitter.set_current_channel(draw_list, 0)
+    draw_joined_field_frame(
+        draw_list,
         button_lo,
         button_hi,
         field_lo,
@@ -3489,8 +3500,12 @@ def _axis_field(
             if field_hovered and editable
             else ctx.theme.bg_frame
         ),
-        editable=editable,
+        rounding=float(imgui.get_style().frame_rounding),
+        badge_opacity=float(imgui.get_style().alpha),
+        field_opacity=float(imgui.get_style().alpha)
+        * (1.0 if editable else float(imgui.get_style().disabled_alpha)),
     )
+    splitter.merge(draw_list)
     if field_hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
         imgui.set_clipboard_text(fmt % value)
     if field_hovered:
@@ -3502,52 +3517,6 @@ def _axis_field(
         imgui.set_tooltip(hint)
 
     return reset, edited, next_value
-
-
-def _fill_axis_field_seam(
-    ctx: PanelContext,
-    button_lo,
-    button_hi,
-    field_lo,
-    field_hi,
-    *,
-    badge_color,
-    field_color,
-    editable: bool,
-) -> None:
-    """Square the joined edges while preserving only the pair's outer corners."""
-
-    rounding = min(
-        float(imgui.get_style().frame_rounding),
-        max(0.0, (float(button_hi.y) - float(button_lo.y)) * 0.5),
-    )
-    if rounding <= 0.0:
-        return
-    style = imgui.get_style()
-
-    def packed(value, opacity: float) -> int:
-        background = ctx.theme.bg_popup
-        mixed = tuple(
-            background[index] + (value[index] - background[index]) * opacity for index in range(3)
-        )
-        return imgui.color_convert_float4_to_u32(imgui.ImVec4(*mixed, 1.0))
-
-    draw_list = imgui.get_window_draw_list()
-    draw_list.add_rect_filled(
-        imgui.ImVec2(button_hi.x - rounding, button_lo.y),
-        button_hi,
-        packed(badge_color, float(style.alpha)),
-    )
-    field_opacity = float(style.alpha) * (1.0 if editable else float(style.disabled_alpha))
-    for y0, y1 in (
-        (field_lo.y, field_lo.y + rounding),
-        (field_hi.y - rounding, field_hi.y),
-    ):
-        draw_list.add_rect_filled(
-            imgui.ImVec2(field_lo.x, y0),
-            imgui.ImVec2(field_lo.x + rounding, y1),
-            packed(field_color, field_opacity),
-        )
 
 
 def _format_vector(values) -> str:
