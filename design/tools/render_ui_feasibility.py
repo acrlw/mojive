@@ -31,10 +31,10 @@ from forge_viewer.ui.viewport_widgets import (
     TOOL_GLYPH_SCALE,
     capsule_points,
     default_tool_hints,
+    draw_mouse_hint_glyph,
     draw_playback_glyph,
     draw_status,
     draw_tool_glyph,
-    mouse_button_fill_geometry,
 )
 from forge_viewer.ui.window import Window, WindowConfig
 
@@ -493,45 +493,16 @@ def _draw_mouse_input(
     button: str,
     suffix: str,
 ) -> float:
-    width, height = width * scale, height * scale
-    y = center_y - height * 0.5
-    corner_radius = min(width * 0.22, height * 0.18)
-
-    outline_width = 1.25 * scale
-    button_fill = mouse_button_fill_geometry(
+    return draw_mouse_hint_glyph(
+        draw,
         x,
-        y,
-        width,
-        height,
+        center_y,
         button,
-        outline_width=outline_width,
-        safety_inset=0.85 * scale,
+        suffix,
+        CONCEPT_THEME,
+        scale,
+        size=(width, height),
     )
-    draw.rect(
-        (x, y),
-        (x + width, y + height),
-        CONCEPT_THEME.text,
-        outline_width,
-        rounding=corner_radius,
-    )
-    if button_fill is not None:
-        mask, fill = button_fill
-        draw.convex_fill(mask, (*CONCEPT_THEME.bg_child[:3], 1.0))
-        draw.convex_fill(fill, CONCEPT_THEME.primary)
-    wheel_lo = (x + width * 0.36, y + 1.35 * scale)
-    wheel_hi = (x + width * 0.64, y + 8.35 * scale)
-    if button == "wheel":
-        draw.rect_filled(
-            wheel_lo,
-            wheel_hi,
-            CONCEPT_THEME.primary,
-            rounding=1.2 * scale,
-        )
-    if not suffix:
-        return width
-    label_x = x + width + 5.0 * scale
-    label_width = _draw_inline_text(draw, label_x, center_y, suffix, CONCEPT_THEME.primary_bright)
-    return width + 5.0 * scale + label_width
 
 
 def _keycap(

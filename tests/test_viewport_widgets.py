@@ -34,7 +34,7 @@ from forge_viewer.ui.viewport_widgets import (
     format_simulation_steps,
     format_simulation_time,
     hint_size,
-    mouse_button_fill_geometry,
+    mouse_button_geometry,
     playback_size,
     tool_column_size,
     tool_hints_size,
@@ -479,6 +479,7 @@ class _RecordedMouse(_MeasuredText):
     def __init__(self):
         self.rects = []
         self.lines = []
+        self.polylines = []
         self.filled_rects = []
         self.convex_fills = []
         self.events = []
@@ -489,6 +490,10 @@ class _RecordedMouse(_MeasuredText):
 
     def line(self, *args, **kwargs):
         self.lines.append((args, kwargs))
+
+    def polyline(self, *args, **kwargs):
+        self.polylines.append((args, kwargs))
+        self.events.append("shell")
 
     def rect_filled(self, *args, **kwargs):
         self.filled_rects.append((args, kwargs))
@@ -513,39 +518,42 @@ def test_mouse_hint_button_replaces_its_part_of_the_blender_style_shell(
     width = draw_mouse_hint_glyph(draw, 10.0, 30.0, button, "", THEME, scale)
 
     assert width == pytest.approx(OVERLAY_GEOMETRY.hint_mouse_width * scale)
-    shell_args, shell_kwargs = draw.rects[0]
-    shell_width = shell_args[1][0] - shell_args[0][0]
-    shell_height = shell_args[1][1] - shell_args[0][1]
-    assert shell_width / shell_height == pytest.approx(14.0 / 18.0)
-    assert shell_kwargs["rounding"] < shell_width * 0.25
+    assert draw.rects == []
     assert draw.lines == []
-    assert len(draw.convex_fills) == 2
-    assert draw.events == ["shell", "fill", "fill"]
-    mask_args, _mask_kwargs = draw.convex_fills[0]
-    fill_args, _fill_kwargs = draw.convex_fills[1]
-    shell_lo, shell_hi = shell_args[:2]
-    mask_points, mask_color = mask_args
-    points, fill_color = fill_args
-    xs = [point[0] for point in points]
-    ys = [point[1] for point in points]
-    mask_xs = [point[0] for point in mask_points]
-    mask_ys = [point[1] for point in mask_points]
-    assert mask_color == (*THEME.bg_child[:3], 1.0)
+    assert len(draw.polylines) == 1
+    assert len(draw.convex_fills) == 1
+    assert draw.events == ["shell", "fill"]
+    shell_args, shell_kwargs = draw.polylines[0]
+    fill_args, _fill_kwargs = draw.convex_fills[0]
+    shell_points, shell_color, shell_stroke = shell_args
+    fill_points, fill_color = fill_args
+    assert shell_kwargs == {}
+    assert shell_color == THEME.text
+    assert shell_stroke == pytest.approx(OVERLAY_GEOMETRY.hint_mouse_stroke * scale)
     assert fill_color == THEME.primary
-    assert min(ys) - min(mask_ys) == pytest.approx(1.0)
-    assert min(mask_ys) < shell_lo[1]
-    seam_y = shell_lo[1] + shell_height * 0.40
-    assert max(mask_ys) > seam_y > max(ys)
+
+    x = 10.0
+    mouse_width = OVERLAY_GEOMETRY.hint_mouse_width * scale
+    mouse_height = OVERLAY_GEOMETRY.hint_control_height * scale
+    mouse_y = 30.0 - mouse_height * 0.5
+    half_stroke = shell_stroke * 0.5
+    shell_gap = shell_stroke * OVERLAY_GEOMETRY.hint_mouse_button_shell_ratio
+    button_width = (mouse_width + shell_stroke) * OVERLAY_GEOMETRY.hint_mouse_button_width_ratio
+    button_bottom = mouse_y + mouse_height * OVERLAY_GEOMETRY.hint_mouse_button_height_ratio
+    fill_xs = [point[0] for point in fill_points]
+    fill_ys = [point[1] for point in fill_points]
+    assert min(fill_ys) == pytest.approx(mouse_y - half_stroke)
+    assert max(fill_ys) == pytest.approx(button_bottom)
     if button == "left":
-        assert min(xs) - min(mask_xs) == pytest.approx(1.0)
-        assert min(mask_xs) < shell_lo[0]
-        assert max(mask_xs) > max(xs)
-        assert max(mask_xs) < (shell_lo[0] + shell_hi[0]) * 0.5
+        assert min(fill_xs) == pytest.approx(x - half_stroke)
+        assert max(fill_xs) - min(fill_xs) == pytest.approx(button_width)
+        assert shell_points[0] == pytest.approx((max(fill_xs) + shell_gap, mouse_y))
+        assert shell_points[-1] == pytest.approx((x, button_bottom + shell_gap))
     else:
-        assert max(mask_xs) - max(xs) == pytest.approx(1.0)
-        assert max(mask_xs) > shell_hi[0]
-        assert min(mask_xs) < min(xs)
-        assert min(mask_xs) > (shell_lo[0] + shell_hi[0]) * 0.5
+        assert max(fill_xs) == pytest.approx(x + mouse_width + half_stroke)
+        assert max(fill_xs) - min(fill_xs) == pytest.approx(button_width)
+        assert shell_points[0] == pytest.approx((min(fill_xs) - shell_gap, mouse_y))
+        assert shell_points[-1] == pytest.approx((x + mouse_width, button_bottom + shell_gap))
 
 
 @pytest.mark.parametrize("scale", (1.0, 2.0, 2.25))
@@ -732,68 +740,39 @@ def test_simulation_metric_keeps_an_exact_clipboard_value():
     assert exact == "65.125 s"
 
 
-@pytest.mark.parametrize("button", ("left", "right"))
-def test_mouse_button_mask_covers_its_shell_edge_but_keeps_inner_gaps(button):
+def test_mouse_button_geometry_is_mirrored_and_scales_without_pixel_corrections():
     x, y, width, height = 13.0, 17.0, 17.5, 22.5
     outline_width = 1.7
-    safety = 0.2
-    geometry = mouse_button_fill_geometry(
-        x,
-        y,
-        width,
-        height,
-        button,
-        outline_width=outline_width,
-        safety_inset=safety,
+    left = mouse_button_geometry(x, y, width, height, "left", outline_width=outline_width)
+    right = mouse_button_geometry(x, y, width, height, "right", outline_width=outline_width)
+    assert left is not None and right is not None
+    assert _polygon_area(left.fill) > 0.0
+    assert _polygon_area(right.fill) == pytest.approx(_polygon_area(left.fill))
+    mirror_x = x * 2.0 + width
+    assert all(
+        actual == pytest.approx((mirror_x - px, py))
+        for actual, (px, py) in zip(right.visible_shell, left.visible_shell, strict=True)
     )
-    assert geometry is not None
-    mask, fill = geometry
-    mask_xs = [point[0] for point in mask]
-    mask_ys = [point[1] for point in mask]
-    xs = [point[0] for point in fill]
-    ys = [point[1] for point in fill]
-    assert min(ys) - min(mask_ys) == pytest.approx(1.0)
-    assert min(mask_ys) < y
-    seam_y = y + height * 0.40
-    assert max(mask_ys) > seam_y > max(ys)
-    if button == "left":
-        assert min(xs) - min(mask_xs) == pytest.approx(1.0)
-        assert min(mask_xs) < x
-        assert max(mask_xs) > max(xs)
-        assert max(mask_xs) < x + width * 0.5
-    else:
-        assert max(mask_xs) - max(xs) == pytest.approx(1.0)
-        assert max(mask_xs) > x + width
-        assert min(mask_xs) < min(xs)
-        assert min(mask_xs) > x + width * 0.5
-
-
-@pytest.mark.parametrize("button", ("left", "right"))
-def test_mouse_button_fill_shrinks_one_pixel_from_the_opposite_bottom_corner(button):
-    x, y, width, height = 13.0, 17.0, 17.5, 22.5
-    outline_width = 1.7
-    safety = 0.2
-    mask, fill = mouse_button_fill_geometry(
-        x,
-        y,
-        width,
-        height,
-        button,
-        outline_width=outline_width,
-        safety_inset=safety,
+    assert all(
+        actual == pytest.approx((mirror_x - px, py))
+        for actual, (px, py) in zip(right.fill, reversed(left.fill), strict=True)
     )
-    mask_xs = [point[0] for point in mask]
-    mask_ys = [point[1] for point in mask]
-    fill_xs = [point[0] for point in fill]
-    fill_ys = [point[1] for point in fill]
-    join_delta = safety * 0.55 + max(0.45, safety * 0.45)
 
-    assert max(mask_ys) - min(mask_ys) - (max(fill_ys) - min(fill_ys)) == pytest.approx(
-        join_delta + 1.0
+    factor = 3.25
+    scaled = mouse_button_geometry(
+        x * factor,
+        y * factor,
+        width * factor,
+        height * factor,
+        "left",
+        outline_width=outline_width * factor,
     )
-    if button == "left":
-        assert max(mask_xs) - max(fill_xs) == pytest.approx(join_delta)
-        assert min(fill_xs) - min(mask_xs) == pytest.approx(1.0)
-    else:
-        assert min(fill_xs) - min(mask_xs) == pytest.approx(join_delta)
-        assert max(mask_xs) - max(fill_xs) == pytest.approx(1.0)
+    assert scaled is not None
+    assert all(
+        actual == pytest.approx((px * factor, py * factor))
+        for actual, (px, py) in zip(scaled.visible_shell, left.visible_shell, strict=True)
+    )
+    assert all(
+        actual == pytest.approx((px * factor, py * factor))
+        for actual, (px, py) in zip(scaled.fill, left.fill, strict=True)
+    )

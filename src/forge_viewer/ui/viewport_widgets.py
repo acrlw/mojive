@@ -41,6 +41,10 @@ class OverlayGeometry:
     hint_chord_gap: float = 10.0
     hint_key_padding_x: float = 8.0
     hint_mouse_width: float = 14.0
+    hint_mouse_stroke: float = 1.25
+    hint_mouse_button_width_ratio: float = 0.44
+    hint_mouse_button_shell_ratio: float = 0.75
+    hint_mouse_button_height_ratio: float = 0.40
     tooltip_padding_x: float = 7.0
     tooltip_padding_y: float = 4.0
 
@@ -1244,8 +1248,16 @@ def _mouse_width(
     return width if not suffix else width + 5.0 * scale + draw.text_size(suffix)[0] * text_scale
 
 
+@dataclass(frozen=True)
+class MouseButtonGeometry:
+    """A highlighted button and the mouse-shell path visible around it."""
+
+    visible_shell: tuple[tuple[float, float], ...]
+    fill: tuple[tuple[float, float], ...]
+
+
 @lru_cache(maxsize=128)
-def mouse_button_fill_geometry(
+def mouse_button_geometry(
     x: float,
     y: float,
     width: float,
@@ -1253,80 +1265,84 @@ def mouse_button_fill_geometry(
     button: str,
     *,
     outline_width: float,
-    safety_inset: float = 0.0,
-) -> tuple[tuple[tuple[float, float], ...], tuple[tuple[float, float], ...]] | None:
-    """Return background-mask and fill silhouettes for one mouse button."""
+) -> MouseButtonGeometry | None:
+    """Return true-knockout shell and fill geometry for one mouse button."""
 
     if button not in {"left", "right"}:
         return None
-    bottom = y + height * 0.40
-    middle = x + width * 0.5
-    center_gap = max(width * 0.06, safety_inset * 0.50)
+    half_stroke = outline_width * 0.5
+    shell_gap = outline_width * OVERLAY_GEOMETRY.hint_mouse_button_shell_ratio
+    button_bottom = y + height * OVERLAY_GEOMETRY.hint_mouse_button_height_ratio
     shell_radius = min(width * 0.22, height * 0.18)
-    outer_outset = outline_width * 0.55 + safety_inset * 0.10
-    join_mask = safety_inset * 0.55
-    join_gap = max(0.45, safety_inset * 0.45)
-    arc_steps = 6
+    outer_radius = shell_radius + half_stroke
+    outer_left = x - half_stroke
+    outer_top = y - half_stroke
+    button_width = (width + outline_width) * OVERLAY_GEOMETRY.hint_mouse_button_width_ratio
+    inner_edge = outer_left + button_width
+    arc_steps = 12
 
-    def button_points(
-        outer_outset: float,
-        join_expand: float,
+    def arc(
+        center_x: float,
+        center_y: float,
+        radius: float,
+        start: float,
+        end: float,
     ) -> tuple[tuple[float, float], ...]:
-        # The exterior arc stays aligned with the mouse shell. Only the inner
-        # and bottom edges are retracted to expose the background-color seam
-        # used by Blender's button silhouette.
-        top = y - outer_outset
-        low = bottom + join_expand
-        expanded_radius = shell_radius + outer_outset
-        if button == "left":
-            outer = x - outer_outset
-            inner = middle - center_gap + join_expand
-            arc = tuple(
-                (
-                    x
-                    + shell_radius
-                    + math.cos(math.pi + math.pi * 0.5 * step / arc_steps) * expanded_radius,
-                    y
-                    + shell_radius
-                    + math.sin(math.pi + math.pi * 0.5 * step / arc_steps) * expanded_radius,
-                )
-                for step in range(arc_steps + 1)
-            )
-            return ((inner, low), (outer, low), *arc, (inner, top))
-        outer = x + width + outer_outset
-        inner = middle + center_gap - join_expand
-        arc = tuple(
+        return tuple(
             (
-                x
-                + width
-                - shell_radius
-                + math.cos(-math.pi * 0.5 + math.pi * 0.5 * step / arc_steps) * expanded_radius,
-                y
-                + shell_radius
-                + math.sin(-math.pi * 0.5 + math.pi * 0.5 * step / arc_steps) * expanded_radius,
+                center_x + math.cos(start + (end - start) * step / arc_steps) * radius,
+                center_y + math.sin(start + (end - start) * step / arc_steps) * radius,
             )
             for step in range(arc_steps + 1)
         )
-        return ((inner, top), *arc, (outer, low), (inner, low))
 
-    fill = button_points(outer_outset, -join_gap)
-    xs = tuple(point[0] for point in fill)
-    ys = tuple(point[1] for point in fill)
-    anchor_x = max(xs) if button == "left" else min(xs)
-    anchor_y = max(ys)
-    scale_x = (max(xs) - min(xs) - 1.0) / (max(xs) - min(xs))
-    scale_y = (max(ys) - min(ys) - 1.0) / (max(ys) - min(ys))
-    fill = tuple(
-        (
-            anchor_x + (point[0] - anchor_x) * scale_x,
-            anchor_y + (point[1] - anchor_y) * scale_y,
-        )
-        for point in fill
+    fill = (
+        (inner_edge, outer_top),
+        *arc(
+            x + shell_radius,
+            y + shell_radius,
+            outer_radius,
+            -math.pi * 0.5,
+            -math.pi,
+        ),
+        (outer_left, button_bottom),
+        (inner_edge, button_bottom),
     )
-    return (
-        button_points(outer_outset, join_mask),
-        fill,
+    visible_shell = (
+        (inner_edge + shell_gap, y),
+        *arc(
+            x + width - shell_radius,
+            y + shell_radius,
+            shell_radius,
+            -math.pi * 0.5,
+            0.0,
+        ),
+        *arc(
+            x + width - shell_radius,
+            y + height - shell_radius,
+            shell_radius,
+            0.0,
+            math.pi * 0.5,
+        ),
+        *arc(
+            x + shell_radius,
+            y + height - shell_radius,
+            shell_radius,
+            math.pi * 0.5,
+            math.pi,
+        ),
+        (x, button_bottom + shell_gap),
     )
+    if button == "right":
+        mirror_x = x * 2.0 + width
+        visible_shell = tuple((mirror_x - point[0], point[1]) for point in visible_shell)
+        # The mirrored outline has ImGui's expected clockwise screen winding.
+        fill = tuple((mirror_x - point[0], point[1]) for point in fill)
+    else:
+        # Match the right button's clockwise screen winding so both convex
+        # fills receive the same outward antialias fringe.
+        fill = tuple(reversed(fill))
+    return MouseButtonGeometry(visible_shell, fill)
 
 
 def draw_mouse_hint_glyph(
@@ -1338,29 +1354,35 @@ def draw_mouse_hint_glyph(
     theme: Theme,
     scale: float,
     *,
-    background=None,
+    size: tuple[float, float] | None = None,
 ) -> float:
     """Draw a Blender-style mouse shell with one semantic control highlighted."""
 
-    width = OVERLAY_GEOMETRY.hint_mouse_width * scale
-    height = OVERLAY_GEOMETRY.hint_control_height * scale
+    logical_width, logical_height = size or (
+        OVERLAY_GEOMETRY.hint_mouse_width,
+        OVERLAY_GEOMETRY.hint_control_height,
+    )
+    width = logical_width * scale
+    height = logical_height * scale
     y = center_y - height * 0.5
     radius = min(width * 0.22, height * 0.18)
-    outline_width = 1.25 * scale
-    button_fill = mouse_button_fill_geometry(
+    outline_width = OVERLAY_GEOMETRY.hint_mouse_stroke * scale
+    button_geometry = mouse_button_geometry(
         x,
         y,
         width,
         height,
         button,
         outline_width=outline_width,
-        safety_inset=0.85 * scale,
     )
-    draw.rect((x, y), (x + width, y + height), theme.text, outline_width, rounding=radius)
-    if button_fill is not None:
-        mask, fill = button_fill
-        draw.convex_fill(mask, background or (*theme.bg_child[:3], 1.0))
-        draw.convex_fill(fill, theme.primary)
+    if button_geometry is None:
+        draw.rect((x, y), (x + width, y + height), theme.text, outline_width, rounding=radius)
+    else:
+        # Omit the shell beneath the button's transparent outer contour instead
+        # of repainting it with a guessed background color. This remains a
+        # genuine knockout over translucent chrome and arbitrary viewports.
+        draw.polyline(button_geometry.visible_shell, theme.text, outline_width)
+        draw.convex_fill(button_geometry.fill, theme.primary)
     wheel_rect = (
         (x + width * 0.36, y + 1.35 * scale + 1.0),
         (x + width * 0.64, y + 8.35 * scale + 1.0),
@@ -1570,7 +1592,6 @@ def draw_tool_hints(
     hints: Sequence[ToolHint],
     *,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
-    background=None,
 ) -> float:
     """Draw tool hints inline and return their consumed width."""
 
@@ -1600,7 +1621,6 @@ def draw_tool_hints(
                 suffix,
                 theme,
                 scale,
-                background=background,
             )
             + input_gap
         )
@@ -1663,7 +1683,6 @@ def draw_scene_tool_hints(
         scale,
         hints,
         labels=labels,
-        background=(*theme.bg_child[:3], 0.92),
     )
 
 
@@ -1980,7 +1999,6 @@ def draw_status(
             scale,
             fitted_hints,
             labels=labels,
-            background=(*theme.bg_child[:3], 1.0),
         )
         left_neighbor_end = cursor + hint_width
 
