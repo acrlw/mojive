@@ -50,7 +50,7 @@ class OverlayGeometry:
     hint_mouse_wheel_height_ratio: float = 7.0 / 18.0
     hint_mouse_wheel_gap_ratio: float = 0.25
     frame_center_radius: float = 1.45
-    frame_center_gap_ratio: float = 0.7
+    frame_center_gap_ratio: float = 1.4
     tooltip_padding_x: float = 7.0
     tooltip_padding_y: float = 4.0
 
