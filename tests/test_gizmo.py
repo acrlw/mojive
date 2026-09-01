@@ -94,7 +94,6 @@ from forge_viewer.ui.gizmo import (
     _project_rotation_dial,
     _project_rotation_tick,
     _projected_line_parameters,
-    _revolute_tick_underlap,
     _rotation_arc_stroke,
     _rotation_fill_alpha,
     _rotation_sweep,
@@ -319,10 +318,7 @@ def test_joint_current_tick_matches_range_width_and_endpoint_color_semantics(
     assert np.allclose(current_tick[2], expected)
     assert current_tick[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
     assert tick_kwargs["cap"] == ("round_end" if joint_type == "hinge" else "round")
-    expected_length = JOINT_CURRENT_TICK_PT + (
-        0.5 * JOINT_RANGE_WIDTH_PT if joint_type == "hinge" else 0.0
-    )
-    assert np.linalg.norm(current_tick[1] - current_tick[0]) == pytest.approx(expected_length)
+    assert np.linalg.norm(current_tick[1] - current_tick[0]) == pytest.approx(JOINT_CURRENT_TICK_PT)
 
 
 @pytest.mark.parametrize(
@@ -631,10 +627,7 @@ def test_rotation_snap_ticks_are_clipped_to_the_reachable_hinge_arc() -> None:
         np.array((1.0, 0.0, 0.0)),
         SIZE_PT,
     )
-    expected_starts = [
-        _revolute_tick_underlap(stable_dial.tick(RING_RADIUS, angle, 4.0), 1.0)[0]
-        for angle in expected_angles
-    ]
+    expected_starts = [stable_dial.tick(RING_RADIUS, angle, 4.0)[0] for angle in expected_angles]
     assert np.asarray([tick[0] for tick in snap_ticks]) == pytest.approx(
         np.asarray(expected_starts)
     )
@@ -2969,12 +2962,12 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
         kwargs["cap"] == "round_end" for name, _args, kwargs in overlay.calls if name == "line"
     )
     assert np.linalg.norm(ticks["current"][1] - ticks["current"][0]) == pytest.approx(
-        JOINT_CURRENT_TICK_PT + 0.5 * JOINT_RANGE_WIDTH_PT
+        JOINT_CURRENT_TICK_PT
     )
     assert np.allclose(ticks["current"][2], JOINT_RANGE_COLOR)
     for limit in ("lower", "upper"):
         assert np.linalg.norm(ticks[limit][1] - ticks[limit][0]) == pytest.approx(
-            JOINT_LIMIT_TICK_PT + 0.5 * JOINT_RANGE_WIDTH_PT
+            JOINT_LIMIT_TICK_PT
         )
 
 

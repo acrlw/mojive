@@ -895,15 +895,16 @@ def _draw_joint_gizmo(
     center = (x + 548.0 * scale, y + 140.0 * scale)
     radius = 72.0 * scale
     arc = tuple((center[0] + ux * radius, center[1] + uy * radius) for ux, uy in JOINT_HINGE_ARC)
-    draw.polyline(arc, JOINT_COLOR, stroke)
+    draw.polyline(arc, JOINT_COLOR, stroke, cap="butt")
     for index, color in enumerate((CONCEPT_THEME.axis_color(0), CONCEPT_THEME.axis_color(2))):
         ux, uy = JOINT_HINGE_ARC[0 if index == 0 else -1]
         point = (center[0] + ux * radius, center[1] + uy * radius)
         draw.line(
-            (point[0] - ux * hinge_tick * 0.35, point[1] - uy * hinge_tick * 0.35),
-            (point[0] + ux * hinge_tick * 0.65, point[1] + uy * hinge_tick * 0.65),
+            point,
+            (point[0] + ux * hinge_tick, point[1] + uy * hinge_tick),
             color,
             2.4 * scale,
+            cap="round_end",
         )
     current_ux, current_uy = JOINT_HINGE_ARC[len(JOINT_HINGE_ARC) // 2]
     current_point = (
@@ -911,16 +912,14 @@ def _draw_joint_gizmo(
         center[1] + current_uy * radius,
     )
     draw.line(
+        current_point,
         (
-            current_point[0] - current_ux * current_tick * 0.5,
-            current_point[1] - current_uy * current_tick * 0.5,
+            current_point[0] + current_ux * current_tick,
+            current_point[1] + current_uy * current_tick,
         ),
-        (
-            current_point[0] + current_ux * current_tick * 0.5,
-            current_point[1] + current_uy * current_tick * 0.5,
-        ),
-        CONCEPT_THEME.primary_bright,
-        4.0 * scale,
+        JOINT_COLOR,
+        stroke,
+        cap="round_end",
     )
     if state is not None and _joint_double_click(
         f"##{item_id}-hinge-ring",
@@ -956,7 +955,7 @@ def _draw_joint_rotation_feedback(draw: ImguiDraw2D, center, radius: float, scal
     """Show the accepted hinge drag + Shift colors without legacy amber/yellow."""
 
     arc = tuple((center[0] + ux * radius, center[1] + uy * radius) for ux, uy in JOINT_HINGE_ARC)
-    draw.polyline(arc, JOINT_COLOR, 3.0 * scale)
+    draw.polyline(arc, JOINT_COLOR, 3.0 * scale, cap="butt")
 
     start_index = 8
     end_index = 17
@@ -965,7 +964,7 @@ def _draw_joint_rotation_feedback(draw: ImguiDraw2D, center, radius: float, scal
         (center, *sweep),
         (*CONCEPT_THEME.primary_dim[:3], 0.24),
     )
-    draw.polyline(sweep, CONCEPT_THEME.primary_bright, 3.0 * scale)
+    draw.polyline(sweep, CONCEPT_THEME.primary_bright, 3.0 * scale, cap="butt")
 
     for index in range(0, len(JOINT_HINGE_ARC), 2):
         ux, uy = JOINT_HINGE_ARC[index]
@@ -976,15 +975,17 @@ def _draw_joint_rotation_feedback(draw: ImguiDraw2D, center, radius: float, scal
             (point[0] + ux * length, point[1] + uy * length),
             CONCEPT_THEME.text_disabled,
             1.1 * scale,
+            cap="round_end",
         )
 
     ux, uy = JOINT_HINGE_ARC[end_index]
     point = arc[end_index]
     draw.line(
-        (point[0] - ux * 2.0 * scale, point[1] - uy * 2.0 * scale),
+        point,
         (point[0] + ux * 12.0 * scale, point[1] + uy * 12.0 * scale),
         CONCEPT_THEME.primary_bright,
         2.6 * scale,
+        cap="round_end",
     )
     draw.circle_filled(center, 3.0 * scale, CONCEPT_THEME.text, segments=18)
 
@@ -3598,7 +3599,8 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         draw.text(
             (x0 + 54.0, content_y + 354.0 * scale),
             note_color,
-            "Current = Primary Bright tick · double-click the active handle = Type value.",
+            "Slide current = Primary Bright · hinge current = range purple · "
+            "double-click the active handle = Type value.",
         )
         draw.text(
             (x0 + 54.0, content_y + 404.0 * scale),

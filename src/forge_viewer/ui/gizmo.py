@@ -166,18 +166,6 @@ def _joint_current_tick_color(state: _JointRangeState, range_color):
     )
 
 
-def _revolute_tick_underlap(tick, style_scale: float) -> tuple[np.ndarray, np.ndarray]:
-    """Hide a radial tick's flat inner seam beneath half of the range stroke."""
-
-    start, end = (np.asarray(point, np.float64) for point in tick)
-    direction = end - start
-    length = float(np.linalg.norm(direction))
-    if length < 1e-6:
-        return start, end
-    inset = 0.5 * JOINT_RANGE_WIDTH_PT * float(style_scale)
-    return start - direction * (inset / length), end
-
-
 def joint_slide_arrow_polygons(
     current, tangent, style_scale: float
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -1428,7 +1416,6 @@ class ObjectGizmo:
                 JOINT_CURRENT_TICK_PT * style_scale,
             )
             if current_tick is not None:
-                current_tick = _revolute_tick_underlap(current_tick, style_scale)
                 overlay.line(
                     current_tick[0],
                     current_tick[1],
@@ -1592,7 +1579,6 @@ class ObjectGizmo:
         tick = dial.tick(JOINT_RANGE_RADIUS, angle, JOINT_LIMIT_TICK_PT * style_scale)
         if tick is None:
             return None
-        tick = _revolute_tick_underlap(tick, style_scale)
         if draw_tick:
             overlay.line(
                 tick[0],
@@ -1957,8 +1943,6 @@ class ObjectGizmo:
                 continue
             segment = tick_segment(angle, _rotation_tick_length_pt(degrees))
             if segment is not None:
-                if limited_hinge:
-                    segment = _revolute_tick_underlap(segment, style_scale)
                 ticks.append(segment)
 
         active_tick = None
