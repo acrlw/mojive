@@ -22,6 +22,7 @@ change while iterating, then run the required acceptance targets before handoff.
 | Shared types or commands | `make test-fast` | `make check` |
 | File format or remote protocol | `make test-integration` | `make check` |
 | MuJoCo adapter or MJCF authoring | focused physics test | `make test-physics` and `make mujoco-audit` |
+| Public renderer performance | isolated quick matrix | `make renderer-benchmark` |
 | MuJoCo model loading | one XML path with the model-suite module | `make mujoco-model-suite` |
 | Render pass or shader | one GPU test file | `make gpu` and `make gpu-wgpu` |
 | Visual interaction | focused GPU test | relevant Make gallery and `make reverse` |
@@ -30,6 +31,36 @@ change while iterating, then run the required acceptance targets before handoff.
 
 Markers may be combined. A file-format test that compiles MuJoCo uses both `integration` and
 `physics`; it runs in the physics layer.
+
+## Renderer performance
+
+The quick renderer benchmark compares `mujoco.Renderer`, Mojive OpenGL, and Mojive wgpu through
+their public `update_scene()` and `render()` APIs:
+
+```bash
+make renderer-benchmark
+```
+
+Each renderer/workload/output/resolution case owns an isolated process. The default matrix measures
+RGB output at 640×480 for primitive, many-object, and dense-mesh scenes. The full matrix also covers
+dynamic transforms and textured/transparent materials. It records constructor and first-frame time,
+update and render median/p95 latency, FPS, close time, and peak RSS growth in
+`output/renderer-benchmark/report.json`. Ratios below `1.0x` are faster than MuJoCo for the same case.
+
+Run the larger resolution and RGB/depth/segmentation matrix explicitly:
+
+```bash
+make renderer-benchmark-full
+make renderer-benchmark ARGS="--workloads dynamic --modes rgb,depth --frames 200"
+```
+
+The complete target writes `output/renderer-benchmark/full-report.json`, keeping the quick report
+available for routine before/after comparisons.
+
+RGB and depth reuse destination arrays. MuJoCo 3.11 does not accept its segmentation ID-pair shape
+as an `out` array, so both implementations use allocating `render()` for segmentation. Internal
+Mojive GPU pass timers are deliberately excluded from cross-renderer ratios. Baselines are recorded
+with host and dependency versions and are not a cross-machine hard gate.
 
 ## Documentation
 

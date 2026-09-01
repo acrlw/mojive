@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu golden golden-accept parity calibrate gallery ui-feasibility ui-runtime ui-frame-profile ui-gallery tool-icons mouse-icons gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept texture-minification local-shadow-precision shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance inspector gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring asset-browser joint-site-authoring model-component-authoring keyframe-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu renderer-benchmark renderer-benchmark-full golden golden-accept parity calibrate gallery ui-feasibility ui-runtime ui-frame-profile ui-gallery tool-icons mouse-icons gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept texture-minification local-shadow-precision shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance inspector gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring asset-browser joint-site-authoring model-component-authoring keyframe-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -100,6 +100,8 @@ help:
 		'  make egl               Linux EGL Renderer and wireframe contract' \
 		'  make renderer-api      public Renderer CPU and GPU contract' \
 		'  make renderer-api-wgpu public Renderer contract over wgpu' \
+		'  make renderer-benchmark MuJoCo/OpenGL/wgpu public API timing comparison' \
+		'  make renderer-benchmark-full complete resolution and output-mode matrix' \
 		'  make camera-state      camera bookmark serialization and restore' \
 		'  make scene-snapshot    complete scene-state serialization and restore' \
 		'  make cli               typed local control commands' \
@@ -196,6 +198,13 @@ renderer-api-wgpu:
 	MOJIVE_BACKEND=wgpu $(PYTEST) -q tests/test_renderer_api.py
 	MOJIVE_BACKEND=wgpu $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
 	MOJIVE_BACKEND=wgpu $(PY) -m mojive.tools.renderer_api
+
+renderer-benchmark:
+	$(PY) -m mojive.tools.renderer_benchmark $(ARGS)
+
+renderer-benchmark-full:
+	$(PY) -m mojive.tools.renderer_benchmark --preset full \
+		-o output/renderer-benchmark/full-report.json $(ARGS)
 
 p0: renderer-api
 

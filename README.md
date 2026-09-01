@@ -211,8 +211,8 @@ Rendering changes additionally require:
 make gpu
 ```
 
-Useful focused targets include `make renderer-api`, `make gpu-wgpu`, `make mujoco-audit`,
-`make adapter-conformance`, `make docs-check`, `make gizmo-gallery`, and `make showcase`. Run
+Useful focused targets include `make renderer-api`, `make renderer-benchmark`, `make gpu-wgpu`,
+`make mujoco-audit`, `make adapter-conformance`, `make docs-check`, `make gizmo-gallery`, and `make showcase`. Run
 `make help` for the maintained target catalog. Generated captures, recordings, reports, and the
 documentation site are written under `output/`.
 
