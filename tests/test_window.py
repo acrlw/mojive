@@ -10,6 +10,7 @@ from imgui_bundle import imgui
 
 from forge_viewer.ui import window as window_module
 from forge_viewer.ui.app import (
+    MODEL_FILTERS,
     ViewerApp,
     _clipped_overlay_host_rect,
     _compact_status_for_selection,
@@ -20,6 +21,8 @@ from forge_viewer.ui.app import (
     _simulation_timestep,
     _status_message_for_bar,
     _toggle_angle_input,
+    _translated_file_filters,
+    precise_input_status_hints,
 )
 from forge_viewer.ui.window import (
     Window,
@@ -73,6 +76,23 @@ def test_status_bar_uses_the_adapter_simulation_timestep() -> None:
 
     assert _simulation_timestep(adapter) == pytest.approx(0.002)
     assert _simulation_timestep(None, loading=True) == 0.0
+
+
+def test_precise_input_status_hints_match_the_implemented_shortcuts() -> None:
+    translate = {"Apply": "应用", "Cancel": "取消", "Switch angle unit": "切换角度单位"}.get
+
+    linear = precise_input_status_hints(SimpleNamespace(unit="m"), translate)
+    angular = precise_input_status_hints(SimpleNamespace(unit="°"), translate)
+
+    assert [(hint.control, hint.label) for hint in linear] == [
+        ("Enter", "应用"),
+        ("Esc", "取消"),
+    ]
+    assert [(hint.control, hint.label) for hint in angular] == [
+        ("Enter", "应用"),
+        ("Esc", "取消"),
+        ("U", "切换角度单位"),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -178,6 +198,7 @@ def test_viewport_recording_streams_and_finalizes_frames(monkeypatch) -> None:
     )
     app = ViewerApp.__new__(ViewerApp)
     app.backend = SimpleNamespace(target=target)
+    app.localizer = SimpleNamespace(text=lambda value: value)
     app.session = SimpleNamespace(
         report_message=lambda message, level: events.append((message, level))
     )
@@ -195,6 +216,12 @@ def test_viewport_recording_streams_and_finalizes_frames(monkeypatch) -> None:
     assert recorder.closed
     assert app._viewport_recorder is None
     assert events[-1][1] == "success"
+
+
+def test_file_dialog_filters_translate_descriptions_without_touching_globs() -> None:
+    translated = _translated_file_filters(MODEL_FILTERS, lambda value: f"zh:{value}")
+    assert translated[::2] == [f"zh:{value}" for value in MODEL_FILTERS[::2]]
+    assert translated[1::2] == MODEL_FILTERS[1::2]
 
 
 def test_layout_settings_path_honors_exact_override(monkeypatch, tmp_path) -> None:

@@ -120,6 +120,31 @@ MESH_FILTERS = [
 ]
 
 
+def precise_input_status_hints(edit: PreciseGizmoInput, translate) -> tuple[ToolHint, ...]:
+    """Return only keyboard actions that the precise-input popup implements."""
+
+    hints = [
+        ToolHint("key", "Enter", translate("Apply"), hint_id="precise.apply"),
+        ToolHint("key", "Esc", translate("Cancel"), hint_id="precise.cancel"),
+    ]
+    if edit.unit == "°":
+        hints.append(
+            ToolHint(
+                "key",
+                "U",
+                translate("Switch angle unit"),
+                hint_id="precise.angle-unit",
+            )
+        )
+    return tuple(hints)
+
+
+def _translated_file_filters(filters: list[str], translate) -> list[str]:
+    """Translate file-dialog descriptions while preserving their glob entries."""
+
+    return [translate(value) if index % 2 == 0 else value for index, value in enumerate(filters)]
+
+
 def _fit_image_rect(
     position: tuple[float, float],
     available: tuple[float, float],
@@ -403,6 +428,7 @@ class ViewerApp:
         self._viewport_labels = localized_viewport_labels(self.localizer.text)
         metric_mode = self.localizer.preference("status_metric", "time")
         self._status_metric_mode = "steps" if metric_mode == "steps" else "time"
+        self._panel_status_hints: tuple[ToolHint, ...] = ()
         self.camera = OrbitCamera()
 
         self.camera_out = CameraOut(backend=backend, session=session)
@@ -668,7 +694,9 @@ class ViewerApp:
         result = self.session.submit(cmd.LoadAsset(Path(path)))
         if result.ok:
             self._after_model_change()
-            self._set_model_drop_notice(f"Loaded {self.session.asset_path.name}")
+            self._set_model_drop_notice(
+                f"{self.localizer.text('Loaded')} {self.session.asset_path.name}"
+            )
         else:
             self._report_model_error(result.message)
         return result
@@ -710,7 +738,9 @@ class ViewerApp:
         result = self.session.submit(cmd.OpenScene(target))
         if result.ok:
             self._after_model_change()
-            self._set_model_drop_notice(f"Opened {self.session.asset_path.name}")
+            self._set_model_drop_notice(
+                f"{self.localizer.text('Opened')} {self.session.asset_path.name}"
+            )
         else:
             self._report_model_error(result.message)
         return result
@@ -844,34 +874,38 @@ class ViewerApp:
     def _open_model_dialog(self, action: str = "open") -> None:
         if self._model_dialog is not None:
             return
+        t = self.localizer.text
         current = self.session.asset_path
         default_path = str(current.parent if current is not None else Path.cwd())
         self._model_dialog = portable_file_dialogs.open_file(
-            "Add MJCF or URDF models" if action == "add" else "Open an MJCF or URDF model",
+            t("Add MJCF or URDF models") if action == "add" else t("Open an MJCF or URDF model"),
             default_path,
-            MODEL_FILTERS,
+            _translated_file_filters(MODEL_FILTERS, t),
             portable_file_dialogs.opt.multiselect
             if action == "add"
             else portable_file_dialogs.opt.none,
         )
         self._model_dialog_action = action
         self._set_model_drop_notice(
-            "Choose a model to add" if action == "add" else "Choose an MJCF or URDF model"
+            t("Choose a model to add") if action == "add" else t("Choose an MJCF or URDF model")
         )
 
     def _open_scene_dialog(self, action: str) -> None:
         if self._scene_dialog is not None:
             return
+        t = self.localizer.text
         current = self.session.asset_path
         if action == "save":
             default = current or (Path.cwd() / f"scene{SCENE_SUFFIX}")
             self._scene_dialog = portable_file_dialogs.save_file(
-                "Save scene", str(default), SCENE_FILTERS
+                t("Save scene"), str(default), _translated_file_filters(SCENE_FILTERS, t)
             )
         else:
             default = current.parent if current is not None else Path.cwd()
             self._scene_dialog = portable_file_dialogs.open_file(
-                "Open Forge scene", str(default), SCENE_FILTERS
+                t("Open Forge scene"),
+                str(default),
+                _translated_file_filters(SCENE_FILTERS, t),
             )
         self._scene_dialog_action = action
 
@@ -881,7 +915,7 @@ class ViewerApp:
         current = self.session.asset_path
         default = current.parent if current is not None else Path.cwd()
         self._resource_dialog = portable_file_dialogs.select_folder(
-            "Add Forge resource directory", str(default)
+            self.localizer.text("Add Forge resource directory"), str(default)
         )
 
     def _open_texture_dialog(
@@ -894,8 +928,12 @@ class ViewerApp:
             return
         current = self.session.asset_path
         default = current.parent if current is not None else Path.cwd()
+        label = "2D" if kind == "2d" else kind
         self._texture_dialog = portable_file_dialogs.open_file(
-            f"Import {'2D' if kind == '2d' else kind} texture", str(default), IMAGE_FILTERS
+            f"{self.localizer.text('Import')} "
+            f"{self.localizer.text(label)} {self.localizer.text('texture')}",
+            str(default),
+            _translated_file_filters(IMAGE_FILTERS, self.localizer.text),
         )
         self._texture_import_target = (int(model_id), int(material_index), kind)
 
@@ -941,9 +979,11 @@ class ViewerApp:
         current = self.session.asset_path
         default = current.parent if current is not None else Path.cwd()
         filters = MESH_FILTERS if kind == "mesh" else IMAGE_FILTERS
-        title = "Import mesh" if kind == "mesh" else "Import PNG height field"
+        title = self.localizer.text("Import mesh" if kind == "mesh" else "Import PNG height field")
         self._geometry_resource_dialog = portable_file_dialogs.open_file(
-            title, str(default), filters
+            title,
+            str(default),
+            _translated_file_filters(filters, self.localizer.text),
         )
         self._geometry_resource_import_target = (int(node_id), kind)
 
@@ -967,7 +1007,9 @@ class ViewerApp:
         base = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem).strip("_.-") or resource_type
         properties = self.session.geometry_shape_properties(node_id)
         if properties is None:
-            self._report_model_error("The target geometry is no longer available")
+            self._report_model_error(
+                self.localizer.text("The target geometry is no longer available")
+            )
             return
         existing = set(
             properties.mesh_names if resource_type == "mesh" else properties.height_field_names
@@ -1013,12 +1055,14 @@ class ViewerApp:
         current = self.session.asset_path
         default = current.parent if current is not None else Path.cwd()
         filters = MESH_FILTERS if kind == "mesh" else IMAGE_FILTERS
-        verb = "Import" if action == "import" else "Replace"
+        verb = self.localizer.text("Import" if action == "import" else "Replace")
         label = (
             "mesh" if kind == "mesh" else "PNG height field" if kind == "hfield" else "PNG texture"
         )
         self._model_asset_dialog = portable_file_dialogs.open_file(
-            f"{verb} {label}", str(default), filters
+            f"{verb} {self.localizer.text(label)}",
+            str(default),
+            _translated_file_filters(filters, self.localizer.text),
         )
         self._model_asset_dialog_target = (
             action,
@@ -1082,11 +1126,13 @@ class ViewerApp:
             if missing is None:
                 return
             self._resource_repair_dialog = portable_file_dialogs.open_file(
-                f"Locate {missing.model_name}", str(default), MODEL_FILTERS
+                f"{self.localizer.text('Locate')} {missing.model_name}",
+                str(default),
+                _translated_file_filters(MODEL_FILTERS, self.localizer.text),
             )
         else:
             self._resource_repair_dialog = portable_file_dialogs.select_folder(
-                "Search a directory for missing resources", str(default)
+                self.localizer.text("Search a directory for missing resources"), str(default)
             )
         self._resource_repair_dialog_action = action
         self._resource_repair_model_index = model_index
@@ -1151,36 +1197,40 @@ class ViewerApp:
                 self._report_model_error(result.message)
 
     def _draw_resource_repair(self) -> None:
+        t = self.localizer.text
+        popup_title = f"{t('Missing Resources')}###Missing Resources"
         if self._open_resource_repair_popup:
-            imgui.open_popup("Missing Resources")
+            imgui.open_popup(popup_title)
             self._open_resource_repair_popup = False
-        if imgui.is_popup_open("Missing Resources"):
+        if imgui.is_popup_open(popup_title):
             _prepare_modal(480.0, self.window.style_scale)
         visible, _ = imgui.begin_popup_modal(
-            "Missing Resources", None, imgui.WindowFlags_.always_auto_resize.value
+            popup_title, None, imgui.WindowFlags_.always_auto_resize.value
         )
         if not visible:
             return
         imgui.text_wrapped(
-            "This Forge scene references model files that are no longer available. "
-            "Locate files individually or search one directory to repair every unambiguous path."
+            t(
+                "This Forge scene references model files that are no longer available. Locate "
+                "files individually or search one directory to repair every unambiguous path."
+            )
         )
         imgui.spacing()
         locate = -1
         for missing in self._missing_resources:
             imgui.text(f"{missing.model_name}: {missing.reference}")
             imgui.same_line()
-            if imgui.small_button(f"Locate...##missing-resource-{missing.model_index}"):
+            if imgui.small_button(f"{t('Locate...')}##missing-resource-{missing.model_index}"):
                 locate = missing.model_index
         if self._resource_repair_status:
             imgui.spacing()
             imgui.text_wrapped(self._resource_repair_status)
-            if imgui.small_button("Copy details##resource-repair"):
+            if imgui.small_button(f"{t('Copy details')}##resource-repair"):
                 imgui.set_clipboard_text(self._resource_repair_status)
         imgui.spacing()
-        search = imgui.button("Search Directory...", imgui.ImVec2(160.0, 0.0))
+        search = imgui.button(t("Search Directory..."), imgui.ImVec2(160.0, 0.0))
         imgui.same_line()
-        cancel = imgui.button("Cancel", imgui.ImVec2(100.0, 0.0))
+        cancel = imgui.button(t("Cancel"), imgui.ImVec2(100.0, 0.0))
         if locate >= 0:
             self._open_resource_repair_dialog("locate", locate)
             imgui.close_current_popup()
@@ -1247,7 +1297,9 @@ class ViewerApp:
         if len(paths) == 1 and paths[0].name.endswith(SCENE_SUFFIX):
             path = paths[0]
             if not self.session.adapter.caps.scene_files:
-                self._report_model_error("The current workspace cannot open Forge scene files")
+                self._report_model_error(
+                    self.localizer.text("The current workspace cannot open Forge scene files")
+                )
                 return
             self._request_document_action("open_scene", path)
             return
@@ -1255,7 +1307,9 @@ class ViewerApp:
             (path for path in paths if path.suffix.lower() not in MODEL_EXTENSIONS), None
         )
         if unsupported is not None:
-            self._report_model_error(f"Unsupported file: {unsupported.name}")
+            self._report_model_error(
+                f"{self.localizer.text('Unsupported file')}: {unsupported.name}"
+            )
             return
         can_add = self.session.adapter.caps.model_composition
         source = self.session.source
@@ -1594,7 +1648,9 @@ class ViewerApp:
     def _add_model_site(self) -> None:
         parent = self._model_child_parent()
         if parent is None:
-            self.session.report_message("Select a model or body before creating a site")
+            self.session.report_message(
+                self.localizer.text("Select a model or body before creating a site")
+            )
             return
         result = self.session.submit(
             cmd.AddModelElement(parent.node_id, "site", self._entity_name("site"))
@@ -1766,22 +1822,26 @@ class ViewerApp:
         self.session.report_message(message, level="error", duration=10.0)
 
     def _draw_model_load_error(self) -> None:
+        t = self.localizer.text
+        popup_title = f"{t('File operation failed')}###File operation failed"
         if self._show_model_load_error:
-            imgui.open_popup("File operation failed")
+            imgui.open_popup(popup_title)
             self._show_model_load_error = False
-        if imgui.is_popup_open("File operation failed"):
+        if imgui.is_popup_open(popup_title):
             _prepare_modal(360.0, self.window.style_scale)
         visible, _ = imgui.begin_popup_modal(
-            "File operation failed", None, imgui.WindowFlags_.always_auto_resize.value
+            popup_title, None, imgui.WindowFlags_.always_auto_resize.value
         )
         if not visible:
             return
         imgui.text_wrapped(self._model_load_error)
         imgui.spacing()
-        if imgui.button("Copy error", imgui.ImVec2(button_width("Copy error", 110.0), 0.0)):
+        copy_error = t("Copy error")
+        if imgui.button(copy_error, imgui.ImVec2(button_width(copy_error, 110.0), 0.0)):
             imgui.set_clipboard_text(self._model_load_error)
         imgui.same_line()
-        if imgui.button("OK", imgui.ImVec2(button_width("OK", 88.0), 0.0)) or imgui.is_key_pressed(
+        ok = t("OK")
+        if imgui.button(ok, imgui.ImVec2(button_width(ok, 88.0), 0.0)) or imgui.is_key_pressed(
             imgui.Key.escape, False
         ):
             imgui.close_current_popup()
@@ -1798,7 +1858,7 @@ class ViewerApp:
             result = self.session.submit(cmd.NewScene())
             if result.ok:
                 self._after_model_change()
-                self._set_model_drop_notice("New Forge scene")
+                self._set_model_drop_notice(self.localizer.text("New Forge scene"))
             else:
                 self._report_model_error(result.message)
         elif action == "open_scene" and path is not None:
@@ -1811,19 +1871,23 @@ class ViewerApp:
         pending = self._pending_document_action
         if pending is None:
             return
-        imgui.open_popup("Unsaved changes")
+        t = self.localizer.text
+        popup_title = f"{t('Unsaved changes')}###Unsaved changes"
+        imgui.open_popup(popup_title)
         _prepare_modal(360.0, self.window.style_scale)
         visible, _ = imgui.begin_popup_modal(
-            "Unsaved changes", None, imgui.WindowFlags_.always_auto_resize.value
+            popup_title, None, imgui.WindowFlags_.always_auto_resize.value
         )
         if not visible:
             return
-        name = self.session.asset_path.name if self.session.asset_path is not None else "Untitled"
-        imgui.text("Save changes to this file?")
+        name = (
+            self.session.asset_path.name if self.session.asset_path is not None else t("Untitled")
+        )
+        imgui.text(t("Save changes to this file?"))
         imgui.text_wrapped(name)
         imgui.spacing()
         cancel, discard, save = _equal_modal_buttons(
-            ("Cancel", "Discard", "Save"), self.theme, primary=2
+            (t("Cancel"), t("Discard"), t("Save")), self.theme, primary=2
         )
         if save:
             if self.session.asset_path is None:
@@ -1847,17 +1911,21 @@ class ViewerApp:
         pending = self._pending_pose_save
         if pending is None:
             return
-        labels = ("Cancel", "Save without keyframe", "Save as key0")
-        imgui.open_popup("Save current pose")
+        t = self.localizer.text
+        labels = (t("Cancel"), t("Save without keyframe"), t("Save as key0"))
+        popup_title = f"{t('Save current pose')}###Save current pose"
+        imgui.open_popup(popup_title)
         _prepare_modal(360.0, self.window.style_scale)
         visible, _ = imgui.begin_popup_modal(
-            "Save current pose", None, imgui.WindowFlags_.always_auto_resize.value
+            popup_title, None, imgui.WindowFlags_.always_auto_resize.value
         )
         if not visible:
             return
         imgui.text_wrapped(
-            "The current pose differs from the model default. Add the current qpos as "
-            "keyframe key0 in the exported MJCF?"
+            t(
+                "The current pose differs from the model default. Add the current qpos as "
+                "keyframe key0 in the exported MJCF?"
+            )
         )
         imgui.spacing()
         target, after = pending
@@ -1878,18 +1946,19 @@ class ViewerApp:
         imgui.end_popup()
 
     def _draw_rename_popup(self) -> None:
+        popup_title = f"{self.localizer.text('Rename Entity')}###Rename Entity"
         if self._open_rename_popup:
-            imgui.open_popup("Rename Entity")
+            imgui.open_popup(popup_title)
             self._open_rename_popup = False
         width = min(220.0, max(1.0, float(imgui.get_main_viewport().work_size.x) - 32.0))
         imgui.set_next_window_size_constraints(
             imgui.ImVec2(width, 0.0),
             imgui.ImVec2(width, float(np.finfo(np.float32).max)),
         )
-        visible = imgui.begin_popup("Rename Entity", imgui.WindowFlags_.always_auto_resize.value)
+        visible = imgui.begin_popup(popup_title, imgui.WindowFlags_.always_auto_resize.value)
         if not visible:
             return
-        imgui.text_disabled("Rename")
+        imgui.text_disabled(self.localizer.text("Rename"))
         imgui.separator()
         imgui.set_next_item_width(-1.0)
         submitted, self._rename_value = imgui.input_text(
@@ -2019,6 +2088,7 @@ class ViewerApp:
         self._draw_tool_column_widget()
         self._draw_context_hint_widget()
         self.panels.draw(ctx)
+        self._panel_status_hints = tuple(ctx.status_hints)
         self._draw_precise_gizmo_popup()
         self._draw_rename_popup()
         self._draw_unsaved_changes()
@@ -2077,20 +2147,21 @@ class ViewerApp:
             | imgui.WindowFlags_.no_focus_on_appearing.value
             | imgui.WindowFlags_.no_saved_settings.value
         )
-        visible, _ = imgui.begin("Loading###model_loading", None, flags)
+        t = self.localizer.text
+        visible, _ = imgui.begin(f"{t('Loading')}###model_loading", None, flags)
         if visible:
             elapsed = max(0.0, time.monotonic() - self._model_load_started)
             dots = "." * (int(elapsed * 2.0) % 3 + 1)
-            imgui.text(f"{self._model_load_verb(job.action)}{dots}")
+            imgui.text(f"{t(self._model_load_verb(job.action))}{dots}")
             imgui.separator()
-            imgui.text_disabled("File")
+            imgui.text_disabled(t("File"))
             imgui.text_wrapped(str(job.path))
             imgui.spacing()
-            imgui.text(f"Elapsed: {elapsed:.1f} s")
+            imgui.text(f"{t('Elapsed')}: {elapsed:.1f} s")
             if self._model_load_queue:
-                imgui.text(f"Queued: {len(self._model_load_queue)}")
+                imgui.text(f"{t('Queued')}: {len(self._model_load_queue)}")
             imgui.spacing()
-            imgui.text_disabled("The loader does not expose reliable stage progress.")
+            imgui.text_disabled(t("The loader does not expose reliable stage progress."))
         imgui.end()
 
     def _scene_input_blocked(self) -> bool:
@@ -2386,8 +2457,13 @@ class ViewerApp:
         appearing = imgui.is_window_appearing()
 
         angular = edit.unit == "°"
-        if angular and imgui.is_key_pressed(imgui.Key.u, False):
+        unit_shortcut = angular and imgui.is_key_pressed(imgui.Key.u, False)
+        if unit_shortcut:
             self._toggle_precise_gizmo_angle_unit()
+            # Rebuild InputScalar's private edit buffer from the converted
+            # value. Its active text state otherwise keeps the pre-conversion
+            # string even though the numeric model has changed.
+            imgui.internal.clear_active_id()
         unit = "rad" if angular and self._precise_gizmo_angle_unit == "radians" else edit.unit
         title = f"{self.localizer.text(edit.action)} {edit.label}"
         # Some popup placements preserve a negative horizontal cursor offset
@@ -2444,7 +2520,7 @@ class ViewerApp:
             - float(imgui.get_style().item_spacing.x)
             - unit_width,
         )
-        if appearing:
+        if appearing or unit_shortcut:
             imgui.set_keyboard_focus_here()
         imgui.set_next_item_width(input_width)
         submitted, self._precise_gizmo_value = imgui.input_double(
@@ -2454,7 +2530,8 @@ class ViewerApp:
             0.0,
             "%.6f" if edit.unit == "m" or unit == "rad" else "%.3f",
             imgui.InputTextFlags_.enter_returns_true.value
-            | imgui.InputTextFlags_.auto_select_all.value,
+            | imgui.InputTextFlags_.auto_select_all.value
+            | imgui.InputTextFlags_.chars_scientific.value,
         )
         imgui.same_line()
         if angular:
@@ -2813,7 +2890,7 @@ class ViewerApp:
     ) -> None:
         image = self._viewport_image
         if image is None:
-            imgui.text_disabled("No viewport image is available")
+            imgui.text_disabled(self.localizer.text("No viewport image is available"))
         else:
             self._viewport_rect = _fit_image_rect(
                 self._viewport_panel_position,
@@ -2907,7 +2984,8 @@ class ViewerApp:
             )
             imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
             visible, _ = imgui.begin(
-                f"Joint {hit.label}###joint_limit_{hit.joint_id}_{hit.label[:3]}",
+                f"{self.localizer.text('Joint')} {hit.label}"
+                f"###joint_limit_{hit.joint_id}_{hit.label[:3]}",
                 None,
                 flags,
             )
@@ -3098,7 +3176,9 @@ class ViewerApp:
             imgui.StyleVar_.item_spacing,
             imgui.ImVec2(0.0, 0.0),
         )
-        visible, _ = imgui.begin("Playback###viewport_playback", None, flags)
+        visible, _ = imgui.begin(
+            f"{self.localizer.text('Playback')}###viewport_playback", None, flags
+        )
         if visible:
             take_playing = self.session.state_take_playing
             paused = self.session.paused and not take_playing
@@ -3176,7 +3256,7 @@ class ViewerApp:
             | imgui.WindowFlags_.no_scrollbar.value
         )
         imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
-        visible, _ = imgui.begin("Tools###viewport_tools", None, flags)
+        visible, _ = imgui.begin(f"{self.localizer.text('Tools')}###viewport_tools", None, flags)
         if visible:
             with _clipped_overlay_draw(self._viewport_rect) as draw:
                 action = draw_tool_column(
@@ -3282,7 +3362,7 @@ class ViewerApp:
             | imgui.WindowFlags_.no_inputs.value
         )
         imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
-        visible, _ = imgui.begin("Hints###viewport_hints", None, flags)
+        visible, _ = imgui.begin(f"{self.localizer.text('Hints')}###viewport_hints", None, flags)
         if visible:
             with _clipped_overlay_draw(self._viewport_rect) as draw:
                 draw_scene_tool_hints(
@@ -3312,7 +3392,15 @@ class ViewerApp:
         return "ready"
 
     def _status_tool_hints(self, *, loading: bool) -> tuple[ToolHint, ...]:
-        if loading or self._scene_input_blocked() or not self._has_scene_content():
+        if loading:
+            return ()
+        edit = self._precise_gizmo_edit
+        if edit is not None:
+            defaults = precise_input_status_hints(edit, self.localizer.text)
+            return self.tool_hints.resolve(defaults, surface="status")
+        if self._panel_status_hints:
+            return self.tool_hints.resolve(self._panel_status_hints, surface="status")
+        if self._scene_input_blocked() or not self._has_scene_content():
             return ()
         defaults = default_tool_hints(
             self._context_tool_hint_variant(),
@@ -3393,8 +3481,16 @@ class ViewerApp:
                 size.y,
                 self.theme,
                 scale,
-                selected=(selected_name if has_selection else self._viewport_labels.no_selection),
-                has_selection=has_selection,
+                selected=(
+                    ""
+                    if self._precise_gizmo_edit is not None
+                    else selected_name
+                    if has_selection
+                    else self._viewport_labels.no_selection
+                ),
+                # The precise-input title already identifies its target. Give
+                # Enter / Esc / U the reclaimed status width at extreme scale.
+                has_selection=has_selection and self._precise_gizmo_edit is None,
                 state=state,
                 sim_time=sim_time,
                 step=sim_step,
@@ -3438,12 +3534,18 @@ class ViewerApp:
         try:
             captured = bool(self.backend.capture(output))
         except Exception as exc:
-            self.session.report_message(f"Viewport capture failed: {exc}", level="error")
+            self.session.report_message(
+                f"{self.localizer.text('Viewport capture failed')}: {exc}", level="error"
+            )
             return
         if captured:
-            self.session.report_message(f"Saved viewport capture to {output}", level="success")
+            self.session.report_message(
+                f"{self.localizer.text('Saved viewport capture to')} {output}", level="success"
+            )
         else:
-            self.session.report_message("Viewport capture failed", level="error")
+            self.session.report_message(
+                self.localizer.text("Viewport capture failed"), level="error"
+            )
 
     def _toggle_viewport_recording(self) -> None:
         if self._viewport_recorder is not None:
@@ -3453,7 +3555,9 @@ class ViewerApp:
 
         target = getattr(self.backend, "target", None)
         if target is None or not hasattr(target, "read_color"):
-            self.session.report_message("Viewport recording is unavailable", level="error")
+            self.session.report_message(
+                self.localizer.text("Viewport recording is unavailable"), level="error"
+            )
             return
         output = Path("output") / f"viewport-{time.strftime('%Y%m%d-%H%M%S')}.mp4"
         try:
@@ -3463,12 +3567,16 @@ class ViewerApp:
                 fps=30.0,
             )
         except Exception as exc:
-            self.session.report_message(f"Viewport recording failed: {exc}", level="error")
+            self.session.report_message(
+                f"{self.localizer.text('Viewport recording failed')}: {exc}", level="error"
+            )
             return
         self._viewport_recorder = recorder
         self._viewport_recording_path = output
         self._viewport_record_elapsed = 1.0 / 30.0
-        self.session.report_message(f"Recording viewport to {output}", level="success")
+        self.session.report_message(
+            f"{self.localizer.text('Recording viewport to')} {output}", level="success"
+        )
 
     def _record_viewport_frame(self, dt: float) -> None:
         recorder = self._viewport_recorder
@@ -3485,7 +3593,9 @@ class ViewerApp:
                 recorder.append(image)
         except Exception as exc:
             self._stop_viewport_recording(report=False)
-            self.session.report_message(f"Viewport recording stopped: {exc}", level="error")
+            self.session.report_message(
+                f"{self.localizer.text('Viewport recording stopped')}: {exc}", level="error"
+            )
             return
         self._viewport_record_elapsed -= frames * period
 
@@ -3502,11 +3612,14 @@ class ViewerApp:
             recorder.close()
         except Exception as exc:
             if report:
-                self.session.report_message(f"Viewport recording failed: {exc}", level="error")
+                self.session.report_message(
+                    f"{self.localizer.text('Viewport recording failed')}: {exc}", level="error"
+                )
             return
         if report and path is not None:
             self.session.report_message(
-                f"Saved {frames} viewport frame(s) to {path}",
+                f"{self.localizer.text('Saved')} {frames} "
+                f"{self.localizer.text('viewport frame(s) to')} {path}",
                 level="success",
             )
 

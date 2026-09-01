@@ -49,7 +49,7 @@ class StatsPanel(Panel):
             scale_max=self._scale_ms,
             graph_size=imgui.ImVec2(-1, 60.0 * ctx.style_scale),
         )
-        imgui.text_disabled(f"scale 0 .. {self._scale_ms:.1f} ms   (60 fps = 16.7 ms)")
+        imgui.text_disabled(f"{ctx.tr('scale')} 0 .. {self._scale_ms:.1f} ms   (60 fps = 16.7 ms)")
         count_flags = (
             imgui.TableFlags_.sizing_stretch_same
             | imgui.TableFlags_.row_bg
@@ -58,11 +58,11 @@ class StatsPanel(Panel):
         if imgui.begin_table("stats_counts", 2, count_flags):
             imgui.table_setup_column("metric", imgui.TableColumnFlags_.width_stretch, 1.0)
             imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch, 1.0)
-            labeled("draw calls", str(stats.draw_calls))
-            labeled("instances", str(stats.instances))
-            labeled("triangles", f"{stats.triangles:,}")
-            labeled("buckets", str(stats.buckets))
-            labeled("frame cpu", f"{stats.frame_cpu_ms:.3f} ms")
+            labeled(ctx.tr("draw calls"), str(stats.draw_calls))
+            labeled(ctx.tr("instances"), str(stats.instances))
+            labeled(ctx.tr("triangles"), f"{stats.triangles:,}")
+            labeled(ctx.tr("buckets"), str(stats.buckets))
+            labeled(ctx.tr("frame cpu"), f"{stats.frame_cpu_ms:.3f} ms")
             imgui.end_table()
 
         imgui.separator()
@@ -87,7 +87,7 @@ class StatsPanel(Panel):
 
     def _passes(self, ctx: PanelContext, stats, caps) -> None:
         if not stats.cpu_ms and not stats.gpu_ms:
-            imgui.text_disabled("no per-pass timing from this backend")
+            imgui.text_disabled(ctx.tr("no per-pass timing from this backend"))
             return
 
         names = list(stats.cpu_ms)
@@ -99,9 +99,9 @@ class StatsPanel(Panel):
             | imgui.TableFlags_.borders_inner_h
         )
         if imgui.begin_table("stats_passes", 3, flags):
-            imgui.table_setup_column("pass")
-            imgui.table_setup_column("cpu ms")
-            imgui.table_setup_column("gpu ms")
+            imgui.table_setup_column(ctx.tr("pass"))
+            imgui.table_setup_column(ctx.tr("cpu ms"))
+            imgui.table_setup_column(ctx.tr("gpu ms"))
             imgui.table_headers_row()
             for name in names:
                 imgui.table_next_row()
@@ -118,5 +118,5 @@ class StatsPanel(Panel):
         if not caps.gpu_timing:
             imgui.text_colored(
                 imgui.ImVec4(*ctx.theme.text_disabled),
-                f"{caps.name}: no GPU timer queries on this machine; cpu column only",
+                f"{caps.name}: {ctx.tr('no GPU timer queries on this machine; cpu column only')}",
             )

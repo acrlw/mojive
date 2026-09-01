@@ -115,6 +115,19 @@ def settings_uses_stacked_layout(available_width: float, style_scale: float) -> 
     return float(available_width) < minimum_width * float(style_scale)
 
 
+def responsive_flag_groups(requested: int, available_width: float, style_scale: float) -> int:
+    """Reduce render-flag columns before translated labels start clipping."""
+
+    fit = int(float(available_width) / max(96.0 * float(style_scale), 1.0))
+    return max(1, min(int(requested), fit))
+
+
+def render_flag_label(flag: RenderFlag, translate, *, localized: bool) -> str:
+    """Keep official MuJoCo flag tokens intact while localizing Forge flags."""
+
+    return translate(flag.value) if localized else flag.value
+
+
 def flag_groups() -> tuple[tuple[str, tuple[RenderFlag, ...]], ...]:
     rest = tuple(f for f in RenderFlag if f not in _RND_FLAGS and f not in _VIS_FLAGS)
     return (
@@ -242,7 +255,7 @@ class SettingsPanel(Panel):
             self._property(t("UI font"))
             imgui.text_disabled(ctx.font_report.mono)
             self._property(t("CJK font"))
-            imgui.text_disabled(ctx.font_report.cjk or "none")
+            imgui.text_disabled(ctx.font_report.cjk or ctx.tr("none"))
         imgui.end_table()
 
     def _rendering(self, ctx: PanelContext) -> None:
@@ -511,7 +524,7 @@ class SettingsPanel(Panel):
                 continue
             if not imgui.collapsing_header(title, imgui.TreeNodeFlags_.default_open):
                 continue
-            self._flag_table(ctx, f"settings_{title}", flags)
+            self._flag_table(ctx, f"settings_{title}", flags, translate_labels=False)
 
         if self._message:
             imgui.separator()
@@ -618,7 +631,7 @@ class SettingsPanel(Panel):
             imgui.end_table()
         imgui.separator()
 
-    def _flag_row(self, ctx: PanelContext, flag: RenderFlag) -> None:
+    def _flag_row(self, ctx: PanelContext, flag: RenderFlag, display_label: str) -> None:
         caps = ctx.backend.caps
         supported = caps.supports(flag)
         imgui.begin_disabled(not supported)
@@ -627,10 +640,12 @@ class SettingsPanel(Panel):
         )
         imgui.end_disabled()
         if not supported:
-            imgui.set_item_tooltip(f"{caps.name} does not implement '{flag.value}'")
+            imgui.set_item_tooltip(f"{caps.name} {ctx.tr('does not implement')} “{display_label}”")
             return
         if changed and not ctx.backend.set_flag(flag, value):
-            self._message = f"'{flag.value}' refused by {caps.name}"
+            self._message = (
+                f"{display_label} · {ctx.tr('backend refused the change')} ({caps.name})"
+            )
 
     def _flag_table(
         self,
@@ -638,7 +653,14 @@ class SettingsPanel(Panel):
         table_id: str,
         flags: tuple[RenderFlag, ...],
         groups: int = 2,
+        *,
+        translate_labels: bool = True,
     ) -> None:
+        groups = responsive_flag_groups(
+            groups,
+            imgui.get_content_region_avail().x,
+            ctx.style_scale,
+        )
         table_flags = imgui.TableFlags_.sizing_stretch_prop
         if not imgui.begin_table(table_id, groups * 2, table_flags):
             return
@@ -661,11 +683,16 @@ class SettingsPanel(Panel):
                 flag = flags[index]
                 imgui.align_text_to_frame_padding()
                 width = imgui.get_content_region_avail().x
-                label_width = imgui.calc_text_size(flag.value).x
+                display_label = render_flag_label(
+                    flag,
+                    ctx.tr,
+                    localized=translate_labels,
+                )
+                label_width = imgui.calc_text_size(display_label).x
                 imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, width - label_width))
-                imgui.text(flag.value)
+                imgui.text(display_label)
                 imgui.table_next_column()
-                self._flag_row(ctx, flag)
+                self._flag_row(ctx, flag, display_label)
         imgui.end_table()
 
     def current_view(self, backend) -> DebugView:
@@ -685,13 +712,15 @@ class SettingsPanel(Panel):
             selected, _ = imgui.selectable(view.value, view is current)
             imgui.end_disabled()
             if not ok:
-                imgui.set_item_tooltip(f"{caps.name} does not implement '{view.value}'")
+                imgui.set_item_tooltip(f"{caps.name} {ctx.tr('does not implement')} “{view.value}”")
             elif selected:
                 if ctx.backend.set_debug_view(view):
                     self._view = view
                     self._message = ""
                 else:
-                    self._message = f"debug view '{view.value}' refused by {caps.name}"
+                    self._message = (
+                        f"{view.value} · {ctx.tr('backend refused the change')} ({caps.name})"
+                    )
         imgui.end_combo()
 
     def _label_mode(self, ctx: PanelContext) -> None:

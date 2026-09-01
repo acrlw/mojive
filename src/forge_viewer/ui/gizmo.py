@@ -69,6 +69,7 @@ from ..gizmo import (
     paint_order,
     plane_corners,
     plane_direction,
+    prepare_projection,
     project,
     rotation_dial,
     rotation_handle_color,
@@ -115,6 +116,8 @@ JOINT_SLIDE_AXIS_HIT_PT = 7.0
 TRANSLATION_GUIDE_RADIUS_PT = 5.0
 TRACKBALL_RAD_PER_PT = 0.01
 JOINT_DRAG_START_TICK_HALF_PT = 6.0
+JOINT_ROTATION_AXIS_DASH_PT = 6.0
+JOINT_ROTATION_AXIS_GAP_PT = 6.0
 _FULL_TURN = 2.0 * np.pi
 _JOINT_RANGE_EPSILON = 1e-9
 
@@ -253,10 +256,17 @@ class _RotationDialProjector:
     ) -> None:
         self._cam = cam
         self._rect = rect
+        self._projection = prepare_projection(cam)
         self._center = np.asarray(center, np.float64)
         self._axis = np.asarray(axis, np.float64)
         self._start_direction = np.asarray(start_direction, np.float64)
-        self._world_scale = world_scale(cam, center, rect[3], size_px)
+        self._world_scale = world_scale(
+            cam,
+            center,
+            rect[3],
+            size_px,
+            prepared=self._projection,
+        )
 
     def points(self, radius, angles) -> np.ndarray:
         angles = np.atleast_1d(np.asarray(angles, np.float64))
@@ -271,6 +281,7 @@ class _RotationDialProjector:
                 angles,
             ),
             self._rect,
+            prepared=self._projection,
         )
 
     def tick(
@@ -302,11 +313,12 @@ class _ScreenRotationDialProjector:
         size_px: float,
     ) -> None:
         self._size_px = float(size_px)
-        projected_center = project(cam, (center,), rect)[0]
+        projection = prepare_projection(cam)
+        projected_center = project(cam, (center,), rect, prepared=projection)[0]
         self._center = projected_center[:2]
         self._depth = float(projected_center[2])
 
-        scale = world_scale(cam, center, rect[3], size_px)
+        scale = world_scale(cam, center, rect[3], size_px, prepared=projection)
         start_world = rotation_dial(center, axis, start_direction, scale, 1.0, (0.0,))[0]
         quarter_world = rotation_dial(
             center,
@@ -316,7 +328,10 @@ class _ScreenRotationDialProjector:
             1.0,
             (0.5 * np.pi,),
         )[0]
-        projected = project(cam, (start_world, quarter_world), rect)[:, :2] - self._center
+        projected = (
+            project(cam, (start_world, quarter_world), rect, prepared=projection)[:, :2]
+            - self._center
+        )
         start = projected[0]
         length = float(np.linalg.norm(start))
         self._radial = start / length if length > 1e-9 else np.array((1.0, 0.0))
@@ -1074,8 +1089,22 @@ class ObjectGizmo:
                 pos = self._start_pos
         else:
             basis = self._target_basis(mat, target)
-        scale = world_scale(cam, pos, rect[3], SIZE_PT * float(style_scale))
-        self._axis_mask, self._plane_mask = visibility(cam, pos, basis, rect, scale)
+        projection = prepare_projection(cam)
+        scale = world_scale(
+            cam,
+            pos,
+            rect[3],
+            SIZE_PT * float(style_scale),
+            prepared=projection,
+        )
+        self._axis_mask, self._plane_mask = visibility(
+            cam,
+            pos,
+            basis,
+            rect,
+            scale,
+            prepared=projection,
+        )
         frame = self._frame
         frame.mode = mode
         frame.style = self._style
@@ -1182,7 +1211,14 @@ class ObjectGizmo:
         frame = self._frame
         origin = np.asarray(frame.position, np.float64)
         rotation = np.asarray(frame.rotation, np.float64)
-        scale = world_scale(cam, origin, rect[3], SIZE_PT * style_scale)
+        projection = prepare_projection(cam)
+        scale = world_scale(
+            cam,
+            origin,
+            rect[3],
+            SIZE_PT * style_scale,
+            prepared=projection,
+        )
         visible = display_handles(frame)
 
         # The draw list paints in submission order with no depth buffer, so
@@ -1195,7 +1231,12 @@ class ObjectGizmo:
             alpha = handle_projection_alpha(frame, handle, cam, origin, rotation[:, axis])
             if alpha <= 0.0:
                 continue
-            screen = project(cam, plane_corners(origin, rotation, scale, axis), rect)
+            screen = project(
+                cam,
+                plane_corners(origin, rotation, scale, axis),
+                rect,
+                prepared=projection,
+            )
             if np.any(screen[:, 2] <= 0.0):
                 continue
             opacity = PLANE_ACTIVE_ALPHA if frame.active is handle else PLANE_ALPHA * alpha
@@ -1215,6 +1256,7 @@ class ObjectGizmo:
                     origin + rotation[:, axis] * scale * AXIS_END,
                 ),
                 rect,
+                prepared=projection,
             )
             if np.any(screen[:, 2] <= 0.0):
                 continue
@@ -1228,7 +1270,7 @@ class ObjectGizmo:
                 overlay.concave_fill(points, self._flat_color(handle, axis, alpha))
 
         if GizmoHandle.SCREEN in visible:
-            center = project(cam, (origin,), rect)[0]
+            center = project(cam, (origin,), rect, prepared=projection)[0]
             if center[2] > 0.0:
                 color = HOVER_COLOR if self._hot(GizmoHandle.SCREEN) else CENTER_COLOR
                 radius = CENTER_RADIUS * SIZE_PT * style_scale
@@ -1241,7 +1283,7 @@ class ObjectGizmo:
                 overlay.circle_filled(center[:2], radius, color, segments=24)
 
         if GizmoHandle.ROTATE_TRACKBALL in visible:
-            center = project(cam, (origin,), rect)[0]
+            center = project(cam, (origin,), rect, prepared=projection)[0]
             if center[2] > 0.0:
                 overlay.circle_filled(
                     center[:2],
@@ -1260,7 +1302,7 @@ class ObjectGizmo:
             if alpha <= 0.0:
                 continue
             ring = rotation_ring(cam, origin, rotation, scale, axis, full=full)
-            screen = project(cam, ring, rect)
+            screen = project(cam, ring, rect, prepared=projection)
             if np.any(screen[:, 2] <= 0.0):
                 continue
             ring_color = rotation_handle_color(frame, handle, axis, alpha)
@@ -1290,7 +1332,7 @@ class ObjectGizmo:
         if GizmoHandle.ROTATE_SCREEN in visible and not (
             frame.active_rotation_overlay and frame.active is GizmoHandle.ROTATE_SCREEN
         ):
-            center = project(cam, (origin,), rect)[0]
+            center = project(cam, (origin,), rect, prepared=projection)[0]
             if center[2] > 0.0:
                 color = HOVER_COLOR if self._hot(GizmoHandle.ROTATE_SCREEN) else CENTER_COLOR
                 radius = SCREEN_RING_RADIUS * SIZE_PT * style_scale
@@ -2020,11 +2062,34 @@ class ObjectGizmo:
         if segment is None or float(np.linalg.norm(segment[1] - segment[0])) < 8.0 * style_scale:
             return
         _fill, pressed, _dark = self._active_rotation_palette()
+        color = _with_alpha(pressed, 0.82)
+        width = 1.6 * style_scale
+        if short_joint_axis:
+            center = project(cam, (origin,), rect)[0]
+            camera_side = float(np.dot(np.asarray(cam.eye, np.float64) - origin, axis))
+            if center[2] > 0.0 and abs(camera_side) > 1e-9:
+                front = segment[1] if camera_side > 0.0 else segment[0]
+                back = segment[0] if camera_side > 0.0 else segment[1]
+                for dash_start, dash_end in _dashed_line_segments(
+                    center[:2],
+                    back,
+                    JOINT_ROTATION_AXIS_DASH_PT * style_scale,
+                    JOINT_ROTATION_AXIS_GAP_PT * style_scale,
+                ):
+                    overlay.line(
+                        dash_start,
+                        dash_end,
+                        color,
+                        width,
+                        cap="round",
+                    )
+                overlay.line(center[:2], front, color, width, cap="round")
+                return
         overlay.line(
             segment[0],
             segment[1],
-            _with_alpha(pressed, 0.82),
-            1.6 * style_scale,
+            color,
+            width,
         )
 
     def _draw_translation_guide(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
@@ -3048,6 +3113,34 @@ def _clip_line_to_rect(origin, direction, rect) -> tuple[np.ndarray, np.ndarray]
     if lo > hi:
         return None
     return origin + lo * direction, origin + hi * direction
+
+
+def _dashed_line_segments(
+    start,
+    end,
+    dash: float,
+    gap: float,
+) -> tuple[tuple[np.ndarray, np.ndarray], ...]:
+    """Split one screen segment into center-anchored dash strokes."""
+
+    start = np.asarray(start, np.float64)
+    delta = np.asarray(end, np.float64) - start
+    length = float(np.linalg.norm(delta))
+    dash = max(float(dash), 0.0)
+    gap = max(float(gap), 0.0)
+    if length < 1e-9 or dash <= 0.0:
+        return ()
+    direction = delta / length
+    stride = dash + gap
+    segments: list[tuple[np.ndarray, np.ndarray]] = []
+    offset = 0.0
+    while offset < length:
+        dash_end = min(length, offset + dash)
+        segments.append((start + direction * offset, start + direction * dash_end))
+        if stride <= 1e-9:
+            break
+        offset += stride
+    return tuple(segments)
 
 
 def _clip_segment_to_rect(start, end, rect) -> tuple[np.ndarray, np.ndarray] | None:

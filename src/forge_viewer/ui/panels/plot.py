@@ -88,7 +88,7 @@ class PlotPanel(Panel):
     def draw(self, ctx: PanelContext) -> None:
         source_index = segmented_control(
             "plot-source",
-            ("Joints", "Sensors"),
+            (ctx.tr("Joints"), ctx.tr("Sensors")),
             0 if self.source == "joint" else 1,
             theme=ctx.theme,
         )
@@ -103,7 +103,7 @@ class PlotPanel(Panel):
         s = ctx.session
         joints = s.joints
         if not joints:
-            imgui.text_disabled("no joints to plot")
+            imgui.text_disabled(ctx.tr("no joints to plot"))
             return
 
         self.joint_index = max(0, min(self.joint_index, len(joints) - 1))
@@ -115,11 +115,11 @@ class PlotPanel(Panel):
             self._velocity.clear()
             self._tracked = self.joint_index
 
-        _c, self.show_angle = imgui.checkbox("angle", self.show_angle)
+        _c, self.show_angle = imgui.checkbox(ctx.tr("angle"), self.show_angle)
         imgui.same_line()
-        _c, self.show_velocity = imgui.checkbox("velocity", self.show_velocity)
+        _c, self.show_velocity = imgui.checkbox(ctx.tr("velocity"), self.show_velocity)
         imgui.same_line()
-        _c, self.show_contact = imgui.checkbox("contact force", self.show_contact)
+        _c, self.show_contact = imgui.checkbox(ctx.tr("contact force"), self.show_contact)
 
         self._sample(ctx)
 
@@ -135,7 +135,7 @@ class PlotPanel(Panel):
     def _draw_sensor(self, ctx: PanelContext) -> None:
         infos = ctx.session.sensor_infos
         if not infos:
-            imgui.text_disabled("no sensors to plot")
+            imgui.text_disabled(ctx.tr("no sensors to plot"))
             return
 
         self.sensor_index = max(0, min(self.sensor_index, len(infos) - 1))
@@ -149,7 +149,7 @@ class PlotPanel(Panel):
             component_changed, self.sensor_component = imgui.combo(
                 "##plot_sensor_component",
                 self.sensor_component,
-                tuple(f"component {index}" for index in range(sensor.dim)),
+                tuple(f"{ctx.tr('component')} {index}" for index in range(sensor.dim)),
             )
             changed = changed or component_changed
 

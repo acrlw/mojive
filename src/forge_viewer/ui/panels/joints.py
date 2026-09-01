@@ -29,6 +29,10 @@ class JointsPanel(Panel):
         self._joint_page = 0
         self._search = ""
         self._sort_by_name = False
+        self._browse_cache_key: tuple[int, str, bool] | None = None
+        self._browse_cache: tuple[JointInfo, ...] = ()
+        self._joint_nodes_generation = -1
+        self._joint_nodes: dict[int, object] = {}
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds(poses=False, qpos=True)
@@ -64,12 +68,18 @@ class JointsPanel(Panel):
         if changed or sort_changed:
             self._joint_page = 0
 
-        filtered = filter_joints(s.joints, self._search)
-        if not filtered:
+        cache_key = (s.structure_generation, self._search, self._sort_by_name)
+        if cache_key != self._browse_cache_key:
+            self._browse_cache = sort_joints(
+                filter_joints(s.joints, self._search),
+                by_name=self._sort_by_name,
+            )
+            self._browse_cache_key = cache_key
+        ordered = self._browse_cache
+        if not ordered:
             imgui.text_disabled(ctx.tr("No matching joints"))
             return
 
-        ordered = sort_joints(filtered, by_name=self._sort_by_name)
         if len(ordered) > _BROWSE_THRESHOLD:
             imgui.text_disabled(f"{len(ordered)} {ctx.tr('joints total')}")
             self._joint_page, start, stop = _page_controls(
@@ -77,8 +87,12 @@ class JointsPanel(Panel):
             )
             ordered = ordered[start:stop]
 
-        joint_nodes = {node.joint_index: node for node in s.nodes if node.type is NodeType.JOINT}
-        self._joint_table(ctx, ordered, joint_nodes)
+        if self._joint_nodes_generation != s.structure_generation:
+            self._joint_nodes = {
+                node.joint_index: node for node in s.nodes if node.type is NodeType.JOINT
+            }
+            self._joint_nodes_generation = s.structure_generation
+        self._joint_table(ctx, ordered, self._joint_nodes)
 
     def _joint_table(self, ctx: PanelContext, joints, joint_nodes) -> None:
         flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
@@ -86,8 +100,13 @@ class JointsPanel(Panel):
             return
         imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.36)
         imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch, 0.64)
-        for joint in joints:
-            self._joint_row(ctx, joint, joint_nodes.get(joint.joint_id))
+        clipper = imgui.ListClipper()
+        clipper.begin(len(joints))
+        while clipper.step():
+            for index in range(clipper.display_start, clipper.display_end):
+                joint = joints[index]
+                self._joint_row(ctx, joint, joint_nodes.get(joint.joint_id))
+        clipper.end()
         imgui.end_table()
 
     def _joint_row(self, ctx: PanelContext, j: JointInfo, joint_node) -> None:
@@ -117,7 +136,7 @@ class JointsPanel(Panel):
         imgui.table_next_column()
         if j.type not in _SCALAR_KINDS:
             imgui.align_text_to_frame_padding()
-            imgui.text_disabled(f"{ctx.tr(f'{j.type.title()} joint')} · {j.dof} {ctx.tr('dof')}")
+            imgui.text_disabled(f"{j.type} · {j.dof} {ctx.tr('dof')}")
             return
 
         value = float(qpos[j.qpos_adr])
@@ -148,6 +167,10 @@ class JointsPanel(Panel):
             self._initial_qpos = np.zeros(0, np.float64)
             self._joint_page = 0
             self._search = ""
+            self._browse_cache_key = None
+            self._browse_cache = ()
+            self._joint_nodes_generation = -1
+            self._joint_nodes = {}
         if frame.qpos is not None and len(self._initial_qpos) != len(frame.qpos):
             self._initial_qpos = np.asarray(frame.qpos, np.float64).copy()
 

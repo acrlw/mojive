@@ -50,33 +50,35 @@ class HelpPanel(Panel):
         return FrameNeeds.none()
 
     def draw(self, ctx: PanelContext) -> None:
-        _table("mouse", MOUSE_GESTURES)
-        _table("keyboard", KEYS)
-        _table("value controls", VALUE_GESTURES)
+        _table(ctx, "mouse", MOUSE_GESTURES)
+        _table(ctx, "keyboard", KEYS)
+        _table(ctx, "value controls", VALUE_GESTURES)
         self._panels(ctx)
 
     def _panels(self, ctx: PanelContext) -> None:
         panels: Any = ctx.panels
         if panels is None:
-            imgui.text_disabled("no panel set in this context")
+            imgui.text_disabled(ctx.tr("no panel set in this context"))
             return
-        if not imgui.collapsing_header("panels", imgui.TreeNodeFlags_.default_open):
+        if not imgui.collapsing_header(ctx.tr("panels"), imgui.TreeNodeFlags_.default_open):
             return
-        imgui.text_disabled("Open or close panels from the Window menu; shortcuts are optional.")
+        imgui.set_item_tooltip(
+            ctx.tr("Open or close panels from the Window menu; shortcuts are optional.")
+        )
         if not imgui.begin_table("help_panels", 3, _FLAGS):
             return
-        imgui.table_setup_column("key")
-        imgui.table_setup_column("panel")
-        imgui.table_setup_column("default")
+        imgui.table_setup_column(ctx.tr("Shortcut"))
+        imgui.table_setup_column(ctx.tr("panel"))
+        imgui.table_setup_column(ctx.tr("default"))
         imgui.table_headers_row()
         for key, name, default_open in panels.shortcut_table():
             imgui.table_next_row()
             imgui.table_next_column()
             imgui.text(key or "—")
             imgui.table_next_column()
-            imgui.text(name)
+            imgui.text(ctx.tr(name))
             imgui.table_next_column()
-            imgui.text_disabled("open" if default_open else "closed")
+            imgui.text_disabled(ctx.tr("open" if default_open else "closed"))
         imgui.end_table()
 
 
@@ -87,15 +89,15 @@ _FLAGS = (
 )
 
 
-def _table(title: str, rows: tuple[tuple[str, str], ...]) -> None:
-    if not imgui.collapsing_header(title, imgui.TreeNodeFlags_.default_open):
+def _table(ctx: PanelContext, title: str, rows: tuple[tuple[str, str], ...]) -> None:
+    if not imgui.collapsing_header(ctx.tr(title), imgui.TreeNodeFlags_.default_open):
         return
     if not imgui.begin_table(f"help_{title}", 2, _FLAGS):
         return
     for left, right in rows:
         imgui.table_next_row()
         imgui.table_next_column()
-        imgui.text(left)
+        imgui.text(ctx.tr(left))
         imgui.table_next_column()
-        imgui.text_disabled(right)
+        imgui.text_disabled(ctx.tr(right))
     imgui.end_table()

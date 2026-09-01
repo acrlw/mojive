@@ -89,12 +89,16 @@ class HierarchyPanel(Panel):
 
         removable = self._batch_removable_roots()
         if len(self._batch_selected) > 1:
-            imgui.text_disabled(f"{len(self._batch_selected)} selected (Ctrl/Cmd+click)")
+            imgui.text_disabled(
+                f"{len(self._batch_selected)} {ctx.tr('selected')} (Ctrl/Cmd+click)"
+            )
             if removable:
                 imgui.same_line()
                 if not ctx.session.paused:
                     imgui.begin_disabled()
-                if imgui.small_button(f"Delete {len(removable)} model element(s)"):
+                if imgui.small_button(
+                    f"{ctx.tr('Delete')} {len(removable)} {ctx.tr('model elements')}"
+                ):
                     result = ctx.submit(
                         cmd.ModelEditBatch(
                             tuple(
@@ -107,7 +111,9 @@ class HierarchyPanel(Panel):
                         self._batch_selected.clear()
                 if not ctx.session.paused:
                     imgui.end_disabled()
-                    imgui.set_item_tooltip("Pause the simulation before editing model topology")
+                    imgui.set_item_tooltip(
+                        ctx.tr("Pause the simulation before editing model topology")
+                    )
 
         imgui.separator()
         if not imgui.begin_child("tree"):
@@ -149,12 +155,16 @@ class HierarchyPanel(Panel):
                         self._rows_truncated = True
                         break
                     hits.append(node)
-            for node in hits:
-                self._row(ctx, node, leaf=True, depth=0)
+            clipper = imgui.ListClipper()
+            clipper.begin(len(hits))
+            while clipper.step():
+                for index in range(clipper.display_start, clipper.display_end):
+                    self._row(ctx, hits[index], leaf=True, depth=0)
+            clipper.end()
             if not hits:
                 imgui.table_next_row()
                 imgui.table_next_column()
-                imgui.text_disabled("no match")
+                imgui.text_disabled(ctx.tr("no match"))
         else:
             for root in self._roots:
                 if self._rows_drawn >= self._row_budget:
@@ -166,7 +176,8 @@ class HierarchyPanel(Panel):
             imgui.table_next_row()
             imgui.table_next_column()
             imgui.text_disabled(
-                f"showing the first {self._row_budget} visible nodes; use the filter to narrow"
+                f"{ctx.tr('showing the first')} {self._row_budget} "
+                f"{ctx.tr('visible nodes; use the filter to narrow')}"
             )
 
         imgui.end_table()
@@ -176,7 +187,8 @@ class HierarchyPanel(Panel):
         style = imgui.get_style()
         spacing = float(style.item_spacing.x)
         padding = float(style.frame_padding.x)
-        total_width = sum(imgui.calc_text_size(label).x + padding * 2.0 for label in _TYPE_FILTERS)
+        display_labels = _TYPE_FILTERS
+        total_width = sum(imgui.calc_text_size(label).x + padding * 2.0 for label in display_labels)
         total_width += spacing * (len(_TYPE_FILTERS) - 1)
         height = imgui.get_frame_height() + imgui.get_style().scrollbar_size + 3.0 * ctx.style_scale
         imgui.set_next_window_content_size(imgui.ImVec2(total_width, 0.0))
@@ -191,7 +203,9 @@ class HierarchyPanel(Panel):
             imgui.end_child()
             return
         imgui.push_style_var(imgui.StyleVar_.frame_rounding, 3.0 * ctx.style_scale)
-        for index, label in enumerate(_TYPE_FILTERS):
+        for index, (label, display_label) in enumerate(
+            zip(_TYPE_FILTERS, display_labels, strict=True)
+        ):
             selected = label == self._type_filter
             imgui.push_style_color(
                 imgui.Col_.button,
@@ -209,7 +223,7 @@ class HierarchyPanel(Panel):
                 imgui.Col_.text,
                 imgui.ImVec4(*(ctx.theme.primary_bright if selected else ctx.theme.text_disabled)),
             )
-            if imgui.button(label):
+            if imgui.button(f"{display_label}##hierarchy-type-{label}"):
                 self._type_filter = label
             imgui.pop_style_color(4)
             if index + 1 < len(_TYPE_FILTERS):
@@ -338,7 +352,7 @@ class HierarchyPanel(Panel):
         if imgui.begin_popup_context_item(f"##entity_context_{node.node_id}"):
             if node.type is NodeType.MODEL and node.model_id >= 0:
                 self._model_create_menu(ctx, node)
-                remove, _ = imgui.menu_item("Remove Model", "", False)
+                remove, _ = imgui.menu_item(ctx.tr("Remove Model"), "", False)
                 if remove:
                     ctx.submit(cmd.RemoveSceneModel(node.model_id))
             elif node.model_id >= 0:
@@ -354,9 +368,9 @@ class HierarchyPanel(Panel):
                     NodeType.CAMERA,
                     NodeType.LIGHT,
                 )
-                duplicate, _ = imgui.menu_item("Duplicate", "Cmd/Ctrl+D", False, removable)
-                rename, _ = imgui.menu_item("Rename", "F2", False, removable)
-                remove, _ = imgui.menu_item("Delete from Model", "", False, removable)
+                duplicate, _ = imgui.menu_item(ctx.tr("Duplicate"), "Cmd/Ctrl+D", False, removable)
+                rename, _ = imgui.menu_item(ctx.tr("Rename"), "F2", False, removable)
+                remove, _ = imgui.menu_item(ctx.tr("Delete from Model"), "", False, removable)
                 if duplicate:
                     result = ctx.submit(cmd.DuplicateModelElement(node.node_id))
                     if result.ok:
@@ -367,9 +381,9 @@ class HierarchyPanel(Panel):
                     ctx.submit(cmd.RemoveModelElement(node.node_id))
             elif editable:
                 ctx.submit(cmd.SelectNode(node.node_id))
-                duplicate, _ = imgui.menu_item("Duplicate", "Cmd/Ctrl+D", False)
-                rename, _ = imgui.menu_item("Rename", "F2", False)
-                remove, _ = imgui.menu_item("Delete", "Delete", False)
+                duplicate, _ = imgui.menu_item(ctx.tr("Duplicate"), "Cmd/Ctrl+D", False)
+                rename, _ = imgui.menu_item(ctx.tr("Rename"), "F2", False)
+                remove, _ = imgui.menu_item(ctx.tr("Delete"), "Delete", False)
                 if duplicate:
                     ctx.submit(cmd.DuplicateSceneEntity(node.object_id))
                 if rename and ctx.request_rename is not None:
@@ -377,17 +391,18 @@ class HierarchyPanel(Panel):
                 if remove:
                     ctx.submit(cmd.RemoveSceneEntity(node.object_id))
             else:
-                imgui.text_disabled("Read-only entity")
+                imgui.text_disabled(ctx.tr("Read-only entity"))
             imgui.end_popup()
 
         if self._show_type_column:
             imgui.table_next_column()
             type_pos = imgui.get_cursor_screen_pos()
-            type_height = imgui.calc_text_size(str(node.type)).y
+            type_label = str(node.type)
+            type_height = imgui.calc_text_size(type_label).y
             imgui.set_cursor_screen_pos(
                 imgui.ImVec2(type_pos.x, row_start.y + (row_height - type_height) * 0.5)
             )
-            imgui.text_disabled(str(node.type))
+            imgui.text_disabled(type_label)
 
         imgui.table_next_column()
         self._visibility_toggle(ctx, node, row_start.y, row_height)
@@ -421,7 +436,7 @@ class HierarchyPanel(Panel):
 
     @staticmethod
     def _model_create_menu(ctx: PanelContext, node: SceneNode) -> None:
-        if not imgui.begin_menu("Add Child", ctx.session.adapter.caps.topology_editing):
+        if not imgui.begin_menu(ctx.tr("Add Child"), ctx.session.adapter.caps.topology_editing):
             return
         entries = [
             ("Body", "body"),
@@ -442,7 +457,7 @@ class HierarchyPanel(Panel):
             entries = [entry for entry in entries if not entry[1].startswith("joint:")]
         names = {item.name for item in ctx.session.nodes}
         for label, element_type in entries:
-            clicked, _ = imgui.menu_item(label, "", False)
+            clicked, _ = imgui.menu_item(ctx.tr(label), "", False)
             if clicked:
                 base = element_type.split(":", 1)[0]
                 index = 1
@@ -532,7 +547,7 @@ class HierarchyPanel(Panel):
                     )
             else:
                 ctx.submit(cmd.SetVisible(node.node_id, not node.visible))
-        imgui.set_item_tooltip("hide" if node.visible else "show")
+        imgui.set_item_tooltip(ctx.tr("hide" if node.visible else "show"))
 
 
 def hierarchy_open_depth(node_count: int) -> int:

@@ -80,7 +80,7 @@ class CameraPanel(Panel):
     def draw(self, ctx: PanelContext) -> None:
         camera = ctx.camera
         if camera is None:
-            imgui.text_disabled("no camera attached to this context")
+            imgui.text_disabled(ctx.tr("no camera attached to this context"))
             return
 
         self._source(ctx)
@@ -99,16 +99,16 @@ class CameraPanel(Panel):
         self._stored_states(ctx, camera)
 
     def _stored_states(self, ctx: PanelContext, camera: Any) -> None:
-        if not imgui.collapsing_header(f"{ctx.tr('camera bookmarks')}###camera_states"):
-            return
+        opened = imgui.collapsing_header(f"{ctx.tr('camera bookmarks')}###camera_states")
         camera_dir = Path("output/snapshots/cameras")
+        imgui.set_item_tooltip(f"{ctx.tr('Stored in')}: {camera_dir.resolve()}")
+        if not opened:
+            return
         view = ctx.model_camera_view if ctx.model_camera_id >= 0 else camera.view()
 
-        imgui.text_disabled(ctx.tr("camera bookmark"))
-        imgui.text_disabled(f"{ctx.tr('Stored in')}: {camera_dir}")
-        imgui.set_item_tooltip(str(camera_dir.resolve()))
+        imgui.set_next_item_width(-1.0)
         _changed, self._bookmark_name = imgui.input_text("##bookmark_name", self._bookmark_name)
-        if imgui.button("save##camera_bookmark"):
+        if imgui.button(f"{ctx.tr('Save')}##camera_bookmark"):
             try:
                 name = next_available_snapshot_name(self._bookmark_name, camera_dir)
                 path = save_named_snapshot(
@@ -121,16 +121,15 @@ class CameraPanel(Panel):
                 self._bookmark_name = next_available_snapshot_name(path.stem, camera_dir)
                 self._bookmark_error = ""
                 ctx.report(
-                    f"Saved camera bookmark to {path.resolve()}",
+                    f"{ctx.tr('Saved camera bookmark to')} {path.resolve()}",
                     level="success",
                 )
             except (OSError, TypeError, ValueError) as error:
                 self._report_storage_error(ctx, error)
-        imgui.same_line()
         bookmarks = list_named_snapshots(camera_dir)
         self._bookmark_index = min(self._bookmark_index, max(len(bookmarks) - 1, 0))
         if bookmarks:
-            imgui.set_next_item_width(140.0 * ctx.style_scale)
+            imgui.set_next_item_width(-1.0)
             changed, self._bookmark_index = imgui.combo(
                 "##camera_bookmarks", self._bookmark_index, bookmarks
             )
@@ -141,11 +140,10 @@ class CameraPanel(Panel):
                         load_named_snapshot(name, camera_dir), camera, ctx.select_model_camera
                     )
                     self._bookmark_error = ""
-                    ctx.report(f"Loaded camera bookmark '{name}'", level="success")
+                    ctx.report(f"{ctx.tr('Loaded camera bookmark')} '{name}'", level="success")
                 except (OSError, KeyError, TypeError, ValueError) as error:
                     self._report_storage_error(ctx, error)
-            imgui.same_line()
-            if imgui.button("copy##camera_bookmark"):
+            if imgui.button(f"{ctx.tr('Copy')}##camera_bookmark"):
                 try:
                     imgui.set_clipboard_text(
                         json.dumps(load_named_snapshot(name, camera_dir), indent=2)
@@ -153,16 +151,16 @@ class CameraPanel(Panel):
                 except (OSError, TypeError, ValueError) as error:
                     self._report_storage_error(ctx, error)
             imgui.same_line()
-            if imgui.button("delete##camera_bookmark"):
+            if imgui.button(f"{ctx.tr('Delete')}##camera_bookmark"):
                 try:
                     delete_named_snapshot(name, camera_dir)
-                    ctx.report(f"Deleted camera bookmark '{name}'", level="success")
+                    ctx.report(f"{ctx.tr('Deleted camera bookmark')} '{name}'", level="success")
                 except OSError as error:
                     self._report_storage_error(ctx, error)
 
         if self._bookmark_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._bookmark_error)
-            if imgui.small_button("Copy error##camera_bookmark"):
+            if imgui.small_button(f"{ctx.tr('Copy error')}##camera_bookmark"):
                 imgui.set_clipboard_text(self._bookmark_error)
 
     def _report_storage_error(self, ctx: PanelContext, error: Exception) -> None:
@@ -230,7 +228,7 @@ class CameraPanel(Panel):
             current = _get(camera, attr)
             if current is None:
                 continue
-            self._property_label(attr)
+            self._property_label(ctx.tr(attr))
             imgui.set_next_item_width(-1.0)
             edit = value_slider(
                 f"##camera-{attr}",
@@ -257,7 +255,9 @@ class CameraPanel(Panel):
             )
             imgui.end_disabled()
             if not supported:
-                imgui.set_item_tooltip(f"{ctx.backend.caps.name} has no orthographic projection")
+                imgui.set_item_tooltip(
+                    f"{ctx.backend.caps.name}: {ctx.tr('orthographic projection unavailable')}"
+                )
             else:
                 camera.orthographic = selected == 1
         imgui.end_table()

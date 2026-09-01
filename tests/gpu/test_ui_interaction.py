@@ -284,7 +284,7 @@ def test_hierarchy_filter_strip_accepts_the_ordinary_mouse_wheel(viewer):
     from imgui_bundle import imgui
 
     activate_panel(viewer, "Hierarchy")
-    point = item_rect(viewer, "button", "all")
+    point = item_rect(viewer, "button", "all##hierarchy-type-all")
     io = imgui.get_io()
     io.add_mouse_pos_event(*point)
     viewer.sync()
@@ -306,6 +306,38 @@ def test_hierarchy_filter_strip_accepts_the_ordinary_mouse_wheel(viewer):
     assert targets and targets[-1] > 0.0
 
 
+def test_keyframe_timeline_owns_the_wheel_while_zooming(viewer):
+    from imgui_bundle import imgui
+
+    panel = viewer.app.panels.get("Keyframes")
+    assert panel is not None
+    panel.open = True
+    viewer.sync()
+    viewer.sync()
+    activate_panel(viewer, "Keyframes")
+    viewer.sync()
+    viewer.sync()
+    point = item_rect(viewer, "invisible_button", "##keyframe-dope-sheet")
+    window = imgui.internal.find_window_by_name("Keyframes")
+    assert window is not None
+    io = imgui.get_io()
+    io.add_mouse_pos_event(*point)
+    viewer.sync()
+    assert [hint.hint_id for hint in viewer.app._panel_status_hints] == [
+        "keyframes.playhead",
+        "keyframes.zoom",
+        "keyframes.pan",
+    ]
+    before_span = panel._view_end - panel._view_start
+    before_scroll = float(window.scroll.y)
+
+    io.add_mouse_wheel_event(0.0, -1.0)
+    viewer.sync()
+
+    assert panel._view_end - panel._view_start > before_span
+    assert float(window.scroll.y) == pytest.approx(before_scroll)
+
+
 def test_environment_inspector_controls_render_flags(viewer):
     from imgui_bundle import imgui
 
@@ -317,10 +349,10 @@ def test_environment_inspector_controls_render_flags(viewer):
     environment = next(n for n in viewer.session.nodes if n.type is NodeType.ENVIRONMENT)
     viewer.session.submit(cmd.Select(environment.object_id))
     activate_panel(viewer, "Inspector")
-    item_rect(viewer, "combo", "texture##skybox")
-    item_rect(viewer, "combo", "mode##haze")
+    item_rect(viewer, "combo", "##environment-skybox-texture")
+    item_rect(viewer, "combo", "##environment-haze-mode")
     _scroll_panel(viewer, "Inspector", -7.0)
-    point = item_rect(viewer, "checkbox", "enabled##fog")
+    point = item_rect(viewer, "checkbox", "##environment-fog-enabled")
     before = viewer.backend.get_flag(RenderFlag.FOG)
 
     click(viewer, imgui.get_io(), point)
@@ -1869,6 +1901,7 @@ def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(
     assert popup_width == pytest.approx(204.0 * v.window.style_scale, abs=2.0)
     assert input_bounds[-1][1] <= content_right + 1.0
     assert input_flags[-1] & imgui.InputTextFlags_.auto_select_all.value
+    assert input_flags[-1] & imgui.InputTextFlags_.chars_scientific.value
     assert title_bounds[-1][0] >= popup_left + imgui.get_style().window_padding.x - 1.0
     assert title_bounds[-1][1] <= content_right + 1.0
     v.app._precise_gizmo_edit = edit
@@ -2020,6 +2053,9 @@ def test_precise_rotation_input_switches_to_radians_with_u(free_body_viewer):
     v.sync()
 
     io.add_key_event(imgui.Key.u, True)
+    # Native keyboard input also arrives through the character queue. The
+    # unit shortcut must not replace the selected numeric buffer with "u".
+    io.add_input_character(ord("u"))
     v.sync()
     io.add_key_event(imgui.Key.u, False)
     v.sync()
@@ -2336,8 +2372,8 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style, monkeyp
     assert gizmo_draw.arc_strokes == 1
     assert gizmo_draw.open_arcs == 0
     assert all(draw.closed_arcs == gizmo_draw.closed_arcs for draw in recorders[1:])
-    # Axis rotations add one finite viewport-clipped guide; the sector itself
-    # still has no center-to-arc radial strokes.
+    # Free-body axis rotations keep one finite viewport-clipped guide; the
+    # sector itself still has no center-to-arc radial strokes.
     assert gizmo_draw.radials == 1
     assert all(draw.radials == 1 for draw in recorders[1:])
     assert gizmo_draw.center_dots == 0
@@ -2499,7 +2535,11 @@ def test_holding_axis_key_uses_the_exact_gizmo_axis_without_a_mouse_click(free_b
     recorders = []
 
     def spy():
-        recorder = Recorder(real())
+        inner = real()
+        window = imgui.internal.get_current_window_read()
+        if window is None or not window.name.startswith("Viewport"):
+            return inner
+        recorder = Recorder(inner)
         recorders.append(recorder)
         return recorder
 

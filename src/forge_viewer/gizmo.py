@@ -65,6 +65,22 @@ CONTRAST_EDGE_COLOR = np.array((0.68, 0.71, 0.76, 1.0), np.float32)
 GUIDE_CORE_COLOR = np.array((0.98, 0.98, 0.99, 1.0), np.float32)
 
 
+@dataclass(frozen=True)
+class GizmoProjection:
+    """Camera matrices prepared once for a related gizmo operation."""
+
+    projection: np.ndarray
+    view_projection: np.ndarray
+
+
+def prepare_projection(cam: CameraView) -> GizmoProjection:
+    """Prepare immutable per-operation camera matrices for gizmo projection."""
+
+    projection = np.asarray(cam.proj_matrix(), np.float64)
+    view = np.asarray(cam.view_matrix(), np.float64)
+    return GizmoProjection(projection, projection @ view)
+
+
 def axis_hover_color(color) -> tuple[float, float, float, float]:
     """Return a brighter interaction color that preserves the source axis hue."""
 
@@ -210,13 +226,19 @@ def rotation_ring_is_full(frame: GizmoFrame, handle: GizmoHandle) -> bool:
     return visible_axes == 1 and bool(frame.handle_mask & (1 << int(handle)))
 
 
-def world_scale(cam: CameraView, origin, viewport_height: float, size_pt: float = SIZE_PT) -> float:
+def world_scale(
+    cam: CameraView,
+    origin,
+    viewport_height: float,
+    size_pt: float = SIZE_PT,
+    *,
+    prepared: GizmoProjection | None = None,
+) -> float:
     h = max(float(viewport_height), 1.0)
-    view = np.asarray(cam.view_matrix(), np.float64)
-    projection = np.asarray(cam.proj_matrix(), np.float64)
+    prepared = prepared or prepare_projection(cam)
     point = np.append(np.asarray(origin, np.float64), 1.0)
-    clip_w = float((projection @ (view @ point))[3])
-    p11 = float(projection[1, 1])
+    clip_w = float((prepared.view_projection @ point)[3])
+    p11 = float(prepared.projection[1, 1])
     if clip_w <= 0.0 or abs(p11) < 1e-9:
         return 0.0
     return 2.0 * clip_w * float(size_pt) / (p11 * h)
@@ -351,10 +373,16 @@ def _normalize_rows(values: np.ndarray, fallback) -> np.ndarray:
     return result
 
 
-def project(cam: CameraView, points, rect: tuple[float, float, float, float]) -> np.ndarray:
+def project(
+    cam: CameraView,
+    points,
+    rect: tuple[float, float, float, float],
+    *,
+    prepared: GizmoProjection | None = None,
+) -> np.ndarray:
     p = np.asarray(points, np.float64).reshape(-1, 3)
-    mvp = np.asarray(cam.proj_matrix(), np.float64) @ np.asarray(cam.view_matrix(), np.float64)
-    clip = np.concatenate((p, np.ones((len(p), 1))), axis=1) @ mvp.T
+    prepared = prepared or prepare_projection(cam)
+    clip = np.concatenate((p, np.ones((len(p), 1))), axis=1) @ prepared.view_projection.T
     w = clip[:, 3]
     safe = np.where(np.abs(w) < 1e-9, 1e-9, w)
     ndc = clip[:, :2] / safe[:, None]
@@ -556,19 +584,39 @@ def visibility(
     rotation,
     rect: tuple[float, float, float, float],
     scale: float,
+    *,
+    prepared: GizmoProjection | None = None,
 ) -> tuple[int, int]:
     o = np.asarray(origin, np.float64)
     r = np.asarray(rotation, np.float64).reshape(3, 3)
-    center = project(cam, [o], rect)[0]
-    if center[2] <= 0.0 or scale <= 0.0:
+    if scale <= 0.0:
+        return 0, 0
+    prepared = prepared or prepare_projection(cam)
+    axis_ends = np.asarray(
+        [o + r[:, axis] * scale * AXIS_END for axis in range(3)],
+        np.float64,
+    )
+    plane_points = np.concatenate(
+        [plane_corners(o, r, scale, axis) for axis in range(3)],
+        axis=0,
+    )
+    screen = project(
+        cam,
+        np.concatenate((o[None, :], axis_ends, plane_points), axis=0),
+        rect,
+        prepared=prepared,
+    )
+    center = screen[0]
+    if center[2] <= 0.0:
         return 0, 0
     axis_mask = 0
     plane_mask = 0
     for axis in range(3):
-        end = project(cam, [o + r[:, axis] * scale * AXIS_END], rect)[0]
+        end = screen[1 + axis]
         if end[2] > 0.0 and axis_handle_alpha(cam, o, r[:, axis]) > 0.0:
             axis_mask |= 1 << axis
-        poly = project(cam, plane_corners(o, r, scale, axis), rect)
+        start = 4 + axis * 4
+        poly = screen[start : start + 4]
         if np.all(poly[:, 2] > 0.0) and plane_handle_alpha(cam, o, r[:, axis]) > 0.0:
             plane_mask |= 1 << axis
     return axis_mask, plane_mask
@@ -588,12 +636,13 @@ def hit_test(
     o = np.asarray(origin, np.float64)
     r = np.asarray(rotation, np.float64).reshape(3, 3)
     style_scale = float(style_scale)
-    scale = world_scale(cam, o, rect[3], SIZE_PT * style_scale)
-    axis_mask, plane_mask = visibility(cam, o, r, rect, scale)
+    prepared = prepare_projection(cam)
+    scale = world_scale(cam, o, rect[3], SIZE_PT * style_scale, prepared=prepared)
+    axis_mask, plane_mask = visibility(cam, o, r, rect, scale, prepared=prepared)
     if not axis_mask and not plane_mask:
         return GizmoHandle.NONE, axis_mask, plane_mask
     p = np.asarray(cursor, np.float64)
-    center = project(cam, [o], rect)[0, :2]
+    center = project(cam, [o], rect, prepared=prepared)[0, :2]
 
     def allowed(handle: GizmoHandle) -> bool:
         return bool(allowed_handles & (1 << int(handle)))
@@ -619,6 +668,7 @@ def hit_test(
                 cam,
                 (o + r[:, axis] * scale * AXIS_START, o + r[:, axis] * scale * AXIS_END),
                 rect,
+                prepared=prepared,
             )
             if np.any(screen[:, 2] <= 0.0):
                 continue
@@ -639,7 +689,12 @@ def hit_test(
             axis = planes[index]
             if plane_handle_alpha(cam, o, r[:, axis]) <= HANDLE_HIT_ALPHA:
                 continue
-            polygon = project(cam, plane_corners(o, r, scale, axis), rect)[:, :2]
+            polygon = project(
+                cam,
+                plane_corners(o, r, scale, axis),
+                rect,
+                prepared=prepared,
+            )[:, :2]
             if _polygon_distance(p, polygon) <= PLANE_HIT_PADDING_PT * style_scale:
                 return PLANE_HANDLES[axis], axis_mask, plane_mask
         return GizmoHandle.NONE, axis_mask, plane_mask
@@ -660,7 +715,7 @@ def hit_test(
         if rotation_ring_alpha(cam, o, r[:, axis]) <= HANDLE_HIT_ALPHA:
             continue
         ring = rotation_ring(cam, o, r, scale, axis, full=full_axis_ring)
-        screen = project(cam, ring, rect)
+        screen = project(cam, ring, rect, prepared=prepared)
         if np.any(screen[:, 2] <= 0.0):
             continue
         distance = min(

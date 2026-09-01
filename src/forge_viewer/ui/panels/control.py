@@ -22,6 +22,8 @@ class ControlPanel(Panel):
         self._snapshot_generation = -1
         self._search = ""
         self._sort_by_name = False
+        self._row_cache_key: tuple[int, str, bool] | None = None
+        self._row_cache: tuple[tuple[ActuatorInfo, int], ...] = ()
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds(poses=False, actuator=True)
@@ -53,11 +55,20 @@ class ControlPanel(Panel):
             state_order="ctrl / act",
             translate=ctx.tr,
         )
-        actuators = sort_actuators(
-            filter_actuators(session.actuators, self._search),
-            by_name=self._sort_by_name,
-        )
-        if not actuators:
+        cache_key = (session.structure_generation, self._search, self._sort_by_name)
+        if cache_key != self._row_cache_key:
+            actuators = sort_actuators(
+                filter_actuators(session.actuators, self._search),
+                by_name=self._sort_by_name,
+            )
+            self._row_cache = tuple(
+                (actuator, component)
+                for actuator in actuators
+                for component in range(actuator.ctrl_count)
+            )
+            self._row_cache_key = cache_key
+        rows = self._row_cache
+        if not rows:
             imgui.text_disabled(ctx.tr("No matching actuators"))
             return
         flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
@@ -65,11 +76,16 @@ class ControlPanel(Panel):
             return
         imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.36)
         imgui.table_setup_column("control", imgui.TableColumnFlags_.width_stretch, 0.64)
-        for actuator in actuators:
-            self._actuator_rows(ctx, actuator)
+        clipper = imgui.ListClipper()
+        clipper.begin(len(rows))
+        while clipper.step():
+            for index in range(clipper.display_start, clipper.display_end):
+                actuator, component = rows[index]
+                self._actuator_row(ctx, actuator, component)
+        clipper.end()
         imgui.end_table()
 
-    def _actuator_rows(self, ctx: PanelContext, actuator: ActuatorInfo) -> None:
+    def _actuator_row(self, ctx: PanelContext, actuator: ActuatorInfo, component: int) -> None:
         ctrl = ctx.session.frame.ctrl
         if ctrl is None:
             return
@@ -77,32 +93,29 @@ class ControlPanel(Panel):
         if hi <= lo:
             lo, hi = -1.0, 1.0
         name = actuator.name or f"act{actuator.actuator_id}"
-        for component in range(actuator.ctrl_count):
-            address = actuator.ctrl_address + component
-            if address >= len(ctrl):
-                continue
-            suffix = f"[{component}]" if actuator.ctrl_count > 1 else ""
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.align_text_to_frame_padding()
-            imgui.text_disabled(f"{name}{suffix}")
-            imgui.table_next_column()
-            imgui.set_next_item_width(-1.0)
-            value = float(ctrl[address])
-            initial = (
-                float(self._initial_ctrl[address]) if address < len(self._initial_ctrl) else value
-            )
-            edit = value_slider(
-                f"##control-actuator-{address}",
-                value,
-                lo,
-                hi,
-                initial=initial,
-                fmt="%+.3f",
-                more_hint="",
-            )
-            if edit.changed:
-                ctx.submit(cmd.SetCtrl(address, edit.value))
+        address = actuator.ctrl_address + component
+        if address >= len(ctrl):
+            return
+        suffix = f"[{component}]" if actuator.ctrl_count > 1 else ""
+        imgui.table_next_row()
+        imgui.table_next_column()
+        imgui.align_text_to_frame_padding()
+        imgui.text_disabled(f"{name}{suffix}")
+        imgui.table_next_column()
+        imgui.set_next_item_width(-1.0)
+        value = float(ctrl[address])
+        initial = float(self._initial_ctrl[address]) if address < len(self._initial_ctrl) else value
+        edit = value_slider(
+            f"##control-actuator-{address}",
+            value,
+            lo,
+            hi,
+            initial=initial,
+            fmt="%+.3f",
+            more_hint="",
+        )
+        if edit.changed:
+            ctx.submit(cmd.SetCtrl(address, edit.value))
 
     @staticmethod
     def _equality(ctx: PanelContext) -> None:
@@ -138,6 +151,8 @@ class ControlPanel(Panel):
             self._snapshot_generation = generation
             self._initial_ctrl = np.zeros(0, np.float64)
             self._search = ""
+            self._row_cache_key = None
+            self._row_cache = ()
         if ctrl is not None and len(self._initial_ctrl) != len(ctrl):
             self._initial_ctrl = np.asarray(ctrl, np.float64).copy()
 

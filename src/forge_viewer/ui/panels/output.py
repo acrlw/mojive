@@ -6,7 +6,7 @@ from imgui_bundle import imgui
 
 from ...adapters.base import FrameNeeds
 from ..messages import OutputMessage
-from . import Panel, PanelContext, search_input
+from . import Panel, PanelContext, button_row_layout, button_width, search_input
 
 _LEVEL_COLORS = {
     "debug": (0.58, 0.62, 0.68, 1.0),
@@ -73,7 +73,7 @@ class OutputPanel(Panel):
     def draw(self, ctx: PanelContext) -> None:
         output = ctx.output
         if output is None:
-            imgui.text_disabled("output is unavailable")
+            imgui.text_disabled(ctx.tr("output is unavailable"))
             return
 
         all_entries = output.entries()
@@ -117,20 +117,35 @@ class OutputPanel(Panel):
         filtering = bool(self._filter_text.strip()) or minimum_rank > 0
 
         copy_label = "Copy shown" if filtering else "Copy all"
-        if imgui.small_button(ctx.tr(copy_label)):
+        copy_text = ctx.tr(copy_label)
+        clear_text = ctx.tr("Clear")
+        count_text = (
+            f"{len(entries)} / {len(all_entries)} {ctx.tr('messages')}"
+            if filtering
+            else f"{len(entries)} {ctx.tr('messages')}"
+        )
+        inline = button_row_layout(
+            (
+                button_width(copy_text),
+                button_width(clear_text),
+                float(imgui.calc_text_size(count_text).x),
+            ),
+            imgui.get_content_region_avail().x,
+            imgui.get_style().item_spacing.x,
+        )
+        if imgui.small_button(copy_text):
             imgui.set_clipboard_text(output.copy_text(entries))
-        imgui.same_line()
-        if imgui.small_button(ctx.tr("Clear")):
+        if inline[1]:
+            imgui.same_line()
+        if imgui.small_button(clear_text):
             output.clear()
             all_entries = ()
             entries = ()
             self._filtered_entries = ()
             self._filter_cache_key = None
-        imgui.same_line()
-        if filtering:
-            imgui.text_disabled(f"{len(entries)} / {len(all_entries)} {ctx.tr('messages')}")
-        else:
-            imgui.text_disabled(f"{len(entries)} {ctx.tr('messages')}")
+        if inline[2]:
+            imgui.same_line()
+        imgui.text_disabled(count_text)
 
         imgui.separator()
         imgui.begin_child("output_messages", imgui.ImVec2(0.0, 0.0), 0)

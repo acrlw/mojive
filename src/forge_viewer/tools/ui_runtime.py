@@ -311,15 +311,19 @@ def _hover_gizmo_candidate(
     raise AssertionError(f"no interactive {handle.name} gizmo candidate")
 
 
-def _item_center(viewer, function_name: str, label: str) -> tuple[float, float]:
+def _item_rect(
+    viewer,
+    function_name: str,
+    label: str,
+) -> tuple[tuple[float, float], tuple[float, float]]:
     original = getattr(imgui, function_name)
-    found: list[tuple[float, float]] = []
+    found: list[tuple[tuple[float, float], tuple[float, float]]] = []
 
     def spy(item_label, *args, **kwargs):
         result = original(item_label, *args, **kwargs)
         if item_label == label:
             lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-            found.append(((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5))
+            found.append(((lo.x, lo.y), (hi.x, hi.y)))
         return result
 
     setattr(imgui, function_name, spy)
@@ -329,6 +333,11 @@ def _item_center(viewer, function_name: str, label: str) -> tuple[float, float]:
         setattr(imgui, function_name, original)
     assert found
     return found[-1]
+
+
+def _item_center(viewer, function_name: str, label: str) -> tuple[float, float]:
+    lo, hi = _item_rect(viewer, function_name, label)
+    return ((lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5)
 
 
 def _open_collapsing_header(viewer, label: str) -> None:
@@ -463,6 +472,38 @@ def _save_window_crop(
     panel = imgui.internal.find_window_by_name(window_name)
     if panel is None:
         return
+    _save_panel_crop(viewer, panel, path, padding=padding, max_height=max_height)
+
+
+def _save_active_popup_crop(
+    viewer,
+    path: Path,
+    *,
+    padding: float = 12.0,
+) -> None:
+    """Crop the topmost active ImGui popup, whose internal name is generated."""
+
+    panel = next(
+        (
+            window
+            for window in reversed(tuple(imgui.get_current_context().windows))
+            if window.active and str(window.name).startswith("##Popup_")
+        ),
+        None,
+    )
+    if panel is None:
+        return
+    _save_panel_crop(viewer, panel, path, padding=padding)
+
+
+def _save_panel_crop(
+    viewer,
+    panel,
+    path: Path,
+    *,
+    padding: float,
+    max_height: float = 0.0,
+) -> None:
     pixels = viewer.window.read_frame()[::-1, :, :3]
     image = Image.fromarray(pixels, "RGB")
     point_width, point_height = viewer.window.size_points
@@ -563,6 +604,29 @@ def _capture_keyframes(output: Path) -> None:
             output / "keyframes-idle-closeup.png",
             padding=8.0,
             max_height=560.0,
+        )
+        timeline_lo, timeline_hi = _item_rect(
+            viewer,
+            "invisible_button",
+            "##keyframe-dope-sheet",
+        )
+        panel_window = imgui.internal.find_window_by_name("Keyframes")
+        assert panel_window is not None
+        scale = viewer.window.style_scale
+        timeline = (
+            timeline_lo[0] + (timeline_hi[0] - timeline_lo[0]) * 0.65,
+            min(
+                timeline_lo[1] + (timeline_hi[1] - timeline_lo[1]) * 0.25,
+                float(panel_window.pos.y + panel_window.size.y) - 4.0 * scale,
+            ),
+        )
+        imgui.get_io().add_mouse_pos_event(*timeline)
+        _settle(viewer, 2)
+        _save_window_crop(
+            viewer,
+            "Status###application_status",
+            output / "keyframes-timeline-status-closeup.png",
+            padding=0.0,
         )
 
         viewer.session.submit(cmd.StartStateTakeRecording())
@@ -827,6 +891,7 @@ def _capture_joint_gizmos(output: Path) -> None:
         viewer.app.gizmo._hovered = GizmoHandle.ROTATE_Z
         edit = viewer.app.gizmo.precise_input(viewer.session)
         if edit is not None:
+            viewer.app._precise_gizmo_angle_unit = "degrees"
             viewer.app._begin_precise_gizmo_input(edit)
             _settle(viewer, 3)
             _click(
@@ -836,21 +901,44 @@ def _capture_joint_gizmos(output: Path) -> None:
             assert viewer.app._precise_gizmo_edit is not None
             _save(viewer, output / "joint-type-value.png")
             _save(viewer, output / "d5-precise-input.png")
-            _save_window_crop(
+            _save_active_popup_crop(
                 viewer,
-                "Type value###precise_gizmo_input",
                 output / "joint-type-value-closeup.png",
                 padding=8.0,
             )
-            viewer.app.set_language("zh_CN")
-            _settle(viewer, 3)
             _save_window_crop(
                 viewer,
-                "输入数值###precise_gizmo_input",
+                "Status###application_status",
+                output / "joint-type-value-status-closeup.png",
+                padding=0.0,
+            )
+            viewer.app.set_language("zh_CN")
+            _settle(viewer, 3)
+            _save_active_popup_crop(
+                viewer,
                 output / "joint-type-value-zh-closeup.png",
                 padding=8.0,
             )
+            _save_window_crop(
+                viewer,
+                "Status###application_status",
+                output / "joint-type-value-zh-status-closeup.png",
+                padding=0.0,
+            )
             viewer.app.set_language("en")
+            io = imgui.get_io()
+            io.add_key_event(imgui.Key.u, True)
+            io.add_input_character(ord("u"))
+            viewer.sync()
+            io.add_key_event(imgui.Key.u, False)
+            _settle(viewer, 2)
+            assert viewer.app._precise_gizmo_angle_unit == "radians"
+            _save(viewer, output / "joint-type-value-unit-shortcut.png")
+            _save_active_popup_crop(
+                viewer,
+                output / "joint-type-value-unit-shortcut-closeup.png",
+                padding=8.0,
+            )
     finally:
         viewer.release()
 
@@ -1300,9 +1388,8 @@ def _capture_joint_gizmo_scene(output: Path) -> None:
             viewer.app._begin_precise_gizmo_input(edit)
             _settle(viewer, 3)
             _save(viewer, output / "joint-ball-type-value.png")
-            _save_window_crop(
+            _save_active_popup_crop(
                 viewer,
-                "Type value###precise_gizmo_input",
                 output / "joint-ball-type-value-closeup.png",
                 padding=8.0,
             )

@@ -49,6 +49,10 @@ class PanelContext:
     info: dict[str, Any] = field(default_factory=dict)
 
     status: str = ""
+    # Panels publish one-frame interaction grammar here. The application
+    # status bar consumes it on the next frame because its viewport side bar
+    # must be laid out before docked panel contents are drawn.
+    status_hints: tuple[Any, ...] = ()
 
     panels: Any = None
 

@@ -54,6 +54,7 @@ from forge_viewer.gizmo import (
     plane_corners,
     plane_direction,
     plane_handle_alpha,
+    prepare_projection,
     project,
     rotation_dial,
     rotation_handle_color,
@@ -61,6 +62,7 @@ from forge_viewer.gizmo import (
     rotation_ring_alpha,
     rotation_ring_is_full,
     trackball_color,
+    visibility,
     world_scale,
 )
 from forge_viewer.render.backend import BackendCaps
@@ -87,6 +89,7 @@ from forge_viewer.ui.gizmo import (
     ObjectGizmo,
     _clip_line_to_rect,
     _clip_segment_to_rect,
+    _dashed_line_segments,
     _joint_current_tick_color,
     _joint_drag_label_color,
     _JointRangeState,
@@ -673,6 +676,63 @@ def test_gizmo_keeps_the_same_screen_size_at_different_depths(orthographic: bool
 
 
 @pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
+def test_prepared_projection_preserves_projection_and_world_scale(orthographic: bool) -> None:
+    cam = camera(orthographic=orthographic)
+    points = np.asarray(((0.0, 0.0, 0.0), (0.4, -0.2, 0.7)))
+    prepared = prepare_projection(cam)
+
+    assert project(cam, points, RECT, prepared=prepared) == pytest.approx(
+        project(cam, points, RECT)
+    )
+    assert world_scale(cam, points[0], RECT[3], prepared=prepared) == pytest.approx(
+        world_scale(cam, points[0], RECT[3])
+    )
+
+
+@pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
+def test_batched_visibility_matches_individual_projection_reference(orthographic: bool) -> None:
+    cam = camera(orthographic=orthographic)
+    rotations = (
+        np.eye(3),
+        math3d.rotvec_to_mat3(np.asarray((0.4, -0.7, 0.2))),
+    )
+    origins = (
+        np.zeros(3),
+        np.asarray(cam.eye, np.float64) + np.asarray(cam.forward(), np.float64) * 2.0,
+        np.asarray(cam.eye, np.float64) - np.asarray(cam.forward(), np.float64),
+    )
+
+    for origin in origins:
+        for rotation in rotations:
+            scale = world_scale(cam, origin, RECT[3])
+            assert visibility(cam, origin, rotation, RECT, scale) == _visibility_reference(
+                cam,
+                origin,
+                rotation,
+                scale,
+            )
+    assert visibility(cam, origins[0], rotations[0], RECT, 0.0) == (0, 0)
+
+
+def _visibility_reference(cam, origin, rotation, scale: float) -> tuple[int, int]:
+    origin = np.asarray(origin, np.float64)
+    rotation = np.asarray(rotation, np.float64).reshape(3, 3)
+    center = project(cam, (origin,), RECT)[0]
+    if center[2] <= 0.0 or scale <= 0.0:
+        return 0, 0
+    axis_mask = 0
+    plane_mask = 0
+    for axis in range(3):
+        end = project(cam, (origin + rotation[:, axis] * scale * AXIS_END,), RECT)[0]
+        if end[2] > 0.0 and axis_handle_alpha(cam, origin, rotation[:, axis]) > 0.0:
+            axis_mask |= 1 << axis
+        polygon = project(cam, plane_corners(origin, rotation, scale, axis), RECT)
+        if np.all(polygon[:, 2] > 0.0) and plane_handle_alpha(cam, origin, rotation[:, axis]) > 0.0:
+            plane_mask |= 1 << axis
+    return axis_mask, plane_mask
+
+
+@pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
 def test_center_and_axis_hit_use_the_viewport_projection(orthographic: bool) -> None:
     cam = camera(orthographic=orthographic)
     origin = np.zeros(3)
@@ -685,6 +745,35 @@ def test_center_and_axis_hit_use_the_viewport_projection(orthographic: bool) -> 
     scale = world_scale(cam, origin, RECT[3])
     x_axis = project(cam, (origin + np.array((0.58 * scale, 0.0, 0.0)),), RECT)[0, :2]
     assert hit_test(cam, origin, rotation, RECT, x_axis, GizmoMode.TRANSLATE)[0] is GizmoHandle.X
+
+
+def test_hit_test_prepares_camera_matrices_once() -> None:
+    base = camera()
+
+    class CountingCamera:
+        def __init__(self) -> None:
+            self.view_calls = 0
+            self.projection_calls = 0
+
+        def view_matrix(self):
+            self.view_calls += 1
+            return base.view_matrix()
+
+        def proj_matrix(self):
+            self.projection_calls += 1
+            return base.proj_matrix()
+
+        def __getattr__(self, name):
+            return getattr(base, name)
+
+    cam = CountingCamera()
+    center = project(base, (np.zeros(3),), RECT)[0, :2]
+
+    assert hit_test(cam, np.zeros(3), np.eye(3), RECT, center, GizmoMode.TRANSLATE)[0] is (
+        GizmoHandle.SCREEN
+    )
+    assert cam.view_calls == 1
+    assert cam.projection_calls == 1
 
 
 def test_hover_clears_when_the_viewport_does_not_own_input() -> None:
@@ -2014,6 +2103,14 @@ def test_finite_segment_clip_does_not_extend_past_its_world_endpoints() -> None:
     assert clipped[1] == pytest.approx((80.0, 50.0))
 
 
+def test_dashed_line_segments_are_anchored_at_the_joint_plane() -> None:
+    segments = _dashed_line_segments((0.0, 0.0), (25.0, 0.0), 6.0, 4.0)
+
+    assert np.asarray([(start[0], end[0]) for start, end in segments]) == pytest.approx(
+        np.asarray(((0.0, 6.0), (10.0, 16.0), (20.0, 25.0)))
+    )
+
+
 def test_rotation_axis_guide_is_long_for_multi_axis_rotation_and_short_for_hinge() -> None:
     cam = CameraView(
         eye=np.array((0.0, -5.0, 0.0)),
@@ -2039,6 +2136,41 @@ def test_rotation_axis_guide_is_long_for_multi_axis_rotation_and_short_for_hinge
     short_length = float(np.linalg.norm(short_line[1] - short_line[0]))
     assert short_length < long_length * 0.5
     assert np.allclose(short_line[2][:3], ACTIVE_HANDLE_COLOR[:3])
+
+
+@pytest.mark.parametrize("camera_z", (2.0, -2.0), ids=("positive-side", "negative-side"))
+def test_hinge_rotation_axis_uses_solid_camera_side_and_dashed_back_side(
+    camera_z: float,
+) -> None:
+    cam = CameraView(
+        eye=np.array((3.0, -5.0, camera_z)),
+        target=np.zeros(3),
+        up=np.array((0.0, 0.0, 1.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._axis[:] = (0.0, 0.0, 1.0)
+    gizmo._joint_range = _JointRangeState("hinge", 0.0, -1.0, 1.0)
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_rotation_axis_guide(overlay, cam, RECT, 1.0)
+
+    lines = [(args, kwargs) for name, args, kwargs in overlay.calls if name == "line"]
+    assert len(lines) >= 3
+    dashed, solid = lines[:-1], lines[-1]
+    assert all(kwargs.get("cap") == "round" for _args, kwargs in dashed)
+    assert solid[1].get("cap") == "round"
+    assert all(args[3] == pytest.approx(solid[0][3]) for args, _kwargs in dashed)
+
+    center = project(cam, (np.zeros(3),), RECT)[0, :2]
+    plus = project(cam, (np.array((0.0, 0.0, 1.0)),), RECT)[0, :2]
+    plus_direction = plus - center
+    expected_sign = np.sign(camera_z)
+    assert np.dot(solid[0][1] - center, plus_direction) * expected_sign > 0.0
+    for args, _kwargs in dashed:
+        midpoint = (args[0] + args[1]) * 0.5
+        assert np.dot(midpoint - center, plus_direction) * expected_sign < 0.0
 
 
 def test_rotation_axis_guide_fades_out_at_a_view_aligned_extreme() -> None:

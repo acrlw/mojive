@@ -114,6 +114,7 @@ _MULTILINE_COMPONENT_FIELDS = {
 
 
 def _component_value_editor(
+    ctx: PanelContext,
     label: str,
     value: str,
     choices: tuple[str, ...],
@@ -121,10 +122,11 @@ def _component_value_editor(
     multiline: bool = False,
 ) -> str:
     if choices:
-        if imgui.begin_combo(label, value or "select"):
+        if imgui.begin_combo(label, value or ctx.tr("select")):
             for index, choice in enumerate(choices):
                 selected, _ = imgui.selectable(
-                    f"{choice or '<default>'}##choice-{index}", choice == value
+                    f"{choice or ctx.tr('<default>')}##choice-{index}",
+                    choice == value,
                 )
                 if selected:
                     value = choice
@@ -284,7 +286,7 @@ class InspectorPanel(Panel):
         if node is None:
             self._transform_velocity = False
             imgui.text_disabled(ctx.tr("nothing selected"))
-            imgui.text_disabled(ctx.tr("click an object in the viewport or the Hierarchy panel"))
+            imgui.set_item_tooltip(ctx.tr("click an object in the viewport or the Hierarchy panel"))
             return
 
         color = ctx.theme.node_color(node.type)
@@ -372,17 +374,15 @@ class InspectorPanel(Panel):
                 self._model_transform_euler = self._continuous_euler(node.node_id, transform[1])
 
         imgui.separator()
-        imgui.text("Model placement")
+        imgui.text(ctx.tr("Model placement"))
         can_edit = ctx.session.paused and info.removable and gizmo is not None
-        if placement_active:
-            imgui.text_wrapped("Preview only; applying rebuilds the composed model once.")
-        else:
-            imgui.text_wrapped("Locked to avoid accidental model rebuilds.")
+        if not placement_active:
             if not can_edit:
                 imgui.begin_disabled()
-            begin_placement = imgui.button("Edit Placement")
+            begin_placement = imgui.button(ctx.tr("Edit Placement"))
             if not can_edit:
                 imgui.end_disabled()
+                imgui.set_item_tooltip(ctx.tr("Locked to avoid accidental model rebuilds."))
             if begin_placement and gizmo is not None:
                 result = gizmo.begin_model_placement(ctx.session, info.model_id)
                 if result.ok:
@@ -417,9 +417,12 @@ class InspectorPanel(Panel):
                 ctx.report(result.message, level="error")
 
         if placement_active and gizmo is not None:
-            apply = imgui.button("Apply Placement")
+            apply = imgui.button(ctx.tr("Apply Placement"))
+            imgui.set_item_tooltip(
+                ctx.tr("Preview only; applying rebuilds the composed model once.")
+            )
             imgui.same_line()
-            cancel = imgui.button("Cancel##model-placement")
+            cancel = imgui.button(f"{ctx.tr('Cancel')}##model-placement")
             if apply:
                 result = gizmo.apply_model_placement(ctx.session)
                 if not result.ok:
@@ -433,13 +436,13 @@ class InspectorPanel(Panel):
                     ctx.report(result.message, level="error")
             return
 
-        if info.removable and imgui.button("Remove Model"):
+        if info.removable and imgui.button(ctx.tr("Remove Model")):
             ctx.submit(cmd.RemoveSceneModel(info.model_id))
         if ctx.session.adapter.caps.topology_editing:
             imgui.same_line()
             if not ctx.session.paused:
                 imgui.begin_disabled()
-            edit_source = imgui.button("Edit MJCF Source...")
+            edit_source = imgui.button(ctx.tr("Edit MJCF Source..."))
             if not ctx.session.paused:
                 imgui.end_disabled()
             if edit_source:
@@ -464,7 +467,7 @@ class InspectorPanel(Panel):
     def _model_components(self, ctx: PanelContext, model_id: int) -> None:
         self._refresh_component_cache(ctx, model_id)
         imgui.separator()
-        imgui.text_disabled("Model Components")
+        imgui.text_disabled(ctx.tr("Model Components"))
         editable = ctx.session.paused
         populated = tuple(
             (category, self._component_cache[category])
@@ -472,7 +475,7 @@ class InspectorPanel(Panel):
             if self._component_cache[category]
         )
         if not populated:
-            imgui.text_disabled("no authored components")
+            imgui.text_disabled(ctx.tr("no authored components"))
         for category, components in populated:
             label = f"{category.capitalize()} ({len(components)})"
             if not imgui.collapsing_header(label):
@@ -483,10 +486,10 @@ class InspectorPanel(Panel):
                 imgui.same_line()
                 if not editable:
                     imgui.begin_disabled()
-                if imgui.small_button("Edit"):
+                if imgui.small_button(ctx.tr("Edit")):
                     self._begin_component_edit(component)
                 imgui.same_line()
-                if imgui.small_button("Delete"):
+                if imgui.small_button(ctx.tr("Delete")):
                     ctx.submit(cmd.RemoveModelComponent(model_id, category, component.component_id))
                 if not editable:
                     imgui.end_disabled()
@@ -499,7 +502,9 @@ class InspectorPanel(Panel):
         )
         if not editable or not add_options:
             imgui.begin_disabled()
-        if imgui.begin_combo("Add Component...##model-component", "select type"):
+        if imgui.begin_combo(
+            f"{ctx.tr('Add Component...')}##model-component", ctx.tr("select type")
+        ):
             for category, subtype in add_options:
                 selected, _ = imgui.selectable(f"{category.capitalize()} / {subtype}", False)
                 if selected:
@@ -510,9 +515,9 @@ class InspectorPanel(Panel):
         if not editable or not add_options:
             imgui.end_disabled()
         if not editable:
-            imgui.set_item_tooltip("Pause the simulation before editing model components")
+            imgui.set_item_tooltip(ctx.tr("Pause the simulation before editing model components"))
         elif not add_options:
-            imgui.set_item_tooltip("Add the referenced model elements first")
+            imgui.set_item_tooltip(ctx.tr("Add the referenced model elements first"))
 
     def _refresh_component_cache(self, ctx: PanelContext, model_id: int) -> None:
         generation = ctx.session.structure_generation
@@ -549,14 +554,15 @@ class InspectorPanel(Panel):
 
     def _draw_component_editor(self, ctx: PanelContext) -> None:
         component = self._component_edit
+        popup_title = f"{ctx.tr('Model Component')}###Model Component"
         if self._open_component_popup and component is not None:
-            imgui.open_popup("Model Component")
+            imgui.open_popup(popup_title)
             self._open_component_popup = False
         imgui.set_next_window_size(
             imgui.ImVec2(560.0 * ctx.style_scale, 520.0 * ctx.style_scale),
             imgui.Cond_.appearing.value,
         )
-        visible, _ = imgui.begin_popup_modal("Model Component")
+        visible, _ = imgui.begin_popup_modal(popup_title)
         if not visible:
             return
         if component is None:
@@ -570,7 +576,7 @@ class InspectorPanel(Panel):
             imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
             imgui.table_next_row()
             imgui.table_next_column()
-            imgui.text_disabled("name")
+            imgui.text_disabled(ctx.tr("name"))
             imgui.table_next_column()
             imgui.set_next_item_width(-1.0)
             _changed, self._component_name = imgui.input_text(
@@ -583,6 +589,7 @@ class InspectorPanel(Panel):
                 imgui.table_next_column()
                 imgui.set_next_item_width(-1.0)
                 field[1] = _component_value_editor(
+                    ctx,
                     f"##component-field-{index}",
                     field[1],
                     choices.get(field[0], ()),
@@ -591,7 +598,7 @@ class InspectorPanel(Panel):
             imgui.end_table()
         if self._component_path:
             imgui.separator()
-            imgui.text_disabled("Path")
+            imgui.text_disabled(ctx.tr("Path"))
         for path_index, (element_type, fields) in enumerate(tuple(self._component_path)):
             imgui.push_id(f"path-{path_index}")
             object_type = next((value for name, value in fields if name == "objtype"), "")
@@ -600,17 +607,17 @@ class InspectorPanel(Panel):
             imgui.same_line()
             if path_index == 0:
                 imgui.begin_disabled()
-            move_up = imgui.small_button("Up")
+            move_up = imgui.small_button(ctx.tr("Up"))
             if path_index == 0:
                 imgui.end_disabled()
             imgui.same_line()
             if path_index + 1 == len(self._component_path):
                 imgui.begin_disabled()
-            move_down = imgui.small_button("Down")
+            move_down = imgui.small_button(ctx.tr("Down"))
             if path_index + 1 == len(self._component_path):
                 imgui.end_disabled()
             imgui.same_line()
-            remove = imgui.small_button("Remove")
+            remove = imgui.small_button(ctx.tr("Remove"))
             if begin_kv_table(f"component_path_fields_{path_index}"):
                 imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
                 imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
@@ -631,6 +638,7 @@ class InspectorPanel(Panel):
                     imgui.set_next_item_width(-1.0)
                     previous = field[1]
                     field[1] = _component_value_editor(
+                        ctx,
                         f"##path-field-{field_index}",
                         field[1],
                         choices,
@@ -675,7 +683,9 @@ class InspectorPanel(Panel):
                 self._component_path.pop(path_index)
                 self._component_path_choices.pop(path_index)
                 break
-        if self._component_path_presets and imgui.begin_combo("Add path item", "select type"):
+        if self._component_path_presets and imgui.begin_combo(
+            ctx.tr("Add path item"), ctx.tr("select type")
+        ):
             for preset in self._component_path_presets:
                 selected, _ = imgui.selectable(_path_preset_label(preset), False)
                 if selected:
@@ -691,9 +701,9 @@ class InspectorPanel(Panel):
             imgui.end_combo()
         if self._component_error:
             imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._component_error)
-            if imgui.small_button("Copy error##component"):
+            if imgui.small_button(f"{ctx.tr('Copy error')}##component"):
                 imgui.set_clipboard_text(self._component_error)
-        if imgui.button("Apply", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+        if imgui.button(ctx.tr("Apply"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
             result = ctx.submit(
                 cmd.UpdateModelComponent(
                     component.model_id,
@@ -713,41 +723,44 @@ class InspectorPanel(Panel):
             else:
                 self._component_error = result.message
         imgui.same_line()
-        if imgui.button("Cancel", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+        if imgui.button(ctx.tr("Cancel"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
             self._component_edit = None
             imgui.close_current_popup()
         imgui.end_popup()
 
     def _draw_model_source(self, ctx: PanelContext) -> None:
+        popup_title = f"{ctx.tr('MJCF Source')}###MJCF Source"
         if self._open_source_popup:
-            imgui.open_popup("MJCF Source")
+            imgui.open_popup(popup_title)
             self._open_source_popup = False
         imgui.set_next_window_size(
             imgui.ImVec2(820.0 * ctx.style_scale, 620.0 * ctx.style_scale),
             imgui.Cond_.appearing.value,
         )
-        visible, _ = imgui.begin_popup_modal("MJCF Source")
+        visible, _ = imgui.begin_popup_modal(popup_title)
         if not visible:
             return
-        imgui.text_disabled("MjSpec validates and recompiles the model when changes are applied.")
         _changed, self._source_text = imgui.input_text_multiline(
             "##mjcf_source",
             self._source_text,
             imgui.ImVec2(-1.0, -70.0 * ctx.style_scale),
             imgui.InputTextFlags_.allow_tab_input.value,
         )
+        imgui.set_item_tooltip(
+            ctx.tr("MjSpec validates and recompiles the model when changes are applied.")
+        )
         if self._source_error:
             imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._source_error)
-            if imgui.small_button("Copy error##source"):
+            if imgui.small_button(f"{ctx.tr('Copy error')}##source"):
                 imgui.set_clipboard_text(self._source_error)
-        if imgui.button("Apply", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+        if imgui.button(ctx.tr("Apply"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
             result = ctx.submit(cmd.SetModelSource(self._source_model_id, self._source_text))
             if result.ok:
                 imgui.close_current_popup()
             else:
                 self._source_error = result.message
         imgui.same_line()
-        if imgui.button("Cancel", imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+        if imgui.button(ctx.tr("Cancel"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
             imgui.close_current_popup()
         imgui.end_popup()
 
@@ -928,11 +941,11 @@ class InspectorPanel(Panel):
             return
         qvel = ctx.session.frame.qvel
         if qvel is None:
-            imgui.text_disabled("waiting for the next frame (qvel is produced on demand)")
+            imgui.text_disabled(ctx.tr("waiting for the next frame (qvel is produced on demand)"))
             return
         dofs = ctx.session.joints_for_body(node.body_index)
         if not dofs:
-            imgui.text_disabled("no joint on this body")
+            imgui.text_disabled(ctx.tr("no joint on this body"))
             return
         if begin_kv_table("insp_vel"):
             for j in dofs:
@@ -1104,8 +1117,6 @@ class InspectorPanel(Panel):
             imgui.end_table()
         derived = inertia_mode == "auto"
         rotation_disabled = derived or inertia_mode == "full"
-        if derived:
-            imgui.text_disabled(ctx.tr("Mass and inertia are derived from attached geoms"))
         sleep_policy_value = sleep_values[sleep_policy]
 
         if not editable:
@@ -1168,6 +1179,7 @@ class InspectorPanel(Panel):
                 self._body_property_error = ""
             else:
                 self._body_property_error = result.message
+        imgui.set_item_tooltip(ctx.tr("Apply rebuilds the model once"))
         if not editable or not dirty:
             imgui.end_disabled()
         imgui.same_line()
@@ -1177,11 +1189,9 @@ class InspectorPanel(Panel):
                 math3d.quat_to_mat3(current.inertial_quaternion), None
             )
             self._body_property_error = ""
-        imgui.same_line()
-        imgui.text_disabled(ctx.tr("Apply rebuilds the model once"))
         if self._body_property_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._body_property_error)
-            if imgui.small_button("Copy error##body-properties"):
+            if imgui.small_button(f"{ctx.tr('Copy error')}##body-properties"):
                 imgui.set_clipboard_text(self._body_property_error)
 
     def _joint(self, ctx: PanelContext, node: SceneNode) -> None:
@@ -1189,7 +1199,7 @@ class InspectorPanel(Panel):
             (item for item in ctx.session.joints if item.joint_id == node.joint_index), None
         )
         if joint is None:
-            imgui.text_disabled("joint metadata is unavailable")
+            imgui.text_disabled(ctx.tr("joint metadata is unavailable"))
             return
         if _begin_property_table("joint_identity"):
             for label, value in (
@@ -1488,7 +1498,9 @@ class InspectorPanel(Panel):
             )
             _property_control_row(ctx, "actuator force limit")
             force_mode_changed, force_mode = imgui.combo(
-                "##joint_actuator_force_limit", force_mode, force_modes
+                "##joint_actuator_force_limit",
+                force_mode,
+                tuple(ctx.tr(value) for value in force_modes),
             )
             _property_control_row(ctx, "actuator force range")
             force_range_changed, force_range = imgui.drag_float2(
@@ -1512,7 +1524,7 @@ class InspectorPanel(Panel):
             imgui.end_table()
         if not editable:
             imgui.end_disabled()
-            imgui.text_disabled("Pause the simulation to edit advanced joint properties")
+            imgui.text_disabled(ctx.tr("Pause the simulation to edit advanced joint properties"))
 
         edited = properties
         if group_changed:
@@ -1587,12 +1599,11 @@ class InspectorPanel(Panel):
             if not editable or not dirty or invalid_force_range:
                 imgui.begin_disabled()
             apply_clicked = imgui.small_button(f"{ctx.tr('Apply')}##joint-advanced")
+            imgui.set_item_tooltip(ctx.tr("Apply rebuilds the model once"))
             if not editable or not dirty or invalid_force_range:
                 imgui.end_disabled()
             imgui.same_line()
             revert_clicked = imgui.small_button(f"{ctx.tr('Revert')}##joint-advanced")
-            imgui.same_line()
-            imgui.text_disabled(ctx.tr("Apply rebuilds the model once"))
             imgui.end_table()
         if apply_clicked:
             result = ctx.submit(
@@ -1623,7 +1634,7 @@ class InspectorPanel(Panel):
             self._joint_advanced_error = ""
         if self._joint_advanced_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._joint_advanced_error)
-            if imgui.small_button("Copy error##joint-advanced"):
+            if imgui.small_button(f"{ctx.tr('Copy error')}##joint-advanced"):
                 imgui.set_clipboard_text(self._joint_advanced_error)
 
     def _site_properties(self, ctx: PanelContext, node: SceneNode) -> None:
@@ -1641,7 +1652,7 @@ class InspectorPanel(Panel):
             self._site_property_edit = current
             self._site_property_error = ""
         properties = self._site_property_edit
-        if properties is None or not imgui.collapsing_header("site shape and endpoints"):
+        if properties is None or not imgui.collapsing_header(ctx.tr("site shape and endpoints")):
             return
         editable = bool(
             ctx.session.adapter.caps.model_properties
@@ -1652,19 +1663,35 @@ class InspectorPanel(Panel):
 
         site_types = ("sphere", "ellipsoid", "capsule", "cylinder", "box")
         site_type = site_types.index(properties.type)
-        type_changed, site_type = imgui.combo("type", site_type, site_types)
-        group_changed, group = imgui.combo(
-            "visual group", int(properties.group), tuple(str(value) for value in range(6))
-        )
+        type_changed = group_changed = endpoints_changed = False
         type_value = site_types[site_type]
         supports_endpoints = type_value in ("capsule", "cylinder")
         use_from_to = properties.use_from_to if supports_endpoints else False
-        if not supports_endpoints:
-            imgui.begin_disabled()
-        endpoints_changed, use_from_to = imgui.checkbox("define with endpoints", use_from_to)
-        if not supports_endpoints:
-            imgui.end_disabled()
-            imgui.set_item_tooltip("Endpoints apply only to capsule and cylinder sites")
+        if _begin_property_table("site_shape_properties"):
+            _property_control_row(ctx, "type")
+            type_changed, site_type = imgui.combo(
+                "##site-type",
+                site_type,
+                tuple(value.title() for value in site_types),
+            )
+            type_value = site_types[site_type]
+            supports_endpoints = type_value in ("capsule", "cylinder")
+            if not supports_endpoints:
+                use_from_to = False
+            _property_control_row(ctx, "visual group")
+            group_changed, group = imgui.combo(
+                "##site-visual-group",
+                int(properties.group),
+                tuple(str(value) for value in range(6)),
+            )
+            _property_control_row(ctx, "define with endpoints")
+            if not supports_endpoints:
+                imgui.begin_disabled()
+            endpoints_changed, use_from_to = imgui.checkbox("##site-define-endpoints", use_from_to)
+            if not supports_endpoints:
+                imgui.end_disabled()
+                imgui.set_item_tooltip(ctx.tr("Endpoints apply only to capsule and cylinder sites"))
+            imgui.end_table()
         from_to = np.asarray(properties.from_to, np.float32)
         first_changed = second_changed = False
         if use_from_to:
@@ -1681,7 +1708,7 @@ class InspectorPanel(Panel):
             from_to = np.asarray((*first, *second), np.float32)
         if not editable:
             imgui.end_disabled()
-            imgui.text_disabled("Pause the simulation to edit site properties")
+            imgui.text_disabled(ctx.tr("Pause the simulation to edit site properties"))
 
         edited = properties
         if type_changed:
@@ -1708,7 +1735,7 @@ class InspectorPanel(Panel):
         dirty = edited != current
         if not editable or not dirty or invalid_endpoints:
             imgui.begin_disabled()
-        if imgui.button("Apply##site-properties"):
+        if imgui.button(f"{ctx.tr('Apply')}##site-properties"):
             result = ctx.submit(
                 cmd.SetSiteProperties(
                     node_id=edited.node_id,
@@ -1723,17 +1750,16 @@ class InspectorPanel(Panel):
                 self._site_property_error = ""
             else:
                 self._site_property_error = result.message
+        imgui.set_item_tooltip(ctx.tr("Apply rebuilds the model once"))
         if not editable or not dirty or invalid_endpoints:
             imgui.end_disabled()
         imgui.same_line()
-        if imgui.button("Revert##site-properties"):
+        if imgui.button(f"{ctx.tr('Revert')}##site-properties"):
             self._site_property_edit = current
             self._site_property_error = ""
-        imgui.same_line()
-        imgui.text_disabled("Apply rebuilds the model once")
         if self._site_property_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._site_property_error)
-            if imgui.small_button("Copy error##site-properties"):
+            if imgui.small_button(f"{ctx.tr('Copy error')}##site-properties"):
                 imgui.set_clipboard_text(self._site_property_error)
 
     def _material(self, ctx: PanelContext, node: SceneNode) -> None:
@@ -1741,7 +1767,7 @@ class InspectorPanel(Panel):
             return
         src = ctx.session.source
         if src is None or node.body_index < 0 or len(src.geom_body) == 0:
-            imgui.text_disabled("no geometry")
+            imgui.text_disabled(ctx.tr("no geometry"))
             return
         instances = (
             np.flatnonzero(np.asarray(src.geom_node) == node.node_id)
@@ -1749,13 +1775,13 @@ class InspectorPanel(Panel):
             else np.flatnonzero(np.asarray(src.geom_body) == node.body_index)
         )
         if len(instances) == 0:
-            imgui.text_disabled("no geometry on this body")
+            imgui.text_disabled(ctx.tr("no geometry on this body"))
             return
         groups: dict[int, list[int]] = {}
         for instance in instances:
             node_id = int(src.geom_node[instance]) if instance < len(src.geom_node) else -1
             groups.setdefault(node_id, []).append(int(instance))
-        imgui.text_disabled(f"{len(groups)} geometry component(s)")
+        imgui.text_disabled(f"{len(groups)} {ctx.tr('geometry components')}")
         for node_id, group in list(groups.items())[:8]:
             self._geometry_material(ctx, node_id, group)
 
@@ -1765,7 +1791,7 @@ class InspectorPanel(Panel):
         first = instances[0]
         material_index = src.geom_material[first] if first < len(src.geom_material) else -1
         if not 0 <= material_index < len(src.materials):
-            imgui.text_disabled("material data is unavailable")
+            imgui.text_disabled(ctx.tr("material data is unavailable"))
             return
         material = src.materials[material_index]
         scene_node = ctx.session.node(node_id)
@@ -1793,7 +1819,7 @@ class InspectorPanel(Panel):
             )
         )
         if infinite_plane:
-            imgui.text_disabled("infinite plane")
+            imgui.text_disabled(ctx.tr("infinite plane"))
         elif size_editor is not None and _property_section(ctx, "geometry dimensions"):
             if not editable_size:
                 imgui.begin_disabled()
@@ -1853,7 +1879,7 @@ class InspectorPanel(Panel):
                 if editable_size
                 else "Edit model geometry dimensions in its source"
             )
-            imgui.set_item_tooltip(hint)
+            imgui.set_item_tooltip(ctx.tr(hint))
             if size_changed and editable_size:
                 self._submit_edit(
                     ctx,
@@ -1912,7 +1938,7 @@ class InspectorPanel(Panel):
                     for candidate in compatible_materials:
                         candidate_material = src.materials[candidate]
                         selected, _ = imgui.selectable(
-                            candidate_material.name or f"material {candidate}",
+                            candidate_material.name or f"{ctx.tr('material')} {candidate}",
                             candidate == material_index,
                         )
                         if selected and candidate != material_index:
@@ -2160,7 +2186,11 @@ class InspectorPanel(Panel):
             imgui.begin_disabled()
         if _begin_property_table("insp_geometry_shape"):
             _property_control_row(ctx, "geometry type")
-            type_changed, type_index = imgui.combo("##geometry_type", type_index, types)
+            type_changed, type_index = imgui.combo(
+                "##geometry_type",
+                type_index,
+                tuple(value.title() for value in types),
+            )
             geom_type = types[type_index]
             if type_changed:
                 choices = (
@@ -2262,7 +2292,7 @@ class InspectorPanel(Panel):
             imgui.end_table()
         if self._geometry_shape_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._geometry_shape_error)
-            if imgui.small_button("Copy error##geometry-shape"):
+            if imgui.small_button(f"{ctx.tr('Copy error')}##geometry-shape"):
                 imgui.set_clipboard_text(self._geometry_shape_error)
 
     def _geometry_contact_properties(self, ctx: PanelContext, node_id: int) -> None:
@@ -2313,18 +2343,20 @@ class InspectorPanel(Panel):
             )
             _property_control_row(ctx, "contact dimension")
             dimension_changed, dimension = imgui.combo(
-                "##contact_dimension", dimension, dimension_labels
+                "##contact_dimension",
+                dimension,
+                tuple(ctx.tr(label) for label in dimension_labels),
             )
             _property_control_row(ctx, "collision type mask")
             type_changed, type_mask = imgui.input_int(
                 "##collision_type_mask", properties.collision_type_mask, 1, 16
             )
-            imgui.set_item_tooltip("Decimal MuJoCo contype bitmask")
+            imgui.set_item_tooltip(ctx.tr("Decimal MuJoCo contype bitmask"))
             _property_control_row(ctx, "collision affinity mask")
             affinity_changed, affinity_mask = imgui.input_int(
                 "##collision_affinity_mask", properties.collision_affinity_mask, 1, 16
             )
-            imgui.set_item_tooltip("Decimal MuJoCo conaffinity bitmask")
+            imgui.set_item_tooltip(ctx.tr("Decimal MuJoCo conaffinity bitmask"))
             _property_control_row(ctx, "contact priority")
             priority_changed, priority = imgui.drag_int(
                 "##contact_priority", properties.contact_priority, 1.0, 0, 2147483647, "%d"
@@ -2351,8 +2383,10 @@ class InspectorPanel(Panel):
                 "%.5g",
             )
             imgui.set_item_tooltip(
-                "Positive values use time-constant/damping-ratio format; non-positive values use "
-                "direct stiffness/damping format"
+                ctx.tr(
+                    "Positive values use time-constant/damping-ratio format; non-positive values "
+                    "use direct stiffness/damping format"
+                )
             )
             _property_control_row(ctx, "impedance min / max / width")
             impedance_first_changed, impedance_first = imgui.drag_float3(
@@ -2396,7 +2430,7 @@ class InspectorPanel(Panel):
             imgui.end_table()
         if not editable:
             imgui.end_disabled()
-            imgui.text_disabled("Pause the simulation to edit model contact properties")
+            imgui.text_disabled(ctx.tr("Pause the simulation to edit model contact properties"))
 
         invalid_masks = type_mask < 0 or affinity_mask < 0
         if invalid_masks:
@@ -2484,10 +2518,12 @@ class InspectorPanel(Panel):
                 int(properties.visual_group),
                 tuple(str(value) for value in range(6)),
             )
-            imgui.set_item_tooltip("MuJoCo geom group used by visibility filters")
+            imgui.set_item_tooltip(ctx.tr("MuJoCo geom group used by visibility filters"))
             _property_control_row(ctx, "mass source")
             mass_mode_changed, mass_mode = imgui.combo(
-                "##geometry_mass_source", mass_mode, ("density", "explicit mass")
+                "##geometry_mass_source",
+                mass_mode,
+                (ctx.tr("density"), ctx.tr("explicit mass")),
             )
             mass_mode_value = mass_values[mass_mode]
             if mass_mode_value == "density":
@@ -2512,7 +2548,9 @@ class InspectorPanel(Panel):
                 )
             _property_control_row(ctx, "inertia distribution")
             inertia_changed, inertia_mode = imgui.combo(
-                "##geometry_inertia_distribution", inertia_mode, inertia_values
+                "##geometry_inertia_distribution",
+                inertia_mode,
+                tuple(ctx.tr(value) for value in inertia_values),
             )
             _property_control_row(ctx, "ellipsoid fluid interaction")
             fluid_changed, fluid_ellipsoid = imgui.checkbox(
@@ -2529,7 +2567,7 @@ class InspectorPanel(Panel):
             imgui.end_table()
         if not editable:
             imgui.end_disabled()
-            imgui.text_disabled("Pause the simulation to edit model geometry properties")
+            imgui.text_disabled(ctx.tr("Pause the simulation to edit model geometry properties"))
 
         edited = properties
         if group_changed:
@@ -2581,17 +2619,16 @@ class InspectorPanel(Panel):
             if revert:
                 self._geometry_advanced_edit = current
                 self._geometry_advanced_error = ""
-        imgui.text_disabled(ctx.tr("Apply rebuilds the model once"))
         if self._geometry_advanced_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._geometry_advanced_error)
-            if imgui.small_button("Copy error##geometry-advanced"):
+            if imgui.small_button(f"{ctx.tr('Copy error')}##geometry-advanced"):
                 imgui.set_clipboard_text(self._geometry_advanced_error)
 
     def _light(self, ctx: PanelContext, node: SceneNode) -> None:
         source = ctx.session.source
         index = node.light_index
         if source is None or not 0 <= index < len(source.lights.lights):
-            imgui.text_disabled("light data is unavailable")
+            imgui.text_disabled(ctx.tr("light data is unavailable"))
             return
         light = source.lights.lights[index]
         changed = False
@@ -2616,7 +2653,7 @@ class InspectorPanel(Panel):
             kind_changed, kind_index = imgui.combo(
                 "##light_type",
                 int(light.type),
-                ["directional", "point", "spot", "area", "image"],
+                ("directional", "point", "spot", "area", "image"),
             )
             changed |= active_changed or kind_changed
             light_type = LightType(kind_index)
@@ -2798,13 +2835,10 @@ class InspectorPanel(Panel):
     def _environment(self, ctx: PanelContext) -> None:
         source = ctx.session.source
         if source is None:
-            imgui.text_disabled("environment data is unavailable")
+            imgui.text_disabled(ctx.tr("environment data is unavailable"))
             return
         environment = source.lights.environment()
         changed = False
-
-        imgui.text_disabled("skybox")
-        self._render_flag(ctx, RenderFlag.SKYBOX, "enabled##skybox")
         cube_textures = [
             name
             for name, item in source.textures.items()
@@ -2812,71 +2846,123 @@ class InspectorPanel(Panel):
         ]
         skyboxes = [None, *cube_textures]
         skybox_index = skyboxes.index(source.skybox) if source.skybox in skyboxes else 0
-        skybox_changed, skybox_index = imgui.combo(
-            "texture##skybox",
-            skybox_index,
-            [name or "none" for name in skyboxes],
-        )
-        if skybox_changed:
-            self._submit_edit(ctx, cmd.SetSkybox(skyboxes[skybox_index]))
+        if _property_section(ctx, "skybox") and _begin_property_table("environment_skybox"):
+            _property_control_row(ctx, "enabled")
+            self._render_flag(ctx, RenderFlag.SKYBOX, "##environment-skybox-enabled")
+            _property_control_row(ctx, "texture")
+            skybox_changed, skybox_index = imgui.combo(
+                "##environment-skybox-texture",
+                skybox_index,
+                [name or ctx.tr("none") for name in skyboxes],
+            )
+            imgui.end_table()
+            if skybox_changed:
+                self._submit_edit(ctx, cmd.SetSkybox(skyboxes[skybox_index]))
 
-        imgui.separator()
-        imgui.text_disabled("ambient light")
-        ambient_changed, ambient = imgui.color_edit3("color##ambient", environment.ambient)
-        changed |= ambient_changed
+        ambient = environment.ambient
+        if _property_section(ctx, "ambient light") and _begin_property_table("environment_ambient"):
+            _property_control_row(ctx, "color")
+            ambient_changed, ambient = _property_color_edit3(
+                ctx, "##environment-ambient-color", ambient
+            )
+            changed |= ambient_changed
+            imgui.end_table()
 
-        imgui.separator()
-        imgui.text_disabled("headlight")
         headlight_enabled = environment.headlight is not None
-        enabled_changed, headlight_enabled = imgui.checkbox("enabled##headlight", headlight_enabled)
-        changed |= enabled_changed
         headlight = environment.headlight or DEFAULT_HEADLIGHT
         intensity = float(np.max(headlight.diffuse))
         color = headlight.diffuse / intensity if intensity > 0.0 else np.ones(3, np.float32)
-        color_changed, color = imgui.color_edit3("color##headlight", color)
-        intensity_changed, intensity = imgui.drag_float(
-            "intensity##headlight", intensity, 0.01, 0.0, 10.0, "%.2f"
-        )
-        specular_changed, specular = imgui.color_edit3("specular##headlight", headlight.specular)
-        headlight_ambient_changed, headlight_ambient = imgui.color_edit3(
-            "ambient##headlight", headlight.ambient
-        )
-        changed |= (
-            color_changed or intensity_changed or specular_changed or headlight_ambient_changed
-        )
+        specular = headlight.specular
+        headlight_ambient = headlight.ambient
+        if _property_section(ctx, "headlight") and _begin_property_table("environment_headlight"):
+            _property_control_row(ctx, "enabled")
+            enabled_changed, headlight_enabled = imgui.checkbox(
+                "##environment-headlight-enabled", headlight_enabled
+            )
+            _property_control_row(ctx, "color")
+            color_changed, color = _property_color_edit3(
+                ctx, "##environment-headlight-color", color
+            )
+            _property_control_row(ctx, "intensity")
+            intensity_changed, intensity = imgui.drag_float(
+                "##environment-headlight-intensity", intensity, 0.01, 0.0, 10.0, "%.2f"
+            )
+            _property_control_row(ctx, "specular")
+            specular_changed, specular = _property_color_edit3(
+                ctx, "##environment-headlight-specular", specular
+            )
+            _property_control_row(ctx, "ambient")
+            headlight_ambient_changed, headlight_ambient = _property_color_edit3(
+                ctx, "##environment-headlight-ambient", headlight_ambient
+            )
+            imgui.end_table()
+            changed |= (
+                enabled_changed
+                or color_changed
+                or intensity_changed
+                or specular_changed
+                or headlight_ambient_changed
+            )
 
-        imgui.separator()
-        imgui.text_disabled("fog")
-        self._render_flag(ctx, RenderFlag.FOG, "enabled##fog")
-        fog_color_changed, fog_color = imgui.color_edit3("color##fog", environment.fog_color)
-        fog_start_changed, fog_start = imgui.drag_float(
-            "start", environment.fog_start, 0.05, 0.0, 1e6, "%.2f m"
-        )
-        fog_end_changed, fog_end = imgui.drag_float(
-            "end", environment.fog_end, 0.05, 0.0, 1e6, "%.2f m"
-        )
-        changed |= fog_color_changed or fog_start_changed or fog_end_changed
+        fog_color = environment.fog_color
+        fog_start = environment.fog_start
+        fog_end = environment.fog_end
+        if _property_section(ctx, "fog") and _begin_property_table("environment_fog"):
+            _property_control_row(ctx, "enabled")
+            self._render_flag(ctx, RenderFlag.FOG, "##environment-fog-enabled")
+            _property_control_row(ctx, "color")
+            fog_color_changed, fog_color = _property_color_edit3(
+                ctx, "##environment-fog-color", fog_color
+            )
+            _property_control_row(ctx, "start")
+            fog_start_changed, fog_start = imgui.drag_float(
+                "##environment-fog-start", fog_start, 0.05, 0.0, 1e6, "%.2f m"
+            )
+            _property_control_row(ctx, "end")
+            fog_end_changed, fog_end = imgui.drag_float(
+                "##environment-fog-end", fog_end, 0.05, 0.0, 1e6, "%.2f m"
+            )
+            imgui.end_table()
+            changed |= fog_color_changed or fog_start_changed or fog_end_changed
 
-        imgui.separator()
-        imgui.text_disabled("haze")
-        self._render_flag(ctx, RenderFlag.HAZE, "enabled##haze")
-        mode_changed, haze_mode = imgui.combo(
-            "mode##haze",
-            int(environment.horizon_haze),
-            ["volumetric", "horizon"],
-        )
-        horizon_haze = bool(haze_mode)
-        haze_color_changed, haze_color = imgui.color_edit3("color##haze", environment.haze_color)
-        haze_label = "radius" if horizon_haze else "density"
-        haze_format = "%.4f" if horizon_haze else "%.4f / m"
-        haze_density_changed, haze_density = imgui.drag_float(
-            haze_label, environment.haze_density, 0.001, 0.0, 100.0, haze_format
-        )
-        slices_changed = False
+        haze_mode = int(environment.horizon_haze)
+        haze_color = environment.haze_color
+        haze_density = environment.haze_density
         haze_slices = environment.horizon_haze_slices
-        if horizon_haze:
-            slices_changed, haze_slices = imgui.drag_int("slices", haze_slices, 1.0, 3, 512, "%d")
-        changed |= haze_color_changed or haze_density_changed or mode_changed or slices_changed
+        if _property_section(ctx, "haze") and _begin_property_table("environment_haze"):
+            _property_control_row(ctx, "enabled")
+            self._render_flag(ctx, RenderFlag.HAZE, "##environment-haze-enabled")
+            _property_control_row(ctx, "Mode")
+            mode_changed, haze_mode = imgui.combo(
+                "##environment-haze-mode",
+                haze_mode,
+                (ctx.tr("volumetric"), ctx.tr("horizon")),
+            )
+            horizon_haze = bool(haze_mode)
+            _property_control_row(ctx, "color")
+            haze_color_changed, haze_color = _property_color_edit3(
+                ctx, "##environment-haze-color", haze_color
+            )
+            _property_control_row(ctx, "radius" if horizon_haze else "density")
+            haze_format = "%.4f" if horizon_haze else "%.4f / m"
+            haze_density_changed, haze_density = imgui.drag_float(
+                "##environment-haze-density",
+                haze_density,
+                0.001,
+                0.0,
+                100.0,
+                haze_format,
+            )
+            slices_changed = False
+            if horizon_haze:
+                _property_control_row(ctx, "slices")
+                slices_changed, haze_slices = imgui.drag_int(
+                    "##environment-haze-slices", haze_slices, 1.0, 3, 512, "%d"
+                )
+            imgui.end_table()
+            changed |= haze_color_changed or haze_density_changed or mode_changed or slices_changed
+
+        horizon_haze = bool(haze_mode)
 
         if changed:
             self._submit_edit(
@@ -2918,12 +3004,12 @@ class InspectorPanel(Panel):
     def _camera(self, ctx: PanelContext, node: SceneNode) -> None:
         index = node.camera_index
         if not 0 <= index < len(ctx.session.cameras):
-            imgui.text_disabled("camera data is unavailable")
+            imgui.text_disabled(ctx.tr("camera data is unavailable"))
             return
         info = ctx.session.cameras[index]
         view = ctx.session.camera_view(info.camera_id)
         if view is None:
-            imgui.text_disabled("camera view is unavailable")
+            imgui.text_disabled(ctx.tr("camera view is unavailable"))
             return
 
         eye = np.asarray(view.eye, np.float64).copy()
@@ -3003,7 +3089,9 @@ class InspectorPanel(Panel):
             )
             imgui.end_disabled()
             if not supported:
-                imgui.set_item_tooltip(f"{ctx.backend.caps.name} has no orthographic projection")
+                imgui.set_item_tooltip(
+                    f"{ctx.backend.caps.name} {ctx.tr('has no orthographic projection')}"
+                )
             elif selected_projection != projection:
                 orthographic = selected_projection == 1
                 ortho_changed = True

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,9 +18,10 @@ from forge_viewer.adapters.base import (
     NodeType,
     SceneNode,
 )
+from forge_viewer.render.backend import RenderFlag
 from forge_viewer.types import MeshShape
 from forge_viewer.ui.compound_fields import draw_joined_field_frame
-from forge_viewer.ui.localization import Language, Localizer, parse_language
+from forge_viewer.ui.localization import _ZH_CN, Language, Localizer, parse_language
 from forge_viewer.ui.messages import OutputBuffer
 from forge_viewer.ui.panels import (
     Panel,
@@ -39,7 +41,8 @@ from forge_viewer.ui.panels.assets import (
     height_field_preview_color,
     unique_asset_name,
 )
-from forge_viewer.ui.panels.control import filter_actuators, sort_actuators
+from forge_viewer.ui.panels.control import ControlPanel, filter_actuators, sort_actuators
+from forge_viewer.ui.panels.help import KEYS, MOUSE_GESTURES, VALUE_GESTURES
 from forge_viewer.ui.panels.hierarchy import (
     HierarchyPanel,
     disclosure_triangle,
@@ -60,12 +63,15 @@ from forge_viewer.ui.panels.inspector import (
     _unique_component_name,
     gizmo_refusal_reason,
 )
-from forge_viewer.ui.panels.joints import filter_joints, page_span, sort_joints
+from forge_viewer.ui.panels.joints import JointsPanel, filter_joints, page_span, sort_joints
 from forge_viewer.ui.panels.keyframes import (
+    KeyframesPanel,
+    decimated_marker_ids,
     fitted_timeline_range,
     nearest_take_frame,
     neighboring_keyframe,
     nice_timeline_step,
+    timeline_status_hints,
     timeline_time_to_x,
     timeline_x_to_time,
     unique_keyframe_name,
@@ -74,6 +80,8 @@ from forge_viewer.ui.panels.keyframes import (
 from forge_viewer.ui.panels.output import filter_output_entries
 from forge_viewer.ui.panels.plot import PlotPanel
 from forge_viewer.ui.panels.settings import (
+    render_flag_label,
+    responsive_flag_groups,
     settings_category_matches,
     settings_uses_stacked_layout,
 )
@@ -97,6 +105,66 @@ EXPECTED_PANELS = {
     "Help",
     "Info",
 }
+
+
+def test_dense_keyframe_markers_keep_one_per_visual_bucket_and_all_priorities() -> None:
+    markers = tuple((index, float(index)) for index in range(12))
+
+    visible = decimated_marker_ids(markers, 0.0, 11.0, 4.0, (3, 5, 10))
+
+    assert visible == (0, 4, 8, 3, 5, 10)
+    assert decimated_marker_ids(((1, 2.0), (2, 3.0)), 0.0, 20.0, 4.0) == (1, 2)
+
+
+def test_dense_keyframe_hit_testing_keeps_markers_omitted_from_the_draw_buckets() -> None:
+    markers = {index: float(index) for index in range(12)}
+    drawn = decimated_marker_ids(tuple(markers.items()), 0.0, 11.0, 4.0)
+    omitted = next(keyframe_id for keyframe_id in markers if keyframe_id not in drawn)
+
+    hit = KeyframesPanel._hit_marker(markers, 20.0, 0.5, (markers[omitted], 20.0))
+
+    assert hit == omitted
+    assert hit in decimated_marker_ids(tuple(markers.items()), 0.0, 11.0, 4.0, (hit,))
+
+
+def test_structure_generation_invalidates_panel_metadata_caches() -> None:
+    frame = SimpleNamespace(ctrl=np.zeros(1), qpos=np.zeros(1))
+    session = SimpleNamespace(structure_generation=2, frame=frame)
+    ctx = SimpleNamespace(session=session)
+
+    control = ControlPanel()
+    control._snapshot_generation = 1
+    control._row_cache_key = (1, "motor", True)
+    control._row_cache = ((object(), 0),)
+    control._snapshot(ctx)
+    assert control._row_cache_key is None
+    assert control._row_cache == ()
+
+    joints = JointsPanel()
+    joints._snapshot_generation = 1
+    joints._browse_cache_key = (1, "hinge", True)
+    joints._browse_cache = (object(),)
+    joints._joint_nodes_generation = 1
+    joints._joint_nodes = {1: object()}
+    joints._snapshot(ctx)
+    assert joints._browse_cache_key is None
+    assert joints._browse_cache == ()
+    assert joints._joint_nodes_generation == -1
+    assert joints._joint_nodes == {}
+
+    first = SimpleNamespace(model_id=0, keyframe_id=1, time=1.0)
+    second = SimpleNamespace(model_id=0, keyframe_id=2, time=2.0)
+    keyframes = KeyframesPanel()
+    keyframes._model_id = 0
+    session.keyframes = (first,)
+    cached, by_id = keyframes._keyframes(ctx)
+    assert cached == (first,)
+    assert by_id == {1: first}
+    session.structure_generation = 3
+    session.keyframes = (second,)
+    cached, by_id = keyframes._keyframes(ctx)
+    assert cached == (second,)
+    assert by_id == {2: second}
 
 
 def test_joined_field_uses_one_outer_surface_and_a_left_rounded_badge() -> None:
@@ -408,6 +476,138 @@ def test_language_preference_round_trip(tmp_path, monkeypatch):
     assert restored.preference("precise_gizmo_angle_unit") == "radians"
 
 
+def test_every_literal_translation_source_has_a_simplified_chinese_entry() -> None:
+    ui_root = Path(__file__).resolve().parents[1] / "src" / "forge_viewer" / "ui"
+    sources: dict[str, list[str]] = {}
+
+    def literal_options(node: ast.AST) -> tuple[str, ...]:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return (node.value,)
+        if isinstance(node, ast.IfExp):
+            return (*literal_options(node.body), *literal_options(node.orelse))
+        return ()
+
+    for path in ui_root.rglob("*.py"):
+        if path.name == "localization.py":
+            continue
+        relative = path.relative_to(ui_root).as_posix()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            name = (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else node.func.id
+                if isinstance(node.func, ast.Name)
+                else ""
+            )
+            translated = name in {"tr", "t"} or (
+                name == "text"
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Attribute)
+                and node.func.value.attr == "localizer"
+            )
+            if translated:
+                for value in literal_options(node.args[0]):
+                    sources.setdefault(value, []).append(f"{relative}:{node.lineno}")
+
+    missing = {value: locations for value, locations in sources.items() if value not in _ZH_CN}
+    assert not missing
+
+
+def test_fixed_imgui_copy_uses_the_localization_boundary() -> None:
+    ui_root = Path(__file__).resolve().parents[1] / "src" / "forge_viewer" / "ui"
+    visible_calls = {
+        "begin_combo",
+        "begin",
+        "begin_popup_modal",
+        "begin_tab_item",
+        "bullet_text",
+        "button",
+        "checkbox",
+        "collapsing_header",
+        "color_edit3",
+        "color_edit4",
+        "combo",
+        "drag_float",
+        "drag_int",
+        "input_text",
+        "menu_item",
+        "radio_button",
+        "selectable",
+        "set_item_tooltip",
+        "set_tooltip",
+        "small_button",
+        "text",
+        "text_disabled",
+        "text_wrapped",
+        "tree_node",
+    }
+    allowed_symbols = {"Δ"}
+    direct: list[str] = []
+    for path in ui_root.rglob("*.py"):
+        relative = path.relative_to(ui_root).as_posix()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                not isinstance(node, ast.Call)
+                or not node.args
+                or not isinstance(node.func, ast.Attribute)
+                or not isinstance(node.func.value, ast.Name)
+                or node.func.value.id != "imgui"
+                or node.func.attr not in visible_calls
+            ):
+                continue
+            label = node.args[0]
+            if (
+                isinstance(label, ast.JoinedStr)
+                and label.values
+                and isinstance(label.values[0], ast.Constant)
+                and str(label.values[0].value).startswith("##")
+            ):
+                continue
+            localized = any(
+                isinstance(item, ast.Call)
+                and (
+                    (isinstance(item.func, ast.Name) and item.func.id == "t")
+                    or (isinstance(item.func, ast.Attribute) and item.func.attr in {"tr", "text"})
+                )
+                for item in ast.walk(label)
+            )
+            raw = [
+                item.value
+                for item in ast.walk(label)
+                if isinstance(item, ast.Constant)
+                and isinstance(item.value, str)
+                and not item.value.startswith("##")
+                and item.value not in allowed_symbols
+                and any(char.isalpha() for char in item.value)
+                and (item.value[:1].isalpha() or " " in item.value)
+            ]
+            if raw and not localized:
+                direct.append(f"{relative}:{node.lineno}: {ast.unparse(label)}")
+    assert not direct
+
+
+def test_dynamic_ui_inventories_have_simplified_chinese_labels() -> None:
+    sources = {
+        *(value for row in (*MOUSE_GESTURES, *KEYS, *VALUE_GESTURES) for value in row),
+        *(panel.name for panel in default_panels()),
+    }
+    assert not sorted(value for value in sources if value not in _ZH_CN)
+
+
+def test_render_flag_table_reduces_columns_before_hidpi_labels_clip() -> None:
+    assert responsive_flag_groups(3, 420.0, 1.0) == 3
+    assert responsive_flag_groups(3, 900.0, 4.0) == 2
+    assert responsive_flag_groups(3, 360.0, 4.0) == 1
+
+
+def test_mujoco_flag_tokens_stay_english_while_forge_flags_can_localize() -> None:
+    localizer = Localizer(Language.SIMPLIFIED_CHINESE)
+    assert render_flag_label(RenderFlag.SHADOW, localizer.text, localized=False) == "shadow"
+    assert render_flag_label(RenderFlag.OUTLINE, localizer.text, localized=True) == "轮廓"
+
+
 def test_viewer_restores_precise_input_preferences(tmp_path, monkeypatch):
     from forge_viewer.ui.app import ViewerApp
 
@@ -655,6 +855,17 @@ def test_keyframe_timeline_navigation_uses_selection_then_playhead():
     assert nearest_take_frame((0.0, 0.2, 0.5), 0.31) == 1
     assert nearest_take_frame((0.0, 0.2, 0.5), 0.4) == 2
     assert nearest_take_frame((), 0.0) == -1
+
+
+def test_keyframe_timeline_status_hints_replace_the_repeated_help_copy():
+    localizer = Localizer(Language.SIMPLIFIED_CHINESE)
+    hints = timeline_status_hints(localizer.text)
+
+    assert [(hint.kind, hint.control, hint.label) for hint in hints] == [
+        ("mouse", "left", "移动播放头"),
+        ("mouse", "wheel", "缩放"),
+        ("mouse", "middle", "平移"),
+    ]
 
 
 def test_transform_keeps_axis_groups_inline_until_the_panel_is_truly_narrow():

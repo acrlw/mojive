@@ -6,7 +6,14 @@ import numpy as np
 from imgui_bundle import imgui
 
 from ...adapters.base import FrameNeeds
-from . import Panel, PanelContext, begin_kv_table, labeled
+from . import (
+    Panel,
+    PanelContext,
+    begin_kv_table,
+    button_row_layout,
+    button_width,
+    labeled,
+)
 
 
 class SensorsPanel(Panel):
@@ -24,7 +31,7 @@ class SensorsPanel(Panel):
     def draw(self, ctx: PanelContext) -> None:
         infos = ctx.session.sensor_infos
         if not infos:
-            imgui.text_disabled("no sensors")
+            imgui.text_disabled(ctx.tr("no sensors"))
             return
 
         self.sensor_index = min(self.sensor_index, len(infos) - 1)
@@ -40,26 +47,35 @@ class SensorsPanel(Panel):
         )
 
         if begin_kv_table("sensor_kv"):
-            labeled("type", sensor.type.removeprefix("mjSENS_").lower())
-            labeled("dimension", str(sensor.dim))
+            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
+            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+            labeled(ctx.tr("type"), sensor.type.removeprefix("mjSENS_").lower())
+            labeled(ctx.tr("dimension"), str(sensor.dim))
             if value is None:
-                labeled("value", "not produced this frame")
+                labeled(ctx.tr("value"), ctx.tr("not produced this frame"))
             elif sensor.dim <= 6:
-                labeled("value", np.array2string(value, precision=6, separator=", "))
+                labeled(ctx.tr("value"), np.array2string(value, precision=6, separator=", "))
             imgui.end_table()
         if value is not None and sensor.dim > 6:
             imgui.separator()
-            imgui.text_disabled("value")
+            imgui.text_disabled(ctx.tr("value"))
             formatted = np.array2string(
                 value,
                 precision=6,
                 separator=", ",
                 max_line_width=72,
             )
-            if imgui.small_button("Copy"):
+            labels = (ctx.tr("Copy"), ctx.tr("Open in Plot"))
+            inline = button_row_layout(
+                tuple(button_width(label) for label in labels),
+                imgui.get_content_region_avail().x,
+                imgui.get_style().item_spacing.x,
+            )
+            if imgui.small_button(labels[0]):
                 imgui.set_clipboard_text(formatted)
-            imgui.same_line()
-            if imgui.small_button("Open in Plot") and ctx.panels is not None:
+            if inline[1]:
+                imgui.same_line()
+            if imgui.small_button(labels[1]) and ctx.panels is not None:
                 panel = ctx.panels.get("Plot")
                 focus = getattr(panel, "focus_sensor", None)
                 if callable(focus):
