@@ -330,7 +330,7 @@ def test_both_instance_strategies_draw_the_same_thing(gl, strategy):
         seen = {tuple(int(v) for v in c) for c in img.reshape(-1, 3)} - {(0, 0, 0)}
         expect = {tuple(round(v * 255) for v in c) for c in _COLORS}
         assert drawn == 9
-        assert inst.draw_calls == 4
+        assert inst.draw_calls == scene.bucket_count() == 2
         # UNORM conversion of an interpolated 0.5 may land on either adjacent
         # 8-bit value across drivers; the instance payload itself is exact.
         assert len(seen) == len(expect)

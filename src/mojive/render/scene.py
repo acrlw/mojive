@@ -210,16 +210,29 @@ class SceneBuilder:
     ) -> RenderScene:
         n = len(self._rows)
 
+        # A draw bucket represents GPU binding state, not a logical material.
+        # Per-instance color, shading, reflection, and texture-coordinate values
+        # already live in the instance streams, so opaque materials that bind the
+        # same texture can share one instanced draw.  The retained material id is
+        # a representative used only to resolve that texture in the backends.
         ident: list[tuple[MeshKey, int, bool, int]] = []
-        seen: dict[tuple[MeshKey, int, bool, int], int] = {}
+        seen: dict[tuple[MeshKey, str | tuple[str, int] | None, bool, int], int] = {}
         row_bucket = np.empty(n, np.int32)
         for i, row in enumerate(self._rows):
             transparent = float(row["color"][3]) < 1.0
-            key = (*row["key"], transparent, i if transparent else -1)
-            if key not in seen:
-                seen[key] = len(ident)
-                ident.append(key)
-            row_bucket[i] = seen[key]
+            mesh, matid = row["key"]
+            binding: str | tuple[str, int] | None
+            if 0 <= matid < len(self._materials):
+                binding = self._materials[matid].texture
+            else:
+                # Preserve invalid ids as distinct keys so validation reports the
+                # original material-table error instead of silently merging them.
+                binding = ("invalid-material", matid)
+            batch_key = (mesh, binding, transparent, i if transparent else -1)
+            if batch_key not in seen:
+                seen[batch_key] = len(ident)
+                ident.append((mesh, matid, transparent, i if transparent else -1))
+            row_bucket[i] = seen[batch_key]
 
         order_of_bucket = sorted(range(len(ident)), key=lambda b: (ident[b][2], b))
         remap = np.empty(len(ident), np.int32)

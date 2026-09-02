@@ -25,8 +25,13 @@ Session lookup therefore resolves one selectable node per object.
 
 ### Bucket identity
 
-Internal bucket keys contain mesh, material, and transparency. Public scene inspection presents
-mesh and material identity while opaque and transparent bucket lists expose pass membership.
+Draw buckets represent GPU binding state rather than logical material identity. Opaque instances
+share a bucket when they use the same mesh and texture binding; color, emission, specular,
+shininess, reflectance, and texture coordinates remain per-instance data. A bucket retains one
+representative material ID so backends can resolve its shared texture without adding another public
+table. Transparent instances remain individually bucketed for stable back-to-front sorting. Public
+scene inspection presents the mesh and representative material while opaque and transparent bucket
+lists expose pass membership.
 
 ### Geometry color
 

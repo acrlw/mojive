@@ -47,6 +47,12 @@ small, pass-owned routing value for each reflective surface; it never overwrites
 reflectance in `RenderScene`. The backend resolves this metadata before executing the planned
 passes, so render passes cannot silently mutate persistent scene state.
 
+Opaque draw buckets follow actual resource bindings: instances with the same mesh and texture share
+one draw even when their logical materials differ. Their shading values and texture coordinates are
+already carried by the visual instance stream. Transparent instances stay separate because their
+camera-dependent draw order is semantically observable. This boundary keeps authoring identity out
+of the command graph and lets both backends benefit from the same batching policy.
+
 ## Data lifetime and upload policy
 
 `SceneSource` owns topology and immutable resources. `RenderScene` carries independent structure,
@@ -149,7 +155,7 @@ space, and bypasses OpenGL tone mapping. Other adapters retain the linear pipeli
 | Selection highlight | Linear-light tint plus emission |
 | Selection outline | ID edge detection with x-ray visibility |
 | Picking | `R32UI` object IDs |
-| Instancing | Mesh/material/transparency buckets |
+| Instancing | Opaque mesh/texture-binding buckets; individually sorted transparent instances |
 | Shadows | Three-cascade directional atlas and local-light shadows |
 | Reflections | Mirrored camera, oblique clipping, and surface sampling |
 | Wide lines | Screen-space triangle strips |
@@ -213,6 +219,7 @@ native RGB-packing changes:
 | 256 static objects | 6.37 ms | 3.17 ms (0.50×) | 2.43 ms (0.38×) |
 | 1,024 animated objects | 10.05 ms | 3.59 ms (0.36×) | 2.73 ms (0.27×) |
 | textured, transparent, reflective materials | 4.12 ms | 2.98 ms (0.72×) | 2.51 ms (0.61×) |
+| 256 untextured material variants | 8.12 ms | 3.19 ms (0.39×) | 7.19 ms (0.89×) |
 
 The ratio is Mojive time divided by MuJoCo time, so lower is faster. These measurements are evidence
 for regression tracking rather than fixed performance requirements; use the benchmark commands on
@@ -221,3 +228,12 @@ power-state modes, so renderer order can change absolute wgpu latency. In altern
 A/B rounds, moving packing from the native CPU kernel to the persistent GPU pass reduced the
 materials median from 3.43–3.50 ms to 2.50–2.60 ms. The earlier strided NumPy path was about 10.3 ms
 under the same load; compare repeated rounds rather than selecting one favorable run.
+
+The `material_variants` workload isolates draw-bucket scalability: it uses 256 distinct logical
+materials over a small set of built-in meshes while leaving their texture binding identical. On the
+same 1920×1080 setup, resource-binding batching reduced the scene from 321 buckets to 6. Median
+render-graph CPU time fell from 1.406 to 0.319 ms on OpenGL and from 2.301 to 0.589 ms on wgpu;
+optimized and baseline RGB captures were byte-identical on both backends. OpenGL end-to-end time
+fell from 4.00 to 3.19 ms. Metal's variable readback power state can outweigh command-encoding
+savings in an individual wgpu run, so its end-to-end row is a captured sample, while the isolated
+CPU result is the appropriate regression signal for this change.

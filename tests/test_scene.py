@@ -42,7 +42,46 @@ def test_validate_accepts_a_well_formed_scene():
     )
     scene.validate()
     assert scene.count == 3
-    assert scene.bucket_count() == 3
+    assert scene.bucket_count() == 2
+
+
+def test_opaque_material_variants_share_a_texture_binding_bucket():
+    builder = SceneBuilder()
+    first = builder.material_id(Material(name="matte", texture="checker"))
+    second = builder.material_id(Material(name="glossy", texture="checker"))
+    values = (
+        np.array([0.0, 0.1, 0.2, 0.3], np.float32),
+        np.array([0.4, 0.5, 0.6, 0.7], np.float32),
+    )
+    for index, (material_id, material) in enumerate(zip((first, second), values, strict=True)):
+        builder.add(
+            MeshKey(MeshShape.BOX),
+            material_id,
+            M.identity(),
+            OPAQUE,
+            material,
+            index + 1,
+        )
+
+    scene = builder.build(CameraView(), LightSet(), 1.0, np.zeros(3))
+
+    assert scene.bucket_count() == 1
+    assert scene.bucket_ranges == ((0, 2),)
+    assert scene.bucket_keys == ((MeshKey(MeshShape.BOX), first),)
+    assert np.array_equal(scene.material[builder.write_index[0]], values[0])
+    assert np.array_equal(scene.material[builder.write_index[1]], values[1])
+
+
+def test_distinct_texture_bindings_remain_distinct_opaque_buckets():
+    builder = SceneBuilder()
+    first = builder.material_id(Material(name="a", texture="checker-a"))
+    second = builder.material_id(Material(name="b", texture="checker-b"))
+    for material_id in (first, second):
+        builder.add(MeshKey(MeshShape.BOX), material_id, M.identity(), OPAQUE, MAT, 1)
+
+    scene = builder.build(CameraView(), LightSet(), 1.0, np.zeros(3))
+
+    assert scene.bucket_count() == 2
 
 
 def test_bucket_ranges_are_contiguous_and_cover_everything():
