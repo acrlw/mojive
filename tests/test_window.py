@@ -29,6 +29,7 @@ from mojive.ui.app import (
 )
 from mojive.ui.window import (
     Window,
+    _install_glfw_clipboard_callbacks,
     _is_dock_tab_nav_target,
     layout_scale,
     layout_settings_path,
@@ -36,6 +37,41 @@ from mojive.ui.window import (
     resolve_ui_scales,
 )
 from mojive.ui.window_wgpu import _scissor_rect_for_target
+
+
+def test_glfw_clipboard_callbacks_use_the_process_wide_api_without_a_window() -> None:
+    calls: list[tuple[str, object, object | None]] = []
+    platform_io = SimpleNamespace()
+
+    class GlfwApi:
+        @staticmethod
+        def get_clipboard_string(window):
+            calls.append(("get", window, None))
+            return b"Mojive"
+
+        @staticmethod
+        def set_clipboard_string(window, text):
+            calls.append(("set", window, text))
+
+    imgui_api = SimpleNamespace(get_platform_io=lambda: platform_io)
+    _install_glfw_clipboard_callbacks(GlfwApi, imgui_api)
+
+    assert platform_io.platform_get_clipboard_text_fn(None) == "Mojive"
+    platform_io.platform_set_clipboard_text_fn(None, "viewer")
+    assert calls == [("get", None, None), ("set", None, "viewer")]
+
+
+def test_glfw_clipboard_callback_treats_an_empty_native_clipboard_as_text() -> None:
+    platform_io = SimpleNamespace()
+    glfw_api = SimpleNamespace(
+        get_clipboard_string=lambda _window: None,
+        set_clipboard_string=lambda _window, _text: None,
+    )
+    imgui_api = SimpleNamespace(get_platform_io=lambda: platform_io)
+
+    _install_glfw_clipboard_callbacks(glfw_api, imgui_api)
+
+    assert platform_io.platform_get_clipboard_text_fn(None) == ""
 
 
 def test_only_a_docked_window_tab_owns_the_suppressed_nav_cursor() -> None:

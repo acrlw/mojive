@@ -31,6 +31,23 @@ imgui: Any = None
 GlfwRenderer: Any = None
 
 
+def _install_glfw_clipboard_callbacks(glfw_api: Any, imgui_api: Any) -> None:
+    """Connect ImGui to GLFW's process-wide clipboard without a legacy window argument."""
+
+    def get_clipboard_text(_ctx: Any) -> str:
+        value = glfw_api.get_clipboard_string(None)
+        if value is None:
+            return ""
+        return value.decode("utf-8") if isinstance(value, bytes) else str(value)
+
+    def set_clipboard_text(_ctx: Any, text: str) -> None:
+        glfw_api.set_clipboard_string(None, text)
+
+    platform_io = imgui_api.get_platform_io()
+    platform_io.platform_get_clipboard_text_fn = get_clipboard_text
+    platform_io.platform_set_clipboard_text_fn = set_clipboard_text
+
+
 def _is_dock_tab_nav_target(nav_id: int, tab_id: int, docked: bool) -> bool:
     """Return whether ImGui navigation currently points at a dock tab."""
 
@@ -288,6 +305,9 @@ class Window:
         io.set_ini_filename(ini)
 
         self._impl = GlfwRenderer(self._window)
+        # imgui_bundle still passes the deprecated GLFW window argument.
+        # Replace only its clipboard callbacks; input and GL rendering remain upstream.
+        _install_glfw_clipboard_callbacks(glfw, imgui)
         glfw.set_drop_callback(self._window, self._on_file_drop)
         self._native_drop_token = native_drop.install(glfw, self._window, self)
 

@@ -308,14 +308,7 @@ class _GlfwInputAdapter:
         glfw.set_char_callback(window, self.char_callback)
         glfw.set_scroll_callback(window, self.scroll_callback)
 
-        def get_clipboard_text(_ctx: Any) -> str:
-            return glfw.get_clipboard_string(self.window).decode()
-
-        def set_clipboard_text(_ctx: Any, text: str) -> None:
-            glfw.set_clipboard_string(self.window, text)
-
-        imgui.get_platform_io().platform_get_clipboard_text_fn = get_clipboard_text
-        imgui.get_platform_io().platform_set_clipboard_text_fn = set_clipboard_text
+        _window_module._install_glfw_clipboard_callbacks(glfw, imgui)
         self._gui_time = None
 
     def keyboard_callback(
