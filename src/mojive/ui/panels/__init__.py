@@ -11,6 +11,7 @@ from imgui_bundle import imgui
 from ...adapters.base import FrameNeeds
 from ..draw2d import ImguiDraw2D
 from ..theme import THEME, Theme
+from ..viewport_widgets import ToolHint
 
 if TYPE_CHECKING:
     from ...render.backend import RenderBackend
@@ -138,6 +139,35 @@ def slider_gesture(
     if double_clicked:
         return "copy"
     return None
+
+
+def copyable_name_item(ctx: PanelContext, name: str, available_width: float) -> bool:
+    """Expose a clipped row name and make its right-click action discoverable."""
+
+    hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled.value)
+    item_min = imgui.get_item_rect_min()
+    item_max = imgui.get_item_rect_max()
+    mouse = imgui.get_io().mouse_pos
+    # Text rows are shorter than the containing table row. Extend through the
+    # row padding so a pointer moving vertically across names never crosses a
+    # one-pixel dead strip that makes the shared status hint blink.
+    vertical_grace = imgui.get_style().item_spacing.y
+    in_name_column = (
+        item_min.x <= mouse.x <= item_min.x + max(1.0, float(available_width))
+        and item_min.y - vertical_grace <= mouse.y <= item_max.y + vertical_grace
+    )
+    if not hovered and not in_name_column:
+        return False
+    ctx.status_hints = (ToolHint("mouse", "right", ctx.tr("Copy name"), hint_id="panel.copy-name"),)
+    if not hovered:
+        return False
+    visible_width = max(1.0, float(available_width) - 2.0 * imgui.get_style().frame_padding.x)
+    if imgui.calc_text_size(name).x > visible_width:
+        imgui.set_tooltip(name)
+    copied = imgui.is_mouse_clicked(imgui.MouseButton_.right)
+    if copied:
+        imgui.set_clipboard_text(name)
+    return bool(copied)
 
 
 @dataclass
@@ -749,6 +779,7 @@ __all__ = [
     "ValueEdit",
     "begin_kv_table",
     "colored_text",
+    "copyable_name_item",
     "default_panels",
     "is_expanded",
     "labeled",

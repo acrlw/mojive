@@ -432,6 +432,15 @@ def test_hierarchy_batch_delete_collapses_selected_descendants_and_skips_scene_e
     assert panel._batch_removable_roots() == (1, 3)
 
 
+def test_hierarchy_clear_selection_drops_multi_selection_state():
+    panel = HierarchyPanel()
+    panel._batch_selected = {1, 2}
+
+    panel.clear_selection()
+
+    assert panel._batch_selected == set()
+
+
 def test_settings_is_a_dockable_panel(panels: PanelSet):
     settings = panels.get("Settings")
     assert settings is not None

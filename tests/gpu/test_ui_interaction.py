@@ -185,6 +185,30 @@ def test_interactive_entry_uses_adapter_camera_hint(viewer):
     assert view.orthographic is hint.orthographic
 
 
+def test_escape_clears_paused_selection_and_is_advertised_in_status(viewer):
+    from imgui_bundle import imgui
+
+    from mojive import commands as cmd
+
+    target = next(node for node in viewer.session.nodes if node.object_id)
+    viewer.session.submit(cmd.Select(target.object_id))
+    x, y, width, height = viewer.app._viewport_rect
+    imgui.get_io().add_mouse_pos_event(x + width * 0.5, y + height * 0.5)
+    viewer.sync()
+
+    hints = viewer.app._status_tool_hints(loading=False)
+    assert any(hint.hint_id == "selection.clear" for hint in hints)
+
+    io = imgui.get_io()
+    io.add_key_event(imgui.Key.escape, True)
+    viewer.sync()
+    io.add_key_event(imgui.Key.escape, False)
+    viewer.sync()
+
+    assert viewer.session.selected == 0
+    assert viewer.session.selected_node is None
+
+
 def test_all_panels_docked_not_stacked(viewer):
 
     from mojive.ui.window import Window
@@ -336,6 +360,104 @@ def test_keyframe_timeline_owns_the_wheel_while_zooming(viewer):
 
     assert panel._view_end - panel._view_start > before_span
     assert float(window.scroll.y) == pytest.approx(before_scroll)
+
+
+def test_control_name_hover_owns_status_and_right_click_copies(viewer) -> None:
+    from imgui_bundle import imgui
+
+    v = build(
+        resolve("actuator_visuals"),
+        "mujoco",
+        paused=True,
+        vsync=False,
+        width=W,
+        height=H,
+    )
+    io = imgui.get_io()
+    try:
+        for _ in range(8):
+            v.sync()
+        activate_panel(v, "Control")
+        for _ in range(2):
+            v.sync()
+        name = "hinge_drive"
+        point = item_rect(v, "text_disabled", name)
+        io.add_mouse_pos_event(*point)
+        v.sync()
+
+        assert [hint.hint_id for hint in v.app._panel_status_hints] == ["panel.copy-name"]
+        click(v, io, point, button=1)
+        assert imgui.get_clipboard_text() == name
+
+        first = item_bounds(v, "text_disabled", "hinge_drive")
+        second = item_bounds(v, "text_disabled", "slide_drive")
+        gap_point = (first[0] + 2.0, (first[3] + second[1]) * 0.5)
+        assert first[3] <= gap_point[1] <= second[1]
+        io.add_mouse_pos_event(*gap_point)
+        v.sync()
+        assert [hint.hint_id for hint in v.app._panel_status_hints] == ["panel.copy-name"]
+
+        window = imgui.internal.find_window_by_name("Control")
+        assert window is not None and window.dock_node is not None
+        node = window.dock_node
+        tab = next(item for item in node.tab_bar.tabs if item.id_ == window.tab_id)
+        bar = node.tab_bar.bar_rect
+        tab_point = (bar.min.x + tab.offset + tab.width * 0.5, (bar.min.y + bar.max.y) * 0.5)
+        io.add_mouse_pos_event(*tab_point)
+        io.add_mouse_button_event(0, True)
+        v.sync()
+        v.sync()
+        assert v.app._status_tool_hints(loading=False) == ()
+        io.add_mouse_button_event(0, False)
+        v.sync()
+    finally:
+        io.add_mouse_button_event(0, False)
+        io.add_mouse_button_event(1, False)
+        v.release()
+        viewer.sync()
+
+
+def test_truncated_joint_name_has_full_tooltip_and_copy_action(viewer) -> None:
+    from imgui_bundle import imgui
+
+    v = build(
+        resolve("joint_gizmo"),
+        "mujoco",
+        paused=True,
+        vsync=False,
+        width=W,
+        height=H,
+    )
+    io = imgui.get_io()
+    tooltips: list[str] = []
+    original_tooltip = imgui.set_tooltip
+    try:
+        v.app.panels.open_panel("Joints")
+        for _ in range(8):
+            v.sync()
+        activate_panel(v, "Joints")
+        for _ in range(2):
+            v.sync()
+        joint = next(item for item in v.session.joints if item.name == "05_multi_revolute_z")
+        item_label = f"{joint.name}##joint-select-{joint.joint_id}"
+        point = item_rect(v, "selectable", item_label)
+        io.add_mouse_pos_event(*point)
+
+        def record_tooltip(text, *args, **kwargs):
+            tooltips.append(str(text))
+            return original_tooltip(text, *args, **kwargs)
+
+        imgui.set_tooltip = record_tooltip
+        v.sync()
+        assert joint.name in tooltips
+        assert [hint.hint_id for hint in v.app._panel_status_hints] == ["panel.copy-name"]
+        click(v, io, point, button=1)
+        assert imgui.get_clipboard_text() == joint.name
+    finally:
+        imgui.set_tooltip = original_tooltip
+        io.add_mouse_button_event(1, False)
+        v.release()
+        viewer.sync()
 
 
 def test_environment_inspector_controls_render_flags(viewer):
@@ -1348,7 +1470,7 @@ def test_joint_gizmo_is_live_in_the_real_viewer_pipeline(workspace):
         v.release()
 
 
-def test_joint_limit_label_click_sets_the_endpoint_in_the_real_viewer() -> None:
+def test_joint_limit_tick_click_sets_the_endpoint_in_the_real_viewer() -> None:
     from imgui_bundle import imgui
 
     import mojive.commands as cmd

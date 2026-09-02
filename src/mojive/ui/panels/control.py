@@ -7,7 +7,14 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import ActuatorInfo, FrameNeeds
-from . import Panel, PanelContext, searchable_ordered_list_header, themed_checkbox, value_slider
+from . import (
+    Panel,
+    PanelContext,
+    copyable_name_item,
+    searchable_ordered_list_header,
+    themed_checkbox,
+    value_slider,
+)
 
 
 class ControlPanel(Panel):
@@ -100,7 +107,9 @@ class ControlPanel(Panel):
         imgui.table_next_row()
         imgui.table_next_column()
         imgui.align_text_to_frame_padding()
+        label_width = max(1.0, imgui.get_content_region_avail().x)
         imgui.text_disabled(f"{name}{suffix}")
+        copyable_name_item(ctx, f"{name}{suffix}", label_width)
         imgui.table_next_column()
         imgui.set_next_item_width(-1.0)
         value = float(ctrl[address])
@@ -132,8 +141,10 @@ class ControlPanel(Panel):
             imgui.table_next_row()
             imgui.table_next_column()
             imgui.align_text_to_frame_padding()
+            label_width = max(1.0, imgui.get_content_region_avail().x)
             imgui.text(constraint.name)
             imgui.set_item_tooltip(constraint.type)
+            copyable_name_item(ctx, constraint.name, label_width)
             imgui.table_next_column()
             changed, enabled = themed_checkbox(
                 f"##equality-{constraint.constraint_id}",

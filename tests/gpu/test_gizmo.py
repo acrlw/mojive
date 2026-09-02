@@ -113,13 +113,11 @@ def _hover_mask(img: np.ndarray) -> np.ndarray:
 
 
 def _joint_mask(img: np.ndarray) -> np.ndarray:
-    rgb = img[..., :3].astype(np.int16)
-    shaded = rgb / np.maximum(JOINT_U8.astype(np.float64), 1.0)
-    return (
-        (rgb[..., 0] > 90)
-        & (rgb[..., 2] > 120)
-        & (np.max(shaded, axis=-1) - np.min(shaded, axis=-1) < 0.18)
-    )
+    rgb = img[..., :3].astype(np.float64)
+    peak = np.max(rgb, axis=-1)
+    chroma = rgb / np.maximum(peak[..., None], 1.0)
+    target_chroma = JOINT_U8.astype(np.float64) / float(np.max(JOINT_U8))
+    return (peak > 64.0) & (np.max(np.abs(chroma - target_chroma), axis=-1) < 0.12)
 
 
 def _tint_mask(img: np.ndarray, target: np.ndarray) -> np.ndarray:
@@ -196,7 +194,7 @@ def test_translate_gizmo_draws_axis_handles_over_the_box(rig):
         assert _axis_mask(patch, axis).any(), f"axis {axis} lost to the box"
 
 
-def test_scalar_joint_color_override_does_not_look_like_a_world_axis(rig):
+def test_scalar_joint_color_override_renders_the_primary_palette(rig):
     if not rig.backend.caps.gizmo:
         pytest.skip("gizmo unsupported by this backend")
     cam = _camera()
@@ -210,10 +208,11 @@ def test_scalar_joint_color_override_does_not_look_like_a_world_axis(rig):
 
     joint_pixels = patch[_joint_mask(patch), :3].astype(np.float64)
     assert len(joint_pixels) > 0
-    assert np.median(joint_pixels[:, 0] / joint_pixels[:, 2]) > 0.65
+    median = np.median(joint_pixels, axis=0)
+    assert median[1] > median[0] > median[2]
 
 
-def test_scalar_joint_handle_keeps_semantic_purple_for_hover_and_press(rig):
+def test_scalar_joint_handle_uses_primary_palette_for_hover_and_press(rig):
     if not rig.backend.caps.gizmo:
         pytest.skip("gizmo unsupported by this backend")
     cam = _camera()
@@ -226,7 +225,7 @@ def test_scalar_joint_handle_keeps_semantic_purple_for_hover_and_press(rig):
     frame.active = GizmoHandle.Z
     active = rig.draw(frame, cam, box=False)
 
-    assert not np.allclose(ACTIVE_HANDLE_COLOR, HOVER_COLOR)
+    assert np.allclose(ACTIVE_HANDLE_COLOR, HOVER_COLOR)
     assert _tint_mask(hovered, JOINT_HOVER_U8).any()
     assert _tint_mask(active, ACTIVE_HANDLE_U8).any()
 

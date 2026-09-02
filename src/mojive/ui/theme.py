@@ -82,6 +82,11 @@ PRIMARY: RGBA = rgb8(156, 191, 141)
 PRIMARY_BRIGHT: RGBA = rgb8(184, 210, 172)
 PRIMARY_DIM: RGBA = rgb8(103, 135, 90)
 
+# Retained for future semantic accents; joint manipulation now uses Primary.
+ACCENT_PURPLE: RGBA = rgb8(173, 150, 184)
+ACCENT_PURPLE_BRIGHT: RGBA = rgb8(199, 180, 207)
+ACCENT_PURPLE_DIM: RGBA = rgb8(141, 120, 152)
+
 
 DANGER: RGBA = rgb8(208, 103, 68)
 WARNING: RGBA = rgb8(201, 161, 92)
@@ -139,6 +144,9 @@ class Theme:
     primary: RGBA = PRIMARY
     primary_bright: RGBA = PRIMARY_BRIGHT
     primary_dim: RGBA = PRIMARY_DIM
+    accent_purple: RGBA = ACCENT_PURPLE
+    accent_purple_bright: RGBA = ACCENT_PURPLE_BRIGHT
+    accent_purple_dim: RGBA = ACCENT_PURPLE_DIM
     danger: RGBA = DANGER
     warning: RGBA = WARNING
     text: RGBA = TEXT

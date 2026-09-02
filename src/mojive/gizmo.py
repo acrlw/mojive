@@ -57,11 +57,11 @@ AXIS_COLORS = np.array(
     np.float32,
 )
 HOVER_COLOR = np.array((184 / 255, 210 / 255, 172 / 255, 1.0), np.float32)
-# Scalar-joint handles keep their semantic purple through hover and press, so
-# application accent customization cannot change their established identity.
-ACTIVE_HANDLE_COLOR = np.array((199 / 255, 180 / 255, 207 / 255, 1.0), np.float32)
+# Scalar-joint handles use the Primary palette so they remain legible in
+# visually dense scenes and share the application's interaction language.
+ACTIVE_HANDLE_COLOR = np.array((184 / 255, 210 / 255, 172 / 255, 1.0), np.float32)
 ACTIVE_COLOR = np.array((103 / 255, 135 / 255, 90 / 255, 1.0), np.float32)
-JOINT_HANDLE_COLOR = np.array((173 / 255, 150 / 255, 184 / 255, 1.0), np.float32)
+JOINT_HANDLE_COLOR = np.array((156 / 255, 191 / 255, 141 / 255, 1.0), np.float32)
 CENTER_COLOR = np.array((0.92, 0.92, 0.92, 1.0), np.float32)
 TRACKBALL_COLOR = np.array((0.70, 0.70, 0.70, 1.0), np.float32)
 CONTRAST_EDGE_COLOR = np.array((0.68, 0.71, 0.76, 1.0), np.float32)

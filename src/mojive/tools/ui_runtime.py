@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -783,6 +784,31 @@ def _capture_joint_gizmos(output: Path) -> None:
                 padding=8.0,
                 max_height=520.0,
             )
+            long_joint = max(
+                viewer.session.joints,
+                key=lambda joint: len(joint.name or f"joint{joint.joint_id}"),
+            )
+            long_joint_name = long_joint.name or f"joint{long_joint.joint_id}"
+            joints._search = long_joint_name
+            _settle(viewer, 2)
+            label_point = _item_center(
+                viewer,
+                "selectable",
+                f"{long_joint_name}##joint-select-{long_joint.joint_id}",
+            )
+            imgui.get_io().add_mouse_pos_event(*label_point)
+            viewer.sync()
+            time.sleep(0.52)
+            _settle(viewer, 2)
+            _save(viewer, output / "joints-name-tooltip.png")
+            _save_window_crop(
+                viewer,
+                "Status###application_status",
+                output / "joints-name-status-closeup.png",
+                padding=0.0,
+            )
+            joints._search = ""
+            _settle(viewer, 2)
             _right_click(
                 viewer,
                 _item_center(viewer, "button", "##sort_order_##joint_search"),
@@ -871,6 +897,8 @@ def _capture_joint_gizmos(output: Path) -> None:
                 x0, y0, x1, y1 = hit.rect
                 io = imgui.get_io()
                 io.add_mouse_pos_event((x0 + x1) * 0.5, (y0 + y1) * 0.5)
+                viewer.sync()
+                time.sleep(0.52)
                 _settle(viewer, 2)
                 _save_window_crop(
                     viewer,

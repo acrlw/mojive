@@ -153,7 +153,7 @@ examples-check:
 	$(PY) -m compileall -q examples
 
 docs-serve:
-	uv run --extra docs mkdocs serve
+	uv run --extra docs mkdocs serve --strict --open
 
 ## Fast tests contain pure CPU behavior and module contracts.
 test-fast:

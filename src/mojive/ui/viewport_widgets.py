@@ -94,6 +94,7 @@ class ViewportLabels:
     time: str = "Time"
     steps: str = "Steps"
     no_selection: str = "No selection"
+    clear_selection: str = "Clear selection"
     show_steps: str = "Click to show steps"
     show_time: str = "Click to show time"
     copy_exact: str = "Right-click to copy exact value"

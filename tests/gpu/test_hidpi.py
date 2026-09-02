@@ -150,8 +150,10 @@ def test_hidpi_viewport_overlays_keep_a_hard_clip_after_splitter_collapse(monkey
             name = f"Joint {hit.label}###joint_limit_{hit.joint_id}_{hit.label[:3]}"
             window = imgui.internal.find_window_by_name(name)
             if window is not None and window.active:
-                clipped_windows.append(window)
-        assert len(clipped_windows) >= 2
+                assert window.pos.x >= viewport_x - 1.0
+                assert window.pos.y >= viewport_y - 1.0
+                assert window.pos.x + window.size.x <= viewport_right + 1.0
+                assert window.pos.y + window.size.y <= viewport_bottom + 1.0
         for window in clipped_windows:
             assert window is not None and window.active
             commands = [item for item in window.draw_list.cmd_buffer if item.elem_count]

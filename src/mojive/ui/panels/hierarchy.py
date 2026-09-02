@@ -72,6 +72,11 @@ class HierarchyPanel(Panel):
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
 
+    def clear_selection(self) -> None:
+        """Clear the hierarchy's optional multi-selection state."""
+
+        self._batch_selected.clear()
+
     def draw(self, ctx: PanelContext) -> None:
         s = ctx.session
         self._refresh(ctx)

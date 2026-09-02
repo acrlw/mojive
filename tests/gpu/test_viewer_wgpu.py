@@ -27,6 +27,21 @@ from mojive.render.webgpu.backend import WgpuBackend  # noqa: E402
 from mojive.ui.window_wgpu import WgpuWindow  # noqa: E402
 
 
+@pytest.fixture(autouse=True, scope="module")
+def _pin_ui_scale():
+    """Keep absolute pixel assertions independent of desktop content scale."""
+
+    old = os.environ.get("MOJIVE_UI_SCALE")
+    os.environ["MOJIVE_UI_SCALE"] = "1"
+    try:
+        yield
+    finally:
+        if old is None:
+            del os.environ["MOJIVE_UI_SCALE"]
+        else:
+            os.environ["MOJIVE_UI_SCALE"] = old
+
+
 @pytest.fixture(scope="module")
 def viewer(backend_name):
     if backend_name != "wgpu":

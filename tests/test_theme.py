@@ -156,6 +156,19 @@ def test_native_gizmo_uses_theme_axis_colors():
         assert tuple(actual) == pytest.approx(want)
 
 
+def test_joint_gizmo_uses_primary_while_reserved_purple_stays_in_the_palette():
+    from mojive.gizmo import ACTIVE_HANDLE_COLOR, JOINT_HANDLE_COLOR
+    from mojive.ui.gizmo import JOINT_ACTIVE_DARK_COLOR, JOINT_RANGE_COLOR
+
+    assert tuple(JOINT_HANDLE_COLOR) == pytest.approx(theme.PRIMARY)
+    assert tuple(ACTIVE_HANDLE_COLOR) == pytest.approx(theme.PRIMARY_BRIGHT)
+    assert JOINT_RANGE_COLOR == theme.PRIMARY
+    assert JOINT_ACTIVE_DARK_COLOR == theme.PRIMARY_DIM
+    assert theme.THEME.accent_purple == theme.ACCENT_PURPLE
+    assert theme.THEME.accent_purple_bright == theme.ACCENT_PURPLE_BRIGHT
+    assert theme.THEME.accent_purple_dim == theme.ACCENT_PURPLE_DIM
+
+
 def test_derived_colors_are_axis_colors_not_lookalikes():
 
     axis = list(theme.AXIS_COLORS.values())

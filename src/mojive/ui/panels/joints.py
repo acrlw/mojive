@@ -9,7 +9,7 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, JointInfo, NodeType
-from . import Panel, PanelContext, searchable_ordered_list_header, value_slider
+from . import Panel, PanelContext, copyable_name_item, searchable_ordered_list_header, value_slider
 
 _SCALAR_KINDS = ("hinge", "slide")
 _BROWSE_THRESHOLD = 256
@@ -120,6 +120,7 @@ class JointsPanel(Panel):
         selected_node = ctx.session.selected_node
         selected = bool(joint_node is not None and selected_node is joint_node)
         if joint_node is None:
+            label_width = max(1.0, imgui.get_content_region_avail().x)
             imgui.text_disabled(name)
         else:
             label_width = max(1.0, imgui.get_content_region_avail().x)
@@ -133,6 +134,7 @@ class JointsPanel(Panel):
             imgui.end_disabled()
             if clicked:
                 ctx.submit(cmd.SelectNode(joint_node.node_id))
+        copyable_name_item(ctx, name, label_width)
         imgui.table_next_column()
         if j.type not in _SCALAR_KINDS:
             imgui.align_text_to_frame_padding()

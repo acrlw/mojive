@@ -66,7 +66,7 @@ CONCEPT_THEME = replace(
         "z": rgb8(111, 148, 229),
     },
 )
-JOINT_COLOR = rgb8(175, 132, 183)
+JOINT_COLOR = CONCEPT_THEME.primary
 # Gizmo strokes need to read against the viewport; Inspector axis badges need
 # the inverse contrast because their 14 pt glyphs are white. Keep the hue
 # identity, but use darker role-specific surfaces for the badges.
@@ -807,7 +807,7 @@ def _draw_joint_gizmo(
     tick = 8.0 * scale
     hinge_tick = 16.0 * scale
 
-    # Slide: purple range/handle, semantic endpoint ticks, labels offset from
+    # Slide: Primary range/handle, semantic endpoint ticks, labels offset from
     # the axis so neither the line nor the model body can pierce the text.
     slide_y = y + 148.0 * scale
     slide_min = x + 74.0 * scale
@@ -890,7 +890,7 @@ def _draw_joint_gizmo(
         scale,
     )
 
-    # Hinge: a single clean purple arc. Endpoint ticks are radial and use the
+    # Hinge: a single clean Primary arc. Endpoint ticks are radial and use the
     # same MIN/MAX semantic colors as the adjacent label dots.
     center = (x + 548.0 * scale, y + 140.0 * scale)
     radius = 72.0 * scale
@@ -3585,7 +3585,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         draw.text(
             (x0 + 54.0, content_y + 28.0),
             note_color,
-            "Purple handles · blue MIN tick · red MAX tick · backed labels with white text.",
+            "Primary handles · blue MIN tick · red MAX tick · delayed read-only labels.",
         )
         imgui.push_id("geometry-joint-gizmo")
         _draw_joint_gizmo(
@@ -3599,7 +3599,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         draw.text(
             (x0 + 54.0, content_y + 354.0 * scale),
             note_color,
-            "Slide current = Primary Bright · hinge current = range purple · "
+            "Slide and hinge current ticks retain the Primary range color · "
             "double-click the active handle = Type value.",
         )
         draw.text(

@@ -10,12 +10,15 @@ from imgui_bundle import imgui
 
 from mojive.ui import window as window_module
 from mojive.ui.app import (
+    JOINT_LIMIT_HOVER_GRACE_SECONDS,
+    JOINT_LIMIT_LABEL_DELAY_SECONDS,
     MODEL_FILTERS,
     ViewerApp,
     _clipped_overlay_host_rect,
     _compact_status_for_selection,
     _fit_image_rect,
     _FrameRateDisplay,
+    _JointLimitHoverState,
     _middle_elide_text,
     _prepare_modal,
     _simulation_timestep,
@@ -40,6 +43,53 @@ def test_only_a_docked_window_tab_owns_the_suppressed_nav_cursor() -> None:
     assert not _is_dock_tab_nav_target(41, 42, True)
     assert not _is_dock_tab_nav_target(42, 42, False)
     assert not _is_dock_tab_nav_target(0, 0, True)
+
+
+def test_joint_limit_hover_delays_label_and_tolerates_short_dropouts() -> None:
+    state = _JointLimitHoverState()
+    lower = (3, 7, "MIN")
+    upper = (3, 7, "MAX")
+    available = (lower, upper)
+
+    assert state.update(lower, available, 10.0) is None
+    assert (
+        state.update(
+            lower,
+            available,
+            10.0 + JOINT_LIMIT_LABEL_DELAY_SECONDS,
+        )
+        == lower
+    )
+    assert state.update(None, available, 10.0 + JOINT_LIMIT_LABEL_DELAY_SECONDS + 0.01) == lower
+    assert (
+        state.update(
+            lower,
+            available,
+            10.0 + JOINT_LIMIT_LABEL_DELAY_SECONDS + JOINT_LIMIT_HOVER_GRACE_SECONDS,
+        )
+        == lower
+    )
+    assert state.update(upper, available, 11.0) is None
+
+
+def test_joint_limit_hover_resets_after_a_real_exit_or_target_removal() -> None:
+    state = _JointLimitHoverState()
+    lower = (3, 7, "MIN")
+    available = (lower,)
+
+    state.update(lower, available, 10.0)
+    assert (
+        state.update(
+            None,
+            available,
+            10.0 + JOINT_LIMIT_HOVER_GRACE_SECONDS + 0.01,
+        )
+        is None
+    )
+    assert state.key is None
+    state.update(lower, available, 11.0)
+    assert state.update(None, (), 11.01) is None
+    assert state.key is None
 
 
 @pytest.mark.parametrize(

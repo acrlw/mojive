@@ -22,6 +22,7 @@ MOUSE_GESTURES: tuple[tuple[str, str], ...] = (
 
 KEYS: tuple[tuple[str, str], ...] = (
     ("Space", "pause / resume"),
+    ("Esc", "clear selection"),
     ("g / r", "gizmo: translate / rotate"),
     ("t", "gizmo: body / world frame"),
     ("Shift while using a gizmo", "snap to the position or rotation step from Settings"),

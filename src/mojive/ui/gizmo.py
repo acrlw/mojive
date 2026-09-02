@@ -105,13 +105,15 @@ ROTATION_TICK_MIN_ALPHA = 0.5
 JOINT_RANGE_RADIUS = RING_RADIUS
 JOINT_RANGE_WIDTH_PT = RING_WIDTH_PT
 JOINT_RANGE_OFFSET_PT = 0.0
-JOINT_RANGE_COLOR = (173 / 255, 150 / 255, 184 / 255, 1.0)
-JOINT_ACTIVE_DARK_COLOR = (141 / 255, 120 / 255, 152 / 255, 1.0)
+JOINT_RANGE_COLOR = THEME.primary
+JOINT_ACTIVE_DARK_COLOR = THEME.primary_dim
 JOINT_LOWER_LIMIT_COLOR = THEME.axis_color("z")
 JOINT_UPPER_LIMIT_COLOR = THEME.axis_color("x")
 JOINT_CURRENT_COLOR = axis_hover_color(JOINT_RANGE_COLOR)
 JOINT_CURRENT_TICK_PT = 20.0
 JOINT_LIMIT_TICK_PT = 14.0
+JOINT_LIMIT_HIT_PT = 18.0
+JOINT_LIMIT_HIT_PADDING_PT = 4.0
 JOINT_SLIDE_ARROW_OFFSET_PT = 17.0
 JOINT_SLIDE_ARROW_INSET_PT = 9.0
 JOINT_SLIDE_ARROW_EXTENT_PT = 48.0
@@ -164,17 +166,10 @@ def _joint_endpoint_color(state: _JointRangeState | None):
 
 
 def _joint_current_tick_color(state: _JointRangeState, range_color):
-    """Match the range stroke except when the current value reaches a limit."""
+    """Keep the current-value tick distinct from the colored limit ticks."""
 
-    endpoint_color = _joint_endpoint_color(state)
-    if endpoint_color is None:
-        return tuple(float(channel) for channel in range_color)
-    return (
-        float(endpoint_color[0]),
-        float(endpoint_color[1]),
-        float(endpoint_color[2]),
-        float(range_color[3]),
-    )
+    del state
+    return tuple(float(channel) for channel in range_color)
 
 
 def joint_slide_arrow_polygons(
@@ -467,7 +462,7 @@ class PreciseGizmoInput:
 
 @dataclass(frozen=True)
 class JointLimitHit:
-    """One screen-space joint endpoint label with its stable write target."""
+    """One screen-space joint endpoint tick with its stable write target."""
 
     joint_id: int
     qpos_adr: int
@@ -475,6 +470,13 @@ class JointLimitHit:
     label: str
     rect: tuple[float, float, float, float]
     semantic_color: tuple[float, float, float, float]
+    tick_start: tuple[float, float]
+    tick_end: tuple[float, float]
+    tick_width: float
+    tick_cap: str
+    label_anchor: tuple[float, float]
+    label_above: bool
+    label_align_right: bool
 
 
 def verdict(paused: bool, node: SceneNode | None) -> Verdict:
@@ -1221,11 +1223,24 @@ class ObjectGizmo:
             self._draw_rotation_guide(overlay, cam, rect, style_scale, rotation_dial_projector)
         if self._using and self._label:
             self._draw_value_label(overlay, cam, rect, style_scale, rotation_dial_projector)
-        if self._joint_range is not None:
-            # Endpoint labels are interactive buttons. Submit them after every
-            # ruler, sector, tick, and live value so no gizmo primitive can
-            # paint over their surface.
-            self._draw_joint_range(overlay, cam, rect, style_scale, phase="labels")
+
+    @staticmethod
+    def draw_joint_limit_label(
+        overlay: Draw2D,
+        hit: JointLimitHit,
+        style_scale: float,
+    ) -> tuple[float, float, float, float]:
+        """Draw the delayed, non-interactive value label for one endpoint tick."""
+
+        return _draw_joint_value_label(
+            overlay,
+            hit.label_anchor,
+            hit.semantic_color,
+            hit.label,
+            style_scale,
+            above=hit.label_above,
+            align_right=hit.label_align_right,
+        )
 
     def _draw_flat(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
         # Scalar joint manipulation is represented by its range axis or arc.
@@ -1491,84 +1506,53 @@ class ObjectGizmo:
                     cap="round_end",
                 )
             if not state.has_ambiguous_dial_limits:
-                self._draw_hinge_limit(
-                    overlay,
-                    dial,
+                tick_width = 3.0 * style_scale
+                lower_tick = dial.tick(
+                    JOINT_RANGE_RADIUS,
                     start_angle,
-                    _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha),
-                    "",
-                    style_scale,
-                    label_above=True,
-                    draw_label=False,
+                    JOINT_LIMIT_TICK_PT * style_scale,
                 )
-                self._draw_hinge_limit(
-                    overlay,
-                    dial,
+                upper_tick = dial.tick(
+                    JOINT_RANGE_RADIUS,
                     state.upper,
-                    _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha),
-                    "",
-                    style_scale,
-                    label_above=False,
-                    draw_label=False,
+                    JOINT_LIMIT_TICK_PT * style_scale,
                 )
-        if phase != "geometry":
-            lower_label = _joint_limit_label("MIN", state.lower, "hinge")
-            upper_label = _joint_limit_label("MAX", state.upper, "hinge")
-            if state.has_ambiguous_dial_limits:
-                # A full- or multi-turn scalar range has no unique pair of
-                # endpoint directions on a circular dial. Ticks would imply a
-                # false geometric meaning. Keep exact limits as stacked badges.
-                lower_rect = upper_rect = None
-                if not self._using:
-                    anchor = dial.points(JOINT_RANGE_RADIUS, (np.pi,))[0, :2]
-                    lower_rect = _draw_joint_value_label(
-                        overlay,
-                        anchor,
-                        _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha),
-                        lower_label,
-                        style_scale,
-                        above=True,
-                        align_right=True,
-                    )
-                    upper_rect = _draw_joint_value_label(
-                        overlay,
-                        anchor,
-                        _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha),
-                        upper_label,
-                        style_scale,
-                        above=False,
-                        align_right=True,
-                    )
-            else:
-                # Tick marks were submitted in the geometry phase. Labels
-                # stay in one uninterrupted top-layer pass.
-                lower_rect = self._draw_hinge_limit(
-                    overlay,
-                    dial,
-                    start_angle,
-                    _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha),
-                    lower_label,
-                    style_scale,
-                    label_above=True,
-                    draw_tick=False,
+                entries = (
+                    (
+                        state.lower,
+                        _joint_limit_label("MIN", state.lower, "hinge"),
+                        lower_tick,
+                        lower_tick[1] if lower_tick is not None else None,
+                        JOINT_LOWER_LIMIT_COLOR,
+                        True,
+                        False,
+                    ),
+                    (
+                        state.upper,
+                        _joint_limit_label("MAX", state.upper, "hinge"),
+                        upper_tick,
+                        upper_tick[1] if upper_tick is not None else None,
+                        JOINT_UPPER_LIMIT_COLOR,
+                        False,
+                        True,
+                    ),
                 )
-                upper_rect = self._draw_hinge_limit(
-                    overlay,
-                    dial,
-                    state.upper,
-                    _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha),
-                    upper_label,
-                    style_scale,
-                    label_above=False,
-                    draw_tick=False,
+                for _value, _label, tick, _anchor, color, _above, _align_right in entries:
+                    if tick is not None:
+                        overlay.line(
+                            tick[0],
+                            tick[1],
+                            _with_alpha(color, alpha),
+                            tick_width,
+                            cap="round_end",
+                        )
+                self._set_joint_limit_hits(
+                    state,
+                    entries,
+                    tick_width=tick_width,
+                    tick_cap="round_end",
+                    style_scale=style_scale,
                 )
-            self._set_joint_limit_hits(
-                state,
-                (
-                    (state.lower, lower_label, lower_rect, JOINT_LOWER_LIMIT_COLOR),
-                    (state.upper, upper_label, upper_rect, JOINT_UPPER_LIMIT_COLOR),
-                ),
-            )
 
     def _draw_slide_handle(
         self,
@@ -1637,42 +1621,6 @@ class ObjectGizmo:
             alpha,
         )
 
-    @staticmethod
-    def _draw_hinge_limit(
-        overlay: Draw2D,
-        dial: _RotationDialProjector,
-        angle: float,
-        limit_color,
-        label: str,
-        style_scale: float,
-        *,
-        label_above: bool,
-        draw_tick: bool = True,
-        draw_label: bool = True,
-    ) -> tuple[float, float, float, float] | None:
-        tick = dial.tick(JOINT_RANGE_RADIUS, angle, JOINT_LIMIT_TICK_PT * style_scale)
-        if tick is None:
-            return None
-        if draw_tick:
-            overlay.line(
-                tick[0],
-                tick[1],
-                limit_color,
-                3.0 * style_scale,
-                cap="round_end",
-            )
-        if not draw_label:
-            return None
-        return _draw_joint_value_label(
-            overlay,
-            tick[1],
-            limit_color,
-            label,
-            style_scale,
-            above=label_above,
-            align_right=not label_above,
-        )
-
     def _draw_slide_range(
         self,
         overlay: Draw2D,
@@ -1695,8 +1643,6 @@ class ObjectGizmo:
             return
         alpha = slide.alpha
         range_color = self._flat_color(GizmoHandle.Z, 2, alpha)
-        lower_color = _with_alpha(JOINT_LOWER_LIMIT_COLOR, alpha)
-        upper_color = _with_alpha(JOINT_UPPER_LIMIT_COLOR, alpha)
         lower, current, upper = slide.lower, slide.current, slide.upper
         tangent, normal = slide.tangent, slide.normal
         if phase != "labels":
@@ -1710,18 +1656,6 @@ class ObjectGizmo:
                 alpha,
             )
 
-            half_tick = 6.0 * style_scale
-            for point, limit_color in (
-                (lower, lower_color),
-                (upper, upper_color),
-            ):
-                overlay.line(
-                    point - normal * half_tick,
-                    point + normal * half_tick,
-                    limit_color,
-                    3.0 * style_scale,
-                    cap="round",
-                )
             if not (self._using and self._active is GizmoHandle.Z and not self._snapping):
                 overlay.line(
                     current - normal * 10.0 * style_scale,
@@ -1730,36 +1664,54 @@ class ObjectGizmo:
                     JOINT_RANGE_WIDTH_PT * style_scale,
                     cap="round",
                 )
-        if phase != "geometry":
-            lower_label = _joint_limit_label("MIN", state.lower, "slide")
-            lower_rect = _draw_joint_value_label(
-                overlay,
-                lower,
-                lower_color,
-                lower_label,
-                style_scale,
-                above=True,
-                align_right=True,
-            )
-            upper_label = _joint_limit_label("MAX", state.upper, "slide")
-            upper_rect = _draw_joint_value_label(
-                overlay,
-                upper,
-                upper_color,
-                upper_label,
-                style_scale,
-                above=False,
-                align_right=False,
-            )
-            self._set_joint_limit_hits(
-                state,
+
+            half_tick = 6.0 * style_scale
+            tick_width = 3.0 * style_scale
+            entries = (
                 (
-                    (state.lower, lower_label, lower_rect, JOINT_LOWER_LIMIT_COLOR),
-                    (state.upper, upper_label, upper_rect, JOINT_UPPER_LIMIT_COLOR),
+                    state.lower,
+                    _joint_limit_label("MIN", state.lower, "slide"),
+                    (lower - normal * half_tick, lower + normal * half_tick),
+                    lower,
+                    JOINT_LOWER_LIMIT_COLOR,
+                    True,
+                    True,
+                ),
+                (
+                    state.upper,
+                    _joint_limit_label("MAX", state.upper, "slide"),
+                    (upper - normal * half_tick, upper + normal * half_tick),
+                    upper,
+                    JOINT_UPPER_LIMIT_COLOR,
+                    False,
+                    False,
                 ),
             )
+            for _value, _label, tick, _anchor, limit_color, _above, _align_right in entries:
+                overlay.line(
+                    tick[0],
+                    tick[1],
+                    _with_alpha(limit_color, alpha),
+                    tick_width,
+                    cap="round",
+                )
+            self._set_joint_limit_hits(
+                state,
+                entries,
+                tick_width=tick_width,
+                tick_cap="round",
+                style_scale=style_scale,
+            )
 
-    def _set_joint_limit_hits(self, state: _JointRangeState, entries) -> None:
+    def _set_joint_limit_hits(
+        self,
+        state: _JointRangeState,
+        entries,
+        *,
+        tick_width: float,
+        tick_cap: str,
+        style_scale: float,
+    ) -> None:
         if state.joint_id < 0 or state.qpos_adr < 0:
             return
         self._joint_limit_hits = tuple(
@@ -1768,15 +1720,30 @@ class ObjectGizmo:
                 qpos_adr=state.qpos_adr,
                 value=float(value),
                 label=label,
-                rect=rect,
+                rect=_joint_limit_tick_rect(tick, tick_width, style_scale),
                 semantic_color=semantic_color,
+                tick_start=tuple(float(component) for component in tick[0]),
+                tick_end=tuple(float(component) for component in tick[1]),
+                tick_width=float(tick_width),
+                tick_cap=tick_cap,
+                label_anchor=tuple(float(component) for component in label_anchor),
+                label_above=bool(label_above),
+                label_align_right=bool(label_align_right),
             )
-            for value, label, rect, semantic_color in entries
-            if rect is not None
+            for (
+                value,
+                label,
+                tick,
+                label_anchor,
+                semantic_color,
+                label_above,
+                label_align_right,
+            ) in entries
+            if tick is not None and label_anchor is not None
         )
 
     def apply_joint_limit(self, session: Session, hit: JointLimitHit) -> CommandResult:
-        """Move the selected scalar joint to the endpoint represented by a label."""
+        """Move the selected scalar joint to the endpoint represented by a tick."""
 
         if not session.paused:
             return CommandResult.bad("Pause the simulation before editing a joint")
@@ -2162,7 +2129,7 @@ class ObjectGizmo:
         rect,
         style_scale: float,
     ) -> None:
-        """Draw a slide drag as one purple segment with tick endpoints."""
+        """Draw a slide drag as one Primary-Dim segment with tick endpoints."""
 
         screen = project(cam, (self._drag_origin_pos, self._frame.position), rect)
         if np.any(screen[:, 2] <= 0.0):
@@ -3016,6 +2983,29 @@ def _draw_joint_value_label(
         label,
     )
     return (x, y, x + width, y + height)
+
+
+def _joint_limit_tick_rect(
+    tick,
+    tick_width: float,
+    style_scale: float,
+) -> tuple[float, float, float, float]:
+    """Return a scale-stable pointer target centered on one endpoint tick."""
+
+    start, end = tick
+    padding = JOINT_LIMIT_HIT_PADDING_PT * style_scale + tick_width * 0.5
+    x0 = min(float(start[0]), float(end[0])) - padding
+    y0 = min(float(start[1]), float(end[1])) - padding
+    x1 = max(float(start[0]), float(end[0])) + padding
+    y1 = max(float(start[1]), float(end[1])) + padding
+    minimum = JOINT_LIMIT_HIT_PT * style_scale
+    if x1 - x0 < minimum:
+        center = (x0 + x1) * 0.5
+        x0, x1 = center - minimum * 0.5, center + minimum * 0.5
+    if y1 - y0 < minimum:
+        center = (y0 + y1) * 0.5
+        y0, y1 = center - minimum * 0.5, center + minimum * 0.5
+    return x0, y0, x1, y1
 
 
 def _joint_limit_label(prefix: str, value: float, joint_type: str) -> str:

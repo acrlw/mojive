@@ -110,6 +110,7 @@ from mojive.ui.gizmo import (
     _snap_tick_alpha,
     _split_segment_around_point,
 )
+from mojive.ui.theme import THEME
 
 RECT = (0.0, 0.0, 800.0, 600.0)
 
@@ -171,7 +172,7 @@ def test_rotation_ring_color_respects_scalar_joint_override() -> None:
     assert color[3] == pytest.approx(0.5 * ROTATE_RING_HOVER_ALPHA)
 
 
-def test_pressed_scalar_joint_rotation_ring_keeps_its_semantic_purple() -> None:
+def test_pressed_scalar_joint_rotation_ring_uses_primary_bright() -> None:
     frame = GizmoFrame(
         mode=GizmoMode.ROTATE,
         active=GizmoHandle.ROTATE_Z,
@@ -181,7 +182,7 @@ def test_pressed_scalar_joint_rotation_ring_keeps_its_semantic_purple() -> None:
     color = rotation_handle_color(frame, GizmoHandle.ROTATE_Z, 2)
 
     assert np.allclose(color[:3], ACTIVE_HANDLE_COLOR[:3])
-    assert color[0] > color[1] and color[2] > color[1]
+    assert color[1] > color[0] > color[2]
     assert color[3] == pytest.approx(ROTATE_RING_ACTIVE_ALPHA)
 
 
@@ -256,11 +257,8 @@ def test_joint_drag_label_dot_uses_endpoint_semantics(current, expected) -> None
     assert np.allclose(_joint_drag_label_color(state), expected)
 
 
-@pytest.mark.parametrize(
-    ("current", "endpoint_color"),
-    ((-1.0, JOINT_LOWER_LIMIT_COLOR), (0.25, None), (1.0, JOINT_UPPER_LIMIT_COLOR)),
-)
-def test_hinge_value_label_dot_matches_the_current_tick_color(current, endpoint_color) -> None:
+@pytest.mark.parametrize("current", (-1.0, 0.25, 1.0))
+def test_hinge_value_label_dot_matches_the_current_tick_color(current) -> None:
     cam = camera()
     gizmo = ObjectGizmo("rotate")
     gizmo._active = GizmoHandle.ROTATE_Z
@@ -286,19 +284,13 @@ def test_hinge_value_label_dot_matches_the_current_tick_color(current, endpoint_
     range_color = (*ACTIVE_HANDLE_COLOR[:3], ACTIVE_HANDLE_COLOR[3] * alpha)
     expected = _joint_current_tick_color(gizmo._joint_range, range_color)
     assert np.allclose(dot_color, expected)
-    if endpoint_color is not None:
-        assert np.allclose(dot_color[:3], endpoint_color[:3])
 
 
 @pytest.mark.parametrize("joint_type", ("hinge", "slide"))
-@pytest.mark.parametrize(
-    ("current", "endpoint_color"),
-    ((-1.0, JOINT_LOWER_LIMIT_COLOR), (0.25, None), (1.0, JOINT_UPPER_LIMIT_COLOR)),
-)
-def test_joint_current_tick_matches_range_width_and_endpoint_color_semantics(
+@pytest.mark.parametrize("current", (-1.0, 0.25, 1.0))
+def test_joint_current_tick_keeps_range_color_beneath_limit_ticks(
     joint_type: str,
     current: float,
-    endpoint_color,
 ) -> None:
     gizmo = ObjectGizmo("rotate" if joint_type == "hinge" else "translate")
     gizmo._joint_range = _JointRangeState(joint_type, current, -1.0, 1.0)
@@ -322,11 +314,26 @@ def test_joint_current_tick_matches_range_width_and_endpoint_color_semantics(
             for name, args, kwargs in overlay.calls
             if name == "line" and "cap" not in kwargs
         )
-    expected = range_color if endpoint_color is None else (*endpoint_color[:3], range_color[3])
-    assert np.allclose(current_tick[2], expected)
+    assert np.allclose(current_tick[2], range_color)
     assert current_tick[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
     assert tick_kwargs["cap"] == ("round_end" if joint_type == "hinge" else "round")
     assert np.linalg.norm(current_tick[1] - current_tick[0]) == pytest.approx(JOINT_CURRENT_TICK_PT)
+    current_index = next(
+        index
+        for index, (name, args, _kwargs) in enumerate(overlay.calls)
+        if name == "line" and args is current_tick
+    )
+    limit_indices = [
+        index
+        for index, (name, args, _kwargs) in enumerate(overlay.calls)
+        if name == "line"
+        and (
+            np.allclose(args[2], JOINT_LOWER_LIMIT_COLOR)
+            or np.allclose(args[2], JOINT_UPPER_LIMIT_COLOR)
+        )
+    ]
+    assert len(limit_indices) == 2
+    assert min(limit_indices) > current_index
 
 
 @pytest.mark.parametrize(
@@ -1664,7 +1671,7 @@ def test_scale4_translation_guide_connectors_stay_beneath_both_endpoint_markers(
     assert np.dot(end - core_line[1], direction) == pytest.approx(radius - core_width * 0.5)
 
 
-def test_joint_translation_guide_is_a_dark_purple_segment_with_asymmetric_ticks() -> None:
+def test_joint_translation_guide_is_a_primary_dim_segment_with_asymmetric_ticks() -> None:
     gizmo = ObjectGizmo()
     gizmo._drag_origin_pos[:] = (0.0, 0.0, 0.0)
     gizmo._frame.position[:] = (0.0, 0.0, 0.5)
@@ -1688,18 +1695,8 @@ def test_joint_translation_guide_is_a_dark_purple_segment_with_asymmetric_ticks(
     assert start_kwargs["cap"] == end_kwargs["cap"] == "round"
 
 
-@pytest.mark.parametrize(
-    ("current", "expected_color"),
-    (
-        (-1.0, JOINT_LOWER_LIMIT_COLOR),
-        (0.25, ACTIVE_HANDLE_COLOR),
-        (1.0, JOINT_UPPER_LIMIT_COLOR),
-    ),
-)
-def test_joint_translation_guide_end_tick_uses_limit_color(
-    current: float,
-    expected_color,
-) -> None:
+@pytest.mark.parametrize("current", (-1.0, 0.25, 1.0))
+def test_joint_translation_guide_end_tick_keeps_active_color(current: float) -> None:
     gizmo = ObjectGizmo()
     gizmo._joint_range = _JointRangeState("slide", current, -1.0, 1.0)
     gizmo._drag_origin_pos[:] = (0.0, 0.0, 0.0)
@@ -1709,7 +1706,7 @@ def test_joint_translation_guide_end_tick_uses_limit_color(
     gizmo._draw_joint_translation_guide(overlay, camera(), RECT, 1.0)
 
     end_tick = overlay.calls[-1][1]
-    assert np.allclose(end_tick[2], expected_color)
+    assert np.allclose(end_tick[2], ACTIVE_HANDLE_COLOR)
 
 
 def test_joint_translation_guide_stays_in_the_final_overlay_without_dots() -> None:
@@ -2934,15 +2931,16 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
             and np.allclose(args[2], axis_hover_color(JOINT_RANGE_COLOR))
             for name, args, _kwargs in highlighted.calls
         )
-        assert {hit.label for hit in gizmo.joint_limit_hits} == labels
 
-    range_args = [
+    assert {hit.label for hit in gizmo.joint_limit_hits} == labels
+
+    range_args = next(
         args
         for name, args, kwargs in overlay.calls
         if name == range_call
         and np.allclose(args[2 if name == "line" else 1], JOINT_RANGE_COLOR)
         and (name == "line" or kwargs.get("closed") is False)
-    ][-1]
+    )
     lower, upper = target.joint.range
     if target.joint.type == "hinge":
         dial = _RotationDialProjector(
@@ -2971,31 +2969,17 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
         assert range_args[1] - range_args[0] == pytest.approx(
             expected_limits[1] - expected_limits[0], abs=1e-6
         )
-    texts = {
-        args[2]: args[1]
-        for name, args, _kwargs in overlay.calls
-        if name == "text" and args[2] in labels
-    }
-    assert set(texts) == labels
-    assert all(
-        np.allclose(color, (220 / 255, 223 / 255, 227 / 255, 1.0)) for color in texts.values()
-    )
-    label_indices = [
-        index
-        for index, (name, args, _kwargs) in enumerate(overlay.calls)
-        if name == "text" and args[2] in labels
-    ]
-    geometry_indices = [
-        index
-        for index, (name, _args, _kwargs) in enumerate(overlay.calls)
-        if name in {"line", "polyline", "fringed_concave_fill", "triangle_fan_fill"}
-    ]
-    assert min(label_indices) > max(geometry_indices)
+    assert not any(name == "text" and args[2] in labels for name, args, _kwargs in overlay.calls)
+    label_overlay = RecordingDraw2D()
+    gizmo.draw_joint_limit_label(label_overlay, gizmo.joint_limit_hits[0], 1.0)
+    label_text = next(args for name, args, _kwargs in label_overlay.calls if name == "text")
+    assert label_text[2] in labels
+    assert np.allclose(label_text[1], (220 / 255, 223 / 255, 227 / 255, 1.0))
 
 
 @pytest.mark.physics
 @pytest.mark.parametrize("body_name", ("hinge_body", "slide_body"))
-def test_joint_limit_labels_write_the_selected_endpoint(body_name: str) -> None:
+def test_joint_limit_ticks_write_the_selected_endpoint(body_name: str) -> None:
     from mojive.adapters.mujoco_adapter import MuJoCoAdapter
     from mojive.assets import resolve
 
@@ -3056,7 +3040,7 @@ def test_hinge_joint_range_continuously_fades_before_its_projection_degenerates(
     limit_colors = [
         args[2]
         for name, args, _kwargs in overlay.calls
-        if name == "circle_filled"
+        if name == "line"
         and (
             np.allclose(args[2][:3], JOINT_LOWER_LIMIT_COLOR[:3])
             or np.allclose(args[2][:3], JOINT_UPPER_LIMIT_COLOR[:3])
@@ -3087,7 +3071,7 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
         if name == "polyline" and np.allclose(args[1], JOINT_RANGE_COLOR)
     )
     assert JOINT_RANGE_RADIUS == RING_RADIUS
-    assert np.allclose(JOINT_RANGE_COLOR, (173 / 255, 150 / 255, 184 / 255, 1.0))
+    assert THEME.primary == JOINT_RANGE_COLOR
     assert allowed[1]["closed"] is False
     assert allowed[1]["cap"] == "butt"
 
@@ -3139,7 +3123,7 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
 
 
 @pytest.mark.parametrize("interaction", ("hovered", "active"))
-def test_hinge_joint_range_keeps_semantic_purple_for_hover_and_press(interaction: str) -> None:
+def test_hinge_joint_range_keeps_primary_palette_for_hover_and_press(interaction: str) -> None:
     cam = CameraView(
         eye=np.array((0.0, 0.0, 5.0)),
         target=np.zeros(3),
@@ -3308,7 +3292,7 @@ def test_multi_turn_hinge_guide_wraps_like_the_rotation_gizmo() -> None:
     assert sector[-1] == pytest.approx(stable_dial.points(RING_RADIUS, (current,))[0, :2])
 
 
-def test_multi_turn_hinge_range_uses_numeric_badge_without_false_endpoint_ticks() -> None:
+def test_multi_turn_hinge_range_has_no_false_endpoint_ticks_or_labels() -> None:
     cam = CameraView(
         eye=np.array((0.0, 0.0, 5.0)),
         target=np.zeros(3),
@@ -3339,8 +3323,8 @@ def test_multi_turn_hinge_range_uses_numeric_badge_without_false_endpoint_ticks(
     )
     assert not tuple(endpoint_lines)
     labels = {args[2] for name, args, _kwargs in overlay.calls if name == "text"}
-    assert "MIN -540.0°" in labels
-    assert "MAX +405.0°" in labels
+    assert not any(label.startswith(("MIN ", "MAX ")) for label in labels)
+    assert gizmo.joint_limit_hits == ()
 
 
 def test_multi_turn_hinge_hides_static_limit_badge_during_drag() -> None:

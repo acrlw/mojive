@@ -18,6 +18,7 @@ from imgui_bundle import imgui, portable_file_dialogs
 
 from .. import commands as cmd
 from ..adapters.base import FrameNeeds, NodeType
+from ..gizmo import axis_active_color, axis_hover_color
 from ..log import add_output_sink, get_logger, remove_output_sink
 from ..render.backend import FrameMode, LabelMode, RenderFlag
 from ..types import Light, LightType, MeshShape, ViewportImage
@@ -31,7 +32,7 @@ from . import gestures as gs
 from .camera import CameraOut, OrbitCamera, ndc_from_viewport, unproject
 from .camera_preview import CameraPreview
 from .draw2d import ImguiDraw2D
-from .gizmo import ObjectGizmo, PreciseGizmoInput
+from .gizmo import JointLimitHit, ObjectGizmo, PreciseGizmoInput
 from .input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
 from .localization import Localizer
 from .messages import OutputBuffer
@@ -81,6 +82,8 @@ if TYPE_CHECKING:
 
 CLICK_SLOP_PT = 4.0
 PRECISE_GIZMO_WIDTH_PT = 204.0
+JOINT_LIMIT_LABEL_DELAY_SECONDS = 0.5
+JOINT_LIMIT_HOVER_GRACE_SECONDS = 0.12
 log = get_logger("ui")
 
 
@@ -234,6 +237,25 @@ def _clipped_overlay_draw(
         imgui.pop_clip_rect()
 
 
+@contextmanager
+def _clipped_foreground_overlay_draw(
+    viewport_rect: tuple[float, float, float, float],
+):
+    """Yield the top-most draw list while retaining the hard viewport clip."""
+
+    x, y, width, height = viewport_rect
+    draw_list = imgui.get_foreground_draw_list()
+    draw_list.push_clip_rect(
+        imgui.ImVec2(x, y),
+        imgui.ImVec2(x + width, y + height),
+        True,
+    )
+    try:
+        yield ImguiDraw2D(draw_list)
+    finally:
+        draw_list.pop_clip_rect()
+
+
 def _equal_modal_buttons(
     labels: tuple[str, ...],
     theme: Theme,
@@ -374,6 +396,7 @@ def _simulation_timestep(adapter, *, loading: bool = False) -> float:
 class Keys:
     fly: tuple[float, float, float] = (0.0, 0.0, 0.0)
     toggle_pause: bool = False
+    clear_selection: bool = False
     frame_scene: bool = False
     gizmo_translate: bool = False
     gizmo_rotate: bool = False
@@ -407,6 +430,40 @@ class _FrameRateDisplay:
             self.value = 1.0 / max(self.smoothed_dt, 1e-6)
             self.elapsed %= 0.25
         return self.value
+
+
+@dataclass
+class _JointLimitHoverState:
+    """Apply a reveal delay and short dropout grace to endpoint hover."""
+
+    key: tuple[int, int, str] | None = None
+    entered_at: float = 0.0
+    last_seen_at: float = 0.0
+
+    def update(
+        self,
+        hovered_key: tuple[int, int, str] | None,
+        available_keys: tuple[tuple[int, int, str], ...],
+        now: float,
+    ) -> tuple[int, int, str] | None:
+        now = float(now)
+        if self.key not in available_keys:
+            self.reset()
+        if hovered_key is not None:
+            if hovered_key != self.key:
+                self.entered_at = now
+            self.key = hovered_key
+            self.last_seen_at = now
+        elif self.key is not None and now - self.last_seen_at > JOINT_LIMIT_HOVER_GRACE_SECONDS:
+            self.reset()
+        if self.key is None or now - self.entered_at < JOINT_LIMIT_LABEL_DELAY_SECONDS:
+            return None
+        return self.key
+
+    def reset(self) -> None:
+        self.key = None
+        self.entered_at = 0.0
+        self.last_seen_at = 0.0
 
 
 class ViewerApp:
@@ -525,6 +582,7 @@ class ViewerApp:
         # through to viewport picking and clear the selected joint.
         self._consume_scene_pointer_until_release = False
         self._joint_picker_node_id = -1
+        self._joint_limit_hover = _JointLimitHoverState()
         self._window_title = ""
         self._closing_without_save = False
         self._model_load_error = ""
@@ -2230,6 +2288,7 @@ class ViewerApp:
             ),
             -1,
         )
+        keyboard_free = not io.want_text_input and not imgui.is_any_item_active()
 
         return Keys(
             fly=(
@@ -2238,6 +2297,11 @@ class ViewerApp:
                 down(InputAction.FLY_UP) - down(InputAction.FLY_DOWN),
             ),
             toggle_pause=bindings.pressed(InputAction.TOGGLE_PAUSE),
+            clear_selection=(
+                keyboard_free
+                and self._selection_clear_enabled()
+                and imgui.is_key_pressed(imgui.Key.escape, False)
+            ),
             frame_scene=bindings.pressed(InputAction.FRAME_SCENE),
             gizmo_translate=bindings.pressed(InputAction.GIZMO_TRANSLATE),
             gizmo_rotate=bindings.pressed(InputAction.GIZMO_ROTATE),
@@ -2950,9 +3014,12 @@ class ViewerApp:
             self._draw_joint_gizmo_picker()
 
     def _draw_joint_limit_controls(self) -> None:
-        """Make the rendered MIN/MAX joint labels direct endpoint controls."""
+        """Make MIN/MAX ticks direct controls and reveal read-only values on dwell."""
 
-        if not self.session.paused:
+        hits = self.gizmo.joint_limit_hits
+        now = time.monotonic()
+        if not self.session.paused or not hits:
+            self._joint_limit_hover.reset()
             return
         flags = (
             imgui.WindowFlags_.no_decoration.value
@@ -2963,11 +3030,10 @@ class ViewerApp:
             | imgui.WindowFlags_.no_background.value
             | imgui.WindowFlags_.no_scrollbar.value
         )
-        for hit in self.gizmo.joint_limit_hits:
+        hovered_hit: JointLimitHit | None = None
+        for hit in hits:
             x0, y0, x1, y1 = hit.rect
-            # Keep the host window clip outside the rounded label. Otherwise
-            # its antialiased right/bottom edge is cut exactly at the window
-            # boundary and reads as a one-pixel seam in the hover state.
+            # Keep the host clip outside the antialiased tick feedback.
             clip_pad = 2.0 * self.window.style_scale
             host_rect = _clipped_overlay_host_rect(
                 self._viewport_rect,
@@ -2985,6 +3051,7 @@ class ViewerApp:
                 imgui.Cond_.always,
             )
             imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
+            imgui.push_style_var(imgui.StyleVar_.window_min_size, imgui.ImVec2(1.0, 1.0))
             visible, _ = imgui.begin(
                 f"{self.localizer.text('Joint')} {hit.label}"
                 f"###joint_limit_{hit.joint_id}_{hit.label[:3]}",
@@ -3006,10 +3073,9 @@ class ViewerApp:
                     )
                     hovered = imgui.is_item_hovered()
                     active = imgui.is_item_active()
-                    # This window is submitted after the viewport and camera
-                    # preview. Repaint every state so the endpoint control stays
-                    # above all range geometry instead of only rising on hover.
-                    self._draw_joint_limit_feedback(hit, hovered=hovered, active=active)
+                    if hovered or active:
+                        hovered_hit = hit
+                        self._draw_joint_limit_feedback(hit, hovered=hovered, active=active)
                     if clicked:
                         result = self.gizmo.apply_joint_limit(self.session, hit)
                         if not result.ok:
@@ -3017,48 +3083,49 @@ class ViewerApp:
                 finally:
                     imgui.pop_clip_rect()
             imgui.end()
-            imgui.pop_style_var()
+            imgui.pop_style_var(2)
 
-    def _draw_joint_limit_feedback(self, hit, *, hovered: bool, active: bool) -> None:
-        """Redraw a joint endpoint label with its button interaction state."""
+        keys = tuple(self._joint_limit_key(hit) for hit in hits)
+        visible_key = self._joint_limit_hover.update(
+            self._joint_limit_key(hovered_hit) if hovered_hit is not None else None,
+            keys,
+            now,
+        )
+        visible_hit = next(
+            (hit for hit in hits if self._joint_limit_key(hit) == visible_key),
+            None,
+        )
+        if visible_hit is not None:
+            with _clipped_foreground_overlay_draw(self._viewport_rect) as draw:
+                self.gizmo.draw_joint_limit_label(draw, visible_hit, self.window.style_scale)
 
-        x0, y0, x1, y1 = hit.rect
-        scale = self.window.style_scale
-        with _clipped_overlay_draw(self._viewport_rect) as draw:
-            background = (
-                self.theme.bg_frame_active
-                if active
-                else self.theme.bg_frame_hovered
-                if hovered
-                else (*self.theme.bg_popup[:3], 0.92)
-            )
-            foreground = self.theme.primary_bright if hovered or active else self.theme.text
-            draw.rect_filled((x0, y0), (x1, y1), background, rounding=3.0 * scale)
-            draw.rect(
-                (x0, y0),
-                (x1, y1),
-                self.theme.border,
-                1.0 * scale,
-                rounding=3.0 * scale,
-            )
-            padding_x = 8.0 * scale
-            dot_radius = 3.0 * scale
-            dot_gap = 6.0 * scale
-            center_y = (y0 + y1) * 0.5
-            draw.circle_filled(
-                (x0 + padding_x + dot_radius, center_y),
-                dot_radius,
-                hit.semantic_color,
-                segments=16,
-            )
-            text_height = imgui.calc_text_size(hit.label).y
-            draw.text(
-                (
-                    x0 + padding_x + dot_radius * 2.0 + dot_gap,
-                    center_y - text_height * 0.5,
-                ),
-                foreground,
-                hit.label,
+    @staticmethod
+    def _joint_limit_key(hit: JointLimitHit) -> tuple[int, int, str]:
+        return hit.joint_id, hit.qpos_adr, hit.label[:3]
+
+    def _draw_joint_limit_feedback(
+        self,
+        hit: JointLimitHit,
+        *,
+        hovered: bool,
+        active: bool,
+    ) -> None:
+        """Repaint one endpoint tick with its pointer interaction state."""
+
+        color = (
+            axis_active_color(hit.semantic_color)
+            if active
+            else axis_hover_color(hit.semantic_color)
+            if hovered
+            else hit.semantic_color
+        )
+        with _clipped_foreground_overlay_draw(self._viewport_rect) as draw:
+            draw.line(
+                hit.tick_start,
+                hit.tick_end,
+                color,
+                hit.tick_width,
+                cap=hit.tick_cap,
             )
 
     def _draw_joint_gizmo_picker(self) -> None:
@@ -3402,14 +3469,40 @@ class ViewerApp:
             return self.tool_hints.resolve(defaults, surface="status")
         if self._panel_status_hints:
             return self.tool_hints.resolve(self._panel_status_hints, surface="status")
-        if self._scene_input_blocked() or not self._has_scene_content():
-            return ()
+        if (
+            self._scene_input_blocked()
+            or not self._has_scene_content()
+            or not self._state.over_viewport
+        ):
+            return self.tool_hints.resolve((), surface="status")
         defaults = default_tool_hints(
             self._context_tool_hint_variant(),
             self.input_bindings,
             self._viewport_labels,
         )
+        if not self._scene_input_blocked() and self._selection_clear_enabled():
+            defaults = (
+                ToolHint(
+                    "key",
+                    "Esc",
+                    self._viewport_labels.clear_selection,
+                    hint_id="selection.clear",
+                ),
+                *defaults,
+            )
         return self.tool_hints.resolve(defaults, surface="status")
+
+    def _selection_clear_enabled(self) -> bool:
+        """Return whether Esc may clear the current scene selection."""
+
+        return bool(
+            self.session.paused
+            and not self.session.state_take_playing
+            and self.session.selected_node is not None
+            and not self.router.held
+            and not self.gizmo.using
+            and not self.gizmo.keyboard_using
+        )
 
     def _has_scene_content(self) -> bool:
         source = self.session.source
@@ -3878,6 +3971,15 @@ class ViewerApp:
     def apply_keys(self, keys: Keys) -> None:
         if keys.toggle_pause:
             self._toggle_playback()
+        if keys.clear_selection:
+            self.session.submit(cmd.Select(0))
+            hierarchy = self.panels.get("Hierarchy")
+            if hierarchy is not None:
+                clear_selection = getattr(hierarchy, "clear_selection", None)
+                if clear_selection is not None:
+                    clear_selection()
+            self.gizmo.cancel()
+            self.router.abort()
         if keys.gizmo_translate:
             self.gizmo.set_mode("translate")
         if keys.gizmo_rotate:
