@@ -47,11 +47,13 @@ complete setup and frame path.
 ### WebGPU capture submission
 
 Synchronous RGB packing and its GPU-to-CPU staging copy share one command encoder and submission.
-The mapped staging buffer persists with the target, avoiding `queue.read_buffer()`'s hidden copy
-submission and transient allocation. Scene rendering remains a separate submission: folding capture
-into the scene backend changed the 1920×1080 materials median by only 0.7 percent while adding a
-backend-specific render return path. The asynchronous API retains its bounded staging ring so
-mapping can overlap later frame submissions.
+RGB, metric depth, object ID, and segmentation use one target-owned staging allocation that grows
+to the largest transfer. Decoding completes while the buffer is mapped and always returns owned or
+caller-owned CPU storage. This avoids the hidden submission and transient allocation of queue
+convenience reads without creating one lifecycle per output format. Scene rendering remains a
+separate submission: folding capture into the scene backend changed the 1920×1080 materials median
+by only 0.7 percent while adding a backend-specific render return path. The asynchronous API retains
+its bounded staging ring so mapping can overlap later frame submissions.
 
 ## Picking and overlays
 

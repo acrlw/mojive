@@ -3,11 +3,63 @@ from __future__ import annotations
 import numpy as np
 
 from mojive.render.webgpu.readback import (
+    WgpuSyncReadback,
     aligned_row_bytes,
     decode_packed_rgb,
     decode_rows,
     rgba_to_rgb,
 )
+
+
+class _FakeBuffer:
+    def __init__(self, size: int) -> None:
+        self.data = bytearray(size)
+        self.map_state = "unmapped"
+        self.destroyed = False
+
+    def map_sync(self, _mode, *, size: int) -> None:
+        assert size <= len(self.data)
+        self.map_state = "mapped"
+
+    def read_mapped(self, *, size: int, copy: bool):
+        assert self.map_state == "mapped"
+        assert not copy
+        return memoryview(self.data)[:size]
+
+    def unmap(self) -> None:
+        self.map_state = "unmapped"
+
+    def destroy(self) -> None:
+        self.destroyed = True
+
+
+class _FakeEncoder:
+    def finish(self):
+        return self
+
+
+class _FakeQueue:
+    def __init__(self) -> None:
+        self.submissions = 0
+
+    def submit(self, commands) -> None:
+        assert len(commands) == 1
+        self.submissions += 1
+
+
+class _FakeDevice:
+    def __init__(self) -> None:
+        self.queue = _FakeQueue()
+        self.buffers: list[_FakeBuffer] = []
+
+    def create_buffer(self, *, size: int, usage) -> _FakeBuffer:
+        del usage
+        buffer = _FakeBuffer(size)
+        self.buffers.append(buffer)
+        return buffer
+
+    def create_command_encoder(self) -> _FakeEncoder:
+        return _FakeEncoder()
 
 
 def test_rgba_to_rgb_is_exact_and_returns_writable_storage() -> None:
@@ -119,3 +171,52 @@ def test_decode_rows_supports_casting_and_strided_destinations() -> None:
 
     assert result is destination
     assert np.array_equal(destination, values[::-1])
+
+
+def test_sync_readback_reuses_and_grows_one_staging_buffer() -> None:
+    device = _FakeDevice()
+    readback = WgpuSyncReadback(device)  # type: ignore[arg-type]
+
+    def transfer(payload: bytes):
+        def encode(_encoder, destination) -> None:
+            destination.data[: len(payload)] = payload
+
+        return encode
+
+    def decode(data):
+        return np.frombuffer(data, np.uint8).copy()
+
+    assert np.array_equal(
+        readback.read_copy(4, transfer(b"abcd"), decode), np.frombuffer(b"abcd", np.uint8)
+    )
+    first = device.buffers[0]
+    assert np.array_equal(
+        readback.read_copy(4, transfer(b"efgh"), decode), np.frombuffer(b"efgh", np.uint8)
+    )
+    assert device.buffers == [first]
+
+    assert np.array_equal(
+        readback.read_copy(8, transfer(b"ijklmnop"), decode),
+        np.frombuffer(b"ijklmnop", np.uint8),
+    )
+    assert len(device.buffers) == 2
+    assert first.destroyed
+    assert all(buffer.map_state == "unmapped" for buffer in device.buffers)
+    assert device.queue.submissions == 3
+
+    latest = device.buffers[-1]
+    readback.release()
+    assert latest.destroyed
+
+
+def test_sync_readback_unmaps_when_decode_raises() -> None:
+    device = _FakeDevice()
+    readback = WgpuSyncReadback(device)  # type: ignore[arg-type]
+
+    def fail(_data):
+        raise RuntimeError("decode failed")
+
+    with np.testing.assert_raises_regex(RuntimeError, "decode failed"):
+        readback.read_copy(4, lambda _encoder, _destination: None, fail)
+
+    assert device.buffers[0].map_state == "unmapped"

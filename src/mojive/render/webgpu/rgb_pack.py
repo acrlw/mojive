@@ -9,7 +9,7 @@ import numpy as np
 import wgpu
 
 from .programs import load_wgsl
-from .readback import WgpuReadbackQueue, decode_packed_rgb
+from .readback import WgpuReadbackQueue, WgpuSyncReadback, decode_packed_rgb
 
 _WORKGROUP_SIZE = 64
 _MAX_DISPATCH_X = 65_535
@@ -40,7 +40,6 @@ class WgpuRgbPacker:
             compute={"module": module, "entry_point": "cs_rgb_pack"},
         )
         self._buffer: wgpu.GPUBuffer | None = None
-        self._staging: wgpu.GPUBuffer | None = None
         self._group: wgpu.GPUBindGroup | None = None
         self._key: tuple[wgpu.GPUTextureView, int, int] | None = None
         self._size = 0
@@ -73,10 +72,6 @@ class WgpuRgbPacker:
         self._buffer = self._device.create_buffer(
             size=self._size,
             usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_SRC,
-        )
-        self._staging = self._device.create_buffer(
-            size=self._size,
-            usage=wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.MAP_READ,
         )
         self._group = self._device.create_bind_group(
             layout=self._layout,
@@ -115,6 +110,7 @@ class WgpuRgbPacker:
 
     def read(
         self,
+        readback: WgpuSyncReadback,
         view: wgpu.GPUTextureView,
         *,
         width: int,
@@ -125,17 +121,14 @@ class WgpuRgbPacker:
         """Pack and synchronously map one render target."""
 
         self._ensure(view, width, height)
-        staging = self._staging
-        assert staging is not None
-        encoder = self._device.create_command_encoder()
-        self._encode_copy(encoder, staging)
-        self._device.queue.submit([encoder.finish()])
-        staging.map_sync(wgpu.MapMode.READ, size=self._size)
-        try:
-            data = staging.read_mapped(size=self._size, copy=False)
-            return decode_packed_rgb(data, width=width, height=height, flip=flip, out=out)
-        finally:
-            staging.unmap()
+        decode = partial(
+            decode_packed_rgb,
+            width=width,
+            height=height,
+            flip=flip,
+            out=out,
+        )
+        return readback.read_copy(self._size, self._encode_copy, decode)
 
     def read_async(
         self,
@@ -173,10 +166,5 @@ class WgpuRgbPacker:
         if self._buffer is not None:
             self._buffer.destroy()
             self._buffer = None
-        if self._staging is not None:
-            if self._staging.map_state == wgpu.BufferMapState.mapped:
-                self._staging.unmap()
-            self._staging.destroy()
-            self._staging = None
         self._size = 0
         self._invocations = 0

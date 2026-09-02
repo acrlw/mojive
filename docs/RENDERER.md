@@ -71,10 +71,11 @@ introducing temporal lag. Any dependency change invalidates the relevant product
 revision-zero custom scenes deliberately take the conservative render-every-frame path.
 
 WebGPU render-target views and resource bind groups follow the same ownership model. Target views
-are created with their textures, while scene, tendon, outline, identity-presentation, RGB-pack
-bindings, and synchronous staging storage persist until one of their buffers or views is replaced.
-Resize, MSAA changes, and instance-buffer growth rebuild only the affected resources rather than
-allocating wrappers or staging buffers every frame.
+are created with their textures, while scene, tendon, outline, identity-presentation, and RGB-pack
+bindings persist until one of their buffers or views is replaced. All synchronous output formats
+share one map-readable staging buffer that grows to the largest transfer and survives target-view
+replacement. Resize, MSAA changes, and instance-buffer growth rebuild only the affected resources
+rather than allocating wrappers or staging buffers every frame.
 
 The MuJoCo adapter derives `FrameNeeds` from visible scene options. Contacts, tendons, deformables,
 diagnostics, islands, and BVH data are prepared only when a visible feature consumes them. Pose
@@ -93,12 +94,12 @@ The mapped payload is exactly three bytes per pixel (apart from at most nine ter
 instead of a four-byte texture copy followed by a strided CPU channel extraction. The shader,
 pipeline, storage buffer, texture binding, and dispatch geometry survive across frames; target
 resize invalidates only the size-dependent buffers and binding. Synchronous capture records the
-packing dispatch and copy into its persistent map-readable staging buffer in one command encoder,
-then maps that buffer directly. This avoids the second submission and transient staging allocation
-hidden by `queue.read_buffer()`. The conversion is byte-exact for the normalized render target. If
-an unusually large target exceeds a device's storage-binding limit, it falls back to the
-texture-copy path rather than failing capture. The generic row decoder retains Pillow's compiled
-RGBA conversion for that path and other texture-copy callers.
+packing dispatch and copy through the target's persistent map-readable staging buffer in one command
+encoder, then maps that buffer directly. This avoids the second submission and transient staging
+allocation hidden by `queue.read_buffer()`. The conversion is byte-exact for the normalized render
+target. If an unusually large target exceeds a device's storage-binding limit, it falls back to
+the texture-copy path rather than failing capture. The generic row decoder retains Pillow's
+compiled RGBA conversion for that path and other texture-copy callers.
 
 `Renderer.render_async()` is the explicit pipelined alternative. On wgpu it records the same GPU
 packing pass and a buffer copy into a lazily-created, three-slot staging ring, then returns a
@@ -109,11 +110,11 @@ backpressure instead of growing GPU memory without limit. Resize, sample-count c
 drain outstanding tickets before destroying their textures. A supplied output array belongs to its
 ticket until the future completes.
 
-Shape, orientation, caller-owned output, dtype-casting, and strided-output behavior remain
-unchanged. OpenGL exposes the same asynchronous method as an already-completed future until a
-PBO-backed queue is justified; no background GL context is introduced implicitly. Metric-depth and
-segmentation synchronous readback is already inexpensive on this device; their asynchronous form
-is provided for non-blocking composition, not assumed to improve throughput.
+Metric depth, object ID, and segmentation use the same staging owner and generic row decoder.
+Caller-owned typed arrays are filled directly from mapped rows rather than through a second full
+image allocation. Shape, orientation, dtype-casting, and strided-output behavior remain unchanged.
+OpenGL exposes the same asynchronous method as an already-completed future until a PBO-backed queue
+is justified; no background GL context is introduced implicitly.
 
 The high-level video recorder uses the same three-frame pipeline when the active target supports
 it, preserving submission and encoding order. Camera preview requests color rather than the full
@@ -235,6 +236,11 @@ interleaved-process rounds from a 2.541 ms median to 2.186 ms, about 14 percent,
 byte-exact output. The measured process RSS delta also fell from roughly 62.5 to 56.6 MiB,
 consistent with replacing the temporary `queue.read_buffer()` path by persistent staging. Compare
 repeated rounds rather than selecting one favorable run.
+
+The same persistent staging design now covers typed outputs. In two alternating 100-frame A/B
+rounds at 1920×1080, WebGPU depth fell from a 2.752 ms combined median to 2.199 ms (20.1 percent),
+and segmentation from 3.073 ms to 2.466 ms (19.7 percent). Sync and async paths remained
+pixel-identical, including direct caller-owned output arrays.
 
 The benchmark report separates the backend command graph from synchronous readback under
 `backend_render`. On the same materials scene, color-only WebGPU submission used 0.309 ms of CPU

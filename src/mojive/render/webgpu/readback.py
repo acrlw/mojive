@@ -116,6 +116,118 @@ class _Job:
     decode: Callable[[Any], np.ndarray]
 
 
+class WgpuSyncReadback:
+    """Synchronously map GPU copies through one reusable staging buffer.
+
+    The buffer grows to the largest requested transfer and is shared across
+    output formats.  Callers provide the GPU copy command and a decoder that
+    completes while the buffer is mapped; returned arrays therefore never
+    retain mapped GPU memory.
+    """
+
+    def __init__(self, device: wgpu.GPUDevice) -> None:
+        self._device = device
+        self._buffer: wgpu.GPUBuffer | None = None
+        self._capacity = 0
+
+    def read_texture(
+        self,
+        texture: wgpu.GPUTexture,
+        *,
+        width: int,
+        height: int,
+        dtype: np.dtype,
+        storage_channels: int,
+        output_channels: int | None = None,
+        flip: bool = True,
+        out: np.ndarray | None = None,
+        origin: tuple[int, int, int] = (0, 0, 0),
+    ) -> np.ndarray:
+        """Copy one texture region and return its owned public array."""
+
+        width, height = int(width), int(height)
+        dtype = np.dtype(dtype)
+        storage_channels = int(storage_channels)
+        output_channels = int(storage_channels if output_channels is None else output_channels)
+        if width < 1 or height < 1:
+            raise ValueError("readback dimensions must be positive")
+        if not 1 <= output_channels <= storage_channels:
+            raise ValueError("output channels must be between one and the stored channel count")
+        shape = (height, width) if output_channels == 1 else (height, width, output_channels)
+        if out is not None and out.shape != shape:
+            raise ValueError(f"Expected destination with shape {shape}, got {out.shape}")
+        row_bytes = aligned_row_bytes(width, dtype.itemsize * storage_channels)
+        size = row_bytes * height
+
+        def encode(encoder: wgpu.GPUCommandEncoder, destination: wgpu.GPUBuffer) -> None:
+            encoder.copy_texture_to_buffer(
+                {"texture": texture, "origin": tuple(int(value) for value in origin)},
+                {
+                    "buffer": destination,
+                    "offset": 0,
+                    "bytes_per_row": row_bytes,
+                    "rows_per_image": height,
+                },
+                (width, height, 1),
+            )
+
+        decode = partial(
+            decode_rows,
+            width=width,
+            height=height,
+            row_bytes=row_bytes,
+            dtype=dtype,
+            storage_channels=storage_channels,
+            output_channels=output_channels,
+            flip=bool(flip),
+            out=out,
+        )
+        return self.read_copy(size, encode, decode)
+
+    def read_copy(
+        self,
+        size: int,
+        encode: Callable[[wgpu.GPUCommandEncoder, wgpu.GPUBuffer], None],
+        decode: Callable[[Any], np.ndarray],
+    ) -> np.ndarray:
+        """Submit one copy, map it synchronously, and decode before unmapping."""
+
+        size = int(size)
+        if size < 1 or size % 4:
+            raise ValueError("readback size must be a positive multiple of four bytes")
+        buffer = self._ensure(size)
+        encoder = self._device.create_command_encoder()
+        encode(encoder, buffer)
+        self._device.queue.submit([encoder.finish()])
+        buffer.map_sync(wgpu.MapMode.READ, size=size)
+        try:
+            return decode(buffer.read_mapped(size=size, copy=False))
+        finally:
+            buffer.unmap()
+
+    def _ensure(self, size: int) -> wgpu.GPUBuffer:
+        if self._buffer is not None and self._capacity >= size:
+            return self._buffer
+        if self._buffer is not None:
+            self._buffer.destroy()
+        self._buffer = self._device.create_buffer(
+            size=size,
+            usage=wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.MAP_READ,
+        )
+        self._capacity = size
+        return self._buffer
+
+    def release(self) -> None:
+        """Destroy the persistent staging allocation."""
+
+        if self._buffer is not None:
+            if self._buffer.map_state == wgpu.BufferMapState.mapped:
+                self._buffer.unmap()
+            self._buffer.destroy()
+            self._buffer = None
+        self._capacity = 0
+
+
 class WgpuReadbackQueue:
     """Copy GPU products through a bounded ring without blocking the render thread.
 

@@ -125,7 +125,7 @@ def test_renderer_rgb_camera_out_and_lifecycle():
         target = renderer._backend.target
         packed_size = ((renderer.width * renderer.height + 3) // 4) * 12
         assert target._rgb_packer._size == packed_size
-        assert target._rgb_packer._staging.size >= packed_size
+        assert target._sync_readback._capacity >= packed_size
         assert {slot.capacity for slot in target._readbacks._slots if slot.buffer is not None} == {
             packed_size
         }

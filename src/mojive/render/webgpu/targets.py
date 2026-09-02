@@ -8,7 +8,7 @@ import numpy as np
 import wgpu
 
 from ...types import CameraView
-from .readback import WgpuReadbackQueue, aligned_row_bytes, rgba_to_rgb
+from .readback import WgpuReadbackQueue, WgpuSyncReadback, rgba_to_rgb
 from .rgb_pack import WgpuRgbPacker
 
 # Frame uniform block, mirrors `struct Frame` in shaders/scene.wgsl.
@@ -90,10 +90,6 @@ def proj_matrix_wgpu(camera: CameraView) -> np.ndarray:
     return perspective_wgpu(camera.fov_y, camera.aspect, camera.near, camera.far)
 
 
-def _aligned_row_bytes(width: int, bpp: int) -> int:
-    return aligned_row_bytes(width, bpp)
-
-
 class RenderTargetWgpu:
     def __init__(self, device: wgpu.GPUDevice, width: int, height: int, samples: int = 4) -> None:
         self._device = device
@@ -101,6 +97,7 @@ class RenderTargetWgpu:
         self.height = max(1, int(height))
         self.samples = self._sample_count(samples)
         self._rgb_packer: WgpuRgbPacker | None = None
+        self._sync_readback: WgpuSyncReadback | None = None
         self._build()
         self._readbacks: WgpuReadbackQueue | None = None
         self.frame_buffer = device.create_buffer(
@@ -214,23 +211,28 @@ class RenderTargetWgpu:
             self._rgb_packer = WgpuRgbPacker(self._device)
         return self._rgb_packer
 
-    def _read_texture(self, texture, dtype, channels: int, flip: bool) -> np.ndarray:
-        bpp = np.dtype(dtype).itemsize * channels
-        row_bytes = _aligned_row_bytes(self.width, bpp)
-        data = self._device.queue.read_texture(
-            {"texture": texture, "origin": (0, 0, 0)},
-            {"bytes_per_row": row_bytes, "rows_per_image": self.height},
-            (self.width, self.height, 1),
+    def _sync_reader(self) -> WgpuSyncReadback:
+        if self._sync_readback is None:
+            self._sync_readback = WgpuSyncReadback(self._device)
+        return self._sync_readback
+
+    def _read_texture(
+        self,
+        texture,
+        dtype,
+        channels: int,
+        flip: bool,
+        out: np.ndarray | None = None,
+    ) -> np.ndarray:
+        return self._sync_reader().read_texture(
+            texture,
+            width=self.width,
+            height=self.height,
+            dtype=dtype,
+            storage_channels=channels,
+            flip=flip,
+            out=out,
         )
-        raw = np.frombuffer(data, np.uint8).reshape(self.height, row_bytes)
-        trimmed = raw[:, : self.width * bpp]
-        image = trimmed.view(dtype).reshape(self.height, self.width, channels)
-        if channels == 1:
-            image = image[..., 0]
-        # WebGPU rows are already top-first; opengl's flip=True means top-first.
-        if not flip:
-            image = image[::-1]
-        return np.ascontiguousarray(image)
 
     def read_color(self, flip: bool = True) -> np.ndarray:
         return self._read_texture(self.color, np.uint8, 4, flip)
@@ -250,6 +252,7 @@ class RenderTargetWgpu:
         if not packer.supports(self.width, self.height):
             return rgba_to_rgb(self.read_color(flip=flip), out)
         return packer.read(
+            self._sync_reader(),
             self.color_view,
             width=self.width,
             height=self.height,
@@ -295,8 +298,7 @@ class RenderTargetWgpu:
                 f"Expected C-contiguous float32 destination with shape {shape}, "
                 f"got {out.dtype} {out.shape}"
             )
-        np.copyto(out, self._read_texture(self.export_depth, np.float32, 1, flip))
-        return out
+        return self._read_texture(self.export_depth, np.float32, 1, flip, out)
 
     def read_metric_depth_async(
         self, flip: bool = True, out: np.ndarray | None = None
@@ -325,8 +327,7 @@ class RenderTargetWgpu:
                 f"Expected C-contiguous int32 destination with shape {shape}, "
                 f"got {out.dtype} {out.shape}"
             )
-        np.copyto(out, self._read_texture(self.export_segmentation, np.int32, 2, flip))
-        return out
+        return self._read_texture(self.export_segmentation, np.int32, 2, flip, out)
 
     def read_segmentation_async(
         self, flip: bool = True, out: np.ndarray | None = None
@@ -346,18 +347,24 @@ class RenderTargetWgpu:
     def read_id(self, x: int, y: int) -> int:
         if not (0 <= x < self.width and 0 <= y < self.height):
             return 0
-        row_bytes = _aligned_row_bytes(1, 4)
-        data = self._device.queue.read_texture(
-            {"texture": self.export_id, "origin": (int(x), int(y), 0)},
-            {"bytes_per_row": row_bytes, "rows_per_image": 1},
-            (1, 1, 1),
+        value = self._sync_reader().read_texture(
+            self.export_id,
+            width=1,
+            height=1,
+            dtype=np.uint32,
+            storage_channels=1,
+            flip=True,
+            origin=(int(x), int(y), 0),
         )
-        return int(np.frombuffer(data, np.uint32)[0])
+        return int(value[0, 0])
 
     def release(self) -> None:
         if self._readbacks is not None:
             self._readbacks.release()
             self._readbacks = None
+        if self._sync_readback is not None:
+            self._sync_readback.release()
+            self._sync_readback = None
         self._release_textures()
         self._rgb_packer = None
         self.frame_buffer.destroy()

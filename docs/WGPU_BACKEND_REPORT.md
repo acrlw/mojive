@@ -70,6 +70,10 @@ These limits are also exposed through `backend.caps.notes`.
 `render/overlay.py`. `ui/window_wgpu.py` implements the existing window contract and keeps
 one ImGui context per window. Offscreen rendering creates a device without a native window.
 
+Synchronous RGB, metric depth, object ID, and segmentation copies share one persistent staging
+owner; asynchronous captures use a separate bounded staging ring. Both paths complete decoding
+before unmapping so public arrays never alias mapped GPU memory.
+
 WGSL uses pipeline variants for shader configuration, explicit barycentric attributes for
 wireframe rendering, fragment clipping for reflection planes, and WebGPU's zero-to-one depth
 range. Texture mip chains are generated on the CPU.
