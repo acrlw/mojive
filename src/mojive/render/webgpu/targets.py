@@ -9,6 +9,7 @@ import wgpu
 
 from ...types import CameraView
 from .readback import WgpuReadbackQueue, aligned_row_bytes, rgba_to_rgb
+from .rgb_pack import WgpuRgbPacker
 
 # Frame uniform block, mirrors `struct Frame` in shaders/scene.wgsl.
 FRAME_DTYPE = np.dtype(
@@ -99,6 +100,7 @@ class RenderTargetWgpu:
         self.width = max(1, int(width))
         self.height = max(1, int(height))
         self.samples = self._sample_count(samples)
+        self._rgb_packer: WgpuRgbPacker | None = None
         self._build()
         self._readbacks: WgpuReadbackQueue | None = None
         self.frame_buffer = device.create_buffer(
@@ -181,6 +183,8 @@ class RenderTargetWgpu:
         return True
 
     def _release_textures(self) -> None:
+        if self._rgb_packer is not None:
+            self._rgb_packer.invalidate()
         for tex in (
             self.color,
             self.color_ms,
@@ -204,6 +208,11 @@ class RenderTargetWgpu:
         if self._readbacks is None:
             self._readbacks = WgpuReadbackQueue(self._device)
         return self._readbacks
+
+    def _rgb_reader(self) -> WgpuRgbPacker:
+        if self._rgb_packer is None:
+            self._rgb_packer = WgpuRgbPacker(self._device)
+        return self._rgb_packer
 
     def _read_texture(self, texture, dtype, channels: int, flip: bool) -> np.ndarray:
         bpp = np.dtype(dtype).itemsize * channels
@@ -237,20 +246,39 @@ class RenderTargetWgpu:
                 f"Expected C-contiguous uint8 destination with shape {shape}, "
                 f"got {out.dtype} {out.shape}"
             )
-        return rgba_to_rgb(self.read_color(flip=flip), out)
+        packer = self._rgb_reader()
+        if not packer.supports(self.width, self.height):
+            return rgba_to_rgb(self.read_color(flip=flip), out)
+        return packer.read(
+            self.color_view,
+            width=self.width,
+            height=self.height,
+            flip=flip,
+            out=out,
+        )
 
     def read_rgb_async(
         self, flip: bool = True, out: np.ndarray | None = None
     ) -> Future[np.ndarray]:
         """Queue packed RGB readback without waiting on the render thread."""
 
-        return self._readback_queue().enqueue(
-            self.color,
+        packer = self._rgb_reader()
+        if not packer.supports(self.width, self.height):
+            return self._readback_queue().enqueue(
+                self.color,
+                width=self.width,
+                height=self.height,
+                dtype=np.uint8,
+                storage_channels=4,
+                output_channels=3,
+                flip=flip,
+                out=out,
+            )
+        return packer.read_async(
+            self._readback_queue(),
+            self.color_view,
             width=self.width,
             height=self.height,
-            dtype=np.uint8,
-            storage_channels=4,
-            output_channels=3,
             flip=flip,
             out=out,
         )
@@ -331,4 +359,5 @@ class RenderTargetWgpu:
             self._readbacks.release()
             self._readbacks = None
         self._release_textures()
+        self._rgb_packer = None
         self.frame_buffer.destroy()

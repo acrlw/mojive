@@ -1,9 +1,11 @@
-"""Bounded asynchronous texture readback for the WebGPU backend."""
+"""Transfer-efficient synchronous and asynchronous WebGPU readback."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
+from functools import partial
 from queue import SimpleQueue
 from threading import Condition, Lock, Thread
 from typing import Any
@@ -34,6 +36,28 @@ def rgba_to_rgb(image: np.ndarray, out: np.ndarray | None = None) -> np.ndarray:
         np.copyto(out, converted, casting="unsafe")
         return out
     return np.array(converted, copy=True, order="C")
+
+
+def decode_packed_rgb(
+    data: Any,
+    *,
+    width: int,
+    height: int,
+    flip: bool,
+    out: np.ndarray | None,
+) -> np.ndarray:
+    """Convert tightly packed GPU RGB bytes into the public image layout."""
+
+    shape = (int(height), int(width), 3)
+    image = np.frombuffer(data, np.uint8, count=int(width) * int(height) * 3).reshape(shape)
+    if not flip:
+        image = image[::-1]
+    if out is not None:
+        if out.shape != shape:
+            raise ValueError(f"Expected destination with shape {shape}, got {out.shape}")
+        np.copyto(out, image, casting="unsafe")
+        return out
+    return np.array(image, copy=True, order="C")
 
 
 def decode_rows(
@@ -89,18 +113,11 @@ class _Job:
     promise: Any
     future: Future[np.ndarray]
     size: int
-    width: int
-    height: int
-    row_bytes: int
-    dtype: np.dtype
-    storage_channels: int
-    output_channels: int
-    flip: bool
-    out: np.ndarray | None
+    decode: Callable[[Any], np.ndarray]
 
 
 class WgpuReadbackQueue:
-    """Copy textures through a bounded staging ring without blocking the render thread.
+    """Copy GPU products through a bounded ring without blocking the render thread.
 
     A queue submission is ordered immediately after the render submission. Mapping,
     row unpacking, channel conversion, and destination-array copying happen on one
@@ -171,43 +188,68 @@ class WgpuReadbackQueue:
             raise ValueError(f"Expected destination with shape {shape}, got {out.shape}")
         row_bytes = aligned_row_bytes(width, dtype.itemsize * int(storage_channels))
         size = row_bytes * height
-        slot_index = self._reserve_slot(size)
-        slot = self._slots[slot_index]
-        assert slot.buffer is not None
-        future: Future[np.ndarray] = Future()
-        try:
-            encoder = self._device.create_command_encoder()
+
+        def encode(encoder: wgpu.GPUCommandEncoder, destination: wgpu.GPUBuffer) -> None:
             encoder.copy_texture_to_buffer(
                 {"texture": texture, "origin": (0, 0, 0)},
                 {
-                    "buffer": slot.buffer,
+                    "buffer": destination,
                     "offset": 0,
                     "bytes_per_row": row_bytes,
                     "rows_per_image": height,
                 },
                 (width, height, 1),
             )
+
+        decode = partial(
+            decode_rows,
+            width=width,
+            height=height,
+            row_bytes=row_bytes,
+            dtype=dtype,
+            storage_channels=storage_channels,
+            output_channels=output_channels,
+            flip=bool(flip),
+            out=out,
+        )
+        return self._enqueue_copy(size, encode, decode)
+
+    def enqueue_copy(
+        self,
+        size: int,
+        encode: Callable[[wgpu.GPUCommandEncoder, wgpu.GPUBuffer], None],
+        decode: Callable[[Any], np.ndarray],
+    ) -> Future[np.ndarray]:
+        """Encode one copy and decode it into caller-owned storage asynchronously.
+
+        ``decode`` must finish copying data before it returns; the mapped staging
+        memory is released immediately afterwards.
+        """
+
+        with self._lifecycle:
+            return self._enqueue_copy(int(size), encode, decode)
+
+    def _enqueue_copy(
+        self,
+        size: int,
+        encode: Callable[[wgpu.GPUCommandEncoder, wgpu.GPUBuffer], None],
+        decode: Callable[[Any], np.ndarray],
+    ) -> Future[np.ndarray]:
+        if size < 1 or size % 4:
+            raise ValueError("readback size must be a positive multiple of four bytes")
+        slot_index = self._reserve_slot(size)
+        slot = self._slots[slot_index]
+        assert slot.buffer is not None
+        future: Future[np.ndarray] = Future()
+        try:
+            encoder = self._device.create_command_encoder()
+            encode(encoder, slot.buffer)
             self._device.queue.submit([encoder.finish()])
             promise = slot.buffer.map_async(wgpu.MapMode.READ, size=size)
         except Exception:
             self._release_slot(slot_index)
             raise
-        self._jobs.put(
-            _Job(
-                slot_index,
-                promise,
-                future,
-                size,
-                width,
-                height,
-                row_bytes,
-                dtype,
-                storage_channels,
-                output_channels,
-                bool(flip),
-                out,
-            )
-        )
+        self._jobs.put(_Job(slot_index, promise, future, size, decode))
         return future
 
     def _reserve_slot(self, size: int) -> int:
@@ -254,18 +296,8 @@ class WgpuReadbackQueue:
             try:
                 job.promise.sync_wait()
                 if running:
-                    mapped = slot.buffer.read_mapped(size=job.size, copy=True)
-                    result = decode_rows(
-                        mapped,
-                        width=job.width,
-                        height=job.height,
-                        row_bytes=job.row_bytes,
-                        dtype=job.dtype,
-                        storage_channels=job.storage_channels,
-                        output_channels=job.output_channels,
-                        flip=job.flip,
-                        out=job.out,
-                    )
+                    mapped = slot.buffer.read_mapped(size=job.size, copy=False)
+                    result = job.decode(mapped)
             except Exception as exc:
                 error = exc
             finally:

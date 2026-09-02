@@ -65,9 +65,10 @@ introducing temporal lag. Any dependency change invalidates the relevant product
 revision-zero custom scenes deliberately take the conservative render-every-frame path.
 
 WebGPU render-target views and resource bind groups follow the same ownership model. Target views
-are created with their textures, while scene, tendon, outline, and identity-presentation bindings
-persist until one of their buffers or views is replaced. Resize, MSAA changes, and instance-buffer
-growth rebuild only the affected descriptors rather than allocating wrapper objects every frame.
+are created with their textures, while scene, tendon, outline, identity-presentation, and RGB-pack
+bindings persist until one of their buffers or views is replaced. Resize, MSAA changes, and
+instance-buffer growth rebuild only the affected descriptors rather than allocating wrapper
+objects every frame.
 
 The MuJoCo adapter derives `FrameNeeds` from visible scene options. Contacts, tendons, deformables,
 diagnostics, islands, and BVH data are prepared only when a visible feature consumes them. Pose
@@ -80,22 +81,30 @@ OpenGL color capture reads packed RGB directly into a persistent staging allocat
 output array. Metric depth and segmentation likewise read their typed export targets directly.
 The current synchronous API deliberately returns a ready NumPy array before `render()` completes.
 
-`Renderer.render_async()` is the explicit pipelined alternative. On wgpu it submits a texture copy
-into a lazily-created, three-slot staging ring and returns a standard `Future`. GPU completion,
-mapping, row-padding removal, RGB packing, orientation, and optional destination-array copying run
-on a dedicated worker. Saturating all three slots applies bounded backpressure instead of growing
-GPU memory without limit. Resize, sample-count changes, and release drain outstanding tickets
-before destroying their textures. A supplied output array belongs to its ticket until the future
-completes.
+WebGPU cannot copy an `rgba8unorm` texture directly into tightly packed three-channel rows. Before
+mapping, a persistent compute pass therefore converts each four RGBA pixels into three `u32` words.
+The mapped payload is exactly three bytes per pixel (apart from at most nine terminal padding bytes),
+instead of a four-byte texture copy followed by a strided CPU channel extraction. The shader,
+pipeline, storage buffer, texture binding, and dispatch geometry survive across frames; target
+resize invalidates only the size-dependent buffer and binding. The conversion is byte-exact for
+the normalized render target. If an unusually large target exceeds a device's storage-binding
+limit, it falls back to the texture-copy path rather than failing capture. The generic row decoder
+retains Pillow's compiled RGBA conversion for that path and other texture-copy callers.
 
-The synchronous and asynchronous wgpu paths share one row decoder. Its common RGBA8-to-RGB8 case
-uses Pillow's compiled conversion kernel instead of NumPy's expensive strided three-channel copy;
-typed depth/segmentation and uncommon channel layouts remain on the generic NumPy path. Shape,
-orientation, caller-owned output, dtype-casting, and strided-output behavior remain unchanged.
-OpenGL exposes the same asynchronous method as an already-completed future until a PBO-backed queue
-is justified; no background GL context is introduced implicitly. Metric-depth and segmentation
-synchronous readback is already inexpensive on this device; their asynchronous form is provided
-for non-blocking composition, not assumed to improve throughput.
+`Renderer.render_async()` is the explicit pipelined alternative. On wgpu it records the same GPU
+packing pass and a buffer copy into a lazily-created, three-slot staging ring, then returns a
+standard `Future`. GPU completion, mapping, orientation, and optional destination-array copying run
+on a dedicated worker. The decoder reads mapped storage directly and completes its owned result
+before unmapping, avoiding an intermediate CPU copy. Saturating all three slots applies bounded
+backpressure instead of growing GPU memory without limit. Resize, sample-count changes, and release
+drain outstanding tickets before destroying their textures. A supplied output array belongs to its
+ticket until the future completes.
+
+Shape, orientation, caller-owned output, dtype-casting, and strided-output behavior remain
+unchanged. OpenGL exposes the same asynchronous method as an already-completed future until a
+PBO-backed queue is justified; no background GL context is introduced implicitly. Metric-depth and
+segmentation synchronous readback is already inexpensive on this device; their asynchronous form
+is provided for non-blocking composition, not assumed to improve throughput.
 
 The high-level video recorder uses the same three-frame pipeline when the active target supports
 it, preserving submission and encoding order. Camera preview requests color rather than the full
@@ -201,13 +210,14 @@ native RGB-packing changes:
 
 | Workload | MuJoCo | Mojive OpenGL | Mojive wgpu |
 |---|---:|---:|---:|
-| 256 static objects | 6.78 ms | 3.18 ms (0.47×) | 3.21 ms (0.47×) |
-| 1,024 animated objects | 10.24 ms | 3.59 ms (0.35×) | 3.58 ms (0.35×) |
-| textured, transparent, reflective materials | 4.10 ms | 2.98 ms (0.73×) | 3.44 ms (0.84×) |
+| 256 static objects | 6.37 ms | 3.17 ms (0.50×) | 2.43 ms (0.38×) |
+| 1,024 animated objects | 10.05 ms | 3.59 ms (0.36×) | 2.73 ms (0.27×) |
+| textured, transparent, reflective materials | 4.12 ms | 2.98 ms (0.72×) | 2.51 ms (0.61×) |
 
 The ratio is Mojive time divided by MuJoCo time, so lower is faster. These measurements are evidence
 for regression tracking rather than fixed performance requirements; use the benchmark commands on
 the target machine when changing pipeline structure. Metal readback on this host has distinct
-power-state modes, so renderer order can change absolute wgpu latency. An alternating same-machine
-A/B of the materials workload measured 10.19–10.61 ms before native packing and 3.47–3.53 ms after
-it in the stable rounds; compare repeated rounds rather than selecting one favorable run.
+power-state modes, so renderer order can change absolute wgpu latency. In alternating same-machine
+A/B rounds, moving packing from the native CPU kernel to the persistent GPU pass reduced the
+materials median from 3.43–3.50 ms to 2.50–2.60 ms. The earlier strided NumPy path was about 10.3 ms
+under the same load; compare repeated rounds rather than selecting one favorable run.

@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from mojive.render.webgpu.readback import aligned_row_bytes, decode_rows, rgba_to_rgb
+from mojive.render.webgpu.readback import (
+    aligned_row_bytes,
+    decode_packed_rgb,
+    decode_rows,
+    rgba_to_rgb,
+)
 
 
 def test_rgba_to_rgb_is_exact_and_returns_writable_storage() -> None:
@@ -27,6 +32,24 @@ def test_rgba_to_rgb_writes_the_requested_destination() -> None:
 
     assert result is out
     assert np.array_equal(out, rgba[..., :3])
+
+
+def test_decode_packed_rgb_preserves_casting_strides_and_orientation() -> None:
+    pixels = np.arange(2 * 3 * 3, dtype=np.uint8).reshape(2, 3, 3)
+    padded = np.concatenate((pixels.reshape(-1), np.array([201, 202], np.uint8)))
+    storage = np.empty((2, 6, 3), np.float32)
+    out = storage[:, ::2]
+
+    result = decode_packed_rgb(
+        padded,
+        width=3,
+        height=2,
+        flip=False,
+        out=out,
+    )
+
+    assert result is out
+    assert np.array_equal(out, pixels[::-1])
 
 
 def test_decode_rows_removes_padding_channels_and_preserves_orientation() -> None:

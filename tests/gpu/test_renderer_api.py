@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -47,6 +48,25 @@ def _model():
     )
 
 
+def test_wgpu_rgb_packing_handles_partial_four_pixel_group() -> None:
+    if os.environ.get("MOJIVE_BACKEND", "opengl").lower() != "wgpu":
+        pytest.skip("WebGPU RGB packing contract")
+    model = _model()
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    renderer = Renderer(model, height=95, width=127)
+    try:
+        renderer.update_scene(data, camera="fixed")
+        with renderer._gl_current():
+            renderer._backend.render(request=RenderRequest.color())
+            rgba = renderer._backend.target.read_color(flip=True)
+            rgb = renderer._backend.target.read_rgb(flip=True)
+        assert np.array_equal(rgb, rgba[..., :3])
+        assert np.array_equal(renderer.render_async().result(timeout=10.0), rgb)
+    finally:
+        renderer.close()
+
+
 def test_renderer_rgb_camera_out_and_lifecycle():
     model = _model()
     data = mujoco.MjData(model)
@@ -72,7 +92,10 @@ def test_renderer_rgb_camera_out_and_lifecycle():
     )
     with renderer._gl_current():
         assert renderer._backend.render(request=combined_request) is not None
-        assert renderer._backend.target.read_rgb().shape == image.shape
+        target = renderer._backend.target
+        rgba = target.read_color(flip=True)
+        assert np.array_equal(target.read_rgb(flip=True), rgba[..., :3])
+        assert np.array_equal(target.read_rgb(flip=False), rgba[::-1, ..., :3])
         assert renderer._backend.target.read_metric_depth().shape == image.shape[:2]
         assert renderer._backend.target.read_segmentation().shape == (*image.shape[:2], 2)
 
@@ -98,6 +121,13 @@ def test_renderer_rgb_camera_out_and_lifecycle():
     async_cast_out = np.empty(image.shape, np.float32)
     assert renderer.render_async(out=async_cast_out).result(timeout=10.0) is async_cast_out
     assert np.array_equal(async_cast_out, image)
+    if renderer._backend.caps.name == "wgpu":
+        target = renderer._backend.target
+        packed_size = ((renderer.width * renderer.height + 3) // 4) * 12
+        assert target._rgb_packer._size == packed_size
+        assert {slot.capacity for slot in target._readbacks._slots if slot.buffer is not None} == {
+            packed_size
+        }
     with pytest.raises(ValueError, match=r"out\.shape"):
         renderer.render(out=np.empty((96, 128), np.uint8))
 
