@@ -105,8 +105,14 @@ class SceneSourceBuilder:
         self._w_rot = np.zeros((0, 3, 3), np.float32)
         self._w_pos = np.zeros((0, 3), np.float32)
         self._ls_rot = np.zeros((0, 3, 3), np.float32)
-
         self._ls_pos = np.zeros((0, 3), np.float32)
+        self._ls_scale = np.zeros((0, 3), np.float32)
+        self._local_rotation_diagonal = False
+        self._local_position_zero = False
+        self._all_static = False
+        self._last_w_rot = np.zeros((0, 3, 3), np.float32)
+        self._last_w_pos = np.zeros((0, 3), np.float32)
+        self._world_pose_valid = False
         self._out_rot = np.zeros((0, 3, 3), np.float32)
         self._out_pos = np.zeros((0, 3), np.float32)
         self._stage = np.zeros((0, 4, 4), np.float32)
@@ -314,8 +320,26 @@ class SceneSourceBuilder:
         self._site_pos = np.zeros((len(self._site_rows), 3), np.float32)
         self._ls_rot = np.stack([m[:3, :3] for m in ls]) if n else np.zeros((0, 3, 3), np.float32)
         self._ls_pos = np.stack([m[:3, 3] for m in ls]) if n else np.zeros((0, 3), np.float32)
+        self._ls_scale = (
+            np.diagonal(self._ls_rot, axis1=1, axis2=2).copy()
+            if n
+            else np.zeros((0, 3), np.float32)
+        )
+        # Primitive size and capsule cap reflection are diagonal local transforms.
+        # Record that invariant once so the frame path can use column scaling.
+        off_diagonal = ~np.eye(3, dtype=bool)
+        self._local_rotation_diagonal = bool(n == 0 or not np.any(self._ls_rot[:, off_diagonal]))
+        self._local_position_zero = bool(n == 0 or not np.any(self._ls_pos))
+        self._all_static = bool(
+            n
+            and len(src.geom_static) == src.instance_count
+            and np.all(src.geom_static[self._source_instances])
+        )
         self._w_rot = np.zeros((n, 3, 3), np.float32)
         self._w_pos = np.zeros((n, 3), np.float32)
+        self._last_w_rot = np.zeros((n, 3, 3), np.float32)
+        self._last_w_pos = np.zeros((n, 3), np.float32)
+        self._world_pose_valid = False
         self._out_rot = np.zeros((n, 3, 3), np.float32)
         self._out_pos = np.zeros((n, 3), np.float32)
         self._stage = np.zeros((n, 4, 4), np.float32)
@@ -333,10 +357,12 @@ class SceneSourceBuilder:
             if p.axis_x:
                 p.half_x = _snap_up(float(cam.far), p.period_u)
                 self._ls_rot[p.slot, 0, 0] = p.half_x
+                self._ls_scale[p.slot, 0] = p.half_x
                 self._scene.tex_coef[p.row, 0] = TEXUNIFORM_SCALE * p.repeat_u * 2.0 * p.half_x
             if p.axis_y:
                 p.half_y = _snap_up(float(cam.far), p.period_v)
                 self._ls_rot[p.slot, 1, 1] = p.half_y
+                self._ls_scale[p.slot, 1] = p.half_y
                 self._scene.tex_coef[p.row, 1] = TEXUNIFORM_SCALE * p.repeat_v * 2.0 * p.half_y
             self._scene.transforms[p.row, 0, 0] = p.half_x
             self._scene.transforms[p.row, 1, 1] = p.half_y
@@ -514,12 +540,37 @@ class SceneSourceBuilder:
             self._w_rot[self._world_rows] = self._identity3
             self._w_pos[self._world_rows] = 0.0
 
+        plane_changed = False
         if self._planes:
-            visual_changed = self._update_infinite_planes(scene) or visual_changed
+            plane_changed = self._update_infinite_planes(scene)
+            visual_changed = plane_changed or visual_changed
 
-        np.matmul(self._w_rot, self._ls_rot, out=self._out_rot)
-        np.matmul(self._w_rot, self._ls_pos[:, :, None], out=self._out_pos[:, :, None])
-        np.add(self._out_pos, self._w_pos, out=self._out_pos)
+        if self._all_static:
+            # Static inputs normally repeat forever, but previews may still change
+            # their authoritative frame poses. Compare those poses before skipping.
+            world_pose_changed = (
+                not self._world_pose_valid
+                or not np.array_equal(self._last_w_rot, self._w_rot)
+                or not np.array_equal(self._last_w_pos, self._w_pos)
+            )
+            if not world_pose_changed and not plane_changed:
+                if visual_changed:
+                    self._visual_revision += 1
+                    scene.visual_revision = self._visual_revision
+                return scene
+            np.copyto(self._last_w_rot, self._w_rot)
+            np.copyto(self._last_w_pos, self._w_pos)
+            self._world_pose_valid = True
+
+        if self._local_rotation_diagonal:
+            np.multiply(self._w_rot, self._ls_scale[:, None, :], out=self._out_rot)
+        else:
+            np.matmul(self._w_rot, self._ls_rot, out=self._out_rot)
+        if self._local_position_zero:
+            np.copyto(self._out_pos, self._w_pos)
+        else:
+            np.matmul(self._w_rot, self._ls_pos[:, :, None], out=self._out_pos[:, :, None])
+            np.add(self._out_pos, self._w_pos, out=self._out_pos)
         self._stage[:, :3, :3] = self._out_rot
         self._stage[:, :3, 3] = self._out_pos
 
@@ -581,12 +632,14 @@ class SceneSourceBuilder:
                 changed = changed or half_x != p.half_x
                 p.half_x = half_x
                 self._ls_rot[j, 0, 0] = p.half_x
+                self._ls_scale[j, 0] = p.half_x
                 scene.tex_coef[row, 0] = TEXUNIFORM_SCALE * p.repeat_u * 2.0 * p.half_x
             if p.axis_y:
                 half_y = _snap_up(abs(ly) + far, p.period_v)
                 changed = changed or half_y != p.half_y
                 p.half_y = half_y
                 self._ls_rot[j, 1, 1] = p.half_y
+                self._ls_scale[j, 1] = p.half_y
                 scene.tex_coef[row, 1] = TEXUNIFORM_SCALE * p.repeat_v * 2.0 * p.half_y
         return changed
 

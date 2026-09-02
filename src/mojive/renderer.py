@@ -233,6 +233,12 @@ class Renderer:
         self._font_scale = font_scale
         self._scene = mujoco.MjvScene(model=model, maxgeom=int(max_geom))
         self._scene_option = mujoco.MjvOption()
+        self._option_flags = np.zeros(0, np.uint8)
+        self._option_label: int | None = None
+        self._option_frame: int | None = None
+        self._cached_frame_needs: FrameNeeds | None = None
+        self._render_flags = np.zeros(0, np.uint8)
+        self._render_bvh_depth: int | None = None
 
         from .adapters.mujoco_adapter import MuJoCoAdapter
 
@@ -317,6 +323,7 @@ class Renderer:
             raise ValueError("data was created for a different MuJoCo model")
         camera = self._resolve_camera(camera)
         option = scene_option or self._scene_option
+        option_changed = self._sync_option_state(option)
         self._adapter.apply_scene_option(option)
         mujoco.mjv_updateScene(
             self._model,
@@ -329,7 +336,9 @@ class Renderer:
         )
         self._adapter.refresh_model_visuals()
         self._adapter.use_data(data)
-        frame = self._adapter.frame(_frame_needs(option))
+        if option_changed or self._cached_frame_needs is None:
+            self._cached_frame_needs = _frame_needs(option, self._model)
+        frame = self._adapter.frame(self._cached_frame_needs)
         adapter_source = self._adapter.scene_source()
         transparent_visual = _flag_enabled(option.flags, mujoco.mjtVisFlag, "mjVIS_TRANSPARENT")
         if (
@@ -348,12 +357,47 @@ class Renderer:
             self._transparent_visual = transparent_visual
             with self._gl_current():
                 self._backend.set_scene(source)
-        _apply_render_options(self._backend, option, self._scene)
+        if self._sync_render_option_state(option, option_changed):
+            _apply_render_options(self._backend, option, self._scene)
         view = _camera_view(self._scene, self._model, self._aspect)
         with self._gl_current():
             self._view = view
             self._backend.set_camera(view)
             self._backend.update(frame)
+
+    def _sync_option_state(self, option) -> bool:
+        """Track in-place MjvOption edits without recomputing stable translations."""
+
+        flags = np.asarray(option.flags)
+        label = int(option.label)
+        frame = int(option.frame)
+        changed = (
+            self._option_flags.shape != flags.shape
+            or not np.array_equal(self._option_flags, flags)
+            or self._option_label != label
+            or self._option_frame != frame
+        )
+        if changed:
+            self._option_flags = flags.astype(np.uint8, copy=True)
+            self._option_label = label
+            self._option_frame = frame
+        return changed
+
+    def _sync_render_option_state(self, option, option_changed: bool) -> bool:
+        """Track flags callers may mutate through the compatibility scene."""
+
+        flags = np.asarray(self._scene.flags)
+        bvh_depth = int(option.bvh_depth)
+        changed = (
+            option_changed
+            or self._render_flags.shape != flags.shape
+            or not np.array_equal(self._render_flags, flags)
+            or self._render_bvh_depth != bvh_depth
+        )
+        if changed:
+            self._render_flags = flags.astype(np.uint8, copy=True)
+            self._render_bvh_depth = bvh_depth
+        return changed
 
     def render(self, *, out: np.ndarray | None = None) -> np.ndarray:
         """Render the selected output mode.
@@ -661,32 +705,46 @@ def _configure_segmentation(source, model) -> None:
     source.geom_segmentation = table[encoded]
 
 
-def _frame_needs(option) -> FrameNeeds:
+def _frame_needs(option, model=None) -> FrameNeeds:
     """Translate visible MuJoCo features into adapter-side dynamic data needs."""
 
     def visible(*names: str) -> bool:
         return any(_flag_enabled(option.flags, mujoco.mjtVisFlag, name) for name in names)
 
-    bvh = visible("mjVIS_BODYBVH", "mjVIS_MESHBVH")
-    contacts = visible("mjVIS_CONTACTPOINT", "mjVIS_CONTACTFORCE", "mjVIS_CONTACTSPLIT")
-    actuator = visible("mjVIS_ACTUATOR", "mjVIS_ACTIVATION")
-    tendons = visible("mjVIS_TENDON") or actuator
-    deformables = visible("mjVIS_SKIN", "mjVIS_FLEXFACE", "mjVIS_FLEXSKIN", "mjVIS_FLEXVERT")
+    def present(field: str) -> bool:
+        return model is None or int(getattr(model, field, 0)) > 0
+
+    bvh = visible("mjVIS_BODYBVH", "mjVIS_MESHBVH") and present("ngeom")
+    contacts = visible(
+        "mjVIS_CONTACTPOINT", "mjVIS_CONTACTFORCE", "mjVIS_CONTACTSPLIT"
+    ) and present("ngeom")
+    actuator = visible("mjVIS_ACTUATOR", "mjVIS_ACTIVATION") and present("nactuator")
+    tendons = (visible("mjVIS_TENDON") and present("ntendon")) or actuator
+    deformables = visible("mjVIS_SKIN", "mjVIS_FLEXFACE", "mjVIS_FLEXSKIN", "mjVIS_FLEXVERT") and (
+        model is None or present("nskin") or present("nflex")
+    )
     islands = visible("mjVIS_ISLAND")
     if islands:
         contacts = tendons = deformables = True
-    diagnostics = bvh or visible(
-        "mjVIS_JOINT",
-        "mjVIS_ACTUATOR",
-        "mjVIS_ACTIVATION",
-        "mjVIS_CAMERA",
-        "mjVIS_LIGHT",
-        "mjVIS_RANGEFINDER",
-        "mjVIS_CONSTRAINT",
-        "mjVIS_AUTOCONNECT",
-        "mjVIS_COM",
-        "mjVIS_INERTIA",
-        "mjVIS_SCLINERTIA",
+    rangefinder = visible("mjVIS_RANGEFINDER") and (
+        # MuJoCo enables the flag by default even when a model has no such sensor.
+        model is None
+        or bool(np.any(np.asarray(model.sensor_type) == int(mujoco.mjtSensor.mjSENS_RANGEFINDER)))
+    )
+    diagnostics = (
+        bvh
+        or rangefinder
+        or any(
+            (
+                visible("mjVIS_JOINT") and present("njnt"),
+                visible("mjVIS_ACTUATOR", "mjVIS_ACTIVATION") and present("nactuator"),
+                visible("mjVIS_CAMERA") and present("ncam"),
+                visible("mjVIS_LIGHT") and present("nlight"),
+                visible("mjVIS_CONSTRAINT") and present("neq"),
+                visible("mjVIS_AUTOCONNECT") and present("nbody"),
+                visible("mjVIS_COM", "mjVIS_INERTIA", "mjVIS_SCLINERTIA") and present("nbody"),
+            )
+        )
     )
     label_none = _mode_value(mujoco.mjtLabel, "mjLABEL_NONE")
     frame_none = _mode_value(mujoco.mjtFrame, "mjFRAME_NONE")

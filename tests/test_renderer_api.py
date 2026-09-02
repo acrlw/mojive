@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 
+import numpy as np
 import pytest
 
 mujoco = pytest.importorskip("mujoco")
@@ -151,6 +152,50 @@ def test_renderer_requests_only_visible_optional_frame_data():
     option.flags[mujoco.mjtVisFlag.mjVIS_ISLAND] = 1
     needs = renderer_module._frame_needs(option)
     assert needs.islands and needs.contacts and needs.tendons and needs.deformables
+
+
+def test_renderer_ignores_default_rangefinder_flag_without_rangefinder_sensor():
+    option = mujoco.MjvOption()
+
+    assert not renderer_module._frame_needs(option, _model()).diagnostics
+
+
+def test_renderer_requests_diagnostics_for_existing_rangefinder_sensor():
+    model = mujoco.MjModel.from_xml_string(
+        """
+        <mujoco>
+          <worldbody><site name="rangefinder" pos="0 0 1"/></worldbody>
+          <sensor><rangefinder name="distance" site="rangefinder"/></sensor>
+        </mujoco>
+        """
+    )
+
+    assert renderer_module._frame_needs(mujoco.MjvOption(), model).diagnostics
+
+
+def test_renderer_option_cache_detects_in_place_mutations():
+    renderer = renderer_module.Renderer.__new__(renderer_module.Renderer)
+    renderer._option_flags = np.zeros(0, np.uint8)
+    renderer._option_label = None
+    renderer._option_frame = None
+    renderer._render_flags = np.zeros(0, np.uint8)
+    renderer._render_bvh_depth = None
+    renderer._scene = mujoco.MjvScene(model=_model(), maxgeom=8)
+    option = mujoco.MjvOption()
+
+    assert renderer._sync_option_state(option)
+    assert not renderer._sync_option_state(option)
+
+    option.flags[mujoco.mjtVisFlag.mjVIS_JOINT] ^= 1
+    assert renderer._sync_option_state(option)
+    assert not renderer._sync_option_state(option)
+
+    assert renderer._sync_render_option_state(option, True)
+    assert not renderer._sync_render_option_state(option, False)
+    renderer._scene.flags[mujoco.mjtRndFlag.mjRND_WIREFRAME] ^= 1
+    assert renderer._sync_render_option_state(option, False)
+    option.bvh_depth += 1
+    assert renderer._sync_render_option_state(option, False)
 
 
 def test_renderer_releases_backend_without_a_separate_graphics_context():

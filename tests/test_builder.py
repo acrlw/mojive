@@ -211,6 +211,27 @@ def test_transforms_match_naive():
     assert np.allclose(got[keep], expect[keep], atol=1e-5)
 
 
+def test_transforms_with_non_diagonal_local_rotation_match_naive():
+    src = make_source(bodies=2, with_plane=False)
+    angle = 0.37
+    cosine, sine = np.cos(angle), np.sin(angle)
+    src.geom_local[0, :3, :3] = np.array(
+        [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]],
+        np.float32,
+    )
+    frame = make_frame(src, seed=5)
+    builder = SceneSourceBuilder()
+    scene = builder.set_source(src, CameraView())
+
+    builder.update(frame)
+
+    assert np.allclose(
+        scene.transforms[builder.write_index],
+        naive_transforms(src, frame),
+        atol=1e-5,
+    )
+
+
 def test_scene_revisions_change_only_with_observable_instance_data():
     src = make_source(bodies=2, with_plane=False)
     frame = make_frame(src, seed=11)
@@ -231,6 +252,28 @@ def test_scene_revisions_change_only_with_observable_instance_data():
     builder.update(frame)
     assert scene.pose_revision == first_pose + 1
     assert scene.visual_revision == first_visual
+
+
+def test_static_scene_reuses_world_pose_until_input_changes():
+    src = make_source(bodies=2, with_plane=False)
+    src.geom_static = np.ones(src.instance_count, bool)
+    frame = make_frame(src, seed=13)
+    builder = SceneSourceBuilder()
+    scene = builder.set_source(src, CameraView())
+    builder.update(frame)
+    first_pose = scene.pose_revision
+
+    builder.update(frame)
+    assert scene.pose_revision == first_pose
+
+    frame.geom_xpos[0, 1] += 0.4
+    builder.update(frame)
+    assert scene.pose_revision == first_pose + 1
+    assert np.allclose(
+        scene.transforms[builder.write_index],
+        naive_transforms(src, frame),
+        atol=1e-5,
+    )
 
 
 def test_capsule_caps_ride_the_shaft():
