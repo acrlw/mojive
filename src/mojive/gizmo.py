@@ -30,7 +30,7 @@ TRACKBALL_RADIUS = RING_RADIUS
 RING_WIDTH_PT = 3.5
 SCREEN_RING_WIDTH_PT = 2.5
 CONTRAST_EDGE_PT = 0.75
-JOINT_OUTLINE_PT = 0.8
+JOINT_OUTLINE_PT = 0.6
 ROTATE_RING_ALPHA = 0.68
 ROTATE_RING_HOVER_ALPHA = 0.88
 ROTATE_RING_ACTIVE_ALPHA = 0.96
@@ -63,7 +63,7 @@ HOVER_COLOR = np.array((184 / 255, 210 / 255, 172 / 255, 1.0), np.float32)
 ACTIVE_HANDLE_COLOR = np.array((184 / 255, 210 / 255, 172 / 255, 1.0), np.float32)
 ACTIVE_COLOR = np.array((103 / 255, 135 / 255, 90 / 255, 1.0), np.float32)
 JOINT_HANDLE_COLOR = np.array((156 / 255, 191 / 255, 141 / 255, 1.0), np.float32)
-JOINT_OUTLINE_COLOR = np.array((0.98, 0.98, 0.99, 0.94), np.float32)
+JOINT_OUTLINE_COLOR = np.array((220 / 255, 223 / 255, 227 / 255, 0.94), np.float32)
 CENTER_COLOR = np.array((0.92, 0.92, 0.92, 1.0), np.float32)
 TRACKBALL_COLOR = np.array((0.70, 0.70, 0.70, 1.0), np.float32)
 CONTRAST_EDGE_COLOR = np.array((0.68, 0.71, 0.76, 1.0), np.float32)
@@ -660,7 +660,19 @@ def _rounded_arrow_head(
     return path
 
 
-def axis_arrow_polygon(start, end, style_scale: float = 1.0) -> np.ndarray:
+@lru_cache(maxsize=32)
+def _rounded_arrow_tail(shaft: float) -> np.ndarray:
+    """Return the semicircle between the two shaft edges, excluding its ends."""
+
+    angles = np.linspace(0.0, np.pi, 9)[1:-1]
+    tail = shaft * np.column_stack((-np.sin(angles), np.cos(angles)))
+    tail.flags.writeable = False
+    return tail
+
+
+def axis_arrow_polygon(
+    start, end, style_scale: float = 1.0, *, round_tail: bool = False
+) -> np.ndarray:
     """Return the rounded screen-space silhouette used by a flat axis handle."""
     start = np.asarray(start, np.float64)
     end = np.asarray(end, np.float64)
@@ -681,11 +693,14 @@ def axis_arrow_polygon(start, end, style_scale: float = 1.0) -> np.ndarray:
         ARROW_CORNER_RADIUS_PT * float(style_scale),
     )
     screen_head = neck + local_head[:, :1] * direction[None, :] + local_head[:, 1:] * side[None, :]
+    local_tail = _rounded_arrow_tail(shaft) if round_tail else np.empty((0, 2), np.float64)
+    screen_tail = start + local_tail[:, :1] * direction[None, :] + local_tail[:, 1:] * side[None, :]
     return np.concatenate(
         (
             (start - side * shaft)[None, :],
             screen_head,
             (start + side * shaft)[None, :],
+            screen_tail,
         )
     )
 

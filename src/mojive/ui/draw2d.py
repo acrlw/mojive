@@ -159,7 +159,9 @@ def _round_cap_polyline_outline(points, width: float) -> tuple[tuple[float, floa
 class Draw2D(Protocol):
     """Immediate-mode 2D primitives; later calls paint over earlier ones."""
 
-    def line(self, a, b, color, width: float, *, cap: str = "butt") -> None: ...
+    def line(self, a, b, color, width: float, *, cap: str = "butt") -> None:
+        """Stroke authored coordinates exactly, like a two-point polyline."""
+        ...
 
     def polyline(
         self,
@@ -191,9 +193,13 @@ class Draw2D(Protocol):
 
     def rect_filled(self, lo, hi, color, *, rounding: float = 0.0) -> None: ...
 
-    def text(self, pos, color, text: str) -> None: ...
+    def text(self, pos, color, text: str, *, pixel_snap: bool = True) -> None: ...
 
     def text_size(self, text: str) -> tuple[float, float]: ...
+
+    def text_ink_bounds(self, text: str) -> tuple[float, float, float, float] | None:
+        """Visible glyph bounds relative to the text pen position."""
+        ...
 
     def centered_label(self, text: str, center, color, max_width: float) -> None:
         """Text centered on its ink box at ``center``, shrinking to fit ``max_width``."""
@@ -226,12 +232,9 @@ class ImguiDraw2D:
         return imgui.color_convert_float4_to_u32(imgui.ImVec4(*(float(c) for c in color)))
 
     def line(self, a, b, color, width: float, *, cap: str = "butt") -> None:
-        if cap in {"round", "round_start", "round_end"}:
-            self.polyline((a, b), color, width, cap=cap)
-            return
-        if cap != "butt":
-            raise ValueError(f"unknown line cap: {cap!r}")
-        self._dl.add_line(self._vec(a), self._vec(b), self._u32(color), float(width))
+        # AddLine shifts its endpoints by half a pixel; AddPolyline preserves
+        # the same authored coordinates as filled paths and other Draw2D ports.
+        self.polyline((a, b), color, width, cap=cap)
 
     def polyline(
         self,
@@ -345,12 +348,26 @@ class ImguiDraw2D:
     def rect_filled(self, lo, hi, color, *, rounding: float = 0.0) -> None:
         self._dl.add_rect_filled(self._vec(lo), self._vec(hi), self._u32(color), float(rounding))
 
-    def text(self, pos, color, text: str) -> None:
-        self._dl.add_text(self._vec(pos), self._u32(color), text)
+    def text(self, pos, color, text: str, *, pixel_snap: bool = True) -> None:
+        if pixel_snap:
+            self._dl.add_text(self._vec(pos), self._u32(color), text)
+            return
+        # Composite layouts share fractional coordinates with their icons.
+        # Keep native text rendering, but do not truncate only the text origin.
+        flags = self._dl.flags
+        self._dl.flags |= self._imgui.ImDrawListFlags_.text_no_pixel_snap.value
+        try:
+            self._dl.add_text(self._vec(pos), self._u32(color), text)
+        finally:
+            self._dl.flags = flags
 
     def text_size(self, text: str) -> tuple[float, float]:
         size = self._imgui.calc_text_size(text)
         return float(size.x), float(size.y)
+
+    def text_ink_bounds(self, text: str) -> tuple[float, float, float, float] | None:
+        imgui = self._imgui
+        return ink_box(imgui.get_font(), imgui.get_font_size(), text)
 
     def centered_label(self, text: str, center, color, max_width: float) -> None:
         imgui = self._imgui

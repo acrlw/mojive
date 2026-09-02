@@ -209,6 +209,115 @@ def test_escape_clears_paused_selection_and_is_advertised_in_status(viewer):
     assert viewer.session.selected_node is None
 
 
+@pytest.mark.parametrize("node_name", ("01_revolute_y", "02_prismatic"))
+@pytest.mark.parametrize(
+    ("button", "shift", "view_cube"),
+    (
+        (0, False, False),
+        (1, False, False),
+        (2, False, False),
+        (0, True, False),
+        (0, False, True),
+        (None, False, False),
+    ),
+    ids=("orbit", "pan-right", "pan-middle", "pan-shift", "view-cube", "zoom"),
+)
+def test_selection_status_survives_navigation_and_escape_consumes_release(
+    viewer, monkeypatch, node_name, button, shift, view_cube
+):
+    from imgui_bundle import imgui
+
+    from mojive import commands as cmd
+    from mojive.ui import app as app_module
+    from mojive.ui.gestures import Claim
+
+    v = build(resolve("joint_gizmo"), "mujoco", paused=True, vsync=False, width=W, height=H)
+    io = imgui.get_io()
+    rendered_hints = []
+    draw_status = app_module.draw_status
+
+    def record_status(*args, **kwargs):
+        rendered_hints.append(kwargs["tool_hints"])
+        return draw_status(*args, **kwargs)
+
+    monkeypatch.setattr(app_module, "draw_status", record_status)
+    try:
+        for _ in range(8):
+            v.sync()
+        node = next(item for item in v.session.nodes if item.name == node_name)
+        v.session.submit(cmd.SelectNode(node.node_id))
+        v.sync()
+        x, y, width, height = v.app._viewport_rect
+        empty = (x + width * 0.6, y + height * 0.75)
+        start = next(b.screen for b in v.app.view_cube.balls if b.positive) if view_cube else empty
+        io.add_mouse_pos_event(*start)
+        v.sync()
+        hints = v.app._status_tool_hints(loading=False)
+        assert hints[0].hint_id == "selection.clear"
+        qpos = v.session.frame.qpos.copy()
+        camera_before = v.app.camera.view().view_matrix().copy()
+        distance_before = v.app.camera.distance
+        io.add_key_event(imgui.Key.mod_shift, shift)
+        if button is not None:
+            io.add_mouse_button_event(button, True)
+        for step in range(6):
+            if button is None:
+                io.add_mouse_wheel_event(0.0, 1.0)
+            else:
+                io.add_mouse_pos_event(start[0] - step * 5.0, start[1] + step * 3.0)
+            v.sync()
+            assert v.app.router.claim is (Claim.VIEW_CUBE if view_cube else Claim.CAMERA)
+            assert v.session.selected_node is node
+            assert v.app._status_tool_hints(loading=False) == hints
+            assert rendered_hints[-1] == hints
+        if button is not None:
+            io.add_mouse_button_event(button, False)
+        io.add_key_event(imgui.Key.mod_shift, False)
+        v.sync()
+        assert v.app._status_tool_hints(loading=False) == hints
+        np.testing.assert_array_equal(v.session.frame.qpos, qpos)
+        assert (
+            not np.allclose(v.app.camera.view().view_matrix(), camera_before)
+            or v.app.camera.distance != distance_before
+        )
+
+        # A second short press is still inside click slop. Esc must not let
+        # its release re-pick an object, even with a navigation modifier held.
+        pick_calls = []
+        monkeypatch.setattr(
+            v.app, "_pick_at", lambda point: pick_calls.append(point) or node.object_id
+        )
+        io.add_mouse_pos_event(*empty)
+        v.sync()
+        io.add_mouse_button_event(0, True)
+        v.sync()
+        assert v.app.router.claim is Claim.CAMERA
+        io.add_key_event(imgui.Key.mod_ctrl, True)
+        io.add_key_event(imgui.Key.escape, True)
+        v.sync()
+        assert v.session.selected_node is None
+        assert v.app._consume_scene_pointer_until_release
+        io.add_key_event(imgui.Key.escape, False)
+        io.add_key_event(imgui.Key.mod_ctrl, False)
+        v.sync()
+        io.add_mouse_button_event(0, False)
+        v.sync()
+        v.sync()
+        assert not pick_calls
+        assert not v.app._consume_scene_pointer_until_release
+        assert v.session.selected_node is None
+        assert all(
+            hint.hint_id != "selection.clear" for hint in v.app._status_tool_hints(loading=False)
+        )
+    finally:
+        for mouse_button in range(3):
+            io.add_mouse_button_event(mouse_button, False)
+        for key in (imgui.Key.escape, imgui.Key.mod_ctrl, imgui.Key.mod_shift):
+            io.add_key_event(key, False)
+        v.release()
+        viewer.sync()
+
+
 def test_all_panels_docked_not_stacked(viewer):
 
     from mojive.ui.window import Window
@@ -347,6 +456,7 @@ def test_keyframe_timeline_owns_the_wheel_while_zooming(viewer):
     io = imgui.get_io()
     io.add_mouse_pos_event(*point)
     viewer.sync()
+    click(viewer, io, point)
     assert [hint.hint_id for hint in viewer.app._panel_status_hints] == [
         "keyframes.playhead",
         "keyframes.zoom",
@@ -362,7 +472,7 @@ def test_keyframe_timeline_owns_the_wheel_while_zooming(viewer):
     assert float(window.scroll.y) == pytest.approx(before_scroll)
 
 
-def test_control_name_hover_owns_status_and_right_click_copies(viewer) -> None:
+def test_control_click_owns_status_and_right_click_copies(viewer) -> None:
     from imgui_bundle import imgui
 
     v = build(
@@ -384,6 +494,7 @@ def test_control_name_hover_owns_status_and_right_click_copies(viewer) -> None:
         point = item_rect(v, "text_disabled", name)
         io.add_mouse_pos_event(*point)
         v.sync()
+        click(v, io, point)
 
         assert [hint.hint_id for hint in v.app._panel_status_hints] == ["panel.copy-name"]
         click(v, io, point, button=1)
@@ -397,6 +508,23 @@ def test_control_name_hover_owns_status_and_right_click_copies(viewer) -> None:
         v.sync()
         assert [hint.hint_id for hint in v.app._panel_status_hints] == ["panel.copy-name"]
 
+        io.add_mouse_pos_event(*center(v))
+        v.sync()
+        assert v.app._status_panel == "Control"
+        assert [hint.hint_id for hint in v.app._status_tool_hints(loading=False)] == [
+            "panel.copy-name"
+        ]
+        click(v, io, center(v))
+        assert v.app._status_panel == "Viewport"
+        viewport_hints = v.app._status_tool_hints(loading=False)
+        assert viewport_hints
+        io.add_mouse_pos_event(*point)
+        v.sync()
+        io.add_mouse_wheel_event(0.0, -1.0)
+        v.sync()
+        assert v.app._status_panel == "Viewport"
+        assert v.app._status_tool_hints(loading=False) == viewport_hints
+
         window = imgui.internal.find_window_by_name("Control")
         assert window is not None and window.dock_node is not None
         node = window.dock_node
@@ -407,9 +535,16 @@ def test_control_name_hover_owns_status_and_right_click_copies(viewer) -> None:
         io.add_mouse_button_event(0, True)
         v.sync()
         v.sync()
-        assert v.app._status_tool_hints(loading=False) == ()
+        assert [hint.hint_id for hint in v.app._status_tool_hints(loading=False)] == [
+            "panel.copy-name"
+        ]
         io.add_mouse_button_event(0, False)
         v.sync()
+        activate_panel(v, "Camera")
+        assert v.app._status_panel == "Camera"
+        assert v.app._panel_status_hints == ()
+        activate_panel(v, "Control")
+        assert v.app._status_panel == "Control"
     finally:
         io.add_mouse_button_event(0, False)
         io.add_mouse_button_event(1, False)
@@ -450,7 +585,12 @@ def test_truncated_joint_name_has_full_tooltip_and_copy_action(viewer) -> None:
         imgui.set_tooltip = record_tooltip
         v.sync()
         assert joint.name in tooltips
+        click(v, io, point)
         assert [hint.hint_id for hint in v.app._panel_status_hints] == ["panel.copy-name"]
+        assert [hint.hint_id for hint in v.app._status_tool_hints(loading=False)] == [
+            "selection.clear",
+            "panel.copy-name",
+        ]
         click(v, io, point, button=1)
         assert imgui.get_clipboard_text() == joint.name
     finally:
@@ -970,6 +1110,11 @@ class _RecordingDrawList:
     def add_line(self, a, b, *rest):
         self._record("line", b)
         return self._inner.add_line(a, b, *rest)
+
+    def add_polyline(self, points, *rest):
+        if len(points) == 2:
+            self._record("line", points[-1])
+        return self._inner.add_polyline(points, *rest)
 
     def add_concave_poly_filled(self, points, *rest):
         self._record("lollipop", points[len(points) // 2])
@@ -2626,6 +2771,11 @@ def test_holding_axis_key_uses_the_exact_gizmo_axis_without_a_mouse_click(free_b
         def add_line(self, *args):
             self.lines.append(args)
             return self.inner.add_line(*args)
+
+        def add_polyline(self, points, color, thickness, flags):
+            if len(points) == 2 and not (flags & imgui.ImDrawFlags_.closed.value):
+                self.lines.append((*points, color, thickness))
+            return self.inner.add_polyline(points, color, thickness, flags)
 
         def __getattr__(self, name):
             return getattr(self.inner, name)

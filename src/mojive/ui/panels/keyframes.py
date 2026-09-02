@@ -631,11 +631,11 @@ class KeyframesPanel(Panel):
         mouse = imgui.get_mouse_pos()
         mouse_xy = (float(mouse.x), float(mouse.y))
         over_timeline = hovered and mouse_xy[0] >= time_lo
+        ctx.status_hints = timeline_status_hints(ctx.tr)
         if over_timeline:
             # The dope sheet uses the wheel for zoom. Owning the wheel here
             # prevents the docked Keyframes window from scrolling as well.
             imgui.set_item_key_owner(imgui.Key.mouse_wheel_y)
-            ctx.status_hints = timeline_status_hints(ctx.tr)
 
         if self._view_needs_fit or self._view_model_id != self._model_id:
             self._view_start, self._view_end = fitted_timeline_range(

@@ -35,7 +35,7 @@ from mojive.ui.viewport_widgets import (
     default_tool_hints,
     draw_mouse_hint_glyph,
     draw_playback_glyph,
-    draw_projection_glyph,
+    draw_projection_label,
     draw_status,
     draw_tool_glyph,
 )
@@ -868,8 +868,11 @@ def _draw_joint_gizmo(
             tuple((float(point[0]), float(point[1])) for point in arrow),
             JOINT_COLOR,
         )
+    hit_arrows = gizmo_ui.joint_slide_arrow_polygons(
+        np.asarray((current_x, slide_y)), np.asarray((1.0, 0.0)), scale, for_hit_test=True
+    )
     arrow_points = np.concatenate(
-        (*arrows, np.asarray(((slide_min, slide_y), (slide_max, slide_y))))
+        (*hit_arrows, np.asarray(((slide_min, slide_y), (slide_max, slide_y))))
     )
     arrow_lo = np.min(arrow_points, axis=0)
     arrow_hi = np.max(arrow_points, axis=0)
@@ -1352,25 +1355,14 @@ def _draw_segmented(
             imgui.pop_style_color(2)
         if icon:
             glyph_scale = max(0.65, imgui.get_frame_height() / 24.0)
-            glyph_width = 10.4 * glyph_scale
-            gap = 7.0 * glyph_scale
-            label_width, label_height = draw.text_size(label)
-            content_width = glyph_width + gap + label_width
-            content_left = (item_min.x + item_max.x - content_width) * 0.5
             color = CONCEPT_THEME.primary_bright if index == selected else CONCEPT_THEME.text
-            draw_projection_glyph(
+            draw_projection_label(
                 draw,
-                (content_left + glyph_width * 0.5, (item_min.y + item_max.y) * 0.5),
+                (item_min.x, item_min.y),
+                (item_max.x, item_max.y),
                 color,
                 glyph_scale,
                 icon,
-            )
-            draw.text(
-                (
-                    content_left + glyph_width + gap,
-                    (item_min.y + item_max.y - label_height) * 0.5,
-                ),
-                color,
                 label,
             )
     imgui.pop_style_var()
@@ -3194,7 +3186,7 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         )
         _property_label("Wheel top gap")
         _, state.hint_mouse_wheel_gap_ratio = imgui.slider_float(
-            "##hint-wheel-gap", state.hint_mouse_wheel_gap_ratio, 0.10, 0.75, "%.2fx"
+            "##hint-wheel-gap", state.hint_mouse_wheel_gap_ratio, 0.10, 1.00, "%.2fx"
         )
         imgui.end_table()
     hint_height = state.hint_control_height + state.hint_padding_y * 2

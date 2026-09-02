@@ -42,13 +42,13 @@ class OverlayGeometry:
     hint_chord_gap: float = 10.0
     hint_key_padding_x: float = 8.0
     hint_mouse_width: float = 14.0
-    hint_mouse_stroke: float = 1.25
-    hint_mouse_button_width_ratio: float = 0.44
-    hint_mouse_button_shell_ratio: float = 0.75
+    hint_mouse_stroke: float = 1.0
+    hint_mouse_button_width_ratio: float = 0.40
+    hint_mouse_button_shell_ratio: float = 1.25
     hint_mouse_button_height_ratio: float = 0.40
-    hint_mouse_wheel_width_ratio: float = 0.28
-    hint_mouse_wheel_height_ratio: float = 7.0 / 18.0
-    hint_mouse_wheel_gap_ratio: float = 0.25
+    hint_mouse_wheel_width_ratio: float = 0.32
+    hint_mouse_wheel_height_ratio: float = 0.40
+    hint_mouse_wheel_gap_ratio: float = 1.0
     frame_center_radius: float = 1.45
     frame_center_gap_ratio: float = 1.4
     tooltip_padding_x: float = 7.0
@@ -967,6 +967,10 @@ def draw_playback(
     return result
 
 
+_PROJECTION_HALF_WIDTH_PT = 5.2
+_PROJECTION_STROKE_PT = 1.25
+
+
 def draw_projection_glyph(
     draw: Draw2D,
     center,
@@ -980,13 +984,49 @@ def draw_projection_glyph(
     s = float(scale)
     half_near = (2.7 if kind == "persp" else 5.4) * s
     half_far = 5.4 * s
-    near_x = x - 5.2 * s
-    far_x = x + 5.2 * s
-    width = max(1.0, 1.25 * s)
-    draw.line((near_x, y - half_near), (near_x, y + half_near), color, width, cap="round")
-    draw.line((far_x, y - half_far), (far_x, y + half_far), color, width, cap="round")
-    draw.line((near_x, y - half_near), (far_x, y - half_far), color, width, cap="round")
-    draw.line((near_x, y + half_near), (far_x, y + half_far), color, width, cap="round")
+    near_x = x - _PROJECTION_HALF_WIDTH_PT * s
+    far_x = x + _PROJECTION_HALF_WIDTH_PT * s
+    width = max(1.0, _PROJECTION_STROKE_PT * s)
+    draw.polyline(
+        (
+            (near_x, y - half_near),
+            (far_x, y - half_far),
+            (far_x, y + half_far),
+            (near_x, y + half_near),
+        ),
+        color,
+        width,
+        closed=True,
+    )
+
+
+def draw_projection_label(draw: Draw2D, lo, hi, color, scale: float, kind: str, label: str) -> None:
+    """Center the visible pair horizontally and its shared body line vertically."""
+
+    stroke = max(1.0, _PROJECTION_STROKE_PT * scale)
+    glyph_width = 2.0 * _PROJECTION_HALF_WIDTH_PT * scale + stroke
+    gap = 7.0 * scale
+    label_width, line_height = draw.text_size(label)
+    ink = draw.text_ink_bounds(label) or (0.0, 0.0, label_width, line_height)
+    content_left = (lo[0] + hi[0] - glyph_width - gap - (ink[2] - ink[0])) * 0.5
+    # Latin x-height is independent of p descenders and h ascenders. Localized
+    # CJK labels use the ideographic body, not a different center per word.
+    body = draw.text_ink_bounds("x" if label.isascii() else "田")
+    center_y = (lo[1] + hi[1]) * 0.5
+    text_y = center_y - ((body[1] + body[3]) * 0.5 if body else line_height * 0.5)
+    draw_projection_glyph(
+        draw,
+        (content_left + glyph_width * 0.5, center_y),
+        color,
+        scale,
+        kind,
+    )
+    draw.text(
+        (content_left + glyph_width + gap - ink[0], text_y),
+        color,
+        label,
+        pixel_snap=False,
+    )
 
 
 def _tool_icon(draw: Draw2D, center, color, scale: float, packed) -> None:

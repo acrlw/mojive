@@ -33,6 +33,7 @@ from mojive.ui.viewport_widgets import (
     draw_mouse_hint_glyph,
     draw_playback_glyph,
     draw_projection_glyph,
+    draw_projection_label,
     draw_status,
     draw_tool_glyph,
     fitting_tool_hints,
@@ -96,6 +97,20 @@ def test_default_overlay_scale_preserves_shared_radial_steps():
     assert playback_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((222.5, 65.0))
     assert tool_column_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((65.0, 235.0))
     assert OVERLAY_GEOMETRY.tool_center_step > OVERLAY_GEOMETRY.state_radius * 2.0
+
+
+def test_default_mouse_hint_geometry_matches_accepted_probe_settings():
+    geometry = OVERLAY_GEOMETRY
+    assert (
+        geometry.hint_mouse_width,
+        geometry.hint_mouse_stroke,
+        geometry.hint_mouse_button_width_ratio,
+        geometry.hint_mouse_button_shell_ratio,
+        geometry.hint_mouse_button_height_ratio,
+        geometry.hint_mouse_wheel_width_ratio,
+        geometry.hint_mouse_wheel_height_ratio,
+        geometry.hint_mouse_wheel_gap_ratio,
+    ) == pytest.approx((14.0, 1.0, 0.40, 1.25, 0.40, 0.32, 0.40, 1.0))
 
 
 def test_capsule_host_guard_band_covers_outline_and_antialiasing() -> None:
@@ -210,9 +225,58 @@ def test_projection_glyph_distinguishes_converging_and_parallel_edges():
     draw_projection_glyph(perspective, (0.0, 0.0), (1.0,) * 4, 1.0, "persp")
     draw_projection_glyph(orthographic, (0.0, 0.0), (1.0,) * 4, 1.0, "ortho")
 
-    assert len(perspective.lines) == len(orthographic.lines) == 4
-    assert perspective.lines[0][0][0][1] != pytest.approx(perspective.lines[1][0][0][1])
-    assert orthographic.lines[0][0][0][1] == pytest.approx(orthographic.lines[2][0][0][1])
+    assert perspective.lines == orthographic.lines == []
+    assert len(perspective.polylines) == len(orthographic.polylines) == 1
+    for draw in (perspective, orthographic):
+        args, kwargs = draw.polylines[0]
+        assert len(args[0]) == 4
+        assert kwargs == {"closed": True}
+    perspective_path = perspective.polylines[0][0][0]
+    orthographic_path = orthographic.polylines[0][0][0]
+    assert perspective_path[0][1] != pytest.approx(perspective_path[1][1])
+    assert orthographic_path[0][1] == pytest.approx(orthographic_path[1][1])
+
+
+@pytest.mark.parametrize("scale", (0.75, 1.0, 2.0, 4.0))
+@pytest.mark.parametrize(
+    ("kind", "label"),
+    (("persp", "persp"), ("ortho", "ortho"), ("persp", "透视"), ("ortho", "正交")),
+)
+def test_projection_labels_center_the_visible_pair_and_share_a_body_line(scale, kind, label):
+    ink = (2.0 * scale, 2.0 * scale, (len(label) * 7.0 - 3.0) * scale, 18.0 * scale)
+
+    class LabelDraw(_RecordedGlyph):
+        def text_size(self, text):
+            return len(text) * 7.0 * scale, 18.0 * scale
+
+        def text_ink_bounds(self, text):
+            if text == label:
+                return ink
+            assert text == ("x" if label.isascii() else "田")
+            return 0.0, 6.0 * scale, 7.0 * scale, 14.0 * scale
+
+        def text(self, pos, color, text, *, pixel_snap=True):
+            assert not pixel_snap
+            self.label = text, pos, color
+
+    draw = LabelDraw()
+    lo, hi = (12.25, 24.5), (172.25, 24.5 + 24.0 * scale)
+    draw_projection_label(draw, lo, hi, (1.0,) * 4, scale, kind, label)
+
+    points = draw.polylines[0][0][0]
+    stroke = draw.polylines[0][0][2]
+    expected_y = (lo[1] + hi[1]) * 0.5
+    assert (min(p[1] for p in points) + max(p[1] for p in points)) * 0.5 == pytest.approx(
+        expected_y
+    )
+    assert draw.label[0] == label
+    assert draw.label[1][1] + 10.0 * scale == pytest.approx(expected_y)
+    icon_left = min(p[0] for p in points) - stroke * 0.5
+    icon_right = max(p[0] for p in points) + stroke * 0.5
+    label_left = draw.label[1][0] + ink[0]
+    label_right = draw.label[1][0] + ink[2]
+    assert label_left - icon_right == pytest.approx(7.0 * scale)
+    assert icon_left + label_right == pytest.approx(lo[0] + hi[0])
 
 
 def test_move_glyph_is_one_connected_rounded_antialiased_outline():
@@ -657,7 +721,7 @@ def test_mouse_hint_button_replaces_its_part_of_the_blender_style_shell(
     ("scale", "pixel_size"),
     ((1.0, 1.0), (1.0, 0.5), (2.0, 1.0), (4.0, 1.0)),
 )
-def test_mouse_wheel_uses_a_quarter_stroke_gap_with_a_physical_pixel_minimum(
+def test_mouse_wheel_uses_configured_stroke_gap_with_a_physical_pixel_minimum(
     scale: float,
     pixel_size: float,
 ) -> None:
@@ -694,7 +758,8 @@ def test_mouse_wheel_uses_a_quarter_stroke_gap_with_a_physical_pixel_minimum(
     )
 
 
-def test_mouse_wheel_geometry_scales_after_the_physical_gap_floor_is_inactive() -> None:
+@pytest.mark.parametrize("gap_ratio", (0.5, 1.0))
+def test_mouse_wheel_geometry_scales_after_the_physical_gap_floor_is_inactive(gap_ratio) -> None:
     geometry = mouse_wheel_geometry(
         10.0,
         20.0,
@@ -712,15 +777,15 @@ def test_mouse_wheel_geometry_scales_after_the_physical_gap_floor_is_inactive() 
         pixel_size=0.5,
     )
 
-    assert geometry.gap == pytest.approx(1.25)
-    assert scaled.gap == pytest.approx(3.75)
+    assert geometry.gap == pytest.approx(5.0)
+    assert scaled.gap == pytest.approx(15.0)
     assert scaled.lo == pytest.approx(tuple(value * 3.0 for value in geometry.lo))
     assert scaled.hi == pytest.approx(tuple(value * 3.0 for value in geometry.hi))
 
     custom = replace(
         OVERLAY_GEOMETRY,
         hint_mouse_wheel_width_ratio=0.36,
-        hint_mouse_wheel_gap_ratio=0.5,
+        hint_mouse_wheel_gap_ratio=gap_ratio,
     )
     customized = mouse_wheel_geometry(
         10.0,
@@ -732,7 +797,7 @@ def test_mouse_wheel_geometry_scales_after_the_physical_gap_floor_is_inactive() 
         geometry=custom,
     )
     assert customized.hi[0] - customized.lo[0] == pytest.approx(14.0 * 0.36)
-    assert customized.gap == pytest.approx(2.5)
+    assert customized.gap == pytest.approx(5.0 * gap_ratio)
 
 
 def test_toolhint_separates_each_group_with_one_subtle_short_rule():

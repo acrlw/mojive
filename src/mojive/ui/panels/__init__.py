@@ -11,7 +11,7 @@ from imgui_bundle import imgui
 from ...adapters.base import FrameNeeds
 from ..draw2d import ImguiDraw2D
 from ..theme import THEME, Theme
-from ..viewport_widgets import ToolHint, draw_projection_glyph
+from ..viewport_widgets import ToolHint, draw_projection_label
 
 if TYPE_CHECKING:
     from ...render.backend import RenderBackend
@@ -50,10 +50,10 @@ class PanelContext:
     info: dict[str, Any] = field(default_factory=dict)
 
     status: str = ""
-    # Panels publish one-frame interaction grammar here. The application
-    # status bar consumes it on the next frame because its viewport side bar
-    # must be laid out before docked panel contents are drawn.
+    # Each panel publishes its available grammar independently of hover.
+    # PanelSet collects it by name; the application selects the clicked panel.
     status_hints: tuple[Any, ...] = ()
+    status_hints_by_panel: dict[str, tuple[Any, ...]] = field(default_factory=dict)
 
     panels: Any = None
 
@@ -144,21 +144,8 @@ def slider_gesture(
 def copyable_name_item(ctx: PanelContext, name: str, available_width: float) -> bool:
     """Expose a clipped row name and make its right-click action discoverable."""
 
-    hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled.value)
-    item_min = imgui.get_item_rect_min()
-    item_max = imgui.get_item_rect_max()
-    mouse = imgui.get_io().mouse_pos
-    # Text rows are shorter than the containing table row. Extend through the
-    # row padding so a pointer moving vertically across names never crosses a
-    # one-pixel dead strip that makes the shared status hint blink.
-    vertical_grace = imgui.get_style().item_spacing.y
-    in_name_column = (
-        item_min.x <= mouse.x <= item_min.x + max(1.0, float(available_width))
-        and item_min.y - vertical_grace <= mouse.y <= item_max.y + vertical_grace
-    )
-    if not hovered and not in_name_column:
-        return False
     ctx.status_hints = (ToolHint("mouse", "right", ctx.tr("Copy name"), hint_id="panel.copy-name"),)
+    hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled.value)
     if not hovered:
         return False
     visible_width = max(1.0, float(available_width) - 2.0 * imgui.get_style().frame_padding.x)
@@ -547,24 +534,13 @@ def segmented_control(
             base_color = theme.primary_bright if is_selected else theme.text
             color = (*base_color[:3], base_color[3] * imgui.get_style().alpha)
             glyph_scale = max(0.65, imgui.get_frame_height() / 24.0)
-            glyph_width = 10.4 * glyph_scale
-            gap = 7.0 * glyph_scale
-            label_width, label_height = draw.text_size(label)
-            content_width = glyph_width + gap + label_width
-            content_left = (item_min.x + item_max.x - content_width) * 0.5
-            draw_projection_glyph(
+            draw_projection_label(
                 draw,
-                (content_left + glyph_width * 0.5, (item_min.y + item_max.y) * 0.5),
+                (item_min.x, item_min.y),
+                (item_max.x, item_max.y),
                 color,
                 glyph_scale,
                 icon,
-            )
-            draw.text(
-                (
-                    content_left + glyph_width + gap,
-                    (item_min.y + item_max.y - label_height) * 0.5,
-                ),
-                color,
                 label,
             )
         if clicked:
@@ -619,6 +595,7 @@ class PanelSet:
 
     def draw(self, ctx: PanelContext) -> None:
         ctx.panels = self
+        ctx.status_hints_by_panel.clear()
         for p in self.panels:
             if not p.open:
                 continue
@@ -627,18 +604,24 @@ class PanelSet:
             if p.modal:
                 self._draw_modal(p, ctx, title)
                 continue
+            # Keep hidden dock tabs addressable on their activation frame,
+            # before ImGui begins submitting the newly selected tab's contents.
+            ctx.status_hints_by_panel[p.name] = ()
             expanded, keep_open = self._begin_panel_window(
                 p,
                 title,
                 ctx.style_scale,
                 self._translated_panel_title(ctx.tr, p.dock_with),
             )
+            ctx.status_hints = ()
             if expanded:
                 p.draw(ctx)
+                ctx.status_hints_by_panel[p.name] = tuple(ctx.status_hints)
             p.finish_frame(ctx)
             imgui.end()
             if keep_open is not None and not keep_open:
                 p.open = False
+                ctx.status_hints_by_panel.pop(p.name, None)
 
     def draw_shells(self, translate, style_scale: float) -> None:
         """Submit docked panel windows without reading application state."""

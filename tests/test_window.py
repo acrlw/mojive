@@ -27,6 +27,9 @@ from mojive.ui.app import (
     _translated_file_filters,
     precise_input_status_hints,
 )
+from mojive.ui.gestures import Claim
+from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
+from mojive.ui.viewport_widgets import DEFAULT_VIEWPORT_LABELS, ToolHint
 from mojive.ui.window import (
     Window,
     _install_glfw_clipboard_callbacks,
@@ -162,6 +165,157 @@ def test_status_bar_uses_the_adapter_simulation_timestep() -> None:
 
     assert _simulation_timestep(adapter) == pytest.approx(0.002)
     assert _simulation_timestep(None, loading=True) == 0.0
+
+
+@pytest.mark.parametrize(
+    ("claim", "held", "using", "keyboard_using", "perturbing", "widget_active", "expected"),
+    (
+        (Claim.NONE, False, False, False, False, False, True),
+        (Claim.CAMERA, True, False, False, False, False, True),
+        (Claim.VIEW_CUBE, True, False, False, False, False, True),
+        (Claim.UI, True, False, False, False, False, True),
+        (Claim.UI, True, False, False, False, True, False),
+        (Claim.OBJECT_GIZMO, True, False, False, False, False, False),
+        (Claim.PERTURB, True, False, False, False, False, False),
+        (Claim.NONE, False, True, False, False, False, False),
+        (Claim.NONE, False, False, True, False, False, False),
+        (Claim.NONE, False, False, False, True, False, False),
+    ),
+)
+def test_clear_selection_distinguishes_navigation_from_target_edits(
+    monkeypatch, claim, held, using, keyboard_using, perturbing, widget_active, expected
+):
+    app = ViewerApp.__new__(ViewerApp)
+    app.session = SimpleNamespace(
+        paused=True,
+        state_take_playing=False,
+        selected_node=object(),
+        perturb=SimpleNamespace(active=perturbing),
+    )
+    app.router = SimpleNamespace(claim=claim, held=held)
+    app.gizmo = SimpleNamespace(using=using, keyboard_using=keyboard_using)
+    monkeypatch.setattr(imgui, "is_any_item_active", lambda: widget_active)
+    monkeypatch.setattr(
+        imgui, "get_current_context", lambda: SimpleNamespace(active_id_window=None)
+    )
+
+    assert app._selection_clear_enabled() is expected
+    app.session.selected_node = None
+    assert not app._selection_clear_enabled()
+    app.session.selected_node = object()
+    app.session.paused = False
+    assert not app._selection_clear_enabled()
+    app.session.paused = True
+    app.session.state_take_playing = True
+    assert not app._selection_clear_enabled()
+
+
+@pytest.mark.parametrize("moving", (False, True))
+def test_background_focus_capture_is_not_an_active_widget_edit(monkeypatch, moving):
+    app = ViewerApp.__new__(ViewerApp)
+    app.session = SimpleNamespace(
+        paused=True,
+        state_take_playing=False,
+        selected_node=object(),
+        perturb=SimpleNamespace(active=False),
+    )
+    app.router = SimpleNamespace(held=True, claim=Claim.CAMERA)
+    app.gizmo = SimpleNamespace(using=False, keyboard_using=False)
+    window = SimpleNamespace(move_id=123)
+    context = SimpleNamespace(
+        active_id_window=window,
+        active_id=123,
+        moving_window=window if moving else None,
+    )
+    monkeypatch.setattr(imgui, "is_any_item_active", lambda: True)
+    monkeypatch.setattr(imgui, "get_current_context", lambda: context)
+
+    assert app._selection_clear_enabled() is (not moving)
+
+
+@pytest.mark.parametrize("panel", ("Viewport", "Joints", "Inspector"))
+def test_selection_status_is_composed_with_panel_hints_but_yields_to_input(panel):
+    app = ViewerApp.__new__(ViewerApp)
+    app._status_panel = panel
+    app._panel_status_hints = (ToolHint("mouse", "right", "Copy name", hint_id="panel.copy"),)
+    app._precise_gizmo_edit = None
+    app._scene_input_blocked = lambda: False
+    app._has_scene_content = lambda: True
+    app._selection_clear_enabled = lambda: True
+    app._context_tool_hint_variant = lambda: "ready"
+    app._viewport_labels = DEFAULT_VIEWPORT_LABELS
+    app.input_bindings = DEFAULT_INPUT_BINDINGS
+    app.localizer = SimpleNamespace(text=lambda value: value)
+    app.tool_hints = SimpleNamespace(resolve=lambda defaults, *, surface: defaults)
+
+    hints = app._status_tool_hints(loading=False)
+    assert hints[0].hint_id == "selection.clear"
+    if panel != "Viewport":
+        assert hints[1:] == app._panel_status_hints
+    assert app._status_tool_hints(loading=True) == ()
+    app._scene_input_blocked = lambda: True
+    assert app._status_tool_hints(loading=False) == ()
+    app._precise_gizmo_edit = SimpleNamespace(unit="m")
+    hints = app._status_tool_hints(loading=False)
+    assert [(hint.control, hint.label) for hint in hints] == [
+        ("Enter", "Apply"),
+        ("Esc", "Cancel"),
+    ]
+
+
+def test_status_context_changes_only_on_click_and_ignores_transient_windows(monkeypatch):
+    app = ViewerApp.__new__(ViewerApp)
+    app._status_panel = "Viewport"
+    app._panel_status_hints = ()
+    app._consume_scene_pointer_until_release = False
+    control, joints = ("copy-control",), ("copy-joint",)
+    ctx = SimpleNamespace(
+        status_hints_by_panel={"Control": control, "Joints": joints, "Inspector": ()}
+    )
+    pointer = {"window": "Control", "button": None}
+    monkeypatch.setattr(imgui, "is_mouse_clicked", lambda button: pointer["button"] == button)
+    monkeypatch.setattr(
+        imgui,
+        "get_current_context",
+        lambda: SimpleNamespace(
+            hovered_window=SimpleNamespace(root_window=SimpleNamespace(name=pointer["window"])),
+            hovered_id=0,
+        ),
+    )
+
+    app._update_status_context(ctx)
+    assert app._status_panel == "Viewport"
+    pointer["button"] = 0
+    app._update_status_context(ctx)
+    assert app._status_panel == "Control"
+    assert app._panel_status_hints == control
+    pointer.update(window="Joints", button=None)
+    app._update_status_context(ctx)
+    assert app._panel_status_hints == control
+    pointer.update(window="关节###Joints", button=1)
+    app._update_status_context(ctx)
+    assert app._status_panel == "Joints"
+    assert app._panel_status_hints == joints
+    pointer.update(window="##Menu_00", button=0)
+    app._update_status_context(ctx)
+    assert app._panel_status_hints == joints
+    pointer["window"] = "Inspector"
+    app._update_status_context(ctx)
+    assert app._status_panel == "Inspector"
+    assert app._panel_status_hints == ()
+    pointer["window"] = "视口###Viewport"
+    app._consume_scene_pointer_until_release = True
+    app._update_status_context(ctx)
+    assert app._status_panel == "Inspector"
+    app._consume_scene_pointer_until_release = False
+    app._update_status_context(ctx)
+    assert app._status_panel == "Viewport"
+    pointer["window"] = "Control"
+    app._update_status_context(ctx)
+    pointer["button"] = None
+    del ctx.status_hints_by_panel["Control"]
+    app._update_status_context(ctx)
+    assert app._status_panel == "Viewport"
 
 
 def test_precise_input_status_hints_match_the_implemented_shortcuts() -> None:

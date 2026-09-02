@@ -80,6 +80,83 @@ def test_imgui_adapter_covers_the_protocol_surface() -> None:
     assert not missing
 
 
+@pytest.fixture
+def native_draw():
+    """Exercise native ImGui tessellation without opening a GPU window."""
+    from imgui_bundle import imgui
+
+    context = imgui.create_context()
+    draw_list = imgui.ImDrawList(imgui.get_draw_list_shared_data())
+    draw_list._reset_for_new_frame()
+    draw_list.flags = (
+        imgui.ImDrawListFlags_.anti_aliased_lines.value
+        | imgui.ImDrawListFlags_.anti_aliased_fill.value
+    )
+    draw_list.push_clip_rect((-1000.0, -1000.0), (1000.0, 1000.0))
+    draw = ImguiDraw2D(draw_list)
+    yield draw
+    draw._dl = None
+    del draw_list
+    imgui.destroy_context(context)
+
+
+@pytest.mark.parametrize("cap", ("butt", "round", "round_start", "round_end"))
+def test_native_line_and_polyline_share_exact_vertices(native_draw, cap):
+    draw = native_draw
+    start, end = (100.25, 120.75), (84.5, 63.125)
+    color = (1.0, 1.0, 1.0, 1.0)
+    draw.line(start, end, color, 3.5, cap=cap)
+    count = len(draw._dl.vtx_buffer)
+    line = np.array([(v.pos.x, v.pos.y) for v in draw._dl.vtx_buffer])
+    draw.polyline((start, end), color, 3.5, cap=cap)
+    polyline = np.array([(v.pos.x, v.pos.y) for v in list(draw._dl.vtx_buffer)[count:]])
+
+    assert line == pytest.approx(polyline)
+    assert {v.col >> 24 for v in draw._dl.vtx_buffer} == {0, 255}
+
+
+@pytest.mark.parametrize("scale", (1.0, 2.25, 4.0))
+@pytest.mark.parametrize("direction", ((0.0, -1.0), (-0.8660254, 0.5), (0.8660254, 0.5)))
+def test_native_frame_arrow_head_and_shaft_remain_coaxial(
+    native_draw, monkeypatch, scale, direction
+):
+    from mojive.ui.viewport_widgets import _draw_axis_arrow_glyph
+
+    draw = native_draw
+    parts = {}
+
+    def record(name, method):
+        def submit(*args, **kwargs):
+            start = len(draw._dl.vtx_buffer)
+            method(*args, **kwargs)
+            parts[name] = np.array([(v.pos.x, v.pos.y) for v in list(draw._dl.vtx_buffer)[start:]])
+
+        return submit
+
+    monkeypatch.setattr(draw, "line", record("shaft", draw.line))
+    monkeypatch.setattr(draw, "fringed_concave_fill", record("head", draw.fringed_concave_fill))
+    center = np.array((100.25, 100.75))
+    _draw_axis_arrow_glyph(
+        draw,
+        center,
+        direction,
+        (1.0,) * 4,
+        1.18 * scale,
+        1.46 * scale,
+        clear_radius=3.0 * scale,
+        base=7.6,
+        tip=10.0,
+        wing=1.8,
+        corner_radius=0.25 * scale,
+    )
+    normal = np.array((-direction[1], direction[0]))
+    normal /= np.linalg.norm(normal)
+    for points in parts.values():
+        across = (points - center) @ normal
+        assert (across.min() + across.max()) * 0.5 == pytest.approx(0.0, abs=1e-5)
+    assert set(parts) == {"shaft", "head"}
+
+
 def test_fill_fringe_expands_outward_for_both_polygon_windings() -> None:
     square = np.array(((0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)))
     expected = np.array(((-1.0, -1.0), (3.0, -1.0), (3.0, 3.0), (-1.0, 3.0)))

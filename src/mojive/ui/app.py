@@ -488,6 +488,7 @@ class ViewerApp:
         metric_mode = self.localizer.preference("status_metric", "time")
         self._status_metric_mode = "steps" if metric_mode == "steps" else "time"
         self._panel_status_hints: tuple[ToolHint, ...] = ()
+        self._status_panel = "Viewport"
         self.camera = OrbitCamera()
 
         self.camera_out = CameraOut(backend=backend, session=session)
@@ -2151,7 +2152,7 @@ class ViewerApp:
         self._draw_tool_column_widget()
         self._draw_context_hint_widget()
         self.panels.draw(ctx)
-        self._panel_status_hints = tuple(ctx.status_hints)
+        self._update_status_context(ctx)
         self._draw_precise_gizmo_popup()
         self._draw_rename_popup()
         self._draw_unsaved_changes()
@@ -2271,10 +2272,11 @@ class ViewerApp:
             return Keys()
         self.panels.poll_shortcuts()
 
-        if io.want_text_input:
-            return Keys()
+        clear_selection = self._selection_clear_enabled() and imgui.is_key_pressed(
+            imgui.Key.escape, False
+        )
         if io.key_ctrl or io.key_super:
-            return Keys()
+            return Keys(clear_selection=clear_selection)
 
         bindings = self.input_bindings
 
@@ -2291,8 +2293,6 @@ class ViewerApp:
             ),
             -1,
         )
-        keyboard_free = not io.want_text_input and not imgui.is_any_item_active()
-
         return Keys(
             fly=(
                 down(InputAction.FLY_FORWARD) - down(InputAction.FLY_BACK),
@@ -2300,11 +2300,7 @@ class ViewerApp:
                 down(InputAction.FLY_UP) - down(InputAction.FLY_DOWN),
             ),
             toggle_pause=bindings.pressed(InputAction.TOGGLE_PAUSE),
-            clear_selection=(
-                keyboard_free
-                and self._selection_clear_enabled()
-                and imgui.is_key_pressed(imgui.Key.escape, False)
-            ),
+            clear_selection=clear_selection,
             frame_scene=bindings.pressed(InputAction.FRAME_SCENE),
             gizmo_translate=bindings.pressed(InputAction.GIZMO_TRANSLATE),
             gizmo_rotate=bindings.pressed(InputAction.GIZMO_ROTATE),
@@ -2646,7 +2642,7 @@ class ViewerApp:
         imgui.end_popup()
 
     def _finish_consumed_scene_pointer(self) -> None:
-        """Release a dismissed-popup pointer latch after one clean frame."""
+        """Release a consumed pointer gesture after one clean release frame."""
 
         if not self._consume_scene_pointer_until_release:
             return
@@ -3478,6 +3474,40 @@ class ViewerApp:
             return "camera"
         return "ready"
 
+    def _update_status_context(self, ctx: PanelContext) -> None:
+        """Latch status ownership on clicks, never on pointer travel or scrolling."""
+
+        if not self._consume_scene_pointer_until_release and any(
+            imgui.is_mouse_clicked(button) for button in (0, 1, 2)
+        ):
+            context = imgui.get_current_context()
+            hovered = context.hovered_window
+            if hovered is not None:
+                owner = hovered.root_window
+                # Dock tabs belong to the dock host, not the panel window.
+                # Use ImGui's hit-tested tab ID (including clipping/scrolling),
+                # rather than its navigation focus, which updates a frame later.
+                if context.hovered_id:
+                    owner = next(
+                        (
+                            window
+                            for window in context.windows
+                            if window.tab_id == context.hovered_id
+                            and window.dock_node is not None
+                            and window.dock_node.host_window is not None
+                            and window.dock_node.host_window.id_ == hovered.id_
+                        ),
+                        owner,
+                    )
+                name = str(owner.name).rsplit("###", 1)[-1]
+                if name == "Viewport" or name.startswith("joint_limit_"):
+                    self._status_panel = "Viewport"
+                elif name in ctx.status_hints_by_panel:
+                    self._status_panel = name
+        if self._status_panel != "Viewport" and self._status_panel not in ctx.status_hints_by_panel:
+            self._status_panel = "Viewport"
+        self._panel_status_hints = ctx.status_hints_by_panel.get(self._status_panel, ())
+
     def _status_tool_hints(self, *, loading: bool) -> tuple[ToolHint, ...]:
         if loading:
             return ()
@@ -3485,20 +3515,21 @@ class ViewerApp:
         if edit is not None:
             defaults = precise_input_status_hints(edit, self.localizer.text)
             return self.tool_hints.resolve(defaults, surface="status")
-        if self._panel_status_hints:
-            return self.tool_hints.resolve(self._panel_status_hints, surface="status")
-        if (
-            self._scene_input_blocked()
-            or not self._has_scene_content()
-            or not self._state.over_viewport
-        ):
+        if self._scene_input_blocked():
             return self.tool_hints.resolve((), surface="status")
-        defaults = default_tool_hints(
-            self._context_tool_hint_variant(),
-            self.input_bindings,
-            self._viewport_labels,
-        )
-        if not self._scene_input_blocked() and self._selection_clear_enabled():
+        if self._status_panel != "Viewport":
+            defaults = self._panel_status_hints
+        elif self._has_scene_content():
+            defaults = default_tool_hints(
+                self._context_tool_hint_variant(),
+                self.input_bindings,
+                self._viewport_labels,
+            )
+        else:
+            defaults = ()
+        # Selection is application state, not part of a panel's hover/gesture
+        # grammar. Compose its action before the clicked panel's own hints.
+        if self._selection_clear_enabled():
             defaults = (
                 ToolHint(
                     "key",
@@ -3511,13 +3542,28 @@ class ViewerApp:
         return self.tool_hints.resolve(defaults, surface="status")
 
     def _selection_clear_enabled(self) -> bool:
-        """Return whether Esc may clear the current scene selection."""
+        """Allow navigation alongside selection; protect edits that own the target."""
 
+        if imgui.is_any_item_active():
+            context = imgui.get_current_context()
+            window = context.active_id_window
+            # ImGui assigns a window's MoveId to an empty-space left press,
+            # even when the docked window is not moving. That focus capture
+            # is not a widget edit and must not suppress orbit/Shift-pan Esc.
+            if (
+                window is None
+                or context.active_id != window.move_id
+                or context.moving_window is not None
+            ):
+                return False
         return bool(
             self.session.paused
             and not self.session.state_take_playing
             and self.session.selected_node is not None
-            and not self.router.held
+            and not (
+                self.router.held and self.router.claim in (gs.Claim.OBJECT_GIZMO, gs.Claim.PERTURB)
+            )
+            and not self.session.perturb.active
             and not self.gizmo.using
             and not self.gizmo.keyboard_using
         )
@@ -3998,6 +4044,12 @@ class ViewerApp:
                     clear_selection()
             self.gizmo.cancel()
             self.router.abort()
+            # Esc may be pressed during orbit/pan, including before it crosses
+            # click slop. Consume the rest of that press so its release cannot
+            # restart a gesture or pick the just-cleared object again.
+            self._consume_scene_pointer_until_release = any(
+                imgui.is_mouse_down(button) for button in range(3)
+            )
         if keys.gizmo_translate:
             self.gizmo.set_mode("translate")
         if keys.gizmo_rotate:

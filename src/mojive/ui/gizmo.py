@@ -119,6 +119,7 @@ JOINT_LIMIT_HIT_PADDING_PT = 4.0
 JOINT_SLIDE_ARROW_OFFSET_PT = 17.0
 JOINT_SLIDE_ARROW_INSET_PT = 9.0
 JOINT_SLIDE_ARROW_EXTENT_PT = 48.0
+JOINT_SLIDE_ARROW_VISUAL_SCALE = 0.8
 JOINT_SLIDE_ARROW_TARGET_PT = (
     2.0 * JOINT_SLIDE_ARROW_INSET_PT
     + 4.0 * (JOINT_SLIDE_ARROW_EXTENT_PT - AXIS_HEAD_LENGTH_PT)
@@ -183,9 +184,9 @@ def _joint_current_tick_color(state: _JointRangeState, range_color):
 
 
 def joint_slide_arrow_polygons(
-    current, tangent, style_scale: float
+    current, tangent, style_scale: float, *, for_hit_test: bool = False
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return opposing slide handles together on one side of the range axis."""
+    """Return smaller round-tail handles, or their unchanged picking silhouettes."""
 
     current = np.asarray(current, np.float64).reshape(2)
     tangent = np.asarray(tangent, np.float64).reshape(2)
@@ -200,10 +201,17 @@ def joint_slide_arrow_polygons(
     # communicate bidirectional motion without making the axis itself look cut.
     inset = tangent * JOINT_SLIDE_ARROW_INSET_PT * style_scale
     extent = tangent * JOINT_SLIDE_ARROW_EXTENT_PT * style_scale
-    return (
-        axis_arrow_polygon(current + offset + inset, current + offset + extent, style_scale),
-        axis_arrow_polygon(current + offset - inset, current + offset - extent, style_scale),
-    )
+
+    def polygon(direction: float) -> np.ndarray:
+        start = current + offset + direction * inset
+        end = current + offset + direction * extent
+        points = axis_arrow_polygon(start, end, style_scale, round_tail=not for_hit_test)
+        if for_hit_test:
+            return points
+        center = (start + end) * 0.5
+        return center + (points - center) * JOINT_SLIDE_ARROW_VISUAL_SCALE
+
+    return polygon(1.0), polygon(-1.0)
 
 
 def joint_slide_arrow_targets(
@@ -1004,7 +1012,7 @@ class ObjectGizmo:
             )
             self._hovered = GizmoHandle.NONE
             if slide is not None:
-                polygons = self._slide_arrow_polygons(slide, self._style_scale)
+                polygons = self._slide_arrow_polygons(slide, self._style_scale, for_hit_test=True)
                 arrow_hit = any(
                     _screen_polygon_distance(cursor, polygon) <= 4.0 * self._style_scale
                     for polygon in polygons
@@ -1204,7 +1212,10 @@ class ObjectGizmo:
                 and self._active_joint.type == "slide"
                 and not self._snapping
             ):
-                self._draw_joint_translation_guide(overlay, cam, rect, style_scale)
+                # Limited slides include the drag markers in the range's
+                # outline/core passes so crossings have no internal border.
+                if self._joint_range is None:
+                    self._draw_joint_translation_guide(overlay, cam, rect, style_scale)
             else:
                 self._draw_translation_guide(overlay, cam, rect, style_scale)
         rotation_dial_projector = None
@@ -1603,7 +1614,7 @@ class ObjectGizmo:
                     overlay.polyline(
                         points,
                         color,
-                        2.0 * JOINT_OUTLINE_PT * style_scale,
+                        2.0 * JOINT_OUTLINE_PT * style_scale * JOINT_SLIDE_ARROW_VISUAL_SCALE,
                         closed=True,
                     )
 
@@ -1611,8 +1622,12 @@ class ObjectGizmo:
     def _slide_arrow_polygons(
         slide: _SlideRangeProjection,
         style_scale: float,
+        *,
+        for_hit_test: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
-        return joint_slide_arrow_polygons(slide.current, slide.tangent, style_scale)
+        return joint_slide_arrow_polygons(
+            slide.current, slide.tangent, style_scale, for_hit_test=for_hit_test
+        )
 
     @staticmethod
     def _slide_arrow_targets(
@@ -1698,7 +1713,16 @@ class ObjectGizmo:
                 outline=outline,
             )
 
-            if not (self._using and self._active is GizmoHandle.Z and not self._snapping):
+            if self._using and self._active is GizmoHandle.Z and not self._snapping:
+                self._draw_joint_translation_guide(
+                    overlay,
+                    cam,
+                    rect,
+                    style_scale,
+                    phase="outline" if outline else "core",
+                    alpha=alpha,
+                )
+            else:
                 overlay.line(
                     current - normal * 10.0 * style_scale,
                     current + normal * 10.0 * style_scale,
@@ -2171,8 +2195,11 @@ class ObjectGizmo:
         cam,
         rect,
         style_scale: float,
+        *,
+        phase: str = "all",
+        alpha: float = 1.0,
     ) -> None:
-        """Draw a slide drag as one Primary-Dim segment with tick endpoints."""
+        """Draw slide drag strokes, sharing outline/core passes with its range."""
 
         screen = project(cam, (self._drag_origin_pos, self._frame.position), rect)
         if np.any(screen[:, 2] <= 0.0):
@@ -2186,47 +2213,32 @@ class ObjectGizmo:
         normal = np.array((-tangent[1], tangent[0]))
         start_half_tick = JOINT_DRAG_START_TICK_HALF_PT * style_scale
         end_half_tick = JOINT_CURRENT_TICK_PT * 0.5 * style_scale
-        color = JOINT_ACTIVE_DARK_COLOR
-        outline = JOINT_OUTLINE_COLOR
         core_width = JOINT_RANGE_WIDTH_PT * style_scale
-        outline_width = core_width + 2.0 * JOINT_OUTLINE_PT * style_scale
         end_width = 4.0 * style_scale
-        end_outline_width = end_width + 2.0 * JOINT_OUTLINE_PT * style_scale
-        if distance > 1e-6:
-            overlay.line(start, end, outline, outline_width)
-            overlay.line(
-                start - normal * start_half_tick,
-                start + normal * start_half_tick,
-                outline,
-                outline_width,
-                cap="round",
-            )
-        overlay.line(
-            end - normal * end_half_tick,
-            end + normal * end_half_tick,
-            outline,
-            end_outline_width,
-            cap="round",
-        )
-        if distance > 1e-6:
-            overlay.line(start, end, color, core_width)
-            overlay.line(
-                start - normal * start_half_tick,
-                start + normal * start_half_tick,
-                color,
-                core_width,
-                cap="round",
-            )
         end_color = ACTIVE_HANDLE_COLOR
         if self._joint_range is not None and self._joint_range.joint_type == "slide":
             end_color = _joint_current_tick_color(self._joint_range, end_color)
-        overlay.line(
-            end - normal * end_half_tick,
-            end + normal * end_half_tick,
-            end_color,
-            end_width,
-            cap="round",
-        )
+        phases = ("outline", "core") if phase == "all" else (phase,)
+        for draw_phase in phases:
+            outline = draw_phase == "outline"
+            extra_width = 2.0 * JOINT_OUTLINE_PT * style_scale if outline else 0.0
+            color = _with_alpha(JOINT_OUTLINE_COLOR if outline else JOINT_ACTIVE_DARK_COLOR, alpha)
+            if distance > 1e-6:
+                overlay.line(start, end, color, core_width + extra_width)
+                overlay.line(
+                    start - normal * start_half_tick,
+                    start + normal * start_half_tick,
+                    color,
+                    core_width + extra_width,
+                    cap="round",
+                )
+            overlay.line(
+                end - normal * end_half_tick,
+                end + normal * end_half_tick,
+                color if outline else _with_alpha(end_color, alpha),
+                end_width + extra_width,
+                cap="round",
+            )
 
     def _publish_translation_guide(self, backend: Any, ui_scale: float) -> None:
         dd = getattr(backend, "debug", None)

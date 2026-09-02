@@ -89,7 +89,10 @@ from mojive.ui.gizmo import (
     JOINT_RANGE_COLOR,
     JOINT_RANGE_RADIUS,
     JOINT_RANGE_WIDTH_PT,
+    JOINT_SLIDE_ARROW_EXTENT_PT,
+    JOINT_SLIDE_ARROW_INSET_PT,
     JOINT_SLIDE_ARROW_OFFSET_PT,
+    JOINT_SLIDE_ARROW_VISUAL_SCALE,
     JOINT_UPPER_LIMIT_COLOR,
     TRACKBALL_RAD_PER_PT,
     TRANSLATION_GUIDE_RADIUS_PT,
@@ -111,6 +114,7 @@ from mojive.ui.gizmo import (
     _ScreenRotationDialProjector,
     _snap_tick_alpha,
     _split_segment_around_point,
+    joint_slide_arrow_polygons,
 )
 from mojive.ui.theme import THEME
 
@@ -1023,6 +1027,38 @@ def test_flat_axis_arrow_rounds_only_the_head_and_scales_with_hidpi() -> None:
     assert scaled / 4.0 == pytest.approx(polygon)
 
 
+def test_round_tail_is_a_continuous_semicircle_in_the_arrow_outline() -> None:
+    start, end = np.array((5.0, 7.0)), np.array((65.0, 7.0))
+    flat = axis_arrow_polygon(start, end)
+    rounded = axis_arrow_polygon(start, end, round_tail=True)
+    assert rounded[: len(flat)] == pytest.approx(flat)
+    arc = np.vstack((rounded[len(flat) - 1 :], rounded[:1]))
+    assert np.linalg.norm(arc - start, axis=1) == pytest.approx(AXIS_SHAFT_HALF_PT)
+    assert arc[:, 0].min() == pytest.approx(start[0] - AXIS_SHAFT_HALF_PT)
+    assert np.all(arc[:, 0] <= start[0])
+    assert np.linalg.norm(np.roll(rounded, -1, axis=0) - rounded, axis=1).min() > 0.0
+    scaled = axis_arrow_polygon(start * 4.0, end * 4.0, 4.0, round_tail=True)
+    assert scaled / 4.0 == pytest.approx(rounded)
+
+
+@pytest.mark.parametrize("scale", (1.0, 2.25))
+@pytest.mark.parametrize("tangent", ((1.0, 0.0), (0.0, -1.0), (0.8, -0.6)))
+def test_slide_arrows_shrink_only_the_visuals_and_keep_original_hit_shapes(scale, tangent):
+    current = np.array((120.0, 80.0))
+    tangent = np.asarray(tangent)
+    center = current + np.array((-tangent[1], tangent[0])) * JOINT_SLIDE_ARROW_OFFSET_PT * scale
+    visible = joint_slide_arrow_polygons(current, tangent, scale)
+    hits = joint_slide_arrow_polygons(current, tangent, scale, for_hit_test=True)
+    for sign, glyph, hit in zip((1.0, -1.0), visible, hits, strict=True):
+        start = center + sign * tangent * JOINT_SLIDE_ARROW_INSET_PT * scale
+        end = center + sign * tangent * JOINT_SLIDE_ARROW_EXTENT_PT * scale
+        assert hit == pytest.approx(axis_arrow_polygon(start, end, scale))
+        midpoint = (start + end) * 0.5
+        full = axis_arrow_polygon(start, end, scale, round_tail=True)
+        assert glyph == pytest.approx(midpoint + (full - midpoint) * JOINT_SLIDE_ARROW_VISUAL_SCALE)
+        assert JOINT_SLIDE_ARROW_VISUAL_SCALE == 0.8
+
+
 def test_active_3d_translation_axis_keeps_the_center_shell_mask() -> None:
     from types import SimpleNamespace
 
@@ -1778,6 +1814,51 @@ def test_joint_translation_guide_stays_in_the_final_overlay_without_dots() -> No
 
     assert not any(name in {"circle", "circle_filled"} for name, _args, _kwargs in overlay.calls)
     assert [name for name, _args, _kwargs in overlay.calls[-3:]] == ["line"] * 3
+
+
+@pytest.mark.parametrize("style", ("2d", "3d"))
+@pytest.mark.parametrize("orthographic", (False, True))
+@pytest.mark.parametrize("current", (0.0, 0.15, -0.34, 0.34))
+def test_slide_drag_markers_share_the_range_outline_pass(style, orthographic, current) -> None:
+    from types import SimpleNamespace
+
+    gizmo = ObjectGizmo()
+    gizmo.set_style(style)
+    gizmo._visible = True
+    gizmo._using = True
+    gizmo._active = GizmoHandle.Z
+    gizmo._active_joint = SimpleNamespace(type="slide")
+    gizmo._joint_range = _JointRangeState("slide", current, -0.34, 0.34)
+    gizmo._frame.active = GizmoHandle.Z
+    gizmo._frame.handle_color = JOINT_HANDLE_COLOR
+    gizmo._frame.position[:] = (0.0, 0.0, current)
+    gizmo._drag_origin_pos[:] = 0.0
+    cam = camera(orthographic=orthographic)
+    axis = project(cam, ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0)), RECT)[:, :2]
+    gizmo._axis_screen[:] = (axis[1] - axis[0]) / np.linalg.norm(axis[1] - axis[0])
+    overlay = RecordingDraw2D()
+
+    gizmo.draw_overlay(cam, RECT, overlay, style_scale=1.0)
+
+    outlines, cores, core_lines = [], [], []
+    for index, (name, args, _kwargs) in enumerate(overlay.calls):
+        color = args[2] if name == "line" else args[1]
+        if np.allclose(color[:3], JOINT_OUTLINE_COLOR[:3]):
+            outlines.append(index)
+        else:
+            cores.append(index)
+            if name == "line":
+                core_lines.append(args)
+    # No start/current/limit edge may be painted over any part of the fill.
+    assert outlines and cores
+    assert max(outlines) < min(cores)
+    dark_strokes = [
+        args for args in core_lines if np.allclose(args[2][:3], JOINT_ACTIVE_DARK_COLOR[:3])
+    ]
+    assert len(dark_strokes) == (2 if current != 0.0 else 0)
+    assert len([args for args in core_lines if args[3] == pytest.approx(4.0)]) == 1
+    assert np.allclose(core_lines[-2][2], JOINT_LOWER_LIMIT_COLOR)
+    assert np.allclose(core_lines[-1][2], JOINT_UPPER_LIMIT_COLOR)
 
 
 def test_translation_snap_guide_is_the_last_axis_overlay_group() -> None:

@@ -166,7 +166,8 @@ class _PillowDraw2D:
             fill=_rgba(color),
         )
 
-    def text(self, pos, color, text: str) -> None:
+    def text(self, pos, color, text: str, *, pixel_snap: bool = True) -> None:
+        del pixel_snap  # Pillow consumes the export's authored coordinates directly.
         self.draw.text(
             tuple(pos), text, fill=_rgba(color), font=_mono_font(round(6.4 * self.scale))
         )
@@ -174,6 +175,14 @@ class _PillowDraw2D:
     def text_size(self, text: str) -> tuple[float, float]:
         bounds = self.draw.textbbox((0, 0), text, font=_mono_font(round(6.4 * self.scale)))
         return float(bounds[2] - bounds[0]), float(bounds[3] - bounds[1])
+
+    def text_ink_bounds(self, text: str) -> tuple[float, float, float, float] | None:
+        if not text.strip():
+            return None
+        return tuple(
+            float(value)
+            for value in self.draw.textbbox((0, 0), text, font=_mono_font(round(6.4 * self.scale)))
+        )
 
     def centered_label(self, text: str, center, color, max_width: float) -> None:
         font_size = max(1, round(6.4 * self.scale))
