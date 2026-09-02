@@ -1362,9 +1362,9 @@ class WgpuBackend:
             if size is not None:
                 self.target.resize(int(size[0]), int(size[1]))
             self.render(request=RenderRequest.color())
-            image = self.target.read_color(flip=True)[..., :3]
+            image = self.target.read_rgb(flip=True)
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-            Image.fromarray(np.ascontiguousarray(image)).save(path)
+            Image.fromarray(image).save(path)
             return True
         finally:
             self._camera = saved_camera

@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 import wgpu
+from PIL import Image
 
 
 def aligned_row_bytes(width: int, bytes_per_pixel: int) -> int:
@@ -17,6 +18,22 @@ def aligned_row_bytes(width: int, bytes_per_pixel: int) -> int:
 
     raw = int(width) * int(bytes_per_pixel)
     return (raw + 255) // 256 * 256
+
+
+def rgba_to_rgb(image: np.ndarray, out: np.ndarray | None = None) -> np.ndarray:
+    """Pack uint8 RGBA pixels into RGB with Pillow's native conversion kernel."""
+
+    image = np.asarray(image)
+    if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 4:
+        raise ValueError(f"Expected uint8 RGBA image, got {image.dtype} {image.shape}")
+    shape = (*image.shape[:2], 3)
+    if out is not None and out.shape != shape:
+        raise ValueError(f"Expected destination with shape {shape}, got {out.shape}")
+    converted = np.asarray(Image.fromarray(image, "RGBA").convert("RGB"))
+    if out is not None:
+        np.copyto(out, converted, casting="unsafe")
+        return out
+    return np.array(converted, copy=True, order="C")
 
 
 def decode_rows(
@@ -43,13 +60,16 @@ def decode_rows(
         .view(dtype)
         .reshape(int(height), int(width), int(storage_channels))
     )
+    pack_rgba = dtype == np.dtype(np.uint8) and storage_channels == 4 and output_channels == 3
     if output_channels == 1:
         image = image[..., 0]
-    elif output_channels != storage_channels:
+    elif not pack_rgba and output_channels != storage_channels:
         image = image[..., :output_channels]
     # WebGPU rows are top-first; flip=True follows the public top-first convention.
     if not flip:
         image = image[::-1]
+    if pack_rgba:
+        return rgba_to_rgb(image, out)
     if out is not None:
         np.copyto(out, image, casting="unsafe")
         return out

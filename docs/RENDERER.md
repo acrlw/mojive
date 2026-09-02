@@ -88,13 +88,14 @@ GPU memory without limit. Resize, sample-count changes, and release drain outsta
 before destroying their textures. A supplied output array belongs to its ticket until the future
 completes.
 
-The synchronous API and its dtype-casting/strided-output behavior remain unchanged. OpenGL exposes
-the same asynchronous method as an already-completed future until a PBO-backed queue is justified;
-no background GL context is introduced implicitly. On an Apple M5, a 40-frame 1920×1080 wgpu RGB
-capture measured about 98 FPS synchronously and 197 FPS through the staging ring, with pixel-exact
-results. This is a throughput measurement, not a promise that single-frame latency is halved.
-Metric-depth and segmentation synchronous readback is already inexpensive on this device; their
-asynchronous form is provided for non-blocking composition, not assumed to improve throughput.
+The synchronous and asynchronous wgpu paths share one row decoder. Its common RGBA8-to-RGB8 case
+uses Pillow's compiled conversion kernel instead of NumPy's expensive strided three-channel copy;
+typed depth/segmentation and uncommon channel layouts remain on the generic NumPy path. Shape,
+orientation, caller-owned output, dtype-casting, and strided-output behavior remain unchanged.
+OpenGL exposes the same asynchronous method as an already-completed future until a PBO-backed queue
+is justified; no background GL context is introduced implicitly. Metric-depth and segmentation
+synchronous readback is already inexpensive on this device; their asynchronous form is provided
+for non-blocking composition, not assumed to improve throughput.
 
 The high-level video recorder uses the same three-frame pipeline when the active target supports
 it, preserving submission and encoding order. Camera preview requests color rather than the full
@@ -194,7 +195,19 @@ make renderer-benchmark
 make renderer-benchmark-full
 ```
 
-On an Apple M5 at 1920×1080 with 4× MSAA, the architecture benchmark records OpenGL RGB capture at
-3.19–3.40 ms, metric depth at 2.02–2.13 ms, and segmentation at 2.74–3.03 ms across the bundled
-workloads. These measurements are evidence for regression tracking rather than fixed performance
-requirements; use the benchmark commands on the target machine when changing pipeline structure.
+On an Apple M5 at 1920×1080 with 4× MSAA, the isolated public-API benchmark records the following
+RGB update-and-render medians after the lifecycle-stream, persistent-pass, stable-binding, and
+native RGB-packing changes:
+
+| Workload | MuJoCo | Mojive OpenGL | Mojive wgpu |
+|---|---:|---:|---:|
+| 256 static objects | 6.78 ms | 3.18 ms (0.47×) | 3.21 ms (0.47×) |
+| 1,024 animated objects | 10.24 ms | 3.59 ms (0.35×) | 3.58 ms (0.35×) |
+| textured, transparent, reflective materials | 4.10 ms | 2.98 ms (0.73×) | 3.44 ms (0.84×) |
+
+The ratio is Mojive time divided by MuJoCo time, so lower is faster. These measurements are evidence
+for regression tracking rather than fixed performance requirements; use the benchmark commands on
+the target machine when changing pipeline structure. Metal readback on this host has distinct
+power-state modes, so renderer order can change absolute wgpu latency. An alternating same-machine
+A/B of the materials workload measured 10.19–10.61 ms before native packing and 3.47–3.53 ms after
+it in the stable rounds; compare repeated rounds rather than selecting one favorable run.

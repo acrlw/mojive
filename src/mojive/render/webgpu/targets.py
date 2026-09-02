@@ -8,7 +8,7 @@ import numpy as np
 import wgpu
 
 from ...types import CameraView
-from .readback import WgpuReadbackQueue, aligned_row_bytes
+from .readback import WgpuReadbackQueue, aligned_row_bytes, rgba_to_rgb
 
 # Frame uniform block, mirrors `struct Frame` in shaders/scene.wgsl.
 FRAME_DTYPE = np.dtype(
@@ -237,8 +237,7 @@ class RenderTargetWgpu:
                 f"Expected C-contiguous uint8 destination with shape {shape}, "
                 f"got {out.dtype} {out.shape}"
             )
-        np.copyto(out, self.read_color(flip=flip)[..., :3])
-        return out
+        return rgba_to_rgb(self.read_color(flip=flip), out)
 
     def read_rgb_async(
         self, flip: bool = True, out: np.ndarray | None = None
