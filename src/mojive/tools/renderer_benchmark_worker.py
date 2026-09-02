@@ -104,14 +104,29 @@ def _dense_mesh(width: int, height: int, samples: int) -> str:
 
 
 def _dynamic(width: int, height: int, samples: int) -> str:
+    return _dynamic_grid(width, height, samples, side=8, spacing=0.9, size=0.3)
+
+
+def _dynamic_large(width: int, height: int, samples: int) -> str:
+    return _dynamic_grid(width, height, samples, side=32, spacing=0.35, size=0.14)
+
+
+def _dynamic_grid(
+    width: int,
+    height: int,
+    samples: int,
+    *,
+    side: int,
+    spacing: float,
+    size: float,
+) -> str:
     bodies = []
-    side = 8
     for index in range(side * side):
-        x = (index % side - (side - 1) / 2) * 0.9
-        y = (index // side - (side - 1) / 2) * 0.9
+        x = (index % side - (side - 1) / 2) * spacing
+        y = (index // side - (side - 1) / 2) * spacing
         bodies.append(
             f'<body pos="{x:.3f} {y:.3f} .45"><freejoint/>'
-            '<geom type="box" size=".3 .3 .3" rgba=".3 .7 .9 1"/></body>'
+            f'<geom type="box" size="{size} {size} {size}" rgba=".3 .7 .9 1"/></body>'
         )
     return _document(width, height, samples, "\n".join(bodies))
 
@@ -140,6 +155,7 @@ _WORKLOADS = {
     "many_objects": _many_objects,
     "dense_mesh": _dense_mesh,
     "dynamic": _dynamic,
+    "dynamic_large": _dynamic_large,
     "materials": _materials,
 }
 
@@ -163,6 +179,17 @@ def _distribution(values: list[float]) -> dict[str, float]:
         "mean_ms": float(np.mean(samples)),
         "min_ms": float(np.min(samples)),
         "max_ms": float(np.max(samples)),
+    }
+
+
+def _byte_distribution(values: list[float]) -> dict[str, float]:
+    samples = np.asarray(values, dtype=np.float64)
+    return {
+        "median": float(statistics.median(values)),
+        "p95": float(np.percentile(samples, 95)),
+        "mean": float(np.mean(samples)),
+        "min": float(np.min(samples)),
+        "max": float(np.max(samples)),
     }
 
 
@@ -201,7 +228,7 @@ def _render(renderer, mode: str, output: np.ndarray) -> np.ndarray:
 
 
 def _animate(mujoco, workload: str, model, data, base_qpos: np.ndarray, frame: int) -> None:
-    if workload == "dynamic":
+    if workload in {"dynamic", "dynamic_large"}:
         qpos = data.qpos.reshape(-1, 7)
         base = base_qpos.reshape(-1, 7)
         phase = np.arange(qpos.shape[0], dtype=np.float64) * 0.17 + frame * 0.035
@@ -253,6 +280,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         update_ms: list[float] = []
         render_ms: list[float] = []
         combined_ms: list[float] = []
+        instance_upload_bytes: list[float] = []
+        stream_upload_bytes: dict[str, list[float]] = {
+            "pose": [],
+            "visual": [],
+            "identity": [],
+        }
         checksum = 0
         for frame in range(args.frames):
             _animate(mujoco, args.workload, model, data, base_qpos, args.warmup + frame)
@@ -264,6 +297,13 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             update_ms.append((updated - start) * 1000.0)
             render_ms.append((finished - updated) * 1000.0)
             combined_ms.append((finished - start) * 1000.0)
+            backend = getattr(renderer, "_backend", None)
+            instances = getattr(backend, "instances", None)
+            if instances is not None:
+                instance_upload_bytes.append(float(instances.uploaded_bytes))
+                uploaded_streams = instances.uploaded_streams
+                for stream, values in stream_upload_bytes.items():
+                    values.append(float(uploaded_streams.get(stream, 0)))
             checksum ^= int(output.reshape(-1)[frame % output.size])
     finally:
         close_start = time.perf_counter()
@@ -295,6 +335,17 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "render": _distribution(render_ms),
         "update_and_render": combined,
         "median_fps": 1000.0 / max(combined["median_ms"], 1e-9),
+        "instance_upload": (
+            None
+            if not instance_upload_bytes
+            else {
+                "bytes": _byte_distribution(instance_upload_bytes),
+                "streams": {
+                    stream: _byte_distribution(values)
+                    for stream, values in stream_upload_bytes.items()
+                },
+            }
+        ),
         "close_ms": close_ms,
         "rss_before_mb": rss_before,
         "peak_rss_mb": peak_rss,

@@ -42,8 +42,7 @@ class ReflectPass(OpaquePass):
         self._eye = np.zeros(3, np.float32)
         self._plane = (0.0, 0.0, 1.0, 0.0)
         self._groups: tuple[_PlaneGroup, ...] = ()
-        self._encoded_scene = None
-        self._encoded_reflectance: dict[int, float] = {}
+        self.reflection_info = np.zeros(0, np.uint32)
 
     def view_matrices(self, ctx: PassContext):
         return self._view, self._view_proj, self._eye
@@ -143,25 +142,17 @@ class ReflectPass(OpaquePass):
         d = -float(np.dot(normal, point))
         return (float(normal[0]), float(normal[1]), float(normal[2]), d)
 
-    def _restore_reflectance(self, scene) -> bool:
-        restored = self._encoded_scene is scene and bool(self._encoded_reflectance)
-        if self._encoded_scene is scene:
-            for index, value in self._encoded_reflectance.items():
-                if index < len(scene.material):
-                    scene.material[index, 3] = value
-        self._encoded_scene = None
-        self._encoded_reflectance.clear()
-        return restored
-
-    def _encode_reflectance(self, scene, groups: tuple[_PlaneGroup, ...]) -> None:
-        self._encoded_scene = scene
+    def _build_reflection_info(self, scene, groups: tuple[_PlaneGroup, ...]) -> None:
+        if len(self.reflection_info) != scene.count:
+            self.reflection_info = np.zeros(scene.count, np.uint32)
+        else:
+            self.reflection_info.fill(0)
         for layer, group in enumerate(groups):
             for index in group.indices:
-                value = float(scene.material[index, 3])
                 shape = scene.bucket_keys[int(scene.bucket[index])][0].shape
-                top_face = 1.0 if shape is MeshShape.BOX else 0.0
-                self._encoded_reflectance[index] = value
-                scene.material[index, 3] = -(4.0 * layer + 2.0 * top_face + value)
+                self.reflection_info[index] = np.uint32(
+                    (layer + 1) | (8 if shape is MeshShape.BOX else 0)
+                )
 
     def _set_plane(self, ctx: PassContext, plane) -> None:
         eye = np.asarray(ctx.camera.eye, np.float64)
@@ -177,11 +168,9 @@ class ReflectPass(OpaquePass):
         """Resolve planar-reflection instance metadata before GPU upload."""
 
         ctx.reflection = ()
-        changed = self._restore_reflectance(ctx.scene)
         self._groups = ()
         if not ctx.flag(RenderFlag.REFLECTION):
-            if changed:
-                ctx.instances.invalidate_upload()
+            self._build_reflection_info(ctx.scene, ())
             return
         eye = np.asarray(ctx.camera.eye, np.float64)
         groups = tuple(
@@ -190,25 +179,19 @@ class ReflectPass(OpaquePass):
             if float(np.dot(group.plane[:3], eye) + group.plane[3]) > 1e-4
         )
         if not groups:
-            if changed:
-                ctx.instances.invalidate_upload()
+            self._build_reflection_info(ctx.scene, ())
             return
         if not self._ensure_target(ctx, len(groups)):
-            if changed:
-                ctx.instances.invalidate_upload()
+            self._build_reflection_info(ctx.scene, ())
             return
         self._groups = groups
-        self._encode_reflectance(ctx.scene, groups)
-        ctx.instances.invalidate_upload()
+        self._build_reflection_info(ctx.scene, groups)
 
     def prepare(self, ctx: PassContext) -> bool:
         if not self._groups:
             return False
         self._set_plane(ctx, self._groups[0].plane)
         if not super().prepare(ctx):
-            self._restore_reflectance(ctx.scene)
-            ctx.instances.invalidate_upload()
-            ctx.instances.upload(ctx.scene)
             return False
 
         ctx.scene_program = None
@@ -262,6 +245,7 @@ class ReflectPass(OpaquePass):
         self.depth = None
         self._size = (0, 0)
         self._groups = ()
+        self.reflection_info = np.zeros(0, np.uint32)
 
 
 register_pass("reflect", ReflectPass)

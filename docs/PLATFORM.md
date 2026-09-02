@@ -47,11 +47,12 @@ Apple M5 selects `SPLIT`. Picking, outline, and segmentation access the selected
 ## Instance-buffer offsets
 
 ModernGL 5.12 omits byte offsets from its instance layout API. OpenGL creates the VAO
-through ModernGL and rebinds instance pointers with `glVertexAttribPointer`,
+through ModernGL and rebinds each lifecycle stream with `glVertexAttribPointer`,
 `glVertexAttribIPointer`, and `glVertexAttribDivisor`. This work occurs during scene setup.
 
-The portable path allocates one instance buffer per bucket. Both paths preserve bucket identity,
-draw counts, and frame behavior.
+The portable path allocates one pose, visual, and identity buffer per bucket. Both paths preserve
+bucket identity, draw counts, and frame behavior. The shared path uploads only contiguous dirty
+ranges; the portable path updates only the lifecycle stream whose revision changed.
 
 ## Timing on tile-based GPUs
 
@@ -95,3 +96,5 @@ make calibrate
 ModernGL 5.12 exposes pure depth attachments through its framebuffer API. OpenGL renders a
 mirrored camera into an offscreen texture and samples it from reflective surface fragments.
 Oblique clipping and winding reversal preserve the reflected scene boundary.
+Reflection layer and box-face routing live in the identity stream; material reflectance remains
+canonical scene data throughout planning and execution.

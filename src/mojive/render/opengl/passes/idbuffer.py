@@ -9,11 +9,11 @@ from ....log import get_logger
 from ...backend import RenderFlag
 from .. import gl_native as G
 from ..instances import (
-    INSTANCE_ATTRIBUTES,
-    INSTANCE_BYTES,
+    INSTANCE_STREAMS,
     MESH_ATTRIBUTES,
     Strategy,
     build_layout,
+    instance_content,
 )
 from ..programs import ProgramSpec
 from ..registry import register_pass
@@ -37,9 +37,9 @@ class IdGeometry:
         self._attachment = -1
         self._generation = -1
         self._vaos: list[moderngl.VertexArray | None] = []
-        self._own: list[moderngl.Buffer | None] = []
+        self._own: list[tuple[moderngl.Buffer, ...] | None] = []
 
-        self._buffer_glo = -1
+        self._buffer_glos: tuple[int, ...] = ()
         self._ranges: object = None
         self._meshes: object = None
         self._strategy: Strategy | None = None
@@ -59,12 +59,12 @@ class IdGeometry:
             fresh = True
 
         store = ctx.instances
-        buf = store.buffer
-        if buf is None:
+        if store.buffer is None:
             return False
+        buffer_glos = tuple(buffer.glo for buffer in store.buffers)
         if (
             fresh
-            or self._buffer_glo != buf.glo
+            or self._buffer_glos != buffer_glos
             or self._ranges is not ctx.scene.bucket_ranges
             or self._meshes is not ctx.meshes
             or self._strategy is not store.strategy
@@ -85,20 +85,14 @@ class IdGeometry:
     def _rebuild(self, ctx: PassContext) -> None:
         self._release_gl()
         prog, store, scene = self.program, ctx.instances, ctx.scene
-        buf = store.buffer
-        assert prog is not None and buf is not None
-        self._buffer_glo = buf.glo
+        assert prog is not None and store.buffer is not None
+        self._buffer_glos = tuple(buffer.glo for buffer in store.buffers)
         self._ranges = scene.bucket_ranges
         self._meshes = ctx.meshes
         self._strategy = store.strategy
         self._broken = False
 
         mesh_layout, mesh_names = build_layout(prog, MESH_ATTRIBUTES)
-        inst_layout, inst_names = build_layout(prog, INSTANCE_ATTRIBUTES, per_instance=True)
-        attrs = tuple(
-            (self._location(prog, name), comps, off, gl_type)
-            for name, _fmt, _nbytes, comps, off, gl_type in INSTANCE_ATTRIBUTES
-        )
         shared = store.strategy is Strategy.SHARED
 
         for b, (start, stop) in enumerate(scene.bucket_ranges):
@@ -108,26 +102,36 @@ class IdGeometry:
                 self._own.append(None)
                 continue
             own = None
-            src = buf
+            buffers = store.buffers
             if not shared:
-                own = ctx.ctx.buffer(reserve=max(1, stop - start) * INSTANCE_BYTES)
-                src = own
+                count = max(1, stop - start)
+                own = tuple(
+                    ctx.ctx.buffer(reserve=count * stride)
+                    for _name, _entries, stride in INSTANCE_STREAMS
+                )
+                buffers = own
             vao = ctx.ctx.vertex_array(
                 prog,
-                [(mesh.vbo, mesh_layout, *mesh_names), (src, inst_layout, *inst_names)],
+                [(mesh.vbo, mesh_layout, *mesh_names), *instance_content(prog, buffers)],
                 mesh.ibo,
                 index_element_size=4,
             )
-            if shared and not G.native().rebind_instance_attributes(
-                vao.glo, buf.glo, INSTANCE_BYTES, start * INSTANCE_BYTES, attrs
-            ):
-                vao.release()
-                self._release_gl()
-                self._broken = True
-                log.error(
-                    "ID pass could not bind the instance offset; GPU picking is disabled for this frame"
-                )
-                return
+            if shared:
+                for buffer, (_name, entries, stride) in zip(buffers, INSTANCE_STREAMS, strict=True):
+                    attrs = tuple(
+                        (self._location(prog, name), comps, off, gl_type)
+                        for name, _fmt, _nbytes, comps, off, gl_type in entries
+                    )
+                    if not G.native().rebind_instance_attributes(
+                        vao.glo, buffer.glo, stride, start * stride, attrs
+                    ):
+                        vao.release()
+                        self._release_gl()
+                        self._broken = True
+                        log.error(
+                            "ID pass could not bind the instance offset; GPU picking is disabled for this frame"
+                        )
+                        return
             self._vaos.append(vao)
             self._own.append(own)
 
@@ -141,11 +145,12 @@ class IdGeometry:
     def upload(self, ctx: PassContext) -> None:
         if self._strategy is not Strategy.PER_BUCKET:
             return
-        data = ctx.instances.pack(ctx.scene)
+        streams = ctx.instances.stream_data()
         for b, (start, stop) in enumerate(ctx.scene.bucket_ranges):
-            buf = self._own[b] if b < len(self._own) else None
-            if buf is not None and stop > start:
-                buf.write(data[start:stop])
+            buffers = self._own[b] if b < len(self._own) else None
+            if buffers is not None and stop > start:
+                for buffer, data in zip(buffers, streams, strict=True):
+                    buffer.write(data[start:stop])
 
     def set_view_proj(self, ctx: PassContext) -> None:
         assert self.program is not None
@@ -178,15 +183,16 @@ class IdGeometry:
             if vao is not None:
                 vao.release()
         self._vaos.clear()
-        for buf in self._own:
-            if buf is not None:
-                buf.release()
+        for buffers in self._own:
+            if buffers is not None:
+                for buffer in buffers:
+                    buffer.release()
         self._own.clear()
 
     def release(self) -> None:
         self._release_gl()
         self.program = None
-        self._buffer_glo = -1
+        self._buffer_glos = ()
         self._ranges = None
         self._meshes = None
         self._strategy = None

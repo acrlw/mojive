@@ -270,22 +270,35 @@ def test_picking_flips_y_and_uses_the_target_over_rect_ratio():
 def test_instance_layout_matches_the_documented_stride():
 
     from mojive.render.opengl.instances import (
+        IDENTITY_ATTRIBUTES,
+        IDENTITY_BYTES,
         INSTANCE_ATTRIBUTES,
         INSTANCE_BYTES,
         INSTANCE_WORDS,
+        POSE_ATTRIBUTES,
+        POSE_BYTES,
+        VISUAL_ATTRIBUTES,
+        VISUAL_BYTES,
     )
     from mojive.render.scene import INSTANCE_FLOATS, INSTANCE_STRIDE
 
     assert INSTANCE_FLOATS == 32, "transform 16 + color 4 + material 4 + tex_coef 4 + cube_coef 4"
-    assert INSTANCE_WORDS == 35
-    assert INSTANCE_BYTES == 140
+    assert INSTANCE_WORDS == 36
+    assert (POSE_BYTES, VISUAL_BYTES, IDENTITY_BYTES) == (64, 64, 16)
+    assert INSTANCE_BYTES == 144
     assert INSTANCE_STRIDE == INSTANCE_BYTES
 
-    cursor = 0
-    for _name, _fmt, nbytes, _comps, off, _t in INSTANCE_ATTRIBUTES:
-        assert off == cursor
-        cursor += nbytes
-    assert cursor == INSTANCE_BYTES
+    for entries, size in (
+        (POSE_ATTRIBUTES, POSE_BYTES),
+        (VISUAL_ATTRIBUTES, VISUAL_BYTES),
+        (IDENTITY_ATTRIBUTES, IDENTITY_BYTES),
+    ):
+        cursor = 0
+        for _name, _fmt, nbytes, _comps, off, _t in entries:
+            assert off == cursor
+            cursor += nbytes
+        assert cursor == size
+    assert len(INSTANCE_ATTRIBUTES) == 12
 
 
 def test_object_id_attribute_is_an_integer_type():

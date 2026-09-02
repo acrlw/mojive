@@ -15,15 +15,14 @@
 //   the ring into the main color target, with the border-connectivity fix
 //   that keeps the outline closed when the object is clipped by the viewport.
 
-struct OutlineInstances {
+struct InstancePose {
     model: mat4x4f,
-    color: vec4f,
-    material: vec4f,
-    texcoef: vec4f,
-    cubecoef: vec4f,
+};
+
+struct InstanceIdentity {
     object_id: u32,
-    // Ends at 132 bytes; the array stride rounds up to 144, matching
-    // instances.py (same layout as scene.wgsl's Instance).
+    reflection_info: u32,
+    segmentation: vec2i,
 };
 
 struct OutlineMaskUniforms {
@@ -32,7 +31,8 @@ struct OutlineMaskUniforms {
 };
 
 @group(0) @binding(0) var<uniform> outline_mask_uniforms: OutlineMaskUniforms;
-@group(0) @binding(1) var<storage, read> outline_instances: array<OutlineInstances>;
+@group(0) @binding(1) var<storage, read> instance_pose: array<InstancePose>;
+@group(0) @binding(4) var<storage, read> instance_identity: array<InstanceIdentity>;
 
 struct OutlineMaskOut {
     @builtin(position) clip: vec4f,
@@ -44,10 +44,11 @@ fn vs_outline_mask(
     @location(0) position: vec3f,
     @builtin(instance_index) instance_index: u32,
 ) -> OutlineMaskOut {
-    let inst = outline_instances[instance_index];
+    let pose = instance_pose[instance_index];
+    let identity = instance_identity[instance_index];
     var out: OutlineMaskOut;
-    out.clip = outline_mask_uniforms.view_proj * (inst.model * vec4f(position, 1.0));
-    out.object_id = inst.object_id;
+    out.clip = outline_mask_uniforms.view_proj * (pose.model * vec4f(position, 1.0));
+    out.object_id = identity.object_id;
     return out;
 }
 

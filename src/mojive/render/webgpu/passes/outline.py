@@ -8,7 +8,7 @@ import wgpu
 from ...backend import RenderFlag
 from ...scene import RenderScene
 from ..blend import ALPHA_BLEND
-from ..instances import INSTANCE_STRIDE
+from ..instances import IDENTITY_STRIDE, POSE_STRIDE
 from ..programs import load_wgsl
 from ..timing import TimestampWriter
 
@@ -46,6 +46,11 @@ class OutlinePass:
                 },
                 {
                     "binding": 1,
+                    "visibility": wgpu.ShaderStage.VERTEX,
+                    "buffer": {"type": "read-only-storage"},
+                },
+                {
+                    "binding": 4,
                     "visibility": wgpu.ShaderStage.VERTEX,
                     "buffer": {"type": "read-only-storage"},
                 },
@@ -180,7 +185,7 @@ class OutlinePass:
         block["params"][:] = (self._sel_id, 0, 0, 0)
         self._device.queue.write_buffer(self._mask_uniforms, 0, block.tobytes())
 
-        # Per frame like the backend's group0: the instance storage buffer is
+        # Per frame like the backend's group0: instance streams can be
         # reallocated on growth, so no bind group survives across frames.
         group = self._device.create_bind_group(
             layout=self._mask_layout,
@@ -196,9 +201,17 @@ class OutlinePass:
                 {
                     "binding": 1,
                     "resource": {
-                        "buffer": instances.buffer,
+                        "buffer": instances.pose_buffer,
                         "offset": 0,
-                        "size": instances.capacity * INSTANCE_STRIDE,
+                        "size": instances.capacity * POSE_STRIDE,
+                    },
+                },
+                {
+                    "binding": 4,
+                    "resource": {
+                        "buffer": instances.identity_buffer,
+                        "offset": 0,
+                        "size": instances.capacity * IDENTITY_STRIDE,
                     },
                 },
             ],

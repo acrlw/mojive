@@ -8,9 +8,10 @@ import numpy as np
 
 from ..types import CameraView, LightSet, Material, MeshKey, ShadingModel
 
-# transform 16 + color 4 + material 4 + tex_coef 4 + cube_coef 4 = 32
+# transform 16 + color 4 + material 4 + tex_coef 4 + cube_coef 4 = 32;
+# identity adds object, reflection routing, and two segmentation words.
 INSTANCE_FLOATS = 32
-INSTANCE_STRIDE = INSTANCE_FLOATS * 4 + 12  # + object_id(uint32), segmentation(2 x int32)
+INSTANCE_STRIDE = INSTANCE_FLOATS * 4 + 16
 
 BACKGROUND_ID = np.uint32(0)
 

@@ -9,6 +9,7 @@ from ....log import get_logger
 from ....types import LightSet, LightType, ShadingModel
 from ...backend import DebugView, RenderFlag
 from .. import color
+from ..instances import Strategy
 from ..programs import ProgramSpec, UniformCache
 from ..registry import register_pass
 from ..targets import IdLayout
@@ -180,8 +181,10 @@ class OpaquePass(BasePass):
         if self._vao_program is prog:
             return
         ctx.instances.rebuild(ctx.scene, prog, ctx.meshes, ctx.programs.generation)
-
-        ctx.instances.upload(ctx.scene)
+        if ctx.instances.strategy is Strategy.PER_BUCKET:
+            reflection_info = ctx.instances.reflection_info.copy()
+            ctx.instances.invalidate_upload()
+            ctx.instances.upload(ctx.scene, reflection_info)
         self._vao_program = prog
 
     def _frame_uniforms(

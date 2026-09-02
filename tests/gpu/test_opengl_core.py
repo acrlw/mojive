@@ -360,6 +360,31 @@ def test_capacity_grows_by_doubling(gl):
         inst.release()
 
 
+def test_pose_revision_uploads_only_changed_transform_range(gl):
+    if not G.native().has_attrib_pointer:
+        pytest.skip("shared instance buffers unavailable")
+    scene = _build_scene()
+    scene.structure_revision = 1
+    scene.pose_revision = 1
+    scene.visual_revision = 1
+    scene.identity_revision = 1
+    inst = InstanceStore(gl)
+    inst.strategy = Strategy.SHARED
+    try:
+        inst.ensure_capacity(scene.count)
+        inst.upload(scene)
+        assert inst.uploaded_bytes == scene.count * 144
+
+        scene.transforms[3, 0, 3] += 0.25
+        scene.pose_revision += 1
+        inst.upload(scene)
+
+        assert inst.uploaded_streams == {"pose": 64}
+        assert inst.uploaded_bytes == 64
+    finally:
+        inst.release()
+
+
 def test_object_id_survives_packing_as_an_exact_uint32(gl):
 
     scene = _build_scene()

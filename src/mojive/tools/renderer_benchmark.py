@@ -14,7 +14,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 RENDERERS = ("mujoco", "mojive-opengl", "mojive-wgpu")
-WORKLOADS = ("primitives", "many_objects", "dense_mesh", "dynamic", "materials")
+WORKLOADS = (
+    "primitives",
+    "many_objects",
+    "dense_mesh",
+    "dynamic",
+    "dynamic_large",
+    "materials",
+)
 MODES = ("rgb", "depth", "segmentation")
 QUICK_RESOLUTIONS = ((640, 480),)
 FULL_RESOLUTIONS = ((640, 480), (1280, 720), (1920, 1080))

@@ -43,8 +43,9 @@ make renderer-benchmark
 
 Each renderer/workload/output/resolution case owns an isolated process. The default matrix measures
 RGB output at 640×480 for primitive, many-object, and dense-mesh scenes. The full matrix also covers
-dynamic transforms and textured/transparent materials. It records constructor and first-frame time,
-update and render median/p95 latency, FPS, close time, and peak RSS growth in
+64- and 1,024-object dynamic transforms plus textured/transparent materials. It records constructor
+and first-frame time, update and render median/p95 latency, FPS, instance-stream upload bytes, close
+time, and peak RSS growth in
 `output/renderer-benchmark/report.json`. Ratios below `1.0x` are faster than MuJoCo for the same case.
 
 Run the larger resolution and RGB/depth/segmentation matrix explicitly:
@@ -52,6 +53,7 @@ Run the larger resolution and RGB/depth/segmentation matrix explicitly:
 ```bash
 make renderer-benchmark-full
 make renderer-benchmark ARGS="--workloads dynamic --modes rgb,depth --frames 200"
+make renderer-benchmark ARGS="--workloads dynamic_large --modes rgb --resolutions 1920x1080"
 ```
 
 The complete target writes `output/renderer-benchmark/full-report.json`, keeping the quick report

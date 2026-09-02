@@ -9,7 +9,7 @@ import wgpu
 
 from ....types import DEFAULT_MATERIAL, MeshKey, MeshShape
 from ...scene import RenderScene
-from ..instances import INSTANCE_STRIDE, InstanceStore
+from ..instances import InstanceStore
 from ..lighting import LIGHTS_BYTES
 from ..targets import FRAME_BYTES
 
@@ -159,6 +159,7 @@ class TendonPass:
         if not self._count:
             return None
         self._store.upload(self._scene)
+        pose, visual, identity = self._store.bindings()
         return self._device.create_bind_group(
             layout=layout,
             entries=[
@@ -169,13 +170,21 @@ class TendonPass:
                 {
                     "binding": 1,
                     "resource": {
-                        "buffer": self._store.buffer,
+                        "buffer": pose[0],
                         "offset": 0,
-                        "size": self._store.capacity * INSTANCE_STRIDE,
+                        "size": pose[1],
                     },
                 },
                 {
                     "binding": 2,
+                    "resource": {"buffer": visual[0], "offset": 0, "size": visual[1]},
+                },
+                {
+                    "binding": 3,
+                    "resource": {"buffer": identity[0], "offset": 0, "size": identity[1]},
+                },
+                {
+                    "binding": 4,
                     "resource": {"buffer": lights_buffer, "offset": 0, "size": LIGHTS_BYTES},
                 },
             ],

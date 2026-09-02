@@ -149,6 +149,21 @@ def test_box_reflection_uses_the_positive_z_face():
     assert groups[0].plane[3] == pytest.approx(-1.9)
 
 
+def test_reflection_metadata_does_not_mutate_material_reflectance():
+    scene = make_scene(
+        [(flat(z=0.0), 0.4), (flat(z=2.0), 0.7)],
+        [MeshShape.PLANE, MeshShape.BOX],
+    )
+    original = scene.material.copy()
+    reflection = ReflectPass()
+
+    reflection._build_reflection_info(scene, ReflectPass.find_planes(scene))
+
+    assert np.array_equal(scene.material, original)
+    # Strongest box is layer zero (+Z-only bit); plane is layer one.
+    assert tuple(reflection.reflection_info) == (2, 9)
+
+
 def test_nonplanar_reflective_material_does_not_replace_the_floor():
     found = ReflectPass.find_plane(
         make_scene(

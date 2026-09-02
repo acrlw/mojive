@@ -12,6 +12,7 @@ in vec4 in_material;   // (emission, specular, shininess, reflectance)
 in vec4 in_texcoef;    // scale/offset; z=1 selects box face-axis mapping
 in vec4 in_cubecoef;   // xyz object-linear scale, w capsule-axis offset
 in uint in_object_id;
+in uint in_reflection_info; // layer+1 in bits 0..2, local +Z-only in bit 3
 
 uniform mat4 u_view_proj;
 uniform mat4 u_view;
@@ -63,8 +64,11 @@ void main() {
     v.color = in_color;
     v.material = in_material.xyz;
     v.reflect = in_material.w;
-    if (v.reflect < 0.0 && mod(-v.reflect, 4.0) >= 2.0 && in_normal.z < 0.5) {
-        v.reflect = 0.0;
+    uint reflection_slot = in_reflection_info & 7u;
+    bool top_face_only = (in_reflection_info & 8u) != 0u;
+    if (reflection_slot != 0u && (!top_face_only || in_normal.z >= 0.5)) {
+        uint layer = reflection_slot - 1u;
+        v.reflect = -(4.0 * float(layer) + in_material.w);
     }
     v.view_depth = -(u_view * world).z;
 

@@ -525,7 +525,9 @@ class OpenGLBackend:
                 p = self._passes.get(name)
                 if p is not None:
                     p.prepare_instances(ctx)
-            self.instances.upload(scene)
+            reflect = self._passes.get("reflect")
+            reflection_info = getattr(reflect, "reflection_info", None)
+            self.instances.upload(scene, reflection_info)
 
             for name in plan.passes:
                 p = self._passes.get(name)
@@ -553,6 +555,10 @@ class OpenGLBackend:
         self.stats.notes["render products"] = plan.request.products.name
         self.stats.notes["render passes"] = ", ".join(plan.passes)
         self.stats.notes["instance upload"] = f"{self.instances.uploaded_bytes} bytes"
+        self.stats.notes["instance streams"] = (
+            ", ".join(f"{name}={count}" for name, count in self.instances.uploaded_streams.items())
+            or "unchanged"
+        )
         if not plan.returns_color:
             return None
         present = self._passes.get("present")

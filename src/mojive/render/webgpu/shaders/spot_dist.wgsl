@@ -10,18 +10,13 @@ struct ShadowDraw {
     light: vec4f,               // xyz u_light_pos, w u_light_range (spot_dist.frag)
 };
 
-// Keep in sync with instances.py (144-byte stride).
-struct Instance {
+// Transform-only lifecycle stream; keep in sync with instances.py.
+struct InstancePose {
     model: mat4x4f,
-    color: vec4f,
-    material: vec4f,
-    texcoef: vec4f,
-    cubecoef: vec4f,
-    object_id: u32,
 };
 
 @group(0) @binding(0) var<uniform> u_draw: ShadowDraw;
-@group(0) @binding(1) var<storage, read> instances: array<Instance>;
+@group(0) @binding(1) var<storage, read> instance_pose: array<InstancePose>;
 
 struct DistOut {
     @builtin(position) clip: vec4f,
@@ -33,7 +28,7 @@ fn vs_dist(
     @location(0) position: vec3f,
     @builtin(instance_index) instance_index: u32,
 ) -> DistOut {
-    let world = instances[instance_index].model * vec4f(position, 1.0);
+    let world = instance_pose[instance_index].model * vec4f(position, 1.0);
     var out: DistOut;
     out.clip = u_draw.view_proj * world;
     out.world = world.xyz;

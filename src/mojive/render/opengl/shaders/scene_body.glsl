@@ -90,8 +90,7 @@ void main() {
     if (v.reflect < 0.0 && u_reflection_size.x > 0.0) {
         float code = -v.reflect;
         int layer = int(floor(code * 0.25));
-        float surface = code - float(layer * 4);
-        float reflectance = surface - (surface >= 2.0 ? 2.0 : 0.0);
+        float reflectance = code - float(layer * 4);
         vec2 reflection_uv = gl_FragCoord.xy / u_reflection_size;
         vec3 reflected;
         if (layer == 0) {

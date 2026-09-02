@@ -9,7 +9,7 @@ from .... import math3d as M
 from ....types import CameraView, MeshShape
 from ...backend import RenderFlag
 from ...scene import RenderScene
-from ..instances import INSTANCE_STRIDE, InstanceStore
+from ..instances import InstanceStore
 from ..lighting import LIGHTS_BYTES, LightUniforms
 from ..targets import FRAME_BYTES, FRAME_DTYPE, proj_matrix_wgpu
 from ..timing import TimestampWriter
@@ -84,11 +84,9 @@ class ReflectPass:
         self._mirrored_eyes = np.zeros((MAX_REFLECTION_PLANES, 3), np.float32)
         self._transparent = True
         self._additive = False
-        self._encoded_scene = None
-        self._encoded_reflectance: dict[int, float] = {}
+        self.reflection_info = np.zeros(0, np.uint32)
         self._group0_cache: dict[tuple, wgpu.GPUBindGroup] = {}
         self._sample_groups: dict[tuple, wgpu.GPUBindGroup] = {}
-        self.instance_variant_changed = False
 
     # -- plane detection (verbatim port of the opengl classmethods) -------------
 
@@ -144,25 +142,22 @@ class ReflectPass:
         d = -float(np.dot(normal, point))
         return (float(normal[0]), float(normal[1]), float(normal[2]), d)
 
-    # -- reflectance channel encoding (verbatim port) ---------------------------
+    # -- pass-owned reflection metadata -----------------------------------------
 
-    def _restore_reflectance(self, scene: RenderScene) -> None:
-        if self._encoded_scene is scene:
-            for index, value in self._encoded_reflectance.items():
-                if index < len(scene.material):
-                    scene.material[index, 3] = value
-        self._encoded_scene = None
-        self._encoded_reflectance.clear()
-
-    def _encode_reflectance(self, scene: RenderScene, groups: tuple[_PlaneGroup, ...]) -> None:
-        self._encoded_scene = scene
+    def _build_reflection_info(
+        self, scene: RenderScene, groups: tuple[_PlaneGroup, ...]
+    ) -> np.ndarray:
+        if len(self.reflection_info) != scene.count:
+            self.reflection_info = np.zeros(scene.count, np.uint32)
+        else:
+            self.reflection_info.fill(0)
         for layer, group in enumerate(groups):
             for index in group.indices:
-                value = float(scene.material[index, 3])
                 shape = scene.bucket_keys[int(scene.bucket[index])][0].shape
-                top_face = 1.0 if shape is MeshShape.BOX else 0.0
-                self._encoded_reflectance[index] = value
-                scene.material[index, 3] = -(4.0 * layer + 2.0 * top_face + value)
+                self.reflection_info[index] = np.uint32(
+                    (layer + 1) | (8 if shape is MeshShape.BOX else 0)
+                )
+        return self.reflection_info
 
     # -- targets -----------------------------------------------------------------
 
@@ -219,13 +214,10 @@ class ReflectPass:
         width: int,
         height: int,
     ) -> bool:
-        """Detect planes and encode reflectance; False means no pass this frame."""
-        self.instance_variant_changed = self._encoded_scene is scene and bool(
-            self._encoded_reflectance
-        )
-        self._restore_reflectance(scene)
+        """Detect planes and build pass metadata; False means no pass this frame."""
         self._groups = ()
         if not flags.get(RenderFlag.REFLECTION, True):
+            self._build_reflection_info(scene, ())
             return False
         eye = np.asarray(camera.eye, np.float64)
         groups = tuple(
@@ -234,14 +226,15 @@ class ReflectPass:
             if float(np.dot(group.plane[:3], eye) + group.plane[3]) > 1e-4
         )
         if not groups:
+            self._build_reflection_info(scene, ())
             return False
         if not self._ensure_target(width, height, len(groups)):
+            self._build_reflection_info(scene, ())
             return False
         self._groups = groups
         self._transparent = flags.get(RenderFlag.TRANSPARENT, True)
         self._additive = flags.get(RenderFlag.ADDITIVE, False)
-        self._encode_reflectance(scene, groups)
-        self.instance_variant_changed = True
+        self._build_reflection_info(scene, groups)
         return True
 
     def write_frames(
@@ -284,7 +277,14 @@ class ReflectPass:
     def _group0(
         self, layout, plane: int, instances: InstanceStore, lights: LightUniforms
     ) -> wgpu.GPUBindGroup:
-        key = (plane, id(instances.buffer), id(lights.buffer))
+        pose, visual, identity = instances.bindings()
+        key = (
+            plane,
+            id(pose[0]),
+            id(visual[0]),
+            id(identity[0]),
+            id(lights.buffer),
+        )
         group = self._group0_cache.get(key)
         if group is None:
             group = self._device.create_bind_group(
@@ -301,13 +301,21 @@ class ReflectPass:
                     {
                         "binding": 1,
                         "resource": {
-                            "buffer": instances.buffer,
+                            "buffer": pose[0],
                             "offset": 0,
-                            "size": instances.capacity * INSTANCE_STRIDE,
+                            "size": pose[1],
                         },
                     },
                     {
                         "binding": 2,
+                        "resource": {"buffer": visual[0], "offset": 0, "size": visual[1]},
+                    },
+                    {
+                        "binding": 3,
+                        "resource": {"buffer": identity[0], "offset": 0, "size": identity[1]},
+                    },
+                    {
+                        "binding": 4,
                         "resource": {"buffer": lights.buffer, "offset": 0, "size": LIGHTS_BYTES},
                     },
                 ],
@@ -401,8 +409,7 @@ class ReflectPass:
         self._release_targets()
         self._uniforms.destroy()
         self._groups = ()
-        self._encoded_scene = None
-        self._encoded_reflectance.clear()
+        self.reflection_info = np.zeros(0, np.uint32)
         self._group0_cache.clear()
         self._sample_groups.clear()
         self._fallback = None

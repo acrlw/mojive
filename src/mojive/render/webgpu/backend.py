@@ -33,7 +33,7 @@ from ..mesh import all_builtin
 from ..overlay import OverlayPublisher, OverlayState
 from ..scene import RenderScene
 from .blend import ADDITIVE_BLEND, ALPHA_BLEND, OVERDRAW_BLEND
-from .instances import INSTANCE_STRIDE, InstanceStore
+from .instances import InstanceStore
 from .lighting import (
     IMAGE_LIGHT_REFERENCE_INTENSITY,
     LIGHTS_BYTES,
@@ -223,6 +223,16 @@ class WgpuBackend:
                 },
                 {
                     "binding": 2,
+                    "visibility": wgpu.ShaderStage.VERTEX,
+                    "buffer": {"type": "read-only-storage"},
+                },
+                {
+                    "binding": 3,
+                    "visibility": wgpu.ShaderStage.VERTEX,
+                    "buffer": {"type": "read-only-storage"},
+                },
+                {
+                    "binding": 4,
                     "visibility": wgpu.ShaderStage.FRAGMENT,
                     "buffer": {"type": "read-only-storage"},
                 },
@@ -685,6 +695,7 @@ class WgpuBackend:
         return pipeline
 
     def _bind_group0(self) -> wgpu.GPUBindGroup:
+        pose, visual, identity = self.instances.bindings()
         return self.device.create_bind_group(
             layout=self._group0_layout,
             entries=[
@@ -699,13 +710,21 @@ class WgpuBackend:
                 {
                     "binding": 1,
                     "resource": {
-                        "buffer": self.instances.buffer,
+                        "buffer": pose[0],
                         "offset": 0,
-                        "size": self.instances.capacity * INSTANCE_STRIDE,
+                        "size": pose[1],
                     },
                 },
                 {
                     "binding": 2,
+                    "resource": {"buffer": visual[0], "offset": 0, "size": visual[1]},
+                },
+                {
+                    "binding": 3,
+                    "resource": {"buffer": identity[0], "offset": 0, "size": identity[1]},
+                },
+                {
+                    "binding": 4,
                     "resource": {"buffer": self.lights.buffer, "offset": 0, "size": LIGHTS_BYTES},
                 },
             ],
@@ -1014,6 +1033,10 @@ class WgpuBackend:
             "render products": plan.request.products.name,
             "render passes": "export",
             "instance upload": f"{self.instances.uploaded_bytes} bytes",
+            "instance streams": ", ".join(
+                f"{name}={count}" for name, count in self.instances.uploaded_streams.items()
+            )
+            or "unchanged",
         }
         return None
 
@@ -1036,13 +1059,10 @@ class WgpuBackend:
             return self._render_export_only(scene, plan, t0)
         target = self.target
         cam = self._camera.with_aspect(target.width / max(target.height, 1))
-        # Plane detection runs before the instance upload so the encoded
-        # negative reflectance reaches the GPU in the same write (opengl relies
-        # on its persistent scene object for the same ordering).
+        # Plane detection produces a separate identity-stream variant; scene
+        # material data remains canonical and is never mutated by a pass.
         reflective = self._reflect.prepare(scene, cam, self._flags, target.width, target.height)
-        if self._reflect.instance_variant_changed:
-            self.instances.invalidate_upload()
-        self.instances.upload(scene)
+        self.instances.upload(scene, self._reflect.reflection_info)
         # Shadow maps render before the scene pass, matching opengl's
         # PASS_ORDER; the same frame's scene pass samples them.
         shadow = self._shadows.prepare(scene, cam, self._flags)
@@ -1252,6 +1272,10 @@ class WgpuBackend:
             "render products": plan.request.products.name,
             "render passes": "scene, export" if plan.export else "scene",
             "instance upload": f"{self.instances.uploaded_bytes} bytes",
+            "instance streams": ", ".join(
+                f"{name}={count}" for name, count in self.instances.uploaded_streams.items()
+            )
+            or "unchanged",
             "export draw calls": str(export_draw_calls),
         }
         # The resolved color is display-domain (finish_color gamma-encodes it)

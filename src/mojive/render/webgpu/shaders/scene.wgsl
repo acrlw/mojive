@@ -14,7 +14,9 @@
 // Shadow sampling lives in shadow_sample.wgsl (prepended by load_wgsl); the
 // GLSL USE_SHADOW define becomes runtime gating on the shadow_counts fields.
 
-// Keep in sync with instances.py (144-byte stride) and targets.py (frame block).
+// Keep the three instance streams in sync with instances.py.  Splitting them by
+// lifecycle lets animated frames upload transforms without retransmitting visual
+// and identity data.
 struct Frame {
     view_proj: mat4x4f,         // WebGPU-clip view-projection
     view: mat4x4f,
@@ -36,14 +38,20 @@ struct Frame {
     reflection: vec4f,          // xy reflection target size; x=0 disables sampling
 };
 
-struct Instance {
+struct InstancePose {
     model: mat4x4f,
+};
+
+struct InstanceVisual {
     color: vec4f,               // linear rgba
     material: vec4f,            // emission, specular, shininess, reflectance
     texcoef: vec4f,             // xy scale; z=1 box mapping, zw<0 infinite-plane light grid
     cubecoef: vec4f,            // xyz object-linear scale, w capsule-axis offset
+};
+
+struct InstanceIdentity {
     object_id: u32,
-    identity_pad: u32,
+    reflection_info: u32,       // layer+1 in bits 0..2, local +Z-only in bit 3
     segmentation: vec2i,
 };
 
@@ -70,8 +78,10 @@ struct Lights {
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
-@group(0) @binding(1) var<storage, read> instances: array<Instance>;
-@group(0) @binding(2) var<storage, read> lights: Lights;
+@group(0) @binding(1) var<storage, read> instance_pose: array<InstancePose>;
+@group(0) @binding(2) var<storage, read> instance_visual: array<InstanceVisual>;
+@group(0) @binding(3) var<storage, read> instance_identity: array<InstanceIdentity>;
+@group(0) @binding(4) var<storage, read> lights: Lights;
 @group(1) @binding(0) var albedo_tex: texture_2d<f32>;
 @group(1) @binding(1) var albedo_sampler: sampler;
 @group(1) @binding(2) var cube_albedo_tex: texture_cube<f32>;
@@ -294,8 +304,10 @@ fn vs_scene(
 }
 
 fn scene_vertex(position: vec3f, normal: vec3f, uv: vec2f, instance_index: u32) -> SceneOut {
-    let inst = instances[instance_index];
-    let model = inst.model;
+    let pose = instance_pose[instance_index];
+    let visual = instance_visual[instance_index];
+    let identity = instance_identity[instance_index];
+    let model = pose.model;
     let world = model * vec4f(position, 1.0);
 
     var out: SceneOut;
@@ -304,9 +316,9 @@ fn scene_vertex(position: vec3f, normal: vec3f, uv: vec2f, instance_index: u32) 
     out.normal = normal_transform(model, normal);
 
     var texcoord = uv;
-    if inst.texcoef.z > 0.5 {
+    if visual.texcoef.z > 0.5 {
         let extent = vec3f(length(model[0].xyz), length(model[1].xyz), length(model[2].xyz));
-        let repeat = inst.texcoef.xy / max(extent.xy, vec2f(1e-7));
+        let repeat = visual.texcoef.xy / max(extent.xy, vec2f(1e-7));
         let axis = abs(normal);
         var scale: vec2f;
         if axis.x >= axis.y && axis.x >= axis.z {
@@ -314,25 +326,26 @@ fn scene_vertex(position: vec3f, normal: vec3f, uv: vec2f, instance_index: u32) 
         } else if axis.y >= axis.z {
             scale = vec2f(extent.x * repeat.x, extent.z * repeat.y);
         } else {
-            scale = inst.texcoef.xy;
+            scale = visual.texcoef.xy;
         }
         texcoord = uv * scale;
     } else {
-        texcoord = uv * inst.texcoef.xy + inst.texcoef.zw;
+        texcoord = uv * visual.texcoef.xy + visual.texcoef.zw;
     }
     out.uv = texcoord;
-    out.cube = position * inst.cubecoef.xyz + vec3f(0.0, 0.0, inst.cubecoef.w);
-    out.cube_on = select(0.0, 1.0, dot(abs(inst.cubecoef.xyz), vec3f(1.0)) > 0.0);
-    out.color = inst.color;
-    out.material = inst.material.xyz;
-    // scene.vert:60-62: negative reflectance encodes (layer, top-face); the
-    // top-face code keeps only the local +Z face of a box reflective.
-    out.reflect = inst.material.w;
-    if out.reflect < 0.0 && (-out.reflect % 4.0) >= 2.0 && normal.z < 0.5 {
-        out.reflect = 0.0;
+    out.cube = position * visual.cubecoef.xyz + vec3f(0.0, 0.0, visual.cubecoef.w);
+    out.cube_on = select(0.0, 1.0, dot(abs(visual.cubecoef.xyz), vec3f(1.0)) > 0.0);
+    out.color = visual.color;
+    out.material = visual.material.xyz;
+    out.reflect = visual.material.w;
+    let reflection_slot = identity.reflection_info & 7u;
+    let top_face_only = (identity.reflection_info & 8u) != 0u;
+    if reflection_slot != 0u && (!top_face_only || normal.z >= 0.5) {
+        let layer = reflection_slot - 1u;
+        out.reflect = -(4.0 * f32(layer) + visual.material.w);
     }
     out.view_depth = -(frame.view * world).z;
-    out.selected = select(0.0, 1.0, frame.ids.x != 0u && inst.object_id == frame.ids.x);
+    out.selected = select(0.0, 1.0, frame.ids.x != 0u && identity.object_id == frame.ids.x);
     return out;
 }
 
@@ -405,13 +418,12 @@ fn scene_fragment(in: SceneOut) -> vec4f {
         base.rgb, in.normal, in.world, emission, in.material.y, in.material.z, in.view_depth,
         surface.texture_color,
     );
-    // scene_body.glsl:72-89: negative reflectance carries (layer, top-face);
-    // add the reflected color before atmosphere, in linear space.
+    // The vertex stage combines canonical reflectance with pass-owned layer
+    // routing; add the reflected color before atmosphere, in linear space.
     if in.reflect < 0.0 && frame.reflection.x > 0.0 {
         let code = -in.reflect;
         let layer = i32(floor(code * 0.25));
-        let surface = code - f32(layer * 4);
-        let reflectance = surface - select(0.0, 2.0, surface >= 2.0);
+        let reflectance = code - f32(layer * 4);
         let reflection_uv = in.clip.xy / frame.reflection.xy;
         // Explicit LOD: the reflection targets have a single mip level, and
         // textureSample would be rejected in this non-uniform branch.
@@ -559,13 +571,14 @@ fn vs_export(
     @location(0) position: vec3f,
     @builtin(instance_index) instance_index: u32,
 ) -> ExportOut {
-    let inst = instances[instance_index];
-    let world = inst.model * vec4f(position, 1.0);
+    let pose = instance_pose[instance_index];
+    let identity = instance_identity[instance_index];
+    let world = pose.model * vec4f(position, 1.0);
     var out: ExportOut;
     out.clip = frame.view_proj * world;
     out.view_depth = -(frame.view * world).z;
-    out.object_id = inst.object_id;
-    out.segmentation = inst.segmentation;
+    out.object_id = identity.object_id;
+    out.segmentation = identity.segmentation;
     return out;
 }
 

@@ -11,7 +11,7 @@ from ....types import CameraView, Light, LightType, ShadingModel
 from ...backend import RenderFlag
 from ...scene import RenderScene
 from ..cascades import ATLAS_SIZE, CascadeSet, build_cascades, slot_pixels
-from ..instances import INSTANCE_STRIDE
+from ..instances import POSE_STRIDE
 from ..lighting import LOCAL_SHADOW_SLOTS, LightSchedule, ShadowState, schedule_lights
 from ..meshes import MeshStore
 from ..programs import load_wgsl
@@ -490,7 +490,7 @@ class ShadowPass:
         return calls
 
     def _draw_group(self, instances) -> wgpu.GPUBindGroup:
-        key = id(instances.buffer)
+        key = id(instances.pose_buffer)
         group = self._draw_groups.get(key)
         if group is None:
             group = self._device.create_bind_group(
@@ -507,9 +507,9 @@ class ShadowPass:
                     {
                         "binding": 1,
                         "resource": {
-                            "buffer": instances.buffer,
+                            "buffer": instances.pose_buffer,
                             "offset": 0,
-                            "size": instances.capacity * INSTANCE_STRIDE,
+                            "size": instances.capacity * POSE_STRIDE,
                         },
                     },
                 ],

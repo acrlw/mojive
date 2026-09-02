@@ -42,17 +42,20 @@ discard on a plane equation instead of `gl_ClipDistance`. The `msaa` render flag
 active targets between 1× and the configured multisample count; sample-count-dependent resources
 are rebuilt through the backend's normal option path.
 
-OpenGL separates instance preparation from pass execution. Passes first select any required
-instance variant (for example, the reflection material view), then the backend performs at most
-one instance upload before executing the planned passes. This ordering keeps pass-owned mutations
-explicit and prevents a later pass from silently invalidating uploaded data.
+Both backends separate instance preparation from pass execution. The reflection planner writes a
+small, pass-owned routing value for each reflective surface; it never overwrites material
+reflectance in `RenderScene`. The backend resolves this metadata before executing the planned
+passes, so render passes cannot silently mutate persistent scene state.
 
 ## Data lifetime and upload policy
 
 `SceneSource` owns topology and immutable resources. `RenderScene` carries independent structure,
-pose, visual, and identity revisions. Instance stores retain their buffers and skip uploads when
-the relevant revisions are unchanged; revision zero remains a conservative compatibility path for
-custom sources that do not provide lifecycle information.
+pose, visual, and identity revisions. OpenGL and WebGPU store instance data in three matching GPU
+streams: 64-byte transforms, 64-byte visual/material records, and 16-byte identity/reflection
+records. A normal animated frame uploads only changed transform ranges instead of retransmitting
+the full 144-byte record. Visual, identity, and reflection changes update their own contiguous
+ranges. Revision zero remains a conservative compatibility path for custom sources, with bytewise
+dirty-range detection preserving correctness without unconditional GPU writes.
 
 The MuJoCo adapter derives `FrameNeeds` from visible scene options. Contacts, tendons, deformables,
 diagnostics, islands, and BVH data are prepared only when a visible feature consumes them. Pose
