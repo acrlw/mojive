@@ -73,9 +73,10 @@ class ViewportLabels:
 
     play: str = "Play"
     pause: str = "Pause"
+    previous: str = "Previous frame"
     step: str = "Step"
     pause_to_step: str = "Pause to step"
-    stop: str = "Stop"
+    reset: str = "Reset"
     move: str = "Move"
     rotate: str = "Rotate"
     world_body: str = "World / Body"
@@ -574,7 +575,7 @@ class ViewportControl:
     tooltip: str = ""
 
 
-PLAYBACK_CONTROLS = tuple(ViewportControl(name) for name in ("toggle", "step", "stop"))
+PLAYBACK_CONTROLS = tuple(ViewportControl(name) for name in ("previous", "toggle", "step", "reset"))
 TOOL_GROUPS = (
     tuple(ViewportControl(name) for name in ("move", "rotate", "frame")),
     (ViewportControl("snap"),),
@@ -799,44 +800,62 @@ def draw_playback_glyph(
     """Draw one normalized playback glyph for runtime and design probes."""
 
     x, y = center
-    if kind == "play":
-        draw.convex_fill(
-            (
-                (x - 4.8 * scale, y - 7.2 * scale),
-                (x + 7.0 * scale, y),
-                (x - 4.8 * scale, y + 7.2 * scale),
-            ),
-            color,
+    triangle_radius = 0.8 * scale
+
+    def rounded_triangle(points, geometry_scale: float = 1.0) -> None:
+        path = _rounded_polygon_corners(
+            points,
+            triangle_radius * geometry_scale,
+            (0, 1, 2),
+            segments=5,
         )
+        draw.fringed_concave_fill(tuple(map(tuple, path)), color)
+
+    def play_triangle(cx: float, direction: float, geometry_scale: float):
+        g = geometry_scale * scale
+        return (
+            (cx - direction * 4.6 * g, y - 8.0 * g),
+            (cx + direction * 9.2 * g, y),
+            (cx - direction * 4.6 * g, y + 8.0 * g),
+        )
+
+    if kind == "play":
+        rounded_triangle(play_triangle(x, 1.0, 1.0))
     elif kind == "pause":
         draw.rect_filled(
-            (x - 5.0 * scale, y - 7.5 * scale),
-            (x - 1.0 * scale, y + 7.5 * scale),
+            (x - 5.4 * scale, y - 8.4 * scale),
+            (x - 1.0 * scale, y + 8.4 * scale),
             color,
+            rounding=0.9 * scale,
         )
         draw.rect_filled(
-            (x + 1.0 * scale, y - 7.5 * scale),
-            (x + 5.0 * scale, y + 7.5 * scale),
+            (x + 1.0 * scale, y - 8.4 * scale),
+            (x + 5.4 * scale, y + 8.4 * scale),
             color,
+            rounding=0.9 * scale,
         )
-    elif kind == "step":
-        draw.convex_fill(
-            (
-                (x - 6.3 * scale, y - 6.3 * scale),
-                (x + 2.0 * scale, y),
-                (x - 6.3 * scale, y + 6.3 * scale),
-            ),
-            color,
+    elif kind in ("previous", "step"):
+        direction = -1.0 if kind == "previous" else 1.0
+        geometry_scale = 0.78
+        # Reuse the play triangle exactly, only mirrored and uniformly scaled.
+        # The barrier adds weight on the travel side, so offset the pair back
+        # toward the button center as one optical unit.
+        icon_x = x - direction * 2.7 * scale
+        rounded_triangle(
+            play_triangle(icon_x, direction, geometry_scale),
+            geometry_scale,
         )
+        barrier_x = icon_x + direction * 8.3 * scale
         draw.rect_filled(
-            (x + 4.8 * scale, y - 6.3 * scale),
-            (x + 6.3 * scale, y + 6.3 * scale),
+            (barrier_x - 0.7 * scale, y - 5.4 * scale),
+            (barrier_x + 0.7 * scale, y + 5.4 * scale),
             color,
+            rounding=0.7 * scale,
         )
-    elif kind == "stop":
+    elif kind in ("reset", "stop"):
         draw.rect_filled(
-            (x - 6.35 * scale, y - 6.35 * scale),
-            (x + 6.35 * scale, y + 6.35 * scale),
+            (x - 6.8 * scale, y - 6.8 * scale),
+            (x + 6.8 * scale, y + 6.8 * scale),
             color,
             rounding=1.0 * scale,
         )
@@ -854,8 +873,12 @@ def _step_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
     draw_playback_glyph(draw, center, color, scale, "step")
 
 
-def _stop_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
-    draw_playback_glyph(draw, center, color, scale, "stop")
+def _previous_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
+    draw_playback_glyph(draw, center, color, scale, "previous")
+
+
+def _reset_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
+    draw_playback_glyph(draw, center, color, scale, "reset")
 
 
 def _viewport_tooltip_padding(scale: float) -> tuple[float, float]:
@@ -885,6 +908,7 @@ def draw_playback(
     *,
     playing: bool,
     step_enabled: bool,
+    previous_enabled: bool = False,
     enabled: bool = True,
     bindings: InputBindings = DEFAULT_INPUT_BINDINGS,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
@@ -896,8 +920,11 @@ def draw_playback(
     result = ""
     states = {
         "toggle": (_pause_icon if playing else _play_icon, playing, True),
+        "previous": (_previous_icon, False, previous_enabled),
         "step": (_step_icon, False, step_enabled),
-        "stop": (_stop_icon, False, True),
+        "reset": (_reset_icon, False, True),
+        # Preserve custom registries created against the earlier control name.
+        "stop": (_reset_icon, False, True),
     }
     for index, control in enumerate(control_specs):
         name = control.name
@@ -926,16 +953,40 @@ def draw_playback(
                 if name == "toggle" and playing
                 else f"{labels.play} ({bindings.label(InputAction.TOGGLE_PAUSE)})"
                 if name == "toggle"
+                else labels.previous
+                if name == "previous"
                 else labels.step
                 if name == "step" and action_enabled
                 else labels.pause_to_step
                 if name == "step"
-                else labels.stop
-                if name == "stop"
+                else labels.reset
+                if name in ("reset", "stop")
                 else name
             )
         _set_viewport_tooltip(tooltip, scale)
     return result
+
+
+def draw_projection_glyph(
+    draw: Draw2D,
+    center,
+    color,
+    scale: float,
+    kind: str,
+) -> None:
+    """Draw a compact perspective frustum or orthographic volume glyph."""
+
+    x, y = (float(value) for value in center)
+    s = float(scale)
+    half_near = (2.7 if kind == "persp" else 5.4) * s
+    half_far = 5.4 * s
+    near_x = x - 5.2 * s
+    far_x = x + 5.2 * s
+    width = max(1.0, 1.25 * s)
+    draw.line((near_x, y - half_near), (near_x, y + half_near), color, width, cap="round")
+    draw.line((far_x, y - half_far), (far_x, y + half_far), color, width, cap="round")
+    draw.line((near_x, y - half_near), (far_x, y - half_far), color, width, cap="round")
+    draw.line((near_x, y + half_near), (far_x, y + half_far), color, width, cap="round")
 
 
 def _tool_icon(draw: Draw2D, center, color, scale: float, packed) -> None:
@@ -1084,7 +1135,7 @@ def _draw_axis_arrow_glyph(
     wing: float,
     corner_radius: float,
 ) -> None:
-    """Draw a coordinate axis with a distinct shaft and rounded arrowhead."""
+    """Draw a coordinate axis with a native-AA shaft and rounded arrowhead."""
 
     ux, uy = (float(value) for value in direction)
     length = math.hypot(ux, uy)
@@ -1092,16 +1143,19 @@ def _draw_axis_arrow_glyph(
     nx, ny = -uy, ux
     x, y = (float(value) for value in center)
 
-    shaft = _axis_shaft_with_circular_start(
-        (base + 0.25) * geometry_scale,
-        stroke_width * 0.5,
-        clear_radius,
-    )
-    draw.fringed_concave_fill(
-        tuple(
-            (x + ux * along + nx * across, y + uy * along + ny * across) for along, across in shaft
+    # A filled ribbon receives Draw2D's one-pixel fringe outside its authored
+    # width. That fixed fringe dominates each independent narrow shaft at small
+    # UI scales; Move is one connected silhouette and Rotate's comparable ring
+    # uses stroke semantics. Submit this shaft as an actual stroke so
+    # ``stroke_width`` includes its AA coverage and remains proportional.
+    draw.line(
+        (x + ux * clear_radius, y + uy * clear_radius),
+        (
+            x + ux * (base + 0.25) * geometry_scale,
+            y + uy * (base + 0.25) * geometry_scale,
         ),
         color,
+        stroke_width,
     )
     draw.fringed_concave_fill(
         tuple(
@@ -1119,31 +1173,6 @@ def _draw_axis_arrow_glyph(
         ),
         color,
     )
-
-
-@lru_cache(maxsize=64)
-def _axis_shaft_with_circular_start(
-    end: float,
-    half_width: float,
-    clear_radius: float,
-    segments: int = 6,
-) -> tuple[tuple[float, float], ...]:
-    """Build a shaft whose inner edge follows one transparent circular shell."""
-
-    radius = max(float(clear_radius), float(half_width) + 1e-6)
-    angle = math.asin(min(1.0, float(half_width) / radius))
-    cut = radius * math.cos(angle)
-    path = [
-        (cut, float(half_width)),
-        (float(end), float(half_width)),
-        (float(end), -float(half_width)),
-        (cut, -float(half_width)),
-    ]
-    for index in range(1, segments):
-        amount = index / segments
-        arc = -angle + 2.0 * angle * amount
-        path.append((radius * math.cos(arc), radius * math.sin(arc)))
-    return tuple(path)
 
 
 @lru_cache(maxsize=64)
@@ -1235,8 +1264,8 @@ def draw_tool_glyph(
                 wing=1.8,
                 corner_radius=_FRAME_ARROW_CORNER_RADIUS_PT * scale,
             )
-        # The curved shaft cut follows the dot's transparent shell exactly;
-        # drawing the dot last supplies the visible white origin inside it.
+        # Shaft endpoints sit on the outside of the dot's relative transparent
+        # shell; drawing the dot last supplies the visible white origin.
         draw.circle_filled(
             center,
             geometry.frame_center_radius * glyph_scale,

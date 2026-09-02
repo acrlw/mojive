@@ -496,7 +496,7 @@ def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
                 f"X##camera_position_0_{node.node_id}",
                 f"X##camera_target_0_{node.node_id}",
                 f"X##camera_up_0_{node.node_id}",
-                f"persp##camera-inspector-projection-{node.node_id}-0",
+                f"##camera-inspector-projection-{node.node_id}-0",
                 "View Camera",
             }:
                 remember(label)
@@ -545,17 +545,17 @@ def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
         control_starts.extend(
             (
                 captured["##camera_fov"][0],
-                captured[f"persp##camera-inspector-projection-{node.node_id}-0"][0],
+                captured[f"##camera-inspector-projection-{node.node_id}-0"][0],
             )
         )
         assert max(control_starts) - min(control_starts) <= 1.0
-        projection_y = captured[f"persp##camera-inspector-projection-{node.node_id}-0"][1]
+        projection_y = captured[f"##camera-inspector-projection-{node.node_id}-0"][1]
         assert projection_y < captured["View Camera"][1]
         assert captured["View Camera"][1] < captured["##camera_preview_enabled"][1]
 
         def choose_orthographic(label, *args, **kwargs):
             clicked = original_button(label, *args, **kwargs)
-            return clicked or label == f"ortho##camera-inspector-projection-{node.node_id}-1"
+            return clicked or label == f"##camera-inspector-projection-{node.node_id}-1"
 
         monkeypatch.setattr(imgui, "button", choose_orthographic)
         viewer.sync()

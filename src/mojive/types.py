@@ -34,6 +34,7 @@ class CameraView:
     focal_length: np.ndarray = field(default_factory=lambda: np.zeros(2, np.float32))
     sensor_size: np.ndarray = field(default_factory=lambda: np.zeros(2, np.float32))
     principal_offset: np.ndarray = field(default_factory=lambda: np.zeros(2, np.float32))
+    orthographic_blend: float | None = None
 
     def view_matrix(self) -> np.ndarray:
         """Return the row-major world-to-camera matrix."""
@@ -41,17 +42,30 @@ class CameraView:
 
     def proj_matrix(self) -> np.ndarray:
         """Return the row-major projection matrix selected by the camera parameters."""
-        if self.orthographic:
+        blend = self.projection_blend()
+        if blend >= 1.0:
             return math3d.orthographic(self.ortho_height, self.aspect, self.near, self.far)
         if self.uses_intrinsics():
-            return math3d.perspective_intrinsics(
+            persp = math3d.perspective_intrinsics(
                 self.focal_length,
                 self.sensor_size,
                 self.principal_offset,
                 self.near,
                 self.far,
             )
-        return math3d.perspective(self.fov_y, self.aspect, self.near, self.far)
+        else:
+            persp = math3d.perspective(self.fov_y, self.aspect, self.near, self.far)
+        if blend <= 0.0:
+            return persp
+        ortho = math3d.orthographic(self.ortho_height, self.aspect, self.near, self.far)
+        return math3d.blend_projection(persp, ortho, self.distance(), blend)
+
+    def projection_blend(self) -> float:
+        """Return the effective orthographic amount, including UI transitions."""
+
+        if self.orthographic_blend is None:
+            return 1.0 if self.orthographic else 0.0
+        return float(np.clip(self.orthographic_blend, 0.0, 1.0))
 
     def uses_intrinsics(self) -> bool:
         """Return whether physical focal length and sensor size define the projection."""

@@ -160,9 +160,7 @@ class IdGeometry:
     def set_export_uniforms(self, ctx: PassContext) -> None:
         self.set_view_proj(ctx)
         assert self.program is not None
-        self.program["u_near"].value = float(ctx.camera.near)
-        self.program["u_far"].value = float(ctx.camera.far)
-        self.program["u_orthographic"].value = bool(ctx.camera.orthographic)
+        self.program["u_view"].write(M.to_gl(ctx.view))
 
     def draw(self, ctx: PassContext, buckets) -> int:
         ranges = ctx.scene.bucket_ranges

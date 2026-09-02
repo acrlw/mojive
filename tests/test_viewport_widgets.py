@@ -31,6 +31,8 @@ from mojive.ui.viewport_widgets import (
     capsule_points,
     draw_hint,
     draw_mouse_hint_glyph,
+    draw_playback_glyph,
+    draw_projection_glyph,
     draw_status,
     draw_tool_glyph,
     fitting_tool_hints,
@@ -91,7 +93,7 @@ def test_default_overlay_scale_preserves_shared_radial_steps():
     assert geometry.rotate_ring_cap == "round"
     assert geometry.state_radius - geometry.icon_radius == pytest.approx(geometry.radial_step)
     assert geometry.shell_radius - geometry.state_radius == pytest.approx(geometry.radial_step)
-    assert playback_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((170.0, 65.0))
+    assert playback_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((222.5, 65.0))
     assert tool_column_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((65.0, 235.0))
     assert OVERLAY_GEOMETRY.tool_center_step > OVERLAY_GEOMETRY.state_radius * 2.0
 
@@ -137,6 +139,7 @@ class _RecordedGlyph:
         self.circles = []
         self.filled_circles = []
         self.polylines = []
+        self.rectangles = []
 
     def fringed_concave_fill(self, points, _color):
         self.paths.append(tuple(points))
@@ -161,6 +164,55 @@ class _RecordedGlyph:
 
     def polyline(self, *args, **kwargs):
         self.polylines.append((args, kwargs))
+
+    def rect_filled(self, *args, **kwargs):
+        self.rectangles.append((args, kwargs))
+
+
+@pytest.mark.parametrize("kind", ("play", "previous", "step"))
+def test_playback_triangles_use_true_rounded_paths(kind: str):
+    draw = _RecordedGlyph()
+
+    draw_playback_glyph(draw, (0.0, 0.0), (1.0, 1.0, 1.0, 1.0), 1.0, kind)
+
+    assert len(draw.paths) == 1
+    assert len(draw.paths[0]) > 3
+    assert not any(point == pytest.approx((7.0, 0.0)) for point in draw.paths[0])
+    if kind in ("previous", "step"):
+        assert draw.rectangles[0][1]["rounding"] > 0.0
+
+
+@pytest.mark.parametrize("kind", ("previous", "step"))
+def test_frame_step_glyph_is_centered_and_fills_the_icon_bound(kind: str):
+    draw = _RecordedGlyph()
+
+    draw_playback_glyph(draw, (0.0, 0.0), (1.0, 1.0, 1.0, 1.0), 1.0, kind)
+
+    points = (*draw.paths[0], *draw.rectangles[0][0][:2])
+    xs = tuple(point[0] for point in points)
+    assert abs(min(xs) + max(xs)) < 0.75
+    assert max(math.hypot(*point) for point in points) < OVERLAY_GEOMETRY.icon_radius
+
+    play = _RecordedGlyph()
+    draw_playback_glyph(play, (0.0, 0.0), (1.0, 1.0, 1.0, 1.0), 1.0, "play")
+    play_x = tuple(point[0] for point in play.paths[0])
+    play_y = tuple(point[1] for point in play.paths[0])
+    triangle_x = tuple(point[0] for point in draw.paths[0])
+    triangle_y = tuple(point[1] for point in draw.paths[0])
+    assert (max(triangle_x) - min(triangle_x)) / (max(play_x) - min(play_x)) == pytest.approx(0.78)
+    assert (max(triangle_y) - min(triangle_y)) / (max(play_y) - min(play_y)) == pytest.approx(0.78)
+
+
+def test_projection_glyph_distinguishes_converging_and_parallel_edges():
+    perspective = _RecordedGlyph()
+    orthographic = _RecordedGlyph()
+
+    draw_projection_glyph(perspective, (0.0, 0.0), (1.0,) * 4, 1.0, "persp")
+    draw_projection_glyph(orthographic, (0.0, 0.0), (1.0,) * 4, 1.0, "ortho")
+
+    assert len(perspective.lines) == len(orthographic.lines) == 4
+    assert perspective.lines[0][0][0][1] != pytest.approx(perspective.lines[1][0][0][1])
+    assert orthographic.lines[0][0][0][1] == pytest.approx(orthographic.lines[2][0][0][1])
 
 
 def test_move_glyph_is_one_connected_rounded_antialiased_outline():
@@ -217,14 +269,17 @@ def test_tool_glyphs_use_the_configured_stroke_without_hidden_scales():
     move_head_width = max(point[0] for point in move_top_head) - min(
         point[0] for point in move_top_head
     )
-    frame_head_width = max(point[0] for point in frame.paths[1]) - min(
-        point[0] for point in frame.paths[1]
+    frame_head_width = max(point[0] for point in frame.paths[0]) - min(
+        point[0] for point in frame.paths[0]
     )
     assert move_shaft_width == pytest.approx(OVERLAY_GEOMETRY.tool_stroke)
     assert len(rotate.circles) == 1
     assert rotate.circles[0][0][3] == pytest.approx(OVERLAY_GEOMETRY.tool_stroke)
     assert len(rotate.paths) == 6
-    assert not frame.lines
+    assert len(frame.lines) == 3
+    assert all(
+        args[3] == pytest.approx(OVERLAY_GEOMETRY.tool_stroke) for args, _kwargs in frame.lines
+    )
     assert move_shaft_width < min(move_head_width, frame_head_width)
     assert move_head_width < 2.0 * _MOVE_ARROW_WING * TOOL_GLYPH_SCALE
     assert frame_head_width < 2.0 * 1.8 * TOOL_GLYPH_SCALE
@@ -306,37 +361,47 @@ def test_rotate_glyph_supports_butt_and_round_authored_caps():
     assert sum(map(len, rounded.paths)) > sum(map(len, butt.paths))
 
 
-def test_frame_arrows_use_separate_axis_shafts_and_rounded_heads():
+@pytest.mark.parametrize("scale", (0.75, 1.0, 2.0, 4.0))
+def test_frame_arrows_scale_native_stroke_shafts_and_center_shell(scale: float):
     draw = _RecordedGlyph()
     center = (20.0, 30.0)
 
-    draw_tool_glyph(draw, center, (1.0, 1.0, 1.0, 1.0), 1.0, "frame", (0.0,) * 4, "world")
+    draw_tool_glyph(
+        draw,
+        center,
+        (1.0, 1.0, 1.0, 1.0),
+        scale,
+        "frame",
+        (0.0,) * 4,
+        "world",
+    )
 
-    assert len(draw.paths) == 6
-    assert not draw.lines
+    assert len(draw.paths) == 3
+    assert len(draw.lines) == 3
     assert not draw.fills
-    shafts = draw.paths[0::2]
-    heads = draw.paths[1::2]
+    heads = draw.paths
     head_areas = []
     for path in heads:
         assert len(path) > 3
-        assert max(math.dist(point, center) for point in path) < 10.0 * TOOL_GLYPH_SCALE
+        assert max(math.dist(point, center) for point in path) < 10.0 * TOOL_GLYPH_SCALE * scale
         head_areas.append(abs(_polygon_area(path)))
     assert head_areas == pytest.approx([head_areas[0]] * 3)
     clear_radius = (
         OVERLAY_GEOMETRY.frame_center_radius * TOOL_GLYPH_SCALE
         + OVERLAY_GEOMETRY.tool_stroke * OVERLAY_GEOMETRY.frame_center_gap_ratio
     )
-    assert all(
-        min(math.dist(point, center) for point in shaft) == pytest.approx(clear_radius)
-        for shaft in shafts
-    )
+    for (start, _end, _color, width), kwargs in draw.lines:
+        assert math.dist(start, center) == pytest.approx(clear_radius * scale)
+        assert width == pytest.approx(OVERLAY_GEOMETRY.tool_stroke * scale)
+        assert not kwargs
     assert _FRAME_ARROW_CORNER_RADIUS_PT < 0.5
     assert len(draw.filled_circles) == 1
     center_args, center_kwargs = draw.filled_circles[0]
     assert center_args[0] == center
-    assert center_args[1] == pytest.approx(OVERLAY_GEOMETRY.frame_center_radius * TOOL_GLYPH_SCALE)
-    assert center_args[1] * 2.0 > OVERLAY_GEOMETRY.tool_stroke
+    assert center_args[1] == pytest.approx(
+        OVERLAY_GEOMETRY.frame_center_radius * TOOL_GLYPH_SCALE * scale
+    )
+    assert center_args[1] * 2.0 > OVERLAY_GEOMETRY.tool_stroke * scale
     assert center_args[2] == (1.0, 1.0, 1.0, 1.0)
     assert center_kwargs["segments"] == 16
 

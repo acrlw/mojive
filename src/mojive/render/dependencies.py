@@ -29,6 +29,7 @@ def camera_key(camera: CameraView) -> tuple:
         float(camera.aspect),
         bool(camera.orthographic),
         float(camera.ortho_height),
+        None if camera.orthographic_blend is None else float(camera.orthographic_blend),
         _array_key(camera.focal_length),
         _array_key(camera.sensor_size),
         _array_key(camera.principal_offset),

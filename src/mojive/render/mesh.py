@@ -9,6 +9,7 @@ from ..gizmo import (
     AXIS_HEAD_LENGTH_PT,
     AXIS_SHAFT_HALF_PT,
     AXIS_START,
+    JOINT_OUTLINE_PT,
     PLANE_INNER,
     PLANE_OUTER,
     RING_RADIUS,
@@ -401,13 +402,16 @@ def _annulus(z: float, inner: float, outer: float, segments: int, *, up: bool):
     return pos, nrm, uv, tri.reshape(-1).astype(np.uint32)
 
 
-def _make_gizmo_arrow() -> MeshData:
-    shaft_radius = AXIS_SHAFT_HALF_PT / SIZE_PT
-    head_radius = AXIS_HEAD_HALF_PT / SIZE_PT
-    head_base = 1.0 - AXIS_HEAD_LENGTH_PT / SIZE_PT
-    cone = _scale_xy(_cone_side(head_base, 1.0, ARROW_SEGMENTS), head_radius)
+def _make_gizmo_arrow(edge: float = 0.0) -> MeshData:
+    expansion = float(edge) / SIZE_PT
+    shaft_radius = AXIS_SHAFT_HALF_PT / SIZE_PT + expansion
+    head_radius = AXIS_HEAD_HALF_PT / SIZE_PT + expansion
+    head_base = 1.0 - (AXIS_HEAD_LENGTH_PT + float(edge)) / SIZE_PT
+    tip = 1.0 + expansion
+    start = AXIS_START - expansion
+    cone = _scale_xy(_cone_side(head_base, tip, ARROW_SEGMENTS), head_radius)
     p, n, uv, idx = cone
-    slope = head_radius / (1.0 - head_base)
+    slope = head_radius / (tip - head_base)
     side = n[:, 2] > 0.0
     xy = n[side, :2]
     xy /= np.linalg.norm(xy, axis=1, keepdims=True)
@@ -416,10 +420,8 @@ def _make_gizmo_arrow() -> MeshData:
     cone = p, n, uv, idx
     return _finish(
         *_merge(
-            _scale_xy(
-                _cylinder_side(AXIS_START, head_base, ARROW_SEGMENTS, 0.0, 1.0), shaft_radius
-            ),
-            _scale_xy(_cap_disk(AXIS_START, ARROW_SEGMENTS, up=False), shaft_radius),
+            _scale_xy(_cylinder_side(start, head_base, ARROW_SEGMENTS, 0.0, 1.0), shaft_radius),
+            _scale_xy(_cap_disk(start, ARROW_SEGMENTS, up=False), shaft_radius),
             _annulus(head_base, shaft_radius, head_radius, ARROW_SEGMENTS, up=False),
             cone,
         )
@@ -541,9 +543,14 @@ def gizmo_mesh(name: str) -> MeshData:
         return mesh
     generators = {
         "arrow": _make_gizmo_arrow,
+        "arrow_edge": lambda: _make_gizmo_arrow(JOINT_OUTLINE_PT),
         "plane": _make_gizmo_plane,
         "ring": _make_gizmo_ring,
         "half_ring": lambda: _make_gizmo_ring(half=True),
+        "ring_edge": lambda: _make_gizmo_ring(tube=RING_TUBE + JOINT_OUTLINE_PT / SIZE_PT),
+        "half_ring_edge": lambda: _make_gizmo_ring(
+            half=True, tube=RING_TUBE + JOINT_OUTLINE_PT / SIZE_PT
+        ),
         "screen_ring": lambda: _make_gizmo_ring(SCREEN_RING_RADIUS, tube=SCREEN_RING_TUBE),
         "screen_ring_edge": lambda: _make_gizmo_ring(
             SCREEN_RING_RADIUS, tube=SCREEN_RING_EDGE_TUBE

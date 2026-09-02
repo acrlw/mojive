@@ -51,7 +51,7 @@ _SLOT_DTYPE = np.dtype(
 )
 # One dynamic-offset window per handle draw; translate mode draws the most
 # (3 planes + 3 arrows + 2 center spheres).
-_SLOTS = 8
+_SLOTS = 16
 _SLOT_BYTES = 256
 
 # Standard GpuMesh stream; only position/normal are read (opengl "3f 3f 8x").
@@ -67,13 +67,17 @@ _VERTEX_LAYOUT = {
 # Pipeline variants (compare, depth write, cull) per handle group.
 _PIPE_PLANE = ("less", False, "none")
 _PIPE_HANDLE = ("less", True, "back")
+_PIPE_OUTLINE = ("less", False, "back")
 _PIPE_OVERLAY = ("always", False, "back")
 
 _MESHES = (
     "arrow",
+    "arrow_edge",
     "plane",
     "ring",
     "half_ring",
+    "ring_edge",
+    "half_ring_edge",
     "screen_ring",
     "screen_ring_edge",
     "trackball",
@@ -199,6 +203,16 @@ class GizmoPass:
                 )
                 if alpha <= 0.0:
                     continue
+                if frame.outline_color is not None:
+                    plans.append(
+                        (
+                            "arrow_edge",
+                            _PIPE_OUTLINE,
+                            _model(frame.position, axis_rotation(frame.rotation, axis), scale),
+                            self._outline_color(frame, alpha),
+                            CENTER_SHELL_RADIUS,
+                        )
+                    )
                 plans.append(
                     (
                         "arrow",
@@ -261,17 +275,26 @@ class GizmoPass:
             )
             if alpha <= 0.0:
                 continue
+            rotation = (
+                axis_rotation(frame.rotation, axis)
+                if full
+                else rotation_half_basis(camera, frame.position, frame.rotation, axis)
+            )
+            if frame.outline_color is not None:
+                plans.append(
+                    (
+                        "ring_edge" if full else "half_ring_edge",
+                        _PIPE_OUTLINE,
+                        _model(frame.position, rotation, scale),
+                        self._outline_color(frame, alpha),
+                        0.0,
+                    )
+                )
             plans.append(
                 (
                     "ring" if full else "half_ring",
                     _PIPE_HANDLE,
-                    _model(
-                        frame.position,
-                        axis_rotation(frame.rotation, axis)
-                        if full
-                        else rotation_half_basis(camera, frame.position, frame.rotation, axis),
-                        scale,
-                    ),
+                    _model(frame.position, rotation, scale),
                     rotation_handle_color(frame, handle, axis, alpha),
                     0.0,
                 )
@@ -313,6 +336,12 @@ class GizmoPass:
         else:
             color = HOVER_COLOR.copy() if self._hot(frame, handle) else np.asarray(base).copy()
         color[3] = alpha
+        return color
+
+    @staticmethod
+    def _outline_color(frame: GizmoFrame, alpha: float) -> np.ndarray:
+        color = np.asarray(frame.outline_color, np.float32).copy()
+        color[3] *= float(alpha)
         return color
 
     def _pipeline(self, compare: str, write: bool, cull: str) -> wgpu.GPURenderPipeline:

@@ -11,7 +11,7 @@ from imgui_bundle import imgui
 from ...adapters.base import FrameNeeds
 from ..draw2d import ImguiDraw2D
 from ..theme import THEME, Theme
-from ..viewport_widgets import ToolHint
+from ..viewport_widgets import ToolHint, draw_projection_glyph
 
 if TYPE_CHECKING:
     from ...render.backend import RenderBackend
@@ -515,6 +515,7 @@ def segmented_control(
     *,
     width: float = 0.0,
     theme: Theme = THEME,
+    icons: tuple[str, ...] | None = None,
 ) -> int:
     """Draw a compact mutually exclusive button row and return its selected index."""
 
@@ -524,6 +525,7 @@ def segmented_control(
     available = width if width > 0.0 else imgui.get_content_region_avail().x
     item_width = max(1.0, (available - spacing * (len(labels) - 1)) / len(labels))
     result = min(max(0, int(selected)), len(labels) - 1)
+    draw = ImguiDraw2D()
     for index, label in enumerate(labels):
         if index:
             imgui.same_line()
@@ -531,9 +533,40 @@ def segmented_control(
         if is_selected:
             imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(*theme.bg_frame_active))
             imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*theme.primary_bright))
-        clicked = imgui.button(f"{label}##{str_id}-{index}", imgui.ImVec2(item_width, 0.0))
+        icon = icons[index] if icons is not None and index < len(icons) else ""
+        # Icon-bearing segments paint their complete contents explicitly.  Reserving
+        # glyph space with leading text made ImGui center the whitespace rather than
+        # the visible icon/text pair, which drifted at different fonts and UI scales.
+        button_label = f"##{str_id}-{index}" if icon else f"{label}##{str_id}-{index}"
+        clicked = imgui.button(button_label, imgui.ImVec2(item_width, 0.0))
+        item_min = imgui.get_item_rect_min()
+        item_max = imgui.get_item_rect_max()
         if is_selected:
             imgui.pop_style_color(2)
+        if icon:
+            base_color = theme.primary_bright if is_selected else theme.text
+            color = (*base_color[:3], base_color[3] * imgui.get_style().alpha)
+            glyph_scale = max(0.65, imgui.get_frame_height() / 24.0)
+            glyph_width = 10.4 * glyph_scale
+            gap = 7.0 * glyph_scale
+            label_width, label_height = draw.text_size(label)
+            content_width = glyph_width + gap + label_width
+            content_left = (item_min.x + item_max.x - content_width) * 0.5
+            draw_projection_glyph(
+                draw,
+                (content_left + glyph_width * 0.5, (item_min.y + item_max.y) * 0.5),
+                color,
+                glyph_scale,
+                icon,
+            )
+            draw.text(
+                (
+                    content_left + glyph_width + gap,
+                    (item_min.y + item_max.y - label_height) * 0.5,
+                ),
+                color,
+                label,
+            )
         if clicked:
             result = index
     return result

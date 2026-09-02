@@ -1843,7 +1843,7 @@ def test_viewport_playback_widget_controls_simulation(viewer):
     for _ in range(3):
         v.sync()
     assert v.session.frame.step > 0
-    click(v, imgui.get_io(), item_rect(v, "invisible_button", "##viewport-playback-stop"))
+    click(v, imgui.get_io(), item_rect(v, "invisible_button", "##viewport-playback-reset"))
     assert v.session.paused
     v.sync()
     assert v.session.frame.step == 0
@@ -1853,6 +1853,10 @@ def test_viewport_playback_widget_controls_simulation(viewer):
     assert v.session.paused
     v.sync()
     assert v.session.frame.step == before + 1
+
+    click(v, imgui.get_io(), item_rect(v, "invisible_button", "##viewport-playback-previous"))
+    v.sync()
+    assert v.session.frame.step == before
 
 
 def test_status_simulation_metric_switches_and_copies_exact_value(viewer):

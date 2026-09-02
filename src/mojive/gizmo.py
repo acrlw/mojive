@@ -30,6 +30,7 @@ TRACKBALL_RADIUS = RING_RADIUS
 RING_WIDTH_PT = 3.5
 SCREEN_RING_WIDTH_PT = 2.5
 CONTRAST_EDGE_PT = 0.75
+JOINT_OUTLINE_PT = 0.8
 ROTATE_RING_ALPHA = 0.68
 ROTATE_RING_HOVER_ALPHA = 0.88
 ROTATE_RING_ACTIVE_ALPHA = 0.96
@@ -62,6 +63,7 @@ HOVER_COLOR = np.array((184 / 255, 210 / 255, 172 / 255, 1.0), np.float32)
 ACTIVE_HANDLE_COLOR = np.array((184 / 255, 210 / 255, 172 / 255, 1.0), np.float32)
 ACTIVE_COLOR = np.array((103 / 255, 135 / 255, 90 / 255, 1.0), np.float32)
 JOINT_HANDLE_COLOR = np.array((156 / 255, 191 / 255, 141 / 255, 1.0), np.float32)
+JOINT_OUTLINE_COLOR = np.array((0.98, 0.98, 0.99, 0.94), np.float32)
 CENTER_COLOR = np.array((0.92, 0.92, 0.92, 1.0), np.float32)
 TRACKBALL_COLOR = np.array((0.70, 0.70, 0.70, 1.0), np.float32)
 CONTRAST_EDGE_COLOR = np.array((0.68, 0.71, 0.76, 1.0), np.float32)
@@ -166,6 +168,7 @@ class GizmoFrame:
     plane_mask: int = 0b111
     handle_mask: int = ALL_HANDLE_MASK
     handle_color: np.ndarray | None = None
+    outline_color: np.ndarray | None = None
     active_projection_fade: bool = False
 
 
@@ -259,23 +262,21 @@ def screen_constant_world_sizes(
     positions = np.asarray(positions, np.float64).reshape(-1, 3)
     if not len(positions):
         return np.zeros(0, np.float64)
-    if camera.orthographic:
-        value = float(camera.ortho_height) * float(pixels) / max(float(viewport_height), 1.0)
-        return np.full(len(positions), value, np.float64)
-    forward = np.asarray(camera.forward(), np.float64)
-    depths = (positions - np.asarray(camera.eye, np.float64)) @ forward
+    projection = np.asarray(camera.proj_matrix(), np.float64)
+    view_projection = projection @ np.asarray(camera.view_matrix(), np.float64)
+    homogeneous = np.column_stack((positions, np.ones(len(positions), np.float64)))
+    depths = homogeneous @ view_projection[3]
     visible = depths > 0.0
     if not visible_only:
         np.abs(depths, out=depths)
+        np.maximum(depths, 1e-9, out=depths)
         visible[:] = True
     result = np.zeros(len(positions), np.float64)
-    np.maximum(depths, max(float(camera.near), 1e-4), out=depths)
+    p11 = abs(float(projection[1, 1]))
+    if p11 < 1e-9:
+        return result
     result[visible] = (
-        2.0
-        * depths[visible]
-        * np.tan(float(camera.fov_y) * 0.5)
-        * float(pixels)
-        / max(float(viewport_height), 1.0)
+        2.0 * depths[visible] * float(pixels) / (p11 * max(float(viewport_height), 1.0))
     )
     return result
 
@@ -409,7 +410,7 @@ def rotation_half_basis(cam: CameraView, origin, rotation, axis: int) -> np.ndar
     o = np.asarray(origin, np.float64)
     r = np.asarray(rotation, np.float64).reshape(3, 3)
     normal = r[:, axis]
-    to_eye = -cam.forward() if cam.orthographic else np.asarray(cam.eye, np.float64) - o
+    to_eye = -_view_direction(cam, o)
     front = to_eye - normal * np.dot(to_eye, normal)
     length = float(np.linalg.norm(front))
     if length < 1e-9:
@@ -479,11 +480,11 @@ def paint_order(cam: CameraView, origin, directions) -> tuple[int, ...]:
 
 def _view_direction(cam: CameraView, origin) -> np.ndarray:
     """Unit vector pointing away from the camera through ``origin``."""
-    d = (
-        np.asarray(cam.forward(), np.float64)
-        if cam.orthographic
-        else np.asarray(origin, np.float64) - np.asarray(cam.eye, np.float64)
-    )
+    perspective = np.asarray(origin, np.float64) - np.asarray(cam.eye, np.float64)
+    perspective /= max(float(np.linalg.norm(perspective)), 1e-12)
+    orthographic = np.asarray(cam.forward(), np.float64)
+    mix = cam.projection_blend()
+    d = perspective * (1.0 - mix) + orthographic * mix
     return d / max(float(np.linalg.norm(d)), 1e-12)
 
 

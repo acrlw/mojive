@@ -45,6 +45,10 @@ from .types import (
     TextureType,
 )
 
+FRAME_HISTORY_LIMIT = 300
+FRAME_HISTORY_BYTE_LIMIT = 64 * 1024 * 1024
+FRAME_HISTORY_TRIM_RATIO = 0.9
+
 
 @dataclass
 class PerturbState:
@@ -428,6 +432,11 @@ class Session:
         self._state_take_playing = False
         self._state_take_elapsed = 0.0
         self._state_take_signature: tuple[tuple[int, ...], ...] | None = None
+        self._frame_history: list[_StateTakeFrame] = []
+        self._frame_history_cursor = -1
+        self._frame_history_bytes = 0
+        self._frame_history_signature: tuple[tuple[int, ...], ...] | None = None
+        self._frame_history_dirty = False
         self._perturb = PerturbState()
         self._camera = CameraView()
         self._last_message = ""
@@ -558,6 +567,22 @@ class Session:
     def state_take_times(self) -> list[float]:
         """Return recorded simulation times in take order."""
         return self._state_take_times
+
+    @property
+    def can_step_back(self) -> bool:
+        """Return whether frame history can restore an earlier displayed state."""
+
+        return bool(
+            self._adapter.caps.simulation
+            and self._adapter.caps.state_snapshots
+            and self._paused
+            and not self._state_take_recording
+            and not self._state_take_playing
+            and (
+                self._frame_history_cursor > 0
+                or (self._frame_history_dirty and self._frame_history_cursor >= 0)
+            )
+        )
 
     @property
     def sensor_infos(self) -> list[SensorInfo]:
@@ -769,6 +794,92 @@ class Session:
         self._state_take_elapsed = 0.0
         self._state_take_signature = None
 
+    @staticmethod
+    def _physics_state_bytes(state: PhysicsState) -> int:
+        return 8 + sum(
+            np.asarray(values).nbytes
+            for values in (
+                state.qpos,
+                state.qvel,
+                state.act,
+                state.ctrl,
+                state.mocap_pos,
+                state.mocap_quat,
+            )
+        )
+
+    def _clear_frame_history(self) -> None:
+        self._frame_history.clear()
+        self._frame_history_cursor = -1
+        self._frame_history_bytes = 0
+        self._frame_history_signature = None
+        self._frame_history_dirty = False
+
+    def _append_frame_history(self, state: PhysicsState | None = None) -> bool:
+        """Append one displayed simulation state and discard an abandoned future."""
+
+        if state is None:
+            state = self._adapter.capture_state()
+        if state is None:
+            return False
+        signature = self._physics_state_signature(state)
+        if self._frame_history_signature not in (None, signature):
+            self._clear_frame_history()
+        self._frame_history_signature = signature
+        if self._frame_history_cursor + 1 < len(self._frame_history):
+            future = self._frame_history[self._frame_history_cursor + 1 :]
+            self._frame_history_bytes -= sum(
+                self._physics_state_bytes(frame.state) for frame in future
+            )
+            del self._frame_history[self._frame_history_cursor + 1 :]
+        self._frame_history.append(_StateTakeFrame(self._step_counter, state))
+        self._frame_history_cursor = len(self._frame_history) - 1
+        self._frame_history_bytes += self._physics_state_bytes(state)
+        if len(self._frame_history) > 2 and (
+            len(self._frame_history) > FRAME_HISTORY_LIMIT
+            or self._frame_history_bytes > FRAME_HISTORY_BYTE_LIMIT
+        ):
+            target_count = max(2, int(FRAME_HISTORY_LIMIT * FRAME_HISTORY_TRIM_RATIO))
+            target_bytes = int(FRAME_HISTORY_BYTE_LIMIT * FRAME_HISTORY_TRIM_RATIO)
+            remove_count = 0
+            remove_bytes = 0
+            while len(self._frame_history) - remove_count > 2 and (
+                len(self._frame_history) - remove_count > target_count
+                or self._frame_history_bytes - remove_bytes > target_bytes
+            ):
+                remove_bytes += self._physics_state_bytes(self._frame_history[remove_count].state)
+                remove_count += 1
+            if remove_count:
+                del self._frame_history[:remove_count]
+                self._frame_history_bytes -= remove_bytes
+                self._frame_history_cursor -= remove_count
+        self._frame_history_dirty = False
+        return True
+
+    def _restore_previous_frame(self) -> bool:
+        if not self._frame_history:
+            return False
+        index = (
+            self._frame_history_cursor
+            if self._frame_history_dirty
+            else self._frame_history_cursor - 1
+        )
+        if not 0 <= index < len(self._frame_history):
+            return False
+        frame = self._frame_history[index]
+        if not self._adapter.restore_state(frame.state):
+            return False
+        self._frame_history_cursor = index
+        self._frame_history_dirty = False
+        self._step_counter = frame.step
+        self._pending_steps = 0
+        self._sim_time_credit = 0.0
+        self._perturb = PerturbState()
+        self._active_keyframe = -1
+        self._state_take_playing = False
+        self._state_take_cursor = -1
+        return True
+
     def _append_state_take_frame(self, state: PhysicsState | None = None) -> bool:
         if state is None:
             state = self._adapter.capture_state()
@@ -848,6 +959,7 @@ class Session:
         self._state_take_recording = False
         self._state_take_playing = False
         self._state_take_cursor = -1
+        self._frame_history_dirty = True
         return CommandResult.good("Scene state restored")
 
     def tick(self, needs: FrameNeeds, wall_dt: float | None = None) -> SceneFrame:
@@ -857,6 +969,17 @@ class Session:
             needs: Optional dynamic arrays required by current consumers.
             wall_dt: Elapsed wall time used for real-time simulation scheduling.
         """
+        history_enabled = bool(
+            self._adapter.caps.simulation
+            and self._adapter.caps.state_snapshots
+            and not self._state_take_recording
+            and not self._state_take_playing
+        )
+        if history_enabled and not self._frame_history:
+            self._append_frame_history()
+        step_before = self._step_counter
+        frame_step_before = int(self._frame.step)
+        frame_time_before = float(self._frame.time)
         if self._state_take_playing:
             self._advance_state_take(wall_dt)
         elif not self._paused and not self._adapter.caps.external_clock:
@@ -901,6 +1024,14 @@ class Session:
                 level="error",
                 duration=10.0,
             )
+        externally_advanced = self._adapter.caps.external_clock and (
+            int(self._frame.step) != frame_step_before
+            or abs(float(self._frame.time) - frame_time_before) > 1e-12
+        )
+        if history_enabled and (
+            self._step_counter != step_before or externally_advanced or self._frame_history_dirty
+        ):
+            self._append_frame_history()
         return self._frame
 
     def submit(self, command: Command) -> CommandResult:
@@ -1046,6 +1177,7 @@ class Session:
 
         self._paused = not self._adapter.caps.simulation or self._adapter.set_paused(True)
         self._clear_state_take()
+        self._clear_frame_history()
         self._step_counter = 0
         self._pending_steps = 0
         self._sim_time_credit = 0.0
@@ -1077,6 +1209,7 @@ class Session:
             if self._paused and not self._adapter.set_paused(False):
                 return CommandResult.bad("physics backend rejected play before recording")
             self._clear_state_take()
+            self._clear_frame_history()
             self._paused = False
             self._sim_time_credit = 0.0
             self._state_take_recording = True
@@ -1184,6 +1317,17 @@ class Session:
             self._pending_steps += count
             return CommandResult.good(f"Stepped {count} frame(s)")
 
+        if isinstance(c, cmd.StepBack):
+            if not caps.simulation or not caps.state_snapshots:
+                return CommandResult.bad(f"{caps.name} has no frame history")
+            if not self._paused:
+                return CommandResult.bad("Pause the simulation before stepping backward")
+            if self._state_take_recording or self._state_take_playing:
+                return CommandResult.bad("Stop take recording or replay before stepping backward")
+            if not self._restore_previous_frame():
+                return CommandResult.bad("No previous frame is available")
+            return CommandResult.good("Restored previous frame")
+
         if isinstance(c, cmd.Reset):
             self._adapter.reset()
             self._step_counter = 0
@@ -1193,6 +1337,7 @@ class Session:
             self._state_take_recording = False
             self._state_take_playing = False
             self._state_take_cursor = -1
+            self._frame_history_dirty = True
             self._equality_constraints = (
                 self._adapter.equality_constraints() if caps.equality_constraints else []
             )
@@ -1597,6 +1742,7 @@ class Session:
             self._active_keyframe = i
             self._state_take_playing = False
             self._state_take_cursor = -1
+            self._frame_history_dirty = True
             return CommandResult.good(f"loaded {self._keyframes[slot].name}")
 
         if isinstance(c, cmd.AddModelKeyframe):
@@ -1758,6 +1904,8 @@ class Session:
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before editing joints")
             ok = self._adapter.set_qpos(c.index, c.value)
+            if ok:
+                self._frame_history_dirty = True
             return (
                 CommandResult.good("")
                 if ok
@@ -1781,6 +1929,8 @@ class Session:
             if not np.all(np.isfinite(values)):
                 return CommandResult.bad("Joint batch values must be finite")
             ok = self._adapter.set_qpos_batch(indices, values)
+            if ok:
+                self._frame_history_dirty = True
             return CommandResult.good("") if ok else CommandResult.bad("Joint batch update failed")
 
         if isinstance(c, cmd.SetJointProperties):
@@ -2512,6 +2662,8 @@ class Session:
 
         if isinstance(c, cmd.SetCtrl):
             ok = self._adapter.set_ctrl(c.index, c.value)
+            if ok:
+                self._frame_history_dirty = True
             return (
                 CommandResult.good("")
                 if ok
@@ -2524,6 +2676,8 @@ class Session:
             ok = self._adapter.apply_perturb(
                 c.node_id, c.target_position, c.target_rotation, c.mode
             )
+            if ok:
+                self._frame_history_dirty = True
             return CommandResult.good("") if ok else CommandResult.bad("Perturbation failed")
 
         if isinstance(c, cmd.ClearPerturb):
@@ -2901,15 +3055,18 @@ class Session:
                 self._selected_node_id = selected.node_id
         elif (selected := self.node(self._selected_node_id)) is None or selected.object_id:
             self._selected_node_id = -1
-        if self._state_take and self._adapter.caps.state_snapshots:
+        if (self._state_take or self._frame_history) and self._adapter.caps.state_snapshots:
             state = self._adapter.capture_state()
-            if state is None or self._physics_state_signature(state) != self._state_take_signature:
+            signature = None if state is None else self._physics_state_signature(state)
+            if self._state_take and signature != self._state_take_signature:
                 self._clear_state_take()
                 self._publish_message(
                     "Cleared recorded take after the simulation state layout changed",
                     level="warning",
                     duration=5.0,
                 )
+            if self._frame_history and signature != self._frame_history_signature:
+                self._clear_frame_history()
         self._adapter_revision = self._adapter.structure_revision
         self._structure_generation += 1
         self._frame = self._adapter.frame(FrameNeeds())

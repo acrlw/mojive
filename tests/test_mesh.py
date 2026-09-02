@@ -195,7 +195,18 @@ def test_mesh_arrays_are_read_only() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ("arrow", "plane", "ring", "half_ring", "screen_ring", "screen_ring_edge")
+    "name",
+    (
+        "arrow",
+        "arrow_edge",
+        "plane",
+        "ring",
+        "ring_edge",
+        "half_ring",
+        "half_ring_edge",
+        "screen_ring",
+        "screen_ring_edge",
+    ),
 )
 def test_gizmo_mesh_is_well_formed_and_cached(name: str) -> None:
     md = gizmo_mesh(name)
@@ -210,7 +221,18 @@ def test_gizmo_mesh_is_well_formed_and_cached(name: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ("arrow", "plane", "ring", "half_ring", "screen_ring", "screen_ring_edge")
+    "name",
+    (
+        "arrow",
+        "arrow_edge",
+        "plane",
+        "ring",
+        "ring_edge",
+        "half_ring",
+        "half_ring_edge",
+        "screen_ring",
+        "screen_ring_edge",
+    ),
 )
 def test_gizmo_mesh_winding_matches_its_normals(name: str) -> None:
     md = gizmo_mesh(name)
@@ -238,12 +260,24 @@ def test_gizmo_arrow_is_one_continuous_silhouette() -> None:
     assert radii.max() * SIZE_PT == pytest.approx(AXIS_HEAD_HALF_PT, abs=1e-6)
     assert np.unique(np.round(p[:, 2], 5)) == pytest.approx(np.round((0.0, head_base, 1.0), 5))
 
+    edge = gizmo_mesh("arrow_edge").positions
+    assert np.linalg.norm(edge[:, :2], axis=1).max() > np.linalg.norm(p[:, :2], axis=1).max()
+    assert edge[:, 2].min() < p[:, 2].min()
+    assert edge[:, 2].max() > p[:, 2].max()
+
 
 def test_solid_gizmo_ring_widths_match_the_flat_overlay() -> None:
-    from mojive.gizmo import CONTRAST_EDGE_PT, RING_WIDTH_PT, SCREEN_RING_WIDTH_PT, SIZE_PT
+    from mojive.gizmo import (
+        CONTRAST_EDGE_PT,
+        JOINT_OUTLINE_PT,
+        RING_WIDTH_PT,
+        SCREEN_RING_WIDTH_PT,
+        SIZE_PT,
+    )
 
     for name, width in (
         ("ring", RING_WIDTH_PT),
+        ("ring_edge", RING_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT),
         ("screen_ring", SCREEN_RING_WIDTH_PT),
         ("screen_ring_edge", SCREEN_RING_WIDTH_PT + 2.0 * CONTRAST_EDGE_PT),
     ):

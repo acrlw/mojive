@@ -89,6 +89,30 @@ def orthographic(height: float, aspect: float, near: float, far: float) -> Mat4:
     return m.astype(np.float32)
 
 
+def blend_projection(
+    perspective_matrix: np.ndarray,
+    orthographic_matrix: np.ndarray,
+    distance: float,
+    amount: float,
+) -> Mat4:
+    """Morph perspective into orthographic projection at a fixed target plane.
+
+    Dividing the perspective matrix by the eye-to-target distance leaves its
+    NDC result unchanged while making its homogeneous ``w`` equal to one at
+    the target.  The normalized matrix can then blend continuously with the
+    orthographic matrix without a size jump at that plane.
+    """
+
+    t = float(np.clip(amount, 0.0, 1.0))
+    if t <= 0.0:
+        return np.asarray(perspective_matrix, np.float32)
+    if t >= 1.0:
+        return np.asarray(orthographic_matrix, np.float32)
+    normalized = np.asarray(perspective_matrix, np.float64) / max(float(distance), 1e-6)
+    ortho = np.asarray(orthographic_matrix, np.float64)
+    return (normalized * (1.0 - t) + ortho * t).astype(np.float32)
+
+
 def ortho_box(left, right, bottom, top, near, far) -> Mat4:
     """Build an OpenGL orthographic projection for explicit view bounds."""
     m = np.eye(4, dtype=np.float64)

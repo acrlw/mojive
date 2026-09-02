@@ -24,6 +24,8 @@ from mojive.gizmo import (
     GUIDE_CORE_COLOR,
     HOVER_COLOR,
     JOINT_HANDLE_COLOR,
+    JOINT_OUTLINE_COLOR,
+    JOINT_OUTLINE_PT,
     PLANE_INNER,
     RING_HIT_PT,
     RING_RADIUS,
@@ -304,19 +306,25 @@ def test_joint_current_tick_keeps_range_color_beneath_limit_ticks(
         for name, args, kwargs in overlay.calls
         if name == "line"
         and args[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
-        and kwargs.get("cap") == ("round_end" if joint_type == "hinge" else "round")
+        and kwargs.get("cap") == "round"
     )
     if joint_type == "hinge":
-        range_color = next(args[1] for name, args, _kwargs in overlay.calls if name == "polyline")
+        range_color = next(
+            args[1]
+            for name, args, _kwargs in overlay.calls
+            if name == "polyline" and args[2] == pytest.approx(JOINT_RANGE_WIDTH_PT)
+        )
     else:
         range_color = next(
             args[2]
             for name, args, kwargs in overlay.calls
-            if name == "line" and "cap" not in kwargs
+            if name == "line"
+            and "cap" not in kwargs
+            and args[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
         )
     assert np.allclose(current_tick[2], range_color)
     assert current_tick[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
-    assert tick_kwargs["cap"] == ("round_end" if joint_type == "hinge" else "round")
+    assert tick_kwargs["cap"] == "round"
     assert np.linalg.norm(current_tick[1] - current_tick[0]) == pytest.approx(JOINT_CURRENT_TICK_PT)
     current_index = next(
         index
@@ -334,6 +342,28 @@ def test_joint_current_tick_keeps_range_color_beneath_limit_ticks(
     ]
     assert len(limit_indices) == 2
     assert min(limit_indices) > current_index
+
+    outline_index = next(
+        index
+        for index, (name, args, _kwargs) in enumerate(overlay.calls)
+        if name in ("line", "polyline")
+        and np.allclose(args[2 if name == "line" else 1][:3], JOINT_OUTLINE_COLOR[:3])
+    )
+    assert outline_index < current_index
+    outline_call = overlay.calls[outline_index][1]
+    outline_width = (
+        outline_call[3] if overlay.calls[outline_index][0] == "line" else outline_call[2]
+    )
+    assert outline_width == pytest.approx(JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT)
+    current_outline = next(
+        args
+        for name, args, kwargs in overlay.calls
+        if name == "line"
+        and np.allclose(args[2][:3], JOINT_OUTLINE_COLOR[:3])
+        and kwargs.get("cap") == "round"
+        and np.linalg.norm(args[1] - args[0]) == pytest.approx(JOINT_CURRENT_TICK_PT)
+    )
+    assert current_outline[3] == pytest.approx(JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT)
 
 
 @pytest.mark.parametrize(
@@ -450,6 +480,16 @@ def test_rotation_arc_round_caps_are_part_of_one_stroke_silhouette() -> None:
     assert np.min(rounded[:, 1]) == pytest.approx(-2.0)
     assert np.max(rounded[:, 1]) == pytest.approx(2.0)
     assert len(rounded) > len(flat)
+
+
+def test_rotation_arc_supports_one_rounded_limit_endpoint() -> None:
+    points = np.array(((0.0, 0.0), (5.0, 0.0), (10.0, 0.0)))
+
+    start = _rotation_arc_stroke(points, None, None, 4.0, round_start=True)
+    end = _rotation_arc_stroke(points, None, None, 4.0, round_end=True)
+
+    assert (np.min(start[:, 0]), np.max(start[:, 0])) == pytest.approx((-2.0, 10.0))
+    assert (np.min(end[:, 0]), np.max(end[:, 0])) == pytest.approx((0.0, 12.0))
 
 
 @pytest.mark.parametrize("degrees", [285.0, -285.0])
@@ -1679,9 +1719,21 @@ def test_joint_translation_guide_is_a_primary_dim_segment_with_asymmetric_ticks(
 
     gizmo._draw_joint_translation_guide(overlay, camera(), RECT, 1.0)
 
-    assert [name for name, _args, _kwargs in overlay.calls] == ["line"] * 3
-    connector, start_tick, end_tick = (args for _name, args, _kwargs in overlay.calls)
-    connector_kwargs, start_kwargs, end_kwargs = (kwargs for _name, _args, kwargs in overlay.calls)
+    assert [name for name, _args, _kwargs in overlay.calls] == ["line"] * 6
+    outline_connector, outline_start, outline_end = (
+        args for _name, args, _kwargs in overlay.calls[:3]
+    )
+    connector, start_tick, end_tick = (args for _name, args, _kwargs in overlay.calls[3:])
+    connector_kwargs, start_kwargs, end_kwargs = (
+        kwargs for _name, _args, kwargs in overlay.calls[3:]
+    )
+    assert all(
+        np.allclose(call[2], JOINT_OUTLINE_COLOR)
+        for call in (outline_connector, outline_start, outline_end)
+    )
+    assert outline_connector[3] == pytest.approx(JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT)
+    assert outline_start[3] == pytest.approx(JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT)
+    assert outline_end[3] == pytest.approx(4.0 + 2.0 * JOINT_OUTLINE_PT)
     assert np.allclose(connector[2], JOINT_ACTIVE_DARK_COLOR)
     assert np.allclose(start_tick[2], JOINT_ACTIVE_DARK_COLOR)
     assert np.allclose(end_tick[2], ACTIVE_HANDLE_COLOR)
@@ -3073,7 +3125,7 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
     assert JOINT_RANGE_RADIUS == RING_RADIUS
     assert THEME.primary == JOINT_RANGE_COLOR
     assert allowed[1]["closed"] is False
-    assert allowed[1]["cap"] == "butt"
+    assert allowed[1]["cap"] == "round"
 
     dial = _RotationDialProjector(
         cam,
@@ -3109,9 +3161,7 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
             if name == "line" and np.allclose(args[2], JOINT_UPPER_LIMIT_COLOR)
         ),
     }
-    assert all(
-        kwargs["cap"] == "round_end" for name, _args, kwargs in overlay.calls if name == "line"
-    )
+    assert all(kwargs["cap"] == "round" for name, _args, kwargs in overlay.calls if name == "line")
     assert np.linalg.norm(ticks["current"][1] - ticks["current"][0]) == pytest.approx(
         JOINT_CURRENT_TICK_PT
     )
@@ -3152,7 +3202,8 @@ def test_hinge_joint_range_keeps_primary_palette_for_hover_and_press(interaction
     assert np.allclose(allowed[1], expected)
 
 
-def test_full_hinge_range_has_no_unavailable_overlay() -> None:
+@pytest.mark.parametrize("span", (2.0 * np.pi, 4.0 * np.pi))
+def test_full_hinge_range_has_no_unavailable_overlay(span: float) -> None:
     cam = CameraView(
         eye=np.array((0.0, 0.0, 5.0)),
         target=np.zeros(3),
@@ -3160,7 +3211,7 @@ def test_full_hinge_range_has_no_unavailable_overlay() -> None:
         aspect=RECT[2] / RECT[3],
     )
     gizmo = ObjectGizmo("rotate")
-    gizmo._joint_range = _JointRangeState("hinge", 0.0, -np.pi, np.pi)
+    gizmo._joint_range = _JointRangeState("hinge", 0.0, -0.5 * span, 0.5 * span)
     overlay = RecordingDraw2D()
 
     gizmo._draw_joint_range(overlay, cam, RECT, 1.0)
@@ -3173,6 +3224,15 @@ def test_full_hinge_range_has_no_unavailable_overlay() -> None:
     assert len(range_calls) == 1
     assert np.allclose(range_calls[0][0][1], JOINT_RANGE_COLOR)
     assert range_calls[0][1]["closed"] is True
+    assert range_calls[0][1]["cap"] == "butt"
+    assert not any(
+        name == "line"
+        and (
+            np.allclose(args[2], JOINT_LOWER_LIMIT_COLOR)
+            or np.allclose(args[2], JOINT_UPPER_LIMIT_COLOR)
+        )
+        for name, args, _kwargs in overlay.calls
+    )
 
 
 def test_active_hinge_guide_keeps_one_allowed_range_arc() -> None:
@@ -3236,6 +3296,52 @@ def test_active_hinge_guide_keeps_one_allowed_range_arc() -> None:
     )
     assert sector[1] == pytest.approx(stable_dial.points(RING_RADIUS, (np.radians(-17.0),))[0, :2])
     assert sector[-1] == pytest.approx(stable_dial.points(RING_RADIUS, (np.radians(23.0),))[0, :2])
+
+
+@pytest.mark.parametrize(
+    ("lower", "start", "current", "upper", "expected"),
+    (
+        (-1.0, 0.0, 1.0, 1.0, (False, True)),
+        (-1.0, -1.0, 0.0, 1.0, (True, False)),
+        (-2.0 * np.pi, 0.2, 2.0 * np.pi, 2.0 * np.pi, (False, False)),
+    ),
+)
+def test_active_hinge_guide_rounds_only_unambiguous_limit_caps(
+    monkeypatch,
+    lower: float,
+    start: float,
+    current: float,
+    upper: float,
+    expected: tuple[bool, bool],
+) -> None:
+    from mojive.ui import gizmo as gizmo_module
+
+    cam = camera()
+    gizmo = ObjectGizmo("rotate")
+    gizmo._active = GizmoHandle.ROTATE_Z
+    gizmo._axis[:] = (0.0, 0.0, 1.0)
+    gizmo._start_basis[:] = np.eye(3)
+    gizmo._joint_drag_origin_qpos = np.array((start,))
+    gizmo._joint_range = _JointRangeState("hinge", current, lower, upper)
+    dial = _RotationDialProjector(
+        cam,
+        RECT,
+        gizmo._start_pos,
+        gizmo._axis,
+        gizmo._start_basis[:, 0],
+        SIZE_PT,
+    )
+    calls = []
+    original = gizmo_module._rotation_arc_stroke
+
+    def record(*args, **kwargs):
+        calls.append((kwargs.get("round_start", False), kwargs.get("round_end", False)))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(gizmo_module, "_rotation_arc_stroke", record)
+    gizmo._draw_rotation_guide(RecordingDraw2D(), cam, RECT, 1.0, dial)
+
+    assert calls == [expected]
 
 
 def test_multi_turn_hinge_guide_wraps_like_the_rotation_gizmo() -> None:
@@ -3481,6 +3587,7 @@ def test_scalar_joint_gizmo_uses_a_joint_color_instead_of_xyz(body_name: str) ->
         interactive=True,
     )
     assert backend.frame.handle_color == pytest.approx(JOINT_HANDLE_COLOR)
+    assert backend.frame.outline_color == pytest.approx(JOINT_OUTLINE_COLOR)
 
 
 @pytest.mark.physics

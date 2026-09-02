@@ -3086,6 +3086,7 @@ class InspectorPanel(Panel):
                 (ctx.tr("persp"), ctx.tr("ortho")),
                 projection,
                 theme=ctx.theme,
+                icons=("persp", "ortho"),
             )
             imgui.end_disabled()
             if not supported:

@@ -252,6 +252,7 @@ class CameraPanel(Panel):
                 (ctx.tr("persp"), ctx.tr("ortho")),
                 1 if bool(ortho) else 0,
                 theme=ctx.theme,
+                icons=("persp", "ortho"),
             )
             imgui.end_disabled()
             if not supported:
@@ -259,7 +260,13 @@ class CameraPanel(Panel):
                     f"{ctx.backend.caps.name}: {ctx.tr('orthographic projection unavailable')}"
                 )
             else:
-                camera.orthographic = selected == 1
+                target = selected == 1
+                if target != bool(ortho):
+                    setter = getattr(camera, "set_orthographic", None)
+                    if setter is not None:
+                        setter(target, animate=True)
+                    else:
+                        camera.orthographic = target
         imgui.end_table()
 
     @staticmethod

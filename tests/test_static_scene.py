@@ -170,7 +170,7 @@ def test_global_playback_controls_prioritize_recording_and_take_replay():
     app._toggle_playback()
     assert isinstance(calls.pop(), cmd.PauseStateTake)
 
-    app._stop_playback()
+    app._reset_playback()
     assert isinstance(calls[-2], cmd.PauseStateTake)
     assert calls[-1] == cmd.SeekStateTake(0)
 
@@ -911,6 +911,38 @@ def test_state_take_records_replays_and_steps_backward_without_editing_the_scene
     assert adapter.steps == 1
     assert session.submit(cmd.ClearStateTake())
     assert session.state_take_times == []
+
+
+def test_default_frame_history_restores_previous_displayed_simulation_states():
+    adapter = SnapshotToyPhysics()
+    session = Session(adapter)
+
+    session.tick(FrameNeeds(), wall_dt=0.01)
+    session.tick(FrameNeeds(), wall_dt=0.01)
+    assert adapter.steps == 2
+    assert session.submit(cmd.Pause())
+    assert session.can_step_back
+
+    assert session.submit(cmd.StepBack())
+    assert adapter.steps == 1
+    assert session.tick(FrameNeeds()).step == 1
+
+    assert session.submit(cmd.Step(1))
+    assert session.tick(FrameNeeds()).step == 2
+    assert session.can_step_back
+    assert session.submit(cmd.StepBack())
+    assert adapter.steps == 1
+
+
+def test_frame_history_requires_pause_and_snapshot_support():
+    running = Session(SnapshotToyPhysics())
+    running.tick(FrameNeeds(), wall_dt=0.01)
+    assert not running.submit(cmd.StepBack())
+
+    unsupported = Session(ToyPhysics())
+    assert unsupported.submit(cmd.Pause())
+    assert not unsupported.can_step_back
+    assert not unsupported.submit(cmd.StepBack())
 
 
 def test_session_routes_sparse_stable_control_ids_without_using_them_as_slots():

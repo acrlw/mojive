@@ -43,6 +43,7 @@ FRAME_MARGIN = 1.15
 FRAME_FAR_MARGIN = 32.0
 
 FRAME_DURATION = 0.35
+PROJECTION_DURATION = 0.28
 DEFAULT_YAW = 0.0
 DEFAULT_PITCH = 0.0
 
@@ -81,6 +82,13 @@ def _ease_out_quart(t: float) -> float:
     return 1.0 - (1.0 - t) ** 4
 
 
+def _smoothstep(t: float) -> float:
+    """Cubic ease-in/out with zero velocity at both projection endpoints."""
+
+    t = min(1.0, max(0.0, t))
+    return t * t * (3.0 - 2.0 * t)
+
+
 def _wrap_deg(a: float) -> float:
     return float((a + 180.0) % 360.0 - 180.0)
 
@@ -94,6 +102,52 @@ class _Anim:
     ortho_height: float
     elapsed: float = 0.0
     duration: float = FRAME_DURATION
+
+
+@dataclass
+class ProjectionTransition:
+    """Small reusable state machine for perspective/orthographic morphing."""
+
+    value: float = 0.0
+    start: float = 0.0
+    target: float = 0.0
+    elapsed: float = 0.0
+    duration: float = PROJECTION_DURATION
+    active: bool = False
+
+    def snap(self, orthographic: bool) -> None:
+        self.value = self.start = self.target = 1.0 if orthographic else 0.0
+        self.elapsed = 0.0
+        self.active = False
+
+    def set(self, orthographic: bool, *, animate: bool) -> None:
+        target = 1.0 if orthographic else 0.0
+        if not animate:
+            self.snap(orthographic)
+            return
+        if self.active and target == self.target:
+            return
+        if not self.active and target == self.value:
+            return
+        self.start = float(self.value)
+        self.target = target
+        self.elapsed = 0.0
+        self.active = True
+
+    def finish(self) -> None:
+        if self.active:
+            self.snap(self.target >= 0.5)
+
+    def advance(self, dt: float) -> bool:
+        if not self.active:
+            return False
+        self.elapsed += max(0.0, float(dt))
+        t = min(1.0, self.elapsed / max(self.duration, 1e-6))
+        eased = _smoothstep(t)
+        self.value = self.start + (self.target - self.start) * eased
+        if t >= 1.0:
+            self.snap(self.target >= 0.5)
+        return True
 
 
 class OrbitCamera:
@@ -124,6 +178,8 @@ class OrbitCamera:
         self._aspect = float(aspect)
         self._orthographic = bool(orthographic)
         self.ortho_height = float(ortho_height)
+        self._projection = ProjectionTransition()
+        self._projection.snap(self._orthographic)
         self._adaptive_near = True
         self._anim: _Anim | None = None
 
@@ -248,6 +304,7 @@ class OrbitCamera:
         self._aspect = float(view.aspect)
         self._orthographic = bool(view.orthographic)
         self.ortho_height = float(view.ortho_height)
+        self._projection.snap(self._orthographic)
         self._touch()
 
     def direction(self) -> np.ndarray:
@@ -276,6 +333,7 @@ class OrbitCamera:
             aspect=float(self._aspect),
             orthographic=bool(self._orthographic),
             ortho_height=float(self.ortho_height),
+            orthographic_blend=(float(self._projection.value) if self._projection.active else None),
         )
 
     def publish(self, sink: CameraSink) -> CameraView:
@@ -291,6 +349,7 @@ class OrbitCamera:
         self._anim = None
         self._anim_start = None
         self._anim_easing = _ease_out_quad
+        self._projection.finish()
 
     @property
     def dirty(self) -> bool:
@@ -343,7 +402,7 @@ class OrbitCamera:
     def matched_ortho_height(self) -> float:
         return self.view().matched_ortho_height()
 
-    def set_orthographic(self, on: bool) -> None:
+    def set_orthographic(self, on: bool, *, animate: bool = False) -> None:
         on = bool(on)
         if on == self._orthographic:
             return
@@ -354,6 +413,7 @@ class OrbitCamera:
                 MIN_DISTANCE, self.ortho_height * 0.5 / float(np.tan(self._fov_y * 0.5))
             )
         self._orthographic = on
+        self._projection.set(on, animate=animate)
         self._touch()
 
     def frame_scene(
@@ -471,7 +531,7 @@ class OrbitCamera:
 
     @property
     def animating(self) -> bool:
-        return self._anim is not None
+        return self._anim is not None or self._projection.active
 
     def advance(self, dt: float, sink: CameraSink) -> bool:
         anim = self._anim
@@ -495,6 +555,8 @@ class OrbitCamera:
                 self._anim = None
                 self._anim_start = None
                 self._anim_easing = _ease_out_quad
+        if self._projection.advance(dt):
+            self._touch()
         if self._dirty:
             self.publish(sink)
             return True

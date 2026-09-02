@@ -35,6 +35,7 @@ from mojive.ui.viewport_widgets import (
     default_tool_hints,
     draw_mouse_hint_glyph,
     draw_playback_glyph,
+    draw_projection_glyph,
     draw_status,
     draw_tool_glyph,
 )
@@ -278,6 +279,14 @@ def _draw_step_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=Non
     draw_playback_glyph(draw, center, color, scale, "step")
 
 
+def _draw_previous_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=None) -> None:
+    draw_playback_glyph(draw, center, color, scale, "previous")
+
+
+def _draw_reset_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=None) -> None:
+    draw_playback_glyph(draw, center, color, scale, "reset")
+
+
 def _draw_stop_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=None) -> None:
     draw_playback_glyph(draw, center, color, scale, "stop")
 
@@ -338,16 +347,17 @@ def _draw_playback(draw: ImguiDraw2D, origin, scale: float, state: ProbeState) -
     assert math.isclose(state_radius - icon_radius, capsule_radius - state_radius)
     hit_size = float(state.overlay_center_step)
     center_step = float(state.overlay_center_step)
-    width = (capsule_radius * 2.0 + center_step * 2.0) * scale
+    width = (capsule_radius * 2.0 + center_step * 3.0) * scale
     height = capsule_radius * 2.0 * scale
     capsule = capsule_points(x, y, width, height)
     draw.convex_fill(capsule, (*CONCEPT_THEME.bg_child[:3], CAPSULE_SURFACE_ALPHA))
     draw.polyline(capsule, CONCEPT_THEME.primary, 1.4 * scale, closed=True)
     for index, (item_id, icon, selected) in enumerate(
         (
+            ("##probe-previous", _draw_previous_icon, False),
             ("##probe-play", _draw_pause_icon if state.playing else _draw_play_icon, state.playing),
             ("##probe-step", _draw_step_icon, False),
-            ("##probe-stop", _draw_stop_icon, False),
+            ("##probe-reset", _draw_reset_icon, False),
         )
     ):
         center_x = x + (capsule_radius + index * center_step) * scale
@@ -369,9 +379,9 @@ def _draw_playback(draw: ImguiDraw2D, origin, scale: float, state: ProbeState) -
             show_state_circle=state.show_state_circles,
             scale=scale,
         )
-        if clicked and index == 0:
+        if clicked and index == 1:
             state.playing = not state.playing
-        elif clicked and index == 2:
+        elif clicked and index == 3:
             state.playing = False
 
 
@@ -1321,8 +1331,10 @@ def _draw_segmented(
     selected: int,
     *,
     width: float = 82.0,
+    icons: tuple[str, ...] | None = None,
 ) -> int:
     result = selected
+    draw = ImguiDraw2D()
     imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(1.0, 0.0))
     for index, label in enumerate(labels):
         if index:
@@ -1330,10 +1342,37 @@ def _draw_segmented(
         if index == selected:
             imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(*CONCEPT_THEME.bg_frame_active))
             imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*CONCEPT_THEME.primary_bright))
-        if imgui.button(f"{label}##{item_id}-{index}", imgui.ImVec2(width, 0.0)):
+        icon = icons[index] if icons is not None and index < len(icons) else ""
+        button_label = f"##{item_id}-{index}" if icon else f"{label}##{item_id}-{index}"
+        if imgui.button(button_label, imgui.ImVec2(width, 0.0)):
             result = index
+        item_min = imgui.get_item_rect_min()
+        item_max = imgui.get_item_rect_max()
         if index == selected:
             imgui.pop_style_color(2)
+        if icon:
+            glyph_scale = max(0.65, imgui.get_frame_height() / 24.0)
+            glyph_width = 10.4 * glyph_scale
+            gap = 7.0 * glyph_scale
+            label_width, label_height = draw.text_size(label)
+            content_width = glyph_width + gap + label_width
+            content_left = (item_min.x + item_max.x - content_width) * 0.5
+            color = CONCEPT_THEME.primary_bright if index == selected else CONCEPT_THEME.text
+            draw_projection_glyph(
+                draw,
+                (content_left + glyph_width * 0.5, (item_min.y + item_max.y) * 0.5),
+                color,
+                glyph_scale,
+                icon,
+            )
+            draw.text(
+                (
+                    content_left + glyph_width + gap,
+                    (item_min.y + item_max.y - label_height) * 0.5,
+                ),
+                color,
+                label,
+            )
     imgui.pop_style_var()
     return result
 
@@ -1862,7 +1901,7 @@ def _draw_viewport(size, scale: float, state: ProbeState) -> tuple[float, float,
         )
     shell_radius = state.overlay_icon_radius + state.overlay_radial_step * 2
     if state.show_playback:
-        playback_width = (shell_radius * 2.0 + state.overlay_center_step * 2.0) * scale
+        playback_width = (shell_radius * 2.0 + state.overlay_center_step * 3.0) * scale
         _draw_playback(
             draw,
             (x0 + (window_size.x - playback_width) * 0.5, y0 + 18 * scale),
@@ -2275,6 +2314,7 @@ def _draw_camera_gallery(size, state: ProbeState) -> None:
                 ("persp", "ortho"),
                 state.camera_projection,
                 width=segment_width,
+                icons=("persp", "ortho"),
             )
             imgui.end_table()
         if imgui.collapsing_header("camera bookmarks"):
@@ -3292,12 +3332,12 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         imgui.pop_id()
         pb_center_y = play_origin[1] + shell_radius * playback_scale
         pb_first_x = play_origin[0] + shell_radius * playback_scale
-        pb_last_x = pb_first_x + center_step * 2.0 * playback_scale
+        pb_last_x = pb_first_x + center_step * 3.0 * playback_scale
         _dimension_line(
             draw,
             (pb_first_x, pb_center_y + (shell_radius + 13.0) * playback_scale),
             (pb_last_x, pb_center_y + (shell_radius + 13.0) * playback_scale),
-            f"2 × CENTER {state.overlay_center_step}",
+            f"3 × CENTER {state.overlay_center_step}",
         )
         _dimension_line(
             draw,
@@ -3309,7 +3349,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             f"SHELL {int(shell_radius * 2.0)}",
             vertical=True,
         )
-        construction_width = (shell_radius * 2.0 + center_step * 2.0) * playback_scale
+        construction_width = (shell_radius * 2.0 + center_step * 3.0) * playback_scale
         if scale <= 1.25:
             playback_notes_x = play_origin[0] + construction_width + 30.0 * scale
             for index, line in enumerate(

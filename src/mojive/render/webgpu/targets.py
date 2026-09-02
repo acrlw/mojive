@@ -7,6 +7,7 @@ from concurrent.futures import Future
 import numpy as np
 import wgpu
 
+from ...math3d import blend_projection
 from ...types import CameraView
 from .readback import WgpuReadbackQueue, WgpuSyncReadback, rgba_to_rgb
 from .rgb_pack import WgpuRgbPacker
@@ -77,17 +78,23 @@ def orthographic_wgpu(height: float, aspect: float, near: float, far: float) -> 
 
 
 def proj_matrix_wgpu(camera: CameraView) -> np.ndarray:
-    if camera.orthographic:
+    blend = camera.projection_blend()
+    if blend >= 1.0:
         return orthographic_wgpu(camera.ortho_height, camera.aspect, camera.near, camera.far)
     if camera.uses_intrinsics():
-        return perspective_intrinsics_wgpu(
+        persp = perspective_intrinsics_wgpu(
             camera.focal_length,
             camera.sensor_size,
             camera.principal_offset,
             camera.near,
             camera.far,
         )
-    return perspective_wgpu(camera.fov_y, camera.aspect, camera.near, camera.far)
+    else:
+        persp = perspective_wgpu(camera.fov_y, camera.aspect, camera.near, camera.far)
+    if blend <= 0.0:
+        return persp
+    ortho = orthographic_wgpu(camera.ortho_height, camera.aspect, camera.near, camera.far)
+    return blend_projection(persp, ortho, camera.distance(), blend)
 
 
 class RenderTargetWgpu:

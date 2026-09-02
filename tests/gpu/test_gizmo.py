@@ -32,6 +32,7 @@ from mojive.gizmo import (  # noqa: E402
     CONTRAST_EDGE_PT,
     HOVER_COLOR,
     JOINT_HANDLE_COLOR,
+    JOINT_OUTLINE_COLOR,
     RING_RADIUS,
     SCREEN_RING_RADIUS,
     SIZE_PT,
@@ -210,6 +211,33 @@ def test_scalar_joint_color_override_renders_the_primary_palette(rig):
     assert len(joint_pixels) > 0
     median = np.median(joint_pixels, axis=0)
     assert median[1] > median[0] > median[2]
+
+
+@pytest.mark.parametrize(
+    ("mode", "handle"),
+    (
+        (GizmoMode.TRANSLATE, GizmoHandle.Z),
+        (GizmoMode.ROTATE, GizmoHandle.ROTATE_Z),
+    ),
+)
+def test_scalar_joint_outline_adds_a_thin_neutral_silhouette(rig, mode, handle):
+    if not rig.backend.caps.gizmo:
+        pytest.skip("gizmo unsupported by this backend")
+    frame = _frame(mode)
+    frame.handle_mask = handle_mask(handle)
+    frame.handle_color = JOINT_HANDLE_COLOR
+    without = rig.draw(frame, _camera(), box=False)
+
+    frame.outline_color = JOINT_OUTLINE_COLOR
+    outlined = rig.draw(frame, _camera(), box=False)
+
+    def neutral_pixels(image):
+        rgb = image[..., :3].astype(np.int16)
+        return (rgb.min(axis=-1) > 100) & (np.ptp(rgb, axis=-1) < 20)
+
+    added = neutral_pixels(outlined) & ~neutral_pixels(without)
+    assert int(added.sum()) > 12
+    assert _joint_mask(outlined).any()
 
 
 def test_scalar_joint_handle_uses_primary_palette_for_hover_and_press(rig):

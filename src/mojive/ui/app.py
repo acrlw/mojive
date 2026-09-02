@@ -9,7 +9,7 @@ import time
 import webbrowser
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,7 +29,7 @@ from ..workspace_io import (
     repair_workspace_resources,
 )
 from . import gestures as gs
-from .camera import CameraOut, OrbitCamera, ndc_from_viewport, unproject
+from .camera import CameraOut, OrbitCamera, ProjectionTransition, ndc_from_viewport, unproject
 from .camera_preview import CameraPreview
 from .draw2d import ImguiDraw2D
 from .gizmo import JointLimitHit, ObjectGizmo, PreciseGizmoInput
@@ -532,6 +532,8 @@ class ViewerApp:
         self._state = gs.InputState()
         self._model_camera_id = -1
         self._model_camera_view = None
+        self._model_camera_projection = ProjectionTransition()
+        self._model_camera_projection_target: bool | None = None
         self._fixed_render_size: tuple[int, int] | None = None
         self._model_dialog: Any | None = None
         self._model_dialog_action = ""
@@ -927,6 +929,7 @@ class ViewerApp:
         self.gizmo.cancel_model_placement(self.session)
         self._model_camera_id = -1
         self._model_camera_view = None
+        self._model_camera_projection_target = None
         self._structure_generation = -1
         self._sync_structure()
         self._reset_source_camera()
@@ -2751,6 +2754,8 @@ class ViewerApp:
         if i < 0:
             self._leave_model_camera(publish=True)
             return
+        if i != self._model_camera_id:
+            self._model_camera_projection_target = None
         self._model_camera_id = i
 
     def _viewing_selected_camera(self) -> bool:
@@ -2771,6 +2776,15 @@ class ViewerApp:
             return
         aspect = max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0)
         view = view.with_aspect(aspect)
+        target = bool(view.orthographic)
+        if self._model_camera_projection_target is None:
+            self._model_camera_projection.snap(target)
+        elif target != self._model_camera_projection_target:
+            self._model_camera_projection.set(target, animate=True)
+        self._model_camera_projection_target = target
+        self._model_camera_projection.advance(self._dt)
+        if self._model_camera_projection.active:
+            view = replace(view, orthographic_blend=self._model_camera_projection.value)
         self._model_camera_view = view
         self.backend.set_camera(view)
         self.session.submit(cmd.SetCamera(view))
@@ -2781,6 +2795,7 @@ class ViewerApp:
         # Model cameras remain scene entities; the editor orbit camera keeps its own view.
         self._model_camera_id = -1
         self._model_camera_view = None
+        self._model_camera_projection_target = None
         if publish:
             self.camera.publish(self.camera_out)
 
@@ -3259,6 +3274,7 @@ class ViewerApp:
                     scale,
                     playing=not paused,
                     step_enabled=paused and not take_playing,
+                    previous_enabled=self.session.can_step_back,
                     enabled=not self._scene_input_blocked(),
                     bindings=self.input_bindings,
                     labels=self._viewport_labels,
@@ -3270,8 +3286,10 @@ class ViewerApp:
                 self._toggle_playback()
             elif action == "step":
                 self.session.submit(cmd.Step(1))
-            elif action == "stop":
-                self._stop_playback()
+            elif action == "previous":
+                self.session.submit(cmd.StepBack())
+            elif action in ("reset", "stop"):
+                self._reset_playback()
         imgui.end()
         imgui.pop_style_var(2)
 
@@ -3726,7 +3744,7 @@ class ViewerApp:
         else:
             self.session.submit(cmd.Play() if self.session.paused else cmd.Pause())
 
-    def _stop_playback(self) -> None:
+    def _reset_playback(self) -> None:
         if self.session.state_take_recording:
             self.session.submit(cmd.StopStateTakeRecording())
         elif self.session.state_take_cursor >= 0:

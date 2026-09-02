@@ -65,6 +65,11 @@ class Step(Command):
 
 
 @dataclass(frozen=True)
+class StepBack(Command):
+    """Restore the previous displayed simulation state from frame history."""
+
+
+@dataclass(frozen=True)
 class Reset(Command):
     """Restore the adapter's initial state."""
 

@@ -10,6 +10,7 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, KeyframeInfo, KeyframeProperties
+from ...gizmo import _rounded_polygon_corners
 from ..draw2d import ImguiDraw2D
 from ..theme import with_alpha
 from ..viewport_widgets import ToolHint
@@ -152,54 +153,74 @@ def _draw_command_icon(draw, center, kind: str, color, scale: float) -> None:
 
     x, y = (float(center[0]), float(center[1]))
     s = float(scale)
+
+    def rounded_fill(points, *, radius: float = 0.75) -> None:
+        path = _rounded_polygon_corners(points, radius * s, tuple(range(len(points))), segments=5)
+        draw.fringed_concave_fill(tuple(map(tuple, path)), color)
+
     if kind == "record":
         draw.circle_filled((x, y), 4.5 * s, color, segments=20)
     elif kind == "play":
-        draw.convex_fill(
-            ((x - 4.5 * s, y - 6.0 * s), (x + 6.0 * s, y), (x - 4.5 * s, y + 6.0 * s)),
-            color,
-        )
+        rounded_fill(((x - 4.5 * s, y - 6.0 * s), (x + 6.0 * s, y), (x - 4.5 * s, y + 6.0 * s)))
     elif kind == "pause":
-        draw.rect_filled((x - 5.0 * s, y - 6.0 * s), (x - 1.5 * s, y + 6.0 * s), color)
-        draw.rect_filled((x + 1.5 * s, y - 6.0 * s), (x + 5.0 * s, y + 6.0 * s), color)
+        draw.rect_filled(
+            (x - 5.0 * s, y - 6.0 * s),
+            (x - 1.5 * s, y + 6.0 * s),
+            color,
+            rounding=0.75 * s,
+        )
+        draw.rect_filled(
+            (x + 1.5 * s, y - 6.0 * s),
+            (x + 5.0 * s, y + 6.0 * s),
+            color,
+            rounding=0.75 * s,
+        )
     elif kind == "stop":
-        draw.rect_filled((x - 5.5 * s, y - 5.5 * s), (x + 5.5 * s, y + 5.5 * s), color)
+        draw.rect_filled(
+            (x - 5.5 * s, y - 5.5 * s),
+            (x + 5.5 * s, y + 5.5 * s),
+            color,
+            rounding=1.0 * s,
+        )
     elif kind in ("first", "previous"):
-        draw.convex_fill(
-            ((x - 5.5 * s, y), (x + 3.5 * s, y - 6.0 * s), (x + 3.5 * s, y + 6.0 * s)),
-            color,
-        )
+        rounded_fill(((x - 5.5 * s, y), (x + 3.5 * s, y - 6.0 * s), (x + 3.5 * s, y + 6.0 * s)))
         if kind == "first":
-            draw.rect_filled((x - 7.0 * s, y - 6.0 * s), (x - 5.2 * s, y + 6.0 * s), color)
+            draw.rect_filled(
+                (x - 7.0 * s, y - 6.0 * s),
+                (x - 5.2 * s, y + 6.0 * s),
+                color,
+                rounding=0.65 * s,
+            )
     elif kind in ("next", "last"):
-        draw.convex_fill(
-            ((x + 5.5 * s, y), (x - 3.5 * s, y - 6.0 * s), (x - 3.5 * s, y + 6.0 * s)),
-            color,
-        )
+        rounded_fill(((x + 5.5 * s, y), (x - 3.5 * s, y - 6.0 * s), (x - 3.5 * s, y + 6.0 * s)))
         if kind == "last":
-            draw.rect_filled((x + 5.2 * s, y - 6.0 * s), (x + 7.0 * s, y + 6.0 * s), color)
+            draw.rect_filled(
+                (x + 5.2 * s, y - 6.0 * s),
+                (x + 7.0 * s, y + 6.0 * s),
+                color,
+                rounding=0.65 * s,
+            )
     elif kind == "clear":
         draw.line((x - 5.0 * s, y - 5.0 * s), (x + 5.0 * s, y + 5.0 * s), color, 1.8 * s)
         draw.line((x + 5.0 * s, y - 5.0 * s), (x - 5.0 * s, y + 5.0 * s), color, 1.8 * s)
     elif kind in ("key-previous", "key-next"):
         direction = -1.0 if kind == "key-previous" else 1.0
         diamond_x = x - direction * 2.5 * s
-        draw.convex_fill(
+        rounded_fill(
             (
                 (diamond_x, y - 4.5 * s),
                 (diamond_x + 4.5 * s, y),
                 (diamond_x, y + 4.5 * s),
                 (diamond_x - 4.5 * s, y),
             ),
-            color,
+            radius=0.55,
         )
-        draw.convex_fill(
+        rounded_fill(
             (
                 (x + direction * 7.0 * s, y),
                 (x + direction * 3.5 * s, y - 3.5 * s),
                 (x + direction * 3.5 * s, y + 3.5 * s),
-            ),
-            color,
+            )
         )
     elif kind == "view":
         draw.rect(

@@ -110,9 +110,12 @@ class GizmoPass(BasePass):
 
                 data = {
                     "arrow": gizmo_mesh("arrow"),
+                    "arrow_edge": gizmo_mesh("arrow_edge"),
                     "plane": gizmo_mesh("plane"),
                     "ring": gizmo_mesh("ring"),
                     "half_ring": gizmo_mesh("half_ring"),
+                    "ring_edge": gizmo_mesh("ring_edge"),
+                    "half_ring_edge": gizmo_mesh("half_ring_edge"),
                     "screen_ring": gizmo_mesh("screen_ring"),
                     "screen_ring_edge": gizmo_mesh("screen_ring_edge"),
                     "trackball": builtin_mesh(MeshKey(MeshShape.DISK)),
@@ -178,6 +181,20 @@ class GizmoPass(BasePass):
                     )
                     if alpha <= 0.0:
                         continue
+                    if frame.outline_color is not None:
+                        ctx.target.fbo.depth_mask = False
+                        edge_color = np.asarray(frame.outline_color, np.float32).copy()
+                        edge_color[3] *= alpha
+                        self._draw(
+                            ctx,
+                            "arrow_edge",
+                            frame.position,
+                            axis_rotation(frame.rotation, axis),
+                            scale,
+                            edge_color,
+                            mask_radius=CENTER_SHELL_RADIUS,
+                        )
+                        ctx.target.fbo.depth_mask = True
                     self._draw(
                         ctx,
                         "arrow",
@@ -247,15 +264,29 @@ class GizmoPass(BasePass):
                 )
                 if alpha <= 0.0:
                     continue
+                rotation = (
+                    axis_rotation(frame.rotation, axis)
+                    if full
+                    else rotation_half_basis(ctx.camera, frame.position, frame.rotation, axis)
+                )
+                if frame.outline_color is not None:
+                    ctx.target.fbo.depth_mask = False
+                    edge_color = np.asarray(frame.outline_color, np.float32).copy()
+                    edge_color[3] *= alpha
+                    self._draw(
+                        ctx,
+                        "ring_edge" if full else "half_ring_edge",
+                        frame.position,
+                        rotation,
+                        scale,
+                        edge_color,
+                    )
+                    ctx.target.fbo.depth_mask = True
                 self._draw(
                     ctx,
                     "ring" if full else "half_ring",
                     frame.position,
-                    (
-                        axis_rotation(frame.rotation, axis)
-                        if full
-                        else rotation_half_basis(ctx.camera, frame.position, frame.rotation, axis)
-                    ),
+                    rotation,
                     scale,
                     rotation_handle_color(frame, handle, axis, alpha),
                 )

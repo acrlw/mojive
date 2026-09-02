@@ -39,6 +39,8 @@ from ..gizmo import (
     GUIDE_CORE_COLOR,
     HOVER_COLOR,
     JOINT_HANDLE_COLOR,
+    JOINT_OUTLINE_COLOR,
+    JOINT_OUTLINE_PT,
     PLANE_ACTIVE_ALPHA,
     PLANE_ALPHA,
     PLANE_HANDLES,
@@ -154,15 +156,23 @@ def _joint_endpoint_color(state: _JointRangeState | None):
 
     if state is None:
         return None
+    if _joint_value_at_limit(state, state.current, lower=True):
+        return JOINT_LOWER_LIMIT_COLOR
+    if _joint_value_at_limit(state, state.current, lower=False):
+        return JOINT_UPPER_LIMIT_COLOR
+    return None
+
+
+def _joint_value_at_limit(state: _JointRangeState, value: float, *, lower: bool) -> bool:
+    """Return whether a scalar value is clamped to one authored limit."""
+
     tolerance = max(
         _JOINT_RANGE_EPSILON,
         abs(float(state.upper) - float(state.lower)) * 1e-6,
     )
-    if float(state.current) <= float(state.lower) + tolerance:
-        return JOINT_LOWER_LIMIT_COLOR
-    if float(state.current) >= float(state.upper) - tolerance:
-        return JOINT_UPPER_LIMIT_COLOR
-    return None
+    if lower:
+        return float(value) <= float(state.lower) + tolerance
+    return float(value) >= float(state.upper) - tolerance
 
 
 def _joint_current_tick_color(state: _JointRangeState, range_color):
@@ -1150,6 +1160,11 @@ class ObjectGizmo:
             if target is not None and target.joint.type in ("hinge", "slide")
             else None
         )
+        frame.outline_color = (
+            JOINT_OUTLINE_COLOR
+            if target is not None and target.joint.type in ("hinge", "slide")
+            else None
+        )
         frame.active_projection_fade = target is not None
         self._publish_translation_guide(backend, ui_scale)
         if self._style is GizmoStyle.FLAT:
@@ -1439,10 +1454,12 @@ class ObjectGizmo:
         state = self._joint_range
         if state is None:
             return
-        if state.joint_type == "hinge":
-            self._draw_hinge_range(overlay, cam, rect, style_scale, state, phase=phase)
-        elif state.joint_type == "slide":
-            self._draw_slide_range(overlay, cam, rect, style_scale, state, phase=phase)
+        phases = ("outline", "core") if phase in ("all", "geometry") else (phase,)
+        for draw_phase in phases:
+            if state.joint_type == "hinge":
+                self._draw_hinge_range(overlay, cam, rect, style_scale, state, phase=draw_phase)
+            elif state.joint_type == "slide":
+                self._draw_slide_range(overlay, cam, rect, style_scale, state, phase=draw_phase)
 
     def _draw_hinge_range(
         self,
@@ -1474,6 +1491,11 @@ class ObjectGizmo:
         full_range = state.covers_full_turn
         allowed_color = self._hinge_range_color()
         range_color = _with_alpha(allowed_color, alpha)
+        outline = phase == "outline"
+        stroke_color = _with_alpha(JOINT_OUTLINE_COLOR, alpha) if outline else range_color
+        range_width = (
+            JOINT_RANGE_WIDTH_PT + (2.0 * JOINT_OUTLINE_PT if outline else 0.0)
+        ) * style_scale
         if phase != "labels" and span > 1e-6:
             point_count = max(2, int(np.ceil(segments * span / _FULL_TURN)) + 1)
             allowed_angles = np.linspace(
@@ -1486,10 +1508,10 @@ class ObjectGizmo:
             if np.all(allowed[:, 2] > 0.0):
                 overlay.polyline(
                     allowed[:, :2],
-                    range_color,
-                    JOINT_RANGE_WIDTH_PT * style_scale,
+                    stroke_color,
+                    range_width,
                     closed=full_range,
-                    cap="butt",
+                    cap="butt" if full_range else "round",
                 )
         if phase != "labels":
             current_tick = dial.tick(
@@ -1501,12 +1523,12 @@ class ObjectGizmo:
                 overlay.line(
                     current_tick[0],
                     current_tick[1],
-                    _joint_current_tick_color(state, range_color),
-                    JOINT_RANGE_WIDTH_PT * style_scale,
-                    cap="round_end",
+                    stroke_color if outline else _joint_current_tick_color(state, range_color),
+                    range_width,
+                    cap="round",
                 )
             if not state.has_ambiguous_dial_limits:
-                tick_width = 3.0 * style_scale
+                tick_width = (3.0 + (2.0 * JOINT_OUTLINE_PT if outline else 0.0)) * style_scale
                 lower_tick = dial.tick(
                     JOINT_RANGE_RADIUS,
                     start_angle,
@@ -1542,17 +1564,18 @@ class ObjectGizmo:
                         overlay.line(
                             tick[0],
                             tick[1],
-                            _with_alpha(color, alpha),
+                            stroke_color if outline else _with_alpha(color, alpha),
                             tick_width,
-                            cap="round_end",
+                            cap="round",
                         )
-                self._set_joint_limit_hits(
-                    state,
-                    entries,
-                    tick_width=tick_width,
-                    tick_cap="round_end",
-                    style_scale=style_scale,
-                )
+                if not outline:
+                    self._set_joint_limit_hits(
+                        state,
+                        entries,
+                        tick_width=tick_width,
+                        tick_cap="round",
+                        style_scale=style_scale,
+                    )
 
     def _draw_slide_handle(
         self,
@@ -1562,14 +1585,27 @@ class ObjectGizmo:
         tangent: np.ndarray,
         normal: np.ndarray,
         alpha: float,
+        *,
+        outline: bool = False,
     ) -> None:
         """Draw opposing external arrows for slide-joint interaction."""
 
         slide = _SlideRangeProjection(current, current, current, tangent, normal, alpha)
-        color = self._flat_color(GizmoHandle.Z, 2, alpha)
+        color = (
+            _with_alpha(JOINT_OUTLINE_COLOR, alpha)
+            if outline
+            else self._flat_color(GizmoHandle.Z, 2, alpha)
+        )
         for points in self._slide_arrow_polygons(slide, style_scale):
             if len(points):
                 overlay.fringed_concave_fill(points, color)
+                if outline:
+                    overlay.polyline(
+                        points,
+                        color,
+                        2.0 * JOINT_OUTLINE_PT * style_scale,
+                        closed=True,
+                    )
 
     @staticmethod
     def _slide_arrow_polygons(
@@ -1645,8 +1681,13 @@ class ObjectGizmo:
         range_color = self._flat_color(GizmoHandle.Z, 2, alpha)
         lower, current, upper = slide.lower, slide.current, slide.upper
         tangent, normal = slide.tangent, slide.normal
+        outline = phase == "outline"
+        stroke_color = _with_alpha(JOINT_OUTLINE_COLOR, alpha) if outline else range_color
+        range_width = (
+            JOINT_RANGE_WIDTH_PT + (2.0 * JOINT_OUTLINE_PT if outline else 0.0)
+        ) * style_scale
         if phase != "labels":
-            overlay.line(lower, upper, range_color, JOINT_RANGE_WIDTH_PT * style_scale)
+            overlay.line(lower, upper, stroke_color, range_width)
             self._draw_slide_handle(
                 overlay,
                 style_scale,
@@ -1654,19 +1695,20 @@ class ObjectGizmo:
                 tangent,
                 normal,
                 alpha,
+                outline=outline,
             )
 
             if not (self._using and self._active is GizmoHandle.Z and not self._snapping):
                 overlay.line(
                     current - normal * 10.0 * style_scale,
                     current + normal * 10.0 * style_scale,
-                    _joint_current_tick_color(state, range_color),
-                    JOINT_RANGE_WIDTH_PT * style_scale,
+                    stroke_color if outline else _joint_current_tick_color(state, range_color),
+                    range_width,
                     cap="round",
                 )
 
             half_tick = 6.0 * style_scale
-            tick_width = 3.0 * style_scale
+            tick_width = (3.0 + (2.0 * JOINT_OUTLINE_PT if outline else 0.0)) * style_scale
             entries = (
                 (
                     state.lower,
@@ -1691,17 +1733,18 @@ class ObjectGizmo:
                 overlay.line(
                     tick[0],
                     tick[1],
-                    _with_alpha(limit_color, alpha),
+                    stroke_color if outline else _with_alpha(limit_color, alpha),
                     tick_width,
                     cap="round",
                 )
-            self._set_joint_limit_hits(
-                state,
-                entries,
-                tick_width=tick_width,
-                tick_cap="round",
-                style_scale=style_scale,
-            )
+            if not outline:
+                self._set_joint_limit_hits(
+                    state,
+                    entries,
+                    tick_width=tick_width,
+                    tick_cap="round",
+                    style_scale=style_scale,
+                )
 
     def _set_joint_limit_hits(
         self,
@@ -2042,7 +2085,7 @@ class ObjectGizmo:
         )
         if short_joint_axis:
             extent = scale * 1.05
-        elif cam.orthographic:
+        elif cam.projection_blend() >= 1.0 - 1e-6:
             extent = max(
                 scale * 8.0,
                 float(cam.ortho_height) * 0.75 * np.hypot(float(cam.aspect), 1.0),
@@ -2144,13 +2187,34 @@ class ObjectGizmo:
         start_half_tick = JOINT_DRAG_START_TICK_HALF_PT * style_scale
         end_half_tick = JOINT_CURRENT_TICK_PT * 0.5 * style_scale
         color = JOINT_ACTIVE_DARK_COLOR
+        outline = JOINT_OUTLINE_COLOR
+        core_width = JOINT_RANGE_WIDTH_PT * style_scale
+        outline_width = core_width + 2.0 * JOINT_OUTLINE_PT * style_scale
+        end_width = 4.0 * style_scale
+        end_outline_width = end_width + 2.0 * JOINT_OUTLINE_PT * style_scale
         if distance > 1e-6:
-            overlay.line(start, end, color, JOINT_RANGE_WIDTH_PT * style_scale)
+            overlay.line(start, end, outline, outline_width)
+            overlay.line(
+                start - normal * start_half_tick,
+                start + normal * start_half_tick,
+                outline,
+                outline_width,
+                cap="round",
+            )
+        overlay.line(
+            end - normal * end_half_tick,
+            end + normal * end_half_tick,
+            outline,
+            end_outline_width,
+            cap="round",
+        )
+        if distance > 1e-6:
+            overlay.line(start, end, color, core_width)
             overlay.line(
                 start - normal * start_half_tick,
                 start + normal * start_half_tick,
                 color,
-                JOINT_RANGE_WIDTH_PT * style_scale,
+                core_width,
                 cap="round",
             )
         end_color = ACTIVE_HANDLE_COLOR
@@ -2160,7 +2224,7 @@ class ObjectGizmo:
             end - normal * end_half_tick,
             end + normal * end_half_tick,
             end_color,
-            4.0 * style_scale,
+            end_width,
             cap="round",
         )
 
@@ -2279,11 +2343,20 @@ class ObjectGizmo:
             width = RING_WIDTH_PT * style_scale
             start_tick = dial.tick(ring_radius, float(angles[0]), 1.0)
             end_tick = dial.tick(ring_radius, float(angles[-1]), 1.0)
+            rounded_start = False
+            rounded_end = False
+            if joint_range_ring and not joint_range.has_ambiguous_dial_limits:
+                rounded_start = _joint_value_at_limit(
+                    joint_range, start_angle, lower=True
+                ) or _joint_value_at_limit(joint_range, start_angle, lower=False)
+                rounded_end = _joint_endpoint_color(joint_range) is not None
             stroke = _rotation_arc_stroke(
                 arc,
                 None if start_tick is None else start_tick[1] - start_tick[0],
                 None if end_tick is None else end_tick[1] - end_tick[0],
                 width,
+                round_start=rounded_start,
+                round_end=rounded_end,
             )
             if len(stroke):
                 overlay.fringed_concave_fill(stroke, border)
@@ -3051,8 +3124,10 @@ def _rotation_arc_stroke(
     width: float,
     *,
     round_caps: bool = False,
+    round_start: bool = False,
+    round_end: bool = False,
 ) -> np.ndarray:
-    """Build one constant-width arc silhouette with flat or round caps."""
+    """Build one constant-width arc silhouette with independently rounded caps."""
     points = np.asarray(points, np.float64).reshape(-1, 2)
     width = float(width)
     if len(points) < 2 or width <= 0.0:
@@ -3094,25 +3169,27 @@ def _rotation_arc_stroke(
     half_width = 0.5 * width
     side_a = points - offsets * half_width
     side_b = points + offsets * half_width
-    if round_caps:
+    round_start = bool(round_start or round_caps)
+    round_end = bool(round_end or round_caps)
+    if round_start or round_end:
         cap_segments = max(8, int(np.ceil(np.pi * half_width)))
         angles = np.linspace(0.0, np.pi, cap_segments + 1)
-        end_cap = points[-1] + half_width * (
-            -offsets[-1][None, :] * np.cos(angles)[:, None]
-            + tangents[-1][None, :] * np.sin(angles)[:, None]
-        )
-        start_cap = points[0] + half_width * (
-            offsets[0][None, :] * np.cos(angles)[:, None]
-            - tangents[0][None, :] * np.sin(angles)[:, None]
-        )
-        return np.vstack(
-            (
-                side_a,
-                end_cap[1:],
-                side_b[-2::-1],
-                start_cap[1:-1],
+        parts = [side_a]
+        if round_end:
+            end_cap = points[-1] + half_width * (
+                -offsets[-1][None, :] * np.cos(angles)[:, None]
+                + tangents[-1][None, :] * np.sin(angles)[:, None]
             )
-        )
+            parts.extend((end_cap[1:], side_b[-2::-1]))
+        else:
+            parts.append(side_b[::-1])
+        if round_start:
+            start_cap = points[0] + half_width * (
+                offsets[0][None, :] * np.cos(angles)[:, None]
+                - tangents[0][None, :] * np.sin(angles)[:, None]
+            )
+            parts.append(start_cap[1:-1])
+        return np.vstack(parts)
     return np.vstack((side_a, side_b[::-1]))
 
 
@@ -3204,7 +3281,7 @@ def _project_finite_axis_segment(
         return None
     axis /= length
     lo, hi = -float(extent), float(extent)
-    if not cam.orthographic:
+    if cam.projection_blend() < 1.0 - 1e-6:
         forward = np.asarray(cam.forward(), np.float64)
         origin_depth = float(np.dot(origin - np.asarray(cam.eye, np.float64), forward))
         axis_depth = float(np.dot(axis, forward))
@@ -3372,11 +3449,10 @@ def _rotation_dial_segments(
     center,
     axis,
 ) -> int:
-    view = (
-        np.asarray(cam.forward(), np.float64)
-        if cam.orthographic
-        else np.asarray(center, np.float64) - np.asarray(cam.eye, np.float64)
-    )
+    perspective = np.asarray(center, np.float64) - np.asarray(cam.eye, np.float64)
+    perspective /= max(float(np.linalg.norm(perspective)), 1e-12)
+    mix = cam.projection_blend()
+    view = perspective * (1.0 - mix) + np.asarray(cam.forward(), np.float64) * mix
     view /= np.linalg.norm(view)
     facing = abs(float(np.dot(np.asarray(axis, np.float64), view)))
     multiplier = min(4.0, 1.0 / max(np.sqrt(facing), 0.25))

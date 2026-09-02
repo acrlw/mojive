@@ -251,6 +251,29 @@ def test_switching_to_orthographic_does_not_jump(distance):
     assert visible_height_at_target(cam.view()) == pytest.approx(before, rel=1e-6)
 
 
+def test_projection_switch_uses_smooth_nonlinear_morph_without_target_scale_jump():
+    from mojive.ui.camera import PROJECTION_DURATION
+
+    cam = OrbitCamera(distance=7.0, aspect=1.6)
+    sink = RecordingSink()
+    before = visible_height_at_target(cam.view())
+
+    cam.set_orthographic(True, animate=True)
+    assert cam.animating
+    assert cam.view().projection_blend() == 0.0
+
+    cam.advance(PROJECTION_DURATION * 0.25, sink)
+    transitional = cam.view()
+    assert transitional.projection_blend() == pytest.approx(0.15625)
+    assert transitional.projection_blend() != pytest.approx(0.25)
+    assert visible_height_at_target(transitional) == pytest.approx(before, rel=1e-6)
+
+    cam.advance(PROJECTION_DURATION, sink)
+    assert not cam.animating
+    assert cam.view().projection_blend() == 1.0
+    assert visible_height_at_target(cam.view()) == pytest.approx(before, rel=1e-6)
+
+
 def test_orthographic_dolly_still_zooms():
 
     cam = OrbitCamera(distance=4.0)
