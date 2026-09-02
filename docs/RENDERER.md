@@ -71,10 +71,10 @@ introducing temporal lag. Any dependency change invalidates the relevant product
 revision-zero custom scenes deliberately take the conservative render-every-frame path.
 
 WebGPU render-target views and resource bind groups follow the same ownership model. Target views
-are created with their textures, while scene, tendon, outline, identity-presentation, and RGB-pack
-bindings persist until one of their buffers or views is replaced. Resize, MSAA changes, and
-instance-buffer growth rebuild only the affected descriptors rather than allocating wrapper
-objects every frame.
+are created with their textures, while scene, tendon, outline, identity-presentation, RGB-pack
+bindings, and synchronous staging storage persist until one of their buffers or views is replaced.
+Resize, MSAA changes, and instance-buffer growth rebuild only the affected resources rather than
+allocating wrappers or staging buffers every frame.
 
 The MuJoCo adapter derives `FrameNeeds` from visible scene options. Contacts, tendons, deformables,
 diagnostics, islands, and BVH data are prepared only when a visible feature consumes them. Pose
@@ -92,10 +92,13 @@ mapping, a persistent compute pass therefore converts each four RGBA pixels into
 The mapped payload is exactly three bytes per pixel (apart from at most nine terminal padding bytes),
 instead of a four-byte texture copy followed by a strided CPU channel extraction. The shader,
 pipeline, storage buffer, texture binding, and dispatch geometry survive across frames; target
-resize invalidates only the size-dependent buffer and binding. The conversion is byte-exact for
-the normalized render target. If an unusually large target exceeds a device's storage-binding
-limit, it falls back to the texture-copy path rather than failing capture. The generic row decoder
-retains Pillow's compiled RGBA conversion for that path and other texture-copy callers.
+resize invalidates only the size-dependent buffers and binding. Synchronous capture records the
+packing dispatch and copy into its persistent map-readable staging buffer in one command encoder,
+then maps that buffer directly. This avoids the second submission and transient staging allocation
+hidden by `queue.read_buffer()`. The conversion is byte-exact for the normalized render target. If
+an unusually large target exceeds a device's storage-binding limit, it falls back to the
+texture-copy path rather than failing capture. The generic row decoder retains Pillow's compiled
+RGBA conversion for that path and other texture-copy callers.
 
 `Renderer.render_async()` is the explicit pipelined alternative. On wgpu it records the same GPU
 packing pass and a buffer copy into a lazily-created, three-slot staging ring, then returns a
@@ -212,13 +215,13 @@ make renderer-benchmark-full
 
 On an Apple M5 at 1920×1080 with 4× MSAA, the isolated public-API benchmark records the following
 RGB update-and-render medians after the lifecycle-stream, persistent-pass, stable-binding, and
-native RGB-packing changes:
+single-submission RGB readback changes:
 
 | Workload | MuJoCo | Mojive OpenGL | Mojive wgpu |
 |---|---:|---:|---:|
 | 256 static objects | 6.37 ms | 3.17 ms (0.50×) | 2.43 ms (0.38×) |
 | 1,024 animated objects | 10.05 ms | 3.59 ms (0.36×) | 2.73 ms (0.27×) |
-| textured, transparent, reflective materials | 4.12 ms | 2.98 ms (0.72×) | 2.51 ms (0.61×) |
+| textured, transparent, reflective materials | 4.32 ms | 2.97 ms (0.69×) | 2.15 ms (0.50×) |
 | 256 untextured material variants | 8.12 ms | 3.19 ms (0.39×) | 7.19 ms (0.89×) |
 
 The ratio is Mojive time divided by MuJoCo time, so lower is faster. These measurements are evidence
@@ -227,7 +230,17 @@ the target machine when changing pipeline structure. Metal readback on this host
 power-state modes, so renderer order can change absolute wgpu latency. In alternating same-machine
 A/B rounds, moving packing from the native CPU kernel to the persistent GPU pass reduced the
 materials median from 3.43–3.50 ms to 2.50–2.60 ms. The earlier strided NumPy path was about 10.3 ms
-under the same load; compare repeated rounds rather than selecting one favorable run.
+under the same load. Combining GPU packing and staging copy into one submission then reduced four
+interleaved-process rounds from a 2.541 ms median to 2.186 ms, about 14 percent, while preserving
+byte-exact output. The measured process RSS delta also fell from roughly 62.5 to 56.6 MiB,
+consistent with replacing the temporary `queue.read_buffer()` path by persistent staging. Compare
+repeated rounds rather than selecting one favorable run.
+
+The benchmark report separates the backend command graph from synchronous readback under
+`backend_render`. On the same materials scene, color-only WebGPU submission used 0.309 ms of CPU
+and completed at 0.590 ms/frame throughput; the interactive viewport request, including the object
+ID export, used 0.316 ms of CPU and completed at 0.669 ms/frame. This keeps renderer architecture
+decisions tied to command-graph measurements even when Metal mapping latency changes power state.
 
 The `material_variants` workload isolates draw-bucket scalability: it uses 256 distinct logical
 materials over a small set of built-in meshes while leaving their texture binding identical. On the

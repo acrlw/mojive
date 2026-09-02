@@ -167,6 +167,7 @@ def test_wgpu_reuses_stable_frame_bindings_and_target_views(rendered):
     group0 = backend._group0
     target.read_rgb()
     rgb_buffer = target._rgb_packer._buffer
+    rgb_staging = target._rgb_packer._staging
     rgb_group = target._rgb_packer._group
     views = (
         target.color_view,
@@ -183,6 +184,7 @@ def test_wgpu_reuses_stable_frame_bindings_and_target_views(rendered):
 
     assert backend._group0 is group0
     assert target._rgb_packer._buffer is rgb_buffer
+    assert target._rgb_packer._staging is rgb_staging
     assert target._rgb_packer._group is rgb_group
     assert views == (
         target.color_view,
@@ -205,9 +207,11 @@ def test_msaa_flag_updates_the_backend_sample_state(backend_name, request):
         assert backend.caps.msaa_samples == 4
         original_color_view = getattr(backend.target, "color_view", None)
         original_rgb_buffer = None
+        original_rgb_staging = None
         if backend_name == "wgpu":
             backend.target.read_rgb()
             original_rgb_buffer = backend.target._rgb_packer._buffer
+            original_rgb_staging = backend.target._rgb_packer._staging
 
         assert backend.set_flag(RenderFlag.MSAA, False)
         assert not backend.get_flag(RenderFlag.MSAA)
@@ -217,8 +221,10 @@ def test_msaa_flag_updates_the_backend_sample_state(backend_name, request):
         if backend_name == "wgpu":
             assert backend.target.color_view is not original_color_view
             assert backend.target._rgb_packer._buffer is None
+            assert backend.target._rgb_packer._staging is None
             backend.target.read_rgb()
             assert backend.target._rgb_packer._buffer is not original_rgb_buffer
+            assert backend.target._rgb_packer._staging is not original_rgb_staging
 
         single_sample_view = getattr(backend.target, "color_view", None)
         assert backend.set_flag(RenderFlag.MSAA, True)

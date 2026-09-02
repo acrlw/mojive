@@ -44,6 +44,15 @@ material. Alpha follows the same path.
 data. This keeps scene conversion inside the rendering boundary and gives protocol clients a
 complete setup and frame path.
 
+### WebGPU capture submission
+
+Synchronous RGB packing and its GPU-to-CPU staging copy share one command encoder and submission.
+The mapped staging buffer persists with the target, avoiding `queue.read_buffer()`'s hidden copy
+submission and transient allocation. Scene rendering remains a separate submission: folding capture
+into the scene backend changed the 1920×1080 materials median by only 0.7 percent while adding a
+backend-specific render return path. The asynchronous API retains its bounded staging ring so
+mapping can overlap later frame submissions.
+
 ## Picking and overlays
 
 GPU picking and physics raycasts use the same visual-group mask. World-body hits resolve to the

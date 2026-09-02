@@ -225,6 +225,14 @@ def _byte_distribution(values: list[float]) -> dict[str, float]:
     }
 
 
+def _counter_distribution(values: list[int]) -> dict[str, float | int]:
+    return {
+        "median": float(statistics.median(values)),
+        "min": min(values),
+        "max": max(values),
+    }
+
+
 def _cache_summary(samples: list[str]) -> dict[str, float | int]:
     rendered = samples.count("rendered")
     reused = samples.count("reused")
@@ -331,6 +339,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "identity": [],
         }
         pass_cache: dict[str, list[str]] = {"shadow": [], "reflection": []}
+        backend_cpu_ms: list[float] = []
+        backend_gpu_ms: list[float] = []
+        backend_draw_calls: list[int] = []
+        backend_buckets: list[int] = []
         checksum = 0
         for frame in range(args.frames):
             _animate(mujoco, args.workload, model, data, base_qpos, args.warmup + frame)
@@ -349,7 +361,14 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 uploaded_streams = instances.uploaded_streams
                 for stream, values in stream_upload_bytes.items():
                     values.append(float(uploaded_streams.get(stream, 0)))
-            notes = getattr(getattr(backend, "stats", None), "notes", {})
+            stats = getattr(backend, "stats", None)
+            if stats is not None:
+                backend_cpu_ms.append(float(stats.frame_cpu_ms))
+                backend_draw_calls.append(int(stats.draw_calls))
+                backend_buckets.append(int(stats.buckets))
+                if stats.gpu_ms:
+                    backend_gpu_ms.append(sum(float(value) for value in stats.gpu_ms.values()))
+            notes = getattr(stats, "notes", {})
             for pass_name, statuses in pass_cache.items():
                 statuses.append(str(notes.get(f"{pass_name} cache", "off")))
             checksum ^= int(output.reshape(-1)[frame % output.size])
@@ -383,6 +402,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "render": _distribution(render_ms),
         "update_and_render": combined,
         "median_fps": 1000.0 / max(combined["median_ms"], 1e-9),
+        "backend_render": (
+            None
+            if not backend_cpu_ms
+            else {
+                "cpu": _distribution(backend_cpu_ms),
+                "gpu_total": _distribution(backend_gpu_ms) if backend_gpu_ms else None,
+                "draw_calls": _counter_distribution(backend_draw_calls),
+                "buckets": _counter_distribution(backend_buckets),
+            }
+        ),
         "instance_upload": (
             None
             if not instance_upload_bytes

@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 from mojive.tools.renderer_benchmark import _add_relative_results, _resolutions
-from mojive.tools.renderer_benchmark_worker import _cache_summary, _distribution
+from mojive.tools.renderer_benchmark_worker import (
+    _cache_summary,
+    _counter_distribution,
+    _distribution,
+)
 
 
 def test_renderer_benchmark_parses_resolution_matrix() -> None:
@@ -59,3 +63,7 @@ def test_renderer_benchmark_summarizes_pass_cache_activity() -> None:
         "inactive_frames": 1,
         "reuse_ratio": pytest.approx(2 / 3),
     }
+
+
+def test_renderer_benchmark_summarizes_integer_counters() -> None:
+    assert _counter_distribution([7, 7, 11]) == {"median": 7.0, "min": 7, "max": 11}
