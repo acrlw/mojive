@@ -88,6 +88,7 @@ class ReflectPass:
         self._encoded_reflectance: dict[int, float] = {}
         self._group0_cache: dict[tuple, wgpu.GPUBindGroup] = {}
         self._sample_groups: dict[tuple, wgpu.GPUBindGroup] = {}
+        self.instance_variant_changed = False
 
     # -- plane detection (verbatim port of the opengl classmethods) -------------
 
@@ -219,6 +220,9 @@ class ReflectPass:
         height: int,
     ) -> bool:
         """Detect planes and encode reflectance; False means no pass this frame."""
+        self.instance_variant_changed = self._encoded_scene is scene and bool(
+            self._encoded_reflectance
+        )
         self._restore_reflectance(scene)
         self._groups = ()
         if not flags.get(RenderFlag.REFLECTION, True):
@@ -237,6 +241,7 @@ class ReflectPass:
         self._transparent = flags.get(RenderFlag.TRANSPARENT, True)
         self._additive = flags.get(RenderFlag.ADDITIVE, False)
         self._encode_reflectance(scene, groups)
+        self.instance_variant_changed = True
         return True
 
     def write_frames(

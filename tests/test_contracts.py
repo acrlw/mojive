@@ -28,6 +28,8 @@ def test_adapter_and_render_extension_types_are_public():
         "MuJoCoAdapter",
         "Occlusion",
         "RenderFlag",
+        "RenderProduct",
+        "RenderRequest",
         "RemoteSceneAdapter",
         "SceneAdapterBase",
         "SceneAdapter",
@@ -59,8 +61,72 @@ def test_null_backend_can_render_after_an_explicit_update():
     assert isinstance(backend, RenderBackend)
     assert backend.render() is None
     assert backend.target.read_color().shape == (24, 32, 4)
+    rgb = np.empty((24, 32, 3), np.uint8)
+    assert backend.target.read_rgb(out=rgb) is rgb
     assert backend.target.read_depth().shape == (24, 32)
     assert backend.target.read_ids().shape == (24, 32)
+
+
+def test_render_requests_describe_products_without_prescribing_passes():
+    from mojive.render.backend import RenderProduct, RenderRequest
+
+    viewport = RenderRequest.viewport()
+    assert viewport.needs(RenderProduct.COLOR)
+    assert viewport.needs(RenderProduct.OBJECT_ID)
+    assert not viewport.needs(RenderProduct.METRIC_DEPTH)
+    assert RenderRequest.color().products == RenderProduct.COLOR
+    assert RenderRequest.metric_depth().products == RenderProduct.METRIC_DEPTH
+    assert RenderRequest.segmentation().products == RenderProduct.SEGMENTATION
+    assert RenderRequest(int(RenderProduct.COLOR)).products is RenderProduct.COLOR
+    with pytest.raises(ValueError, match="at least one product"):
+        RenderRequest(RenderProduct(0))
+
+
+def test_opengl_render_plan_prunes_unrequested_products():
+    from mojive.render.backend import DebugView, RenderRequest
+    from mojive.render.opengl.backend import compile_render_plan
+
+    viewport = compile_render_plan(None)
+    assert "opaque" in viewport.passes
+    assert "id" in viewport.passes
+    assert "present" in viewport.passes
+
+    color = compile_render_plan(RenderRequest.color())
+    assert "opaque" in color.passes
+    assert "id" not in color.passes
+    assert "present" in color.passes
+
+    debug_ids = compile_render_plan(RenderRequest.color(), DebugView.SEGMENT)
+    assert "id" in debug_ids.passes
+
+    depth = compile_render_plan(RenderRequest.metric_depth())
+    assert depth.passes == ("export",)
+    assert not depth.returns_color
+
+    segmentation = compile_render_plan(RenderRequest.segmentation())
+    assert segmentation.passes == ("export",)
+    assert not segmentation.returns_color
+
+
+def test_wgpu_render_plan_separates_scene_and_export_workloads():
+    from mojive.render.backend import DebugView, RenderRequest
+    from mojive.render.webgpu.backend import compile_render_plan
+
+    viewport = compile_render_plan(None)
+    assert viewport.color and viewport.export_identity and viewport.export
+    assert not viewport.export_depth
+
+    color = compile_render_plan(RenderRequest.color())
+    assert color.color and not color.export
+
+    debug_ids = compile_render_plan(RenderRequest.color(), DebugView.IDCOLOR)
+    assert debug_ids.color and debug_ids.export_identity
+
+    depth = compile_render_plan(RenderRequest.metric_depth())
+    assert not depth.color and depth.export_depth and depth.export
+
+    segmentation = compile_render_plan(RenderRequest.segmentation())
+    assert not segmentation.color and segmentation.export_identity and segmentation.export
 
 
 def test_debug_outputs_are_not_exposed_as_independent_render_flags():
@@ -199,8 +265,8 @@ def test_instance_layout_matches_the_documented_stride():
     from mojive.render.scene import INSTANCE_FLOATS, INSTANCE_STRIDE
 
     assert INSTANCE_FLOATS == 32, "transform 16 + color 4 + material 4 + tex_coef 4 + cube_coef 4"
-    assert INSTANCE_WORDS == 33
-    assert INSTANCE_BYTES == 132
+    assert INSTANCE_WORDS == 35
+    assert INSTANCE_BYTES == 140
     assert INSTANCE_STRIDE == INSTANCE_BYTES
 
     cursor = 0
@@ -248,6 +314,7 @@ def test_pass_order_is_the_one_the_spec_pins():
         "reflect",
         "opaque",
         "id",
+        "export",
         "skybox",
         "tendon",
         "transparent",

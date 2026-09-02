@@ -143,13 +143,15 @@ class ReflectPass(OpaquePass):
         d = -float(np.dot(normal, point))
         return (float(normal[0]), float(normal[1]), float(normal[2]), d)
 
-    def _restore_reflectance(self, scene) -> None:
+    def _restore_reflectance(self, scene) -> bool:
+        restored = self._encoded_scene is scene and bool(self._encoded_reflectance)
         if self._encoded_scene is scene:
             for index, value in self._encoded_reflectance.items():
                 if index < len(scene.material):
                     scene.material[index, 3] = value
         self._encoded_scene = None
         self._encoded_reflectance.clear()
+        return restored
 
     def _encode_reflectance(self, scene, groups: tuple[_PlaneGroup, ...]) -> None:
         self._encoded_scene = scene
@@ -171,11 +173,16 @@ class ReflectPass(OpaquePass):
         self._eye = (self._mirror @ np.append(eye, 1.0))[:3].astype(np.float32)
         self._plane = plane
 
-    def prepare(self, ctx: PassContext) -> bool:
+    def prepare_instances(self, ctx: PassContext) -> None:
+        """Resolve planar-reflection instance metadata before GPU upload."""
+
         ctx.reflection = ()
-        self._restore_reflectance(ctx.scene)
+        changed = self._restore_reflectance(ctx.scene)
+        self._groups = ()
         if not ctx.flag(RenderFlag.REFLECTION):
-            return False
+            if changed:
+                ctx.instances.invalidate_upload()
+            return
         eye = np.asarray(ctx.camera.eye, np.float64)
         groups = tuple(
             group
@@ -183,14 +190,25 @@ class ReflectPass(OpaquePass):
             if float(np.dot(group.plane[:3], eye) + group.plane[3]) > 1e-4
         )
         if not groups:
-            return False
+            if changed:
+                ctx.instances.invalidate_upload()
+            return
         if not self._ensure_target(ctx, len(groups)):
-            return False
+            if changed:
+                ctx.instances.invalidate_upload()
+            return
         self._groups = groups
         self._encode_reflectance(ctx.scene, groups)
-        self._set_plane(ctx, groups[0].plane)
+        ctx.instances.invalidate_upload()
+
+    def prepare(self, ctx: PassContext) -> bool:
+        if not self._groups:
+            return False
+        self._set_plane(ctx, self._groups[0].plane)
         if not super().prepare(ctx):
             self._restore_reflectance(ctx.scene)
+            ctx.instances.invalidate_upload()
+            ctx.instances.upload(ctx.scene)
             return False
 
         ctx.scene_program = None

@@ -211,6 +211,28 @@ def test_transforms_match_naive():
     assert np.allclose(got[keep], expect[keep], atol=1e-5)
 
 
+def test_scene_revisions_change_only_with_observable_instance_data():
+    src = make_source(bodies=2, with_plane=False)
+    frame = make_frame(src, seed=11)
+    builder = SceneSourceBuilder()
+    scene = builder.set_source(src, CameraView())
+
+    structure = scene.structure_revision
+    builder.update(frame)
+    first_pose = scene.pose_revision
+    first_visual = scene.visual_revision
+    builder.update(frame)
+
+    assert scene.structure_revision == structure
+    assert scene.pose_revision == first_pose
+    assert scene.visual_revision == first_visual
+
+    frame.geom_xpos[0, 0] += 0.25
+    builder.update(frame)
+    assert scene.pose_revision == first_pose + 1
+    assert scene.visual_revision == first_visual
+
+
 def test_capsule_caps_ride_the_shaft():
 
     src = make_source(bodies=1, with_plane=False)

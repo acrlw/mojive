@@ -108,6 +108,66 @@ class FrameMode(enum.StrEnum):
     WORLD = "world"
 
 
+class RenderProduct(enum.IntFlag):
+    """GPU products that a render invocation must make available.
+
+    Products describe observable outputs, not implementation passes. Backends
+    remain free to combine products in one pass or schedule dedicated passes.
+    """
+
+    COLOR = 1 << 0
+    METRIC_DEPTH = 1 << 1
+    OBJECT_ID = 1 << 2
+    SEGMENTATION = 1 << 3
+
+
+@dataclass(frozen=True)
+class RenderRequest:
+    """Backend-neutral output contract for one render invocation.
+
+    The default is the interactive viewport contract: resolved color plus a
+    current object-ID target for picking. Compatibility renderers should use
+    one of the named constructors so a backend can prune unrelated work.
+    """
+
+    products: RenderProduct = RenderProduct.COLOR | RenderProduct.OBJECT_ID
+
+    def __post_init__(self) -> None:
+        products = RenderProduct(self.products)
+        if not products:
+            raise ValueError("A render request must contain at least one product")
+        object.__setattr__(self, "products", products)
+
+    def needs(self, product: RenderProduct) -> bool:
+        """Return whether all bits in ``product`` are requested."""
+
+        return self.products & product == product
+
+    @classmethod
+    def viewport(cls) -> RenderRequest:
+        """Request resolved color and a current picking buffer."""
+
+        return cls(RenderProduct.COLOR | RenderProduct.OBJECT_ID)
+
+    @classmethod
+    def color(cls) -> RenderRequest:
+        """Request resolved color only."""
+
+        return cls(RenderProduct.COLOR)
+
+    @classmethod
+    def metric_depth(cls) -> RenderRequest:
+        """Request linear metric depth only."""
+
+        return cls(RenderProduct.METRIC_DEPTH)
+
+    @classmethod
+    def segmentation(cls) -> RenderRequest:
+        """Request semantic object and object-type IDs only."""
+
+        return cls(RenderProduct.SEGMENTATION)
+
+
 @dataclass(frozen=True)
 class BackendCaps:
     """Immutable feature and platform capabilities reported by a render backend."""
@@ -161,8 +221,11 @@ class ReadbackTarget(Protocol):
     samples: int
 
     def read_color(self, flip: bool = True) -> np.ndarray: ...
+    def read_rgb(self, flip: bool = True, out: np.ndarray | None = None) -> np.ndarray: ...
     def read_depth(self, flip: bool = True) -> np.ndarray: ...
+    def read_metric_depth(self, flip: bool = True, out: np.ndarray | None = None) -> np.ndarray: ...
     def read_ids(self, flip: bool = False) -> np.ndarray: ...
+    def read_segmentation(self, flip: bool = True, out: np.ndarray | None = None) -> np.ndarray: ...
 
 
 @runtime_checkable
@@ -204,8 +267,12 @@ class RenderBackend(Protocol):
 
         ...
 
-    def render(self, frame: SceneFrame | None = None) -> ViewportImage | None:
-        """Optionally update from ``frame``, then return a viewport image handle."""
+    def render(
+        self,
+        frame: SceneFrame | None = None,
+        request: RenderRequest | None = None,
+    ) -> ViewportImage | None:
+        """Render requested products, defaulting to the interactive viewport."""
 
         ...
 
@@ -320,13 +387,49 @@ class _NullTarget:
         del flip
         return np.zeros((self.height, self.width, 4), np.uint8)
 
+    def read_rgb(self, flip: bool = True, out: np.ndarray | None = None) -> np.ndarray:
+        del flip
+        shape = (self.height, self.width, 3)
+        if out is None:
+            return np.zeros(shape, np.uint8)
+        if out.shape != shape or out.dtype != np.uint8:
+            raise ValueError(
+                f"Expected uint8 destination with shape {shape}, got {out.dtype} {out.shape}"
+            )
+        out.fill(0)
+        return out
+
     def read_depth(self, flip: bool = True) -> np.ndarray:
         del flip
         return np.ones((self.height, self.width), np.float32)
 
+    def read_metric_depth(self, flip: bool = True, out: np.ndarray | None = None) -> np.ndarray:
+        del flip
+        shape = (self.height, self.width)
+        if out is None:
+            return np.ones(shape, np.float32)
+        if out.shape != shape or out.dtype != np.float32:
+            raise ValueError(
+                f"Expected float32 destination with shape {shape}, got {out.dtype} {out.shape}"
+            )
+        out.fill(1.0)
+        return out
+
     def read_ids(self, flip: bool = False) -> np.ndarray:
         del flip
         return np.zeros((self.height, self.width), np.uint32)
+
+    def read_segmentation(self, flip: bool = True, out: np.ndarray | None = None) -> np.ndarray:
+        del flip
+        shape = (self.height, self.width, 2)
+        if out is None:
+            return np.full(shape, -1, np.int32)
+        if out.shape != shape or out.dtype != np.int32:
+            raise ValueError(
+                f"Expected int32 destination with shape {shape}, got {out.dtype} {out.shape}"
+            )
+        out.fill(-1)
+        return out
 
 
 class NullBackend:
@@ -348,7 +451,8 @@ class NullBackend:
     def set_camera(self, camera) -> None: ...
     def set_background(self, rgba) -> None: ...
     def set_transparent_id_rendering(self, enabled: bool) -> None: ...
-    def render(self, frame=None) -> ViewportImage | None:
+    def render(self, frame=None, request: RenderRequest | None = None) -> ViewportImage | None:
+        del frame, request
         return None
 
     def resize(self, width: int, height: int) -> None:

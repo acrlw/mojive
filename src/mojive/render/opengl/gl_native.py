@@ -9,6 +9,7 @@ from ctypes import c_float, c_int, c_ubyte, c_uint, c_void_p
 GL_ARRAY_BUFFER = 0x8892
 GL_COLOR = 0x1800
 GL_FLOAT = 0x1406
+GL_INT = 0x1404
 GL_UNSIGNED_INT = 0x1405
 GL_FALSE = 0
 GL_DEBUG_SOURCE_APPLICATION = 0x824A
@@ -72,6 +73,7 @@ class GLNative:
     def __init__(self) -> None:
         self._lib = _load_gl()
         self.has_clear_buffer_uiv = False
+        self.has_clear_buffer_iv = False
         self.has_clear_buffer_fv = False
         self.has_attrib_pointer = False
         self.has_debug_group = False
@@ -85,6 +87,9 @@ class GLNative:
 
         self.has_clear_buffer_uiv = self._bind(
             "glClearBufferuiv", [c_uint, c_int, ctypes.POINTER(c_uint)], None
+        )
+        self.has_clear_buffer_iv = self._bind(
+            "glClearBufferiv", [c_uint, c_int, ctypes.POINTER(c_int)], None
         )
 
         self.has_clear_buffer_fv = self._bind(
@@ -193,6 +198,13 @@ class GLNative:
         self._glClearBufferuiv(GL_COLOR, draw_buffer, buf)  # type: ignore[attr-defined]
         return True
 
+    def clear_color_int(self, draw_buffer: int, values: tuple[int, int, int, int]) -> bool:
+        if not self.has_clear_buffer_iv:
+            return False
+        buf = (c_int * 4)(*values)
+        self._glClearBufferiv(GL_COLOR, draw_buffer, buf)  # type: ignore[attr-defined]
+        return True
+
     def rebind_instance_attributes(
         self,
         vao_glo: int,
@@ -258,6 +270,14 @@ class GLNative:
         self._glBlitFramebuffer(  # type: ignore[attr-defined]
             0, 0, width, height, 0, 0, width, height, GL_DEPTH_BUFFER_BIT, GL_NEAREST
         )
+        return True
+
+    def bind_draw_framebuffer(self, framebuffer: int) -> bool:
+        """Force a draw-framebuffer bind without relying on ModernGL's cache."""
+
+        if not self.has_blit:
+            return False
+        self._glBindFramebuffer(GL_FRAMEBUFFER, int(framebuffer))  # type: ignore[attr-defined]
         return True
 
     def attach_array_layer(self, texture_glo: int, layer: int) -> bool:

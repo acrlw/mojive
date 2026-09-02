@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import moderngl
@@ -14,7 +14,16 @@ from ...adapters.base import SceneFrame, SceneSource
 from ...gizmo import GizmoFrame
 from ...log import get_logger
 from ...types import CameraView, MeshKey, ViewportImage
-from ..backend import BackendCaps, DebugView, FrameMode, LabelMode, RenderFlag, RenderStats
+from ..backend import (
+    BackendCaps,
+    DebugView,
+    FrameMode,
+    LabelMode,
+    RenderFlag,
+    RenderProduct,
+    RenderRequest,
+    RenderStats,
+)
 from ..debugdraw import DebugDraw
 from ..overlay import OverlayPublisher, OverlayState
 from ..scene import RenderScene
@@ -33,6 +42,45 @@ log = get_logger("backend")
 
 
 PassFactory = Callable[[], RenderPass]
+
+
+@dataclass(frozen=True)
+class OpenGLRenderPlan:
+    """Concrete OpenGL pass sequence compiled from a product request."""
+
+    request: RenderRequest
+    passes: tuple[str, ...]
+
+    @property
+    def returns_color(self) -> bool:
+        return self.request.needs(RenderProduct.COLOR)
+
+
+def compile_render_plan(
+    request: RenderRequest | None,
+    debug_view: DebugView = DebugView.SHADED,
+) -> OpenGLRenderPlan:
+    """Compile requested products into the minimal ordered OpenGL pass set."""
+
+    request = request or RenderRequest.viewport()
+    color = request.needs(RenderProduct.COLOR)
+    depth = request.needs(RenderProduct.METRIC_DEPTH)
+    identity = request.needs(RenderProduct.OBJECT_ID) or request.needs(RenderProduct.SEGMENTATION)
+    if color and debug_view in {DebugView.SEGMENT, DebugView.IDCOLOR}:
+        identity = True
+
+    if color:
+        passes = tuple(
+            name for name in PASS_ORDER if name != "export" and (name != "id" or identity)
+        )
+    else:
+        passes = tuple(
+            name
+            for name in PASS_ORDER
+            if (name == "export" and (depth or request.needs(RenderProduct.SEGMENTATION)))
+            or (name == "id" and request.needs(RenderProduct.OBJECT_ID))
+        )
+    return OpenGLRenderPlan(request=request, passes=passes)
 
 
 class OpenGLBackend:
@@ -258,16 +306,18 @@ class OpenGLBackend:
         need = self.instances.needs_rebuild(scene, gen) or self._structure_generation < 0
         if need:
             self._bucket_meshes = [self.meshes.get(k) for k, _ in scene.bucket_keys]
-            prog = self._scene_program()
+            # Identity-only renders may run before the shaded program has ever
+            # compiled. Allocate pass-independent instance storage up front so
+            # the ID pass can build its own VAOs without warming the color path.
+            self.instances.ensure_capacity(scene.count)
+            # Reuse an already compiled shaded program, but do not compile one
+            # merely because scene structure changed. Identity-only rendering
+            # must stay independent from the shaded pipeline.
+            prog = getattr(self._passes.get("opaque"), "program", None)
             if prog is not None:
                 self.instances.rebuild(scene, prog, self._bucket_meshes, gen)
             self._structure_generation = 0
             self._program_generation = gen
-
-    def _scene_program(self) -> moderngl.Program | None:
-        op = self._passes.get("opaque")
-        getter = getattr(op, "scene_program", None)
-        return getter(self) if callable(getter) else None
 
     def update(self, frame: SceneFrame) -> None:
         if self._builder is None:
@@ -443,12 +493,18 @@ class OpenGLBackend:
         if debug is not None:
             debug.configure_text(primary, primary_index, fallback, fallback_index, size_px)
 
-    def render(self, frame: SceneFrame | None = None) -> ViewportImage | None:
+    def render(
+        self,
+        frame: SceneFrame | None = None,
+        request: RenderRequest | None = None,
+    ) -> ViewportImage | None:
         if frame is not None:
             self.update(frame)
         scene = self._scene
         if scene is None or not self.gl_caps.usable:
             return None
+
+        plan = compile_render_plan(request, self._debug_view)
 
         t0 = time.perf_counter()
         with self.guard:
@@ -459,9 +515,16 @@ class OpenGLBackend:
 
             ctx = self._make_context(scene)
             self.instances.draw_calls = 0
+            # Pass-owned instance variants are resolved as a distinct graph
+            # phase. This keeps the single frame upload canonical and avoids
+            # hidden scene mutations during pass execution.
+            for name in plan.passes:
+                p = self._passes.get(name)
+                if p is not None:
+                    p.prepare_instances(ctx)
             self.instances.upload(scene)
 
-            for name in PASS_ORDER:
+            for name in plan.passes:
                 p = self._passes.get(name)
                 if p is None:
                     continue
@@ -473,16 +536,22 @@ class OpenGLBackend:
 
             self.timing.collect()
 
-            bind_default_framebuffer(self.ctx)
+            if plan.returns_color:
+                bind_default_framebuffer(self.ctx)
 
         self.stats.draw_calls = self.instances.draw_calls
         self.stats.instances = scene.count
         self.stats.buckets = scene.bucket_count()
-        self.stats.triangles = self.instances.triangles(scene)
+        self.stats.triangles = self.instances.triangles(scene, self._bucket_meshes)
         self.stats.cpu_ms = self.timing.cpu_table()
         self.stats.gpu_ms = self.timing.gpu_table()
         self.stats.frame_cpu_ms = (time.perf_counter() - t0) * 1000.0
         self._update_light_stats(scene)
+        self.stats.notes["render products"] = plan.request.products.name
+        self.stats.notes["render passes"] = ", ".join(plan.passes)
+        self.stats.notes["instance upload"] = f"{self.instances.uploaded_bytes} bytes"
+        if not plan.returns_color:
+            return None
         present = self._passes.get("present")
         return getattr(present, "image", None)
 
@@ -552,7 +621,7 @@ class OpenGLBackend:
             if camera is not None:
                 self._camera = camera
             if size is not None or camera is not None:
-                self.render()
+                self.render(request=RenderRequest.color())
             img = self.target.read_color(flip=True)
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Image.fromarray(img, "RGBA").save(Path(path))

@@ -141,6 +141,11 @@ class RenderTargetWgpu:
             format="r32uint",
             usage=export_usage | wgpu.TextureUsage.TEXTURE_BINDING,
         )
+        self.export_segmentation = device.create_texture(
+            size=size,
+            format="rg32sint",
+            usage=export_usage,
+        )
         self.export_zbuf = device.create_texture(
             size=size, format="depth24plus", usage=wgpu.TextureUsage.RENDER_ATTACHMENT
         )
@@ -169,6 +174,7 @@ class RenderTargetWgpu:
             self.zbuf,
             self.export_depth,
             self.export_id,
+            self.export_segmentation,
             self.export_zbuf,
         ):
             if tex is not None:
@@ -195,11 +201,49 @@ class RenderTargetWgpu:
     def read_color(self, flip: bool = True) -> np.ndarray:
         return self._read_texture(self.color, np.uint8, 4, flip)
 
+    def read_rgb(self, flip: bool = True, out: np.ndarray | None = None) -> np.ndarray:
+        """Read packed RGB into a new or caller-owned array."""
+
+        shape = (self.height, self.width, 3)
+        if out is None:
+            out = np.empty(shape, np.uint8)
+        elif out.shape != shape or out.dtype != np.uint8 or not out.flags.c_contiguous:
+            raise ValueError(
+                f"Expected C-contiguous uint8 destination with shape {shape}, "
+                f"got {out.dtype} {out.shape}"
+            )
+        np.copyto(out, self.read_color(flip=flip)[..., :3])
+        return out
+
     def read_depth(self, flip: bool = True) -> np.ndarray:
         return self._read_texture(self.export_depth, np.float32, 1, flip)
 
+    def read_metric_depth(self, flip: bool = True, out: np.ndarray | None = None) -> np.ndarray:
+        shape = (self.height, self.width)
+        if out is None:
+            return self._read_texture(self.export_depth, np.float32, 1, flip)
+        if out.shape != shape or out.dtype != np.float32 or not out.flags.c_contiguous:
+            raise ValueError(
+                f"Expected C-contiguous float32 destination with shape {shape}, "
+                f"got {out.dtype} {out.shape}"
+            )
+        np.copyto(out, self._read_texture(self.export_depth, np.float32, 1, flip))
+        return out
+
     def read_ids(self, flip: bool = False) -> np.ndarray:
         return self._read_texture(self.export_id, np.uint32, 1, flip)
+
+    def read_segmentation(self, flip: bool = True, out: np.ndarray | None = None) -> np.ndarray:
+        shape = (self.height, self.width, 2)
+        if out is None:
+            return self._read_texture(self.export_segmentation, np.int32, 2, flip)
+        if out.shape != shape or out.dtype != np.int32 or not out.flags.c_contiguous:
+            raise ValueError(
+                f"Expected C-contiguous int32 destination with shape {shape}, "
+                f"got {out.dtype} {out.shape}"
+            )
+        np.copyto(out, self._read_texture(self.export_segmentation, np.int32, 2, flip))
+        return out
 
     def read_id(self, x: int, y: int) -> int:
         if not (0 <= x < self.width and 0 <= y < self.height):

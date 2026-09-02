@@ -7,7 +7,7 @@ WGSL pipelines, render passes, readback, and the viewport texture.
 from __future__ import annotations
 
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -17,7 +17,16 @@ from ...adapters.base import SceneFrame, SceneSource
 from ...gizmo import GizmoFrame
 from ...log import get_logger
 from ...types import CameraView, ShadingModel, ViewportImage
-from ..backend import BackendCaps, DebugView, FrameMode, LabelMode, RenderFlag, RenderStats
+from ..backend import (
+    BackendCaps,
+    DebugView,
+    FrameMode,
+    LabelMode,
+    RenderFlag,
+    RenderProduct,
+    RenderRequest,
+    RenderStats,
+)
 from ..builder import SceneSourceBuilder
 from ..debugdraw import DebugDraw
 from ..mesh import all_builtin
@@ -124,6 +133,38 @@ _VERTEX_LAYOUT = {
         {"format": "float32x2", "offset": 24, "shader_location": 2},
     ],
 }
+
+
+@dataclass(frozen=True)
+class WgpuRenderPlan:
+    """Concrete WGPU workloads compiled from a product request."""
+
+    request: RenderRequest
+    color: bool
+    export_depth: bool
+    export_identity: bool
+
+    @property
+    def export(self) -> bool:
+        return self.export_depth or self.export_identity
+
+
+def compile_render_plan(
+    request: RenderRequest | None,
+    debug_view: DebugView = DebugView.SHADED,
+) -> WgpuRenderPlan:
+    """Compile requested products into WGPU scene and export workloads."""
+
+    request = request or RenderRequest.viewport()
+    color = request.needs(RenderProduct.COLOR)
+    export_depth = request.needs(RenderProduct.METRIC_DEPTH)
+    export_identity = request.needs(RenderProduct.OBJECT_ID) or request.needs(
+        RenderProduct.SEGMENTATION
+    )
+    if color and debug_view in {DebugView.SEGMENT, DebugView.IDCOLOR}:
+        export_identity = True
+    return WgpuRenderPlan(request, color, export_depth, export_identity)
+
 
 # Non-indexed wireframe stream from MeshStore: the scene vertex attributes plus
 # a barycentric triple per vertex (see shaders/scene.wgsl vs_scene_wire).
@@ -626,7 +667,11 @@ class WgpuBackend:
             fragment={
                 "module": self._module,
                 "entry_point": "fs_export",
-                "targets": [{"format": "r32float"}, {"format": "r32uint"}],
+                "targets": [
+                    {"format": "r32float"},
+                    {"format": "r32uint"},
+                    {"format": "rg32sint"},
+                ],
             },
             primitive={"topology": "triangle-list", "front_face": "ccw", "cull_mode": cull},
             depth_stencil={
@@ -864,7 +909,119 @@ class WgpuBackend:
             max(0, stop - start) for start, stop in (scene.bucket_ranges[b] for b in buckets)
         )
 
-    def render(self, frame: SceneFrame | None = None) -> ViewportImage | None:
+    def _encode_export_pass(
+        self,
+        encoder,
+        scene: RenderScene,
+        group0,
+        cull: str,
+        timestamp,
+        metric_far: float,
+    ) -> tuple[int, int]:
+        """Encode the unlit geometry export shared by depth and identity products."""
+
+        target = self.target
+        render_pass = encoder.begin_render_pass(
+            color_attachments=[
+                {
+                    "view": target.export_depth.create_view(),
+                    "clear_value": (metric_far, metric_far, metric_far, metric_far),
+                    "load_op": "clear",
+                    "store_op": "store",
+                },
+                {
+                    "view": target.export_id.create_view(),
+                    "clear_value": (0, 0, 0, 0),
+                    "load_op": "clear",
+                    "store_op": "store",
+                },
+                {
+                    "view": target.export_segmentation.create_view(),
+                    "clear_value": (-1, -1, -1, -1),
+                    "load_op": "clear",
+                    "store_op": "store",
+                },
+            ],
+            depth_stencil_attachment={
+                "view": target.export_zbuf.create_view(),
+                "depth_clear_value": 1.0,
+                "depth_load_op": "clear",
+                "depth_store_op": "store",
+            },
+            timestamp_writes=timestamp("export"),
+        )
+        draw_calls = 0
+        instances_drawn = 0
+        if scene.count:
+            render_pass.set_pipeline(self._export_pipeline(cull))
+            render_pass.set_bind_group(0, group0)
+            buckets = list(scene.opaque_buckets)
+            if self._include_transparent_ids and self.get_flag(RenderFlag.TRANSPARENT):
+                buckets += list(scene.transparent_draw_order())
+            for bucket in buckets:
+                start, stop = scene.bucket_ranges[bucket]
+                if stop <= start:
+                    continue
+                mesh = self.meshes.get(scene.bucket_keys[bucket][0])
+                if mesh is None:
+                    continue
+                render_pass.set_vertex_buffer(0, mesh.vbo)
+                render_pass.set_index_buffer(mesh.ibo, "uint32")
+                render_pass.draw_indexed(mesh.index_count, stop - start, 0, 0, start)
+                draw_calls += 1
+                instances_drawn += stop - start
+        render_pass.end()
+        return draw_calls, instances_drawn
+
+    def _render_export_only(
+        self,
+        scene: RenderScene,
+        plan: WgpuRenderPlan,
+        started: float,
+    ) -> None:
+        """Render depth or identity without touching the shaded color graph."""
+
+        target = self.target
+        camera = self._camera.with_aspect(target.width / max(target.height, 1))
+        self.instances.upload(scene)
+        schedule = self.lights.upload(scene.lights, None)
+        self._write_frame_uniforms(camera, 0, (0.0, 0.0), (0.0, 0.0))
+        group0 = self._bind_group0()
+        cull = "back" if self.get_flag(RenderFlag.CULL_FACE) else "none"
+        encoder = self.device.create_command_encoder()
+        self.timing.begin_frame()
+        draw_calls, instances_drawn = self._encode_export_pass(
+            encoder,
+            scene,
+            group0,
+            cull,
+            self.timing.timestamp_writes,
+            float(camera.far),
+        )
+        pending_timing = self.timing.resolve(encoder)
+        self.device.queue.submit([encoder.finish()])
+        self.timing.submitted(pending_timing)
+
+        self.stats.draw_calls = draw_calls
+        self.stats.instances = instances_drawn
+        self.stats.buckets = scene.bucket_count()
+        self.stats.triangles = scene.triangle_count(self.meshes.triangle_counts())
+        self.stats.frame_cpu_ms = (time.perf_counter() - started) * 1000.0
+        self.stats.gpu_ms = dict(self.timing.gpu_ms)
+        self.stats.notes = {
+            "scene lights": f"{len(schedule.lights)} active, 0 used by export",
+            "shadow casters": "0 active, export-only plan",
+            "render products": plan.request.products.name,
+            "render passes": "export",
+            "instance upload": f"{self.instances.uploaded_bytes} bytes",
+        }
+        return None
+
+    def render(
+        self,
+        frame: SceneFrame | None = None,
+        request: RenderRequest | None = None,
+    ) -> ViewportImage | None:
         if frame is not None:
             self.update(frame)
         scene = self._scene
@@ -874,12 +1031,17 @@ class WgpuBackend:
             self._reload_wgsl()
 
         t0 = time.perf_counter()
+        plan = compile_render_plan(request, self._debug_view)
+        if not plan.color:
+            return self._render_export_only(scene, plan, t0)
         target = self.target
         cam = self._camera.with_aspect(target.width / max(target.height, 1))
         # Plane detection runs before the instance upload so the encoded
         # negative reflectance reaches the GPU in the same write (opengl relies
         # on its persistent scene object for the same ordering).
         reflective = self._reflect.prepare(scene, cam, self._flags, target.width, target.height)
+        if self._reflect.instance_variant_changed:
+            self.instances.invalidate_upload()
         self.instances.upload(scene)
         # Shadow maps render before the scene pass, matching opengl's
         # PASS_ORDER; the same frame's scene pass samples them.
@@ -1054,47 +1216,11 @@ class WgpuBackend:
         draw_calls += self._gizmo.execute(pass1)
         pass1.end()
 
-        pass2 = encoder.begin_render_pass(
-            color_attachments=[
-                {
-                    "view": target.export_depth.create_view(),
-                    # depth 1.0 == far plane, matching the GL depth clear
-                    "clear_value": (1.0, 1.0, 1.0, 1.0),
-                    "load_op": "clear",
-                    "store_op": "store",
-                },
-                {
-                    "view": target.export_id.create_view(),
-                    "clear_value": (0, 0, 0, 0),
-                    "load_op": "clear",
-                    "store_op": "store",
-                },
-            ],
-            depth_stencil_attachment={
-                "view": target.export_zbuf.create_view(),
-                "depth_clear_value": 1.0,
-                "depth_load_op": "clear",
-                "depth_store_op": "store",
-            },
-            timestamp_writes=timestamp("export"),
-        )
-        if scene.count:
-            pass2.set_pipeline(self._export_pipeline(cull))
-            pass2.set_bind_group(0, group0)
-            buckets = list(scene.opaque_buckets)
-            if self._include_transparent_ids and self.get_flag(RenderFlag.TRANSPARENT):
-                buckets += list(scene.transparent_draw_order())
-            for b in buckets:
-                start, stop = scene.bucket_ranges[b]
-                if stop <= start:
-                    continue
-                mesh = self.meshes.get(scene.bucket_keys[b][0])
-                if mesh is None:
-                    continue
-                pass2.set_vertex_buffer(0, mesh.vbo)
-                pass2.set_index_buffer(mesh.ibo, "uint32")
-                pass2.draw_indexed(mesh.index_count, stop - start, 0, 0, start)
-        pass2.end()
+        export_draw_calls = 0
+        if plan.export:
+            export_draw_calls, _ = self._encode_export_pass(
+                encoder, scene, group0, cull, timestamp, float(cam.far)
+            )
 
         # SEGMENT/IDCOLOR rebuild the resolved color from the export ids;
         # other views need no present work (the resolve happened in pass1).
@@ -1123,6 +1249,10 @@ class WgpuBackend:
             "shadow casters": (
                 f"{schedule.selected_shadow_count} active, {schedule.deferred_shadows} deferred"
             ),
+            "render products": plan.request.products.name,
+            "render passes": "scene, export" if plan.export else "scene",
+            "instance upload": f"{self.instances.uploaded_bytes} bytes",
+            "export draw calls": str(export_draw_calls),
         }
         # The resolved color is display-domain (finish_color gamma-encodes it)
         # and top-row-first, so the viewer presents it without a y flip.
@@ -1167,7 +1297,7 @@ class WgpuBackend:
                 self._camera = camera
             if size is not None:
                 self.target.resize(int(size[0]), int(size[1]))
-            self.render()
+            self.render(request=RenderRequest.color())
             image = self.target.read_color(flip=True)[..., :3]
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Image.fromarray(np.ascontiguousarray(image)).save(path)

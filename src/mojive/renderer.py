@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 from .adapters.base import FrameNeeds
-from .render.backend import DebugView, FrameMode, LabelMode, RenderFlag
+from .render.backend import DebugView, FrameMode, LabelMode, RenderFlag, RenderRequest
 from .types import CameraView, InstancePoseSource, InstanceVisual
 
 try:
@@ -25,17 +25,6 @@ else:
     _IMPORT_ERROR = None
     DEFAULT_FONT_SCALE = mujoco.mjtFontScale.mjFONTSCALE_150
 
-
-_FRAME_NEEDS = FrameNeeds(
-    poses=True,
-    contacts=True,
-    tendons=True,
-    actuator=True,
-    deformables=True,
-    diagnostics=True,
-    islands=True,
-    bvh=False,
-)
 
 _VIS_FLAGS = {
     "mjVIS_CONVEXHULL": RenderFlag.CONVEXHULL,
@@ -242,7 +231,7 @@ class Renderer:
         adapter_source = adapter.scene_source()
         self._transparent_visual = False
         source = _limit_scene_source(adapter_source, int(max_geom), model, False)
-        self._segmentation_table = _configure_segmentation(source, model)
+        _configure_segmentation(source, model)
         self._source = source
         self._adapter_source = adapter_source
         samples = max(0, int(model.vis.quality.offsamples))
@@ -343,7 +332,7 @@ class Renderer:
                 self._model,
                 transparent_visual,
             )
-            self._segmentation_table = _configure_segmentation(source, self._model)
+            _configure_segmentation(source, self._model)
             self._source = source
             self._adapter_source = adapter_source
             self._transparent_visual = transparent_visual
@@ -377,15 +366,15 @@ class Renderer:
                 f"Expected `out.shape == {shape}`. Got `out.shape={out.shape}` instead."
             )
         with self._gl_current():
-            self._backend.render()
             if self._depth_rendering:
-                image = _metric_depth(self._backend.target.read_depth(flip=True), self._view)
+                self._backend.render(request=RenderRequest.metric_depth())
+                image = self._backend.target.read_metric_depth(flip=True, out=out)
             elif self._segmentation_rendering:
-                image = _segmentation_image(
-                    self._backend.target.read_ids(flip=True), self._segmentation_table, out=out
-                )
+                self._backend.render(request=RenderRequest.segmentation())
+                image = self._backend.target.read_segmentation(flip=True, out=out)
             else:
-                image = np.ascontiguousarray(self._backend.target.read_color(flip=True)[..., :3])
+                self._backend.render(request=RenderRequest.color())
+                image = self._backend.target.read_rgb(flip=True, out=out)
         if out is None:
             return image
         if image is out:
@@ -515,16 +504,6 @@ def _camera_view(scene, model, aspect: float) -> CameraView:
     )
 
 
-def _metric_depth(depth: np.ndarray, camera: CameraView) -> np.ndarray:
-    values = np.asarray(depth, np.float64)
-    near, far = float(camera.near), float(camera.far)
-    if camera.orthographic:
-        metric = near + values * (far - near)
-    else:
-        metric = near * far / np.maximum(far - values * (far - near), 1e-12)
-    return np.ascontiguousarray(metric.astype(np.float32))
-
-
 def _limit_scene_source(source, max_geom: int, model, transparent_visual: bool):
     limit = max(int(max_geom), 0)
     keep = np.zeros(source.instance_count, bool)
@@ -570,6 +549,11 @@ def _limit_scene_source(source, max_geom: int, model, transparent_visual: bool):
         geom_size=source.geom_size[indices].copy(),
         geom_rgba=rgba,
         geom_object_id=source.geom_object_id[indices].copy(),
+        geom_segmentation=(
+            source.geom_segmentation[indices].copy()
+            if len(source.geom_segmentation) == source.instance_count
+            else np.full((len(indices), 2), -1, np.int32)
+        ),
         geom_body=source.geom_body[indices].copy(),
         geom_source=source.geom_source[indices].copy(),
         geom_pose_source=source.geom_pose_source[indices].copy(),
@@ -582,7 +566,7 @@ def _limit_scene_source(source, max_geom: int, model, transparent_visual: bool):
     )
 
 
-def _configure_segmentation(source, model) -> np.ndarray:
+def _configure_segmentation(source, model) -> None:
     pairs: list[tuple[int, int]] = []
     encoded = np.zeros(source.instance_count, np.uint32)
     pair_to_id: dict[tuple[int, int], int] = {}
@@ -619,28 +603,49 @@ def _configure_segmentation(source, model) -> np.ndarray:
     table = np.full((len(pairs) + 1, 2), -1, np.int32)
     if pairs:
         table[1:] = np.asarray(pairs, np.int32)
-    return table
-
-
-def _segmentation_image(
-    ids: np.ndarray, table: np.ndarray, *, out: np.ndarray | None = None
-) -> np.ndarray:
-    ids = np.asarray(ids, np.uint32)
-    image = out if out is not None else np.empty((*ids.shape, 2), np.int32)
-    if len(table) and (not ids.size or int(ids.max()) < len(table)):
-        np.take(table, ids, axis=0, out=image)
-        return image
-    image.fill(-1)
-    valid = ids < len(table)
-    image[valid] = table[ids[valid]]
-    return image
+    source.geom_segmentation = table[encoded]
 
 
 def _frame_needs(option) -> FrameNeeds:
-    bvh = _flag_enabled(option.flags, mujoco.mjtVisFlag, "mjVIS_BODYBVH") or _flag_enabled(
-        option.flags, mujoco.mjtVisFlag, "mjVIS_MESHBVH"
+    """Translate visible MuJoCo features into adapter-side dynamic data needs."""
+
+    def visible(*names: str) -> bool:
+        return any(_flag_enabled(option.flags, mujoco.mjtVisFlag, name) for name in names)
+
+    bvh = visible("mjVIS_BODYBVH", "mjVIS_MESHBVH")
+    contacts = visible("mjVIS_CONTACTPOINT", "mjVIS_CONTACTFORCE", "mjVIS_CONTACTSPLIT")
+    actuator = visible("mjVIS_ACTUATOR", "mjVIS_ACTIVATION")
+    tendons = visible("mjVIS_TENDON") or actuator
+    deformables = visible("mjVIS_SKIN", "mjVIS_FLEXFACE", "mjVIS_FLEXSKIN", "mjVIS_FLEXVERT")
+    islands = visible("mjVIS_ISLAND")
+    if islands:
+        contacts = tendons = deformables = True
+    diagnostics = bvh or visible(
+        "mjVIS_JOINT",
+        "mjVIS_ACTUATOR",
+        "mjVIS_ACTIVATION",
+        "mjVIS_CAMERA",
+        "mjVIS_LIGHT",
+        "mjVIS_RANGEFINDER",
+        "mjVIS_CONSTRAINT",
+        "mjVIS_AUTOCONNECT",
+        "mjVIS_COM",
+        "mjVIS_INERTIA",
+        "mjVIS_SCLINERTIA",
     )
-    return replace(_FRAME_NEEDS, bvh=True) if bvh else _FRAME_NEEDS
+    label_none = _mode_value(mujoco.mjtLabel, "mjLABEL_NONE")
+    frame_none = _mode_value(mujoco.mjtFrame, "mjFRAME_NONE")
+    diagnostics = diagnostics or int(option.label) != label_none or int(option.frame) != frame_none
+    return FrameNeeds(
+        poses=True,
+        contacts=contacts,
+        tendons=tendons,
+        actuator=actuator,
+        deformables=deformables,
+        diagnostics=diagnostics,
+        islands=islands,
+        bvh=bvh,
+    )
 
 
 def _flag_enabled(values, enum_type, name: str) -> bool:

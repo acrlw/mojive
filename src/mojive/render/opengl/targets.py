@@ -112,6 +112,13 @@ class RenderTarget:
 
         self.depth_resolve = ctx.depth_texture((self.width, self.height))
         self.depth_resolve_fbo = ctx.framebuffer(depth_attachment=self.depth_resolve)
+        self.metric_depth = ctx.texture((self.width, self.height), 1, dtype="f4")
+        self.segmentation = ctx.texture((self.width, self.height), 2, dtype="i4")
+        self.export_depth = ctx.depth_texture((self.width, self.height))
+        self.export_fbo = ctx.framebuffer(
+            [self.metric_depth, self.segmentation],
+            self.export_depth,
+        )
         if self.id_layout is IdLayout.SHARED and self.samples > 1:
             self.id_resolve = ctx.texture((self.width, self.height), 1, dtype="u4")
             self.id_resolve_fbo = ctx.framebuffer([self.id_resolve])
@@ -122,6 +129,9 @@ class RenderTarget:
         self._clear_prog = ctx.program(vertex_shader=_CLEAR_VS_FAR, fragment_shader=_CLEAR_FS)
         self._clear_vao = ctx.vertex_array(self._clear_prog, [])
         self._pixel = bytearray(4)
+        self._rgb_stage = np.empty((self.height, self.width, 3), np.uint8)
+        self._metric_stage = np.empty((self.height, self.width), np.float32)
+        self._segmentation_stage = np.empty((self.height, self.width, 2), np.int32)
 
     @property
     def info(self) -> TargetInfo:
@@ -141,6 +151,14 @@ class RenderTarget:
 
     def use_id(self) -> None:
         self.id_fbo.use()
+        self.ctx.viewport = (0, 0, self.width, self.height)
+
+    def use_export(self) -> None:
+        self.export_fbo.use()
+        # Readback can restore the native draw binding to zero without
+        # updating ModernGL's cache. Export-only frames may bind this same FBO
+        # again, so force the native binding as well.
+        self._gl.bind_draw_framebuffer(self.export_fbo.glo)
         self.ctx.viewport = (0, 0, self.width, self.height)
 
     def clear_main(self, color: tuple[float, float, float, float]) -> None:
@@ -181,6 +199,20 @@ class RenderTarget:
             self.fbo.color_mask = ((True, True, True, True), (True, True, True, True))
         self.ctx.depth_func = "<"
 
+    def clear_export(self, metric_far: float) -> None:
+        self.use_export()
+        self.export_fbo.depth_mask = True
+        cleared = (
+            self._gl.clear_depth_only(1.0)
+            and self._gl.clear_color_float(
+                0,
+                (metric_far, metric_far, metric_far, metric_far),
+            )
+            and self._gl.clear_color_int(1, (-1, -1, -1, -1))
+        )
+        if not cleared:
+            raise RuntimeError("OpenGL typed export-buffer clear is unavailable")
+
     def resolve(self) -> None:
         prev = self.ctx.fbo
         if self._gl.blit_color(self._blit_src.glo, self.resolve_fbo.glo, self.width, self.height):
@@ -205,6 +237,29 @@ class RenderTarget:
         img = np.frombuffer(raw, np.uint8).reshape(self.height, self.width, 4)
         return img[::-1] if flip else img
 
+    def read_rgb(self, flip: bool = True, out: np.ndarray | None = None) -> np.ndarray:
+        """Read packed RGB, optionally directly into a caller-owned result."""
+
+        shape = (self.height, self.width, 3)
+        if out is None:
+            out = np.empty(shape, np.uint8)
+        elif out.shape != shape or out.dtype != np.uint8 or not out.flags.c_contiguous:
+            raise ValueError(
+                f"Expected C-contiguous uint8 destination with shape {shape}, "
+                f"got {out.dtype} {out.shape}"
+            )
+        if flip:
+            self.resolve_fbo.read_into(
+                self._rgb_stage,
+                components=3,
+                dtype="f1",
+                alignment=1,
+            )
+            np.copyto(out, self._rgb_stage[::-1])
+        else:
+            self.resolve_fbo.read_into(out, components=3, dtype="f1", alignment=1)
+        return out
+
     def read_depth(self, flip: bool = True) -> np.ndarray:
         fbo = self._blit_src
         if self.samples > 1:
@@ -220,11 +275,58 @@ class RenderTarget:
         depth = np.frombuffer(raw, np.float32).reshape(self.height, self.width)
         return depth[::-1] if flip else depth
 
+    def read_metric_depth(self, flip: bool = True, out: np.ndarray | None = None) -> np.ndarray:
+        shape = (self.height, self.width)
+        if out is None:
+            out = np.empty(shape, np.float32)
+        elif out.shape != shape or out.dtype != np.float32 or not out.flags.c_contiguous:
+            raise ValueError(
+                f"Expected C-contiguous float32 destination with shape {shape}, "
+                f"got {out.dtype} {out.shape}"
+            )
+        if flip:
+            self.export_fbo.read_into(
+                self._metric_stage,
+                components=1,
+                dtype="f4",
+                attachment=0,
+            )
+            np.copyto(out, self._metric_stage[::-1])
+        else:
+            self.export_fbo.read_into(out, components=1, dtype="f4", attachment=0)
+        # ModernGL readback may leave its framebuffer cache pointing at the
+        # export target while the native draw binding changed. Move to a known
+        # different target so the next export pass performs a real bind.
+        self.resolve_fbo.use()
+        return out
+
     def read_ids(self, flip: bool = False) -> np.ndarray:
         fbo, attachment = self._id_read_target()
         raw = fbo.read(components=1, dtype="u4", attachment=attachment)
         ids = np.frombuffer(raw, np.uint32).reshape(self.height, self.width)
         return ids[::-1] if flip else ids
+
+    def read_segmentation(self, flip: bool = True, out: np.ndarray | None = None) -> np.ndarray:
+        shape = (self.height, self.width, 2)
+        if out is None:
+            out = np.empty(shape, np.int32)
+        elif out.shape != shape or out.dtype != np.int32 or not out.flags.c_contiguous:
+            raise ValueError(
+                f"Expected C-contiguous int32 destination with shape {shape}, "
+                f"got {out.dtype} {out.shape}"
+            )
+        if flip:
+            self.export_fbo.read_into(
+                self._segmentation_stage,
+                components=2,
+                dtype="i4",
+                attachment=1,
+            )
+            np.copyto(out, self._segmentation_stage[::-1])
+        else:
+            self.export_fbo.read_into(out, components=2, dtype="i4", attachment=1)
+        self.resolve_fbo.use()
+        return out
 
     def _id_read_target(self):
         fbo, attachment = self.id_fbo, self.id_draw_buffer
@@ -250,6 +352,10 @@ class RenderTarget:
             self.resolve_tex,
             self.depth_resolve_fbo,
             self.depth_resolve,
+            self.export_fbo,
+            self.export_depth,
+            self.metric_depth,
+            self.segmentation,
             self.id_resolve_fbo,
             self.id_resolve,
             self._blit_src if self._blit_src is not self.fbo else None,

@@ -158,6 +158,8 @@ class PassContext:
 class RenderPass(Protocol):
     name: str
 
+    def prepare_instances(self, ctx: PassContext) -> None: ...
+
     def prepare(self, ctx: PassContext) -> bool: ...
 
     def execute(self, ctx: PassContext) -> None: ...
@@ -167,6 +169,11 @@ class RenderPass(Protocol):
 
 class BasePass:
     name = "pass"
+
+    def prepare_instances(self, ctx: PassContext) -> None:
+        """Apply pass-owned instance variants before the frame upload."""
+
+        del ctx
 
     def prepare(self, ctx: PassContext) -> bool:
         return True

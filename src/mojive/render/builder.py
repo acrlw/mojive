@@ -97,6 +97,10 @@ class SceneSourceBuilder:
         self._site_pos = np.zeros((0, 3), np.float32)
         self._world_rows = np.zeros(0, np.intp)
         self._identity3 = np.eye(3, dtype=np.float32)
+        self._structure_revision = 0
+        self._pose_revision = 0
+        self._visual_revision = 0
+        self._identity_revision = 0
 
         self._w_rot = np.zeros((0, 3, 3), np.float32)
         self._w_pos = np.zeros((0, 3), np.float32)
@@ -106,6 +110,8 @@ class SceneSourceBuilder:
         self._out_rot = np.zeros((0, 3, 3), np.float32)
         self._out_pos = np.zeros((0, 3), np.float32)
         self._stage = np.zeros((0, 4, 4), np.float32)
+        self._last_stage = np.zeros((0, 4, 4), np.float32)
+        self._pose_valid = False
 
     @property
     def scene(self) -> RenderScene:
@@ -244,6 +250,11 @@ class SceneSourceBuilder:
                     np.float32,
                 ),
                 object_id=int(src.geom_object_id[i]),
+                segmentation=(
+                    src.geom_segmentation[i]
+                    if len(src.geom_segmentation) == src.instance_count
+                    else (-1, -1)
+                ),
                 tex_coef=tex,
                 cube_coef=cube,
                 infinite_plane=infinite,
@@ -309,6 +320,8 @@ class SceneSourceBuilder:
         self._out_pos = np.zeros((n, 3), np.float32)
         self._stage = np.zeros((n, 4, 4), np.float32)
         self._stage[:, 3, 3] = 1.0
+        self._last_stage = np.zeros_like(self._stage)
+        self._pose_valid = False
         if self._world_rows.size:
             self._w_rot[self._world_rows] = self._identity3
 
@@ -327,6 +340,14 @@ class SceneSourceBuilder:
                 self._scene.tex_coef[p.row, 1] = TEXUNIFORM_SCALE * p.repeat_v * 2.0 * p.half_y
             self._scene.transforms[p.row, 0, 0] = p.half_x
             self._scene.transforms[p.row, 1, 1] = p.half_y
+        self._structure_revision += 1
+        self._pose_revision += 1
+        self._visual_revision += 1
+        self._identity_revision += 1
+        self._scene.structure_revision = self._structure_revision
+        self._scene.pose_revision = self._pose_revision
+        self._scene.visual_revision = self._visual_revision
+        self._scene.identity_revision = self._identity_revision
         self._tri_counts = self._mesh_triangles()
         self._geom_count = 0
         return self._scene
@@ -462,8 +483,11 @@ class SceneSourceBuilder:
             scene.camera = camera
         if frame.lights is not None:
             scene.lights = frame.lights
-        self._update_colors(instance_rgba)
+        visual_changed = self._update_colors(instance_rgba)
         if scene.count == 0 or frame.geom_xpos is None or frame.geom_xmat is None:
+            if visual_changed:
+                self._visual_revision += 1
+                scene.visual_revision = self._visual_revision
             return scene
 
         xpos, xmat = frame.geom_xpos, frame.geom_xmat
@@ -491,7 +515,7 @@ class SceneSourceBuilder:
             self._w_pos[self._world_rows] = 0.0
 
         if self._planes:
-            self._update_infinite_planes(scene)
+            visual_changed = self._update_infinite_planes(scene) or visual_changed
 
         np.matmul(self._w_rot, self._ls_rot, out=self._out_rot)
         np.matmul(self._w_rot, self._ls_pos[:, :, None], out=self._out_pos[:, :, None])
@@ -499,28 +523,42 @@ class SceneSourceBuilder:
         self._stage[:, :3, :3] = self._out_rot
         self._stage[:, :3, 3] = self._out_pos
 
-        scene.transforms[self._write_index] = self._stage
+        pose_changed = not self._pose_valid or not np.array_equal(self._last_stage, self._stage)
+        if pose_changed:
+            scene.transforms[self._write_index] = self._stage
+            np.copyto(self._last_stage, self._stage)
+            self._pose_valid = True
+            self._pose_revision += 1
+            scene.pose_revision = self._pose_revision
+        if visual_changed:
+            self._visual_revision += 1
+            scene.visual_revision = self._visual_revision
         return scene
 
-    def _update_colors(self, rgba: np.ndarray | None) -> None:
+    def _update_colors(self, rgba: np.ndarray | None) -> bool:
         if rgba is None:
             if self._colors_overridden:
                 np.copyto(self._scene.colors, self._base_colors)
                 self._colors_overridden = False
-            return
+                return True
+            return False
         np.take(rgba, self._source_instances, axis=0, out=self._color_stage)
         np.power(
             np.clip(self._color_stage[:, :3], 0.0, 1.0),
             2.2,
             out=self._color_stage[:, :3],
         )
-        self._scene.colors[self._write_index] = self._color_stage
+        changed = not np.array_equal(self._scene.colors[self._write_index], self._color_stage)
+        if changed:
+            self._scene.colors[self._write_index] = self._color_stage
         self._colors_overridden = True
+        return changed
 
-    def _update_infinite_planes(self, scene: RenderScene) -> None:
+    def _update_infinite_planes(self, scene: RenderScene) -> bool:
         cam = scene.camera
         far = float(cam.far)
         ex, ey, ez = (float(v) for v in np.asarray(cam.eye, np.float32).reshape(3))
+        changed = False
         for p in self._planes:
             j = p.slot
             dx = ex - self._w_pos.item(j, 0)
@@ -539,13 +577,18 @@ class SceneSourceBuilder:
             )
             row = p.row
             if p.axis_x:
-                p.half_x = _snap_up(abs(lx) + far, p.period_u)
+                half_x = _snap_up(abs(lx) + far, p.period_u)
+                changed = changed or half_x != p.half_x
+                p.half_x = half_x
                 self._ls_rot[j, 0, 0] = p.half_x
                 scene.tex_coef[row, 0] = TEXUNIFORM_SCALE * p.repeat_u * 2.0 * p.half_x
             if p.axis_y:
-                p.half_y = _snap_up(abs(ly) + far, p.period_v)
+                half_y = _snap_up(abs(ly) + far, p.period_v)
+                changed = changed or half_y != p.half_y
+                p.half_y = half_y
                 self._ls_rot[j, 1, 1] = p.half_y
                 scene.tex_coef[row, 1] = TEXUNIFORM_SCALE * p.repeat_v * 2.0 * p.half_y
+        return changed
 
     def stats(self) -> BuilderStats:
         scene = self._scene

@@ -20,9 +20,11 @@ INSTANCE_ATTRIBUTES: tuple[tuple[str, str, int, int, int, int], ...] = (
     ("in_texcoef", "4f", 16, 4, 96, G.GL_FLOAT),
     ("in_cubecoef", "4f", 16, 4, 112, G.GL_FLOAT),
     ("in_object_id", "1u", 4, 1, 128, G.GL_UNSIGNED_INT),
+    ("in_segment_id", "1i", 4, 1, 132, G.GL_INT),
+    ("in_segment_type", "1i", 4, 1, 136, G.GL_INT),
 )
-INSTANCE_WORDS = INSTANCE_FLOATS + 1
-INSTANCE_BYTES = INSTANCE_WORDS * 4  # 132
+INSTANCE_WORDS = INSTANCE_FLOATS + 3
+INSTANCE_BYTES = INSTANCE_WORDS * 4  # 140
 MESH_ATTRIBUTES: tuple[tuple[str, str, int, int, int, int], ...] = (
     ("in_position", "3f", 12, 3, 0, G.GL_FLOAT),
     ("in_normal", "3f", 12, 3, 12, G.GL_FLOAT),
@@ -97,6 +99,8 @@ class InstanceStore:
         self._generation = -1
         self._meshes: list[GpuMesh | None] = []
         self._keys = ()
+        self._last_revisions: tuple[int, int, int, int] | None = None
+        self.uploaded_bytes = 0
 
         self._raw = np.zeros((0, INSTANCE_WORDS), np.uint32)
         self._staging = self._raw.view(np.float32)
@@ -112,7 +116,18 @@ class InstanceStore:
         self.capacity = new_cap
         self._raw = np.zeros((new_cap, INSTANCE_WORDS), np.uint32)
         self._staging = self._raw.view(np.float32)
+        self._last_revisions = None
         return True
+
+    def ensure_capacity(self, count: int) -> bool:
+        """Ensure shared instance storage exists before any pass builds VAOs."""
+
+        return self._ensure_capacity(max(int(count), 1))
+
+    def invalidate_upload(self) -> None:
+        """Force the next upload after a pass-owned instance variant changes."""
+
+        self._last_revisions = None
 
     def rebuild(
         self,
@@ -205,18 +220,37 @@ class InstanceStore:
         dst[:, 28:32] = scene.cube_coef
 
         self._raw[:n, 32] = scene.object_id
+        if scene.segmentation.shape == (n, 2):
+            self._raw[:n, 33:35] = scene.segmentation.view(np.uint32)
+        else:
+            self._raw[:n, 33:35] = np.uint32(0xFFFFFFFF)
         return self._raw[:n]
 
     def upload(self, scene: RenderScene) -> None:
+        revisions = (
+            scene.structure_revision,
+            scene.pose_revision,
+            scene.visual_revision,
+            scene.identity_revision,
+        )
+        if all(revisions) and revisions == self._last_revisions:
+            self.uploaded_bytes = 0
+            return
         data = self.pack(scene)
         if len(data) == 0 or self.buffer is None:
+            self.uploaded_bytes = 0
+            self._last_revisions = revisions
             return
         if self.strategy is Strategy.SHARED:
             self.buffer.write(data)
+            self.uploaded_bytes = data.nbytes
+            self._last_revisions = revisions
             return
         for b, (start, stop) in enumerate(self._ranges):
             if stop > start and b < len(self._bucket_buffers):
                 self._bucket_buffers[b].write(data[start:stop])
+        self.uploaded_bytes = data.nbytes
+        self._last_revisions = revisions
 
     def draw(self, bucket: int, instances: int | None = None) -> int:
         if not (0 <= bucket < len(self._vaos)):
@@ -235,10 +269,15 @@ class InstanceStore:
     def vao(self, bucket: int) -> moderngl.VertexArray | None:
         return self._vaos[bucket] if 0 <= bucket < len(self._vaos) else None
 
-    def triangles(self, scene: RenderScene) -> int:
+    def triangles(
+        self,
+        scene: RenderScene,
+        meshes: list[GpuMesh | None] | None = None,
+    ) -> int:
         total = 0
+        meshes = self._meshes if meshes is None else meshes
         for b, (start, stop) in enumerate(scene.bucket_ranges):
-            mesh = self._meshes[b] if b < len(self._meshes) else None
+            mesh = meshes[b] if b < len(meshes) else None
             if mesh is not None:
                 total += mesh.triangle_count * (stop - start)
         return total

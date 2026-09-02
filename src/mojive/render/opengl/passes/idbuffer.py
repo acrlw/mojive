@@ -23,9 +23,15 @@ log = get_logger("id")
 
 
 class IdGeometry:
-    def __init__(self, only_selected: bool = False, float_mask: bool = False) -> None:
+    def __init__(
+        self,
+        only_selected: bool = False,
+        float_mask: bool = False,
+        export: bool = False,
+    ) -> None:
         self._only_selected = bool(only_selected)
         self._float_mask = bool(float_mask)
+        self._export = bool(export)
         self.program: moderngl.Program | None = None
         self._spec: ProgramSpec | None = None
         self._attachment = -1
@@ -67,6 +73,8 @@ class IdGeometry:
         return bool(self._vaos) and not self._broken
 
     def _make_spec(self, attachment: int) -> ProgramSpec:
+        if self._export:
+            return ProgramSpec(name="export", vertex="export.vert", fragment="export.frag")
         defines: dict[str, object] = {"ID_ATTACHMENT": attachment}
         if self._only_selected:
             defines["ID_ONLY_SELECTED"] = 1
@@ -143,6 +151,13 @@ class IdGeometry:
         assert self.program is not None
 
         self.program["u_view_proj"].write(M.to_gl(ctx.view_proj))
+
+    def set_export_uniforms(self, ctx: PassContext) -> None:
+        self.set_view_proj(ctx)
+        assert self.program is not None
+        self.program["u_near"].value = float(ctx.camera.near)
+        self.program["u_far"].value = float(ctx.camera.far)
+        self.program["u_orthographic"].value = bool(ctx.camera.orthographic)
 
     def draw(self, ctx: PassContext, buckets) -> int:
         ranges = ctx.scene.bucket_ranges
@@ -226,6 +241,43 @@ class IdBufferPass(BasePass):
         self._geom.release()
 
 
+class ExportPass(BasePass):
+    """Unlit metric-depth and semantic-identity export."""
+
+    name = "export"
+
+    def __init__(self) -> None:
+        self._geom = IdGeometry(export=True)
+
+    def prepare(self, ctx: PassContext) -> bool:
+        ctx.target.clear_export(float(ctx.camera.far))
+        if not self._geom.ensure(ctx, -1):
+            return False
+        self._geom.upload(ctx)
+        return bool(
+            ctx.scene.opaque_buckets
+            or (
+                ctx.include_transparent_ids
+                and ctx.scene.transparent_buckets
+                and ctx.flag(RenderFlag.TRANSPARENT)
+            )
+        )
+
+    def execute(self, ctx: PassContext) -> None:
+        ctx.target.use_export()
+        state_opaque(ctx.ctx)
+        if not ctx.flag(RenderFlag.CULL_FACE):
+            ctx.ctx.disable(moderngl.CULL_FACE)
+        self._geom.set_export_uniforms(ctx)
+        ctx.draw_calls += self._geom.draw(ctx, ctx.scene.opaque_buckets)
+        if ctx.include_transparent_ids and ctx.flag(RenderFlag.TRANSPARENT):
+            ctx.draw_calls += self._geom.draw(ctx, ctx.scene.transparent_draw_order())
+
+    def release(self) -> None:
+        self._geom.release()
+
+
 # Importing through the package here would create a register_pass initialization cycle.
 
 register_pass("id", IdBufferPass)
+register_pass("export", ExportPass)

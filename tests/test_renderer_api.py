@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import inspect
 
-import numpy as np
 import pytest
 
 mujoco = pytest.importorskip("mujoco")
@@ -124,22 +123,34 @@ def test_renderer_requests_bvh_data_only_when_visible():
     assert renderer_module._frame_needs(option).bvh
 
 
-def test_segmentation_image_uses_table_and_rejects_unknown_ids():
-    table = np.asarray(((-1, -1), (4, 5), (8, 9)), np.int32)
+def test_renderer_requests_only_visible_optional_frame_data():
+    option = mujoco.MjvOption()
+    option.flags[:] = 0
+    option.label = mujoco.mjtLabel.mjLABEL_NONE
+    option.frame = mujoco.mjtFrame.mjFRAME_NONE
 
-    image = renderer_module._segmentation_image(np.asarray([[0, 2], [1, 2]], np.uint32), table)
-    assert image.tolist() == [[[-1, -1], [8, 9]], [[4, 5], [8, 9]]]
-    assert image.flags.c_contiguous
-
-    out = np.empty_like(image)
-    assert (
-        renderer_module._segmentation_image(np.asarray([[0, 2], [1, 2]], np.uint32), table, out=out)
-        is out
+    needs = renderer_module._frame_needs(option)
+    assert needs.poses
+    assert not any(
+        (
+            needs.contacts,
+            needs.tendons,
+            needs.actuator,
+            needs.deformables,
+            needs.diagnostics,
+            needs.islands,
+            needs.bvh,
+        )
     )
-    assert np.array_equal(out, image)
 
-    invalid = renderer_module._segmentation_image(np.asarray([[3]], np.uint32), table)
-    assert invalid.tolist() == [[[-1, -1]]]
+    option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTFORCE] = 1
+    assert renderer_module._frame_needs(option).contacts
+    option.flags[mujoco.mjtVisFlag.mjVIS_ACTUATOR] = 1
+    needs = renderer_module._frame_needs(option)
+    assert needs.actuator and needs.tendons and needs.diagnostics
+    option.flags[mujoco.mjtVisFlag.mjVIS_ISLAND] = 1
+    needs = renderer_module._frame_needs(option)
+    assert needs.islands and needs.contacts and needs.tendons and needs.deformables
 
 
 def test_renderer_releases_backend_without_a_separate_graphics_context():

@@ -44,8 +44,8 @@ struct Instance {
     texcoef: vec4f,             // xy scale; z=1 box mapping, zw<0 infinite-plane light grid
     cubecoef: vec4f,            // xyz object-linear scale, w capsule-axis offset
     object_id: u32,
-    // The struct ends at 132 and rounds up to a 144-byte array stride,
-    // matching instances.py's padded dtype.
+    identity_pad: u32,
+    segmentation: vec2i,
 };
 
 struct Lights {
@@ -552,6 +552,7 @@ struct ExportOut {
     @builtin(position) clip: vec4f,
     @location(0) view_depth: f32,
     @location(1) @interpolate(flat) object_id: u32,
+    @location(2) @interpolate(flat) segmentation: vec2i,
 };
 
 @vertex
@@ -565,28 +566,21 @@ fn vs_export(
     out.clip = frame.view_proj * world;
     out.view_depth = -(frame.view * world).z;
     out.object_id = inst.object_id;
+    out.segmentation = inst.segmentation;
     return out;
 }
 
 struct ExportFrag {
-    @location(0) depth: f32,        // GL-compatible nonlinear depth in [0,1]
+    @location(0) depth: f32,
     @location(1) object_id: u32,
+    @location(2) segmentation: vec2i,
 };
 
 @fragment
 fn fs_export(in: ExportOut) -> ExportFrag {
-    let near = frame.shading.z;
-    let far = frame.shading.w;
-    let d = max(in.view_depth, 1e-6);
-    var depth: f32;
-    if frame.flags.x > 0.5 {
-        depth = clamp((d - near) / max(far - near, 1e-6), 0.0, 1.0);
-    } else {
-        let ndc = (far + near) / (far - near) - (2.0 * far * near) / ((far - near) * d);
-        depth = clamp(0.5 + 0.5 * ndc, 0.0, 1.0);
-    }
     var out: ExportFrag;
-    out.depth = depth;
+    out.depth = in.view_depth;
     out.object_id = in.object_id;
+    out.segmentation = in.segmentation;
     return out;
 }

@@ -10,17 +10,28 @@ shadow
 reflect
 opaque
 id
+export
 skybox
 tendon
 transparent
-present
 outline
 debug
 gizmo
+present
 ```
 
-The ID pass shares scene visibility with opaque rendering and supplies picking, segmentation,
-and selection outlines. Debug and gizmo passes consume generic commands and UI state.
+This is the superset, not a fixed cost paid by every call. A backend compiles a pass plan from a
+backend-neutral `RenderRequest` and schedules only the work needed for the requested products:
+
+- viewport: resolved color plus object IDs for picking and outlines
+- color capture: resolved color only
+- metric depth: an `R32F` export target only
+- segmentation: an `RG32I` semantic-ID export target only
+
+The ID pass shares scene visibility with opaque rendering and supplies picking and selection
+outlines. Metric depth and MuJoCo `(object_id, object_type)` pairs are written directly by the GPU;
+they do not require full-frame CPU depth conversion or an ID lookup. Debug and gizmo passes
+consume generic commands and UI state.
 
 The wgpu backend (`MOJIVE_BACKEND=wgpu`) runs the same pass order with WebGPU
 constructions for the GL-only pieces: picking/segmentation/depth readback comes from a
@@ -30,6 +41,35 @@ built vertex attribute instead of a geometry shader, and reflection clipping is 
 discard on a plane equation instead of `gl_ClipDistance`. The `msaa` render flag switches the
 active targets between 1× and the configured multisample count; sample-count-dependent resources
 are rebuilt through the backend's normal option path.
+
+OpenGL separates instance preparation from pass execution. Passes first select any required
+instance variant (for example, the reflection material view), then the backend performs at most
+one instance upload before executing the planned passes. This ordering keeps pass-owned mutations
+explicit and prevents a later pass from silently invalidating uploaded data.
+
+## Data lifetime and upload policy
+
+`SceneSource` owns topology and immutable resources. `RenderScene` carries independent structure,
+pose, visual, and identity revisions. Instance stores retain their buffers and skip uploads when
+the relevant revisions are unchanged; revision zero remains a conservative compatibility path for
+custom sources that do not provide lifecycle information.
+
+The MuJoCo adapter derives `FrameNeeds` from visible scene options. Contacts, tendons, deformables,
+diagnostics, islands, and BVH data are prepared only when a visible feature consumes them. Pose
+data remains mandatory. This keeps optional simulation extraction out of ordinary frames without
+coupling the adapter to a specific graphics backend.
+
+## Readback boundary
+
+OpenGL color capture reads packed RGB directly into a persistent staging allocation or a supplied
+output array. Metric depth and segmentation likewise read their typed export targets directly.
+The current synchronous API deliberately returns a ready NumPy array before `render()` completes.
+
+wgpu color capture still copies an RGBA texture and packs RGB on the CPU. Removing that remaining
+cost requires an explicit asynchronous or batched capture contract plus a staging-buffer ring; it
+should not be hidden behind the synchronous API because that would change data ownership and frame
+latency. The export-only depth and segmentation paths already avoid the shaded frame graph and CPU
+post-processing.
 
 ## Color pipeline
 
@@ -120,4 +160,11 @@ make calibrate
 make showcase
 make gallery
 make gizmo-gallery
+make renderer-benchmark
+make renderer-benchmark-full
 ```
+
+On an Apple M5 at 1920×1080 with 4× MSAA, the architecture benchmark records OpenGL RGB capture at
+3.19–3.40 ms, metric depth at 2.02–2.13 ms, and segmentation at 2.74–3.03 ms across the bundled
+workloads. These measurements are evidence for regression tracking rather than fixed performance
+requirements; use the benchmark commands on the target machine when changing pipeline structure.

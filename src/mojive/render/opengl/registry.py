@@ -10,6 +10,7 @@ PASS_ORDER: tuple[str, ...] = (
     "reflect",
     "opaque",
     "id",
+    "export",
     "skybox",
     "tendon",
     "transparent",

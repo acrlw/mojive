@@ -10,7 +10,7 @@ from ..types import CameraView, LightSet, Material, MeshKey, ShadingModel
 
 # transform 16 + color 4 + material 4 + tex_coef 4 + cube_coef 4 = 32
 INSTANCE_FLOATS = 32
-INSTANCE_STRIDE = INSTANCE_FLOATS * 4 + 4  # + object_id(uint32)
+INSTANCE_STRIDE = INSTANCE_FLOATS * 4 + 12  # + object_id(uint32), segmentation(2 x int32)
 
 BACKGROUND_ID = np.uint32(0)
 
@@ -18,6 +18,11 @@ BACKGROUND_ID = np.uint32(0)
 @dataclass
 class RenderScene:
     count: int = 0
+
+    structure_revision: int = 0
+    pose_revision: int = 0
+    visual_revision: int = 0
+    identity_revision: int = 0
 
     transforms: np.ndarray = field(default_factory=lambda: np.zeros((0, 4, 4), np.float32))
     colors: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
@@ -29,6 +34,8 @@ class RenderScene:
     cube_coef: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
 
     object_id: np.ndarray = field(default_factory=lambda: np.zeros((0,), np.uint32))
+
+    segmentation: np.ndarray = field(default_factory=lambda: np.full((0, 2), -1, np.int32))
 
     bucket: np.ndarray = field(default_factory=lambda: np.zeros((0,), np.int32))
 
@@ -69,6 +76,7 @@ class RenderScene:
             "tex_coef",
             "cube_coef",
             "object_id",
+            "segmentation",
             "bucket",
         ):
             arr = getattr(self, name)
@@ -80,6 +88,8 @@ class RenderScene:
             raise ValueError("transforms must use float32")
         if self.object_id.dtype != np.uint32:
             raise ValueError("object_id must use uint32")
+        if self.segmentation.shape != (n, 2) or self.segmentation.dtype != np.int32:
+            raise ValueError("segmentation must use int32 with shape (N, 2)")
 
         if len(self.bucket_ranges) != len(self.bucket_keys):
             raise ValueError("bucket_ranges and bucket_keys must have equal lengths")
@@ -159,6 +169,7 @@ class SceneBuilder:
         color: np.ndarray,
         material: np.ndarray,
         object_id: int,
+        segmentation: tuple[int, int] | np.ndarray = (-1, -1),
         tex_coef: np.ndarray | None = None,
         cube_coef: np.ndarray | None = None,
         infinite_plane: bool = False,
@@ -180,6 +191,7 @@ class SceneBuilder:
                     else np.asarray(cube_coef, np.float32).reshape(4)
                 ),
                 "object_id": np.uint32(object_id),
+                "segmentation": np.asarray(segmentation, np.int32).reshape(2),
                 "infinite_plane": infinite_plane,
             }
         )
@@ -249,6 +261,11 @@ class SceneBuilder:
             np.array([r["object_id"] for r in self._rows], np.uint32)[order]
             if n
             else np.zeros(0, np.uint32)
+        )
+        scene.segmentation = (
+            np.stack([r["segmentation"] for r in self._rows])[order]
+            if n
+            else np.full((0, 2), -1, np.int32)
         )
         scene.infinite_planes = tuple(
             int(write_index[i]) for i, r in enumerate(self._rows) if r["infinite_plane"]

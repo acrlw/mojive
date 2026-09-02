@@ -32,7 +32,14 @@ from .backends import make_adapter
 from .composition import build_from_adapter, build_scene, build_workspace
 from .recording import SnapshotWriter, VideoRecorder, read_snapshots
 from .remote import RemoteSceneAdapter, SnapshotPublisher
-from .render.backend import DebugView, FrameMode, LabelMode, RenderFlag
+from .render.backend import (
+    DebugView,
+    FrameMode,
+    LabelMode,
+    RenderFlag,
+    RenderProduct,
+    RenderRequest,
+)
 from .render.debugdraw import DebugDraw, Layer, Occlusion
 from .scene import Scene, SceneLight, SceneObject
 from .types import (
@@ -109,6 +116,8 @@ __all__ = [
     "PhysicsState",
     "RemoteSceneAdapter",
     "RenderFlag",
+    "RenderProduct",
+    "RenderRequest",
     "Renderer",
     "Scene",
     "SceneAdapter",
