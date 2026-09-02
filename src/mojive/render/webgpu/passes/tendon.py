@@ -27,6 +27,8 @@ class TendonPass:
         self._store = InstanceStore(device)
         self._material_ids = np.zeros(0, np.int32)
         self._transparent = np.zeros(0, bool)
+        self._group0: wgpu.GPUBindGroup | None = None
+        self._group0_key: tuple | None = None
 
     @property
     def capsule_count(self) -> int:
@@ -152,15 +154,26 @@ class TendonPass:
     ) -> wgpu.GPUBindGroup | None:
         """Upload the capsule instances and bind them as scene group0.
 
-        Returns None when there is nothing to draw.  A fresh group every
-        frame, like the backend's main group0: the storage buffer is
-        reallocated on growth, so no bind group survives across frames.
+        Returns None when there is nothing to draw. The binding persists until
+        an instance stream is reallocated on growth.
         """
         if not self._count:
             return None
         self._store.upload(self._scene)
         pose, visual, identity = self._store.bindings()
-        return self._device.create_bind_group(
+        key = (
+            frame_buffer,
+            pose[0],
+            pose[1],
+            visual[0],
+            visual[1],
+            identity[0],
+            identity[1],
+            lights_buffer,
+        )
+        if self._group0 is not None and self._group0_key == key:
+            return self._group0
+        self._group0 = self._device.create_bind_group(
             layout=layout,
             entries=[
                 {
@@ -189,6 +202,10 @@ class TendonPass:
                 },
             ],
         )
+        self._group0_key = key
+        return self._group0
 
     def release(self) -> None:
+        self._group0 = None
+        self._group0_key = None
         self._store.release()

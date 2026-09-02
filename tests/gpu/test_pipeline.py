@@ -159,6 +159,36 @@ def _require(backend_name: str, *names: str) -> None:
         pytest.skip(f"required render passes unavailable: {missing}")
 
 
+def test_wgpu_reuses_stable_frame_bindings_and_target_views(rendered):
+    if rendered["backend_name"] != "wgpu":
+        pytest.skip("wgpu resource-lifetime contract")
+    backend = rendered["backend"]
+    target = backend.target
+    group0 = backend._group0
+    views = (
+        target.color_view,
+        target.color_ms_view,
+        target.zbuf_view,
+        target.export_depth_view,
+        target.export_id_view,
+        target.export_segmentation_view,
+        target.export_zbuf_view,
+    )
+
+    backend.render()
+
+    assert backend._group0 is group0
+    assert views == (
+        target.color_view,
+        target.color_ms_view,
+        target.zbuf_view,
+        target.export_depth_view,
+        target.export_id_view,
+        target.export_segmentation_view,
+        target.export_zbuf_view,
+    )
+
+
 def test_msaa_flag_updates_the_backend_sample_state(backend_name, request):
     """OpenGL toggles rasterization state; wgpu rebuilds sample-count state."""
     backend = _make_backend(backend_name, request)
@@ -167,17 +197,23 @@ def test_msaa_flag_updates_the_backend_sample_state(backend_name, request):
         assert backend.get_flag(RenderFlag.MSAA)
         assert backend.target.samples == 4
         assert backend.caps.msaa_samples == 4
+        original_color_view = getattr(backend.target, "color_view", None)
 
         assert backend.set_flag(RenderFlag.MSAA, False)
         assert not backend.get_flag(RenderFlag.MSAA)
         expected = 1 if backend_name == "wgpu" else 4
         assert backend.target.samples == expected
         assert backend.caps.msaa_samples == expected
+        if backend_name == "wgpu":
+            assert backend.target.color_view is not original_color_view
 
+        single_sample_view = getattr(backend.target, "color_view", None)
         assert backend.set_flag(RenderFlag.MSAA, True)
         assert backend.get_flag(RenderFlag.MSAA)
         assert backend.target.samples == 4
         assert backend.caps.msaa_samples == 4
+        if backend_name == "wgpu":
+            assert backend.target.color_view is not single_sample_view
     finally:
         backend.release()
 

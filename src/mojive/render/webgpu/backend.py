@@ -297,6 +297,8 @@ class WgpuBackend:
             bind_group_layouts=[self._group0_layout]
         )
         self._pipelines: dict[tuple, wgpu.GPURenderPipeline] = {}
+        self._group0: wgpu.GPUBindGroup | None = None
+        self._group0_key: tuple | None = None
         self._texture_groups: dict[tuple[int, int], wgpu.GPUBindGroup] = {}
         self._image_light_groups: dict[int, wgpu.GPUBindGroup] = {}
         self._skybox = SkyboxPass(self.device, self.target.samples)
@@ -698,7 +700,19 @@ class WgpuBackend:
 
     def _bind_group0(self) -> wgpu.GPUBindGroup:
         pose, visual, identity = self.instances.bindings()
-        return self.device.create_bind_group(
+        key = (
+            self.target.frame_buffer,
+            pose[0],
+            pose[1],
+            visual[0],
+            visual[1],
+            identity[0],
+            identity[1],
+            self.lights.buffer,
+        )
+        if self._group0 is not None and self._group0_key == key:
+            return self._group0
+        self._group0 = self.device.create_bind_group(
             layout=self._group0_layout,
             entries=[
                 {
@@ -731,6 +745,8 @@ class WgpuBackend:
                 },
             ],
         )
+        self._group0_key = key
+        return self._group0
 
     def _texture_group(self, name: str | None) -> wgpu.GPUBindGroup:
         view = self.textures.get(name) if name else None
@@ -945,26 +961,26 @@ class WgpuBackend:
         render_pass = encoder.begin_render_pass(
             color_attachments=[
                 {
-                    "view": target.export_depth.create_view(),
+                    "view": target.export_depth_view,
                     "clear_value": (metric_far, metric_far, metric_far, metric_far),
                     "load_op": "clear",
                     "store_op": "store",
                 },
                 {
-                    "view": target.export_id.create_view(),
+                    "view": target.export_id_view,
                     "clear_value": (0, 0, 0, 0),
                     "load_op": "clear",
                     "store_op": "store",
                 },
                 {
-                    "view": target.export_segmentation.create_view(),
+                    "view": target.export_segmentation_view,
                     "clear_value": (-1, -1, -1, -1),
                     "load_op": "clear",
                     "store_op": "store",
                 },
             ],
             depth_stencil_attachment={
-                "view": target.export_zbuf.create_view(),
+                "view": target.export_zbuf_view,
                 "depth_clear_value": 1.0,
                 "depth_load_op": "clear",
                 "depth_store_op": "store",
@@ -1145,9 +1161,9 @@ class WgpuBackend:
             )
             draw_calls += calls
 
-        color_view = target.color_ms.create_view() if target.color_ms is not None else None
+        color_view = target.color_ms_view
         color_attachment = {
-            "view": color_view if color_view is not None else target.color.create_view(),
+            "view": color_view if color_view is not None else target.color_view,
             "clear_value": (
                 OVERDRAW_CLEAR if self._debug_view is DebugView.OVERDRAW else self._background
             ),
@@ -1155,7 +1171,7 @@ class WgpuBackend:
             "store_op": "store" if color_view is None else "discard",
         }
         if color_view is not None:
-            color_attachment["resolve_target"] = target.color.create_view()
+            color_attachment["resolve_target"] = target.color_view
         # The outline mask renders ahead of the main pass; the dilation
         # composite joins the main pass after transparent geometry, matching
         # opengl's PASS_ORDER (outline between transparent and present).
@@ -1179,7 +1195,7 @@ class WgpuBackend:
         pass1 = encoder.begin_render_pass(
             color_attachments=[color_attachment],
             depth_stencil_attachment={
-                "view": target.zbuf.create_view(),
+                "view": target.zbuf_view,
                 "depth_clear_value": 1.0,
                 "depth_load_op": "clear",
                 "depth_store_op": "store",
@@ -1268,8 +1284,8 @@ class WgpuBackend:
         # other views need no present work (the resolve happened in pass1).
         draw_calls += self._present.execute(
             encoder,
-            target.color,
-            target.export_id,
+            target.color_view,
+            target.export_id_view,
             self._debug_view,
             self._selected,
             timestamp,
@@ -1501,6 +1517,8 @@ class WgpuBackend:
         self._debug.release()
         self._gizmo.release()
         self._pipelines.clear()
+        self._group0 = None
+        self._group0_key = None
         self._texture_groups.clear()
         self._image_light_groups.clear()
         self._scene = None

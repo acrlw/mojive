@@ -126,7 +126,11 @@ class OutlinePass:
         )
 
         self._mask: wgpu.GPUTexture | None = None
+        self._mask_view: wgpu.GPUTextureView | None = None
         self._mask_size: tuple[int, int] = (0, 0)
+        self._mask_group: wgpu.GPUBindGroup | None = None
+        self._mask_group_key: tuple | None = None
+        self._composite_group: wgpu.GPUBindGroup | None = None
 
         self._buckets: tuple[int, ...] = ()
         self._sel_id = -1
@@ -164,7 +168,11 @@ class OutlinePass:
             format="r8unorm",
             usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.TEXTURE_BINDING,
         )
+        self._mask_view = self._mask.create_view()
         self._mask_size = (width, height)
+        self._mask_group = None
+        self._mask_group_key = None
+        self._composite_group = None
         return self._mask
 
     def render_mask(
@@ -179,47 +187,54 @@ class OutlinePass:
         timestamp: TimestampWriter | None = None,
     ) -> int:
         """Rasterize the selected silhouette; returns the draw-call count."""
-        mask = self._ensure_mask(width, height)
+        self._ensure_mask(width, height)
         block = self._mask_block
         block["view_proj"][:] = np.asarray(view_proj, np.float32).T
         block["params"][:] = (self._sel_id, 0, 0, 0)
         self._device.queue.write_buffer(self._mask_uniforms, 0, block.tobytes())
 
-        # Per frame like the backend's group0: instance streams can be
-        # reallocated on growth, so no bind group survives across frames.
-        group = self._device.create_bind_group(
-            layout=self._mask_layout,
-            entries=[
-                {
-                    "binding": 0,
-                    "resource": {
-                        "buffer": self._mask_uniforms,
-                        "offset": 0,
-                        "size": _MASK_DTYPE.itemsize,
-                    },
-                },
-                {
-                    "binding": 1,
-                    "resource": {
-                        "buffer": instances.pose_buffer,
-                        "offset": 0,
-                        "size": instances.capacity * POSE_STRIDE,
-                    },
-                },
-                {
-                    "binding": 4,
-                    "resource": {
-                        "buffer": instances.identity_buffer,
-                        "offset": 0,
-                        "size": instances.capacity * IDENTITY_STRIDE,
-                    },
-                },
-            ],
+        key = (
+            instances.pose_buffer,
+            instances.capacity * POSE_STRIDE,
+            instances.identity_buffer,
+            instances.capacity * IDENTITY_STRIDE,
         )
+        if self._mask_group is None or self._mask_group_key != key:
+            self._mask_group = self._device.create_bind_group(
+                layout=self._mask_layout,
+                entries=[
+                    {
+                        "binding": 0,
+                        "resource": {
+                            "buffer": self._mask_uniforms,
+                            "offset": 0,
+                            "size": _MASK_DTYPE.itemsize,
+                        },
+                    },
+                    {
+                        "binding": 1,
+                        "resource": {
+                            "buffer": instances.pose_buffer,
+                            "offset": 0,
+                            "size": instances.capacity * POSE_STRIDE,
+                        },
+                    },
+                    {
+                        "binding": 4,
+                        "resource": {
+                            "buffer": instances.identity_buffer,
+                            "offset": 0,
+                            "size": instances.capacity * IDENTITY_STRIDE,
+                        },
+                    },
+                ],
+            )
+            self._mask_group_key = key
+        assert self._mask_view is not None
         mask_pass = encoder.begin_render_pass(
             color_attachments=[
                 {
-                    "view": mask.create_view(),
+                    "view": self._mask_view,
                     "clear_value": (0.0, 0.0, 0.0, 0.0),
                     "load_op": "clear",
                     "store_op": "store",
@@ -228,7 +243,7 @@ class OutlinePass:
             timestamp_writes=timestamp("outline") if timestamp is not None else None,
         )
         mask_pass.set_pipeline(self._mask_pipeline)
-        mask_pass.set_bind_group(0, group)
+        mask_pass.set_bind_group(0, self._mask_group)
         calls = 0
         for b in self._buckets:
             start, stop = scene.bucket_ranges[b]
@@ -251,22 +266,24 @@ class OutlinePass:
         block["color"][:] = self.color
         block["size"][:] = (width, height, 0, 0)
         self._device.queue.write_buffer(self._composite_uniforms, 0, block.tobytes())
-        group = self._device.create_bind_group(
-            layout=self._composite_layout,
-            entries=[
-                {"binding": 2, "resource": self._mask.create_view()},
-                {
-                    "binding": 3,
-                    "resource": {
-                        "buffer": self._composite_uniforms,
-                        "offset": 0,
-                        "size": _COMPOSITE_DTYPE.itemsize,
+        if self._composite_group is None:
+            assert self._mask_view is not None
+            self._composite_group = self._device.create_bind_group(
+                layout=self._composite_layout,
+                entries=[
+                    {"binding": 2, "resource": self._mask_view},
+                    {
+                        "binding": 3,
+                        "resource": {
+                            "buffer": self._composite_uniforms,
+                            "offset": 0,
+                            "size": _COMPOSITE_DTYPE.itemsize,
+                        },
                     },
-                },
-            ],
-        )
+                ],
+            )
         pass_encoder.set_pipeline(self._composite_pipeline)
-        pass_encoder.set_bind_group(0, group)
+        pass_encoder.set_bind_group(0, self._composite_group)
         pass_encoder.draw(3)
         return 1
 
@@ -274,6 +291,10 @@ class OutlinePass:
         if self._mask is not None:
             self._mask.destroy()
             self._mask = None
+        self._mask_view = None
         self._mask_size = (0, 0)
+        self._mask_group = None
+        self._mask_group_key = None
+        self._composite_group = None
         self._mask_uniforms.destroy()
         self._composite_uniforms.destroy()

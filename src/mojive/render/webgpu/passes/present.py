@@ -49,12 +49,14 @@ class PresentPass:
         self._uniforms = device.create_buffer(
             size=_PRESENT_DTYPE.itemsize, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST
         )
+        self._group: wgpu.GPUBindGroup | None = None
+        self._group_view: wgpu.GPUTextureView | None = None
 
     def execute(
         self,
         encoder: wgpu.GPUCommandEncoder,
-        color: wgpu.GPUTexture,
-        ids: wgpu.GPUTexture,
+        color: wgpu.GPUTextureView,
+        ids: wgpu.GPUTextureView,
         debug_view: DebugView,
         selected_id: int,
         timestamp: TimestampWriter | None = None,
@@ -66,24 +68,26 @@ class PresentPass:
         block = self._block
         block["params"][:] = (mode, int(selected_id), 0, 0)
         self._device.queue.write_buffer(self._uniforms, 0, block.tobytes())
-        group = self._device.create_bind_group(
-            layout=self._layout,
-            entries=[
-                {"binding": 0, "resource": ids.create_view()},
-                {
-                    "binding": 1,
-                    "resource": {
-                        "buffer": self._uniforms,
-                        "offset": 0,
-                        "size": _PRESENT_DTYPE.itemsize,
+        if self._group is None or self._group_view is not ids:
+            self._group = self._device.create_bind_group(
+                layout=self._layout,
+                entries=[
+                    {"binding": 0, "resource": ids},
+                    {
+                        "binding": 1,
+                        "resource": {
+                            "buffer": self._uniforms,
+                            "offset": 0,
+                            "size": _PRESENT_DTYPE.itemsize,
+                        },
                     },
-                },
-            ],
-        )
+                ],
+            )
+            self._group_view = ids
         present_pass = encoder.begin_render_pass(
             color_attachments=[
                 {
-                    "view": color.create_view(),
+                    "view": color,
                     # Every pixel is overwritten by the fullscreen draw.
                     "clear_value": (0.0, 0.0, 0.0, 1.0),
                     "load_op": "clear",
@@ -93,10 +97,12 @@ class PresentPass:
             timestamp_writes=timestamp("present") if timestamp is not None else None,
         )
         present_pass.set_pipeline(self._pipeline)
-        present_pass.set_bind_group(0, group)
+        present_pass.set_bind_group(0, self._group)
         present_pass.draw(3)
         present_pass.end()
         return 1
 
     def release(self) -> None:
+        self._group = None
+        self._group_view = None
         self._uniforms.destroy()

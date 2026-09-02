@@ -64,6 +64,11 @@ This removes the expensive offscreen passes from static frames without lowering 
 introducing temporal lag. Any dependency change invalidates the relevant product immediately;
 revision-zero custom scenes deliberately take the conservative render-every-frame path.
 
+WebGPU render-target views and resource bind groups follow the same ownership model. Target views
+are created with their textures, while scene, tendon, outline, and identity-presentation bindings
+persist until one of their buffers or views is replaced. Resize, MSAA changes, and instance-buffer
+growth rebuild only the affected descriptors rather than allocating wrapper objects every frame.
+
 The MuJoCo adapter derives `FrameNeeds` from visible scene options. Contacts, tendons, deformables,
 diagnostics, islands, and BVH data are prepared only when a visible feature consumes them. Pose
 data remains mandatory. This keeps optional simulation extraction out of ordinary frames without

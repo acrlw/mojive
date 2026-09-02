@@ -130,28 +130,34 @@ class RenderTargetWgpu:
             if self.samples > 1
             else None
         )
+        self.color_ms_view = self.color_ms.create_view() if self.color_ms is not None else None
         self.zbuf = device.create_texture(
             size=size,
             format="depth24plus",
             usage=wgpu.TextureUsage.RENDER_ATTACHMENT,
             sample_count=self.samples,
         )
+        self.zbuf_view = self.zbuf.create_view()
         export_usage = wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_SRC
         self.export_depth = device.create_texture(size=size, format="r32float", usage=export_usage)
+        self.export_depth_view = self.export_depth.create_view()
         # export_id is additionally sampled by the present pass (SEGMENT/IDCOLOR).
         self.export_id = device.create_texture(
             size=size,
             format="r32uint",
             usage=export_usage | wgpu.TextureUsage.TEXTURE_BINDING,
         )
+        self.export_id_view = self.export_id.create_view()
         self.export_segmentation = device.create_texture(
             size=size,
             format="rg32sint",
             usage=export_usage,
         )
+        self.export_segmentation_view = self.export_segmentation.create_view()
         self.export_zbuf = device.create_texture(
             size=size, format="depth24plus", usage=wgpu.TextureUsage.RENDER_ATTACHMENT
         )
+        self.export_zbuf_view = self.export_zbuf.create_view()
 
     def resize(self, width: int, height: int) -> None:
         width, height = max(1, int(width)), max(1, int(height))
@@ -186,6 +192,13 @@ class RenderTargetWgpu:
         ):
             if tex is not None:
                 tex.destroy()
+        self.color_view = None
+        self.color_ms_view = None
+        self.zbuf_view = None
+        self.export_depth_view = None
+        self.export_id_view = None
+        self.export_segmentation_view = None
+        self.export_zbuf_view = None
 
     def _readback_queue(self) -> WgpuReadbackQueue:
         if self._readbacks is None:
