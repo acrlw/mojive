@@ -116,6 +116,10 @@ class OffscreenHarness:
         if steps:
             self.adapter.step(steps)
         frame = self.adapter.frame(self.needs)
+        source = self.adapter.scene_source()
+        if source is not self.source:
+            self.source = source
+            self.backend.set_scene(source)
         self.backend.update(frame)
         return self.backend.render()
 

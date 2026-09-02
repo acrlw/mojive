@@ -34,7 +34,7 @@ _FRAME_NEEDS = FrameNeeds(
     deformables=True,
     diagnostics=True,
     islands=True,
-    bvh=True,
+    bvh=False,
 )
 
 _VIS_FLAGS = {
@@ -329,6 +329,8 @@ class Renderer:
             self._scene,
         )
         self._adapter.refresh_model_visuals()
+        self._adapter.use_data(data)
+        frame = self._adapter.frame(_frame_needs(option))
         adapter_source = self._adapter.scene_source()
         transparent_visual = _flag_enabled(option.flags, mujoco.mjtVisFlag, "mjVIS_TRANSPARENT")
         if (
@@ -348,8 +350,6 @@ class Renderer:
             with self._gl_current():
                 self._backend.set_scene(source)
         _apply_render_options(self._backend, option, self._scene)
-        self._adapter.use_data(data)
-        frame = self._adapter.frame(_FRAME_NEEDS)
         view = _camera_view(self._scene, self._model, self._aspect)
         with self._gl_current():
             self._view = view
@@ -382,12 +382,14 @@ class Renderer:
                 image = _metric_depth(self._backend.target.read_depth(flip=True), self._view)
             elif self._segmentation_rendering:
                 image = _segmentation_image(
-                    self._backend.target.read_ids(flip=True), self._segmentation_table
+                    self._backend.target.read_ids(flip=True), self._segmentation_table, out=out
                 )
             else:
                 image = np.ascontiguousarray(self._backend.target.read_color(flip=True)[..., :3])
         if out is None:
             return image
+        if image is out:
+            return out
         np.copyto(out, image, casting="unsafe")
         return out
 
@@ -620,12 +622,25 @@ def _configure_segmentation(source, model) -> np.ndarray:
     return table
 
 
-def _segmentation_image(ids: np.ndarray, table: np.ndarray) -> np.ndarray:
+def _segmentation_image(
+    ids: np.ndarray, table: np.ndarray, *, out: np.ndarray | None = None
+) -> np.ndarray:
     ids = np.asarray(ids, np.uint32)
-    image = np.full((*ids.shape, 2), -1, np.int32)
+    image = out if out is not None else np.empty((*ids.shape, 2), np.int32)
+    if len(table) and (not ids.size or int(ids.max()) < len(table)):
+        np.take(table, ids, axis=0, out=image)
+        return image
+    image.fill(-1)
     valid = ids < len(table)
     image[valid] = table[ids[valid]]
-    return np.ascontiguousarray(image)
+    return image
+
+
+def _frame_needs(option) -> FrameNeeds:
+    bvh = _flag_enabled(option.flags, mujoco.mjtVisFlag, "mjVIS_BODYBVH") or _flag_enabled(
+        option.flags, mujoco.mjtVisFlag, "mjVIS_MESHBVH"
+    )
+    return replace(_FRAME_NEEDS, bvh=True) if bvh else _FRAME_NEEDS
 
 
 def _flag_enabled(values, enum_type, name: str) -> bool:
