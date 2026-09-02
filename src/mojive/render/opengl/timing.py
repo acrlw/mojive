@@ -35,6 +35,7 @@ class FrameTiming:
         self._gl = G.native()
         self._timers: dict[str, PassTimer] = {}
         self._order: list[str] = []
+        self._frame_order: list[str] = []
         self._depth = 0
         self.enabled = enabled
 
@@ -68,6 +69,8 @@ class FrameTiming:
 
     def begin(self, name: str) -> None:
         t = self._timer(name)
+        if name not in self._frame_order:
+            self._frame_order.append(name)
         t._cpu_start = time.perf_counter()
         self._gl.push_debug_group(name)
 
@@ -102,13 +105,18 @@ class FrameTiming:
                 else:
                     self._gl.delete_query(qid)
 
+    def begin_frame(self) -> None:
+        """Start a new timing table without discarding delayed GPU samples."""
+
+        self._frame_order = []
+
     def cpu_table(self) -> dict[str, float]:
-        return {n: self._timers[n].cpu_ms for n in self._order}
+        return {n: self._timers[n].cpu_ms for n in self._frame_order}
 
     def gpu_table(self) -> dict[str, float]:
         if not self.gpu_available:
             return {}
-        return {n: self._timers[n].gpu_ms for n in self._order}
+        return {n: self._timers[n].gpu_ms for n in self._frame_order}
 
     def scope(self, name: str) -> _Scope:
         return _Scope(self, name)

@@ -14,10 +14,13 @@ class MeshStore:
         self.ctx = ctx
         self._meshes: dict[MeshKey, GpuMesh] = {}
         self._sources: dict[MeshKey, MeshData] = {}
+        self.revision = 0
 
     def sync(self, meshes: dict[MeshKey, MeshData]) -> None:
+        changed = False
         for key, data in meshes.items():
             if key not in self._meshes or self._sources.get(key) is not data:
+                changed = True
                 old = self._meshes.pop(key, None)
                 if old is not None:
                     old.release()
@@ -26,16 +29,23 @@ class MeshStore:
                 )
                 self._sources[key] = data
         for key in [k for k in self._meshes if k not in meshes]:
+            changed = True
             self._meshes.pop(key).release()
             self._sources.pop(key, None)
+        if changed:
+            self.revision += 1
 
     def update(self, meshes: dict[MeshKey, MeshUpdate] | None) -> None:
         if not meshes:
             return
+        changed = False
         for key, data in meshes.items():
             mesh = self._meshes.get(key)
             if mesh is not None:
                 mesh.update(data.positions, data.normals)
+                changed = True
+        if changed:
+            self.revision += 1
 
     def get(self, key: MeshKey) -> GpuMesh | None:
         return self._meshes.get(key)
@@ -79,6 +89,7 @@ class TextureStore:
         self._white: moderngl.Texture | None = None
         self._white_cube: moderngl.TextureCube | None = None
         self._black_cube: moderngl.TextureCube | None = None
+        self.revision = 0
 
     @property
     def white(self) -> moderngl.Texture:
@@ -99,11 +110,13 @@ class TextureStore:
         return self._white_cube
 
     def sync(self, textures: dict[str, TextureData], skybox: str | None = None) -> None:
+        changed = False
         for name, data in textures.items():
             # Texture names are local to one SceneSource. A runtime model replacement
             # can reuse a name for different pixels, just like meshes reuse MeshKey.
             if self._sources.get(name) is data:
                 continue
+            changed = True
             old = self._textures.pop(name, None)
             if old is not None:
                 old.release()
@@ -129,9 +142,14 @@ class TextureStore:
             self._textures[name] = tex
             self._sources[name] = data
         for name in [k for k in self._textures if k not in textures]:
+            changed = True
             self._textures.pop(name).release()
             self._sources.pop(name, None)
+        if self._skybox_name != skybox:
+            changed = True
         self._skybox_name = skybox
+        if changed:
+            self.revision += 1
 
     def _make_2d(self, w, h, comps, pixels, fmt):
         blob = np.ascontiguousarray(pixels).tobytes()

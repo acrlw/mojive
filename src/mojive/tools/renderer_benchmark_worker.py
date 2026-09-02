@@ -193,6 +193,18 @@ def _byte_distribution(values: list[float]) -> dict[str, float]:
     }
 
 
+def _cache_summary(samples: list[str]) -> dict[str, float | int]:
+    rendered = samples.count("rendered")
+    reused = samples.count("reused")
+    active = rendered + reused
+    return {
+        "rendered_frames": rendered,
+        "reused_frames": reused,
+        "inactive_frames": len(samples) - active,
+        "reuse_ratio": reused / active if active else 0.0,
+    }
+
+
 def _make_renderer(name: str, model, width: int, height: int):
     if name == "mujoco":
         import mujoco
@@ -286,6 +298,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "visual": [],
             "identity": [],
         }
+        pass_cache: dict[str, list[str]] = {"shadow": [], "reflection": []}
         checksum = 0
         for frame in range(args.frames):
             _animate(mujoco, args.workload, model, data, base_qpos, args.warmup + frame)
@@ -304,6 +317,9 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 uploaded_streams = instances.uploaded_streams
                 for stream, values in stream_upload_bytes.items():
                     values.append(float(uploaded_streams.get(stream, 0)))
+            notes = getattr(getattr(backend, "stats", None), "notes", {})
+            for pass_name, statuses in pass_cache.items():
+                statuses.append(str(notes.get(f"{pass_name} cache", "off")))
             checksum ^= int(output.reshape(-1)[frame % output.size])
     finally:
         close_start = time.perf_counter()
@@ -345,6 +361,11 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                     for stream, values in stream_upload_bytes.items()
                 },
             }
+        ),
+        "pass_cache": (
+            None
+            if args.renderer == "mujoco"
+            else {name: _cache_summary(values) for name, values in pass_cache.items()}
         ),
         "close_ms": close_ms,
         "rss_before_mb": rss_before,

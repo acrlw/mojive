@@ -9,6 +9,7 @@ from .... import math3d
 from ....log import get_logger
 from ....types import MeshShape
 from ...backend import RenderFlag
+from ...dependencies import camera_key, flags_key, lifecycle_key, lights_key
 from ..registry import register_pass
 from .base import PassContext, state_opaque, state_transparent
 from .opaque import OpaquePass, draw_buckets
@@ -43,6 +44,10 @@ class ReflectPass(OpaquePass):
         self._plane = (0.0, 0.0, 1.0, 0.0)
         self._groups: tuple[_PlaneGroup, ...] = ()
         self.reflection_info = np.zeros(0, np.uint32)
+        self.cache_status = "off"
+        self._cache_scene = None
+        self._cache_key: tuple | None = None
+        self._pending_key: tuple | None = None
 
     def view_matrices(self, ctx: PassContext):
         return self._view, self._view_proj, self._eye
@@ -169,6 +174,8 @@ class ReflectPass(OpaquePass):
 
         ctx.reflection = ()
         self._groups = ()
+        self.cache_status = "off"
+        self._pending_key = None
         if not ctx.flag(RenderFlag.REFLECTION):
             self._build_reflection_info(ctx.scene, ())
             return
@@ -190,12 +197,38 @@ class ReflectPass(OpaquePass):
     def prepare(self, ctx: PassContext) -> bool:
         if not self._groups:
             return False
+        key = self._dependency_key(ctx)
+        if self._cache_scene is ctx.scene and self._cache_key == key and self.colors:
+            ctx.reflection = tuple(self.colors)
+            self.cache_status = "reused"
+            return False
+
+        self._cache_scene = None
+        self._cache_key = None
+        self._pending_key = key
         self._set_plane(ctx, self._groups[0].plane)
         if not super().prepare(ctx):
+            self._pending_key = None
             return False
 
         ctx.scene_program = None
         return True
+
+    def _dependency_key(self, ctx: PassContext) -> tuple:
+        scene = ctx.scene
+        return (
+            lifecycle_key(scene, ctx.frame_serial, visual=True, identity=True),
+            int(ctx.mesh_revision),
+            int(ctx.texture_revision),
+            camera_key(ctx.camera),
+            lights_key(scene.lights),
+            flags_key(ctx.flags),
+            ctx.debug_view.value,
+            int(ctx.selected_id),
+            scene.shading_model.value,
+            self._size,
+            int(ctx.programs.generation),
+        )
 
     def execute(self, ctx: PassContext) -> None:
         if not self.fbos or self.program is None:
@@ -231,6 +264,10 @@ class ReflectPass(OpaquePass):
                 gl.disable_direct(GL_CLIP_DISTANCE0)
                 gl.front_face = "ccw"
         ctx.reflection = tuple(self.colors)
+        self._cache_scene = ctx.scene
+        self._cache_key = self._pending_key
+        self._pending_key = None
+        self.cache_status = "rendered"
 
     def release(self) -> None:
         super().release()
@@ -246,6 +283,10 @@ class ReflectPass(OpaquePass):
         self._size = (0, 0)
         self._groups = ()
         self.reflection_info = np.zeros(0, np.uint32)
+        self._cache_scene = None
+        self._cache_key = None
+        self._pending_key = None
+        self.cache_status = "off"
 
 
 register_pass("reflect", ReflectPass)

@@ -57,6 +57,13 @@ the full 144-byte record. Visual, identity, and reflection changes update their 
 ranges. Revision zero remains a conservative compatibility path for custom sources, with bytewise
 dirty-range detection preserving correctness without unconditional GPU writes.
 
+Shadow maps and planar-reflection colors are persistent pass products. Both backends reuse them
+while their complete dependency keys are unchanged: scene lifecycle revisions, camera, lights,
+mesh and texture resources, render flags, selection/debug state, target size, and shader generation.
+This removes the expensive offscreen passes from static frames without lowering update frequency or
+introducing temporal lag. Any dependency change invalidates the relevant product immediately;
+revision-zero custom scenes deliberately take the conservative render-every-frame path.
+
 The MuJoCo adapter derives `FrameNeeds` from visible scene options. Contacts, tendons, deformables,
 diagnostics, islands, and BVH data are prepared only when a visible feature consumes them. Pose
 data remains mandatory. This keeps optional simulation extraction out of ordinary frames without

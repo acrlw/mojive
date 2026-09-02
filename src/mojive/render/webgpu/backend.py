@@ -209,6 +209,8 @@ class WgpuBackend:
         self._shader_watch = WgslWatch(*_SCENE_SHADERS)
         self._shader_reload_error = ""
         self._hot_reload = False
+        self._shader_generation = 0
+        self._frame_serial = 0
         self._group0_layout = self.device.create_bind_group_layout(
             entries=[
                 {
@@ -1050,6 +1052,7 @@ class WgpuBackend:
         scene = self._scene
         if scene is None:
             return None
+        self._frame_serial += 1
         if self._hot_reload:
             self._reload_wgsl()
 
@@ -1061,11 +1064,30 @@ class WgpuBackend:
         cam = self._camera.with_aspect(target.width / max(target.height, 1))
         # Plane detection produces a separate identity-stream variant; scene
         # material data remains canonical and is never mutated by a pass.
-        reflective = self._reflect.prepare(scene, cam, self._flags, target.width, target.height)
+        reflective = self._reflect.prepare(
+            scene,
+            cam,
+            self._flags,
+            target.width,
+            target.height,
+            frame_serial=self._frame_serial,
+            mesh_revision=self.meshes.revision,
+            texture_revision=self.textures.revision,
+            shader_generation=self._shader_generation,
+            selected_id=self._selected,
+            debug_view=self._debug_view.value,
+        )
         self.instances.upload(scene, self._reflect.reflection_info)
         # Shadow maps render before the scene pass, matching opengl's
         # PASS_ORDER; the same frame's scene pass samples them.
-        shadow = self._shadows.prepare(scene, cam, self._flags)
+        shadow = self._shadows.prepare(
+            scene,
+            cam,
+            self._flags,
+            frame_serial=self._frame_serial,
+            mesh_revision=self.meshes.revision,
+            shader_generation=self._shader_generation,
+        )
         schedule = self.lights.upload(scene.lights, shadow)
         light_count = len(schedule.lights)
         group2, image_gain, image_mip = self._image_light_binding(scene.lights)
@@ -1073,7 +1095,7 @@ class WgpuBackend:
         view_proj = self._write_frame_uniforms(
             cam, light_count, (image_gain, image_mip), reflection_size
         )
-        if reflective:
+        if reflective and not self._reflect.cache_hit:
             self._reflect.write_frames(
                 cam, light_count, (image_gain, image_mip), self._pack_frame_block
             )
@@ -1090,13 +1112,13 @@ class WgpuBackend:
         timestamp = self.timing.timestamp_writes
 
         draw_calls = 0
-        if shadow is not None:
+        if shadow is not None and not self._shadows.cache_hit:
             draw_calls += self._shadows.execute(
                 encoder, scene, self.meshes, self.instances, timestamp
             )
         # Mirrored scene passes run between the shadow pass and the main scene
         # pass, matching opengl's PASS_ORDER (shadow, reflect, opaque, ...).
-        if reflective:
+        if reflective and not self._reflect.cache_hit:
             group4_fallback = self._reflect.fallback_group()
 
             def draw_reflected(pass_encoder, plane_group0, buckets, blend):
@@ -1277,6 +1299,8 @@ class WgpuBackend:
             )
             or "unchanged",
             "export draw calls": str(export_draw_calls),
+            "shadow cache": self._shadows.cache_status,
+            "reflection cache": self._reflect.cache_status,
         }
         # The resolved color is display-domain (finish_color gamma-encodes it)
         # and top-row-first, so the viewer presents it without a y flip.
@@ -1456,6 +1480,7 @@ class WgpuBackend:
             self._module = module
             self._scene_shader_code = code
             self._pipelines.clear()
+            self._shader_generation += 1
             self._shader_reload_error = ""
             log.info("Scene shaders reloaded")
         watch.mark()

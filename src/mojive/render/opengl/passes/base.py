@@ -136,6 +136,9 @@ class PassContext:
     ui_scale: float = 1.0
     time: float = 0.0
     background: tuple[float, float, float, float] = (0.13, 0.14, 0.16, 1.0)
+    frame_serial: int = 0
+    mesh_revision: int = 0
+    texture_revision: int = 0
 
     shadow: ShadowResult = field(default_factory=ShadowResult)
     scene_program: moderngl.Program | None = None

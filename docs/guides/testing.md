@@ -45,7 +45,7 @@ Each renderer/workload/output/resolution case owns an isolated process. The defa
 RGB output at 640×480 for primitive, many-object, and dense-mesh scenes. The full matrix also covers
 64- and 1,024-object dynamic transforms plus textured/transparent materials. It records constructor
 and first-frame time, update and render median/p95 latency, FPS, instance-stream upload bytes, close
-time, and peak RSS growth in
+time, shadow/reflection cache reuse, and peak RSS growth in
 `output/renderer-benchmark/report.json`. Ratios below `1.0x` are faster than MuJoCo for the same case.
 
 Run the larger resolution and RGB/depth/segmentation matrix explicitly:

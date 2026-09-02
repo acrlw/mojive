@@ -8,6 +8,7 @@ import wgpu
 from .... import math3d as M
 from ....types import CameraView, MeshShape
 from ...backend import RenderFlag
+from ...dependencies import camera_key, flags_key, lifecycle_key, lights_key
 from ...scene import RenderScene
 from ..instances import InstanceStore
 from ..lighting import LIGHTS_BYTES, LightUniforms
@@ -87,6 +88,11 @@ class ReflectPass:
         self.reflection_info = np.zeros(0, np.uint32)
         self._group0_cache: dict[tuple, wgpu.GPUBindGroup] = {}
         self._sample_groups: dict[tuple, wgpu.GPUBindGroup] = {}
+        self.cache_status = "off"
+        self.cache_hit = False
+        self._cache_scene: RenderScene | None = None
+        self._cache_key: tuple | None = None
+        self._pending_key: tuple | None = None
 
     # -- plane detection (verbatim port of the opengl classmethods) -------------
 
@@ -195,6 +201,9 @@ class ReflectPass:
         self._depth_view = None
         self._size = (0, 0)
         self._sample_groups.clear()
+        self._cache_scene = None
+        self._cache_key = None
+        self._pending_key = None
 
     def _fallback_view(self) -> wgpu.GPUTextureView:
         if self._fallback is None:
@@ -213,9 +222,19 @@ class ReflectPass:
         flags: dict[RenderFlag, bool],
         width: int,
         height: int,
+        *,
+        frame_serial: int,
+        mesh_revision: int,
+        texture_revision: int,
+        shader_generation: int,
+        selected_id: int,
+        debug_view: str,
     ) -> bool:
         """Detect planes and build pass metadata; False means no pass this frame."""
         self._groups = ()
+        self.cache_status = "off"
+        self.cache_hit = False
+        self._pending_key = None
         if not flags.get(RenderFlag.REFLECTION, True):
             self._build_reflection_info(scene, ())
             return False
@@ -235,6 +254,27 @@ class ReflectPass:
         self._transparent = flags.get(RenderFlag.TRANSPARENT, True)
         self._additive = flags.get(RenderFlag.ADDITIVE, False)
         self._build_reflection_info(scene, groups)
+        key = (
+            lifecycle_key(scene, frame_serial, visual=True, identity=True),
+            int(mesh_revision),
+            int(texture_revision),
+            camera_key(camera),
+            lights_key(scene.lights),
+            flags_key(flags),
+            str(debug_view),
+            int(selected_id),
+            scene.shading_model.value,
+            self._size,
+            int(shader_generation),
+        )
+        if self._cache_scene is scene and self._cache_key == key and self._views:
+            self.cache_status = "reused"
+            self.cache_hit = True
+            return True
+
+        self._cache_scene = None
+        self._cache_key = None
+        self._pending_key = key
         return True
 
     def write_frames(
@@ -403,6 +443,10 @@ class ReflectPass:
                 calls += c
                 drawn += d
             plane_pass.end()
+        self._cache_scene = scene
+        self._cache_key = self._pending_key
+        self._pending_key = None
+        self.cache_status = "rendered"
         return calls, drawn
 
     def release(self) -> None:
@@ -414,3 +458,8 @@ class ReflectPass:
         self._sample_groups.clear()
         self._fallback = None
         self._fallback_group = None
+        self._cache_scene = None
+        self._cache_key = None
+        self._pending_key = None
+        self.cache_status = "off"
+        self.cache_hit = False

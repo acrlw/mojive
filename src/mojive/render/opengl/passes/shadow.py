@@ -11,6 +11,8 @@ from .... import math3d as M
 from ....log import get_logger
 from ....types import Light, LightType, ShadingModel
 from ...backend import RenderFlag
+from ...dependencies import camera_key, lifecycle_key, lights_key
+from ...scene import RenderScene
 from .. import gl_native as G
 from ..cascades import (
     ATLAS_SIZE,
@@ -90,6 +92,11 @@ class ShadowPass(BasePass):
         self._cascades = CascadeSet()
         self._scratch = np.zeros((4, 4), np.float32)
         self.cascade_cpu_ms = 0.0
+        self.cache_status = "off"
+        self._cache_scene: RenderScene | None = None
+        self._cache_key: tuple | None = None
+        self._pending_key: tuple | None = None
+        self._state: ShadowResult | None = None
 
         self._failed = ""
 
@@ -156,12 +163,26 @@ class ShadowPass(BasePass):
         return True
 
     def prepare(self, ctx: PassContext) -> bool:
-        s = ctx.shadow
-        self._reset(s)
+        self.cache_status = "off"
+        self._pending_key = None
         if not ctx.flag(RenderFlag.SHADOW):
             return False
         if not ctx.scene.opaque_buckets:
             return False
+        key = self._dependency_key(ctx)
+        if self._cache_scene is ctx.scene and self._cache_key == key and self._state is not None:
+            ctx.shadow = self._state
+            self.cache_status = "reused"
+            return False
+
+        # Keep only the latest complete product. Invalidating before resource
+        # changes prevents a failed reallocation from reviving released maps.
+        self._cache_scene = None
+        self._cache_key = None
+        self._state = None
+        self._pending_key = key
+        s = ctx.shadow
+        self._reset(s)
         schedule = schedule_lights(ctx.scene.lights)
         sun = (
             schedule.lights[schedule.directional_shadow]
@@ -224,6 +245,21 @@ class ShadowPass(BasePass):
         s.cascade_count = c.count
         s.enabled = True
         return True
+
+    @staticmethod
+    def _dependency_key(ctx: PassContext) -> tuple:
+        scene = ctx.scene
+        return (
+            lifecycle_key(scene, ctx.frame_serial),
+            int(ctx.mesh_revision),
+            camera_key(ctx.camera),
+            lights_key(scene.lights),
+            tuple(float(value) for value in np.asarray(scene.scene_center).flat),
+            float(scene.scene_extent),
+            float(scene.shadow_clip),
+            scene.shading_model.value,
+            int(ctx.programs.generation),
+        )
 
     @staticmethod
     def _local_resolution(schedule: LightSchedule) -> int:
@@ -323,6 +359,11 @@ class ShadowPass(BasePass):
             self._draw_cascades(ctx, gl)
         if ctx.shadow.local_count and self._local_tex is not None:
             self._draw_locals(ctx)
+        self._cache_scene = ctx.scene
+        self._cache_key = self._pending_key
+        self._state = ctx.shadow
+        self._pending_key = None
+        self.cache_status = "rendered"
 
     def _draw_cascades(self, ctx: PassContext, gl) -> None:
         fbo = self._fbo
@@ -386,6 +427,11 @@ class ShadowPass(BasePass):
         self._fbo = None
         self.atlas = None
         self._local_fallback = None
+        self._cache_scene = None
+        self._cache_key = None
+        self._pending_key = None
+        self._state = None
+        self.cache_status = "off"
 
 
 def bind_shadow_uniforms(

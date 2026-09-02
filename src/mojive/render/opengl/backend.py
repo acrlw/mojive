@@ -177,6 +177,7 @@ class OpenGLBackend:
         self._bvh_depth = 0
         self._structure_generation = -1
         self._program_generation = -1
+        self._frame_serial = 0
         self.caps = self._build_caps()
         self._hot_reload = False
 
@@ -506,6 +507,7 @@ class OpenGLBackend:
         scene = self._scene
         if scene is None or not self.gl_caps.usable:
             return None
+        self._frame_serial += 1
 
         plan = compile_render_plan(request, self._debug_view)
 
@@ -518,6 +520,7 @@ class OpenGLBackend:
 
             ctx = self._make_context(scene)
             self.instances.draw_calls = 0
+            self.timing.begin_frame()
             # Pass-owned instance variants are resolved as a distinct graph
             # phase. This keeps the single frame upload canonical and avoids
             # hidden scene mutations during pass execution.
@@ -559,6 +562,10 @@ class OpenGLBackend:
             ", ".join(f"{name}={count}" for name, count in self.instances.uploaded_streams.items())
             or "unchanged"
         )
+        shadow = self._passes.get("shadow")
+        reflect = self._passes.get("reflect")
+        self.stats.notes["shadow cache"] = getattr(shadow, "cache_status", "off")
+        self.stats.notes["reflection cache"] = getattr(reflect, "cache_status", "off")
         if not plan.returns_color:
             return None
         present = self._passes.get("present")
@@ -600,6 +607,9 @@ class OpenGLBackend:
             include_transparent_ids=self._include_transparent_ids,
             gizmo=self._gizmo,
             time=time.monotonic(),
+            frame_serial=self._frame_serial,
+            mesh_revision=self.meshes.revision,
+            texture_revision=self.textures.revision,
             shadow=ShadowResult(),
         )
 

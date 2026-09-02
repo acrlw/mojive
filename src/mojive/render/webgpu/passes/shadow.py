@@ -9,6 +9,7 @@ from .... import math3d as M
 from ....log import get_logger
 from ....types import CameraView, Light, LightType, ShadingModel
 from ...backend import RenderFlag
+from ...dependencies import camera_key, lifecycle_key, lights_key
 from ...scene import RenderScene
 from ..cascades import ATLAS_SIZE, CascadeSet, build_cascades, slot_pixels
 from ..instances import POSE_STRIDE
@@ -133,6 +134,11 @@ class ShadowPass:
         self._state: ShadowState | None = None
         self._draw_groups: dict[int, wgpu.GPUBindGroup] = {}
         self._sample_groups: dict[tuple[int, int], wgpu.GPUBindGroup] = {}
+        self.cache_status = "off"
+        self.cache_hit = False
+        self._cache_scene: RenderScene | None = None
+        self._cache_key: tuple | None = None
+        self._pending_key: tuple | None = None
         self._failed = ""
 
     # -- lazy resources ---------------------------------------------------------
@@ -261,13 +267,33 @@ class ShadowPass:
     # -- per-frame scheduling -----------------------------------------------------
 
     def prepare(
-        self, scene: RenderScene, camera: CameraView, flags: dict[RenderFlag, bool]
+        self,
+        scene: RenderScene,
+        camera: CameraView,
+        flags: dict[RenderFlag, bool],
+        *,
+        frame_serial: int,
+        mesh_revision: int,
+        shader_generation: int,
     ) -> ShadowState | None:
         """Select casters and build matrices; None means no shadow pass this frame."""
+        self.cache_status = "off"
+        self.cache_hit = False
+        self._pending_key = None
         if not flags.get(RenderFlag.SHADOW, True):
             return None
         if not scene.opaque_buckets:
             return None
+        key = self._dependency_key(scene, camera, frame_serial, mesh_revision, shader_generation)
+        if self._cache_scene is scene and self._cache_key == key and self._state is not None:
+            self.cache_status = "reused"
+            self.cache_hit = True
+            return self._state
+
+        self._cache_scene = None
+        self._cache_key = None
+        self._state = None
+        self._pending_key = key
         schedule = schedule_lights(scene.lights)
         sun = (
             schedule.lights[schedule.directional_shadow]
@@ -311,6 +337,26 @@ class ShadowPass:
         self._state = state
         self._write_draw_uniforms(state)
         return state
+
+    @staticmethod
+    def _dependency_key(
+        scene: RenderScene,
+        camera: CameraView,
+        frame_serial: int,
+        mesh_revision: int,
+        shader_generation: int,
+    ) -> tuple:
+        return (
+            lifecycle_key(scene, frame_serial),
+            int(mesh_revision),
+            camera_key(camera),
+            lights_key(scene.lights),
+            tuple(float(value) for value in np.asarray(scene.scene_center).flat),
+            float(scene.scene_extent),
+            float(scene.shadow_clip),
+            scene.shading_model.value,
+            int(shader_generation),
+        )
 
     @staticmethod
     def _local_resolution(schedule: LightSchedule) -> int:
@@ -487,6 +533,10 @@ class ShadowPass:
                 calls += _draw_opaque(layer_pass, scene, meshes)
                 draw += 1
                 layer_pass.end()
+        self._cache_scene = scene
+        self._cache_key = self._pending_key
+        self._pending_key = None
+        self.cache_status = "rendered"
         return calls
 
     def _draw_group(self, instances) -> wgpu.GPUBindGroup:
@@ -550,3 +600,8 @@ class ShadowPass:
         self._depth_pipeline = None
         self._dist_pipeline = None
         self._state = None
+        self._cache_scene = None
+        self._cache_key = None
+        self._pending_key = None
+        self.cache_status = "off"
+        self.cache_hit = False

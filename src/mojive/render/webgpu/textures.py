@@ -65,6 +65,7 @@ class TextureStore:
         self._white: wgpu.GPUTextureView | None = None
         self._white_cube: wgpu.GPUTextureView | None = None
         self._black_cube: wgpu.GPUTextureView | None = None
+        self.revision = 0
         # opengl 2D textures wrap (repeat_x/repeat_y = True); tiled planes and
         # box face-axis mapping rely on uv outside [0,1] repeating.  Trilinear
         # plus anisotropy 16.0 matches opengl (resources.py builds mipmaps with
@@ -100,11 +101,13 @@ class TextureStore:
         return self._white
 
     def sync(self, textures: dict[str, TextureData], skybox: str | None = None) -> None:
+        changed = False
         for name, data in textures.items():
             # Names identify textures only within the current SceneSource. Replace
             # resources when a newly loaded scene reuses a 2D or cube texture name.
             if self._sources.get(name) is data:
                 continue
+            changed = True
             self._textures.pop(name, None)
             self._cubes.pop(name, None)
             if data.type is TextureType.TWO_D:
@@ -113,10 +116,15 @@ class TextureStore:
                 self._cubes[name] = self._upload_cube(data)
             self._sources[name] = data
         for name in [k for k in self._sources if k not in textures]:
+            changed = True
             self._textures.pop(name, None)
             self._cubes.pop(name, None)
             self._sources.pop(name, None)
+        if self._skybox_name != skybox:
+            changed = True
         self._skybox_name = skybox
+        if changed:
+            self.revision += 1
 
     def _format_for(self, comps: int, srgb: bool) -> tuple[str, int, bool]:
         """Texture format, bytes per pixel, and CPU-linearization flag."""

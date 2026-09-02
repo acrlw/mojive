@@ -103,26 +103,36 @@ class MeshStore:
         self._device = device
         self._meshes: dict[MeshKey, GpuMesh] = {}
         self._sources: dict[MeshKey, MeshData] = {}
+        self.revision = 0
 
     def sync(self, meshes: dict[MeshKey, MeshData]) -> None:
+        changed = False
         for key, data in meshes.items():
             if key not in self._meshes or self._sources.get(key) is not data:
+                changed = True
                 old = self._meshes.pop(key, None)
                 if old is not None:
                     old.release()
                 self._meshes[key] = GpuMesh(self._device, data)
                 self._sources[key] = data
         for key in [k for k in self._meshes if k not in meshes]:
+            changed = True
             self._meshes.pop(key).release()
             self._sources.pop(key, None)
+        if changed:
+            self.revision += 1
 
     def update(self, meshes: dict[MeshKey, MeshUpdate] | None) -> None:
         if not meshes:
             return
+        changed = False
         for key, data in meshes.items():
             mesh = self._meshes.get(key)
             if mesh is not None:
                 mesh.update(data.positions, data.normals)
+                changed = True
+        if changed:
+            self.revision += 1
 
     def get(self, key: MeshKey) -> GpuMesh | None:
         return self._meshes.get(key)

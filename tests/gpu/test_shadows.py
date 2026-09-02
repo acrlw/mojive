@@ -132,6 +132,16 @@ def _scene(
     return b.build(camera, lights, extent, np.zeros(3, np.float32))
 
 
+def _managed(scene):
+    """Give hand-built GPU fixtures the managed lifecycle contract."""
+
+    scene.structure_revision = 1
+    scene.pose_revision = 1
+    scene.visual_revision = 1
+    scene.identity_revision = 1
+    return scene
+
+
 def _spot_scene(camera: CameraView, cast: bool = True, with_box: bool = True):
     b = SceneBuilder()
     mid = b.material_id(Material(name="spot-test"))
@@ -287,6 +297,50 @@ def test_shadow_pass_actually_ran(backend):
     order = list(backend.stats.cpu_ms)
     assert "shadow" in order
     assert order.index("shadow") < order.index("opaque")
+
+
+def test_shadow_cache_reuses_static_maps_and_tracks_dependencies(backend):
+    scene = _managed(_scene(VIEW))
+    backend.set_camera(VIEW)
+    backend.set_flag(RenderFlag.SHADOW, True)
+    backend.set_render_scene(scene)
+
+    backend.render()
+    first = backend.target.read_color(flip=True).copy()
+    rendered_calls = backend.stats.draw_calls
+    assert backend.stats.notes["shadow cache"] == "rendered"
+
+    backend.render()
+    second = backend.target.read_color(flip=True).copy()
+    assert backend.stats.notes["shadow cache"] == "reused"
+    if backend.caps.name == "wgpu":
+        assert backend.stats.draw_calls < rendered_calls
+    else:
+        assert "shadow" not in backend.stats.cpu_ms
+    assert np.array_equal(first, second)
+
+    moved_view = CameraView(
+        eye=VIEW.eye + np.array([0.15, 0.0, 0.0], np.float32),
+        target=VIEW.target,
+        up=VIEW.up,
+        fov_y=VIEW.fov_y,
+        near=VIEW.near,
+        far=VIEW.far,
+    )
+    backend.set_camera(moved_view)
+    backend.render()
+    assert backend.stats.notes["shadow cache"] == "rendered"
+    backend.render()
+    assert backend.stats.notes["shadow cache"] == "reused"
+
+    scene.lights.lights[0].direction[:] = (0.2, 0.7, -1.0)
+    backend.render()
+    assert backend.stats.notes["shadow cache"] == "rendered"
+
+    scene.transforms[1, 0, 3] += 0.2
+    scene.pose_revision += 1
+    backend.render()
+    assert backend.stats.notes["shadow cache"] == "rendered"
 
 
 def test_ground_darkens_where_the_light_points(backend):

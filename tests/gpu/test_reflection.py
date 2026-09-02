@@ -48,6 +48,37 @@ def shot(rig, *, reflection: bool) -> np.ndarray:
     return rig.backend.target.read_color(flip=True)[..., :3].astype(np.int32)
 
 
+def test_reflection_cache_reuses_static_color_and_tracks_camera():
+    with OffscreenHarness(resolve("reflection"), W, H) as harness:
+        harness.camera = CAMERA
+        harness.backend.set_camera(CAMERA)
+        harness.backend.set_flag(RenderFlag.REFLECTION, True)
+        harness.step_and_render(0)
+        first = harness.backend.target.read_color(flip=True).copy()
+        rendered_calls = harness.backend.stats.draw_calls
+        assert harness.backend.stats.notes["reflection cache"] == "rendered"
+
+        harness.step_and_render(0)
+        second = harness.backend.target.read_color(flip=True).copy()
+        assert harness.backend.stats.notes["reflection cache"] == "reused"
+        assert harness.backend.stats.draw_calls < rendered_calls
+        assert np.array_equal(first, second)
+
+        moved = CameraView(
+            eye=CAMERA.eye + np.array([0.2, 0.0, 0.0], np.float32),
+            target=CAMERA.target,
+            up=CAMERA.up,
+            fov_y=CAMERA.fov_y,
+            near=CAMERA.near,
+            far=CAMERA.far,
+            aspect=CAMERA.aspect,
+        )
+        harness.camera = moved
+        harness.backend.set_camera(moved)
+        harness.step_and_render(0)
+        assert harness.backend.stats.notes["reflection cache"] == "rendered"
+
+
 @pytest.fixture(scope="module")
 def pair(rig):
 

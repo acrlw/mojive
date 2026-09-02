@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from mojive.tools.renderer_benchmark import _add_relative_results, _resolutions
-from mojive.tools.renderer_benchmark_worker import _distribution
+from mojive.tools.renderer_benchmark_worker import _cache_summary, _distribution
 
 
 def test_renderer_benchmark_parses_resolution_matrix() -> None:
@@ -48,3 +48,14 @@ def test_renderer_benchmark_distribution_uses_median_and_p95() -> None:
 
     assert result["median_ms"] == 2.5
     assert result["p95_ms"] == pytest.approx(17.45)
+
+
+def test_renderer_benchmark_summarizes_pass_cache_activity() -> None:
+    result = _cache_summary(["rendered", "reused", "reused", "off"])
+
+    assert result == {
+        "rendered_frames": 1,
+        "reused_frames": 2,
+        "inactive_frames": 1,
+        "reuse_ratio": pytest.approx(2 / 3),
+    }
