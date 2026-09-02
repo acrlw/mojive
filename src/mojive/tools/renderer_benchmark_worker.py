@@ -150,6 +150,37 @@ def _materials(width: int, height: int, samples: int) -> str:
     return _document(width, height, samples, body, asset=asset)
 
 
+def _material_variants(width: int, height: int, samples: int) -> str:
+    """Stress material diversity without inventing extra texture bindings."""
+
+    side = 16
+    kinds = ("sphere", "box", "capsule", "cylinder")
+    materials = []
+    geoms = []
+    for index in range(side * side):
+        x = (index % side - (side - 1) / 2) * 0.62
+        y = (index // side - (side - 1) / 2) * 0.62
+        kind = kinds[index % len(kinds)]
+        red = 0.2 + 0.7 * ((index * 17) % 31) / 30.0
+        green = 0.2 + 0.7 * ((index * 11) % 29) / 28.0
+        blue = 0.2 + 0.7 * ((index * 7) % 23) / 22.0
+        specular = 0.05 + 0.8 * (index % 9) / 8.0
+        shininess = 0.1 + 0.8 * (index % 7) / 6.0
+        name = f"variant_{index}"
+        materials.append(
+            f'<material name="{name}" rgba="{red:.4f} {green:.4f} {blue:.4f} 1" '
+            f'specular="{specular:.4f}" shininess="{shininess:.4f}"/>'
+        )
+        size = ".22" if kind == "sphere" else ".2 .2 .2"
+        if kind in {"capsule", "cylinder"}:
+            size = ".15 .23"
+        geoms.append(
+            f'<geom type="{kind}" pos="{x:.3f} {y:.3f} .32" size="{size}" material="{name}"/>'
+        )
+    asset = "<asset>" + "\n".join(materials) + "</asset>"
+    return _document(width, height, samples, "\n".join(geoms), asset=asset)
+
+
 _WORKLOADS = {
     "primitives": _primitives,
     "many_objects": _many_objects,
@@ -157,6 +188,7 @@ _WORKLOADS = {
     "dynamic": _dynamic,
     "dynamic_large": _dynamic_large,
     "materials": _materials,
+    "material_variants": _material_variants,
 }
 
 

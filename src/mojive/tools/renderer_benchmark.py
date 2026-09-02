@@ -21,6 +21,7 @@ WORKLOADS = (
     "dynamic",
     "dynamic_large",
     "materials",
+    "material_variants",
 )
 MODES = ("rgb", "depth", "segmentation")
 QUICK_RESOLUTIONS = ((640, 480),)
