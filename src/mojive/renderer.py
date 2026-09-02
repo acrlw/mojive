@@ -5,8 +5,9 @@ from __future__ import annotations
 import contextlib
 import os
 import sys
+from concurrent.futures import Future
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -93,6 +94,15 @@ _FRAME_MODES = {
     "mjFRAME_CONTACT": FrameMode.CONTACT,
     "mjFRAME_WORLD": FrameMode.WORLD,
 }
+
+
+@dataclass(frozen=True)
+class _RenderOutput:
+    shape: tuple[int, ...]
+    dtype: np.dtype
+    request: RenderRequest
+    read_name: str
+    async_read_name: str
 
 
 class _GLFWContext:
@@ -355,32 +365,77 @@ class Renderer:
             RGB ``uint8``, metric depth ``float32``, or MuJoCo segmentation IDs.
         """
         self._require_open("render")
-        if self._depth_rendering:
-            shape = (self._height, self._width)
-        elif self._segmentation_rendering:
-            shape = (self._height, self._width, 2)
-        else:
-            shape = (self._height, self._width, 3)
-        if out is not None and out.shape != shape:
+        spec = self._render_output()
+        if out is not None and out.shape != spec.shape:
             raise ValueError(
-                f"Expected `out.shape == {shape}`. Got `out.shape={out.shape}` instead."
+                f"Expected `out.shape == {spec.shape}`. Got `out.shape={out.shape}` instead."
             )
+        direct_out = out if out is not None and out.flags.c_contiguous else None
         with self._gl_current():
-            if self._depth_rendering:
-                self._backend.render(request=RenderRequest.metric_depth())
-                image = self._backend.target.read_metric_depth(flip=True, out=out)
-            elif self._segmentation_rendering:
-                self._backend.render(request=RenderRequest.segmentation())
-                image = self._backend.target.read_segmentation(flip=True, out=out)
-            else:
-                self._backend.render(request=RenderRequest.color())
-                image = self._backend.target.read_rgb(flip=True, out=out)
+            self._backend.render(request=spec.request)
+            native_out = (
+                direct_out if direct_out is not None and direct_out.dtype == spec.dtype else None
+            )
+            image = getattr(self._backend.target, spec.read_name)(flip=True, out=native_out)
         if out is None:
             return image
         if image is out:
             return out
         np.copyto(out, image, casting="unsafe")
         return out
+
+    def render_async(self, *, out: np.ndarray | None = None) -> Future[np.ndarray]:
+        """Submit a render and return a future for its CPU image.
+
+        WebGPU uses a bounded staging-buffer ring, allowing GPU rendering and
+        mapping/channel conversion to overlap subsequent submissions. OpenGL
+        currently preserves the same API with an already-completed future.
+        When ``out`` is supplied, the caller owns it but must not read or mutate
+        it until the returned future completes.
+        """
+
+        self._require_open("render_async")
+        spec = self._render_output()
+        if out is not None and out.shape != spec.shape:
+            raise ValueError(
+                f"Expected `out.shape == {spec.shape}`. Got `out.shape={out.shape}` instead."
+            )
+        reader = getattr(self._backend.target, spec.async_read_name, None)
+        if not callable(reader):
+            future: Future[np.ndarray] = Future()
+            try:
+                future.set_result(self.render(out=out))
+            except Exception as exc:
+                future.set_exception(exc)
+            return future
+        with self._gl_current():
+            self._backend.render(request=spec.request)
+            return reader(flip=True, out=out)
+
+    def _render_output(self) -> _RenderOutput:
+        if self._depth_rendering:
+            return _RenderOutput(
+                (self._height, self._width),
+                np.dtype(np.float32),
+                RenderRequest.metric_depth(),
+                "read_metric_depth",
+                "read_metric_depth_async",
+            )
+        if self._segmentation_rendering:
+            return _RenderOutput(
+                (self._height, self._width, 2),
+                np.dtype(np.int32),
+                RenderRequest.segmentation(),
+                "read_segmentation",
+                "read_segmentation_async",
+            )
+        return _RenderOutput(
+            (self._height, self._width, 3),
+            np.dtype(np.uint8),
+            RenderRequest.color(),
+            "read_rgb",
+            "read_rgb_async",
+        )
 
     def enable_depth_rendering(self) -> None:
         """Select metric depth output for subsequent :meth:`render` calls."""

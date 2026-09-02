@@ -79,6 +79,30 @@ def test_object_id_is_uint32_and_zero_is_reserved():
     assert scene.object_id.dtype == np.uint32
 
 
+def test_scene_builder_preserves_legacy_optional_argument_order():
+    builder = SceneBuilder()
+    material = builder.material_id(Material(name="legacy"))
+    tex_coef = np.array([2.0, 3.0, 4.0, 5.0], np.float32)
+    cube_coef = np.array([6.0, 7.0, 8.0, 9.0], np.float32)
+    builder.add(
+        MeshKey(MeshShape.BOX),
+        material,
+        M.identity(),
+        OPAQUE,
+        MAT,
+        1,
+        tex_coef,
+        cube_coef,
+        True,
+    )
+    scene = builder.build(CameraView(), LightSet(), 1.0, np.zeros(3))
+
+    assert np.array_equal(scene.tex_coef[0], tex_coef)
+    assert np.array_equal(scene.cube_coef[0], cube_coef)
+    assert scene.infinite_planes == (0,)
+    assert scene.segmentation[0].tolist() == [-1, -1]
+
+
 def test_scale_does_not_enter_the_bucket_key():
 
     b = SceneBuilder()

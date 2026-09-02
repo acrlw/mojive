@@ -7,10 +7,9 @@
 //   orthographic projections are built on the CPU side in ``targets.py``.
 // - ``gl_ClipDistance`` becomes a fragment discard on a plane equation in the
 //   frame uniforms (clip_plane); the main pass binds the (0,0,0,1) no-op.
-// - Depth and object-id export runs as a separate single-sampled MRT pass that
-//   re-rasterizes the scene and writes GL-compatible nonlinear depth.  WebGPU
-//   cannot resolve multisampled integer or depth attachments, so this replaces
-//   opengl's ``blit_depth``/``blit_color`` resolve of the shared MSAA buffers.
+// - A separate single-sampled MRT pass re-rasterizes metric view depth plus
+//   object and semantic IDs. WebGPU cannot resolve multisampled integer or
+//   depth attachments, so this replaces opengl's shared-buffer resolve.
 //
 // Shadow sampling lives in shadow_sample.wgsl (prepended by load_wgsl); the
 // GLSL USE_SHADOW define becomes runtime gating on the shadow_counts fields.

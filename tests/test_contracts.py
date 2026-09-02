@@ -83,7 +83,7 @@ def test_render_requests_describe_products_without_prescribing_passes():
 
 
 def test_opengl_render_plan_prunes_unrequested_products():
-    from mojive.render.backend import DebugView, RenderRequest
+    from mojive.render.backend import DebugView, RenderProduct, RenderRequest
     from mojive.render.opengl.backend import compile_render_plan
 
     viewport = compile_render_plan(None)
@@ -107,9 +107,16 @@ def test_opengl_render_plan_prunes_unrequested_products():
     assert segmentation.passes == ("export",)
     assert not segmentation.returns_color
 
+    combined = compile_render_plan(
+        RenderRequest(RenderProduct.COLOR | RenderProduct.METRIC_DEPTH | RenderProduct.SEGMENTATION)
+    )
+    assert "opaque" in combined.passes
+    assert "export" in combined.passes
+    assert "id" not in combined.passes
+
 
 def test_wgpu_render_plan_separates_scene_and_export_workloads():
-    from mojive.render.backend import DebugView, RenderRequest
+    from mojive.render.backend import DebugView, RenderProduct, RenderRequest
     from mojive.render.webgpu.backend import compile_render_plan
 
     viewport = compile_render_plan(None)
@@ -127,6 +134,11 @@ def test_wgpu_render_plan_separates_scene_and_export_workloads():
 
     segmentation = compile_render_plan(RenderRequest.segmentation())
     assert not segmentation.color and segmentation.export_identity and segmentation.export
+
+    combined = compile_render_plan(
+        RenderRequest(RenderProduct.COLOR | RenderProduct.METRIC_DEPTH | RenderProduct.SEGMENTATION)
+    )
+    assert combined.color and combined.export_depth and combined.export_identity
 
 
 def test_debug_outputs_are_not_exposed_as_independent_render_flags():

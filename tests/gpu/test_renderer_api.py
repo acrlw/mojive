@@ -15,6 +15,8 @@ from mojive.render.backend import (  # noqa: E402
     FrameMode,
     LabelMode,
     RenderFlag,
+    RenderProduct,
+    RenderRequest,
 )
 
 pytestmark = pytest.mark.gpu
@@ -65,9 +67,37 @@ def test_renderer_rgb_camera_out_and_lifecycle():
     assert image.flags.c_contiguous
     assert np.ptp(image) > 0
 
+    combined_request = RenderRequest(
+        RenderProduct.COLOR | RenderProduct.METRIC_DEPTH | RenderProduct.SEGMENTATION
+    )
+    with renderer._gl_current():
+        assert renderer._backend.render(request=combined_request) is not None
+        assert renderer._backend.target.read_rgb().shape == image.shape
+        assert renderer._backend.target.read_metric_depth().shape == image.shape[:2]
+        assert renderer._backend.target.read_segmentation().shape == (*image.shape[:2], 2)
+
     out = np.empty_like(image)
     assert renderer.render(out=out) is out
     assert np.array_equal(out, image)
+    cast_out = np.empty(image.shape, np.float32)
+    assert renderer.render(out=cast_out) is cast_out
+    assert np.array_equal(cast_out, image)
+    strided_storage = np.empty((96, 256, 3), np.uint8)
+    strided_out = strided_storage[:, ::2]
+    assert not strided_out.flags.c_contiguous
+    assert renderer.render(out=strided_out) is strided_out
+    assert np.array_equal(strided_out, image)
+    if renderer._backend.caps.name == "wgpu":
+        assert renderer._backend.target._readbacks is None
+    async_image = renderer.render_async().result(timeout=10.0)
+    assert np.array_equal(async_image, image)
+    if renderer._backend.caps.name == "wgpu":
+        assert renderer._backend.target._readbacks is not None
+    queued = [renderer.render_async() for _ in range(5)]
+    assert all(np.array_equal(future.result(timeout=10.0), image) for future in queued)
+    async_cast_out = np.empty(image.shape, np.float32)
+    assert renderer.render_async(out=async_cast_out).result(timeout=10.0) is async_cast_out
+    assert np.array_equal(async_cast_out, image)
     with pytest.raises(ValueError, match=r"out\.shape"):
         renderer.render(out=np.empty((96, 128), np.uint8))
 
@@ -89,6 +119,10 @@ def test_renderer_rgb_camera_out_and_lifecycle():
     depth_out = np.empty_like(depth)
     assert renderer.render(out=depth_out) is depth_out
     assert np.array_equal(depth_out, depth)
+    depth_cast_out = np.empty(depth.shape, np.float64)
+    assert renderer.render(out=depth_cast_out) is depth_cast_out
+    assert np.array_equal(depth_cast_out, depth)
+    assert np.array_equal(renderer.render_async().result(timeout=10.0), depth)
 
     renderer.enable_segmentation_rendering()
     segmentation = renderer.render()
@@ -103,11 +137,17 @@ def test_renderer_rgb_camera_out_and_lifecycle():
     segmentation_out = np.empty_like(segmentation)
     assert renderer.render(out=segmentation_out) is segmentation_out
     assert np.array_equal(segmentation_out, segmentation)
+    segmentation_cast_out = np.empty(segmentation.shape, np.int64)
+    assert renderer.render(out=segmentation_cast_out) is segmentation_cast_out
+    assert np.array_equal(segmentation_cast_out, segmentation)
+    assert np.array_equal(renderer.render_async().result(timeout=10.0), segmentation)
 
     renderer.disable_segmentation_rendering()
     assert renderer.render().shape == (96, 128, 3)
 
+    pending_on_close = renderer.render_async()
     renderer.close()
+    assert pending_on_close.result(timeout=10.0).shape == (96, 128, 3)
     renderer.close()
     with pytest.raises(RuntimeError, match="after close"):
         renderer.render()

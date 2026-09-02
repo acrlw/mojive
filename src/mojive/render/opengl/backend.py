@@ -65,13 +65,16 @@ def compile_render_plan(
     request = request or RenderRequest.viewport()
     color = request.needs(RenderProduct.COLOR)
     depth = request.needs(RenderProduct.METRIC_DEPTH)
-    identity = request.needs(RenderProduct.OBJECT_ID) or request.needs(RenderProduct.SEGMENTATION)
+    object_id = request.needs(RenderProduct.OBJECT_ID)
+    segmentation = request.needs(RenderProduct.SEGMENTATION)
     if color and debug_view in {DebugView.SEGMENT, DebugView.IDCOLOR}:
-        identity = True
+        object_id = True
 
     if color:
         passes = tuple(
-            name for name in PASS_ORDER if name != "export" and (name != "id" or identity)
+            name
+            for name in PASS_ORDER
+            if (name != "id" or object_id) and (name != "export" or depth or segmentation)
         )
     else:
         passes = tuple(

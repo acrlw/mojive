@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import operator
 import os
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -114,17 +115,34 @@ class Viewer:
         if size is not None:
             self.app.set_fixed_render_size(*size)
         recorder = None
+        pending = deque()
+        target = None
+        async_read = None
+
+        def append(image: np.ndarray) -> None:
+            nonlocal recorder
+            if recorder is None:
+                recorder = VideoRecorder(
+                    output, (int(image.shape[1]), int(image.shape[0])), fps=fps
+                )
+            recorder.append(image)
+
         try:
             for index in range(frame_count):
                 if before_frame is not None:
                     before_frame(index, self)
+                if target is None:
+                    target = self.backend.target
+                    async_read = getattr(target, "read_rgb_async", None)
                 self.sync()
-                image = self.backend.target.read_color(flip=True)[..., :3]
-                if recorder is None:
-                    recorder = VideoRecorder(
-                        output, (int(image.shape[1]), int(image.shape[0])), fps=fps
-                    )
-                recorder.append(image)
+                if callable(async_read):
+                    pending.append(async_read(flip=True))
+                    if len(pending) >= 3:
+                        append(pending.popleft().result())
+                else:
+                    append(target.read_color(flip=True)[..., :3])
+            while pending:
+                append(pending.popleft().result())
         finally:
             try:
                 if recorder is not None:

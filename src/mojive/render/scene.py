@@ -19,11 +19,6 @@ BACKGROUND_ID = np.uint32(0)
 class RenderScene:
     count: int = 0
 
-    structure_revision: int = 0
-    pose_revision: int = 0
-    visual_revision: int = 0
-    identity_revision: int = 0
-
     transforms: np.ndarray = field(default_factory=lambda: np.zeros((0, 4, 4), np.float32))
     colors: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
 
@@ -34,8 +29,6 @@ class RenderScene:
     cube_coef: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
 
     object_id: np.ndarray = field(default_factory=lambda: np.zeros((0,), np.uint32))
-
-    segmentation: np.ndarray = field(default_factory=lambda: np.full((0, 2), -1, np.int32))
 
     bucket: np.ndarray = field(default_factory=lambda: np.zeros((0,), np.int32))
 
@@ -57,6 +50,14 @@ class RenderScene:
     selected_id: int = 0
 
     infinite_planes: tuple[int, ...] = ()
+
+    # Appended lifecycle and semantic fields preserve the legacy positional
+    # constructor while giving managed scene builders an explicit upload contract.
+    structure_revision: int = 0
+    pose_revision: int = 0
+    visual_revision: int = 0
+    identity_revision: int = 0
+    segmentation: np.ndarray = field(default_factory=lambda: np.full((0, 2), -1, np.int32))
 
     def bucket_count(self) -> int:
         return len(self.bucket_keys)
@@ -169,10 +170,10 @@ class SceneBuilder:
         color: np.ndarray,
         material: np.ndarray,
         object_id: int,
-        segmentation: tuple[int, int] | np.ndarray = (-1, -1),
         tex_coef: np.ndarray | None = None,
         cube_coef: np.ndarray | None = None,
         infinite_plane: bool = False,
+        segmentation: tuple[int, int] | np.ndarray = (-1, -1),
     ) -> int:
         self._rows.append(
             {

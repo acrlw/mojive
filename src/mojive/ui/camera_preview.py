@@ -9,6 +9,7 @@ import numpy as np
 from imgui_bundle import imgui
 
 from ..adapters.base import NodeType, SceneFrame, SceneSource
+from ..render.backend import RenderRequest
 from ..types import CameraView, ViewportImage
 
 
@@ -54,7 +55,9 @@ class CameraPreview:
         backend.set_camera(camera.with_aspect(size[0] / max(size[1], 1)))
         backend.highlight(0)
         backend.update(frame)
-        self._image = backend.render()
+        # Preview has no picking or selection outline. The backend still adds
+        # identity work when the selected debug view actually consumes it.
+        self._image = backend.render(request=RenderRequest.color())
 
     def draw(
         self,

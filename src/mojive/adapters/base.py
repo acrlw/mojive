@@ -656,7 +656,6 @@ class SceneSource:
     geom_size: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float32))
     geom_rgba: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
     geom_object_id: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint32))
-    geom_segmentation: np.ndarray = field(default_factory=lambda: np.full((0, 2), -1, np.int32))
     geom_body: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
     geom_source: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
 
@@ -728,6 +727,9 @@ class SceneSource:
     scene_center: np.ndarray = field(default_factory=lambda: np.zeros(3, np.float32))
     nodes: list[SceneNode] = field(default_factory=list)
     shading_model: ShadingModel = ShadingModel.LINEAR
+
+    # Appended to preserve the positional constructor used by older adapters.
+    geom_segmentation: np.ndarray = field(default_factory=lambda: np.full((0, 2), -1, np.int32))
 
     @property
     def instance_count(self) -> int:

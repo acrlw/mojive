@@ -65,11 +65,26 @@ OpenGL color capture reads packed RGB directly into a persistent staging allocat
 output array. Metric depth and segmentation likewise read their typed export targets directly.
 The current synchronous API deliberately returns a ready NumPy array before `render()` completes.
 
-wgpu color capture still copies an RGBA texture and packs RGB on the CPU. Removing that remaining
-cost requires an explicit asynchronous or batched capture contract plus a staging-buffer ring; it
-should not be hidden behind the synchronous API because that would change data ownership and frame
-latency. The export-only depth and segmentation paths already avoid the shaded frame graph and CPU
-post-processing.
+`Renderer.render_async()` is the explicit pipelined alternative. On wgpu it submits a texture copy
+into a lazily-created, three-slot staging ring and returns a standard `Future`. GPU completion,
+mapping, row-padding removal, RGB packing, orientation, and optional destination-array copying run
+on a dedicated worker. Saturating all three slots applies bounded backpressure instead of growing
+GPU memory without limit. Resize, sample-count changes, and release drain outstanding tickets
+before destroying their textures. A supplied output array belongs to its ticket until the future
+completes.
+
+The synchronous API and its dtype-casting/strided-output behavior remain unchanged. OpenGL exposes
+the same asynchronous method as an already-completed future until a PBO-backed queue is justified;
+no background GL context is introduced implicitly. On an Apple M5, a 40-frame 1920×1080 wgpu RGB
+capture measured about 98 FPS synchronously and 197 FPS through the staging ring, with pixel-exact
+results. This is a throughput measurement, not a promise that single-frame latency is halved.
+Metric-depth and segmentation synchronous readback is already inexpensive on this device; their
+asynchronous form is provided for non-blocking composition, not assumed to improve throughput.
+
+The high-level video recorder uses the same three-frame pipeline when the active target supports
+it, preserving submission and encoding order. Camera preview requests color rather than the full
+viewport contract, so ordinary previews no longer render an unused picking buffer; identity debug
+views still add their required product through the backend's plan compiler.
 
 ## Color pipeline
 

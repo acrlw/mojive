@@ -6,7 +6,7 @@ import pytest
 from mojive import math3d
 from mojive.adapters.base import CameraInfo, NodeType, SceneFrame, SceneNode, SceneSource
 from mojive.commands import SetCamera
-from mojive.render.backend import DebugView, FrameMode, LabelMode, RenderFlag
+from mojive.render.backend import DebugView, FrameMode, LabelMode, RenderFlag, RenderProduct
 from mojive.types import CameraView
 from mojive.ui.camera import CameraOut, OrbitCamera, camera_basis
 from mojive.ui.camera_preview import CameraPreview
@@ -557,6 +557,7 @@ def test_camera_preview_copies_the_main_render_state() -> None:
             self.frame_mode = None
             self.bvh_depth = None
             self.camera = None
+            self.request = None
 
         def resize(self, *_size) -> None:
             pass
@@ -588,7 +589,8 @@ def test_camera_preview_copies_the_main_render_state() -> None:
         def update(self, _frame) -> None:
             pass
 
-        def render(self):
+        def render(self, request=None):
+            self.request = request
             return None
 
     peer = Peer()
@@ -625,3 +627,4 @@ def test_camera_preview_copies_the_main_render_state() -> None:
     assert peer.frame_mode is FrameMode.WORLD
     assert peer.bvh_depth == 3
     assert peer.camera.aspect == pytest.approx(16.0 / 9.0)
+    assert peer.request.products == RenderProduct.COLOR

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import Future
+
 import numpy as np
 import pytest
 
@@ -155,4 +157,45 @@ def test_viewer_record_restores_render_size_after_success(tmp_path, monkeypatch)
     assert app.fixed_render_size is None
     assert app.fixed_render_size_changes == [(320, 240), None]
     assert len(recorders[0].frames) == 2
+    assert recorders[0].closed == 1
+
+
+def test_viewer_record_pipelines_async_readback_in_frame_order(tmp_path, monkeypatch):
+    from mojive import recording
+
+    viewer, app, backend, *_ = _viewer()
+
+    class Target:
+        def __init__(self):
+            self.index = 0
+
+        def read_rgb_async(self, flip=True):
+            assert flip
+            future = Future()
+            future.set_result(np.full((4, 6, 3), self.index, np.uint8))
+            self.index += 1
+            return future
+
+    backend.target = Target()
+    recorders = []
+
+    class Recorder:
+        def __init__(self, path, size, fps):
+            self.path, self.size, self.fps = path, size, fps
+            self.values = []
+            self.closed = 0
+            recorders.append(self)
+
+        def append(self, frame):
+            self.values.append(int(frame[0, 0, 0]))
+
+        def close(self):
+            self.closed += 1
+
+    monkeypatch.setattr(recording, "VideoRecorder", Recorder)
+
+    viewer.record(tmp_path / "capture.mp4", 5)
+
+    assert app.syncs == 5
+    assert recorders[0].values == [0, 1, 2, 3, 4]
     assert recorders[0].closed == 1

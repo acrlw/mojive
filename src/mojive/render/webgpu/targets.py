@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from concurrent.futures import Future
+
 import numpy as np
 import wgpu
 
 from ...types import CameraView
+from .readback import WgpuReadbackQueue, aligned_row_bytes
 
 # Frame uniform block, mirrors `struct Frame` in shaders/scene.wgsl.
 FRAME_DTYPE = np.dtype(
@@ -87,8 +90,7 @@ def proj_matrix_wgpu(camera: CameraView) -> np.ndarray:
 
 
 def _aligned_row_bytes(width: int, bpp: int) -> int:
-    raw = width * bpp
-    return (raw + 255) // 256 * 256
+    return aligned_row_bytes(width, bpp)
 
 
 class RenderTargetWgpu:
@@ -98,6 +100,7 @@ class RenderTargetWgpu:
         self.height = max(1, int(height))
         self.samples = self._sample_count(samples)
         self._build()
+        self._readbacks: WgpuReadbackQueue | None = None
         self.frame_buffer = device.create_buffer(
             size=FRAME_BYTES, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST
         )
@@ -154,6 +157,8 @@ class RenderTargetWgpu:
         width, height = max(1, int(width)), max(1, int(height))
         if (width, height) == (self.width, self.height):
             return
+        if self._readbacks is not None:
+            self._readbacks.drain()
         self.width, self.height = width, height
         self._release_textures()
         self._build()
@@ -162,6 +167,8 @@ class RenderTargetWgpu:
         samples = self._sample_count(samples)
         if samples == self.samples:
             return False
+        if self._readbacks is not None:
+            self._readbacks.drain()
         self.samples = samples
         self._release_textures()
         self._build()
@@ -179,6 +186,11 @@ class RenderTargetWgpu:
         ):
             if tex is not None:
                 tex.destroy()
+
+    def _readback_queue(self) -> WgpuReadbackQueue:
+        if self._readbacks is None:
+            self._readbacks = WgpuReadbackQueue(self._device)
+        return self._readbacks
 
     def _read_texture(self, texture, dtype, channels: int, flip: bool) -> np.ndarray:
         bpp = np.dtype(dtype).itemsize * channels
@@ -215,6 +227,22 @@ class RenderTargetWgpu:
         np.copyto(out, self.read_color(flip=flip)[..., :3])
         return out
 
+    def read_rgb_async(
+        self, flip: bool = True, out: np.ndarray | None = None
+    ) -> Future[np.ndarray]:
+        """Queue packed RGB readback without waiting on the render thread."""
+
+        return self._readback_queue().enqueue(
+            self.color,
+            width=self.width,
+            height=self.height,
+            dtype=np.uint8,
+            storage_channels=4,
+            output_channels=3,
+            flip=flip,
+            out=out,
+        )
+
     def read_depth(self, flip: bool = True) -> np.ndarray:
         return self._read_texture(self.export_depth, np.float32, 1, flip)
 
@@ -229,6 +257,21 @@ class RenderTargetWgpu:
             )
         np.copyto(out, self._read_texture(self.export_depth, np.float32, 1, flip))
         return out
+
+    def read_metric_depth_async(
+        self, flip: bool = True, out: np.ndarray | None = None
+    ) -> Future[np.ndarray]:
+        """Queue metric-depth readback without waiting on the render thread."""
+
+        return self._readback_queue().enqueue(
+            self.export_depth,
+            width=self.width,
+            height=self.height,
+            dtype=np.float32,
+            storage_channels=1,
+            flip=flip,
+            out=out,
+        )
 
     def read_ids(self, flip: bool = False) -> np.ndarray:
         return self._read_texture(self.export_id, np.uint32, 1, flip)
@@ -245,6 +288,21 @@ class RenderTargetWgpu:
         np.copyto(out, self._read_texture(self.export_segmentation, np.int32, 2, flip))
         return out
 
+    def read_segmentation_async(
+        self, flip: bool = True, out: np.ndarray | None = None
+    ) -> Future[np.ndarray]:
+        """Queue semantic-ID readback without waiting on the render thread."""
+
+        return self._readback_queue().enqueue(
+            self.export_segmentation,
+            width=self.width,
+            height=self.height,
+            dtype=np.int32,
+            storage_channels=2,
+            flip=flip,
+            out=out,
+        )
+
     def read_id(self, x: int, y: int) -> int:
         if not (0 <= x < self.width and 0 <= y < self.height):
             return 0
@@ -257,5 +315,8 @@ class RenderTargetWgpu:
         return int(np.frombuffer(data, np.uint32)[0])
 
     def release(self) -> None:
+        if self._readbacks is not None:
+            self._readbacks.release()
+            self._readbacks = None
         self._release_textures()
         self.frame_buffer.destroy()
