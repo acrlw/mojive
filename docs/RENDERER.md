@@ -121,6 +121,10 @@ it, preserving submission and encoding order. Camera preview requests color rath
 viewport contract, so ordinary previews no longer render an unused picking buffer; identity debug
 views still add their required product through the backend's plan compiler.
 
+Native vectorized camera/world rendering is a separate concern from asynchronous single-target
+capture. Its current limits and proposed resource, scene, camera, and GPU-result contracts are
+documented in [Batch rendering for reinforcement learning](BATCH_RENDERING.md).
+
 ## Color pipeline
 
 Texture sampling uses sRGB formats. Mojive-native scene sources combine lighting, reflection, fog,

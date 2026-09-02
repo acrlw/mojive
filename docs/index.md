@@ -13,8 +13,10 @@ The project provides three primary workflows:
 Use the [getting started guide](getting-started.md) to run the editor. The
 [command-line reference](reference/cli.md) distinguishes render backends from scene adapters, and
 the [configuration reference](reference/configuration.md) lists runtime overrides and persistent
-paths. The [architecture guide](concepts/architecture.md) explains ownership and data flow. The
-[API map](api/index.md) lists the public modules, contracts, and entry points.
+paths. The [architecture guide](concepts/architecture.md) explains ownership and data flow, while
+the [batch rendering design](BATCH_RENDERING.md) evaluates the path from today's single-view API to
+vectorized RL camera observations. The [API map](api/index.md) lists the public modules, contracts,
+and entry points.
 
 Current development priorities live in `plan/STATUS.md`. Completed implementation plans in
 `plan/` are historical engineering records rather than user documentation.

@@ -362,7 +362,7 @@ class RenderBackend(Protocol):
         ...
 
     def create_peer(self, width: int, height: int) -> RenderBackend:
-        """Create an independent render target sharing immutable GPU resources."""
+        """Create an independent render target on the same graphics device or context."""
 
         ...
 

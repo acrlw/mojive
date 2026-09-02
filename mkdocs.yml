@@ -35,6 +35,7 @@ nav:
   - Concepts:
       - Architecture: concepts/architecture.md
       - Renderer: RENDERER.md
+      - Batch rendering for RL: BATCH_RENDERING.md
       - Platform support: PLATFORM.md
   - API reference:
       - API map: api/index.md

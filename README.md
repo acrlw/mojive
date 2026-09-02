@@ -245,6 +245,7 @@ Renderer code consumes shared scene contracts; physics-specific state remains in
 - [Examples](examples/README.md)
 - [Architecture](docs/concepts/architecture.md)
 - [Renderer design](docs/RENDERER.md)
+- [Batch rendering for RL](docs/BATCH_RENDERING.md)
 - [API map](docs/api/index.md)
 - [Testing guide](docs/guides/testing.md)
 
