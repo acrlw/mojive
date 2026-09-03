@@ -10,7 +10,13 @@ from imgui_bundle import imgui
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, NodeType, SceneNode
 from ..draw2d import ImguiDraw2D
-from . import Panel, PanelContext, horizontal_wheel_scroll, search_input
+from . import (
+    Panel,
+    PanelContext,
+    horizontal_wheel_scroll,
+    publish_focus_item_hint,
+    search_input,
+)
 
 _LARGE_SCENE_NODES = 2_000
 _VISIBLE_ROW_BUDGET = 512
@@ -186,6 +192,8 @@ class HierarchyPanel(Panel):
             )
 
         imgui.end_table()
+        if self._rows_drawn:
+            publish_focus_item_hint(ctx)
         imgui.end_child()
 
     def _draw_type_filters(self, ctx: PanelContext) -> None:
@@ -347,6 +355,12 @@ class HierarchyPanel(Panel):
                 else:
                     self._batch_selected = {node.node_id}
                     ctx.submit(cmd.SelectNode(node.node_id))
+        if (
+            hovered
+            and imgui.is_mouse_double_clicked(imgui.MouseButton_.left)
+            and ctx.focus_node is not None
+        ):
+            ctx.focus_node(node.node_id)
 
         editable = bool(
             ctx.session.adapter.caps.scene_authoring
@@ -360,7 +374,7 @@ class HierarchyPanel(Panel):
                 remove, _ = imgui.menu_item(ctx.tr("Remove Model"), "", False)
                 if remove:
                     ctx.submit(cmd.RemoveSceneModel(node.model_id))
-            elif node.model_id >= 0:
+            elif node.source_editable:
                 if node.type in (NodeType.ROBOT, NodeType.LINK):
                     self._model_create_menu(ctx, node)
                     imgui.separator()
@@ -427,7 +441,7 @@ class HierarchyPanel(Panel):
             node_id
             for node_id in self._batch_selected
             if (node := self._by_id.get(node_id)) is not None
-            and node.model_id >= 0
+            and node.source_editable
             and node.type in removable_types
         }
         roots = []

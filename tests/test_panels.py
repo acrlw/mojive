@@ -30,6 +30,8 @@ from mojive.ui.panels import (
     button_row_layout,
     default_panels,
     horizontal_wheel_target,
+    publish_focus_item_hint,
+    publish_status_hint,
     slider_gesture,
     sort_order_glyph,
     sort_order_tooltip,
@@ -86,7 +88,7 @@ from mojive.ui.panels.settings import (
     settings_uses_stacked_layout,
 )
 from mojive.ui.panels.stats import StatsPanel, _scale_ceiling
-from mojive.ui.viewport_widgets import capsule_points, playback_size, tool_column_size
+from mojive.ui.viewport_widgets import ToolHint, capsule_points, playback_size, tool_column_size
 from mojive.ui.window import ResizeLatch
 
 EXPECTED_PANELS = {
@@ -388,6 +390,7 @@ def test_output_buffer_separates_history_from_transient_status(monkeypatch):
     assert output.active_status(now + 4.9) == status
     assert output.active_status(now + 5.0) is None
     assert "[DEBUG] runtime detail" in output.copy_text()
+    assert output.copy_message_text() == "runtime detail\nsaved scene"
 
 
 def test_output_filter_combines_text_component_and_severity():
@@ -421,9 +424,16 @@ def test_large_editor_lists_are_bounded_and_large_hierarchies_start_closed():
 def test_hierarchy_batch_delete_collapses_selected_descendants_and_skips_scene_entities():
     panel = HierarchyPanel()
     nodes = (
-        SceneNode(1, "body", NodeType.LINK, model_id=0),
-        SceneNode(2, "child geom", NodeType.GEOM, parent=1, model_id=0),
-        SceneNode(3, "sibling geom", NodeType.GEOM, model_id=0),
+        SceneNode(1, "body", NodeType.LINK, model_id=0, source_editable=True),
+        SceneNode(
+            2,
+            "child geom",
+            NodeType.GEOM,
+            parent=1,
+            model_id=0,
+            source_editable=True,
+        ),
+        SceneNode(3, "sibling geom", NodeType.GEOM, model_id=0, source_editable=True),
         SceneNode(4, "opengl object", NodeType.LINK, model_id=-1),
     )
     panel._by_id = {node.node_id: node for node in nodes}
@@ -874,6 +884,23 @@ def test_keyframe_timeline_status_hints_replace_the_repeated_help_copy():
         ("mouse", "left", "移动播放头"),
         ("mouse", "wheel", "缩放"),
         ("mouse", "middle", "平移"),
+    ]
+
+
+def test_panel_status_hints_compose_without_duplicate_row_entries():
+    localizer = Localizer(Language.SIMPLIFIED_CHINESE)
+    ctx = SimpleNamespace(status_hints=(), tr=localizer.text)
+
+    publish_focus_item_hint(ctx)
+    publish_focus_item_hint(ctx)
+    publish_status_hint(
+        ctx,
+        ToolHint("mouse", "right", localizer.text("Copy name"), hint_id="panel.copy-name"),
+    )
+
+    assert [(hint.control, hint.suffix, hint.label) for hint in ctx.status_hints] == [
+        ("left", "×2", "聚焦项目"),
+        ("right", "", "复制名称"),
     ]
 
 

@@ -43,9 +43,11 @@ FRAME_MARGIN = 1.15
 FRAME_FAR_MARGIN = 32.0
 
 FRAME_DURATION = 0.35
+FOCUS_DURATION = 0.36
 PROJECTION_DURATION = 0.28
 DEFAULT_YAW = 0.0
 DEFAULT_PITCH = 0.0
+ISO_PITCH = 30.0
 
 
 PRESETS: dict[str, tuple[float, float]] = {
@@ -55,7 +57,7 @@ PRESETS: dict[str, tuple[float, float]] = {
     "left": (180.0, 0.0),
     "top": (-90.0, PITCH_LIMIT),
     "bottom": (-90.0, -PITCH_LIMIT),
-    "iso": (-135.0, 30.0),
+    "iso": (-135.0, ISO_PITCH),
 }
 
 
@@ -82,6 +84,11 @@ def _ease_out_quart(t: float) -> float:
     return 1.0 - (1.0 - t) ** 4
 
 
+def _ease_out_cubic(t: float) -> float:
+    t = min(1.0, max(0.0, t))
+    return 1.0 - (1.0 - t) ** 3
+
+
 def _smoothstep(t: float) -> float:
     """Cubic ease-in/out with zero velocity at both projection endpoints."""
 
@@ -91,6 +98,110 @@ def _smoothstep(t: float) -> float:
 
 def _wrap_deg(a: float) -> float:
     return float((a + 180.0) % 360.0 - 180.0)
+
+
+def closest_axis_view_direction(axis, eye_offset) -> np.ndarray:
+    """Return the axis direction on the side nearest the current camera eye."""
+
+    direction = _normalized_direction(axis, np.array((0.0, 0.0, 1.0), np.float64))
+    offset = np.asarray(eye_offset, np.float64).reshape(3)
+    return direction if float(np.dot(direction, offset)) >= 0.0 else -direction
+
+
+def closest_perpendicular_view_direction(axis, eye_offset, fallback) -> np.ndarray:
+    """Return the nearest stable view direction perpendicular to ``axis``."""
+
+    normal = _normalized_direction(axis, np.array((0.0, 0.0, 1.0), np.float64))
+    for candidate in (eye_offset, fallback):
+        projected = np.asarray(candidate, np.float64).reshape(3)
+        projected = projected - normal * float(np.dot(projected, normal))
+        length = float(np.linalg.norm(projected))
+        if np.isfinite(length) and length > 1e-9:
+            return projected / length
+
+    # Both supplied directions can be parallel to the joint axis.  Pick the
+    # world basis least aligned with it so the fallback remains deterministic.
+    basis = np.eye(3, dtype=np.float64)
+    reference = basis[int(np.argmin(np.abs(basis @ normal)))]
+    projected = reference - normal * float(np.dot(reference, normal))
+    return projected / max(float(np.linalg.norm(projected)), 1e-9)
+
+
+def oblique_axis_view_directions(
+    axis,
+    eye_offset,
+    fallback,
+    angle_degrees: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return elevated two-axis orbit views around a rotation axis.
+
+    A single off-axis rotation leaves the camera, joint axis, and world-up in
+    one plane. Applying the requested angle to both azimuth and elevation gives
+    the focused joint the same depth cues as an editor ISO view.
+    """
+
+    world_up = np.array((0.0, 0.0, 1.0), np.float64)
+    axial = closest_axis_view_direction(axis, eye_offset)
+    horizontal = axial - world_up * float(np.dot(axial, world_up))
+    if float(np.linalg.norm(horizontal)) <= 1e-9:
+        horizontal = np.asarray(eye_offset, np.float64).reshape(3).copy()
+        horizontal[2] = 0.0
+    if float(np.linalg.norm(horizontal)) <= 1e-9:
+        horizontal = np.asarray(fallback, np.float64).reshape(3).copy()
+        horizontal[2] = 0.0
+    horizontal = _normalized_direction(horizontal, np.array((1.0, 0.0, 0.0)))
+    side = _normalized_direction(np.cross(world_up, horizontal), (0.0, 1.0, 0.0))
+    angle = np.deg2rad(float(np.clip(angle_degrees, 0.0, PITCH_LIMIT)))
+    planar = float(np.cos(angle))
+    height = float(np.sin(angle))
+    turn = float(np.sin(angle))
+    forward = float(np.cos(angle))
+    candidates = tuple(
+        _normalized_direction(
+            planar * (base * forward + side * sign * turn) + world_up * height,
+            world_up,
+        )
+        for base in (horizontal, -horizontal)
+        for sign in (1.0, -1.0)
+    )
+    current = _normalized_direction(eye_offset, candidates[0])
+    return tuple(sorted(candidates, key=lambda value: -float(np.dot(value, current))))
+
+
+def elevated_focus_view_direction(
+    eye_offset,
+    fallback,
+    minimum_elevation_degrees: float = ISO_PITCH,
+) -> np.ndarray:
+    """Preserve view azimuth while keeping a focus direction above the target."""
+
+    direction = _normalized_direction(eye_offset, fallback)
+    elevation = np.deg2rad(float(np.clip(minimum_elevation_degrees, 0.0, PITCH_LIMIT)))
+    minimum_z = float(np.sin(elevation))
+    if direction[2] >= minimum_z:
+        return direction
+
+    horizontal = direction.copy()
+    horizontal[2] = 0.0
+    length = float(np.linalg.norm(horizontal))
+    if not np.isfinite(length) or length <= 1e-9:
+        horizontal = np.asarray(fallback, np.float64).reshape(3).copy()
+        horizontal[2] = 0.0
+        length = float(np.linalg.norm(horizontal))
+    if not np.isfinite(length) or length <= 1e-9:
+        horizontal = np.array((1.0, 0.0, 0.0), np.float64)
+        length = 1.0
+    horizontal /= length
+    return horizontal * np.cos(elevation) + np.array((0.0, 0.0, minimum_z), np.float64)
+
+
+def _normalized_direction(value, fallback) -> np.ndarray:
+    direction = np.asarray(value, np.float64).reshape(3)
+    length = float(np.linalg.norm(direction))
+    if not np.isfinite(direction).all() or not np.isfinite(length) or length <= 1e-9:
+        direction = np.asarray(fallback, np.float64).reshape(3)
+        length = float(np.linalg.norm(direction))
+    return direction / max(length, 1e-9)
 
 
 @dataclass
@@ -423,6 +534,7 @@ class OrbitCamera:
         *,
         animate: bool = True,
         clip: CameraView | None = None,
+        minimum_pitch: float | None = None,
     ) -> CameraView:
         lo = np.asarray(bounds[0], np.float64).reshape(3)
         hi = np.asarray(bounds[1], np.float64).reshape(3)
@@ -444,7 +556,11 @@ class OrbitCamera:
             pivot=center,
             distance=distance,
             yaw=self._yaw,
-            pitch=self._pitch,
+            pitch=(
+                self._pitch
+                if minimum_pitch is None
+                else max(self._pitch, float(np.clip(minimum_pitch, -PITCH_LIMIT, PITCH_LIMIT)))
+            ),
             ortho_height=ortho_height,
         )
         self.near, self.far = float(near), float(far)
@@ -479,6 +595,39 @@ class OrbitCamera:
             ortho_height=ortho_height,
         )
         self._apply_goal(goal, animate=animate, easing=_ease_out_quart)
+        return self.publish(sink)
+
+    def focus_target(
+        self,
+        center,
+        radius: float,
+        eye_direction,
+        sink: CameraSink,
+        *,
+        margin: float = FRAME_MARGIN,
+        animate: bool = True,
+    ) -> CameraView:
+        """Frame a target from a world direction with a gentle focus transition."""
+
+        direction = _normalized_direction(eye_direction, self.direction())
+        yaw = float(np.degrees(np.arctan2(direction[1], direction[0])))
+        pitch = float(np.degrees(np.arcsin(np.clip(direction[2], -1.0, 1.0))))
+        target = np.asarray(center, np.float64).reshape(3)
+        target_radius = max(float(radius), 1e-6)
+        if not np.isfinite(target).all() or not np.isfinite(target_radius):
+            return self.look_from(yaw, pitch, sink, animate=animate)
+        distance, ortho_height = self._framing_distance(target_radius, margin)
+        self.near = min(self.near, max(MIN_NEAR, (distance - target_radius) * 0.25))
+        self.far = max(self.far, (distance + target_radius) * 2.0)
+        goal = _Anim(
+            pivot=target.copy(),
+            distance=distance,
+            yaw=yaw,
+            pitch=float(np.clip(pitch, -PITCH_LIMIT, PITCH_LIMIT)),
+            ortho_height=ortho_height,
+            duration=FOCUS_DURATION,
+        )
+        self._apply_goal(goal, animate=animate, easing=_ease_out_cubic)
         return self.publish(sink)
 
     def _framing_distance(self, radius: float, margin: float) -> tuple[float, float]:

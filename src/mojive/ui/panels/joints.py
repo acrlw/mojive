@@ -9,7 +9,14 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, JointInfo, NodeType
-from . import Panel, PanelContext, copyable_name_item, searchable_ordered_list_header, value_slider
+from . import (
+    Panel,
+    PanelContext,
+    copyable_name_item,
+    publish_focus_item_hint,
+    searchable_ordered_list_header,
+    value_slider,
+)
 
 _SCALAR_KINDS = ("hinge", "slide")
 _BROWSE_THRESHOLD = 256
@@ -92,6 +99,8 @@ class JointsPanel(Panel):
                 node.joint_index: node for node in s.nodes if node.type is NodeType.JOINT
             }
             self._joint_nodes_generation = s.structure_generation
+        if self._joint_nodes:
+            publish_focus_item_hint(ctx)
         self._joint_table(ctx, ordered, self._joint_nodes)
 
     def _joint_table(self, ctx: PanelContext, joints, joint_nodes) -> None:
@@ -132,8 +141,15 @@ class JointsPanel(Panel):
                 imgui.ImVec2(label_width, 0.0),
             )
             imgui.end_disabled()
+            double_clicked = imgui.is_item_hovered(
+                imgui.HoveredFlags_.allow_when_disabled.value
+            ) and imgui.is_mouse_double_clicked(imgui.MouseButton_.left)
             if clicked:
                 ctx.submit(cmd.SelectNode(joint_node.node_id))
+            if double_clicked and ctx.focus_joint is not None:
+                if not clicked:
+                    ctx.submit(cmd.SelectNode(joint_node.node_id))
+                ctx.focus_joint(j.joint_id)
         copyable_name_item(ctx, name, label_width)
         imgui.table_next_column()
         if j.type not in _SCALAR_KINDS:

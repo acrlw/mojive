@@ -13,11 +13,13 @@ from mojive.ui.app import (
     JOINT_LIMIT_HOVER_GRACE_SECONDS,
     JOINT_LIMIT_LABEL_DELAY_SECONDS,
     MODEL_FILTERS,
+    PRECISE_GIZMO_HINT_DELAY_SECONDS,
     ViewerApp,
     _clipped_overlay_host_rect,
     _compact_status_for_selection,
     _fit_image_rect,
     _FrameRateDisplay,
+    _GizmoHintHoverState,
     _JointLimitHoverState,
     _middle_elide_text,
     _prepare_modal,
@@ -131,6 +133,16 @@ def test_joint_limit_hover_resets_after_a_real_exit_or_target_removal() -> None:
     assert state.key is None
 
 
+def test_precise_gizmo_status_hint_requires_an_uninterrupted_hover_delay() -> None:
+    state = _GizmoHintHoverState()
+
+    assert not state.update(True, 10.0)
+    assert not state.update(True, 10.0 + PRECISE_GIZMO_HINT_DELAY_SECONDS - 0.01)
+    assert state.update(True, 10.0 + PRECISE_GIZMO_HINT_DELAY_SECONDS)
+    assert not state.update(False, 10.0 + PRECISE_GIZMO_HINT_DELAY_SECONDS + 0.01)
+    assert state.entered_at is None
+
+
 @pytest.mark.parametrize(
     ("message", "selected", "expected"),
     (
@@ -239,6 +251,7 @@ def test_selection_status_is_composed_with_panel_hints_but_yields_to_input(panel
     app._status_panel = panel
     app._panel_status_hints = (ToolHint("mouse", "right", "Copy name", hint_id="panel.copy"),)
     app._precise_gizmo_edit = None
+    app._gizmo_hint_hover = SimpleNamespace(visible=False)
     app._scene_input_blocked = lambda: False
     app._has_scene_content = lambda: True
     app._selection_clear_enabled = lambda: True
@@ -252,6 +265,14 @@ def test_selection_status_is_composed_with_panel_hints_but_yields_to_input(panel
     assert hints[0].hint_id == "selection.clear"
     if panel != "Viewport":
         assert hints[1:] == app._panel_status_hints
+    else:
+        assert all(hint.hint_id != "gizmo.type_value" for hint in hints)
+    app._status_panel = "Joints"
+    app._gizmo_hint_hover.visible = True
+    hints = app._status_tool_hints(loading=False)
+    assert [hint.hint_id for hint in hints] == ["selection.clear", "gizmo.type_value"]
+    app._gizmo_hint_hover.visible = False
+    app._status_panel = panel
     assert app._status_tool_hints(loading=True) == ()
     app._scene_input_blocked = lambda: True
     assert app._status_tool_hints(loading=False) == ()

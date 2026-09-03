@@ -481,6 +481,25 @@ class Session:
         """Return the selected hierarchy node."""
         return self.node(self._selected_node_id)
 
+    @property
+    def selection_highlight_object_id(self) -> int:
+        """Return the render object representing the logical hierarchy selection."""
+
+        if self._selected > 0:
+            return self._selected
+        node = self.selected_node
+        if node is None or node.type is not NodeType.JOINT:
+            return 0
+        parent_id = int(node.parent)
+        while parent_id >= 0:
+            parent = self.node(parent_id)
+            if parent is None:
+                break
+            if parent.object_id > 0 and parent.body_index == node.body_index:
+                return int(parent.object_id)
+            parent_id = int(parent.parent)
+        return 0
+
     def entity_gizmo_lock_enabled(self, node: SceneNode) -> bool:
         """Return the runtime gizmo-lock preference for a camera or light."""
         return node.object_id not in self._unlocked_entity_gizmos
@@ -1518,6 +1537,11 @@ class Session:
                 return CommandResult.bad(f"{caps.name} does not support topology editing")
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before changing model topology")
+            parent = self.node(c.parent_node_id)
+            if parent is None:
+                return CommandResult.bad(f"Unknown parent node_id={c.parent_node_id}")
+            if parent.type not in (NodeType.WORLD, NodeType.MODEL) and not parent.source_editable:
+                return CommandResult.bad(f"{parent.name} has no editable source element")
             try:
                 node_id = self._adapter.add_model_element(c.parent_node_id, c.element_type, c.name)
             except Exception as exc:
@@ -1535,6 +1559,8 @@ class Session:
             node = self.node(c.node_id)
             if node is None:
                 return CommandResult.bad(f"Unknown node_id={c.node_id}")
+            if not node.source_editable:
+                return CommandResult.bad(f"{node.name} has no editable source element")
             try:
                 node_id = self._adapter.duplicate_model_element(c.node_id)
             except Exception as exc:
@@ -1554,6 +1580,8 @@ class Session:
             node = self.node(c.node_id)
             if node is None:
                 return CommandResult.bad(f"Unknown node_id={c.node_id}")
+            if not node.source_editable:
+                return CommandResult.bad(f"{node.name} has no editable source element")
             try:
                 changed = self._adapter.remove_model_element(c.node_id)
             except Exception as exc:
@@ -1573,6 +1601,8 @@ class Session:
             node = self.node(c.node_id)
             if node is None:
                 return CommandResult.bad(f"Unknown node_id={c.node_id}")
+            if not node.source_editable:
+                return CommandResult.bad(f"{node.name} has no editable source element")
             try:
                 changed = self._adapter.rename_model_element(c.node_id, c.name)
             except Exception as exc:
@@ -1892,9 +1922,12 @@ class Session:
             if node is None:
                 return CommandResult.bad(f"Unknown node_id={c.node_id}")
             if not node.posable:
-                return CommandResult.bad(
+                message = (
                     "This link is joint-driven; use its viewport gizmo or the Joints panel"
+                    if node.type in (NodeType.LINK, NodeType.ROBOT)
+                    else "This entity has no editable transform"
                 )
+                return CommandResult.bad(message)
             ok = self._adapter.set_pose(c.node_id, c.position, c.rotation)
             return CommandResult.good("") if ok else CommandResult.bad("Pose update failed")
 
@@ -1941,6 +1974,12 @@ class Session:
             joint = next((item for item in self._joints if item.joint_id == c.joint_id), None)
             if joint is None:
                 return CommandResult.bad(f"Joint {c.joint_id} is unavailable")
+            joint_node = next(
+                (node for node in self._nodes if node.joint_index == c.joint_id),
+                None,
+            )
+            if joint_node is None or not joint_node.source_editable:
+                return CommandResult.bad(f"Joint {joint.name} has no editable source element")
             if joint.type == "free":
                 return CommandResult.bad("Free-joint properties are not editable here")
             axis = np.asarray(c.axis, np.float64).reshape(3)
@@ -1983,6 +2022,12 @@ class Session:
                 return CommandResult.bad(f"{caps.name} does not support model property editing")
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before editing joint properties")
+            joint_node = next(
+                (node for node in self._nodes if node.joint_index == c.joint_id),
+                None,
+            )
+            if joint_node is None or not joint_node.source_editable:
+                return CommandResult.bad(f"Joint {c.joint_id} has no editable source element")
             if self._adapter.joint_advanced_properties(c.joint_id) is None:
                 return CommandResult.bad(f"Joint {c.joint_id} is unavailable")
             try:
@@ -2049,6 +2094,9 @@ class Session:
                 return CommandResult.bad(f"{caps.name} does not support model property editing")
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before editing site properties")
+            node = self.node(c.node_id)
+            if node is None or not node.source_editable:
+                return CommandResult.bad(f"Site node {c.node_id} has no editable source element")
             if self._adapter.site_properties(c.node_id) is None:
                 return CommandResult.bad(f"Site node {c.node_id} is unavailable")
             site_type = str(c.type).strip().lower()
@@ -2089,6 +2137,11 @@ class Session:
                 return CommandResult.bad(f"{caps.name} does not support model property editing")
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before editing geometry properties")
+            node = self.node(c.node_id)
+            if node is None or not node.source_editable:
+                return CommandResult.bad(
+                    f"Geometry node {c.node_id} has no editable source element"
+                )
             current = self._adapter.geometry_properties(c.node_id)
             if current is None:
                 return CommandResult.bad(f"Geometry node {c.node_id} is unavailable")
@@ -2182,6 +2235,11 @@ class Session:
                 return CommandResult.bad(f"{caps.name} does not support model property editing")
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before editing geometry properties")
+            node = self.node(c.node_id)
+            if node is None or not node.source_editable:
+                return CommandResult.bad(
+                    f"Geometry node {c.node_id} has no editable source element"
+                )
             if self._adapter.geometry_advanced_properties(c.node_id) is None:
                 return CommandResult.bad(f"Geometry node {c.node_id} is unavailable")
             mass_mode = str(c.mass_mode).strip().lower()
@@ -2231,6 +2289,11 @@ class Session:
                 return CommandResult.bad(f"{caps.name} does not support model property editing")
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before editing geometry shape")
+            node = self.node(c.node_id)
+            if node is None or not node.source_editable:
+                return CommandResult.bad(
+                    f"Geometry node {c.node_id} has no editable source element"
+                )
             current = self._adapter.geometry_shape_properties(c.node_id)
             if current is None:
                 return CommandResult.bad(f"Geometry node {c.node_id} is unavailable")
@@ -2273,6 +2336,11 @@ class Session:
                 return CommandResult.bad(f"{caps.name} does not support model asset editing")
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before importing geometry resources")
+            node = self.node(c.node_id)
+            if node is None or not node.source_editable:
+                return CommandResult.bad(
+                    f"Geometry node {c.node_id} has no editable source element"
+                )
             resource_type = str(c.resource_type).strip().lower()
             if resource_type not in ("mesh", "hfield"):
                 return CommandResult.bad("Geometry resource type must be mesh or hfield")
@@ -2500,6 +2568,9 @@ class Session:
                 return CommandResult.bad(f"{caps.name} does not support model property editing")
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before editing body properties")
+            node = self.node(c.node_id)
+            if node is None or not node.source_editable:
+                return CommandResult.bad(f"Body node {c.node_id} has no editable source element")
             if self._adapter.body_properties(c.node_id) is None:
                 return CommandResult.bad(f"Body node {c.node_id} is unavailable")
             inertia_mode = str(c.inertia_mode).strip().lower()
@@ -2594,6 +2665,11 @@ class Session:
                 return CommandResult.bad(f"{caps.name} does not support model asset editing")
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before creating materials")
+            node = self.node(c.node_id)
+            if node is None or not node.source_editable:
+                return CommandResult.bad(
+                    f"Geometry node {c.node_id} has no editable source element"
+                )
             value = str(c.name).strip()
             if not value:
                 return CommandResult.bad("A material name cannot be empty")
@@ -2641,6 +2717,11 @@ class Session:
                 return CommandResult.bad(f"{caps.name} does not support model asset editing")
             if caps.simulation and not self._paused:
                 return CommandResult.bad("Pause the simulation before binding materials")
+            node = self.node(c.node_id)
+            if node is None or not node.source_editable:
+                return CommandResult.bad(
+                    f"Geometry node {c.node_id} has no editable source element"
+                )
             if not self._adapter.set_geometry_material(c.node_id, c.material_index):
                 return CommandResult.bad("The material is unavailable for this model geometry")
             self._refresh_structure()
@@ -2781,6 +2862,12 @@ class Session:
             instances = np.flatnonzero(self._source.geom_node == int(c.node_id))
             if not len(instances):
                 return CommandResult.bad(f"geometry node {c.node_id} is unavailable")
+            node = self.node(c.node_id)
+            authored_scene_node = bool(node is not None and node.model_id < 0)
+            if node is None or (not node.source_editable and not authored_scene_node):
+                return CommandResult.bad(
+                    f"Geometry node {c.node_id} has no editable source element"
+                )
             size = np.asarray(c.size, np.float32).reshape(3)
             if not np.all(np.isfinite(size)) or np.any(size <= 0.0):
                 return CommandResult.bad("geometry size must contain three positive values")

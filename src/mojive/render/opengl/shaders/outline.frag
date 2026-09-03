@@ -6,6 +6,7 @@
 uniform sampler2D u_mask;
 uniform ivec2 u_size;
 uniform vec4 u_color;
+uniform float u_xray_alpha;
 
 layout(location = 0) out vec4 o_color;
 
@@ -54,7 +55,7 @@ bool clipped_by_border(ivec2 p) {
 void main() {
     ivec2 p = ivec2(gl_FragCoord.xy);
     float center = coverage_at(p);
-    float alpha = outline_alpha(p);
+    float alpha = max(outline_alpha(p), center * u_xray_alpha);
     if (center > 0.0 && clipped_by_border(p)) alpha = max(alpha, center);
     if (alpha <= 0.0) discard;
 

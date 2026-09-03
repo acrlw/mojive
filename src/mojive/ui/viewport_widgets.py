@@ -1410,7 +1410,14 @@ def _key_width(draw: Draw2D, label: str, scale: float, text_scale: float = 1.0) 
 
 
 def _keycap(
-    draw: Draw2D, x: float, center_y: float, label: str, theme: Theme, scale: float
+    draw: Draw2D,
+    x: float,
+    center_y: float,
+    label: str,
+    theme: Theme,
+    scale: float,
+    *,
+    muted: bool = False,
 ) -> float:
     text_width, text_height = draw.text_size(label)
     width = text_width + OVERLAY_GEOMETRY.hint_key_padding_x * 2.0 * scale
@@ -1418,7 +1425,11 @@ def _keycap(
     y = center_y - height * 0.5
     draw.rect_filled((x, y), (x + width, y + height), theme.bg_frame, rounding=3.0 * scale)
     draw.rect((x, y), (x + width, y + height), theme.border, 1.0 * scale, rounding=3.0 * scale)
-    draw.text((x + (width - text_width) * 0.5, y + (height - text_height) * 0.5), theme.text, label)
+    draw.text(
+        (x + (width - text_width) * 0.5, y + (height - text_height) * 0.5),
+        theme.text_disabled if muted else theme.text,
+        label,
+    )
     return width
 
 
@@ -1581,6 +1592,7 @@ def draw_mouse_hint_glyph(
     size: tuple[float, float] | None = None,
     pixel_size: float = 1.0,
     geometry: OverlayGeometry = OVERLAY_GEOMETRY,
+    muted: bool = False,
 ) -> float:
     """Draw a Blender-style mouse shell with one semantic control highlighted."""
 
@@ -1602,14 +1614,17 @@ def draw_mouse_hint_glyph(
         outline_width=outline_width,
         geometry=geometry,
     )
+    shell_color = theme.text_disabled if muted else theme.text
+    fill_color = theme.bg_frame_active if muted else theme.primary
+    suffix_color = theme.text_disabled if muted else theme.primary_bright
     if button_geometry is None:
-        draw.rect((x, y), (x + width, y + height), theme.text, outline_width, rounding=radius)
+        draw.rect((x, y), (x + width, y + height), shell_color, outline_width, rounding=radius)
     else:
         # Omit the shell beneath the button's transparent outer contour instead
         # of repainting it with a guessed background color. This remains a
         # genuine knockout over translucent chrome and arbitrary viewports.
-        draw.polyline(button_geometry.visible_shell, theme.text, outline_width)
-        draw.convex_fill(button_geometry.fill, theme.primary)
+        draw.polyline(button_geometry.visible_shell, shell_color, outline_width)
+        draw.convex_fill(button_geometry.fill, fill_color)
     if button == "wheel":
         wheel = mouse_wheel_geometry(
             x,
@@ -1623,13 +1638,13 @@ def draw_mouse_hint_glyph(
         draw.rect_filled(
             wheel.lo,
             wheel.hi,
-            theme.primary,
+            fill_color,
             rounding=wheel.rounding,
         )
     if not suffix:
         return width
     label_x = x + width + 5.0 * scale
-    return width + 5.0 * scale + _inline_text(draw, label_x, center_y, suffix, theme.primary_bright)
+    return width + 5.0 * scale + _inline_text(draw, label_x, center_y, suffix, suffix_color)
 
 
 @lru_cache(maxsize=64)
@@ -1825,6 +1840,7 @@ def draw_tool_hints(
     *,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
     pixel_size: float = 1.0,
+    muted: bool = False,
 ) -> float:
     """Draw tool hints inline and return their consumed width."""
 
@@ -1833,14 +1849,16 @@ def draw_tool_hints(
     input_gap = OVERLAY_GEOMETRY.hint_input_gap * scale
     group_gap = OVERLAY_GEOMETRY.hint_group_gap * scale
     chord_gap = OVERLAY_GEOMETRY.hint_chord_gap * scale
+    text_color = theme.text_disabled if muted else theme.text
+    accent_color = theme.text_disabled if muted else theme.primary_bright
 
     def text(value: str, color=None) -> None:
         nonlocal cursor
-        cursor += _inline_text(draw, cursor, center_y, value, color or theme.text)
+        cursor += _inline_text(draw, cursor, center_y, value, color or text_color)
 
     def key(label: str, meaning: str) -> None:
         nonlocal cursor
-        cursor += _keycap(draw, cursor, center_y, label, theme, scale) + input_gap
+        cursor += _keycap(draw, cursor, center_y, label, theme, scale, muted=muted) + input_gap
         text(meaning)
 
     def mouse(button: str, meaning: str, *, suffix: str = "", after: float = 0.0) -> None:
@@ -1855,6 +1873,7 @@ def draw_tool_hints(
                 theme,
                 scale,
                 pixel_size=pixel_size,
+                muted=muted,
             )
             + input_gap
         )
@@ -1863,10 +1882,10 @@ def draw_tool_hints(
 
     def perturb(modifier: str) -> None:
         nonlocal cursor
-        cursor += _keycap(draw, cursor, center_y, modifier, theme, scale) + input_gap
+        cursor += _keycap(draw, cursor, center_y, modifier, theme, scale, muted=muted) + input_gap
         text("+", theme.text_disabled)
         cursor += chord_gap
-        text(labels.drag, theme.primary_bright)
+        text(labels.drag, accent_color)
         cursor += chord_gap
         mouse("left", labels.push, after=chord_gap)
         mouse("right", labels.twist)
@@ -2124,7 +2143,7 @@ def draw_status(
         (x, y),
         (x + width, y),
         theme.primary_dim if running else theme.border,
-        1.0 * scale,
+        (2.0 if running else 1.0) * scale,
     )
     cy = y + height * 0.5
     cursor = x + 12.0 * scale
@@ -2203,7 +2222,7 @@ def draw_status(
                 cursor,
                 cy,
                 selected_shown,
-                theme.text if has_selection else theme.text_disabled,
+                theme.text_disabled,
             )
     left_neighbor_end = cursor
 
@@ -2239,6 +2258,7 @@ def draw_status(
             fitted_hints,
             labels=labels,
             pixel_size=pixel_size,
+            muted=True,
         )
         left_neighbor_end = cursor + hint_width
 
@@ -2252,14 +2272,14 @@ def draw_status(
         status_colors = {
             "error": theme.danger,
             "warning": theme.warning,
-            "success": theme.primary_bright,
+            "success": theme.text_disabled,
         }
         _inline_text(
             draw,
             status_x,
             cy,
             shown,
-            status_colors.get(status_level, theme.primary_bright),
+            status_colors.get(status_level, theme.text_disabled),
         )
         left_neighbor_end = status_x + shown_width
     telemetry_present = any(telemetry_fields)
@@ -2276,7 +2296,7 @@ def draw_status(
             1.0 * scale,
         )
     if performance.backend_text:
-        _inline_text(draw, performance.backend_x, cy, performance.backend_text, theme.text)
+        _inline_text(draw, performance.backend_x, cy, performance.backend_text, theme.text_disabled)
     if performance.metric_text:
         metric_height = min(height - 6.0 * scale, 20.0 * scale)
         metric_rect = (
@@ -2293,11 +2313,17 @@ def draw_status(
             1.0 * scale,
             rounding=3.0 * scale,
         )
-        _inline_text(draw, performance.metric_x + 7.0 * scale, cy, metric_text, theme.text)
+        _inline_text(
+            draw,
+            performance.metric_x + 7.0 * scale,
+            cy,
+            metric_text,
+            theme.text_disabled,
+        )
     if performance.delta_text:
-        _inline_text(draw, performance.delta_x, cy, performance.delta_text, theme.text)
+        _inline_text(draw, performance.delta_x, cy, performance.delta_text, theme.text_disabled)
     if performance.fps_text:
-        _inline_text(draw, performance.fps_x, cy, performance.fps_text, theme.text)
+        _inline_text(draw, performance.fps_x, cy, performance.fps_text, theme.text_disabled)
     for divider_x in performance.dividers:
         draw.line(
             (divider_x, cy - 6.0 * scale),

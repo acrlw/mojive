@@ -8,7 +8,17 @@ from mojive.adapters.base import CameraInfo, NodeType, SceneFrame, SceneNode, Sc
 from mojive.commands import SetCamera
 from mojive.render.backend import DebugView, FrameMode, LabelMode, RenderFlag, RenderProduct
 from mojive.types import CameraView
-from mojive.ui.camera import CameraOut, OrbitCamera, camera_basis
+from mojive.ui.camera import (
+    FOCUS_DURATION,
+    ISO_PITCH,
+    CameraOut,
+    OrbitCamera,
+    camera_basis,
+    closest_axis_view_direction,
+    closest_perpendicular_view_direction,
+    elevated_focus_view_direction,
+    oblique_axis_view_directions,
+)
 from mojive.ui.camera_preview import CameraPreview
 
 
@@ -327,6 +337,21 @@ def test_frame_scene_preserves_scene_clip_planes_when_provided():
     assert view.far == pytest.approx(clip.far)
 
 
+def test_frame_scene_can_raise_an_upward_focus_to_iso_pitch():
+    bounds = (np.full(3, -1.0), np.full(3, 1.0))
+    cam = OrbitCamera(yaw=42.0, pitch=-35.0)
+
+    cam.frame_scene(
+        bounds,
+        RecordingSink(),
+        animate=False,
+        minimum_pitch=ISO_PITCH,
+    )
+
+    assert cam.yaw == pytest.approx(42.0)
+    assert cam.pitch == pytest.approx(ISO_PITCH)
+
+
 def test_look_from_target_centers_selection_and_padding_controls_distance():
     center = np.array((3.0, -2.0, 1.0))
     cam = OrbitCamera(aspect=1.6)
@@ -368,6 +393,75 @@ def test_look_from_target_uses_fast_ease_out_quart():
 
     assert cam.pivot == pytest.approx(target * _ease_out_quart(0.25))
     assert _ease_out_quart(0.25) > 0.65
+
+
+def test_joint_focus_directions_keep_the_nearest_camera_side():
+    axis = np.array((0.0, 1.0, 0.0))
+
+    assert closest_axis_view_direction(axis, (0.0, -4.0, 1.0)) == pytest.approx(-axis)
+    perpendicular = closest_perpendicular_view_direction(
+        axis,
+        (3.0, 8.0, 4.0),
+        (1.0, 0.0, 0.0),
+    )
+    assert np.dot(perpendicular, axis) == pytest.approx(0.0, abs=1e-9)
+    assert perpendicular == pytest.approx(np.array((3.0, 0.0, 4.0)) / 5.0)
+
+
+def test_joint_focus_perpendicular_direction_has_a_parallel_view_fallback():
+    direction = closest_perpendicular_view_direction(
+        (0.0, 0.0, 1.0),
+        (0.0, 0.0, 5.0),
+        (0.0, 0.0, -1.0),
+    )
+
+    assert np.linalg.norm(direction) == pytest.approx(1.0)
+    assert direction[2] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_oblique_axis_views_apply_the_same_angle_to_azimuth_and_elevation():
+    axis = np.array((1.0, 0.0, 0.0))
+    eye = np.array((4.0, 3.0, 0.0))
+
+    directions = oblique_axis_view_directions(axis, eye, (0.0, 0.0, 1.0), 35.0)
+
+    assert len(directions) == 4
+    assert all(np.linalg.norm(direction) == pytest.approx(1.0) for direction in directions)
+    angle = np.deg2rad(35.0)
+    assert np.dot(directions[0], axis) == pytest.approx(np.cos(angle) ** 2)
+    assert directions[0][1] > 0.0
+    assert directions[1][1] < 0.0
+    assert all(direction[2] == pytest.approx(np.sin(angle)) for direction in directions)
+    assert directions[2][0] < 0.0
+    assert directions[3][0] < 0.0
+
+
+def test_elevated_focus_view_keeps_azimuth_and_enforces_iso_elevation():
+    direction = elevated_focus_view_direction(
+        (3.0, -4.0, -2.0),
+        (1.0, 0.0, 0.0),
+    )
+
+    assert np.linalg.norm(direction) == pytest.approx(1.0)
+    assert np.degrees(np.arcsin(direction[2])) == pytest.approx(ISO_PITCH)
+    np.testing.assert_allclose(direction[:2] / np.linalg.norm(direction[:2]), (0.6, -0.8))
+
+
+def test_focus_target_uses_a_moderate_ease_out_and_requested_direction():
+    from mojive.ui.camera import _ease_out_cubic
+
+    cam = OrbitCamera(pivot=np.zeros(3), distance=6.0, yaw=180.0)
+    sink = RecordingSink()
+    target = np.array((2.0, -1.0, 0.5))
+
+    cam.focus_target(target, 0.5, (0.0, 1.0, 0.0), sink, animate=True)
+    cam.advance(FOCUS_DURATION * 0.25, sink)
+
+    assert cam.pivot == pytest.approx(target * _ease_out_cubic(0.25))
+    assert 0.5 < _ease_out_cubic(0.25) < 0.65
+    cam.advance(FOCUS_DURATION, sink)
+    assert cam.pivot == pytest.approx(target)
+    assert cam.direction() == pytest.approx((0.0, 1.0, 0.0), abs=1e-6)
 
 
 def test_adopted_scene_clip_planes_survive_free_camera_navigation():

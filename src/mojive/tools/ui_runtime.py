@@ -1338,6 +1338,32 @@ def _capture_joint_gizmo_scene(output: Path) -> None:
         viewer.app.gizmo.set_style("2d")
         _settle(viewer, 8)
 
+        compiled_only = next(
+            node
+            for node in viewer.session.nodes
+            if node.type is NodeType.GEOM and not node.source_editable
+        )
+        viewer.session.submit(cmd.SelectNode(compiled_only.node_id))
+        _settle(viewer, 3)
+        assert not compiled_only.posable
+        assert viewer.app.gizmo.visible
+        assert viewer.app.gizmo.display_only
+        _save_window_crop(
+            viewer,
+            "Viewport",
+            output / "compiled-only-geom-coordinate-frame.png",
+            padding=0.0,
+        )
+        _activate_panel(viewer, "Inspector")
+        _settle(viewer, 2)
+        _save_window_crop(
+            viewer,
+            "Inspector",
+            output / "compiled-only-geom-read-only.png",
+            padding=8.0,
+            max_height=700.0,
+        )
+
         slide = next(item for item in viewer.session.nodes if item.name == "02_prismatic")
         viewer.session.submit(cmd.Select(slide.object_id))
         _settle(viewer, 6)
@@ -1450,6 +1476,21 @@ def _capture_joint_gizmo_scene(output: Path) -> None:
             "Joint gizmo###viewport_joint_gizmo",
             output / "joint-multi-picker-closeup.png",
             padding=8.0,
+        )
+
+        revolute = next(item for item in viewer.session.nodes if item.name == "05_multi_revolute_z")
+        viewer.session.submit(cmd.SelectNode(revolute.node_id))
+        assert viewer.app.request_joint_focus(revolute.joint_index)
+        viewer.sync()
+        viewer.app.camera.advance(1.0, viewer.app.camera_out)
+        _settle(viewer, 3)
+        _park_cursor(viewer)
+        viewer.sync()
+        _save_window_crop(
+            viewer,
+            "Viewport",
+            output / "joint-revolute-focus-oblique.png",
+            padding=0.0,
         )
 
         camera = next(item for item in viewer.session.nodes if item.name == "joint_gizmos")

@@ -194,3 +194,17 @@ def test_travel_separates_a_click_from_a_drag():
     router.update(press())
     router.update(press(delta=(3.0, 4.0)))
     assert router.travel == 7.0
+
+
+def test_router_remembers_the_press_button_through_the_release_frame():
+    router = GestureRouter()
+    router.update(press())
+    assert router.started_with_left
+    router.update(InputState(over_viewport=True))
+    assert router.released
+    assert router.started_with_left
+    router.update(InputState(over_viewport=True))
+    assert not router.started_with_left
+
+    router.update(InputState(over_viewport=True, right=True))
+    assert not router.started_with_left

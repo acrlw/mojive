@@ -559,7 +559,8 @@ def test_highlight_needs_the_emission_term(rig, monkeypatch):
         monkeypatch.setattr(opaque_pass, "HIGHLIGHT_EMISSION", 0.0)
     mix_only = float(Rig.center(rig.draw([quad], ambient=dark, selected=1))[:3].mean())
 
-    assert lit - plain > 40.0
+    # Selection remains obvious in a dark scene without bleaching the surface.
+    assert 40.0 < lit - plain < 100.0
     assert (lit - plain) > 4.0 * abs(mix_only - plain)
 
 

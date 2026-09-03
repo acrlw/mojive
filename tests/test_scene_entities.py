@@ -18,9 +18,9 @@ from mojive.session import Session
 from mojive.types import CameraView, Light, LightSet, LightType
 from mojive.ui.gizmo import (
     ObjectGizmo,
-    _node_pose,
     _set_camera_from_world,
     _set_light_from_world,
+    node_world_pose,
 )
 from mojive.ui.scene_entities import (
     CAMERA_HELPER_SIZE_PT,
@@ -481,7 +481,7 @@ def test_light_and_camera_gizmo_commands_write_entity_transforms() -> None:
         session, light_node, np.array((4.0, 5.0, 6.0)), light_rotation
     )
     assert light_command is not None and session.submit(light_command)
-    light_position, light_basis = _node_pose(session, light_node)
+    light_position, light_basis = node_world_pose(session, light_node)
     assert light_position == pytest.approx((4.0, 5.0, 6.0))
     assert -light_basis[:, 2] == pytest.approx((0.0, 1.0, 0.0))
 
@@ -490,7 +490,7 @@ def test_light_and_camera_gizmo_commands_write_entity_transforms() -> None:
         session, camera_node, np.array((2.0, 3.0, 4.0)), camera_rotation
     )
     assert camera_command is not None and session.submit(camera_command)
-    camera_position, camera_rotation = _node_pose(session, camera_node)
+    camera_position, camera_rotation = node_world_pose(session, camera_node)
     assert camera_position == pytest.approx((2.0, 3.0, 4.0))
     assert -camera_rotation[:, 2] == pytest.approx((0.0, 0.0, -1.0))
 
@@ -520,14 +520,14 @@ def test_light_rotation_gizmo_keeps_its_drag_frame_after_write_back(
     rect = (0.0, 0.0, 800.0, 600.0)
     gizmo = ObjectGizmo("rotate")
     gizmo.set_style("3d")
-    start_position, start_basis = _node_pose(session, node)
+    start_position, start_basis = node_world_pose(session, node)
     scale = 0.5
     start = start_position + start_basis[:, 1] * scale
     end = start_position + start_basis[:, 2] * scale
     start_cursor, end_cursor = project(editor_camera, (start, end), rect)[:, :2]
     assert gizmo.keyboard_interact(session, editor_camera, rect, start_cursor, 0)
     assert gizmo.keyboard_interact(session, editor_camera, rect, end_cursor, 0)
-    assert not np.allclose(_node_pose(session, node)[1], start_basis)
+    assert not np.allclose(node_world_pose(session, node)[1], start_basis)
 
     backend = SimpleNamespace(
         caps=BackendCaps(name="capture", gizmo=True),

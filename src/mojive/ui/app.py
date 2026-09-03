@@ -29,10 +29,21 @@ from ..workspace_io import (
     repair_workspace_resources,
 )
 from . import gestures as gs
-from .camera import CameraOut, OrbitCamera, ProjectionTransition, ndc_from_viewport, unproject
+from .camera import (
+    ISO_PITCH,
+    CameraOut,
+    OrbitCamera,
+    ProjectionTransition,
+    camera_basis,
+    closest_perpendicular_view_direction,
+    elevated_focus_view_direction,
+    ndc_from_viewport,
+    oblique_axis_view_directions,
+    unproject,
+)
 from .camera_preview import CameraPreview
 from .draw2d import ImguiDraw2D
-from .gizmo import JointLimitHit, ObjectGizmo, PreciseGizmoInput
+from .gizmo import JointLimitHit, ObjectGizmo, PreciseGizmoInput, node_world_pose
 from .input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
 from .localization import Localizer
 from .messages import OutputBuffer
@@ -84,6 +95,11 @@ CLICK_SLOP_PT = 4.0
 PRECISE_GIZMO_WIDTH_PT = 204.0
 JOINT_LIMIT_LABEL_DELAY_SECONDS = 0.5
 JOINT_LIMIT_HOVER_GRACE_SECONDS = 0.12
+PRECISE_GIZMO_HINT_DELAY_SECONDS = 0.5
+JOINT_FOCUS_MARGIN = 1.5
+JOINT_FOCUS_OBLIQUE_DEGREES = 35.0
+VIEWPORT_DOUBLE_CLICK_SECONDS = 0.3
+VIEWPORT_DOUBLE_CLICK_RADIUS_PT = 6.0
 log = get_logger("ui")
 
 
@@ -466,6 +482,28 @@ class _JointLimitHoverState:
         self.last_seen_at = 0.0
 
 
+@dataclass
+class _GizmoHintHoverState:
+    """Reveal typed-input help only after an uninterrupted actionable hover."""
+
+    entered_at: float | None = None
+    visible: bool = False
+
+    def update(self, hovered: bool, now: float) -> bool:
+        now = float(now)
+        if not hovered:
+            self.reset()
+            return False
+        if self.entered_at is None:
+            self.entered_at = now
+        self.visible = now - self.entered_at >= PRECISE_GIZMO_HINT_DELAY_SECONDS
+        return self.visible
+
+    def reset(self) -> None:
+        self.entered_at = None
+        self.visible = False
+
+
 class ViewerApp:
     def __init__(
         self,
@@ -584,8 +622,12 @@ class ViewerApp:
         # that physical press has fully ended.  The same click must never fall
         # through to viewport picking and clear the selected joint.
         self._consume_scene_pointer_until_release = False
+        self._last_viewport_click: tuple[float, tuple[float, float], int] | None = None
         self._joint_picker_node_id = -1
+        self._pending_node_focus_id: int | None = None
+        self._pending_joint_focus_id: int | None = None
         self._joint_limit_hover = _JointLimitHoverState()
+        self._gizmo_hint_hover = _GizmoHintHoverState()
         self._window_title = ""
         self._closing_without_save = False
         self._model_load_error = ""
@@ -931,6 +973,10 @@ class ViewerApp:
         self._model_camera_id = -1
         self._model_camera_view = None
         self._model_camera_projection_target = None
+        self._pending_node_focus_id = None
+        self._pending_joint_focus_id = None
+        self._last_viewport_click = None
+        self._gizmo_hint_hover.reset()
         self._structure_generation = -1
         self._sync_structure()
         self._reset_source_camera()
@@ -1696,7 +1742,7 @@ class ViewerApp:
         node = self.session.selected_node
         while node is not None:
             if node.type in (NodeType.MODEL, NodeType.WORLD, NodeType.LINK, NodeType.ROBOT) and (
-                node.type is NodeType.WORLD or node.model_id >= 0
+                node.type in (NodeType.WORLD, NodeType.MODEL) or node.source_editable
             ):
                 return node
             node = self.session.node(node.parent)
@@ -1814,6 +1860,7 @@ class ViewerApp:
         if (
             node is None
             or node.model_id < 0
+            or not node.source_editable
             or node.type
             not in {
                 NodeType.ROBOT,
@@ -1856,6 +1903,7 @@ class ViewerApp:
         if (
             node is None
             or node.model_id < 0
+            or not node.source_editable
             or node.type
             not in {
                 NodeType.ROBOT,
@@ -2102,10 +2150,16 @@ class ViewerApp:
 
         frame = self.session.tick(self.frame_needs(), wall_dt=dt)
         self._sync_structure()
+        self._apply_pending_joint_focus()
+        self._apply_pending_node_focus()
         self._sync_model_camera()
         self.backend.update(frame)
 
-        self.backend.highlight(self.session.selected)
+        selected_node = self.session.selected_node
+        self.backend.highlight(
+            self.session.selection_highlight_object_id,
+            xray=bool(selected_node is not None and selected_node.type is NodeType.JOINT),
+        )
 
         if self.debug_bridge is not None:
             self.debug_bridge.pump()
@@ -2339,6 +2393,12 @@ class ViewerApp:
             cursor,
             enabled=over_viewport and not self._viewing_selected_camera(),
             style_scale=self.window.style_scale,
+        )
+        self._gizmo_hint_hover.update(
+            over_viewport
+            and self.gizmo.precise_input_hovered
+            and not any(imgui.is_mouse_down(button) for button in range(3)),
+            time.monotonic(),
         )
         node = self.session.selected_node
         return gs.InputState(
@@ -2802,6 +2862,7 @@ class ViewerApp:
             self.camera_out,
             animate=animate,
             clip=self.session.camera_hint(),
+            minimum_pitch=ISO_PITCH,
         )
 
     def _reset_source_camera(self) -> None:
@@ -2870,14 +2931,359 @@ class ViewerApp:
             return None
         return center, radius
 
+    def request_joint_focus(self, joint_id: int) -> bool:
+        """Request one diagnostics-backed camera focus on a stable joint ID."""
+
+        requested = int(joint_id)
+        if not any(joint.joint_id == requested for joint in self.session.joints):
+            return False
+        self._pending_node_focus_id = None
+        self._pending_joint_focus_id = requested
+        return True
+
+    def request_node_focus(self, node_id: int) -> bool:
+        """Request a camera focus on one stable hierarchy node."""
+
+        node = self.session.node(int(node_id))
+        if node is None:
+            return False
+        if node.type is NodeType.JOINT:
+            return self.request_joint_focus(node.joint_index)
+        self._pending_joint_focus_id = None
+        self._pending_node_focus_id = node.node_id
+        return True
+
+    def _request_node_joint_focus(self, node: SceneNode) -> bool:
+        if node.type not in (NodeType.JOINT, NodeType.LINK, NodeType.ROBOT, NodeType.GEOM):
+            return False
+        joint_id = int(node.joint_index) if node.type is NodeType.JOINT else -1
+        if joint_id < 0 and node.body_index >= 0:
+            candidates = tuple(
+                joint
+                for joint in self.session.joints_for_body(node.body_index)
+                if joint.type in ("hinge", "slide", "ball")
+            )
+            selected = self.gizmo.selected_joint_id(node.body_index)
+            if any(joint.joint_id == selected for joint in candidates):
+                joint_id = selected
+            elif len(candidates) == 1:
+                joint_id = candidates[0].joint_id
+        if joint_id < 0 or not self.request_joint_focus(joint_id):
+            return False
+        joint_node = next(
+            (
+                candidate
+                for candidate in self.session.nodes
+                if candidate.type is NodeType.JOINT and candidate.joint_index == joint_id
+            ),
+            None,
+        )
+        if joint_node is not None:
+            self.session.submit(cmd.SelectNode(joint_node.node_id))
+        return True
+
+    def _apply_pending_joint_focus(self) -> None:
+        joint_id = self._pending_joint_focus_id
+        if joint_id is None:
+            return
+        self._pending_joint_focus_id = None
+        joint = next(
+            (candidate for candidate in self.session.joints if candidate.joint_id == joint_id),
+            None,
+        )
+        node = next(
+            (
+                candidate
+                for candidate in self.session.nodes
+                if candidate.type is NodeType.JOINT and candidate.joint_index == joint_id
+            ),
+            None,
+        )
+        if joint is None or node is None:
+            return
+
+        body_position, body_rotation = self._node_pose(node)
+        center = np.asarray(body_position, np.float64).reshape(3)
+        axis = np.asarray(body_rotation, np.float64).reshape(3, 3) @ np.asarray(
+            joint.axis, np.float64
+        ).reshape(3)
+        diagnostics = self.session.frame.diagnostics
+        if diagnostics is not None:
+            if 0 <= joint_id < len(diagnostics.joint_xaxis):
+                candidate_axis = np.asarray(diagnostics.joint_xaxis[joint_id], np.float64).reshape(
+                    3
+                )
+                if np.isfinite(candidate_axis).all() and np.linalg.norm(candidate_axis) > 1e-9:
+                    axis = candidate_axis
+            if joint.type != "slide" and 0 <= joint_id < len(diagnostics.joint_xpos):
+                candidate_center = np.asarray(diagnostics.joint_xpos[joint_id], np.float64).reshape(
+                    3
+                )
+                if np.isfinite(candidate_center).all():
+                    center = candidate_center
+
+        axis_length = float(np.linalg.norm(axis))
+        if not np.isfinite(axis).all() or not np.isfinite(axis_length) or axis_length <= 1e-9:
+            axis = np.array((0.0, 0.0, 1.0), np.float64)
+        else:
+            axis = axis / axis_length
+
+        slide_half_span = 0.0
+        frame = self.session.frame
+        if joint.type == "slide" and joint.limited:
+            lower, upper = map(float, joint.range)
+            if (
+                np.isfinite((lower, upper)).all()
+                and upper > lower
+                and frame.qpos is not None
+                and 0 <= joint.qpos_adr < len(frame.qpos)
+            ):
+                current = float(frame.qpos[joint.qpos_adr])
+                if np.isfinite(current):
+                    midpoint = (lower + upper) * 0.5
+                    center = center + axis * (midpoint - current)
+                    slide_half_span = (upper - lower) * 0.5
+
+        current_view = self._camera_view()
+        eye_offset = np.asarray(current_view.eye, np.float64).reshape(3) - center
+        camera_right = camera_basis(current_view)[0]
+        elevated_direction = elevated_focus_view_direction(eye_offset, camera_right)
+        if joint.type == "hinge":
+            candidates = oblique_axis_view_directions(
+                axis,
+                eye_offset,
+                camera_right,
+                JOINT_FOCUS_OBLIQUE_DEGREES,
+            )
+        elif joint.type == "slide":
+            nearest = closest_perpendicular_view_direction(
+                axis,
+                eye_offset,
+                camera_right,
+            )
+            tangent = np.cross(axis, nearest)
+            candidates = (nearest, -nearest, tangent, -tangent, elevated_direction)
+        else:
+            candidates = (elevated_direction,)
+
+        radius = self._joint_focus_radius(node)
+        if slide_half_span > 0.0:
+            radius += slide_half_span
+        eye_direction = self._least_occluded_joint_direction(
+            center,
+            radius,
+            candidates,
+            node,
+            eye_offset,
+            preferred_up=(0.0, 0.0, 1.0),
+            minimum_elevation_degrees=ISO_PITCH,
+        )
+        if self._model_camera_id >= 0:
+            self.camera.adopt(current_view)
+        self._leave_model_camera()
+        self.camera.set_aspect(max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0))
+        self.camera.focus_target(
+            center,
+            radius,
+            eye_direction,
+            self.camera_out,
+            margin=JOINT_FOCUS_MARGIN,
+            animate=True,
+        )
+
+    def _least_occluded_joint_direction(
+        self,
+        center: np.ndarray,
+        radius: float,
+        candidates: tuple[np.ndarray, ...],
+        node: SceneNode,
+        eye_offset: np.ndarray,
+        *,
+        preferred_up: tuple[float, float, float] | None = None,
+        minimum_elevation_degrees: float = 0.0,
+    ) -> np.ndarray:
+        """Prefer a requested elevation, then a clear focus ray and a short turn."""
+
+        directions: list[np.ndarray] = []
+        for value in candidates:
+            direction = np.asarray(value, np.float64).reshape(3)
+            length = float(np.linalg.norm(direction))
+            if not np.isfinite(direction).all() or not np.isfinite(length) or length <= 1e-9:
+                continue
+            direction = direction / length
+            if not any(float(np.dot(direction, known)) > 1.0 - 1e-7 for known in directions):
+                directions.append(direction)
+        if not directions:
+            return np.asarray(self.camera.direction(), np.float64)
+
+        current_direction = np.asarray(eye_offset, np.float64)
+        current_length = float(np.linalg.norm(current_direction))
+        if current_length > 1e-9:
+            current_direction /= current_length
+        else:
+            current_direction = directions[0]
+
+        up = None
+        if preferred_up is not None:
+            candidate_up = np.asarray(preferred_up, np.float64).reshape(3)
+            up_length = float(np.linalg.norm(candidate_up))
+            if np.isfinite(candidate_up).all() and np.isfinite(up_length) and up_length > 1e-9:
+                up = candidate_up / up_length
+
+        if up is not None:
+            minimum_elevation = np.deg2rad(float(np.clip(minimum_elevation_degrees, 0.0, 90.0)))
+            preferred = [
+                direction
+                for direction in directions
+                if float(np.dot(direction, up)) >= float(np.sin(minimum_elevation)) - 1e-6
+            ]
+            if preferred:
+                directions = preferred
+            else:
+                above = [
+                    direction for direction in directions if float(np.dot(direction, up)) >= -1e-6
+                ]
+                if above:
+                    directions = above
+
+        def turn_from_current(direction: np.ndarray) -> float:
+            return 1.0 - float(np.clip(np.dot(direction, current_direction), -1.0, 1.0))
+
+        caps = getattr(getattr(self.session, "adapter", None), "caps", None)
+        if not bool(getattr(caps, "raycast", False)):
+            return min(directions, key=turn_from_current)
+
+        lo, hi = self.session.bounds()
+        scene_span = float(np.linalg.norm(np.asarray(hi, np.float64) - np.asarray(lo, np.float64)))
+        current_distance = float(np.linalg.norm(np.asarray(eye_offset, np.float64)))
+        probe_distance = max(current_distance, scene_span * 0.75, float(radius) * 8.0, 1.0)
+
+        best = directions[0]
+        best_score = (2.0, 0.0, 0.0)
+        for direction in directions:
+            origin = np.asarray(center, np.float64) + direction * probe_distance
+            try:
+                hit_id, hit_distance = self.session.query(
+                    cmd.Pick(origin=origin, direction=-direction)
+                )
+            except (AttributeError, TypeError, ValueError):
+                return min(directions, key=turn_from_current)
+            hit_id = int(hit_id)
+            hit_distance = float(hit_distance)
+            hit_node = self.session.node_by_object_id(hit_id) if hit_id > 0 else None
+            hits_target = bool(
+                hit_id == node.body_index
+                or (hit_node is not None and hit_node.body_index == node.body_index)
+            )
+            blocked = bool(
+                hit_id > 0
+                and not hits_target
+                and np.isfinite(hit_distance)
+                and hit_distance < probe_distance
+            )
+            clearance = min(max(hit_distance, 0.0), probe_distance) if blocked else 0.0
+            score = (1.0 if blocked else 0.0, -clearance, turn_from_current(direction))
+            if score < best_score:
+                best = direction
+                best_score = score
+        return best
+
+    def _apply_pending_node_focus(self) -> None:
+        node_id = self._pending_node_focus_id
+        if node_id is None:
+            return
+        self._pending_node_focus_id = None
+        node = self.session.node(node_id)
+        if node is None:
+            return
+
+        bounds = self.session.node_world_bounds(node.node_id)
+        if bounds is None and node.type in (NodeType.WORLD, NodeType.ENVIRONMENT):
+            bounds = self.session.bounds()
+        if bounds is not None:
+            lo_or_center = np.asarray(bounds[0], np.float64).reshape(3)
+            hi_or_half = np.asarray(bounds[1], np.float64).reshape(3)
+            if node.type in (NodeType.WORLD, NodeType.ENVIRONMENT):
+                center = (lo_or_center + hi_or_half) * 0.5
+                radius = float(np.linalg.norm(hi_or_half - lo_or_center) * 0.5)
+            else:
+                center = lo_or_center
+                radius = float(np.linalg.norm(hi_or_half))
+        else:
+            center, _rotation = self._node_pose(node)
+            lo, hi = self.session.bounds()
+            radius = float(
+                np.linalg.norm(np.asarray(hi, np.float64) - np.asarray(lo, np.float64)) * 0.025
+            )
+        center = np.asarray(center, np.float64).reshape(3)
+        if not np.isfinite(center).all() or not np.isfinite(radius) or radius <= 1e-6:
+            return
+
+        current_view = self._camera_view()
+        eye_offset = np.asarray(current_view.eye, np.float64).reshape(3) - center
+        eye_direction = elevated_focus_view_direction(
+            eye_offset,
+            camera_basis(current_view)[0],
+        )
+        if self._model_camera_id >= 0:
+            self.camera.adopt(current_view)
+        self._leave_model_camera()
+        self.camera.set_aspect(max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0))
+        self.camera.focus_target(
+            center,
+            radius,
+            eye_direction,
+            self.camera_out,
+            animate=True,
+        )
+
+    def _joint_focus_radius(self, node: SceneNode) -> float:
+        for bounds in (
+            self.session.node_local_bounds(node.node_id),
+            self.session.node_world_bounds(node.node_id),
+        ):
+            if bounds is None:
+                continue
+            half = np.sort(np.abs(np.asarray(bounds[1], np.float64).reshape(3)))
+            if np.isfinite(half).all() and half[-1] > 1e-6:
+                return max(float(half[-1]), 1e-4)
+        lo, hi = self.session.bounds()
+        diagonal = float(np.linalg.norm(np.asarray(hi, np.float64) - np.asarray(lo, np.float64)))
+        if np.isfinite(diagonal) and diagonal > 1e-6:
+            return max(diagonal * 0.025, 1e-4)
+        return max(self.camera.distance * 0.04, 1e-4)
+
     def _poll_pick(self, state: gs.InputState) -> None:
         if not self.router.wants_camera():
             return
-        if not self.router.released or self.router.travel > CLICK_SLOP_PT:
+        if not self.router.released:
+            return
+        if self.router.travel > CLICK_SLOP_PT:
+            self._last_viewport_click = None
+            return
+        if not self.router.started_with_left:
             return
         if not state.over_viewport:
             return
         object_id = self._pick_at(state.cursor)
+        now = time.monotonic()
+        previous = self._last_viewport_click
+        radius = VIEWPORT_DOUBLE_CLICK_RADIUS_PT * self.window.style_scale
+        double_clicked = bool(
+            previous is not None
+            and object_id > 0
+            and previous[2] == object_id
+            and now - previous[0] <= VIEWPORT_DOUBLE_CLICK_SECONDS
+            and (state.cursor[0] - previous[1][0]) ** 2 + (state.cursor[1] - previous[1][1]) ** 2
+            <= radius * radius
+        )
+        self._last_viewport_click = None if double_clicked else (now, state.cursor, object_id)
+        if double_clicked:
+            node = self.session.node_by_object_id(object_id)
+            if node is not None:
+                if self._request_node_joint_focus(node):
+                    return
+                self.request_node_focus(node.node_id)
         self.session.submit(cmd.Select(object_id))
 
     def _pick_at(self, cursor: tuple[float, float]) -> int:
@@ -3196,6 +3602,23 @@ class ViewerApp:
                 )
                 if clicked:
                     self.gizmo.select_joint(node.body_index, joint.joint_id)
+                if (
+                    supported
+                    and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled.value)
+                    and imgui.is_mouse_double_clicked(imgui.MouseButton_.left)
+                ):
+                    self.gizmo.select_joint(node.body_index, joint.joint_id)
+                    self._request_node_joint_focus(
+                        next(
+                            (
+                                candidate
+                                for candidate in self.session.nodes
+                                if candidate.type is NodeType.JOINT
+                                and candidate.joint_index == joint.joint_id
+                            ),
+                            node,
+                        )
+                    )
                 imgui.end_disabled()
         imgui.end()
 
@@ -3517,13 +3940,23 @@ class ViewerApp:
             return self.tool_hints.resolve(defaults, surface="status")
         if self._scene_input_blocked():
             return self.tool_hints.resolve((), surface="status")
-        if self._status_panel != "Viewport":
-            defaults = self._panel_status_hints
-        elif self._has_scene_content():
+        if self._gizmo_hint_hover.visible:
             defaults = default_tool_hints(
-                self._context_tool_hint_variant(),
+                "ready_minimal",
                 self.input_bindings,
                 self._viewport_labels,
+            )
+        elif self._status_panel != "Viewport":
+            defaults = self._panel_status_hints
+        elif self._has_scene_content():
+            defaults = tuple(
+                hint
+                for hint in default_tool_hints(
+                    self._context_tool_hint_variant(),
+                    self.input_bindings,
+                    self._viewport_labels,
+                )
+                if hint.hint_id != "gizmo.type_value"
             )
         else:
             defaults = ()
@@ -3880,6 +4313,8 @@ class ViewerApp:
             .merge(self.panels.frame_needs())
             .merge(self.gizmo.frame_needs(self.session))
         )
+        if getattr(self, "_pending_joint_focus_id", None) is not None:
+            needs = needs.merge(FrameNeeds(poses=False, qpos=True, diagnostics=True))
         label_mode = self.backend.get_label_mode()
         frame_mode = self.backend.get_frame_mode()
         needs.contacts = needs.contacts or (
@@ -3992,6 +4427,8 @@ class ViewerApp:
             model_camera_id=self._model_camera_id,
             model_camera_view=self._model_camera_view,
             select_model_camera=self.select_model_camera,
+            focus_node=self.request_node_focus,
+            focus_joint=self.request_joint_focus,
             request_rename=self.request_rename,
             request_model_rename=self.request_model_rename,
             request_texture_import=self._open_texture_dialog,
@@ -4028,9 +4465,7 @@ class ViewerApp:
         return unproject(self._camera_view(), *ndc)
 
     def _node_pose(self, node) -> tuple[np.ndarray, np.ndarray]:
-        from .perturb import current_pose
-
-        return current_pose(self.session, node)
+        return node_world_pose(self.session, node)
 
     def apply_keys(self, keys: Keys) -> None:
         if keys.toggle_pause:

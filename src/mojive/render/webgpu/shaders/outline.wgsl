@@ -65,6 +65,7 @@ fn fs_outline_mask(in: OutlineMaskOut) -> @location(0) f32 {
 struct OutlineCompositeUniforms {
     color: vec4f,
     size: vec4u,                // xy target size
+    params: vec4f,              // x x-ray silhouette alpha
 };
 
 @group(0) @binding(2) var outline_mask_tex: texture_2d<f32>;
@@ -133,7 +134,7 @@ fn clipped_by_border(p: vec2i) -> bool {
 fn fs_outline(@builtin(position) frag_coord: vec4f) -> @location(0) vec4f {
     let p = vec2i(frag_coord.xy);
     let center = coverage_at(p);
-    var alpha = outline_alpha(p);
+    var alpha = max(outline_alpha(p), center * outline_composite.params.x);
     if (center > 0.0 && clipped_by_border(p)) {
         alpha = max(alpha, center);
     }

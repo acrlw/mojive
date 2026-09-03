@@ -77,6 +77,11 @@ class SceneNode:
     joint_index: int = -1
     model_id: int = -1
 
+    # True only when this compiled node has a stable element in the editable
+    # scene source. Runtime pose control (``posable``) is intentionally
+    # separate: a free body can be movable even when no authored source exists.
+    source_editable: bool = False
+
 
 @dataclass
 class JointInfo:

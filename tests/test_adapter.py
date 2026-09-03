@@ -776,6 +776,75 @@ def test_set_pose_on_free_body_resets_velocity(adapter):
     assert not adapter.set_pose(nodes["arm"].node_id, np.zeros(3), np.eye(3))
 
 
+def test_pose_capability_requires_a_runtime_target_or_named_source_element(tmp_path):
+    path = tmp_path / "pose-capability.xml"
+    path.write_text(
+        """
+<mujoco>
+  <worldbody>
+    <geom type="sphere" size=".1"/>
+    <geom name="geom0" type="sphere" size=".1"/>
+    <site type="sphere" size=".02"/>
+    <site name="site0" type="sphere" size=".02"/>
+    <body name="joint_body">
+      <joint type="hinge"/>
+      <geom name="named_joint_geom" type="box" size=".1 .1 .1"/>
+    </body>
+    <body>
+      <freejoint/>
+      <geom name="free_geom" type="sphere" size=".1"/>
+    </body>
+  </worldbody>
+</mujoco>
+""",
+        encoding="utf-8",
+    )
+    value = MuJoCoAdapter(path)
+    try:
+        nodes = {node.name: node for node in value.nodes()}
+        geoms = {node.geom_index: node for node in value.nodes() if node.type is NodeType.GEOM}
+        sites = {node.site_index: node for node in value.nodes() if node.type is NodeType.SITE}
+        assert geoms[0].name == geoms[1].name == "geom0"
+        assert not geoms[0].source_editable
+        assert not geoms[0].posable
+        assert geoms[1].source_editable
+        assert geoms[1].posable
+        assert sites[0].name == sites[1].name == "site0"
+        assert not sites[0].source_editable
+        assert not sites[0].posable
+        assert sites[1].source_editable
+        assert sites[1].posable
+        assert nodes["named_joint_geom"].source_editable
+        assert nodes["named_joint_geom"].posable
+
+        unnamed_free_body = next(
+            node
+            for node in value.nodes()
+            if node.type in (NodeType.LINK, NodeType.ROBOT) and node.body_index == 2
+        )
+        assert not unnamed_free_body.source_editable
+        assert unnamed_free_body.posable
+
+        frame = value.frame(FrameNeeds())
+        for node in value.nodes():
+            if not node.posable:
+                continue
+            if node.type is NodeType.GEOM:
+                position = frame.geom_xpos[node.geom_index]
+                rotation = frame.geom_xmat[node.geom_index]
+            elif node.type is NodeType.SITE:
+                position = frame.site_xpos[node.site_index]
+                rotation = frame.site_xmat[node.site_index]
+            elif node.type in (NodeType.LINK, NodeType.ROBOT):
+                position = frame.body_xpos[node.body_index]
+                rotation = frame.body_xmat[node.body_index]
+            else:
+                continue
+            assert value.set_pose(node.node_id, position, rotation), node.name
+    finally:
+        value.release()
+
+
 def test_mocap_bodies_use_the_shared_pose_editing_contract():
     from mojive.assets import resolve
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import wgpu
 
-from ...backend import RenderFlag
+from ...backend import SELECTION_XRAY_ALPHA, RenderFlag
 from ...scene import RenderScene
 from ..blend import ALPHA_BLEND
 from ..instances import IDENTITY_STRIDE, POSE_STRIDE
@@ -26,6 +26,7 @@ _COMPOSITE_DTYPE = np.dtype(
     [
         ("color", "(4,)f4"),
         ("size", "(4,)u4"),  # xy: target size
+        ("params", "(4,)f4"),  # x: x-ray silhouette alpha
     ]
 )
 
@@ -136,6 +137,7 @@ class OutlinePass:
         self._sel_id = -1
         self._sel_ids: object = None
         self.color: tuple[float, float, float, float] = OUTLINE_COLOR
+        self.xray = False
 
     def prepare(
         self, scene: RenderScene, selected_id: int, flags: dict[RenderFlag, bool]
@@ -265,6 +267,7 @@ class OutlinePass:
         block = self._composite_block
         block["color"][:] = self.color
         block["size"][:] = (width, height, 0, 0)
+        block["params"][:] = (SELECTION_XRAY_ALPHA if self.xray else 0.0, 0.0, 0.0, 0.0)
         self._device.queue.write_buffer(self._composite_uniforms, 0, block.tobytes())
         if self._composite_group is None:
             assert self._mask_view is not None

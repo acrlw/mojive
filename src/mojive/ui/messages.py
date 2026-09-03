@@ -102,7 +102,15 @@ class OutputBuffer:
         self.write(f"[mojive/{component}] {message}", level=level, timestamp=stamp)
 
     def copy_text(self, entries: Iterable[OutputMessage] | None = None) -> str:
+        """Return complete log records including timestamp and severity."""
+
         selected = self.entries() if entries is None else entries
         return "\n".join(
             f"{entry.timestamp} [{entry.level.upper()}] {entry.text}" for entry in selected
         )
+
+    def copy_message_text(self, entries: Iterable[OutputMessage] | None = None) -> str:
+        """Return message bodies without timestamp or severity metadata."""
+
+        selected = self.entries() if entries is None else entries
+        return "\n".join(entry.text for entry in selected)

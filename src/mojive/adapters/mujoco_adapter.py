@@ -5592,10 +5592,16 @@ class MuJoCoAdapter(SceneAdapterBase):
             self._node_element[node_id] = (model_id, NodeType.MODEL, "")
 
         for b in range(1, m.nbody):
-            name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b) or f"body{b}"
+            compiled_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b)
+            name = compiled_name or f"body{b}"
             parent = int(body_parent[b])
             node_type = NodeType.ROBOT if parent == 0 and has_child[b] else NodeType.LINK
-            model_id, raw_name = self._model_element_name(name, mujoco.mjtObj.mjOBJ_BODY)
+            model_id, raw_name = self._model_element_name(
+                compiled_name or "", mujoco.mjtObj.mjOBJ_BODY
+            )
+            source_editable = (
+                bool(raw_name) and self._element(model_id, "link", raw_name) is not None
+            )
             parent_node = body_node[parent]
             if parent == 0 and model_id in model_parents:
                 parent_node = model_parents[model_id]
@@ -5605,7 +5611,8 @@ class MuJoCoAdapter(SceneAdapterBase):
                 parent_node,
                 b,
                 object_id=b,
-                posable=self._is_posable_body(b) or (model_id >= 0 and not has_kinematic_dof[b]),
+                posable=self._is_posable_body(b) or (source_editable and not has_kinematic_dof[b]),
+                source_editable=source_editable,
             )
             nodes[body_node[b]].model_id = model_id
             self._node_element[body_node[b]] = (model_id, node_type, raw_name)
@@ -5616,14 +5623,20 @@ class MuJoCoAdapter(SceneAdapterBase):
             for gi in range(adr, adr + num):
                 if not self._visual_groups["geom"][int(m.geom_group[gi])]:
                     continue
-                gname = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, gi) or f"geom{gi}"
-                model_id, raw_name = self._model_element_name(gname, mujoco.mjtObj.mjOBJ_GEOM)
+                compiled_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, gi)
+                gname = compiled_name or f"geom{gi}"
+                model_id, raw_name = self._model_element_name(
+                    compiled_name or "", mujoco.mjtObj.mjOBJ_GEOM
+                )
+                source_editable = (
+                    bool(raw_name) and self._element(model_id, "geom", raw_name) is not None
+                )
                 is_plane = int(m.geom_type[gi]) == int(mujoco.mjtGeom.mjGEOM_PLANE)
                 is_infinite_plane = is_plane and (
                     float(m.geom_size[gi, 0]) == 0.0 or float(m.geom_size[gi, 1]) == 0.0
                 )
                 object_id = (
-                    self._geometry_object_id(model_id, raw_name)
+                    self._geometry_object_id(model_id, raw_name or gname)
                     if b == 0 and is_plane and not is_infinite_plane
                     else 0
                 )
@@ -5634,7 +5647,8 @@ class MuJoCoAdapter(SceneAdapterBase):
                     b,
                     object_id=object_id,
                     geom_index=gi,
-                    posable=True,
+                    posable=source_editable,
+                    source_editable=source_editable,
                 )
                 nodes[self._geom_nodes[gi]].model_id = model_id
                 self._node_element[self._geom_nodes[gi]] = (
@@ -5646,15 +5660,22 @@ class MuJoCoAdapter(SceneAdapterBase):
             for ji in range(ja, ja + jn):
                 if not self._visual_groups["joint"][int(m.jnt_group[ji])]:
                     continue
-                jname = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, ji) or f"joint{ji}"
+                compiled_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, ji)
+                jname = compiled_name or f"joint{ji}"
                 node_id = add(jname, NodeType.JOINT, parent, b, joint_index=ji)
-                model_id, raw_name = self._model_element_name(jname, mujoco.mjtObj.mjOBJ_JOINT)
+                model_id, raw_name = self._model_element_name(
+                    compiled_name or "", mujoco.mjtObj.mjOBJ_JOINT
+                )
                 nodes[node_id].model_id = model_id
+                nodes[node_id].source_editable = bool(raw_name) and (
+                    self._element(model_id, "joint", raw_name) is not None
+                )
                 self._node_element[node_id] = (model_id, NodeType.JOINT, raw_name)
 
         for li in range(m.nlight):
             b = int(m.light_bodyid[li])
-            name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_LIGHT, li) or f"light{li}"
+            compiled_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_LIGHT, li)
+            name = compiled_name or f"light{li}"
             node_id = add(
                 name,
                 NodeType.LIGHT,
@@ -5664,12 +5685,18 @@ class MuJoCoAdapter(SceneAdapterBase):
                 visible=bool(m.light_active[li]),
                 light_index=li,
             )
-            model_id, raw_name = self._model_element_name(name, mujoco.mjtObj.mjOBJ_LIGHT)
+            model_id, raw_name = self._model_element_name(
+                compiled_name or "", mujoco.mjtObj.mjOBJ_LIGHT
+            )
             nodes[node_id].model_id = model_id
+            nodes[node_id].source_editable = bool(raw_name) and (
+                self._element(model_id, "light", raw_name) is not None
+            )
             self._node_element[node_id] = (model_id, NodeType.LIGHT, raw_name)
         for ci in range(m.ncam):
             b = int(m.cam_bodyid[ci])
-            name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_CAMERA, ci) or f"camera{ci}"
+            compiled_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_CAMERA, ci)
+            name = compiled_name or f"camera{ci}"
             node_id = add(
                 name,
                 NodeType.CAMERA,
@@ -5678,22 +5705,34 @@ class MuJoCoAdapter(SceneAdapterBase):
                 object_id=CAMERA_OBJECT_BASE + ci,
                 camera_index=ci,
             )
-            model_id, raw_name = self._model_element_name(name, mujoco.mjtObj.mjOBJ_CAMERA)
+            model_id, raw_name = self._model_element_name(
+                compiled_name or "", mujoco.mjtObj.mjOBJ_CAMERA
+            )
             nodes[node_id].model_id = model_id
+            nodes[node_id].source_editable = bool(raw_name) and (
+                self._element(model_id, "camera", raw_name) is not None
+            )
             self._node_element[node_id] = (model_id, NodeType.CAMERA, raw_name)
         for si in range(m.nsite):
             if not self._visual_groups["site"][int(m.site_group[si])]:
                 continue
             b = int(m.site_bodyid[si])
-            name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_SITE, si) or f"site{si}"
-            model_id, raw_name = self._model_element_name(name, mujoco.mjtObj.mjOBJ_SITE)
+            compiled_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_SITE, si)
+            name = compiled_name or f"site{si}"
+            model_id, raw_name = self._model_element_name(
+                compiled_name or "", mujoco.mjtObj.mjOBJ_SITE
+            )
+            source_editable = (
+                bool(raw_name) and self._element(model_id, "site", raw_name) is not None
+            )
             self._site_nodes[si] = add(
                 name,
                 NodeType.SITE,
                 body_node[b],
                 b,
                 site_index=si,
-                posable=model_id >= 0 and not has_kinematic_dof[b],
+                posable=source_editable and not has_kinematic_dof[b],
+                source_editable=source_editable,
             )
             nodes[self._site_nodes[si]].model_id = model_id
             self._node_element[self._site_nodes[si]] = (model_id, NodeType.SITE, raw_name)

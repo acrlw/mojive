@@ -135,6 +135,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
                     "parent": n.parent,
                     "object_id": int(n.object_id),
                     "posable": n.posable,
+                    "source_editable": n.source_editable,
                 }
                 for n in nodes
             ],

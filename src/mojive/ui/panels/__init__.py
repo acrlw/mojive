@@ -27,6 +27,8 @@ class PanelContext:
     model_camera_id: int = -1
     model_camera_view: Any = None
     select_model_camera: Any = None
+    focus_node: Any = None
+    focus_joint: Any = None
     request_rename: Any = None
     request_model_rename: Any = None
     request_texture_import: Any = None
@@ -144,7 +146,10 @@ def slider_gesture(
 def copyable_name_item(ctx: PanelContext, name: str, available_width: float) -> bool:
     """Expose a clipped row name and make its right-click action discoverable."""
 
-    ctx.status_hints = (ToolHint("mouse", "right", ctx.tr("Copy name"), hint_id="panel.copy-name"),)
+    publish_status_hint(
+        ctx,
+        ToolHint("mouse", "right", ctx.tr("Copy name"), hint_id="panel.copy-name"),
+    )
     hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled.value)
     if not hovered:
         return False
@@ -155,6 +160,30 @@ def copyable_name_item(ctx: PanelContext, name: str, available_width: float) -> 
     if copied:
         imgui.set_clipboard_text(name)
     return bool(copied)
+
+
+def publish_status_hint(ctx: PanelContext, hint: ToolHint) -> None:
+    """Publish one stable panel grammar entry without duplicating visible rows."""
+
+    if hint.hint_id and any(existing.hint_id == hint.hint_id for existing in ctx.status_hints):
+        return
+    if hint not in ctx.status_hints:
+        ctx.status_hints = (*ctx.status_hints, hint)
+
+
+def publish_focus_item_hint(ctx: PanelContext) -> None:
+    """Advertise the shared hierarchy/joint double-click focus gesture."""
+
+    publish_status_hint(
+        ctx,
+        ToolHint(
+            "mouse",
+            "left",
+            ctx.tr("Focus item"),
+            "×2",
+            hint_id="panel.focus-item",
+        ),
+    )
 
 
 @dataclass
@@ -799,6 +828,8 @@ __all__ = [
     "default_panels",
     "is_expanded",
     "labeled",
+    "publish_focus_item_hint",
+    "publish_status_hint",
     "search_input",
     "segmented_control",
     "slider_gesture",

@@ -473,8 +473,11 @@ class OpenGLBackend:
         self.target = RenderTarget(self.ctx, width, height, self.target.samples)
         self.caps = self._build_caps()
 
-    def highlight(self, object_id: int) -> None:
+    def highlight(self, object_id: int, *, xray: bool = False) -> None:
         self._selected = int(object_id)
+        outline = self._passes.get("outline")
+        if outline is not None:
+            outline.xray = bool(xray and self._selected)
 
     def set_transparent_id_rendering(self, enabled: bool) -> None:
         self._include_transparent_ids = bool(enabled)

@@ -111,6 +111,7 @@ class GestureRouter:
         self._mode = "translate"
         self._press_cursor = (0.0, 0.0)
         self._travel = 0.0
+        self._started_with_left = False
 
     @property
     def claim(self) -> Claim:
@@ -136,6 +137,12 @@ class GestureRouter:
     def press_cursor(self) -> tuple[float, float]:
         return self._press_cursor
 
+    @property
+    def started_with_left(self) -> bool:
+        """Whether the current/released claim began with only the left button."""
+
+        return self._started_with_left
+
     def update(self, state: InputState) -> Claim:
         if state.blocked:
             self.abort()
@@ -158,12 +165,16 @@ class GestureRouter:
             self._mode = perturb_mode(state)
             self._press_cursor = state.cursor
             self._travel = 0.0
+            self._started_with_left = bool(state.left and not state.right and not state.middle)
+        else:
+            self._started_with_left = False
         self._claim = claim
         return claim
 
     def abort(self) -> None:
         self._held = False
         self._released = False
+        self._started_with_left = False
         self._claim = Claim.NONE
 
     def wants_camera(self) -> bool:

@@ -586,9 +586,13 @@ def test_truncated_joint_name_has_full_tooltip_and_copy_action(viewer) -> None:
         v.sync()
         assert joint.name in tooltips
         click(v, io, point)
-        assert [hint.hint_id for hint in v.app._panel_status_hints] == ["panel.copy-name"]
+        assert [hint.hint_id for hint in v.app._panel_status_hints] == [
+            "panel.focus-item",
+            "panel.copy-name",
+        ]
         assert [hint.hint_id for hint in v.app._status_tool_hints(loading=False)] == [
             "selection.clear",
+            "panel.focus-item",
             "panel.copy-name",
         ]
         click(v, io, point, button=1)
@@ -596,6 +600,146 @@ def test_truncated_joint_name_has_full_tooltip_and_copy_action(viewer) -> None:
     finally:
         imgui.set_tooltip = original_tooltip
         io.add_mouse_button_event(1, False)
+        v.release()
+        viewer.sync()
+
+
+def test_double_clicking_joint_and_hierarchy_rows_focuses_the_camera(viewer) -> None:
+    from imgui_bundle import imgui
+
+    from mojive.adapters.base import NodeType
+    from mojive.gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, project, world_scale
+
+    v = build(
+        resolve("joint_gizmo"),
+        "mujoco",
+        paused=True,
+        vsync=False,
+        width=W,
+        height=H,
+    )
+    io = imgui.get_io()
+    try:
+        v.app.panels.open_panel("Joints")
+        for _ in range(8):
+            v.sync()
+        activate_panel(v, "Joints")
+        joint = next(item for item in v.session.joints if item.name == "01_revolute_y")
+        label = f"{joint.name}##joint-select-{joint.joint_id}"
+        point = item_rect(v, "selectable", label)
+
+        click(v, io, point)
+        assert v.app._status_panel == "Joints"
+        assert [hint.hint_id for hint in v.app._panel_status_hints] == [
+            "panel.focus-item",
+            "panel.copy-name",
+        ]
+        click(v, io, point)
+        assert v.session.selected_node is not None
+        assert v.session.selected_node.joint_index == joint.joint_id
+        assert v.session.selection_highlight_object_id > 0
+        assert v.backend._selected == v.session.selection_highlight_object_id
+        outline = (
+            v.backend._outline if v.backend.caps.name == "wgpu" else v.backend._passes["outline"]
+        )
+        assert outline.xray
+        assert v.app.camera.animating
+        v.app.camera.advance(1.0, v.app.camera_out)
+
+        diagnostics = v.session.frame.diagnostics
+        assert diagnostics is not None
+        axis = diagnostics.joint_xaxis[joint.joint_id]
+        center = diagnostics.joint_xpos[joint.joint_id]
+        assert abs(float(np.dot(v.app.camera.direction(), axis))) == pytest.approx(
+            np.cos(np.deg2rad(35.0)) ** 2, abs=1e-5
+        )
+        assert v.app.camera.pitch == pytest.approx(35.0)
+        assert v.app.camera.direction()[2] > 0.0
+        assert v.app.camera.pivot == pytest.approx(center, abs=1e-5)
+
+        selected = v.session.selected_node
+        target, reason = v.app.gizmo._joint_target(v.session, selected)
+        assert target is not None, reason
+        pose = v.app.gizmo._target_pose(v.session, selected, target)
+        assert pose is not None
+        position, rotation = pose
+        cam = v.app._camera_view()
+        rect = v.app._viewport_rect
+        scale = world_scale(cam, position, rect[3], SIZE_PT * v.window.style_scale)
+
+        def ring_point(angle):
+            world = position + scale * RING_RADIUS * (
+                np.cos(angle) * rotation[:, 0] + np.sin(angle) * rotation[:, 1]
+            )
+            return project(cam, (world,), rect)[0, :2]
+
+        ring_cursor = next(
+            ring_point(angle)
+            for angle in np.linspace(0.0, 2.0 * np.pi, 64, endpoint=False)
+            if v.app.gizmo.update_hover(
+                v.session,
+                cam,
+                rect,
+                tuple(ring_point(angle)),
+                style_scale=v.window.style_scale,
+            )
+            is GizmoHandle.ROTATE_Z
+        )
+        io.add_mouse_pos_event(*ring_cursor)
+        v.sync()
+        assert all(
+            hint.hint_id != "gizmo.type_value" for hint in v.app._status_tool_hints(loading=False)
+        )
+        assert v.app._gizmo_hint_hover.entered_at is not None
+        v.app._gizmo_hint_hover.entered_at -= 1.0
+        v.sync()
+        assert [hint.hint_id for hint in v.app._status_tool_hints(loading=False)] == [
+            "selection.clear",
+            "gizmo.type_value",
+        ]
+
+        target = next(
+            item
+            for item in v.session.nodes
+            if item.type is NodeType.LINK and item.name == "03_ball"
+        )
+        bounds = v.session.node_world_bounds(target.node_id)
+        assert bounds is not None
+        hierarchy = v.app.panels.get("Hierarchy")
+        assert hierarchy is not None
+        hierarchy._filter = target.name
+        activate_panel(v, "Hierarchy")
+        for _ in range(2):
+            v.sync()
+        point = item_rect(v, "invisible_button", f"##hierarchy-node-{target.node_id}")
+
+        click(v, io, point)
+        assert v.app._status_panel == "Hierarchy"
+        assert [hint.hint_id for hint in v.app._panel_status_hints] == ["panel.focus-item"]
+        click(v, io, point)
+        assert v.session.selected_node is target
+        assert not outline.xray
+        assert v.app.camera.animating
+        v.app.camera.advance(1.0, v.app.camera_out)
+        assert v.app.camera.pivot == pytest.approx(bounds[0], abs=1e-5)
+
+        camera_node = next(item for item in v.session.nodes if item.type is NodeType.CAMERA)
+        camera_info = v.session.cameras[camera_node.camera_index]
+        camera_view = v.session.camera_view(camera_info.camera_id)
+        assert camera_view is not None
+        hierarchy._filter = camera_node.name
+        for _ in range(2):
+            v.sync()
+        point = item_rect(v, "invisible_button", f"##hierarchy-node-{camera_node.node_id}")
+
+        click(v, io, point)
+        click(v, io, point)
+        assert v.session.selected_node is camera_node
+        assert v.app.camera.animating
+        v.app.camera.advance(1.0, v.app.camera_out)
+        assert v.app.camera.pivot == pytest.approx(camera_view.eye, abs=1e-5)
+    finally:
+        io.add_mouse_button_event(0, False)
         v.release()
         viewer.sync()
 
@@ -1611,6 +1755,24 @@ def test_joint_gizmo_is_live_in_the_real_viewer_pipeline(workspace):
         assert v.app.frame_needs().diagnostics
         assert v.app.gizmo.last_verdict.ok
         assert v.app.gizmo.visible
+
+        target, reason = v.app.gizmo._joint_target(v.session, node)
+        assert target is not None, reason
+        assert v.app.request_joint_focus(target.joint.joint_id)
+        assert v.app.frame_needs().diagnostics
+        v.sync()
+        assert v.app.camera.animating
+        v.app.camera.advance(1.0, v.app.camera_out)
+        diagnostics = v.session.frame.diagnostics
+        assert diagnostics is not None
+        axis = diagnostics.joint_xaxis[target.joint.joint_id]
+        center = diagnostics.joint_xpos[target.joint.joint_id]
+        assert abs(float(np.dot(v.app.camera.direction(), axis))) == pytest.approx(
+            np.cos(np.deg2rad(35.0)) ** 2, abs=1e-5
+        )
+        assert v.app.camera.pitch == pytest.approx(35.0)
+        assert v.app.camera.direction()[2] > 0.0
+        assert v.app.camera.pivot == pytest.approx(center, abs=1e-5)
     finally:
         v.release()
 
@@ -2651,6 +2813,65 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style, monkeyp
     assert after_pos == pytest.approx(before_pos, abs=1e-5)
     assert np.linalg.norm(after_mat - before_mat) > 0.05
     assert abs(v.app.camera.yaw - before_yaw) < 1e-6
+
+
+def test_rotation_gizmo_accepts_a_straight_drag_without_orbiting(free_body_viewer):
+    from imgui_bundle import imgui
+
+    import mojive.commands as cmd
+    from mojive.gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, project, world_scale
+
+    v = free_body_viewer
+    io = imgui.get_io()
+    node = next(item for item in v.session.nodes if item.posable)
+    assert v.session.submit(cmd.Select(node.object_id))
+    v.app.gizmo.set_mode("rotate")
+    v.app.gizmo.set_space("body")
+    v.app.gizmo.set_style("2d")
+    v.app.camera.look_from(-135.0, 25.0, v.app.camera_out, animate=False)
+    for _ in range(4):
+        v.sync()
+
+    cam = v.app.camera.view()
+    rect = v.app._viewport_rect
+    position = np.asarray(v.session.frame.body_xpos[node.body_index], np.float64)
+    rotation = np.asarray(v.session.frame.body_xmat[node.body_index], np.float64).reshape(3, 3)
+    scale = world_scale(cam, position, rect[3], SIZE_PT * v.window.style_scale)
+    angles = np.linspace(0.0, 2.0 * np.pi, 128, endpoint=False)
+    ring = np.array(
+        [
+            position
+            + scale
+            * RING_RADIUS
+            * (np.cos(angle) * rotation[:, 0] + np.sin(angle) * rotation[:, 1])
+            for angle in angles
+        ]
+    )
+    projected = project(cam, ring, rect)[:, :2]
+    start = projected[int(np.argmax(projected[:, 0]))]
+    io.add_mouse_pos_event(*start)
+    for _ in range(2):
+        v.sync()
+    assert v.app.gizmo.hovered_handle is GizmoHandle.ROTATE_Z
+
+    before_mat = rotation.copy()
+    before_yaw = v.app.camera.yaw
+    try:
+        io.add_mouse_button_event(0, True)
+        v.sync()
+        io.add_mouse_pos_event(*(start + np.array((20.0, 0.0))))
+        v.sync()
+        assert v.app.gizmo._rotation_linear
+        io.add_mouse_pos_event(*(start + np.array((60.0, 0.0))))
+        v.sync()
+        after_mat = np.asarray(v.session.frame.body_xmat[node.body_index]).reshape(3, 3)
+        assert np.linalg.norm(after_mat - before_mat) > 0.05
+        assert abs(v.app.camera.yaw - before_yaw) < 1e-6
+    finally:
+        io.add_mouse_button_event(0, False)
+        v.sync()
+        v.session.submit(cmd.Reset())
+        v.sync()
 
 
 @pytest.mark.parametrize("orthographic", (False, True), ids=("perspective", "orthographic"))

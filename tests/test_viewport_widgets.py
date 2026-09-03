@@ -487,14 +487,28 @@ class _RecordedStatus(_MeasuredText):
     def __init__(self):
         self.texts = []
         self.text_positions = []
+        self.text_colors = []
         self.lines = []
+        self.circles = []
+        self.polylines = []
+        self.convex_fills = []
 
-    def text(self, position, _color, value):
+    def text(self, position, color, value):
         self.texts.append(value)
         self.text_positions.append((position, value))
+        self.text_colors.append(color)
 
     def line(self, *args, **kwargs):
         self.lines.append((args, kwargs))
+
+    def circle_filled(self, *args, **kwargs):
+        self.circles.append((args, kwargs))
+
+    def polyline(self, *args, **kwargs):
+        self.polylines.append((args, kwargs))
+
+    def convex_fill(self, *args, **kwargs):
+        self.convex_fills.append((args, kwargs))
 
     def __getattr__(self, _name):
         return lambda *_args, **_kwargs: None
@@ -585,6 +599,41 @@ def test_status_renders_context_hints_after_core_simulation_fields():
     x_by_text = {text: position[0] for position, text in draw.text_positions}
     assert x_by_text["Frame"] < x_by_text["OpenGL"]
     assert x_by_text["OpenGL"] < x_by_text["Steps 674"] < x_by_text["Δt 0.002 s"]
+
+
+def test_status_uses_muted_gray_for_chrome_and_context_hints():
+    from mojive.ui.theme import THEME
+
+    draw = _RecordedStatus()
+    draw_status(
+        draw,
+        (0.0, 0.0),
+        1800.0,
+        28.0,
+        THEME,
+        1.0,
+        selected="01_revolute",
+        has_selection=True,
+        state="running",
+        sim_time=0.2,
+        step=674,
+        metric_mode="steps",
+        backend="OpenGL",
+        dt=0.002,
+        fps=60.0,
+        status="Saved scene",
+        status_level="success",
+        tool_hints=(ToolHint("key", "T", "Frame"), ToolHint("mouse", "left", "Select")),
+    )
+
+    colors_by_text = dict(zip(draw.texts, draw.text_colors, strict=True))
+    assert colors_by_text.pop("Running") == THEME.primary
+    assert set(colors_by_text.values()) == {THEME.text_disabled}
+    assert draw.lines[0][0][2] == THEME.primary_dim
+    assert draw.lines[0][0][3] == pytest.approx(2.0)
+    assert draw.circles[0][0][2] == THEME.primary
+    assert draw.polylines[0][0][1] == THEME.text_disabled
+    assert draw.convex_fills[0][0][1] == THEME.bg_frame_active
 
 
 @pytest.mark.parametrize("width", (48.0, 80.0, 140.0, 220.0, 300.0, 400.0, 520.0))

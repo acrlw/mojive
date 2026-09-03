@@ -188,14 +188,19 @@ class OutputPanel(Panel):
                     if entry.sequence not in self._selected_sequences:
                         self._selected_sequences = {entry.sequence}
                         self._selection_anchor = entry.sequence
-                    copy_message, _ = imgui.menu_item(ctx.tr("Copy"), "Ctrl+C", False)
-                    copy_all, _ = imgui.menu_item(ctx.tr("Copy all"), "Ctrl+Shift+C", False)
+                    selected = tuple(
+                        item for item in entries if item.sequence in self._selected_sequences
+                    )
+                    copy_message, _ = imgui.menu_item(ctx.tr("Copy message"), "Ctrl+C", False)
+                    copy_full, _ = imgui.menu_item(ctx.tr("Copy full entry"), "Ctrl+Shift+C", False)
+                    imgui.separator()
+                    copy_scope = "Copy shown" if filtering else "Copy all"
+                    copy_scope, _ = imgui.menu_item(ctx.tr(copy_scope), "", False)
                     if copy_message:
-                        selected = tuple(
-                            item for item in entries if item.sequence in self._selected_sequences
-                        )
+                        imgui.set_clipboard_text(output.copy_message_text(selected))
+                    if copy_full:
                         imgui.set_clipboard_text(output.copy_text(selected))
-                    if copy_all:
+                    if copy_scope:
                         imgui.set_clipboard_text(output.copy_text(entries))
                     imgui.end_popup()
                 if hovered or entry.sequence in self._selected_sequences:
@@ -219,14 +224,18 @@ class OutputPanel(Panel):
                 )
         clipper.end()
         io = imgui.get_io()
-        if (io.key_ctrl or io.key_super) and imgui.is_key_pressed(imgui.Key.c, False):
+        if (
+            (io.key_ctrl or io.key_super)
+            and imgui.is_key_pressed(imgui.Key.c, False)
+            and self._selected_sequences
+        ):
+            selected = tuple(
+                entry for entry in entries if entry.sequence in self._selected_sequences
+            )
             if io.key_shift:
-                imgui.set_clipboard_text(output.copy_text(entries))
-            elif self._selected_sequences:
-                selected = tuple(
-                    entry for entry in entries if entry.sequence in self._selected_sequences
-                )
                 imgui.set_clipboard_text(output.copy_text(selected))
+            else:
+                imgui.set_clipboard_text(output.copy_message_text(selected))
         newest_visible = entries[-1].sequence if entries else 0
         if newest_visible > self._last_sequence:
             imgui.set_scroll_here_y(1.0)

@@ -81,7 +81,7 @@ class Rig:
         self.camera = _camera()
         backend.set_camera(self.camera)
 
-    def draw(self, boxes, selected: int = 0) -> np.ndarray:
+    def draw(self, boxes, selected: int = 0, *, xray: bool = False) -> np.ndarray:
         sb = SceneBuilder()
         matid = sb.material_id(Material())
         for pos, scale, color, oid in boxes:
@@ -94,7 +94,7 @@ class Rig:
                 object_id=oid,
             )
         scene = sb.build(self.camera, LightSet(ambient=AMBIENT), 2.0, np.zeros(3, np.float32))
-        self.backend.highlight(selected)
+        self.backend.highlight(selected, xray=xray)
         self.backend.set_render_scene(scene)
         assert self.backend.render(None) is not None
         return self.backend.target.read_color(flip=True)
@@ -177,6 +177,20 @@ def test_outline_is_solid_through_an_occluder(rig):
     assert int(rig.ids()[H // 2, W // 2]) == 8  # the occluder owns the center
     assert alone > 200
     assert abs(alone - behind) <= 2
+
+
+def test_xray_adds_a_subtle_fill_through_an_occluder(rig):
+    if not rig.backend.caps.outline:
+        pytest.skip("outline unsupported by this backend")
+    boxes = _box(occluder=True)
+    ordinary = rig.draw(boxes, selected=SEL)
+    xray = rig.draw(boxes, selected=SEL, xray=True)
+
+    assert int(rig.ids()[H // 2, W // 2]) == 8
+    ordinary_center = ordinary[H // 2, W // 2, :3].astype(int)
+    xray_center = xray[H // 2, W // 2, :3].astype(int)
+    assert np.abs(xray_center - ordinary_center).max() >= 8
+    assert not np.array_equal(xray_center, u8(OUTLINE_COLOR))
 
 
 def test_no_outline_without_selection(rig):

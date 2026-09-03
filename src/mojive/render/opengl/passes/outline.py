@@ -5,7 +5,7 @@ from __future__ import annotations
 import moderngl
 import numpy as np
 
-from ...backend import RenderFlag
+from ...backend import SELECTION_XRAY_ALPHA, RenderFlag
 from .. import gl_native as G
 from ..programs import ProgramSpec, UniformCache
 from ..registry import register_pass
@@ -56,6 +56,7 @@ class OutlinePass(BasePass):
         self._sel_id = -1
         self._sel_ids: object = None
         self.color: tuple[float, float, float, float] = OUTLINE_COLOR
+        self.xray = False
 
     def prepare(self, ctx: PassContext) -> bool:
         if not ctx.flag(RenderFlag.OUTLINE):
@@ -112,6 +113,7 @@ class OutlinePass(BasePass):
         u.force("u_mask", 0)
         u.set("u_size", self._size)
         u.set("u_color", self.color)
+        u.set("u_xray_alpha", SELECTION_XRAY_ALPHA if self.xray else 0.0)
         self._vao.render(moderngl.TRIANGLES, vertices=3)
         if shared_id:
             ctx.target.fbo.color_mask = (

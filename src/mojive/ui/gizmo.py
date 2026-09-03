@@ -128,6 +128,9 @@ JOINT_SLIDE_ARROW_TARGET_PT = (
 JOINT_SLIDE_AXIS_HIT_PT = 7.0
 TRANSLATION_GUIDE_RADIUS_PT = 5.0
 TRACKBALL_RAD_PER_PT = 0.01
+ROTATION_LINEAR_ESCAPE_PT = 8.0
+ROTATION_LINEAR_LOCK_PT = 2.0
+ROTATION_EDGE_LINEAR_ALPHA = 0.18
 JOINT_DRAG_START_TICK_HALF_PT = 6.0
 JOINT_ROTATION_AXIS_DASH_PT = 6.0
 JOINT_ROTATION_AXIS_GAP_PT = 6.0
@@ -518,6 +521,7 @@ class ObjectGizmo:
         self._keyboard = False
         self._guide_gpu = False
         self._interactive = True
+        self._display_only = False
         self._visible = False
         self._drawn = False
         self._axis_mask = 0b111
@@ -539,6 +543,15 @@ class ObjectGizmo:
         self._plane_start = np.zeros(3, np.float64)
         self._rotation_start_vec = np.zeros(3, np.float64)
         self._last_rot_vec = np.zeros(3, np.float64)
+        self._rotation_screen_ring = np.zeros((RING_SEGMENTS, 2), np.float64)
+        self._rotation_screen_ring_valid = False
+        self._rotation_screen_tangent = np.zeros(2, np.float64)
+        self._rotation_linear = False
+        self._rotation_linear_axis = -1
+        self._rotation_linear_sign = 1.0
+        self._rotation_last_cursor = np.zeros(2, np.float64)
+        self._rotation_linear_origin_cursor = np.zeros(2, np.float64)
+        self._rotation_linear_origin_angle = 0.0
         self._rotation_raw_angle = 0.0
         self._rotation_angle = 0.0
         self._trackball_angles = np.zeros(2, np.float64)
@@ -607,6 +620,22 @@ class ObjectGizmo:
     @property
     def hovered_handle(self) -> GizmoHandle:
         return self._hovered
+
+    @property
+    def precise_input_hovered(self) -> bool:
+        """Return whether the pointer is over a scalar handle that accepts typed input."""
+
+        return bool(
+            self.hovered
+            and self._hovered in (*AXIS_HANDLES, *ROTATE_HANDLES)
+            and self._hovered is not GizmoHandle.ROTATE_TRACKBALL
+        )
+
+    @property
+    def display_only(self) -> bool:
+        """Return whether the current gizmo is a non-interactive coordinate frame."""
+
+        return self._display_only
 
     @property
     def joint_limit_hits(self) -> tuple[JointLimitHit, ...]:
@@ -1107,26 +1136,40 @@ class ObjectGizmo:
         yielding: bool,
         interactive: bool,
     ) -> bool:
-        self._interactive = bool(interactive)
         self._joint_range = None
         node = session.selected_node
         self._verdict = self.evaluate(session, node)
-        self._visible = not yielding and self._verdict.ok
+        self._display_only = bool(
+            not self._verdict.ok and self.read_only_frame_available(session, node)
+        )
+        self._interactive = bool(interactive and not self._display_only)
+        self._visible = not yielding and (self._verdict.ok or self._display_only)
         if not self._visible:
+            self._display_only = False
             self._clear_translation_guide(backend)
             if backend.caps.gizmo:
                 backend.set_gizmo(None)
             self._drawn = False
             return False
-        target, _reason = self._joint_target(session, node)
+        target, _reason = (None, "") if self._display_only else self._joint_target(session, node)
         pose = self._target_pose(session, node, target)
         if pose is None:
             self._drawn = False
             return False
         pos, mat = pose
         self._joint_range = self._joint_range_state(session, target)
-        mode = target.mode if target is not None else self._mode
-        self._handle_mask = target.handles if target is not None else ALL_HANDLE_MASK
+        mode = (
+            GizmoMode.TRANSLATE
+            if self._display_only
+            else (target.mode if target is not None else self._mode)
+        )
+        self._handle_mask = (
+            handle_mask(*AXIS_HANDLES, GizmoHandle.SCREEN)
+            if self._display_only
+            else target.handles
+            if target is not None
+            else ALL_HANDLE_MASK
+        )
         active = self._active is not GizmoHandle.NONE
         if active:
             basis = self._start_basis
@@ -1157,7 +1200,7 @@ class ObjectGizmo:
         np.copyto(frame.position, pos, casting="unsafe")
         np.copyto(frame.rotation, basis, casting="unsafe")
         frame.size_px = SIZE_PT * float(ui_scale)
-        frame.hovered = self._hovered if interactive else GizmoHandle.NONE
+        frame.hovered = self._hovered if self._interactive else GizmoHandle.NONE
         frame.active = self._active
         frame.active_rotation_overlay = self._using and self._active in ROTATE_HANDLES
         frame.axis_mask = self._axis_mask
@@ -2485,6 +2528,13 @@ class ObjectGizmo:
         np.copyto(self._start_basis, self._target_basis(mat, target))
         np.copyto(self._current_mat, mat)
         self._start_cursor[:] = cursor
+        self._rotation_screen_ring_valid = False
+        self._rotation_linear = False
+        self._rotation_linear_axis = -1
+        self._rotation_linear_sign = 1.0
+        self._rotation_last_cursor[:] = cursor
+        self._rotation_linear_origin_cursor[:] = cursor
+        self._rotation_linear_origin_angle = 0.0
         self._rotation_raw_angle = 0.0
         self._rotation_angle = 0.0
         self._trackball_angles[:] = 0.0
@@ -2531,10 +2581,120 @@ class ObjectGizmo:
                 self._end()
                 return False
             self._rotation_start_vec[:] = self._last_rot_vec[:] = v / n
+            self._prepare_rotation_drag(cam, rect)
         else:
             self._plane_start[:] = hit
         self._start_edit(session)
         return True
+
+    def _prepare_rotation_drag(self, cam: CameraView, rect) -> None:
+        """Cache the rendered dial used to distinguish arc and linear drags."""
+
+        self._rotation_screen_tangent[:] = (1.0, 0.0)
+        projector_type = (
+            _ScreenRotationDialProjector
+            if self._active is GizmoHandle.ROTATE_SCREEN
+            else _RotationDialProjector
+        )
+        projector = projector_type(
+            cam,
+            rect,
+            self._start_pos,
+            self._axis,
+            self._rotation_start_vec,
+            SIZE_PT * self._style_scale,
+        )
+        radius = SCREEN_RING_RADIUS if self._active is GizmoHandle.ROTATE_SCREEN else RING_RADIUS
+        angles = np.linspace(0.0, 2.0 * np.pi, RING_SEGMENTS, endpoint=False)
+        projected = projector.points(radius, angles)
+        valid = bool(
+            projected.shape == (RING_SEGMENTS, 3)
+            and np.isfinite(projected).all()
+            and np.all(projected[:, 2] > 0.0)
+        )
+        self._rotation_screen_ring_valid = valid
+        if valid:
+            np.copyto(self._rotation_screen_ring, projected[:, :2])
+            tangent = self._rotation_screen_ring[1] - self._rotation_screen_ring[-1]
+            length = float(np.linalg.norm(tangent))
+            if length > 1e-6:
+                self._rotation_screen_tangent[:] = tangent / length
+            else:
+                self._rotation_screen_tangent[:] = (1.0, 0.0)
+                self._rotation_screen_ring_valid = False
+        if self._active is not GizmoHandle.ROTATE_SCREEN and (
+            rotation_ring_alpha(cam, self._start_pos, self._axis) < ROTATION_EDGE_LINEAR_ALPHA
+        ):
+            self._rotation_linear = True
+
+    def _rotation_ring_distance(self, cursor) -> float:
+        """Return the exact screen distance to the cached projected ring."""
+
+        if not self._rotation_screen_ring_valid:
+            return float("inf")
+        px, py = map(float, np.asarray(cursor, np.float64).reshape(2))
+        best = float("inf")
+        previous = self._rotation_screen_ring[-1]
+        for current in self._rotation_screen_ring:
+            ax, ay = float(previous[0]), float(previous[1])
+            dx, dy = float(current[0]) - ax, float(current[1]) - ay
+            denominator = dx * dx + dy * dy
+            amount = (
+                float(np.clip(((px - ax) * dx + (py - ay) * dy) / denominator, 0.0, 1.0))
+                if denominator > 1e-12
+                else 0.0
+            )
+            ex = px - (ax + dx * amount)
+            ey = py - (ay + dy * amount)
+            best = min(best, ex * ex + ey * ey)
+            previous = current
+        return float(np.sqrt(best))
+
+    def _begin_linear_rotation_drag(self, cursor) -> None:
+        """Lock one cardinal direction and preserve the latest pointer motion."""
+
+        current = np.asarray(cursor, np.float64).reshape(2)
+        total = current - self._start_cursor
+        if float(np.linalg.norm(total)) < ROTATION_LINEAR_LOCK_PT * self._style_scale:
+            return
+        if abs(float(total[0])) > abs(float(total[1])):
+            axis = 0
+        elif abs(float(total[1])) > abs(float(total[0])):
+            axis = 1
+        else:
+            axis = int(np.argmax(np.abs(self._rotation_screen_tangent)))
+        tangent_component = float(self._rotation_screen_tangent[axis])
+        if abs(tangent_component) >= 0.15:
+            sign = 1.0 if tangent_component > 0.0 else -1.0
+        else:
+            # At the exact top/side of a dial the chosen cardinal drag can be
+            # radial. Keep those gestures useful with the conventional mapping:
+            # right and up increase, left and down decrease.
+            sign = 1.0 if axis == 0 else -1.0
+        self._rotation_linear = True
+        self._rotation_linear_axis = axis
+        self._rotation_linear_sign = sign
+        self._rotation_linear_origin_cursor[:] = current
+        latest_travel = float(current[axis] - self._rotation_last_cursor[axis])
+        latest_travel /= max(self._style_scale, 1e-6)
+        self._rotation_raw_angle += latest_travel * sign * TRACKBALL_RAD_PER_PT
+        self._rotation_linear_origin_angle = float(self._rotation_raw_angle)
+
+    def _update_linear_rotation_drag(self, cursor) -> None:
+        current = np.asarray(cursor, np.float64).reshape(2)
+        if self._rotation_linear_axis < 0:
+            self._begin_linear_rotation_drag(current)
+        if self._rotation_linear_axis < 0:
+            return
+        travel = float(
+            current[self._rotation_linear_axis]
+            - self._rotation_linear_origin_cursor[self._rotation_linear_axis]
+        )
+        travel /= max(self._style_scale, 1e-6)
+        self._rotation_raw_angle = (
+            self._rotation_linear_origin_angle
+            + travel * self._rotation_linear_sign * TRACKBALL_RAD_PER_PT
+        )
 
     def _drag(self, session, cam, rect, cursor, *, snap: bool) -> bool:
         handle = self._active
@@ -2570,31 +2730,47 @@ class ObjectGizmo:
                 self._current_mat[:] = self._start_mat
             mat = self._current_mat
         else:
-            hit = _cursor_plane(cam, rect, cursor, self._start_pos, self._plane_normal)
-            if hit is None:
-                return False
-            v = hit - self._start_pos
-            n = float(np.linalg.norm(v))
-            if n < 1e-9:
-                return False
-            v /= n
-            angle = float(
-                np.arctan2(
-                    np.dot(self._axis, np.cross(self._last_rot_vec, v)),
-                    np.dot(self._last_rot_vec, v),
+            if not self._rotation_linear and (
+                self._rotation_ring_distance(cursor) > ROTATION_LINEAR_ESCAPE_PT * self._style_scale
+            ):
+                self._begin_linear_rotation_drag(cursor)
+            if self._rotation_linear:
+                self._update_linear_rotation_drag(cursor)
+                self._rotation_angle = (
+                    _snap_value(self._rotation_raw_angle, np.radians(self.rotation_snap_deg))
+                    if snap
+                    else self._rotation_raw_angle
                 )
-            )
-            if abs(angle) >= 1e-9:
-                self._last_rot_vec[:] = v
-                self._rotation_raw_angle += angle
-            self._rotation_angle = (
-                _snap_value(self._rotation_raw_angle, np.radians(self.rotation_snap_deg))
-                if snap
-                else self._rotation_raw_angle
-            )
-            delta = math3d.rotvec_to_mat3(self._axis * self._rotation_angle)
-            self._current_mat[:] = delta @ self._start_mat
-            mat = self._current_mat
+                delta = math3d.rotvec_to_mat3(self._axis * self._rotation_angle)
+                self._current_mat[:] = delta @ self._start_mat
+                mat = self._current_mat
+            else:
+                hit = _cursor_plane(cam, rect, cursor, self._start_pos, self._plane_normal)
+                if hit is None:
+                    return False
+                v = hit - self._start_pos
+                n = float(np.linalg.norm(v))
+                if n < 1e-9:
+                    return False
+                v /= n
+                angle = float(
+                    np.arctan2(
+                        np.dot(self._axis, np.cross(self._last_rot_vec, v)),
+                        np.dot(self._last_rot_vec, v),
+                    )
+                )
+                if abs(angle) >= 1e-9:
+                    self._last_rot_vec[:] = v
+                    self._rotation_raw_angle += angle
+                self._rotation_last_cursor[:] = cursor
+                self._rotation_angle = (
+                    _snap_value(self._rotation_raw_angle, np.radians(self.rotation_snap_deg))
+                    if snap
+                    else self._rotation_raw_angle
+                )
+                delta = math3d.rotvec_to_mat3(self._axis * self._rotation_angle)
+                self._current_mat[:] = delta @ self._start_mat
+                mat = self._current_mat
 
         if snap and handle not in ROTATE_HANDLES:
             delta = self._start_basis.T @ (pos - self._start_pos)
@@ -2640,12 +2816,12 @@ class ObjectGizmo:
                 rtol=0.0,
             )
         ):
-            self._rebase_clamped_joint_drag(cursor, pos)
+            self._rebase_clamped_joint_drag(cam, rect, cursor, pos)
         self._edit_started = True
         self._label = self._format_value(pos)
         return True
 
-    def _rebase_clamped_joint_drag(self, cursor, position) -> None:
+    def _rebase_clamped_joint_drag(self, cam, rect, cursor, position) -> None:
         """Discard pointer over-travel when a scalar joint reaches a limit."""
 
         joint = self._active_joint
@@ -2654,11 +2830,23 @@ class ObjectGizmo:
         if joint.type == "hinge":
             applied = float(self._rotation_angle)
             self._start_joint_qpos[0] += applied
-            self._start_mat[:] = math3d.rotvec_to_mat3(self._axis * applied) @ self._start_mat
+            applied_rotation = math3d.rotvec_to_mat3(self._axis * applied)
+            self._start_mat[:] = applied_rotation @ self._start_mat
             self._current_mat[:] = self._start_mat
-            self._rotation_start_vec[:] = self._last_rot_vec
+            self._rotation_start_vec[:] = (
+                applied_rotation @ self._rotation_start_vec
+                if self._rotation_linear
+                else self._last_rot_vec
+            )
+            self._last_rot_vec[:] = self._rotation_start_vec
+            self._start_cursor[:] = cursor
+            self._rotation_last_cursor[:] = cursor
             self._rotation_raw_angle = 0.0
             self._rotation_angle = 0.0
+            self._rotation_linear_origin_cursor[:] = cursor
+            self._rotation_linear_origin_angle = 0.0
+            if not self._rotation_linear:
+                self._prepare_rotation_drag(cam, rect)
             return
         if joint.type == "slide":
             applied = float(np.dot(np.asarray(position) - self._start_pos, self._axis))
@@ -2845,7 +3033,7 @@ class ObjectGizmo:
         self, session: Session, node: SceneNode, target: _JointTarget | None
     ) -> tuple[np.ndarray, np.ndarray] | None:
         if target is None:
-            return _node_pose(session, node)
+            return node_world_pose(session, node)
         frame = session.frame
         diagnostics = frame.diagnostics
         joint_id = target.joint.joint_id
@@ -2859,9 +3047,9 @@ class ObjectGizmo:
         position = np.asarray(diagnostics.joint_xpos[joint_id], np.float64).reshape(3)
         if target.joint.type == "slide":
             # MuJoCo's xanchor excludes this slide coordinate; the driven body pose does not.
-            position, _ = _node_pose(session, node)
+            position, _ = node_world_pose(session, node)
         if target.joint.type == "ball":
-            _body_position, body_rotation = _node_pose(session, node)
+            _body_position, body_rotation = node_world_pose(session, node)
             return position, body_rotation
         axis = np.asarray(diagnostics.joint_xaxis[joint_id], np.float64).reshape(3)
         return position, _basis_from_z(axis)
@@ -2884,6 +3072,38 @@ class ObjectGizmo:
         if self._space is GizmoSpace.BODY:
             return np.asarray(rotation, np.float64).reshape(3, 3)
         return _WORLD_BASIS
+
+    @staticmethod
+    def read_only_frame_available(session: Session, node: SceneNode | None) -> bool:
+        """Return whether a non-editable spatial node can expose its coordinate frame."""
+
+        if node is None or node.posable:
+            return False
+        frame = session.frame
+        if node.type is NodeType.GEOM:
+            return bool(
+                frame.geom_xpos is not None
+                and frame.geom_xmat is not None
+                and 0 <= node.geom_index < len(frame.geom_xpos)
+                and node.geom_index < len(frame.geom_xmat)
+            )
+        if node.type is NodeType.SITE:
+            return bool(
+                frame.site_xpos is not None
+                and frame.site_xmat is not None
+                and 0 <= node.site_index < len(frame.site_xpos)
+                and node.site_index < len(frame.site_xmat)
+            )
+        if node.type in (NodeType.LINK, NodeType.ROBOT):
+            return bool(
+                frame.body_xpos is not None
+                and frame.body_xmat is not None
+                and 0 <= node.body_index < len(frame.body_xpos)
+                and node.body_index < len(frame.body_xmat)
+            )
+        if node.type is NodeType.MODEL:
+            return any(item.model_id == node.model_id for item in session.scene_models)
+        return False
 
     def evaluate(self, session: Session, node: SceneNode | None) -> Verdict:
         """Return the actual viewport-gizmo availability for one scene node."""
@@ -2916,6 +3136,19 @@ class ObjectGizmo:
             result = Verdict(True)
         else:
             result = verdict(session.paused, node)
+        if (
+            node is not None
+            and not node.posable
+            and node.type
+            not in (
+                NodeType.LINK,
+                NodeType.ROBOT,
+                NodeType.JOINT,
+                NodeType.LIGHT,
+                NodeType.CAMERA,
+            )
+        ):
+            result = Verdict(False, "This entity has no editable transform")
         if not result.ok or node is None:
             return result
         if (
@@ -3496,7 +3729,9 @@ def _basis_from_z(axis) -> np.ndarray:
     return np.column_stack((x, y, z))
 
 
-def _node_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarray]:
+def node_world_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarray]:
+    """Resolve one hierarchy node's current world-space position and orientation."""
+
     frame = session.frame
     if node.type is NodeType.MODEL:
         info = next((item for item in session.scene_models if item.model_id == node.model_id), None)

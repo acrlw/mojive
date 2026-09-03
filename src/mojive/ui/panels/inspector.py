@@ -321,7 +321,10 @@ class InspectorPanel(Panel):
         self._material(ctx, node)
 
     def _name_editor(self, ctx: PanelContext, node: SceneNode) -> None:
-        model_element = node.model_id >= 0 and node.type not in (NodeType.WORLD, NodeType.MODEL)
+        model_element = node.source_editable and node.type not in (
+            NodeType.WORLD,
+            NodeType.MODEL,
+        )
         scene_entity = (
             node.model_id < 0
             and node.object_id > 0
@@ -931,6 +934,8 @@ class InspectorPanel(Panel):
         active = availability.ok if availability is not None else reason is None
         if active:
             return
+        if ctx.gizmo is not None and ctx.gizmo.read_only_frame_available(ctx.session, node):
+            return
         imgui.separator()
         imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), ctx.tr("gizmo hidden"))
         imgui.text_wrapped(reason)
@@ -1220,6 +1225,7 @@ class InspectorPanel(Panel):
             ctx.session.adapter.caps.model_properties
             and ctx.session.paused
             and joint.type != "free"
+            and node.source_editable
         )
         if not editable:
             imgui.begin_disabled()
@@ -1309,6 +1315,8 @@ class InspectorPanel(Panel):
                     "Pause the simulation to edit model properties"
                     if not ctx.session.paused
                     else "This adapter cannot write model properties"
+                    if not ctx.session.adapter.caps.model_properties
+                    else "This compiled joint has no editable source element"
                 )
             )
             imgui.text_disabled(reason)
@@ -1814,7 +1822,7 @@ class InspectorPanel(Panel):
             and not infinite_plane
             and scene_node is not None
             and (
-                ctx.session.adapter.caps.topology_editing
+                (ctx.session.adapter.caps.topology_editing and scene_node.source_editable)
                 or (scene_node.model_id < 0 and ctx.session.adapter.caps.scene_authoring)
             )
         )
@@ -1894,6 +1902,7 @@ class InspectorPanel(Panel):
 
         model_id = scene_node.model_id if scene_node is not None else -1
         model_assets = bool(model_id >= 0 and ctx.session.adapter.caps.model_assets)
+        assignment_editable = bool(scene_node is not None and scene_node.source_editable)
         compatible_materials = ctx.session.model_material_indices(model_id) if model_assets else ()
         asset_editable = bool(
             not model_assets or not ctx.session.adapter.caps.simulation or ctx.session.paused
@@ -1931,6 +1940,8 @@ class InspectorPanel(Panel):
                 if not asset_editable:
                     imgui.begin_disabled()
                 _property_control_row(ctx, "assigned material")
+                if not assignment_editable:
+                    imgui.begin_disabled()
                 if imgui.begin_combo("##assigned_material", assignment_label):
                     selected, _ = imgui.selectable(ctx.tr("inline appearance"), not assigned)
                     if selected and assigned:
@@ -1944,6 +1955,8 @@ class InspectorPanel(Panel):
                         if selected and candidate != material_index:
                             assignment_choice = candidate
                     imgui.end_combo()
+                if not assignment_editable:
+                    imgui.end_disabled()
 
                 if assigned and ctx.panels is not None:
                     (open_assets,) = _property_button_row(ctx, "asset browser", ("Open in Assets",))
@@ -1951,13 +1964,17 @@ class InspectorPanel(Panel):
                     src.materials[index].name.removeprefix(prefix) for index in compatible_materials
                 }
                 new_name = _unique_component_name("material", existing_materials)
+                if not assignment_editable:
+                    imgui.begin_disabled()
                 (create,) = _property_button_row(ctx, "create material", ("New material",))
-                if not assigned:
+                if not assigned or not assignment_editable:
                     imgui.begin_disabled()
                 (duplicate,) = _property_button_row(
                     ctx, "material actions", ("Duplicate material",)
                 )
-                if not assigned:
+                if not assigned or not assignment_editable:
+                    imgui.end_disabled()
+                if not assignment_editable:
                     imgui.end_disabled()
                 can_import_texture = assigned and ctx.request_texture_import is not None
                 if not can_import_texture:
@@ -2167,6 +2184,8 @@ class InspectorPanel(Panel):
         editable = bool(
             ctx.session.adapter.caps.model_properties
             and (not ctx.session.adapter.caps.simulation or ctx.session.paused)
+            and (scene_node := ctx.session.node(node_id)) is not None
+            and scene_node.source_editable
         )
         types = (
             "plane",
@@ -2302,6 +2321,8 @@ class InspectorPanel(Panel):
         editable = bool(
             ctx.session.adapter.caps.model_properties
             and (not ctx.session.adapter.caps.simulation or ctx.session.paused)
+            and (scene_node := ctx.session.node(node_id)) is not None
+            and scene_node.source_editable
         )
         friction = np.asarray(properties.friction, np.float32)
         dimension = 1

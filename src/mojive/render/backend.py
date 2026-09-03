@@ -17,6 +17,9 @@ if TYPE_CHECKING:
     from .debugdraw import DebugDraw
 
 
+SELECTION_XRAY_ALPHA = 0.12
+
+
 class RenderFlag(enum.StrEnum):
     """Independently switchable renderer features and MuJoCo visual semantics."""
 
@@ -296,8 +299,8 @@ class RenderBackend(Protocol):
 
         ...
 
-    def highlight(self, object_id: int) -> None:
-        """Set the object rendered by the selection outline pass."""
+    def highlight(self, object_id: int, *, xray: bool = False) -> None:
+        """Set the outlined object and optionally reveal its occluded silhouette."""
 
         ...
 
@@ -465,7 +468,7 @@ class NullBackend:
     def pick(self, x: int, y: int) -> int:
         return 0
 
-    def highlight(self, object_id: int) -> None: ...
+    def highlight(self, object_id: int, *, xray: bool = False) -> None: ...
     def set_gizmo(self, gizmo) -> bool:
         return False
 

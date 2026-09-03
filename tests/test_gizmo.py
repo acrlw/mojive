@@ -13,6 +13,7 @@ from mojive.gizmo import (
     ARROW_CORNER_RADIUS_PT,
     AXIS_COLORS,
     AXIS_END,
+    AXIS_HANDLES,
     AXIS_HEAD_LENGTH_PT,
     AXIS_SHAFT_HALF_PT,
     AXIS_START,
@@ -1348,6 +1349,42 @@ class CaptureBackend:
         return frame is not None
 
 
+def test_nonposable_spatial_node_publishes_a_read_only_coordinate_frame() -> None:
+    session, node = session_at(position=(0.2, -0.1, 0.4))
+    node.posable = False
+    gizmo = ObjectGizmo("rotate")
+    gizmo.set_style("3d")
+    backend = CaptureBackend()
+    cam = camera()
+    center = tuple(project(cam, ((0.2, -0.1, 0.4),), RECT)[0, :2])
+
+    assert gizmo.update_hover(session, cam, RECT, center) is GizmoHandle.NONE
+    assert gizmo.publish(
+        backend,
+        session,
+        cam,
+        RECT,
+        ui_scale=1.0,
+        style_scale=1.0,
+        yielding=False,
+        interactive=True,
+    )
+    assert gizmo.display_only
+    assert backend.frame.mode is GizmoMode.TRANSLATE
+    assert backend.frame.handle_mask == handle_mask(*AXIS_HANDLES, GizmoHandle.SCREEN)
+    assert backend.frame.hovered is GizmoHandle.NONE
+    assert backend.frame.position == pytest.approx((0.2, -0.1, 0.4))
+    assert not gizmo.interact(
+        session,
+        cam,
+        RECT,
+        center,
+        claimed=True,
+        left_down=True,
+        released=False,
+    )
+
+
 def test_hidpi_scales_solid_gizmo_and_hit_geometry() -> None:
     session, _ = session_at()
     gizmo = ObjectGizmo()
@@ -2530,6 +2567,40 @@ def test_outer_ring_rotates_around_the_camera_axis() -> None:
     assert gizmo.value_label.startswith("Screen ")
 
 
+@pytest.mark.parametrize(
+    "direction",
+    (
+        np.array((1.0, 0.0)),
+        np.array((-1.0, 0.0)),
+        np.array((0.0, 1.0)),
+        np.array((0.0, -1.0)),
+    ),
+)
+def test_rotation_ring_accepts_straight_cardinal_drags(direction) -> None:
+    session, node = session_at()
+    gizmo = ObjectGizmo("rotate")
+    cam = camera()
+    center = project(cam, (np.zeros(3),), RECT)[0, :2]
+    start = center + direction * SCREEN_RING_RADIUS * SIZE_PT
+
+    assert gizmo._begin_handle(session, cam, RECT, start, GizmoHandle.ROTATE_SCREEN)
+    outside = start + direction * 20.0
+    assert gizmo._drag(session, cam, RECT, outside, snap=False)
+    assert gizmo._rotation_linear
+
+    farther = outside + direction * 40.0
+    assert gizmo._drag(session, cam, RECT, farther, snap=False)
+    first_angle = gizmo._rotation_angle
+    assert abs(first_angle) == pytest.approx(0.6)
+
+    farther = farther + direction * 10.0
+    assert gizmo._drag(session, cam, RECT, farther, snap=False)
+    assert abs(gizmo._rotation_angle) == pytest.approx(0.7)
+    assert np.sign(gizmo._rotation_angle) == np.sign(first_angle)
+    rotation = np.asarray(session.frame.body_xmat[node.body_index]).reshape(3, 3)
+    assert not np.allclose(rotation, np.eye(3))
+
+
 @pytest.mark.physics
 @pytest.mark.parametrize(
     ("body_name", "handle", "amount"),
@@ -2598,6 +2669,50 @@ def test_joint_gizmo_edits_only_the_selected_joint_dof(
         assert updated_position == pytest.approx(session.frame.body_xpos[node.body_index], abs=1e-7)
         assert updated_position == pytest.approx(position + basis[:, 2] * amount, abs=1e-6)
         assert updated_basis == pytest.approx(basis, abs=1e-6)
+
+
+@pytest.mark.physics
+def test_hinge_joint_rotation_accepts_a_straight_drag_off_the_ring() -> None:
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
+
+    adapter = MuJoCoAdapter(resolve("joint_types"))
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == "hinge_body")
+    assert session.submit(cmd.Select(node.object_id))
+    session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
+    gizmo = ObjectGizmo()
+    target, reason = gizmo._joint_target(session, node)
+    assert target is not None, reason
+    pose = gizmo._target_pose(session, node, target)
+    assert pose is not None
+    position, basis = pose
+    cam = CameraView(eye=np.array((2.0, -4.0, 2.0)), target=position.copy())
+    scale = world_scale(cam, position, RECT[3], SIZE_PT)
+    angles = np.linspace(0.0, 2.0 * np.pi, 128, endpoint=False)
+    ring = np.array(
+        [
+            position
+            + (basis[:, 0] * np.cos(angle) + basis[:, 1] * np.sin(angle)) * scale * RING_RADIUS
+            for angle in angles
+        ]
+    )
+    screen = project(cam, ring, RECT)[:, :2]
+    start = screen[int(np.argmax(screen[:, 0]))]
+
+    assert gizmo._begin_handle(session, cam, RECT, start, GizmoHandle.ROTATE_Z)
+    outside = start + np.array((20.0, 0.0))
+    assert gizmo._drag(session, cam, RECT, outside, snap=False)
+    assert gizmo._rotation_linear
+
+    assert gizmo._drag(session, cam, RECT, outside + np.array((40.0, 0.0)), snap=False)
+    first = float(adapter.data.qpos[target.joint.qpos_adr])
+    assert abs(first) == pytest.approx(0.6)
+    assert gizmo._drag(session, cam, RECT, outside + np.array((50.0, 0.0)), snap=False)
+    second = float(adapter.data.qpos[target.joint.qpos_adr])
+    assert abs(second) == pytest.approx(0.7)
+    assert np.sign(second) == np.sign(first)
 
 
 @pytest.mark.physics

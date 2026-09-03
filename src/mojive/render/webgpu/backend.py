@@ -60,7 +60,7 @@ log = get_logger("wgpu")
 
 HIGHLIGHT_COLOR = (1.0, 0.82, 0.45, 0.0)
 HIGHLIGHT_BLEND = 0.35
-HIGHLIGHT_EMISSION = 0.35
+HIGHLIGHT_EMISSION = 0.16
 EXPOSURE = 1.0
 # opengl opaque.NO_CLIP: a clip-plane equation that never discards.
 NO_CLIP = (0.0, 0.0, 0.0, 1.0)
@@ -1375,8 +1375,9 @@ class WgpuBackend:
         # Match opengl's GL viewport convention: y measured from the bottom.
         return self.target.read_id(int(x), self.target.height - 1 - int(y))
 
-    def highlight(self, object_id: int) -> None:
+    def highlight(self, object_id: int, *, xray: bool = False) -> None:
         self._selected = int(object_id)
+        self._outline.xray = bool(xray and self._selected)
 
     def set_transparent_id_rendering(self, enabled: bool) -> None:
         self._include_transparent_ids = bool(enabled)

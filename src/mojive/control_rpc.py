@@ -468,6 +468,7 @@ def _node_payload(node) -> dict[str, Any]:
         "parent": int(node.parent),
         "visible": bool(node.visible),
         "posable": bool(node.posable),
+        "source_editable": bool(node.source_editable),
         "body_index": int(node.body_index),
         "site_index": int(node.site_index),
     }
