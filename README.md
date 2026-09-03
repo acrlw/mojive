@@ -73,6 +73,12 @@ For development dependencies:
 make setup
 ```
 
+For Python offscreen rendering on a Linux server, OpenGL uses EGL and needs a working GPU
+driver/EGL installation, but no desktop display. In `MOJIVE_GL=auto`, a failed EGL initialization
+can fall back to a hidden GLFW window on a desktop's main thread. Set `MOJIVE_GL=egl` to require
+display-free EGL, or `MOJIVE_GL=glfw` to select the desktop path explicitly. Hidden windows still
+need X11/Wayland. See [context troubleshooting](docs/reference/configuration.md#render-backend-requirements).
+
 ## Render backends
 
 OpenGL is the default and recommended backend. To test wgpu:

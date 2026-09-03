@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 import os
 import sys
+import threading
+import warnings
 from concurrent.futures import Future
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -111,8 +113,9 @@ class _GLFWContext:
 
         self._glfw = glfw
         if not glfw.init():
-            raise RuntimeError("GLFW initialization failed")
+            raise RuntimeError(f"GLFW initialization failed: {glfw.get_error()}")
         for hint, value in (
+            (glfw.CONTEXT_CREATION_API, glfw.NATIVE_CONTEXT_API),
             (glfw.CONTEXT_VERSION_MAJOR, 3),
             (glfw.CONTEXT_VERSION_MINOR, 3),
             (glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE),
@@ -124,7 +127,7 @@ class _GLFWContext:
             max(1, width), max(1, height), "Mojive Renderer", None, None
         )
         if not self.window:
-            raise RuntimeError("Failed to create an OpenGL 3.3 core context")
+            raise RuntimeError(f"Failed to create an OpenGL 3.3 core context: {glfw.get_error()}")
         self.gl_context = None
 
     @contextmanager
@@ -166,11 +169,59 @@ class _StandaloneContext:
 
 def _create_context(width: int, height: int):
     requested = os.environ.get("MOJIVE_GL", "").strip().lower()
-    if requested == "egl" or (requested in {"", "auto"} and sys.platform.startswith("linux")):
-        return _StandaloneContext("egl")
-    if requested not in {"", "auto", "glfw", "native"}:
+    if requested not in {"", "auto", "egl", "glfw", "native"}:
         raise ValueError(f"Unsupported MOJIVE_GL backend: {requested}")
-    return _GLFWContext(width, height)
+    auto = requested in {"", "auto"}
+    use_egl = requested == "egl" or (auto and sys.platform.startswith("linux"))
+    failures: list[tuple[str, Exception]] = []
+    if use_egl:
+        try:
+            return _StandaloneContext("egl")
+        except Exception as exc:
+            failures.append(("EGL", exc))
+            if not auto:
+                raise _context_error(
+                    requested, failures, "Explicit EGL selection was preserved."
+                ) from exc
+            if not any(os.environ.get(key) for key in ("DISPLAY", "WAYLAND_DISPLAY")):
+                raise _context_error(
+                    requested, failures, "GLFW fallback requires an X11 or Wayland display."
+                ) from exc
+            if threading.current_thread() is not threading.main_thread():
+                raise _context_error(
+                    requested, failures, "GLFW fallback requires the main thread."
+                ) from exc
+    try:
+        context = _GLFWContext(width, height)
+    except Exception as exc:
+        failures.append(("GLFW", exc))
+        raise _context_error(requested, failures) from exc
+    if failures:
+        try:
+            warnings.warn(
+                f"Mojive EGL context creation failed ({failures[0][1]}); "
+                "using a hidden GLFW window instead. This requires a desktop display and may "
+                "select a different GPU. Set MOJIVE_GL=egl to require EGL or MOJIVE_GL=glfw "
+                "to select GLFW explicitly.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        except Exception:
+            context.close()
+            raise
+    return context
+
+
+def _context_error(requested: str, failures: list[tuple[str, Exception]], note: str = ""):
+    details = "; ".join(f"{name}: {type(exc).__name__}: {exc}" for name, exc in failures)
+    return RuntimeError(
+        f"Mojive could not create an OpenGL 3.3 context (MOJIVE_GL={requested or 'auto'}, "
+        f"platform={sys.platform}). {details}. {note} "
+        "On an X11/Wayland desktop, try MOJIVE_GL=glfw on the main thread. "
+        "On a server without a display, check the GPU driver, EGL libraries, and container GPU "
+        "access; a hidden GLFW window is not a display-free fallback. "
+        "See docs/reference/configuration.md#render-backend-requirements."
+    )
 
 
 def _select_backend(width: int, height: int, samples: int):

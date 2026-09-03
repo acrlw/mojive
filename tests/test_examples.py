@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import ast
+import runpy
 from pathlib import Path
+
+import numpy as np
+import pytest
 
 
 def test_python_examples_are_import_safe_and_have_main_entry_points() -> None:
@@ -21,3 +25,15 @@ def test_python_examples_are_import_safe_and_have_main_entry_points() -> None:
             and node.test.left.id == "__name__"
             for node in module.body
         ), script.name
+
+
+def test_video_annotation_leaves_source_rgb_untouched():
+    pytest.importorskip("mujoco")
+    example = Path(__file__).parents[1] / "examples/mujoco_video.py"
+    annotate = runpy.run_path(str(example))["annotate"]
+    rgb = np.full((60, 240, 3), 120, np.uint8)
+    annotated = annotate(rgb, "Policy A", 1.234)
+    assert np.all(rgb == 120)
+    assert annotated.shape == rgb.shape
+    assert not np.shares_memory(annotated, rgb)
+    assert not np.array_equal(annotated, rgb)

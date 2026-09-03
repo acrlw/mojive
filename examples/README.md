@@ -9,6 +9,7 @@ Run these programs from the repository root after `uv sync --extra mujoco --extr
 | `debug_draw.py` | yes | retained diagnostics and world-space labels |
 | `custom_adapter.py` | yes | small independent simulation adapter |
 | `mujoco_render.py` | no | RGB PNG, metric depth NPY, and segmentation NPY |
+| `mujoco_video.py` | no | streamed MP4 rollout with optional Pillow label/timestamp |
 | `multi_camera_render.py` | no | one PNG for the free view and each fixed camera |
 | `mujoco_control.py` | no | qpos editing and deterministic stepping through `Session` |
 | `compose_scene.py` | no | combined `.mojive.json` workspace or portable MJCF |
@@ -50,6 +51,20 @@ metric camera distance. The segmentation array stores `(object ID, object type)`
 
 `multi_camera_render.py` writes `free.png` and one file for every model camera. `showcase.xml` is
 used here because it contains named fixed cameras.
+
+Record a rollout at video FPS without changing the model's physical timestep:
+
+```bash
+uv run python examples/mujoco_video.py assets/test_scene.xml \
+  --frames 90 --fps 30 --label "Policy A" --output output/examples/rollout.mp4
+```
+
+Omit `--label` for raw RGB. MP4 defaults to player-compatible `yuv420p`; use
+`--pixel-format yuv444p` for full chroma resolution. Odd dimensions are edge-padded for `yuv420p`,
+not resized. The [rendering tutorial](../docs/tutorials/mujoco-rendering.md#record-a-rollout)
+embeds the complete example. `make rollout-video` runs the same example for visual acceptance.
+On a Linux desktop, `MOJIVE_GL=glfw` selects hidden-window rendering if EGL initialization fails;
+display-free servers still need working EGL. See [configuration](../docs/reference/configuration.md).
 
 ## Scene composition and MJCF export
 

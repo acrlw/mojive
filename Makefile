@@ -3,6 +3,8 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
+.PHONY: rollout-video
+
 .PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu renderer-benchmark renderer-benchmark-full golden golden-accept parity calibrate gallery ui-feasibility ui-runtime readme-media ui-frame-profile ui-gallery tool-icons mouse-icons gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept texture-minification local-shadow-precision shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance inspector gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring asset-browser joint-site-authoring model-component-authoring keyframe-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
@@ -74,6 +76,7 @@ help:
 		'  make cameras           free, named, and orthographic cameras' \
 		'  make capture           write PNG' \
 		'  make record            stream MP4' \
+		'  make rollout-video     offscreen MP4 with simulation-time subtitles' \
 		'  make showcase          render feature overview' \
 		'' \
 		'Backends and remote viewing:' \
@@ -427,6 +430,11 @@ capture:
 ## Stream video encoding. Example: make record SCENE=test_scene ARGS="--frames 120".
 record:
 	$(PY) -m mojive.cli record $(SCENE) -o $(OUTPUT) $(ARGS)
+
+## End-to-end Renderer + VideoRecorder + Pillow acceptance, without editor UI.
+rollout-video:
+	$(PY) examples/mujoco_video.py assets/test_scene.xml --label "Mojive rollout" \
+		--output output/examples/rollout.mp4 $(ARGS)
 
 LIVE_HOST ?= 127.0.0.1
 LIVE_PORT ?= 47650

@@ -22,6 +22,7 @@ The public package exports the common scene, rendering, adapter, remote, and rec
 |---|---|---|
 | Build a scene in Python | `Scene`, `build_scene` | `examples/programmatic_scene.py` |
 | Render MuJoCo arrays | `Renderer` | `examples/mujoco_render.py` |
+| Record a video or annotate RGB | `VideoRecorder` | `examples/mujoco_video.py` |
 | Control MuJoCo state | `Session`, typed commands | `examples/mujoco_control.py` |
 | Compose MJCF and URDF | `WorkspaceAdapter` | `examples/compose_scene.py` |
 | Publish a live scene | `SnapshotPublisher` | `examples/remote_publish.py` |
