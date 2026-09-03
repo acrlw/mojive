@@ -25,12 +25,22 @@ from mojive.ui import theme as theme_mod
 from mojive.ui.compound_fields import draw_joined_field_frame
 from mojive.ui.draw2d import ImguiDraw2D
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
+from mojive.ui.panels import (
+    button_row_layout,
+    button_width,
+    search_input,
+    searchable_ordered_list_header,
+)
 from mojive.ui.panels.settings import settings_uses_stacked_layout
+from mojive.ui.perturb import OUTLINE_CORNER_RADIUS_PT
 from mojive.ui.theme import THEME, rgb8
+from mojive.ui.viewcube import DEFAULT_SELECTION_PADDING
 from mojive.ui.viewport_widgets import (
     CAPSULE_SURFACE_ALPHA,
+    DEFAULT_VIEWPORT_OVERLAY_SCALE,
     OVERLAY_GEOMETRY,
     TOOL_GLYPH_SCALE,
+    ToolHint,
     capsule_points,
     default_tool_hints,
     draw_mouse_hint_glyph,
@@ -43,30 +53,36 @@ from mojive.ui.window import Window, WindowConfig
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = ROOT / "output" / "ui-drawing-feasibility.png"
+PROBE_BASE_SIZE = (1600, 1000)
+GEOMETRY_CANVAS_SIZE = (1560.0, 900.0)
+PANEL_CANVAS_SIZE = (1560.0, 900.0)
+WORKSPACE_CANVAS_SIZE = (1600.0, 960.0)
 
-CONCEPT_THEME = replace(
-    THEME,
-    primary=rgb8(156, 191, 141),
-    primary_bright=rgb8(184, 210, 172),
-    primary_dim=rgb8(103, 135, 90),
-    danger=rgb8(208, 103, 68),
-    warning=rgb8(201, 161, 92),
-    text=rgb8(220, 222, 227),
-    text_disabled=rgb8(123, 129, 137),
-    bg_window=rgb8(30, 33, 37),
-    bg_child=rgb8(26, 29, 32),
-    bg_popup=rgb8(24, 27, 30),
-    bg_frame=rgb8(43, 47, 52),
-    bg_frame_hovered=rgb8(54, 59, 65),
-    bg_frame_active=rgb8(64, 70, 77),
-    bg_header=rgb8(48, 53, 58),
-    border=rgb8(58, 63, 69),
-    axis_colors={
-        "x": rgb8(220, 119, 115),
-        "y": rgb8(82, 170, 92),
-        "z": rgb8(111, 148, 229),
-    },
-)
+
+def _probe_window_size(width: int, height: int, ui_scale: float) -> tuple[int, int]:
+    """Keep a useful logical canvas while inspecting extreme UI scales."""
+
+    factor = max(1.0, float(ui_scale) / 2.0)
+    return round(width * factor), round(height * factor)
+
+
+def _virtual_canvas_size(
+    available,
+    scale: float,
+    logical_size: tuple[float, float],
+) -> tuple[float, float]:
+    """Preserve component proportions and let extreme scales scroll."""
+
+    return (
+        max(float(available.x), logical_size[0] * scale),
+        max(float(available.y), logical_size[1] * scale),
+    )
+
+
+# Start every concept session from the production palette. Geometry and state
+# controls below remain experimental, while accepted theme changes propagate
+# here automatically instead of leaving a second stale color table.
+CONCEPT_THEME = replace(THEME)
 JOINT_COLOR = CONCEPT_THEME.primary
 # Gizmo strokes need to read against the viewport; Inspector axis badges need
 # the inverse contrast because their 14 pt glyphs are white. Keep the hue
@@ -89,6 +105,14 @@ AXIS_BADGE_ACTIVE = (
 AXIS_BADGE_TEXT = (1.0, 1.0, 1.0, 1.0)
 VIEW_A = rgb8(31, 35, 39)
 VIEW_B = rgb8(36, 40, 45)
+PROBE_FRAME_SAMPLES = np.asarray(
+    (8.4, 8.1, 8.5, 8.2, 8.3, 8.6, 8.2, 8.4, 8.3, 8.35),
+    np.float32,
+)
+PROBE_PLOT_SAMPLES = np.asarray(
+    (0.00, 0.08, 0.16, 0.27, 0.35, 0.41, 0.38, 0.31, 0.20, 0.11, 0.04),
+    np.float32,
+)
 
 # Overlay glyphs start from one 20×20 logical coordinate system. Tool Column
 # paths receive the shared optical scale so they read at runtime size; playback
@@ -156,10 +180,7 @@ class ProbeState:
     show_playback: bool = True
     show_tool_column: bool = True
     show_joint_gizmos: bool = True
-    show_context_hints: bool = True
-    show_settings: bool = True
-    show_keyframes: bool = True
-    show_output: bool = True
+    show_context_hints: bool = False
     show_icon_bounds: bool = False
     show_state_circles: bool = False
     show_construction_notes: bool = False
@@ -169,12 +190,12 @@ class ProbeState:
     gizmo_style: int = 1
     frame: int = 1
     remember_input: bool = True
-    viewport_overlay_scale: float = 1.25
-    position_snap: float = 0.1
-    rotation_snap: float = 5.0
-    tick_scale: float = 1.25
-    selection_padding: float = 1.2
-    corner_radius: float = 4.0
+    viewport_overlay_scale: float = DEFAULT_VIEWPORT_OVERLAY_SCALE
+    position_snap: float = gizmo_ui.DEFAULT_TRANSLATION_SNAP_M
+    rotation_snap: float = gizmo_ui.DEFAULT_ROTATION_SNAP_DEG
+    tick_scale: float = gizmo_ui.DEFAULT_ROTATION_TICK_SCALE
+    selection_padding: float = DEFAULT_SELECTION_PADDING
+    corner_radius: float = OUTLINE_CORNER_RADIUS_PT
     scene_icons: bool = True
     influence_volumes: bool = True
     value_open: bool = False
@@ -198,10 +219,18 @@ class ProbeState:
     hierarchy_filter: str = ""
     hierarchy_kind: int = 0
     hierarchy_selection: int = 2
+    control_filter: str = ""
+    control_sort_by_name: bool = False
+    joint_filter: str = ""
+    joint_sort_by_name: bool = False
+    workspace_right_tab: str = "Control"
     hierarchy_visibility: list[bool] = field(
         default_factory=lambda: [True, True, False, True, True, True]
     )
     asset_selection: int = 1
+    asset_filter: str = ""
+    asset_type: int = 0
+    sensor_index: int = 0
     helper_selection: int = 1
     camera_projection: int = 0
     settings_page: int = 1
@@ -808,13 +837,17 @@ def _draw_joint_gizmo(
     state: ProbeState | None = None,
     *,
     item_id: str = "joint",
+    show_limit_labels: bool = True,
 ) -> None:
-    """Draw the accepted M8 slide/hinge target, not the current raw runtime labels."""
+    """Draw the production slide/hinge silhouettes with optional delayed labels."""
 
     x, y = origin
-    stroke = 3.0 * scale
-    tick = 8.0 * scale
-    hinge_tick = 16.0 * scale
+    stroke = gizmo_ui.JOINT_RANGE_WIDTH_PT * scale
+    outline = gizmo_geometry.JOINT_OUTLINE_PT * scale
+    outline_width = stroke + 2.0 * outline
+    outline_color = tuple(float(value) for value in gizmo_geometry.JOINT_OUTLINE_COLOR)
+    tick = 12.0 * scale
+    hinge_tick = gizmo_ui.JOINT_LIMIT_TICK_PT * scale
 
     # Slide: Primary range/handle, semantic endpoint ticks, labels offset from
     # the axis so neither the line nor the model body can pierce the text.
@@ -834,26 +867,45 @@ def _draw_joint_gizmo(
         1.0 * scale,
         rounding=2.0 * scale,
     )
+    draw.line((slide_min, slide_y), (slide_max, slide_y), outline_color, outline_width)
     draw.line((slide_min, slide_y), (slide_max, slide_y), JOINT_COLOR, stroke)
+    for point in (slide_min, slide_max):
+        draw.line(
+            (point, slide_y - tick * 0.5),
+            (point, slide_y + tick * 0.5),
+            outline_color,
+            2.0 * scale + 2.0 * outline,
+            cap="round",
+        )
     draw.line(
         (slide_min, slide_y - tick * 0.5),
         (slide_min, slide_y + tick * 0.5),
         CONCEPT_THEME.axis_color(2),
         2.0 * scale,
+        cap="round",
     )
     draw.line(
         (slide_max, slide_y - tick * 0.5),
         (slide_max, slide_y + tick * 0.5),
         CONCEPT_THEME.axis_color(0),
         2.0 * scale,
+        cap="round",
     )
     current_x = x + 211.0 * scale
     current_tick = 20.0 * scale
     draw.line(
         (current_x, slide_y - current_tick * 0.5),
         (current_x, slide_y + current_tick * 0.5),
-        CONCEPT_THEME.primary_bright,
+        outline_color,
+        4.0 * scale + 2.0 * outline,
+        cap="round",
+    )
+    draw.line(
+        (current_x, slide_y - current_tick * 0.5),
+        (current_x, slide_y + current_tick * 0.5),
+        gizmo_ui.JOINT_CURRENT_COLOR,
         4.0 * scale,
+        cap="round",
     )
     # Opposing drag handles sit off the scale line; the line itself shares the
     # same pointer target so the control remains discoverable.
@@ -863,8 +915,16 @@ def _draw_joint_gizmo(
         scale,
     )
     for arrow in arrows:
+        points = tuple((float(point[0]), float(point[1])) for point in arrow)
+        draw.fringed_concave_fill(points, outline_color)
+        draw.polyline(
+            points,
+            outline_color,
+            2.0 * outline * gizmo_ui.JOINT_SLIDE_ARROW_VISUAL_SCALE,
+            closed=True,
+        )
         draw.fringed_concave_fill(
-            tuple((float(point[0]), float(point[1])) for point in arrow),
+            points,
             JOINT_COLOR,
         )
     hit_arrows = gizmo_ui.joint_slide_arrow_polygons(
@@ -881,42 +941,53 @@ def _draw_joint_gizmo(
         (arrow_hi[0] + 4.0 * scale, arrow_hi[1] + 4.0 * scale),
     ):
         _open_joint_value(state, "slide_joint", 0.0, "m")
-    _draw_label_button(
-        draw,
-        "##joint-min-slide",
-        (x + 18.0 * scale, y + 82.0 * scale),
-        "MIN",
-        "−0.340",
-        "m",
-        CONCEPT_THEME.axis_color(2),
-        scale,
-    )
-    _draw_label_button(
-        draw,
-        "##joint-max-slide",
-        (x + 282.0 * scale, y + 172.0 * scale),
-        "MAX",
-        "+0.340",
-        "m",
-        CONCEPT_THEME.axis_color(0),
-        scale,
-    )
+    if show_limit_labels:
+        _draw_label_button(
+            draw,
+            "##joint-min-slide",
+            (x + 18.0 * scale, y + 82.0 * scale),
+            "MIN",
+            "−0.340",
+            "m",
+            CONCEPT_THEME.axis_color(2),
+            scale,
+            interactive=False,
+        )
+        _draw_label_button(
+            draw,
+            "##joint-max-slide",
+            (x + 282.0 * scale, y + 172.0 * scale),
+            "MAX",
+            "+0.340",
+            "m",
+            CONCEPT_THEME.axis_color(0),
+            scale,
+            interactive=False,
+        )
 
     # Hinge: a single clean Primary arc. Endpoint ticks are radial and use the
     # same MIN/MAX semantic colors as the adjacent label dots.
     center = (x + 548.0 * scale, y + 140.0 * scale)
     radius = 72.0 * scale
     arc = tuple((center[0] + ux * radius, center[1] + uy * radius) for ux, uy in JOINT_HINGE_ARC)
-    draw.polyline(arc, JOINT_COLOR, stroke, cap="butt")
+    draw.polyline(arc, outline_color, outline_width, cap="round")
+    draw.polyline(arc, JOINT_COLOR, stroke, cap="round")
     for index, color in enumerate((CONCEPT_THEME.axis_color(0), CONCEPT_THEME.axis_color(2))):
         ux, uy = JOINT_HINGE_ARC[0 if index == 0 else -1]
         point = (center[0] + ux * radius, center[1] + uy * radius)
         draw.line(
             point,
             (point[0] + ux * hinge_tick, point[1] + uy * hinge_tick),
+            outline_color,
+            2.4 * scale + 2.0 * outline,
+            cap="round",
+        )
+        draw.line(
+            point,
+            (point[0] + ux * hinge_tick, point[1] + uy * hinge_tick),
             color,
             2.4 * scale,
-            cap="round_end",
+            cap="round",
         )
     current_ux, current_uy = JOINT_HINGE_ARC[len(JOINT_HINGE_ARC) // 2]
     current_point = (
@@ -929,9 +1000,19 @@ def _draw_joint_gizmo(
             current_point[0] + current_ux * current_tick,
             current_point[1] + current_uy * current_tick,
         ),
+        outline_color,
+        outline_width,
+        cap="round",
+    )
+    draw.line(
+        current_point,
+        (
+            current_point[0] + current_ux * current_tick,
+            current_point[1] + current_uy * current_tick,
+        ),
         JOINT_COLOR,
         stroke,
-        cap="round_end",
+        cap="round",
     )
     if state is not None and _joint_double_click(
         f"##{item_id}-hinge-ring",
@@ -941,33 +1022,39 @@ def _draw_joint_gizmo(
         tolerance=10.0 * scale,
     ):
         _open_joint_value(state, "hinge_joint", 0.0, "°")
-    _draw_label_button(
-        draw,
-        "##joint-max-hinge",
-        (x + 500.0 * scale, y + 18.0 * scale),
-        "MAX",
-        "+120.0",
-        "°",
-        CONCEPT_THEME.axis_color(0),
-        scale,
-    )
-    _draw_label_button(
-        draw,
-        "##joint-min-hinge",
-        (x + 392.0 * scale, y + 208.0 * scale),
-        "MIN",
-        "−120.0",
-        "°",
-        CONCEPT_THEME.axis_color(2),
-        scale,
-    )
+    if show_limit_labels:
+        _draw_label_button(
+            draw,
+            "##joint-max-hinge",
+            (x + 500.0 * scale, y + 18.0 * scale),
+            "MAX",
+            "+120.0",
+            "°",
+            CONCEPT_THEME.axis_color(0),
+            scale,
+            interactive=False,
+        )
+        _draw_label_button(
+            draw,
+            "##joint-min-hinge",
+            (x + 392.0 * scale, y + 208.0 * scale),
+            "MIN",
+            "−120.0",
+            "°",
+            CONCEPT_THEME.axis_color(2),
+            scale,
+            interactive=False,
+        )
 
 
 def _draw_joint_rotation_feedback(draw: ImguiDraw2D, center, radius: float, scale: float) -> None:
-    """Show the accepted hinge drag + Shift colors without legacy amber/yellow."""
+    """Show the production hinge drag + Shift colors and joint outline."""
 
     arc = tuple((center[0] + ux * radius, center[1] + uy * radius) for ux, uy in JOINT_HINGE_ARC)
-    draw.polyline(arc, JOINT_COLOR, 3.0 * scale, cap="butt")
+    outline = gizmo_geometry.JOINT_OUTLINE_PT * scale
+    outline_color = tuple(float(value) for value in gizmo_geometry.JOINT_OUTLINE_COLOR)
+    draw.polyline(arc, outline_color, 3.0 * scale + 2.0 * outline, cap="round")
+    draw.polyline(arc, JOINT_COLOR, 3.0 * scale, cap="round")
 
     start_index = 8
     end_index = 17
@@ -976,7 +1063,13 @@ def _draw_joint_rotation_feedback(draw: ImguiDraw2D, center, radius: float, scal
         (center, *sweep),
         (*CONCEPT_THEME.primary_dim[:3], 0.24),
     )
-    draw.polyline(sweep, CONCEPT_THEME.primary_bright, 3.0 * scale, cap="butt")
+    draw.polyline(
+        sweep,
+        outline_color,
+        3.0 * scale + 2.0 * outline,
+        cap="round",
+    )
+    draw.polyline(sweep, CONCEPT_THEME.primary_bright, 3.0 * scale, cap="round")
 
     for index in range(0, len(JOINT_HINGE_ARC), 2):
         ux, uy = JOINT_HINGE_ARC[index]
@@ -987,7 +1080,7 @@ def _draw_joint_rotation_feedback(draw: ImguiDraw2D, center, radius: float, scal
             (point[0] + ux * length, point[1] + uy * length),
             CONCEPT_THEME.text_disabled,
             1.1 * scale,
-            cap="round_end",
+            cap="round",
         )
 
     ux, uy = JOINT_HINGE_ARC[end_index]
@@ -997,7 +1090,7 @@ def _draw_joint_rotation_feedback(draw: ImguiDraw2D, center, radius: float, scal
         (point[0] + ux * 12.0 * scale, point[1] + uy * 12.0 * scale),
         CONCEPT_THEME.primary_bright,
         2.6 * scale,
-        cap="round_end",
+        cap="round",
     )
     draw.circle_filled(center, 3.0 * scale, CONCEPT_THEME.text, segments=18)
 
@@ -1908,6 +2001,7 @@ def _draw_viewport(size, scale: float, state: ProbeState) -> tuple[float, float,
             scale,
             state,
             item_id="workspace-joint",
+            show_limit_labels=False,
         )
     if state.show_context_hints:
         hint_width = _hint_bar_width(draw, scale, state)
@@ -2032,10 +2126,11 @@ def _draw_keyframes(size, scale: float) -> None:
         return
     imgui.text("Keyframes")
     imgui.separator()
-    imgui.text_disabled("Model")
-    imgui.same_line()
-    imgui.set_next_item_width(260 * scale)
-    imgui.combo("##probe-keyframe-model", 0, ("joint_types",))
+    if _begin_gallery_properties("##probe-keyframe-model-row"):
+        _property_label("model")
+        imgui.set_next_item_width(-1.0)
+        imgui.combo("##probe-keyframe-model", 0, ("joint_types",))
+        imgui.end_table()
     draw = ImguiDraw2D(imgui.get_window_draw_list())
     row_one = imgui.get_cursor_screen_pos()
     imgui.button("●  Record New Take", imgui.ImVec2(142.0 * scale, 28.0 * scale))
@@ -2048,14 +2143,8 @@ def _draw_keyframes(size, scale: float) -> None:
             kind,
             scale,
         )
-    draw.text(
-        (
-            imgui.get_window_pos().x + imgui.get_window_size().x - 154.0 * scale,
-            row_one.y + 7.0 * scale,
-        ),
-        CONCEPT_THEME.text_disabled,
-        "frame 86 / 240",
-    )
+    take_status_x = transport_x + 7 * 34.0 * scale + 8.0 * scale
+    draw.text((take_status_x, row_one.y + 7.0 * scale), CONCEPT_THEME.text_disabled, "frame 86/240")
 
     row_two_y = row_one.y + 34.0 * scale
     imgui.set_cursor_screen_pos(imgui.ImVec2(row_one.x, row_two_y))
@@ -2069,10 +2158,7 @@ def _draw_keyframes(size, scale: float) -> None:
             scale,
         )
     draw.text(
-        (
-            imgui.get_window_pos().x + imgui.get_window_size().x - 154.0 * scale,
-            row_two_y + 7.0 * scale,
-        ),
+        (transport_x + 3 * 34.0 * scale + 8.0 * scale, row_two_y + 7.0 * scale),
         CONCEPT_THEME.text_disabled,
         "1.20 s · 3 snapshots",
     )
@@ -2080,6 +2166,14 @@ def _draw_keyframes(size, scale: float) -> None:
     timeline_y = row_two_y + 54 * scale
     left = row_one.x + 128 * scale
     right = imgui.get_window_pos().x + imgui.get_window_size().x - 18 * scale
+    imgui.set_cursor_screen_pos(imgui.ImVec2(row_one.x, timeline_y - 26.0 * scale))
+    imgui.invisible_button(
+        "##probe-keyframe-dope-sheet",
+        imgui.ImVec2(max(1.0, right - row_one.x), 132.0 * scale),
+        _flags(imgui.ButtonFlags_.mouse_button_left, imgui.ButtonFlags_.mouse_button_middle),
+    )
+    if imgui.is_item_hovered() and imgui.get_mouse_pos().x >= left:
+        imgui.set_item_key_owner(imgui.Key.mouse_wheel_y)
     draw.text((row_one.x, timeline_y - 5 * scale), CONCEPT_THEME.text, "Model Keyframes")
     draw.line(
         (left, timeline_y + 4 * scale), (right, timeline_y + 4 * scale), CONCEPT_THEME.border, 1.0
@@ -2120,19 +2214,24 @@ def _draw_keyframes(size, scale: float) -> None:
     imgui.end_child()
 
 
-def _draw_output(size, state: ProbeState) -> None:
+def _draw_output(size, state: ProbeState, scale: float) -> None:
     if not imgui.begin_child("Output###ProbeOutput", size, imgui.ChildFlags_.borders.value):
         imgui.end_child()
         return
     imgui.text("Output")
     imgui.separator()
     available = imgui.get_content_region_avail().x
-    imgui.set_next_item_width(max(100.0, available - 155.0))
-    _, state.output_filter = imgui.input_text_with_hint(
-        "##probe-output-filter", "Filter text or component...", state.output_filter
+    level_width = 145.0 * scale
+    imgui.set_next_item_width(max(100.0 * scale, available - level_width - 10.0 * scale))
+    _, state.output_filter = search_input(
+        "##probe-output-filter",
+        state.output_filter,
+        hint="Filter text or component...",
+        search_tooltip="Search output",
+        clear_tooltip="Clear search",
     )
     imgui.same_line()
-    imgui.set_next_item_width(145.0)
+    imgui.set_next_item_width(level_width)
     _, state.output_level = imgui.combo(
         "##probe-output-level", state.output_level, ("All levels", "Warnings", "Errors")
     )
@@ -2147,7 +2246,18 @@ def _draw_output(size, state: ProbeState) -> None:
             ("09:44:54", "INFO", "[mojive/ui] Loading model /assets/joint_types.xml"),
         )
     )
-    imgui.text_disabled(f"{len(rows)} messages · select a row, then right-click or press Ctrl+C")
+    copy_label = "Copy all"
+    if imgui.button(copy_label):
+        imgui.set_clipboard_text(
+            "\n".join(f"{time}  [{severity}]  {text}" for time, severity, text in rows)
+        )
+    imgui.same_line()
+    if imgui.button("Clear"):
+        state.output_cleared = True
+        state.selected_output = -1
+        rows = ()
+    imgui.same_line()
+    imgui.text_disabled(f"{len(rows)} messages")
     imgui.separator()
     if not rows:
         imgui.text_disabled("No messages")
@@ -2164,8 +2274,8 @@ def _draw_output(size, state: ProbeState) -> None:
             state.selected_output = index
         if imgui.begin_popup_context_item(f"##probe-output-context-{index}"):
             copy_message, _ = imgui.menu_item("Copy message", "Ctrl+C", False)
-            copy_row, _ = imgui.menu_item("Copy complete row", "", False)
-            copy_all, _ = imgui.menu_item("Copy all shown", "", False)
+            copy_row, _ = imgui.menu_item("Copy full entry", "Ctrl+Shift+C", False)
+            copy_all, _ = imgui.menu_item("Copy all", "", False)
             imgui.separator()
             clear_output, _ = imgui.menu_item("Clear output", "", False)
             if copy_message:
@@ -2184,7 +2294,10 @@ def _draw_output(size, state: ProbeState) -> None:
     copy_shortcut = bool(io.key_ctrl or io.key_super) and imgui.is_key_pressed(imgui.Key.c, False)
     if copy_shortcut and 0 <= state.selected_output < len(rows):
         timestamp, level, message = rows[state.selected_output]
-        imgui.set_clipboard_text(f"{timestamp}  [{level}]  {message}")
+        if io.key_shift:
+            imgui.set_clipboard_text(f"{timestamp}  [{level}]  {message}")
+        else:
+            imgui.set_clipboard_text(message)
     imgui.end_child()
 
 
@@ -2209,11 +2322,52 @@ def _begin_gallery_properties(item_id: str) -> bool:
     return True
 
 
-def _draw_control_gallery(size, state: ProbeState) -> None:
-    opened = _begin_gallery_panel("Control", "ProbeControl", size)
-    if opened:
-        imgui.text("actuators")
-        imgui.separator()
+def _draw_search_header(
+    item_id: str,
+    hint: str,
+    value: str,
+    sort_by_name: bool,
+    *,
+    state_order: str,
+) -> tuple[str, bool]:
+    """Use the production searchable-list header with specimen state."""
+
+    _changed, value, _sort_changed, sort_by_name = searchable_ordered_list_header(
+        f"##{item_id}",
+        value,
+        sort_by_name,
+        hint=hint,
+        search_tooltip=hint,
+        clear_tooltip="Clear search",
+        state_order=state_order,
+        translate=lambda text: text,
+    )
+    return value, sort_by_name
+
+
+def _draw_copy_buttons(item_id: str, labels: tuple[str, str]) -> None:
+    flags = _flags(
+        imgui.TableFlags_.sizing_stretch_same,
+        imgui.TableFlags_.no_pad_outer_x,
+    )
+    if not imgui.begin_table(f"##{item_id}-copy", 2, flags):
+        return
+    for label in labels:
+        imgui.table_next_column()
+        imgui.button(f"{label}##{item_id}", imgui.ImVec2(-1.0, 0.0))
+    imgui.end_table()
+
+
+def _draw_control_content(state: ProbeState) -> None:
+    if imgui.collapsing_header("actuators", imgui.TreeNodeFlags_.default_open.value):
+        state.control_filter, state.control_sort_by_name = _draw_search_header(
+            "probe-actuator",
+            "Search actuators",
+            state.control_filter,
+            state.control_sort_by_name,
+            state_order="ctrl / act",
+        )
+        _draw_copy_buttons("probe-actuator-state", ("Copy ctrl", "Copy act"))
         if _begin_gallery_properties("##probe-control-actuators"):
             _property_label("hinge_pos")
             _, state.hinge_ctrl = imgui.slider_float(
@@ -2225,97 +2379,113 @@ def _draw_control_gallery(size, state: ProbeState) -> None:
             )
             imgui.end_table()
 
-        imgui.spacing()
-        imgui.text("equality")
-        imgui.separator()
-        if _begin_gallery_properties("##probe-control-equality"):
-            for item_id, name, enabled in (
-                ("weld", "eq_weld_0", state.weld_enabled),
-                ("connect", "eq_connect_0", state.connect_enabled),
-            ):
-                _property_label(name)
-                _changed, enabled = _probe_checkbox(f"##probe-equality-{item_id}", enabled)
-                if item_id == "weld":
-                    state.weld_enabled = enabled
-                else:
-                    state.connect_enabled = enabled
-            imgui.end_table()
+    if imgui.collapsing_header(
+        "equality", imgui.TreeNodeFlags_.default_open.value
+    ) and _begin_gallery_properties("##probe-control-equality"):
+        for item_id, name, enabled in (
+            ("weld", "eq_weld_0", state.weld_enabled),
+            ("connect", "eq_connect_0", state.connect_enabled),
+        ):
+            _property_label(name)
+            _changed, enabled = _probe_checkbox(f"##probe-equality-{item_id}", enabled)
+            if item_id == "weld":
+                state.weld_enabled = enabled
+            else:
+                state.connect_enabled = enabled
+        imgui.end_table()
+
+
+def _draw_control_gallery(size, state: ProbeState) -> None:
+    opened = _begin_gallery_panel("Control", "ProbeControl", size)
+    if opened:
+        _draw_control_content(state)
     imgui.end_child()
+
+
+def _draw_joints_content(state: ProbeState) -> None:
+    state.joint_filter, state.joint_sort_by_name = _draw_search_header(
+        "probe-joint",
+        "Search joints",
+        state.joint_filter,
+        state.joint_sort_by_name,
+        state_order="qpos / qvel",
+    )
+    _draw_copy_buttons("probe-joint-state", ("Copy qpos", "Copy qvel"))
+    if _begin_gallery_properties("##probe-all-joints"):
+        _property_label("floating_base")
+        _table_text("free · 6 dof", disabled=True)
+        _property_label("shoulder_ball")
+        _table_text("ball · 3 dof", disabled=True)
+        _property_label("slide")
+        _, state.slide_position = imgui.slider_float(
+            "##probe-slide-position", state.slide_position, -0.34, 0.34, "%+.4f"
+        )
+        _property_label("hinge_limited")
+        _, state.hinge_position = imgui.slider_float(
+            "##probe-hinge-position", state.hinge_position, -1.2, 1.2, "%+.4f"
+        )
+        imgui.end_table()
 
 
 def _draw_joints_gallery(size, state: ProbeState) -> None:
     opened = _begin_gallery_panel("Joints", "ProbeJoints", size)
     if opened:
-        if _begin_gallery_properties("##probe-direct-joints"):
-            _property_label("hinge_limited")
-            _, state.hinge_position = imgui.slider_float(
-                "##probe-hinge-position", state.hinge_position, -1.2, 1.2, "%+.4f"
-            )
-            imgui.end_table()
-
-        imgui.spacing()
-        imgui.text_disabled("Other joints")
-        if _begin_gallery_properties("##probe-all-joints"):
-            _property_label("free")
-            _table_text("free · 6 dof", disabled=True)
-            _property_label("slide")
-            _, state.slide_position = imgui.slider_float(
-                "##probe-slide-position", state.slide_position, -0.34, 0.34, "%+.4f"
-            )
-            _property_label("ball")
-            _table_text("ball · 3 dof", disabled=True)
-            imgui.end_table()
+        _draw_joints_content(state)
     imgui.end_child()
+
+
+def _draw_camera_content(state: ProbeState) -> None:
+    imgui.set_next_item_width(-1.0)
+    imgui.combo("##probe-camera", 0, ("source: free", "overview", "tracking"))
+    imgui.spacing()
+    imgui.text_disabled("presets")
+    preset_flags = _flags(
+        imgui.TableFlags_.sizing_stretch_same,
+        imgui.TableFlags_.no_saved_settings,
+        imgui.TableFlags_.no_pad_outer_x,
+    )
+    if imgui.begin_table("##probe-camera-presets", 4, preset_flags):
+        for index, label in enumerate(
+            ("front", "back", "left", "right", "top", "bottom", "iso", "frame all")
+        ):
+            imgui.table_next_column()
+            imgui.button(f"{label}##probe-camera-preset-{index}", imgui.ImVec2(-1.0, 0.0))
+        imgui.end_table()
+    imgui.separator()
+    if _begin_gallery_properties("##probe-camera-params"):
+        for label, value, lo, hi, fmt in (
+            ("yaw", -90.0, -180.0, 180.0, "%.1f deg"),
+            ("pitch", -20.0, -89.9, 89.9, "%.1f deg"),
+            ("distance", 3.0, 0.05, 200.0, "%.3f m"),
+            ("fov_y_deg", 45.0, 10.0, 120.0, "%.1f deg"),
+            ("far", 200.0, 1.0, 100000.0, "%.1f m"),
+        ):
+            _property_label(label)
+            imgui.slider_float(f"##probe-camera-{label}", value, lo, hi, fmt)
+        _property_label("projection")
+        segment_width = max(44.0, (imgui.get_content_region_avail().x - 1.0) * 0.5)
+        state.camera_projection = _draw_segmented(
+            "camera-projection",
+            ("persp", "ortho"),
+            state.camera_projection,
+            width=segment_width,
+            icons=("persp", "ortho"),
+        )
+        imgui.end_table()
+    if imgui.collapsing_header("camera bookmarks"):
+        imgui.text_disabled("camera bookmark")
+        imgui.input_text("##probe-camera-bookmark", "view-1")
+        imgui.button("save")
+        imgui.same_line()
+        imgui.button("copy")
+        imgui.same_line()
+        imgui.button("delete")
 
 
 def _draw_camera_gallery(size, state: ProbeState) -> None:
     opened = _begin_gallery_panel("Camera", "ProbeCamera", size)
     if opened:
-        imgui.set_next_item_width(-1.0)
-        imgui.combo("##probe-camera", 0, ("source: free", "overview", "tracking"))
-        imgui.spacing()
-        imgui.text_disabled("presets")
-        preset_flags = _flags(
-            imgui.TableFlags_.sizing_stretch_same,
-            imgui.TableFlags_.no_saved_settings,
-            imgui.TableFlags_.no_pad_outer_x,
-        )
-        if imgui.begin_table("##probe-camera-presets", 4, preset_flags):
-            for index, label in enumerate(
-                ("front", "back", "left", "right", "top", "bottom", "iso", "frame all")
-            ):
-                imgui.table_next_column()
-                imgui.button(f"{label}##probe-camera-preset-{index}", imgui.ImVec2(-1.0, 0.0))
-            imgui.end_table()
-        imgui.separator()
-        if _begin_gallery_properties("##probe-camera-params"):
-            for label, value, lo, hi, fmt in (
-                ("yaw", -90.0, -180.0, 180.0, "%.1f deg"),
-                ("pitch", -20.0, -89.9, 89.9, "%.1f deg"),
-                ("distance", 3.0, 0.05, 200.0, "%.3f m"),
-                ("fov_y_deg", 45.0, 10.0, 120.0, "%.1f deg"),
-                ("far", 200.0, 1.0, 100000.0, "%.1f m"),
-            ):
-                _property_label(label)
-                imgui.slider_float(f"##probe-camera-{label}", value, lo, hi, fmt)
-            _property_label("projection")
-            segment_width = max(44.0, (imgui.get_content_region_avail().x - 1.0) * 0.5)
-            state.camera_projection = _draw_segmented(
-                "camera-projection",
-                ("persp", "ortho"),
-                state.camera_projection,
-                width=segment_width,
-                icons=("persp", "ortho"),
-            )
-            imgui.end_table()
-        if imgui.collapsing_header("camera bookmarks"):
-            imgui.text_disabled("camera bookmark")
-            imgui.input_text("##probe-camera-bookmark", "view-1")
-            imgui.button("save")
-            imgui.same_line()
-            imgui.button("copy")
-            imgui.same_line()
-            imgui.button("delete")
+        _draw_camera_content(state)
     imgui.end_child()
 
 
@@ -2483,8 +2653,12 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
     opened = _begin_gallery_panel("Hierarchy", "ProbeHierarchy", size)
     if opened:
         imgui.set_next_item_width(-1.0)
-        _changed, state.hierarchy_filter = imgui.input_text_with_hint(
-            "##probe-hierarchy-filter", "Filter entities...", state.hierarchy_filter
+        _changed, state.hierarchy_filter = search_input(
+            "##probe-hierarchy-filter",
+            state.hierarchy_filter,
+            hint="Search hierarchy",
+            search_tooltip="Search hierarchy",
+            clear_tooltip="Clear search",
         )
         chip_flags = _flags(
             imgui.WindowFlags_.horizontal_scrollbar, imgui.WindowFlags_.no_scroll_with_mouse
@@ -2662,79 +2836,169 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
 def _draw_assets_gallery(size, state: ProbeState) -> None:
     opened = _begin_gallery_panel("Assets", "ProbeAssets", size)
     if opened:
-        imgui.button("Import Mesh...")
-        imgui.same_line()
-        imgui.button("Import Texture...")
+        if _begin_gallery_properties("##probe-asset-model"):
+            _property_label("model")
+            imgui.set_next_item_width(-1.0)
+            imgui.combo("##probe-asset-model-name", 0, ("gizmo",))
+            imgui.end_table()
+
+        import_labels = ("Import Mesh...", "Import Height Field...", "Import Texture...")
+        inline = button_row_layout(
+            tuple(button_width(label) for label in import_labels),
+            imgui.get_content_region_avail().x,
+            imgui.get_style().item_spacing.x,
+        )
+        for index, label in enumerate(import_labels):
+            if inline[index]:
+                imgui.same_line()
+            imgui.button(f"{label}##probe-asset-import-{index}")
+
+        if _begin_gallery_properties("##probe-texture-type"):
+            _property_label("texture type")
+            imgui.set_next_item_width(-1.0)
+            imgui.combo("##probe-texture-type-value", 0, ("2D", "Cube", "Skybox"))
+            imgui.end_table()
+        imgui.collapsing_header("Height-field import size")
+        imgui.collapsing_header("New material")
         imgui.separator()
-        for index, (name, kind) in enumerate(
-            (
-                ("robot_body", "mesh"),
-                ("floor_albedo", "texture"),
-                ("robot_metal", "material"),
-                ("terrain", "height field"),
-            )
+        imgui.set_next_item_width(-1.0)
+        _changed, state.asset_filter = search_input(
+            "##probe-asset-filter",
+            state.asset_filter,
+            hint="Filter assets...",
+            search_tooltip="Search assets",
+            clear_tooltip="Clear search",
+        )
+        imgui.set_next_item_width(-1.0)
+        _changed, state.asset_type = imgui.combo(
+            "##probe-asset-type", state.asset_type, ("All", "mesh", "texture", "material", "hfield")
+        )
+        list_height = min(150.0, max(86.0, imgui.get_content_region_avail().y * 0.48))
+        if imgui.begin_child(
+            "##probe-asset-list", imgui.ImVec2(0.0, list_height), imgui.ChildFlags_.borders.value
         ):
-            clicked, _ = imgui.selectable(
-                f"{name}##probe-asset-{index}", state.asset_selection == index
+            flags = _flags(
+                imgui.TableFlags_.sizing_stretch_prop,
+                imgui.TableFlags_.row_bg,
+                imgui.TableFlags_.no_saved_settings,
             )
-            if clicked:
-                state.asset_selection = index
-            imgui.same_line()
-            width = imgui.calc_text_size(kind).x
-            imgui.set_cursor_pos_x(
-                max(imgui.get_cursor_pos_x(), imgui.get_window_width() - width - 18.0)
-            )
-            imgui.text_disabled(kind)
-        imgui.separator()
-        imgui.text_disabled("4 model-local assets")
+            if imgui.begin_table("##probe-asset-table", 3, flags):
+                imgui.table_setup_column("Name", imgui.TableColumnFlags_.width_stretch.value, 1.0)
+                imgui.table_setup_column("Type", imgui.TableColumnFlags_.width_fixed.value)
+                imgui.table_setup_column("Used", imgui.TableColumnFlags_.width_fixed.value)
+                imgui.table_headers_row()
+                for index, (name, kind, used) in enumerate(
+                    (
+                        ("robot_body", "mesh", "2"),
+                        ("floor_albedo", "texture", "1"),
+                        ("robot_metal", "material", "12"),
+                        ("terrain", "hfield", "1"),
+                    )
+                ):
+                    imgui.table_next_row()
+                    imgui.table_next_column()
+                    clicked, _ = imgui.selectable(
+                        f"{name}##probe-asset-{index}",
+                        state.asset_selection == index,
+                        imgui.SelectableFlags_.span_all_columns.value,
+                    )
+                    if clicked:
+                        state.asset_selection = index
+                    imgui.table_next_column()
+                    imgui.text_disabled(kind)
+                    imgui.table_next_column()
+                    imgui.text_disabled(used)
+                imgui.end_table()
+        imgui.end_child()
     imgui.end_child()
 
 
 def _draw_stats_gallery(size) -> None:
     opened = _begin_gallery_panel("Stats", "ProbeStats", size)
     if opened:
-        if _begin_gallery_properties("##probe-stats"):
+        imgui.plot_lines(
+            "##probe-frame-plot",
+            PROBE_FRAME_SAMPLES,
+            overlay_text="8.35 ms   119.8 fps",
+            scale_min=0.0,
+            scale_max=16.7,
+            graph_size=imgui.ImVec2(-1.0, 60.0),
+        )
+        imgui.text_disabled("scale 0 .. 16.7 ms   (60 fps = 16.7 ms)")
+        flags = _flags(imgui.TableFlags_.sizing_stretch_same, imgui.TableFlags_.row_bg)
+        if imgui.begin_table("##probe-stats-counts", 2, flags):
+            imgui.table_setup_column("metric", imgui.TableColumnFlags_.width_stretch.value, 1.0)
+            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch.value, 1.0)
             for label, value in (
-                ("FPS", "119.8"),
-                ("Frame", "8.35 ms"),
-                ("Physics", "0.42 ms"),
-                ("Render", "3.61 ms"),
-                ("Draw calls", "148"),
-                ("Triangles", "284,612"),
+                ("draw calls", "148"),
+                ("instances", "216"),
+                ("triangles", "284,612"),
+                ("buckets", "9"),
+                ("frame cpu", "3.610 ms"),
             ):
                 _property_label(label)
                 _table_text(value)
             imgui.end_table()
-        imgui.spacing()
-        imgui.plot_lines(
-            "##probe-frame-plot",
-            np.asarray((8.4, 8.1, 8.5, 8.2, 8.3, 8.6, 8.2, 8.4, 8.3, 8.35), np.float32),
-            graph_size=imgui.ImVec2(-1.0, 72.0),
-        )
-    imgui.end_child()
-
-
-def _draw_sensors_gallery(size) -> None:
-    opened = _begin_gallery_panel("Sensors", "ProbeSensors", size)
-    if opened:
-        imgui.input_text_with_hint("##probe-sensor-filter", "Filter sensors...", "")
         imgui.separator()
-        if imgui.begin_table("##probe-sensors", 3, imgui.TableFlags_.row_bg.value):
-            imgui.table_setup_column("Sensor", imgui.TableColumnFlags_.width_stretch.value, 0.5)
-            imgui.table_setup_column("Value", imgui.TableColumnFlags_.width_stretch.value, 0.3)
-            imgui.table_setup_column("Unit", imgui.TableColumnFlags_.width_stretch.value, 0.2)
+        if imgui.begin_table(
+            "##probe-stats-passes",
+            3,
+            _flags(imgui.TableFlags_.sizing_stretch_prop, imgui.TableFlags_.row_bg),
+        ):
+            for heading in ("pass", "cpu ms", "gpu ms"):
+                imgui.table_setup_column(heading)
             imgui.table_headers_row()
-            for name, value, unit in (
-                ("imu_accel", "0.02  0.01  9.81", "m/s²"),
-                ("hinge_pos", "+0.350", "rad"),
-                ("foot_force", "128.4", "N"),
-                ("range_front", "2.41", "m"),
-            ):
+            for name, cpu, gpu in (("opaque", "1.842", "1.109"), ("overlay", "0.381", "0.214")):
                 imgui.table_next_row()
-                for cell in (name, value, unit):
+                for cell in (name, cpu, gpu):
                     imgui.table_next_column()
                     imgui.text(cell)
             imgui.end_table()
+    imgui.end_child()
+
+
+def _draw_sensors_gallery(size, state: ProbeState) -> None:
+    opened = _begin_gallery_panel("Sensors", "ProbeSensors", size)
+    if opened:
+        imgui.set_next_item_width(-1.0)
+        _changed, state.sensor_index = imgui.combo(
+            "##probe-sensor", state.sensor_index, ("camera_grid", "imu_accel", "hinge_pos")
+        )
+        if _begin_gallery_properties("##probe-sensor-properties"):
+            if state.sensor_index == 0:
+                _property_label("type")
+                _table_text("rangefinder")
+                _property_label("dimension")
+                _table_text("42")
+            elif state.sensor_index == 1:
+                _property_label("type")
+                _table_text("accelerometer")
+                _property_label("dimension")
+                _table_text("3")
+                _property_label("value")
+                _table_text("[0.02, 0.01, 9.81]")
+            else:
+                _property_label("type")
+                _table_text("jointpos")
+                _property_label("dimension")
+                _table_text("1")
+                _property_label("value")
+                _table_text("[0.350]")
+            imgui.end_table()
+        if state.sensor_index == 0:
+            imgui.separator()
+            imgui.text_disabled("value")
+            imgui.button("Copy")
+            imgui.same_line()
+            imgui.button("Open in Plot")
+            if imgui.begin_child(
+                "##probe-sensor-values", imgui.ImVec2(0.0, 112.0), imgui.ChildFlags_.borders.value
+            ):
+                imgui.text_wrapped(
+                    "[ 2.410969, -0.774737, 0.387369, 0.640125, 1.129701,  ... ,\n"
+                    "  1.884203, 2.004288, 2.101055 ]"
+                )
+            imgui.end_child()
     imgui.end_child()
 
 
@@ -2769,12 +3033,85 @@ def _draw_panel_gallery(available, state: ProbeState, scale: float) -> None:
             lambda: _draw_hierarchy_gallery(lower_sizes[0], state, scale),
             lambda: _draw_assets_gallery(lower_sizes[1], state),
             lambda: _draw_stats_gallery(lower_sizes[2]),
-            lambda: _draw_sensors_gallery(lower_sizes[3]),
+            lambda: _draw_sensors_gallery(lower_sizes[3], state),
         )
     ):
         draw_panel()
         if index != 3:
             imgui.same_line()
+
+
+def _draw_workspace_right_dock(size, state: ProbeState) -> None:
+    if not imgui.begin_child(
+        "Right dock###ProbeWorkspaceRightDock",
+        size,
+        imgui.ChildFlags_.borders.value,
+    ):
+        imgui.end_child()
+        return
+    if imgui.begin_tab_bar("##probe-workspace-right-tabs"):
+        for label in ("Control", "Joints", "Camera"):
+            flags = (
+                imgui.TabItemFlags_.set_selected
+                if state.workspace_right_tab == label
+                else imgui.TabItemFlags_.none
+            )
+            opened, _ = imgui.begin_tab_item(label, None, flags)
+            if not opened:
+                continue
+            state.workspace_right_tab = label
+            if label == "Control":
+                _draw_control_content(state)
+            elif label == "Joints":
+                _draw_joints_content(state)
+            else:
+                _draw_camera_content(state)
+            imgui.end_tab_item()
+        imgui.end_tab_bar()
+    imgui.end_child()
+
+
+def _draw_panel_page(available, state: ProbeState, scale: float) -> None:
+    flags = _flags(
+        imgui.WindowFlags_.horizontal_scrollbar,
+        imgui.WindowFlags_.always_vertical_scrollbar,
+    )
+    if not imgui.begin_child(
+        "Panel gallery canvas###ProbePanelGalleryCanvas",
+        available,
+        imgui.ChildFlags_.none.value,
+        flags,
+    ):
+        imgui.end_child()
+        return
+    cursor = imgui.get_cursor_pos()
+    width, height = _virtual_canvas_size(available, scale, PANEL_CANVAS_SIZE)
+    _draw_panel_gallery(imgui.ImVec2(width, height), state, scale)
+    imgui.set_cursor_pos(imgui.ImVec2(cursor.x + width - 1.0, cursor.y + height - 1.0))
+    imgui.dummy(imgui.ImVec2(1.0, 1.0))
+    imgui.end_child()
+
+
+def _probe_status_hints(
+    variant: str,
+    *,
+    selected: bool,
+    selection_clear: bool = True,
+) -> tuple[ToolHint, ...]:
+    """Compose the production status grammar for deterministic specimens."""
+
+    hints = default_tool_hints(variant, DEFAULT_INPUT_BINDINGS)
+    if variant != "ready_minimal":
+        hints = tuple(hint for hint in hints if hint.hint_id != "gizmo.type_value")
+    if selected and selection_clear:
+        hints = (
+            ToolHint("key", "Esc", "Clear selection", hint_id="selection.clear"),
+            *hints,
+        )
+    return (
+        ToolHint("key", "Backspace", "Rewind", hint_id="playback.previous"),
+        *hints,
+    )
 
 
 def _draw_status_strip(
@@ -2791,6 +3128,10 @@ def _draw_status_strip(
     """Draw the same persistent status surface used by the application."""
 
     rate = float(fps)
+    selected_item = selected.strip() or "No selection"
+    has_selection = selected_item != "No selection"
+    variant = "ready" if has_selection else "camera"
+    hints = _probe_status_hints(variant, selected=has_selection)
     draw_status(
         draw,
         origin,
@@ -2798,7 +3139,7 @@ def _draw_status_strip(
         height,
         CONCEPT_THEME,
         scale,
-        selected=selected,
+        selected=selected_item,
         state="running" if running else "paused",
         sim_time=1.204,
         step=1204,
@@ -2806,10 +3147,7 @@ def _draw_status_strip(
         backend="OpenGL",
         dt=0.002,
         fps=rate,
-        tool_hints=default_tool_hints(
-            "ready" if selected != "no selection" else "camera",
-            DEFAULT_INPUT_BINDINGS,
-        ),
+        tool_hints=hints,
     )
 
 
@@ -2911,7 +3249,7 @@ def _draw_status_tab(available, scale: float) -> None:
     samples = (
         ("Paused · selected", "a_sphere", False, "119.8"),
         ("Running · selected", "a_sphere", True, "60.0"),
-        ("Paused · no selection", "no selection", False, "119.8"),
+        ("Paused · no selection", "No selection", False, "119.8"),
     )
     width = min(1180.0 * scale, imgui.get_content_region_avail().x)
     height = 34.0 * scale
@@ -2943,11 +3281,7 @@ def _draw_plot_aux(size) -> None:
     imgui.text("Plot")
     imgui.separator()
     imgui.text_disabled("hinge_pos · rad")
-    values = np.asarray(
-        (0.00, 0.08, 0.16, 0.27, 0.35, 0.41, 0.38, 0.31, 0.20, 0.11, 0.04),
-        np.float32,
-    )
-    imgui.plot_lines("##probe-plot", values, graph_size=imgui.ImVec2(-1.0, -1.0))
+    imgui.plot_lines("##probe-plot", PROBE_PLOT_SAMPLES, graph_size=imgui.ImVec2(-1.0, -1.0))
     imgui.end_child()
 
 
@@ -2963,9 +3297,12 @@ def _draw_help_aux(size) -> None:
         imgui.table_headers_row()
         for input_name, action in (
             ("Space", "Play / Pause"),
+            ("Backspace", "Previous frame · hold to rewind"),
+            ("Esc", "Clear selection"),
             ("Shift", "Snap"),
             ("T", "World / Body"),
-            ("Double-click", "Type value"),
+            ("Double-click item", "Focus item"),
+            ("Double-click gizmo", "Type value after hover hint"),
             ("Ctrl + drag", "Push / Twist"),
         ):
             imgui.table_next_row()
@@ -3011,7 +3348,7 @@ def _draw_workspaces_tab(available, scale: float, state: ProbeState) -> None:
     state.aux_tab = active
     remaining = imgui.get_content_region_avail()
     if active == "Output":
-        _draw_output(remaining, state)
+        _draw_output(remaining, state, scale)
     elif active == "Plot":
         _draw_plot_aux(remaining)
     elif active == "Help":
@@ -3025,20 +3362,49 @@ def _dimension_line(
     start,
     end,
     label: str,
+    scale: float,
     *,
     vertical: bool = False,
 ) -> None:
     color = (*CONCEPT_THEME.text_disabled[:3], 0.9)
-    draw.line(start, end, color, 1.0)
+    draw.line(start, end, color, 1.0 * scale)
     if vertical:
-        draw.line((start[0] - 5.0, start[1]), (start[0] + 5.0, start[1]), color, 1.0)
-        draw.line((end[0] - 5.0, end[1]), (end[0] + 5.0, end[1]), color, 1.0)
-        draw.text((start[0] + 9.0, (start[1] + end[1]) * 0.5 - 7.0), color, label)
+        draw.line(
+            (start[0] - 5.0 * scale, start[1]),
+            (start[0] + 5.0 * scale, start[1]),
+            color,
+            1.0 * scale,
+        )
+        draw.line(
+            (end[0] - 5.0 * scale, end[1]),
+            (end[0] + 5.0 * scale, end[1]),
+            color,
+            1.0 * scale,
+        )
+        draw.text(
+            (start[0] + 9.0 * scale, (start[1] + end[1]) * 0.5 - 7.0 * scale),
+            color,
+            label,
+        )
     else:
-        draw.line((start[0], start[1] - 5.0), (start[0], start[1] + 5.0), color, 1.0)
-        draw.line((end[0], end[1] - 5.0), (end[0], end[1] + 5.0), color, 1.0)
+        draw.line(
+            (start[0], start[1] - 5.0 * scale),
+            (start[0], start[1] + 5.0 * scale),
+            color,
+            1.0 * scale,
+        )
+        draw.line(
+            (end[0], end[1] - 5.0 * scale),
+            (end[0], end[1] + 5.0 * scale),
+            color,
+            1.0 * scale,
+        )
         width, _ = draw.text_size(label)
-        draw.text(((start[0] + end[0] - width) * 0.5, start[1] + 8.0), color, label)
+        draw.text(
+            ((start[0] + end[0] - width) * 0.5, start[1] + 8.0 * scale),
+            color,
+            label,
+        )
 
 
 def _even_slider(item_id: str, value: int, minimum: int, maximum: int) -> int:
@@ -3047,6 +3413,37 @@ def _even_slider(item_id: str, value: int, minimum: int, maximum: int) -> int:
         return value
     snapped = int(round(candidate / 2.0) * 2)
     return max(minimum, min(maximum, snapped))
+
+
+def _geometry_values_text(state: ProbeState) -> str:
+    """Return the live component experiment as reviewable production fields."""
+
+    values = (
+        ("icon_radius", state.overlay_icon_radius),
+        ("radial_step", state.overlay_radial_step),
+        ("center_step", state.overlay_center_step),
+        ("tool_group_gap", state.tool_group_gap),
+        ("divider_width", state.divider_width),
+        ("tool_stroke", state.tool_stroke_width),
+        ("rotate_ring_gap_ratio", state.rotate_ring_gap_ratio),
+        ("rotate_ring_cap", repr(state.rotate_ring_cap)),
+        ("hint_control_height", state.hint_control_height),
+        ("hint_padding_x", state.hint_padding_x),
+        ("hint_padding_y", state.hint_padding_y),
+        ("hint_input_gap", state.hint_input_gap),
+        ("hint_group_gap", state.hint_group_gap),
+        ("hint_chord_gap", state.hint_chord_gap),
+        ("hint_key_padding_x", state.hint_key_padding_x),
+        ("hint_mouse_width", state.hint_mouse_width),
+        ("hint_mouse_stroke", state.hint_mouse_stroke),
+        ("hint_mouse_button_width_ratio", state.hint_mouse_button_width_ratio),
+        ("hint_mouse_button_shell_ratio", state.hint_mouse_button_shell_ratio),
+        ("hint_mouse_button_height_ratio", state.hint_mouse_button_height_ratio),
+        ("hint_mouse_wheel_width_ratio", state.hint_mouse_wheel_width_ratio),
+        ("hint_mouse_wheel_height_ratio", state.hint_mouse_wheel_height_ratio),
+        ("hint_mouse_wheel_gap_ratio", state.hint_mouse_wheel_gap_ratio),
+    )
+    return "\n".join(f"{name}={value}," for name, value in values)
 
 
 def _draw_geometry_controls(position, size, state: ProbeState) -> None:
@@ -3059,8 +3456,12 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         imgui.end_child()
         return
 
-    imgui.text("Geometry controls")
+    imgui.text("Live component experiment")
     imgui.separator()
+    imgui.text_wrapped(
+        "Probe-only values. Review visually, then copy accepted fields into production."
+    )
+    imgui.spacing()
     flags = _flags(imgui.TableFlags_.sizing_stretch_prop, imgui.TableFlags_.pad_outer_x)
     if imgui.begin_table("##geometry-controls", 2, flags):
         imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch.value, 0.46)
@@ -3191,7 +3592,9 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
     imgui.text_disabled(f"Single row  ·  shell height {hint_height}")
 
     imgui.spacing()
-    if imgui.button("Reset suggested", imgui.ImVec2(-1.0, 0.0)):
+    if imgui.button("Copy current values", imgui.ImVec2(-1.0, 0.0)):
+        imgui.set_clipboard_text(_geometry_values_text(state))
+    if imgui.button("Reset production defaults", imgui.ImVec2(-1.0, 0.0)):
         state.overlay_icon_radius = int(OVERLAY_GEOMETRY.icon_radius)
         state.overlay_radial_step = int(OVERLAY_GEOMETRY.radial_step)
         state.overlay_center_step = int(OVERLAY_GEOMETRY.center_step)
@@ -3228,12 +3631,6 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         imgui.end_child()
         return
 
-    lo = imgui.get_window_pos()
-    size = imgui.get_window_size()
-    x0, y0 = float(lo.x), float(lo.y)
-    draw = ImguiDraw2D(imgui.get_window_draw_list())
-    draw.rect_filled((x0, y0), (x0 + size.x, y0 + size.y), CONCEPT_THEME.bg_child)
-
     active_tab = state.geometry_tab
     if imgui.begin_tab_bar("##geometry-spec-tabs"):
         for label in (
@@ -3258,6 +3655,32 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
     state.geometry_tab = active_tab
     state.geometry_tab_initialized = True
 
+    canvas_available = imgui.get_content_region_avail()
+    canvas_flags = _flags(
+        imgui.WindowFlags_.horizontal_scrollbar,
+        imgui.WindowFlags_.always_vertical_scrollbar,
+    )
+    if not imgui.begin_child(
+        "Geometry canvas###ProbeGeometryCanvas",
+        canvas_available,
+        imgui.ChildFlags_.none.value,
+        canvas_flags,
+    ):
+        imgui.end_child()
+        imgui.end_child()
+        return
+
+    canvas_cursor = imgui.get_cursor_pos()
+    canvas_origin = imgui.get_cursor_screen_pos()
+    canvas_width, canvas_height = _virtual_canvas_size(
+        canvas_available,
+        scale,
+        GEOMETRY_CANVAS_SIZE,
+    )
+    size = imgui.ImVec2(canvas_width, canvas_height)
+    x0, y0 = float(canvas_origin.x), float(canvas_origin.y)
+    draw = ImguiDraw2D(imgui.get_window_draw_list())
+
     content_y = float(imgui.get_cursor_screen_pos().y) + 8.0 * scale
     title_color = CONCEPT_THEME.text
     note_color = CONCEPT_THEME.text_disabled
@@ -3266,31 +3689,35 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
     shell_radius = state_radius + float(state.overlay_radial_step)
     center_step = float(state.overlay_center_step)
     group_step = center_step + float(state.tool_group_gap)
-    controls_width = min(360.0, size.x * 0.25)
-    controls_x = x0 + size.x - controls_width - 24.0
+    controls_width = 360.0 * scale
+    controls_x = x0 + size.x - controls_width - 24.0 * scale
     controls_y = content_y
-    controls_height = min(760.0, y0 + size.y - controls_y - 18.0)
+    controls_height = min(760.0 * scale, y0 + size.y - controls_y - 18.0 * scale)
 
     show_geometry_controls = active_tab in ("Playback", "Tools", "Hints & input")
 
     if active_tab == "Playback":
         playback_scale = scale * state.construction_playback_scale
-        play_origin = (x0 + 54.0, content_y + 74.0)
+        play_origin = (x0 + 54.0 * scale, content_y + 74.0 * scale)
         pause_origin = (
             play_origin[0],
             play_origin[1] + (shell_radius * 2.0 + 26.0) * playback_scale,
         )
         draw.text(
-            (x0 + 54.0, content_y + 4.0),
+            (x0 + 54.0 * scale, content_y + 4.0 * scale),
             title_color,
             "Playback construction · Play and Pause",
         )
         draw.text(
-            (x0 + 54.0, content_y + 28.0),
+            (x0 + 54.0 * scale, content_y + 28.0 * scale),
             note_color,
             "Amber = icon bound · green = state circle · outer line = capsule",
         )
-        draw.text((play_origin[0], play_origin[1] - 22.0), note_color, "Play geometry · 3×")
+        draw.text(
+            (play_origin[0], play_origin[1] - 22.0 * scale),
+            note_color,
+            f"Play geometry · {state.construction_playback_scale:.1f}×",
+        )
         imgui.push_id("geometry-playback-play")
         _draw_playback(
             draw,
@@ -3305,7 +3732,11 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             ),
         )
         imgui.pop_id()
-        draw.text((pause_origin[0], pause_origin[1] - 22.0), note_color, "Pause geometry · 3×")
+        draw.text(
+            (pause_origin[0], pause_origin[1] - 22.0 * scale),
+            note_color,
+            f"Pause geometry · {state.construction_playback_scale:.1f}×",
+        )
         imgui.push_id("geometry-playback-pause")
         _draw_playback(
             draw,
@@ -3328,42 +3759,35 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             (pb_first_x, pb_center_y + (shell_radius + 13.0) * playback_scale),
             (pb_last_x, pb_center_y + (shell_radius + 13.0) * playback_scale),
             f"3 × CENTER {state.overlay_center_step}",
+            scale,
         )
         _dimension_line(
             draw,
-            (play_origin[0] - 22.0, play_origin[1]),
+            (play_origin[0] - 22.0 * scale, play_origin[1]),
             (
-                play_origin[0] - 22.0,
+                play_origin[0] - 22.0 * scale,
                 play_origin[1] + shell_radius * 2.0 * playback_scale,
             ),
             f"SHELL {int(shell_radius * 2.0)}",
+            scale,
             vertical=True,
         )
-        construction_width = (shell_radius * 2.0 + center_step * 3.0) * playback_scale
-        if scale <= 1.25:
-            playback_notes_x = play_origin[0] + construction_width + 30.0 * scale
-            for index, line in enumerate(
-                (
-                    f"ICON BOUND  Ø{int(icon_radius * 2.0)}",
-                    f"STATE CIRCLE Ø{int(state_radius * 2.0)}",
-                    f"SHELL HEIGHT {int(shell_radius * 2.0)}",
-                    f"CENTER STEP  {state.overlay_center_step}",
-                    f"RADIAL STEP  {state.overlay_radial_step:2d}",
-                    f"ICON CLEARANCE {int(center_step - icon_radius * 2.0)}",
-                    f"STATE CLEARANCE {int(center_step - state_radius * 2.0)}",
-                )
-            ):
-                color = (
-                    CONCEPT_THEME.warning
-                    if index == 0
-                    else CONCEPT_THEME.primary_bright
-                    if index == 1
-                    else note_color
-                )
-                draw.text((playback_notes_x, content_y + 82.0 + index * 25.0), color, line)
+        draw.text(
+            (x0 + 54.0 * scale, content_y + 530.0 * scale),
+            note_color,
+            (
+                f"Bounds  icon {int(icon_radius * 2.0)} · state {int(state_radius * 2.0)} · "
+                f"shell {int(shell_radius * 2.0)} · centers {state.overlay_center_step} · "
+                f"radial {state.overlay_radial_step}"
+            ),
+        )
 
-        comparison_x = x0 + max(650.0, size.x * 0.43)
-        draw.text((comparison_x, content_y + 4.0), title_color, "Playback states · 2×")
+        comparison_x = x0 + max(650.0 * scale, size.x * 0.43)
+        draw.text(
+            (comparison_x, content_y + 4.0 * scale),
+            title_color,
+            "Playback states · 2×",
+        )
         product_state = replace(
             state,
             show_icon_bounds=False,
@@ -3373,17 +3797,22 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         paused_state = replace(product_state, playing=False)
         playing_state = replace(product_state, playing=True)
         imgui.push_id("product-playback-paused")
-        _draw_playback(draw, (comparison_x, content_y + 58.0), scale * 2.0, paused_state)
+        _draw_playback(
+            draw,
+            (comparison_x, content_y + 58.0 * scale),
+            scale * 2.0,
+            paused_state,
+        )
         imgui.pop_id()
         playing_x = comparison_x
-        playing_y = content_y + 198.0
+        playing_y = content_y + 198.0 * scale
         imgui.push_id("product-playback-playing")
         _draw_playback(draw, (playing_x, playing_y), scale * 2.0, playing_state)
         imgui.pop_id()
-        draw.text((comparison_x, content_y + 158.0), note_color, "Paused · Play")
-        draw.text((playing_x, playing_y + 100.0), note_color, "Playing · Pause")
+        draw.text((comparison_x, content_y + 158.0 * scale), note_color, "Paused · Play")
+        draw.text((playing_x, playing_y + 100.0 * scale), note_color, "Playing · Pause")
         draw.text(
-            (comparison_x, playing_y + 128.0),
+            (comparison_x, playing_y + 128.0 * scale),
             note_color,
             "Play is neutral · Pause stays selected while playing.",
         )
@@ -3396,21 +3825,21 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             show_construction_notes=True,
         )
         tool_scale = scale * state.construction_tool_scale
-        tool_origin = (x0 + 96.0, content_y + 56.0)
+        tool_origin = (x0 + 96.0 * scale, content_y + 56.0 * scale)
         draw.text(
-            (x0 + 54.0, content_y + 4.0),
+            (x0 + 54.0 * scale, content_y + 4.0 * scale),
             title_color,
             f"Construction geometry · {state.construction_tool_scale:.1f}× inspection",
         )
         draw.text(
-            (x0 + 54.0, content_y + 28.0),
+            (x0 + 54.0 * scale, content_y + 28.0 * scale),
             note_color,
             "Amber = icon bound · green = state circle · outer line = capsule",
         )
         imgui.push_id("geometry-tools")
         _draw_tool_column(draw, tool_origin, tool_scale, construction_state)
         imgui.pop_id()
-        tool_notes_x = tool_origin[0] + 150.0
+        tool_notes_x = tool_origin[0] + 150.0 * scale
         for index, line in enumerate(
             (
                 f"TOOL GLYPH Ø{icon_radius * TOOL_GLYPH_SCALE * 2.0:.1f}",
@@ -3430,10 +3859,14 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                 if index == 1
                 else note_color
             )
-            draw.text((tool_notes_x, content_y + 76.0 + index * 25.0), color, line)
+            draw.text(
+                (tool_notes_x, content_y + (76.0 + index * 25.0) * scale),
+                color,
+                line,
+            )
 
-        comparison_x = x0 + max(650.0, size.x * 0.43)
-        product_tool_origin = (comparison_x, content_y + 56.0)
+        comparison_x = x0 + max(650.0 * scale, size.x * 0.43)
+        product_tool_origin = (comparison_x, content_y + 56.0 * scale)
         product_tool_scale = scale * 1.8
         product_state = replace(
             state,
@@ -3446,7 +3879,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         imgui.pop_id()
         labels_x = product_tool_origin[0] + shell_radius * 2.0 * product_tool_scale + 18.0 * scale
         draw.text(
-            (labels_x, content_y + 4.0),
+            (labels_x, content_y + 4.0 * scale),
             title_color,
             "Product scale · 1.8× inspection",
         )
@@ -3504,22 +3937,23 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             )
 
     elif active_tab == "Hints & input":
-        hint_label_x = x0 + 54.0
-        draw.text((hint_label_x, content_y + 4.0), title_color, "Context hint states")
+        hint_label_x = x0 + 54.0 * scale
+        draw.text((hint_label_x, content_y + 4.0 * scale), title_color, "Context hint states")
         draw.text(
-            (hint_label_x, content_y + 28.0),
+            (hint_label_x, content_y + 28.0 * scale),
             note_color,
             "Defaults are composed into Status; each whole group is dropped when space runs out.",
         )
-        for index, (label, variant) in enumerate(
+        for index, (label, selected, variant, selection_clear) in enumerate(
             (
-                ("No selection", "camera"),
-                ("Transform ready", "ready"),
-                ("Transform drag", "dragging"),
-                ("Ctrl held", "perturb"),
+                ("No selection", False, "camera", False),
+                ("Transform ready", True, "ready", True),
+                ("Handle hovered · 0.5 s", True, "ready_minimal", True),
+                ("Transform drag", True, "dragging", False),
+                ("Ctrl held", True, "perturb", True),
             )
         ):
-            row_y = content_y + 70.0 + index * 58.0 * scale
+            row_y = content_y + 70.0 * scale + index * 52.0 * scale
             draw_status(
                 draw,
                 (hint_label_x, row_y),
@@ -3527,7 +3961,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                 28.0 * scale,
                 CONCEPT_THEME,
                 scale,
-                selected=label,
+                selected=label if selected else "No selection",
                 state="paused",
                 sim_time=1.204,
                 step=1204,
@@ -3535,17 +3969,21 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                 backend="OpenGL",
                 dt=0.002,
                 fps=60.0,
-                tool_hints=default_tool_hints(variant, DEFAULT_INPUT_BINDINGS),
+                tool_hints=_probe_status_hints(
+                    variant,
+                    selected=selected,
+                    selection_clear=selection_clear,
+                ),
             )
 
         draw.text(
-            (hint_label_x, content_y + 306.0 * scale),
+            (hint_label_x, content_y + 344.0 * scale),
             note_color,
             "Reusable scene surface (custom hint providers can opt in):",
         )
         hint_x = hint_label_x
-        _draw_hint_bar(draw, (hint_x, content_y + 332.0 * scale), scale, state, "camera")
-        card_y = content_y + 396.0 * scale
+        _draw_hint_bar(draw, (hint_x, content_y + 370.0 * scale), scale, state, "camera")
+        card_y = content_y + 434.0 * scale
         draw.text((hint_label_x, card_y), title_color, "Value input · M10")
         _draw_value_input_card(
             (hint_x, card_y),
@@ -3560,9 +3998,13 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         )
 
     elif active_tab == "Transform gizmos":
-        draw.text((x0 + 54.0, content_y + 4.0), title_color, "Transform gizmos · M8 target")
         draw.text(
-            (x0 + 54.0, content_y + 28.0),
+            (x0 + 54.0 * scale, content_y + 4.0 * scale),
+            title_color,
+            "Transform gizmos · production states",
+        )
+        draw.text(
+            (x0 + 54.0 * scale, content_y + 28.0 * scale),
             note_color,
             "RGB defaults; hover/active uses Primary Bright; drag values use backed labels.",
         )
@@ -3573,7 +4015,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             )
         ):
             row_y = content_y + (190.0 + row * 258.0) * scale
-            draw.text((x0 + 54.0, row_y - 120.0 * scale), title_color, heading)
+            draw.text((x0 + 54.0 * scale, row_y - 120.0 * scale), title_color, heading)
             states = (
                 ("Default", "default"),
                 ("Hover X", "hover"),
@@ -3599,70 +4041,78 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                     label,
                 )
         draw.text(
-            (x0 + 54.0, content_y + 612.0 * scale),
+            (x0 + 54.0 * scale, content_y + 612.0 * scale),
             note_color,
             "Hover/active + snap tick = Primary Bright; drag sector = Primary Dim at low alpha.",
         )
         draw.text(
-            (x0 + 54.0, content_y + 638.0 * scale),
+            (x0 + 54.0 * scale, content_y + 638.0 * scale),
             note_color,
             "2D / 3D changes geometry only; label and interaction-state rules stay identical.",
         )
 
     elif active_tab == "Joint & helpers":
-        draw.text((x0 + 54.0, content_y + 4.0), title_color, "Joint gizmos · M8 target")
         draw.text(
-            (x0 + 54.0, content_y + 28.0),
+            (x0 + 54.0 * scale, content_y + 4.0 * scale),
+            title_color,
+            "Joint gizmos · production states",
+        )
+        draw.text(
+            (x0 + 54.0 * scale, content_y + 28.0 * scale),
             note_color,
             "Primary handles · blue MIN tick · red MAX tick · delayed read-only labels.",
         )
         imgui.push_id("geometry-joint-gizmo")
         _draw_joint_gizmo(
             draw,
-            (x0 + 54.0, content_y + 58.0 * scale),
+            (x0 + 54.0 * scale, content_y + 58.0 * scale),
             scale,
             state,
             item_id="geometry-joint",
         )
         imgui.pop_id()
         draw.text(
-            (x0 + 54.0, content_y + 354.0 * scale),
+            (x0 + 54.0 * scale, content_y + 354.0 * scale),
             note_color,
-            "Slide and hinge current ticks retain the Primary range color · "
-            "double-click the active handle = Type value.",
+            "Current ticks retain Primary; MIN/MAX ticks stay above them and expose delayed labels.",
         )
         draw.text(
-            (x0 + 54.0, content_y + 404.0 * scale),
+            (x0 + 54.0 * scale, content_y + 380.0 * scale),
+            note_color,
+            "Hover a handle for the Type value hint; double-click the handle to enter it.",
+        )
+        draw.text(
+            (x0 + 54.0 * scale, content_y + 420.0 * scale),
             title_color,
             "Hinge drag + Shift",
         )
         _draw_joint_rotation_feedback(
             draw,
-            (x0 + 230.0 * scale, content_y + 520.0 * scale),
+            (x0 + 230.0 * scale, content_y + 536.0 * scale),
             76.0 * scale,
             scale,
         )
         draw.text(
-            (x0 + 340.0 * scale, content_y + 472.0 * scale),
+            (x0 + 340.0 * scale, content_y + 488.0 * scale),
             CONCEPT_THEME.primary_bright,
             "Primary Bright  active arc / tick",
         )
         draw.text(
-            (x0 + 340.0 * scale, content_y + 500.0 * scale),
+            (x0 + 340.0 * scale, content_y + 516.0 * scale),
             CONCEPT_THEME.primary_dim,
             "Primary Dim  sweep sector · 24% alpha",
         )
         draw.text(
-            (x0 + 340.0 * scale, content_y + 528.0 * scale),
+            (x0 + 340.0 * scale, content_y + 544.0 * scale),
             note_color,
             "Text Disabled  passive snap ticks",
         )
 
         helper_x = x0 + max(700.0 * scale, size.x * 0.47)
         helper_width = min(500.0 * scale, x0 + size.x - helper_x - 30.0 * scale)
-        draw.text((helper_x, content_y + 4.0), title_color, "Camera / light helpers")
+        draw.text((helper_x, content_y + 4.0 * scale), title_color, "Camera / light helpers")
         draw.text(
-            (helper_x, content_y + 28.0),
+            (helper_x, content_y + 28.0 * scale),
             note_color,
             "Default · hover · selected; selected entity alone reveals its influence volume.",
         )
@@ -3703,31 +4153,52 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                 f"{icon_scale:.2g}×",
             )
         draw.text(
-            (x0 + 54.0, content_y + 650.0 * scale),
+            (x0 + 54.0 * scale, content_y + 650.0 * scale),
             note_color,
             "Renderer acceptance: 3D depth, occlusion and picking stay in make gizmo / lighting tests.",
         )
 
     elif active_tab == "Status":
-        imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 12.0, content_y))
-        _draw_status_tab(imgui.ImVec2(size.x - 24.0, y0 + size.y - content_y - 12.0), scale)
+        imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 12.0 * scale, content_y))
+        _draw_status_tab(
+            imgui.ImVec2(
+                size.x - 24.0 * scale,
+                y0 + size.y - content_y - 12.0 * scale,
+            ),
+            scale,
+        )
 
     elif active_tab == "Shell & settings":
-        imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 12.0, content_y))
+        imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 12.0 * scale, content_y))
         _draw_shell_settings_tab(
-            imgui.ImVec2(size.x - 24.0, y0 + size.y - content_y - 12.0), scale, state
+            imgui.ImVec2(
+                size.x - 24.0 * scale,
+                y0 + size.y - content_y - 12.0 * scale,
+            ),
+            scale,
+            state,
         )
 
     elif active_tab == "Panels":
-        imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 12.0, content_y))
+        imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 12.0 * scale, content_y))
         _draw_panel_gallery(
-            imgui.ImVec2(size.x - 24.0, y0 + size.y - content_y - 12.0), state, scale
+            imgui.ImVec2(
+                size.x - 24.0 * scale,
+                y0 + size.y - content_y - 12.0 * scale,
+            ),
+            state,
+            scale,
         )
 
     else:
-        imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 12.0, content_y))
+        imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 12.0 * scale, content_y))
         _draw_workspaces_tab(
-            imgui.ImVec2(size.x - 24.0, y0 + size.y - content_y - 12.0), scale, state
+            imgui.ImVec2(
+                size.x - 24.0 * scale,
+                y0 + size.y - content_y - 12.0 * scale,
+            ),
+            scale,
+            state,
         )
 
     if active_tab in (
@@ -3738,7 +4209,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         "Joint & helpers",
     ):
         extent = 690.0 * scale
-        imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 8.0, content_y + extent))
+        imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 8.0 * scale, content_y + extent))
         imgui.dummy(imgui.ImVec2(1.0, 1.0))
 
     if show_geometry_controls:
@@ -3748,7 +4219,79 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             state,
         )
 
+    imgui.set_cursor_pos(
+        imgui.ImVec2(
+            canvas_cursor.x + canvas_width - 1.0,
+            canvas_cursor.y + canvas_height - 1.0,
+        )
+    )
+    imgui.dummy(imgui.ImVec2(1.0, 1.0))
     imgui.end_child()
+    imgui.end_child()
+
+
+def _draw_workspace_canvas(available, scale: float, state: ProbeState):
+    flags = _flags(
+        imgui.WindowFlags_.horizontal_scrollbar,
+        imgui.WindowFlags_.always_vertical_scrollbar,
+    )
+    if not imgui.begin_child(
+        "Editor preview canvas###ProbeWorkspaceCanvas",
+        available,
+        imgui.ChildFlags_.none.value,
+        flags,
+    ):
+        imgui.end_child()
+        return None
+
+    cursor = imgui.get_cursor_pos()
+    origin = imgui.get_cursor_screen_pos()
+    width, height = _virtual_canvas_size(available, scale, WORKSPACE_CANVAS_SIZE)
+    spacing = imgui.get_style().item_spacing
+    status_height = 34.0 * scale
+    main_height = height - status_height - spacing.y
+    left_width = 330.0 * scale
+    right_width = 390.0 * scale
+    center_width = width - left_width - right_width - spacing.x * 2.0
+    bottom_height = 250.0 * scale
+    viewport_height = main_height - bottom_height - spacing.y
+    right_top_height = main_height * 0.50
+    right_bottom_height = main_height - right_top_height - spacing.y
+
+    left_x = origin.x
+    center_x = left_x + left_width + spacing.x
+    right_x = center_x + center_width + spacing.x
+    top_y = origin.y
+
+    imgui.set_cursor_screen_pos(imgui.ImVec2(left_x, top_y))
+    _draw_hierarchy_gallery(imgui.ImVec2(left_width, main_height), state, scale)
+
+    imgui.set_cursor_screen_pos(imgui.ImVec2(center_x, top_y))
+    viewport_rect = _draw_viewport(imgui.ImVec2(center_width, viewport_height), scale, state)
+    imgui.set_cursor_screen_pos(imgui.ImVec2(center_x, top_y + viewport_height + spacing.y))
+    _draw_output(imgui.ImVec2(center_width, bottom_height), state, scale)
+
+    imgui.set_cursor_screen_pos(imgui.ImVec2(right_x, top_y))
+    _draw_workspace_right_dock(imgui.ImVec2(right_width, right_top_height), state)
+    imgui.set_cursor_screen_pos(imgui.ImVec2(right_x, top_y + right_top_height + spacing.y))
+    _draw_inspector_gallery(imgui.ImVec2(right_width, right_bottom_height), scale)
+
+    status_origin = (origin.x, origin.y + main_height + spacing.y)
+    _draw_status_strip(
+        ImguiDraw2D(imgui.get_window_draw_list()),
+        status_origin,
+        width,
+        status_height,
+        scale,
+        selected="a_sphere",
+        running=state.playing,
+        fps="60.0" if state.playing else "119.8",
+    )
+
+    imgui.set_cursor_pos(imgui.ImVec2(cursor.x + width - 1.0, cursor.y + height - 1.0))
+    imgui.dummy(imgui.ImVec2(1.0, 1.0))
+    imgui.end_child()
+    return viewport_rect
 
 
 def _draw_workspace(window: Window, state: ProbeState) -> None:
@@ -3794,17 +4337,6 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
                 if clicked:
                     setattr(state, attribute, not value)
             imgui.separator()
-            imgui.text_disabled("Panels")
-            for label, attribute in (
-                ("Settings", "show_settings"),
-                ("Keyframes", "show_keyframes"),
-                ("Output", "show_output"),
-            ):
-                value = bool(getattr(state, attribute))
-                clicked, _ = imgui.menu_item(label, "", value)
-                if clicked:
-                    setattr(state, attribute, not value)
-            imgui.separator()
             imgui.text_disabled("Construction")
             all_construction = bool(
                 state.show_icon_bounds
@@ -3831,7 +4363,7 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
 
     available = imgui.get_content_region_avail()
     if state.page == "Panels":
-        _draw_panel_gallery(available, state, scale)
+        _draw_panel_page(available, state, scale)
         imgui.end()
         return
     if state.page == "Geometry":
@@ -3848,45 +4380,11 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
         )
         return
 
-    spacing = imgui.get_style().item_spacing
-    workspace_origin = imgui.get_cursor_screen_pos()
-    status_height = 34.0 * scale
-    workspace_height = max(1.0, available.y - status_height - spacing.y)
-    show_bottom = state.show_keyframes or state.show_output
-    bottom_height = min(245.0 * scale, workspace_height * 0.30) if show_bottom else 0.0
-    top_height = workspace_height - (bottom_height + spacing.y if show_bottom else 0.0)
-    right_width = max(470.0 * scale, available.x * 0.31) if state.show_settings else 0.0
-    viewport_width = available.x - (right_width + spacing.x if state.show_settings else 0.0)
-
-    viewport_rect = _draw_viewport(imgui.ImVec2(viewport_width, top_height), scale, state)
-    if state.show_settings:
-        imgui.same_line()
-        _draw_settings(imgui.ImVec2(right_width, top_height), state, scale)
-
-    if state.show_keyframes:
-        keyframes_width = available.x * 0.63 if state.show_output else available.x
-        _draw_keyframes(imgui.ImVec2(keyframes_width, bottom_height), scale)
-    if state.show_output:
-        if state.show_keyframes:
-            imgui.same_line()
-        _draw_output(imgui.ImVec2(0.0, bottom_height), state)
-
-    status_origin = (
-        workspace_origin.x,
-        workspace_origin.y + available.y - status_height,
-    )
-    _draw_status_strip(
-        ImguiDraw2D(imgui.get_window_draw_list()),
-        status_origin,
-        available.x,
-        status_height,
-        scale,
-        selected="a_sphere",
-        running=state.playing,
-        fps="60.0" if state.playing else "119.8",
-    )
-
+    viewport_rect = _draw_workspace_canvas(available, scale, state)
     imgui.end()
+
+    if viewport_rect is None:
+        return
 
     _draw_value_input(
         (viewport_rect[2] - 326.0 * scale, viewport_rect[1] + 74.0 * scale),
@@ -3912,11 +4410,12 @@ def render(
     ui_scale: float,
     interactive_fps: float,
 ) -> None:
+    window_width, window_height = _probe_window_size(width, height, ui_scale)
     window = Window(
         WindowConfig(
             title="Mojive UI feasibility",
-            width=width,
-            height=height,
+            width=window_width,
+            height=window_height,
             # The probe is UI, not a GPU benchmark. Interactive mode is paced,
             # and DrawList antialiasing already covers its vector edges.
             vsync=interactive,
@@ -3974,13 +4473,16 @@ def render(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-o", "--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--width", type=int, default=1600)
-    parser.add_argument("--height", type=int, default=1000)
+    parser.add_argument("--width", type=int, default=PROBE_BASE_SIZE[0])
+    parser.add_argument("--height", type=int, default=PROBE_BASE_SIZE[1])
     parser.add_argument(
         "--ui-scale",
         type=float,
         default=1.0,
-        help="Logical UI scale used for paths, strokes, controls, and text",
+        help=(
+            "Logical UI scale used for paths, strokes, controls, and text; "
+            "the capture expands above 2x and oversized concept canvases scroll"
+        ),
     )
     parser.add_argument(
         "--page",

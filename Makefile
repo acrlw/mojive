@@ -271,6 +271,9 @@ ui-gallery:
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab shell -o output/ui-geometry-shell.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab panels -o output/ui-geometry-panels.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab workspaces -o output/ui-geometry-workspaces.png
+	$(PY) design/tools/render_ui_feasibility.py --ui-scale 4 --page workspace -o output/ui-workspace-hidpi.png
+	$(PY) design/tools/render_ui_feasibility.py --ui-scale 4 --page panels -o output/ui-panels-hidpi.png
+	$(PY) design/tools/render_ui_feasibility.py --ui-scale 4 --page geometry --geometry-tab helpers -o output/ui-geometry-joint-helpers-hidpi.png
 	$(PY) -m mojive.tools.ui_runtime -o output/ui-runtime
 
 gizmo-gallery:
