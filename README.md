@@ -1,59 +1,56 @@
 # Mojive
 
-Mojive is an interactive 3D viewer, editor, and renderer for robotics and simulation. MuJoCo
-models, programmatic scenes, custom adapters, remote publishers, and recorded snapshots all use
-the same scene contract, rendering pipeline, and UI.
+![The Mojive editor running a scene with an active rotation perturbation](docs/images/readme/hero.png)
 
-Mojive currently provides:
+<p align="center">
+  <strong>3D viewer, editor, and renderer for robotics and simulation.</strong>
+</p>
 
-- an editor for composing MJCF and URDF models with authored geometry, materials, cameras, lights,
-  and environment settings;
-- interactive selection, transform and joint gizmos, physical perturbation, debug drawing,
-  diagnostics, capture, and video recording;
-- a `mujoco.Renderer`-style offscreen API for RGB, metric depth, and segmentation output;
-- OpenGL and wgpu render backends; and
-- live remote viewing, snapshot replay, and local RPC automation.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="docs/getting-started.md">User guide</a> ·
+  <a href="docs/api/index.md">API reference</a> ·
+  <a href="examples/README.md">Examples</a>
+</p>
 
-The project is under active development. File formats are versioned, but pre-1.0 APIs and editor
-workflows may still change.
+Mojive stands for **Mo**del/**J**oint **I**nteractive **V**iewer & **E**ditor.
 
-## Install
+Mojive brings model inspection, scene editing, simulation control, and image rendering into one
+application. It works with MJCF, URDF, Python scenes, remote publishers, and recorded sessions.
 
-Mojive requires Python 3.11 or newer. The default interactive backend needs an OpenGL 3.3 core
-profile. The wgpu extra uses Metal, Vulkan, or DX12. MuJoCo is optional unless you load MJCF/URDF
-or use the compatible `Renderer` API.
+## What it does
 
-From a source checkout:
+- **Editor:** compose models, create geometry, edit materials, lights, cameras, and environment.
+- **Interaction:** select objects, move free bodies, adjust joints, perturb simulations, and edit
+  exact values.
+- **Rendering:** produce RGB, metric depth, and segmentation images from Python or the CLI.
+- **Simulation:** inspect joints, actuators, sensors, contacts, tendons, constraints, and keyframes.
+- **Integration:** connect custom simulations through adapters or publish scenes over the network.
+- **Automation:** capture images, record video, replay snapshots, and control a local viewer by RPC.
+
+OpenGL is the default renderer. wgpu is available as an optional test backend.
+
+## Preview
+
+| Joint tools | Renderer |
+| :---: | :---: |
+| ![A focused revolute joint with the Mojive joint gizmo](docs/images/readme/joint-authoring.png) | ![The bundled Mojive renderer showcase](docs/images/readme/rendering.png) |
+| Focus a joint and adjust it in the viewport. | The bundled showcase rendered with OpenGL. |
+
+All images in this README are unmodified Mojive captures.
+
+## Quick start
+
+Mojive requires Python 3.11 or newer. The default window uses an OpenGL 3.3 core profile.
 
 ```bash
 git clone https://github.com/acrlw/mojive.git
 cd mojive
-uv sync --python 3.11 --extra mujoco --extra wgpu
-```
-
-For development, install the test and documentation dependencies as well:
-
-```bash
-make setup
-```
-
-A standard virtual environment also works:
-
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[mujoco,wgpu]"
-```
-
-## Start the application
-
-Open an empty workspace:
-
-```bash
+uv sync --python 3.11 --extra mujoco
 uv run mojive editor
 ```
 
-Open a bundled scene or a model file directly:
+Open a bundled scene, MJCF file, or URDF file:
 
 ```bash
 uv run mojive view test_scene
@@ -61,16 +58,32 @@ uv run mojive view path/to/model.xml --paused
 uv run mojive view path/to/model.urdf --paused
 ```
 
-Use the wgpu renderer instead of OpenGL:
+To install without `uv`:
 
 ```bash
-MOJIVE_BACKEND=wgpu uv run mojive editor
-MOJIVE_BACKEND=wgpu uv run mojive view test_scene
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[mujoco]"
+mojive editor
 ```
 
-`MOJIVE_BACKEND` selects the **render backend** (`opengl` or `wgpu`). The CLI option
-`--backend` selects the **scene/physics adapter** (`mujoco`, `toy`, or another registered adapter).
-These are independent choices. Run these discovery commands to inspect the current installation:
+For development dependencies:
+
+```bash
+make setup
+```
+
+## Render backends
+
+OpenGL is the default and recommended backend. To test wgpu:
+
+```bash
+uv sync --extra mujoco --extra wgpu
+MOJIVE_BACKEND=wgpu uv run mojive editor
+```
+
+`MOJIVE_BACKEND` selects `opengl` or `wgpu`. The CLI `--backend` option selects the scene adapter,
+such as `mujoco` or `toy`.
 
 ```bash
 uv run mojive backends
@@ -78,40 +91,42 @@ uv run mojive assets --quick
 uv run mojive --help
 ```
 
-The editor opens and saves `.mojive.json` workspaces. A workspace can combine multiple MJCF or
-URDF models with Mojive-authored entities and resource directories. Use **File > Save As** and
-choose MJCF/XML to export a portable MuJoCo model. See the
-[editor and MJCF guide](docs/guides/editor-and-mjcf.md) for topology editing, assets, keyframes,
-resource repair, and export behavior.
+## Editor
 
-## Basic interaction
+The editor reads and writes `.mojive.json` workspaces. A workspace can contain multiple MJCF or
+URDF models, resource directories, model edits, and Mojive-authored entities.
 
-- `G`: position gizmo
-- `R`: rotation gizmo
-- `T`: switch body/world frame
-- `Shift` while dragging: snap to the configured position or rotation step
-- `Ctrl` + left/right drag: MuJoCo translation/rotation perturbation
-- `F`: frame the scene
-- `F9`: open the dockable Settings panel
+Use **File > Save As > MuJoCo XML / MJCF** to export a standalone MuJoCo model. The
+[editor guide](docs/guides/editor-and-mjcf.md) covers composition, topology editing, assets,
+keyframes, resource repair, and export.
 
-Camera preview is off by default. Select a camera and enable **preview** in Inspector when needed.
-The preview can then be pinned to its current view or locked to the camera entity.
+Select a camera to edit it. Enable **preview** in Inspector when a live camera preview is useful.
 
-The UI follows the display content scale. Override it only when the desktop reports the wrong
-value:
+### Common controls
+
+| Input | Action |
+|---|---|
+| `Space` | Play or pause |
+| `Backspace` | Previous frame; hold to rewind |
+| `G` / `R` | Position / rotation gizmo |
+| `T` | Switch body/world frame |
+| `Shift` while dragging | Snap |
+| `Ctrl` + left/right drag | Translation/rotation perturbation |
+| `F` | Frame the scene |
+| `F9` | Open Settings |
+
+Input bindings can be changed in Settings. UI scale and language normally follow the desktop:
 
 ```bash
 MOJIVE_UI_SCALE=1.5 uv run mojive editor
 MOJIVE_LANGUAGE=zh_CN uv run mojive editor
 ```
 
-All supported runtime settings and persistence paths are listed in the
-[configuration reference](docs/reference/configuration.md).
+See the [configuration reference](docs/reference/configuration.md) for every runtime option.
 
-## Programmatic rendering
+## Python rendering
 
-`mojive.Renderer` follows the common `mujoco.Renderer` workflow while adding explicit backend
-selection through `MOJIVE_BACKEND`:
+`mojive.Renderer` follows the familiar `mujoco.Renderer` update-and-render loop:
 
 ```python
 import mujoco
@@ -133,14 +148,15 @@ with Renderer(model, width=640, height=480) as renderer:
     object_id_and_type = renderer.render()
 ```
 
-The API supports free, fixed, named, and `MjvCamera` cameras, `MjvOption`, caller-owned output
-arrays, multiple contexts, and deterministic release. See the
-[MuJoCo rendering tutorial](docs/tutorials/mujoco-rendering.md) and
-[rendering API reference](docs/api/rendering.md).
+The API accepts free, fixed, named, and `MjvCamera` cameras. It also accepts `MjvOption`, reusable
+output arrays, and multiple renderer instances.
 
-## Programmatic scenes and adapters
+Start with the [rendering tutorial](docs/tutorials/mujoco-rendering.md), then use the
+[rendering API reference](docs/api/rendering.md) for details.
 
-Use `Scene` for geometry, cameras, lights, and materials created in Python:
+## Python scenes and custom simulations
+
+Create geometry, cameras, lights, and materials directly in Python:
 
 ```python
 from mojive import Light, Scene, build_scene
@@ -158,100 +174,97 @@ key.remove()
 viewer.release()
 ```
 
-Custom simulations implement `SceneAdapterBase`: `scene_source()` publishes stable structure,
-`frame()` publishes dynamic data, and `AdapterCaps` declares optional commands. The
-[custom adapter guide](docs/how-to/custom-adapter.md) and [`examples/`](examples/README.md) cover
-the supported integration paths.
+A custom simulation implements `SceneAdapterBase`:
 
-## Remote viewing, replay, and control
+- `scene_source()` supplies stable meshes, materials, and object identities.
+- `frame()` supplies poses and other changing data.
+- `AdapterCaps` declares the commands and data the adapter provides.
 
-Run a headless publisher and attach one or more independent viewers:
+See the [custom adapter guide](docs/how-to/custom-adapter.md) and the runnable
+[examples](examples/README.md).
+
+## Remote viewing, replay, and automation
+
+Run simulation in one process and view it from another:
 
 ```bash
 uv run mojive serve deformables --host 127.0.0.1 --port 47650
 uv run mojive attach --host 127.0.0.1 --port 47650
 ```
 
-Record the published stream with `--record-snapshot output/session.fvs`, then start replay and
-attach in separate terminals:
+Record and replay a published session:
 
 ```bash
+uv run mojive serve deformables --record-snapshot output/session.fvs
 uv run mojive replay output/session.fvs --loop
 uv run mojive attach
 ```
 
-Local automation uses a versioned AF_UNIX service:
+Start a local control service and query it from another process:
 
 ```bash
-MOJIVE_BACKEND=wgpu uv run mojive rpc-serve test_scene --socket output/mojive.sock
+uv run mojive rpc-serve test_scene --socket output/mojive.sock
 uv run mojive control get_state --socket output/mojive.sock --json
-uv run mojive control capture \
-  --socket output/mojive.sock \
-  --params '{"mode":"depth","output":"output/depth.npy"}'
 ```
 
-The wgpu selection keeps capture portable on macOS, where an OpenGL context cannot be created in
-the RPC request worker. Linux may use the default OpenGL renderer for the same service.
+See the [remote viewing tutorial](docs/tutorials/remote-viewing.md) and
+[local RPC guide](docs/how-to/rpc-control.md).
 
-See the [CLI reference](docs/reference/cli.md),
-[remote viewing tutorial](docs/tutorials/remote-viewing.md), and
-[RPC guide](docs/how-to/rpc-control.md) for the complete workflows.
+## Development
 
-## Development and verification
-
-Use the smallest relevant target while iterating, then run the required repository gate:
+Use focused targets while working, then run the repository checks:
 
 ```bash
 make check
+make gpu                 # rendering changes
+make docs-check          # documentation changes
 ```
 
-Rendering changes additionally require:
+Useful targets:
 
 ```bash
-make gpu
+make renderer-api
+make renderer-benchmark
+make mujoco-audit
+make adapter-conformance ADAPTER=mujoco CONFORMANCE_ASSET=deformables
+make gizmo-gallery
+make showcase
+make help
 ```
 
-Useful focused targets include `make renderer-api`, `make renderer-benchmark`, `make gpu-wgpu`,
-`make mujoco-audit`, `make adapter-conformance`, `make docs-check`, `make gizmo-gallery`, and `make showcase`. Run
-`make help` for the maintained target catalog. Generated captures, recordings, reports, and the
-documentation site are written under `output/`.
+Generated captures, recordings, reports, and the documentation site go to `output/`.
+`make readme-media` captures with OpenGL and copies the selected images unchanged into the README.
 
 ## Architecture
 
 ```text
-src/mojive/
-├── types.py, math3d.py, commands.py   shared contracts
-├── session.py                         application state and command routing
-├── scene.py                           programmatic scenes
-├── adapters/                          MuJoCo, static, toy, and remote sources
-├── render/
-│   ├── scene.py                       renderer scene representation
-│   ├── backend.py                     rendering backend protocol
-│   ├── opengl/                        OpenGL passes and shaders
-│   └── webgpu/                        wgpu passes and WGSL shaders
-└── ui/                                window, panels, gestures, and gizmos
+MJCF / URDF / Scene / remote stream
+                 │
+              adapter
+                 │ SceneSource + SceneFrame
+                 ▼
+              Session
+                 │
+        OpenGL or wgpu renderer
+                 │
+          viewport or image
 ```
 
-Python matrices are row-major with translation in `matrix[:3, 3]`. World coordinates use Z-up.
-Renderer code consumes shared scene contracts; physics-specific state remains in adapters;
-`Session` owns selection, overrides, history, and command routing.
+- Adapters translate models, simulations, and network data.
+- `Session` owns selection, history, overrides, simulation control, and command routing.
+- Renderers own GPU resources and output images.
+- The UI reads session state and submits typed commands.
+
+See [Architecture](docs/concepts/architecture.md) and [Renderer design](docs/RENDERER.md).
 
 ## Documentation
 
-- [User guide](docs/index.md)
 - [Getting started](docs/getting-started.md)
-- [CLI reference](docs/reference/cli.md)
-- [Configuration reference](docs/reference/configuration.md)
-- [Examples](examples/README.md)
-- [Architecture](docs/concepts/architecture.md)
-- [Renderer design](docs/RENDERER.md)
-- [Batch rendering for RL](docs/BATCH_RENDERING.md)
+- [Editor and MJCF](docs/guides/editor-and-mjcf.md)
+- [CLI](docs/reference/cli.md) and [configuration](docs/reference/configuration.md)
 - [API map](docs/api/index.md)
-- [Testing guide](docs/guides/testing.md)
-
-Current priorities are tracked in [`plan/STATUS.md`](plan/STATUS.md). Completed implementation
-plans are retained in [`plan/`](plan/README.md) as historical engineering records.
+- [Testing](docs/guides/testing.md)
 
 ## License
 
-Mojive is available under the [MIT License](LICENSE).
+[MIT](LICENSE)
