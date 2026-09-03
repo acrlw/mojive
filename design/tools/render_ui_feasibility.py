@@ -394,7 +394,7 @@ def _draw_tool_icon(
     stroke_width: float,
     rotate_ring_gap_ratio: float,
     rotate_ring_cap: str,
-    surface_color,
+    _surface_color,
     frame_space: str,
 ) -> None:
     draw_tool_glyph(
@@ -403,7 +403,6 @@ def _draw_tool_icon(
         color,
         scale,
         kind,
-        surface_color,
         frame_space,
         replace(
             OVERLAY_GEOMETRY,
@@ -2800,7 +2799,6 @@ def _draw_status_strip(
         CONCEPT_THEME,
         scale,
         selected=selected,
-        has_selection=selected != "no selection",
         state="running" if running else "paused",
         sim_time=1.204,
         step=1204,
@@ -3530,7 +3528,6 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                 CONCEPT_THEME,
                 scale,
                 selected=label,
-                has_selection=variant != "camera",
                 state="paused",
                 sim_time=1.204,
                 step=1204,
