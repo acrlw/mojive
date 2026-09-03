@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import os
 
 import numpy as np
@@ -600,6 +601,108 @@ def test_truncated_joint_name_has_full_tooltip_and_copy_action(viewer) -> None:
     finally:
         imgui.set_tooltip = original_tooltip
         io.add_mouse_button_event(1, False)
+        v.release()
+        viewer.sync()
+
+
+def test_free_joint_row_keeps_joint_selection_and_exposes_the_transform_gizmo(viewer) -> None:
+    from imgui_bundle import imgui
+
+    v = build(
+        resolve("joint_gizmo"),
+        "mujoco",
+        paused=True,
+        vsync=False,
+        width=W,
+        height=H,
+    )
+    io = imgui.get_io()
+    try:
+        v.app.panels.open_panel("Joints")
+        for _ in range(8):
+            v.sync()
+        activate_panel(v, "Joints")
+        joint = next(item for item in v.session.joints if item.name == "04_free_6dof")
+        point = item_rect(v, "selectable", f"{joint.name}##joint-select-{joint.joint_id}")
+
+        click(v, io, point)
+        for _ in range(2):
+            v.sync()
+        selected = v.session.selected_node
+        assert selected is not None
+        assert selected.name == joint.name
+        assert not selected.posable
+        assert selected.body_index == joint.body
+        assert v.app.gizmo.last_verdict.ok
+        assert v.app.gizmo.visible
+
+        click(v, io, point)
+        assert v.session.selected_node is selected
+        assert v.app.camera.animating
+        v.app.camera.advance(1.0, v.app.camera_out)
+
+        hierarchy = v.app.panels.get("Hierarchy")
+        assert hierarchy is not None
+        hierarchy._filter = joint.name
+        activate_panel(v, "Hierarchy")
+        for _ in range(2):
+            v.sync()
+        point = item_rect(v, "invisible_button", f"##hierarchy-node-{selected.node_id}")
+
+        click(v, io, point)
+        assert v.session.selected_node is selected
+        assert v.app.gizmo.last_verdict.ok
+        assert v.app.gizmo.visible
+        click(v, io, point)
+        assert v.session.selected_node is selected
+        assert v.app.camera.animating
+    finally:
+        io.add_mouse_button_event(0, False)
+        v.release()
+        viewer.sync()
+
+
+def test_joint_and_control_copy_buttons_export_complete_state_vectors(viewer) -> None:
+    from imgui_bundle import imgui
+
+    v = build(
+        resolve("actuator_visuals"),
+        "mujoco",
+        paused=True,
+        vsync=False,
+        width=W,
+        height=H,
+    )
+    io = imgui.get_io()
+    try:
+        v.app.panels.open_panel("Joints")
+        v.app.panels.open_panel("Control")
+        for _ in range(8):
+            v.sync()
+        state = v.session.adapter.capture_state()
+        assert state is not None and len(state.act) > 0
+
+        activate_panel(v, "Joints")
+        qpos_bounds = item_bounds(v, "button", "Copy qpos")
+        qvel_bounds = item_bounds(v, "button", "Copy qvel")
+        assert qpos_bounds[1] == pytest.approx(qvel_bounds[1], abs=1.0)
+        assert qpos_bounds[2] <= qvel_bounds[0]
+        for label, expected in (("Copy qpos", state.qpos), ("Copy qvel", state.qvel)):
+            click(v, io, item_rect(v, "button", label))
+            copied = np.asarray(ast.literal_eval(imgui.get_clipboard_text()), np.float64)
+            assert copied == pytest.approx(expected)
+
+        activate_panel(v, "Control")
+        ctrl_bounds = item_bounds(v, "button", "Copy ctrl")
+        act_bounds = item_bounds(v, "button", "Copy act")
+        assert ctrl_bounds[1] == pytest.approx(act_bounds[1], abs=1.0)
+        assert ctrl_bounds[2] <= act_bounds[0]
+        for label, expected in (("Copy ctrl", state.ctrl), ("Copy act", state.act)):
+            click(v, io, item_rect(v, "button", label))
+            copied = np.asarray(ast.literal_eval(imgui.get_clipboard_text()), np.float64)
+            assert copied == pytest.approx(expected)
+    finally:
+        io.add_mouse_button_event(0, False)
         v.release()
         viewer.sync()
 
@@ -1405,7 +1508,7 @@ def test_top_view_is_canonical_x_right_y_up(viewer):
     from mojive.ui import viewcube as vc
     from mojive.ui.camera import camera_basis
 
-    yaw, pitch = vc.yaw_pitch_for(2, 1.0, 37.0)
+    yaw, pitch = vc.yaw_pitch_for(2, 1.0)
     viewer.app.camera.look_from(yaw, pitch, viewer.app.camera_out, animate=False)
     viewer.sync()
     right, up, _fwd = camera_basis(viewer.app.camera.view())
@@ -1730,7 +1833,7 @@ def test_tool_column_hides_without_actions_and_centers_when_available(free_body_
 
 @pytest.mark.parametrize("workspace", (False, True), ids=("viewer", "editor"))
 def test_joint_gizmo_is_live_in_the_real_viewer_pipeline(workspace):
-    """Viewer and editor must retain the diagnostics requested by a joint gizmo."""
+    """Viewer and editor must retain the joint frames requested by a joint gizmo."""
 
     import mojive.commands as cmd
 
@@ -1752,14 +1855,15 @@ def test_joint_gizmo_is_live_in_the_real_viewer_pipeline(workspace):
             v.sync()
 
         assert v.session.frame.diagnostics is not None
-        assert v.app.frame_needs().diagnostics
+        assert v.app.frame_needs().joint_frames
+        assert not v.app.frame_needs().diagnostics
         assert v.app.gizmo.last_verdict.ok
         assert v.app.gizmo.visible
 
         target, reason = v.app.gizmo._joint_target(v.session, node)
         assert target is not None, reason
         assert v.app.request_joint_focus(target.joint.joint_id)
-        assert v.app.frame_needs().diagnostics
+        assert v.app.frame_needs().joint_frames
         v.sync()
         assert v.app.camera.animating
         v.app.camera.advance(1.0, v.app.camera_out)
@@ -3126,6 +3230,54 @@ def test_the_keyboard_shortcuts_are_not_swallowed(free_body_viewer):
     for _ in range(120):
         v.sync()
     assert v.app.camera.distance < 50.0
+
+
+def test_backspace_steps_history_backward_and_repeats_while_held(viewer) -> None:
+    import time
+
+    from imgui_bundle import imgui
+
+    from mojive import commands as cmd
+    from mojive.ui.app import STEP_BACK_REPEAT_DELAY_SECONDS, STEP_BACK_REPEAT_RATE_SECONDS
+
+    v = build(
+        resolve("joint_gizmo"),
+        "mujoco",
+        paused=True,
+        vsync=False,
+        width=W,
+        height=H,
+    )
+    io = imgui.get_io()
+    try:
+        for _ in range(5):
+            assert v.session.submit(cmd.Step(1))
+            v.sync()
+        assert v.session.frame.step == 5
+        assert v.session.can_step_back
+        hint = next(
+            hint
+            for hint in v.app._status_tool_hints(loading=False)
+            if hint.hint_id == "playback.previous"
+        )
+        assert (hint.control, hint.label) == ("Backspace", "Rewind")
+
+        io.add_key_event(imgui.Key.backspace, True)
+        v.sync()
+        assert v.session.frame.step == 4
+
+        deadline = (
+            time.monotonic() + STEP_BACK_REPEAT_DELAY_SECONDS + 2.0 * STEP_BACK_REPEAT_RATE_SECONDS
+        )
+        while time.monotonic() < deadline and v.session.frame.step == 4:
+            time.sleep(0.02)
+            v.sync()
+        assert v.session.frame.step < 4
+    finally:
+        io.add_key_event(imgui.Key.backspace, False)
+        v.sync()
+        v.release()
+        viewer.sync()
 
 
 def test_blocking_modal_owns_all_viewport_input_and_hides_context_hint(

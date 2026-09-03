@@ -166,6 +166,7 @@ def test_help_panel_lists_every_key_the_main_loop_polls():
 
     polled_actions = (
         InputAction.TOGGLE_PAUSE,
+        InputAction.STEP_BACK,
         InputAction.FRAME_SCENE,
         InputAction.GIZMO_TRANSLATE,
         InputAction.GIZMO_ROTATE,

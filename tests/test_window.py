@@ -258,6 +258,7 @@ def test_selection_status_is_composed_with_panel_hints_but_yields_to_input(panel
     app._context_tool_hint_variant = lambda: "ready"
     app._viewport_labels = DEFAULT_VIEWPORT_LABELS
     app.input_bindings = DEFAULT_INPUT_BINDINGS
+    app.session = SimpleNamespace(can_step_back=False)
     app.localizer = SimpleNamespace(text=lambda value: value)
     app.tool_hints = SimpleNamespace(resolve=lambda defaults, *, surface: defaults)
 

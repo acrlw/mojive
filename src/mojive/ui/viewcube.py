@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 
@@ -63,6 +64,27 @@ def layout(
     cam: CameraView, center: tuple[float, float], radius_pt: float, ball_pt: float
 ) -> list[Ball]:
     right, up, forward = camera_basis(cam)
+    return list(
+        _cached_layout(
+            tuple(float(value) for value in right),
+            tuple(float(value) for value in up),
+            tuple(float(value) for value in forward),
+            tuple(float(value) for value in center),
+            float(radius_pt),
+            float(ball_pt),
+        )
+    )
+
+
+@lru_cache(maxsize=256)
+def _cached_layout(
+    right: tuple[float, float, float],
+    up: tuple[float, float, float],
+    forward: tuple[float, float, float],
+    center: tuple[float, float],
+    radius_pt: float,
+    ball_pt: float,
+) -> tuple[Ball, ...]:
     out: list[Ball] = []
     for axis in range(3):
         world = np.zeros(3)
@@ -84,7 +106,7 @@ def layout(
                 )
             )
     out.sort(key=lambda b: -b.depth)
-    return out
+    return tuple(out)
 
 
 def hit_test(balls: list[Ball], cursor: tuple[float, float]) -> Ball | None:
@@ -107,7 +129,7 @@ def widget_center(
     return (rect[0] + rect[2] - m - r, rect[1] + m + r)
 
 
-def yaw_pitch_for(axis: int, sign: float, current_yaw: float) -> tuple[float, float]:
+def yaw_pitch_for(axis: int, sign: float) -> tuple[float, float]:
     if axis == 2:
         return TOP_YAW, PITCH_LIMIT * (1.0 if sign > 0 else -1.0)
     yaw = 0.0 if axis == 0 else 90.0
@@ -162,7 +184,7 @@ class ViewCube:
         )
 
     def click(self, camera: OrbitCamera, ball: Ball, sink, *, focus=None) -> None:
-        yaw, pitch = yaw_pitch_for(ball.axis, ball.sign, camera.yaw)
+        yaw, pitch = yaw_pitch_for(ball.axis, ball.sign)
         if focus is None:
             camera.look_from(yaw, pitch, sink)
             return
@@ -222,20 +244,21 @@ def _back_alpha(depth: float) -> float:
     return float(np.clip((BACK_FADE_END - depth) / (BACK_FADE_END - BACK_FADE_START), 0.0, 1.0))
 
 
+@lru_cache(maxsize=256)
 def _lollipop_outline(
     center: tuple[float, float],
     ball: tuple[float, float],
     radius: float,
     line_width: float,
     segments: int = 24,
-) -> list[tuple[float, float]]:
+) -> tuple[tuple[float, float], ...]:
     center_v = np.asarray(center, np.float64)
     ball_v = np.asarray(ball, np.float64)
     direction = ball_v - center_v
     distance = float(np.linalg.norm(direction))
     if distance <= radius:
         angles = np.linspace(0.0, 2.0 * np.pi, segments, endpoint=False)
-        return [tuple(ball_v + radius * np.array((np.cos(a), np.sin(a)))) for a in angles]
+        return tuple(tuple(ball_v + radius * np.array((np.cos(a), np.sin(a)))) for a in angles)
 
     direction /= distance
     side = np.array((-direction[1], direction[0]))
@@ -245,7 +268,7 @@ def _lollipop_outline(
     points = [center_v - side * half]
     points.extend(ball_v + radius * (np.cos(a) * direction + np.sin(a) * side) for a in arc)
     points.append(center_v + side * half)
-    return [tuple(point) for point in points]
+    return tuple(tuple(point) for point in points)
 
 
 def _label_alpha(ball: Ball, hovered: bool) -> float:

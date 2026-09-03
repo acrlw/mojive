@@ -134,6 +134,8 @@ class AssetsPanel(Panel):
         self._hfield_import_size = np.array((1.0, 1.0, 1.0, 0.1), np.float32)
         self._hfield_size = self._hfield_import_size.copy()
         self._hfield_source_size = self._hfield_import_size.copy()
+        self._hfield_preview_item: ModelAssetInfo | None = None
+        self._hfield_preview_grid: tuple[int, int, tuple[int, ...]] = (0, 0, ())
         self._texture_import_type = "2d"
         self._material_create_name = "material"
 
@@ -446,8 +448,7 @@ class AssetsPanel(Panel):
         if not editable:
             imgui.end_disabled()
 
-    @staticmethod
-    def _height_field_preview(ctx: PanelContext, item: ModelAssetInfo) -> None:
+    def _height_field_preview(self, ctx: PanelContext, item: ModelAssetInfo) -> None:
         rows, columns = item.preview_shape
         source_rows, source_columns = item.data_shape
         if rows <= 0 or columns <= 0 or len(item.preview_values) != rows * columns:
@@ -465,18 +466,14 @@ class AssetsPanel(Panel):
         imgui.invisible_button("##height-field-preview", imgui.ImVec2(available, height))
         lo = imgui.get_item_rect_min()
         hi = imgui.get_item_rect_max()
-        cell_width = (hi.x - lo.x) / columns
-        cell_height = (hi.y - lo.y) / rows
         low, high = item.preview_range
-        span = high - low
+        display_rows, display_columns, colors = self._height_field_preview_data(item)
+        cell_width = (hi.x - lo.x) / display_columns
+        cell_height = (hi.y - lo.y) / display_rows
         draw_list = imgui.get_window_draw_list()
-        for row in range(rows):
-            for column in range(columns):
-                value = item.preview_values[row * columns + column]
-                normalized = (value - low) / span if span > 1e-12 else 0.5
-                rgba = imgui.color_convert_float4_to_u32(
-                    imgui.ImVec4(*height_field_preview_color(normalized))
-                )
+        for row in range(display_rows):
+            for column in range(display_columns):
+                rgba = colors[row * display_columns + column]
                 draw_list.add_rect_filled(
                     imgui.ImVec2(lo.x + column * cell_width, lo.y + row * cell_height),
                     imgui.ImVec2(
@@ -491,6 +488,34 @@ class AssetsPanel(Panel):
             f"{source_columns} × {source_rows} {ctx.tr('samples')} · "
             f"{ctx.tr('normalized')} {low:.4g} .. {high:.4g}"
         )
+
+    def _height_field_preview_data(
+        self,
+        item: ModelAssetInfo,
+    ) -> tuple[int, int, tuple[int, ...]]:
+        """Cache a bounded display grid and its packed colors for one stable asset."""
+
+        if self._hfield_preview_item is item:
+            return self._hfield_preview_grid
+        rows, columns = item.preview_shape
+        values = np.asarray(item.preview_values, np.float64).reshape(rows, columns)
+        display_rows = min(rows, 24)
+        display_columns = min(columns, 24)
+        row_indices = np.rint(np.linspace(0, rows - 1, display_rows)).astype(np.intp)
+        column_indices = np.rint(np.linspace(0, columns - 1, display_columns)).astype(np.intp)
+        display = values[np.ix_(row_indices, column_indices)].reshape(-1)
+        low, high = item.preview_range
+        span = high - low
+        normalized = (display - low) / span if span > 1e-12 else np.full_like(display, 0.5)
+        colors = tuple(
+            imgui.color_convert_float4_to_u32(
+                imgui.ImVec4(*height_field_preview_color(float(value)))
+            )
+            for value in normalized
+        )
+        self._hfield_preview_item = item
+        self._hfield_preview_grid = (display_rows, display_columns, colors)
+        return self._hfield_preview_grid
 
     def _hfield_controls(self, ctx: PanelContext, item: ModelAssetInfo) -> None:
         imgui.separator()

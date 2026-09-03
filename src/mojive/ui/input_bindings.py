@@ -15,6 +15,7 @@ from imgui_bundle import imgui
 
 class InputAction(enum.StrEnum):
     TOGGLE_PAUSE = "toggle_pause"
+    STEP_BACK = "step_back"
     FRAME_SCENE = "frame_scene"
     GIZMO_TRANSLATE = "gizmo_translate"
     GIZMO_ROTATE = "gizmo_rotate"
@@ -71,6 +72,16 @@ class InputBindings:
         key = self.binding(action).key
         keys = key if isinstance(key, tuple) else (key,)
         return any(imgui.is_key_pressed(candidate, False) for candidate in keys)
+
+    def press_count(self, action: InputAction, *, delay: float, rate: float) -> int:
+        """Return immediate and held-repeat presses at an action-specific cadence."""
+
+        key = self.binding(action).key
+        keys = key if isinstance(key, tuple) else (key,)
+        return max(
+            (imgui.get_key_pressed_amount(candidate, delay, rate) for candidate in keys),
+            default=0,
+        )
 
     def with_binding(self, action: InputAction, key: object, label: str) -> InputBindings:
         """Return a changed map without mutating an in-flight input frame."""
@@ -157,6 +168,7 @@ def _choice_for_key(key: object) -> KeyChoice:
 
 _ACTION_NAMES = {
     InputAction.TOGGLE_PAUSE: "Play / Pause",
+    InputAction.STEP_BACK: "Previous frame",
     InputAction.FRAME_SCENE: "Frame selection",
     InputAction.GIZMO_TRANSLATE: "Move tool",
     InputAction.GIZMO_ROTATE: "Rotate tool",
@@ -177,6 +189,7 @@ _ACTION_NAMES = {
 
 _KEY_CHOICES = (
     KeyChoice("space", imgui.Key.space, "Space"),
+    KeyChoice("backspace", imgui.Key.backspace, "Backspace"),
     KeyChoice(
         "shift",
         (imgui.Key.left_shift, imgui.Key.right_shift),
@@ -202,6 +215,7 @@ _KEY_CHOICES_BY_ID = {choice.identifier: choice for choice in _KEY_CHOICES}
 DEFAULT_INPUT_BINDINGS = InputBindings(
     (
         (InputAction.TOGGLE_PAUSE, KeyBinding(imgui.Key.space, "Space", "space")),
+        (InputAction.STEP_BACK, KeyBinding(imgui.Key.backspace, "Backspace", "backspace")),
         (InputAction.FRAME_SCENE, KeyBinding(imgui.Key.f, "F", "f")),
         (InputAction.GIZMO_TRANSLATE, KeyBinding(imgui.Key.g, "G", "g")),
         (InputAction.GIZMO_ROTATE, KeyBinding(imgui.Key.r, "R", "r")),

@@ -12,8 +12,27 @@ from . import (
     begin_kv_table,
     button_row_layout,
     button_width,
+    copy_state_vector,
     labeled,
 )
+
+
+def sensor_value_preview(values, *, max_items: int = 24) -> str:
+    """Format a bounded head/tail preview without walking the complete sensor array."""
+
+    vector = np.asarray(values).reshape(-1)
+    limit = max(2, int(max_items))
+    if len(vector) <= limit:
+        return np.array2string(vector, precision=6, separator=", ", max_line_width=72)
+    head_count = limit // 2
+    tail_count = limit - head_count
+    head = np.array2string(vector[:head_count], precision=6, separator=", ", max_line_width=72)[
+        1:-1
+    ]
+    tail = np.array2string(vector[-tail_count:], precision=6, separator=", ", max_line_width=72)[
+        1:-1
+    ]
+    return f"[{head},\n ...,\n {tail}]"
 
 
 class SensorsPanel(Panel):
@@ -59,12 +78,7 @@ class SensorsPanel(Panel):
         if value is not None and sensor.dim > 6:
             imgui.separator()
             imgui.text_disabled(ctx.tr("value"))
-            formatted = np.array2string(
-                value,
-                precision=6,
-                separator=", ",
-                max_line_width=72,
-            )
+            preview = sensor_value_preview(value)
             labels = (ctx.tr("Copy"), ctx.tr("Open in Plot"))
             inline = button_row_layout(
                 tuple(button_width(label) for label in labels),
@@ -72,7 +86,7 @@ class SensorsPanel(Panel):
                 imgui.get_style().item_spacing.x,
             )
             if imgui.small_button(labels[0]):
-                imgui.set_clipboard_text(formatted)
+                copy_state_vector(value)
             if inline[1]:
                 imgui.same_line()
             if imgui.small_button(labels[1]) and ctx.panels is not None:
@@ -81,7 +95,7 @@ class SensorsPanel(Panel):
                 if callable(focus):
                     focus(self.sensor_index)
                 ctx.panels.open_panel("Plot")
-            height = min(150.0, 38.0 + 18.0 * max(1, formatted.count("\n") + 1))
+            height = min(150.0, 38.0 + 18.0 * max(1, preview.count("\n") + 1))
             if imgui.begin_child("sensor_value_block", imgui.ImVec2(0.0, height), 1):
-                imgui.text_wrapped(formatted)
+                imgui.text_wrapped(preview)
             imgui.end_child()

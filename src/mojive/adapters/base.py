@@ -568,6 +568,7 @@ class FrameNeeds:
     actuator: bool = False
     sensors: bool = False
     deformables: bool = False
+    joint_frames: bool = False
     diagnostics: bool = False
     islands: bool = False
     bvh: bool = False
@@ -583,6 +584,7 @@ class FrameNeeds:
             actuator=self.actuator or other.actuator,
             sensors=self.sensors or other.sensors,
             deformables=self.deformables or other.deformables,
+            joint_frames=self.joint_frames or other.joint_frames,
             diagnostics=self.diagnostics or other.diagnostics,
             islands=self.islands or other.islands,
             bvh=self.bvh or other.bvh,

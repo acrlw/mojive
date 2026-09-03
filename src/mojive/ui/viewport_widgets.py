@@ -74,6 +74,7 @@ class ViewportLabels:
     play: str = "Play"
     pause: str = "Pause"
     previous: str = "Previous frame"
+    rewind: str = "Rewind"
     step: str = "Step"
     pause_to_step: str = "Pause to step"
     reset: str = "Reset"
@@ -803,13 +804,13 @@ def draw_playback_glyph(
     triangle_radius = 0.8 * scale
 
     def rounded_triangle(points, geometry_scale: float = 1.0) -> None:
-        path = _rounded_polygon_corners(
-            points,
-            triangle_radius * geometry_scale,
-            (0, 1, 2),
-            segments=5,
+        draw.fringed_concave_fill(
+            _rounded_playback_triangle(
+                tuple(points),
+                triangle_radius * geometry_scale,
+            ),
+            color,
         )
-        draw.fringed_concave_fill(tuple(map(tuple, path)), color)
 
     def play_triangle(cx: float, direction: float, geometry_scale: float):
         g = geometry_scale * scale
@@ -859,6 +860,19 @@ def draw_playback_glyph(
             color,
             rounding=1.0 * scale,
         )
+
+
+@lru_cache(maxsize=128)
+def _rounded_playback_triangle(
+    points: tuple[tuple[float, float], ...],
+    radius: float,
+) -> tuple[tuple[float, float], ...]:
+    return tuple(
+        map(
+            tuple,
+            _rounded_polygon_corners(points, radius, (0, 1, 2), segments=5),
+        )
+    )
 
 
 def _play_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
@@ -953,7 +967,7 @@ def draw_playback(
                 if name == "toggle" and playing
                 else f"{labels.play} ({bindings.label(InputAction.TOGGLE_PAUSE)})"
                 if name == "toggle"
-                else labels.previous
+                else f"{labels.previous} ({bindings.label(InputAction.STEP_BACK)})"
                 if name == "previous"
                 else labels.step
                 if name == "step" and action_enabled
@@ -1030,54 +1044,9 @@ def draw_projection_label(draw: Draw2D, lo, hi, color, scale: float, kind: str, 
 
 
 def _tool_icon(draw: Draw2D, center, color, scale: float, packed) -> None:
-    surface, payload = packed
+    _surface, payload = packed
     kind, space = payload
-    draw_tool_glyph(draw, center, color, scale, kind, surface, space)
-
-
-@lru_cache(maxsize=128)
-def _arrow_silhouette_path(
-    x: float,
-    y: float,
-    ux: float,
-    uy: float,
-    scale: float,
-    base: float,
-    tip: float,
-    wing: float,
-    shaft_half: float,
-) -> tuple[tuple[float, float], ...]:
-    """Build one continuous narrow-shaft arrow silhouette."""
-
-    length = math.hypot(ux, uy)
-    ux, uy = ux / length, uy / length
-    nx, ny = -uy, ux
-
-    def point(along: float, across: float) -> tuple[float, float]:
-        return (
-            x + (ux * along + nx * across) * scale,
-            y + (uy * along + ny * across) * scale,
-        )
-
-    polygon = (
-        point(0.0, shaft_half),
-        point(base, shaft_half),
-        point(base, wing),
-        point(tip, 0.0),
-        point(base, -wing),
-        point(base, -shaft_half),
-        point(0.0, -shaft_half),
-    )
-    return tuple(
-        map(
-            tuple,
-            _rounded_polygon_corners(
-                polygon,
-                ARROW_CORNER_RADIUS_PT * scale,
-                (2, 3, 4),
-            ),
-        )
-    )
+    draw_tool_glyph(draw, center, color, scale, kind, space)
 
 
 @lru_cache(maxsize=64)
@@ -1128,36 +1097,6 @@ def _move_glyph_path(
                 (23, 0, 1, 5, 6, 7, 11, 12, 13, 17, 18, 19),
             ),
         )
-    )
-
-
-def _draw_arrow_glyph(
-    draw: Draw2D,
-    center,
-    direction,
-    color,
-    scale: float,
-    *,
-    base: float,
-    tip: float,
-    wing: float,
-    shaft_half: float,
-) -> None:
-    """Submit a shaft and triangular head as one explicitly AA-filled path."""
-
-    draw.fringed_concave_fill(
-        _arrow_silhouette_path(
-            float(center[0]),
-            float(center[1]),
-            float(direction[0]),
-            float(direction[1]),
-            float(scale),
-            float(base),
-            float(tip),
-            float(wing),
-            float(shaft_half),
-        ),
-        color,
     )
 
 
@@ -1247,7 +1186,6 @@ def draw_tool_glyph(
     color,
     scale: float,
     kind: str,
-    surface,
     space: str,
     geometry: OverlayGeometry = OVERLAY_GEOMETRY,
 ) -> None:
@@ -2122,7 +2060,6 @@ def draw_status(
     scale: float,
     *,
     selected: str,
-    has_selection: bool,
     state: str,
     sim_time: float,
     step: int,

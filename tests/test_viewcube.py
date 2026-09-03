@@ -200,7 +200,7 @@ def test_fully_faded_ball_is_not_clickable():
 )
 def test_click_target_is_the_axis_you_clicked(axis, sign, yaw, pitch):
 
-    got_yaw, got_pitch = vc.yaw_pitch_for(axis, sign, current_yaw=37.5)
+    got_yaw, got_pitch = vc.yaw_pitch_for(axis, sign)
     assert abs((got_yaw - yaw + 180.0) % 360.0 - 180.0) < 1e-6
     assert abs(got_pitch - pitch) < 1e-6
 
@@ -209,15 +209,15 @@ def test_top_view_yaw_matches_the_camera_preset():
 
     from mojive.ui.camera import PRESETS
 
-    assert vc.yaw_pitch_for(2, 1.0, 0.0) == PRESETS["top"]
-    assert vc.yaw_pitch_for(2, -1.0, 0.0) == PRESETS["bottom"]
+    assert vc.yaw_pitch_for(2, 1.0) == PRESETS["top"]
+    assert vc.yaw_pitch_for(2, -1.0) == PRESETS["bottom"]
 
 
 def test_top_view_is_right_handed_x_right_y_up():
 
     from mojive.ui.camera import camera_basis
 
-    yaw, pitch = vc.yaw_pitch_for(2, 1.0, 0.0)
+    yaw, pitch = vc.yaw_pitch_for(2, 1.0)
     y, p = np.radians(yaw), np.radians(pitch)
     direction = np.array([np.cos(p) * np.cos(y), np.cos(p) * np.sin(y), np.sin(p)])
     right, up, _f = camera_basis(cam(direction * 5.0))

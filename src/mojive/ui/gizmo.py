@@ -131,6 +131,7 @@ TRACKBALL_RAD_PER_PT = 0.01
 ROTATION_LINEAR_ESCAPE_PT = 8.0
 ROTATION_LINEAR_LOCK_PT = 2.0
 ROTATION_EDGE_LINEAR_ALPHA = 0.18
+SLIDE_CARDINAL_ESCAPE_PT = 8.0
 JOINT_DRAG_START_TICK_HALF_PT = 6.0
 JOINT_ROTATION_AXIS_DASH_PT = 6.0
 JOINT_ROTATION_AXIS_GAP_PT = 6.0
@@ -179,10 +180,9 @@ def _joint_value_at_limit(state: _JointRangeState, value: float, *, lower: bool)
     return float(value) >= float(state.upper) - tolerance
 
 
-def _joint_current_tick_color(state: _JointRangeState, range_color):
+def _joint_current_tick_color(range_color):
     """Keep the current-value tick distinct from the colored limit ticks."""
 
-    del state
     return tuple(float(channel) for channel in range_color)
 
 
@@ -466,6 +466,16 @@ class _SlideRangeProjection:
 
 
 @dataclass(frozen=True)
+class _HingeRangeProjection:
+    alpha: float
+    allowed: np.ndarray | None
+    full_range: bool
+    current_tick: tuple[np.ndarray, np.ndarray] | None
+    lower_tick: tuple[np.ndarray, np.ndarray] | None
+    upper_tick: tuple[np.ndarray, np.ndarray] | None
+
+
+@dataclass(frozen=True)
 class PreciseGizmoInput:
     """Stable scalar-handle target captured when precise input opens."""
 
@@ -529,6 +539,7 @@ class ObjectGizmo:
         self._handle_mask = ALL_HANDLE_MASK
         self._frame = GizmoFrame()
         self._style_scale = 1.0
+        self._hover_cache_signature: tuple | None = None
 
         self._start_pos = np.zeros(3, np.float64)
         self._drag_origin_pos = np.zeros(3, np.float64)
@@ -539,6 +550,11 @@ class ObjectGizmo:
         self._axis = np.zeros(3, np.float64)
         self._axis_screen = np.zeros(2, np.float64)
         self._world_per_pt = 0.0
+        self._slide_cardinal_axis = -1
+        self._slide_cardinal_sign = 1.0
+        self._slide_last_cursor = np.zeros(2, np.float64)
+        self._slide_cardinal_origin_cursor = np.zeros(2, np.float64)
+        self._slide_cardinal_origin_travel = 0.0
         self._plane_normal = np.zeros(3, np.float64)
         self._plane_start = np.zeros(3, np.float64)
         self._rotation_start_vec = np.zeros(3, np.float64)
@@ -658,7 +674,7 @@ class ObjectGizmo:
         target, _reason = self._joint_target(session, node)
         if target is None:
             return FrameNeeds.none()
-        return FrameNeeds(poses=False, qpos=True, diagnostics=True)
+        return FrameNeeds(poses=False, qpos=True, joint_frames=True)
 
     def selected_joint_id(self, body_index: int) -> int:
         return self._joint_selection.get(int(body_index), -1)
@@ -1017,16 +1033,33 @@ class ObjectGizmo:
             return self._hovered
         if not enabled:
             self._hovered = GizmoHandle.NONE
+            self._hover_cache_signature = None
             return self._hovered
         target, _reason = self._joint_target(session, node)
         pose = self._target_pose(session, node, target)
         if pose is None:
             self._hovered = GizmoHandle.NONE
+            self._hover_cache_signature = None
             return self._hovered
         pos, mat = pose
         mode = target.mode if target is not None else self._mode
         self._handle_mask = target.handles if target is not None else ALL_HANDLE_MASK
         range_state = self._joint_range_state(session, target)
+        signature = self._hover_signature(
+            session,
+            node,
+            target,
+            range_state,
+            cam,
+            rect,
+            cursor,
+            pos,
+            mat,
+            mode,
+            style_scale,
+        )
+        if signature == self._hover_cache_signature:
+            return self._hovered
         if target is not None and target.joint.type == "slide" and range_state is not None:
             basis = self._target_basis(mat, target)
             scale = world_scale(cam, pos, rect[3], SIZE_PT * self._style_scale)
@@ -1051,6 +1084,7 @@ class ObjectGizmo:
                 )
                 if arrow_hit or axis_hit:
                     self._hovered = GizmoHandle.Z
+            self._hover_cache_signature = signature
             return self._hovered
         self._hovered, self._axis_mask, self._plane_mask = hit_test(
             cam,
@@ -1063,7 +1097,58 @@ class ObjectGizmo:
             self._handle_mask,
             self._hovered,
         )
+        self._hover_cache_signature = signature
         return self._hovered
+
+    def _hover_signature(
+        self,
+        session: Session,
+        node: SceneNode,
+        target: _JointTarget | None,
+        range_state: _JointRangeState | None,
+        cam: CameraView,
+        rect,
+        cursor,
+        position,
+        rotation,
+        mode: GizmoMode,
+        style_scale: float,
+    ) -> tuple:
+        """Describe every input that can change idle gizmo hit testing."""
+
+        joint = target.joint if target is not None else None
+        return (
+            id(session),
+            session.structure_generation,
+            session.paused,
+            int(node.node_id),
+            int(joint.joint_id) if joint is not None else -1,
+            joint.type if joint is not None else "",
+            int(self._handle_mask),
+            mode.value,
+            self._space.value,
+            float(style_scale),
+            tuple(float(value) for value in rect),
+            tuple(float(value) for value in cursor),
+            tuple(float(value) for value in np.asarray(position).reshape(-1)),
+            tuple(float(value) for value in np.asarray(rotation).reshape(-1)),
+            None
+            if range_state is None
+            else (range_state.current, range_state.lower, range_state.upper),
+            tuple(float(value) for value in np.asarray(cam.eye).reshape(-1)),
+            tuple(float(value) for value in np.asarray(cam.target).reshape(-1)),
+            tuple(float(value) for value in np.asarray(cam.up).reshape(-1)),
+            float(cam.fov_y),
+            float(cam.near),
+            float(cam.far),
+            float(cam.aspect),
+            bool(cam.orthographic),
+            float(cam.ortho_height),
+            tuple(float(value) for value in np.asarray(cam.focal_length).reshape(-1)),
+            tuple(float(value) for value in np.asarray(cam.sensor_size).reshape(-1)),
+            tuple(float(value) for value in np.asarray(cam.principal_offset).reshape(-1)),
+            cam.orthographic_blend,
+        )
 
     def interact(
         self,
@@ -1508,12 +1593,110 @@ class ObjectGizmo:
         state = self._joint_range
         if state is None:
             return
+        hinge = (
+            self._hinge_range_projection(cam, rect, style_scale, state)
+            if state.joint_type == "hinge"
+            else None
+        )
+        slide = (
+            self._slide_range_projection(
+                cam,
+                rect,
+                style_scale,
+                state,
+                self._frame.position,
+                self._frame.rotation,
+            )
+            if state.joint_type == "slide"
+            else None
+        )
+        if state.joint_type == "hinge" and hinge is None:
+            return
+        if state.joint_type == "slide" and slide is None:
+            return
         phases = ("outline", "core") if phase in ("all", "geometry") else (phase,)
         for draw_phase in phases:
             if state.joint_type == "hinge":
-                self._draw_hinge_range(overlay, cam, rect, style_scale, state, phase=draw_phase)
+                self._draw_hinge_range(
+                    overlay,
+                    cam,
+                    rect,
+                    style_scale,
+                    state,
+                    phase=draw_phase,
+                    prepared=hinge,
+                )
             elif state.joint_type == "slide":
-                self._draw_slide_range(overlay, cam, rect, style_scale, state, phase=draw_phase)
+                self._draw_slide_range(
+                    overlay,
+                    cam,
+                    rect,
+                    style_scale,
+                    state,
+                    phase=draw_phase,
+                    prepared=slide,
+                )
+
+    def _hinge_range_projection(
+        self,
+        cam,
+        rect,
+        style_scale: float,
+        state: _JointRangeState,
+    ) -> _HingeRangeProjection | None:
+        frame = self._frame
+        origin = np.asarray(frame.position, np.float64)
+        rotation = np.asarray(frame.rotation, np.float64)
+        alpha = rotation_ring_alpha(cam, origin, rotation[:, 2])
+        if alpha <= 0.0:
+            return None
+        dial = _RotationDialProjector(
+            cam,
+            rect,
+            origin,
+            rotation[:, 2],
+            rotation[:, 0],
+            SIZE_PT * style_scale,
+        )
+        span = state.angular_span
+        full_range = state.covers_full_turn
+        allowed = None
+        if span > 1e-6:
+            segments = _rotation_dial_segments(cam, origin, rotation[:, 2])
+            point_count = max(2, int(np.ceil(segments * span / _FULL_TURN)) + 1)
+            allowed_angles = np.linspace(
+                state.lower,
+                state.lower + span,
+                segments if full_range else point_count,
+                endpoint=not full_range,
+            )
+            candidate = dial.points(JOINT_RANGE_RADIUS, allowed_angles)
+            if np.all(candidate[:, 2] > 0.0):
+                allowed = candidate[:, :2]
+        return _HingeRangeProjection(
+            alpha=alpha,
+            allowed=allowed,
+            full_range=full_range,
+            current_tick=dial.tick(
+                JOINT_RANGE_RADIUS,
+                state.current,
+                JOINT_CURRENT_TICK_PT * style_scale,
+            ),
+            lower_tick=None
+            if state.has_ambiguous_dial_limits
+            else dial.tick(
+                JOINT_RANGE_RADIUS,
+                state.lower,
+                JOINT_LIMIT_TICK_PT * style_scale,
+            ),
+            upper_tick=None
+            if state.has_ambiguous_dial_limits
+            else dial.tick(
+                JOINT_RANGE_RADIUS,
+                state.upper,
+                JOINT_LIMIT_TICK_PT * style_scale,
+            ),
+        )
 
     def _draw_hinge_range(
         self,
@@ -1524,25 +1707,12 @@ class ObjectGizmo:
         state: _JointRangeState,
         *,
         phase: str = "all",
+        prepared: _HingeRangeProjection | None = None,
     ) -> None:
-        frame = self._frame
-        origin = np.asarray(frame.position, np.float64)
-        rotation = np.asarray(frame.rotation, np.float64)
-        alpha = rotation_ring_alpha(cam, origin, rotation[:, 2])
-        if alpha <= 0.0:
+        projection = prepared or self._hinge_range_projection(cam, rect, style_scale, state)
+        if projection is None:
             return
-        dial = _RotationDialProjector(
-            cam,
-            rect,
-            origin,
-            rotation[:, 2],
-            rotation[:, 0],
-            SIZE_PT * style_scale,
-        )
-        segments = _rotation_dial_segments(cam, origin, rotation[:, 2])
-        span = state.angular_span
-        start_angle = state.lower
-        full_range = state.covers_full_turn
+        alpha = projection.alpha
         allowed_color = self._hinge_range_color()
         range_color = _with_alpha(allowed_color, alpha)
         outline = phase == "outline"
@@ -1550,49 +1720,28 @@ class ObjectGizmo:
         range_width = (
             JOINT_RANGE_WIDTH_PT + (2.0 * JOINT_OUTLINE_PT if outline else 0.0)
         ) * style_scale
-        if phase != "labels" and span > 1e-6:
-            point_count = max(2, int(np.ceil(segments * span / _FULL_TURN)) + 1)
-            allowed_angles = np.linspace(
-                start_angle,
-                start_angle + span,
-                segments if full_range else point_count,
-                endpoint=not full_range,
+        if phase != "labels" and projection.allowed is not None:
+            overlay.polyline(
+                projection.allowed,
+                stroke_color,
+                range_width,
+                closed=projection.full_range,
+                cap="butt" if projection.full_range else "round",
             )
-            allowed = dial.points(JOINT_RANGE_RADIUS, allowed_angles)
-            if np.all(allowed[:, 2] > 0.0):
-                overlay.polyline(
-                    allowed[:, :2],
-                    stroke_color,
-                    range_width,
-                    closed=full_range,
-                    cap="butt" if full_range else "round",
-                )
         if phase != "labels":
-            current_tick = dial.tick(
-                JOINT_RANGE_RADIUS,
-                state.current,
-                JOINT_CURRENT_TICK_PT * style_scale,
-            )
+            current_tick = projection.current_tick
             if current_tick is not None:
                 overlay.line(
                     current_tick[0],
                     current_tick[1],
-                    stroke_color if outline else _joint_current_tick_color(state, range_color),
+                    stroke_color if outline else _joint_current_tick_color(range_color),
                     range_width,
                     cap="round",
                 )
             if not state.has_ambiguous_dial_limits:
                 tick_width = (3.0 + (2.0 * JOINT_OUTLINE_PT if outline else 0.0)) * style_scale
-                lower_tick = dial.tick(
-                    JOINT_RANGE_RADIUS,
-                    start_angle,
-                    JOINT_LIMIT_TICK_PT * style_scale,
-                )
-                upper_tick = dial.tick(
-                    JOINT_RANGE_RADIUS,
-                    state.upper,
-                    JOINT_LIMIT_TICK_PT * style_scale,
-                )
+                lower_tick = projection.lower_tick
+                upper_tick = projection.upper_tick
                 entries = (
                     (
                         state.lower,
@@ -1724,14 +1873,10 @@ class ObjectGizmo:
         state: _JointRangeState,
         *,
         phase: str = "all",
+        prepared: _SlideRangeProjection | None = None,
     ) -> None:
-        slide = self._slide_range_projection(
-            cam,
-            rect,
-            style_scale,
-            state,
-            self._frame.position,
-            self._frame.rotation,
+        slide = prepared or self._slide_range_projection(
+            cam, rect, style_scale, state, self._frame.position, self._frame.rotation
         )
         if slide is None:
             return
@@ -1769,7 +1914,7 @@ class ObjectGizmo:
                 overlay.line(
                     current - normal * 10.0 * style_scale,
                     current + normal * 10.0 * style_scale,
-                    stroke_color if outline else _joint_current_tick_color(state, range_color),
+                    stroke_color if outline else _joint_current_tick_color(range_color),
                     range_width,
                     cap="round",
                 )
@@ -2260,7 +2405,7 @@ class ObjectGizmo:
         end_width = 4.0 * style_scale
         end_color = ACTIVE_HANDLE_COLOR
         if self._joint_range is not None and self._joint_range.joint_type == "slide":
-            end_color = _joint_current_tick_color(self._joint_range, end_color)
+            end_color = _joint_current_tick_color(end_color)
         phases = ("outline", "core") if phase == "all" else (phase,)
         for draw_phase in phases:
             outline = draw_phase == "outline"
@@ -2465,7 +2610,7 @@ class ObjectGizmo:
                 axis = np.asarray(self._frame.rotation, np.float64).reshape(3, 3)[:, 2]
                 alpha = axis_handle_alpha(cam, origin, axis)
                 range_color = self._flat_color(GizmoHandle.Z, 2, alpha)
-            semantic_color = _joint_current_tick_color(state, range_color)
+            semantic_color = _joint_current_tick_color(range_color)
         elif self._active in ROTATE_AXIS_HANDLES and self._joint_range is None:
             _fill, semantic_color, _dark = self._active_rotation_palette()
         else:
@@ -2537,6 +2682,11 @@ class ObjectGizmo:
         self._rotation_linear_origin_angle = 0.0
         self._rotation_raw_angle = 0.0
         self._rotation_angle = 0.0
+        self._slide_cardinal_axis = -1
+        self._slide_cardinal_sign = 1.0
+        self._slide_last_cursor[:] = cursor
+        self._slide_cardinal_origin_cursor[:] = cursor
+        self._slide_cardinal_origin_travel = 0.0
         self._trackball_angles[:] = 0.0
         self._snapping = False
         self._edit_started = False
@@ -2696,13 +2846,52 @@ class ObjectGizmo:
             + travel * self._rotation_linear_sign * TRACKBALL_RAD_PER_PT
         )
 
+    def _slide_drag_travel(self, cursor) -> float:
+        """Keep an axial drag exact, but accept a deliberate cardinal escape."""
+
+        current = np.asarray(cursor, np.float64).reshape(2)
+        delta = current - self._start_cursor
+        projected = float(np.dot(delta, self._axis_screen))
+        if self._slide_cardinal_axis < 0:
+            perpendicular = delta - self._axis_screen * projected
+            if float(np.linalg.norm(perpendicular)) <= (
+                SLIDE_CARDINAL_ESCAPE_PT * self._style_scale
+            ):
+                self._slide_last_cursor[:] = current
+                return projected
+            axis = 0 if abs(float(delta[0])) > abs(float(delta[1])) else 1
+            component = float(self._axis_screen[axis])
+            if abs(component) >= 0.15:
+                sign = 1.0 if component > 0.0 else -1.0
+            else:
+                # Preserve familiar screen controls when the rendered axis is
+                # perpendicular to the chosen drag: right and up increase.
+                sign = 1.0 if axis == 0 else -1.0
+            previous_delta = self._slide_last_cursor - self._start_cursor
+            previous_travel = float(np.dot(previous_delta, self._axis_screen))
+            latest_travel = float(current[axis] - self._slide_last_cursor[axis]) * sign
+            self._slide_cardinal_axis = axis
+            self._slide_cardinal_sign = sign
+            self._slide_cardinal_origin_cursor[:] = current
+            self._slide_cardinal_origin_travel = previous_travel + latest_travel
+
+        axis = self._slide_cardinal_axis
+        travel = float(current[axis] - self._slide_cardinal_origin_cursor[axis])
+        travel = self._slide_cardinal_origin_travel + travel * self._slide_cardinal_sign
+        self._slide_last_cursor[:] = current
+        return travel
+
     def _drag(self, session, cam, rect, cursor, *, snap: bool) -> bool:
         handle = self._active
         self._snapping = bool(snap)
         pos = self._start_pos.copy()
         mat = self._start_mat
         if handle in (GizmoHandle.X, GizmoHandle.Y, GizmoHandle.Z):
-            travel = float(np.dot(np.asarray(cursor) - self._start_cursor, self._axis_screen))
+            travel = (
+                self._slide_drag_travel(cursor)
+                if self._active_joint is not None and self._active_joint.type == "slide"
+                else float(np.dot(np.asarray(cursor) - self._start_cursor, self._axis_screen))
+            )
             pos += self._axis * (travel * self._world_per_pt)
         elif handle in (GizmoHandle.SCREEN, GizmoHandle.YZ, GizmoHandle.ZX, GizmoHandle.XY):
             hit = _cursor_plane(cam, rect, cursor, self._start_pos, self._plane_normal)
@@ -2853,6 +3042,9 @@ class ObjectGizmo:
             self._start_joint_qpos[0] += applied
             self._start_pos[:] = position
             self._start_cursor[:] = cursor
+            self._slide_last_cursor[:] = cursor
+            self._slide_cardinal_origin_cursor[:] = cursor
+            self._slide_cardinal_origin_travel = 0.0
 
     def _submit_transform(
         self, session, node, pos, mat, *, preview_model: bool = True
@@ -2860,6 +3052,7 @@ class ObjectGizmo:
         """Route drag and precise edits through the same target command path."""
 
         pos = np.asarray(pos, np.float64)
+        transform_node = self._transform_node(session, node)
         if self._active_joint is not None:
             joint = self._active_joint
             if joint.type == "ball":
@@ -2884,22 +3077,22 @@ class ObjectGizmo:
                 else:
                     pos = self._start_pos + self._axis * applied
                 command = SetQpos(joint.qpos_adr, value)
-        elif node.type is NodeType.MODEL and preview_model:
-            result = self.preview_model_placement(session, node.model_id, pos, mat)
+        elif transform_node.type is NodeType.MODEL and preview_model:
+            result = self.preview_model_placement(session, transform_node.model_id, pos, mat)
             return result, pos
-        elif node.type is NodeType.MODEL:
+        elif transform_node.type is NodeType.MODEL:
             command = SetSceneModelTransform(
-                model_id=node.model_id,
+                model_id=transform_node.model_id,
                 position=np.asarray(pos, np.float32),
                 rotation=np.asarray(mat, np.float32),
             )
-        elif node.type is NodeType.LIGHT:
-            command = _set_light_from_world(session, node, pos, mat)
-        elif node.type is NodeType.CAMERA:
-            command = _set_camera_from_world(session, node, pos, mat)
-        elif node.posable:
+        elif transform_node.type is NodeType.LIGHT:
+            command = _set_light_from_world(session, transform_node, pos, mat)
+        elif transform_node.type is NodeType.CAMERA:
+            command = _set_camera_from_world(session, transform_node, pos, mat)
+        elif transform_node.posable:
             command = SetPose(
-                node_id=node.node_id,
+                node_id=transform_node.node_id,
                 position=np.asarray(pos, np.float32),
                 rotation=np.asarray(mat, np.float32),
             )
@@ -3001,6 +3194,36 @@ class ObjectGizmo:
         return None, f"{joint.type} joint uses the free-body transform gizmo"
 
     @staticmethod
+    def _transform_node(session: Session, node: SceneNode) -> SceneNode:
+        """Resolve the pose-write target while preserving a selected free-joint node."""
+
+        if node.type is not NodeType.JOINT:
+            return node
+        joint = next(
+            (
+                item
+                for item in session.joints_for_body(node.body_index)
+                if item.joint_id == node.joint_index
+            ),
+            None,
+        )
+        if joint is None or joint.type != "free":
+            return node
+        parent = session.node(node.parent)
+        if parent is not None and parent.posable and int(parent.body_index) == int(node.body_index):
+            return parent
+        return next(
+            (
+                candidate
+                for candidate in session.nodes
+                if candidate.posable
+                and int(candidate.body_index) == int(node.body_index)
+                and candidate.type in (NodeType.LINK, NodeType.ROBOT)
+            ),
+            node,
+        )
+
+    @staticmethod
     def _joint_range_state(
         session: Session, target: _JointTarget | None
     ) -> _JointRangeState | None:
@@ -3033,7 +3256,7 @@ class ObjectGizmo:
         self, session: Session, node: SceneNode, target: _JointTarget | None
     ) -> tuple[np.ndarray, np.ndarray] | None:
         if target is None:
-            return node_world_pose(session, node)
+            return node_world_pose(session, self._transform_node(session, node))
         frame = session.frame
         diagnostics = frame.diagnostics
         joint_id = target.joint.joint_id
@@ -3115,7 +3338,10 @@ class ObjectGizmo:
         ):
             return Verdict(False, "Model placement is locked; use Edit Placement in the Inspector")
         target, reason = self._joint_target(session, node)
-        if (
+        transform_node = None if node is None else self._transform_node(session, node)
+        if transform_node is not None and transform_node is not node:
+            result = verdict(session.paused, transform_node)
+        elif (
             node is not None
             and not node.posable
             and node.type
@@ -3152,12 +3378,13 @@ class ObjectGizmo:
         if not result.ok or node is None:
             return result
         if (
-            node.posable
-            and node.type not in (NodeType.LIGHT, NodeType.CAMERA)
+            transform_node is not None
+            and transform_node.posable
+            and transform_node.type not in (NodeType.LIGHT, NodeType.CAMERA)
             and not session.adapter.caps.write_pose
         ):
             return Verdict(False, f"{session.adapter.caps.name} cannot edit this transform")
-        if session.entity_gizmo_locked(node):
+        if session.entity_gizmo_locked(transform_node):
             return Verdict(False, "gizmo is locked while simulation is running")
         if node.type is NodeType.LIGHT:
             light = _source_light(session, node)
@@ -3202,6 +3429,7 @@ class ObjectGizmo:
         self._snapping = False
         self._active = GizmoHandle.NONE
         self._active_joint = None
+        self._slide_cardinal_axis = -1
         self._start_joint_qpos = np.zeros(0, np.float64)
         self._joint_drag_origin_qpos = np.zeros(0, np.float64)
         self._trackball_angles[:] = 0.0

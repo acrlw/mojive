@@ -12,6 +12,7 @@ from ...adapters.base import FrameNeeds, JointInfo, NodeType
 from . import (
     Panel,
     PanelContext,
+    copy_state_vector,
     copyable_name_item,
     publish_focus_item_hint,
     searchable_ordered_list_header,
@@ -74,6 +75,7 @@ class JointsPanel(Panel):
         )
         if changed or sort_changed:
             self._joint_page = 0
+        _joint_state_copy_buttons(ctx)
 
         cache_key = (s.structure_generation, self._search, self._sort_by_name)
         if cache_key != self._browse_cache_key:
@@ -191,6 +193,27 @@ class JointsPanel(Panel):
             self._joint_nodes = {}
         if frame.qpos is not None and len(self._initial_qpos) != len(frame.qpos):
             self._initial_qpos = np.asarray(frame.qpos, np.float64).copy()
+
+
+def _joint_state_copy_buttons(ctx: PanelContext) -> None:
+    frame = ctx.session.frame
+    flags = imgui.TableFlags_.sizing_stretch_same | imgui.TableFlags_.no_pad_outer_x
+    if not imgui.begin_table("joint_state_copy", 2, flags):
+        return
+    imgui.table_next_column()
+    if imgui.button(ctx.tr("Copy qpos"), imgui.ImVec2(-1.0, 0.0)):
+        copy_state_vector(frame.qpos)
+    imgui.table_next_column()
+    qvel_available = frame.qvel is not None or ctx.session.adapter.caps.state_snapshots
+    imgui.begin_disabled(not qvel_available)
+    if imgui.button(ctx.tr("Copy qvel"), imgui.ImVec2(-1.0, 0.0)):
+        values = frame.qvel
+        if values is None:
+            state = ctx.session.adapter.capture_state()
+            values = None if state is None else state.qvel
+        copy_state_vector(values)
+    imgui.end_disabled()
+    imgui.end_table()
 
 
 def _page_controls(ctx: PanelContext, label: str, count: int, page: int) -> tuple[int, int, int]:

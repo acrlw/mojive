@@ -275,7 +275,6 @@ def render_tool_shell_icon(
     scale = working_size * _GLYPH_SCALE_FOR_CANVAS
     center = (working_size * 0.5, working_size * 0.5)
     color = tuple(channel / 255.0 for channel in foreground)
-    transparent = tuple(channel / 255.0 for channel in _TRANSPARENT)
     core = Image.new("RGBA", (working_size, working_size), _TRANSPARENT)
     draw_tool_glyph(
         _PillowDraw2D(core, scale),
@@ -283,7 +282,6 @@ def render_tool_shell_icon(
         color,
         scale,
         kind,
-        transparent,
         space,
         geometry,
     )
@@ -301,7 +299,6 @@ def render_tool_shell_icon(
             color,
             scale,
             kind,
-            transparent,
             space,
             geometry,
         )
@@ -420,7 +417,6 @@ def export_icons(output: Path, size: int = 1024) -> tuple[Path, ...]:
     scale = working_size * _GLYPH_SCALE_FOR_CANVAS
     center = (working_size * 0.5, working_size * 0.5)
     foreground = tuple(channel / 255.0 for channel in _FOREGROUND)
-    transparent = tuple(channel / 255.0 for channel in _TRANSPARENT)
     variants = (
         ("move", "move", "world", OVERLAY_GEOMETRY),
         ("rotate", "rotate", "world", OVERLAY_GEOMETRY),
@@ -449,7 +445,6 @@ def export_icons(output: Path, size: int = 1024) -> tuple[Path, ...]:
             foreground,
             scale,
             kind,
-            transparent,
             space,
             geometry,
         )

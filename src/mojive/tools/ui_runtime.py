@@ -1364,6 +1364,31 @@ def _capture_joint_gizmo_scene(output: Path) -> None:
             max_height=700.0,
         )
 
+        original_view = viewer.app._camera_view()
+        free_joint = next(
+            node
+            for node in viewer.session.nodes
+            if node.type is NodeType.JOINT and node.name == "04_free_6dof"
+        )
+        viewer.session.submit(cmd.SelectNode(free_joint.node_id))
+        assert viewer.app.request_node_focus(free_joint.node_id)
+        viewer.sync()
+        viewer.app.camera.advance(1.0, viewer.app.camera_out)
+        _settle(viewer, 3)
+        assert viewer.session.selected_node is free_joint
+        assert viewer.app.gizmo.visible
+        assert not viewer.app.gizmo.display_only
+        _park_cursor(viewer)
+        viewer.sync()
+        _save_window_crop(
+            viewer,
+            "Viewport",
+            output / "joint-free-transform-gizmo.png",
+            padding=0.0,
+        )
+        viewer.app.camera.adopt(original_view)
+        viewer.app.camera.publish(viewer.app.camera_out)
+
         slide = next(item for item in viewer.session.nodes if item.name == "02_prismatic")
         viewer.session.submit(cmd.Select(slide.object_id))
         _settle(viewer, 6)

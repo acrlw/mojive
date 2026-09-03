@@ -289,7 +289,7 @@ def test_hinge_value_label_dot_matches_the_current_tick_color(current) -> None:
     dot_color = next(args[2] for name, args, _kwargs in overlay.calls if name == "circle_filled")
     alpha = rotation_ring_alpha(cam, gizmo._start_pos, gizmo._axis)
     range_color = (*ACTIVE_HANDLE_COLOR[:3], ACTIVE_HANDLE_COLOR[3] * alpha)
-    expected = _joint_current_tick_color(gizmo._joint_range, range_color)
+    expected = _joint_current_tick_color(range_color)
     assert np.allclose(dot_color, expected)
 
 
@@ -841,6 +841,32 @@ def test_hover_clears_when_the_viewport_does_not_own_input() -> None:
 
     assert gizmo.update_hover(session, cam, RECT, center) is GizmoHandle.SCREEN
     assert gizmo.update_hover(session, cam, RECT, center, enabled=False) is GizmoHandle.NONE
+
+
+def test_idle_hover_reuses_unchanged_hit_test(monkeypatch) -> None:
+    import mojive.ui.gizmo as ui_gizmo
+
+    session, _ = session_at()
+    gizmo = ObjectGizmo()
+    cam = camera()
+    center = tuple(project(cam, (np.zeros(3),), RECT)[0, :2])
+    calls = 0
+    real_hit_test = ui_gizmo.hit_test
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_hit_test(*args, **kwargs)
+
+    monkeypatch.setattr(ui_gizmo, "hit_test", counted)
+
+    assert gizmo.update_hover(session, cam, RECT, center) is GizmoHandle.SCREEN
+    assert gizmo.update_hover(session, cam, RECT, center) is GizmoHandle.SCREEN
+    assert calls == 1
+
+    moved = (center[0] + 1.0, center[1])
+    gizmo.update_hover(session, cam, RECT, moved)
+    assert calls == 2
 
 
 def test_precise_axis_input_applies_a_body_frame_delta_and_one_undo() -> None:
@@ -2623,7 +2649,7 @@ def test_joint_gizmo_edits_only_the_selected_joint_dof(
     assert session.submit(cmd.Select(node.object_id))
     gizmo = ObjectGizmo()
     needs = gizmo.frame_needs(session)
-    assert needs.qpos and needs.diagnostics
+    assert needs.qpos and needs.joint_frames and not needs.diagnostics
     session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
     assert gizmo.evaluate(session, node).ok
 
@@ -2712,6 +2738,39 @@ def test_hinge_joint_rotation_accepts_a_straight_drag_off_the_ring() -> None:
     assert gizmo._drag(session, cam, RECT, outside + np.array((50.0, 0.0)), snap=False)
     second = float(adapter.data.qpos[target.joint.qpos_adr])
     assert abs(second) == pytest.approx(0.7)
+    assert np.sign(second) == np.sign(first)
+
+
+@pytest.mark.physics
+def test_slide_joint_accepts_a_cardinal_drag_off_the_projected_axis() -> None:
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
+
+    adapter = MuJoCoAdapter(resolve("joint_types"))
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == "slide_body")
+    assert session.submit(cmd.Select(node.object_id))
+    session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
+    gizmo = ObjectGizmo()
+    target, reason = gizmo._joint_target(session, node)
+    assert target is not None, reason
+    pose = gizmo._target_pose(session, node, target)
+    assert pose is not None
+    position, basis = pose
+    cam = CameraView(eye=np.array((2.0, -4.0, 2.0)), target=position.copy())
+    start = project(cam, (position + basis[:, 2] * 0.1,), RECT)[0, :2]
+    assert gizmo._begin_handle(session, cam, RECT, start, GizmoHandle.Z)
+    perpendicular = np.array((-gizmo._axis_screen[1], gizmo._axis_screen[0]))
+
+    assert gizmo._drag(session, cam, RECT, start + perpendicular * 12.0, snap=False)
+    first = float(adapter.data.qpos[target.joint.qpos_adr])
+    assert gizmo._slide_cardinal_axis in (0, 1)
+    assert abs(first) > 1e-3
+
+    assert gizmo._drag(session, cam, RECT, start + perpendicular * 18.0, snap=False)
+    second = float(adapter.data.qpos[target.joint.qpos_adr])
+    assert abs(second) > abs(first)
     assert np.sign(second) == np.sign(first)
 
 
@@ -3086,6 +3145,54 @@ def test_precise_joint_relative_input_keeps_display_units(
     assert edit is not None
     assert gizmo.apply_precise_value(session, camera(), edit, delta)
     assert adapter.data.qpos[target.joint.qpos_adr] == pytest.approx(expected)
+
+
+@pytest.mark.physics
+def test_selected_free_joint_uses_its_body_transform_without_losing_joint_selection() -> None:
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
+
+    adapter = MuJoCoAdapter(resolve("joint_gizmo"))
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+    joint_node = next(
+        item
+        for item in session.nodes
+        if item.type is NodeType.JOINT and item.name == "04_free_6dof"
+    )
+    body_node = session.node(joint_node.parent)
+    assert body_node is not None and body_node.posable
+    assert session.submit(cmd.SelectNode(joint_node.node_id))
+    session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
+    gizmo = ObjectGizmo()
+
+    assert session.selected_node is joint_node
+    assert gizmo._transform_node(session, joint_node) is body_node
+    assert gizmo.evaluate(session, joint_node).ok
+    assert gizmo.publish(
+        CaptureBackend(),
+        session,
+        camera(),
+        RECT,
+        ui_scale=1.0,
+        style_scale=1.0,
+        yielding=False,
+        interactive=True,
+    )
+
+    qpos_address = next(
+        item.qpos_adr for item in session.joints if item.joint_id == joint_node.joint_index
+    )
+    before = np.asarray(adapter.data.qpos[qpos_address : qpos_address + 3]).copy()
+    gizmo._hovered = GizmoHandle.X
+    edit = gizmo.precise_input(session)
+    assert edit is not None
+    assert gizmo.apply_precise_value(session, camera(), edit, 0.1)
+
+    expected = before.copy()
+    expected[0] += 0.1
+    assert adapter.data.qpos[qpos_address : qpos_address + 3] == pytest.approx(expected)
+    assert session.selected_node is joint_node
 
 
 @pytest.mark.physics
@@ -3627,6 +3734,40 @@ def test_multi_turn_hinge_range_has_no_false_endpoint_ticks_or_labels() -> None:
     labels = {args[2] for name, args, _kwargs in overlay.calls if name == "text"}
     assert not any(label.startswith(("MIN ", "MAX ")) for label in labels)
     assert gizmo.joint_limit_hits == ()
+
+
+@pytest.mark.parametrize(
+    ("joint_type", "method_name", "limits"),
+    (
+        ("hinge", "_hinge_range_projection", (-1.0, 1.0)),
+        ("slide", "_slide_range_projection", (-0.2, 0.3)),
+    ),
+)
+def test_joint_range_projects_geometry_once_for_outline_and_core(
+    monkeypatch,
+    joint_type: str,
+    method_name: str,
+    limits: tuple[float, float],
+) -> None:
+    cam = camera()
+    gizmo = ObjectGizmo("rotate" if joint_type == "hinge" else "translate")
+    gizmo._frame.position[:] = 0.0
+    gizmo._frame.rotation[:] = np.eye(3)
+    gizmo._joint_range = _JointRangeState(joint_type, 0.0, *limits)
+    overlay = RecordingDraw2D()
+    calls = 0
+    real_projection = getattr(gizmo, method_name)
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_projection(*args, **kwargs)
+
+    monkeypatch.setattr(gizmo, method_name, counted)
+
+    gizmo._draw_joint_range(overlay, cam, RECT, 1.0)
+
+    assert calls == 1
 
 
 def test_multi_turn_hinge_hides_static_limit_badge_during_drag() -> None:

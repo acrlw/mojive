@@ -10,6 +10,7 @@ from ...adapters.base import ActuatorInfo, FrameNeeds
 from . import (
     Panel,
     PanelContext,
+    copy_state_vector,
     copyable_name_item,
     searchable_ordered_list_header,
     themed_checkbox,
@@ -62,6 +63,7 @@ class ControlPanel(Panel):
             state_order="ctrl / act",
             translate=ctx.tr,
         )
+        self._state_copy_buttons(ctx)
         cache_key = (session.structure_generation, self._search, self._sort_by_name)
         if cache_key != self._row_cache_key:
             actuators = sort_actuators(
@@ -90,6 +92,23 @@ class ControlPanel(Panel):
                 actuator, component = rows[index]
                 self._actuator_row(ctx, actuator, component)
         clipper.end()
+        imgui.end_table()
+
+    @staticmethod
+    def _state_copy_buttons(ctx: PanelContext) -> None:
+        frame = ctx.session.frame
+        flags = imgui.TableFlags_.sizing_stretch_same | imgui.TableFlags_.no_pad_outer_x
+        if not imgui.begin_table("actuator_state_copy", 2, flags):
+            return
+        imgui.table_next_column()
+        if imgui.button(ctx.tr("Copy ctrl"), imgui.ImVec2(-1.0, 0.0)):
+            copy_state_vector(frame.ctrl)
+        imgui.table_next_column()
+        imgui.begin_disabled(not ctx.session.adapter.caps.state_snapshots)
+        if imgui.button(ctx.tr("Copy act"), imgui.ImVec2(-1.0, 0.0)):
+            state = ctx.session.adapter.capture_state()
+            copy_state_vector(None if state is None else state.act)
+        imgui.end_disabled()
         imgui.end_table()
 
     def _actuator_row(self, ctx: PanelContext, actuator: ActuatorInfo, component: int) -> None:

@@ -2615,8 +2615,11 @@ class MuJoCoAdapter(SceneAdapterBase):
             data = np.asarray(
                 self._m.hfield_data[address : address + rows * columns], np.float32
             ).reshape(rows, columns)
-            preview_rows = min(rows, 48)
-            preview_columns = min(columns, 48)
+            # The inspector submits one ImGui rectangle per preview sample. A 24×24
+            # grid already exceeds the visible resolution of the 180 px preview
+            # while keeping the immediate-mode draw cost bounded.
+            preview_rows = min(rows, 24)
+            preview_columns = min(columns, 24)
             row_indices = np.rint(np.linspace(0, rows - 1, preview_rows)).astype(np.intp)
             column_indices = np.rint(np.linspace(0, columns - 1, preview_columns)).astype(np.intp)
             preview = data[np.ix_(row_indices, column_indices)]
@@ -3939,27 +3942,35 @@ class MuJoCoAdapter(SceneAdapterBase):
             f.tendon_island_rgba = None
             f.flex_island_rgba = None
 
-        if needs.diagnostics:
+        if needs.diagnostics or needs.joint_frames:
             diagnostics = self._diagnostic_frame
             np.copyto(diagnostics.joint_xpos, d.xanchor, casting="unsafe")
             np.copyto(diagnostics.joint_xaxis, d.xaxis, casting="unsafe")
-            np.copyto(diagnostics.subtree_com, d.subtree_com, casting="unsafe")
-            np.copyto(diagnostics.body_xipos, d.xipos, casting="unsafe")
-            np.copyto(
-                diagnostics.body_ximat,
-                d.ximat.reshape(self._m.nbody, 3, 3),
-                casting="unsafe",
+            if needs.diagnostics:
+                np.copyto(diagnostics.subtree_com, d.subtree_com, casting="unsafe")
+                np.copyto(diagnostics.body_xipos, d.xipos, casting="unsafe")
+                np.copyto(
+                    diagnostics.body_ximat,
+                    d.ximat.reshape(self._m.nbody, 3, 3),
+                    casting="unsafe",
+                )
+                self._fill_actuator_visual_poses(diagnostics)
+                self._fill_slider_crank_visuals(diagnostics)
+                self._fill_autoconnect_visuals(diagnostics)
+                self._fill_rangefinder_visuals(diagnostics)
+                self._fill_constraint_visuals(diagnostics)
+                if needs.bvh:
+                    self._fill_bvh_visuals(diagnostics)
+            self._apply_model_transform_preview_diagnostics(
+                diagnostics,
+                include_full_frame=needs.diagnostics,
             )
-            self._fill_actuator_visual_poses(diagnostics)
-            self._fill_slider_crank_visuals(diagnostics)
-            self._fill_autoconnect_visuals(diagnostics)
-            self._fill_rangefinder_visuals(diagnostics)
-            self._fill_constraint_visuals(diagnostics)
-            if needs.bvh:
-                self._fill_bvh_visuals(diagnostics)
-            self._apply_model_transform_preview_diagnostics(diagnostics)
             f.diagnostics = diagnostics
-            f.cameras = tuple(self.camera_view(i) for i in range(self._m.ncam))
+            f.cameras = (
+                tuple(self.camera_view(i) for i in range(self._m.ncam))
+                if needs.diagnostics
+                else None
+            )
         else:
             f.diagnostics = None
             f.cameras = None
@@ -3987,12 +3998,19 @@ class MuJoCoAdapter(SceneAdapterBase):
             self._site_xpos_buf, self._site_xmat_buf, preview.site_indices
         )
 
-    def _apply_model_transform_preview_diagnostics(self, diagnostics: DiagnosticFrame) -> None:
+    def _apply_model_transform_preview_diagnostics(
+        self,
+        diagnostics: DiagnosticFrame,
+        *,
+        include_full_frame: bool,
+    ) -> None:
         preview = self._model_transform_preview
         if preview is None:
             return
         self._transform_preview_points(diagnostics.joint_xpos, preview.joint_indices)
         self._transform_preview_directions(diagnostics.joint_xaxis, preview.joint_indices)
+        if not include_full_frame:
+            return
         self._transform_preview_points(diagnostics.subtree_com, preview.body_indices)
         self._transform_preview_group(
             diagnostics.body_xipos, diagnostics.body_ximat, preview.body_indices

@@ -35,6 +35,7 @@ from mojive.ui.panels import (
     slider_gesture,
     sort_order_glyph,
     sort_order_tooltip,
+    state_vector_text,
     validate_panels,
 )
 from mojive.ui.panels.assets import (
@@ -81,6 +82,7 @@ from mojive.ui.panels.keyframes import (
 )
 from mojive.ui.panels.output import filter_output_entries
 from mojive.ui.panels.plot import PlotPanel
+from mojive.ui.panels.sensors import sensor_value_preview
 from mojive.ui.panels.settings import (
     render_flag_label,
     responsive_flag_groups,
@@ -843,6 +845,24 @@ def test_transform_clipboard_vector_is_plain_xyz():
     assert _format_vector((1.25, -2.0, 0.0)) == "1.25, -2, 0"
 
 
+def test_simulation_state_clipboard_vector_is_complete_and_python_readable():
+    text = state_vector_text(np.array((1.25, -2.0, 0.0), np.float64))
+    assert text == "[1.25, -2.0, 0.0]"
+    assert ast.literal_eval(text) == [1.25, -2.0, 0.0]
+    assert state_vector_text(np.zeros(0)) == "[]"
+
+
+def test_sensor_preview_is_bounded_but_preserves_small_vectors():
+    small = np.arange(6, dtype=np.float64)
+    large = np.arange(10_000, dtype=np.float64)
+
+    assert "..." not in sensor_value_preview(small)
+    preview = sensor_value_preview(large)
+    assert "..." in preview
+    assert "0." in preview and "9999." in preview
+    assert len(preview) < 400
+
+
 def test_keyframe_names_advance_without_exposing_raw_state_arrays():
     assert unique_keyframe_name(set()) == "key1"
     assert unique_keyframe_name({"key1", "key2"}) == "key3"
@@ -1003,6 +1023,7 @@ def test_app_frame_needs_preserves_consumer_requests():
         tendons=True,
         actuator=True,
         deformables=True,
+        joint_frames=True,
         diagnostics=True,
         islands=True,
         bvh=True,
@@ -1023,6 +1044,7 @@ def test_app_frame_needs_preserves_consumer_requests():
     assert needs.tendons
     assert needs.actuator
     assert needs.deformables
+    assert needs.joint_frames
     assert needs.diagnostics
     assert needs.islands
     assert needs.bvh

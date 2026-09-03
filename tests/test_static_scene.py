@@ -913,6 +913,35 @@ def test_state_take_records_replays_and_steps_backward_without_editing_the_scene
     assert session.state_take_times == []
 
 
+def test_state_take_stops_at_the_frame_budget(monkeypatch):
+    import mojive.session as session_module
+
+    monkeypatch.setattr(session_module, "STATE_TAKE_FRAME_LIMIT", 2)
+    session = Session(SnapshotToyPhysics())
+
+    assert session.submit(cmd.StartStateTakeRecording())
+    session.tick(FrameNeeds(), wall_dt=0.01)
+    session.tick(FrameNeeds(), wall_dt=0.01)
+
+    assert not session.state_take_recording
+    assert len(session.state_take_times) == 2
+    assert "recording limit" in session.last_message.lower()
+    assert session.last_message_level == "warning"
+
+
+def test_state_take_rejects_a_first_frame_over_the_memory_budget(monkeypatch):
+    import mojive.session as session_module
+
+    monkeypatch.setattr(session_module, "STATE_TAKE_BYTE_LIMIT", 1)
+    session = Session(SnapshotToyPhysics())
+
+    result = session.submit(cmd.StartStateTakeRecording())
+
+    assert not result
+    assert "recording limit" in result.message.lower()
+    assert session.state_take_times == []
+
+
 def test_default_frame_history_restores_previous_displayed_simulation_states():
     adapter = SnapshotToyPhysics()
     session = Session(adapter)

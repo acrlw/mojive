@@ -100,6 +100,8 @@ JOINT_FOCUS_MARGIN = 1.5
 JOINT_FOCUS_OBLIQUE_DEGREES = 35.0
 VIEWPORT_DOUBLE_CLICK_SECONDS = 0.3
 VIEWPORT_DOUBLE_CLICK_RADIUS_PT = 6.0
+STEP_BACK_REPEAT_DELAY_SECONDS = 0.35
+STEP_BACK_REPEAT_RATE_SECONDS = 0.1
 log = get_logger("ui")
 
 
@@ -305,14 +307,6 @@ def _primary_button(label: str, width: float, theme: Theme) -> bool:
     return clicked
 
 
-def _disabled_text_wrapped(value: str) -> None:
-    """Draw secondary copy without letting long text escape a constrained dialog."""
-
-    imgui.push_style_color(imgui.Col_.text, imgui.get_style_color_vec4(imgui.Col_.text_disabled))
-    imgui.text_wrapped(value)
-    imgui.pop_style_color()
-
-
 def _middle_elide_text(value: str, max_width: float, measure) -> str:
     """Keep both ends of a dynamic name inside one fixed-width line."""
 
@@ -412,6 +406,7 @@ def _simulation_timestep(adapter, *, loading: bool = False) -> float:
 class Keys:
     fly: tuple[float, float, float] = (0.0, 0.0, 0.0)
     toggle_pause: bool = False
+    step_back_count: int = 0
     clear_selection: bool = False
     frame_scene: bool = False
     gizmo_translate: bool = False
@@ -1631,9 +1626,7 @@ class ViewerApp:
             self._selected_entity() or self._selected_model_element() is not None
         )
         if can_edit and keyboard_free and editable_selected:
-            if imgui.is_key_pressed(imgui.Key.delete, False) or imgui.is_key_pressed(
-                imgui.Key.backspace, False
-            ):
+            if imgui.is_key_pressed(imgui.Key.delete, False):
                 self._remove_selected()
             if imgui.is_key_pressed(imgui.Key.f2, False):
                 self._request_selected_rename()
@@ -2354,6 +2347,15 @@ class ViewerApp:
                 down(InputAction.FLY_UP) - down(InputAction.FLY_DOWN),
             ),
             toggle_pause=bindings.pressed(InputAction.TOGGLE_PAUSE),
+            step_back_count=(
+                bindings.press_count(
+                    InputAction.STEP_BACK,
+                    delay=STEP_BACK_REPEAT_DELAY_SECONDS,
+                    rate=STEP_BACK_REPEAT_RATE_SECONDS,
+                )
+                if self.session.can_step_back
+                else 0
+            ),
             clear_selection=clear_selection,
             frame_scene=bindings.pressed(InputAction.FRAME_SCENE),
             gizmo_translate=bindings.pressed(InputAction.GIZMO_TRANSLATE),
@@ -3972,6 +3974,16 @@ class ViewerApp:
                 ),
                 *defaults,
             )
+        if self._status_panel == "Viewport" and self.session.can_step_back:
+            defaults = (
+                ToolHint(
+                    "key",
+                    self.input_bindings.label(InputAction.STEP_BACK),
+                    self._viewport_labels.rewind,
+                    hint_id="playback.previous",
+                ),
+                *defaults,
+            )
         return self.tool_hints.resolve(defaults, surface="status")
 
     def _selection_clear_enabled(self) -> bool:
@@ -4082,7 +4094,6 @@ class ViewerApp:
                 ),
                 # The precise-input title already identifies its target. Give
                 # Enter / Esc / U the reclaimed status width at extreme scale.
-                has_selection=has_selection and self._precise_gizmo_edit is None,
                 state=state,
                 sim_time=sim_time,
                 step=sim_step,
@@ -4314,7 +4325,7 @@ class ViewerApp:
             .merge(self.gizmo.frame_needs(self.session))
         )
         if getattr(self, "_pending_joint_focus_id", None) is not None:
-            needs = needs.merge(FrameNeeds(poses=False, qpos=True, diagnostics=True))
+            needs = needs.merge(FrameNeeds(poses=False, qpos=True, joint_frames=True))
         label_mode = self.backend.get_label_mode()
         frame_mode = self.backend.get_frame_mode()
         needs.contacts = needs.contacts or (
@@ -4470,6 +4481,9 @@ class ViewerApp:
     def apply_keys(self, keys: Keys) -> None:
         if keys.toggle_pause:
             self._toggle_playback()
+        for _ in range(keys.step_back_count):
+            if not self.session.submit(cmd.StepBack()):
+                break
         if keys.clear_selection:
             self.session.submit(cmd.Select(0))
             hierarchy = self.panels.get("Hierarchy")

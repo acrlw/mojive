@@ -283,7 +283,7 @@ def test_move_glyph_is_one_connected_rounded_antialiased_outline():
     draw = _RecordedGlyph()
     center = (20.0, 30.0)
 
-    draw_tool_glyph(draw, center, (1.0, 1.0, 1.0, 1.0), 1.0, "move", (0.0,) * 4, "world")
+    draw_tool_glyph(draw, center, (1.0, 1.0, 1.0, 1.0), 1.0, "move", "world")
 
     assert len(draw.paths) == 1
     path = draw.paths[0]
@@ -312,14 +312,13 @@ def test_move_glyph_is_one_connected_rounded_antialiased_outline():
 def test_tool_glyphs_use_the_configured_stroke_without_hidden_scales():
     center = (20.0, 30.0)
     color = (1.0, 1.0, 1.0, 1.0)
-    surface = (0.0,) * 4
     move = _RecordedGlyph()
     rotate = _RecordedGlyph()
     frame = _RecordedGlyph()
 
-    draw_tool_glyph(move, center, color, 1.0, "move", surface, "world")
-    draw_tool_glyph(rotate, center, color, 1.0, "rotate", surface, "world")
-    draw_tool_glyph(frame, center, color, 1.0, "frame", surface, "world")
+    draw_tool_glyph(move, center, color, 1.0, "move", "world")
+    draw_tool_glyph(rotate, center, color, 1.0, "rotate", "world")
+    draw_tool_glyph(frame, center, color, 1.0, "frame", "world")
 
     move_path = move.paths[0]
     move_shaft_half = OVERLAY_GEOMETRY.tool_stroke * 0.5
@@ -358,7 +357,6 @@ def test_rotate_glyph_uses_antialiased_transparent_knockout_breaks():
         (1.0, 1.0, 1.0, 1.0),
         4.0,
         "rotate",
-        (0.0,) * 4,
         "world",
     )
 
@@ -406,7 +404,6 @@ def test_rotate_glyph_supports_butt_and_round_authored_caps():
         color,
         4.0,
         "rotate",
-        (0.0,) * 4,
         "world",
         replace(OVERLAY_GEOMETRY, rotate_ring_cap="butt"),
     )
@@ -416,7 +413,6 @@ def test_rotate_glyph_supports_butt_and_round_authored_caps():
         color,
         4.0,
         "rotate",
-        (0.0,) * 4,
         "world",
         replace(OVERLAY_GEOMETRY, rotate_ring_cap="round"),
     )
@@ -436,7 +432,6 @@ def test_frame_arrows_scale_native_stroke_shafts_and_center_shell(scale: float):
         (1.0, 1.0, 1.0, 1.0),
         scale,
         "frame",
-        (0.0,) * 4,
         "world",
     )
 
@@ -526,7 +521,6 @@ def test_status_places_simulation_state_before_selection():
         THEME,
         1.0,
         selected="01_revolute",
-        has_selection=True,
         state="paused",
         sim_time=0.2,
         step=674,
@@ -554,7 +548,6 @@ def test_right_aligned_telemetry_has_no_separator_against_empty_space():
         THEME,
         1.0,
         selected="01_revolute",
-        has_selection=True,
         state="paused",
         sim_time=0.2,
         step=0,
@@ -584,7 +577,6 @@ def test_status_renders_context_hints_after_core_simulation_fields():
         THEME,
         1.0,
         selected="01_revolute",
-        has_selection=True,
         state="paused",
         sim_time=0.2,
         step=674,
@@ -613,7 +605,6 @@ def test_status_uses_muted_gray_for_chrome_and_context_hints():
         THEME,
         1.0,
         selected="01_revolute",
-        has_selection=True,
         state="running",
         sim_time=0.2,
         step=674,
@@ -649,7 +640,6 @@ def test_status_progressively_collapses_without_text_overlap(width):
         THEME,
         1.0,
         selected="01_revolute",
-        has_selection=True,
         state="paused",
         sim_time=0.2,
         step=674,

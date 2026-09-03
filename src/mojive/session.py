@@ -48,6 +48,8 @@ from .types import (
 FRAME_HISTORY_LIMIT = 300
 FRAME_HISTORY_BYTE_LIMIT = 64 * 1024 * 1024
 FRAME_HISTORY_TRIM_RATIO = 0.9
+STATE_TAKE_FRAME_LIMIT = 100_000
+STATE_TAKE_BYTE_LIMIT = 64 * 1024 * 1024
 
 
 @dataclass
@@ -432,6 +434,9 @@ class Session:
         self._state_take_playing = False
         self._state_take_elapsed = 0.0
         self._state_take_signature: tuple[tuple[int, ...], ...] | None = None
+        self._state_take_bytes = 0
+        self._state_take_append_error = ""
+        self._state_take_limit_reached = False
         self._frame_history: list[_StateTakeFrame] = []
         self._frame_history_cursor = -1
         self._frame_history_bytes = 0
@@ -812,6 +817,9 @@ class Session:
         self._state_take_playing = False
         self._state_take_elapsed = 0.0
         self._state_take_signature = None
+        self._state_take_bytes = 0
+        self._state_take_append_error = ""
+        self._state_take_limit_reached = False
 
     @staticmethod
     def _physics_state_bytes(state: PhysicsState) -> int:
@@ -903,16 +911,35 @@ class Session:
         if state is None:
             state = self._adapter.capture_state()
         if state is None:
+            self._state_take_append_error = "Physics backend could not capture the current state"
+            self._state_take_limit_reached = False
             return False
         if self._state_take and self._state_take[-1].step == self._step_counter:
             return True
         signature = self._physics_state_signature(state)
         if self._state_take_signature is not None and signature != self._state_take_signature:
+            self._state_take_append_error = (
+                "State-take recording stopped because the scene state changed"
+            )
+            self._state_take_limit_reached = False
+            return False
+        frame_bytes = self._physics_state_bytes(state)
+        if (
+            len(self._state_take) >= STATE_TAKE_FRAME_LIMIT
+            or self._state_take_bytes + frame_bytes > STATE_TAKE_BYTE_LIMIT
+        ):
+            self._state_take_append_error = (
+                "State-take recording stopped after reaching its recording limit"
+            )
+            self._state_take_limit_reached = True
             return False
         self._state_take_signature = signature
         self._state_take.append(_StateTakeFrame(self._step_counter, state))
         self._state_take_times.append(float(state.time))
         self._state_take_cursor = len(self._state_take) - 1
+        self._state_take_bytes += frame_bytes
+        self._state_take_append_error = ""
+        self._state_take_limit_reached = False
         return True
 
     def _restore_state_take_frame(self, frame_index: int) -> bool:
@@ -1038,9 +1065,12 @@ class Session:
             and not self._append_state_take_frame()
         ):
             self._state_take_recording = False
+            message = self._state_take_append_error or (
+                "State-take recording stopped because the scene state changed"
+            )
             self._publish_message(
-                "State-take recording stopped because the scene state changed",
-                level="error",
+                message,
+                level="warning" if self._state_take_limit_reached else "error",
                 duration=10.0,
             )
         externally_advanced = self._adapter.caps.external_clock and (
@@ -1236,7 +1266,10 @@ class Session:
                 self._state_take_recording = False
                 self._adapter.set_paused(True)
                 self._paused = True
-                return CommandResult.bad("physics backend could not start state-take recording")
+                return CommandResult.bad(
+                    self._state_take_append_error
+                    or "Physics backend could not start state-take recording"
+                )
             return CommandResult.good("Recording simulation take")
 
         if isinstance(c, cmd.StopStateTakeRecording):

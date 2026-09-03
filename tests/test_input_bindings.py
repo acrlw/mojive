@@ -19,6 +19,11 @@ def test_remap_swaps_the_displaced_action_without_duplicate_keys() -> None:
     assert len(identifiers) == len(set(identifiers))
 
 
+def test_step_back_defaults_to_backspace() -> None:
+    assert DEFAULT_INPUT_BINDINGS.key_id(InputAction.STEP_BACK) == "backspace"
+    assert DEFAULT_INPUT_BINDINGS.label(InputAction.STEP_BACK) == "Backspace"
+
+
 def test_saved_input_bindings_restore_the_same_map() -> None:
     changed = DEFAULT_INPUT_BINDINGS.remap(InputAction.SNAP, "x").remap(
         InputAction.FLY_FORWARD, "digit_1"

@@ -589,6 +589,26 @@ def test_frame_produces_only_what_is_needed(adapter):
     assert f.geom_xpos is None
 
 
+def test_joint_frame_request_skips_full_diagnostics(adapter, monkeypatch):
+    """Joint gizmos must not pay for unrelated diagnostic visual preparation."""
+
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("full diagnostics were prepared for a joint-only frame")
+
+    monkeypatch.setattr(adapter, "_fill_actuator_visual_poses", unexpected)
+    monkeypatch.setattr(adapter, "_fill_slider_crank_visuals", unexpected)
+    monkeypatch.setattr(adapter, "_fill_autoconnect_visuals", unexpected)
+    monkeypatch.setattr(adapter, "_fill_rangefinder_visuals", unexpected)
+    monkeypatch.setattr(adapter, "_fill_constraint_visuals", unexpected)
+
+    frame = adapter.frame(FrameNeeds(poses=False, joint_frames=True))
+
+    assert frame.diagnostics is not None
+    assert frame.diagnostics.joint_xpos == pytest.approx(adapter.data.xanchor)
+    assert frame.diagnostics.joint_xaxis == pytest.approx(adapter.data.xaxis)
+    assert frame.cameras is None
+
+
 def test_diagnostic_metadata_and_frame_match_mujoco(adapter):
     source = adapter.scene_source().diagnostics
     model, data = adapter.model, adapter.data

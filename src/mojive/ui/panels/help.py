@@ -23,6 +23,7 @@ MOUSE_GESTURES: tuple[tuple[str, str], ...] = (
 
 KEYS: tuple[tuple[str, str], ...] = (
     ("Space", "pause / resume"),
+    ("Backspace", "restore the previous frame; hold to rewind"),
     ("Esc", "clear selection"),
     ("g / r", "gizmo: translate / rotate"),
     ("t", "gizmo: body / world frame"),

@@ -6,6 +6,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from imgui_bundle import imgui
 
 from ...adapters.base import FrameNeeds
@@ -160,6 +161,22 @@ def copyable_name_item(ctx: PanelContext, name: str, available_width: float) -> 
     if copied:
         imgui.set_clipboard_text(name)
     return bool(copied)
+
+
+def state_vector_text(values) -> str:
+    """Format one complete simulation vector for lossless clipboard reuse."""
+
+    vector = np.asarray(values).reshape(-1)
+    return "[" + ", ".join(repr(float(value)) for value in vector) + "]"
+
+
+def copy_state_vector(values) -> bool:
+    """Copy a simulation vector when the current adapter produced it."""
+
+    if values is None:
+        return False
+    imgui.set_clipboard_text(state_vector_text(values))
+    return True
 
 
 def publish_status_hint(ctx: PanelContext, hint: ToolHint) -> None:
@@ -824,6 +841,7 @@ __all__ = [
     "ValueEdit",
     "begin_kv_table",
     "colored_text",
+    "copy_state_vector",
     "copyable_name_item",
     "default_panels",
     "is_expanded",
@@ -833,6 +851,7 @@ __all__ = [
     "search_input",
     "segmented_control",
     "slider_gesture",
+    "state_vector_text",
     "themed_checkbox",
     "validate_panels",
     "value_slider",

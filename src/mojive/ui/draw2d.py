@@ -51,6 +51,15 @@ def _anti_alias_fringe_outer(points) -> np.ndarray:
     return outline + miters * scale[:, None]
 
 
+@lru_cache(maxsize=512)
+def _cached_anti_alias_fringe_outer(
+    points: tuple[tuple[float, float], ...],
+) -> tuple[tuple[float, float], ...]:
+    """Cache the expensive normal/miter construction for stable UI polygons."""
+
+    return tuple(tuple(point) for point in _anti_alias_fringe_outer(points))
+
+
 @lru_cache(maxsize=256)
 def _open_polyline_ribbon(
     path: tuple[tuple[float, float], ...],
@@ -288,11 +297,11 @@ class ImguiDraw2D:
         imgui = self._imgui
         dl = self._dl
         rgba = self._u32(color)
-        outline = np.asarray(points, np.float64).reshape(-1, 2)
+        outline = tuple((float(point[0]), float(point[1])) for point in points)
         aa_flag = imgui.ImDrawListFlags_.anti_aliased_fill.value
         flags = dl.flags
         dl.flags = flags & ~aa_flag
-        dl.add_concave_poly_filled([self._vec(p) for p in outline], rgba)
+        dl.add_concave_poly_filled(self._vecs(outline), rgba)
         dl.flags = flags
         if not (flags & aa_flag):
             return
@@ -306,8 +315,8 @@ class ImguiDraw2D:
         dl = self._dl
         if not (dl.flags & imgui.ImDrawListFlags_.anti_aliased_fill.value):
             return
-        outline = np.asarray(outline, np.float64).reshape(-1, 2)
-        outer = _anti_alias_fringe_outer(outline)
+        outline = tuple((float(point[0]), float(point[1])) for point in outline)
+        outer = _cached_anti_alias_fringe_outer(outline)
         if len(outer) != len(outline):
             return
 
@@ -316,9 +325,11 @@ class ImguiDraw2D:
         transparent = rgba & 0x00FFFFFF
         uv = imgui.get_io().fonts.tex_uv_white_pixel
         dl.prim_reserve(count * 6, count * 2)
-        for inner, fringe in zip(outline, outer, strict=True):
-            dl.prim_write_vtx(self._vec(inner), uv, rgba)
-            dl.prim_write_vtx(self._vec(fringe), uv, transparent)
+        inner_points = self._vecs(outline)
+        fringe_points = self._vecs(outer)
+        for inner, fringe in zip(inner_points, fringe_points, strict=True):
+            dl.prim_write_vtx(inner, uv, rgba)
+            dl.prim_write_vtx(fringe, uv, transparent)
         for i in range(count):
             j = (i + 1) % count
             dl.prim_write_idx(base + i * 2)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import bisect
 import math
 from collections.abc import Sequence
+from functools import lru_cache
 
 from imgui_bundle import imgui
 
@@ -20,6 +21,19 @@ _MIN_TIMELINE_SPAN = 1e-6
 _COMMAND_HEIGHT_PT = 28.0
 _COMMAND_ICON_PT = 16.0
 _MARKER_SPACING_FACTOR = 1.5
+
+
+@lru_cache(maxsize=256)
+def _rounded_command_icon_path(
+    points: tuple[tuple[float, float], ...],
+    radius: float,
+) -> tuple[tuple[float, float], ...]:
+    return tuple(
+        map(
+            tuple,
+            _rounded_polygon_corners(points, radius, tuple(range(len(points))), segments=5),
+        )
+    )
 
 
 def timeline_status_hints(translate) -> tuple[ToolHint, ...]:
@@ -155,8 +169,10 @@ def _draw_command_icon(draw, center, kind: str, color, scale: float) -> None:
     s = float(scale)
 
     def rounded_fill(points, *, radius: float = 0.75) -> None:
-        path = _rounded_polygon_corners(points, radius * s, tuple(range(len(points))), segments=5)
-        draw.fringed_concave_fill(tuple(map(tuple, path)), color)
+        draw.fringed_concave_fill(
+            _rounded_command_icon_path(tuple(points), radius * s),
+            color,
+        )
 
     if kind == "record":
         draw.circle_filled((x, y), 4.5 * s, color, segments=20)
@@ -735,7 +751,6 @@ class KeyframesPanel(Panel):
 
         self._paint_dope_sheet(
             ctx,
-            keyframes,
             lo,
             hi,
             time_lo,
@@ -758,7 +773,6 @@ class KeyframesPanel(Panel):
     def _paint_dope_sheet(
         self,
         ctx: PanelContext,
-        keyframes: tuple[KeyframeInfo, ...],
         lo: tuple[float, float],
         hi: tuple[float, float],
         time_lo: float,
