@@ -489,7 +489,7 @@ inspector:
 gizmo:
 	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli view gizmo --paused $(ARGS)
 
-## Numbered revolute, prismatic, ball, free, and multi-joint gizmo acceptance.
+## Numbered revolute, prismatic, ball, free, multi-joint, and compact-range acceptance.
 joint-gizmo:
 	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor joint_gizmo $(ARGS)
 

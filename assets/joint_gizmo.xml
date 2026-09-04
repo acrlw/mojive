@@ -73,6 +73,24 @@
       </body>
     </body>
 
+    <!-- 06/07: compact limits exercise the viewport precision rail after an endpoint dwell. -->
+    <body name="06_precision_hinge_anchor" pos="-0.55 -1.0 0.55">
+      <geom type="cylinder" size="0.10 0.10" euler="90 0 0" material="anchor"/>
+      <body name="06_precision_hinge">
+        <joint name="06_precision_hinge_y" type="hinge" axis="0 1 0" range="-2 2"/>
+        <geom type="capsule" fromto="0 0 0 0.42 0 0" size="0.065" material="revolute"/>
+        <geom type="sphere" pos="0.42 0 0" size="0.09" material="revolute"/>
+      </body>
+    </body>
+
+    <body name="07_precision_slide_anchor" pos="0.55 -1.0 0.55">
+      <geom type="capsule" fromto="-.32 0 0 .32 0 0" size="0.025" material="anchor"/>
+      <body name="07_precision_slide">
+        <joint name="07_precision_slide_x" type="slide" axis="1 0 0" range="-.005 .005"/>
+        <geom type="box" size="0.13 0.11 0.11" material="prismatic"/>
+      </body>
+    </body>
+
     <camera name="joint_gizmos" pos="0 -4.1 2.55" xyaxes="1 0 0 0 0.53 0.85"/>
   </worldbody>
 </mujoco>

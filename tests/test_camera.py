@@ -72,7 +72,6 @@ def test_camera_preview_is_disabled_until_explicitly_enabled() -> None:
 
 
 def visible_height_at_target(view) -> float:
-
     v, p = view.view_matrix(), view.proj_matrix()
     forward = np.asarray(view.forward(), np.float64)
     eye = np.asarray(view.eye, np.float64)
@@ -96,7 +95,6 @@ def corners(lo, hi) -> np.ndarray:
 
 
 def inside_frustum(view, pts) -> bool:
-
     mvp = np.asarray(view.proj_matrix(), np.float64) @ np.asarray(view.view_matrix(), np.float64)
     h = np.concatenate([np.asarray(pts, np.float64), np.ones((len(pts), 1))], axis=1) @ mvp.T
     w = h[:, 3]
@@ -128,7 +126,6 @@ def test_camera_intrinsics_create_an_off_center_projection():
 
 
 def test_orbit_keeps_the_distance_to_the_pivot():
-
     cam = OrbitCamera(pivot=np.array([1.0, -2.0, 0.5]), distance=3.7)
     before = np.linalg.norm(cam.eye() - cam.pivot)
     for dx, dy in ((30.0, 12.0), (-80.0, 40.0), (200.0, -300.0)):
@@ -151,7 +148,6 @@ def test_default_camera_looks_from_positive_x_with_positive_y_on_the_right():
 
 
 def test_dolly_only_changes_the_distance():
-
     cam = OrbitCamera(pivot=np.array([0.4, 0.2, -0.1]), distance=5.0)
     dir_before = cam.direction().copy()
     pivot_before = cam.pivot.copy()
@@ -164,7 +160,6 @@ def test_dolly_only_changes_the_distance():
 
 
 def test_dolly_never_reaches_zero():
-
     cam = OrbitCamera(distance=5.0)
     for _ in range(100):
         cam.dolly(10.0)
@@ -172,7 +167,6 @@ def test_dolly_never_reaches_zero():
 
 
 def test_near_plane_follows_the_camera_in_for_close_inspection():
-
     cam = OrbitCamera(distance=10.0, near=0.5, far=100.0)
     far_view = cam.view()
     cam.distance = 0.1
@@ -184,7 +178,6 @@ def test_near_plane_follows_the_camera_in_for_close_inspection():
 
 
 def test_angles_are_degrees():
-
     cam = OrbitCamera(distance=4.0, yaw=0.0, pitch=30.0)
     assert cam.eye()[2] - cam.pivot[2] == pytest.approx(4.0 * np.sin(np.deg2rad(30.0)))
     cam.yaw = 90.0
@@ -195,7 +188,6 @@ def test_angles_are_degrees():
 
 
 def test_writing_a_property_marks_the_camera_dirty():
-
     for attr, value in (("distance", 7.0), ("yaw", 12.0), ("pitch", -20.0), ("aspect", 1.9)):
         cam = OrbitCamera()
         sink = RecordingSink()
@@ -208,7 +200,6 @@ def test_writing_a_property_marks_the_camera_dirty():
 
 
 def test_assigning_orthographic_directly_still_does_not_jump():
-
     cam = OrbitCamera(distance=11.0, aspect=1.3)
     before = visible_height_at_target(cam.view())
     cam.orthographic = True
@@ -216,7 +207,6 @@ def test_assigning_orthographic_directly_still_does_not_jump():
 
 
 def test_q_lifts_along_world_z_even_when_looking_straight_down():
-
     cam = OrbitCamera(pitch=85.0, distance=4.0)
     assert cam.pitch > 80.0
     speed = cam.distance * 1.6
@@ -228,7 +218,6 @@ def test_q_lifts_along_world_z_even_when_looking_straight_down():
 
 
 def test_fly_speed_scales_with_the_viewing_distance():
-
     near = OrbitCamera(distance=1.0)
     far = OrbitCamera(distance=10.0)
     near.fly(0.1, forward=1.0)
@@ -237,7 +226,6 @@ def test_fly_speed_scales_with_the_viewing_distance():
 
 
 def test_wasd_moves_along_the_view_axes():
-
     cam = OrbitCamera(pitch=0.0, yaw=0.0, distance=4.0)
     right, _, forward = cam.basis()
     before = cam.pivot.copy()
@@ -250,7 +238,6 @@ def test_wasd_moves_along_the_view_axes():
 
 @pytest.mark.parametrize("distance", [0.7, 4.0, 25.0])
 def test_switching_to_orthographic_does_not_jump(distance):
-
     cam = OrbitCamera(distance=distance, aspect=1.6)
     before = visible_height_at_target(cam.view())
     cam.set_orthographic(True)
@@ -285,7 +272,6 @@ def test_projection_switch_uses_smooth_nonlinear_morph_without_target_scale_jump
 
 
 def test_orthographic_dolly_still_zooms():
-
     cam = OrbitCamera(distance=4.0)
     cam.set_orthographic(True)
     before = visible_height_at_target(cam.view())
@@ -294,7 +280,6 @@ def test_orthographic_dolly_still_zooms():
 
 
 def test_frame_scene_grows_with_the_bounds_and_keeps_the_box_in_view():
-
     small = (np.array([-1.0, -1.0, -1.0]), np.array([1.0, 1.0, 1.0]))
     big = (np.array([-10.0, -10.0, -10.0]), np.array([10.0, 10.0, 10.0]))
 
@@ -310,7 +295,6 @@ def test_frame_scene_grows_with_the_bounds_and_keeps_the_box_in_view():
 
 
 def test_frame_scene_handles_a_lopsided_box():
-
     bounds = (np.array([-8.0, -0.2, -0.2]), np.array([8.0, 0.2, 0.2]))
     cam = OrbitCamera(aspect=0.6)
     cam.frame_scene(bounds, RecordingSink(), animate=False)
@@ -318,7 +302,6 @@ def test_frame_scene_handles_a_lopsided_box():
 
 
 def test_frame_scene_keeps_distant_ground_in_view():
-
     bounds = (np.full(3, -1.0), np.full(3, 1.0))
     cam = OrbitCamera(aspect=1.6)
     cam.frame_scene(bounds, RecordingSink(), animate=False)
@@ -419,21 +402,39 @@ def test_joint_focus_perpendicular_direction_has_a_parallel_view_fallback():
     assert direction[2] == pytest.approx(0.0, abs=1e-9)
 
 
-def test_oblique_axis_views_apply_the_same_angle_to_azimuth_and_elevation():
-    axis = np.array((1.0, 0.0, 0.0))
-    eye = np.array((4.0, 3.0, 0.0))
+@pytest.mark.parametrize("yaw", (55.0, 125.0, -50.0, -130.0))
+def test_oblique_axis_views_preserve_a_nearby_readable_quadrant(yaw):
+    axis = np.array((0.0, 1.0, 0.0))
+    pitch = np.deg2rad(35.0)
+    heading = np.deg2rad(yaw)
+    eye = np.array(
+        (np.cos(pitch) * np.cos(heading), np.cos(pitch) * np.sin(heading), np.sin(pitch))
+    )
 
-    directions = oblique_axis_view_directions(axis, eye, (0.0, 0.0, 1.0), 35.0)
+    directions = oblique_axis_view_directions(axis, eye, (1.0, 0.0, 0.0), 35.0)
 
-    assert len(directions) == 4
+    assert len(directions) >= 3
+    assert directions[0] == pytest.approx(eye)
     assert all(np.linalg.norm(direction) == pytest.approx(1.0) for direction in directions)
-    angle = np.deg2rad(35.0)
-    assert np.dot(directions[0], axis) == pytest.approx(np.cos(angle) ** 2)
-    assert directions[0][1] > 0.0
-    assert directions[1][1] < 0.0
-    assert all(direction[2] == pytest.approx(np.sin(angle)) for direction in directions)
-    assert directions[2][0] < 0.0
-    assert directions[3][0] < 0.0
+    assert all(np.degrees(np.arcsin(direction[2])) >= 35.0 - 1e-6 for direction in directions)
+    axis_angles = [
+        np.degrees(np.arccos(np.clip(abs(np.dot(direction, axis)), -1.0, 1.0)))
+        for direction in directions
+    ]
+    assert all(35.0 - 1e-3 <= angle <= 55.0 + 1e-3 for angle in axis_angles)
+
+
+def test_oblique_axis_view_only_nudges_an_edge_on_camera_as_far_as_needed():
+    pitch = np.deg2rad(35.0)
+    eye = np.array((np.cos(pitch), 0.0, np.sin(pitch)))
+
+    direction = oblique_axis_view_directions((0.0, 1.0, 0.0), eye, (0.0, 1.0, 0.0), 35.0)[0]
+
+    axis_angle = np.degrees(np.arccos(np.clip(abs(direction[1]), -1.0, 1.0)))
+    turn = np.degrees(np.arccos(np.clip(np.dot(direction, eye), -1.0, 1.0)))
+    assert 54.0 <= axis_angle <= 55.0 + 1e-3
+    assert np.degrees(np.arcsin(direction[2])) == pytest.approx(35.0, abs=1e-3)
+    assert turn < 40.0
 
 
 def test_elevated_focus_view_keeps_azimuth_and_enforces_iso_elevation():
@@ -484,7 +485,6 @@ def test_adopted_scene_clip_planes_survive_free_camera_navigation():
 
 
 def test_frame_scene_publishes_the_camera_to_the_backend():
-
     cam = OrbitCamera()
     sink = RecordingSink()
     view = cam.frame_scene((np.full(3, -1.0), np.full(3, 1.0)), sink, animate=False)
@@ -493,7 +493,6 @@ def test_frame_scene_publishes_the_camera_to_the_backend():
 
 
 def test_camera_reaches_both_the_backend_and_the_session():
-
     sink = RecordingSink()
     session = RecordingSession()
     out = CameraOut(backend=sink, session=session)
@@ -532,7 +531,6 @@ def test_free_camera_can_adopt_a_rolled_model_camera_without_an_eye_jump():
 
 
 def test_advance_publishes_every_frame_of_the_easing():
-
     cam = OrbitCamera(distance=1.0)
     sink = RecordingSink()
     cam.frame_scene((np.full(3, -5.0), np.full(3, 5.0)), sink, animate=True)
@@ -548,7 +546,6 @@ def test_advance_publishes_every_frame_of_the_easing():
 
 
 def test_easing_takes_the_short_way_around():
-
     cam = OrbitCamera(yaw=-179.0)
     sink = RecordingSink()
     cam.look_from(179.0, 0.0, sink, animate=True)
@@ -560,7 +557,6 @@ def test_easing_takes_the_short_way_around():
 
 
 def test_easing_is_ease_out_not_ease_in_out():
-
     import itertools
 
     from mojive.ui.camera import _ease_out_quad as ease
@@ -573,7 +569,6 @@ def test_easing_is_ease_out_not_ease_in_out():
 
 
 def test_look_from_can_be_retargeted_mid_flight():
-
     cam = OrbitCamera(yaw=0.0, pitch=0.0)
     sink = RecordingSink()
     cam.look_from(90.0, 40.0, sink, animate=True)
@@ -590,7 +585,6 @@ def test_look_from_can_be_retargeted_mid_flight():
 
 
 def test_every_public_setter_marks_dirty_and_publishes():
-
     writable = [
         name
         for name, attr in vars(OrbitCamera).items()

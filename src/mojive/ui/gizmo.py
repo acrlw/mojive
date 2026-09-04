@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
@@ -44,6 +45,7 @@ from ..gizmo import (
     PLANE_ACTIVE_ALPHA,
     PLANE_ALPHA,
     PLANE_HANDLES,
+    RING_HIT_PT,
     RING_RADIUS,
     RING_SEGMENTS,
     RING_WIDTH_PT,
@@ -116,6 +118,17 @@ JOINT_CURRENT_TICK_PT = 20.0
 JOINT_LIMIT_TICK_PT = 14.0
 JOINT_LIMIT_HIT_PT = 18.0
 JOINT_LIMIT_HIT_PADDING_PT = 4.0
+JOINT_LIMIT_STROKE_HIT_PADDING_PT = 3.0
+JOINT_LIMIT_OUTER_HIT_FRACTION = 0.30
+JOINT_PRECISION_TRIGGER_PT = 30.0
+JOINT_PRECISION_MAX_HINGE_SPAN_DEG = 45.0
+JOINT_PRECISION_TRACK_PT = 144.0
+JOINT_PRECISION_PANEL_HEIGHT_PT = 30.0
+JOINT_PRECISION_OFFSET_PT = 44.0
+JOINT_PRECISION_MARGIN_PT = 10.0
+JOINT_PRECISION_REVEAL_DELAY_SECONDS = 0.50
+JOINT_PRECISION_DWELL_GRACE_SECONDS = 0.12
+JOINT_PRECISION_REVEAL_GRACE_SECONDS = 0.30
 JOINT_SLIDE_ARROW_OFFSET_PT = 17.0
 JOINT_SLIDE_ARROW_INSET_PT = 9.0
 JOINT_SLIDE_ARROW_EXTENT_PT = 48.0
@@ -476,6 +489,23 @@ class _HingeRangeProjection:
 
 
 @dataclass(frozen=True)
+class _JointPrecisionProjection:
+    """Expanded viewport rail for a scalar range that is too small on screen."""
+
+    joint_id: int
+    qpos_adr: int
+    joint_type: str
+    lower: float
+    upper: float
+    start: np.ndarray
+    current: np.ndarray
+    end: np.ndarray
+    panel_rect: tuple[float, float, float, float]
+    hit_rect: tuple[float, float, float, float]
+    source: np.ndarray
+
+
+@dataclass(frozen=True)
 class PreciseGizmoInput:
     """Stable scalar-handle target captured when precise input opens."""
 
@@ -586,6 +616,15 @@ class ObjectGizmo:
         self._active_joint: JointInfo | None = None
         self._joint_range: _JointRangeState | None = None
         self._joint_limit_hits: tuple[JointLimitHit, ...] = ()
+        self._joint_limit_hovered: JointLimitHit | None = None
+        self._joint_limit_active: JointLimitHit | None = None
+        self._joint_precision: _JointPrecisionProjection | None = None
+        self._joint_precision_dwell_key: tuple[int, int] | None = None
+        self._joint_precision_dwell_started = 0.0
+        self._joint_precision_dwell_last_seen = 0.0
+        self._joint_precision_visible_until = 0.0
+        self._joint_precision_hovered = False
+        self._joint_precision_active = False
         self._start_joint_qpos = np.zeros(0, np.float64)
         self._joint_drag_origin_qpos = np.zeros(0, np.float64)
         self.translation_snap_m = DEFAULT_TRANSLATION_SNAP_M
@@ -643,6 +682,8 @@ class ObjectGizmo:
 
         return bool(
             self.hovered
+            and not self._joint_precision_hovered
+            and self._joint_limit_hovered is None
             and self._hovered in (*AXIS_HANDLES, *ROTATE_HANDLES)
             and self._hovered is not GizmoHandle.ROTATE_TRACKBALL
         )
@@ -656,6 +697,27 @@ class ObjectGizmo:
     @property
     def joint_limit_hits(self) -> tuple[JointLimitHit, ...]:
         return self._joint_limit_hits
+
+    @property
+    def hovered_joint_limit(self) -> JointLimitHit | None:
+        return self._joint_limit_hovered
+
+    @property
+    def active_joint_limit(self) -> JointLimitHit | None:
+        return self._joint_limit_active
+
+    @property
+    def joint_precision_visible(self) -> bool:
+        return self._joint_precision is not None and (
+            self._joint_precision_active
+            or self._joint_precision_hovered
+            or time.monotonic() <= self._joint_precision_visible_until
+        )
+
+    @property
+    def joint_precision_hit_rect(self) -> tuple[float, float, float, float] | None:
+        projection = self._joint_precision
+        return None if projection is None else projection.hit_rect
 
     @property
     def active_handle(self) -> GizmoHandle:
@@ -695,6 +757,26 @@ class ObjectGizmo:
             return
         self._end()
         self._joint_selection[body] = joint
+
+    def reveal_joint_precision(
+        self,
+        hit: JointLimitHit,
+        *,
+        now: float | None = None,
+    ) -> bool:
+        """Keep the compact-range rail visible after an endpoint dwell."""
+
+        projection = self._joint_precision
+        if projection is None or (
+            projection.joint_id != hit.joint_id or projection.qpos_adr != hit.qpos_adr
+        ):
+            return False
+        timestamp = time.monotonic() if now is None else float(now)
+        self._joint_precision_visible_until = max(
+            self._joint_precision_visible_until,
+            timestamp + JOINT_PRECISION_REVEAL_GRACE_SECONDS,
+        )
+        return True
 
     def set_mode(self, mode: str) -> None:
         if mode in (GizmoMode.TRANSLATE.value, GizmoMode.ROTATE.value) and not self._using:
@@ -1026,6 +1108,8 @@ class ObjectGizmo:
         self._verdict = self.evaluate(session, node)
         if not self._verdict.ok:
             self._hovered = GizmoHandle.NONE
+            self._joint_limit_hovered = None
+            self._joint_precision_hovered = False
             self._axis_mask = self._plane_mask = 0
             return self._hovered
         if self._active is not GizmoHandle.NONE:
@@ -1033,18 +1117,54 @@ class ObjectGizmo:
             return self._hovered
         if not enabled:
             self._hovered = GizmoHandle.NONE
+            self._joint_limit_hovered = None
+            self._joint_precision_hovered = False
             self._hover_cache_signature = None
             return self._hovered
         target, _reason = self._joint_target(session, node)
         pose = self._target_pose(session, node, target)
         if pose is None:
             self._hovered = GizmoHandle.NONE
+            self._joint_limit_hovered = None
+            self._joint_precision_hovered = False
             self._hover_cache_signature = None
             return self._hovered
         pos, mat = pose
         mode = target.mode if target is not None else self._mode
         self._handle_mask = target.handles if target is not None else ALL_HANDLE_MASK
         range_state = self._joint_range_state(session, target)
+        basis = self._target_basis(mat, target)
+        self._joint_precision = self._joint_precision_projection(
+            cam,
+            rect,
+            self._style_scale,
+            range_state,
+            pos,
+            basis,
+        )
+        now = time.monotonic()
+        precision_visible = bool(
+            self._joint_precision is not None
+            and (
+                self._joint_precision_active
+                or self._joint_precision_hovered
+                or now <= self._joint_precision_visible_until
+            )
+        )
+        self._joint_precision_hovered = bool(
+            precision_visible
+            and self._joint_precision is not None
+            and _point_in_rect(cursor, self._joint_precision.hit_rect)
+        )
+        if self._joint_precision_hovered:
+            self._joint_precision_visible_until = now + JOINT_PRECISION_REVEAL_GRACE_SECONDS
+            self._update_joint_precision_dwell(True, now)
+            scale = world_scale(cam, pos, rect[3], SIZE_PT * self._style_scale)
+            self._axis_mask, self._plane_mask = visibility(cam, pos, basis, rect, scale)
+            self._joint_limit_hovered = None
+            self._hovered = _joint_range_handle(range_state)
+            self._hover_cache_signature = None
+            return self._hovered
         signature = self._hover_signature(
             session,
             node,
@@ -1059,37 +1179,76 @@ class ObjectGizmo:
             style_scale,
         )
         if signature == self._hover_cache_signature:
+            self._update_joint_precision_dwell(self._hovered is not GizmoHandle.NONE, now)
             return self._hovered
-        if target is not None and target.joint.type == "slide" and range_state is not None:
-            basis = self._target_basis(mat, target)
+        if target is not None and range_state is not None:
             scale = world_scale(cam, pos, rect[3], SIZE_PT * self._style_scale)
             self._axis_mask, self._plane_mask = visibility(cam, pos, basis, rect, scale)
-            slide = self._slide_range_projection(
-                cam,
-                rect,
-                self._style_scale,
-                range_state,
-                pos,
-                basis,
-            )
             self._hovered = GizmoHandle.NONE
-            if slide is not None:
+            range_hit = False
+            current_hit = False
+            arrow_hit = False
+            if target.joint.type == "hinge":
+                hinge = self._hinge_range_projection(
+                    cam,
+                    rect,
+                    self._style_scale,
+                    range_state,
+                )
+                range_hit = _hinge_range_path_hit(cursor, hinge, self._style_scale)
+                current_hit = _hinge_current_tick_hit(cursor, hinge, self._style_scale)
+            else:
+                slide = self._slide_range_projection(
+                    cam,
+                    rect,
+                    self._style_scale,
+                    range_state,
+                    pos,
+                    basis,
+                )
+                range_hit = _slide_range_path_hit(cursor, slide, self._style_scale)
+                current_hit = _slide_current_tick_hit(cursor, slide, self._style_scale)
+            limit_hit = _closest_joint_limit_hit(
+                cursor,
+                self._joint_limit_hits,
+                range_state,
+                self._style_scale,
+            )
+            # A hinge range owns the inner crossing of its outward endpoint
+            # ticks. A slide endpoint spans both sides of the axis, so its two
+            # outer sections own the pointer after the center section has been
+            # excluded by _closest_joint_limit_hit().
+            limit_owns = limit_hit is not None and (target.joint.type == "slide" or not range_hit)
+            if range_hit and not limit_owns:
+                self._hovered = _joint_range_handle(range_state)
+                self._joint_limit_hovered = None
+            elif limit_owns:
+                self._hovered = _joint_range_handle(range_state)
+                self._joint_limit_hovered = limit_hit
+            elif current_hit:
+                self._hovered = _joint_range_handle(range_state)
+                self._joint_limit_hovered = None
+            else:
+                self._joint_limit_hovered = None
+            if target.joint.type == "slide" and slide is not None and not range_hit:
                 polygons = self._slide_arrow_polygons(slide, self._style_scale, for_hit_test=True)
                 arrow_hit = any(
                     _screen_polygon_distance(cursor, polygon) <= 4.0 * self._style_scale
                     for polygon in polygons
                 )
-                axis_hit = _screen_segment_distance(cursor, slide.lower, slide.upper) <= (
-                    JOINT_SLIDE_AXIS_HIT_PT * self._style_scale
-                )
-                if arrow_hit or axis_hit:
+                if arrow_hit:
                     self._hovered = GizmoHandle.Z
+            self._update_joint_precision_dwell(
+                range_hit or current_hit or limit_hit is not None or arrow_hit,
+                now,
+            )
             self._hover_cache_signature = signature
             return self._hovered
+        self._joint_limit_hovered = None
         self._hovered, self._axis_mask, self._plane_mask = hit_test(
             cam,
             pos,
-            self._target_basis(mat, target),
+            basis,
             rect,
             cursor,
             mode,
@@ -1097,8 +1256,34 @@ class ObjectGizmo:
             self._handle_mask,
             self._hovered,
         )
+        self._update_joint_precision_dwell(False, now)
         self._hover_cache_signature = signature
         return self._hovered
+
+    def _update_joint_precision_dwell(
+        self,
+        hovered: bool,
+        now: float,
+    ) -> None:
+        """Reveal a compact rail after dwelling anywhere on the joint gizmo."""
+
+        projection = self._joint_precision
+        if projection is None:
+            self._joint_precision_dwell_key = None
+            return
+        key = (projection.joint_id, projection.qpos_adr)
+        if hovered:
+            if key != self._joint_precision_dwell_key:
+                self._joint_precision_dwell_key = key
+                self._joint_precision_dwell_started = now
+            self._joint_precision_dwell_last_seen = now
+        elif key != self._joint_precision_dwell_key or (
+            now - self._joint_precision_dwell_last_seen > JOINT_PRECISION_DWELL_GRACE_SECONDS
+        ):
+            self._joint_precision_dwell_key = None
+            return
+        if now - self._joint_precision_dwell_started >= JOINT_PRECISION_REVEAL_DELAY_SECONDS:
+            self._joint_precision_visible_until = now + JOINT_PRECISION_REVEAL_GRACE_SECONDS
 
     def _hover_signature(
         self,
@@ -1164,6 +1349,22 @@ class ObjectGizmo:
         style_scale: float = 1.0,
     ) -> bool:
         self._style_scale = float(style_scale)
+        if self._joint_limit_active is not None:
+            if not claimed:
+                self._joint_limit_active = None
+                return False
+            if released or not left_down:
+                active = self._joint_limit_active
+                hovered = self._joint_limit_hovered
+                self._joint_limit_active = None
+                if hovered is not None and _same_joint_limit(active, hovered):
+                    result = self.apply_joint_limit(session, active)
+                    if not result.ok:
+                        self._verdict = Verdict(False, result.message)
+                        session.report_message(result.message, level="warning")
+                    return result.ok
+                return False
+            return True
         if not claimed:
             if self._using and not left_down:
                 self._end(commit=True)
@@ -1171,8 +1372,15 @@ class ObjectGizmo:
         if released or not left_down:
             self._end(commit=True)
             return False
-        if self._active is GizmoHandle.NONE and not self._begin(session, cam, rect, cursor):
-            return False
+        if self._active is GizmoHandle.NONE:
+            if self._joint_limit_hovered is not None:
+                self._joint_limit_active = self._joint_limit_hovered
+                return True
+            if self._joint_precision_hovered:
+                if not self._begin_joint_precision(session, cam, rect, cursor):
+                    return False
+            elif not self._begin(session, cam, rect, cursor):
+                return False
         self._using = True
         return self._drag(session, cam, rect, cursor, snap=snap)
 
@@ -1332,9 +1540,29 @@ class ObjectGizmo:
         )
         if self._joint_range is not None and not joint_range_below_dial:
             self._draw_joint_range(overlay, cam, rect, style_scale, phase="geometry")
-        if self._using and self._snapping and self._active in AXIS_HANDLES:
+        self._joint_precision = self._joint_precision_projection(
+            cam,
+            rect,
+            style_scale,
+            self._joint_range,
+            self._frame.position,
+            self._frame.rotation,
+        )
+        if self.joint_precision_visible:
+            self._draw_joint_precision(overlay, style_scale)
+        if (
+            self._using
+            and not self._joint_precision_active
+            and self._snapping
+            and self._active in AXIS_HANDLES
+        ):
             self._draw_translation_snap_ruler(overlay, cam, rect, style_scale)
-        if self._using and self._active not in ROTATE_HANDLES and not self._guide_gpu:
+        if (
+            self._using
+            and not self._joint_precision_active
+            and self._active not in ROTATE_HANDLES
+            and not self._guide_gpu
+        ):
             if (
                 self._active_joint is not None
                 and self._active_joint.type == "slide"
@@ -1349,6 +1577,7 @@ class ObjectGizmo:
         rotation_dial_projector = None
         if (
             self._using
+            and not self._joint_precision_active
             and self._active in ROTATE_HANDLES
             and self._active is not GizmoHandle.ROTATE_TRACKBALL
         ):
@@ -1375,7 +1604,7 @@ class ObjectGizmo:
                 # painted over its silhouette.
                 self._draw_joint_range(overlay, cam, rect, style_scale, phase="geometry")
             self._draw_rotation_guide(overlay, cam, rect, style_scale, rotation_dial_projector)
-        if self._using and self._label:
+        if self._using and self._label and not self._joint_precision_active:
             self._draw_value_label(overlay, cam, rect, style_scale, rotation_dial_projector)
 
     @staticmethod
@@ -1636,6 +1865,248 @@ class ObjectGizmo:
                     phase=draw_phase,
                     prepared=slide,
                 )
+
+    def _joint_precision_projection(
+        self,
+        cam,
+        rect,
+        style_scale: float,
+        state: _JointRangeState | None,
+        position,
+        rotation,
+    ) -> _JointPrecisionProjection | None:
+        """Expand only scalar limits that collapse below a useful screen distance."""
+
+        if state is None or state.joint_id < 0 or state.qpos_adr < 0:
+            return None
+        if state.joint_type == "hinge":
+            if state.angular_span > np.radians(JOINT_PRECISION_MAX_HINGE_SPAN_DEG):
+                return None
+            hinge = self._hinge_range_projection(cam, rect, style_scale, state)
+            if hinge is None or hinge.lower_tick is None or hinge.upper_tick is None:
+                return None
+            lower = np.asarray(hinge.lower_tick[0], np.float64)
+            upper = np.asarray(hinge.upper_tick[0], np.float64)
+        elif state.joint_type == "slide":
+            slide = self._slide_range_projection(
+                cam,
+                rect,
+                style_scale,
+                state,
+                position,
+                rotation,
+            )
+            if slide is None:
+                return None
+            lower = slide.lower
+            upper = slide.upper
+        else:
+            return None
+        if float(np.linalg.norm(upper - lower)) >= JOINT_PRECISION_TRIGGER_PT * style_scale:
+            return None
+
+        viewport_x, viewport_y, viewport_width, viewport_height = (float(value) for value in rect)
+        margin = JOINT_PRECISION_MARGIN_PT * style_scale
+        panel_height = JOINT_PRECISION_PANEL_HEIGHT_PT * style_scale
+        available_width = viewport_width - 2.0 * margin
+        track_width = min(
+            JOINT_PRECISION_TRACK_PT * style_scale, available_width - 20.0 * style_scale
+        )
+        if track_width < 60.0 * style_scale or viewport_height < panel_height + 2.0 * margin:
+            return None
+        panel_width = track_width + 20.0 * style_scale
+        source = (lower + upper) * 0.5
+        half_width = panel_width * 0.5
+        center_x = float(
+            np.clip(
+                source[0],
+                viewport_x + margin + half_width,
+                viewport_x + viewport_width - margin - half_width,
+            )
+        )
+        half_height = panel_height * 0.5
+        above = float(source[1] - JOINT_PRECISION_OFFSET_PT * style_scale)
+        below = float(source[1] + JOINT_PRECISION_OFFSET_PT * style_scale)
+        if above - half_height >= viewport_y + margin:
+            center_y = above
+        elif below + half_height <= viewport_y + viewport_height - margin:
+            center_y = below
+        else:
+            center_y = float(
+                np.clip(
+                    above,
+                    viewport_y + margin + half_height,
+                    viewport_y + viewport_height - margin - half_height,
+                )
+            )
+        start = np.array((center_x - track_width * 0.5, center_y), np.float64)
+        end = np.array((center_x + track_width * 0.5, center_y), np.float64)
+        normalized = float(
+            np.clip(
+                (state.current - state.lower) / max(state.upper - state.lower, 1e-12),
+                0.0,
+                1.0,
+            )
+        )
+        current = start + (end - start) * normalized
+        panel_rect = (
+            center_x - half_width,
+            center_y - half_height,
+            center_x + half_width,
+            center_y + half_height,
+        )
+        return _JointPrecisionProjection(
+            state.joint_id,
+            state.qpos_adr,
+            state.joint_type,
+            state.lower,
+            state.upper,
+            start,
+            current,
+            end,
+            panel_rect,
+            panel_rect,
+            source,
+        )
+
+    def _draw_joint_precision(self, overlay: Draw2D, style_scale: float) -> None:
+        """Draw a compact-range rail entirely through backend-neutral viewport primitives."""
+
+        rail = self._joint_precision
+        if rail is None:
+            return
+        x0, y0, x1, y1 = rail.panel_rect
+        panel_edge = np.array(
+            (
+                float(np.clip(rail.source[0], x0, x1)),
+                y1 if rail.source[1] >= (y0 + y1) * 0.5 else y0,
+            ),
+            np.float64,
+        )
+        overlay.line(
+            rail.source,
+            panel_edge,
+            _with_alpha(THEME.text_disabled, 0.60),
+            1.0 * style_scale,
+        )
+        overlay.rect_filled(
+            (x0, y0),
+            (x1, y1),
+            (*THEME.bg_popup[:3], 0.94),
+            rounding=5.0 * style_scale,
+        )
+        border = (
+            THEME.primary_dim
+            if self._joint_precision_hovered or self._joint_precision_active
+            else THEME.border
+        )
+        overlay.rect(
+            (x0, y0),
+            (x1, y1),
+            border,
+            1.0 * style_scale,
+            rounding=5.0 * style_scale,
+        )
+        core = (
+            axis_active_color(JOINT_RANGE_COLOR)
+            if self._joint_precision_active
+            else axis_hover_color(JOINT_RANGE_COLOR)
+            if self._joint_precision_hovered
+            else JOINT_RANGE_COLOR
+        )
+        overlay.line(
+            rail.start,
+            rail.end,
+            JOINT_OUTLINE_COLOR,
+            (JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT) * style_scale,
+        )
+        overlay.line(
+            rail.start,
+            rail.end,
+            core,
+            JOINT_RANGE_WIDTH_PT * style_scale,
+        )
+        drag_start = None
+        if self._joint_precision_active and len(self._joint_drag_origin_qpos):
+            normalized_start = float(
+                np.clip(
+                    (float(self._joint_drag_origin_qpos[0]) - rail.lower)
+                    / max(rail.upper - rail.lower, 1e-12),
+                    0.0,
+                    1.0,
+                )
+            )
+            drag_start = rail.start + (rail.end - rail.start) * normalized_start
+            if float(np.linalg.norm(rail.current - drag_start)) > 1e-6:
+                overlay.line(
+                    drag_start,
+                    rail.current,
+                    JOINT_OUTLINE_COLOR,
+                    (JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT) * style_scale,
+                )
+                overlay.line(
+                    drag_start,
+                    rail.current,
+                    JOINT_ACTIVE_DARK_COLOR,
+                    JOINT_RANGE_WIDTH_PT * style_scale,
+                )
+        endpoint_half = 5.5 * style_scale
+        start_half = JOINT_DRAG_START_TICK_HALF_PT * style_scale
+        current_half = 8.0 * style_scale
+        if drag_start is not None:
+            start_a = drag_start - np.array((0.0, start_half))
+            start_b = drag_start + np.array((0.0, start_half))
+            overlay.line(
+                start_a,
+                start_b,
+                JOINT_OUTLINE_COLOR,
+                (JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT) * style_scale,
+                cap="round",
+            )
+            overlay.line(
+                start_a,
+                start_b,
+                JOINT_ACTIVE_DARK_COLOR,
+                JOINT_RANGE_WIDTH_PT * style_scale,
+                cap="round",
+            )
+        current_a = rail.current - np.array((0.0, current_half))
+        current_b = rail.current + np.array((0.0, current_half))
+        overlay.line(
+            current_a,
+            current_b,
+            JOINT_OUTLINE_COLOR,
+            (4.0 + 2.0 * JOINT_OUTLINE_PT) * style_scale,
+            cap="round",
+        )
+        overlay.line(current_a, current_b, core, 4.0 * style_scale, cap="round")
+        # Semantic endpoints are the final rail geometry so neither the drag
+        # origin nor the moving current tick can cover a physical limit.
+        for point, color in (
+            (rail.start, JOINT_LOWER_LIMIT_COLOR),
+            (rail.end, JOINT_UPPER_LIMIT_COLOR),
+        ):
+            a = point - np.array((0.0, endpoint_half))
+            b = point + np.array((0.0, endpoint_half))
+            overlay.line(
+                a,
+                b,
+                JOINT_OUTLINE_COLOR,
+                (3.0 + 2.0 * JOINT_OUTLINE_PT) * style_scale,
+                cap="round",
+            )
+            overlay.line(a, b, color, 3.0 * style_scale, cap="round")
+        if self._joint_precision_active and self._label:
+            _draw_joint_value_label(
+                overlay,
+                ((x0 + x1) * 0.5, y0),
+                core,
+                self._label,
+                style_scale,
+                above=True,
+                align_right=False,
+                centered=True,
+            )
 
     def _hinge_range_projection(
         self,
@@ -2641,6 +3112,48 @@ class ObjectGizmo:
     def _begin(self, session, cam, rect, cursor) -> bool:
         return self._begin_handle(session, cam, rect, cursor, self._hovered)
 
+    def _begin_joint_precision(self, session, cam, rect, cursor) -> bool:
+        """Start a direct scalar edit on the expanded viewport rail."""
+
+        projection = self._joint_precision
+        node = session.selected_node
+        if projection is None or node is None:
+            return False
+        target, _reason = self._joint_target(session, node)
+        if target is None or target.joint.type not in ("hinge", "slide"):
+            return False
+        joint = target.joint
+        if int(joint.joint_id) != projection.joint_id or int(joint.qpos_adr) != projection.qpos_adr:
+            return False
+        qpos = session.frame.qpos
+        address = int(joint.qpos_adr)
+        if qpos is None or not 0 <= address < len(qpos):
+            return False
+        pose = self._target_pose(session, node, target)
+        if pose is None:
+            return False
+        pos, mat = pose
+        self._active_joint = joint
+        self._active = _joint_range_handle(self._joint_range_state(session, target))
+        self._start_joint_qpos = np.asarray((qpos[address],), np.float64)
+        self._joint_drag_origin_qpos = self._start_joint_qpos.copy()
+        np.copyto(self._start_pos, pos)
+        np.copyto(self._drag_origin_pos, pos)
+        np.copyto(self._start_mat, mat)
+        np.copyto(self._start_basis, self._target_basis(mat, target))
+        np.copyto(self._current_mat, mat)
+        self._axis[:] = self._start_basis[:, 2]
+        self._start_cursor[:] = cursor
+        self._rotation_angle = 0.0
+        self._snapping = False
+        self._edit_started = False
+        self._precision_value_label(float(qpos[address]), snap=False)
+        self._joint_precision_active = True
+        self._joint_precision_visible_until = time.monotonic() + (
+            JOINT_PRECISION_REVEAL_GRACE_SECONDS
+        )
+        return True
+
     def _begin_handle(self, session, cam, rect, cursor, handle: GizmoHandle) -> bool:
         node = session.selected_node
         if node is None or handle is GizmoHandle.NONE:
@@ -2882,6 +3395,8 @@ class ObjectGizmo:
         return travel
 
     def _drag(self, session, cam, rect, cursor, *, snap: bool) -> bool:
+        if self._joint_precision_active:
+            return self._drag_joint_precision(session, cursor, snap=snap)
         handle = self._active
         self._snapping = bool(snap)
         pos = self._start_pos.copy()
@@ -3009,6 +3524,65 @@ class ObjectGizmo:
         self._edit_started = True
         self._label = self._format_value(pos)
         return True
+
+    def _drag_joint_precision(self, session, cursor, *, snap: bool) -> bool:
+        """Map horizontal rail travel over the complete authored scalar range."""
+
+        projection = self._joint_precision
+        joint = self._active_joint
+        if projection is None or joint is None:
+            self._end()
+            return False
+        width = float(projection.end[0] - projection.start[0])
+        if width <= 1e-6:
+            self._end()
+            return False
+        amount = float(np.clip((float(cursor[0]) - projection.start[0]) / width, 0.0, 1.0))
+        value = projection.lower + amount * (projection.upper - projection.lower)
+        self._snapping = bool(snap)
+        if snap:
+            step = (
+                np.radians(self.rotation_snap_deg)
+                if joint.type == "hinge"
+                else self.translation_snap_m
+            )
+            value = float(np.clip(_snap_value(value, step), projection.lower, projection.upper))
+        current = session.frame.qpos
+        address = int(projection.qpos_adr)
+        if current is None or not 0 <= address < len(current):
+            self._end()
+            return False
+        if np.isclose(float(current[address]), value, atol=1e-12, rtol=0.0):
+            self._precision_value_label(value, snap=snap)
+            return True
+        result = session.submit(SetQpos(address, value))
+        if not result.ok:
+            self._verdict = Verdict(False, result.message)
+            self._end()
+            return False
+        self._edit_started = True
+        self._precision_value_label(value, snap=snap)
+        return True
+
+    def _precision_value_label(self, value: float, *, snap: bool) -> None:
+        projection = self._joint_precision
+        joint = self._active_joint
+        if projection is None or joint is None:
+            self._label = ""
+            return
+        name = joint.name or joint.type
+        span = projection.upper - projection.lower
+        if joint.type == "hinge":
+            shown = float(np.degrees(value))
+            shown_span = float(np.degrees(span))
+            decimals = 3 if shown_span < 1.0 else 2 if shown_span < 10.0 else 1
+            label = f"{name} {shown:+.{decimals}f}°"
+            snap_label = f" · SNAP {_format_step(self.rotation_snap_deg)}°"
+        else:
+            decimals = 5 if span < 0.01 else 4 if span < 0.1 else 3
+            label = f"{name} {value:+.{decimals}f} m"
+            snap_label = f" · SNAP {_format_step(self.translation_snap_m)} m"
+        self._label = label + (snap_label if snap else "")
 
     def _rebase_clamped_joint_drag(self, cam, rect, cursor, position) -> None:
         """Discard pointer over-travel when a scalar joint reaches a limit."""
@@ -3429,6 +4003,8 @@ class ObjectGizmo:
         self._snapping = False
         self._active = GizmoHandle.NONE
         self._active_joint = None
+        self._joint_limit_active = None
+        self._joint_precision_active = False
         self._slide_cardinal_axis = -1
         self._start_joint_qpos = np.zeros(0, np.float64)
         self._joint_drag_origin_qpos = np.zeros(0, np.float64)
@@ -3483,6 +4059,7 @@ def _draw_joint_value_label(
     *,
     above: bool,
     align_right: bool,
+    centered: bool = False,
 ) -> tuple[float, float, float, float]:
     """Draw a translucent semantic-dot label without coloring the value text."""
 
@@ -3498,7 +4075,10 @@ def _draw_joint_value_label(
     width = padding_x * 2.0 + dot_radius * 2.0 + dot_gap + text_width
     height = max(26.0 * style_scale, text_height + padding_y * 2.0)
     margin = 8.0 * style_scale
-    x = float(anchor[0]) - width - margin if align_right else float(anchor[0]) + margin
+    if centered:
+        x = float(anchor[0]) - width * 0.5
+    else:
+        x = float(anchor[0]) - width - margin if align_right else float(anchor[0]) + margin
     y = float(anchor[1]) - height - margin if above else float(anchor[1]) + margin
     overlay.rect_filled(
         (x, y),
@@ -3529,6 +4109,145 @@ def _draw_joint_value_label(
         label,
     )
     return (x, y, x + width, y + height)
+
+
+def _point_in_rect(point, rect: tuple[float, float, float, float]) -> bool:
+    x, y = (float(value) for value in point)
+    return rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]
+
+
+def _joint_range_handle(state: _JointRangeState | None) -> GizmoHandle:
+    if state is not None and state.joint_type == "slide":
+        return GizmoHandle.Z
+    return GizmoHandle.ROTATE_Z
+
+
+def _polyline_screen_distance(point, points, *, closed: bool = False) -> float:
+    path = np.asarray(points, np.float64).reshape(-1, 2)
+    if len(path) < 2:
+        return float("inf")
+    count = len(path) if closed else len(path) - 1
+    return min(
+        _screen_segment_distance(point, path[index], path[(index + 1) % len(path)])
+        for index in range(count)
+    )
+
+
+def _hinge_range_hit(
+    cursor,
+    projection: _HingeRangeProjection | None,
+    style_scale: float,
+) -> bool:
+    return _hinge_range_path_hit(cursor, projection, style_scale) or _hinge_current_tick_hit(
+        cursor, projection, style_scale
+    )
+
+
+def _hinge_range_path_hit(
+    cursor,
+    projection: _HingeRangeProjection | None,
+    style_scale: float,
+) -> bool:
+    if projection is None:
+        return False
+    distance = float("inf")
+    if projection.allowed is not None:
+        distance = _polyline_screen_distance(
+            cursor,
+            projection.allowed,
+            closed=projection.full_range,
+        )
+    return distance <= RING_HIT_PT * style_scale
+
+
+def _hinge_current_tick_hit(
+    cursor,
+    projection: _HingeRangeProjection | None,
+    style_scale: float,
+) -> bool:
+    return bool(
+        projection is not None
+        and projection.current_tick is not None
+        and _screen_segment_distance(cursor, *projection.current_tick) <= RING_HIT_PT * style_scale
+    )
+
+
+def _slide_range_hit(
+    cursor,
+    projection: _SlideRangeProjection | None,
+    style_scale: float,
+) -> bool:
+    return _slide_range_path_hit(cursor, projection, style_scale) or _slide_current_tick_hit(
+        cursor, projection, style_scale
+    )
+
+
+def _slide_range_path_hit(
+    cursor,
+    projection: _SlideRangeProjection | None,
+    style_scale: float,
+) -> bool:
+    if projection is None:
+        return False
+    distance = _screen_segment_distance(cursor, projection.lower, projection.upper)
+    return distance <= JOINT_SLIDE_AXIS_HIT_PT * style_scale
+
+
+def _slide_current_tick_hit(
+    cursor,
+    projection: _SlideRangeProjection | None,
+    style_scale: float,
+) -> bool:
+    if projection is None:
+        return False
+    half_tick = 10.0 * style_scale
+    distance = _screen_segment_distance(
+        cursor,
+        projection.current - projection.normal * half_tick,
+        projection.current + projection.normal * half_tick,
+    )
+    return distance <= JOINT_SLIDE_AXIS_HIT_PT * style_scale
+
+
+def _same_joint_limit(a: JointLimitHit, b: JointLimitHit) -> bool:
+    return a.joint_id == b.joint_id and a.qpos_adr == b.qpos_adr and a.label[:3] == b.label[:3]
+
+
+def _closest_joint_limit_hit(
+    cursor,
+    hits: tuple[JointLimitHit, ...],
+    state: _JointRangeState,
+    style_scale: float,
+) -> JointLimitHit | None:
+    """Pick the nearest visible outer tick stroke, never its bounding box."""
+
+    point = np.asarray(cursor, np.float64)
+    candidates: list[tuple[float, float, JointLimitHit]] = []
+    for hit in hits:
+        if hit.joint_id != state.joint_id or hit.qpos_adr != state.qpos_adr:
+            continue
+        start = np.asarray(hit.tick_start, np.float64)
+        end = np.asarray(hit.tick_end, np.float64)
+        edge = end - start
+        denominator = float(np.dot(edge, edge))
+        if denominator <= 1e-12:
+            continue
+        along = float(np.dot(point - start, edge) / denominator)
+        if state.joint_type == "hinge" and along < JOINT_LIMIT_OUTER_HIT_FRACTION:
+            continue
+        if state.joint_type == "slide" and abs(along - 0.5) < (
+            0.5 - JOINT_LIMIT_OUTER_HIT_FRACTION
+        ):
+            continue
+        along = float(np.clip(along, 0.0, 1.0))
+        closest = start + edge * along
+        distance = float(np.linalg.norm(point - closest))
+        threshold = hit.tick_width * 0.5 + JOINT_LIMIT_STROKE_HIT_PADDING_PT * style_scale
+        if distance <= threshold:
+            candidates.append((distance, float(np.linalg.norm(point - end)), hit))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: (item[0], item[1], item[2].label))[2]
 
 
 def _joint_limit_tick_rect(

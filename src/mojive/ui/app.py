@@ -98,6 +98,7 @@ JOINT_LIMIT_HOVER_GRACE_SECONDS = 0.12
 PRECISE_GIZMO_HINT_DELAY_SECONDS = 0.5
 JOINT_FOCUS_MARGIN = 1.5
 JOINT_FOCUS_OBLIQUE_DEGREES = 35.0
+JOINT_FOCUS_OCCLUSION_NEIGHBORHOOD_DEGREES = 25.0
 VIEWPORT_DOUBLE_CLICK_SECONDS = 0.3
 VIEWPORT_DOUBLE_CLICK_RADIUS_PT = 6.0
 STEP_BACK_REPEAT_DELAY_SECONDS = 0.35
@@ -1054,7 +1055,7 @@ class ViewerApp:
         except Exception as exc:
             self._report_model_error(str(exc))
             return
-        if isinstance(selected, (list, tuple)):
+        if isinstance(selected, list | tuple):
             selected = selected[0] if selected else ""
         if not selected:
             return
@@ -1104,7 +1105,7 @@ class ViewerApp:
         except Exception as exc:
             self._report_model_error(str(exc))
             return
-        if isinstance(selected, (list, tuple)):
+        if isinstance(selected, list | tuple):
             selected = selected[0] if selected else ""
         if not selected:
             return
@@ -1189,7 +1190,7 @@ class ViewerApp:
         except Exception as exc:
             self._report_model_error(str(exc))
             return
-        if isinstance(selected, (list, tuple)):
+        if isinstance(selected, list | tuple):
             selected = selected[0] if selected else ""
         if not selected:
             return
@@ -1257,7 +1258,7 @@ class ViewerApp:
             self._resource_repair_status = str(exc)
             self._open_resource_repair_popup = True
             return
-        if isinstance(selected, (list, tuple)):
+        if isinstance(selected, list | tuple):
             selected = selected[0] if selected else ""
         if not selected:
             self._open_resource_repair_popup = True
@@ -1362,7 +1363,7 @@ class ViewerApp:
             self._report_model_error(str(exc))
             self._after_save_action = None
             return
-        if isinstance(selected, (list, tuple)):
+        if isinstance(selected, list | tuple):
             selected = selected[0] if selected else ""
         if not selected:
             self._after_save_action = None
@@ -3151,6 +3152,20 @@ class ViewerApp:
         def turn_from_current(direction: np.ndarray) -> float:
             return 1.0 - float(np.clip(np.dot(direction, current_direction), -1.0, 1.0))
 
+        # Occlusion can choose a slightly different nearby side, but it must
+        # not pull focus across the model to a distant canonical quadrant.
+        turn_angles = [
+            float(np.arccos(np.clip(np.dot(direction, current_direction), -1.0, 1.0)))
+            for direction in directions
+        ]
+        nearest_turn = min(turn_angles)
+        turn_limit = nearest_turn + np.deg2rad(JOINT_FOCUS_OCCLUSION_NEIGHBORHOOD_DEGREES)
+        directions = [
+            direction
+            for direction, turn_angle in zip(directions, turn_angles, strict=True)
+            if turn_angle <= turn_limit + 1e-9
+        ]
+
         caps = getattr(getattr(self.session, "adapter", None), "caps", None)
         if not bool(getattr(caps, "raycast", False)):
             return min(directions, key=turn_from_current)
@@ -3440,69 +3455,15 @@ class ViewerApp:
         if not self.session.paused or not hits:
             self._joint_limit_hover.reset()
             return
-        flags = (
-            imgui.WindowFlags_.no_decoration.value
-            | imgui.WindowFlags_.no_docking.value
-            | imgui.WindowFlags_.no_move.value
-            | imgui.WindowFlags_.no_focus_on_appearing.value
-            | imgui.WindowFlags_.no_saved_settings.value
-            | imgui.WindowFlags_.no_background.value
-            | imgui.WindowFlags_.no_scrollbar.value
-        )
-        hovered_hit: JointLimitHit | None = None
-        for hit in hits:
-            x0, y0, x1, y1 = hit.rect
-            # Keep the host clip outside the antialiased tick feedback.
-            clip_pad = 2.0 * self.window.style_scale
-            host_rect = _clipped_overlay_host_rect(
-                self._viewport_rect,
-                (x0, y0, x1, y1),
-                clip_pad,
+        hovered_hit = self.gizmo.hovered_joint_limit
+        active_hit = self.gizmo.active_joint_limit
+        feedback_hit = active_hit or hovered_hit
+        if feedback_hit is not None:
+            self._draw_joint_limit_feedback(
+                feedback_hit,
+                hovered=hovered_hit is not None,
+                active=active_hit is not None,
             )
-            if host_rect is None:
-                continue
-            imgui.set_next_window_pos(
-                imgui.ImVec2(host_rect[0], host_rect[1]),
-                imgui.Cond_.always,
-            )
-            imgui.set_next_window_size(
-                imgui.ImVec2(host_rect[2], host_rect[3]),
-                imgui.Cond_.always,
-            )
-            imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
-            imgui.push_style_var(imgui.StyleVar_.window_min_size, imgui.ImVec2(1.0, 1.0))
-            visible, _ = imgui.begin(
-                f"{self.localizer.text('Joint')} {hit.label}"
-                f"###joint_limit_{hit.joint_id}_{hit.label[:3]}",
-                None,
-                flags,
-            )
-            if visible:
-                viewport_x, viewport_y, viewport_width, viewport_height = self._viewport_rect
-                imgui.push_clip_rect(
-                    imgui.ImVec2(viewport_x, viewport_y),
-                    imgui.ImVec2(viewport_x + viewport_width, viewport_y + viewport_height),
-                    True,
-                )
-                try:
-                    imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
-                    clicked = imgui.invisible_button(
-                        f"##joint_limit_hit_{hit.joint_id}_{hit.label[:3]}",
-                        imgui.ImVec2(max(x1 - x0, 1.0), max(y1 - y0, 1.0)),
-                    )
-                    hovered = imgui.is_item_hovered()
-                    active = imgui.is_item_active()
-                    if hovered or active:
-                        hovered_hit = hit
-                        self._draw_joint_limit_feedback(hit, hovered=hovered, active=active)
-                    if clicked:
-                        result = self.gizmo.apply_joint_limit(self.session, hit)
-                        if not result.ok:
-                            self.session.report_message(result.message, level="warning")
-                finally:
-                    imgui.pop_clip_rect()
-            imgui.end()
-            imgui.pop_style_var(2)
 
         keys = tuple(self._joint_limit_key(hit) for hit in hits)
         visible_key = self._joint_limit_hover.update(
@@ -3515,6 +3476,7 @@ class ViewerApp:
             None,
         )
         if visible_hit is not None:
+            self.gizmo.reveal_joint_precision(visible_hit, now=now)
             with _clipped_foreground_overlay_draw(self._viewport_rect) as draw:
                 self.gizmo.draw_joint_limit_label(draw, visible_hit, self.window.style_scale)
 
@@ -3925,7 +3887,7 @@ class ViewerApp:
                         owner,
                     )
                 name = str(owner.name).rsplit("###", 1)[-1]
-                if name == "Viewport" or name.startswith("joint_limit_"):
+                if name == "Viewport":
                     self._status_panel = "Viewport"
                 elif name in ctx.status_hints_by_panel:
                     self._status_panel = name

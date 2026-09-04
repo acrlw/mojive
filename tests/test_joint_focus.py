@@ -68,7 +68,7 @@ def _focus_app(joint: JointInfo, frame: SceneFrame) -> ViewerApp:
     return app
 
 
-def test_hinge_focus_targets_the_anchor_from_a_readable_oblique_view() -> None:
+def test_hinge_focus_targets_the_anchor_from_the_nearest_readable_oblique_view() -> None:
     joint = JointInfo(0, "elbow", "hinge", True, (-1.0, 1.0), 0, 0, 1)
     frame = SceneFrame(
         body_xpos=np.array(((0.0, 0.0, 0.0), (1.0, 2.0, 3.0)), np.float32),
@@ -88,14 +88,48 @@ def test_hinge_focus_targets_the_anchor_from_a_readable_oblique_view() -> None:
     assert app.camera.pivot == pytest.approx((1.5, 2.0, 3.0))
     direction = app.camera.direction()
     assert abs(np.dot(direction, (1.0, 0.0, 0.0))) == pytest.approx(
-        np.cos(np.deg2rad(35.0)) ** 2, abs=1e-6
+        np.cos(np.deg2rad(35.0)), abs=1e-6
     )
     assert app.camera.pitch == pytest.approx(35.0)
-    assert abs(direction[1]) > 0.4
+    assert direction[1] == pytest.approx(0.0, abs=1e-6)
     assert app._pending_joint_focus_id is None
 
 
-def test_joint_focus_prefers_the_candidate_without_an_occluding_body() -> None:
+def test_joint_focus_can_avoid_an_occluder_with_a_small_nearby_turn() -> None:
+    target = SceneNode(7, "elbow", NodeType.JOINT, body_index=1, joint_index=0)
+    blocker = SceneNode(8, "torso", NodeType.LINK, object_id=2, body_index=2)
+    target_link = SceneNode(9, "forearm", NodeType.LINK, object_id=1, body_index=1)
+    app = object.__new__(ViewerApp)
+    app.camera = OrbitCamera(pivot=np.zeros(3), distance=3.0, yaw=0.0)
+    nearby = np.array((np.cos(np.deg2rad(15.0)), np.sin(np.deg2rad(15.0)), 0.0))
+
+    def query(pick):
+        if pick.origin[1] < 0.1:
+            return blocker.object_id, 1.0
+        return target_link.object_id, 2.0
+
+    app.session = SimpleNamespace(
+        adapter=SimpleNamespace(caps=SimpleNamespace(raycast=True)),
+        bounds=lambda: (np.full(3, -2.0), np.full(3, 2.0)),
+        query=query,
+        node_by_object_id=lambda object_id: {
+            blocker.object_id: blocker,
+            target_link.object_id: target_link,
+        }.get(object_id),
+    )
+
+    direction = app._least_occluded_joint_direction(
+        np.zeros(3),
+        0.3,
+        (np.array((1.0, 0.0, 0.0)), nearby, np.array((-1.0, 0.0, 0.0))),
+        target,
+        np.array((3.0, 0.0, 0.0)),
+    )
+
+    assert direction == pytest.approx(nearby)
+
+
+def test_joint_focus_does_not_cross_the_model_only_to_avoid_an_occluder() -> None:
     target = SceneNode(7, "elbow", NodeType.JOINT, body_index=1, joint_index=0)
     blocker = SceneNode(8, "torso", NodeType.LINK, object_id=2, body_index=2)
     target_link = SceneNode(9, "forearm", NodeType.LINK, object_id=1, body_index=1)
@@ -125,7 +159,7 @@ def test_joint_focus_prefers_the_candidate_without_an_occluding_body() -> None:
         np.array((3.0, 0.0, 0.0)),
     )
 
-    assert direction == pytest.approx((-1.0, 0.0, 0.0))
+    assert direction == pytest.approx((1.0, 0.0, 0.0))
 
 
 def test_hinge_focus_prefers_an_unblocked_view_from_above() -> None:

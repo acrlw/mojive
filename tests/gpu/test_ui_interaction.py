@@ -42,7 +42,6 @@ def _pin_ui_scale(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def viewer():
-
     v = build(resolve("pick_scene"), "mujoco", paused=True, vsync=False, width=W, height=H)
     try:
         for _ in range(14):
@@ -53,14 +52,12 @@ def viewer():
 
 
 def snap(v) -> np.ndarray:
-
     px = v.window.read_frame()
     assert px is not None
     return np.asarray(px)[::-1][..., :3].copy()
 
 
 def viewport_snap(v) -> np.ndarray:
-
     image = snap(v)
     x, y, w, h = v.window.points_to_pixels(v.app._viewport_rect)
     x0, y0, x1, y1 = round(x), round(y), round(x + w), round(y + h)
@@ -93,7 +90,6 @@ def click(v, io, point, button=0):
 
 
 def activate_panel(v, name):
-
     from imgui_bundle import imgui
 
     window = imgui.internal.find_window_by_name(name)
@@ -120,7 +116,6 @@ def _scroll_panel(v, name, wheel_y):
 
 
 def item_rect(v, function_name, label):
-
     from imgui_bundle import imgui
 
     original = getattr(imgui, function_name)
@@ -143,7 +138,6 @@ def item_rect(v, function_name, label):
 
 
 def item_bounds(v, function_name, label):
-
     from imgui_bundle import imgui
 
     original = getattr(imgui, function_name)
@@ -166,7 +160,6 @@ def item_bounds(v, function_name, label):
 
 
 def test_viewport_gets_real_estate(viewer):
-
     _x, _y, w, h = viewer.app._viewport_rect
     pw, ph = viewer.window.size_points
     assert w > 200 and h > 200
@@ -320,7 +313,6 @@ def test_selection_status_survives_navigation_and_escape_consumes_release(
 
 
 def test_all_panels_docked_not_stacked(viewer):
-
     from mojive.ui.window import Window
 
     laid_out = set(
@@ -393,7 +385,6 @@ def test_hierarchy_search_clear_button_resets_filter(viewer):
 
 
 def test_hierarchy_visibility_toggle_does_not_select_the_row(viewer):
-
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
@@ -753,10 +744,11 @@ def test_double_clicking_joint_and_hierarchy_rows_focuses_the_camera(viewer) -> 
         assert diagnostics is not None
         axis = diagnostics.joint_xaxis[joint.joint_id]
         center = diagnostics.joint_xpos[joint.joint_id]
-        assert abs(float(np.dot(v.app.camera.direction(), axis))) == pytest.approx(
-            np.cos(np.deg2rad(35.0)) ** 2, abs=1e-5
+        axis_angle = np.degrees(
+            np.arccos(np.clip(abs(float(np.dot(v.app.camera.direction(), axis))), -1.0, 1.0))
         )
-        assert v.app.camera.pitch == pytest.approx(35.0)
+        assert 35.0 - 1e-5 <= axis_angle <= 55.0 + 1e-5
+        assert v.app.camera.pitch >= 35.0 - 1e-5
         assert v.app.camera.direction()[2] > 0.0
         assert v.app.camera.pivot == pytest.approx(center, abs=1e-5)
 
@@ -927,7 +919,6 @@ def test_light_inspector_groups_property_tables_and_joined_vectors(viewer):
 
 
 def test_orbit_moves_camera_and_picture(viewer):
-
     from imgui_bundle import imgui
 
     io = imgui.get_io()
@@ -962,7 +953,6 @@ def test_localized_viewport_accepts_camera_input(viewer):
 
 
 def test_wheel_dollies(viewer):
-
     from imgui_bundle import imgui
 
     io = imgui.get_io()
@@ -982,7 +972,6 @@ def test_wheel_dollies(viewer):
 
 
 def test_floating_panel_over_the_viewport_blocks_camera_input(viewer):
-
     from imgui_bundle import imgui
 
     real_draw = viewer.app.panels.draw
@@ -1064,7 +1053,6 @@ def test_floating_viewport_separates_window_and_scene_gestures(viewer):
 
 
 def _project(cam, world, rect):
-
     clip = cam.proj_matrix() @ (cam.view_matrix() @ np.array([*world, 1.0], np.float64))
     if clip[3] <= 0.0:
         return None
@@ -1077,7 +1065,6 @@ def _project(cam, world, rect):
 
 
 def test_click_picks_the_object_actually_under_the_cursor(viewer):
-
     from imgui_bundle import imgui
 
     io = imgui.get_io()
@@ -1143,7 +1130,6 @@ def test_click_picks_the_object_actually_under_the_cursor(viewer):
 
 
 def test_selection_reaches_the_outline_in_the_window(viewer):
-
     from mojive import commands as cmd
 
     target = next(n for n in viewer.session.nodes if n.name == "cluster")
@@ -1165,7 +1151,6 @@ def test_selection_reaches_the_outline_in_the_window(viewer):
 
 
 def test_view_gizmo_fits_the_corner(viewer):
-
     balls = viewer.app.view_cube.balls
     assert balls
     xs = [b.screen[0] for b in balls]
@@ -1187,7 +1172,6 @@ def test_view_gizmo_fits_the_corner(viewer):
     [(0, 1.0, 0.0, 0.0), (0, -1.0, 180.0, 0.0), (1, 1.0, 90.0, 0.0), (1, -1.0, 270.0, 0.0)],
 )
 def test_view_gizmo_click_snaps_to_that_axis(viewer, axis, sign, yaw, pitch):
-
     from imgui_bundle import imgui
 
     io = imgui.get_io()
@@ -1248,7 +1232,6 @@ def test_view_gizmo_click_frames_the_selected_object(viewer):
 
 
 def test_view_gizmo_axis_points_at_you_when_you_look_down_it(viewer):
-
     viewer.app.camera.look_from(0.0, 0.0, viewer.app.camera_out, animate=False)
     viewer.sync()
 
@@ -1267,7 +1250,6 @@ def test_view_gizmo_axis_points_at_you_when_you_look_down_it(viewer):
 
 
 def _ball_and_ink(frame, ball, scale):
-
     cx, cy = ball.screen[0] * scale, ball.screen[1] * scale
     r = ball.radius * scale
     x0, y0 = int(cx - r - 3), int(cy - r - 3)
@@ -1295,7 +1277,6 @@ def _ball_and_ink(frame, ball, scale):
 
 
 def test_gizmo_label_sits_in_the_middle_of_its_ball(viewer):
-
     from imgui_bundle import imgui
 
     io = imgui.get_io()
@@ -1385,7 +1366,6 @@ class _RecordingDrawList:
 
 
 def test_gizmo_draws_each_axis_as_one_unit(viewer):
-
     from imgui_bundle import imgui
 
     io = imgui.get_io()
@@ -1435,7 +1415,6 @@ def test_gizmo_draws_each_axis_as_one_unit(viewer):
 
 
 def test_negative_balls_are_dark_and_opaque(viewer):
-
     from imgui_bundle import imgui
 
     imgui.get_io().add_mouse_pos_event(0.0, 0.0)
@@ -1480,7 +1459,6 @@ def test_negative_balls_are_dark_and_opaque(viewer):
 
 
 def test_hover_does_not_resize_the_ball(viewer):
-
     from imgui_bundle import imgui
 
     io = imgui.get_io()
@@ -1504,7 +1482,6 @@ def test_hover_does_not_resize_the_ball(viewer):
 
 
 def test_top_view_is_canonical_x_right_y_up(viewer):
-
     from mojive.ui import viewcube as vc
     from mojive.ui.camera import camera_basis
 
@@ -1517,7 +1494,6 @@ def test_top_view_is_canonical_x_right_y_up(viewer):
 
 
 def test_clicking_during_a_transition_does_not_strand_the_camera(viewer):
-
     from imgui_bundle import imgui
 
     from mojive.ui import viewcube as vc
@@ -1554,7 +1530,6 @@ def test_clicking_during_a_transition_does_not_strand_the_camera(viewer):
 
 
 def test_font_is_monospace(viewer):
-
     from imgui_bundle import imgui
 
     widths = {c: imgui.calc_text_size(c).x for c in "iWml.0X"}
@@ -1562,7 +1537,6 @@ def test_font_is_monospace(viewer):
 
 
 def test_cjk_glyphs_present(viewer):
-
     from imgui_bundle import imgui
 
     if not viewer.window.font_report.cjk:
@@ -1576,7 +1550,6 @@ def test_cjk_glyphs_present(viewer):
 
 
 def test_font_size_is_in_layout_space(viewer):
-
     from imgui_bundle import imgui
 
     want = viewer.window.config.font_size_pt * viewer.window.style_scale
@@ -1590,7 +1563,6 @@ def test_font_size_is_in_layout_space(viewer):
 
 @pytest.fixture(scope="module")
 def free_body_viewer():
-
     v = build(resolve("perturb_ghost"), "mujoco", paused=True, vsync=False, width=W, height=H)
     try:
         for _ in range(14):
@@ -1601,7 +1573,6 @@ def free_body_viewer():
 
 
 def test_inspector_transform_resets_and_copies_without_gesture_conflicts(free_body_viewer):
-
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
@@ -1681,7 +1652,6 @@ def test_inspector_transform_resets_and_copies_without_gesture_conflicts(free_bo
 
 
 def test_inspector_drag_stays_ui_owned_after_crossing_into_viewport(free_body_viewer):
-
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
@@ -1727,7 +1697,6 @@ def test_inspector_drag_stays_ui_owned_after_crossing_into_viewport(free_body_vi
 
 
 def test_inspector_rotation_y_drags_continuously_past_gimbal_lock(free_body_viewer):
-
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
@@ -1774,7 +1743,6 @@ def test_inspector_rotation_y_drags_continuously_past_gimbal_lock(free_body_view
 
 
 def test_gizmo_is_live_for_a_free_body(free_body_viewer):
-
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
@@ -1871,10 +1839,11 @@ def test_joint_gizmo_is_live_in_the_real_viewer_pipeline(workspace):
         assert diagnostics is not None
         axis = diagnostics.joint_xaxis[target.joint.joint_id]
         center = diagnostics.joint_xpos[target.joint.joint_id]
-        assert abs(float(np.dot(v.app.camera.direction(), axis))) == pytest.approx(
-            np.cos(np.deg2rad(35.0)) ** 2, abs=1e-5
+        axis_angle = np.degrees(
+            np.arccos(np.clip(abs(float(np.dot(v.app.camera.direction(), axis))), -1.0, 1.0))
         )
-        assert v.app.camera.pitch == pytest.approx(35.0)
+        assert 35.0 - 1e-5 <= axis_angle <= 55.0 + 1e-5
+        assert v.app.camera.pitch >= 35.0 - 1e-5
         assert v.app.camera.direction()[2] > 0.0
         assert v.app.camera.pivot == pytest.approx(center, abs=1e-5)
     finally:
@@ -1885,6 +1854,7 @@ def test_joint_limit_tick_click_sets_the_endpoint_in_the_real_viewer() -> None:
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
+    from mojive.gizmo import GizmoHandle
 
     v = build(
         resolve("joint_types"),
@@ -1907,6 +1877,36 @@ def test_joint_limit_tick_click_sets_the_endpoint_in_the_real_viewer() -> None:
         lower_hit, upper_hit = v.app.gizmo.joint_limit_hits
         assert lower_hit.value == pytest.approx(target.joint.range[0])
         assert upper_hit.value == pytest.approx(target.joint.range[1])
+        hinge = v.app.gizmo._hinge_range_projection(
+            v.app._camera_view(),
+            v.app._viewport_rect,
+            v.window.style_scale,
+            v.app.gizmo._joint_range,
+        )
+        assert hinge is not None and hinge.upper_tick is not None
+        assert (
+            v.app.gizmo.update_hover(
+                v.session,
+                v.app._camera_view(),
+                v.app._viewport_rect,
+                tuple(hinge.upper_tick[0]),
+                style_scale=v.window.style_scale,
+            )
+            is GizmoHandle.ROTATE_Z
+        )
+        assert v.app.gizmo.hovered_joint_limit is None
+        assert (
+            v.app.gizmo.update_hover(
+                v.session,
+                v.app._camera_view(),
+                v.app._viewport_rect,
+                tuple(hinge.upper_tick[1]),
+                style_scale=v.window.style_scale,
+            )
+            is GizmoHandle.ROTATE_Z
+        )
+        assert v.app.gizmo.hovered_joint_limit is not None
+        assert v.app.gizmo.hovered_joint_limit.label.startswith("MAX")
         x0, y0, x1, y1 = lower_hit.rect
         click(v, imgui.get_io(), ((x0 + x1) * 0.5, (y0 + y1) * 0.5))
         for _ in range(2):
@@ -1915,6 +1915,111 @@ def test_joint_limit_tick_click_sets_the_endpoint_in_the_real_viewer() -> None:
         assert v.session.frame.qpos is not None
         assert v.session.frame.qpos[target.joint.qpos_adr] == pytest.approx(target.joint.range[0])
     finally:
+        v.release()
+
+
+@pytest.mark.parametrize(
+    "node_name",
+    ("06_precision_hinge", "07_precision_slide"),
+)
+def test_compact_joint_range_expands_to_a_drag_track_in_the_real_viewer(
+    node_name: str,
+) -> None:
+    from imgui_bundle import imgui
+
+    import mojive.commands as cmd
+
+    v = build(
+        resolve("joint_gizmo"),
+        "mujoco",
+        paused=True,
+        vsync=False,
+        width=W,
+        height=H,
+    )
+    io = imgui.get_io()
+    try:
+        for _ in range(8):
+            v.sync()
+        node = next(item for item in v.session.nodes if item.name == node_name)
+        assert v.session.submit(cmd.Select(node.object_id))
+        for _ in range(4):
+            v.sync()
+
+        target, reason = v.app.gizmo._joint_target(v.session, node)
+        assert target is not None, reason
+        range_state = v.app.gizmo._joint_range
+        assert range_state is not None
+        limit_hits = v.app.gizmo.joint_limit_hits
+        if target.joint.type == "hinge":
+            projection = v.app.gizmo._hinge_range_projection(
+                v.app._camera_view(),
+                v.app._viewport_rect,
+                v.window.style_scale,
+                range_state,
+            )
+            assert projection is not None
+            assert projection.allowed is not None
+            assert projection.current_tick is not None
+            hover_points = (
+                tuple((projection.allowed[0] + projection.allowed[-1]) * 0.5),
+                tuple(projection.current_tick[1]),
+                *(hit.tick_end for hit in limit_hits),
+            )
+        else:
+            pose = v.app.gizmo._target_pose(v.session, node, target)
+            assert pose is not None
+            projection = v.app.gizmo._slide_range_projection(
+                v.app._camera_view(),
+                v.app._viewport_rect,
+                v.window.style_scale,
+                range_state,
+                pose[0],
+                v.app.gizmo._target_basis(pose[1], target),
+            )
+            assert projection is not None
+            hover_points = (
+                tuple((projection.lower + projection.upper) * 0.5),
+                tuple(projection.current + projection.normal * 10.0 * v.window.style_scale),
+                *(hit.tick_end for hit in limit_hits),
+                *(
+                    tuple(point)
+                    for point in v.app.gizmo._slide_arrow_targets(
+                        projection,
+                        v.window.style_scale,
+                    )
+                ),
+            )
+
+        dwell_started = None
+        for point in hover_points:
+            io.add_mouse_pos_event(*point)
+            v.sync()
+            assert v.app.gizmo._joint_precision_dwell_key == (
+                target.joint.joint_id,
+                target.joint.qpos_adr,
+            )
+            if dwell_started is None:
+                dwell_started = v.app.gizmo._joint_precision_dwell_started
+            else:
+                assert v.app.gizmo._joint_precision_dwell_started == dwell_started
+        v.app.gizmo._joint_precision_dwell_started -= 1.0
+        v.sync()
+
+        rail = v.app.gizmo._joint_precision
+        assert rail is not None
+        assert v.app.gizmo.joint_precision_visible
+        assert v.app.gizmo.joint_precision_hit_rect == rail.panel_rect
+        cursor = rail.start + 0.75 * (rail.end - rail.start)
+        click(v, io, tuple(cursor))
+        for _ in range(2):
+            v.sync()
+
+        expected = target.joint.range[0] + 0.75 * (target.joint.range[1] - target.joint.range[0])
+        assert v.session.frame.qpos is not None
+        assert v.session.frame.qpos[target.joint.qpos_adr] == pytest.approx(expected, abs=5e-4)
+    finally:
+        io.add_mouse_button_event(0, False)
         v.release()
 
 
@@ -2296,7 +2401,6 @@ def test_status_simulation_metric_switches_and_copies_exact_value(viewer):
 
 
 def test_gizmo_disappears_without_an_editable_body(free_body_viewer):
-
     import mojive.commands as cmd
     from mojive.adapters.base import NodeType
 
@@ -2312,7 +2416,6 @@ def test_gizmo_disappears_without_an_editable_body(free_body_viewer):
 
 
 def test_dragging_the_gizmo_moves_the_object_not_the_camera(free_body_viewer):
-
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
@@ -2760,7 +2863,6 @@ def test_gizmo_drag_feedback_matches_in_2d_and_3d(free_body_viewer, style, arrow
 
 @pytest.mark.parametrize("style", ("2d", "3d"))
 def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style, monkeypatch):
-
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
@@ -3051,7 +3153,6 @@ def test_pressed_screen_rotation_ring_keeps_its_idle_pixel_geometry(
 
 
 def test_gizmo_stays_drawn_while_the_camera_is_being_dragged(free_body_viewer):
-
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
@@ -3187,7 +3288,6 @@ def test_holding_axis_key_uses_the_exact_gizmo_axis_without_a_mouse_click(free_b
 
 
 def test_the_keyboard_shortcuts_are_not_swallowed(free_body_viewer):
-
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
@@ -3341,7 +3441,6 @@ def test_blocking_modal_owns_all_viewport_input_and_hides_context_hint(
 
 
 def test_g_and_r_switch_modes_and_there_is_no_scale(free_body_viewer):
-
     v = free_body_viewer
     g = v.app.gizmo
     g.set_mode("rotate")
@@ -3353,7 +3452,6 @@ def test_g_and_r_switch_modes_and_there_is_no_scale(free_body_viewer):
 
 
 def test_closing_one_window_leaves_glfw_alive_for_the_other():
-
     import glfw as _glfw
 
     from mojive.ui.window import Window, WindowConfig

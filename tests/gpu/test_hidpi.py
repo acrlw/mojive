@@ -80,11 +80,11 @@ def test_hidpi_capsule_hosts_are_clipped_and_modal_width_tracks_layout_scale(mon
         for hit in viewer.app.gizmo.joint_limit_hits:
             name = f"Joint {hit.label}###joint_limit_{hit.joint_id}_{hit.label[:3]}"
             window = imgui.internal.find_window_by_name(name)
-            assert window is not None and window.active, name
-            assert window.pos.x >= viewport_x - 1.0
-            assert window.pos.y >= viewport_y - 1.0
-            assert window.pos.x + window.size.x <= viewport_right + 1.0
-            assert window.pos.y + window.size.y <= viewport_bottom + 1.0
+            assert window is None or not window.active, name
+            assert hit.rect[0] >= viewport_x - 1.0
+            assert hit.rect[1] >= viewport_y - 1.0
+            assert hit.rect[2] <= viewport_right + 1.0
+            assert hit.rect[3] <= viewport_bottom + 1.0
 
         viewer.app._pending_document_action = ("new_scene", None)
         for _ in range(3):
@@ -149,11 +149,7 @@ def test_hidpi_viewport_overlays_keep_a_hard_clip_after_splitter_collapse(monkey
         for hit in viewer.app.gizmo.joint_limit_hits:
             name = f"Joint {hit.label}###joint_limit_{hit.joint_id}_{hit.label[:3]}"
             window = imgui.internal.find_window_by_name(name)
-            if window is not None and window.active:
-                assert window.pos.x >= viewport_x - 1.0
-                assert window.pos.y >= viewport_y - 1.0
-                assert window.pos.x + window.size.x <= viewport_right + 1.0
-                assert window.pos.y + window.size.y <= viewport_bottom + 1.0
+            assert window is None or not window.active, name
         for window in clipped_windows:
             assert window is not None and window.active
             commands = [item for item in window.draw_list.cmd_buffer if item.elem_count]

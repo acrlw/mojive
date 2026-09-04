@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from mojive.assets import (
@@ -218,6 +219,12 @@ def test_joint_gizmo_scene_covers_single_and_multi_joint_targets() -> None:
     assert model.body_jntnum[names["03_ball"]] == 1
     assert model.body_jntnum[names["04_free"]] == 1
     assert model.body_jntnum[names["05_multi_joint"]] == 3
+    assert model.body_jntnum[names["06_precision_hinge"]] == 1
+    assert model.body_jntnum[names["07_precision_slide"]] == 1
+    precision_hinge = int(model.body_jntadr[names["06_precision_hinge"]])
+    precision_slide = int(model.body_jntadr[names["07_precision_slide"]])
+    assert np.degrees(model.jnt_range[precision_hinge]) == pytest.approx((-2.0, 2.0))
+    assert model.jnt_range[precision_slide] == pytest.approx((-0.005, 0.005))
 
 
 @pytest.mark.physics

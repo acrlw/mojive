@@ -100,9 +100,13 @@ from mojive.ui.gizmo import (
     ObjectGizmo,
     _clip_line_to_rect,
     _clip_segment_to_rect,
+    _closest_joint_limit_hit,
     _dashed_line_segments,
+    _hinge_range_hit,
+    _HingeRangeProjection,
     _joint_current_tick_color,
     _joint_drag_label_color,
+    _JointPrecisionProjection,
     _JointRangeState,
     _project_finite_axis_segment,
     _project_rotation_dial,
@@ -3369,6 +3373,251 @@ def test_joint_limit_ticks_write_the_selected_endpoint(body_name: str) -> None:
     assert adapter.data.qpos[target.joint.qpos_adr] == pytest.approx(target.joint.range[1])
     assert gizmo.apply_joint_limit(session, lower_hit)
     assert adapter.data.qpos[target.joint.qpos_adr] == pytest.approx(target.joint.range[0])
+
+
+def test_joint_limit_hit_uses_the_outer_tick_without_covering_the_range_stroke() -> None:
+    from mojive.ui.gizmo import JointLimitHit
+
+    tick = JointLimitHit(
+        joint_id=3,
+        qpos_adr=7,
+        value=1.0,
+        label="MAX +1.0°",
+        rect=(41.0, -9.0, 59.0, 23.0),
+        semantic_color=JOINT_UPPER_LIMIT_COLOR,
+        tick_start=(50.0, 0.0),
+        tick_end=(50.0, 14.0),
+        tick_width=3.0,
+        tick_cap="round",
+        label_anchor=(50.0, 14.0),
+        label_above=False,
+        label_align_right=True,
+    )
+    state = _JointRangeState("hinge", 0.0, -1.0, 1.0, joint_id=3, qpos_adr=7)
+    projection = _HingeRangeProjection(
+        alpha=1.0,
+        allowed=np.array(((0.0, 0.0), (100.0, 0.0))),
+        full_range=False,
+        current_tick=None,
+        lower_tick=None,
+        upper_tick=None,
+    )
+
+    assert _hinge_range_hit((50.0, 2.0), projection, 1.0)
+    assert _closest_joint_limit_hit((50.0, 2.0), (tick,), state, 1.0) is None
+    assert not _hinge_range_hit((50.0, 12.0), projection, 1.0)
+    assert _closest_joint_limit_hit((50.0, 12.0), (tick,), state, 1.0) is tick
+
+
+def test_slide_joint_limit_hit_leaves_its_axis_crossing_for_dragging() -> None:
+    from mojive.ui.gizmo import JointLimitHit
+
+    tick = JointLimitHit(
+        joint_id=3,
+        qpos_adr=7,
+        value=0.01,
+        label="MAX +0.010 m",
+        rect=(41.0, -9.0, 59.0, 9.0),
+        semantic_color=JOINT_UPPER_LIMIT_COLOR,
+        tick_start=(50.0, -10.0),
+        tick_end=(50.0, 10.0),
+        tick_width=3.0,
+        tick_cap="round",
+        label_anchor=(50.0, -10.0),
+        label_above=True,
+        label_align_right=True,
+    )
+    state = _JointRangeState("slide", 0.0, -0.01, 0.01, joint_id=3, qpos_adr=7)
+
+    assert _closest_joint_limit_hit((50.0, 0.0), (tick,), state, 1.0) is None
+    assert _closest_joint_limit_hit((50.0, -9.0), (tick,), state, 1.0) is tick
+    assert _closest_joint_limit_hit((50.0, 9.0), (tick,), state, 1.0) is tick
+
+
+def test_tiny_hinge_range_reveals_a_viewport_precision_rail() -> None:
+    cam = CameraView(
+        eye=np.array((0.0, 0.0, 5.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 1.0, 0.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._visible = True
+    gizmo._frame.position[:] = 0.0
+    gizmo._frame.rotation[:] = np.eye(3)
+    gizmo._joint_range = _JointRangeState(
+        "hinge",
+        0.0,
+        np.radians(-1.0),
+        np.radians(1.0),
+        joint_id=3,
+        qpos_adr=7,
+    )
+    hidden = RecordingDraw2D()
+    gizmo.draw_overlay(cam, RECT, hidden, style_scale=1.0)
+
+    assert gizmo.joint_precision_hit_rect is not None
+    assert not gizmo.joint_precision_visible
+    assert gizmo.reveal_joint_precision(gizmo.joint_limit_hits[0])
+
+    visible = RecordingDraw2D()
+    gizmo.draw_overlay(cam, RECT, visible, style_scale=1.0)
+    rail = gizmo._joint_precision
+    assert rail is not None
+    assert gizmo.joint_precision_visible
+    assert np.linalg.norm(rail.end - rail.start) == pytest.approx(144.0)
+    assert any(
+        name == "rect_filled" and args[0] == pytest.approx(rail.panel_rect[:2])
+        for name, args, _kwargs in visible.calls
+    )
+    track_lines = [
+        kwargs
+        for name, args, kwargs in visible.calls
+        if name == "line" and np.allclose(args[0], rail.start) and np.allclose(args[1], rail.end)
+    ]
+    assert len(track_lines) == 2
+    assert all(kwargs.get("cap", "butt") == "butt" for kwargs in track_lines)
+
+    gizmo._joint_range = _JointRangeState(
+        "hinge",
+        0.0,
+        np.radians(-60.0),
+        np.radians(60.0),
+        joint_id=3,
+        qpos_adr=7,
+    )
+    gizmo.draw_overlay(cam, RECT, RecordingDraw2D(), style_scale=1.0)
+    assert gizmo.joint_precision_hit_rect is None
+
+
+def test_joint_precision_dwell_survives_movement_between_gizmo_parts() -> None:
+    gizmo = ObjectGizmo()
+    gizmo._joint_precision = _JointPrecisionProjection(
+        joint_id=3,
+        qpos_adr=7,
+        joint_type="slide",
+        lower=-0.005,
+        upper=0.005,
+        start=np.array((100.0, 100.0)),
+        current=np.array((172.0, 100.0)),
+        end=np.array((244.0, 100.0)),
+        panel_rect=(90.0, 85.0, 254.0, 115.0),
+        hit_rect=(90.0, 85.0, 254.0, 115.0),
+        source=np.array((172.0, 144.0)),
+    )
+
+    gizmo._update_joint_precision_dwell(True, 10.0)
+    gizmo._update_joint_precision_dwell(False, 10.05)
+    gizmo._update_joint_precision_dwell(True, 10.10)
+    assert gizmo._joint_precision_dwell_started == pytest.approx(10.0)
+    gizmo._update_joint_precision_dwell(True, 10.49)
+    assert gizmo._joint_precision_visible_until == 0.0
+    gizmo._update_joint_precision_dwell(True, 10.50)
+    assert gizmo._joint_precision_visible_until > 10.50
+
+
+@pytest.mark.physics
+def test_joint_precision_rail_maps_its_full_width_to_the_authored_range() -> None:
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
+
+    adapter = MuJoCoAdapter(resolve("joint_types"))
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == "hinge_body")
+    assert session.submit(cmd.Select(node.object_id))
+    session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
+    gizmo = ObjectGizmo()
+    target, reason = gizmo._joint_target(session, node)
+    assert target is not None, reason
+    lower, upper = target.joint.range
+    gizmo._joint_precision = _JointPrecisionProjection(
+        joint_id=target.joint.joint_id,
+        qpos_adr=target.joint.qpos_adr,
+        joint_type="hinge",
+        lower=lower,
+        upper=upper,
+        start=np.array((100.0, 100.0)),
+        current=np.array((172.0, 100.0)),
+        end=np.array((244.0, 100.0)),
+        panel_rect=(90.0, 85.0, 254.0, 115.0),
+        hit_rect=(90.0, 85.0, 254.0, 115.0),
+        source=np.array((172.0, 144.0)),
+    )
+    gizmo._joint_precision_hovered = True
+    cam = camera()
+
+    cursor = (208.0, 100.0)
+    assert gizmo.interact(
+        session,
+        cam,
+        RECT,
+        cursor,
+        claimed=True,
+        left_down=True,
+        released=False,
+    )
+    assert adapter.data.qpos[target.joint.qpos_adr] == pytest.approx(lower + 0.75 * (upper - lower))
+    gizmo._joint_precision = _JointPrecisionProjection(
+        joint_id=target.joint.joint_id,
+        qpos_adr=target.joint.qpos_adr,
+        joint_type="hinge",
+        lower=lower,
+        upper=upper,
+        start=np.array((100.0, 100.0)),
+        current=np.array(cursor),
+        end=np.array((244.0, 100.0)),
+        panel_rect=(90.0, 85.0, 254.0, 115.0),
+        hit_rect=(90.0, 85.0, 254.0, 115.0),
+        source=np.array((172.0, 144.0)),
+    )
+    active = RecordingDraw2D()
+    gizmo._draw_joint_precision(active, 1.0)
+    drag_start = np.array((172.0, 100.0))
+    assert any(
+        name == "line"
+        and np.allclose(args[0], drag_start)
+        and np.allclose(args[1], cursor)
+        and np.allclose(args[2], JOINT_ACTIVE_DARK_COLOR)
+        for name, args, _kwargs in active.calls
+    )
+    assert any(
+        name == "line"
+        and np.allclose(args[2], JOINT_ACTIVE_DARK_COLOR)
+        and args[0][0] == pytest.approx(drag_start[0])
+        and args[1][0] == pytest.approx(drag_start[0])
+        for name, args, _kwargs in active.calls
+    )
+    line_colors = [args[2] for name, args, _kwargs in active.calls if name == "line"]
+    assert len(line_colors) >= 4
+    assert all(
+        np.allclose(actual, expected)
+        for actual, expected in zip(
+            line_colors[-4:],
+            (
+                JOINT_OUTLINE_COLOR,
+                JOINT_LOWER_LIMIT_COLOR,
+                JOINT_OUTLINE_COLOR,
+                JOINT_UPPER_LIMIT_COLOR,
+            ),
+            strict=True,
+        )
+    )
+    label_fill = [args for name, args, _kwargs in active.calls if name == "rect_filled"][-1]
+    label_center_x = (float(label_fill[0][0]) + float(label_fill[1][0])) * 0.5
+    assert label_center_x == pytest.approx(172.0)
+    assert (
+        gizmo.interact(
+            session,
+            cam,
+            RECT,
+            cursor,
+            claimed=True,
+            left_down=False,
+            released=True,
+        )
+        is False
+    )
 
 
 def test_hinge_joint_range_continuously_fades_before_its_projection_degenerates() -> None:

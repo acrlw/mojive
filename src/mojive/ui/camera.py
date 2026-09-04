@@ -132,40 +132,67 @@ def oblique_axis_view_directions(
     eye_offset,
     fallback,
     angle_degrees: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return elevated two-axis orbit views around a rotation axis.
+) -> tuple[np.ndarray, ...]:
+    """Return nearby elevated views that keep a rotation axis readable.
 
-    A single off-axis rotation leaves the camera, joint axis, and world-up in
-    one plane. Applying the requested angle to both azimuth and elevation gives
-    the focused joint the same depth cues as an editor ISO view.
+    Preserve the current azimuth whenever it already gives the joint useful
+    depth. Only clamp views that are nearly axial or edge-on, then offer small
+    neighboring turns for the one-shot occlusion check. This avoids snapping
+    every focus request to one of four global ISO-like quadrants.
     """
 
-    world_up = np.array((0.0, 0.0, 1.0), np.float64)
-    axial = closest_axis_view_direction(axis, eye_offset)
-    horizontal = axial - world_up * float(np.dot(axial, world_up))
-    if float(np.linalg.norm(horizontal)) <= 1e-9:
-        horizontal = np.asarray(eye_offset, np.float64).reshape(3).copy()
-        horizontal[2] = 0.0
-    if float(np.linalg.norm(horizontal)) <= 1e-9:
-        horizontal = np.asarray(fallback, np.float64).reshape(3).copy()
-        horizontal[2] = 0.0
-    horizontal = _normalized_direction(horizontal, np.array((1.0, 0.0, 0.0)))
-    side = _normalized_direction(np.cross(world_up, horizontal), (0.0, 1.0, 0.0))
-    angle = np.deg2rad(float(np.clip(angle_degrees, 0.0, PITCH_LIMIT)))
-    planar = float(np.cos(angle))
-    height = float(np.sin(angle))
-    turn = float(np.sin(angle))
-    forward = float(np.cos(angle))
-    candidates = tuple(
-        _normalized_direction(
-            planar * (base * forward + side * sign * turn) + world_up * height,
-            world_up,
+    minimum_angle = float(np.clip(angle_degrees, 0.0, 45.0))
+    maximum_angle = 90.0 - minimum_angle
+    current = _normalized_direction(eye_offset, fallback)
+    elevated = elevated_focus_view_direction(current, fallback, minimum_angle)
+    normal = _normalized_direction(axis, np.array((0.0, 0.0, 1.0), np.float64))
+    current_pitch = float(np.degrees(np.arcsin(np.clip(elevated[2], -1.0, 1.0))))
+    current_yaw = float(np.degrees(np.arctan2(elevated[1], elevated[0])))
+
+    def readable(direction: np.ndarray) -> bool:
+        axis_angle = float(
+            np.degrees(np.arccos(np.clip(abs(np.dot(direction, normal)), -1.0, 1.0)))
         )
-        for base in (horizontal, -horizontal)
-        for sign in (1.0, -1.0)
+        return minimum_angle - 1e-6 <= axis_angle <= maximum_angle + 1e-6
+
+    scored: list[tuple[float, np.ndarray]] = []
+    if readable(elevated):
+        scored.append((1.0 - float(np.dot(elevated, current)), elevated))
+
+    # This bounded search runs only on a focus request. A five-degree lattice
+    # is dense enough to find a small corrective turn while remaining much
+    # cheaper than the raycasts performed for the chosen nearby candidates.
+    pitch_values = [current_pitch]
+    pitch_values.extend(
+        value
+        for value in np.arange(minimum_angle, PITCH_LIMIT + 2.5, 5.0)
+        if abs(float(value) - current_pitch) > 1e-6
     )
-    current = _normalized_direction(eye_offset, candidates[0])
-    return tuple(sorted(candidates, key=lambda value: -float(np.dot(value, current))))
+    for pitch_degrees in pitch_values:
+        pitch = float(np.deg2rad(np.clip(pitch_degrees, minimum_angle, PITCH_LIMIT)))
+        horizontal = float(np.cos(pitch))
+        height = float(np.sin(pitch))
+        for yaw_offset in np.arange(0.0, 360.0, 5.0):
+            yaw = np.deg2rad(current_yaw + float(yaw_offset))
+            candidate = np.array(
+                (horizontal * np.cos(yaw), horizontal * np.sin(yaw), height),
+                np.float64,
+            )
+            if readable(candidate):
+                scored.append((1.0 - float(np.dot(candidate, current)), candidate))
+
+    if not scored:
+        return (elevated,)
+    scored.sort(key=lambda item: item[0])
+    candidates: list[np.ndarray] = []
+    minimum_separation = float(np.cos(np.deg2rad(10.0)))
+    for _turn, candidate in scored:
+        if any(float(np.dot(candidate, known)) > minimum_separation for known in candidates):
+            continue
+        candidates.append(candidate)
+        if len(candidates) >= 9:
+            break
+    return tuple(candidates)
 
 
 def elevated_focus_view_direction(
