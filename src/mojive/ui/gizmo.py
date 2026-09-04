@@ -540,6 +540,47 @@ class JointLimitHit:
     label_align_right: bool
 
 
+def _gizmo_geometry_key(
+    cam: CameraView,
+    rect: tuple[float, float, float, float],
+    style_scale: float,
+    state: _JointRangeState | None,
+    position,
+    rotation,
+) -> tuple:
+    """Describe the screen projection inputs shared by hover and drawing."""
+
+    return (
+        float(style_scale),
+        tuple(float(value) for value in rect),
+        tuple(float(value) for value in np.asarray(position).reshape(-1)),
+        tuple(float(value) for value in np.asarray(rotation).reshape(-1)),
+        None
+        if state is None
+        else (
+            state.joint_type,
+            state.current,
+            state.lower,
+            state.upper,
+            state.joint_id,
+            state.qpos_adr,
+        ),
+        tuple(float(value) for value in np.asarray(cam.eye).reshape(-1)),
+        tuple(float(value) for value in np.asarray(cam.target).reshape(-1)),
+        tuple(float(value) for value in np.asarray(cam.up).reshape(-1)),
+        float(cam.fov_y),
+        float(cam.near),
+        float(cam.far),
+        float(cam.aspect),
+        bool(cam.orthographic),
+        float(cam.ortho_height),
+        tuple(float(value) for value in np.asarray(cam.focal_length).reshape(-1)),
+        tuple(float(value) for value in np.asarray(cam.sensor_size).reshape(-1)),
+        tuple(float(value) for value in np.asarray(cam.principal_offset).reshape(-1)),
+        cam.orthographic_blend,
+    )
+
+
 def verdict(paused: bool, node: SceneNode | None) -> Verdict:
     if node is None:
         return Verdict(False, REASON_NO_SELECTION)
@@ -570,6 +611,9 @@ class ObjectGizmo:
         self._frame = GizmoFrame()
         self._style_scale = 1.0
         self._hover_cache_signature: tuple | None = None
+        self._hover_geometry_signature: tuple | None = None
+        self._joint_projection_signature: tuple | None = None
+        self._joint_projection: _HingeRangeProjection | _SlideRangeProjection | None = None
 
         self._start_pos = np.zeros(3, np.float64)
         self._drag_origin_pos = np.zeros(3, np.float64)
@@ -1111,6 +1155,8 @@ class ObjectGizmo:
             self._joint_limit_hovered = None
             self._joint_precision_hovered = False
             self._axis_mask = self._plane_mask = 0
+            self._hover_cache_signature = None
+            self._hover_geometry_signature = None
             return self._hovered
         if self._active is not GizmoHandle.NONE:
             self._hovered = self._active
@@ -1120,6 +1166,7 @@ class ObjectGizmo:
             self._joint_limit_hovered = None
             self._joint_precision_hovered = False
             self._hover_cache_signature = None
+            self._hover_geometry_signature = None
             return self._hovered
         target, _reason = self._joint_target(session, node)
         pose = self._target_pose(session, node, target)
@@ -1128,20 +1175,49 @@ class ObjectGizmo:
             self._joint_limit_hovered = None
             self._joint_precision_hovered = False
             self._hover_cache_signature = None
+            self._hover_geometry_signature = None
             return self._hovered
         pos, mat = pose
         mode = target.mode if target is not None else self._mode
         self._handle_mask = target.handles if target is not None else ALL_HANDLE_MASK
         range_state = self._joint_range_state(session, target)
         basis = self._target_basis(mat, target)
-        self._joint_precision = self._joint_precision_projection(
+        signature = self._hover_signature(
+            session,
+            node,
+            target,
+            range_state,
             cam,
             rect,
-            self._style_scale,
-            range_state,
+            cursor,
             pos,
-            basis,
+            mat,
+            mode,
+            style_scale,
         )
+        cached = signature == self._hover_cache_signature
+        geometry_signature = signature[0]
+        geometry_cached = geometry_signature == self._hover_geometry_signature
+        range_projection = self._joint_projection
+        if not geometry_cached:
+            range_projection = self._joint_range_projection(
+                cam,
+                rect,
+                self._style_scale,
+                range_state,
+                pos,
+                basis,
+            )
+            self._joint_precision = self._joint_precision_projection(
+                rect,
+                self._style_scale,
+                range_state,
+                range_projection,
+            )
+            self._hover_geometry_signature = geometry_signature
+            if target is not None and range_state is not None:
+                scale = world_scale(cam, pos, rect[3], SIZE_PT * self._style_scale)
+                self._axis_mask, self._plane_mask = visibility(cam, pos, basis, rect, scale)
         now = time.monotonic()
         precision_visible = bool(
             self._joint_precision is not None
@@ -1159,52 +1235,31 @@ class ObjectGizmo:
         if self._joint_precision_hovered:
             self._joint_precision_visible_until = now + JOINT_PRECISION_REVEAL_GRACE_SECONDS
             self._update_joint_precision_dwell(True, now)
-            scale = world_scale(cam, pos, rect[3], SIZE_PT * self._style_scale)
-            self._axis_mask, self._plane_mask = visibility(cam, pos, basis, rect, scale)
             self._joint_limit_hovered = None
             self._hovered = _joint_range_handle(range_state)
-            self._hover_cache_signature = None
+            self._hover_cache_signature = signature
             return self._hovered
-        signature = self._hover_signature(
-            session,
-            node,
-            target,
-            range_state,
-            cam,
-            rect,
-            cursor,
-            pos,
-            mat,
-            mode,
-            style_scale,
-        )
-        if signature == self._hover_cache_signature:
+        if cached:
             self._update_joint_precision_dwell(self._hovered is not GizmoHandle.NONE, now)
             return self._hovered
         if target is not None and range_state is not None:
-            scale = world_scale(cam, pos, rect[3], SIZE_PT * self._style_scale)
-            self._axis_mask, self._plane_mask = visibility(cam, pos, basis, rect, scale)
             self._hovered = GizmoHandle.NONE
             range_hit = False
             current_hit = False
             arrow_hit = False
             if target.joint.type == "hinge":
-                hinge = self._hinge_range_projection(
-                    cam,
-                    rect,
-                    self._style_scale,
-                    range_state,
+                hinge = (
+                    range_projection
+                    if isinstance(range_projection, _HingeRangeProjection)
+                    else None
                 )
                 range_hit = _hinge_range_path_hit(cursor, hinge, self._style_scale)
                 current_hit = _hinge_current_tick_hit(cursor, hinge, self._style_scale)
             else:
-                slide = self._slide_range_projection(
-                    cam,
-                    rect,
-                    self._style_scale,
-                    range_state,
-                    pos,
-                    basis,
+                slide = (
+                    range_projection
+                    if isinstance(range_projection, _SlideRangeProjection)
+                    else None
                 )
                 range_hit = _slide_range_path_hit(cursor, slide, self._style_scale)
                 current_hit = _slide_current_tick_hit(cursor, slide, self._style_scale)
@@ -1303,36 +1358,26 @@ class ObjectGizmo:
 
         joint = target.joint if target is not None else None
         return (
-            id(session),
-            session.structure_generation,
-            session.paused,
-            int(node.node_id),
-            int(joint.joint_id) if joint is not None else -1,
-            joint.type if joint is not None else "",
-            int(self._handle_mask),
-            mode.value,
-            self._space.value,
-            float(style_scale),
-            tuple(float(value) for value in rect),
+            (
+                id(session),
+                session.structure_generation,
+                session.paused,
+                int(node.node_id),
+                int(joint.joint_id) if joint is not None else -1,
+                joint.type if joint is not None else "",
+                int(self._handle_mask),
+                mode.value,
+                self._space.value,
+                _gizmo_geometry_key(
+                    cam,
+                    rect,
+                    style_scale,
+                    range_state,
+                    position,
+                    rotation,
+                ),
+            ),
             tuple(float(value) for value in cursor),
-            tuple(float(value) for value in np.asarray(position).reshape(-1)),
-            tuple(float(value) for value in np.asarray(rotation).reshape(-1)),
-            None
-            if range_state is None
-            else (range_state.current, range_state.lower, range_state.upper),
-            tuple(float(value) for value in np.asarray(cam.eye).reshape(-1)),
-            tuple(float(value) for value in np.asarray(cam.target).reshape(-1)),
-            tuple(float(value) for value in np.asarray(cam.up).reshape(-1)),
-            float(cam.fov_y),
-            float(cam.near),
-            float(cam.far),
-            float(cam.aspect),
-            bool(cam.orthographic),
-            float(cam.ortho_height),
-            tuple(float(value) for value in np.asarray(cam.focal_length).reshape(-1)),
-            tuple(float(value) for value in np.asarray(cam.sensor_size).reshape(-1)),
-            tuple(float(value) for value in np.asarray(cam.principal_offset).reshape(-1)),
-            cam.orthographic_blend,
         )
 
     def interact(
@@ -1538,15 +1583,28 @@ class ObjectGizmo:
             and self._snapping
             and self._active in ROTATE_HANDLES
         )
-        if self._joint_range is not None and not joint_range_below_dial:
-            self._draw_joint_range(overlay, cam, rect, style_scale, phase="geometry")
-        self._joint_precision = self._joint_precision_projection(
+        range_projection = self._joint_range_projection(
             cam,
             rect,
             style_scale,
             self._joint_range,
             self._frame.position,
             self._frame.rotation,
+        )
+        if self._joint_range is not None and not joint_range_below_dial:
+            self._draw_joint_range(
+                overlay,
+                cam,
+                rect,
+                style_scale,
+                phase="geometry",
+                prepared=range_projection,
+            )
+        self._joint_precision = self._joint_precision_projection(
+            rect,
+            style_scale,
+            self._joint_range,
+            range_projection,
         )
         if self.joint_precision_visible:
             self._draw_joint_precision(overlay, style_scale)
@@ -1602,7 +1660,14 @@ class ObjectGizmo:
             if joint_range_below_dial:
                 # Snap ticks are a ruler beneath the joint arc, not spikes
                 # painted over its silhouette.
-                self._draw_joint_range(overlay, cam, rect, style_scale, phase="geometry")
+                self._draw_joint_range(
+                    overlay,
+                    cam,
+                    rect,
+                    style_scale,
+                    phase="geometry",
+                    prepared=range_projection,
+                )
             self._draw_rotation_guide(overlay, cam, rect, style_scale, rotation_dial_projector)
         if self._using and self._label and not self._joint_precision_active:
             self._draw_value_label(overlay, cam, rect, style_scale, rotation_dial_projector)
@@ -1818,17 +1883,14 @@ class ObjectGizmo:
         style_scale: float,
         *,
         phase: str = "all",
+        prepared: _HingeRangeProjection | _SlideRangeProjection | None = None,
     ) -> None:
         state = self._joint_range
         if state is None:
             return
-        hinge = (
-            self._hinge_range_projection(cam, rect, style_scale, state)
-            if state.joint_type == "hinge"
-            else None
-        )
-        slide = (
-            self._slide_range_projection(
+        projection = prepared
+        if projection is None:
+            projection = self._joint_range_projection(
                 cam,
                 rect,
                 style_scale,
@@ -1836,16 +1898,11 @@ class ObjectGizmo:
                 self._frame.position,
                 self._frame.rotation,
             )
-            if state.joint_type == "slide"
-            else None
-        )
-        if state.joint_type == "hinge" and hinge is None:
-            return
-        if state.joint_type == "slide" and slide is None:
+        if projection is None:
             return
         phases = ("outline", "core") if phase in ("all", "geometry") else (phase,)
         for draw_phase in phases:
-            if state.joint_type == "hinge":
+            if isinstance(projection, _HingeRangeProjection):
                 self._draw_hinge_range(
                     overlay,
                     cam,
@@ -1853,9 +1910,9 @@ class ObjectGizmo:
                     style_scale,
                     state,
                     phase=draw_phase,
-                    prepared=hinge,
+                    prepared=projection,
                 )
-            elif state.joint_type == "slide":
+            elif isinstance(projection, _SlideRangeProjection):
                 self._draw_slide_range(
                     overlay,
                     cam,
@@ -1863,10 +1920,10 @@ class ObjectGizmo:
                     style_scale,
                     state,
                     phase=draw_phase,
-                    prepared=slide,
+                    prepared=projection,
                 )
 
-    def _joint_precision_projection(
+    def _joint_range_projection(
         self,
         cam,
         rect,
@@ -1874,6 +1931,46 @@ class ObjectGizmo:
         state: _JointRangeState | None,
         position,
         rotation,
+    ) -> _HingeRangeProjection | _SlideRangeProjection | None:
+        """Project a scalar joint range once for hit testing and overlay drawing."""
+
+        if state is None:
+            self._joint_projection_signature = None
+            self._joint_projection = None
+            return None
+        signature = _gizmo_geometry_key(cam, rect, style_scale, state, position, rotation)
+        if signature == self._joint_projection_signature:
+            return self._joint_projection
+        if state.joint_type == "hinge":
+            projection = self._hinge_range_projection(
+                cam,
+                rect,
+                style_scale,
+                state,
+                position,
+                rotation,
+            )
+        elif state.joint_type == "slide":
+            projection = self._slide_range_projection(
+                cam,
+                rect,
+                style_scale,
+                state,
+                position,
+                rotation,
+            )
+        else:
+            projection = None
+        self._joint_projection_signature = signature
+        self._joint_projection = projection
+        return projection
+
+    def _joint_precision_projection(
+        self,
+        rect,
+        style_scale: float,
+        state: _JointRangeState | None,
+        prepared: _HingeRangeProjection | _SlideRangeProjection | None,
     ) -> _JointPrecisionProjection | None:
         """Expand only scalar limits that collapse below a useful screen distance."""
 
@@ -1882,20 +1979,13 @@ class ObjectGizmo:
         if state.joint_type == "hinge":
             if state.angular_span > np.radians(JOINT_PRECISION_MAX_HINGE_SPAN_DEG):
                 return None
-            hinge = self._hinge_range_projection(cam, rect, style_scale, state)
+            hinge = prepared if isinstance(prepared, _HingeRangeProjection) else None
             if hinge is None or hinge.lower_tick is None or hinge.upper_tick is None:
                 return None
             lower = np.asarray(hinge.lower_tick[0], np.float64)
             upper = np.asarray(hinge.upper_tick[0], np.float64)
         elif state.joint_type == "slide":
-            slide = self._slide_range_projection(
-                cam,
-                rect,
-                style_scale,
-                state,
-                position,
-                rotation,
-            )
+            slide = prepared if isinstance(prepared, _SlideRangeProjection) else None
             if slide is None:
                 return None
             lower = slide.lower
@@ -2114,26 +2204,33 @@ class ObjectGizmo:
         rect,
         style_scale: float,
         state: _JointRangeState,
+        position=None,
+        rotation=None,
     ) -> _HingeRangeProjection | None:
-        frame = self._frame
-        origin = np.asarray(frame.position, np.float64)
-        rotation = np.asarray(frame.rotation, np.float64)
-        alpha = rotation_ring_alpha(cam, origin, rotation[:, 2])
+        origin = np.asarray(
+            self._frame.position if position is None else position,
+            np.float64,
+        )
+        basis = np.asarray(
+            self._frame.rotation if rotation is None else rotation,
+            np.float64,
+        ).reshape(3, 3)
+        alpha = rotation_ring_alpha(cam, origin, basis[:, 2])
         if alpha <= 0.0:
             return None
         dial = _RotationDialProjector(
             cam,
             rect,
             origin,
-            rotation[:, 2],
-            rotation[:, 0],
+            basis[:, 2],
+            basis[:, 0],
             SIZE_PT * style_scale,
         )
         span = state.angular_span
         full_range = state.covers_full_turn
         allowed = None
         if span > 1e-6:
-            segments = _rotation_dial_segments(cam, origin, rotation[:, 2])
+            segments = _rotation_dial_segments(cam, origin, basis[:, 2])
             point_count = max(2, int(np.ceil(segments * span / _FULL_TURN)) + 1)
             allowed_angles = np.linspace(
                 state.lower,

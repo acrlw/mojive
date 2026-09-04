@@ -3490,6 +3490,34 @@ def test_tiny_hinge_range_reveals_a_viewport_precision_rail() -> None:
     assert gizmo.joint_precision_hit_rect is None
 
 
+def test_joint_range_projection_is_reused_until_its_geometry_changes(monkeypatch) -> None:
+    gizmo = ObjectGizmo("rotate")
+    cam = camera()
+    state = _JointRangeState("hinge", 0.0, -0.1, 0.1, joint_id=3, qpos_adr=7)
+    position = np.zeros(3)
+    rotation = np.eye(3)
+    calls = 0
+    project_hinge = gizmo._hinge_range_projection
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return project_hinge(*args, **kwargs)
+
+    monkeypatch.setattr(gizmo, "_hinge_range_projection", counted)
+
+    first = gizmo._joint_range_projection(cam, RECT, 1.0, state, position, rotation)
+    second = gizmo._joint_range_projection(cam, RECT, 1.0, state, position, rotation)
+    assert second is first
+    assert calls == 1
+
+    wider_rect = (*RECT[:2], RECT[2] + 1.0, RECT[3])
+    gizmo._joint_range_projection(cam, wider_rect, 1.0, state, position, rotation)
+    moved = _JointRangeState("hinge", 0.01, -0.1, 0.1, joint_id=3, qpos_adr=7)
+    gizmo._joint_range_projection(cam, wider_rect, 1.0, moved, position, rotation)
+    assert calls == 3
+
+
 def test_joint_precision_dwell_survives_movement_between_gizmo_parts() -> None:
     gizmo = ObjectGizmo()
     gizmo._joint_precision = _JointPrecisionProjection(
