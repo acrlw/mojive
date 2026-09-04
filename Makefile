@@ -5,7 +5,7 @@ RUFF := .venv/bin/ruff
 
 .PHONY: rollout-video
 
-.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu renderer-benchmark renderer-benchmark-full golden golden-accept parity calibrate gallery ui-feasibility ui-runtime readme-media ui-frame-profile ui-gallery tool-icons mouse-icons gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept texture-minification local-shadow-precision shadow-quality shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance inspector gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring asset-browser joint-site-authoring model-component-authoring keyframe-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu renderer-benchmark renderer-benchmark-full golden golden-accept parity calibrate gallery ui-feasibility ui-runtime readme-media ui-frame-profile ui-gallery tool-icons mouse-icons gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas canvas-2d lighting image-light many-lights material-parity material-parity-accept texture-minification local-shadow-precision shadow-quality shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance inspector gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring asset-browser joint-site-authoring model-component-authoring keyframe-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -82,6 +82,7 @@ help:
 		'' \
 		'Backends and remote viewing:' \
 		'  make canvas            standalone scene and material editor' \
+		'  make canvas-2d         retained 2D physics/geometry debug canvas' \
 		'  make scene-io          save, load, and capture a Mojive scene' \
 		'  make editor-files      scene document workflow acceptance' \
 		'  make entity-edit       Entity lifecycle acceptance' \
@@ -376,6 +377,9 @@ workspace-edit:
 ## Programmatic scene, OpenGL rendering, and the standard UI.
 canvas:
 	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli canvas $(ARGS)
+
+canvas-2d:
+	MOJIVE_BACKEND=$(BACKEND) $(PY) examples/canvas2d.py $(ARGS)
 
 ## Independent physics adapter with gravity, collision, controls, and pose editing.
 toy-physics:

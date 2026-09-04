@@ -10,6 +10,7 @@ from mojive import (
     SelectionInputConfig,
     SelectionStyle,
     ViewerConfig,
+    ViewportOverlayConfig,
 )
 from mojive.composition import _viewer_layout_path
 
@@ -53,6 +54,24 @@ def test_top_level_config_is_immutable_and_composable() -> None:
 
     assert config.interactions.camera.fly is False
     assert config.selection.frame is True
+
+
+def test_viewport_overlay_mapping_validates_scales_and_positions() -> None:
+    overlays = ViewportOverlayConfig.from_mapping(
+        {
+            "playback_scale": 0.1,
+            "tool_scale": float("nan"),
+            "movable": False,
+            "playback_position": (0.25, 0.75),
+            "tool_position": (2.0, 0.5),
+        }
+    )
+
+    assert overlays.playback_scale == 0.6
+    assert overlays.tool_scale == 1.0
+    assert overlays.movable is False
+    assert overlays.playback_position == (0.25, 0.75)
+    assert overlays.tool_position is None
 
 
 def test_layout_policy_can_isolate_an_embedded_viewer(tmp_path) -> None:

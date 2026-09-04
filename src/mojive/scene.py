@@ -226,9 +226,18 @@ class Scene:
         """Add a sphere using :meth:`add` keyword arguments."""
         return self.add(MeshShape.SPHERE, **kwargs)
 
+    def ellipsoid(self, **kwargs) -> SceneObject:
+        """Add an ellipsoid using a non-uniform sphere size."""
+        kwargs.setdefault("size", (0.65, 0.45, 0.35))
+        return self.add(MeshShape.SPHERE, **kwargs)
+
     def cylinder(self, **kwargs) -> SceneObject:
         """Add a cylinder using :meth:`add` keyword arguments."""
         return self.add(MeshShape.CYLINDER, **kwargs)
+
+    def cone(self, **kwargs) -> SceneObject:
+        """Add a cone using :meth:`add` keyword arguments."""
+        return self.add(MeshShape.CONE, **kwargs)
 
     def plane(self, **kwargs) -> SceneObject:
         """Add a plane using :meth:`add` keyword arguments."""

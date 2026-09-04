@@ -878,9 +878,10 @@ def test_transform_editability_matches_the_set_pose_contract():
     (
         (MeshShape.PLANE, (2.0, 3.0, 1.0), "width / length", (4.0, 6.0)),
         (MeshShape.BOX, (1.0, 2.0, 3.0), "width / depth / height", (2.0, 4.0, 6.0)),
-        (MeshShape.SPHERE, (0.5, 0.5, 0.5), "diameter", (1.0,)),
-        (MeshShape.SPHERE, (0.5, 1.0, 1.5), "width / depth / height", (1.0, 2.0, 3.0)),
+        (MeshShape.SPHERE, (0.5, 0.5, 0.5), "radius", (0.5,)),
+        (MeshShape.SPHERE, (0.5, 1.0, 1.5), "radii x / y / z", (0.5, 1.0, 1.5)),
         (MeshShape.CYLINDER, (0.5, 0.5, 2.0), "diameter / height", (1.0, 4.0)),
+        (MeshShape.CONE, (0.5, 0.5, 2.0), "diameter / height", (1.0, 4.0)),
         (
             MeshShape.CAPSULE_SHAFT,
             (0.5, 0.5, 2.0),

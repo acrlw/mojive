@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from imgui_bundle import imgui
 
+from mojive import CaptureSurface, RecordingPhase
 from mojive.ui import window as window_module
 from mojive.ui.app import (
     JOINT_LIMIT_HOVER_GRACE_SECONDS,
@@ -503,11 +504,32 @@ def test_viewport_recording_streams_and_finalizes_frames(monkeypatch) -> None:
     assert recorder is not None and recorder.size == (2, 1) and recorder.fps == 30.0
     app._record_viewport_frame(0.0)
     assert recorder.frames == 1
+    assert app.recording.phase is RecordingPhase.RECORDING
+    assert app.pause_recording()
+    app._record_viewport_frame(1.0)
+    assert recorder.frames == 1
+    assert app.resume_recording()
+    app._record_viewport_frame(0.0)
+    assert recorder.frames == 2
     app._toggle_viewport_recording()
 
     assert recorder.closed
     assert app._viewport_recorder is None
     assert events[-1][1] == "success"
+
+
+def test_presented_capture_surface_flips_and_crops_viewport_pixels() -> None:
+    # Native window readback follows OpenGL convention: its first row is the bottom row.
+    bottom_up = np.arange(4 * 6 * 3, dtype=np.uint8).reshape(4, 6, 3)
+    app = ViewerApp.__new__(ViewerApp)
+    app.window = SimpleNamespace(points_to_pixels=lambda value: value)
+    app._viewport_rect = (1.0, 1.0, 3.0, 2.0)
+
+    window = app._surface_image(CaptureSurface.WINDOW, bottom_up)
+    viewport = app._surface_image(CaptureSurface.VIEWPORT, bottom_up)
+
+    assert np.array_equal(window, bottom_up[::-1])
+    assert np.array_equal(viewport, bottom_up[::-1][1:3, 1:4])
 
 
 def test_file_dialog_filters_translate_descriptions_without_touching_globs() -> None:

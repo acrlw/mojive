@@ -198,6 +198,8 @@ class StatusLayout:
 
     metric_rect: tuple[float, float, float, float] | None = None
     metric_exact: str = ""
+    recording_pause_rect: tuple[float, float, float, float] | None = None
+    recording_stop_rect: tuple[float, float, float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -221,6 +223,8 @@ OVERLAY_GEOMETRY = OverlayGeometry()
 DEFAULT_VIEWPORT_OVERLAY_SCALE = 1.25
 MIN_VIEWPORT_OVERLAY_SCALE = 0.85
 MAX_VIEWPORT_OVERLAY_SCALE = 2.0
+MIN_VIEWPORT_CAPSULE_SCALE = 0.6
+MAX_VIEWPORT_CAPSULE_SCALE = 1.6
 PLAYBACK_CHROME_SCALE = 0.82
 TOOL_CHROME_SCALE = PLAYBACK_CHROME_SCALE
 HINT_CHROME_SCALE = PLAYBACK_CHROME_SCALE
@@ -236,6 +240,69 @@ TOOL_GLYPH_SCALE = 1.18
 _MOVE_ARROW_BASE = 5.0
 _MOVE_ARROW_TIP = 9.0
 _MOVE_ARROW_WING = (_MOVE_ARROW_TIP - _MOVE_ARROW_BASE) / math.sqrt(3.0)
+
+
+def positioned_overlay_rect(
+    viewport: tuple[float, float, float, float],
+    size: tuple[float, float],
+    position: tuple[float, float] | None,
+    default_center: tuple[float, float],
+    *,
+    margin: float = 4.0,
+) -> tuple[float, float, float, float]:
+    """Place an overlay by normalized center and clamp it inside the viewport."""
+
+    x, y, width, height = (float(value) for value in viewport)
+    item_width, item_height = (max(0.0, float(value)) for value in size)
+    if position is None:
+        center_x, center_y = default_center
+    else:
+        center_x = x + width * min(1.0, max(0.0, float(position[0])))
+        center_y = y + height * min(1.0, max(0.0, float(position[1])))
+    half_width, half_height = item_width * 0.5, item_height * 0.5
+    guard = max(0.0, float(margin))
+    min_x, max_x = x + half_width + guard, x + width - half_width - guard
+    min_y, max_y = y + half_height + guard, y + height - half_height - guard
+    center_x = x + width * 0.5 if min_x > max_x else min(max(center_x, min_x), max_x)
+    center_y = y + height * 0.5 if min_y > max_y else min(max(center_y, min_y), max_y)
+    return (
+        center_x - half_width,
+        center_y - half_height,
+        center_x + half_width,
+        center_y + half_height,
+    )
+
+
+def normalized_overlay_position(
+    viewport: tuple[float, float, float, float],
+    rect: tuple[float, float, float, float],
+) -> tuple[float, float]:
+    """Return one overlay center in viewport-relative coordinates."""
+
+    x, y, width, height = (float(value) for value in viewport)
+    center_x = (float(rect[0]) + float(rect[2])) * 0.5
+    center_y = (float(rect[1]) + float(rect[3])) * 0.5
+    return (
+        min(1.0, max(0.0, (center_x - x) / max(width, 1e-6))),
+        min(1.0, max(0.0, (center_y - y) / max(height, 1e-6))),
+    )
+
+
+def overlay_border_hit(
+    point: tuple[float, float],
+    rect: tuple[float, float, float, float],
+    thickness: float,
+) -> bool:
+    """Return whether a point lies on the draggable capsule border band."""
+
+    px, py = float(point[0]), float(point[1])
+    x0, y0, x1, y1 = (float(value) for value in rect)
+    if not (x0 <= px <= x1 and y0 <= py <= y1):
+        return False
+    inset = max(0.0, float(thickness))
+    return not (x0 + inset < px < x1 - inset and y0 + inset < py < y1 - inset)
+
+
 _FRAME_ARROW_CORNER_RADIUS_PT = 0.25
 FRAME_LABEL_MAX_WIDTH = 4.4
 CAPSULE_SURFACE_ALPHA = 0.92
@@ -1339,7 +1406,9 @@ def draw_tool_column(
 
 def _inline_text(draw: Draw2D, x: float, center_y: float, value: str, color) -> float:
     width, height = draw.text_size(value)
-    draw.text((x, center_y - height * 0.5), color, value)
+    ink = draw.text_ink_bounds(value)
+    pen_y = center_y - height * 0.5 if ink is None else center_y - (ink[1] + ink[3]) * 0.5
+    draw.text((x, pen_y), color, value)
     return width
 
 
@@ -2069,19 +2138,23 @@ def draw_status(
     fps: float,
     status: str = "",
     status_level: str = "info",
+    recording_phase: str = "idle",
+    recording_duration: float = 0.0,
+    recording_surface: str = "scene",
     tool_hints: Sequence[ToolHint] = (),
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
     pixel_size: float = 1.0,
 ) -> StatusLayout:
     x, y = origin
     running = state == "running"
+    recording = recording_phase in {"recording", "paused"}
     draw.rect_filled((x, y), (x + width, y + height), (*theme.bg_child[:3], 1.0))
     top_divider_width = 1.0 * scale
     top_divider_y = y + top_divider_width * 0.5
     draw.line(
         (x, top_divider_y),
         (x + width, top_divider_y),
-        theme.primary_dim if running else theme.border,
+        theme.warning if recording else theme.primary_dim if running else theme.border,
         top_divider_width,
     )
     cy = y + (height + top_divider_width) * 0.5
@@ -2112,6 +2185,69 @@ def draw_status(
     state_width = draw.text_size(state_text)[0]
     if cursor + state_width <= x + width - 12.0 * scale:
         cursor += _inline_text(draw, cursor, cy, state_text, state_color)
+
+    recording_pause_rect = None
+    recording_stop_rect = None
+    if recording and width >= 360.0 * scale:
+        separator()
+        accent = theme.warning if recording_phase == "paused" else theme.danger
+        draw.circle_filled((cursor + 3.5 * scale, cy), 3.5 * scale, accent, segments=20)
+        cursor += 11.0 * scale
+        seconds = max(0, int(recording_duration))
+        surface_label = {"scene": "SCENE", "viewport": "VIEW", "window": "WINDOW"}.get(
+            recording_surface, "REC"
+        )
+        record_text = f"{surface_label} {seconds // 60:02d}:{seconds % 60:02d}"
+        cursor += _inline_text(draw, cursor, cy, record_text, accent)
+        cursor += 7.0 * scale
+        button_size = min(height - 5.0 * scale, 19.0 * scale)
+        button_y = cy - button_size * 0.5
+        recording_pause_rect = (cursor, button_y, cursor + button_size, button_y + button_size)
+        draw.rect_filled(
+            recording_pause_rect[:2],
+            recording_pause_rect[2:],
+            theme.bg_frame,
+            rounding=3.0 * scale,
+        )
+        icon = accent
+        center_x = cursor + button_size * 0.5
+        if recording_phase == "paused":
+            draw.line(
+                (center_x - 2.0 * scale, cy - 4.0 * scale),
+                (center_x + 3.5 * scale, cy),
+                icon,
+                1.6 * scale,
+            )
+            draw.line(
+                (center_x + 3.5 * scale, cy),
+                (center_x - 2.0 * scale, cy + 4.0 * scale),
+                icon,
+                1.6 * scale,
+            )
+        else:
+            for offset in (-2.0, 2.0):
+                draw.line(
+                    (center_x + offset * scale, cy - 4.0 * scale),
+                    (center_x + offset * scale, cy + 4.0 * scale),
+                    icon,
+                    1.8 * scale,
+                )
+        cursor += button_size + 4.0 * scale
+        recording_stop_rect = (cursor, button_y, cursor + button_size, button_y + button_size)
+        draw.rect_filled(
+            recording_stop_rect[:2],
+            recording_stop_rect[2:],
+            theme.bg_frame,
+            rounding=3.0 * scale,
+        )
+        inset = 5.5 * scale
+        draw.rect_filled(
+            (cursor + inset, button_y + inset),
+            (cursor + button_size - inset, button_y + button_size - inset),
+            accent,
+            rounding=1.0 * scale,
+        )
+        cursor += button_size
 
     metric_text = ""
     metric_exact = ""
@@ -2265,4 +2401,9 @@ def draw_status(
             1.0 * scale,
         )
 
-    return StatusLayout(metric_rect, metric_exact if metric_rect is not None else "")
+    return StatusLayout(
+        metric_rect=metric_rect,
+        metric_exact=metric_exact if metric_rect is not None else "",
+        recording_pause_rect=recording_pause_rect,
+        recording_stop_rect=recording_stop_rect,
+    )

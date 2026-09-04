@@ -13,7 +13,14 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .config import InteractionConfig, LayoutConfig, SelectionStyle, ViewerConfig
+from .capture import CaptureSurface, RecordingInfo
+from .config import (
+    InteractionConfig,
+    LayoutConfig,
+    SelectionStyle,
+    ViewerConfig,
+    ViewportOverlayConfig,
+)
 from .log import get_logger
 
 log = get_logger("composition")
@@ -66,6 +73,7 @@ class Viewer:
     bridge: Any
     _released: bool = field(default=False, init=False, repr=False)
     _rpc_server: Any = field(default=None, init=False, repr=False)
+    _canvas_2d: Any = field(default=None, init=False, repr=False)
 
     def run(self, max_frames: int | None = None) -> None:
         """Run the UI event loop until the window closes or a frame limit is reached."""
@@ -80,6 +88,25 @@ class Viewer:
         """Return the runtime panel manager."""
 
         return self.app.panels
+
+    @property
+    def canvas2d(self):
+        """Return a retained 2D diagnostic canvas sharing this viewer's debug pass."""
+
+        if self._canvas_2d is None:
+            from .canvas2d import Canvas2D
+
+            draw = getattr(self.backend, "debug", None)
+            if draw is None:
+                raise RuntimeError("the active backend does not provide debug drawing")
+            self._canvas_2d = Canvas2D(draw)
+        return self._canvas_2d
+
+    @property
+    def viewport_size(self) -> tuple[float, float]:
+        """Return the current viewport content size in logical pixels."""
+
+        return float(self.app._viewport_rect[2]), float(self.app._viewport_rect[3])
 
     @property
     def interactions(self) -> InteractionConfig:
@@ -109,11 +136,67 @@ class Viewer:
 
         self.app.set_selection_style(value, persist=persist)
 
+    def configure_viewport_overlays(
+        self, value: ViewportOverlayConfig, *, persist: bool = False
+    ) -> None:
+        """Configure placement, scaling, and dragging for viewport capsules."""
+
+        self.app.set_viewport_overlays(value, persist=persist)
+
+    def set_camera(self, view) -> None:
+        """Adopt a backend-neutral camera view in the interactive editor camera."""
+
+        self.app.camera.adopt(view)
+
     def configure_shadow_quality(self, value, *, persist: bool = False) -> None:
         """Set shadow quality for this viewer."""
 
         if not self.app.set_shadow_quality(value, persist=persist):
             raise RuntimeError(f"The {self.backend.caps.name} backend rejected shadow quality")
+
+    @property
+    def recording(self) -> RecordingInfo:
+        """Return the current interactive recording state."""
+
+        return self.app.recording
+
+    def capture(
+        self,
+        output: str | Path | None = None,
+        *,
+        surface: CaptureSurface | str = CaptureSurface.SCENE,
+    ) -> Path:
+        """Capture the next frame, defaulting to the UI-free scene image."""
+
+        path = self.app.request_capture(output, surface=surface)
+        self.sync()
+        return path
+
+    def start_recording(
+        self,
+        output: str | Path | None = None,
+        *,
+        surface: CaptureSurface | str = CaptureSurface.SCENE,
+        fps: float = 30.0,
+    ) -> Path:
+        """Start a user-driven recording without taking over the event loop."""
+
+        return self.app.start_recording(output, surface=surface, fps=fps)
+
+    def pause_recording(self) -> bool:
+        """Pause an active user-driven recording."""
+
+        return self.app.pause_recording()
+
+    def resume_recording(self) -> bool:
+        """Resume a paused user-driven recording."""
+
+        return self.app.resume_recording()
+
+    def stop_recording(self) -> Path | None:
+        """Finalize an active user-driven recording."""
+
+        return self.app.stop_recording()
 
     def set_input_handler(self, handler) -> None:
         """Install a per-frame input handler that can claim keys or pointer input."""

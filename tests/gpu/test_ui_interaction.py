@@ -1799,6 +1799,59 @@ def test_tool_column_hides_without_actions_and_centers_when_available(free_body_
     )
 
 
+@pytest.mark.parametrize("kind", ("playback", "tools"))
+def test_viewport_capsules_drag_from_their_border(free_body_viewer, kind):
+    from dataclasses import replace
+
+    from imgui_bundle import imgui
+
+    import mojive.commands as cmd
+
+    v = free_body_viewer
+    node = next(item for item in v.session.nodes if item.posable)
+    assert v.session.submit(cmd.Select(node.object_id))
+    v.app.set_viewport_overlays(
+        replace(
+            v.app.viewport_overlays,
+            playback_position=None,
+            tool_position=None,
+            movable=True,
+        ),
+        persist=False,
+    )
+    for _ in range(3):
+        v.sync()
+    rect = v.app._playback_widget_rect if kind == "playback" else v.app._tool_widget_rect
+    assert rect is not None
+    before = ((rect[0] + rect[2]) * 0.5, (rect[1] + rect[3]) * 0.5)
+
+    drag(
+        v,
+        imgui.get_io(),
+        rect[0] + 2.0,
+        (rect[1] + rect[3]) * 0.5,
+        90.0,
+        45.0,
+        steps=4,
+    )
+    moved = v.app._playback_widget_rect if kind == "playback" else v.app._tool_widget_rect
+    assert moved is not None
+    after = ((moved[0] + moved[2]) * 0.5, (moved[1] + moved[3]) * 0.5)
+    assert after[0] - before[0] == pytest.approx(90.0, abs=4.0)
+    assert after[1] - before[1] == pytest.approx(45.0, abs=4.0)
+    v.app.set_viewport_overlays(
+        replace(
+            v.app.viewport_overlays,
+            playback_position=None,
+            tool_position=None,
+        ),
+        persist=True,
+    )
+    x, y, width, height = v.app._viewport_rect
+    imgui.get_io().add_mouse_pos_event(x + width - 8.0, y + height - 8.0)
+    v.sync()
+
+
 @pytest.mark.parametrize("workspace", (False, True), ids=("viewer", "editor"))
 def test_joint_gizmo_is_live_in_the_real_viewer_pipeline(workspace):
     """Viewer and editor must retain the joint frames requested by a joint gizmo."""
@@ -2222,7 +2275,11 @@ def test_limited_slide_drag_keeps_feedback_and_claim_until_mouse_release() -> No
         v.sync()
         assert v.session.frame.qpos is not None
         returned = float(v.session.frame.qpos[target.joint.qpos_adr])
-        assert lower + 0.01 < returned < lower + 0.025
+        # ImGui delivers integer framebuffer cursor coordinates on this path.
+        # Allow one pixel of projection quantization around the requested
+        # 0.02 m return instead of coupling this invariant to dock-bar height.
+        pixel_error = v.app.gizmo._world_per_pt
+        assert lower + 0.02 - pixel_error <= returned <= lower + 0.02 + pixel_error
         assert v.app.gizmo.using
 
         io.add_mouse_button_event(0, False)
@@ -3338,10 +3395,14 @@ def test_policy_input_recovers_after_hierarchy_search_focus(viewer):
     from mojive import InputClaim
 
     v = viewer
+    # Fixtures own separate ImGui contexts; make this viewer current before
+    # retrieving its IO object instead of depending on prior test order.
+    v.sync()
     io = imgui.get_io()
     activate_panel(v, "Hierarchy")
     search = item_rect(v, "input_text_with_hint", "##filter")
     click(v, io, search)
+    v.sync()
     assert io.want_text_input
 
     observations = []

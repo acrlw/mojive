@@ -5749,7 +5749,9 @@ class MuJoCoAdapter(SceneAdapterBase):
                 body_node[b],
                 b,
                 site_index=si,
-                posable=source_editable and not has_kinematic_dof[b],
+                # A site pose is authored relative to its body. Joint-driven
+                # parent motion does not make that local transform read-only.
+                posable=source_editable,
                 source_editable=source_editable,
             )
             nodes[self._site_nodes[si]].model_id = model_id

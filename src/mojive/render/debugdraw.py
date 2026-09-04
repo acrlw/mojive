@@ -252,11 +252,13 @@ class Layer:
         "_texts",
         "name",
         "occlusion",
+        "visible",
     )
 
     def __init__(self, name: str, occlusion: Occlusion, owner: DebugDraw) -> None:
         self.name = name
         self.occlusion = occlusion
+        self.visible = True
         self._owner = owner
         self._stores: dict[PrimitiveType, _Store] = {}
         self._index: dict[str, _Entry] = {}
@@ -871,6 +873,8 @@ class DebugDraw:
                 frame, occ, layers, DrawPath.POINT, (PrimitiveType.POINT,), self._pack_point
             )
             for layer in layers:
+                if not layer.visible:
+                    continue
                 for label in layer._texts.values():
                     if frame.text_count == len(frame.texts):
                         frame.texts.append(label)
@@ -884,6 +888,8 @@ class DebugDraw:
         for path in DrawPath:
             need[path] = 0
         for layer in self._layers.values():
+            if not layer.visible:
+                continue
             for primitive_type, st in layer._stores.items():
                 if st.count == 0:
                     continue
@@ -909,6 +915,8 @@ class DebugDraw:
         dst = frame.streams[path]
         at = start
         for layer in layers:
+            if not layer.visible:
+                continue
             for primitive_type in primitive_types:
                 st = layer._stores.get(primitive_type)
                 if st is not None and st.count:
@@ -925,6 +933,8 @@ class DebugDraw:
             dst = frame.streams[DrawPath.SOLID]
             at = start
             for layer in layers:
+                if not layer.visible:
+                    continue
                 st = layer._stores.get(primitive_type)
                 if st is not None and st.count:
                     at = self._pack_solid(dst, at, st)

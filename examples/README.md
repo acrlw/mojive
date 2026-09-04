@@ -7,6 +7,7 @@ Run these programs from the repository root after `uv sync --extra mujoco --extr
 |---|---:|---|
 | `programmatic_scene.py` | yes | authored scene without a physics backend |
 | `debug_draw.py` | yes | retained diagnostics and world-space labels |
+| `canvas2d.py` | yes | layered 2D physics and geometry diagnostics |
 | `custom_adapter.py` | yes | small independent simulation adapter |
 | `mujoco_render.py` | no | RGB PNG, metric depth NPY, and segmentation NPY |
 | `mujoco_video.py` | no | streamed MP4 rollout with optional Pillow label/timestamp |
@@ -25,10 +26,11 @@ All generated files in these examples are placed under the ignored `output/examp
 uv run python examples/programmatic_scene.py
 uv run python examples/custom_adapter.py
 uv run python examples/debug_draw.py
+uv run python examples/canvas2d.py
 ```
 
-Close the application window to end each program. The source for all three is embedded in the
-corresponding user-guide page and is checked during `make docs-check`.
+Close the application window to end each program. These sources are cross-referenced from the
+user guide and checked during `make docs-check`.
 
 ## MuJoCo rendering and control
 

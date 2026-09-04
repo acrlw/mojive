@@ -285,6 +285,7 @@ class Renderer:
         self._closed = False
         self._depth_rendering = False
         self._segmentation_rendering = False
+        self._canvas_2d = None
         shadow_quality = ShadowQuality(shadow_quality)
 
         self._check_framebuffer(model, int(width), int(height))
@@ -363,6 +364,20 @@ class Renderer:
     def width(self) -> int:
         """Return output image width in pixels."""
         return self._width
+
+    @property
+    def canvas2d(self):
+        """Return a retained 2D diagnostic canvas rendered with RGB output."""
+
+        self._require_open("canvas2d")
+        if self._canvas_2d is None:
+            from .canvas2d import Canvas2D
+
+            draw = getattr(self._backend, "debug", None)
+            if draw is None:
+                raise RuntimeError("the active backend does not provide debug drawing")
+            self._canvas_2d = Canvas2D(draw)
+        return self._canvas_2d
 
     @property
     def _aspect(self) -> float:

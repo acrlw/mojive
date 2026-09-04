@@ -534,8 +534,10 @@ def test_editor_plane_is_a_static_mujoco_ground_during_model_composition() -> No
     assert picked == plane.object_id
     assert distance == pytest.approx(3.0)
 
-    assert session.submit(cmd.SetPose(plane.node_id, np.array((1.0, 2.0, 0.0)), np.eye(3)))
+    plane_rotation = math3d.axis_angle_to_mat3((1.0, 0.0, 0.0), 0.35)
+    assert session.submit(cmd.SetPose(plane.node_id, np.array((1.0, 2.0, 0.0)), plane_rotation))
     assert document.primary.model.geom_pos[0] == pytest.approx((1.0, 2.0, 0.0))
+    assert document.primary.model.geom_quat[0] == pytest.approx(math3d.mat3_to_quat(plane_rotation))
     assert session.submit(cmd.Undo())
     assert document.primary.model.geom_pos[0] == pytest.approx((0.0, 0.0, 0.0))
 
@@ -967,6 +969,56 @@ def test_empty_root_site_creation_is_editable_and_undoable() -> None:
     assert all(node.name != "target" for node in session.nodes)
     assert session.submit(cmd.Redo())
     assert any(node.name == "target" and node.type is NodeType.SITE for node in session.nodes)
+
+
+def test_site_on_joint_driven_body_keeps_editable_local_pose(tmp_path: Path) -> None:
+    path = tmp_path / "driven-site.xml"
+    path.write_text(
+        """
+<mujoco>
+  <worldbody>
+    <body name="arm">
+      <joint name="hinge" type="hinge"/>
+      <geom name="link" type="box" size="0.2 0.05 0.05"/>
+      <site name="target" pos="0.3 0 0"/>
+    </body>
+  </worldbody>
+</mujoco>
+""".strip(),
+        encoding="utf-8",
+    )
+    document = WorkspaceAdapter(MuJoCoAdapter(path))
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    site = next(node for node in session.nodes if node.name == "target")
+
+    assert site.posable
+    site_rotation = math3d.axis_angle_to_mat3((0.0, 1.0, 0.0), 0.4)
+    result = session.submit(cmd.SetPose(site.node_id, np.array((0.4, 0.2, 0.1)), site_rotation))
+    assert result.ok, result.message
+    index = mujoco.mj_name2id(document.primary.model, mujoco.mjtObj.mjOBJ_SITE, "target")
+    assert document.primary.model.site_pos[index] == pytest.approx((0.4, 0.2, 0.1))
+    assert document.primary.model.site_quat[index] == pytest.approx(
+        math3d.mat3_to_quat(site_rotation)
+    )
+
+
+def test_editor_capsule_creation_uses_native_mujoco_primitive() -> None:
+    document = workspace()
+    session = Session(document)
+    assert session.submit(cmd.Pause())
+    app = ViewerApp.__new__(ViewerApp)
+    app.session = session
+    app.localizer = type("Localizer", (), {"text": staticmethod(lambda value: value)})()
+
+    app._add_model_primitive("capsule", "capsule")
+
+    capsule = next(node for node in session.nodes if node.name == "capsule")
+    assert capsule.type is NodeType.GEOM
+    assert capsule.posable
+    assert int(document.primary.model.geom_type[capsule.geom_index]) == int(
+        mujoco.mjtGeom.mjGEOM_CAPSULE
+    )
 
 
 def test_model_element_duplication_copies_subtree_references_and_history(

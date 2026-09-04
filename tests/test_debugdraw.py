@@ -64,6 +64,20 @@ def test_same_id_redrawn_every_frame_does_not_grow():
     )
 
 
+def test_hidden_layer_retains_contents_without_emitting_batches():
+    dd = DebugDraw()
+    layer = dd.layer("toggle", Occlusion.ALWAYS)
+    layer.line("axis", A, B, RED)
+    assert dd.build().counts[DrawPath.SEGMENT] == 1
+
+    layer.visible = False
+    assert dd.build().counts[DrawPath.SEGMENT] == 0
+    assert layer.primitives == 1
+
+    layer.visible = True
+    assert dd.build().counts[DrawPath.SEGMENT] == 1
+
+
 def test_batch_entry_stays_one_id_and_still_emits_plain_lines():
 
     dd = DebugDraw()

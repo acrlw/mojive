@@ -7,6 +7,7 @@ application override persisted desktop preferences for that viewer instance.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,18 @@ if TYPE_CHECKING:
 
 def _bool(value: object, default: bool) -> bool:
     return value if isinstance(value, bool) else default
+
+
+def _position(value: object) -> tuple[float, float] | None:
+    if not isinstance(value, (tuple, list)) or len(value) != 2:
+        return None
+    try:
+        x, y = float(value[0]), float(value[1])
+    except (TypeError, ValueError):
+        return None
+    if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+        return None
+    return x, y
 
 
 @dataclass(frozen=True)
@@ -136,6 +149,39 @@ class LayoutConfig:
 
 
 @dataclass(frozen=True)
+class ViewportOverlayConfig:
+    """Configure movable viewport playback and tool capsules."""
+
+    playback_scale: float = 1.0
+    tool_scale: float = 1.0
+    movable: bool = True
+    playback_position: tuple[float, float] | None = None
+    tool_position: tuple[float, float] | None = None
+
+    @classmethod
+    def from_mapping(cls, value: object) -> ViewportOverlayConfig:
+        source = value if isinstance(value, Mapping) else {}
+        defaults = cls()
+
+        def scale(name: str, default: float) -> float:
+            try:
+                result = float(source.get(name, default))
+            except (TypeError, ValueError):
+                return default
+            if not math.isfinite(result):
+                return default
+            return min(1.6, max(0.6, result))
+
+        return cls(
+            playback_scale=scale("playback_scale", defaults.playback_scale),
+            tool_scale=scale("tool_scale", defaults.tool_scale),
+            movable=_bool(source.get("movable"), defaults.movable),
+            playback_position=_position(source.get("playback_position")),
+            tool_position=_position(source.get("tool_position")),
+        )
+
+
+@dataclass(frozen=True)
 class ViewerConfig:
     """Top-level behavior configuration for an interactive viewer."""
 
@@ -143,6 +189,7 @@ class ViewerConfig:
     selection: SelectionStyle = field(default_factory=SelectionStyle)
     panels: Mapping[str, PanelConfig] = field(default_factory=dict)
     layout: LayoutConfig = field(default_factory=LayoutConfig)
+    viewport_overlays: ViewportOverlayConfig = field(default_factory=ViewportOverlayConfig)
     shadow_quality: ShadowQuality | str | None = None
 
 
@@ -154,4 +201,5 @@ __all__ = [
     "SelectionInputConfig",
     "SelectionStyle",
     "ViewerConfig",
+    "ViewportOverlayConfig",
 ]

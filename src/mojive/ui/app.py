@@ -18,7 +18,8 @@ from imgui_bundle import imgui, portable_file_dialogs
 
 from .. import commands as cmd
 from ..adapters.base import FrameNeeds, NodeType
-from ..config import InteractionConfig, SelectionStyle, ViewerConfig
+from ..capture import CaptureSurface, RecordingInfo, RecordingPhase
+from ..config import InteractionConfig, SelectionStyle, ViewerConfig, ViewportOverlayConfig
 from ..gizmo import axis_active_color, axis_hover_color
 from ..input import InputClaim, InputContext
 from ..log import add_output_sink, get_logger, remove_output_sink
@@ -67,7 +68,9 @@ from .viewcube import DEFAULT_SELECTION_PADDING, ViewCube
 from .viewport_widgets import (
     DEFAULT_VIEWPORT_OVERLAY_SCALE,
     HINT_CHROME_SCALE,
+    MAX_VIEWPORT_CAPSULE_SCALE,
     MAX_VIEWPORT_OVERLAY_SCALE,
+    MIN_VIEWPORT_CAPSULE_SCALE,
     MIN_VIEWPORT_OVERLAY_SCALE,
     OVERLAY_CLIP_PADDING,
     OVERLAY_GEOMETRY,
@@ -82,7 +85,10 @@ from .viewport_widgets import (
     draw_tool_column,
     fitting_tool_hints,
     localized_viewport_labels,
+    normalized_overlay_position,
+    overlay_border_hit,
     playback_size,
+    positioned_overlay_rect,
     tool_column_size,
     tool_hints_size,
     viewport_chrome_scale,
@@ -554,6 +560,7 @@ class ViewerApp:
         self.theme = theme or THEME
         self.debug_bridge = debug_bridge
         self.localizer = Localizer.load()
+        explicit_config = config is not None
         viewer_config = config or ViewerConfig(
             interactions=InteractionConfig.from_mapping(
                 self.localizer.preference("interactions", {})
@@ -562,6 +569,12 @@ class ViewerApp:
         )
         self.interactions = viewer_config.interactions
         self.selection_style = viewer_config.selection
+        overlay_config = ViewportOverlayConfig.from_mapping(
+            asdict(viewer_config.viewport_overlays)
+            if explicit_config
+            else self.localizer.preference("viewport_overlays", {})
+        )
+        self.viewport_overlays = overlay_config
         self._input_handler = None
         self._input_claim = _NO_INPUT_CLAIM
         self._rpc_service = None
@@ -705,10 +718,19 @@ class ViewerApp:
         self._output_sink_id: int | None = None
         self._seen_message_revision = int(getattr(session, "message_revision", 0))
         self._snap_latched = False
-        self._capture_viewport_requested = False
+        self._capture_request: tuple[Path, CaptureSurface] | None = None
         self._viewport_recorder: Any | None = None
         self._viewport_recording_path: Path | None = None
         self._viewport_record_elapsed = 0.0
+        self._viewport_recording_phase = RecordingPhase.IDLE
+        self._viewport_recording_surface = CaptureSurface.SCENE
+        self._viewport_recording_fps = 30.0
+        self._viewport_recording_frames = 0
+        self._viewport_recording_duration = 0.0
+        self._playback_widget_rect: tuple[float, float, float, float] | None = None
+        self._tool_widget_rect: tuple[float, float, float, float] | None = None
+        self._overlay_drag_kind = ""
+        self._overlay_drag_offset = (0.0, 0.0)
         overlay_scale = self.localizer.preference(
             "viewport_overlay_scale", DEFAULT_VIEWPORT_OVERLAY_SCALE
         )
@@ -737,6 +759,19 @@ class ViewerApp:
             self.localizer.set_preferences({"shadow_quality": quality.value})
         return True
 
+    @property
+    def recording(self) -> RecordingInfo:
+        """Return the current interactive recording state."""
+
+        return RecordingInfo(
+            phase=getattr(self, "_viewport_recording_phase", RecordingPhase.IDLE),
+            surface=getattr(self, "_viewport_recording_surface", CaptureSurface.SCENE),
+            path=getattr(self, "_viewport_recording_path", None),
+            fps=getattr(self, "_viewport_recording_fps", 30.0),
+            frames=getattr(self, "_viewport_recording_frames", 0),
+            duration=getattr(self, "_viewport_recording_duration", 0.0),
+        )
+
     def _toggle_status_metric(self) -> None:
         self._status_metric_mode = "steps" if self._status_metric_mode == "time" else "time"
         self.localizer.set_preferences({"status_metric": self._status_metric_mode})
@@ -762,6 +797,32 @@ class ViewerApp:
         )
         if persist:
             self.localizer.set_preferences({"viewport_overlay_scale": self._viewport_overlay_scale})
+
+    def set_viewport_overlays(self, value: ViewportOverlayConfig, *, persist: bool = True) -> None:
+        """Replace playback/tool capsule presentation and movement policy."""
+
+        if not isinstance(value, ViewportOverlayConfig):
+            raise TypeError("viewport overlays must be a ViewportOverlayConfig")
+        self.viewport_overlays = ViewportOverlayConfig.from_mapping(asdict(value))
+        if not self.viewport_overlays.movable:
+            self._overlay_drag_kind = ""
+        if persist:
+            self.localizer.set_preferences({"viewport_overlays": asdict(self.viewport_overlays)})
+
+    def set_viewport_capsule_scale(self, name: str, value: float, *, persist: bool = True) -> None:
+        """Set one viewport capsule's scale independently."""
+
+        value = float(value)
+        if not np.isfinite(value):
+            raise ValueError("viewport capsule scale must be finite")
+        value = min(MAX_VIEWPORT_CAPSULE_SCALE, max(MIN_VIEWPORT_CAPSULE_SCALE, value))
+        if name == "playback":
+            config = replace(self.viewport_overlays, playback_scale=value)
+        elif name == "tools":
+            config = replace(self.viewport_overlays, tool_scale=value)
+        else:
+            raise ValueError(f"unknown viewport capsule: {name!r}")
+        self.set_viewport_overlays(config, persist=persist)
 
     def set_input_binding(self, action: InputAction, key_id: str | None) -> None:
         """Atomically remap one viewport action and persist the whole map."""
@@ -1572,7 +1633,10 @@ class ViewerApp:
         redo = False
         open_settings = False
         frame_scene = False
-        capture_viewport = False
+        capture_surface: CaptureSurface | None = None
+        start_recording_surface: CaptureSurface | None = None
+        pause_recording = False
+        stop_recording = False
         toggle_viewport_recording = False
         reset_layout = False
         open_help = False
@@ -1655,30 +1719,52 @@ class ViewerApp:
             self._draw_entity_menu(shortcut, can_edit)
             if imgui.begin_menu(t("View")):
                 frame_scene, _ = imgui.menu_item(t("Frame All"), "F", False)
-                capture_viewport, _ = imgui.menu_item(
-                    t("Capture Viewport"), f"{shortcut}+Shift+P", False
-                )
-                toggle_viewport_recording, _ = imgui.menu_item(
-                    t(
-                        "Stop Viewport Recording"
-                        if self._viewport_recorder is not None
-                        else "Record Viewport"
-                    ),
-                    f"{shortcut}+Shift+R",
-                    self._viewport_recorder is not None,
-                )
+                if imgui.begin_menu(t("Capture")):
+                    clicked, _ = imgui.menu_item(t("Scene Image"), f"{shortcut}+Shift+P", False)
+                    if clicked:
+                        capture_surface = CaptureSurface.SCENE
+                    clicked, _ = imgui.menu_item(t("Viewport with UI"), "", False)
+                    if clicked:
+                        capture_surface = CaptureSurface.VIEWPORT
+                    clicked, _ = imgui.menu_item(t("Entire Window"), "", False)
+                    if clicked:
+                        capture_surface = CaptureSurface.WINDOW
+                    imgui.end_menu()
+                if self.recording.active:
+                    if self._viewport_recording_phase is RecordingPhase.PAUSED:
+                        pause_recording, _ = imgui.menu_item(t("Resume Recording"), "", False)
+                    else:
+                        pause_recording, _ = imgui.menu_item(t("Pause Recording"), "", False)
+                    stop_recording, _ = imgui.menu_item(
+                        t("Stop Recording"), f"{shortcut}+Shift+R", False
+                    )
+                elif imgui.begin_menu(t("Record")):
+                    clicked, _ = imgui.menu_item(t("Scene Only"), f"{shortcut}+Shift+R", False)
+                    if clicked:
+                        start_recording_surface = CaptureSurface.SCENE
+                    clicked, _ = imgui.menu_item(t("Viewport with UI"), "", False)
+                    if clicked:
+                        start_recording_surface = CaptureSurface.VIEWPORT
+                    clicked, _ = imgui.menu_item(t("Entire Window"), "", False)
+                    if clicked:
+                        start_recording_surface = CaptureSurface.WINDOW
+                    imgui.end_menu()
                 imgui.separator()
                 helpers, _ = imgui.menu_item(
-                    t("Scene Helpers"), "", bool(self.scene_entities.visible)
+                    t("Camera & Light Helpers"), "", bool(self.scene_entities.visible)
                 )
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(t("Show camera and light icons in the scene"))
                 if helpers:
                     self.scene_entities.visible = not self.scene_entities.visible
                 influence, _ = imgui.menu_item(
-                    t("Influence Volumes"),
+                    t("Selected Camera & Light Volumes"),
                     "",
                     bool(self.scene_entities.show_influence),
                     bool(self.scene_entities.visible),
                 )
+                if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled.value):
+                    imgui.set_tooltip(t("Show the selected camera frustum or light range"))
                 if influence:
                     self.scene_entities.show_influence = not self.scene_entities.show_influence
                 imgui.end_menu()
@@ -1732,7 +1818,8 @@ class ViewerApp:
             if can_load:
                 reload_model |= imgui.is_key_pressed(imgui.Key.o, False) and bool(io.key_shift)
             open_settings |= imgui.is_key_pressed(imgui.Key.comma, False)
-            capture_viewport |= bool(io.key_shift) and imgui.is_key_pressed(imgui.Key.p, False)
+            if bool(io.key_shift) and imgui.is_key_pressed(imgui.Key.p, False):
+                capture_surface = CaptureSurface.SCENE
             toggle_viewport_recording |= bool(io.key_shift) and imgui.is_key_pressed(
                 imgui.Key.r, False
             )
@@ -1762,9 +1849,23 @@ class ViewerApp:
         if frame_scene:
             self._leave_model_camera()
             self._frame_scene(animate=True)
-        if capture_viewport:
-            self._capture_viewport_requested = True
-        if toggle_viewport_recording:
+        if capture_surface is not None:
+            self.request_capture(surface=capture_surface)
+        if start_recording_surface is not None:
+            try:
+                self.start_recording(surface=start_recording_surface)
+            except Exception as exc:
+                self.session.report_message(
+                    f"{self.localizer.text('Recording failed')}: {exc}", level="error"
+                )
+        if pause_recording:
+            if self._viewport_recording_phase is RecordingPhase.PAUSED:
+                self.resume_recording()
+            else:
+                self.pause_recording()
+        if stop_recording:
+            self.stop_recording()
+        elif toggle_viewport_recording:
             self._toggle_viewport_recording()
         if reset_layout:
             self.window.reset_layout()
@@ -1813,6 +1914,18 @@ class ViewerApp:
                 clicked, _ = imgui.menu_item(t(label), "", False)
                 if clicked:
                     self._add_scene_object(shape, label.lower())
+            ellipsoid, _ = imgui.menu_item(t("Ellipsoid"), "", False)
+            capsule, _ = imgui.menu_item(
+                t("Capsule"), "", False, self.session.adapter.caps.topology_editing
+            )
+            if ellipsoid:
+                self._add_scene_object(
+                    MeshShape.SPHERE,
+                    "ellipsoid",
+                    size=(0.65, 0.45, 0.35),
+                )
+            if capsule:
+                self._add_model_primitive("capsule", "capsule")
             imgui.separator()
             point_light, _ = imgui.menu_item(t("Point Light"), "", False)
             camera, _ = imgui.menu_item(t("Camera"), "", False)
@@ -1881,7 +1994,30 @@ class ViewerApp:
         if result.ok:
             self.session.submit(cmd.SelectNode(result.entity_id))
 
-    def _add_scene_object(self, shape: MeshShape, base_name: str) -> None:
+    def _add_model_primitive(self, primitive: str, base_name: str) -> None:
+        parent = self._model_child_parent()
+        if parent is None:
+            self.session.report_message(
+                self.localizer.text("Select a model or body before creating geometry")
+            )
+            return
+        result = self.session.submit(
+            cmd.AddModelElement(
+                parent.node_id,
+                f"geom:{primitive}",
+                self._entity_name(base_name),
+            )
+        )
+        if result.ok:
+            self.session.submit(cmd.SelectNode(result.entity_id))
+
+    def _add_scene_object(
+        self,
+        shape: MeshShape,
+        base_name: str,
+        *,
+        size: tuple[float, float, float] | None = None,
+    ) -> None:
         if shape is MeshShape.PLANE and self.session.adapter.caps.topology_editing:
             world = next(
                 (
@@ -1905,7 +2041,7 @@ class ViewerApp:
                         self.session.submit(cmd.Select(node.object_id))
                     return
         position = tuple(float(value) for value in self._camera_view().target)
-        size = (4.0, 4.0, 0.02) if shape is MeshShape.PLANE else (0.5, 0.5, 0.5)
+        size = size or ((4.0, 4.0, 0.02) if shape is MeshShape.PLANE else (0.5, 0.5, 0.5))
         result = self.session.submit(
             cmd.AddSceneObject(shape, self._entity_name(base_name), size=size, position=position)
         )
@@ -2228,7 +2364,7 @@ class ViewerApp:
         self._sync_display_scale()
         if self._model_load_future is not None and self._poll_model_load():
             self._draw_model_loading_frame()
-            window.end_frame()
+            self._present_frame(dt)
             self._frame_index += 1
             return
         self._poll_model_dialog()
@@ -2241,7 +2377,7 @@ class ViewerApp:
         self._poll_model_drop()
         if self._start_model_load():
             self._draw_model_loading_frame()
-            window.end_frame()
+            self._present_frame(dt)
             self._frame_index += 1
             return
         self._draw_main_menu()
@@ -2306,9 +2442,6 @@ class ViewerApp:
         self._publish_gizmo()
 
         self._viewport_image = self.backend.render()
-        self._record_viewport_frame(dt)
-        if self._capture_viewport_requested:
-            self._capture_viewport()
         self.camera_preview.update(
             self.backend,
             self.session.source,
@@ -2333,7 +2466,7 @@ class ViewerApp:
         self._draw_resource_repair()
         self._draw_model_load_error()
         self._sync_window_title()
-        window.end_frame()
+        self._present_frame(dt)
         self._frame_index += 1
 
     def _draw_model_loading_frame(self) -> None:
@@ -2431,12 +2564,40 @@ class ViewerApp:
         popup_flags = imgui.PopupFlags_.any_popup_id.value | imgui.PopupFlags_.any_popup_level.value
         any_popup = bool(imgui.is_popup_open("", popup_flags))
         io = imgui.get_io()
+        mouse_pos = getattr(io, "mouse_pos", None)
+        cursor = (
+            (float(mouse_pos.x), float(mouse_pos.y))
+            if mouse_pos is not None
+            else (float("inf"), float("inf"))
+        )
+        overlay_config = getattr(self, "viewport_overlays", None)
+        # Read the frame snapshot already returned by get_io(). This avoids a
+        # second global-context query and keeps headless embedding/tests safe
+        # while an ImGui context is being created or torn down.
+        pointer_engaged = any(bool(value) for value in getattr(io, "mouse_down", ())[:3])
+        overlay_border = bool(
+            overlay_config is not None
+            and overlay_config.movable
+            # An already-owned scene gesture keeps capture until release;
+            # merely crossing a capsule border must not interrupt a drag.
+            and not getattr(self.gizmo, "using", False)
+            and pointer_engaged
+            and any(
+                rect is not None and overlay_border_hit(cursor, rect, 6.0 * self.window.style_scale)
+                for rect in (
+                    getattr(self, "_playback_widget_rect", None),
+                    getattr(self, "_tool_widget_rect", None),
+                )
+            )
+        )
         return bool(
             pending_prompt
             or native_dialog
             or any_popup
             or io.want_text_input
             or self._consume_scene_pointer_until_release
+            or getattr(self, "_overlay_drag_kind", "")
+            or overlay_border
         )
 
     def _poll_input_handler(self) -> None:
@@ -3848,37 +4009,101 @@ class ViewerApp:
                 imgui.end_disabled()
         imgui.end()
 
+    def _viewport_overlay_rect(
+        self,
+        name: str,
+        size: tuple[float, float],
+        default_center: tuple[float, float],
+    ) -> tuple[float, float, float, float]:
+        position = (
+            self.viewport_overlays.playback_position
+            if name == "playback"
+            else self.viewport_overlays.tool_position
+        )
+        if self._overlay_drag_kind == name:
+            io = imgui.get_io()
+            if imgui.is_mouse_down(imgui.MouseButton_.left):
+                center = (
+                    float(io.mouse_pos.x) - self._overlay_drag_offset[0],
+                    float(io.mouse_pos.y) - self._overlay_drag_offset[1],
+                )
+                moving = (
+                    center[0] - size[0] * 0.5,
+                    center[1] - size[1] * 0.5,
+                    center[0] + size[0] * 0.5,
+                    center[1] + size[1] * 0.5,
+                )
+                position = normalized_overlay_position(self._viewport_rect, moving)
+                field = "playback_position" if name == "playback" else "tool_position"
+                self.set_viewport_overlays(
+                    replace(self.viewport_overlays, **{field: position}), persist=False
+                )
+            else:
+                self._overlay_drag_kind = ""
+                self.set_viewport_overlays(self.viewport_overlays, persist=True)
+        return positioned_overlay_rect(
+            self._viewport_rect,
+            size,
+            position,
+            default_center,
+            margin=4.0 * self.window.style_scale,
+        )
+
+    def _offer_viewport_overlay_drag(
+        self,
+        name: str,
+        rect: tuple[float, float, float, float],
+    ) -> None:
+        if not self.viewport_overlays.movable:
+            return
+        io = imgui.get_io()
+        point = (float(io.mouse_pos.x), float(io.mouse_pos.y))
+        if self._overlay_drag_kind != name and not overlay_border_hit(
+            point, rect, 6.0 * self.window.style_scale
+        ):
+            return
+        imgui.set_mouse_cursor(imgui.MouseCursor_.resize_all)
+        if not self._overlay_drag_kind and imgui.is_mouse_clicked(imgui.MouseButton_.left):
+            center = ((rect[0] + rect[2]) * 0.5, (rect[1] + rect[3]) * 0.5)
+            self._overlay_drag_kind = name
+            self._overlay_drag_offset = (point[0] - center[0], point[1] - center[1])
+            self._consume_scene_pointer_until_release = True
+
     def _draw_playback_widget(self) -> None:
         """Draw the final playback capsule at the viewport's top center."""
 
         caps = self.session.adapter.caps
         if not caps.simulation or not self._has_scene_content():
+            self._playback_widget_rect = None
             return
         x, y, width, _height = self._viewport_rect
         style_scale = self.window.style_scale
         scale = viewport_chrome_scale(
             style_scale,
-            self._viewport_overlay_scale,
+            self._viewport_overlay_scale * self.viewport_overlays.playback_scale,
             PLAYBACK_CHROME_SCALE,
         )
         widget_width, widget_height = playback_size(scale, self.viewport_chrome.playback_controls)
         if widget_width <= 0.0 or widget_height <= 0.0:
+            self._playback_widget_rect = None
             return
-        widget_rect = (
-            x + (width - widget_width) * 0.5,
-            y + 12.0 * style_scale,
-            x + (width + widget_width) * 0.5,
-            y + 12.0 * style_scale + widget_height,
+        widget_rect = self._viewport_overlay_rect(
+            "playback",
+            (widget_width, widget_height),
+            (x + width * 0.5, y + 12.0 * style_scale + widget_height * 0.5),
         )
+        self._playback_widget_rect = widget_rect
         preview_rect = self.camera_preview.bounds
         if preview_rect is not None and _rectangles_overlap(widget_rect, preview_rect):
             # A tiny HiDPI viewport cannot expose two large overlays at once.
             # Keep the camera preview header reachable so it can be moved or
             # disabled instead of placing playback above its drag target.
+            self._playback_widget_rect = None
             return
         clip_pad = OVERLAY_CLIP_PADDING * scale
         host_rect = _clipped_overlay_host_rect(self._viewport_rect, widget_rect, clip_pad)
         if host_rect is None:
+            self._playback_widget_rect = None
             return
         imgui.set_next_window_pos(
             imgui.ImVec2(host_rect[0], host_rect[1]),
@@ -3935,6 +4160,7 @@ class ViewerApp:
                 self.session.submit(cmd.StepBack())
             elif action in ("reset", "stop"):
                 self._reset_playback()
+            self._offer_viewport_overlay_drag("playback", widget_rect)
         imgui.end()
         imgui.pop_style_var(2)
 
@@ -3942,33 +4168,38 @@ class ViewerApp:
         """Draw the viewport tool capsule without construction geometry."""
 
         if not self._has_scene_content():
+            self._tool_widget_rect = None
             return
         enabled = bool(self._state.has_selection and self._state.gizmo_available)
         # A column made entirely of disabled tools is visual noise and can
         # obscure joint selection. It returns as soon as one tool is usable.
         if not enabled:
+            self._tool_widget_rect = None
             return
         x, y, _width, height = self._viewport_rect
         style_scale = self.window.style_scale
         scale = viewport_chrome_scale(
             style_scale,
-            self._viewport_overlay_scale,
+            self._viewport_overlay_scale * self.viewport_overlays.tool_scale,
             TOOL_CHROME_SCALE,
         )
         widget_width, widget_height = tool_column_size(scale, self.viewport_chrome.tool_groups)
         if widget_width <= 0.0 or widget_height <= 0.0:
+            self._tool_widget_rect = None
             return
         clip_pad = OVERLAY_CLIP_PADDING * scale
         if height < widget_height + 120.0 * style_scale:
+            self._tool_widget_rect = None
             return
-        widget_rect = (
-            x + 12.0 * style_scale,
-            y + (height - widget_height) * 0.5,
-            x + 12.0 * style_scale + widget_width,
-            y + (height + widget_height) * 0.5,
+        widget_rect = self._viewport_overlay_rect(
+            "tools",
+            (widget_width, widget_height),
+            (x + 12.0 * style_scale + widget_width * 0.5, y + height * 0.5),
         )
+        self._tool_widget_rect = widget_rect
         host_rect = _clipped_overlay_host_rect(self._viewport_rect, widget_rect, clip_pad)
         if host_rect is None:
+            self._tool_widget_rect = None
             return
         imgui.set_next_window_pos(
             imgui.ImVec2(host_rect[0], host_rect[1]),
@@ -4014,6 +4245,7 @@ class ViewerApp:
                 self.gizmo.toggle_space()
             elif action == "snap":
                 self._snap_latched = not self._snap_latched
+            self._offer_viewport_overlay_drag("tools", widget_rect)
         imgui.end()
         imgui.pop_style_var()
 
@@ -4250,7 +4482,10 @@ class ViewerApp:
 
         viewport = imgui.get_main_viewport()
         scale = self.window.style_scale
-        height = 28.0 * scale
+        # Ink-box centering in draw_status keeps glyphs visually centered on
+        # macOS; this can therefore remain a compact authored height instead
+        # of compensating for CoreText's asymmetric line box.
+        height = 24.0 * scale
         flags = (
             imgui.WindowFlags_.no_decoration.value
             | imgui.WindowFlags_.no_docking.value
@@ -4303,6 +4538,7 @@ class ViewerApp:
                 )
             )
             status_text = self.localizer.text(status_text)
+            recording = self.recording
             status_layout = draw_status(
                 ImguiDraw2D(),
                 (origin.x, origin.y),
@@ -4330,6 +4566,9 @@ class ViewerApp:
                 fps=self._frame_rate.value,
                 status=status_text,
                 status_level="info" if active_status is None else active_status.level,
+                recording_phase=recording.phase.value,
+                recording_duration=recording.duration,
+                recording_surface=recording.surface.value,
                 tool_hints=self._status_tool_hints(loading=loading),
                 labels=self._viewport_labels,
                 pixel_size=self.window.pixels_to_points(1.0),
@@ -4352,104 +4591,264 @@ class ViewerApp:
                         else self._viewport_labels.show_time
                     )
                     imgui.set_tooltip(f"{switch} · {self._viewport_labels.copy_exact}")
+            if status_layout.recording_pause_rect is not None and not loading:
+                x0, y0, x1, y1 = status_layout.recording_pause_rect
+                imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
+                if imgui.invisible_button(
+                    "##status_recording_pause", imgui.ImVec2(x1 - x0, y1 - y0)
+                ):
+                    if recording.phase is RecordingPhase.PAUSED:
+                        self.resume_recording()
+                    else:
+                        self.pause_recording()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        self.localizer.text(
+                            "Resume Recording"
+                            if recording.phase is RecordingPhase.PAUSED
+                            else "Pause Recording"
+                        )
+                    )
+            if status_layout.recording_stop_rect is not None and not loading:
+                x0, y0, x1, y1 = status_layout.recording_stop_rect
+                imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
+                if imgui.invisible_button(
+                    "##status_recording_stop", imgui.ImVec2(x1 - x0, y1 - y0)
+                ):
+                    self.stop_recording()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(self.localizer.text("Stop Recording"))
         imgui.end()
         imgui.pop_style_var(2)
 
-    def _capture_viewport(self) -> None:
-        self._capture_viewport_requested = False
-        output = Path("output") / f"viewport-{time.strftime('%Y%m%d-%H%M%S')}.png"
-        output.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            captured = bool(self.backend.capture(output))
-        except Exception as exc:
-            self.session.report_message(
-                f"{self.localizer.text('Viewport capture failed')}: {exc}", level="error"
-            )
-            return
-        if captured:
-            self.session.report_message(
-                f"{self.localizer.text('Saved viewport capture to')} {output}", level="success"
-            )
-        else:
-            self.session.report_message(
-                self.localizer.text("Viewport capture failed"), level="error"
-            )
+    @staticmethod
+    def _capture_output(surface: CaptureSurface, suffix: str) -> Path:
+        stem = {
+            CaptureSurface.SCENE: "scene",
+            CaptureSurface.VIEWPORT: "viewport-ui",
+            CaptureSurface.WINDOW: "window",
+        }[surface]
+        return Path("output") / f"{stem}-{time.strftime('%Y%m%d-%H%M%S')}{suffix}"
 
-    def _toggle_viewport_recording(self) -> None:
-        if self._viewport_recorder is not None:
-            self._stop_viewport_recording()
-            return
-        from ..recording import VideoRecorder
+    def request_capture(
+        self,
+        output: str | Path | None = None,
+        *,
+        surface: CaptureSurface | str = CaptureSurface.SCENE,
+    ) -> Path:
+        """Capture one future presented frame; pure scene output is the default."""
 
-        target = getattr(self.backend, "target", None)
-        if target is None or not hasattr(target, "read_color"):
-            self.session.report_message(
-                self.localizer.text("Viewport recording is unavailable"), level="error"
-            )
-            return
-        output = Path("output") / f"viewport-{time.strftime('%Y%m%d-%H%M%S')}.mp4"
-        try:
+        surface = CaptureSurface(surface)
+        path = Path(output) if output is not None else self._capture_output(surface, ".png")
+        self._capture_request = (path, surface)
+        return path
+
+    def start_recording(
+        self,
+        output: str | Path | None = None,
+        *,
+        surface: CaptureSurface | str = CaptureSurface.SCENE,
+        fps: float = 30.0,
+    ) -> Path:
+        """Start an interactive recording of the scene, viewport UI, or full window."""
+
+        if self.recording.active:
+            raise RuntimeError("a viewer recording is already active")
+        surface = CaptureSurface(surface)
+        fps = float(fps)
+        if not np.isfinite(fps) or fps <= 0.0:
+            raise ValueError("frame rate must be finite and positive")
+        if surface is CaptureSurface.SCENE:
+            target = getattr(self.backend, "target", None)
+            if target is None or not hasattr(target, "read_color"):
+                raise RuntimeError("scene recording is unavailable for this backend")
+        path = Path(output) if output is not None else self._capture_output(surface, ".mp4")
+        recorder = None
+        if surface is CaptureSurface.SCENE:
+            from ..recording import VideoRecorder
+
             recorder = VideoRecorder(
-                output,
+                path,
                 (max(1, int(target.width)), max(1, int(target.height))),
-                fps=30.0,
+                fps=fps,
             )
-        except Exception as exc:
-            self.session.report_message(
-                f"{self.localizer.text('Viewport recording failed')}: {exc}", level="error"
-            )
-            return
         self._viewport_recorder = recorder
-        self._viewport_recording_path = output
-        self._viewport_record_elapsed = 1.0 / 30.0
+        self._viewport_recording_path = path
+        self._viewport_recording_surface = surface
+        self._viewport_recording_fps = fps
+        self._viewport_recording_frames = 0
+        self._viewport_recording_duration = 0.0
+        self._viewport_record_elapsed = 1.0 / fps
+        self._viewport_recording_phase = RecordingPhase.RECORDING
         self.session.report_message(
-            f"{self.localizer.text('Recording viewport to')} {output}", level="success"
+            f"{self.localizer.text('Recording')} {surface.value} {self.localizer.text('to')} {path}",
+            level="success",
         )
+        return path
 
-    def _record_viewport_frame(self, dt: float) -> None:
+    def pause_recording(self) -> bool:
+        """Pause an active interactive recording without finalizing its video."""
+
+        if self._viewport_recording_phase is not RecordingPhase.RECORDING:
+            return False
+        self._viewport_recording_phase = RecordingPhase.PAUSED
+        self._viewport_record_elapsed = 0.0
+        return True
+
+    def resume_recording(self) -> bool:
+        """Resume a paused interactive recording."""
+
+        if self._viewport_recording_phase is not RecordingPhase.PAUSED:
+            return False
+        self._viewport_recording_phase = RecordingPhase.RECORDING
+        self._viewport_record_elapsed = 1.0 / self._viewport_recording_fps
+        return True
+
+    def stop_recording(self, *, report: bool = True) -> Path | None:
+        """Finalize the active interactive recording and return its destination."""
+
+        if not self.recording.active:
+            return None
         recorder = self._viewport_recorder
-        if recorder is None:
-            return
-        period = 1.0 / 30.0
-        self._viewport_record_elapsed += max(0.0, min(float(dt), 0.1))
-        frames = min(3, int(self._viewport_record_elapsed / period))
-        if frames <= 0:
-            return
-        try:
-            image = self.backend.target.read_color(flip=True)[..., :3]
-            for _ in range(frames):
-                recorder.append(image)
-        except Exception as exc:
-            self._stop_viewport_recording(report=False)
-            self.session.report_message(
-                f"{self.localizer.text('Viewport recording stopped')}: {exc}", level="error"
-            )
-            return
-        self._viewport_record_elapsed -= frames * period
-
-    def _stop_viewport_recording(self, *, report: bool = True) -> None:
-        recorder = getattr(self, "_viewport_recorder", None)
-        if recorder is None:
-            return
         path = self._viewport_recording_path
-        frames = int(getattr(recorder, "frames", 0))
+        frames = self._viewport_recording_frames
         self._viewport_recorder = None
         self._viewport_recording_path = None
         self._viewport_record_elapsed = 0.0
+        self._viewport_recording_phase = RecordingPhase.IDLE
+        if recorder is None:
+            if report:
+                self.session.report_message(
+                    self.localizer.text("Recording stopped before any frames were captured"),
+                    level="warning",
+                )
+            return path
         try:
             recorder.close()
         except Exception as exc:
             if report:
                 self.session.report_message(
-                    f"{self.localizer.text('Viewport recording failed')}: {exc}", level="error"
+                    f"{self.localizer.text('Recording failed')}: {exc}", level="error"
                 )
-            return
+            return path
         if report and path is not None:
             self.session.report_message(
                 f"{self.localizer.text('Saved')} {frames} "
-                f"{self.localizer.text('viewport frame(s) to')} {path}",
+                f"{self.localizer.text('frame(s) to')} {path}",
                 level="success",
             )
+        return path
+
+    def _needs_presented_readback(self, dt: float) -> bool:
+        requested = getattr(self, "_capture_request", None)
+        if requested is not None and requested[1] is not CaptureSurface.SCENE:
+            return True
+        return (
+            self._viewport_recording_phase is RecordingPhase.RECORDING
+            and self._viewport_recording_surface is not CaptureSurface.SCENE
+            and self._viewport_record_elapsed + max(0.0, min(float(dt), 0.1))
+            >= 1.0 / self._viewport_recording_fps
+        )
+
+    def _present_frame(self, dt: float) -> None:
+        presented = self.window.end_frame(readback=self._needs_presented_readback(dt))
+        self._finish_capture_and_recording(presented, dt)
+
+    def _surface_image(self, surface: CaptureSurface, presented: np.ndarray | None) -> np.ndarray:
+        if surface is CaptureSurface.SCENE:
+            image = self.backend.target.read_color(flip=True)
+            return np.ascontiguousarray(image[..., :3])
+        if presented is None:
+            raise RuntimeError("window readback did not produce an image")
+        image = np.asarray(presented)[::-1]
+        if surface is CaptureSurface.WINDOW:
+            return np.ascontiguousarray(image[..., :3])
+        x, y, width, height = self.window.points_to_pixels(self._viewport_rect)
+        x0 = max(0, round(x))
+        y0 = max(0, round(y))
+        x1 = min(image.shape[1], round(x + width))
+        y1 = min(image.shape[0], round(y + height))
+        if x1 <= x0 or y1 <= y0:
+            raise RuntimeError("the viewport is outside the presented window")
+        return np.ascontiguousarray(image[y0:y1, x0:x1, :3])
+
+    def _finish_capture_and_recording(self, presented: np.ndarray | None, dt: float) -> None:
+        images: dict[CaptureSurface, np.ndarray] = {}
+
+        def image_for(surface: CaptureSurface) -> np.ndarray:
+            if surface not in images:
+                images[surface] = self._surface_image(surface, presented)
+            return images[surface]
+
+        request = getattr(self, "_capture_request", None)
+        self._capture_request = None
+        if request is not None:
+            path, surface = request
+            try:
+                from PIL import Image
+
+                path.parent.mkdir(parents=True, exist_ok=True)
+                Image.fromarray(image_for(surface), "RGB").save(path)
+            except Exception as exc:
+                self.session.report_message(
+                    f"{self.localizer.text('Capture failed')}: {exc}", level="error"
+                )
+            else:
+                self.session.report_message(
+                    f"{self.localizer.text('Saved capture to')} {path}",
+                    level="success",
+                )
+        if self._viewport_recording_phase is not RecordingPhase.RECORDING:
+            return
+        period = 1.0 / self._viewport_recording_fps
+        self._viewport_record_elapsed += max(0.0, min(float(dt), 0.1))
+        count = min(3, int(self._viewport_record_elapsed / period))
+        if count <= 0:
+            return
+        try:
+            image = image_for(self._viewport_recording_surface)
+            if self._viewport_recorder is None:
+                from ..recording import VideoRecorder
+
+                self._viewport_recorder = VideoRecorder(
+                    self._viewport_recording_path,
+                    (int(image.shape[1]), int(image.shape[0])),
+                    fps=self._viewport_recording_fps,
+                )
+            elif tuple(self._viewport_recorder.size) != (image.shape[1], image.shape[0]):
+                raise RuntimeError("capture size changed while recording")
+            for _ in range(count):
+                self._viewport_recorder.append(image)
+            self._viewport_recording_frames += count
+            self._viewport_recording_duration = (
+                self._viewport_recording_frames / self._viewport_recording_fps
+            )
+        except Exception as exc:
+            self.stop_recording(report=False)
+            self.session.report_message(
+                f"{self.localizer.text('Recording stopped')}: {exc}", level="error"
+            )
+            return
+        self._viewport_record_elapsed -= count * period
+
+    def _toggle_viewport_recording(self) -> None:
+        if self.recording.active:
+            self.stop_recording()
+            return
+        try:
+            self.start_recording()
+        except Exception as exc:
+            self.session.report_message(
+                f"{self.localizer.text('Recording failed')}: {exc}", level="error"
+            )
+
+    def _record_viewport_frame(self, dt: float) -> None:
+        """Compatibility hook for integrations that manually pump raw scene frames."""
+
+        self._finish_capture_and_recording(None, dt)
+
+    def _stop_viewport_recording(self, *, report: bool = True) -> None:
+        self.stop_recording(report=report)
 
     def _toggle_playback(self) -> None:
         if self.session.state_take_recording:
@@ -4696,6 +5095,9 @@ class ViewerApp:
             set_view_selection_padding=self.set_view_selection_padding,
             viewport_overlay_scale=self._viewport_overlay_scale,
             set_viewport_overlay_scale=self.set_viewport_overlay_scale,
+            viewport_overlays=self.viewport_overlays,
+            set_viewport_overlays=self.set_viewport_overlays,
+            set_viewport_capsule_scale=self.set_viewport_capsule_scale,
             input_bindings=self.input_bindings,
             set_input_binding=self.set_input_binding,
             reset_input_bindings=self.reset_input_bindings,

@@ -43,11 +43,34 @@ from mojive.ui.viewport_widgets import (
     hint_size,
     mouse_button_geometry,
     mouse_wheel_geometry,
+    normalized_overlay_position,
+    overlay_border_hit,
     playback_size,
+    positioned_overlay_rect,
     tool_column_size,
     tool_hints_size,
     viewport_chrome_scale,
 )
+
+
+def test_normalized_overlay_position_clamps_and_round_trips() -> None:
+    viewport = (100.0, 50.0, 400.0, 200.0)
+    rect = positioned_overlay_rect(viewport, (120.0, 40.0), (0.5, 0.5), (0.0, 0.0))
+    assert rect == pytest.approx((240.0, 130.0, 360.0, 170.0))
+    assert normalized_overlay_position(viewport, rect) == pytest.approx((0.5, 0.5))
+
+    clamped = positioned_overlay_rect(viewport, (120.0, 40.0), (0.0, 0.0), (0.0, 0.0))
+    assert clamped == pytest.approx((104.0, 54.0, 224.0, 94.0))
+    oversized = positioned_overlay_rect(viewport, (500.0, 300.0), (0.0, 0.0), (0.0, 0.0))
+    assert normalized_overlay_position(viewport, oversized) == pytest.approx((0.5, 0.5))
+
+
+def test_only_overlay_border_band_is_a_drag_target() -> None:
+    rect = (10.0, 20.0, 110.0, 60.0)
+    assert overlay_border_hit((12.0, 40.0), rect, 6.0)
+    assert overlay_border_hit((60.0, 23.0), rect, 6.0)
+    assert not overlay_border_hit((60.0, 40.0), rect, 6.0)
+    assert not overlay_border_hit((0.0, 0.0), rect, 6.0)
 
 
 @pytest.mark.parametrize(
@@ -539,6 +562,36 @@ def test_status_places_simulation_state_before_selection():
     x_by_text = {text: position[0] for position, text in draw.text_positions}
     assert x_by_text["01_revolute"] < x_by_text["OpenGL"]
     assert x_by_text["OpenGL"] < x_by_text["Steps 674"] < x_by_text["Δt 0.002 s"]
+
+
+def test_status_exposes_recording_controls_and_warning_divider() -> None:
+    from mojive.ui.theme import THEME
+
+    draw = _RecordedStatus()
+    layout = draw_status(
+        draw,
+        (0.0, 0.0),
+        1100.0,
+        24.0,
+        THEME,
+        1.0,
+        selected="body",
+        state="paused",
+        sim_time=0.2,
+        step=10,
+        metric_mode="time",
+        backend="wgpu",
+        dt=0.002,
+        fps=60.0,
+        recording_phase="recording",
+        recording_duration=65.2,
+        recording_surface="viewport",
+    )
+
+    assert "VIEW 01:05" in draw.texts
+    assert draw.lines[0][0][2] == THEME.warning
+    assert layout.recording_pause_rect is not None
+    assert layout.recording_stop_rect is not None
 
 
 def test_right_aligned_telemetry_has_no_separator_against_empty_space():

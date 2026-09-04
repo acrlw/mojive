@@ -67,6 +67,7 @@ from mojive import (
     SelectionInputConfig,
     SelectionStyle,
     ViewerConfig,
+    ViewportOverlayConfig,
     build,
 )
 
@@ -83,6 +84,11 @@ config = ViewerConfig(
     },
     # Keep this product's docking state separate from the Mojive editor.
     layout=LayoutConfig(path=".policy-eval-imgui.ini"),
+    viewport_overlays=ViewportOverlayConfig(
+        playback_scale=0.85,
+        tool_scale=0.75,
+        movable=True,
+    ),
     shadow_quality="high",
 )
 
@@ -102,7 +108,8 @@ mode is active. Broad ImGui keyboard capture from a focused panel does not block
 only active text editing, modal UI, and native dialogs do. Clicking the viewport returns focus,
 while `pick_on_focus=False` can make that first click focus-only. Actions may also be assigned to
 `None` in the Settings shortcut editor. At
-runtime, use `viewer.configure_interactions(...)`, `viewer.configure_selection(...)`, and the
+runtime, use `viewer.configure_interactions(...)`, `viewer.configure_selection(...)`,
+`viewer.configure_viewport_overlays(...)`, and the
 stable panel IDs through `viewer.panels.open("hierarchy")`, `close`, `enable`, or `disable`.
 Explicit `ViewerConfig` values apply to that viewer instance. Changes made in Settings are stored
 as desktop preferences for later viewers created without an explicit config. Runtime
@@ -123,6 +130,35 @@ with Renderer(model, shadow_quality=ShadowQuality.HIGH) as renderer:
     image = renderer.render()
     renderer.set_shadow_quality(ShadowQuality.PERFORMANCE)
 ```
+
+## Interactive capture and recording
+
+Interactive captures distinguish the raw scene from composed UI. `SCENE` is the default and
+does not incur a full-window framebuffer readback. `VIEWPORT` includes Mojive's viewport tools
+and overlays but crops panels and the menu bar; `WINDOW` captures the complete ImGui window.
+
+```python
+from mojive import CaptureSurface
+
+viewer.capture("output/raw.png")
+viewer.capture("output/tutorial.png", surface=CaptureSurface.VIEWPORT)
+
+viewer.start_recording("output/walkthrough.mp4", surface=CaptureSurface.WINDOW, fps=30)
+for _ in range(120):
+    viewer.sync()
+viewer.pause_recording()
+# Update the scene without appending video frames, then continue the same file.
+viewer.resume_recording()
+for _ in range(120):
+    viewer.sync()
+viewer.stop_recording()
+```
+
+`viewer.record(...)` remains the deterministic fixed-frame, UI-free rollout API. The
+`start_recording` lifecycle is for user-driven or automated editor demonstrations. The current
+phase, surface, output path, frame count, and duration are available through `viewer.recording`.
+Changing the window or viewport dimensions while recording a UI surface stops that recording
+with an explicit error instead of silently stretching or cropping frames.
 
 Generated captures, recordings, reports, visual-acceptance images, and the built documentation
 site belong under the repository's ignored `output/` directory.

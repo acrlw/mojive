@@ -17,6 +17,7 @@ not required.
 | Publish or record dynamic frames | [Remote viewing and replay](../tutorials/remote-viewing.md) | `SnapshotPublisher`, `SnapshotWriter` |
 | Integrate another physics engine | [Custom scene adapter](../how-to/custom-adapter.md) | `SceneAdapterBase`, `SceneSource`, `SceneFrame` |
 | Add diagnostics and labels | [Debug drawing](../how-to/debug-draw.md) | `DebugDraw`, `Layer`, `Occlusion` |
+| Debug 2D physics and geometry | [2D diagnostic canvas](../how-to/debug-draw.md#2d-physics-and-geometry-diagnostics) | `Canvas2D`, `CanvasLayer2D` |
 | Automate a running process | [Local RPC control](../how-to/rpc-control.md) | `RpcClient`, `ControlService` |
 
 ## Example catalog
@@ -25,6 +26,7 @@ not required.
 |---|---|
 | `programmatic_scene.py` | interactive scene without a physics backend |
 | `debug_draw.py` | retained lines, arrows, points, frames, and labels |
+| `canvas2d.py` | layered 2D physics and geometry diagnostics |
 | `custom_adapter.py` | backend-neutral simulation integration |
 | `mujoco_render.py` | RGB, metric depth, and segmentation output |
 | `mujoco_video.py` | streamed MP4 rollout with optional RGB label/timestamp |

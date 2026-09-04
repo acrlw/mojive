@@ -24,7 +24,9 @@ from ..viewcube import (
 )
 from ..viewport_widgets import (
     DEFAULT_VIEWPORT_OVERLAY_SCALE,
+    MAX_VIEWPORT_CAPSULE_SCALE,
     MAX_VIEWPORT_OVERLAY_SCALE,
+    MIN_VIEWPORT_CAPSULE_SCALE,
     MIN_VIEWPORT_OVERLAY_SCALE,
 )
 from . import Panel, PanelContext, search_input, segmented_control, themed_checkbox
@@ -390,6 +392,45 @@ class SettingsPanel(Panel):
                         overlay_scale,
                         persist=committed or reset,
                     )
+                if ctx.viewport_overlays is not None:
+                    for name, label, value in (
+                        ("playback", "Playback size", ctx.viewport_overlays.playback_scale),
+                        ("tools", "Tool column size", ctx.viewport_overlays.tool_scale),
+                    ):
+                        self._property(t(label))
+                        changed, relative_scale = imgui.drag_float(
+                            f"##viewport_{name}_scale",
+                            float(value),
+                            0.02,
+                            MIN_VIEWPORT_CAPSULE_SCALE,
+                            MAX_VIEWPORT_CAPSULE_SCALE,
+                            "%.2fx",
+                        )
+                        hovered = imgui.is_item_hovered()
+                        committed = imgui.is_item_deactivated_after_edit()
+                        reset = False
+                        if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                            changed, relative_scale, reset = True, 1.0, True
+                        if hovered:
+                            imgui.set_tooltip(t("Right-click to reset"))
+                        if (
+                            changed or committed or reset
+                        ) and ctx.set_viewport_capsule_scale is not None:
+                            ctx.set_viewport_capsule_scale(
+                                name,
+                                relative_scale,
+                                persist=committed or reset,
+                            )
+                    self._property(t("Movable capsules"))
+                    changed, movable = themed_checkbox(
+                        "##viewport_capsules_movable",
+                        bool(ctx.viewport_overlays.movable),
+                        ctx.theme,
+                    )
+                    if changed and ctx.set_viewport_overlays is not None:
+                        ctx.set_viewport_overlays(
+                            replace(ctx.viewport_overlays, movable=movable), persist=True
+                        )
                 imgui.end_table()
 
             self._group_heading(t("Input"))
@@ -520,7 +561,7 @@ class SettingsPanel(Panel):
         if ctx.scene_entities is not None:
             self._group_heading(t("Helpers"))
             if self._begin_properties("settings_interaction_helpers"):
-                self._property(t("Entities"))
+                self._property(t("Camera & light icons"))
                 changed, visible = themed_checkbox(
                     "##scene_entity_helpers",
                     ctx.scene_entities.visible,
@@ -528,7 +569,7 @@ class SettingsPanel(Panel):
                 )
                 if changed:
                     ctx.scene_entities.visible = visible
-                self._property(t("Volumes"))
+                self._property(t("Selected frustum / light range"))
                 imgui.begin_disabled(not ctx.scene_entities.visible)
                 changed, influence = themed_checkbox(
                     "##selected_influence_volumes",

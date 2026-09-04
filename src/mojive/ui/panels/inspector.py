@@ -48,7 +48,7 @@ _MATERIAL_PRESETS = {
 
 
 def _geometry_dimensions(shape: MeshShape, size) -> tuple[str, np.ndarray] | None:
-    """Return user-facing full dimensions for one editable primitive."""
+    """Return conventional authored dimensions for one editable primitive."""
     value = np.asarray(size, np.float32).reshape(3)
     if shape is MeshShape.PLANE:
         return "width / length", value[:2] * 2.0
@@ -56,9 +56,11 @@ def _geometry_dimensions(shape: MeshShape, size) -> tuple[str, np.ndarray] | Non
         return "width / depth / height", value * 2.0
     if shape is MeshShape.SPHERE:
         if np.allclose(value, value[0], rtol=1e-5, atol=1e-7):
-            return "diameter", value[:1] * 2.0
-        return "width / depth / height", value * 2.0
+            return "radius", value[:1].copy()
+        return "radii x / y / z", value.copy()
     if shape is MeshShape.CYLINDER:
+        return "diameter / height", np.array((value[0] * 2.0, value[2] * 2.0))
+    if shape is MeshShape.CONE:
         return "diameter / height", np.array((value[0] * 2.0, value[2] * 2.0))
     if shape is MeshShape.CAPSULE_SHAFT:
         return "diameter / shaft length", np.array((value[0] * 2.0, value[2] * 2.0))
@@ -72,11 +74,14 @@ def _geometry_size_from_dimensions(shape: MeshShape, size, dimensions) -> np.nda
     half = dimensions * 0.5
     if shape is MeshShape.PLANE:
         value[:2] = half[:2]
-    elif shape is MeshShape.BOX or (shape is MeshShape.SPHERE and len(half) == 3):
+    elif shape is MeshShape.BOX:
         value[:] = half[:3]
     elif shape is MeshShape.SPHERE:
-        value[:] = half[0]
-    elif shape in (MeshShape.CYLINDER, MeshShape.CAPSULE_SHAFT):
+        if len(dimensions) == 3:
+            value[:] = dimensions[:3]
+        else:
+            value[:] = dimensions[0]
+    elif shape in (MeshShape.CYLINDER, MeshShape.CONE, MeshShape.CAPSULE_SHAFT):
         value[:2] = half[0]
         value[2] = half[1]
     return value

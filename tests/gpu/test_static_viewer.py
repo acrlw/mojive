@@ -214,6 +214,47 @@ def test_canvas_records_streaming_video(canvas, tmp_path):
     assert metadata["fps"] == pytest.approx(24.0)
 
 
+def test_interactive_capture_scopes_and_recording_lifecycle(canvas, tmp_path):
+    from imageio_ffmpeg import read_frames
+    from PIL import Image
+
+    from mojive import CaptureSurface, RecordingPhase
+
+    viewer, _scene = canvas
+    raw_path = viewer.capture(tmp_path / "raw.png")
+    viewport_path = viewer.capture(tmp_path / "viewport.png", surface=CaptureSurface.VIEWPORT)
+    window_path = viewer.capture(tmp_path / "window.png", surface=CaptureSurface.WINDOW)
+
+    with (
+        Image.open(raw_path) as raw,
+        Image.open(viewport_path) as viewport,
+        Image.open(window_path) as window,
+    ):
+        target = viewer.backend.target
+        assert raw.size == (target.width, target.height)
+        _x, _y, width, height = viewer.window.points_to_pixels(viewer.app._viewport_rect)
+        assert viewport.size == (round(width), round(height))
+        assert window.size == viewer.window.size_pixels
+
+    output = tmp_path / "interactive-window.mp4"
+    viewer.start_recording(output, surface=CaptureSurface.WINDOW, fps=30)
+    viewer.sync()
+    assert viewer.recording.phase is RecordingPhase.RECORDING
+    frames_before_pause = viewer.recording.frames
+    assert viewer.pause_recording()
+    viewer.sync()
+    assert viewer.recording.frames == frames_before_pause
+    assert viewer.resume_recording()
+    viewer.sync()
+    assert viewer.stop_recording() == output
+
+    reader = read_frames(str(output))
+    _metadata = next(reader)
+    frames = sum(1 for _ in reader)
+    reader.close()
+    assert frames >= 2
+
+
 def test_editor_actions_save_and_restore_an_authored_scene(tmp_path, monkeypatch):
     viewer = build_scene(Scene(), vsync=False, width=960, height=640)
     document = tmp_path / "editor.mojive.json"

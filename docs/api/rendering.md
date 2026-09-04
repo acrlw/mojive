@@ -11,3 +11,7 @@
 ## Debug drawing
 
 ::: mojive.render.debugdraw
+
+## 2D diagnostic canvas
+
+::: mojive.canvas2d

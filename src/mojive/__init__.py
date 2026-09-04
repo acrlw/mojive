@@ -29,6 +29,8 @@ from .adapters.base import (
 from .adapters.conformance import ConformanceCheck, ConformanceReport, check_adapter
 from .adapters.toy import ToyPhysicsAdapter
 from .backends import make_adapter
+from .canvas2d import Canvas2D, CanvasLayer2D
+from .capture import CaptureSurface, RecordingInfo, RecordingPhase
 from .composition import (
     Viewer,
     build,
@@ -45,6 +47,7 @@ from .config import (
     SelectionInputConfig,
     SelectionStyle,
     ViewerConfig,
+    ViewportOverlayConfig,
 )
 from .input import InputClaim, InputContext
 from .recording import SnapshotWriter, VideoRecorder, read_snapshots
@@ -106,6 +109,9 @@ __all__ = [
     "CameraInfo",
     "CameraInputConfig",
     "CameraView",
+    "Canvas2D",
+    "CanvasLayer2D",
+    "CaptureSurface",
     "ConformanceCheck",
     "ConformanceReport",
     "DebugDraw",
@@ -138,6 +144,8 @@ __all__ = [
     "Occlusion",
     "PanelConfig",
     "PhysicsState",
+    "RecordingInfo",
+    "RecordingPhase",
     "RemoteSceneAdapter",
     "RenderFlag",
     "RenderProduct",
@@ -164,6 +172,7 @@ __all__ = [
     "VideoRecorder",
     "Viewer",
     "ViewerConfig",
+    "ViewportOverlayConfig",
     "VisualGroupInfo",
     "audit_model",
     "build",

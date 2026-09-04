@@ -73,6 +73,9 @@ class PanelContext:
     set_view_selection_padding: Any = None
     viewport_overlay_scale: float = 1.0
     set_viewport_overlay_scale: Any = None
+    viewport_overlays: Any = None
+    set_viewport_overlays: Any = None
+    set_viewport_capsule_scale: Any = None
     input_bindings: Any = None
     set_input_binding: Any = None
     reset_input_bindings: Any = None
