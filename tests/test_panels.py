@@ -44,6 +44,7 @@ from mojive.ui.panels.assets import (
     height_field_preview_color,
     unique_asset_name,
 )
+from mojive.ui.panels.camera import camera_preset_column_count
 from mojive.ui.panels.control import ControlPanel, filter_actuators, sort_actuators
 from mojive.ui.panels.help import KEYS, MOUSE_GESTURES, VALUE_GESTURES
 from mojive.ui.panels.hierarchy import (
@@ -621,6 +622,18 @@ def test_render_flag_table_reduces_columns_before_hidpi_labels_clip() -> None:
     assert responsive_flag_groups(3, 420.0, 1.0) == 3
     assert responsive_flag_groups(3, 900.0, 4.0) == 2
     assert responsive_flag_groups(3, 360.0, 4.0) == 1
+
+
+def test_camera_presets_reduce_balanced_columns_before_labels_clip() -> None:
+    assert camera_preset_column_count(400.0, 100.0) == 4
+    assert camera_preset_column_count(399.0, 100.0) == 2
+    assert camera_preset_column_count(199.0, 100.0) == 1
+
+
+def test_scene_reset_status_has_a_simplified_chinese_label() -> None:
+    localizer = Localizer(Language.SIMPLIFIED_CHINESE)
+
+    assert localizer.text("Scene reset") == "场景已重置"
 
 
 def test_mujoco_flag_tokens_stay_english_while_opengl_flags_can_localize() -> None:

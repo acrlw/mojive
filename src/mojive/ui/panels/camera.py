@@ -23,6 +23,7 @@ from ..camera import DEFAULT_PITCH, DEFAULT_YAW
 from . import (
     Panel,
     PanelContext,
+    button_width,
     segmented_control,
     value_slider,
 )
@@ -45,6 +46,18 @@ PARAM_SLIDERS: tuple[tuple[str, float, float, str, float | None], ...] = (
     ("fov_y_deg", 10.0, 120.0, "%.1f deg", 45.0),
     ("far", 1.0, 100000.0, "%.1f m", 200.0),
 )
+
+
+def camera_preset_column_count(available_width: float, minimum_cell_width: float) -> int:
+    """Keep the eight camera presets in a balanced grid without clipping labels."""
+
+    available = max(0.0, float(available_width))
+    required = max(1.0, float(minimum_cell_width))
+    if available >= 4.0 * required:
+        return 4
+    if available >= 2.0 * required:
+        return 2
+    return 1
 
 
 @runtime_checkable
@@ -197,16 +210,27 @@ class CameraPanel(Panel):
         )
         can_frame = hasattr(camera, "frame_all")
         entries = (*PRESETS, ("frame all", 0.0, 0.0))
+        labels = tuple(ctx.tr(label) for label, _yaw, _pitch in entries)
+        style = imgui.get_style()
+        minimum_cell_width = max(button_width(label) for label in labels) + 2.0 * float(
+            style.cell_padding.x
+        )
+        columns = camera_preset_column_count(
+            imgui.get_content_region_avail().x,
+            minimum_cell_width,
+        )
         flags = imgui.TableFlags_.sizing_stretch_same | imgui.TableFlags_.no_pad_outer_x
-        if not imgui.begin_table("camera_presets", 4, flags):
+        if not imgui.begin_table("camera_presets", columns, flags):
             return
-        for index, (label, yaw, pitch) in enumerate(entries):
-            if index % 4 == 0:
+        for index, ((label, yaw, pitch), display_label) in enumerate(
+            zip(entries, labels, strict=True)
+        ):
+            if index % columns == 0:
                 imgui.table_next_row()
             imgui.table_next_column()
             enabled = can_frame if label == "frame all" else has_setter
             imgui.begin_disabled(not enabled)
-            if imgui.button(ctx.tr(label), imgui.ImVec2(-1.0, 0.0)):
+            if imgui.button(display_label, imgui.ImVec2(-1.0, 0.0)):
                 if label == "frame all":
                     lo, hi = ctx.session.bounds()
                     camera.frame_all(lo, hi)

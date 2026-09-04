@@ -2076,13 +2076,15 @@ def draw_status(
     x, y = origin
     running = state == "running"
     draw.rect_filled((x, y), (x + width, y + height), (*theme.bg_child[:3], 1.0))
+    top_divider_width = 1.0 * scale
+    top_divider_y = y + top_divider_width * 0.5
     draw.line(
-        (x, y),
-        (x + width, y),
+        (x, top_divider_y),
+        (x + width, top_divider_y),
         theme.primary_dim if running else theme.border,
-        2.0 * scale,
+        top_divider_width,
     )
-    cy = y + height * 0.5
+    cy = y + (height + top_divider_width) * 0.5
     cursor = x + 12.0 * scale
 
     def separator() -> None:
@@ -2200,12 +2202,6 @@ def draw_status(
         left_neighbor_end = cursor + hint_width
 
     if shown:
-        draw.line(
-            (status_x - 7.0 * scale, cy - 6.0 * scale),
-            (status_x - 7.0 * scale, cy + 6.0 * scale),
-            theme.border,
-            1.0 * scale,
-        )
         status_colors = {
             "error": theme.danger,
             "warning": theme.warning,

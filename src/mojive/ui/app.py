@@ -4040,6 +4040,7 @@ class ViewerApp:
                     active_status.level,
                 )
             )
+            status_text = self.localizer.text(status_text)
             status_layout = draw_status(
                 ImguiDraw2D(),
                 (origin.x, origin.y),

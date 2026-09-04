@@ -121,6 +121,7 @@ _ZH_CN = {
     "Steps": "步数",
     "No selection": "未选择",
     "Clear selection": "取消选择",
+    "Scene reset": "场景已重置",
     "Click to show steps": "单击显示步数",
     "Click to show time": "单击显示时间",
     "Right-click to copy exact value": "右键复制精确值",
