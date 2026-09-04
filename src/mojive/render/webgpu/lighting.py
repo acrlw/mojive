@@ -127,6 +127,7 @@ class ShadowState:
 
     enabled: bool = False
     cascade_count: int = 0
+    quality: int = 1
     shadow_light: int = -1  # scheduled index of the directional caster
     matrices: np.ndarray = field(default_factory=lambda: np.zeros((3, 4, 4), np.float32))
     splits: np.ndarray = field(default_factory=lambda: np.zeros(3, np.float32))
@@ -199,7 +200,7 @@ class LightUniforms:
             float(shadow.cascade_count),
             float(shadow.local_count),
             float(shadow.shadow_light),
-            0.0,
+            float(shadow.quality),
         )
         m = min(shadow.local_count, LOCAL_SHADOW_SLOTS)
         block["local_matrix"][:] = 0.0

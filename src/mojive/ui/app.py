@@ -9,7 +9,7 @@ import time
 import webbrowser
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -18,9 +18,12 @@ from imgui_bundle import imgui, portable_file_dialogs
 
 from .. import commands as cmd
 from ..adapters.base import FrameNeeds, NodeType
+from ..config import InteractionConfig, SelectionStyle, ViewerConfig
 from ..gizmo import axis_active_color, axis_hover_color
+from ..input import InputClaim, InputContext
 from ..log import add_output_sink, get_logger, remove_output_sink
-from ..render.backend import FrameMode, LabelMode, RenderFlag
+from ..render.backend import FrameMode, LabelMode, RenderFlag, ShadowQuality
+from ..render.debugdraw import Occlusion
 from ..types import Light, LightType, MeshShape, ViewportImage
 from ..workspace_io import (
     MissingResource,
@@ -49,7 +52,7 @@ from .localization import Localizer
 from .messages import OutputBuffer
 from .panels import (
     PanelContext,
-    PanelSet,
+    PanelManager,
     button_width,
     segmented_control,
 )
@@ -103,6 +106,38 @@ VIEWPORT_DOUBLE_CLICK_SECONDS = 0.3
 VIEWPORT_DOUBLE_CLICK_RADIUS_PT = 6.0
 STEP_BACK_REPEAT_DELAY_SECONDS = 0.35
 STEP_BACK_REPEAT_RATE_SECONDS = 0.1
+_DEFAULT_INTERACTIONS = InteractionConfig()
+_NO_INPUT_CLAIM = InputClaim()
+_SELECTION_BOX_SIGNS = np.asarray(
+    (
+        (-1.0, -1.0, -1.0),
+        (1.0, -1.0, -1.0),
+        (1.0, 1.0, -1.0),
+        (-1.0, 1.0, -1.0),
+        (-1.0, -1.0, 1.0),
+        (1.0, -1.0, 1.0),
+        (1.0, 1.0, 1.0),
+        (-1.0, 1.0, 1.0),
+    ),
+    np.float32,
+)
+_SELECTION_BOX_EDGES = np.asarray(
+    (
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
+    ),
+    np.intp,
+)
 log = get_logger("ui")
 
 
@@ -510,6 +545,7 @@ class ViewerApp:
         title: str = "Mojive",
         theme: Theme | None = None,
         debug_bridge: Any | None = None,
+        config: ViewerConfig | None = None,
     ) -> None:
         self.session = session
         self.backend = backend
@@ -518,6 +554,35 @@ class ViewerApp:
         self.theme = theme or THEME
         self.debug_bridge = debug_bridge
         self.localizer = Localizer.load()
+        viewer_config = config or ViewerConfig(
+            interactions=InteractionConfig.from_mapping(
+                self.localizer.preference("interactions", {})
+            ),
+            selection=SelectionStyle.from_mapping(self.localizer.preference("selection_style", {})),
+        )
+        self.interactions = viewer_config.interactions
+        self.selection_style = viewer_config.selection
+        self._input_handler = None
+        self._input_claim = _NO_INPUT_CLAIM
+        self._rpc_service = None
+        self._viewport_focused = False
+        self._selection_press_started_focused = False
+        self._selection_transform = np.eye(4, dtype=np.float32)
+        self._selection_bounds_corners = np.empty((8, 3), np.float32)
+        self._selection_bounds_starts = np.empty((12, 3), np.float32)
+        self._selection_bounds_ends = np.empty((12, 3), np.float32)
+        requested_shadow_quality = (
+            viewer_config.shadow_quality
+            if viewer_config.shadow_quality is not None
+            else self.localizer.preference("shadow_quality", ShadowQuality.BALANCED.value)
+        )
+        try:
+            shadow_quality = ShadowQuality(requested_shadow_quality)
+        except (TypeError, ValueError):
+            shadow_quality = ShadowQuality.BALANCED
+        set_shadow_quality = getattr(self.backend, "set_shadow_quality", None)
+        if set_shadow_quality is not None:
+            set_shadow_quality(shadow_quality)
         self._viewport_labels = localized_viewport_labels(self.localizer.text)
         metric_mode = self.localizer.preference("status_metric", "time")
         self._status_metric_mode = "steps" if metric_mode == "steps" else "time"
@@ -550,7 +615,7 @@ class ViewerApp:
         # Kept as a direct public alias for callers that only customize hints.
         self.tool_hints = self.viewport_chrome.tool_hints
         self.output = OutputBuffer()
-        self.panels = PanelSet()
+        self.panels = PanelManager(config=dict(viewer_config.panels))
         if os.environ.get("MOJIVE_OPEN_SETTINGS") == "1":
             self.panels.open_panel("Settings")
         self._started = False
@@ -660,6 +725,18 @@ class ViewerApp:
         self.localizer.set_language(language)
         self._viewport_labels = localized_viewport_labels(self.localizer.text)
 
+    def set_shadow_quality(self, quality: ShadowQuality | str, *, persist: bool = True) -> bool:
+        try:
+            quality = ShadowQuality(quality)
+        except (TypeError, ValueError):
+            return False
+        setter = getattr(self.backend, "set_shadow_quality", None)
+        if setter is None or not setter(quality):
+            return False
+        if persist:
+            self.localizer.set_preferences({"shadow_quality": quality.value})
+        return True
+
     def _toggle_status_metric(self) -> None:
         self._status_metric_mode = "steps" if self._status_metric_mode == "time" else "time"
         self.localizer.set_preferences({"status_metric": self._status_metric_mode})
@@ -686,11 +763,42 @@ class ViewerApp:
         if persist:
             self.localizer.set_preferences({"viewport_overlay_scale": self._viewport_overlay_scale})
 
-    def set_input_binding(self, action: InputAction, key_id: str) -> None:
+    def set_input_binding(self, action: InputAction, key_id: str | None) -> None:
         """Atomically remap one viewport action and persist the whole map."""
 
         self.input_bindings = self.input_bindings.remap(action, key_id)
         self.localizer.set_preferences({"input_bindings": self.input_bindings.preferences()})
+
+    def set_interactions(self, value: InteractionConfig, *, persist: bool = True) -> None:
+        """Replace the built-in input policy without changing application bindings."""
+
+        if not isinstance(value, InteractionConfig):
+            raise TypeError("interactions must be an InteractionConfig")
+        self.interactions = value
+        if persist:
+            self.localizer.set_preferences({"interactions": asdict(value)})
+        if not value.gizmo:
+            self.gizmo.cancel()
+        if not value.perturb and self.session.perturb.active:
+            self.perturb.end(self.session)
+
+    def set_selection_style(self, value: SelectionStyle, *, persist: bool = True) -> None:
+        """Replace selection presentation independently from logical selection."""
+
+        if not isinstance(value, SelectionStyle):
+            raise TypeError("selection style must be a SelectionStyle")
+        self.selection_style = value
+        if persist:
+            self.localizer.set_preferences({"selection_style": asdict(value)})
+        if not value.gizmo:
+            self.gizmo.cancel()
+
+    def set_input_handler(self, handler) -> None:
+        """Set a callback that observes input and returns an optional InputClaim."""
+
+        if handler is not None and not callable(handler):
+            raise TypeError("input handler must be callable or None")
+        self._input_handler = handler
 
     def reset_input_bindings(self) -> None:
         self.input_bindings = DEFAULT_INPUT_BINDINGS
@@ -798,6 +906,17 @@ class ViewerApp:
             self._set_model_drop_notice(
                 f"{self.localizer.text('Loaded')} {self.session.asset_path.name}"
             )
+        else:
+            self._report_model_error(result.message)
+        return result
+
+    def reload_model(self) -> CommandResult:
+        """Reload the active source and refresh viewer-owned derived state."""
+
+        result = self.session.submit(cmd.Reload())
+        if result.ok:
+            self._after_model_change()
+            self._set_model_drop_notice(self.localizer.text("Reloaded"))
         else:
             self._report_model_error(result.message)
         return result
@@ -1565,7 +1684,7 @@ class ViewerApp:
                 imgui.end_menu()
             if imgui.begin_menu(t("Window")):
                 for panel in self.panels:
-                    if panel.modal:
+                    if not panel.enabled or panel.modal:
                         continue
                     label = t(panel.name)
                     clicked, _ = imgui.menu_item(
@@ -2104,6 +2223,8 @@ class ViewerApp:
         self._frame_rate.update(dt)
 
         window.begin_frame()
+        if self._rpc_service is not None:
+            self._rpc_service.pump()
         self._sync_display_scale()
         if self._model_load_future is not None and self._poll_model_load():
             self._draw_model_loading_frame()
@@ -2128,6 +2249,7 @@ class ViewerApp:
         window.begin_dockspace()
         self._begin_viewport_panel()
         self._sync_viewport_size()
+        self._poll_input_handler()
         keys = self._poll_keys()
         self.apply_keys(keys)
 
@@ -2153,6 +2275,8 @@ class ViewerApp:
         self.backend.highlight(
             self.session.selection_highlight_object_id,
             xray=bool(selected_node is not None and selected_node.type is NodeType.JOINT),
+            fill=self.selection_style.highlight,
+            outline=self.selection_style.outline,
         )
 
         if self.debug_bridge is not None:
@@ -2178,6 +2302,7 @@ class ViewerApp:
             # must not change authored camera helper geometry.
             selected_camera_aspect=preview_size[0] / preview_size[1],
         )
+        self._publish_selection_style()
         self._publish_gizmo()
 
         self._viewport_image = self.backend.render()
@@ -2314,22 +2439,64 @@ class ViewerApp:
             or self._consume_scene_pointer_until_release
         )
 
+    def _poll_input_handler(self) -> None:
+        """Offer input to the embedding application before built-in tools poll it."""
+
+        io = imgui.get_io()
+        rect = self._viewport_rect
+        cursor = (float(io.mouse_pos.x), float(io.mouse_pos.y))
+        inside = bool(
+            rect[0] <= cursor[0] <= rect[0] + rect[2] and rect[1] <= cursor[1] <= rect[1] + rect[3]
+        )
+        focused_before_frame = self._viewport_focused
+        self._viewport_focused = bool(imgui.is_window_focused())
+        if imgui.is_mouse_clicked(0) and inside:
+            self._selection_press_started_focused = focused_before_frame
+        self._input_claim = _NO_INPUT_CLAIM
+        if self._input_handler is None:
+            return
+        blocked = self._scene_input_blocked()
+        context = InputContext(
+            viewport_hovered=inside and not blocked,
+            viewport_focused=self._viewport_focused,
+            blocked=blocked,
+            cursor=cursor,
+            delta=(float(io.mouse_delta.x), float(io.mouse_delta.y)),
+            wheel=float(io.mouse_wheel),
+        )
+        claim = self._input_handler(context)
+        if claim is None:
+            return
+        if not isinstance(claim, InputClaim):
+            raise TypeError("input handler must return InputClaim or None")
+        self._input_claim = claim
+
     def _poll_keys(self) -> Keys:
         io = imgui.get_io()
         if self._scene_input_blocked():
             return Keys()
-        self.panels.poll_shortcuts()
+        if self.interactions.panel_shortcuts:
+            self.panels.poll_shortcuts(
+                claimed_keys=self._input_claim.keys,
+                keyboard_claimed=self._input_claim.keyboard,
+            )
 
-        clear_selection = self._selection_clear_enabled() and imgui.is_key_pressed(
-            imgui.Key.escape, False
+        clear_selection = bool(
+            self.interactions.selection.clear_with_escape
+            and not self._input_claim.claims_key("escape")
+            and self._selection_clear_enabled()
+            and imgui.is_key_pressed(imgui.Key.escape, False)
         )
         if io.key_ctrl or io.key_super:
             return Keys(clear_selection=clear_selection)
 
         bindings = self.input_bindings
 
+        def available(action: InputAction) -> bool:
+            return not self._input_claim.claims_key(bindings.key_id(action))
+
         def down(action: InputAction) -> float:
-            return 1.0 if bindings.down(action) else 0.0
+            return 1.0 if available(action) and bindings.down(action) else 0.0
 
         axis = next(
             (
@@ -2337,7 +2504,7 @@ class ViewerApp:
                 for index, action in enumerate(
                     (InputAction.AXIS_X, InputAction.AXIS_Y, InputAction.AXIS_Z)
                 )
-                if bindings.down(action)
+                if self.interactions.gizmo and available(action) and bindings.down(action)
             ),
             -1,
         )
@@ -2346,22 +2513,37 @@ class ViewerApp:
                 down(InputAction.FLY_FORWARD) - down(InputAction.FLY_BACK),
                 down(InputAction.FLY_RIGHT) - down(InputAction.FLY_LEFT),
                 down(InputAction.FLY_UP) - down(InputAction.FLY_DOWN),
+            )
+            if self.interactions.camera.fly
+            else (0.0, 0.0, 0.0),
+            toggle_pause=bool(
+                self.interactions.playback_shortcuts
+                and available(InputAction.TOGGLE_PAUSE)
+                and bindings.pressed(InputAction.TOGGLE_PAUSE)
             ),
-            toggle_pause=bindings.pressed(InputAction.TOGGLE_PAUSE),
             step_back_count=(
                 bindings.press_count(
                     InputAction.STEP_BACK,
                     delay=STEP_BACK_REPEAT_DELAY_SECONDS,
                     rate=STEP_BACK_REPEAT_RATE_SECONDS,
                 )
-                if self.session.can_step_back
+                if self.interactions.playback_shortcuts
+                and available(InputAction.STEP_BACK)
+                and self.session.can_step_back
                 else 0
             ),
             clear_selection=clear_selection,
-            frame_scene=bindings.pressed(InputAction.FRAME_SCENE),
-            gizmo_translate=bindings.pressed(InputAction.GIZMO_TRANSLATE),
-            gizmo_rotate=bindings.pressed(InputAction.GIZMO_ROTATE),
-            gizmo_space=bindings.pressed(InputAction.GIZMO_SPACE),
+            frame_scene=available(InputAction.FRAME_SCENE)
+            and bindings.pressed(InputAction.FRAME_SCENE),
+            gizmo_translate=self.interactions.gizmo
+            and available(InputAction.GIZMO_TRANSLATE)
+            and bindings.pressed(InputAction.GIZMO_TRANSLATE),
+            gizmo_rotate=self.interactions.gizmo
+            and available(InputAction.GIZMO_ROTATE)
+            and bindings.pressed(InputAction.GIZMO_ROTATE),
+            gizmo_space=self.interactions.gizmo
+            and available(InputAction.GIZMO_SPACE)
+            and bindings.pressed(InputAction.GIZMO_SPACE),
             gizmo_axis=axis,
         )
 
@@ -2387,14 +2569,20 @@ class ViewerApp:
             rect,
             cursor,
             self.window.style_scale,
-            enabled=over_viewport,
+            enabled=over_viewport
+            and self.interactions.camera.view_cube
+            and not self._input_claim.pointer,
         )
         self.gizmo.update_hover(
             self.session,
             view,
             rect,
             cursor,
-            enabled=over_viewport and not self._viewing_selected_camera(),
+            enabled=over_viewport
+            and self.interactions.gizmo
+            and self.selection_style.gizmo
+            and not self._input_claim.pointer
+            and not self._viewing_selected_camera(),
             style_scale=self.window.style_scale,
         )
         self._gizmo_hint_hover.update(
@@ -2406,18 +2594,26 @@ class ViewerApp:
         node = self.session.selected_node
         return gs.InputState(
             blocked=blocked,
-            left=imgui.is_mouse_down(0),
-            right=imgui.is_mouse_down(1),
-            middle=imgui.is_mouse_down(2),
-            ctrl=self.input_bindings.down(InputAction.PERTURB),
-            shift=self.input_bindings.down(InputAction.SNAP),
-            alt=io.key_alt,
-            wheel=float(io.mouse_wheel),
+            left=not self._input_claim.claims_button(0) and imgui.is_mouse_down(0),
+            right=not self._input_claim.claims_button(1) and imgui.is_mouse_down(1),
+            middle=not self._input_claim.claims_button(2) and imgui.is_mouse_down(2),
+            ctrl=self.interactions.perturb
+            and not self._input_claim.claims_key(self.input_bindings.key_id(InputAction.PERTURB))
+            and self.input_bindings.down(InputAction.PERTURB),
+            shift=self.interactions.gizmo
+            and not self._input_claim.claims_key(self.input_bindings.key_id(InputAction.SNAP))
+            and self.input_bindings.down(InputAction.SNAP),
+            alt=not self._input_claim.claims_key("alt") and io.key_alt,
+            wheel=0.0
+            if self._input_claim.wheel or self._input_claim.pointer
+            else float(io.mouse_wheel),
             cursor=cursor,
             delta=(float(io.mouse_delta.x), float(io.mouse_delta.y)),
             over_viewport=over_viewport,
             over_view_cube=over_viewport and hovered_ball is not None,
-            gizmo_available=(self.gizmo.style == "2d" or self.backend.caps.gizmo)
+            gizmo_available=self.interactions.gizmo
+            and self.selection_style.gizmo
+            and (self.gizmo.style == "2d" or self.backend.caps.gizmo)
             and self.gizmo.last_verdict.ok,
             gizmo_hovered=over_viewport and self.gizmo.hovered,
             has_selection=node is not None,
@@ -2447,6 +2643,9 @@ class ViewerApp:
         return self.router.update(state)
 
     def _poll_gizmo(self, state: gs.InputState, keys: Keys) -> None:
+        if not self.interactions.gizmo or not self.selection_style.gizmo:
+            self.gizmo.cancel()
+            return
         if state.blocked:
             self.gizmo.cancel()
             return
@@ -2754,8 +2953,11 @@ class ViewerApp:
             self._viewport_rect,
             ui_scale=self.window.ui_scale,
             style_scale=self.window.style_scale,
-            yielding=gs.gizmo_yields(self._state) or self._viewing_selected_camera(),
-            interactive=self.router.claim in (gs.Claim.NONE, gs.Claim.OBJECT_GIZMO),
+            yielding=not self.selection_style.gizmo
+            or gs.gizmo_yields(self._state)
+            or self._viewing_selected_camera(),
+            interactive=self.interactions.gizmo
+            and self.router.claim in (gs.Claim.NONE, gs.Claim.OBJECT_GIZMO),
         )
 
     def _poll_camera(self, state: gs.InputState, keys: Keys, dt: float) -> None:
@@ -2767,7 +2969,7 @@ class ViewerApp:
             self._leave_model_camera()
             self._frame_scene(animate=True)
 
-        if self.router.wants_view_cube():
+        if self.interactions.camera.view_cube and self.router.wants_view_cube():
             ball = self.view_cube.hovered
 
             if self.router.travel >= CLICK_SLOP_PT and state.delta != (0.0, 0.0):
@@ -2788,13 +2990,13 @@ class ViewerApp:
         gesture = gs.camera_gesture(state)
 
         settled = self.router.travel >= CLICK_SLOP_PT
-        if gesture is gs.CameraGesture.ORBIT and settled:
+        if gesture is gs.CameraGesture.ORBIT and settled and self.interactions.camera.orbit:
             self._leave_model_camera()
             self.camera.orbit(*state.delta)
-        elif gesture is gs.CameraGesture.PAN and settled:
+        elif gesture is gs.CameraGesture.PAN and settled and self.interactions.camera.pan:
             self._leave_model_camera()
             self.camera.pan(state.delta[0], state.delta[1], self._viewport_rect[3])
-        elif gesture is gs.CameraGesture.DOLLY:
+        elif gesture is gs.CameraGesture.DOLLY and self.interactions.camera.dolly:
             self._leave_model_camera()
             self.camera.dolly(state.wheel)
 
@@ -2880,7 +3082,7 @@ class ViewerApp:
 
     def _poll_perturb(self, state: gs.InputState) -> None:
         st = self.session.perturb
-        if not self.router.wants_perturb():
+        if not self.interactions.perturb or not self.router.wants_perturb():
             if st.active:
                 self.perturb.end(self.session)
             return
@@ -2918,6 +3120,54 @@ class ViewerApp:
             rect=self._viewport_rect,
             ui_scale=self.window.ui_scale,
             style_scale=self.window.style_scale,
+        )
+
+    def _publish_selection_style(self) -> None:
+        """Publish selected-object helpers without changing logical selection."""
+
+        debug = getattr(self.backend, "debug", None)
+        if debug is None:
+            return
+        layer = debug.layer("ui.selection", Occlusion.GHOST)
+        node = self.session.selected_node
+        style = self.selection_style
+        if node is None or not (style.frame or style.label or style.bounds):
+            layer.clear()
+            return
+
+        position, rotation = self._node_pose(node)
+        if style.frame:
+            transform = self._selection_transform
+            transform.fill(0.0)
+            transform[3, 3] = 1.0
+            transform[:3, :3] = rotation
+            transform[:3, 3] = position
+            length = max(float(self.session.source.debug_frame_length), 1e-4)
+            layer.frame("frame", transform, length)
+        else:
+            layer.erase("frame")
+
+        if style.label:
+            layer.text("label", position, node.name, offset_px=(8.0, -8.0))
+        else:
+            layer.erase("label")
+
+        bounds = self.session.node_world_bounds(node.node_id) if style.bounds else None
+        if bounds is None:
+            layer.erase("bounds")
+            return
+        center, half = bounds
+        corners = self._selection_bounds_corners
+        np.multiply(_SELECTION_BOX_SIGNS, np.asarray(half, np.float32), out=corners)
+        corners += np.asarray(center, np.float32)
+        np.take(corners, _SELECTION_BOX_EDGES[:, 0], axis=0, out=self._selection_bounds_starts)
+        np.take(corners, _SELECTION_BOX_EDGES[:, 1], axis=0, out=self._selection_bounds_ends)
+        layer.lines(
+            "bounds",
+            self._selection_bounds_starts,
+            self._selection_bounds_ends,
+            self.theme.warning,
+            1.5 * self.window.ui_scale,
         )
 
     def _selected_view_focus(self) -> tuple[np.ndarray, float] | None:
@@ -3271,6 +3521,13 @@ class ViewerApp:
         return max(self.camera.distance * 0.04, 1e-4)
 
     def _poll_pick(self, state: gs.InputState) -> None:
+        selection = getattr(self, "interactions", _DEFAULT_INTERACTIONS).selection
+        input_claim = getattr(self, "_input_claim", _NO_INPUT_CLAIM)
+        if not selection.pick or input_claim.pointer or input_claim.claims_button(0):
+            return
+        # A plain viewport click is classified as a camera-region gesture by
+        # the router even when every camera motion switch is disabled. Keep
+        # gizmo, view-cube, and perturb releases out of scene selection.
         if not self.router.wants_camera():
             return
         if not self.router.released:
@@ -3281,6 +3538,10 @@ class ViewerApp:
         if not self.router.started_with_left:
             return
         if not state.over_viewport:
+            return
+        if not selection.pick_on_focus and not getattr(
+            self, "_selection_press_started_focused", True
+        ):
             return
         object_id = self._pick_at(state.cursor)
         now = time.monotonic()
@@ -3295,13 +3556,14 @@ class ViewerApp:
             <= radius * radius
         )
         self._last_viewport_click = None if double_clicked else (now, state.cursor, object_id)
-        if double_clicked:
+        if double_clicked and selection.focus_on_double_click:
             node = self.session.node_by_object_id(object_id)
             if node is not None:
                 if self._request_node_joint_focus(node):
                     return
                 self.request_node_focus(node.node_id)
-        self.session.submit(cmd.Select(object_id))
+        if object_id > 0 or selection.clear_on_empty:
+            self.session.submit(cmd.Select(object_id))
 
     def _pick_at(self, cursor: tuple[float, float]) -> int:
         rect = self._viewport_rect
@@ -4282,11 +4544,13 @@ class ViewerApp:
             cursor_y += size[1] + 3.0 * scale
 
     def frame_needs(self) -> FrameNeeds:
-        needs = (
-            FrameNeeds(poses=True)
-            .merge(self.panels.frame_needs())
-            .merge(self.gizmo.frame_needs(self.session))
-        )
+        needs = FrameNeeds(poses=True).merge(self.panels.frame_needs())
+        interactions = getattr(self, "interactions", None)
+        selection_style = getattr(self, "selection_style", None)
+        if (interactions is None or interactions.gizmo) and (
+            selection_style is None or selection_style.gizmo
+        ):
+            needs = needs.merge(self.gizmo.frame_needs(self.session))
         if getattr(self, "_pending_joint_focus_id", None) is not None:
             needs = needs.merge(FrameNeeds(poses=False, qpos=True, joint_frames=True))
         label_mode = self.backend.get_label_mode()
@@ -4423,6 +4687,11 @@ class ViewerApp:
             language=self.localizer.language.value,
             translate=self.localizer.text,
             set_language=self.set_language,
+            set_shadow_quality=self.set_shadow_quality,
+            interactions=self.interactions,
+            set_interactions=self.set_interactions,
+            selection_style=self.selection_style,
+            set_selection_style=self.set_selection_style,
             set_precise_input_memory=self.set_precise_input_choice_memory,
             set_view_selection_padding=self.set_view_selection_padding,
             viewport_overlay_scale=self._viewport_overlay_scale,

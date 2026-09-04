@@ -36,6 +36,7 @@ def sensor_value_preview(values, *, max_items: int = 24) -> str:
 
 
 class SensorsPanel(Panel):
+    id = "sensors"
     name = "Sensors"
     default_open = False
     shortcut = "F11"

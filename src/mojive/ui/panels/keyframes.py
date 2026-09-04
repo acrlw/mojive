@@ -318,6 +318,7 @@ def _command_button_width(label: str, scale: float) -> float:
 class KeyframesPanel(Panel):
     """Edit whole-model state snapshots on a Blender-style time ruler."""
 
+    id = "keyframes"
     name = "Keyframes"
     default_open = False
     shortcut = ""

@@ -116,6 +116,7 @@ def _hfield_size_editor(ctx: PanelContext, str_id: str, value) -> tuple[bool, np
 class AssetsPanel(Panel):
     """Browse model assets separately from scene-object bindings in Inspector."""
 
+    id = "assets"
     name = "Assets"
     default_open = False
     shortcut = ""

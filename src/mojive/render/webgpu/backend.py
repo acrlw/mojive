@@ -26,6 +26,7 @@ from ..backend import (
     RenderProduct,
     RenderRequest,
     RenderStats,
+    ShadowQuality,
 )
 from ..builder import SceneSourceBuilder
 from ..debugdraw import DebugDraw
@@ -315,6 +316,7 @@ class WgpuBackend:
         self._camera = CameraView()
         self._background = (0.13, 0.14, 0.16, 1.0)
         self._selected = 0
+        self._outlined = 0
         self._include_transparent_ids = False
         self._debug_view = DebugView.SHADED
         self._label_mode = LabelMode.NONE
@@ -379,6 +381,7 @@ class WgpuBackend:
             scene_shader_code=self._scene_shader_code,
         )
         peer._hot_reload = self._hot_reload
+        peer.set_shadow_quality(self.get_shadow_quality())
         return peer
 
     def _build_caps(self) -> BackendCaps:
@@ -1175,7 +1178,7 @@ class WgpuBackend:
         # The outline mask renders ahead of the main pass; the dilation
         # composite joins the main pass after transparent geometry, matching
         # opengl's PASS_ORDER (outline between transparent and present).
-        outline_buckets = self._outline.prepare(scene, self._selected, self._flags)
+        outline_buckets = self._outline.prepare(scene, self._outlined, self._flags)
         if outline_buckets:
             draw_calls += self._outline.render_mask(
                 encoder,
@@ -1375,9 +1378,18 @@ class WgpuBackend:
         # Match opengl's GL viewport convention: y measured from the bottom.
         return self.target.read_id(int(x), self.target.height - 1 - int(y))
 
-    def highlight(self, object_id: int, *, xray: bool = False) -> None:
-        self._selected = int(object_id)
-        self._outline.xray = bool(xray and self._selected)
+    def highlight(
+        self,
+        object_id: int,
+        *,
+        xray: bool = False,
+        fill: bool = True,
+        outline: bool = True,
+    ) -> None:
+        object_id = int(object_id)
+        self._selected = object_id if fill else 0
+        self._outlined = object_id if outline else 0
+        self._outline.xray = bool(xray and self._outlined)
 
     def set_transparent_id_rendering(self, enabled: bool) -> None:
         self._include_transparent_ids = bool(enabled)
@@ -1431,6 +1443,17 @@ class WgpuBackend:
 
     def get_flag(self, flag: RenderFlag) -> bool:
         return self._flags.get(flag, False)
+
+    def set_shadow_quality(self, quality: ShadowQuality) -> bool:
+        try:
+            quality = ShadowQuality(quality)
+        except ValueError:
+            return False
+        self._shadows.set_quality(quality)
+        return True
+
+    def get_shadow_quality(self) -> ShadowQuality:
+        return self._shadows.get_quality()
 
     def set_debug_view(self, view: DebugView) -> bool:
         if view not in _SUPPORTED_VIEWS:

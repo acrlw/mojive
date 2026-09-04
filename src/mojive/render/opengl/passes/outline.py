@@ -61,7 +61,7 @@ class OutlinePass(BasePass):
     def prepare(self, ctx: PassContext) -> bool:
         if not ctx.flag(RenderFlag.OUTLINE):
             return False
-        sel = int(ctx.selected_id)
+        sel = int(ctx.selected_id if ctx.outline_id is None else ctx.outline_id)
         if sel == 0:
             return False
         self._buckets = self._selected_buckets(ctx, sel)
@@ -90,7 +90,8 @@ class OutlinePass(BasePass):
         gl.wireframe = False
         assert self._geom.program is not None
         self._geom.set_view_proj(ctx)
-        self._geom.program["u_selected"].value = int(ctx.selected_id)
+        selected = ctx.selected_id if ctx.outline_id is None else ctx.outline_id
+        self._geom.program["u_selected"].value = int(selected)
         ctx.draw_calls += self._geom.draw(ctx, self._buckets)
 
         if self._mask_ms_fbo is not self._mask_fbo:

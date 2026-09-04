@@ -44,6 +44,7 @@ VALUE_GESTURES: tuple[tuple[str, str], ...] = (
 
 
 class HelpPanel(Panel):
+    id = "help"
     name = "Help"
     default_open = False
     shortcut = "F1"

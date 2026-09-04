@@ -86,6 +86,7 @@ class ShadowResult:
     tile_uv: np.ndarray = field(default_factory=lambda: np.zeros((3, 4), np.float32))
 
     cascade_count: int = 0
+    quality: int = 1
     enabled: bool = False
 
     local_count: int = 0
@@ -131,6 +132,7 @@ class PassContext:
     debug_view: DebugView = DebugView.SHADED
     debug: DebugDraw | None = None
     selected_id: int = 0
+    outline_id: int | None = None
     include_transparent_ids: bool = False
     gizmo: GizmoFrame | None = None
     ui_scale: float = 1.0

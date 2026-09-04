@@ -51,3 +51,11 @@ def test_unknown_remap_key_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="Unsupported viewport key"):
         key_choice("not-a-key")
+
+
+def test_action_can_be_explicitly_unbound_and_restored() -> None:
+    changed = DEFAULT_INPUT_BINDINGS.remap(InputAction.FLY_FORWARD, None)
+
+    assert changed.key_id(InputAction.FLY_FORWARD) is None
+    assert changed.label(InputAction.FLY_FORWARD) == "Unbound"
+    assert InputBindings.from_preferences(changed.preferences()) == changed

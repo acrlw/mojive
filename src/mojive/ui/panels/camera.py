@@ -76,6 +76,7 @@ def _get(obj: Any, name: str, default: Any = None) -> Any:
 
 
 class CameraPanel(Panel):
+    id = "camera"
     name = "Camera"
     default_open = True
     shortcut = "F6"

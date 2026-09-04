@@ -10,7 +10,7 @@ import numpy as np
 from .... import math3d as M
 from ....log import get_logger
 from ....types import Light, LightType, ShadingModel
-from ...backend import RenderFlag
+from ...backend import RenderFlag, ShadowQuality
 from ...dependencies import lifecycle_key, lights_key, shadow_camera_key
 from ...scene import RenderScene
 from .. import gl_native as G
@@ -79,6 +79,7 @@ class ShadowPass(BasePass):
 
     def __init__(self) -> None:
         self.atlas: moderngl.Texture | None = None
+        self._atlas_fallback: moderngl.Texture | None = None
         self._fbo: moderngl.Framebuffer | None = None
         self._geom = ShadowGeometry()
         self._distance_geom = DistanceGeometry()
@@ -97,6 +98,7 @@ class ShadowPass(BasePass):
         self._cache_key: tuple | None = None
         self._pending_key: tuple | None = None
         self._state: ShadowResult | None = None
+        self._quality = ShadowQuality.BALANCED
 
         self._failed = ""
 
@@ -154,17 +156,33 @@ class ShadowPass(BasePass):
                 )
             return False
 
-        tex.compare_func = ""
-
-        tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        # A comparison texture keeps filtering on binary visibility rather
+        # than interpolating stored depth, and lets the GPU provide 2x2 PCF.
+        tex.compare_func = "<="
+        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
         tex.repeat_x = tex.repeat_y = False
         self.atlas = tex
         self._fbo = ctx.ctx.framebuffer(depth_attachment=tex)
         return True
 
+    def _ensure_atlas_fallback(self, ctx: PassContext) -> None:
+        if self._atlas_fallback is not None:
+            return
+        tex = ctx.ctx.depth_texture((1, 1))
+        tex.compare_func = "<="
+        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        tex.repeat_x = tex.repeat_y = False
+        self._atlas_fallback = tex
+
     def prepare(self, ctx: PassContext) -> bool:
         self.cache_status = "off"
         self._pending_key = None
+        s = ctx.shadow
+        self._reset(s)
+        self._ensure_atlas_fallback(ctx)
+        self._ensure_local_fallback(ctx)
+        s.atlas = self._atlas_fallback
+        s.local_tex = self._local_fallback
         if not ctx.flag(RenderFlag.SHADOW):
             return False
         if not ctx.scene.opaque_buckets:
@@ -182,8 +200,6 @@ class ShadowPass(BasePass):
         self._cache_key = None
         self._state = None
         self._pending_key = key
-        s = ctx.shadow
-        self._reset(s)
         sun = (
             schedule.lights[schedule.directional_shadow]
             if schedule.directional_shadow >= 0
@@ -199,8 +215,6 @@ class ShadowPass(BasePass):
             s.local_count = local_count = 0
             if sun is None:
                 return False
-        if local_count == 0:
-            self._ensure_local_fallback(ctx)
         s.local_tex = self._local_tex if local_count else self._local_fallback
 
         t0 = time.perf_counter()
@@ -212,6 +226,7 @@ class ShadowPass(BasePass):
                 ctx.scene.scene_extent,
                 scene_center=ctx.scene.scene_center,
                 shadow_clip=ctx.scene.shadow_clip,
+                radius_divisors=self._quality.cascade_divisors,
                 into=self._cascades,
             )
         else:
@@ -237,17 +252,17 @@ class ShadowPass(BasePass):
             self._distance_geom.upload(ctx)
 
         c = self._cascades
-        s.atlas = self.atlas
+        s.atlas = self.atlas if c.count else self._atlas_fallback
         s.matrices = c.matrices
         s.splits = c.splits
         s.texel_world = c.texel_world
         s.tile_uv = c.tile_uv
         s.cascade_count = c.count
+        s.quality = self._quality.level
         s.enabled = True
         return True
 
-    @staticmethod
-    def _dependency_key(ctx: PassContext, schedule: LightSchedule) -> tuple:
+    def _dependency_key(self, ctx: PassContext, schedule: LightSchedule) -> tuple:
         scene = ctx.scene
         return (
             lifecycle_key(scene, ctx.frame_serial),
@@ -258,8 +273,22 @@ class ShadowPass(BasePass):
             float(scene.scene_extent),
             float(scene.shadow_clip),
             scene.shading_model.value,
+            self._quality.value,
             int(ctx.programs.generation),
         )
+
+    def set_quality(self, quality: ShadowQuality) -> None:
+        quality = ShadowQuality(quality)
+        if quality is self._quality:
+            return
+        self._quality = quality
+        self._cache_scene = None
+        self._cache_key = None
+        self._pending_key = None
+        self._state = None
+
+    def get_quality(self) -> ShadowQuality:
+        return self._quality
 
     @staticmethod
     def _local_resolution(schedule: LightSchedule) -> int:
@@ -421,11 +450,12 @@ class ShadowPass(BasePass):
         self._geom.release()
         self._distance_geom.release()
         self._release_local()
-        for obj in (self._fbo, self.atlas, self._local_fallback):
+        for obj in (self._fbo, self.atlas, self._atlas_fallback, self._local_fallback):
             if obj is not None:
                 obj.release()
         self._fbo = None
         self.atlas = None
+        self._atlas_fallback = None
         self._local_fallback = None
         self._cache_scene = None
         self._cache_key = None
@@ -438,6 +468,14 @@ def bind_shadow_uniforms(
     program_or_cache, result: ShadowResult, unit: int = SHADOW_TEXTURE_UNIT
 ) -> bool:
     prog, cache = _resolve(program_or_cache)
+    # Keep unlike sampler types on distinct units even when their count is
+    # zero. OpenGL validates active sampler uniforms before dynamic branches.
+    _force(prog, cache, "u_shadow_atlas", int(unit))
+    _force(prog, cache, "u_local_shadow", LOCAL_TEXTURE_UNIT)
+    if result.atlas is not None:
+        result.atlas.use(int(unit))
+    if result.local_tex is not None:
+        result.local_tex.use(LOCAL_TEXTURE_UNIT)
     if not result.enabled:
         _set(prog, cache, "u_shadow_count", 0)
         _set(prog, cache, "u_local_count", 0)
@@ -450,17 +488,11 @@ def bind_shadow_uniforms(
         _set(prog, cache, "u_local_count", 0)
         return False
 
-    if has_cascades:
-        result.atlas.use(int(unit))
-
-        _force(prog, cache, "u_shadow_atlas", int(unit))
     _set(prog, cache, "u_shadow_count", int(result.cascade_count))
+    _set(prog, cache, "u_shadow_quality", int(result.quality))
     _set(prog, cache, "u_shadow_bias", SHADOW_BIAS)
 
     _set(prog, cache, "u_local_count", int(result.local_count))
-    _force(prog, cache, "u_local_shadow", LOCAL_TEXTURE_UNIT)
-    if result.local_tex is not None:
-        result.local_tex.use(LOCAL_TEXTURE_UNIT)
     if has_local:
         _LOCAL_SLOT_BY_LIGHT.fill(-1)
         for slot in range(result.local_count):

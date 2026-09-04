@@ -46,6 +46,7 @@ class Ring:
 
 
 class PlotPanel(Panel):
+    id = "plot"
     name = "Plot"
     default_open = False
     shortcut = "F7"

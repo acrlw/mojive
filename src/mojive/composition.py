@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from .config import InteractionConfig, LayoutConfig, SelectionStyle, ViewerConfig
 from .log import get_logger
 
 log = get_logger("composition")
@@ -20,6 +21,19 @@ log = get_logger("composition")
 if TYPE_CHECKING:
     from .adapters.base import SceneAdapter
     from .scene import Scene
+
+
+def _viewer_layout_path(config: ViewerConfig | None, *, vsync: bool) -> str:
+    """Resolve one viewer's ImGui persistence path without creating it."""
+
+    layout = config.layout if config is not None else LayoutConfig()
+    if not vsync or not layout.persistence:
+        return ""
+    if layout.path is not None:
+        return str(Path(layout.path).expanduser())
+    from .ui.window import layout_settings_path
+
+    return str(layout_settings_path())
 
 
 def render_backend_name() -> str:
@@ -51,6 +65,7 @@ class Viewer:
     window: Any
     bridge: Any
     _released: bool = field(default=False, init=False, repr=False)
+    _rpc_server: Any = field(default=None, init=False, repr=False)
 
     def run(self, max_frames: int | None = None) -> None:
         """Run the UI event loop until the window closes or a frame limit is reached."""
@@ -60,11 +75,77 @@ class Viewer:
         """Advance the session and render one frame without entering the event loop."""
         self.app.sync()
 
+    @property
+    def panels(self):
+        """Return the runtime panel manager."""
+
+        return self.app.panels
+
+    @property
+    def interactions(self) -> InteractionConfig:
+        """Return the active built-in interaction switches."""
+
+        return self.app.interactions
+
+    @property
+    def selection_style(self) -> SelectionStyle:
+        """Return the active presentation settings for logical selection."""
+
+        return self.app.selection_style
+
+    @property
+    def shadow_quality(self):
+        """Return the active renderer shadow quality preset."""
+
+        return self.backend.get_shadow_quality()
+
+    def configure_interactions(self, value: InteractionConfig, *, persist: bool = False) -> None:
+        """Replace the built-in interaction policy for this viewer."""
+
+        self.app.set_interactions(value, persist=persist)
+
+    def configure_selection(self, value: SelectionStyle, *, persist: bool = False) -> None:
+        """Replace the selection presentation policy for this viewer."""
+
+        self.app.set_selection_style(value, persist=persist)
+
+    def configure_shadow_quality(self, value, *, persist: bool = False) -> None:
+        """Set shadow quality for this viewer."""
+
+        if not self.app.set_shadow_quality(value, persist=persist):
+            raise RuntimeError(f"The {self.backend.caps.name} backend rejected shadow quality")
+
+    def set_input_handler(self, handler) -> None:
+        """Install a per-frame input handler that can claim keys or pointer input."""
+
+        self.app.set_input_handler(handler)
+
+    def start_rpc(self, socket_path=None):
+        """Expose this viewer through a local, UI-thread-safe control socket."""
+
+        if self._rpc_server is not None:
+            return self._rpc_server
+        from .control_rpc import DEFAULT_SOCKET, ViewerRpcServer
+
+        self._rpc_server = ViewerRpcServer(
+            self, DEFAULT_SOCKET if socket_path is None else socket_path
+        )
+        return self._rpc_server
+
+    def stop_rpc(self) -> None:
+        """Stop the control socket previously created by :meth:`start_rpc`."""
+
+        if self._rpc_server is None:
+            return
+        self._rpc_server.close()
+        self._rpc_server = None
+
     def release(self) -> None:
         """Release application-owned resources and the native window once."""
         if self._released:
             return
         self._released = True
+        self.stop_rpc()
         try:
             self.app.release()
         except Exception as e:
@@ -167,6 +248,7 @@ def build(
     samples: int = 4,
     title: str = "Mojive",
     show_window: bool = True,
+    config: ViewerConfig | None = None,
 ) -> Viewer:
     """Build an interactive viewer for a model or scene asset.
 
@@ -181,6 +263,7 @@ def build(
         title: Native window title.
         show_window: Show the native window when rendering starts. Disable for
             automated UI tests and off-screen capture.
+        config: Optional programmatic interaction, selection, and panel policy.
 
     Returns:
         A composed viewer ready to run or step manually.
@@ -197,6 +280,7 @@ def build(
         samples=samples,
         title=title,
         show_window=show_window,
+        viewer_config=config,
     )
 
 
@@ -211,6 +295,7 @@ def build_workspace(
     samples: int = 4,
     title: str = "Mojive",
     show_window: bool = True,
+    config: ViewerConfig | None = None,
 ) -> Viewer:
     """Build an editable workspace around a model adapter."""
     from .adapters.workspace import WorkspaceAdapter
@@ -226,6 +311,7 @@ def build_workspace(
         samples=samples,
         title=title,
         show_window=show_window,
+        viewer_config=config,
     )
 
 
@@ -239,6 +325,7 @@ def build_from_adapter(
     samples: int = 4,
     title: str = "Mojive",
     show_window: bool = True,
+    config: ViewerConfig | None = None,
 ) -> Viewer:
     """Build an interactive viewer around an initialized scene adapter."""
 
@@ -252,6 +339,7 @@ def build_from_adapter(
         samples=samples,
         title=title,
         show_window=show_window,
+        viewer_config=config,
     )
 
 
@@ -284,17 +372,18 @@ def _compose(
     samples: int,
     title: str,
     show_window: bool,
+    viewer_config: ViewerConfig | None,
 ) -> Viewer:
     from . import commands as cmd
     from .bridge import DebugBridge
     from .session import Session
     from .ui.app import ViewerApp
-    from .ui.window import WindowConfig, layout_settings_path
+    from .ui.window import WindowConfig
 
-    ini = str(layout_settings_path()) if vsync else ""
+    ini = _viewer_layout_path(viewer_config, vsync=vsync)
     if ini:
         Path(ini).parent.mkdir(parents=True, exist_ok=True)
-    config = WindowConfig(
+    window_config = WindowConfig(
         title=title,
         width=width,
         height=height,
@@ -313,17 +402,20 @@ def _compose(
             from .render.webgpu.backend import WgpuBackend
             from .ui.window_wgpu import WgpuWindow
 
-            window = WgpuWindow(config)
+            window = WgpuWindow(window_config)
             fb_w, fb_h = window.size_pixels
             backend = WgpuBackend(fb_w, fb_h, samples, device=window.device)
         else:
             from .render.opengl.backend import OpenGLBackend
             from .ui.window import Window
 
-            window = Window(config)
+            window = Window(window_config)
             window.make_current()
             fb_w, fb_h = window.size_pixels
             backend = OpenGLBackend(None, fb_w, fb_h, samples)
+
+        if viewer_config is not None and viewer_config.layout.reset:
+            window.reset_layout()
 
         debug_bridge = DebugBridge(backend)
         debug_bridge.serve()
@@ -333,7 +425,14 @@ def _compose(
         if paused and not session.paused:
             session.submit(cmd.Pause())
 
-        app = ViewerApp(session, backend, window, title=title, debug_bridge=debug_bridge)
+        app = ViewerApp(
+            session,
+            backend,
+            window,
+            title=title,
+            debug_bridge=debug_bridge,
+            config=viewer_config,
+        )
         return Viewer(
             app=app,
             session=session,

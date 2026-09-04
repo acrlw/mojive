@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds
-from ...render.backend import DebugView, FrameMode, LabelMode, RenderFlag
+from ...render.backend import DebugView, FrameMode, LabelMode, RenderFlag, ShadowQuality
 from ..gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,
     DEFAULT_ROTATION_TICK_SCALE,
@@ -75,6 +77,10 @@ _CATEGORY_SEARCH_TERMS = {
     "General": ("language", "ui font", "cjk font"),
     "Interaction": (
         "gizmo",
+        "built-in interactions camera orbit pan dolly fly view cube",
+        "scene picking selection focus empty click escape",
+        "playback panel shortcuts physics perturbation",
+        "selection presentation highlight outline coordinate frame label bounds",
         "style",
         "orientation",
         "overlay size",
@@ -86,7 +92,7 @@ _CATEGORY_SEARCH_TERMS = {
         "helpers entities influence volumes",
     ),
     "Rendering": (
-        "backend graphics device scene lights shadow casters",
+        "backend graphics device scene lights shadow casters quality performance balanced high",
         "debug view labels frames",
         "opengl render flags outline tonemap msaa",
     ),
@@ -138,6 +144,7 @@ def flag_groups() -> tuple[tuple[str, tuple[RenderFlag, ...]], ...]:
 
 
 class SettingsPanel(Panel):
+    id = "settings"
     name = "Settings"
     default_open = False
     shortcut = "F9"
@@ -257,10 +264,51 @@ class SettingsPanel(Panel):
             self._property(t("CJK font"))
             imgui.text_disabled(ctx.font_report.cjk or ctx.tr("none"))
         imgui.end_table()
+        if ctx.panels is not None:
+            self._group_heading(t("Panels"))
+            if self._begin_properties("settings_panels"):
+                for panel in ctx.panels:
+                    if not panel.enabled or panel.modal or panel.id == self.id:
+                        continue
+                    self._property(t(panel.name))
+                    changed, is_open = themed_checkbox(
+                        f"##panel_open_{panel.id}", panel.open, ctx.theme
+                    )
+                    if changed:
+                        ctx.panels.set_open(panel.id, is_open)
+                imgui.end_table()
 
     def _rendering(self, ctx: PanelContext) -> None:
         t = ctx.tr
         caps = ctx.backend.caps
+        if caps.shadows:
+            self._group_heading(t("Shadows"))
+            if self._begin_properties("settings_shadow_quality"):
+                self._property(t("Shadow quality"))
+                getter = getattr(ctx.backend, "get_shadow_quality", None)
+                try:
+                    current = (
+                        ShadowQuality(getter()) if getter is not None else ShadowQuality.BALANCED
+                    )
+                except (TypeError, ValueError):
+                    current = ShadowQuality.BALANCED
+                qualities = tuple(ShadowQuality)
+                imgui.begin_group()
+                index = segmented_control(
+                    "shadow-quality",
+                    tuple(t(label) for label in ("Performance", "Balanced", "High")),
+                    qualities.index(current),
+                    theme=ctx.theme,
+                )
+                imgui.end_group()
+                imgui.set_item_tooltip(
+                    t("Higher quality smooths close-up shadow edges but costs more GPU time")
+                )
+                selected = qualities[index]
+                if selected is not current and ctx.set_shadow_quality is not None:
+                    ctx.set_shadow_quality(selected)
+                imgui.end_table()
+
         opengl_flags = flag_groups()[-1][1]
         if opengl_flags:
             self._group_heading(t("OpenGL render flags"))
@@ -294,6 +342,10 @@ class SettingsPanel(Panel):
 
     def _interaction(self, ctx: PanelContext) -> None:
         t = ctx.tr
+        if ctx.interactions is not None:
+            self._interaction_policy(ctx)
+        if ctx.selection_style is not None:
+            self._selection_presentation(ctx)
         if ctx.gizmo is not None:
             self._group_heading(t("Gizmo"))
             if self._begin_properties("settings_interaction_gizmo"):
@@ -488,12 +540,116 @@ class SettingsPanel(Panel):
                     ctx.scene_entities.show_influence = influence
                 imgui.end_table()
 
+    def _interaction_policy(self, ctx: PanelContext) -> None:
+        t = ctx.tr
+        config = ctx.interactions
+        self._group_heading(t("Built-in interactions"))
+        if not self._begin_properties("settings_builtin_interactions"):
+            return
+
+        def update_top(attribute: str, value: bool) -> None:
+            nonlocal config
+            config = replace(config, **{attribute: value})
+            ctx.interactions = config
+            if ctx.set_interactions is not None:
+                ctx.set_interactions(config)
+
+        def update_camera(attribute: str, value: bool) -> None:
+            nonlocal config
+            config = replace(config, camera=replace(config.camera, **{attribute: value}))
+            ctx.interactions = config
+            if ctx.set_interactions is not None:
+                ctx.set_interactions(config)
+
+        def update_selection(attribute: str, value: bool) -> None:
+            nonlocal config
+            config = replace(
+                config,
+                selection=replace(config.selection, **{attribute: value}),
+            )
+            ctx.interactions = config
+            if ctx.set_interactions is not None:
+                ctx.set_interactions(config)
+
+        rows = (
+            ("Camera orbit", config.camera.orbit, update_camera, "orbit"),
+            ("Camera pan", config.camera.pan, update_camera, "pan"),
+            ("Camera dolly", config.camera.dolly, update_camera, "dolly"),
+            ("Camera fly keys", config.camera.fly, update_camera, "fly"),
+            ("View cube", config.camera.view_cube, update_camera, "view_cube"),
+            ("Scene picking", config.selection.pick, update_selection, "pick"),
+            (
+                "Clear selection on empty click",
+                config.selection.clear_on_empty,
+                update_selection,
+                "clear_on_empty",
+            ),
+            (
+                "Clear selection with Escape",
+                config.selection.clear_with_escape,
+                update_selection,
+                "clear_with_escape",
+            ),
+            (
+                "Focus on double-click",
+                config.selection.focus_on_double_click,
+                update_selection,
+                "focus_on_double_click",
+            ),
+            (
+                "Pick when focusing viewport",
+                config.selection.pick_on_focus,
+                update_selection,
+                "pick_on_focus",
+            ),
+            ("Gizmo input", config.gizmo, update_top, "gizmo"),
+            ("Physics perturbation", config.perturb, update_top, "perturb"),
+            (
+                "Playback shortcuts",
+                config.playback_shortcuts,
+                update_top,
+                "playback_shortcuts",
+            ),
+            ("Panel shortcuts", config.panel_shortcuts, update_top, "panel_shortcuts"),
+        )
+        for label, current, callback, attribute in rows:
+            self._property(t(label))
+            changed, value = themed_checkbox(f"##interaction_{attribute}", current, ctx.theme)
+            if changed:
+                callback(attribute, value)
+        imgui.end_table()
+
+    def _selection_presentation(self, ctx: PanelContext) -> None:
+        t = ctx.tr
+        style = ctx.selection_style
+        self._group_heading(t("Selection presentation"))
+        if not self._begin_properties("settings_selection_presentation"):
+            return
+        for attribute, label in (
+            ("highlight", "Highlight fill"),
+            ("outline", "Outline"),
+            ("gizmo", "Gizmo"),
+            ("frame", "Coordinate frame"),
+            ("label", "Name label"),
+            ("bounds", "Bounds"),
+        ):
+            self._property(t(label))
+            changed, value = themed_checkbox(
+                f"##selection_{attribute}", getattr(style, attribute), ctx.theme
+            )
+            if changed:
+                style = replace(style, **{attribute: value})
+                ctx.selection_style = style
+                if ctx.set_selection_style is not None:
+                    ctx.set_selection_style(style)
+        imgui.end_table()
+
     def _shortcut_settings(self, ctx: PanelContext) -> None:
         """Draw conflict-free viewport key remapping from the shared map."""
 
         t = ctx.tr
         choices = key_choices()
-        labels = tuple(choice.label for choice in choices)
+        labels = tuple(t(choice.label) for choice in choices)
         identifiers = tuple(choice.identifier for choice in choices)
         self._group_heading(t("Shortcuts"))
         if not self._begin_properties("settings_interaction_shortcuts"):

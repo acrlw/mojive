@@ -14,8 +14,16 @@ glfw = pytest.importorskip("glfw")
 from mojive import commands as cmd  # noqa: E402
 from mojive.bridge import DebugClient  # noqa: E402
 from mojive.composition import build_scene  # noqa: E402
+from mojive.config import (  # noqa: E402
+    CameraInputConfig,
+    InteractionConfig,
+    PanelConfig,
+    SelectionStyle,
+    ViewerConfig,
+)
 from mojive.demos import canvas_scene  # noqa: E402
 from mojive.gizmo import SIZE_PT, GizmoHandle, project, world_scale  # noqa: E402
+from mojive.render.backend import ShadowQuality  # noqa: E402
 from mojive.render.debugdraw import PrimitiveType  # noqa: E402
 from mojive.scene import Scene  # noqa: E402
 from mojive.types import DEFAULT_MATERIAL, CameraView, Material, MeshShape  # noqa: E402
@@ -99,6 +107,29 @@ def test_canvas_selection_reaches_antialiased_outline(canvas):
     outline = np.array([255, 161, 51], np.int16)
 
     assert np.all(np.abs(image - outline) <= 3, axis=-1).sum() > 100
+
+
+def test_programmatic_viewer_policy_reaches_ui_and_both_selection_passes():
+    config = ViewerConfig(
+        interactions=InteractionConfig(camera=CameraInputConfig(fly=False), gizmo=False),
+        selection=SelectionStyle(highlight=False, outline=True, gizmo=False),
+        panels={"hierarchy": PanelConfig(enabled=False)},
+        shadow_quality=ShadowQuality.HIGH,
+    )
+    viewer = build_scene(canvas_scene(), config=config, vsync=False, show_window=False)
+    try:
+        target = next(node for node in viewer.session.nodes if node.name == "crate")
+        assert viewer.session.submit(cmd.Select(target.object_id))
+        viewer.sync()
+
+        assert viewer.interactions.camera.fly is False
+        assert viewer.selection_style.highlight is False
+        assert viewer.panels.state("hierarchy").enabled is False
+        assert viewer.shadow_quality is ShadowQuality.HIGH
+        assert viewer.backend._selected == 0
+        assert viewer.backend._outlined == target.object_id
+    finally:
+        viewer.release()
 
 
 def test_canvas_pose_update_changes_the_window(canvas):
@@ -369,6 +400,36 @@ def test_settings_controls_precise_input_choice_memory(canvas, monkeypatch):
         assert viewer.app.localizer.preference("remember_precise_input_choices") is False
     finally:
         viewer.app.set_precise_input_choice_memory(True)
+        settings.open = False
+
+
+def test_settings_controls_and_persists_shadow_quality(canvas, monkeypatch):
+    from mojive.ui.panels import settings as settings_module
+
+    viewer, _scene = canvas
+    settings = viewer.app.panels.get("Settings")
+    assert settings is not None
+    original_control = settings_module.segmented_control
+    changed = []
+
+    def select_high(str_id, labels, selected, **kwargs):
+        current = original_control(str_id, labels, selected, **kwargs)
+        if str_id == "shadow-quality" and not changed:
+            changed.append(True)
+            return ShadowQuality.HIGH.level
+        return current
+
+    try:
+        viewer.app.set_shadow_quality(ShadowQuality.BALANCED)
+        settings._category = "Rendering"
+        settings.open = True
+        monkeypatch.setattr(settings_module, "segmented_control", select_high)
+        viewer.sync()
+        assert changed
+        assert viewer.backend.get_shadow_quality() is ShadowQuality.HIGH
+        assert viewer.app.localizer.preference("shadow_quality") == "high"
+    finally:
+        viewer.app.set_shadow_quality(ShadowQuality.BALANCED)
         settings.open = False
 
 

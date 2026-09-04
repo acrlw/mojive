@@ -3544,6 +3544,48 @@ def test_joint_precision_dwell_survives_movement_between_gizmo_parts() -> None:
     assert gizmo._joint_precision_visible_until > 10.50
 
 
+def test_joint_precision_rail_draws_one_joined_outline_before_its_colored_strokes() -> None:
+    gizmo = ObjectGizmo()
+    gizmo._joint_precision = _JointPrecisionProjection(
+        joint_id=3,
+        qpos_adr=7,
+        joint_type="slide",
+        lower=-0.005,
+        upper=0.005,
+        start=np.array((100.0, 100.0)),
+        current=np.array((172.0, 100.0)),
+        end=np.array((244.0, 100.0)),
+        panel_rect=(90.0, 85.0, 254.0, 115.0),
+        hit_rect=(90.0, 85.0, 254.0, 115.0),
+        source=np.array((172.0, 144.0)),
+    )
+    overlay = RecordingDraw2D()
+
+    gizmo._draw_joint_precision(overlay, 1.0)
+
+    geometry = [
+        args
+        for name, args, _kwargs in overlay.calls
+        if name == "line"
+        and (
+            np.allclose(args[2], JOINT_OUTLINE_COLOR)
+            or np.allclose(args[2], JOINT_RANGE_COLOR)
+            or np.allclose(args[2], JOINT_LOWER_LIMIT_COLOR)
+            or np.allclose(args[2], JOINT_UPPER_LIMIT_COLOR)
+        )
+    ]
+    outline_indices = [
+        index for index, args in enumerate(geometry) if np.allclose(args[2], JOINT_OUTLINE_COLOR)
+    ]
+    core_indices = [
+        index
+        for index, args in enumerate(geometry)
+        if not np.allclose(args[2], JOINT_OUTLINE_COLOR)
+    ]
+    assert len(outline_indices) == len(core_indices) == 4
+    assert max(outline_indices) < min(core_indices)
+
+
 @pytest.mark.physics
 def test_joint_precision_rail_maps_its_full_width_to_the_authored_range() -> None:
     from mojive.adapters.mujoco_adapter import MuJoCoAdapter
@@ -3617,20 +3659,20 @@ def test_joint_precision_rail_maps_its_full_width_to_the_authored_range() -> Non
         for name, args, _kwargs in active.calls
     )
     line_colors = [args[2] for name, args, _kwargs in active.calls if name == "line"]
-    assert len(line_colors) >= 4
-    assert all(
-        np.allclose(actual, expected)
-        for actual, expected in zip(
-            line_colors[-4:],
-            (
-                JOINT_OUTLINE_COLOR,
-                JOINT_LOWER_LIMIT_COLOR,
-                JOINT_OUTLINE_COLOR,
-                JOINT_UPPER_LIMIT_COLOR,
-            ),
-            strict=True,
-        )
+    lower_index = max(
+        index
+        for index, color in enumerate(line_colors)
+        if np.allclose(color, JOINT_LOWER_LIMIT_COLOR)
     )
+    upper_index = max(
+        index
+        for index, color in enumerate(line_colors)
+        if np.allclose(color, JOINT_UPPER_LIMIT_COLOR)
+    )
+    last_outline = max(
+        index for index, color in enumerate(line_colors) if np.allclose(color, JOINT_OUTLINE_COLOR)
+    )
+    assert last_outline < lower_index < upper_index
     label_fill = [args for name, args, _kwargs in active.calls if name == "rect_filled"][-1]
     label_center_x = (float(label_fill[0][0]) + float(label_fill[1][0])) * 0.5
     assert label_center_x == pytest.approx(172.0)

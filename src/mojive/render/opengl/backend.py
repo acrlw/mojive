@@ -23,6 +23,7 @@ from ..backend import (
     RenderProduct,
     RenderRequest,
     RenderStats,
+    ShadowQuality,
 )
 from ..debugdraw import DebugDraw
 from ..overlay import OverlayPublisher, OverlayState
@@ -130,6 +131,7 @@ class OpenGLBackend:
         self._camera = CameraView()
         self._background = (0.13, 0.14, 0.16, 1.0)
         self._selected = 0
+        self._outlined = 0
         self._include_transparent_ids = False
         self._gizmo: GizmoFrame | None = None
         self._debug_view = DebugView.SHADED
@@ -190,6 +192,7 @@ class OpenGLBackend:
             program_cache=self.programs.fork(),
         )
         peer._hot_reload = self._hot_reload
+        peer.set_shadow_quality(self.get_shadow_quality())
         return peer
 
     def _supported_flags(self) -> frozenset[RenderFlag]:
@@ -473,11 +476,20 @@ class OpenGLBackend:
         self.target = RenderTarget(self.ctx, width, height, self.target.samples)
         self.caps = self._build_caps()
 
-    def highlight(self, object_id: int, *, xray: bool = False) -> None:
-        self._selected = int(object_id)
+    def highlight(
+        self,
+        object_id: int,
+        *,
+        xray: bool = False,
+        fill: bool = True,
+        outline: bool = True,
+    ) -> None:
+        object_id = int(object_id)
+        self._selected = object_id if fill else 0
+        self._outlined = object_id if outline else 0
         outline = self._passes.get("outline")
         if outline is not None:
-            outline.xray = bool(xray and self._selected)
+            outline.xray = bool(xray and self._outlined)
 
     def set_transparent_id_rendering(self, enabled: bool) -> None:
         self._include_transparent_ids = bool(enabled)
@@ -606,6 +618,7 @@ class OpenGLBackend:
             debug_view=self._debug_view,
             debug=self.debug,
             selected_id=self._selected,
+            outline_id=self._outlined,
             background=self._background,
             include_transparent_ids=self._include_transparent_ids,
             gizmo=self._gizmo,
@@ -685,6 +698,23 @@ class OpenGLBackend:
 
     def get_flag(self, flag: RenderFlag) -> bool:
         return self._flags.get(flag, False)
+
+    def set_shadow_quality(self, quality: ShadowQuality) -> bool:
+        shadow = self._passes.get("shadow")
+        if shadow is None:
+            return False
+        try:
+            quality = ShadowQuality(quality)
+        except ValueError:
+            return False
+        shadow.set_quality(quality)
+        return True
+
+    def get_shadow_quality(self) -> ShadowQuality:
+        shadow = self._passes.get("shadow")
+        if shadow is None:
+            return ShadowQuality.BALANCED
+        return shadow.get_quality()
 
     def set_debug_view(self, view: DebugView) -> bool:
         if view not in self.caps.debug_views:

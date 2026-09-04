@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from mojive.render.backend import ShadowQuality
 from mojive.render.opengl import cascades as C
 
 ATLAS = 4096
@@ -24,6 +25,27 @@ def test_three_radii_are_r_over_9_3_1():
     s = _set(extent=extent, clip=clip)
     r = extent * clip
     assert s.splits == pytest.approx([r / 9.0, r / 3.0, r], rel=1e-6)
+
+
+def test_shadow_quality_tightens_near_cascades_without_growing_the_atlas():
+    sets = {
+        quality: _set(extent=12.0, radius_divisors=quality.cascade_divisors)
+        for quality in ShadowQuality
+    }
+
+    assert ShadowQuality.PERFORMANCE.level == 0
+    assert ShadowQuality.BALANCED.level == 1
+    assert ShadowQuality.HIGH.level == 2
+    assert (
+        sets[ShadowQuality.HIGH].splits[0]
+        < sets[ShadowQuality.BALANCED].splits[0]
+        < sets[ShadowQuality.PERFORMANCE].splits[0]
+    )
+    assert all(shadows.splits[2] == pytest.approx(12.0) for shadows in sets.values())
+    assert all(
+        shadows.tile_uv == pytest.approx(sets[ShadowQuality.BALANCED].tile_uv)
+        for shadows in sets.values()
+    )
 
 
 def test_radius_scales_with_shadow_clip():

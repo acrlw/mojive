@@ -8,7 +8,7 @@ pytestmark = pytest.mark.gpu
 glfw = pytest.importorskip("glfw")
 moderngl = pytest.importorskip("moderngl")
 
-from mojive.render.backend import RenderFlag  # noqa: E402
+from mojive.render.backend import RenderFlag, ShadowQuality  # noqa: E402
 from mojive.render.mesh import builtin_mesh  # noqa: E402
 from mojive.render.opengl import gl_native as G  # noqa: E402
 from mojive.render.opengl import passes as _passes  # noqa: E402
@@ -315,7 +315,6 @@ def test_shadow_cache_reuses_static_maps_and_tracks_dependencies(backend):
     first = backend.target.read_color(flip=True).copy()
     rendered_calls = backend.stats.draw_calls
     assert backend.stats.notes["shadow cache"] == "rendered"
-
     backend.render()
     second = backend.target.read_color(flip=True).copy()
     assert backend.stats.notes["shadow cache"] == "reused"
@@ -359,6 +358,25 @@ def test_shadow_cache_reuses_static_maps_and_tracks_dependencies(backend):
     scene.pose_revision += 1
     backend.render()
     assert backend.stats.notes["shadow cache"] == "rendered"
+
+
+def test_shadow_quality_is_runtime_switchable_and_invalidates_cached_maps(backend):
+    scene = _managed(_scene(VIEW))
+    backend.set_camera(VIEW)
+    backend.set_flag(RenderFlag.SHADOW, True)
+    backend.set_render_scene(scene)
+
+    backend.render()
+    backend.render()
+    assert backend.stats.notes["shadow cache"] == "reused"
+
+    assert backend.set_shadow_quality(ShadowQuality.HIGH)
+    assert backend.get_shadow_quality() is ShadowQuality.HIGH
+    backend.render()
+    assert backend.stats.notes["shadow cache"] == "rendered"
+    backend.render()
+    assert backend.stats.notes["shadow cache"] == "reused"
+    assert not backend.set_shadow_quality("ultra")
 
 
 def test_local_shadow_cache_ignores_camera_motion(backend):

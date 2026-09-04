@@ -190,6 +190,7 @@ def gizmo_refusal_reason(
 
 
 class InspectorPanel(Panel):
+    id = "inspector"
     name = "Inspector"
     default_open = True
     shortcut = "F4"

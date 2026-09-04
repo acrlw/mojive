@@ -2104,18 +2104,6 @@ class ObjectGizmo:
             if self._joint_precision_hovered
             else JOINT_RANGE_COLOR
         )
-        overlay.line(
-            rail.start,
-            rail.end,
-            JOINT_OUTLINE_COLOR,
-            (JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT) * style_scale,
-        )
-        overlay.line(
-            rail.start,
-            rail.end,
-            core,
-            JOINT_RANGE_WIDTH_PT * style_scale,
-        )
         drag_start = None
         if self._joint_precision_active and len(self._joint_drag_origin_qpos):
             normalized_start = float(
@@ -2127,65 +2115,58 @@ class ObjectGizmo:
                 )
             )
             drag_start = rail.start + (rail.end - rail.start) * normalized_start
-            if float(np.linalg.norm(rail.current - drag_start)) > 1e-6:
-                overlay.line(
-                    drag_start,
-                    rail.current,
-                    JOINT_OUTLINE_COLOR,
-                    (JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT) * style_scale,
-                )
-                overlay.line(
+        endpoint_half = 5.5 * style_scale
+        start_half = JOINT_DRAG_START_TICK_HALF_PT * style_scale
+        current_half = 8.0 * style_scale
+        strokes = [
+            (rail.start, rail.end, core, JOINT_RANGE_WIDTH_PT * style_scale, None),
+        ]
+        if drag_start is not None and float(np.linalg.norm(rail.current - drag_start)) > 1e-6:
+            strokes.append(
+                (
                     drag_start,
                     rail.current,
                     JOINT_ACTIVE_DARK_COLOR,
                     JOINT_RANGE_WIDTH_PT * style_scale,
+                    None,
                 )
-        endpoint_half = 5.5 * style_scale
-        start_half = JOINT_DRAG_START_TICK_HALF_PT * style_scale
-        current_half = 8.0 * style_scale
+            )
         if drag_start is not None:
             start_a = drag_start - np.array((0.0, start_half))
             start_b = drag_start + np.array((0.0, start_half))
-            overlay.line(
-                start_a,
-                start_b,
-                JOINT_OUTLINE_COLOR,
-                (JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT) * style_scale,
-                cap="round",
-            )
-            overlay.line(
-                start_a,
-                start_b,
-                JOINT_ACTIVE_DARK_COLOR,
-                JOINT_RANGE_WIDTH_PT * style_scale,
-                cap="round",
+            strokes.append(
+                (
+                    start_a,
+                    start_b,
+                    JOINT_ACTIVE_DARK_COLOR,
+                    JOINT_RANGE_WIDTH_PT * style_scale,
+                    "round",
+                )
             )
         current_a = rail.current - np.array((0.0, current_half))
         current_b = rail.current + np.array((0.0, current_half))
-        overlay.line(
-            current_a,
-            current_b,
-            JOINT_OUTLINE_COLOR,
-            (4.0 + 2.0 * JOINT_OUTLINE_PT) * style_scale,
-            cap="round",
-        )
-        overlay.line(current_a, current_b, core, 4.0 * style_scale, cap="round")
-        # Semantic endpoints are the final rail geometry so neither the drag
-        # origin nor the moving current tick can cover a physical limit.
+        strokes.append((current_a, current_b, core, 4.0 * style_scale, "round"))
         for point, color in (
             (rail.start, JOINT_LOWER_LIMIT_COLOR),
             (rail.end, JOINT_UPPER_LIMIT_COLOR),
         ):
             a = point - np.array((0.0, endpoint_half))
             b = point + np.array((0.0, endpoint_half))
-            overlay.line(
-                a,
-                b,
-                JOINT_OUTLINE_COLOR,
-                (3.0 + 2.0 * JOINT_OUTLINE_PT) * style_scale,
-                cap="round",
-            )
-            overlay.line(a, b, color, 3.0 * style_scale, cap="round")
+            strokes.append((a, b, color, 3.0 * style_scale, "round"))
+
+        # Treat the rail and every tick as one silhouette. Drawing every dark
+        # stroke first prevents a later tick outline from cutting through the
+        # colored rail at their intersection.
+        for outline in (True, False):
+            for start, end, color, width, cap in strokes:
+                kwargs = {} if cap is None else {"cap": cap}
+                overlay.line(
+                    start,
+                    end,
+                    JOINT_OUTLINE_COLOR if outline else color,
+                    width + (2.0 * JOINT_OUTLINE_PT * style_scale if outline else 0.0),
+                    **kwargs,
+                )
         if self._joint_precision_active and self._label:
             _draw_joint_value_label(
                 overlay,

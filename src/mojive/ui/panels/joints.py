@@ -25,6 +25,7 @@ _PAGE_SIZE = 128
 
 
 class JointsPanel(Panel):
+    id = "joints"
     name = "Joints"
     default_open = True
     shortcut = "F5"

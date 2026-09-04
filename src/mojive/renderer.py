@@ -15,7 +15,14 @@ from typing import Any
 import numpy as np
 
 from .adapters.base import FrameNeeds
-from .render.backend import DebugView, FrameMode, LabelMode, RenderFlag, RenderRequest
+from .render.backend import (
+    DebugView,
+    FrameMode,
+    LabelMode,
+    RenderFlag,
+    RenderRequest,
+    ShadowQuality,
+)
 from .types import CameraView, InstancePoseSource, InstanceVisual
 
 try:
@@ -265,6 +272,8 @@ class Renderer:
         width: int = 320,
         max_geom: int = 10000,
         font_scale: Any = DEFAULT_FONT_SCALE,
+        *,
+        shadow_quality: ShadowQuality | str = ShadowQuality.BALANCED,
     ) -> None:
         if mujoco is None:  # pragma: no cover - optional dependency
             raise RuntimeError(
@@ -276,6 +285,7 @@ class Renderer:
         self._closed = False
         self._depth_rendering = False
         self._segmentation_rendering = False
+        shadow_quality = ShadowQuality(shadow_quality)
 
         self._check_framebuffer(model, int(width), int(height))
         self._model = model
@@ -309,6 +319,10 @@ class Renderer:
             with self._gl_current():
                 backend.set_background((0.0, 0.0, 0.0, 1.0))
                 backend.set_scene(source)
+                if not backend.set_shadow_quality(shadow_quality):
+                    raise RuntimeError(
+                        f"The {backend.caps.name} backend does not support shadow quality presets"
+                    )
                 self._view = (adapter.camera_hint() or CameraView()).with_aspect(self._aspect)
                 backend.set_camera(self._view)
         except Exception:
@@ -567,6 +581,21 @@ class Renderer:
         backend_flag = _RND_FLAGS.get(member.name)
         if backend_flag is not None:
             self._backend.set_flag(backend_flag, bool(enabled))
+
+    @property
+    def shadow_quality(self) -> ShadowQuality:
+        """Return the active shadow quality preset."""
+        self._require_open("shadow_quality")
+        return self._backend.get_shadow_quality()
+
+    def set_shadow_quality(self, quality: ShadowQuality | str) -> None:
+        """Set shadow filtering and near-cascade density for subsequent renders."""
+        self._require_open("set_shadow_quality")
+        quality = ShadowQuality(quality)
+        if not self._backend.set_shadow_quality(quality):
+            raise RuntimeError(
+                f"The {self._backend.caps.name} backend does not support shadow quality presets"
+            )
 
     def close(self) -> None:
         """Release renderer, adapter, and graphics-context resources."""

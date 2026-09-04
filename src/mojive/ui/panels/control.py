@@ -19,6 +19,7 @@ from . import (
 
 
 class ControlPanel(Panel):
+    id = "control"
     name = "Control"
     default_open = True
     shortcut = ""

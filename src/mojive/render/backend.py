@@ -66,6 +66,30 @@ class RenderFlag(enum.StrEnum):
     MSAA = "msaa"
 
 
+class ShadowQuality(enum.StrEnum):
+    """Shadow-map sampling and near-cascade density preset."""
+
+    PERFORMANCE = "performance"
+    BALANCED = "balanced"
+    HIGH = "high"
+
+    @property
+    def level(self) -> int:
+        """Return the compact shader value used by both render backends."""
+
+        return tuple(type(self)).index(self)
+
+    @property
+    def cascade_divisors(self) -> tuple[float, float, float]:
+        """Return near-to-far cascade density without changing atlas memory."""
+
+        return {
+            type(self).PERFORMANCE: (6.0, 2.0, 1.0),
+            type(self).BALANCED: (9.0, 3.0, 1.0),
+            type(self).HIGH: (12.0, 4.0, 1.0),
+        }[self]
+
+
 class DebugView(enum.StrEnum):
     """Viewport output selected for renderer inspection."""
 
@@ -299,8 +323,15 @@ class RenderBackend(Protocol):
 
         ...
 
-    def highlight(self, object_id: int, *, xray: bool = False) -> None:
-        """Set the outlined object and optionally reveal its occluded silhouette."""
+    def highlight(
+        self,
+        object_id: int,
+        *,
+        xray: bool = False,
+        fill: bool = True,
+        outline: bool = True,
+    ) -> None:
+        """Set independently filled and outlined selection presentation."""
 
         ...
 
@@ -316,6 +347,16 @@ class RenderBackend(Protocol):
 
     def get_flag(self, flag: RenderFlag) -> bool:
         """Return the effective value of a render flag."""
+
+        ...
+
+    def set_shadow_quality(self, quality: ShadowQuality) -> bool:
+        """Set the shadow quality preset and report whether it is supported."""
+
+        ...
+
+    def get_shadow_quality(self) -> ShadowQuality:
+        """Return the active shadow quality preset."""
 
         ...
 
@@ -448,6 +489,7 @@ class NullBackend:
         self._view = DebugView.SHADED
         self._label_mode = LabelMode.NONE
         self._frame_mode = FrameMode.NONE
+        self._shadow_quality = ShadowQuality.BALANCED
 
     def set_scene(self, source) -> None: ...
     def update(self, frame) -> None: ...
@@ -468,7 +510,14 @@ class NullBackend:
     def pick(self, x: int, y: int) -> int:
         return 0
 
-    def highlight(self, object_id: int, *, xray: bool = False) -> None: ...
+    def highlight(
+        self,
+        object_id: int,
+        *,
+        xray: bool = False,
+        fill: bool = True,
+        outline: bool = True,
+    ) -> None: ...
     def set_gizmo(self, gizmo) -> bool:
         return False
 
@@ -477,6 +526,13 @@ class NullBackend:
 
     def get_flag(self, flag: RenderFlag) -> bool:
         return self._flags.get(flag, False)
+
+    def set_shadow_quality(self, quality: ShadowQuality) -> bool:
+        del quality
+        return False
+
+    def get_shadow_quality(self) -> ShadowQuality:
+        return self._shadow_quality
 
     def set_debug_view(self, view: DebugView) -> bool:
         return False

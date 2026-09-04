@@ -18,7 +18,8 @@ from mojive.adapters.base import (
     NodeType,
     SceneNode,
 )
-from mojive.render.backend import RenderFlag
+from mojive.config import PanelConfig
+from mojive.render.backend import RenderFlag, ShadowQuality
 from mojive.types import MeshShape
 from mojive.ui.compound_fields import draw_joined_field_frame
 from mojive.ui.localization import _ZH_CN, Language, Localizer, parse_language
@@ -234,6 +235,32 @@ def panels() -> PanelSet:
 def test_registered_panels(panels: PanelSet):
 
     assert {p.name for p in panels} == EXPECTED_PANELS
+    assert panels.get("hierarchy") is panels.get("Hierarchy")
+
+
+def test_panel_config_controls_availability_and_initial_open_state() -> None:
+    panels = PanelSet(
+        config={
+            "hierarchy": PanelConfig(enabled=False),
+            "stats": PanelConfig(open=True),
+        }
+    )
+
+    assert panels.state("hierarchy").enabled is False
+    assert panels.state("hierarchy").open is False
+    assert panels.state("stats").open is True
+    assert panels.open("hierarchy") is False
+
+
+def test_panel_manager_runtime_controls_use_stable_ids() -> None:
+    panels = PanelSet()
+
+    assert panels.close("hierarchy")
+    assert panels.state("hierarchy").open is False
+    assert panels.open("hierarchy")
+    assert panels.disable("hierarchy")
+    assert panels.state("hierarchy").enabled is False
+    assert panels.enable("hierarchy")
 
 
 def test_settings_search_routes_queries_across_categories() -> None:
@@ -665,6 +692,32 @@ def test_viewer_restores_precise_input_preferences(tmp_path, monkeypatch):
 
     app.set_view_selection_padding(2.25)
     assert Localizer.load().preference("view_selection_padding") == pytest.approx(2.25)
+
+
+def test_viewer_restores_and_persists_shadow_quality(tmp_path, monkeypatch):
+    from mojive.ui.app import ViewerApp
+
+    path = tmp_path / "settings.json"
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(path))
+    Localizer.load().set_preferences({"shadow_quality": "high"})
+
+    class Backend:
+        quality = ShadowQuality.BALANCED
+
+        def set_shadow_quality(self, quality):
+            self.quality = ShadowQuality(quality)
+            return True
+
+    backend = Backend()
+    app = ViewerApp(SimpleNamespace(), backend)
+
+    assert backend.quality is ShadowQuality.HIGH
+    assert app.set_shadow_quality(ShadowQuality.PERFORMANCE)
+    assert backend.quality is ShadowQuality.PERFORMANCE
+    assert Localizer.load().preference("shadow_quality") == "performance"
+    assert app.set_shadow_quality(ShadowQuality.HIGH, persist=False)
+    assert backend.quality is ShadowQuality.HIGH
+    assert Localizer.load().preference("shadow_quality") == "performance"
 
 
 def test_viewer_restores_and_persists_viewport_input_bindings(tmp_path, monkeypatch):

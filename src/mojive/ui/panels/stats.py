@@ -19,6 +19,7 @@ def _scale_ceiling(value: float) -> float:
 
 
 class StatsPanel(Panel):
+    id = "stats"
     name = "Stats"
     default_open = False
     shortcut = "F8"

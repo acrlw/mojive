@@ -11,17 +11,15 @@
 //   that).
 // - WebGPU framebuffer rows run y-down where GL's run y-up, so every
 //   NDC-derived uv flips y (atlas tile, spot layer, point cube face).
-// - Comparison results are bilinearly blended into a compact 2x2 PCF kernel;
-//   interpolating stored depth before comparison would leak light across
-//   discontinuities. No sampler bindings are needed.
+// - Directional maps use a comparison sampler so filtering blends visibility
+//   rather than stored depth and the GPU supplies each 2x2 PCF sample.
 //
 // Count fields gate everything: with `shadow_counts` zero the functions never
 // touch the (1x1 fallback) textures.
 
 const SHADOW_MAX_CASCADES: i32 = 3;
 const SHADOW_PCF_RADIUS: i32 = 1;
-const LOCAL_PCF_RADIUS: i32 = 1;
-const AREA_PCF_RADIUS: i32 = 3;
+const MAX_POINT_PCF_RADIUS: i32 = 3;
 const OPENGL_SHADOW_BIAS: vec2f = vec2f(1.0, 2.5);
 const OPENGL_SHADOW_MIN_NDL: f32 = 0.15;
 // Local distance maps are R16F. One relative half-float ULP keeps a receiver
@@ -30,6 +28,7 @@ const LOCAL_DISTANCE_QUANTIZATION_BIAS: f32 = 1.0 / 1024.0;
 
 @group(3) @binding(0) var shadow_atlas: texture_depth_2d;
 @group(3) @binding(1) var local_shadow: texture_2d_array<f32>;
+@group(3) @binding(2) var shadow_sampler: sampler_comparison;
 
 fn shadow_bias_factors() -> vec2f {
     return select(OPENGL_SHADOW_BIAS, lights.shadow_bias.xy, lights.shadow_bias.x > 0.0);
@@ -37,31 +36,18 @@ fn shadow_bias_factors() -> vec2f {
 
 // shadow_sample.glsl shadow_factor(): cascade select with fallback, slope-
 // scaled bias, continuous PCF, atlas tile clamp.
-fn bilinear_shadow_compare(
+fn hardware_shadow_compare(
     uv: vec2f,
     reference: f32,
     min_texel: vec2i,
     max_texel: vec2i,
 ) -> f32 {
     let dims = vec2f(textureDimensions(shadow_atlas, 0u));
-    let texel_pos = uv * dims - vec2f(0.5);
-    let base = vec2i(floor(texel_pos));
-    let blend = fract(texel_pos);
-    let p00 = clamp(base, min_texel, max_texel);
-    let p10 = clamp(base + vec2i(1, 0), min_texel, max_texel);
-    let p01 = clamp(base + vec2i(0, 1), min_texel, max_texel);
-    let p11 = clamp(base + vec2i(1, 1), min_texel, max_texel);
-    let row0 = mix(
-        step(reference, textureLoad(shadow_atlas, p00, 0)),
-        step(reference, textureLoad(shadow_atlas, p10, 0)),
-        blend.x,
+    let lo = (vec2f(min_texel) + vec2f(0.5)) / dims;
+    let hi = (vec2f(max_texel) + vec2f(0.5)) / dims;
+    return textureSampleCompareLevel(
+        shadow_atlas, shadow_sampler, clamp(uv, lo, hi), reference,
     );
-    let row1 = mix(
-        step(reference, textureLoad(shadow_atlas, p01, 0)),
-        step(reference, textureLoad(shadow_atlas, p11, 0)),
-        blend.x,
-    );
-    return mix(row0, row1, blend.y);
 }
 
 fn bilinear_local_shadow_compare(uv: vec2f, layer: i32, reference: f32) -> f32 {
@@ -95,30 +81,71 @@ fn filtered_shadow_compare(
     min_texel: vec2i,
     max_texel: vec2i,
 ) -> f32 {
+    let quality = clamp(i32(lights.shadow_counts.w), 0, 2);
+    if quality == 0 {
+        return hardware_shadow_compare(uv, reference, min_texel, max_texel);
+    }
     let offset = texel * 0.75;
     var lit = 0.0;
+    if quality == 1 {
+        for (var y = -1; y <= 1; y = y + 2) {
+            for (var x = -1; x <= 1; x = x + 2) {
+                lit += hardware_shadow_compare(
+                    uv + vec2f(f32(x), f32(y)) * offset,
+                    reference,
+                    min_texel,
+                    max_texel,
+                );
+            }
+        }
+        return lit * 0.25;
+    }
+    // Each comparison sample already provides a filtered 2x2 footprint. A
+    // center plus four diagonals retains a wider high-quality kernel without
+    // the redundant work of a full 3x3 comparison grid.
+    lit = hardware_shadow_compare(uv, reference, min_texel, max_texel);
+    let high_offset = texel * 1.25;
     for (var y = -1; y <= 1; y = y + 2) {
         for (var x = -1; x <= 1; x = x + 2) {
-            lit += bilinear_shadow_compare(
-                uv + vec2f(f32(x), f32(y)) * offset, reference, min_texel, max_texel
+            lit += hardware_shadow_compare(
+                uv + vec2f(f32(x), f32(y)) * high_offset,
+                reference,
+                min_texel,
+                max_texel,
             );
         }
     }
-    return lit * 0.25;
+    return lit * 0.2;
 }
 
 fn filtered_local_shadow_compare(uv: vec2f, layer: i32, reference: f32) -> f32 {
+    let quality = clamp(i32(lights.shadow_counts.w), 0, 2);
+    if quality == 0 {
+        return bilinear_local_shadow_compare(uv, layer, reference);
+    }
     let texel = 1.0 / vec2f(textureDimensions(local_shadow, 0u).xy);
     let offset = texel * 0.75;
     var lit = 0.0;
+    if quality == 1 {
+        for (var y = -1; y <= 1; y = y + 2) {
+            for (var x = -1; x <= 1; x = x + 2) {
+                lit += bilinear_local_shadow_compare(
+                    uv + vec2f(f32(x), f32(y)) * offset, layer, reference
+                );
+            }
+        }
+        return lit * 0.25;
+    }
+    lit = bilinear_local_shadow_compare(uv, layer, reference);
+    let high_offset = texel * 1.25;
     for (var y = -1; y <= 1; y = y + 2) {
         for (var x = -1; x <= 1; x = x + 2) {
             lit += bilinear_local_shadow_compare(
-                uv + vec2f(f32(x), f32(y)) * offset, layer, reference
+                uv + vec2f(f32(x), f32(y)) * high_offset, layer, reference
             );
         }
     }
-    return lit * 0.25;
+    return lit * 0.2;
 }
 
 fn shadow_factor(world_pos: vec3f, normal: vec3f, view_depth: f32) -> f32 {
@@ -275,20 +302,29 @@ fn local_point_shadow(slot: i32, world_pos: vec3f, normal: vec3f) -> f32 {
     let up = cross(right, direction);
     var lit = 0.0;
     var taps = 0.0;
-    let radius = select(LOCAL_PCF_RADIUS, AREA_PCF_RADIUS, lights.local_radius[slot] > 0.0);
+    let quality = clamp(i32(lights.shadow_counts.w), 0, 2);
+    let area = lights.local_radius[slot] > 0.0;
+    var radius = select(0, 1, area);
+    if quality == 1 {
+        radius = select(1, 2, area);
+    } else if quality >= 2 {
+        radius = select(2, 3, area);
+    }
     let step_angle = max(
         lights.local_texel[slot],
-        lights.local_radius[slot] / max(dist * f32(AREA_PCF_RADIUS), 1e-6),
+        lights.local_radius[slot] / max(dist * f32(max(radius, 1)), 1e-6),
     );
     let dims = vec2f(textureDimensions(local_shadow, 0u).xy);
-    for (var y = -AREA_PCF_RADIUS; y <= AREA_PCF_RADIUS; y = y + 1) {
-        for (var x = -AREA_PCF_RADIUS; x <= AREA_PCF_RADIUS; x = x + 1) {
+    let dims_i = vec2i(dims);
+    for (var y = -MAX_POINT_PCF_RADIUS; y <= MAX_POINT_PCF_RADIUS; y = y + 1) {
+        for (var x = -MAX_POINT_PCF_RADIUS; x <= MAX_POINT_PCF_RADIUS; x = x + 1) {
             if abs(x) > radius || abs(y) > radius {
                 continue;
             }
             let sample_dir = direction + (right * f32(x) + up * f32(y)) * step_angle;
             let luv = point_layer_uv(slot, sample_dir);
-            lit += step(dist - bias, textureLoad(local_shadow, vec2i(luv.xy * dims), i32(luv.z), 0).r);
+            let texel = clamp(vec2i(luv.xy * dims), vec2i(0), dims_i - vec2i(1));
+            lit += step(dist - bias, textureLoad(local_shadow, texel, i32(luv.z), 0).r);
             taps += 1.0;
         }
     }

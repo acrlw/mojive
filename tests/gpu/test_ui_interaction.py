@@ -3332,6 +3332,40 @@ def test_the_keyboard_shortcuts_are_not_swallowed(free_body_viewer):
     assert v.app.camera.distance < 50.0
 
 
+def test_policy_input_recovers_after_hierarchy_search_focus(viewer):
+    from imgui_bundle import imgui
+
+    from mojive import InputClaim
+
+    v = viewer
+    io = imgui.get_io()
+    activate_panel(v, "Hierarchy")
+    search = item_rect(v, "input_text_with_hint", "##filter")
+    click(v, io, search)
+    assert io.want_text_input
+
+    observations = []
+
+    def policy_input(context):
+        observations.append((context.viewport_focused, context.blocked, context.key_down("w")))
+        return InputClaim(keys=frozenset({"w", "a", "s", "d"}))
+
+    v.set_input_handler(policy_input)
+    try:
+        click(v, io, center(v))
+        v.sync()
+        assert not io.want_text_input
+
+        io.add_key_event(imgui.Key.w, True)
+        v.sync()
+        assert observations[-1] == (True, False, True)
+        io.add_key_event(imgui.Key.w, False)
+        v.sync()
+    finally:
+        io.add_key_event(imgui.Key.w, False)
+        v.set_input_handler(None)
+
+
 def test_backspace_steps_history_backward_and_repeats_while_held(viewer) -> None:
     import time
 

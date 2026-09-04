@@ -37,6 +37,93 @@ Application preferences default to these locations:
 `MOJIVE_SETTINGS` replaces the settings-file path. `MOJIVE_IMGUI_INI` replaces the layout-file
 path. `MOJIVE_CONFIG_DIR` affects the layout file only.
 
+The Settings panel writes user choices to the JSON settings file and restores them at the next
+launch. The file is intentionally backend-neutral, so switching between OpenGL and WebGPU keeps
+the same preference.
+
+| Preference | Values | Settings panel |
+|---|---|---|
+| `shadow_quality` | `performance`, `balanced`, `high` | Rendering > Shadows > Shadow quality |
+
+`balanced` is the default. `performance` reduces receiver filtering work, while `high` increases
+near-cascade density and filtering quality for close inspection. Changing the preset invalidates
+the shadow-map cache once; subsequent static frames reuse the rebuilt maps.
+
+## Programmatic viewer configuration
+
+Embedding code can define interaction ownership before the viewer starts. The options are
+independent: disabling scene picking does not disable focus or camera motion, disabling fly keys
+does not disable orbit, and hiding the gizmo does not clear the logical selection.
+
+```python
+from pathlib import Path
+
+from mojive import (
+    CameraInputConfig,
+    InteractionConfig,
+    InputClaim,
+    LayoutConfig,
+    PanelConfig,
+    SelectionInputConfig,
+    SelectionStyle,
+    ViewerConfig,
+    build,
+)
+
+config = ViewerConfig(
+    interactions=InteractionConfig(
+        camera=CameraInputConfig(fly=False),
+        selection=SelectionInputConfig(pick=False, clear_with_escape=False),
+        panel_shortcuts=False,
+    ),
+    selection=SelectionStyle(highlight=True, outline=True, gizmo=False, frame=True),
+    panels={
+        "hierarchy": PanelConfig(enabled=False),
+        "inspector": PanelConfig(open=False),
+    },
+    # Keep this product's docking state separate from the Mojive editor.
+    layout=LayoutConfig(path=".policy-eval-imgui.ini"),
+    shadow_quality="high",
+)
+
+viewer = build(Path("robot.xml"), config=config)
+
+def policy_input(input):
+    if input.viewport_focused and input.key_down("w"):
+        move_policy_target_forward()
+    return InputClaim(keys=frozenset({"w", "a", "s", "d"}))
+
+viewer.set_input_handler(policy_input)
+viewer.run()
+```
+
+`InputClaim` is per-frame ownership, so an application may claim WASD only while a policy-control
+mode is active. Broad ImGui keyboard capture from a focused panel does not block the callback;
+only active text editing, modal UI, and native dialogs do. Clicking the viewport returns focus,
+while `pick_on_focus=False` can make that first click focus-only. Actions may also be assigned to
+`None` in the Settings shortcut editor. At
+runtime, use `viewer.configure_interactions(...)`, `viewer.configure_selection(...)`, and the
+stable panel IDs through `viewer.panels.open("hierarchy")`, `close`, `enable`, or `disable`.
+Explicit `ViewerConfig` values apply to that viewer instance. Changes made in Settings are stored
+as desktop preferences for later viewers created without an explicit config. Runtime
+`configure_*` calls are also instance-local unless passed `persist=True`.
+
+Use `LayoutConfig(persistence=False)` for a deterministic default layout on every launch, or
+`LayoutConfig(reset=True)` to discard stale/off-screen docking coordinates once and then keep the
+new layout. A custom `path` isolates each embedding application from Mojive's editor layout.
+
+Library code configures shadow quality explicitly per renderer and does not read or update the
+application settings file:
+
+```python
+from mojive import Renderer, ShadowQuality
+
+with Renderer(model, shadow_quality=ShadowQuality.HIGH) as renderer:
+    renderer.update_scene(data)
+    image = renderer.render()
+    renderer.set_shadow_quality(ShadowQuality.PERFORMANCE)
+```
+
 Generated captures, recordings, reports, visual-acceptance images, and the built documentation
 site belong under the repository's ignored `output/` directory.
 

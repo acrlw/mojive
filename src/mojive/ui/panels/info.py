@@ -15,6 +15,7 @@ _FLAGS = (
 
 
 class InfoPanel(Panel):
+    id = "info"
     name = "Info"
     default_open = False
     shortcut = "F10"

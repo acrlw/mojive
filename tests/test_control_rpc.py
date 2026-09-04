@@ -7,7 +7,9 @@ import socket
 import stat
 import tempfile
 import threading
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -20,6 +22,7 @@ from mojive.control_rpc import (
     ControlService,
     RpcClient,
     RpcError,
+    ViewerControlService,
     _mujoco_camera,
 )
 from mojive.types import CameraView
@@ -60,6 +63,78 @@ def test_rpc_routes_simulation_and_state_commands(rpc):
     assert after["paused"]
     assert after["physics"]["qpos"]["values"][0] == pytest.approx(changed[0])
     assert service.session.frame.step == 2
+
+
+def test_rpc_advertises_capabilities_and_supports_atomic_policy_steps(rpc):
+    client, _, _ = rpc
+    client.call("pause")
+    hello = client.hello()
+    before = client.get_state()
+    ctrl = np.asarray(before["physics"]["ctrl"]["values"])
+
+    observed = client.step(2, ctrl=ctrl, observe=True)
+
+    assert hello["service"] == "mojive.control"
+    assert "set_ctrl" in hello["methods"]
+    assert "set_shadow_quality" in hello["methods"]
+    assert "reset_layout" in hello["methods"]
+    assert observed["state"]["step"] == 2
+    assert observed["state"]["physics"]["ctrl"]["values"] == pytest.approx(ctrl)
+
+
+def test_rpc_restores_velocity_and_rejects_wrong_state_shapes(rpc):
+    client, _, _ = rpc
+    client.call("pause")
+    before = client.get_state()
+    qvel = np.asarray(before["physics"]["qvel"]["values"])
+    changed = qvel + 0.125
+
+    client.call("set_qvel", {"values": changed.tolist()})
+    after = client.get_state()
+
+    assert after["physics"]["qvel"]["values"] == pytest.approx(changed)
+    with pytest.raises(RpcError, match="Expected qvel shape") as error:
+        client.call("set_qvel", {"values": [0.0]})
+    assert error.value.code == "invalid_params"
+
+
+def test_headless_resume_has_a_realtime_scheduler(rpc):
+    client, _, _ = rpc
+    client.call("resume")
+    deadline = time.monotonic() + 1.0
+    state = client.get_state()
+    while state["step"] == 0 and time.monotonic() < deadline:
+        time.sleep(0.01)
+        state = client.get_state()
+    client.call("pause")
+
+    assert state["step"] > 0
+
+
+def test_viewer_service_marshals_requests_until_the_ui_thread_pumps(rpc):
+    _, service, _ = rpc
+    app = SimpleNamespace(camera=service.camera)
+    viewer_service = ViewerControlService(SimpleNamespace(session=service.session, app=app))
+    response = None
+
+    def request() -> None:
+        nonlocal response
+        response = viewer_service.handle(
+            {"version": PROTOCOL_VERSION, "id": 7, "method": "hello", "params": {}}
+        )
+
+    thread = threading.Thread(target=request)
+    thread.start()
+    deadline = time.monotonic() + 1.0
+    while viewer_service._pending.empty() and time.monotonic() < deadline:
+        time.sleep(0.001)
+    assert thread.is_alive()
+    assert viewer_service.pump() == 1
+    thread.join(timeout=1.0)
+    viewer_service.close()
+
+    assert response["id"] == 7
+    assert response["result"]["viewer_attached"] is True
 
 
 def test_control_socket_is_private_to_the_current_user(rpc):

@@ -10,7 +10,7 @@ import pytest
 
 mujoco = pytest.importorskip("mujoco")
 
-from mojive import Renderer  # noqa: E402
+from mojive import Renderer, ShadowQuality  # noqa: E402
 from mojive.render.backend import (  # noqa: E402
     DebugView,
     FrameMode,
@@ -71,13 +71,22 @@ def test_renderer_rgb_camera_out_and_lifecycle():
     model = _model()
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
-    renderer = Renderer(model, height=96, width=128, max_geom=32)
+    renderer = Renderer(
+        model,
+        height=96,
+        width=128,
+        max_geom=32,
+        shadow_quality=ShadowQuality.HIGH,
+    )
 
     assert renderer.model is model
     assert renderer.height == 96
     assert renderer.width == 128
     assert isinstance(renderer.scene, mujoco.MjvScene)
     assert renderer.scene.maxgeom == 32
+    assert renderer.shadow_quality is ShadowQuality.HIGH
+    renderer.set_shadow_quality(ShadowQuality.PERFORMANCE)
+    assert renderer.shadow_quality is ShadowQuality.PERFORMANCE
 
     renderer.update_scene(data)
     assert renderer.scene.ngeom > 0

@@ -34,11 +34,41 @@ def test_renderer_is_exported_with_mujoco_compatible_constructor():
         "width",
         "max_geom",
         "font_scale",
+        "shadow_quality",
     ]
     assert signature.parameters["height"].default == 240
     assert signature.parameters["width"].default == 320
     assert signature.parameters["max_geom"].default == 10000
     assert signature.parameters["font_scale"].default == mujoco.mjtFontScale.mjFONTSCALE_150
+    assert signature.parameters["shadow_quality"].default is mojive.ShadowQuality.BALANCED
+
+
+def test_shadow_quality_is_part_of_the_public_api():
+    assert mojive.ShadowQuality.HIGH.value == "high"
+
+    renderer = renderer_module.Renderer.__new__(renderer_module.Renderer)
+    renderer._closed = False
+
+    class Backend:
+        caps = type("Caps", (), {"name": "test"})()
+
+        def __init__(self):
+            self.quality = mojive.ShadowQuality.BALANCED
+
+        def set_shadow_quality(self, quality):
+            self.quality = quality
+            return True
+
+        def get_shadow_quality(self):
+            return self.quality
+
+    renderer._backend = Backend()
+    renderer.set_shadow_quality("high")
+
+    assert renderer.shadow_quality is mojive.ShadowQuality.HIGH
+
+    with pytest.raises(ValueError):
+        renderer.set_shadow_quality("ultra")
 
 
 @pytest.mark.parametrize(

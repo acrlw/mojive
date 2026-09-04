@@ -60,9 +60,13 @@ def light_basis(direction) -> np.ndarray:
     return np.array([s, u, -f], np.float32)
 
 
-def cascade_radii(scene_extent: float, shadow_clip: float = DEFAULT_SHADOW_CLIP) -> np.ndarray:
+def cascade_radii(
+    scene_extent: float,
+    shadow_clip: float = DEFAULT_SHADOW_CLIP,
+    radius_divisors: tuple[float, ...] = RADIUS_DIVISORS,
+) -> np.ndarray:
     r = max(float(scene_extent), 1e-6) * max(float(shadow_clip), 1e-6)
-    return np.array([r / d for d in RADIUS_DIVISORS], np.float32)
+    return np.array([r / d for d in radius_divisors], np.float32)
 
 
 def snap_to_texel(center, basis: np.ndarray, texel: float) -> np.ndarray:
@@ -99,11 +103,12 @@ def build_cascades(
     slots: tuple[int, ...] = tuple(range(CASCADE_COUNT)),
     tile_pixels: int = TILE_PIXELS,
     pcf_radius: int = PCF_RADIUS,
+    radius_divisors: tuple[float, ...] = RADIUS_DIVISORS,
     into: CascadeSet | None = None,
 ) -> CascadeSet:
     out = into if into is not None else CascadeSet()
     basis = light_basis(light_direction)
-    radii = cascade_radii(scene_extent, shadow_clip)
+    radii = cascade_radii(scene_extent, shadow_clip, radius_divisors)
     focus = np.asarray(focus, np.float64).reshape(3)
     center_w = (
         np.asarray(scene_center, np.float64).reshape(3) if scene_center is not None else focus

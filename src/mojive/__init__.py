@@ -29,7 +29,24 @@ from .adapters.base import (
 from .adapters.conformance import ConformanceCheck, ConformanceReport, check_adapter
 from .adapters.toy import ToyPhysicsAdapter
 from .backends import make_adapter
-from .composition import build_from_adapter, build_scene, build_workspace
+from .composition import (
+    Viewer,
+    build,
+    build_editor,
+    build_from_adapter,
+    build_scene,
+    build_workspace,
+)
+from .config import (
+    CameraInputConfig,
+    InteractionConfig,
+    LayoutConfig,
+    PanelConfig,
+    SelectionInputConfig,
+    SelectionStyle,
+    ViewerConfig,
+)
+from .input import InputClaim, InputContext
 from .recording import SnapshotWriter, VideoRecorder, read_snapshots
 from .remote import RemoteSceneAdapter, SnapshotPublisher
 from .render.backend import (
@@ -39,6 +56,7 @@ from .render.backend import (
     RenderFlag,
     RenderProduct,
     RenderRequest,
+    ShadowQuality,
 )
 from .render.debugdraw import DebugDraw, Layer, Occlusion
 from .scene import Scene, SceneLight, SceneObject
@@ -86,6 +104,7 @@ __all__ = [
     "ActuatorVisualType",
     "AdapterCaps",
     "CameraInfo",
+    "CameraInputConfig",
     "CameraView",
     "ConformanceCheck",
     "ConformanceReport",
@@ -97,11 +116,15 @@ __all__ = [
     "EqualityConstraintInfo",
     "FrameMode",
     "FrameNeeds",
+    "InputClaim",
+    "InputContext",
+    "InteractionConfig",
     "JointInfo",
     "JointVisualType",
     "KeyframeInfo",
     "LabelMode",
     "Layer",
+    "LayoutConfig",
     "Light",
     "LightSet",
     "LightType",
@@ -113,6 +136,7 @@ __all__ = [
     "MuJoCoAdapter",
     "NodeType",
     "Occlusion",
+    "PanelConfig",
     "PhysicsState",
     "RemoteSceneAdapter",
     "RenderFlag",
@@ -129,14 +153,21 @@ __all__ = [
     "SceneObject",
     "SceneSaveOptions",
     "SceneSource",
+    "SelectionInputConfig",
+    "SelectionStyle",
     "SensorInfo",
     "ShadingModel",
+    "ShadowQuality",
     "SnapshotPublisher",
     "SnapshotWriter",
     "ToyPhysicsAdapter",
     "VideoRecorder",
+    "Viewer",
+    "ViewerConfig",
     "VisualGroupInfo",
     "audit_model",
+    "build",
+    "build_editor",
     "build_from_adapter",
     "build_scene",
     "build_workspace",

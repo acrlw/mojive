@@ -245,6 +245,36 @@ def test_background_focus_capture_is_not_an_active_widget_edit(monkeypatch, movi
     assert app._selection_clear_enabled() is (not moving)
 
 
+def test_scene_input_ignores_broad_imgui_keyboard_capture(monkeypatch):
+    """A focused panel must not reserve policy keys unless it is editing text."""
+
+    app = ViewerApp.__new__(ViewerApp)
+    for attribute in (
+        "_pending_document_action",
+        "_pending_pose_save",
+        "_model_dialog",
+        "_scene_dialog",
+        "_resource_dialog",
+        "_texture_dialog",
+        "_geometry_resource_dialog",
+        "_model_asset_dialog",
+        "_resource_repair_dialog",
+        "_precise_gizmo_edit",
+    ):
+        setattr(app, attribute, None)
+    app._show_model_load_error = False
+    app._open_resource_repair_popup = False
+    app._open_rename_popup = False
+    app._consume_scene_pointer_until_release = False
+    io = SimpleNamespace(want_capture_keyboard=True, want_text_input=False)
+    monkeypatch.setattr(imgui, "get_io", lambda: io)
+    monkeypatch.setattr(imgui, "is_popup_open", lambda *_args: False)
+
+    assert not app._scene_input_blocked()
+    io.want_text_input = True
+    assert app._scene_input_blocked()
+
+
 @pytest.mark.parametrize("panel", ("Viewport", "Joints", "Inspector"))
 def test_selection_status_is_composed_with_panel_hints_but_yields_to_input(panel):
     app = ViewerApp.__new__(ViewerApp)

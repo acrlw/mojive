@@ -10,6 +10,7 @@ import numpy as np
 from imgui_bundle import imgui
 
 from ...adapters.base import FrameNeeds
+from ...config import PanelConfig
 from ..draw2d import ImguiDraw2D
 from ..theme import THEME, Theme
 from ..viewport_widgets import ToolHint, draw_projection_label
@@ -54,7 +55,7 @@ class PanelContext:
 
     status: str = ""
     # Each panel publishes its available grammar independently of hover.
-    # PanelSet collects it by name; the application selects the clicked panel.
+    # PanelManager collects it by name; the application selects the clicked panel.
     status_hints: tuple[Any, ...] = ()
     status_hints_by_panel: dict[str, tuple[Any, ...]] = field(default_factory=dict)
 
@@ -63,6 +64,11 @@ class PanelContext:
     language: str = "en"
     translate: Any = None
     set_language: Any = None
+    set_shadow_quality: Any = None
+    interactions: Any = None
+    set_interactions: Any = None
+    selection_style: Any = None
+    set_selection_style: Any = None
     set_precise_input_memory: Any = None
     set_view_selection_padding: Any = None
     viewport_overlay_scale: float = 1.0
@@ -95,6 +101,7 @@ class PanelContext:
 
 
 class Panel:
+    id: str = ""
     name: str = ""
 
     default_open: bool = True
@@ -108,13 +115,14 @@ class Panel:
     initial_size: tuple[float, float] = (0.0, 0.0)
 
     def __init__(self) -> None:
+        self.enabled = True
         self.open = self.default_open
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
 
     def needs(self) -> FrameNeeds:
-        return self.frame_needs() if self.open else FrameNeeds.none()
+        return self.frame_needs() if self.enabled and self.open else FrameNeeds.none()
 
     def draw(self, ctx: PanelContext) -> None:
         raise NotImplementedError
@@ -615,23 +623,105 @@ def button_row_layout(
     return tuple(same_line)
 
 
-class PanelSet:
-    def __init__(self, panels: list[Panel] | None = None) -> None:
+@dataclass(frozen=True)
+class PanelState:
+    """Current availability and open state of one registered panel."""
+
+    enabled: bool
+    open: bool
+
+
+class PanelManager:
+    """Register panels and control them through stable, non-localized IDs."""
+
+    def __init__(
+        self,
+        panels: list[Panel] | None = None,
+        config: dict[str, PanelConfig] | None = None,
+    ) -> None:
         self.panels: list[Panel] = list(panels) if panels is not None else default_panels()
+        self._pending_config = dict(config or {})
         problems = validate_panels(self.panels)
         if problems:
             raise ValueError("Invalid panel configuration: " + "; ".join(problems))
+        for panel in self.panels:
+            self._apply_config(panel)
 
     def __iter__(self):
         return iter(self.panels)
 
-    def get(self, name: str) -> Panel | None:
-        return next((p for p in self.panels if p.name == name), None)
+    def get(self, panel_id: str) -> Panel | None:
+        """Return a panel by stable ID, accepting its legacy title for compatibility."""
 
-    def open_panel(self, name: str) -> None:
-        panel = self.get(name)
-        if panel is not None:
-            panel.open = True
+        value = str(panel_id)
+        return next((p for p in self.panels if _panel_id(p) == value or p.name == value), None)
+
+    def register(self, panel: Panel) -> None:
+        """Register one custom panel and apply any deferred configuration."""
+
+        if self.get(_panel_id(panel)) is not None:
+            raise ValueError(f"Duplicate panel ID: {_panel_id(panel)}")
+        self.panels.append(panel)
+        problems = validate_panels(self.panels)
+        if problems:
+            self.panels.pop()
+            raise ValueError("Invalid panel configuration: " + "; ".join(problems))
+        self._apply_config(panel)
+
+    def set_open(self, panel_id: str, open: bool) -> bool:
+        panel = self.get(panel_id)
+        if panel is None or not panel.enabled:
+            return False
+        panel.open = bool(open)
+        return True
+
+    def open(self, panel_id: str) -> bool:
+        return self.set_open(panel_id, True)
+
+    def close(self, panel_id: str) -> bool:
+        return self.set_open(panel_id, False)
+
+    def toggle(self, panel_id: str) -> bool:
+        panel = self.get(panel_id)
+        return False if panel is None else self.set_open(panel_id, not panel.open)
+
+    def set_enabled(self, panel_id: str, enabled: bool) -> bool:
+        panel = self.get(panel_id)
+        if panel is None:
+            return False
+        panel.enabled = bool(enabled)
+        if not panel.enabled:
+            panel.open = False
+        return True
+
+    def enable(self, panel_id: str) -> bool:
+        return self.set_enabled(panel_id, True)
+
+    def disable(self, panel_id: str) -> bool:
+        return self.set_enabled(panel_id, False)
+
+    def state(self, panel_id: str) -> PanelState | None:
+        panel = self.get(panel_id)
+        return None if panel is None else PanelState(bool(panel.enabled), bool(panel.open))
+
+    def states(self) -> dict[str, PanelState]:
+        return {_panel_id(panel): PanelState(panel.enabled, panel.open) for panel in self.panels}
+
+    def open_panel(self, panel_id: str) -> None:
+        """Compatibility alias for callers using the previous method name."""
+
+        self.open(panel_id)
+
+    def _apply_config(self, panel: Panel) -> None:
+        override = self._pending_config.pop(_panel_id(panel), None)
+        if override is None:
+            return
+        if override.enabled is not None:
+            panel.enabled = bool(override.enabled)
+        if override.open is not None:
+            panel.open = bool(override.open)
+        if not panel.enabled:
+            panel.open = False
 
     def frame_needs(self) -> FrameNeeds:
         needs = FrameNeeds.none()
@@ -643,7 +733,7 @@ class PanelSet:
         ctx.panels = self
         ctx.status_hints_by_panel.clear()
         for p in self.panels:
-            if not p.open:
+            if not p.enabled or not p.open:
                 continue
             translated = ctx.tr(p.name)
             title = p.name if translated == p.name else f"{translated}###{p.name}"
@@ -673,7 +763,7 @@ class PanelSet:
         """Submit docked panel windows without reading application state."""
 
         for panel in self.panels:
-            if not panel.open or panel.modal:
+            if not panel.enabled or not panel.open or panel.modal:
                 continue
             translated = translate(panel.name)
             title = panel.name if translated == panel.name else f"{translated}###{panel.name}"
@@ -757,12 +847,16 @@ class PanelSet:
         if keep_open is not None and not keep_open:
             panel.open = False
 
-    def poll_shortcuts(self) -> None:
+    def poll_shortcuts(self, *, claimed_keys=frozenset(), keyboard_claimed: bool = False) -> None:
         if imgui.get_io().want_capture_keyboard and imgui.is_any_item_active():
             return
+        if keyboard_claimed:
+            return
         for p in self.panels:
+            if not p.enabled:
+                continue
             for spec in (p.shortcut, *p.aliases):
-                if spec and _shortcut_pressed(spec):
+                if spec and spec.casefold() not in claimed_keys and _shortcut_pressed(spec):
                     p.toggle()
                     break
 
@@ -784,7 +878,14 @@ def validate_panels(panels: list[Panel]) -> list[str]:
     problems: list[str] = []
     seen: dict[str, str] = {}
     names: set[str] = set()
+    ids: set[str] = set()
     for p in panels:
+        panel_id = _panel_id(p)
+        if not panel_id:
+            problems.append(f"{type(p).__name__} has no panel ID")
+        elif panel_id in ids:
+            problems.append(f"Duplicate panel ID: {panel_id}")
+        ids.add(panel_id)
         if not p.name:
             problems.append(f"{type(p).__name__} has no name")
         elif p.name in names:
@@ -798,6 +899,18 @@ def validate_panels(panels: list[Panel]) -> list[str]:
                 problems.append(f"Shortcut {spec} is shared by {seen[spec]} and {p.name}")
             seen[spec] = p.name
     return problems
+
+
+def _panel_id(panel: Panel) -> str:
+    """Resolve the stable ID, with a compatibility fallback for custom panels."""
+
+    if panel.id:
+        return str(panel.id)
+    return str(panel.name).strip().casefold().replace(" ", "_")
+
+
+# Kept for source compatibility; new public code should use PanelManager.
+PanelSet = PanelManager
 
 
 def default_panels() -> list[Panel]:
@@ -837,7 +950,9 @@ def default_panels() -> list[Panel]:
 __all__ = [
     "Panel",
     "PanelContext",
+    "PanelManager",
     "PanelSet",
+    "PanelState",
     "ValueEdit",
     "begin_kv_table",
     "colored_text",

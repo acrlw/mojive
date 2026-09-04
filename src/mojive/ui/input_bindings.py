@@ -35,15 +35,15 @@ class InputAction(enum.StrEnum):
 
 @dataclass(frozen=True)
 class KeyBinding:
-    key: object
+    key: object | None
     label: str
-    identifier: str = ""
+    identifier: str | None = None
 
 
 @dataclass(frozen=True)
 class KeyChoice:
-    identifier: str
-    key: object
+    identifier: str | None
+    key: object | None
     label: str
 
 
@@ -59,17 +59,23 @@ class InputBindings:
     def label(self, action: InputAction) -> str:
         return self.binding(action).label
 
-    def key_id(self, action: InputAction) -> str:
+    def key_id(self, action: InputAction) -> str | None:
         binding = self.binding(action)
+        if binding.key is None:
+            return None
         return binding.identifier or _choice_for_key(binding.key).identifier
 
     def down(self, action: InputAction) -> bool:
         key = self.binding(action).key
+        if key is None:
+            return False
         keys = key if isinstance(key, tuple) else (key,)
         return any(imgui.is_key_down(candidate) for candidate in keys)
 
     def pressed(self, action: InputAction) -> bool:
         key = self.binding(action).key
+        if key is None:
+            return False
         keys = key if isinstance(key, tuple) else (key,)
         return any(imgui.is_key_pressed(candidate, False) for candidate in keys)
 
@@ -77,13 +83,15 @@ class InputBindings:
         """Return immediate and held-repeat presses at an action-specific cadence."""
 
         key = self.binding(action).key
+        if key is None:
+            return 0
         keys = key if isinstance(key, tuple) else (key,)
         return max(
             (imgui.get_key_pressed_amount(candidate, delay, rate) for candidate in keys),
             default=0,
         )
 
-    def with_binding(self, action: InputAction, key: object, label: str) -> InputBindings:
+    def with_binding(self, action: InputAction, key: object | None, label: str) -> InputBindings:
         """Return a changed map without mutating an in-flight input frame."""
 
         choice = _choice_for_key(key)
@@ -96,7 +104,7 @@ class InputBindings:
             ),
         )
 
-    def remap(self, action: InputAction, key_id: str) -> InputBindings:
+    def remap(self, action: InputAction, key_id: str | None) -> InputBindings:
         """Bind one action and swap the displaced action to the previous key.
 
         A viewport key always belongs to exactly one action. Swapping instead
@@ -110,7 +118,9 @@ class InputBindings:
             (
                 candidate
                 for candidate, binding in self.entries
-                if candidate is not action and self.key_id(candidate) == choice.identifier
+                if choice.identifier is not None
+                and candidate is not action
+                and self.key_id(candidate) == choice.identifier
             ),
             None,
         )
@@ -124,7 +134,7 @@ class InputBindings:
                 entries.append((candidate, binding))
         return replace(self, entries=tuple(entries))
 
-    def preferences(self) -> dict[str, str]:
+    def preferences(self) -> dict[str, str | None]:
         """Return the stable JSON representation used by editor settings."""
 
         return {action.value: self.key_id(action) for action, _binding in self.entries}
@@ -137,8 +147,12 @@ class InputBindings:
             return DEFAULT_INPUT_BINDINGS
         bindings = DEFAULT_INPUT_BINDINGS
         for action in InputAction:
+            if action.value not in value:
+                continue
             key_id = value.get(action.value)
-            if not isinstance(key_id, str) or key_id not in _KEY_CHOICES_BY_ID:
+            if key_id is not None and not isinstance(key_id, str):
+                continue
+            if key_id not in _KEY_CHOICES_BY_ID:
                 continue
             bindings = bindings.remap(action, key_id)
         return bindings
@@ -152,14 +166,14 @@ def key_choices() -> tuple[KeyChoice, ...]:
     return _KEY_CHOICES
 
 
-def key_choice(identifier: str) -> KeyChoice:
+def key_choice(identifier: str | None) -> KeyChoice:
     try:
-        return _KEY_CHOICES_BY_ID[str(identifier)]
+        return _KEY_CHOICES_BY_ID[identifier]
     except KeyError as error:
         raise ValueError(f"Unsupported viewport key: {identifier}") from error
 
 
-def _choice_for_key(key: object) -> KeyChoice:
+def _choice_for_key(key: object | None) -> KeyChoice:
     for choice in _KEY_CHOICES:
         if choice.key == key:
             return choice
@@ -188,6 +202,7 @@ _ACTION_NAMES = {
 
 
 _KEY_CHOICES = (
+    KeyChoice(None, None, "Unbound"),
     KeyChoice("space", imgui.Key.space, "Space"),
     KeyChoice("backspace", imgui.Key.backspace, "Backspace"),
     KeyChoice(

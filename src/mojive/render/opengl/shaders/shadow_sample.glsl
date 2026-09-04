@@ -4,8 +4,7 @@
 #define SHADOW_MAX_CASCADES 3
 #define SHADOW_MAX_LOCAL 8
 #define SHADOW_MAX_LIGHTS 100
-#define LOCAL_PCF_RADIUS 1
-#define AREA_PCF_RADIUS 3
+#define MAX_POINT_PCF_RADIUS 3
 
 #ifndef SHADOW_PCF_RADIUS
 #define SHADOW_PCF_RADIUS 1
@@ -18,12 +17,13 @@ const float MOJIVE_SHADOW_MIN_NDL = 0.15;
 // distance, which otherwise appears as concentric self-shadow rings.
 const float LOCAL_DISTANCE_QUANTIZATION_BIAS = 1.0 / 1024.0;
 
-uniform sampler2D u_shadow_atlas;
+uniform sampler2DShadow u_shadow_atlas;
 uniform mat4 u_shadow_matrix[SHADOW_MAX_CASCADES];
 uniform vec3 u_shadow_splits;
 uniform vec3 u_shadow_texel;
 uniform vec4 u_shadow_tile[SHADOW_MAX_CASCADES];
 uniform int u_shadow_count;
+uniform int u_shadow_quality;
 uniform vec2 u_shadow_bias;
 
 uniform sampler2DArray u_local_shadow;
@@ -35,34 +35,19 @@ uniform int u_local_layer[SHADOW_MAX_LOCAL];
 uniform int u_local_slot[SHADOW_MAX_LIGHTS];
 uniform int u_local_count;
 
-// Blend binary comparison results, never stored depths, to avoid light leaks
-// across blocker discontinuities.
-float bilinear_shadow_compare(
-    sampler2D shadow_map,
+// Hardware comparison filtering blends visibility results, never stored
+// depths, so blocker discontinuities cannot leak light through the kernel.
+float hardware_shadow_compare(
+    sampler2DShadow shadow_map,
     vec2 uv,
     float reference,
     ivec2 min_texel,
     ivec2 max_texel
 ) {
-    ivec2 dims = textureSize(shadow_map, 0);
-    vec2 texel_pos = uv * vec2(dims) - 0.5;
-    ivec2 base = ivec2(floor(texel_pos));
-    vec2 blend = fract(texel_pos);
-    ivec2 p00 = clamp(base, min_texel, max_texel);
-    ivec2 p10 = clamp(base + ivec2(1, 0), min_texel, max_texel);
-    ivec2 p01 = clamp(base + ivec2(0, 1), min_texel, max_texel);
-    ivec2 p11 = clamp(base + ivec2(1, 1), min_texel, max_texel);
-    float row0 = mix(
-        step(reference, texelFetch(shadow_map, p00, 0).r),
-        step(reference, texelFetch(shadow_map, p10, 0).r),
-        blend.x
-    );
-    float row1 = mix(
-        step(reference, texelFetch(shadow_map, p01, 0).r),
-        step(reference, texelFetch(shadow_map, p11, 0).r),
-        blend.x
-    );
-    return mix(row0, row1, blend.y);
+    vec2 dims = vec2(textureSize(shadow_map, 0));
+    vec2 lo = (vec2(min_texel) + 0.5) / dims;
+    vec2 hi = (vec2(max_texel) + 0.5) / dims;
+    return texture(shadow_map, vec3(clamp(uv, lo, hi), reference));
 }
 
 float bilinear_local_shadow_compare(vec2 uv, int layer, float reference) {
@@ -90,18 +75,40 @@ float bilinear_local_shadow_compare(vec2 uv, int layer, float reference) {
 }
 
 float filtered_shadow_compare(
-    sampler2D shadow_map,
+    sampler2DShadow shadow_map,
     vec2 uv,
     vec2 texel,
     float reference,
     ivec2 min_texel,
     ivec2 max_texel
 ) {
+    if (u_shadow_quality <= 0) {
+        return hardware_shadow_compare(shadow_map, uv, reference, min_texel, max_texel);
+    }
     vec2 offset = texel * 0.75;
     float lit = 0.0;
+    if (u_shadow_quality == 1) {
+        for (int y = -1; y <= 1; y += 2) {
+            for (int x = -1; x <= 1; x += 2) {
+                lit += hardware_shadow_compare(
+                    shadow_map,
+                    uv + vec2(float(x), float(y)) * offset,
+                    reference,
+                    min_texel,
+                    max_texel
+                );
+            }
+        }
+        return lit * 0.25;
+    }
+    // High quality spends one sample at the kernel center and four on the
+    // diagonals. Each comparison sample is already hardware-filtered 2x2, so
+    // a full 3x3 grid adds substantial redundant work for little edge gain.
+    lit = hardware_shadow_compare(shadow_map, uv, reference, min_texel, max_texel);
+    offset = texel * 1.25;
     for (int y = -1; y <= 1; y += 2) {
         for (int x = -1; x <= 1; x += 2) {
-            lit += bilinear_shadow_compare(
+            lit += hardware_shadow_compare(
                 shadow_map,
                 uv + vec2(float(x), float(y)) * offset,
                 reference,
@@ -110,13 +117,28 @@ float filtered_shadow_compare(
             );
         }
     }
-    return lit * 0.25;
+    return lit * 0.2;
 }
 
 float filtered_local_shadow_compare(vec2 uv, int layer, float reference) {
+    if (u_shadow_quality <= 0) {
+        return bilinear_local_shadow_compare(uv, layer, reference);
+    }
     vec2 texel = 1.0 / vec2(textureSize(u_local_shadow, 0).xy);
     vec2 offset = texel * 0.75;
     float lit = 0.0;
+    if (u_shadow_quality == 1) {
+        for (int y = -1; y <= 1; y += 2) {
+            for (int x = -1; x <= 1; x += 2) {
+                lit += bilinear_local_shadow_compare(
+                    uv + vec2(float(x), float(y)) * offset, layer, reference
+                );
+            }
+        }
+        return lit * 0.25;
+    }
+    lit = bilinear_local_shadow_compare(uv, layer, reference);
+    offset = texel * 1.25;
     for (int y = -1; y <= 1; y += 2) {
         for (int x = -1; x <= 1; x += 2) {
             lit += bilinear_local_shadow_compare(
@@ -124,7 +146,7 @@ float filtered_local_shadow_compare(vec2 uv, int layer, float reference) {
             );
         }
     }
-    return lit * 0.25;
+    return lit * 0.2;
 }
 
 float shadow_factor(vec3 world_pos, vec3 normal, float view_depth) {
@@ -236,13 +258,15 @@ float local_point_shadow(int slot, vec3 world_pos, vec3 normal) {
     vec3 up = cross(right, direction);
     float lit = 0.0;
     float taps = 0.0;
-    int radius = (u_local_radius[slot] > 0.0) ? AREA_PCF_RADIUS : LOCAL_PCF_RADIUS;
+    bool area = u_local_radius[slot] > 0.0;
+    int radius = (u_shadow_quality <= 0) ? (area ? 1 : 0)
+        : (u_shadow_quality == 1 ? (area ? 2 : 1) : (area ? 3 : 2));
     float step_angle = max(
         u_local_texel[slot],
-        u_local_radius[slot] / max(dist * float(AREA_PCF_RADIUS), 1e-6)
+        u_local_radius[slot] / max(dist * float(max(radius, 1)), 1e-6)
     );
-    for (int y = -AREA_PCF_RADIUS; y <= AREA_PCF_RADIUS; ++y) {
-        for (int x = -AREA_PCF_RADIUS; x <= AREA_PCF_RADIUS; ++x) {
+    for (int y = -MAX_POINT_PCF_RADIUS; y <= MAX_POINT_PCF_RADIUS; ++y) {
+        for (int x = -MAX_POINT_PCF_RADIUS; x <= MAX_POINT_PCF_RADIUS; ++x) {
             if (abs(x) > radius || abs(y) > radius) continue;
             vec3 sample_dir = direction +
                 (right * float(x) + up * float(y)) * step_angle;

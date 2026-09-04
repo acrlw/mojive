@@ -8,7 +8,7 @@ import wgpu
 from .... import math3d as M
 from ....log import get_logger
 from ....types import CameraView, Light, LightType, ShadingModel
-from ...backend import RenderFlag
+from ...backend import RenderFlag, ShadowQuality
 from ...dependencies import lifecycle_key, lights_key, shadow_camera_key
 from ...scene import RenderScene
 from ..cascades import ATLAS_SIZE, CascadeSet, build_cascades, slot_pixels
@@ -87,7 +87,19 @@ class ShadowPass:
                     "visibility": wgpu.ShaderStage.FRAGMENT,
                     "texture": {"sample_type": "float", "view_dimension": "2d-array"},
                 },
+                {
+                    "binding": 2,
+                    "visibility": wgpu.ShaderStage.FRAGMENT,
+                    "sampler": {"type": "comparison"},
+                },
             ]
+        )
+        self._compare_sampler = device.create_sampler(
+            address_mode_u="clamp-to-edge",
+            address_mode_v="clamp-to-edge",
+            mag_filter="linear",
+            min_filter="linear",
+            compare="less-equal",
         )
         self._draw_layout = device.create_bind_group_layout(
             entries=[
@@ -139,6 +151,7 @@ class ShadowPass:
         self._cache_scene: RenderScene | None = None
         self._cache_key: tuple | None = None
         self._pending_key: tuple | None = None
+        self._quality = ShadowQuality.BALANCED
         self._failed = ""
 
     # -- lazy resources ---------------------------------------------------------
@@ -302,7 +315,7 @@ class ShadowPass:
             if schedule.directional_shadow >= 0
             else None
         )
-        state = ShadowState()
+        state = ShadowState(quality=self._quality.level)
         local_pixels = self._local_resolution(schedule)
         local_count, local_layers = self._prepare_locals(scene, schedule, state, local_pixels)
         if sun is None and local_count == 0:
@@ -323,6 +336,7 @@ class ShadowPass:
                 scene.scene_extent,
                 scene_center=scene.scene_center,
                 shadow_clip=scene.shadow_clip,
+                radius_divisors=self._quality.cascade_divisors,
                 into=self._cascades,
             )
         else:
@@ -340,8 +354,8 @@ class ShadowPass:
         self._write_draw_uniforms(state)
         return state
 
-    @staticmethod
     def _dependency_key(
+        self,
         scene: RenderScene,
         camera: CameraView,
         schedule: LightSchedule,
@@ -358,8 +372,22 @@ class ShadowPass:
             float(scene.scene_extent),
             float(scene.shadow_clip),
             scene.shading_model.value,
+            self._quality.value,
             int(shader_generation),
         )
+
+    def set_quality(self, quality: ShadowQuality) -> None:
+        quality = ShadowQuality(quality)
+        if quality is self._quality:
+            return
+        self._quality = quality
+        self._cache_scene = None
+        self._cache_key = None
+        self._pending_key = None
+        self._state = None
+
+    def get_quality(self) -> ShadowQuality:
+        return self._quality
 
     @staticmethod
     def _local_resolution(schedule: LightSchedule) -> int:
@@ -584,6 +612,7 @@ class ShadowPass:
                 entries=[
                     {"binding": 0, "resource": atlas_view},
                     {"binding": 1, "resource": local_view},
+                    {"binding": 2, "resource": self._compare_sampler},
                 ],
             )
             self._sample_groups[key] = group

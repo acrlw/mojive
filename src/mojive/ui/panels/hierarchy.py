@@ -54,6 +54,7 @@ def disclosure_triangle(
 
 
 class HierarchyPanel(Panel):
+    id = "hierarchy"
     name = "Hierarchy"
     default_open = True
     shortcut = "F3"

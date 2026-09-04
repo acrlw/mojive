@@ -5,7 +5,7 @@ RUFF := .venv/bin/ruff
 
 .PHONY: rollout-video
 
-.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu renderer-benchmark renderer-benchmark-full golden golden-accept parity calibrate gallery ui-feasibility ui-runtime readme-media ui-frame-profile ui-gallery tool-icons mouse-icons gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept texture-minification local-shadow-precision shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance inspector gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring asset-browser joint-site-authoring model-component-authoring keyframe-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu renderer-benchmark renderer-benchmark-full golden golden-accept parity calibrate gallery ui-feasibility ui-runtime readme-media ui-frame-profile ui-gallery tool-icons mouse-icons gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas lighting image-light many-lights material-parity material-parity-accept texture-minification local-shadow-precision shadow-quality shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance inspector gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring asset-browser joint-site-authoring model-component-authoring keyframe-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -69,6 +69,7 @@ help:
 		'  make material-parity   texture, transparency, tendon, deformable, and dense scenes' \
 		'  make texture-minification  near/far textured-plane filtering acceptance' \
 		'  make local-shadow-precision  anymal-c spotlight receiver precision acceptance' \
+		'  make shadow-quality    performance/balanced/high shadow comparison' \
 		'  make shadow-scheduling deterministic light and shadow-slot report' \
 		'  make scene-icons       camera and light scene icons' \
 		'  make reflect           multiple planar reflections' \
@@ -579,6 +580,10 @@ local-shadow-precision:
 	}
 	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.tools.local_shadow_precision \
 		"$(LOCAL_SHADOW_SCENE)"
+
+shadow-quality:
+	$(PYTEST) -q tests/test_cascades.py tests/test_panels.py -k shadow_quality
+	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.tools.shadow_quality $(ARGS)
 
 AUDIT_SCENE ?= mujoco_visuals
 ## Full MuJoCo adapter and simulation regression suite.

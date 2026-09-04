@@ -51,6 +51,7 @@ def filter_output_entries(
 
 
 class OutputPanel(Panel):
+    id = "output"
     name = "Output"
     default_open = True
     shortcut = "F12"
