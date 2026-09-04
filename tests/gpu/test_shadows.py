@@ -142,7 +142,12 @@ def _managed(scene):
     return scene
 
 
-def _spot_scene(camera: CameraView, cast: bool = True, with_box: bool = True):
+def _spot_scene(
+    camera: CameraView,
+    cast: bool = True,
+    with_box: bool = True,
+    active: bool = True,
+):
     b = SceneBuilder()
     mid = b.material_id(Material(name="spot-test"))
     material = np.array([0.0, 0.0, 0.3, 0.0], np.float32)
@@ -172,6 +177,7 @@ def _spot_scene(camera: CameraView, cast: bool = True, with_box: bool = True):
         cutoff=38.0,
         exponent=2.0,
         cast_shadow=cast,
+        active=active,
     )
     lights = LightSet(lights=(spot,), headlight=None, ambient=np.full(3, 0.08, np.float32))
     return b.build(camera, lights, EXTENT, np.zeros(3, np.float32))
@@ -228,10 +234,10 @@ def _render(backend, camera=VIEW, shadow=True, **kw) -> np.ndarray:
     return backend.target.read_color(flip=True)[..., :3].astype(np.int16)
 
 
-def _render_spot(backend, shadow=True, cast=True, with_box=True) -> np.ndarray:
+def _render_spot(backend, shadow=True, cast=True, with_box=True, active=True) -> np.ndarray:
     backend.set_flag(RenderFlag.SHADOW, bool(shadow))
     backend.set_camera(VIEW)
-    backend.set_render_scene(_spot_scene(VIEW, cast=cast, with_box=with_box))
+    backend.set_render_scene(_spot_scene(VIEW, cast=cast, with_box=with_box, active=active))
     backend.render()
     return backend.target.read_color(flip=True)[..., :3].astype(np.int16)
 
@@ -329,6 +335,18 @@ def test_shadow_cache_reuses_static_maps_and_tracks_dependencies(backend):
     )
     backend.set_camera(moved_view)
     backend.render()
+    assert backend.stats.notes["shadow cache"] == "reused"
+
+    moved_target_view = CameraView(
+        eye=moved_view.eye,
+        target=VIEW.target + np.array([0.15, 0.0, 0.0], np.float32),
+        up=VIEW.up,
+        fov_y=VIEW.fov_y,
+        near=VIEW.near,
+        far=VIEW.far,
+    )
+    backend.set_camera(moved_target_view)
+    backend.render()
     assert backend.stats.notes["shadow cache"] == "rendered"
     backend.render()
     assert backend.stats.notes["shadow cache"] == "reused"
@@ -341,6 +359,28 @@ def test_shadow_cache_reuses_static_maps_and_tracks_dependencies(backend):
     scene.pose_revision += 1
     backend.render()
     assert backend.stats.notes["shadow cache"] == "rendered"
+
+
+def test_local_shadow_cache_ignores_camera_motion(backend):
+    scene = _managed(_spot_scene(VIEW))
+    backend.set_camera(VIEW)
+    backend.set_flag(RenderFlag.SHADOW, True)
+    backend.set_render_scene(scene)
+
+    backend.render()
+    assert backend.stats.notes["shadow cache"] == "rendered"
+
+    moved_view = CameraView(
+        eye=VIEW.eye + np.array([0.15, 0.0, 0.0], np.float32),
+        target=VIEW.target + np.array([0.0, 0.2, 0.0], np.float32),
+        up=VIEW.up,
+        fov_y=VIEW.fov_y,
+        near=VIEW.near,
+        far=VIEW.far,
+    )
+    backend.set_camera(moved_view)
+    backend.render()
+    assert backend.stats.notes["shadow cache"] == "reused"
 
 
 def test_ground_darkens_where_the_light_points(backend):
@@ -450,6 +490,19 @@ def test_spot_shadow_uses_its_perspective_distance_map(backend):
     px, py = _to_pixel(VIEW, hit)
     ys, xs = np.nonzero(mask)
     assert float(np.hypot(xs.mean() - px, ys.mean() - py)) < 16.0
+
+
+def test_spot_shadow_edge_has_continuous_coverage(backend):
+    lit = _render_spot(backend, shadow=False)
+    ambient = _render_spot(backend, shadow=True, active=False)
+    shadowed = _render_spot(backend, shadow=True)
+
+    available = np.maximum(_luma(lit) - _luma(ambient), 1.0)
+    shadow_fraction = np.clip((_luma(lit) - _luma(shadowed)) / available, 0.0, 1.0)
+    partial = shadow_fraction[(shadow_fraction > 0.05) & (shadow_fraction < 0.95)]
+
+    assert len(partial) > 100
+    assert len(np.unique(np.round(partial, 2))) > 35
 
 
 def test_spot_shadow_distance_quantization_does_not_ring_on_its_receiver(backend):

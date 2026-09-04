@@ -9,7 +9,7 @@ from .... import math3d as M
 from ....log import get_logger
 from ....types import CameraView, Light, LightType, ShadingModel
 from ...backend import RenderFlag
-from ...dependencies import camera_key, lifecycle_key, lights_key
+from ...dependencies import lifecycle_key, lights_key, shadow_camera_key
 from ...scene import RenderScene
 from ..cascades import ATLAS_SIZE, CascadeSet, build_cascades, slot_pixels
 from ..instances import POSE_STRIDE
@@ -284,7 +284,10 @@ class ShadowPass:
             return None
         if not scene.opaque_buckets:
             return None
-        key = self._dependency_key(scene, camera, frame_serial, mesh_revision, shader_generation)
+        schedule = schedule_lights(scene.lights)
+        key = self._dependency_key(
+            scene, camera, schedule, frame_serial, mesh_revision, shader_generation
+        )
         if self._cache_scene is scene and self._cache_key == key and self._state is not None:
             self.cache_status = "reused"
             self.cache_hit = True
@@ -294,7 +297,6 @@ class ShadowPass:
         self._cache_key = None
         self._state = None
         self._pending_key = key
-        schedule = schedule_lights(scene.lights)
         sun = (
             schedule.lights[schedule.directional_shadow]
             if schedule.directional_shadow >= 0
@@ -342,6 +344,7 @@ class ShadowPass:
     def _dependency_key(
         scene: RenderScene,
         camera: CameraView,
+        schedule: LightSchedule,
         frame_serial: int,
         mesh_revision: int,
         shader_generation: int,
@@ -349,7 +352,7 @@ class ShadowPass:
         return (
             lifecycle_key(scene, frame_serial),
             int(mesh_revision),
-            camera_key(camera),
+            shadow_camera_key(camera, directional=schedule.directional_shadow >= 0),
             lights_key(scene.lights),
             tuple(float(value) for value in np.asarray(scene.scene_center).flat),
             float(scene.scene_extent),

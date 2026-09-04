@@ -36,6 +36,12 @@ def camera_key(camera: CameraView) -> tuple:
     )
 
 
+def shadow_camera_key(camera: CameraView, *, directional: bool) -> tuple | None:
+    """Key the camera input actually consumed while building shadow maps."""
+
+    return _array_key(camera.target) if directional else None
+
+
 def _light_key(light: Light | None) -> tuple | None:
     if light is None:
         return None

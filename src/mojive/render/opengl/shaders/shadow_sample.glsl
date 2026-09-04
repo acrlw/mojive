@@ -18,10 +18,6 @@ const float MOJIVE_SHADOW_MIN_NDL = 0.15;
 // distance, which otherwise appears as concentric self-shadow rings.
 const float LOCAL_DISTANCE_QUANTIZATION_BIAS = 1.0 / 1024.0;
 
-float pcf_tent_weight(int offset, int radius) {
-    return float(radius + 1 - abs(offset));
-}
-
 uniform sampler2D u_shadow_atlas;
 uniform mat4 u_shadow_matrix[SHADOW_MAX_CASCADES];
 uniform vec3 u_shadow_splits;
@@ -38,6 +34,98 @@ uniform float u_local_radius[SHADOW_MAX_LOCAL];
 uniform int u_local_layer[SHADOW_MAX_LOCAL];
 uniform int u_local_slot[SHADOW_MAX_LIGHTS];
 uniform int u_local_count;
+
+// Blend binary comparison results, never stored depths, to avoid light leaks
+// across blocker discontinuities.
+float bilinear_shadow_compare(
+    sampler2D shadow_map,
+    vec2 uv,
+    float reference,
+    ivec2 min_texel,
+    ivec2 max_texel
+) {
+    ivec2 dims = textureSize(shadow_map, 0);
+    vec2 texel_pos = uv * vec2(dims) - 0.5;
+    ivec2 base = ivec2(floor(texel_pos));
+    vec2 blend = fract(texel_pos);
+    ivec2 p00 = clamp(base, min_texel, max_texel);
+    ivec2 p10 = clamp(base + ivec2(1, 0), min_texel, max_texel);
+    ivec2 p01 = clamp(base + ivec2(0, 1), min_texel, max_texel);
+    ivec2 p11 = clamp(base + ivec2(1, 1), min_texel, max_texel);
+    float row0 = mix(
+        step(reference, texelFetch(shadow_map, p00, 0).r),
+        step(reference, texelFetch(shadow_map, p10, 0).r),
+        blend.x
+    );
+    float row1 = mix(
+        step(reference, texelFetch(shadow_map, p01, 0).r),
+        step(reference, texelFetch(shadow_map, p11, 0).r),
+        blend.x
+    );
+    return mix(row0, row1, blend.y);
+}
+
+float bilinear_local_shadow_compare(vec2 uv, int layer, float reference) {
+    ivec2 dims = textureSize(u_local_shadow, 0).xy;
+    vec2 texel_pos = uv * vec2(dims) - 0.5;
+    ivec2 base = ivec2(floor(texel_pos));
+    vec2 blend = fract(texel_pos);
+    ivec2 lo = ivec2(0);
+    ivec2 hi = dims - ivec2(1);
+    ivec2 p00 = clamp(base, lo, hi);
+    ivec2 p10 = clamp(base + ivec2(1, 0), lo, hi);
+    ivec2 p01 = clamp(base + ivec2(0, 1), lo, hi);
+    ivec2 p11 = clamp(base + ivec2(1, 1), lo, hi);
+    float row0 = mix(
+        step(reference, texelFetch(u_local_shadow, ivec3(p00, layer), 0).r),
+        step(reference, texelFetch(u_local_shadow, ivec3(p10, layer), 0).r),
+        blend.x
+    );
+    float row1 = mix(
+        step(reference, texelFetch(u_local_shadow, ivec3(p01, layer), 0).r),
+        step(reference, texelFetch(u_local_shadow, ivec3(p11, layer), 0).r),
+        blend.x
+    );
+    return mix(row0, row1, blend.y);
+}
+
+float filtered_shadow_compare(
+    sampler2D shadow_map,
+    vec2 uv,
+    vec2 texel,
+    float reference,
+    ivec2 min_texel,
+    ivec2 max_texel
+) {
+    vec2 offset = texel * 0.75;
+    float lit = 0.0;
+    for (int y = -1; y <= 1; y += 2) {
+        for (int x = -1; x <= 1; x += 2) {
+            lit += bilinear_shadow_compare(
+                shadow_map,
+                uv + vec2(float(x), float(y)) * offset,
+                reference,
+                min_texel,
+                max_texel
+            );
+        }
+    }
+    return lit * 0.25;
+}
+
+float filtered_local_shadow_compare(vec2 uv, int layer, float reference) {
+    vec2 texel = 1.0 / vec2(textureSize(u_local_shadow, 0).xy);
+    vec2 offset = texel * 0.75;
+    float lit = 0.0;
+    for (int y = -1; y <= 1; y += 2) {
+        for (int x = -1; x <= 1; x += 2) {
+            lit += bilinear_local_shadow_compare(
+                uv + vec2(float(x), float(y)) * offset, layer, reference
+            );
+        }
+    }
+    return lit * 0.25;
+}
 
 float shadow_factor(vec3 world_pos, vec3 normal, float view_depth) {
     int count = min(u_shadow_count, SHADOW_MAX_CASCADES);
@@ -77,19 +165,19 @@ float shadow_factor(vec3 world_pos, vec3 normal, float view_depth) {
     vec2 margin = (float(SHADOW_PCF_RADIUS) + 0.5) * texel_uv;
     vec2 uv = mix(tile.xy - margin, tile.zw + margin, p.xy);
 
-    float lit = 0.0;
-    float taps = 0.0;
     float ref = p.z - bias;
-    for (int y = -SHADOW_PCF_RADIUS; y <= SHADOW_PCF_RADIUS; ++y) {
-        for (int x = -SHADOW_PCF_RADIUS; x <= SHADOW_PCF_RADIUS; ++x) {
-            vec2 s = clamp(uv + vec2(float(x), float(y)) * texel_uv, tile.xy, tile.zw);
-            float weight = pcf_tent_weight(x, SHADOW_PCF_RADIUS) *
-                           pcf_tent_weight(y, SHADOW_PCF_RADIUS);
-            lit += step(ref, texture(u_shadow_atlas, s).r) * weight;
-            taps += weight;
-        }
-    }
-    return lit / taps;
+    ivec2 dims = textureSize(u_shadow_atlas, 0);
+    ivec2 min_texel = max(
+        ivec2(floor((tile.xy - margin) * vec2(dims))),
+        ivec2(0)
+    );
+    ivec2 max_texel = min(
+        ivec2(ceil((tile.zw + margin) * vec2(dims))) - ivec2(1),
+        dims - ivec2(1)
+    );
+    return filtered_shadow_compare(
+        u_shadow_atlas, uv, texel_uv, ref, min_texel, max_texel
+    );
 }
 
 float local_bias(int slot, float dist, vec3 normal, vec3 l) {
@@ -112,23 +200,7 @@ float local_spot_shadow(int slot, vec3 world_pos, vec3 normal) {
     float dist = length(to_light);
     if (u_local_pos[slot].w > 0.0 && dist > u_local_pos[slot].w) return 1.0;
     float bias = local_bias(slot, dist, normal, to_light / max(dist, 1e-6));
-    vec2 texel = 1.0 / vec2(textureSize(u_local_shadow, 0).xy);
-    vec2 margin = (float(LOCAL_PCF_RADIUS) + 0.5) * texel;
-    vec2 uv = mix(margin, vec2(1.0) - margin, p.xy);
-    float lit = 0.0;
-    float taps = 0.0;
-    for (int y = -LOCAL_PCF_RADIUS; y <= LOCAL_PCF_RADIUS; ++y) {
-        for (int x = -LOCAL_PCF_RADIUS; x <= LOCAL_PCF_RADIUS; ++x) {
-            vec2 sample_uv = clamp(uv + vec2(float(x), float(y)) * texel,
-                                   margin, vec2(1.0) - margin);
-            float weight = pcf_tent_weight(x, LOCAL_PCF_RADIUS) *
-                           pcf_tent_weight(y, LOCAL_PCF_RADIUS);
-            lit += step(dist - bias,
-                        texture(u_local_shadow, vec3(sample_uv, float(u_local_layer[slot]))).r) * weight;
-            taps += weight;
-        }
-    }
-    return lit / taps;
+    return filtered_local_shadow_compare(p.xy, u_local_layer[slot], dist - bias);
 }
 
 vec3 point_layer_uv(int slot, vec3 d) {

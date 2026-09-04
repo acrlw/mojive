@@ -11,7 +11,7 @@ from .... import math3d as M
 from ....log import get_logger
 from ....types import Light, LightType, ShadingModel
 from ...backend import RenderFlag
-from ...dependencies import camera_key, lifecycle_key, lights_key
+from ...dependencies import lifecycle_key, lights_key, shadow_camera_key
 from ...scene import RenderScene
 from .. import gl_native as G
 from ..cascades import (
@@ -169,7 +169,8 @@ class ShadowPass(BasePass):
             return False
         if not ctx.scene.opaque_buckets:
             return False
-        key = self._dependency_key(ctx)
+        schedule = schedule_lights(ctx.scene.lights)
+        key = self._dependency_key(ctx, schedule)
         if self._cache_scene is ctx.scene and self._cache_key == key and self._state is not None:
             ctx.shadow = self._state
             self.cache_status = "reused"
@@ -183,7 +184,6 @@ class ShadowPass(BasePass):
         self._pending_key = key
         s = ctx.shadow
         self._reset(s)
-        schedule = schedule_lights(ctx.scene.lights)
         sun = (
             schedule.lights[schedule.directional_shadow]
             if schedule.directional_shadow >= 0
@@ -247,12 +247,12 @@ class ShadowPass(BasePass):
         return True
 
     @staticmethod
-    def _dependency_key(ctx: PassContext) -> tuple:
+    def _dependency_key(ctx: PassContext, schedule: LightSchedule) -> tuple:
         scene = ctx.scene
         return (
             lifecycle_key(scene, ctx.frame_serial),
             int(ctx.mesh_revision),
-            camera_key(ctx.camera),
+            shadow_camera_key(ctx.camera, directional=schedule.directional_shadow >= 0),
             lights_key(scene.lights),
             tuple(float(value) for value in np.asarray(scene.scene_center).flat),
             float(scene.scene_extent),

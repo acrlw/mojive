@@ -11,9 +11,9 @@
 //   that).
 // - WebGPU framebuffer rows run y-down where GL's run y-up, so every
 //   NDC-derived uv flips y (atlas tile, spot layer, point cube face).
-// - NEAREST `texture()` calls become explicit `textureLoad` on texel
-//   coordinates (floor via vec2i truncation matches NEAREST addressing); no
-//   sampler bindings are needed.
+// - Comparison results are bilinearly blended into a compact 2x2 PCF kernel;
+//   interpolating stored depth before comparison would leak light across
+//   discontinuities. No sampler bindings are needed.
 //
 // Count fields gate everything: with `shadow_counts` zero the functions never
 // touch the (1x1 fallback) textures.
@@ -35,12 +35,92 @@ fn shadow_bias_factors() -> vec2f {
     return select(OPENGL_SHADOW_BIAS, lights.shadow_bias.xy, lights.shadow_bias.x > 0.0);
 }
 
-fn pcf_tent_weight(offset: i32, radius: i32) -> f32 {
-    return f32(radius + 1 - abs(offset));
+// shadow_sample.glsl shadow_factor(): cascade select with fallback, slope-
+// scaled bias, continuous PCF, atlas tile clamp.
+fn bilinear_shadow_compare(
+    uv: vec2f,
+    reference: f32,
+    min_texel: vec2i,
+    max_texel: vec2i,
+) -> f32 {
+    let dims = vec2f(textureDimensions(shadow_atlas, 0u));
+    let texel_pos = uv * dims - vec2f(0.5);
+    let base = vec2i(floor(texel_pos));
+    let blend = fract(texel_pos);
+    let p00 = clamp(base, min_texel, max_texel);
+    let p10 = clamp(base + vec2i(1, 0), min_texel, max_texel);
+    let p01 = clamp(base + vec2i(0, 1), min_texel, max_texel);
+    let p11 = clamp(base + vec2i(1, 1), min_texel, max_texel);
+    let row0 = mix(
+        step(reference, textureLoad(shadow_atlas, p00, 0)),
+        step(reference, textureLoad(shadow_atlas, p10, 0)),
+        blend.x,
+    );
+    let row1 = mix(
+        step(reference, textureLoad(shadow_atlas, p01, 0)),
+        step(reference, textureLoad(shadow_atlas, p11, 0)),
+        blend.x,
+    );
+    return mix(row0, row1, blend.y);
 }
 
-// shadow_sample.glsl shadow_factor(): cascade select with fallback, slope-
-// scaled bias, tent-filtered PCF, atlas tile clamp.
+fn bilinear_local_shadow_compare(uv: vec2f, layer: i32, reference: f32) -> f32 {
+    let dims_i = vec2i(textureDimensions(local_shadow, 0u).xy);
+    let texel_pos = uv * vec2f(dims_i) - vec2f(0.5);
+    let base = vec2i(floor(texel_pos));
+    let blend = fract(texel_pos);
+    let lo = vec2i(0);
+    let hi = dims_i - vec2i(1);
+    let p00 = clamp(base, lo, hi);
+    let p10 = clamp(base + vec2i(1, 0), lo, hi);
+    let p01 = clamp(base + vec2i(0, 1), lo, hi);
+    let p11 = clamp(base + vec2i(1, 1), lo, hi);
+    let row0 = mix(
+        step(reference, textureLoad(local_shadow, p00, layer, 0).r),
+        step(reference, textureLoad(local_shadow, p10, layer, 0).r),
+        blend.x,
+    );
+    let row1 = mix(
+        step(reference, textureLoad(local_shadow, p01, layer, 0).r),
+        step(reference, textureLoad(local_shadow, p11, layer, 0).r),
+        blend.x,
+    );
+    return mix(row0, row1, blend.y);
+}
+
+fn filtered_shadow_compare(
+    uv: vec2f,
+    texel: vec2f,
+    reference: f32,
+    min_texel: vec2i,
+    max_texel: vec2i,
+) -> f32 {
+    let offset = texel * 0.75;
+    var lit = 0.0;
+    for (var y = -1; y <= 1; y = y + 2) {
+        for (var x = -1; x <= 1; x = x + 2) {
+            lit += bilinear_shadow_compare(
+                uv + vec2f(f32(x), f32(y)) * offset, reference, min_texel, max_texel
+            );
+        }
+    }
+    return lit * 0.25;
+}
+
+fn filtered_local_shadow_compare(uv: vec2f, layer: i32, reference: f32) -> f32 {
+    let texel = 1.0 / vec2f(textureDimensions(local_shadow, 0u).xy);
+    let offset = texel * 0.75;
+    var lit = 0.0;
+    for (var y = -1; y <= 1; y = y + 2) {
+        for (var x = -1; x <= 1; x = x + 2) {
+            lit += bilinear_local_shadow_compare(
+                uv + vec2f(f32(x), f32(y)) * offset, layer, reference
+            );
+        }
+    }
+    return lit * 0.25;
+}
+
 fn shadow_factor(world_pos: vec3f, normal: vec3f, view_depth: f32) -> f32 {
     let count = min(i32(lights.shadow_counts.x), SHADOW_MAX_CASCADES);
     if count <= 0 {
@@ -98,19 +178,13 @@ fn shadow_factor(world_pos: vec3f, normal: vec3f, view_depth: f32) -> f32 {
     let margin = (f32(SHADOW_PCF_RADIUS) + 0.5) * texel_uv;
     let uv = mix(tile.xy - margin, tile.zw + margin, p.xy);
 
-    var lit = 0.0;
-    var taps = 0.0;
     let ref_depth = p.z - bias;
-    for (var y = -SHADOW_PCF_RADIUS; y <= SHADOW_PCF_RADIUS; y = y + 1) {
-        for (var x = -SHADOW_PCF_RADIUS; x <= SHADOW_PCF_RADIUS; x = x + 1) {
-            let s = clamp(uv + vec2f(f32(x), f32(y)) * texel_uv, tile.xy, tile.zw);
-            let weight = pcf_tent_weight(x, SHADOW_PCF_RADIUS) *
-                pcf_tent_weight(y, SHADOW_PCF_RADIUS);
-            lit += step(ref_depth, textureLoad(shadow_atlas, vec2i(s * dims), 0)) * weight;
-            taps += weight;
-        }
-    }
-    return lit / taps;
+    let dims_i = vec2i(textureDimensions(shadow_atlas, 0u));
+    let min_texel = max(vec2i(floor((tile.xy - margin) * dims)), vec2i(0));
+    let max_texel = min(
+        vec2i(ceil((tile.zw + margin) * dims)) - vec2i(1), dims_i - vec2i(1)
+    );
+    return filtered_shadow_compare(uv, texel_uv, ref_depth, min_texel, max_texel);
 }
 
 fn local_bias(slot: i32, dist: f32, normal: vec3f, l: vec3f) -> f32 {
@@ -140,27 +214,7 @@ fn local_spot_shadow(slot: i32, world_pos: vec3f, normal: vec3f) -> f32 {
         return 1.0;
     }
     let bias = local_bias(slot, dist, normal, to_light / max(dist, 1e-6));
-    let dims = vec2f(textureDimensions(local_shadow, 0u).xy);
-    let texel = 1.0 / dims;
-    let margin = (f32(LOCAL_PCF_RADIUS) + 0.5) * texel;
-    let uv = mix(margin, vec2f(1.0) - margin, p.xy);
-    var lit = 0.0;
-    var taps = 0.0;
-    for (var y = -LOCAL_PCF_RADIUS; y <= LOCAL_PCF_RADIUS; y = y + 1) {
-        for (var x = -LOCAL_PCF_RADIUS; x <= LOCAL_PCF_RADIUS; x = x + 1) {
-            let sample_uv = clamp(
-                uv + vec2f(f32(x), f32(y)) * texel, margin, vec2f(1.0) - margin
-            );
-            let weight = pcf_tent_weight(x, LOCAL_PCF_RADIUS) *
-                pcf_tent_weight(y, LOCAL_PCF_RADIUS);
-            lit += step(
-                dist - bias,
-                textureLoad(local_shadow, vec2i(sample_uv * dims), lights.local_layer[slot], 0).r
-            ) * weight;
-            taps += weight;
-        }
-    }
-    return lit / taps;
+    return filtered_local_shadow_compare(p.xy, lights.local_layer[slot], dist - bias);
 }
 
 // shadow_sample.glsl point_layer_uv(): direction to cube-face layer uv; the
