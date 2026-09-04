@@ -531,6 +531,8 @@ def test_status_places_simulation_state_before_selection():
     )
 
     assert draw.texts[:2] == ["Paused", "01_revolute"]
+    assert draw.lines[0][0][2] == THEME.border
+    assert draw.lines[0][0][3] == pytest.approx(2.0)
     x_by_text = {text: position[0] for position, text in draw.text_positions}
     assert x_by_text["01_revolute"] < x_by_text["OpenGL"]
     assert x_by_text["OpenGL"] < x_by_text["Steps 674"] < x_by_text["Δt 0.002 s"]

@@ -2080,7 +2080,7 @@ def draw_status(
         (x, y),
         (x + width, y),
         theme.primary_dim if running else theme.border,
-        (2.0 if running else 1.0) * scale,
+        2.0 * scale,
     )
     cy = y + height * 0.5
     cursor = x + 12.0 * scale
