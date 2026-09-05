@@ -11,6 +11,7 @@ from mojive.types import CameraView
 from mojive.ui.camera import (
     FOCUS_DURATION,
     ISO_PITCH,
+    PITCH_LIMIT,
     CameraOut,
     OrbitCamera,
     camera_basis,
@@ -528,6 +529,32 @@ def test_free_camera_can_adopt_a_rolled_model_camera_without_an_eye_jump():
     assert adopted.fov_y == pytest.approx(view.fov_y)
     assert adopted.near == pytest.approx(view.near)
     assert adopted.far == pytest.approx(view.far)
+
+
+def test_free_camera_adopts_a_top_view_without_roll_or_first_orbit_jump():
+    view = CameraView(
+        eye=np.array([0.0, 0.0, 10.0], np.float32),
+        target=np.zeros(3, np.float32),
+        up=np.array([0.0, 1.0, 0.0], np.float32),
+        orthographic=True,
+        ortho_height=8.0,
+    )
+    cam = OrbitCamera()
+    cam.adopt(view)
+    adopted = cam.view()
+
+    assert cam.yaw == pytest.approx(-90.0)
+    assert cam.pitch == pytest.approx(PITCH_LIMIT)
+    np.testing.assert_allclose(
+        adopted.view_matrix()[:3, :3],
+        view.view_matrix()[:3, :3],
+        atol=2e-3,
+    )
+
+    before_drag = adopted.view_matrix()[:3, :3]
+    cam.orbit(1.0, -1.0)
+    after_drag = cam.view().view_matrix()[:3, :3]
+    assert float(np.trace(before_drag @ after_drag.T)) > 2.999
 
 
 def test_advance_publishes_every_frame_of_the_easing():

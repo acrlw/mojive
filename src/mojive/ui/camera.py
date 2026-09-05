@@ -100,6 +100,26 @@ def _wrap_deg(a: float) -> float:
     return float((a + 180.0) % 360.0 - 180.0)
 
 
+def _adopted_yaw(direction: np.ndarray, up) -> float:
+    """Recover a stable orbit yaw, including at the world-Z poles."""
+
+    horizontal = float(np.linalg.norm(direction[:2]))
+    if horizontal > 1e-9:
+        return float(np.degrees(np.arctan2(direction[1], direction[0])))
+
+    # A world-Z orbit cannot use its regular up vector at an exact pole. Use
+    # the source camera's screen-up direction to select the equivalent yaw
+    # before pitch is moved just inside the representable orbit range.
+    screen_up = np.asarray(up, np.float64).reshape(3)
+    screen_up = screen_up - direction * float(np.dot(screen_up, direction))
+    planar_length = float(np.linalg.norm(screen_up[:2]))
+    if np.isfinite(planar_length) and planar_length > 1e-9:
+        pole_sign = 1.0 if direction[2] >= 0.0 else -1.0
+        heading = -pole_sign * screen_up[:2] / planar_length
+        return float(np.degrees(np.arctan2(heading[1], heading[0])))
+    return PRESETS["top"][0]
+
+
 def closest_axis_view_direction(axis, eye_offset) -> np.ndarray:
     """Return the axis direction on the side nearest the current camera eye."""
 
@@ -433,8 +453,14 @@ class OrbitCamera:
         self._stop_anim()
         self._pivot = target.copy()
         self._distance = distance
-        self._yaw = float(np.degrees(np.arctan2(direction[1], direction[0])))
-        self._pitch = float(np.degrees(np.arcsin(np.clip(direction[2], -1.0, 1.0))))
+        self._yaw = _adopted_yaw(direction, view.up)
+        self._pitch = float(
+            np.clip(
+                np.degrees(np.arcsin(np.clip(direction[2], -1.0, 1.0))),
+                -PITCH_LIMIT,
+                PITCH_LIMIT,
+            )
+        )
         self._fov_y = float(view.fov_y)
         self.near = float(view.near)
         self.far = float(view.far)
