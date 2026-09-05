@@ -557,19 +557,43 @@ def masked_axis_start(origin, end, radius: float) -> np.ndarray:
     return origin + direction * (float(radius) / length)
 
 
-def dimension_axis_geometry(start, end, style_scale: float) -> tuple[np.ndarray, np.ndarray]:
-    """Return a scale-style shaft endpoint and screen-aligned square handle."""
+def dimension_axis_polygon(
+    start,
+    end,
+    style_scale: float,
+    *,
+    outline_pt: float = 0.0,
+) -> np.ndarray:
+    """Return one silhouette joining a scale-style shaft and square handle."""
 
     start = np.asarray(start, np.float64).reshape(2)
     end = np.asarray(end, np.float64).reshape(2)
     direction = end - start
     length = float(np.linalg.norm(direction))
-    half = DIMENSION_HANDLE_HALF_PT * float(style_scale)
-    shaft_end = end if length <= half else end - direction * (half / length)
-    square = end + half * np.asarray(
-        ((-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)), np.float64
+    if length < 1e-6:
+        return np.empty((0, 2), np.float64)
+    direction /= length
+    side = np.array((-direction[1], direction[0]), np.float64)
+    scale = float(style_scale)
+    edge = float(outline_pt) * scale
+    shaft = DIMENSION_SHAFT_WIDTH_PT * 0.5 * scale + edge
+    half = DIMENSION_HANDLE_HALF_PT * scale + edge
+    tail = start - direction * edge
+    neck = end - direction * half
+    tip = end + direction * half
+    return np.asarray(
+        (
+            tail - side * shaft,
+            neck - side * shaft,
+            neck - side * half,
+            tip - side * half,
+            tip + side * half,
+            neck + side * half,
+            neck + side * shaft,
+            tail + side * shaft,
+        ),
+        np.float64,
     )
-    return shaft_end, square
 
 
 def _rounded_polygon_corners(
@@ -823,12 +847,8 @@ def hit_test(
                 CENTER_SHELL_RADIUS * SIZE_PT * style_scale,
             )
             if mode is GizmoMode.DIMENSIONS:
-                shaft_end, polygon = dimension_axis_geometry(start, screen[1, :2], style_scale)
-                distance = min(
-                    _polygon_distance(p, polygon),
-                    _segment_distance(p, start, shaft_end)
-                    - DIMENSION_SHAFT_WIDTH_PT * 0.5 * style_scale,
-                )
+                polygon = dimension_axis_polygon(start, screen[1, :2], style_scale)
+                distance = _polygon_distance(p, polygon)
             else:
                 polygon = axis_arrow_polygon(start, screen[1, :2], style_scale)
                 distance = _polygon_distance(p, polygon)

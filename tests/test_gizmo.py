@@ -809,7 +809,10 @@ def test_dimension_gizmo_stays_on_geometry_pose_and_reuses_flat_overlay() -> Non
 
     assert backend.frame is None
     assert gizmo._frame.position == pytest.approx((1.0, 2.0, 0.5))
-    assert any(name == "rect_filled" for name, _args, _kwargs in overlay.calls)
+    silhouettes = [args[0] for name, args, _kwargs in overlay.calls if name == "concave_fill"]
+    assert silhouettes
+    assert all(np.asarray(points).shape == (8, 2) for points in silhouettes)
+    assert not any(name in ("line", "rect_filled") for name, _args, _kwargs in overlay.calls)
 
 
 @pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))

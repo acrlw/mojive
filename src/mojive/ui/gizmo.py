@@ -40,7 +40,6 @@ from ..gizmo import (
     CONTRAST_EDGE_COLOR,
     CONTRAST_EDGE_PT,
     DIMENSION_HANDLE_HALF_PT,
-    DIMENSION_SHAFT_WIDTH_PT,
     GUIDE_CORE_COLOR,
     HOVER_COLOR,
     JOINT_HANDLE_COLOR,
@@ -70,7 +69,7 @@ from ..gizmo import (
     axis_dark_color,
     axis_handle_alpha,
     axis_hover_color,
-    dimension_axis_geometry,
+    dimension_axis_polygon,
     display_handles,
     handle_mask,
     handle_projection_alpha,
@@ -1873,20 +1872,18 @@ class ObjectGizmo:
             )
             color = self._flat_color(handle, axis, alpha)
             if frame.mode is GizmoMode.DIMENSIONS:
-                shaft_end, square = dimension_axis_geometry(start, screen[1, :2], style_scale)
-                overlay.line(
+                outline = dimension_axis_polygon(
                     start,
-                    shaft_end,
+                    screen[1, :2],
+                    style_scale,
+                    outline_pt=CONTRAST_EDGE_PT,
+                )
+                points = dimension_axis_polygon(start, screen[1, :2], style_scale)
+                overlay.concave_fill(
+                    outline,
                     CONTRAST_EDGE_COLOR,
-                    (DIMENSION_SHAFT_WIDTH_PT + 2.0 * CONTRAST_EDGE_PT) * style_scale,
                 )
-                overlay.line(
-                    start,
-                    shaft_end,
-                    color,
-                    DIMENSION_SHAFT_WIDTH_PT * style_scale,
-                )
-                self._draw_dimension_square(overlay, np.mean(square, axis=0), color, style_scale)
+                overlay.concave_fill(points, color)
             else:
                 points = axis_arrow_polygon(start, screen[1, :2], style_scale)
                 if len(points):
