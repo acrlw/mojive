@@ -106,6 +106,7 @@ PRECISE_GIZMO_WIDTH_PT = 204.0
 JOINT_LIMIT_LABEL_DELAY_SECONDS = 0.5
 JOINT_LIMIT_HOVER_GRACE_SECONDS = 0.12
 PRECISE_GIZMO_HINT_DELAY_SECONDS = 0.5
+APPLICATION_STATUS_HEIGHT_PT = 28.0
 JOINT_FOCUS_MARGIN = 1.5
 JOINT_FOCUS_OBLIQUE_DEGREES = 35.0
 JOINT_FOCUS_OCCLUSION_NEIGHBORHOOD_DEGREES = 25.0
@@ -810,6 +811,20 @@ class ViewerApp:
             self._overlay_drag_kind = ""
         if persist:
             self.localizer.set_preferences({"viewport_overlays": asdict(self.viewport_overlays)})
+
+    def reset_layout(self, *, persist: bool = True) -> None:
+        """Restore dock panels and movable viewport chrome to product defaults."""
+
+        self.window.reset_layout()
+        self._overlay_drag_kind = ""
+        self.set_viewport_overlays(
+            replace(
+                self.viewport_overlays,
+                playback_position=None,
+                tool_position=None,
+            ),
+            persist=persist,
+        )
 
     def set_viewport_capsule_scale(self, name: str, value: float, *, persist: bool = True) -> None:
         """Set one viewport capsule's scale independently."""
@@ -1877,7 +1892,7 @@ class ViewerApp:
         elif toggle_viewport_recording:
             self._toggle_viewport_recording()
         if reset_layout:
-            self.window.reset_layout()
+            self.reset_layout()
         if open_help:
             self.panels.open_panel("Help")
         if open_documentation:
@@ -4543,17 +4558,19 @@ class ViewerApp:
             return False
         lights = getattr(getattr(source, "lights", None), "lights", ())
         cameras = getattr(source, "cameras", ())
-        return bool(getattr(source, "instance_count", 0) or lights or cameras)
+        debug = getattr(self.backend, "debug", None)
+        debug_primitives = int(getattr(debug, "primitives", 0))
+        return bool(getattr(source, "instance_count", 0) or lights or cameras or debug_primitives)
 
     def _draw_application_status_bar(self, *, loading: bool = False) -> None:
         """Draw persistent selection, simulation, backend, and frame-rate status."""
 
         viewport = imgui.get_main_viewport()
         scale = self.window.style_scale
-        # Ink-box centering in draw_status keeps glyphs visually centered on
-        # macOS; this can therefore remain a compact authored height instead
-        # of compensating for CoreText's asymmetric line box.
-        height = 24.0 * scale
+        # Ink-box centering keeps glyphs visually centered on macOS. A small
+        # vertical gutter separates the single-line groups without inflating
+        # their internal geometry.
+        height = APPLICATION_STATUS_HEIGHT_PT * scale
         flags = (
             imgui.WindowFlags_.no_decoration.value
             | imgui.WindowFlags_.no_docking.value
@@ -4938,8 +4955,7 @@ class ViewerApp:
             self.session.submit(cmd.Reset())
 
     def _draw_model_drop_overlay(self, overlay: ImguiDraw2D) -> None:
-        source = self.session.source
-        empty = source is not None and source.instance_count == 0
+        empty = not self._has_scene_content()
         notice = self._model_drop_notice if time.monotonic() < self._model_drop_notice_until else ""
         caps = self.session.adapter.caps
         dragging = self.window.file_drag_active and (caps.asset_loading or caps.scene_files)

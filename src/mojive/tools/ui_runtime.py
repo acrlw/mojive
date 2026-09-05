@@ -14,8 +14,9 @@ from PIL import Image
 from .. import commands as cmd
 from ..adapters.base import NodeType
 from ..assets import resolve
-from ..composition import build, build_editor
+from ..composition import build, build_editor, build_scene
 from ..gizmo import RING_RADIUS, SIZE_PT, TRACKBALL_RADIUS, GizmoHandle, project, world_scale
+from ..scene import Scene
 from ..types import CameraView
 
 
@@ -29,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     (args.output / "joint-slide-single-arrow.png").unlink(missing_ok=True)
 
     _capture_empty_workspace(args.output)
+    _capture_canvas_2d(args.output)
 
     width, height = _capture_size(1920, 1080)
     viewer = build(
@@ -270,6 +272,47 @@ def _capture_empty_workspace(output: Path) -> None:
         _park_cursor(viewer)
         viewer.sync()
         _save(viewer, output / "d1-empty-workspace.png")
+    finally:
+        viewer.release()
+
+
+def _capture_canvas_2d(output: Path) -> None:
+    """Capture retained Canvas2D content without the empty-document notice."""
+
+    width, height = _capture_size(1600, 1000)
+    viewer = build_scene(
+        Scene(),
+        title="Mojive 2D canvas",
+        vsync=False,
+        width=width,
+        height=height,
+        show_window=False,
+    )
+    try:
+        canvas = viewer.canvas2d
+        grid = canvas.layer("grid", depth=-0.02)
+        grid.grid("unit-grid", (-4.0, -2.5, 4.0, 2.5), 0.5)
+        shapes = canvas.layer("shapes")
+        shapes.circle("body-a", (-1.2, 0.2), 0.65, (0.35, 0.75, 1.0, 1.0), 3.0)
+        shapes.rectangle("body-b", (0.3, -0.7), (1.8, 0.6), (1.0, 0.55, 0.25, 1.0), 3.0)
+        shapes.polygon(
+            "simplex",
+            ((-0.2, 1.0), (1.0, 1.7), (1.8, 0.9)),
+            (0.55, 0.95, 0.45, 1.0),
+            3.0,
+        )
+        shapes.arrow("velocity", (-1.2, 0.2), (-0.1, 0.8), (1.0, 0.9, 0.25, 1.0), 3.0)
+        labels = canvas.layer("labels", depth=0.02)
+        labels.text("velocity-label", (-0.1, 0.8), "velocity", offset_px=(8.0, -6.0))
+        viewer.sync()
+        canvas_width, canvas_height = viewer.viewport_size
+        viewer.set_camera(
+            canvas.camera((-4.0, -2.5, 4.0, 2.5), aspect=canvas_width / canvas_height)
+        )
+        _settle(viewer, 5)
+        _park_cursor(viewer)
+        viewer.sync()
+        _save(viewer, output / "canvas2d-content.png")
     finally:
         viewer.release()
 

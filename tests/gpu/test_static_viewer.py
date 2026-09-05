@@ -17,9 +17,11 @@ from mojive.composition import build_scene  # noqa: E402
 from mojive.config import (  # noqa: E402
     CameraInputConfig,
     InteractionConfig,
+    LayoutConfig,
     PanelConfig,
     SelectionStyle,
     ViewerConfig,
+    ViewportOverlayConfig,
 )
 from mojive.demos import canvas_scene  # noqa: E402
 from mojive.gizmo import SIZE_PT, GizmoHandle, project, world_scale  # noqa: E402
@@ -27,6 +29,7 @@ from mojive.render.backend import ShadowQuality  # noqa: E402
 from mojive.render.debugdraw import PrimitiveType  # noqa: E402
 from mojive.scene import Scene  # noqa: E402
 from mojive.types import DEFAULT_MATERIAL, CameraView, Material, MeshShape  # noqa: E402
+from mojive.ui.app import APPLICATION_STATUS_HEIGHT_PT  # noqa: E402
 from mojive.ui.scene_entities import HELPER_ICON_LAYER, HELPER_LAYER  # noqa: E402
 
 
@@ -95,6 +98,68 @@ def test_canvas_opens_without_importing_mujoco(canvas):
     assert viewer.session.paused
     assert viewer.backend.stats.instances == 4
     assert float(image.std()) > 10.0
+
+
+def test_status_bar_uses_the_comfortable_application_height(canvas):
+    from imgui_bundle import imgui
+
+    viewer, _scene = canvas
+    status = imgui.internal.find_window_by_name("Status###application_status")
+
+    assert status is not None and status.active
+    assert status.size.y == pytest.approx(
+        APPLICATION_STATUS_HEIGHT_PT * viewer.window.style_scale,
+        abs=1.0,
+    )
+
+
+def test_retained_canvas_content_suppresses_the_empty_scene_notice(monkeypatch):
+    viewer = build_scene(Scene(), vsync=False, width=900, height=620, show_window=False)
+    notices: list[str] = []
+    try:
+        monkeypatch.setattr(
+            viewer.app,
+            "_draw_center_notice",
+            lambda _overlay, message, **_kwargs: notices.append(message),
+        )
+        viewer.canvas2d.layer("acceptance").circle(
+            "body",
+            (0.0, 0.0),
+            0.5,
+            (0.35, 0.75, 1.0, 1.0),
+            3.0,
+        )
+
+        for _ in range(3):
+            viewer.sync()
+
+        assert viewer.backend.debug.primitives > 0
+        assert not notices
+    finally:
+        viewer.release()
+
+
+def test_programmatic_layout_reset_clears_viewport_capsule_positions():
+    config = ViewerConfig(
+        layout=LayoutConfig(persistence=False, reset=True),
+        viewport_overlays=ViewportOverlayConfig(
+            playback_position=(0.2, 0.3),
+            tool_position=(0.8, 0.7),
+        ),
+    )
+    viewer = build_scene(
+        Scene(),
+        config=config,
+        vsync=False,
+        width=900,
+        height=620,
+        show_window=False,
+    )
+    try:
+        assert viewer.app.viewport_overlays.playback_position is None
+        assert viewer.app.viewport_overlays.tool_position is None
+    finally:
+        viewer.release()
 
 
 def test_canvas_selection_reaches_antialiased_outline(canvas):

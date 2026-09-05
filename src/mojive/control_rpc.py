@@ -568,7 +568,7 @@ class ControlService:
 
     def _reset_layout(self) -> dict[str, bool]:
         app = self._require_viewer()
-        app.window.reset_layout()
+        app.reset_layout()
         return {"reset": True}
 
     def _set_interactions(self, params: dict[str, Any]) -> dict[str, Any]:

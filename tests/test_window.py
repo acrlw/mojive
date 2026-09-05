@@ -9,6 +9,7 @@ import pytest
 from imgui_bundle import imgui
 
 from mojive import CaptureSurface, RecordingPhase
+from mojive.config import ViewportOverlayConfig
 from mojive.ui import window as window_module
 from mojive.ui.app import (
     JOINT_LIMIT_HOVER_GRACE_SECONDS,
@@ -571,6 +572,51 @@ def test_reset_layout_rebuilds_and_persists_immediately(monkeypatch, tmp_path) -
     assert events == [("load", ""), "build", ("save", str(target))]
     assert target.parent.is_dir()
     assert window._ini_existed is True
+
+
+def test_application_layout_reset_restores_viewport_capsule_positions() -> None:
+    events: list[object] = []
+    app = ViewerApp.__new__(ViewerApp)
+    app.window = SimpleNamespace(
+        config=SimpleNamespace(ini_path="layout.ini"),
+        reset_layout=lambda: events.append("layout"),
+    )
+    app.localizer = SimpleNamespace(set_preferences=lambda value: events.append(value))
+    app.viewport_overlays = ViewportOverlayConfig(
+        playback_scale=1.2,
+        tool_scale=0.9,
+        movable=True,
+        playback_position=(0.2, 0.3),
+        tool_position=(0.8, 0.7),
+    )
+    app._overlay_drag_kind = "tools"
+
+    app.reset_layout()
+
+    assert events[0] == "layout"
+    assert app._overlay_drag_kind == ""
+    assert app.viewport_overlays.playback_position is None
+    assert app.viewport_overlays.tool_position is None
+    assert app.viewport_overlays.playback_scale == pytest.approx(1.2)
+    assert app.viewport_overlays.tool_scale == pytest.approx(0.9)
+    assert events[1]["viewport_overlays"]["playback_position"] is None
+    assert events[1]["viewport_overlays"]["tool_position"] is None
+
+
+def test_retained_debug_primitives_count_as_scene_content() -> None:
+    app = ViewerApp.__new__(ViewerApp)
+    app.session = SimpleNamespace(
+        source=SimpleNamespace(
+            instance_count=0,
+            lights=SimpleNamespace(lights=()),
+            cameras=(),
+        )
+    )
+    app.backend = SimpleNamespace(debug=SimpleNamespace(primitives=0))
+
+    assert not app._has_scene_content()
+    app.backend.debug.primitives = 3
+    assert app._has_scene_content()
 
 
 def test_viewport_image_is_aspect_fitted_while_render_target_resize_is_pending() -> None:

@@ -526,9 +526,6 @@ def _compose(
             fb_w, fb_h = window.size_pixels
             backend = OpenGLBackend(None, fb_w, fb_h, samples)
 
-        if viewer_config is not None and viewer_config.layout.reset:
-            window.reset_layout()
-
         debug_bridge = DebugBridge(backend)
         debug_bridge.serve()
 
@@ -545,6 +542,8 @@ def _compose(
             debug_bridge=debug_bridge,
             config=viewer_config,
         )
+        if viewer_config is not None and viewer_config.layout.reset:
+            app.reset_layout(persist=bool(window.config.ini_path))
         return Viewer(
             app=app,
             session=session,
