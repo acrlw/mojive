@@ -1,8 +1,10 @@
 # Mojive UI design tools
 
-`render_ui_feasibility.py` is Mojive's interactive UI concept workbench. It is intended for
-trying component geometry, checking responsive layouts, and reviewing a proposed UI state before
-changing the application.
+`render_ui_feasibility.py` is Mojive's interactive UI concept workbench. Use it when component
+geometry, responsive layout, or an interaction concept needs exploration. Routine fixes can use
+the existing production UI and focused acceptance targets directly. The agent reviews generated
+images and links useful results under `output/` for the user to view; user approval is required
+only when explicitly requested. See the [verification guide](../docs/guides/testing.md).
 
 The probe creates Mojive's real `Window` and ImGui context. It starts from the production theme and
 reuses the production Draw2D paths for playback, tool, mouse-hint, projection, status, and object

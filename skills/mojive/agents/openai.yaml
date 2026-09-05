@@ -1,4 +1,4 @@
 interface:
   display_name: "Mojive"
   short_description: "Inspect, edit, and verify Mojive 3D scenes"
-  default_prompt: "Use $mojive to inspect the active scene, apply the requested changes, and verify the result."
+  default_prompt: "Use $mojive to complete the requested scene task with the appropriate state owner and verify the result."

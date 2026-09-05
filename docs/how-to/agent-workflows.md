@@ -1,5 +1,7 @@
 # Agent workflows
 
+Use this guide for entry points, runnable examples, and Skill maintenance. Read the section needed
+for the task; ordinary scene operation does not require running repository acceptance suites.
 Choose the entry point by the state you need to operate on:
 
 | Task | Entry point | State owner |
@@ -23,29 +25,35 @@ uv run mojive control get_scene --json
 uv run mojive control describe_operations --params '{"name":"edit_scene"}' --json
 ```
 
-Use returned IDs for subsequent operations. `node_id` identifies a hierarchy entry and is used
-by `set_visible`; `object_id` identifies a selection and pixels in an `object_id` capture;
-`body_index` is an adapter-specific physics lookup. Names help locate candidates but may repeat.
-Creation results expose named IDs. Pass the returned `document` as `expected_document` when
-editing retained IDs. Refresh scene metadata after `stale_document` or replacing a document.
-Use `describe_operations` for live parameter schemas and availability; filter by name to keep
-the response small. Keep a single `RpcClient` connection for a multi-step workflow.
+For repeated operations, use one `RpcClient`; `examples/control_client.py` is a small starting
+point. Discover each needed operation by name, reuse its schema, and refresh availability after
+relevant state changes. Use returned entity IDs and current document tokens as described in
+[document editing](rpc-control.md#edit-a-document). Inspect the resulting state and, for visual
+changes, the appropriate scene or presented-viewer capture. Capture metadata identifies the frame
+and structure generation; separate calls on a running or externally clocked simulation may observe
+different frames. Follow [deadline recovery](rpc-control.md#deadlines-and-recovery) before retrying
+a mutation whose outcome is unknown.
 
-Read the mutation's result and then inspect the resulting state. `inspect_object.geometries`
-returns geometry edit IDs and current size, RGBA, and material values. Use these to verify changes
-without reconstructing the object from source code. `hierarchy_visible` includes hidden ancestors.
-For visual changes, also capture RGB or object IDs; a successful command alone does not prove the requested image.
-Capture results identify the frame and structure generation they rendered. Separate calls on a
-running or externally clocked simulation may observe different frames.
+## Build and render a new scene
 
-Use `examples/control_client.py` as a small Python starting point.
-For direct authored rendering, use the [programmatic scene tutorial](../tutorials/programmatic-scene.md)
-and `examples/offscreen_scene.py`. Physics-specific `Renderer(model)` remains available for
-MuJoCo compatibility; `SceneRenderer` consumes shared contracts.
+Use `Scene` and `SceneRenderer` in one process. Follow the
+[programmatic scene tutorial](../tutorials/programmatic-scene.md) and `examples/offscreen_scene.py`
+when you need an example. Inspect public scene state and render the requested output; this route
+does not require RPC or an existing viewer. Physics-specific `Renderer(model)` remains available
+for MuJoCo compatibility; `SceneRenderer` consumes shared contracts.
+
+## Deliver results
+
+Verify the requested state and inspect relevant images yourself. Save captures under `output/`
+and include clickable absolute paths to representative visual results in the final response,
+with a short explanation of what they show. User review is optional unless explicitly required.
+Report any unmet requirement and its concrete blocker after attempting in-scope recovery; finish
+independent requirements while a dependency is blocked.
 
 ## Executable acceptance example
 
-Run from the repository checkout:
+Use these isolated examples when changing scene-control behavior or the workflow's task decisions.
+Run the relevant mode from the repository checkout:
 
 ```bash
 make agent-control
@@ -53,42 +61,66 @@ make agent-viewer ARGS='--output output/agent-viewer'
 MOJIVE_RENDERER=wgpu make agent-control ARGS='--output output/agent-control-wgpu'
 ```
 
+For standalone RPC capture on macOS, use the wgpu command: its graphics worker cannot own a macOS
+OpenGL context. The attached-viewer mode renders on the UI thread. These are mode/backend choices,
+not three mandatory runs for every edit; select them using the [verification matrix](../guides/testing.md#change-mapping).
+
 The example creates an isolated authored scene and service, discovers its object and camera IDs,
 hides a box, verifies that its selection pixels disappear, then restores it. The plane and sphere
 remain visible. It writes RGB images, object-ID arrays, and `report.json` under the output
 directory. It then edits position, size, color, and name in one transaction, reads back the edited
 and restored properties, verifies Undo/Redo and failure rollback, saves and reopens the document,
-rejects stale IDs, and captures the edited
-scene. `make agent-viewer` also verifies the actual viewport and window images. Both modes shut
-down their service on completion.
+rejects stale IDs, and captures the edited scene. `make agent-viewer` also verifies the actual
+viewport and window images. Both modes shut down their service on completion.
 
 ```python
 --8<-- "examples/agent_inspection.py"
 ```
 
-## Maintained skill and responsibilities
+## Skill discovery
 
-The source skill lives in `skills/mojive/SKILL.md`. It routes tasks to the correct state owner,
-operation discovery, document preconditions, and result verification. The operation catalog owns
-parameter schemas, availability, and command construction. `ControlApplication` coordinates
-Session commands and capture. `control_rpc` owns envelopes, sockets, deadlines, and UI-thread
-queuing. Session owns mutations, transactions, and history; adapters own physics write-back.
-Native remote scene-edit messages reuse the catalog's validation and command construction.
+The source skill lives in `skills/mojive/SKILL.md`. The repository's `.agents/skills/mojive` symlink
+points to that directory for repository discovery. Edit the source once; do not maintain a second
+copy. Resolve Skill references from the source directory. The skill can be invoked as `$mojive`
+once discovered, or selected automatically for matching scene tasks.
 
-To make this checkout's skill available in your personal Codex installation, link it once:
+For optional use outside this repository, link the source into a user skill directory supported
+by your Codex host. The shared user location is `~/.agents/skills`:
 
 ```bash
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-ln -s "$PWD/skills/mojive" "${CODEX_HOME:-$HOME/.codex}/skills/mojive"
+mkdir -p "$HOME/.agents/skills"
+ln -s "$PWD/skills/mojive" "$HOME/.agents/skills/mojive"
 ```
 
-Run from the repository root. An existing destination is preserved by `ln`; update an existing
-installation deliberately. The symlink keeps the skill and its repository references current.
-The skill can be invoked as `$mojive` in sessions where it has been discovered.
+Run that optional installation from the repository root. An existing destination is preserved by
+`ln`; inspect an existing installation before deliberately updating it, and avoid duplicate
+installations. Some Codex hosts also load `${CODEX_HOME:-$HOME/.codex}/skills`; existing installations
+there need not be replaced. Repository operation requires no personal installation.
 
-Validate skill edits with the skill creator's `quick_validate.py`, then run the acceptance
-example. Extend the skill only when actual use exposes a missing task decision. Parameter and
-protocol changes belong in code and tests, with matching documentation updates.
+## Skill maintenance
+
+Maintain instructions or examples when that work is part of the requested task. Ordinary scene
+operation can report a demonstrated workflow gap without changing repository instructions.
+Keep the Skill focused on task decisions; the operation catalog in `src/mojive/operations.py` owns
+parameter definitions and `control_schema.py` owns shared schemas. Component responsibilities are
+documented in [architecture](../concepts/architecture.md#ownership).
+
+For Skill edits, validate frontmatter, naming, UI metadata, the discovery symlink, and referenced
+paths. Use the installed skill-creator's `quick_validate.py` with the source Skill directory as its
+argument when available; otherwise check the same format constraints directly and report that
+validation method. The helper's absence does not block equivalent validation.
+
+Check realistic task decisions as well: existing-viewer edits keep the correct Session, direct
+scene creation works without RPC, unknown mutation outcomes are inspected before retry, and an
+explicit request for review before edits still produces only a proposal. Format validation alone
+does not establish these behaviors. Run the applicable [verification gates](../guides/testing.md#change-mapping)
+for changed decisions or executable behavior. Pure wording changes do not require scene rendering.
+Extend the Skill only for demonstrated gaps, keeping parameter and protocol details in code and
+the relevant reference guide.
+
+This instruction workflow was reviewed on 2026-09-05 against the official
+[GPT-6 Astra guidance](https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices)
+and [Skill authoring guidance](https://learn.chatgpt.com/docs/build-skills).
 
 Batch rendering remains deferred. Capture and viewport have explicit independent settings;
 transactional authoring applies only to the edits advertised by discovery. The native remote

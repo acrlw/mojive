@@ -1,7 +1,8 @@
 # Testing
 
-The suite is split by runtime and dependency boundary. Use the smallest layer that covers the
-change while iterating, then run the required acceptance targets before handoff.
+The suite is split by runtime and dependency boundary. Start with the smallest meaningful check
+for the changed behavior, then complete the applicable gates below. This page owns the verification
+matrix; other agent guidance links here.
 
 | Layer | Marker or target | Coverage |
 |---|---|---|
@@ -17,20 +18,80 @@ change while iterating, then run the required acceptance targets before handoff.
 
 ## Change mapping
 
+Code, executable example, test, and build behavior changes finish with `make check`. The table adds
+checks for each affected behavior; combine applicable rows without rerunning shared prerequisites.
+Pure prose, link, and metadata edits use their own rows instead of the CPU or GPU suites.
+
 | Change | Iteration target | Acceptance target |
 |---|---|---|
-| Shared types or commands | `make test-fast` | `make check` |
-| File format or remote protocol | `make test-integration` | `make check` |
-| MuJoCo adapter or MJCF authoring | focused physics test | `make test-physics` and `make mujoco-audit` |
+| Shared types or commands | focused CPU test | `make check` |
+| File format or remote protocol | focused integration test | `make check` |
+| MuJoCo adapter or MJCF authoring | focused physics test | `make test-physics`, `make mujoco-audit`, and `make adapter-conformance ADAPTER=mujoco CONFORMANCE_ASSET=deformables` |
 | Public renderer performance | isolated quick matrix | `make renderer-benchmark` |
 | MuJoCo model loading | one XML path with the model-suite module | `make mujoco-model-suite` |
-| Render pass or shader | one GPU test file | `make gpu` and `make gpu-wgpu` |
-| Visual interaction | focused GPU test | relevant Make gallery and `make reverse` |
-| Settings layout | focused UI GPU test | `make settings` |
-| Documentation or examples | `make examples-check` | `make docs-check` |
+| Rendering behavior, render pass, or shader | one GPU test file | `make gpu`, `make gpu-wgpu`, and relevant visual output |
+| Visual interaction or settings layout | focused UI GPU test | relevant scripted gallery or interactive Make target with captured evidence |
+| Registered regression invariant | its focused regression test | `make reverse` |
+| Documentation or executable examples | relevant document/example checks | `make docs-check` |
+| Instruction or Skill wording, links, or metadata | scope and reference review | [Skill validation](../how-to/agent-workflows.md#skill-maintenance) when applicable |
+| Scene-control task decisions, operation behavior, or acceptance examples | relevant operation tests, such as `tests/test_operations.py` | `make agent-control`; also `make agent-viewer` when viewer attachment or presented capture is affected |
 
 Markers may be combined. A file-format test that compiles MuJoCo uses both `integration` and
-`physics`; it runs in the physics layer.
+`physics`; it runs in the physics layer. A Skill behavior change still uses the scene-control row
+even if it changes only Markdown. Backend-specific capture examples use `MOJIVE_RENDERER` as
+described in [agent workflows](../how-to/agent-workflows.md#executable-acceptance-example).
+
+Once applicable checks pass, broaden or repeat them only for a new change, failure, or unresolved
+concern. Test observable behavior and meaningful invariants; a wording edit does not need a test
+that merely matches the new wording. Extended release gates such as `make p1` are for release
+acceptance or changes that affect that breadth of behavior.
+
+Keep `make reverse` exclusive in its checkout: it temporarily mutates source files and restores
+them. Run GPU/window checks sequentially when they compete for the same device or desktop.
+Independent CPU checks can run together when they do not share mutable files or services.
+On macOS, `TMPDIR=/private/tmp make check` keeps temporary Unix socket paths within the platform
+length limit when the system's default temporary directory is too long.
+
+If a dependency, display, or device blocks a gate, attempt recovery within the authorized scope
+and complete independent checks. Report the blocked command, reason, and remaining coverage;
+an unavailable check is not a passed check.
+
+## Visual review and baselines
+
+The agent inspects relevant captures and golden comparisons before delivery. A golden image is a
+reviewed regression reference, not a visual quality score. Compare the intended change and areas
+that should remain stable; fix unexpected differences before updating a reference. User sign-off
+is required only when explicitly requested.
+
+Use the existing target that demonstrates the behavior: examples include `make gizmo-gallery`,
+`make ui-runtime`, `make lighting`, `make deformables`, and `make showcase`. Targets such as
+`make outline`, `make gizmo`, `make perturb`, and `make settings` open interactive viewers. Exercise
+the relevant behavior, capture the result under `output/`, and close only the viewer you started.
+A scripted gallery can supply the evidence when it covers the same behavior.
+
+Golden comparison and baseline updates are separate actions. Scope them to the affected cases:
+
+```bash
+make golden ARGS='showcase'
+```
+
+After the agent reviews an intentional, in-scope visual difference, accept and compare that case:
+
+```bash
+make golden-accept ARGS='showcase'
+make golden ARGS='showcase'
+```
+
+Omit `ARGS` for the full set. The agent can update a baseline for an intended change within the
+task after inspecting the difference; do not refresh unrelated references or relax thresholds
+merely to make checks pass. Reviewed references remain in `tests/golden/`; generated comparisons
+and reports stay under `output/`.
+
+When a task produces visual results, include clickable absolute paths to representative images,
+galleries, or videos in the final response and briefly explain what they demonstrate. Prefer a
+useful before/after view or final result over a list of every diagnostic file. Show an image inline
+when useful. Sharing these results lets the user inspect the work without making their review a
+completion gate.
 
 ## Renderer performance
 

@@ -224,12 +224,12 @@ p0: renderer-api
 p1: check p0 renderer-api-wgpu mujoco-physics camera-state scene-snapshot rpc material-parity shadow-scheduling mujoco-audit golden parity reverse gpu gpu-wgpu
 	$(MAKE) adapter-conformance ADAPTER=mujoco CONFORMANCE_ASSET=deformables
 
-## Compare golden images. Use golden-accept after visual review.
+## Compare golden images. ARGS selects cases; the agent reviews differences before accepting.
 golden:
-	$(PY) -m mojive.tools.golden
+	$(PY) -m mojive.tools.golden $(ARGS)
 
 golden-accept:
-	$(PY) -m mojive.tools.golden --accept
+	$(PY) -m mojive.tools.golden --accept $(ARGS)
 
 ## Render OpenGL and the MuJoCo reference from one camera. The reference uses a subprocess.
 parity:
