@@ -184,7 +184,7 @@ def _choice_for_key(key: object | None) -> KeyChoice:
 _ACTION_NAMES = {
     InputAction.TOGGLE_PAUSE: "Play / Pause",
     InputAction.STEP_BACK: "Previous frame",
-    InputAction.FRAME_SCENE: "Frame selection",
+    InputAction.FRAME_SCENE: "Frame All",
     InputAction.GIZMO_TRANSLATE: "Move tool",
     InputAction.GIZMO_ROTATE: "Rotate tool",
     InputAction.GIZMO_DIMENSIONS: "Dimensions tool",

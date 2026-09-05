@@ -1,5 +1,9 @@
 # Renderer and debug draw
 
+## Backend-neutral scene renderer
+
+::: mojive.scene_renderer.SceneRenderer
+
 ## MuJoCo-compatible renderer
 
 ::: mojive.renderer.Renderer

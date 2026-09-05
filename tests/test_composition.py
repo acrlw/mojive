@@ -223,3 +223,40 @@ def test_viewer_record_pipelines_async_readback_in_frame_order(tmp_path, monkeyp
     assert app.syncs == 5
     assert recorders[0].values == [0, 1, 2, 3, 4]
     assert recorders[0].closed == 1
+
+
+def test_explicit_adapter_and_renderer_selection_reaches_composition(monkeypatch, tmp_path):
+    from mojive import composition
+    from mojive.adapters import registry
+
+    sentinel = object()
+    calls = []
+    monkeypatch.setattr(
+        registry, "make_adapter", lambda name, asset: calls.append((name, asset)) or sentinel
+    )
+    monkeypatch.setattr("mojive.backends.make_adapter", registry.make_adapter)
+
+    def compose(factory, **kwargs):
+        assert factory() is sentinel
+        assert kwargs["renderer"] == "wgpu"
+        return sentinel
+
+    monkeypatch.setattr(composition, "_compose", compose)
+    path = tmp_path / "scene.xml"
+    assert composition.build(path, adapter_name="toy", renderer="wgpu") is sentinel
+    assert calls == [("toy", path)]
+    with pytest.raises(ValueError, match="conflicts"):
+        composition.build(path, "mujoco", adapter_name="toy")
+
+
+def test_renderer_selection_prefers_explicit_then_named_then_legacy_environment(monkeypatch):
+    from mojive.render.selection import render_backend_name
+
+    monkeypatch.setenv("MOJIVE_BACKEND", "wgpu")
+    monkeypatch.delenv("MOJIVE_RENDERER", raising=False)
+    assert render_backend_name() == "wgpu"
+    monkeypatch.setenv("MOJIVE_RENDERER", "opengl")
+    assert render_backend_name() == "opengl"
+    assert render_backend_name("webgpu") == "wgpu"
+    with pytest.raises(ValueError, match="Unsupported renderer"):
+        render_backend_name("missing")

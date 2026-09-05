@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from .adapters.base import CAMERA_OBJECT_BASE
-from .scene import Scene, _CameraItem, _Item, _LightItem
+from .scene import Scene, _CameraItem, _immutable_mesh, _Item, _LightItem
 from .types import (
     CameraView,
     Environment,
@@ -129,13 +129,11 @@ def _scene_from_document(document: dict) -> Scene:
     scene = Scene()
     materials = [_material_from_document(item) for item in document["materials"]]
     scene._meshes = {
-        MeshKey(MeshShape.ASSET, int(item["index"])): _mesh_from_document(item)
+        MeshKey(MeshShape.ASSET, int(item["index"])): _immutable_mesh(_mesh_from_document(item))
         for item in document["meshes"]
     }
-    scene.textures = {
-        texture.name: texture
-        for texture in (_texture_from_document(item) for item in document["textures"])
-    }
+    for item in document["textures"]:
+        scene.add_texture(_texture_from_document(item))
     skybox = document.get("skybox")
     if skybox is not None and not scene.set_skybox(str(skybox)):
         raise ValueError(f"Scene skybox {skybox!r} is not a cube texture")

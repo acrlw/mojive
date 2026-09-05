@@ -1,5 +1,46 @@
 # Renderer design
 
+## Backend-neutral scenes
+
+`SceneRenderer` renders shared scene contracts without MuJoCo or the editor UI:
+
+```python
+from mojive import RenderProduct, Scene, SceneRenderer
+
+scene = Scene()
+box = scene.box(color=(0.1, 0.6, 0.9, 1.0))
+with SceneRenderer(scene.source, width=640, height=480, renderer="opengl") as renderer:
+    renderer.update(scene.frame)
+    rgb = renderer.render()
+    depth = renderer.render(product=RenderProduct.METRIC_DEPTH)
+    object_ids = renderer.render(product=RenderProduct.OBJECT_ID)
+```
+
+`set_scene(source)` uploads changed structure; `update(frame, camera=...)` uploads dynamic
+state. `update_from(provider)` follows a `SceneProvider` revision automatically. It requests
+poses and deformables by default; pass `needs=FrameNeeds(...)` for other diagnostics. The
+caller advances simulation and prepares remote providers. The renderer never steps or releases
+a provider. Keep graphics operations on the constructing thread, and use the context manager
+or `close()` to release GPU resources.
+
+All returned arrays use top-left image orientation. RGB is `(height, width, 3)` uint8, metric
+depth is `(height, width)` float32, and object IDs are `(height, width)` uint32 with zero for
+background. Segmentation uses `(height, width, 2)` int32 pairs supplied by the scene source;
+those semantic IDs are distinct from selection object IDs. `out=` accepts a writable array
+with the exact output shape and dtype, including a strided destination. `resize(width, height)`
+updates image dimensions and camera aspect.
+
+Run `make scene-renderer` for RGB, depth, and object-ID acceptance images under
+`output/scene-renderer/`. Set `MOJIVE_RENDERER=wgpu` to exercise the same example over WebGPU.
+
+## Renderer selection
+
+Both `SceneRenderer(..., renderer="wgpu")` and the MuJoCo-compatible
+`Renderer(model, renderer="wgpu")` accept an explicit renderer. Interactive builders accept
+`renderer=` too. Explicit selection takes precedence over `MOJIVE_RENDERER`, then the legacy
+`MOJIVE_BACKEND` environment variable. `build(..., adapter_name="mujoco")` selects the scene
+adapter independently; the positional `backend_name` argument remains a compatible alias.
+
 Mojive provides the OpenGL backend and the cross-platform wgpu backend. Both consume
 backend-neutral scene data and implement the same linear-light, bucketed render pipeline.
 
@@ -151,6 +192,10 @@ space, and bypasses OpenGL tone mapping. Other adapters retain the linear pipeli
   plane.
 - Classic fixed-function specular is modulated by the surface texture together with ambient and
   diffuse lighting; Mojive-native scenes retain the untextured specular path.
+- Classic lighting is clamped before texture modulation, preserving texture contrast under
+  saturated lights. Generated 2D coordinates on MuJoCo primitives use object X/Y projection,
+  including T-axis reversal and a constant half-unit phase; authored linear scenes retain their
+  UV mapping. This follows the [MuJoCo 3.11 classic texture setup](https://github.com/google-deepmind/mujoco/blob/3.11.0/src/render/classic/render_gl3.c#L109-L145).
 - Texture surfaces receive lighting.
 - Image lights sample cube-map diffuse radiance and roughness-aware specular mip levels. An
   intensity of 5000 maps to unit radiance in the OpenGL lighting model.

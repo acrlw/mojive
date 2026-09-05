@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 
 import mujoco
@@ -15,7 +14,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("model", type=Path)
     parser.add_argument("--output", type=Path, default=Path("output/examples"))
-    parser.add_argument("--backend", choices=("opengl", "wgpu"), default="opengl")
+    parser.add_argument(
+        "--renderer", "--backend", dest="backend", choices=("opengl", "wgpu"), default="opengl"
+    )
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     return parser.parse_args()
@@ -23,7 +24,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    os.environ["MOJIVE_BACKEND"] = args.backend
     from mojive import Renderer
 
     model = mujoco.MjModel.from_xml_path(str(args.model.resolve()))
@@ -31,7 +31,7 @@ def main() -> None:
     mujoco.mj_forward(model, data)
     args.output.mkdir(parents=True, exist_ok=True)
 
-    with Renderer(model, height=args.height, width=args.width) as renderer:
+    with Renderer(model, height=args.height, width=args.width, renderer=args.backend) as renderer:
         renderer.update_scene(data, camera=-1)
         rgb = renderer.render()
         Image.fromarray(rgb).save(args.output / "rgb.png")

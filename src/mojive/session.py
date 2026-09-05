@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 
@@ -34,14 +38,16 @@ from .adapters.base import (
     SensorInfo,
     SiteProperties,
 )
+from .bounds import SceneBounds, _MeshBoundsCache, _node_local_bounds, _node_world_bounds
 from .commands import Command, CommandResult, Query
+from .history import EditHistory, EditRecord
 from .types import (
+    Bounds,
     CameraView,
+    CenteredBounds,
     Environment,
-    InstancePoseSource,
     Light,
     Material,
-    MeshShape,
     TextureType,
 )
 
@@ -76,15 +82,7 @@ class PerturbState:
 class _DocumentState:
     adapter_state: object
     selected: int
-
-
-@dataclass(frozen=True)
-class _EditRecord:
-    label: str
-    before: _DocumentState
-    after: _DocumentState
-    before_revision: int
-    after_revision: int
+    authored: AuthoredSceneOverlay
 
 
 @dataclass(frozen=True)
@@ -134,206 +132,6 @@ def _apply_geometry_color_overrides(source: SceneSource, overrides: dict[int, np
         rgba = overrides.get(int(node_id))
         if rgba is not None:
             source.geom_rgba[instance] = rgba
-
-
-_BOUND_CORNER_SIGNS = np.array(
-    [[x, y, z] for x in (-1.0, 1.0) for y in (-1.0, 1.0) for z in (-1.0, 1.0)],
-    np.float64,
-)
-
-
-def _instance_mesh_bounds(
-    source: SceneSource, instance: int
-) -> tuple[np.ndarray, np.ndarray] | None:
-    key = source.geom_mesh[instance]
-    mesh = source.meshes.get(key)
-    if mesh is not None:
-        points = np.asarray(mesh.positions, np.float64).reshape(-1, 3)
-        points = points[np.isfinite(points).all(axis=1)]
-        if not len(points):
-            return None
-        return points.min(axis=0), points.max(axis=0)
-
-    if key.shape in {
-        MeshShape.ASSET,
-        MeshShape.HEIGHTFIELD,
-        MeshShape.FLEX,
-        MeshShape.FLEX_FACE,
-        MeshShape.SKIN,
-        MeshShape.CONVEX_HULL,
-    }:
-        return None
-    if key.shape in {MeshShape.PLANE, MeshShape.DISK}:
-        return np.array((-1.0, -1.0, 0.0)), np.array((1.0, 1.0, 0.0))
-    if key.shape in {
-        MeshShape.CAPSULE_CAP,
-        MeshShape.ARROW_SHAFT,
-        MeshShape.ARROW_HEAD,
-        MeshShape.ARROW,
-    }:
-        return np.array((-1.0, -1.0, 0.0)), np.ones(3, np.float64)
-    return -np.ones(3, np.float64), np.ones(3, np.float64)
-
-
-def _instance_world_corners(
-    source: SceneSource,
-    frame: SceneFrame,
-    instance: int,
-) -> np.ndarray | None:
-    """Return one finite rendered instance's eight world-space bound corners."""
-
-    count = source.instance_count
-    if len(source.geom_size) != count:
-        return None
-    pose_index = int(source.geom_source[instance]) if len(source.geom_source) == count else instance
-    if not 0 <= pose_index < len(frame.geom_xpos) or pose_index >= len(frame.geom_xmat):
-        return None
-    mesh_bounds = _instance_mesh_bounds(source, instance)
-    if mesh_bounds is None:
-        return None
-    mesh_lo, mesh_hi = mesh_bounds
-    mesh_center = (mesh_lo + mesh_hi) * 0.5
-    mesh_half = (mesh_hi - mesh_lo) * 0.5
-    size = np.asarray(source.geom_size[instance], np.float64).reshape(3)
-    local = (
-        np.asarray(source.geom_local[instance], np.float64).reshape(4, 4)
-        if len(source.geom_local) == count
-        else np.eye(4, dtype=np.float64)
-    )
-    geom_position = np.asarray(frame.geom_xpos[pose_index], np.float64).reshape(3)
-    geom_rotation = np.asarray(frame.geom_xmat[pose_index], np.float64).reshape(3, 3)
-    if not all(
-        np.isfinite(value).all()
-        for value in (mesh_center, mesh_half, size, local, geom_position, geom_rotation)
-    ):
-        return None
-    points = _BOUND_CORNER_SIGNS * mesh_half + mesh_center
-    points = (points * size) @ local[:3, :3].T + local[:3, 3]
-    return points @ geom_rotation.T + geom_position
-
-
-def _node_local_bounds(
-    source: SceneSource | None,
-    frame: SceneFrame,
-    node: SceneNode,
-) -> tuple[np.ndarray, np.ndarray] | None:
-    """Return the selected geom or body's finite geometry bound in its body frame."""
-
-    if source is None or source.instance_count == 0 or node.body_index < 0:
-        return None
-    if frame.body_xpos is None or frame.body_xmat is None:
-        return None
-    if frame.geom_xpos is None or frame.geom_xmat is None:
-        return None
-
-    body = int(node.body_index)
-    if body >= len(frame.body_xpos) or body >= len(frame.body_xmat):
-        return None
-    body_position = np.asarray(frame.body_xpos[body], np.float64).reshape(3)
-    body_rotation = np.asarray(frame.body_xmat[body], np.float64).reshape(3, 3)
-    if not np.isfinite(body_position).all() or not np.isfinite(body_rotation).all():
-        return None
-
-    count = source.instance_count
-    if len(source.geom_body) != count or len(source.geom_size) != count:
-        return None
-    geom_only = len(source.geom_pose_source) == count
-    target_geom = int(node.geom_index) if node.type is NodeType.GEOM else -1
-    lo: np.ndarray | None = None
-    hi: np.ndarray | None = None
-    for instance in range(count):
-        if int(source.geom_body[instance]) != body:
-            continue
-        if len(source.geom_infinite_plane) == count and source.geom_infinite_plane[instance]:
-            continue
-        if geom_only and int(source.geom_pose_source[instance]) != int(InstancePoseSource.GEOM):
-            continue
-
-        pose_index = (
-            int(source.geom_source[instance]) if len(source.geom_source) == count else instance
-        )
-        if target_geom >= 0 and pose_index != target_geom:
-            continue
-        if not 0 <= pose_index < len(frame.geom_xpos) or pose_index >= len(frame.geom_xmat):
-            continue
-
-        points = _instance_world_corners(source, frame, instance)
-        if points is None:
-            continue
-        points = (points - body_position) @ body_rotation
-        part_lo, part_hi = points.min(axis=0), points.max(axis=0)
-        lo = part_lo if lo is None else np.minimum(lo, part_lo)
-        hi = part_hi if hi is None else np.maximum(hi, part_hi)
-
-    if lo is None or hi is None:
-        return None
-    return ((lo + hi) * 0.5).astype(np.float32), ((hi - lo) * 0.5).astype(np.float32)
-
-
-def _node_world_bounds(
-    source: SceneSource | None,
-    frame: SceneFrame,
-    node: SceneNode,
-    nodes: list[SceneNode],
-) -> tuple[np.ndarray, np.ndarray] | None:
-    """Return selected finite geometry bounds without nesting body/geom scans."""
-
-    if source is None or source.instance_count == 0:
-        return None
-    if frame.geom_xpos is None or frame.geom_xmat is None:
-        return None
-    count = source.instance_count
-    if len(source.geom_body) != count:
-        return None
-
-    target_geoms: set[int] | None = None
-    target_bodies: set[int] | None = None
-    if node.type is NodeType.MODEL:
-        nodes_by_id = {candidate.node_id: candidate for candidate in nodes}
-        pending = list(node.children)
-        target_geoms = set()
-        while pending:
-            candidate = nodes_by_id.get(pending.pop())
-            if candidate is None:
-                continue
-            pending.extend(candidate.children)
-            if candidate.type is NodeType.GEOM and candidate.geom_index >= 0:
-                target_geoms.add(int(candidate.geom_index))
-        if not target_geoms:
-            return None
-    elif node.body_index >= 0:
-        target_bodies = {int(node.body_index)}
-        if node.type is NodeType.GEOM and node.geom_index >= 0:
-            target_geoms = {int(node.geom_index)}
-    else:
-        return None
-
-    lo: np.ndarray | None = None
-    hi: np.ndarray | None = None
-    for instance in range(count):
-        if len(source.geom_infinite_plane) == count and source.geom_infinite_plane[instance]:
-            continue
-        if len(source.geom_pose_source) == count and int(source.geom_pose_source[instance]) != int(
-            InstancePoseSource.GEOM
-        ):
-            continue
-        pose_index = (
-            int(source.geom_source[instance]) if len(source.geom_source) == count else instance
-        )
-        if target_geoms is not None and pose_index not in target_geoms:
-            continue
-        if target_bodies is not None and int(source.geom_body[instance]) not in target_bodies:
-            continue
-        points = _instance_world_corners(source, frame, instance)
-        if points is None:
-            continue
-        part_lo, part_hi = points.min(axis=0), points.max(axis=0)
-        lo = part_lo if lo is None else np.minimum(lo, part_lo)
-        hi = part_hi if hi is None else np.maximum(hi, part_hi)
-
-    if lo is None or hi is None:
-        return None
-    return ((lo + hi) * 0.5).astype(np.float32), ((hi - lo) * 0.5).astype(np.float32)
 
 
 _SCENE_EDIT_COMMANDS = (
@@ -400,7 +198,14 @@ class Session:
     stable-structure generations while the adapter owns simulation data.
     """
 
-    def __init__(self, adapter: SceneAdapter, asset_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        adapter: SceneAdapter,
+        asset_path: Path | None = None,
+        *,
+        history_record_limit: int = 100,
+        history_byte_limit: int = 256 * 1024 * 1024,
+    ) -> None:
         self._adapter = adapter
         self._asset_path = asset_path
         self._paused = not adapter.caps.simulation
@@ -413,6 +218,8 @@ class Session:
         self._pending_steps = 0
         self._frame = SceneFrame()
         self._source: SceneSource | None = None
+        self._mesh_bounds_cache: _MeshBoundsCache = {}
+        self._scene_bounds: SceneBounds | None = None
         self._authored = AuthoredSceneOverlay()
         self._nodes: list[SceneNode] = []
         self._by_node_id: dict[int, SceneNode] = {}
@@ -448,13 +255,18 @@ class Session:
         self._message_revision = 0
         self._last_message_level = "info"
         self._last_message_duration: float | None = 5.0
-        self._undo_stack: list[_EditRecord] = []
-        self._redo_stack: list[_EditRecord] = []
+        self._history: EditHistory[_DocumentState] = EditHistory(
+            record_limit=history_record_limit, byte_limit=history_byte_limit
+        )
+        self._undo_stack = self._history.undo
+        self._redo_stack = self._history.redo
         self._edit_before: _DocumentState | None = None
         self._edit_before_revision = 0
         self._edit_label = ""
         self._edit_changed = False
+        self._edit_failed = False
         self._document_revision = 0
+        self._document_id = uuid4().hex
         self._saved_revision = 0
         self._next_document_revision = 1
         self._structure_generation = 0
@@ -749,6 +561,16 @@ class Session:
         return self._edit_changed or self._document_revision != self._saved_revision
 
     @property
+    def document_id(self) -> str:
+        """Return the current document identity, renewed after new/open/load/reload."""
+        return self._document_id
+
+    @property
+    def document_revision(self) -> int:
+        """Return the authored revision represented by the current undo history state."""
+        return self._document_revision
+
+    @property
     def current_pose_modified(self) -> bool:
         """Return whether physics state differs from its saved initial pose."""
         return self._adapter.current_pose_modified()
@@ -764,6 +586,33 @@ class Session:
         return bool(self._redo_stack)
 
     @property
+    def history_bytes(self) -> int:
+        """Return estimated Python/NumPy storage retained by Undo and Redo."""
+        return self._history.bytes
+
+    @contextmanager
+    def edit(self, label: str = "Edit") -> Iterator[Session]:
+        """Group submitted edits, rolling back on exceptions or failed commands.
+
+        Direct adapter or Scene mutations bypass command tracking. Use submit()
+        inside this context so failure, dirty state, and history remain consistent.
+        """
+        result = self.submit(cmd.BeginEditTransaction(label))
+        if not result.ok:
+            raise RuntimeError(result.message)
+        try:
+            yield self
+        except BaseException as error:
+            result = self.submit(cmd.CancelEditTransaction())
+            if not result.ok:
+                raise RuntimeError(result.message) from error
+            raise
+        else:
+            result = self.submit(cmd.EndEditTransaction())
+            if not result.ok:
+                raise RuntimeError(result.message)
+
+    @property
     def editing(self) -> bool:
         """Return whether a continuous edit transaction is active."""
         return self._edit_before is not None
@@ -777,18 +626,24 @@ class Session:
         """Look up a hierarchy node by node ID."""
         return self._by_node_id.get(int(node_id))
 
-    def node_local_bounds(self, node_id: int) -> tuple[np.ndarray, np.ndarray] | None:
-        """Return finite render geometry bounds in the owning body's local frame."""
-        node = self.node(node_id)
-        return None if node is None else _node_local_bounds(self._source, self._frame, node)
-
-    def node_world_bounds(self, node_id: int) -> tuple[np.ndarray, np.ndarray] | None:
-        """Return finite selected geometry bounds in world space."""
+    def node_local_bounds(self, node_id: int) -> CenteredBounds | None:
+        """Return center and half extent in the owning body's local frame."""
         node = self.node(node_id)
         return (
             None
             if node is None
-            else _node_world_bounds(self._source, self._frame, node, self._nodes)
+            else _node_local_bounds(self._source, self._frame, node, self._mesh_bounds_cache)
+        )
+
+    def node_world_bounds(self, node_id: int) -> CenteredBounds | None:
+        """Return selected geometry center and half extent in world space."""
+        node = self.node(node_id)
+        return (
+            None
+            if node is None
+            else _node_world_bounds(
+                self._source, self._frame, node, self._nodes, self._mesh_bounds_cache
+            )
         )
 
     def node_by_object_id(self, object_id: int) -> SceneNode | None:
@@ -1040,9 +895,12 @@ class Session:
                 self._adapter.step(n)
                 self._step_counter += n
         elif self._pending_steps > 0:
-            self._adapter.step(self._pending_steps)
-            self._step_counter += self._pending_steps
+            count = self._pending_steps
+            # A failed external step can have an uncertain outcome; consume the
+            # request before dispatch so another render tick cannot retry it.
             self._pending_steps = 0
+            self._adapter.step(count)
+            self._step_counter += count
 
         prepare_frame = getattr(self._adapter, "prepare_frame", None)
         if prepare_frame is not None:
@@ -1091,12 +949,22 @@ class Session:
         if isinstance(command, cmd.EndEditTransaction):
             result = self._end_edit()
             return self._record_result(result)
+        if isinstance(command, cmd.CancelEditTransaction):
+            return self._record_result(self._cancel_edit())
         if isinstance(command, cmd.Undo):
             result = self._undo()
             return self._record_result(result)
         if isinstance(command, cmd.Redo):
             result = self._redo()
             return self._record_result(result)
+
+        if self.editing and isinstance(
+            command, (cmd.Reload, cmd.NewScene, cmd.OpenScene, cmd.LoadAsset, cmd.SaveScene)
+        ):
+            self._edit_failed = True
+            return self._record_result(
+                CommandResult.bad("Finish or cancel the active edit before document operations")
+            )
 
         scene_edit = isinstance(command, _SCENE_EDIT_COMMANDS)
         before = (
@@ -1105,11 +973,16 @@ class Session:
             else None
         )
         result = self._dispatch(command)
+        if not result.ok and scene_edit and self.editing:
+            self._edit_failed = True
         if result.ok and scene_edit and self._adapter.caps.scene_files:
             if self.editing:
                 self._edit_changed = True
             elif before is not None:
-                self._commit_edit(type(command).__name__, before)
+                if not self._commit_edit(type(command).__name__, before):
+                    result = CommandResult.good(
+                        "Edit applied; undo history exceeded its memory budget", result.entity_id
+                    )
             else:
                 self._advance_document_revision()
         return self._record_result(result)
@@ -1118,12 +991,12 @@ class Session:
         state = self._adapter.capture_edit_state()
         if state is None:
             raise RuntimeError(f"{self._adapter.caps.name} did not provide an edit state")
-        return _DocumentState(state, self._selected)
+        return _DocumentState(state, self._selected, deepcopy(self._authored))
 
     def _restore_document_state(self, state: _DocumentState) -> bool:
         if not self._adapter.restore_edit_state(state.adapter_state):
             return False
-        self._authored.clear()
+        self._authored = deepcopy(state.authored)
         self._selected = int(state.selected)
         self._selected_node_id = -1
         self._refresh_structure()
@@ -1141,11 +1014,31 @@ class Session:
         self._edit_before_revision = self._document_revision
         self._edit_label = str(label) or "Edit"
         self._edit_changed = False
+        self._edit_failed = False
         return CommandResult.good()
+
+    def _cancel_edit(self) -> CommandResult:
+        if not self.editing:
+            return CommandResult.bad("No edit transaction is active")
+        if not self._restore_document_state(self._edit_before):
+            return CommandResult.bad("Edit state is incompatible with this scene")
+        self._document_revision = self._edit_before_revision
+        self._edit_before = None
+        self._edit_label = ""
+        self._edit_changed = False
+        self._edit_failed = False
+        return CommandResult.good("Edit cancelled")
 
     def _end_edit(self) -> CommandResult:
         if not self.editing:
             return CommandResult.bad("No edit transaction is active")
+        if self._edit_failed:
+            result = self._cancel_edit()
+            return (
+                CommandResult.bad("Edit transaction rolled back after a failed command")
+                if result.ok
+                else result
+            )
         before = self._edit_before
         label = self._edit_label
         changed = self._edit_changed
@@ -1154,7 +1047,8 @@ class Session:
         self._edit_label = ""
         self._edit_changed = False
         if changed and before is not None:
-            self._commit_edit(label, before, before_revision)
+            if not self._commit_edit(label, before, before_revision):
+                return CommandResult.good("Edit applied; undo history exceeded its memory budget")
             return CommandResult.good(label)
         return CommandResult.good()
 
@@ -1163,12 +1057,12 @@ class Session:
         label: str,
         before: _DocumentState,
         before_revision: int | None = None,
-    ) -> None:
+    ) -> bool:
         revision = self._document_revision if before_revision is None else before_revision
         after_revision = self._next_document_revision
         self._next_document_revision += 1
-        self._undo_stack.append(
-            _EditRecord(
+        retained = self._history.append(
+            EditRecord(
                 label,
                 before,
                 self._capture_document_state(),
@@ -1176,14 +1070,13 @@ class Session:
                 after_revision,
             )
         )
-        del self._undo_stack[:-100]
-        self._redo_stack.clear()
         self._document_revision = after_revision
+        return retained
 
     def _advance_document_revision(self) -> None:
         self._document_revision = self._next_document_revision
         self._next_document_revision += 1
-        self._redo_stack.clear()
+        self._history.clear_redo()
 
     def _undo(self) -> CommandResult:
         if self.editing:
@@ -1212,11 +1105,12 @@ class Session:
         return CommandResult.good(f"Redo {record.label}")
 
     def _reset_edit_history(self) -> None:
-        self._undo_stack.clear()
-        self._redo_stack.clear()
+        self._document_id = uuid4().hex
+        self._history.clear()
         self._edit_before = None
         self._edit_label = ""
         self._edit_changed = False
+        self._edit_failed = False
         self._document_revision = 0
         self._saved_revision = 0
         self._next_document_revision = 1
@@ -1381,7 +1275,10 @@ class Session:
             return CommandResult.good("Restored previous frame")
 
         if isinstance(c, cmd.Reset):
-            self._adapter.reset()
+            try:
+                self._adapter.reset()
+            except Exception as exc:
+                return CommandResult.bad(str(exc))
             self._step_counter = 0
             self._sim_time_credit = 0.0
             self._perturb = PerturbState()
@@ -2819,7 +2716,7 @@ class Session:
                     node.visible = c.light.active
                     break
             self._compose_lights()
-            message = "" if writeback else "edited in OpenGL; backend write-back is unavailable"
+            message = "" if writeback else "edited in the viewer; adapter write-back is unavailable"
             return CommandResult.good(message)
 
         if isinstance(c, cmd.SetEnvironment):
@@ -2831,7 +2728,7 @@ class Session:
             )
             self._source.lights = self._source.lights.with_environment(c.environment)
             self._compose_lights()
-            message = "" if writeback else "edited in OpenGL; backend write-back is unavailable"
+            message = "" if writeback else "edited in the viewer; adapter write-back is unavailable"
             return CommandResult.good(message)
 
         if isinstance(c, cmd.SetSkybox):
@@ -2869,7 +2766,7 @@ class Session:
                 self._authored.materials.pop(index, None)
             self._source.materials[index] = c.material
             self._structure_generation += 1
-            message = "" if writeback else "edited in OpenGL; backend write-back is unavailable"
+            message = "" if writeback else "edited in the viewer; adapter write-back is unavailable"
             return CommandResult.good(message)
 
         if isinstance(c, cmd.SetGeometryColor):
@@ -2886,7 +2783,7 @@ class Session:
                 self._authored.geometry_colors.pop(c.node_id, None)
             self._source.geom_rgba[instances] = rgba
             self._structure_generation += 1
-            message = "" if writeback else "edited in OpenGL; backend write-back is unavailable"
+            message = "" if writeback else "edited in the viewer; adapter write-back is unavailable"
             return CommandResult.good(message)
 
         if isinstance(c, cmd.SetGeometrySize):
@@ -2923,7 +2820,7 @@ class Session:
             else:
                 self._authored.cameras.pop(camera_id, None)
             self._compose_cameras()
-            message = "" if writeback else "edited in OpenGL; backend write-back is unavailable"
+            message = "" if writeback else "edited in the viewer; adapter write-back is unavailable"
             return CommandResult.good(message)
 
         if isinstance(c, cmd.AddSceneObject):
@@ -3040,39 +2937,15 @@ class Session:
             return self.bounds()
         raise TypeError(f"Unknown query: {type(q).__name__}")
 
-    def bounds(self) -> tuple[np.ndarray, np.ndarray]:
-        """Return an axis-aligned world-space bound for finite scene geometry."""
-        src = self._source
-        frame = self._frame
-        if src is None:
-            return np.full(3, -0.5, np.float32), np.full(3, 0.5, np.float32)
-
-        lo: np.ndarray | None = None
-        hi: np.ndarray | None = None
-        if frame.geom_xpos is not None and len(frame.geom_xpos):
-            pos = np.asarray(frame.geom_xpos, np.float32)
-            size = src.geom_size[: len(pos)] if len(src.geom_size) >= len(pos) else None
-            finite = np.isfinite(pos).all(axis=1)
-
-            if len(src.geom_infinite_plane) == len(pos):
-                finite &= ~src.geom_infinite_plane
-            if finite.any():
-                p = pos[finite]
-                r = np.max(size[finite], axis=1, keepdims=True) if size is not None else 0.0
-                lo, hi = (p - r).min(axis=0), (p + r).max(axis=0)
-
-        for key in src.dynamic_meshes:
-            points = np.asarray(src.meshes[key].positions, np.float32)
-            points = points[np.isfinite(points).all(axis=1)]
-            if not len(points):
-                continue
-            mesh_lo, mesh_hi = points.min(axis=0), points.max(axis=0)
-            lo = mesh_lo if lo is None else np.minimum(lo, mesh_lo)
-            hi = mesh_hi if hi is None else np.maximum(hi, mesh_hi)
-
-        if lo is None or hi is None:
-            return np.full(3, -0.5, np.float32), np.full(3, 0.5, np.float32)
-        return lo.astype(np.float32), hi.astype(np.float32)
+    def bounds(self) -> Bounds:
+        """Return world-space minimum/maximum bounds for finite scene geometry."""
+        if self._source is not None:
+            if self._scene_bounds is None:
+                self._scene_bounds = SceneBounds(self._source, self._mesh_bounds_cache)
+            bounds = self._scene_bounds.world(self._frame)
+            if bounds is not None:
+                return bounds
+        return Bounds(np.full(3, -0.5, np.float32), np.full(3, 0.5, np.float32))
 
     def camera_hint(self) -> CameraView | None:
         """Return the adapter camera suggested for initial framing."""
@@ -3094,6 +2967,8 @@ class Session:
         return self._adapter.visual_groups() if self._adapter.caps.visual_groups else ()
 
     def _refresh_structure(self) -> None:
+        self._mesh_bounds_cache.clear()
+        self._scene_bounds = None
         self._source = self._adapter.scene_source()
         if self._authored.environment is not None:
             self._source.lights = self._source.lights.with_environment(self._authored.environment)

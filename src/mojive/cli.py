@@ -291,6 +291,8 @@ def cmd_view(args: argparse.Namespace) -> int:
         vsync=not args.no_vsync,
     )
     try:
+        if getattr(args, "rpc_socket", None):
+            viewer.start_rpc(Path(args.rpc_socket))
         for name in args.enable_render:
             viewer.backend.set_flag(RenderFlag(name), True)
         viewer.run()
@@ -346,7 +348,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 published_generation = session.structure_generation
             sequence = publisher.publish_frame(frame)
             if writer is not None:
-                writer.write(RemoteFrame(sequence, frame, tuple(frame.debug_commands or ())))
+                writer.write(
+                    RemoteFrame(
+                        sequence,
+                        frame,
+                        tuple(frame.debug_commands or ()),
+                        structure_revision=published_generation,
+                    )
+                )
             deadline += period
             delay = deadline - time.perf_counter()
             if delay > 0.0:
@@ -383,6 +392,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
     import time
     from dataclasses import replace
 
+    from .adapters.base import AdapterCaps
     from .commands import CommandResult
     from .recording import read_snapshots
     from .remote import RemoteFrame, RemoteStructure, SnapshotPublisher
@@ -404,18 +414,13 @@ def cmd_replay(args: argparse.Namespace) -> int:
             for packet in read_snapshots(path):
                 packets += 1
                 if isinstance(packet, RemoteStructure):
-                    caps = replace(
-                        packet.caps,
+                    caps = AdapterCaps(
                         name=f"replay:{packet.caps.name}",
-                        simulation=False,
-                        write_pose=False,
-                        write_qpos=False,
-                        perturb=False,
-                        raycast=False,
-                        equality_constraints=False,
+                        external_clock=True,
+                        contacts=packet.caps.contacts,
                         model_cameras=bool(packet.cameras),
-                        visual_groups=False,
-                        reload=False,
+                        sensors=packet.caps.sensors,
+                        notes=(*packet.caps.notes, "Recorded playback is read-only"),
                     )
                     publisher.publish_structure(replace(packet, caps=caps))
                 elif isinstance(packet, RemoteFrame):
@@ -487,6 +492,8 @@ def cmd_editor(args: argparse.Namespace) -> int:
         else build_editor(vsync=not args.no_vsync, title="Mojive")
     )
     try:
+        if getattr(args, "rpc_socket", None):
+            viewer.start_rpc(Path(args.rpc_socket))
         viewer.run()
     finally:
         viewer.release()
@@ -672,11 +679,24 @@ def cmd_rpc_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_control(args: argparse.Namespace) -> int:
-    from .control_rpc import RpcClient
+    from .control_rpc import RpcClient, RpcError
 
-    params = json.loads(args.params)
-    with RpcClient(Path(args.socket), args.timeout) as client:
-        result = client.call(args.method, params)
+    try:
+        try:
+            params = json.loads(args.params)
+        except ValueError as exc:
+            raise RpcError("invalid_params", f"Invalid parameter JSON: {exc}") from exc
+        if not isinstance(params, dict):
+            raise RpcError("invalid_params", "Parameters must be a JSON object")
+        with RpcClient(Path(args.socket), args.timeout) as client:
+            result = client.call(args.method, params)
+    except (RpcError, ValueError) as exc:
+        if not args.json:
+            raise
+        if not isinstance(exc, RpcError):
+            exc = RpcError("invalid_params", str(exc))
+        print(json.dumps({"error": exc.payload()}, indent=2))
+        return 2
     if args.json:
         print(json.dumps(result, indent=2))
     elif isinstance(result, dict) and result.get("message"):
@@ -693,7 +713,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     def with_asset(sp):
         sp.add_argument("asset", help="Path or asset name; the extension is optional")
-        sp.add_argument("-b", "--backend", default=DEFAULT_BACKEND)
+        sp.add_argument(
+            "-b",
+            "--adapter",
+            "--backend",
+            dest="backend",
+            default=DEFAULT_BACKEND,
+            help="Scene adapter name",
+        )
         return sp
 
     def with_render_flags(sp):
@@ -712,6 +739,7 @@ def build_parser() -> argparse.ArgumentParser:
     startup.add_argument("--paused", dest="paused", action="store_true")
     startup.add_argument("--play", dest="paused", action="store_false")
     sp.add_argument("--no-vsync", action="store_true")
+    sp.add_argument("--rpc-socket", help="Expose this viewer through a local control socket")
     sp.set_defaults(func=cmd_view, json=False, paused=True)
 
     sp = with_render_flags(sub.add_parser("canvas", help="Open a procedural 3D canvas"))
@@ -722,6 +750,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("editor", help="Open a model and scene workspace")
     sp.add_argument("asset", nargs="?", help="Optional MJCF or URDF path or asset name")
     sp.add_argument("--no-vsync", action="store_true")
+    sp.add_argument("--rpc-socket", help="Expose this viewer through a local control socket")
     sp.set_defaults(func=cmd_editor, json=False)
 
     sp = sub.add_parser("toy", help="Open the toy physics backend")
@@ -810,7 +839,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("assets", help="List assets and free-body support")
     sp.add_argument("--json", action="store_true")
     sp.add_argument("--quick", action="store_true", help="List names without loading assets")
-    sp.add_argument("-b", "--backend", default=DEFAULT_BACKEND)
+    sp.add_argument(
+        "-b",
+        "--adapter",
+        "--backend",
+        dest="backend",
+        default=DEFAULT_BACKEND,
+        help="Scene adapter name",
+    )
     sp.set_defaults(func=cmd_assets)
 
     sp = sub.add_parser("probe", help="Probe OpenGL capabilities")

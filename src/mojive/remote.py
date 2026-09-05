@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import contextlib
+import math
 import pickle
 import queue
+import socket
 import threading
 import time
 from collections import deque
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
-from multiprocessing.connection import Client, Connection, Listener
+from multiprocessing.connection import Connection, Listener, answer_challenge, deliver_challenge
 from typing import Any
 
 import numpy as np
@@ -42,6 +45,18 @@ from .types import CameraView, Environment, Light, Material
 
 DEFAULT_PORT = 47650
 AUTHKEY = b"mojive-local"
+
+
+def _close_connection(connection: Connection) -> None:
+    """Interrupt pending TCP reads/writes before releasing the Connection's descriptor."""
+    with contextlib.suppress(OSError):
+        transport = socket.socket(fileno=connection.fileno())
+        try:
+            transport.shutdown(socket.SHUT_RDWR)
+        finally:
+            # Connection owns the descriptor; the temporary socket only shuts it down.
+            transport.detach()
+    connection.close()
 
 
 @dataclass(frozen=True)
@@ -175,15 +190,13 @@ class _LatestSender:
                 return
             self.closed = True
             self._condition.notify_all()
-        self.connection.close()
+        _close_connection(self.connection)
 
 
 @dataclass
 class _CommandRequest:
     payload: dict
-    done: threading.Event = field(default_factory=threading.Event)
-    cancelled: threading.Event = field(default_factory=threading.Event)
-    result: Any = None
+    result: Future = field(default_factory=Future)
 
 
 class SnapshotPublisher:
@@ -259,15 +272,14 @@ class SnapshotPublisher:
                 request = self._commands.get_nowait()
             except queue.Empty:
                 break
-            if request.cancelled.is_set():
-                request.done.set()
+            if not request.result.set_running_or_notify_cancel():
                 count += 1
                 continue
             try:
-                request.result = handler(request.payload)
+                result = handler(request.payload)
             except Exception as exc:
-                request.result = CommandResult.bad(f"remote command failed: {exc}")
-            request.done.set()
+                result = CommandResult.bad(f"remote command failed: {exc}")
+            request.result.set_result(result)
             count += 1
         return count
 
@@ -308,11 +320,16 @@ class SnapshotPublisher:
             while not self._closed:
                 request = _CommandRequest(connection.recv())
                 self._commands.put(request)
-                if not request.done.wait(self._command_timeout):
-                    request.cancelled.set()
-                    connection.send(CommandResult.bad("remote command timed out"))
-                else:
-                    connection.send(request.result)
+                try:
+                    result = request.result.result(timeout=self._command_timeout)
+                except TimeoutError:
+                    cancelled = request.result.cancel()
+                    result = CommandResult.bad(
+                        "remote command timed out before execution"
+                        if cancelled
+                        else "remote command timed out; completion unknown; inspect before retrying"
+                    )
+                connection.send(result)
         except (EOFError, OSError):
             pass
         finally:
@@ -336,7 +353,7 @@ class SnapshotPublisher:
             command_clients, self._command_clients = self._command_clients, set()
         for connection in command_clients:
             with contextlib.suppress(OSError):
-                connection.close()
+                _close_connection(connection)
 
 
 class RemoteSceneAdapter(SceneAdapterBase):
@@ -345,6 +362,9 @@ class RemoteSceneAdapter(SceneAdapterBase):
     def __init__(
         self, host: str = "127.0.0.1", port: int = DEFAULT_PORT, timeout: float = 8.0
     ) -> None:
+        timeout = float(timeout)
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Remote timeout must be finite and positive")
         self.host, self.port = host, int(port)
         self._lock = threading.Condition()
         self._structure: RemoteStructure | None = None
@@ -361,6 +381,9 @@ class RemoteSceneAdapter(SceneAdapterBase):
         self._closed = False
         self._timeout = float(timeout)
         self._command_lock = threading.Lock()
+        self._command_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="mojive-remote-control"
+        )
         self._state: Connection | None = None
         self._command: Connection | None = None
         try:
@@ -373,7 +396,8 @@ class RemoteSceneAdapter(SceneAdapterBase):
         except Exception:
             self.release()
             raise
-        caps = self._structure.caps
+
+    def _update_capabilities(self, caps: AdapterCaps) -> None:
         self.caps = replace(
             caps,
             name=f"remote:{caps.name}",
@@ -386,22 +410,42 @@ class RemoteSceneAdapter(SceneAdapterBase):
             scene_files=False,
             topology_editing=False,
             model_assets=False,
-            notes=(*caps.notes, f"attached to {host}:{port}"),
+            notes=(*caps.notes, f"attached to {self.host}:{self.port}"),
         )
 
-    @staticmethod
-    def _connect(address, timeout: float) -> Connection:
+    def _connect(self, address, timeout: float) -> Connection:
         deadline = time.monotonic() + timeout
         last_error: Exception | None = None
         while time.monotonic() < deadline:
+            connection = None
             try:
-                return Client(address, authkey=AUTHKEY)
+                with socket.create_connection(address, timeout=deadline - time.monotonic()) as peer:
+                    peer.setblocking(True)
+                    connection = Connection(peer.detach())
+                handshake = self._command_executor.submit(self._authenticate, connection)
+                handshake.result(timeout=max(0.0, deadline - time.monotonic()))
+                return connection
+            except TimeoutError as exc:
+                last_error = exc
+                if connection is not None:
+                    _close_connection(connection)
+                break
             except (ConnectionRefusedError, FileNotFoundError, OSError) as exc:
                 last_error = exc
-                time.sleep(0.05)
-        raise ConnectionError(
-            f"cannot connect to remote viewer publisher at {address}: {last_error}"
-        )
+                if connection is not None:
+                    _close_connection(connection)
+                time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+            except Exception:
+                if connection is not None:
+                    _close_connection(connection)
+                raise
+        raise ConnectionError(f"remote connection to {address} timed out: {last_error}")
+
+    @staticmethod
+    def _authenticate(connection: Connection) -> None:
+        # Match multiprocessing Client's handshake while retaining ownership on timeout.
+        answer_challenge(connection, AUTHKEY)
+        deliver_challenge(connection, AUTHKEY)
 
     def _receive(self) -> None:
         try:
@@ -412,6 +456,7 @@ class RemoteSceneAdapter(SceneAdapterBase):
                 with self._lock:
                     if isinstance(packet, RemoteStructure):
                         self._structure = packet
+                        self._update_capabilities(packet.caps)
                         self._camera_slot_by_id = {
                             camera.camera_id: slot for slot, camera in enumerate(packet.cameras)
                         }
@@ -444,7 +489,7 @@ class RemoteSceneAdapter(SceneAdapterBase):
                     self._lock.notify_all()
         except (EOFError, OSError, pickle.PickleError) as exc:
             with self._lock:
-                self._error = str(exc)
+                self._error = str(exc) or type(exc).__name__
                 self._lock.notify_all()
 
     def _wait(self, predicate, timeout: float, what: str) -> None:
@@ -546,14 +591,38 @@ class RemoteSceneAdapter(SceneAdapterBase):
         return self._structure.visual_groups
 
     def _send(self, op: str, **args):
-        with self._command_lock:
-            try:
-                if self._command is None:
-                    return CommandResult.bad("remote command channel is closed")
-                self._command.send({"op": op, **args})
-                return self._command.recv()
-            except (EOFError, OSError):
+        deadline = time.monotonic() + self._timeout
+        if not self._command_lock.acquire(timeout=self._timeout):
+            return CommandResult.bad("remote command channel is busy; request was not sent")
+        try:
+            if self._command is None:
                 return CommandResult.bad("remote command channel is closed")
+            pending = self._command_executor.submit(
+                self._exchange_command, self._command, {"op": op, **args}
+            )
+            return pending.result(timeout=max(0.0, deadline - time.monotonic()))
+        except TimeoutError:
+            self._close_command_channel()
+            return CommandResult.bad(
+                "remote command timed out; completion unknown; inspect before retrying"
+            )
+        except (EOFError, OSError, RuntimeError):
+            self._close_command_channel()
+            return CommandResult.bad("remote command channel is closed; completion unknown")
+        finally:
+            self._command_lock.release()
+
+    @staticmethod
+    def _exchange_command(connection: Connection, payload: dict):
+        # poll() alone cannot bound a blocked send or a reply with only its header received.
+        connection.send(payload)
+        return connection.recv()
+
+    def _close_command_channel(self) -> None:
+        connection, self._command = self._command, None
+        if connection is not None:
+            with contextlib.suppress(OSError):
+                _close_connection(connection)
 
     @staticmethod
     def _ok(result) -> bool:
@@ -562,14 +631,24 @@ class RemoteSceneAdapter(SceneAdapterBase):
     def set_paused(self, paused: bool) -> bool:
         return self._ok(self._send("pause" if paused else "play"))
 
+    def _run_control_command(self, operation: str, **args) -> None:
+        result = self._send(operation, **args)
+        if not self._ok(result):
+            message = (
+                result.message
+                if isinstance(result, CommandResult)
+                else f"remote {operation} failed"
+            )
+            raise RuntimeError(message)
+
     def step(self, count: int = 1) -> None:
-        self._send("step", count=int(count))
+        self._run_control_command("step", count=int(count))
 
     def reset(self) -> None:
-        self._send("reset")
+        self._run_control_command("reset")
 
     def reload(self) -> None:
-        self._send("reload")
+        self._run_control_command("reload")
 
     def set_visual_group(self, category: str, group: int, visible: bool) -> bool:
         return self._ok(
@@ -846,15 +925,16 @@ class RemoteSceneAdapter(SceneAdapterBase):
     def release(self) -> None:
         if self._closed:
             return
-        self._closed = True
+        with self._lock:
+            self._closed = True
+            self._error = self._error or "adapter released"
+            self._lock.notify_all()
         if self._state is not None:
             with contextlib.suppress(OSError):
-                self._state.close()
+                _close_connection(self._state)
             self._state = None
-        if self._command is not None:
-            with contextlib.suppress(OSError):
-                self._command.close()
-            self._command = None
+        self._close_command_channel()
+        self._command_executor.shutdown(wait=False, cancel_futures=True)
 
 
 def handle_session_command(session, message: dict):
@@ -862,6 +942,38 @@ def handle_session_command(session, message: dict):
     op = message.get("op")
     if op == "raycast":
         return session.query(cmd.Pick(message["origin"], message["direction"]))
+    # Native publisher messages retain their established wire names. Their scene
+    # edits share the application catalog's validation and command construction.
+    from .control_errors import ControlError
+    from .operations import apply_session_operation
+
+    shared = {
+        "pose": "set_pose",
+        "geometry_color": "set_geometry_color",
+        "geometry_size": "set_geometry_size",
+        "scene_camera": "set_scene_camera",
+        **{
+            name: name
+            for name in (
+                "add_scene_object",
+                "remove_scene_object",
+                "add_scene_light",
+                "remove_scene_light",
+                "add_scene_camera",
+                "remove_scene_camera",
+                "duplicate_scene_entity",
+                "remove_scene_entity",
+                "rename_scene_entity",
+            )
+        },
+    }
+    if op in shared:
+        try:
+            return apply_session_operation(
+                session, shared[op], {key: value for key, value in message.items() if key != "op"}
+            )
+        except ControlError as exc:
+            return CommandResult.bad(str(exc))
     commands = {
         "pause": lambda: cmd.Pause(),
         "play": lambda: cmd.Play(),
@@ -947,7 +1059,6 @@ def handle_session_command(session, message: dict):
         ),
         "equality": lambda: cmd.SetEqualityEnabled(message["constraint_id"], message["enabled"]),
         "ctrl": lambda: cmd.SetCtrl(message["index"], message["value"]),
-        "pose": lambda: cmd.SetPose(message["node_id"], message["position"], message["rotation"]),
         "light": lambda: cmd.SetLight(
             message.get("light_index", message.get("light_id")), message["light"]
         ),
@@ -956,26 +1067,6 @@ def handle_session_command(session, message: dict):
         "material": lambda: cmd.SetMaterial(
             message.get("material_index", message.get("material_id")), message["material"]
         ),
-        "geometry_color": lambda: cmd.SetGeometryColor(message["node_id"], message["rgba"]),
-        "geometry_size": lambda: cmd.SetGeometrySize(message["node_id"], message["size"]),
-        "scene_camera": lambda: cmd.SetSceneCamera(message["camera_id"], message["camera"]),
-        "add_scene_object": lambda: cmd.AddSceneObject(
-            message["shape"],
-            message["name"],
-            message["size"],
-            message["position"],
-            message["rotation"],
-            message["color"],
-            message["material"],
-        ),
-        "remove_scene_object": lambda: cmd.RemoveSceneObject(message["object_id"]),
-        "add_scene_light": lambda: cmd.AddSceneLight(message["name"], message["light"]),
-        "remove_scene_light": lambda: cmd.RemoveSceneLight(message["light_id"]),
-        "add_scene_camera": lambda: cmd.AddSceneCamera(message["name"], message["camera"]),
-        "remove_scene_camera": lambda: cmd.RemoveSceneCamera(message["camera_id"]),
-        "duplicate_scene_entity": lambda: cmd.DuplicateSceneEntity(message["object_id"]),
-        "remove_scene_entity": lambda: cmd.RemoveSceneEntity(message["object_id"]),
-        "rename_scene_entity": lambda: cmd.RenameSceneEntity(message["object_id"], message["name"]),
         "perturb": lambda: cmd.Perturb(
             message["node_id"],
             message["target_position"],

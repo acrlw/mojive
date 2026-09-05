@@ -8,7 +8,8 @@ it does not block viewport interaction.
 
 | Variable | Values | Purpose |
 |---|---|---|
-| `MOJIVE_BACKEND` | `opengl`, `wgpu` | Select the render backend for interactive and offscreen rendering. |
+| `MOJIVE_RENDERER` | `opengl`, `wgpu` | Select the renderer for interactive and offscreen rendering; an explicit `renderer=` argument takes precedence. |
+| `MOJIVE_BACKEND` | `opengl`, `wgpu` | Legacy renderer setting, used when `MOJIVE_RENDERER` is unset. |
 | `MOJIVE_GL` | `auto`, `native`, `glfw`, `egl` | Select OpenGL context creation. Offscreen `auto` tries EGL on Linux, then hidden GLFW only when a desktop display and the main thread are available. |
 | `MOJIVE_UI_SCALE` | positive number | Override the logical UI scale when desktop scale detection is wrong. |
 | `MOJIVE_LANGUAGE` | `en`, `zh_CN` | Override the UI language for the process. |
@@ -18,11 +19,12 @@ it does not block viewport interaction.
 | `MOJIVE_IMGUI_INI` | file path | Override the ImGui layout file directly. |
 | `MOJIVE_OPEN_SETTINGS` | `1` | Open the Settings panel at startup; primarily used by visual acceptance. |
 
-`MOJIVE_BACKEND` controls rendering, not the scene/physics adapter. Model-oriented CLI commands
-use `-b/--backend` for the adapter. See the [CLI reference](cli.md#render-backend-and-scene-adapter).
+`MOJIVE_RENDERER` and its legacy alias `MOJIVE_BACKEND` select rendering. Model-oriented CLI
+commands use `--adapter` (or the compatible `-b/--backend` alias) for the scene adapter. See the
+[CLI reference](cli.md#render-backend-and-scene-adapter).
 
 `FORGE_VIEWER_BACKEND` and the value `forge` remain accepted only as migration compatibility for
-older local launch scripts. New scripts should use `MOJIVE_BACKEND=opengl`.
+older local launch scripts. New scripts should use `MOJIVE_RENDERER=opengl`.
 
 ## Persistent files
 
@@ -182,7 +184,21 @@ site belong under the repository's ignored `output/` directory.
 
 OpenGL is the default. Interactive windows require a desktop OpenGL 3.3 core profile. On Linux,
 interactive GLFW normally chooses the native context API (EGL on Wayland, GLX on X11); set
-`MOJIVE_GL=egl` to force and verify EGL for the interactive window.
+`MOJIVE_GL=egl PYOPENGL_PLATFORM=egl` to force and verify EGL for the interactive window
+(or use `make egl-viewer`). Set both variables before starting Python: GLFW and the ImGui
+PyOpenGL backend must agree on the context API.
+
+If EGL fails with `eglInitialize failed (0x3001)` in a Conda shell, check
+`printenv __EGL_VENDOR_LIBRARY_DIRS`. A Conda activation hook can restrict EGL vendor discovery
+to its Mesa libraries and exclude the system NVIDIA driver. Compare with system discovery:
+
+```bash
+env -u __EGL_VENDOR_LIBRARY_DIRS make egl
+```
+
+If this succeeds, remove the vendor-directory export from the affected environment's
+`etc/conda/activate.d/` hook and run `unset __EGL_VENDOR_LIBRARY_DIRS` in existing shells.
+Keep intentional vendor overrides when they are required by your environment.
 
 Offscreen `Renderer` has a separate context policy:
 

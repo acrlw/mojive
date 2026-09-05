@@ -21,11 +21,13 @@ def main() -> None:
     """Pause, advance, inspect, and optionally capture the remote scene."""
     args = parse_args()
     with RpcClient(args.socket) as client:
-        client.call("pause")
-        client.call("step", {"count": args.steps})
+        capabilities = client.hello()
+        if capabilities["adapter"]["simulation"]:
+            client.call("pause")
+            client.call("step", {"count": args.steps})
         state = client.call("get_state")
         print(f"asset={state['asset']}")
-        print(f"paused={state['paused']} time={state['physics']['time']:.6f}")
+        print(f"paused={state['paused']} time={state['time']:.6f}")
         if args.capture is not None:
             result = client.call("capture", {"output": str(args.capture)})
             print(result["path"])

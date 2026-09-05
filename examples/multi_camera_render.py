@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 
 import mujoco
@@ -15,7 +14,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("model", type=Path)
     parser.add_argument("--output", type=Path, default=Path("output/examples/cameras"))
-    parser.add_argument("--backend", choices=("opengl", "wgpu"), default="opengl")
+    parser.add_argument(
+        "--renderer", "--backend", dest="backend", choices=("opengl", "wgpu"), default="opengl"
+    )
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     return parser.parse_args()
@@ -33,7 +34,6 @@ def camera_names(model: mujoco.MjModel) -> list[str]:
 def main() -> None:
     """Render the free camera and each named fixed camera to PNG."""
     args = parse_args()
-    os.environ["MOJIVE_BACKEND"] = args.backend
     from mojive import Renderer
 
     model = mujoco.MjModel.from_xml_path(str(args.model.expanduser().resolve()))
@@ -41,7 +41,7 @@ def main() -> None:
     mujoco.mj_forward(model, data)
     args.output.mkdir(parents=True, exist_ok=True)
     cameras: list[int | str] = [-1, *camera_names(model)]
-    with Renderer(model, height=args.height, width=args.width) as renderer:
+    with Renderer(model, height=args.height, width=args.width, renderer=args.backend) as renderer:
         for camera in cameras:
             renderer.update_scene(data, camera=camera)
             image = renderer.render()

@@ -23,7 +23,6 @@ from mojive.control_rpc import (
     RpcClient,
     RpcError,
     ViewerControlService,
-    _mujoco_camera,
 )
 from mojive.types import CameraView
 
@@ -63,6 +62,56 @@ def test_rpc_routes_simulation_and_state_commands(rpc):
     assert after["paused"]
     assert after["physics"]["qpos"]["values"][0] == pytest.approx(changed[0])
     assert service.session.frame.step == 2
+
+
+def test_schema_rejection_precedes_control_updates_and_reports_live_availability(rpc):
+    client, service, _ = rpc
+    assert client.get_state()["paused"]
+    before = service.session.adapter.capture_state().ctrl.copy()
+    controls = np.full_like(before, 0.25).tolist()
+    for count in (0, -1, True, 1.5):
+        with pytest.raises(RpcError) as error:
+            client.call("step", {"count": count, "ctrl": controls})
+        assert error.value.code == "invalid_params"
+        assert error.value.details["path"] == "/count"
+        np.testing.assert_array_equal(service.session.adapter.capture_state().ctrl, before)
+        assert service.session.frame.step == 0
+    assert client.describe_operations(name="step")["operations"][0]["available"]
+    client.call("resume")
+    operation = client.describe_operations(name="step")["operations"][0]
+    assert not operation["available"] and "Pause" in operation["unavailable_reason"]
+    client.call("pause")
+
+
+def test_physics_queries_match_schemas_and_report_session_geometry_edits(rpc):
+    from mojive.control_schema import Validator
+    from mojive.operations import OPERATIONS
+
+    client, _, _ = rpc
+    for method in (
+        "hello",
+        "get_state",
+        "get_scene",
+        "get_capture_settings",
+        "describe_operations",
+    ):
+        Validator(OPERATIONS[method].output_schema).validate(client.call(method))
+    node = next(item for item in client.call("get_scene")["objects"] if item["type"] == "geom")
+    before = client.call("inspect_object", {"node_id": node["node_id"]})
+    assert before["geometries"]
+    client.call(
+        "set_geometry_color",
+        {
+            "node_id": node["node_id"],
+            "rgba": [0.2, 0.4, 0.8, 1],
+            "expected_document": before["document"],
+        },
+    )
+    after = client.call("inspect_object", {"node_id": node["node_id"]})
+    Validator(OPERATIONS["inspect_object"].output_schema).validate(after)
+    assert after["geometries"][0]["rgba"] == pytest.approx([0.2, 0.4, 0.8, 1])
+    stepped = client.call("step", {"count": 1, "observe": True})
+    Validator(OPERATIONS["step"].output_schema).validate(stepped)
 
 
 def test_rpc_advertises_capabilities_and_supports_atomic_policy_steps(rpc):
@@ -143,31 +192,19 @@ def test_control_socket_is_private_to_the_current_user(rpc):
     assert stat.S_IMODE(client.socket_path.stat().st_mode) == 0o600
 
 
-def test_rpc_free_camera_preserves_eye_and_view_direction():
-    import mujoco
+def test_rpc_camera_selection_uses_session_overrides(rpc, monkeypatch):
+    from mojive import commands as cmd
 
-    model = mujoco.MjModel.from_xml_string(
-        '<mujoco><worldbody><geom type="box" size=".1 .1 .1"/></worldbody></mujoco>'
-    )
+    client, service, _ = rpc
     view = CameraView(
         eye=np.array([2.0, -3.0, 1.5], np.float32),
         target=np.array([0.2, 0.4, 0.7], np.float32),
-        up=np.array([0.0, 0.0, 1.0], np.float32),
     )
-    scene = mujoco.MjvScene(model, maxgeom=16)
-    mujoco.mjv_updateScene(
-        model,
-        mujoco.MjData(model),
-        mujoco.MjvOption(),
-        None,
-        _mujoco_camera(view),
-        mujoco.mjtCatBit.mjCAT_ALL,
-        scene,
-    )
-
-    eye = (np.asarray(scene.camera[0].pos) + np.asarray(scene.camera[1].pos)) * 0.5
-    assert eye == pytest.approx(view.eye, abs=1e-6)
-    assert scene.camera[0].forward == pytest.approx(view.forward(), abs=1e-6)
+    monkeypatch.setattr(service.session.adapter, "set_camera_view", lambda *args: False)
+    assert service.session.submit(cmd.SetSceneCamera(0, view)).ok
+    client.call("set_camera", {"camera_id": 0})
+    assert service.camera.view().eye == pytest.approx(view.eye, abs=1e-6)
+    assert service.camera.view().forward() == pytest.approx(view.forward(), abs=1e-6)
 
 
 def test_rpc_lists_selects_and_inspects_objects(rpc):

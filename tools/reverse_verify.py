@@ -29,8 +29,8 @@ CASES = [
     ),
     (
         "src/mojive/render/opengl/instances.py",
-        "vao.glo, self.buffer.glo, INSTANCE_BYTES, start * INSTANCE_BYTES, attrs",
-        "vao.glo, self.buffer.glo, INSTANCE_BYTES, 0, attrs",
+        "                start * stride,",
+        "                0,",
         "test_both_instance_strategies_draw_the_same_thing",
         GPU_TESTS,
     ),
@@ -64,8 +64,8 @@ CASES = [
     ),
     (
         "src/mojive/render/opengl/instances.py",
-        "        dst[:, 0:16] = scene.transforms.transpose(0, 2, 1).reshape(n, 16)",
-        "        dst[:, 0:16] = scene.transforms.reshape(n, 16)",
+        "            floats[:, :16] = scene.transforms.transpose(0, 2, 1).reshape(n, 16)",
+        "            floats[:, :16] = scene.transforms.reshape(n, 16)",
         "test_pack_transposes_row_major_to_column_major",
         GPU_TESTS,
     ),
@@ -92,23 +92,22 @@ CASES = [
     ),
     (
         "src/mojive/render/opengl/instances.py",
-        '("in_object_id", "1u", 4, 1, 128, G.GL_UNSIGNED_INT),',
-        '("in_object_id", "1f", 4, 1, 128, G.GL_FLOAT),',
+        '("in_object_id", "1u", 4, 1, 0, G.GL_UNSIGNED_INT),',
+        '("in_object_id", "1f", 4, 1, 0, G.GL_FLOAT),',
         "test_object_id_reaches_the_shader_exactly",
         GPU_TESTS,
     ),
     (
         "src/mojive/render/opengl/instances.py",
-        "        self._raw[:n, 32] = scene.object_id",
-        "        self._raw[:n, 32] = scene.object_id.astype(np.float32).astype(np.uint32)"
-        + "\n        self._raw[:n, 32] = np.float32(scene.object_id).astype(np.uint32)",
+        "            raw[:, 32] = scene.object_id",
+        "            raw[:, 32] = scene.object_id.astype(np.float32).astype(np.uint32)",
         "test_object_id_survives_packing_as_an_exact_uint32",
         GPU_TESTS,
     ),
     (
         "src/mojive/render/scene.py",
-        '            key = (*row["key"], transparent, i if transparent else -1)',
-        '            key = (*row["key"], False, -1)',
+        "            batch_key = (mesh, binding, transparent, i if transparent else -1)",
+        "            batch_key = (mesh, binding, False, -1)",
         "test_same_mesh_and_material_but_different_alpha_split_into_two_buckets",
         CPU_TESTS,
     ),
@@ -205,8 +204,8 @@ CASES = [
     ),
     (
         "src/mojive/ui/app.py",
-        "            self.window.style_scale,\n            enabled=over_viewport,",
-        "            self.window.style_scale * 3.0,\n            enabled=over_viewport,",
+        "            self.window.style_scale,\n            enabled=over_viewport\n",
+        "            self.window.style_scale * 3.0,\n            enabled=over_viewport\n",
         "test_view_gizmo_fits_the_corner",
         UI_TESTS,
     ),
@@ -320,8 +319,8 @@ CASES = [
     ),
     (
         "src/mojive/ui/gizmo.py",
-        "        self._visible = not yielding and self._verdict.ok",
-        "        self._visible = not yielding and interactive and self._verdict.ok",
+        "        self._visible = not yielding and (self._verdict.ok or self._display_only)",
+        "        self._visible = not yielding and interactive and (self._verdict.ok or self._display_only)",
         "test_gizmo_stays_drawn_while_the_camera_is_being_dragged",
         UI_TESTS,
     ),
@@ -334,8 +333,8 @@ CASES = [
     ),
     (
         "src/mojive/ui/app.py",
-        "        if io.want_text_input:",
-        "        if io.want_capture_keyboard:",
+        "    def _poll_keys(self) -> Keys:\n        io = imgui.get_io()\n        if self._scene_input_blocked():",
+        "    def _poll_keys(self) -> Keys:\n        io = imgui.get_io()\n        if self._scene_input_blocked() or io.want_capture_keyboard:",
         "test_the_keyboard_shortcuts_are_not_swallowed",
         UI_TESTS,
     ),
@@ -391,7 +390,7 @@ CASES = [
 ]
 
 
-def run(test: str, path: str) -> bool:
+def run(test: str, path: str) -> int:
     marks = "gpu" if path.startswith("tests/gpu") else "not gpu"
     env = dict(os.environ)
 
@@ -418,7 +417,9 @@ def run(test: str, path: str) -> bool:
         timeout=300,
         env=env,
     )
-    return r.returncode == 0
+    if r.returncode not in (0, 1) and r.returncode >= 0:
+        print(r.stdout, r.stderr)
+    return r.returncode
 
 
 def main() -> int:
@@ -434,15 +435,18 @@ def main() -> int:
         stat = path.stat()
         try:
             path.write_text(backup.replace(old, new, 1))
-            still_green = run(test, tpath)
+            returncode = run(test, tpath)
         finally:
             path.write_text(backup)
 
             os.utime(path, (stat.st_atime, stat.st_mtime))
-        mark = "✗" if still_green else "✓"
-        result = "still passes" if still_green else "fails as expected"
+        # Assertion failures and native crashes expose a broken invariant.
+        # Collection errors or an empty selection do not exercise the mutation.
+        caught = returncode == 1 or returncode < 0
+        mark = "✓" if caught else "✗"
+        result = "fails as expected" if caught else f"unexpected pytest exit {returncode}"
         print(f"{mark} {label:52} {result}")
-        if still_green:
+        if not caught:
             bad.append(label)
 
     shutil.rmtree(ROOT / ".pytest_cache", ignore_errors=True)
@@ -467,6 +471,8 @@ def main() -> int:
             timeout=300,
         )
         print(f"restored {path:32} {r.stdout.strip().splitlines()[-1]}")
+        if r.returncode != 0:
+            bad.append(f"restored {path}")
     if bad:
         print(f"\n{len(bad)} reverse gates failed: {bad}")
         return 1

@@ -5,6 +5,7 @@ import os
 import pytest
 
 from mojive.render.opengl import gl_native as G
+from mojive.render.selection import render_backend_name
 
 
 def _load_glfw():
@@ -58,10 +59,7 @@ def _english_ui():
 @pytest.fixture(scope="session")
 def backend_name():
 
-    requested = os.environ.get("MOJIVE_BACKEND", "").strip().lower()
-    if requested == "webgpu":
-        requested = "wgpu"
-    return requested or "opengl"
+    return render_backend_name()
 
 
 @pytest.fixture(scope="session")

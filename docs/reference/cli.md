@@ -8,13 +8,15 @@ JSON document and send logs to stderr.
 
 Mojive has two independent backend choices:
 
-- `MOJIVE_BACKEND=opengl|wgpu` selects the renderer. OpenGL is the default.
-- `-b/--backend` on model commands selects the scene/physics adapter. The default is `mujoco`.
+- `MOJIVE_RENDERER=opengl|wgpu` selects the renderer. OpenGL is the default;
+  `MOJIVE_BACKEND` remains a compatible fallback.
+- `--adapter` on model commands selects the scene/physics adapter. The default is `mujoco`;
+  `-b/--backend` remain compatible aliases.
 
 For example, this loads a MuJoCo model through the MuJoCo adapter and renders it through wgpu:
 
 ```bash
-MOJIVE_BACKEND=wgpu uv run mojive view test_scene -b mujoco
+MOJIVE_RENDERER=wgpu uv run mojive view test_scene --adapter mujoco
 ```
 
 Asset arguments accept a filesystem path or a bundled asset name. The extension is optional for
@@ -35,7 +37,7 @@ and `msaa`.
 Open one asset in the standard viewer. The model starts paused unless `--play` is passed.
 
 ```text
-mojive view ASSET [-b ADAPTER] [--paused | --play] [--no-vsync]
+mojive view ASSET [-b ADAPTER] [--paused | --play] [--no-vsync] [--rpc-socket PATH]
                   [--enable-render FLAG ...]
 ```
 
@@ -44,7 +46,7 @@ mojive view ASSET [-b ADAPTER] [--paused | --play] [--no-vsync]
 Open an empty workspace or load one MJCF/URDF asset into the editor.
 
 ```text
-mojive editor [ASSET] [--no-vsync]
+mojive editor [ASSET] [--no-vsync] [--rpc-socket PATH]
 ```
 
 Use the File menu for `.mojive.json` workspaces, additional models, resource directories, and
@@ -230,5 +232,12 @@ Send one typed RPC method. `--params` must be a JSON object.
 mojive control METHOD [--params JSON] [--socket PATH] [--timeout SECONDS] [--json]
 ```
 
+`--json` preserves structured errors with exit status 2. Use `hello`, `get_scene`, and
+`describe_operations` to discover the running service and its parameter schemas. `view` and
+`editor` expose their own Session when started with `--rpc-socket`.
+
 Use the [RPC control guide](../how-to/rpc-control.md) for a persistent Python client and capture
 examples.
+
+`--adapter` is the preferred spelling for the scene adapter selector; `--backend` and `-b`
+remain compatible aliases. Renderer selection uses `MOJIVE_RENDERER` independently.

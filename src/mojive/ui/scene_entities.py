@@ -14,9 +14,10 @@ from ..gizmo import (
     screen_constant_world_sizes,
     world_scale,
 )
+from ..math3d import camera_rotation as camera_rotation
+from ..math3d import direction_basis
 from ..render.debugdraw import Occlusion
 from ..types import CameraView, Light, LightType
-from .camera import camera_basis
 from .theme import THEME
 
 HELPER_LAYER = "ui.scene_entities"
@@ -346,21 +347,6 @@ def light_icon_segments(
     starts = np.concatenate((rings, detail_starts), axis=1)
     ends = np.concatenate((np.roll(rings, -1, axis=1), detail_ends), axis=1)
     return starts.reshape(-1, 3), ends.reshape(-1, 3)
-
-
-def camera_rotation(view: CameraView) -> np.ndarray:
-    right, up, forward = camera_basis(view)
-    return np.column_stack((right, up, -forward)).astype(np.float32)
-
-
-def direction_basis(direction) -> np.ndarray:
-    forward = _direction(direction)
-    reference = np.array((0.0, 0.0, 1.0))
-    if abs(float(np.dot(forward, reference))) > 0.95:
-        reference = np.array((0.0, 1.0, 0.0))
-    right = math3d.normalize(np.cross(forward, reference))
-    up = math3d.normalize(np.cross(right, forward))
-    return np.column_stack((right, up, -forward)).astype(np.float32)
 
 
 def camera_frustum_segments(view: CameraView) -> tuple[np.ndarray, np.ndarray]:

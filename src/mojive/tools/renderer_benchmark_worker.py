@@ -458,6 +458,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
 
+    os.environ.pop("MOJIVE_RENDERER", None)
     if args.renderer == "mojive-opengl":
         os.environ["MOJIVE_BACKEND"] = "opengl"
     elif args.renderer == "mojive-wgpu":

@@ -98,3 +98,17 @@ make mujoco-model-suite \
 The JSON report defaults to `output/mujoco-model-suite.json`. Unavailable plugin runtimes are
 reported as `skipped_dependency`; compilation, adapter, render, and empty-output failures remain
 test failures.
+
+## Direct backend product comparisons
+
+`tests/gpu/test_backend_parity.py` renders the same textured and transparent scene with both
+backends, in linear and MuJoCo classic modes. RGB allows a mean difference below one display
+level and p99 at most five levels; object-ID and segmentation disagreement must stay below 0.1%
+of pixels; metric depth p99 on shared visible pixels must stay below 1e-4 world units. The test
+also checks generated texture orientation and classic lighting saturation independently. These
+are functional image checks, with reports and captures under `output/quality-improvements/`.
+
+The scene and material goldens were refreshed on 2026-09-05 after reviewing the earlier classic-lighting
+migration, correcting generated primitive texture coordinates and clamping lighting before
+texture modulation. The corresponding MuJoCo reference comparison retains its separate
+approximate renderer-parity thresholds; it does not promise pixel-identical MuJoCo shading.

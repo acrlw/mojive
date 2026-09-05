@@ -772,7 +772,10 @@ def test_custom_mesh_enters_the_same_scene_contract():
     scene = Scene()
     scene.mesh(mesh, name="triangle")
 
-    assert next(iter(scene.source.meshes.values())) is mesh
+    stored = next(iter(scene.source.meshes.values()))
+    assert np.array_equal(stored.positions, mesh.positions)
+    assert np.array_equal(stored.indices, mesh.indices)
+    assert not np.shares_memory(stored.positions, mesh.positions)
     assert scene.source.instance_count == 1
 
 

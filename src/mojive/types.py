@@ -4,11 +4,45 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
 from . import math3d
+
+
+class Bounds(NamedTuple):
+    """Axis-aligned bounds expressed as minimum and maximum coordinates."""
+
+    minimum: np.ndarray
+    maximum: np.ndarray
+
+    @property
+    def center(self) -> np.ndarray:
+        """Return the midpoint of the bound."""
+        return (self.minimum + self.maximum) * 0.5
+
+    @property
+    def half_extent(self) -> np.ndarray:
+        """Return half of the bound's dimensions."""
+        return (self.maximum - self.minimum) * 0.5
+
+
+class CenteredBounds(NamedTuple):
+    """Axis-aligned bounds expressed as center and nonnegative half extent."""
+
+    center: np.ndarray
+    half_extent: np.ndarray
+
+    @property
+    def minimum(self) -> np.ndarray:
+        """Return the minimum coordinates."""
+        return self.center - self.half_extent
+
+    @property
+    def maximum(self) -> np.ndarray:
+        """Return the maximum coordinates."""
+        return self.center + self.half_extent
 
 
 @dataclass(frozen=True)

@@ -16,6 +16,7 @@ dependencies = [
     "loguru>=0.7",
     # window.read_frame() reads the default framebuffer through PyOpenGL.
     "pyopengl>=3.1",
+    "jsonschema>=4.23",
 ]
 
 [project.optional-dependencies]

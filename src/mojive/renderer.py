@@ -3,10 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import os
-import sys
-import threading
-import warnings
 from concurrent.futures import Future
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -23,6 +19,7 @@ from .render.backend import (
     RenderRequest,
     ShadowQuality,
 )
+from .render.context import _select_backend
 from .types import CameraView, InstancePoseSource, InstanceVisual
 
 try:
@@ -114,149 +111,6 @@ class _RenderOutput:
     async_read_name: str
 
 
-class _GLFWContext:
-    def __init__(self, width: int, height: int) -> None:
-        import glfw
-
-        self._glfw = glfw
-        if not glfw.init():
-            raise RuntimeError(f"GLFW initialization failed: {glfw.get_error()}")
-        for hint, value in (
-            (glfw.CONTEXT_CREATION_API, glfw.NATIVE_CONTEXT_API),
-            (glfw.CONTEXT_VERSION_MAJOR, 3),
-            (glfw.CONTEXT_VERSION_MINOR, 3),
-            (glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE),
-            (glfw.OPENGL_FORWARD_COMPAT, True),
-            (glfw.VISIBLE, False),
-        ):
-            glfw.window_hint(hint, value)
-        self.window = glfw.create_window(
-            max(1, width), max(1, height), "Mojive Renderer", None, None
-        )
-        if not self.window:
-            raise RuntimeError(f"Failed to create an OpenGL 3.3 core context: {glfw.get_error()}")
-        self.gl_context = None
-
-    @contextmanager
-    def current(self):
-        glfw = self._glfw
-        previous = glfw.get_current_context()
-        glfw.make_context_current(self.window)
-        try:
-            yield
-        finally:
-            glfw.make_context_current(previous)
-
-    def close(self) -> None:
-        if self.window is None:
-            return
-        current = self._glfw.get_current_context()
-        if current == self.window:
-            self._glfw.make_context_current(None)
-        self._glfw.destroy_window(self.window)
-        self.window = None
-
-
-class _StandaloneContext:
-    def __init__(self, backend: str) -> None:
-        import moderngl
-
-        self.gl_context = moderngl.create_standalone_context(require=330, backend=backend)
-
-    @contextmanager
-    def current(self):
-        yield
-
-    def close(self) -> None:
-        if self.gl_context is None:
-            return
-        self.gl_context.release()
-        self.gl_context = None
-
-
-def _create_context(width: int, height: int):
-    requested = os.environ.get("MOJIVE_GL", "").strip().lower()
-    if requested not in {"", "auto", "egl", "glfw", "native"}:
-        raise ValueError(f"Unsupported MOJIVE_GL backend: {requested}")
-    auto = requested in {"", "auto"}
-    use_egl = requested == "egl" or (auto and sys.platform.startswith("linux"))
-    failures: list[tuple[str, Exception]] = []
-    if use_egl:
-        try:
-            return _StandaloneContext("egl")
-        except Exception as exc:
-            failures.append(("EGL", exc))
-            if not auto:
-                raise _context_error(
-                    requested, failures, "Explicit EGL selection was preserved."
-                ) from exc
-            if not any(os.environ.get(key) for key in ("DISPLAY", "WAYLAND_DISPLAY")):
-                raise _context_error(
-                    requested, failures, "GLFW fallback requires an X11 or Wayland display."
-                ) from exc
-            if threading.current_thread() is not threading.main_thread():
-                raise _context_error(
-                    requested, failures, "GLFW fallback requires the main thread."
-                ) from exc
-    try:
-        context = _GLFWContext(width, height)
-    except Exception as exc:
-        failures.append(("GLFW", exc))
-        raise _context_error(requested, failures) from exc
-    if failures:
-        try:
-            warnings.warn(
-                f"Mojive EGL context creation failed ({failures[0][1]}); "
-                "using a hidden GLFW window instead. This requires a desktop display and may "
-                "select a different GPU. Set MOJIVE_GL=egl to require EGL or MOJIVE_GL=glfw "
-                "to select GLFW explicitly.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-        except Exception:
-            context.close()
-            raise
-    return context
-
-
-def _context_error(requested: str, failures: list[tuple[str, Exception]], note: str = ""):
-    details = "; ".join(f"{name}: {type(exc).__name__}: {exc}" for name, exc in failures)
-    return RuntimeError(
-        f"Mojive could not create an OpenGL 3.3 context (MOJIVE_GL={requested or 'auto'}, "
-        f"platform={sys.platform}). {details}. {note} "
-        "On an X11/Wayland desktop, try MOJIVE_GL=glfw on the main thread. "
-        "On a server without a display, check the GPU driver, EGL libraries, and container GPU "
-        "access; a hidden GLFW window is not a display-free fallback. "
-        "See docs/reference/configuration.md#render-backend-requirements."
-    )
-
-
-def _select_backend(width: int, height: int, samples: int):
-    """Create the render backend selected by MOJIVE_BACKEND.
-
-    Returns ``(context, backend)``; ``context`` is ``None`` for backends that
-    manage no GL state of their own (the webgpu backend needs no window, EGL,
-    or GLFW at all).
-    """
-    requested = os.environ.get("MOJIVE_BACKEND", "").strip().lower()
-    if requested in {"wgpu", "webgpu"}:
-        from .render.webgpu.backend import WgpuBackend
-
-        return None, WgpuBackend(max(1, width), max(1, height), samples, gpu_timing=False)
-    if requested not in {"", "opengl"}:
-        raise ValueError(f"Unsupported MOJIVE_BACKEND: {requested}")
-    from .render.opengl.backend import OpenGLBackend
-
-    context = _create_context(width, height)
-    try:
-        with context.current():
-            backend = OpenGLBackend(context.gl_context, max(1, width), max(1, height), samples)
-    except Exception:
-        context.close()
-        raise
-    return context, backend
-
-
 class Renderer:
     """Render an existing MuJoCo model through the selected backend.
 
@@ -274,6 +128,7 @@ class Renderer:
         font_scale: Any = DEFAULT_FONT_SCALE,
         *,
         shadow_quality: ShadowQuality | str = ShadowQuality.BALANCED,
+        renderer: str | None = None,
     ) -> None:
         if mujoco is None:  # pragma: no cover - optional dependency
             raise RuntimeError(
@@ -309,11 +164,15 @@ class Renderer:
         adapter_source = adapter.scene_source()
         self._transparent_visual = False
         source = _limit_scene_source(adapter_source, int(max_geom), model, False)
-        _configure_segmentation(source, model)
+        _configure_segmentation(source)
         self._source = source
         self._adapter_source = adapter_source
         samples = max(0, int(model.vis.quality.offsamples))
-        context, backend = _select_backend(self._width, self._height, samples)
+        try:
+            context, backend = _select_backend(self._width, self._height, samples, renderer)
+        except Exception:
+            adapter.release()
+            raise
         self._context = context
         self._backend = backend
         try:
@@ -431,7 +290,7 @@ class Renderer:
                 self._model,
                 transparent_visual,
             )
-            _configure_segmentation(source, self._model)
+            _configure_segmentation(source)
             self._source = source
             self._adapter_source = adapter_source
             self._transparent_visual = transparent_visual
@@ -760,33 +619,14 @@ def _limit_scene_source(source, max_geom: int, model, transparent_visual: bool):
     )
 
 
-def _configure_segmentation(source, model) -> None:
+def _configure_segmentation(source) -> None:
     pairs: list[tuple[int, int]] = []
     encoded = np.zeros(source.instance_count, np.uint32)
     pair_to_id: dict[tuple[int, int], int] = {}
-    for index in range(source.instance_count):
-        pose = int(source.geom_pose_source[index])
-        source_id = int(source.geom_source[index])
-        if pose == int(InstancePoseSource.GEOM):
-            pair = (source_id, int(mujoco.mjtObj.mjOBJ_GEOM))
-        elif pose == int(InstancePoseSource.SITE):
-            pair = (source_id, int(mujoco.mjtObj.mjOBJ_SITE))
-        else:
-            visual = int(source.geom_visual[index])
-            object_id = int(source.geom_object_id[index])
-            if visual in {
-                int(InstanceVisual.FLEX_EDGE),
-                int(InstanceVisual.FLEX_FACE),
-                int(InstanceVisual.FLEX_SKIN),
-            }:
-                pair = (object_id - model.nbody, int(mujoco.mjtObj.mjOBJ_FLEX))
-            elif visual == int(InstanceVisual.SKIN):
-                pair = (
-                    object_id - model.nbody - model.nflex,
-                    int(mujoco.mjtObj.mjOBJ_SKIN),
-                )
-            else:
-                continue
+    for index, values in enumerate(source.geom_segmentation):
+        pair = tuple(int(value) for value in values)
+        if pair == (-1, -1):
+            continue
         segment_id = pair_to_id.get(pair)
         if segment_id is None:
             segment_id = len(pairs) + 1

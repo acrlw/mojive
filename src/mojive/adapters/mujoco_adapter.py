@@ -3769,15 +3769,17 @@ class MuJoCoAdapter(SceneAdapterBase):
             "light_castshadow",
             "light_active",
         )
+        # Compiled model array sizes are fixed until the next installation.
+        # Empty fields cannot change and need no per-frame comparison.
         self._visual_state = {
-            name: np.asarray(getattr(model, name)).copy()
+            name: value.copy()
             for name in visual_fields
-            if hasattr(model, name)
+            if (value := np.asarray(getattr(model, name, ()))).size
         }
         self._light_state = {
-            name: np.asarray(getattr(model, name)).copy()
+            name: value.copy()
             for name in light_fields
-            if hasattr(model, name)
+            if (value := np.asarray(getattr(model, name, ()))).size
         }
         self._lights_edited = False
         self._perturb = mujoco.MjvPerturb()
@@ -4508,6 +4510,31 @@ class MuJoCoAdapter(SceneAdapterBase):
         src.geom_source = np.array(sources, np.int32)
         src.geom_pose_source = np.array(pose_sources, np.uint8)
         src.geom_visual = np.array(visuals, np.uint8)
+        # Semantic pairs belong to the adapter; rendering selection IDs stay
+        # unchanged so the viewer and offscreen captures identify the same objects.
+        src.geom_segmentation = np.full((n, 2), -1, np.int32)
+        for pose_source, object_type in (
+            (InstancePoseSource.GEOM, mujoco.mjtObj.mjOBJ_GEOM),
+            (InstancePoseSource.SITE, mujoco.mjtObj.mjOBJ_SITE),
+        ):
+            mask = src.geom_pose_source == int(pose_source)
+            src.geom_segmentation[mask, 0] = src.geom_source[mask]
+            src.geom_segmentation[mask, 1] = int(object_type)
+        flex = np.isin(
+            src.geom_visual,
+            (
+                int(InstanceVisual.FLEX_EDGE),
+                int(InstanceVisual.FLEX_FACE),
+                int(InstanceVisual.FLEX_SKIN),
+            ),
+        )
+        src.geom_segmentation[flex, 0] = src.geom_object_id[flex].astype(np.int32) - m.nbody
+        src.geom_segmentation[flex, 1] = int(mujoco.mjtObj.mjOBJ_FLEX)
+        skin = src.geom_visual == int(InstanceVisual.SKIN)
+        src.geom_segmentation[skin, 0] = (
+            src.geom_object_id[skin].astype(np.int32) - m.nbody - m.nflex
+        )
+        src.geom_segmentation[skin, 1] = int(mujoco.mjtObj.mjOBJ_SKIN)
         src.geom_static = np.array(statics, bool)
         src.instance_island_body = np.array(island_bodies, np.int32)
         src.geom_node = np.array(node_ids, np.int32)

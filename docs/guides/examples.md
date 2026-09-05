@@ -24,6 +24,8 @@ not required.
 
 | Example | Result |
 |---|---|
+| `offscreen_scene.py` | authored RGB, depth, and object-ID output without MuJoCo |
+| `agent_inspection.py` | RPC discovery, transactions, document lifecycle, and scene/viewport capture |
 | `programmatic_scene.py` | interactive scene without a physics backend |
 | `debug_draw.py` | retained lines, arrows, points, frames, and labels |
 | `canvas2d.py` | layered 2D physics and geometry diagnostics |

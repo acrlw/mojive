@@ -24,19 +24,25 @@ from .base import (
     SensorInfo,
     VisualGroupInfo,
 )
-from .workspace import WorkspaceAdapter
 
 if TYPE_CHECKING:
     from .mujoco_adapter import MuJoCoAdapter
+    from .workspace import WorkspaceAdapter
 
 
 def __getattr__(name: str):
-    if name != "MuJoCoAdapter":
-        raise AttributeError(name)
-    from .mujoco_adapter import MuJoCoAdapter
+    if name == "MuJoCoAdapter":
+        from .mujoco_adapter import MuJoCoAdapter
 
-    globals()[name] = MuJoCoAdapter
-    return MuJoCoAdapter
+        value = MuJoCoAdapter
+    elif name == "WorkspaceAdapter":
+        from .workspace import WorkspaceAdapter
+
+        value = WorkspaceAdapter
+    else:
+        raise AttributeError(name)
+    globals()[name] = value
+    return value
 
 
 __all__ = [

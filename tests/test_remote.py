@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import socket
+import struct
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 import numpy as np
@@ -272,6 +274,79 @@ def test_remote_masks_operations_that_have_no_transport_and_retains_camera_capab
         source_session.release()
 
 
+def test_remote_capabilities_follow_republished_structure():
+    source_session = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    structure = snapshot_structure(source_session)
+    publisher.publish_structure(structure)
+    remote = RemoteSceneAdapter(port=publisher.port)
+    try:
+        assert remote.caps.scene_authoring
+        publisher.publish_structure(
+            replace(
+                structure,
+                structure_revision=structure.structure_revision + 1,
+                caps=replace(structure.caps, name="read-only", scene_authoring=False),
+            )
+        )
+        _eventually(lambda: remote.structure_revision == structure.structure_revision + 1)
+        assert not remote.caps.scene_authoring
+        assert remote.caps.name == "remote:read-only"
+        assert remote.caps.external_clock
+        assert not remote.caps.scene_files
+    finally:
+        remote.release()
+        publisher.close()
+        source_session.release()
+
+
+@pytest.mark.parametrize("has_frame", [False, True])
+def test_remote_disconnect_reports_eof_instead_of_stale_frames_or_timeout(has_frame):
+    source_session = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    publisher.publish_structure(snapshot_structure(source_session))
+    if has_frame:
+        publisher.publish_frame(source_session.frame)
+    remote = RemoteSceneAdapter(port=publisher.port, timeout=0.2)
+    try:
+        if has_frame:
+            remote.frame(FrameNeeds())
+        publisher.close()
+        _eventually(lambda: remote._error)
+        with pytest.raises(ConnectionError, match="remote stream closed"):
+            remote.frame(FrameNeeds())
+    finally:
+        remote.release()
+        publisher.close()
+        source_session.release()
+
+
+@pytest.mark.parametrize("operation", ["step", "reset", "reload"])
+def test_remote_control_failure_is_not_silently_accepted(operation, monkeypatch):
+    adapter = RemoteSceneAdapter.__new__(RemoteSceneAdapter)
+    monkeypatch.setattr(adapter, "_send", lambda *args, **kwargs: CommandResult.bad("rejected"))
+    with pytest.raises(RuntimeError, match="rejected"):
+        getattr(adapter, operation)()
+
+
+def test_failed_remote_reset_returns_a_failed_session_result(monkeypatch):
+    source_session = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(source_session.frame)
+    remote = RemoteSceneAdapter(port=publisher.port)
+    session = Session(remote)
+    monkeypatch.setattr(remote, "_send", lambda *args, **kwargs: CommandResult.bad("rejected"))
+    try:
+        result = session.submit(cmd.Reset())
+        assert not result.ok
+        assert "rejected" in result.message
+    finally:
+        session.release()
+        publisher.close()
+        source_session.release()
+
+
 def test_commands_use_a_separate_round_trip_channel():
     scene = Scene()
     scene.sphere()
@@ -325,6 +400,98 @@ def test_timed_out_command_is_cancelled_before_it_reaches_the_handler():
         source_session.release()
 
 
+def test_remote_connection_timeout_includes_a_stalled_handshake():
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            accepted = workers.submit(listener.accept)
+            attempt = workers.submit(
+                RemoteSceneAdapter, port=listener.getsockname()[1], timeout=0.05
+            )
+            peer, _ = accepted.result(timeout=1)
+            try:
+                with pytest.raises(ConnectionError, match="timed out"):
+                    attempt.result(timeout=0.5)
+            finally:
+                peer.close()
+
+
+@pytest.mark.parametrize("partial_response", [False, True])
+def test_adapter_timeout_bounds_the_whole_command_and_discards_the_channel(
+    monkeypatch, partial_response
+):
+    source = Session(StaticSceneAdapter(Scene()))
+    received, finish = threading.Event(), threading.Event()
+
+    def stalled_peer(_publisher, connection):
+        try:
+            connection.recv()
+            if partial_response:
+                # A reply header can arrive before a stalled or interrupted payload.
+                connection._send(struct.pack("!i", 100))
+            received.set()
+            finish.wait(2)
+        finally:
+            connection.close()
+
+    monkeypatch.setattr(SnapshotPublisher, "_command_client", stalled_peer)
+    publisher = SnapshotPublisher(port=_port_pair())
+    publisher.publish_structure(snapshot_structure(source))
+    remote = RemoteSceneAdapter(port=publisher.port)
+    remote._timeout = 0.05
+    try:
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            future = worker.submit(remote._send, "pause")
+            assert received.wait(1)
+            try:
+                result = future.result(timeout=0.5)
+                assert not result.ok and "completion unknown" in result.message
+                assert remote._command is None
+                assert "closed" in remote._send("play").message
+            finally:
+                finish.set()
+    finally:
+        finish.set()
+        remote.release()
+        publisher.close()
+        source.release()
+
+
+def test_publisher_timeout_distinguishes_an_already_started_command():
+    source = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair(), command_timeout=0.15)
+    publisher.publish_structure(snapshot_structure(source))
+    remote = RemoteSceneAdapter(port=publisher.port)
+    started, finish = threading.Event(), threading.Event()
+    calls = []
+
+    def handler(message):
+        calls.append(message)
+        started.set()
+        assert finish.wait(2)
+        return CommandResult.good()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            response = workers.submit(remote._send, "pause")
+            _eventually(lambda: not publisher._commands.empty())
+            pump = workers.submit(publisher.pump_commands, handler)
+            assert started.wait(1)
+            try:
+                result = response.result(timeout=1)
+                assert not result.ok and "completion unknown" in result.message
+            finally:
+                finish.set()
+            assert pump.result(timeout=1) == 1
+            assert calls == [{"op": "pause"}]
+    finally:
+        finish.set()
+        remote.release()
+        publisher.close()
+        source.release()
+
+
 def test_publisher_close_unblocks_a_waiting_remote_command():
     source_session = Session(StaticSceneAdapter(Scene()))
     port = _port_pair()
@@ -367,6 +534,31 @@ def test_scene_camera_command_keeps_its_typed_remote_boundary():
         Sink(), {"op": "scene_camera", "camera_id": 7, "camera": camera}
     )
     assert command == cmd.SetSceneCamera(7, camera)
+
+
+def test_remote_document_precondition_is_consumed_before_constructing_command():
+    scene = Scene()
+    box = scene.box(name="before")
+    session = Session(StaticSceneAdapter(scene))
+    try:
+        request = {
+            "op": "rename_scene_entity",
+            "object_id": box.object_id,
+            "name": "after",
+            "expected_document": {"id": "old-document"},
+        }
+        rejected = handle_session_command(session, request)
+        assert not rejected.ok and "document changed" in rejected.message
+        assert session.node_by_object_id(box.object_id).name == "before"
+        request["expected_document"] = {
+            "id": session.document_id,
+            "revision": session.document_revision,
+        }
+        assert handle_session_command(session, request).ok
+        assert session.node_by_object_id(box.object_id).name == "after"
+        assert "expected_document" in request
+    finally:
+        session.release()
 
 
 def test_qpos_batch_command_keeps_its_typed_remote_boundary():
@@ -769,3 +961,22 @@ def test_external_clock_is_not_stepped_or_overwritten_by_render_ticks():
     assert not session.paused
     assert session.submit(cmd.Pause())
     assert adapter.paused
+
+
+def test_failed_explicit_step_is_not_retried_by_the_next_render_tick(monkeypatch):
+    adapter = _ExternalClock()
+    session = Session(adapter)
+    calls = []
+
+    def failed_step(count):
+        calls.append(count)
+        raise RuntimeError("remote step outcome is unknown")
+
+    monkeypatch.setattr(adapter, "step", failed_step)
+    assert session.submit(cmd.Pause()).ok
+    assert session.submit(cmd.Step(3)).ok
+    with pytest.raises(RuntimeError, match="outcome is unknown"):
+        session.tick(FrameNeeds())
+    session.tick(FrameNeeds())
+    assert calls == [3]
+    session.release()

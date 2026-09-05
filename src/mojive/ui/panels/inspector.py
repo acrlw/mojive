@@ -171,7 +171,7 @@ class InspectorPanel(Panel):
         self._rotation_euler = np.zeros(3, np.float64)
         self._rotation_matrix = np.eye(3, dtype=np.float64)
         self._edit_transaction = False
-        self._model_name_node = -1
+        self._model_name_source: tuple[int, int, int, str] | None = None
         self._model_name = ""
         self._source_model_id = -1
         self._source_text = ""
@@ -300,8 +300,9 @@ class InspectorPanel(Panel):
         )
         if not model_element and not scene_entity:
             return
-        if self._model_name_node != node.node_id:
-            self._model_name_node = node.node_id
+        name_source = (node.node_id, node.model_id, node.object_id, node.name)
+        if self._model_name_source != name_source:
+            self._model_name_source = name_source
             prefix = f"opengl_{node.model_id}_"
             self._model_name = node.name.removeprefix(prefix)
         imgui.set_next_item_width(-80.0 * ctx.style_scale)

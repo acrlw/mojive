@@ -52,7 +52,7 @@ class WorkspaceAdapter(SceneAdapterBase):
         self._path: Path | None = None
         self._resource_roots: tuple[Path, ...] = ()
         self._source: SceneSource | None = None
-        self._primary_revision = -1
+        self._primary_revision = primary.structure_revision
         self._scene_revision = -1
         self._node_to_scene: dict[int, int] = {}
         self._object_to_scene: dict[int, int] = {}
@@ -65,7 +65,7 @@ class WorkspaceAdapter(SceneAdapterBase):
             model_cameras=True,
             scene_authoring=True,
             scene_files=True,
-            edit_history=True,
+            edit_history=primary.capture_edit_state() is not None,
             model_composition=primary.caps.model_composition,
         )
 
@@ -122,16 +122,19 @@ class WorkspaceAdapter(SceneAdapterBase):
     def current_pose_modified(self) -> bool:
         return self.primary.current_pose_modified()
 
-    def capture_edit_state(self) -> object:
-        return self.scene.clone(), self.primary.capture_edit_state(), self._resource_roots
+    def capture_edit_state(self) -> object | None:
+        primary_state = self.primary.capture_edit_state()
+        if primary_state is None:
+            return None
+        return self.scene.clone(), primary_state, self._resource_roots
 
     def restore_edit_state(self, state: object) -> bool:
         if not isinstance(state, tuple) or len(state) != 3 or not isinstance(state[0], Scene):
             return False
-        restored_primary = state[1] is None or self.primary.restore_edit_state(state[1])
+        restored_primary = state[1] is not None and self.primary.restore_edit_state(state[1])
         if not restored_primary:
             return False
-        self.scene = state[0].clone()
+        self.scene.restore(state[0])
         self.set_resource_roots(state[2])
         self._invalidate()
         return True
@@ -312,13 +315,18 @@ class WorkspaceAdapter(SceneAdapterBase):
         return changed
 
     def scene_source(self) -> SceneSource:
+        primary_revision = self.primary.structure_revision
+        if self._primary_revision != primary_revision:
+            self.caps = replace(
+                self.caps, edit_history=self.primary.capture_edit_state() is not None
+            )
         if (
             self._source is None
-            or self._primary_revision != self.primary.structure_revision
+            or self._primary_revision != primary_revision
             or self._scene_revision != self.scene.structure_revision
         ):
             self._source = self._merge_source(self.primary.scene_source(), self.scene.source)
-            self._primary_revision = self.primary.structure_revision
+            self._primary_revision = primary_revision
             self._scene_revision = self.scene.structure_revision
         return self._source
 
@@ -729,8 +737,10 @@ class WorkspaceAdapter(SceneAdapterBase):
     def _merge_source(self, primary: SceneSource, authored: SceneSource) -> SceneSource:
         body_offset = len(primary.body_names) or _body_count(primary.nodes)
         geom_instances = primary.geom_pose_source == int(InstancePoseSource.GEOM)
-        geom_offset = (
-            int(np.max(primary.geom_source[geom_instances])) + 1 if np.any(geom_instances) else 0
+        # Visual filters can omit trailing geometry instances without removing their pose rows.
+        geom_offset = max(
+            len(primary.geom_names),
+            int(np.max(primary.geom_source[geom_instances])) + 1 if np.any(geom_instances) else 0,
         )
         material_offset = len(primary.materials)
         scene_center, scene_extent = _merge_scene_bounds(primary, authored)
@@ -788,6 +798,7 @@ class WorkspaceAdapter(SceneAdapterBase):
                 children=[],
                 object_id=object_id,
                 body_index=body,
+                geom_index=raw.geom_index + geom_offset if raw.geom_index >= 0 else -1,
                 light_index=light,
                 camera_index=camera,
             )
@@ -829,6 +840,14 @@ class WorkspaceAdapter(SceneAdapterBase):
             geom_size=_rows(primary.geom_size, authored.geom_size),
             geom_rgba=_rows(primary.geom_rgba, authored.geom_rgba),
             geom_object_id=np.concatenate((primary.geom_object_id, geom_object)),
+            geom_segmentation=_rows(
+                primary.geom_segmentation
+                if len(primary.geom_segmentation) == primary.instance_count
+                else np.full((primary.instance_count, 2), -1, np.int32),
+                authored.geom_segmentation
+                if len(authored.geom_segmentation) == authored.instance_count
+                else np.full((authored.instance_count, 2), -1, np.int32),
+            ),
             geom_body=np.concatenate(
                 (primary.geom_body, body_offset + authored.geom_body.astype(np.int32) - 1)
             ),

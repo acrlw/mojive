@@ -82,6 +82,7 @@ def test_hinge_focus_targets_the_anchor_from_the_nearest_readable_oblique_view()
     app = _focus_app(joint, frame)
     app.camera = OrbitCamera(pivot=np.array((1.5, 2.0, 3.0)), distance=3.0, yaw=0.0, pitch=0.0)
 
+    app.session.camera = app.camera.view()
     app._apply_pending_joint_focus()
     app.camera.advance(FOCUS_DURATION, app.camera_out)
 
@@ -231,6 +232,7 @@ def test_slide_focus_looks_perpendicular_at_the_range_midpoint() -> None:
     )
     app = _focus_app(joint, frame)
 
+    app.session.camera = app.camera.view()
     app._apply_pending_joint_focus()
     app.camera.advance(FOCUS_DURATION, app.camera_out)
 
@@ -254,6 +256,7 @@ def test_vertical_slide_focus_uses_iso_elevation_instead_of_a_level_view() -> No
     )
     app = _focus_app(joint, frame)
 
+    app.session.camera = app.camera.view()
     app._apply_pending_joint_focus()
     app.camera.advance(FOCUS_DURATION, app.camera_out)
 
@@ -287,6 +290,7 @@ def test_hierarchy_node_focus_preserves_azimuth_at_iso_elevation() -> None:
     app._pending_node_focus_id = None
 
     assert app.request_node_focus(node.node_id)
+    app.session.camera = app.camera.view()
     app._apply_pending_node_focus()
     app.camera.advance(FOCUS_DURATION, app.camera_out)
 
@@ -335,6 +339,7 @@ def test_hierarchy_camera_focus_uses_the_camera_world_position() -> None:
     app._pending_node_focus_id = None
 
     assert app.request_node_focus(node.node_id)
+    app.session.camera = app.camera.view()
     app._apply_pending_node_focus()
     app.camera.advance(FOCUS_DURATION, app.camera_out)
 

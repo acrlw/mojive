@@ -650,6 +650,8 @@ class Layer:
 
     def clear(self) -> None:
         """Remove every primitive and label from this layer."""
+        if not self._index and not self._texts:
+            return
         for st in self._stores.values():
             self._owner._primitives -= st.count
             st.count = 0

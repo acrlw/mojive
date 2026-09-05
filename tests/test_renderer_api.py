@@ -35,6 +35,7 @@ def test_renderer_is_exported_with_mujoco_compatible_constructor():
         "max_geom",
         "font_scale",
         "shadow_quality",
+        "renderer",
     ]
     assert signature.parameters["height"].default == 240
     assert signature.parameters["width"].default == 320

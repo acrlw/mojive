@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from imgui_bundle import imgui
-
 
 def normalize_key(value: str) -> str:
     """Return the stable identifier used by input claims and key bindings."""
@@ -26,6 +24,8 @@ def normalize_key(value: str) -> str:
 
 
 def _imgui_keys(identifier: str) -> tuple[object, ...]:
+    from imgui_bundle import imgui
+
     key_id = normalize_key(identifier)
     modifiers = {
         "ctrl": (imgui.Key.left_ctrl, imgui.Key.right_ctrl),
@@ -47,7 +47,8 @@ class InputClaim:
     """Input reserved by an embedding application for the current frame.
 
     Claimed input is still observable by the application callback, but Mojive's
-    built-in camera, tools, selection, and panel shortcuts do not consume it.
+    built-in camera, tools, selection, and editor or panel shortcuts do not
+    consume it. Explicit menu clicks remain available.
     """
 
     keys: frozenset[str] = field(default_factory=frozenset)
@@ -83,23 +84,35 @@ class InputContext:
     wheel: float
 
     def key_down(self, key: str) -> bool:
+        from imgui_bundle import imgui
+
         return not self.blocked and any(imgui.is_key_down(value) for value in _imgui_keys(key))
 
     def key_pressed(self, key: str, *, repeat: bool = False) -> bool:
+        from imgui_bundle import imgui
+
         return not self.blocked and any(
             imgui.is_key_pressed(value, repeat) for value in _imgui_keys(key)
         )
 
     def key_released(self, key: str) -> bool:
+        from imgui_bundle import imgui
+
         return not self.blocked and any(imgui.is_key_released(value) for value in _imgui_keys(key))
 
     def mouse_down(self, button: int) -> bool:
+        from imgui_bundle import imgui
+
         return not self.blocked and imgui.is_mouse_down(int(button))
 
     def mouse_clicked(self, button: int) -> bool:
+        from imgui_bundle import imgui
+
         return not self.blocked and imgui.is_mouse_clicked(int(button))
 
     def mouse_released(self, button: int) -> bool:
+        from imgui_bundle import imgui
+
         return not self.blocked and imgui.is_mouse_released(int(button))
 
 

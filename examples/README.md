@@ -5,6 +5,7 @@ Run these programs from the repository root after `uv sync --extra mujoco --extr
 
 | Example | Window | Result |
 |---|---:|---|
+| `offscreen_scene.py` | no | authored RGB, depth, and object-ID output without MuJoCo |
 | `programmatic_scene.py` | yes | authored scene without a physics backend |
 | `debug_draw.py` | yes | retained diagnostics and world-space labels |
 | `canvas2d.py` | yes | layered 2D physics and geometry diagnostics |
@@ -17,8 +18,9 @@ Run these programs from the repository root after `uv sync --extra mujoco --extr
 | `remote_publish.py` | no | live latest-state publisher for attached viewers |
 | `record_replay.py` | no | versioned `.fvs` snapshot recording |
 | `control_client.py` | no | persistent local RPC automation |
+| `agent_inspection.py` | no | RPC discovery, transactional editing, document lifecycle, and image verification |
 
-All generated files in these examples are placed under the ignored `output/examples/` directory.
+All generated files in these examples are placed under the ignored `output/` directory.
 
 ## Interactive scenes
 
@@ -119,6 +121,12 @@ uv run mojive attach
 ```
 
 ## Local control
+
+`agent_inspection.py` runs a self-contained authored scene through RPC discovery, object
+inspection, visibility, atomic edits, Undo/Redo, save/reopen, stale-document rejection, and
+RGB/object-ID verification. Run `make agent-control` and review `output/agent-control/`.
+`make agent-viewer` also verifies the presented viewport and window. Neither mode requires a
+physics engine or separately running service.
 
 Start the service:
 

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mojive import renderer
+from mojive.render import context as renderer
 
 
 @pytest.fixture

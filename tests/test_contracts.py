@@ -420,3 +420,41 @@ def test_settings_panel_reads_the_debug_view_from_the_backend():
         pass
 
     assert panel.current_view(NoGetter()) is DebugView.SHADED
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "imports",
+    [
+        "from mojive.types import MeshData; from mojive.commands import Select",
+        "from mojive import Scene, SceneAdapterBase, InputClaim, SceneFrame, CameraView, SceneRenderer",
+        "from mojive.adapters import WorkspaceAdapter; from mojive import Scene",
+    ],
+)
+def test_data_imports_do_not_load_window_render_or_physics_packages(imports):
+    import subprocess
+    import sys
+
+    code = f"""
+import sys
+from importlib.abc import MetaPathFinder
+class BlockRuntime(MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {{'imgui_bundle', 'glfw', 'moderngl', 'mujoco', 'wgpu'}}:
+            raise AssertionError('Unexpected runtime dependency: ' + fullname)
+sys.meta_path.insert(0, BlockRuntime())
+{imports}
+"""
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_lazy_public_exports_remain_discoverable_and_cached():
+    import mojive
+    from mojive.scene import Scene
+
+    assert set(mojive.__all__) <= set(dir(mojive))
+    assert mojive.Scene is Scene
+    assert vars(mojive)["Scene"] is Scene
+    with pytest.raises(AttributeError, match="has no attribute"):
+        _ = mojive.missing_export

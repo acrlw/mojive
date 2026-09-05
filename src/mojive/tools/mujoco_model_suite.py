@@ -372,7 +372,7 @@ def audit_model(request: ModelAuditRequest) -> ModelAuditResult:
     if request.load_only:
         return ModelAuditResult(status=ModelAuditStatus.PASSED, **common)
 
-    os.environ["MOJIVE_BACKEND"] = request.backend
+    os.environ["MOJIVE_RENDERER"] = request.backend
     try:
         from ..renderer import Renderer
 

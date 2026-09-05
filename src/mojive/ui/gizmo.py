@@ -90,11 +90,11 @@ from ..gizmo import (
     world_scale,
 )
 from ..render.debugdraw import Occlusion
+from ..scene_queries import camera_for_node, node_world_pose
 from ..types import CameraView, LightType, MeshShape
 from .camera import ndc_from_viewport, unproject
 from .draw2d import Draw2D
 from .panels.inspector import gizmo_refusal_reason
-from .scene_entities import camera_rotation, direction_basis
 from .theme import THEME
 
 if TYPE_CHECKING:
@@ -5112,78 +5112,11 @@ def _basis_from_z(axis) -> np.ndarray:
     return np.column_stack((x, y, z))
 
 
-def node_world_pose(session: Session, node: SceneNode) -> tuple[np.ndarray, np.ndarray]:
-    """Resolve one hierarchy node's current world-space position and orientation."""
-
-    frame = session.frame
-    if node.type is NodeType.MODEL:
-        info = next((item for item in session.scene_models if item.model_id == node.model_id), None)
-        if info is not None:
-            return (
-                np.asarray(info.position, np.float64).reshape(3),
-                np.asarray(info.rotation, np.float64).reshape(3, 3),
-            )
-    if node.type is NodeType.LIGHT:
-        lights = frame.lights or (session.source.lights if session.source is not None else None)
-        if lights is not None and 0 <= node.light_index < len(lights.lights):
-            light = lights.lights[node.light_index]
-            return (
-                np.asarray(light.position, np.float64).reshape(3),
-                np.asarray(direction_basis(light.direction), np.float64),
-            )
-    if node.type is NodeType.CAMERA:
-        view = _camera_for_node(session, node)
-        if view is not None:
-            return (
-                np.asarray(view.eye, np.float64).reshape(3),
-                np.asarray(camera_rotation(view), np.float64),
-            )
-    if node.type is NodeType.SITE:
-        i = int(node.site_index)
-        pos = np.zeros(3, np.float64)
-        mat = np.eye(3, dtype=np.float64)
-        if frame.site_xpos is not None and 0 <= i < len(frame.site_xpos):
-            pos = np.asarray(frame.site_xpos[i], np.float64).reshape(3)
-        if frame.site_xmat is not None and 0 <= i < len(frame.site_xmat):
-            mat = np.asarray(frame.site_xmat[i], np.float64).reshape(3, 3)
-        return pos, mat
-    if node.type is NodeType.GEOM:
-        i = int(node.geom_index)
-        pos = np.zeros(3, np.float64)
-        mat = np.eye(3, dtype=np.float64)
-        if frame.geom_xpos is not None and 0 <= i < len(frame.geom_xpos):
-            pos = np.asarray(frame.geom_xpos[i], np.float64).reshape(3)
-        if frame.geom_xmat is not None and 0 <= i < len(frame.geom_xmat):
-            mat = np.asarray(frame.geom_xmat[i], np.float64).reshape(3, 3)
-        return pos, mat
-    i = int(node.body_index)
-    pos = np.zeros(3, np.float64)
-    mat = np.eye(3, dtype=np.float64)
-    if frame.body_xpos is not None and 0 <= i < len(frame.body_xpos):
-        pos = np.asarray(frame.body_xpos[i], np.float64).reshape(3)
-    if frame.body_xmat is not None and 0 <= i < len(frame.body_xmat):
-        mat = np.asarray(frame.body_xmat[i], np.float64).reshape(3, 3)
-    return pos, mat
-
-
 def _source_light(session: Session, node: SceneNode):
     source = session.source
     if source is None or not 0 <= node.light_index < len(source.lights.lights):
         return None
     return source.lights.lights[node.light_index]
-
-
-def _camera_for_node(session: Session, node: SceneNode) -> CameraView | None:
-    if not 0 <= node.camera_index < len(session.cameras):
-        return None
-    camera_id = session.cameras[node.camera_index].camera_id
-    view = session.camera_view(camera_id)
-    if view is not None:
-        return view
-    frame = session.frame
-    if frame.cameras is not None and node.camera_index < len(frame.cameras):
-        return frame.cameras[node.camera_index]
-    return None
 
 
 def _set_light_from_world(session: Session, node: SceneNode, position, rotation):
@@ -5215,7 +5148,7 @@ def _set_light_from_world(session: Session, node: SceneNode, position, rotation)
 
 
 def _set_camera_from_world(session: Session, node: SceneNode, position, rotation):
-    view = _camera_for_node(session, node)
+    view = camera_for_node(session, node)
     if view is None or not 0 <= node.camera_index < len(session.cameras):
         return None
     rotation = np.asarray(rotation, np.float64).reshape(3, 3)

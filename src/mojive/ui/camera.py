@@ -10,6 +10,7 @@ import numpy as np
 
 from .. import math3d
 from ..commands import SetCamera
+from ..math3d import camera_basis
 from ..types import CameraView
 
 if TYPE_CHECKING:
@@ -59,19 +60,6 @@ PRESETS: dict[str, tuple[float, float]] = {
     "bottom": (-90.0, -PITCH_LIMIT),
     "iso": (-135.0, ISO_PITCH),
 }
-
-
-def camera_basis(view: CameraView) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    forward = np.asarray(view.forward(), np.float64)
-    right = np.cross(forward, np.asarray(view.up, np.float64))
-    n = np.linalg.norm(right)
-    if n > 1e-9:
-        right = right / n
-    else:
-        reference = (0.0, 0.0, 1.0) if abs(float(forward[2])) < 0.95 else (0.0, 1.0, 0.0)
-        right = math3d.normalize(np.cross(forward, reference))
-    up = np.cross(right, forward)
-    return right, up, forward
 
 
 def _ease_out_quad(t: float) -> float:
@@ -346,6 +334,7 @@ class OrbitCamera:
         self._dirty = True
 
         self._out: CameraSink | None = None
+        self._exact_view: CameraView | None = None
 
     def __repr__(self) -> str:
         return (
@@ -398,8 +387,7 @@ class OrbitCamera:
 
     @aspect.setter
     def aspect(self, value: float) -> None:
-        self._aspect = float(value)
-        self._touch()
+        self.set_aspect(value)
 
     @property
     def fov_y(self) -> float:
@@ -443,8 +431,8 @@ class OrbitCamera:
             raise ValueError(f"Unknown camera preset: {name}")
         return self.look_from(yaw, pitch, self._require_out())
 
-    def adopt(self, view: CameraView) -> None:
-        """Seed the free orbit camera from a scene camera."""
+    def adopt(self, view: CameraView, *, exact: bool = False) -> None:
+        """Seed the orbit camera; optionally retain the exact view until a gesture."""
         eye = np.asarray(view.eye, np.float64)
         target = np.asarray(view.target, np.float64)
         delta = eye - target
@@ -470,6 +458,7 @@ class OrbitCamera:
         self.ortho_height = float(view.ortho_height)
         self._projection.snap(self._orthographic)
         self._touch()
+        self._exact_view = view if exact else None
 
     def direction(self) -> np.ndarray:
         yaw = np.radians(self._yaw)
@@ -484,6 +473,8 @@ class OrbitCamera:
         return camera_basis(self.view())
 
     def view(self) -> CameraView:
+        if self._exact_view is not None:
+            return self._exact_view.with_aspect(self._aspect)
         near = max(MIN_NEAR, float(self.near))
         if self._adaptive_near:
             near = min(near, self._distance * NEAR_DISTANCE_FRACTION)
@@ -507,6 +498,7 @@ class OrbitCamera:
         return v
 
     def _touch(self) -> None:
+        self._exact_view = None
         self._dirty = True
 
     def _stop_anim(self) -> None:
@@ -523,7 +515,7 @@ class OrbitCamera:
         aspect = float(aspect)
         if abs(aspect - self._aspect) > 1e-9:
             self._aspect = aspect
-            self._touch()
+            self._dirty = True
 
     def orbit(self, dx_px: float, dy_px: float) -> None:
         self._yaw -= float(dx_px) * ORBIT_DEG_PER_PIXEL

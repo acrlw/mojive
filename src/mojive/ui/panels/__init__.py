@@ -851,15 +851,32 @@ class PanelManager:
             panel.open = False
 
     def poll_shortcuts(self, *, claimed_keys=frozenset(), keyboard_claimed: bool = False) -> None:
-        if imgui.get_io().want_capture_keyboard and imgui.is_any_item_active():
+        io = imgui.get_io()
+        if io.want_capture_keyboard and imgui.is_any_item_active():
             return
         if keyboard_claimed:
+            return
+        if any(
+            held and key in claimed_keys
+            for key, held in (
+                ("ctrl", io.key_ctrl),
+                ("super", io.key_super),
+                ("alt", io.key_alt),
+                ("shift", io.key_shift),
+            )
+        ):
             return
         for p in self.panels:
             if not p.enabled:
                 continue
             for spec in (p.shortcut, *p.aliases):
-                if spec and spec.casefold() not in claimed_keys and _shortcut_pressed(spec):
+                key = "slash" if spec == "?" else spec.casefold()
+                if (
+                    spec
+                    and key not in claimed_keys
+                    and spec.casefold() not in claimed_keys
+                    and _shortcut_pressed(spec)
+                ):
                     p.toggle()
                     break
 

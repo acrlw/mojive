@@ -81,6 +81,34 @@ class ToyPhysicsAdapter(SceneAdapterBase):
     def scene_source(self) -> SceneSource:
         return self.scene.source
 
+    def capture_edit_state(self) -> object:
+        return self.scene.clone(), self._positions.copy(), self._velocities.copy(), self._steps
+
+    def restore_edit_state(self, state: object) -> bool:
+        if not isinstance(state, tuple) or len(state) != 4 or not isinstance(state[0], Scene):
+            return False
+        self.scene.restore(state[0])
+        self._positions[:] = state[1]
+        self._velocities[:] = state[2]
+        self._steps = state[3]
+        self._sync_scene()
+        return True
+
+    def set_light(self, light_index: int, light) -> bool:
+        return self.scene.set_light_at(light_index, light)
+
+    def set_environment(self, environment) -> bool:
+        return self.scene.set_environment(environment)
+
+    def set_skybox(self, texture: str | None) -> bool:
+        return self.scene.set_skybox(texture)
+
+    def set_material(self, material_index: int, material) -> bool:
+        return self.scene.set_material(material_index, material)
+
+    def set_geometry_color(self, node_id: int, rgba) -> bool:
+        return self.scene.set_geometry_color(node_id, rgba)
+
     def frame(self, needs: FrameNeeds) -> SceneFrame:
         frame = self.scene.frame
         frame.time = self._steps * self.timestep()

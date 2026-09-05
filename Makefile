@@ -104,6 +104,7 @@ help:
 		'  make gpu               real OpenGL tests' \
 		'  make gpu-wgpu          real WebGPU tests' \
 		'  make egl               Linux EGL Renderer and wireframe contract' \
+		'  make scene-renderer    authored RGB, depth, and object-ID images' \
 		'  make renderer-api      public Renderer CPU and GPU contract' \
 		'  make renderer-api-wgpu public Renderer contract over wgpu' \
 		'  make renderer-benchmark MuJoCo/OpenGL/wgpu public API timing comparison' \
@@ -112,6 +113,8 @@ help:
 		'  make scene-snapshot    complete scene-state serialization and restore' \
 		'  make cli               typed local control commands' \
 		'  make rpc               local RPC protocol and capture artifacts' \
+		'  make agent-control     discover, edit, and verify an authored scene through RPC' \
+		'  make agent-viewer      verify RPC edits and presented viewport/window capture' \
 		'  make material-parity   material and dense-scene image baselines' \
 		'  make shadow-scheduling deterministic light and shadow selection' \
 		'  make doctor            window-path smoke test' \
@@ -130,7 +133,7 @@ help:
 		'  MOJIVE_CJK_FONT=/path/font.otf make editor' \
 		'  make hidpi BACKEND=wgpu UI_SCALE=2' \
 		'  MOJIVE_UI_SCALE=1.5 make viewer BACKEND=wgpu SCENE=gizmo ARGS="--paused"' \
-		'  MOJIVE_GL=egl make viewer          Linux GLFW EGL context' \
+		'  make egl-viewer                   Linux GLFW EGL context' \
 		'' \
 		'BACKEND accepts opengl (OpenGL) or wgpu. Leave UI scale unset for automatic scaling.'
 
@@ -184,15 +187,19 @@ mjcf-roundtrip:
 gpu:
 	@for f in $$(ls tests/gpu/test_*.py); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
 
-GPU_WGPU_FILES := tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py tests/gpu/test_hidpi.py tests/gpu/test_horizon_haze.py tests/gpu/test_shading.py tests/gpu/test_shadows.py tests/gpu/test_reflection.py tests/gpu/test_outline.py tests/gpu/test_tendon.py tests/gpu/test_debugdraw.py tests/gpu/test_gizmo.py tests/gpu/test_pipeline.py tests/gpu/test_viewer_wgpu.py tests/gpu/test_static_viewer.py tests/gpu/test_model_loading.py tests/gpu/test_ui_interaction.py tests/gpu/test_wgpu_shader_reload.py
+GPU_WGPU_FILES := tests/gpu/test_input_ownership.py tests/gpu/test_scene_renderer.py tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py tests/gpu/test_hidpi.py tests/gpu/test_horizon_haze.py tests/gpu/test_shading.py tests/gpu/test_shadows.py tests/gpu/test_reflection.py tests/gpu/test_outline.py tests/gpu/test_tendon.py tests/gpu/test_debugdraw.py tests/gpu/test_gizmo.py tests/gpu/test_pipeline.py tests/gpu/test_viewer_wgpu.py tests/gpu/test_static_viewer.py tests/gpu/test_model_loading.py tests/gpu/test_ui_interaction.py tests/gpu/test_wgpu_shader_reload.py
 ## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
 gpu-wgpu:
-	@export MOJIVE_BACKEND=wgpu; for f in $(GPU_WGPU_FILES); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
+	@export MOJIVE_RENDERER=wgpu; for f in $(GPU_WGPU_FILES); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
 
 egl:
 	@test "$$(uname -s)" = Linux || { echo 'make egl requires Linux'; exit 2; }
 	MOJIVE_GL=egl $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
+
+.PHONY: scene-renderer
+scene-renderer:
+	$(PY) examples/offscreen_scene.py
 
 renderer-api:
 	$(PYTEST) -q tests/test_renderer_api.py
@@ -201,9 +208,9 @@ renderer-api:
 
 ## Same Renderer API checks against the wgpu backend.
 renderer-api-wgpu:
-	MOJIVE_BACKEND=wgpu $(PYTEST) -q tests/test_renderer_api.py
-	MOJIVE_BACKEND=wgpu $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
-	MOJIVE_BACKEND=wgpu $(PY) -m mojive.tools.renderer_api
+	MOJIVE_RENDERER=wgpu $(PYTEST) -q tests/test_renderer_api.py
+	MOJIVE_RENDERER=wgpu $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
+	MOJIVE_RENDERER=wgpu $(PY) -m mojive.tools.renderer_api
 
 renderer-benchmark:
 	$(PY) -m mojive.tools.renderer_benchmark $(ARGS)
@@ -244,9 +251,9 @@ ui-runtime:
 
 ## Refresh README images with unmodified production UI and renderer captures.
 readme-media:
-	MOJIVE_BACKEND=opengl $(PY) -m mojive.tools.ui_runtime \
+	MOJIVE_RENDERER=opengl $(PY) -m mojive.tools.ui_runtime \
 		-o output/readme-media/runtime
-	MOJIVE_BACKEND=opengl $(PY) -m mojive.tools.showcase \
+	MOJIVE_RENDERER=opengl $(PY) -m mojive.tools.showcase \
 		-o output/readme-media/showcase.png --width 1920 --height 1080
 	$(PY) tools/build_readme_media.py \
 		--runtime output/readme-media/runtime \
@@ -301,7 +308,7 @@ editor-performance:
 
 stability: rpc-soak format-validation
 	$(PYTEST) -q -m physics tests/test_stability.py
-	MOJIVE_BACKEND=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py -k 'multi_camera_concurrency'
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py -k 'multi_camera_concurrency'
 	$(PY) -m mojive.tools.stability $(ARGS)
 
 rpc-soak:
@@ -352,34 +359,34 @@ ARGS  ?=
 BACKEND ?= opengl
 LANGUAGE ?= $(MOJIVE_LANGUAGE)
 viewer:
-	MOJIVE_BACKEND=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) $(PY) -m mojive.cli view $(SCENE) $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) $(PY) -m mojive.cli view $(SCENE) $(ARGS)
 
 egl-viewer:
 	@test "$$(uname -s)" = Linux || { echo 'make egl-viewer requires Linux'; exit 2; }
-	MOJIVE_GL=egl $(PY) -m mojive.cli view $(SCENE) $(ARGS)
+	MOJIVE_GL=egl PYOPENGL_PLATFORM=egl $(PY) -m mojive.cli view $(SCENE) $(ARGS)
 
 UI_SCALE ?= 2
 hidpi:
-	MOJIVE_BACKEND=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) MOJIVE_UI_SCALE=$(UI_SCALE) $(PY) -m mojive.cli view gizmo --paused $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) MOJIVE_UI_SCALE=$(UI_SCALE) $(PY) -m mojive.cli view gizmo --paused $(ARGS)
 
 ## Open an empty MuJoCo scene and load MJCF or URDF from File > Open Model.
 empty:
-	MOJIVE_BACKEND=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) $(PY) -m mojive.cli view empty --paused $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) $(PY) -m mojive.cli view empty --paused $(ARGS)
 
 ## Empty authored scene with New/Open/Save and Entity creation workflows.
 editor:
-	MOJIVE_BACKEND=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) $(PY) -m mojive.cli editor $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) $(PY) -m mojive.cli editor $(ARGS)
 
 workspace-edit:
 	$(PYTEST) -q tests/test_workspace.py tests/test_scene_entities.py
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor $(ARGS)
 
 ## Programmatic scene, OpenGL rendering, and the standard UI.
 canvas:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli canvas $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli canvas $(ARGS)
 
 canvas-2d:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) examples/canvas2d.py $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) examples/canvas2d.py $(ARGS)
 
 ## Independent physics adapter with gravity, collision, controls, and pose editing.
 toy-physics:
@@ -394,7 +401,7 @@ adapter-conformance:
 
 ## Editable lights and Environment controls for ambient light, fog, haze, and headlight.
 lighting:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli canvas --demo lighting $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli canvas --demo lighting $(ARGS)
 
 image-light:
 	$(PY) -m mojive.cli view assets/image_light.xml --paused $(ARGS)
@@ -420,7 +427,7 @@ scene-icons:
 
 scene-entities:
 	$(PYTEST) -q tests/test_scene_entities.py
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.tools.scene_entities $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.scene_entities $(ARGS)
 
 ## World anchors, screen offsets, alignment, and depth modes with the UI font.
 text-overlay:
@@ -486,65 +493,72 @@ rpc: cli
 	$(PYTEST) -q -m "gpu or physics" tests/gpu/test_control_rpc_capture.py
 	$(PY) -m mojive.tools.control_rpc
 
+.PHONY: agent-control agent-viewer
+agent-control:
+	$(PY) examples/agent_inspection.py $(ARGS)
+
+agent-viewer:
+	$(PY) examples/agent_inspection.py --viewer $(ARGS)
+
 ## Compact Inspector transform acceptance image.
 inspector:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.tools.inspector $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.inspector $(ARGS)
 
 ## Native gizmo acceptance: G position, R rotation, T frame, F9 settings.
 gizmo:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli view gizmo --paused $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli view gizmo --paused $(ARGS)
 
 ## Numbered revolute, prismatic, ball, free, multi-joint, and compact-range acceptance.
 joint-gizmo:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor joint_gizmo $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor joint_gizmo $(ARGS)
 
 ## Fixed-body transform and sphere/box/cylinder/capsule dimension authoring acceptance.
 primitive-authoring:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Material creation/copy/binding and 2D image import acceptance.
 material-authoring:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Geometry contact, solver, surface, mass, group, inertia, and fluid acceptance.
 contact-authoring:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Body auto/explicit inertia, gravcomp, mocap, and sleep-policy acceptance.
 body-authoring:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Geometry shape switching plus mesh, height-field, cube, and skybox import acceptance.
 resource-authoring:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Model-local files, materials, and height-field physical-dimension acceptance.
 asset-browser:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Joint dynamics/solver/force limits and site shape/group/endpoints acceptance.
 joint-site-authoring:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor joint_gizmo $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor joint_gizmo $(ARGS)
 
 ## Contact, actuator, sensor, tendon, and equality component acceptance.
 model-component-authoring:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Simulation-take transport plus model-local snapshot Dope Sheet acceptance.
 keyframe-authoring:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Ctrl/Cmd multi-selection and one-rebuild model topology deletion acceptance.
 batch-editing:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
 
 ## Dockable non-modal Settings acceptance.
 settings:
-	MOJIVE_OPEN_SETTINGS=1 MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli editor $(ARGS)
+	MOJIVE_OPEN_SETTINGS=1 MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor $(ARGS)
 
 ## Perturbation acceptance: Ctrl+left translates and Ctrl+right rotates a selected free body.
 perturb:
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.cli view gizmo $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli view gizmo $(ARGS)
 
 ## Selection outline acceptance across multiple geoms and occlusion.
 outline:
@@ -572,7 +586,7 @@ texture-minification:
 		echo "set TEXTURE_MINIFICATION_SCENE=/path/to/anybotics_anymal_c/scene.xml"; \
 		exit 2; \
 	}
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.tools.texture_minification \
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.texture_minification \
 		"$(TEXTURE_MINIFICATION_SCENE)"
 
 LOCAL_SHADOW_SCENE ?= $(MENAGERIE_DIR)/anybotics_anymal_c/scene.xml
@@ -582,12 +596,12 @@ local-shadow-precision:
 		echo "set LOCAL_SHADOW_SCENE=/path/to/anybotics_anymal_c/scene.xml"; \
 		exit 2; \
 	}
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.tools.local_shadow_precision \
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.local_shadow_precision \
 		"$(LOCAL_SHADOW_SCENE)"
 
 shadow-quality:
 	$(PYTEST) -q tests/test_cascades.py tests/test_panels.py -k shadow_quality
-	MOJIVE_BACKEND=$(BACKEND) $(PY) -m mojive.tools.shadow_quality $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.shadow_quality $(ARGS)
 
 AUDIT_SCENE ?= mujoco_visuals
 ## Full MuJoCo adapter and simulation regression suite.

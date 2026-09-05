@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .adapters.registry import PHYSICS_MODULES, make_adapter, physics_available, physics_of
+from .adapters.registry import (
+    PHYSICS_MODULES,
+    make_adapter,
+    physics_available,
+    physics_of,
+    registered_adapters,
+)
+from .render.selection import render_backend_name
 
 if TYPE_CHECKING:
     from .adapters.base import SceneAdapter
@@ -45,17 +51,12 @@ _RENDER_REQUIREMENTS: dict[str, tuple[str, ...]] = {
 def _active_renderer(renderer: str) -> str:
     """The renderer the viewer would actually use for a matrix row.
 
-    MOJIVE_BACKEND swaps the opengl renderer for the wgpu backend; other
+    Renderer environment settings can swap OpenGL for the wgpu backend; other
     renderers (the MuJoCo reference, planned adapters) are unaffected.
     """
     if renderer != "opengl":
         return renderer
-    requested = (
-        os.environ.get("MOJIVE_BACKEND", os.environ.get("FORGE_VIEWER_BACKEND", "")).strip().lower()
-    )
-    if requested == "forge":
-        requested = "opengl"
-    return "wgpu" if requested in {"wgpu", "webgpu"} else "opengl"
+    return render_backend_name()
 
 
 _MATRIX: tuple[tuple[str, str, str, str], ...] = (
@@ -84,7 +85,10 @@ def backend_info(name: str) -> BackendInfo:
     for entry in _MATRIX:
         if entry[0] == name:
             return _describe(*entry)
-    known = ", ".join(e[0] for e in _MATRIX)
+    for adapter_name, label in registered_adapters():
+        if name == adapter_name:
+            return _describe(name, label, "opengl", "registered adapter")
+    known = ", ".join([e[0] for e in _MATRIX] + [name for name, _ in registered_adapters()])
     return BackendInfo(
         name=name,
         physics="?",
@@ -129,7 +133,10 @@ def _describe(name: str, physics_label: str, renderer: str, role: str) -> Backen
 
 
 def available_backends() -> list[BackendInfo]:
-    return [_describe(*entry) for entry in _MATRIX]
+    return [_describe(*entry) for entry in _MATRIX] + [
+        _describe(name, label, "opengl", "registered adapter")
+        for name, label in registered_adapters()
+    ]
 
 
 def default_backend() -> str:

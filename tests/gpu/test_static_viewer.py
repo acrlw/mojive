@@ -100,6 +100,41 @@ def test_canvas_opens_without_importing_mujoco(canvas):
     assert float(image.std()) > 10.0
 
 
+def test_inspector_name_tracks_external_rename_and_undo(canvas, monkeypatch):
+    from imgui_bundle import imgui
+
+    viewer, scene = canvas
+    box = scene.object("crate")
+    seen = []
+    original_input = imgui.input_text
+
+    def input_text(label, value, *args, **kwargs):
+        if label == "##entity_name":
+            seen.append(value)
+        return original_input(label, value, *args, **kwargs)
+
+    monkeypatch.setattr(imgui, "input_text", input_text)
+    try:
+        viewer.session.submit(cmd.Select(box.object_id))
+        for _ in range(12):
+            viewer.sync()
+        assert seen[-1] == "crate"
+        for command, expected in (
+            (cmd.RenameSceneEntity(box.object_id, "renamed"), "renamed"),
+            (cmd.Undo(), "crate"),
+            (cmd.Redo(), "renamed"),
+        ):
+            assert viewer.session.submit(command).ok
+            seen.clear()
+            for _ in range(2):
+                viewer.sync()
+            assert seen[-1] == expected
+    finally:
+        viewer.session.submit(cmd.Undo())
+        viewer.session.submit(cmd.Select(0))
+        viewer.sync()
+
+
 def test_status_bar_uses_the_comfortable_application_height(canvas):
     from imgui_bundle import imgui
 

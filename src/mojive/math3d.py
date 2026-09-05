@@ -296,3 +296,36 @@ def inverse_orthographic_box(left, right, bottom, top, near, far) -> np.ndarray:
     m[2, 3] = -(rf + rn) * 0.5
     m[3, 3] = 1.0
     return m.astype(np.float32)
+
+
+def camera_basis(view) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return right, up, and forward unit axes for a world camera."""
+    forward = np.asarray(view.forward(), np.float64)
+    right = np.cross(forward, np.asarray(view.up, np.float64))
+    n = np.linalg.norm(right)
+    if n > 1e-9:
+        right = right / n
+    else:
+        reference = (0.0, 0.0, 1.0) if abs(float(forward[2])) < 0.95 else (0.0, 1.0, 0.0)
+        right = normalize(np.cross(forward, reference))
+    up = np.cross(right, forward)
+    return right, up, forward
+
+
+def camera_rotation(view) -> np.ndarray:
+    """Return the world rotation of a camera with local negative-Z forward."""
+    right, up, forward = camera_basis(view)
+    return np.column_stack((right, up, -forward)).astype(np.float32)
+
+
+def direction_basis(direction) -> np.ndarray:
+    """Build a world rotation whose local negative-Z axis follows a direction."""
+    forward = normalize(np.asarray(direction, np.float64))
+    if not np.any(forward):
+        forward = np.array((0.0, 0.0, -1.0), np.float32)
+    reference = np.array((0.0, 0.0, 1.0))
+    if abs(float(np.dot(forward, reference))) > 0.95:
+        reference = np.array((0.0, 1.0, 0.0))
+    right = normalize(np.cross(forward, reference))
+    up = normalize(np.cross(right, forward))
+    return np.column_stack((right, up, -forward)).astype(np.float32)

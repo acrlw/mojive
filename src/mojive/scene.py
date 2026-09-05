@@ -18,6 +18,7 @@ from .adapters.base import (
     SceneNode,
     SceneSource,
 )
+from .bounds import SceneBounds
 from .types import (
     DEFAULT_HEADLIGHT,
     DEFAULT_MATERIAL,
@@ -38,8 +39,13 @@ from .types import (
 class SceneObject:
     """Handle for editing one object owned by a :class:`Scene`."""
 
-    scene: Scene = field(repr=False, compare=False)
+    scene: Scene = field(repr=False)
     object_id: int
+
+    @property
+    def mesh_key(self) -> MeshKey:
+        """Return this object's mesh resource key."""
+        return self.scene._item(self.object_id).mesh
 
     def set_pose(self, position, rotation=None) -> None:
         """Set world position and optional 3x3 world rotation."""
@@ -66,7 +72,7 @@ class SceneObject:
 class SceneLight:
     """Handle for editing one light owned by a :class:`Scene`."""
 
-    scene: Scene = field(repr=False, compare=False)
+    scene: Scene = field(repr=False)
     light_id: int
 
     @property
@@ -152,8 +158,32 @@ class Scene:
         return save_scene(self, path)
 
     def clone(self) -> Scene:
-        """Return a deep copy suitable for editor undo state."""
-        return copy.deepcopy(self)
+        """Copy authored state, sharing immutable mesh and texture storage.
+
+        Mutable transforms, materials, cameras, and lights are copied. Asset arrays
+        are read-only snapshots; replace resources to edit them.
+        """
+        self._rebuild()
+        memo = {id(mesh): _immutable_mesh(mesh) for mesh in self._meshes.values()}
+        memo.update(
+            {id(texture): _immutable_texture(texture) for texture in self.textures.values()}
+        )
+        return copy.deepcopy(self, memo)
+
+    def restore(self, state: Scene) -> None:
+        """Restore a snapshot without invalidating this scene's surviving handles.
+
+        Handles for absent entities raise KeyError. Allocated IDs are never reused
+        after Undo, so an old handle cannot accidentally target a new entity.
+        """
+        restored = state.clone()
+        revision = max(self._revision, state._revision) + 1
+        for name in ("_next_object_id", "_next_mesh_id", "_next_camera_id", "_next_light_id"):
+            setattr(restored, name, max(getattr(self, name), getattr(restored, name)))
+        if restored._built_revision == restored._revision:
+            restored._built_revision = revision
+        restored._revision = revision
+        self.__dict__.update(restored.__dict__)
 
     @classmethod
     def load(cls, path: str | Path) -> Scene:
@@ -244,15 +274,26 @@ class Scene:
         return self.add(MeshShape.PLANE, **kwargs)
 
     def mesh(self, data: MeshData, **kwargs) -> SceneObject:
-        """Register an indexed mesh and add one instance."""
+        """Copy an indexed mesh into immutable scene storage and add one instance."""
         key = MeshKey(MeshShape.ASSET, self._next_mesh_id)
         self._next_mesh_id += 1
-        self._meshes[key] = data
+        self._meshes[key] = _immutable_mesh(data)
         return self.add(key, **kwargs)
 
     def add_texture(self, texture: TextureData) -> None:
-        """Add or replace a named texture."""
-        self.textures[texture.name] = texture
+        """Copy or replace a named texture in immutable scene storage.
+
+        Later edits to the caller's pixels do not change this scene or its history.
+        Call add_texture again to publish a replacement.
+        """
+        self.textures[texture.name] = _immutable_texture(texture)
+        self._revision += 1
+
+    def replace_mesh(self, key: MeshKey, data: MeshData) -> None:
+        """Replace a registered mesh for all objects using its resource key."""
+        if key not in self._meshes:
+            raise KeyError(f"Unknown mesh: {key}")
+        self._meshes[key] = _immutable_mesh(data)
         self._revision += 1
 
     def set_skybox(self, texture: str | None) -> bool:
@@ -593,6 +634,7 @@ class Scene:
                     NodeType.GEOM,
                     parent=link_id,
                     body_index=body_index,
+                    geom_index=i,
                 )
             )
             nodes[0].children.append(link_id)
@@ -647,16 +689,6 @@ class Scene:
         for i, item in enumerate(self._items):
             self._write_pose(i, item)
 
-        if n:
-            radii = np.array([float(np.max(x.size)) for x in self._items], np.float32)
-            lo = positions - radii[:, None]
-            hi = positions + radii[:, None]
-            center = ((lo.min(axis=0) + hi.max(axis=0)) * 0.5).astype(np.float32)
-            extent = max(float(np.linalg.norm(hi.max(axis=0) - lo.min(axis=0)) * 0.5), 0.5)
-        else:
-            center = np.zeros(3, np.float32)
-            extent = 1.0
-
         self._source = SceneSource(
             meshes=dict(self._meshes),
             textures=dict(self.textures),
@@ -677,10 +709,12 @@ class Scene:
             lights=self.lights,
             cameras=tuple(camera.view for camera in self._cameras),
             skybox=self.skybox,
-            scene_extent=extent,
-            scene_center=center,
             nodes=nodes,
         )
+        bounds = SceneBounds(self._source).world(self._frame)
+        if bounds is not None:
+            self._source.scene_center = bounds.center
+            self._source.scene_extent = max(float(np.linalg.norm(bounds.half_extent)), 0.5)
         self._built_revision = self._revision
 
     def _write_pose(self, index: int, item: _Item) -> None:
@@ -694,6 +728,33 @@ class Scene:
 
 def _vec3(value) -> np.ndarray:
     return np.asarray(value, np.float32).reshape(3).copy()
+
+
+def _immutable_array(value: np.ndarray) -> np.ndarray:
+    """Own bytes-backed storage whose write flag cannot be re-enabled."""
+    owner = value
+    while isinstance(owner, np.ndarray):
+        owner = owner.base
+    if not value.flags.writeable and isinstance(owner, bytes):
+        return value
+    return np.frombuffer(value.tobytes(), dtype=value.dtype).reshape(value.shape)
+
+
+def _immutable_mesh(mesh: MeshData) -> MeshData:
+    arrays = tuple(
+        _immutable_array(value) for value in (mesh.positions, mesh.normals, mesh.uvs, mesh.indices)
+    )
+    if all(
+        a is b
+        for a, b in zip(arrays, (mesh.positions, mesh.normals, mesh.uvs, mesh.indices), strict=True)
+    ):
+        return mesh
+    return MeshData(*arrays)
+
+
+def _immutable_texture(texture: TextureData) -> TextureData:
+    pixels = _immutable_array(texture.pixels)
+    return texture if pixels is texture.pixels else replace(texture, pixels=pixels)
 
 
 def _mat3(value) -> np.ndarray:

@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import contextlib
 import operator
-import os
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -22,12 +21,20 @@ from .config import (
     ViewportOverlayConfig,
 )
 from .log import get_logger
+from .render.selection import render_backend_name
 
 log = get_logger("composition")
 
 if TYPE_CHECKING:
     from .adapters.base import SceneAdapter
+    from .bridge import DebugBridge
+    from .canvas2d import Canvas2D
+    from .control_rpc import ViewerRpcServer
+    from .render.backend import RenderBackend
     from .scene import Scene
+    from .session import Session
+    from .ui.app import ViewerApp
+    from .ui.window import Window
 
 
 def _viewer_layout_path(config: ViewerConfig | None, *, vsync: bool) -> str:
@@ -43,20 +50,6 @@ def _viewer_layout_path(config: ViewerConfig | None, *, vsync: bool) -> str:
     return str(layout_settings_path())
 
 
-def render_backend_name() -> str:
-    """The renderer selected by MOJIVE_BACKEND ("opengl" or "wgpu")."""
-    requested = (
-        os.environ.get("MOJIVE_BACKEND", os.environ.get("FORGE_VIEWER_BACKEND", "")).strip().lower()
-    )
-    if requested == "forge":
-        requested = "opengl"
-    if requested == "webgpu":
-        requested = "wgpu"
-    if requested not in {"", "opengl", "wgpu"}:
-        raise ValueError(f"Unsupported MOJIVE_BACKEND: {requested}")
-    return requested or "opengl"
-
-
 @dataclass
 class Viewer:
     """Own the objects that make up one interactive viewer.
@@ -66,14 +59,14 @@ class Viewer:
     when an application embeds the viewer without using a context manager.
     """
 
-    app: Any
-    session: Any
-    backend: Any
-    window: Any
-    bridge: Any
+    app: ViewerApp
+    session: Session
+    backend: RenderBackend
+    window: Window
+    bridge: DebugBridge
     _released: bool = field(default=False, init=False, repr=False)
-    _rpc_server: Any = field(default=None, init=False, repr=False)
-    _canvas_2d: Any = field(default=None, init=False, repr=False)
+    _rpc_server: ViewerRpcServer | None = field(default=None, init=False, repr=False)
+    _canvas_2d: Canvas2D | None = field(default=None, init=False, repr=False)
 
     def run(self, max_frames: int | None = None) -> None:
         """Run the UI event loop until the window closes or a frame limit is reached."""
@@ -349,10 +342,18 @@ class Viewer:
         return Path(output)
 
 
+def _adapter_name(adapter_name: str | None, backend_name: str | None) -> str:
+    if adapter_name is not None and backend_name is not None and adapter_name != backend_name:
+        raise ValueError("adapter_name conflicts with the legacy backend_name argument")
+    return adapter_name or backend_name or "mujoco"
+
+
 def build(
     asset: Path,
-    backend_name: str = "mujoco",
+    backend_name: str | None = None,
     *,
+    adapter_name: str | None = None,
+    renderer: str | None = None,
     paused: bool = True,
     vsync: bool = True,
     width: int = 1600,
@@ -366,7 +367,9 @@ def build(
 
     Args:
         asset: Asset path accepted by the selected scene adapter.
-        backend_name: Scene adapter name, such as ``"mujoco"``.
+        backend_name: Legacy positional alias for ``adapter_name``.
+        adapter_name: Scene adapter name, such as ``"mujoco"`` (the default).
+        renderer: ``"opengl"`` or ``"wgpu"``; defaults to environment settings.
         paused: Start physics in the paused state.
         vsync: Synchronize presentation to the display.
         width: Initial logical window width.
@@ -382,8 +385,9 @@ def build(
     """
     from .backends import make_adapter
 
+    name = _adapter_name(adapter_name, backend_name)
     return _compose(
-        lambda: make_adapter(backend_name, asset),
+        lambda: make_adapter(name, asset),
         asset_path=asset,
         paused=paused,
         vsync=vsync,
@@ -393,13 +397,16 @@ def build(
         title=title,
         show_window=show_window,
         viewer_config=config,
+        renderer=renderer,
     )
 
 
 def build_workspace(
     asset: Path,
-    backend_name: str = "mujoco",
+    backend_name: str | None = None,
     *,
+    adapter_name: str | None = None,
+    renderer: str | None = None,
     paused: bool = True,
     vsync: bool = True,
     width: int = 1600,
@@ -413,8 +420,9 @@ def build_workspace(
     from .adapters.workspace import WorkspaceAdapter
     from .backends import make_adapter
 
+    name = _adapter_name(adapter_name, backend_name)
     return _compose(
-        lambda: WorkspaceAdapter(make_adapter(backend_name, asset)),
+        lambda: WorkspaceAdapter(make_adapter(name, asset)),
         asset_path=asset,
         paused=paused,
         vsync=vsync,
@@ -424,12 +432,14 @@ def build_workspace(
         title=title,
         show_window=show_window,
         viewer_config=config,
+        renderer=renderer,
     )
 
 
 def build_from_adapter(
     adapter: SceneAdapter,
     *,
+    renderer: str | None = None,
     paused: bool = False,
     vsync: bool = True,
     width: int = 1600,
@@ -452,6 +462,7 @@ def build_from_adapter(
         title=title,
         show_window=show_window,
         viewer_config=config,
+        renderer=renderer,
     )
 
 
@@ -485,6 +496,7 @@ def _compose(
     title: str,
     show_window: bool,
     viewer_config: ViewerConfig | None,
+    renderer: str | None = None,
 ) -> Viewer:
     from . import commands as cmd
     from .bridge import DebugBridge
@@ -492,6 +504,7 @@ def _compose(
     from .ui.app import ViewerApp
     from .ui.window import WindowConfig
 
+    renderer = render_backend_name(renderer)
     ini = _viewer_layout_path(viewer_config, vsync=vsync)
     if ini:
         Path(ini).parent.mkdir(parents=True, exist_ok=True)
@@ -510,7 +523,7 @@ def _compose(
     adapter = None
     session = None
     try:
-        if render_backend_name() == "wgpu":
+        if renderer == "wgpu":
             from .render.webgpu.backend import WgpuBackend
             from .ui.window_wgpu import WgpuWindow
 

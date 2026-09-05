@@ -6,6 +6,8 @@
 
 ::: mojive.adapters.base.SceneSaveOptions
 
+::: mojive.adapters.base.SceneProvider
+
 ::: mojive.adapters.base.SceneAdapterBase
 
 ::: mojive.adapters.base.SceneAdapter
@@ -23,3 +25,9 @@
 ## Conformance
 
 ::: mojive.adapters.conformance
+
+## Adapter registration
+
+::: mojive.adapters.registry.register_adapter
+
+::: mojive.adapters.registry.unregister_adapter

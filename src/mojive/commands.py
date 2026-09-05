@@ -320,6 +320,11 @@ class EndEditTransaction(Command):
 
 
 @dataclass(frozen=True)
+class CancelEditTransaction(Command):
+    """Restore the document state captured at the start of the active edit."""
+
+
+@dataclass(frozen=True)
 class Undo(Command):
     """Restore the document state before the latest edit transaction."""
 

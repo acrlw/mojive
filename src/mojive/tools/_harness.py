@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +11,7 @@ import numpy as np
 
 from ..adapters.base import FrameNeeds
 from ..render.opengl.backend import OpenGLBackend
+from ..render.selection import render_backend_name
 from ..types import CameraView
 
 
@@ -36,10 +36,7 @@ class OffscreenHarness:
         backend: str = "mujoco",
         configure_adapter: Callable[[object], None] | None = None,
     ) -> None:
-        requested = os.environ.get("MOJIVE_BACKEND", "").strip().lower()
-        if requested == "webgpu":
-            requested = "wgpu"
-        use_wgpu = requested == "wgpu"
+        use_wgpu = render_backend_name() == "wgpu"
 
         # The wgpu backend owns its device and needs no GL context or window.
         self._glfw = None

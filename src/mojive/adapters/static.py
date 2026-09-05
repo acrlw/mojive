@@ -50,13 +50,13 @@ class StaticSceneAdapter(SceneAdapterBase):
     def restore_edit_state(self, state: object) -> bool:
         if not isinstance(state, Scene):
             return False
-        self.scene = state.clone()
+        self.scene.restore(state)
         return True
 
     def reload(self) -> None:
         if self._path is None:
             raise RuntimeError("Scene has not been saved")
-        self.scene = Scene.load(self._path)
+        self.scene.restore(Scene.load(self._path))
 
     @property
     def structure_revision(self) -> int:

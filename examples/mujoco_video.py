@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import math
-import os
 from pathlib import Path
 
 import mujoco
@@ -23,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--camera", help="Fixed model camera name; omit for the free view")
-    parser.add_argument("--backend", choices=("opengl", "wgpu"))
+    parser.add_argument("--renderer", "--backend", dest="backend", choices=("opengl", "wgpu"))
     parser.add_argument("--pixel-format", choices=("yuv420p", "yuv444p"), default="yuv420p")
     parser.add_argument("--label", default="", help="Add a label and simulation timestamp to RGB")
     args = parser.parse_args()
@@ -47,8 +46,6 @@ def annotate(rgb: np.ndarray, label: str, simulation_time: float) -> np.ndarray:
 
 def main() -> None:
     args = parse_args()
-    if args.backend:
-        os.environ["MOJIVE_BACKEND"] = args.backend
     model = mujoco.MjModel.from_xml_path(str(args.model.expanduser().resolve()))
     model.vis.global_.offwidth = max(model.vis.global_.offwidth, args.width)
     model.vis.global_.offheight = max(model.vis.global_.offheight, args.height)
@@ -56,7 +53,7 @@ def main() -> None:
     mujoco.mj_forward(model, data)
     start = float(data.time)
     with (
-        Renderer(model, width=args.width, height=args.height) as renderer,
+        Renderer(model, width=args.width, height=args.height, renderer=args.backend) as renderer,
         VideoRecorder(
             args.output, (args.width, args.height), fps=args.fps, pixel_format=args.pixel_format
         ) as video,

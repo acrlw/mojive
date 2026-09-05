@@ -29,6 +29,7 @@ nav:
       - Custom scene adapter: how-to/custom-adapter.md
       - Debug drawing: how-to/debug-draw.md
       - Local RPC control: how-to/rpc-control.md
+      - Agent workflows: how-to/agent-workflows.md
       - Editor and MJCF: guides/editor-and-mjcf.md
       - Testing: guides/testing.md
       - WebGPU backend: WGPU_BACKEND_REPORT.md

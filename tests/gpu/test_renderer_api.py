@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import numpy as np
@@ -49,7 +48,9 @@ def _model():
 
 
 def test_wgpu_rgb_packing_handles_partial_four_pixel_group() -> None:
-    if os.environ.get("MOJIVE_BACKEND", "opengl").lower() != "wgpu":
+    from mojive.render.selection import render_backend_name
+
+    if render_backend_name() != "wgpu":
         pytest.skip("WebGPU RGB packing contract")
     model = _model()
     data = mujoco.MjData(model)

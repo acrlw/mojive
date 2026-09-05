@@ -766,3 +766,22 @@ def test_camera_preview_copies_the_main_render_state() -> None:
     assert peer.bvh_depth == 3
     assert peer.camera.aspect == pytest.approx(16.0 / 9.0)
     assert peer.request.products == RenderProduct.COLOR
+
+
+def test_exact_adopt_preserves_roll_and_intrinsics_across_resize_until_gesture():
+    view = CameraView(
+        eye=np.array([0, 0, 4], np.float32),
+        up=np.array([1, 1, 0], np.float32),
+        focal_length=np.array([35, 35], np.float32),
+        sensor_size=np.array([36, 24], np.float32),
+    )
+    camera = OrbitCamera()
+    camera.adopt(view, exact=True)
+    camera.set_aspect(1.5)
+    actual = camera.view()
+    assert actual.aspect == 1.5
+    np.testing.assert_array_equal(actual.up, view.up)
+    np.testing.assert_array_equal(actual.eye, view.eye)
+    np.testing.assert_array_equal(actual.focal_length, view.focal_length)
+    camera.orbit(10, 5)
+    assert not np.array_equal(camera.view().eye, view.eye)

@@ -10,6 +10,7 @@ The public package exports the common scene, rendering, adapter, remote, and rec
 | `mojive.commands` | Typed application operations | `Command`, `Query`, scene and simulation commands |
 | `mojive.scene` | Programmatic authored scenes | `Scene`, `SceneObject`, `SceneLight` |
 | `mojive.session` | Application state and routing | `Session`, `PerturbState` |
+| `mojive.scene_renderer` | Backend-neutral offscreen rendering | `SceneRenderer` |
 | `mojive.renderer` | MuJoCo-compatible offscreen rendering | `Renderer` |
 | `mojive.render.debugdraw` | Debug primitives and layers | `DebugDraw`, `Layer`, `Occlusion` |
 | `mojive.canvas2d` | Layered 2D physics and geometry diagnostics | `Canvas2D`, `CanvasLayer2D` |
@@ -17,12 +18,15 @@ The public package exports the common scene, rendering, adapter, remote, and rec
 | `mojive.remote` | Live structure, frame, and command transport | `SnapshotPublisher`, `RemoteSceneAdapter` |
 | `mojive.recording` | Video and snapshot streams | `VideoRecorder`, `SnapshotWriter` |
 | `mojive.control_rpc` | Local process control | `ControlServer`, `ControlService`, `RpcClient` |
+| `mojive.control` | Session application operations | `ControlApplication` |
+| `mojive.operations` | Operation discovery and validation | `OPERATIONS`, `Operation` |
 
 ## Integration paths
 
 | Goal | Start with | Example |
 |---|---|---|
 | Build a scene in Python | `Scene`, `build_scene` | `examples/programmatic_scene.py` |
+| Render authored or custom scene frames | `SceneRenderer` | `examples/offscreen_scene.py` |
 | Render MuJoCo arrays | `Renderer` | `examples/mujoco_render.py` |
 | Record a video or annotate RGB | `VideoRecorder` | `examples/mujoco_video.py` |
 | Debug a 2D physics or geometry algorithm | `Canvas2D` | `examples/canvas2d.py` |

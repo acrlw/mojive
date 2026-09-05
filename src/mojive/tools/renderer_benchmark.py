@@ -181,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
             ]
             environment = os.environ.copy()
             environment.pop("MOJIVE_BACKEND", None)
+            environment.pop("MOJIVE_RENDERER", None)
             started = time.perf_counter()
             try:
                 completed = subprocess.run(

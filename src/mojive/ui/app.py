@@ -26,7 +26,7 @@ from ..input import InputClaim, InputContext
 from ..log import add_output_sink, get_logger, remove_output_sink
 from ..render.backend import FrameMode, LabelMode, RenderFlag, ShadowQuality
 from ..render.debugdraw import Occlusion
-from ..types import Light, LightType, MeshShape, ViewportImage
+from ..types import CameraView, Light, LightType, MeshShape, ViewportImage
 from ..workspace_io import (
     MissingResource,
     missing_resource_entries,
@@ -722,6 +722,7 @@ class ViewerApp:
         self._seen_message_revision = int(getattr(session, "message_revision", 0))
         self._snap_latched = False
         self._capture_request: tuple[Path, CaptureSurface] | None = None
+        self._capture_tasks: list[tuple[Path, CaptureSurface, Future]] = []
         self._viewport_recorder: Any | None = None
         self._viewport_recording_path: Path | None = None
         self._viewport_record_elapsed = 0.0
@@ -948,6 +949,10 @@ class ViewerApp:
         if self._released:
             return
         self._released = True
+        for _path, _surface, future in getattr(self, "_capture_tasks", []):
+            if not future.done():
+                future.set_exception(RuntimeError("The viewer closed before capture completed"))
+        self._capture_tasks = []
         executor = getattr(self, "_model_load_executor", None)
         if executor is not None:
             executor.shutdown(wait=True, cancel_futures=True)
@@ -1661,7 +1666,6 @@ class ViewerApp:
         start_recording_surface: CaptureSurface | None = None
         pause_recording = False
         stop_recording = False
-        toggle_viewport_recording = False
         reset_layout = False
         open_help = False
         open_documentation = False
@@ -1742,7 +1746,9 @@ class ViewerApp:
                 imgui.end_menu()
             self._draw_entity_menu(shortcut, can_edit)
             if imgui.begin_menu(t("View")):
-                frame_scene, _ = imgui.menu_item(t("Frame All"), "F", False)
+                frame_scene, _ = imgui.menu_item(
+                    t("Frame All"), self.input_bindings.label(InputAction.FRAME_SCENE), False
+                )
                 if imgui.begin_menu(t("Capture")):
                     clicked, _ = imgui.menu_item(t("Scene Image"), f"{shortcut}+Shift+P", False)
                     if clicked:
@@ -1825,43 +1831,6 @@ class ViewerApp:
                 imgui.text_disabled(document)
             imgui.end_main_menu_bar()
 
-        io = imgui.get_io()
-        modifier = bool(io.key_ctrl or io.key_super)
-        keyboard_free = not io.want_text_input and not imgui.is_any_item_active()
-        if modifier and keyboard_free:
-            if caps.edit_history:
-                undo |= imgui.is_key_pressed(imgui.Key.z, False) and not io.key_shift
-                redo |= imgui.is_key_pressed(imgui.Key.z, False) and bool(io.key_shift)
-            if can_scene_files:
-                new_scene |= imgui.is_key_pressed(imgui.Key.n, False)
-                open_scene |= imgui.is_key_pressed(imgui.Key.o, False) and not io.key_shift
-                save_scene |= imgui.is_key_pressed(imgui.Key.s, False) and not io.key_shift
-                save_scene_as |= imgui.is_key_pressed(imgui.Key.s, False) and bool(io.key_shift)
-            elif can_load:
-                open_model |= imgui.is_key_pressed(imgui.Key.o, False) and not io.key_shift
-            if can_load:
-                reload_model |= imgui.is_key_pressed(imgui.Key.o, False) and bool(io.key_shift)
-            open_settings |= imgui.is_key_pressed(imgui.Key.comma, False)
-            if bool(io.key_shift) and imgui.is_key_pressed(imgui.Key.p, False):
-                capture_surface = CaptureSurface.SCENE
-            toggle_viewport_recording |= bool(io.key_shift) and imgui.is_key_pressed(
-                imgui.Key.r, False
-            )
-            editable_selected = bool(
-                self._selected_entity() or self._selected_model_element() is not None
-            )
-            if can_edit and editable_selected and imgui.is_key_pressed(imgui.Key.d, False):
-                self._duplicate_selected()
-        quit_viewer |= modifier and imgui.is_key_pressed(imgui.Key.q, False)
-        editable_selected = bool(
-            self._selected_entity() or self._selected_model_element() is not None
-        )
-        if can_edit and keyboard_free and editable_selected:
-            if imgui.is_key_pressed(imgui.Key.delete, False):
-                self._remove_selected()
-            if imgui.is_key_pressed(imgui.Key.f2, False):
-                self._request_selected_rename()
-
         if new_scene:
             self._request_document_action("new_scene")
         if undo:
@@ -1889,8 +1858,6 @@ class ViewerApp:
                 self.pause_recording()
         if stop_recording:
             self.stop_recording()
-        elif toggle_viewport_recording:
-            self._toggle_viewport_recording()
         if reset_layout:
             self.reset_layout()
         if open_help:
@@ -2442,6 +2409,7 @@ class ViewerApp:
         self._begin_viewport_panel()
         self._sync_viewport_size()
         self._poll_input_handler()
+        self._poll_application_shortcuts()
         keys = self._poll_keys()
         self.apply_keys(keys)
 
@@ -2688,6 +2656,64 @@ class ViewerApp:
             raise TypeError("input handler must return InputClaim or None")
         self._input_claim = claim
 
+    def _poll_application_shortcuts(self) -> None:
+        """Dispatch editor shortcuts after the application has claimed this frame."""
+        io = imgui.get_io()
+        if self._scene_input_blocked() or imgui.is_any_item_active():
+            return
+        claim = self._input_claim
+        if claim.keyboard:
+            return
+        modifier = bool(io.key_ctrl or io.key_super)
+        if (io.key_ctrl and claim.claims_key("ctrl")) or (
+            io.key_super and claim.claims_key("super")
+        ):
+            return
+        if io.key_shift and claim.claims_key("shift"):
+            return
+
+        def pressed(key: str) -> bool:
+            return not claim.claims_key(key) and imgui.is_key_pressed(
+                getattr(imgui.Key, key), False
+            )
+
+        caps = self.session.adapter.caps
+        if modifier:
+            if caps.edit_history and pressed("z"):
+                self.session.submit(cmd.Redo() if io.key_shift else cmd.Undo())
+            if caps.scene_files:
+                if pressed("n"):
+                    self._request_document_action("new_scene")
+                if pressed("o") and not io.key_shift:
+                    self._open_scene_dialog("open")
+                if pressed("s"):
+                    if io.key_shift or self.session.asset_path is None:
+                        self._open_scene_dialog("save")
+                    else:
+                        self._request_scene_save(self.session.asset_path)
+            elif caps.asset_loading and pressed("o") and not io.key_shift:
+                self._open_model_dialog()
+            if caps.asset_loading and io.key_shift and pressed("o"):
+                self._queue_model_load("reload", self.session.asset_path)
+            if pressed("comma"):
+                self.panels.open_panel("Settings")
+            if io.key_shift and pressed("p"):
+                self.request_capture(surface=CaptureSurface.SCENE)
+            if io.key_shift and pressed("r"):
+                self._toggle_viewport_recording()
+            if pressed("q"):
+                self._request_document_action("quit")
+        editable_selected = bool(
+            self._selected_entity() or self._selected_model_element() is not None
+        )
+        if caps.scene_authoring and editable_selected:
+            if modifier and pressed("d"):
+                self._duplicate_selected()
+            if not modifier and pressed("delete"):
+                self._remove_selected()
+            if not modifier and pressed("f2"):
+                self._request_selected_rename()
+
     def _poll_keys(self) -> Keys:
         io = imgui.get_io()
         if self._scene_input_blocked():
@@ -2704,13 +2730,15 @@ class ViewerApp:
             and self._selection_clear_enabled()
             and imgui.is_key_pressed(imgui.Key.escape, False)
         )
-        if io.key_ctrl or io.key_super:
-            return Keys(clear_selection=clear_selection)
-
         bindings = self.input_bindings
 
         def available(action: InputAction) -> bool:
-            return not self._input_claim.claims_key(bindings.key_id(action))
+            key_id = bindings.key_id(action)
+            # Editor chords reserve their letter keys. A modifier explicitly
+            # assigned to a viewport action still works as a standalone key.
+            if io.key_super or (io.key_ctrl and key_id != "ctrl"):
+                return False
+            return not self._input_claim.claims_key(key_id)
 
         def down(action: InputAction) -> float:
             return 1.0 if available(action) and bindings.down(action) else 0.0
@@ -3226,7 +3254,23 @@ class ViewerApp:
         self.camera.advance(dt, self.camera_out)
 
     def _camera_view(self):
-        return self._model_camera_view or self.camera.view()
+        return self.session.camera
+
+    def viewport_camera_state(self) -> dict:
+        """Return the effective viewport camera recorded in the Session."""
+        from ..scene_state import camera_bookmark
+
+        return camera_bookmark(self.camera, self.session.camera, self._model_camera_id)
+
+    def set_viewport_camera(self, view: CameraView, *, camera_id: int = -1) -> None:
+        """Set viewport presentation and synchronize its public Session state."""
+        self._leave_model_camera()
+        self.camera.adopt(view, exact=True)
+        self.camera.publish(self.camera_out)
+        self.select_model_camera(camera_id)
+        view = view.with_aspect(max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0))
+        self.backend.set_camera(view)
+        self.session.submit(cmd.SetCamera(view))
 
     def select_model_camera(self, camera_id: int) -> None:
         i = int(camera_id)
@@ -4728,6 +4772,17 @@ class ViewerApp:
         self._capture_request = (path, surface)
         return path
 
+    def request_capture_async(self, output=None, *, surface=CaptureSurface.VIEWPORT) -> Future:
+        """Complete a capture future after a presented frame has been saved."""
+        surface = CaptureSurface(surface)
+        path = Path(output) if output is not None else self._capture_output(surface, ".png")
+        future = Future()
+        if self._released:
+            future.set_exception(RuntimeError("The viewer is closed"))
+        else:
+            self._capture_tasks.append((path, surface, future))
+        return future
+
     def start_recording(
         self,
         output: str | Path | None = None,
@@ -4828,6 +4883,11 @@ class ViewerApp:
         requested = getattr(self, "_capture_request", None)
         if requested is not None and requested[1] is not CaptureSurface.SCENE:
             return True
+        if any(
+            surface is not CaptureSurface.SCENE
+            for _, surface, _ in getattr(self, "_capture_tasks", [])
+        ):
+            return True
         return (
             self._viewport_recording_phase is RecordingPhase.RECORDING
             and self._viewport_recording_surface is not CaptureSurface.SCENE
@@ -4883,6 +4943,35 @@ class ViewerApp:
                     f"{self.localizer.text('Saved capture to')} {path}",
                     level="success",
                 )
+        tasks, self._capture_tasks = getattr(self, "_capture_tasks", []), []
+        for path, surface, future in tasks:
+            if not future.set_running_or_notify_cancel():
+                continue
+            try:
+                from PIL import Image
+
+                image = image_for(surface)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                Image.fromarray(image, "RGB").save(path)
+                future.set_result(
+                    {
+                        "path": str(path.resolve()),
+                        "scope": surface.value,
+                        "mode": "rgb",
+                        "orientation": "top_left",
+                        "shape": list(image.shape),
+                        "dtype": str(image.dtype),
+                        "document": {
+                            "id": self.session.document_id,
+                            "revision": self.session.document_revision,
+                        },
+                        "structure_generation": self.session.structure_generation,
+                        "step": self.session.frame.step,
+                        "time": self.session.frame.time,
+                    }
+                )
+            except Exception as exc:
+                future.set_exception(exc)
         if self._viewport_recording_phase is not RecordingPhase.RECORDING:
             return
         period = 1.0 / self._viewport_recording_fps

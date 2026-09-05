@@ -133,6 +133,39 @@ def test_adapters_do_not_import_render_internals():
     assert not bad
 
 
+def test_session_capture_and_rpc_do_not_import_physics_or_compatibility_renderer():
+    """Generic control consumes composed contracts, including for MuJoCo scenes."""
+    forbidden = ("mujoco", "newton", "warp", "mojive.renderer", "mojive.adapters.mujoco_adapter")
+    bad = {}
+    for name in ("control.py", "control_rpc.py", "session_capture.py", "scene_renderer.py"):
+        imports = _imports(SRC / name)
+        hits = {hit for prefix in forbidden for hit in _hits(imports, prefix)}
+        if hits:
+            bad[name] = sorted(hits)
+    assert not bad
+
+
+def test_application_operations_do_not_depend_on_ui_or_socket_transport():
+    """Application behavior and world queries stay usable without a window or server."""
+    bad = {}
+    for name in (
+        "control.py",
+        "control_schema.py",
+        "operations.py",
+        "camera_control.py",
+        "scene_queries.py",
+    ):
+        imports = _imports(SRC / name)
+        hits = {
+            hit
+            for prefix in ("mojive.ui", "mojive.control_rpc", "socket", "socketserver")
+            for hit in _hits(imports, prefix)
+        }
+        if hits:
+            bad[name] = sorted(hits)
+    assert not bad
+
+
 def test_this_scan_needs_no_gpu_and_no_optional_deps():
     """Architecture checks remain runnable in the fast CPU layer."""
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import math
 import time
+from contextlib import suppress
 
 from mojive import FrameNeeds, Scene, SnapshotPublisher
 from mojive.adapters.static import StaticSceneAdapter
@@ -28,6 +29,7 @@ def main() -> None:
     session = Session(StaticSceneAdapter(scene))
     publisher = SnapshotPublisher(args.host, args.port)
     publisher.publish_structure(snapshot_structure(session))
+    generation = session.structure_generation
     period = 1.0 / max(args.hz, 1.0)
     started = time.perf_counter()
     print(f"Publishing on {args.host}:{args.port}; attach with uv run mojive attach")
@@ -35,9 +37,15 @@ def main() -> None:
         while True:
             frame_start = time.perf_counter()
             elapsed = frame_start - started
-            marker.set_pose((math.cos(elapsed), math.sin(elapsed), 0.5))
+            # Remote authoring may remove the animated object; Undo can restore it.
+            with suppress(KeyError):
+                marker.set_pose((math.cos(elapsed), math.sin(elapsed), 0.5))
             publisher.pump_commands(lambda message: handle_session_command(session, message))
-            publisher.publish_frame(session.tick(FrameNeeds(poses=True)))
+            frame = session.tick(FrameNeeds(poses=True))
+            if session.structure_generation != generation:
+                generation = session.structure_generation
+                publisher.publish_structure(snapshot_structure(session))
+            publisher.publish_frame(frame)
             time.sleep(max(0.0, period - (time.perf_counter() - frame_start)))
     finally:
         publisher.close()

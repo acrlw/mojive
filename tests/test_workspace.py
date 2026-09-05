@@ -76,6 +76,49 @@ def test_loaded_workspace_keeps_the_primary_camera_hint() -> None:
         document.release()
 
 
+def test_workspace_preserves_primary_segmentation_with_authored_geometry():
+    document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
+    session = Session(document)
+    try:
+        primary = document.primary.scene_source()
+        expected = primary.geom_segmentation.copy()
+        assert np.any(expected[:, 1] == int(mujoco.mjtObj.mjOBJ_GEOM))
+        assert session.submit(cmd.AddSceneObject(MeshShape.BOX, "authored")).ok
+        source = session.source
+        assert len(source.geom_segmentation) == source.instance_count
+        np.testing.assert_array_equal(source.geom_segmentation[: primary.instance_count], expected)
+        assert np.all(source.geom_segmentation[primary.instance_count :] == -1)
+    finally:
+        session.release()
+
+
+@pytest.mark.parametrize("visible_primary", [False, True])
+def test_authored_geometry_poses_follow_hidden_primary_geometries(visible_primary):
+    primary = MuJoCoAdapter()
+    primary.load_model(
+        mujoco.MjModel.from_xml_string(
+            "<mujoco><worldbody>"
+            + ('<geom type="box" size=".5 .5 .5"/>' if visible_primary else "")
+            + '<geom type="sphere" size=".5" group="5" pos="10 0 0"/>'
+            "</worldbody></mujoco>"
+        )
+    )
+    document = WorkspaceAdapter(primary)
+    document.scene.box(name="authored", position=(2, 3, 4))
+    try:
+        source = document.scene_source()
+        frame = document.frame(FrameNeeds())
+        primary_count = 1 + int(visible_primary)
+        assert primary.scene_source().instance_count == int(visible_primary)
+        assert source.geom_source[-1] == primary_count
+        node = next(node for node in source.nodes if node.name == "authored.geom")
+        assert node.geom_index == primary_count
+        np.testing.assert_array_equal(frame.geom_xpos[node.geom_index], (2, 3, 4))
+        np.testing.assert_array_equal(frame.geom_xpos[primary_count - 1], (10, 0, 0))
+    finally:
+        document.release()
+
+
 def test_loaded_model_workspace_supports_authored_entities() -> None:
     document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
     session = Session(document, ASSETS / "test_scene.xml")
