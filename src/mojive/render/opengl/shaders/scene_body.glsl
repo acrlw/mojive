@@ -86,6 +86,10 @@ void main() {
         emission, v.material.y, v.material.z, v.view_depth,
         texel.rgb
     );
+    // Classic OpenGL clamps primary lighting before texture modulation.
+    if (u_classic_lighting != 0) {
+        lit = clamp(lit, vec3(0.0), texel.rgb);
+    }
 
     if (v.reflect < 0.0 && u_reflection_size.x > 0.0) {
         float code = -v.reflect;

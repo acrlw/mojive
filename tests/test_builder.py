@@ -627,3 +627,20 @@ def test_stats_reports_batching_numbers():
         key = scene.bucket_keys[bucket][0]
         expect += mesh.builtin_mesh(key).triangle_count * (stop - start)
     assert stats.triangles == expect > 0
+
+
+@pytest.mark.parametrize("uniform", [False, True])
+@pytest.mark.parametrize(
+    "shape", [MeshShape.BOX, MeshShape.SPHERE, MeshShape.CYLINDER, MeshShape.CAPSULE_CAP]
+)
+def test_mujoco_primitive_texture_mapping_uses_object_projection(shape, uniform):
+    from mojive import Scene, ShadingModel
+
+    scene = Scene()
+    scene.add_texture(TextureData("grid", TextureType.TWO_D, np.zeros((2, 2, 3), np.uint8)))
+    scene.add(shape, size=(2, 3, 4), material=_grid_material(3, uniform))
+    source = scene.source
+    source.shading_model = ShadingModel.MUJOCO_CLASSIC
+    built = SceneSourceBuilder().set_source(source, CameraView())
+    expected = [3, -4.5] if uniform else [1.5, -1.5]
+    np.testing.assert_allclose(built.tex_coef[0], [*expected, 2, 0])

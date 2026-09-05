@@ -436,6 +436,31 @@ class SceneSourceBuilder:
         self, mat, size: np.ndarray, infinite: bool, key: MeshKey, local: np.ndarray
     ) -> np.ndarray:
         """Return texture mapping parameters for one primitive instance."""
+        src = self._source
+        texture = src.textures.get(mat.texture) if src is not None else None
+        if (
+            src is not None
+            and src.shading_model == ShadingModel.MUJOCO_CLASSIC
+            and texture is not None
+            and texture.type is TextureType.TWO_D
+            and not infinite
+            and key.shape
+            in {
+                MeshShape.PLANE,
+                MeshShape.BOX,
+                MeshShape.SPHERE,
+                MeshShape.CYLINDER,
+                MeshShape.CAPSULE_CAP,
+            }
+        ):
+            # MuJoCo's generated 2D coordinates project object X/Y. The half-unit
+            # phase is constant, independent of repetition, and T reverses Y.
+            scale = np.asarray(mat.tex_repeat, np.float32) * np.array([0.5, -0.5], np.float32)
+            if mat.tex_uniform:
+                scale *= size[:2]
+            if key.shape is MeshShape.CAPSULE_CAP and float(local[2, 2]) < 0.0:
+                scale[1] *= -1.0
+            return np.array([scale[0], scale[1], 2.0, 0.0], np.float32)
         if mat.texture is None:
             coef = np.array([1.0, 1.0, 0.0, 0.0], np.float32)
         elif not mat.tex_uniform and not infinite:

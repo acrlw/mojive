@@ -45,7 +45,7 @@ struct InstancePose {
 struct InstanceVisual {
     color: vec4f,               // linear rgba
     material: vec4f,            // emission, specular, shininess, reflectance
-    texcoef: vec4f,             // xy scale; z=1 box mapping, zw<0 infinite-plane light grid
+    texcoef: vec4f,             // scale/offset; z=1 box face axes, z=2 object X/Y projection
     cubecoef: vec4f,            // xyz object-linear scale, w capsule-axis offset
 };
 
@@ -316,7 +316,9 @@ fn scene_vertex(position: vec3f, normal: vec3f, uv: vec2f, instance_index: u32) 
     out.normal = normal_transform(model, normal);
 
     var texcoord = uv;
-    if visual.texcoef.z > 0.5 {
+    if visual.texcoef.z > 1.5 {
+        texcoord = position.xy * visual.texcoef.xy - vec2f(0.5);
+    } else if visual.texcoef.z > 0.5 {
         let extent = vec3f(length(model[0].xyz), length(model[1].xyz), length(model[2].xyz));
         let repeat = visual.texcoef.xy / max(extent.xy, vec2f(1e-7));
         let axis = abs(normal);
@@ -418,6 +420,11 @@ fn scene_fragment(in: SceneOut) -> vec4f {
         base.rgb, in.normal, in.world, emission, in.material.y, in.material.z, in.view_depth,
         surface.texture_color,
     );
+    // Classic OpenGL clamps primary lighting before texture modulation.
+    if frame.flags.z > 0.5 {
+        lit = clamp(lit, vec3f(0.0), surface.texture_color);
+    }
+
     // The vertex stage combines canonical reflectance with pass-owned layer
     // routing; add the reflected color before atmosphere, in linear space.
     if in.reflect < 0.0 && frame.reflection.x > 0.0 {

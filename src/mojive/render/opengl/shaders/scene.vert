@@ -9,7 +9,7 @@ in vec4 in_model2;
 in vec4 in_model3;
 in vec4 in_color;      // Linear RGBA
 in vec4 in_material;   // (emission, specular, shininess, reflectance)
-in vec4 in_texcoef;    // scale/offset; z=1 selects box face-axis mapping
+in vec4 in_texcoef;    // scale/offset; z=1 box face axes, z=2 object X/Y projection
 in vec4 in_cubecoef;   // xyz object-linear scale, w capsule-axis offset
 in uint in_object_id;
 in uint in_reflection_info; // layer+1 in bits 0..2, local +Z-only in bit 3
@@ -39,7 +39,9 @@ void main() {
 
     v.world = world.xyz;
     v.normal = transpose(inverse(mat3(model))) * in_normal;
-    if (in_texcoef.z > 0.5) {
+    if (in_texcoef.z > 1.5) {
+        v.uv = in_position.xy * in_texcoef.xy - vec2(0.5);
+    } else if (in_texcoef.z > 0.5) {
         vec3 extent = vec3(
             length(model[0].xyz),
             length(model[1].xyz),
