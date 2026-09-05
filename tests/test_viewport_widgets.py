@@ -10,6 +10,7 @@ from mojive.ui.viewport_widgets import (
     _MOVE_ARROW_BASE,
     _MOVE_ARROW_TIP,
     _MOVE_ARROW_WING,
+    _MOVE_SHAFT_VISUAL_RATIO,
     DEFAULT_VIEWPORT_LABELS,
     DEFAULT_VIEWPORT_OVERLAY_SCALE,
     HINT_CHROME_SCALE,
@@ -342,7 +343,7 @@ def test_dimensions_glyph_uses_three_scale_style_square_endpoints():
     assert all(item[1]["rounding"] > 0.0 for item in draw.rectangles)
 
 
-def test_tool_glyphs_use_the_configured_stroke_without_hidden_scales():
+def test_tool_glyph_strokes_have_matching_visual_weight():
     center = (20.0, 30.0)
     color = (1.0, 1.0, 1.0, 1.0)
     move = _RecordedGlyph()
@@ -354,7 +355,7 @@ def test_tool_glyphs_use_the_configured_stroke_without_hidden_scales():
     draw_tool_glyph(frame, center, color, 1.0, "frame", "world")
 
     move_path = move.paths[0]
-    move_shaft_half = OVERLAY_GEOMETRY.tool_stroke * 0.5
+    move_shaft_half = OVERLAY_GEOMETRY.tool_stroke * _MOVE_SHAFT_VISUAL_RATIO * 0.5
     move_shaft_corner = (
         center[0] + move_shaft_half,
         center[1] - 5.0 * TOOL_GLYPH_SCALE,
@@ -368,7 +369,11 @@ def test_tool_glyphs_use_the_configured_stroke_without_hidden_scales():
     frame_head_width = max(point[0] for point in frame.paths[0]) - min(
         point[0] for point in frame.paths[0]
     )
-    assert move_shaft_width == pytest.approx(OVERLAY_GEOMETRY.tool_stroke)
+    # The move silhouette receives a one-pixel fill fringe on both sides;
+    # narrowing its solid ribbon matches the apparent width of native strokes.
+    assert move_shaft_width == pytest.approx(
+        OVERLAY_GEOMETRY.tool_stroke * _MOVE_SHAFT_VISUAL_RATIO
+    )
     assert len(rotate.circles) == 1
     assert rotate.circles[0][0][3] == pytest.approx(OVERLAY_GEOMETRY.tool_stroke)
     assert len(rotate.paths) == 6

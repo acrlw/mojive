@@ -241,6 +241,7 @@ TOOL_GLYPH_SCALE = 1.18
 _MOVE_ARROW_BASE = 5.0
 _MOVE_ARROW_TIP = 9.0
 _MOVE_ARROW_WING = (_MOVE_ARROW_TIP - _MOVE_ARROW_BASE) / math.sqrt(3.0)
+_MOVE_SHAFT_VISUAL_RATIO = 0.5
 
 
 def positioned_overlay_rect(
@@ -1271,7 +1272,7 @@ def draw_tool_glyph(
                 _MOVE_ARROW_BASE,
                 _MOVE_ARROW_TIP,
                 _MOVE_ARROW_WING,
-                geometry.tool_stroke * 0.5 / TOOL_GLYPH_SCALE,
+                geometry.tool_stroke * _MOVE_SHAFT_VISUAL_RATIO * 0.5 / TOOL_GLYPH_SCALE,
             ),
             color,
         )

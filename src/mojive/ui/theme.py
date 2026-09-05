@@ -132,6 +132,15 @@ AXIS_COLORS: dict[str, RGBA] = {
     "z": rgb8(111, 148, 229),
 }
 AXIS_ORDER: tuple[str, str, str] = ("x", "y", "z")
+ENTITY_PALETTE: tuple[RGBA, ...] = (
+    PRIMARY,
+    ACCENT_PURPLE_BRIGHT,
+    AXIS_COLORS["x"],
+    AXIS_COLORS["y"],
+    AXIS_COLORS["z"],
+    WARNING,
+    rgb8(138, 183, 192),
+)
 
 
 PERTURB_COMMANDED: RGBA = AXIS_COLORS["y"]
@@ -161,6 +170,7 @@ class Theme:
     border: RGBA = BORDER
     node_colors: dict[NodeType, RGBA] = field(default_factory=lambda: dict(NODE_COLORS))
     axis_colors: dict[str, RGBA] = field(default_factory=lambda: dict(AXIS_COLORS))
+    entity_palette: tuple[RGBA, ...] = ENTITY_PALETTE
 
     def node_color(self, node_type: NodeType | str) -> RGBA:
         try:

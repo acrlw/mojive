@@ -22,6 +22,7 @@ from mojive.adapters.base import (
 )
 from mojive.adapters.mujoco_adapter import MuJoCoAdapter
 from mojive.adapters.workspace import WorkspaceAdapter
+from mojive.gizmo import GizmoHandle
 from mojive.session import Session
 from mojive.types import (
     DEFAULT_MATERIAL,
@@ -34,6 +35,8 @@ from mojive.types import (
     TextureType,
 )
 from mojive.ui.app import ViewerApp
+from mojive.ui.gizmo import ObjectGizmo
+from mojive.ui.theme import THEME
 from mojive.workspace_io import (
     missing_resource_entries,
     missing_resources,
@@ -528,6 +531,9 @@ def test_editor_plane_is_a_static_mujoco_ground_during_model_composition() -> No
     assert plane.object_id != 0
     assert session.selected == plane.object_id
     assert session.source.geom_object_id.tolist() == [plane.object_id]
+    assert any(
+        np.allclose(document.primary.model.geom_rgba[0], color) for color in THEME.entity_palette
+    )
     picked, distance = document.primary.raycast(
         np.array((0.0, 0.0, 3.0)), np.array((0.0, 0.0, -1.0))
     )
@@ -1001,6 +1007,9 @@ def test_site_on_joint_driven_body_keeps_editable_local_pose(tmp_path: Path) -> 
     assert document.primary.model.site_quat[index] == pytest.approx(
         math3d.mat3_to_quat(site_rotation)
     )
+    session.tick(FrameNeeds())
+    assert session.frame.site_xpos[index] == pytest.approx((0.4, 0.2, 0.1))
+    assert session.frame.site_xmat[index] == pytest.approx(site_rotation)
 
 
 def test_editor_capsule_creation_uses_native_mujoco_primitive() -> None:
@@ -1016,9 +1025,63 @@ def test_editor_capsule_creation_uses_native_mujoco_primitive() -> None:
     capsule = next(node for node in session.nodes if node.name == "capsule")
     assert capsule.type is NodeType.GEOM
     assert capsule.posable
+    assert capsule.object_id > 0
+    assert session.selected == capsule.object_id
     assert int(document.primary.model.geom_type[capsule.geom_index]) == int(
         mujoco.mjtGeom.mjGEOM_CAPSULE
     )
+    assert all(
+        object_id == capsule.object_id
+        for object_id, node_id in zip(
+            session.source.geom_object_id,
+            session.source.geom_node,
+            strict=True,
+        )
+        if node_id == capsule.node_id
+    )
+    assert any(
+        np.allclose(document.primary.model.geom_rgba[capsule.geom_index], color)
+        for color in THEME.entity_palette
+    )
+
+    # Creation plus the initial palette color is one user action, not two undo steps.
+    assert session.submit(cmd.Undo())
+    assert all(node.name != "capsule" for node in session.nodes)
+    assert session.submit(cmd.Redo())
+    capsule = next(node for node in session.nodes if node.name == "capsule")
+    assert session.selected == capsule.object_id
+
+    position = np.array((0.4, -0.2, 0.3), np.float32)
+    assert session.submit(cmd.SetPose(capsule.node_id, position, np.eye(3, dtype=np.float32)))
+    assert document.primary.model.geom_pos[capsule.geom_index] == pytest.approx(position)
+
+    session.tick(FrameNeeds())
+    gizmo = ObjectGizmo("translate")
+    camera = CameraView(
+        eye=np.array((3.0, -5.0, 3.0), np.float32),
+        target=position.copy(),
+        aspect=4.0 / 3.0,
+    )
+    cursor = np.array((320.0, 240.0))
+    assert gizmo.evaluate(session, capsule).ok
+    assert gizmo._begin_handle(
+        session,
+        camera,
+        (0.0, 0.0, 640.0, 480.0),
+        cursor,
+        GizmoHandle.X,
+    )
+    assert gizmo._drag(
+        session,
+        camera,
+        (0.0, 0.0, 640.0, 480.0),
+        cursor + gizmo._axis_screen * 30.0,
+        snap=False,
+    )
+    gizmo._end(commit=True)
+    moved = np.asarray(document.primary.model.geom_pos[capsule.geom_index])
+    assert moved[0] != pytest.approx(position[0])
+    assert moved[1:] == pytest.approx(position[1:])
 
 
 def test_model_element_duplication_copies_subtree_references_and_history(

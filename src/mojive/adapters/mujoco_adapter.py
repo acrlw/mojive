@@ -1798,6 +1798,8 @@ class MuJoCoAdapter(SceneAdapterBase):
         edited = self._spec_from_component_xml(model_id, _serialize_component_xml(root))
         if not self._replace_model_spec(model_id, edited):
             return -1
+        if node_type is NodeType.GEOM:
+            self._geometry_object_id(model_id, duplicate_name)
         self.nodes()
         body_types = {NodeType.ROBOT, NodeType.LINK}
         return next(
@@ -1945,6 +1947,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                         element = body.add_body(name=value)
                     elif type_name == "geom":
                         element = body.add_geom(name=value)
+                        self._geometry_object_id(model_id, value)
                         element.type = {
                             "box": mujoco.mjtGeom.mjGEOM_BOX,
                             "capsule": mujoco.mjtGeom.mjGEOM_CAPSULE,
@@ -2004,6 +2007,8 @@ class MuJoCoAdapter(SceneAdapterBase):
                         NodeType.LIGHT,
                     }:
                         raise ValueError(f"{node_type.value} {current!r} cannot be removed")
+                    if node_type is NodeType.GEOM:
+                        self._geometry_object_ids.pop((model_id, current), None)
                     spec.delete(element)
                     result_identities.append(None)
                     changed_models.add(model_id)
@@ -4407,6 +4412,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                 skipped.add(gtype)
                 continue
 
+            geom_node = self.nodes()[self._geom_nodes[gi]]
             append_parts(
                 parts,
                 mat_index=mat_index,
@@ -4415,11 +4421,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                 source=gi,
                 pose_source=InstancePoseSource.GEOM,
                 node_id=self._geom_nodes.get(gi, -1),
-                object_id=(
-                    self.nodes()[self._geom_nodes[gi]].object_id
-                    if body == 0 and gi in self._geom_nodes
-                    else body
-                ),
+                object_id=int(geom_node.object_id or body),
                 is_infinite=is_infinite,
                 is_static=int(m.body_weldid[body]) == 0,
                 island_body=body if int(m.body_dofnum[int(m.body_weldid[body])]) else -1,
@@ -5653,9 +5655,11 @@ class MuJoCoAdapter(SceneAdapterBase):
                 is_infinite_plane = is_plane and (
                     float(m.geom_size[gi, 0]) == 0.0 or float(m.geom_size[gi, 1]) == 0.0
                 )
+                identity = (model_id, raw_name or gname)
                 object_id = (
-                    self._geometry_object_id(model_id, raw_name or gname)
-                    if b == 0 and is_plane and not is_infinite_plane
+                    self._geometry_object_id(*identity)
+                    if identity in self._geometry_object_ids
+                    or (b == 0 and is_plane and not is_infinite_plane)
                     else 0
                 )
                 self._geom_nodes[gi] = add(
@@ -7682,6 +7686,10 @@ class MuJoCoAdapter(SceneAdapterBase):
         else:
             return False
         self._mark_model_edited(model_id)
+        if node_type in (NodeType.GEOM, NodeType.SITE):
+            # MuJoCo caches local geom/site poses as model constants;
+            # mj_forward alone leaves their world pose unchanged.
+            mujoco.mj_setConst(self._m, self._d)
         mujoco.mj_forward(self._m, self._d)
         return True
 
@@ -7784,13 +7792,13 @@ class MuJoCoAdapter(SceneAdapterBase):
         gid = int(self._ray_geomid[0])
         if dist < 0.0 or gid < 0:
             return 0, float("inf")
+        node_id = self._geom_nodes.get(gid, -1)
+        node = self._node_for_id(node_id)
+        if node is not None and node.object_id:
+            return int(node.object_id), float(dist)
         body = int(self._m.geom_bodyid[gid])
         if body == 0:
-            node_id = self._geom_nodes.get(gid, -1)
-            node = self._node_for_id(node_id)
-            if node is None or not node.object_id:
-                return 0, float("inf")
-            return int(node.object_id), float(dist)
+            return 0, float("inf")
         return body, float(dist)
 
     def camera_hint(self) -> CameraView | None:

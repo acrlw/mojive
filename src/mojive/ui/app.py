@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import random
 import re
 import sys
 import time
@@ -1996,11 +1997,15 @@ class ViewerApp:
                 self.localizer.text("Select a model or body before creating a site")
             )
             return
-        result = self.session.submit(
-            cmd.AddModelElement(parent.node_id, "site", self._entity_name("site"))
-        )
-        if result.ok:
-            self.session.submit(cmd.SelectNode(result.entity_id))
+        with self._entity_creation("Create site"):
+            result = self.session.submit(
+                cmd.AddModelElement(parent.node_id, "site", self._entity_name("site"))
+            )
+            if result.ok:
+                self.session.submit(
+                    cmd.SetGeometryColor(result.entity_id, self._next_entity_color())
+                )
+                self.session.submit(cmd.SelectNode(result.entity_id))
 
     def _add_model_primitive(self, primitive: str, base_name: str) -> None:
         parent = self._model_child_parent()
@@ -2009,15 +2014,39 @@ class ViewerApp:
                 self.localizer.text("Select a model or body before creating geometry")
             )
             return
-        result = self.session.submit(
-            cmd.AddModelElement(
-                parent.node_id,
-                f"geom:{primitive}",
-                self._entity_name(base_name),
+        with self._entity_creation(f"Create {base_name}"):
+            result = self.session.submit(
+                cmd.AddModelElement(
+                    parent.node_id,
+                    f"geom:{primitive}",
+                    self._entity_name(base_name),
+                )
             )
-        )
-        if result.ok:
-            self.session.submit(cmd.SelectNode(result.entity_id))
+            if result.ok:
+                self.session.submit(
+                    cmd.SetGeometryColor(result.entity_id, self._next_entity_color())
+                )
+                self.session.submit(cmd.SelectNode(result.entity_id))
+
+    @contextmanager
+    def _entity_creation(self, label: str):
+        """Coalesce creation and initial styling into one undoable edit."""
+
+        opened = False
+        if not self.session.editing and self.session.adapter.caps.edit_history:
+            opened = self.session.submit(cmd.BeginEditTransaction(label)).ok
+        try:
+            yield
+        finally:
+            if opened:
+                self.session.submit(cmd.EndEditTransaction())
+
+    def _next_entity_color(self) -> tuple[float, float, float, float]:
+        """Choose one authored-object color from the active theme palette."""
+
+        theme = getattr(self, "theme", THEME)
+        palette = theme.entity_palette or THEME.entity_palette
+        return random.choice(palette)
 
     def _add_scene_object(
         self,
@@ -2026,35 +2055,39 @@ class ViewerApp:
         *,
         size: tuple[float, float, float] | None = None,
     ) -> None:
-        if shape is MeshShape.PLANE and self.session.adapter.caps.topology_editing:
-            world = next(
-                (
-                    node
-                    for node in self.session.nodes
-                    if node.type is NodeType.WORLD and node.parent < 0
-                ),
-                None,
-            )
-            if world is not None:
-                result = self.session.submit(
-                    cmd.AddModelElement(
-                        world.node_id,
-                        "geom:plane",
-                        self._entity_name(base_name),
-                    )
+        name = self._entity_name(base_name)
+        color = self._next_entity_color()
+        with self._entity_creation(f"Create {base_name}"):
+            if shape is MeshShape.PLANE and self.session.adapter.caps.topology_editing:
+                world = next(
+                    (
+                        node
+                        for node in self.session.nodes
+                        if node.type is NodeType.WORLD and node.parent < 0
+                    ),
+                    None,
                 )
-                if result.ok:
-                    node = self.session.node(result.entity_id)
-                    if node is not None:
-                        self.session.submit(cmd.Select(node.object_id))
-                    return
-        position = tuple(float(value) for value in self._camera_view().target)
-        size = size or ((4.0, 4.0, 0.02) if shape is MeshShape.PLANE else (0.5, 0.5, 0.5))
-        result = self.session.submit(
-            cmd.AddSceneObject(shape, self._entity_name(base_name), size=size, position=position)
-        )
-        if result.ok:
-            self.session.submit(cmd.Select(result.entity_id))
+                if world is not None:
+                    result = self.session.submit(
+                        cmd.AddModelElement(
+                            world.node_id,
+                            "geom:plane",
+                            name,
+                        )
+                    )
+                    if result.ok:
+                        self.session.submit(cmd.SetGeometryColor(result.entity_id, color))
+                        node = self.session.node(result.entity_id)
+                        if node is not None:
+                            self.session.submit(cmd.Select(node.object_id))
+                        return
+            position = tuple(float(value) for value in self._camera_view().target)
+            size = size or ((4.0, 4.0, 0.02) if shape is MeshShape.PLANE else (0.5, 0.5, 0.5))
+            result = self.session.submit(
+                cmd.AddSceneObject(shape, name, size=size, position=position, color=color)
+            )
+            if result.ok:
+                self.session.submit(cmd.Select(result.entity_id))
 
     def _add_scene_light(self) -> None:
         view = self._camera_view()

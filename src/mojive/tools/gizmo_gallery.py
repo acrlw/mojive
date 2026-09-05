@@ -25,6 +25,7 @@ from ..gizmo import (
     world_scale,
 )
 from ..ui import viewcube
+from ..ui.gizmo import node_world_pose
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -60,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
             if item.type is NodeType.GEOM and item.name == "box"
         )
         _dimensions(viewer, geometry, args.output)
+        _entity_capsule(viewer, args.output)
     finally:
         viewer.release()
     print(args.output.resolve())
@@ -344,11 +346,58 @@ def _dimensions(viewer, node, output: Path) -> None:
     viewer.sync()
 
 
+def _entity_capsule(viewer, output: Path) -> None:
+    """Capture a colored Entity-created capsule before and during translation."""
+
+    world = next(
+        node for node in viewer.session.nodes if node.type is NodeType.WORLD and node.parent < 0
+    )
+    viewer.session.submit(cmd.SelectNode(world.node_id))
+    viewer.app._add_model_primitive("capsule", "entity capsule")
+    node = viewer.session.selected_node
+    if node is None or node.type is not NodeType.GEOM:
+        raise RuntimeError("Entity capsule was not created and selected")
+
+    position = np.array((0.0, -1.0, 0.65), np.float32)
+    viewer.session.submit(cmd.SetGeometrySize(node.node_id, np.array((0.22, 0.22, 0.4))))
+    viewer.session.submit(cmd.SetPose(node.node_id, position, np.eye(3)))
+    viewer.app.gizmo.set_mode("translate")
+    viewer.app.gizmo.set_style("2d")
+    viewer.app.gizmo.set_space("body")
+    viewer.app.camera.look_from_target(
+        -135.0,
+        25.0,
+        position,
+        0.7,
+        viewer.app.camera_out,
+        animate=False,
+    )
+    for _ in range(4):
+        viewer.sync()
+    _save_full(viewer, output / "entity-capsule-move-window.png")
+    _save(viewer, node, output / "entity-capsule-move.png")
+
+    camera, rect, origin, rotation, scale = _state(viewer, node)
+    cursor = _axis_cursor(viewer, camera, rect, origin, rotation, scale)
+    io = imgui.get_io()
+    io.add_mouse_pos_event(*cursor)
+    viewer.sync()
+    viewer.app._gallery_left_down = True
+    viewer.sync()
+    axis = project(camera, (origin, origin + rotation[:, 2] * scale), rect)[:, :2]
+    direction = axis[1] - axis[0]
+    direction /= np.linalg.norm(direction)
+    io.add_mouse_pos_event(*(cursor + direction * 48.0))
+    viewer.sync()
+    _save(viewer, node, output / "entity-capsule-move-drag.png")
+    viewer.app._gallery_left_down = False
+    viewer.sync()
+
+
 def _state(viewer, node):
     camera = viewer.app.camera.view()
     rect = viewer.app._viewport_rect
-    origin = np.asarray(viewer.session.frame.body_xpos[node.body_index], np.float64)
-    rotation = np.asarray(viewer.session.frame.body_xmat[node.body_index], np.float64).reshape(3, 3)
+    origin, rotation = node_world_pose(viewer.session, node)
     return (
         camera,
         rect,
