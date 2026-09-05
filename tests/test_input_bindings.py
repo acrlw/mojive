@@ -24,6 +24,11 @@ def test_step_back_defaults_to_backspace() -> None:
     assert DEFAULT_INPUT_BINDINGS.label(InputAction.STEP_BACK) == "Backspace"
 
 
+def test_dimensions_tool_is_unbound_by_default() -> None:
+    assert DEFAULT_INPUT_BINDINGS.key_id(InputAction.GIZMO_DIMENSIONS) is None
+    assert DEFAULT_INPUT_BINDINGS.label(InputAction.GIZMO_DIMENSIONS) == "Unbound"
+
+
 def test_saved_input_bindings_restore_the_same_map() -> None:
     changed = DEFAULT_INPUT_BINDINGS.remap(InputAction.SNAP, "x").remap(
         InputAction.FLY_FORWARD, "digit_1"

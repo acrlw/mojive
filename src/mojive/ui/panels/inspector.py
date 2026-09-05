@@ -23,8 +23,9 @@ from ...adapters.base import (
     SceneNode,
     SiteProperties,
 )
+from ...geometry import geometry_dimensions, geometry_size_from_dimensions
 from ...render.backend import RenderFlag
-from ...types import DEFAULT_HEADLIGHT, Environment, LightType, MeshShape, TextureType
+from ...types import DEFAULT_HEADLIGHT, Environment, LightType, TextureType
 from ..compound_fields import draw_joined_field_frame
 from . import (
     Panel,
@@ -45,46 +46,6 @@ _MATERIAL_PRESETS = {
     "Rubber": (0.0, 0.08, 0.20, 0.0),
     "Emissive": (1.0, 0.10, 0.20, 0.0),
 }
-
-
-def _geometry_dimensions(shape: MeshShape, size) -> tuple[str, np.ndarray] | None:
-    """Return conventional authored dimensions for one editable primitive."""
-    value = np.asarray(size, np.float32).reshape(3)
-    if shape is MeshShape.PLANE:
-        return "width / length", value[:2] * 2.0
-    if shape is MeshShape.BOX:
-        return "width / depth / height", value * 2.0
-    if shape is MeshShape.SPHERE:
-        if np.allclose(value, value[0], rtol=1e-5, atol=1e-7):
-            return "radius", value[:1].copy()
-        return "radii x / y / z", value.copy()
-    if shape is MeshShape.CYLINDER:
-        return "diameter / height", np.array((value[0] * 2.0, value[2] * 2.0))
-    if shape is MeshShape.CONE:
-        return "diameter / height", np.array((value[0] * 2.0, value[2] * 2.0))
-    if shape is MeshShape.CAPSULE_SHAFT:
-        return "diameter / shaft length", np.array((value[0] * 2.0, value[2] * 2.0))
-    return None
-
-
-def _geometry_size_from_dimensions(shape: MeshShape, size, dimensions) -> np.ndarray:
-    """Convert full UI dimensions back to the render-size convention."""
-    value = np.asarray(size, np.float32).reshape(3).copy()
-    dimensions = np.maximum(np.asarray(dimensions, np.float32).reshape(-1), 0.002)
-    half = dimensions * 0.5
-    if shape is MeshShape.PLANE:
-        value[:2] = half[:2]
-    elif shape is MeshShape.BOX:
-        value[:] = half[:3]
-    elif shape is MeshShape.SPHERE:
-        if len(dimensions) == 3:
-            value[:] = dimensions[:3]
-        else:
-            value[:] = dimensions[0]
-    elif shape in (MeshShape.CYLINDER, MeshShape.CONE, MeshShape.CAPSULE_SHAFT):
-        value[:2] = half[0]
-        value[2] = half[1]
-    return value
 
 
 def _unique_component_name(category: str, existing: set[str]) -> str:
@@ -1822,7 +1783,7 @@ class InspectorPanel(Panel):
 
         shape = src.geom_mesh[first].shape
         infinite_plane = bool(src.geom_infinite_plane[first])
-        size_editor = _geometry_dimensions(shape, src.geom_size[first])
+        size_editor = geometry_dimensions(shape, src.geom_size[first])
         editable_size = (
             size_editor is not None
             and not infinite_plane
@@ -1837,7 +1798,7 @@ class InspectorPanel(Panel):
         elif size_editor is not None and _property_section(ctx, "geometry dimensions"):
             if not editable_size:
                 imgui.begin_disabled()
-            dimension_label, dimensions = size_editor
+            dimension_label, dimensions = size_editor.label, size_editor.array()
             size_changed = False
             if _begin_property_table("insp_geometry_dimensions"):
                 if len(dimensions) == 1:
@@ -1899,7 +1860,7 @@ class InspectorPanel(Panel):
                     ctx,
                     cmd.SetGeometrySize(
                         node_id,
-                        _geometry_size_from_dimensions(shape, src.geom_size[first], dimensions),
+                        geometry_size_from_dimensions(shape, src.geom_size[first], dimensions),
                     ),
                 )
 

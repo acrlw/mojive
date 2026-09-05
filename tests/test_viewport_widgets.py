@@ -118,7 +118,7 @@ def test_default_overlay_scale_preserves_shared_radial_steps():
     assert geometry.state_radius - geometry.icon_radius == pytest.approx(geometry.radial_step)
     assert geometry.shell_radius - geometry.state_radius == pytest.approx(geometry.radial_step)
     assert playback_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((222.5, 65.0))
-    assert tool_column_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((65.0, 235.0))
+    assert tool_column_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((65.0, 287.5))
     assert OVERLAY_GEOMETRY.tool_center_step > OVERLAY_GEOMETRY.state_radius * 2.0
 
 
@@ -330,6 +330,16 @@ def test_move_glyph_is_one_connected_rounded_antialiased_outline():
     assert pytest.approx((_MOVE_ARROW_TIP - _MOVE_ARROW_BASE) / math.sqrt(3.0)) == (
         _MOVE_ARROW_WING
     )
+
+
+def test_dimensions_glyph_uses_three_scale_style_square_endpoints():
+    draw = _RecordedGlyph()
+
+    draw_tool_glyph(draw, (20.0, 30.0), (1.0, 1.0, 1.0, 1.0), 1.0, "dimensions", "body")
+
+    assert len(draw.lines) == 3
+    assert len(draw.rectangles) == 3
+    assert all(item[1]["rounding"] > 0.0 for item in draw.rectangles)
 
 
 def test_tool_glyphs_use_the_configured_stroke_without_hidden_scales():

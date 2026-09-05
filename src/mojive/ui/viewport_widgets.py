@@ -8,7 +8,7 @@ translates those points before submitting them to ``Draw2D``.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, fields
 from functools import lru_cache
 from itertools import pairwise
@@ -80,6 +80,7 @@ class ViewportLabels:
     reset: str = "Reset"
     move: str = "Move"
     rotate: str = "Rotate"
+    dimensions: str = "Dimensions"
     world_body: str = "World / Body"
     snap: str = "Snap"
     orbit: str = "Orbit"
@@ -645,7 +646,7 @@ class ViewportControl:
 
 PLAYBACK_CONTROLS = tuple(ViewportControl(name) for name in ("previous", "toggle", "step", "reset"))
 TOOL_GROUPS = (
-    tuple(ViewportControl(name) for name in ("move", "rotate", "frame")),
+    tuple(ViewportControl(name) for name in ("move", "rotate", "dimensions", "frame")),
     (ViewportControl("snap"),),
 )
 
@@ -1290,6 +1291,17 @@ def draw_tool_glyph(
             for local in ring:
                 path = _transform_path(local, x, y, glyph_scale)
                 draw.concave_fill(path, color)
+    elif kind == "dimensions":
+        half = 2.0 * scale
+        for ux, uy in _FRAME_AXES:
+            end = (x + ux * 9.0 * glyph_scale, y + uy * 9.0 * glyph_scale)
+            draw.line(center, end, color, stroke)
+            draw.rect_filled(
+                (end[0] - half, end[1] - half),
+                (end[0] + half, end[1] + half),
+                color,
+                rounding=0.5 * scale,
+            )
     elif kind == "frame":
         clear_radius = (
             geometry.frame_center_radius * glyph_scale
@@ -1345,6 +1357,8 @@ def draw_tool_column(
     snap: bool,
     enabled: bool = True,
     disabled_reason: str = "",
+    enabled_controls: Collection[str] | None = None,
+    disabled_reasons: Mapping[str, str] | None = None,
     bindings: InputBindings = DEFAULT_INPUT_BINDINGS,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
     groups: Sequence[Sequence[ViewportControl]] = TOOL_GROUPS,
@@ -1371,8 +1385,10 @@ def draw_tool_column(
         selected = (
             (kind == "move" and mode == "translate")
             or (kind == "rotate" and mode == "rotate")
+            or (kind == "dimensions" and mode == "dimensions")
             or (kind == "snap" and snap)
         )
+        control_enabled = enabled and (enabled_controls is None or kind in enabled_controls)
         if _circle_button(
             draw,
             f"##viewport-tool-{kind}",
@@ -1381,19 +1397,21 @@ def draw_tool_column(
             scale,
             control.icon or _tool_icon,
             selected=selected,
-            enabled=enabled,
+            enabled=control_enabled,
             payload=(kind, space),
         ):
             result = kind
         _set_viewport_tooltip(
-            disabled_reason
-            if not enabled and disabled_reason
+            (disabled_reasons or {}).get(kind, disabled_reason)
+            if not control_enabled and ((disabled_reasons or {}).get(kind) or disabled_reason)
             else control.tooltip
             if control.tooltip
             else f"{labels.move} ({bindings.label(InputAction.GIZMO_TRANSLATE)})"
             if kind == "move"
             else f"{labels.rotate} ({bindings.label(InputAction.GIZMO_ROTATE)})"
             if kind == "rotate"
+            else f"{labels.dimensions} ({bindings.label(InputAction.GIZMO_DIMENSIONS)})"
+            if kind == "dimensions"
             else f"{labels.world_body} ({bindings.label(InputAction.GIZMO_SPACE)})"
             if kind == "frame"
             else f"{labels.snap} ({bindings.label(InputAction.SNAP)})"

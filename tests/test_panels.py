@@ -19,6 +19,7 @@ from mojive.adapters.base import (
     SceneNode,
 )
 from mojive.config import PanelConfig
+from mojive.geometry import geometry_dimensions, geometry_size_from_dimensions
 from mojive.render.backend import RenderFlag, ShadowQuality
 from mojive.types import MeshShape
 from mojive.ui.compound_fields import draw_joined_field_frame
@@ -58,8 +59,6 @@ from mojive.ui.panels.inspector import (
     _compact_transform,
     _format_vector,
     _free_velocity,
-    _geometry_dimensions,
-    _geometry_size_from_dimensions,
     _matching_path_preset,
     _mix_color,
     _nearest_euler_degrees,
@@ -492,7 +491,7 @@ def test_settings_is_a_dockable_panel(panels: PanelSet):
 
 def test_viewport_chrome_uses_exact_capsule_geometry_and_spacing():
     assert playback_size(1.0) == pytest.approx((178.0, 52.0))
-    assert tool_column_size(1.0) == pytest.approx((52.0, 188.0))
+    assert tool_column_size(1.0) == pytest.approx((52.0, 230.0))
 
     horizontal = np.asarray(capsule_points(10.0, 20.0, 136.0, 52.0))
     vertical = np.asarray(capsule_points(10.0, 20.0, 52.0, 188.0))
@@ -891,11 +890,11 @@ def test_transform_editability_matches_the_set_pose_contract():
     ),
 )
 def test_geometry_dimension_editor_uses_full_user_facing_dimensions(shape, size, label, dimensions):
-    editor = _geometry_dimensions(shape, size)
+    editor = geometry_dimensions(shape, size)
     assert editor is not None
-    assert editor[0] == label
-    assert editor[1] == pytest.approx(dimensions)
-    assert _geometry_size_from_dimensions(shape, size, editor[1]) == pytest.approx(size)
+    assert editor.label == label
+    assert editor.values == pytest.approx(dimensions)
+    assert geometry_size_from_dimensions(shape, size, editor.values) == pytest.approx(size)
 
 
 def test_free_body_velocity_is_split_into_linear_and_angular_xyz():

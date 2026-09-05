@@ -76,7 +76,7 @@ from mojive.gizmo import (
 from mojive.render.backend import BackendCaps
 from mojive.scene import Scene
 from mojive.session import Session
-from mojive.types import CameraView
+from mojive.types import CameraView, MeshShape
 from mojive.ui.gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,
     DEFAULT_ROTATION_TICK_SCALE,
@@ -717,6 +717,99 @@ def session_at(position=(0.0, 0.0, 0.0), rotation=None) -> tuple[Session, object
     session = Session(StaticSceneAdapter(scene))
     session.submit(cmd.Select(obj.object_id))
     return session, session.selected_node
+
+
+def dimension_session(
+    shape: MeshShape = MeshShape.BOX,
+    *,
+    size=(0.5, 0.7, 0.9),
+    position=(0.0, 0.0, 0.0),
+    rotation=None,
+) -> tuple[Session, object]:
+    scene = Scene()
+    scene.add(shape, name="resizable", size=size, position=position, rotation=rotation)
+    session = Session(StaticSceneAdapter(scene))
+    node = next(item for item in session.nodes if item.type is NodeType.GEOM)
+    assert session.submit(cmd.SelectNode(node.node_id))
+    return session, session.selected_node
+
+
+def test_dimension_hit_testing_uses_scale_style_square_endpoints() -> None:
+    cam = camera()
+    origin = np.zeros(3)
+    scale = world_scale(cam, origin, RECT[3])
+    endpoint = project(cam, ((scale * AXIS_END, 0.0, 0.0),), RECT)[0, :2]
+    allowed = handle_mask(GizmoHandle.X)
+
+    handle, _axes, _planes = hit_test(
+        cam,
+        origin,
+        np.eye(3),
+        RECT,
+        tuple(endpoint),
+        GizmoMode.DIMENSIONS,
+        allowed_handles=allowed,
+    )
+
+    assert handle is GizmoHandle.X
+
+
+def test_dimension_gizmo_drag_resizes_one_box_parameter_and_is_undoable() -> None:
+    session, node = dimension_session()
+    gizmo = ObjectGizmo("dimensions")
+    cam = camera()
+    start = np.array((220.0, 310.0))
+    original = session.source.geom_size.copy()
+
+    assert gizmo.evaluate(session, node).ok
+    assert gizmo._begin_handle(session, cam, RECT, start, GizmoHandle.X)
+    assert gizmo._drag(session, cam, RECT, start + gizmo._axis_screen * 30.0, snap=False)
+    changed = session.source.geom_size.copy()
+    gizmo._end(commit=True)
+
+    assert changed[0, 0] > original[0, 0]
+    assert changed[0, 1:] == pytest.approx(original[0, 1:])
+    assert gizmo.value_label == ""
+    assert session.submit(cmd.Undo())
+    assert session.source.geom_size == pytest.approx(original)
+
+
+def test_uniform_sphere_dimension_uses_one_center_handle_and_precise_input() -> None:
+    session, _node = dimension_session(MeshShape.SPHERE, size=(0.4, 0.4, 0.4))
+    gizmo = ObjectGizmo("dimensions")
+    gizmo._hovered = GizmoHandle.SCREEN
+
+    edit = gizmo.precise_input(session)
+
+    assert edit is not None
+    assert (edit.action, edit.label) == ("Resize", "radius")
+    assert edit.absolute_value == pytest.approx(0.4)
+    assert gizmo.apply_precise_value(session, camera(), edit, 0.65, absolute=True)
+    assert session.source.geom_size[0] == pytest.approx((0.65, 0.65, 0.65))
+
+
+def test_dimension_gizmo_stays_on_geometry_pose_and_reuses_flat_overlay() -> None:
+    session, _node = dimension_session(position=(1.0, 2.0, 0.5))
+    gizmo = ObjectGizmo("dimensions")
+    gizmo.set_style("3d")
+    backend = CaptureBackend()
+
+    assert gizmo.publish(
+        backend,
+        session,
+        camera(),
+        RECT,
+        ui_scale=1.0,
+        style_scale=1.0,
+        yielding=False,
+        interactive=True,
+    )
+    overlay = RecordingDraw2D()
+    gizmo.draw_overlay(camera(), RECT, overlay)
+
+    assert backend.frame is None
+    assert gizmo._frame.position == pytest.approx((1.0, 2.0, 0.5))
+    assert any(name == "rect_filled" for name, _args, _kwargs in overlay.calls)
 
 
 @pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))

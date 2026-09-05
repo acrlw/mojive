@@ -1,4 +1,4 @@
-"""Interactive position and rotation gizmo behavior."""
+"""Interactive transform and primitive-dimension gizmo behavior."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from ..commands import (
     CommandResult,
     EndEditTransaction,
     PreviewSceneModelTransform,
+    SetGeometrySize,
     SetLight,
     SetPose,
     SetQpos,
@@ -23,6 +24,7 @@ from ..commands import (
     SetSceneCamera,
     SetSceneModelTransform,
 )
+from ..geometry import GeometryDimensions, geometry_dimensions, geometry_size_from_dimensions
 from ..gizmo import (
     ACTIVE_COLOR,
     ACTIVE_HANDLE_COLOR,
@@ -37,6 +39,8 @@ from ..gizmo import (
     CENTER_SHELL_RADIUS,
     CONTRAST_EDGE_COLOR,
     CONTRAST_EDGE_PT,
+    DIMENSION_HANDLE_HALF_PT,
+    DIMENSION_SHAFT_WIDTH_PT,
     GUIDE_CORE_COLOR,
     HOVER_COLOR,
     JOINT_HANDLE_COLOR,
@@ -66,6 +70,7 @@ from ..gizmo import (
     axis_dark_color,
     axis_handle_alpha,
     axis_hover_color,
+    dimension_axis_geometry,
     display_handles,
     handle_mask,
     handle_projection_alpha,
@@ -86,7 +91,7 @@ from ..gizmo import (
     world_scale,
 )
 from ..render.debugdraw import Occlusion
-from ..types import CameraView, LightType
+from ..types import CameraView, LightType, MeshShape
 from .camera import ndc_from_viewport, unproject
 from .draw2d import Draw2D
 from .panels.inspector import gizmo_refusal_reason
@@ -519,6 +524,15 @@ class PreciseGizmoInput:
     space: str
     absolute_value: float | None
     absolute_label: str
+    dimension_index: int = -1
+
+
+@dataclass(frozen=True)
+class _DimensionTarget:
+    shape: MeshShape
+    size: np.ndarray
+    dimensions: GeometryDimensions
+    pose_index: int
 
 
 @dataclass(frozen=True)
@@ -671,6 +685,11 @@ class ObjectGizmo:
         self._joint_precision_active = False
         self._start_joint_qpos = np.zeros(0, np.float64)
         self._joint_drag_origin_qpos = np.zeros(0, np.float64)
+        self._dimension_start: _DimensionTarget | None = None
+        self._dimension_cache_session: Session | None = None
+        self._dimension_cache_generation = -1
+        self._dimension_cache_node = -1
+        self._dimension_cache: tuple[_DimensionTarget | None, str] = (None, "")
         self.translation_snap_m = DEFAULT_TRANSLATION_SNAP_M
         self.rotation_snap_deg = DEFAULT_ROTATION_SNAP_DEG
         self.rotation_tick_scale = DEFAULT_ROTATION_TICK_SCALE
@@ -728,7 +747,10 @@ class ObjectGizmo:
             self.hovered
             and not self._joint_precision_hovered
             and self._joint_limit_hovered is None
-            and self._hovered in (*AXIS_HANDLES, *ROTATE_HANDLES)
+            and (
+                self._hovered in (*AXIS_HANDLES, *ROTATE_HANDLES)
+                or (self._mode is GizmoMode.DIMENSIONS and self._hovered is GizmoHandle.SCREEN)
+            )
             and self._hovered is not GizmoHandle.ROTATE_TRACKBALL
         )
 
@@ -823,7 +845,7 @@ class ObjectGizmo:
         return True
 
     def set_mode(self, mode: str) -> None:
-        if mode in (GizmoMode.TRANSLATE.value, GizmoMode.ROTATE.value) and not self._using:
+        if mode in tuple(item.value for item in GizmoMode) and not self._using:
             self._mode = GizmoMode(mode)
 
     def set_style(self, style: str) -> None:
@@ -961,12 +983,34 @@ class ObjectGizmo:
 
         node = session.selected_node
         handle = self._hovered
-        if node is None or handle not in (*AXIS_HANDLES, *ROTATE_HANDLES):
+        dimension_handle = self._mode is GizmoMode.DIMENSIONS and handle is GizmoHandle.SCREEN
+        if node is None or (
+            handle not in (*AXIS_HANDLES, *ROTATE_HANDLES) and not dimension_handle
+        ):
             return None
         if handle is GizmoHandle.ROTATE_TRACKBALL:
             return None
         if not self.evaluate(session, node).ok:
             return None
+        if self._mode is GizmoMode.DIMENSIONS:
+            target, _reason = self._dimension_target(session, node)
+            axis = None if handle is GizmoHandle.SCREEN else _axis_of(handle)
+            mapping = None if target is None else target.dimensions.handle(axis)
+            if target is None or mapping is None:
+                return None
+            return PreciseGizmoInput(
+                handle=handle,
+                object_id=int(session.selected),
+                node_id=int(node.node_id),
+                joint_id=-1,
+                action="Resize",
+                label=mapping.label,
+                unit="m",
+                space=GizmoSpace.BODY.value,
+                absolute_value=float(target.dimensions.values[mapping.parameter]),
+                absolute_label=f"target {mapping.label}",
+                dimension_index=mapping.parameter,
+            )
         target, _reason = self._joint_target(session, node)
         mode = target.mode if target is not None else self._mode
         if mode is GizmoMode.TRANSLATE and handle not in AXIS_HANDLES:
@@ -1051,6 +1095,8 @@ class ObjectGizmo:
         available = self.evaluate(session, node)
         if not available.ok:
             return CommandResult.bad(available.reason)
+        if edit.dimension_index >= 0:
+            return self._apply_precise_dimensions(session, node, edit, amount, absolute=absolute)
         target, reason = self._joint_target(session, node)
         joint_id = -1 if target is None else int(target.joint.joint_id)
         if joint_id != edit.joint_id:
@@ -1137,6 +1183,43 @@ class ObjectGizmo:
             self._verdict = Verdict(False, result.message)
         return result
 
+    def _apply_precise_dimensions(
+        self,
+        session: Session,
+        node: SceneNode,
+        edit: PreciseGizmoInput,
+        amount: float,
+        *,
+        absolute: bool,
+    ) -> CommandResult:
+        target, reason = self._dimension_target(session, node)
+        axis = None if edit.handle is GizmoHandle.SCREEN else _axis_of(edit.handle)
+        mapping = None if target is None else target.dimensions.handle(axis)
+        if target is None or mapping is None or mapping.parameter != edit.dimension_index:
+            return CommandResult.bad(
+                reason or "The geometry dimension changed; reopen precise input"
+            )
+        values = target.dimensions.array().astype(np.float64)
+        current = float(values[mapping.parameter])
+        requested = amount if absolute else current + amount
+        if requested < 0.002:
+            return CommandResult.bad("Geometry dimensions must be at least 0.002 m")
+        if abs(requested - current) < 1e-12:
+            return CommandResult.good("No change")
+        values[mapping.parameter] = requested
+        self._active = edit.handle
+        self._start_edit(session)
+        result = session.submit(
+            SetGeometrySize(
+                node.node_id,
+                geometry_size_from_dimensions(target.shape, target.size, values),
+            )
+        )
+        self._end(commit=result.ok)
+        if not result.ok:
+            self._verdict = Verdict(False, result.message)
+        return result
+
     def update_hover(
         self,
         session: Session,
@@ -1169,7 +1252,14 @@ class ObjectGizmo:
             self._hover_geometry_signature = None
             return self._hovered
         target, _reason = self._joint_target(session, node)
-        pose = self._target_pose(session, node, target)
+        dimension_target = None
+        if self._mode is GizmoMode.DIMENSIONS:
+            dimension_target, _reason = self._dimension_target(session, node)
+        pose = (
+            self._dimension_pose(session, node, dimension_target)
+            if dimension_target is not None
+            else self._target_pose(session, node, target)
+        )
         if pose is None:
             self._hovered = GizmoHandle.NONE
             self._joint_limit_hovered = None
@@ -1179,7 +1269,13 @@ class ObjectGizmo:
             return self._hovered
         pos, mat = pose
         mode = target.mode if target is not None else self._mode
-        self._handle_mask = target.handles if target is not None else ALL_HANDLE_MASK
+        self._handle_mask = (
+            self._dimension_handle_mask(dimension_target.dimensions)
+            if dimension_target is not None
+            else target.handles
+            if target is not None
+            else ALL_HANDLE_MASK
+        )
         range_state = self._joint_range_state(session, target)
         basis = self._target_basis(mat, target)
         signature = self._hover_signature(
@@ -1448,8 +1544,17 @@ class ObjectGizmo:
         node = session.selected_node
         target, _reason = self._joint_target(session, node)
         mode = target.mode if target is not None else self._mode
-        handle = AXIS_HANDLES[axis] if mode is GizmoMode.TRANSLATE else ROTATE_AXIS_HANDLES[axis]
-        allowed = target.handles if target is not None else ALL_HANDLE_MASK
+        handle = ROTATE_AXIS_HANDLES[axis] if mode is GizmoMode.ROTATE else AXIS_HANDLES[axis]
+        dimension_target = None
+        if mode is GizmoMode.DIMENSIONS:
+            dimension_target, _reason = self._dimension_target(session, node)
+        allowed = (
+            self._dimension_handle_mask(dimension_target.dimensions)
+            if dimension_target is not None
+            else target.handles
+            if target is not None
+            else ALL_HANDLE_MASK
+        )
         if not allowed & (1 << int(handle)):
             return False
         if self._keyboard and self._active is not handle:
@@ -1478,7 +1583,9 @@ class ObjectGizmo:
         node = session.selected_node
         self._verdict = self.evaluate(session, node)
         self._display_only = bool(
-            not self._verdict.ok and self.read_only_frame_available(session, node)
+            self._mode is not GizmoMode.DIMENSIONS
+            and not self._verdict.ok
+            and self.read_only_frame_available(session, node)
         )
         self._interactive = bool(interactive and not self._display_only)
         self._visible = not yielding and (self._verdict.ok or self._display_only)
@@ -1490,7 +1597,14 @@ class ObjectGizmo:
             self._drawn = False
             return False
         target, _reason = (None, "") if self._display_only else self._joint_target(session, node)
-        pose = self._target_pose(session, node, target)
+        dimension_target = None
+        if not self._display_only and self._mode is GizmoMode.DIMENSIONS:
+            dimension_target, _reason = self._dimension_target(session, node)
+        pose = (
+            self._dimension_pose(session, node, dimension_target)
+            if dimension_target is not None
+            else self._target_pose(session, node, target)
+        )
         if pose is None:
             self._drawn = False
             return False
@@ -1504,6 +1618,8 @@ class ObjectGizmo:
         self._handle_mask = (
             handle_mask(*AXIS_HANDLES, GizmoHandle.SCREEN)
             if self._display_only
+            else self._dimension_handle_mask(dimension_target.dimensions)
+            if dimension_target is not None
             else target.handles
             if target is not None
             else ALL_HANDLE_MASK
@@ -1534,7 +1650,7 @@ class ObjectGizmo:
         frame = self._frame
         frame.mode = mode
         frame.style = self._style
-        frame.space = self._space
+        frame.space = GizmoSpace.BODY if mode is GizmoMode.DIMENSIONS else self._space
         np.copyto(frame.position, pos, casting="unsafe")
         np.copyto(frame.rotation, basis, casting="unsafe")
         frame.size_px = SIZE_PT * float(ui_scale)
@@ -1556,7 +1672,7 @@ class ObjectGizmo:
         )
         frame.active_projection_fade = target is not None
         self._publish_translation_guide(backend, ui_scale)
-        if self._style is GizmoStyle.FLAT:
+        if self._style is GizmoStyle.FLAT or mode is GizmoMode.DIMENSIONS:
             if backend.caps.gizmo:
                 backend.set_gizmo(None)
             self._drawn = False
@@ -1573,7 +1689,7 @@ class ObjectGizmo:
             return
         if self._keyboard and not self._snapping:
             self._draw_axis_constraint(overlay, cam, rect, style_scale)
-        if self._style is GizmoStyle.FLAT:
+        if self._style is GizmoStyle.FLAT or self._frame.mode is GizmoMode.DIMENSIONS:
             self._draw_flat(overlay, cam, rect, style_scale)
             self._drawn = True
         joint_range_below_dial = bool(
@@ -1613,12 +1729,14 @@ class ObjectGizmo:
             and not self._joint_precision_active
             and self._snapping
             and self._active in AXIS_HANDLES
+            and self._mode is not GizmoMode.DIMENSIONS
         ):
             self._draw_translation_snap_ruler(overlay, cam, rect, style_scale)
         if (
             self._using
             and not self._joint_precision_active
             and self._active not in ROTATE_HANDLES
+            and self._mode is not GizmoMode.DIMENSIONS
             and not self._guide_gpu
         ):
             if (
@@ -1753,22 +1871,42 @@ class ObjectGizmo:
                 screen[1, :2],
                 CENTER_SHELL_RADIUS * SIZE_PT * style_scale,
             )
-            points = axis_arrow_polygon(start, screen[1, :2], style_scale)
-            if len(points):
-                overlay.concave_fill(points, self._flat_color(handle, axis, alpha))
+            color = self._flat_color(handle, axis, alpha)
+            if frame.mode is GizmoMode.DIMENSIONS:
+                shaft_end, square = dimension_axis_geometry(start, screen[1, :2], style_scale)
+                overlay.line(
+                    start,
+                    shaft_end,
+                    CONTRAST_EDGE_COLOR,
+                    (DIMENSION_SHAFT_WIDTH_PT + 2.0 * CONTRAST_EDGE_PT) * style_scale,
+                )
+                overlay.line(
+                    start,
+                    shaft_end,
+                    color,
+                    DIMENSION_SHAFT_WIDTH_PT * style_scale,
+                )
+                self._draw_dimension_square(overlay, np.mean(square, axis=0), color, style_scale)
+            else:
+                points = axis_arrow_polygon(start, screen[1, :2], style_scale)
+                if len(points):
+                    overlay.concave_fill(points, color)
 
         if GizmoHandle.SCREEN in visible:
             center = project(cam, (origin,), rect, prepared=projection)[0]
             if center[2] > 0.0:
                 color = HOVER_COLOR if self._hot(GizmoHandle.SCREEN) else CENTER_COLOR
-                radius = CENTER_RADIUS * SIZE_PT * style_scale
-                overlay.circle_filled(
-                    center[:2],
-                    radius + CONTRAST_EDGE_PT * style_scale,
-                    CONTRAST_EDGE_COLOR,
-                    segments=24,
-                )
-                overlay.circle_filled(center[:2], radius, color, segments=24)
+                if frame.mode is GizmoMode.DIMENSIONS:
+                    self._draw_dimension_square(overlay, center[:2], color, style_scale)
+                else:
+                    radius = CENTER_RADIUS * SIZE_PT * style_scale
+                    overlay.circle_filled(
+                        center[:2],
+                        radius + CONTRAST_EDGE_PT * style_scale,
+                        CONTRAST_EDGE_COLOR,
+                        segments=24,
+                    )
+                    overlay.circle_filled(center[:2], radius, color, segments=24)
 
         if GizmoHandle.ROTATE_TRACKBALL in visible:
             center = project(cam, (origin,), rect, prepared=projection)[0]
@@ -1838,6 +1976,29 @@ class ObjectGizmo:
                     SCREEN_RING_WIDTH_PT * style_scale,
                     segments=RING_SEGMENTS,
                 )
+
+    @staticmethod
+    def _draw_dimension_square(
+        overlay: Draw2D,
+        center,
+        color,
+        style_scale: float,
+    ) -> None:
+        half = DIMENSION_HANDLE_HALF_PT * style_scale
+        edge = CONTRAST_EDGE_PT * style_scale
+        center = np.asarray(center, np.float64)
+        overlay.rect_filled(
+            center - half - edge,
+            center + half + edge,
+            CONTRAST_EDGE_COLOR,
+            rounding=1.0 * style_scale,
+        )
+        overlay.rect_filled(
+            center - half,
+            center + half,
+            color,
+            rounding=0.75 * style_scale,
+        )
 
     def _flat_color(self, handle: GizmoHandle, axis: int, alpha: float = 1.0):
         base = self._handle_color(axis)
@@ -2983,6 +3144,7 @@ class ObjectGizmo:
         # endpoints stay above both 2D and 3D gizmo axes.
         active = (
             self._using
+            and self._mode is not GizmoMode.DIMENSIONS
             and self._active not in ROTATE_HANDLES
             and not self._snapping
             and not (self._active_joint is not None and self._active_joint.type == "slide")
@@ -3237,14 +3399,31 @@ class ObjectGizmo:
         if node is None or handle is GizmoHandle.NONE:
             return False
         target, _reason = self._joint_target(session, node)
-        allowed = target.handles if target is not None else ALL_HANDLE_MASK
+        dimension_target = None
+        if self._mode is GizmoMode.DIMENSIONS:
+            dimension_target, _reason = self._dimension_target(session, node)
+            if dimension_target is None:
+                return False
+        allowed = (
+            self._dimension_handle_mask(dimension_target.dimensions)
+            if dimension_target is not None
+            else target.handles
+            if target is not None
+            else ALL_HANDLE_MASK
+        )
         if not allowed & (1 << int(handle)):
             return False
-        pose = self._target_pose(session, node, target)
+        pose = (
+            self._dimension_pose(session, node, dimension_target)
+            if dimension_target is not None
+            else self._target_pose(session, node, target)
+        )
         if pose is None:
             return False
         pos, mat = pose
         self._active_joint = target.joint if target is not None else None
+        if dimension_target is not None:
+            self._dimension_start = dimension_target
         if self._active_joint is not None:
             count = 4 if self._active_joint.type == "ball" else 1
             qpos = session.frame.qpos
@@ -3281,7 +3460,11 @@ class ObjectGizmo:
         self._trackball_angles[:] = 0.0
         self._snapping = False
         self._edit_started = False
-        self._label = self._format_value(self._start_pos)
+        self._label = (
+            self._format_dimension_value()
+            if dimension_target is not None
+            else self._format_value(self._start_pos)
+        )
 
         axis = _axis_of(self._active)
         if axis >= 0:
@@ -3299,6 +3482,13 @@ class ObjectGizmo:
                 return False
             self._axis_screen[:] = delta / length
             self._world_per_pt = scale / length
+            self._start_edit(session)
+            return True
+
+        if self._mode is GizmoMode.DIMENSIONS and self._active is GizmoHandle.SCREEN:
+            self._axis_screen[:] = (np.sqrt(0.5), -np.sqrt(0.5))
+            scale = world_scale(cam, pos, rect[3], SIZE_PT * self._style_scale)
+            self._world_per_pt = scale / max(SIZE_PT * self._style_scale, 1e-6)
             self._start_edit(session)
             return True
 
@@ -3477,6 +3667,8 @@ class ObjectGizmo:
             return self._drag_joint_precision(session, cursor, snap=snap)
         handle = self._active
         self._snapping = bool(snap)
+        if self._mode is GizmoMode.DIMENSIONS:
+            return self._drag_dimensions(session, cursor, snap=snap)
         pos = self._start_pos.copy()
         mat = self._start_mat
         if handle in (GizmoHandle.X, GizmoHandle.Y, GizmoHandle.Z):
@@ -3601,6 +3793,53 @@ class ObjectGizmo:
             self._rebase_clamped_joint_drag(cam, rect, cursor, pos)
         self._edit_started = True
         self._label = self._format_value(pos)
+        return True
+
+    def _drag_dimensions(self, session: Session, cursor, *, snap: bool) -> bool:
+        """Apply one primitive parameter while preserving its shape conventions."""
+
+        node = session.selected_node
+        target = self._dimension_start
+        axis = None if self._active is GizmoHandle.SCREEN else _axis_of(self._active)
+        mapping = None if target is None else target.dimensions.handle(axis)
+        if node is None or target is None or mapping is None:
+            self._end()
+            return False
+        values = target.dimensions.array().astype(np.float64)
+        travel = float(
+            np.dot(
+                np.asarray(cursor, np.float64).reshape(2) - self._start_cursor,
+                self._axis_screen,
+            )
+        )
+        value = float(values[mapping.parameter]) + (
+            travel * self._world_per_pt * mapping.world_to_value
+        )
+        if snap:
+            value = _snap_value(value, self.translation_snap_m)
+        value = max(value, 0.002)
+        values[mapping.parameter] = value
+        self._snapping = bool(snap)
+        if np.isclose(
+            value,
+            target.dimensions.values[mapping.parameter],
+            atol=1e-12,
+            rtol=0.0,
+        ):
+            self._label = self._format_dimension_value(value)
+            return True
+        result = session.submit(
+            SetGeometrySize(
+                node.node_id,
+                geometry_size_from_dimensions(target.shape, target.size, values),
+            )
+        )
+        if not result.ok:
+            self._verdict = Verdict(False, result.message)
+            self._end()
+            return False
+        self._edit_started = True
+        self._label = self._format_dimension_value(value)
         return True
 
     def _drag_joint_precision(self, session, cursor, *, snap: bool) -> bool:
@@ -3798,6 +4037,18 @@ class ObjectGizmo:
         value = f"X {local[0]:+.3f}  Y {local[1]:+.3f}  Z {local[2]:+.3f} m"
         return self._with_translation_snap(value)
 
+    def _format_dimension_value(self, value: float | None = None) -> str:
+        target = self._dimension_start
+        axis = None if self._active is GizmoHandle.SCREEN else _axis_of(self._active)
+        mapping = None if target is None else target.dimensions.handle(axis)
+        if mapping is None:
+            return ""
+        shown = (
+            float(target.dimensions.values[mapping.parameter]) if value is None else float(value)
+        )
+        label = f"{mapping.label.title()} {shown:.3f} m"
+        return self._with_translation_snap(label)
+
     def _with_translation_snap(self, value: str) -> str:
         if not self._snapping:
             return value
@@ -3904,6 +4155,92 @@ class ObjectGizmo:
             int(joint.qpos_adr),
         )
 
+    def _dimension_target(
+        self, session: Session, node: SceneNode | None
+    ) -> tuple[_DimensionTarget | None, str]:
+        """Resolve one editable primitive without inventing transform scale."""
+
+        generation = int(session.structure_generation)
+        node_id = -1 if node is None else int(node.node_id)
+        if (
+            session is self._dimension_cache_session
+            and generation == self._dimension_cache_generation
+            and node_id == self._dimension_cache_node
+        ):
+            return self._dimension_cache
+        if node is None or node.type not in (NodeType.GEOM, NodeType.SITE):
+            result = (None, "Select an editable geometry or site")
+        else:
+            result = self._resolve_dimension_target(session, node)
+        self._dimension_cache_session = session
+        self._dimension_cache_generation = generation
+        self._dimension_cache_node = node_id
+        self._dimension_cache = result
+        return result
+
+    @staticmethod
+    def _resolve_dimension_target(
+        session: Session, node: SceneNode
+    ) -> tuple[_DimensionTarget | None, str]:
+        source = session.source
+        if source is None:
+            return None, "Geometry dimensions are unavailable"
+        instances = np.flatnonzero(np.asarray(source.geom_node) == int(node.node_id))
+        if not len(instances):
+            return None, "Geometry dimensions are unavailable"
+        first = int(instances[0])
+        if first < len(source.geom_infinite_plane) and bool(source.geom_infinite_plane[first]):
+            return None, "Infinite planes have no finite dimensions"
+        shape = source.geom_mesh[first].shape
+        size = np.asarray(source.geom_size[first], np.float32).reshape(3).copy()
+        dimensions = geometry_dimensions(shape, size)
+        if dimensions is None:
+            return None, f"{shape.value} dimensions are not editable with a gizmo"
+        caps = session.adapter.caps
+        editable = bool(
+            (node.model_id < 0 and caps.scene_authoring)
+            or (node.source_editable and caps.topology_editing)
+        )
+        if not editable:
+            return None, "This geometry has no editable source dimensions"
+        pose_index = (
+            int(source.geom_source[first])
+            if len(source.geom_source) == source.instance_count
+            else first
+        )
+        return _DimensionTarget(shape, size, dimensions, pose_index), ""
+
+    @staticmethod
+    def _dimension_handle_mask(dimensions: GeometryDimensions) -> int:
+        return handle_mask(
+            *(
+                GizmoHandle.SCREEN if item.axis is None else AXIS_HANDLES[item.axis]
+                for item in dimensions.handles
+            )
+        )
+
+    @staticmethod
+    def _dimension_pose(
+        session: Session,
+        node: SceneNode,
+        target: _DimensionTarget,
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        if node.type is NodeType.SITE:
+            return node_world_pose(session, node)
+        frame = session.frame
+        index = target.pose_index
+        if (
+            frame.geom_xpos is None
+            or frame.geom_xmat is None
+            or not 0 <= index < len(frame.geom_xpos)
+            or index >= len(frame.geom_xmat)
+        ):
+            return None
+        return (
+            np.asarray(frame.geom_xpos[index], np.float64).reshape(3),
+            np.asarray(frame.geom_xmat[index], np.float64).reshape(3, 3),
+        )
+
     def _target_pose(
         self, session: Session, node: SceneNode, target: _JointTarget | None
     ) -> tuple[np.ndarray, np.ndarray] | None:
@@ -3937,6 +4274,8 @@ class ObjectGizmo:
         space: str | GizmoSpace | None = None,
     ) -> np.ndarray:
         if target is not None and target.joint.type in ("hinge", "slide"):
+            return np.asarray(rotation, np.float64).reshape(3, 3)
+        if self._mode is GizmoMode.DIMENSIONS:
             return np.asarray(rotation, np.float64).reshape(3, 3)
         selected = self._space if space is None else GizmoSpace(space)
         if selected is GizmoSpace.BODY:
@@ -3980,8 +4319,24 @@ class ObjectGizmo:
             return any(item.model_id == node.model_id for item in session.scene_models)
         return False
 
+    def evaluate_mode(
+        self, session: Session, node: SceneNode | None, mode: GizmoMode | str
+    ) -> Verdict:
+        """Return availability for one tool without changing the active mode."""
+
+        selected = GizmoMode(mode)
+        if selected is GizmoMode.DIMENSIONS:
+            target, reason = self._dimension_target(session, node)
+            return Verdict(target is not None, reason)
+        return self._evaluate_transform(session, node)
+
     def evaluate(self, session: Session, node: SceneNode | None) -> Verdict:
-        """Return the actual viewport-gizmo availability for one scene node."""
+        """Return availability for the active viewport gizmo mode."""
+
+        return self.evaluate_mode(session, node, self._mode)
+
+    def _evaluate_transform(self, session: Session, node: SceneNode | None) -> Verdict:
+        """Return position/rotation availability for one scene node."""
 
         if (
             node is not None
@@ -4052,7 +4407,12 @@ class ObjectGizmo:
         node = session.selected_node
         if node is not None and node.type is NodeType.MODEL:
             return
-        result = session.submit(BeginEditTransaction(f"{self._mode.value.title()} transform"))
+        label = (
+            "Resize geometry"
+            if self._mode is GizmoMode.DIMENSIONS
+            else f"{self._mode.value.title()} transform"
+        )
+        result = session.submit(BeginEditTransaction(label))
         if result.ok:
             self._edit_session = session
 
@@ -4086,6 +4446,7 @@ class ObjectGizmo:
         self._slide_cardinal_axis = -1
         self._start_joint_qpos = np.zeros(0, np.float64)
         self._joint_drag_origin_qpos = np.zeros(0, np.float64)
+        self._dimension_start = None
         self._trackball_angles[:] = 0.0
         self._label = ""
         self._edit_started = False

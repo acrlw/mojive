@@ -115,6 +115,7 @@ Select a camera to edit it. Enable **preview** in Inspector when a live camera p
 | `Space` | Play or pause |
 | `Backspace` | Previous frame; hold to rewind |
 | `G` / `R` | Position / rotation gizmo |
+| Unbound by default | Primitive dimensions gizmo; assign in Settings or code |
 | `T` | Switch body/world frame |
 | `Shift` while dragging | Snap |
 | `Ctrl` + left/right drag | Translation/rotation perturbation |

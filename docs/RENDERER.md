@@ -202,6 +202,10 @@ Native 2D and 3D gizmos share interaction state, colors, sizing, snapping, label
 feedback. Their pixel footprint remains stable with camera distance. Axis depth ordering follows
 camera-space depth.
 
+The primitive Dimensions mode reuses the same projection, hit testing, input routing, edit
+transactions, and `Draw2D` overlay. Its square endpoints expose only independent authored
+parameters; it does not introduce transform scale or another backend render pass.
+
 Position snapping uses a projected axis ruler. Rotation snapping uses an outer tick ring. The
 default increments are 0.5 m and 5 degrees.
 

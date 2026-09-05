@@ -19,6 +19,7 @@ class InputAction(enum.StrEnum):
     FRAME_SCENE = "frame_scene"
     GIZMO_TRANSLATE = "gizmo_translate"
     GIZMO_ROTATE = "gizmo_rotate"
+    GIZMO_DIMENSIONS = "gizmo_dimensions"
     GIZMO_SPACE = "gizmo_space"
     SNAP = "snap"
     PERTURB = "perturb"
@@ -186,6 +187,7 @@ _ACTION_NAMES = {
     InputAction.FRAME_SCENE: "Frame selection",
     InputAction.GIZMO_TRANSLATE: "Move tool",
     InputAction.GIZMO_ROTATE: "Rotate tool",
+    InputAction.GIZMO_DIMENSIONS: "Dimensions tool",
     InputAction.GIZMO_SPACE: "World / Body",
     InputAction.SNAP: "Snap",
     InputAction.PERTURB: "Perturb",
@@ -234,6 +236,7 @@ DEFAULT_INPUT_BINDINGS = InputBindings(
         (InputAction.FRAME_SCENE, KeyBinding(imgui.Key.f, "F", "f")),
         (InputAction.GIZMO_TRANSLATE, KeyBinding(imgui.Key.g, "G", "g")),
         (InputAction.GIZMO_ROTATE, KeyBinding(imgui.Key.r, "R", "r")),
+        (InputAction.GIZMO_DIMENSIONS, KeyBinding(None, "Unbound", None)),
         (InputAction.GIZMO_SPACE, KeyBinding(imgui.Key.t, "T", "t")),
         (
             InputAction.SNAP,

@@ -2515,6 +2515,81 @@ def test_dragging_the_gizmo_moves_the_object_not_the_camera(free_body_viewer):
     assert abs(v.app.camera.yaw - before_yaw) < 1e-6
 
 
+def test_dimension_gizmo_resizes_authored_geometry_in_the_real_viewer(
+    free_body_viewer, monkeypatch
+):
+    from imgui_bundle import imgui
+
+    import mojive.commands as cmd
+    from mojive.adapters.base import NodeType
+    from mojive.gizmo import AXIS_END, SIZE_PT, GizmoHandle, project, world_scale
+
+    v = free_body_viewer
+    io = imgui.get_io()
+    monkeypatch.setattr(io, "mouse_double_click_time", 0.0)
+    node = next(
+        item for item in v.session.nodes if item.type is NodeType.GEOM and item.name == "wall_left"
+    )
+    assert v.session.submit(cmd.SelectNode(node.node_id))
+    v.set_gizmo_mode("dimensions")
+    v.app.camera.look_from(-135.0, 25.0, v.app.camera_out, animate=False)
+    for _ in range(4):
+        v.sync()
+
+    target, reason = v.app.gizmo._dimension_target(v.session, v.session.selected_node)
+    assert target is not None, reason
+    original = target.size.copy()
+    pose = v.app.gizmo._dimension_pose(v.session, v.session.selected_node, target)
+    assert pose is not None
+    origin, rotation = pose
+    cam = v.app.camera.view()
+    rect = v.app._viewport_rect
+    scale = world_scale(cam, origin, rect[3], SIZE_PT * v.window.style_scale)
+
+    handle = GizmoHandle.NONE
+    cursor = np.zeros(2)
+    for mapping in target.dimensions.handles:
+        if mapping.axis is None:
+            continue
+        candidate = project(
+            cam,
+            (origin + rotation[:, mapping.axis] * scale * AXIS_END,),
+            rect,
+        )[0, :2]
+        io.add_mouse_pos_event(*candidate)
+        v.sync()
+        expected = (GizmoHandle.X, GizmoHandle.Y, GizmoHandle.Z)[mapping.axis]
+        if v.app.gizmo.hovered_handle is expected:
+            handle, cursor = expected, candidate
+            break
+    assert handle is not GizmoHandle.NONE
+
+    io.add_mouse_button_event(0, True)
+    v.sync()
+    assert v.app.gizmo.active_handle is handle
+    io.add_mouse_pos_event(*(cursor + v.app.gizmo._axis_screen * 32.0))
+    for _ in range(3):
+        v.sync()
+    io.add_mouse_button_event(0, False)
+    v.sync()
+    assert not v.app.gizmo.using
+
+    changed, reason = v.app.gizmo._dimension_target(v.session, v.session.selected_node)
+    assert changed is not None, reason
+    assert not np.allclose(changed.size, original)
+    assert v.session.submit(cmd.SetGeometrySize(node.node_id, original))
+    restored, reason = v.app.gizmo._dimension_target(v.session, v.session.selected_node)
+    assert restored is not None, reason
+    assert restored.size == pytest.approx(original)
+
+    # This fixture is shared by later parametrized interaction tests. ImGui
+    # retains the timestamp of a completed click even when double-click timing
+    # is temporarily disabled, so clear that history before the next test.
+    io.mouse_clicked_time[0] = -float("inf")
+    io.mouse_clicked_count[0] = 0
+    io.mouse_clicked_last_count[0] = 0
+
+
 def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(
     free_body_viewer, monkeypatch
 ):
@@ -2827,7 +2902,9 @@ def test_precise_input_choice_memory_can_be_disabled(free_body_viewer):
 
 
 @pytest.mark.parametrize(("style", "arrow_count"), (("2d", 1), ("3d", 0)))
-def test_gizmo_drag_feedback_matches_in_2d_and_3d(free_body_viewer, style, arrow_count):
+def test_gizmo_drag_feedback_matches_in_2d_and_3d(
+    free_body_viewer, style, arrow_count, monkeypatch
+):
     """2D/3D share one compound GPU drag link and the same value label."""
     from imgui_bundle import imgui
 
@@ -2866,6 +2943,9 @@ def test_gizmo_drag_feedback_matches_in_2d_and_3d(free_body_viewer, style, arrow
 
     v = free_body_viewer
     io = imgui.get_io()
+    # Parameter cases share one Viewer and execute too quickly to represent two
+    # intentional user clicks. Keep the second drag from becoming a double-click.
+    monkeypatch.setattr(io, "mouse_double_click_time", 0.0)
     node = next(n for n in v.session.nodes if n.posable)
     v.session.submit(cmd.Select(node.object_id))
     v.app.gizmo.set_mode("translate")
@@ -3535,7 +3615,7 @@ def test_blocking_modal_owns_all_viewport_input_and_hides_context_hint(
         v.sync()
 
 
-def test_g_and_r_switch_modes_and_there_is_no_scale(free_body_viewer):
+def test_g_and_r_switch_transform_modes_and_dimensions_is_not_scale(free_body_viewer):
     v = free_body_viewer
     g = v.app.gizmo
     g.set_mode("rotate")
@@ -3544,6 +3624,8 @@ def test_g_and_r_switch_modes_and_there_is_no_scale(free_body_viewer):
     assert g.mode == "translate"
     g.set_mode("scale")
     assert g.mode == "translate"
+    g.set_mode("dimensions")
+    assert g.mode == "dimensions"
 
 
 def test_closing_one_window_leaves_glfw_alive_for_the_other():

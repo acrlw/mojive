@@ -11,9 +11,19 @@ from imgui_bundle import imgui
 from PIL import Image
 
 from .. import commands as cmd
+from ..adapters.base import NodeType
 from ..assets import resolve
 from ..composition import build
-from ..gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, GizmoMode, hit_test, project, world_scale
+from ..gizmo import (
+    AXIS_END,
+    RING_RADIUS,
+    SIZE_PT,
+    GizmoHandle,
+    GizmoMode,
+    hit_test,
+    project,
+    world_scale,
+)
 from ..ui import viewcube
 
 
@@ -44,6 +54,12 @@ def main(argv: list[str] | None = None) -> int:
         for style in ("2d", "3d"):
             _position(viewer, node, style, args.output)
             _rotation(viewer, node, style, args.output)
+        geometry = next(
+            item
+            for item in viewer.session.nodes
+            if item.type is NodeType.GEOM and item.name == "box"
+        )
+        _dimensions(viewer, geometry, args.output)
     finally:
         viewer.release()
     print(args.output.resolve())
@@ -290,6 +306,44 @@ def _rotation(viewer, node, style: str, output: Path) -> None:
     viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
 
 
+def _dimensions(viewer, node, output: Path) -> None:
+    """Capture the primitive-aware scale-style geometry tool."""
+
+    viewer.session.submit(cmd.SelectNode(node.node_id))
+    viewer.app.gizmo.set_mode("dimensions")
+    viewer.app.gizmo.set_style("2d")
+    viewer.app.camera.set_orthographic(False)
+    viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
+    for _ in range(4):
+        viewer.sync()
+    _save_full(viewer, output / "dimensions-box-window.png")
+    _save(viewer, node, output / "dimensions-box.png")
+
+    camera, rect, origin, rotation, scale = _state(viewer, node)
+    cursor = project(
+        camera,
+        (origin + rotation[:, 0] * scale * AXIS_END,),
+        rect,
+    )[0, :2]
+    io = imgui.get_io()
+    io.add_mouse_pos_event(*cursor)
+    viewer.sync()
+    viewer.app._gallery_left_down = True
+    viewer.sync()
+    direction = project(
+        camera,
+        (origin, origin + rotation[:, 0] * scale),
+        rect,
+    )[:, :2]
+    direction = direction[1] - direction[0]
+    direction /= np.linalg.norm(direction)
+    io.add_mouse_pos_event(*(cursor + direction * 42.0))
+    viewer.sync()
+    _save(viewer, node, output / "dimensions-box-drag.png")
+    viewer.app._gallery_left_down = False
+    viewer.sync()
+
+
 def _state(viewer, node):
     camera = viewer.app.camera.view()
     rect = viewer.app._viewport_rect
@@ -359,6 +413,12 @@ def _save_view_gizmo(viewer, path: Path) -> None:
     y = int(center[1] * sy)
     crop = pixels[max(0, y - half_y) : y + half_y, max(0, x - half_x) : x + half_x]
     Image.fromarray(crop, "RGB").save(path)
+
+
+def _save_full(viewer, path: Path) -> None:
+    viewer.sync()
+    pixels = viewer.window.read_frame()[::-1, :, :3]
+    Image.fromarray(pixels, "RGB").save(path)
 
 
 if __name__ == "__main__":

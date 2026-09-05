@@ -115,6 +115,21 @@ Explicit `ViewerConfig` values apply to that viewer instance. Changes made in Se
 as desktop preferences for later viewers created without an explicit config. Runtime
 `configure_*` calls are also instance-local unless passed `persist=True`.
 
+The Dimensions tool deliberately has no default shortcut, so it does not take another key from an
+embedding application. It can be selected and optionally bound from code:
+
+```python
+from mojive import InputAction
+
+viewer.set_gizmo_mode("dimensions")
+viewer.configure_input_binding(InputAction.GIZMO_DIMENSIONS, "s")
+```
+
+The tool edits primitive parameters rather than adding transform scale: a sphere exposes radius;
+a cylinder or cone exposes diameter and height; a capsule exposes diameter and shaft length; and a
+box or ellipsoid exposes three independent dimensions. Unsupported mesh data remains editable
+through its source rather than being presented as a misleading scale operation.
+
 Use `LayoutConfig(persistence=False)` for a deterministic default layout on every launch, or
 `LayoutConfig(reset=True)` to discard stale/off-screen docking coordinates once and then keep the
 new layout. A custom `path` isolates each embedding application from Mojive's editor layout.

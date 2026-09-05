@@ -143,6 +143,35 @@ class Viewer:
 
         self.app.set_viewport_overlays(value, persist=persist)
 
+    @property
+    def gizmo_mode(self) -> str:
+        """Return the active viewport gizmo mode."""
+
+        return self.app.gizmo.mode
+
+    def set_gizmo_mode(self, mode: str) -> None:
+        """Select ``translate``, ``rotate``, or primitive ``dimensions`` editing."""
+
+        from .gizmo import GizmoMode
+
+        selected = GizmoMode(mode)
+        if self.app.gizmo.using:
+            raise RuntimeError("cannot change gizmo mode during an active edit")
+        self.app.gizmo.set_mode(selected.value)
+
+    def configure_input_binding(
+        self,
+        action,
+        key_id: str | None,
+        *,
+        persist: bool = False,
+    ) -> None:
+        """Assign one optional editor shortcut without changing input ownership."""
+
+        from .ui.input_bindings import InputAction
+
+        self.app.set_input_binding(InputAction(action), key_id, persist=persist)
+
     def set_camera(self, view) -> None:
         """Adopt a backend-neutral camera view in the interactive editor camera."""
 

@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from mojive.composition import Viewer
+from mojive.ui.input_bindings import InputAction
 
 
 class Resource:
@@ -32,6 +33,16 @@ class App:
         self.releases = 0
         self.fixed_render_size = None
         self.fixed_render_size_changes = []
+        self.gizmo = type(
+            "Gizmo",
+            (),
+            {
+                "mode": "translate",
+                "using": False,
+                "set_mode": lambda gizmo, mode: setattr(gizmo, "mode", mode),
+            },
+        )()
+        self.input_binding_changes = []
 
     def run(self, max_frames=None) -> None:
         del max_frames
@@ -54,6 +65,9 @@ class App:
         self.fixed_render_size = None
         self.fixed_render_size_changes.append(None)
 
+    def set_input_binding(self, action, key_id, *, persist=True) -> None:
+        self.input_binding_changes.append((action, key_id, persist))
+
 
 def _viewer():
     backend = Resource()
@@ -72,6 +86,16 @@ def test_viewer_run_does_not_destroy_resources_before_the_caller_is_done():
     assert app.runs == 1
     assert app.releases == 0
     assert backend.releases == session.releases == bridge.closes == window.closes == 0
+
+
+def test_viewer_exposes_programmatic_gizmo_mode_and_optional_binding() -> None:
+    viewer, app, *_ = _viewer()
+
+    viewer.set_gizmo_mode("dimensions")
+    viewer.configure_input_binding(InputAction.GIZMO_DIMENSIONS, "s")
+
+    assert viewer.gizmo_mode == "dimensions"
+    assert app.input_binding_changes == [(InputAction.GIZMO_DIMENSIONS, "s", False)]
 
 
 def test_viewer_context_manager_releases_every_owner_once():

@@ -20,7 +20,7 @@ from .. import commands as cmd
 from ..adapters.base import FrameNeeds, NodeType
 from ..capture import CaptureSurface, RecordingInfo, RecordingPhase
 from ..config import InteractionConfig, SelectionStyle, ViewerConfig, ViewportOverlayConfig
-from ..gizmo import axis_active_color, axis_hover_color
+from ..gizmo import GizmoMode, axis_active_color, axis_hover_color
 from ..input import InputClaim, InputContext
 from ..log import add_output_sink, get_logger, remove_output_sink
 from ..render.backend import FrameMode, LabelMode, RenderFlag, ShadowQuality
@@ -453,6 +453,7 @@ class Keys:
     frame_scene: bool = False
     gizmo_translate: bool = False
     gizmo_rotate: bool = False
+    gizmo_dimensions: bool = False
     gizmo_space: bool = False
     gizmo_axis: int = -1
 
@@ -824,11 +825,18 @@ class ViewerApp:
             raise ValueError(f"unknown viewport capsule: {name!r}")
         self.set_viewport_overlays(config, persist=persist)
 
-    def set_input_binding(self, action: InputAction, key_id: str | None) -> None:
+    def set_input_binding(
+        self,
+        action: InputAction,
+        key_id: str | None,
+        *,
+        persist: bool = True,
+    ) -> None:
         """Atomically remap one viewport action and persist the whole map."""
 
         self.input_bindings = self.input_bindings.remap(action, key_id)
-        self.localizer.set_preferences({"input_bindings": self.input_bindings.preferences()})
+        if persist:
+            self.localizer.set_preferences({"input_bindings": self.input_bindings.preferences()})
 
     def set_interactions(self, value: InteractionConfig, *, persist: bool = True) -> None:
         """Replace the built-in input policy without changing application bindings."""
@@ -2702,6 +2710,9 @@ class ViewerApp:
             gizmo_rotate=self.interactions.gizmo
             and available(InputAction.GIZMO_ROTATE)
             and bindings.pressed(InputAction.GIZMO_ROTATE),
+            gizmo_dimensions=self.interactions.gizmo
+            and available(InputAction.GIZMO_DIMENSIONS)
+            and bindings.pressed(InputAction.GIZMO_DIMENSIONS),
             gizmo_space=self.interactions.gizmo
             and available(InputAction.GIZMO_SPACE)
             and bindings.pressed(InputAction.GIZMO_SPACE),
@@ -2953,7 +2964,7 @@ class ViewerApp:
             # string even though the numeric model has changed.
             imgui.internal.clear_active_id()
         unit = "rad" if angular and self._precise_gizmo_angle_unit == "radians" else edit.unit
-        title = f"{self.localizer.text(edit.action)} {edit.label}"
+        title = f"{self.localizer.text(edit.action)} {self.localizer.text(edit.label)}"
         # Some popup placements preserve a negative horizontal cursor offset
         # from the activating item. Clamp the first line to the popup's own
         # content padding so the beginning of "Rotate" cannot be clipped.
@@ -4170,10 +4181,25 @@ class ViewerApp:
         if not self._has_scene_content():
             self._tool_widget_rect = None
             return
-        enabled = bool(self._state.has_selection and self._state.gizmo_available)
+        node = self.session.selected_node
+        transform = self.gizmo.evaluate_mode(self.session, node, GizmoMode.TRANSLATE)
+        dimensions = self.gizmo.evaluate_mode(self.session, node, GizmoMode.DIMENSIONS)
+        controls_enabled = bool(
+            node is not None
+            and self.interactions.gizmo
+            and self.selection_style.gizmo
+            and (self.gizmo.style == "2d" or self.backend.caps.gizmo)
+        )
+        enabled_controls: set[str] = set()
+        if controls_enabled and transform.ok:
+            enabled_controls.update(("move", "rotate", "frame"))
+        if controls_enabled and dimensions.ok:
+            enabled_controls.add("dimensions")
+        if enabled_controls:
+            enabled_controls.add("snap")
         # A column made entirely of disabled tools is visual noise and can
         # obscure joint selection. It returns as soon as one tool is usable.
-        if not enabled:
+        if not enabled_controls:
             self._tool_widget_rect = None
             return
         x, y, _width, height = self._viewport_rect
@@ -4231,6 +4257,13 @@ class ViewerApp:
                     space=self.gizmo.space,
                     snap=self._snap_latched or self.gizmo.snapping,
                     enabled=not self._scene_input_blocked(),
+                    enabled_controls=enabled_controls,
+                    disabled_reasons={
+                        "move": transform.reason,
+                        "rotate": transform.reason,
+                        "frame": transform.reason,
+                        "dimensions": dimensions.reason,
+                    },
                     bindings=self.input_bindings,
                     labels=self._viewport_labels,
                     groups=self.viewport_chrome.tool_groups,
@@ -4241,6 +4274,8 @@ class ViewerApp:
                 self.gizmo.set_mode("translate")
             elif action == "rotate":
                 self.gizmo.set_mode("rotate")
+            elif action == "dimensions":
+                self.gizmo.set_mode("dimensions")
             elif action == "frame":
                 self.gizmo.toggle_space()
             elif action == "snap":
@@ -5137,5 +5172,7 @@ class ViewerApp:
             self.gizmo.set_mode("translate")
         if keys.gizmo_rotate:
             self.gizmo.set_mode("rotate")
+        if keys.gizmo_dimensions:
+            self.gizmo.set_mode("dimensions")
         if keys.gizmo_space:
             self.gizmo.toggle_space()

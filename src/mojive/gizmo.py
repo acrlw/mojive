@@ -37,6 +37,8 @@ ROTATE_RING_ACTIVE_ALPHA = 0.96
 TRACKBALL_ALPHA = 0.035
 TRACKBALL_HOVER_ALPHA = 0.16
 TRACKBALL_ACTIVE_ALPHA = 0.22
+DIMENSION_HANDLE_HALF_PT = 5.5
+DIMENSION_SHAFT_WIDTH_PT = 2.5
 
 RING_TUBE = RING_WIDTH_PT / (2.0 * SIZE_PT)
 SCREEN_RING_TUBE = SCREEN_RING_WIDTH_PT / (2.0 * SIZE_PT)
@@ -110,6 +112,7 @@ def axis_dark_color(color) -> tuple[float, float, float, float]:
 class GizmoMode(enum.StrEnum):
     TRANSLATE = "translate"
     ROTATE = "rotate"
+    DIMENSIONS = "dimensions"
 
 
 class GizmoStyle(enum.StrEnum):
@@ -554,6 +557,21 @@ def masked_axis_start(origin, end, radius: float) -> np.ndarray:
     return origin + direction * (float(radius) / length)
 
 
+def dimension_axis_geometry(start, end, style_scale: float) -> tuple[np.ndarray, np.ndarray]:
+    """Return a scale-style shaft endpoint and screen-aligned square handle."""
+
+    start = np.asarray(start, np.float64).reshape(2)
+    end = np.asarray(end, np.float64).reshape(2)
+    direction = end - start
+    length = float(np.linalg.norm(direction))
+    half = DIMENSION_HANDLE_HALF_PT * float(style_scale)
+    shaft_end = end if length <= half else end - direction * (half / length)
+    square = end + half * np.asarray(
+        ((-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)), np.float64
+    )
+    return shaft_end, square
+
+
 def _rounded_polygon_corners(
     points,
     radius: float,
@@ -774,7 +792,7 @@ def hit_test(
     def allowed(handle: GizmoHandle) -> bool:
         return bool(allowed_handles & (1 << int(handle)))
 
-    if mode is GizmoMode.TRANSLATE:
+    if mode in (GizmoMode.TRANSLATE, GizmoMode.DIMENSIONS):
         if (
             allowed(GizmoHandle.SCREEN)
             and np.linalg.norm(p - center) <= CENTER_HIT_PT * style_scale
@@ -804,9 +822,21 @@ def hit_test(
                 screen[1, :2],
                 CENTER_SHELL_RADIUS * SIZE_PT * style_scale,
             )
-            polygon = axis_arrow_polygon(start, screen[1, :2], style_scale)
-            if _polygon_distance(p, polygon) <= AXIS_HIT_PADDING_PT * style_scale:
+            if mode is GizmoMode.DIMENSIONS:
+                shaft_end, polygon = dimension_axis_geometry(start, screen[1, :2], style_scale)
+                distance = min(
+                    _polygon_distance(p, polygon),
+                    _segment_distance(p, start, shaft_end)
+                    - DIMENSION_SHAFT_WIDTH_PT * 0.5 * style_scale,
+                )
+            else:
+                polygon = axis_arrow_polygon(start, screen[1, :2], style_scale)
+                distance = _polygon_distance(p, polygon)
+            if distance <= AXIS_HIT_PADDING_PT * style_scale:
                 return handle, axis_mask, plane_mask
+
+        if mode is GizmoMode.DIMENSIONS:
+            return GizmoHandle.NONE, axis_mask, plane_mask
 
         planes = [
             axis for axis in range(3) if plane_mask & (1 << axis) and allowed(PLANE_HANDLES[axis])

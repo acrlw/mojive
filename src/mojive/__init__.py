@@ -76,6 +76,7 @@ from .types import (
     MeshUpdate,
     ShadingModel,
 )
+from .ui.input_bindings import InputAction
 
 if TYPE_CHECKING:
     from .adapters.mujoco_adapter import MuJoCoAdapter
@@ -122,6 +123,7 @@ __all__ = [
     "EqualityConstraintInfo",
     "FrameMode",
     "FrameNeeds",
+    "InputAction",
     "InputClaim",
     "InputContext",
     "InteractionConfig",
