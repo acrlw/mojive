@@ -14,5 +14,7 @@ flat out uint v_id;
 void main() {
     mat4 m = mat4(in_model0, in_model1, in_model2, in_model3);
     v_id = in_object_id;
-    gl_Position = u_view_proj * m * vec4(in_position, 1.0);
+    // Match the scene shader's operation order when reusing its depth buffer.
+    vec4 world = m * vec4(in_position, 1.0);
+    gl_Position = u_view_proj * world;
 }

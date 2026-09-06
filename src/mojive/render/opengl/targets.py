@@ -173,20 +173,20 @@ class RenderTarget:
             self.fbo.clear(*color)
             self._gl.drain_errors()
 
-    def clear_id(self, value: int = 0) -> None:
+    def clear_id(self, value: int = 0, *, clear_depth: bool = False) -> None:
         self.id_fbo.use()
         self.ctx.viewport = (0, 0, self.width, self.height)
-        split = self.id_layout is IdLayout.SPLIT
+        reset_depth = clear_depth or self.id_layout is IdLayout.SPLIT
 
-        if split:
+        if reset_depth:
             self.id_fbo.depth_mask = True
 
-        depth_done = self._gl.clear_depth_only(1.0) if split else True
+        depth_done = self._gl.clear_depth_only(1.0) if reset_depth else True
         if depth_done and self._gl.clear_color_uint(self.id_draw_buffer, int(value)):
             return
 
         self.ctx.disable(moderngl.BLEND | moderngl.CULL_FACE)
-        if split and not depth_done:
+        if reset_depth and not depth_done:
             self.ctx.enable(moderngl.DEPTH_TEST)
             self.ctx.depth_func = "1"  # GL_ALWAYS
         else:

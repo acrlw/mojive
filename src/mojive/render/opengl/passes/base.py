@@ -134,6 +134,7 @@ class PassContext:
     selected_id: int = 0
     outline_id: int | None = None
     include_transparent_ids: bool = False
+    opaque_depth_ready: bool = False
     gizmo: GizmoFrame | None = None
     ui_scale: float = 1.0
     time: float = 0.0

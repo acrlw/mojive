@@ -372,6 +372,7 @@ class OpaquePass(BasePass):
         gl.multisample = bool(ctx.flag(RenderFlag.MSAA))
 
         draw_buckets(ctx, ctx.scene.opaque_buckets)
+        ctx.opaque_depth_ready = not overdraw
 
         if target.id_layout is IdLayout.SHARED:
             target.fbo.color_mask = (_MASK_ON, _MASK_ON)

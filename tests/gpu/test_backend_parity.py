@@ -118,3 +118,31 @@ def test_classic_generated_texture_coordinates_keep_object_xy_orientation(backen
     # Object X maps left-to-right, object Y maps to the reverse texture row.
     actual = rgb[np.array([36, 36, 60, 60]), np.array([36, 60, 36, 60])]
     np.testing.assert_allclose(actual, colors.reshape(4, 3), atol=1)
+
+
+@pytest.mark.parametrize("backend", ["opengl", "wgpu"])
+@pytest.mark.parametrize("samples", [0, 4])
+def test_identity_only_requests_use_current_camera_depth_without_a_color_render(backend, samples):
+    scene = Scene()
+    scene.box(position=(-0.25, 0.0, 0.5))
+    scene.box(position=(0.35, 0.6, 0.5), color=(1.0, 0.2, 0.1, 0.5))
+    source = scene.source
+    source.geom_segmentation = np.column_stack(
+        (source.geom_object_id, np.ones(source.instance_count))
+    ).astype(np.int32)
+    with SceneRenderer(source, width=128, height=96, samples=samples, renderer=backend) as renderer:
+        for eye in ((3.0, -3.0, 2.0), (-3.0, 3.0, 1.0), (4.0, 0.0, 2.0)):
+            renderer.update(
+                scene.frame, camera=CameraView(eye=np.array(eye), target=np.array((0, 0, 0.5)))
+            )
+            ids = renderer.render(product=RenderProduct.OBJECT_ID)
+            semantics = renderer.render(product=RenderProduct.SEGMENTATION)[..., 0]
+            expected = np.maximum(semantics, 0).astype(np.uint32)
+            # The ID buffer may be multisampled; compare fully covered pixels
+            # against the independent single-sample semantic export.
+            interior = np.ones(expected.shape, bool)
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    interior &= expected == np.roll(expected, (dy, dx), axis=(0, 1))
+            assert np.count_nonzero(interior & (expected != 0)) > 100
+            np.testing.assert_array_equal(ids[interior], expected[interior])
