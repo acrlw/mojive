@@ -17,6 +17,9 @@ from mojive.ui.viewport_widgets import (
     OVERLAY_CLIP_PADDING,
     OVERLAY_GEOMETRY,
     PLAYBACK_CHROME_SCALE,
+    PLAYBACK_HALF_HEIGHT_PT,
+    PLAYBACK_RESET_SCALE,
+    PLAYBACK_STEP_SCALE,
     TOOL_CHROME_SCALE,
     TOOL_GLYPH_SCALE,
     ToolHint,
@@ -52,6 +55,7 @@ from mojive.ui.viewport_widgets import (
     tool_hints_size,
     viewport_chrome_scale,
 )
+from tests.curve_assertions import assert_paths_close
 
 
 def test_normalized_overlay_position_clamps_and_round_trips() -> None:
@@ -82,7 +86,7 @@ def test_only_overlay_border_band_is_a_drag_target() -> None:
         (44.0, 44.0),
     ),
 )
-def test_capsule_points_keep_exact_bounds_and_circular_ends(width, height):
+def test_capsule_points_keep_exact_bounds_and_symmetric_convex_ends(width, height):
     points = capsule_points(7.0, 11.0, width, height)
     xs = tuple(point[0] for point in points)
     ys = tuple(point[1] for point in points)
@@ -91,16 +95,16 @@ def test_capsule_points_keep_exact_bounds_and_circular_ends(width, height):
     assert min(ys) == pytest.approx(11.0)
     assert max(ys) == pytest.approx(11.0 + height)
 
-    radius = min(width, height) * 0.5
-    if width >= height:
-        centers = ((7.0 + radius, 11.0 + radius), (7.0 + width - radius, 11.0 + radius))
-        halves = (points[len(points) // 2 :], points[: len(points) // 2])
-    else:
-        centers = ((7.0 + radius, 11.0 + radius), (7.0 + radius, 11.0 + height - radius))
-        halves = (points[: len(points) // 2], points[len(points) // 2 :])
-    for center, half in zip(centers, halves, strict=True):
-        for point in half:
-            assert math.dist(point, center) == pytest.approx(radius, abs=1e-9)
+    center = (7.0 + width * 0.5, 11.0 + height * 0.5)
+    reflected = tuple((2 * center[0] - px, 2 * center[1] - py) for px, py in points)
+    assert_paths_close(reflected, points, 1e-8)
+    edges = [
+        (b[0] - a[0], b[1] - a[1]) for a, b in zip(points, (*points[1:], points[0]), strict=True)
+    ]
+    assert all(
+        a[0] * b[1] - a[1] * b[0] >= -1e-8
+        for a, b in zip(edges, (*edges[1:], edges[0]), strict=True)
+    )
 
 
 def test_default_overlay_scale_preserves_shared_radial_steps():
@@ -183,6 +187,11 @@ class _RecordedGlyph:
     def fringed_concave_fill(self, points, _color):
         self.paths.append(tuple(points))
 
+    def arrow(self, start, end, color, width, **style):
+        from mojive.curves2d import arrow_points
+
+        self.fringed_concave_fill(arrow_points(start, end, width, **style), color)
+
     def concave_fill(self, points, _color):
         self.paths.append(tuple(points))
 
@@ -238,8 +247,36 @@ def test_frame_step_glyph_is_centered_and_fills_the_icon_bound(kind: str):
     play_y = tuple(point[1] for point in play.paths[0])
     triangle_x = tuple(point[0] for point in draw.paths[0])
     triangle_y = tuple(point[1] for point in draw.paths[0])
-    assert (max(triangle_x) - min(triangle_x)) / (max(play_x) - min(play_x)) == pytest.approx(0.78)
-    assert (max(triangle_y) - min(triangle_y)) / (max(play_y) - min(play_y)) == pytest.approx(0.78)
+    assert max(triangle_x) - min(triangle_x) == pytest.approx(
+        (max(play_x) - min(play_x)) * PLAYBACK_STEP_SCALE
+    )
+    assert max(triangle_y) - min(triangle_y) == pytest.approx(
+        (max(play_y) - min(play_y)) * PLAYBACK_STEP_SCALE
+    )
+
+
+@pytest.mark.parametrize("smoothing", (0.0, 0.6, 1.0))
+@pytest.mark.parametrize("scale", (1.0, 3.0))
+def test_playback_visible_extents_align_across_states_and_smoothing(smoothing, scale):
+    center = (73.5, 124.25)
+    for kind in ("play", "pause", "previous", "step", "reset"):
+        draw = _RecordedGlyph()
+        draw_playback_glyph(draw, center, (1.0,) * 4, scale, kind, smoothing=smoothing)
+        points = [point for path in draw.paths for point in path]
+        points.extend(point for args, _ in draw.rectangles for point in args[:2])
+        ys = [point[1] for point in points]
+        ratio = (
+            PLAYBACK_STEP_SCALE
+            if kind in ("previous", "step")
+            else PLAYBACK_RESET_SCALE
+            if kind == "reset"
+            else 1.0
+        )
+        assert min(ys) == pytest.approx(center[1] - PLAYBACK_HALF_HEIGHT_PT * scale * ratio)
+        assert max(ys) == pytest.approx(center[1] + PLAYBACK_HALF_HEIGHT_PT * scale * ratio)
+        assert (
+            max(math.dist(point, center) for point in points) < OVERLAY_GEOMETRY.icon_radius * scale
+        )
 
 
 def test_projection_glyph_distinguishes_converging_and_parallel_edges():
@@ -338,9 +375,12 @@ def test_dimensions_glyph_uses_three_scale_style_square_endpoints():
 
     draw_tool_glyph(draw, (20.0, 30.0), (1.0, 1.0, 1.0, 1.0), 1.0, "dimensions", "body")
 
-    assert len(draw.lines) == 3
-    assert len(draw.rectangles) == 3
-    assert all(item[1]["rounding"] > 0.0 for item in draw.rectangles)
+    assert len(draw.paths) == 3
+    assert not draw.lines and not draw.rectangles
+    assert len(draw.filled_circles) == 1
+    for path in draw.paths:
+        assert len(path) > 8
+        assert abs(_polygon_area(path)) > 0.0
 
 
 def test_tool_glyph_strokes_have_matching_visual_weight():
@@ -358,9 +398,9 @@ def test_tool_glyph_strokes_have_matching_visual_weight():
     move_shaft_half = OVERLAY_GEOMETRY.tool_stroke * _MOVE_SHAFT_VISUAL_RATIO * 0.5
     move_shaft_corner = (
         center[0] + move_shaft_half,
-        center[1] - 5.0 * TOOL_GLYPH_SCALE,
+        center[1] - _MOVE_ARROW_BASE * TOOL_GLYPH_SCALE,
     )
-    assert any(point == pytest.approx(move_shaft_corner) for point in move_path)
+    assert not any(point == pytest.approx(move_shaft_corner) for point in move_path)
     move_shaft_width = move_shaft_half * 2.0
     move_top_head = [point for point in move_path if point[1] <= center[1] - 4.5 * TOOL_GLYPH_SCALE]
     move_head_width = max(point[0] for point in move_top_head) - min(
@@ -377,10 +417,8 @@ def test_tool_glyph_strokes_have_matching_visual_weight():
     assert len(rotate.circles) == 1
     assert rotate.circles[0][0][3] == pytest.approx(OVERLAY_GEOMETRY.tool_stroke)
     assert len(rotate.paths) == 6
-    assert len(frame.lines) == 3
-    assert all(
-        args[3] == pytest.approx(OVERLAY_GEOMETRY.tool_stroke) for args, _kwargs in frame.lines
-    )
+    assert len(frame.paths) == 3
+    assert not frame.lines
     assert move_shaft_width < min(move_head_width, frame_head_width)
     assert move_head_width < 2.0 * _MOVE_ARROW_WING * TOOL_GLYPH_SCALE
     assert frame_head_width < 2.0 * 1.8 * TOOL_GLYPH_SCALE
@@ -460,7 +498,7 @@ def test_rotate_glyph_supports_butt_and_round_authored_caps():
 
 
 @pytest.mark.parametrize("scale", (0.75, 1.0, 2.0, 4.0))
-def test_frame_arrows_scale_native_stroke_shafts_and_center_shell(scale: float):
+def test_frame_arrows_share_one_continuous_silhouette_and_center_shell(scale: float):
     draw = _RecordedGlyph()
     center = (20.0, 30.0)
 
@@ -474,7 +512,7 @@ def test_frame_arrows_scale_native_stroke_shafts_and_center_shell(scale: float):
     )
 
     assert len(draw.paths) == 3
-    assert len(draw.lines) == 3
+    assert not draw.lines
     assert not draw.fills
     heads = draw.paths
     head_areas = []
@@ -487,10 +525,15 @@ def test_frame_arrows_scale_native_stroke_shafts_and_center_shell(scale: float):
         OVERLAY_GEOMETRY.frame_center_radius * TOOL_GLYPH_SCALE
         + OVERLAY_GEOMETRY.tool_stroke * OVERLAY_GEOMETRY.frame_center_gap_ratio
     )
-    for (start, _end, _color, width), kwargs in draw.lines:
-        assert math.dist(start, center) == pytest.approx(clear_radius * scale)
-        assert width == pytest.approx(OVERLAY_GEOMETRY.tool_stroke * scale)
-        assert not kwargs
+    for path in draw.paths:
+        tail_midpoint = tuple((path[0][axis] + path[-1][axis]) * 0.5 for axis in (0, 1))
+        assert math.dist(tail_midpoint, center) == pytest.approx(clear_radius * scale)
+        assert math.dist(path[0], path[-1]) == pytest.approx(
+            max(
+                OVERLAY_GEOMETRY.tool_stroke * scale * 0.45,
+                OVERLAY_GEOMETRY.tool_stroke * scale - 1.0,
+            )
+        )
     assert _FRAME_ARROW_CORNER_RADIUS_PT < 0.5
     assert len(draw.filled_circles) == 1
     center_args, center_kwargs = draw.filled_circles[0]
@@ -506,14 +549,15 @@ def test_frame_arrows_scale_native_stroke_shafts_and_center_shell(scale: float):
 def test_status_backend_and_fps_use_independent_stable_columns():
     draw = _MeasuredText()
     two_digits = _status_performance_layout(draw, 500.0, 1.0, "OpenGL", 0.009, 99.9)
-    three_digits = _status_performance_layout(draw, 500.0, 1.0, "OpenGL", 0.0167, 107.0)
+    three_digits = _status_performance_layout(draw, 500.0, 1.0, "OpenGL", 0.009, 107.0)
 
     assert two_digits.backend_x == pytest.approx(three_digits.backend_x)
     assert two_digits.delta_text == "Δt 0.009 s"
-    assert three_digits.delta_text == "Δt 0.0167 s"
+    assert three_digits.delta_text == "Δt 0.009 s"
     assert two_digits.dividers == pytest.approx(three_digits.dividers)
     assert two_digits.fps_x + draw.text_size(two_digits.fps_text)[0] == pytest.approx(500.0)
     assert three_digits.fps_x + draw.text_size(three_digits.fps_text)[0] == pytest.approx(500.0)
+    assert two_digits.delta_x - min(two_digits.dividers) == pytest.approx(11.0)
 
 
 class _RecordedStatus(_MeasuredText):
@@ -545,6 +589,47 @@ class _RecordedStatus(_MeasuredText):
 
     def __getattr__(self, _name):
         return lambda *_args, **_kwargs: None
+
+
+def test_status_badges_and_descriptions_share_one_text_baseline():
+    from mojive.ui.theme import THEME
+
+    class InkStatus(_RecordedStatus):
+        def __init__(self):
+            super().__init__()
+            self.badges = []
+
+        def text_ink_bounds(self, value):
+            return (0.0, 2.0, self.text_size(value)[0], 13.0 if "g" in value else 10.0)
+
+        def rect_filled(self, lo, hi, color, **kwargs):
+            if "rounding" in kwargs:
+                self.badges.append((lo, hi, kwargs["rounding"]))
+
+    draw = InkStatus()
+    draw_status(
+        draw,
+        (0.0, 0.0),
+        1800.0,
+        28.0,
+        THEME,
+        1.0,
+        selected="body",
+        state="paused",
+        sim_time=0.0,
+        step=0,
+        metric_mode="steps",
+        backend="OpenGL",
+        dt=0.002,
+        fps=60.0,
+        tool_hints=(ToolHint("key", "Ctrl", "+ Drag"),),
+    )
+    positions = {value: position for position, value in draw.text_positions}
+    assert positions["Ctrl"][1] == positions["+ Drag"][1] == positions["Steps 0"][1]
+    assert len(draw.badges) == 2
+    first, second = draw.badges
+    assert first[1][1] - first[0][1] == second[1][1] - second[0][1]
+    assert first[2] == second[2]
 
 
 def test_status_places_simulation_state_before_selection():
@@ -838,7 +923,9 @@ def test_mouse_hint_button_replaces_its_part_of_the_blender_style_shell(
     ("scale", "pixel_size"),
     ((1.0, 1.0), (1.0, 0.5), (2.0, 1.0), (4.0, 1.0)),
 )
+@pytest.mark.parametrize("button", ("wheel", "middle"))
 def test_mouse_wheel_uses_configured_stroke_gap_with_a_physical_pixel_minimum(
+    button: str,
     scale: float,
     pixel_size: float,
 ) -> None:
@@ -849,7 +936,7 @@ def test_mouse_wheel_uses_configured_stroke_gap_with_a_physical_pixel_minimum(
         draw,
         10.0,
         30.0,
-        "wheel",
+        button,
         "",
         THEME,
         scale,
@@ -1114,11 +1201,9 @@ def test_mouse_button_geometry_is_mirrored_and_scales_without_pixel_corrections(
         outline_width=outline_width * factor,
     )
     assert scaled is not None
-    assert all(
-        actual == pytest.approx((px * factor, py * factor))
-        for actual, (px, py) in zip(scaled.visible_shell, left.visible_shell, strict=True)
+    assert_paths_close(
+        [(px / factor, py / factor) for px, py in scaled.visible_shell],
+        left.visible_shell,
+        closed=False,
     )
-    assert all(
-        actual == pytest.approx((px * factor, py * factor))
-        for actual, (px, py) in zip(scaled.fill, left.fill, strict=True)
-    )
+    assert_paths_close([(px / factor, py / factor) for px, py in scaled.fill], left.fill)

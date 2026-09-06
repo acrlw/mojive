@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -23,8 +24,15 @@ from ..types import CameraView
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-o", "--output", type=Path, default=Path("output/ui-runtime"))
+    parser.add_argument(
+        "--panels-only", action="store_true", help="Capture panel layout acceptance cases"
+    )
     args = parser.parse_args(argv)
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.panels_only:
+        _capture_panel_layouts(args.output)
+        _capture_control(args.output, "actuator_visuals", "control-actuators-closeup.png")
+        return 0
     (args.output / "d2-tools-disabled-closeup.png").unlink(missing_ok=True)
     (args.output / "joint-slide-external-arrows.png").unlink(missing_ok=True)
     (args.output / "joint-slide-single-arrow.png").unlink(missing_ok=True)
@@ -246,8 +254,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         for label in ("File", "Edit", "Entity", "View", "Window", "Help"):
             _open_main_menu(viewer, label)
+            if label == "Window":
+                point = _item_center(viewer, "menu_item", "Control")
+                imgui.get_io().add_mouse_pos_event(*point)
+                _settle(viewer, 2)
             _save(viewer, args.output / f"{label.lower()}-menu.png")
+            _save_active_popup_crop(viewer, args.output / f"{label.lower()}-menu-closeup.png")
             _dismiss_popup(viewer)
+        _capture_viewport_layout(viewer, args.output)
     finally:
         viewer.release()
 
@@ -257,11 +271,146 @@ def main(argv: list[str] | None = None) -> int:
     _capture_sensors(args.output)
     _capture_joint_gizmos(args.output)
     _capture_joint_gizmo_scene(args.output)
+    _capture_selection_flow(args.output)
+    _capture_panel_layouts(args.output)
     _capture_light_helpers(args.output)
 
     for path in sorted(args.output.glob("*.png")):
         print(path.resolve())
     return 0
+
+
+def _capture_panel_layouts(output: Path) -> None:
+    """Review the same native panels at ordinary and constrained widths."""
+    viewer = build(
+        resolve("joint_gizmo"),
+        paused=True,
+        vsync=False,
+        width=1600,
+        height=1100,
+        show_window=False,
+    )
+    manager = viewer.app.panels
+    original_begin = manager._begin_panel_window
+    target_name, target_width = "", 420.0
+
+    def place(panel, *args, **kwargs):
+        if panel.name == target_name:
+            imgui.set_next_window_pos((420.0, 100.0))
+            imgui.set_next_window_size((target_width, 850.0))
+        return original_begin(panel, *args, **kwargs)
+
+    try:
+        _settle(viewer, 8)
+        link = next(node for node in viewer.session.nodes if node.name == "03_ball_anchor")
+        viewer.session.submit(cmd.SelectNode(link.node_id))
+        manager._begin_panel_window = place
+        for name, width, filename in (
+            ("Inspector", 480.0, "inspector-wide.png"),
+            ("Inspector", 320.0, "inspector-wrapped.png"),
+            ("Inspector", 230.0, "inspector-narrow.png"),
+            ("Assets", 360.0, "assets-form.png"),
+            ("Settings", 720.0, "settings-equal-rows.png"),
+            ("Joints", 320.0, "joints-padded-rows.png"),
+            ("Keyframes", 480.0, "keyframes-wrapped-toolbar.png"),
+        ):
+            target_name, target_width = name, width
+            manager.open_panel(name)
+            _settle(viewer, 3)
+            window = imgui.internal.find_window_by_name(name)
+            if window.dock_node is not None:
+                imgui.internal.dock_context_process_undock_window(
+                    imgui.get_current_context(), window, True
+                )
+            imgui.internal.focus_window(window)
+            _settle(viewer, 4)
+            if name == "Inspector":
+                section, _ = _item_rect(viewer, "collapsing_header", "velocity")
+                for axis in "XYZ":
+                    lo, hi = _item_rect(
+                        viewer, "button", f"{axis}##rotation_{'XYZ'.index(axis)}_{link.node_id}"
+                    )
+                    assert lo[0] >= window.inner_clip_rect.min.x
+                    assert hi[0] <= window.inner_clip_rect.max.x
+                    assert hi[1] <= min(section[1], window.inner_clip_rect.max.y)
+                _click(viewer, _item_center(viewer, "collapsing_header", "velocity"))
+            elif name == "Assets":
+                for label in (
+                    "Height-field import size##height-field-import-size",
+                    "New material##new-material",
+                ):
+                    _click(viewer, _item_center(viewer, "collapsing_header", label))
+            elif name == "Settings":
+                first = _item_rect(viewer, "selectable", "General##settings_General")
+                second = _item_rect(viewer, "selectable", "Interaction##settings_Interaction")
+                assert np.allclose(
+                    np.subtract(first[1], first[0]), np.subtract(second[1], second[0])
+                )
+                imgui.get_io().add_mouse_pos_event(
+                    *_item_center(viewer, "selectable", "Interaction##settings_Interaction")
+                )
+            elif name == "Joints":
+                joint = next(node for node in viewer.session.nodes if node.name == "01_revolute_y")
+                viewer.session.submit(cmd.SelectNode(joint.node_id))
+                imgui.get_io().add_mouse_pos_event(
+                    *_item_center(
+                        viewer,
+                        "selectable",
+                        f"02_prismatic_x##joint-select-{joint.joint_index + 1}",
+                    )
+                )
+            if name not in ("Settings", "Joints"):
+                _park_cursor(viewer)
+            _settle(viewer, 2)
+            _save_window_crop(viewer, name, output / filename, padding=4, max_height=670)
+    finally:
+        manager._begin_panel_window = original_begin
+        viewer.release()
+
+
+def _capture_selection_flow(output: Path) -> None:
+    """Exercise hierarchy selection, viewport replacement, and double-click focus."""
+    viewer = build(
+        resolve("joint_gizmo"),
+        paused=True,
+        vsync=False,
+        width=1600,
+        height=1000,
+        show_window=False,
+    )
+    try:
+        viewer.app.set_interactions(
+            replace(viewer.app.interactions, gizmo=False, perturb=False), persist=False
+        )
+        _settle(viewer, 8)
+        hierarchy = viewer.app.panels.get("Hierarchy")
+        geom = next(node for node in viewer.session.nodes if node.name == "geom1")
+        link = next(node for node in viewer.session.nodes if node.name == "02_prismatic")
+        hierarchy._filter = geom.name
+        _activate_panel(viewer, "Hierarchy")
+        _settle(viewer, 2)
+        _click(viewer, _item_center(viewer, "invisible_button", f"##hierarchy-node-{geom.node_id}"))
+        assert hierarchy._batch_selected == {geom.node_id}
+        hierarchy._filter = ""
+        _settle(viewer, 3)
+        position = viewer.session.frame.body_xpos[link.body_index]
+        point = tuple(
+            project(viewer.app._camera_view(), (position,), viewer.app._viewport_rect)[0, :2]
+        )
+        assert viewer.app._pick_at(point) == link.object_id
+        _click(viewer, point)
+        assert viewer.session.selected_node is link
+        _click(viewer, point)
+        assert viewer.app.camera.animating
+        viewer.app.camera.advance(1.0, viewer.app.camera_out)
+        _park_cursor(viewer)
+        _settle(viewer, 3)
+        assert viewer.session.selected_node is link
+        assert not hierarchy._batch_selected
+        _save(viewer, output / "focus-keeps-hierarchy-selection.png")
+        _save_window_crop(viewer, "Hierarchy", output / "selection-replaced-closeup.png", padding=4)
+    finally:
+        viewer.release()
 
 
 def _capture_empty_workspace(output: Path) -> None:
@@ -272,6 +421,14 @@ def _capture_empty_workspace(output: Path) -> None:
         _park_cursor(viewer)
         viewer.sync()
         _save(viewer, output / "d1-empty-workspace.png")
+        _open_main_menu(viewer, "Entity")
+        point = _item_center(viewer, "begin_menu", "Create")
+        imgui.get_io().add_mouse_pos_event(*point)
+        _settle(viewer, 2)
+        time.sleep(0.4)
+        _settle(viewer, 2)
+        _save(viewer, output / "entity-create-menu.png")
+        _save_active_popup_crop(viewer, output / "entity-create-menu-closeup.png")
     finally:
         viewer.release()
 
@@ -319,6 +476,27 @@ def _capture_canvas_2d(output: Path) -> None:
 
 def _settle(viewer, frames: int = 7) -> None:
     for _ in range(frames):
+        viewer.sync()
+    # Resizing defers framebuffer rebuilds. A few fast frames can still capture
+    # letterboxing or start a gesture with the previous projection matrix.
+    deadline = time.perf_counter() + viewer.window.latch.settle_seconds + 1.0
+    resized = False
+    while viewer.app._fixed_render_size is None:
+        target = tuple(
+            max(1, int(value))
+            for value in viewer.window.points_to_pixels(viewer.app._viewport_panel_size)
+        )
+        if viewer.window.latch.committed == target:
+            break
+        if time.perf_counter() >= deadline:
+            raise RuntimeError("Viewport framebuffer did not settle to its content size")
+        time.sleep(0.01)
+        viewer.sync()
+        resized = True
+    if resized:
+        # The capture API reads GL_BACK after presentation. Refresh both buffers
+        # after the resize rather than capturing the last pre-resize image.
+        viewer.sync()
         viewer.sync()
 
 
@@ -444,6 +622,55 @@ def _capture_dock_tab_without_nav_cursor(viewer, output: Path) -> None:
     context.nav_id = 0
 
 
+def _capture_viewport_layout(viewer, output: Path) -> None:
+    """Show the actual scene bounds and dock targets without panel padding."""
+    _park_cursor(viewer)
+    _settle(viewer, 2)
+    _save_window_crop(viewer, "Viewport", output / "viewport-docked.png", padding=0)
+    viewport = imgui.internal.find_window_by_name("Viewport")
+    if viewport is None or viewport.dock_node is None:
+        return
+    context = imgui.get_current_context()
+    imgui.internal.dock_context_process_undock_window(context, viewport, True)
+    original = viewer.app._begin_viewport_panel
+
+    def position():
+        imgui.set_next_window_pos((340, 140))
+        imgui.set_next_window_size((640, 500))
+        original()
+
+    viewer.app._begin_viewport_panel = position
+    try:
+        _settle(viewer, 3)
+    finally:
+        viewer.app._begin_viewport_panel = original
+    _save_window_crop(viewer, "Viewport", output / "viewport-floating.png", padding=0)
+    io = imgui.get_io()
+    for edge, point in (
+        ("left", (viewport.pos.x, viewport.pos.y + viewport.size.y * 0.5)),
+        ("right", (viewport.pos.x + viewport.size.x - 1, viewport.pos.y + viewport.size.y * 0.5)),
+        ("bottom", (viewport.pos.x + viewport.size.x * 0.5, viewport.pos.y + viewport.size.y - 1)),
+    ):
+        io.add_mouse_pos_event(*point)
+        _settle(viewer, 2)
+        time.sleep(0.08)
+        _settle(viewer, 2)
+        _save_window_crop(
+            viewer, "Viewport", output / f"viewport-floating-resize-{edge}.png", padding=4
+        )
+    title = viewport.title_bar_rect()
+    x, y = (title.min.x + title.max.x) * 0.5, (title.min.y + title.max.y) * 0.5
+    io.add_mouse_pos_event(x, y)
+    viewer.sync()
+    io.add_mouse_button_event(0, True)
+    viewer.sync()
+    io.add_mouse_pos_event(x + 90, y + 70)
+    _settle(viewer, 2)
+    _save(viewer, output / "viewport-dock-drag.png")
+    io.add_mouse_button_event(0, False)
+    viewer.sync()
+
+
 def _activate_panel(viewer, name: str) -> None:
     panel = imgui.internal.find_window_by_name(name)
     if panel is None or panel.dock_node is None or panel.dock_node.tab_bar is None:
@@ -497,21 +724,7 @@ def _dismiss_popup(viewer) -> None:
 
 
 def _open_main_menu(viewer, label: str) -> None:
-    viewport = imgui.get_main_viewport()
-    io = imgui.get_io()
-    labels = ("File", "Edit", "Entity", "View", "Window", "Help")
-    slot = labels.index(label)
-    padding = float(imgui.get_style().frame_padding.x)
-    x = viewport.pos.x + padding
-    x += sum(float(imgui.calc_text_size(item).x) + padding * 2.0 for item in labels[:slot])
-    x += imgui.calc_text_size(label).x * 0.5
-    y = viewport.pos.y + imgui.get_frame_height() * 0.5
-    io.add_mouse_pos_event(x, y)
-    viewer.sync()
-    io.add_mouse_button_event(0, True)
-    viewer.sync()
-    io.add_mouse_button_event(0, False)
-    viewer.sync()
+    _click(viewer, _item_center(viewer, "begin_menu", label))
     _settle(viewer, 2)
 
 
@@ -546,7 +759,7 @@ def _save_active_popup_crop(
         (
             window
             for window in reversed(tuple(imgui.get_current_context().windows))
-            if window.active and str(window.name).startswith("##Popup_")
+            if window.active and window.flags & imgui.WindowFlags_.popup.value
         ),
         None,
     )
@@ -1049,7 +1262,14 @@ def _capture_hinge_held_at_limit(viewer, node, output: Path) -> None:
         )
         return project(cam, (world,), rect)[0, :2]
 
-    start_angle = next(
+    qpos = viewer.session.frame.qpos
+    assert qpos is not None
+    origin = float(qpos[target.joint.qpos_adr])
+    lower = float(target.joint.range[0])
+    overtravel = lower - origin - 0.35
+    # Use the best-resolved return segment. Near a projected ellipse extremum,
+    # a 0.05-radian movement can collapse to one input pixel after layout changes.
+    candidates = (
         angle
         for angle in np.linspace(0.0, 2.0 * np.pi, 64, endpoint=False)
         if viewer.app.gizmo.update_hover(
@@ -1061,6 +1281,12 @@ def _capture_hinge_held_at_limit(viewer, node, output: Path) -> None:
         )
         is GizmoHandle.ROTATE_Z
     )
+    start_angle = max(
+        candidates,
+        key=lambda angle: np.linalg.norm(
+            cursor(angle + overtravel + 0.05) - cursor(angle + overtravel)
+        ),
+    )
     io = imgui.get_io()
     viewer.app._snap_latched = True
     io.add_mouse_pos_event(*cursor(start_angle))
@@ -1069,11 +1295,6 @@ def _capture_hinge_held_at_limit(viewer, node, output: Path) -> None:
     viewer.sync()
     assert viewer.app.gizmo.using
 
-    qpos = viewer.session.frame.qpos
-    assert qpos is not None
-    origin = float(qpos[target.joint.qpos_adr])
-    lower = float(target.joint.range[0])
-    overtravel = lower - origin - 0.35
     for delta in np.linspace(0.0, overtravel, 40)[1:]:
         io.add_mouse_pos_event(*cursor(start_angle + delta))
         viewer.sync()

@@ -20,12 +20,11 @@ struct DebugLineOut {
 struct DebugArrowOut {
     @builtin(position) pos: vec4f,
     @location(0) color: vec4f,
-    @location(1) arrow_pos: vec2f,
+    @location(1) @interpolate(linear) arrow_pos: vec2f,
     @location(2) @interpolate(flat) arrow_shape: vec4f,
 };
 
-// Matches ARROW_CORNER_RADIUS_PT / (2 * AXIS_SHAFT_HALF_PT).
-const DEBUG_ARROW_CORNER_RADIUS_RATIO: f32 = 0.5 / 4.4;
+// DebugPass supplies DEBUG_ARROW_CORNER_RADIUS_RATIO from shared gizmo geometry.
 
 @vertex
 fn vs_debug_line(in: DebugLineIn, @builtin(vertex_index) v: u32) -> DebugLineOut {

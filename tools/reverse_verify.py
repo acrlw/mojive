@@ -282,10 +282,8 @@ CASES = [
     ),
     (
         "src/mojive/ui/viewcube.py",
-        "                outline = _lollipop_outline(self._center, b.screen, b.radius, LINE_PT * style_scale)",
-        "                outline = _lollipop_outline(\n"
-        "                    self._center, b.screen, b.radius * (1.25 if hovered else 1.0), LINE_PT * style_scale\n"
-        "                )",
+        "                    self._center, b.screen, b.radius, LINE_PT * style_scale, smoothing=smoothing",
+        "                    self._center, b.screen, b.radius * (1.25 if hovered else 1.0), LINE_PT * style_scale, smoothing=smoothing",
         "test_hover_does_not_resize_the_ball",
         VC_TESTS,
     ),

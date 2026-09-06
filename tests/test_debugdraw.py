@@ -257,8 +257,9 @@ def test_vertex_counts_match_the_spec_table():
         PrimitiveType.SOLID_ARROW: 1,
         PrimitiveType.SOLID_DOUBLE_ARROW: 1,
         PrimitiveType.CYLINDER: 1,
+        PrimitiveType.SCREEN_TRIANGLE: 3,
     }
-    assert len(VERTEX_COUNT) == 12
+    assert len(VERTEX_COUNT) == 13
 
 
 def test_closed_polyline_packs_shared_neighbors_for_continuous_joins():
@@ -721,6 +722,7 @@ def test_perturbation_feedback_lands_on_the_layers_it_asks_for():
     assert record[0:3] == pytest.approx([0.1, 0.0, 0.2])
     assert record[3:6] == pytest.approx([0.5, 0.0, 0.4])
     assert record[14:17] == pytest.approx([2.0, 6.0, 0.75])
+    assert record[17] == pytest.approx(0.6)
 
     ctrl._publish_mark(
         dd, st, (None, None), CameraView(), (0.0, 0.0, 960.0, 720.0), MarkBudget(), 1.0
@@ -833,3 +835,100 @@ def test_external_bad_line_does_not_take_the_connection_down(short_dir):
         assert br.stats.invalid == 1
     finally:
         br.close()
+
+
+def test_screen_arrow_reuses_mesh_and_updates_retained_geometry():
+    from mojive.curves2d import arrow_triangles
+
+    dd = DebugDraw()
+    layer = dd.layer("ui", Occlusion.ALWAYS)
+    arrow_triangles.cache_clear()
+    layer.arrow_2d("arrow", (10, 20), (110, 20), (1, 0, 0, 1))
+    initial = layer.positions_of(PrimitiveType.SCREEN_TRIANGLE).copy()
+    layer.arrow_2d("arrow", (30, 40), (130, 40), (0, 1, 0, 1))
+    shifted = layer.positions_of(PrimitiveType.SCREEN_TRIANGLE)
+    assert np.allclose(shifted[:, :, :2], initial[:, :, :2] + 20)
+    assert arrow_triangles.cache_info().misses == 1
+    assert dd.build().counts[DrawPath.SCREEN_TRIANGLE] == len(initial)
+    assert np.all(dd.build().stream(DrawPath.SCREEN_TRIANGLE)[:, 9:13] == (0, 1, 0, 1))
+    layer.arrow_2d("arrow", (30, 40), (30, 40), (1, 1, 1, 1))
+    assert layer.primitives == 0
+
+
+def test_screen_storage_preserves_views_through_growth_removal_and_expiry():
+    dd = DebugDraw(limit=100000)
+    layer = dd.layer("ui", Occlusion.ALWAYS)
+    layer.arrow_2d("first", (0, 0), (100, 0), (1, 0, 0, 1))
+    layer.arrow_2d("second", (0, 30), (100, 30), (0, 1, 0, 0.5))
+    second = dd.build().stream(DrawPath.SCREEN_TRIANGLE).copy()
+    second = second[second[:, 10] == 1]
+    # Grow storage well beyond its first allocation and compact a multi-triangle entry.
+    for i in range(20):
+        layer.arrow_2d(f"extra-{i}", (0, 50 + i), (100, 50 + i), (0, 0, 1, 1), duration=0)
+    layer.erase("first")
+    dd.expire(0)
+    assert dd.build().stream(DrawPath.SCREEN_TRIANGLE) == pytest.approx(second)
+    positions = layer.positions_of(PrimitiveType.SCREEN_TRIANGLE)
+    positions[:, :, 0] += 17
+    updated = dd.build().stream(DrawPath.SCREEN_TRIANGLE)
+    assert updated[:, :9].reshape(-1, 3, 3) == pytest.approx(positions)
+    assert updated[:, 9:13] == pytest.approx(second[:, 9:13])
+    layer.visible = False
+    assert dd.build().counts[DrawPath.SCREEN_TRIANGLE] == 0
+    layer.visible = True
+    assert dd.build().counts[DrawPath.SCREEN_TRIANGLE] == len(second)
+    layer.clear()
+    assert dd.build().counts[DrawPath.SCREEN_TRIANGLE] == 0
+
+
+def test_bridge_exposes_screen_arrow_style_and_antialias_options():
+    backend = _Backend()
+    bridge = DebugBridge(backend)
+    message = {
+        "op": "arrow_2d",
+        "layer": "policy.screen",
+        "occlusion": "always",
+        "id": "arrow",
+        "a": [10, 20],
+        "b": [90, 20],
+        "head_length_px": 12.0,
+        "head_width_px": 14.0,
+        "corner_radius_px": 0.0,
+        "smoothing": 0.0,
+        "antialias": False,
+    }
+    assert bridge.apply_batch([message]) == 1
+    solid = backend.debug.build().stream(DrawPath.SCREEN_TRIANGLE).copy()
+    assert np.all(solid[:, (2, 5, 8)] == 1.0)
+    assert solid[:, :9].reshape(-1, 3)[:, :2].max(axis=0) == pytest.approx((90, 27))
+    message.update(corner_radius_px=1.0, join_radius_px=0.0, smoothing=0.75, antialias=True)
+    assert bridge.apply_batch([message]) == 1
+    rounded = backend.debug.build().stream(DrawPath.SCREEN_TRIANGLE)
+    assert len(rounded) > len(solid)
+    assert np.any(rounded[:, (2, 5, 8)] == 0.0)
+    positions = rounded[:, :9].reshape(-1, 3)
+    assert np.any(np.all(np.isclose(positions, (78.0, 21.0, 1.0)), axis=1))
+
+
+@pytest.mark.parametrize(
+    "options",
+    (
+        {"smoothing": 1.1},
+        {"corner_radius_px": -1},
+        {"head_length_px": float("inf")},
+        {"join_radius_px": -1},
+    ),
+)
+def test_screen_arrow_rejects_invalid_style(options):
+    dd = DebugDraw()
+    with pytest.raises(ValueError):
+        dd.layer("ui", Occlusion.ALWAYS).arrow_2d("a", (0, 0), (10, 0), (1, 1, 1, 1), **options)
+
+
+def test_invalid_screen_arrow_does_not_replace_retained_geometry():
+    layer = DebugDraw().layer("ui", Occlusion.ALWAYS)
+    layer.arrow_2d("a", (0, 0), (10, 0), (1, 1, 1, 1))
+    before = layer.positions_of(PrimitiveType.SCREEN_TRIANGLE).copy()
+    with pytest.raises(ValueError, match="finite pixel coordinates"):
+        layer.arrow_2d("a", (0, 0), (float("nan"), 0), (1, 1, 1, 1))
+    assert layer.positions_of(PrimitiveType.SCREEN_TRIANGLE) == pytest.approx(before)

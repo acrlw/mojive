@@ -19,6 +19,7 @@ import wgpu
 from imgui_bundle.python_backends import compute_fb_scale
 from wgpu.utils.imgui import ImguiWgpuBackend
 
+from ..input import add_physical_mouse_button_event
 from ..log import get_logger
 from . import native_drop
 from . import theme as theme_mod
@@ -343,7 +344,7 @@ class _GlfwInputAdapter:
             self.io.add_mouse_pos_event(-1, -1)
 
     def mouse_button_callback(self, window: Any, button: int, action: int, mods: int) -> None:
-        self.io.add_mouse_button_event(button, action == glfw.PRESS)
+        add_physical_mouse_button_event(self.io, button, action == glfw.PRESS)
 
     def scroll_callback(self, window: Any, x_offset: float, y_offset: float) -> None:
         self.io.add_mouse_wheel_event(x_offset, y_offset)

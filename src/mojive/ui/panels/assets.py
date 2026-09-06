@@ -16,6 +16,7 @@ from . import (
     button_row_layout,
     button_width,
     labeled,
+    padded_selectable,
     search_input,
 )
 
@@ -97,6 +98,7 @@ def _hfield_size_editor(ctx: PanelContext, str_id: str, value) -> tuple[bool, np
         ):
             imgui.table_next_row()
             imgui.table_next_column()
+            imgui.align_text_to_frame_padding()
             imgui.text_disabled(ctx.tr(label))
             imgui.table_next_column()
             imgui.set_next_item_width(-1.0)
@@ -166,10 +168,13 @@ class AssetsPanel(Panel):
             self._cache_generation = -1
 
         if begin_kv_table("asset_model"):
-            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
+            imgui.table_setup_column(
+                "label", imgui.TableColumnFlags_.width_fixed, 96.0 * ctx.style_scale
+            )
             imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
             imgui.table_next_row()
             imgui.table_next_column()
+            imgui.align_text_to_frame_padding()
             imgui.text_disabled(ctx.tr("model"))
             imgui.table_next_column()
             slot = model_ids.index(self._model_id)
@@ -228,7 +233,7 @@ class AssetsPanel(Panel):
                         key = (item.model_id, item.type, item.name)
                         imgui.table_next_row()
                         imgui.table_next_column()
-                        selected, _ = imgui.selectable(
+                        selected, _ = padded_selectable(
                             f"{item.name}##{item.type}:{item.index}",
                             self._selected == key,
                             imgui.SelectableFlags_.span_all_columns.value,
@@ -236,8 +241,10 @@ class AssetsPanel(Panel):
                         if selected:
                             self._selected = key
                         imgui.table_next_column()
+                        imgui.align_text_to_frame_padding()
                         imgui.text_disabled(item.type)
                         imgui.table_next_column()
+                        imgui.align_text_to_frame_padding()
                         imgui.text_disabled(str(len(item.references)))
                 imgui.end_table()
         imgui.end_child()
@@ -288,11 +295,11 @@ class AssetsPanel(Panel):
         )
         if not editable:
             imgui.begin_disabled()
-        if imgui.small_button(mesh_label) and ctx.request_model_asset_import is not None:
+        if imgui.button(mesh_label) and ctx.request_model_asset_import is not None:
             ctx.request_model_asset_import(self._model_id, "mesh", ())
         if inline[1]:
             imgui.same_line()
-        if imgui.small_button(hfield_label) and ctx.request_model_asset_import is not None:
+        if imgui.button(hfield_label) and ctx.request_model_asset_import is not None:
             ctx.request_model_asset_import(
                 self._model_id,
                 "hfield",
@@ -300,15 +307,18 @@ class AssetsPanel(Panel):
             )
         if inline[2]:
             imgui.same_line()
-        if imgui.small_button(texture_label) and ctx.request_texture_import is not None:
+        if imgui.button(texture_label) and ctx.request_texture_import is not None:
             ctx.request_texture_import(self._model_id, -1, self._texture_import_type)
         if not editable:
             imgui.end_disabled()
         if begin_kv_table("texture_import_type"):
-            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
+            imgui.table_setup_column(
+                "label", imgui.TableColumnFlags_.width_fixed, 96.0 * ctx.style_scale
+            )
             imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
             imgui.table_next_row()
             imgui.table_next_column()
+            imgui.align_text_to_frame_padding()
             imgui.text_disabled(ctx.tr("texture type"))
             imgui.table_next_column()
             texture_types = ("2d", "cube", "skybox")
@@ -322,7 +332,7 @@ class AssetsPanel(Panel):
             if changed:
                 self._texture_import_type = texture_types[slot]
             imgui.end_table()
-        hfield_open = imgui.tree_node(
+        hfield_open = imgui.collapsing_header(
             f"{ctx.tr('Height-field import size')}##height-field-import-size"
         )
         imgui.set_item_tooltip(ctx.tr("Set physical dimensions before importing the PNG."))
@@ -330,18 +340,27 @@ class AssetsPanel(Panel):
             _changed, self._hfield_import_size = _hfield_size_editor(
                 ctx, "hfield-import-size", self._hfield_import_size
             )
-            imgui.tree_pop()
-        material_open = imgui.tree_node(f"{ctx.tr('New material')}##new-material")
+        material_open = imgui.collapsing_header(f"{ctx.tr('New material')}##new-material")
         imgui.set_item_tooltip(ctx.tr("Creates an unbound material asset for later assignment."))
         if material_open:
-            imgui.set_next_item_width(-1.0)
-            _changed, self._material_create_name = imgui.input_text(
-                f"{ctx.tr('name')}##new-material-name", self._material_create_name
-            )
+            if begin_kv_table("new_material"):
+                imgui.table_setup_column(
+                    "label", imgui.TableColumnFlags_.width_fixed, 96.0 * ctx.style_scale
+                )
+                imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+                imgui.table_next_column()
+                imgui.align_text_to_frame_padding()
+                imgui.text_disabled(ctx.tr("name"))
+                imgui.table_next_column()
+                imgui.set_next_item_width(-1.0)
+                _changed, self._material_create_name = imgui.input_text(
+                    "##new-material-name", self._material_create_name
+                )
+                imgui.end_table()
             material_name = self._material_create_name.strip()
             if not material_name or not editable:
                 imgui.begin_disabled()
-            if imgui.small_button(ctx.tr("Create Material")):
+            if imgui.button(ctx.tr("Create Material")):
                 result = ctx.submit(cmd.CreateModelMaterial(self._model_id, material_name))
                 if result.ok:
                     self._selected = (self._model_id, "material", material_name)
@@ -351,7 +370,6 @@ class AssetsPanel(Panel):
                     )
             if not material_name or not editable:
                 imgui.end_disabled()
-            imgui.tree_pop()
         if not ctx.session.paused:
             imgui.text_disabled(ctx.tr("Pause the simulation to edit model assets"))
 
@@ -400,7 +418,7 @@ class AssetsPanel(Panel):
         action_index = 0
         if not rename or rename == item.name:
             imgui.begin_disabled()
-        if imgui.small_button(action_labels[action_index]):
+        if imgui.button(action_labels[action_index]):
             result = ctx.submit(cmd.RenameModelAsset(item.model_id, item.type, item.name, rename))
             if result.ok:
                 self._selected = (item.model_id, item.type, rename)
@@ -410,7 +428,7 @@ class AssetsPanel(Panel):
         action_index += 1
         if inline[action_index]:
             imgui.same_line()
-        if imgui.small_button(action_labels[action_index]):
+        if imgui.button(action_labels[action_index]):
             duplicate = unique_asset_name(f"{item.name}_copy", self._assets, item.type)
             result = ctx.submit(
                 cmd.DuplicateModelAsset(item.model_id, item.type, item.name, duplicate)
@@ -423,7 +441,7 @@ class AssetsPanel(Panel):
             if inline[action_index]:
                 imgui.same_line()
             if (
-                imgui.small_button(action_labels[action_index])
+                imgui.button(action_labels[action_index])
                 and ctx.request_model_asset_replace is not None
             ):
                 ctx.request_model_asset_replace(item.model_id, item.type, item.name)
@@ -432,7 +450,7 @@ class AssetsPanel(Panel):
             imgui.begin_disabled()
         if inline[action_index]:
             imgui.same_line()
-        if imgui.small_button(action_labels[action_index]):
+        if imgui.button(action_labels[action_index]):
             ctx.submit(cmd.RemoveModelAsset(item.model_id, item.type, item.name))
         if item.references:
             imgui.end_disabled()
@@ -525,7 +543,7 @@ class AssetsPanel(Panel):
         dirty = not np.allclose(self._hfield_size, self._hfield_source_size)
         if not dirty:
             imgui.begin_disabled()
-        if imgui.small_button(ctx.tr("Apply Dimensions")):
+        if imgui.button(ctx.tr("Apply Dimensions")):
             result = ctx.submit(
                 cmd.SetHeightFieldSize(
                     item.model_id,
@@ -560,11 +578,14 @@ class AssetsPanel(Panel):
         imgui.separator()
         imgui.text_disabled(ctx.tr("material appearance"))
         if begin_kv_table("asset_material"):
-            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
+            imgui.table_setup_column(
+                "label", imgui.TableColumnFlags_.width_fixed, 96.0 * ctx.style_scale
+            )
             imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
 
             imgui.table_next_row()
             imgui.table_next_column()
+            imgui.align_text_to_frame_padding()
             imgui.text_disabled(ctx.tr("base color"))
             imgui.table_next_column()
             imgui.set_next_item_width(-1.0)
@@ -581,6 +602,7 @@ class AssetsPanel(Panel):
             for label, value, maximum in scalar_fields:
                 imgui.table_next_row()
                 imgui.table_next_column()
+                imgui.align_text_to_frame_padding()
                 imgui.text_disabled(ctx.tr(label))
                 imgui.table_next_column()
                 imgui.set_next_item_width(-1.0)
@@ -597,6 +619,7 @@ class AssetsPanel(Panel):
             ):
                 imgui.table_next_row()
                 imgui.table_next_column()
+                imgui.align_text_to_frame_padding()
                 imgui.text_disabled(ctx.tr(label))
                 imgui.table_next_column()
                 enabled = value >= 0.0
@@ -624,12 +647,13 @@ class AssetsPanel(Panel):
 
             imgui.table_next_row()
             imgui.table_next_column()
+            imgui.align_text_to_frame_padding()
             imgui.text_disabled(ctx.tr("texture"))
             imgui.table_next_column()
             imgui.set_next_item_width(-1.0)
             if imgui.begin_combo("##asset-material-texture", texture or ctx.tr("none")):
                 for candidate in (None, *ctx.session.model_texture_names(item.model_id)):
-                    selected, _ = imgui.selectable(
+                    selected, _ = padded_selectable(
                         candidate or ctx.tr("none"), candidate == texture
                     )
                     if selected:
@@ -639,6 +663,7 @@ class AssetsPanel(Panel):
 
             imgui.table_next_row()
             imgui.table_next_column()
+            imgui.align_text_to_frame_padding()
             imgui.text_disabled(ctx.tr("texture repeat"))
             imgui.table_next_column()
             imgui.set_next_item_width(-1.0)
@@ -649,6 +674,7 @@ class AssetsPanel(Panel):
 
             imgui.table_next_row()
             imgui.table_next_column()
+            imgui.align_text_to_frame_padding()
             imgui.text_disabled(ctx.tr("uniform scale"))
             imgui.table_next_column()
             item_changed, tex_uniform = imgui.checkbox("##asset-material-uniform", tex_uniform)

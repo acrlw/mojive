@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from ..curves2d import CORNER_SMOOTHING, arrow_triangles
 from ..gizmo import ARROW_CORNER_RADIUS_PT, AXIS_HEAD_LENGTH_PT, AXIS_SHAFT_HALF_PT
 from ..log import get_logger
 from ..types import MeshKey, MeshShape
@@ -44,6 +45,7 @@ class PrimitiveType(enum.IntEnum):
     SOLID_ARROW = 9
     SOLID_DOUBLE_ARROW = 10
     CYLINDER = 11
+    SCREEN_TRIANGLE = 12
 
 
 VERTEX_COUNT: dict[PrimitiveType, int] = {
@@ -59,6 +61,7 @@ VERTEX_COUNT: dict[PrimitiveType, int] = {
     PrimitiveType.SOLID_ARROW: 1,
     PrimitiveType.SOLID_DOUBLE_ARROW: 1,
     PrimitiveType.CYLINDER: 1,
+    PrimitiveType.SCREEN_TRIANGLE: 3,
 }
 
 
@@ -75,6 +78,7 @@ class DrawPath(enum.StrEnum):
 
     SECTOR = "sector"
     DRAG_LINK = "drag_link"
+    SCREEN_TRIANGLE = "screen_triangle"
 
 
 PRIMITIVE_PATH: dict[PrimitiveType, DrawPath] = {
@@ -90,6 +94,7 @@ PRIMITIVE_PATH: dict[PrimitiveType, DrawPath] = {
     PrimitiveType.SOLID_ARROW: DrawPath.SOLID,
     PrimitiveType.SOLID_DOUBLE_ARROW: DrawPath.SOLID,
     PrimitiveType.CYLINDER: DrawPath.SOLID,
+    PrimitiveType.SCREEN_TRIANGLE: DrawPath.SCREEN_TRIANGLE,
 }
 
 PRIMITIVE_MESH: dict[PrimitiveType, MeshKey] = {
@@ -109,7 +114,8 @@ RECORD_FLOATS: dict[DrawPath, int] = {
     DrawPath.SECTOR: 14,  # center(3) rotvec_end(3) ref_end(3) rgba(4) radius_px(1)
     DrawPath.STROKE: 14,  # prev/a/b(9) rgba(4) width_px(1)
     # a(3) b(3) core_rgba(4) edge_rgba(4) width/radius/edge_px(3)
-    DrawPath.DRAG_LINK: 17,
+    DrawPath.DRAG_LINK: 18,
+    DrawPath.SCREEN_TRIANGLE: 13,  # three x/y/coverage vertices and RGBA
 }
 
 NEVER = -1.0
@@ -147,7 +153,9 @@ class _Store:
         "outlines",
         "positions",
         "primitive_type",
+        "screen_records",
         "sizes",
+        "smoothing",
         "transforms",
         "verts",
     )
@@ -156,6 +164,7 @@ class _Store:
         self.primitive_type = primitive_type
         self.verts = VERTEX_COUNT[primitive_type]
         self.count = 0
+        self.screen_records = np.zeros((0, RECORD_FLOATS[DrawPath.SCREEN_TRIANGLE]), np.float32)
         self.positions = np.zeros((0, self.verts, 3), np.float32)
         self.colors = np.zeros((0, 4), np.float32)
         self.edge_colors = np.zeros((0, 4), np.float32)
@@ -164,6 +173,7 @@ class _Store:
         self.extras = np.zeros(0, np.float32)
 
         self.outlines = np.zeros(0, np.float32)
+        self.smoothing = np.zeros(0, np.float32)
         self.transforms = (
             np.zeros((0, 4, 4), np.float32)
             if primitive_type in PRIMITIVE_MESH
@@ -178,12 +188,21 @@ class _Store:
         if need <= self.capacity:
             return
         cap = max(need, self.capacity * 2, 16)
+        if self.primitive_type is PrimitiveType.SCREEN_TRIANGLE:
+            # Keep screen meshes in upload order. The public position view still
+            # writes through, while packing becomes one contiguous copy.
+            self.screen_records = _grow(self.screen_records, cap)
+            self.positions = self.screen_records[:, :9].reshape(cap, 3, 3)
+            self.colors = self.screen_records[:, 9:13]
+            return
         self.positions = _grow(self.positions, cap)
         self.colors = _grow(self.colors, cap)
         self.edge_colors = _grow(self.edge_colors, cap)
         self.sizes = _grow(self.sizes, cap)
         self.extras = _grow(self.extras, cap)
         self.outlines = _grow(self.outlines, cap)
+        if self.primitive_type is PrimitiveType.DRAG_LINK:
+            self.smoothing = _grow(self.smoothing, cap)
         if self.transforms.ndim == 3:
             self.transforms = _grow(self.transforms, cap)
 
@@ -192,12 +211,18 @@ class _Store:
         tail = n - (start + count)
         if tail > 0:
             src, dst = slice(start + count, n), slice(start, start + tail)
+            if self.primitive_type is PrimitiveType.SCREEN_TRIANGLE:
+                self.screen_records[dst] = self.screen_records[src]
+                self.count = n - count
+                return count + tail
             self.positions[dst] = self.positions[src]
             self.colors[dst] = self.colors[src]
             self.edge_colors[dst] = self.edge_colors[src]
             self.sizes[dst] = self.sizes[src]
             self.extras[dst] = self.extras[src]
             self.outlines[dst] = self.outlines[src]
+            if self.primitive_type is PrimitiveType.DRAG_LINK:
+                self.smoothing[dst] = self.smoothing[src]
             if self.transforms.ndim == 3:
                 self.transforms[dst] = self.transforms[src]
         self.count = n - count
@@ -410,6 +435,61 @@ class Layer:
             PrimitiveType.ARROW, ident, pts_a, pts_b, color, width_px, duration, start_mask_px
         )
 
+    def arrow_2d(
+        self,
+        ident: str,
+        a,
+        b,
+        color,
+        width_px: float = 2.0,
+        duration: float = NEVER,
+        *,
+        head_length_px: float = 7.0,
+        head_width_px: float = 8.0,
+        corner_radius_px: float = 1.0,
+        join_radius_px: float | None = None,
+        smoothing: float = CORNER_SMOOTHING,
+        round_tail: bool = False,
+        antialias: bool = True,
+    ) -> None:
+        """Draw the shared UI arrow in viewport pixels, with origin at the top left.
+
+        Use an ALWAYS layer. Radius zero selects sharp corners; positive radius
+        with smoothing zero selects circular fillets. Values above zero select G3
+        head-to-shaft joins. Geometry and external antialiasing match Draw2D.
+        """
+        if self.occlusion is not Occlusion.ALWAYS:
+            raise ValueError("screen-space arrows require an ALWAYS layer")
+        start, end = np.asarray(a, np.float64), np.asarray(b, np.float64)
+        if start.shape != (2,) or end.shape != (2,) or not all(map(math.isfinite, (*start, *end))):
+            raise ValueError("arrow_2d endpoints must each contain two finite pixel coordinates")
+        delta = end - start
+        length = float(np.linalg.norm(delta))
+        mesh = arrow_triangles(
+            length,
+            width_px,
+            head_length_px,
+            head_width_px,
+            corner_radius_px,
+            smoothing,
+            round_tail,
+            antialias,
+            join_radius_px,
+        )
+        if not len(mesh):
+            self.erase(ident)
+            return
+        index = self._alloc(PrimitiveType.SCREEN_TRIANGLE, ident, len(mesh), duration)
+        if index < 0:
+            return
+        store = self._stores[PrimitiveType.SCREEN_TRIANGLE]
+        dst = store.positions[index : index + len(mesh)]
+        ux, uy = delta / length
+        dst[:, :, 0] = start[0] + mesh[:, :, 0] * ux - mesh[:, :, 1] * uy
+        dst[:, :, 1] = start[1] + mesh[:, :, 0] * uy + mesh[:, :, 1] * ux
+        dst[:, :, 2] = mesh[:, :, 2]
+        store.colors[index : index + len(mesh)] = _rgba(color)
+
     def point(self, ident: str, p, color, radius_px: float = 4.0, duration: float = NEVER) -> None:
         """Create or replace one world-anchored screen-space point."""
         i = self._alloc(PrimitiveType.POINT, ident, 1, duration)
@@ -432,6 +512,7 @@ class Layer:
         radius_px: float = 6.0,
         edge_px: float = 0.75,
         duration: float = NEVER,
+        smoothing: float = CORNER_SMOOTHING,
     ) -> None:
         """Draw a connected drag origin, line, and target with one outline."""
         i = self._alloc(PrimitiveType.DRAG_LINK, ident, 1, duration)
@@ -445,6 +526,7 @@ class Layer:
         st.sizes[i] = width_px
         st.extras[i] = radius_px
         st.outlines[i] = edge_px
+        st.smoothing[i] = min(1.0, max(0.0, float(smoothing)))
 
     def points(
         self, ident: str, positions, color, radius_px: float = 4.0, duration: float = NEVER
@@ -874,6 +956,14 @@ class DebugDraw:
             self._batch(
                 frame, occ, layers, DrawPath.POINT, (PrimitiveType.POINT,), self._pack_point
             )
+            self._batch(
+                frame,
+                occ,
+                layers,
+                DrawPath.SCREEN_TRIANGLE,
+                (PrimitiveType.SCREEN_TRIANGLE,),
+                self._pack_screen_triangle,
+            )
             for layer in layers:
                 if not layer.visible:
                     continue
@@ -987,6 +1077,12 @@ class DebugDraw:
         return at + n
 
     @staticmethod
+    def _pack_screen_triangle(dst: np.ndarray, at: int, st: _Store) -> int:
+        n = st.count
+        dst[at : at + n] = st.screen_records[:n]
+        return at + n
+
+    @staticmethod
     def _pack_stroke(dst: np.ndarray, at: int, st: _Store) -> int:
         n = st.count
         s = slice(at, at + n)
@@ -1006,6 +1102,7 @@ class DebugDraw:
         dst[s, 14] = st.sizes[:n]
         dst[s, 15] = st.extras[:n]
         dst[s, 16] = st.outlines[:n]
+        dst[s, 17] = st.smoothing[:n]
         return at + n
 
     @staticmethod

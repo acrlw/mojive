@@ -820,7 +820,7 @@ wgpu = [
 requires-dist = [
     { name = "glfw", specifier = ">=2.7" },
     { name = "imageio-ffmpeg", specifier = ">=0.6" },
-    { name = "imgui-bundle", specifier = ">=1.6" },
+    { name = "imgui-bundle", specifier = "==1.92.900" },
     { name = "jsonschema", specifier = ">=4.23" },
     { name = "loguru", specifier = ">=0.7" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },

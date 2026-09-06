@@ -81,7 +81,7 @@ class ControlPanel(Panel):
         if not rows:
             imgui.text_disabled(ctx.tr("No matching actuators"))
             return
-        flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
+        flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.pad_outer_x
         if not imgui.begin_table("control_actuators", 2, flags):
             return
         imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.36)
@@ -148,7 +148,7 @@ class ControlPanel(Panel):
 
     @staticmethod
     def _equality(ctx: PanelContext) -> None:
-        flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
+        flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.pad_outer_x
         if not imgui.begin_table("control_equality", 2, flags):
             return
         imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 1.0)

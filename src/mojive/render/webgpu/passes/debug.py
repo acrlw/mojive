@@ -7,7 +7,14 @@ import wgpu
 
 from ....log import get_logger
 from ....types import MeshKey
-from ...debugdraw import RECORD_FLOATS, DebugDraw, DrawPath, Occlusion, PackedFrame
+from ...debugdraw import (
+    ARROW_CORNER_RADIUS_RATIO,
+    RECORD_FLOATS,
+    DebugDraw,
+    DrawPath,
+    Occlusion,
+    PackedFrame,
+)
 from ...mesh import builtin_mesh
 from ...text import RECORD_FLOATS as TEXT_RECORD_FLOATS
 from ...text import TextLayout
@@ -35,6 +42,7 @@ _UNIFORM_SLOTS = 2
 _UNIFORM_SLOT_BYTES = 256
 
 _VERTICES: dict[DrawPath, int] = {
+    DrawPath.SCREEN_TRIANGLE: 3,
     DrawPath.SEGMENT: 6,
     DrawPath.ARROW: 15,
     DrawPath.STROKE: 6 + 3 * STROKE_JOIN_SEGMENTS,
@@ -44,6 +52,7 @@ _VERTICES: dict[DrawPath, int] = {
 }
 
 _ENTRIES: dict[DrawPath, tuple[str, str]] = {
+    DrawPath.SCREEN_TRIANGLE: ("vs_debug_screen", "fs_debug_line"),
     DrawPath.SEGMENT: ("vs_debug_line", "fs_debug_line"),
     DrawPath.ARROW: ("vs_debug_arrow", "fs_debug_arrow"),
     DrawPath.STROKE: ("vs_debug_stroke", "fs_debug_line"),
@@ -67,6 +76,15 @@ def _instanced(path: DrawPath, *attrs: tuple[str, int]) -> dict:
 
 
 _LAYOUTS: dict[DrawPath, list[dict]] = {
+    DrawPath.SCREEN_TRIANGLE: [
+        _instanced(
+            DrawPath.SCREEN_TRIANGLE,
+            ("float32x3", 0),
+            ("float32x3", 12),
+            ("float32x3", 24),
+            ("float32x4", 36),
+        )
+    ],
     DrawPath.SEGMENT: [
         _instanced(
             DrawPath.SEGMENT,
@@ -112,6 +130,7 @@ _LAYOUTS: dict[DrawPath, list[dict]] = {
             ("float32", 56),
             ("float32", 60),
             ("float32", 64),
+            ("float32", 68),
         )
     ],
     DrawPath.SECTOR: [
@@ -172,9 +191,11 @@ class DebugPass:
         self.draw = draw
         self.draw_calls = 0
         self._module = device.create_shader_module(
-            code=load_wgsl(
+            code=f"const DEBUG_ARROW_CORNER_RADIUS_RATIO: f32 = {ARROW_CORNER_RADIUS_RATIO};\n"
+            + load_wgsl(
                 "debug_common.wgsl",
                 "debug_line.wgsl",
+                "debug_screen.wgsl",
                 "debug_stroke.wgsl",
                 "debug_point.wgsl",
                 "debug_solid.wgsl",

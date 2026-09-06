@@ -32,6 +32,8 @@ nav:
       - Agent workflows: how-to/agent-workflows.md
       - Editor and MJCF: guides/editor-and-mjcf.md
       - Testing: guides/testing.md
+      - G3 UI corners: how-to/ui-corners.md
+      - Extend UI drawing: how-to/ui-drawing.md
       - WebGPU backend: WGPU_BACKEND_REPORT.md
   - Concepts:
       - Architecture: concepts/architecture.md

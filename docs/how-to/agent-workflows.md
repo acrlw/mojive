@@ -4,6 +4,9 @@ Use this guide for entry points, runnable examples, and Skill maintenance. Read 
 for the task; ordinary scene operation does not require running repository acceptance suites.
 Choose the entry point by the state you need to operate on:
 
+For repository UI development, start with the [drawing extension guide](ui-drawing.md). It maps
+shape helpers, drawing adapters, retained diagnostics, coordinate units, caching, and tests.
+
 | Task | Entry point | State owner |
 |---|---|---|
 | Inspect or control an existing viewer | Start with `--rpc-socket` or attach `Viewer.start_rpc`, then use `RpcClient` or `mojive control` | The viewer's Session |

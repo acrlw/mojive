@@ -26,8 +26,12 @@ def test_blocking_prompt_aborts_an_existing_viewport_claim():
     assert router.held
 
     assert router.update(InputState(blocked=True, left=True)) is Claim.UI
-    assert not router.held
+    assert router.held
     assert not router.wants_gizmo()
+    assert router.update(press()) is Claim.UI
+    assert router.update(InputState(over_viewport=True)) is Claim.UI
+    assert router.released
+    assert router.update(press()) is Claim.CAMERA
 
 
 def test_camera_and_perturb_are_never_both_active():

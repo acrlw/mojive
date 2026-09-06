@@ -13,7 +13,7 @@ uniform float u_alpha;
 
 out vec4 v_color;
 #ifdef ROUND_ARROW
-out vec2 v_arrow_pos;
+noperspective out vec2 v_arrow_pos;
 flat out vec4 v_arrow_shape; // head length, shaft half-width, wing half-width, corner radius
 #endif
 

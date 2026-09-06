@@ -4,12 +4,15 @@ verify what would be painted — and in which order — without a window."""
 from __future__ import annotations
 
 import inspect
+import subprocess
+import sys
 
 import numpy as np
 import pytest
 
 from mojive import commands as cmd
 from mojive.adapters.static import StaticSceneAdapter
+from mojive.curves2d import capped_polyline_points
 from mojive.gizmo import AXIS_COLORS, paint_order, plane_direction
 from mojive.render.backend import BackendCaps
 from mojive.scene import Scene
@@ -20,8 +23,6 @@ from mojive.ui.draw2d import (
     Draw2D,
     ImguiDraw2D,
     _anti_alias_fringe_outer,
-    _capped_polyline_outline,
-    _round_cap_polyline_outline,
 )
 from mojive.ui.gizmo import ObjectGizmo
 
@@ -80,6 +81,27 @@ def test_imgui_adapter_covers_the_protocol_surface() -> None:
     assert not missing
 
 
+def test_geometry_and_draw_protocol_import_without_loading_graphics_libraries():
+    script = """
+import importlib.abc
+import sys
+
+class NoGraphics(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'imgui_bundle', 'moderngl', 'glfw', 'wgpu', 'mujoco'}:
+            raise AssertionError('Unexpected graphics import: ' + fullname)
+
+sys.meta_path.insert(0, NoGraphics())
+from mojive.curves2d import arrow_points
+from mojive.draglink2d import smooth_drag_link_mesh
+from mojive.ui.draw2d import Draw2D, ImguiDraw2D
+assert len(arrow_points((0, 0), (20, 0))) > 3
+assert len(smooth_drag_link_mesh(20, 5, 2)[1]) > 0
+"""
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.fixture
 def native_draw():
     """Exercise native ImGui tessellation without opening a GPU window."""
@@ -115,26 +137,271 @@ def test_native_line_and_polyline_share_exact_vertices(native_draw, cap):
     assert {v.col >> 24 for v in draw._dl.vtx_buffer} == {0, 255}
 
 
+@pytest.mark.parametrize("smoothing", (0.0, 0.6, 1.0))
+@pytest.mark.parametrize("round_tail", (False, True))
+@pytest.mark.parametrize("direction", ((0.6, 0.8), (-0.8, 0.6)))
+def test_cached_arrow_preserves_reference_boundary_fringe_and_fill(
+    native_draw, smoothing, round_tail, direction
+):
+    from mojive.curves2d import arrow_points
+
+    draw = native_draw
+    start = np.array((100.25, 120.75))
+    end = start + np.asarray(direction) * 100.0
+    options = {"smoothing": smoothing, "round_tail": round_tail}
+    color = (0.2, 0.5, 0.8, 0.7)
+    outline = arrow_points(start, end, 2.0, **options)
+    draw.fringed_concave_fill(outline, color)
+    reference = np.array([(v.pos.x, v.pos.y) for v in draw._dl.vtx_buffer])
+    colors = [v.col for v in draw._dl.vtx_buffer]
+    index_start = len(draw._dl.idx_buffer)
+    draw.arrow(start, end, color, 2.0, **options)
+    actual = np.array([(v.pos.x, v.pos.y) for v in list(draw._dl.vtx_buffer)[len(reference) :]])
+    # The shared mesh adds one interior fan vertex; its boundary and external
+    # fringe retain the existing coverage and color, including translucent fills.
+    np.testing.assert_allclose(actual[1:], reference, atol=2e-5, rtol=0)
+    assert [v.col for v in list(draw._dl.vtx_buffer)[len(reference) + 1 :]] == colors
+    indices = np.asarray(list(draw._dl.idx_buffer)[index_start:]) - len(reference)
+    triangles = actual[indices[: len(outline) * 3].reshape(-1, 3)]
+    a, b = triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+    areas = (a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]) * 0.5
+    expected = (
+        np.sum(
+            outline[:, 0] * np.roll(outline[:, 1], -1) - outline[:, 1] * np.roll(outline[:, 0], -1)
+        )
+        * 0.5
+    )
+    assert areas.min() >= -1e-4
+    assert areas.sum() == pytest.approx(expected, abs=0.002)
+
+
+def test_arrow_motion_reuses_local_mesh_and_antialias_preparation(native_draw):
+    from mojive.curves2d import arrow_mesh
+    from mojive.ui.draw2d import _cached_fringe_points
+
+    arrow_mesh.cache_clear()
+    _cached_fringe_points.cache_clear()
+    for i in range(24):
+        start = (100 + i * 0.125, 120 + i * 0.0625)
+        dx, dy = ((60, 80), (-60, 80), (-80, -60))[i % 3]
+        native_draw.arrow(start, (start[0] + dx, start[1] + dy), (1.0,) * 4)
+    assert arrow_mesh.cache_info().misses == 1
+    assert _cached_fringe_points.cache_info().misses == 1
+
+
+@pytest.mark.parametrize("method", ("convex_fill", "concave_fill", "fringed_concave_fill"))
+def test_native_fill_antialiasing_is_identical_for_reversed_winding(native_draw, method):
+    path = ((10.25, 20.5), (28.75, 23.25), (15.25, 40.5))
+    draw = native_draw
+    fill = getattr(draw, method)
+    fill(path, (1.0,) * 4)
+    count = len(draw._dl.vtx_buffer)
+    first = [(v.pos.x, v.pos.y, v.col) for v in draw._dl.vtx_buffer]
+    fill(path[::-1], (1.0,) * 4)
+    second = [(v.pos.x, v.pos.y, v.col) for v in list(draw._dl.vtx_buffer)[count:]]
+    assert first == second
+    assert {color >> 24 for _, _, color in first} == {0, 255}
+
+
+def test_triangle_fan_fallback_reads_the_base_after_a_reservation_rollover(native_draw):
+    class RollingDrawList:
+        # ImGui builds using 16-bit indices may roll over inside PrimReserve.
+        flags = 0
+        _vtx_current_idx = 65534
+
+        def __init__(self):
+            self.indices = []
+
+        def prim_reserve(self, index_count, vertex_count):
+            self._vtx_current_idx = 0
+
+        def prim_write_vtx(self, *args):
+            self._vtx_current_idx += 1
+
+        def prim_write_idx(self, index):
+            self.indices.append(index)
+
+    original = native_draw._dl
+    rolling = RollingDrawList()
+    try:
+        native_draw._dl = rolling
+        native_draw.triangle_fan_fill(((10, 10), (30, 10), (30, 30), (10, 30)), (1.0,) * 4)
+        assert rolling.indices == [0, 1, 2, 0, 2, 3]
+    finally:
+        native_draw._dl = original
+
+
+def test_indexed_fill_accepts_numpy_contours(native_draw):
+    points = np.array(((10.0, 10.0), (30.0, 10.0), (20.0, 30.0)))
+    native_draw.indexed_fill(points, (0, 1, 2), (1.0,) * 4, outline=points)
+    assert {v.col >> 24 for v in native_draw._dl.vtx_buffer} == {0, 255}
+
+
+@pytest.mark.parametrize("direction", ((1.0, 0.0), (0.6, 0.8), (-0.8, -0.6)))
+def test_local_mesh_placement_preserves_vertices_and_reuses_fringe(native_draw, direction):
+    from mojive.draglink2d import smooth_drag_link_mesh
+    from mojive.ui.draw2d import _cached_fringe_points
+
+    points, indices, outline, hole = smooth_drag_link_mesh(8.0, 5.0, 2.0)
+    ux, uy = direction
+    origin = (125.25, -300.5)
+
+    def placed(path):
+        return tuple((origin[0] + x * ux - y * uy, origin[1] + x * uy + y * ux) for x, y in path)
+
+    draw = native_draw
+    draw.indexed_fill(
+        placed(points), indices, (0.4, 0.7, 1.0, 0.5), outline=placed(outline), hole=placed(hole)
+    )
+    reference = [(v.pos.x, v.pos.y, v.col) for v in draw._dl.vtx_buffer]
+    reference_indices = list(draw._dl.idx_buffer)
+    draw.indexed_fill(
+        points,
+        indices,
+        (0.4, 0.7, 1.0, 0.5),
+        outline=outline,
+        hole=hole,
+        origin=origin,
+        direction=direction,
+    )
+    placed_vertices = [
+        (v.pos.x, v.pos.y, v.col) for v in list(draw._dl.vtx_buffer)[len(reference) :]
+    ]
+    assert np.array(placed_vertices)[:, :2] == pytest.approx(np.array(reference)[:, :2], abs=4e-5)
+    assert [v[2] for v in placed_vertices] == [v[2] for v in reference]
+    assert [
+        i - len(reference) for i in list(draw._dl.idx_buffer)[len(reference_indices) :]
+    ] == reference_indices
+    # Transform only the newly appended range and reuse local AA for a new placement.
+    assert [
+        (v.pos.x, v.pos.y, v.col) for v in list(draw._dl.vtx_buffer)[: len(reference)]
+    ] == reference
+    misses = _cached_fringe_points.cache_info().misses
+    draw.indexed_fill(
+        points,
+        indices,
+        (0.4, 0.7, 1.0, 0.5),
+        outline=outline,
+        hole=hole,
+        origin=(200, 300),
+        direction=(-0.6, 0.8),
+    )
+    assert _cached_fringe_points.cache_info().misses == misses
+
+
+def test_cached_fill_and_color_follow_mutable_input_changes(native_draw):
+    draw = native_draw
+    points = [[10.0, 10.0], [30.0, 10.0], [20.0, 30.0]]
+    color = [1.0, 0.0, 0.0, 1.0]
+    draw.convex_fill(tuple(points), color)
+    count = len(draw._dl.vtx_buffer)
+    points[0][0] = 15.0
+    color[:] = [0.0, 1.0, 0.0, 0.5]
+    draw.convex_fill(tuple(points), color)
+    second = list(draw._dl.vtx_buffer)[count:]
+    assert any(v.col == draw._u32(color) for v in second)
+    assert min(v.pos.x for v in second) > 13.0
+
+
+def test_failed_concave_submission_restores_draw_flags(native_draw):
+    class FailingDrawList:
+        flags = native_draw._dl.flags
+
+        def add_concave_poly_filled(self, *args):
+            raise ValueError("rejected geometry")
+
+    original = native_draw._dl
+    failing = FailingDrawList()
+    try:
+        native_draw._dl = failing
+        with pytest.raises(ValueError, match="rejected geometry"):
+            native_draw.fringed_concave_fill(((0, 0), (1, 0), (1, 1)), (1.0,) * 4)
+        assert failing.flags == original.flags
+    finally:
+        native_draw._dl = original
+
+
+def test_indexed_hollow_fill_matches_native_and_fallback(native_draw):
+    from mojive.draglink2d import smooth_drag_link_mesh
+
+    draw = native_draw
+    if not hasattr(draw._dl, "add_indexed_fill"):
+        pytest.skip("requires the Mojive native ImGui patch")
+    points, indices, outline, hole = smooth_drag_link_mesh(8.0, 5.0, 2.0)
+    draw.indexed_fill(points, indices, (1.0,) * 4, outline=outline, hole=hole)
+    vertices = [(v.pos.x, v.pos.y, v.uv.x, v.uv.y, v.col) for v in draw._dl.vtx_buffer]
+    native_indices = list(draw._dl.idx_buffer)
+
+    class Fallback:
+        def __getattr__(self, name):
+            if name in {"add_indexed_fill", "add_poly_fringe"}:
+                raise AttributeError(name)
+            return getattr(native, name)
+
+    native = draw._dl
+    try:
+        draw._dl = Fallback()
+        draw.indexed_fill(points, indices, (1.0,) * 4, outline=outline, hole=hole)
+        fallback_vertices = [
+            (v.pos.x, v.pos.y, v.uv.x, v.uv.y, v.col)
+            for v in list(native.vtx_buffer)[len(vertices) :]
+        ]
+        fallback_indices = [
+            i - len(vertices) for i in list(native.idx_buffer)[len(native_indices) :]
+        ]
+    finally:
+        draw._dl = native
+        native = None
+    assert fallback_vertices == vertices
+    assert fallback_indices == native_indices
+    assert len(vertices) == len(points) + 2 * (len(outline) + len(hole))
+    assert sum(v[-1] >> 24 == 0 for v in vertices) == len(outline) + len(hole)
+
+
+@pytest.mark.parametrize("aa", (False, True))
+@pytest.mark.parametrize("color", (0xFFFFFFFF, 0x7F80AA33))
+def test_native_fringe_matches_fallback_mesh(native_draw, aa, color):
+    from mojive.curves2d import smooth_rect_points
+
+    draw = native_draw
+    if not hasattr(draw._dl, "add_poly_fringe"):
+        pytest.skip("requires the Mojive native ImGui patch")
+    path = smooth_rect_points(3.25, 4.75, 27.5, 36.0, 6.0)
+    if not aa:
+        draw._dl.flags &= ~draw._imgui.ImDrawListFlags_.anti_aliased_fill.value
+    draw._write_anti_alias_fringe(path, color)
+    vertices = [(v.pos.x, v.pos.y, v.uv.x, v.uv.y, v.col) for v in draw._dl.vtx_buffer]
+    indices = list(draw._dl.idx_buffer)
+
+    class Fallback:
+        def __getattr__(self, name):
+            if name == "add_poly_fringe":
+                raise AttributeError(name)
+            return getattr(native, name)
+
+    native = draw._dl
+    try:
+        draw._dl = Fallback()
+        draw._write_anti_alias_fringe(path, color)
+        fallback_vertices = [
+            (v.pos.x, v.pos.y, v.uv.x, v.uv.y, v.col)
+            for v in list(native.vtx_buffer)[len(vertices) :]
+        ]
+        fallback_indices = [i - len(vertices) for i in list(native.idx_buffer)[len(indices) :]]
+    finally:
+        draw._dl = native
+        # Do not retain a native draw list in a failed assertion's traceback.
+        native = None
+    assert fallback_vertices == vertices
+    assert fallback_indices == indices
+
+
 @pytest.mark.parametrize("scale", (1.0, 2.25, 4.0))
 @pytest.mark.parametrize("direction", ((0.0, -1.0), (-0.8660254, 0.5), (0.8660254, 0.5)))
-def test_native_frame_arrow_head_and_shaft_remain_coaxial(
-    native_draw, monkeypatch, scale, direction
-):
+def test_native_frame_arrow_head_and_shaft_remain_coaxial(native_draw, scale, direction):
     from mojive.ui.viewport_widgets import _draw_axis_arrow_glyph
 
     draw = native_draw
-    parts = {}
-
-    def record(name, method):
-        def submit(*args, **kwargs):
-            start = len(draw._dl.vtx_buffer)
-            method(*args, **kwargs)
-            parts[name] = np.array([(v.pos.x, v.pos.y) for v in list(draw._dl.vtx_buffer)[start:]])
-
-        return submit
-
-    monkeypatch.setattr(draw, "line", record("shaft", draw.line))
-    monkeypatch.setattr(draw, "fringed_concave_fill", record("head", draw.fringed_concave_fill))
     center = np.array((100.25, 100.75))
     _draw_axis_arrow_glyph(
         draw,
@@ -151,10 +418,10 @@ def test_native_frame_arrow_head_and_shaft_remain_coaxial(
     )
     normal = np.array((-direction[1], direction[0]))
     normal /= np.linalg.norm(normal)
-    for points in parts.values():
-        across = (points - center) @ normal
-        assert (across.min() + across.max()) * 0.5 == pytest.approx(0.0, abs=1e-5)
-    assert set(parts) == {"shaft", "head"}
+    points = np.array([(v.pos.x, v.pos.y) for v in draw._dl.vtx_buffer])
+    assert len(points) > 3
+    across = (points - center) @ normal
+    assert (across.min() + across.max()) * 0.5 == pytest.approx(0.0, abs=1e-5)
 
 
 def test_fill_fringe_expands_outward_for_both_polygon_windings() -> None:
@@ -166,7 +433,9 @@ def test_fill_fringe_expands_outward_for_both_polygon_windings() -> None:
 
 
 def test_round_cap_polyline_is_one_capsule_silhouette() -> None:
-    outline = np.asarray(_round_cap_polyline_outline(((0.0, 0.0), (10.0, 0.0)), 4.0))
+    outline = np.asarray(
+        capped_polyline_points(((0.0, 0.0), (10.0, 0.0)), 4.0, round_start=True, round_end=True)
+    )
 
     assert outline[:, 0].min() == pytest.approx(-2.0)
     assert outline[:, 0].max() == pytest.approx(12.0)
@@ -177,7 +446,7 @@ def test_round_cap_polyline_is_one_capsule_silhouette() -> None:
 
 def test_asymmetric_cap_polyline_is_flat_at_start_and_round_at_end() -> None:
     outline = np.asarray(
-        _capped_polyline_outline(
+        capped_polyline_points(
             ((0.0, 0.0), (10.0, 0.0)),
             4.0,
             round_start=False,
@@ -195,7 +464,7 @@ def test_round_cap_polyline_keeps_clockwise_screen_winding_for_a_reflex_arc() ->
     angles = np.linspace(0.0, np.radians(240.0), 80)
     path = np.column_stack((100.0 * np.cos(angles), 100.0 * np.sin(angles)))
 
-    outline = np.asarray(_round_cap_polyline_outline(path, 4.0))
+    outline = np.asarray(capped_polyline_points(path, 4.0, round_start=True, round_end=True))
     signed_area = 0.5 * np.sum(
         outline[:, 0] * np.roll(outline[:, 1], -1) - outline[:, 1] * np.roll(outline[:, 0], -1)
     )

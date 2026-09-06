@@ -8,11 +8,6 @@ import pytest
 from mojive.render.backend import RenderFlag
 from mojive.tools._harness import OffscreenHarness
 from mojive.types import CameraView
-from mojive.ui.viewport_widgets import (
-    PLAYBACK_CHROME_SCALE,
-    playback_size,
-    viewport_chrome_scale,
-)
 
 pytestmark = pytest.mark.gpu
 
@@ -143,10 +138,15 @@ def test_mujoco_haze_changes_sky_below_horizon_without_fogging_objects(tmp_path)
     assert np.abs(haze.astype(np.float32) - target).max(axis=2).min() <= 2.0
 
 
-def test_interactive_viewport_does_not_composite_haze_twice(tmp_path):
+def test_interactive_viewport_does_not_composite_haze_twice(tmp_path, monkeypatch):
     pytest.importorskip("glfw")
+    from imgui_bundle import imgui
+    from PIL import Image
+
     from mojive.composition import build
 
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MOJIVE_IMGUI_INI", str(tmp_path / "layout.ini"))
     scene = tmp_path / "interactive-haze.xml"
     scene.write_text(
         """
@@ -168,44 +168,45 @@ def test_interactive_viewport_does_not_composite_haze_twice(tmp_path):
     )
     viewer = build(scene, paused=True, vsync=False, width=960, height=640)
     try:
+        # Let initial scene framing finish before setting the horizon view.
+        for _ in range(12):
+            viewer.sync()
+        viewer.backend.set_flag(RenderFlag.SKYBOX, True)
         viewer.app.camera.pivot = (0.0, 0.0, 0.7)
         viewer.app.camera.distance = 5.0
         viewer.app.camera.yaw = -90.0
         viewer.app.camera.pitch = 5.0
-        for _ in range(12):
+        viewer.backend.set_flag(RenderFlag.HAZE, False)
+        for _ in range(3):
             viewer.sync()
+        clear = viewer.backend.target.read_color(flip=True)[..., :3].copy()
+        viewer.backend.set_flag(RenderFlag.HAZE, True)
+        capture = viewer.capture(tmp_path / "haze-window.png", surface="window")
 
         target = viewer.backend.target.read_color(flip=True)
-        window = np.asarray(viewer.window.read_frame())[::-1, :, :3]
+        # The capture API reads before buffer swap. GL_BACK after sync can still
+        # hold the previous frame, unlike WebGPU's retained presentation texture.
+        window = np.asarray(Image.open(capture).convert("RGB"))
         x, y, width, height = viewer.window.points_to_pixels(viewer.app._viewport_rect)
         x0, y0, x1, y1 = map(round, (x, y, x + width, y + height))
         viewport = window[y0:y1, x0:x1]
 
         assert viewport.shape == (*target.shape[:2], 3)
         assert np.all(target[..., 3] == 255)
-        # This upper-left probe sits above the vertically centered Tool Column
-        # and left of the playback capsule. Derive its right edge from current
-        # playback geometry so chrome antialiasing cannot enter the sample when
-        # the overlay proportions change.
-        y0, y1 = 8, max(16, target.shape[0] // 8)
+        # The floor-only scene has no Tool Column. Sample a full-height strip
+        # left of the actual playback host, including the visible horizon haze.
+        # Host bounds include placement, per-widget scale, and AA padding.
         style_scale = viewer.window.style_scale
-        overlay_scale = viewer.app._viewport_overlay_scale
         point_to_pixel = target.shape[1] / viewer.app._viewport_rect[2]
-        playback_scale = viewport_chrome_scale(
-            style_scale,
-            overlay_scale,
-            PLAYBACK_CHROME_SCALE,
-        )
-        playback_width, _ = playback_size(
-            playback_scale,
-            viewer.app.viewport_chrome.playback_controls,
-        )
+        playback = imgui.internal.find_window_by_name("Playback###viewport_playback")
+        assert playback is not None and playback.active
         guard = 4.0 * style_scale
         x0 = round(guard * point_to_pixel)
-        x1 = round(
-            (viewer.app._viewport_rect[2] * 0.5 - playback_width * 0.5 - guard) * point_to_pixel
-        )
+        x1 = round((playback.pos.x - viewer.app._viewport_rect[0] - guard) * point_to_pixel)
         assert x1 > x0
+        y0, y1 = x0, target.shape[0] - x0
+        difference = np.max(np.abs(target[..., :3].astype(int) - clear), axis=2)
+        assert np.count_nonzero(difference[y0:y1, x0:x1] > 5) > 100
         np.testing.assert_array_equal(
             viewport[y0:y1, x0:x1],
             target[y0:y1, x0:x1, :3],

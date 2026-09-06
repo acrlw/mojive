@@ -73,6 +73,9 @@ For development dependencies:
 make setup
 ```
 
+This also builds the [bulk UI drawing bindings and slider/focus fixes](docs/how-to/ui-corners.md),
+requiring CMake and a C++17 toolchain. Launch that build with `uv run --no-sync mojive editor`.
+
 For Python offscreen rendering on a Linux server, OpenGL uses EGL and needs a working GPU
 driver/EGL installation, but no desktop display. In `MOJIVE_GL=auto`, a failed EGL initialization
 can fall back to a hidden GLFW window on a desktop's main thread. Set `MOJIVE_GL=egl` to require
@@ -218,6 +221,9 @@ See the [remote viewing tutorial](docs/tutorials/remote-viewing.md) and
 [local RPC guide](docs/how-to/rpc-control.md).
 
 ## Development
+
+For custom widgets, icons, or diagnostics, start with [Extend UI drawing](docs/how-to/ui-drawing.md)
+for module ownership, API examples, coordinate units, caching, and focused verification.
 
 Use focused targets while working, then run the repository checks:
 

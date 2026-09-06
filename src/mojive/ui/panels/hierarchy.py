@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
+from functools import lru_cache
 
 from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, NodeType, SceneNode
-from ..draw2d import ImguiDraw2D
+from ...curves2d import CORNER_SMOOTHING, smooth_polygon_corners
+from ..draw2d import ImguiDraw2D, text_line_y
+from ..theme import ROW_PADDING_X, ROW_PADDING_Y
 from . import (
     Panel,
     PanelContext,
@@ -38,19 +41,29 @@ def disclosure_triangle(
     radius: float,
     *,
     opened: bool,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> tuple[tuple[float, float], ...]:
     """Return one canonical right triangle, rigidly rotated when expanded."""
 
     cx, cy = center
-    canonical = (
-        (-0.55 * radius, -radius),
-        (-0.55 * radius, radius),
-        (0.65 * radius, 0.0),
-    )
+    canonical = _disclosure_shape(radius, smoothing)
     if not opened:
         return tuple((cx + x, cy + y) for x, y in canonical)
     # Screen Y grows downward, so a positive quarter turn maps right to down.
     return tuple((cx - y, cy + x) for x, y in canonical)
+
+
+@lru_cache(maxsize=64)
+def _disclosure_shape(radius: float, smoothing: float):
+    points = smooth_polygon_corners(
+        ((-0.5 * radius, -radius), (-0.5 * radius, radius), (radius, 0.0)),
+        0.10 * radius,
+        (0, 1, 2),
+        smoothing=smoothing,
+    )
+    # Center the visible bounds, so rotating the shape does not lower its body.
+    points -= (points.min(axis=0) + points.max(axis=0)) * 0.5
+    return tuple(map(tuple, points.tolist()))
 
 
 class HierarchyPanel(Panel):
@@ -73,8 +86,10 @@ class HierarchyPanel(Panel):
         self._rows_drawn = 0
         self._rows_truncated = False
         self._batch_selected: set[int] = set()
+        self._selection_token: tuple[int, int] | None = None
         self._open_state: dict[int, bool] = {}
         self._show_type_column = True
+        self._text_line_offset = 0.0
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -84,9 +99,31 @@ class HierarchyPanel(Panel):
 
         self._batch_selected.clear()
 
+    def _follow_selection(self, session, *, keep_batch: bool = False) -> None:
+        selected = session.selected_node
+        token = (session.selection_revision, selected.node_id if selected else -1)
+        if token != self._selection_token and not keep_batch:
+            self._batch_selected.clear()
+        self._selection_token = token
+
+    def _select_row(self, ctx: PanelContext, node_id: int, *, additive: bool) -> None:
+        if additive:
+            if not self._batch_selected and ctx.session.selected_node is not None:
+                self._batch_selected.add(ctx.session.selected_node.node_id)
+            if node_id in self._batch_selected:
+                self._batch_selected.remove(node_id)
+                node_id = min(self._batch_selected, default=-1)
+            else:
+                self._batch_selected.add(node_id)
+        else:
+            self._batch_selected = {node_id}
+        ctx.submit(cmd.SelectNode(node_id) if node_id >= 0 else cmd.Select(0))
+        self._follow_selection(ctx.session, keep_batch=True)
+
     def draw(self, ctx: PanelContext) -> None:
         s = ctx.session
         self._refresh(ctx)
+        self._follow_selection(s)
 
         imgui.set_next_item_width(-1)
         _changed, self._filter = search_input(
@@ -132,14 +169,18 @@ class HierarchyPanel(Panel):
             imgui.end_child()
             return
 
-        table_flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
+        table_flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.pad_outer_x
         available_width = float(imgui.get_content_region_avail().x)
         self._show_type_column = hierarchy_shows_type_column(
             available_width,
             ctx.style_scale,
         )
         column_count = 3 if self._show_type_column else 2
+        imgui.push_style_var(
+            imgui.StyleVar_.cell_padding, imgui.ImVec2(ROW_PADDING_X * ctx.style_scale, 0.0)
+        )
         if not imgui.begin_table("hierarchy_rows", column_count, table_flags):
+            imgui.pop_style_var()
             imgui.end_child()
             return
         imgui.table_setup_column("node", imgui.TableColumnFlags_.width_stretch, 1.0)
@@ -157,6 +198,7 @@ class HierarchyPanel(Panel):
 
         self._rows_drawn = 0
         self._rows_truncated = False
+        self._text_line_offset = text_line_y(ImguiDraw2D(), 0.0)
         if self._filter or self._type_filter != "all":
             needle = self._filter.casefold()
             hits = []
@@ -193,6 +235,7 @@ class HierarchyPanel(Panel):
             )
 
         imgui.end_table()
+        imgui.pop_style_var()
         if self._rows_drawn:
             publish_focus_item_hint(ctx)
         imgui.end_child()
@@ -216,7 +259,6 @@ class HierarchyPanel(Panel):
         ):
             imgui.end_child()
             return
-        imgui.push_style_var(imgui.StyleVar_.frame_rounding, 3.0 * ctx.style_scale)
         for index, (label, display_label) in enumerate(
             zip(_TYPE_FILTERS, display_labels, strict=True)
         ):
@@ -242,7 +284,6 @@ class HierarchyPanel(Panel):
             imgui.pop_style_color(4)
             if index + 1 < len(_TYPE_FILTERS):
                 imgui.same_line()
-        imgui.pop_style_var()
         horizontal_wheel_scroll(step=56.0 * ctx.style_scale)
         imgui.end_child()
 
@@ -292,18 +333,25 @@ class HierarchyPanel(Panel):
         default_open: bool = False,
     ) -> bool:
         self._rows_drawn += 1
-        row_height = max(imgui.get_frame_height(), 26.0 * ctx.style_scale)
+        row_height = max(
+            imgui.get_font_size() + 2.0 * ROW_PADDING_Y * ctx.style_scale,
+            26.0 * ctx.style_scale,
+        )
         imgui.table_next_row(0, row_height)
         imgui.table_next_column()
+        opened = self._open_state.get(node.node_id, default_open)
+        width = max(1.0, imgui.get_content_region_avail().x)
+        # Keep table height and tree traversal while skipping offscreen glyphs and hit targets.
+        if not imgui.is_rect_visible(imgui.ImVec2(width, row_height)):
+            return opened
         selected = ctx.session.selected_node
         is_selected = node.node_id in self._batch_selected or (
             selected is not None and node.node_id == selected.node_id
         )
         row_start = imgui.get_cursor_screen_pos()
-        width = imgui.get_content_region_avail().x
         imgui.invisible_button(
             f"##hierarchy-node-{node.node_id}",
-            imgui.ImVec2(max(1.0, width), row_height),
+            imgui.ImVec2(width, row_height),
         )
         hovered = imgui.is_item_hovered()
         draw = ImguiDraw2D()
@@ -314,24 +362,23 @@ class HierarchyPanel(Panel):
                 imgui.color_convert_float4_to_u32(imgui.ImVec4(*color)),
             )
         indent = depth * 18.0 * ctx.style_scale
+        name = node.name or "?"
+        text_y = round(row_start.y + row_height * 0.5 + self._text_line_offset)
         arrow_center = (
             row_start.x + indent + 7.0 * ctx.style_scale,
-            row_start.y + row_height * 0.5,
+            text_y - self._text_line_offset,
         )
-        opened = self._open_state.get(node.node_id, default_open)
         if not leaf:
-            radius = 5.0 * ctx.style_scale
+            radius = 4.0 * ctx.style_scale
             draw.fringed_concave_fill(
                 disclosure_triangle(arrow_center, radius, opened=opened),
                 ctx.theme.text,
             )
-        name = node.name or "?"
-        text_height = imgui.calc_text_size(name).y
         text_color = ctx.theme.text if node.visible else ctx.theme.text_disabled
         draw.text(
             (
                 row_start.x + indent + 20.0 * ctx.style_scale,
-                row_start.y + (row_height - text_height) * 0.5,
+                text_y,
             ),
             text_color,
             name,
@@ -343,19 +390,7 @@ class HierarchyPanel(Panel):
                 self._open_state[node.node_id] = opened
             else:
                 io = imgui.get_io()
-                if io.key_ctrl or io.key_super:
-                    if node.node_id in self._batch_selected:
-                        self._batch_selected.remove(node.node_id)
-                        if self._batch_selected:
-                            ctx.submit(cmd.SelectNode(next(reversed(tuple(self._batch_selected)))))
-                        else:
-                            ctx.submit(cmd.Select(0))
-                    else:
-                        self._batch_selected.add(node.node_id)
-                        ctx.submit(cmd.SelectNode(node.node_id))
-                else:
-                    self._batch_selected = {node.node_id}
-                    ctx.submit(cmd.SelectNode(node.node_id))
+                self._select_row(ctx, node.node_id, additive=bool(io.key_ctrl or io.key_super))
         if (
             hovered
             and imgui.is_mouse_double_clicked(imgui.MouseButton_.left)
@@ -418,10 +453,7 @@ class HierarchyPanel(Panel):
             imgui.table_next_column()
             type_pos = imgui.get_cursor_screen_pos()
             type_label = str(node.type)
-            type_height = imgui.calc_text_size(type_label).y
-            imgui.set_cursor_screen_pos(
-                imgui.ImVec2(type_pos.x, row_start.y + (row_height - type_height) * 0.5)
-            )
+            imgui.set_cursor_screen_pos(imgui.ImVec2(type_pos.x, text_y))
             imgui.text_disabled(type_label)
 
         imgui.table_next_column()

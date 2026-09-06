@@ -5,7 +5,9 @@ from __future__ import annotations
 from imgui_bundle import imgui
 
 from ...adapters.base import FrameNeeds
+from ..draw2d import ImguiDraw2D, text_line_y
 from ..messages import OutputMessage
+from ..theme import ROW_PADDING_X, ROW_PADDING_Y
 from . import Panel, PanelContext, button_row_layout, button_width, search_input
 
 _LEVEL_COLORS = {
@@ -81,7 +83,8 @@ class OutputPanel(Panel):
         available = imgui.get_content_region_avail().x
         spacing = imgui.get_style().item_spacing.x
         level_width = min(190.0 * ctx.style_scale, max(125.0 * ctx.style_scale, available * 0.38))
-        imgui.set_next_item_width(max(80.0 * ctx.style_scale, available - level_width - spacing))
+        filters_inline = available >= 80.0 * ctx.style_scale + level_width + spacing
+        imgui.set_next_item_width(available - level_width - spacing if filters_inline else -1)
         changed, self._filter_text = search_input(
             "##output-filter",
             self._filter_text,
@@ -92,8 +95,9 @@ class OutputPanel(Panel):
         if changed:
             self._filter_cache_key = None
             self._last_sequence = 0
-        imgui.same_line()
-        imgui.set_next_item_width(level_width)
+        if filters_inline:
+            imgui.same_line()
+        imgui.set_next_item_width(level_width if filters_inline else -1)
         level_labels = tuple(ctx.tr(label) for label, _rank in _LEVEL_FILTERS)
         changed, self._level_filter = imgui.combo(
             "##output-level",
@@ -134,11 +138,11 @@ class OutputPanel(Panel):
             imgui.get_content_region_avail().x,
             imgui.get_style().item_spacing.x,
         )
-        if imgui.small_button(copy_text):
+        if imgui.button(copy_text):
             imgui.set_clipboard_text(output.copy_text(entries))
         if inline[1]:
             imgui.same_line()
-        if imgui.small_button(clear_text):
+        if imgui.button(clear_text):
             output.clear()
             all_entries = ()
             entries = ()
@@ -146,10 +150,14 @@ class OutputPanel(Panel):
             self._filter_cache_key = None
         if inline[2]:
             imgui.same_line()
+        imgui.align_text_to_frame_padding()
         imgui.text_disabled(count_text)
 
         imgui.separator()
         imgui.begin_child("output_messages", imgui.ImVec2(0.0, 0.0), 0)
+        row_height = imgui.get_font_size() + 2.0 * ROW_PADDING_Y * ctx.style_scale
+        text_offset = text_line_y(ImguiDraw2D(), row_height * 0.5)
+        padding_x = ROW_PADDING_X * ctx.style_scale
         clipper = imgui.ListClipper()
         clipper.begin(len(entries))
         while clipper.step():
@@ -160,7 +168,6 @@ class OutputPanel(Panel):
                     f"{entry.text.replace(chr(10), '  ↵  ')}"
                 )
                 start = imgui.get_cursor_screen_pos()
-                row_height = imgui.get_frame_height()
                 clicked = imgui.invisible_button(
                     f"##output-row-{entry.sequence}",
                     imgui.ImVec2(imgui.get_content_region_avail().x, row_height),
@@ -214,15 +221,20 @@ class OutputPanel(Panel):
                         row_lo,
                         row_hi,
                         imgui.color_convert_float4_to_u32(imgui.ImVec4(*color)),
-                        2.0 * ctx.style_scale,
+                        imgui.get_style().frame_rounding,
                     )
                 color = _LEVEL_COLORS.get(entry.level, _LEVEL_COLORS["info"])
-                text_height = imgui.calc_text_size(row).y
+                imgui.push_clip_rect(
+                    (row_lo.x + padding_x, row_lo.y),
+                    (max(row_lo.x + padding_x, row_hi.x - padding_x), row_hi.y),
+                    True,
+                )
                 imgui.get_window_draw_list().add_text(
-                    imgui.ImVec2(start.x, start.y + (row_height - text_height) * 0.5),
+                    imgui.ImVec2(start.x + padding_x, round(start.y + text_offset)),
                     imgui.color_convert_float4_to_u32(imgui.ImVec4(*color)),
                     row,
                 )
+                imgui.pop_clip_rect()
         clipper.end()
         io = imgui.get_io()
         if (

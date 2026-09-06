@@ -19,11 +19,14 @@ from imgui_bundle import imgui
 from PIL import Image
 
 from mojive import gizmo as gizmo_geometry
+from mojive.curves2d import CORNER_SMOOTHING
 from mojive.types import CameraView
 from mojive.ui import gizmo as gizmo_ui
+from mojive.ui import perturb as perturb_ui
 from mojive.ui import theme as theme_mod
+from mojive.ui import viewcube as view_ui
 from mojive.ui.compound_fields import draw_joined_field_frame
-from mojive.ui.draw2d import ImguiDraw2D
+from mojive.ui.draw2d import ImguiDraw2D, draw_drag_link
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
 from mojive.ui.panels import (
     button_row_layout,
@@ -31,6 +34,8 @@ from mojive.ui.panels import (
     search_input,
     searchable_ordered_list_header,
 )
+from mojive.ui.panels.hierarchy import disclosure_triangle
+from mojive.ui.panels.keyframes import _command_button, _draw_command_icon
 from mojive.ui.panels.settings import settings_uses_stacked_layout
 from mojive.ui.perturb import OUTLINE_CORNER_RADIUS_PT
 from mojive.ui.theme import THEME, rgb8
@@ -48,6 +53,7 @@ from mojive.ui.viewport_widgets import (
     draw_projection_label,
     draw_status,
     draw_tool_glyph,
+    keycap_rounding,
 )
 from mojive.ui.window import Window, WindowConfig
 
@@ -124,7 +130,7 @@ OVERLAY_CENTER_STEP = 34.0
 # Accepted M8 hinge specimen. The arc is sampled once at import; each frame
 # performs only scale + translation before handing the points to Draw2D.
 JOINT_HINGE_ARC = tuple(
-    (math.cos(math.radians(angle)), math.sin(math.radians(angle))) for angle in range(-65, 216, 10)
+    (math.cos(math.radians(angle)), math.sin(math.radians(angle))) for angle in range(-65, 216)
 )
 
 # Screen-space unit vectors for the fixed orthographic World / Body icon.
@@ -167,7 +173,20 @@ GIZMO_PROBE_CAMERA = CameraView(
     orthographic=True,
     ortho_height=4.0,
 )
-GIZMO_PROBE_SPECIMENS = {mode: gizmo_ui.ObjectGizmo(mode) for mode in ("translate", "rotate")}
+GIZMO_PROBE_SPECIMENS = {
+    mode: gizmo_ui.ObjectGizmo(mode) for mode in ("translate", "rotate", "dimensions")
+}
+CORNER_VIEW_GIZMO = view_ui.ViewCube()
+CORNER_CONTROLS = (
+    ("Capsules", "capsule_smoothing"),
+    ("Playback icons", "playback_smoothing"),
+    ("Tool icons", "tool_smoothing"),
+    ("Mouse hints", "mouse_smoothing"),
+    ("Transform gizmo", "transform_smoothing"),
+    ("Joint gizmo", "joint_smoothing"),
+    ("View gizmo", "view_smoothing"),
+    ("Perturbation gizmo", "perturb_smoothing"),
+)
 GIZMO_IDENTITY_F32 = np.eye(3, dtype=np.float32)
 GIZMO_IDENTITY_F64 = np.eye(3, dtype=np.float64)
 
@@ -175,6 +194,18 @@ GIZMO_IDENTITY_F64 = np.eye(3, dtype=np.float64)
 @dataclass
 class ProbeState:
     page: str = "Workspace"
+    imgui_rounding: float = theme_mod.DEFAULT_CORNER_RADIUS
+    imgui_example_value: float = 0.0
+    imgui_example_enabled: bool = True
+    capsule_smoothing: float = CORNER_SMOOTHING
+    playback_smoothing: float = CORNER_SMOOTHING
+    tool_smoothing: float = CORNER_SMOOTHING
+    mouse_smoothing: float = CORNER_SMOOTHING
+    transform_smoothing: float = CORNER_SMOOTHING
+    joint_smoothing: float = CORNER_SMOOTHING
+    view_smoothing: float = CORNER_SMOOTHING
+    perturb_smoothing: float = CORNER_SMOOTHING
+
     geometry_tab: str = "Playback"
     geometry_tab_initialized: bool = False
     show_playback: bool = True
@@ -297,23 +328,23 @@ def _flags(*values) -> int:
 
 
 def _draw_play_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=None) -> None:
-    draw_playback_glyph(draw, center, color, scale, "play")
+    draw_playback_glyph(draw, center, color, scale, "play", smoothing=draw.corner_smoothing)
 
 
 def _draw_pause_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=None) -> None:
-    draw_playback_glyph(draw, center, color, scale, "pause")
+    draw_playback_glyph(draw, center, color, scale, "pause", smoothing=draw.corner_smoothing)
 
 
 def _draw_step_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=None) -> None:
-    draw_playback_glyph(draw, center, color, scale, "step")
+    draw_playback_glyph(draw, center, color, scale, "step", smoothing=draw.corner_smoothing)
 
 
 def _draw_previous_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=None) -> None:
-    draw_playback_glyph(draw, center, color, scale, "previous")
+    draw_playback_glyph(draw, center, color, scale, "previous", smoothing=draw.corner_smoothing)
 
 
 def _draw_reset_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=None) -> None:
-    draw_playback_glyph(draw, center, color, scale, "reset")
+    draw_playback_glyph(draw, center, color, scale, "reset", smoothing=draw.corner_smoothing)
 
 
 def _draw_stop_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=None) -> None:
@@ -369,6 +400,7 @@ def _circular_icon_button(
 
 
 def _draw_playback(draw: ImguiDraw2D, origin, scale: float, state: ProbeState) -> None:
+    draw = draw.with_corner_smoothing(state.playback_smoothing)
     x, y = origin
     icon_radius = float(state.overlay_icon_radius)
     state_radius = icon_radius + float(state.overlay_radial_step)
@@ -378,7 +410,7 @@ def _draw_playback(draw: ImguiDraw2D, origin, scale: float, state: ProbeState) -
     center_step = float(state.overlay_center_step)
     width = (capsule_radius * 2.0 + center_step * 3.0) * scale
     height = capsule_radius * 2.0 * scale
-    capsule = capsule_points(x, y, width, height)
+    capsule = capsule_points(x, y, width, height, state.capsule_smoothing)
     draw.convex_fill(capsule, (*CONCEPT_THEME.bg_child[:3], CAPSULE_SURFACE_ALPHA))
     draw.polyline(capsule, CONCEPT_THEME.primary, 1.4 * scale, closed=True)
     for index, (item_id, icon, selected) in enumerate(
@@ -439,10 +471,12 @@ def _draw_tool_icon(
             rotate_ring_gap_ratio=rotate_ring_gap_ratio,
             rotate_ring_cap=rotate_ring_cap,
         ),
+        smoothing=draw.corner_smoothing,
     )
 
 
 def _draw_tool_column(draw: ImguiDraw2D, origin, scale: float, state: ProbeState) -> None:
+    draw = draw.with_corner_smoothing(state.tool_smoothing)
     x, y = origin
     icon_radius = float(state.overlay_icon_radius)
     state_radius = icon_radius + float(state.overlay_radial_step)
@@ -459,7 +493,7 @@ def _draw_tool_column(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
     )
     width = capsule_radius * 2.0 * scale
     height = (centers[-1] + capsule_radius) * scale
-    capsule = capsule_points(x, y, width, height)
+    capsule = capsule_points(x, y, width, height, state.capsule_smoothing)
     draw.convex_fill(capsule, (*CONCEPT_THEME.bg_child[:3], CAPSULE_SURFACE_ALPHA))
     draw.polyline(capsule, CONCEPT_THEME.primary, 1.4 * scale, closed=True)
     separator = (*CONCEPT_THEME.border[:3], 0.72)
@@ -550,6 +584,7 @@ def _draw_mouse_input(
         CONCEPT_THEME,
         scale,
         size=(width, height),
+        smoothing=state.mouse_smoothing,
         geometry=replace(
             OVERLAY_GEOMETRY,
             hint_mouse_width=width,
@@ -579,13 +614,18 @@ def _keycap(
     width = text_width + padding_x * 2.0 * scale
     height *= scale
     y = center_y - height * 0.5
-    draw.rect_filled((x, y), (x + width, y + height), CONCEPT_THEME.bg_frame, rounding=3.0 * scale)
+    draw.rect_filled(
+        (x, y),
+        (x + width, y + height),
+        CONCEPT_THEME.bg_frame,
+        rounding=keycap_rounding(width, height),
+    )
     draw.rect(
         (x, y),
         (x + width, y + height),
         CONCEPT_THEME.border,
         1.0 * scale,
-        rounding=3.0 * scale,
+        rounding=keycap_rounding(width, height),
     )
     draw.text(
         (x + (width - text_width) * 0.5, y + (height - text_height) * 0.5),
@@ -667,7 +707,7 @@ def _draw_hint_bar(
     x, y = origin
     width = _hint_bar_width(draw, scale, state, variant)
     height = (state.hint_control_height + state.hint_padding_y * 2.0) * scale
-    capsule = _capsule_outline(x, y, width, height)
+    capsule = capsule_points(x, y, width, height, state.capsule_smoothing)
     draw.convex_fill(capsule, (*CONCEPT_THEME.bg_child[:3], CAPSULE_SURFACE_ALPHA))
     draw.polyline(capsule, CONCEPT_THEME.primary, 1.4 * scale, closed=True)
     center_y = y + height * 0.5
@@ -841,11 +881,10 @@ def _draw_joint_gizmo(
 ) -> None:
     """Draw the production slide/hinge silhouettes with optional delayed labels."""
 
+    if state is not None:
+        draw = draw.with_corner_smoothing(state.joint_smoothing)
     x, y = origin
     stroke = gizmo_ui.JOINT_RANGE_WIDTH_PT * scale
-    outline = gizmo_geometry.JOINT_OUTLINE_PT * scale
-    outline_width = stroke + 2.0 * outline
-    outline_color = tuple(float(value) for value in gizmo_geometry.JOINT_OUTLINE_COLOR)
     tick = 12.0 * scale
     hinge_tick = gizmo_ui.JOINT_LIMIT_TICK_PT * scale
 
@@ -867,28 +906,19 @@ def _draw_joint_gizmo(
         1.0 * scale,
         rounding=2.0 * scale,
     )
-    draw.line((slide_min, slide_y), (slide_max, slide_y), outline_color, outline_width)
     draw.line((slide_min, slide_y), (slide_max, slide_y), JOINT_COLOR, stroke)
-    for point in (slide_min, slide_max):
-        draw.line(
-            (point, slide_y - tick * 0.5),
-            (point, slide_y + tick * 0.5),
-            outline_color,
-            2.0 * scale + 2.0 * outline,
-            cap="round",
-        )
     draw.line(
         (slide_min, slide_y - tick * 0.5),
         (slide_min, slide_y + tick * 0.5),
         CONCEPT_THEME.axis_color(2),
-        2.0 * scale,
+        stroke,
         cap="round",
     )
     draw.line(
         (slide_max, slide_y - tick * 0.5),
         (slide_max, slide_y + tick * 0.5),
         CONCEPT_THEME.axis_color(0),
-        2.0 * scale,
+        stroke,
         cap="round",
     )
     current_x = x + 211.0 * scale
@@ -896,15 +926,8 @@ def _draw_joint_gizmo(
     draw.line(
         (current_x, slide_y - current_tick * 0.5),
         (current_x, slide_y + current_tick * 0.5),
-        outline_color,
-        4.0 * scale + 2.0 * outline,
-        cap="round",
-    )
-    draw.line(
-        (current_x, slide_y - current_tick * 0.5),
-        (current_x, slide_y + current_tick * 0.5),
         gizmo_ui.JOINT_CURRENT_COLOR,
-        4.0 * scale,
+        stroke,
         cap="round",
     )
     # Opposing drag handles sit off the scale line; the line itself shares the
@@ -913,16 +936,10 @@ def _draw_joint_gizmo(
         np.asarray((current_x, slide_y)),
         np.asarray((1.0, 0.0)),
         scale,
+        smoothing=draw.corner_smoothing,
     )
     for arrow in arrows:
         points = tuple((float(point[0]), float(point[1])) for point in arrow)
-        draw.fringed_concave_fill(points, outline_color)
-        draw.polyline(
-            points,
-            outline_color,
-            2.0 * outline * gizmo_ui.JOINT_SLIDE_ARROW_VISUAL_SCALE,
-            closed=True,
-        )
         draw.fringed_concave_fill(
             points,
             JOINT_COLOR,
@@ -970,7 +987,6 @@ def _draw_joint_gizmo(
     center = (x + 548.0 * scale, y + 140.0 * scale)
     radius = 72.0 * scale
     arc = tuple((center[0] + ux * radius, center[1] + uy * radius) for ux, uy in JOINT_HINGE_ARC)
-    draw.polyline(arc, outline_color, outline_width, cap="round")
     draw.polyline(arc, JOINT_COLOR, stroke, cap="round")
     for index, color in enumerate((CONCEPT_THEME.axis_color(0), CONCEPT_THEME.axis_color(2))):
         ux, uy = JOINT_HINGE_ARC[0 if index == 0 else -1]
@@ -978,31 +994,14 @@ def _draw_joint_gizmo(
         draw.line(
             point,
             (point[0] + ux * hinge_tick, point[1] + uy * hinge_tick),
-            outline_color,
-            2.4 * scale + 2.0 * outline,
-            cap="round",
-        )
-        draw.line(
-            point,
-            (point[0] + ux * hinge_tick, point[1] + uy * hinge_tick),
             color,
-            2.4 * scale,
+            stroke,
             cap="round",
         )
     current_ux, current_uy = JOINT_HINGE_ARC[len(JOINT_HINGE_ARC) // 2]
     current_point = (
         center[0] + current_ux * radius,
         center[1] + current_uy * radius,
-    )
-    draw.line(
-        current_point,
-        (
-            current_point[0] + current_ux * current_tick,
-            current_point[1] + current_uy * current_tick,
-        ),
-        outline_color,
-        outline_width,
-        cap="round",
     )
     draw.line(
         current_point,
@@ -1048,33 +1047,24 @@ def _draw_joint_gizmo(
 
 
 def _draw_joint_rotation_feedback(draw: ImguiDraw2D, center, radius: float, scale: float) -> None:
-    """Show the production hinge drag + Shift colors and joint outline."""
+    """Show the production hinge drag and Shift feedback colors."""
 
     arc = tuple((center[0] + ux * radius, center[1] + uy * radius) for ux, uy in JOINT_HINGE_ARC)
-    outline = gizmo_geometry.JOINT_OUTLINE_PT * scale
-    outline_color = tuple(float(value) for value in gizmo_geometry.JOINT_OUTLINE_COLOR)
-    draw.polyline(arc, outline_color, 3.0 * scale + 2.0 * outline, cap="round")
     draw.polyline(arc, JOINT_COLOR, 3.0 * scale, cap="round")
 
-    start_index = 8
-    end_index = 17
+    start_index = 80
+    end_index = 170
     sweep = arc[start_index : end_index + 1]
     draw.triangle_fan_fill(
         (center, *sweep),
         (*CONCEPT_THEME.primary_dim[:3], 0.24),
     )
-    draw.polyline(
-        sweep,
-        outline_color,
-        3.0 * scale + 2.0 * outline,
-        cap="round",
-    )
     draw.polyline(sweep, CONCEPT_THEME.primary_bright, 3.0 * scale, cap="round")
 
-    for index in range(0, len(JOINT_HINGE_ARC), 2):
+    for index in range(0, len(JOINT_HINGE_ARC), 20):
         ux, uy = JOINT_HINGE_ARC[index]
         point = arc[index]
-        length = (9.0 if index % 6 == 0 else 6.0) * scale
+        length = (9.0 if index % 60 == 0 else 6.0) * scale
         draw.line(
             point,
             (point[0] + ux * length, point[1] + uy * length),
@@ -1189,9 +1179,11 @@ def _draw_transform_gizmo(
     *,
     forced_state: str,
     mode: str,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> None:
     """Render the same flat gizmo geometry and color states as the application."""
 
+    draw = draw.with_corner_smoothing(smoothing)
     hit = 190.0 * scale
     imgui.set_cursor_screen_pos(
         imgui.ImVec2(float(center[0] - hit * 0.5), float(center[1] - hit * 0.5))
@@ -1205,6 +1197,7 @@ def _draw_transform_gizmo(
     rect = (x - 98.0 * scale, y - 98.0 * scale, 196.0 * scale, 196.0 * scale)
     camera = GIZMO_PROBE_CAMERA
     specimen = GIZMO_PROBE_SPECIMENS[mode]
+    specimen._frame.corner_smoothing = smoothing
     specimen._visible = True
     specimen._interactive = True
     specimen._using = False
@@ -1224,9 +1217,7 @@ def _draw_transform_gizmo(
     )
     specimen._frame.axis_mask = axis_mask
     specimen._frame.plane_mask = plane_mask
-    hot = (
-        gizmo_geometry.GizmoHandle.X if mode == "translate" else gizmo_geometry.GizmoHandle.ROTATE_X
-    )
+    hot = gizmo_geometry.GizmoHandle.X if mode != "rotate" else gizmo_geometry.GizmoHandle.ROTATE_X
     specimen._hovered = hot if display_state == "hover" else gizmo_geometry.GizmoHandle.NONE
     specimen._active = hot if display_state == "pressed" else gizmo_geometry.GizmoHandle.NONE
     specimen._frame.hovered = specimen._hovered
@@ -1760,63 +1751,12 @@ def _draw_settings(size, state: ProbeState, scale: float) -> None:
         imgui.end_child()
         return
     imgui.set_next_item_width(-1.0)
-    if state.settings_filter:
-        imgui.set_next_item_allow_overlap()
-    _, state.settings_filter = imgui.input_text("##probe-settings-filter", state.settings_filter)
-    lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-    cursor_after_input = imgui.get_cursor_screen_pos()
-    icon_color = imgui.color_convert_float4_to_u32(
-        imgui.get_style_color_vec4(imgui.Col_.text_disabled)
+    _, state.settings_filter = search_input(
+        "##probe-settings-filter",
+        state.settings_filter,
+        search_tooltip="Search settings",
+        clear_tooltip="Clear search",
     )
-    radius = max(2.5, (hi.y - lo.y) * 0.16)
-    icon_step = max(radius * 3.6, hi.y - lo.y)
-    center = imgui.ImVec2(hi.x - radius * 2.7, (lo.y + hi.y) * 0.5 - radius * 0.2)
-    draw_list = imgui.get_window_draw_list()
-    draw_list.add_circle(center, radius, icon_color, 12, 1.2)
-    draw_list.add_line(
-        imgui.ImVec2(center.x + radius * 0.70, center.y + radius * 0.70),
-        imgui.ImVec2(center.x + radius * 1.55, center.y + radius * 1.55),
-        icon_color,
-        1.2,
-    )
-    search_lo = imgui.ImVec2(center.x - icon_step * 0.5, lo.y)
-    search_hi = imgui.ImVec2(center.x + icon_step * 0.5, hi.y)
-    if imgui.is_mouse_hovering_rect(search_lo, search_hi):
-        imgui.set_tooltip("Search settings")
-    if state.settings_filter:
-        clear_center = imgui.ImVec2(center.x - icon_step, (lo.y + hi.y) * 0.5)
-        clear_lo = imgui.ImVec2(clear_center.x - icon_step * 0.5, lo.y)
-        clear_hi = imgui.ImVec2(clear_center.x + icon_step * 0.5, hi.y)
-        imgui.set_cursor_screen_pos(clear_lo)
-        clear_clicked = imgui.invisible_button(
-            "##probe-clear-settings-search",
-            imgui.ImVec2(clear_hi.x - clear_lo.x, clear_hi.y - clear_lo.y),
-        )
-        clear_hovered = imgui.is_item_hovered()
-        imgui.set_cursor_screen_pos(cursor_after_input)
-        clear_color = (
-            imgui.color_convert_float4_to_u32(imgui.get_style_color_vec4(imgui.Col_.text))
-            if clear_hovered
-            else icon_color
-        )
-        arm = radius * 0.88
-        draw_list.add_line(
-            imgui.ImVec2(clear_center.x - arm, clear_center.y - arm),
-            imgui.ImVec2(clear_center.x + arm, clear_center.y + arm),
-            clear_color,
-            1.4,
-        )
-        draw_list.add_line(
-            imgui.ImVec2(clear_center.x + arm, clear_center.y - arm),
-            imgui.ImVec2(clear_center.x - arm, clear_center.y + arm),
-            clear_color,
-            1.4,
-        )
-        if clear_hovered:
-            imgui.set_mouse_cursor(imgui.MouseCursor_.hand)
-            imgui.set_tooltip("Clear search")
-        if clear_clicked:
-            state.settings_filter = ""
     imgui.separator()
     if state.settings_page == 0:
         _draw_settings_general(state)
@@ -2021,106 +1961,17 @@ def _draw_viewport(size, scale: float, state: ProbeState) -> tuple[float, float,
 
 
 def _diamond(draw: ImguiDraw2D, center, size: float, color) -> None:
-    x, y = center
-    draw.convex_fill(((x, y - size), (x + size, y), (x, y + size), (x - size, y)), color)
+    _draw_command_icon(draw, center, "snapshot", color, size / 6.0, smoothing=draw.corner_smoothing)
 
 
 def _draw_transport_button(
     draw: ImguiDraw2D, item_id: str, position, kind: str, scale: float
 ) -> None:
-    size = 28.0 * scale
     imgui.set_cursor_screen_pos(imgui.ImVec2(float(position[0]), float(position[1])))
-    imgui.invisible_button(item_id, imgui.ImVec2(size, size))
-    hovered = imgui.is_item_hovered()
-    background = CONCEPT_THEME.bg_frame_hovered if hovered else CONCEPT_THEME.bg_frame
-    foreground = CONCEPT_THEME.primary_bright if hovered else CONCEPT_THEME.text
-    x, y = position
-    draw.rect_filled((x, y), (x + size, y + size), background, rounding=3 * scale)
-    center = (x + size * 0.5, y + size * 0.5)
-    if kind == "record":
-        draw.circle_filled(center, 5 * scale, CONCEPT_THEME.danger)
-    elif kind == "play":
-        _draw_play_icon(draw, center, foreground, scale)
-    elif kind == "stop":
-        _draw_stop_icon(draw, center, foreground, scale)
-    elif kind in ("first", "previous"):
-        x2, y2 = center
-        draw.convex_fill(
-            (
-                (x2 - 6.0 * scale, y2),
-                (x2 + 3.5 * scale, y2 - 6.0 * scale),
-                (x2 + 3.5 * scale, y2 + 6.0 * scale),
-            ),
-            foreground,
-        )
-        if kind == "first":
-            draw.rect_filled(
-                (x2 - 7.0 * scale, y2 - 6.0 * scale),
-                (x2 - 5.2 * scale, y2 + 6.0 * scale),
-                foreground,
-            )
-    elif kind in ("next", "last"):
-        x2, y2 = center
-        draw.convex_fill(
-            (
-                (x2 + 6.0 * scale, y2),
-                (x2 - 3.5 * scale, y2 - 6.0 * scale),
-                (x2 - 3.5 * scale, y2 + 6.0 * scale),
-            ),
-            foreground,
-        )
-        if kind == "last":
-            draw.rect_filled(
-                (x2 + 5.2 * scale, y2 - 6.0 * scale),
-                (x2 + 7.0 * scale, y2 + 6.0 * scale),
-                foreground,
-            )
-    elif kind == "clear":
-        x2, y2 = center
-        draw.line(
-            (x2 - 5.0 * scale, y2 - 5.0 * scale),
-            (x2 + 5.0 * scale, y2 + 5.0 * scale),
-            foreground,
-            1.8 * scale,
-        )
-        draw.line(
-            (x2 + 5.0 * scale, y2 - 5.0 * scale),
-            (x2 - 5.0 * scale, y2 + 5.0 * scale),
-            foreground,
-            1.8 * scale,
-        )
-    elif kind in ("key-previous", "key-next"):
-        x2, y2 = center
-        _diamond(
-            draw,
-            (x2 + (2.5 if kind == "key-previous" else -2.5) * scale, y2),
-            4.5 * scale,
-            foreground,
-        )
-        direction = -1.0 if kind == "key-previous" else 1.0
-        draw.convex_fill(
-            (
-                (x2 + direction * 7.0 * scale, y2),
-                (x2 + direction * 3.5 * scale, y2 - 3.5 * scale),
-                (x2 + direction * 3.5 * scale, y2 + 3.5 * scale),
-            ),
-            foreground,
-        )
-    elif kind == "view":
-        x2, y2 = center
-        draw.rect(
-            (x2 - 7.0 * scale, y2 - 5.0 * scale),
-            (x2 + 7.0 * scale, y2 + 5.0 * scale),
-            foreground,
-            1.5 * scale,
-            rounding=1.5 * scale,
-        )
-        draw.circle_filled(center, 2.0 * scale, foreground, segments=16)
-    else:
-        _diamond(draw, center, 6 * scale, foreground)
+    _command_button(item_id, kind, kind, CONCEPT_THEME, scale, smoothing=draw.corner_smoothing)
 
 
-def _draw_keyframes(size, scale: float) -> None:
+def _draw_keyframes(size, scale: float, state: ProbeState) -> None:
     if not imgui.begin_child("Keyframes###ProbeKeyframes", size, imgui.ChildFlags_.borders.value):
         imgui.end_child()
         return
@@ -2131,9 +1982,18 @@ def _draw_keyframes(size, scale: float) -> None:
         imgui.set_next_item_width(-1.0)
         imgui.combo("##probe-keyframe-model", 0, ("joint_types",))
         imgui.end_table()
-    draw = ImguiDraw2D(imgui.get_window_draw_list())
+    draw = ImguiDraw2D(imgui.get_window_draw_list(), corner_smoothing=state.playback_smoothing)
     row_one = imgui.get_cursor_screen_pos()
-    imgui.button("●  Record New Take", imgui.ImVec2(142.0 * scale, 28.0 * scale))
+    _command_button(
+        "##probe-record",
+        "record",
+        "Record New Take",
+        CONCEPT_THEME,
+        scale,
+        label="Record New Take",
+        width=142.0 * scale,
+        smoothing=state.playback_smoothing,
+    )
     transport_x = row_one.x + 152.0 * scale
     for index, kind in enumerate(("first", "previous", "play", "stop", "next", "last", "clear")):
         _draw_transport_button(
@@ -2148,7 +2008,16 @@ def _draw_keyframes(size, scale: float) -> None:
 
     row_two_y = row_one.y + 34.0 * scale
     imgui.set_cursor_screen_pos(imgui.ImVec2(row_one.x, row_two_y))
-    imgui.button("◆  Capture Snapshot", imgui.ImVec2(142.0 * scale, 28.0 * scale))
+    _command_button(
+        "##probe-snapshot",
+        "snapshot",
+        "Capture Snapshot",
+        CONCEPT_THEME,
+        scale,
+        label="Capture Snapshot",
+        width=142.0 * scale,
+        smoothing=state.playback_smoothing,
+    )
     for index, kind in enumerate(("key-previous", "key-next", "view")):
         _draw_transport_button(
             draw,
@@ -2734,21 +2603,19 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
                 text_y = lo.y + max(0.0, (hi.y - lo.y - imgui.get_font_size()) * 0.5)
                 node_x = lo.x + (6.0 + depth * 22.0) * scale
                 if disclosure:
-                    center_y = (lo.y + hi.y) * 0.5
-                    if disclosure == "▾":
-                        triangle = (
-                            (node_x, center_y - 3.5 * scale),
-                            (node_x + 10.0 * scale, center_y - 3.5 * scale),
-                            (node_x + 5.0 * scale, center_y + 4.5 * scale),
-                        )
-                    else:
-                        triangle = (
-                            (node_x + 1.0 * scale, center_y - 5.0 * scale),
-                            (node_x + 1.0 * scale, center_y + 5.0 * scale),
-                            (node_x + 9.0 * scale, center_y),
-                        )
-                    row_draw.convex_fill(
-                        triangle,
+                    ink = row_draw.text_ink_bounds("H")
+                    center_y = (
+                        round(text_y) + (ink[1] + ink[3]) * 0.5
+                        if ink is not None
+                        else (lo.y + hi.y) * 0.5
+                    )
+                    row_draw.fringed_concave_fill(
+                        disclosure_triangle(
+                            (node_x + 5 * scale, center_y),
+                            4 * scale,
+                            opened=disclosure == "▾",
+                            smoothing=state.tool_smoothing,
+                        ),
                         CONCEPT_THEME.text,
                     )
                 row_draw.text(
@@ -3335,7 +3202,7 @@ def _draw_info_aux(size) -> None:
 
 def _draw_workspaces_tab(available, scale: float, state: ProbeState) -> None:
     keyframe_height = min(320.0 * scale, max(240.0 * scale, available.y * 0.34))
-    _draw_keyframes(imgui.ImVec2(available.x, keyframe_height), scale)
+    _draw_keyframes(imgui.ImVec2(available.x, keyframe_height), scale, state)
     imgui.text_disabled("M15 · full-width bottom dock; transport uses compact icon groups")
     active = state.aux_tab
     if imgui.begin_tab_bar("##probe-aux-tabs"):
@@ -3419,6 +3286,7 @@ def _geometry_values_text(state: ProbeState) -> str:
     """Return the live component experiment as reviewable production fields."""
 
     values = (
+        ("imgui_rounding", state.imgui_rounding),
         ("icon_radius", state.overlay_icon_radius),
         ("radial_step", state.overlay_radial_step),
         ("center_step", state.overlay_center_step),
@@ -3443,7 +3311,212 @@ def _geometry_values_text(state: ProbeState) -> str:
         ("hint_mouse_wheel_height_ratio", state.hint_mouse_wheel_height_ratio),
         ("hint_mouse_wheel_gap_ratio", state.hint_mouse_wheel_gap_ratio),
     )
+    values += tuple((name, getattr(state, name)) for _, name in CORNER_CONTROLS)
     return "\n".join(f"{name}={value}," for name, value in values)
+
+
+def _draw_corner_controls(position, size, state: ProbeState) -> None:
+    imgui.set_cursor_screen_pos(imgui.ImVec2(*position))
+    if imgui.begin_child(
+        "Corner smoothing###CornerControls", imgui.ImVec2(*size), imgui.ChildFlags_.borders.value
+    ):
+        imgui.text("ImGui corner radius")
+        imgui.set_next_item_width(-1.0)
+        _, state.imgui_rounding = imgui.slider_float(
+            "##imgui-corner-radius",
+            state.imgui_rounding,
+            0.0,
+            16.0,
+            "%.2f px",
+            imgui.SliderFlags_.always_clamp.value,
+        )
+        imgui.text_wrapped("Standard ImGui corners. Radius does not change layout spacing.")
+        imgui.separator()
+        imgui.text("Custom drawing smoothing")
+        imgui.separator()
+        for label, name in CORNER_CONTROLS:
+            imgui.text(label)
+            imgui.set_next_item_width(-1.0)
+            changed, value = imgui.slider_float(
+                f"##corner-{name}",
+                getattr(state, name),
+                0.0,
+                1.0,
+                "%.3f",
+                imgui.SliderFlags_.always_clamp.value,
+            )
+            if changed:
+                setattr(state, name, float(value))
+        imgui.separator()
+        if imgui.button("Reset corners", imgui.ImVec2(-1.0, 0.0)):
+            state.imgui_rounding = theme_mod.DEFAULT_CORNER_RADIUS
+            for _, name in CORNER_CONTROLS:
+                setattr(state, name, CORNER_SMOOTHING)
+        if imgui.button("Copy corner values", imgui.ImVec2(-1.0, 0.0)):
+            imgui.set_clipboard_text(
+                f"imgui_rounding={state.imgui_rounding:.6g}\n"
+                + "\n".join(f"{name}={getattr(state, name):.6g}" for _, name in CORNER_CONTROLS)
+            )
+        imgui.text_wrapped(
+            "0 uses the baseline profile. Positive values add smooth curvature transitions."
+        )
+    imgui.end_child()
+
+
+def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState) -> None:
+    x0, y0 = origin
+    _draw_corner_controls((x0 + 12 * scale, y0), (286 * scale, 790 * scale), state)
+    width, height, gap = 390.0 * scale, 247.0 * scale, 12.0 * scale
+    specimens = (("ImGui controls", "imgui_rounding"), *CORNER_CONTROLS)
+    for index, (title, field_name) in enumerate(specimens):
+        x = x0 + 320 * scale + (index % 3) * (width + gap)
+        y = y0 + (index // 3) * (height + gap)
+        q = 0.0 if field_name == "imgui_rounding" else getattr(state, field_name)
+        item_draw = draw.with_corner_smoothing(q)
+        draw.rect_filled(
+            (x, y),
+            (x + width, y + height),
+            CONCEPT_THEME.bg_child,
+            rounding=8 * scale,
+            smoothing=0.0,
+        )
+        caption = (
+            f"{title}  {state.imgui_rounding:.1f} px"
+            if field_name == "imgui_rounding"
+            else f"{title}  {q:.3f}"
+        )
+        draw.text((x + 16 * scale, y + 14 * scale), CONCEPT_THEME.text, caption)
+        cx, cy = x + width * 0.5, y + height * 0.56
+        imgui.push_id(field_name)
+        if field_name == "imgui_rounding":
+            imgui.set_cursor_screen_pos(imgui.ImVec2(x + 24 * scale, y + 64 * scale))
+            imgui.button("Rounded button", imgui.ImVec2(width - 48 * scale, 40 * scale))
+            imgui.set_cursor_screen_pos(imgui.ImVec2(x + 24 * scale, y + 121 * scale))
+            _, state.imgui_example_enabled = imgui.checkbox("Enabled", state.imgui_example_enabled)
+            imgui.set_cursor_screen_pos(imgui.ImVec2(x + 24 * scale, y + 165 * scale))
+            imgui.set_next_item_width(width - 48 * scale)
+            _, state.imgui_example_value = imgui.slider_float(
+                "##native-corner-example", state.imgui_example_value, 0.0, 1.0, "%.2f"
+            )
+        elif field_name == "capsule_smoothing":
+            for w, h, yy in ((280, 62, cy - 55 * scale), (88, 54, cy + 32 * scale)):
+                points = capsule_points(
+                    cx - w * scale * 0.5, yy - h * scale * 0.5, w * scale, h * scale, q
+                )
+                item_draw.convex_fill(points, CONCEPT_THEME.bg_frame)
+                item_draw.polyline(points, CONCEPT_THEME.primary, 1.5 * scale, closed=True)
+        elif field_name == "playback_smoothing":
+            for i, kind in enumerate(("play", "pause", "previous", "reset")):
+                draw_playback_glyph(
+                    item_draw,
+                    (cx + (i - 1.5) * 76 * scale, cy),
+                    CONCEPT_THEME.text,
+                    2.1 * scale,
+                    kind,
+                    smoothing=q,
+                )
+        elif field_name == "tool_smoothing":
+            for i, kind in enumerate(("move", "rotate", "dimensions", "snap")):
+                draw_tool_glyph(
+                    item_draw,
+                    (cx + (i - 1.5) * 82 * scale, cy),
+                    CONCEPT_THEME.text,
+                    2.0 * scale,
+                    kind,
+                    "world",
+                    smoothing=q,
+                )
+        elif field_name == "mouse_smoothing":
+            for i, button in enumerate(("left", "right", "wheel")):
+                draw_mouse_hint_glyph(
+                    item_draw,
+                    cx + (i - 1) * 98 * scale - 24 * scale,
+                    cy,
+                    button,
+                    "",
+                    CONCEPT_THEME,
+                    3.2 * scale,
+                    smoothing=q,
+                )
+        elif field_name == "transform_smoothing":
+            for i, mode in enumerate(("translate", "dimensions")):
+                _draw_transform_gizmo(
+                    item_draw,
+                    f"##corner-{mode}",
+                    (cx + (i - 0.5) * 182 * scale, cy),
+                    0.85 * scale,
+                    forced_state="default",
+                    mode=mode,
+                    smoothing=q,
+                )
+            draw_drag_link(
+                item_draw,
+                (cx - 65 * scale, y + height - 57 * scale),
+                (cx + 65 * scale, y + height - 57 * scale),
+                CONCEPT_THEME.text,
+                CONCEPT_THEME.text_disabled,
+                2 * scale,
+                5 * scale,
+                0.75 * scale,
+                smoothing=q,
+            )
+            for i in range(11):
+                a = (cx + (i - 5) * 13 * scale, y + height - 24 * scale)
+                item_draw.line(
+                    a,
+                    (a[0], a[1] + (14 if i % 5 == 0 else 8) * scale),
+                    CONCEPT_THEME.text,
+                    2 * scale,
+                    cap="round",
+                )
+        elif field_name == "joint_smoothing":
+            _draw_joint_gizmo(
+                item_draw,
+                (x + 4 * scale, y + 67 * scale),
+                0.55 * scale,
+                state,
+                item_id="corner-joint",
+                show_limit_labels=False,
+            )
+        elif field_name == "view_smoothing":
+            zoom = 1.6 * scale
+            reach = (view_ui.RADIUS_PT + view_ui.BALL_PT + view_ui.MARGIN_PT) * zoom
+            rect = (cx - 100 * scale, cy - reach, 100 * scale + reach, height)
+            CORNER_VIEW_GIZMO.update(GIZMO_PROBE_CAMERA, rect, (-1000, -1000), zoom, enabled=False)
+            CORNER_VIEW_GIZMO.draw(item_draw, zoom, smoothing=q)
+        else:
+            rect = (cx - 85 * scale, cy - 85 * scale, 170 * scale, 170 * scale)
+            edges = perturb_ui.silhouette_edges(
+                np.zeros(3), GIZMO_IDENTITY_F64, np.ones(3) * 0.65, GIZMO_PROBE_CAMERA.eye
+            )
+            loop = perturb_ui.silhouette_loop(edges)
+            rounded = perturb_ui.rounded_loop(
+                loop, GIZMO_PROBE_CAMERA, rect, 8 * scale, smoothing=q
+            )
+            points = perturb_ui.project(GIZMO_PROBE_CAMERA, rounded, rect)[:, :2]
+            item_draw.polyline(points, CONCEPT_THEME.text, 2 * scale, closed=True)
+            perturb_ui.draw_axes(
+                item_draw,
+                GIZMO_PROBE_CAMERA,
+                rect,
+                np.zeros(3),
+                GIZMO_IDENTITY_F64,
+                0.7 * scale,
+                smoothing=q,
+            )
+        if field_name == "perturb_smoothing":
+            draw_drag_link(
+                item_draw,
+                (cx - 75 * scale, y + height - 22 * scale),
+                (cx + 75 * scale, y + height - 22 * scale),
+                CONCEPT_THEME.text,
+                CONCEPT_THEME.text_disabled,
+                2 * scale,
+                5 * scale,
+                0.75 * scale,
+                smoothing=q,
+            )
+        imgui.pop_id()
 
 
 def _draw_geometry_controls(position, size, state: ProbeState) -> None:
@@ -3595,6 +3668,9 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
     if imgui.button("Copy current values", imgui.ImVec2(-1.0, 0.0)):
         imgui.set_clipboard_text(_geometry_values_text(state))
     if imgui.button("Reset production defaults", imgui.ImVec2(-1.0, 0.0)):
+        state.imgui_rounding = theme_mod.DEFAULT_CORNER_RADIUS
+        for _, name in CORNER_CONTROLS:
+            setattr(state, name, CORNER_SMOOTHING)
         state.overlay_icon_radius = int(OVERLAY_GEOMETRY.icon_radius)
         state.overlay_radial_step = int(OVERLAY_GEOMETRY.radial_step)
         state.overlay_center_step = int(OVERLAY_GEOMETRY.center_step)
@@ -3634,6 +3710,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
     active_tab = state.geometry_tab
     if imgui.begin_tab_bar("##geometry-spec-tabs"):
         for label in (
+            "Corners",
             "Playback",
             "Tools",
             "Hints & input",
@@ -3696,7 +3773,12 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
 
     show_geometry_controls = active_tab in ("Playback", "Tools", "Hints & input")
 
-    if active_tab == "Playback":
+    if active_tab == "Tools":
+        draw = draw.with_corner_smoothing(state.tool_smoothing)
+
+    if active_tab == "Corners":
+        _draw_corner_page(draw, (x0, content_y), scale, state)
+    elif active_tab == "Playback":
         playback_scale = scale * state.construction_playback_scale
         play_origin = (x0 + 54.0 * scale, content_y + 74.0 * scale)
         pause_origin = (
@@ -4033,6 +4115,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                     scale,
                     forced_state=forced_state,
                     mode=mode,
+                    smoothing=state.transform_smoothing,
                 )
                 label_width, _ = draw.text_size(label)
                 draw.text(
@@ -4296,6 +4379,7 @@ def _draw_workspace_canvas(available, scale: float, state: ProbeState):
 
 def _draw_workspace(window: Window, state: ProbeState) -> None:
     scale = window.style_scale
+    theme_mod.apply_corner_radius(imgui, state.imgui_rounding, scale)
     display = imgui.get_io().display_size
     imgui.set_next_window_pos(imgui.ImVec2(0.0, 0.0))
     imgui.set_next_window_size(display)
@@ -4322,6 +4406,15 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
                 clicked, _ = imgui.menu_item(page, "", state.page == page)
                 if clicked:
                     state.page = page
+            imgui.separator()
+            _, state.imgui_rounding = imgui.slider_float(
+                "ImGui corner radius",
+                state.imgui_rounding,
+                0.0,
+                16.0,
+                "%.2f px",
+                imgui.SliderFlags_.always_clamp.value,
+            )
             imgui.separator()
             imgui.text_disabled("Viewport overlays")
             for label, attribute in (
@@ -4409,6 +4502,8 @@ def render(
     initial_rotate_cap: str,
     ui_scale: float,
     interactive_fps: float,
+    initial_smoothing: float | None = None,
+    initial_imgui_radius: float | None = None,
 ) -> None:
     window_width, window_height = _probe_window_size(width, height, ui_scale)
     window = Window(
@@ -4433,6 +4528,11 @@ def render(
             geometry_tab=initial_geometry_tab,
             rotate_ring_cap=initial_rotate_cap,
         )
+        if initial_smoothing is not None:
+            for _, name in CORNER_CONTROLS:
+                setattr(state, name, initial_smoothing)
+        if initial_imgui_radius is not None:
+            state.imgui_rounding = initial_imgui_radius
         if interactive:
             window.show()
             frame_period = 1.0 / interactive_fps
@@ -4493,6 +4593,7 @@ def main() -> None:
     parser.add_argument(
         "--geometry-tab",
         choices=(
+            "corners",
             "playback",
             "tools",
             "hints",
@@ -4523,7 +4624,23 @@ def main() -> None:
         default=30.0,
         help="Maximum interactive refresh rate (default: 30)",
     )
+    parser.add_argument(
+        "--smoothing",
+        type=float,
+        default=None,
+        help="Initial corner smoothing for all element groups, from 0 to 1",
+    )
+    parser.add_argument(
+        "--imgui-radius",
+        type=float,
+        default=None,
+        help="Initial ImGui radius in logical pixels, from 0 to 16",
+    )
     args = parser.parse_args()
+    if args.imgui_radius is not None and not 0.0 <= args.imgui_radius <= 16.0:
+        parser.error("--imgui-radius must be between 0 and 16")
+    if args.smoothing is not None and not 0.0 <= args.smoothing <= 1.0:
+        parser.error("--smoothing must be between 0 and 1")
     if not 0.75 <= args.ui_scale <= 4.0:
         parser.error("--ui-scale must be between 0.75 and 4.0")
     if not 15.0 <= args.fps <= 240.0:
@@ -4536,6 +4653,7 @@ def main() -> None:
         interactive=args.interactive,
         initial_page=args.page.title(),
         initial_geometry_tab={
+            "corners": "Corners",
             "playback": "Playback",
             "tools": "Tools",
             "hints": "Hints & input",
@@ -4549,6 +4667,8 @@ def main() -> None:
         initial_rotate_cap=args.rotate_cap,
         ui_scale=args.ui_scale,
         interactive_fps=args.fps,
+        initial_smoothing=args.smoothing,
+        initial_imgui_radius=args.imgui_radius,
     )
     print("interactive probe closed" if args.interactive else output)
 

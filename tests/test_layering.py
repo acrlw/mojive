@@ -122,6 +122,25 @@ def test_shared_vocabulary_is_dependency_free():
     assert not bad
 
 
+def test_shared_2d_geometry_is_independent_of_draw_adapters_and_interaction():
+    forbidden = (
+        "mojive.ui",
+        "mojive.render",
+        "mojive.gizmo",
+        "mojive.adapters",
+        "imgui_bundle",
+        "glfw",
+        "moderngl",
+        "wgpu",
+    )
+    bad = {}
+    for name in ("curves2d.py", "draglink2d.py"):
+        hits = {hit for prefix in forbidden for hit in _hits(_imports(SRC / name), prefix)}
+        if hits:
+            bad[name] = sorted(hits)
+    assert not bad
+
+
 def test_adapters_do_not_import_render_internals():
     """Adapters publish shared scene contracts without backend imports."""
 

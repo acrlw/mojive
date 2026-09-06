@@ -89,16 +89,20 @@ def test_gpu_pass_timing_is_reported_when_supported(viewer):
     if not supported:
         assert not v.backend.stats.gpu_ms
         return
-    for _ in range(20):
+    # Readback completion is asynchronous and need not track the CPU frame rate.
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
         v.sync()
-        if "export" in v.backend.stats.gpu_ms:
+        if v.backend.stats.gpu_ms:
             break
         time.sleep(0.005)
     # Metal may leave one render-pass boundary timestamp unchanged. The
     # collector deliberately drops that invalid sample instead of publishing
     # a zero or wrapped duration, so individual pass keys remain optional.
-    assert v.backend.stats.gpu_ms["export"] > 0.0
-    assert all(np.isfinite(value) and value < 1000.0 for value in v.backend.stats.gpu_ms.values())
+    assert v.backend.stats.gpu_ms
+    assert all(
+        np.isfinite(value) and 0.0 < value < 1000.0 for value in v.backend.stats.gpu_ms.values()
+    )
 
 
 def test_window_dependencies_use_the_imgui_glfw_library(backend_name):

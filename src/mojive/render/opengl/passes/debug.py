@@ -35,6 +35,7 @@ GHOST_ALPHA = 0.28
 
 
 _SPECS = {
+    DrawPath.SCREEN_TRIANGLE: ProgramSpec("debug_screen", "debug_screen.vert", "debug_line.frag"),
     DrawPath.SEGMENT: ProgramSpec("debug_line", "debug_line.vert", "debug_line.frag"),
     DrawPath.ARROW: ProgramSpec(
         "debug_line",
@@ -64,15 +65,22 @@ _SPECS = {
     ),
 }
 _LAYOUT: dict[DrawPath, str] = {
+    DrawPath.SCREEN_TRIANGLE: "3f 3f 3f 4f/i",
     DrawPath.SEGMENT: "3f 3f 4f 1f 1f 1f/i",
     DrawPath.ARROW: "3f 3f 4f 1f 1f 1f/i",
     DrawPath.STROKE: "3f 3f 3f 4f 1f/i",
     DrawPath.POINT: "3f 4f 1f/i",
-    DrawPath.DRAG_LINK: "3f 3f 4f 4f 1f 1f 1f/i",
+    DrawPath.DRAG_LINK: "3f 3f 4f 4f 1f 1f 1f 1f/i",
     DrawPath.SOLID: "4f 4f 4f 4f 4f/i",
     DrawPath.SECTOR: "3f 3f 3f 4f 1f/i",
 }
 _ATTRS: dict[DrawPath, tuple[tuple[str, int, int], ...]] = {
+    DrawPath.SCREEN_TRIANGLE: (
+        ("in_a", 3, 0),
+        ("in_b", 3, 12),
+        ("in_c", 3, 24),
+        ("in_color", 4, 36),
+    ),
     DrawPath.SEGMENT: (
         ("in_a", 3, 0),
         ("in_b", 3, 12),
@@ -105,6 +113,7 @@ _ATTRS: dict[DrawPath, tuple[tuple[str, int, int], ...]] = {
         ("in_width", 1, 56),
         ("in_radius", 1, 60),
         ("in_edge", 1, 64),
+        ("in_smoothing", 1, 68),
     ),
     DrawPath.SOLID: (
         ("in_model0", 4, 0),
@@ -122,6 +131,7 @@ _ATTRS: dict[DrawPath, tuple[tuple[str, int, int], ...]] = {
     ),
 }
 _VERTICES: dict[DrawPath, int] = {
+    DrawPath.SCREEN_TRIANGLE: 3,
     DrawPath.SEGMENT: 6,
     DrawPath.ARROW: 15,
     DrawPath.STROKE: 6 + 3 * STROKE_JOIN_SEGMENTS,

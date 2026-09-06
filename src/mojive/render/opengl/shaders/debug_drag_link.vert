@@ -7,6 +7,7 @@ in vec4 in_edge_color;
 in float in_width;
 in float in_radius;
 in float in_edge;
+in float in_smoothing;
 
 uniform mat4 u_view_proj;
 uniform vec2 u_viewport;
@@ -20,6 +21,7 @@ flat out vec4 v_edge_color;
 flat out float v_width;
 flat out float v_radius;
 flat out float v_edge;
+flat out float v_smoothing;
 
 void main() {
     vec4 clip_a = u_view_proj * vec4(in_a, 1.0);
@@ -31,11 +33,12 @@ void main() {
     v_width = in_width;
     v_radius = in_radius;
     v_edge = in_edge;
+    v_smoothing = in_smoothing;
 
     // The hollow start ring extends half a core stroke beyond its radius.
     // Include that stroke as well as the contrast edge and AA guard in the
     // primitive quad; otherwise large UI scales clip the ring at the quad.
-    float pad = in_radius + 0.5 * in_width + in_edge + 2.0;
+    float pad = in_radius + 0.5 * in_width + in_edge + in_radius * in_smoothing * 0.3125 + 2.0;
     vec2 lo = min(v_a, v_b) - pad;
     vec2 hi = max(v_a, v_b) + pad;
     const vec2 C[6] = vec2[6](

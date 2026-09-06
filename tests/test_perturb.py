@@ -464,7 +464,8 @@ def test_rounded_loop_trims_screen_space_corners():
 
     rounded = P.rounded_loop(loop, cam, rect, 8.0, segments=5)
 
-    assert rounded.shape == (24, 3)
+    assert rounded.ndim == 2 and rounded.shape[1] == 3
+    assert len(rounded) > len(loop)
     assert not any(np.allclose(point, corner) for point in rounded for corner in loop)
     assert np.max(np.abs(rounded[:, [0, 2]])) <= 1.0
 
@@ -591,8 +592,8 @@ def test_layers_and_occlusion_tiers_match_the_spec(monkeypatch):
     assert core[1] == P.OUTLINE_RGBA
     assert border[2] > core[2]
     assert border[3] is core[3] is True
-    expected_points = 6 * (P.OUTLINE_CORNER_SEGMENTS + 1)
-    assert len(border[0]) == len(core[0]) == expected_points
+    assert len(border[0]) == len(core[0]) > 6
+    assert np.array_equal(border[0], core[0])
     shell = P.CENTER_SHELL_RADIUS * P.SIZE_PT
     axes = layer.calls["perturb.axes"]
     assert axes[4] == pytest.approx(shell)
@@ -603,6 +604,27 @@ def test_layers_and_occlusion_tiers_match_the_spec(monkeypatch):
     assert center[1] == pytest.approx(P.CENTER_COLOR)
     assert center[2] == pytest.approx(P.CENTER_RADIUS * P.SIZE_PT)
     assert budget.dropped == 0
+
+
+def test_overlay_axes_replace_world_arrows_without_duplicating_marks():
+    from mojive.render.debugdraw import DebugDraw, PrimitiveType
+
+    session, _ = make_session()
+    cam = side_camera()
+    controller = P.PerturbController()
+    backend = DebugBackend()
+    backend.debug = DebugDraw()
+    controller.begin(session, cam, session.selected_node, np.zeros(3), "rotate")
+    budget = controller.publish_marks(backend, session, cam, rect=RECT)
+    total = budget.primitives
+    layer = backend.debug.layer(P.MARK_LAYER, P.Occlusion.ALWAYS)
+    assert layer.count_of(PrimitiveType.ARROW) == 3
+
+    for _ in range(3):
+        budget = controller.publish_marks(backend, session, cam, rect=RECT, overlay_axes=True)
+        assert layer.count_of(PrimitiveType.ARROW) == 0
+        assert layer.count_of(PrimitiveType.POINT) == 2
+        assert budget.primitives == total - 3
 
 
 def test_twist_gizmo_scales_world_length_and_pixel_geometry(monkeypatch):

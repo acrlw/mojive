@@ -2,7 +2,7 @@
 
 in vec4 v_color;
 #ifdef ROUND_ARROW
-in vec2 v_arrow_pos;
+noperspective in vec2 v_arrow_pos;
 flat in vec4 v_arrow_shape;
 #endif
 

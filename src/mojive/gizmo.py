@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import enum
-import math
 from dataclasses import dataclass, field
-from functools import lru_cache
 
 import numpy as np
 
+from .curves2d import CORNER_SMOOTHING, arrow_points, box_handle_points, smooth_polygon_corners
 from .types import CameraView
 
 SIZE_PT = 88.0
@@ -17,9 +16,10 @@ AXIS_END = 1.0
 AXIS_SHAFT_HALF_PT = 2.2
 AXIS_HEAD_HALF_PT = 7.0
 AXIS_HEAD_LENGTH_PT = 12.0
-ARROW_CORNER_RADIUS_PT = 0.5
+ARROW_CORNER_RADIUS_PT = 1.2
 PLANE_INNER = 0.22
 PLANE_OUTER = 0.40
+PLANE_CORNER_RADIUS_PT = 2.0
 PLANE_ALPHA = 0.42
 PLANE_ACTIVE_ALPHA = 0.68
 CENTER_RADIUS = 0.075
@@ -39,6 +39,7 @@ TRACKBALL_HOVER_ALPHA = 0.16
 TRACKBALL_ACTIVE_ALPHA = 0.22
 DIMENSION_HANDLE_HALF_PT = 5.5
 DIMENSION_SHAFT_WIDTH_PT = 2.5
+DIMENSION_CORNER_RADIUS_RATIO = 0.1
 
 RING_TUBE = RING_WIDTH_PT / (2.0 * SIZE_PT)
 SCREEN_RING_TUBE = SCREEN_RING_WIDTH_PT / (2.0 * SIZE_PT)
@@ -49,6 +50,8 @@ PLANE_HIT_PADDING_PT = 2.0
 RING_HIT_PT = 5.5
 CENTER_HIT_PT = 9.0
 HANDLE_HIT_ALPHA = 0.05
+_PROJECTION_HIDE = 0.08
+_PROJECTION_FADE = 0.20
 RING_SEGMENTS = 64
 
 AXIS_COLORS = np.array(
@@ -173,6 +176,7 @@ class GizmoFrame:
     handle_color: np.ndarray | None = None
     outline_color: np.ndarray | None = None
     active_projection_fade: bool = False
+    corner_smoothing: float = CORNER_SMOOTHING
 
 
 def rotation_handle_color(
@@ -426,13 +430,13 @@ def rotation_half_basis(cam: CameraView, origin, rotation, axis: int) -> np.ndar
 
 def rotation_ring_alpha(cam: CameraView, origin, normal) -> float:
     facing = _view_facing(cam, origin, normal)
-    return float(np.clip((facing - 0.08) / 0.20, 0.0, 1.0))
+    return float(np.clip((facing - _PROJECTION_HIDE) / _PROJECTION_FADE, 0.0, 1.0))
 
 
 def axis_handle_alpha(cam: CameraView, origin, axis) -> float:
     facing = _view_facing(cam, origin, axis)
     projected = np.sqrt(max(0.0, 1.0 - facing * facing))
-    return float(np.clip((projected - 0.08) / 0.20, 0.0, 1.0))
+    return float(np.clip((projected - _PROJECTION_HIDE) / _PROJECTION_FADE, 0.0, 1.0))
 
 
 def plane_handle_alpha(cam: CameraView, origin, normal) -> float:
@@ -483,10 +487,15 @@ def paint_order(cam: CameraView, origin, directions) -> tuple[int, ...]:
 
 def _view_direction(cam: CameraView, origin) -> np.ndarray:
     """Unit vector pointing away from the camera through ``origin``."""
+    mix = cam.projection_blend()
+    if mix >= 1.0:
+        direction = np.asarray(cam.forward(), np.float64)
+        return direction / max(float(np.linalg.norm(direction)), 1e-12)
     perspective = np.asarray(origin, np.float64) - np.asarray(cam.eye, np.float64)
     perspective /= max(float(np.linalg.norm(perspective)), 1e-12)
+    if mix <= 0.0:
+        return perspective
     orthographic = np.asarray(cam.forward(), np.float64)
-    mix = cam.projection_blend()
     d = perspective * (1.0 - mix) + orthographic * mix
     return d / max(float(np.linalg.norm(d)), 1e-12)
 
@@ -563,8 +572,10 @@ def dimension_axis_polygon(
     style_scale: float,
     *,
     outline_pt: float = 0.0,
+    for_hit_test: bool = False,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> np.ndarray:
-    """Return one silhouette joining a scale-style shaft and square handle."""
+    """Return one silhouette joining a shaft and a small G3 rounded square."""
 
     start = np.asarray(start, np.float64).reshape(2)
     end = np.asarray(end, np.float64).reshape(2)
@@ -581,18 +592,31 @@ def dimension_axis_polygon(
     tail = start - direction * edge
     neck = end - direction * half
     tip = end + direction * half
-    return np.asarray(
-        (
-            tail - side * shaft,
-            neck - side * shaft,
-            neck - side * half,
-            tip - side * half,
-            tip + side * half,
-            neck + side * half,
-            neck + side * shaft,
-            tail + side * shaft,
-        ),
-        np.float64,
+    if for_hit_test:
+        return np.asarray(
+            (
+                tail - side * shaft,
+                neck - side * shaft,
+                neck - side * half,
+                tip - side * half,
+                tip + side * half,
+                neck + side * half,
+                neck + side * shaft,
+                tail + side * shaft,
+            ),
+            np.float64,
+        )
+    radius = 2.0 * DIMENSION_HANDLE_HALF_PT * DIMENSION_CORNER_RADIUS_RATIO * scale
+    return box_handle_points(
+        tail,
+        end,
+        2.0 * shaft,
+        2.0 * half,
+        corner_radius=radius + edge,
+        # Contract concave corners for the border, retaining a small G3 transition
+        # when the border is wider than the inner concave radius.
+        join_radius=max(radius * 0.25, radius * 0.5 - edge),
+        smoothing=smoothing,
     )
 
 
@@ -601,149 +625,31 @@ def _rounded_polygon_corners(
     radius: float,
     corners: tuple[int, ...],
     *,
-    segments: int = 6,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> np.ndarray:
-    """Replace selected convex polygon corners with tangent circular fillets.
+    """Replace selected convex corners with G3 turns at the existing edge footprint."""
 
-    ``radius`` is the desired screen-space radius. Edge trimming is derived from
-    the corner angle and clamped to the available edge lengths. Sampling includes
-    the arc midpoint, so symmetric arrow tips have one rounded apex rather than a
-    short flat segment.
-    """
-
-    polygon = np.asarray(points, np.float64).reshape(-1, 2)
-    count = len(polygon)
-    if count < 3 or radius <= 0.0 or segments < 1:
-        return polygon.copy()
-    selected = {int(index) % count for index in corners}
-    signed_area = 0.5 * float(
-        np.sum(
-            polygon[:, 0] * np.roll(polygon[:, 1], -1) - polygon[:, 1] * np.roll(polygon[:, 0], -1)
-        )
-    )
-    winding = 1.0 if signed_area >= 0.0 else -1.0
-    rounded: list[np.ndarray] = []
-    for index, point in enumerate(polygon):
-        if index not in selected:
-            rounded.append(point)
-            continue
-        incoming_edge = point - polygon[index - 1]
-        outgoing_edge = polygon[(index + 1) % count] - point
-        turn = incoming_edge[0] * outgoing_edge[1] - incoming_edge[1] * outgoing_edge[0]
-        if turn * winding <= 1e-9:
-            rounded.append(point)
-            continue
-        incoming = polygon[index - 1] - point
-        outgoing = polygon[(index + 1) % count] - point
-        incoming_length = float(np.linalg.norm(incoming))
-        outgoing_length = float(np.linalg.norm(outgoing))
-        if incoming_length < 1e-9 or outgoing_length < 1e-9:
-            rounded.append(point)
-            continue
-        incoming /= incoming_length
-        outgoing /= outgoing_length
-        angle = float(np.arccos(np.clip(np.dot(incoming, outgoing), -1.0, 1.0)))
-        half_angle = angle * 0.5
-        tangent = float(radius) / max(float(np.tan(half_angle)), 1e-6)
-        tangent = min(tangent, incoming_length * 0.45, outgoing_length * 0.45)
-        effective_radius = tangent * float(np.tan(half_angle))
-        bisector = incoming + outgoing
-        bisector_length = float(np.linalg.norm(bisector))
-        if bisector_length < 1e-9 or effective_radius < 1e-9:
-            rounded.append(point)
-            continue
-        center = point + bisector / bisector_length * (
-            effective_radius / max(float(np.sin(half_angle)), 1e-6)
-        )
-        start = point + incoming * tangent
-        end = point + outgoing * tangent
-        start_angle = math.atan2(start[1] - center[1], start[0] - center[0])
-        end_angle = math.atan2(end[1] - center[1], end[0] - center[0])
-        if winding > 0.0:
-            sweep = (end_angle - start_angle) % (2.0 * math.pi)
-        else:
-            sweep = -((start_angle - end_angle) % (2.0 * math.pi))
-        for step in range(segments + 1):
-            amount = step / segments
-            rounded.append(
-                center
-                + effective_radius
-                * np.asarray(
-                    (
-                        math.cos(start_angle + sweep * amount),
-                        math.sin(start_angle + sweep * amount),
-                    )
-                )
-            )
-    return np.asarray(rounded, np.float64)
-
-
-@lru_cache(maxsize=32)
-def _rounded_arrow_head(
-    head: float,
-    shaft: float,
-    wing: float,
-    radius: float,
-) -> np.ndarray:
-    """Cache the invariant local head while the projected shaft length changes."""
-
-    path = _rounded_polygon_corners(
-        (
-            (0.0, -shaft),
-            (0.0, -wing),
-            (head, 0.0),
-            (0.0, wing),
-            (0.0, shaft),
-        ),
-        radius,
-        (1, 2, 3),
-    )
-    path.flags.writeable = False
-    return path
-
-
-@lru_cache(maxsize=32)
-def _rounded_arrow_tail(shaft: float) -> np.ndarray:
-    """Return the semicircle between the two shaft edges, excluding its ends."""
-
-    angles = np.linspace(0.0, np.pi, 9)[1:-1]
-    tail = shaft * np.column_stack((-np.sin(angles), np.cos(angles)))
-    tail.flags.writeable = False
-    return tail
+    return smooth_polygon_corners(points, radius, corners, smoothing=smoothing)
 
 
 def axis_arrow_polygon(
-    start, end, style_scale: float = 1.0, *, round_tail: bool = False
+    start,
+    end,
+    style_scale: float = 1.0,
+    *,
+    round_tail: bool = False,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> np.ndarray:
-    """Return the rounded screen-space silhouette used by a flat axis handle."""
-    start = np.asarray(start, np.float64)
-    end = np.asarray(end, np.float64)
-    direction = end - start
-    length = float(np.linalg.norm(direction))
-    if length < 1e-6:
-        return np.empty((0, 2), np.float64)
-    direction /= length
-    side = np.array((-direction[1], direction[0]))
-    shaft = AXIS_SHAFT_HALF_PT * float(style_scale)
-    head = min(AXIS_HEAD_LENGTH_PT * float(style_scale), length * 0.42)
-    wing = AXIS_HEAD_HALF_PT * float(style_scale)
-    neck = end - direction * head
-    local_head = _rounded_arrow_head(
-        head,
-        shaft,
-        wing,
-        ARROW_CORNER_RADIUS_PT * float(style_scale),
-    )
-    screen_head = neck + local_head[:, :1] * direction[None, :] + local_head[:, 1:] * side[None, :]
-    local_tail = _rounded_arrow_tail(shaft) if round_tail else np.empty((0, 2), np.float64)
-    screen_tail = start + local_tail[:, :1] * direction[None, :] + local_tail[:, 1:] * side[None, :]
-    return np.concatenate(
-        (
-            (start - side * shaft)[None, :],
-            screen_head,
-            (start + side * shaft)[None, :],
-            screen_tail,
-        )
+    """Return the common G3 head-and-shaft silhouette at the gizmo's dimensions."""
+    return arrow_points(
+        start,
+        end,
+        2.0 * AXIS_SHAFT_HALF_PT * style_scale,
+        head_length=AXIS_HEAD_LENGTH_PT * style_scale,
+        head_width=2.0 * AXIS_HEAD_HALF_PT * style_scale,
+        corner_radius=ARROW_CORNER_RADIUS_PT * style_scale,
+        smoothing=smoothing,
+        round_tail=round_tail,
     )
 
 
@@ -780,13 +686,17 @@ def visibility(
         return 0, 0
     axis_mask = 0
     plane_mask = 0
+    # All six handles share one view ray and the same three frame directions.
+    facing = np.abs(_view_direction(cam, o) @ r)
+    axes_visible = np.sqrt(np.maximum(0.0, 1.0 - facing * facing)) > _PROJECTION_HIDE
+    planes_visible = facing > _PROJECTION_HIDE
     for axis in range(3):
         end = screen[1 + axis]
-        if end[2] > 0.0 and axis_handle_alpha(cam, o, r[:, axis]) > 0.0:
+        if end[2] > 0.0 and axes_visible[axis]:
             axis_mask |= 1 << axis
         start = 4 + axis * 4
         poly = screen[start : start + 4]
-        if np.all(poly[:, 2] > 0.0) and plane_handle_alpha(cam, o, r[:, axis]) > 0.0:
+        if np.all(poly[:, 2] > 0.0) and planes_visible[axis]:
             plane_mask |= 1 << axis
     return axis_mask, plane_mask
 
@@ -847,11 +757,13 @@ def hit_test(
                 CENTER_SHELL_RADIUS * SIZE_PT * style_scale,
             )
             if mode is GizmoMode.DIMENSIONS:
-                polygon = dimension_axis_polygon(start, screen[1, :2], style_scale)
-                distance = _polygon_distance(p, polygon)
+                polygon = dimension_axis_polygon(
+                    start, screen[1, :2], style_scale, for_hit_test=True
+                )
+                distance = screen_polygon_distance(p, polygon)
             else:
                 polygon = axis_arrow_polygon(start, screen[1, :2], style_scale)
-                distance = _polygon_distance(p, polygon)
+                distance = screen_polygon_distance(p, polygon)
             if distance <= AXIS_HIT_PADDING_PT * style_scale:
                 return handle, axis_mask, plane_mask
 
@@ -872,7 +784,7 @@ def hit_test(
                 rect,
                 prepared=prepared,
             )[:, :2]
-            if _polygon_distance(p, polygon) <= PLANE_HIT_PADDING_PT * style_scale:
+            if screen_polygon_distance(p, polygon) <= PLANE_HIT_PADDING_PT * style_scale:
                 return PLANE_HANDLES[axis], axis_mask, plane_mask
         return GizmoHandle.NONE, axis_mask, plane_mask
 
@@ -895,10 +807,7 @@ def hit_test(
         screen = project(cam, ring, rect, prepared=prepared)
         if np.any(screen[:, 2] <= 0.0):
             continue
-        distance = min(
-            _segment_distance(p, screen[i, :2], screen[(i + 1) % len(screen), :2])
-            for i in range(len(screen) if full_axis_ring else len(screen) - 1)
-        )
+        distance = screen_path_distance(p, screen[:, :2], closed=full_axis_ring)
         if handle is preferred_handle:
             preferred_distance = distance
         if distance < best_distance - 1e-6 or (
@@ -920,22 +829,33 @@ def hit_test(
     return GizmoHandle.NONE, axis_mask, plane_mask
 
 
-def _polygon_distance(point: np.ndarray, polygon: np.ndarray) -> float:
+def screen_polygon_distance(point, polygon) -> float:
+    """Distance to a filled simple screen-space polygon, including its boundary."""
+    point = np.asarray(point, np.float64).reshape(2)
+    polygon = np.asarray(polygon, np.float64).reshape(-1, 2)
     if len(polygon) < 3:
         return float("inf")
     if _inside_polygon(point, polygon):
         return 0.0
-    return min(
-        _segment_distance(point, polygon[i], polygon[(i + 1) % len(polygon)])
-        for i in range(len(polygon))
-    )
+    return screen_path_distance(point, polygon, closed=True)
 
 
-def _segment_distance(p: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
-    ab = b - a
-    den = float(np.dot(ab, ab))
-    t = float(np.clip(np.dot(p - a, ab) / den, 0.0, 1.0)) if den > 1e-12 else 0.0
-    return float(np.linalg.norm(p - (a + ab * t)))
+def screen_path_distance(point, points, *, closed: bool = False) -> float:
+    """Distance to an open or closed screen path, including collapsed segments."""
+    point = np.asarray(point, np.float64).reshape(2)
+    points = np.asarray(points, np.float64).reshape(-1, 2)
+    if len(points) < 2:
+        return float("inf")
+    starts = points if closed else points[:-1]
+    ends = np.roll(points, -1, axis=0) if closed else points[1:]
+    edges = ends - starts
+    offset = point - starts
+    length2 = np.einsum("ij,ij->i", edges, edges)
+    parameter = np.zeros(len(edges))
+    np.divide(np.einsum("ij,ij->i", offset, edges), length2, out=parameter, where=length2 > 1e-12)
+    np.clip(parameter, 0.0, 1.0, out=parameter)
+    offset -= edges * parameter[:, None]
+    return float(np.sqrt(np.min(np.einsum("ij,ij->i", offset, offset))))
 
 
 def _inside_polygon(point: np.ndarray, polygon: np.ndarray) -> bool:

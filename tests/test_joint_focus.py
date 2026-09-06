@@ -365,6 +365,27 @@ def test_joint_selection_highlights_its_renderable_parent_without_changing_targe
     assert session.selection_highlight_object_id == parent.object_id
 
 
+def test_joint_focus_from_a_link_does_not_replace_its_selection() -> None:
+    app = object.__new__(ViewerApp)
+    joint = JointInfo(0, "elbow", "hinge", True, (-1.0, 1.0), 0, 0, 1)
+    link = SceneNode(3, "forearm", NodeType.LINK, object_id=9, body_index=1)
+    joint_node = SceneNode(4, "elbow", NodeType.JOINT, body_index=1, joint_index=0)
+    submitted = []
+    app.session = SimpleNamespace(
+        joints=[joint],
+        nodes=[link, joint_node],
+        selected_node=link,
+        joints_for_body=lambda _body_index: [joint],
+        submit=submitted.append,
+    )
+    app.gizmo = SimpleNamespace(selected_joint_id=lambda _body_index: joint.joint_id)
+
+    assert app._request_node_joint_focus(link)
+    assert app._pending_joint_focus_id == joint.joint_id
+    assert app.session.selected_node is link
+    assert not submitted
+
+
 def test_viewport_double_click_requires_two_complete_short_left_clicks() -> None:
     app = object.__new__(ViewerApp)
     app.router = SimpleNamespace(

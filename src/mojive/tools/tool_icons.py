@@ -9,7 +9,13 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from ..ui.draw2d import _capped_polyline_outline, _open_polyline_ribbon
+from ..curves2d import (
+    CORNER_SMOOTHING,
+    arrow_points,
+    capped_polyline_points,
+    polyline_ribbon,
+    smooth_rect_points,
+)
 from ..ui.viewport_widgets import (
     _ROTATE_HALF_RINGS,
     OVERLAY_GEOMETRY,
@@ -62,8 +68,13 @@ class _PillowDraw2D:
     def _width(width: float) -> int:
         return max(1, round(float(width)))
 
-    def line(self, a, b, color, width: float, *, cap: str = "butt") -> None:
-        self.polyline((a, b), color, width, cap=cap)
+    def line(
+        self, a, b, color, width: float, *, cap: str = "butt", smoothing: float = CORNER_SMOOTHING
+    ) -> None:
+        self.polyline((a, b), color, width, cap=cap, smoothing=smoothing)
+
+    def arrow(self, start, end, color, width=2.0, **style) -> None:
+        self.fringed_concave_fill(arrow_points(start, end, width, **style), color)
 
     def polyline(
         self,
@@ -73,25 +84,29 @@ class _PillowDraw2D:
         *,
         closed: bool = False,
         cap: str = "butt",
+        smoothing: float = CORNER_SMOOTHING,
     ) -> None:
         path = self._points(points)
         if closed and path:
             path = (*path, path[0])
-        self.capped_polyline(path, color, width, cap=cap)
+        self.capped_polyline(path, color, width, cap=cap, smoothing=smoothing)
 
-    def capped_polyline(self, points, color, width: float, *, cap: str) -> None:
+    def capped_polyline(
+        self, points, color, width: float, *, cap: str, smoothing: float = CORNER_SMOOTHING
+    ) -> None:
         path = self._points(points)
         if cap in {"round", "round_start", "round_end"}:
-            outline = _capped_polyline_outline(
+            outline = capped_polyline_points(
                 path,
                 float(width),
                 round_start=cap in {"round", "round_start"},
                 round_end=cap in {"round", "round_end"},
+                smoothing=smoothing,
             )
             if outline:
                 self.draw.polygon(outline, fill=_rgba(color))
             return
-        left, right, outline = _open_polyline_ribbon(path, float(width))
+        left, right, outline = polyline_ribbon(path, float(width))
         if not outline:
             return
         fill = _rgba(color)
@@ -136,35 +151,40 @@ class _PillowDraw2D:
         x, y = center
         self.draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=_rgba(color))
 
-    def rect(self, lo, hi, color, width: float = 1.0, *, rounding: float = 0.0) -> None:
-        half_width = float(width) * 0.5
-        self.draw.rounded_rectangle(
-            (
-                float(lo[0]) - half_width,
-                float(lo[1]) - half_width,
-                float(hi[0]) + half_width,
-                float(hi[1]) + half_width,
-            ),
-            radius=float(rounding) + half_width,
-            fill=_rgba(color),
+    def rect(
+        self,
+        lo,
+        hi,
+        color,
+        width: float = 1.0,
+        *,
+        rounding: float = 0.0,
+        smoothing: float = CORNER_SMOOTHING,
+    ) -> None:
+        points = smooth_rect_points(
+            float(lo[0]),
+            float(lo[1]),
+            float(hi[0]),
+            float(hi[1]),
+            float(rounding),
+            smoothing=smoothing,
         )
-        self.draw.rounded_rectangle(
-            (
-                float(lo[0]) + half_width,
-                float(lo[1]) + half_width,
-                float(hi[0]) - half_width,
-                float(hi[1]) - half_width,
-            ),
-            radius=max(0.0, float(rounding) - half_width),
-            fill=_TRANSPARENT,
-        )
+        if points:
+            self.polyline(points, color, width, closed=True)
 
-    def rect_filled(self, lo, hi, color, *, rounding: float = 0.0) -> None:
-        self.draw.rounded_rectangle(
-            (*lo, *hi),
-            radius=float(rounding),
-            fill=_rgba(color),
+    def rect_filled(
+        self, lo, hi, color, *, rounding: float = 0.0, smoothing: float = CORNER_SMOOTHING
+    ) -> None:
+        points = smooth_rect_points(
+            float(lo[0]),
+            float(lo[1]),
+            float(hi[0]),
+            float(hi[1]),
+            float(rounding),
+            smoothing=smoothing,
         )
+        if points:
+            self.convex_fill(points, color)
 
     def text(self, pos, color, text: str, *, pixel_snap: bool = True) -> None:
         del pixel_snap  # Pillow consumes the export's authored coordinates directly.
@@ -245,6 +265,9 @@ class _ToolShellMaskDraw2D:
 
     def fringed_concave_fill(self, points, _color) -> None:
         self._filled_polygon(points)
+
+    def arrow(self, start, end, color, width=2.0, **style) -> None:
+        self.fringed_concave_fill(arrow_points(start, end, width, **style), color)
 
     def circle_filled(self, center, radius: float, _color, *, segments: int = 0) -> None:
         del segments
@@ -419,6 +442,7 @@ def export_icons(output: Path, size: int = 1024) -> tuple[Path, ...]:
     foreground = tuple(channel / 255.0 for channel in _FOREGROUND)
     variants = (
         ("move", "move", "world", OVERLAY_GEOMETRY),
+        ("dimensions", "dimensions", "world", OVERLAY_GEOMETRY),
         ("rotate", "rotate", "world", OVERLAY_GEOMETRY),
         (
             "rotate-butt",

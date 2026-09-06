@@ -13,6 +13,9 @@ The public package exports the common scene, rendering, adapter, remote, and rec
 | `mojive.scene_renderer` | Backend-neutral offscreen rendering | `SceneRenderer` |
 | `mojive.renderer` | MuJoCo-compatible offscreen rendering | `Renderer` |
 | `mojive.render.debugdraw` | Debug primitives and layers | `DebugDraw`, `Layer`, `Occlusion` |
+| `mojive.curves2d` | Shared sampled paths and stroke profiles | `smooth_rect_points`, `smooth_capsule_points`, `arrow_points`, `capped_polyline_points` |
+| `mojive.draglink2d` | Hollow-connector geometry | `drag_link_field`, `smooth_drag_link_mesh` |
+| `mojive.ui.draw2d` | UI overlay extension protocol | `Draw2D`, `ImguiDraw2D` |
 | `mojive.canvas2d` | Layered 2D physics and geometry diagnostics | `Canvas2D`, `CanvasLayer2D` |
 | `mojive.capture` | Interactive screenshot and recording contracts | `CaptureSurface`, `RecordingInfo` |
 | `mojive.remote` | Live structure, frame, and command transport | `SnapshotPublisher`, `RemoteSceneAdapter` |
@@ -36,6 +39,8 @@ The public package exports the common scene, rendering, adapter, remote, and rec
 
 The [examples guide](../guides/examples.md) explains how to run each workflow. The module pages
 list signatures, types, and public members generated from the source documentation.
+For custom widgets, icons, or screen diagnostics, use the [drawing extension guide](../how-to/ui-drawing.md)
+to choose the surface and its state owner before changing a renderer or UI controller.
 
 ## Stability
 

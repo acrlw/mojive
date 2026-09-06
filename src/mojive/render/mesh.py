@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..curves2d import smooth_rect_points
 from ..gizmo import (
     AXIS_HEAD_HALF_PT,
     AXIS_HEAD_LENGTH_PT,
     AXIS_SHAFT_HALF_PT,
     AXIS_START,
     JOINT_OUTLINE_PT,
+    PLANE_CORNER_RADIUS_PT,
     PLANE_INNER,
     PLANE_OUTER,
     RING_RADIUS,
@@ -430,10 +432,26 @@ def _make_gizmo_arrow(edge: float = 0.0) -> MeshData:
 
 def _make_gizmo_plane() -> MeshData:
     a, b = PLANE_INNER, PLANE_OUTER
-    pos = np.array(((a, a, 0.0), (b, a, 0.0), (b, b, 0.0), (a, b, 0.0)))
-    nrm = np.tile(np.array([[0.0, 0.0, 1.0]]), (4, 1))
-    uv = np.array(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)))
-    return _finish(pos, nrm, uv, np.array((0, 1, 2, 0, 2, 3), np.uint32))
+    # Sample in logical pixels before converting to the cached unit gizmo mesh.
+    boundary = (
+        np.asarray(
+            smooth_rect_points(
+                a * SIZE_PT,
+                a * SIZE_PT,
+                b * SIZE_PT,
+                b * SIZE_PT,
+                PLANE_CORNER_RADIUS_PT,
+            )
+        )
+        / SIZE_PT
+    )
+    xy = np.vstack((np.full(2, (a + b) * 0.5), boundary))
+    pos = np.column_stack((xy, np.zeros(len(xy))))
+    nrm = np.tile((0.0, 0.0, 1.0), (len(pos), 1))
+    uv = (xy - a) / (b - a)
+    indices = np.arange(1, len(pos), dtype=np.uint32)
+    triangles = np.column_stack((np.zeros_like(indices), indices, np.roll(indices, -1)))
+    return _finish(pos, nrm, uv, triangles.ravel())
 
 
 def _make_gizmo_ring(

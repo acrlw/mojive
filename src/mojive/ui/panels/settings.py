@@ -29,7 +29,14 @@ from ..viewport_widgets import (
     MIN_VIEWPORT_CAPSULE_SCALE,
     MIN_VIEWPORT_OVERLAY_SCALE,
 )
-from . import Panel, PanelContext, search_input, segmented_control, themed_checkbox
+from . import (
+    Panel,
+    PanelContext,
+    padded_selectable,
+    search_input,
+    segmented_control,
+    themed_checkbox,
+)
 
 _RND_FLAGS: tuple[RenderFlag, ...] = (
     RenderFlag.SHADOW,
@@ -175,7 +182,7 @@ class SettingsPanel(Panel):
                 for category in _CATEGORIES:
                     matched = settings_category_matches(category, self._search)
                     imgui.begin_disabled(not matched)
-                    selected, _ = imgui.selectable(
+                    selected, _ = padded_selectable(
                         f"{ctx.tr(category)}##settings_{category}",
                         self._category == category,
                     )
@@ -240,7 +247,7 @@ class SettingsPanel(Panel):
         for category in _CATEGORIES:
             matched = settings_category_matches(category, self._search)
             imgui.begin_disabled(not matched)
-            selected, _ = imgui.selectable(
+            selected, _ = padded_selectable(
                 f"{ctx.tr(category)}##settings_{category}", self._category == category
             )
             if selected:
@@ -268,13 +275,16 @@ class SettingsPanel(Panel):
         imgui.end_table()
         if ctx.panels is not None:
             self._group_heading(t("Panels"))
-            if self._begin_properties("settings_panels"):
-                for panel in ctx.panels:
-                    if not panel.enabled or panel.modal or panel.id == self.id:
-                        continue
-                    self._property(t(panel.name))
+            panels = tuple(
+                panel
+                for panel in ctx.panels
+                if panel.enabled and not panel.modal and panel.id != self.id
+            )
+            if self._begin_toggle_grid("settings_panels", tuple(t(panel.name) for panel in panels)):
+                for panel in panels:
+                    imgui.table_next_column()
                     changed, is_open = themed_checkbox(
-                        f"##panel_open_{panel.id}", panel.open, ctx.theme
+                        f"{t(panel.name)}###panel_open_{panel.id}", panel.open, ctx.theme
                     )
                     if changed:
                         ctx.panels.set_open(panel.id, is_open)
@@ -585,8 +595,6 @@ class SettingsPanel(Panel):
         t = ctx.tr
         config = ctx.interactions
         self._group_heading(t("Built-in interactions"))
-        if not self._begin_properties("settings_builtin_interactions"):
-            return
 
         def update_top(attribute: str, value: bool) -> None:
             nonlocal config
@@ -653,9 +661,15 @@ class SettingsPanel(Panel):
             ),
             ("Panel shortcuts", config.panel_shortcuts, update_top, "panel_shortcuts"),
         )
+        if not self._begin_toggle_grid(
+            "settings_builtin_interactions", tuple(t(row[0]) for row in rows)
+        ):
+            return
         for label, current, callback, attribute in rows:
-            self._property(t(label))
-            changed, value = themed_checkbox(f"##interaction_{attribute}", current, ctx.theme)
+            imgui.table_next_column()
+            changed, value = themed_checkbox(
+                f"{t(label)}###interaction_{attribute}", current, ctx.theme
+            )
             if changed:
                 callback(attribute, value)
         imgui.end_table()
@@ -664,19 +678,22 @@ class SettingsPanel(Panel):
         t = ctx.tr
         style = ctx.selection_style
         self._group_heading(t("Selection presentation"))
-        if not self._begin_properties("settings_selection_presentation"):
-            return
-        for attribute, label in (
+        rows = (
             ("highlight", "Highlight fill"),
             ("outline", "Outline"),
             ("gizmo", "Gizmo"),
             ("frame", "Coordinate frame"),
             ("label", "Name label"),
             ("bounds", "Bounds"),
+        )
+        if not self._begin_toggle_grid(
+            "settings_selection_presentation", tuple(t(label) for _, label in rows)
         ):
-            self._property(t(label))
+            return
+        for attribute, label in rows:
+            imgui.table_next_column()
             changed, value = themed_checkbox(
-                f"##selection_{attribute}", getattr(style, attribute), ctx.theme
+                f"{t(label)}###selection_{attribute}", getattr(style, attribute), ctx.theme
             )
             if changed:
                 style = replace(style, **{attribute: value})
@@ -728,11 +745,23 @@ class SettingsPanel(Panel):
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._message)
 
     @staticmethod
+    def _begin_toggle_grid(str_id: str, labels: tuple[str, ...]) -> bool:
+        style = imgui.get_style()
+        required = max((imgui.calc_text_size(label).x for label in labels), default=0.0)
+        required += (
+            imgui.get_frame_height() + style.item_inner_spacing.x + 2.0 * style.cell_padding.x
+        )
+        columns = max(1, min(4, int(imgui.get_content_region_avail().x / max(1.0, required))))
+        return imgui.begin_table(str_id, columns, imgui.TableFlags_.sizing_stretch_same)
+
+    @staticmethod
     def _begin_properties(str_id: str) -> bool:
         flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.pad_outer_x
-        if not imgui.begin_table(str_id, 2, flags):
+        compact = imgui.get_content_region_avail().x < 24.0 * imgui.get_font_size()
+        if not imgui.begin_table(str_id, 1 if compact else 2, flags):
             return False
-        imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch.value, 0.36)
+        if not compact:
+            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch.value, 0.36)
         imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch.value, 0.64)
         return True
 
@@ -746,10 +775,13 @@ class SettingsPanel(Panel):
     def _property(label: str) -> None:
         imgui.table_next_row()
         imgui.table_next_column()
-        imgui.align_text_to_frame_padding()
+        compact = imgui.table_get_column_count() == 1
+        if not compact:
+            imgui.align_text_to_frame_padding()
         width = imgui.get_content_region_avail().x
         text_width = imgui.calc_text_size(label).x
-        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, width - text_width))
+        if not compact:
+            imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, width - text_width))
         imgui.text(label)
         imgui.table_next_column()
         imgui.set_next_item_width(-1.0)
@@ -906,7 +938,7 @@ class SettingsPanel(Panel):
         for view in DebugView:
             ok = (view in caps.debug_views) if caps.debug_views else False
             imgui.begin_disabled(not ok)
-            selected, _ = imgui.selectable(view.value, view is current)
+            selected, _ = padded_selectable(view.value, view is current)
             imgui.end_disabled()
             if not ok:
                 imgui.set_item_tooltip(f"{caps.name} {ctx.tr('does not implement')} “{view.value}”")
@@ -928,7 +960,7 @@ class SettingsPanel(Panel):
             for mode in LabelMode:
                 supported = mode in backend.caps.label_modes
                 imgui.begin_disabled(not supported)
-                selected, _ = imgui.selectable(mode.value, mode is label)
+                selected, _ = padded_selectable(mode.value, mode is label)
                 imgui.end_disabled()
                 if selected and supported:
                     backend.set_label_mode(mode)
@@ -942,7 +974,7 @@ class SettingsPanel(Panel):
             for mode in FrameMode:
                 supported = mode in backend.caps.frame_modes
                 imgui.begin_disabled(not supported)
-                selected, _ = imgui.selectable(mode.value, mode is frame)
+                selected, _ = padded_selectable(mode.value, mode is frame)
                 imgui.end_disabled()
                 if selected and supported:
                     backend.set_frame_mode(mode)

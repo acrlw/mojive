@@ -357,6 +357,12 @@ def _entity_capsule(viewer, output: Path) -> None:
     node = viewer.session.selected_node
     if node is None or node.type is not NodeType.GEOM:
         raise RuntimeError("Entity capsule was not created and selected")
+    # Entity creation chooses a random palette color; comparisons need one fixed material.
+    result = viewer.session.submit(
+        cmd.SetGeometryColor(node.node_id, np.array((0.55, 0.75, 0.35, 1.0)))
+    )
+    if not result.ok:
+        raise RuntimeError(result.message)
 
     position = np.array((0.0, -1.0, 0.65), np.float32)
     viewer.session.submit(cmd.SetGeometrySize(node.node_id, np.array((0.22, 0.22, 0.4))))

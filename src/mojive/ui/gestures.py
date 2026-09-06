@@ -147,6 +147,9 @@ class GestureRouter:
         if state.blocked:
             self.abort()
             self._claim = Claim.UI
+            # Dismissing a popup must not transfer its held press to the scene
+            # when the popup disappears on the following frame.
+            self._held = state.any_button
             return self._claim
         if self._held:
             if state.any_button:
