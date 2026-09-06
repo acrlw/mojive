@@ -203,7 +203,8 @@ class IdBufferPass(BasePass):
         self._geom = IdGeometry()
 
     def prepare(self, ctx: PassContext) -> bool:
-        ctx.target.clear_id(0)
+        # An ID-only request has no opaque pass to initialize current depth.
+        ctx.target.clear_id(0, clear_depth=not ctx.opaque_depth_ready)
         if not self._geom.ensure(ctx, ctx.target.id_draw_buffer):
             return False
         self._geom.upload(ctx)
@@ -220,16 +221,19 @@ class IdBufferPass(BasePass):
         target = ctx.target
         fbo = target.id_fbo
         shared = fbo is target.fbo
+        reuse_depth = shared and ctx.opaque_depth_ready
 
         if shared:
-            fbo.depth_mask = False
+            fbo.depth_mask = not reuse_depth
 
             fbo.color_mask = ((False, False, False, False), (True, True, True, True))
         else:
             fbo.depth_mask = True
         target.use_id()
         state_opaque(ctx.ctx)
-        ctx.ctx.depth_func = "<=" if shared else "<"
+        if not ctx.flag(RenderFlag.CULL_FACE):
+            ctx.ctx.disable(moderngl.CULL_FACE)
+        ctx.ctx.depth_func = "<=" if reuse_depth else "<"
 
         self._geom.set_view_proj(ctx)
         ctx.draw_calls += self._geom.draw(ctx, ctx.scene.opaque_buckets)
