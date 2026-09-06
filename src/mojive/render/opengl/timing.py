@@ -74,7 +74,9 @@ class FrameTiming:
         t._cpu_start = time.perf_counter()
         self._gl.push_debug_group(name)
 
-        if self.gpu_available and self._depth == 0:
+        # Skip instrumentation while earlier samples are delayed. Rendering must
+        # neither wait for a timestamp nor grow an unbounded query backlog.
+        if self.gpu_available and self._depth == 0 and len(t.pending) < _POOL_LIMIT:
             qid = t.free.pop() if t.free else self._gl.gen_query()
             self._gl.begin_time_query(qid)
             t.active = qid
