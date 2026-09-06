@@ -11,10 +11,12 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
+from imgui_bundle import imgui
 
 from .. import commands as cmd
 from ..assets import resolve
 from ..composition import build
+from ..gizmo import GizmoMode, project
 
 _CAPSULE_METHODS = (
     "_draw_playback_widget",
@@ -30,21 +32,59 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--warmup", type=int, default=24)
     parser.add_argument("--profile-frames", type=int, default=180)
     parser.add_argument("--max-capsule-ms", type=float, default=0.75)
+    parser.add_argument("--asset", default="gizmo", help="Asset name or model path to profile")
+    parser.add_argument("--running", action="store_true", help="Include live simulation ticks")
+    parser.add_argument(
+        "--expand-hierarchy", action="store_true", help="Profile expanded hierarchy rows"
+    )
+    parser.add_argument(
+        "--hover-gizmo", action="store_true", help="Sweep the pointer over the selected gizmo"
+    )
+    parser.add_argument(
+        "--gizmo-mode", choices=[mode.value for mode in GizmoMode], default="translate"
+    )
     args = parser.parse_args(argv)
     args.output.mkdir(parents=True, exist_ok=True)
 
     viewer = build(
-        resolve("gizmo"),
-        paused=True,
+        resolve(args.asset),
+        paused=not args.running,
         vsync=False,
         width=1600,
         height=1000,
         show_window=False,
     )
     try:
-        selected = next(node for node in viewer.session.nodes if node.posable)
+        selected = next(
+            node
+            for node in viewer.session.nodes
+            if node.posable and (args.gizmo_mode != "dimensions" or node.geom_index >= 0)
+        )
         viewer.session.submit(cmd.Select(selected.object_id))
+        viewer.app.gizmo.set_mode(args.gizmo_mode)
         for _ in range(max(1, args.warmup)):
+            viewer.sync()
+        if args.expand_hierarchy:
+            hierarchy = viewer.panels.get("Hierarchy")
+            hierarchy._open_state.update(
+                {node.node_id: True for node in viewer.session.nodes if node.children}
+            )
+
+        cursor_step = 0
+        origin, _rotation = viewer.app._node_pose(selected)
+        center = project(viewer.app._camera_view(), (origin,), viewer.app._viewport_rect)[0, :2]
+
+        # Match the native gallery's queued pointer events without moving the OS cursor.
+        def sync():
+            nonlocal cursor_step
+            if args.hover_gizmo:
+                angle = cursor_step * 0.31
+                radius = 35.0 + 45.0 * (cursor_step % 17) / 16.0
+                io = imgui.get_io()
+                io.add_mouse_pos_event(
+                    *(center + radius * np.array((np.cos(angle), np.sin(angle))))
+                )
+                cursor_step += 1
             viewer.sync()
 
         variants = {
@@ -61,9 +101,10 @@ def main(argv: list[str] | None = None) -> int:
             order = tuple(variants) if round_index % 2 == 0 else tuple(reversed(variants))
             for name in order:
                 with _disabled(viewer.app, variants[name]):
+                    cursor_step = 0
                     for _ in range(4):
-                        viewer.sync()
-                    samples[name].extend(_sample(viewer, max(1, args.frames // 3)))
+                        sync()
+                    samples[name].extend(_sample(sync, max(1, args.frames // 3)))
 
         report = {name: _summary(values) for name, values in samples.items()}
         full = report["full"]["median_ms"]
@@ -79,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
         profiler = cProfile.Profile()
         profiler.enable()
         for _ in range(max(1, args.profile_frames)):
-            viewer.sync()
+            sync()
         profiler.disable()
         profiler.dump_stats(profile_path)
         text_path = args.output / "ui-frame-profile.txt"
@@ -88,6 +129,19 @@ def main(argv: list[str] | None = None) -> int:
             stats.strip_dirs().sort_stats("cumtime").print_stats(50)
 
         report["profile"] = str(profile_path.resolve())
+        report["scene"] = {
+            "asset": args.asset,
+            "running": args.running,
+            "expanded_hierarchy": args.expand_hierarchy,
+        }
+        report["interaction"] = {"hover_gizmo": args.hover_gizmo, "gizmo_mode": args.gizmo_mode}
+        report["interaction"]["hit_test_calls"] = sum(
+            entry[1]
+            for (path, _line, name), entry in stats.stats.items()
+            if path == "gizmo.py" and name == "hit_test"
+        )
+        if args.hover_gizmo and not report["interaction"]["hit_test_calls"]:
+            raise RuntimeError("The pointer sweep did not exercise gizmo hit testing")
         report_path = args.output / "ui-frame-profile.json"
         report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report, indent=2))
@@ -104,11 +158,11 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _sample(viewer, frames: int) -> list[float]:
+def _sample(sync, frames: int) -> list[float]:
     values = []
     for _ in range(frames):
         start = time.perf_counter_ns()
-        viewer.sync()
+        sync()
         values.append((time.perf_counter_ns() - start) / 1_000_000.0)
     return values
 

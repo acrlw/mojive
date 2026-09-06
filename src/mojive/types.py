@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field, replace
+from functools import lru_cache
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -45,6 +46,13 @@ class CenteredBounds(NamedTuple):
         return self.center + self.half_extent
 
 
+@lru_cache(maxsize=128)
+def _camera_view_matrix(eye: tuple, target: tuple, up: tuple) -> np.ndarray:
+    # Camera arrays are caller-owned and can change in place. Value keys let
+    # independent frame consumers share the calculation without stale matrices.
+    return math3d.look_at(eye, target, up)
+
+
 @dataclass(frozen=True)
 class CameraView:
     """Backend-neutral camera definition in world coordinates.
@@ -72,7 +80,11 @@ class CameraView:
 
     def view_matrix(self) -> np.ndarray:
         """Return the row-major world-to-camera matrix."""
-        return math3d.look_at(self.eye, self.target, self.up)
+        return _camera_view_matrix(
+            tuple(map(float, self.eye)),
+            tuple(map(float, self.target)),
+            tuple(map(float, self.up)),
+        ).copy()
 
     def proj_matrix(self) -> np.ndarray:
         """Return the row-major projection matrix selected by the camera parameters."""

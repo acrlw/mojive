@@ -785,3 +785,38 @@ def test_exact_adopt_preserves_roll_and_intrinsics_across_resize_until_gesture()
     np.testing.assert_array_equal(actual.focal_length, view.focal_length)
     camera.orbit(10, 5)
     assert not np.array_equal(camera.view().eye, view.eye)
+
+
+@pytest.mark.parametrize("field", ["eye", "target", "up"])
+def test_camera_matrix_cache_observes_in_place_edits_and_returns_independent_arrays(field):
+    camera = CameraView()
+    before = camera.view_matrix()
+    getattr(camera, field)[:] = (1.0, 2.0, 3.0)
+    expected = math3d.look_at(camera.eye, camera.target, camera.up)
+    actual = camera.view_matrix()
+    np.testing.assert_array_equal(actual, expected)
+    assert not np.array_equal(actual, before)
+    actual[:] = 0
+    np.testing.assert_array_equal(camera.view_matrix(), expected)
+
+
+def test_camera_matrix_reuse_is_by_value_and_bounded(monkeypatch):
+    from mojive.types import _camera_view_matrix
+
+    _camera_view_matrix.cache_clear()
+    original = math3d.look_at
+    calls = []
+
+    def tracked(*args):
+        calls.append(args)
+        return original(*args)
+
+    monkeypatch.setattr(math3d, "look_at", tracked)
+    camera = CameraView(eye=[4.0, 0.0, 0.0])
+    for _ in range(5):
+        camera.with_aspect(2).view_matrix()
+    assert len(calls) == 1
+    for i in range(200):
+        CameraView(eye=[4.0, i * 0.01, 0.0]).view_matrix()
+    assert _camera_view_matrix.cache_info().currsize <= 128
+    _camera_view_matrix.cache_clear()

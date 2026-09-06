@@ -141,23 +141,15 @@ def _node_local_bounds(
     count = source.instance_count
     if len(source.geom_body) != count or len(source.geom_size) != count:
         return None
-    geom_only = len(source.geom_pose_source) == count
     target_geom = int(node.geom_index) if node.type is NodeType.GEOM else -1
     lo: np.ndarray | None = None
     hi: np.ndarray | None = None
-    for instance in range(count):
-        if int(source.geom_body[instance]) != body:
-            continue
-        if len(source.geom_infinite_plane) == count and source.geom_infinite_plane[instance]:
-            continue
-        if geom_only and int(source.geom_pose_source[instance]) != int(InstancePoseSource.GEOM):
-            continue
-
+    for instance in _geometry_instances(
+        source, bodies={body}, geoms={target_geom} if target_geom >= 0 else None
+    ):
         pose_index = (
             int(source.geom_source[instance]) if len(source.geom_source) == count else instance
         )
-        if target_geom >= 0 and pose_index != target_geom:
-            continue
         if not 0 <= pose_index < len(frame.geom_xpos) or pose_index >= len(frame.geom_xmat):
             continue
 
@@ -174,6 +166,28 @@ def _node_local_bounds(
     return CenteredBounds(
         ((lo + hi) * 0.5).astype(np.float32), ((hi - lo) * 0.5).astype(np.float32)
     )
+
+
+def _geometry_instances(
+    source: SceneSource, *, bodies: set[int] | None, geoms: set[int] | None
+) -> np.ndarray:
+    """Filter current instance metadata before the per-selected-instance transform."""
+    count = source.instance_count
+    selected = np.ones(count, bool)
+    for values, targets in (
+        (source.geom_body, bodies),
+        (source.geom_source if len(source.geom_source) == count else np.arange(count), geoms),
+    ):
+        if targets is not None:
+            if len(targets) == 1:
+                selected &= values == next(iter(targets))
+            else:
+                selected &= np.isin(values, list(targets))
+    if len(source.geom_infinite_plane) == count:
+        selected &= ~source.geom_infinite_plane
+    if len(source.geom_pose_source) == count:
+        selected &= source.geom_pose_source == int(InstancePoseSource.GEOM)
+    return np.flatnonzero(selected)
 
 
 def _node_world_bounds(
@@ -217,20 +231,7 @@ def _node_world_bounds(
 
     lo: np.ndarray | None = None
     hi: np.ndarray | None = None
-    for instance in range(count):
-        if len(source.geom_infinite_plane) == count and source.geom_infinite_plane[instance]:
-            continue
-        if len(source.geom_pose_source) == count and int(source.geom_pose_source[instance]) != int(
-            InstancePoseSource.GEOM
-        ):
-            continue
-        pose_index = (
-            int(source.geom_source[instance]) if len(source.geom_source) == count else instance
-        )
-        if target_geoms is not None and pose_index not in target_geoms:
-            continue
-        if target_bodies is not None and int(source.geom_body[instance]) not in target_bodies:
-            continue
+    for instance in _geometry_instances(source, bodies=target_bodies, geoms=target_geoms):
         points = _instance_world_corners(source, frame, instance, cache)
         if points is None:
             continue
@@ -263,6 +264,8 @@ class SceneBounds:
         self._world_half = np.empty_like(self._translation)
         self._minimum = np.empty_like(self._translation)
         self._maximum = np.empty_like(self._translation)
+        self._previous_inputs: tuple[np.ndarray | None, ...] | None = None
+        self._previous_bounds: Bounds | None = None
         groups: dict[MeshKey, list[int]] = {}
         for instance, key in enumerate(source.geom_mesh):
             groups.setdefault(key, []).append(instance)
@@ -297,6 +300,48 @@ class SceneBounds:
 
     def world(self, frame: SceneFrame) -> Bounds | None:
         """Return the finite world AABB, including current dynamic mesh updates."""
+        # Adapters may reuse and mutate pose arrays without advancing simulation
+        # time. Compare their contents rather than frame identity or step numbers.
+        # Dynamic mesh vertices have separate lifetimes and bypass this cache.
+        if self._dynamic:
+            return self._compute_world(frame)
+        source = self.source
+        inputs = (
+            source.geom_size,
+            source.geom_local,
+            source.geom_infinite_plane,
+            frame.geom_xpos,
+            frame.geom_xmat,
+            frame.site_xpos,
+            frame.site_xmat,
+        )
+        previous = self._previous_inputs
+        if previous is not None and all(
+            current is old if current is None or old is None else np.array_equal(current, old)
+            for current, old in zip(inputs, previous, strict=True)
+        ):
+            bounds = self._previous_bounds
+            return None if bounds is None else Bounds(bounds.minimum.copy(), bounds.maximum.copy())
+        bounds = self._compute_world(frame)
+        if previous is not None and all(
+            current is old
+            if current is None or old is None
+            else current.shape == old.shape and current.dtype == old.dtype
+            for current, old in zip(inputs, previous, strict=True)
+        ):
+            for current, old in zip(inputs, previous, strict=True):
+                if current is not None:
+                    np.copyto(old, current)
+        else:
+            self._previous_inputs = tuple(
+                None if value is None else value.copy() for value in inputs
+            )
+        self._previous_bounds = (
+            None if bounds is None else Bounds(bounds.minimum.copy(), bounds.maximum.copy())
+        )
+        return bounds
+
+    def _compute_world(self, frame: SceneFrame) -> Bounds | None:
         source = self.source
         count = source.instance_count
         if not count or len(source.geom_size) != count:
