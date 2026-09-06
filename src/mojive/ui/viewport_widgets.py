@@ -1,8 +1,7 @@
 """Production viewport chrome shared by the interactive viewer.
 
-The glyphs are fixed screen-space geometry.  Curves used by the rotate, snap,
-mouse, and capsule shapes are sampled once at import; a frame only scales and
-translates those points before submitting them to ``Draw2D``.
+The glyphs share cached G3 corner and stroke geometry. A frame scales and
+translates cached local paths before submitting them to ``Draw2D``.
 """
 
 from __future__ import annotations
@@ -13,10 +12,23 @@ from dataclasses import dataclass, fields
 from functools import lru_cache
 from itertools import pairwise
 
+import numpy as np
 from imgui_bundle import imgui
 
-from ..gizmo import ARROW_CORNER_RADIUS_PT, _rounded_polygon_corners
-from .draw2d import Draw2D, _open_polyline_ribbon
+from ..curves2d import (
+    CORNER_SMOOTHING,
+    box_handle_points,
+    clip_polygon_rect,
+    offset_closed_path,
+    polyline_ribbon,
+    smooth_capsule_points,
+    smooth_ellipse_stroke,
+    smooth_line_cap,
+    smooth_polygon_corners,
+    smooth_rect_points,
+)
+from ..gizmo import ARROW_CORNER_RADIUS_PT, DIMENSION_CORNER_RADIUS_RATIO, _rounded_polygon_corners
+from .draw2d import Draw2D, text_line_y
 from .input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
 from .theme import Theme
 
@@ -227,6 +239,9 @@ MAX_VIEWPORT_OVERLAY_SCALE = 2.0
 MIN_VIEWPORT_CAPSULE_SCALE = 0.6
 MAX_VIEWPORT_CAPSULE_SCALE = 1.6
 PLAYBACK_CHROME_SCALE = 0.82
+PLAYBACK_HALF_HEIGHT_PT = 6.8
+PLAYBACK_STEP_SCALE = 0.88
+PLAYBACK_RESET_SCALE = 0.92
 TOOL_CHROME_SCALE = PLAYBACK_CHROME_SCALE
 HINT_CHROME_SCALE = PLAYBACK_CHROME_SCALE
 # ImGui clips a window draw list at the host window boundary.  A capsule's
@@ -238,7 +253,7 @@ OVERLAY_CLIP_PADDING = 5.0
 # This scale changes only their authored paths; hit regions, state circles, and
 # capsule spacing continue to use the shared overlay geometry.
 TOOL_GLYPH_SCALE = 1.18
-_MOVE_ARROW_BASE = 5.0
+_MOVE_ARROW_BASE = 6.0
 _MOVE_ARROW_TIP = 9.0
 _MOVE_ARROW_WING = (_MOVE_ARROW_TIP - _MOVE_ARROW_BASE) / math.sqrt(3.0)
 _MOVE_SHAFT_VISUAL_RATIO = 0.5
@@ -305,7 +320,7 @@ def overlay_border_hit(
     return not (x0 + inset < px < x1 - inset and y0 + inset < py < y1 - inset)
 
 
-_FRAME_ARROW_CORNER_RADIUS_PT = 0.25
+_FRAME_ARROW_CORNER_RADIUS_PT = 0.45
 FRAME_LABEL_MAX_WIDTH = 4.4
 CAPSULE_SURFACE_ALPHA = 0.92
 
@@ -316,24 +331,6 @@ CENTER_STEP = OVERLAY_GEOMETRY.center_step
 TOOL_GROUP_GAP = OVERLAY_GEOMETRY.tool_group_gap
 DIVIDER_WIDTH = OVERLAY_GEOMETRY.divider_width
 
-_CAPSULE_RIGHT = tuple(
-    (math.sin(math.pi * index / 48.0), -math.cos(math.pi * index / 48.0)) for index in range(49)
-)
-_CAPSULE_LEFT = tuple((-x, -y) for x, y in _CAPSULE_RIGHT)
-_CAPSULE_TOP = tuple(
-    (
-        math.cos(math.pi + math.pi * index / 48.0),
-        math.sin(math.pi + math.pi * index / 48.0),
-    )
-    for index in range(49)
-)
-_CAPSULE_BOTTOM = tuple(
-    (math.cos(math.pi * index / 48.0), math.sin(math.pi * index / 48.0)) for index in range(49)
-)
-_SNAP_ARC = tuple(
-    (math.cos(math.pi - math.pi * index / 48.0), math.sin(math.pi - math.pi * index / 48.0))
-    for index in range(49)
-)
 # Fixed ISO-orthographic front half-rings. Path order is Y, X, Z; crossings
 # cycle Y over X, X over Z, and Z over Y so no complete axis owns one layer.
 _ROTATE_HALF_RINGS = (
@@ -468,10 +465,21 @@ def _rotate_stroke_outline(
     path: tuple[tuple[float, float], ...],
     width: float,
     cap: str,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> tuple[tuple[float, float], ...]:
     """Return one inner ring's filled stroke silhouette in authored coordinates."""
 
-    left, right, outline = _open_polyline_ribbon(path, width)
+    if cap not in {"butt", "round"}:
+        raise ValueError(f"unknown rotate ring cap: {cap!r}")
+    try:
+        return smooth_ellipse_stroke(
+            path[0], path[len(path) // 2], width, rounded=cap == "round", smoothing=smoothing
+        )
+    except ValueError:
+        # Wide knockout masks can exceed the ellipse's normal-coordinate
+        # reach. Their clipped interior uses the established miter envelope.
+        pass
+    left, right, outline = polyline_ribbon(path, width)
     if not outline:
         return ()
     if cap == "butt":
@@ -617,6 +625,7 @@ def _rotate_visible_ring_polygons(
     tool_stroke: float,
     ring_gap_ratio: float,
     cap: str,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> tuple[tuple[tuple[tuple[float, float], ...], ...], ...]:
     """Subtract each front shell from the ring behind it for cyclic occlusion."""
 
@@ -626,11 +635,12 @@ def _rotate_visible_ring_polygons(
     occluder_by_ring = (2, 0, 1)
     result = []
     for index, path in enumerate(_ROTATE_HALF_RINGS):
-        outline = _rotate_stroke_outline(path, local_width, cap)
+        outline = _rotate_stroke_outline(path, local_width, cap, smoothing)
         shell = _rotate_stroke_outline(
             _ROTATE_HALF_RINGS[occluder_by_ring[index]],
             shell_width,
             cap,
+            smoothing,
         )
         result.append(_polygon_difference(outline, shell))
     return tuple(result)
@@ -760,22 +770,10 @@ def viewport_chrome_scale(
 
 
 @lru_cache(maxsize=64)
-def capsule_points(x: float, y: float, width: float, height: float):
-    if width >= height:
-        radius = height * 0.5
-        cy = y + radius
-        right = x + width - radius
-        left = x + radius
-        return tuple((right + ux * radius, cy + uy * radius) for ux, uy in _CAPSULE_RIGHT) + tuple(
-            (left + ux * radius, cy + uy * radius) for ux, uy in _CAPSULE_LEFT
-        )
-    radius = width * 0.5
-    cx = x + radius
-    top = y + radius
-    bottom = y + height - radius
-    return tuple((cx + ux * radius, top + uy * radius) for ux, uy in _CAPSULE_TOP) + tuple(
-        (cx + ux * radius, bottom + uy * radius) for ux, uy in _CAPSULE_BOTTOM
-    )
+def capsule_points(
+    x: float, y: float, width: float, height: float, smoothing: float = CORNER_SMOOTHING
+):
+    return smooth_capsule_points(x, y, width, height, smoothing)
 
 
 @lru_cache(maxsize=256)
@@ -866,82 +864,80 @@ def draw_playback_glyph(
     color,
     scale: float,
     kind: str,
+    *,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> None:
     """Draw one normalized playback glyph for runtime and design probes."""
 
     x, y = center
-    triangle_radius = 0.8 * scale
-
-    def rounded_triangle(points, geometry_scale: float = 1.0) -> None:
-        draw.fringed_concave_fill(
-            _rounded_playback_triangle(
-                tuple(points),
-                triangle_radius * geometry_scale,
-            ),
-            color,
-        )
-
-    def play_triangle(cx: float, direction: float, geometry_scale: float):
-        g = geometry_scale * scale
-        return (
-            (cx - direction * 4.6 * g, y - 8.0 * g),
-            (cx + direction * 9.2 * g, y),
-            (cx - direction * 4.6 * g, y + 8.0 * g),
-        )
-
-    if kind == "play":
-        rounded_triangle(play_triangle(x, 1.0, 1.0))
+    if kind in ("previous", "step"):
+        scale *= PLAYBACK_STEP_SCALE
+    elif kind in ("reset", "stop"):
+        scale *= PLAYBACK_RESET_SCALE
+    half_height = PLAYBACK_HALF_HEIGHT_PT * scale
+    if kind in ("play", "reverse", "previous", "step"):
+        triangle, barrier_x = _rounded_playback_triangle(kind, scale, smoothing)
+        draw.fringed_concave_fill(tuple((x + px, y + py) for px, py in triangle), color)
+        if kind in ("previous", "step"):
+            draw.rect_filled(
+                (x + barrier_x - 0.7 * scale, y - half_height),
+                (x + barrier_x + 0.7 * scale, y + half_height),
+                color,
+                rounding=0.7 * scale,
+                smoothing=smoothing,
+            )
     elif kind == "pause":
         draw.rect_filled(
-            (x - 5.4 * scale, y - 8.4 * scale),
-            (x - 1.0 * scale, y + 8.4 * scale),
+            (x - 5.4 * scale, y - half_height),
+            (x - 1.0 * scale, y + half_height),
             color,
             rounding=0.9 * scale,
+            smoothing=smoothing,
         )
         draw.rect_filled(
-            (x + 1.0 * scale, y - 8.4 * scale),
-            (x + 5.4 * scale, y + 8.4 * scale),
+            (x + 1.0 * scale, y - half_height),
+            (x + 5.4 * scale, y + half_height),
             color,
             rounding=0.9 * scale,
-        )
-    elif kind in ("previous", "step"):
-        direction = -1.0 if kind == "previous" else 1.0
-        geometry_scale = 0.78
-        # Reuse the play triangle exactly, only mirrored and uniformly scaled.
-        # The barrier adds weight on the travel side, so offset the pair back
-        # toward the button center as one optical unit.
-        icon_x = x - direction * 2.7 * scale
-        rounded_triangle(
-            play_triangle(icon_x, direction, geometry_scale),
-            geometry_scale,
-        )
-        barrier_x = icon_x + direction * 8.3 * scale
-        draw.rect_filled(
-            (barrier_x - 0.7 * scale, y - 5.4 * scale),
-            (barrier_x + 0.7 * scale, y + 5.4 * scale),
-            color,
-            rounding=0.7 * scale,
+            smoothing=smoothing,
         )
     elif kind in ("reset", "stop"):
         draw.rect_filled(
-            (x - 6.8 * scale, y - 6.8 * scale),
-            (x + 6.8 * scale, y + 6.8 * scale),
+            (x - half_height, y - half_height),
+            (x + half_height, y + half_height),
             color,
             rounding=1.0 * scale,
+            smoothing=smoothing,
         )
 
 
 @lru_cache(maxsize=128)
 def _rounded_playback_triangle(
-    points: tuple[tuple[float, float], ...],
-    radius: float,
-) -> tuple[tuple[float, float], ...]:
-    return tuple(
-        map(
-            tuple,
-            _rounded_polygon_corners(points, radius, (0, 1, 2), segments=5),
-        )
+    kind: str,
+    scale: float,
+    smoothing: float = CORNER_SMOOTHING,
+) -> tuple[tuple[tuple[float, float], ...], float]:
+    points = _rounded_polygon_corners(
+        np.array(((-4.6, -8.0), (9.2, 0.0), (-4.6, 8.0))) * scale,
+        0.8 * scale,
+        (0, 1, 2),
+        smoothing=smoothing,
     )
+    # Align the visible curved extrema, not the discarded sharp triangle tips.
+    points *= PLAYBACK_HALF_HEIGHT_PT * scale / np.max(np.abs(points[:, 1]))
+    barrier_x = 0.0
+    if kind in ("previous", "step"):
+        lo, hi = points[:, 0].min(), points[:, 0].max()
+        barrier_x = hi + 2.0 * scale
+        offset = (lo + barrier_x + 0.7 * scale) * 0.5
+        points[:, 0] -= offset
+        barrier_x -= offset
+        if kind == "previous":
+            points[:, 0] *= -1.0
+            barrier_x *= -1.0
+    elif kind == "reverse":
+        points[:, 0] *= -1.0
+    return tuple(map(tuple, points.tolist())), float(barrier_x)
 
 
 def _play_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
@@ -1127,9 +1123,17 @@ def _move_glyph_path(
     tip: float,
     wing: float,
     shaft_half: float,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> tuple[tuple[float, float], ...]:
     """Build the four-way move icon as one connected antialiased outline."""
+    local = _move_glyph_shape(scale, base, tip, wing, shaft_half, smoothing)
+    return _transform_path(local, x, y, 1.0)
 
+
+@lru_cache(maxsize=64)
+def _move_glyph_shape(
+    scale: float, base: float, tip: float, wing: float, shaft_half: float, smoothing: float
+):
     local = (
         (0.0, -tip),
         (wing, -base),
@@ -1156,15 +1160,19 @@ def _move_glyph_path(
         (-shaft_half, -base),
         (-wing, -base),
     )
-    polygon = tuple((x + px * scale, y + py * scale) for px, py in local)
+    polygon = tuple((px * scale, py * scale) for px, py in local)
+    radius = min(ARROW_CORNER_RADIUS_PT, (tip - base) * 0.18) * scale
     return tuple(
         map(
             tuple,
-            _rounded_polygon_corners(
+            smooth_polygon_corners(
                 polygon,
-                ARROW_CORNER_RADIUS_PT * scale,
-                (23, 0, 1, 5, 6, 7, 11, 12, 13, 17, 18, 19),
-            ),
+                radius,
+                tuple(range(len(polygon))),
+                smoothing=smoothing,
+                convex_only=False,
+                corner_radii=dict.fromkeys((2, 4, 8, 10, 14, 16, 20, 22), radius * 0.5),
+            ).tolist(),
         )
     )
 
@@ -1182,71 +1190,33 @@ def _draw_axis_arrow_glyph(
     tip: float,
     wing: float,
     corner_radius: float,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> None:
-    """Draw a coordinate axis with a native-AA shaft and rounded arrowhead."""
-
+    """Draw one continuous coordinate-axis silhouette with a transparent origin shell."""
     ux, uy = (float(value) for value in direction)
     length = math.hypot(ux, uy)
     ux, uy = ux / length, uy / length
-    nx, ny = -uy, ux
     x, y = (float(value) for value in center)
-
-    # A filled ribbon receives Draw2D's one-pixel fringe outside its authored
-    # width. That fixed fringe dominates each independent narrow shaft at small
-    # UI scales; Move is one connected silhouette and Rotate's comparable ring
-    # uses stroke semantics. Submit this shaft as an actual stroke so
-    # ``stroke_width`` includes its AA coverage and remains proportional.
-    draw.line(
+    # A filled silhouette's fringe lies outside the core. Preserve the apparent
+    # stroke weight of the former native line while joining it to the head.
+    core_width = max(stroke_width * 0.45, stroke_width - 1.0)
+    draw.arrow(
         (x + ux * clear_radius, y + uy * clear_radius),
-        (
-            x + ux * (base + 0.25) * geometry_scale,
-            y + uy * (base + 0.25) * geometry_scale,
-        ),
+        (x + ux * tip * geometry_scale, y + uy * tip * geometry_scale),
         color,
-        stroke_width,
-    )
-    draw.fringed_concave_fill(
-        tuple(
-            (
-                x + ux * along + nx * across,
-                y + uy * along + ny * across,
-            )
-            for along, across in _rounded_axis_head_path(
-                base,
-                tip,
-                wing,
-                geometry_scale,
-                corner_radius,
-            )
-        ),
-        color,
+        core_width,
+        head_length=(tip - base) * geometry_scale,
+        head_width=2.0 * wing * geometry_scale,
+        corner_radius=corner_radius,
+        smoothing=smoothing,
     )
 
 
 @lru_cache(maxsize=64)
-def _rounded_axis_head_path(
-    base: float,
-    tip: float,
-    wing: float,
-    geometry_scale: float,
-    corner_radius: float,
-) -> tuple[tuple[float, float], ...]:
-    """Cache one local Tool Column arrowhead at its effective UI scale."""
-
-    return tuple(
-        map(
-            tuple,
-            _rounded_polygon_corners(
-                (
-                    (tip * geometry_scale, 0.0),
-                    (base * geometry_scale, wing * geometry_scale),
-                    (base * geometry_scale, -wing * geometry_scale),
-                ),
-                corner_radius,
-                (0, 1, 2),
-            ),
-        )
-    )
+def _snap_glyph_shape(scale: float, smoothing: float = CORNER_SMOOTHING):
+    radius = 6.4 * scale
+    cap = smooth_line_cap((0.0, 0.0), (0.0, 1.0), 2.0 * radius, smoothing=smoothing)
+    return ((-radius, -6.2 * scale), *map(tuple, cap.tolist()), (radius, -6.2 * scale))
 
 
 def draw_tool_glyph(
@@ -1257,6 +1227,8 @@ def draw_tool_glyph(
     kind: str,
     space: str,
     geometry: OverlayGeometry = OVERLAY_GEOMETRY,
+    *,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> None:
     """Draw one normalized Tool Column glyph for runtime and design probes."""
 
@@ -1273,6 +1245,7 @@ def draw_tool_glyph(
                 _MOVE_ARROW_TIP,
                 _MOVE_ARROW_WING,
                 geometry.tool_stroke * _MOVE_SHAFT_VISUAL_RATIO * 0.5 / TOOL_GLYPH_SCALE,
+                smoothing,
             ),
             color,
         )
@@ -1288,21 +1261,30 @@ def draw_tool_glyph(
             geometry.tool_stroke,
             geometry.rotate_ring_gap_ratio,
             geometry.rotate_ring_cap,
+            smoothing,
         ):
             for local in ring:
                 path = _transform_path(local, x, y, glyph_scale)
                 draw.concave_fill(path, color)
     elif kind == "dimensions":
         half = 2.0 * scale
+        clear_radius = (
+            geometry.frame_center_radius * glyph_scale
+            + geometry.tool_stroke * geometry.frame_center_gap_ratio * scale
+        )
         for ux, uy in _FRAME_AXES:
             end = (x + ux * 9.0 * glyph_scale, y + uy * 9.0 * glyph_scale)
-            draw.line(center, end, color, stroke)
-            draw.rect_filled(
-                (end[0] - half, end[1] - half),
-                (end[0] + half, end[1] + half),
-                color,
-                rounding=0.5 * scale,
+            start = (x + ux * clear_radius, y + uy * clear_radius)
+            path = box_handle_points(
+                start,
+                end,
+                max(stroke * 0.45, stroke - 1.0),
+                2.0 * half,
+                corner_radius=2.0 * half * DIMENSION_CORNER_RADIUS_RATIO,
+                smoothing=smoothing,
             )
+            draw.fringed_concave_fill(path, color)
+        draw.circle_filled(center, geometry.frame_center_radius * glyph_scale, color, segments=16)
     elif kind == "frame":
         clear_radius = (
             geometry.frame_center_radius * glyph_scale
@@ -1321,6 +1303,7 @@ def draw_tool_glyph(
                 tip=10.0,
                 wing=1.8,
                 corner_radius=_FRAME_ARROW_CORNER_RADIUS_PT * scale,
+                smoothing=smoothing,
             )
         # Shaft endpoints sit on the outside of the dot's relative transparent
         # shell; drawing the dot last supplies the visible white origin.
@@ -1337,13 +1320,7 @@ def draw_tool_glyph(
             FRAME_LABEL_MAX_WIDTH * scale,
         )
     else:
-        radius = 6.4 * glyph_scale
-        local = (
-            (-radius, -6.2 * glyph_scale),
-            *((ux * radius, uy * radius) for ux, uy in _SNAP_ARC),
-            (radius, -6.2 * glyph_scale),
-        )
-        path = _transform_path(local, x, y, 1.0)
+        path = _transform_path(_snap_glyph_shape(glyph_scale, smoothing), x, y, 1.0)
         draw.polyline(path, color, stroke)
 
 
@@ -1424,15 +1401,18 @@ def draw_tool_column(
 
 
 def _inline_text(draw: Draw2D, x: float, center_y: float, value: str, color) -> float:
-    width, height = draw.text_size(value)
-    ink = draw.text_ink_bounds(value)
-    pen_y = center_y - height * 0.5 if ink is None else center_y - (ink[1] + ink[3]) * 0.5
-    draw.text((x, pen_y), color, value)
+    width = draw.text_size(value)[0]
+    draw.text((x, text_line_y(draw, center_y)), color, value)
     return width
 
 
 def _key_width(draw: Draw2D, label: str, scale: float, text_scale: float = 1.0) -> float:
     return draw.text_size(label)[0] * text_scale + OVERLAY_GEOMETRY.hint_key_padding_x * 2.0 * scale
+
+
+def keycap_rounding(width: float, height: float) -> float:
+    """Use the same keycap proportions in status bars and geometry previews."""
+    return min(width * 0.5, height * 0.35)
 
 
 def _keycap(
@@ -1445,14 +1425,15 @@ def _keycap(
     *,
     muted: bool = False,
 ) -> float:
-    text_width, text_height = draw.text_size(label)
+    text_width = draw.text_size(label)[0]
     width = text_width + OVERLAY_GEOMETRY.hint_key_padding_x * 2.0 * scale
     height = OVERLAY_GEOMETRY.hint_control_height * scale
     y = center_y - height * 0.5
-    draw.rect_filled((x, y), (x + width, y + height), theme.bg_frame, rounding=3.0 * scale)
-    draw.rect((x, y), (x + width, y + height), theme.border, 1.0 * scale, rounding=3.0 * scale)
+    rounding = keycap_rounding(width, height)
+    draw.rect_filled((x, y), (x + width, y + height), theme.bg_frame, rounding=rounding)
+    draw.rect((x, y), (x + width, y + height), theme.border, 1.0 * scale, rounding=rounding)
     draw.text(
-        (x + (width - text_width) * 0.5, y + (height - text_height) * 0.5),
+        (x + (width - text_width) * 0.5, text_line_y(draw, center_y)),
         theme.text_disabled if muted else theme.text,
         label,
     )
@@ -1497,6 +1478,7 @@ def mouse_button_geometry(
     *,
     outline_width: float,
     geometry: OverlayGeometry = OVERLAY_GEOMETRY,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> MouseButtonGeometry | None:
     """Return true-knockout shell and fill geometry for one mouse button."""
 
@@ -1506,74 +1488,25 @@ def mouse_button_geometry(
     shell_gap = outline_width * geometry.hint_mouse_button_shell_ratio
     button_bottom = y + height * geometry.hint_mouse_button_height_ratio
     shell_radius = min(width * 0.22, height * 0.18)
-    outer_radius = shell_radius + half_stroke
     outer_left = x - half_stroke
-    outer_top = y - half_stroke
     button_width = (width + outline_width) * geometry.hint_mouse_button_width_ratio
     inner_edge = outer_left + button_width
-    arc_steps = 12
-
-    def arc(
-        center_x: float,
-        center_y: float,
-        radius: float,
-        start: float,
-        end: float,
-    ) -> tuple[tuple[float, float], ...]:
-        return tuple(
-            (
-                center_x + math.cos(start + (end - start) * step / arc_steps) * radius,
-                center_y + math.sin(start + (end - start) * step / arc_steps) * radius,
-            )
-            for step in range(arc_steps + 1)
-        )
-
-    fill = (
-        (inner_edge, outer_top),
-        *arc(
-            x + shell_radius,
-            y + shell_radius,
-            outer_radius,
-            -math.pi * 0.5,
-            -math.pi,
-        ),
-        (outer_left, button_bottom),
-        (inner_edge, button_bottom),
+    shell = smooth_rect_points(x, y, x + width, y + height, shell_radius, smoothing=smoothing)
+    outer = offset_closed_path(shell, half_stroke)
+    fill = clip_polygon_rect(outer, (outer_left, y - half_stroke, inner_edge, button_bottom))
+    other_corners = smooth_rect_points(
+        x, y, x + width, y + height, shell_radius, (False, True, True, True), smoothing=smoothing
     )
     visible_shell = (
         (inner_edge + shell_gap, y),
-        *arc(
-            x + width - shell_radius,
-            y + shell_radius,
-            shell_radius,
-            -math.pi * 0.5,
-            0.0,
-        ),
-        *arc(
-            x + width - shell_radius,
-            y + height - shell_radius,
-            shell_radius,
-            0.0,
-            math.pi * 0.5,
-        ),
-        *arc(
-            x + shell_radius,
-            y + height - shell_radius,
-            shell_radius,
-            math.pi * 0.5,
-            math.pi,
-        ),
+        *other_corners[1:],
         (x, button_bottom + shell_gap),
     )
     if button == "right":
         mirror_x = x * 2.0 + width
         visible_shell = tuple((mirror_x - point[0], point[1]) for point in visible_shell)
-        # The mirrored outline has ImGui's expected clockwise screen winding.
         fill = tuple((mirror_x - point[0], point[1]) for point in fill)
-    else:
-        # Match the right button's clockwise screen winding so both convex
-        # fills receive the same outward antialias fringe.
-        fill = tuple(reversed(fill))
+    fill = _counterclockwise(fill)
     return MouseButtonGeometry(visible_shell, fill)
 
 
@@ -1618,6 +1551,7 @@ def draw_mouse_hint_glyph(
     size: tuple[float, float] | None = None,
     pixel_size: float = 1.0,
     geometry: OverlayGeometry = OVERLAY_GEOMETRY,
+    smoothing: float = CORNER_SMOOTHING,
     muted: bool = False,
 ) -> float:
     """Draw a Blender-style mouse shell with one semantic control highlighted."""
@@ -1639,19 +1573,27 @@ def draw_mouse_hint_glyph(
         button,
         outline_width=outline_width,
         geometry=geometry,
+        smoothing=smoothing,
     )
     shell_color = theme.text_disabled if muted else theme.text
     fill_color = theme.bg_frame_active if muted else theme.primary
     suffix_color = theme.text_disabled if muted else theme.primary_bright
     if button_geometry is None:
-        draw.rect((x, y), (x + width, y + height), shell_color, outline_width, rounding=radius)
+        draw.rect(
+            (x, y),
+            (x + width, y + height),
+            shell_color,
+            outline_width,
+            rounding=radius,
+            smoothing=smoothing,
+        )
     else:
         # Omit the shell beneath the button's transparent outer contour instead
         # of repainting it with a guessed background color. This remains a
         # genuine knockout over translucent chrome and arbitrary viewports.
         draw.polyline(button_geometry.visible_shell, shell_color, outline_width)
         draw.convex_fill(button_geometry.fill, fill_color)
-    if button == "wheel":
+    if button in ("wheel", "middle"):
         wheel = mouse_wheel_geometry(
             x,
             y,
@@ -1666,6 +1608,7 @@ def draw_mouse_hint_glyph(
             wheel.hi,
             fill_color,
             rounding=wheel.rounding,
+            smoothing=smoothing,
         )
     if not suffix:
         return width
@@ -2060,7 +2003,7 @@ def _status_performance_layout(
     metric_text: str = "",
     max_width: float | None = None,
 ) -> _StatusPerformanceLayout:
-    """Lay out telemetry without jitter and collapse it before it can overlap.
+    """Keep FPS columns stable and collapse telemetry before it can overlap.
 
     The visual order is backend, simulation metric, delta time, and FPS.  When
     space is constrained, backend and FPS yield first, followed by the metric;
@@ -2074,14 +2017,14 @@ def _status_performance_layout(
 
     actual = {
         "backend": draw.text_size(backend_text)[0],
-        "metric": (draw.text_size(metric_text)[0] + 14.0 * scale if metric_text else 0.0),
+        "metric": (_key_width(draw, metric_text, scale) if metric_text else 0.0),
         "delta": draw.text_size(delta_text)[0],
         "fps": draw.text_size(fps_text)[0],
     }
     reserved = {
         "backend": actual["backend"],
         "metric": actual["metric"],
-        "delta": max(actual["delta"], draw.text_size("Δt 0.000000 s")[0]),
+        "delta": actual["delta"],
         "fps": max(actual["fps"], draw.text_size("000.0 fps")[0]),
     }
     gap = 22.0 * scale
@@ -2386,28 +2329,14 @@ def draw_status(
     if performance.backend_text:
         _inline_text(draw, performance.backend_x, cy, performance.backend_text, theme.text_disabled)
     if performance.metric_text:
-        metric_height = min(height - 6.0 * scale, 20.0 * scale)
+        metric_height = OVERLAY_GEOMETRY.hint_control_height * scale
         metric_rect = (
             performance.metric_x,
             cy - metric_height * 0.5,
             performance.metric_x + performance.metric_width,
             cy + metric_height * 0.5,
         )
-        draw.rect_filled(metric_rect[:2], metric_rect[2:], theme.bg_frame, rounding=3.0 * scale)
-        draw.rect(
-            metric_rect[:2],
-            metric_rect[2:],
-            theme.border,
-            1.0 * scale,
-            rounding=3.0 * scale,
-        )
-        _inline_text(
-            draw,
-            performance.metric_x + 7.0 * scale,
-            cy,
-            metric_text,
-            theme.text_disabled,
-        )
+        _keycap(draw, performance.metric_x, cy, metric_text, theme, scale, muted=True)
     if performance.delta_text:
         _inline_text(draw, performance.delta_x, cy, performance.delta_text, theme.text_disabled)
     if performance.fps_text:

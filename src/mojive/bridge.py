@@ -109,6 +109,30 @@ def _apply_arrow(layer: Layer, m: dict) -> None:
     )
 
 
+def _apply_arrow_2d(layer: Layer, m: dict) -> None:
+    layer.arrow_2d(
+        m["id"],
+        m["a"],
+        m["b"],
+        m.get("color", _WHITE),
+        float(m.get("width_px", 2.0)),
+        float(m.get("duration", NEVER)),
+        **{
+            key: m[key]
+            for key in (
+                "head_length_px",
+                "head_width_px",
+                "corner_radius_px",
+                "join_radius_px",
+                "smoothing",
+                "round_tail",
+                "antialias",
+            )
+            if key in m
+        },
+    )
+
+
 def _apply_arrows(layer: Layer, m: dict) -> None:
     layer.arrows(
         m["id"],
@@ -212,6 +236,7 @@ OPS = {
     "line": _apply_line,
     "lines": _apply_lines,
     "arrow": _apply_arrow,
+    "arrow_2d": _apply_arrow_2d,
     "arrows": _apply_arrows,
     "point": _apply_point,
     "points": _apply_points,

@@ -7,6 +7,7 @@ from functools import lru_cache
 
 import numpy as np
 
+from ..curves2d import CORNER_SMOOTHING, smooth_lollipop_points
 from ..types import CameraView
 from .camera import PITCH_LIMIT, OrbitCamera, camera_basis
 from .draw2d import Draw2D
@@ -198,7 +199,9 @@ class ViewCube:
             margin=self.selection_padding,
         )
 
-    def draw(self, overlay: Draw2D, style_scale: float = 1.0) -> None:
+    def draw(
+        self, overlay: Draw2D, style_scale: float = 1.0, *, smoothing: float = CORNER_SMOOTHING
+    ) -> None:
         if not self._balls:
             return
 
@@ -221,7 +224,9 @@ class ViewCube:
             )
             color = (*face, b.alpha)
             if b.positive:
-                outline = _lollipop_outline(self._center, b.screen, b.radius, LINE_PT * style_scale)
+                outline = _lollipop_outline(
+                    self._center, b.screen, b.radius, LINE_PT * style_scale, smoothing=smoothing
+                )
                 overlay.fringed_concave_fill(outline, color)
             else:
                 overlay.circle_filled(b.screen, b.radius, color, segments=24)
@@ -251,6 +256,8 @@ def _lollipop_outline(
     radius: float,
     line_width: float,
     segments: int = 24,
+    *,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> tuple[tuple[float, float], ...]:
     center_v = np.asarray(center, np.float64)
     ball_v = np.asarray(ball, np.float64)
@@ -262,13 +269,9 @@ def _lollipop_outline(
 
     direction /= distance
     side = np.array((-direction[1], direction[0]))
-    half = min(line_width * 0.5, radius * 0.5)
-    angle = float(np.arcsin(half / radius))
-    arc = np.linspace(-np.pi + angle, np.pi - angle, segments)
-    points = [center_v - side * half]
-    points.extend(ball_v + radius * (np.cos(a) * direction + np.sin(a) * side) for a in arc)
-    points.append(center_v + side * half)
-    return tuple(tuple(point) for point in points)
+    local = np.asarray(smooth_lollipop_points(distance, radius, line_width, smoothing))
+    points = ball_v + local[:, :1] * direction + local[:, 1:] * side
+    return tuple(map(tuple, points.tolist()))
 
 
 def _label_alpha(ball: Ball, hovered: bool) -> float:

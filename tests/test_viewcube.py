@@ -137,8 +137,11 @@ def test_back_ball_fade_is_continuous():
 def test_axis_line_and_ball_are_one_lollipop_outline():
     outline = vc._lollipop_outline((10.0, 20.0), (40.0, 60.0), 10.0, 2.0)
     assert len(outline) > 24
-    assert np.linalg.norm(np.asarray(outline[0]) - (10.0, 20.0)) == pytest.approx(1.0)
-    assert np.linalg.norm(np.asarray(outline[-1]) - (10.0, 20.0)) == pytest.approx(1.0)
+    points = np.asarray(outline) - np.array((10.0, 20.0))
+    tangent = np.array((0.6, 0.8))
+    # The rounded shaft tip preserves the conventional half-width extension.
+    assert (points @ tangent).min() == pytest.approx(-1.0)
+    assert np.linalg.norm(points[0] - points[-1]) > 1e-9
 
 
 def test_lollipop_becomes_one_circle_when_the_ball_covers_the_center():

@@ -30,6 +30,21 @@ def add_diagnostics(viewer) -> None:
         color=(0.85, 0.93, 1.0, 1.0),
         offset_px=(10.0, -8.0),
     )
+    for index, (name, radius, smoothing) in enumerate(
+        (("g3", 1.5, 0.6), ("circular", 1.5, 0.0), ("sharp", 0.0, 0.0))
+    ):
+        y = 60.0 + index * 50.0
+        overlay.arrow_2d(
+            name,
+            (40.0, y),
+            (240.0, y),
+            (0.85, 0.93, 1.0, 1.0),
+            4.0,
+            head_length_px=18.0,
+            head_width_px=20.0,
+            corner_radius_px=radius,
+            smoothing=smoothing,
+        )
 
 
 def main() -> None:

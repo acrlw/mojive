@@ -83,3 +83,9 @@ metadata carries vertical image orientation.
 Shared contracts live in `types.py`, `commands.py`, `math3d.py`, and `adapters/base.py`. Render
 code imports shared contracts. Adapter integrations own physics-specific code. UI modules depend
 on session state and protocols. `tests/test_layering.py` enforces these boundaries.
+
+For overlays, `curves2d.py` owns reusable paths and stroke profiles; `draglink2d.py` owns the
+implicit hollow-connector field and mesh. Both remain independent of UI and backend imports.
+`ui/draw2d.py` defines the drawing protocol and adapts it to ImGui. Widgets own placement and
+interaction; retained debug layers own identifiers, lifetime, budgets, and stream packing.
+The [UI drawing guide](../how-to/ui-drawing.md) lists extension entry points and examples.

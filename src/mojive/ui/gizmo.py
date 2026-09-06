@@ -24,6 +24,7 @@ from ..commands import (
     SetSceneCamera,
     SetSceneModelTransform,
 )
+from ..curves2d import CORNER_SMOOTHING, arc_ribbon_mesh, smooth_affine_corners
 from ..geometry import GeometryDimensions, geometry_dimensions, geometry_size_from_dimensions
 from ..gizmo import (
     ACTIVE_COLOR,
@@ -39,14 +40,12 @@ from ..gizmo import (
     CENTER_SHELL_RADIUS,
     CONTRAST_EDGE_COLOR,
     CONTRAST_EDGE_PT,
-    DIMENSION_HANDLE_HALF_PT,
     GUIDE_CORE_COLOR,
     HOVER_COLOR,
     JOINT_HANDLE_COLOR,
-    JOINT_OUTLINE_COLOR,
-    JOINT_OUTLINE_PT,
     PLANE_ACTIVE_ALPHA,
     PLANE_ALPHA,
+    PLANE_CORNER_RADIUS_PT,
     PLANE_HANDLES,
     RING_HIT_PT,
     RING_RADIUS,
@@ -85,6 +84,8 @@ from ..gizmo import (
     rotation_ring,
     rotation_ring_alpha,
     rotation_ring_is_full,
+    screen_path_distance,
+    screen_polygon_distance,
     trackball_color,
     visibility,
     world_scale,
@@ -93,7 +94,7 @@ from ..render.debugdraw import Occlusion
 from ..scene_queries import camera_for_node, node_world_pose
 from ..types import CameraView, LightType, MeshShape
 from .camera import ndc_from_viewport, unproject
-from .draw2d import Draw2D
+from .draw2d import Draw2D, draw_drag_link
 from .panels.inspector import gizmo_refusal_reason
 from .theme import THEME
 
@@ -204,7 +205,12 @@ def _joint_current_tick_color(range_color):
 
 
 def joint_slide_arrow_polygons(
-    current, tangent, style_scale: float, *, for_hit_test: bool = False
+    current,
+    tangent,
+    style_scale: float,
+    *,
+    for_hit_test: bool = False,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return smaller round-tail handles, or their unchanged picking silhouettes."""
 
@@ -225,7 +231,13 @@ def joint_slide_arrow_polygons(
     def polygon(direction: float) -> np.ndarray:
         start = current + offset + direction * inset
         end = current + offset + direction * extent
-        points = axis_arrow_polygon(start, end, style_scale, round_tail=not for_hit_test)
+        points = axis_arrow_polygon(
+            start,
+            end,
+            style_scale,
+            round_tail=not for_hit_test,
+            smoothing=CORNER_SMOOTHING if for_hit_test else smoothing,
+        )
         if for_hit_test:
             return points
         center = (start + end) * 0.5
@@ -263,41 +275,6 @@ def _screen_segment_distance(point, start, end) -> float:
         else 0.0
     )
     return float(np.linalg.norm(point - (start + edge * amount)))
-
-
-def _screen_polygon_distance(point, polygon) -> float:
-    """Distance to a small screen polygon, including its filled interior."""
-
-    point = np.asarray(point, np.float64)
-    polygon = np.asarray(polygon, np.float64).reshape(-1, 2)
-    if len(polygon) < 3:
-        return float("inf")
-    x, y = point
-    inside = False
-    previous = polygon[-1]
-    for current in polygon:
-        if (current[1] > y) != (previous[1] > y):
-            intersection = current[0] + (previous[0] - current[0]) * (y - current[1]) / (
-                previous[1] - current[1]
-            )
-            if x < intersection:
-                inside = not inside
-        previous = current
-    if inside:
-        return 0.0
-
-    distance = float("inf")
-    for index, start in enumerate(polygon):
-        end = polygon[(index + 1) % len(polygon)]
-        edge = end - start
-        denominator = float(np.dot(edge, edge))
-        t = (
-            float(np.clip(np.dot(point - start, edge) / denominator, 0.0, 1.0))
-            if denominator > 1e-12
-            else 0.0
-        )
-        distance = min(distance, float(np.linalg.norm(point - (start + edge * t))))
-    return distance
 
 
 class _RotationDialProjector:
@@ -1383,7 +1360,7 @@ class ObjectGizmo:
             if target.joint.type == "slide" and slide is not None and not range_hit:
                 polygons = self._slide_arrow_polygons(slide, self._style_scale, for_hit_test=True)
                 arrow_hit = any(
-                    _screen_polygon_distance(cursor, polygon) <= 4.0 * self._style_scale
+                    screen_polygon_distance(cursor, polygon) <= 4.0 * self._style_scale
                     for polygon in polygons
                 )
                 if arrow_hit:
@@ -1664,11 +1641,7 @@ class ObjectGizmo:
             if target is not None and target.joint.type in ("hinge", "slide")
             else None
         )
-        frame.outline_color = (
-            JOINT_OUTLINE_COLOR
-            if target is not None and target.joint.type in ("hinge", "slide")
-            else None
-        )
+        frame.outline_color = None
         frame.active_projection_fade = target is not None
         self._publish_translation_guide(backend, ui_scale)
         if self._style is GizmoStyle.FLAT or mode is GizmoMode.DIMENSIONS:
@@ -1743,8 +1716,7 @@ class ObjectGizmo:
                 and self._active_joint.type == "slide"
                 and not self._snapping
             ):
-                # Limited slides include the drag markers in the range's
-                # outline/core passes so crossings have no internal border.
+                # Limited slides already include these markers in their range.
                 if self._joint_range is None:
                     self._draw_joint_translation_guide(overlay, cam, rect, style_scale)
             else:
@@ -1845,7 +1817,10 @@ class ObjectGizmo:
             if np.any(screen[:, 2] <= 0.0):
                 continue
             opacity = PLANE_ACTIVE_ALPHA if frame.active is handle else PLANE_ALPHA * alpha
-            overlay.convex_fill(screen[:, :2], self._flat_color(handle, axis, opacity))
+            points = smooth_affine_corners(
+                screen[:, :2], PLANE_CORNER_RADIUS_PT * style_scale, frame.corner_smoothing
+            )
+            overlay.convex_fill(points, self._flat_color(handle, axis, opacity))
 
         axes = [axis for axis, handle in enumerate(AXIS_HANDLES) if handle in visible]
         for k in paint_order(cam, origin, [rotation[:, axis] for axis in axes]):
@@ -1872,38 +1847,30 @@ class ObjectGizmo:
             )
             color = self._flat_color(handle, axis, alpha)
             if frame.mode is GizmoMode.DIMENSIONS:
-                outline = dimension_axis_polygon(
-                    start,
-                    screen[1, :2],
-                    style_scale,
-                    outline_pt=CONTRAST_EDGE_PT,
-                )
-                points = dimension_axis_polygon(start, screen[1, :2], style_scale)
-                overlay.concave_fill(
-                    outline,
-                    CONTRAST_EDGE_COLOR,
+                points = dimension_axis_polygon(
+                    start, screen[1, :2], style_scale, smoothing=frame.corner_smoothing
                 )
                 overlay.concave_fill(points, color)
             else:
-                points = axis_arrow_polygon(start, screen[1, :2], style_scale)
+                points = axis_arrow_polygon(
+                    start, screen[1, :2], style_scale, smoothing=frame.corner_smoothing
+                )
                 if len(points):
                     overlay.concave_fill(points, color)
 
-        if GizmoHandle.SCREEN in visible:
+        if GizmoHandle.SCREEN in visible or frame.mode is GizmoMode.DIMENSIONS:
             center = project(cam, (origin,), rect, prepared=projection)[0]
             if center[2] > 0.0:
                 color = HOVER_COLOR if self._hot(GizmoHandle.SCREEN) else CENTER_COLOR
-                if frame.mode is GizmoMode.DIMENSIONS:
-                    self._draw_dimension_square(overlay, center[:2], color, style_scale)
-                else:
-                    radius = CENTER_RADIUS * SIZE_PT * style_scale
+                radius = CENTER_RADIUS * SIZE_PT * style_scale
+                if frame.mode is not GizmoMode.DIMENSIONS:
                     overlay.circle_filled(
                         center[:2],
                         radius + CONTRAST_EDGE_PT * style_scale,
                         CONTRAST_EDGE_COLOR,
                         segments=24,
                     )
-                    overlay.circle_filled(center[:2], radius, color, segments=24)
+                overlay.circle_filled(center[:2], radius, color, segments=24)
 
         if GizmoHandle.ROTATE_TRACKBALL in visible:
             center = project(cam, (origin,), rect, prepared=projection)[0]
@@ -1938,19 +1905,26 @@ class ObjectGizmo:
                     closed=True,
                 )
                 continue
-            stroke = _rotation_arc_stroke(
+            stroke, indices = arc_ribbon_mesh(
                 screen[:, :2],
                 None,
                 None,
                 ring_width,
                 round_caps=True,
+                smoothing=frame.corner_smoothing,
             )
             if len(stroke):
                 # Submit the translucent ribbon and both caps as one fill so
                 # their overlap cannot accumulate alpha at either endpoint.
-                overlay.fringed_concave_fill(stroke, ring_color)
+                overlay.indexed_fill(stroke, indices, ring_color, outline=stroke)
             else:
-                overlay.polyline(screen[:, :2], ring_color, ring_width, cap="round")
+                overlay.polyline(
+                    screen[:, :2],
+                    ring_color,
+                    ring_width,
+                    cap="round",
+                    smoothing=frame.corner_smoothing,
+                )
 
         if GizmoHandle.ROTATE_SCREEN in visible and not (
             frame.active_rotation_overlay and frame.active is GizmoHandle.ROTATE_SCREEN
@@ -1973,29 +1947,6 @@ class ObjectGizmo:
                     SCREEN_RING_WIDTH_PT * style_scale,
                     segments=RING_SEGMENTS,
                 )
-
-    @staticmethod
-    def _draw_dimension_square(
-        overlay: Draw2D,
-        center,
-        color,
-        style_scale: float,
-    ) -> None:
-        half = DIMENSION_HANDLE_HALF_PT * style_scale
-        edge = CONTRAST_EDGE_PT * style_scale
-        center = np.asarray(center, np.float64)
-        overlay.rect_filled(
-            center - half - edge,
-            center + half + edge,
-            CONTRAST_EDGE_COLOR,
-            rounding=1.0 * style_scale,
-        )
-        overlay.rect_filled(
-            center - half,
-            center + half,
-            color,
-            rounding=0.75 * style_scale,
-        )
 
     def _flat_color(self, handle: GizmoHandle, axis: int, alpha: float = 1.0):
         base = self._handle_color(axis)
@@ -2058,28 +2009,26 @@ class ObjectGizmo:
             )
         if projection is None:
             return
-        phases = ("outline", "core") if phase in ("all", "geometry") else (phase,)
-        for draw_phase in phases:
-            if isinstance(projection, _HingeRangeProjection):
-                self._draw_hinge_range(
-                    overlay,
-                    cam,
-                    rect,
-                    style_scale,
-                    state,
-                    phase=draw_phase,
-                    prepared=projection,
-                )
-            elif isinstance(projection, _SlideRangeProjection):
-                self._draw_slide_range(
-                    overlay,
-                    cam,
-                    rect,
-                    style_scale,
-                    state,
-                    phase=draw_phase,
-                    prepared=projection,
-                )
+        if isinstance(projection, _HingeRangeProjection):
+            self._draw_hinge_range(
+                overlay,
+                cam,
+                rect,
+                style_scale,
+                state,
+                phase=phase,
+                prepared=projection,
+            )
+        elif isinstance(projection, _SlideRangeProjection):
+            self._draw_slide_range(
+                overlay,
+                cam,
+                rect,
+                style_scale,
+                state,
+                phase=phase,
+                prepared=projection,
+            )
 
     def _joint_range_projection(
         self,
@@ -2242,6 +2191,7 @@ class ObjectGizmo:
             (x1, y1),
             (*THEME.bg_popup[:3], 0.94),
             rounding=5.0 * style_scale,
+            smoothing=self._frame.corner_smoothing,
         )
         border = (
             THEME.primary_dim
@@ -2254,6 +2204,7 @@ class ObjectGizmo:
             border,
             1.0 * style_scale,
             rounding=5.0 * style_scale,
+            smoothing=self._frame.corner_smoothing,
         )
         core = (
             axis_active_color(JOINT_RANGE_COLOR)
@@ -2312,19 +2263,9 @@ class ObjectGizmo:
             b = point + np.array((0.0, endpoint_half))
             strokes.append((a, b, color, 3.0 * style_scale, "round"))
 
-        # Treat the rail and every tick as one silhouette. Drawing every dark
-        # stroke first prevents a later tick outline from cutting through the
-        # colored rail at their intersection.
-        for outline in (True, False):
-            for start, end, color, width, cap in strokes:
-                kwargs = {} if cap is None else {"cap": cap}
-                overlay.line(
-                    start,
-                    end,
-                    JOINT_OUTLINE_COLOR if outline else color,
-                    width + (2.0 * JOINT_OUTLINE_PT * style_scale if outline else 0.0),
-                    **kwargs,
-                )
+        for start, end, color, width, cap in strokes:
+            kwargs = {} if cap is None else {"cap": cap}
+            overlay.line(start, end, color, width, **kwargs)
         if self._joint_precision_active and self._label:
             _draw_joint_value_label(
                 overlay,
@@ -2422,18 +2363,15 @@ class ObjectGizmo:
         alpha = projection.alpha
         allowed_color = self._hinge_range_color()
         range_color = _with_alpha(allowed_color, alpha)
-        outline = phase == "outline"
-        stroke_color = _with_alpha(JOINT_OUTLINE_COLOR, alpha) if outline else range_color
-        range_width = (
-            JOINT_RANGE_WIDTH_PT + (2.0 * JOINT_OUTLINE_PT if outline else 0.0)
-        ) * style_scale
+        range_width = JOINT_RANGE_WIDTH_PT * style_scale
         if phase != "labels" and projection.allowed is not None:
             overlay.polyline(
                 projection.allowed,
-                stroke_color,
+                range_color,
                 range_width,
                 closed=projection.full_range,
                 cap="butt" if projection.full_range else "round",
+                smoothing=self._frame.corner_smoothing,
             )
         if phase != "labels":
             current_tick = projection.current_tick
@@ -2441,12 +2379,13 @@ class ObjectGizmo:
                 overlay.line(
                     current_tick[0],
                     current_tick[1],
-                    stroke_color if outline else _joint_current_tick_color(range_color),
+                    _joint_current_tick_color(range_color),
                     range_width,
                     cap="round",
+                    smoothing=self._frame.corner_smoothing,
                 )
             if not state.has_ambiguous_dial_limits:
-                tick_width = (3.0 + (2.0 * JOINT_OUTLINE_PT if outline else 0.0)) * style_scale
+                tick_width = range_width
                 lower_tick = projection.lower_tick
                 upper_tick = projection.upper_tick
                 entries = (
@@ -2474,18 +2413,18 @@ class ObjectGizmo:
                         overlay.line(
                             tick[0],
                             tick[1],
-                            stroke_color if outline else _with_alpha(color, alpha),
+                            _with_alpha(color, alpha),
                             tick_width,
                             cap="round",
+                            smoothing=self._frame.corner_smoothing,
                         )
-                if not outline:
-                    self._set_joint_limit_hits(
-                        state,
-                        entries,
-                        tick_width=tick_width,
-                        tick_cap="round",
-                        style_scale=style_scale,
-                    )
+                self._set_joint_limit_hits(
+                    state,
+                    entries,
+                    tick_width=tick_width,
+                    tick_cap="round",
+                    style_scale=style_scale,
+                )
 
     def _draw_slide_handle(
         self,
@@ -2495,27 +2434,16 @@ class ObjectGizmo:
         tangent: np.ndarray,
         normal: np.ndarray,
         alpha: float,
-        *,
-        outline: bool = False,
     ) -> None:
         """Draw opposing external arrows for slide-joint interaction."""
 
         slide = _SlideRangeProjection(current, current, current, tangent, normal, alpha)
-        color = (
-            _with_alpha(JOINT_OUTLINE_COLOR, alpha)
-            if outline
-            else self._flat_color(GizmoHandle.Z, 2, alpha)
-        )
-        for points in self._slide_arrow_polygons(slide, style_scale):
+        color = self._flat_color(GizmoHandle.Z, 2, alpha)
+        for points in self._slide_arrow_polygons(
+            slide, style_scale, smoothing=self._frame.corner_smoothing
+        ):
             if len(points):
                 overlay.fringed_concave_fill(points, color)
-                if outline:
-                    overlay.polyline(
-                        points,
-                        color,
-                        2.0 * JOINT_OUTLINE_PT * style_scale * JOINT_SLIDE_ARROW_VISUAL_SCALE,
-                        closed=True,
-                    )
 
     @staticmethod
     def _slide_arrow_polygons(
@@ -2523,9 +2451,14 @@ class ObjectGizmo:
         style_scale: float,
         *,
         for_hit_test: bool = False,
+        smoothing: float = CORNER_SMOOTHING,
     ) -> tuple[np.ndarray, np.ndarray]:
         return joint_slide_arrow_polygons(
-            slide.current, slide.tangent, style_scale, for_hit_test=for_hit_test
+            slide.current,
+            slide.tangent,
+            style_scale,
+            for_hit_test=for_hit_test,
+            smoothing=smoothing,
         )
 
     @staticmethod
@@ -2591,13 +2524,9 @@ class ObjectGizmo:
         range_color = self._flat_color(GizmoHandle.Z, 2, alpha)
         lower, current, upper = slide.lower, slide.current, slide.upper
         tangent, normal = slide.tangent, slide.normal
-        outline = phase == "outline"
-        stroke_color = _with_alpha(JOINT_OUTLINE_COLOR, alpha) if outline else range_color
-        range_width = (
-            JOINT_RANGE_WIDTH_PT + (2.0 * JOINT_OUTLINE_PT if outline else 0.0)
-        ) * style_scale
+        range_width = JOINT_RANGE_WIDTH_PT * style_scale
         if phase != "labels":
-            overlay.line(lower, upper, stroke_color, range_width)
+            overlay.line(lower, upper, range_color, range_width)
             self._draw_slide_handle(
                 overlay,
                 style_scale,
@@ -2605,7 +2534,6 @@ class ObjectGizmo:
                 tangent,
                 normal,
                 alpha,
-                outline=outline,
             )
 
             if self._using and self._active is GizmoHandle.Z and not self._snapping:
@@ -2614,20 +2542,20 @@ class ObjectGizmo:
                     cam,
                     rect,
                     style_scale,
-                    phase="outline" if outline else "core",
                     alpha=alpha,
                 )
             else:
                 overlay.line(
                     current - normal * 10.0 * style_scale,
                     current + normal * 10.0 * style_scale,
-                    stroke_color if outline else _joint_current_tick_color(range_color),
+                    _joint_current_tick_color(range_color),
                     range_width,
                     cap="round",
+                    smoothing=self._frame.corner_smoothing,
                 )
 
             half_tick = 6.0 * style_scale
-            tick_width = (3.0 + (2.0 * JOINT_OUTLINE_PT if outline else 0.0)) * style_scale
+            tick_width = range_width
             entries = (
                 (
                     state.lower,
@@ -2652,18 +2580,18 @@ class ObjectGizmo:
                 overlay.line(
                     tick[0],
                     tick[1],
-                    stroke_color if outline else _with_alpha(limit_color, alpha),
+                    _with_alpha(limit_color, alpha),
                     tick_width,
                     cap="round",
+                    smoothing=self._frame.corner_smoothing,
                 )
-            if not outline:
-                self._set_joint_limit_hits(
-                    state,
-                    entries,
-                    tick_width=tick_width,
-                    tick_cap="round",
-                    style_scale=style_scale,
-                )
+            self._set_joint_limit_hits(
+                state,
+                entries,
+                tick_width=tick_width,
+                tick_cap="round",
+                style_scale=style_scale,
+            )
 
     def _set_joint_limit_hits(
         self,
@@ -2873,6 +2801,7 @@ class ObjectGizmo:
                     tick_color,
                     (2.2 if is_active else 1.2) * style_scale,
                     cap="round",
+                    smoothing=self._frame.corner_smoothing,
                 )
 
     def _draw_rotation_snap_ticks(
@@ -2971,6 +2900,7 @@ class ObjectGizmo:
                 core,
                 1.1 * style_scale,
                 cap="round_end" if limited_hinge else "round",
+                smoothing=self._frame.corner_smoothing,
             )
         if active_tick is not None:
             _fill, pressed, _dark = self._active_rotation_palette()
@@ -2980,6 +2910,7 @@ class ObjectGizmo:
                 _with_alpha(pressed, projection_alpha),
                 2.2 * style_scale,
                 cap="round",
+                smoothing=self._frame.corner_smoothing,
             )
 
     def _draw_rotation_axis_guide(
@@ -3043,8 +2974,16 @@ class ObjectGizmo:
                         color,
                         width,
                         cap="round",
+                        smoothing=self._frame.corner_smoothing,
                     )
-                overlay.line(center[:2], front, color, width, cap="round")
+                overlay.line(
+                    center[:2],
+                    front,
+                    color,
+                    width,
+                    cap="round",
+                    smoothing=self._frame.corner_smoothing,
+                )
                 return
         overlay.line(
             segment[0],
@@ -3057,32 +2996,17 @@ class ObjectGizmo:
         screen = project(cam, (self._drag_origin_pos, self._frame.position), rect)
         if np.any(screen[:, 2] <= 0.0):
             return
-        start, end = screen[:, :2]
-        delta = end - start
-        distance = float(np.linalg.norm(delta))
-        edge = CONTRAST_EDGE_COLOR
-        core = GUIDE_CORE_COLOR
-        radius = TRANSLATION_GUIDE_RADIUS_PT * style_scale
-        core_width = 2.0 * style_scale
-        edge_width = core_width + 2.0 * CONTRAST_EDGE_PT * style_scale
-        if distance > 2.0 * radius:
-            direction = delta / distance
-            edge_a = start + direction * (radius - edge_width * 0.5)
-            edge_b = end - direction * (radius - edge_width * 0.5)
-            core_a = start + direction * (radius - core_width * 0.5)
-            core_b = end - direction * (radius - core_width * 0.5)
-            overlay.line(edge_a, edge_b, edge, edge_width)
-        overlay.circle(start, radius, edge, edge_width, segments=24)
-        overlay.circle_filled(
-            end,
-            radius + CONTRAST_EDGE_PT * style_scale,
-            edge,
-            segments=24,
+        draw_drag_link(
+            overlay,
+            screen[0, :2],
+            screen[1, :2],
+            GUIDE_CORE_COLOR,
+            CONTRAST_EDGE_COLOR,
+            2.0 * style_scale,
+            TRANSLATION_GUIDE_RADIUS_PT * style_scale,
+            CONTRAST_EDGE_PT * style_scale,
+            smoothing=self._frame.corner_smoothing,
         )
-        if distance > 2.0 * radius:
-            overlay.line(core_a, core_b, core, core_width)
-        overlay.circle(start, radius, core, core_width, segments=24)
-        overlay.circle_filled(end, radius, core, segments=24)
 
     def _draw_joint_translation_guide(
         self,
@@ -3091,10 +3015,9 @@ class ObjectGizmo:
         rect,
         style_scale: float,
         *,
-        phase: str = "all",
         alpha: float = 1.0,
     ) -> None:
-        """Draw slide drag strokes, sharing outline/core passes with its range."""
+        """Draw the slide drag connector and ticks in one pass."""
 
         screen = project(cam, (self._drag_origin_pos, self._frame.position), rect)
         if np.any(screen[:, 2] <= 0.0):
@@ -3109,31 +3032,29 @@ class ObjectGizmo:
         start_half_tick = JOINT_DRAG_START_TICK_HALF_PT * style_scale
         end_half_tick = JOINT_CURRENT_TICK_PT * 0.5 * style_scale
         core_width = JOINT_RANGE_WIDTH_PT * style_scale
-        end_width = 4.0 * style_scale
+        end_width = core_width
         end_color = ACTIVE_HANDLE_COLOR
         if self._joint_range is not None and self._joint_range.joint_type == "slide":
             end_color = _joint_current_tick_color(end_color)
-        phases = ("outline", "core") if phase == "all" else (phase,)
-        for draw_phase in phases:
-            outline = draw_phase == "outline"
-            extra_width = 2.0 * JOINT_OUTLINE_PT * style_scale if outline else 0.0
-            color = _with_alpha(JOINT_OUTLINE_COLOR if outline else JOINT_ACTIVE_DARK_COLOR, alpha)
-            if distance > 1e-6:
-                overlay.line(start, end, color, core_width + extra_width)
-                overlay.line(
-                    start - normal * start_half_tick,
-                    start + normal * start_half_tick,
-                    color,
-                    core_width + extra_width,
-                    cap="round",
-                )
+        color = _with_alpha(JOINT_ACTIVE_DARK_COLOR, alpha)
+        if distance > 1e-6:
+            overlay.line(start, end, color, core_width)
             overlay.line(
-                end - normal * end_half_tick,
-                end + normal * end_half_tick,
-                color if outline else _with_alpha(end_color, alpha),
-                end_width + extra_width,
+                start - normal * start_half_tick,
+                start + normal * start_half_tick,
+                color,
+                core_width,
                 cap="round",
+                smoothing=self._frame.corner_smoothing,
             )
+        overlay.line(
+            end - normal * end_half_tick,
+            end + normal * end_half_tick,
+            _with_alpha(end_color, alpha),
+            end_width,
+            cap="round",
+            smoothing=self._frame.corner_smoothing,
+        )
 
     def _publish_translation_guide(self, backend: Any, ui_scale: float) -> None:
         dd = getattr(backend, "debug", None)
@@ -3157,6 +3078,7 @@ class ObjectGizmo:
             CONTRAST_EDGE_COLOR,
             width_px=2.0 * ui_scale,
             radius_px=TRANSLATION_GUIDE_RADIUS_PT * ui_scale,
+            smoothing=self._frame.corner_smoothing,
             edge_px=CONTRAST_EDGE_PT * ui_scale,
         )
         self._guide_gpu = True
@@ -3258,16 +3180,17 @@ class ObjectGizmo:
                     joint_range, start_angle, lower=True
                 ) or _joint_value_at_limit(joint_range, start_angle, lower=False)
                 rounded_end = _joint_endpoint_color(joint_range) is not None
-            stroke = _rotation_arc_stroke(
+            stroke, indices = arc_ribbon_mesh(
                 arc,
                 None if start_tick is None else start_tick[1] - start_tick[0],
                 None if end_tick is None else end_tick[1] - end_tick[0],
                 width,
                 round_start=rounded_start,
                 round_end=rounded_end,
+                smoothing=self._frame.corner_smoothing,
             )
             if len(stroke):
-                overlay.fringed_concave_fill(stroke, border)
+                overlay.indexed_fill(stroke, indices, border, outline=stroke)
             else:
                 overlay.polyline(arc, border, width)
 
@@ -3334,6 +3257,7 @@ class ObjectGizmo:
             (x + width, y + height),
             (0.08, 0.09, 0.11, 0.92),
             rounding=4.0 * style_scale,
+            smoothing=self._frame.corner_smoothing,
         )
         text_x = x + pad
         if semantic_color is not None:
@@ -3743,6 +3667,15 @@ class ObjectGizmo:
                 self._current_mat[:] = delta @ self._start_mat
                 mat = self._current_mat
 
+        raw_joint_value = None
+        if self._active_joint is not None and self._active_joint.type in ("hinge", "slide"):
+            raw_delta = (
+                self._rotation_raw_angle
+                if self._active_joint.type == "hinge"
+                else float(np.dot(pos - self._start_pos, self._axis))
+            )
+            raw_joint_value = float(self._start_joint_qpos[0]) + raw_delta
+
         if snap and handle not in ROTATE_HANDLES:
             delta = self._start_basis.T @ (pos - self._start_pos)
             delta = _snap_translation(delta, handle, self.translation_snap_m)
@@ -3780,14 +3713,16 @@ class ObjectGizmo:
             and joint is not None
             and joint.limited
             and joint.range[1] > joint.range[0]
-            and not np.isclose(
-                requested_joint_value,
-                np.clip(requested_joint_value, joint.range[0], joint.range[1]),
-                atol=1e-12,
-                rtol=0.0,
-            )
         ):
-            self._rebase_clamped_joint_drag(cam, rect, cursor, pos)
+            lower, upper = joint.range
+            outside = requested_joint_value < lower - 1e-12 or requested_joint_value > upper + 1e-12
+            # Snapping can hide sub-step overtravel at a limit. Discard it too,
+            # so releasing Snap and reversing direction has no residual dead zone.
+            held_outside = (
+                requested_joint_value <= lower + 1e-12 and raw_joint_value < lower - 1e-12
+            ) or (requested_joint_value >= upper - 1e-12 and raw_joint_value > upper + 1e-12)
+            if outside or held_outside:
+                self._rebase_clamped_joint_drag(cam, rect, cursor, pos)
         self._edit_started = True
         self._label = self._format_value(pos)
         return True
@@ -4558,17 +4493,6 @@ def _joint_range_handle(state: _JointRangeState | None) -> GizmoHandle:
     return GizmoHandle.ROTATE_Z
 
 
-def _polyline_screen_distance(point, points, *, closed: bool = False) -> float:
-    path = np.asarray(points, np.float64).reshape(-1, 2)
-    if len(path) < 2:
-        return float("inf")
-    count = len(path) if closed else len(path) - 1
-    return min(
-        _screen_segment_distance(point, path[index], path[(index + 1) % len(path)])
-        for index in range(count)
-    )
-
-
 def _hinge_range_hit(
     cursor,
     projection: _HingeRangeProjection | None,
@@ -4588,7 +4512,7 @@ def _hinge_range_path_hit(
         return False
     distance = float("inf")
     if projection.allowed is not None:
-        distance = _polyline_screen_distance(
+        distance = screen_path_distance(
             cursor,
             projection.allowed,
             closed=projection.full_range,
@@ -4743,82 +4667,6 @@ def _rotation_tick_length_pt(degrees: float) -> float:
     if abs(degrees / 15.0 - round(degrees / 15.0)) < 1e-6:
         return 5.5
     return 4.0
-
-
-def _rotation_arc_stroke(
-    points,
-    start_radial,
-    end_radial,
-    width: float,
-    *,
-    round_caps: bool = False,
-    round_start: bool = False,
-    round_end: bool = False,
-) -> np.ndarray:
-    """Build one constant-width arc silhouette with independently rounded caps."""
-    points = np.asarray(points, np.float64).reshape(-1, 2)
-    width = float(width)
-    if len(points) < 2 or width <= 0.0:
-        return np.empty((0, 2), np.float64)
-
-    tangents = np.empty_like(points)
-    tangents[0] = points[1] - points[0]
-    tangents[-1] = points[-1] - points[-2]
-    if len(points) > 2:
-        tangents[1:-1] = points[2:] - points[:-2]
-    lengths = np.linalg.norm(tangents, axis=1)
-    for index in np.flatnonzero(lengths < 1e-6):
-        candidates = []
-        if index > 0:
-            candidates.append(points[index] - points[index - 1])
-        if index + 1 < len(points):
-            candidates.append(points[index + 1] - points[index])
-        if candidates:
-            tangent = max(candidates, key=np.linalg.norm)
-            tangents[index] = tangent
-            lengths[index] = np.linalg.norm(tangent)
-    if np.any(lengths < 1e-6):
-        return np.empty((0, 2), np.float64)
-
-    tangents /= lengths[:, None]
-    offsets = np.column_stack((-tangents[:, 1], tangents[:, 0]))
-    for index, radial in ((0, start_radial), (-1, end_radial)):
-        if radial is None:
-            continue
-        radial = np.asarray(radial, np.float64).reshape(2)
-        length = float(np.linalg.norm(radial))
-        if length < 1e-6:
-            continue
-        radial /= length
-        if np.dot(radial, offsets[index]) < 0.0:
-            radial *= -1.0
-        offsets[index] = radial
-
-    half_width = 0.5 * width
-    side_a = points - offsets * half_width
-    side_b = points + offsets * half_width
-    round_start = bool(round_start or round_caps)
-    round_end = bool(round_end or round_caps)
-    if round_start or round_end:
-        cap_segments = max(8, int(np.ceil(np.pi * half_width)))
-        angles = np.linspace(0.0, np.pi, cap_segments + 1)
-        parts = [side_a]
-        if round_end:
-            end_cap = points[-1] + half_width * (
-                -offsets[-1][None, :] * np.cos(angles)[:, None]
-                + tangents[-1][None, :] * np.sin(angles)[:, None]
-            )
-            parts.extend((end_cap[1:], side_b[-2::-1]))
-        else:
-            parts.append(side_b[::-1])
-        if round_start:
-            start_cap = points[0] + half_width * (
-                offsets[0][None, :] * np.cos(angles)[:, None]
-                - tangents[0][None, :] * np.sin(angles)[:, None]
-            )
-            parts.append(start_cap[1:-1])
-        return np.vstack(parts)
-    return np.vstack((side_a, side_b[::-1]))
 
 
 def _clip_line_to_rect(origin, direction, rect) -> tuple[np.ndarray, np.ndarray] | None:

@@ -12,6 +12,8 @@ from dataclasses import dataclass, replace
 
 from imgui_bundle import imgui
 
+from ..input import imgui_key_for_physical_key
+
 
 class InputAction(enum.StrEnum):
     TOGGLE_PAUSE = "toggle_pause"
@@ -71,14 +73,16 @@ class InputBindings:
         if key is None:
             return False
         keys = key if isinstance(key, tuple) else (key,)
-        return any(imgui.is_key_down(candidate) for candidate in keys)
+        return any(imgui.is_key_down(imgui_key_for_physical_key(candidate)) for candidate in keys)
 
     def pressed(self, action: InputAction) -> bool:
         key = self.binding(action).key
         if key is None:
             return False
         keys = key if isinstance(key, tuple) else (key,)
-        return any(imgui.is_key_pressed(candidate, False) for candidate in keys)
+        return any(
+            imgui.is_key_pressed(imgui_key_for_physical_key(candidate), False) for candidate in keys
+        )
 
     def press_count(self, action: InputAction, *, delay: float, rate: float) -> int:
         """Return immediate and held-repeat presses at an action-specific cadence."""
@@ -88,7 +92,10 @@ class InputBindings:
             return 0
         keys = key if isinstance(key, tuple) else (key,)
         return max(
-            (imgui.get_key_pressed_amount(candidate, delay, rate) for candidate in keys),
+            (
+                imgui.get_key_pressed_amount(imgui_key_for_physical_key(candidate), delay, rate)
+                for candidate in keys
+            ),
             default=0,
         )
 

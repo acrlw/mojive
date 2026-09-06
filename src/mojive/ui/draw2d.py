@@ -12,10 +12,18 @@ from __future__ import annotations
 
 import math
 from functools import lru_cache
-from itertools import pairwise
 from typing import Protocol, runtime_checkable
 
 import numpy as np
+
+from ..curves2d import (
+    CORNER_SMOOTHING,
+    arrow_mesh,
+    capped_polyline_points,
+    smooth_rect_points,
+)
+from ..curves2d import polygon_fringe as _anti_alias_fringe_outer
+from ..draglink2d import smooth_drag_link_mesh
 
 
 @lru_cache(maxsize=512)
@@ -27,149 +35,84 @@ def _cached_imgui_points(points: tuple[tuple[float, float], ...]):
     return tuple(imgui.ImVec2(float(x), float(y)) for x, y in points)
 
 
-def _anti_alias_fringe_outer(points) -> np.ndarray:
-    """Return a one-pixel outward miter ring for either polygon winding."""
-
-    outline = np.asarray(points, np.float64).reshape(-1, 2)
-    if len(outline) < 3:
-        return np.empty((0, 2), np.float64)
-    edges = np.roll(outline, -1, axis=0) - outline
-    lengths = np.linalg.norm(edges, axis=1)
-    if np.any(lengths < 1e-9):
-        return np.empty((0, 2), np.float64)
-    signed_area = 0.5 * float(
-        np.sum(outline[:, 0] * np.roll(outline[:, 1], -1))
-        - np.sum(outline[:, 1] * np.roll(outline[:, 0], -1))
+@lru_cache(maxsize=512)
+def _clockwise_points(points: tuple[tuple[float, float], ...]):
+    # ImGui's fill fringe requires clockwise screen winding, including mirrored glyphs.
+    area = sum(
+        a[0] * b[1] - a[1] * b[0] for a, b in zip(points, points[1:] + points[:1], strict=True)
     )
-    if abs(signed_area) < 1e-9:
-        return np.empty((0, 2), np.float64)
-    normals = np.column_stack((edges[:, 1], -edges[:, 0])) / lengths[:, None]
-    if signed_area < 0.0:
-        normals *= -1.0
-    miters = (np.roll(normals, 1, axis=0) + normals) * 0.5
-    scale = np.minimum(1.0 / np.maximum(np.sum(miters * miters, axis=1), 1e-4), 100.0)
-    return outline + miters * scale[:, None]
+    return points if area >= 0.0 else points[::-1]
 
 
 @lru_cache(maxsize=512)
-def _cached_anti_alias_fringe_outer(
-    points: tuple[tuple[float, float], ...],
-) -> tuple[tuple[float, float], ...]:
-    """Cache the expensive normal/miter construction for stable UI polygons."""
+def _cached_imgui_fill_points(points: tuple[tuple[float, float], ...]):
+    return _cached_imgui_points(_clockwise_points(points))
 
-    return tuple(tuple(point) for point in _anti_alias_fringe_outer(points))
+
+def _fill_points(points):
+    try:
+        return _cached_imgui_fill_points(points)
+    except TypeError:
+        return _cached_imgui_fill_points(tuple((float(p[0]), float(p[1])) for p in points))
 
 
 @lru_cache(maxsize=256)
-def _open_polyline_ribbon(
-    path: tuple[tuple[float, float], ...],
-    width: float,
-) -> tuple[
-    tuple[tuple[float, float], ...],
-    tuple[tuple[float, float], ...],
-    tuple[tuple[float, float], ...],
-]:
-    """Build cached left/right edges and the complete boundary of an open stroke."""
+def _cached_color(color):
+    from imgui_bundle import imgui
 
-    if len(path) < 2 or width <= 0.0:
-        return (), (), ()
-    points = tuple((float(x), float(y)) for x, y in path)
-    directions = []
-    for start, end in pairwise(points):
-        dx, dy = end[0] - start[0], end[1] - start[1]
-        length = math.hypot(dx, dy)
-        if length <= 1e-9:
-            return (), (), ()
-        directions.append((dx / length, dy / length))
-    normals = tuple((-dy, dx) for dx, dy in directions)
-    half_width = 0.5 * float(width)
-    offsets = []
-    for index in range(len(points)):
-        if index == 0:
-            offsets.append((normals[0][0] * half_width, normals[0][1] * half_width))
-            continue
-        if index == len(points) - 1:
-            offsets.append((normals[-1][0] * half_width, normals[-1][1] * half_width))
-            continue
-        mx = normals[index - 1][0] + normals[index][0]
-        my = normals[index - 1][1] + normals[index][1]
-        miter_length = math.hypot(mx, my)
-        if miter_length <= 1e-9:
-            offsets.append((normals[index][0] * half_width, normals[index][1] * half_width))
-            continue
-        mx, my = mx / miter_length, my / miter_length
-        projection = max(mx * normals[index][0] + my * normals[index][1], 0.5)
-        miter_scale = half_width / projection
-        offsets.append((mx * miter_scale, my * miter_scale))
-    left = tuple((p[0] + o[0], p[1] + o[1]) for p, o in zip(points, offsets, strict=True))
-    right = tuple((p[0] - o[0], p[1] - o[1]) for p, o in zip(points, offsets, strict=True))
-    return left, right, left + tuple(reversed(right))
+    return imgui.color_convert_float4_to_u32(imgui.ImVec4(*(float(c) for c in color)))
 
 
-def _capped_polyline_outline(
-    points,
-    width: float,
-    *,
-    round_start: bool,
-    round_end: bool,
-) -> tuple[tuple[float, float], ...]:
-    """Build one non-overlapping silhouette with independent endpoint caps."""
-
-    path = tuple((float(point[0]), float(point[1])) for point in points)
-    left, right, _outline = _open_polyline_ribbon(path, float(width))
-    if not left:
-        return ()
-
-    start_direction = np.asarray(path[1], np.float64) - np.asarray(path[0], np.float64)
-    end_direction = np.asarray(path[-1], np.float64) - np.asarray(path[-2], np.float64)
-    start_direction /= np.linalg.norm(start_direction)
-    end_direction /= np.linalg.norm(end_direction)
-    start_normal = np.array((-start_direction[1], start_direction[0]))
-    end_normal = np.array((-end_direction[1], end_direction[0]))
-    half_width = 0.5 * float(width)
-    cap_segments = max(8, min(16, math.ceil(math.pi * half_width)))
-    angles = np.linspace(0.0, math.pi, cap_segments + 1)
-    if round_end:
-        end = np.asarray(path[-1], np.float64)
-        end_boundary = end + half_width * (
-            end_normal[None, :] * np.cos(angles)[:, None]
-            + end_direction[None, :] * np.sin(angles)[:, None]
-        )
-        end_boundary = tuple(tuple(point) for point in end_boundary[1:])
-    else:
-        end_boundary = (right[-1],)
-    if round_start:
-        start = np.asarray(path[0], np.float64)
-        start_boundary = start + half_width * (
-            -start_normal[None, :] * np.cos(angles)[:, None]
-            - start_direction[None, :] * np.sin(angles)[:, None]
-        )
-        start_boundary = tuple(tuple(point) for point in start_boundary[1:-1])
-    else:
-        start_boundary = ()
-    outline = (
-        *left,
-        *end_boundary,
-        *reversed(right[:-1]),
-        *start_boundary,
-    )
-    # ImGui's concave fill triangulator expects clockwise screen-space input.
-    # The ribbon construction above naturally produces the opposite winding.
-    return (*reversed(outline),)
+@lru_cache(maxsize=128)
+def _triangle_fan_indices(count: int) -> tuple[int, ...]:
+    return tuple(index for i in range(1, count - 1) for index in (0, i, i + 1))
 
 
-def _round_cap_polyline_outline(points, width: float) -> tuple[tuple[float, float], ...]:
-    """Build one non-overlapping silhouette for an open round-capped stroke."""
-
-    return _capped_polyline_outline(points, width, round_start=True, round_end=True)
+@lru_cache(maxsize=512)
+def _cached_fringe_points(points: tuple[tuple[float, float], ...], inside: bool = False):
+    """Reuse both native vertex arrays and their outward miter construction."""
+    fringe = _anti_alias_fringe_outer(points)
+    if inside and len(fringe) == len(points):
+        fringe = 2.0 * np.asarray(points) - fringe
+    outer = tuple(map(tuple, fringe.tolist()))
+    if len(outer) != len(points):
+        return (), ()
+    return _cached_imgui_points(points), _cached_imgui_points(outer)
 
 
 @runtime_checkable
 class Draw2D(Protocol):
-    """Immediate-mode 2D primitives; later calls paint over earlier ones."""
+    """Immediate-mode overlays in logical window coordinates, with float RGBA colors.
 
-    def line(self, a, b, color, width: float, *, cap: str = "butt") -> None:
+    Later calls paint over earlier ones. Geometry helpers own local paths;
+    adapters own submission and antialiasing. See docs/how-to/ui-drawing.md.
+    """
+
+    def line(
+        self, a, b, color, width: float, *, cap: str = "butt", smoothing: float | None = None
+    ) -> None:
         """Stroke authored coordinates exactly, like a two-point polyline."""
+        ...
+
+    def arrow(
+        self,
+        a,
+        b,
+        color,
+        width: float = 2.0,
+        *,
+        head_length: float = 7.0,
+        head_width: float = 8.0,
+        corner_radius: float = 1.0,
+        join_radius: float | None = None,
+        smoothing: float | None = None,
+        round_tail: bool = False,
+    ) -> None:
+        """Draw one arrow outline; smoothing None uses the adapter's default.
+
+        Radius zero is sharp; smoothing zero uses circular corners. Explicit
+        dimensions use the same units as endpoints. The adapter controls AA.
+        """
         ...
 
     def polyline(
@@ -180,11 +123,24 @@ class Draw2D(Protocol):
         *,
         closed: bool = False,
         cap: str = "butt",
+        smoothing: float | None = None,
     ) -> None: ...
 
     def convex_fill(self, points, color) -> None: ...
 
-    def triangle_fan_fill(self, points, color) -> None: ...
+    def indexed_fill(
+        self, points, indices, color, *, outline=(), hole=(), origin=None, direction=(1.0, 0.0)
+    ) -> None:
+        """Fill triangles and optional AA contours, optionally placing a local mesh.
+
+        With origin set, direction is the unit local X axis in window coordinates.
+        Placement is rigid so the antialias fringe retains its one-pixel width.
+        """
+        ...
+
+    def triangle_fan_fill(self, points, color) -> None:
+        """Fill a simple polygon visible from its first vertex, such as a sector."""
+        ...
 
     def concave_fill(self, points, color) -> None: ...
 
@@ -198,9 +154,20 @@ class Draw2D(Protocol):
 
     def circle_filled(self, center, radius: float, color, *, segments: int = 0) -> None: ...
 
-    def rect(self, lo, hi, color, width: float = 1.0, *, rounding: float = 0.0) -> None: ...
+    def rect(
+        self,
+        lo,
+        hi,
+        color,
+        width: float = 1.0,
+        *,
+        rounding: float = 0.0,
+        smoothing: float | None = None,
+    ) -> None: ...
 
-    def rect_filled(self, lo, hi, color, *, rounding: float = 0.0) -> None: ...
+    def rect_filled(
+        self, lo, hi, color, *, rounding: float = 0.0, smoothing: float | None = None
+    ) -> None: ...
 
     def text(self, pos, color, text: str, *, pixel_snap: bool = True) -> None: ...
 
@@ -215,14 +182,27 @@ class Draw2D(Protocol):
         ...
 
 
+def text_line_y(draw: Draw2D, center_y: float) -> float:
+    """Align a text row to one cap-height reference, independent of word contents."""
+
+    ink = draw.text_ink_bounds("H")
+    center = (ink[1] + ink[3]) * 0.5 if ink else draw.text_size("H")[1] * 0.5
+    return center_y - center
+
+
 class ImguiDraw2D:
     """Draw2D over the current imgui window's draw list (or a given one)."""
 
-    def __init__(self, draw_list=None) -> None:
+    def __init__(self, draw_list=None, *, corner_smoothing: float = CORNER_SMOOTHING) -> None:
         from imgui_bundle import imgui
 
         self._imgui = imgui
         self._dl = draw_list if draw_list is not None else imgui.get_window_draw_list()
+        self.corner_smoothing = float(corner_smoothing)
+
+    def with_corner_smoothing(self, value: float):
+        """Share the draw list while selecting one element family's curve profile."""
+        return ImguiDraw2D(self._dl, corner_smoothing=value)
 
     def _vec(self, p):
         imgui = self._imgui
@@ -237,13 +217,55 @@ class ImguiDraw2D:
         return [self._vec(point) for point in points]
 
     def _u32(self, color) -> int:
-        imgui = self._imgui
-        return imgui.color_convert_float4_to_u32(imgui.ImVec4(*(float(c) for c in color)))
+        return _cached_color(color if isinstance(color, tuple) else tuple(color))
 
-    def line(self, a, b, color, width: float, *, cap: str = "butt") -> None:
+    def line(
+        self, a, b, color, width: float, *, cap: str = "butt", smoothing: float | None = None
+    ) -> None:
         # AddLine shifts its endpoints by half a pixel; AddPolyline preserves
         # the same authored coordinates as filled paths and other Draw2D ports.
-        self.polyline((a, b), color, width, cap=cap)
+        self.polyline((a, b), color, width, cap=cap, smoothing=smoothing)
+
+    def arrow(
+        self,
+        a,
+        b,
+        color,
+        width: float = 2.0,
+        *,
+        head_length: float = 7.0,
+        head_width: float = 8.0,
+        corner_radius: float = 1.0,
+        join_radius: float | None = None,
+        smoothing: float | None = None,
+        round_tail: bool = False,
+    ) -> None:
+        ax, ay = map(float, a)
+        bx, by = map(float, b)
+        if not all(map(math.isfinite, (ax, ay, bx, by))):
+            raise ValueError("arrow endpoints must each contain two finite coordinates")
+        dx, dy = bx - ax, by - ay
+        length = math.hypot(dx, dy)
+        vertices, indices, outline = arrow_mesh(
+            length,
+            width,
+            head_length=head_length,
+            head_width=head_width,
+            corner_radius=corner_radius,
+            join_radius=join_radius,
+            smoothing=self.corner_smoothing if smoothing is None else smoothing,
+            round_tail=round_tail,
+        )
+        if not indices:
+            return
+        self.indexed_fill(
+            vertices,
+            indices,
+            color,
+            outline=outline,
+            origin=(ax, ay),
+            direction=(dx / length, dy / length),
+        )
 
     def polyline(
         self,
@@ -253,15 +275,17 @@ class ImguiDraw2D:
         *,
         closed: bool = False,
         cap: str = "butt",
+        smoothing: float | None = None,
     ) -> None:
         if cap not in {"butt", "round", "round_start", "round_end"}:
             raise ValueError(f"unknown polyline cap: {cap!r}")
         if not closed and cap != "butt":
-            outline = _capped_polyline_outline(
+            outline = capped_polyline_points(
                 points,
                 width,
                 round_start=cap in {"round", "round_start"},
                 round_end=cap in {"round", "round_end"},
+                smoothing=self.corner_smoothing if smoothing is None else smoothing,
             )
             if outline:
                 self.fringed_concave_fill(outline, color)
@@ -271,62 +295,107 @@ class ImguiDraw2D:
         self._dl.add_polyline(self._vecs(points), self._u32(color), float(width), flags.value)
 
     def convex_fill(self, points, color) -> None:
-        self._dl.add_convex_poly_filled(self._vecs(points), self._u32(color))
+        self._dl.add_convex_poly_filled(_fill_points(points), self._u32(color))
+
+    def indexed_fill(
+        self, points, indices, color, *, outline=(), hole=(), origin=None, direction=(1.0, 0.0)
+    ) -> None:
+        """Submit precomputed triangles and antialias only the external contours."""
+        if not len(indices):
+            return
+        vertex_start = len(self._dl.vtx_buffer) if origin is not None else 0
+        native = getattr(self._dl, "add_indexed_fill", None)
+        rgba = self._u32(color)
+        path = (
+            points
+            if isinstance(points, tuple)
+            else tuple((float(point[0]), float(point[1])) for point in points)
+        )
+        vertices = self._vecs(path)
+        if outline is points:
+            outline = path
+        if native is not None:
+            native(vertices, indices, rgba)
+        else:
+            if len(indices) % 3 or any(i < 0 or i >= len(vertices) for i in indices):
+                raise ValueError("triangle indices must be valid vertex indices grouped in threes")
+            dl = self._dl
+            dl.prim_reserve(len(indices), len(vertices))
+            base = dl._vtx_current_idx
+            uv = self._imgui.get_io().fonts.tex_uv_white_pixel
+            for point in vertices:
+                dl.prim_write_vtx(point, uv, rgba)
+            for index in indices:
+                dl.prim_write_idx(base + int(index))
+        if len(outline):
+            self._write_anti_alias_fringe(outline, rgba)
+        if len(hole):
+            self._write_anti_alias_fringe(hole, rgba, inside=True)
+        if origin is not None:
+            # Transform the submitted range, including AA, in one native pass.
+            # Local vertex and fringe caches survive movement and rotation.
+            self._imgui.internal.shade_verts_transform_pos(
+                self._dl,
+                vertex_start,
+                len(self._dl.vtx_buffer),
+                (0.0, 0.0),
+                float(direction[0]),
+                float(direction[1]),
+                self._vec(origin),
+            )
 
     def triangle_fan_fill(self, points, color) -> None:
-        vertices = np.asarray(points, np.float64).reshape(-1, 2)
+        vertices = tuple((float(p[0]), float(p[1])) for p in points)
         if len(vertices) < 3:
             return
-        dl = self._dl
-        base = dl._vtx_current_idx
-        uv = self._imgui.get_io().fonts.tex_uv_white_pixel
-        rgba = self._u32(color)
-        dl.prim_reserve((len(vertices) - 2) * 3, len(vertices))
-        for point in vertices:
-            dl.prim_write_vtx(self._vec(point), uv, rgba)
-        for index in range(1, len(vertices) - 1):
-            dl.prim_write_idx(base)
-            dl.prim_write_idx(base + index)
-            dl.prim_write_idx(base + index + 1)
-        self._write_anti_alias_fringe(vertices, rgba)
+        self.indexed_fill(vertices, _triangle_fan_indices(len(vertices)), color, outline=vertices)
 
     def concave_fill(self, points, color) -> None:
-        self._dl.add_concave_poly_filled(self._vecs(points), self._u32(color))
+        self._dl.add_concave_poly_filled(_fill_points(points), self._u32(color))
 
     def fringed_concave_fill(self, points, color) -> None:
         imgui = self._imgui
         dl = self._dl
         rgba = self._u32(color)
-        outline = tuple((float(point[0]), float(point[1])) for point in points)
+        try:
+            outline = _clockwise_points(points)
+        except TypeError:
+            outline = _clockwise_points(tuple((float(p[0]), float(p[1])) for p in points))
         aa_flag = imgui.ImDrawListFlags_.anti_aliased_fill.value
         flags = dl.flags
-        dl.flags = flags & ~aa_flag
-        dl.add_concave_poly_filled(self._vecs(outline), rgba)
-        dl.flags = flags
+        try:
+            dl.flags = flags & ~aa_flag
+            dl.add_concave_poly_filled(self._vecs(outline), rgba)
+        finally:
+            dl.flags = flags
         if not (flags & aa_flag):
             return
 
         self._write_anti_alias_fringe(outline, rgba)
 
-    def _write_anti_alias_fringe(self, outline, rgba: int) -> None:
+    def _write_anti_alias_fringe(self, outline, rgba: int, *, inside: bool = False) -> None:
         """Emit one alpha-gradient ring around an already solid polygon fill."""
 
         imgui = self._imgui
         dl = self._dl
         if not (dl.flags & imgui.ImDrawListFlags_.anti_aliased_fill.value):
             return
-        outline = tuple((float(point[0]), float(point[1])) for point in outline)
-        outer = _cached_anti_alias_fringe_outer(outline)
-        if len(outer) != len(outline):
+        if not isinstance(outline, tuple):
+            outline = tuple((float(point[0]), float(point[1])) for point in outline)
+        inner_points, fringe_points = _cached_fringe_points(outline, inside)
+        if not inner_points:
+            return
+
+        native_fringe = getattr(dl, "add_poly_fringe", None)
+        if native_fringe is not None:
+            native_fringe(inner_points, fringe_points, rgba)
             return
 
         count = len(outline)
-        base = dl._vtx_current_idx
         transparent = rgba & 0x00FFFFFF
         uv = imgui.get_io().fonts.tex_uv_white_pixel
         dl.prim_reserve(count * 6, count * 2)
-        inner_points = self._vecs(outline)
-        fringe_points = self._vecs(outer)
+        base = dl._vtx_current_idx
         for inner, fringe in zip(inner_points, fringe_points, strict=True):
             dl.prim_write_vtx(inner, uv, rgba)
             dl.prim_write_vtx(fringe, uv, transparent)
@@ -351,13 +420,46 @@ class ImguiDraw2D:
             self._vec(center), float(radius), self._u32(color), int(segments)
         )
 
-    def rect(self, lo, hi, color, width: float = 1.0, *, rounding: float = 0.0) -> None:
-        self._dl.add_rect(
-            self._vec(lo), self._vec(hi), self._u32(color), float(rounding), float(width), 0
+    def rect(
+        self,
+        lo,
+        hi,
+        color,
+        width: float = 1.0,
+        *,
+        rounding: float = 0.0,
+        smoothing: float | None = None,
+    ) -> None:
+        if rounding <= 0.0:
+            self._dl.add_rect(self._vec(lo), self._vec(hi), self._u32(color), 0.0, float(width), 0)
+            return
+        points = smooth_rect_points(
+            float(lo[0]),
+            float(lo[1]),
+            float(hi[0]),
+            float(hi[1]),
+            float(rounding),
+            smoothing=self.corner_smoothing if smoothing is None else smoothing,
         )
+        if points:
+            self.polyline(points, color, width, closed=True)
 
-    def rect_filled(self, lo, hi, color, *, rounding: float = 0.0) -> None:
-        self._dl.add_rect_filled(self._vec(lo), self._vec(hi), self._u32(color), float(rounding))
+    def rect_filled(
+        self, lo, hi, color, *, rounding: float = 0.0, smoothing: float | None = None
+    ) -> None:
+        if rounding <= 0.0:
+            self._dl.add_rect_filled(self._vec(lo), self._vec(hi), self._u32(color), 0.0)
+            return
+        points = smooth_rect_points(
+            float(lo[0]),
+            float(lo[1]),
+            float(hi[0]),
+            float(hi[1]),
+            float(rounding),
+            smoothing=self.corner_smoothing if smoothing is None else smoothing,
+        )
+        if points:
+            self.convex_fill(points, color)
 
     def text(self, pos, color, text: str, *, pixel_snap: bool = True) -> None:
         if pixel_snap:
@@ -411,6 +513,33 @@ class ImguiDraw2D:
                     rgba,
                 )
             pen_x += g.advance_x
+
+
+def draw_drag_link(
+    overlay: Draw2D,
+    start,
+    end,
+    core,
+    edge,
+    width: float,
+    radius: float,
+    edge_width: float,
+    *,
+    smoothing: float = CORNER_SMOOTHING,
+) -> None:
+    """Draw the shared implicit drag-link outline through a backend-neutral triangle mesh."""
+    dx, dy = float(end[0] - start[0]), float(end[1] - start[1])
+    distance = math.hypot(dx, dy)
+    ux, uy = (dx / distance, dy / distance) if distance > 1e-9 else (1.0, 0.0)
+    x, y = float(start[0]), float(start[1])
+
+    for level, color in ((edge_width, edge), (0.0, core)):
+        vertices, indices, outline, hole = smooth_drag_link_mesh(
+            distance, radius, width, smoothing, level
+        )
+        overlay.indexed_fill(
+            vertices, indices, color, outline=outline, hole=hole, origin=(x, y), direction=(ux, uy)
+        )
 
 
 def ink_box(font, size: float, text: str):

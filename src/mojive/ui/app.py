@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import random
 import re
@@ -22,7 +23,7 @@ from ..adapters.base import FrameNeeds, NodeType
 from ..capture import CaptureSurface, RecordingInfo, RecordingPhase
 from ..config import InteractionConfig, SelectionStyle, ViewerConfig, ViewportOverlayConfig
 from ..gizmo import GizmoMode, axis_active_color, axis_hover_color
-from ..input import InputClaim, InputContext
+from ..input import InputClaim, InputContext, physical_ctrl_super
 from ..log import add_output_sink, get_logger, remove_output_sink
 from ..render.backend import FrameMode, LabelMode, RenderFlag, ShadowQuality
 from ..render.debugdraw import Occlusion
@@ -62,6 +63,10 @@ from .perturb import (
     PerturbController,
     cursor_grab_point,
     draw_fallback,
+    draw_translation_link,
+)
+from .perturb import (
+    draw_axes as draw_perturb_axes,
 )
 from .scene_entities import SceneEntityHelpers
 from .theme import THEME, Theme
@@ -580,6 +585,7 @@ class ViewerApp:
         self.viewport_overlays = overlay_config
         self._input_handler = None
         self._input_claim = _NO_INPUT_CLAIM
+        self._popup_owned_frame = False
         self._rpc_service = None
         self._viewport_focused = False
         self._selection_press_started_focused = False
@@ -1641,6 +1647,16 @@ class ViewerApp:
         self._model_drop_notice = message
         self._model_drop_notice_until = time.monotonic() + 1.8
 
+    def _begin_main_menu(self, label: str, enabled: bool = True) -> bool:
+        # Horizontal menu entries need less spacing than vertical popup rows.
+        imgui.push_style_var(
+            imgui.StyleVar_.item_spacing,
+            imgui.ImVec2(8.0 * self.window.style_scale, 8.0 * self.window.style_scale),
+        )
+        opened = imgui.begin_menu(label, enabled)
+        imgui.pop_style_var()
+        return opened
+
     def _draw_main_menu(self) -> None:
         t = self.localizer.text
         caps = self.session.adapter.caps
@@ -1671,8 +1687,13 @@ class ViewerApp:
         open_documentation = False
         open_about = False
         quit_viewer = False
+        imgui.push_style_var(
+            imgui.StyleVar_.item_spacing,
+            imgui.ImVec2(20.0 * self.window.style_scale, 8.0 * self.window.style_scale),
+        )
         if imgui.begin_main_menu_bar():
-            if imgui.begin_menu(t("File")):
+            imgui.set_cursor_pos_x(4.0 * self.window.style_scale)
+            if self._begin_main_menu(t("File")):
                 if can_scene_files:
                     new_scene, _ = imgui.menu_item(t("New Scene"), f"{shortcut}+N", False)
                     open_scene, _ = imgui.menu_item(
@@ -1728,7 +1749,7 @@ class ViewerApp:
                 imgui.separator()
                 quit_viewer, _ = imgui.menu_item(t("Quit"), f"{shortcut}+Q", False, True)
                 imgui.end_menu()
-            if imgui.begin_menu(t("Edit")):
+            if self._begin_main_menu(t("Edit")):
                 undo, _ = imgui.menu_item(
                     t("Undo"),
                     f"{shortcut}+Z",
@@ -1745,7 +1766,7 @@ class ViewerApp:
                 open_settings, _ = imgui.menu_item(t("Settings..."), f"{shortcut}+,", False)
                 imgui.end_menu()
             self._draw_entity_menu(shortcut, can_edit)
-            if imgui.begin_menu(t("View")):
+            if self._begin_main_menu(t("View")):
                 frame_scene, _ = imgui.menu_item(
                     t("Frame All"), self.input_bindings.label(InputAction.FRAME_SCENE), False
                 )
@@ -1798,7 +1819,7 @@ class ViewerApp:
                 if influence:
                     self.scene_entities.show_influence = not self.scene_entities.show_influence
                 imgui.end_menu()
-            if imgui.begin_menu(t("Window")):
+            if self._begin_main_menu(t("Window")):
                 for panel in self.panels:
                     if not panel.enabled or panel.modal:
                         continue
@@ -1813,7 +1834,7 @@ class ViewerApp:
                 imgui.separator()
                 reset_layout, _ = imgui.menu_item(t("Reset Layout"), "", False)
                 imgui.end_menu()
-            if imgui.begin_menu(t("Help")):
+            if self._begin_main_menu(t("Help")):
                 open_help, _ = imgui.menu_item(t("Interaction Reference"), "F1", False)
                 open_documentation, _ = imgui.menu_item(t("Documentation"), "", False)
                 imgui.separator()
@@ -1830,6 +1851,7 @@ class ViewerApp:
                 imgui.set_cursor_pos_x(max(imgui.get_cursor_pos_x(), target_x))
                 imgui.text_disabled(document)
             imgui.end_main_menu_bar()
+        imgui.pop_style_var()
 
         if new_scene:
             self._request_document_action("new_scene")
@@ -1892,7 +1914,7 @@ class ViewerApp:
 
     def _draw_entity_menu(self, shortcut: str, enabled: bool) -> None:
         t = self.localizer.text
-        if not imgui.begin_menu(t("Entity"), enabled):
+        if not self._begin_main_menu(t("Entity"), enabled):
             return
         if imgui.begin_menu(t("Create")):
             for label, shape in (
@@ -2382,6 +2404,7 @@ class ViewerApp:
         self._frame_rate.update(dt)
 
         window.begin_frame()
+        self._popup_owned_frame = window.popup_owned_frame
         if self._rpc_service is not None:
             self._rpc_service.pump()
         self._sync_display_scale()
@@ -2586,7 +2609,9 @@ class ViewerApp:
             )
         )
         popup_flags = imgui.PopupFlags_.any_popup_id.value | imgui.PopupFlags_.any_popup_level.value
-        any_popup = bool(imgui.is_popup_open("", popup_flags))
+        any_popup = self._popup_owned_frame or bool(imgui.is_popup_open("", popup_flags))
+        context = imgui.get_current_context()
+        native_activation = context is not None and context.nav_activate_id != 0
         io = imgui.get_io()
         mouse_pos = getattr(io, "mouse_pos", None)
         cursor = (
@@ -2618,6 +2643,7 @@ class ViewerApp:
             pending_prompt
             or native_dialog
             or any_popup
+            or native_activation
             or io.want_text_input
             or self._consume_scene_pointer_until_release
             or getattr(self, "_overlay_drag_kind", "")
@@ -2640,7 +2666,7 @@ class ViewerApp:
         self._input_claim = _NO_INPUT_CLAIM
         if self._input_handler is None:
             return
-        blocked = self._scene_input_blocked()
+        blocked = self._scene_input_blocked() or self._native_window_input_owned()
         context = InputContext(
             viewport_hovered=inside and not blocked,
             viewport_focused=self._viewport_focused,
@@ -2664,10 +2690,9 @@ class ViewerApp:
         claim = self._input_claim
         if claim.keyboard:
             return
-        modifier = bool(io.key_ctrl or io.key_super)
-        if (io.key_ctrl and claim.claims_key("ctrl")) or (
-            io.key_super and claim.claims_key("super")
-        ):
+        ctrl, super_key = physical_ctrl_super(io)
+        modifier = ctrl or super_key
+        if (ctrl and claim.claims_key("ctrl")) or (super_key and claim.claims_key("super")):
             return
         if io.key_shift and claim.claims_key("shift"):
             return
@@ -2731,12 +2756,13 @@ class ViewerApp:
             and imgui.is_key_pressed(imgui.Key.escape, False)
         )
         bindings = self.input_bindings
+        ctrl, super_key = physical_ctrl_super(io)
 
         def available(action: InputAction) -> bool:
             key_id = bindings.key_id(action)
             # Editor chords reserve their letter keys. A modifier explicitly
             # assigned to a viewport action still works as a standalone key.
-            if io.key_super or (io.key_ctrl and key_id != "ctrl"):
+            if super_key or (ctrl and key_id != "ctrl"):
                 return False
             return not self._input_claim.claims_key(key_id)
 
@@ -2805,7 +2831,7 @@ class ViewerApp:
         )
         hovered_window = imgui.get_current_context().hovered_window
         hovered_name = None if hovered_window is None else str(hovered_window.name)
-        viewport_window_busy = self._viewport_window_is_being_manipulated()
+        viewport_window_busy = self._native_window_input_owned()
         over_viewport = (
             gs.viewport_input_allowed(inside, hovered_name)
             and not viewport_window_busy
@@ -2872,15 +2898,17 @@ class ViewerApp:
         )
 
     @staticmethod
-    def _viewport_window_is_being_manipulated() -> bool:
-        """Keep scene gestures out of floating-window move and resize gestures."""
+    def _native_window_input_owned() -> bool:
+        """Honor native controls and dock splitters before claiming a scene drag."""
 
         context = imgui.get_current_context()
         window = context.current_window
-        if window is None or str(window.name).rsplit("###", 1)[-1] != "Viewport":
+        if window is None:
             return False
-        moving = context.moving_window
-        if moving is not None and int(moving.id_) == int(window.id_):
+        owner = context.active_id_window
+        if context.active_id and owner is not None and owner.id_ != window.id_:
+            return True
+        if context.moving_window is not None:
             return True
         return bool(
             int(window.resize_border_held) >= 0
@@ -3083,9 +3111,6 @@ class ViewerApp:
             mode_index = next_mode
             self._set_precise_gizmo_absolute(edit, bool(mode_index))
         imgui.spacing()
-        if edit.absolute_value is None:
-            imgui.text("Δ")
-            imgui.same_line()
         unit_width = 82.0 * scale if angular else float(imgui.calc_text_size(unit).x)
         if not angular:
             unit_width += 2.0 * float(imgui.get_style().frame_padding.x)
@@ -3120,6 +3145,7 @@ class ViewerApp:
             if next_unit != (1 if self._precise_gizmo_angle_unit == "radians" else 0):
                 self._toggle_precise_gizmo_angle_unit()
         else:
+            imgui.align_text_to_frame_padding()
             imgui.text(unit)
         if self._precise_gizmo_error:
             imgui.spacing()
@@ -3384,6 +3410,7 @@ class ViewerApp:
             rect=self._viewport_rect,
             ui_scale=self.window.ui_scale,
             style_scale=self.window.style_scale,
+            overlay_axes=True,
         )
 
     def _publish_selection_style(self) -> None:
@@ -3485,19 +3512,7 @@ class ViewerApp:
                 joint_id = selected
             elif len(candidates) == 1:
                 joint_id = candidates[0].joint_id
-        if joint_id < 0 or not self.request_joint_focus(joint_id):
-            return False
-        joint_node = next(
-            (
-                candidate
-                for candidate in self.session.nodes
-                if candidate.type is NodeType.JOINT and candidate.joint_index == joint_id
-            ),
-            None,
-        )
-        if joint_node is not None:
-            self.session.submit(cmd.SelectNode(joint_node.node_id))
-        return True
+        return joint_id >= 0 and self.request_joint_focus(joint_id)
 
     def _apply_pending_joint_focus(self) -> None:
         joint_id = self._pending_joint_focus_id
@@ -3896,9 +3911,19 @@ class ViewerApp:
         title = self.localizer.text("Viewport")
         if title != "Viewport":
             title += "###Viewport"
+        # Docked scenes fill their panel; floating scenes retain the native
+        # resize border. Neither acquires the ordinary panel content padding.
+        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
         imgui.begin(title, None, imgui.WindowFlags_.no_scrollbar.value)
+        imgui.pop_style_var()
         pos = imgui.get_cursor_screen_pos()
         size = imgui.get_content_region_avail()
+        if not imgui.is_window_docked():
+            # Derive the inset from the border, not the drawing clip: moving
+            # partly off screen must not resize the scene or change its aspect.
+            inset = float(math.ceil(imgui.get_style().window_border_size * 0.5))
+            pos = imgui.ImVec2(pos.x + inset, pos.y)
+            size = imgui.ImVec2(size.x - 2.0 * inset, size.y - inset)
         panel_position = (float(pos.x), float(pos.y))
         self._viewport_panel_position = panel_position
         self._viewport_panel_size = (max(float(size.x), 1.0), max(float(size.y), 1.0))
@@ -3927,12 +3952,16 @@ class ViewerApp:
             uv1 = imgui.ImVec2(1.0, 0.0) if image.flip_y else imgui.ImVec2(1.0, 1.0)
             x, y, width, height = self._viewport_rect
             imgui.set_cursor_screen_pos(imgui.ImVec2(x, y))
+            # Only the docked scene covers the native one-pixel inner border.
+            # Floating image bounds stop before resize grips and hover strokes.
+            imgui.push_clip_rect((x, y), (x + width, y + height), False)
             imgui.image(
                 self.window.viewport_texture_ref(image),
                 imgui.ImVec2(width, height),
                 uv0,
                 uv1,
             )
+            imgui.pop_clip_rect()
         x, y, w, h = self._viewport_rect
         imgui.push_clip_rect(imgui.ImVec2(x, y), imgui.ImVec2(x + w, y + h), True)
         try:
@@ -3942,13 +3971,39 @@ class ViewerApp:
                 if st.active and not self.backend.caps.debug_draw:
                     node = self.session.node(st.node_id)
                     center = self._node_pose(node)[0] if node is not None else st.target_pos
-                    draw_fallback(
-                        self._camera_view(),
-                        st,
-                        self._viewport_rect,
-                        (imgui.get_io().mouse_pos.x, imgui.get_io().mouse_pos.y),
-                        center,
+                    if st.mode == "translate":
+                        pose = (
+                            self._node_pose(node)
+                            if node is not None
+                            else (st.target_pos, st.target_mat)
+                        )
+                        draw_translation_link(
+                            self._camera_view(),
+                            st,
+                            self._viewport_rect,
+                            pose,
+                            overlay,
+                            self.window.style_scale,
+                        )
+                    else:
+                        draw_fallback(
+                            self._camera_view(),
+                            st,
+                            self._viewport_rect,
+                            (imgui.get_io().mouse_pos.x, imgui.get_io().mouse_pos.y),
+                            center,
+                            overlay,
+                            self.window.style_scale,
+                        )
+                if st.active and st.mode == "rotate":
+                    node = self.session.node(st.node_id)
+                    center = self._node_pose(node)[0] if node is not None else st.target_pos
+                    draw_perturb_axes(
                         overlay,
+                        self._camera_view(),
+                        self._viewport_rect,
+                        center,
+                        st.target_mat,
                         self.window.style_scale,
                     )
                 self.gizmo.draw_overlay(
@@ -4611,7 +4666,7 @@ class ViewerApp:
 
         viewport = imgui.get_main_viewport()
         scale = self.window.style_scale
-        # Ink-box centering keeps glyphs visually centered on macOS. A small
+        # One shared text baseline aligns every status group. A small
         # vertical gutter separates the single-line groups without inflating
         # their internal geometry.
         height = APPLICATION_STATUS_HEIGHT_PT * scale

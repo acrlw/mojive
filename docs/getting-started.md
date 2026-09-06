@@ -17,7 +17,10 @@ The extras are independent:
 - `dev` installs pytest and Ruff; and
 - `docs` installs the strict documentation build.
 
-`make setup` installs `dev`, `mujoco`, and `wgpu` for repository development.
+`make setup` installs `dev`, `mujoco`, and `wgpu` for repository development and builds the
+[bulk UI drawing bindings and slider/focus fixes](how-to/ui-corners.md). The native build needs
+CMake and a C++17 toolchain. After this local build, use `uv run --no-sync mojive editor`
+to preserve its wheel instead of replacing it during dependency synchronization.
 
 ## Open the editor
 

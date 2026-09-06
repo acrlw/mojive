@@ -11,13 +11,14 @@ from mojive import commands as cmd
 pytestmark = pytest.mark.gpu
 
 
-@pytest.fixture
-def viewer(tmp_path, monkeypatch):
+@pytest.fixture(params=[False, True], ids=["standard-keys", "macos-keys"])
+def viewer(tmp_path, monkeypatch, request):
     monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
     scene = Scene()
     box = scene.box(name="original")
     with build_scene(scene, vsync=False, show_window=False, width=1280, height=800) as viewer:
+        imgui.get_io().config_mac_osx_behaviors = request.param
         for _ in range(12):
             viewer.sync()
         viewer.session.submit(cmd.Select(box.object_id))
@@ -115,3 +116,66 @@ def test_help_alias_honors_claimed_physical_keys(viewer, key):
     viewer.set_input_handler(None)
     press(viewer, imgui.Key.slash, shift=True)
     assert help_panel.open
+
+
+def test_input_hook_observes_physical_control_independently_of_command(viewer):
+    viewer, _ = viewer
+    observed = []
+
+    def handler(context):
+        observed.append(
+            (
+                context.key_down("ctrl"),
+                context.key_down("super"),
+                context.key_pressed("ctrl"),
+                context.key_released("ctrl"),
+            )
+        )
+        return InputClaim(keys={"ctrl"})
+
+    viewer.set_input_handler(handler)
+    press(viewer, imgui.Key.left_ctrl, ctrl=True)
+    assert observed == [(True, False, True, False), (False, False, False, True)]
+
+
+@pytest.mark.parametrize("button", [0, 1], ids=["left", "right"])
+def test_glfw_control_click_preserves_physical_button_and_native_key_mode(viewer, button):
+    import glfw
+
+    viewer, _ = viewer
+    window = viewer.window._window
+    keyboard = glfw.set_key_callback(window, None)
+    mouse = glfw.set_mouse_button_callback(window, None)
+    glfw.set_key_callback(window, keyboard)
+    glfw.set_mouse_button_callback(window, mouse)
+    assert keyboard is not None and mouse is not None
+    io = imgui.get_io()
+    macos = io.config_mac_osx_behaviors
+    observed = []
+
+    def handler(context):
+        observed.append(
+            (
+                context.key_down("ctrl"),
+                context.mouse_down(0),
+                context.mouse_down(1),
+                context.mouse_clicked(button),
+                context.mouse_released(button),
+            )
+        )
+        return InputClaim(pointer=True)
+
+    viewer.set_input_handler(handler)
+    # Both events may arrive between frames; modifier lookup must see queued keys.
+    keyboard(window, glfw.KEY_LEFT_CONTROL, 0, glfw.PRESS, glfw.MOD_CONTROL)
+    mouse(window, button, glfw.PRESS, glfw.MOD_CONTROL)
+    viewer.sync()
+    # Releasing Control first must not leave an aliased right button held.
+    keyboard(window, glfw.KEY_LEFT_CONTROL, 0, glfw.RELEASE, 0)
+    mouse(window, button, glfw.RELEASE, 0)
+    viewer.sync()
+    assert observed == [
+        (True, button == 0, button == 1, True, False),
+        (False, False, False, False, True),
+    ]
+    assert io.config_mac_osx_behaviors == macos

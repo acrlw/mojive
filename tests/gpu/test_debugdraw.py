@@ -301,3 +301,35 @@ def test_ten_thousand_lines_render_without_dropping(rig):
     # backends time frames differently; this checks correctness of the path.
     assert rig.backend.debug.stats().primitives == n
     assert rig.debug_pass().draw_calls == 1
+
+
+def test_screen_arrows_share_g3_circular_and_sharp_styles(rig):
+    from pathlib import Path
+
+    from PIL import Image
+
+    layer = rig.backend.debug.layer("screen", Occlusion.ALWAYS)
+    for index, (radius, smoothing) in enumerate(((3.0, 0.6), (3.0, 0.0), (0.0, 0.0))):
+        y = 65.0 + index * 85.0
+        layer.arrow_2d(
+            f"arrow-{index}",
+            (60.0, y),
+            (340.0, y),
+            (1.0, 1.0, 1.0, 1.0),
+            8.0,
+            head_length_px=36.0,
+            head_width_px=40.0,
+            corner_radius_px=radius,
+            smoothing=smoothing,
+        )
+    image = rig.draw()
+    output = Path("output/g3-controls")
+    output.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(image).save(output / f"debug-arrows-{rig.backend.caps.name}.png")
+    gray = image[:, :, :3].max(axis=2)
+    for y in (65, 150, 235):
+        assert gray[y, 100] > 180
+        assert gray[y - 18 : y + 19, 320:335].max() > 180
+        assert gray[y - 30, 200] < 10
+    assert np.count_nonzero((gray > 10) & (gray < 230)) > 100
+    assert not np.array_equal(gray[35:95], gray[120:180])

@@ -139,6 +139,43 @@ help:
 
 setup:
 	uv sync --python 3.11 --extra dev --extra mujoco --extra wgpu
+	$(MAKE) setup-imgui
+
+.PHONY: setup-imgui setup-g3 g3-ui g3-benchmark interaction-benchmark ui-corners ui-corners-gallery
+setup-imgui:
+	$(PY) tools/build_imgui.py --install
+
+# Keep the previous setup command working for existing checkouts.
+setup-g3: setup-imgui
+
+g3-ui:
+	$(PY) -m mojive.tools.tool_icons -o output/g3-ui/tool-icons
+	$(PY) -m mojive.tools.mouse_hint_icons -o output/g3-ui/mouse-icons
+	$(PY) -m mojive.tools.ui_runtime -o output/g3-ui/runtime
+
+g3-benchmark:
+	$(PY) tools/benchmark_g3.py $(ARGS)
+
+interaction-benchmark:
+	$(PY) tools/benchmark_interaction.py $(ARGS)
+
+ui-corners:
+	$(PY) design/tools/render_ui_feasibility.py --interactive --page geometry --geometry-tab corners $(ARGS)
+
+ui-corners-gallery:
+	$(PYTEST) -q -m gpu tests/gpu/test_ui_corner_controls.py -k tab_focus
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --smoothing 0 -o output/g3-controls/corners-000.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --smoothing 0.6 -o output/g3-controls/corners-060.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --smoothing 1 -o output/g3-controls/corners-100.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --imgui-radius 0 -o output/g3-controls/radius-00.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --imgui-radius 8 -o output/g3-controls/radius-08.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --imgui-radius 12 -o output/g3-controls/radius-12.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --imgui-radius 16 -o output/g3-controls/radius-16.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab playback -o output/g3-controls/playback-aligned.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab workspaces -o output/g3-controls/workspaces.png
+	$(PY) design/tools/render_ui_feasibility.py --page panels -o output/g3-controls/panels.png
+	MOJIVE_BACKEND=opengl $(PYTEST) -q -m gpu tests/gpu/test_debugdraw.py -k screen_arrows
+	MOJIVE_BACKEND=wgpu $(PYTEST) -q -m gpu tests/gpu/test_debugdraw.py -k screen_arrows
 
 ## Lint, formatting, and CPU tests.
 check: lint test
@@ -187,7 +224,7 @@ mjcf-roundtrip:
 gpu:
 	@for f in $$(ls tests/gpu/test_*.py); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
 
-GPU_WGPU_FILES := tests/gpu/test_input_ownership.py tests/gpu/test_scene_renderer.py tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py tests/gpu/test_hidpi.py tests/gpu/test_horizon_haze.py tests/gpu/test_shading.py tests/gpu/test_shadows.py tests/gpu/test_reflection.py tests/gpu/test_outline.py tests/gpu/test_tendon.py tests/gpu/test_debugdraw.py tests/gpu/test_gizmo.py tests/gpu/test_pipeline.py tests/gpu/test_viewer_wgpu.py tests/gpu/test_static_viewer.py tests/gpu/test_model_loading.py tests/gpu/test_ui_interaction.py tests/gpu/test_wgpu_shader_reload.py
+GPU_WGPU_FILES := tests/gpu/test_input_ownership.py tests/gpu/test_scene_renderer.py tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py tests/gpu/test_hidpi.py tests/gpu/test_horizon_haze.py tests/gpu/test_shading.py tests/gpu/test_shadows.py tests/gpu/test_reflection.py tests/gpu/test_outline.py tests/gpu/test_tendon.py tests/gpu/test_debugdraw.py tests/gpu/test_gizmo.py tests/gpu/test_pipeline.py tests/gpu/test_viewer_wgpu.py tests/gpu/test_static_viewer.py tests/gpu/test_model_loading.py tests/gpu/test_ui_interaction.py tests/gpu/test_ui_layout_input.py tests/gpu/test_wgpu_shader_reload.py
 ## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
 gpu-wgpu:
@@ -248,6 +285,10 @@ ui-feasibility:
 
 ui-runtime:
 	$(PY) -m mojive.tools.ui_runtime $(ARGS)
+
+.PHONY: ui-layout-audit
+ui-layout-audit:
+	$(PY) -m mojive.tools.ui_layout_audit $(ARGS)
 
 ## Refresh README images with unmodified production UI and renderer captures.
 readme-media:

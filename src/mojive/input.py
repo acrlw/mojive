@@ -3,6 +3,55 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
+
+
+@lru_cache(maxsize=1)
+def _macos_modifier_keys():
+    from imgui_bundle import imgui
+
+    key = imgui.Key
+    pairs = (
+        (key.left_ctrl, key.left_super),
+        (key.right_ctrl, key.right_super),
+        (key.mod_ctrl, key.mod_super),
+    )
+    return {a: b for pair in pairs for a, b in (pair, pair[::-1])}
+
+
+def imgui_key_for_physical_key(key):
+    """Map a physical key to ImGui's current platform-specific key representation."""
+    swapped = _macos_modifier_keys().get(key)
+    if swapped is not None:
+        from imgui_bundle import imgui
+
+        if imgui.get_io().config_mac_osx_behaviors:
+            return swapped
+    return key
+
+
+def physical_ctrl_super(io) -> tuple[bool, bool]:
+    """Return physical Control and Super states while retaining native text-editing behavior."""
+    if io.config_mac_osx_behaviors:
+        return bool(io.key_super), bool(io.key_ctrl)
+    return bool(io.key_ctrl), bool(io.key_super)
+
+
+def add_physical_mouse_button_event(io, button: int, down: bool) -> None:
+    """Queue a physical button without ImGui's macOS Control-click alias.
+
+    Viewer gestures bind physical Control and mouse buttons independently.
+    Keep native macOS key and text editing behavior outside this event call.
+    """
+    macos = io.config_mac_osx_behaviors
+    if button != 0 or not macos:
+        io.add_mouse_button_event(button, down)
+        return
+    try:
+        io.config_mac_osx_behaviors = False
+        io.add_mouse_button_event(button, down)
+    finally:
+        io.config_mac_osx_behaviors = macos
 
 
 def normalize_key(value: str) -> str:
@@ -34,7 +83,7 @@ def _imgui_keys(identifier: str) -> tuple[object, ...]:
         "super": (imgui.Key.left_super, imgui.Key.right_super),
     }
     if key_id in modifiers:
-        return modifiers[key_id]
+        return tuple(imgui_key_for_physical_key(key) for key in modifiers[key_id])
     attribute = f"_{key_id[6:]}" if key_id.startswith("digit_") else key_id
     key = getattr(imgui.Key, attribute, None)
     if key is None:

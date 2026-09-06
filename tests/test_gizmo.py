@@ -8,6 +8,7 @@ from mojive import math3d
 from mojive.adapters.base import FrameNeeds, NodeType
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.adapters.toy import ToyPhysicsAdapter
+from mojive.curves2d import arc_ribbon_points
 from mojive.gizmo import (
     ACTIVE_HANDLE_COLOR,
     ARROW_CORNER_RADIUS_PT,
@@ -21,12 +22,11 @@ from mojive.gizmo import (
     CENTER_HIT_PT,
     CENTER_RADIUS,
     CENTER_SHELL_RADIUS,
-    CONTRAST_EDGE_PT,
+    CONTRAST_EDGE_COLOR,
     GUIDE_CORE_COLOR,
     HOVER_COLOR,
     JOINT_HANDLE_COLOR,
     JOINT_OUTLINE_COLOR,
-    JOINT_OUTLINE_PT,
     PLANE_INNER,
     RING_HIT_PT,
     RING_RADIUS,
@@ -112,7 +112,6 @@ from mojive.ui.gizmo import (
     _project_rotation_dial,
     _project_rotation_tick,
     _projected_line_parameters,
-    _rotation_arc_stroke,
     _rotation_fill_alpha,
     _rotation_sweep,
     _RotationDialProjector,
@@ -122,6 +121,7 @@ from mojive.ui.gizmo import (
     joint_slide_arrow_polygons,
 )
 from mojive.ui.theme import THEME
+from tests.curve_assertions import assert_paths_close
 
 RECT = (0.0, 0.0, 800.0, 600.0)
 
@@ -352,27 +352,11 @@ def test_joint_current_tick_keeps_range_color_beneath_limit_ticks(
     assert len(limit_indices) == 2
     assert min(limit_indices) > current_index
 
-    outline_index = next(
-        index
-        for index, (name, args, _kwargs) in enumerate(overlay.calls)
-        if name in ("line", "polyline")
+    assert not any(
+        name in ("line", "polyline")
         and np.allclose(args[2 if name == "line" else 1][:3], JOINT_OUTLINE_COLOR[:3])
+        for name, args, _kwargs in overlay.calls
     )
-    assert outline_index < current_index
-    outline_call = overlay.calls[outline_index][1]
-    outline_width = (
-        outline_call[3] if overlay.calls[outline_index][0] == "line" else outline_call[2]
-    )
-    assert outline_width == pytest.approx(JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT)
-    current_outline = next(
-        args
-        for name, args, kwargs in overlay.calls
-        if name == "line"
-        and np.allclose(args[2][:3], JOINT_OUTLINE_COLOR[:3])
-        and kwargs.get("cap") == "round"
-        and np.linalg.norm(args[1] - args[0]) == pytest.approx(JOINT_CURRENT_TICK_PT)
-    )
-    assert current_outline[3] == pytest.approx(JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT)
 
 
 @pytest.mark.parametrize(
@@ -454,7 +438,7 @@ def test_rotation_guide_keeps_the_sector_and_arc_without_center_strokes(
 
     fills = [args[0] for name, args, _kwargs in overlay.calls if name == "triangle_fan_fill"]
     polylines = [kwargs for name, _args, kwargs in overlay.calls if name == "polyline"]
-    strokes = [args[0] for name, args, _kwargs in overlay.calls if name == "fringed_concave_fill"]
+    strokes = [args[0] for name, args, _kwargs in overlay.calls if name == "indexed_fill"]
     dots = [args[0] for name, args, _kwargs in overlay.calls if name == "circle_filled"]
     projected_center = project(cam, (center,), RECT)[0, :2]
     assert len(fills) == 1
@@ -479,8 +463,8 @@ def test_rotation_guide_keeps_the_sector_and_arc_without_center_strokes(
 def test_rotation_arc_round_caps_are_part_of_one_stroke_silhouette() -> None:
     points = np.array(((0.0, 0.0), (5.0, 0.0), (10.0, 0.0)))
 
-    flat = _rotation_arc_stroke(points, None, None, 4.0)
-    rounded = _rotation_arc_stroke(points, None, None, 4.0, round_caps=True)
+    flat = arc_ribbon_points(points, None, None, 4.0)
+    rounded = arc_ribbon_points(points, None, None, 4.0, round_caps=True)
 
     assert np.min(flat[:, 0]) == pytest.approx(0.0)
     assert np.max(flat[:, 0]) == pytest.approx(10.0)
@@ -494,11 +478,51 @@ def test_rotation_arc_round_caps_are_part_of_one_stroke_silhouette() -> None:
 def test_rotation_arc_supports_one_rounded_limit_endpoint() -> None:
     points = np.array(((0.0, 0.0), (5.0, 0.0), (10.0, 0.0)))
 
-    start = _rotation_arc_stroke(points, None, None, 4.0, round_start=True)
-    end = _rotation_arc_stroke(points, None, None, 4.0, round_end=True)
+    start = arc_ribbon_points(points, None, None, 4.0, round_start=True)
+    end = arc_ribbon_points(points, None, None, 4.0, round_end=True)
 
     assert (np.min(start[:, 0]), np.max(start[:, 0])) == pytest.approx((-2.0, 10.0))
     assert (np.min(end[:, 0]), np.max(end[:, 0])) == pytest.approx((0.0, 12.0))
+
+
+def test_rotation_arc_caps_follow_smoothing_without_changing_tip_extent():
+    points = np.array(((0.0, 0.0), (5.0, 0.0), (10.0, 0.0)))
+    paths = [
+        arc_ribbon_points(points, None, None, 4.0, round_caps=True, smoothing=q)
+        for q in (0.0, 0.23, 1.0)
+    ]
+    for path in paths:
+        assert path.min(axis=0) == pytest.approx((-2.0, -2.0))
+        assert path.max(axis=0) == pytest.approx((12.0, 2.0))
+    assert len({tuple(p.ravel()) for p in paths}) == 3
+
+
+def test_rotation_arc_cap_meets_a_parallel_endpoint_segment():
+    angles = np.linspace(0.0, 0.8, 12)
+    points = np.column_stack((np.cos(angles), np.sin(angles))) * 40
+    stroke = arc_ribbon_points(points, None, None, 4, round_end=True, smoothing=0.6)
+    join = stroke[len(points)] - stroke[len(points) - 1]
+    tangent = points[-1] - points[-2]
+    assert join @ tangent > 0.0
+    assert abs(join[0] * tangent[1] - join[1] * tangent[0]) < 1e-9
+
+
+def test_rotation_gizmo_forwards_its_own_smoothing_to_arc_caps(monkeypatch):
+    from mojive.ui import gizmo as module
+
+    gizmo = ObjectGizmo("rotate")
+    gizmo._frame.mode = GizmoMode.ROTATE
+    gizmo._frame.corner_smoothing = 0.23
+    values = []
+    original = module.arc_ribbon_mesh
+
+    def record(*args, **kwargs):
+        values.append(kwargs.get("smoothing"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, "arc_ribbon_mesh", record)
+    gizmo._draw_flat(RecordingDraw2D(), camera(), RECT, 1.0)
+    assert values and all(value == 0.23 for value in values)
 
 
 @pytest.mark.parametrize("degrees", [285.0, -285.0])
@@ -811,7 +835,7 @@ def test_dimension_gizmo_stays_on_geometry_pose_and_reuses_flat_overlay() -> Non
     assert gizmo._frame.position == pytest.approx((1.0, 2.0, 0.5))
     silhouettes = [args[0] for name, args, _kwargs in overlay.calls if name == "concave_fill"]
     assert silhouettes
-    assert all(np.asarray(points).shape == (8, 2) for points in silhouettes)
+    assert all(np.asarray(points).shape[0] > 8 for points in silhouettes)
     assert not any(name in ("line", "rect_filled") for name, _args, _kwargs in overlay.calls)
 
 
@@ -1124,18 +1148,20 @@ def test_translation_center_shell_masks_continuous_axes_but_not_planes() -> None
     assert np.allclose(masked_axis_start(np.zeros(2), np.array((20.0, 0.0)), 7.0), (7, 0))
 
 
-def test_rounded_polygon_corner_is_a_tangent_circular_fillet() -> None:
+def test_rounded_polygon_corner_retains_footprint_and_has_flat_curvature_joins() -> None:
     rounded = _rounded_polygon_corners(
         ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)),
         2.0,
         (1,),
     )
-    arc = rounded[1:8]
+    arc = rounded[1:-2]
 
     assert arc[0] == pytest.approx((8.0, 0.0))
     assert arc[-1] == pytest.approx((10.0, 2.0))
-    assert np.linalg.norm(arc - np.array((8.0, 2.0)), axis=1) == pytest.approx(2.0)
-    assert arc[len(arc) // 2] == pytest.approx((8.0 + np.sqrt(2.0), 2.0 - np.sqrt(2.0)))
+    # The first/last chord already approaches the adjacent straight tangent.
+    assert abs(arc[1, 1] / (arc[1, 0] - 8.0)) < 0.02
+    assert abs((10.0 - arc[-2, 0]) / (2.0 - arc[-2, 1])) < 0.02
+    assert np.all(np.diff(arc, axis=0) >= -1e-12)
 
 
 def test_flat_axis_arrow_rounds_only_the_head_and_scales_with_hidpi() -> None:
@@ -1151,21 +1177,21 @@ def test_flat_axis_arrow_rounds_only_the_head_and_scales_with_hidpi() -> None:
     assert np.any(np.isclose(polygon[:, 0], end[0] - AXIS_HEAD_LENGTH_PT))
 
     scaled = axis_arrow_polygon(start * 4.0, end * 4.0, style_scale=4.0)
-    assert scaled / 4.0 == pytest.approx(polygon)
+    assert_paths_close(scaled / 4.0, polygon)
 
 
-def test_round_tail_is_a_continuous_semicircle_in_the_arrow_outline() -> None:
+def test_round_tail_keeps_tip_extent_and_smooth_shaft_joins() -> None:
     start, end = np.array((5.0, 7.0)), np.array((65.0, 7.0))
     flat = axis_arrow_polygon(start, end)
     rounded = axis_arrow_polygon(start, end, round_tail=True)
-    assert rounded[: len(flat)] == pytest.approx(flat)
+    assert rounded[1 : len(flat) - 1] == pytest.approx(flat[1:-1])
     arc = np.vstack((rounded[len(flat) - 1 :], rounded[:1]))
-    assert np.linalg.norm(arc - start, axis=1) == pytest.approx(AXIS_SHAFT_HALF_PT)
+    assert arc[[0, -1], 1] == pytest.approx(start[1] + np.array((1, -1)) * AXIS_SHAFT_HALF_PT)
     assert arc[:, 0].min() == pytest.approx(start[0] - AXIS_SHAFT_HALF_PT)
-    assert np.all(arc[:, 0] <= start[0])
+    assert np.all(arc[:, 0] <= arc[0, 0] + 1e-9)
     assert np.linalg.norm(np.roll(rounded, -1, axis=0) - rounded, axis=1).min() > 0.0
     scaled = axis_arrow_polygon(start * 4.0, end * 4.0, 4.0, round_tail=True)
-    assert scaled / 4.0 == pytest.approx(rounded)
+    assert_paths_close(scaled / 4.0, rounded)
 
 
 @pytest.mark.parametrize("scale", (1.0, 2.25))
@@ -1851,20 +1877,16 @@ def test_translation_snap_guide_draws_smaller_endpoints_above_its_connector() ->
 
     gizmo._draw_translation_guide(overlay, camera(), RECT, 1.0)
 
-    rings = [call for call in overlay.calls if call[0] == "circle"]
-    dots = [call for call in overlay.calls if call[0] == "circle_filled"]
-    assert [call[0] for call in overlay.calls] == [
-        "line",
-        "circle",
-        "circle_filled",
-        "line",
-        "circle",
-        "circle_filled",
-    ]
-    assert len(rings) == 2
-    assert len(dots) == 2
-    assert all(call[1][1] == pytest.approx(TRANSLATION_GUIDE_RADIUS_PT) for call in rings)
-    assert dots[-1][1][1] == pytest.approx(TRANSLATION_GUIDE_RADIUS_PT)
+    assert [call[0] for call in overlay.calls] == ["indexed_fill", "indexed_fill"]
+    edge, core = overlay.calls
+    assert core[1][2] == pytest.approx(GUIDE_CORE_COLOR)
+    assert edge[1][2] == pytest.approx(CONTRAST_EDGE_COLOR)
+    assert len(core[2]["hole"]) > 3
+    assert len(edge[2]["outline"]) > 3
+    screen = project(camera(), (gizmo._drag_origin_pos, gizmo._frame.position), RECT)
+    radius = TRANSLATION_GUIDE_RADIUS_PT
+    assert core[2]["origin"] == pytest.approx(screen[0, :2])
+    assert max(np.linalg.norm(np.asarray(core[2]["hole"]), axis=1)) < radius
 
 
 @pytest.mark.parametrize(
@@ -1888,26 +1910,30 @@ def test_scale4_translation_guide_connectors_stay_beneath_both_endpoint_markers(
 
     gizmo._draw_translation_guide(overlay, camera(), RECT, scale)
 
-    assert [call[0] for call in overlay.calls] == [
-        "line",
-        "circle",
-        "circle_filled",
-        "line",
-        "circle",
-        "circle_filled",
-    ]
+    assert [call[0] for call in overlay.calls] == ["indexed_fill", "indexed_fill"]
     screen = project(camera(), (gizmo._drag_origin_pos, gizmo._frame.position), RECT)
     start, end = screen[:, :2]
     direction = (end - start) / np.linalg.norm(end - start)
-    radius = TRANSLATION_GUIDE_RADIUS_PT * scale
-    edge_width = (2.0 + 2.0 * CONTRAST_EDGE_PT) * scale
-    core_width = 2.0 * scale
-    edge_line = overlay.calls[0][1]
-    core_line = overlay.calls[3][1]
-    assert np.dot(edge_line[0] - start, direction) == pytest.approx(radius - edge_width * 0.5)
-    assert np.dot(end - edge_line[1], direction) == pytest.approx(radius - edge_width * 0.5)
-    assert np.dot(core_line[0] - start, direction) == pytest.approx(radius - core_width * 0.5)
-    assert np.dot(end - core_line[1], direction) == pytest.approx(radius - core_width * 0.5)
+    vertices = np.asarray(overlay.calls[-1][1][0])
+    assert overlay.calls[-1][2]["origin"] == pytest.approx(start)
+    assert overlay.calls[-1][2]["direction"] == pytest.approx(direction)
+    along, across = vertices.T
+    distance = np.linalg.norm(end - start)
+    from mojive.draglink2d import drag_link_field
+
+    triangles = np.asarray(overlay.calls[-1][1][1]).reshape(-1, 3)
+    centroids = vertices[triangles].mean(axis=1)
+    values = drag_link_field(
+        centroids[:, 0],
+        centroids[:, 1],
+        distance,
+        TRANSLATION_GUIDE_RADIUS_PT * scale,
+        2.0 * scale,
+        0.6,
+    )
+    assert values.max() < 0.05
+    assert along.min() < 0.0 and along.max() > distance
+    assert max(abs(across)) >= TRANSLATION_GUIDE_RADIUS_PT * scale
 
 
 def test_joint_translation_guide_is_a_primary_dim_segment_with_asymmetric_ticks() -> None:
@@ -1918,21 +1944,9 @@ def test_joint_translation_guide_is_a_primary_dim_segment_with_asymmetric_ticks(
 
     gizmo._draw_joint_translation_guide(overlay, camera(), RECT, 1.0)
 
-    assert [name for name, _args, _kwargs in overlay.calls] == ["line"] * 6
-    outline_connector, outline_start, outline_end = (
-        args for _name, args, _kwargs in overlay.calls[:3]
-    )
-    connector, start_tick, end_tick = (args for _name, args, _kwargs in overlay.calls[3:])
-    connector_kwargs, start_kwargs, end_kwargs = (
-        kwargs for _name, _args, kwargs in overlay.calls[3:]
-    )
-    assert all(
-        np.allclose(call[2], JOINT_OUTLINE_COLOR)
-        for call in (outline_connector, outline_start, outline_end)
-    )
-    assert outline_connector[3] == pytest.approx(JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT)
-    assert outline_start[3] == pytest.approx(JOINT_RANGE_WIDTH_PT + 2.0 * JOINT_OUTLINE_PT)
-    assert outline_end[3] == pytest.approx(4.0 + 2.0 * JOINT_OUTLINE_PT)
+    assert [name for name, _args, _kwargs in overlay.calls] == ["line"] * 3
+    connector, start_tick, end_tick = (args for _name, args, _kwargs in overlay.calls)
+    connector_kwargs, start_kwargs, end_kwargs = (kwargs for _name, _args, kwargs in overlay.calls)
     assert np.allclose(connector[2], JOINT_ACTIVE_DARK_COLOR)
     assert np.allclose(start_tick[2], JOINT_ACTIVE_DARK_COLOR)
     assert np.allclose(end_tick[2], ACTIVE_HANDLE_COLOR)
@@ -1941,7 +1955,7 @@ def test_joint_translation_guide_is_a_primary_dim_segment_with_asymmetric_ticks(
         2.0 * JOINT_DRAG_START_TICK_HALF_PT
     )
     assert np.linalg.norm(end_tick[1] - end_tick[0]) == pytest.approx(JOINT_CURRENT_TICK_PT)
-    assert end_tick[3] == pytest.approx(4.0)
+    assert end_tick[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
     assert "cap" not in connector_kwargs
     assert start_kwargs["cap"] == end_kwargs["cap"] == "round"
 
@@ -1982,7 +1996,9 @@ def test_joint_translation_guide_stays_in_the_final_overlay_without_dots() -> No
 @pytest.mark.parametrize("style", ("2d", "3d"))
 @pytest.mark.parametrize("orthographic", (False, True))
 @pytest.mark.parametrize("current", (0.0, 0.15, -0.34, 0.34))
-def test_slide_drag_markers_share_the_range_outline_pass(style, orthographic, current) -> None:
+def test_slide_drag_markers_draw_once_without_contrast_outlines(
+    style, orthographic, current
+) -> None:
     from types import SimpleNamespace
 
     gizmo = ObjectGizmo()
@@ -2012,14 +2028,13 @@ def test_slide_drag_markers_share_the_range_outline_pass(style, orthographic, cu
             cores.append(index)
             if name == "line":
                 core_lines.append(args)
-    # No start/current/limit edge may be painted over any part of the fill.
-    assert outlines and cores
-    assert max(outlines) < min(cores)
+    assert not outlines
+    assert cores
     dark_strokes = [
         args for args in core_lines if np.allclose(args[2][:3], JOINT_ACTIVE_DARK_COLOR[:3])
     ]
     assert len(dark_strokes) == (2 if current != 0.0 else 0)
-    assert len([args for args in core_lines if args[3] == pytest.approx(4.0)]) == 1
+    assert all(args[3] == pytest.approx(JOINT_RANGE_WIDTH_PT) for args in core_lines)
     assert np.allclose(core_lines[-2][2], JOINT_LOWER_LIMIT_COLOR)
     assert np.allclose(core_lines[-1][2], JOINT_UPPER_LIMIT_COLOR)
 
@@ -2038,14 +2053,7 @@ def test_translation_snap_guide_is_the_last_axis_overlay_group() -> None:
 
     gizmo.draw_overlay(camera(), RECT, overlay, style_scale=1.0)
 
-    assert [call[0] for call in overlay.calls[-6:]] == [
-        "line",
-        "circle",
-        "circle_filled",
-        "line",
-        "circle",
-        "circle_filled",
-    ]
+    assert [call[0] for call in overlay.calls[-2:]] == ["indexed_fill", "indexed_fill"]
 
 
 def test_translation_snap_guide_does_not_stay_in_the_gpu_layer() -> None:
@@ -2875,7 +2883,8 @@ def test_slide_joint_accepts_a_cardinal_drag_off_the_projected_axis() -> None:
 
 
 @pytest.mark.physics
-def test_slide_joint_drag_rebases_at_a_clamped_limit() -> None:
+@pytest.mark.parametrize("snap_overtravel", (False, True))
+def test_slide_joint_drag_rebases_at_a_clamped_limit(snap_overtravel) -> None:
     from mojive.adapters.mujoco_adapter import MuJoCoAdapter
     from mojive.assets import resolve
 
@@ -2935,6 +2944,20 @@ def test_slide_joint_drag_rebases_at_a_clamped_limit() -> None:
     assert gizmo.using
     assert gizmo._drag_origin_pos == pytest.approx(drag_origin)
 
+    if snap_overtravel:
+        farther += gizmo._axis_screen * (0.01 / gizmo._world_per_pt)
+        assert gizmo.interact(
+            session,
+            cam,
+            RECT,
+            tuple(farther),
+            claimed=True,
+            left_down=True,
+            released=False,
+            snap=True,
+        )
+        assert adapter.data.qpos[target.joint.qpos_adr] == pytest.approx(upper)
+
     inward = farther - gizmo._axis_screen * (0.02 / gizmo._world_per_pt)
     assert gizmo.interact(
         session,
@@ -2961,7 +2984,8 @@ def test_slide_joint_drag_rebases_at_a_clamped_limit() -> None:
 
 
 @pytest.mark.physics
-def test_hinge_joint_drag_rebases_at_a_clamped_limit() -> None:
+@pytest.mark.parametrize("snap_overtravel", (False, True))
+def test_hinge_joint_drag_rebases_at_a_clamped_limit(snap_overtravel) -> None:
     from mojive.adapters.mujoco_adapter import MuJoCoAdapter
     from mojive.assets import resolve
 
@@ -3024,6 +3048,20 @@ def test_hinge_joint_drag_rebases_at_a_clamped_limit() -> None:
     assert gizmo.using
     assert gizmo._joint_drag_origin_qpos[0] == pytest.approx(drag_origin)
 
+    if snap_overtravel:
+        assert gizmo.interact(
+            session,
+            cam,
+            RECT,
+            tuple(cursor(upper + 0.32)),
+            claimed=True,
+            left_down=True,
+            released=False,
+            snap=True,
+        )
+        assert adapter.data.qpos[target.joint.qpos_adr] == pytest.approx(upper)
+    return_angle = upper + (0.27 if snap_overtravel else 0.25)
+
     session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0.0)
     gizmo._joint_range = gizmo._joint_range_state(session, target)
     assert gizmo._joint_range is not None
@@ -3043,7 +3081,7 @@ def test_hinge_joint_drag_rebases_at_a_clamped_limit() -> None:
         session,
         cam,
         RECT,
-        tuple(cursor(upper + 0.25)),
+        tuple(cursor(return_angle)),
         claimed=True,
         left_down=True,
         released=False,
@@ -3055,7 +3093,7 @@ def test_hinge_joint_drag_rebases_at_a_clamped_limit() -> None:
         session,
         cam,
         RECT,
-        tuple(cursor(upper + 0.25)),
+        tuple(cursor(return_angle)),
         claimed=True,
         left_down=False,
         released=True,
@@ -3571,7 +3609,7 @@ def test_tiny_hinge_range_reveals_a_viewport_precision_rail() -> None:
         for name, args, kwargs in visible.calls
         if name == "line" and np.allclose(args[0], rail.start) and np.allclose(args[1], rail.end)
     ]
-    assert len(track_lines) == 2
+    assert len(track_lines) == 1
     assert all(kwargs.get("cap", "butt") == "butt" for kwargs in track_lines)
 
     gizmo._joint_range = _JointRangeState(
@@ -3640,7 +3678,7 @@ def test_joint_precision_dwell_survives_movement_between_gizmo_parts() -> None:
     assert gizmo._joint_precision_visible_until > 10.50
 
 
-def test_joint_precision_rail_draws_one_joined_outline_before_its_colored_strokes() -> None:
+def test_joint_precision_rail_draws_each_colored_stroke_once() -> None:
     gizmo = ObjectGizmo()
     gizmo._joint_precision = _JointPrecisionProjection(
         joint_id=3,
@@ -3678,8 +3716,8 @@ def test_joint_precision_rail_draws_one_joined_outline_before_its_colored_stroke
         for index, args in enumerate(geometry)
         if not np.allclose(args[2], JOINT_OUTLINE_COLOR)
     ]
-    assert len(outline_indices) == len(core_indices) == 4
-    assert max(outline_indices) < min(core_indices)
+    assert outline_indices == []
+    assert len(core_indices) == 4
 
 
 @pytest.mark.physics
@@ -3765,10 +3803,8 @@ def test_joint_precision_rail_maps_its_full_width_to_the_authored_range() -> Non
         for index, color in enumerate(line_colors)
         if np.allclose(color, JOINT_UPPER_LIMIT_COLOR)
     )
-    last_outline = max(
-        index for index, color in enumerate(line_colors) if np.allclose(color, JOINT_OUTLINE_COLOR)
-    )
-    assert last_outline < lower_index < upper_index
+    assert not any(np.allclose(color, JOINT_OUTLINE_COLOR) for color in line_colors)
+    assert lower_index < upper_index
     label_fill = [args for name, args, _kwargs in active.calls if name == "rect_filled"][-1]
     label_center_x = (float(label_fill[0][0]) + float(label_fill[1][0])) * 0.5
     assert label_center_x == pytest.approx(172.0)
@@ -3996,13 +4032,11 @@ def test_active_hinge_guide_keeps_one_allowed_range_arc() -> None:
         name == "polyline" and kwargs.get("closed") and np.allclose(args[1], HOVER_COLOR)
         for name, args, kwargs in overlay.calls
     )
-    assert any(name == "fringed_concave_fill" for name, _args, _kwargs in overlay.calls)
+    assert any(name == "indexed_fill" for name, _args, _kwargs in overlay.calls)
     sector_args = next(args for name, args, _kwargs in overlay.calls if name == "triangle_fan_fill")
     sector = np.asarray(sector_args[0])
     assert np.allclose(sector_args[1][:3], ACTIVE_HANDLE_COLOR[:3])
-    arc_color = next(
-        args[1] for name, args, _kwargs in overlay.calls if name == "fringed_concave_fill"
-    )
+    arc_color = next(args[2] for name, args, _kwargs in overlay.calls if name == "indexed_fill")
     assert np.allclose(arc_color, JOINT_ACTIVE_DARK_COLOR)
     stable_dial = _RotationDialProjector(
         cam,
@@ -4050,13 +4084,13 @@ def test_active_hinge_guide_rounds_only_unambiguous_limit_caps(
         SIZE_PT,
     )
     calls = []
-    original = gizmo_module._rotation_arc_stroke
+    original = gizmo_module.arc_ribbon_mesh
 
     def record(*args, **kwargs):
         calls.append((kwargs.get("round_start", False), kwargs.get("round_end", False)))
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(gizmo_module, "_rotation_arc_stroke", record)
+    monkeypatch.setattr(gizmo_module, "arc_ribbon_mesh", record)
     gizmo._draw_rotation_guide(RecordingDraw2D(), cam, RECT, 1.0, dial)
 
     assert calls == [expected]
@@ -4158,7 +4192,7 @@ def test_multi_turn_hinge_range_has_no_false_endpoint_ticks_or_labels() -> None:
         ("slide", "_slide_range_projection", (-0.2, 0.3)),
     ),
 )
-def test_joint_range_projects_geometry_once_for_outline_and_core(
+def test_joint_range_projects_geometry_once(
     monkeypatch,
     joint_type: str,
     method_name: str,
@@ -4339,7 +4373,7 @@ def test_scalar_joint_gizmo_uses_a_joint_color_instead_of_xyz(body_name: str) ->
         interactive=True,
     )
     assert backend.frame.handle_color == pytest.approx(JOINT_HANDLE_COLOR)
-    assert backend.frame.outline_color == pytest.approx(JOINT_OUTLINE_COLOR)
+    assert backend.frame.outline_color is None
 
 
 @pytest.mark.physics
@@ -4406,3 +4440,53 @@ def test_inspector_omits_redundant_active_gizmo_status(monkeypatch) -> None:
     InspectorPanel()._gizmo_reason(PanelContext(session, None, gizmo=gizmo), node)
 
     assert lines == []
+
+
+def test_dimension_handles_round_square_corners_and_shaft_joins_and_keep_hit_regions():
+    from mojive.gizmo import DIMENSION_HANDLE_HALF_PT, dimension_axis_polygon
+
+    start, end = np.array((5.0, 7.0)), np.array((65.0, 7.0))
+    shape = dimension_axis_polygon(start, end, 1.0)
+    hit = dimension_axis_polygon(start, end, 1.0, for_hit_test=True)
+    assert hit.shape == (8, 2)
+    assert len(shape) > len(hit)
+    assert shape.min(axis=0) == pytest.approx(hit.min(axis=0))
+    assert shape.max(axis=0) == pytest.approx(hit.max(axis=0))
+    for corner in hit[2:6]:
+        # A small radius cuts each mathematical corner without changing the
+        # square footprint. Shaft shoulders use a smaller transition.
+        nearest = np.linalg.norm(shape - corner, axis=1).min()
+        assert 0.05 < nearest < DIMENSION_HANDLE_HALF_PT * 0.2
+    outer_cut = np.linalg.norm(shape - hit[2], axis=1).min()
+    for shoulder in hit[[1, 6]]:
+        assert 0.1 < np.linalg.norm(shape - shoulder, axis=1).min() < outer_cut * 0.75
+    assert shape[0] == pytest.approx(hit[0])
+    assert shape[-1] == pytest.approx(hit[-1])
+    scaled = dimension_axis_polygon(start * 4, end * 4, 4)
+    assert_paths_close(scaled / 4, shape)
+    border = dimension_axis_polygon(start, end, 1.0, outline_pt=0.75)
+    border_hit = dimension_axis_polygon(start, end, 1.0, outline_pt=0.75, for_hit_test=True)
+    for shoulder in border_hit[[1, 6]]:
+        assert np.linalg.norm(border - shoulder, axis=1).min() > 0.05
+    a, b = border, np.roll(border, -1, axis=0)
+    for x, y in shape:
+        crossings = ((a[:, 1] > y) != (b[:, 1] > y)) & (
+            x < (b[:, 0] - a[:, 0]) * (y - a[:, 1]) / (b[:, 1] - a[:, 1] + 1e-30) + a[:, 0]
+        )
+        assert crossings.sum() % 2 == 1
+
+
+def test_dimensions_keep_a_circular_origin_without_a_center_drag_handle():
+    gizmo = ObjectGizmo()
+    gizmo._frame.mode = GizmoMode.DIMENSIONS
+    gizmo._frame.handle_mask = handle_mask(*AXIS_HANDLES)
+    overlay = RecordingDraw2D()
+    gizmo._draw_flat(overlay, camera(), RECT, 1.0)
+    circles = [args for name, args, kwargs in overlay.calls if name == "circle_filled"]
+    assert len(circles) == 1
+    assert circles[-1][1] == pytest.approx(CENTER_RADIUS * SIZE_PT)
+    assert np.allclose(circles[-1][2], CENTER_COLOR)
+    assert GizmoHandle.SCREEN not in display_handles(gizmo._frame)
+    fills = [args for name, args, kwargs in overlay.calls if name == "concave_fill"]
+    assert len(fills) == len(AXIS_HANDLES)
+    assert all(not np.allclose(args[1], CONTRAST_EDGE_COLOR) for args in fills)

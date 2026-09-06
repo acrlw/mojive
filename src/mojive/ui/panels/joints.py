@@ -14,6 +14,7 @@ from . import (
     PanelContext,
     copy_state_vector,
     copyable_name_item,
+    padded_selectable,
     publish_focus_item_hint,
     searchable_ordered_list_header,
     value_slider,
@@ -128,7 +129,6 @@ class JointsPanel(Panel):
         name = j.name or f"joint{j.joint_id}"
         imgui.table_next_row()
         imgui.table_next_column()
-        imgui.align_text_to_frame_padding()
         selected_node = ctx.session.selected_node
         selected = bool(joint_node is not None and selected_node is joint_node)
         if joint_node is None:
@@ -137,7 +137,7 @@ class JointsPanel(Panel):
         else:
             label_width = max(1.0, imgui.get_content_region_avail().x)
             imgui.begin_disabled(not ctx.session.paused)
-            clicked, _ = imgui.selectable(
+            clicked, _ = padded_selectable(
                 f"{name}##joint-select-{j.joint_id}",
                 selected,
                 imgui.SelectableFlags_.none.value,

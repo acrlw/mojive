@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from .. import math3d
 from ..commands import ClearPerturb, Perturb
+from ..curves2d import CORNER_SMOOTHING, smooth_polygon_corners, smooth_turn_points
 from ..gizmo import (
     AXIS_COLORS,
     AXIS_SHAFT_HALF_PT,
@@ -19,13 +21,15 @@ from ..gizmo import (
     CONTRAST_EDGE_PT,
     GUIDE_CORE_COLOR,
     SIZE_PT,
+    axis_arrow_polygon,
     axis_handle_alpha,
+    masked_axis_start,
     world_scale,
 )
 from ..log import get_logger
 from ..types import CameraView
 from .camera import camera_basis
-from .draw2d import Draw2D
+from .draw2d import Draw2D, draw_drag_link
 
 log = get_logger("perturb")
 
@@ -209,14 +213,26 @@ def project(cam: CameraView, points, rect: tuple[float, float, float, float]) ->
     return np.stack([sx, sy, w[:, 0]], axis=1)
 
 
+@lru_cache(maxsize=128)
+def _outline_corner(radius_px: float, smoothing: float) -> np.ndarray:
+    template = np.asarray(smooth_turn_points(np.pi * 0.5, radius_px, smoothing))
+    template /= template[-1].copy()
+    template.setflags(write=False)
+    return template
+
+
 def rounded_loop(
     points,
     cam: CameraView,
     rect: tuple[float, float, float, float],
     radius_px: float,
     segments: int = OUTLINE_CORNER_SEGMENTS,
+    *,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> np.ndarray:
     loop = np.asarray(points, np.float64).reshape(-1, 3)
+    if radius_px <= 0 or len(loop) < 3:
+        return loop.copy()
     screen = project(cam, loop, rect)[:, :2]
     curves: list[np.ndarray] = []
     for index, corner in enumerate(loop):
@@ -230,8 +246,10 @@ def rounded_loop(
         trim_px = min(float(radius_px), 0.4 * incoming_px, 0.4 * outgoing_px)
         start = corner + (previous - corner) * (trim_px / incoming_px)
         end = corner + (following - corner) * (trim_px / outgoing_px)
-        t = np.linspace(0.0, 1.0, segments + 1, dtype=np.float64)[:, None]
-        curves.append((1.0 - t) ** 2 * start + 2.0 * (1.0 - t) * t * corner + t**2 * end)
+        # An affine map of the canonical turn matches straight edges through G3.
+        # Perspective projection preserves this contact wherever the plane is regular.
+        template = _outline_corner(max(trim_px, 1e-6), smoothing)
+        curves.append(start + template[:, :1] * (corner - start) + template[:, 1:] * (end - corner))
     return np.concatenate(curves, axis=0)
 
 
@@ -336,6 +354,8 @@ class PerturbController:
         rect: tuple[float, float, float, float],
         ui_scale: float = 1.0,
         style_scale: float = 1.0,
+        overlay_axes: bool = False,
+        smoothing: float = CORNER_SMOOTHING,
     ) -> MarkBudget:
         budget = self.budget
         budget.primitives = 0
@@ -362,10 +382,12 @@ class PerturbController:
         pose = current_pose(session, node) if node is not None else (None, None)
         if st.mode == "translate":
             layer_name = DRAG_LAYER
-            self._publish_drag(dd, st, pose, budget, ui_scale)
+            self._publish_drag(dd, st, pose, budget, ui_scale, smoothing)
         else:
             layer_name = MARK_LAYER
-            self._publish_mark(dd, st, pose, cam, rect, budget, ui_scale, style_scale)
+            self._publish_mark(
+                dd, st, pose, cam, rect, budget, ui_scale, style_scale, overlay_axes, smoothing
+            )
 
         if self._published and self._published != layer_name:
             self._clear(backend, self._published)
@@ -379,6 +401,7 @@ class PerturbController:
         pose: tuple[np.ndarray | None, np.ndarray | None],
         budget: MarkBudget,
         ui_scale: float,
+        smoothing: float = CORNER_SMOOTHING,
     ) -> None:
         layer = dd.layer(DRAG_LAYER, Occlusion.ALWAYS)
         grab = grab_point_now(st, *pose).astype(np.float32)
@@ -392,6 +415,7 @@ class PerturbController:
             width_px=DRAG_WIDTH_PX * ui_scale,
             radius_px=GRAB_RADIUS_PX * ui_scale,
             edge_px=CONTRAST_EDGE_PT * ui_scale,
+            smoothing=smoothing,
         )
         budget.primitives = 1
 
@@ -405,6 +429,8 @@ class PerturbController:
         budget: MarkBudget,
         ui_scale: float,
         style_scale: float = 1.0,
+        overlay_axes: bool = False,
+        smoothing: float = CORNER_SMOOTHING,
     ) -> None:
         layer = dd.layer(MARK_LAYER, Occlusion.ALWAYS)
         body_center = (
@@ -412,7 +438,6 @@ class PerturbController:
             if pose[0] is not None
             else np.asarray(st.target_pos, np.float64)
         )
-        axis_len = world_scale(cam, body_center, rect[3], SIZE_PT * style_scale)
         center, half = perturb_outline_box(cam, st, rect, body_center, style_scale)
 
         outline = silhouette_edges(center, st.target_mat, half, cam.eye)
@@ -423,6 +448,7 @@ class PerturbController:
                 cam,
                 rect,
                 self.outline_corner_radius_pt * style_scale,
+                smoothing=smoothing,
             )
             layer.polyline(
                 "perturb.outline.border",
@@ -439,22 +465,28 @@ class PerturbController:
                 closed=True,
             )
 
-        axis_width = 2.0 * AXIS_SHAFT_HALF_PT * ui_scale
-        shell_radius = CENTER_SHELL_RADIUS * SIZE_PT * ui_scale
-        rotation = np.asarray(st.target_mat, np.float64)
-        order = axis_draw_order(cam, rotation)
-        directions = rotation[:, order].T
-        colors = np.asarray(AXIS_COLORS)[list(order)].copy()
-        for row, direction in zip(colors, directions, strict=True):
-            row[3] = axis_handle_alpha(cam, body_center, direction)
-        layer.arrows(
-            "perturb.axes",
-            np.broadcast_to(body_center, (3, 3)),
-            body_center + directions * axis_len,
-            colors,
-            axis_width,
-            start_mask_px=shell_radius,
-        )
+        # The viewer submits rounded silhouettes through its backend-neutral UI
+        # draw list. Headless debug consumers retain the world-arrow fallback.
+        if overlay_axes:
+            layer.erase("perturb.axes")
+        else:
+            axis_len = world_scale(cam, body_center, rect[3], SIZE_PT * style_scale)
+            axis_width = 2.0 * AXIS_SHAFT_HALF_PT * ui_scale
+            shell_radius = CENTER_SHELL_RADIUS * SIZE_PT * ui_scale
+            rotation = np.asarray(st.target_mat, np.float64)
+            order = axis_draw_order(cam, rotation)
+            directions = rotation[:, order].T
+            colors = np.asarray(AXIS_COLORS)[list(order)].copy()
+            for row, direction in zip(colors, directions, strict=True):
+                row[3] = axis_handle_alpha(cam, body_center, direction)
+            layer.arrows(
+                "perturb.axes",
+                np.broadcast_to(body_center, (3, 3)),
+                body_center + directions * axis_len,
+                colors,
+                axis_width,
+                start_mask_px=shell_radius,
+            )
         layer.point(
             "perturb.center.edge",
             body_center,
@@ -467,7 +499,7 @@ class PerturbController:
             CENTER_COLOR,
             CENTER_RADIUS * SIZE_PT * ui_scale,
         )
-        budget.primitives = 2 * len(loop) + 5 if len(loop) else 5
+        budget.primitives = 2 * len(loop) + 2 + (0 if overlay_axes else 3)
 
     def _clear(self, backend: Any, only: str = "") -> None:
         dd = backend.debug
@@ -498,6 +530,63 @@ def fallback_segments(
     return scr, np.roll(scr, -1, axis=0)
 
 
+def draw_translation_link(
+    cam,
+    st,
+    rect,
+    pose,
+    overlay: Draw2D,
+    style_scale: float = 1.0,
+    *,
+    smoothing: float = CORNER_SMOOTHING,
+) -> None:
+    points = project(cam, (grab_point_now(st, *pose), grab_point_target(st)), rect)
+    if np.all(points[:, 2] > 0.0):
+        draw_drag_link(
+            overlay,
+            points[0, :2],
+            points[1, :2],
+            DRAG_RGBA,
+            DRAG_EDGE_RGBA,
+            DRAG_WIDTH_PX * style_scale,
+            GRAB_RADIUS_PX * style_scale,
+            CONTRAST_EDGE_PT * style_scale,
+            smoothing=smoothing,
+        )
+
+
+def draw_axes(
+    overlay: Draw2D,
+    cam: CameraView,
+    rect,
+    center,
+    rotation,
+    style_scale: float = 1.0,
+    *,
+    smoothing: float = CORNER_SMOOTHING,
+) -> None:
+    """Draw perturbation axes with the same G3 arrow silhouettes as transform handles."""
+    center = np.asarray(center, np.float64)
+    rotation = np.asarray(rotation, np.float64).reshape(3, 3)
+    length = world_scale(cam, center, rect[3], SIZE_PT * style_scale)
+    screen_center = project(cam, (center,), rect)[0]
+    if screen_center[2] <= 0:
+        return
+    for axis in axis_draw_order(cam, rotation):
+        direction = rotation[:, axis]
+        end = project(cam, (center + direction * length,), rect)[0]
+        if end[2] <= 0:
+            continue
+        start = masked_axis_start(
+            screen_center[:2], end[:2], CENTER_SHELL_RADIUS * SIZE_PT * style_scale
+        )
+        path = axis_arrow_polygon(start, end[:2], style_scale, smoothing=smoothing)
+        color = AXIS_COLORS[axis].copy()
+        color[3] *= axis_handle_alpha(cam, center, direction)
+        if len(path):
+            overlay.concave_fill(path, color)
+
+
 def draw_fallback(
     cam: CameraView,
     st: PerturbState,
@@ -509,7 +598,9 @@ def draw_fallback(
 ) -> None:
     a, _b = fallback_segments(cam, st, rect, center, style_scale)
     if len(a) and np.all(a[:, 2] > 0.0):
-        points = a[:, :2]
+        points = smooth_polygon_corners(
+            a[:, :2], OUTLINE_CORNER_RADIUS_PT * style_scale, tuple(range(len(a)))
+        )
         overlay.polyline(
             points, OUTLINE_BORDER_RGBA, OUTLINE_BORDER_WIDTH_PT * style_scale, closed=True
         )

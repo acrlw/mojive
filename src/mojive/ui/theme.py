@@ -184,6 +184,26 @@ class Theme:
 
 
 THEME = Theme()
+DEFAULT_CORNER_RADIUS = 4.8
+ROW_PADDING_X = 10.0
+ROW_PADDING_Y = 5.0
+CONTROL_ROUNDING = (
+    "window_rounding",
+    "child_rounding",
+    "frame_rounding",
+    "popup_rounding",
+    "tab_rounding",
+    "scrollbar_rounding",
+)
+
+
+def apply_corner_radius(imgui: Any, radius: float, ui_scale: float = 1.0) -> None:
+    """Scale native control radii together, using frame radius as the reference."""
+    factor = float(radius) * float(ui_scale)
+    style = imgui.get_style()
+    for name in CONTROL_ROUNDING:
+        setattr(style, name, factor)
+    style.grab_rounding = max(0.0, float(style.frame_rounding) - 2.0)
 
 
 def apply(imgui: Any, theme: Theme = THEME, ui_scale: float = 1.0) -> None:
@@ -248,23 +268,22 @@ def apply(imgui: Any, theme: Theme = THEME, ui_scale: float = 1.0) -> None:
     put(col.nav_cursor, theme.primary)
     put(col.drag_drop_target, theme.warning)
 
-    style.window_rounding = 3.0
-    style.child_rounding = 3.0
-    style.frame_rounding = 3.0
-    style.popup_rounding = 3.0
-    style.grab_rounding = 3.0
-    style.tab_rounding = 3.0
-    style.scrollbar_rounding = 6.0
+    apply_corner_radius(imgui, DEFAULT_CORNER_RADIUS)
+    style.selectable_rounding = 0.0
+    style.menu_item_rounding = 0.0
     style.window_border_size = 1.0
     style.frame_border_size = 0.0
-    style.window_padding = imgui.ImVec2(8.0, 8.0)
-    style.frame_padding = imgui.ImVec2(6.0, 3.0)
-    style.item_spacing = imgui.ImVec2(7.0, 5.0)
+    # Keep layout stable while the radius slider is dragged.
+    style.window_padding = imgui.ImVec2(10.0, 10.0)
+    style.frame_padding = imgui.ImVec2(10.0, 4.0)
+    style.item_spacing = imgui.ImVec2(10.0, 8.0)
     style.cell_padding = imgui.ImVec2(5.0, 2.0)
     style.indent_spacing = 16.0
     style.scrollbar_size = 12.0
+    # Native sliders also enforce a square minimum based on the inner track height.
     style.grab_min_size = 9.0
     style.window_title_align = imgui.ImVec2(0.0, 0.5)
 
     if ui_scale != 1.0:
         style.scale_all_sizes(ui_scale)
+        apply_corner_radius(imgui, DEFAULT_CORNER_RADIUS, ui_scale)

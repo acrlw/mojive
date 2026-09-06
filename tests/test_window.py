@@ -267,6 +267,7 @@ def test_scene_input_ignores_broad_imgui_keyboard_capture(monkeypatch):
     app._show_model_load_error = False
     app._open_resource_repair_popup = False
     app._open_rename_popup = False
+    app._popup_owned_frame = False
     app._consume_scene_pointer_until_release = False
     io = SimpleNamespace(want_capture_keyboard=True, want_text_input=False)
     monkeypatch.setattr(imgui, "get_io", lambda: io)

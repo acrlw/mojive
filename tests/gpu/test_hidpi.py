@@ -119,6 +119,23 @@ def test_hidpi_viewport_overlays_keep_a_hard_clip_after_splitter_collapse(monkey
         show_window=False,
     )
     io = imgui.get_io()
+    clip_rects = []
+    render = imgui.render
+
+    def capture_logical_clips():
+        render()
+        # OpenGL's ImGui adapter scales clip rectangles in place on submission;
+        # WebGPU leaves them in points. Inspect the shared pre-submission domain.
+        clip_rects.clear()
+        window = imgui.internal.find_window_by_name("Playback###viewport_playback")
+        if window is not None and window.active:
+            clip_rects.extend(
+                (item.clip_rect.x, item.clip_rect.y, item.clip_rect.z, item.clip_rect.w)
+                for item in window.draw_list.cmd_buffer
+                if item.elem_count
+            )
+
+    monkeypatch.setattr(imgui, "render", capture_logical_clips)
     try:
         node = next(item for item in viewer.session.nodes if item.name == "02_prismatic")
         assert viewer.session.submit(cmd.Select(node.object_id))
@@ -142,23 +159,16 @@ def test_hidpi_viewport_overlays_keep_a_hard_clip_after_splitter_collapse(monkey
         viewport_right = viewport_x + viewport_width
         viewport_bottom = viewport_y + viewport_height
         assert viewport_width < 80.0
-        clip_left, clip_top = viewer.window.points_to_pixels((viewport_x, viewport_y))
-        clip_right, clip_bottom = viewer.window.points_to_pixels((viewport_right, viewport_bottom))
-
-        clipped_windows = [imgui.internal.find_window_by_name("Playback###viewport_playback")]
         for hit in viewer.app.gizmo.joint_limit_hits:
             name = f"Joint {hit.label}###joint_limit_{hit.joint_id}_{hit.label[:3]}"
             window = imgui.internal.find_window_by_name(name)
             assert window is None or not window.active, name
-        for window in clipped_windows:
-            assert window is not None and window.active
-            commands = [item for item in window.draw_list.cmd_buffer if item.elem_count]
-            assert commands
-            for item in commands:
-                assert item.clip_rect.x >= clip_left - 1.0
-                assert item.clip_rect.y >= clip_top - 1.0
-                assert item.clip_rect.z <= clip_right + 1.0
-                assert item.clip_rect.w <= clip_bottom + 1.0
+        assert clip_rects
+        for left, top, right, bottom in clip_rects:
+            assert left >= viewport_x - 1.0
+            assert top >= viewport_y - 1.0
+            assert right <= viewport_right + 1.0
+            assert bottom <= viewport_bottom + 1.0
     finally:
         io.add_mouse_button_event(0, False)
         viewer.release()

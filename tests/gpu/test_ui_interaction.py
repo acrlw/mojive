@@ -137,6 +137,28 @@ def item_rect(v, function_name, label):
     return found[-1]
 
 
+def reveal_item(v, function_name, label):
+    """Scroll the owning native window before clicking a responsive form item."""
+    from imgui_bundle import imgui
+
+    original = getattr(imgui, function_name)
+
+    def spy(item_label, *args, **kwargs):
+        result = original(item_label, *args, **kwargs)
+        if item_label == label:
+            imgui.set_scroll_here_y(0.5)
+        return result
+
+    setattr(imgui, function_name, spy)
+    try:
+        v.sync()
+    finally:
+        setattr(imgui, function_name, original)
+    v.sync()
+    v.sync()
+    return item_rect(v, function_name, label)
+
+
 def item_bounds(v, function_name, label):
     from imgui_bundle import imgui
 
@@ -164,6 +186,7 @@ def test_viewport_gets_real_estate(viewer):
     pw, ph = viewer.window.size_points
     assert w > 200 and h > 200
     assert (w * h) / (pw * ph) > 0.20
+    _assert_viewport_has_no_padding(viewer)
 
 
 def test_interactive_entry_uses_adapter_camera_hint(viewer):
@@ -380,8 +403,49 @@ def test_hierarchy_search_clear_button_resets_filter(viewer):
         point = item_rect(viewer, "invisible_button", "##clear_filter")
         click(viewer, imgui.get_io(), point)
         assert panel._filter == ""
+        viewer.sync()  # Native keyboard activation is queued for the next frame.
+        imgui.get_io().add_input_characters_utf8("joint")
+        viewer.sync()
+        assert panel._filter == "joint"
+        imgui.get_io().add_key_event(imgui.Key.escape, True)
+        viewer.sync()
+        imgui.get_io().add_key_event(imgui.Key.escape, False)
+        viewer.sync()
     finally:
         panel._filter = ""
+
+
+def test_hierarchy_reselect_from_scene_clears_an_explicit_batch(viewer):
+    from imgui_bundle import imgui
+
+    from mojive import commands as cmd
+
+    panel = viewer.app.panels.get("Hierarchy")
+    targets = [node for node in viewer.session.nodes if node.object_id][:2]
+    activate_panel(viewer, "Hierarchy")
+    io = imgui.get_io()
+    modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
+    try:
+        for index, node in enumerate(targets):
+            panel._filter = node.name
+            point = item_rect(viewer, "invisible_button", f"##hierarchy-node-{node.node_id}")
+            io.add_key_event(modifier, bool(index))
+            click(viewer, io, point)
+        io.add_key_event(modifier, False)
+        viewer.sync()
+        assert panel._batch_selected == {node.node_id for node in targets}
+        # The primary ID stays unchanged, but an unmodified scene selection
+        # still replaces the explicitly selected hierarchy batch.
+        assert viewer.session.selected_node.node_id == targets[-1].node_id
+        viewer.session.submit(cmd.Select(targets[-1].object_id))
+        viewer.sync()
+        assert panel._batch_selected == set()
+    finally:
+        io.add_key_event(modifier, False)
+        panel._filter = ""
+        viewer.session.submit(cmd.Select(0))
+        viewer.sync()
+        viewer.sync()  # Let the unfiltered tree restore its scrollbar before the next interaction.
 
 
 def test_hierarchy_visibility_toggle_does_not_select_the_row(viewer):
@@ -442,9 +506,14 @@ def test_keyframe_timeline_owns_the_wheel_while_zooming(viewer):
     activate_panel(viewer, "Keyframes")
     viewer.sync()
     viewer.sync()
-    point = item_rect(viewer, "invisible_button", "##keyframe-dope-sheet")
+    bounds = item_bounds(viewer, "invisible_button", "##keyframe-dope-sheet")
     window = imgui.internal.find_window_by_name("Keyframes")
     assert window is not None
+    clip = window.inner_clip_rect
+    point = (
+        (max(bounds[0], clip.min.x) + min(bounds[2], clip.max.x)) * 0.5,
+        (max(bounds[1], clip.min.y) + min(bounds[3], clip.max.y)) * 0.5,
+    )
     io = imgui.get_io()
     io.add_mouse_pos_event(*point)
     viewer.sync()
@@ -878,22 +947,22 @@ def test_material_inspector_exposes_instance_and_shared_controls(viewer):
     viewer.session.submit(cmd.Select(target.object_id))
     activate_panel(viewer, "Inspector")
     _scroll_panel(viewer, "Inspector", 100.0)
-    header = item_rect(viewer, "collapsing_header", "material")
+    header = reveal_item(viewer, "collapsing_header", "material")
     click(viewer, imgui.get_io(), header)
 
     item_rect(viewer, "input_text", "##entity_name")
     item_rect(viewer, "color_edit4", "##geometry_instance_color")
     _scroll_panel(viewer, "Inspector", -6.0)
-    contact = item_rect(viewer, "collapsing_header", "contact properties")
+    contact = reveal_item(viewer, "collapsing_header", "contact properties")
     click(viewer, imgui.get_io(), contact)
     _scroll_panel(viewer, "Inspector", -5.0)
     item_rect(viewer, "drag_float3", "##contact_friction")
     item_rect(viewer, "combo", "##contact_dimension")
     item_rect(viewer, "input_int", "##collision_type_mask")
     item_rect(viewer, "begin_combo", "##assigned_material")
-    item_rect(viewer, "small_button", "New material##create material-0")
-    item_rect(viewer, "small_button", "Duplicate material##material actions-0")
-    item_rect(viewer, "small_button", "Import texture##texture import-0")
+    item_rect(viewer, "button", "New material##create material-0")
+    item_rect(viewer, "button", "Duplicate material##material actions-0")
+    item_rect(viewer, "button", "Import texture##texture import-0")
     item_rect(viewer, "color_edit4", "##material_base_color")
     item_rect(viewer, "begin_combo", "##material_preset")
     item_rect(viewer, "drag_float", "##material_specular")
@@ -1002,6 +1071,55 @@ def test_floating_panel_over_the_viewport_blocks_camera_input(viewer):
         viewer.sync()
 
 
+def _assert_viewport_has_no_padding(viewer):
+    from imgui_bundle import imgui
+
+    from mojive.ui import theme
+
+    previous = None
+    original_image = imgui.image
+    image_clips = []
+
+    def record_image(*args, **kwargs):
+        if imgui.internal.get_current_window().name == "Viewport":
+            draw = imgui.get_window_draw_list()
+            lo, hi = draw.get_clip_rect_min(), draw.get_clip_rect_max()
+            image_clips.append((lo.x, lo.y, hi.x, hi.y))
+        return original_image(*args, **kwargs)
+
+    imgui.image = record_image
+    try:
+        for radius in (0.0, theme.DEFAULT_CORNER_RADIUS, 16.0):
+            theme.apply_corner_radius(imgui, radius)
+            for _ in range(3):
+                viewer.sync()
+            window = imgui.internal.find_window_by_name("Viewport")
+            assert (window.window_padding.x, window.window_padding.y) == (0.0, 0.0)
+            origin = viewer.app._viewport_panel_position
+            size = viewer.app._viewport_panel_size
+            inner = window.inner_rect if window.dock_node else window.inner_clip_rect
+            assert origin == pytest.approx((inner.min.x, inner.min.y), abs=1e-4)
+            assert size == pytest.approx(
+                (inner.max.x - inner.min.x, inner.max.y - inner.min.y), abs=1e-4
+            )
+            # Docked images cover the content edge; floating images leave the
+            # native resize outline outside their actual drawing clip.
+            assert image_clips[-1] == pytest.approx(
+                (inner.min.x, inner.min.y, inner.max.x, inner.max.y), abs=1e-4
+            )
+            if window.dock_node is None:
+                assert inner.min.x > window.pos.x
+                assert inner.max.x < window.pos.x + window.size.x
+                assert inner.max.y < window.pos.y + window.size.y
+            assert viewer.app._viewport_rect == pytest.approx((*origin, *size), abs=1e-4)
+            if previous is not None:
+                assert (*origin, *size) == pytest.approx(previous)
+            previous = (*origin, *size)
+    finally:
+        imgui.image = original_image
+        theme.apply_corner_radius(imgui, theme.DEFAULT_CORNER_RADIUS)
+
+
 def test_floating_viewport_separates_window_and_scene_gestures(viewer):
     from imgui_bundle import imgui
 
@@ -1019,6 +1137,7 @@ def test_floating_viewport_separates_window_and_scene_gestures(viewer):
         v.sync()
         viewport = imgui.internal.find_window_by_name("Viewport")
         assert viewport.dock_node is None
+        _assert_viewport_has_no_padding(v)
 
         window_before = (viewport.pos.x, viewport.pos.y)
         yaw_before = v.app.camera.yaw
@@ -1047,6 +1166,22 @@ def test_floating_viewport_separates_window_and_scene_gestures(viewer):
         assert viewport.size.x > size_before[0] + 30.0
         assert viewport.size.y == pytest.approx(size_before[1])
         assert v.app.camera.yaw == pytest.approx(yaw_before)
+
+        panel_size = v.app._viewport_panel_size
+        original_begin = v.app._begin_viewport_panel
+
+        def move_partly_offscreen():
+            imgui.set_next_window_pos((-50.0, 35.0))
+            original_begin()
+
+        v.app._begin_viewport_panel = move_partly_offscreen
+        try:
+            v.sync()
+            v.sync()
+            assert v.app._viewport_panel_position[0] < 0.0
+            assert v.app._viewport_panel_size == pytest.approx(panel_size)
+        finally:
+            v.app._begin_viewport_panel = original_begin
     finally:
         v.release()
         imgui.set_current_context(viewer.window._imgui_context)
@@ -1110,6 +1245,14 @@ def test_click_picks_the_object_actually_under_the_cursor(viewer):
     assert candidates
     _dist, target, (px, py) = min(candidates, key=lambda t: t[0])
 
+    hierarchy = viewer.app.panels.get("Hierarchy")
+    other = next(n for n in viewer.session.nodes if n.object_id and n is not target)
+    hierarchy._filter = other.name
+    activate_panel(viewer, "Hierarchy")
+    click(viewer, io, item_rect(viewer, "invisible_button", f"##hierarchy-node-{other.node_id}"))
+    assert hierarchy._batch_selected == {other.node_id}
+    hierarchy._filter = ""
+
     io.add_mouse_pos_event(px, py)
     viewer.sync()
     io.add_mouse_button_event(0, True)
@@ -1121,6 +1264,7 @@ def test_click_picks_the_object_actually_under_the_cursor(viewer):
     got = viewer.session.selected_node
     assert got is not None
     assert got.object_id == target.object_id
+    assert hierarchy._batch_selected == set()
 
     img = viewer.app._viewport_image
     assert img is not None
@@ -1596,11 +1740,8 @@ def test_inspector_transform_resets_and_copies_without_gesture_conflicts(free_bo
     position_label = item_bounds(v, "text", "position")
     x_axis = item_bounds(v, "button", f"X##position_0_{node.node_id}")
     x_value = item_bounds(v, "drag_float", f"##position_0_{node.node_id}")
-    assert position_label[2] < x_axis[0]
-    assert (position_label[1] + position_label[3]) * 0.5 == pytest.approx(
-        (x_axis[1] + x_axis[3]) * 0.5,
-        abs=0.1,
-    )
+    assert position_label[2] <= x_axis[0] or position_label[3] <= x_axis[1]
+    assert x_axis[1::2] == pytest.approx(x_value[1::2], abs=0.1)
     # The axis badge and value are one compound field: their square inner
     # corners meet exactly, while only the outer corners stay rounded.
     assert x_value[0] - x_axis[2] == pytest.approx(0.0, abs=0.1)
@@ -1608,7 +1749,9 @@ def test_inspector_transform_resets_and_copies_without_gesture_conflicts(free_bo
     from mojive.ui.panels.inspector import _mix_color
     from mojive.ui.theme import THEME
 
+    reveal_item(v, "button", f"X##linear velocity_0_{node.node_id}")
     readonly_x = item_bounds(v, "button", f"X##linear velocity_0_{node.node_id}")
+    assert readonly_x[0] == pytest.approx(x_axis[0], abs=0.1)
     image = snap(v)
     expected_axis = np.rint(
         np.asarray(_mix_color(THEME.bg_frame, THEME.axis_color(0), 0.56)[:3]) * 255.0
@@ -1624,7 +1767,7 @@ def test_inspector_transform_resets_and_copies_without_gesture_conflicts(free_bo
         median = np.median(sample.reshape(-1, 3), axis=0)
         assert np.max(np.abs(median - expected_axis)) <= 2
 
-    x_reset = item_rect(v, "button", f"X##position_0_{node.node_id}")
+    x_reset = reveal_item(v, "button", f"X##position_0_{node.node_id}")
     click(v, io, x_reset)
     v.sync()
     got = np.asarray(v.session.frame.body_xpos[node.body_index], np.float64)
@@ -3094,9 +3237,9 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style, monkeyp
             self.sectors += 1
             return self.inner.triangle_fan_fill(points, color)
 
-        def fringed_concave_fill(self, points, color):
+        def indexed_fill(self, points, indices, color, **kwargs):
             self.arc_strokes += 1
-            return self.inner.fringed_concave_fill(points, color)
+            return self.inner.indexed_fill(points, indices, color, **kwargs)
 
         def polyline(self, points, color, width, *, closed=False):
             if closed:

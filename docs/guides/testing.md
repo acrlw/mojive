@@ -69,6 +69,13 @@ Use the existing target that demonstrates the behavior: examples include `make g
 the relevant behavior, capture the result under `output/`, and close only the viewer you started.
 A scripted gallery can supply the evidence when it covers the same behavior.
 
+`make ui-layout-audit` captures Camera, Settings, Inspector, Keyframes, and menus in English
+and Chinese at normal and 150% UI scale. It checks horizontal containment, complete Shadow
+quality labels, and Transform height after reflow. Images and measured bounds are written to
+`output/ui-layout-audit/`; inspect the images as well as the assertions. The native input
+regressions in `tests/gpu/test_ui_layout_input.py` exercise dock splitters, popup dismissal,
+checkbox label/keyboard activation, and the timeline's distinct wheel and right-drag gestures.
+
 Golden comparison and baseline updates are separate actions. Scope them to the affected cases:
 
 ```bash

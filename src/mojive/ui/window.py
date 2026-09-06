@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from ..input import add_physical_mouse_button_event
 from ..log import get_logger
 from . import fonts, native_drop
 from . import theme as theme_mod
@@ -306,8 +307,8 @@ class Window:
 
         self._impl = GlfwRenderer(self._window)
         # imgui_bundle still passes the deprecated GLFW window argument.
-        # Replace only its clipboard callbacks; input and GL rendering remain upstream.
         _install_glfw_clipboard_callbacks(glfw, imgui)
+        glfw.set_mouse_button_callback(self._window, self._on_mouse_button)
         glfw.set_drop_callback(self._window, self._on_file_drop)
         self._native_drop_token = native_drop.install(glfw, self._window, self)
 
@@ -319,6 +320,9 @@ class Window:
         self.dockspace_id = 0
         self._layout_done = False
         self.latch = ResizeLatch()
+
+    def _on_mouse_button(self, _window: Any, button: int, action: int, _mods: int) -> None:
+        add_physical_mouse_button_event(imgui.get_io(), button, action == glfw.PRESS)
 
     def _load_fonts(self, io) -> None:
         self._font_atlas_scale = self._style_scale
@@ -492,6 +496,8 @@ class Window:
         self._refresh_scales()
         self._sync_style_scale()
         self._impl.process_inputs()
+        # NewFrame may dismiss a popup. Its closing event still belongs to UI.
+        self.popup_owned_frame = bool(self._imgui_context.open_popup_stack)
         imgui.new_frame()
 
     def begin_dockspace(self) -> None:

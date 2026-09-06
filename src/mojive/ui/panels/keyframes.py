@@ -11,27 +11,40 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, KeyframeInfo, KeyframeProperties
+from ...curves2d import CORNER_SMOOTHING
 from ...gizmo import _rounded_polygon_corners
-from ..draw2d import ImguiDraw2D
+from ..draw2d import ImguiDraw2D, text_line_y
 from ..theme import with_alpha
-from ..viewport_widgets import ToolHint
+from ..viewport_widgets import ToolHint, draw_playback_glyph
 from . import Panel, PanelContext, begin_kv_table, button_row_layout, button_width
 
 _MIN_TIMELINE_SPAN = 1e-6
 _COMMAND_HEIGHT_PT = 28.0
 _COMMAND_ICON_PT = 16.0
 _MARKER_SPACING_FACTOR = 1.5
+_COMMAND_PLAYBACK_KINDS = {
+    "first": "previous",
+    "previous": "reverse",
+    "next": "play",
+    "last": "step",
+    "play": "play",
+    "pause": "pause",
+    "stop": "stop",
+}
 
 
 @lru_cache(maxsize=256)
 def _rounded_command_icon_path(
     points: tuple[tuple[float, float], ...],
     radius: float,
+    smoothing: float = CORNER_SMOOTHING,
 ) -> tuple[tuple[float, float], ...]:
     return tuple(
         map(
             tuple,
-            _rounded_polygon_corners(points, radius, tuple(range(len(points))), segments=5),
+            _rounded_polygon_corners(
+                points, radius, tuple(range(len(points))), smoothing=smoothing
+            ),
         )
     )
 
@@ -42,7 +55,7 @@ def timeline_status_hints(translate) -> tuple[ToolHint, ...]:
     return (
         ToolHint("mouse", "left", translate("Move playhead"), hint_id="keyframes.playhead"),
         ToolHint("mouse", "wheel", translate("Zoom"), hint_id="keyframes.zoom"),
-        ToolHint("mouse", "middle", translate("Pan"), hint_id="keyframes.pan"),
+        ToolHint("mouse", "right", translate("Pan"), hint_id="keyframes.pan"),
     )
 
 
@@ -162,7 +175,9 @@ def decimated_marker_ids(
     return (*buckets.values(), *dict.fromkeys(priority_visible))
 
 
-def _draw_command_icon(draw, center, kind: str, color, scale: float) -> None:
+def _draw_command_icon(
+    draw, center, kind: str, color, scale: float, *, smoothing: float = CORNER_SMOOTHING
+) -> None:
     """Draw one 16 pt transport or keyframe glyph."""
 
     x, y = (float(center[0]), float(center[1]))
@@ -170,83 +185,70 @@ def _draw_command_icon(draw, center, kind: str, color, scale: float) -> None:
 
     def rounded_fill(points, *, radius: float = 0.75) -> None:
         draw.fringed_concave_fill(
-            _rounded_command_icon_path(tuple(points), radius * s),
+            tuple(
+                (x + px, y + py)
+                for px, py in _rounded_command_icon_path(
+                    tuple((px * s, py * s) for px, py in points), radius * s, smoothing
+                )
+            ),
             color,
         )
 
-    if kind == "record":
-        draw.circle_filled((x, y), 4.5 * s, color, segments=20)
-    elif kind == "play":
-        rounded_fill(((x - 4.5 * s, y - 6.0 * s), (x + 6.0 * s, y), (x - 4.5 * s, y + 6.0 * s)))
-    elif kind == "pause":
-        draw.rect_filled(
-            (x - 5.0 * s, y - 6.0 * s),
-            (x - 1.5 * s, y + 6.0 * s),
-            color,
-            rounding=0.75 * s,
+    if kind in _COMMAND_PLAYBACK_KINDS:
+        draw_playback_glyph(
+            draw, center, color, s * 0.85, _COMMAND_PLAYBACK_KINDS[kind], smoothing=smoothing
         )
-        draw.rect_filled(
-            (x + 1.5 * s, y - 6.0 * s),
-            (x + 5.0 * s, y + 6.0 * s),
-            color,
-            rounding=0.75 * s,
-        )
-    elif kind == "stop":
-        draw.rect_filled(
-            (x - 5.5 * s, y - 5.5 * s),
-            (x + 5.5 * s, y + 5.5 * s),
-            color,
-            rounding=1.0 * s,
-        )
-    elif kind in ("first", "previous"):
-        rounded_fill(((x - 5.5 * s, y), (x + 3.5 * s, y - 6.0 * s), (x + 3.5 * s, y + 6.0 * s)))
-        if kind == "first":
-            draw.rect_filled(
-                (x - 7.0 * s, y - 6.0 * s),
-                (x - 5.2 * s, y + 6.0 * s),
-                color,
-                rounding=0.65 * s,
-            )
-    elif kind in ("next", "last"):
-        rounded_fill(((x + 5.5 * s, y), (x - 3.5 * s, y - 6.0 * s), (x - 3.5 * s, y + 6.0 * s)))
-        if kind == "last":
-            draw.rect_filled(
-                (x + 5.2 * s, y - 6.0 * s),
-                (x + 7.0 * s, y + 6.0 * s),
-                color,
-                rounding=0.65 * s,
-            )
+    elif kind == "record":
+        draw.circle_filled((x, y), 4.5 * s, color)
     elif kind == "clear":
-        draw.line((x - 5.0 * s, y - 5.0 * s), (x + 5.0 * s, y + 5.0 * s), color, 1.8 * s)
-        draw.line((x + 5.0 * s, y - 5.0 * s), (x - 5.0 * s, y + 5.0 * s), color, 1.8 * s)
+        draw.line(
+            (x - 5.0 * s, y - 5.0 * s),
+            (x + 5.0 * s, y + 5.0 * s),
+            color,
+            1.8 * s,
+            cap="round",
+            smoothing=smoothing,
+        )
+        draw.line(
+            (x + 5.0 * s, y - 5.0 * s),
+            (x - 5.0 * s, y + 5.0 * s),
+            color,
+            1.8 * s,
+            cap="round",
+            smoothing=smoothing,
+        )
     elif kind in ("key-previous", "key-next"):
         direction = -1.0 if kind == "key-previous" else 1.0
-        diamond_x = x - direction * 2.5 * s
+        diamond_x = -direction * 2.5
         rounded_fill(
             (
-                (diamond_x, y - 4.5 * s),
-                (diamond_x + 4.5 * s, y),
-                (diamond_x, y + 4.5 * s),
-                (diamond_x - 4.5 * s, y),
+                (diamond_x, -4.5),
+                (diamond_x + 4.5, 0.0),
+                (diamond_x, 4.5),
+                (diamond_x - 4.5, 0.0),
             ),
             radius=0.55,
         )
         rounded_fill(
             (
-                (x + direction * 7.0 * s, y),
-                (x + direction * 3.5 * s, y - 3.5 * s),
-                (x + direction * 3.5 * s, y + 3.5 * s),
+                (direction * 7.0, 0.0),
+                (direction * 3.5, -3.5),
+                (direction * 3.5, 3.5),
             )
         )
     elif kind == "view":
         draw.rect(
-            (x - 7.0 * s, y - 5.0 * s), (x + 7.0 * s, y + 5.0 * s), color, 1.5 * s, rounding=1.5 * s
-        )
-        draw.circle_filled((x, y), 2.0 * s, color, segments=16)
-    else:
-        draw.convex_fill(
-            ((x, y - 6.0 * s), (x + 6.0 * s, y), (x, y + 6.0 * s), (x - 6.0 * s, y)),
+            (x - 7.0 * s, y - 5.0 * s),
+            (x + 7.0 * s, y + 5.0 * s),
             color,
+            1.5 * s,
+            rounding=1.5 * s,
+            smoothing=smoothing,
+        )
+        draw.circle_filled((x, y), 2.0 * s, color)
+    else:
+        rounded_fill(
+            ((0.0, -6.0), (6.0, 0.0), (0.0, 6.0), (-6.0, 0.0)),
         )
 
 
@@ -260,12 +262,14 @@ def _command_button(
     label: str = "",
     enabled: bool = True,
     selected: bool = False,
+    smoothing: float = CORNER_SMOOTHING,
+    width: float | None = None,
 ) -> bool:
     """Render a compact 28 pt semantic button with a vector glyph."""
 
     scale = float(scale)
     height = _COMMAND_HEIGHT_PT * scale
-    width = _command_button_width(label, scale)
+    width = _command_button_width(label, scale) if width is None else width
     if not enabled:
         imgui.begin_disabled()
     origin = imgui.get_cursor_screen_pos()
@@ -289,22 +293,29 @@ def _command_button(
         if hovered or selected
         else theme.text
     )
-    draw = ImguiDraw2D()
+    draw = ImguiDraw2D(corner_smoothing=smoothing)
     lo = (float(origin.x), float(origin.y))
     hi = (lo[0] + width, lo[1] + height)
-    draw.rect_filled(lo, hi, background, rounding=3.0 * scale)
+    draw.rect_filled(lo, hi, background, rounding=float(imgui.get_style().frame_rounding))
     icon_center = (lo[0] + 14.0 * scale, lo[1] + height * 0.5)
     icon_color = theme.danger if kind == "record" and enabled else foreground
-    _draw_command_icon(draw, icon_center, kind, icon_color, scale)
+    _draw_command_icon(draw, icon_center, kind, icon_color, scale, smoothing=smoothing)
     if label:
-        text_height = float(imgui.calc_text_size(label).y)
         draw.text(
-            (lo[0] + 31.0 * scale, lo[1] + (height - text_height) * 0.5),
+            (lo[0] + 31.0 * scale, text_line_y(draw, lo[1] + height * 0.5)),
             foreground,
             label,
         )
     imgui.set_item_tooltip(tooltip)
     return bool(clicked and enabled)
+
+
+def _toolbar_status(text: str, color, scale: float) -> None:
+    draw = ImguiDraw2D()
+    origin = imgui.get_cursor_screen_pos()
+    height = _COMMAND_HEIGHT_PT * scale
+    imgui.dummy((draw.text_size(text)[0], height))
+    draw.text((origin.x, text_line_y(draw, origin.y + height * 0.5)), color, text)
 
 
 def _command_button_width(label: str, scale: float) -> float:
@@ -370,6 +381,7 @@ class KeyframesPanel(Panel):
             imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
             imgui.table_next_row()
             imgui.table_next_column()
+            imgui.align_text_to_frame_padding()
             imgui.text_disabled(ctx.tr("model"))
             imgui.table_next_column()
             slot = model_ids.index(self._model_id)
@@ -521,15 +533,14 @@ class KeyframesPanel(Panel):
         if inline[item_index]:
             imgui.same_line()
         status = self._take_status(ctx, take_times)
-        if recording:
-            imgui.text_colored(imgui.ImVec4(*ctx.theme.danger), status)
-        elif playing:
-            imgui.text_colored(
-                imgui.ImVec4(*ctx.theme.primary_bright),
-                status,
-            )
-        else:
-            imgui.text_disabled(status)
+        color = (
+            ctx.theme.danger
+            if recording
+            else ctx.theme.primary_bright
+            if playing
+            else ctx.theme.text_disabled
+        )
+        _toolbar_status(status, color, scale)
         imgui.pop_style_var()
 
     @staticmethod
@@ -616,7 +627,7 @@ class KeyframesPanel(Panel):
         item_index += 1
         if inline[item_index]:
             imgui.same_line()
-        imgui.text_disabled(status)
+        _toolbar_status(status, ctx.theme.text_disabled, scale)
         imgui.pop_style_var()
 
     def _draw_dope_sheet(
@@ -628,9 +639,9 @@ class KeyframesPanel(Panel):
         editable: bool,
     ) -> None:
         scale = ctx.style_scale
-        available = max(260.0 * scale, float(imgui.get_content_region_avail().x))
+        available = max(1.0, float(imgui.get_content_region_avail().x))
         height = 154.0 * scale
-        channel_width = min(150.0 * scale, max(92.0 * scale, available * 0.25))
+        channel_width = min(150.0 * scale, available * 0.45)
         ruler_height = 27.0 * scale
         lo_vec = imgui.get_cursor_screen_pos()
         lo = (float(lo_vec.x), float(lo_vec.y))
@@ -640,8 +651,7 @@ class KeyframesPanel(Panel):
         time_width = max(1.0, time_hi - time_lo)
 
         flags = (
-            imgui.ButtonFlags_.mouse_button_left.value
-            | imgui.ButtonFlags_.mouse_button_middle.value
+            imgui.ButtonFlags_.mouse_button_left.value | imgui.ButtonFlags_.mouse_button_right.value
         )
         imgui.invisible_button("##keyframe-dope-sheet", imgui.ImVec2(available, height), flags)
         hovered = imgui.is_item_hovered()
@@ -674,7 +684,7 @@ class KeyframesPanel(Panel):
             self._view_start, self._view_end = zoom_timeline_range(
                 self._view_start, self._view_end, anchor, float(io.mouse_wheel)
             )
-        if over_timeline and imgui.is_mouse_dragging(imgui.MouseButton_.middle):
+        if imgui.is_item_active() and imgui.is_mouse_dragging(imgui.MouseButton_.right):
             shift = -float(io.mouse_delta.x) * (self._view_end - self._view_start) / time_width
             self._view_start += shift
             self._view_end += shift
@@ -812,16 +822,22 @@ class KeyframesPanel(Panel):
             tick += step
             iterations += 1
 
-        overlay.text(
-            (lo[0] + 10.0 * ctx.style_scale, marker_y - imgui.get_font_size() * 0.5),
-            theme.text,
-            ctx.tr("Model Keyframes"),
-        )
-        overlay.text(
-            (lo[0] + 10.0 * ctx.style_scale, take_y - imgui.get_font_size() * 0.5),
-            theme.text,
-            ctx.tr("Recorded Take"),
-        )
+        inset = 10.0 * ctx.style_scale
+        label_width = max(1.0, time_lo - lo[0] - 2.0 * inset)
+        draw_list = imgui.get_window_draw_list()
+        draw_list.push_clip_rect((lo[0], ruler_bottom), (time_lo, hi[1]), True)
+        for center_y, label in ((marker_y, "Model Keyframes"), (take_y, "Recorded Take")):
+            text = ctx.tr(label)
+            size = imgui.calc_text_size(text, wrap_width=label_width)
+            draw_list.add_text(
+                imgui.get_font(),
+                imgui.get_font_size(),
+                (lo[0] + inset, center_y - size.y * 0.5),
+                imgui.get_color_u32(imgui.Col_.text),
+                text,
+                wrap_width=label_width,
+            )
+        draw_list.pop_clip_rect()
 
         playhead_x = timeline_time_to_x(
             self._playhead, self._view_start, self._view_end, time_lo, time_hi
@@ -829,10 +845,12 @@ class KeyframesPanel(Panel):
         if time_lo <= playhead_x <= time_hi:
             overlay.line((playhead_x, lo[1]), (playhead_x, hi[1]), theme.danger, 1.5)
             overlay.convex_fill(
-                (
-                    (playhead_x - 5.0, lo[1]),
-                    (playhead_x + 5.0, lo[1]),
-                    (playhead_x, lo[1] + 7.0),
+                tuple(
+                    (playhead_x + px, lo[1] + py)
+                    for px, py in _rounded_command_icon_path(
+                        ((-5.0, 0.0), (5.0, 0.0), (0.0, 7.0)),
+                        0.6,
+                    )
                 ),
                 theme.danger,
             )
@@ -856,11 +874,17 @@ class KeyframesPanel(Panel):
                 if selected
                 else theme.text_disabled
             )
-            points = (
-                (x, marker_y - marker_radius),
-                (x + marker_radius, marker_y),
-                (x, marker_y + marker_radius),
-                (x - marker_radius, marker_y),
+            points = tuple(
+                (x + px, marker_y + py)
+                for px, py in _rounded_command_icon_path(
+                    (
+                        (0.0, -marker_radius),
+                        (marker_radius, 0.0),
+                        (0.0, marker_radius),
+                        (-marker_radius, 0.0),
+                    ),
+                    0.6 * ctx.style_scale,
+                )
             )
             overlay.convex_fill(points, fill)
             overlay.polyline(points, theme.bg_window, 1.0, closed=True)

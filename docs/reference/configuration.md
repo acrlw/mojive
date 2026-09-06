@@ -117,6 +117,10 @@ Explicit `ViewerConfig` values apply to that viewer instance. Changes made in Se
 as desktop preferences for later viewers created without an explicit config. Runtime
 `configure_*` calls are also instance-local unless passed `persist=True`.
 
+Input hooks and bindings use physical keys and mouse buttons. On macOS, `ctrl` means Control
+and `super` means Command; Control plus left click remains a left-button gesture. Native macOS
+text-editing shortcuts remain enabled inside ImGui text fields.
+
 The Dimensions tool deliberately has no default shortcut, so it does not take another key from an
 embedding application. It can be selected and optionally bound from code:
 

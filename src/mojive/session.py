@@ -213,6 +213,7 @@ class Session:
         self._sim_time_credit = 0.0
         self._selected = 0
         self._selected_node_id = -1
+        self._selection_revision = 0
         self._unlocked_entity_gizmos: set[int] = set()
         self._step_counter = 0
         self._pending_steps = 0
@@ -297,6 +298,11 @@ class Session:
     def selected_node(self) -> SceneNode | None:
         """Return the selected hierarchy node."""
         return self.node(self._selected_node_id)
+
+    @property
+    def selection_revision(self) -> int:
+        """Advance for every accepted selection command, including reselecting a node."""
+        return self._selection_revision
 
     @property
     def selection_highlight_object_id(self) -> int:
@@ -1809,6 +1815,7 @@ class Session:
                 return CommandResult.bad(f"Unknown object_id={c.object_id}")
             self._selected = int(c.object_id)
             self._selected_node_id = node.node_id if node is not None else -1
+            self._selection_revision += 1
             return CommandResult.good(node.name if node else "Selection cleared")
 
         if isinstance(c, cmd.SelectNode):
@@ -1817,6 +1824,7 @@ class Session:
                 return CommandResult.bad(f"Unknown node_id={c.node_id}")
             self._selected_node_id = node.node_id
             self._selected = int(node.object_id)
+            self._selection_revision += 1
             return CommandResult.good(node.name)
 
         if isinstance(c, cmd.SetVisible):

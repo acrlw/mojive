@@ -12,6 +12,7 @@ struct DebugDragLinkIn {
     @location(4) width: f32,
     @location(5) radius: f32,
     @location(6) edge: f32,
+    @location(7) smoothing: f32,
 };
 
 struct DebugDragLinkOut {
@@ -24,6 +25,7 @@ struct DebugDragLinkOut {
     @location(5) @interpolate(flat) width: f32,
     @location(6) @interpolate(flat) radius: f32,
     @location(7) @interpolate(flat) edge: f32,
+    @location(8) @interpolate(flat) smoothing: f32,
 };
 
 @vertex
@@ -39,11 +41,12 @@ fn vs_debug_drag_link(in: DebugDragLinkIn, @builtin(vertex_index) v: u32) -> Deb
     out.width = in.width;
     out.radius = in.radius;
     out.edge = in.edge;
+    out.smoothing = in.smoothing;
 
     // The hollow start ring extends half a core stroke beyond its radius.
     // Include that stroke as well as the contrast edge and AA guard in the
     // primitive quad; otherwise large UI scales clip the ring at the quad.
-    let pad = in.radius + 0.5 * in.width + in.edge + 2.0;
+    let pad = in.radius + 0.5 * in.width + in.edge + in.radius * in.smoothing * 0.3125 + 2.0;
     let lo = min(out.a, out.b) - vec2f(pad);
     let hi = max(out.a, out.b) + vec2f(pad);
     var C = array<vec2f, 6>(
@@ -63,6 +66,15 @@ fn dbg_capsule_sdf(p: vec2f, a: vec2f, b: vec2f, radius: f32) -> f32 {
     return length(p - (a + t * ab)) - radius;
 }
 
+// Even sextic matches abs(t) through its third derivative at both blend limits.
+fn dbg_smooth_union(a: f32, b: f32, blend: f32) -> f32 {
+    if blend <= 0.0 || abs(a - b) >= blend { return min(a, b); }
+    let t = (a - b) / blend;
+    let t2 = t * t;
+    let profile = (5.0 + t2 * (15.0 + t2 * (-5.0 + t2))) / 16.0;
+    return 0.5 * (a + b - blend * profile);
+}
+
 @fragment
 fn fs_debug_drag_link(in: DebugDragLinkOut) -> @location(0) vec4f {
     let half_width = 0.5 * in.width;
@@ -70,14 +82,16 @@ fn fs_debug_drag_link(in: DebugDragLinkOut) -> @location(0) vec4f {
     let length_ab = length(ab);
     let direction = select(vec2f(1.0, 0.0), ab / length_ab, length_ab > 1e-4);
 
-    // Center the connector cap on the ring. Its rear edge meets the ring's
-    // inner edge, preserving the hollow center while the outer half merges
-    // with the ring core.
+    // Blend only the outside of the origin. The connector cannot dent its hole.
     let link_start = in.a + direction * in.radius;
-    let ring = abs(length(in.pixel - in.a) - in.radius) - half_width;
+    let radial = length(in.pixel - in.a);
+    let disk = radial - in.radius - half_width;
+    let hole = in.radius - half_width - radial;
     let link = dbg_capsule_sdf(in.pixel, link_start, in.b, half_width);
     let dot_end = length(in.pixel - in.b) - in.radius;
-    let shape = min(ring, min(link, dot_end));
+    let blend = in.radius * in.smoothing;
+    let origin = max(dbg_smooth_union(disk, link, blend), hole);
+    let shape = dbg_smooth_union(origin, dot_end, blend);
 
     let aa = max(fwidth(shape), 0.65);
     let outer = 1.0 - smoothstep(-aa, aa, shape - in.edge);

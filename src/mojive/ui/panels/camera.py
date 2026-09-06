@@ -245,9 +245,11 @@ class CameraPanel(Panel):
 
     def _params(self, ctx: PanelContext, camera: Any) -> None:
         flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
-        if not imgui.begin_table("camera_properties", 2, flags):
+        compact = imgui.get_content_region_avail().x < 240.0 * ctx.style_scale
+        if not imgui.begin_table("camera_properties", 1 if compact else 2, flags):
             return
-        imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.38)
+        if not compact:
+            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.38)
         imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch, 0.62)
         for attr, lo, hi, fmt, initial in PARAM_SLIDERS:
             current = _get(camera, attr)
@@ -298,9 +300,12 @@ class CameraPanel(Panel):
     def _property_label(label: str) -> None:
         imgui.table_next_row()
         imgui.table_next_column()
-        imgui.align_text_to_frame_padding()
+        compact = imgui.table_get_column_count() == 1
+        if not compact:
+            imgui.align_text_to_frame_padding()
         available = imgui.get_content_region_avail().x
         width = imgui.calc_text_size(label).x
-        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, available - width))
+        if not compact:
+            imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, available - width))
         imgui.text_disabled(label)
         imgui.table_next_column()

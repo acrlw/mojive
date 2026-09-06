@@ -13,7 +13,7 @@ Occlusion modes:
 ## Interactive example
 
 ```bash
-uv run python examples/debug_draw.py
+uv run --no-sync python examples/debug_draw.py
 ```
 
 ```python
@@ -37,6 +37,45 @@ depth.arrows("robot-velocities", starts, ends, (0.2, 0.7, 1.0, 1.0), 2.0)
 
 Do not split a batch merely to assign numeric IDs to records. Split only where independent
 lifetime or erasure semantics are required.
+
+## UI-style screen arrows
+
+`Layer.arrow_2d` uses the same G3 silhouette as the flat Transform and Joint gizmos.
+Coordinates are render-viewport pixels with the origin at the top left. Use an `ALWAYS`
+layer; these arrows are screen overlays and have no world depth. `Draw2D.arrow` accepts matching
+shape dimensions without the `_px` suffix, in logical window coordinates. Its adapter controls
+AA, and `smoothing=None` selects the adapter default. Debug `arrow_2d` has an explicit `antialias`
+option and a numeric smoothing value. Existing `arrow` and `arrows` methods retain
+their world-anchor API and lightweight GPU line-arrow path.
+
+```python
+from mojive.render.debugdraw import Occlusion
+
+overlay = viewer.backend.debug.layer("ui-arrows", Occlusion.ALWAYS)
+overlay.arrow_2d(
+    "direction", (40, 60), (240, 60), (1, 1, 1, 1), 4,
+    head_length_px=18, head_width_px=20,
+    corner_radius_px=1.5, smoothing=0.6,
+)
+```
+
+The head, concave shoulders, and shaft form one continuous outline. Radius zero selects
+sharp corners. Positive radius with smoothing zero selects ordinary circular fillets.
+`join_radius_px` controls the two shoulders independently. It defaults to half the head
+corner radius; set it to zero for sharp shoulders. The UI equivalent is `join_radius`.
+The smaller shoulder radius keeps the head more rounded than its connection to the shaft.
+Positive smoothing up to one enables G3 joins. `round_tail` controls the rear cap and
+`antialias` controls the external fringe. The local outline and triangle fan are cached;
+changing position only transforms the cached mesh. Each triangle counts toward the debug
+primitive budget, so retain the lighter world-arrow batch for high-cardinality diagnostics.
+The local bridge accepts the same options with `op: "arrow_2d"` and `occlusion: "always"`.
+Dimensions and endpoints must be finite, dimensions must be nonnegative, and smoothing must
+be in 0–1. A zero-length head draws a plain shaft. Zero width or coincident endpoints erase
+the retained arrow. Invalid input raises `ValueError` before replacing existing geometry.
+The executable example above draws all three corner styles.
+
+For custom UI widgets, follow [the drawing extension guide](ui-drawing.md) for ownership,
+coordinates, cache placement, and the matching verification paths.
 
 ## 2D physics and geometry diagnostics
 

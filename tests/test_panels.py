@@ -215,6 +215,8 @@ def test_hierarchy_disclosure_is_one_rigidly_rotated_antialiased_shape() -> None
     expected = np.column_stack((-(closed - center)[:, 1], (closed - center)[:, 0])) + center
 
     assert opened == pytest.approx(expected)
+    for shape in (closed, opened):
+        assert (shape.min(axis=0) + shape.max(axis=0)) * 0.5 == pytest.approx(center)
     assert np.linalg.norm(opened - np.roll(opened, -1, axis=0), axis=1) == pytest.approx(
         np.linalg.norm(closed - np.roll(closed, -1, axis=0), axis=1)
     )
@@ -969,7 +971,7 @@ def test_keyframe_timeline_status_hints_replace_the_repeated_help_copy():
     assert [(hint.kind, hint.control, hint.label) for hint in hints] == [
         ("mouse", "left", "移动播放头"),
         ("mouse", "wheel", "缩放"),
-        ("mouse", "middle", "平移"),
+        ("mouse", "right", "平移"),
     ]
 
 
