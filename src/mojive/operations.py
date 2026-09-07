@@ -198,9 +198,8 @@ class Operation:
             return "The scene contains no actuator controls"
         return None
 
-    def describe(self, session, *, viewer_attached: bool = False) -> dict:
-        """Return machine-readable schemas, scope, and current availability."""
-        reason = self.unavailable_reason(session, viewer_attached=viewer_attached)
+    def specification(self) -> dict:
+        """Return independent copies of the installed contract without runtime availability."""
         result = {
             "name": self.name,
             "description": self.description,
@@ -210,11 +209,16 @@ class Operation:
             "input_schema": deepcopy(self.input_schema),
             "output_schema": deepcopy(self.output_schema),
             "requirements": {"capabilities": list(self.capabilities), "paused": self.paused},
-            "available": reason is None,
-            "unavailable_reason": reason,
         }
         if self.alias_of:
             result["alias_of"] = self.alias_of
+        return result
+
+    def describe(self, session, *, viewer_attached: bool = False) -> dict:
+        """Return machine-readable schemas, scope, and current availability."""
+        result = self.specification()
+        reason = self.unavailable_reason(session, viewer_attached=viewer_attached)
+        result.update(available=reason is None, unavailable_reason=reason)
         return result
 
 
