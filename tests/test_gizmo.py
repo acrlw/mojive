@@ -3894,7 +3894,9 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
     range_strokes = [
         args
         for name, args, _kwargs in overlay.calls
-        if name == "polyline" and args[2] == pytest.approx(RING_WIDTH_PT)
+        if name == "polyline"
+        and args[2] == pytest.approx(RING_WIDTH_PT)
+        and np.allclose(args[1], JOINT_RANGE_COLOR)
     ]
     assert len(range_strokes) == 1
 
@@ -4022,7 +4024,9 @@ def test_active_hinge_guide_keeps_one_allowed_range_arc() -> None:
     range_strokes = [
         args
         for name, args, _kwargs in overlay.calls
-        if name == "polyline" and args[2] == pytest.approx(RING_WIDTH_PT)
+        if name == "polyline"
+        and args[2] == pytest.approx(RING_WIDTH_PT)
+        and np.allclose(args[1], gizmo._hinge_range_color())
     ]
     assert len(range_strokes) == 1
     assert not any(
@@ -4490,3 +4494,86 @@ def test_dimensions_keep_a_circular_origin_without_a_center_drag_handle():
     fills = [args for name, args, kwargs in overlay.calls if name == "concave_fill"]
     assert len(fills) == len(AXIS_HANDLES)
     assert all(not np.allclose(args[1], CONTRAST_EDGE_COLOR) for args in fills)
+
+
+@pytest.mark.parametrize("span", (0.0, 0.01, 0.3, 5.0))
+def test_limited_hinge_has_a_faint_complementary_hover_target(span):
+    from mojive.ui.gizmo import (
+        JOINT_COMPLEMENT_ALPHA,
+        _hinge_range_path_hit,
+    )
+
+    cam = CameraView(
+        eye=np.array((0.0, 0.0, 5.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 1.0, 0.0)),
+        aspect=RECT[2] / RECT[3],
+    )
+    gizmo = ObjectGizmo("rotate")
+    gizmo._joint_range = _JointRangeState("hinge", 0.0, -span / 2, span / 2)
+    overlay = RecordingDraw2D()
+    gizmo._draw_joint_range(overlay, cam, RECT, 1.0)
+    complement = next(
+        args
+        for name, args, _ in overlay.calls
+        if name == "polyline" and args[1][3] == pytest.approx(JOINT_COMPLEMENT_ALPHA)
+    )
+    assert complement[2] == pytest.approx(JOINT_RANGE_WIDTH_PT)
+    assert complement[1][3] == pytest.approx(JOINT_RANGE_COLOR[3] * JOINT_COMPLEMENT_ALPHA)
+    projection = gizmo._hinge_range_projection(
+        cam, RECT, 1.0, gizmo._joint_range, gizmo._frame.position, gizmo._frame.rotation
+    )
+    if span:
+        assert complement[0][0] == pytest.approx(projection.allowed[-1])
+        assert complement[0][-1] == pytest.approx(projection.allowed[0])
+    else:
+        assert complement[0][0] == pytest.approx(complement[0][-1])
+    point = complement[0][len(complement[0]) // 2]
+    assert _hinge_range_path_hit(point, projection, 1.0)
+
+
+@pytest.mark.physics
+def test_tiny_hinge_complement_press_drags_without_jump_and_respects_limits(tmp_path):
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+
+    path = tmp_path / "tiny.xml"
+    path.write_text(
+        '<mujoco><compiler angle="radian"/><worldbody><body name="tiny">'
+        '<joint type="hinge" range="-0.01 0.01" limited="true"/>'
+        '<geom type="box" size="0.2 0.05 0.05"/></body></worldbody></mujoco>'
+    )
+    adapter = MuJoCoAdapter(path)
+    session = Session(adapter)
+    session.submit(cmd.Pause())
+    node = next(item for item in session.nodes if item.name == "tiny")
+    session.submit(cmd.Select(node.object_id))
+    session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0)
+    gizmo = ObjectGizmo()
+    target, _ = gizmo._joint_target(session, node)
+    pos, basis = gizmo._target_pose(session, node, target)
+    cam = CameraView(
+        eye=pos + basis[:, 2] * 5, target=pos, up=basis[:, 1], aspect=RECT[2] / RECT[3]
+    )
+    gizmo.publish(
+        CaptureBackend(),
+        session,
+        cam,
+        RECT,
+        ui_scale=1,
+        style_scale=1,
+        yielding=False,
+        interactive=True,
+    )
+    gizmo.draw_overlay(cam, RECT, RecordingDraw2D(), style_scale=1)
+    dial = _RotationDialProjector(cam, RECT, pos, basis[:, 2], basis[:, 0], SIZE_PT)
+    start = dial.points(JOINT_RANGE_RADIUS, (np.pi,))[0, :2]
+    gizmo.update_hover(session, cam, RECT, start, enabled=True, style_scale=1)
+    assert gizmo.hovered
+    assert gizmo.interact(session, cam, RECT, start, claimed=True, left_down=True, released=False)
+    assert adapter.data.qpos[0] == pytest.approx(0, abs=1e-10)
+    assert gizmo.active_handle is GizmoHandle.ROTATE_Z
+    moved = dial.points(JOINT_RANGE_RADIUS, (np.pi + 0.1,))[0, :2]
+    assert gizmo.interact(session, cam, RECT, moved, claimed=True, left_down=True, released=False)
+    assert adapter.data.qpos[0] == pytest.approx(0.01)
+    gizmo.interact(session, cam, RECT, moved, claimed=True, left_down=False, released=True)
+    assert not gizmo.using

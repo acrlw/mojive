@@ -113,6 +113,8 @@ SNAP_TICK_FADE_STEPS = 10.0
 ROTATION_TICK_MIN_ALPHA = 0.5
 JOINT_RANGE_RADIUS = RING_RADIUS
 JOINT_RANGE_WIDTH_PT = RING_WIDTH_PT
+JOINT_COMPLEMENT_ALPHA = 0.12
+JOINT_COMPLEMENT_HOVER_ALPHA = 0.26
 JOINT_RANGE_OFFSET_PT = 0.0
 JOINT_RANGE_COLOR = THEME.primary
 JOINT_ACTIVE_DARK_COLOR = THEME.primary_dim
@@ -467,6 +469,7 @@ class _HingeRangeProjection:
     current_tick: tuple[np.ndarray, np.ndarray] | None
     lower_tick: tuple[np.ndarray, np.ndarray] | None
     upper_tick: tuple[np.ndarray, np.ndarray] | None
+    complement: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -2309,8 +2312,9 @@ class ObjectGizmo:
         span = state.angular_span
         full_range = state.covers_full_turn
         allowed = None
+        complement = None
+        segments = _rotation_dial_segments(cam, origin, basis[:, 2])
         if span > 1e-6:
-            segments = _rotation_dial_segments(cam, origin, basis[:, 2])
             point_count = max(2, int(np.ceil(segments * span / _FULL_TURN)) + 1)
             allowed_angles = np.linspace(
                 state.lower,
@@ -2321,10 +2325,17 @@ class ObjectGizmo:
             candidate = dial.points(JOINT_RANGE_RADIUS, allowed_angles)
             if np.all(candidate[:, 2] > 0.0):
                 allowed = candidate[:, :2]
+        if not full_range:
+            count = max(2, int(np.ceil(segments * (_FULL_TURN - span) / _FULL_TURN)) + 1)
+            angles = np.linspace(state.lower + span, state.lower + _FULL_TURN, count)
+            candidate = dial.points(JOINT_RANGE_RADIUS, angles)
+            if np.all(candidate[:, 2] > 0.0):
+                complement = candidate[:, :2]
         return _HingeRangeProjection(
             alpha=alpha,
             allowed=allowed,
             full_range=full_range,
+            complement=complement,
             current_tick=dial.tick(
                 JOINT_RANGE_RADIUS,
                 state.current,
@@ -2374,6 +2385,19 @@ class ObjectGizmo:
                 smoothing=self._frame.corner_smoothing,
             )
         if phase != "labels":
+            if projection.complement is not None:
+                engaged = self._active is GizmoHandle.ROTATE_Z or (
+                    self._interactive and self._hovered is GizmoHandle.ROTATE_Z
+                )
+                opacity = JOINT_COMPLEMENT_HOVER_ALPHA if engaged else JOINT_COMPLEMENT_ALPHA
+                overlay.polyline(
+                    projection.complement,
+                    _with_alpha(allowed_color, alpha * opacity),
+                    range_width,
+                    closed=False,
+                    cap="butt",
+                    smoothing=self._frame.corner_smoothing,
+                )
             current_tick = projection.current_tick
             if current_tick is not None:
                 overlay.line(
@@ -4517,6 +4541,8 @@ def _hinge_range_path_hit(
             projection.allowed,
             closed=projection.full_range,
         )
+    if projection.complement is not None:
+        distance = min(distance, screen_path_distance(cursor, projection.complement, closed=False))
     return distance <= RING_HIT_PT * style_scale
 
 
