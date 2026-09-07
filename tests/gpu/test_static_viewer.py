@@ -337,7 +337,7 @@ def test_interactive_capture_scopes_and_recording_lifecycle(canvas, tmp_path):
         assert window.size == viewer.window.size_pixels
 
     output = tmp_path / "interactive-window.mp4"
-    viewer.start_recording(output, surface=CaptureSurface.WINDOW, fps=30)
+    viewer.start_recording(output, surface=CaptureSurface.WINDOW, fps=30, countdown=0)
     viewer.sync()
     assert viewer.recording.phase is RecordingPhase.RECORDING
     frames_before_pause = viewer.recording.frames
@@ -822,3 +822,46 @@ def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
     finally:
         imgui.get_io().add_mouse_button_event(0, False)
         viewer.release()
+
+
+def test_zero_countdown_menu_recording_starts_with_a_clean_viewport(canvas, monkeypatch, tmp_path):
+    from imgui_bundle import imgui
+
+    import mojive.recording as recording
+    from mojive import CaptureSurface, RecordingConfig, RecordingPhase
+    from mojive.tools.ui_runtime import _click, _item_center, _open_main_menu
+
+    viewer, _scene = canvas
+    previous = viewer.app.recording_config
+    images = []
+
+    class Recorder:
+        def __init__(self, path, size, fps):
+            self.size = size
+            assert fps == 60
+            assert not imgui.get_current_context().open_popup_stack
+
+        def append(self, image):
+            assert viewer.recording.phase is RecordingPhase.RECORDING
+            assert not imgui.get_current_context().open_popup_stack
+            images.append(image.copy())
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(recording, "VideoRecorder", Recorder)
+    monkeypatch.setattr(viewer.app, "_capture_output", lambda *args: tmp_path / "menu.mp4")
+    viewer.configure_recording(RecordingConfig(countdown=0))
+    try:
+        _open_main_menu(viewer, "View")
+        _open_main_menu(viewer, "Record")
+        _click(viewer, _item_center(viewer, "menu_item", "Viewport with UI"))
+        for _ in range(3):
+            viewer.sync()
+        assert images
+        viewer.stop_recording()
+        clean = viewer.capture_array(surface=CaptureSurface.VIEWPORT)
+        np.testing.assert_array_equal(images[0], clean)
+    finally:
+        viewer.stop_recording()
+        viewer.configure_recording(previous)

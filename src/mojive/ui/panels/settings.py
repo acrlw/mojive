@@ -8,6 +8,7 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds
+from ...capture import CaptureSurface
 from ...render.backend import DebugView, FrameMode, LabelMode, RenderFlag, ShadowQuality
 from ..gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,
@@ -78,12 +79,13 @@ _VIS_FLAGS: tuple[RenderFlag, ...] = (
     RenderFlag.MESHBVH,
 )
 
-_CATEGORIES = ("General", "Interaction", "Rendering", "MuJoCo Visuals")
+_CATEGORIES = ("General", "Interaction", "Rendering", "Recording", "MuJoCo Visuals")
 _CATEGORY_WIDTH_PT = 132.0
 _PAGE_MIN_WIDTH_PT = 224.0
 _COLUMN_GAP_PT = 8.0
 _CATEGORY_SEARCH_TERMS = {
     "General": ("language", "ui font", "cjk font"),
+    "Recording": ("video capture countdown delay seconds frame rate fps viewport layers",),
     "Interaction": (
         "gizmo",
         "built-in interactions camera orbit pan dolly fly view cube",
@@ -230,6 +232,8 @@ class SettingsPanel(Panel):
             self._interaction(ctx)
         elif self._category == "Rendering":
             self._rendering(ctx)
+        elif self._category == "Recording":
+            self._recording(ctx)
         else:
             self._mujoco_visuals(ctx)
         imgui.end_child()
@@ -289,6 +293,53 @@ class SettingsPanel(Panel):
                     if changed:
                         ctx.panels.set_open(panel.id, is_open)
                 imgui.end_table()
+
+    def show_category(self, category: str) -> None:
+        if category in _CATEGORIES:
+            self._category = category
+            self._search = ""
+
+    def _recording(self, ctx: PanelContext) -> None:
+        config = ctx.recording_config
+        if config is None:
+            return
+        if self._begin_properties("settings_recording"):
+            self._property(ctx.tr("Countdown (s)"))
+            changed, value = imgui.input_float(
+                "##recording_delay", config.countdown, 1.0, 5.0, "%.1f"
+            )
+            if changed:
+                config = replace(config, countdown=value)
+                ctx.set_recording_config(config)
+            self._property(ctx.tr("Video frame rate"))
+            changed, value = imgui.input_float("##recording_fps", config.fps, 1.0, 10.0, "%.1f")
+            if changed:
+                config = replace(config, fps=value)
+                ctx.set_recording_config(config)
+            self._property(ctx.tr("Default capture area"))
+            surfaces = tuple(CaptureSurface)
+            labels = ("Scene Only", "Viewport with UI", "Entire Window")
+            selected = surfaces.index(config.surface)
+            if imgui.begin_combo("##recording_surface", ctx.tr(labels[selected])):
+                for index, label in enumerate(labels):
+                    clicked, _ = imgui.selectable(ctx.tr(label), index == selected)
+                    if clicked:
+                        config = replace(config, surface=surfaces[index])
+                        ctx.set_recording_config(config)
+                imgui.end_combo()
+            imgui.end_table()
+        imgui.spacing()
+        imgui.text_wrapped(
+            ctx.tr(
+                "Defaults apply to the next recording. Set the countdown to 0 to start after menus close."
+            )
+        )
+        imgui.spacing()
+        imgui.text_wrapped(
+            ctx.tr("Viewport recording follows the visibility choices in the Layers panel.")
+        )
+        if ctx.panels is not None and imgui.button(ctx.tr("Open Layers")):
+            ctx.panels.open_panel("Layers")
 
     def _rendering(self, ctx: PanelContext) -> None:
         t = ctx.tr

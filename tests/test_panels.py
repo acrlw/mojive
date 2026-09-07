@@ -106,6 +106,7 @@ EXPECTED_PANELS = {
     "Stats",
     "Output",
     "Settings",
+    "Layers",
     "Sensors",
     "Help",
     "Info",

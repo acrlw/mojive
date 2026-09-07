@@ -691,7 +691,8 @@ def test_status_places_simulation_state_before_selection():
     assert x_by_text["OpenGL"] < x_by_text["Steps 674"] < x_by_text["Δt 0.002 s"]
 
 
-def test_status_exposes_recording_controls_and_warning_divider() -> None:
+@pytest.mark.parametrize("phase", ("recording", "paused", "countdown"))
+def test_status_exposes_recording_controls_and_warning_divider(phase) -> None:
     from mojive.ui.theme import THEME
 
     draw = _RecordedStatus()
@@ -710,14 +711,15 @@ def test_status_exposes_recording_controls_and_warning_divider() -> None:
         backend="wgpu",
         dt=0.002,
         fps=60.0,
-        recording_phase="recording",
+        recording_phase=phase,
         recording_duration=65.2,
+        countdown_remaining=2.1,
         recording_surface="viewport",
     )
 
-    assert "VIEW 01:05" in draw.texts
+    assert ("VIEW 3 s" if phase == "countdown" else "VIEW 01:05") in draw.texts
     assert draw.lines[0][0][2] == THEME.warning
-    assert layout.recording_pause_rect is not None
+    assert (layout.recording_pause_rect is not None) == (phase != "countdown")
     assert layout.recording_stop_rect is not None
 
 

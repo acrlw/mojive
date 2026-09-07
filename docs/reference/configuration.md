@@ -66,9 +66,11 @@ from mojive import (
     InputClaim,
     LayoutConfig,
     PanelConfig,
+    RecordingConfig,
     SelectionInputConfig,
     SelectionStyle,
     ViewerConfig,
+    ViewportLayers,
     ViewportOverlayConfig,
     build,
 )
@@ -91,6 +93,8 @@ config = ViewerConfig(
         tool_scale=0.75,
         movable=True,
     ),
+    layers=ViewportLayers(debug_3d=False),
+    recording=RecordingConfig(countdown=3.0, fps=60),
     shadow_quality="high",
 )
 
@@ -111,7 +115,8 @@ only active text editing, modal UI, and native dialogs do. Clicking the viewport
 while `pick_on_focus=False` can make that first click focus-only. Actions may also be assigned to
 `None` in the Settings shortcut editor. At
 runtime, use `viewer.configure_interactions(...)`, `viewer.configure_selection(...)`,
-`viewer.configure_viewport_overlays(...)`, and the
+`viewer.configure_viewport_overlays(...)`, `viewer.configure_layers(...)`,
+`viewer.configure_recording(...)`, and the
 stable panel IDs through `viewer.panels.open("hierarchy")`, `close`, `enable`, or `disable`.
 Explicit `ViewerConfig` values apply to that viewer instance. Changes made in Settings are stored
 as desktop preferences for later viewers created without an explicit config. Runtime
@@ -154,7 +159,7 @@ with Renderer(model, shadow_quality=ShadowQuality.HIGH) as renderer:
 
 ## Interactive capture and recording
 
-Interactive captures distinguish the raw scene from composed UI. `SCENE` is the default and
+Interactive captures distinguish the raw scene from composed UI. Still captures default to `SCENE` and
 does not incur a full-window framebuffer readback. `VIEWPORT` includes Mojive's viewport tools
 and overlays but crops panels and the menu bar; `WINDOW` captures the complete ImGui window.
 
@@ -164,7 +169,7 @@ from mojive import CaptureSurface
 viewer.capture("output/raw.png")
 viewer.capture("output/tutorial.png", surface=CaptureSurface.VIEWPORT)
 
-viewer.start_recording("output/walkthrough.mp4", surface=CaptureSurface.WINDOW, fps=30)
+viewer.start_recording("output/walkthrough.mp4", countdown=0)
 for _ in range(120):
     viewer.sync()
 viewer.pause_recording()
@@ -175,9 +180,34 @@ for _ in range(120):
 viewer.stop_recording()
 ```
 
+Interactive recordings default to `VIEWPORT`, 60 FPS, and a three-second countdown. Change these
+in **Settings > Recording**, also reachable through **View > Recording Settings...**. Countdown
+uses wall time, can be canceled with its button or the recording shortcut, and creates no video
+file until a frame is captured. A zero-second delay starts on the next clean frame after menus
+close. The recording rate is independent from display and physics rates.
+
+Open **View > Layers...** or **Window > Layers** to control viewport content during everyday
+viewing and recording. The panel docks outside the viewport. Its switches control viewport
+controls, transform and joint gizmos, selection feedback, camera/light helpers, perturbation
+guides, 3D debug drawings, and 2D canvas drawings. Public debug layers and `Canvas2D` layers can
+also be hidden individually under **Named drawing layers**. These switches preserve the
+publisher's own visibility choices and tool settings. Hidden gizmos and camera/light helpers
+stop receiving pointer hits. Hiding perturbation guides keeps physical perturbation available.
+Model geometry visibility remains in the Hierarchy and visual-group controls.
+
+Viewport capture and recording follow the live choices, including changes made while recording;
+there is no separate recording-only mask or extra scene render. Raw `SCENE` output follows the
+GPU drawing layers but excludes ImGui overlays. Camera preview is part of viewport controls.
+Small limited hinge joints show a faint complementary arc completing the rotation ring. Hover
+or drag anywhere on that ring to manipulate the joint within its authored limits.
+
+Use `make recording-layers` (or `BACKEND=wgpu`) for scripted live controls and encoded-video
+acceptance, including representative images under `output/recording-layers/`.
+
 `viewer.record(...)` remains the deterministic fixed-frame, UI-free rollout API. The
 `start_recording` lifecycle is for user-driven or automated editor demonstrations. The current
-phase, surface, output path, frame count, and duration are available through `viewer.recording`.
+phase (`idle`, `countdown`, `recording`, or `paused`), remaining countdown seconds, surface,
+output path, frame count, and duration are available through `viewer.recording`.
 Changing the window or viewport dimensions while recording a UI surface stops that recording
 with an explicit error instead of silently stretching or cropping frames.
 
