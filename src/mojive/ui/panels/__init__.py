@@ -328,18 +328,9 @@ def search_input(
         changed, value = imgui.input_text_with_hint(str_id, hint, value)
     else:
         changed, value = imgui.input_text(str_id, value)
-    focused = imgui.is_item_focused() and imgui.get_current_context().nav_cursor_visible
     imgui.pop_style_var()
     imgui.pop_style_color(4)
-    if focused:
-        outset = 3.0
-        draw_list.add_rect(
-            (lo[0] - outset, lo[1] - outset),
-            (hi[0] + outset, hi[1] + outset),
-            imgui.get_color_u32(imgui.Col_.nav_cursor),
-            style.frame_rounding + outset,
-            thickness=2.0,
-        )
+    imgui.internal.render_nav_cursor(imgui.internal.ImRect(lo, hi), input_id)
 
     draw = ImguiDraw2D()
     color = imgui.get_style_color_vec4(imgui.Col_.text_disabled)

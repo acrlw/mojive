@@ -600,7 +600,6 @@ _ZH_CN = {
     "Snap · Shift": "吸附 · Shift",
     "Style": "样式",
     "The current pose differs from the model default. Add the current qpos as keyframe key0 in the exported MJCF?": "当前姿态与模型默认值不同。是否在导出的 MJCF 中将当前 qpos 添加为关键帧 key0？",
-    "The loader does not expose reliable stage progress.": "加载器不提供可靠的阶段进度。",
     "The selected geometry belongs to a different model": "选中的几何体属于其他模型",
     "This Mojive scene references model files that are no longer available. Locate files individually or search one directory to repair every unambiguous path.": "此 OpenGL 场景引用了已不可用的模型文件。可逐个定位文件，或搜索一个目录以修复所有无歧义路径。",
     "Tick scale": "刻度大小",

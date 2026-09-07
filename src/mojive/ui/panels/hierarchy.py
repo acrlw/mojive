@@ -357,10 +357,17 @@ class HierarchyPanel(Panel):
         draw = ImguiDraw2D()
         if is_selected or hovered:
             color = ctx.theme.bg_header if is_selected else ctx.theme.bg_frame
-            imgui.table_set_bg_color(
-                imgui.TableBgTarget_.row_bg0,
+            table = imgui.internal.get_current_table()
+            # Span every column in the background channel while retaining the
+            # same circular corners as the surrounding native child surface.
+            imgui.internal.table_push_background_channel()
+            imgui.get_window_draw_list().add_rect_filled(
+                (table.work_rect.min.x, row_start.y),
+                (table.work_rect.max.x, row_start.y + row_height),
                 imgui.color_convert_float4_to_u32(imgui.ImVec4(*color)),
+                imgui.get_style().child_rounding,
             )
+            imgui.internal.table_pop_background_channel()
         indent = depth * 18.0 * ctx.style_scale
         name = node.name or "?"
         text_y = round(row_start.y + row_height * 0.5 + self._text_line_offset)

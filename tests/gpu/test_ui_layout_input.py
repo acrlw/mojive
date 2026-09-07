@@ -32,6 +32,100 @@ def _camera_state(viewer):
     return np.concatenate((view.eye, view.target, [view.fov_y]))
 
 
+@pytest.mark.parametrize("floating", (False, True))
+def test_dock_tabs_do_not_emit_a_clipped_focus_ring(viewer, floating):
+    from mojive.tools.ui_runtime import _settle
+
+    context = imgui.get_current_context()
+    window = imgui.internal.find_window_by_name("Viewport")
+    if floating:
+        # A floating group renders its tab bar inside NewFrame, before the
+        # application's DockSpace call. Retain two tabs so the host stays alive.
+        inspector = imgui.internal.find_window_by_name("Inspector")
+        imgui.internal.dock_builder_dock_window("Inspector", window.dock_node.id_)
+        _settle(viewer, 3)
+        imgui.internal.dock_context_process_undock_node(context, window.dock_node)
+        _settle(viewer, 3)
+        assert inspector.dock_node == window.dock_node
+    color = imgui.ImVec4(0.9, 0.3, 0.7, 1.0)
+    packed = imgui.color_convert_float4_to_u32(color)
+    imgui.get_style().set_color_(int(imgui.Col_.nav_cursor), color)
+    context.nav_window = window
+    context.nav_id = window.tab_id
+    context.nav_cursor_visible = True
+    viewer.sync()
+    assert not context.nav_cursor_visible
+    assert not any(
+        vertex.col == packed
+        for rendered in context.windows
+        if rendered.active
+        for vertex in rendered.draw_list.vtx_buffer
+    )
+
+
+def test_joint_picker_fits_long_titles_and_joint_labels(viewer, monkeypatch):
+    from dataclasses import replace
+
+    from mojive.tools.ui_runtime import _item_rect, _settle
+
+    node = next(node for node in viewer.session.nodes if node.name == "05_multi_joint")
+    viewer.session.submit(cmd.SelectNode(node.node_id))
+    joints = viewer.app.gizmo.joint_choices(viewer.session)
+    long_joint = replace(joints[0], name="wrist_hand_rotation_with_a_long_joint_name_l")
+    monkeypatch.setattr(
+        viewer.app.gizmo, "joint_choices", lambda _session: [long_joint, *joints[1:]]
+    )
+    titles = []
+    begin = imgui.begin
+
+    def record_title(name, *args, **kwargs):
+        if name.endswith("###viewport_joint_gizmo"):
+            titles.append(name)
+        return begin(name, *args, **kwargs)
+
+    monkeypatch.setattr(imgui, "begin", record_title)
+    for title in ("hand_l", "left_hand_with_an_even_longer_body_name_than_the_joint_choices"):
+        node.name = title
+        viewer.app._joint_picker_node_id = -1
+        x, y, width, height = viewer.app._viewport_rect
+        imgui.get_io().add_mouse_pos_event(x + width - 2, y + height - 2)
+        _settle(viewer, 4)
+        picker = imgui.internal.find_window_by_name("###viewport_joint_gizmo")
+        assert titles[-1] == f"{title}###viewport_joint_gizmo"
+        assert (
+            picker.size.x >= imgui.calc_text_size(title).x + 2 * imgui.get_style().window_padding.x
+        )
+        label = f"{long_joint.name}  ({long_joint.type})##viewport-joint-{long_joint.joint_id}"
+        lo, hi = _item_rect(viewer, "selectable", label)
+        assert hi[0] - lo[0] >= imgui.calc_text_size(label, hide_text_after_double_hash=True).x
+        assert hi[0] <= picker.inner_clip_rect.max.x
+        assert picker.pos.x + picker.size.x <= x + width
+        assert picker.pos.y + picker.size.y <= y + height
+
+
+@pytest.mark.parametrize("selected", (False, True))
+def test_hierarchy_row_highlight_retains_rounded_child_corners(viewer, selected):
+    from mojive.tools.ui_runtime import _item_rect, _settle
+
+    node = next(node for node in viewer.session.nodes if node.parent < 0)
+    lo, hi = _item_rect(viewer, "invisible_button", f"##hierarchy-node-{node.node_id}")
+    if selected:
+        viewer.session.submit(cmd.SelectNode(node.node_id))
+    else:
+        imgui.get_io().add_mouse_pos_event((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2)
+    _settle(viewer, 3)
+    tree = next(window for window in imgui.get_current_context().windows if "/tree_" in window.name)
+    color = viewer.app.theme.bg_header if selected else viewer.app.theme.bg_frame
+    packed = imgui.color_convert_float4_to_u32(imgui.ImVec4(*color))
+    vertices = np.array([(v.pos.x, v.pos.y) for v in tree.draw_list.vtx_buffer if v.col == packed])
+    assert len(vertices) > 8
+    start, end = vertices.min(axis=0), vertices.max(axis=0)
+    assert start[0] == pytest.approx(tree.inner_rect.min.x, abs=1)
+    assert end[0] == pytest.approx(tree.inner_rect.max.x, abs=1)
+    radius = imgui.get_style().child_rounding
+    assert np.linalg.norm(vertices - start, axis=1).min() > radius * 0.3
+
+
 def _drag(viewer, start, delta, button=0):
     io = imgui.get_io()
     io.add_mouse_pos_event(*start)

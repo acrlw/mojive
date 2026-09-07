@@ -131,6 +131,13 @@ def patch(source: Path) -> None:
         "                RenderNavCursor(ImRect(bb.Min - ImVec2(2, 2), bb.Max + ImVec2(2, 2)), g.NavId, ImGuiNavRenderCursorFlags_Compact);",
         "                RenderNavCursor(ImRect(bb.Min - ImVec2(2, 2), bb.Max + ImVec2(2, 2)), g.NavId, ImGuiNavRenderCursorFlags_Compact, child_window->WindowRounding > 0.0f ? child_window->WindowRounding + 2.0f : 0.0f);",
     )
+    # Dock tabs can render during NewFrame, before the application suppresses
+    # their cursor. The selected tab already identifies the focused dock window.
+    change(
+        imgui + "imgui_widgets.cpp",
+        "        RenderNavCursor(bb, id);\n\n        // Select with right mouse button.",
+        "        if (docked_window == NULL)\n            RenderNavCursor(bb, id);\n\n        // Select with right mouse button.",
+    )
 
     # Size the actual grab in SliderBehaviorT, so rendering, click offsets, and
     # value mapping all use the same bounds. Keep its size stable during radius edits.
