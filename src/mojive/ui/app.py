@@ -57,6 +57,7 @@ from .panels import (
     PanelContext,
     PanelManager,
     button_width,
+    padded_selectable,
     segmented_control,
 )
 from .perturb import (
@@ -2577,8 +2578,6 @@ class ViewerApp:
             imgui.text(f"{t('Elapsed')}: {elapsed:.1f} s")
             if self._model_load_queue:
                 imgui.text(f"{t('Queued')}: {len(self._model_load_queue)}")
-            imgui.spacing()
-            imgui.text_disabled(t("The loader does not expose reliable stage progress."))
         imgui.end()
 
     def _scene_input_blocked(self) -> bool:
@@ -4102,17 +4101,26 @@ class ViewerApp:
             return
         x, y, width, height = self._viewport_rect
         scale = self.window.style_scale
+        style = imgui.get_style()
+        labels = [f"{joint.name or f'joint {joint.joint_id}'}  ({joint.type})" for joint in joints]
+        content_width = max(imgui.calc_text_size(label).x for label in labels)
+        picker_width = (
+            max(
+                imgui.calc_text_size(node.name).x,
+                content_width + 2.0 * style.frame_padding.x,
+            )
+            + 2.0 * style.window_padding.x
+        )
+        picker_height = imgui.get_frame_height() * (len(joints) + 1) + 2.0 * style.window_padding.y
         if node.node_id != self._joint_picker_node_id:
             mouse = imgui.get_io().mouse_pos
             inside = x <= mouse.x <= x + width and y <= mouse.y <= y + height
             desired_x = mouse.x + 14.0 * scale if inside else x + 18.0 * scale
             desired_y = mouse.y + 14.0 * scale if inside else y + 18.0 * scale
-            estimate_width = 280.0 * scale
-            estimate_height = (74.0 + 28.0 * len(joints)) * scale
             min_x = x + 8.0 * scale
             min_y = y + 8.0 * scale
-            max_x = max(min_x, x + width - estimate_width)
-            max_y = max(min_y, y + height - estimate_height)
+            max_x = max(min_x, x + width - picker_width - 8.0 * scale)
+            max_y = max(min_y, y + height - picker_height - 8.0 * scale)
             imgui.set_next_window_pos(
                 imgui.ImVec2(
                     min(max(min_x, desired_x), max_x),
@@ -4121,6 +4129,7 @@ class ViewerApp:
                 imgui.Cond_.always,
             )
             self._joint_picker_node_id = node.node_id
+        imgui.set_next_window_size(imgui.ImVec2(picker_width, 0.0))
         imgui.set_next_window_bg_alpha(0.92)
         flags = (
             imgui.WindowFlags_.always_auto_resize.value
@@ -4129,20 +4138,17 @@ class ViewerApp:
             | imgui.WindowFlags_.no_saved_settings.value
         )
         visible, _ = imgui.begin(
-            f"{self.localizer.text('Joint gizmo')}###viewport_joint_gizmo",
+            f"{node.name}###viewport_joint_gizmo",
             None,
             flags,
         )
         if visible:
-            imgui.text_disabled(node.name)
-            imgui.separator()
             selected = self.gizmo.selected_joint_id(node.body_index)
-            for joint in joints:
+            for joint, label in zip(joints, labels, strict=True):
                 supported = joint.type in ("hinge", "slide", "ball")
                 imgui.begin_disabled(not supported)
-                label = joint.name or f"joint {joint.joint_id}"
-                clicked, _selected = imgui.selectable(
-                    f"{label}  ({joint.type})##viewport-joint-{joint.joint_id}",
+                clicked, _selected = padded_selectable(
+                    f"{label}##viewport-joint-{joint.joint_id}",
                     selected == joint.joint_id,
                 )
                 if clicked:

@@ -16,6 +16,7 @@ from ..assets import resolve
 from ..composition import build
 from ..gizmo import GizmoHandle
 from .ui_runtime import (
+    _capture_dock_tab_without_nav_cursor,
     _dismiss_popup,
     _item_rect,
     _open_main_menu,
@@ -24,6 +25,36 @@ from .ui_runtime import (
     _save_window_crop,
     _settle,
 )
+
+
+def _capture_interaction_chrome(viewer, folder: Path) -> None:
+    """Exercise the same row, title, and focus surfaces used by the editor."""
+    root = next(node for node in viewer.session.nodes if node.parent < 0)
+    lo, hi = _item_rect(viewer, "invisible_button", f"##hierarchy-node-{root.node_id}")
+    imgui.get_io().add_mouse_pos_event((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2)
+    _settle(viewer, 3)
+    _save_window_crop(viewer, "Hierarchy", folder / "hierarchy-hover.png", padding=0)
+    viewer.session.submit(cmd.SelectNode(root.node_id))
+    _park_cursor(viewer)
+    _settle(viewer, 3)
+    _save_window_crop(viewer, "Hierarchy", folder / "hierarchy-selected.png", padding=0)
+    node = next(node for node in viewer.session.nodes if node.name == "05_multi_joint")
+    viewer.session.submit(cmd.SelectNode(node.node_id))
+    _settle(viewer, 4)
+    _save_window_crop(viewer, "###viewport_joint_gizmo", folder / "joint-picker.png")
+    original_name = node.name
+    try:
+        node.name = "left_hand_with_a_long_body_name"
+        _settle(viewer, 3)
+        picker = imgui.internal.find_window_by_name("###viewport_joint_gizmo")
+        assert (
+            picker.size.x
+            >= imgui.calc_text_size(node.name).x + 2 * imgui.get_style().window_padding.x
+        )
+        _save_window_crop(viewer, "###viewport_joint_gizmo", folder / "joint-picker-long-title.png")
+    finally:
+        node.name = original_name
+    _capture_dock_tab_without_nav_cursor(viewer, folder)
 
 
 def capture(output: Path, scale: float, language: str) -> list[dict]:
@@ -48,6 +79,7 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
         ) as viewer,
     ):
         _settle(viewer, 8)
+        _capture_interaction_chrome(viewer, folder)
         manager = viewer.panels
         begin = manager._begin_panel_window
         target, width = "", 480.0
@@ -75,13 +107,14 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
         _save_active_popup_crop(viewer, folder / "window-menu.png")
         _dismiss_popup(viewer)
         assert viewer.session.selected_node is link
-        free = next(node for node in viewer.session.nodes if node.name == "04_free")
-        viewer.session.submit(cmd.SelectNode(free.node_id))
+        hinge = next(node for node in viewer.session.nodes if node.name == "01_revolute")
+        viewer.session.submit(cmd.SelectNode(hinge.node_id))
         viewer.app.gizmo.set_mode("rotate")
         _settle(viewer, 3)
         viewer.app.gizmo._hovered = GizmoHandle.ROTATE_Z
         edit = viewer.app.gizmo.precise_input(viewer.session)
         assert edit is not None
+        viewer.app._precise_gizmo_angle_unit = "radians"
         viewer.app._begin_precise_gizmo_input(edit)
         _settle(viewer, 3)
         _save_active_popup_crop(viewer, folder / "precise-input.png")

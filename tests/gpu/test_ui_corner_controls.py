@@ -14,6 +14,8 @@ pytestmark = pytest.mark.gpu
 
 
 def test_corner_sliders_update_independently_and_keep_fractional_values(monkeypatch):
+    # Keep every probe slider visible regardless of the desktop's default scale.
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]))
     from design.tools import render_ui_feasibility as probe
 
@@ -382,5 +384,62 @@ def test_native_menu_highlight_keeps_text_padding(monkeypatch):
             text = text_shapes[index]
             assert text[:, 0].min() - lo[0] >= 3.0
             assert hi[0] - text[:, 0].max() >= 3.0
+    finally:
+        window.close()
+
+
+@pytest.mark.parametrize("control", ("number", "text", "search"))
+@pytest.mark.parametrize("scale", (1.0, 1.5))
+def test_input_focus_follows_the_full_control_contour(control, scale, monkeypatch):
+    from tests.curve_assertions import distance_to_path
+
+    from mojive.curves2d import smooth_rect_points
+    from mojive.ui.panels import search_input
+
+    monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
+    window = Window(
+        WindowConfig(width=540, height=260, docking=False, ini_path="", show_on_start=False)
+    )
+    packed = imgui.color_convert_float4_to_u32(imgui.ImVec4(0.9, 0.3, 0.7, 1.0))
+    try:
+        for index in range(7):
+            window.begin_frame()
+            imgui.push_style_color(imgui.Col_.nav_cursor, packed)
+            imgui.set_next_window_pos((0, 0))
+            imgui.set_next_window_size((540, 260))
+            imgui.begin("Input focus")
+            imgui.text("Keyboard focus follows the field, including search icons")
+            origin = imgui.get_cursor_screen_pos()
+            lo = (origin.x, origin.y)
+            hi = (origin.x + 300 * scale, origin.y + imgui.get_frame_height())
+            imgui.set_next_item_width(300 * scale)
+            if index == 2:
+                imgui.set_keyboard_focus_here()
+            if control == "number":
+                imgui.input_double("##input", 0.0, 0.0, 0.0, "%.6f")
+            elif control == "text":
+                imgui.input_text("##input", "Text")
+            else:
+                search_input("##input", "", hint="Search hierarchy")
+            vertices = np.array(
+                [
+                    (v.pos.x, v.pos.y)
+                    for v in imgui.get_window_draw_list().vtx_buffer
+                    if v.col == packed
+                ]
+            )
+            imgui.end()
+            imgui.pop_style_color()
+            pixels = window.end_frame(readback=True)
+        assert imgui.get_current_context().nav_cursor_visible
+        assert len(vertices) > 8
+        boundary = smooth_rect_points(*lo, *hi, imgui.get_style().frame_rounding, smoothing=0.0)
+        centerline = vertices.reshape(-1, 2, 2).mean(axis=1)
+        gap = distance_to_path(centerline, boundary)
+        assert gap.min() > 2.9
+        assert gap.max() < 4.4
+        destination = Path("output/g3-controls")
+        destination.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(pixels[::-1]).save(destination / f"focus-{control}-{scale:g}x.png")
     finally:
         window.close()
