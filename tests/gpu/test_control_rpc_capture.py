@@ -1,5 +1,6 @@
 """Real GPU capture through the local control service."""
 
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -21,8 +22,18 @@ from mojive.types import CameraView
 pytestmark = pytest.mark.gpu
 
 
+@pytest.fixture
+def standalone_capture_backend(monkeypatch):
+    # Cocoa context creation must stay on the main thread. Standalone RPC
+    # capture owns a graphics worker; attached-viewer tests exercise OpenGL.
+    if sys.platform == "darwin":
+        monkeypatch.setenv("MOJIVE_RENDERER", "wgpu")
+
+
 @pytest.mark.parametrize("mode", ["rgb", "depth", "object_id", "segmentation"])
-def test_shared_capture_matches_arrays_and_reuses_the_buffer(tmp_path, monkeypatch, mode):
+def test_shared_capture_matches_arrays_and_reuses_the_buffer(
+    tmp_path, monkeypatch, mode, standalone_capture_backend
+):
     from mojive.capture import decode_image
 
     scene = Scene()
@@ -55,7 +66,9 @@ def test_shared_capture_matches_arrays_and_reuses_the_buffer(tmp_path, monkeypat
 @pytest.mark.parametrize(
     "mode,encoding", [("rgb", "raw"), ("rgb", "png"), ("depth", "npy"), ("segmentation", "raw")]
 )
-def test_in_memory_scene_capture_creates_no_files(tmp_path, monkeypatch, mode, encoding):
+def test_in_memory_scene_capture_creates_no_files(
+    tmp_path, monkeypatch, mode, encoding, standalone_capture_backend
+):
     from mojive.capture import decode_image
 
     scene = Scene()
@@ -83,7 +96,7 @@ def test_in_memory_scene_capture_creates_no_files(tmp_path, monkeypatch, mode, e
 
 
 @pytest.mark.physics
-def test_control_service_captures_rgb_depth_and_segmentation(tmp_path):
+def test_control_service_captures_rgb_depth_and_segmentation(tmp_path, standalone_capture_backend):
     from mojive.adapters.mujoco_adapter import MuJoCoAdapter
 
     asset = Path("assets/test_scene.xml").resolve()
@@ -114,7 +127,9 @@ def test_control_service_captures_rgb_depth_and_segmentation(tmp_path):
     assert np.load(segmentation["path"]).shape == (96, 128, 2)
 
 
-def test_rpc_scene_capture_follows_visibility_and_camera_across_clients(tmp_path):
+def test_rpc_scene_capture_follows_visibility_and_camera_across_clients(
+    tmp_path, standalone_capture_backend
+):
     scene = Scene()
     box = scene.box(color=(1, 0, 0, 1))
     view = CameraView(up=np.array([0.0, 0.5, 1.0], np.float32))
@@ -281,11 +296,14 @@ def test_viewport_capture_completes_after_present_and_keeps_capture_camera_separ
                 viewer.sync()
             actual = future.result(timeout=1)
         np.testing.assert_allclose(viewer.session.camera.eye, actual["eye"])
-        assert viewer.capture_array(surface="window").shape == (480, 640, 3)
+        width, height = viewer.window.size_pixels
+        assert viewer.capture_array(surface="window").shape == (height, width, 3)
 
 
 @pytest.mark.physics
-def test_mujoco_capture_keeps_session_overrides_and_model_render_limits(tmp_path, monkeypatch):
+def test_mujoco_capture_keeps_session_overrides_and_model_render_limits(
+    tmp_path, monkeypatch, standalone_capture_backend
+):
     import mujoco
 
     from mojive.adapters.mujoco_adapter import MuJoCoAdapter
@@ -326,4 +344,32 @@ def test_mujoco_capture_keeps_session_overrides_and_model_render_limits(tmp_path
         )
         assert np.load(result["path"])[36, 48] == pytest.approx([0, int(mujoco.mjtObj.mjOBJ_GEOM)])
     finally:
+        service.close()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Cocoa requires main-thread window creation")
+def test_unsupported_worker_opengl_capture_returns_error_without_killing_service(
+    tmp_path, monkeypatch
+):
+    from mojive.control_rpc import RpcError
+
+    monkeypatch.setenv("MOJIVE_RENDERER", "opengl")
+    monkeypatch.setenv("MOJIVE_GL", "glfw")
+    scene = Scene()
+    scene.box()
+    service = ControlService(StaticSceneAdapter(scene))
+    server = ControlServer(tmp_path / "unsupported.sock", service)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with RpcClient(server.socket_path) as client:
+            with pytest.raises(RpcError, match="MOJIVE_RENDERER=wgpu"):
+                client.call("capture", {"output": str(tmp_path / "unsupported.png")})
+            assert client.hello()["service"] == "mojive.control"
+            assert client.call("get_scene")["objects"]
+            assert not (tmp_path / "unsupported.png").exists()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
         service.close()

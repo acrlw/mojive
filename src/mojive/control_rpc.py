@@ -320,6 +320,8 @@ class RpcClient:
 
     def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
         """Send one request, validate correlation metadata, and return its result."""
+        if not isinstance(method, str) or not method:
+            raise RpcError("invalid_params", "Method must be a nonempty string")
         if params is not None and not isinstance(params, dict):
             raise RpcError("invalid_params", "Parameters must be a JSON object")
         with self._lock:
@@ -336,9 +338,18 @@ class RpcClient:
                 "deadline": deadline,
             }
             try:
+                encoded = (
+                    json.dumps(request, separators=(",", ":"), allow_nan=False).encode() + b"\n"
+                )
+            except (TypeError, ValueError) as exc:
+                raise RpcError(
+                    "invalid_params", f"Parameters must contain JSON values: {exc}"
+                ) from exc
+            try:
                 client = self._connect()
-                client.sendall(json.dumps(request, separators=(",", ":")).encode() + b"\n")
+                client.sendall(encoded)
                 response = _read_response(client, deadline=deadline)
+                _validate_response(response, request_id)
             except TimeoutError as exc:
                 self.close()
                 raise RpcError(
@@ -352,13 +363,7 @@ class RpcClient:
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 self.close()
                 raise RpcError("connection_failed", str(exc)) from exc
-            if response.get("version") != PROTOCOL_VERSION:
-                self.close()
-                raise RpcError("invalid_response", "RPC response version is incompatible")
-            if response.get("id") != request_id:
-                self.close()
-                raise RpcError("invalid_response", "RPC response ID does not match the request")
-            if response.get("error"):
+            if response.get("error") is not None:
                 error = response["error"]
                 raise RpcError(error["code"], error["message"], details=error.get("details"))
             return response.get("result")
@@ -465,7 +470,33 @@ def _read_response(client: socket.socket, *, deadline: float | None = None) -> d
         data.extend(chunk)
     if not data:
         raise RpcError("invalid_response", "RPC server closed without a response")
-    return json.loads(data)
+    if not data.endswith(b"\n"):
+        raise RpcError("invalid_response", "RPC server closed before completing its response")
+    try:
+        return json.loads(data)
+    except (ValueError, UnicodeError) as exc:
+        raise RpcError("invalid_response", "RPC response is not valid JSON") from exc
+
+
+def _validate_response(response, request_id: int) -> None:
+    """Reject malformed envelopes before exposing their contents to callers."""
+    if not isinstance(response, dict):
+        raise RpcError("invalid_response", "RPC response must be a JSON object")
+    if type(response.get("version")) is not int or response["version"] != PROTOCOL_VERSION:
+        raise RpcError("invalid_response", "RPC response version is incompatible")
+    if type(response.get("id")) is not int or response["id"] != request_id:
+        raise RpcError("invalid_response", "RPC response ID does not match the request")
+    error = response.get("error")
+    if error is not None:
+        if (
+            not isinstance(error, dict)
+            or not isinstance(error.get("code"), str)
+            or not isinstance(error.get("message"), str)
+            or ("details" in error and not isinstance(error["details"], dict))
+        ):
+            raise RpcError("invalid_response", "RPC error must contain a code and message")
+    elif "result" not in response:
+        raise RpcError("invalid_response", "RPC response is missing its result")
 
 
 def _request_deadline(request: dict[str, Any]) -> float | None:

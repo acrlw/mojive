@@ -212,7 +212,11 @@ class SnapshotPublisher:
         self.host, self.port = host, int(port)
         self.command_port = self.port + 1
         self._state_listener = Listener((host, self.port), authkey=AUTHKEY)
-        self._command_listener = Listener((host, self.command_port), authkey=AUTHKEY)
+        try:
+            self._command_listener = Listener((host, self.command_port), authkey=AUTHKEY)
+        except Exception:
+            self._state_listener.close()
+            raise
         self._clients: list[_LatestSender] = []
         self._clients_lock = threading.Lock()
         self._command_clients: set[Connection] = set()

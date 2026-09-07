@@ -152,3 +152,16 @@ def test_unknown_context_mode_does_not_start_any_backend(contexts, monkeypatch):
     with pytest.raises(ValueError, match="Unsupported MOJIVE_GL"):
         renderer._create_context(64, 48)
     assert not calls
+
+
+def test_macos_worker_context_fails_before_glfw_initialization(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from mojive.render import context
+
+    monkeypatch.setattr(context.sys, "platform", "darwin")
+    with (
+        ThreadPoolExecutor(max_workers=1) as pool,
+        pytest.raises(RuntimeError, match="MOJIVE_RENDERER=wgpu"),
+    ):
+        pool.submit(context._GLFWContext, 64, 48).result()
