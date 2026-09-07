@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
+from contextlib import ExitStack
 from dataclasses import asdict
 from pathlib import Path
 
@@ -23,6 +25,26 @@ def _resolve(name: str) -> Path:
     from .assets import resolve
 
     return resolve(name)
+
+
+def _positive_int(value: str) -> int:
+    try:
+        result = int(value)
+        if result > 0:
+            return result
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError("value must be a positive integer")
+
+
+def _positive_float(value: str) -> float:
+    try:
+        result = float(value)
+        if math.isfinite(result) and result > 0.0:
+            return result
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError("value must be finite and positive")
 
 
 def cmd_backends(args: argparse.Namespace) -> int:
@@ -68,8 +90,10 @@ def cmd_assets(args: argparse.Namespace) -> int:
         for n in names:
             try:
                 adapter = make_adapter(args.backend, resolve_asset(n))
-                free[n] = sum(1 for node in adapter.nodes() if node.posable)
-                adapter.release()
+                try:
+                    free[n] = sum(1 for node in adapter.nodes() if node.posable)
+                finally:
+                    adapter.release()
             except Exception:
                 free[n] = -1
 
@@ -205,6 +229,8 @@ def cmd_inspect(args: argparse.Namespace) -> int:
 
 def cmd_audit(args: argparse.Namespace) -> int:
     """Report exactly what Mojive will render, hide, degrade, or skip in a MuJoCo model."""
+    if args.backend != "mujoco":
+        raise ValueError("audit supports the mujoco adapter only")
     from .adapters.conformance import check_adapter
     from .adapters.mujoco_adapter import MuJoCoAdapter
     from .mujoco_audit import audit_model
@@ -272,12 +298,24 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
 
 def _print_tree(nodes, parent: int = -1, depth: int = 0) -> None:
+    children = {}
     for n in nodes:
-        if n.parent != parent:
+        children.setdefault(n.parent, []).append(n)
+    pending = [(iter(children.get(parent, ())), depth)]
+    visited = set()
+    while pending:
+        siblings, depth = pending[-1]
+        n = next(siblings, None)
+        if n is None:
+            pending.pop()
             continue
+        if n.node_id in visited:
+            raise ValueError(f"Scene tree contains a cycle or duplicate node ID: {n.node_id}")
+        visited.add(n.node_id)
         tag = " ◆" if n.posable else ""
         print(f"  {'  ' * depth}{n.name}  ({n.type}, id={n.object_id}){tag}")
-        _print_tree(nodes, n.node_id, depth + 1)
+        if n.node_id in children:
+            pending.append((iter(children[n.node_id]), depth + 1))
 
 
 def cmd_view(args: argparse.Namespace) -> int:
@@ -313,31 +351,41 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from .session import Session
 
     path = _resolve(args.asset)
-    session = Session(make_adapter(args.backend, path), path)
-    publisher = SnapshotPublisher(args.host, args.port)
-    writer = SnapshotWriter(Path(args.record_snapshot)) if args.record_snapshot else None
-    if args.paused and not session.paused:
-        session.submit(cmd.Pause())
-    needs = FrameNeeds(
-        poses=True,
-        qpos=True,
-        qvel=True,
-        contacts=True,
-        tendons=True,
-        actuator=True,
-        sensors=True,
-        deformables=True,
-        diagnostics=True,
-    )
-    period = 1.0 / max(float(args.hz), 1.0)
-    previous = time.perf_counter()
-    deadline = previous
-    published_generation = -1
-    log.info("Publishing {} at {}:{}", path.name, args.host, args.port)
-    try:
+    with ExitStack() as resources:
+        session = Session(make_adapter(args.backend, path), path)
+        resources.callback(session.release)
+        publisher = SnapshotPublisher(args.host, args.port)
+        resources.callback(publisher.close)
+        writer = (
+            resources.enter_context(SnapshotWriter(Path(args.record_snapshot)))
+            if args.record_snapshot
+            else None
+        )
+        if args.paused and not session.paused:
+            session.submit(cmd.Pause())
+        needs = FrameNeeds(
+            poses=True,
+            qpos=True,
+            qvel=True,
+            contacts=True,
+            tendons=True,
+            actuator=True,
+            sensors=True,
+            deformables=True,
+            diagnostics=True,
+        )
+        period = 1.0 / args.hz
+        previous = time.perf_counter()
+        deadline = previous
+        published_generation = -1
+        log.info("Publishing {} at {}:{}", path.name, args.host, args.port)
+
+        def handle_command(message):
+            return handle_session_command(session, message)
+
         while True:
             now = time.perf_counter()
-            publisher.pump_commands(lambda message: handle_session_command(session, message))
+            publisher.pump_commands(handle_command)
             frame = session.tick(needs, wall_dt=max(0.0, now - previous))
             previous = now
             if session.structure_generation != published_generation:
@@ -359,14 +407,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
             deadline += period
             delay = deadline - time.perf_counter()
             if delay > 0.0:
-                time.sleep(delay)
+                # Publication cadence must not delay remote command responses.
+                while delay > 0.0:
+                    time.sleep(min(delay, 0.01))
+                    publisher.pump_commands(handle_command)
+                    delay = deadline - time.perf_counter()
             else:
                 deadline = time.perf_counter()
-    finally:
-        if writer is not None:
-            writer.close()
-        publisher.close()
-        session.release()
 
 
 def cmd_attach(args: argparse.Namespace) -> int:
@@ -426,7 +473,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
                 elif isinstance(packet, RemoteFrame):
                     frame_time = float(packet.frame.time)
                     if previous_time is not None:
-                        wait(max(0.0, frame_time - previous_time) / max(args.speed, 0.01))
+                        wait(max(0.0, frame_time - previous_time) / args.speed)
                     publisher.publish_frame(
                         replace(packet.frame, paused=True), packet.debug_commands
                     )
@@ -558,6 +605,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def cmd_capture(args: argparse.Namespace) -> int:
+    if bool(args.width) != bool(args.height):
+        raise ValueError("Capture width and height must be provided together")
     from .composition import capture
 
     size = (args.width, args.height) if args.width and args.height else None
@@ -658,8 +707,7 @@ def cmd_keyframes(args: argparse.Namespace) -> int:
 def cmd_probe(args: argparse.Namespace) -> int:
     import subprocess
 
-    tool = Path(__file__).resolve().parents[2] / "tools" / "probe_gl.py"
-    return subprocess.call([sys.executable, str(tool)])
+    return subprocess.call([sys.executable, "-m", "mojive.tools.probe_gl"])
 
 
 def cmd_rpc_serve(args: argparse.Namespace) -> int:
@@ -668,12 +716,14 @@ def cmd_rpc_serve(args: argparse.Namespace) -> int:
 
     path = _resolve(args.asset)
     service = ControlService(make_adapter(args.backend, path), path)
-    server = ControlServer(Path(args.socket), service)
-    log.info("Control RPC listening on {}", server.socket_path)
     try:
-        server.serve_forever()
+        server = ControlServer(Path(args.socket), service)
+        log.info("Control RPC listening on {}", server.socket_path)
+        try:
+            server.serve_forever()
+        finally:
+            server.server_close()
     finally:
-        server.server_close()
         service.close()
     return 0
 
@@ -683,7 +733,14 @@ def cmd_control(args: argparse.Namespace) -> int:
 
     try:
         try:
-            params = json.loads(args.params)
+            source = "{}" if args.params is None else args.params
+            if args.params_file is not None:
+                source = (
+                    sys.stdin.read()
+                    if args.params_file == "-"
+                    else Path(args.params_file).expanduser().read_text(encoding="utf-8")
+                )
+            params = json.loads(source)
         except ValueError as exc:
             raise RpcError("invalid_params", f"Invalid parameter JSON: {exc}") from exc
         if not isinstance(params, dict):
@@ -706,8 +763,39 @@ def cmd_control(args: argparse.Namespace) -> int:
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="mojive", description="Interactive 3D simulation viewer")
+def cmd_operations(args: argparse.Namespace) -> int:
+    """Describe installed operation contracts without starting a viewer or service."""
+    from .control_errors import ControlError
+    from .operations import OPERATIONS
+
+    if args.name is not None and args.name not in OPERATIONS:
+        raise ControlError("unknown_method", f"Unknown control method: {args.name}")
+    selected = [OPERATIONS[args.name]] if args.name else OPERATIONS.values()
+    descriptions = [
+        item.specification() for item in selected if args.scope is None or item.scope == args.scope
+    ]
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "schema_dialect": "https://json-schema.org/draft/2020-12/schema",
+                    "operations": descriptions,
+                },
+                indent=2,
+            )
+        )
+    elif args.name:
+        print(json.dumps(descriptions, indent=2))
+    else:
+        for item in descriptions:
+            action = "write" if item["mutates"] else "read"
+            print(f"{item['name']:<28} {item['scope']:<8} {action:<5} {item['description']}")
+        print("\nUse control describe_operations to check live availability and document identity.")
+    return 0
+
+
+def build_parser(*, parser_class=argparse.ArgumentParser) -> argparse.ArgumentParser:
+    p = parser_class(prog="mojive", description="Interactive 3D simulation viewer")
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="command", required=True)
 
@@ -766,7 +854,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = with_asset(sub.add_parser("serve", help="Run physics and publish live snapshots"))
     sp.add_argument("--host", default="127.0.0.1")
     sp.add_argument("--port", type=int, default=47650)
-    sp.add_argument("--hz", type=float, default=120.0, help="snapshot publish rate")
+    sp.add_argument("--hz", type=_positive_float, default=120.0, help="snapshot publish rate")
     sp.add_argument("--paused", action="store_true")
     sp.add_argument("--record-snapshot", metavar="FILE", help="append the published stream")
     sp.set_defaults(func=cmd_serve, json=False)
@@ -787,13 +875,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("snapshot")
     sp.add_argument("--host", default="127.0.0.1")
     sp.add_argument("--port", type=int, default=47650)
-    sp.add_argument("--speed", type=float, default=1.0)
+    sp.add_argument("--speed", type=_positive_float, default=1.0)
     sp.add_argument("--loop", action="store_true")
     sp.set_defaults(func=cmd_replay, json=False)
 
     sp = with_asset(sub.add_parser("doctor", help="Run a 90-frame smoke test"))
     sp.add_argument("--json", action="store_true")
-    sp.add_argument("-n", "--frames", type=int, default=90)
+    sp.add_argument("-n", "--frames", type=_positive_int, default=90)
     sp.set_defaults(func=cmd_doctor)
 
     sp = with_asset(sub.add_parser("inspect", help="Print the scene tree and joint table"))
@@ -810,25 +898,27 @@ def build_parser() -> argparse.ArgumentParser:
     sp = with_render_flags(with_asset(sub.add_parser("capture", help="Save a PNG image")))
     sp.add_argument("-o", "--output", required=True)
     sp.add_argument("--include-ui", action="store_true", help="Include panels and gizmos")
-    sp.add_argument("--width", type=int, default=0, help="Output width, such as 3840 for 4K")
-    sp.add_argument("--height", type=int, default=0)
+    sp.add_argument(
+        "--width", type=_positive_int, default=0, help="Output width, such as 3840 for 4K"
+    )
+    sp.add_argument("--height", type=_positive_int, default=0)
     sp.add_argument("--camera", default="", help="capture through a named model camera")
     sp.set_defaults(func=cmd_capture, json=False)
 
     sp = with_render_flags(with_asset(sub.add_parser("record", help="Record viewport video")))
     sp.add_argument("-o", "--output", required=True)
-    sp.add_argument("--frames", type=int, default=300)
-    sp.add_argument("--fps", type=float, default=30.0)
-    sp.add_argument("--width", type=int, default=1280)
-    sp.add_argument("--height", type=int, default=720)
+    sp.add_argument("--frames", type=_positive_int, default=300)
+    sp.add_argument("--fps", type=_positive_float, default=30.0)
+    sp.add_argument("--width", type=_positive_int, default=1280)
+    sp.add_argument("--height", type=_positive_int, default=720)
     sp.set_defaults(func=cmd_record, json=False)
 
     sp = with_render_flags(with_asset(sub.add_parser("keyframes", help="Record model keyframes")))
     sp.add_argument("-o", "--output", required=True)
-    sp.add_argument("--fps", type=float, default=60.0)
-    sp.add_argument("--width", type=int, default=1920)
-    sp.add_argument("--height", type=int, default=1080)
-    sp.add_argument("--camera-distance-scale", type=float, default=1.0)
+    sp.add_argument("--fps", type=_positive_float, default=60.0)
+    sp.add_argument("--width", type=_positive_int, default=1920)
+    sp.add_argument("--height", type=_positive_int, default=1080)
+    sp.add_argument("--camera-distance-scale", type=_positive_float, default=1.0)
     sp.add_argument("--camera", default="", help="follow a named model camera")
     sp.set_defaults(func=cmd_keyframes, json=False)
 
@@ -858,28 +948,68 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("control", help="Send one typed command to a local control service")
     sp.add_argument("method")
-    sp.add_argument("--params", default="{}", help="JSON object containing method parameters")
+    params = sp.add_mutually_exclusive_group()
+    params.add_argument("--params", help="JSON object containing method parameters")
+    params.add_argument(
+        "--params-file", metavar="FILE", help="Read parameter JSON from a UTF-8 file; - reads stdin"
+    )
     sp.add_argument("--socket", default="output/mojive.sock")
     sp.add_argument("--timeout", type=float, default=5.0)
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_control)
+
+    sp = sub.add_parser("operations", help="Describe installed control schemas without a service")
+    sp.add_argument("name", nargs="?", help="Optional operation name")
+    sp.add_argument("--scope", choices=("scene", "capture", "viewport", "service"))
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_operations)
     return p
 
 
+class _UsageError(Exception):
+    def __init__(self, parser, message):
+        super().__init__(message)
+        self.parser = parser
+
+
+class _ArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise _UsageError(self, message)
+
+
+def _report_error(exc: Exception, code: str, json_mode: bool) -> int:
+    from .control_errors import ControlError
+
+    if json_mode:
+        error = (
+            exc.payload() if isinstance(exc, ControlError) else {"code": code, "message": str(exc)}
+        )
+        print(json.dumps({"error": error}, indent=2))
+    else:
+        print(str(exc), file=sys.stderr)
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    try:
+        args = build_parser(parser_class=_ArgumentParser).parse_args(argv)
+    except _UsageError as exc:
+        json_mode = "--json" in argv[: argv.index("--")] if "--" in argv else "--json" in argv
+        if not json_mode:
+            exc.parser.print_usage(sys.stderr)
+        return _report_error(exc, "invalid_arguments", json_mode)
     _setup_logging(getattr(args, "json", False), args.verbose)
     try:
         return args.func(args)
     except FileNotFoundError as e:
-        print(str(e), file=sys.stderr)
-        return 2
+        return _report_error(e, "not_found", args.json)
+    except OSError as e:
+        return _report_error(e, "io_error", args.json)
     except ValueError as e:
-        print(str(e), file=sys.stderr)
-        return 2
+        return _report_error(e, "invalid_params", args.json)
     except RuntimeError as e:
-        print(str(e), file=sys.stderr)
-        return 2
+        return _report_error(e, "operation_failed", args.json)
     except KeyboardInterrupt:
         return 130
 

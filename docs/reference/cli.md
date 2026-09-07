@@ -4,6 +4,10 @@ Run commands as `uv run mojive ...` from a source checkout, or as `mojive ...` a
 the package. `mojive -v ...` enables verbose logging. Commands with `--json` reserve stdout for the
 JSON document and send logs to stderr.
 
+JSON-mode argument, input, file, and operation failures return an `error` object with `code` and
+`message`, plus `details` when available, and exit with status 2. Successful commands exit with
+status 0; diagnostic acceptance failures can exit with status 1. Interrupts exit with status 130.
+
 ## Render backend and scene adapter
 
 Mojive has two independent backend choices:
@@ -186,6 +190,8 @@ mojive serve ASSET [-b ADAPTER] [--host HOST] [--port PORT] [--hz HZ]
 ```
 
 Defaults: `127.0.0.1:47650` at 120 Hz.
+Positive publication rates below 1 Hz are supported. Waiting between publications continues
+processing remote commands, with an idle polling interval of at most 10 ms.
 
 ### `attach`
 
@@ -211,6 +217,19 @@ Replay is read-only. Timing follows recorded frame timestamps.
 
 ## Local process control
 
+### `operations`
+
+Read installed operation descriptions and JSON schemas without opening a window, loading a scene,
+or connecting to a service. An optional operation name returns its complete contract.
+
+```text
+mojive operations [NAME] [--scope scene|capture|viewport|service] [--json]
+```
+
+This catalog comes from the same definitions as RPC validation. It does not report live
+availability or document identity. Use `control describe_operations` against the target viewer
+before applying edits; the running service can have a different version or adapter.
+
 ### `rpc-serve`
 
 Run a local AF_UNIX scene-control service.
@@ -229,12 +248,23 @@ worker threads and the platform OpenGL context path is main-thread-only. Linux c
 Send one typed RPC method. `--params` must be a JSON object.
 
 ```text
-mojive control METHOD [--params JSON] [--socket PATH] [--timeout SECONDS] [--json]
+mojive control METHOD [--params JSON | --params-file FILE]
+                       [--socket PATH] [--timeout SECONDS] [--json]
 ```
 
 `--json` preserves structured errors with exit status 2. Use `hello`, `get_scene`, and
 `describe_operations` to discover the running service and its parameter schemas. `view` and
 `editor` expose their own Session when started with `--rpc-socket`.
+
+`--params-file` reads UTF-8 JSON. Use `--params-file -` to read stdin. Both inputs require one JSON
+object and reject non-finite numbers before connecting. The default parameters are `{}`.
+Files avoid shell quoting and command-line length limits for multi-operation edits.
+
+```bash
+mojive operations edit_scene --json
+mojive control edit_scene --socket output/mojive.sock --params-file output/edit.json --json
+printf '%s\n' '{"scope":"scene"}' | mojive control describe_operations --params-file - --json
+```
 
 Use the [RPC control guide](../how-to/rpc-control.md) for a persistent Python client and capture
 examples.

@@ -195,6 +195,16 @@ With `--json`, CLI failures print `{"error":{"code":...,"message":...,"details":
 and exit with status 2. Success prints the operation result. Python raises `RpcError` with the
 same `code` and optional `details`. No client retry is implicit.
 
+For shell automation, `mojive operations edit_scene --json` reads the installed schema without
+starting a service. Check `control describe_operations` for the target service's live contract
+and availability. Save a multi-operation request as UTF-8 JSON, then call
+`mojive control edit_scene --params-file output/edit.json --json`. Use `--params-file -` for stdin.
+Inline `--params` remains supported. Malformed JSON and non-finite numbers fail before connecting.
+
+Malformed response envelopes return `invalid_response` and close the connection. A subsequent
+explicit call reconnects. A connection or response failure after submission can leave a mutation's
+outcome unknown; read the current document before deciding whether another edit is needed.
+
 Attached-viewer settings are instance-local by default. Pass `"persist": true` to
 `set_interactions`, `set_selection_style`, or `set_shadow_quality` only when the remote caller
 intentionally wants to update the user's desktop preferences.
