@@ -234,8 +234,12 @@ class SnapshotWriter:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._file = self.path.open("wb")
-        self._file.write(SNAPSHOT_MAGIC)
-        pickle.dump(SnapshotHeader(), self._file, protocol=pickle.HIGHEST_PROTOCOL)
+        try:
+            self._file.write(SNAPSHOT_MAGIC)
+            pickle.dump(SnapshotHeader(), self._file, protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception:
+            self._file.close()
+            raise
         self.packets = 0
 
     def write(self, packet: object) -> None:

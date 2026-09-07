@@ -13,6 +13,12 @@ from .selection import render_backend_name
 
 class _GLFWContext:
     def __init__(self, width: int, height: int) -> None:
+        if sys.platform == "darwin" and threading.current_thread() is not threading.main_thread():
+            raise RuntimeError(
+                "macOS OpenGL context creation requires the main thread. "
+                "Use MOJIVE_RENDERER=wgpu for standalone RPC capture, "
+                "or capture through an attached viewer."
+            )
         import glfw
 
         self._glfw = glfw

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import pickle
 from dataclasses import replace
 
@@ -22,6 +23,20 @@ from mojive.scene import Scene
 from mojive.session import Session
 
 pytestmark = pytest.mark.integration
+
+
+def test_snapshot_header_write_failure_closes_the_file(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    class FullDisk(io.BytesIO):
+        def write(self, _data):
+            raise OSError("disk full")
+
+    stream = FullDisk()
+    monkeypatch.setattr(Path, "open", lambda *args, **kwargs: stream)
+    with pytest.raises(OSError, match="disk full"):
+        SnapshotWriter(tmp_path / "failed.fvs")
+    assert stream.closed
 
 
 def test_snapshot_stream_round_trips_structure_frame_and_debug_commands(tmp_path):

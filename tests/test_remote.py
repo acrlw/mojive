@@ -69,6 +69,17 @@ def _eventually(predicate, timeout=2.0):
     raise AssertionError("condition did not become true")
 
 
+def test_failed_command_listener_releases_the_state_port():
+    port = _port_pair()
+    with socket.socket() as occupied:
+        occupied.bind(("127.0.0.1", port + 1))
+        occupied.listen()
+        with pytest.raises(OSError):
+            SnapshotPublisher(port=port)
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", port))
+
+
 def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
     scene = Scene()
     scene.box(name="remote box")
