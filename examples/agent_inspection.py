@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from mojive import CameraView, Scene
+from mojive import CameraView, Scene, SharedImage
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.control_rpc import ControlServer, ControlService, RpcClient, RpcError
 
@@ -153,6 +153,9 @@ def exercise(socket_path: Path, output: Path) -> None:
         camera = next(item for item in reopened["cameras"] if item["name"] == "inspection")
         client.call("set_capture_camera", {"camera_id": camera["camera_id"]})
         captures.append(client.call("capture", {"output": str(output / "edited-rgb.png")}))
+        with SharedImage((480, 640, 3)) as image:
+            shared_capture = client.capture_into(image)
+            np.testing.assert_array_equal(image.array, np.asarray(Image.open(captures[-1]["path"])))
         if capabilities["viewer_attached"]:
             client.call("set_viewport_camera", {"camera_id": camera["camera_id"]})
             for surface in ("viewport", "window"):
@@ -169,6 +172,7 @@ def exercise(socket_path: Path, output: Path) -> None:
             "visible_pixels": counts,
             "reopened_document": reopened["document"],
             "captures": captures,
+            "shared_capture": shared_capture,
         }
         (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
 

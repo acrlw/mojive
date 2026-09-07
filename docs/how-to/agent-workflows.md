@@ -12,6 +12,7 @@ shape helpers, drawing adapters, retained diagnostics, coordinate units, caching
 | Inspect or control an existing viewer | Start with `--rpc-socket` or attach `Viewer.start_rpc`, then use `RpcClient` or `mojive control` | The viewer's Session |
 | Build a scene and produce images | `Scene` and `SceneRenderer` | Your Python process |
 | Control a standalone simulation | `mojive rpc-serve` and the same RPC client | The service's Session |
+| Display a caller-owned MuJoCo rollout | `launch_passive(model, data)` and `sync()` | The caller's physics loop |
 | Display a remote publisher | Snapshot transport | The publisher owns simulation state |
 
 Starting a standalone service creates a separate Session. To inspect the scene already visible

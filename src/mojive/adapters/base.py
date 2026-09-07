@@ -359,6 +359,38 @@ class VisualGroupInfo:
 
 
 @dataclass(frozen=True)
+class ContactObservation:
+    """One contact in native geometry order, with a wrench on the second geometry.
+
+    ``frame`` maps world vectors to contact coordinates. Wrenches contain force
+    followed by torque, evaluated at ``position``. Negative geometry/body indices
+    identify flex contacts; ``flex_ids`` retains their native identity.
+    """
+
+    index: int
+    geom_ids: tuple[int, int]
+    body_indices: tuple[int, int]
+    flex_ids: tuple[int, int]
+    position: np.ndarray
+    frame: np.ndarray
+    distance: float
+    dimension: int
+    wrench: np.ndarray
+    world_wrench: np.ndarray
+
+
+@dataclass(frozen=True)
+class PhysicsObservation:
+    """Owned copies of derived physics measurements, separate from restorable state."""
+
+    time: float
+    sensordata: np.ndarray
+    sensors: tuple[SensorInfo, ...]
+    actuator_force: np.ndarray
+    contacts: tuple[ContactObservation, ...]
+
+
+@dataclass(frozen=True)
 class PhysicsState:
     """Complete simulation state used by snapshots, reset, and reproduction tools."""
 
@@ -384,6 +416,7 @@ class AdapterCaps:
     asset_loading: bool = False
 
     external_clock: bool = False
+    clock_control: bool = True  # Whether a simulation accepts explicit UI clock commands.
 
     write_pose: bool = False
     write_qpos: bool = False
@@ -608,6 +641,7 @@ class SceneFrame:
     time: float = 0.0
     step: int = 0
     paused: bool = False
+    physics_hz: float | None = None  # Measured by the physics owner; None means unavailable.
 
     geom_xpos: np.ndarray | None = None
     geom_xmat: np.ndarray | None = None
@@ -1142,6 +1176,14 @@ class SceneAdapterBase:
         """Set one actuator control coordinate."""
         return False
 
+    def set_ctrl_vector(self, values: np.ndarray) -> bool:
+        """Validate and replace the entire control vector without partial writes."""
+        return False
+
+    def capture_observation(self) -> PhysicsObservation | None:
+        """Read derived measurements without stepping or recomputing physics."""
+        return None
+
     def set_pose(self, node_id: int, position, rotation) -> bool:
         """Write a world pose to a posable hierarchy node."""
         return False
@@ -1439,6 +1481,8 @@ class SceneAdapter(SceneProvider, Protocol):
     def set_geometry_material(self, node_id: int, material_index: int) -> bool: ...
     def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool: ...
     def set_ctrl(self, index: int, value: float) -> bool: ...
+    def set_ctrl_vector(self, values: np.ndarray) -> bool: ...
+    def capture_observation(self) -> PhysicsObservation | None: ...
     def set_pose(self, node_id: int, position, rotation) -> bool: ...
     def capture_state(self) -> PhysicsState | None: ...
     def restore_state(self, state: PhysicsState) -> bool: ...

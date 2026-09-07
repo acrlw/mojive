@@ -41,6 +41,7 @@ from .adapters.base import (
 from .bounds import SceneBounds, _MeshBoundsCache, _node_local_bounds, _node_world_bounds
 from .commands import Command, CommandResult, Query
 from .history import EditHistory, EditRecord
+from .rates import StepRate
 from .types import (
     Bounds,
     CameraView,
@@ -218,6 +219,7 @@ class Session:
         self._step_counter = 0
         self._pending_steps = 0
         self._frame = SceneFrame()
+        self._physics_rate = StepRate()
         self._source: SceneSource | None = None
         self._mesh_bounds_cache: _MeshBoundsCache = {}
         self._scene_bounds: SceneBounds | None = None
@@ -923,6 +925,11 @@ class Session:
         else:
             self._frame.paused = self._paused
             self._frame.step = self._step_counter
+            self._frame.physics_hz = (
+                self._physics_rate.update(self._step_counter, self._frame.time)
+                if self._adapter.caps.simulation
+                else None
+            )
         if (
             self._state_take_recording
             and (not self._state_take or self._state_take[-1].step != self._step_counter)
@@ -1148,6 +1155,12 @@ class Session:
 
     def _dispatch(self, c: Command) -> CommandResult:
         caps = self._adapter.caps
+        if (
+            caps.simulation
+            and not caps.clock_control
+            and isinstance(c, (cmd.Pause, cmd.Play, cmd.Step, cmd.Reset, cmd.SetSpeed))
+        ):
+            return CommandResult.bad("Physics clock control belongs to the external caller")
 
         if isinstance(c, cmd.StartStateTakeRecording):
             if not caps.simulation or not caps.state_snapshots:
@@ -2678,6 +2691,14 @@ class Session:
                 self._equality_constraints[slot], enabled=bool(c.enabled)
             )
             return CommandResult.good("")
+
+        if isinstance(c, cmd.SetCtrlVector):
+            ok = self._adapter.set_ctrl_vector(c.values)
+            if ok:
+                self._frame_history_dirty = True
+            return (
+                CommandResult.good("") if ok else CommandResult.bad("Control vector update failed")
+            )
 
         if isinstance(c, cmd.SetCtrl):
             ok = self._adapter.set_ctrl(c.index, c.value)

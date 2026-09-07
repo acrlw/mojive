@@ -53,6 +53,7 @@ from .base import (
     BodyProperties,
     BvhType,
     CameraInfo,
+    ContactObservation,
     DiagnosticFrame,
     DiagnosticSource,
     EqualityConstraintInfo,
@@ -70,6 +71,7 @@ from .base import (
     ModelComponentInfo,
     ModelComponentPathItem,
     NodeType,
+    PhysicsObservation,
     PhysicsState,
     SceneAdapterBase,
     SceneFrame,
@@ -1272,7 +1274,7 @@ class _CompositionEditState:
 class MuJoCoAdapter(SceneAdapterBase):
     """Expose MuJoCo model structure, simulation state, and authoring through scene contracts."""
 
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(self, path: Path | None = None, *, external_clock: bool = False) -> None:
         if mujoco is None:  # pragma: no cover
             raise RuntimeError(
                 f"MuJoCo is not installed: {_IMPORT_ERROR}. Install the [mujoco] optional dependency."
@@ -1280,6 +1282,8 @@ class MuJoCoAdapter(SceneAdapterBase):
         self.caps = AdapterCaps(
             name="mujoco",
             simulation=True,
+            external_clock=external_clock,
+            clock_control=not external_clock,
             asset_loading=True,
             write_pose=True,
             write_qpos=True,
@@ -1431,6 +1435,8 @@ class MuJoCoAdapter(SceneAdapterBase):
         """Install an existing MuJoCo model and optional data object."""
         if not isinstance(model, mujoco.MjModel):
             raise TypeError("model must be a mujoco.MjModel")
+        if data is not None and not isinstance(data, mujoco.MjData):
+            raise TypeError("data must be a mujoco.MjData")
         if data is not None and data.model is not model:
             raise ValueError("data was created for a different MuJoCo model")
         self._path = None
@@ -3853,16 +3859,19 @@ class MuJoCoAdapter(SceneAdapterBase):
             self._body_xmat_buf[i] = view.xmat.reshape(3, 3)
 
     def reset(self) -> None:
+        if self.caps.external_clock:
+            raise RuntimeError("Reset belongs to the external physics caller")
         mujoco.mj_resetData(self._m, self._d)
         mujoco.mj_forward(self._m, self._d)
 
     def set_paused(self, paused: bool) -> bool:
         """Pause ownership lives in Session; local MuJoCo needs no additional state."""
-        return True
+        return not self.caps.external_clock
 
     def step(self, count: int = 1) -> None:
-        for _ in range(max(1, int(count))):
-            mujoco.mj_step(self._m, self._d)
+        if self.caps.external_clock:
+            raise RuntimeError("Physics stepping belongs to the external caller")
+        mujoco.mj_step(self._m, self._d, nstep=max(1, int(count)))
 
     def timestep(self) -> float:
         return float(self._m.opt.timestep)
@@ -3873,6 +3882,8 @@ class MuJoCoAdapter(SceneAdapterBase):
         d = self._d
         f = self._frame
         f.time = float(d.time)
+        if self.caps.external_clock:
+            f.paused = False
 
         if needs.poses:
             self._fill_poses()
@@ -7072,12 +7083,64 @@ class MuJoCoAdapter(SceneAdapterBase):
         if not 0 <= i < m.nu:
             return False
         v = float(value)
+        if not np.isfinite(v):
+            return False
         actuator = int(self._ctrl_actuator[i])
         if actuator >= 0 and bool(m.actuator_ctrllimited[actuator]):
             lo, hi = m.actuator_ctrlrange[actuator]
             v = float(np.clip(v, lo, hi))
         self._d.ctrl[i] = v
         return True
+
+    def set_ctrl_vector(self, values: np.ndarray) -> bool:
+        """Clamp all flat control coordinates and commit them together."""
+        values = np.asarray(values, dtype=np.float64)
+        if values.shape != self._d.ctrl.shape or not np.all(np.isfinite(values)):
+            return False
+        if not values.size:
+            return True
+        indices = self._ctrl_actuator
+        limited = self._m.actuator_ctrllimited[indices].astype(bool)
+        ranges = self._m.actuator_ctrlrange[indices]
+        np.clip(
+            values,
+            np.where(limited, ranges[:, 0], -np.inf),
+            np.where(limited, ranges[:, 1], np.inf),
+            out=self._d.ctrl,
+        )
+        return True
+
+    def capture_observation(self) -> PhysicsObservation:
+        """Copy the current solver and sensor outputs without changing simulation state."""
+        m, d = self._m, self._d
+        contacts = []
+        for index in range(d.ncon):
+            contact = d.contact[index]
+            frame = contact.frame.reshape(3, 3).copy()
+            wrench = np.zeros(6, np.float64)
+            mujoco.mj_contactForce(m, d, index, wrench)
+            geom_ids = tuple(int(value) for value in contact.geom)
+            contacts.append(
+                ContactObservation(
+                    index=index,
+                    geom_ids=geom_ids,
+                    body_indices=tuple(int(m.geom_bodyid[g]) if g >= 0 else -1 for g in geom_ids),
+                    flex_ids=tuple(int(value) for value in contact.flex),
+                    position=contact.pos.copy(),
+                    frame=frame,
+                    distance=float(contact.dist),
+                    dimension=int(contact.dim),
+                    wrench=wrench,
+                    world_wrench=(wrench.reshape(2, 3) @ frame).reshape(6),
+                )
+            )
+        return PhysicsObservation(
+            time=float(d.time),
+            sensordata=d.sensordata.copy(),
+            sensors=tuple(self.sensors()),
+            actuator_force=d.actuator_force.copy(),
+            contacts=tuple(contacts),
+        )
 
     def set_light(self, light_index: int, light: Light) -> bool:
         i = int(light_index)

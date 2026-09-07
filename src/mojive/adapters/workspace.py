@@ -698,6 +698,12 @@ class WorkspaceAdapter(SceneAdapterBase):
     def set_ctrl(self, index: int, value: float) -> bool:
         return self.primary.set_ctrl(index, value)
 
+    def set_ctrl_vector(self, values: np.ndarray) -> bool:
+        return self.primary.set_ctrl_vector(values)
+
+    def capture_observation(self):
+        return self.primary.capture_observation()
+
     def capture_state(self):
         return self.primary.capture_state()
 

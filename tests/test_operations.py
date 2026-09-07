@@ -7,7 +7,7 @@ from dataclasses import asdict
 import numpy as np
 import pytest
 
-from mojive import Scene
+from mojive import Scene, SharedImage
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.control_rpc import ControlService, RpcError
 from mojive.control_schema import Validator
@@ -26,6 +26,28 @@ def invoke(service, method, **params):
     result = service.dispatch(method, params)
     Validator(OPERATIONS[method].output_schema).validate(result)
     return result
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"encoding": "raw"},
+        {"output": "unexpected.png"},
+        {"buffer": {"name": "missing", "shape": [2, 3], "dtype": "<f8"}},
+        {"buffer": {"name": "missing", "shape": [2, 3], "dtype": "|u1"}},
+    ],
+)
+def test_invalid_shared_capture_is_rejected_before_rendering(service, monkeypatch, extra):
+    monkeypatch.setattr(
+        service.application._capture_service,
+        "render",
+        lambda *a, **kw: pytest.fail("rendered an invalid capture"),
+    )
+    with SharedImage((2, 3, 3)) as target:
+        params = {"transport": "shared_memory", "buffer": target.descriptor, **extra}
+        with pytest.raises(RpcError) as error:
+            service.dispatch("capture", params)
+        assert error.value.code == "invalid_params"
 
 
 def test_rpc_client_import_does_not_initialize_application_or_graphics():

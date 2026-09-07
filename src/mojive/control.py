@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import Future
+from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,7 @@ import numpy as np
 from . import commands as cmd
 from .adapters.base import FrameNeeds, PhysicsState
 from .camera_control import CameraState, update_camera
+from .capture import encode_image
 from .config import InteractionConfig, SelectionStyle
 from .control_errors import ControlError
 from .control_schema import json_value
@@ -37,6 +40,7 @@ from .scene_state import (
 )
 from .session import Session
 from .session_capture import SessionCapture
+from .shared_image import SharedImage
 from .types import DEFAULT_MATERIAL, CameraView
 
 CAMERA_DIRECTORY = DEFAULT_DIRECTORY / "cameras"
@@ -272,15 +276,13 @@ class ControlApplication:
     def _set_ctrl(self, params: dict[str, Any]) -> dict[str, Any]:
         if "values" not in params:
             return self._command(OPERATIONS["set_ctrl"].command(params))
-        state = self._require_state()
-        values = self._vector("ctrl", params["values"], state.ctrl)
-        results = [self._command(cmd.SetCtrl(index, value)) for index, value in enumerate(values)]
-        return {
-            "ok": True,
-            "message": "",
-            "entity_id": -1,
-            "count": len(results),
-        }
+        frame = self.session.adapter.frame(FrameNeeds(poses=False, actuator=True))
+        if frame.ctrl is None:
+            raise ControlError("unsupported", "The scene adapter does not expose actuator controls")
+        values = self._vector("ctrl", params["values"], frame.ctrl)
+        result = self._command(cmd.SetCtrlVector(values))
+        result["count"] = len(values)
+        return result
 
     def _set_qvel(self, params):
         return self._set_state_fields({"qvel": params["values"]})
@@ -375,7 +377,7 @@ class ControlApplication:
             raise ControlError("invalid_params", f"{name} values must be finite")
         return values
 
-    def _state(self, _params=None) -> dict[str, Any]:
+    def _state(self, params=None) -> dict[str, Any]:
         self.session.tick(FrameNeeds(qpos=True, qvel=True, actuator=True), wall_dt=0.0)
         state = self.session.adapter.capture_state()
         return {
@@ -388,6 +390,12 @@ class ControlApplication:
             "step": self.session.frame.step,
             "time": self.session.frame.time,
             "physics": physics_state_to_dict(state) if state is not None else None,
+            "physics_hz": self.session.frame.physics_hz,
+            "observations": (
+                self.session.adapter.capture_observation()
+                if (params or {}).get("observations", True)
+                else None
+            ),
             "camera": self._capture_camera(),
         }
 
@@ -441,9 +449,67 @@ class ControlApplication:
 
     def _capture_viewport(self, params):
         app = self._require_viewer()
-        return app.request_capture_async(
-            params.get("output"), surface=params.get("surface", "viewport")
-        )
+        transport = self._capture_transport(params)
+        if transport == "file":
+            return app.request_capture_async(
+                params.get("output"), surface=params.get("surface", "viewport")
+            )
+        shared = self._capture_buffer(params) if transport == "shared_memory" else None
+        try:
+            source = app.request_capture_async(
+                surface=params.get("surface", "viewport"),
+                memory=True,
+                out=shared.array if shared is not None else None,
+            )
+        except BaseException:
+            if shared is not None:
+                shared.close()
+            raise
+        result = Future()
+
+        def complete(future):
+            try:
+                if not result.set_running_or_notify_cancel():
+                    return
+                payload = future.result()
+                image = payload.pop("image")
+                transfer = (
+                    {"transport": transport, "buffer": shared.descriptor}
+                    if shared is not None
+                    else encode_image(image, params.get("encoding", "raw"))
+                )
+                result.set_result({**payload, **transfer})
+            except Exception as exc:
+                result.set_exception(exc)
+            finally:
+                if shared is not None:
+                    shared.close()
+
+        source.add_done_callback(complete)
+        result.add_done_callback(lambda future: source.cancel() if future.cancelled() else None)
+        return result
+
+    @staticmethod
+    def _capture_transport(params):
+        transport = params.get("transport", "file")
+        if transport != "file" and "output" in params:
+            raise ControlError("invalid_params", "In-memory capture cannot specify an output path")
+        if transport != "base64" and "encoding" in params:
+            raise ControlError("invalid_params", "encoding requires transport='base64'")
+        if (transport == "shared_memory") != ("buffer" in params):
+            raise ControlError(
+                "invalid_params", "shared_memory transport requires a buffer descriptor"
+            )
+        if params.get("encoding") == "png" and params.get("mode", "rgb") != "rgb":
+            raise ControlError("invalid_params", "PNG encoding requires RGB mode")
+        return transport
+
+    @staticmethod
+    def _capture_buffer(params):
+        try:
+            return SharedImage.attach(params["buffer"])
+        except (OSError, ValueError, TypeError, OverflowError) as exc:
+            raise ControlError("invalid_params", str(exc)) from exc
 
     def _set_option_flag(self, params: dict[str, Any], family: str) -> dict[str, Any]:
         prefix = "mjRND_" if family == "render" else "mjVIS_"
@@ -479,6 +545,7 @@ class ControlApplication:
         return {"name": prefix + flag.name, "enabled": enabled}
 
     def _capture(self, params: dict[str, Any]) -> dict[str, Any]:
+        transport = self._capture_transport(params)
         self._capture_camera()
         from PIL import Image
 
@@ -486,26 +553,36 @@ class ControlApplication:
         width = params.get("width", 640)
         height = params.get("height", 480)
         try:
-            image = self._capture_service.render(
-                self.camera.view(),
-                width=width,
-                height=height,
-                product=CAPTURE_PRODUCTS[mode],
-                camera_id=self.camera_source,
-            )
+            target = self._capture_buffer(params) if transport == "shared_memory" else None
+            with target if target is not None else nullcontext():
+                image = self._capture_service.render(
+                    self.camera.view(),
+                    width=width,
+                    height=height,
+                    product=CAPTURE_PRODUCTS[mode],
+                    camera_id=self.camera_source,
+                    out=target.array if target is not None else None,
+                )
+                if target is not None:
+                    payload = {"transport": transport, "buffer": target.descriptor}
         except NotImplementedError as exc:
             raise ControlError("unsupported", str(exc)) from exc
-        default_suffix = ".png" if mode == "rgb" else ".npy"
-        output = Path(params.get("output", f"output/rpc/{mode}{default_suffix}"))
-        output.parent.mkdir(parents=True, exist_ok=True)
-        if mode == "rgb":
-            Image.fromarray(image, "RGB").save(output)
-        else:
-            np.save(output, image)
-            if output.suffix != ".npy":
-                output = output.with_suffix(output.suffix + ".npy")
+        except ValueError as exc:
+            raise ControlError("invalid_params", str(exc)) from exc
+        if transport == "base64":
+            payload = encode_image(image, params.get("encoding", "raw"))
+        elif transport == "file":
+            default_suffix = ".png" if mode == "rgb" else ".npy"
+            output = Path(params.get("output", f"output/rpc/{mode}{default_suffix}"))
+            output.parent.mkdir(parents=True, exist_ok=True)
+            if mode == "rgb":
+                Image.fromarray(image, "RGB").save(output)
+            else:
+                np.save(output, image)
+                if output.suffix != ".npy":
+                    output = output.with_suffix(output.suffix + ".npy")
+            payload = {"path": str(output.resolve())}
         return {
-            "path": str(output.resolve()),
             "mode": mode,
             "shape": list(image.shape),
             "dtype": str(image.dtype),
@@ -515,6 +592,7 @@ class ControlApplication:
             "structure_generation": self.session.structure_generation,
             "step": self.session.frame.step,
             "time": self.session.frame.time,
+            **payload,
         }
 
     def _drop_renderer(self) -> None:

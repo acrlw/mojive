@@ -108,6 +108,8 @@ class ViewportLabels:
     static: str = "Static"
     time: str = "Time"
     steps: str = "Steps"
+    physics: str = "Physics"
+    render: str = "Render"
     no_selection: str = "No selection"
     clear_selection: str = "Clear selection"
     show_steps: str = "Click to show steps"
@@ -2002,17 +2004,25 @@ def _status_performance_layout(
     *,
     metric_text: str = "",
     max_width: float | None = None,
+    physics_hz: float | None = None,
+    show_physics: bool = False,
+    labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
 ) -> _StatusPerformanceLayout:
     """Keep FPS columns stable and collapse telemetry before it can overlap.
 
-    The visual order is backend, simulation metric, delta time, and FPS.  When
-    space is constrained, backend and FPS yield first, followed by the metric;
-    delta time remains until even its compact form no longer fits.
+    The visual order is backend, simulation metric, delta time, and rates.
+    Preserve the physics/render pair when it fits. Otherwise prioritize the
+    simulation metric and delta time, then use remaining space for render FPS.
     """
 
     backend_text = str(backend)
     delta_text = f"Δt {max(0.0, float(dt)):.6g} s"
-    fps_text = f"{max(0.0, float(fps)):.1f} fps"
+    fps_text = f"{labels.render} {max(0.0, float(fps)):.1f} FPS"
+    fps_reserve = f"{labels.render} 000.0 FPS"
+    if show_physics:
+        rate = "—" if physics_hz is None else f"{max(0.0, physics_hz):.0f}"
+        fps_text = f"{labels.physics} {rate} Hz · {fps_text}"
+        fps_reserve = f"{labels.physics} 00000 Hz · {fps_reserve}"
     metric_text = str(metric_text)
 
     actual = {
@@ -2025,7 +2035,7 @@ def _status_performance_layout(
         "backend": actual["backend"],
         "metric": actual["metric"],
         "delta": actual["delta"],
-        "fps": max(actual["fps"], draw.text_size("000.0 fps")[0]),
+        "fps": max(actual["fps"], draw.text_size(fps_reserve)[0]),
     }
     gap = 22.0 * scale
 
@@ -2035,7 +2045,13 @@ def _status_performance_layout(
 
     limit = float("inf") if max_width is None else max(0.0, float(max_width))
     visible: set[str] = set()
-    if reserved["delta"] <= limit:
+    if show_physics and reserved["fps"] <= limit:
+        visible.add("fps")
+        for name in ("metric", "delta", "backend"):
+            candidate = {*visible, name}
+            if reserved[name] > 0.0 and required(candidate) <= limit:
+                visible = candidate
+    elif reserved["delta"] <= limit:
         visible.add("delta")
     else:
         compact = f"Δt {max(0.0, float(dt)):.4g}s"
@@ -2098,6 +2114,8 @@ def draw_status(
     backend: str,
     dt: float,
     fps: float,
+    physics_hz: float | None = None,
+    show_physics: bool = False,
     status: str = "",
     status_level: str = "info",
     recording_phase: str = "idle",
@@ -2240,6 +2258,9 @@ def draw_status(
         fps,
         metric_text=metric_text,
         max_width=telemetry_budget,
+        physics_hz=physics_hz,
+        show_physics=show_physics,
+        labels=labels,
     )
     telemetry_fields = (
         performance.backend_text,

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from mojive import RenderProduct, Scene, SceneRenderer
+from mojive import RenderProduct, Scene, SceneRenderer, SharedImage
 from mojive import commands as cmd
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.composition import build_scene
@@ -19,6 +19,67 @@ from mojive.operations import OPERATIONS
 from mojive.types import CameraView
 
 pytestmark = pytest.mark.gpu
+
+
+@pytest.mark.parametrize("mode", ["rgb", "depth", "object_id", "segmentation"])
+def test_shared_capture_matches_arrays_and_reuses_the_buffer(tmp_path, monkeypatch, mode):
+    from mojive.capture import decode_image
+
+    scene = Scene()
+    scene.box()
+    service = ControlService(StaticSceneAdapter(scene))
+    monkeypatch.chdir(tmp_path)
+    try:
+        params = {"mode": mode, "width": 64, "height": 48}
+        reference = decode_image(service.dispatch("capture", {**params, "transport": "base64"}))
+        with SharedImage(reference.shape, reference.dtype) as target:
+            target.array.fill(0)
+            for _ in range(2):
+                payload = service.dispatch(
+                    "capture",
+                    {
+                        **params,
+                        "transport": "shared_memory",
+                        "buffer": target.descriptor,
+                    },
+                )
+                Validator(OPERATIONS["capture"].output_schema).validate(payload)
+                assert "path" not in payload and "data" not in payload
+                assert payload["buffer"] == target.descriptor
+                np.testing.assert_array_equal(target.array, reference)
+        assert not list(tmp_path.iterdir())
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize(
+    "mode,encoding", [("rgb", "raw"), ("rgb", "png"), ("depth", "npy"), ("segmentation", "raw")]
+)
+def test_in_memory_scene_capture_creates_no_files(tmp_path, monkeypatch, mode, encoding):
+    from mojive.capture import decode_image
+
+    scene = Scene()
+    scene.box()
+    service = ControlService(StaticSceneAdapter(scene))
+    monkeypatch.chdir(tmp_path)
+    try:
+        payload = service.dispatch(
+            "capture",
+            {
+                "mode": mode,
+                "width": 64,
+                "height": 48,
+                "transport": "base64",
+                "encoding": encoding,
+            },
+        )
+        Validator(OPERATIONS["capture"].output_schema).validate(payload)
+        image = decode_image(payload)
+        assert image.shape[:2] == (48, 64)
+        assert "path" not in payload
+        assert not list(tmp_path.iterdir())
+    finally:
+        service.close()
 
 
 @pytest.mark.physics
@@ -155,6 +216,8 @@ def test_attached_rpc_capture_uses_the_viewer_session_and_keeps_rendering(tmp_pa
 def test_viewport_capture_completes_after_present_and_keeps_capture_camera_separate(
     tmp_path, monkeypatch
 ):
+    from mojive.capture import decode_image
+
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
     scene = Scene()
     scene.box(color=(1, 0, 0, 1))
@@ -191,6 +254,20 @@ def test_viewport_capture_completes_after_present_and_keeps_capture_camera_separ
                     pixels = np.asarray(Image.open(capture["path"]))
                     assert list(pixels.shape) == capture["shape"]
                     assert np.ptp(pixels) > 100
+                    memory = call("capture_viewport", {"surface": surface, "transport": "base64"})
+                    decoded = decode_image(memory)
+                    assert decoded.shape == pixels.shape
+                    assert np.ptp(decoded) > 100
+                    assert "path" not in memory
+                    with SharedImage(decoded.shape) as target:
+                        metadata = client.capture_into(target, surface=surface)
+                        Validator(OPERATIONS["capture_viewport"].output_schema).validate(metadata)
+                        assert "data" not in metadata and "path" not in metadata
+                        assert metadata["buffer"] == target.descriptor
+                        assert np.ptp(target.array) > 100
+                        # The status readout can change between frames; viewport content is stable.
+                        if surface == "viewport":
+                            np.testing.assert_array_equal(target.array, decoded)
                 actual = call("get_viewport_camera")
                 assert actual["up"] == view["up"]
                 assert actual["focal_length"] == view["focal_length"]
@@ -204,6 +281,7 @@ def test_viewport_capture_completes_after_present_and_keeps_capture_camera_separ
                 viewer.sync()
             actual = future.result(timeout=1)
         np.testing.assert_allclose(viewer.session.camera.eye, actual["eye"])
+        assert viewer.capture_array(surface="window").shape == (480, 640, 3)
 
 
 @pytest.mark.physics

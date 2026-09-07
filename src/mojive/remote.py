@@ -684,6 +684,9 @@ class RemoteSceneAdapter(SceneAdapterBase):
     def set_ctrl(self, index: int, value: float) -> bool:
         return self._ok(self._send("ctrl", index=int(index), value=float(value)))
 
+    def set_ctrl_vector(self, values: np.ndarray) -> bool:
+        return self._ok(self._send("ctrl_vector", values=np.asarray(values, np.float64)))
+
     def set_pose(self, node_id: int, position, rotation) -> bool:
         return self._ok(
             self._send(
@@ -1059,6 +1062,7 @@ def handle_session_command(session, message: dict):
         ),
         "equality": lambda: cmd.SetEqualityEnabled(message["constraint_id"], message["enabled"]),
         "ctrl": lambda: cmd.SetCtrl(message["index"], message["value"]),
+        "ctrl_vector": lambda: cmd.SetCtrlVector(message["values"]),
         "light": lambda: cmd.SetLight(
             message.get("light_index", message.get("light_id")), message["light"]
         ),

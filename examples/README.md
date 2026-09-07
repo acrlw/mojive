@@ -14,6 +14,7 @@ Run these programs from the repository root after `uv sync --extra mujoco --extr
 | `mujoco_video.py` | no | streamed MP4 rollout with optional Pillow label/timestamp |
 | `multi_camera_render.py` | no | one PNG for the free view and each fixed camera |
 | `mujoco_control.py` | no | qpos editing and deterministic stepping through `Session` |
+| `passive_viewer.py` | yes | caller-owned physics, independent display rate, and in-memory captures |
 | `compose_scene.py` | no | combined `.mojive.json` workspace or portable MJCF |
 | `remote_publish.py` | no | live latest-state publisher for attached viewers |
 | `record_replay.py` | no | versioned `.fvs` snapshot recording |
@@ -21,6 +22,10 @@ Run these programs from the repository root after `uv sync --extra mujoco --extr
 | `agent_inspection.py` | no | RPC discovery, transactional editing, document lifecycle, and image verification |
 
 All generated files in these examples are placed under the ignored `output/` directory.
+
+Run `make passive-viewer` for a three-second 1000 Hz physics / 60 FPS display example.
+Use `ARGS='--physics-hz 500 --display-fps 30 --hidden'` for an automated run.
+The guarded script entry point is required by the passive viewer's spawned display process.
 
 ## Interactive scenes
 

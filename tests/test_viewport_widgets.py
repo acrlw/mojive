@@ -560,6 +560,33 @@ def test_status_backend_and_fps_use_independent_stable_columns():
     assert two_digits.delta_x - min(two_digits.dividers) == pytest.approx(11.0)
 
 
+def test_status_distinguishes_measured_physics_and_render_rates():
+    draw = _MeasuredText()
+    layout = _status_performance_layout(
+        draw,
+        1000.0,
+        1.0,
+        "OpenGL",
+        0.002,
+        60.0,
+        physics_hz=1000.0,
+        show_physics=True,
+    )
+    assert layout.fps_text == "Physics 1000 Hz · Render 60.0 FPS"
+    unknown = _status_performance_layout(
+        draw,
+        1000.0,
+        1.0,
+        "OpenGL",
+        0.002,
+        60.0,
+        show_physics=True,
+    )
+    assert unknown.fps_text == "Physics — Hz · Render 60.0 FPS"
+    static = _status_performance_layout(draw, 1000.0, 1.0, "OpenGL", 0, 60.0)
+    assert static.fps_text == "Render 60.0 FPS"
+
+
 class _RecordedStatus(_MeasuredText):
     def __init__(self):
         self.texts = []
@@ -791,7 +818,8 @@ def test_status_uses_muted_gray_for_chrome_and_context_hints():
 
 
 @pytest.mark.parametrize("width", (48.0, 80.0, 140.0, 220.0, 300.0, 400.0, 520.0))
-def test_status_progressively_collapses_without_text_overlap(width):
+@pytest.mark.parametrize("show_physics", [False, True])
+def test_status_progressively_collapses_without_text_overlap(width, show_physics):
     from mojive.ui.theme import THEME
 
     draw = _RecordedStatus()
@@ -810,6 +838,8 @@ def test_status_progressively_collapses_without_text_overlap(width):
         backend="wgpu",
         dt=0.002,
         fps=59.8,
+        show_physics=show_physics,
+        physics_hz=1000,
         status="Saved scene",
         tool_hints=(ToolHint("key", "Shift", "Snap"),),
     )

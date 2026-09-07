@@ -760,6 +760,13 @@ class SetCtrl(Command):
 
 
 @dataclass(frozen=True)
+class SetCtrlVector(Command):
+    """Replace all actuator controls in one validated, atomic update."""
+
+    values: np.ndarray
+
+
+@dataclass(frozen=True)
 class Perturb(Command):
     """Apply a world-space translation or rotation perturbation target."""
 

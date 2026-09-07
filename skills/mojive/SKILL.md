@@ -12,6 +12,8 @@ Choose the state owner before choosing an API:
 - New scene and images: use `Scene` and `SceneRenderer` in one Python process. Verify through
   public scene APIs and rendered output; RPC instructions apply only when using RPC.
 - Standalone simulation: use `mojive rpc-serve` and the same control client.
+- Caller-owned MuJoCo rollout: use `launch_passive(model, data)` and publish with `sync()`;
+  see [passive viewing](../../docs/tutorials/passive-viewing.md). The caller owns physics stepping.
 
 Read [agent workflows](../../docs/how-to/agent-workflows.md) when you need startup or executable
 examples, the [scene tutorial](../../docs/tutorials/programmatic-scene.md) for direct authoring,
@@ -45,6 +47,10 @@ query; compare floating-point values with a tolerance. For visual edits, also in
 `capture` renders the composed scene with independent capture settings; `capture_viewport`
 captures the presented viewport or window. Use `set_capture_camera` or `set_viewport_camera`
 for the intended scope.
+For local image loops, reuse `SharedImage` buffers with `RpcClient.capture_into`; read after
+completion and consume before reuse. Base64 supports clients without a shared-memory namespace.
+Save files when an artifact is needed. See the RPC guide for buffer ownership and timeout handling.
+Use `get_state` observations for sensors, contact identity/wrenches, and actuator forces.
 Use `object_id` captures to count selection pixels; segmentation IDs have different semantics.
 After document replacement, rediscover scene cameras and select the intended capture camera again.
 
