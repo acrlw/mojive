@@ -538,7 +538,7 @@ class Window:
 
     _LAYOUT_LEFT = ("Hierarchy", "Assets")
     _LAYOUT_RIGHT_TOP = ("Control", "Joints", "Camera", "Settings", "Sensors")
-    _LAYOUT_RIGHT_BOTTOM = ("Inspector",)
+    _LAYOUT_RIGHT_BOTTOM = ("Inspector", "Layers")
     _LAYOUT_BOTTOM = ("Stats", "Output", "Keyframes", "Plot", "Help", "Info")
 
     def _build_default_layout(self) -> None:

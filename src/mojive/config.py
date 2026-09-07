@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .capture import CaptureSurface
+
 if TYPE_CHECKING:
     from .render.backend import ShadowQuality
 
@@ -182,6 +184,75 @@ class ViewportOverlayConfig:
 
 
 @dataclass(frozen=True)
+class ViewportLayers:
+    """Visibility of viewport overlays, shared by viewing, capture, and recording."""
+
+    viewport_ui: bool = True
+    gizmos: bool = True
+    selection: bool = True
+    helpers: bool = True
+    perturbation: bool = True
+    debug_3d: bool = True
+    debug_2d: bool = True
+    hidden_debug_layers: tuple[str, ...] = ()
+
+    @classmethod
+    def from_mapping(cls, value: object) -> ViewportLayers:
+        source = value if isinstance(value, Mapping) else {}
+        hidden = source.get("hidden_debug_layers", ())
+        return cls(
+            **{
+                name: _bool(source.get(name), True)
+                for name in (
+                    "viewport_ui",
+                    "gizmos",
+                    "selection",
+                    "helpers",
+                    "perturbation",
+                    "debug_3d",
+                    "debug_2d",
+                )
+            },
+            hidden_debug_layers=tuple(
+                dict.fromkeys(name for name in hidden if isinstance(name, str))
+            )
+            if isinstance(hidden, (tuple, list))
+            else (),
+        )
+
+
+@dataclass(frozen=True)
+class RecordingConfig:
+    """Persisted interactive video defaults, independent from display pacing."""
+
+    countdown: float = 3.0
+    fps: float = 60.0
+    surface: CaptureSurface = CaptureSurface.VIEWPORT
+
+    @classmethod
+    def from_mapping(cls, value: object) -> RecordingConfig:
+        source = value if isinstance(value, Mapping) else {}
+        defaults = cls()
+
+        def number(name, minimum, maximum):
+            try:
+                result = float(source.get(name, getattr(defaults, name)))
+            except (TypeError, ValueError):
+                return getattr(defaults, name)
+            if not math.isfinite(result):
+                return getattr(defaults, name)
+            return min(maximum, max(minimum, result))
+
+        try:
+            surface = CaptureSurface(source.get("surface", defaults.surface))
+        except (ValueError, TypeError):
+            surface = defaults.surface
+        return cls(
+            countdown=number("countdown", 0.0, 60.0), fps=number("fps", 1.0, 240.0), surface=surface
+        )
+
+
+@dataclass(frozen=True)
 class ViewerConfig:
     """Top-level behavior configuration for an interactive viewer."""
 
@@ -190,6 +261,8 @@ class ViewerConfig:
     panels: Mapping[str, PanelConfig] = field(default_factory=dict)
     layout: LayoutConfig = field(default_factory=LayoutConfig)
     viewport_overlays: ViewportOverlayConfig = field(default_factory=ViewportOverlayConfig)
+    layers: ViewportLayers = field(default_factory=ViewportLayers)
+    recording: RecordingConfig = field(default_factory=RecordingConfig)
     shadow_quality: ShadowQuality | str | None = None
 
 
@@ -198,8 +271,10 @@ __all__ = [
     "InteractionConfig",
     "LayoutConfig",
     "PanelConfig",
+    "RecordingConfig",
     "SelectionInputConfig",
     "SelectionStyle",
     "ViewerConfig",
+    "ViewportLayers",
     "ViewportOverlayConfig",
 ]

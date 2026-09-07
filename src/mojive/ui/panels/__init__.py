@@ -76,6 +76,10 @@ class PanelContext:
     set_viewport_overlay_scale: Any = None
     viewport_overlays: Any = None
     set_viewport_overlays: Any = None
+    viewport_layers: Any = None
+    set_viewport_layers: Any = None
+    recording_config: Any = None
+    set_recording_config: Any = None
     set_viewport_capsule_scale: Any = None
     input_bindings: Any = None
     set_input_binding: Any = None
@@ -1033,6 +1037,7 @@ def default_panels() -> list[Panel]:
     from .inspector import InspectorPanel
     from .joints import JointsPanel
     from .keyframes import KeyframesPanel
+    from .layers import LayersPanel
     from .output import OutputPanel
     from .plot import PlotPanel
     from .sensors import SensorsPanel
@@ -1051,6 +1056,7 @@ def default_panels() -> list[Panel]:
         StatsPanel(),
         OutputPanel(),
         SettingsPanel(),
+        LayersPanel(),
         SensorsPanel(),
         HelpPanel(),
         InfoPanel(),

@@ -2120,6 +2120,7 @@ def draw_status(
     status_level: str = "info",
     recording_phase: str = "idle",
     recording_duration: float = 0.0,
+    countdown_remaining: float = 0.0,
     recording_surface: str = "scene",
     tool_hints: Sequence[ToolHint] = (),
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
@@ -2127,7 +2128,7 @@ def draw_status(
 ) -> StatusLayout:
     x, y = origin
     running = state == "running"
-    recording = recording_phase in {"recording", "paused"}
+    recording = recording_phase in {"countdown", "recording", "paused"}
     draw.rect_filled((x, y), (x + width, y + height), (*theme.bg_child[:3], 1.0))
     top_divider_width = 1.0 * scale
     top_divider_y = y + top_divider_width * 0.5
@@ -2170,49 +2171,54 @@ def draw_status(
     recording_stop_rect = None
     if recording and width >= 360.0 * scale:
         separator()
-        accent = theme.warning if recording_phase == "paused" else theme.danger
+        accent = theme.warning if recording_phase in {"countdown", "paused"} else theme.danger
         draw.circle_filled((cursor + 3.5 * scale, cy), 3.5 * scale, accent, segments=20)
         cursor += 11.0 * scale
         seconds = max(0, int(recording_duration))
         surface_label = {"scene": "SCENE", "viewport": "VIEW", "window": "WINDOW"}.get(
             recording_surface, "REC"
         )
-        record_text = f"{surface_label} {seconds // 60:02d}:{seconds % 60:02d}"
+        record_text = (
+            f"{surface_label} {max(0, math.ceil(countdown_remaining))} s"
+            if recording_phase == "countdown"
+            else f"{surface_label} {seconds // 60:02d}:{seconds % 60:02d}"
+        )
         cursor += _inline_text(draw, cursor, cy, record_text, accent)
         cursor += 7.0 * scale
         button_size = min(height - 5.0 * scale, 19.0 * scale)
         button_y = cy - button_size * 0.5
-        recording_pause_rect = (cursor, button_y, cursor + button_size, button_y + button_size)
-        draw.rect_filled(
-            recording_pause_rect[:2],
-            recording_pause_rect[2:],
-            theme.bg_frame,
-            rounding=3.0 * scale,
-        )
-        icon = accent
-        center_x = cursor + button_size * 0.5
-        if recording_phase == "paused":
-            draw.line(
-                (center_x - 2.0 * scale, cy - 4.0 * scale),
-                (center_x + 3.5 * scale, cy),
-                icon,
-                1.6 * scale,
+        if recording_phase != "countdown":
+            recording_pause_rect = (cursor, button_y, cursor + button_size, button_y + button_size)
+            draw.rect_filled(
+                recording_pause_rect[:2],
+                recording_pause_rect[2:],
+                theme.bg_frame,
+                rounding=3.0 * scale,
             )
-            draw.line(
-                (center_x + 3.5 * scale, cy),
-                (center_x - 2.0 * scale, cy + 4.0 * scale),
-                icon,
-                1.6 * scale,
-            )
-        else:
-            for offset in (-2.0, 2.0):
+            icon = accent
+            center_x = cursor + button_size * 0.5
+            if recording_phase == "paused":
                 draw.line(
-                    (center_x + offset * scale, cy - 4.0 * scale),
-                    (center_x + offset * scale, cy + 4.0 * scale),
+                    (center_x - 2.0 * scale, cy - 4.0 * scale),
+                    (center_x + 3.5 * scale, cy),
                     icon,
-                    1.8 * scale,
+                    1.6 * scale,
                 )
-        cursor += button_size + 4.0 * scale
+                draw.line(
+                    (center_x + 3.5 * scale, cy),
+                    (center_x - 2.0 * scale, cy + 4.0 * scale),
+                    icon,
+                    1.6 * scale,
+                )
+            else:
+                for offset in (-2.0, 2.0):
+                    draw.line(
+                        (center_x + offset * scale, cy - 4.0 * scale),
+                        (center_x + offset * scale, cy + 4.0 * scale),
+                        icon,
+                        1.8 * scale,
+                    )
+            cursor += button_size + 4.0 * scale
         recording_stop_rect = (cursor, button_y, cursor + button_size, button_y + button_size)
         draw.rect_filled(
             recording_stop_rect[:2],

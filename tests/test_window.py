@@ -529,10 +529,11 @@ def test_viewport_recording_streams_and_finalizes_frames(monkeypatch) -> None:
     app._viewport_recording_path = None
     app._viewport_record_elapsed = 0.0
 
-    app._toggle_viewport_recording()
-    recorder = app._viewport_recorder
-    assert recorder is not None and recorder.size == (2, 1) and recorder.fps == 30.0
+    app.start_recording(surface=CaptureSurface.SCENE, countdown=0)
+    assert app._viewport_recorder is None
     app._record_viewport_frame(0.0)
+    recorder = app._viewport_recorder
+    assert recorder is not None and recorder.size == (2, 1) and recorder.fps == 60.0
     assert recorder.frames == 1
     assert app.recording.phase is RecordingPhase.RECORDING
     assert app.pause_recording()
@@ -763,3 +764,43 @@ def test_overlay_host_is_the_padded_content_intersection_with_the_viewport() -> 
         )
         is None
     )
+
+
+def test_recording_countdown_uses_wall_time_and_waits_for_menu_dismissal(monkeypatch, tmp_path):
+    import mojive.ui.app as app_module
+    from mojive import RecordingConfig
+
+    now = [10.0]
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: now[0])
+    app = ViewerApp.__new__(ViewerApp)
+    app.recording_config = RecordingConfig(countdown=3)
+    app.backend = SimpleNamespace()
+    app._popup_owned_frame = False
+    app._model_load_future = None
+    app.localizer = SimpleNamespace(text=lambda value: value)
+    app.session = SimpleNamespace(report_message=lambda *args, **kwargs: None)
+    path = tmp_path / "countdown.mp4"
+    assert app.start_recording(path) == path
+    assert app.recording.phase is RecordingPhase.COUNTDOWN
+    assert app.recording.countdown_remaining == 3
+    assert app.recording.fps == 60
+    assert app.recording.surface is CaptureSurface.VIEWPORT
+    now[0] += 2.99
+    app._advance_recording_countdown()
+    assert app.recording.phase is RecordingPhase.COUNTDOWN
+    now[0] += 1
+    app._popup_owned_frame = True
+    app._advance_recording_countdown()
+    assert app.recording.phase is RecordingPhase.COUNTDOWN
+    app._popup_owned_frame = False
+    app._advance_recording_countdown()
+    assert app.recording.phase is RecordingPhase.RECORDING
+    assert app.recording.countdown_remaining == 0
+    assert app._viewport_recorder is None
+    assert not path.exists()
+    assert app.stop_recording() is None
+    assert app.start_recording(path, countdown=0) == path
+    assert app.recording.phase is RecordingPhase.COUNTDOWN
+    assert app.stop_recording() is None
+    assert not path.exists()
+    assert app.recording.phase is RecordingPhase.IDLE

@@ -3,6 +3,11 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
+.PHONY: recording-layers
+
+recording-layers:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.recording_layers $(ARGS)
+
 .PHONY: rollout-video
 .PHONY: passive-viewer
 
@@ -82,6 +87,7 @@ help:
 		'  make cameras           free, named, and orthographic cameras' \
 		'  make capture           write PNG' \
 		'  make record            stream MP4' \
+		'  make recording-layers  live layers, countdown, and compact joint acceptance' \
 		'  make rollout-video     offscreen MP4 with simulation-time subtitles' \
 		'  make showcase          render feature overview' \
 		'' \

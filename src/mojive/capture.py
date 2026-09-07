@@ -71,6 +71,7 @@ class RecordingPhase(StrEnum):
     """Lifecycle state of an interactive viewer recording."""
 
     IDLE = "idle"
+    COUNTDOWN = "countdown"
     RECORDING = "recording"
     PAUSED = "paused"
 
@@ -82,9 +83,10 @@ class RecordingInfo:
     phase: RecordingPhase = RecordingPhase.IDLE
     surface: CaptureSurface = CaptureSurface.SCENE
     path: Path | None = None
-    fps: float = 30.0
+    fps: float = 60.0
     frames: int = 0
     duration: float = 0.0
+    countdown_remaining: float = 0.0
 
     @property
     def active(self) -> bool:

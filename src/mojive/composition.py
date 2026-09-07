@@ -16,8 +16,10 @@ from .capture import CaptureSurface, RecordingInfo
 from .config import (
     InteractionConfig,
     LayoutConfig,
+    RecordingConfig,
     SelectionStyle,
     ViewerConfig,
+    ViewportLayers,
     ViewportOverlayConfig,
 )
 from .log import get_logger
@@ -148,6 +150,14 @@ class Viewer:
 
         self.app.set_viewport_overlays(value, persist=persist)
 
+    def configure_layers(self, value: ViewportLayers, *, persist: bool = False) -> None:
+        """Set content visibility for the live viewport and viewport recordings."""
+        self.app.set_viewport_layers(value, persist=persist)
+
+    def configure_recording(self, value: RecordingConfig, *, persist: bool = False) -> None:
+        """Set countdown, surface, and frame rate defaults for future recordings."""
+        self.app.set_recording_config(value, persist=persist)
+
     @property
     def gizmo_mode(self) -> str:
         """Return the active viewport gizmo mode."""
@@ -222,12 +232,13 @@ class Viewer:
         self,
         output: str | Path | None = None,
         *,
-        surface: CaptureSurface | str = CaptureSurface.SCENE,
-        fps: float = 30.0,
+        surface: CaptureSurface | str | None = None,
+        fps: float | None = None,
+        countdown: float | None = None,
     ) -> Path:
-        """Start a user-driven recording without taking over the event loop."""
+        """Schedule recording using configured defaults; zero delay starts on the next frame."""
 
-        return self.app.start_recording(output, surface=surface, fps=fps)
+        return self.app.start_recording(output, surface=surface, fps=fps, countdown=countdown)
 
     def pause_recording(self) -> bool:
         """Pause an active user-driven recording."""
