@@ -151,11 +151,24 @@ CAMERA_PATCH = obj(
     },
     minProperties=1,
 )
+SHARED_IMAGE = obj(
+    {"name": NAME, "shape": {**array(COUNT), "minItems": 2, "maxItems": 3}, "dtype": NAME},
+    required=("name", "shape", "dtype"),
+)
 CAPTURE_RESULT = {
     "type": "object",
-    "required": ["path", "scope"],
+    "required": ["scope"],
+    "oneOf": [
+        {"required": ["path"]},
+        {"required": ["data", "encoding", "transport"]},
+        {"required": ["buffer", "transport"]},
+    ],
     "properties": {
         "path": NAME,
+        "transport": {"enum": ["base64", "shared_memory"]},
+        "buffer": SHARED_IMAGE,
+        "encoding": {"enum": ["raw", "png", "npy"]},
+        "data": STRING,
         "scope": STRING,
         "shape": array(COUNT),
         "dtype": STRING,
@@ -274,6 +287,40 @@ PHYSICS_RESULT = record(
         for item in fields(PhysicsState)
     }
 )
+OBSERVATION_RESULT = record(
+    {
+        "time": NUMBER,
+        "sensordata": VECTOR,
+        "sensors": array(
+            record(
+                {
+                    "sensor_id": ID,
+                    "name": STRING,
+                    "type": STRING,
+                    "data_adr": ID,
+                    "dim": ID,
+                }
+            )
+        ),
+        "actuator_force": VECTOR,
+        "contacts": array(
+            record(
+                {
+                    "index": ID,
+                    "geom_ids": array(INTEGER, 2),
+                    "body_indices": array(INTEGER, 2),
+                    "flex_ids": array(INTEGER, 2),
+                    "position": VECTOR3,
+                    "frame": ROTATION,
+                    "distance": NUMBER,
+                    "dimension": INTEGER,
+                    "wrench": array(NUMBER, 6),
+                    "world_wrench": array(NUMBER, 6),
+                }
+            )
+        ),
+    }
+)
 STATE_RESULT = record(
     {
         "document": DOCUMENT,
@@ -285,6 +332,8 @@ STATE_RESULT = record(
         "step": ID,
         "time": NUMBER,
         "physics": {"anyOf": [PHYSICS_RESULT, {"type": "null"}]},
+        "physics_hz": {"type": ["number", "null"], "minimum": 0},
+        "observations": {"anyOf": [OBSERVATION_RESULT, {"type": "null"}]},
         "camera": CAMERA_RESULT,
     }
 )

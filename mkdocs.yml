@@ -25,6 +25,7 @@ nav:
       - Programmatic scene: tutorials/programmatic-scene.md
       - MuJoCo rendering: tutorials/mujoco-rendering.md
       - Remote viewing and replay: tutorials/remote-viewing.md
+      - Passive viewing: tutorials/passive-viewing.md
   - How-to guides:
       - Custom scene adapter: how-to/custom-adapter.md
       - Debug drawing: how-to/debug-draw.md

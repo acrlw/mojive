@@ -7,6 +7,10 @@ adapter, debug bridge, and editor UI as one owned `Viewer`.
 
 ::: mojive.composition
 
+## Passive MuJoCo viewing
+
+::: mojive.passive
+
 ## Backend discovery
 
 ::: mojive.backends

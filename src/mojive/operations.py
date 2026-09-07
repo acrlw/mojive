@@ -38,6 +38,7 @@ from .control_schema import (
     RGBA,
     ROTATION,
     SCENE_RESULT,
+    SHARED_IMAGE,
     STATE_RESULT,
     STRING,
     VECTOR,
@@ -174,6 +175,12 @@ class Operation:
         """Explain why this operation cannot run in the current application state."""
         if self.scope == "viewport" and not viewer_attached:
             return "This operation requires an attached viewer"
+        if (
+            session.adapter.caps.simulation
+            and not session.adapter.caps.clock_control
+            and self.name in {"pause", "resume", "step", "reset", "set_speed"}
+        ):
+            return "Physics clock control belongs to the external caller"
         for capability in self.capabilities:
             if not getattr(session.adapter.caps, capability):
                 return f"The {session.adapter.caps.name} adapter does not support {capability}"
@@ -249,11 +256,17 @@ _HISTORY = {"capabilities": ("edit_history",)}
 _VIEW = {"scope": "viewport"}
 _PHYSICS = {"capabilities": ("simulation",)}
 _STATE = {"capabilities": ("state_snapshots",), "paused": True}
+_CAPTURE_TRANSFER = {
+    "transport": {"enum": ["file", "base64", "shared_memory"], "default": "file"},
+    "buffer": SHARED_IMAGE,
+    "encoding": {"enum": ["raw", "png", "npy"], "default": "raw"},
+    "output": NAME,
+}
 _CAPTURE_PARAMS = {
     "mode": {"enum": list(CAPTURE_PRODUCTS), "default": "rgb"},
     "width": {**COUNT, "default": 640},
     "height": {**COUNT, "default": 480},
-    "output": NAME,
+    **_CAPTURE_TRANSFER,
 }
 _SCALAR_OR_VECTOR = obj(
     {"index": ID, "value": NUMBER, "values": VECTOR},
@@ -302,6 +315,7 @@ _CATALOG = [
     _op(
         "get_state",
         "Read simulation, selection, capture camera, and document state.",
+        {"observations": {**BOOLEAN, "default": True}},
         result=STATE_RESULT,
         handler="_state",
     ),
@@ -656,8 +670,8 @@ _CATALOG = [
     ),
     _op(
         "capture_viewport",
-        "Save the next fully presented viewport or window; wait for the completed artifact.",
-        {"surface": {"enum": ["viewport", "window"], "default": "viewport"}, "output": NAME},
+        "Capture the next presented viewport or window to a file or in-memory image.",
+        {"surface": {"enum": ["viewport", "window"], "default": "viewport"}, **_CAPTURE_TRANSFER},
         result=CAPTURE_RESULT,
         handler="_capture_viewport",
         **_VIEW,

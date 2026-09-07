@@ -45,8 +45,9 @@ class SessionCapture:
         height: int,
         product: RenderProduct,
         camera_id: int = -1,
+        out: np.ndarray | None = None,
     ) -> np.ndarray:
-        """Refresh composed scene data and synchronously return a top-left image."""
+        """Refresh the scene and return a top-left image, optionally writing into ``out``."""
         if self._closed:
             raise RuntimeError("SessionCapture is closed")
         # Diagnostics are requested only when explicitly enabled. Tendons and
@@ -101,12 +102,13 @@ class SessionCapture:
             width,
             height,
             product,
+            out,
         )
         if self._executor is not None:
             return self._executor.submit(self._render, *args).result()
         return self._render(*args)
 
-    def _render(self, source, generation, frame, camera, width, height, product):
+    def _render(self, source, generation, frame, camera, width, height, product, out):
         structure_changed = (
             self._generation != generation or self._uploaded_opacity != self.dynamic_opacity
         )
@@ -132,7 +134,7 @@ class SessionCapture:
                 f"The capture renderer does not support {self.debug_view.value}"
             )
         self._renderer.update(frame, camera=camera)
-        return self._renderer.render(product=product)
+        return self._renderer.render(product=product, out=out)
 
     def reset(self) -> None:
         """Release capture resources on their owner thread, retaining flag choices."""

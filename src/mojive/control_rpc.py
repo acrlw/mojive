@@ -375,14 +375,51 @@ class RpcClient:
             params["scope"] = scope
         return self.call("describe_operations", params)
 
-    def get_state(self) -> dict[str, Any]:
-        return self.call("get_state")
+    def get_state(self, *, observations: bool = True) -> dict[str, Any]:
+        """Read physics state and optional sensor, contact, and actuator measurements."""
+        return self.call("get_state", {"observations": observations})
+
+    def capture_array(self, *, mode="rgb", width=640, height=480, encoding="raw"):
+        """Capture the session scene directly to a NumPy array without disk I/O."""
+        from .capture import decode_image
+
+        return decode_image(
+            self.call(
+                "capture",
+                {
+                    "mode": mode,
+                    "width": width,
+                    "height": height,
+                    "transport": "base64",
+                    "encoding": encoding,
+                },
+            )
+        )
+
+    def capture_into(self, buffer, *, mode="rgb", surface=None) -> dict[str, Any]:
+        """Write into a reusable SharedImage; return metadata without image serialization.
+
+        The completed response is the write boundary: read ``buffer.array``
+        afterwards and finish consuming it before the next write. On timeout,
+        completion is unknown; discard this buffer instead of reusing it.
+        ``surface='viewport'`` or ``'window'`` captures the presented UI and
+        requires a buffer matching its current pixel dimensions.
+        """
+        descriptor = buffer.descriptor
+        params = {"transport": "shared_memory", "buffer": descriptor}
+        if surface is None:
+            params.update(mode=mode, height=descriptor["shape"][0], width=descriptor["shape"][1])
+            return self.call("capture", params)
+        if mode != "rgb":
+            raise ValueError("Presented capture requires RGB mode")
+        params["surface"] = surface
+        return self.call("capture_viewport", params)
 
     def set_ctrl(self, values) -> dict[str, Any]:
         return self.call("set_ctrl", {"values": list(values)})
 
     def step(self, count: int = 1, *, ctrl=None, observe: bool = False) -> dict[str, Any]:
-        params: dict[str, Any] = {"count": int(count), "observe": bool(observe)}
+        params: dict[str, Any] = {"count": count, "observe": observe}
         if ctrl is not None:
             params["ctrl"] = list(ctrl)
         return self.call("step", params)

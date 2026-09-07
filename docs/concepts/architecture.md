@@ -1,5 +1,12 @@
 # Architecture
 
+## Application boundary
+
+Mojive provides scene inspection, rendering, simulation integration, state/control APIs, and
+image transport. Applications built on these interfaces own controller mappings, teleoperation
+policies, inverse kinematics, episode/reward tracking, custom plots, trajectory dataset formats,
+and Gymnasium integration. These are application responsibilities, not missing viewer modules.
+
 ## Data flow
 
 An adapter publishes a `SceneSource` when stable structure changes and a `SceneFrame` for dynamic

@@ -100,9 +100,12 @@ def test_capture_reuses_resources_and_releases_on_the_graphics_thread(
         def update(self, frame, *, camera):
             self.record("update")
 
-        def render(self, *, product):
+        def render(self, *, product, out=None):
             self.record("render")
-            return np.zeros((self.height, self.width, 3), np.uint8)
+            if out is None:
+                out = np.empty((self.height, self.width, 3), np.uint8)
+            out.fill(0)
+            return out
 
         def resize(self, width, height):
             self.width, self.height = width, height

@@ -478,6 +478,13 @@ def test_status_frame_rate_is_smoothed_and_rate_limited() -> None:
         assert display.update(1.0 / 60.0) == previous
 
 
+def test_status_render_rate_can_drop_below_ten_fps() -> None:
+    display = _FrameRateDisplay()
+    for _ in range(20):
+        display.update(0.5)
+    assert display.value == pytest.approx(2.0, rel=1e-5)
+
+
 def test_dynamic_popover_title_elides_the_middle() -> None:
     value = "Rotate 01_revolute_y_with_a_long_joint_name"
     shown = _middle_elide_text(value, 18.0, len)

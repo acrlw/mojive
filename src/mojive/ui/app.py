@@ -482,7 +482,7 @@ class _FrameRateDisplay:
     elapsed: float = 0.0
 
     def update(self, dt: float) -> float:
-        dt = min(0.1, max(float(dt), 1e-6))
+        dt = max(float(dt), 1e-6)
         # A half-second time constant follows sustained performance changes
         # without turning normal frame-time jitter into flashing text.
         alpha = 1.0 - float(np.exp(-dt / 0.5))
@@ -729,7 +729,9 @@ class ViewerApp:
         self._seen_message_revision = int(getattr(session, "message_revision", 0))
         self._snap_latched = False
         self._capture_request: tuple[Path, CaptureSurface] | None = None
-        self._capture_tasks: list[tuple[Path, CaptureSurface, Future]] = []
+        self._capture_tasks: list[
+            tuple[Path | None, CaptureSurface, Future, np.ndarray | None]
+        ] = []
         self._viewport_recorder: Any | None = None
         self._viewport_recording_path: Path | None = None
         self._viewport_record_elapsed = 0.0
@@ -956,7 +958,7 @@ class ViewerApp:
         if self._released:
             return
         self._released = True
-        for _path, _surface, future in getattr(self, "_capture_tasks", []):
+        for _path, _surface, future, _out in getattr(self, "_capture_tasks", []):
             if not future.done():
                 future.set_exception(RuntimeError("The viewer closed before capture completed"))
         self._capture_tasks = []
@@ -2400,9 +2402,10 @@ class ViewerApp:
     def frame(self) -> None:
         window = self.window
         now = time.perf_counter()
-        dt = self._dt = min(0.1, now - self._last_time)
+        elapsed = now - self._last_time
+        dt = self._dt = min(0.1, elapsed)
         self._last_time = now
-        self._frame_rate.update(dt)
+        self._frame_rate.update(elapsed)
 
         window.begin_frame()
         self._popup_owned_frame = window.popup_owned_frame
@@ -4309,7 +4312,8 @@ class ViewerApp:
                     playing=not paused,
                     step_enabled=paused and not take_playing,
                     previous_enabled=self.session.can_step_back,
-                    enabled=not self._scene_input_blocked(),
+                    enabled=not self._scene_input_blocked()
+                    and self.session.adapter.caps.clock_control,
                     bindings=self.input_bindings,
                     labels=self._viewport_labels,
                     control_specs=self.viewport_chrome.playback_controls,
@@ -4754,6 +4758,8 @@ class ViewerApp:
                 ),
                 dt=_simulation_timestep(self.session.adapter, loading=loading),
                 fps=self._frame_rate.value,
+                physics_hz=self.session.frame.physics_hz,
+                show_physics=self.session.adapter.caps.simulation,
                 status=status_text,
                 status_level="info" if active_status is None else active_status.level,
                 recording_phase=recording.phase.value,
@@ -4833,15 +4839,29 @@ class ViewerApp:
         self._capture_request = (path, surface)
         return path
 
-    def request_capture_async(self, output=None, *, surface=CaptureSurface.VIEWPORT) -> Future:
-        """Complete a capture future after a presented frame has been saved."""
+    def request_capture_async(
+        self, output=None, *, surface=CaptureSurface.VIEWPORT, memory: bool = False, out=None
+    ) -> Future:
+        """Return a presented capture as a file or an owned in-memory image."""
+        if memory and output is not None:
+            raise ValueError("An in-memory capture cannot also specify an output path")
+        if out is not None and not memory:
+            raise ValueError("A capture destination requires memory=True")
+        if out is not None and (
+            out.dtype != np.uint8 or not out.flags.writeable or not out.flags.c_contiguous
+        ):
+            raise ValueError("out must be a writable C-contiguous uint8 array")
         surface = CaptureSurface(surface)
-        path = Path(output) if output is not None else self._capture_output(surface, ".png")
+        path = (
+            None
+            if memory
+            else (Path(output) if output is not None else self._capture_output(surface, ".png"))
+        )
         future = Future()
         if self._released:
             future.set_exception(RuntimeError("The viewer is closed"))
         else:
-            self._capture_tasks.append((path, surface, future))
+            self._capture_tasks.append((path, surface, future, out))
         return future
 
     def start_recording(
@@ -4946,7 +4966,7 @@ class ViewerApp:
             return True
         if any(
             surface is not CaptureSurface.SCENE
-            for _, surface, _ in getattr(self, "_capture_tasks", [])
+            for _, surface, _, _ in getattr(self, "_capture_tasks", [])
         ):
             return True
         return (
@@ -4960,23 +4980,32 @@ class ViewerApp:
         presented = self.window.end_frame(readback=self._needs_presented_readback(dt))
         self._finish_capture_and_recording(presented, dt)
 
-    def _surface_image(self, surface: CaptureSurface, presented: np.ndarray | None) -> np.ndarray:
+    def _surface_image(
+        self, surface: CaptureSurface, presented: np.ndarray | None, *, out=None
+    ) -> np.ndarray:
         if surface is CaptureSurface.SCENE:
-            image = self.backend.target.read_color(flip=True)
-            return np.ascontiguousarray(image[..., :3])
-        if presented is None:
-            raise RuntimeError("window readback did not produce an image")
-        image = np.asarray(presented)[::-1]
-        if surface is CaptureSurface.WINDOW:
-            return np.ascontiguousarray(image[..., :3])
-        x, y, width, height = self.window.points_to_pixels(self._viewport_rect)
-        x0 = max(0, round(x))
-        y0 = max(0, round(y))
-        x1 = min(image.shape[1], round(x + width))
-        y1 = min(image.shape[0], round(y + height))
-        if x1 <= x0 or y1 <= y0:
-            raise RuntimeError("the viewport is outside the presented window")
-        return np.ascontiguousarray(image[y0:y1, x0:x1, :3])
+            if out is not None:
+                return self.backend.target.read_rgb(flip=True, out=out)
+            image = self.backend.target.read_color(flip=True)[..., :3]
+        else:
+            if presented is None:
+                raise RuntimeError("window readback did not produce an image")
+            image = np.asarray(presented)[::-1, :, :3]
+            if surface is CaptureSurface.VIEWPORT:
+                x, y, width, height = self.window.points_to_pixels(self._viewport_rect)
+                x0 = max(0, round(x))
+                y0 = max(0, round(y))
+                x1 = min(image.shape[1], round(x + width))
+                y1 = min(image.shape[0], round(y + height))
+                if x1 <= x0 or y1 <= y0:
+                    raise RuntimeError("the viewport is outside the presented window")
+                image = image[y0:y1, x0:x1]
+        if out is None:
+            return np.ascontiguousarray(image)
+        if out.shape != image.shape or out.dtype != image.dtype or not out.flags.writeable:
+            raise ValueError(f"out must be a writable {image.dtype} array with shape {image.shape}")
+        np.copyto(out, image)
+        return out
 
     def _finish_capture_and_recording(self, presented: np.ndarray | None, dt: float) -> None:
         images: dict[CaptureSurface, np.ndarray] = {}
@@ -5005,18 +5034,27 @@ class ViewerApp:
                     level="success",
                 )
         tasks, self._capture_tasks = getattr(self, "_capture_tasks", []), []
-        for path, surface, future in tasks:
+        for path, surface, future, out in tasks:
             if not future.set_running_or_notify_cancel():
                 continue
             try:
                 from PIL import Image
 
-                image = image_for(surface)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                Image.fromarray(image, "RGB").save(path)
+                image = (
+                    self._surface_image(surface, presented, out=out)
+                    if out is not None
+                    else image_for(surface)
+                )
+                if path is not None:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    Image.fromarray(image, "RGB").save(path)
                 future.set_result(
                     {
-                        "path": str(path.resolve()),
+                        **(
+                            {"path": str(path.resolve())}
+                            if path is not None
+                            else {"image": image if out is not None else image.copy()}
+                        ),
                         "scope": surface.value,
                         "mode": "rgb",
                         "orientation": "top_left",

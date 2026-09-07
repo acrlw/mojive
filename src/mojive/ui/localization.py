@@ -152,6 +152,8 @@ _ZH_CN = {
     "Static": "静态",
     "Time": "时间",
     "Steps": "步数",
+    "Physics": "物理",
+    "Render": "渲染",
     "No selection": "未选择",
     "Clear selection": "取消选择",
     "Scene reset": "场景已重置",

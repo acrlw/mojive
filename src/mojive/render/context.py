@@ -70,6 +70,9 @@ class _StandaloneContext:
     def close(self) -> None:
         if self.gl_context is None:
             return
+        # A current EGL context survives destruction until it is unbound. Clear
+        # that binding before a capture worker exits or another API creates a context.
+        self.gl_context.__exit__(None, None, None)
         self.gl_context.release()
         self.gl_context = None
 

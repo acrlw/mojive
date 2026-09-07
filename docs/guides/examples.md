@@ -13,6 +13,7 @@ not required.
 |---|---|---|
 | Create geometry, cameras, and lights | [Programmatic scene](../tutorials/programmatic-scene.md) | `Scene`, `build_scene` |
 | Render MuJoCo arrays | [MuJoCo rendering](../tutorials/mujoco-rendering.md) | `Renderer` |
+| Evaluate caller-owned physics with a live window | [Passive viewing](../tutorials/passive-viewing.md) | `launch_passive` |
 | Record a rollout or add video subtitles | [Rollout video](../tutorials/mujoco-rendering.md#record-a-rollout) | `VideoRecorder`, Pillow |
 | Publish or record dynamic frames | [Remote viewing and replay](../tutorials/remote-viewing.md) | `SnapshotPublisher`, `SnapshotWriter` |
 | Integrate another physics engine | [Custom scene adapter](../how-to/custom-adapter.md) | `SceneAdapterBase`, `SceneSource`, `SceneFrame` |
@@ -34,6 +35,7 @@ not required.
 | `mujoco_video.py` | streamed MP4 rollout with optional RGB label/timestamp |
 | `multi_camera_render.py` | one PNG per MuJoCo camera |
 | `mujoco_control.py` | qpos editing and deterministic stepping |
+| `passive_viewer.py` | independent physics/display rates and in-memory captures |
 | `compose_scene.py` | combined MJCF/URDF workspace or portable MJCF |
 | `remote_publish.py` | live latest-state publisher for independent viewers |
 | `record_replay.py` | `.fvs` snapshot recording |

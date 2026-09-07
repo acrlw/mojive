@@ -26,6 +26,8 @@ from .render.selection import render_backend_name
 log = get_logger("composition")
 
 if TYPE_CHECKING:
+    from mujoco import MjData, MjModel
+
     from .adapters.base import SceneAdapter
     from .bridge import DebugBridge
     from .canvas2d import Canvas2D
@@ -74,7 +76,17 @@ class Viewer:
 
     def sync(self) -> None:
         """Advance the session and render one frame without entering the event loop."""
+        if self._released:
+            raise RuntimeError("The viewer is closed")
         self.app.sync()
+
+    def is_running(self) -> bool:
+        """Return whether the viewer remains open, including pending save prompts."""
+        return not self._released and not self.app._should_close()
+
+    def close(self) -> None:
+        """Close the viewer and release its resources on the owning UI thread."""
+        self.release()
 
     @property
     def panels(self):
@@ -193,6 +205,18 @@ class Viewer:
         path = self.app.request_capture(output, surface=surface)
         self.sync()
         return path
+
+    def capture_array(self, *, surface: CaptureSurface | str = CaptureSurface.SCENE) -> np.ndarray:
+        """Render and return an owned top-left RGB image without writing a file."""
+        future = self.app.request_capture_async(surface=surface, memory=True)
+        self.sync()
+        return future.result()["image"]
+
+    def capture_into(self, out: np.ndarray, *, surface=CaptureSurface.SCENE) -> np.ndarray:
+        """Capture one presented frame into a reusable RGB destination array."""
+        future = self.app.request_capture_async(surface=surface, memory=True, out=out)
+        self.sync()
+        return future.result()["image"]
 
     def start_recording(
         self,
@@ -349,9 +373,12 @@ def _adapter_name(adapter_name: str | None, backend_name: str | None) -> str:
 
 
 def build(
-    asset: Path,
+    asset: str | Path | MjModel | None = None,
     backend_name: str | None = None,
     *,
+    model: MjModel | None = None,
+    data: MjData | None = None,
+    external_clock: bool | None = None,
     adapter_name: str | None = None,
     renderer: str | None = None,
     paused: bool = True,
@@ -367,6 +394,12 @@ def build(
 
     Args:
         asset: Asset path accepted by the selected scene adapter.
+            An instantiated MuJoCo model is also accepted here.
+        model: Existing MuJoCo model, as an alternative to ``asset``.
+        data: Existing MuJoCo data belonging to ``model``; preserved by identity.
+        external_clock: Let the caller own physics stepping. Defaults to true
+            for instantiated models and false for asset paths. UI pause/play
+            cannot take ownership of an external clock.
         backend_name: Legacy positional alias for ``adapter_name``.
         adapter_name: Scene adapter name, such as ``"mujoco"`` (the default).
         renderer: ``"opengl"`` or ``"wgpu"``; defaults to environment settings.
@@ -386,8 +419,34 @@ def build(
     from .backends import make_adapter
 
     name = _adapter_name(adapter_name, backend_name)
+    if model is not None and asset is not None:
+        raise ValueError("Specify either asset or model")
+    if model is None and asset is not None and not isinstance(asset, (str, Path)):
+        model, asset = asset, None
+    if model is not None or external_clock is not None:
+        if name != "mujoco":
+            raise ValueError("model, data, and external_clock require the MuJoCo adapter")
+        from .adapters.mujoco_adapter import MuJoCoAdapter
+
+        def create_adapter():
+            adapter = MuJoCoAdapter(
+                asset,
+                external_clock=(model is not None if external_clock is None else external_clock),
+            )
+            if model is not None:
+                adapter.load_model(model, data)
+            return adapter
+    else:
+
+        def create_adapter():
+            return make_adapter(name, asset)
+
+    if asset is None and model is None:
+        raise ValueError("An asset path or instantiated model is required")
+    if data is not None and model is None:
+        raise ValueError("data requires an instantiated model")
     return _compose(
-        lambda: make_adapter(name, asset),
+        create_adapter,
         asset_path=asset,
         paused=paused,
         vsync=vsync,

@@ -42,6 +42,7 @@ finally:
 
 The standalone service starts paused and starts a real-time scheduler after `resume`. An attached
 service uses the viewer's existing frame scheduler and never advances the same session twice.
+For a caller-owned policy loop, use [passive viewing](../tutorials/passive-viewing.md).
 
 Use a different socket path for each running service. Startup rejects regular files, symlinks, and
 active sockets; it reclaims a stale socket only after the operating system refuses a connection.
@@ -204,6 +205,91 @@ distance. `object_id` returns a uint32 NPY image whose nonzero values match sele
 pairs supplied by the adapter. MuJoCo supplies native geometry/site/flex/skin IDs and `mjtObj`
 types; unknown semantics and the background use `(-1, -1)`. These semantic IDs are distinct from
 selection object IDs.
+
+## Measurements and vector actions
+
+`set_ctrl` with `values` and `step` with `ctrl` use one validated `SetCtrlVector` command.
+The vector length must equal the flat control dimension; all values must be finite. MuJoCo
+applies each actuator's control limits before committing the vector. Invalid vectors leave
+every control unchanged. Native integrations can submit `commands.SetCtrlVector(values)`
+or call `adapter.set_ctrl_vector(values)` directly.
+
+`get_state` includes `observations` when the adapter supports them. This record contains
+`sensordata`, sensor names/types and their `data_adr`/`dim` slices, `actuator_force`, and
+contacts. Contact records retain native `geom_ids`, `body_indices`, `flex_ids`, position,
+distance, dimension, and the contact frame. Each six-component wrench is force followed by
+torque at the contact point, acting on the second geometry. `wrench` uses contact coordinates;
+`world_wrench` uses world coordinates. Negative geometry/body indices identify flex contacts.
+Body indices can be matched against scene nodes; they are distinct from selection object IDs.
+
+Observations are owned copies of the current native solver outputs. Reading does not step or
+recompute physics. MuJoCo's own sensor computation stages therefore determine their sampling
+time; call `mj_forward` yourself if you explicitly need recomputation after a manual state edit.
+An adapter without this capability returns null. `get_state(observations=False)` omits the
+measurement work. `step(..., observe=True)` includes the post-step state and measurements in
+the same response. The existing `physics` snapshot representation remains separate.
+
+## In-memory capture
+
+The default capture transport writes a file. Set `"transport": "base64"` to return image bytes
+in the JSON response without creating a file. `encoding` accepts `raw` (default, uncompressed
+array bytes), `npy` (NumPy container), or `png` (RGB only). `shape`, NumPy `dtype` including byte
+order, and top-left orientation describe the image. An in-memory request cannot specify an
+`output` path. Base64 increases wire size; it removes disk I/O rather than providing zero-copy
+transport. `capture_viewport` supports the same transport for viewport/window RGB.
+
+For repeated local capture, allocate one `SharedImage` and use `capture_into`. It returns frame
+metadata; pixel data is written directly into the caller's buffer without JSON image encoding
+or a client-side image copy. RGB, metric depth, object IDs, and segmentation are supported.
+
+```python
+import numpy as np
+from mojive import SharedImage
+
+with SharedImage((480, 640, 3), np.uint8) as rgb:
+    for _ in range(100):
+        metadata = client.capture_into(rgb)
+        image = rgb.array  # Zero-copy view, overwritten by the next capture into rgb.
+        print(metadata["step"], image.mean())
+
+with SharedImage((480, 640), np.float32) as depth:
+    client.capture_into(depth, mode="depth")
+```
+
+Raw RPC clients send `{"transport": "shared_memory", "buffer": {"name": ..., "shape": ...,
+"dtype": ...}}` with the usual capture dimensions and mode. The response echoes `buffer` with
+`transport`, shape, dtype, orientation, and frame metadata. No pixel bytes travel over the socket.
+Shared memory requires the same host and shared-memory namespace. Base64 remains available
+when processes cannot map the same allocation.
+
+The caller owns allocation and cleanup. Read only after the successful response and finish
+consuming the view before the next write to the same buffer. Use `image.copy()` to retain a
+frame, or separate buffers for concurrent consumers. If a request times out, discard that buffer:
+the server may still be completing its write. Readers never unlink another process's allocation.
+Closing the owner unlinks the POSIX name; existing local NumPy views retain their mapping until
+released. Windows frees the allocation when its last mapping closes.
+
+For presented RGB, use `client.capture_into(buffer, surface="viewport")` or `surface="window"`.
+The buffer must match that surface's current pixel dimensions; reallocate after a resize.
+GPU readback, orientation changes, and format conversion still have a cost. Shared memory
+removes IPC pixel copies; it does not imply a zero-copy GPU-to-policy path.
+
+```python
+from mojive.capture import decode_image
+
+rgb = client.capture_array(width=640, height=480)
+depth = client.capture_array(mode="depth", encoding="npy")
+payload = client.call("capture", {
+    "mode": "rgb", "transport": "base64", "encoding": "png",
+})
+image = decode_image(payload)
+print(payload["step"], payload["time"])
+```
+
+The regular Python `Viewer.capture_array(surface="scene")` returns an owned RGB array directly.
+The MuJoCo `Renderer` and generic `SceneRenderer` also return arrays for RGB, depth, and IDs.
+
+## Scene and presented capture settings
 
 Captures consume the current Session scene, including authored geometry, visibility, materials,
 camera overrides, and dynamic meshes. They work with static, workspace, remote, and physics

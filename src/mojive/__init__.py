@@ -9,6 +9,7 @@ if TYPE_CHECKING:
         ActuatorVisualType,
         AdapterCaps,
         CameraInfo,
+        ContactObservation,
         DiagnosticFrame,
         DiagnosticSource,
         EqualityConstraintInfo,
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
         JointVisualType,
         KeyframeInfo,
         NodeType,
+        PhysicsObservation,
         PhysicsState,
         SceneAdapter,
         SceneAdapterBase,
@@ -56,6 +58,7 @@ if TYPE_CHECKING:
     )
     from .input import InputClaim, InputContext
     from .mujoco_audit import audit_model, schema_coverage, visual_coverage
+    from .passive import PassiveViewer, launch_passive
     from .recording import SnapshotWriter, VideoRecorder, read_snapshots
     from .remote import RemoteSceneAdapter, SnapshotPublisher
     from .render.backend import (
@@ -71,6 +74,7 @@ if TYPE_CHECKING:
     from .renderer import Renderer
     from .scene import Scene, SceneLight, SceneObject
     from .scene_renderer import SceneRenderer
+    from .shared_image import SharedImage
     from .types import (
         Bounds,
         CameraView,
@@ -97,6 +101,7 @@ _EXPORT_MODULES = {
         "ActuatorVisualType",
         "AdapterCaps",
         "CameraInfo",
+        "ContactObservation",
         "DiagnosticFrame",
         "DiagnosticSource",
         "EqualityConstraintInfo",
@@ -105,6 +110,7 @@ _EXPORT_MODULES = {
         "JointVisualType",
         "KeyframeInfo",
         "NodeType",
+        "PhysicsObservation",
         "PhysicsState",
         "SceneAdapter",
         "SceneAdapterBase",
@@ -141,6 +147,8 @@ _EXPORT_MODULES = {
         "ViewportOverlayConfig",
     ),
     ".input": ("InputClaim", "InputContext"),
+    ".passive": ("PassiveViewer", "launch_passive"),
+    ".shared_image": ("SharedImage",),
     ".recording": ("SnapshotWriter", "VideoRecorder", "read_snapshots"),
     ".remote": ("RemoteSceneAdapter", "SnapshotPublisher"),
     ".render.backend": (
@@ -206,6 +214,7 @@ __all__ = [
     "CenteredBounds",
     "ConformanceCheck",
     "ConformanceReport",
+    "ContactObservation",
     "DebugDraw",
     "DebugView",
     "DiagnosticFrame",
@@ -236,6 +245,8 @@ __all__ = [
     "NodeType",
     "Occlusion",
     "PanelConfig",
+    "PassiveViewer",
+    "PhysicsObservation",
     "PhysicsState",
     "RecordingInfo",
     "RecordingPhase",
@@ -261,6 +272,7 @@ __all__ = [
     "SensorInfo",
     "ShadingModel",
     "ShadowQuality",
+    "SharedImage",
     "SnapshotPublisher",
     "SnapshotWriter",
     "ToyPhysicsAdapter",
@@ -276,6 +288,7 @@ __all__ = [
     "build_scene",
     "build_workspace",
     "check_adapter",
+    "launch_passive",
     "make_adapter",
     "read_snapshots",
     "register_adapter",
