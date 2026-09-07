@@ -42,6 +42,7 @@ from .bounds import SceneBounds, _MeshBoundsCache, _node_local_bounds, _node_wor
 from .commands import Command, CommandResult, Query
 from .history import EditHistory, EditRecord
 from .rates import StepRate
+from .simulation import SimulationDriver
 from .types import (
     Bounds,
     CameraView,
@@ -208,6 +209,7 @@ class Session:
         history_byte_limit: int = 256 * 1024 * 1024,
     ) -> None:
         self._adapter = adapter
+        self._simulation_driver: SimulationDriver | None = None
         self._asset_path = asset_path
         self._paused = not adapter.caps.simulation
         self._speed = 1.0
@@ -871,6 +873,37 @@ class Session:
         self._frame_history_dirty = True
         return CommandResult.good("Scene state restored")
 
+    def set_threaded_physics(self, enabled: bool) -> bool:
+        """Choose concurrent real-time stepping; explicit ticks remain synchronous."""
+        if not enabled:
+            if self._simulation_driver is not None:
+                self._step_counter += self._simulation_driver.suspend()
+                self._simulation_driver.close()
+                self._simulation_driver = None
+            return False
+        if self._simulation_driver is None and not self._adapter.caps.external_clock:
+            factory = getattr(self._adapter, "create_simulation_driver", None)
+            self._simulation_driver = factory() if factory is not None else None
+        return self._simulation_driver is not None
+
+    def _resume_physics(self, *, reset_clock: bool = True) -> None:
+        if (
+            self._simulation_driver is not None
+            and not self._paused
+            and not self._state_take_playing
+        ):
+            try:
+                self._simulation_driver.start(self._speed, reset_clock=reset_clock)
+            except Exception as exc:
+                self._physics_failed(exc)
+
+    def _physics_failed(self, error: Exception) -> None:
+        self.set_threaded_physics(False)
+        self._paused = True
+        self._state_take_recording = False
+        self._adapter.set_paused(True)
+        self.report_message(f"Physics worker stopped: {error}", level="error")
+
     def tick(self, needs: FrameNeeds, wall_dt: float | None = None) -> SceneFrame:
         """Advance simulation time and obtain one composed dynamic frame.
 
@@ -878,6 +911,17 @@ class Session:
             needs: Optional dynamic arrays required by current consumers.
             wall_dt: Elapsed wall time used for real-time simulation scheduling.
         """
+        step_before = self._step_counter
+        concurrent = self._simulation_driver is not None and wall_dt is not None
+        if self._simulation_driver is not None:
+            try:
+                self._step_counter += self._simulation_driver.poll()
+                if concurrent and not self._paused and not self._state_take_playing:
+                    self._resume_physics()
+                else:
+                    self._step_counter += self._simulation_driver.suspend()
+            except Exception as exc:
+                self._physics_failed(exc)
         history_enabled = bool(
             self._adapter.caps.simulation
             and self._adapter.caps.state_snapshots
@@ -886,12 +930,11 @@ class Session:
         )
         if history_enabled and not self._frame_history:
             self._append_frame_history()
-        step_before = self._step_counter
         frame_step_before = int(self._frame.step)
         frame_time_before = float(self._frame.time)
         if self._state_take_playing:
             self._advance_state_take(wall_dt)
-        elif not self._paused and not self._adapter.caps.external_clock:
+        elif not self._paused and not self._adapter.caps.external_clock and not concurrent:
             timestep = self._adapter.timestep()
             if wall_dt is not None and timestep > 0.0:
                 self._sim_time_credit += float(wall_dt) * self._speed
@@ -956,6 +999,20 @@ class Session:
 
     def submit(self, command: Command) -> CommandResult:
         """Apply one typed command and update edit history and status text."""
+        driver = self._simulation_driver
+        # Camera and selection only change Session-owned state. All other
+        # commands fence physics before reading history or mutating an adapter;
+        # new command types inherit the safe default.
+        if driver is None or isinstance(command, (cmd.SetCamera, cmd.Select, cmd.SelectNode)):
+            return self._submit(command)
+        was_running = not self._paused and not self._state_take_playing
+        self._step_counter += driver.suspend()
+        try:
+            return self._submit(command)
+        finally:
+            self._resume_physics(reset_clock=not was_running)
+
+    def _submit(self, command: Command) -> CommandResult:
         if isinstance(command, cmd.BeginEditTransaction):
             result = self._begin_edit(command.label)
             return self._record_result(result)
@@ -3180,4 +3237,5 @@ class Session:
 
     def release(self) -> None:
         """Release resources owned by the scene adapter."""
+        self.set_threaded_physics(False)
         self._adapter.release()

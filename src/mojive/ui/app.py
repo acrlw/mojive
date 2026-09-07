@@ -587,6 +587,7 @@ class ViewerApp:
             selection=SelectionStyle.from_mapping(self.localizer.preference("selection_style", {})),
         )
         self.interactions = viewer_config.interactions
+        self._threaded_physics = viewer_config.threaded_physics
         self.selection_style = viewer_config.selection
         overlay_config = ViewportOverlayConfig.from_mapping(
             asdict(viewer_config.viewport_overlays)
@@ -969,6 +970,7 @@ class ViewerApp:
             self.window = Window(WindowConfig(title=self.title))
         self._sync_structure()
         self._reset_source_camera()
+        self.session.set_threaded_physics(self._threaded_physics)
         if self.window.config.show_on_start:
             self.window.show()
         self._started = True

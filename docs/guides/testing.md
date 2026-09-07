@@ -102,6 +102,36 @@ completion gate.
 
 ## Renderer performance
 
+The production physics/render concurrency comparison includes the official MuJoCo 100-humanoid
+model (1,600 moving bodies, 2,700 degrees of freedom), deformable stress, and a lightweight rigid
+scene:
+
+```bash
+make physics-concurrency
+make physics-concurrency HUMANOIDS_MODEL=/path/to/mujoco/model/humanoid/100_humanoids.xml
+```
+
+This target compares `ViewerConfig(threaded_physics=False)` and the default concurrent driver
+through the real Viewer and Session. It alternates modes over three repeats, uses identical
+render quality, verifies physics against serial replay, and saves captures, frame samples, and
+thread timelines under `output/physics-concurrency/`. The default model path follows the first
+`MUJOCO_MODEL_ROOTS` checkout. No models are downloaded by the target.
+
+Report both rendering rate and simulation progress. `display_time_lag_ms` measures displayed
+simulation time against elapsed target time; a recently published snapshot can still represent
+a late simulation. Frame work and `sync()` return timings are CPU/application metrics, not
+display scanout latency. Each case owns a hidden window with VSync disabled and drains the GPU
+before ending its throughput measurement. Run performance measurements separately from tests.
+
+`make physics-render-benchmark` retains a fixed-workload experiment for isolating snapshot-copy
+cost. Its ordered publication mode preserves every displayed state and applies backpressure;
+it is distinct from the production latest-state policy. Pass `--production` to measure the real
+Session runtime, and `--renderer wgpu` to select the other backend.
+
+Thread ownership, pause/step/history, command fences, model replacement, controls, replay, and
+failure recovery are covered by `tests/test_threaded_physics.py`. Default viewer startup and
+model-loading interaction additionally run through the GPU suites.
+
 The quick renderer benchmark compares `mujoco.Renderer`, Mojive OpenGL, and Mojive wgpu through
 their public `update_scene()` and `render()` APIs:
 

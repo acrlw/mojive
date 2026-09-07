@@ -264,6 +264,7 @@ class ViewerConfig:
     layers: ViewportLayers = field(default_factory=ViewportLayers)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
     shadow_quality: ShadowQuality | str | None = None
+    threaded_physics: bool = True
 
 
 __all__ = [
