@@ -457,7 +457,11 @@ class WgpuWindow(Window):
         self._layout_done = False
         self.latch = ResizeLatch()
 
-        self._gpu_context = wgpu.gpu.get_canvas_context(get_glfw_present_info(handle))
+        # Window pacing (or the passive display scheduler) owns the frame rate.
+        # wgpu otherwise defaults to FIFO and waits on native vsync as well.
+        self._gpu_context = wgpu.gpu.get_canvas_context(
+            {**get_glfw_present_info(handle), "vsync": False}
+        )
         self._gpu_context.set_physical_size(*self.size_pixels)
         self._configure_surface()
         self._imgui_backend = _WgpuImguiBackend(self._device, self._surface_format)
@@ -489,8 +493,8 @@ class WgpuWindow(Window):
         pass
 
     def set_vsync(self, on: bool) -> None:
-        # wgpu-py 0.32 picks the immediate present mode and exposes no knob,
-        # so vsync is emulated by pacing the frame loop (see _pace_frame).
+        # The surface requests immediate presentation; software pacing can be
+        # toggled without recreating its swapchain (see _pace_frame).
         self._vsync = bool(on)
         self._next_frame_at = None
 
@@ -590,7 +594,10 @@ class WgpuWindow(Window):
         texels = np.frombuffer(data, np.uint8).reshape(h, row_bytes)[:, : w * 4].reshape(h, w, 4)
         if self._readback is None or self._readback.shape[:2] != (h, w):
             self._readback = np.empty((h, w, 3), np.uint8)
-        self._readback[:] = texels[::-1, :, self._rgb_channels]
+        # Advanced channel indexing creates a planar full-frame temporary.
+        # Copy strided channels directly into the reusable packed RGB buffer.
+        for destination, source in enumerate(self._rgb_channels):
+            np.copyto(self._readback[..., destination], texels[::-1, :, source])
         return self._readback
 
     def close(self) -> None:
