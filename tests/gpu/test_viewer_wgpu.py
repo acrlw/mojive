@@ -77,6 +77,8 @@ def test_window_and_backend_are_wgpu(viewer):
     assert not v.window.shown
     assert v.backend.caps.name == "wgpu"
     assert v.backend.device is v.window.device
+    # The window owns software pacing; native FIFO must not impose another clock.
+    assert not v.window._gpu_context._present_info["vsync"]
     fb_w, fb_h = v.window.size_pixels
     pt_w, pt_h = v.window.size_points
     assert fb_w >= pt_w and fb_h >= pt_h

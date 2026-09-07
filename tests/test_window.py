@@ -43,7 +43,28 @@ from mojive.ui.window import (
     resolve_context_api,
     resolve_ui_scales,
 )
-from mojive.ui.window_wgpu import _scissor_rect_for_target
+from mojive.ui.window_wgpu import WgpuWindow, _scissor_rect_for_target
+
+
+@pytest.mark.parametrize("channels", [(0, 1, 2), (2, 1, 0)])
+def test_wgpu_window_readback_preserves_rgb_padding_and_orientation(channels):
+    width, height = 7, 5
+    rgb = np.arange(height * width * 3, dtype=np.uint8).reshape(height, width, 3)
+    raw = np.full((height, 256), 239, np.uint8)
+    texels = raw[:, : width * 4].reshape(height, width, 4)
+    texels[..., :3] = rgb if channels == (0, 1, 2) else rgb[..., ::-1]
+    texels[..., 3] = 17
+    window = SimpleNamespace(
+        _frame_tex=object(),
+        _frame_tex_size=(width, height),
+        _readback=None,
+        _rgb_channels=channels,
+        _device=SimpleNamespace(queue=SimpleNamespace(read_texture=lambda *args: raw)),
+    )
+    result = WgpuWindow.read_frame(window)
+    np.testing.assert_array_equal(result, rgb[::-1])
+    assert result.flags.c_contiguous
+    assert WgpuWindow.read_frame(window) is result
 
 
 def test_glfw_clipboard_callbacks_use_the_process_wide_api_without_a_window() -> None:
