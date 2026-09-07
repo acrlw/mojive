@@ -549,6 +549,11 @@ class WorkspaceAdapter(SceneAdapterBase):
     def timestep(self) -> float:
         return self.primary.timestep()
 
+    def create_simulation_driver(self):
+        """Keep physics ownership in the primary adapter when composing a scene."""
+        factory = getattr(self.primary, "create_simulation_driver", None)
+        return factory() if factory is not None else None
+
     def joints(self):
         return self.primary.joints()
 

@@ -386,13 +386,16 @@ class Layer:
         st = self._stores[PrimitiveType.STROKE]
         dst = st.positions[i : i + count]
         if closed:
-            dst[:, 0] = np.roll(p, 1, axis=0)
+            dst[0, 0] = p[-1]
+            dst[1:, 0] = p[:-1]
             dst[:, 1] = p
-            dst[:, 2] = np.roll(p, -1, axis=0)
+            dst[:-1, 2] = p[1:]
+            dst[-1, 2] = p[0]
         else:
             dst[:, 1] = p[:-1]
             dst[:, 2] = p[1:]
-            dst[:, 0] = np.concatenate((p[:1], p[:-2]), axis=0)
+            dst[0, 0] = p[0]
+            dst[1:, 0] = p[:-2]
         colors = np.asarray(color, np.float32)
         st.colors[i : i + count] = colors[:count] if colors.ndim == 2 else _rgba(color)
         st.sizes[i : i + count] = width_px

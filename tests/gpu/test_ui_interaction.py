@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import os
+import time
 
 import numpy as np
 import pytest
@@ -2556,8 +2557,12 @@ def test_viewport_playback_widget_controls_simulation(viewer):
     click(v, imgui.get_io(), item_rect(v, "invisible_button", "##viewport-playback-toggle"))
     assert not v.session.paused
 
-    for _ in range(3):
+    # Rendering can complete several frames before the real-time physics
+    # deadline. Wait for a published state without assuming one step per frame.
+    deadline = time.monotonic() + 2
+    while v.session.frame.step == 0 and time.monotonic() < deadline:
         v.sync()
+        time.sleep(0.002)
     assert v.session.frame.step > 0
     click(v, imgui.get_io(), item_rect(v, "invisible_button", "##viewport-playback-reset"))
     assert v.session.paused

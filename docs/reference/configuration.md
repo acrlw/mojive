@@ -122,6 +122,13 @@ Explicit `ViewerConfig` values apply to that viewer instance. Changes made in Se
 as desktop preferences for later viewers created without an explicit config. Runtime
 `configure_*` calls are also instance-local unless passed `persist=True`.
 
+Owned MuJoCo viewers default to `ViewerConfig(threaded_physics=True)`: physics advances on a
+worker while the main thread reads completed snapshots. Use `threaded_physics=False` for the
+serial path. This is an instance option, not a persisted desktop preference. Externally clocked
+models and adapters without a concurrent driver keep their existing execution mode. Physics
+commands synchronize at a native batch boundary; camera and selection interaction do not wait
+for that boundary. See [simulation ownership](../concepts/architecture.md#ownership).
+
 Input hooks and bindings use physical keys and mouse buttons. On macOS, `ctrl` means Control
 and `super` means Command; Control plus left click remains a left-button gesture. Native macOS
 text-editing shortcuts remain enabled inside ImGui text fields.

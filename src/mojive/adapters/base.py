@@ -26,6 +26,7 @@ from ..types import (
 
 if TYPE_CHECKING:
     from ..commands import ModelEdit
+    from ..simulation import SimulationDriver
 
 GEOMETRY_OBJECT_BASE = 0x50000000
 LIGHT_OBJECT_BASE = 0x70000000
@@ -987,6 +988,10 @@ class SceneAdapterBase:
     def step(self, count: int = 1) -> None:
         """Advance simulation state by ``count`` fixed steps."""
 
+    def create_simulation_driver(self) -> SimulationDriver | None:
+        """Return an optional owned physics worker for an interactive Session."""
+        return None
+
     def set_paused(self, paused: bool) -> bool:
         """Set adapter-owned pause state and report whether it was accepted."""
         return True
@@ -1425,6 +1430,7 @@ class SceneAdapter(SceneProvider, Protocol):
     def reset(self) -> None: ...
     def step(self, count: int = 1) -> None: ...
     def set_paused(self, paused: bool) -> bool: ...
+    def create_simulation_driver(self) -> SimulationDriver | None: ...
     def nodes(self) -> list[SceneNode]: ...
     def joints(self) -> list[JointInfo]: ...
     def actuators(self) -> list[ActuatorInfo]: ...

@@ -10,6 +10,17 @@ recording-layers:
 
 .PHONY: rollout-video
 .PHONY: passive-viewer
+.PHONY: physics-render-benchmark
+.PHONY: physics-concurrency
+
+physics-render-benchmark:
+	$(PY) -m mojive.tools.physics_render_benchmark $(ARGS)
+
+HUMANOIDS_MODEL ?= $(firstword $(MUJOCO_MODEL_ROOTS))/humanoid/100_humanoids.xml
+physics-concurrency:
+	$(PY) -m mojive.tools.physics_render_benchmark --production \
+		--workloads joint_types,cloth_stress,humanoids100 --humanoids-model "$(HUMANOIDS_MODEL)" \
+		--seconds 6 --warmup 36 --output output/physics-concurrency $(ARGS)
 
 passive-viewer:
 	$(PY) examples/passive_viewer.py $(ARGS)
@@ -120,6 +131,8 @@ help:
 		'  make renderer-api-wgpu public Renderer contract over wgpu' \
 		'  make renderer-benchmark MuJoCo/OpenGL/wgpu public API timing comparison' \
 		'  make renderer-benchmark-full complete resolution and output-mode matrix' \
+		'  make physics-render-benchmark same-process physics/render concurrency experiment' \
+		'  make physics-concurrency default editor runtime, including 100 humanoids' \
 		'  make camera-state      camera bookmark serialization and restore' \
 		'  make scene-snapshot    complete scene-state serialization and restore' \
 		'  make cli               typed local control commands' \

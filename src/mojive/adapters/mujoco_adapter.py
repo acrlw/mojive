@@ -3876,6 +3876,14 @@ class MuJoCoAdapter(SceneAdapterBase):
     def timestep(self) -> float:
         return float(self._m.opt.timestep)
 
+    def create_simulation_driver(self):
+        """Create a worker only when this adapter owns the physics clock."""
+        if self.caps.external_clock:
+            return None
+        from .mujoco_simulation import MuJoCoSimulation
+
+        return MuJoCoSimulation(self)
+
     def frame(self, needs: FrameNeeds) -> SceneFrame:
         if self.prepare_frame(needs):
             self.scene_source()
