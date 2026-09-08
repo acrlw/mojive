@@ -47,6 +47,7 @@ nav:
       - C++ foundation (中文): plans/cpp-foundation.zh.md
       - C++ implementation checklist: plans/cpp-implementation.zh.md
       - C++ dependencies (中文): plans/cpp-dependencies.zh.md
+      - Native renderer acceptance (中文): plans/native-renderer-parity.zh.md
       - Native backend decision (中文): plans/native-backend-decision.zh.md
       - Native C++ proposal (中文): plans/native-cpp-bgfx.zh.md
   - API reference:

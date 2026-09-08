@@ -31,8 +31,11 @@ help:
 	@printf '%s\n' \
 		'Interactive:' \
 		'  make viewer             default MuJoCo scene' \
-		'  make native-viewer      build and launch the C++/bgfx Viewer preview' \
+		'  make native-viewer      build and launch the C++/bgfx Viewer' \
 		'  make native-editor      C++/bgfx scene editor' \
+		'  make native-parity      compare native/OpenGL/wgpu render products' \
+		'  make native-model-parity verify live rigid, skin, and flex scenes' \
+		'  make native-wheel-test  build, install, and verify the native wheel' \
 		'  make passive-viewer     independent physics and display rates with captures' \
 		'  make egl-viewer         Linux viewer with a GLFW EGL context' \
 		'  make hidpi              viewer with an explicit 200% UI scale' \
@@ -761,7 +764,7 @@ doctor:
 clean:
 	rm -rf out .pytest_cache **/__pycache__
 
-# Optional native renderer evaluation; the Python application remains independent.
+# Optional native renderer; OpenGL remains the default Python backend.
 NATIVE_BUILD ?= output/cpp-build
 NATIVE_BACKEND ?= bgfx
 NATIVE_OUTPUT ?= output/native-probe/$(NATIVE_BACKEND)
@@ -860,3 +863,37 @@ native-editor: native-python-build
 
 native-viewer-test: native-python-build
 	PYTHONPATH="$(abspath python/src)" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_HUMANOIDS_MODEL="$(HUMANOIDS_MODEL)" $(PYTEST) -q python/bindingTests/test_native_viewer.py
+
+# Matched visual products and native-only feature regression checks.
+.PHONY: native-parity native-features-test native-spirv
+native-parity: native-python-build
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.native_parity --check $(ARGS)
+
+native-features-test: native-python-build
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PYTEST) -q python/bindingTests/test_native_features.py
+
+native-spirv: native-build
+	$(PY) tools/check_native_shaders.py --build $(NATIVE_BUILD)
+
+.PHONY: native-wheel
+native-wheel: native-python-build
+	MOJIVE_NATIVE_WHEEL_BUILD="$(abspath $(NATIVE_BUILD))" uv build --wheel --python "$(abspath $(PY))" -o output/native-wheel
+
+.PHONY: native-wheel-test
+native-wheel-test: native-wheel
+	$(PY) tools/check_native_wheel.py $$(ls -t output/native-wheel/*.whl | head -1)
+
+.PHONY: native-model-parity
+native-model-parity: native-python-build
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.native_model_parity $(if $(HUMANOIDS_MODEL),--humanoids-model "$(HUMANOIDS_MODEL)") $(ARGS)
+
+.PHONY: native-motion-parity native-corpus-parity
+native-motion-parity: native-python-build
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.native_motion_parity $(ARGS)
+
+native-corpus-parity: native-python-build
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.native_corpus_parity assets $(if $(MENAGERIE_ROOT),"$(MENAGERIE_ROOT)") $(ARGS)
+
+.PHONY: native-window-benchmark
+native-window-benchmark: native-python-build
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.native_window_benchmark $(ARGS)

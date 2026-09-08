@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import moderngl
@@ -28,6 +28,7 @@ from ..backend import (
 from ..debugdraw import DebugDraw
 from ..overlay import OverlayPublisher, OverlayState
 from ..scene import RenderScene
+from ..tendon import TendonPublisher
 from .context import ContextCaps, attach
 from .instances import InstanceStore
 from .passes.base import PassContext, RenderPass, ShadowResult
@@ -168,13 +169,9 @@ class OpenGLBackend:
         self._overlay = OverlayPublisher(
             self.debug if self.debug is not None else DebugDraw(), self._flags
         )
-        self._tendon_actuator = np.zeros(0, np.int32)
-        self._capsule_segments = np.zeros((0, 2, 3), np.float32)
-        self._capsule_widths = np.zeros(0, np.float32)
-        self._capsule_colors = np.zeros((0, 4), np.float32)
-        self._capsule_materials = np.zeros((0, 4), np.float32)
-        self._capsule_material_ids = np.zeros(0, np.int32)
-        self._capsule_transparent = np.zeros(0, bool)
+        self._tendon_publisher = TendonPublisher(
+            self._passes.get("tendon"), self._overlay, self.get_flag
+        )
         self._bucket_meshes: list = []
         self._bvh_depth = 0
         self._structure_generation = -1
@@ -282,23 +279,7 @@ class OpenGLBackend:
         from ..mesh import all_builtin
 
         self._source = source
-        self._tendon_visible = source.tendon_visible
-        self._actuator_visible = source.actuator_visible
-        self._material_values = np.asarray(
-            [
-                (mat.emission, mat.specular, mat.shininess, mat.reflectance)
-                for mat in source.materials
-            ],
-            np.float32,
-        )
-        self._tendon_material_table = tuple(source.materials)
-        self._island_tendon_material_table = tuple(
-            replace(material, texture=None) for material in source.materials
-        )
-        self._tendon_actuator = np.full(len(source.tendon_rgba), -1, np.int32)
-        for actuator, tendon in enumerate(source.actuator_tendon):
-            if 0 <= tendon < len(self._tendon_actuator):
-                self._tendon_actuator[tendon] = actuator
+        self._tendon_publisher.set_scene(source)
         self._overlay.set_scene(source)
         self.meshes.sync({**all_builtin(), **source.meshes})
         self.textures.sync(source.textures, source.skybox)
@@ -332,7 +313,7 @@ class OpenGLBackend:
         self.meshes.update(frame.mesh_updates)
         island_rgba = frame.island_rgba if self.get_flag(RenderFlag.ISLAND) else None
         self.set_render_scene(self._builder.update(frame, self._camera, island_rgba))
-        self._publish_tendons(frame)
+        self._tendon_publisher.update(frame)
         if self.debug is not None:
             self._overlay.publish(frame, self._overlay_state())
 
@@ -344,123 +325,6 @@ class OpenGLBackend:
             label_mode=self._label_mode,
             frame_mode=self._frame_mode,
             bvh_depth=self._bvh_depth,
-        )
-
-    def _publish_tendons(self, frame: SceneFrame) -> None:
-        tendon_pass = self._passes.get("tendon")
-        update = getattr(tendon_pass, "update", None)
-        clear = getattr(tendon_pass, "clear", None)
-        segments, ids, widths = (
-            frame.tendon_segments,
-            frame.tendon_ids,
-            frame.tendon_widths,
-        )
-        if (
-            not callable(update)
-            or segments is None
-            or ids is None
-            or widths is None
-            or not len(segments)
-        ):
-            if callable(clear):
-                clear()
-            return
-
-        base_indices = (
-            np.flatnonzero(self._tendon_visible[ids])
-            if self.get_flag(RenderFlag.TENDON)
-            else np.zeros(0, np.intp)
-        )
-        base_count = len(base_indices)
-        actuator_indices = np.zeros(0, np.intp)
-        segment_actuators = np.zeros(0, np.int32)
-        if self.get_flag(RenderFlag.ACTUATOR) and frame.ctrl is not None:
-            segment_actuators = self._tendon_actuator[ids]
-            available = segment_actuators >= 0
-            available[available] &= self._actuator_visible[segment_actuators[available]]
-            actuator_indices = np.flatnonzero(available)
-        total = base_count + len(actuator_indices)
-        if not total:
-            clear()
-            return
-
-        if total > len(self._capsule_widths):
-            capacity = max(total, 2 * len(self._capsule_widths), 64)
-            self._capsule_segments = np.zeros((capacity, 2, 3), np.float32)
-            self._capsule_widths = np.zeros(capacity, np.float32)
-            self._capsule_colors = np.zeros((capacity, 4), np.float32)
-            self._capsule_materials = np.zeros((capacity, 4), np.float32)
-            self._capsule_material_ids = np.zeros(capacity, np.int32)
-            self._capsule_transparent = np.zeros(capacity, bool)
-
-        if base_count:
-            self._capsule_segments[:base_count] = segments[base_indices]
-            self._capsule_widths[:base_count] = widths[base_indices]
-            tendon_rgba = self._source.tendon_rgba
-            if self.get_flag(RenderFlag.ISLAND) and frame.tendon_island_rgba is not None:
-                tendon_rgba = frame.tendon_island_rgba
-            np.take(
-                tendon_rgba,
-                ids[base_indices],
-                axis=0,
-                out=self._capsule_colors[:base_count],
-                mode="clip",
-            )
-            np.take(
-                self._material_values,
-                self._source.tendon_material[ids[base_indices]],
-                axis=0,
-                out=self._capsule_materials[:base_count],
-                mode="clip",
-            )
-            self._capsule_material_ids[:base_count] = self._source.tendon_material[
-                ids[base_indices]
-            ]
-
-        if len(actuator_indices):
-            palette = self._overlay.fill_actuator_palette(frame)
-            start = base_count
-            stop = start + len(actuator_indices)
-            self._capsule_segments[start:stop] = segments[actuator_indices]
-            self._capsule_widths[start:stop] = (
-                widths[actuator_indices] * self._source.actuator_tendon_scale
-            )
-            np.take(
-                palette,
-                segment_actuators[actuator_indices],
-                axis=0,
-                out=self._capsule_colors[start:stop],
-            )
-            np.take(
-                self._material_values,
-                self._source.tendon_material[ids[actuator_indices]],
-                axis=0,
-                out=self._capsule_materials[start:stop],
-                mode="clip",
-            )
-            self._capsule_material_ids[start:stop] = self._source.tendon_material[
-                ids[actuator_indices]
-            ]
-
-        np.less(
-            self._capsule_colors[:total, 3],
-            1.0,
-            out=self._capsule_transparent[:total],
-        )
-
-        material_table = (
-            self._island_tendon_material_table
-            if self.get_flag(RenderFlag.ISLAND)
-            else self._tendon_material_table
-        )
-        update(
-            self._capsule_segments[:total],
-            self._capsule_widths[:total],
-            self._capsule_colors[:total],
-            self._capsule_materials[:total],
-            self._capsule_material_ids[:total],
-            self._capsule_transparent[:total],
-            material_table,
         )
 
     def set_camera(self, camera: CameraView) -> None:

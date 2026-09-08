@@ -15,3 +15,24 @@ float v_depth : TEXCOORD3;
 vec2 v_texcoord0 : TEXCOORD4;
 
 vec3 v_world : TEXCOORD5;
+vec4 i_data5 : TEXCOORD26;
+vec4 i_data6 : TEXCOORD25;
+vec4 i_data7 : TEXCOORD24;
+vec4 v_litMaterial : TEXCOORD6;
+vec4 v_litCube : TEXCOORD7;
+vec4 v_litIdentity : TEXCOORD8;
+
+noperspective vec2 v_arrow_pos : TEXCOORD0;
+flat vec4 v_arrow_shape : TEXCOORD1;
+vec3 v_view_pos : TEXCOORD0;
+noperspective vec2 v_pixel : TEXCOORD0;
+flat vec2 v_a : TEXCOORD1;
+flat vec2 v_b : TEXCOORD2;
+flat vec4 v_core_color : COLOR0;
+flat vec4 v_edge_color : COLOR1;
+flat float v_width : TEXCOORD3;
+flat float v_radius : TEXCOORD4;
+flat float v_edge : TEXCOORD5;
+flat float v_smoothing : TEXCOORD6;
+vec3 a_texcoord1 : TEXCOORD1;
+vec3 v_bary : TEXCOORD9;

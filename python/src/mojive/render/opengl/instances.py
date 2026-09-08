@@ -165,6 +165,11 @@ class InstanceStore:
         return self.pose_buffer, self.visual_buffer, self.identity_buffer
 
     @property
+    def program(self) -> moderngl.Program | None:
+        """Program used by the currently bound shared instance VAOs."""
+        return self._program
+
+    @property
     def reflection_info(self) -> np.ndarray:
         return self._identity[: self.count, 1]
 

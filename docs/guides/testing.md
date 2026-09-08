@@ -18,6 +18,11 @@ matrix; other agent guidance links here.
 | Native live runtime | `make native-runtime` | native MuJoCo serial/parallel comparison with bounded output queues |
 | Private native runtime | `make cpp-python-test`, `make cpp-python-gpu` | native logging, GLM compatibility, NumPy ownership, real GPU products and runtime teardown |
 | Native Viewer | `make native-viewer-test HUMANOIDS_MODEL=/path/to/100_humanoids.xml` | public Python products, independent scenes, asynchronous readback, window lifecycle and advancing dense physics |
+| Native render parity | `make native-parity`, `make native-model-parity HUMANOIDS_MODEL=/path/to/100_humanoids.xml` | matched OpenGL/wgpu/bgfx color, depth, identity, feature effects, deformable updates and pose restoration |
+| Native motion and corpus | `make native-motion-parity`, `make native-corpus-parity MENAGERIE_ROOT=/path/to/mujoco_menagerie` | continuous close panning/orbit/zoom, object color checks, all local model loads and eight-view comparisons |
+| Native window cadence | `make native-window-benchmark` | real-window VSync on/off frame timing and same-frame camera publication; run separately from other checks |
+| Native feature lifecycle | `make native-features-test` | cache invalidation, camera capture, pending readbacks and resource reuse |
+| Native distribution | `make native-spirv`, `make native-wheel-test` | Vulkan shader compilation and installed platform wheel rendering without development paths |
 | Native bindings | `make native-bindings-test` | isolated pybind11/nanobind behavior, MuJoCo coexistence, ownership, and GIL release |
 | Golden | `make golden` | reviewed image baselines |
 | Full | `make test-all` | CPU, physics, OpenGL, and WebGPU layers |
@@ -134,7 +139,8 @@ before ending its throughput measurement. Run performance measurements separatel
 `make physics-render-benchmark` retains a fixed-workload experiment for isolating snapshot-copy
 cost. Its ordered publication mode preserves every displayed state and applies backpressure;
 it is distinct from the production latest-state policy. Pass `--production` to measure the real
-Session runtime, and `--renderer wgpu` to select the other backend.
+Session runtime, and `--renderer wgpu` or `--renderer bgfx` to select another backend. The native backend requires
+`MOJIVE_NATIVE_BUILD` when it has not been installed as a platform wheel.
 
 Thread ownership, pause/step/history, command fences, model replacement, controls, replay, and
 failure recovery are covered by `python/tests/test_threaded_physics.py`. Default viewer startup and
@@ -160,6 +166,7 @@ synchronous readback in
 Run the larger resolution and RGB/depth/segmentation matrix explicitly:
 
 ```bash
+make renderer-benchmark ARGS="--renderers mujoco,mojive-opengl,mojive-wgpu,mojive-bgfx"
 make renderer-benchmark-full
 make renderer-benchmark ARGS="--workloads dynamic --modes rgb,depth --frames 200"
 make renderer-benchmark ARGS="--workloads dynamic_large --modes rgb --resolutions 1920x1080"

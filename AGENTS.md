@@ -93,7 +93,7 @@ view does not create an additional approval step.
 - Python remains the public product API under `python/src/mojive`; keep existing snake_case names
   and behavior compatible. C++ implementation sources live in `cpp`, with neutral contracts and
   private backends. Read `docs/guides/development.md` for naming and local build commands.
-- Mojive-owned C++ uses PascalCase types, camelCase functions/fields/files and `m` + PascalCase
+- Mojive-owned C++ uses PascalCase types/files, camelCase functions/fields and `m` + PascalCase
   private members. Preserve upstream and standard-library spellings. Never reformat vendor code.
 - `thirdParty/imgui` is tracked, editable source; other core dependencies are pinned submodules.
   Maintain dependency provenance and focused customization history as described in

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import enum
+import hashlib
 import json
 import multiprocessing
 import os
@@ -42,6 +43,8 @@ class ModelAuditRequest:
     dynamic_frames: int
     load_only: bool
     model_fragment: bool = False
+    capture_dir: str | None = None
+    capture_samples: int | None = None
 
 
 @dataclass(frozen=True)
@@ -386,6 +389,12 @@ def audit_model(request: ModelAuditRequest) -> ModelAuditResult:
         rgb_min = 255
         rgb_max = 0
         rgb_stds: list[float] = []
+        capture = None
+        if request.capture_dir:
+            capture = Path(request.capture_dir) / capture_name(path)
+            capture.mkdir(parents=True, exist_ok=True)
+        if request.capture_samples is not None:
+            model.vis.quality.offsamples = request.capture_samples
         with Renderer(model, height=height, width=width) as renderer:
             for index, (azimuth, elevation) in enumerate(_CAMERA_POSES[:view_count]):
                 if index == view_count - 1:
@@ -400,6 +409,20 @@ def audit_model(request: ModelAuditRequest) -> ModelAuditResult:
                 renderer.enable_segmentation_rendering()
                 segmentation = renderer.render()
                 renderer.disable_segmentation_rendering()
+                if capture is not None:
+                    from PIL import Image
+
+                    Image.fromarray(rgb).save(capture / f"{index:02}.png")
+                    renderer.enable_depth_rendering()
+                    depth = renderer.render()
+                    renderer.disable_depth_rendering()
+                    np.savez_compressed(
+                        capture / f"{index:02}.npz",
+                        segmentation=segmentation,
+                        depth=depth,
+                        near=renderer._view.near,
+                        far=renderer._view.far,
+                    )
                 objects = _visible_object_ids(segmentation)
                 if objects:
                     visible_views += 1
@@ -430,6 +453,12 @@ def audit_model(request: ModelAuditRequest) -> ModelAuditResult:
     )
 
 
+def capture_name(path: Path) -> str:
+    """Return a stable, collision-free capture folder name for one model path."""
+    digest = hashlib.sha256(str(path.resolve()).encode()).hexdigest()[:12]
+    return f"{path.parent.name}-{path.stem}-{digest}"
+
+
 def run_suite(
     models: list[Path],
     *,
@@ -440,6 +469,8 @@ def run_suite(
     height: int,
     dynamic_frames: int,
     load_only: bool,
+    capture_dir: Path | None = None,
+    capture_samples: int | None = None,
 ) -> list[ModelAuditResult]:
     """Audit model paths in parallel and return results in path order."""
 
@@ -454,6 +485,8 @@ def run_suite(
             dynamic_frames=dynamic_frames,
             load_only=load_only,
             model_fragment=path in fragment_files,
+            capture_dir=str(capture_dir) if capture_dir else None,
+            capture_samples=capture_samples,
         )
         for path in models
     ]
@@ -492,7 +525,7 @@ def _parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("roots", nargs="+", type=Path, help="model directories or MJCF/URDF files")
-    parser.add_argument("--backend", choices=("opengl", "wgpu"), default="opengl")
+    parser.add_argument("--backend", choices=("opengl", "wgpu", "bgfx"), default="opengl")
     parser.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
     parser.add_argument("--camera-count", type=int, default=len(_CAMERA_POSES))
     parser.add_argument("--width", type=int, default=240)
@@ -500,6 +533,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--dynamic-frames", type=int, default=1)
     parser.add_argument("--load-only", action="store_true")
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--capture-dir", type=Path, help="save matched RGB and segmentation views")
     return parser
 
 
@@ -519,6 +553,7 @@ def main(argv: list[str] | None = None) -> int:
         height=args.height,
         dynamic_frames=args.dynamic_frames,
         load_only=args.load_only,
+        capture_dir=args.capture_dir,
     )
     report = build_report(args.roots, results)
     if args.report is not None:

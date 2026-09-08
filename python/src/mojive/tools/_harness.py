@@ -36,12 +36,14 @@ class OffscreenHarness:
         backend: str = "mujoco",
         configure_adapter: Callable[[object], None] | None = None,
     ) -> None:
-        use_wgpu = render_backend_name() == "wgpu"
+        renderer = render_backend_name()
+        use_wgpu = renderer == "wgpu"
+        use_native = renderer == "bgfx"
 
         # The wgpu backend owns its device and needs no GL context or window.
         self._glfw = None
         self.window = None
-        if not use_wgpu:
+        if not (use_wgpu or use_native):
             import glfw
 
             self._glfw = glfw
@@ -68,7 +70,11 @@ class OffscreenHarness:
         self.adapter = make_adapter(backend, asset)
         if configure_adapter is not None:
             configure_adapter(self.adapter)
-        if use_wgpu:
+        if use_native:
+            from ..render.native.backend import NativeBackend
+
+            self.backend = NativeBackend(width=width, height=height, samples=samples)
+        elif use_wgpu:
             from ..render.webgpu.backend import WgpuBackend
 
             self.backend = WgpuBackend(width=width, height=height, samples=samples)

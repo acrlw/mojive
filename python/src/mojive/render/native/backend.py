@@ -7,19 +7,30 @@ from pathlib import Path
 
 import numpy as np
 
-from ...types import CameraView, ViewportImage
+from ...types import CameraView, LightType, MeshKey, MeshShape, TextureType, ViewportImage
 from ..backend import (
     BackendCaps,
     DebugView,
     FrameMode,
     LabelMode,
     RenderFlag,
+    RenderProduct,
+    RenderRequest,
     RenderStats,
     ShadowQuality,
 )
 from ..builder import SceneSourceBuilder
-from ..mesh import builtin_mesh
+from ..debugdraw import PRIMITIVE_MESH, DebugDraw, DrawPath, Occlusion
+from ..gizmo_plan import _MESHES, GizmoPlanner
+from ..mesh import builtin_mesh, gizmo_mesh
+from ..overlay import OverlayPublisher, OverlayState
+from ..tendon import TendonPublisher, TendonScene
+from ..text import TextLayout
+from ..texture import mip_chain, srgb_to_linear_u8
 from .device import acquire_device
+
+_DRAW_PATHS = {path: index for index, path in enumerate(DrawPath)}
+_OCCLUSIONS = {mode: index for index, mode in enumerate(Occlusion)}
 
 
 class NativeTarget:
@@ -104,23 +115,35 @@ class NativeTarget:
 
 
 class NativeBackend:
-    """Native candidate with explicit capabilities and independent scene ownership."""
+    """Native rendering with explicit capabilities and independent scene ownership."""
 
     def __init__(self, width=640, height=480, samples=1):
+        # Match the portable color target policy; MuJoCo may request arbitrary
+        # counts (for example 24). Data products remain single-sampled.
+        samples = max(value for value in (1, 2, 4) if value <= max(1, samples))
         self.device = acquire_device()
         self.api, self.runtime = self.device.api, self.device.runtime
         self._closed = False
         self._camera = CameraView()
+        self._gizmo = None
+        self._gizmo_planner = GizmoPlanner()
+        self._gizmo_meshes = {}
         self._builder = SceneSourceBuilder()
         self._revision = 0
         self._sequence = 0
         self._uploaded = None
+        self._uploaded_visuals = None
+        self._last_frame = None
+        self._render_state_dirty = False
         self._source = None
         self._mesh_indices = {}
         self._style = self.api.SceneStyle()
-        self._tint_colors = np.empty((0, 4), np.float32)
+        self._style.transparent_ids = False
+        self._style.cull_face = True
+        self._lighting_source = None
+        self._textures = {}
+        self._debug_view = DebugView.SHADED
         self._selected = 0
-        self._fill = True
         self._scene_handle = None
         try:
             self._scene_handle = self.runtime.create_scene(self.api.SceneSource())
@@ -128,31 +151,56 @@ class NativeBackend:
         except Exception:
             self.release()
             raise
-        self.debug = None
+        self.runtime.configure(self._scene_handle, self._style)
+        self.debug = DebugDraw()
+        self._text = TextLayout()
+        self._glyph_atlas = None
+        self._debug_meshes = {}
+        self._label_mode, self._frame_mode, self._bvh_depth = LabelMode.NONE, FrameMode.NONE, 0
         self.stats = RenderStats()
         self._flags = dict.fromkeys(
-            (RenderFlag.STATIC, RenderFlag.SKIN, RenderFlag.FLEXSKIN, RenderFlag.TEXTURE), True
+            (
+                RenderFlag.STATIC,
+                RenderFlag.SKIN,
+                RenderFlag.FLEXSKIN,
+                RenderFlag.FLEXEDGE,
+                RenderFlag.TEXTURE,
+                RenderFlag.CULL_FACE,
+                RenderFlag.TRANSPARENT,
+                RenderFlag.TONEMAP,
+                RenderFlag.HAZE,
+                RenderFlag.MSAA,
+                RenderFlag.SHADOW,
+                RenderFlag.SKYBOX,
+                RenderFlag.REFLECTION,
+                RenderFlag.OUTLINE,
+            ),
+            True,
         )
+        self._overlay = OverlayPublisher(self.debug, self._flags)
+        self._tendons = TendonScene()
+        self._tendon_publisher = TendonPublisher(self._tendons, self._overlay, self.get_flag)
+        self._surface_meshes = {}
+        self._surface_records = np.zeros((0, 32), np.float32)
+        self._flags[RenderFlag.TENDON] = True
         self.caps = BackendCaps(
             name="bgfx",
             renderer=self.runtime.capabilities.device,
             gpu_pick=True,
+            shadows=True,
+            outline=True,
+            gizmo=True,
+            debug_draw=True,
+            label_modes=frozenset(LabelMode),
+            frame_modes=frozenset(FrameMode),
             capture=True,
             orthographic=True,
-            msaa_samples=max(1, samples),
-            render_flags=frozenset(
-                (
-                    RenderFlag.STATIC,
-                    RenderFlag.SKIN,
-                    RenderFlag.FLEXSKIN,
-                    RenderFlag.FLEXFACE,
-                    RenderFlag.CONVEXHULL,
-                    RenderFlag.TEXTURE,
-                )
-            ),
-            debug_views=frozenset((DebugView.SHADED,)),
+            msaa_samples=self.target.samples,
+            render_flags=frozenset(RenderFlag),
+            debug_views=frozenset(DebugView),
             notes=(
-                "Native preview: production lighting, shadows and diagnostic overlays are pending",
+                "Object ID and metric depth use single-sampled scene geometry",
+                "Color MSAA rounds down to 1x, 2x, or 4x",
             ),
         )
 
@@ -163,18 +211,34 @@ class NativeBackend:
     def set_scene(self, source):
         self._require_open()
         self._source = source
+        self._last_frame = None
+        self._uploaded_visuals = None
+        self._overlay.set_scene(source)
+        self._tendon_publisher.set_scene(source)
+        self._tendons.clear()
         self._builder.set_source(source, self._camera)
         self._uploaded = None
+        self._lighting_source = None
         self._sync_scene()
 
     def _sync_scene(self):
         scene = self._builder.scene
-        key = (scene.structure_revision, scene.identity_revision)
-        if key != self._uploaded:
+        structure_key = (scene.structure_revision, scene.identity_revision)
+        if structure_key != self._uploaded:
             source = self.api.SceneSource()
             self._revision += 1
             source.revision = self._revision
+            source.infinite_planes = scene.infinite_planes
+            source.planar_kinds = [
+                {MeshShape.PLANE: 1, MeshShape.BOX: 2}.get(scene.bucket_keys[int(b)][0].shape, 0)
+                for b in scene.bucket
+            ]
             source.linear_colors = scene.shading_model.value == "linear"
+            source.extent, source.shadow_clip, source.center = (
+                scene.scene_extent,
+                scene.shadow_clip,
+                tuple(scene.scene_center),
+            )
             keys = list(dict.fromkeys(key for key, _ in scene.bucket_keys))
             self._mesh_indices = {key: index for index, key in enumerate(keys)}
             for mesh_key in keys:
@@ -183,28 +247,60 @@ class NativeBackend:
                     mesh = builtin_mesh(mesh_key)
                 index = source.add_mesh(mesh.positions, mesh.normals, mesh.indices)
                 source.set_mesh_texcoords(index, mesh.uvs)
+            self._gizmo_meshes = {}
+            for name in _MESHES:
+                mesh = (
+                    builtin_mesh(
+                        MeshKey(MeshShape.DISK if name == "trackball" else MeshShape.SPHERE)
+                    )
+                    if name in {"trackball", "center"}
+                    else gizmo_mesh(name)
+                )
+                self._gizmo_meshes[name] = source.add_mesh(
+                    mesh.positions, mesh.normals, mesh.indices
+                )
+            self._surface_meshes = {}
+            for shape in (MeshShape.CAPSULE_SHAFT, MeshShape.CAPSULE_CAP):
+                key = MeshKey(shape)
+                mesh = builtin_mesh(key)
+                index = source.add_mesh(mesh.positions, mesh.normals, mesh.indices)
+                source.set_mesh_texcoords(index, mesh.uvs)
+                self._surface_meshes[key] = index
+            self._debug_meshes = {}
+            for key in PRIMITIVE_MESH.values():
+                mesh = builtin_mesh(key)
+                self._debug_meshes[key] = source.add_mesh(
+                    mesh.positions, mesh.normals, mesh.indices
+                )
             slots = np.array(
                 [self._mesh_indices[scene.bucket_keys[int(b)][0]] for b in scene.bucket], np.uint32
             )
             textures = {}
             for name, texture in (self._source.textures if self._source else {}).items():
-                if texture.type.value != "2d":
-                    continue
                 pixels = texture.pixels
-                rgba = np.full((*pixels.shape[:2], 4), 255, np.uint8)
-                rgba[..., : pixels.shape[2]] = pixels
-                from PIL import Image
-
-                image = Image.fromarray(rgba)
-                levels = [rgba.reshape(-1)]
-                while image.width > 1 or image.height > 1:
-                    image = image.resize(
-                        (max(1, image.width // 2), max(1, image.height // 2)), Image.Resampling.BOX
-                    )
-                    levels.append(np.asarray(image).reshape(-1))
-                textures[name] = source.add_texture_mips(
-                    rgba.shape[1], rgba.shape[0], np.concatenate(levels)
+                srgb = texture.srgb
+                if srgb and pixels.shape[-1] < 3:
+                    # Match the R8/RG8 linear fallback used by the other backends.
+                    pixels = srgb_to_linear_u8(pixels)
+                    srgb = False
+                if texture.type is TextureType.TWO_D:
+                    pixels = pixels[None]
+                rgba = np.zeros((*pixels.shape[:-1], 4), np.uint8)
+                rgba[..., 3] = 255
+                rgba[..., : pixels.shape[-1]] = pixels
+                levels = mip_chain(rgba, srgb=srgb)
+                payload = np.concatenate(
+                    [level[face].reshape(-1) for face in range(len(pixels)) for level in levels]
                 )
+                textures[name] = source.add_texture_data(
+                    rgba.shape[2],
+                    rgba.shape[1],
+                    payload,
+                    texture.type is not TextureType.TWO_D,
+                    srgb,
+                )
+            self._textures = textures
+            self._lighting_source = None
             materials = []
             for material in scene.materials:
                 native = self.api.Material()
@@ -220,41 +316,183 @@ class NativeBackend:
             source.set_material_indices(
                 np.array([scene.bucket_keys[int(b)][1] for b in scene.bucket], np.uint32)
             )
+            source.set_visuals(scene.material, scene.cube_coef)
             self.runtime.set_scene(source, self._scene_handle)
-            self._uploaded = key
-        colors = scene.colors
-        if self._selected and self._fill:
-            if self._tint_colors.shape != colors.shape:
-                self._tint_colors = np.empty_like(colors)
-            np.copyto(self._tint_colors, colors)
-            mask = scene.object_id == self._selected
-            self._tint_colors[mask, :3] = colors[mask, :3] * 0.65 + np.array(
-                [0.35, 0.2275, 0.035], np.float32
+            self._uploaded = structure_key
+            self._uploaded_visuals = None
+        visual_key = (scene.pose_revision, scene.visual_revision)
+        if visual_key != self._uploaded_visuals:
+            self._sequence += 1
+            self.runtime.update_visuals(
+                self._scene_handle,
+                scene.transforms,
+                scene.tex_coef,
+                scene.colors,
+                scene.material,
+                scene.cube_coef,
+                self._revision,
+                self._sequence,
             )
-            colors = self._tint_colors
-        self._sequence += 1
-        self.runtime.update_textured(
-            self._scene_handle,
-            scene.transforms,
-            scene.tex_coef,
-            colors,
-            self._revision,
-            self._sequence,
+            self._uploaded_visuals = visual_key
+        self._sync_lighting()
+
+    def _sync_lighting(self):
+        lights = self._builder.scene.lights
+        if lights is self._lighting_source:
+            return
+        native = self.api.Lighting()
+        native.enabled = True
+        native.horizon_haze = lights.horizon_haze
+        native.haze_slices = lights.horizon_haze_slices
+        native.haze_density = lights.haze_density
+        native.ambient = tuple(lights.ambient)
+        native.fog = (
+            lights.fog_start,
+            lights.fog_end,
+            0,
+            0 if lights.horizon_haze else lights.haze_density,
         )
+        native.fog_color, native.haze_color = tuple(lights.fog_color), tuple(lights.haze_color)
+        if lights.headlight is not None and lights.headlight.active:
+            native.headlight_diffuse = (*lights.headlight.diffuse, 1)
+            native.headlight_specular = tuple(lights.headlight.specular)
+        items = []
+        for light in lights.lights:
+            if not light.active:
+                continue
+            if light.type is LightType.IMAGE:
+                native.image_texture = self._textures.get(light.texture, -1)
+                native.image_intensity = max(light.intensity, 0) if native.image_texture >= 0 else 0
+                continue
+            row = self.api.Light()
+            for field in ("position", "direction", "diffuse", "specular", "attenuation"):
+                setattr(row, field, tuple(getattr(light, field)))
+            row.type, row.cutoff, row.exponent, row.range = (
+                int(light.type),
+                light.cutoff,
+                light.exponent,
+                light.range,
+            )
+            row.radius, row.cast_shadow = light.area_radius, light.cast_shadow
+            items.append(row)
+        native.lights = items[:100]
+        native.skybox_texture = self._textures.get(self._source.skybox, -1) if self._source else -1
+        self.runtime.set_lighting(self._scene_handle, native)
+        self._lighting_source = lights
 
     def update(self, frame):
         self._require_open()
         if self._source is None:
             return
-        self._builder.update(frame, self._camera)
+        self._last_frame = frame
+        self._render_state_dirty = False
+        self._builder.update(
+            frame, self._camera, frame.island_rgba if self.get_flag(RenderFlag.ISLAND) else None
+        )
+        self._tendon_publisher.update(frame)
+        self._overlay.publish(
+            frame,
+            OverlayState(
+                self._camera,
+                self.target.height,
+                self._selected,
+                self._label_mode,
+                self._frame_mode,
+                self._bvh_depth,
+            ),
+        )
         self._sync_scene()
         for key, mesh in (frame.mesh_updates or {}).items():
             index = self._mesh_indices.get(key)
             if index is not None:
                 self.runtime.update_mesh(index, mesh.positions, mesh.normals, self._scene_handle)
 
+    def _sync_overlays(self):
+        packet = self.api.OverlayFrame()
+        camera = self._camera
+        view, proj = camera.view_matrix(), camera.proj_matrix()
+        draws = []
+        for name, (compare, write, cull), model, color, mask in self._gizmo_planner.plan(
+            self._gizmo, camera, proj @ view, proj, self.target.height
+        ):
+            row = self.api.OverlayDraw()
+            row.mesh, row.transform, row.color = self._gizmo_meshes[name], model, tuple(color)
+            row.mask_radius = mask
+            row.depth_test, row.depth_write, row.cull_face = (
+                compare != "always",
+                write,
+                cull == "back",
+            )
+            draws.append(row)
+        packet.gizmos = draws
+        surface = self._tendons.scene
+        count = surface.count
+        if count:
+            if len(self._surface_records) < count:
+                self._surface_records = np.zeros(
+                    (max(count, 2 * len(self._surface_records)), 32), np.float32
+                )
+            records = self._surface_records[:count]
+            records[:, :12] = surface.transforms[:, :3].reshape(count, 12)
+            records[:, 12:16], records[:, 16:20] = surface.colors, surface.tex_coef
+            records[:, 20:24], records[:, 24:28] = surface.material, surface.cube_coef
+            packet.set_surfaces(records)
+            batches = []
+
+            def batch(bucket, start, stop, transparent):
+                key, material_id = surface.bucket_keys[bucket]
+                row = self.api.SurfaceBatch()
+                row.mesh, row.start, row.count = self._surface_meshes[key], start, stop - start
+                row.texture = self._textures.get(surface.materials[material_id].texture, -1)
+                row.transparent = transparent
+                batches.append(row)
+
+            for bucket in surface.opaque_buckets:
+                batch(bucket, *surface.bucket_ranges[bucket], False)
+            for bucket in surface.transparent_draw_order(camera.eye):
+                batch(bucket, *surface.bucket_ranges[bucket], True)
+            packet.surface_batches = batches
+
+        def pack(frame):
+            batches = []
+            for path in DrawPath:
+                if frame.counts[path]:
+                    packet.set_stream(_DRAW_PATHS[path], frame.stream(path))
+            for batch in frame.active():
+                row = self.api.DebugBatch()
+                row.path, row.occlusion = (
+                    _DRAW_PATHS[batch.path],
+                    _OCCLUSIONS[batch.occlusion],
+                )
+                row.start, row.count = batch.start, batch.count
+                if batch.mesh is not None:
+                    row.mesh = self._debug_meshes[batch.mesh]
+                batches.append(row)
+            if self._text.prepare(frame.texts, frame.text_count):
+                if self._text.atlas_dirty or self._glyph_atlas is None:
+                    width, height = self._text.atlas_size
+                    mask = np.frombuffer(self._text.pixels, np.uint8).reshape(height, width)
+                    rgba = np.repeat(mask[..., None], 4, axis=2)
+                    replacement = self.runtime.upload_texture(rgba)
+                    if self._glyph_atlas is not None:
+                        self.runtime.destroy_texture(self._glyph_atlas)
+                    self._glyph_atlas = replacement
+                    self._text.mark_uploaded()
+                packet.glyph_atlas = self._glyph_atlas
+                packet.set_stream(8, self._text.records[: self._text.count])
+                for batch in self._text.batches():
+                    row = self.api.DebugBatch()
+                    row.path, row.occlusion = 8, _OCCLUSIONS[batch.occlusion]
+                    row.start, row.count = batch.start, batch.count
+                    batches.append(row)
+            packet.debug = batches
+
+        self.debug.render_frame(pack)
+        self.runtime.set_overlays(self._scene_handle, packet)
+
     def set_camera(self, camera):
-        self._camera = camera
+        self._camera = camera.with_aspect(self.target.width / self.target.height)
+        self._render_state_dirty = True
 
     def set_background(self, rgba):
         self._style.background = tuple(rgba)
@@ -269,14 +507,25 @@ class NativeBackend:
         started = time.perf_counter()
         if frame is not None:
             self.update(frame)
+        elif self._render_state_dirty and self._last_frame is not None:
+            self.update(self._last_frame)
         camera = self.api.CameraView()
         camera.view = self._camera.view_matrix()
         camera.projection = self._camera.proj_matrix()
         camera.far_plane = self._camera.far
+        camera.near_plane = self._camera.near
+        camera.focus = tuple(self._camera.target)
         camera.revision = self._sequence
-        self.target.frame = self.runtime.render(self.target.handle, camera)
+        request = request or RenderRequest.viewport()
+        color = request.needs(RenderProduct.COLOR)
+        if color:
+            self._sync_overlays()
+        self.target.frame = self.runtime.render(
+            self.target.handle, camera, color, bool(request.products & ~RenderProduct.COLOR)
+        )
         self.stats.instances = self._builder.scene.count
-        self.stats.draw_calls = 2 * self._builder.scene.bucket_count()
+        self.stats.draw_calls = self.target.frame.statistics.draw_calls
+        self.stats.buckets = self._builder.scene.bucket_count()
         self.stats.frame_cpu_ms = (time.perf_counter() - started) * 1000
         texture = self.runtime.target_texture(self.target.handle)
         return ViewportImage(texture.id, self.target.width, self.target.height, False, texture)
@@ -288,6 +537,7 @@ class NativeBackend:
             self.runtime.resize(self.target.handle, width, height)
             self.target.width, self.target.height = width, height
             self.target.frame = None
+            self.set_camera(self._camera)
 
     def pick(self, x, y):
         if self.target.frame is None or not (
@@ -303,21 +553,38 @@ class NativeBackend:
         return int(result.image[0, 0]) if result.state == self.api.ReadbackState.READY else 0
 
     def highlight(self, object_id, *, xray=False, fill=True, outline=True):
-        if (self._selected, self._fill) != (object_id, fill):
-            self._selected, self._fill = object_id, fill
-            if self._source is not None:
-                self._sync_scene()
+        self._selected = object_id
+        self._style.selected_id, self._style.selection_fill = object_id, fill
+        self._style.selection_outline, self._style.selection_xray = outline, xray
+        self.runtime.configure(self._scene_handle, self._style)
 
     def set_gizmo(self, gizmo):
-        return False
+        self._gizmo = gizmo
+        return True
 
     def set_flag(self, flag, value):
         flag = RenderFlag(flag)
         if flag not in self.caps.render_flags:
             return False
         self._flags[flag] = bool(value)
-        if flag == RenderFlag.TEXTURE:
-            self._style.textures = bool(value)
+        self._render_state_dirty = True
+        style_names = {
+            RenderFlag.WIREFRAME: "wireframe",
+            RenderFlag.TEXTURE: "textures",
+            RenderFlag.CULL_FACE: "cull_face",
+            RenderFlag.TRANSPARENT: "transparent",
+            RenderFlag.ADDITIVE: "additive",
+            RenderFlag.TONEMAP: "tonemap",
+            RenderFlag.FOG: "fog",
+            RenderFlag.HAZE: "haze",
+            RenderFlag.MSAA: "msaa",
+            RenderFlag.SHADOW: "shadows",
+            RenderFlag.SKYBOX: "skybox",
+            RenderFlag.REFLECTION: "reflections",
+            RenderFlag.OUTLINE: "outline",
+        }
+        if flag in style_names:
+            setattr(self._style, style_names[flag], bool(value))
             self.runtime.configure(self._scene_handle, self._style)
             return True
         if self._source is not None:
@@ -327,6 +594,7 @@ class NativeBackend:
                 flex_face=self.get_flag(RenderFlag.FLEXFACE),
                 flex_skin=self.get_flag(RenderFlag.FLEXSKIN),
                 convex_hull=self.get_flag(RenderFlag.CONVEXHULL),
+                island=self.get_flag(RenderFlag.ISLAND),
             )
             self._sync_scene()
         return True
@@ -335,34 +603,61 @@ class NativeBackend:
         return self._flags.get(flag, False)
 
     def set_shadow_quality(self, quality):
-        return False
+        self._style.shadow_quality = list(ShadowQuality).index(ShadowQuality(quality))
+        self.runtime.configure(self._scene_handle, self._style)
+        return True
 
     def get_shadow_quality(self):
-        return ShadowQuality.BALANCED
+        return list(ShadowQuality)[self._style.shadow_quality]
 
     def set_debug_view(self, view):
-        return DebugView(view) == DebugView.SHADED
+        view = DebugView(view)
+        modes = {
+            DebugView.SHADED: 0,
+            DebugView.ALBEDO: 1,
+            DebugView.NORMAL: 2,
+            DebugView.DEPTH: 3,
+            DebugView.OVERDRAW: 4,
+            DebugView.WIREFRAME: 5,
+        }
+        if view not in modes:
+            return False
+        self._debug_view = view
+        self._style.debug_view = modes[view]
+        self.runtime.configure(self._scene_handle, self._style)
+        return True
 
     def get_debug_view(self):
-        return DebugView.SHADED
+        return self._debug_view
+
+    def configure_text(
+        self, primary="", primary_index=0, fallback="", fallback_index=0, size_px=14
+    ):
+        self._text.configure(primary, primary_index, fallback, fallback_index, size_px)
 
     def set_label_mode(self, mode):
-        return LabelMode(mode) == LabelMode.NONE
+        self._label_mode = LabelMode(mode)
+        self._render_state_dirty = True
+        return True
 
     def get_label_mode(self):
-        return LabelMode.NONE
+        return self._label_mode
 
     def set_frame_mode(self, mode):
-        return FrameMode(mode) == FrameMode.NONE
+        self._frame_mode = FrameMode(mode)
+        self._render_state_dirty = True
+        return True
 
     def get_frame_mode(self):
-        return FrameMode.NONE
+        return self._frame_mode
 
     def set_bvh_depth(self, depth):
-        return False
+        self._bvh_depth = max(int(depth), 0)
+        self._render_state_dirty = True
+        return True
 
     def get_bvh_depth(self):
-        return 0
+        return self._bvh_depth
 
     def render_options(self):
         return tuple(flag for flag in RenderFlag if flag in self.caps.render_flags)
@@ -376,20 +671,19 @@ class NativeBackend:
         self._require_open()
         width, height = size or (self.target.width, self.target.height)
         view = (camera or self._camera).with_aspect(width / height)
-        native = self.api.CameraView()
-        native.view, native.projection = view.view_matrix(), view.proj_matrix()
-        native.far_plane = view.far
-        target = self.runtime.create_target(width, height, self.target.samples, self._scene_handle)
+        previous_target, previous_camera = self.target, self._camera
+        temporary = NativeTarget(self, width, height, self.target.samples)
         try:
-            frame = self.runtime.render(target, native)
-            result = self.runtime.wait(self.runtime.readback(frame, self.api.Product.COLOR))
-            if result.state != self.api.ReadbackState.READY:
-                raise RuntimeError("Capture was canceled by a scene change")
+            self.target = temporary
+            self.set_camera(view)
+            self.render(request=RenderRequest.color())
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-            Image.fromarray(result.image).save(path)
+            Image.fromarray(temporary.read_rgb()).save(path)
             return True
         finally:
-            self.runtime.destroy(target)
+            self.target = previous_target
+            self.set_camera(previous_camera)
+            self.runtime.destroy(temporary.handle)
 
     def describe(self):
         return f"bgfx / {self.runtime.capabilities.backend} / C++ render owner"
@@ -399,6 +693,8 @@ class NativeBackend:
             return
         self._closed = True
         try:
+            if getattr(self, "_glyph_atlas", None) is not None:
+                self.runtime.destroy_texture(self._glyph_atlas)
             if self._scene_handle is not None:
                 self.runtime.destroy_scene(self._scene_handle)
         finally:

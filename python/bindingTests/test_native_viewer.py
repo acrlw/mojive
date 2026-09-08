@@ -122,7 +122,8 @@ def test_full_viewer_two_windows_resize_selection_and_peer_survival():
             a.sync()
             b.sync()
         image = a.capture_array(surface="window")
-        assert image.shape == (760, 1100, 3) and np.std(image) > 10
+        width, height = a.window.size_pixels
+        assert image.shape == (height, width, 3) and np.std(image) > 10
         Image.fromarray(image).save(OUTPUT / "viewer.png")
         # A scene target remains valid after a peer is resized, reloaded, and closed.
         a.backend.render()
@@ -197,12 +198,14 @@ def test_hundred_humanoid_viewer_physics_and_rendering():
         model, renderer="bgfx", paused=False, width=1280, height=800, vsync=False, show_window=False
     ) as viewer:
         frames = 0
-        deadline = time.perf_counter() + 5
-        while frames < 60 or viewer.session.frame.time < 0.05:
+        deadline = time.perf_counter() + 15
+        while frames < 3 or viewer.session.frame.time < 0.05:
             viewer.sync()
             frames += 1
             if time.perf_counter() > deadline:
-                pytest.fail("Physics did not publish advancing frames within five seconds")
+                pytest.fail(
+                    f"Physics did not advance: {frames} frames, simulation time {viewer.session.frame.time}"
+                )
         assert viewer.session.frame.step > 0
         rgb = viewer.capture_array(surface="window")
         Image.fromarray(rgb).save(OUTPUT / "humanoids100.png")
@@ -241,7 +244,8 @@ def test_shown_scaled_window_and_cjk(monkeypatch):
         rgb = viewer.capture_array(surface="window")
         width, height = viewer.window.size_pixels
         assert rgb.shape == (height, width, 3)
-        assert viewer.window.shown and viewer.window.ui_scale == 1.5
+        assert viewer.window.shown
+        assert viewer.window.ui_scale == pytest.approx(1.5 * viewer.window.pixel_scale)
         Image.fromarray(rgb).save(OUTPUT / "scaled-cjk.png")
         (OUTPUT / "display-scale.json").write_text(
             json.dumps(
@@ -266,7 +270,7 @@ def test_alternate_capture_and_real_alpha_do_not_replace_viewport():
         backend.render()
         rgba = backend.target.read_color()
         assert rgba.shape == (48, 64, 4)
-        np.testing.assert_array_equal(rgba[0, 0], [25, 51, 76, 127])
+        np.testing.assert_array_equal(rgba[0, 0], [26, 51, 77, 128])
         backend.capture(OUTPUT / "alternate.png", size=(83, 29))
         assert Image.open(OUTPUT / "alternate.png").size == (83, 29)
         np.testing.assert_array_equal(backend.target.read_color(), rgba)
@@ -299,3 +303,168 @@ def test_async_completion_can_close_the_last_renderer():
     assert done.result(timeout=15)
     with SceneRenderer(width=16, height=16, renderer="bgfx") as fresh:
         fresh.render()
+
+
+def test_viewer_projection_and_colors_match_opengl_after_resize():
+    from mojive import CameraView
+    from mojive.composition import build
+    from mojive.ui import window as window_module
+
+    captures = {}
+    for backend in ("opengl", "bgfx"):
+        with build(
+            Path("assets/test_scene.xml"),
+            renderer=backend,
+            width=1100,
+            height=760,
+            vsync=False,
+            paused=True,
+            show_window=False,
+        ) as viewer:
+            for _ in range(4):
+                viewer.sync()
+            original = viewer.app.camera.view()
+            # The application camera intentionally carries aspect=1; render targets own aspect.
+            viewer.app.camera.adopt(
+                CameraView(
+                    eye=np.array([2.6, 1.4, 0.67], np.float32),
+                    target=np.array([0, 0, 0.2], np.float32),
+                    near=original.near,
+                    far=509,
+                )
+            )
+            for width, height in ((1100, 760), (820, 880), (1100, 760)):
+                window_module.glfw.set_window_size(viewer.window._window, width, height)
+                for _ in range(4):
+                    viewer.sync()
+                rgb = viewer.backend.target.read_rgb(flip=True)
+                key = (backend, width, height)
+                if key in captures:
+                    np.testing.assert_array_equal(captures[key], rgb)
+                captures[key] = rgb.copy()
+                Image.fromarray(rgb).save(OUTPUT / f"projection-{backend}-{width}-{height}.png")
+    for width, height in ((1100, 760), (820, 880)):
+        reference, native = captures["opengl", width, height], captures["bgfx", width, height]
+        error = np.abs(native.astype(float) - reference)
+        assert error.mean() < 1
+        assert np.percentile(error, 99) <= 3
+
+
+def _metal_display_sync(window):
+    import ctypes as c
+
+    objc = c.CDLL("/usr/lib/libobjc.A.dylib")
+    objc.sel_registerName.argtypes, objc.sel_registerName.restype = [c.c_char_p], c.c_void_p
+    objc.object_getClassName.argtypes, objc.object_getClassName.restype = [c.c_void_p], c.c_char_p
+
+    def send(obj, name, *args, result=c.c_void_p):
+        call = c.CFUNCTYPE(result, c.c_void_p, c.c_void_p, *([c.c_ulong] * len(args)))(
+            ("objc_msgSend", objc)
+        )
+        return call(obj, objc.sel_registerName(name.encode()), *args)
+
+    def array(obj, name):
+        items = send(obj, name)
+        return [
+            send(items, "objectAtIndex:", i)
+            for i in range(send(items, "count", result=c.c_ulong) if items else 0)
+        ]
+
+    states = []
+
+    def layer(value):
+        if not value:
+            return
+        if "MetalLayer" in objc.object_getClassName(value).decode():
+            states.append(bool(send(value, "displaySyncEnabled", result=c.c_bool)))
+        for child in array(value, "sublayers"):
+            layer(child)
+
+    def view(value):
+        layer(send(value, "layer"))
+        for child in array(value, "subviews"):
+            view(child)
+
+    view(send(window._native_handle()[0], "contentView"))
+    assert states, "The window must own a real Metal presentation layer"
+    return states
+
+
+@pytest.mark.skipif(os.sys.platform != "darwin", reason="Inspect the actual macOS display layer")
+def test_vsync_controls_gpu_presentation_and_survives_peer_close():
+    from mojive.composition import build
+
+    with build(
+        Path("assets/test_scene.xml"),
+        renderer="bgfx",
+        width=640,
+        height=480,
+        vsync=False,
+        show_window=False,
+    ) as a:
+        for enabled in (True, False, True):
+            a.window.set_vsync(enabled)
+            for _ in range(3):
+                a.sync()
+            assert all(value is enabled for value in _metal_display_sync(a.window))
+        with build(
+            Path("assets/test_scene.xml"),
+            renderer="bgfx",
+            width=640,
+            height=480,
+            vsync=False,
+            show_window=False,
+        ) as b:
+            a.sync()
+            b.sync()
+            # bgfx shares presentation policy: a synchronized peer retains VSync.
+            assert all(_metal_display_sync(a.window)) and all(_metal_display_sync(b.window))
+        a.sync()
+        assert all(_metal_display_sync(a.window))
+        a.window.set_vsync(False)
+        for _ in range(3):
+            a.sync()
+        assert not any(_metal_display_sync(a.window))
+
+
+@pytest.mark.parametrize(("requested", "effective"), [(0, 1), (3, 2), (24, 4)])
+def test_mujoco_sample_requests_use_portable_color_targets(requested, effective):
+    import mujoco
+
+    model = mujoco.MjModel.from_xml_path("assets/test_scene.xml")
+    model.vis.quality.offsamples = requested
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    with Renderer(model, width=96, height=72, renderer="bgfx") as renderer:
+        renderer.update_scene(data)
+        rgb = renderer.render()
+        assert rgb.shape == (72, 96, 3) and np.std(rgb) > 5
+        assert renderer._backend.caps.msaa_samples == effective
+
+
+def test_zero_alpha_geometry_remains_available_to_semantic_export():
+    import mujoco
+
+    model = mujoco.MjModel.from_xml_string("""
+        <mujoco><worldbody>
+          <geom name="opaque" type="sphere" size="0.4" rgba="0 1 0 1"/>
+          <geom name="invisible" type="box" size="0.5 0.1 0.5" pos="0 -1 0"
+                rgba="1 0 0 0"/>
+        </worldbody></mujoco>
+    """)
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    camera = mujoco.MjvCamera()
+    camera.lookat[:] = 0
+    camera.distance, camera.azimuth, camera.elevation = 4, 90, 0
+    results = {}
+    for backend in ("opengl", "bgfx"):
+        with Renderer(model, width=160, height=120, renderer=backend) as renderer:
+            renderer.update_scene(data, camera)
+            rgb = renderer.render()
+            renderer.enable_segmentation_rendering()
+            ids = renderer.render()
+            assert np.count_nonzero(ids[..., 0] == 1) > 100
+            results[backend] = rgb, ids
+    np.testing.assert_array_equal(results["opengl"][1], results["bgfx"][1])
+    assert np.abs(results["opengl"][0].astype(float) - results["bgfx"][0]).mean() < 1

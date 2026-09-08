@@ -370,7 +370,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                     backend_gpu_ms.append(sum(float(value) for value in stats.gpu_ms.values()))
             notes = getattr(stats, "notes", {})
             for pass_name, statuses in pass_cache.items():
-                statuses.append(str(notes.get(f"{pass_name} cache", "off")))
+                statuses.append(str(notes.get(f"{pass_name} cache", "unavailable")))
             checksum ^= int(output.reshape(-1)[frame % output.size])
     finally:
         close_start = time.perf_counter()
@@ -446,7 +446,9 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--renderer", choices=("mujoco", "mojive-opengl", "mojive-wgpu"), required=True
+        "--renderer",
+        choices=("mujoco", "mojive-opengl", "mojive-wgpu", "mojive-bgfx"),
+        required=True,
     )
     parser.add_argument("--workload", choices=tuple(_WORKLOADS), required=True)
     parser.add_argument("--mode", choices=("rgb", "depth", "segmentation"), required=True)
@@ -461,6 +463,8 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.pop("MOJIVE_RENDERER", None)
     if args.renderer == "mojive-opengl":
         os.environ["MOJIVE_BACKEND"] = "opengl"
+    elif args.renderer == "mojive-bgfx":
+        os.environ["MOJIVE_BACKEND"] = "bgfx"
     elif args.renderer == "mojive-wgpu":
         os.environ["MOJIVE_BACKEND"] = "wgpu"
     else:
