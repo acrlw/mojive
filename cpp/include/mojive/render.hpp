@@ -153,6 +153,7 @@ class Renderer {
 // The platform layer supplies native OS handles; a backend decides how to use them.
 // Offscreen consumers leave handles empty and do not initialize an editor.
 
+void validateCamera(const CameraView &);
 void validateUi(const UiFrame &);
 void validateScene(const SceneSource &);
 void validateFrame(const SceneSource &, const SceneFrame &);

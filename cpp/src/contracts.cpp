@@ -1,6 +1,10 @@
 #include <algorithm>
 #include <cmath>
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
+#include <glm/geometric.hpp>
 #include <mojive/render.hpp>
+#include <numbers>
 #include <stdexcept>
 
 namespace mojive {
@@ -41,6 +45,14 @@ void validateScene(const SceneSource &scene) {
                 throw std::invalid_argument("Non-finite color");
     }
 }
+void validateCamera(const CameraView &camera) {
+    if (!std::isfinite(camera.farPlane) || camera.farPlane <= 0)
+        throw std::invalid_argument("Invalid camera far plane");
+    for (const auto *matrix : {&camera.view, &camera.projection})
+        for (float value : *matrix)
+            if (!std::isfinite(value))
+                throw std::invalid_argument("Non-finite camera matrix");
+}
 void validateFrame(const SceneSource &scene, const SceneFrame &frame) {
     if (frame.sourceRevision != scene.revision || frame.transforms.size() != scene.instances.size())
         throw std::invalid_argument("Frame does not match the scene source");
@@ -52,66 +64,41 @@ void validateFrame(const SceneSource &scene, const SceneFrame &frame) {
             throw std::invalid_argument("Scene transforms must be affine");
     }
 }
-using V = std::array<float, 3>;
-static V sub(V a, V b) {
-    return {a[0] - b[0], a[1] - b[1], a[2] - b[2]};
+namespace {
+Matrix rowMajor(const glm::mat4 &matrix) {
+    Matrix result;
+    for (size_t row = 0; row < 4; ++row)
+        for (size_t column = 0; column < 4; ++column)
+            result[4 * row + column] = matrix[column][row];
+    return result;
 }
-static V cross(V a, V b) {
-    return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+bool finite(std::initializer_list<float> values) {
+    return std::all_of(values.begin(), values.end(),
+                       [](float value) { return std::isfinite(value); });
 }
-static float dot(V a, V b) {
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-static V normalized(V a) {
-    float length = std::sqrt(dot(a, a));
-    if (length < 1e-8f)
+} // namespace
+Matrix lookAt(std::array<float, 3> eye, std::array<float, 3> target, std::array<float, 3> up) {
+    if (!finite({eye[0], eye[1], eye[2], target[0], target[1], target[2], up[0], up[1], up[2]}))
+        throw std::invalid_argument("Non-finite camera basis");
+    glm::vec3 e(eye[0], eye[1], eye[2]), t(target[0], target[1], target[2]), u(up[0], up[1], up[2]);
+    const auto direction = t - e;
+    const auto length = glm::length(direction);
+    if (!std::isfinite(length) || length < 1e-8f)
         throw std::invalid_argument("Degenerate camera basis");
-    return {a[0] / length, a[1] / length, a[2] / length};
-}
-Matrix lookAt(V eye, V target, V up) {
-    V z = normalized(sub(eye, target)), x = normalized(cross(up, z)), y = cross(z, x);
-    return {x[0], x[1], x[2], -dot(x, eye), y[0], y[1], y[2], -dot(y, eye),
-            z[0], z[1], z[2], -dot(z, eye), 0,    0,    0,    1};
+    const auto sideLength = glm::length(glm::cross(u, direction / length));
+    if (!std::isfinite(sideLength) || sideLength < 1e-8f)
+        throw std::invalid_argument("Degenerate camera basis");
+    return rowMajor(glm::lookAtRH(e, t, u));
 }
 Matrix perspective(float fov, float aspect, float near, float far) {
-    if (fov <= 0 || fov >= 3.14159f || aspect <= 0 || near <= 0 || far <= near)
+    if (!finite({fov, aspect, near, far}) || fov <= 0 || fov >= std::numbers::pi_v<float> ||
+        aspect <= 0 || near <= 0 || far <= near)
         throw std::invalid_argument("Invalid perspective camera");
-    float f = 1 / std::tan(fov / 2);
-    return {f / aspect,
-            0,
-            0,
-            0,
-            0,
-            f,
-            0,
-            0,
-            0,
-            0,
-            (far + near) / (near - far),
-            2 * far * near / (near - far),
-            0,
-            0,
-            -1,
-            0};
+    return rowMajor(glm::perspectiveRH_NO(fov, aspect, near, far));
 }
 Matrix orthographic(float width, float height, float near, float far) {
-    if (width <= 0 || height <= 0 || far <= near)
+    if (!finite({width, height, near, far}) || width <= 0 || height <= 0 || far <= near)
         throw std::invalid_argument("Invalid orthographic camera");
-    return {2 / width,
-            0,
-            0,
-            0,
-            0,
-            2 / height,
-            0,
-            0,
-            0,
-            0,
-            -2 / (far - near),
-            -(far + near) / (far - near),
-            0,
-            0,
-            0,
-            1};
+    return rowMajor(glm::orthoRH_NO(-width / 2, width / 2, -height / 2, height / 2, near, far));
 }
 } // namespace mojive

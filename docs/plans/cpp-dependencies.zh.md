@@ -1,6 +1,6 @@
 # C++ 基础库选型与依赖边界
 
-评估日期：2026-09-08。本文是正式开发的依赖建议；GLM、Eigen、EnTT、spdlog 尚未加入当前构建，也没有把推荐当成已验证的性能收益。
+更新日期：2026-09-08。GLM 1.0.3 与 spdlog 1.17.0 已按固定提交纳入源码和构建；Eigen、EnTT 未加入。当前结果验证兼容性和生命周期，没有把依赖接入当成已测得的性能提升。
 
 ## 结论
 
@@ -20,7 +20,7 @@ GLM 与 Eigen 都可以处理小矩阵，选择 GLM 是当前图形基础设施�
 
 ## 当前代码说明了什么
 
-- `cpp/src/contracts.cpp` 仍包含验证阶段手写的 `sub`、`cross`、`dot`、归一化及相机矩阵公式。接入 GLM 时替换这些算法实现，保留退化输入检查与 Mojive 坐标约定。
+- `cpp/src/contracts.cpp` 已使用 GLM 的右手系相机算法，替换验证阶段的手写向量和矩阵公式。输入退化检查、行主序边界及深度契约保留。
 - `cpp/include/mojive/render.hpp` 已有 `SceneSource`、`SceneFrame`、`objectId` 和连续的变换数组。标准库数据契约便于隔离后端，不要求内部也只能用标准库计算。
 - Python 的 `Session` 已经负责选择、命令和编辑状态。增加另一份 ECS 世界，首先会产生状态归属、对象映射和同步问题，不能仅凭库的微基准判断收益。
 - `python/src/mojive/log.py` 已用 Loguru；`ui/messages.py` 的 `OutputBuffer` 已是有界、带锁的日志历史。迁移期间它可以订阅原生记录；原生文件输出不以此 Python 面板为前提。
@@ -133,7 +133,7 @@ Mojive 应直接复用 MuJoCo 的仿真、模型、动力学、已有数学工�
 
 ## 下一步实施与验收
 
-先在现有 C++ worktree 接入 GLM，替换验证代码中的基础数学；然后在私有 Python 扩展的纵向集成中接入 spdlog 桥接。Eigen 与原生业务求解不在本轮路线内；EnTT 仅按基础设施需求重新评估，不改变当前 Python API。
+已在 C++ worktree 接入 GLM，并通过私有扩展提供 spdlog 日志发布、批量读取和关闭。原生 Output 面板与可选 Loguru sink 适配尚未接入。后续进度见[实现与验收清单](cpp-implementation.zh.md)。Eigen 与原生业务求解不在本轮路线内；EnTT 仅按基础设施需求重新评估，不改变当前 Python API。
 
 数学验收覆盖退化相机、变换方向、投影和矩阵布局，并复用原生 RGB / 深度 / 分割及相机验收。日志验收覆盖无 GIL 的原生生产者、Python 发布与停止消费、原生输出持续工作、溢出计数、多 runtime 隔离、宿主 sink 保留、桥接无回路、显式关闭及解释器退出。性能比较继续使用 100 humanoid，记录正常日志级别下的帧耗时分位数、仿真吞吐、内存和包体；日志洪峰单独测试。
 

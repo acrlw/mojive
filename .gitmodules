@@ -19,3 +19,9 @@
 [submodule "third_party/robin_map"]
 	path = thirdParty/robinMap
 	url = https://github.com/Tessil/robin-map.git
+[submodule "thirdParty/glm"]
+	path = thirdParty/glm
+	url = https://github.com/g-truc/glm.git
+[submodule "thirdParty/spdlog"]
+	path = thirdParty/spdlog
+	url = https://github.com/gabime/spdlog.git

@@ -9,6 +9,7 @@ The C++ build never replaces an edited ImGui tree with a fetched copy.
 | `imgui/` | Tracked source, v1.92.9b-docking | Dear ImGui core and platform integration; owned customization history |
 | `bgfx/`, `bx/`, `bimg/`, `bgfxCmake/` | Git submodules at the tested commits | Renderer and offline shader compilation |
 | `glfw/` | Git submodule | Native platform windows and input |
+| `glm/`, `spdlog/` | Git submodules | Private graphics math and native logging |
 | `nanobind/`, `robinMap/` | Git submodules | Python binding support |
 | SDL, pybind11, separate shader tools | Optional locked downloads | Retained comparison experiments, disabled by default |
 

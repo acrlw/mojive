@@ -776,7 +776,7 @@ native-build:
 
 native-test:
 	$(PY) tools/check_native_layers.py
-	cmake -S cpp -B output/cpp-core-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_BGFX=OFF -DMOJIVE_BUILD_SDL=OFF -DMOJIVE_BUILD_BINDINGS=OFF
+	cmake -S cpp -B output/cpp-core-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_BGFX=OFF -DMOJIVE_BUILD_SDL=OFF -DMOJIVE_BUILD_BINDINGS=OFF -DMOJIVE_BUILD_PYTHON=OFF
 	cmake --build output/cpp-core-build --parallel $(NATIVE_JOBS)
 	ctest --test-dir output/cpp-core-build --output-on-failure
 
@@ -828,3 +828,19 @@ cpp-build: native-build
 cpp-test: native-test
 cpp-probe: native-probe
 cpp-gallery: native-gallery
+
+# Private extension acceptance; public backends remain unchanged until parity.
+CPP_PYTHON_BUILD ?= output/cpp-python-build
+CPP_PYTHON_BGFX ?= OFF
+.PHONY: cpp-python cpp-python-test
+cpp-python:
+	cmake -S cpp -B $(CPP_PYTHON_BUILD) -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_BGFX=$(CPP_PYTHON_BGFX) -DMOJIVE_BUILD_SDL=OFF -DMOJIVE_BUILD_PYTHON=ON -DPython_EXECUTABLE="$(abspath $(PY))"
+	cmake --build $(CPP_PYTHON_BUILD) --parallel $(NATIVE_JOBS)
+
+cpp-python-test: cpp-python
+	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(CPP_PYTHON_BUILD))" $(PYTEST) -q python/bindingTests/test_native.py
+
+.PHONY: cpp-python-gpu
+cpp-python-gpu:
+	$(MAKE) cpp-python CPP_PYTHON_BGFX=ON CPP_PYTHON_BUILD=$(NATIVE_BUILD)
+	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_NATIVE_SHADER_DIR="$(abspath $(NATIVE_BUILD)/shaders)" MOJIVE_NATIVE_SCENE="$(abspath $(NATIVE_SCENE))" $(PYTEST) -q python/bindingTests/test_native.py python/bindingTests/test_native_render.py
