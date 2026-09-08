@@ -219,7 +219,7 @@ class StatusLayout:
 
 @dataclass(frozen=True)
 class _StatusPerformanceLayout:
-    """Stable, progressively collapsible right-edge telemetry columns."""
+    """Compact, progressively collapsible right-edge telemetry columns."""
 
     backend_text: str
     metric_text: str
@@ -2008,7 +2008,7 @@ def _status_performance_layout(
     show_physics: bool = False,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
 ) -> _StatusPerformanceLayout:
-    """Keep FPS columns stable and collapse telemetry before it can overlap.
+    """Pack telemetry by its displayed width and collapse it before it can overlap.
 
     The visual order is backend, simulation metric, delta time, and rates.
     Preserve the physics/render pair when it fits. Otherwise prioritize the
@@ -2018,55 +2018,46 @@ def _status_performance_layout(
     backend_text = str(backend)
     delta_text = f"Δt {max(0.0, float(dt)):.6g} s"
     fps_text = f"{labels.render} {max(0.0, float(fps)):.1f} FPS"
-    fps_reserve = f"{labels.render} 000.0 FPS"
     if show_physics:
         rate = "—" if physics_hz is None else f"{max(0.0, physics_hz):.0f}"
         fps_text = f"{labels.physics} {rate} Hz · {fps_text}"
-        fps_reserve = f"{labels.physics} 00000 Hz · {fps_reserve}"
     metric_text = str(metric_text)
 
-    actual = {
+    widths = {
         "backend": draw.text_size(backend_text)[0],
         "metric": (_key_width(draw, metric_text, scale) if metric_text else 0.0),
         "delta": draw.text_size(delta_text)[0],
         "fps": draw.text_size(fps_text)[0],
     }
-    reserved = {
-        "backend": actual["backend"],
-        "metric": actual["metric"],
-        "delta": actual["delta"],
-        "fps": max(actual["fps"], draw.text_size(fps_reserve)[0]),
-    }
     gap = 22.0 * scale
 
     def required(names: set[str]) -> float:
         count = sum(1 for name in ("backend", "metric", "delta", "fps") if name in names)
-        return sum(reserved[name] for name in names) + max(0, count - 1) * gap
+        return sum(widths[name] for name in names) + max(0, count - 1) * gap
 
     limit = float("inf") if max_width is None else max(0.0, float(max_width))
     visible: set[str] = set()
-    if show_physics and reserved["fps"] <= limit:
+    if show_physics and widths["fps"] <= limit:
         visible.add("fps")
         for name in ("metric", "delta", "backend"):
             candidate = {*visible, name}
-            if reserved[name] > 0.0 and required(candidate) <= limit:
+            if widths[name] > 0.0 and required(candidate) <= limit:
                 visible = candidate
-    elif reserved["delta"] <= limit:
+    elif widths["delta"] <= limit:
         visible.add("delta")
     else:
         compact = f"Δt {max(0.0, float(dt)):.4g}s"
         compact_width = draw.text_size(compact)[0]
         if compact_width <= limit:
             delta_text = compact
-            actual["delta"] = compact_width
-            reserved["delta"] = compact_width
+            widths["delta"] = compact_width
             visible.add("delta")
 
     # Preserve the simulation metric beside delta time before spending scarce
     # width on FPS or the backend label.
     if "delta" in visible:
         for name in ("metric", "fps", "backend"):
-            if reserved[name] <= 0.0:
+            if widths[name] <= 0.0:
                 continue
             candidate = {*visible, name}
             if required(candidate) <= limit:
@@ -2077,8 +2068,8 @@ def _status_performance_layout(
     dividers: list[float] = []
     cursor = float(right)
     for reverse_index, name in enumerate(reversed(order)):
-        positions[name] = cursor - actual[name]
-        cursor -= reserved[name]
+        positions[name] = cursor - widths[name]
+        cursor -= widths[name]
         if reverse_index < len(order) - 1:
             dividers.append(cursor - gap * 0.5)
             cursor -= gap
@@ -2090,7 +2081,7 @@ def _status_performance_layout(
         fps_text if "fps" in visible else "",
         positions["backend"],
         positions["metric"],
-        actual["metric"] if "metric" in visible else 0.0,
+        widths["metric"] if "metric" in visible else 0.0,
         positions["delta"],
         positions["fps"],
         tuple(dividers),

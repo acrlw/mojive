@@ -546,18 +546,41 @@ def test_frame_arrows_share_one_continuous_silhouette_and_center_shell(scale: fl
     assert center_kwargs["segments"] == 16
 
 
-def test_status_backend_and_fps_use_independent_stable_columns():
+@pytest.mark.parametrize("physics_hz,fps", ((None, 60), (0, 60), (1000, 99.9), (10000, 107)))
+@pytest.mark.parametrize("scale", (1.0, 1.5))
+@pytest.mark.parametrize(
+    "labels",
+    (
+        DEFAULT_VIEWPORT_LABELS,
+        replace(DEFAULT_VIEWPORT_LABELS, physics="物理", render="渲染"),
+    ),
+)
+def test_status_rates_use_actual_width_and_uniform_separator_spacing(
+    physics_hz, fps, scale, labels
+):
     draw = _MeasuredText()
-    two_digits = _status_performance_layout(draw, 500.0, 1.0, "OpenGL", 0.009, 99.9)
-    three_digits = _status_performance_layout(draw, 500.0, 1.0, "OpenGL", 0.009, 107.0)
-
-    assert two_digits.backend_x == pytest.approx(three_digits.backend_x)
-    assert two_digits.delta_text == "Δt 0.009 s"
-    assert three_digits.delta_text == "Δt 0.009 s"
-    assert two_digits.dividers == pytest.approx(three_digits.dividers)
-    assert two_digits.fps_x + draw.text_size(two_digits.fps_text)[0] == pytest.approx(500.0)
-    assert three_digits.fps_x + draw.text_size(three_digits.fps_text)[0] == pytest.approx(500.0)
-    assert two_digits.delta_x - min(two_digits.dividers) == pytest.approx(11.0)
+    layout = _status_performance_layout(
+        draw,
+        1000,
+        scale,
+        "OpenGL",
+        1 / 30,
+        fps,
+        physics_hz=physics_hz,
+        show_physics=True,
+        labels=labels,
+    )
+    spans = (
+        (layout.backend_x, draw.text_size(layout.backend_text)[0]),
+        (layout.delta_x, draw.text_size(layout.delta_text)[0]),
+        (layout.fps_x, draw.text_size(layout.fps_text)[0]),
+    )
+    assert spans[-1][0] + spans[-1][1] == pytest.approx(1000)
+    for ((left, width), (right, _)), divider in zip(
+        pairwise(spans), sorted(layout.dividers), strict=True
+    ):
+        assert divider - (left + width) == pytest.approx(11 * scale)
+        assert right - divider == pytest.approx(11 * scale)
 
 
 def test_status_distinguishes_measured_physics_and_render_rates():

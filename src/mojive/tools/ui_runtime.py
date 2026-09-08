@@ -27,8 +27,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--panels-only", action="store_true", help="Capture panel layout acceptance cases"
     )
+    parser.add_argument(
+        "--status-only", action="store_true", help="Capture telemetry spacing at digit boundaries"
+    )
     args = parser.parse_args(argv)
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.status_only:
+        _capture_status_spacing(args.output)
+        return 0
     if args.panels_only:
         _capture_panel_layouts(args.output)
         _capture_control(args.output, "actuator_visuals", "control-actuators-closeup.png")
@@ -498,6 +504,36 @@ def _settle(viewer, frames: int = 7) -> None:
         # after the resize rather than capturing the last pre-resize image.
         viewer.sync()
         viewer.sync()
+
+
+def _capture_status_spacing(output: Path) -> None:
+    from ..ui import app as app_module
+
+    viewer = build_scene(Scene(), vsync=False, width=1600, height=600, show_window=False)
+    original = app_module.draw_status
+    values = {"state": "paused", "step": 780, "dt": 1 / 30, "show_physics": True}
+
+    def draw_status(*args, **kwargs):
+        # Fix measured rates so visual comparisons cover the same digit boundaries.
+        return original(*args, **(kwargs | values))
+
+    app_module.draw_status = draw_status
+    try:
+        viewer.app._status_metric_mode = "steps"
+        for language in ("en", "zh_CN"):
+            viewer.app.set_language(language)
+            for rate, fps in ((0, 60.0), (1000, 99.9), (10000, 107.0)):
+                values.update(physics_hz=rate, fps=fps)
+                _settle(viewer, 3)
+                _save_window_crop(
+                    viewer,
+                    "Status###application_status",
+                    output / f"status-{language}-{rate}.png",
+                    padding=0.0,
+                )
+    finally:
+        app_module.draw_status = original
+        viewer.release()
 
 
 def _capture_size(width: int, height: int) -> tuple[int, int]:
