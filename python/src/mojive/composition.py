@@ -593,7 +593,15 @@ def _compose(
     adapter = None
     session = None
     try:
-        if renderer == "wgpu":
+        if renderer == "bgfx":
+            from .render.native.backend import NativeBackend
+            from .render.native.device import acquire_device
+            from .ui.window_native import NativeWindow
+
+            window = NativeWindow(window_config, device=acquire_device())
+            fb_w, fb_h = window.size_pixels
+            backend = NativeBackend(fb_w, fb_h, samples)
+        elif renderer == "wgpu":
             from .render.webgpu.backend import WgpuBackend
             from .ui.window_wgpu import WgpuWindow
 

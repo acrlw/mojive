@@ -55,7 +55,9 @@ class SceneRenderer:
                 self._backend.set_scene(source if source is not None else SceneSource())
                 self._backend.set_background((0.0, 0.0, 0.0, 1.0))
                 self._backend.set_camera(self._camera.with_aspect(width / height))
-                if not self._backend.set_shadow_quality(quality):
+                if not self._backend.set_shadow_quality(quality) and (
+                    self._backend.caps.shadows or quality != ShadowQuality.BALANCED
+                ):
                     raise RuntimeError("The renderer does not support shadow quality presets")
         except Exception:
             self.close()

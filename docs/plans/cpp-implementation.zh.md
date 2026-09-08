@@ -2,7 +2,7 @@
 
 更新日期：2026-09-08。开发分支：`codex/cpp-foundation`。
 
-**已有 Python API 和行为是兼容基准。第一阶段已经打通 Python → C++ → bgfx → NumPy 的离屏渲染；完整后端迁移尚未完成。** 当前公开 Renderer 和 Viewer 继续使用现有实现，Python 安装流程不变。
+**原生后端已经可以通过 `make native-viewer` 启动完整 Viewer，也可以通过现有 Renderer / SceneRenderer API 使用。** OpenGL 仍为默认；bgfx 是显式选择的开发预览，完整画质和功能迁移尚未完成。运行方式与当前限制见[启动指南](../how-to/native-viewer.zh.md)。
 
 ## 已完成的第一阶段
 
@@ -24,23 +24,23 @@
 - `set_scene()` 和 `update()` 返回时，后端已经消费本次 CPU 数据；不代表画面已完成 GPU 执行。调用期间输入必须保持稳定，调用后允许修改或释放。
 - Python 浮点输入按形状转为连续 float32，支持 F-order 和带 stride 的视图。ID 与索引输入要求相应的连续 uint32 / int32，避免隐式整数转换破坏身份信息。所有矩阵仍按数学上的行、列解释，用户不转置。
 - `render()` 返回帧 token。`readback()` 返回有界读取 ticket；`advance()` 推进提交，`poll()` 检查状态，`wait()` 推进并等待结果。当前不是 `asyncio.Future`。
-- `ReadbackResult.image` 在 Ready 时创建独立、连续、左上原点的 NumPy 数组；Pending / Canceled 时返回 `None`。已有输出在运行时关闭后仍有效。复用 `out` 数组尚待接入公开外观层。
+- `ReadbackResult.image` 在 Ready 时创建独立、连续、左上原点的 NumPy 数组；Pending / Canceled 时返回 `None`。已有输出在运行时关闭后仍有效。公开外观层已支持复用 `out`、非连续数组和原有 dtype 转换。
 - `close()` 拒绝后续工作，等待已接受调用完成，在原生所属线程释放 GPU，然后停止日志输出。正在同步等待读取的调用有超时；关闭不是强制中断驱动程序。
 - 队列满时对提交方施加等待，等待时释放 GIL；日志满时按约定丢弃并计数。两个通道的策略不同。
 - 原生 worker 不调用 Python。绑定在持有 GIL 时取得输入快照，随后释放 GIL 等待原生工作。物理状态的稳定性依旧由其现有所有者保证。
-- 当前一份 bgfx runtime 只拥有一个场景，可创建多个相机/输出目标。**这不等价于已经支持多个独立公开 Renderer。** 相互独立的场景和资源必须在下一阶段解决，不能通过每帧切换时销毁重建 GPU 场景应付。
-- 离屏 runtime 不接受平台窗口。窗口事件、原生句柄创建与 ImGui 主线程约束将在 Viewer 接入时单独处理。
+- 一份进程级 runtime 支持多个独立场景及输出目标；公开 Renderer / SceneRenderer / Viewer 共享设备。场景拥有自己的资源和 revision，关闭、重建一个场景只取消该场景的读取。高亮和帧颜色更新不重建网格或纹理。
+- 平台窗口由主线程创建并交给 runtime 管理 GPU 表面。ImGui 绘制数据转换为后端无关 UI packet，场景与窗口合成都留在 GPU 上；GLFW 的输入适配由两个 NO_API 窗口实现共用。
 
 ## 后续验收顺序
 
 | 阶段 | 必须完成的内容 | 状态 |
 |---|---|---|
-| 2. Python 兼容外观层与资源隔离 | 现有 SceneSource / SceneFrame 的适配；共享设备下的独立场景；多 Renderer 交错更新和关闭；现有同步、读取 ticket、`out` / stride / dtype / 异常语义 | 待实现 |
-| 3. 渲染效果与性能 | 材质、纹理、透明、灯光、阴影、反射、动态网格、调试和选择输出；按同画质比较现有后端；100 humanoid、复杂网格、反复加载与内存增长 | 待实现 |
-| 4. Viewer 和 UI 基础设施 | 主线程窗口/ImGui、原生渲染交接、现有 Session 权威状态；面板扩展边界；原生 Output 订阅；曲率连续自绘控件与统一设计规范 | 待实现 |
+| 2. Python 兼容外观层与资源隔离 | 现有 SceneSource / SceneFrame 适配；共享设备下独立场景；多 Renderer 交错更新与关闭；同步 / Future / `out` / stride / dtype | 已接入并通过本机验收 |
+| 3. 渲染效果与性能 | 基础材质、二维纹理与 mipmap、动态网格、精确选择输出；完整灯光、透明排序、阴影、反射和调试绘制 | 基础接入；完整画质和性能对比待完成 |
+| 4. Viewer 和 UI 基础设施 | 主线程窗口/ImGui、GPU 合成、Session 权威状态、原生 Output 订阅、多窗口生命周期 | 已接入原有 Viewer；ImGui 控件继续使用现有 Python 实现 |
 | 5. 分发与平台验收 | 可安装原生 wheel、shader / 动态库打包、独立环境安装、Python 版本矩阵、Windows/macOS/Linux 生命周期与 GPU 验收 | 待实现 |
 
-公开后端注册以兼容性和能力覆盖为前提；不把尚未实现的效果静默忽略。普通脚本继续直接调用 Python，不要求先启动 daemon。独立 runtime CLI、远程 session 和崩溃隔离留作之后的产品能力，不混入当前渲染迁移。
+按用户要求提供显式预览启动入口；通过 capabilities 标明支持范围，未实现的可选开关返回不支持。不能把预览入口当作完整迁移完成。普通脚本继续直接调用 Python，不要求先启动 daemon。独立 runtime CLI、远程 session 和崩溃隔离留作之后的产品能力，不混入当前渲染迁移。
 
 C++ 不承接 IK、最小二乘、规划等业务求解，不引入 Qt、Eigen 或 EnTT。GLM、spdlog、bgfx 和 nanobind 保持实现边界，后端无关的头文件不暴露它们的类型。当前没有开启 workflow CI。
 
@@ -59,4 +59,6 @@ make cpp-gallery HUMANOIDS_MODEL=/path/to/mujoco/model/humanoid/100_humanoids.xm
 
 共享测试要求见[验证矩阵](../guides/testing.md)。原生运行时的线程、异常和关闭还可用 `MOJIVE_ENABLE_SANITIZERS=ON` 在独立构建目录运行 CTest；GPU 检查顺序执行。
 
-当前私有扩展有 6 项 CPU/Python 检查及 4 项 GPU 检查；C++ CTest 有 3 项；原有绑定对比有 13 项。现有 Python 快速测试 1,625 项、集成测试 129 项通过。生成结果保存在 `output/cpp-python/bgfx/`，其中 `products.png` 用于查看三个方向与颜色位置，`humanoids100.png` 和 `acceptance.json` 记录实际大场景输出。
+当前私有扩展有 6 项 CPU/Python 检查及 5 项 GPU 检查；C++ CTest 有 3 项；原有绑定对比有 13 项。现有 Python 快速测试 1,625 项、集成测试 129 项通过。生成结果保存在 `output/cpp-python/bgfx/`，其中 `products.png` 用于查看三个方向与颜色位置，`humanoids100.png` 和 `acceptance.json` 记录实际大场景输出。
+
+第二阶段新增 8 项完整 Viewer / 公开 API GPU 验收，包含实际推进的官方 100 humanoid 模型、窗口缩放和重开、场景隔离与异步读取。`output/native-viewer/` 保存可供人工检查的完整界面。

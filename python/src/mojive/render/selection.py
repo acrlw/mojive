@@ -15,6 +15,8 @@ def render_backend_name(renderer: str | None = None) -> str:
         )
     requested = requested.strip().lower()
     requested = {"forge": "opengl", "webgpu": "wgpu"}.get(requested, requested)
-    if requested not in {"", "opengl", "wgpu"}:
-        raise ValueError(f"Unsupported renderer: {requested!r}; expected 'opengl' or 'wgpu'")
+    if requested not in {"", "opengl", "wgpu", "bgfx"}:
+        raise ValueError(
+            f"Unsupported renderer: {requested!r}; expected 'opengl', 'wgpu' or 'bgfx'"
+        )
     return requested or "opengl"

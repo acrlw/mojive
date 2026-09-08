@@ -179,7 +179,9 @@ class Renderer:
             with self._gl_current():
                 backend.set_background((0.0, 0.0, 0.0, 1.0))
                 backend.set_scene(source)
-                if not backend.set_shadow_quality(shadow_quality):
+                if not backend.set_shadow_quality(shadow_quality) and (
+                    backend.caps.shadows or shadow_quality != ShadowQuality.BALANCED
+                ):
                     raise RuntimeError(
                         f"The {backend.caps.name} backend does not support shadow quality presets"
                     )

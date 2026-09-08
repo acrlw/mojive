@@ -38,9 +38,9 @@ C++ 提供舞台和基础设施，Python 负责上层业务、算法选择、工
 
 ## 本次准备与下一步的分界
 
-这次完成目录、命名、源码依赖、构建入口和兼容性验证。Python 安装仍使用现有构建方式，**还没有把 bgfx 接进公开 `Renderer`，也没有改写已安装的 imgui-bundle wheel**。不会把准备工作的 C++ fixture 当成已经能替代生产 API 的实现。
+这次完成目录、命名、源码依赖、构建入口和兼容性验证。Python 安装仍使用现有构建方式，**现已通过显式 `renderer="bgfx"` 接入公开 `Renderer`，可用 `make native-viewer` 启动；没有改写已安装的 imgui-bundle wheel**。不会把准备工作的 C++ fixture 当成已经能替代生产 API 的实现。
 
-正式开发已开始：私有 `mojive._native` 扩展已打通场景提交、RGB/深度/分割/ID 读取与释放，并验证数组所有权、异常和 `close()`。公开 Renderer 接入、`out` 缓冲兼容、完整渲染效果与 UI 仍按[实现与验收清单](cpp-implementation.zh.md)推进。接口以当前 Python 行为为准，不要求用户接触 bgfx handle 或改写成新的 C++ 客户端。
+正式开发已开始：私有 `mojive._native` 扩展已打通场景提交、RGB/深度/分割/ID 读取与释放，并验证数组所有权、异常和 `close()`。公开 Renderer、`out` 缓冲兼容和原有 Viewer 已接入；剩余完整渲染效果与分发仍按[实现与验收清单](cpp-implementation.zh.md)推进。接口以当前 Python 行为为准，不要求用户接触 bgfx handle 或改写成新的 C++ 客户端。
 
 对于用户自己在 Python 中推进的 MuJoCo 仿真，`update_scene(data)` 在调用边界读取稳定状态并形成 Mojive 自有快照；不能把借来的可写 `mjData` / NumPy 指针交给后台线程长期使用。后台渲染与资源任务可以释放 GIL，Python 回调则在持有 GIL 时处理。只有 Mojive 管理仿真时，原生物理 adapter 才独占自己的物理状态；不能擅自接管用户的 `MjData`。
 
