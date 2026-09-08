@@ -164,6 +164,35 @@ with Renderer(model, shadow_quality=ShadowQuality.HIGH) as renderer:
     renderer.set_shadow_quality(ShadowQuality.PERFORMANCE)
 ```
 
+## Camera tracking
+
+Open **Camera > Tracking** (`F6`), choose a body in **Target**, or select a scene object and
+press **Track selected**. **X-Y** follows horizontal motion while holding the current camera
+height; **X-Y-Z** also follows vertical motion. Tracking keeps the viewing direction and distance:
+the target's rotation does not turn the camera. Orbit and zoom still work, and panning adjusts
+the composition offset. Changing scene selection does not change the tracking target.
+
+**Smoothing** is the time in seconds to halve the remaining position error. Larger values suppress
+rapid motion more strongly and add following delay; `0` follows directly. The default is `0.25 s`
+with X-Y tracking. Smoothing uses elapsed display time, independently of simulation steps,
+playback speed, and the physics owner. Axis and smoothing choices persist across launches;
+tracking starts disabled in a new viewer. Choose **Off** to stop at the current view. Selecting a
+model camera, framing the scene, focusing another object, or explicitly setting a camera also
+ends tracking.
+
+```python
+from mojive import CameraTrackingConfig
+
+viewer.configure_tracking(CameraTrackingConfig(axes="xy", smoothing=0.35))
+viewer.track_body("pelvis")  # Unique body name, or composed body index.
+viewer.track_body(None)     # Stop following without changing the current view.
+```
+
+These methods also work on `launch_passive()` handles: following runs in the display process
+without adding work to each physics step. For other adapters and programmatic scenes, use
+`viewer.track_node(node.node_id)` with a node from `viewer.session.nodes`. `ViewerConfig(tracking=...)`
+sets initial preferences; `configure_tracking(..., persist=True)` also saves desktop preferences.
+
 ## Interactive capture and recording
 
 Interactive captures distinguish the raw scene from composed UI. Still captures default to `SCENE` and

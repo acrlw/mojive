@@ -30,6 +30,10 @@ class PanelContext:
     model_camera_id: int = -1
     model_camera_view: Any = None
     select_model_camera: Any = None
+    tracking: Any = None
+    tracking_node_id: int | None = None
+    track_node: Any = None
+    set_camera_tracking: Any = None
     focus_node: Any = None
     focus_joint: Any = None
     request_rename: Any = None

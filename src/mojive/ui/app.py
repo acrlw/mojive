@@ -22,6 +22,7 @@ from .. import commands as cmd
 from ..adapters.base import FrameNeeds, NodeType
 from ..capture import CaptureSurface, RecordingInfo, RecordingPhase
 from ..config import (
+    CameraTrackingConfig,
     InteractionConfig,
     RecordingConfig,
     SelectionStyle,
@@ -55,6 +56,7 @@ from .camera import (
     unproject,
 )
 from .camera_preview import CameraPreview
+from .camera_tracking import CameraTracker, can_track_node, tracking_position
 from .draw2d import ImguiDraw2D
 from .gizmo import JointLimitHit, ObjectGizmo, PreciseGizmoInput, node_world_pose
 from .input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
@@ -605,6 +607,14 @@ class ViewerApp:
             if explicit_config
             else self.localizer.preference("recording", {})
         )
+        self.camera_tracker = CameraTracker(
+            CameraTrackingConfig.from_mapping(
+                asdict(viewer_config.tracking)
+                if explicit_config
+                else self.localizer.preference("camera_tracking", {})
+            )
+        )
+        self._tracking_adapter = None
         self._input_handler = None
         self._input_claim = _NO_INPUT_CLAIM
         self._popup_owned_frame = False
@@ -817,6 +827,59 @@ class ViewerApp:
         self.recording_config = RecordingConfig.from_mapping(asdict(value))
         if persist:
             self.localizer.set_preferences({"recording": asdict(self.recording_config)})
+
+    def set_camera_tracking(self, value: CameraTrackingConfig, *, persist: bool = True) -> None:
+        """Change tracking axes or smoothing without moving the camera immediately."""
+        if not isinstance(value, CameraTrackingConfig):
+            raise TypeError("tracking must be a CameraTrackingConfig")
+        self.camera_tracker.config = value
+        if persist:
+            self.localizer.set_preferences({"camera_tracking": asdict(value)})
+
+    @property
+    def tracking_node_id(self) -> int | None:
+        """Return the stable hierarchy node currently followed by the editor camera."""
+        tracker = getattr(self, "camera_tracker", None)
+        return tracker.node_id if tracker is not None else None
+
+    def track_node(self, node_id: int | None) -> None:
+        """Follow a hierarchy node; None stops following at the current camera position."""
+        if node_id is None:
+            tracker = getattr(self, "camera_tracker", None)
+            if tracker is not None:
+                tracker.stop()
+            self._tracking_adapter = None
+            return
+        node = self.session.node(node_id)
+        if not can_track_node(node):
+            raise ValueError(f"Node {node_id} has no trackable world position")
+        if node_id == self.tracking_node_id:
+            return
+        if self._model_camera_id >= 0:
+            self.camera.adopt(self._camera_view(), exact=True)
+        self._leave_model_camera()
+        self.camera_tracker.start(node_id, self.camera)
+        self._tracking_adapter = self.session.adapter
+        self._tracking_node = node
+
+    def _sync_camera_tracking(self, dt: float) -> None:
+        node_id = self.tracking_node_id
+        if node_id is None:
+            return
+        node = self.session.node(node_id)
+        previous = self._tracking_node
+        if (
+            not can_track_node(node)
+            or self.session.adapter is not self._tracking_adapter
+            or node.type != previous.type
+            or node.object_id != previous.object_id
+            or node.name != previous.name
+        ):
+            self.track_node(None)
+            return
+        position = tracking_position(self.session, node)
+        if position is not None and self.camera_tracker.advance(self.camera, position, dt):
+            self.camera.publish(self.camera_out)
 
     def set_viewport_layers(self, value: ViewportLayers, *, persist: bool = True) -> None:
         """Set live viewport visibility while preserving individual tool settings."""
@@ -2512,6 +2575,7 @@ class ViewerApp:
 
         frame = self.session.tick(self.frame_needs(), wall_dt=dt)
         self._sync_structure()
+        self._sync_camera_tracking(elapsed)
         self._apply_pending_joint_focus()
         self._apply_pending_node_focus()
         self._sync_model_camera()
@@ -3362,6 +3426,7 @@ class ViewerApp:
 
     def set_viewport_camera(self, view: CameraView, *, camera_id: int = -1) -> None:
         """Set viewport presentation and synchronize its public Session state."""
+        self.track_node(None)
         self._leave_model_camera()
         self.camera.adopt(view, exact=True)
         self.camera.publish(self.camera_out)
@@ -3374,6 +3439,7 @@ class ViewerApp:
         i = int(camera_id)
         if i >= 0 and not any(c.camera_id == i for c in self.session.cameras):
             return
+        self.track_node(None)
         if i < 0:
             self._leave_model_camera(publish=True)
             return
@@ -3423,6 +3489,7 @@ class ViewerApp:
             self.camera.publish(self.camera_out)
 
     def _frame_scene(self, *, animate: bool = True) -> None:
+        self.track_node(None)
         self.camera.set_aspect(max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0))
         self.camera.frame_scene(
             self.session.bounds(),
@@ -3434,6 +3501,7 @@ class ViewerApp:
 
     def _reset_source_camera(self) -> None:
         """Restore the scene source's authored/default free camera."""
+        self.track_node(None)
         hint = self.session.camera_hint()
         if hint is None:
             self._frame_scene(animate=False)
@@ -3591,6 +3659,7 @@ class ViewerApp:
         if joint_id is None:
             return
         self._pending_joint_focus_id = None
+        self.track_node(None)
         joint = next(
             (candidate for candidate in self.session.joints if candidate.joint_id == joint_id),
             None,
@@ -3811,6 +3880,7 @@ class ViewerApp:
         if node_id is None:
             return
         self._pending_node_focus_id = None
+        self.track_node(None)
         node = self.session.node(node_id)
         if node is None:
             return
@@ -5469,6 +5539,10 @@ class ViewerApp:
             model_camera_id=self._model_camera_id,
             model_camera_view=self._model_camera_view,
             select_model_camera=self.select_model_camera,
+            tracking=self.camera_tracker.config,
+            tracking_node_id=self.tracking_node_id,
+            track_node=self.track_node,
+            set_camera_tracking=self.set_camera_tracking,
             focus_node=self.request_node_focus,
             focus_joint=self.request_joint_focus,
             request_rename=self.request_rename,

@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from mojive import SharedImage, build, launch_passive
+from mojive import CameraTrackingConfig, CameraView, SharedImage, build, launch_passive
 from mojive import commands as cmd
 from mojive.control_rpc import RpcClient, RpcError
 
@@ -107,3 +107,26 @@ def test_passive_startup_failure_is_reported_and_reaped():
     model = mujoco.MjModel.from_xml_string("<mujoco/>")
     with pytest.raises(RuntimeError, match="renderer"):
         launch_passive(model, mujoco.MjData(model), renderer="missing", show_window=False)
+
+
+def test_passive_body_tracking_uses_published_pose_without_stepping_physics(tmp_path):
+    model = mujoco.MjModel.from_xml_path("assets/joint_types.xml")
+    data = mujoco.MjData(model)
+    with launch_passive(model, data, width=800, height=600, show_window=False) as viewer:
+        viewer.set_camera(CameraView(eye=np.array((4, -6, 3)), target=np.array((0, 0, 1))))
+        viewer.configure_tracking(CameraTrackingConfig(axes="xy", smoothing=0))
+        viewer.track_body("free_body")
+        socket_path = viewer.start_rpc(tmp_path / "tracking.sock")
+        with RpcClient(socket_path, timeout=5) as client:
+            data.qpos[:3] = (2, 3, 8)
+            mujoco.mj_forward(model, data)
+            viewer.capture_array()
+            assert client.call("get_viewport_camera")["target"] == pytest.approx((2, 3, 1))
+            viewer.configure_tracking(CameraTrackingConfig(axes="xyz", smoothing=0))
+            viewer.capture_array()
+            assert client.call("get_viewport_camera")["target"] == pytest.approx((2, 3, 8))
+            viewer.track_body(None)
+            data.qpos[:3] = (5, 6, 9)
+            viewer.capture_array()
+            assert client.call("get_viewport_camera")["target"] == pytest.approx((2, 3, 8))
+        assert data.time == 0

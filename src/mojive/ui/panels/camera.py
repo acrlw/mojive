@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from imgui_bundle import imgui
 
-from ...adapters.base import FrameNeeds
+from ...adapters.base import FrameNeeds, NodeType
 from ...scene_state import (
     apply_camera_bookmark,
     camera_bookmark,
@@ -20,10 +21,12 @@ from ...scene_state import (
 )
 from ...types import CameraView
 from ..camera import DEFAULT_PITCH, DEFAULT_YAW
+from ..camera_tracking import can_track_node
 from . import (
     Panel,
     PanelContext,
     button_width,
+    search_input,
     segmented_control,
     value_slider,
 )
@@ -87,6 +90,7 @@ class CameraPanel(Panel):
         self._bookmark_name = "view-1"
         self._bookmark_index = 0
         self._bookmark_error = ""
+        self._tracking_filter = ""
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -98,6 +102,7 @@ class CameraPanel(Panel):
             return
 
         self._source(ctx)
+        self._tracking(ctx)
         if ctx.model_camera_id >= 0 and ctx.model_camera_view is not None:
             if ctx.select_model_camera is not None and imgui.button(
                 ctx.tr("Return to Editor Camera")
@@ -111,6 +116,83 @@ class CameraPanel(Panel):
         self._params(ctx, camera)
         imgui.separator()
         self._stored_states(ctx, camera)
+
+    def _tracking(self, ctx: PanelContext) -> None:
+        if ctx.tracking is None or ctx.track_node is None:
+            return
+        if not imgui.collapsing_header(
+            f"{ctx.tr('Tracking')}###camera_tracking", imgui.TreeNodeFlags_.default_open
+        ):
+            return
+        node = ctx.session.node(ctx.tracking_node_id) if ctx.tracking_node_id is not None else None
+        current = node.name if node is not None else ctx.tr("Off")
+        imgui.set_next_item_width(-1)
+        if imgui.begin_combo("##tracking-target", f"{ctx.tr('Target')}: {current}"):
+            selected, _ = imgui.selectable(f"{ctx.tr('Off')}##tracking-off", node is None)
+            if selected:
+                ctx.track_node(None)
+            imgui.set_next_item_width(-1)
+            _, self._tracking_filter = search_input(
+                "##tracking-filter",
+                self._tracking_filter,
+                hint=ctx.tr("Filter targets"),
+                search_tooltip=ctx.tr("Filter targets"),
+                clear_tooltip=ctx.tr("Clear search"),
+            )
+            query = self._tracking_filter.casefold()
+            for candidate in ctx.session.nodes:
+                primary = candidate.type in (NodeType.ROBOT, NodeType.LINK) or (
+                    candidate.type is NodeType.GEOM and candidate.body_index < 0
+                )
+                if not primary and candidate.node_id != ctx.tracking_node_id:
+                    continue
+                if query not in candidate.name.casefold():
+                    continue
+                selected, _ = imgui.selectable(
+                    f"{candidate.name}##tracking-{candidate.node_id}",
+                    candidate.node_id == ctx.tracking_node_id,
+                )
+                if selected:
+                    ctx.track_node(candidate.node_id)
+            imgui.end_combo()
+        imgui.set_item_tooltip(current)
+        selected_node = ctx.session.selected_node
+        imgui.begin_disabled(not can_track_node(selected_node))
+        if imgui.button(f"{ctx.tr('Track selected')}##track-selected", imgui.ImVec2(-1, 0)):
+            ctx.track_node(selected_node.node_id)
+        imgui.end_disabled()
+
+        flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
+        compact = imgui.get_content_region_avail().x < 240.0 * ctx.style_scale
+        if imgui.begin_table("tracking_properties", 1 if compact else 2, flags):
+            if not compact:
+                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.38)
+            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch, 0.62)
+            self._property_label(ctx.tr("Axes"))
+            axes = segmented_control(
+                "tracking-axes", ("X-Y", "X-Y-Z"), int(ctx.tracking.axes == "xyz"), theme=ctx.theme
+            )
+            imgui.set_item_tooltip(ctx.tr("X-Y keeps camera height. X-Y-Z also follows height."))
+            if axes != int(ctx.tracking.axes == "xyz"):
+                ctx.set_camera_tracking(replace(ctx.tracking, axes="xyz" if axes else "xy"))
+            self._property_label(ctx.tr("Smoothing"))
+            imgui.set_next_item_width(-1)
+            edit = value_slider(
+                "##tracking-smoothing",
+                ctx.tracking.smoothing,
+                0.0,
+                2.0,
+                initial=0.25,
+                fmt="%.2f s",
+                more_hint="none",
+            )
+            imgui.set_item_tooltip(
+                ctx.tr("Time to halve the position error. Higher is smoother; 0 follows directly.")
+            )
+            if edit.changed:
+                ctx.set_camera_tracking(replace(ctx.tracking, smoothing=max(0.0, edit.value)))
+            imgui.end_table()
+        imgui.separator()
 
     def _stored_states(self, ctx: PanelContext, camera: Any) -> None:
         opened = imgui.collapsing_header(f"{ctx.tr('camera bookmarks')}###camera_states")
@@ -233,6 +315,8 @@ class CameraPanel(Panel):
             imgui.begin_disabled(not enabled)
             if imgui.button(display_label, imgui.ImVec2(-1.0, 0.0)):
                 if label == "frame all":
+                    if ctx.track_node is not None:
+                        ctx.track_node(None)
                     lo, hi = ctx.session.bounds()
                     camera.frame_all(lo, hi)
                 elif hasattr(camera, "set_preset"):
