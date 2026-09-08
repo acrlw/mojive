@@ -13,3 +13,5 @@ vec4 v_meta1 : TEXCOORD1;
 vec3 v_normal : TEXCOORD2;
 float v_depth : TEXCOORD3;
 vec2 v_texcoord0 : TEXCOORD4;
+
+vec3 v_world : TEXCOORD5;

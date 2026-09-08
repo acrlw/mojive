@@ -26,7 +26,39 @@ void validateUi(const UiFrame &ui) {
 }
 
 void validateScene(const SceneSource &scene) {
+    for (const auto &texture : scene.textures) {
+        uint64_t expected = 0;
+        uint32_t w = texture.size.width, h = texture.size.height;
+        do {
+            expected += uint64_t(w) * h * 4;
+            if (!texture.mipmaps || (w == 1 && h == 1))
+                break;
+            w = std::max(1u, w / 2);
+            h = std::max(1u, h / 2);
+        } while (w && h);
+        if (!texture.size.width || !texture.size.height || texture.size.width > 16384 ||
+            texture.size.height > 16384 || texture.rgba.size() != expected)
+            throw std::invalid_argument("Invalid scene texture");
+    }
+    for (const auto &material : scene.materials)
+        if (material.texture < -1 || material.texture >= int64_t(scene.textures.size()) ||
+            !std::isfinite(material.emission) || !std::isfinite(material.specular) ||
+            !std::isfinite(material.shininess))
+            throw std::invalid_argument("Invalid scene material");
+    if (!scene.materialIndices.empty()) {
+        if (scene.materialIndices.size() != scene.instances.size())
+            throw std::invalid_argument("Material count does not match instances");
+        for (auto index : scene.materialIndices)
+            if (index >= scene.materials.size())
+                throw std::invalid_argument("Invalid material index");
+    }
     for (const auto &mesh : scene.meshes) {
+        if (!mesh.texcoords.empty() && mesh.texcoords.size() != mesh.vertices.size())
+            throw std::invalid_argument("Texture coordinate count does not match vertices");
+        for (const auto &uv : mesh.texcoords)
+            for (float value : uv)
+                if (!std::isfinite(value))
+                    throw std::invalid_argument("Non-finite texture coordinate");
         if (mesh.vertices.empty() || mesh.indices.empty() || mesh.indices.size() % 3)
             throw std::invalid_argument("Meshes require indexed triangles");
         for (auto i : mesh.indices)
@@ -56,6 +88,18 @@ void validateCamera(const CameraView &camera) {
 void validateFrame(const SceneSource &scene, const SceneFrame &frame) {
     if (frame.sourceRevision != scene.revision || frame.transforms.size() != scene.instances.size())
         throw std::invalid_argument("Frame does not match the scene source");
+    if (!frame.texcoords.empty() && frame.texcoords.size() != frame.transforms.size())
+        throw std::invalid_argument("Texture transform count does not match instances");
+    if (!frame.colors.empty() && frame.colors.size() != frame.transforms.size())
+        throw std::invalid_argument("Color count does not match instances");
+    for (const auto &color : frame.colors)
+        for (float value : color)
+            if (!std::isfinite(value))
+                throw std::invalid_argument("Non-finite instance color");
+    for (const auto &uv : frame.texcoords)
+        for (float value : uv)
+            if (!std::isfinite(value))
+                throw std::invalid_argument("Non-finite texture transform");
     for (const auto &matrix : frame.transforms) {
         for (float p : matrix)
             if (!std::isfinite(p))

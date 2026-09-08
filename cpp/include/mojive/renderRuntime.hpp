@@ -4,7 +4,7 @@
 #include <mojive/render.hpp>
 
 namespace mojive {
-// Offscreen runtime: serialize backend work on one native owner thread. Accepted
+// Native runtime: serialize backend work on one native owner thread. Accepted
 // calls finish before close returns. No job contains a Python object or callback.
 class RenderRuntime final : public Renderer {
   public:
@@ -15,6 +15,13 @@ class RenderRuntime final : public Renderer {
     RenderRuntime &operator=(const RenderRuntime &) = delete;
     const Capabilities &capabilities() const override;
     void setScene(const SceneSource &) override;
+    void configure(Scene, const SceneStyle &) override;
+    Scene createScene(const SceneSource &) override;
+    void setScene(Scene, const SceneSource &) override;
+    void update(Scene, const SceneFrame &) override;
+    void updateMesh(Scene, uint32_t, std::span<const Vertex>) override;
+    Target createTarget(Scene, Extent, uint32_t = 1) override;
+    void destroy(Scene) override;
     void update(const SceneFrame &) override;
     void updateMesh(uint32_t, std::span<const Vertex>) override;
     Target createTarget(Extent, uint32_t samples = 1) override;
