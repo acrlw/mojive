@@ -523,7 +523,7 @@ def test_viewport_recording_streams_and_finalizes_frames(monkeypatch) -> None:
     app.backend = SimpleNamespace(target=target)
     app.localizer = SimpleNamespace(text=lambda value: value)
     app.session = SimpleNamespace(
-        report_message=lambda message, level: events.append((message, level))
+        report_message=lambda message, level, **kwargs: events.append((message, level))
     )
     app._viewport_recorder = None
     app._viewport_recording_path = None

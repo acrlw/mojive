@@ -916,6 +916,111 @@ def test_state_take_records_replays_and_steps_backward_without_editing_the_scene
     assert session.state_take_times == []
 
 
+def _recorded_take(count=10):
+    adapter = SnapshotToyPhysics()
+    session = Session(adapter)
+    assert session.submit(cmd.StartStateTakeRecording())
+    for _ in range(count):
+        session.tick(FrameNeeds(), wall_dt=0.01)
+    assert session.submit(cmd.StopStateTakeRecording())
+    return session, adapter
+
+
+def test_take_loop_wraps_inclusively_and_clear_restores_normal_end_behavior():
+    session, adapter = _recorded_take()
+    assert session.submit(cmd.SetStateTakeLoop(2, 4))
+    assert session.submit(cmd.PlayStateTake())
+    assert session.state_take_cursor == 2
+    for expected in (3, 4, 2, 3, 4, 2):
+        session.tick(FrameNeeds(), wall_dt=0.01)
+        assert session.state_take_cursor == expected
+        assert adapter.steps == expected
+        assert session.state_take_playing
+    assert session.submit(cmd.SetStateTakeLoop())
+    session.tick(FrameNeeds(), wall_dt=0.2)
+    assert session.state_take_cursor == 10
+    assert not session.state_take_playing
+    assert session.paused
+
+
+def test_one_shot_take_replay_preserves_loop_and_fractional_time_across_pause():
+    session, adapter = _recorded_take()
+    assert session.submit(cmd.SetStateTakeLoop(2, 4))
+    assert session.submit(cmd.SeekStateTake(0))
+    assert session.submit(cmd.PlayStateTake(loop=False))
+    session.tick(FrameNeeds.none(), wall_dt=0.005)
+    assert session.state_take_cursor == 0
+    assert session.submit(cmd.PauseStateTake())
+    session.tick(FrameNeeds.none(), wall_dt=5.0)
+    assert adapter.steps == 0
+    assert session.submit(cmd.PlayStateTake(loop=False))
+    session.tick(FrameNeeds.none(), wall_dt=0.005)
+    assert adapter.steps == 1
+    session.tick(FrameNeeds.none(), wall_dt=1.0)
+    assert adapter.steps == 10
+    assert not session.state_take_playing
+    assert session.state_take_loop == (2, 4)
+    assert session.submit(cmd.PlayStateTake())
+    assert session.state_take_cursor == 2
+    assert session.paused
+
+
+def test_take_loop_spanning_last_frame_preserves_speed_and_restores_only_displayed_sample(
+    monkeypatch,
+):
+    session, adapter = _recorded_take()
+    calls = []
+    restore = adapter.restore_state
+
+    def observe(state):
+        calls.append(state.time)
+        return restore(state)
+
+    monkeypatch.setattr(adapter, "restore_state", observe)
+    assert session.submit(cmd.SetStateTakeLoop(8, 10))
+    assert session.submit(cmd.PlayStateTake())
+    calls.clear()
+    assert session.submit(cmd.SetSpeed(2))
+    session.tick(FrameNeeds(), wall_dt=3.005)
+    assert session.state_take_cursor == 9
+    assert len(calls) == 1
+    assert session.state_take_playing
+    session.tick(FrameNeeds(), wall_dt=0.005)
+    assert session.state_take_cursor == 10
+    session.tick(FrameNeeds(), wall_dt=0.005)
+    assert session.state_take_cursor == 8
+
+
+def test_take_loop_seek_pause_and_new_recording_preserve_expected_ownership():
+    session, adapter = _recorded_take()
+    assert session.submit(cmd.SetStateTakeLoop(2, 6))
+    assert session.submit(cmd.SeekStateTake(8))
+    assert not session.state_take_playing
+    assert adapter.steps == 8
+    assert session.submit(cmd.PlayStateTake())
+    assert session.state_take_cursor == 2
+    assert session.submit(cmd.PauseStateTake())
+    session.tick(FrameNeeds(), wall_dt=1)
+    assert session.state_take_cursor == 2
+    assert session.submit(cmd.StartStateTakeRecording())
+    assert session.state_take_loop is None
+    session.tick(FrameNeeds(), wall_dt=0.01)
+    assert session.submit(cmd.StopStateTakeRecording())
+    assert len(session.state_take_times) == 2
+    assert session.submit(cmd.PlayStateTake())
+    session.tick(FrameNeeds(), wall_dt=0.01)
+    assert session.state_take_cursor == 1
+    assert not session.state_take_playing
+
+
+@pytest.mark.parametrize("bounds", [(-1, 2), (3, 2), (2, 2), (0, 99), (None, 2), (1.2, 3)])
+def test_invalid_take_loop_preserves_existing_range(bounds):
+    session, _ = _recorded_take()
+    assert session.submit(cmd.SetStateTakeLoop(1, 4))
+    assert not session.submit(cmd.SetStateTakeLoop(*bounds))
+    assert session.state_take_loop == (1, 4)
+
+
 def test_state_take_stops_at_the_frame_budget(monkeypatch):
     import mojive.session as session_module
 

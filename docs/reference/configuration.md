@@ -164,6 +164,35 @@ with Renderer(model, shadow_quality=ShadowQuality.HIGH) as renderer:
     renderer.set_shadow_quality(ShadowQuality.PERFORMANCE)
 ```
 
+## Camera tracking
+
+Open **Camera > Tracking** (`F6`), choose a body in **Target**, or select a scene object and
+press **Track selected**. **X-Y** follows horizontal motion while holding the current camera
+height; **X-Y-Z** also follows vertical motion. Tracking keeps the viewing direction and distance:
+the target's rotation does not turn the camera. Orbit and zoom still work, and panning adjusts
+the composition offset. Changing scene selection does not change the tracking target.
+
+**Smoothing** is the time in seconds to halve the remaining position error. Larger values suppress
+rapid motion more strongly and add following delay; `0` follows directly. The default is `0.25 s`
+with X-Y tracking. Smoothing uses elapsed display time, independently of simulation steps,
+playback speed, and the physics owner. Axis and smoothing choices persist across launches;
+tracking starts disabled in a new viewer. Choose **Off** to stop at the current view. Selecting a
+model camera, framing the scene, focusing another object, or explicitly setting a camera also
+ends tracking.
+
+```python
+from mojive import CameraTrackingConfig
+
+viewer.configure_tracking(CameraTrackingConfig(axes="xy", smoothing=0.35))
+viewer.track_body("pelvis")  # Unique body name, or composed body index.
+viewer.track_body(None)     # Stop following without changing the current view.
+```
+
+These methods also work on `launch_passive()` handles: following runs in the display process
+without adding work to each physics step. For other adapters and programmatic scenes, use
+`viewer.track_node(node.node_id)` with a node from `viewer.session.nodes`. `ViewerConfig(tracking=...)`
+sets initial preferences; `configure_tracking(..., persist=True)` also saves desktop preferences.
+
 ## Interactive capture and recording
 
 Interactive captures distinguish the raw scene from composed UI. Still captures default to `SCENE` and
@@ -192,6 +221,22 @@ in **Settings > Recording**, also reachable through **View > Recording Settings.
 uses wall time, can be canceled with its button or the recording shortcut, and creates no video
 file until a frame is captured. A zero-second delay starts on the next clean frame after menus
 close. The recording rate is independent from display and physics rates.
+
+For a completed simulation take, **Keyframes > Record Take Video** rewinds to its first frame,
+waits for the countdown, records the entire take once, and saves automatically. **Video Settings**
+sets the start delay and final-frame hold (one second by default); the same defaults are available
+in **Settings > Recording**. The countdown is excluded from the video; the final hold is included.
+The selected loop range remains available for ordinary playback and is ignored for this recording.
+Pausing the video also pauses take playback and the final hold. Camera and Layers controls remain
+available while recording. Changing the take or scene ends the recording.
+
+The equivalent API is `viewer.start_take_video("output/take.mp4", countdown=3, end_hold=1)`;
+keep calling `viewer.sync()` while `viewer.recording.active`. Take playback advances with encoded
+frames at the selected playback speed. Slow rendering or encoding can extend recording wall time
+without skipping motion or shortening the resulting video. Finished videos show their absolute
+save path in Status for eight seconds. Hover to read the full message and right-click to copy the
+path; the message also remains in Output. Other Status messages can be copied by right-clicking.
+Use `make take-video` (or `BACKEND=wgpu`) for native controls and decoded-video acceptance.
 
 Open **View > Layers...** or **Window > Layers** to control viewport content during everyday
 viewing and recording. The panel docks outside the viewport. Its switches control viewport

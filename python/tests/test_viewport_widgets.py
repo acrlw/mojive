@@ -40,6 +40,7 @@ from mojive.ui.viewport_widgets import (
     draw_projection_label,
     draw_status,
     draw_tool_glyph,
+    draw_tool_hints,
     fitting_tool_hints,
     format_simulation_metric,
     format_simulation_steps,
@@ -546,18 +547,41 @@ def test_frame_arrows_share_one_continuous_silhouette_and_center_shell(scale: fl
     assert center_kwargs["segments"] == 16
 
 
-def test_status_backend_and_fps_use_independent_stable_columns():
+@pytest.mark.parametrize("physics_hz,fps", ((None, 60), (0, 60), (1000, 99.9), (10000, 107)))
+@pytest.mark.parametrize("scale", (1.0, 1.5))
+@pytest.mark.parametrize(
+    "labels",
+    (
+        DEFAULT_VIEWPORT_LABELS,
+        replace(DEFAULT_VIEWPORT_LABELS, physics="物理", render="渲染"),
+    ),
+)
+def test_status_rates_use_actual_width_and_uniform_separator_spacing(
+    physics_hz, fps, scale, labels
+):
     draw = _MeasuredText()
-    two_digits = _status_performance_layout(draw, 500.0, 1.0, "OpenGL", 0.009, 99.9)
-    three_digits = _status_performance_layout(draw, 500.0, 1.0, "OpenGL", 0.009, 107.0)
-
-    assert two_digits.backend_x == pytest.approx(three_digits.backend_x)
-    assert two_digits.delta_text == "Δt 0.009 s"
-    assert three_digits.delta_text == "Δt 0.009 s"
-    assert two_digits.dividers == pytest.approx(three_digits.dividers)
-    assert two_digits.fps_x + draw.text_size(two_digits.fps_text)[0] == pytest.approx(500.0)
-    assert three_digits.fps_x + draw.text_size(three_digits.fps_text)[0] == pytest.approx(500.0)
-    assert two_digits.delta_x - min(two_digits.dividers) == pytest.approx(11.0)
+    layout = _status_performance_layout(
+        draw,
+        1000,
+        scale,
+        "OpenGL",
+        1 / 30,
+        fps,
+        physics_hz=physics_hz,
+        show_physics=True,
+        labels=labels,
+    )
+    spans = (
+        (layout.backend_x, draw.text_size(layout.backend_text)[0]),
+        (layout.delta_x, draw.text_size(layout.delta_text)[0]),
+        (layout.fps_x, draw.text_size(layout.fps_text)[0]),
+    )
+    assert spans[-1][0] + spans[-1][1] == pytest.approx(1000)
+    for ((left, width), (right, _)), divider in zip(
+        pairwise(spans), sorted(layout.dividers), strict=True
+    ):
+        assert divider - (left + width) == pytest.approx(11 * scale)
+        assert right - divider == pytest.approx(11 * scale)
 
 
 def test_status_distinguishes_measured_physics_and_render_rates():
@@ -1080,6 +1104,26 @@ def test_tool_hint_fitting_never_draws_a_partial_group():
 
     assert fitting_tool_hints(draw, 1.0, hints, first_width) == hints[:1]
     assert fitting_tool_hints(draw, 1.0, hints, 1.0) == ()
+
+
+@pytest.mark.parametrize("scale", (1.0, 1.5, 2.0))
+def test_modified_mouse_hint_keeps_its_glyph_and_matches_its_measured_width(scale):
+    from mojive.ui.theme import THEME
+
+    draw = _RecordedMouse()
+    text = []
+    draw.text = lambda _pos, _color, value: text.append(value)
+    hint = ToolHint("mouse", "right", "Select loop range", modifier="Shift")
+    registry = ToolHintRegistry()
+    registry.add("range", hint)
+    hints = registry.resolve()
+
+    width = draw_tool_hints(draw, (10, 15), THEME, scale, hints)
+
+    assert width == pytest.approx(tool_hints_size(draw, scale, hints)[0])
+    assert text == ["Shift", "+", "Select loop range"]
+    assert draw.convex_fills  # The mouse button is drawn as geometry.
+    assert fitting_tool_hints(draw, scale, hints, width - 1) == ()
 
 
 def test_viewport_chrome_registry_dispatches_custom_actions_and_allows_removal():

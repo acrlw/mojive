@@ -520,6 +520,7 @@ def test_keyframe_timeline_owns_the_wheel_while_zooming(viewer):
     viewer.sync()
     click(viewer, io, point)
     assert [hint.hint_id for hint in viewer.app._panel_status_hints] == [
+        "keyframes.range",
         "keyframes.playhead",
         "keyframes.zoom",
         "keyframes.pan",

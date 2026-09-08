@@ -17,7 +17,9 @@ from ..composition import build
 from ..gizmo import GizmoHandle
 from .ui_runtime import (
     _capture_dock_tab_without_nav_cursor,
+    _click,
     _dismiss_popup,
+    _item_center,
     _item_rect,
     _open_main_menu,
     _park_cursor,
@@ -148,7 +150,12 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
             filename = f"{target.lower()}-{width}-{category.lower() or 'layout'}.png"
             _save_window_crop(viewer, target, folder / filename, padding=3.0)
             if target == "Camera":
-                labels = ("##camera-projection-0", "##camera-projection-1")
+                labels = (
+                    "##camera-projection-0",
+                    "##camera-projection-1",
+                    "X-Y##tracking-axes-0",
+                    "X-Y-Z##tracking-axes-1",
+                )
             elif category == "Rendering":
                 labels = tuple(
                     f"{translate(label)}##shadow-quality-{i}"
@@ -179,6 +186,45 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
                 assert max(hi[1] for _, hi in rectangles) <= section[1]
             results.append({"image": str(folder / filename), "rectangles": rectangles})
             panel.open = False
+
+        assert viewer.session.submit(cmd.LoadAsset(resolve("actuator_visuals")))
+        searches = (
+            ("Hierarchy", "filter"),
+            ("Joints", "joint_search"),
+            ("Control", "actuator_search"),
+            ("Assets", "asset-filter"),
+            ("Settings", "settings_search"),
+            ("Output", "output-filter"),
+            ("Camera", "tracking-filter"),
+        )
+        for target, field in searches:
+            width = 360
+            manager.open_panel(target)
+            _settle(viewer, 3)
+            window = imgui.internal.find_window_by_name(target)
+            if window.dock_node is not None:
+                imgui.internal.dock_context_process_undock_window(
+                    imgui.get_current_context(), window, True
+                )
+            imgui.internal.focus_window(window)
+            _settle(viewer, 4)
+            if target == "Camera":
+                _click(viewer, _item_center(viewer, "begin_combo", "##tracking-target"))
+            _click(viewer, _item_center(viewer, "input_text_with_hint", f"##{field}"))
+            imgui.get_io().add_input_characters_utf8("123")
+            _settle(viewer, 3)
+            filename = folder / f"search-{target.lower()}.png"
+            if target == "Camera":
+                _save_active_popup_crop(viewer, filename)
+            else:
+                _save_window_crop(viewer, target, filename, padding=0)
+            lo, hi = _item_rect(viewer, "input_text_with_hint", f"##{field}")
+            clear_lo, clear_hi = _item_rect(viewer, "invisible_button", f"##clear_{field}")
+            assert clear_lo[0] >= hi[0]
+            _click(viewer, ((clear_lo[0] + clear_hi[0]) / 2, (clear_lo[1] + clear_hi[1]) / 2))
+            _dismiss_popup(viewer)
+            results.append({"image": str(filename), "rectangles": [(lo, hi), (clear_lo, clear_hi)]})
+            manager.get(target).open = False
         manager._begin_panel_window = begin
     return results
 

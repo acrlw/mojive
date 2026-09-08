@@ -32,6 +32,61 @@ def _camera_state(viewer):
     return np.concatenate((view.eye, view.target, [view.fov_y]))
 
 
+@pytest.mark.parametrize(
+    ("name", "field", "attribute"),
+    (
+        ("Hierarchy", "filter", "_filter"),
+        ("Joints", "joint_search", "_search"),
+        ("Control", "actuator_search", "_search"),
+        ("Assets", "asset-filter", "_filter"),
+        ("Settings", "settings_search", "_search"),
+        ("Output", "output-filter", "_filter_text"),
+        ("Camera", "tracking-filter", "_tracking_filter"),
+    ),
+)
+def test_search_fields_clear_and_retype_without_moving_the_text_origin(
+    viewer, name, field, attribute
+):
+    from mojive.tools.ui_runtime import _activate_panel, _click, _item_center, _item_rect
+
+    if name == "Control":
+        assert viewer.session.submit(cmd.LoadAsset(resolve("actuator_visuals")))
+    viewer.panels.open_panel(name)
+    for _ in range(4):
+        viewer.sync()
+    _activate_panel(viewer, name)
+    window = imgui.internal.find_window_by_name(name)
+    imgui.internal.focus_window(window)
+    for _ in range(3):
+        viewer.sync()
+    if name == "Camera":
+        _click(viewer, _item_center(viewer, "begin_combo", "##tracking-target"))
+        for _ in range(3):
+            viewer.sync()
+    panel = viewer.panels.get(name)
+    empty_bounds = _item_rect(viewer, "input_text_with_hint", f"##{field}")
+    _click(
+        viewer,
+        (
+            (empty_bounds[0][0] + empty_bounds[1][0]) * 0.5,
+            (empty_bounds[0][1] + empty_bounds[1][1]) * 0.5,
+        ),
+    )
+    imgui.get_io().add_input_characters_utf8("123")
+    viewer.sync()
+    assert getattr(panel, attribute) == "123"
+    filled_bounds = _item_rect(viewer, "input_text_with_hint", f"##{field}")
+    assert filled_bounds[0] == empty_bounds[0]
+    clear_bounds = _item_rect(viewer, "invisible_button", f"##clear_{field}")
+    assert clear_bounds[0][0] >= filled_bounds[1][0]
+    _click(viewer, _item_center(viewer, "invisible_button", f"##clear_{field}"))
+    assert getattr(panel, attribute) == ""
+    viewer.sync()
+    imgui.get_io().add_input_characters_utf8("test")
+    viewer.sync()
+    assert getattr(panel, attribute) == "test"
+
+
 @pytest.mark.parametrize("floating", (False, True))
 def test_dock_tabs_do_not_emit_a_clipped_focus_ring(viewer, floating):
     from mojive.tools.ui_runtime import _settle
