@@ -14,7 +14,7 @@ from pathlib import Path
 def main() -> None:
     """Alternate backends and execution order; keep raw runs and median metrics."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--build", type=Path, default=Path("output/native-build"))
+    parser.add_argument("--build", type=Path, default=Path("output/cpp-build"))
     parser.add_argument("--scene", type=Path, default=Path("output/native-probe/humanoids100.mjvp"))
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("output/native-probe/runtime"))

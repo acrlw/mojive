@@ -49,9 +49,7 @@ def measure(function, iterations: int) -> float:
 def main() -> None:
     """Preserve independent run samples and neutral aggregate metrics."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--modules", type=Path, default=Path("output/native-bindings-build/bindings")
-    )
+    parser.add_argument("--modules", type=Path, default=Path("output/cpp-bindings-build/bindings"))
     parser.add_argument("--scene", type=Path, default=Path("output/native-probe/humanoids100.mjvp"))
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument(

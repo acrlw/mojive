@@ -6,7 +6,7 @@
 
 这是当前交互式编辑器目标下的工程选择。SDL GPU 的拾取完成更快，接口也更直接；bgfx 当前实现的主线程余量更大，现有线程、shader 和诊断设施更符合本阶段减少平台工程量的要求。不要把这一结论解释成 bgfx 在所有场景都更快，或 SDL 不能做多线程。
 
-Windows/Linux CI 已准备，但当前 GitHub OAuth 凭据缺少 `workflow` scope，远端拒绝新增 workflow，因此 **这两个平台的构建和运行未通过本轮 CI 验证**。本机生成了 SPIR-V、MSL、HLSL；HLSL 生成不等于 Windows DXIL 编译或 D3D12 运行通过。真正的 Windows/Linux GPU、Linux Wayland、2× framebuffer 和跨显示器 DPI 也尚未验收。选择默认实现可以推进；三平台发布不能越过这些门槛。
+根据当前开发安排，**暂不运行 workflow CI**，实验 workflow 已移除，Linux 将由用户在对应系统上测试。本机生成了 SPIR-V、MSL、HLSL，但这不等于 Windows/Linux 运行已经通过。真实高 DPI、完整生产画质及三平台发布仍需各自验收；这些不会阻止当前的本地准备工作。
 
 ## 验证覆盖
 
@@ -21,7 +21,7 @@ Windows/Linux CI 已准备，但当前 GitHub OAuth 凭据缺少 `workflow` scop
 | ImGui | 原有字体、动态 CJK atlas、docking、主窗口与 peer 缩放；仍是集成 fixture，不是完整编辑器 detached-window 回调实现 |
 | 真实物理 | C++ 直接调用 MuJoCo C API，100 humanoid；120 帧原生姿态先与 Python 导出核对，再比较串行与独立物理线程 |
 | 内存检查 | 自有 native 代码通过 ASan/UBSan；没有仪器化全部第三方库，也没有宣称通过 leak sanitizer |
-| 跨平台 shader | SDL 从同一套 GLSL 离线生成 SPIR-V / MSL / HLSL，生成的 Metal shader 在本机通过 GPU 检查；Windows DXIL 编译仍受上述 CI 权限限制 |
+| 跨平台 shader | SDL 从同一套 GLSL 离线生成 SPIR-V / MSL / HLSL，生成的 Metal shader 在本机通过 GPU 检查；Windows DXIL 编译与运行后续在对应系统验证 |
 
 ## 性能结论的含义
 
@@ -86,4 +86,4 @@ SDL 的四个颜色附件上限能容纳当前实验的数据 pass；原生整�
 
 macOS 选择 Metal，Windows 选择 D3D12，Linux 选择 Vulkan；保留适配器替换能力。平台层当前保持 GLFW，不因为 SDL GPU 实验引入第二套生产窗口事件系统。底层资源与 shader 编译器版本按锁文件一起升级。三平台的构建、真实 GPU 与发布包验证必须完成后，才能宣称原生版支持三平台。
 
-复现命令见[原生验证指南](../guides/native-probe.md)。历史比较和初始方案见[原生迁移提案](native-cpp-bgfx.zh.md)，其中未完成事项以本文最新状态为准。
+Python 作为产品入口的最新准备范围见[C++ 开发准备](cpp-foundation.zh.md)。复现命令见[原生验证指南](../guides/native-probe.md)。历史比较和初始方案见[原生迁移提案](native-cpp-bgfx.zh.md)，其中未完成事项以本文最新状态为准。

@@ -1,0 +1,43 @@
+# Repository-managed dependencies
+
+`dependencies.json` is the source-of-truth revision lock. Production dependencies are available
+as repository-managed source; optional comparison dependencies are checksum-locked downloads.
+The C++ build never replaces an edited ImGui tree with a fetched copy.
+
+| Source | Management | Purpose |
+|---|---|---|
+| `imgui/` | Tracked source, v1.92.9b-docking | Dear ImGui core and platform integration; owned customization history |
+| `bgfx/`, `bx/`, `bimg/`, `bgfxCmake/` | Git submodules at the tested commits | Renderer and offline shader compilation |
+| `glfw/` | Git submodule | Native platform windows and input |
+| `nanobind/`, `robinMap/` | Git submodules | Python binding support |
+| SDL, pybind11, separate shader tools | Optional locked downloads | Retained comparison experiments, disabled by default |
+
+After cloning, initialize only the top-level submodules:
+
+```bash
+git submodule update --init --depth 1
+python tools/check_dependencies.py
+```
+
+Nested upstream submodules are not required: bgfx, bx, bimg and robin-map are supplied through
+the top-level paths above. Do not use `--remote` for routine setup. A dependency update changes
+the submodule commit and the matching lock entry together, then runs the applicable native gates.
+Upstream licenses remain in every source directory; Mojive's license does not replace them.
+
+## ImGui customization
+
+The initial import is byte-identical to the locked upstream archive. `imguiBaseline.json` records
+all imported files. Check it with `python tools/check_dependencies.py --imgui-baseline`; that
+optional check intentionally fails after a local customization. It is not a requirement to keep
+ImGui unmodified during development.
+
+Record local behavior changes in `imguiChanges.md` and normal, focused Git commits. Keep upstream
+version updates separate from Mojive behavior patches. Retain the upstream API and formatting;
+do not apply Mojive's C++ naming rules across vendor source. During an upstream update, reconcile
+local patches against the recorded baseline and regenerate that baseline from the new unmodified
+upstream archive, not from the customized working tree.
+
+UI spacing, typography and common widgets belong in Mojive's UI layer. Changes to ImGui's
+rounding geometry or internal draw paths belong here when its public customization points are
+insufficient. The baseline import does not implement continuous-curvature corners. Existing
+Python `imgui-bundle` remains independent until the native UI bridge is integrated.

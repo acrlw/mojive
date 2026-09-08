@@ -32,7 +32,7 @@ diagnostic overlays, and tooling. Current validation is summarized in
 ## Milestones
 
 ### M1 — Backend-parameterized test infrastructure — done (42847a1)
-- `tests/gpu/conftest.py`: `make_backend(...)` factory honoring `MOJIVE_BACKEND`;
+- `python/tests/gpu/conftest.py`: `make_backend(...)` factory honoring `MOJIVE_BACKEND`;
   `backend_name` fixture; GL-internals test files (test_opengl_core, test_id_outline,
   test_debugdraw_gpu, and the GL-specific parts of test_pipeline) get an explicit
   opengl-only skip guard.

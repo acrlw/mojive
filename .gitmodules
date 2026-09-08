@@ -1,0 +1,21 @@
+[submodule "third_party/bgfx"]
+	path = thirdParty/bgfx
+	url = https://github.com/bkaradzic/bgfx.git
+[submodule "third_party/bx"]
+	path = thirdParty/bx
+	url = https://github.com/bkaradzic/bx.git
+[submodule "third_party/bimg"]
+	path = thirdParty/bimg
+	url = https://github.com/bkaradzic/bimg.git
+[submodule "third_party/bgfx_cmake"]
+	path = thirdParty/bgfxCmake
+	url = https://github.com/bkaradzic/bgfx.cmake.git
+[submodule "third_party/glfw"]
+	path = thirdParty/glfw
+	url = https://github.com/glfw/glfw.git
+[submodule "third_party/nanobind"]
+	path = thirdParty/nanobind
+	url = https://github.com/wjakob/nanobind.git
+[submodule "third_party/robin_map"]
+	path = thirdParty/robinMap
+	url = https://github.com/Tessil/robin-map.git

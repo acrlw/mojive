@@ -56,7 +56,7 @@
 <!-- ================= 0. 封面 ================= -->
 <section id="cover">
   <h1>Mojive UI 设计审阅与概念设计</h1>
-  <p class="lead">本文档基于基线运行截图与当前源码（<code>src/mojive/ui/</code> 目录）制作，包含现状切片、交互地图、动线分析、问题清单、设计规范、概念设计提案与详细设计原型（<a href="#detail">§7</a>，全窗口高保真）。截图保留采集时的本地化状态，仅作为历史证据；功能清单与设计判断以 2026-08-29 的工作区源码为准。本文档含设计规范章节（<a href="#spec">§5</a>），所有 mockup 的图标 / 色值 / 圆角 / 快捷键标注以 §5 为准。</p>
+  <p class="lead">本文档基于基线运行截图与当前源码（<code>python/src/mojive/ui/</code> 目录）制作，包含现状切片、交互地图、动线分析、问题清单、设计规范、概念设计提案与详细设计原型（<a href="#detail">§7</a>，全窗口高保真）。截图保留采集时的本地化状态，仅作为历史证据；功能清单与设计判断以 2026-08-29 的工作区源码为准。本文档含设计规范章节（<a href="#spec">§5</a>），所有 mockup 的图标 / 色值 / 圆角 / 快捷键标注以 §5 为准。</p>
   <p class="meta-line">日期：2026-08-29 ｜ 对象版本：工作区当前源码 ｜ 截图复现：<code>design/tools/capture_states.py</code></p>
 
   <div class="cover-card">
@@ -502,7 +502,7 @@
     <thead><tr><th>编号</th><th>严重度</th><th>问题</th><th style="width:34%">证据（截图 / 代码位置）</th></tr></thead>
     <tbody>
       <tr><td class="issue-id">P1-1</td><td><span class="sev p1">P1 摩擦</span></td><td>Window 菜单已可恢复面板，但缺少 Reset Layout；布局节点损坏后没有安全回到默认布局的入口</td><td><code>app.py:1132-1144</code>；<code>window.py:444-470</code></td></tr>
-      <tr><td class="issue-id">P1-2</td><td><span class="sev p1">P1 摩擦</span></td><td>截图 / 录制仅 CLI，GUI 无入口</td><td><code>src/mojive/cli.py</code>；相机面板仅有剪贴板/书签</td></tr>
+      <tr><td class="issue-id">P1-2</td><td><span class="sev p1">P1 摩擦</span></td><td>截图 / 录制仅 CLI，GUI 无入口</td><td><code>python/src/mojive/cli.py</code>；相机面板仅有剪贴板/书签</td></tr>
       <tr><td class="issue-id">P1-3</td><td><span class="sev p1">P1 摩擦</span></td><td>高级手势零可供性；Help 已可从 Window 打开，但操作现场没有情境提示</td><td><code>panels/help.py</code>；<code>ui/panels/__init__.py:357+</code></td></tr>
       <tr><td class="issue-id">P1-4</td><td><span class="sev p1">P1 摩擦</span></td><td>检查器 3100 行超长单栏，多 geom 材质平铺</td><td><code>state-selected-gizmo.png</code>；<code>ui/panels/inspector.py</code></td></tr>
       <tr><td class="issue-id">P1-5</td><td><span class="sev p1">P1 摩擦</span></td><td>运行态门控分散、文案不一：哪些控件运行中可用没有一致规则与状态提示</td><td><code>state-running.png</code>；<code>inspector.py</code> 十余处警告文案</td></tr>
@@ -533,7 +533,7 @@
 <!-- ================= 5. 设计规范 ================= -->
 <section id="spec">
   <h2>5 · 设计规范 <span class="h2-sub">所有 mockup 的图标 / 色值 / 圆角 / 快捷键标注以本节为准</span></h2>
-  <p>全部数值取自源码：<code>src/mojive/ui/theme.py</code>、<code>src/mojive/ui/app.py:2318-2456</code>（播放控件）、<code>src/mojive/ui/fonts.py</code> 与 <code>window.py:162</code>（字体）。本文档中的 px 对应实现中的 pt @ <code>ui_scale = 1</code>。</p>
+  <p>全部数值取自源码：<code>python/src/mojive/ui/theme.py</code>、<code>python/src/mojive/ui/app.py:2318-2456</code>（播放控件）、<code>python/src/mojive/ui/fonts.py</code> 与 <code>window.py:162</code>（字体）。本文档中的 px 对应实现中的 pt @ <code>ui_scale = 1</code>。</p>
   <p style="border:1px solid var(--border);border-left:3px solid var(--primary-dim);background:var(--bg-child);padding:8px 12px;max-width:960px"><b>线框风格约定（桌面应用风格）</b>：mojive 是桌面软件，本文档所有 mockup 一律按桌面应用绘制——<b>flat 填色、1px Border <code>#3A3F45</code> 描边、无阴影（浮动窗 / 弹出菜单 / popover 除外）、无渐变、圆角仅 §5.3 两级</b>（3px 面板 / 999px 胶囊 overlay）。禁止前端化手法：卡片投影、渐变铺色、大于 3px 的面板圆角、装饰性透明叠层。</p>
 
   <h3>5.1 色卡</h3>

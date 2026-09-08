@@ -1,6 +1,6 @@
 # Native renderer probe
 
-The optional `native/` project evaluates a C++ renderer without changing the Python Viewer,
+The optional `cpp/` project evaluates a C++ renderer without changing the Python Viewer,
 Session, renderer selection, dependencies, or public rendering APIs. It is an experimental
 subset, not a replacement editor. See the [Chinese migration proposal](../plans/native-cpp-bgfx.zh.md)
 for the broader plan. The [current backend decision](../plans/native-backend-decision.zh.md) selects bgfx for the native implementation and records the latest evidence and remaining platform gates.
@@ -38,7 +38,7 @@ no graphics-device handles cross the common boundary.
 - The queue has eight reusable staging slots. Exhaustion applies explicit backpressure. Callers
   must consume tickets, including canceled results. `poll()` does not advance GPU work.
 - Only the owner thread calls the renderer. `advance()` submits work without exposing bgfx's
-  completion frame numbers. Interactive applications poll between events; `wait_for_readback()`
+  completion frame numbers. Interactive applications poll between events; `waitForReadback()`
   is intended for offline consumers and validation.
 
 The prototype uses separate color and data passes. Color supports 1x/4x MSAA. Data uses
@@ -52,8 +52,8 @@ source patch or vendor-specific scene layout is required.
 
 ## Build and verification
 
-Install a C++20 compiler, CMake 3.24 or newer, and Ninja. The full build downloads checksum-locked
-source archives described in `native/dependencies.lock.json`. The bgfx/bx/bimg versions come
+Install a C++20 compiler, CMake 3.24 or newer, and Ninja. Production sources come from vendored ImGui and initialized Git submodules; optional comparison
+builds download checksum-locked dependencies described in `thirdParty/dependencies.json`. The bgfx/bx/bimg versions come
 from one pinned bgfx.cmake revision. Build products stay under `output/`.
 
 ```bash
@@ -173,14 +173,13 @@ uses one set of GLSL sources, compiled to SPIR-V by glslang and translated to MS
 SPIRV-Cross. Windows additionally compiles HLSL to DXIL with DXC. These tools are build-time
 programs in an isolated CMake project; they are not linked into the SDL runtime. The generated
 MSL path has passed real Metal conformance. SPIR-V generation and HLSL translation do not
-establish Vulkan or D3D12 runtime correctness. A Windows/Linux workflow is prepared, but the
-current GitHub OAuth credentials reject its upload because they lack `workflow` scope;
-those CI builds and platform runtimes have not run. The SDL-only build does not fetch
+establish Vulkan or D3D12 runtime correctness. The evaluation workflow has been removed at the user's request; Linux will be validated locally
+on the user's Linux system. Windows/Linux platform runtimes have not run in this preparation. The SDL-only build does not fetch
 bgfx, bx, bimg, or their shader compiler; pass `NATIVE_CMAKE_ARGS=-DMOJIVE_BUILD_BGFX=OFF` to check it.
 
 The gallery keeps GLFW's existing platform and ImGui integration and wraps native
 windows through SDL's public native-window properties. Cocoa is exercised locally; Win32
-and X11 branches are implemented but remain subject to the blocked platform validation. This isolates the GPU comparison from
+and X11 branches are implemented but remain subject to platform validation on the corresponding systems. This isolates the GPU comparison from
 an unrelated event-system rewrite. The wrapper does not own the GLFW window. Both windows
 share a GPU device; the experiment does not require a central daemon or one process per window.
 
@@ -204,7 +203,7 @@ make native-bindings-test
 make native-bindings-benchmark HUMANOIDS_MODEL=/path/to/mujoco/model/humanoid/100_humanoids.xml
 ```
 
-The build adds two isolated extension modules under `output/native-bindings-build/bindings`.
+The build adds two isolated extension modules under `output/cpp-bindings-build/bindings`.
 It does not install a package, modify the Python app's dependencies, or replace MuJoCo's module.
 Versions and source checksums for pybind11, nanobind, and nanobind's robin-map dependency are
 locked. Both wrappers call the same compiled C++20 implementation with the same optimization

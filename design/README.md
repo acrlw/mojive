@@ -30,7 +30,7 @@ Use the `Probe` menu to switch between:
 
 The Playback, Tools, and Hints tabs include a `Live component experiment` panel. Changes update the
 specimen immediately. `Copy current values` copies the relevant `OverlayGeometry` fields for review;
-`Reset production defaults` restores values from `src/mojive/ui/viewport_widgets.py`. Probe changes
+`Reset production defaults` restores values from `python/src/mojive/ui/viewport_widgets.py`. Probe changes
 remain local until they are deliberately implemented in production.
 
 The default Workspace follows production behavior: regular tool hints live in the status bar,

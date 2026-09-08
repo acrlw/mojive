@@ -1,0 +1,14 @@
+Checks: '-*,readability-identifier-naming'
+HeaderFilterRegex: '(^|/)cpp/(include|src|bindings|tools|tests)/'
+CheckOptions:
+  readability-identifier-naming.NamespaceCase: camelBack
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.EnumConstantCase: CamelCase
+  readability-identifier-naming.FunctionCase: camelBack
+  readability-identifier-naming.ParameterCase: camelBack
+  readability-identifier-naming.VariableCase: camelBack
+  readability-identifier-naming.MemberCase: camelBack
+  readability-identifier-naming.PrivateMemberPrefix: m
+  readability-identifier-naming.PrivateMemberCase: CamelCase
