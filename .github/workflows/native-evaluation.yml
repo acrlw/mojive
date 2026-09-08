@@ -40,6 +40,8 @@ jobs:
         run: |
           xvfb-run -a output/native-ci/mojive_native_probe output/native-ci/shaders output/conformance/bgfx bgfx
           xvfb-run -a output/native-ci/mojive_native_probe output/native-ci/shaders output/conformance/sdl sdl
+          xvfb-run -a output/native-ci/mojive_native_composition output/native-ci/shaders output/composition/bgfx bgfx
+          xvfb-run -a output/native-ci/mojive_native_composition output/native-ci/shaders output/composition/sdl sdl
       - name: D3D12 conformance
         if: runner.os == 'Windows'
         shell: pwsh
@@ -47,6 +49,10 @@ jobs:
           & output/native-ci/Release/mojive_native_probe.exe output/native-ci/shaders output/conformance/bgfx bgfx
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & output/native-ci/Release/mojive_native_probe.exe output/native-ci/shaders output/conformance/sdl sdl
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & output/native-ci/Release/mojive_native_composition.exe output/native-ci/shaders output/composition/bgfx bgfx
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & output/native-ci/Release/mojive_native_composition.exe output/native-ci/shaders output/composition/sdl sdl
           exit $LASTEXITCODE
       - name: Save test products and portable shader artifacts
         if: always()
@@ -55,6 +61,7 @@ jobs:
           name: native-${{ runner.os }}
           path: |
             output/conformance/
+            output/composition/
             output/native-ci/shaders/
             output/native-ci/Testing/Temporary/
           if-no-files-found: warn

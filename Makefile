@@ -803,3 +803,17 @@ native-bindings-test: native-bindings
 
 native-bindings-benchmark: native-bindings native-fixture
 	$(PY) tools/benchmark_native_bindings.py --modules "$(NATIVE_BINDINGS_BUILD)/bindings" --model "$(HUMANOIDS_MODEL)" --scene "$(NATIVE_SCENE)" $(ARGS)
+
+.PHONY: native-composition native-windows native-runtime
+native-composition: native-build
+	$(NATIVE_BUILD)/mojive_native_composition $(NATIVE_BUILD)/shaders $(NATIVE_OUTPUT) $(NATIVE_BACKEND)
+
+native-windows: native-build
+	$(NATIVE_BUILD)/mojive_native_windows $(NATIVE_BUILD)/shaders $(NATIVE_OUTPUT) $(NATIVE_BACKEND)
+
+native-runtime: native-build native-fixture
+	$(PY) tools/run_native_runtime.py --build $(NATIVE_BUILD) --scene "$(NATIVE_SCENE)" --model "$(HUMANOIDS_MODEL)" $(ARGS)
+
+.PHONY: native-scene-capture
+native-scene-capture: native-build native-fixture
+	$(NATIVE_BUILD)/mojive_native_scene_capture $(NATIVE_BUILD)/shaders "$(NATIVE_SCENE)" $(NATIVE_OUTPUT) $(NATIVE_BACKEND)

@@ -1,43 +1,19 @@
+#include "platform_window.hpp"
 #include "renderer_factory.hpp"
 #include "scene_stream.hpp"
-#include <imgui.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_internal.h>
-#include <mojive/readback.hpp>
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-#if defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#elif defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#else
-#define GLFW_EXPOSE_NATIVE_X11
-#endif
-#include <GLFW/glfw3native.h>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_internal.h>
 #include <iostream>
+#include <mojive/readback.hpp>
 #include <thread>
 #include <unordered_set>
 
 using namespace mojive;
-static NativeWindow native_window(GLFWwindow *window) {
-    int width, height;
-    glfwGetFramebufferSize(window, &width, &height);
-    NativeWindow result;
-    result.size = {uint32_t(width), uint32_t(height)};
-#if defined(__APPLE__)
-    result.handle = glfwGetCocoaWindow(window);
-#elif defined(_WIN32)
-    result.handle = glfwGetWin32Window(window);
-#else
-    result.handle = reinterpret_cast<void *>(glfwGetX11Window(window));
-    result.display = glfwGetX11Display();
-#endif
-    return result;
-}
 struct UiPackets {
     std::vector<UiVertex> vertices;
     std::vector<uint32_t> indices;
@@ -122,14 +98,14 @@ int main(int argc, char **argv) {
         std::string backend = argc > 6 ? argv[6] : "bgfx";
         probe::RendererOptions options;
         options.shader_directory = argv[1];
-        options.window = native_window(window);
+        options.window = probe::native_window(window);
         auto renderer = probe::make_renderer(options, backend);
         auto scene = probe::load(argv[2]);
         renderer->set_scene(scene.source);
         auto viewport = renderer->create_target({1280, 720}, 4);
         auto capture = renderer->create_target(options.window.size);
-        auto secondary_size = native_window(secondary).size;
-        auto surface = renderer->create_surface(native_window(secondary));
+        auto secondary_size = probe::native_window(secondary).size;
+        auto surface = renderer->create_surface(probe::native_window(secondary));
         ImGui::CreateContext();
         auto &io = ImGui::GetIO();
         io.IniFilename = nullptr;
@@ -162,8 +138,10 @@ int main(int argc, char **argv) {
         FrameToken capture_frame;
         for (uint64_t n = 0; n < 110; ++n) {
             glfwPollEvents();
-            if (n == 55)
+            if (n == 55) {
                 glfwSetWindowSize(window, 1000, 700);
+                glfwSetWindowSize(secondary, 480, 320);
+            }
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
             auto dock = ImGui::DockSpaceOverViewport();
@@ -223,6 +201,8 @@ int main(int argc, char **argv) {
             renderer->render_ui(packets.frame);
             renderer->resize(capture, packets.frame.size);
             capture_frame = renderer->render_ui(packets.frame, capture);
+            secondary_size = probe::native_window(secondary).size;
+            renderer->resize(surface, secondary_size);
             std::array<UiVertex, 4> quad = {
                 {{0, 0, 0, 0, 0xffffffff},
                  {float(secondary_size.width), 0, 1, 0, 0xffffffff},

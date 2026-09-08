@@ -335,6 +335,7 @@ class SdlRenderer final : public Renderer {
         const char *driver = "vulkan";
 #endif
         device_ = checked(SDL_CreateGPUDevice(shader_format_, false, driver));
+        checked(SDL_SetGPUAllowedFramesInFlight(device_, 2));
         caps_ = {std::string("SDL3 ") + SDL_GetGPUDeviceDriver(device_),
                  "",
                  true,
@@ -484,6 +485,8 @@ class SdlRenderer final : public Renderer {
         if (!window.handle)
             throw std::invalid_argument("Missing native window");
         auto props = checked(SDL_CreateProperties());
+        checked(
+            SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true));
 #if defined(__APPLE__)
         checked(SDL_SetPointerProperty(props, SDL_PROP_WINDOW_CREATE_COCOA_WINDOW_POINTER,
                                        window.handle));
@@ -516,8 +519,14 @@ class SdlRenderer final : public Renderer {
         auto &t = target(id);
         if (t.size == size)
             return;
-        if (t.window)
-            throw std::invalid_argument("Resize native surfaces through the platform window");
+        if (t.window) {
+            // SDL updates the claimed swapchain from the platform window's drawable
+            // size on acquisition; keep its identity and resources across resizes.
+            t.size = size;
+            ++t.generation;
+            t.latest = {};
+            return;
+        }
         cancel(id);
         release_target(t);
         t.size = size;
