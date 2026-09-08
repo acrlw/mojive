@@ -4767,7 +4767,9 @@ class ViewerApp:
             defaults = ()
         # Selection is application state, not part of a panel's hover/gesture
         # grammar. Compose its action before the clicked panel's own hints.
-        if self._selection_clear_enabled():
+        if self._selection_clear_enabled() and not any(
+            hint.kind == "key" and hint.control == "Esc" for hint in defaults
+        ):
             defaults = (
                 ToolHint(
                     "key",
@@ -5331,6 +5333,8 @@ class ViewerApp:
             self.session.submit(cmd.StopStateTakeRecording())
         elif self.session.state_take_playing:
             self.session.submit(cmd.PauseStateTake())
+        elif self.session.paused and self.session.state_take_cursor >= 0:
+            self.session.submit(cmd.PlayStateTake())
         else:
             self.session.submit(cmd.Play() if self.session.paused else cmd.Pause())
 
@@ -5339,7 +5343,8 @@ class ViewerApp:
             self.session.submit(cmd.StopStateTakeRecording())
         elif self.session.state_take_cursor >= 0:
             self.session.submit(cmd.PauseStateTake())
-            self.session.submit(cmd.SeekStateTake(0))
+            loop = getattr(self.session, "state_take_loop", None)
+            self.session.submit(cmd.SeekStateTake(loop[0] if loop else 0))
         else:
             if not self.session.paused:
                 self.session.submit(cmd.Pause())

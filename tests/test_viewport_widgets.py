@@ -40,6 +40,7 @@ from mojive.ui.viewport_widgets import (
     draw_projection_label,
     draw_status,
     draw_tool_glyph,
+    draw_tool_hints,
     fitting_tool_hints,
     format_simulation_metric,
     format_simulation_steps,
@@ -1103,6 +1104,26 @@ def test_tool_hint_fitting_never_draws_a_partial_group():
 
     assert fitting_tool_hints(draw, 1.0, hints, first_width) == hints[:1]
     assert fitting_tool_hints(draw, 1.0, hints, 1.0) == ()
+
+
+@pytest.mark.parametrize("scale", (1.0, 1.5, 2.0))
+def test_modified_mouse_hint_keeps_its_glyph_and_matches_its_measured_width(scale):
+    from mojive.ui.theme import THEME
+
+    draw = _RecordedMouse()
+    text = []
+    draw.text = lambda _pos, _color, value: text.append(value)
+    hint = ToolHint("mouse", "right", "Select loop range", modifier="Shift")
+    registry = ToolHintRegistry()
+    registry.add("range", hint)
+    hints = registry.resolve()
+
+    width = draw_tool_hints(draw, (10, 15), THEME, scale, hints)
+
+    assert width == pytest.approx(tool_hints_size(draw, scale, hints)[0])
+    assert text == ["Shift", "+", "Select loop range"]
+    assert draw.convex_fills  # The mouse button is drawn as geometry.
+    assert fitting_tool_hints(draw, scale, hints, width - 1) == ()
 
 
 def test_viewport_chrome_registry_dispatches_custom_actions_and_allows_removal():
