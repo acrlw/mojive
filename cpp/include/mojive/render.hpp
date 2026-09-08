@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -29,20 +30,40 @@ struct Vertex {
 struct Mesh {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
+    std::vector<std::array<float, 2>> texcoords;
 };
 struct Instance {
     uint32_t mesh = 0, objectId = 0;
     std::array<int32_t, 2> segmentation = {-1, -1};
     std::array<float, 4> color = {1, 1, 1, 1};
 };
+struct Material {
+    int32_t texture = -1;
+    float emission = 0, specular = 0.5f, shininess = 0.5f;
+};
+struct TextureSource {
+    Extent size;
+    bool mipmaps = false;
+    std::vector<std::byte> rgba;
+};
+struct SceneStyle {
+    std::array<float, 4> background = {0.125f, 0.15f, 0.18f, 1};
+    bool textures = true, wireframe = false, transparentIds = true;
+};
 struct SceneSource {
     uint64_t revision = 1;
     std::vector<Mesh> meshes;
     std::vector<Instance> instances;
+    std::vector<Material> materials;
+    std::vector<TextureSource> textures;
+    std::vector<uint32_t> materialIndices;
+    bool linearColors = false;
 };
 struct SceneFrame {
     uint64_t sourceRevision = 1, sequence = 0;
     std::span<const Matrix> transforms;
+    std::span<const std::array<float, 4>> texcoords;
+    std::span<const std::array<float, 4>> colors;
 };
 struct CameraView {
     Matrix view = identity();
@@ -51,13 +72,14 @@ struct CameraView {
     uint64_t revision = 0;
     float farPlane = 200;
 };
-enum class Product { Color, ObjectId, Segmentation, MetricDepth };
+enum class Product { Color, ObjectId, Segmentation, MetricDepth, ColorAlpha };
 constexpr size_t pixelBytes(Product product) {
     switch (product) {
     case Product::Color:
         return 3; // RGB uint8
     case Product::Segmentation:
         return 8; // two signed int32 values
+    case Product::ColorAlpha:
     case Product::ObjectId:
     case Product::MetricDepth:
         return 4;
@@ -69,6 +91,10 @@ struct Image {
     Extent size;
     // Tightly packed, top-left origin. Integer/float values use host byte order.
     std::vector<std::byte> pixels;
+};
+struct Scene {
+    uint64_t id = 0;
+    bool operator==(const Scene &) const = default;
 };
 struct Target {
     uint64_t id = 0;
@@ -94,6 +120,7 @@ struct Capabilities {
     bool readback = false, instancing = false, multipleWindows = false;
     bool integerTarget = false, signedPairTarget = false, floatTarget = false;
     uint32_t maxTextureSize = 0;
+    bool multipleScenes = false;
 };
 struct FrameStats {
     uint64_t drawCalls = 0, instances = 0, uploadBytes = 0;
@@ -131,6 +158,28 @@ class Renderer {
     virtual ~Renderer() = default;
     virtual const Capabilities &capabilities() const = 0;
     virtual void setScene(const SceneSource &) = 0;
+    virtual void configure(Scene, const SceneStyle &) {
+        throw std::logic_error("Scene styling is unavailable");
+    }
+    virtual Scene createScene(const SceneSource &) {
+        throw std::logic_error("Independent scenes are unavailable");
+    }
+    virtual void setScene(Scene, const SceneSource &) {
+        throw std::logic_error("Independent scenes are unavailable");
+    }
+    virtual void update(Scene, const SceneFrame &) {
+        throw std::logic_error("Independent scenes are unavailable");
+    }
+    virtual void updateMesh(Scene, uint32_t, std::span<const Vertex>) {
+        throw std::logic_error("Independent scenes are unavailable");
+    }
+    virtual Target createTarget(Scene, Extent, uint32_t = 1) {
+        throw std::logic_error("Independent scenes are unavailable");
+    }
+    // Destroying a scene invalidates its attached targets and readback tickets.
+    virtual void destroy(Scene) {
+        throw std::logic_error("Independent scenes are unavailable");
+    }
     virtual void update(const SceneFrame &) = 0;
     virtual void updateMesh(uint32_t mesh, std::span<const Vertex>) = 0;
     virtual Target createTarget(Extent, uint32_t samples = 1) = 0;

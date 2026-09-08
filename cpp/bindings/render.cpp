@@ -3,7 +3,9 @@
 #include <mojive/renderRuntime.hpp>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/array.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 
 namespace nb = nanobind;
 using namespace mojive;
@@ -32,6 +34,8 @@ nb::object imageArray(const ReadbackResult &result) {
     switch (image.product) {
     case Product::Color:
         return ownedArray<uint8_t>(data, {h, w, 3});
+    case Product::ColorAlpha:
+        return ownedArray<uint8_t>(data, {h, w, 4});
     case Product::ObjectId:
         return ownedArray<uint32_t>(data, {h, w});
     case Product::Segmentation:
@@ -60,6 +64,7 @@ std::vector<Vertex> vertices(Array<float, -1, 3> positions, Array<float, -1, 3> 
 void bindRender(nb::module_ &module) {
     nb::enum_<Product>(module, "Product")
         .value("COLOR", Product::Color)
+        .value("RGBA", Product::ColorAlpha)
         .value("OBJECT_ID", Product::ObjectId)
         .value("SEGMENTATION", Product::Segmentation)
         .value("METRIC_DEPTH", Product::MetricDepth);
@@ -77,6 +82,15 @@ void bindRender(nb::module_ &module) {
         .def_rw("y", &Region::y)
         .def_rw("width", &Region::width)
         .def_rw("height", &Region::height);
+    nb::class_<Scene>(module, "Scene").def(nb::init<>()).def_ro("id", &Scene::id);
+    nb::class_<Texture>(module, "Texture").def_ro("id", &Texture::id);
+    nb::class_<UiCommand>(module, "UiCommand")
+        .def(nb::init<>())
+        .def_rw("first_index", &UiCommand::firstIndex)
+        .def_rw("index_count", &UiCommand::indexCount)
+        .def_rw("vertex_offset", &UiCommand::vertexOffset)
+        .def_rw("clip", &UiCommand::clip)
+        .def_rw("texture", &UiCommand::texture);
     nb::class_<Target>(module, "Target").def_ro("id", &Target::id);
     nb::class_<FrameToken>(module, "FrameToken")
         .def_ro("target", &FrameToken::target)
@@ -100,7 +114,8 @@ void bindRender(nb::module_ &module) {
         .def_ro("device", &Capabilities::device)
         .def_ro("readback", &Capabilities::readback)
         .def_ro("instancing", &Capabilities::instancing)
-        .def_ro("max_texture_size", &Capabilities::maxTextureSize);
+        .def_ro("max_texture_size", &Capabilities::maxTextureSize)
+        .def_ro("multiple_scenes", &Capabilities::multipleScenes);
     nb::class_<CameraView>(module, "CameraView")
         .def(nb::init<>())
         .def_rw("revision", &CameraView::revision)
@@ -112,9 +127,57 @@ void bindRender(nb::module_ &module) {
             "projection",
             [](const CameraView &c) { return ownedArray<float>(c.projection.data(), {4, 4}); },
             [](CameraView &c, Array<float, 4, 4> value) { c.projection = matrix(value); });
+    nb::class_<SceneStyle>(module, "SceneStyle")
+        .def(nb::init<>())
+        .def_rw("background", &SceneStyle::background)
+        .def_rw("textures", &SceneStyle::textures)
+        .def_rw("wireframe", &SceneStyle::wireframe)
+        .def_rw("transparent_ids", &SceneStyle::transparentIds);
+    nb::class_<Material>(module, "Material")
+        .def(nb::init<>())
+        .def_rw("texture", &Material::texture)
+        .def_rw("emission", &Material::emission)
+        .def_rw("specular", &Material::specular)
+        .def_rw("shininess", &Material::shininess);
     nb::class_<SceneSource>(module, "SceneSource")
         .def(nb::init<>())
         .def_rw("revision", &SceneSource::revision)
+        .def_rw("materials", &SceneSource::materials)
+        .def_rw("linear_colors", &SceneSource::linearColors)
+        .def("add_texture_mips",
+             [](SceneSource &s, uint32_t width, uint32_t height, Array<uint8_t, -1> bytes) {
+                 TextureSource texture;
+                 texture.size = {width, height};
+                 texture.mipmaps = true;
+                 texture.rgba.resize(bytes.size());
+                 if (!texture.rgba.empty())
+                     std::memcpy(texture.rgba.data(), bytes.data(), bytes.size());
+                 s.textures.push_back(std::move(texture));
+                 return s.textures.size() - 1;
+             })
+        .def(
+            "set_material_indices",
+            [](SceneSource &s, Array<uint32_t, -1> indices) {
+                s.materialIndices.assign(indices.data(), indices.data() + indices.size());
+            },
+            nb::arg("indices").noconvert())
+        .def("set_mesh_texcoords",
+             [](SceneSource &s, size_t mesh, Array<float, -1, 2> uv) {
+                 auto &out = s.meshes.at(mesh).texcoords;
+                 out.resize(uv.shape(0));
+                 if (!out.empty())
+                     std::memcpy(out.data(), uv.data(), uv.size() * sizeof(float));
+             })
+        .def("add_texture",
+             [](SceneSource &s, Array<uint8_t, -1, -1, 4> pixels) {
+                 TextureSource texture;
+                 texture.size = {uint32_t(pixels.shape(1)), uint32_t(pixels.shape(0))};
+                 texture.rgba.resize(pixels.size());
+                 if (!texture.rgba.empty())
+                     std::memcpy(texture.rgba.data(), pixels.data(), pixels.size());
+                 s.textures.push_back(std::move(texture));
+                 return s.textures.size() - 1;
+             })
         .def_prop_ro("mesh_count", [](const SceneSource &s) { return s.meshes.size(); })
         .def_prop_ro("instance_count", [](const SceneSource &s) { return s.instances.size(); })
         .def(
@@ -163,15 +226,49 @@ void bindRender(nb::module_ &module) {
         .def_prop_ro("log", &RenderRuntime::log, nb::rv_policy::reference_internal)
         .def_prop_ro("closed", &RenderRuntime::closed)
         .def("close", &RenderRuntime::close, nb::call_guard<nb::gil_scoped_release>())
-        .def("set_scene",
+        .def("configure",
+             [](RenderRuntime &r, Scene scene, SceneStyle style) {
+                 nb::gil_scoped_release release;
+                 r.configure(scene, style);
+             })
+        .def("update_textured",
+             [](RenderRuntime &r, Scene scene, Array<float, -1, 4, 4> array, Array<float, -1, 4> uv,
+                Array<float, -1, 4> colors, uint64_t revision, uint64_t sequence) {
+                 thread_local std::vector<Matrix> transforms;
+                 thread_local std::vector<std::array<float, 4>> coords, rgba;
+                 transforms.resize(array.shape(0));
+                 coords.resize(uv.shape(0));
+                 if (!transforms.empty())
+                     std::memcpy(transforms.data(), array.data(), array.size() * sizeof(float));
+                 if (!coords.empty())
+                     std::memcpy(coords.data(), uv.data(), uv.size() * sizeof(float));
+                 rgba.resize(colors.shape(0));
+                 if (!rgba.empty())
+                     std::memcpy(rgba.data(), colors.data(), colors.size() * sizeof(float));
+                 nb::gil_scoped_release release;
+                 r.update(scene, {revision, sequence, transforms, coords, rgba});
+             })
+        .def("create_scene",
              [](RenderRuntime &r, SceneSource source) {
                  nb::gil_scoped_release release;
-                 r.setScene(source);
+                 return r.createScene(source);
+             })
+        .def("destroy_scene",
+             [](RenderRuntime &r, Scene scene) {
+                 nb::gil_scoped_release release;
+                 r.destroy(scene);
              })
         .def(
+            "set_scene",
+            [](RenderRuntime &r, SceneSource source, Scene scene) {
+                nb::gil_scoped_release release;
+                r.setScene(scene, source);
+            },
+            nb::arg("source"), nb::arg("scene") = Scene{})
+        .def(
             "update",
-            [](RenderRuntime &r, Array<float, -1, 4, 4> array, uint64_t revision,
-               uint64_t sequence) {
+            [](RenderRuntime &r, Array<float, -1, 4, 4> array, uint64_t revision, uint64_t sequence,
+               Scene scene) {
                 // Synchronous dispatch never calls Python. Reuse this calling thread's
                 // owned snapshot only after the backend has consumed it.
                 thread_local std::vector<Matrix> transforms;
@@ -180,23 +277,26 @@ void bindRender(nb::module_ &module) {
                     std::memcpy(transforms.data(), array.data(),
                                 transforms.size() * sizeof(Matrix));
                 nb::gil_scoped_release release;
-                r.update({revision, sequence, transforms});
+                r.update(scene, {revision, sequence, transforms});
             },
-            nb::arg("transforms"), nb::arg("source_revision") = 1, nb::arg("sequence") = 0)
-        .def("update_mesh",
-             [](RenderRuntime &r, uint32_t mesh, Array<float, -1, 3> positions,
-                Array<float, -1, 3> normals) {
-                 auto data = vertices(positions, normals);
-                 nb::gil_scoped_release release;
-                 r.updateMesh(mesh, data);
-             })
+            nb::arg("transforms"), nb::arg("source_revision") = 1, nb::arg("sequence") = 0,
+            nb::arg("scene") = Scene{})
+        .def(
+            "update_mesh",
+            [](RenderRuntime &r, uint32_t mesh, Array<float, -1, 3> positions,
+               Array<float, -1, 3> normals, Scene scene) {
+                auto data = vertices(positions, normals);
+                nb::gil_scoped_release release;
+                r.updateMesh(scene, mesh, data);
+            },
+            nb::arg("mesh"), nb::arg("positions"), nb::arg("normals"), nb::arg("scene") = Scene{})
         .def(
             "create_target",
-            [](RenderRuntime &r, uint32_t width, uint32_t height, uint32_t samples) {
+            [](RenderRuntime &r, uint32_t width, uint32_t height, uint32_t samples, Scene scene) {
                 nb::gil_scoped_release release;
-                return r.createTarget({width, height}, samples);
+                return r.createTarget(scene, {width, height}, samples);
             },
-            nb::arg("width"), nb::arg("height"), nb::arg("samples") = 1)
+            nb::arg("width"), nb::arg("height"), nb::arg("samples") = 1, nb::arg("scene") = Scene{})
         .def("resize",
              [](RenderRuntime &r, Target target, uint32_t width, uint32_t height) {
                  nb::gil_scoped_release release;
@@ -222,6 +322,51 @@ void bindRender(nb::module_ &module) {
         .def("poll", &RenderRuntime::poll, nb::call_guard<nb::gil_scoped_release>())
         .def("wait", &RenderRuntime::wait, nb::call_guard<nb::gil_scoped_release>())
         .def("advance", &RenderRuntime::advance, nb::call_guard<nb::gil_scoped_release>())
+        .def(
+            "create_surface",
+            [](RenderRuntime &r, uintptr_t handle, uint32_t width, uint32_t height,
+               uintptr_t display) {
+                nb::gil_scoped_release release;
+                return r.createSurface({reinterpret_cast<void *>(handle),
+                                        reinterpret_cast<void *>(display),
+                                        {width, height}});
+            },
+            nb::arg("handle"), nb::arg("width"), nb::arg("height"), nb::arg("display") = 0)
+        .def("target_texture", &RenderRuntime::targetTexture,
+             nb::call_guard<nb::gil_scoped_release>())
+        .def("upload_texture",
+             [](RenderRuntime &r, Array<uint8_t, -1, -1, 4> image) {
+                 Extent size{static_cast<uint32_t>(image.shape(1)),
+                             static_cast<uint32_t>(image.shape(0))};
+                 std::vector<std::byte> data(image.size());
+                 if (!data.empty())
+                     std::memcpy(data.data(), image.data(), data.size());
+                 nb::gil_scoped_release release;
+                 return r.uploadTexture(size, data);
+             })
+        .def("destroy_texture",
+             [](RenderRuntime &r, Texture texture) {
+                 nb::gil_scoped_release release;
+                 r.destroy(texture);
+             })
+        .def("render_ui",
+             [](RenderRuntime &r, uint32_t width, uint32_t height, Array<uint8_t, -1> bytes,
+                Array<uint32_t, -1> indices, std::vector<UiCommand> commands, Target target) {
+                 static_assert(sizeof(UiVertex) == 20);
+                 if (bytes.size() % sizeof(UiVertex))
+                     throw std::invalid_argument("Invalid UI vertex byte count");
+                 thread_local std::vector<UiVertex> vertices;
+                 thread_local std::vector<uint32_t> indexData;
+                 vertices.resize(bytes.size() / sizeof(UiVertex));
+                 indexData.resize(indices.size());
+                 if (!vertices.empty())
+                     std::memcpy(vertices.data(), bytes.data(), bytes.size());
+                 if (!indexData.empty())
+                     std::memcpy(indexData.data(), indices.data(),
+                                 indices.size() * sizeof(uint32_t));
+                 nb::gil_scoped_release release;
+                 return r.renderUi({{width, height}, vertices, indexData, commands}, target);
+             })
         .def(
             "__enter__",
             [](RenderRuntime &r) -> RenderRuntime & {

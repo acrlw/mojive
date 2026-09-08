@@ -1,4 +1,4 @@
-$input v_color0, v_meta0, v_meta1, v_normal, v_depth
+$input v_color0, v_meta0, v_meta1, v_normal, v_depth, v_texcoord0, v_world
 #include <bgfx_shader.sh>
 vec4 packWords(vec2 words)
 {

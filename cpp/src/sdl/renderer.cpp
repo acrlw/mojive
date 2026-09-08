@@ -613,7 +613,7 @@ class SdlRenderer final : public Renderer {
         if (t.window || frame != t.latest || !frame.submission ||
             frame.sceneRevision != mScene.revision)
             throw std::invalid_argument("Stale or unreadable frame");
-        if (t.colorOnly && product != Product::Color)
+        if (t.colorOnly && product != Product::Color && product != Product::ColorAlpha)
             throw std::invalid_argument("UI frame has no scene data products");
         if (region.x >= t.size.width || region.y >= t.size.height)
             throw std::invalid_argument("Invalid readback origin");
@@ -647,10 +647,10 @@ class SdlRenderer final : public Renderer {
         }
         auto *pass = checked(SDL_BeginGPUCopyPass(command()));
         for (uint32_t i = 0; i < r.count; ++i) {
-            auto *image = product == Product::Color         ? t.color
-                          : product == Product::MetricDepth ? t.data[3]
-                          : product == Product::ObjectId    ? t.data[0]
-                                                            : t.data[1 + i];
+            auto *image = (product == Product::Color || product == Product::ColorAlpha) ? t.color
+                          : product == Product::MetricDepth                             ? t.data[3]
+                          : product == Product::ObjectId ? t.data[0]
+                                                         : t.data[1 + i];
             SDL_GPUTextureRegion src{image,         0, 0, region.x, region.y, 0, region.width,
                                      region.height, 1};
             SDL_GPUTextureTransferInfo dst{r.buffer, i * r.pitch * region.height, r.pitch / 4,

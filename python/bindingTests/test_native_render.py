@@ -224,3 +224,47 @@ def test_official_hundred_humanoids_through_python(native, runtime):
             )
             + "\n"
         )
+
+
+def test_texture_orientation_and_incremental_colors_preserve_submitted_readback(native, runtime):
+    source = native.SceneSource()
+    positions = np.array(
+        [[-0.8, -0.8, 0], [0.8, -0.8, 0], [0.8, 0.8, 0], [-0.8, 0.8, 0]], np.float32
+    )
+    source.add_mesh(positions, np.tile([0, 0, 1], (4, 1)), np.array([0, 1, 2, 0, 2, 3], np.uint32))
+    source.set_mesh_texcoords(0, np.array([[0, 1], [1, 1], [1, 0], [0, 0]], np.float32))
+    pixels = np.array(
+        [[[255, 0, 0, 255], [0, 255, 0, 255]], [[0, 0, 255, 255], [255, 255, 255, 255]]], np.uint8
+    )
+    material = native.Material()
+    material.texture = source.add_texture(pixels)
+    material.specular = 0
+    source.materials = [material]
+    source.set_instances(
+        np.array([0], np.uint32),
+        np.array([7], np.uint32),
+        np.array([[3, 5]], np.int32),
+        np.ones((1, 4), np.float32),
+    )
+    source.set_material_indices(np.array([0], np.uint32))
+    scene = runtime.create_scene(source)
+    transform = np.eye(4, dtype=np.float32)[None]
+    uv = np.array([[1, 1, 0, 0]], np.float32)
+    runtime.update_textured(scene, transform, uv, np.ones((1, 4), np.float32), 1, 0)
+    camera = native.CameraView()
+    camera.view = native.look_at([0, 0, 5], [0, 0, 0], [0, 1, 0])
+    camera.projection = native.orthographic(2, 2, 0.1, 20)
+    camera.far_plane = 20
+    target = runtime.create_target(64, 64, scene=scene)
+    token = runtime.render(target, camera)
+    ticket = runtime.readback(token, native.Product.COLOR)
+    runtime.update_textured(scene, transform, uv, np.array([[0, 0, 0, 1]], np.float32), 1, 1)
+    black = runtime.render(target, camera)
+    first = runtime.wait(ticket)
+    assert first.state == native.ReadbackState.READY
+    color = first.image
+    assert color[20, 20, 0] > max(color[20, 20, 1:]) + 100
+    assert color[20, 44, 1] > max(color[20, 44, [0, 2]]) + 100
+    assert color[44, 20, 2] > max(color[44, 20, :2]) + 100
+    assert runtime.wait(runtime.readback(black, native.Product.COLOR)).image[32, 32].max() == 0
+    assert runtime.wait(runtime.readback(black, native.Product.OBJECT_ID)).image[32, 32] == 7
