@@ -22,6 +22,7 @@ from .. import commands as cmd
 from ..adapters.base import FrameNeeds, NodeType
 from ..capture import CaptureSurface, RecordingInfo, RecordingPhase
 from ..config import (
+    CameraTrackingConfig,
     InteractionConfig,
     RecordingConfig,
     SelectionStyle,
@@ -55,6 +56,7 @@ from .camera import (
     unproject,
 )
 from .camera_preview import CameraPreview
+from .camera_tracking import CameraTracker, can_track_node, tracking_position
 from .draw2d import ImguiDraw2D
 from .gizmo import JointLimitHit, ObjectGizmo, PreciseGizmoInput, node_world_pose
 from .input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
@@ -78,6 +80,7 @@ from .perturb import (
     draw_axes as draw_perturb_axes,
 )
 from .scene_entities import SceneEntityHelpers
+from .take_video import TakeVideo
 from .theme import THEME, Theme
 from .viewcube import DEFAULT_SELECTION_PADDING, ViewCube
 from .viewport_widgets import (
@@ -605,6 +608,14 @@ class ViewerApp:
             if explicit_config
             else self.localizer.preference("recording", {})
         )
+        self.camera_tracker = CameraTracker(
+            CameraTrackingConfig.from_mapping(
+                asdict(viewer_config.tracking)
+                if explicit_config
+                else self.localizer.preference("camera_tracking", {})
+            )
+        )
+        self._tracking_adapter = None
         self._input_handler = None
         self._input_claim = _NO_INPUT_CLAIM
         self._popup_owned_frame = False
@@ -762,6 +773,7 @@ class ViewerApp:
         self._recording_deadline = 0.0
         self._viewport_recording_frames = 0
         self._viewport_recording_duration = 0.0
+        self._take_video: TakeVideo | None = None
         self._playback_widget_rect: tuple[float, float, float, float] | None = None
         self._tool_widget_rect: tuple[float, float, float, float] | None = None
         self._overlay_drag_kind = ""
@@ -817,6 +829,59 @@ class ViewerApp:
         self.recording_config = RecordingConfig.from_mapping(asdict(value))
         if persist:
             self.localizer.set_preferences({"recording": asdict(self.recording_config)})
+
+    def set_camera_tracking(self, value: CameraTrackingConfig, *, persist: bool = True) -> None:
+        """Change tracking axes or smoothing without moving the camera immediately."""
+        if not isinstance(value, CameraTrackingConfig):
+            raise TypeError("tracking must be a CameraTrackingConfig")
+        self.camera_tracker.config = value
+        if persist:
+            self.localizer.set_preferences({"camera_tracking": asdict(value)})
+
+    @property
+    def tracking_node_id(self) -> int | None:
+        """Return the stable hierarchy node currently followed by the editor camera."""
+        tracker = getattr(self, "camera_tracker", None)
+        return tracker.node_id if tracker is not None else None
+
+    def track_node(self, node_id: int | None) -> None:
+        """Follow a hierarchy node; None stops following at the current camera position."""
+        if node_id is None:
+            tracker = getattr(self, "camera_tracker", None)
+            if tracker is not None:
+                tracker.stop()
+            self._tracking_adapter = None
+            return
+        node = self.session.node(node_id)
+        if not can_track_node(node):
+            raise ValueError(f"Node {node_id} has no trackable world position")
+        if node_id == self.tracking_node_id:
+            return
+        if self._model_camera_id >= 0:
+            self.camera.adopt(self._camera_view(), exact=True)
+        self._leave_model_camera()
+        self.camera_tracker.start(node_id, self.camera)
+        self._tracking_adapter = self.session.adapter
+        self._tracking_node = node
+
+    def _sync_camera_tracking(self, dt: float) -> None:
+        node_id = self.tracking_node_id
+        if node_id is None:
+            return
+        node = self.session.node(node_id)
+        previous = self._tracking_node
+        if (
+            not can_track_node(node)
+            or self.session.adapter is not self._tracking_adapter
+            or node.type != previous.type
+            or node.object_id != previous.object_id
+            or node.name != previous.name
+        ):
+            self.track_node(None)
+            return
+        position = tracking_position(self.session, node)
+        if position is not None and self.camera_tracker.advance(self.camera, position, dt):
+            self.camera.publish(self.camera_out)
 
     def set_viewport_layers(self, value: ViewportLayers, *, persist: bool = True) -> None:
         """Set live viewport visibility while preserving individual tool settings."""
@@ -1145,6 +1210,8 @@ class ViewerApp:
     def _start_model_load(self) -> bool:
         if self._model_load_future is not None or not self._model_load_queue:
             return self._model_load_future is not None
+        if getattr(self, "_take_video", None) is not None:
+            self.stop_recording()
         if self.session.adapter.caps.simulation and not self.session.paused:
             paused = self.session.submit(cmd.Pause())
             if not paused.ok:
@@ -2510,8 +2577,20 @@ class ViewerApp:
         self._advance_camera(dt)
         self._finish_consumed_scene_pointer()
 
-        frame = self.session.tick(self.frame_needs(), wall_dt=dt)
+        playback_dt = self._prepare_take_video(dt)
+        frame = self.session.tick(self.frame_needs(), wall_dt=playback_dt)
+        if self._take_video is not None:
+            self._take_video.cursor = self.session.state_take_cursor
+            self._take_video.playing = self.session.state_take_playing
+            if (
+                self._take_video.started
+                and self.recording.phase is RecordingPhase.RECORDING
+                and not self._take_video.playing
+                and self._take_video.cursor != self._take_video.frame_count - 1
+            ):
+                self.stop_recording(report=False)
         self._sync_structure()
+        self._sync_camera_tracking(elapsed)
         self._apply_pending_joint_focus()
         self._apply_pending_node_focus()
         self._sync_model_camera()
@@ -3362,6 +3441,7 @@ class ViewerApp:
 
     def set_viewport_camera(self, view: CameraView, *, camera_id: int = -1) -> None:
         """Set viewport presentation and synchronize its public Session state."""
+        self.track_node(None)
         self._leave_model_camera()
         self.camera.adopt(view, exact=True)
         self.camera.publish(self.camera_out)
@@ -3374,6 +3454,7 @@ class ViewerApp:
         i = int(camera_id)
         if i >= 0 and not any(c.camera_id == i for c in self.session.cameras):
             return
+        self.track_node(None)
         if i < 0:
             self._leave_model_camera(publish=True)
             return
@@ -3423,6 +3504,7 @@ class ViewerApp:
             self.camera.publish(self.camera_out)
 
     def _frame_scene(self, *, animate: bool = True) -> None:
+        self.track_node(None)
         self.camera.set_aspect(max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0))
         self.camera.frame_scene(
             self.session.bounds(),
@@ -3434,6 +3516,7 @@ class ViewerApp:
 
     def _reset_source_camera(self) -> None:
         """Restore the scene source's authored/default free camera."""
+        self.track_node(None)
         hint = self.session.camera_hint()
         if hint is None:
             self._frame_scene(animate=False)
@@ -3591,6 +3674,7 @@ class ViewerApp:
         if joint_id is None:
             return
         self._pending_joint_focus_id = None
+        self.track_node(None)
         joint = next(
             (candidate for candidate in self.session.joints if candidate.joint_id == joint_id),
             None,
@@ -3811,6 +3895,7 @@ class ViewerApp:
         if node_id is None:
             return
         self._pending_node_focus_id = None
+        self.track_node(None)
         node = self.session.node(node_id)
         if node is None:
             return
@@ -4697,7 +4782,9 @@ class ViewerApp:
             defaults = ()
         # Selection is application state, not part of a panel's hover/gesture
         # grammar. Compose its action before the clicked panel's own hints.
-        if self._selection_clear_enabled():
+        if self._selection_clear_enabled() and not any(
+            hint.kind == "key" and hint.control == "Esc" for hint in defaults
+        ):
             defaults = (
                 ToolHint(
                     "key",
@@ -4847,6 +4934,7 @@ class ViewerApp:
                 show_physics=self.session.adapter.caps.simulation,
                 status=status_text,
                 status_level="info" if active_status is None else active_status.level,
+                status_path=active_status is not None and active_status.copy_text is not None,
                 recording_phase=recording.phase.value,
                 recording_duration=recording.duration,
                 countdown_remaining=recording.countdown_remaining,
@@ -4873,6 +4961,19 @@ class ViewerApp:
                         else self._viewport_labels.show_time
                     )
                     imgui.set_tooltip(f"{switch} · {self._viewport_labels.copy_exact}")
+            if status_layout.message_rect is not None and active_status is not None:
+                x0, y0, x1, y1 = status_layout.message_rect
+                imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
+                imgui.invisible_button("##status_message", imgui.ImVec2(x1 - x0, y1 - y0))
+                if imgui.is_item_hovered():
+                    if imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                        imgui.set_clipboard_text(active_status.copy_text or active_status.text)
+                    hint = self.localizer.text(
+                        "Right-click to copy path"
+                        if active_status.copy_text is not None
+                        else "Right-click to copy message"
+                    )
+                    imgui.set_tooltip(f"{active_status.text}\n{hint}")
             if status_layout.recording_pause_rect is not None and not loading:
                 x0, y0, x1, y1 = status_layout.recording_pause_rect
                 imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
@@ -5007,6 +5108,69 @@ class ViewerApp:
         self._viewport_record_elapsed = 1.0 / self._viewport_recording_fps
         self._recording_first_frame = True
 
+    def start_take_video(
+        self,
+        output: str | Path | None = None,
+        *,
+        surface: CaptureSurface | str | None = None,
+        fps: float | None = None,
+        countdown: float | None = None,
+        end_hold: float | None = None,
+    ) -> Path:
+        """Record the whole take once, waiting at the first and final poses."""
+        session = self.session
+        if session.state_take_recording or not session.state_take_times:
+            raise ValueError("Stop recording a simulation take before recording its video")
+        config = self.recording_config
+        end_hold = float(config.end_hold if end_hold is None else end_hold)
+        if not math.isfinite(end_hold) or end_hold < 0:
+            raise ValueError("end hold must be finite and nonnegative")
+        path = self.start_recording(output, surface=surface, fps=fps, countdown=countdown)
+        result = session.submit(cmd.SeekStateTake(0))
+        if not result.ok:
+            self.stop_recording(report=False)
+            raise RuntimeError(result.message)
+        self._take_video = TakeVideo(
+            len(session.state_take_times),
+            session.structure_generation,
+            math.ceil(end_hold * self._viewport_recording_fps),
+        )
+        return path
+
+    def _validate_take_video(self) -> bool:
+        take = getattr(self, "_take_video", None)
+        if take is None:
+            return False
+        session = self.session
+        if (
+            session.structure_generation != take.structure_generation
+            or len(session.state_take_times) != take.frame_count
+            or session.state_take_recording
+            or not session.paused
+            or session.state_take_cursor != take.cursor
+            or session.state_take_playing != take.playing
+        ):
+            # A transport command or scene edit ends the export before an
+            # unrelated pose can be encoded into the same video.
+            self.stop_recording()
+            return False
+        return True
+
+    def _prepare_take_video(self, dt: float) -> float:
+        if not self._validate_take_video():
+            return dt
+        take = self._take_video
+        take.frame_due = False
+        if self._viewport_recording_phase is not RecordingPhase.RECORDING:
+            return 0.0
+        if not take.started:
+            result = self.session.submit(cmd.PlayStateTake(loop=False))
+            if not result.ok:
+                self.stop_recording(report=False)
+                self.session.report_message(result.message, level="error")
+                return 0.0
+        return take.prepare_frame(dt, self._viewport_recording_fps)
+
     def _draw_recording_countdown(self) -> None:
         if self._viewport_recording_phase is not RecordingPhase.COUNTDOWN:
             return
@@ -5046,6 +5210,12 @@ class ViewerApp:
             return False
         self._viewport_recording_phase = RecordingPhase.PAUSED
         self._viewport_record_elapsed = 0.0
+        take = getattr(self, "_take_video", None)
+        if take is not None:
+            self.session.submit(cmd.PauseStateTake())
+            take.playing = False
+            take.frame_due = False
+            take.elapsed = 0.0
         return True
 
     def resume_recording(self) -> bool:
@@ -5055,6 +5225,14 @@ class ViewerApp:
             return False
         self._viewport_recording_phase = RecordingPhase.RECORDING
         self._viewport_record_elapsed = 1.0 / self._viewport_recording_fps
+        take = getattr(self, "_take_video", None)
+        if take is not None and take.started and take.tail_frames is None:
+            result = self.session.submit(cmd.PlayStateTake(loop=False))
+            if not result.ok:
+                self.stop_recording(report=False)
+                self.session.report_message(result.message, level="error")
+                return False
+            take.playing = self.session.state_take_playing
         return True
 
     def stop_recording(self, *, report: bool = True) -> Path | None:
@@ -5069,6 +5247,9 @@ class ViewerApp:
         self._viewport_recording_path = None
         self._viewport_record_elapsed = 0.0
         self._viewport_recording_phase = RecordingPhase.IDLE
+        take, self._take_video = getattr(self, "_take_video", None), None
+        if take is not None and self.session.state_take_playing:
+            self.session.submit(cmd.PauseStateTake())
         if recorder is None and frames == 0:
             if report:
                 self.session.report_message(self.localizer.text("Recording canceled"), level="info")
@@ -5083,9 +5264,10 @@ class ViewerApp:
             return path
         if report and path is not None:
             self.session.report_message(
-                f"{self.localizer.text('Saved')} {frames} "
-                f"{self.localizer.text('frame(s) to')} {path}",
+                f"{self.localizer.text('Saved video to')} {path.resolve()}",
                 level="success",
+                duration=8.0,
+                copy_text=str(path.resolve()),
             )
         return path
 
@@ -5098,6 +5280,9 @@ class ViewerApp:
             for _, surface, _, _ in getattr(self, "_capture_tasks", [])
         ):
             return True
+        take = getattr(self, "_take_video", None)
+        if take is not None:
+            return take.frame_due and self._viewport_recording_surface is not CaptureSurface.SCENE
         return (
             self._viewport_recording_phase is RecordingPhase.RECORDING
             and self._viewport_recording_surface is not CaptureSurface.SCENE
@@ -5202,12 +5387,18 @@ class ViewerApp:
                 future.set_exception(exc)
         if self._viewport_recording_phase is not RecordingPhase.RECORDING:
             return
+        take = getattr(self, "_take_video", None)
+        if take is not None and not self._validate_take_video():
+            return
         period = 1.0 / self._viewport_recording_fps
-        if getattr(self, "_recording_first_frame", False):
+        if take is not None:
+            count = int(take.frame_due)
+        elif getattr(self, "_recording_first_frame", False):
             self._recording_first_frame = False
+            count = min(3, int(self._viewport_record_elapsed / period))
         else:
             self._viewport_record_elapsed += max(0.0, min(float(dt), 0.1))
-        count = min(3, int(self._viewport_record_elapsed / period))
+            count = min(3, int(self._viewport_record_elapsed / period))
         if count <= 0:
             return
         try:
@@ -5234,7 +5425,12 @@ class ViewerApp:
                 f"{self.localizer.text('Recording stopped')}: {exc}", level="error"
             )
             return
-        self._viewport_record_elapsed -= count * period
+        if take is not None:
+            take.frame_due = False
+            if take.captured(at_end=take.cursor == take.frame_count - 1):
+                self.stop_recording()
+        else:
+            self._viewport_record_elapsed -= count * period
 
     def _toggle_viewport_recording(self) -> None:
         if self.recording.active:
@@ -5257,19 +5453,29 @@ class ViewerApp:
         self.stop_recording(report=report)
 
     def _toggle_playback(self) -> None:
-        if self.session.state_take_recording:
+        if getattr(self, "_take_video", None) is not None:
+            if self.recording.phase is RecordingPhase.PAUSED:
+                self.resume_recording()
+            else:
+                self.pause_recording()
+        elif self.session.state_take_recording:
             self.session.submit(cmd.StopStateTakeRecording())
         elif self.session.state_take_playing:
             self.session.submit(cmd.PauseStateTake())
+        elif self.session.paused and self.session.state_take_cursor >= 0:
+            self.session.submit(cmd.PlayStateTake())
         else:
             self.session.submit(cmd.Play() if self.session.paused else cmd.Pause())
 
     def _reset_playback(self) -> None:
+        if getattr(self, "_take_video", None) is not None:
+            self.stop_recording()
         if self.session.state_take_recording:
             self.session.submit(cmd.StopStateTakeRecording())
         elif self.session.state_take_cursor >= 0:
             self.session.submit(cmd.PauseStateTake())
-            self.session.submit(cmd.SeekStateTake(0))
+            loop = getattr(self.session, "state_take_loop", None)
+            self.session.submit(cmd.SeekStateTake(loop[0] if loop else 0))
         else:
             if not self.session.paused:
                 self.session.submit(cmd.Pause())
@@ -5306,6 +5512,7 @@ class ViewerApp:
             self.session.last_message,
             level=getattr(self.session, "last_message_level", "info"),
             duration=getattr(self.session, "last_message_duration", 5.0),
+            copy_text=getattr(self.session, "last_message_copy_text", None),
         )
 
     def _draw_center_notice(
@@ -5469,6 +5676,10 @@ class ViewerApp:
             model_camera_id=self._model_camera_id,
             model_camera_view=self._model_camera_view,
             select_model_camera=self.select_model_camera,
+            tracking=self.camera_tracker.config,
+            tracking_node_id=self.tracking_node_id,
+            track_node=self.track_node,
+            set_camera_tracking=self.set_camera_tracking,
             focus_node=self.request_node_focus,
             focus_joint=self.request_joint_focus,
             request_rename=self.request_rename,
@@ -5488,6 +5699,7 @@ class ViewerApp:
             viewport_rect=self._viewport_rect,
             dt=self._dt,
             status=self.session.last_message,
+            popup_owned_frame=self._popup_owned_frame,
             language=self.localizer.language.value,
             translate=self.localizer.text,
             set_language=self.set_language,
@@ -5505,6 +5717,10 @@ class ViewerApp:
             set_viewport_layers=self.set_viewport_layers,
             recording_config=self.recording_config,
             set_recording_config=self.set_recording_config,
+            recording=self.recording,
+            take_video_active=self._take_video is not None,
+            start_take_video=self.start_take_video,
+            stop_recording=self.stop_recording,
             set_viewport_overlays=self.set_viewport_overlays,
             set_viewport_capsule_scale=self.set_viewport_capsule_scale,
             input_bindings=self.input_bindings,

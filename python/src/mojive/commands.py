@@ -86,7 +86,9 @@ class StopStateTakeRecording(Command):
 
 @dataclass(frozen=True)
 class PlayStateTake(Command):
-    """Replay the transient state take from its current frame."""
+    """Replay the take, optionally ignoring the selected loop for one playback."""
+
+    loop: bool = True
 
 
 @dataclass(frozen=True)
@@ -99,6 +101,14 @@ class SeekStateTake(Command):
     """Restore one frame from the transient state take."""
 
     frame_index: int
+
+
+@dataclass(frozen=True)
+class SetStateTakeLoop(Command):
+    """Loop an inclusive range of recorded frames; both None clear the range."""
+
+    first_frame: int | None = None
+    last_frame: int | None = None
 
 
 @dataclass(frozen=True)

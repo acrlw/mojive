@@ -4,6 +4,18 @@ RUFF := .venv/bin/ruff
 .DEFAULT_GOAL := help
 
 .PHONY: recording-layers
+.PHONY: camera-tracking
+.PHONY: keyframe-timeline
+.PHONY: take-video
+
+take-video:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.take_video $(ARGS)
+
+keyframe-timeline:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.keyframe_timeline $(ARGS)
+
+camera-tracking:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.camera_tracking $(ARGS)
 
 recording-layers:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.recording_layers $(ARGS)
@@ -104,6 +116,7 @@ help:
 		'  make capture           write PNG' \
 		'  make record            stream MP4' \
 		'  make recording-layers  live layers, countdown, and compact joint acceptance' \
+		'  make take-video        one-shot take recording, end hold, and copyable save path' \
 		'  make rollout-video     offscreen MP4 with simulation-time subtitles' \
 		'  make showcase          render feature overview' \
 		'' \
@@ -255,6 +268,8 @@ gpu:
 
 GPU_WGPU_FILES := python/tests/gpu/test_input_ownership.py python/tests/gpu/test_scene_renderer.py python/tests/gpu/test_renderer_api.py python/tests/gpu/test_control_rpc_capture.py python/tests/gpu/test_hidpi.py python/tests/gpu/test_horizon_haze.py python/tests/gpu/test_shading.py python/tests/gpu/test_shadows.py python/tests/gpu/test_reflection.py python/tests/gpu/test_outline.py python/tests/gpu/test_tendon.py python/tests/gpu/test_debugdraw.py python/tests/gpu/test_gizmo.py python/tests/gpu/test_pipeline.py python/tests/gpu/test_viewer_wgpu.py python/tests/gpu/test_static_viewer.py python/tests/gpu/test_model_loading.py python/tests/gpu/test_ui_interaction.py python/tests/gpu/test_ui_layout_input.py python/tests/gpu/test_wgpu_shader_reload.py
 GPU_WGPU_FILES += python/tests/gpu/test_passive.py
+GPU_WGPU_FILES += python/tests/gpu/test_camera_tracking.py
+GPU_WGPU_FILES += python/tests/gpu/test_keyframe_timeline.py
 ## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
 gpu-wgpu:

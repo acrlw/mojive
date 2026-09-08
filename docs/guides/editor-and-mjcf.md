@@ -69,6 +69,26 @@ The structured Inspector currently covers:
   first/previous/next/last frames, and promote the current take frame to a persistent model keyframe
   with **Capture Snapshot**. A new recording replaces the previous transient take.
 
+In **Keyframes**, click or drag the time ruler or empty track space to seek the recorded take.
+Dragging during replay temporarily pauses it and resumes from the released position. Hold
+**Shift** and drag with the **right mouse button** to select an orange loop range; dragging in
+either direction works. Replay includes both selected endpoint frames and repeats that range,
+even with the panel closed. **Clear range**, **Esc** while the timeline is focused, or a
+**Shift + right-click** removes the range. During a range drag, **Esc** cancels the preview and
+keeps the previous range.
+
+**Follow playhead** defaults to **Page**, which scrolls at the visible edge and places the
+playhead near the left side. **Locked** keeps the playhead at its current screen position while
+time moves beneath it; **Off** leaves the view unchanged. Right-drag pans and turns following
+off, and the wheel zooms. **Space** pauses and resumes the recorded take when a take frame is
+active. These controls use recorded samples without changing the physics or display frame rates.
+
+**Record Take Video** records the completed take from its first frame through its last frame,
+ignoring the selected loop for that recording. **Video Settings** controls the countdown before
+playback and the recorded hold on the final frame. The video saves automatically; its path appears
+briefly in Status and can be copied with a right-click. Pausing the video or pressing **Space**
+pauses both playback and recording. Stop the video before scrubbing or editing take poses.
+
 The **Assets** panel is the model-level inventory; Inspector remains responsible for binding an
 asset to the selected scene element. It covers standalone mesh, PNG height-field and texture
 import, material creation and replacement, basic appearance, height-field physical dimensions,

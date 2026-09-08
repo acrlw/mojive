@@ -14,6 +14,7 @@ import numpy as np
 
 from .capture import CaptureSurface, RecordingInfo
 from .config import (
+    CameraTrackingConfig,
     InteractionConfig,
     LayoutConfig,
     RecordingConfig,
@@ -190,7 +191,45 @@ class Viewer:
     def set_camera(self, view) -> None:
         """Adopt a backend-neutral camera view in the interactive editor camera."""
 
-        self.app.camera.adopt(view)
+        self.app.set_viewport_camera(view)
+
+    @property
+    def tracking_node_id(self) -> int | None:
+        """Return the followed hierarchy node, or None when tracking is disabled."""
+        return self.app.tracking_node_id
+
+    def track_node(self, node_id: int | None) -> None:
+        """Follow a stable hierarchy node with the configured axes and smoothing.
+
+        The Camera panel offers the same target selection. Pass None to stop
+        at the current view. Orbit, zoom, and pan remain available while following.
+        """
+        self.app.track_node(node_id)
+
+    def configure_tracking(self, value: CameraTrackingConfig, *, persist: bool = False) -> None:
+        """Set world axes and smoothing half-life in seconds for camera following."""
+        self.app.set_camera_tracking(value, persist=persist)
+
+    def track_body(self, body: str | int | None) -> None:
+        """Follow a body by unique name or composed body index; None stops following."""
+        from .adapters.base import NodeType
+
+        if body is None:
+            self.track_node(None)
+            return
+        matches = [
+            node
+            for node in self.session.nodes
+            if node.type in (NodeType.ROBOT, NodeType.LINK)
+            and (
+                node.name == body
+                if isinstance(body, str)
+                else node.body_index == operator.index(body)
+            )
+        ]
+        if len(matches) != 1:
+            raise ValueError(f"Expected one body matching {body!r}, found {len(matches)}")
+        self.track_node(matches[0].node_id)
 
     def configure_shadow_quality(self, value, *, persist: bool = False) -> None:
         """Set shadow quality for this viewer."""
@@ -239,6 +278,20 @@ class Viewer:
         """Schedule recording using configured defaults; zero delay starts on the next frame."""
 
         return self.app.start_recording(output, surface=surface, fps=fps, countdown=countdown)
+
+    def start_take_video(
+        self,
+        output: str | Path | None = None,
+        *,
+        surface: CaptureSurface | str | None = None,
+        fps: float | None = None,
+        countdown: float | None = None,
+        end_hold: float | None = None,
+    ) -> Path:
+        """Record a take from its first frame through the final hold, then save automatically."""
+        return self.app.start_take_video(
+            output, surface=surface, fps=fps, countdown=countdown, end_hold=end_hold
+        )
 
     def pause_recording(self) -> bool:
         """Pause an active user-driven recording."""

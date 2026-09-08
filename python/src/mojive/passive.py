@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from .capture import CaptureSurface
-from .config import LayoutConfig, ViewerConfig
+from .config import CameraTrackingConfig, LayoutConfig, ViewerConfig
 from .rates import StepRate
 from .shared_image import SharedImage
 
@@ -190,6 +190,14 @@ class PassiveViewer:
     def set_camera(self, view) -> None:
         """Adopt a backend-neutral camera view in the display process."""
         self._request("camera", view)
+
+    def track_body(self, body: str | int | None) -> None:
+        """Follow a MuJoCo body by name or index in the display process; None stops."""
+        self._request("track_body", body)
+
+    def configure_tracking(self, value: CameraTrackingConfig, *, persist: bool = False) -> None:
+        """Set a CameraTrackingConfig without changing the caller's physics cadence."""
+        self._request("configure_tracking", (value, persist))
 
     def capture_array(self, *, surface: CaptureSurface | str = CaptureSurface.SCENE) -> np.ndarray:
         """Publish state and wait for one owned RGB capture, without disk I/O."""
@@ -466,6 +474,10 @@ def _run_viewer(model, mailbox, stop, connection, max_fps, options):
                             }
                     elif operation == "camera":
                         viewer.set_camera(payload)
+                    elif operation == "track_body":
+                        viewer.track_body(payload)
+                    elif operation == "configure_tracking":
+                        viewer.configure_tracking(payload[0], persist=payload[1])
                     elif operation == "stats":
                         with mailbox.lock:
                             result = {
