@@ -337,6 +337,20 @@ STATE_RESULT = record(
         "camera": CAMERA_RESULT,
     }
 )
+ADAPTER_CAPABILITIES = value_schema(AdapterCaps())
+ADAPTER_CAPABILITIES["properties"].update(
+    notes=array(STRING),
+    model_formats=array({"type": "string", "pattern": r"^\.[a-z0-9]+$"}),
+    features=array(
+        {
+            "type": "array",
+            "prefixItems": [NAME, COUNT],
+            "items": False,
+            "minItems": 2,
+            "maxItems": 2,
+        }
+    ),
+)
 CAPABILITIES_RESULT = record(
     {
         "protocol_version": COUNT,
@@ -344,17 +358,19 @@ CAPABILITIES_RESULT = record(
         "viewer_attached": BOOLEAN,
         "deadline_clock": {"const": "monotonic"},
         "methods": array(NAME),
+        "method_versions": {"type": "object", "additionalProperties": COUNT},
         "available_methods": array(NAME),
         "schema_dialect": NAME,
         "document": DOCUMENT,
         "capture_modes": array(NAME),
         "capture_scope": {"const": "session_scene"},
-        "adapter": value_schema(AdapterCaps()),
+        "adapter": ADAPTER_CAPABILITIES,
     }
 )
 OPERATION_DESCRIPTION = record(
     {
         "name": NAME,
+        "version": COUNT,
         "description": STRING,
         "scope": {"enum": ["scene", "capture", "viewport", "service"]},
         "mutates": BOOLEAN,

@@ -13,8 +13,10 @@ from ...adapters.base import FrameNeeds
 from ...config import PanelConfig
 from ...input import physical_ctrl_super
 from ..draw2d import ImguiDraw2D
+from ..input_bindings import DEFAULT_INPUT_BINDINGS
+from ..pointer_bindings import PointerAction
 from ..theme import THEME, Theme
-from ..viewport_widgets import ToolHint, draw_projection_label
+from ..viewport_widgets import ToolHint, draw_projection_label, pointer_tool_hint
 
 if TYPE_CHECKING:
     from ...render.backend import RenderBackend
@@ -42,6 +44,7 @@ class PanelContext:
     request_geometry_resource_import: Any = None
     request_model_asset_import: Any = None
     request_model_asset_replace: Any = None
+    queue_model_edit: Any = None
 
     theme: Theme = THEME
     gizmo: Any = None
@@ -92,6 +95,9 @@ class PanelContext:
     set_viewport_capsule_scale: Any = None
     input_bindings: Any = None
     set_input_binding: Any = None
+    set_pointer_binding: Any = None
+    set_navigation_preset: Any = None
+    input_claim: Any = None
     reset_input_bindings: Any = None
     font_report: Any = None
     output: Any = None
@@ -101,6 +107,15 @@ class PanelContext:
         if result.message:
             self.status = result.message
         return result
+
+    def submit_model_edit(self, command: Any, completed=None) -> None:
+        """Defer a rebuilding UI edit while retaining the synchronous Session API."""
+        if self.queue_model_edit is not None:
+            self.queue_model_edit(command, completed)
+        else:
+            result = self.submit(command)
+            if completed is not None:
+                completed(result)
 
     def report(
         self,
@@ -174,7 +189,12 @@ def copyable_name_item(ctx: PanelContext, name: str, available_width: float) -> 
 
     publish_status_hint(
         ctx,
-        ToolHint("mouse", "right", ctx.tr("Copy name"), hint_id="panel.copy-name"),
+        pointer_tool_hint(
+            PointerAction.COPY_NAME,
+            ctx.input_bindings or DEFAULT_INPUT_BINDINGS,
+            ctx.tr("Copy name"),
+            hint_id="panel.copy-name",
+        ),
     )
     hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled.value)
     if not hovered:
@@ -182,7 +202,7 @@ def copyable_name_item(ctx: PanelContext, name: str, available_width: float) -> 
     visible_width = max(1.0, float(available_width) - 2.0 * imgui.get_style().frame_padding.x)
     if imgui.calc_text_size(name).x > visible_width:
         imgui.set_tooltip(name)
-    copied = imgui.is_mouse_clicked(imgui.MouseButton_.right)
+    copied = pointer_pressed(ctx, PointerAction.COPY_NAME)
     if copied:
         imgui.set_clipboard_text(name)
     return bool(copied)
@@ -207,6 +227,8 @@ def copy_state_vector(values) -> bool:
 def publish_status_hint(ctx: PanelContext, hint: ToolHint) -> None:
     """Publish one stable panel grammar entry without duplicating visible rows."""
 
+    if hint is None:
+        return
     if hint.hint_id and any(existing.hint_id == hint.hint_id for existing in ctx.status_hints):
         return
     if hint not in ctx.status_hints:
@@ -218,14 +240,28 @@ def publish_focus_item_hint(ctx: PanelContext) -> None:
 
     publish_status_hint(
         ctx,
-        ToolHint(
-            "mouse",
-            "left",
+        pointer_tool_hint(
+            PointerAction.PANEL_FOCUS,
+            ctx.input_bindings or DEFAULT_INPUT_BINDINGS,
             ctx.tr("Focus item"),
-            "×2",
             hint_id="panel.focus-item",
         ),
     )
+
+
+def pointer_pressed(ctx: PanelContext, action: PointerAction) -> bool:
+    bindings = ctx.input_bindings or DEFAULT_INPUT_BINDINGS
+    frame = (
+        bindings.pointer_frame()
+        if ctx.input_claim is None
+        else bindings.pointer_frame(ctx.input_claim)
+    )
+    return bindings.pointer_match(action, frame, press=True) is not None
+
+
+def pointer_hint(ctx: PanelContext, action: PointerAction, label: str) -> str:
+    bindings = ctx.input_bindings or DEFAULT_INPUT_BINDINGS
+    return f"{bindings.pointer_label(action)} · {label}"
 
 
 @dataclass
@@ -246,17 +282,23 @@ def value_slider(
     fmt: str = "%.4f",
     width: float = 0.0,
     more_hint: str = "more options",
+    bindings=None,
 ) -> ValueEdit:
     if width:
         imgui.set_next_item_width(width)
     changed, new_value = imgui.slider_float(label, value, lo, hi, fmt)
-    io = imgui.get_io()
-    action = slider_gesture(
-        imgui.is_item_hovered(),
-        imgui.is_mouse_clicked(imgui.MouseButton_.right),
-        imgui.is_mouse_double_clicked(imgui.MouseButton_.left),
-        bool(io.key_shift),
-    )
+    bindings = bindings or DEFAULT_INPUT_BINDINGS
+    action = None
+    if imgui.is_item_hovered():
+        frame = bindings.pointer_frame()
+        for candidate, name in (
+            (PointerAction.VALUE_RESET, "reset"),
+            (PointerAction.VALUE_COPY, "copy"),
+            (PointerAction.VALUE_EXPAND, "expand"),
+        ):
+            if bindings.pointer_match(candidate, frame, press=True) is not None:
+                action = name
+                break
     out = ValueEdit(changed=changed, value=new_value, expanded=label in _EXPANDED)
 
     if action == "reset" and initial is not None:
@@ -272,9 +314,9 @@ def value_slider(
             _EXPANDED.add(label)
         out.expanded = label in _EXPANDED
 
-    tooltip = "Right-click reset · Double-click copy"
+    tooltip = f"{bindings.pointer_label(PointerAction.VALUE_RESET)}: reset · {bindings.pointer_label(PointerAction.VALUE_COPY)}: copy"
     if more_hint:
-        tooltip += f" · Shift+right-click {more_hint}"
+        tooltip += f" · {bindings.pointer_label(PointerAction.VALUE_EXPAND)}: {more_hint}"
     imgui.set_item_tooltip(tooltip)
     return out
 
@@ -447,13 +489,17 @@ def sort_order_button(
     *,
     state_order: str,
     translate=lambda value: value,
+    bindings=None,
 ) -> tuple[bool, bool]:
     """Draw a compact state/name order toggle beside a search field."""
 
     size = imgui.get_frame_height()
     left_clicked = imgui.button(f"##sort_order_{str_id}", imgui.ImVec2(size, 0.0))
     hovered = imgui.is_item_hovered()
-    right_clicked = hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right)
+    bindings = bindings or DEFAULT_INPUT_BINDINGS
+    alternate = hovered and bindings.pointer_match(
+        PointerAction.SORT_ALTERNATE, bindings.pointer_frame(), press=True
+    )
     lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
     color_value = imgui.get_style_color_vec4(imgui.Col_.check_mark if by_name else imgui.Col_.text)
     color = color_value
@@ -462,7 +508,7 @@ def sort_order_button(
     for start, end in sort_order_glyph((lo.x, lo.y, hi.x, hi.y)):
         draw.line(start, end, color, thickness, cap="round")
     imgui.set_item_tooltip(sort_order_tooltip(by_name, state_order, translate))
-    changed = bool(left_clicked or right_clicked)
+    changed = bool(left_clicked or alternate)
     return changed, (not by_name if changed else by_name)
 
 
@@ -476,6 +522,7 @@ def searchable_ordered_list_header(
     clear_tooltip: str,
     state_order: str,
     translate=lambda text: text,
+    bindings=None,
 ) -> tuple[bool, str, bool, bool]:
     """Draw one responsive search field followed by its list-order button."""
 
@@ -496,6 +543,7 @@ def searchable_ordered_list_header(
         by_name,
         state_order=state_order,
         translate=translate,
+        bindings=bindings,
     )
     return search_changed, value, sort_changed, by_name
 

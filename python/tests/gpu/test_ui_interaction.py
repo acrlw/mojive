@@ -804,10 +804,15 @@ def test_double_clicking_joint_and_hierarchy_rows_focuses_the_camera(viewer) -> 
         assert v.session.selected_node.joint_index == joint.joint_id
         assert v.session.selection_highlight_object_id > 0
         assert v.backend._selected == v.session.selection_highlight_object_id
-        outline = (
-            v.backend._outline if v.backend.caps.name == "wgpu" else v.backend._passes["outline"]
-        )
-        assert outline.xray
+        if v.backend.caps.name == "bgfx":
+            assert v.backend._style.selection_xray
+        else:
+            outline = (
+                v.backend._outline
+                if v.backend.caps.name == "wgpu"
+                else v.backend._passes["outline"]
+            )
+            assert outline.xray
         assert v.app.camera.animating
         v.app.camera.advance(1.0, v.app.camera_out)
 
@@ -884,7 +889,9 @@ def test_double_clicking_joint_and_hierarchy_rows_focuses_the_camera(viewer) -> 
         assert [hint.hint_id for hint in v.app._panel_status_hints] == ["panel.focus-item"]
         click(v, io, point)
         assert v.session.selected_node is target
-        assert not outline.xray
+        assert not (
+            v.backend._style.selection_xray if v.backend.caps.name == "bgfx" else outline.xray
+        )
         assert v.app.camera.animating
         v.app.camera.advance(1.0, v.app.camera_out)
         assert v.app.camera.pivot == pytest.approx(bounds[0], abs=1e-5)
@@ -1395,7 +1402,7 @@ def test_view_gizmo_axis_points_at_you_when_you_look_down_it(viewer):
             assert d > reach * 0.9
 
 
-def _ball_and_ink(frame, ball, scale):
+def _ball_and_ink(frame, ball, scale, background):
     cx, cy = ball.screen[0] * scale, ball.screen[1] * scale
     r = ball.radius * scale
     x0, y0 = int(cx - r - 3), int(cy - r - 3)
@@ -1405,7 +1412,10 @@ def _ball_and_ink(frame, ball, scale):
         ball.axis
     ]
     disc = dominance > 25
-    ink = (sub.min(axis=2) > 165) & ((sub.max(axis=2) - sub.min(axis=2)) < 40)
+    bare = background[y0 : int(cy + r + 4), x0 : int(cx + r + 4)].astype(np.int16)
+    # Thin subpixel glyph strokes may never reach an absolute white threshold.
+    # Measure their coverage against the same ball with its label omitted.
+    ink = (sub - bare).max(axis=2) > 12
     if not disc.any() or not ink.any():
         return None
 
@@ -1422,7 +1432,7 @@ def _ball_and_ink(frame, ball, scale):
     return (bx, by), (ix, iy), bw
 
 
-def test_gizmo_label_sits_in_the_middle_of_its_ball(viewer):
+def test_gizmo_label_sits_in_the_middle_of_its_ball(viewer, monkeypatch):
     from imgui_bundle import imgui
 
     io = imgui.get_io()
@@ -1441,7 +1451,13 @@ def test_gizmo_label_sits_in_the_middle_of_its_ball(viewer):
             if hit is None or (hit.axis, hit.sign) != (axis, target.sign):
                 continue
             b = next(x for x in viewer.app.view_cube.balls if (x.axis, x.sign) == (axis, -1.0))
-            got = _ball_and_ink(snap(viewer), b, viewer.window.pixel_scale)
+            from mojive.ui.draw2d import ImguiDraw2D
+
+            frame = viewer.capture_array(surface="window")
+            with monkeypatch.context() as patch:
+                patch.setattr(ImguiDraw2D, "centered_label", lambda *args, **kwargs: None)
+                background = viewer.capture_array(surface="window")
+            got = _ball_and_ink(frame, b, viewer.window.pixel_scale, background)
             if got is None:
                 continue
             (bx, by), (ix, iy), _bw = got

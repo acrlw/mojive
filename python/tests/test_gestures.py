@@ -213,3 +213,33 @@ def test_router_remembers_the_press_button_through_the_release_frame():
 
     router.update(InputState(over_viewport=True, right=True))
     assert not router.started_with_left
+
+
+def test_multi_button_navigation_assembles_before_motion_and_drains_on_release():
+    from mojive.ui.pointer_bindings import PointerAction as Action
+
+    router = GestureRouter()
+    router.update(press(actions=frozenset({Action.ORBIT, Action.SELECT})))
+    router.update(press(right=True, actions=frozenset({Action.PAN})))
+    assert router.camera_gesture(InputState()) is CameraGesture.PAN
+    assert not router.started_with_left
+    router.update(press(right=True, delta=(8, 3), actions=frozenset({Action.PAN})))
+    assert router.travel == 11
+    router.update(press(actions=frozenset({Action.ORBIT, Action.SELECT})))
+    assert router.released and not router.held
+    assert router.update(press(actions=frozenset({Action.ORBIT}))) is Claim.NONE
+    assert not router.released
+    router.update(InputState())
+    router.update(press(actions=frozenset({Action.ORBIT})))
+    assert router.held
+    assert router.camera_gesture(InputState()) is CameraGesture.ORBIT
+
+
+def test_an_active_mapped_drag_is_not_reassigned_by_an_extra_button():
+    from mojive.ui.pointer_bindings import PointerAction as Action
+
+    router = GestureRouter()
+    router.update(press(actions=frozenset({Action.ORBIT})))
+    router.update(press(delta=(4, 0), actions=frozenset({Action.ORBIT})))
+    router.update(press(right=True, actions=frozenset({Action.PAN})))
+    assert router.camera_gesture(InputState()) is CameraGesture.ORBIT

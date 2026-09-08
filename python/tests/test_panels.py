@@ -980,7 +980,7 @@ def test_keyframe_timeline_status_hints_replace_the_repeated_help_copy():
 
 def test_panel_status_hints_compose_without_duplicate_row_entries():
     localizer = Localizer(Language.SIMPLIFIED_CHINESE)
-    ctx = SimpleNamespace(status_hints=(), tr=localizer.text)
+    ctx = SimpleNamespace(status_hints=(), tr=localizer.text, input_bindings=None)
 
     publish_focus_item_hint(ctx)
     publish_focus_item_hint(ctx)
@@ -1266,3 +1266,30 @@ def test_latch_needs_no_gl():
     from mojive.ui import window as win
 
     assert win.glfw is None and win.gl is None and win.imgui is None
+
+
+def test_inspector_collapsed_components_only_count_and_invalidate_on_model_edits():
+    from mojive.ui.panels.inspector import InspectorPanel
+
+    calls = []
+
+    def count(model_id, category):
+        calls.append((model_id, category))
+        return 700 if category in {"actuator", "tendon"} else 0
+
+    session = SimpleNamespace(structure_generation=1, model_component_count=count)
+    ctx = SimpleNamespace(session=session)
+    panel = InspectorPanel()
+    panel._refresh_component_cache(ctx, 1)
+    assert panel._component_counts["actuator"] == 700
+    assert panel._component_cache == panel._component_presets == {}
+    assert len(calls) == 5
+    panel._refresh_component_cache(ctx, 1)
+    assert len(calls) == 5
+    panel._component_cache["actuator"] = ("old",)
+    session.structure_generation += 1
+    panel._refresh_component_cache(ctx, 1)
+    assert panel._component_cache == {}
+    panel._refresh_component_cache(ctx, 2)
+    assert len(calls) == 15
+    assert calls[-1][0] == 2

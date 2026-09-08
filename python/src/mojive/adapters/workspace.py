@@ -225,6 +225,9 @@ class WorkspaceAdapter(SceneAdapterBase):
             self._invalidate()
         return changed
 
+    def model_component_count(self, model_id: int, category: str) -> int:
+        return self.primary.model_component_count(model_id, category)
+
     def model_components(self, model_id: int, category: str):
         return self.primary.model_components(model_id, category)
 

@@ -14,9 +14,12 @@ from ... import commands as cmd
 from ...adapters.base import FrameNeeds, KeyframeInfo, KeyframeProperties
 from ...curves2d import CORNER_SMOOTHING
 from ...gizmo import _rounded_polygon_corners
+from ...input import InputClaim
 from ..draw2d import ImguiDraw2D, text_line_y
+from ..input_bindings import DEFAULT_INPUT_BINDINGS
+from ..pointer_bindings import PointerAction
 from ..theme import with_alpha
-from ..viewport_widgets import ToolHint, draw_playback_glyph
+from ..viewport_widgets import ToolHint, draw_playback_glyph, pointer_tool_hint
 from . import Panel, PanelContext, begin_kv_table, button_row_layout, button_width
 
 _MIN_TIMELINE_SPAN = 1e-6
@@ -51,20 +54,34 @@ def _rounded_command_icon_path(
     )
 
 
-def timeline_status_hints(translate, *, has_range: bool = False) -> tuple[ToolHint, ...]:
+def timeline_status_hints(
+    translate, *, has_range: bool = False, bindings=DEFAULT_INPUT_BINDINGS
+) -> tuple[ToolHint, ...]:
     """Prioritize the range gesture when a narrow status bar can fit few hints."""
 
-    hints = (
-        ToolHint(
-            "mouse",
-            "right",
-            translate("Select loop range"),
-            hint_id="keyframes.range",
-            modifier="Shift",
-        ),
-        ToolHint("mouse", "left", translate("Move playhead"), hint_id="keyframes.playhead"),
-        ToolHint("mouse", "wheel", translate("Zoom"), hint_id="keyframes.zoom"),
-        ToolHint("mouse", "right", translate("Pan"), hint_id="keyframes.pan"),
+    hints = tuple(
+        hint
+        for hint in (
+            pointer_tool_hint(
+                PointerAction.TIMELINE_RANGE,
+                bindings,
+                translate("Select loop range"),
+                hint_id="keyframes.range",
+            ),
+            pointer_tool_hint(
+                PointerAction.TIMELINE_SCRUB,
+                bindings,
+                translate("Move playhead"),
+                hint_id="keyframes.playhead",
+            ),
+            pointer_tool_hint(
+                PointerAction.TIMELINE_ZOOM, bindings, translate("Zoom"), hint_id="keyframes.zoom"
+            ),
+            pointer_tool_hint(
+                PointerAction.TIMELINE_PAN, bindings, translate("Pan"), hint_id="keyframes.pan"
+            ),
+        )
+        if hint is not None
     )
     if has_range:
         hints += (
@@ -407,6 +424,7 @@ class KeyframesPanel(Panel):
         self._drag_preview_time = 0.0
         self._drag_moved = False
         self._pointer_mode = ""
+        self._pointer_chord = None
         self._scrub_resume = False
         self._range_anchor = -1
         self._range_preview: tuple[int, int] | None = None
@@ -451,7 +469,11 @@ class KeyframesPanel(Panel):
 
         keyframes, keyframe_by_id = self._keyframes(ctx)
         take_times = ctx.session.state_take_times
-        editable = bool(ctx.session.paused and not ctx.take_video_active)
+        editable = bool(
+            ctx.session.paused
+            and not ctx.take_video_active
+            and ctx.session.adapter.caps.supports("model.keyframe_edit")
+        )
         self._sync_selection(ctx, keyframe_by_id, take_times)
         self._draw_take_transport(ctx, take_times)
         self._draw_take_video(ctx, take_times)
@@ -796,14 +818,9 @@ class KeyframesPanel(Panel):
             enabled=editable,
         ):
             name = unique_keyframe_name({key.name for key in keyframes})
-            result = ctx.submit(cmd.AddModelKeyframe(self._model_id, name))
-            if result.ok:
-                self._selected_id = result.entity_id
-                self._selection_generation = -1
-                self._view_needs_fit = True
-                self._error = ""
-            else:
-                self._error = result.message
+            ctx.submit_model_edit(
+                cmd.AddModelKeyframe(self._model_id, name), self._snapshot_created
+            )
         navigation_enabled = bool(keyframes and editable)
         item_index = 1
         for kind, direction, tooltip in (
@@ -859,7 +876,9 @@ class KeyframesPanel(Panel):
         time_width = max(1.0, time_hi - time_lo)
 
         flags = (
-            imgui.ButtonFlags_.mouse_button_left.value | imgui.ButtonFlags_.mouse_button_right.value
+            imgui.ButtonFlags_.mouse_button_left.value
+            | imgui.ButtonFlags_.mouse_button_right.value
+            | imgui.ButtonFlags_.mouse_button_middle.value
         )
         imgui.invisible_button("##keyframe-dope-sheet", imgui.ImVec2(available, height), flags)
         timeline_id = imgui.get_item_id()
@@ -868,7 +887,9 @@ class KeyframesPanel(Panel):
         mouse_xy = (float(mouse.x), float(mouse.y))
         over_timeline = hovered and mouse_xy[0] >= time_lo
         ctx.status_hints = timeline_status_hints(
-            ctx.tr, has_range=ctx.session.state_take_loop is not None
+            ctx.tr,
+            has_range=ctx.session.state_take_loop is not None,
+            bindings=ctx.input_bindings or DEFAULT_INPUT_BINDINGS,
         )
         if over_timeline:
             # The dope sheet uses the wheel for zoom. Owning the wheel here
@@ -894,13 +915,16 @@ class KeyframesPanel(Panel):
             self._view_needs_fit = False
 
         io = imgui.get_io()
-        if (
-            over_timeline
-            and imgui.is_mouse_clicked(imgui.MouseButton_.right)
-            and not self._pointer_mode
-        ):
+        bindings = ctx.input_bindings or DEFAULT_INPUT_BINDINGS
+        pointer = bindings.pointer_frame(ctx.input_claim or InputClaim())
+        pan_press = bindings.pointer_match(PointerAction.TIMELINE_PAN, pointer, press=True)
+        range_press = bindings.pointer_match(PointerAction.TIMELINE_RANGE, pointer, press=True)
+        select_press = bindings.pointer_match(PointerAction.TIMELINE_SCRUB, pointer, press=True)
+        load_press = bindings.pointer_match(PointerAction.TIMELINE_LOAD, pointer, press=True)
+        if over_timeline and (pan_press or range_press) and not self._pointer_mode:
             self._drag_start_x = mouse_xy[0]
-            if io.key_shift:
+            self._pointer_chord = range_press or pan_press
+            if range_press:
                 if len(take_times) > 1 and not ctx.session.state_take_recording:
                     self._pointer_mode = "range"
                     time = timeline_x_to_time(
@@ -911,7 +935,11 @@ class KeyframesPanel(Panel):
             else:
                 self._pointer_mode = "pan"
 
-        zooming = bool(over_timeline and io.mouse_wheel and not self._pointer_mode)
+        zooming = bool(
+            over_timeline
+            and bindings.pointer_match(PointerAction.TIMELINE_ZOOM, pointer)
+            and not self._pointer_mode
+        )
         if zooming:
             anchor = timeline_x_to_time(
                 mouse_xy[0], self._view_start, self._view_end, time_lo, time_hi
@@ -921,7 +949,11 @@ class KeyframesPanel(Panel):
             self._view_start, self._view_end = zoom_timeline_range(
                 self._view_start, self._view_end, anchor, float(io.mouse_wheel)
             )
-        if self._pointer_mode == "pan" and imgui.is_mouse_dragging(imgui.MouseButton_.right):
+        if (
+            self._pointer_mode == "pan"
+            and pointer.held(self._pointer_chord)
+            and abs(mouse_xy[0] - self._drag_start_x) >= float(io.mouse_drag_threshold)
+        ):
             self._follow_mode = "off"
             shift = -float(io.mouse_delta.x) * (self._view_end - self._view_start) / time_width
             self._view_start += shift
@@ -968,10 +1000,11 @@ class KeyframesPanel(Panel):
 
         if (
             over_timeline
-            and imgui.is_mouse_clicked(imgui.MouseButton_.left)
+            and (select_press or load_press)
             and not self._pointer_mode
             and not ctx.take_video_active
         ):
+            self._pointer_chord = load_press or select_press
             if hit_id >= 0:
                 self._selected_id = hit_id
                 self._selection_generation = -1
@@ -984,7 +1017,7 @@ class KeyframesPanel(Panel):
                     self._drag_offset_x = marker_positions[hit_id] - mouse_xy[0]
                     self._drag_preview_time = marker.time
                     self._drag_moved = False
-                if editable and imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
+                if editable and load_press:
                     self._load_keyframe(ctx, marker)
             else:
                 if not ctx.session.state_take_recording:
@@ -993,7 +1026,7 @@ class KeyframesPanel(Panel):
                     self._selected_id = -1
                     self._selection_generation = -1
 
-        if self._pointer_mode == "scrub" and imgui.is_mouse_down(imgui.MouseButton_.left):
+        if self._pointer_mode == "scrub" and pointer.held(self._pointer_chord):
             x = min(time_hi, max(time_lo, mouse_xy[0]))
             self._seek_time(
                 ctx,
@@ -1001,7 +1034,7 @@ class KeyframesPanel(Panel):
                 timeline_x_to_time(x, self._view_start, self._view_end, time_lo, time_hi),
             )
 
-        if self._pointer_mode == "range" and imgui.is_mouse_down(imgui.MouseButton_.right):
+        if self._pointer_mode == "range" and pointer.held(self._pointer_chord):
             x = min(time_hi, max(time_lo, mouse_xy[0]))
             time = timeline_x_to_time(x, self._view_start, self._view_end, time_lo, time_hi)
             index = nearest_take_frame(take_times, time)
@@ -1018,7 +1051,7 @@ class KeyframesPanel(Panel):
             elif ctx.session.state_take_loop is not None:
                 ctx.submit(cmd.SetStateTakeLoop())
 
-        if self._drag_id >= 0 and imgui.is_mouse_down(imgui.MouseButton_.left):
+        if self._drag_id >= 0 and pointer.held(self._pointer_chord):
             self._drag_moved = (
                 self._drag_moved or abs(mouse_xy[0] - self._drag_start_x) > 3.0 * scale
             )
@@ -1028,13 +1061,14 @@ class KeyframesPanel(Panel):
                     drag_x, self._view_start, self._view_end, time_lo, time_hi
                 )
                 self._playhead = self._drag_preview_time
-        if self._drag_id >= 0 and imgui.is_mouse_released(imgui.MouseButton_.left):
+        released = self._pointer_chord is not None and not pointer.held(self._pointer_chord)
+        if self._drag_id >= 0 and released:
             if self._drag_moved and editable:
                 self._retime_keyframe(ctx, self._drag_id, self._drag_preview_time)
             self._drag_id = -1
             self._drag_moved = False
 
-        if imgui.is_mouse_released(imgui.MouseButton_.left) and self._pointer_mode in (
+        if released and self._pointer_mode in (
             "key",
             "scrub",
         ):
@@ -1043,7 +1077,7 @@ class KeyframesPanel(Panel):
                 self._error = "" if result.ok else result.message
             self._pointer_mode = ""
             self._scrub_resume = False
-        if imgui.is_mouse_released(imgui.MouseButton_.right) and self._pointer_mode in (
+        if released and self._pointer_mode in (
             "range",
             "pan",
             "cancelled",
@@ -1324,18 +1358,38 @@ class KeyframesPanel(Panel):
         else:
             self._error = result.message
 
-    def _retime_keyframe(self, ctx: PanelContext, keyframe_id: int, time: float) -> None:
-        properties = ctx.session.keyframe_properties(keyframe_id)
-        if properties is None:
-            self._error = ctx.tr("Keyframe state is no longer available")
-            return
-        result = ctx.submit(_set_keyframe_command(properties, properties.name, time))
+    def _snapshot_created(self, result) -> None:
+        if result.ok:
+            self._selected_id = result.entity_id
+            self._selection_generation = -1
+            self._view_needs_fit = True
+            self._error = ""
+        else:
+            self._error = result.message
+
+    def _snapshot_updated(self, result, time: float) -> None:
         if result.ok:
             self._selection_generation = -1
             self._playhead = float(time)
             self._error = ""
         else:
             self._error = result.message
+
+    def _snapshot_removed(self, result) -> None:
+        if result.ok:
+            self._clear_selection()
+        else:
+            self._error = result.message
+
+    def _retime_keyframe(self, ctx: PanelContext, keyframe_id: int, time: float) -> None:
+        properties = ctx.session.keyframe_properties(keyframe_id)
+        if properties is None:
+            self._error = ctx.tr("Keyframe state is no longer available")
+            return
+        ctx.submit_model_edit(
+            _set_keyframe_command(properties, properties.name, time),
+            lambda result: self._snapshot_updated(result, time),
+        )
 
     def _draw_selected(self, ctx: PanelContext, editable: bool) -> None:
         if self._selected_id < 0:
@@ -1384,15 +1438,11 @@ class KeyframesPanel(Panel):
             imgui.get_style().item_spacing.x,
         )
         if imgui.button(action_labels[0]):
-            result = ctx.submit(
-                _set_keyframe_command(properties, self._name.strip(), float(self._time))
+            time = float(self._time)
+            ctx.submit_model_edit(
+                _set_keyframe_command(properties, self._name.strip(), time),
+                lambda result: self._snapshot_updated(result, time),
             )
-            if result.ok:
-                self._selection_generation = -1
-                self._playhead = float(self._time)
-                self._error = ""
-            else:
-                self._error = result.message
         if not editable or not dirty or not self._name.strip():
             imgui.end_disabled()
         if inline[1]:
@@ -1407,11 +1457,9 @@ class KeyframesPanel(Panel):
         if inline[2]:
             imgui.same_line()
         if imgui.button(action_labels[2]):
-            result = ctx.submit(cmd.RemoveModelKeyframe(properties.keyframe_id))
-            if result.ok:
-                self._clear_selection()
-            else:
-                self._error = result.message
+            ctx.submit_model_edit(
+                cmd.RemoveModelKeyframe(properties.keyframe_id), self._snapshot_removed
+            )
         if not editable:
             imgui.end_disabled()
             imgui.set_item_tooltip(ctx.tr("Pause the simulation before editing keyframes"))

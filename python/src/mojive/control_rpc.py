@@ -72,6 +72,20 @@ class ControlService:
                 request_id,
                 error={"code": "invalid_request", "message": "method and params are required"},
             )
+        from .operations import OPERATIONS
+
+        operation_version = request.get("operation_version", 1)
+        operation = OPERATIONS.get(method)
+        if type(operation_version) is not int or (
+            operation is not None and operation_version != operation.version
+        ):
+            return _response(
+                request_id,
+                error={
+                    "code": "operation_version_mismatch",
+                    "message": f"Unsupported revision {operation_version!r} of {method}",
+                },
+            )
         try:
             deadline = _request_deadline(request)
             with self.application.lock:
@@ -318,10 +332,14 @@ class RpcClient:
         self._client: socket.socket | None = None
         self._lock = threading.Lock()
 
-    def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
+    def call(
+        self, method: str, params: dict[str, Any] | None = None, *, operation_version: int = 1
+    ) -> Any:
         """Send one request, validate correlation metadata, and return its result."""
         if not isinstance(method, str) or not method:
             raise RpcError("invalid_params", "Method must be a nonempty string")
+        if type(operation_version) is not int or operation_version < 1:
+            raise RpcError("invalid_params", "Operation revision must be a positive integer")
         if params is not None and not isinstance(params, dict):
             raise RpcError("invalid_params", "Parameters must be a JSON object")
         with self._lock:
@@ -337,6 +355,8 @@ class RpcClient:
                 "params": params or {},
                 "deadline": deadline,
             }
+            if operation_version != 1:
+                request["operation_version"] = operation_version
             try:
                 encoded = (
                     json.dumps(request, separators=(",", ":"), allow_nan=False).encode() + b"\n"

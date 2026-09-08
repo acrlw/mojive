@@ -12,11 +12,13 @@ from ... import commands as cmd
 from ...adapters.base import FrameNeeds, NodeType, SceneNode
 from ...curves2d import CORNER_SMOOTHING, smooth_polygon_corners
 from ..draw2d import ImguiDraw2D, text_line_y
+from ..pointer_bindings import PointerAction
 from ..theme import ROW_PADDING_X, ROW_PADDING_Y
 from . import (
     Panel,
     PanelContext,
     horizontal_wheel_scroll,
+    pointer_pressed,
     publish_focus_item_hint,
     search_input,
 )
@@ -396,11 +398,12 @@ class HierarchyPanel(Panel):
                 opened = not opened
                 self._open_state[node.node_id] = opened
             else:
-                io = imgui.get_io()
-                self._select_row(ctx, node.node_id, additive=bool(io.key_ctrl or io.key_super))
+                self._select_row(
+                    ctx, node.node_id, additive=pointer_pressed(ctx, PointerAction.ADD_SELECTION)
+                )
         if (
             hovered
-            and imgui.is_mouse_double_clicked(imgui.MouseButton_.left)
+            and pointer_pressed(ctx, PointerAction.PANEL_FOCUS)
             and ctx.focus_node is not None
         ):
             ctx.focus_node(node.node_id)

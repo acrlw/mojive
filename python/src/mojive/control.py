@@ -135,6 +135,7 @@ class ControlApplication:
             "viewer_attached": self.app is not None,
             "deadline_clock": "monotonic",
             "methods": tuple(sorted(OPERATIONS)),
+            "method_versions": {name: operation.version for name, operation in OPERATIONS.items()},
             "available_methods": tuple(
                 sorted(
                     name

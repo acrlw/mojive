@@ -70,6 +70,7 @@ def _model_load_app(results, *, paused: bool = True):
     app._model_load_job = None
     app._model_load_queue = []
     app._model_load_started = 0.0
+    app._model_load_completion = None
     app._close_after_model_load = False
     app._after_calls = []
     app._notices = []
@@ -107,6 +108,7 @@ def test_model_load_jobs_execute_off_the_ui_thread(tmp_path) -> None:
     app._model_load_job = None
     app._model_load_queue = []
     app._model_load_started = 0.0
+    app._model_load_completion = None
     app._queue_model_load("load", tmp_path / "model.xml")
 
     try:
@@ -197,7 +199,12 @@ def test_async_model_load_runs_consecutive_queued_jobs(tmp_path) -> None:
     app._queue_model_load("load", tmp_path / "second.xml")
     try:
         assert app._start_model_load()
-        assert _finish_model_load(app)
+        assert not _finish_model_load(app)
+        # Each queued model must submit its first frame before the next job.
+        assert not app._start_model_load()
+        assert len(app.session.calls) == 1
+        app._finish_model_load_frame()
+        assert app._start_model_load()
         assert not _finish_model_load(app)
     finally:
         app._model_load_executor.shutdown(wait=True)
@@ -1144,3 +1151,48 @@ def test_simulation_speed_tracks_wall_time_not_render_frames():
     assert run(1 / 60, 60) == 500
     assert run(1 / 30, 30) == 500
     assert run(1 / 60, 60, speed=0.5) == 250
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_queued_model_edit_completes_on_ui_thread_without_resetting_camera(tmp_path, ok):
+    expected = cmd.CommandResult.good("Edited", 42) if ok else cmd.CommandResult.bad("Invalid MJCF")
+    app = _model_load_app([expected])
+    app.session.asset_path = tmp_path / "scene.xml"
+    syncs = []
+    app._sync_structure = lambda: syncs.append(threading.get_ident())
+    completed = []
+    ui_thread = threading.get_ident()
+    command = cmd.SetModelSource(1, "<mujoco/>")
+    app._queue_model_edit(command, lambda result: completed.append((threading.get_ident(), result)))
+    assert completed == []
+    try:
+        assert app._start_model_load()
+        _finish_model_load(app)
+        assert completed == [(ui_thread, expected)]
+        assert syncs == ([ui_thread] if ok else [])
+        assert app._after_calls == []
+        assert app.session.calls == [command]
+    finally:
+        app._model_load_executor.shutdown(wait=True)
+
+
+def test_loading_frame_does_not_pump_rpc_against_mutating_session():
+    from concurrent.futures import Future
+
+    from mojive.ui.app import ViewerApp
+
+    app = ViewerApp.__new__(ViewerApp)
+    calls = []
+    app.window = SimpleNamespace(begin_frame=lambda: None, popup_owned_frame=False)
+    app._last_time = 0.0
+    app._frame_rate = SimpleNamespace(update=lambda _dt: None)
+    app._advance_recording_countdown = lambda: None
+    app._sync_display_scale = lambda: None
+    app._model_load_future = Future()
+    app._model_load_job = object()
+    app._rpc_service = SimpleNamespace(pump=lambda: calls.append("rpc"))
+    app._draw_model_loading_frame = lambda: calls.append("loading")
+    app._present_frame = lambda _dt: calls.append("present")
+    app._frame_index = 0
+    app.frame()
+    assert calls == ["loading", "present"]

@@ -439,6 +439,30 @@ class AdapterCaps:
     model_properties: bool = False
     model_assets: bool = False
     notes: tuple[str, ...] = ()
+    backend_version: str = ""
+    model_formats: tuple[str, ...] = ()
+    features: tuple[tuple[str, int], ...] = ()
+    write_ctrl: bool = False
+
+    def supports(self, feature: str, version: int = 1) -> bool:
+        """Check an exact feature contract revision; unknown features are unavailable.
+
+        Boolean capabilities use revision 1. Namespaced extensions are advertised
+        separately, without inferring support from the backend name or version.
+        """
+        if type(version) is not int or version < 1:
+            return False
+        value = getattr(self, feature, None)
+        if type(value) is bool:
+            return value and version == 1
+        return any(
+            name == feature and type(revision) is int and revision == version
+            for name, revision in self.features
+        )
+
+    def accepts_model(self, path: str | Path) -> bool:
+        """Whether this adapter advertises a loader for the file's extension."""
+        return self.asset_loading and Path(path).suffix.lower() in self.model_formats
 
 
 class JointVisualType(enum.IntEnum):
@@ -909,6 +933,10 @@ class SceneAdapterBase:
     def set_scene_model_xml(self, model_id: int, xml: str) -> bool:
         """Compile and apply replacement MJCF text for one model."""
         return False
+
+    def model_component_count(self, model_id: int, category: str) -> int:
+        """Count declarations without constructing their editable field choices."""
+        return len(self.model_components(model_id, category))
 
     def model_components(self, model_id: int, category: str) -> tuple[ModelComponentInfo, ...]:
         """Return editable model-level component or custom declarations in a category."""
@@ -1389,6 +1417,7 @@ class SceneAdapter(SceneProvider, Protocol):
     def scene_model_xml(self, model_id: int) -> str | None: ...
     def scene_model_source(self, model_id: int) -> str | None: ...
     def set_scene_model_xml(self, model_id: int, xml: str) -> bool: ...
+    def model_component_count(self, model_id: int, category: str) -> int: ...
     def model_components(self, model_id: int, category: str) -> tuple[ModelComponentInfo, ...]: ...
     def model_component_presets(self, model_id: int, category: str) -> tuple[str, ...]: ...
     def add_model_component(self, model_id: int, category: str, subtype: str, name: str) -> int: ...

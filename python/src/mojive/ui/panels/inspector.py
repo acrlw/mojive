@@ -27,6 +27,7 @@ from ...geometry import geometry_dimensions, geometry_size_from_dimensions
 from ...render.backend import RenderFlag
 from ...types import DEFAULT_HEADLIGHT, Environment, LightType, TextureType
 from ..compound_fields import draw_joined_field_frame
+from ..pointer_bindings import PointerAction
 from . import (
     Panel,
     PanelContext,
@@ -34,6 +35,8 @@ from . import (
     button_row_layout,
     button_width,
     labeled,
+    pointer_hint,
+    pointer_pressed,
     segmented_control,
 )
 
@@ -181,6 +184,7 @@ class InspectorPanel(Panel):
         self._component_cache_model = -1
         self._component_cache: dict[str, tuple[ModelComponentInfo, ...]] = {}
         self._component_presets: dict[str, tuple[str, ...]] = {}
+        self._component_counts: dict[str, int] = {}
         self._component_edit: ModelComponentInfo | None = None
         self._component_name = ""
         self._component_fields: list[list[str]] = []
@@ -409,7 +413,7 @@ class InspectorPanel(Panel):
 
         if info.removable and imgui.button(ctx.tr("Remove Model")):
             ctx.submit(cmd.RemoveSceneModel(info.model_id))
-        if ctx.session.adapter.caps.topology_editing:
+        if ctx.session.adapter.caps.supports("mujoco.mjcf"):
             imgui.same_line()
             if not ctx.session.paused:
                 imgui.begin_disabled()
@@ -423,6 +427,7 @@ class InspectorPanel(Panel):
                     self._source_text = source
                     self._source_error = ""
                     self._open_source_popup = True
+        if ctx.session.adapter.caps.supports("model.components"):
             self._model_components(ctx, info.model_id)
 
     def _sync_model_transform(
@@ -440,55 +445,81 @@ class InspectorPanel(Panel):
         imgui.separator()
         imgui.text_disabled(ctx.tr("Model Components"))
         editable = ctx.session.paused
-        populated = tuple(
-            (category, self._component_cache[category])
-            for category in _MODEL_COMPONENT_CATEGORIES
-            if self._component_cache[category]
-        )
-        if not populated:
+        if not any(self._component_counts.values()):
             imgui.text_disabled(ctx.tr("no authored components"))
-        for category, components in populated:
-            label = f"{category.capitalize()} ({len(components)})"
-            if not imgui.collapsing_header(label):
+        for category, count in self._component_counts.items():
+            if not count or not imgui.collapsing_header(f"{category.capitalize()} ({count})"):
                 continue
-            for component in components:
-                imgui.push_id(f"{category}-{component.component_id}")
-                imgui.text(f"{component.name}  ({component.subtype})")
-                imgui.same_line()
-                if not editable:
-                    imgui.begin_disabled()
-                if imgui.button(ctx.tr("Edit")):
-                    self._begin_component_edit(component)
-                imgui.same_line()
-                if imgui.button(ctx.tr("Delete")):
-                    ctx.submit(cmd.RemoveModelComponent(model_id, category, component.component_id))
-                if not editable:
-                    imgui.end_disabled()
-                imgui.pop_id()
+            if category not in self._component_cache:
+                self._component_cache[category] = ctx.session.model_components(model_id, category)
+            components = self._component_cache[category]
+            flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_saved_settings
+            if not imgui.begin_table(f"components-{category}", 3, flags):
+                continue
+            imgui.table_setup_column("Name", imgui.TableColumnFlags_.width_stretch)
+            imgui.table_setup_column(
+                "Edit", imgui.TableColumnFlags_.width_fixed, button_width(ctx.tr("Edit"))
+            )
+            imgui.table_setup_column(
+                "Delete", imgui.TableColumnFlags_.width_fixed, button_width(ctx.tr("Delete"))
+            )
+            clipper = imgui.ListClipper()
+            clipper.begin(len(components))
+            while clipper.step():
+                for index in range(clipper.display_start, clipper.display_end):
+                    component = components[index]
+                    imgui.push_id(f"{category}-{component.component_id}")
+                    imgui.table_next_row()
+                    imgui.table_next_column()
+                    imgui.align_text_to_frame_padding()
+                    label = f"{component.name}  ({component.subtype})"
+                    imgui.text(label)
+                    imgui.set_item_tooltip(label)
+                    imgui.table_next_column()
+                    if not editable:
+                        imgui.begin_disabled()
+                    if imgui.button(ctx.tr("Edit")):
+                        self._begin_component_edit(component)
+                    imgui.table_next_column()
+                    if imgui.button(ctx.tr("Delete")):
+                        ctx.submit_model_edit(
+                            cmd.RemoveModelComponent(model_id, category, component.component_id)
+                        )
+                    if not editable:
+                        imgui.end_disabled()
+                    imgui.pop_id()
+            clipper.end()
+            imgui.end_table()
 
-        add_options = tuple(
-            (category, subtype)
-            for category in _MODEL_COMPONENT_CATEGORIES
-            for subtype in self._component_presets[category]
-        )
-        if not editable or not add_options:
+        if not editable:
             imgui.begin_disabled()
         if imgui.begin_combo(
             f"{ctx.tr('Add Component...')}##model-component", ctx.tr("select type")
         ):
-            for category, subtype in add_options:
-                selected, _ = imgui.selectable(f"{category.capitalize()} / {subtype}", False)
-                if selected:
-                    names = {component.name for component in self._component_cache[category]}
-                    name = _unique_component_name(category, names)
-                    ctx.submit(cmd.AddModelComponent(model_id, category, subtype, name))
+            if not self._component_presets:
+                self._component_presets = {
+                    category: ctx.session.model_component_presets(model_id, category)
+                    for category in _MODEL_COMPONENT_CATEGORIES
+                }
+            if not any(self._component_presets.values()):
+                imgui.text_disabled(ctx.tr("Add the referenced model elements first"))
+            for category, subtypes in self._component_presets.items():
+                for subtype in subtypes:
+                    selected, _ = imgui.selectable(f"{category.capitalize()} / {subtype}", False)
+                    if selected:
+                        if category not in self._component_cache:
+                            self._component_cache[category] = ctx.session.model_components(
+                                model_id, category
+                            )
+                        names = {component.name for component in self._component_cache[category]}
+                        name = _unique_component_name(category, names)
+                        ctx.submit_model_edit(
+                            cmd.AddModelComponent(model_id, category, subtype, name)
+                        )
             imgui.end_combo()
-        if not editable or not add_options:
-            imgui.end_disabled()
         if not editable:
+            imgui.end_disabled()
             imgui.set_item_tooltip(ctx.tr("Pause the simulation before editing model components"))
-        elif not add_options:
-            imgui.set_item_tooltip(ctx.tr("Add the referenced model elements first"))
 
     def _refresh_component_cache(self, ctx: PanelContext, model_id: int) -> None:
         generation = ctx.session.structure_generation
@@ -499,13 +530,11 @@ class InspectorPanel(Panel):
             return
         self._component_cache_generation = generation
         self._component_cache_model = model_id
-        self._component_cache = {
-            category: ctx.session.model_components(model_id, category)
+        self._component_cache.clear()
+        self._component_presets.clear()
+        self._component_counts = {
+            category: ctx.session.model_component_count(model_id, category)
             for category in _MODEL_COMPONENT_CATEGORIES
-        }
-        self._component_presets = {
-            category: ctx.session.model_component_presets(model_id, category)
-            for category in self._component_cache
         }
 
     def _begin_component_edit(self, component: ModelComponentInfo) -> None:
@@ -675,7 +704,7 @@ class InspectorPanel(Panel):
             if imgui.button(f"{ctx.tr('Copy error')}##component"):
                 imgui.set_clipboard_text(self._component_error)
         if imgui.button(ctx.tr("Apply"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
-            result = ctx.submit(
+            ctx.submit_model_edit(
                 cmd.UpdateModelComponent(
                     component.model_id,
                     component.category,
@@ -686,18 +715,27 @@ class InspectorPanel(Panel):
                         (element_type, tuple((name, value) for name, value in fields))
                         for element_type, fields in self._component_path
                     ),
-                )
+                ),
+                self._component_edit_completed,
             )
-            if result.ok:
-                self._component_edit = None
-                imgui.close_current_popup()
-            else:
-                self._component_error = result.message
+            imgui.close_current_popup()
         imgui.same_line()
         if imgui.button(ctx.tr("Cancel"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
             self._component_edit = None
             imgui.close_current_popup()
         imgui.end_popup()
+
+    def _component_edit_completed(self, result) -> None:
+        if result.ok:
+            self._component_edit = None
+        else:
+            self._component_error = result.message
+            self._open_component_popup = True
+
+    def _source_edit_completed(self, result) -> None:
+        if not result.ok:
+            self._source_error = result.message
+            self._open_source_popup = True
 
     def _draw_model_source(self, ctx: PanelContext) -> None:
         popup_title = f"{ctx.tr('MJCF Source')}###MJCF Source"
@@ -725,11 +763,11 @@ class InspectorPanel(Panel):
             if imgui.button(f"{ctx.tr('Copy error')}##source"):
                 imgui.set_clipboard_text(self._source_error)
         if imgui.button(ctx.tr("Apply"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
-            result = ctx.submit(cmd.SetModelSource(self._source_model_id, self._source_text))
-            if result.ok:
-                imgui.close_current_popup()
-            else:
-                self._source_error = result.message
+            ctx.submit_model_edit(
+                cmd.SetModelSource(self._source_model_id, self._source_text),
+                self._source_edit_completed,
+            )
+            imgui.close_current_popup()
         imgui.same_line()
         if imgui.button(ctx.tr("Cancel"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
             imgui.close_current_popup()
@@ -3397,10 +3435,10 @@ def _vector_row(
     imgui.text(name)
     imgui.pop_style_color()
     group_hovered = imgui.is_item_hovered()
-    if group_hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+    if group_hovered and pointer_pressed(ctx, PointerAction.PROPERTY_COPY):
         imgui.set_clipboard_text(_format_vector(out))
     if group_hovered:
-        imgui.set_tooltip(ctx.tr("Right-click to copy XYZ"))
+        imgui.set_tooltip(pointer_hint(ctx, PointerAction.PROPERTY_COPY, ctx.tr("Copy XYZ")))
 
     stacked = compact and imgui.get_content_region_avail().x < 3.0 * _axis_field_min_width(
         ctx.style_scale
@@ -3546,14 +3584,12 @@ def _axis_field(
         * (1.0 if editable else float(imgui.get_style().disabled_alpha)),
     )
     splitter.merge(draw_list)
-    if field_hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+    if field_hovered and pointer_pressed(ctx, PointerAction.PROPERTY_COPY):
         imgui.set_clipboard_text(fmt % value)
     if field_hovered:
-        hint = (
-            ctx.tr("Drag to edit · right-click to copy")
-            if editable
-            else ctx.tr("Read only · right-click to copy")
-        )
+        hint = pointer_hint(ctx, PointerAction.PROPERTY_COPY, ctx.tr("Copy value"))
+        if not editable:
+            hint = f"{ctx.tr('Read only')} · {hint}"
         imgui.set_tooltip(hint)
 
     return reset, edited, next_value

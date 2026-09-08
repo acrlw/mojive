@@ -381,7 +381,7 @@ def test_commands_use_a_separate_round_trip_channel():
     worker.start()
     try:
         assert remote.set_paused(True)
-        assert received == [{"op": "pause"}]
+        assert received == [{"op": "pause", "operation_version": 1}]
         assert remote.set_environment(Environment(ambient=np.array([0.2, 0.3, 0.4], np.float32)))
         assert received[-1]["op"] == "environment"
         assert received[-1]["environment"].ambient == pytest.approx([0.2, 0.3, 0.4])
@@ -495,7 +495,7 @@ def test_publisher_timeout_distinguishes_an_already_started_command():
             finally:
                 finish.set()
             assert pump.result(timeout=1) == 1
-            assert calls == [{"op": "pause"}]
+            assert calls == [{"op": "pause", "operation_version": 1}]
     finally:
         finish.set()
         remote.release()
@@ -991,3 +991,81 @@ def test_failed_explicit_step_is_not_retried_by_the_next_render_tick(monkeypatch
     session.tick(FrameNeeds())
     assert calls == [3]
     session.release()
+
+
+def test_remote_negotiates_commands_and_rechecks_after_capability_changes():
+    source = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    structure = snapshot_structure(source)
+    publisher.publish_structure(structure)
+    remote = RemoteSceneAdapter(port=publisher.port)
+    try:
+        assert remote.caps.scene_authoring
+        readonly = replace(
+            structure, structure_revision=structure.structure_revision + 1, command_versions=()
+        )
+        publisher.publish_structure(readonly)
+        _eventually(lambda: remote.structure_revision == readonly.structure_revision)
+        assert not remote.caps.scene_authoring
+        assert not remote.caps.write_pose
+        assert not remote.caps.clock_control
+        assert not remote._send("pause").ok
+        assert publisher._commands.empty()
+        mismatch = replace(
+            structure,
+            structure_revision=readonly.structure_revision + 1,
+            command_versions=(("pause", 2),),
+        )
+        publisher.publish_structure(mismatch)
+        _eventually(lambda: remote.structure_revision == mismatch.structure_revision)
+        assert not remote._send("pause").ok
+        assert publisher._commands.empty()
+        assert not handle_session_command(source, {"op": "reset", "operation_version": 2}).ok
+    finally:
+        remote.release()
+        publisher.close()
+        source.release()
+
+
+@pytest.mark.parametrize("revision", [99, True])
+def test_remote_rejects_incompatible_stream_version_at_connection(revision):
+    source = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    publisher.publish_structure(replace(snapshot_structure(source), protocol_version=revision))
+    try:
+        with pytest.raises(ConnectionError, match=f"Unsupported remote stream version: {revision}"):
+            RemoteSceneAdapter(port=publisher.port, timeout=0.5)
+    finally:
+        publisher.close()
+        source.release()
+
+
+def test_partial_remote_manifest_retains_monitoring_but_withdraws_writeback():
+    source = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    structure = replace(
+        snapshot_structure(source),
+        caps=AdapterCaps(name="physics", simulation=True, write_ctrl=True),
+        command_versions=(("pause", 1), ("play", 1), ("ctrl", 1)),
+    )
+    publisher.publish_structure(structure)
+    remote = RemoteSceneAdapter(port=publisher.port)
+    try:
+        assert remote.caps.simulation
+        assert not remote.caps.clock_control
+        assert not remote.caps.write_ctrl
+        invalid = replace(
+            structure,
+            structure_revision=structure.structure_revision + 1,
+            command_versions=(("ctrl", True), ("ctrl_vector", True)),
+        )
+        publisher.publish_structure(invalid)
+        _eventually(lambda: remote.structure_revision == invalid.structure_revision)
+        assert not remote.caps.write_ctrl
+        assert not remote._send("ctrl", index=0, value=1).ok
+        assert publisher._commands.empty()
+        assert not handle_session_command(source, {"op": "raycast"}).ok
+    finally:
+        remote.release()
+        publisher.close()
+        source.release()

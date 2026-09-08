@@ -27,7 +27,7 @@ from mojive.types import CameraView  # noqa: E402
 from mojive.ui.app import (  # noqa: E402
     IMAGE_FILTERS,
     MESH_FILTERS,
-    MODEL_FILTERS,
+    _model_filters,
     _ModelLoadJob,
 )
 from mojive.ui.camera_preview import CameraPreview  # noqa: E402
@@ -119,7 +119,7 @@ def test_file_menu_opens_model_browser(viewer, monkeypatch):
     viewer.sync()
     monkeypatch.setattr(viewer.app, "_open_model_dialog", lambda: opened.append(True))
     _click(viewer, _item_center(viewer, "begin_menu", "File"))
-    _click(viewer, _item_center(viewer, "menu_item", "Open Model (MJCF / URDF)..."))
+    _click(viewer, _item_center(viewer, "menu_item", "Open Model..."))
     assert opened
 
 
@@ -151,8 +151,8 @@ def test_add_model_dialog_filters_formats_and_accepts_multiple_files(viewer, mon
     viewer.app._open_model_dialog("add")
     viewer.app._poll_model_dialog()
 
-    assert opened["title"] == "Add MJCF or URDF models"
-    assert opened["filters"] == MODEL_FILTERS
+    assert opened["title"] == "Add models"
+    assert opened["filters"] == _model_filters(viewer.session.adapter.caps)
     assert opened["options"] == portable_file_dialogs.opt.multiselect
     assert [item[:2] for item in loaded] == [("add", Path(path)) for path in paths]
 
@@ -496,20 +496,22 @@ def test_camera_preview_matches_the_main_backend_for_the_same_camera_and_size():
         instance.backend.highlight(0)
         instance.backend.update(frame)
         instance.backend.debug.clear()
-        assert instance.backend.render() is not None
-        main = instance.backend.target.read_color(flip=True).copy()
+        for quality in ("performance", "high"):
+            instance.backend.set_shadow_quality(quality)
+            assert instance.backend.render() is not None
+            main = instance.backend.target.read_color(flip=True).copy()
 
-        preview.update(
-            instance.backend,
-            instance.session.source,
-            instance.session.structure_generation,
-            frame,
-            camera,
-            (640, 480),
-        )
-        peer = preview._backend
-        assert peer is not None
-        assert np.array_equal(peer.target.read_color(flip=True), main)
+            preview.update(
+                instance.backend,
+                instance.session.source,
+                instance.session.structure_generation,
+                frame,
+                camera,
+                (640, 480),
+            )
+            peer = preview._backend
+            assert peer is not None
+            assert np.array_equal(peer.target.read_color(flip=True), main)
     finally:
         preview.release()
         instance.release()
@@ -587,7 +589,7 @@ def test_viewer_frames_reuse_adapter_buffers_without_python_growth():
         instance.release()
 
 
-def test_model_component_inspector_tracks_structured_edits():
+def test_model_component_inspector_tracks_structured_edits(monkeypatch):
     instance = build_editor(vsync=False, width=960, height=640)
     try:
         assert instance.app.add_model(resolve("actuator_visuals"))
@@ -595,8 +597,8 @@ def test_model_component_inspector_tracks_structured_edits():
         assert instance.session.submit(SelectNode(model.node_id))
         instance.sync()
         inspector = instance.app.panels.get("Inspector")
-        assert inspector._component_cache["actuator"]
-        assert "jointpos" in inspector._component_presets["sensor"]
+        assert inspector._component_counts["actuator"] > 0
+        assert inspector._component_cache == inspector._component_presets == {}
 
         assert instance.session.submit(
             AddModelComponent(model.model_id, "sensor", "jointpos", "angle")
@@ -604,6 +606,19 @@ def test_model_component_inspector_tracks_structured_edits():
         inspector._refresh_component_cache(
             SimpleNamespace(session=instance.session), model.model_id
         )
+        assert inspector._component_counts["sensor"] == 1
+        assert inspector._component_cache == {}
+        from imgui_bundle import imgui
+
+        header = imgui.collapsing_header
+
+        def expand_sensors(label, *args, **kwargs):
+            if label == "Sensor (1)":
+                imgui.set_next_item_open(True)
+            return header(label, *args, **kwargs)
+
+        monkeypatch.setattr(imgui, "collapsing_header", expand_sensors)
+        instance.sync()
         assert [item.name for item in inspector._component_cache["sensor"]] == ["angle"]
         sensor = inspector._component_cache["sensor"][0]
         inspector._begin_component_edit(sensor)
@@ -718,3 +733,63 @@ def test_static_scene_file_menu_renders():
         _item_center(instance, "menu_item", "New Scene")
     finally:
         instance.release()
+
+
+def test_deferred_snapshot_edit_keeps_window_alive_and_rejects_invalid_source(monkeypatch):
+    import threading
+    import time
+
+    from mojive import commands as cmd
+
+    with build_editor(vsync=False, width=960, height=640, show_window=False) as instance:
+        added = instance.app.add_model(resolve("joint_types"))
+        assert added.ok
+        for _ in range(3):
+            instance.sync()
+        before_camera = instance.app.camera.view().view_matrix().copy()
+        ui_thread = threading.get_ident()
+        entered, release = threading.Event(), threading.Event()
+        submit = instance.session.submit
+        callbacks = []
+        snapshot = cmd.AddModelKeyframe(added.entity_id, "queued")
+
+        def blocked(command):
+            if command is snapshot:
+                assert threading.get_ident() != ui_thread
+                entered.set()
+                assert release.wait(timeout=5)
+            return submit(command)
+
+        monkeypatch.setattr(instance.session, "submit", blocked)
+        instance.app._panel_context().submit_model_edit(
+            snapshot, lambda result: callbacks.append((threading.get_ident(), result))
+        )
+        try:
+            instance.sync()
+            assert entered.wait(timeout=2)
+            before_frame = instance.window.frame_index
+            for _ in range(2):
+                instance.sync()
+            assert instance.window.frame_index >= before_frame + 2
+            assert callbacks == []
+        finally:
+            release.set()
+        deadline = time.monotonic() + 5
+        while not callbacks:
+            assert time.monotonic() < deadline
+            instance.sync()
+        assert callbacks[0][0] == ui_thread and callbacks[0][1].ok
+        assert any(key.name == "queued" for key in instance.session.keyframes)
+        np.testing.assert_allclose(instance.app.camera.view().view_matrix(), before_camera)
+        before_source = instance.session.source
+        errors = []
+        instance.app._queue_model_edit(
+            cmd.SetModelSource(added.entity_id, "<broken>"), errors.append
+        )
+        deadline = time.monotonic() + 5
+        while not errors:
+            assert time.monotonic() < deadline
+            instance.sync()
+        assert not errors[0].ok
+        assert instance.session.source is before_source
+        assert instance.window.read_frame().std() > 5

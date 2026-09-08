@@ -9,10 +9,19 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, replace
+from functools import cached_property, lru_cache
 
 from imgui_bundle import imgui
 
-from ..input import imgui_key_for_physical_key
+from ..input import InputClaim, _imgui_keys, imgui_key_for_physical_key, physical_ctrl_super
+from .pointer_bindings import (
+    DEFAULT_POINTER_BINDINGS,
+    NAVIGATION_PRESETS,
+    PointerAction,
+    PointerChord,
+    PointerFrame,
+    exclusive_group,
+)
 
 
 class InputAction(enum.StrEnum):
@@ -55,6 +64,7 @@ class InputBindings:
     """One replaceable binding set shared by polling, hints, and tooltips."""
 
     entries: tuple[tuple[InputAction, KeyBinding], ...]
+    pointers: tuple[tuple[PointerAction, tuple[PointerChord, ...]], ...] = DEFAULT_POINTER_BINDINGS
 
     def binding(self, action: InputAction) -> KeyBinding:
         return next(binding for candidate, binding in self.entries if candidate is action)
@@ -140,12 +150,20 @@ class InputBindings:
                 entries.append((candidate, previous))
             else:
                 entries.append((candidate, binding))
-        return replace(self, entries=tuple(entries))
+        candidate = replace(self, entries=tuple(entries))
+        candidate._validate_pointers()
+        return candidate
 
-    def preferences(self) -> dict[str, str | None]:
+    def preferences(self) -> dict[str, object]:
         """Return the stable JSON representation used by editor settings."""
 
-        return {action.value: self.key_id(action) for action, _binding in self.entries}
+        return {
+            **{action.value: self.key_id(action) for action, _binding in self.entries},
+            "pointer": {
+                action.value: [chord.identifier() for chord in chords]
+                for action, chords in self.pointers
+            },
+        }
 
     @classmethod
     def from_preferences(cls, value: object) -> InputBindings:
@@ -162,8 +180,181 @@ class InputBindings:
                 continue
             if key_id not in _KEY_CHOICES_BY_ID:
                 continue
-            bindings = bindings.remap(action, key_id)
+            try:
+                bindings = bindings.remap(action, key_id)
+            except ValueError:
+                continue
+        pointer_values = value.get("pointer")
+        if isinstance(pointer_values, dict):
+            entries = dict(bindings.pointers)
+            for action in PointerAction:
+                if action.value not in pointer_values:
+                    continue
+                chords = pointer_values[action.value]
+                if not isinstance(chords, list) or not all(
+                    isinstance(chord, str) for chord in chords
+                ):
+                    continue
+                try:
+                    entries[action] = tuple(PointerChord.parse(chord) for chord in chords)
+                except ValueError:
+                    continue
+            candidate = replace(bindings, pointers=tuple(entries.items()))
+            try:
+                candidate._validate_pointers()
+            except ValueError:
+                pass
+            else:
+                bindings = candidate
         return bindings
+
+    def pointer_chords(self, action: PointerAction) -> tuple[PointerChord, ...]:
+        return next((chords for candidate, chords in self.pointers if candidate == action), ())
+
+    def resolved_chord(self, chord: PointerChord) -> PointerChord | None:
+        keys = []
+        for key in chord.modifiers:
+            if key in ("snap", "perturb"):
+                key = self.key_id(InputAction(key))
+                if key is None:
+                    return None
+            keys.append(key)
+        return replace(chord, modifiers=tuple(sorted(set(keys))))
+
+    def pointer_label(self, action: PointerAction) -> str:
+        labels = []
+        for chord in self.pointer_chords(action):
+            resolved = self.resolved_chord(chord)
+            if resolved is not None:
+                labels.append(resolved.identifier())
+        return "; ".join(labels) or "Unbound"
+
+    def remap_pointer(self, action: PointerAction, identifiers: tuple[str, ...]) -> InputBindings:
+        """Replace all alternatives of an action, rejecting conflicts atomically."""
+        entries = dict(self.pointers)
+        entries[PointerAction(action)] = tuple(PointerChord.parse(value) for value in identifiers)
+        candidate = replace(self, pointers=tuple(entries.items()))
+        candidate._validate_pointers()
+        return candidate
+
+    def navigation_preset(self, name: str) -> InputBindings:
+        """Replace camera navigation while retaining editing and application bindings."""
+        entries = dict(self.pointers)
+        if name not in NAVIGATION_PRESETS:
+            raise ValueError(f"Unknown navigation preset: {name}")
+        for action, values in NAVIGATION_PRESETS[name].items():
+            entries[action] = tuple(PointerChord.parse(value) for value in values)
+        entries[PointerAction.DOLLY] = (PointerChord.parse("wheel"),)
+        candidate = replace(self, pointers=tuple(entries.items()))
+        candidate._validate_pointers()
+        return candidate
+
+    def _validate_pointers(self) -> None:
+        claimed = {}
+        for action, chords in self.pointers:
+            for chord in chords:
+                resolved = self.resolved_chord(chord)
+                if resolved is None:
+                    continue
+                if resolved.wheel != (action in (PointerAction.DOLLY, PointerAction.TIMELINE_ZOOM)):
+                    raise ValueError(
+                        f"{action} requires {'wheel' if not resolved.wheel else 'buttons'}"
+                    )
+                key = (exclusive_group(action), resolved)
+                if key in claimed:
+                    raise ValueError(f"{resolved.identifier()} is already used by {claimed[key]}")
+                claimed[key] = action
+
+    @cached_property
+    def pointer_keys(self) -> frozenset[str]:
+        keys = {"ctrl", "shift", "alt", "super"}
+        for _action, chords in self.pointers:
+            for chord in chords:
+                resolved = self.resolved_chord(chord)
+                if resolved is not None:
+                    keys.update(resolved.modifiers)
+        return frozenset(keys)
+
+    def pointer_frame(self, claim: InputClaim = InputClaim()) -> PointerFrame:
+        """Sample physical buttons, modifiers and registered held keys once per UI frame."""
+        required = self.pointer_keys
+        io = imgui.get_io()
+        ctrl, super_key = physical_ctrl_super(io)
+        modifiers = {
+            "ctrl": ctrl,
+            "super": super_key,
+            "shift": io.key_shift
+            or imgui.is_key_down(imgui.Key.left_shift)
+            or imgui.is_key_down(imgui.Key.right_shift),
+            "alt": io.key_alt
+            or imgui.is_key_down(imgui.Key.left_alt)
+            or imgui.is_key_down(imgui.Key.right_alt),
+        }
+        keys = frozenset(
+            key
+            for key in required
+            if not claim.claims_key(key)
+            and (
+                modifiers[key]
+                if key in modifiers
+                else any(imgui.is_key_down(value) for value in _imgui_keys(key))
+            )
+        )
+        available = tuple(button for button in range(3) if not claim.claims_button(button))
+        return PointerFrame(
+            buttons=frozenset(button for button in available if imgui.is_mouse_down(button)),
+            clicked=frozenset(button for button in available if imgui.is_mouse_clicked(button)),
+            doubled=frozenset(
+                button for button in available if imgui.is_mouse_double_clicked(button)
+            ),
+            released=frozenset(button for button in available if imgui.is_mouse_released(button)),
+            keys=keys,
+            wheel=0.0 if claim.wheel or claim.pointer else float(imgui.get_io().mouse_wheel),
+        )
+
+    def pointer_match(
+        self, action: PointerAction, frame: PointerFrame, *, press: bool = False
+    ) -> PointerChord | None:
+        """Resolve an action, preferring the most specific matching chord in its context."""
+        return next(
+            (
+                chord
+                for candidate, chord in self.pointer_matches(frame, press=press)
+                if candidate == action
+            ),
+            None,
+        )
+
+    @cached_property
+    def resolved_pointers(self) -> tuple[tuple[PointerAction, PointerChord], ...]:
+        return tuple(
+            (action, resolved)
+            for action, chords in self.pointers
+            for chord in chords
+            if (resolved := self.resolved_chord(chord)) is not None
+        )
+
+    def pointer_matches(
+        self, frame: PointerFrame, *, press: bool = False
+    ) -> tuple[tuple[PointerAction, PointerChord], ...]:
+        return _pointer_matches(self.resolved_pointers, frame, press)
+
+
+@lru_cache(maxsize=32)
+def _pointer_matches(
+    entries: tuple[tuple[PointerAction, PointerChord], ...], frame: PointerFrame, press: bool
+) -> tuple[tuple[PointerAction, PointerChord], ...]:
+    candidates = []
+    best = {}
+    for action, chord in entries:
+        group = exclusive_group(action)
+        if frame.matches(chord, press=press, extra_keys=group in ("gizmo", "view_cube")):
+            rank = (len(chord.modifiers), chord.clicks)
+            candidates.append((action, chord, group, rank))
+            best[group] = max(best.get(group, (0, 0)), rank)
+    return tuple(
+        (action, chord) for action, chord, group, rank in candidates if rank == best[group]
+    )
 
 
 def input_action_name(action: InputAction) -> str:
