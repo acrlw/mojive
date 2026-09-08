@@ -51,8 +51,8 @@ void validateScene(const SceneSource &scene) {
             h = std::max(1u, h / 2);
         } while (w && h);
         if (!texture.size.width || !texture.size.height || texture.size.width > 16384 ||
-            texture.size.height > 16384 ||
-            texture.rgba.size() != expected * (texture.cube ? 6 : 1) ||
+            texture.size.height > 16384 || !texture.rgba ||
+            texture.rgba->size() != expected * (texture.cube ? 6 : 1) ||
             (texture.cube && texture.size.width != texture.size.height))
             throw std::invalid_argument("Invalid scene texture");
     }

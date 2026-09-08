@@ -248,6 +248,9 @@ def test_texture_orientation_and_incremental_colors_preserve_submitted_readback(
     )
     source.set_material_indices(np.array([0], np.uint32))
     scene = runtime.create_scene(source)
+    # GPU upload must own immutable pixels after the Python inputs are gone.
+    pixels[:] = 0
+    del pixels, source
     transform = np.eye(4, dtype=np.float32)[None]
     uv = np.array([[1, 1, 0, 0]], np.float32)
     runtime.update_textured(scene, transform, uv, np.ones((1, 4), np.float32), 1, 0)
@@ -281,7 +284,25 @@ def test_render_request_prunes_color_and_rejects_unavailable_products(native, ru
     assert stats.draw_calls == 1
     with pytest.raises(ValueError, match="unavailable"):
         runtime.readback(frame, native.Product.COLOR)
-    assert runtime.wait(runtime.readback(frame, native.Product.OBJECT_ID)).image.any()
+    products = (native.Product.OBJECT_ID, native.Product.SEGMENTATION, native.Product.METRIC_DEPTH)
+    references = {
+        product: runtime.wait(runtime.readback(frame, product)).image.copy() for product in products
+    }
+    for product in products:
+        target = runtime.create_target(64, 64)
+        frame = runtime.render(target, camera, data_product=product)
+        np.testing.assert_array_equal(
+            runtime.wait(runtime.readback(frame, product)).image, references[product]
+        )
+        for other in products:
+            if other != product:
+                with pytest.raises(ValueError, match="unavailable"):
+                    runtime.readback(frame, other)
+    with pytest.raises(ValueError, match="Invalid scene data product"):
+        runtime.render(target, camera, data_product=native.Product.COLOR)
+    # Returning to the full product set must populate the previously omitted attachments.
+    frame = runtime.render(target, camera)
+    assert runtime.wait(runtime.readback(frame, native.Product.METRIC_DEPTH)).image.min() < 20
     frame = runtime.render(target, camera, color=True, scene_data=False)
     with pytest.raises(ValueError, match="unavailable"):
         runtime.readback(frame, native.Product.METRIC_DEPTH)

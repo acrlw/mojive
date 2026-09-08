@@ -21,7 +21,9 @@ auto matrixArray(Matrix value) {
 #if MOJIVE_HAS_BGFX
 void bindRender(nb::module_ &);
 #endif
+void bindMeshProcessing(nb::module_ &);
 NB_MODULE(_native, module) {
+    bindMeshProcessing(module);
     module.doc() = "Private Mojive runtime infrastructure; use the compatible Python facade.";
     module.attr("contract_version") = 1;
 #if MOJIVE_HAS_BGFX

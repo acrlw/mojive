@@ -494,8 +494,9 @@ class ImguiDraw2D:
             size *= max_width / width
             box = ink_box(font, size, text) or box
 
-        pen_x = round(float(center[0]) - (box[0] + box[2]) * 0.5)
-        pen_y = round(float(center[1]) - (box[1] + box[3]) * 0.5)
+        # Labels move rigidly with their geometry, including fractional pixels.
+        pen_x = float(center[0]) - (box[0] + box[2]) * 0.5
+        pen_y = float(center[1]) - (box[1] + box[3]) * 0.5
         baked = font.get_font_baked(size)
         tex = imgui.get_io().fonts.tex_data.get_tex_ref()
         rgba = self._u32(color)

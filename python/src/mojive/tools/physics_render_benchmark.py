@@ -3,7 +3,7 @@
 Production runs compare the serial and concurrent Session paths. A separate
 fixed-topology experiment isolates snapshot-copy costs: paired runs preserve
 every frame and physics step; realtime runs publish only the latest state.
-All ImGui/GPU work remains on the main thread in both cases.
+ImGui remains on the main thread; GPU work follows each backend's owner policy.
 """
 
 from __future__ import annotations

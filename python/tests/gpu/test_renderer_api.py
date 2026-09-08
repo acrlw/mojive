@@ -369,3 +369,46 @@ def test_renderer_segmentation_maps_flex_and_skin_objects():
 
     assert any(object_type == int(mujoco.mjtObj.mjOBJ_FLEX) for _, object_type in pairs)
     assert any(object_type == int(mujoco.mjtObj.mjOBJ_SKIN) for _, object_type in pairs)
+
+
+def test_native_close_from_readback_callback_preserves_queued_images():
+    from threading import Barrier, Event, get_ident
+
+    from mojive.render.selection import render_backend_name
+
+    if render_backend_name() != "bgfx":
+        pytest.skip("Native queued readback ownership")
+    model = _model()
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    renderer = Renderer(model, height=64, width=64)
+    renderer.update_scene(data)
+    expected = renderer.render()
+    completed, gate = Event(), Event()
+    started = Barrier(3)
+    caller = get_ident()
+    callback_threads = []
+
+    def occupy_worker():
+        started.wait(timeout=10)
+        gate.wait(timeout=10)
+
+    for _ in range(2):
+        renderer._backend.device.readbacks.submit(occupy_worker)
+    started.wait(timeout=10)
+    queued = [renderer.render_async() for _ in range(8)]
+
+    def close(_):
+        callback_threads.append(get_ident())
+        renderer.close()
+        completed.set()
+
+    queued[0].add_done_callback(close)
+    gate.set()
+    assert completed.wait(10)
+    assert callback_threads[0] != caller
+    for future in queued:
+        np.testing.assert_array_equal(future.result(timeout=10), expected)
+    with Renderer(model, height=64, width=64) as peer:
+        peer.update_scene(data)
+        assert peer.render().shape == expected.shape

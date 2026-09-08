@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -68,7 +69,8 @@ struct Lighting {
 struct TextureSource {
     Extent size;
     bool mipmaps = false, srgb = false, cube = false;
-    std::vector<std::byte> rgba;
+    // Immutable shared upload storage can outlive the caller until GPU submission.
+    std::shared_ptr<const std::vector<std::byte>> rgba;
 };
 struct SceneStyle {
     bool operator==(const SceneStyle &) const = default;
@@ -185,11 +187,15 @@ struct Target {
 };
 struct RenderRequest {
     bool color = true, sceneData = true;
+    std::optional<Product> dataProduct;
 };
 struct FrameStats {
     bool operator==(const FrameStats &) const = default;
     uint64_t drawCalls = 0, instances = 0, uploadBytes = 0;
     double gpuMs = -1;
+    bool reflectionRendered = false, reflectionReused = false;
+    bool shadowRendered = false, shadowReused = false;
+    uint64_t shadowInstances = 0, culledShadowInstances = 0;
 };
 struct FrameToken {
     Target target;

@@ -7,7 +7,7 @@ The C++ build never replaces an edited ImGui tree with a fetched copy.
 | Source | Management | Purpose |
 |---|---|---|
 | `imgui/` | Tracked source, v1.92.9b-docking | Dear ImGui core and platform integration; owned customization history |
-| `bgfx/`, `bx/`, `bimg/`, `bgfxCmake/` | Git submodules at the tested commits | Renderer and offline shader compilation |
+| `bgfx/`, `bx/`, `bimg/`, `bgfxCmake/` | Git submodules at the tested commits | Renderer, offline shader compilation, and stb image resizing |
 | `glfw/` | Git submodule | Native platform windows and input |
 | `glm/`, `spdlog/` | Git submodules | Private graphics math and native logging |
 | `nanobind/`, `robinMap/` | Git submodules | Python binding support |
@@ -51,3 +51,19 @@ for an offscreen-only runtime. The patch preserves reset-selected anisotropy ind
 a swap chain so Viewer and offscreen textures use the same filtering. The submodule remains
 unchanged; CMake fails if the pinned source context no longer matches. Reconcile this patch
 explicitly during a bgfx update and rerun textured tendon and image-light parity.
+
+## Native texture preprocessing
+
+`cpp/src/Texture.cpp` uses `bimg/3rdparty/stb/stb_image_resize2.h` from the pinned bimg
+revision. Its upstream license remains in that header. The box filter preserves the shared
+linear-light RGB and independent-alpha mip contract, including non-power-of-two extents.
+Mojive does not introduce a separate stb download or modify the vendored implementation.
+
+## Optional mesh preparation
+
+`cpp/src/MeshProcessing.cpp` uses meshoptimizer's allocator and simplifier from
+`bgfx/3rdparty/meshoptimizer`, pinned by the bgfx submodule revision. The optional Python
+extension builds those CPU-only sources without a graphics dependency and releases the GIL
+while simplifying. Initialize the bgfx submodule even for a renderer-free Python extension
+build. The MIT license is retained upstream and included in platform wheels. The helper returns
+ordinary Mojive mesh data and does not couple consumer renderers to bgfx.
