@@ -5,6 +5,7 @@ from __future__ import annotations
 import bisect
 import math
 from collections.abc import Sequence
+from dataclasses import replace
 from functools import lru_cache
 
 from imgui_bundle import imgui
@@ -450,9 +451,10 @@ class KeyframesPanel(Panel):
 
         keyframes, keyframe_by_id = self._keyframes(ctx)
         take_times = ctx.session.state_take_times
-        editable = bool(ctx.session.paused)
+        editable = bool(ctx.session.paused and not ctx.take_video_active)
         self._sync_selection(ctx, keyframe_by_id, take_times)
         self._draw_take_transport(ctx, take_times)
+        self._draw_take_video(ctx, take_times)
         self._draw_keyframe_toolbar(ctx, keyframes, take_times, editable)
         self._draw_timeline_toolbar(ctx, take_times)
         self._draw_dope_sheet(ctx, keyframes, keyframe_by_id, take_times, editable)
@@ -498,7 +500,7 @@ class KeyframesPanel(Panel):
             ctx.theme,
             scale,
             label=record_label,
-            enabled=supported,
+            enabled=supported and not ctx.take_video_active,
             selected=recording,
         ):
             result = ctx.submit(
@@ -507,7 +509,9 @@ class KeyframesPanel(Panel):
             self._error = "" if result.ok else result.message
             if result.ok:
                 self._view_needs_fit = not recording
-        transport_enabled = bool(supported and take_times and not recording)
+        transport_enabled = bool(
+            supported and take_times and not recording and not ctx.take_video_active
+        )
         item_index = 1
         for kind, target, tooltip in (
             ("first", 0, ctx.tr("First frame")),
@@ -608,6 +612,67 @@ class KeyframesPanel(Panel):
         _toolbar_status(status, color, scale, width=status_width)
         imgui.pop_style_var()
 
+    def _draw_take_video(self, ctx: PanelContext, take_times: Sequence[float]) -> None:
+        if ctx.start_take_video is None or ctx.recording_config is None:
+            return
+        active = ctx.take_video_active
+        label = ctx.tr("Stop Video" if active else "Record Take Video")
+        width = max(button_width(ctx.tr(text)) for text in ("Stop Video", "Record Take Video"))
+        options = ctx.tr("Video Settings")
+        available = imgui.get_content_region_avail().x
+        spacing = imgui.get_style().item_spacing.x
+        right = imgui.get_cursor_screen_pos().x + available
+        if right - imgui.get_item_rect_max().x - spacing >= width:
+            imgui.same_line()
+            available = imgui.get_content_region_avail().x
+        inline = button_row_layout(
+            (width, button_width(options)),
+            available,
+            spacing,
+        )
+        disabled = not active and (
+            not take_times
+            or ctx.session.state_take_recording
+            or (ctx.recording is not None and ctx.recording.active)
+        )
+        imgui.begin_disabled(disabled)
+        height = _COMMAND_HEIGHT_PT * ctx.style_scale
+        if imgui.button(f"{label}##take-video", imgui.ImVec2(width, height)):
+            try:
+                if active:
+                    ctx.stop_recording()
+                else:
+                    ctx.start_take_video()
+                self._error = ""
+            except (RuntimeError, ValueError) as exc:
+                self._error = str(exc)
+        imgui.end_disabled()
+        if inline[1]:
+            imgui.same_line()
+        if imgui.button(f"{options}##take-video-settings", imgui.ImVec2(0, height)):
+            imgui.open_popup("##take-video-options")
+        if imgui.begin_popup("##take-video-options"):
+            config = ctx.recording_config
+            imgui.begin_disabled(active)
+            for field, title in (("countdown", "Start delay (s)"), ("end_hold", "End hold (s)")):
+                imgui.text_unformatted(ctx.tr(title))
+                imgui.set_next_item_width(220 * ctx.style_scale)
+                changed, value = imgui.input_float(
+                    f"##take-video-{field}", getattr(config, field), 0.5, 5.0, "%.1f"
+                )
+                if changed:
+                    config = replace(config, **{field: value})
+                    ctx.set_recording_config(config)
+            imgui.end_disabled()
+            imgui.push_text_wrap_pos(imgui.get_cursor_pos_x() + 280 * ctx.style_scale)
+            imgui.text_wrapped(
+                ctx.tr(
+                    "Wait at the first frame, record the whole take once, then hold the final frame."
+                )
+            )
+            imgui.pop_text_wrap_pos()
+            imgui.end_popup()
+
     def _draw_timeline_toolbar(self, ctx: PanelContext, take_times: Sequence[float]) -> None:
         scale = ctx.style_scale
         available = float(imgui.get_content_region_avail().x)
@@ -660,7 +725,7 @@ class KeyframesPanel(Panel):
         self._last_followed_playhead = None
 
     def _seek_time(self, ctx: PanelContext, take_times: Sequence[float], time: float) -> None:
-        if ctx.session.state_take_recording:
+        if ctx.session.state_take_recording or ctx.take_video_active:
             return
         if take_times:
             index = nearest_take_frame(take_times, time)
@@ -810,8 +875,10 @@ class KeyframesPanel(Panel):
             # prevents the docked Keyframes window from scrolling as well.
             imgui.set_item_key_owner(imgui.Key.mouse_wheel_y)
 
-        owns_escape = imgui.is_window_focused() and (
-            self._pointer_mode == "range" or ctx.session.state_take_loop is not None
+        owns_escape = (
+            imgui.is_window_focused()
+            and not ctx.popup_owned_frame
+            and (self._pointer_mode == "range" or ctx.session.state_take_loop is not None)
         )
         if owns_escape:
             imgui.internal.set_key_owner(
@@ -903,6 +970,7 @@ class KeyframesPanel(Panel):
             over_timeline
             and imgui.is_mouse_clicked(imgui.MouseButton_.left)
             and not self._pointer_mode
+            and not ctx.take_video_active
         ):
             if hit_id >= 0:
                 self._selected_id = hit_id

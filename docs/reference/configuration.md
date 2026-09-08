@@ -222,6 +222,22 @@ uses wall time, can be canceled with its button or the recording shortcut, and c
 file until a frame is captured. A zero-second delay starts on the next clean frame after menus
 close. The recording rate is independent from display and physics rates.
 
+For a completed simulation take, **Keyframes > Record Take Video** rewinds to its first frame,
+waits for the countdown, records the entire take once, and saves automatically. **Video Settings**
+sets the start delay and final-frame hold (one second by default); the same defaults are available
+in **Settings > Recording**. The countdown is excluded from the video; the final hold is included.
+The selected loop range remains available for ordinary playback and is ignored for this recording.
+Pausing the video also pauses take playback and the final hold. Camera and Layers controls remain
+available while recording. Changing the take or scene ends the recording.
+
+The equivalent API is `viewer.start_take_video("output/take.mp4", countdown=3, end_hold=1)`;
+keep calling `viewer.sync()` while `viewer.recording.active`. Take playback advances with encoded
+frames at the selected playback speed. Slow rendering or encoding can extend recording wall time
+without skipping motion or shortening the resulting video. Finished videos show their absolute
+save path in Status for eight seconds. Hover to read the full message and right-click to copy the
+path; the message also remains in Output. Other Status messages can be copied by right-clicking.
+Use `make take-video` (or `BACKEND=wgpu`) for native controls and decoded-video acceptance.
+
 Open **View > Layers...** or **Window > Layers** to control viewport content during everyday
 viewing and recording. The panel docks outside the viewport. Its switches control viewport
 controls, transform and joint gizmos, selection feedback, camera/light helpers, perturbation

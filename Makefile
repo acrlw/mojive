@@ -6,6 +6,10 @@ RUFF := .venv/bin/ruff
 .PHONY: recording-layers
 .PHONY: camera-tracking
 .PHONY: keyframe-timeline
+.PHONY: take-video
+
+take-video:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.take_video $(ARGS)
 
 keyframe-timeline:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.keyframe_timeline $(ARGS)
@@ -107,6 +111,7 @@ help:
 		'  make capture           write PNG' \
 		'  make record            stream MP4' \
 		'  make recording-layers  live layers, countdown, and compact joint acceptance' \
+		'  make take-video        one-shot take recording, end hold, and copyable save path' \
 		'  make rollout-video     offscreen MP4 with simulation-time subtitles' \
 		'  make showcase          render feature overview' \
 		'' \

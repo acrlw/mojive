@@ -83,6 +83,12 @@ time moves beneath it; **Off** leaves the view unchanged. Right-drag pans and tu
 off, and the wheel zooms. **Space** pauses and resumes the recorded take when a take frame is
 active. These controls use recorded samples without changing the physics or display frame rates.
 
+**Record Take Video** records the completed take from its first frame through its last frame,
+ignoring the selected loop for that recording. **Video Settings** controls the countdown before
+playback and the recorded hold on the final frame. The video saves automatically; its path appears
+briefly in Status and can be copied with a right-click. Pausing the video or pressing **Space**
+pauses both playback and recording. Stop the video before scrubbing or editing take poses.
+
 The **Assets** panel is the model-level inventory; Inspector remains responsible for binding an
 asset to the selected scene element. It covers standalone mesh, PNG height-field and texture
 import, material creation and replacement, basic appearance, height-field physical dimensions,

@@ -943,6 +943,28 @@ def test_take_loop_wraps_inclusively_and_clear_restores_normal_end_behavior():
     assert session.paused
 
 
+def test_one_shot_take_replay_preserves_loop_and_fractional_time_across_pause():
+    session, adapter = _recorded_take()
+    assert session.submit(cmd.SetStateTakeLoop(2, 4))
+    assert session.submit(cmd.SeekStateTake(0))
+    assert session.submit(cmd.PlayStateTake(loop=False))
+    session.tick(FrameNeeds.none(), wall_dt=0.005)
+    assert session.state_take_cursor == 0
+    assert session.submit(cmd.PauseStateTake())
+    session.tick(FrameNeeds.none(), wall_dt=5.0)
+    assert adapter.steps == 0
+    assert session.submit(cmd.PlayStateTake(loop=False))
+    session.tick(FrameNeeds.none(), wall_dt=0.005)
+    assert adapter.steps == 1
+    session.tick(FrameNeeds.none(), wall_dt=1.0)
+    assert adapter.steps == 10
+    assert not session.state_take_playing
+    assert session.state_take_loop == (2, 4)
+    assert session.submit(cmd.PlayStateTake())
+    assert session.state_take_cursor == 2
+    assert session.paused
+
+
 def test_take_loop_spanning_last_frame_preserves_speed_and_restores_only_displayed_sample(
     monkeypatch,
 ):

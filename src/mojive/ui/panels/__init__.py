@@ -59,6 +59,7 @@ class PanelContext:
     info: dict[str, Any] = field(default_factory=dict)
 
     status: str = ""
+    popup_owned_frame: bool = False
     # Each panel publishes its available grammar independently of hover.
     # PanelManager collects it by name; the application selects the clicked panel.
     status_hints: tuple[Any, ...] = ()
@@ -84,6 +85,10 @@ class PanelContext:
     set_viewport_layers: Any = None
     recording_config: Any = None
     set_recording_config: Any = None
+    recording: Any = None
+    take_video_active: bool = False
+    start_take_video: Any = None
+    stop_recording: Any = None
     set_viewport_capsule_scale: Any = None
     input_bindings: Any = None
     set_input_binding: Any = None
