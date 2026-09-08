@@ -1,3 +1,4 @@
+#include "renderer_factory.hpp"
 #include <algorithm>
 #include <bit>
 #include <chrono>
@@ -6,7 +7,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <mojive/backends/bgfx.hpp>
 #include <mojive/readback.hpp>
 #include <stdexcept>
 #include <thread>
@@ -198,6 +198,9 @@ static void conformance(Renderer &renderer, const std::filesystem::path &output)
     auto updated = wait(renderer, renderer.readback(frame, Product::MetricDepth));
     require(std::abs(pixel<float>(updated.image, 64, 83) - 4.5f) < 1e-4f,
             "Dynamic mesh update ignored");
+    renderer.set_scene(source);
+    rejects([&] { renderer.readback(frame, Product::ObjectId); },
+            "Scene replacement with the same revision retained an obsolete token");
     renderer.destroy(target);
     renderer.advance();
     std::ofstream report(output / "conformance.json");
@@ -214,14 +217,17 @@ int main(int argc, char **argv) {
         std::string shaders = argc > 1 ? argv[1] : "output/native-build/shaders";
         std::filesystem::path output = argc > 2 ? argv[2] : "output/native-probe";
         std::filesystem::create_directories(output);
-        BgfxOptions options;
+        std::string backend = argc > 3 ? argv[3] : "bgfx";
+        probe::RendererOptions options;
         options.shader_directory = shaders;
-        auto renderer = make_bgfx_renderer(options);
+        auto renderer = probe::make_renderer(options, backend);
         std::cout << "Renderer: " << renderer->capabilities().backend << std::endl;
-        rejects([&] { make_bgfx_renderer(options); }, "Second process runtime accepted");
+        if (backend == "bgfx")
+            rejects([&] { probe::make_renderer(options, backend); },
+                    "Second process runtime accepted");
         conformance(*renderer, output);
         renderer.reset();
-        auto reopened = make_bgfx_renderer(options);
+        auto reopened = probe::make_renderer(options, backend);
         conformance(*reopened, output);
         std::cout << "Native conformance passed, including runtime restart" << std::endl;
         return 0;

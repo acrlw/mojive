@@ -6,6 +6,12 @@
 > bgfx 源码核对版本：`9b636df330c81e11c84595651a291b6c59fb7396`，提交时间为 2026-09-07 UTC。
 > 该 SHA 用于固定本次证据，不代表已验证的生产依赖版本。
 
+## 后续实验更新
+
+现已在同一 `Renderer` 契约下实现 bgfx 和 SDL3 GPU 两个适配器，并加入 nanobind / pybind11 的独立对照。新 C++ 核心的 Python 薄接口倾向采用 **nanobind**；小调用和数组传参有收益，批量 C++ 内核的耗时则基本相同。MuJoCo 继续使用其官方 pybind11 绑定，通过 NumPy 和 Mojive 自有快照交换数据，不直接混用两套库包装的 C++ 对象。
+
+SDL3 的本次适配器只验证了 macOS / Metal；Windows 和 Linux 的 shader 构建与实机验收仍未完成。标准输出和生命周期测试已复用，原公共契约没有因第二种后端而改变。SDL 在拾取读回上更有优势，但高分辨率连续图像读回不是全面领先。继续保留 bgfx 作为对照，在生产效果、线程调度和三平台验收后再确定默认后端。下面保留初始方案，当前复现方式与范围以[原生验证指南](../guides/native-probe.md)为准。
+
 ## 先看结论
 
 **建议把 bgfx 作为原生 C++ 版本的首选原型候选，先通过 Mojive 的关键能力和性能验证，再决定正式采用。** 它符合桌面三平台、原生图形 API、Dear ImGui、自定义渲染流程、避免引入大型引擎的方向。bgfx 使用 BSD-2-Clause 许可证；本方案排除 Diligent，不采用 Qt，也不引入 Dawn 作为原生渲染依赖。[官方概述](https://bkaradzic.github.io/bgfx/overview.html)、[许可证](https://github.com/bkaradzic/bgfx/blob/9b636df330c81e11c84595651a291b6c59fb7396/LICENSE)

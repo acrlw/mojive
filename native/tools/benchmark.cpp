@@ -1,3 +1,4 @@
+#include "renderer_factory.hpp"
 #include "scene_stream.hpp"
 #include <algorithm>
 #include <chrono>
@@ -6,7 +7,6 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <mojive/backends/bgfx.hpp>
 #include <mojive/readback.hpp>
 #include <numeric>
 #include <thread>
@@ -31,8 +31,8 @@ struct Pending {
 int main(int argc, char **argv) {
     try {
         if (argc < 8)
-            throw std::invalid_argument(
-                "Usage: benchmark shaders trajectory output width height seconds mode [fps-limit]");
+            throw std::invalid_argument("Usage: benchmark shaders trajectory output width height "
+                                        "seconds mode [fps-limit] [bgfx|sdl]");
         auto scene = probe::load(argv[2]);
         Extent size{uint32_t(std::stoul(argv[4])), uint32_t(std::stoul(argv[5]))};
         double seconds = std::stod(argv[6]), fps_limit = argc > 8 ? std::stod(argv[8]) : 0;
@@ -46,9 +46,10 @@ int main(int argc, char **argv) {
                           : mode == "depth"        ? Product::MetricDepth
                           : mode == "segmentation" ? Product::Segmentation
                                                    : Product::ObjectId;
-        BgfxOptions options;
+        std::string backend = argc > 9 ? argv[9] : "bgfx";
+        probe::RendererOptions options;
         options.shader_directory = argv[1];
-        auto renderer = make_bgfx_renderer(options);
+        auto renderer = probe::make_renderer(options, backend);
         renderer->set_scene(scene.source);
         auto target = renderer->create_target(size, 4);
         auto camera = scene.camera;
@@ -124,7 +125,7 @@ int main(int argc, char **argv) {
             consume(true);
         }
         // A final readback drains queued GPU work even in the no-readback case.
-        renderer->update({1, frames, scene.frames[frames % scene.frames.size()]});
+        renderer->update({1, 0, scene.frames[0]});
         auto token = renderer->render(target, camera);
         auto ticket = renderer->readback(token, Product::Color);
         ReadbackResult snapshot;
@@ -159,9 +160,10 @@ int main(int argc, char **argv) {
                << ",\n\"fps_limit\":" << fps_limit << ",\n\"fps\":" << frames / elapsed
                << ",\n\"frame_cpu_p50_ms\":" << percentile(cpu, .5)
                << ",\n\"frame_cpu_p95_ms\":" << percentile(cpu, .95)
-               << ",\n\"frame_cpu_p99_ms\":" << percentile(cpu, .99)
-               << ",\n\"gpu_p50_ms\":" << percentile(gpu, .5)
-               << ",\n\"gpu_p95_ms\":" << percentile(gpu, .95)
+               << ",\n\"frame_cpu_p99_ms\":" << percentile(cpu, .99) << ",\n\"gpu_p50_ms\":"
+               << (gpu.empty() ? "null" : std::to_string(percentile(gpu, .5)))
+               << ",\n\"gpu_p95_ms\":"
+               << (gpu.empty() ? "null" : std::to_string(percentile(gpu, .95)))
                << ",\n\"readback_p50_ms\":" << percentile(latency, .5)
                << ",\n\"readback_p95_ms\":" << percentile(latency, .95)
                << ",\n\"readbacks\":" << completed
