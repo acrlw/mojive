@@ -6,53 +6,10 @@ import numpy as np
 import wgpu
 
 from ...types import TextureData, TextureType
+from ..texture import mip_chain as _mip_chain
+from ..texture import srgb_to_linear_u8 as _srgb_to_linear_u8
 
 _BYTES_PER_CHANNEL = {1: (wgpu.TextureFormat.r8unorm, 1), 2: (wgpu.TextureFormat.rg8unorm, 2)}
-
-
-def _srgb_to_linear_u8(pixels: np.ndarray) -> np.ndarray:
-    x = pixels.astype(np.float32) / 255.0
-    lo = x / 12.92
-    hi = ((np.maximum(x, 0.0) + 0.055) / 1.055) ** 2.4
-    return (np.where(x <= 0.04045, lo, hi) * 255.0 + 0.5).astype(np.uint8)
-
-
-def _box_reduce_axis(pixels: np.ndarray, axis: int) -> np.ndarray:
-    """Area-average one image axis to the next legal WebGPU mip extent."""
-
-    size = pixels.shape[axis]
-    target = max(1, size // 2)
-    if size == target:
-        return pixels
-    moved = np.moveaxis(pixels, axis, 0)
-    if size == target * 2:
-        return np.moveaxis(moved.reshape(target, 2, *moved.shape[1:]).mean(axis=1), 0, axis)
-
-    # Odd, non-power-of-two dimensions cannot be reshaped into 2x blocks.
-    # Use exact source-pixel coverage so the final row/column is included
-    # instead of truncating it or prematurely ending the mip chain.
-    edges = np.linspace(0.0, float(size), target + 1, dtype=np.float32)
-    source_lo = np.arange(size, dtype=np.float32)
-    weights = np.maximum(
-        0.0,
-        np.minimum(edges[1:, None], source_lo[None, :] + 1.0)
-        - np.maximum(edges[:-1, None], source_lo[None, :]),
-    )
-    weights /= float(size) / float(target)
-    reduced = np.tensordot(weights, moved, axes=((1,), (0,)))
-    return np.moveaxis(reduced, 0, axis)
-
-
-def _mip_chain(pixels: np.ndarray) -> list[np.ndarray]:
-    """Complete box-filtered mip chain for a (layers, h, w, comps) u8 array."""
-
-    levels = [np.ascontiguousarray(pixels)]
-    while levels[-1].shape[1] > 1 or levels[-1].shape[2] > 1:
-        level = levels[-1].astype(np.float32)
-        level = _box_reduce_axis(level, 1)
-        level = _box_reduce_axis(level, 2)
-        levels.append(np.ascontiguousarray(np.clip(level + 0.5, 0.0, 255.0).astype(np.uint8)))
-    return levels
 
 
 class TextureStore:
@@ -163,7 +120,7 @@ class TextureStore:
             pixels = np.concatenate([pixels, alpha], axis=2)
         if linearize:
             pixels = np.ascontiguousarray(_srgb_to_linear_u8(pixels))
-        levels = _mip_chain(pixels[None])
+        levels = _mip_chain(pixels[None], srgb=data.srgb and not linearize)
         tex = self._device.create_texture(
             size=(w, h, 1),
             format=fmt,
@@ -183,7 +140,7 @@ class TextureStore:
             pixels = np.concatenate([pixels, alpha], axis=3)
         if linearize:
             pixels = np.ascontiguousarray(_srgb_to_linear_u8(pixels))
-        levels = _mip_chain(pixels)
+        levels = _mip_chain(pixels, srgb=data.srgb and not linearize)
         tex = self._device.create_texture(
             size=(size, size, 6),
             format=fmt,

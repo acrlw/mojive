@@ -62,3 +62,11 @@ def test_odd_mip_reduction_includes_last_row_and_column():
     assert levels[1].shape == (1, 1, 2, 1)
     assert np.all(levels[1] > 0)
     assert levels[-1].shape == (1, 1, 1, 1)
+
+
+def test_srgb_mip_averages_light_energy_without_gamma_correcting_alpha():
+    pixels = np.array([[[[0, 0, 0, 0], [255, 255, 255, 255]]]], np.uint8)
+    levels = _mip_chain(pixels, srgb=True)
+    np.testing.assert_array_equal(levels[0], pixels)
+    np.testing.assert_array_equal(levels[1][0, 0, 0], [188, 188, 188, 128])
+    np.testing.assert_array_equal(_mip_chain(pixels)[1][0, 0, 0], [128, 128, 128, 128])

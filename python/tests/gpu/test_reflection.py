@@ -291,3 +291,17 @@ def test_box_reflection_is_confined_to_the_positive_z_face(tmp_path):
     assert int(sides.sum()) > 1000
     assert int((changed & top).sum()) > 200
     assert int((changed & sides).sum()) == 0
+
+
+def test_reflection_survives_shaded_wireframe_round_trip():
+    with OffscreenHarness(resolve("deformables"), W, H) as harness:
+        harness.backend.set_flag(RenderFlag.REFLECTION, True)
+        harness.step_and_render(0)
+        original = harness.backend.target.read_color().copy()
+        harness.backend.set_debug_view(DebugView.WIREFRAME)
+        harness.backend.set_flag(RenderFlag.REFLECTION, False)
+        harness.step_and_render(0)
+        harness.backend.set_debug_view(DebugView.SHADED)
+        harness.backend.set_flag(RenderFlag.REFLECTION, True)
+        harness.step_and_render(0)
+        np.testing.assert_array_equal(harness.backend.target.read_color(), original)

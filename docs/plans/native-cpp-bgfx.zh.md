@@ -40,7 +40,7 @@
 | CJK、HiDPI 和自有设计规范 | 可实现 | 属于 ImGui、字体及 Mojive 组件层；bgfx 不负责布局，也不决定圆角曲线 |
 | 维护成本 | 比三个自研图形后端低，但并非零 | 固定依赖、迁移 shader、维护 ImGui renderer backend，仍需三平台实机验证 |
 
-平台覆盖参考[官方概述](https://bkaradzic.github.io/bgfx/overview.html)。线程和 encoder 的约束参考[线程模型](https://bkaradzic.github.io/bgfx/internals.html)。多窗口能力参考[22-windows 示例](https://github.com/bkaradzic/bgfx/blob/9b636df330c81e11c84595651a291b6c59fb7396/examples/22-windows/windows.cpp)。上述“合适”是架构判断，不是已经通过运行测试。
+平台覆盖参考[官方概述](https://bkaradzic.github.io/bgfx/overview.html)。线程和 encoder 的约束参考[线程模型](https://bkaradzic.github.io/bgfx/internals.html)。多窗口能力参考[22-windows 示例](https://github.com/bkaradzic/bgfx/blob/9b636df330c81e11c84595651a291b6c59fb7396/examples/22-windows/Windows.cpp)。上述“合适”是架构判断，不是已经通过运行测试。
 
 ### 1. 最需要警惕的是回读
 

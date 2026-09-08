@@ -5,7 +5,6 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
-import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -96,8 +95,6 @@ class NativeWindow(Window):
         self._viewport_textures = {}
         self._vertices = np.empty(0, np.uint8)
         self._indices = np.empty(0, np.uint32)
-        self._vsync_interval: float | None = None
-        self._next_frame_at: float | None = None
 
         self.set_vsync(self.config.vsync)
 
@@ -137,34 +134,16 @@ class NativeWindow(Window):
         io.backend_flags |= imgui.BackendFlags_.renderer_has_vtx_offset
         handle, display = self._native_handle()
         self._surface = self.runtime.create_surface(handle, *self.size_pixels, display)
+        self.set_vsync(self._vsync)
 
     def make_current(self) -> None:
         # NO_API window: there is no GL context to make current.
         pass
 
     def set_vsync(self, on: bool) -> None:
-        # The surface requests immediate presentation; software pacing can be
-        # toggled without recreating its swapchain (see _pace_frame).
         self._vsync = bool(on)
-        self._next_frame_at = None
-
-    def _pace_frame(self) -> None:
-        if self._vsync_interval is None:
-            refresh = 0
-            monitor = glfw.get_window_monitor(self._window) or glfw.get_primary_monitor()
-            if monitor:
-                mode = glfw.get_video_mode(monitor)
-                if mode is not None:
-                    refresh = mode.refresh_rate
-            self._vsync_interval = 1.0 / (refresh if refresh > 0 else 60)
-        now = time.perf_counter()
-        target = self._next_frame_at
-        if target is None or now >= target + self._vsync_interval:
-            self._next_frame_at = now + self._vsync_interval  # resync when behind
-            return
-        if now < target:
-            time.sleep(target - now)
-        self._next_frame_at = target + self._vsync_interval
+        if self._surface is not None:
+            self.runtime.set_vsync(self._surface, self._vsync)
 
     def _native_handle(self):
         if sys.platform == "darwin":
@@ -289,8 +268,6 @@ class NativeWindow(Window):
             self.runtime.advance()
             if readback:
                 result = self.read_frame()
-            if self._vsync:
-                self._pace_frame()
         self.device.drain_logs()
         self._frame_index += 1
         return result

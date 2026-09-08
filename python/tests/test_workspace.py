@@ -3413,3 +3413,34 @@ def test_unchanged_model_placement_exits_without_recompiling(monkeypatch) -> Non
     assert compile_count == 0
     assert not session.can_undo
     assert not gizmo.model_placement_active(session, model_id)
+
+
+def test_attached_skin_names_and_materials_remain_distinct() -> None:
+    document = MuJoCoAdapter()
+    document.new_scene()
+    try:
+        document.add_scene_model(ASSETS / "deformables.xml", np.zeros(3), np.eye(3))
+        document.add_scene_model(ASSETS / "deformables.xml", np.array([2, 0, 0]), np.eye(3))
+        model = document.model
+        assert model.nskin == 2
+        names = [model.skin(i).name for i in range(model.nskin)]
+        assert len(set(names)) == 2 and all(name.endswith("ribbon") for name in names)
+        materials = model.skin_matid
+        assert materials[0] != materials[1]
+        assert all(model.mat(int(index)).name.endswith("skin_mat") for index in materials)
+        document.scene_source()
+        needs = FrameNeeds(poses=True, deformables=True)
+        document.prepare_frame(needs)
+        frame = document.frame(needs)
+        assert np.isfinite(frame.geom_xpos).all()
+        skins = [
+            update.positions
+            for key, update in frame.mesh_updates.items()
+            if key.shape is MeshShape.SKIN
+        ]
+        assert len(skins) == 2
+        np.testing.assert_allclose(
+            skins[1] - skins[0], np.broadcast_to([2, 0, 0], skins[0].shape), atol=1e-6
+        )
+    finally:
+        document.release()

@@ -13,7 +13,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-RENDERERS = ("mujoco", "mojive-opengl", "mojive-wgpu")
+RENDERERS = ("mujoco", "mojive-opengl", "mojive-wgpu", "mojive-bgfx")
 WORKLOADS = (
     "primitives",
     "many_objects",
@@ -106,7 +106,7 @@ def _print_report(cases: list[dict[str, object]], output: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preset", choices=("quick", "full"), default="quick")
-    parser.add_argument("--renderers", default=",".join(RENDERERS))
+    parser.add_argument("--renderers", default=",".join(RENDERERS[:3]))
     parser.add_argument("--workloads")
     parser.add_argument("--modes")
     parser.add_argument("--resolutions")

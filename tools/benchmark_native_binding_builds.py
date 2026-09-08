@@ -19,8 +19,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     sources = {
-        "nanobind": Path("cpp/bindings/nanobind.cpp"),
-        "pybind": Path("cpp/bindings/pybind.cpp"),
+        "nanobind": Path("cpp/bindings/Nanobind.cpp"),
+        "pybind": Path("cpp/bindings/Pybind.cpp"),
     }
     records = []
     args.output.parent.mkdir(parents=True, exist_ok=True)

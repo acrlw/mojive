@@ -42,3 +42,12 @@ UI spacing, typography and common widgets belong in Mojive's UI layer. Changes t
 rounding geometry or internal draw paths belong here when its public customization points are
 insufficient. The baseline import does not implement continuous-curvature corners. Existing
 Python `imgui-bundle` remains independent until the native UI bridge is integrated.
+
+## bgfx Metal offscreen sampling
+
+`cpp/cmake/MetalHeadless.cmake` compiles a narrowly modified build-tree copy of the pinned
+Metal renderer. Upstream sampler anisotropy reads the main window swap chain, which is absent
+for an offscreen-only runtime. The patch preserves reset-selected anisotropy independently of
+a swap chain so Viewer and offscreen textures use the same filtering. The submodule remains
+unchanged; CMake fails if the pinned source context no longer matches. Reconcile this patch
+explicitly during a bgfx update and rerun textured tendon and image-light parity.

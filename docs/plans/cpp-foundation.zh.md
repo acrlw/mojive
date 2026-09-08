@@ -28,7 +28,7 @@ C++ 提供舞台和基础设施，Python 负责上层业务、算法选择、工
 
 ## 已确定的规范
 
-- C++：Qt 风格，`SceneFrame`、`setScene()`、`objectId`、私有成员 `mDevice`，复合文件名 `sceneStream.hpp`。不引入 Qt，不加 `Q` 前缀。
+- C++：Qt 风格，`SceneFrame`、`setScene()`、`objectId`、私有成员 `mDevice`，复合文件名 `SceneStream.hpp`。不引入 Qt，不加 `Q` 前缀。
 - Python：保留当前 snake_case API，不要求用户把现有脚本改成驼峰。
 - 目录：`python/src/mojive` 放 Python 包，`python/tests` 放测试；`cpp` 放自有 C++；`thirdParty` 管理上游源码。
 - 默认 C++ 后端：bgfx。标准库契约隔离后端类型，SDL 对比实现保留为可选实验。

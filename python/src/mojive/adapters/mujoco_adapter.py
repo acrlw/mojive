@@ -3057,7 +3057,17 @@ class MuJoCoAdapter(SceneAdapterBase):
                 item.position,
                 item.rotation,
             )
+            skin_start = len(spec.skins)
+            skin_names = {skin.name for skin in child.skins}
+            material_names = {material.name for material in child.materials}
             spec.attach(child, prefix=item.prefix, frame=frame)
+            # MjSpec namespaces skin bone bodies but leaves skin names and material
+            # references unchanged. Limit repair to the newly attached assets.
+            for skin in list(spec.skins)[skin_start:]:
+                if skin.name and skin.name in skin_names:
+                    skin.name = f"{item.prefix}{skin.name}"
+                if skin.material and skin.material in material_names:
+                    skin.material = f"{item.prefix}{skin.material}"
             self._restore_attached_world_targets(spec, item.prefix)
         return spec
 

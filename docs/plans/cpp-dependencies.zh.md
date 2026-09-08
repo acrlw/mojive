@@ -20,8 +20,8 @@ GLM 与 Eigen 都可以处理小矩阵，选择 GLM 是当前图形基础设施�
 
 ## 当前代码说明了什么
 
-- `cpp/src/contracts.cpp` 已使用 GLM 的右手系相机算法，替换验证阶段的手写向量和矩阵公式。输入退化检查、行主序边界及深度契约保留。
-- `cpp/include/mojive/render.hpp` 已有 `SceneSource`、`SceneFrame`、`objectId` 和连续的变换数组。标准库数据契约便于隔离后端，不要求内部也只能用标准库计算。
+- `cpp/src/Contracts.cpp` 已使用 GLM 的右手系相机算法，替换验证阶段的手写向量和矩阵公式。输入退化检查、行主序边界及深度契约保留。
+- `cpp/include/mojive/Render.hpp` 已有 `SceneSource`、`SceneFrame`、`objectId` 和连续的变换数组。标准库数据契约便于隔离后端，不要求内部也只能用标准库计算。
 - Python 的 `Session` 已经负责选择、命令和编辑状态。增加另一份 ECS 世界，首先会产生状态归属、对象映射和同步问题，不能仅凭库的微基准判断收益。
 - `python/src/mojive/log.py` 已用 Loguru；`ui/messages.py` 的 `OutputBuffer` 已是有界、带锁的日志历史。迁移期间它可以订阅原生记录；原生文件输出不以此 Python 面板为前提。
 - 当前日志的 `configure()` 会调用无参数 `logger.remove()`，目前由 CLI 初始化调用。接入原生库时不能把它直接复用到模块导入或每个 Renderer 的构造过程，否则会移除宿主应用配置的 Loguru sink。
@@ -43,7 +43,7 @@ IK、最小二乘、矩阵分解等业务能力由上层 Python 库承担，不�
 
 ## 行主序契约：来源与准确含义
 
-当前实现的证据是：`math3d.compose()` 创建 NumPy 矩阵并将平移写入 `m[:3, 3]`；MuJoCo adapter 把 `xmat` 视作 3×3 矩阵；`math3d.to_gl()` 在 OpenGL 上传边界重新排列数据。原生 `render.hpp` 延续行主序的共享契约，bgfx adapter 内的 `columnMajor()` 负责上传布局转换。
+当前实现的证据是：`math3d.compose()` 创建 NumPy 矩阵并将平移写入 `m[:3, 3]`；MuJoCo adapter 把 `xmat` 视作 3×3 矩阵；`math3d.to_gl()` 在 OpenGL 上传边界重新排列数据。原生 `Render.hpp` 延续行主序的共享契约，bgfx adapter 内的 `columnMajor()` 负责上传布局转换。
 
 NumPy 支持 C-order、F-order 和带 stride 的视图；从普通嵌套序列创建数组时默认采用 C-order。MuJoCo 的矩阵采用行主序。因此当前选择与两者相容，也有利于保留现有 API。仅凭当前代码不能把最初设计动机归因于某一个库，而且两者都不要求 Mojive 内部永远使用同一存储布局。[NumPy 数组布局](https://numpy.org/doc/stable/reference/generated/numpy.array.html)、[MuJoCo 数据布局](https://mujoco.readthedocs.io/en/stable/programming/simulation.html#data-layout)
 

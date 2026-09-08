@@ -43,6 +43,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["python/src/mojive"]
 
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "tools/native_wheel_hook.py"
+
 [tool.hatch.build.targets.wheel.force-include]
 "assets" = "mojive/data/assets"
 

@@ -6,6 +6,7 @@ import moderngl
 import numpy as np
 
 from ...types import MeshData, MeshKey, MeshUpdate, TextureData, TextureType
+from ..texture import srgb_to_linear_u8
 from .instances import GpuMesh
 
 
@@ -70,14 +71,6 @@ def _srgb_internal_format(components: int) -> int | None:
     if components == 3:
         return GL_SRGB8
     return None
-
-
-def srgb_to_linear_u8(pixels: np.ndarray) -> np.ndarray:
-    out = pixels.astype(np.float32) / 255.0
-    rgb = out[..., :3]
-    linear = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
-    out[..., :3] = linear
-    return np.clip(out * 255.0 + 0.5, 0, 255).astype(np.uint8)
 
 
 class TextureStore:

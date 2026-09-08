@@ -268,3 +268,51 @@ def test_texture_orientation_and_incremental_colors_preserve_submitted_readback(
     assert color[44, 20, 2] > max(color[44, 20, :2]) + 100
     assert runtime.wait(runtime.readback(black, native.Product.COLOR)).image[32, 32].max() == 0
     assert runtime.wait(runtime.readback(black, native.Product.OBJECT_ID)).image[32, 32] == 7
+
+
+def test_render_request_prunes_color_and_rejects_unavailable_products(native, runtime):
+    source, transforms, camera = fixture_scene(native)
+    runtime.set_scene(source)
+    runtime.update(transforms)
+    target = runtime.create_target(64, 64)
+    runtime.advance()
+    frame = runtime.render(target, camera, color=False, scene_data=True)
+    stats = runtime.advance()
+    assert stats.draw_calls == 1
+    with pytest.raises(ValueError, match="unavailable"):
+        runtime.readback(frame, native.Product.COLOR)
+    assert runtime.wait(runtime.readback(frame, native.Product.OBJECT_ID)).image.any()
+    frame = runtime.render(target, camera, color=True, scene_data=False)
+    with pytest.raises(ValueError, match="unavailable"):
+        runtime.readback(frame, native.Product.METRIC_DEPTH)
+    assert runtime.wait(runtime.readback(frame, native.Product.COLOR)).image.std() > 10
+    with pytest.raises(ValueError, match="Empty"):
+        runtime.render(target, camera, color=False, scene_data=False)
+
+
+def test_invalid_native_visual_updates_preserve_the_scene(native, runtime):
+    source, transforms, camera = fixture_scene(native)
+    runtime.set_scene(source)
+    runtime.update(transforms)
+    target = runtime.create_target(64, 64)
+    expected = runtime.wait(
+        runtime.readback(runtime.render(target, camera), native.Product.COLOR)
+    ).image
+    lighting = native.Lighting()
+    lighting.image_texture = 0
+    with pytest.raises(ValueError, match="cube texture"):
+        runtime.set_lighting(native.Scene(), lighting)
+    style = native.SceneStyle()
+    style.shadow_quality = 5
+    with pytest.raises(ValueError, match="render mode"):
+        runtime.configure(native.Scene(), style)
+    packet = native.OverlayFrame()
+    surface = native.SurfaceBatch()
+    surface.count = 1
+    packet.surface_batches = [surface]
+    with pytest.raises(ValueError, match="surface batch"):
+        runtime.set_overlays(native.Scene(), packet)
+    actual = runtime.wait(
+        runtime.readback(runtime.render(target, camera), native.Product.COLOR)
+    ).image
+    np.testing.assert_array_equal(expected, actual)

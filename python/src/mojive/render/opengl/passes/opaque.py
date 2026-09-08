@@ -87,7 +87,6 @@ class OpaquePass(BasePass):
         self._spec_used: ProgramSpec | None = None
 
         self._uniforms: UniformCache | None = None
-        self._vao_program: moderngl.Program | None = None
         self._shadow_include: bool | None = None
         self._shadow_checked = -1
         self._light_buffer: moderngl.Buffer | None = None
@@ -178,14 +177,13 @@ class OpaquePass(BasePass):
         self._light_buffer.bind_to_uniform_block(LIGHT_BLOCK_BINDING)
 
     def _ensure_vaos(self, ctx: PassContext, prog: moderngl.Program) -> None:
-        if self._vao_program is prog:
+        if ctx.instances.program is prog:
             return
         ctx.instances.rebuild(ctx.scene, prog, ctx.meshes, ctx.programs.generation)
         if ctx.instances.strategy is Strategy.PER_BUCKET:
             reflection_info = ctx.instances.reflection_info.copy()
             ctx.instances.invalidate_upload()
             ctx.instances.upload(ctx.scene, reflection_info)
-        self._vao_program = prog
 
     def _frame_uniforms(
         self, ctx: PassContext, prog: moderngl.Program, wireframe: bool, use_shadow: bool
@@ -384,7 +382,6 @@ class OpaquePass(BasePass):
         self.program = None
         self._spec_used = None
         self._uniforms = None
-        self._vao_program = None
 
 
 register_pass("opaque", OpaquePass)

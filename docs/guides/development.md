@@ -41,7 +41,7 @@ Mojive-owned C++ uses a Qt-like style without adopting Qt or its `Q` type prefix
 | Parameters, locals and public fields | camelCase | `objectId`, `cameraRevision` |
 | Private class members | `m` + PascalCase | `mDevice`, `mReadbacks` |
 | Namespaces | camelCase | `mojive`, `mojive::bindingProbe` |
-| Compound source filenames | camelCase | `sceneStream.hpp`, `sceneCapture.cpp` |
+| Source filenames | PascalCase | `SceneStream.hpp`, `SceneCapture.cpp` |
 
 Use `.hpp` / `.cpp`, four spaces and the committed `cpp/.clang-format`. The optional
 `cpp/.clang-tidy` names the same identifier rules. Upstream APIs, standard-library names,

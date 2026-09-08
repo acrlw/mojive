@@ -106,8 +106,8 @@ def _state_digest(data):
 
 
 def _gpu_drain(viewer, renderer):
-    if renderer == "wgpu":
-        viewer.backend.device.queue.on_submitted_work_done_sync()
+    if renderer in {"bgfx", "wgpu"}:
+        viewer.backend.target.read_color()
     else:
         viewer.backend.ctx.finish()
 
@@ -553,7 +553,7 @@ def main(argv=None):
     parser.add_argument("--schedule", choices=("paired", "realtime"), default="paired")
     parser.add_argument("--workload", choices=WORKLOADS, default="joint_types")
     parser.add_argument("--workloads", default=",".join(WORKLOADS[:3]))
-    parser.add_argument("--renderer", choices=("opengl", "wgpu"), default="opengl")
+    parser.add_argument("--renderer", choices=("opengl", "wgpu", "bgfx"), default="opengl")
     parser.add_argument("--frames", type=int, default=180)
     parser.add_argument("--steps-per-frame", type=int, default=8)
     parser.add_argument("--warmup", type=int, default=24)
