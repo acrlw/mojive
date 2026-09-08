@@ -8,9 +8,9 @@
 
 ## 后续实验更新
 
-现已在同一 `Renderer` 契约下实现 bgfx 和 SDL3 GPU 两个适配器，并加入 nanobind / pybind11 的独立对照。新 C++ 核心的 Python 薄接口倾向采用 **nanobind**；小调用和数组传参有收益，批量 C++ 内核的耗时则基本相同。MuJoCo 继续使用其官方 pybind11 绑定，通过 NumPy 和 Mojive 自有快照交换数据，不直接混用两套库包装的 C++ 对象。
+**当前选型与验收状态以 [C++ 渲染后端选型结论](native-backend-decision.zh.md) 为准。** 决定使用 bgfx 启动 C++ 生产实现，nanobind 用作 Python 薄接口，SDL GPU 保留为可替换接口的实验对照。已补充原生 MuJoCo 并行、跨 pass 依赖、窗口生命周期、可移植 shader 和 ASan/UBSan 验证。
 
-SDL3 的本次适配器只验证了 macOS / Metal；Windows 和 Linux 的 shader 构建与实机验收仍未完成。标准输出和生命周期测试已复用，原公共契约没有因第二种后端而改变。SDL 在拾取读回上更有优势，但高分辨率连续图像读回不是全面领先。继续保留 bgfx 作为对照，在生产效果、线程调度和三平台验收后再确定默认后端。下面保留初始方案，当前复现方式与范围以[原生验证指南](../guides/native-probe.md)为准。
+Windows/Linux CI 因 GitHub 凭据缺少 workflow 权限尚未执行；物理 GPU、实际高 DPI 和完整生产画质仍是发布与迁移验收条件。以下保留初始提案，不能将早期候选措辞或旧 benchmark 当作最新结论。
 
 ## 先看结论
 

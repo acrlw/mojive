@@ -3,7 +3,7 @@
 The optional `native/` project evaluates a C++ renderer without changing the Python Viewer,
 Session, renderer selection, dependencies, or public rendering APIs. It is an experimental
 subset, not a replacement editor. See the [Chinese migration proposal](../plans/native-cpp-bgfx.zh.md)
-for the broader plan.
+for the broader plan. The [current backend decision](../plans/native-backend-decision.zh.md) selects bgfx for the native implementation and records the latest evidence and remaining platform gates.
 
 ## Boundaries
 
@@ -77,7 +77,7 @@ uses upstream sources with `SHADERC_CONFIG_HAS_TINT=0`, without linking Tint/Daw
 `BGFX_CONFIG_RENDERER_WEBGPU=0` is insufficient: selecting any backend macro also disables
 bgfx's automatic backend selection. No vendor sources are modified.
 
-The SDL option is described below; its current shader coverage is narrower than the bgfx build.
+The SDL option and its offline portable shader pipeline are described below.
 
 On the tested Clang host, `-DMOJIVE_ENABLE_SANITIZERS=ON` instruments Mojive's native code
 with AddressSanitizer and UndefinedBehaviorSanitizer. Disable it for performance runs; vendor
@@ -100,7 +100,7 @@ ImGui's default font rasterizer with the existing font assets; FreeType integrat
 
 The native gallery is a rendering integration fixture. It does not implement the production
 panels or automatic Dear ImGui detached-window callbacks. Secondary surfaces are explicitly
-created and closed; resizing a secondary surface requires recreation in this probe.
+created and closed. Both adapters now resize a secondary surface in place while preserving its public identity.
 
 ## Fixed-trajectory benchmark
 
@@ -169,13 +169,18 @@ make native-benchmark NATIVE_BACKEND=sdl HUMANOIDS_MODEL=/path/to/mujoco/model/h
 
 SDL GPU is a graphics API abstraction with Metal, D3D12, and Vulkan drivers. SDL's window/input
 library and SDL's newer GPU API have different maturity histories. The evaluation currently
-provides **Metal shaders only** and refuses an SDL build on other platforms. A portable shader
-pipeline and real Windows/Linux acceptance are outstanding; SDL's supported-platform list is
-not evidence that this adapter has passed on those platforms. The SDL-only build does not fetch
+uses one set of GLSL sources, compiled to SPIR-V by glslang and translated to MSL/HLSL by
+SPIRV-Cross. Windows additionally compiles HLSL to DXIL with DXC. These tools are build-time
+programs in an isolated CMake project; they are not linked into the SDL runtime. The generated
+MSL path has passed real Metal conformance. SPIR-V generation and HLSL translation do not
+establish Vulkan or D3D12 runtime correctness. A Windows/Linux workflow is prepared, but the
+current GitHub OAuth credentials reject its upload because they lack `workflow` scope;
+those CI builds and platform runtimes have not run. The SDL-only build does not fetch
 bgfx, bx, bimg, or their shader compiler; pass `NATIVE_CMAKE_ARGS=-DMOJIVE_BUILD_BGFX=OFF` to check it.
 
-The gallery keeps GLFW's existing platform and ImGui integration and wraps its native Cocoa
-windows through SDL's public native-window properties. This isolates the GPU comparison from
+The gallery keeps GLFW's existing platform and ImGui integration and wraps native
+windows through SDL's public native-window properties. Cocoa is exercised locally; Win32
+and X11 branches are implemented but remain subject to the blocked platform validation. This isolates the GPU comparison from
 an unrelated event-system rewrite. The wrapper does not own the GLFW window. Both windows
 share a GPU device; the experiment does not require a central daemon or one process per window.
 
@@ -234,7 +239,7 @@ Official references: [MuJoCo Python bindings](https://mujoco.readthedocs.io/en/s
 [SDL native-window properties](https://wiki.libsdl.org/SDL3/SDL_CreateWindowWithProperties).
 
 
-## Measured comparison (2026-09-08)
+## Initial comparison (historical, 2026-09-08)
 
 The same M5/Metal host completed 60 alternating uncapped runs and 12 runs paced at 120 FPS.
 Each combination used three 10-second runs after 90 warmup frames. The table reports median
@@ -251,8 +256,9 @@ throughput of the fixed-trajectory prototype with an explicit two-frame GPU queu
 At 120 FPS in 1080p, pick completion P95 was 19.11 ms with bgfx and
 9.84 ms with SDL. RGB completion P95 was 22.89 ms and
 13.36 ms respectively, but SDL's RGB CPU frame P95 was higher
-(8.33 ms versus 6.40 ms). This supports continuing the SDL picking path while
-retaining bgfx as a comparison; it does not establish a universal SDL performance advantage.
+(8.33 ms versus 6.40 ms). These early results motivated the live-runtime comparison below; the current decision selects
+bgfx while retaining SDL as an experimental adapter. They do not establish a universal SDL
+performance advantage.
 
 The binding comparison used nanobind 3.0.1, pybind11 3.1.0, CPython 3.11.15, NumPy 2.4.6,
 and MuJoCo 3.11.0. Seven alternating runs measured identical shared C++ kernels.
@@ -281,7 +287,9 @@ UI scales, actual secondary surfaces, and renderer-only ASan/UBSan plus Metal AP
 The three-object conformance outputs were bit-identical across backends. Full humanoid color
 captures differed in less than 0.01% of pixels, with mean absolute channel error below 0.00035
 on the 0-255 scale; these captures are not claimed to be bit-identical. SDL's Windows/Linux
-shader path, real 2x framebuffers, production effects, and live native physics remain untested.
+shader runtime, real 2x framebuffers, and production effects remain untested. This paragraph
+records the earlier comparison; live native physics and offline portable shader generation
+were subsequently added by the decision acceptance below.
 The Python regression and strict documentation gates passed. Ten locked dependency archives
 and 8,900 extracted source files matched without vendor patches.
 
@@ -289,3 +297,59 @@ The full local Chinese report is `output/native-probe/sdl-nanobind-report.zh.md`
 run records, CSV samples, and fixed-frame captures are under `sdl-comparison/` and `sdl-paced/`
 within that output directory; binding data is under `bindings/`. Opaque renderer handles are
 scoped to their renderer and must not be transferred between backend instances.
+
+
+## Decision acceptance and live runtime
+
+The final decision adds these reproducible targets:
+
+```bash
+make native-composition NATIVE_BACKEND=bgfx
+make native-windows NATIVE_BACKEND=bgfx
+make native-scene-capture NATIVE_BACKEND=bgfx HUMANOIDS_MODEL=/path/to/100_humanoids.xml
+# Repeat with NATIVE_BACKEND=sdl to use the same tests against SDL GPU.
+```
+
+Composition checks render-to-texture dependencies with the consumer allocated before its
+producer, plus alpha blending, clipping, texture orientation and 120 resource cycles. This
+exposed a real bgfx adapter ordering bug: view allocation order previously dictated execution
+order. The adapter now uses a complete view-order permutation for each submitted frame.
+The patch belongs to Mojive; upstream bgfx files remain unchanged.
+
+The window fixture creates, resizes, minimizes, restores and closes 24 peer windows while
+checking output from the surviving device. `bgfx::updateSwapChain` and SDL's drawable-size
+acquisition preserve surface identity on resize. macOS physical-footprint samples are retained,
+including one after shutdown. Footprint growth is an observation, not a leak-sanitizer pass or
+proof of a leak. `mojive_sdl_window_audit` isolates the SDL-only lifecycle without GLFW, ImGui
+or Mojive rendering code. Actual Retina and cross-monitor behavior remain unverified.
+
+For live physics, provide the MuJoCo Python distribution directory containing `include/` and
+its native shared library. This links the C API directly; the executable does not embed Python.
+The macOS wheel retains a framework install name, so the build supplies a local runtime symlink
+without modifying the wheel.
+
+```bash
+make native-runtime HUMANOIDS_MODEL=/path/to/100_humanoids.xml \
+  NATIVE_CMAKE_ARGS='-DMOJIVE_BUILD_SDL=ON -DMOJIVE_MUJOCO_ROOT=/path/to/site-packages/mujoco'
+```
+
+The runtime first compares all 120 exported poses to native MuJoCo output, including all split
+capsule instances. It then measures 100-humanoid live physics serially and on an independent
+thread. Three preallocated snapshots rotate through producer, completed mailbox and consumer;
+only a completed buffer is exchanged under the lock. Renderer calls stay on their owner thread.
+No `mjData` or writable NumPy view crosses the snapshot boundary.
+
+The matrix alternates both adapters and execution modes across three 10-second repetitions at
+1080p/4x MSAA/120 FPS pacing. Pick-only runs request one pixel each frame. Recording runs use
+one pick every second frame and RGB/depth/segmentation every fourth frame; multi-camera runs
+add a 640x480 camera and RGB every fourth frame. These are 60/30 Hz at 120 FPS; serial runs
+below the cap produce fewer outputs, whose counts remain in the report.
+The final workload waits at a bounded queue when necessary and records every requested output,
+so reduced work cannot masquerade as lower frame cost. Results report frame CPU percentiles,
+simulation steps, snapshot age, observed readback latency (starting before the request API
+call), and completed request counts. This is offscreen throughput, not measured display scanout.
+The earlier drop-on-full experiment is retained separately and is not the final performance
+comparison. Neither test includes production shading or the complete editor.
+
+Final raw reports are under `output/native-probe/runtime/`, `composition-*`, `windows-final-*`,
+and `scene-final-*`. The Chinese delivery report is `output/native-probe/backend-decision.zh.md`.
