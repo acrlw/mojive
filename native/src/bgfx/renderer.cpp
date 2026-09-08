@@ -48,6 +48,7 @@ struct GpuTarget {
     uint64_t generation = 1;
     uint32_t last_render = UINT32_MAX, last_readback = UINT32_MAX;
     FrameToken latest;
+    bgfx::SwapChain swap_chain;
     bgfx::FrameBufferHandle color_fb = BGFX_INVALID_HANDLE, data_fb = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle color = BGFX_INVALID_HANDLE;
     std::array<bgfx::TextureHandle, 4> data;
@@ -73,9 +74,28 @@ class BgfxRenderer final : public Renderer {
     uint64_t sequence_ = 0, submission_ = 0;
     uint32_t gpu_frame_ = 0;
     bool pending_commands_ = false;
+    std::array<bgfx::ViewId, 256> pass_order_{};
+    std::array<bool, 256> used_passes_{};
+    uint16_t pass_count_ = 0;
+    uint32_t main_render_ = UINT32_MAX;
+    void order_pass(bgfx::ViewId view) {
+        if (!used_passes_[view]) {
+            used_passes_[view] = true;
+            pass_order_[pass_count_++] = view;
+        }
+    }
     void flush() {
+        // bgfx sorts views numerically unless explicitly remapped. Preserve API
+        // dependency order even when a sampled target was allocated later.
+        auto count = pass_count_;
+        for (bgfx::ViewId id = 0; id < pass_order_.size(); ++id)
+            if (!used_passes_[id])
+                pass_order_[count++] = id;
+        bgfx::setViewOrder(0, pass_order_.size(), pass_order_.data());
         gpu_frame_ = bgfx::frame();
         pending_commands_ = false;
+        pass_count_ = 0;
+        used_passes_.fill(false);
     }
     void begin_target(GpuTarget &target) {
         if (target.last_render == gpu_frame_ || target.last_readback == gpu_frame_)
@@ -380,11 +400,12 @@ class BgfxRenderer final : public Renderer {
         t.size = window.size;
         t.surface = true;
         t.view = std::distance(views_.begin(), slot) * 4;
-        bgfx::SwapChain surface;
+        auto &surface = t.swap_chain;
         surface.nwh = window.handle;
         surface.ndt = window.display;
         surface.width = window.size.width;
         surface.height = window.size.height;
+        surface.maxFrameLatency = 2;
         t.color_fb = bgfx::createFrameBuffer(surface);
         if (!bgfx::isValid(t.color_fb))
             throw std::runtime_error("Cannot create native surface");
@@ -399,10 +420,17 @@ class BgfxRenderer final : public Renderer {
         auto &t = target(id);
         if (t.size == size)
             return;
-        if (t.surface)
-            throw std::logic_error("Recreate secondary native surfaces when resizing in the probe");
         if (pending_commands_)
             flush();
+        if (t.surface) {
+            t.swap_chain.width = size.width;
+            t.swap_chain.height = size.height;
+            bgfx::updateSwapChain(t.color_fb, t.swap_chain);
+            t.size = size;
+            ++t.generation;
+            t.latest = {};
+            return;
+        }
         cancel(id);
         release_target(t);
         t.size = size;
@@ -436,6 +464,7 @@ class BgfxRenderer final : public Renderer {
                 projection[8 + c] = (projection[8 + c] + projection[12 + c]) * 0.5f;
         projection = column_major(projection);
         for (uint16_t pass = 0; pass < 2; ++pass) {
+            order_pass(t.view + pass);
             bgfx::setViewRect(t.view + pass, 0, 0, t.size.width, t.size.height);
             bgfx::setViewFrameBuffer(t.view + pass, pass ? t.data_fb : t.color_fb);
             bgfx::setViewTransform(t.view + pass, view.data(), projection.data());
@@ -541,6 +570,7 @@ class BgfxRenderer final : public Renderer {
             bgfx::TextureRegion dst{}, src{};
             dst.init(r.textures[i]);
             src.init(source, region.x, y, region.width, region.height);
+            order_pass(t.view + 2);
             bgfx::blit(t.view + 2, dst, src);
             r.ready = bgfx::read(dst, r.bytes[i].data());
         }
@@ -655,6 +685,12 @@ class BgfxRenderer final : public Renderer {
             t.color_only = true;
             token = t.latest = {output, t.generation, scene_.revision, sequence_, 0, ++submission_};
         }
+        if (!output.id) {
+            if (main_render_ == gpu_frame_)
+                flush();
+            main_render_ = gpu_frame_;
+        }
+        order_pass(view);
         bgfx::setViewMode(view, bgfx::ViewMode::Sequential);
         bgfx::setViewRect(view, 0, 0, ui.size.width, ui.size.height);
         bgfx::setViewFrameBuffer(view, framebuffer);
@@ -687,9 +723,10 @@ class BgfxRenderer final : public Renderer {
                                   ui.vertices.size() - command.vertex_offset);
             bgfx::setIndexBuffer(&indices, command.first_index, command.index_count);
             bgfx::setTexture(0, image_sampler_, texture_handle(command.texture));
-            bgfx::setState(
-                BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
-                BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA));
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+                           BGFX_STATE_BLEND_FUNC_SEPARATE(
+                               BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA,
+                               BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA));
             bgfx::submit(view, ui_program_);
         }
         return token;
