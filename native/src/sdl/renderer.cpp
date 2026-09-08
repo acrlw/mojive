@@ -59,7 +59,8 @@ class SdlRenderer final : public Renderer {
     Capabilities caps_;
     SceneSource scene_;
     uint64_t sequence_ = 0, submission_ = 0;
-    std::string shader_source_;
+    std::string shader_directory_;
+    SDL_GPUShaderFormat shader_format_ = SDL_GPU_SHADERFORMAT_INVALID;
     std::vector<MeshData> meshes_;
     std::vector<std::array<float, 28>> instances_;
     std::vector<float> packed_;
@@ -215,10 +216,19 @@ class SdlRenderer final : public Renderer {
     }
     SDL_GPUShader *shader(const char *entry, bool vertex, bool ui) {
         SDL_GPUShaderCreateInfo info{};
-        info.code = reinterpret_cast<const Uint8 *>(shader_source_.c_str());
-        info.code_size = shader_source_.size() + 1;
-        info.entrypoint = entry;
-        info.format = SDL_GPU_SHADERFORMAT_MSL;
+        const char *extension = shader_format_ == SDL_GPU_SHADERFORMAT_MSL    ? ".msl"
+                                : shader_format_ == SDL_GPU_SHADERFORMAT_DXIL ? ".dxil"
+                                                                              : ".spv";
+        std::ifstream file(shader_directory_ + "/" + entry + extension, std::ios::binary);
+        if (!file)
+            throw std::runtime_error("Cannot open SDL shader: " + std::string(entry) + extension);
+        std::string code(std::istreambuf_iterator<char>(file), {});
+        if (shader_format_ == SDL_GPU_SHADERFORMAT_MSL)
+            code.push_back('\0');
+        info.code = reinterpret_cast<const Uint8 *>(code.data());
+        info.code_size = code.size();
+        info.entrypoint = shader_format_ == SDL_GPU_SHADERFORMAT_MSL ? entry : "main";
+        info.format = shader_format_;
         info.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
         info.num_uniform_buffers = vertex ? 1 : 0;
         info.num_samplers = ui && !vertex ? 1 : 0;
@@ -314,10 +324,26 @@ class SdlRenderer final : public Renderer {
     void initialize(const SdlOptions &options) {
         checked(SDL_InitSubSystem(SDL_INIT_VIDEO));
         video_ = true;
-        device_ = checked(SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, false, "metal"));
-        caps_ = {
-            "SDL3 Metal", SDL_GetGPUDeviceDriver(device_), true, true, true, false, false, true,
-            16384};
+#if defined(__APPLE__)
+        shader_format_ = SDL_GPU_SHADERFORMAT_MSL;
+        const char *driver = "metal";
+#elif defined(_WIN32)
+        shader_format_ = SDL_GPU_SHADERFORMAT_DXIL;
+        const char *driver = "direct3d12";
+#else
+        shader_format_ = SDL_GPU_SHADERFORMAT_SPIRV;
+        const char *driver = "vulkan";
+#endif
+        device_ = checked(SDL_CreateGPUDevice(shader_format_, false, driver));
+        caps_ = {std::string("SDL3 ") + SDL_GetGPUDeviceDriver(device_),
+                 "",
+                 true,
+                 true,
+                 true,
+                 false,
+                 false,
+                 true,
+                 16384};
         caps_.integer_target =
             SDL_GPUTextureSupportsFormat(device_, SDL_GPU_TEXTUREFORMAT_R32_UINT,
                                          SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);
@@ -326,10 +352,7 @@ class SdlRenderer final : public Renderer {
                                          SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);
         caps_.device = SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device_),
                                              SDL_PROP_GPU_DEVICE_NAME_STRING, "Unknown GPU");
-        std::ifstream file(options.shader_directory + "/sdl.metal");
-        if (!file)
-            throw std::runtime_error("Cannot open SDL Metal shaders");
-        shader_source_.assign(std::istreambuf_iterator<char>(file), {});
+        shader_directory_ = options.shader_directory;
         SDL_GPUSamplerCreateInfo sampler{};
         sampler.min_filter = sampler.mag_filter = SDL_GPU_FILTER_LINEAR;
         sampler.address_mode_u = sampler.address_mode_v = sampler.address_mode_w =
@@ -461,9 +484,17 @@ class SdlRenderer final : public Renderer {
         if (!window.handle)
             throw std::invalid_argument("Missing native window");
         auto props = checked(SDL_CreateProperties());
+#if defined(__APPLE__)
         checked(SDL_SetPointerProperty(props, SDL_PROP_WINDOW_CREATE_COCOA_WINDOW_POINTER,
                                        window.handle));
         checked(SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_METAL_BOOLEAN, true));
+#elif defined(_WIN32)
+        checked(SDL_SetPointerProperty(props, SDL_PROP_WINDOW_CREATE_WIN32_HWND_POINTER,
+                                       window.handle));
+#else
+        checked(SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X11_WINDOW_NUMBER,
+                                      reinterpret_cast<uintptr_t>(window.handle)));
+#endif
         auto *wrapped = SDL_CreateWindowWithProperties(props);
         SDL_DestroyProperties(props);
         checked(wrapped);
