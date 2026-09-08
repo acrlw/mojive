@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     )
     from .config import (
         CameraInputConfig,
+        CameraTrackingConfig,
         InteractionConfig,
         LayoutConfig,
         PanelConfig,
@@ -140,6 +141,7 @@ _EXPORT_MODULES = {
     ),
     ".config": (
         "CameraInputConfig",
+        "CameraTrackingConfig",
         "InteractionConfig",
         "LayoutConfig",
         "PanelConfig",
@@ -211,6 +213,7 @@ __all__ = [
     "Bounds",
     "CameraInfo",
     "CameraInputConfig",
+    "CameraTrackingConfig",
     "CameraView",
     "Canvas2D",
     "CanvasLayer2D",

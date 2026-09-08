@@ -59,6 +59,39 @@ class CameraInputConfig:
 
 
 @dataclass(frozen=True)
+class CameraTrackingConfig:
+    """World axes and position smoothing for the editor camera's tracking target.
+
+    ``smoothing`` is the error half-life in wall-clock seconds: zero follows
+    immediately. ``xy`` holds the camera height; ``xyz`` also follows height.
+    """
+
+    axes: str = "xy"
+    smoothing: float = 0.25
+
+    def __post_init__(self) -> None:
+        if self.axes not in ("xy", "xyz"):
+            raise ValueError("tracking axes must be 'xy' or 'xyz'")
+        if not math.isfinite(self.smoothing) or self.smoothing < 0:
+            raise ValueError("tracking smoothing must be finite and nonnegative")
+
+    @classmethod
+    def from_mapping(cls, value: object) -> CameraTrackingConfig:
+        source = value if isinstance(value, Mapping) else {}
+        defaults = cls()
+        axes = source.get("axes", defaults.axes)
+        if axes not in ("xy", "xyz"):
+            axes = defaults.axes
+        try:
+            smoothing = float(source.get("smoothing", defaults.smoothing))
+        except (TypeError, ValueError):
+            smoothing = defaults.smoothing
+        if not math.isfinite(smoothing) or smoothing < 0:
+            smoothing = defaults.smoothing
+        return cls(axes=axes, smoothing=smoothing)
+
+
+@dataclass(frozen=True)
 class SelectionInputConfig:
     """Configure pointer gestures that change or focus scene selection."""
 
@@ -263,12 +296,14 @@ class ViewerConfig:
     viewport_overlays: ViewportOverlayConfig = field(default_factory=ViewportOverlayConfig)
     layers: ViewportLayers = field(default_factory=ViewportLayers)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
+    tracking: CameraTrackingConfig = field(default_factory=CameraTrackingConfig)
     shadow_quality: ShadowQuality | str | None = None
     threaded_physics: bool = True
 
 
 __all__ = [
     "CameraInputConfig",
+    "CameraTrackingConfig",
     "InteractionConfig",
     "LayoutConfig",
     "PanelConfig",

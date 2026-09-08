@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
@@ -496,6 +496,20 @@ class OrbitCamera:
         sink.set_camera(v)
         self._dirty = False
         return v
+
+    def translate(self, delta: np.ndarray) -> None:
+        """Move eye and pivot together, retaining projection, roll, and orbit animation."""
+        self._pivot += delta
+        if self._exact_view is not None:
+            self._exact_view = replace(
+                self._exact_view,
+                eye=self._exact_view.eye + delta,
+                target=self._exact_view.target + delta,
+            )
+        if self._anim is not None and self._anim_start is not None:
+            self._anim.pivot += delta
+            self._anim_start.pivot += delta
+        self._dirty = True
 
     def _touch(self) -> None:
         self._exact_view = None

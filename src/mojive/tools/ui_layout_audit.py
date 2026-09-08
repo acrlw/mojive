@@ -148,7 +148,12 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
             filename = f"{target.lower()}-{width}-{category.lower() or 'layout'}.png"
             _save_window_crop(viewer, target, folder / filename, padding=3.0)
             if target == "Camera":
-                labels = ("##camera-projection-0", "##camera-projection-1")
+                labels = (
+                    "##camera-projection-0",
+                    "##camera-projection-1",
+                    "X-Y##tracking-axes-0",
+                    "X-Y-Z##tracking-axes-1",
+                )
             elif category == "Rendering":
                 labels = tuple(
                     f"{translate(label)}##shadow-quality-{i}"
