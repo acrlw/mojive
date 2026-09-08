@@ -2,9 +2,9 @@
 
 Mojive remains a Python package. `mojive.Renderer`, `SceneRenderer`, Viewer entry points and
 existing snake_case methods remain the user-facing API. C++ supplies selected implementation
-workloads; a future private `mojive._native` extension will sit behind the Python facade.
-The current C++ tools are acceptance fixtures, not a replacement standalone product or an
-already-integrated Python renderer.
+workloads through the private `mojive._native` extension. Select `renderer="bgfx"` in the
+existing Python API or run `make native-viewer`; the C++ tools remain acceptance fixtures,
+not a replacement standalone product.
 
 ## Source layout
 
@@ -64,10 +64,10 @@ make cpp-test
 make cpp-probe
 ```
 
-Python installation remains a pure-Python Hatch build for this preparation step. Its wheel
-contains the existing Python package, shaders and bundled assets; it does not yet contain the
-native renderer. Native wheel integration is a subsequent feature with its own compatibility
-and distribution checks.
+The default Hatch wheel remains pure Python. `make native-wheel-test` explicitly builds a
+platform wheel with the native extension, compiled shaders and dependency licenses, then
+installs it in isolation and renders through the public Python API. Local native builds do not
+replace the installed Python package; Make selects the extension with `MOJIVE_NATIVE_BUILD`.
 
 `cpp-*` targets are convenient entry points; the earlier `native-*` acceptance commands remain
 available. C++ builds use fresh `output/cpp-build`, `output/cpp-core-build` and
@@ -95,8 +95,8 @@ outside the current roadmap. EnTT requires a demonstrated infrastructure need. G
 
 ## Private native extension
 
-The optional `mojive._native` module is built separately and is not registered as a public
-renderer backend. GLM camera calculations preserve the existing row-major contract. The native
+The optional `mojive._native` module is built separately behind the public bgfx backend.
+GLM camera calculations preserve the existing row-major contract. The native
 log supports independent cursors and optional rotating file output without changing host logging.
 An offscreen `RenderRuntime` owns one native backend thread, bounded dispatch and joined teardown;
 Python calls release the GIL while waiting. Window event handling remains a platform concern.
@@ -113,7 +113,9 @@ four image products, array ownership, cross-thread callers, cancellation, initia
 interpreter shutdown and the official 100-humanoid scene. Captures are written under
 `output/cpp-python/bgfx/`. No extension is copied into an existing Python installation.
 
-The current native backend still has one scene per runtime, simplified shading and a process-wide
-bgfx device reservation. Independent public Renderer instances, full render feature parity,
-`out` buffers, wheel packaging and UI integration remain acceptance gates before registration.
-See the [implementation checklist (Chinese)](../plans/cpp-implementation.zh.md).
+Independent public Renderer instances and windows share a process-wide device while owning
+separate scenes, targets and readback lifetimes. Static output reuse invalidates on geometry,
+lighting, style, camera and target changes; separately updated overlays disable color reuse.
+Native texture preparation releases the GIL and transfers immutable upload storage to bgfx.
+See the [Viewer guide (Chinese)](../how-to/native-viewer.zh.md) for public usage and the
+[acceptance record (Chinese)](../plans/native-renderer-parity.zh.md) for measured coverage and limits.

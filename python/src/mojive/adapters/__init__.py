@@ -24,6 +24,7 @@ from .base import (
     SensorInfo,
     VisualGroupInfo,
 )
+from .worlds import WorldInstances
 
 if TYPE_CHECKING:
     from .mujoco_adapter import MuJoCoAdapter
@@ -68,4 +69,5 @@ __all__ = [
     "SensorInfo",
     "VisualGroupInfo",
     "WorkspaceAdapter",
+    "WorldInstances",
 ]
