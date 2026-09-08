@@ -41,6 +41,7 @@ nav:
       - Renderer: RENDERER.md
       - Batch rendering for RL: BATCH_RENDERING.md
       - Platform support: PLATFORM.md
+      - Native C++ proposal (中文): plans/native-cpp-bgfx.zh.md
   - API reference:
       - API map: api/index.md
       - Public package exports: api/public.md
