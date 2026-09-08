@@ -1,0 +1,32 @@
+"""Check that native contracts and common consumers stay independent of graphics vendors."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+VENDOR_INCLUDE = re.compile(r"#\s*include\s*[<\"](?:(?:bgfx|bx|bimg|GLFW)/|imgui[_.])")
+
+
+def main() -> None:
+    """Reject backend or UI dependencies in the common native boundary."""
+    files = [
+        *sorted((ROOT / "native/include/mojive").glob("*.hpp")),
+        *sorted((ROOT / "native/src").glob("*.cpp")),
+        *sorted((ROOT / "native/tests").glob("*.cpp")),
+    ]
+    errors = []
+    for path in files:
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            if VENDOR_INCLUDE.search(line):
+                errors.append(
+                    f"{path.relative_to(ROOT)}:{number}: vendor dependency in common code"
+                )
+    if errors:
+        raise SystemExit("\n".join(errors))
+    print(f"Native layering passed: {len(files)} common headers, sources, and tests")
+
+
+if __name__ == "__main__":
+    main()

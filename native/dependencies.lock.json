@@ -1,0 +1,39 @@
+{
+  "bgfx_cmake": {
+    "repo": "bkaradzic/bgfx.cmake",
+    "commit": "297c84a6ca5a43c0840059b2169ed05ff288c42c",
+    "url": "https://codeload.github.com/bkaradzic/bgfx.cmake/tar.gz/297c84a6ca5a43c0840059b2169ed05ff288c42c",
+    "sha256": "07aa70322e9af3ccf653b4e3823e24079229ed4beaa6b96c3e5387d58d7f299f"
+  },
+  "bgfx": {
+    "repo": "bkaradzic/bgfx",
+    "commit": "8c8b6b5692be5054e89d2a59640c50b9319c9425",
+    "url": "https://codeload.github.com/bkaradzic/bgfx/tar.gz/8c8b6b5692be5054e89d2a59640c50b9319c9425",
+    "sha256": "4f9c24a11376a2ebb9a5192ba0c530a162736e901249ac196c80238e266aeba0"
+  },
+  "bimg": {
+    "repo": "bkaradzic/bimg",
+    "commit": "ddbeeae05779f84f97694553eb41605a60f86f0a",
+    "url": "https://codeload.github.com/bkaradzic/bimg/tar.gz/ddbeeae05779f84f97694553eb41605a60f86f0a",
+    "sha256": "290f736a93960e17f26bc80179c702598231db3b0c34ac0b0f0d8a87ea1ad039"
+  },
+  "bx": {
+    "repo": "bkaradzic/bx",
+    "commit": "98ad3bec2a7ee1a5cbabdcabc25252572dcb1d88",
+    "url": "https://codeload.github.com/bkaradzic/bx/tar.gz/98ad3bec2a7ee1a5cbabdcabc25252572dcb1d88",
+    "sha256": "1c9cd3b2434904fe24b5079327999912b3ed737b106caf82f6678f1f6026568f"
+  },
+  "glfw": {
+    "repo": "glfw/glfw",
+    "commit": "7b6aead9fb88b3623e3b3725ebb42670cbe4c579",
+    "url": "https://codeload.github.com/glfw/glfw/tar.gz/7b6aead9fb88b3623e3b3725ebb42670cbe4c579",
+    "sha256": "169d49096e339caabbc12e1762273c5cb9130a535a282ba46cf5c14ab6e55694"
+  },
+  "imgui": {
+    "repo": "ocornut/imgui",
+    "commit": "b48d1afbe8ee8b238e2961dc363a949dd7304e23",
+    "tag": "v1.92.9b-docking",
+    "url": "https://codeload.github.com/ocornut/imgui/tar.gz/b48d1afbe8ee8b238e2961dc363a949dd7304e23",
+    "sha256": "747c5a465a05c4ef5b4a09e2e0e3d0ce2bc76b31420f0f5af33df470907cf893"
+  }
+}
