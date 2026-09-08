@@ -71,3 +71,46 @@ visible to attached viewers. Frames should never refer to geometry from an unpub
 
 Snapshot streams and `.fvs` recordings use pickle and require trusted input. Use trusted peers
 and files; this transport does not provide authentication or a safe untrusted-data decoder.
+
+## Negotiating write-back
+
+Each `RemoteStructure` carries `protocol_version` and `command_versions`. A mismatched stream
+revision fails the connection before its scene is used. Write-back capabilities are the
+intersection of advertised adapter features and wire operations supported at the same exact
+revision. A missing or unknown command revision withdraws that operation; legacy structures
+without a command manifest remain readable but expose no unnegotiated write-back. Supported
+capabilities refresh when a new structure arrives. Files, model imports and source editing are
+not offered by this snapshot channel. Those operations require a separately authorized control
+interface with its own discovery contract.
+
+`get_capabilities` / `describe_operations` belong to the JSON control RPC interface; the binary
+snapshot channel has its own manifest. Backend version strings are diagnostic metadata, not
+permission to send a newer command. Unknown operations are rejected rather than silently mapped
+to a similarly named engine function. The existing trusted-peer restriction still applies.
+
+For a reproducible two-process transport stress test, run:
+
+```bash
+make g1-worlds-transport MENAGERIE_ROOT=/path/to/mujoco_menagerie
+```
+
+This downloads a checksum-pinned Unitree CSV, replays independent random phases, and measures
+1024/2048/4096 worlds over localhost TCP. The publisher targets 120 Hz and the consumer samples
+at 30 Hz. Reports include full pose bytes, snapshot age, publication time and coalesced frames.
+These are transport measurements without rendering, not WAN latency or reinforcement-learning
+throughput. The test owns its server and never connects to an existing viewer session.
+
+To include the consumer's GPU work, run the separate end-to-end target:
+
+```bash
+make g1-worlds-monitor-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie
+make g1-worlds-monitor-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie \
+  ARGS="--renderer opengl --output output/g1-worlds-monitor-opengl"
+```
+
+Both use original meshes unless an explicit LOD is requested. This path reports receive-time
+snapshot age and completed-image age separately, including renderer update and RGB readback.
+The publisher and renderer execute in separate processes; the consumer takes the latest frame
+instead of accumulating a playback queue. These local monotonic-clock measurements do not
+measure display scanout or unsynchronized clocks on separate hosts. The parent stops only its
+own publisher after sampling finishes.

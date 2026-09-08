@@ -268,7 +268,7 @@ gpu:
 
 GPU_WGPU_FILES := python/tests/gpu/test_input_ownership.py python/tests/gpu/test_scene_renderer.py python/tests/gpu/test_renderer_api.py python/tests/gpu/test_control_rpc_capture.py python/tests/gpu/test_hidpi.py python/tests/gpu/test_horizon_haze.py python/tests/gpu/test_shading.py python/tests/gpu/test_shadows.py python/tests/gpu/test_reflection.py python/tests/gpu/test_outline.py python/tests/gpu/test_tendon.py python/tests/gpu/test_debugdraw.py python/tests/gpu/test_gizmo.py python/tests/gpu/test_pipeline.py python/tests/gpu/test_viewer_wgpu.py python/tests/gpu/test_static_viewer.py python/tests/gpu/test_model_loading.py python/tests/gpu/test_ui_interaction.py python/tests/gpu/test_ui_layout_input.py python/tests/gpu/test_wgpu_shader_reload.py
 GPU_WGPU_FILES += python/tests/gpu/test_passive.py
-GPU_WGPU_FILES += python/tests/gpu/test_camera_tracking.py
+GPU_WGPU_FILES += python/tests/gpu/test_camera_tracking.py python/tests/gpu/test_input_mapping.py
 GPU_WGPU_FILES += python/tests/gpu/test_keyframe_timeline.py
 ## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
@@ -858,7 +858,7 @@ cpp-python:
 	cmake --build $(CPP_PYTHON_BUILD) --parallel $(NATIVE_JOBS)
 
 cpp-python-test: cpp-python
-	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(CPP_PYTHON_BUILD))" $(PYTEST) -q python/bindingTests/test_native.py
+	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(CPP_PYTHON_BUILD))" $(PYTEST) -q python/bindingTests/test_native.py python/bindingTests/test_native_mesh_processing.py
 
 .PHONY: cpp-python-gpu
 cpp-python-gpu:
@@ -912,3 +912,32 @@ native-corpus-parity: native-python-build
 .PHONY: native-window-benchmark
 native-window-benchmark: native-python-build
 	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.native_window_benchmark $(ARGS)
+
+.PHONY: native-ui-parity
+native-ui-parity: native-python-build
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.native_ui_parity $(ARGS)
+
+.PHONY: native-load-benchmark
+native-load-benchmark: native-python-build
+	MOJIVE_NATIVE_BUILD="$(NATIVE_BUILD)" $(PY) -m mojive.tools.native_load_benchmark --root "$(MENAGERIE_ROOT)" $(ARGS)
+
+.PHONY: native-editor-benchmark
+native-editor-benchmark: native-python-build
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.native_editor_benchmark --root "$(MENAGERIE_ROOT)" $(ARGS)
+
+# Reproducible monitoring stress: pinned motion, independent worlds, shared resources.
+G1_MODEL ?= $(MENAGERIE_ROOT)/unitree_g1/scene.xml
+G1_WORLDS ?= 1024
+.PHONY: g1-worlds g1-worlds-benchmark g1-worlds-transport
+g1-worlds: native-python-build
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.g1_worlds --model "$(G1_MODEL)" --download --view --count $(G1_WORLDS) $(ARGS)
+
+g1-worlds-benchmark: native-python-build
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.g1_worlds --model "$(G1_MODEL)" --download $(ARGS)
+
+g1-worlds-transport:
+	$(PY) -m mojive.tools.g1_worlds --model "$(G1_MODEL)" --download --transport-only $(ARGS)
+
+.PHONY: g1-worlds-monitor-benchmark
+g1-worlds-monitor-benchmark: native-python-build
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.g1_worlds --model "$(G1_MODEL)" --download --monitor --output output/g1-worlds-monitor $(ARGS)

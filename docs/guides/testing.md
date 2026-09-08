@@ -20,7 +20,9 @@ matrix; other agent guidance links here.
 | Native Viewer | `make native-viewer-test HUMANOIDS_MODEL=/path/to/100_humanoids.xml` | public Python products, independent scenes, asynchronous readback, window lifecycle and advancing dense physics |
 | Native render parity | `make native-parity`, `make native-model-parity HUMANOIDS_MODEL=/path/to/100_humanoids.xml` | matched OpenGL/wgpu/bgfx color, depth, identity, feature effects, deformable updates and pose restoration |
 | Native motion and corpus | `make native-motion-parity`, `make native-corpus-parity MENAGERIE_ROOT=/path/to/mujoco_menagerie` | continuous close panning/orbit/zoom, object color checks, all local model loads and eight-view comparisons |
-| Native window cadence | `make native-window-benchmark` | real-window VSync on/off frame timing and same-frame camera publication; run separately from other checks |
+| Native UI parity | `make native-ui-parity` | fractional axis-label motion, CJK/Latin atlas filtering and ImGui antialiasing at normal and 150% scale |
+| Native load latency | `make native-load-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie` | isolated model processes, source/resource/first-frame timings and repeated loads against OpenGL |
+| Native window cadence | `make native-window-benchmark` | real-window pan/orbit/dolly timing with VSync on/off and same-frame camera publication; run separately from other checks |
 | Native feature lifecycle | `make native-features-test` | cache invalidation, camera capture, pending readbacks and resource reuse |
 | Native distribution | `make native-spirv`, `make native-wheel-test` | Vulkan shader compilation and installed platform wheel rendering without development paths |
 | Native bindings | `make native-bindings-test` | isolated pybind11/nanobind behavior, MuJoCo coexistence, ownership, and GIL release |
@@ -193,6 +195,21 @@ enum values and core `MOJIVE_*` variables, requires every example in both catalo
 missing snippet or asset paths. The strict site build rejects broken links, unresolved API modules,
 and documentation warnings.
 
+## Native loading and UI diagnostics
+
+`make native-load-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie` starts a fresh
+process for each model/backend, then performs three queued loads through an initialized Viewer.
+The first process load and same-process reloads are reported separately. OS file caches are not
+purged. Source preparation, resource preparation, first-frame submission, readback readiness and
+the longest UI frame are distinct metrics; readback bounds GPU readiness but does not measure
+physical scanout. The benchmark reads the already submitted window image rather than rendering
+a second frame. Run it separately from performance and GPU checks.
+
+`make native-ui-parity` captures OpenGL and bgfx through actual windows. It clicks all four
+horizontal axis endpoints, checks that moving labels retain fractional positions relative to the
+axis balls, and compares English/CJK glyphs, rounded outlines and multiple line widths at 100%
+and 150% UI scale. Review the PNG comparisons and axis animation under `output/native-ui-parity/`.
+
 ## MuJoCo model corpus
 
 `make mujoco-model-suite` compiles, adapts, and renders the XML files under the configured model
@@ -225,3 +242,37 @@ The scene and material goldens were refreshed on 2026-09-05 after reviewing the 
 migration, correcting generated primitive texture coordinates and clamping lighting before
 texture modulation. The corresponding MuJoCo reference comparison retains its separate
 approximate renderer-parity thresholds; it does not promise pixel-identical MuJoCo shading.
+
+## Composed-model editor latency
+
+`make native-editor-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie` creates an empty
+workspace, adds a floor and MS-Human-700, then selects, previews placement, captures/loads/removes
+keyframes, composes Go2, applies MJCF, removes a model, and exercises Undo/Redo. Use
+`ARGS="--backend opengl --output output/editor-opengl"` for the reference backend. Run each
+backend separately from GPU tests and other benchmarks. `--hidden` isolates editor/render work
+from visible presentation; report it separately from visible-window measurements.
+
+Selection must cause zero scene resource uploads. Reports distinguish synchronous public command
+latency from queued UI edit completion and longest UI frame; background compilation does not make
+the underlying compile instantaneous. Images capture the selected human and composed workspace.
+
+## Independent-world and input acceptance
+
+`make g1-worlds-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie` compares small, detailed
+G1 captures before timing 1024/2048/4096 independent worlds. Geometry is shared and motion
+phases are seeded. Default runs retain original meshes; explicit `--mesh-ratio` / `--mesh-error`
+runs use the same LOD in both renderers and must keep separate output directories. Render timing
+includes completed RGB readback. Backend draw-call statistics have different scopes and must not
+be compared as if they counted identical passes. Unavailable GPU timers are reported as null.
+
+`make g1-worlds` is the interactive acceptance entry point; `make g1-worlds-transport` measures
+separate publisher and receiver processes over loopback without rendering.
+`make g1-worlds-monitor-benchmark` adds completed GPU output and reports both receive-time
+and completed-image age. Run the two backend variants serially with identical mesh quality. See the
+[native Viewer guide](../how-to/native-viewer.zh.md#g1-world) for input data and limitations.
+
+`make native-editor-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie ARGS="--gallery"`
+also captures the expanded 700-actuator component table and mouse mapping settings after
+completing its timed operations. `python/tests/gpu/test_input_mapping.py` exercises changed
+navigation, multi-button acquisition/release, unsupported perturbation, and panel/slider remaps
+through actual windows. Run these with `MOJIVE_RENDERER=opengl`, `wgpu`, and `bgfx` as applicable.

@@ -87,6 +87,8 @@ Python 面板和用户回调仍受 GIL 约束。当前没有引入 daemon、远�
 make native-parity
 make native-motion-parity
 make native-window-benchmark
+make native-ui-parity
+make native-load-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie
 make native-corpus-parity MENAGERIE_ROOT=/path/to/mujoco_menagerie
 make native-model-parity HUMANOIDS_MODEL=/path/to/mujoco/model/humanoid/100_humanoids.xml
 make native-viewer-test HUMANOIDS_MODEL=/path/to/mujoco/model/humanoid/100_humanoids.xml
@@ -99,8 +101,74 @@ make native-wheel-test
 
 `native-motion-parity` 保存连续近景平移、环绕、缩放的逐帧 PNG、并排动画和指标；`native-corpus-parity` 通过公开 MuJoCo Renderer 逐个加载本地模型，默认在单采样下严格对照八个视角的 RGB 和分割，MSAA 图像另由 motion／Viewer 验收覆盖；生成每模型最差视角、总览图和失败清单。缺少依赖或非独立 XML 片段会单独报告，不能计作通过。
 
-`native-window-benchmark` 在真实可见窗口中分别开启／关闭 VSync，测量连续平移的 CPU 提交帧时间，并检查相机变更在同一帧送到渲染器。这不是光子延迟测量，CPU 提交 FPS 也不等于显示器实际呈现 FPS。测量时避免同时运行其他 GPU 验收。
+`native-window-benchmark` 在真实可见窗口中分别开启／关闭 VSync，测量连续平移、环绕和缩放的 CPU 提交帧时间，并检查相机变更在同一帧送到渲染器。这不是光子延迟测量，CPU 提交 FPS 也不等于显示器实际呈现 FPS。测量时避免同时运行其他 GPU 验收。
+
+`native-ui-parity` 检查轴球与文字在点击转场中的连续相对位置，以及中文／英文、圆角轮廓和线条的抗锯齿。`native-load-benchmark` 在独立进程中比较十种 Menagerie 机器人的首次加载与同进程重复加载，分别记录解析、资源准备、首帧提交和首帧可读取的时间；不会把解析时间当作整个等待时间，也不会把 GPU 读回时间称为实际屏幕显示时间。系统文件缓存未清除。
+
+原生纹理使用仓库已有的 stb resize，在释放 GIL 后生成线性光 mipmap；较大的纹理集合使用有界线程池。完成的像素数据以不可变共享存储交给上传任务，避免额外复制，并保证调用方释放后 GPU 仍能读取。
 
 `native-wheel-test` 构建平台专用 wheel，安装到独立目录，移除开发环境变量后实际渲染。安装这个 wheel 后无需设置 `MOJIVE_NATIVE_BUILD`。普通 `uv build` 仍生成原有纯 Python 包；只有显式设置 `MOJIVE_NATIVE_WHEEL_BUILD` 才附带扩展、shader 和原生依赖许可证。当前 wheel 匹配构建机器的 Python ABI、架构和操作系统版本，不是跨平台通用包。
 
 本机实测为 macOS／Metal，包括 Retina 2× framebuffer 和 150% 中文 UI。Vulkan 的全部 shader 已编译为 SPIR-V；Linux／Vulkan 和 Windows／D3D12 的实际设备运行仍需在对应机器验收。Linux 窗口当前使用 X11（Wayland 桌面可经 XWayland），尚未提供原生 Wayland 窗口路径。
+
+## 鼠标映射和后端能力
+
+Settings → Interaction 的 Mouse gestures 和现有键盘映射共用一份输入配置。可以选择
+Mojive、Blender、Unity、Unreal、MuJoCo 的视角操作预设，也可以为每项编辑组合，例如
+`alt+left; middle`、`left+right`、`shift+right`、`left:double`。分号分隔替代操作；回车应用；
+清空表示解绑。视口、时间轴、面板、滑块和工具栏具有各自的操作上下文，同一上下文冲突会拒绝保存。
+预设只覆盖导航习惯，不表示完整复制对应软件的所有工具、第一人称导航或快捷键。
+
+```python
+viewer.configure_navigation_preset("Blender")
+viewer.configure_pointer_binding("camera.pan", ("left+right",))
+viewer.configure_pointer_binding("timeline.pan", ("middle",), persist=True)
+```
+
+拖动开始后保留取得操作权的按钮组合，释放其中一个按钮结束组合拖动，并等剩余按钮全部释放后
+再接受新的场景操作。修改映射也会更新状态提示。普通 ImGui 控件激活、文本编辑和系统菜单快捷键
+仍遵循控件及平台约定；新语义鼠标操作应通过 `PointerAction` 接入，不要在处理器里新增按钮常量。
+
+模型导入入口由当前物理适配器的格式声明决定，不再统一假设 MJCF / URDF。
+未实现扰动的后端不会启用对应鼠标操作；公共命令、扩展能力和 RPC 版本要求见
+[适配器契约](custom-adapter.md#capability-and-version-contracts)。
+
+## G1 多 world 演示与压力测试
+
+```bash
+make g1-worlds MENAGERIE_ROOT=/path/to/mujoco_menagerie G1_WORLDS=1024
+make g1-worlds-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie
+make g1-worlds-transport MENAGERIE_ROOT=/path/to/mujoco_menagerie
+make g1-worlds-monitor-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie
+```
+
+前两个目标编译原生扩展。演示默认使用 bgfx；`ARGS="--renderer opengl"` 可切换交互演示。
+原始精度是默认值。基准先比较 1、4、16 个机器人近景的 RGB、深度和身份，再计时
+1024、2048、4096 个 world。动作来自 Unitree 官方 `unitree_rl_mjlab` 的
+`dance1_subject2.csv`（Apache-2.0，提交 `1425b15f73bd4095f0df53709d7c389c3eb9e790`），
+下载后验证 SHA-256；不会执行下载的脚本。模型使用本地 Menagerie 的 `unitree_g1/scene.xml`。
+
+这是独立姿态回放，非 4096 个物理仿真，也不是训练性能。每个 world 有独立随机起始相位，
+固定种子，默认间距 7 m。网格资源共享，绘制按实例分批。1024 个原始机器人已经包含约
+4.03 亿个三角形／场景 pass，不能期待仅改用 C++ 就能以 120 FPS 绘制。
+
+可显式评估 meshoptimizer LOD：
+
+```bash
+make g1-worlds-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie \
+  ARGS="--mesh-ratio .01 --mesh-error .05 --output output/g1-worlds-lod"
+```
+
+误差上限包含法线和 UV 属性的约束，实际减面比例可能高于目标。它不等价于像素误差，
+更不能保证近景看不出差异。LOD 只在显式请求时生成，两种后端使用同一份结果；原始网格不会覆盖。
+报告区分姿态更新、renderer 更新、完整 GPU 输出及读回、首帧和内存。显示帧率、物理吞吐、
+离屏输出吞吐和传输延迟分别报告，不能互相替代。
+
+`g1-worlds-transport` 只测传输；`g1-worlds-monitor-benchmark` 在独立发布进程之外，
+还执行接收、renderer 更新、GPU 绘制和完整图像读回。两者都使用 localhost TCP、120 Hz
+目标发布速率和 30 Hz 目标接收速率。报告分别记录取到快照时的年龄和 GPU 图像完成时的年龄；
+后者包含渲染等待，仍不是屏幕扫描延迟。`ARGS="--renderer opengl"` 可运行 OpenGL 对照。
+所有进程由本次测试创建并在结束时关闭，不会附着到已有 session。
+
+原生阴影 pass 对每级光源视锥做保守包围盒剔除，保留相交物体；移动、负缩放和动态网格更新
+会刷新包围盒。它不改变原始网格精度，颜色和反射 pass 不使用这项剔除。
