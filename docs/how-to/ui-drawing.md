@@ -190,13 +190,13 @@ Transform and joint gizmos use this same implementation.
 
 | Change | Focused evidence |
 | --- | --- |
-| Reference profile, bounds, sampling, or cache | `tests/test_curves2d.py` |
-| Implicit connector, hole topology, or tessellation | `tests/test_draglink2d.py` |
-| Submission, AA, winding, or vertex offsets | `tests/test_draw2d.py` |
-| Gizmo appearance and interaction | `tests/test_gizmo.py`, `tests/gpu/test_gizmo.py`, `make gizmo-gallery` |
-| Radius/smoothing controls | `tests/gpu/test_ui_corner_controls.py`, `make ui-corners-gallery` |
-| Retained primitives and bridge | `tests/test_debugdraw.py`, `tests/gpu/test_debugdraw.py`, `examples/debug_draw.py` |
-| Dependency boundaries | `tests/test_layering.py` |
+| Reference profile, bounds, sampling, or cache | `python/tests/test_curves2d.py` |
+| Implicit connector, hole topology, or tessellation | `python/tests/test_draglink2d.py` |
+| Submission, AA, winding, or vertex offsets | `python/tests/test_draw2d.py` |
+| Gizmo appearance and interaction | `python/tests/test_gizmo.py`, `python/tests/gpu/test_gizmo.py`, `make gizmo-gallery` |
+| Radius/smoothing controls | `python/tests/gpu/test_ui_corner_controls.py`, `make ui-corners-gallery` |
+| Retained primitives and bridge | `python/tests/test_debugdraw.py`, `python/tests/gpu/test_debugdraw.py`, `examples/debug_draw.py` |
+| Dependency boundaries | `python/tests/test_layering.py` |
 
 Finish with the applicable gates in the [verification matrix](../guides/testing.md#change-mapping).
 Use `make g3-benchmark` for CPU shape/submission cases and `make ui-frame-profile` for an actual

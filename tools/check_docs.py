@@ -13,21 +13,21 @@ from mojive.render.backend import DebugView, RenderFlag
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_MODULES = (
-    "src/mojive/types.py",
-    "src/mojive/commands.py",
-    "src/mojive/adapters/base.py",
-    "src/mojive/adapters/conformance.py",
-    "src/mojive/scene.py",
-    "src/mojive/composition.py",
-    "src/mojive/session.py",
-    "src/mojive/renderer.py",
-    "src/mojive/render/backend.py",
-    "src/mojive/render/debugdraw.py",
-    "src/mojive/recording.py",
-    "src/mojive/remote.py",
-    "src/mojive/control_rpc.py",
-    "src/mojive/scene_io.py",
-    "src/mojive/workspace_io.py",
+    "python/src/mojive/types.py",
+    "python/src/mojive/commands.py",
+    "python/src/mojive/adapters/base.py",
+    "python/src/mojive/adapters/conformance.py",
+    "python/src/mojive/scene.py",
+    "python/src/mojive/composition.py",
+    "python/src/mojive/session.py",
+    "python/src/mojive/renderer.py",
+    "python/src/mojive/render/backend.py",
+    "python/src/mojive/render/debugdraw.py",
+    "python/src/mojive/recording.py",
+    "python/src/mojive/remote.py",
+    "python/src/mojive/control_rpc.py",
+    "python/src/mojive/scene_io.py",
+    "python/src/mojive/workspace_io.py",
 )
 SNIPPET = re.compile(r'--8<--\s+["\']([^"\']+)["\']')
 ASSET_REFERENCE = re.compile(
@@ -36,13 +36,13 @@ ASSET_REFERENCE = re.compile(
 )
 CURRENT_DOCS = (ROOT / "README.md", ROOT / "examples/README.md")
 CONFIG_ENV_MODULES = (
-    "src/mojive/composition.py",
-    "src/mojive/renderer.py",
-    "src/mojive/ui/app.py",
-    "src/mojive/ui/fonts.py",
-    "src/mojive/ui/localization.py",
-    "src/mojive/ui/window.py",
-    "src/mojive/ui/window_wgpu.py",
+    "python/src/mojive/composition.py",
+    "python/src/mojive/renderer.py",
+    "python/src/mojive/ui/app.py",
+    "python/src/mojive/ui/fonts.py",
+    "python/src/mojive/ui/localization.py",
+    "python/src/mojive/ui/window.py",
+    "python/src/mojive/ui/window_wgpu.py",
 )
 MOJIVE_ENV = re.compile(r'["\'](MOJIVE_[A-Z0-9_]+)["\']')
 

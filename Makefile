@@ -187,7 +187,7 @@ ui-corners:
 	$(PY) design/tools/render_ui_feasibility.py --interactive --page geometry --geometry-tab corners $(ARGS)
 
 ui-corners-gallery:
-	$(PYTEST) -q -m gpu tests/gpu/test_ui_corner_controls.py -k tab_focus
+	$(PYTEST) -q -m gpu python/tests/gpu/test_ui_corner_controls.py -k tab_focus
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --smoothing 0 -o output/g3-controls/corners-000.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --smoothing 0.6 -o output/g3-controls/corners-060.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --smoothing 1 -o output/g3-controls/corners-100.png
@@ -198,19 +198,19 @@ ui-corners-gallery:
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab playback -o output/g3-controls/playback-aligned.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab workspaces -o output/g3-controls/workspaces.png
 	$(PY) design/tools/render_ui_feasibility.py --page panels -o output/g3-controls/panels.png
-	MOJIVE_BACKEND=opengl $(PYTEST) -q -m gpu tests/gpu/test_debugdraw.py -k screen_arrows
-	MOJIVE_BACKEND=wgpu $(PYTEST) -q -m gpu tests/gpu/test_debugdraw.py -k screen_arrows
+	MOJIVE_BACKEND=opengl $(PYTEST) -q -m gpu python/tests/gpu/test_debugdraw.py -k screen_arrows
+	MOJIVE_BACKEND=wgpu $(PYTEST) -q -m gpu python/tests/gpu/test_debugdraw.py -k screen_arrows
 
 ## Lint, formatting, and CPU tests.
 check: lint test
 
 lint:
-	$(RUFF) check src tests tools examples
-	$(RUFF) format --check src tests tools examples
+	$(RUFF) check python tools examples
+	$(RUFF) format --check python tools examples
 
 fmt:
-	$(RUFF) check --fix src tests tools examples
-	$(RUFF) format src tests tools examples
+	$(RUFF) check --fix python tools examples
+	$(RUFF) format python tools examples
 
 docs:
 	uv run --extra docs mkdocs build --strict --site-dir output/site
@@ -242,14 +242,14 @@ test-physics:
 test-all: test test-physics gpu gpu-wgpu
 
 mjcf-roundtrip:
-	$(PYTEST) -q -m physics tests/test_workspace.py -k 'mjcf_export or exports_formatted or export_current_pose'
+	$(PYTEST) -q -m physics python/tests/test_workspace.py -k 'mjcf_export or exports_formatted or export_current_pose'
 
 ## Isolate files because OpenGL and physics libraries own process-global registries.
 gpu:
-	@for f in $$(ls tests/gpu/test_*.py); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
+	@for f in $$(ls python/tests/gpu/test_*.py); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
 
-GPU_WGPU_FILES := tests/gpu/test_input_ownership.py tests/gpu/test_scene_renderer.py tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py tests/gpu/test_hidpi.py tests/gpu/test_horizon_haze.py tests/gpu/test_shading.py tests/gpu/test_shadows.py tests/gpu/test_reflection.py tests/gpu/test_outline.py tests/gpu/test_tendon.py tests/gpu/test_debugdraw.py tests/gpu/test_gizmo.py tests/gpu/test_pipeline.py tests/gpu/test_viewer_wgpu.py tests/gpu/test_static_viewer.py tests/gpu/test_model_loading.py tests/gpu/test_ui_interaction.py tests/gpu/test_ui_layout_input.py tests/gpu/test_wgpu_shader_reload.py
-GPU_WGPU_FILES += tests/gpu/test_passive.py
+GPU_WGPU_FILES := python/tests/gpu/test_input_ownership.py python/tests/gpu/test_scene_renderer.py python/tests/gpu/test_renderer_api.py python/tests/gpu/test_control_rpc_capture.py python/tests/gpu/test_hidpi.py python/tests/gpu/test_horizon_haze.py python/tests/gpu/test_shading.py python/tests/gpu/test_shadows.py python/tests/gpu/test_reflection.py python/tests/gpu/test_outline.py python/tests/gpu/test_tendon.py python/tests/gpu/test_debugdraw.py python/tests/gpu/test_gizmo.py python/tests/gpu/test_pipeline.py python/tests/gpu/test_viewer_wgpu.py python/tests/gpu/test_static_viewer.py python/tests/gpu/test_model_loading.py python/tests/gpu/test_ui_interaction.py python/tests/gpu/test_ui_layout_input.py python/tests/gpu/test_wgpu_shader_reload.py
+GPU_WGPU_FILES += python/tests/gpu/test_passive.py
 ## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
 gpu-wgpu:
@@ -257,21 +257,21 @@ gpu-wgpu:
 
 egl:
 	@test "$$(uname -s)" = Linux || { echo 'make egl requires Linux'; exit 2; }
-	MOJIVE_GL=egl $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
+	MOJIVE_GL=egl $(PYTEST) -q -m gpu python/tests/gpu/test_renderer_api.py
 
 .PHONY: scene-renderer
 scene-renderer:
 	$(PY) examples/offscreen_scene.py
 
 renderer-api:
-	$(PYTEST) -q tests/test_renderer_api.py
-	$(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
+	$(PYTEST) -q python/tests/test_renderer_api.py
+	$(PYTEST) -q -m gpu python/tests/gpu/test_renderer_api.py
 	$(PY) -m mojive.tools.renderer_api
 
 ## Same Renderer API checks against the wgpu backend.
 renderer-api-wgpu:
-	MOJIVE_RENDERER=wgpu $(PYTEST) -q tests/test_renderer_api.py
-	MOJIVE_RENDERER=wgpu $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
+	MOJIVE_RENDERER=wgpu $(PYTEST) -q python/tests/test_renderer_api.py
+	MOJIVE_RENDERER=wgpu $(PYTEST) -q -m gpu python/tests/gpu/test_renderer_api.py
 	MOJIVE_RENDERER=wgpu $(PY) -m mojive.tools.renderer_api
 
 renderer-benchmark:
@@ -365,39 +365,39 @@ model-loading:
 	$(PY) -m mojive.tools.model_loading $(ARGS)
 
 model-composition:
-	$(PYTEST) -q -m physics tests/test_adapter.py -k 'mjspec_model_composition'
+	$(PYTEST) -q -m physics python/tests/test_adapter.py -k 'mjspec_model_composition'
 	$(PY) -m mojive.tools.model_composition $(ARGS)
 
 editor-performance:
-	$(PYTEST) -q -m physics tests/test_editor_performance.py
+	$(PYTEST) -q -m physics python/tests/test_editor_performance.py
 	$(PY) -m mojive.tools.editor_performance $(ARGS)
 
 stability: rpc-soak format-validation
-	$(PYTEST) -q -m physics tests/test_stability.py
-	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py -k 'multi_camera_concurrency'
+	$(PYTEST) -q -m physics python/tests/test_stability.py
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu python/tests/gpu/test_renderer_api.py -k 'multi_camera_concurrency'
 	$(PY) -m mojive.tools.stability $(ARGS)
 
 rpc-soak:
-	$(PYTEST) -q -m physics tests/test_control_rpc.py -k 'reuses_one_connection or recovers_after_invalid or idle_connection or reconnects_on_the_call'
+	$(PYTEST) -q -m physics python/tests/test_control_rpc.py -k 'reuses_one_connection or recovers_after_invalid or idle_connection or reconnects_on_the_call'
 
 format-validation:
-	$(PYTEST) -q tests/test_recording.py
-	$(PYTEST) -q -m physics tests/test_scene_state.py -k 'version or current or future'
+	$(PYTEST) -q python/tests/test_recording.py
+	$(PYTEST) -q -m physics python/tests/test_scene_state.py -k 'version or current or future'
 
 scene-io:
 	$(PY) -m mojive.tools.scene_io $(ARGS)
 
 editor-files:
-	$(PYTEST) -q tests/test_static_scene.py -k 'document_commands'
+	$(PYTEST) -q python/tests/test_static_scene.py -k 'document_commands'
 	$(PY) -m mojive.tools.scene_io $(ARGS)
 
 entity-edit:
-	$(PYTEST) -q tests/test_static_scene.py -k 'entity_lifecycle'
-	$(PYTEST) -q -m gpu tests/gpu/test_static_viewer.py -k 'editor_actions'
+	$(PYTEST) -q python/tests/test_static_scene.py -k 'entity_lifecycle'
+	$(PYTEST) -q -m gpu python/tests/gpu/test_static_viewer.py -k 'editor_actions'
 
 undo-redo:
-	$(PYTEST) -q tests/test_static_scene.py -k 'undo_redo or history or edit_transaction'
-	$(PYTEST) -q -m gpu tests/gpu/test_static_viewer.py -k 'undo_redo'
+	$(PYTEST) -q python/tests/test_static_scene.py -k 'undo_redo or history or edit_transaction'
+	$(PYTEST) -q -m gpu python/tests/gpu/test_static_viewer.py -k 'undo_redo'
 
 remote-authoring:
 	$(PY) -m mojive.tools.remote_authoring $(ARGS)
@@ -444,7 +444,7 @@ editor:
 	MOJIVE_RENDERER=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) $(PY) -m mojive.cli editor $(ARGS)
 
 workspace-edit:
-	$(PYTEST) -q tests/test_workspace.py tests/test_scene_entities.py
+	$(PYTEST) -q python/tests/test_workspace.py python/tests/test_scene_entities.py
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor $(ARGS)
 
 ## Programmatic scene, OpenGL rendering, and the standard UI.
@@ -476,15 +476,15 @@ many-lights:
 	$(PY) -m mojive.tools.mujoco_many_lights $(ARGS)
 
 material-parity:
-	$(PYTEST) -q tests/test_builder.py tests/test_scene.py
+	$(PYTEST) -q python/tests/test_builder.py python/tests/test_scene.py
 	$(PY) -m mojive.tools.material_parity $(ARGS)
 
 material-parity-accept:
 	$(PY) -m mojive.tools.material_parity --accept $(ARGS)
 
 shadow-scheduling:
-	$(PYTEST) -q tests/test_light_schedule.py
-	$(PYTEST) -q -m gpu tests/gpu/test_shadows.py -k 'eight_local or local_light_indices'
+	$(PYTEST) -q python/tests/test_light_schedule.py
+	$(PYTEST) -q -m gpu python/tests/gpu/test_shadows.py -k 'eight_local or local_light_indices'
 	$(PY) -m mojive.tools.shadow_scheduling $(ARGS)
 
 scene-icons:
@@ -492,7 +492,7 @@ scene-icons:
 		--enable-render camera --enable-render light $(ARGS)
 
 scene-entities:
-	$(PYTEST) -q tests/test_scene_entities.py
+	$(PYTEST) -q python/tests/test_scene_entities.py
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.scene_entities $(ARGS)
 
 ## World anchors, screen offsets, alignment, and depth modes with the UI font.
@@ -545,18 +545,18 @@ snapshot-replay:
 	$(PY) -m mojive.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) --title "Mojive replay" $(ARGS)
 
 camera-state:
-	$(PY) -m pytest -q -m physics tests/test_scene_state.py -k camera
+	$(PY) -m pytest -q -m physics python/tests/test_scene_state.py -k camera
 	$(PY) -m mojive.tools.scene_state $(ARGS)
 
 scene-snapshot:
-	$(PY) -m pytest -q -m physics tests/test_scene_state.py
+	$(PY) -m pytest -q -m physics python/tests/test_scene_state.py
 	$(PY) -m mojive.tools.scene_state $(ARGS)
 
 cli:
-	$(PYTEST) -q -m physics tests/test_control_rpc.py
+	$(PYTEST) -q -m physics python/tests/test_control_rpc.py
 
 rpc: cli
-	$(PYTEST) -q -m "gpu or physics" tests/gpu/test_control_rpc_capture.py
+	$(PYTEST) -q -m "gpu or physics" python/tests/gpu/test_control_rpc_capture.py
 	$(PY) -m mojive.tools.control_rpc
 
 .PHONY: agent-control agent-viewer
@@ -666,7 +666,7 @@ local-shadow-precision:
 		"$(LOCAL_SHADOW_SCENE)"
 
 shadow-quality:
-	$(PYTEST) -q tests/test_cascades.py tests/test_panels.py -k shadow_quality
+	$(PYTEST) -q python/tests/test_cascades.py python/tests/test_panels.py -k shadow_quality
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.shadow_quality $(ARGS)
 
 AUDIT_SCENE ?= mujoco_visuals
@@ -760,10 +760,10 @@ clean:
 	rm -rf out .pytest_cache **/__pycache__
 
 # Optional native renderer evaluation; the Python application remains independent.
-NATIVE_BUILD ?= output/native-build
+NATIVE_BUILD ?= output/cpp-build
 NATIVE_BACKEND ?= bgfx
 NATIVE_OUTPUT ?= output/native-probe/$(NATIVE_BACKEND)
-NATIVE_BINDINGS_BUILD ?= output/native-bindings-build
+NATIVE_BINDINGS_BUILD ?= output/cpp-bindings-build
 NATIVE_JOBS ?= 4
 NATIVE_SCENE ?= output/native-probe/humanoids100.mjvp
 NATIVE_FONT_LATIN ?= $(HOME)/Library/Caches/mojive/fonts/JetBrainsMono-Regular.ttf
@@ -771,14 +771,14 @@ NATIVE_FONT_CJK ?= $(HOME)/Library/Caches/mojive/fonts/NotoSansSC-Regular.otf
 
 .PHONY: native-build native-test native-probe native-fixture native-gallery native-benchmark
 native-build:
-	cmake -S native -B $(NATIVE_BUILD) -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_SDL=$(if $(filter sdl,$(NATIVE_BACKEND)),ON,OFF) $(NATIVE_CMAKE_ARGS)
+	cmake -S cpp -B $(NATIVE_BUILD) -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_SDL=$(if $(filter sdl,$(NATIVE_BACKEND)),ON,OFF) $(NATIVE_CMAKE_ARGS)
 	cmake --build $(NATIVE_BUILD) --parallel $(NATIVE_JOBS)
 
 native-test:
 	$(PY) tools/check_native_layers.py
-	cmake -S native -B output/native-core-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_BGFX=OFF -DMOJIVE_BUILD_SDL=OFF -DMOJIVE_BUILD_BINDINGS=OFF
-	cmake --build output/native-core-build --parallel $(NATIVE_JOBS)
-	ctest --test-dir output/native-core-build --output-on-failure
+	cmake -S cpp -B output/cpp-core-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_BGFX=OFF -DMOJIVE_BUILD_SDL=OFF -DMOJIVE_BUILD_BINDINGS=OFF
+	cmake --build output/cpp-core-build --parallel $(NATIVE_JOBS)
+	ctest --test-dir output/cpp-core-build --output-on-failure
 
 native-probe: native-build
 	$(NATIVE_BUILD)/mojive_native_probe $(NATIVE_BUILD)/shaders $(NATIVE_OUTPUT) $(NATIVE_BACKEND)
@@ -795,11 +795,11 @@ native-benchmark: native-build native-fixture
 
 .PHONY: native-bindings native-bindings-test native-bindings-benchmark
 native-bindings:
-	cmake -S native -B $(NATIVE_BINDINGS_BUILD) -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_BGFX=OFF -DMOJIVE_BUILD_SDL=OFF -DMOJIVE_BUILD_BINDINGS=ON -DPython_EXECUTABLE="$(abspath $(PY))" $(NATIVE_BINDINGS_CMAKE_ARGS)
+	cmake -S cpp -B $(NATIVE_BINDINGS_BUILD) -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_BGFX=OFF -DMOJIVE_BUILD_SDL=OFF -DMOJIVE_BUILD_BINDINGS=ON -DPython_EXECUTABLE="$(abspath $(PY))" $(NATIVE_BINDINGS_CMAKE_ARGS)
 	cmake --build $(NATIVE_BINDINGS_BUILD) --parallel $(NATIVE_JOBS)
 
 native-bindings-test: native-bindings
-	PYTHONPATH="$(NATIVE_BINDINGS_BUILD)/bindings" $(PYTEST) -q native/tests/test_bindings.py
+	PYTHONPATH="$(NATIVE_BINDINGS_BUILD)/bindings" $(PYTEST) -q python/bindingTests/test_bindings.py
 
 native-bindings-benchmark: native-bindings native-fixture
 	$(PY) tools/benchmark_native_bindings.py --modules "$(NATIVE_BINDINGS_BUILD)/bindings" --model "$(HUMANOIDS_MODEL)" --scene "$(NATIVE_SCENE)" $(ARGS)
@@ -817,3 +817,14 @@ native-runtime: native-build native-fixture
 .PHONY: native-scene-capture
 native-scene-capture: native-build native-fixture
 	$(NATIVE_BUILD)/mojive_native_scene_capture $(NATIVE_BUILD)/shaders "$(NATIVE_SCENE)" $(NATIVE_OUTPUT) $(NATIVE_BACKEND)
+
+# C++ development entry points; native-* targets remain available for prior scripts.
+.PHONY: cpp-deps cpp-build cpp-test cpp-probe cpp-gallery
+cpp-deps:
+	git submodule update --init --depth 1
+	$(PY) tools/check_dependencies.py
+
+cpp-build: native-build
+cpp-test: native-test
+cpp-probe: native-probe
+cpp-gallery: native-gallery

@@ -31,7 +31,7 @@ programmatic scenes, remote publishers, and snapshot replay enter through scene 
 - `Session` owns application state, selection, overrides, and command routing.
 - Mojive scene entities own cameras, lights, materials, and authoring metadata.
 - Physics adapters own simulation state and capability-specific write-back.
-- `tests/test_layering.py` enforces dependency boundaries.
+- `python/tests/test_layering.py` enforces dependency boundaries.
 
 ## Coordinate conventions
 
@@ -87,3 +87,14 @@ view does not create an additional approval step.
 - Preserve unrelated working-tree changes.
 - Use concise imperative English commit subjects.
 - Group commits by coherent behavior.
+
+## Python and C++ development
+
+- Python remains the public product API under `python/src/mojive`; keep existing snake_case names
+  and behavior compatible. C++ implementation sources live in `cpp`, with neutral contracts and
+  private backends. Read `docs/guides/development.md` for naming and local build commands.
+- Mojive-owned C++ uses PascalCase types, camelCase functions/fields/files and `m` + PascalCase
+  private members. Preserve upstream and standard-library spellings. Never reformat vendor code.
+- `thirdParty/imgui` is tracked, editable source; other core dependencies are pinned submodules.
+  Maintain dependency provenance and focused customization history as described in
+  `thirdParty/README.md`. Repository setup does not require workflow CI.

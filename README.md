@@ -222,6 +222,11 @@ See the [remote viewing tutorial](docs/tutorials/remote-viewing.md) and
 
 ## Development
 
+Mojive remains a Python package: its public API lives in `python/src/mojive`, and selected native
+implementation work lives in `cpp`. Upstream sources are managed under `thirdParty`. See the
+[Python/C++ development guide](docs/guides/development.md) for Qt-style C++ naming, dependency
+setup and the boundary between the current Python API and native preparation.
+
 For custom widgets, icons, or diagnostics, start with [Extend UI drawing](docs/how-to/ui-drawing.md)
 for module ownership, API examples, coordinate units, caching, and focused verification.
 

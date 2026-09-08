@@ -13,14 +13,14 @@ from pathlib import Path
 def main() -> None:
     """Recompile each wrapper in alternating order, retaining the common kernel."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--build", type=Path, default=Path("output/native-bindings-build"))
+    parser.add_argument("--build", type=Path, default=Path("output/cpp-bindings-build"))
     parser.add_argument(
         "--output", type=Path, default=Path("output/native-probe/bindings/build-cost.json")
     )
     args = parser.parse_args()
     sources = {
-        "nanobind": Path("native/bindings/nanobind.cpp"),
-        "pybind": Path("native/bindings/pybind.cpp"),
+        "nanobind": Path("cpp/bindings/nanobind.cpp"),
+        "pybind": Path("cpp/bindings/pybind.cpp"),
     }
     records = []
     args.output.parent.mkdir(parents=True, exist_ok=True)

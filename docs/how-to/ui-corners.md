@@ -2,8 +2,8 @@
 
 Mojive's custom UI uses curvature ramps for rounded rectangles, playback and tool capsules,
 rounded arrowheads, small rounded Scale handles, Snap, mouse hints, and stroke caps. The geometry lives in
-`src/mojive/curves2d.py`; ImGui and PNG export consume the same paths. Implicit hollow connectors
-live in `src/mojive/draglink2d.py`. The [drawing extension guide](ui-drawing.md) maps API entry
+`python/src/mojive/curves2d.py`; ImGui and PNG export consume the same paths. Implicit hollow connectors
+live in `python/src/mojive/draglink2d.py`. The [drawing extension guide](ui-drawing.md) maps API entry
 points, module responsibilities, coordinates, and verification for new widgets and diagnostics.
 
 ## Native ImGui controls

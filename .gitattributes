@@ -1,0 +1,3 @@
+# Preserve the exact upstream baseline, including its original whitespace and line endings.
+thirdParty/imgui/** -text -whitespace
+thirdParty/** linguist-vendored

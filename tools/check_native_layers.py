@@ -14,9 +14,9 @@ VENDOR_INCLUDE = re.compile(
 def main() -> None:
     """Reject backend or UI dependencies in the common native boundary."""
     files = [
-        *sorted((ROOT / "native/include/mojive").glob("*.hpp")),
-        *sorted((ROOT / "native/src").glob("*.cpp")),
-        *sorted((ROOT / "native/tests").glob("*.cpp")),
+        *sorted((ROOT / "cpp/include/mojive").glob("*.hpp")),
+        *sorted((ROOT / "cpp/src").glob("*.cpp")),
+        *sorted((ROOT / "cpp/tests").glob("*.cpp")),
     ]
     errors = []
     for path in files:

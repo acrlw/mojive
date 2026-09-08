@@ -40,7 +40,7 @@ Pure prose, link, and metadata edits use their own rows instead of the CPU or GP
 | Registered regression invariant | its focused regression test | `make reverse` |
 | Documentation or executable examples | relevant document/example checks | `make docs-check` |
 | Instruction or Skill wording, links, or metadata | scope and reference review | [Skill validation](../how-to/agent-workflows.md#skill-maintenance) when applicable |
-| Scene-control task decisions, operation behavior, or acceptance examples | relevant operation tests, such as `tests/test_operations.py` | `make agent-control`; also `make agent-viewer` when viewer attachment or presented capture is affected |
+| Scene-control task decisions, operation behavior, or acceptance examples | relevant operation tests, such as `python/tests/test_operations.py` | `make agent-control`; also `make agent-viewer` when viewer attachment or presented capture is affected |
 
 Markers may be combined. A file-format test that compiles MuJoCo uses both `integration` and
 `physics`; it runs in the physics layer. A Skill behavior change still uses the scene-control row
@@ -79,7 +79,7 @@ A scripted gallery can supply the evidence when it covers the same behavior.
 and Chinese at normal and 150% UI scale. It checks horizontal containment, complete Shadow
 quality labels, and Transform height after reflow. Images and measured bounds are written to
 `output/ui-layout-audit/`; inspect the images as well as the assertions. The native input
-regressions in `tests/gpu/test_ui_layout_input.py` exercise dock splitters, popup dismissal,
+regressions in `python/tests/gpu/test_ui_layout_input.py` exercise dock splitters, popup dismissal,
 checkbox label/keyboard activation, and the timeline's distinct wheel and right-drag gestures.
 
 Golden comparison and baseline updates are separate actions. Scope them to the affected cases:
@@ -97,7 +97,7 @@ make golden ARGS='showcase'
 
 Omit `ARGS` for the full set. The agent can update a baseline for an intended change within the
 task after inspecting the difference; do not refresh unrelated references or relax thresholds
-merely to make checks pass. Reviewed references remain in `tests/golden/`; generated comparisons
+merely to make checks pass. Reviewed references remain in `python/tests/golden/`; generated comparisons
 and reports stay under `output/`.
 
 When a task produces visual results, include clickable absolute paths to representative images,
@@ -135,7 +135,7 @@ it is distinct from the production latest-state policy. Pass `--production` to m
 Session runtime, and `--renderer wgpu` to select the other backend.
 
 Thread ownership, pause/step/history, command fences, model replacement, controls, replay, and
-failure recovery are covered by `tests/test_threaded_physics.py`. Default viewer startup and
+failure recovery are covered by `python/tests/test_threaded_physics.py`. Default viewer startup and
 model-loading interaction additionally run through the GPU suites.
 
 The quick renderer benchmark compares `mujoco.Renderer`, Mojive OpenGL, and Mojive wgpu through
@@ -205,7 +205,7 @@ test failures.
 
 ## Direct backend product comparisons
 
-`tests/gpu/test_backend_parity.py` renders the same textured and transparent scene with both
+`python/tests/gpu/test_backend_parity.py` renders the same textured and transparent scene with both
 backends, in linear and MuJoCo classic modes. RGB allows a mean difference below one display
 level and p99 at most five levels; object-ID and segmentation disagreement must stay below 0.1%
 of pixels; metric depth p99 on shared visible pixels must stay below 1e-4 world units. The test
