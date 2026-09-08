@@ -85,3 +85,11 @@ Read the repository's `thirdParty/README.md` before editing an upstream source t
 Dear ImGui is tracked directly to make custom drawing changes reviewable alongside Mojive.
 Its first import has no local behavior patches. The native library and Python `imgui-bundle`
 are separate until integration; editing the former does not change the latter's installed wheel.
+
+The [native dependency plan (Chinese)](../plans/cpp-dependencies.zh.md) recommends GLM for
+graphics math and spdlog for runtime-owned native output and bounded log history. Python can
+publish records, configure output and subscribe through optional Loguru/logging bridges; native
+output must not depend on a Python consumer. C++ provides rendering and runtime infrastructure;
+business algorithms and extension policy remain in Python. Eigen and native business solvers are
+outside the current roadmap. EnTT requires a demonstrated infrastructure need. These recommended
+libraries are not yet dependencies in the current build.
