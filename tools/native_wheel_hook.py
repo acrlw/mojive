@@ -43,3 +43,9 @@ class NativeWheelHook(BuildHookInterface):
                 if path.is_file():
                     includes[str(path)] = "mojive/nativeLicenses/" + name + ".txt"
                     break
+        includes[str(Path(self.root) / "thirdParty/bgfx/3rdparty/meshoptimizer/LICENSE.md")] = (
+            "mojive/nativeLicenses/meshoptimizer.txt"
+        )
+        includes[str(Path(self.root) / "thirdParty/stbImageResizeLicense.txt")] = (
+            "mojive/nativeLicenses/stbImageResize.txt"
+        )

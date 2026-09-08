@@ -1,9 +1,11 @@
 #include <cstring>
 #include <mojive/RenderRuntime.hpp>
+#include <mojive/Texture.hpp>
 #include <mojive/backends/Bgfx.hpp>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/array.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
@@ -25,23 +27,29 @@ template <class T> nb::object ownedArray(const void *bytes, std::initializer_lis
     auto *data = storage.release();
     return nb::cast(nb::ndarray<nb::numpy, T>(data->data(), shape, owner));
 }
-nb::object imageArray(const ReadbackResult &result) {
+template <class T>
+nb::object imageView(ReadbackResult &result, std::initializer_list<size_t> shape) {
+    // The completed result owns these bytes independently of the GPU/runtime.
+    // Let NumPy retain that result instead of copying every exported image.
+    return nb::cast(nb::ndarray<nb::numpy, T>(reinterpret_cast<T *>(result.image.pixels.data()),
+                                              shape, nb::find(result)));
+}
+nb::object imageArray(ReadbackResult &result) {
     if (result.state != ReadbackState::Ready)
         return nb::none();
     const auto &image = result.image;
     const size_t h = image.size.height, w = image.size.width;
-    const auto *data = image.pixels.data();
     switch (image.product) {
     case Product::Color:
-        return ownedArray<uint8_t>(data, {h, w, 3});
+        return imageView<uint8_t>(result, {h, w, 3});
     case Product::ColorAlpha:
-        return ownedArray<uint8_t>(data, {h, w, 4});
+        return imageView<uint8_t>(result, {h, w, 4});
     case Product::ObjectId:
-        return ownedArray<uint32_t>(data, {h, w});
+        return imageView<uint32_t>(result, {h, w});
     case Product::Segmentation:
-        return ownedArray<int32_t>(data, {h, w, 2});
+        return imageView<int32_t>(result, {h, w, 2});
     case Product::MetricDepth:
-        return ownedArray<float>(data, {h, w});
+        return imageView<float>(result, {h, w});
     }
     throw std::invalid_argument("Unknown image product");
 }
@@ -109,7 +117,13 @@ void bindRender(nb::module_ &module) {
         .def_ro("draw_calls", &FrameStats::drawCalls)
         .def_ro("instances", &FrameStats::instances)
         .def_ro("upload_bytes", &FrameStats::uploadBytes)
-        .def_ro("gpu_ms", &FrameStats::gpuMs);
+        .def_ro("gpu_ms", &FrameStats::gpuMs)
+        .def_ro("reflection_rendered", &FrameStats::reflectionRendered)
+        .def_ro("reflection_reused", &FrameStats::reflectionReused)
+        .def_ro("shadow_rendered", &FrameStats::shadowRendered)
+        .def_ro("shadow_reused", &FrameStats::shadowReused)
+        .def_ro("shadow_instances", &FrameStats::shadowInstances)
+        .def_ro("culled_shadow_instances", &FrameStats::culledShadowInstances);
     nb::class_<Capabilities>(module, "Capabilities")
         .def_ro("backend", &Capabilities::backend)
         .def_ro("device", &Capabilities::device)
@@ -257,6 +271,20 @@ void bindRender(nb::module_ &module) {
                  if (cube.size())
                      std::memcpy(s.cubeCoords.data(), cube.data(), cube.size() * sizeof(float));
              })
+        .def("add_texture_pixels",
+             [](SceneSource &s, Array<uint8_t, -1, -1, -1, -1> pixels, bool cube, bool srgb) {
+                 if (pixels.shape(0) != (cube ? 6 : 1))
+                     throw std::invalid_argument("Invalid texture face count");
+                 TextureSource texture;
+                 {
+                     nb::gil_scoped_release release;
+                     texture = prepareTexture(
+                         {uint32_t(pixels.shape(2)), uint32_t(pixels.shape(1))},
+                         {pixels.data(), pixels.size()}, pixels.shape(3), cube, srgb);
+                 }
+                 s.textures.push_back(std::move(texture));
+                 return s.textures.size() - 1;
+             })
         .def("add_texture_data",
              [](SceneSource &s, uint32_t width, uint32_t height, Array<uint8_t, -1> bytes,
                 bool cube, bool srgb) {
@@ -265,9 +293,10 @@ void bindRender(nb::module_ &module) {
                  t.mipmaps = true;
                  t.cube = cube;
                  t.srgb = srgb;
-                 t.rgba.resize(bytes.size());
+                 auto rgba = std::make_shared<std::vector<std::byte>>(bytes.size());
+                 t.rgba = rgba;
                  if (bytes.size())
-                     std::memcpy(t.rgba.data(), bytes.data(), bytes.size());
+                     std::memcpy(rgba->data(), bytes.data(), bytes.size());
                  s.textures.push_back(std::move(t));
                  return s.textures.size() - 1;
              })
@@ -276,9 +305,10 @@ void bindRender(nb::module_ &module) {
                  TextureSource texture;
                  texture.size = {width, height};
                  texture.mipmaps = true;
-                 texture.rgba.resize(bytes.size());
-                 if (!texture.rgba.empty())
-                     std::memcpy(texture.rgba.data(), bytes.data(), bytes.size());
+                 auto rgba = std::make_shared<std::vector<std::byte>>(bytes.size());
+                 texture.rgba = rgba;
+                 if (!rgba->empty())
+                     std::memcpy(rgba->data(), bytes.data(), bytes.size());
                  s.textures.push_back(std::move(texture));
                  return s.textures.size() - 1;
              })
@@ -299,9 +329,10 @@ void bindRender(nb::module_ &module) {
              [](SceneSource &s, Array<uint8_t, -1, -1, 4> pixels) {
                  TextureSource texture;
                  texture.size = {uint32_t(pixels.shape(1)), uint32_t(pixels.shape(0))};
-                 texture.rgba.resize(pixels.size());
-                 if (!texture.rgba.empty())
-                     std::memcpy(texture.rgba.data(), pixels.data(), pixels.size());
+                 auto rgba = std::make_shared<std::vector<std::byte>>(pixels.size());
+                 texture.rgba = rgba;
+                 if (!rgba->empty())
+                     std::memcpy(rgba->data(), pixels.data(), pixels.size());
                  s.textures.push_back(std::move(texture));
                  return s.textures.size() - 1;
              })
@@ -367,6 +398,7 @@ void bindRender(nb::module_ &module) {
              [](RenderRuntime &r, Scene scene, Array<float, -1, 4, 4> pose, Array<float, -1, 4> uv,
                 Array<float, -1, 4> color, Array<float, -1, 4> material, Array<float, -1, 4> cube,
                 uint64_t revision, uint64_t sequence) {
+                 nb::gil_scoped_release release;
                  thread_local std::vector<Matrix> transforms;
                  thread_local std::vector<std::array<float, 4>> coords, colors, materials, cubes;
                  transforms.resize(pose.shape(0));
@@ -381,7 +413,6 @@ void bindRender(nb::module_ &module) {
                  copy(colors, color);
                  copy(materials, material);
                  copy(cubes, cube);
-                 nb::gil_scoped_release release;
                  r.update(scene,
                           {revision, sequence, transforms, coords, colors, materials, cubes});
              })
@@ -468,12 +499,13 @@ void bindRender(nb::module_ &module) {
              })
         .def(
             "render",
-            [](RenderRuntime &r, Target target, CameraView camera, bool color, bool sceneData) {
+            [](RenderRuntime &r, Target target, CameraView camera, bool color, bool sceneData,
+               std::optional<Product> dataProduct) {
                 nb::gil_scoped_release release;
-                return r.renderRequested(target, camera, {color, sceneData});
+                return r.renderRequested(target, camera, {color, sceneData, dataProduct});
             },
             nb::arg("target"), nb::arg("camera"), nb::arg("color") = true,
-            nb::arg("scene_data") = true)
+            nb::arg("scene_data") = true, nb::arg("data_product") = nb::none())
         .def(
             "readback",
             [](RenderRuntime &r, FrameToken frame, Product product, Region region) {

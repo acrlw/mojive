@@ -49,8 +49,8 @@ def test_mujoco_classic_skybox_depth_clips_far_infinite_plane(tmp_path):
         visible = harness.backend.target.read_color(flip=True)[..., :3].copy()
 
         floor = next(node for node in harness.source.nodes if node.name == "floor")
-        assert harness.backend._builder.set_visible(floor.node_id, False)
-        harness.backend.set_render_scene(harness.backend._builder.scene)
+        floor.visible = False
+        harness.backend.set_scene(harness.source)
         harness.step_and_render(0)
         hidden = harness.backend.target.read_color(flip=True)[..., :3].copy()
 

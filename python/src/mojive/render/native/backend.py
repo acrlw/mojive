@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
 import numpy as np
@@ -26,8 +28,11 @@ from ..mesh import builtin_mesh, gizmo_mesh
 from ..overlay import OverlayPublisher, OverlayState
 from ..tendon import TendonPublisher, TendonScene
 from ..text import TextLayout
-from ..texture import mip_chain, srgb_to_linear_u8
+from ..texture import srgb_to_linear_u8
 from .device import acquire_device
+
+_NO_VISUALS = np.empty((0, 4), np.float32)
+_NO_VISUALS.flags.writeable = False
 
 _DRAW_PATHS = {path: index for index, path in enumerate(DrawPath)}
 _OCCLUSIONS = {mode: index for index, mode in enumerate(Occlusion)}
@@ -80,7 +85,10 @@ class NativeTarget:
                 return out
             return self._deliver(image, flip, None)
 
-        return self.backend.device.readbacks.submit(complete)
+        future = self.backend.device.readbacks.submit(complete)
+        self.backend._pending_readbacks.add(future)
+        future.add_done_callback(self.backend._pending_readbacks.discard)
+        return future
 
     def read_rgb_async(self, flip=True, out=None):
         return self._read_async(self.backend.api.Product.COLOR, flip, out)
@@ -123,6 +131,11 @@ class NativeBackend:
         samples = max(value for value in (1, 2, 4) if value <= max(1, samples))
         self.device = acquire_device()
         self.api, self.runtime = self.device.api, self.device.runtime
+        self._data_products = {
+            RenderProduct.OBJECT_ID: self.api.Product.OBJECT_ID,
+            RenderProduct.SEGMENTATION: self.api.Product.SEGMENTATION,
+            RenderProduct.METRIC_DEPTH: self.api.Product.METRIC_DEPTH,
+        }
         self._closed = False
         self._camera = CameraView()
         self._gizmo = None
@@ -143,8 +156,9 @@ class NativeBackend:
         self._lighting_source = None
         self._textures = {}
         self._debug_view = DebugView.SHADED
-        self._selected = 0
+        self._selected = self._outlined = 0
         self._scene_handle = None
+        self._pending_readbacks = set()
         try:
             self._scene_handle = self.runtime.create_scene(self.api.SceneSource())
             self.target = NativeTarget(self, max(1, width), max(1, height), max(1, samples))
@@ -275,30 +289,32 @@ class NativeBackend:
             slots = np.array(
                 [self._mesh_indices[scene.bucket_keys[int(b)][0]] for b in scene.bucket], np.uint32
             )
-            textures = {}
-            for name, texture in (self._source.textures if self._source else {}).items():
-                pixels = texture.pixels
-                srgb = texture.srgb
+            texture_items = list((self._source.textures if self._source else {}).items())
+
+            def prepare(item):
+                name, texture = item
+                pixels, srgb = texture.pixels, texture.srgb
                 if srgb and pixels.shape[-1] < 3:
                     # Match the R8/RG8 linear fallback used by the other backends.
                     pixels = srgb_to_linear_u8(pixels)
                     srgb = False
                 if texture.type is TextureType.TWO_D:
                     pixels = pixels[None]
-                rgba = np.zeros((*pixels.shape[:-1], 4), np.uint8)
-                rgba[..., 3] = 255
-                rgba[..., : pixels.shape[-1]] = pixels
-                levels = mip_chain(rgba, srgb=srgb)
-                payload = np.concatenate(
-                    [level[face].reshape(-1) for face in range(len(pixels)) for level in levels]
+                index = source.add_texture_pixels(
+                    np.ascontiguousarray(pixels), texture.type is not TextureType.TWO_D, srgb
                 )
-                textures[name] = source.add_texture_data(
-                    rgba.shape[2],
-                    rgba.shape[1],
-                    payload,
-                    texture.type is not TextureType.TWO_D,
-                    srgb,
-                )
+                return name, index
+
+            # The resizer releases the GIL; only the completed texture insertion
+            # takes it again. Keep CPU preprocessing bounded and GPU submission on
+            # its owner thread. Small texture sets avoid worker startup overhead.
+            if len(texture_items) > 1 and sum(t.pixels.nbytes for _, t in texture_items) > 4 << 20:
+                with ThreadPoolExecutor(
+                    max_workers=4, thread_name_prefix="mojive-textures"
+                ) as pool:
+                    textures = dict(pool.map(prepare, texture_items))
+            else:
+                textures = dict(map(prepare, texture_items))
             self._textures = textures
             self._lighting_source = None
             materials = []
@@ -322,14 +338,17 @@ class NativeBackend:
             self._uploaded_visuals = None
         visual_key = (scene.pose_revision, scene.visual_revision)
         if visual_key != self._uploaded_visuals:
+            attributes_changed = (
+                self._uploaded_visuals is None or scene.visual_revision != self._uploaded_visuals[1]
+            )
             self._sequence += 1
             self.runtime.update_visuals(
                 self._scene_handle,
                 scene.transforms,
                 scene.tex_coef,
-                scene.colors,
-                scene.material,
-                scene.cube_coef,
+                scene.colors if attributes_changed else _NO_VISUALS,
+                scene.material if attributes_changed else _NO_VISUALS,
+                scene.cube_coef if attributes_changed else _NO_VISUALS,
                 self._revision,
                 self._sequence,
             )
@@ -521,10 +540,25 @@ class NativeBackend:
         if color:
             self._sync_overlays()
         self.target.frame = self.runtime.render(
-            self.target.handle, camera, color, bool(request.products & ~RenderProduct.COLOR)
+            self.target.handle,
+            camera,
+            color,
+            bool(request.products & ~RenderProduct.COLOR),
+            self._data_products.get(request.products & ~RenderProduct.COLOR),
         )
         self.stats.instances = self._builder.scene.count
-        self.stats.draw_calls = self.target.frame.statistics.draw_calls
+        statistics = self.target.frame.statistics
+        self.stats.draw_calls = statistics.draw_calls
+        for name in ("shadow", "reflection"):
+            self.stats.notes[f"{name} cache"] = (
+                "rendered"
+                if getattr(statistics, f"{name}_rendered")
+                else "reused"
+                if getattr(statistics, f"{name}_reused")
+                else "disabled"
+            )
+        self.stats.notes["shadow instances"] = statistics.shadow_instances
+        self.stats.notes["culled shadow instances"] = statistics.culled_shadow_instances
         self.stats.buckets = self._builder.scene.bucket_count()
         self.stats.frame_cpu_ms = (time.perf_counter() - started) * 1000
         texture = self.runtime.target_texture(self.target.handle)
@@ -553,7 +587,9 @@ class NativeBackend:
         return int(result.image[0, 0]) if result.state == self.api.ReadbackState.READY else 0
 
     def highlight(self, object_id, *, xray=False, fill=True, outline=True):
-        self._selected = object_id
+        object_id = int(object_id)
+        self._selected = object_id if fill else 0
+        self._outlined = object_id if outline else 0
         self._style.selected_id, self._style.selection_fill = object_id, fill
         self._style.selection_outline, self._style.selection_xray = outline, xray
         self.runtime.configure(self._scene_handle, self._style)
@@ -663,7 +699,9 @@ class NativeBackend:
         return tuple(flag for flag in RenderFlag if flag in self.caps.render_flags)
 
     def create_peer(self, width, height):
-        return NativeBackend(width, height, self.target.samples)
+        peer = NativeBackend(width, height, self.target.samples)
+        peer.set_shadow_quality(self.get_shadow_quality())
+        return peer
 
     def capture(self, path, camera=None, size=None):
         from PIL import Image
@@ -692,6 +730,15 @@ class NativeBackend:
         if self._closed:
             return
         self._closed = True
+        if self.device.in_readback_worker():
+            # A callback must not occupy a pool worker while waiting for queued
+            # reads. The cleanup thread retains this scene's device reference.
+            threading.Thread(target=self._finish_release, name="mojive-render-close").start()
+        else:
+            self._finish_release()
+
+    def _finish_release(self):
+        wait(tuple(self._pending_readbacks))
         try:
             if getattr(self, "_glyph_atlas", None) is not None:
                 self.runtime.destroy_texture(self._glyph_atlas)

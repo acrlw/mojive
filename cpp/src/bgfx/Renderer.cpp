@@ -2,6 +2,7 @@
 #include "Lighting.hpp"
 #include "Reflections.hpp"
 #include "Shadows.hpp"
+#include "Visibility.hpp"
 #include <algorithm>
 #include <atomic>
 #include <bgfx/bgfx.h>
@@ -47,6 +48,7 @@ struct GpuMesh {
     bgfx::IndexBufferHandle indices = BGFX_INVALID_HANDLE;
     bgfx::DynamicVertexBufferHandle wireVertices = BGFX_INVALID_HANDLE;
     size_t vertexCount = 0;
+    MeshBounds bounds;
 };
 struct GpuVertex {
     Vertex vertex;
@@ -61,7 +63,9 @@ struct GpuBatch {
     std::vector<uint32_t> instances;
 };
 using ShadowKey = std::tuple<uint64_t, uint64_t, int, bool, std::array<float, 3>>;
-using ReflectionKey = std::tuple<uint64_t, uint64_t, uint64_t, Matrix, Matrix, float, float>;
+using DataKey = std::tuple<uint64_t, uint64_t, Matrix, Matrix, float, float>;
+using ReflectionKey =
+    std::tuple<uint64_t, uint64_t, uint64_t, Matrix, Matrix, float, float, std::array<float, 3>>;
 struct GpuScene {
     uint64_t geometryRevision = 1, lightingRevision = 1, styleRevision = 1;
     std::optional<ShadowKey> shadowKey;
@@ -80,24 +84,30 @@ struct GpuScene {
     uint64_t sequence = 0;
     std::vector<GpuMesh> meshes;
     std::vector<std::array<float, 40>> instances;
+    std::vector<MeshBounds> worldBounds;
 };
 struct GpuTarget {
     Scene scene;
     bgfx::FrameBufferHandle selectionFrame = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle selectionMask = BGFX_INVALID_HANDLE;
     ReflectionMaps reflections;
-    std::optional<ReflectionKey> reflectionKey;
+    std::optional<ReflectionKey> reflectionKey, colorKey;
+    std::optional<DataKey> dataKey;
+    uint8_t cachedData = 0;
     Extent size;
     uint32_t samples = 1, allocatedSamples = 1;
     bool surface = false, colorOnly = false, dataOnly = false, vsync = false;
+    std::optional<Product> dataProduct;
     uint16_t view = 0;
     uint64_t generation = 1;
     uint32_t lastRender = UINT32_MAX, lastReadback = UINT32_MAX;
     FrameToken latest;
     bgfx::SwapChain swapChain;
-    bgfx::FrameBufferHandle colorFb = BGFX_INVALID_HANDLE, dataFb = BGFX_INVALID_HANDLE;
+    bgfx::FrameBufferHandle colorFb = BGFX_INVALID_HANDLE;
+    std::array<bgfx::FrameBufferHandle, 4> dataFbs = {
+        {BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
     bgfx::TextureHandle color = BGFX_INVALID_HANDLE;
-    std::array<bgfx::TextureHandle, 4> data;
+    std::array<bgfx::TextureHandle, 3> data;
 };
 struct ReadbackSlot {
     uint64_t ticket = 0;
@@ -106,10 +116,8 @@ struct ReadbackSlot {
     FrameToken frame;
     Product product = Product::Color;
     Extent size;
-    uint32_t count = 1;
-    std::array<bgfx::TextureHandle, 2> textures = {bgfx::TextureHandle{bgfx::kInvalidHandle},
-                                                   bgfx::TextureHandle{bgfx::kInvalidHandle}};
-    std::array<std::vector<std::byte>, 2> bytes;
+    bgfx::TextureHandle texture = BGFX_INVALID_HANDLE;
+    std::vector<std::byte> bytes;
 };
 
 class BgfxRenderer final : public Renderer {
@@ -119,7 +127,8 @@ class BgfxRenderer final : public Renderer {
     std::unordered_map<uint64_t, GpuScene> mScenes{{0, GpuScene{}}};
     uint64_t mSubmission = 0;
     uint32_t mGpuFrame = 0;
-    uint32_t mResetFlags = BGFX_RESET_MAXANISOTROPY;
+    // Submit presentation with its rendered frame, including when the caller pauses.
+    uint32_t mResetFlags = BGFX_RESET_MAXANISOTROPY | BGFX_RESET_FLIP_AFTER_RENDER;
     bool mPendingCommands = false;
     std::array<bgfx::ViewId, 256> mPassOrder{};
     std::array<bool, 256> mUsedPasses{};
@@ -136,6 +145,7 @@ class BgfxRenderer final : public Renderer {
         bgfx::DynamicVertexBufferHandle handle = BGFX_INVALID_HANDLE;
         bgfx::VertexLayout layout;
         uint32_t cursor = 0, capacity = 0;
+        std::vector<std::byte> bytes;
     };
     std::unordered_map<uint16_t, InstanceUpload> mInstanceUploads;
     std::vector<std::byte> mInstanceBytes;
@@ -144,6 +154,12 @@ class BgfxRenderer final : public Renderer {
             throw std::length_error("Instance stream is too large");
         mInstanceBytes.resize(size_t(count) * stride);
         return mInstanceBytes.data();
+    }
+    void uploadInstances(const InstanceUpload &upload) {
+        if (upload.cursor)
+            bgfx::update(
+                upload.handle, 0,
+                bgfx::copy(upload.bytes.data(), upload.cursor * upload.layout.getStride()));
     }
     void bindInstances(uint32_t count, uint16_t stride) {
         auto &upload = mInstanceUploads[stride];
@@ -162,18 +178,25 @@ class BgfxRenderer final : public Renderer {
             auto handle = bgfx::createDynamicVertexBuffer(capacity, upload.layout);
             if (!bgfx::isValid(handle))
                 throw std::runtime_error("Cannot allocate instance stream");
-            if (bgfx::isValid(upload.handle))
+            if (bgfx::isValid(upload.handle)) {
+                uploadInstances(upload);
                 bgfx::destroy(upload.handle);
+            }
             upload.handle = handle;
             upload.capacity = capacity;
             upload.cursor = 0;
         }
-        bgfx::update(upload.handle, upload.cursor,
-                     bgfx::copy(mInstanceBytes.data(), count * stride));
+        upload.bytes.resize(size_t(upload.cursor + count) * stride);
+        std::memcpy(upload.bytes.data() + size_t(upload.cursor) * stride, mInstanceBytes.data(),
+                    size_t(count) * stride);
         bgfx::setInstanceDataBuffer(upload.handle, upload.cursor, count);
         upload.cursor += count;
     }
     void flush() {
+        // Upload one contiguous stream per layout. Per-draw updates otherwise
+        // create many Metal staging buffers and blit commands in each frame.
+        for (const auto &[stride, upload] : mInstanceUploads)
+            uploadInstances(upload);
         // bgfx sorts views numerically unless explicitly remapped. Preserve API
         // dependency order even when a sampled target was allocated later.
         auto count = mPassCount;
@@ -240,8 +263,9 @@ class BgfxRenderer final : public Renderer {
     std::vector<std::pair<float, uint32_t>> mTransparent;
     bgfx::UniformHandle mMaterial = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle mWhite = BGFX_INVALID_HANDLE;
-    bgfx::ProgramHandle mColorProgram = BGFX_INVALID_HANDLE, mDataProgram = BGFX_INVALID_HANDLE,
-                        mUiProgram = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle mColorProgram = BGFX_INVALID_HANDLE, mUiProgram = BGFX_INVALID_HANDLE;
+    std::array<bgfx::ProgramHandle, 4> mDataPrograms = {
+        {BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
     bgfx::UniformHandle mImageSampler = BGFX_INVALID_HANDLE;
     Extent mWindowSize;
     bool mHasWindow = false;
@@ -275,17 +299,18 @@ class BgfxRenderer final : public Renderer {
                 bgfx::destroy(mesh.indices);
         }
     }
-    void renderShadows(GpuScene &scene, const CameraView &camera) {
+    bool renderShadows(GpuScene &scene, const CameraView &camera) {
         ShadowKey key{scene.geometryRevision, scene.lightingRevision, scene.style.shadowQuality,
                       scene.style.shadows, camera.focus};
         if (scene.shadowKey == key)
-            return;
+            return false;
         scene.shadowKey.reset();
         auto &shadow = scene.shadows;
         shadow.prepare(scene.source, scene.lighting, scene.style, camera);
         auto draw = [&](bgfx::ViewId view, const glm::mat4 &matrix, bgfx::FrameBufferHandle frame,
                         int x, int y, int pixels, const float *light) {
             orderPass(view);
+            const ClipFrustum frustum(matrix);
             auto projection = matrix;
             if (!bgfx::getCaps()->homogeneousDepth)
                 for (int c = 0; c < 4; ++c)
@@ -304,9 +329,15 @@ class BgfxRenderer final : public Renderer {
             bgfx::touch(view);
             for (const auto &batch : scene.batches) {
                 mDrawIndices.clear();
-                for (auto index : batch.instances)
-                    if (scene.instances[index][19] >= 1)
+                for (auto index : batch.instances) {
+                    if (scene.instances[index][19] < 1)
+                        continue;
+                    if (frustum.intersects(scene.worldBounds[index])) {
                         mDrawIndices.push_back(index);
+                        ++mStats.shadowInstances;
+                    } else
+                        ++mStats.culledShadowInstances;
+                }
                 uint32_t count = mDrawIndices.size();
                 if (!count)
                     continue;
@@ -347,6 +378,7 @@ class BgfxRenderer final : public Renderer {
                      shadow.positions[slot].data());
         }
         scene.shadowKey = key;
+        return true;
     }
     void renderEnvironment(const GpuScene &scene, const GpuTarget &target,
                            const CameraView &camera) {
@@ -690,6 +722,9 @@ class BgfxRenderer final : public Renderer {
     }
     void releaseTarget(GpuTarget &t) {
         t.reflectionKey.reset();
+        t.colorKey.reset();
+        t.dataKey.reset();
+        t.cachedData = 0;
         t.reflections.release();
         if (bgfx::isValid(t.selectionFrame))
             bgfx::destroy(t.selectionFrame);
@@ -697,9 +732,13 @@ class BgfxRenderer final : public Renderer {
         t.selectionMask = BGFX_INVALID_HANDLE;
         if (bgfx::isValid(t.colorFb))
             bgfx::destroy(t.colorFb);
-        if (bgfx::isValid(t.dataFb))
-            bgfx::destroy(t.dataFb);
-        t.colorFb = t.dataFb = BGFX_INVALID_HANDLE;
+        // The complete framebuffer owns the shared attachments; destroy it last.
+        for (size_t i = t.dataFbs.size(); i-- > 0;) {
+            if (bgfx::isValid(t.dataFbs[i]))
+                bgfx::destroy(t.dataFbs[i]);
+            t.dataFbs[i] = BGFX_INVALID_HANDLE;
+        }
+        t.colorFb = BGFX_INVALID_HANDLE;
     }
     void allocateTarget(GpuTarget &t) {
         uint64_t flags = BGFX_TEXTURE_RT | sampler;
@@ -728,16 +767,26 @@ class BgfxRenderer final : public Renderer {
             if (!bgfx::isValid(t.colorFb))
                 throw std::runtime_error("Cannot create color framebuffer");
             orphaned.clear();
-            for (size_t i = 0; i < 4; ++i)
-                t.data[i] =
-                    texture(i == 3 ? bgfx::TextureFormat::R32F : bgfx::TextureFormat::RGBA8, flags);
+            const bgfx::TextureFormat::Enum formats[] = {
+                bgfx::TextureFormat::RGBA8, bgfx::TextureFormat::RGBA16, bgfx::TextureFormat::R32F};
+            for (size_t i = 0; i < t.data.size(); ++i)
+                t.data[i] = texture(formats[i], flags);
             auto dataDepth = texture(bgfx::TextureFormat::D32F, flags | BGFX_TEXTURE_RT_WRITE_ONLY);
-            bgfx::TextureHandle attachments[] = {t.data[0], t.data[1], t.data[2], t.data[3],
-                                                 dataDepth};
-            t.dataFb = bgfx::createFrameBuffer(5, attachments, true);
-            if (!bgfx::isValid(t.colorFb) || !bgfx::isValid(t.dataFb))
+            bgfx::TextureHandle attachments[] = {t.data[0], t.data[1], t.data[2], dataDepth};
+            t.dataFbs[0] = bgfx::createFrameBuffer(4, attachments, true);
+            if (!bgfx::isValid(t.colorFb) || !bgfx::isValid(t.dataFbs[0]))
                 throw std::runtime_error("Cannot create framebuffer");
             orphaned.clear();
+            // Export only requested attachments; retain the full set for combined requests.
+            bgfx::TextureHandle idAttachments[] = {t.data[0], dataDepth};
+            bgfx::TextureHandle segmentationAttachments[] = {t.data[1], dataDepth};
+            bgfx::TextureHandle depthAttachments[] = {t.data[2], dataDepth};
+            t.dataFbs[1] = bgfx::createFrameBuffer(2, idAttachments, false);
+            t.dataFbs[2] = bgfx::createFrameBuffer(2, segmentationAttachments, false);
+            t.dataFbs[3] = bgfx::createFrameBuffer(2, depthAttachments, false);
+            for (auto framebuffer : t.dataFbs)
+                if (!bgfx::isValid(framebuffer))
+                    throw std::runtime_error("Cannot create data framebuffer");
         } catch (...) {
             for (auto texture : orphaned)
                 bgfx::destroy(texture);
@@ -751,9 +800,9 @@ class BgfxRenderer final : public Renderer {
                 request.canceled = true;
     }
     void releaseSlot(ReadbackSlot &slot) {
-        for (auto texture : slot.textures)
-            if (bgfx::isValid(texture))
-                bgfx::destroy(texture);
+        if (bgfx::isValid(slot.texture))
+            bgfx::destroy(slot.texture);
+        slot.texture = BGFX_INVALID_HANDLE;
     }
     bgfx::TextureHandle textureHandle(Texture texture) const {
         if (texture.id & targetTextureBit) {
@@ -782,9 +831,8 @@ class BgfxRenderer final : public Renderer {
 #endif
         init.fallback = false;
         init.profile = true;
-        init.reset = BGFX_RESET_MAXANISOTROPY;
-        // Keep one submitted GPU frame in flight for interactive input latency.
-        // The presentation surface still owns two drawables for safe reuse.
+        init.reset = mResetFlags;
+        // Bound queued work so input cannot accumulate behind older GPU frames.
         init.swapChain.maxFrameLatency = 1;
         init.swapChain.nwh = options.window.handle;
         init.swapChain.ndt = options.window.display;
@@ -814,7 +862,7 @@ class BgfxRenderer final : public Renderer {
         mCaps.signedPairTarget = rt(bgfx::TextureFormat::RG32I);
         mCaps.floatTarget = rt(bgfx::TextureFormat::R32F);
         if (!mCaps.readback || !mCaps.instancing || !mCaps.floatTarget ||
-            caps->limits.maxFBAttachments < 5)
+            !rt(bgfx::TextureFormat::RGBA16) || caps->limits.maxFBAttachments < 4)
             throw std::runtime_error("Device lacks a required probe capability");
         mVertices.begin()
             .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
@@ -856,7 +904,9 @@ class BgfxRenderer final : public Renderer {
         mDebugDepth = bgfx::createUniform("u_debugDepth", bgfx::UniformType::Vec4);
         mDebugAtlas = bgfx::createUniform("s_debugAtlas", bgfx::UniformType::Sampler);
         mColorProgram = program(options.shaderDirectory, "vs_scene", "fs_color");
-        mDataProgram = program(options.shaderDirectory, "vs_scene", "fs_data");
+        const char *dataShaders[] = {"fs_data", "fs_id", "fs_segmentation", "fs_depth"};
+        for (size_t i = 0; i < mDataPrograms.size(); ++i)
+            mDataPrograms[i] = program(options.shaderDirectory, "vs_scene", dataShaders[i]);
         mUiProgram = program(options.shaderDirectory, "vs_ui", "fs_ui");
         mSurfaceLayout.begin();
         for (int i = 0; i < 8; ++i)
@@ -908,6 +958,9 @@ class BgfxRenderer final : public Renderer {
     ~BgfxRenderer() override {
         if (!mInitialized)
             return;
+        // Resource uploads can open a Metal blit encoder before the first render.
+        // Finish that frame before queuing destruction, including failed startup.
+        flush();
         // Pending readback destinations must survive until the render thread has stopped.
         for (auto &[id, t] : mTargets)
             releaseTarget(t);
@@ -969,8 +1022,9 @@ class BgfxRenderer final : public Renderer {
             bgfx::destroy(mWhiteCube);
         if (bgfx::isValid(mColorProgram))
             bgfx::destroy(mColorProgram);
-        if (bgfx::isValid(mDataProgram))
-            bgfx::destroy(mDataProgram);
+        for (auto program : mDataPrograms)
+            if (bgfx::isValid(program))
+                bgfx::destroy(program);
         if (bgfx::isValid(mUiProgram))
             bgfx::destroy(mUiProgram);
         if (bgfx::isValid(mImageSampler))
@@ -979,6 +1033,7 @@ class BgfxRenderer final : public Renderer {
             bgfx::destroy(mMaterial);
         if (bgfx::isValid(mWhite))
             bgfx::destroy(mWhite);
+        flush();
         bgfx::shutdown();
         runtimeActive.clear();
     }
@@ -1115,8 +1170,27 @@ class BgfxRenderer final : public Renderer {
     GpuScene uploadScene(const SceneSource &source) {
         validateScene(source);
         GpuScene result;
-        result.source = source;
+        // Texture pixels are upload inputs, not retained renderer state. Copy
+        // geometry for deformable/wire updates, and only texture metadata.
+        result.source = {.revision = source.revision,
+                         .meshes = source.meshes,
+                         .instances = source.instances,
+                         .materials = source.materials,
+                         .textures = {},
+                         .materialIndices = source.materialIndices,
+                         .infinitePlanes = source.infinitePlanes,
+                         .planarKinds = source.planarKinds,
+                         .linearColors = source.linearColors,
+                         .visualMaterials = source.visualMaterials,
+                         .cubeCoords = source.cubeCoords,
+                         .extent = source.extent,
+                         .shadowClip = source.shadowClip,
+                         .center = source.center};
+        for (const auto &texture : source.textures)
+            result.source.textures.push_back(
+                {texture.size, texture.mipmaps, texture.srgb, texture.cube, {}});
         result.instances.resize(source.instances.size());
+        result.worldBounds.resize(source.instances.size());
         result.meshes.resize(source.meshes.size());
         try {
             for (size_t i = 0; i < source.meshes.size(); ++i) {
@@ -1135,6 +1209,7 @@ class BgfxRenderer final : public Renderer {
                 if (!bgfx::isValid(mesh.vertices) || !bgfx::isValid(mesh.indices))
                     throw std::runtime_error("Cannot allocate scene mesh");
                 mesh.vertexCount = input.vertices.size();
+                mesh.bounds = meshBounds(input.vertices);
             }
             for (const auto &texture : source.textures) {
                 extent(texture.size);
@@ -1144,7 +1219,14 @@ class BgfxRenderer final : public Renderer {
                          ? uint64_t(BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
                                     BGFX_SAMPLER_W_CLAMP)
                          : uint64_t(BGFX_SAMPLER_MIN_ANISOTROPIC | BGFX_SAMPLER_MAG_ANISOTROPIC));
-                auto memory = bgfx::copy(texture.rgba.data(), texture.rgba.size());
+                // bgfx releases this immutable storage after its render thread has
+                // consumed the upload. Do not duplicate large mip chains or rely
+                // on the caller keeping its SceneSource alive.
+                auto *storage = new decltype(texture.rgba)(texture.rgba);
+                auto memory = bgfx::makeRef(
+                    (*storage)->data(), (*storage)->size(),
+                    [](void *, void *user) { delete static_cast<decltype(storage)>(user); },
+                    storage);
                 auto handle =
                     texture.cube
                         ? bgfx::createTextureCube(texture.size.width, texture.mipmaps, 1,
@@ -1169,6 +1251,7 @@ class BgfxRenderer final : public Renderer {
                 auto &data = result.instances[i];
                 const auto matrix = identity();
                 std::copy(matrix.begin(), matrix.end(), data.begin());
+                result.worldBounds[i] = result.meshes[input.mesh].bounds;
                 std::copy(input.color.begin(), input.color.end(), data.begin() + 16);
                 data[28] = data[29] = 1;
                 auto visual =
@@ -1227,6 +1310,9 @@ class BgfxRenderer final : public Renderer {
                 cancel(Target{targetId});
                 target.latest = {};
                 target.reflectionKey.reset();
+                target.colorKey.reset();
+                target.dataKey.reset();
+                target.cachedData = 0;
             }
         }
         releaseScene(current);
@@ -1276,6 +1362,9 @@ class BgfxRenderer final : public Renderer {
                 std::copy(frame.texcoords[i].begin(), frame.texcoords[i].end(),
                           current.instances[i].begin() + 28);
             changed |= previous != current.instances[i];
+            current.worldBounds[i] =
+                transformBounds(current.meshes[current.source.instances[i].mesh].bounds,
+                                current.instances[i].data());
         }
         if (changed)
             ++current.geometryRevision;
@@ -1297,6 +1386,11 @@ class BgfxRenderer final : public Renderer {
                         throw std::invalid_argument("Non-finite dynamic mesh vertex");
         ++current.geometryRevision;
         current.source.meshes[index].vertices.assign(vertices.begin(), vertices.end());
+        current.meshes[index].bounds = meshBounds(vertices);
+        for (size_t i = 0; i < current.instances.size(); ++i)
+            if (current.source.instances[i].mesh == index)
+                current.worldBounds[i] =
+                    transformBounds(current.meshes[index].bounds, current.instances[i].data());
         if (bgfx::isValid(current.meshes[index].wireVertices))
             updateWireMesh(current, index);
         std::vector<GpuVertex> upload(vertices.size());
@@ -1370,7 +1464,8 @@ class BgfxRenderer final : public Renderer {
         bool enabled = std::any_of(mTargets.begin(), mTargets.end(), [](const auto &entry) {
             return entry.second.surface && entry.second.vsync;
         });
-        uint32_t flags = BGFX_RESET_MAXANISOTROPY | (enabled ? BGFX_RESET_VSYNC : 0);
+        uint32_t flags = BGFX_RESET_MAXANISOTROPY | BGFX_RESET_FLIP_AFTER_RENDER |
+                         (enabled ? BGFX_RESET_VSYNC : 0);
         if (flags != mResetFlags) {
             if (mPendingCommands)
                 flush();
@@ -1422,6 +1517,21 @@ class BgfxRenderer final : public Renderer {
     }
     FrameToken renderRequested(Target id, const CameraView &camera,
                                RenderRequest request) override {
+        size_t dataIndex = 0;
+        if (request.dataProduct)
+            switch (*request.dataProduct) {
+            case Product::ObjectId:
+                dataIndex = 1;
+                break;
+            case Product::Segmentation:
+                dataIndex = 2;
+                break;
+            case Product::MetricDepth:
+                dataIndex = 3;
+                break;
+            default:
+                throw std::invalid_argument("Invalid scene data product");
+            }
         const auto before = mStats;
         if (!request.color && !request.sceneData)
             throw std::invalid_argument("Empty render request");
@@ -1450,19 +1560,32 @@ class BgfxRenderer final : public Renderer {
         if (mNextSceneView + 59 >= 250)
             flush();
         beginTarget(t);
-        ReflectionKey reflectionKey{
-            current.geometryRevision, current.lightingRevision, current.styleRevision, camera.view,
-            camera.projection,        camera.nearPlane,         camera.farPlane};
+        ReflectionKey reflectionKey{current.geometryRevision, current.lightingRevision,
+                                    current.styleRevision,    camera.view,
+                                    camera.projection,        camera.nearPlane,
+                                    camera.farPlane,          camera.focus};
         bool reflectionDirty = t.reflectionKey != reflectionKey;
-        if (request.color) {
+        // Retain static scene color only when no separately updated overlays are present.
+        const bool cacheColor = current.overlays.surfaceBatches.empty() &&
+                                current.overlays.gizmos.empty() && current.overlays.debug.empty();
+        const bool renderColor = request.color && (!cacheColor || t.colorKey != reflectionKey);
+        const DataKey dataKey{current.geometryRevision, current.styleRevision, camera.view,
+                              camera.projection,        camera.nearPlane,      camera.farPlane};
+        if (t.dataKey != dataKey)
+            t.cachedData = 0;
+        const uint8_t dataMask = dataIndex ? 1u << (dataIndex - 1) : 7;
+        const bool renderData = request.sceneData && (t.cachedData & dataMask) != dataMask;
+        bool shadowRendered = false;
+        if (renderColor) {
             mLighting.prepare(current.lighting);
-            renderShadows(current, camera);
+            shadowRendered = renderShadows(current, camera);
             if (reflectionDirty)
                 t.reflections.prepare(current.source, current.instances, current.style, camera,
                                       t.size);
         }
         t.colorOnly = !request.sceneData;
         t.dataOnly = !request.color;
+        t.dataProduct = request.dataProduct;
         float clear_depth[4] = {camera.farPlane, 0, 0, 1};
         bgfx::setPaletteColor(2 + t.view / 4, clear_depth);
         auto view = columnMajor(camera.view), projection = camera.projection;
@@ -1471,14 +1594,20 @@ class BgfxRenderer final : public Renderer {
                 projection[8 + c] = (projection[8 + c] + projection[12 + c]) * 0.5f;
         projection = columnMajor(projection);
         for (uint16_t pass = 0; pass < 2; ++pass) {
-            if (pass ? !request.sceneData : !request.color)
+            if (pass ? !renderData : !renderColor)
                 continue;
             bgfx::setViewRect(t.view + pass, 0, 0, t.size.width, t.size.height);
-            bgfx::setViewFrameBuffer(t.view + pass, pass ? t.dataFb : t.colorFb);
+            bgfx::setViewFrameBuffer(t.view + pass, pass ? t.dataFbs[dataIndex] : t.colorFb);
             bgfx::setViewTransform(t.view + pass, view.data(), projection.data());
-            if (pass)
+            if (pass && t.dataProduct == Product::MetricDepth)
+                bgfx::setViewClear(t.view + pass, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 1.0f, 0,
+                                   2 + t.view / 4);
+            else if (pass && t.dataProduct)
+                bgfx::setViewClear(t.view + pass, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                                   *t.dataProduct == Product::Segmentation ? UINT32_MAX : 0, 1.0f);
+            else if (pass)
                 bgfx::setViewClear(t.view + pass, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 1.0f, 0, 0,
-                                   1, 1, 2 + t.view / 4);
+                                   1, 2 + t.view / 4);
             else
                 bgfx::setViewClear(
                     t.view + pass, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
@@ -1595,7 +1724,7 @@ class BgfxRenderer final : public Renderer {
                             BGFX_STATE_WRITE_RGB | BGFX_STATE_BLEND_ADD;
             }
             bgfx::setState(state);
-            bgfx::submit(pass ? t.view + pass : colorView, pass ? mDataProgram
+            bgfx::submit(pass ? t.view + pass : colorView, pass ? mDataPrograms[dataIndex]
                                                                 : (wire  ? mWireProgram
                                                                    : lit ? mLitProgram
                                                                          : mColorProgram));
@@ -1667,7 +1796,7 @@ class BgfxRenderer final : public Renderer {
         orderPass(t.view);
         orderPass(t.view + 1);
         for (uint16_t pass = 0; pass < 2; ++pass) {
-            if (pass ? !request.sceneData : !request.color)
+            if (pass ? !renderData : !renderColor)
                 continue;
             for (const auto &batch : current.batches) {
                 mDrawIndices.clear();
@@ -1680,7 +1809,7 @@ class BgfxRenderer final : public Renderer {
                 draw(batch.mesh, batch.material, mDrawIndices, pass, false);
             }
         }
-        if (request.color) {
+        if (renderColor) {
             renderEnvironment(current, t, camera);
             renderSurfaces(current, t, camera);
             drawTransparent();
@@ -1688,6 +1817,11 @@ class BgfxRenderer final : public Renderer {
             renderDebug(current, t, camera, view, projection);
             renderGizmos(current, t, view, projection);
             t.reflectionKey = reflectionKey;
+            t.colorKey = cacheColor ? std::optional{reflectionKey} : std::nullopt;
+        }
+        if (renderData) {
+            t.dataKey = dataKey;
+            t.cachedData |= dataMask;
         }
         t.latest = {
             id,           t.generation, current.source.revision, current.sequence, camera.revision,
@@ -1695,12 +1829,25 @@ class BgfxRenderer final : public Renderer {
         t.latest.statistics = {mStats.drawCalls - before.drawCalls,
                                mStats.instances - before.instances,
                                mStats.uploadBytes - before.uploadBytes, -1};
+        auto &stats = t.latest.statistics;
+        stats.shadowInstances = mStats.shadowInstances - before.shadowInstances;
+        stats.culledShadowInstances = mStats.culledShadowInstances - before.culledShadowInstances;
+        if (request.color && current.style.reflections && !t.reflections.groups.empty()) {
+            stats.reflectionRendered = renderColor && reflectionDirty;
+            stats.reflectionReused = !stats.reflectionRendered;
+        }
+        if (request.color && current.style.shadows) {
+            stats.shadowRendered = shadowRendered;
+            stats.shadowReused = !shadowRendered;
+        }
         return t.latest;
     }
     ReadbackTicket readback(FrameToken frame, Product product, Region region) override {
         owner();
         auto &t = target(frame.target);
         if (t.surface ||
+            (t.dataProduct && product != Product::Color && product != Product::ColorAlpha &&
+             product != *t.dataProduct) ||
             (t.colorOnly && product != Product::Color && product != Product::ColorAlpha) ||
             (t.dataOnly && (product == Product::Color || product == Product::ColorAlpha)))
             throw std::invalid_argument("Requested output is unavailable");
@@ -1724,43 +1871,37 @@ class BgfxRenderer final : public Renderer {
             mReadbacks.emplace_back();
         auto &r = mReadbacks[slot];
         bool reuse = r.size == Extent{region.width, region.height} && r.product == product &&
-                     bgfx::isValid(r.textures[0]);
-        if (!reuse) {
+                     bgfx::isValid(r.texture);
+        if (!reuse)
             releaseSlot(r);
-            r.textures = {bgfx::TextureHandle{bgfx::kInvalidHandle},
-                          bgfx::TextureHandle{bgfx::kInvalidHandle}};
-        }
         r.ticket = allocateId();
         r.canceled = false;
         r.frame = frame;
         r.product = product;
         r.size = {region.width, region.height};
-        r.count = product == Product::Segmentation ? 2 : 1;
-        for (size_t i = 0; i < r.count; ++i) {
-            auto format = product == Product::MetricDepth ? bgfx::TextureFormat::R32F
-                                                          : bgfx::TextureFormat::RGBA8;
-            if (!reuse)
-                r.textures[i] =
-                    bgfx::createTexture2D(r.size.width, r.size.height, false, 1, format,
-                                          BGFX_TEXTURE_BLIT_DST | BGFX_TEXTURE_READ_BACK | sampler);
-            r.bytes[i].resize(size_t(r.size.width) * r.size.height * 4);
-            bgfx::TextureHandle source = t.color;
-            if (product == Product::ObjectId)
-                source = t.data[0];
-            if (product == Product::Segmentation)
-                source = t.data[i + 1];
-            if (product == Product::MetricDepth)
-                source = t.data[3];
-            uint32_t y = bgfx::getCaps()->originBottomLeft
-                             ? t.size.height - region.y - region.height
-                             : region.y;
-            bgfx::TextureRegion dst{}, src{};
-            dst.init(r.textures[i]);
-            src.init(source, region.x, y, region.width, region.height);
-            orderPass(t.view + 2);
-            bgfx::blit(t.view + 2, dst, src);
-            r.ready = bgfx::read(dst, r.bytes[i].data());
-        }
+        const auto format = product == Product::MetricDepth    ? bgfx::TextureFormat::R32F
+                            : product == Product::Segmentation ? bgfx::TextureFormat::RGBA16
+                                                               : bgfx::TextureFormat::RGBA8;
+        if (!reuse)
+            r.texture =
+                bgfx::createTexture2D(r.size.width, r.size.height, false, 1, format,
+                                      BGFX_TEXTURE_BLIT_DST | BGFX_TEXTURE_READ_BACK | sampler);
+        if (!bgfx::isValid(r.texture))
+            throw std::runtime_error("Cannot allocate readback texture");
+        r.bytes.resize(size_t(r.size.width) * r.size.height *
+                       (product == Product::Segmentation ? 8 : 4));
+        auto source = product == Product::ObjectId       ? t.data[0]
+                      : product == Product::Segmentation ? t.data[1]
+                      : product == Product::MetricDepth  ? t.data[2]
+                                                         : t.color;
+        uint32_t y =
+            bgfx::getCaps()->originBottomLeft ? t.size.height - region.y - region.height : region.y;
+        bgfx::TextureRegion dst{}, src{};
+        dst.init(r.texture);
+        src.init(source, region.x, y, region.width, region.height);
+        orderPass(t.view + 2);
+        bgfx::blit(t.view + 2, dst, src);
+        r.ready = bgfx::read(dst, r.bytes.data());
         t.lastReadback = mGpuFrame;
         mPendingCommands = true;
         return {r.ticket};
@@ -1783,25 +1924,43 @@ class BgfxRenderer final : public Renderer {
             image.product = it->product;
             image.size = it->size;
             auto stride = pixelBytes(image.product);
-            image.pixels.resize(size_t(image.size.width) * image.size.height * stride);
-            bool flip = bgfx::getCaps()->originBottomLeft;
-            for (size_t y = 0; y < image.size.height; ++y)
-                for (size_t x = 0; x < image.size.width; ++x) {
-                    size_t from =
-                        ((flip ? image.size.height - 1 - y : y) * image.size.width + x) * 4;
-                    auto *destination = image.pixels.data() + (y * image.size.width + x) * stride;
-                    if (image.product == Product::Color)
-                        std::memcpy(destination, it->bytes[0].data() + from, 3);
-                    else if (image.product == Product::ColorAlpha)
-                        std::memcpy(destination, it->bytes[0].data() + from, 4);
-                    else if (image.product == Product::MetricDepth)
-                        std::memcpy(destination, it->bytes[0].data() + from, 4);
-                    else
-                        for (size_t part = 0; part < it->count; ++part) {
-                            uint32_t value = word(it->bytes[part].data() + from);
-                            std::memcpy(destination + part * 4, &value, 4);
+            const bool flip = bgfx::getCaps()->originBottomLeft;
+            const bool rawWords =
+                image.product == Product::ColorAlpha || image.product == Product::MetricDepth ||
+                ((image.product == Product::ObjectId || image.product == Product::Segmentation) &&
+                 std::endian::native == std::endian::little);
+            if (!flip && rawWords) {
+                image.pixels = std::move(it->bytes);
+            } else {
+                image.pixels.resize(size_t(image.size.width) * image.size.height * stride);
+                const size_t sourceStride = image.product == Product::Segmentation ? 8 : 4;
+                for (size_t y = 0; y < image.size.height; ++y) {
+                    const size_t offset =
+                        (flip ? image.size.height - 1 - y : y) * image.size.width * sourceStride;
+                    const auto *source = it->bytes.data() + offset;
+                    auto *destination = image.pixels.data() + y * image.size.width * stride;
+                    if (rawWords) {
+                        std::memcpy(destination, source, image.size.width * stride);
+                    } else if (image.product == Product::Color) {
+                        for (size_t x = 0; x < image.size.width; ++x)
+                            std::memcpy(destination + x * 3, source + x * 4, 3);
+                    } else if (image.product == Product::Segmentation) {
+                        for (size_t x = 0; x < image.size.width; ++x) {
+                            uint16_t words[4];
+                            std::memcpy(words, source + x * 8, 8);
+                            const uint32_t values[] = {
+                                uint32_t(words[0]) | uint32_t(words[1]) << 16,
+                                uint32_t(words[2]) | uint32_t(words[3]) << 16};
+                            std::memcpy(destination + x * 8, values, 8);
                         }
+                    } else {
+                        for (size_t x = 0; x < image.size.width; ++x) {
+                            const uint32_t value = word(source + x * 4);
+                            std::memcpy(destination + x * 4, &value, 4);
+                        }
+                    }
                 }
+            }
         }
         it->ticket = 0;
         return result;
@@ -1828,9 +1987,11 @@ class BgfxRenderer final : public Renderer {
         extent(size);
         if (rgba.size() != size_t(size.width) * size.height * 4)
             throw std::invalid_argument("Invalid RGBA texture bytes");
-        auto texture =
-            bgfx::createTexture2D(size.width, size.height, false, 1, bgfx::TextureFormat::RGBA8,
-                                  sampler, bgfx::copy(rgba.data(), rgba.size()));
+        // Font coverage and ImGui textured AA require bilinear filtering.
+        // Integer data targets retain their separate point-sampling policy.
+        auto texture = bgfx::createTexture2D(
+            size.width, size.height, false, 1, bgfx::TextureFormat::RGBA8,
+            BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP, bgfx::copy(rgba.data(), rgba.size()));
         Texture id{allocateId()};
         mTextures.emplace(id.id, texture);
         return id;
@@ -1873,6 +2034,8 @@ class BgfxRenderer final : public Renderer {
             framebuffer = t.colorFb;
             t.colorOnly = true;
             t.dataOnly = false;
+            t.dataProduct.reset();
+            t.colorKey.reset();
             token = t.latest = {output, t.generation, 0, 0, 0, ++mSubmission};
         }
         if (!output.id) {

@@ -59,6 +59,8 @@ with SceneRenderer(scene.source, width=160, height=120, renderer='bgfx', samples
         text=True,
         check=True,
     )
+    assert (destination / "mojive/nativeLicenses/stbImageResize.txt").is_file()
+    assert (destination / "mojive/nativeLicenses/meshoptimizer.txt").is_file()
     report = json.loads(result.stdout)
     Path("output/native-wheel/installed.json").write_text(json.dumps(report, indent=2) + "\n")
     print(result.stdout.strip())

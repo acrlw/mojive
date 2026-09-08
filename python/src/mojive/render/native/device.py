@@ -97,15 +97,18 @@ class NativeDevice:
     def unregister_texture(self, key):
         self.textures.pop(key, None)
 
+    def in_readback_worker(self):
+        return bool(getattr(self._readback_thread, "active", False))
+
     def release(self):
         global _shared
         with _lock:
             self.users -= 1
             if self.users == 0:
                 try:
-                    self.readbacks.shutdown(
-                        wait=not getattr(self._readback_thread, "active", False)
-                    )
+                    # Scene owners have drained their readbacks. Do not join user
+                    # completion callbacks while holding the device registry lock.
+                    self.readbacks.shutdown(wait=False)
                     self.runtime.close()
                     self.drain_logs()
                 finally:
