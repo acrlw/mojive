@@ -5,6 +5,10 @@ RUFF := .venv/bin/ruff
 
 .PHONY: recording-layers
 .PHONY: camera-tracking
+.PHONY: keyframe-timeline
+
+keyframe-timeline:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.keyframe_timeline $(ARGS)
 
 camera-tracking:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.camera_tracking $(ARGS)
@@ -255,6 +259,7 @@ gpu:
 GPU_WGPU_FILES := tests/gpu/test_input_ownership.py tests/gpu/test_scene_renderer.py tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py tests/gpu/test_hidpi.py tests/gpu/test_horizon_haze.py tests/gpu/test_shading.py tests/gpu/test_shadows.py tests/gpu/test_reflection.py tests/gpu/test_outline.py tests/gpu/test_tendon.py tests/gpu/test_debugdraw.py tests/gpu/test_gizmo.py tests/gpu/test_pipeline.py tests/gpu/test_viewer_wgpu.py tests/gpu/test_static_viewer.py tests/gpu/test_model_loading.py tests/gpu/test_ui_interaction.py tests/gpu/test_ui_layout_input.py tests/gpu/test_wgpu_shader_reload.py
 GPU_WGPU_FILES += tests/gpu/test_passive.py
 GPU_WGPU_FILES += tests/gpu/test_camera_tracking.py
+GPU_WGPU_FILES += tests/gpu/test_keyframe_timeline.py
 ## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
 gpu-wgpu:

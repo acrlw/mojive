@@ -102,6 +102,14 @@ class SeekStateTake(Command):
 
 
 @dataclass(frozen=True)
+class SetStateTakeLoop(Command):
+    """Loop an inclusive range of recorded frames; both None clear the range."""
+
+    first_frame: int | None = None
+    last_frame: int | None = None
+
+
+@dataclass(frozen=True)
 class ClearStateTake(Command):
     """Discard the transient state take without changing the current simulation state."""
 

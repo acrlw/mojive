@@ -970,10 +970,12 @@ def test_keyframe_timeline_status_hints_replace_the_repeated_help_copy():
     hints = timeline_status_hints(localizer.text)
 
     assert [(hint.kind, hint.control, hint.label) for hint in hints] == [
+        ("mouse", "right", "选择循环范围"),
         ("mouse", "left", "移动播放头"),
         ("mouse", "wheel", "缩放"),
         ("mouse", "right", "平移"),
     ]
+    assert hints[0].modifier == "Shift"
 
 
 def test_panel_status_hints_compose_without_duplicate_row_entries():

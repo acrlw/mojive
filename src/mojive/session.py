@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import bisect
+import operator
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import deepcopy
@@ -241,6 +243,8 @@ class Session:
         self._active_keyframe = -1
         self._state_take: list[_StateTakeFrame] = []
         self._state_take_times: list[float] = []
+        self._state_take_offsets: list[float] = []
+        self._state_take_loop: tuple[int, int] | None = None
         self._state_take_cursor = -1
         self._state_take_recording = False
         self._state_take_playing = False
@@ -413,6 +417,11 @@ class Session:
     def state_take_times(self) -> list[float]:
         """Return recorded simulation times in take order."""
         return self._state_take_times
+
+    @property
+    def state_take_loop(self) -> tuple[int, int] | None:
+        """Return the inclusive replay range, or None when replay stops at the take end."""
+        return self._state_take_loop
 
     @property
     def can_step_back(self) -> bool:
@@ -677,6 +686,8 @@ class Session:
     def _clear_state_take(self) -> None:
         self._state_take.clear()
         self._state_take_times.clear()
+        self._state_take_offsets.clear()
+        self._state_take_loop = None
         self._state_take_cursor = -1
         self._state_take_recording = False
         self._state_take_playing = False
@@ -801,6 +812,13 @@ class Session:
         self._state_take_signature = signature
         self._state_take.append(_StateTakeFrame(self._step_counter, state))
         self._state_take_times.append(float(state.time))
+        offset = 0.0
+        if self._state_take_offsets:
+            duration = self._state_take_times[-1] - self._state_take_times[-2]
+            if not np.isfinite(duration) or duration <= 1e-9:
+                duration = max(self._adapter.timestep(), 1.0 / 60.0)
+            offset = self._state_take_offsets[-1] + duration
+        self._state_take_offsets.append(offset)
         self._state_take_cursor = len(self._state_take) - 1
         self._state_take_bytes += frame_bytes
         self._state_take_append_error = ""
@@ -826,26 +844,36 @@ class Session:
         if not self._state_take_playing or not self._state_take:
             return
         dt = self._adapter.timestep() if wall_dt is None else max(0.0, float(wall_dt))
-        self._state_take_elapsed += dt * self._speed
-        last = len(self._state_take) - 1
-        while self._state_take_cursor < last:
-            current = self._state_take[self._state_take_cursor]
-            following = self._state_take[self._state_take_cursor + 1]
-            duration = float(following.state.time) - float(current.state.time)
-            if not np.isfinite(duration) or duration <= 1e-9:
-                duration = max(self._adapter.timestep(), 1.0 / 60.0)
-            if self._state_take_elapsed + 1e-12 < duration:
-                break
-            self._state_take_elapsed -= duration
-            if not self._restore_state_take_frame(self._state_take_cursor + 1):
-                self._state_take_playing = False
-                self._publish_message(
-                    "Recorded take is incompatible with the current scene",
-                    level="error",
-                    duration=10.0,
-                )
-                return
-        if self._state_take_cursor >= last:
+        offsets = self._state_take_offsets
+        first, last = self._state_take_loop or (0, len(self._state_take) - 1)
+        cursor = self._state_take_cursor
+        position = (
+            offsets[cursor] + self._state_take_elapsed
+            if first <= cursor <= last
+            else offsets[first]
+        ) + dt * self._speed
+        if self._state_take_loop is not None:
+            # Include the last selected frame for one recorded interval, then
+            # wrap excess time in one operation even after a long display stall.
+            tail = min(last + 1, len(offsets) - 1)
+            interval = offsets[tail] - offsets[tail - 1]
+            duration = offsets[last] - offsets[first] + interval
+            if position + 1e-12 >= offsets[first] + duration:
+                position = offsets[first] + max(0.0, position - offsets[first]) % duration
+                if offsets[first] + duration - position < 1e-12:
+                    position = offsets[first]
+        index = min(last, max(first, bisect.bisect_right(offsets, position + 1e-12) - 1))
+        self._state_take_elapsed = max(0.0, position - offsets[index])
+        # Only the final displayed sample needs a physics restore/forward pass.
+        if index != cursor and not self._restore_state_take_frame(index):
+            self._state_take_playing = False
+            self._publish_message(
+                "Recorded take is incompatible with the current scene",
+                level="error",
+                duration=10.0,
+            )
+            return
+        if self._state_take_loop is None and index >= last:
             self._state_take_playing = False
             self._state_take_elapsed = 0.0
 
@@ -1261,9 +1289,10 @@ class Session:
             if not self._paused and not self._adapter.set_paused(True):
                 return CommandResult.bad("physics backend rejected pause before take replay")
             self._paused = True
+            first, last = self._state_take_loop or (0, len(self._state_take) - 1)
             index = self._state_take_cursor
-            if index < 0 or index >= len(self._state_take) - 1:
-                index = 0
+            if index < first or index >= last:
+                index = first
             if not self._restore_state_take_frame(index):
                 return CommandResult.bad("Recorded take is incompatible with the current scene")
             self._state_take_elapsed = 0.0
@@ -1289,6 +1318,21 @@ class Session:
             if not self._restore_state_take_frame(index):
                 return CommandResult.bad("Recorded take is incompatible with the current scene")
             return CommandResult.good(f"Take frame {index + 1}/{len(self._state_take)}")
+
+        if isinstance(c, cmd.SetStateTakeLoop):
+            if c.first_frame is None and c.last_frame is None:
+                self._state_take_loop = None
+                return CommandResult.good("Cleared take loop range")
+            if self._state_take_recording:
+                return CommandResult.bad("Stop recording before selecting a loop range")
+            try:
+                first, last = operator.index(c.first_frame), operator.index(c.last_frame)
+            except TypeError:
+                return CommandResult.bad("Loop endpoints must both be recorded frame indices")
+            if not 0 <= first < last < len(self._state_take):
+                return CommandResult.bad("Select at least two frames within the recorded take")
+            self._state_take_loop = first, last
+            return CommandResult.good(f"Looping take frames {first + 1}–{last + 1}")
 
         if isinstance(c, cmd.ClearStateTake):
             if self._state_take_recording:

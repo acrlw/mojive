@@ -129,6 +129,7 @@ class ToolHint:
     label: str = ""
     suffix: str = ""
     hint_id: str = ""
+    modifier: str = ""
 
 
 class ToolHintRegistry:
@@ -158,6 +159,7 @@ class ToolHintRegistry:
             hint.label,
             hint.suffix,
             hint.hint_id or key,
+            hint.modifier,
         )
         self._hidden_defaults[target].discard(key)
 
@@ -1710,8 +1712,17 @@ def _tool_hint_width(
             _key_width(draw, group.control, scale, text_scale) + input_gap + text_width(group.label)
         )
     if group.kind == "mouse":
+        modifier_width = (
+            _key_width(draw, group.modifier, scale, text_scale)
+            + input_gap
+            + text_width("+")
+            + chord
+            if group.modifier
+            else 0.0
+        )
         return (
-            _mouse_width(draw, scale, group.suffix, text_scale)
+            modifier_width
+            + _mouse_width(draw, scale, group.suffix, text_scale)
             + input_gap
             + text_width(group.label)
         )
@@ -1868,6 +1879,13 @@ def draw_tool_hints(
         elif group.kind == "key":
             key(group.control, group.label)
         elif group.kind == "mouse":
+            if group.modifier:
+                cursor += (
+                    _keycap(draw, cursor, center_y, group.modifier, theme, scale, muted=muted)
+                    + input_gap
+                )
+                text("+", theme.text_disabled)
+                cursor += chord_gap
             mouse(group.control, group.label, suffix=group.suffix)
         else:
             perturb(group.control)
