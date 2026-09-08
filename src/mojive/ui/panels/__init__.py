@@ -290,7 +290,7 @@ def search_input(
     search_tooltip: str = "Search",
     clear_tooltip: str = "Clear search",
 ) -> tuple[bool, str]:
-    """Draw a search field with consistent search and clear affordances."""
+    """Draw a live filter with a leading search glyph and a trailing clear button."""
 
     style = imgui.get_style()
     width, height = float(imgui.calc_item_width()), float(imgui.get_frame_height())
@@ -298,9 +298,8 @@ def search_input(
     lo = (start.x, start.y)
     hi = (start.x + width, start.y + height)
     padding = float(style.frame_padding.x) * 0.5
-    slot_count = 2 if width >= height * 4.0 else 1
     slot_width = min(height, width * 0.25)
-    input_width = max(1.0, width - slot_count * slot_width - padding)
+    input_width = max(1.0, width - 2.0 * (slot_width + padding))
     input_id = imgui.get_id(str_id)
     draw_list = imgui.get_window_draw_list()
     hovered = imgui.is_window_hovered() and imgui.is_mouse_hovering_rect(lo, hi)
@@ -321,8 +320,9 @@ def search_input(
         )
 
     # The native editor owns a separate text region. Long text and the caret
-    # cannot pass beneath the trailing icons, and the whole group owns one frame.
+    # cannot pass beneath either glyph, and the whole group owns one frame.
     imgui.begin_group()
+    imgui.set_cursor_screen_pos((lo[0] + slot_width + padding, lo[1]))
     imgui.set_next_item_width(input_width)
     for color in (
         imgui.Col_.frame_bg,
@@ -346,25 +346,24 @@ def search_input(
     stroke = max(1.0, height * 0.055)
     identifier = str_id.partition("##")[2] or str_id
     center_y = (lo[1] + hi[1]) * 0.5
-    search_x = hi[0] - padding - slot_width * 0.5
+    search_x = lo[0] + padding + slot_width * 0.5
     focus_requested = False
-    if slot_count == 2 or not value:
-        center = (search_x - radius * 0.275, center_y - radius * 0.275)
-        draw.circle(center, radius, color, stroke)
-        draw.line(
-            (center[0] + radius * 0.70, center[1] + radius * 0.70),
-            (center[0] + radius * 1.55, center[1] + radius * 1.55),
-            color,
-            stroke,
-            cap="round",
-        )
-        imgui.set_cursor_screen_pos((search_x - slot_width * 0.5, lo[1]))
-        if imgui.invisible_button(f"##search_{identifier}", (slot_width, height)):
-            focus_requested = True
-        if imgui.is_item_hovered():
-            imgui.set_tooltip(search_tooltip)
+    center = (search_x - radius * 0.275, center_y - radius * 0.275)
+    draw.circle(center, radius, color, stroke)
+    draw.line(
+        (center[0] + radius * 0.70, center[1] + radius * 0.70),
+        (center[0] + radius * 1.55, center[1] + radius * 1.55),
+        color,
+        stroke,
+        cap="round",
+    )
+    if imgui.is_window_hovered() and imgui.is_mouse_hovering_rect(
+        lo, (lo[0] + slot_width + padding, hi[1])
+    ):
+        imgui.set_tooltip(search_tooltip)
+        focus_requested = imgui.is_mouse_clicked(imgui.MouseButton_.left)
     if value:
-        center_x = search_x - (slot_width if slot_count == 2 else 0.0)
+        center_x = hi[0] - padding - slot_width * 0.5
         imgui.set_cursor_screen_pos((center_x - slot_width * 0.5, lo[1]))
         clicked = imgui.invisible_button(f"##clear_{identifier}", (slot_width, height))
         hovered = imgui.is_item_hovered()
