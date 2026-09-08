@@ -93,5 +93,23 @@
     "commit": "a0fba56c34a6700f1724bf9b751da5b488a3775c",
     "url": "https://codeload.github.com/KhronosGroup/SPIRV-Cross/tar.gz/a0fba56c34a6700f1724bf9b751da5b488a3775c",
     "sha256": "1e79592b0a498ffb854f7d71e0d5811fcedb87a25201644bbf5dbba438e01264"
+  },
+  "glm": {
+    "repo": "g-truc/glm",
+    "tag": "1.0.3",
+    "commit": "8d1fd52e5ab5590e2c81768ace50c72bae28f2ed",
+    "url": "https://codeload.github.com/g-truc/glm/tar.gz/8d1fd52e5ab5590e2c81768ace50c72bae28f2ed",
+    "sha256": "36eefbae41503e6822e8d9e1b4cc85c6a6621f17676f6258aaf0a64c2de0a09c",
+    "source": "submodule",
+    "path": "thirdParty/glm"
+  },
+  "spdlog": {
+    "repo": "gabime/spdlog",
+    "tag": "v1.17.0",
+    "commit": "79524ddd08a4ec981b7fea76afd08ee05f83755d",
+    "url": "https://codeload.github.com/gabime/spdlog/tar.gz/79524ddd08a4ec981b7fea76afd08ee05f83755d",
+    "sha256": "c6dee844e35a54cc80e3ab76aae2310763e0b49c7397549dfa4d4657d9737138",
+    "source": "submodule",
+    "path": "thirdParty/spdlog"
   }
 }

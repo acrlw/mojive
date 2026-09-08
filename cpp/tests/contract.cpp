@@ -118,6 +118,32 @@ int main() {
         rejects([] { perspective(1, 0, .1f, 10); });
         auto projection = perspective(1, 1, .1f, 10);
         check(projection[14] == -1, "Projection convention changed");
+        const auto nan = std::numeric_limits<float>::quiet_NaN();
+        const auto infinity = std::numeric_limits<float>::infinity();
+        rejects([&] { perspective(nan, 1, .1f, 10); });
+        rejects([&] { orthographic(1, infinity, .1f, 10); });
+        rejects([&] { lookAt({0, 0, nan}, {0, 0, 0}, {0, 1, 0}); });
+        rejects([] { lookAt({0, 0, 1}, {0, 0, 0}, {0, 0, 1}); });
+        rejects([] { lookAt({0, 0, 1}, {0, 0, 0}, {1e38f, 1e38f, 0}); });
+        CameraView invalidCamera;
+        invalidCamera.view[3] = nan;
+        rejects([&] { validateCamera(invalidCamera); });
+        invalidCamera.view = identity();
+        invalidCamera.farPlane = 0;
+        rejects([&] { validateCamera(invalidCamera); });
+        auto ndcDepth = [](const Matrix &p, float z) {
+            return (p[10] * z + p[11]) / (p[14] * z + p[15]);
+        };
+        auto ortho = orthographic(4, 2, .1f, 10);
+        for (const auto &p : {projection, ortho}) {
+            check(std::abs(ndcDepth(p, -.1f) + 1) < 1e-5f, "Near plane convention changed");
+            check(std::abs(ndcDepth(p, -10) - 1) < 1e-5f, "Far plane convention changed");
+        }
+        auto angled = lookAt({3, -4, 5}, {1, 2, 0}, {0, 0, 1});
+        for (size_t row = 0; row < 3; ++row)
+            check(std::abs(3 * angled[row * 4] - 4 * angled[row * 4 + 1] + 5 * angled[row * 4 + 2] +
+                           angled[row * 4 + 3]) < 1e-5f,
+                  "View transform does not map the eye to the origin");
         std::array<UiVertex, 3> uiVertices{};
         std::array<uint32_t, 3> uiIndices = {0, 1, 2};
         std::array<UiCommand, 1> commands = {{{0, 3, 0, {0, 0, 32, 32}, {1}}}};

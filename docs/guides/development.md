@@ -91,5 +91,29 @@ graphics math and spdlog for runtime-owned native output and bounded log history
 publish records, configure output and subscribe through optional Loguru/logging bridges; native
 output must not depend on a Python consumer. C++ provides rendering and runtime infrastructure;
 business algorithms and extension policy remain in Python. Eigen and native business solvers are
-outside the current roadmap. EnTT requires a demonstrated infrastructure need. These recommended
-libraries are not yet dependencies in the current build.
+outside the current roadmap. EnTT requires a demonstrated infrastructure need. GLM and spdlog are pinned build dependencies; Eigen and EnTT are not included.
+
+## Private native extension
+
+The optional `mojive._native` module is built separately and is not registered as a public
+renderer backend. GLM camera calculations preserve the existing row-major contract. The native
+log supports independent cursors and optional rotating file output without changing host logging.
+An offscreen `RenderRuntime` owns one native backend thread, bounded dispatch and joined teardown;
+Python calls release the GIL while waiting. Window event handling remains a platform concern.
+
+```bash
+make cpp-python-test
+make native-fixture HUMANOIDS_MODEL=/path/to/mujoco/model/humanoid/100_humanoids.xml
+make cpp-python-gpu
+```
+
+`cpp-python-test` builds a CPU-only extension. `cpp-python-gpu` builds bgfx in `NATIVE_BUILD`,
+loads that exact module and uses the existing `NATIVE_SCENE` fixture. These opt-in tests cover
+four image products, array ownership, cross-thread callers, cancellation, initialization failure,
+interpreter shutdown and the official 100-humanoid scene. Captures are written under
+`output/cpp-python/bgfx/`. No extension is copied into an existing Python installation.
+
+The current native backend still has one scene per runtime, simplified shading and a process-wide
+bgfx device reservation. Independent public Renderer instances, full render feature parity,
+`out` buffers, wheel packaging and UI integration remain acceptance gates before registration.
+See the [implementation checklist (Chinese)](../plans/cpp-implementation.zh.md).

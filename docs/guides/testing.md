@@ -16,6 +16,7 @@ matrix; other agent guidance links here.
 | Native probe | `make native-test`, `make native-probe` | optional C++ contracts and real GPU output/lifetime checks; choose `NATIVE_BACKEND=sdl` for SDL GPU |
 | Native composition and lifecycle | `make native-composition`, `make native-windows` | texture dependencies, alpha/scissor output, repeated native surface lifecycle |
 | Native live runtime | `make native-runtime` | native MuJoCo serial/parallel comparison with bounded output queues |
+| Private native runtime | `make cpp-python-test`, `make cpp-python-gpu` | native logging, GLM compatibility, NumPy ownership, real GPU products and runtime teardown |
 | Native bindings | `make native-bindings-test` | isolated pybind11/nanobind behavior, MuJoCo coexistence, ownership, and GIL release |
 | Golden | `make golden` | reviewed image baselines |
 | Full | `make test-all` | CPU, physics, OpenGL, and WebGPU layers |
@@ -36,7 +37,7 @@ Pure prose, link, and metadata edits use their own rows instead of the CPU or GP
 | Rendering behavior, render pass, or shader | one GPU test file | `make gpu`, `make gpu-wgpu`, and relevant visual output |
 | Visual interaction or settings layout | focused UI GPU test | relevant scripted gallery or interactive Make target with captured evidence |
 | Native renderer probe or its shader | `make native-test`, `make native-probe` | `make check`, relevant `make native-gallery` or `make native-benchmark` evidence; Python rendering changes also use the rendering row above |
-| Native binding boundary | `make native-bindings-test` | `make check`; relevant `make native-bindings-benchmark` evidence for performance claims |
+| Native binding boundary | `make native-bindings-test`; `make cpp-python-test` and `make cpp-python-gpu` for the private runtime | `make check`; relevant `make native-bindings-benchmark` evidence for performance claims |
 | Registered regression invariant | its focused regression test | `make reverse` |
 | Documentation or executable examples | relevant document/example checks | `make docs-check` |
 | Instruction or Skill wording, links, or metadata | scope and reference review | [Skill validation](../how-to/agent-workflows.md#skill-maintenance) when applicable |

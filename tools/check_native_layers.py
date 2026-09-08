@@ -21,7 +21,10 @@ def main() -> None:
     errors = []
     for path in files:
         for number, line in enumerate(path.read_text().splitlines(), 1):
-            if VENDOR_INCLUDE.search(line):
+            private_type = path.suffix == ".hpp" and re.search(
+                r"#\s*include\s*[<\"](?:glm|spdlog)/", line
+            )
+            if VENDOR_INCLUDE.search(line) or private_type:
                 errors.append(
                     f"{path.relative_to(ROOT)}:{number}: vendor dependency in common code"
                 )
