@@ -261,6 +261,7 @@ class RecordingConfig:
     countdown: float = 3.0
     fps: float = 60.0
     surface: CaptureSurface = CaptureSurface.VIEWPORT
+    end_hold: float = 1.0
 
     @classmethod
     def from_mapping(cls, value: object) -> RecordingConfig:
@@ -281,7 +282,10 @@ class RecordingConfig:
         except (ValueError, TypeError):
             surface = defaults.surface
         return cls(
-            countdown=number("countdown", 0.0, 60.0), fps=number("fps", 1.0, 240.0), surface=surface
+            countdown=number("countdown", 0.0, 60.0),
+            fps=number("fps", 1.0, 240.0),
+            surface=surface,
+            end_hold=number("end_hold", 0.0, 60.0),
         )
 
 

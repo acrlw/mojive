@@ -311,6 +311,13 @@ class SettingsPanel(Panel):
             if changed:
                 config = replace(config, countdown=value)
                 ctx.set_recording_config(config)
+            self._property(ctx.tr("Take end hold (s)"))
+            changed, value = imgui.input_float(
+                "##recording_end_hold", config.end_hold, 0.5, 5.0, "%.1f"
+            )
+            if changed:
+                config = replace(config, end_hold=value)
+                ctx.set_recording_config(config)
             self._property(ctx.tr("Video frame rate"))
             changed, value = imgui.input_float("##recording_fps", config.fps, 1.0, 10.0, "%.1f")
             if changed:
@@ -337,6 +344,12 @@ class SettingsPanel(Panel):
         imgui.spacing()
         imgui.text_wrapped(
             ctx.tr("Viewport recording follows the visibility choices in the Layers panel.")
+        )
+        imgui.spacing()
+        imgui.text_wrapped(
+            ctx.tr(
+                "Take videos start from the first frame and stop automatically after the end hold."
+            )
         )
         if ctx.panels is not None and imgui.button(ctx.tr("Open Layers")):
             ctx.panels.open_panel("Layers")

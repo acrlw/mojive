@@ -86,7 +86,9 @@ class StopStateTakeRecording(Command):
 
 @dataclass(frozen=True)
 class PlayStateTake(Command):
-    """Replay the transient state take from its current frame."""
+    """Replay the take, optionally ignoring the selected loop for one playback."""
+
+    loop: bool = True
 
 
 @dataclass(frozen=True)

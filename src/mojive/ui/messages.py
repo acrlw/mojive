@@ -17,6 +17,7 @@ class OutputMessage:
     timestamp: str
     level: str
     text: str
+    copy_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class OutputBuffer:
         *,
         level: str = "info",
         timestamp: str | None = None,
+        copy_text: str | None = None,
     ) -> OutputMessage | None:
         value = str(text).strip()
         if not value:
@@ -51,6 +53,7 @@ class OutputBuffer:
                 timestamp or datetime.now().strftime("%H:%M:%S"),
                 str(level).lower(),
                 value,
+                copy_text,
             )
             self._entries.append(message)
             return message
@@ -61,8 +64,9 @@ class OutputBuffer:
         *,
         level: str = "info",
         duration: float | None = 5.0,
+        copy_text: str | None = None,
     ) -> OutputMessage | None:
-        message = self.write(text, level=level)
+        message = self.write(text, level=level, copy_text=copy_text)
         if message is None:
             return None
         expires_at = None if duration is None else time.monotonic() + max(0.0, float(duration))

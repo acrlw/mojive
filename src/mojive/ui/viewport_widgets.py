@@ -217,6 +217,7 @@ class StatusLayout:
     metric_exact: str = ""
     recording_pause_rect: tuple[float, float, float, float] | None = None
     recording_stop_rect: tuple[float, float, float, float] | None = None
+    message_rect: tuple[float, float, float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -2002,14 +2003,26 @@ def format_simulation_metric(
     return f"{labels.time} {format_simulation_time(value)}", f"{value:.17g} s"
 
 
-def _fit_status_text(draw: Draw2D, value: str, max_width: float) -> str:
+def _fit_status_text(draw: Draw2D, value: str, max_width: float, *, middle: bool = False) -> str:
     text = " ".join(str(value).split())
     if draw.text_size(text)[0] <= max_width:
         return text
-    ellipsis = "…"
-    while text and draw.text_size(f"{text}{ellipsis}")[0] > max_width:
-        text = text[:-1]
-    return f"{text.rstrip()}{ellipsis}" if text else ""
+
+    def elided(length):
+        if middle:
+            return (
+                f"{text[: (length + 1) // 2].rstrip()}…{text[len(text) - length // 2 :].lstrip()}"
+            )
+        return f"{text[:length].rstrip()}…"
+
+    lo, hi = 0, len(text) - 1
+    while lo < hi:
+        count = (lo + hi + 1) // 2
+        if draw.text_size(elided(count))[0] <= max_width:
+            lo = count
+        else:
+            hi = count - 1
+    return elided(lo) if lo else ""
 
 
 def _status_performance_layout(
@@ -2127,6 +2140,7 @@ def draw_status(
     show_physics: bool = False,
     status: str = "",
     status_level: str = "info",
+    status_path: bool = False,
     recording_phase: str = "idle",
     recording_duration: float = 0.0,
     countdown_remaining: float = 0.0,
@@ -2308,7 +2322,9 @@ def draw_status(
     if compact_status and available > 48.0 * scale:
         # A transient report remains readable without evicting every context
         # hint from a wide status bar.
-        shown = _fit_status_text(draw, compact_status, min(available, width * 0.28))
+        shown = _fit_status_text(
+            draw, compact_status, min(available, width * 0.28), middle=status_path
+        )
         shown_width, _ = draw.text_size(shown)
         status_x = performance.left - 22.0 * scale - shown_width
 
@@ -2390,4 +2406,5 @@ def draw_status(
         metric_exact=metric_exact if metric_rect is not None else "",
         recording_pause_rect=recording_pause_rect,
         recording_stop_rect=recording_stop_rect,
+        message_rect=(status_x, y, status_x + shown_width, y + height) if shown else None,
     )

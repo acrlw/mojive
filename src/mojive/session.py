@@ -248,6 +248,7 @@ class Session:
         self._state_take_cursor = -1
         self._state_take_recording = False
         self._state_take_playing = False
+        self._state_take_use_loop = True
         self._state_take_elapsed = 0.0
         self._state_take_signature: tuple[tuple[int, ...], ...] | None = None
         self._state_take_bytes = 0
@@ -264,6 +265,7 @@ class Session:
         self._message_revision = 0
         self._last_message_level = "info"
         self._last_message_duration: float | None = 5.0
+        self._last_message_copy_text: str | None = None
         self._history: EditHistory[_DocumentState] = EditHistory(
             record_limit=history_record_limit, byte_limit=history_byte_limit
         )
@@ -540,15 +542,20 @@ class Session:
     def last_message_duration(self) -> float | None:
         return self._last_message_duration
 
+    @property
+    def last_message_copy_text(self) -> str | None:
+        return self._last_message_copy_text
+
     def report_message(
         self,
         message: str,
         *,
         level: str = "warning",
         duration: float | None = 5.0,
+        copy_text: str | None = None,
     ) -> None:
         """Publish a user-facing UI or runtime diagnostic without creating a command."""
-        self._publish_message(str(message), level=level, duration=duration)
+        self._publish_message(str(message), level=level, duration=duration, copy_text=copy_text)
 
     def _publish_message(
         self,
@@ -556,6 +563,7 @@ class Session:
         *,
         level: str,
         duration: float | None,
+        copy_text: str | None = None,
     ) -> None:
         self._last_message = str(message)
         if not self._last_message:
@@ -563,6 +571,7 @@ class Session:
         self._message_revision += 1
         self._last_message_level = str(level)
         self._last_message_duration = duration
+        self._last_message_copy_text = copy_text
 
     def _record_result(self, result: CommandResult) -> CommandResult:
         self._last_message = result.message
@@ -845,14 +854,15 @@ class Session:
             return
         dt = self._adapter.timestep() if wall_dt is None else max(0.0, float(wall_dt))
         offsets = self._state_take_offsets
-        first, last = self._state_take_loop or (0, len(self._state_take) - 1)
+        loop = self._state_take_loop if self._state_take_use_loop else None
+        first, last = loop or (0, len(self._state_take) - 1)
         cursor = self._state_take_cursor
         position = (
             offsets[cursor] + self._state_take_elapsed
             if first <= cursor <= last
             else offsets[first]
         ) + dt * self._speed
-        if self._state_take_loop is not None:
+        if loop is not None:
             # Include the last selected frame for one recorded interval, then
             # wrap excess time in one operation even after a long display stall.
             tail = min(last + 1, len(offsets) - 1)
@@ -873,7 +883,7 @@ class Session:
                 duration=10.0,
             )
             return
-        if self._state_take_loop is None and index >= last:
+        if loop is None and index >= last:
             self._state_take_playing = False
             self._state_take_elapsed = 0.0
 
@@ -1289,19 +1299,21 @@ class Session:
             if not self._paused and not self._adapter.set_paused(True):
                 return CommandResult.bad("physics backend rejected pause before take replay")
             self._paused = True
-            first, last = self._state_take_loop or (0, len(self._state_take) - 1)
-            index = self._state_take_cursor
+            loop = self._state_take_loop if c.loop else None
+            first, last = loop or (0, len(self._state_take) - 1)
+            previous_index = index = self._state_take_cursor
             if index < first or index >= last:
                 index = first
             if not self._restore_state_take_frame(index):
                 return CommandResult.bad("Recorded take is incompatible with the current scene")
-            self._state_take_elapsed = 0.0
+            if index != previous_index or c.loop != self._state_take_use_loop:
+                self._state_take_elapsed = 0.0
+            self._state_take_use_loop = c.loop
             self._state_take_playing = len(self._state_take) > 1
             return CommandResult.good("Replaying simulation take")
 
         if isinstance(c, cmd.PauseStateTake):
             self._state_take_playing = False
-            self._state_take_elapsed = 0.0
             return CommandResult.good("Take replay paused")
 
         if isinstance(c, cmd.SeekStateTake):

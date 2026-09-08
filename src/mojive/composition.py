@@ -279,6 +279,20 @@ class Viewer:
 
         return self.app.start_recording(output, surface=surface, fps=fps, countdown=countdown)
 
+    def start_take_video(
+        self,
+        output: str | Path | None = None,
+        *,
+        surface: CaptureSurface | str | None = None,
+        fps: float | None = None,
+        countdown: float | None = None,
+        end_hold: float | None = None,
+    ) -> Path:
+        """Record a take from its first frame through the final hold, then save automatically."""
+        return self.app.start_take_video(
+            output, surface=surface, fps=fps, countdown=countdown, end_hold=end_hold
+        )
+
     def pause_recording(self) -> bool:
         """Pause an active user-driven recording."""
 
