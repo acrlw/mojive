@@ -38,6 +38,7 @@ nav:
       - Extend UI drawing: how-to/ui-drawing.md
       - WebGPU backend: WGPU_BACKEND_REPORT.md
       - Native renderer probe: guides/native-probe.md
+      - Native Viewer (中文): how-to/native-viewer.zh.md
   - Concepts:
       - Architecture: concepts/architecture.md
       - Renderer: RENDERER.md

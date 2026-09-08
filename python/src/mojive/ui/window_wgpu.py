@@ -16,15 +16,13 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 import wgpu
-from imgui_bundle.python_backends import compute_fb_scale
 from wgpu.utils.imgui import ImguiWgpuBackend
 
-from ..input import add_physical_mouse_button_event
 from ..log import get_logger
 from . import native_drop
 from . import theme as theme_mod
 from . import window as _window_module
-from .window import ResizeLatch, Window, WindowConfig
+from .window import GlfwInputAdapter, ResizeLatch, Window, WindowConfig
 
 if TYPE_CHECKING:
     from ..types import ViewportImage
@@ -287,87 +285,6 @@ class _WgpuImguiBackend(ImguiWgpuBackend):
             global_idx_offset += commands.idx_buffer.size()
 
 
-class _GlfwInputAdapter:
-    """imgui input translation over raw GLFW callbacks for a NO_API window.
-
-    imgui_bundle's GlfwRenderer couples this input half with an OpenGL
-    renderer (its __init__ creates GL device objects), so it cannot serve a
-    window without a GL context.  This adapter reuses its key table and
-    mirrors its callbacks; ``process_inputs()`` plays the same role in
-    ``begin_frame()`` as GlfwRenderer's does for the GL window.
-    """
-
-    def __init__(self, window: Any) -> None:
-        self.window = window
-        self.io = imgui.get_io()
-        self.key_map: dict[Any, Any] = {}
-        GlfwRenderer._map_keys(self)  # fills key_map only; no GL involved
-
-        glfw.set_key_callback(window, self.keyboard_callback)
-        glfw.set_cursor_pos_callback(window, self.mouse_callback)
-        glfw.set_mouse_button_callback(window, self.mouse_button_callback)
-        glfw.set_char_callback(window, self.char_callback)
-        glfw.set_scroll_callback(window, self.scroll_callback)
-
-        _window_module._install_glfw_clipboard_callbacks(glfw, imgui)
-        self._gui_time = None
-
-    def keyboard_callback(
-        self, window: Any, glfw_key: int, scancode: int, action: int, mods: int
-    ) -> None:
-        io = self.io
-        if glfw_key not in self.key_map:
-            return
-        imgui_key = self.key_map[glfw_key]
-        down = action != glfw.RELEASE
-        io.add_key_event(imgui_key, down)
-
-        # Handle modifiers, since ImGui has an additional mod_ctrl / shift / etc
-        if imgui_key == imgui.Key.left_ctrl or imgui_key == imgui.Key.right_ctrl:
-            io.add_key_event(imgui.Key.mod_ctrl, down)
-        if imgui_key == imgui.Key.left_shift or imgui_key == imgui.Key.right_shift:
-            io.add_key_event(imgui.Key.mod_shift, down)
-        if imgui_key == imgui.Key.left_alt or imgui_key == imgui.Key.right_alt:
-            io.add_key_event(imgui.Key.mod_alt, down)
-        if imgui_key == imgui.Key.left_super or imgui_key == imgui.Key.right_super:
-            io.add_key_event(imgui.Key.mod_super, down)
-
-    def char_callback(self, window: Any, char: int) -> None:
-        if 0 < char < 0x10000:
-            self.io.add_input_character(char)
-
-    def mouse_callback(self, *args: Any, **kwargs: Any) -> None:
-        if glfw.get_window_attrib(self.window, glfw.FOCUSED):
-            mouse_pos = glfw.get_cursor_pos(self.window)
-            self.io.add_mouse_pos_event(mouse_pos[0], mouse_pos[1])
-        else:
-            self.io.add_mouse_pos_event(-1, -1)
-
-    def mouse_button_callback(self, window: Any, button: int, action: int, mods: int) -> None:
-        add_physical_mouse_button_event(self.io, button, action == glfw.PRESS)
-
-    def scroll_callback(self, window: Any, x_offset: float, y_offset: float) -> None:
-        self.io.add_mouse_wheel_event(x_offset, y_offset)
-
-    def process_inputs(self) -> None:
-        io = self.io
-
-        window_size = glfw.get_window_size(self.window)
-        fb_size = glfw.get_framebuffer_size(self.window)
-
-        io.display_size = imgui.ImVec2(*window_size)
-        io.display_framebuffer_scale = imgui.ImVec2(*compute_fb_scale(window_size, fb_size))
-
-        current_time = glfw.get_time()
-        if self._gui_time:
-            io.delta_time = current_time - self._gui_time
-        else:
-            io.delta_time = 1.0 / 60.0
-        if io.delta_time <= 0.0:
-            io.delta_time = 1.0 / 1000.0
-        self._gui_time = current_time
-
-
 class WgpuWindow(Window):
     """``Window`` contract over a wgpu surface instead of a GL context."""
 
@@ -444,7 +361,7 @@ class WgpuWindow(Window):
         self._ini_existed = bool(ini) and Path(ini).exists()
         io.set_ini_filename(ini)
 
-        self._impl = _GlfwInputAdapter(handle)
+        self._impl = GlfwInputAdapter(handle)
         glfw.set_drop_callback(handle, self._on_file_drop)
         self._native_drop_token = native_drop.install(glfw, handle, self)
 

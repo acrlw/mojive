@@ -148,6 +148,10 @@ def _select_backend(width: int, height: int, samples: int, renderer: str | None 
     or GLFW at all).
     """
     requested = render_backend_name(renderer)
+    if requested == "bgfx":
+        from .native.backend import NativeBackend
+
+        return None, NativeBackend(max(1, width), max(1, height), samples)
     if requested in {"wgpu", "webgpu"}:
         from .webgpu.backend import WgpuBackend
 

@@ -31,6 +31,8 @@ help:
 	@printf '%s\n' \
 		'Interactive:' \
 		'  make viewer             default MuJoCo scene' \
+		'  make native-viewer      build and launch the C++/bgfx Viewer preview' \
+		'  make native-editor      C++/bgfx scene editor' \
 		'  make passive-viewer     independent physics and display rates with captures' \
 		'  make egl-viewer         Linux viewer with a GLFW EGL context' \
 		'  make hidpi              viewer with an explicit 200% UI scale' \
@@ -829,7 +831,7 @@ cpp-test: native-test
 cpp-probe: native-probe
 cpp-gallery: native-gallery
 
-# Private extension acceptance; public backends remain unchanged until parity.
+# Native extension acceptance; production OpenGL remains the default backend.
 CPP_PYTHON_BUILD ?= output/cpp-python-build
 CPP_PYTHON_BGFX ?= OFF
 .PHONY: cpp-python cpp-python-test
@@ -844,3 +846,17 @@ cpp-python-test: cpp-python
 cpp-python-gpu:
 	$(MAKE) cpp-python CPP_PYTHON_BGFX=ON CPP_PYTHON_BUILD=$(NATIVE_BUILD)
 	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_NATIVE_SHADER_DIR="$(abspath $(NATIVE_BUILD)/shaders)" MOJIVE_NATIVE_SCENE="$(abspath $(NATIVE_SCENE))" $(PYTEST) -q python/bindingTests/test_native.py python/bindingTests/test_native_render.py
+
+# Opt-in native development entry points use the existing Python Viewer and tools.
+.PHONY: native-python-build native-viewer native-editor native-viewer-test
+native-python-build:
+	$(MAKE) cpp-python CPP_PYTHON_BGFX=ON CPP_PYTHON_BUILD=$(NATIVE_BUILD)
+
+native-viewer: native-python-build
+	PYTHONPATH="$(abspath python/src)$(if $(PYTHONPATH),:$(PYTHONPATH))" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(MAKE) viewer BACKEND=bgfx
+
+native-editor: native-python-build
+	PYTHONPATH="$(abspath python/src)$(if $(PYTHONPATH),:$(PYTHONPATH))" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(MAKE) editor BACKEND=bgfx
+
+native-viewer-test: native-python-build
+	PYTHONPATH="$(abspath python/src)" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_HUMANOIDS_MODEL="$(HUMANOIDS_MODEL)" $(PYTEST) -q python/bindingTests/test_native_viewer.py

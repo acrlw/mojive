@@ -17,6 +17,7 @@ matrix; other agent guidance links here.
 | Native composition and lifecycle | `make native-composition`, `make native-windows` | texture dependencies, alpha/scissor output, repeated native surface lifecycle |
 | Native live runtime | `make native-runtime` | native MuJoCo serial/parallel comparison with bounded output queues |
 | Private native runtime | `make cpp-python-test`, `make cpp-python-gpu` | native logging, GLM compatibility, NumPy ownership, real GPU products and runtime teardown |
+| Native Viewer | `make native-viewer-test HUMANOIDS_MODEL=/path/to/100_humanoids.xml` | public Python products, independent scenes, asynchronous readback, window lifecycle and advancing dense physics |
 | Native bindings | `make native-bindings-test` | isolated pybind11/nanobind behavior, MuJoCo coexistence, ownership, and GIL release |
 | Golden | `make golden` | reviewed image baselines |
 | Full | `make test-all` | CPU, physics, OpenGL, and WebGPU layers |
