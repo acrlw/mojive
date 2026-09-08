@@ -1,8 +1,8 @@
+#include "renderer_factory.hpp"
 #include "scene_stream.hpp"
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_internal.h>
-#include <mojive/backends/bgfx.hpp>
 #include <mojive/readback.hpp>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -107,9 +107,9 @@ struct UiPackets {
 };
 int main(int argc, char **argv) {
     try {
-        if (argc != 6)
-            throw std::invalid_argument(
-                "Usage: gallery shaders trajectory output-directory font-latin font-cjk");
+        if (argc < 6 || argc > 7)
+            throw std::invalid_argument("Usage: gallery shaders trajectory output-directory "
+                                        "font-latin font-cjk [bgfx|sdl]");
         if (!glfwInit())
             throw std::runtime_error("Cannot initialize GLFW");
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -119,10 +119,11 @@ int main(int argc, char **argv) {
             throw std::runtime_error("Cannot create native windows");
         glfwSetWindowPos(window, 60, 70);
         glfwSetWindowPos(secondary, 1200, 90);
-        BgfxOptions options;
+        std::string backend = argc > 6 ? argv[6] : "bgfx";
+        probe::RendererOptions options;
         options.shader_directory = argv[1];
         options.window = native_window(window);
-        auto renderer = make_bgfx_renderer(options);
+        auto renderer = probe::make_renderer(options, backend);
         auto scene = probe::load(argv[2]);
         renderer->set_scene(scene.source);
         auto viewport = renderer->create_target({1280, 720}, 4);

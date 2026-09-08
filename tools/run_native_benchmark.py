@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import platform
 import statistics
@@ -21,6 +22,7 @@ def main() -> None:
     parser.add_argument("--resolutions", default="1920x1080,2560x1440")
     parser.add_argument("--modes", default="none,pick,color,depth,segmentation")
     parser.add_argument("--fps-limit", type=float, default=0)
+    parser.add_argument("--backends", default="bgfx")
     args = parser.parse_args()
     if args.seconds <= 0 or args.repeats < 1:
         parser.error("seconds and repeats must be positive")
@@ -30,8 +32,9 @@ def main() -> None:
     for repeat in range(args.repeats):
         for resolution in args.resolutions.split(","):
             width, height = map(int, resolution.split("x"))
-            for mode in modes if repeat % 2 == 0 else modes[::-1]:
-                path = args.output / f"{resolution}-{mode}-{repeat}.json"
+            pairs = list(itertools.product(modes, args.backends.split(",")))
+            for mode, backend in pairs if repeat % 2 == 0 else pairs[::-1]:
+                path = args.output / f"{backend}-{resolution}-{mode}-{repeat}.json"
                 subprocess.run(
                     [
                         str(args.build / "mojive_native_benchmark"),
@@ -43,16 +46,20 @@ def main() -> None:
                         str(args.seconds),
                         mode,
                         str(args.fps_limit),
+                        backend,
                     ],
                     check=True,
                     timeout=args.seconds + 120,
                 )
                 record = json.loads(path.read_text())
                 record["repeat"] = repeat
+                record["implementation"] = backend
                 records.append(record)
                 summary = {}
                 for item in records:
-                    key = f"{item['width']}x{item['height']}/{item['mode']}"
+                    key = (
+                        f"{item['implementation']}/{item['width']}x{item['height']}/{item['mode']}"
+                    )
                     summary.setdefault(key, []).append(item)
                 aggregates = {
                     key: {

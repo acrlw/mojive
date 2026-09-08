@@ -216,6 +216,7 @@ class BgfxRenderer final : public Renderer {
 #endif
         init.fallback = false;
         init.profile = true;
+        init.swapChain.maxFrameLatency = 2;
         init.swapChain.nwh = options.window.handle;
         init.swapChain.ndt = options.window.display;
         init.swapChain.width = options.window.handle ? options.window.size.width : 0;

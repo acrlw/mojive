@@ -9,14 +9,14 @@ for the broader plan.
 
 `mojive_render_contract` contains standard-library-only scene, camera, image, target, texture,
 UI packet, and completion types. `mojive_render_core` validates inputs and implements a bounded
-synchronous readback consumer. Neither target includes or links bgfx, GLFW, or ImGui.
+synchronous readback consumer. Neither target includes or links bgfx, SDL, GLFW, ImGui, or a Python binding library.
 
 `mojive_backend_bgfx` implements the `Renderer` interface and privately owns bgfx handles,
 view allocation, instance layouts, frame counters, staging textures, and device lifecycle.
-Only executable composition roots select `make_bgfx_renderer`. A future backend implements
-`Renderer` and supplies another factory; it does not require changing scene producers or the
-common readback consumer. The recording test double compiles and exercises that consumer with
-`MOJIVE_BUILD_BGFX=OFF`.
+`mojive_backend_sdl` implements the same interface with SDL3 GPU command buffers, transfer
+buffers, fences, and swapchains. Only executable composition roots select a factory; switching
+between `bgfx` and `sdl` does not change scene producers or the common readback consumer. The recording test double compiles and exercises that consumer with
+both rendering backends disabled.
 
 The ImGui adapter converts draw lists into generic `UiFrame` packets. The renderer itself does
 not include ImGui or physics headers. Native OS window handles enter through `NativeWindow`;
@@ -61,11 +61,11 @@ make native-test
 make native-probe
 ```
 
-`native-test` configures a separate build with bgfx disabled and checks common dependency
+`native-test` configures a separate build with both rendering backends disabled and checks common dependency
 boundaries. `native-probe` runs real GPU checks for exact IDs above `2^24`, negative segmentation,
 metric depth, background values, MSAA edge identities, one-pixel regions, dynamic mesh updates,
 resize, peer destruction, source replacement, stale input, queue backpressure, owner-thread
-violations, and runtime restart. It writes images and `conformance.json` to `output/native-probe/`.
+violations, and runtime restart. It writes images and `conformance.json` to `output/native-probe/<backend>/`.
 
 The tested host is macOS/Metal. Windows/D3D12 and Linux/Vulkan are selected by the build but
 remain unverified on physical hardware. Linux currently uses X11; Wayland is not implemented
@@ -76,6 +76,8 @@ The build explicitly selects the platform renderer and disables WebGPU. Its shad
 uses upstream sources with `SHADERC_CONFIG_HAS_TINT=0`, without linking Tint/Dawn. Merely setting
 `BGFX_CONFIG_RENDERER_WEBGPU=0` is insufficient: selecting any backend macro also disables
 bgfx's automatic backend selection. No vendor sources are modified.
+
+The SDL option is described below; its current shader coverage is narrower than the bgfx build.
 
 On the tested Clang host, `-DMOJIVE_ENABLE_SANITIZERS=ON` instruments Mojive's native code
 with AddressSanitizer and UndefinedBehaviorSanitizer. Disable it for performance runs; vendor
@@ -114,7 +116,7 @@ builder. On the tested model this produces 1,600 moving bodies, 2,700 degrees of
 contains mesh data, exact identity metadata, and 120 recorded transform frames. It is not a
 new public scene format. Export metadata includes the source path and a content checksum.
 
-Runs alternate mode order across repeats, warm up the selected path, reuse staging textures,
+Runs alternate backend and mode order across repeats, warm up the selected path, reuse staging textures,
 limit pending readbacks, and drain GPU work before recording total throughput. Modes distinguish
 no readback, a one-pixel pick, and continuous RGB/depth/segmentation output. JSON retains each
 run and aggregates the median of run statistics. CSV columns are separate sample sequences;
@@ -154,3 +156,136 @@ It does not establish a production speedup or native physics/render concurrency.
 
 The local Chinese report is `output/native-probe/report.zh.md`; raw records and separate sample
 CSV files live under `output/native-probe/benchmark/` and `output/native-probe/paced/`.
+
+
+## SDL3 GPU comparison
+
+```bash
+make native-probe NATIVE_BACKEND=sdl
+make native-gallery NATIVE_BACKEND=sdl HUMANOIDS_MODEL=/path/to/mujoco/model/humanoid/100_humanoids.xml
+make native-benchmark NATIVE_BACKEND=sdl HUMANOIDS_MODEL=/path/to/mujoco/model/humanoid/100_humanoids.xml \
+  ARGS='--backends bgfx,sdl --output output/native-probe/sdl-comparison'
+```
+
+SDL GPU is a graphics API abstraction with Metal, D3D12, and Vulkan drivers. SDL's window/input
+library and SDL's newer GPU API have different maturity histories. The evaluation currently
+provides **Metal shaders only** and refuses an SDL build on other platforms. A portable shader
+pipeline and real Windows/Linux acceptance are outstanding; SDL's supported-platform list is
+not evidence that this adapter has passed on those platforms. The SDL-only build does not fetch
+bgfx, bx, bimg, or their shader compiler; pass `NATIVE_CMAKE_ARGS=-DMOJIVE_BUILD_BGFX=OFF` to check it.
+
+The gallery keeps GLFW's existing platform and ImGui integration and wraps its native Cocoa
+windows through SDL's public native-window properties. This isolates the GPU comparison from
+an unrelated event-system rewrite. The wrapper does not own the GLFW window. Both windows
+share a GPU device; the experiment does not require a central daemon or one process per window.
+
+Both adapters use the same two passes, geometry, instance count, color/MSAA settings, and exact
+identity encoding. Both now explicitly bound outstanding GPU frames to two; the earlier bgfx
+result used its default queue setting and is historical, not the comparison baseline. SDL's
+fence is backend-private and becomes a common `ReadbackTicket`. A zero-copy borrowed MuJoCo
+array is never retained for asynchronous GPU access. Upload buffers and readback slots are reused.
+SDL GPU exposes no portable timestamp-query API used by this adapter, so its GPU timing fields
+are `null`. CPU timing and completed readback latency remain measured. Readback completion is
+observed when the application polls, and a frame-rate cap changes that observation interval.
+
+Benchmark captures always show the same recorded frame, independent of measured throughput.
+Data conformance checks also compare exact raw arrays from both implementations. No production
+rendering effect or live simulation is added by this experiment.
+
+## Python binding comparison
+
+```bash
+make native-bindings-test
+make native-bindings-benchmark HUMANOIDS_MODEL=/path/to/mujoco/model/humanoid/100_humanoids.xml
+```
+
+The build adds two isolated extension modules under `output/native-bindings-build/bindings`.
+It does not install a package, modify the Python app's dependencies, or replace MuJoCo's module.
+Versions and source checksums for pybind11, nanobind, and nanobind's robin-map dependency are
+locked. Both wrappers call the same compiled C++20 implementation with the same optimization
+level; automatic LTO, stripping, and size-oriented flags are disabled for this comparison.
+The binding-only build does not fetch or link any renderer or UI dependency.
+
+The tests cover all six import orders with MuJoCo, exact NumPy buffer addresses, explicit owned
+snapshots, read-only views that survive deletion of the original owner, rejected dtype/stride
+conversions, wrong-thread frame mutation, and Python execution while native computation runs.
+Both bindings explicitly release the GIL for the batched C++ work. Neither makes arbitrary
+Python code parallel. Copy a physics state at an adapter synchronization boundary before
+starting asynchronous work; the GIL does not protect a buffer while another native thread is
+writing it.
+
+MuJoCo's official Python package uses pybind11. Mojive can use nanobind without rewrapping
+MuJoCo's C++ object types: exchange NumPy arrays, ordinary values, and Mojive-owned snapshots.
+Different binding libraries' registered C++ wrapper objects are intentionally rejected in the
+comparison; an array boundary works. Sharing raw `mjData*` ownership across extension modules
+is outside this contract. A future native physics adapter should call MuJoCo's C API directly
+and own its model/data lifetime rather than routing every physics step through Python.
+
+The benchmark measures small calls, strict ndarray borrowing, copying the official humanoid
+model's `qpos`, and packing the same fixture's 5,101 transforms into two 80-byte records per
+instance. It also measures a shared native computation after releasing the GIL. Seven alternating
+runs retain raw values and median timings. These are boundary/kernel measurements, not claims
+about production FPS, GIL-free Python, or a full C++ editor. Choosing nanobind does not change
+the standard-library-only renderer contracts; the binding library stays in two module sources.
+
+Official references: [MuJoCo Python bindings](https://mujoco.readthedocs.io/en/stable/python.html),
+[nanobind design](https://nanobind.readthedocs.io/en/latest/why.html),
+[SDL GPU API](https://wiki.libsdl.org/SDL3/CategoryGPU), and
+[SDL native-window properties](https://wiki.libsdl.org/SDL3/SDL_CreateWindowWithProperties).
+
+
+## Measured comparison (2026-09-08)
+
+The same M5/Metal host completed 60 alternating uncapped runs and 12 runs paced at 120 FPS.
+Each combination used three 10-second runs after 90 warmup frames. The table reports median
+throughput of the fixed-trajectory prototype with an explicit two-frame GPU queue budget.
+
+| Output per frame | bgfx 1080p FPS | SDL 1080p FPS | bgfx 1440p FPS | SDL 1440p FPS |
+|---|---:|---:|---:|---:|
+| None | 824.8 | 887.2 | 793.7 | 832.3 |
+| One-pixel pick | 587.1 | 894.3 | 522.8 | 844.6 |
+| RGB | 182.7 | 211.3 | 141.6 | 129.1 |
+| Metric depth | 161.1 | 183.5 | 130.8 | 110.0 |
+| Segmentation | 142.6 | 177.4 | 113.4 | 107.1 |
+
+At 120 FPS in 1080p, pick completion P95 was 19.11 ms with bgfx and
+9.84 ms with SDL. RGB completion P95 was 22.89 ms and
+13.36 ms respectively, but SDL's RGB CPU frame P95 was higher
+(8.33 ms versus 6.40 ms). This supports continuing the SDL picking path while
+retaining bgfx as a comparison; it does not establish a universal SDL performance advantage.
+
+The binding comparison used nanobind 3.0.1, pybind11 3.1.0, CPython 3.11.15, NumPy 2.4.6,
+and MuJoCo 3.11.0. Seven alternating runs measured identical shared C++ kernels.
+
+| Boundary or workload | pybind11 | nanobind |
+|---|---:|---:|
+| Scalar call, including Python loop | 39.4 ns | 24.0 ns |
+| Strict ndarray borrowing | 176.5 ns | 134.9 ns |
+| Copy 2,800 qpos values | 538.8 ns | 455.2 ns |
+| Update 5,101 instance records | 10.67 us | 10.60 us |
+| Shared native computation | 51.76 us | 52.15 us |
+| Unstripped module | 281.4 KiB | 224.7 KiB |
+
+Five alternating incremental wrapper rebuilds, with support libraries and the kernel already
+built, took a median 1.788 s for pybind11 and 0.449 s for nanobind. This measures editing one
+wrapper, not initial full-project compilation. Reproduce with
+`python tools/benchmark_native_binding_builds.py` after `make native-bindings`.
+
+Nanobind is the preferred thin-binding candidate for the next native core slice. Small boundary
+costs and rebuild time improved; shared batch computation was effectively unchanged. Both
+libraries passed 13 ownership, array, thread, and import-order checks with MuJoCo. Neither
+library removes the need for explicit GIL release and a safe physics snapshot boundary.
+
+SDL passed the shared conformance suite, including same-revision source replacement, both
+UI scales, actual secondary surfaces, and renderer-only ASan/UBSan plus Metal API validation.
+The three-object conformance outputs were bit-identical across backends. Full humanoid color
+captures differed in less than 0.01% of pixels, with mean absolute channel error below 0.00035
+on the 0-255 scale; these captures are not claimed to be bit-identical. SDL's Windows/Linux
+shader path, real 2x framebuffers, production effects, and live native physics remain untested.
+The Python regression and strict documentation gates passed. Ten locked dependency archives
+and 8,900 extracted source files matched without vendor patches.
+
+The full local Chinese report is `output/native-probe/sdl-nanobind-report.zh.md`. Independent
+run records, CSV samples, and fixed-frame captures are under `sdl-comparison/` and `sdl-paced/`
+within that output directory; binding data is under `bindings/`. Opaque renderer handles are
+scoped to their renderer and must not be transferred between backend instances.

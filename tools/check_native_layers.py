@@ -6,7 +6,9 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VENDOR_INCLUDE = re.compile(r"#\s*include\s*[<\"](?:(?:bgfx|bx|bimg|GLFW)/|imgui[_.])")
+VENDOR_INCLUDE = re.compile(
+    r"#\s*include\s*[<\"](?:(?:bgfx|bx|bimg|GLFW|SDL3|nanobind|pybind11|mojive/backends)/|imgui[_.]|Python[.]h)"
+)
 
 
 def main() -> None:

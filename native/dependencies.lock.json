@@ -35,5 +35,33 @@
     "tag": "v1.92.9b-docking",
     "url": "https://codeload.github.com/ocornut/imgui/tar.gz/b48d1afbe8ee8b238e2961dc363a949dd7304e23",
     "sha256": "747c5a465a05c4ef5b4a09e2e0e3d0ce2bc76b31420f0f5af33df470907cf893"
+  },
+  "sdl": {
+    "repo": "libsdl-org/SDL",
+    "tag": "release-3.4.16",
+    "commit": "fa2c02bb6e21974a89ea9824bc53c9932abe5f9c",
+    "url": "https://codeload.github.com/libsdl-org/SDL/tar.gz/fa2c02bb6e21974a89ea9824bc53c9932abe5f9c",
+    "sha256": "d246967187a4f37cc850608dbaf5cff9d1df4d731259903d25539755cdfcc657"
+  },
+  "nanobind": {
+    "repo": "wjakob/nanobind",
+    "tag": "v3.0.1",
+    "commit": "db4827f06f6f1680e5d4004c95fc8d69299dba8b",
+    "url": "https://codeload.github.com/wjakob/nanobind/tar.gz/db4827f06f6f1680e5d4004c95fc8d69299dba8b",
+    "sha256": "60c350b2d64cdf2c1d8e46433d38dba0fb69ba118f9077c1c7e74228e6dec1e0"
+  },
+  "pybind11": {
+    "repo": "pybind/pybind11",
+    "tag": "v3.1.0",
+    "commit": "97bf890db679505a14dfe547a5e77bb2bd05dc90",
+    "url": "https://codeload.github.com/pybind/pybind11/tar.gz/97bf890db679505a14dfe547a5e77bb2bd05dc90",
+    "sha256": "6368877d3f241f283e010d858af27a6934ac45f7cbb5c68d2518b11bf64a113f"
+  },
+  "robin_map": {
+    "repo": "Tessil/robin-map",
+    "tag": "nanobind-submodule",
+    "commit": "4ec1bf19c6a96125ea22062f38c2cf5b958e448e",
+    "url": "https://codeload.github.com/Tessil/robin-map/tar.gz/4ec1bf19c6a96125ea22062f38c2cf5b958e448e",
+    "sha256": "4968947bd2e908854481519ec422823af4161a286ff1e16943293b753e80cb3f"
   }
 }
