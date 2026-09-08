@@ -36,6 +36,7 @@ nav:
       - G3 UI corners: how-to/ui-corners.md
       - Extend UI drawing: how-to/ui-drawing.md
       - WebGPU backend: WGPU_BACKEND_REPORT.md
+      - Native renderer probe: guides/native-probe.md
   - Concepts:
       - Architecture: concepts/architecture.md
       - Renderer: RENDERER.md

@@ -758,3 +758,34 @@ doctor:
 
 clean:
 	rm -rf out .pytest_cache **/__pycache__
+
+# Optional native renderer evaluation; the Python application remains independent.
+NATIVE_BUILD ?= output/native-build
+NATIVE_JOBS ?= 4
+NATIVE_SCENE ?= output/native-probe/humanoids100.mjvp
+NATIVE_FONT_LATIN ?= $(HOME)/Library/Caches/mojive/fonts/JetBrainsMono-Regular.ttf
+NATIVE_FONT_CJK ?= $(HOME)/Library/Caches/mojive/fonts/NotoSansSC-Regular.otf
+
+.PHONY: native-build native-test native-probe native-fixture native-gallery native-benchmark
+native-build:
+	cmake -S native -B $(NATIVE_BUILD) -G Ninja -DCMAKE_BUILD_TYPE=Release $(NATIVE_CMAKE_ARGS)
+	cmake --build $(NATIVE_BUILD) --parallel $(NATIVE_JOBS)
+
+native-test:
+	$(PY) tools/check_native_layers.py
+	cmake -S native -B output/native-core-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_BGFX=OFF
+	cmake --build output/native-core-build --parallel $(NATIVE_JOBS)
+	ctest --test-dir output/native-core-build --output-on-failure
+
+native-probe: native-build
+	$(NATIVE_BUILD)/mojive_native_probe $(NATIVE_BUILD)/shaders output/native-probe
+
+native-fixture:
+	$(if $(HUMANOIDS_MODEL),,$(error Set HUMANOIDS_MODEL to the official humanoid/100_humanoids.xml))
+	$(PY) tools/export_native_probe.py "$(HUMANOIDS_MODEL)" --output "$(NATIVE_SCENE)"
+
+native-gallery: native-build native-fixture
+	$(NATIVE_BUILD)/mojive_native_gallery $(NATIVE_BUILD)/shaders "$(NATIVE_SCENE)" output/native-probe "$(NATIVE_FONT_LATIN)" "$(NATIVE_FONT_CJK)"
+
+native-benchmark: native-build native-fixture
+	$(PY) tools/run_native_benchmark.py --build $(NATIVE_BUILD) --scene "$(NATIVE_SCENE)" $(ARGS)

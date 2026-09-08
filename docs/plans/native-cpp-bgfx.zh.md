@@ -1,6 +1,7 @@
 # Mojive 原生 C++ 方案与 bgfx 评估
 
-> 评估日期：2026-09-08。状态：技术提案，尚未实现或实测 bgfx 后端。
+> 初始评估日期：2026-09-08。以下保留评估时的计划与判断。
+> 后续已在此分支实现首轮原生验证；当前范围、接口与复现入口见[原生验证指南](../guides/native-probe.md)。
 > Mojive 基线：`origin/main` 的 `23194d361dbaed19448cb5512af42e9936452805`。
 > bgfx 源码核对版本：`9b636df330c81e11c84595651a291b6c59fb7396`，提交时间为 2026-09-07 UTC。
 > 该 SHA 用于固定本次证据，不代表已验证的生产依赖版本。
@@ -152,7 +153,7 @@ P0 必须包括 32 位 ID、带负数的分割结果、米制深度、MSAA 下�
 
 P1 可先复用现有场景快照，避免在验证图形后端时同时重写所有面板。P3 不长期维护两套相互镜像的 Session；完成一条编辑链路后，Python 侧通过绑定访问同一状态。原型不直接写进 Python OpenGL 窗口。
 
-实现时增加 `native-probe`、`native-test`、`native-benchmark` 和原生 UI gallery 等 Make 入口，并接入现有验证矩阵。本次没有添加空壳目标或未经运行的 C++ 框架。
+已增加 `native-probe`、`native-test`、`native-benchmark` 和 `native-gallery` 等 Make 入口，并接入现有验证矩阵。当前本机结果见[原生验证指南](../guides/native-probe.md#initial-measured-result)。
 
 若关键回读只能靠深度修改多个 bgfx 后端才能满足交互与录制要求，或者原生帧延迟持续明显退化，就暂停扩大迁移范围，重新审视 bgfx。不能因为已经写了几个 pass 就把它当成不可撤回的选择。
 
@@ -172,10 +173,10 @@ P1 可先复用现有场景快照，避免在验证图形后端时同时重写�
 
 通过条件先看正确性，再看多次运行可重复的收益。对轻场景尤其检查延迟是否增加，不能用重场景平均 FPS 掩盖。测得 CPU 提交完成或 `present` 返回也不是显示器发光延迟；需要声明测量边界。
 
-本次没有编译运行 bgfx，没有 C++ 性能数值，也没有 Windows/Linux 实机结果。完成 P0/P1 后才能给出“值得全面迁移到 bgfx”的性能结论。
+现已完成本机 Metal 原型和固定轨迹测量；完整画质对比、真实 2× framebuffer 及 Windows/Linux 实机验证仍待完成。当前不能据此给出“值得全面迁移到 bgfx”的性能结论。
 
 ## 分支与保留 Python 的方式
 
-已从获取到的最新 `origin/main` 创建 `codex/bgfx-cpp-evaluation`，独立 worktree 为 `mojive-bgfx-cpp`。原 main 工作区保持不动。该分支先承载提案，后续可以承载 P0/P1；更大阶段按完整行为拆成可审查的提交或分支。
+已从获取到的最新 `origin/main` 创建 `codex/bgfx-cpp-evaluation`，独立 worktree 为 `mojive-bgfx-cpp`。原 main 工作区保持不动。该分支已承载提案和首轮本机原生验证；更大阶段按完整行为拆成可审查的提交或分支。
 
 原生代码建议新增 `native/` 与独立绑定包；现有 `src/mojive/` 继续运行。优先保持场景/帧/命令和公开输出契约兼容，不靠大范围重命名制造两套相似接口。达到对应验收条件后再切换入口，Python 版本的删除或默认后端变更不包含在本次提案工作中。

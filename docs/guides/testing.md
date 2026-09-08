@@ -13,6 +13,7 @@ matrix; other agent guidance links here.
 | Physics | `make test-physics` | model compilation and live physics worlds |
 | OpenGL GPU | `make gpu` | real OpenGL contexts and rendered output |
 | WebGPU | `make gpu-wgpu` | Metal, Vulkan, or DX12 backend behavior |
+| Native probe | `make native-test`, `make native-probe` | optional C++ contracts and real GPU output/lifetime checks |
 | Golden | `make golden` | reviewed image baselines |
 | Full | `make test-all` | CPU, physics, OpenGL, and WebGPU layers |
 
@@ -31,6 +32,7 @@ Pure prose, link, and metadata edits use their own rows instead of the CPU or GP
 | MuJoCo model loading | one XML path with the model-suite module | `make mujoco-model-suite` |
 | Rendering behavior, render pass, or shader | one GPU test file | `make gpu`, `make gpu-wgpu`, and relevant visual output |
 | Visual interaction or settings layout | focused UI GPU test | relevant scripted gallery or interactive Make target with captured evidence |
+| Native renderer probe or its shader | `make native-test`, `make native-probe` | `make check`, relevant `make native-gallery` or `make native-benchmark` evidence; Python rendering changes also use the rendering row above |
 | Registered regression invariant | its focused regression test | `make reverse` |
 | Documentation or executable examples | relevant document/example checks | `make docs-check` |
 | Instruction or Skill wording, links, or metadata | scope and reference review | [Skill validation](../how-to/agent-workflows.md#skill-maintenance) when applicable |
