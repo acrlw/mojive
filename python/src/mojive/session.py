@@ -471,6 +471,10 @@ class Session:
         """Return file-backed models participating in the composed scene."""
         return self._adapter.scene_models()
 
+    def model_component_count(self, model_id: int, category: str) -> int:
+        """Count model declarations without building their editor fields."""
+        return self._adapter.model_component_count(model_id, category)
+
     def model_components(self, model_id: int, category: str):
         """Return editable components in one model-level MJCF category."""
         return self._adapter.model_components(model_id, category)
@@ -1037,6 +1041,13 @@ class Session:
 
     def submit(self, command: Command) -> CommandResult:
         """Apply one typed command and update edit history and status text."""
+        from .command_support import unavailable_reason
+
+        reason = unavailable_reason(self._adapter.caps, command)
+        if reason is not None:
+            if self.editing:
+                self._edit_failed = True
+            return self._record_result(CommandResult.bad(reason))
         driver = self._simulation_driver
         # Camera and selection only change Session-owned state. All other
         # commands fence physics before reading history or mutating an adapter;
@@ -1250,13 +1261,6 @@ class Session:
 
     def _dispatch(self, c: Command) -> CommandResult:
         caps = self._adapter.caps
-        if (
-            caps.simulation
-            and not caps.clock_control
-            and isinstance(c, (cmd.Pause, cmd.Play, cmd.Step, cmd.Reset, cmd.SetSpeed))
-        ):
-            return CommandResult.bad("Physics clock control belongs to the external caller")
-
         if isinstance(c, cmd.StartStateTakeRecording):
             if not caps.simulation or not caps.state_snapshots:
                 return CommandResult.bad(f"{caps.name} cannot record simulation-state takes")

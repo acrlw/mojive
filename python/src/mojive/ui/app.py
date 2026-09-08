@@ -79,6 +79,7 @@ from .perturb import (
 from .perturb import (
     draw_axes as draw_perturb_axes,
 )
+from .pointer_bindings import PointerAction
 from .scene_entities import SceneEntityHelpers
 from .take_video import TakeVideo
 from .theme import THEME, Theme
@@ -168,28 +169,27 @@ log = get_logger("ui")
 
 PICK_SCREEN_RADIUS_PT = 40.0
 
-MODEL_EXTENSIONS = frozenset((".xml", ".mjcf", ".urdf"))
-MODEL_FILTERS = [
-    "All supported models (*.xml, *.mjcf, *.urdf)",
-    "*.xml *.mjcf *.urdf",
-    "MuJoCo XML / MJCF (*.xml, *.mjcf)",
-    "*.xml *.mjcf",
-    "URDF (*.urdf)",
-    "*.urdf",
-    "All files",
-    "*",
-]
+
+def _model_filters(caps) -> list[str]:
+    patterns = " ".join(f"*{extension}" for extension in caps.model_formats)
+    return ["Supported models", patterns] if caps.asset_loading and patterns else []
+
+
 SCENE_SUFFIX = ".mojive.json"
 LEGACY_SCENE_SUFFIX = ".forge.json"
 SCENE_SUFFIXES = (SCENE_SUFFIX, LEGACY_SCENE_SUFFIX)
-SCENE_FILTERS = [
-    "Mojive scenes (*.mojive.json, *.forge.json)",
-    "*.mojive.json *.forge.json",
-    "MuJoCo XML / MJCF (*.xml, *.mjcf)",
-    "*.xml *.mjcf",
-    "All files",
-    "*",
-]
+
+
+def _scene_filters(caps, *, saving: bool = False) -> list[str]:
+    filters = ["Mojive scenes (*.mojive.json, *.forge.json)", "*.mojive.json *.forge.json"]
+    if saving:
+        if caps.supports("mujoco.mjcf"):
+            filters += ["MuJoCo XML / MJCF (*.xml, *.mjcf)", "*.xml *.mjcf"]
+    else:
+        filters += _model_filters(caps)
+    return filters
+
+
 IMAGE_FILTERS = [
     "PNG images (*.png)",
     "*.png",
@@ -482,6 +482,16 @@ class _ModelLoadJob:
     action: str
     path: Path
     command: Any
+    completed: Any = None
+
+
+@dataclass(frozen=True)
+class _ModelLoadCompletion:
+    job: _ModelLoadJob
+    message: str
+    started: float
+    prepared: float
+    resources_ready: float
 
 
 @dataclass
@@ -753,6 +763,7 @@ class ViewerApp:
         self._model_load_job: _ModelLoadJob | None = None
         self._model_load_queue: list[_ModelLoadJob] = []
         self._model_load_started = 0.0
+        self._model_load_completion: _ModelLoadCompletion | None = None
         self._close_after_model_load = False
         self._model_drop_notice = ""
         self._model_drop_notice_until = 0.0
@@ -776,6 +787,7 @@ class ViewerApp:
         self._take_video: TakeVideo | None = None
         self._playback_widget_rect: tuple[float, float, float, float] | None = None
         self._tool_widget_rect: tuple[float, float, float, float] | None = None
+        self._overlay_drag_chord = None
         self._overlay_drag_kind = ""
         self._overlay_drag_offset = (0.0, 0.0)
         overlay_scale = self.localizer.preference(
@@ -975,6 +987,20 @@ class ViewerApp:
         if persist:
             self.localizer.set_preferences({"input_bindings": self.input_bindings.preferences()})
 
+    def set_pointer_binding(
+        self, action: PointerAction, identifiers: tuple[str, ...], *, persist: bool = True
+    ) -> None:
+        """Replace one mouse action's alternatives after conflict validation."""
+        self.input_bindings = self.input_bindings.remap_pointer(action, identifiers)
+        if persist:
+            self.localizer.set_preferences({"input_bindings": self.input_bindings.preferences()})
+
+    def set_navigation_preset(self, name: str, *, persist: bool = True) -> None:
+        """Apply camera navigation bindings without changing editing gestures."""
+        self.input_bindings = self.input_bindings.navigation_preset(name)
+        if persist:
+            self.localizer.set_preferences({"input_bindings": self.input_bindings.preferences()})
+
     def set_interactions(self, value: InteractionConfig, *, persist: bool = True) -> None:
         """Replace the built-in input policy without changing application bindings."""
 
@@ -1155,7 +1181,7 @@ class ViewerApp:
 
     def open_scene(self, path: str | Path) -> CommandResult:
         target = Path(path).expanduser().resolve()
-        if target.suffix.lower() in MODEL_EXTENSIONS:
+        if self.session.adapter.caps.accepts_model(target):
             return self.load_model(target)
         try:
             missing = missing_resource_entries(target)
@@ -1178,7 +1204,7 @@ class ViewerApp:
 
     def _queue_scene_open(self, path: str | Path) -> None:
         target = Path(path).expanduser().resolve()
-        if target.suffix.lower() in MODEL_EXTENSIONS:
+        if self.session.adapter.caps.accepts_model(target):
             self._queue_model_load("load", target)
             return
         try:
@@ -1207,7 +1233,14 @@ class ViewerApp:
             command = cmd.LoadAsset(target)
         self._model_load_queue.append(_ModelLoadJob(action, target, command))
 
+    def _queue_model_edit(self, command, completed=None) -> None:
+        """Serialize expensive UI edits with loads; notify on the UI thread."""
+        path = self.session.asset_path or Path("Untitled")
+        self._model_load_queue.append(_ModelLoadJob("edit", path, command, completed))
+
     def _start_model_load(self) -> bool:
+        if self._model_load_completion is not None:
+            return False
         if self._model_load_future is not None or not self._model_load_queue:
             return self._model_load_future is not None
         if getattr(self, "_take_video", None) is not None:
@@ -1241,23 +1274,30 @@ class ViewerApp:
             return False
         if not future.done():
             return True
-        elapsed = time.monotonic() - self._model_load_started
+        prepared = time.monotonic()
         try:
             result = future.result()
         except Exception as exc:
             result = cmd.CommandResult.bad(str(exc))
         self._model_load_future = None
         self._model_load_job = None
-        log.info("{} {} in {:.3f}s", result.message or "Finished", job.path, elapsed)
         if result.ok:
-            self._after_model_change()
+            if job.action == "edit":
+                self._sync_structure()
+            else:
+                self._after_model_change()
+            self._model_load_completion = _ModelLoadCompletion(
+                job, result.message, self._model_load_started, prepared, time.monotonic()
+            )
             self._set_model_drop_notice(result.message)
         else:
+            log.info(
+                "{} {} after {:.3f}s", result.message, job.path, prepared - self._model_load_started
+            )
             self._model_load_queue.clear()
             self._report_model_error(result.message)
-        if self._model_load_queue:
-            self._start_model_load()
-            return True
+        if job.completed is not None:
+            job.completed(result)
         if self._close_after_model_load:
             self._close_after_model_load = False
             self._request_document_action("quit")
@@ -1269,6 +1309,7 @@ class ViewerApp:
             "add": "Adding model",
             "open": "Opening scene",
             "reload": "Reloading model",
+            "edit": "Applying model edit",
         }.get(action, "Loading model")
 
     def save_scene(
@@ -1310,22 +1351,22 @@ class ViewerApp:
         self._reset_source_camera()
 
     def _open_model_dialog(self, action: str = "open") -> None:
-        if self._model_dialog is not None:
+        if self._model_dialog is not None or not _model_filters(self.session.adapter.caps):
             return
         t = self.localizer.text
         current = self.session.asset_path
         default_path = str(current.parent if current is not None else Path.cwd())
         self._model_dialog = portable_file_dialogs.open_file(
-            t("Add MJCF or URDF models") if action == "add" else t("Open an MJCF or URDF model"),
+            t("Add models") if action == "add" else t("Open a model"),
             default_path,
-            _translated_file_filters(MODEL_FILTERS, t),
+            _translated_file_filters(_model_filters(self.session.adapter.caps), t),
             portable_file_dialogs.opt.multiselect
             if action == "add"
             else portable_file_dialogs.opt.none,
         )
         self._model_dialog_action = action
         self._set_model_drop_notice(
-            t("Choose a model to add") if action == "add" else t("Choose an MJCF or URDF model")
+            t("Choose a model to add") if action == "add" else t("Choose a model")
         )
 
     def _open_scene_dialog(self, action: str) -> None:
@@ -1336,14 +1377,20 @@ class ViewerApp:
         if action == "save":
             default = current or (Path.cwd() / f"scene{SCENE_SUFFIX}")
             self._scene_dialog = portable_file_dialogs.save_file(
-                t("Save scene"), str(default), _translated_file_filters(SCENE_FILTERS, t)
+                t("Save scene"),
+                str(default),
+                _translated_file_filters(
+                    _scene_filters(self.session.adapter.caps, saving=action == "save"), t
+                ),
             )
         else:
             default = current.parent if current is not None else Path.cwd()
             self._scene_dialog = portable_file_dialogs.open_file(
                 t("Open Mojive scene"),
                 str(default),
-                _translated_file_filters(SCENE_FILTERS, t),
+                _translated_file_filters(
+                    _scene_filters(self.session.adapter.caps, saving=action == "save"), t
+                ),
             )
         self._scene_dialog_action = action
 
@@ -1566,7 +1613,9 @@ class ViewerApp:
             self._resource_repair_dialog = portable_file_dialogs.open_file(
                 f"{self.localizer.text('Locate')} {missing.model_name}",
                 str(default),
-                _translated_file_filters(MODEL_FILTERS, self.localizer.text),
+                _translated_file_filters(
+                    _model_filters(self.session.adapter.caps), self.localizer.text
+                ),
             )
         else:
             self._resource_repair_dialog = portable_file_dialogs.select_folder(
@@ -1742,7 +1791,7 @@ class ViewerApp:
             self._request_document_action("open_scene", path)
             return
         unsupported = next(
-            (path for path in paths if path.suffix.lower() not in MODEL_EXTENSIONS), None
+            (path for path in paths if not self.session.adapter.caps.accepts_model(path)), None
         )
         if unsupported is not None:
             self._report_model_error(
@@ -1777,7 +1826,7 @@ class ViewerApp:
     def _draw_main_menu(self) -> None:
         t = self.localizer.text
         caps = self.session.adapter.caps
-        can_load = bool(caps.asset_loading)
+        can_load = bool(_model_filters(caps))
         can_edit = bool(caps.scene_authoring)
         can_scene_files = bool(caps.scene_files)
         shortcut = "Cmd" if sys.platform == "darwin" else "Ctrl"
@@ -1830,14 +1879,14 @@ class ViewerApp:
                     if can_scene_files:
                         imgui.separator()
                     open_model, _ = imgui.menu_item(
-                        t("Open Model (MJCF / URDF)..."),
+                        t("Open Model..."),
                         f"{shortcut}+O" if not can_scene_files else "",
                         False,
                         self._model_dialog is None,
                     )
                     if caps.model_composition:
                         add_model, _ = imgui.menu_item(
-                            t("Add Models (MJCF / URDF)..."),
+                            t("Add Models..."),
                             "",
                             False,
                             self._model_dialog is None,
@@ -1853,7 +1902,7 @@ class ViewerApp:
                         t("Reload Model"),
                         f"{shortcut}+Shift+O",
                         False,
-                        self.session.asset_path is not None,
+                        caps.reload and self.session.asset_path is not None,
                     )
                 if can_scene_files and imgui.begin_menu(t("Resource Directories")):
                     add_resource_root, _ = imgui.menu_item(
@@ -2535,14 +2584,14 @@ class ViewerApp:
         window.begin_frame()
         self._popup_owned_frame = window.popup_owned_frame
         self._advance_recording_countdown()
-        if self._rpc_service is not None:
-            self._rpc_service.pump()
         self._sync_display_scale()
         if self._model_load_future is not None and self._poll_model_load():
             self._draw_model_loading_frame()
             self._present_frame(dt)
             self._frame_index += 1
             return
+        if self._rpc_service is not None:
+            self._rpc_service.pump()
         self._poll_model_dialog()
         self._poll_scene_dialog()
         self._poll_resource_dialog()
@@ -2859,9 +2908,9 @@ class ViewerApp:
                         self._open_scene_dialog("save")
                     else:
                         self._request_scene_save(self.session.asset_path)
-            elif caps.asset_loading and pressed("o") and not io.key_shift:
+            elif _model_filters(caps) and pressed("o") and not io.key_shift:
                 self._open_model_dialog()
-            if caps.asset_loading and io.key_shift and pressed("o"):
+            if caps.reload and io.key_shift and pressed("o"):
                 self._queue_model_load("reload", self.session.asset_path)
             if pressed("comma"):
                 self.panels.open_panel("Settings")
@@ -3011,14 +3060,27 @@ class ViewerApp:
             time.monotonic(),
         )
         node = self.session.selected_node
+        pointer = self.input_bindings.pointer_frame(self._input_claim)
+        actions = frozenset(
+            action for action, _chord in self.input_bindings.pointer_matches(pointer)
+        )
+        if actions & {PointerAction.PERTURB_TRANSLATE, PointerAction.PERTURB_ROTATE}:
+            actions -= {PointerAction.GIZMO, PointerAction.GIZMO_VALUE}
+            if not (self.interactions.perturb and self.session.adapter.caps.perturb):
+                actions -= {PointerAction.PERTURB_TRANSLATE, PointerAction.PERTURB_ROTATE}
+
         return gs.InputState(
+            actions=actions,
             blocked=blocked,
             left=not self._input_claim.claims_button(0) and imgui.is_mouse_down(0),
             right=not self._input_claim.claims_button(1) and imgui.is_mouse_down(1),
             middle=not self._input_claim.claims_button(2) and imgui.is_mouse_down(2),
             ctrl=self.interactions.perturb
-            and not self._input_claim.claims_key(self.input_bindings.key_id(InputAction.PERTURB))
-            and self.input_bindings.down(InputAction.PERTURB),
+            and self.session.adapter.caps.perturb
+            and (
+                PointerAction.PERTURB_TRANSLATE in actions
+                or PointerAction.PERTURB_ROTATE in actions
+            ),
             shift=self.interactions.gizmo
             and not self._input_claim.claims_key(self.input_bindings.key_id(InputAction.SNAP))
             and self.input_bindings.down(InputAction.SNAP),
@@ -3093,7 +3155,7 @@ class ViewerApp:
                 self._viewport_rect,
                 state.cursor,
                 claimed=False,
-                left_down=state.left,
+                left_down=state.any_button and self.router.wants_gizmo(),
                 released=self.router.released,
                 style_scale=self.window.style_scale,
             )
@@ -3113,7 +3175,9 @@ class ViewerApp:
                 style_scale=self.window.style_scale,
             )
             return
-        if state.gizmo_hovered and imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
+        if state.gizmo_hovered and state.action(
+            PointerAction.GIZMO_VALUE, imgui.is_mouse_double_clicked(imgui.MouseButton_.left)
+        ):
             edit = self.gizmo.precise_input(self.session)
             if edit is not None:
                 self.gizmo.cancel()
@@ -3126,7 +3190,7 @@ class ViewerApp:
             self._viewport_rect,
             state.cursor,
             claimed=self.router.wants_gizmo(),
-            left_down=state.left,
+            left_down=state.any_button and self.router.wants_gizmo(),
             released=self.router.released,
             snap=state.shift or self._snap_latched,
             style_scale=self.window.style_scale,
@@ -3412,7 +3476,7 @@ class ViewerApp:
 
         if not self.router.wants_camera():
             return
-        gesture = gs.camera_gesture(state)
+        gesture = self.router.camera_gesture(state)
 
         settled = self.router.travel >= CLICK_SLOP_PT
         if gesture is gs.CameraGesture.ORBIT and settled and self.interactions.camera.orbit:
@@ -3421,6 +3485,9 @@ class ViewerApp:
         elif gesture is gs.CameraGesture.PAN and settled and self.interactions.camera.pan:
             self._leave_model_camera()
             self.camera.pan(state.delta[0], state.delta[1], self._viewport_rect[3])
+        elif gesture is gs.CameraGesture.DOLLY_DRAG and settled and self.interactions.camera.dolly:
+            self._leave_model_camera()
+            self.camera.dolly(-state.delta[1] * 0.05)
         elif gesture is gs.CameraGesture.DOLLY and self.interactions.camera.dolly:
             self._leave_model_camera()
             self.camera.dolly(state.wheel)
@@ -3527,7 +3594,10 @@ class ViewerApp:
 
     def _poll_perturb(self, state: gs.InputState) -> None:
         st = self.session.perturb
-        if not self.interactions.perturb or not self.router.wants_perturb():
+        if (
+            not (self.interactions.perturb and self.session.adapter.caps.perturb)
+            or not self.router.wants_perturb()
+        ):
             if st.active:
                 self.perturb.end(self.session)
             return
@@ -3959,7 +4029,7 @@ class ViewerApp:
     def _poll_pick(self, state: gs.InputState) -> None:
         selection = getattr(self, "interactions", _DEFAULT_INTERACTIONS).selection
         input_claim = getattr(self, "_input_claim", _NO_INPUT_CLAIM)
-        if not selection.pick or input_claim.pointer or input_claim.claims_button(0):
+        if not selection.pick or input_claim.pointer:
             return
         # A plain viewport click is classified as a camera-region gesture by
         # the router even when every camera motion switch is disabled. Keep
@@ -3971,7 +4041,7 @@ class ViewerApp:
         if self.router.travel > CLICK_SLOP_PT:
             self._last_viewport_click = None
             return
-        if not self.router.started_with_left:
+        if not (self.router.started_with_left or self.router.started_with_focus):
             return
         if not state.over_viewport:
             return
@@ -3991,6 +4061,8 @@ class ViewerApp:
             and (state.cursor[0] - previous[1][0]) ** 2 + (state.cursor[1] - previous[1][1]) ** 2
             <= radius * radius
         )
+        if state.actions is not None:
+            double_clicked = self.router.started_with_focus
         self._last_viewport_click = None if double_clicked else (now, state.cursor, object_id)
         if double_clicked and selection.focus_on_double_click:
             node = self.session.node_by_object_id(object_id)
@@ -4320,7 +4392,9 @@ class ViewerApp:
                 if (
                     supported
                     and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled.value)
-                    and imgui.is_mouse_double_clicked(imgui.MouseButton_.left)
+                    and self.input_bindings.pointer_match(
+                        PointerAction.PANEL_FOCUS, self.input_bindings.pointer_frame(), press=True
+                    )
                 ):
                     self.gizmo.select_joint(node.body_index, joint.joint_id)
                     self._request_node_joint_focus(
@@ -4350,7 +4424,9 @@ class ViewerApp:
         )
         if self._overlay_drag_kind == name:
             io = imgui.get_io()
-            if imgui.is_mouse_down(imgui.MouseButton_.left):
+            if self._overlay_drag_chord is not None and self.input_bindings.pointer_frame().held(
+                self._overlay_drag_chord
+            ):
                 center = (
                     float(io.mouse_pos.x) - self._overlay_drag_offset[0],
                     float(io.mouse_pos.y) - self._overlay_drag_offset[1],
@@ -4391,7 +4467,11 @@ class ViewerApp:
         ):
             return
         imgui.set_mouse_cursor(imgui.MouseCursor_.resize_all)
-        if not self._overlay_drag_kind and imgui.is_mouse_clicked(imgui.MouseButton_.left):
+        chord = self.input_bindings.pointer_match(
+            PointerAction.OVERLAY_DRAG, self.input_bindings.pointer_frame(), press=True
+        )
+        if not self._overlay_drag_kind and chord is not None:
+            self._overlay_drag_chord = chord
             center = ((rect[0] + rect[2]) * 0.5, (rect[1] + rect[3]) * 0.5)
             self._overlay_drag_kind = name
             self._overlay_drag_offset = (point[0] - center[0], point[1] - center[1])
@@ -4804,6 +4884,8 @@ class ViewerApp:
                 ),
                 *defaults,
             )
+        if not (self.interactions.perturb and self.session.adapter.caps.perturb):
+            defaults = tuple(hint for hint in defaults if not hint.hint_id.startswith("perturb"))
         return self.tool_hints.resolve(defaults, surface="status")
 
     def _selection_clear_enabled(self) -> bool:
@@ -4952,7 +5034,9 @@ class ViewerApp:
                 ):
                     self._toggle_status_metric()
                 hovered = imgui.is_item_hovered()
-                if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                if hovered and self.input_bindings.pointer_match(
+                    PointerAction.STATUS_COPY, self.input_bindings.pointer_frame(), press=True
+                ):
                     imgui.set_clipboard_text(status_layout.metric_exact)
                 if hovered:
                     switch = (
@@ -4966,13 +5050,11 @@ class ViewerApp:
                 imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
                 imgui.invisible_button("##status_message", imgui.ImVec2(x1 - x0, y1 - y0))
                 if imgui.is_item_hovered():
-                    if imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                    if self.input_bindings.pointer_match(
+                        PointerAction.STATUS_COPY, self.input_bindings.pointer_frame(), press=True
+                    ):
                         imgui.set_clipboard_text(active_status.copy_text or active_status.text)
-                    hint = self.localizer.text(
-                        "Right-click to copy path"
-                        if active_status.copy_text is not None
-                        else "Right-click to copy message"
-                    )
+                    hint = f"{self.input_bindings.pointer_label(PointerAction.STATUS_COPY)} · {self.localizer.text('Copy')}"
                     imgui.set_tooltip(f"{active_status.text}\n{hint}")
             if status_layout.recording_pause_rect is not None and not loading:
                 x0, y0, x1, y1 = status_layout.recording_pause_rect
@@ -5293,6 +5375,23 @@ class ViewerApp:
     def _present_frame(self, dt: float) -> None:
         presented = self.window.end_frame(readback=self._needs_presented_readback(dt))
         self._finish_capture_and_recording(presented, dt)
+        self._finish_model_load_frame()
+
+    def _finish_model_load_frame(self) -> None:
+        completion = self._model_load_completion
+        if completion is None:
+            return
+        self._model_load_completion = None
+        now = time.monotonic()
+        log.info(
+            "{} {} in {:.3f}s (source {:.3f}s, resources {:.3f}s, first frame submitted {:.3f}s)",
+            completion.message or "Loaded",
+            completion.job.path,
+            now - completion.started,
+            completion.prepared - completion.started,
+            completion.resources_ready - completion.prepared,
+            now - completion.resources_ready,
+        )
 
     def _surface_image(
         self, surface: CaptureSurface, presented: np.ndarray | None, *, out=None
@@ -5485,13 +5584,17 @@ class ViewerApp:
         empty = not self._has_scene_content()
         notice = self._model_drop_notice if time.monotonic() < self._model_drop_notice_until else ""
         caps = self.session.adapter.caps
-        dragging = self.window.file_drag_active and (caps.asset_loading or caps.scene_files)
+        dragging = self.window.file_drag_active and (bool(_model_filters(caps)) or caps.scene_files)
         if not empty and not notice and not dragging:
             return
         empty_hint = (
             "Drop a .mojive.json scene here\nFile > Open Scene...  ·  Entity > Create"
             if caps.scene_files
-            else "Drop an MJCF or URDF model here\nFile > Open Model...  ·  Add Model..."
+            else (
+                "Drop a supported model here\nFile > Open Model..."
+                if _model_filters(caps)
+                else "Waiting for scene data"
+            )
         )
         if dragging:
             message = (
@@ -5688,6 +5791,7 @@ class ViewerApp:
             request_geometry_resource_import=self._open_geometry_resource_dialog,
             request_model_asset_import=self._open_model_asset_import_dialog,
             request_model_asset_replace=self._open_model_asset_replace_dialog,
+            queue_model_edit=self._queue_model_edit,
             gizmo=self.gizmo,
             view_cube=self.view_cube,
             perturb=self.perturb,
@@ -5725,6 +5829,9 @@ class ViewerApp:
             set_viewport_capsule_scale=self.set_viewport_capsule_scale,
             input_bindings=self.input_bindings,
             set_input_binding=self.set_input_binding,
+            set_pointer_binding=self.set_pointer_binding,
+            set_navigation_preset=self.set_navigation_preset,
+            input_claim=self._input_claim,
             reset_input_bindings=self.reset_input_bindings,
             font_report=self.window.font_report,
             output=self.output,

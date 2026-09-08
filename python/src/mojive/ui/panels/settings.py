@@ -18,6 +18,7 @@ from ..gizmo import (
 from ..input_bindings import InputAction, input_action_name, key_choices
 from ..localization import LANGUAGE_LABELS, Language, parse_language
 from ..perturb import OUTLINE_CORNER_RADIUS_PT
+from ..pointer_bindings import NAVIGATION_PRESETS, POINTER_ACTION_NAMES, PointerAction
 from ..viewcube import (
     DEFAULT_SELECTION_PADDING,
     MAX_SELECTION_PADDING,
@@ -34,6 +35,8 @@ from . import (
     Panel,
     PanelContext,
     padded_selectable,
+    pointer_hint,
+    pointer_pressed,
     search_input,
     segmented_control,
     themed_checkbox,
@@ -164,6 +167,9 @@ class SettingsPanel(Panel):
 
     def __init__(self) -> None:
         super().__init__()
+        self._pointer_text = {}
+        self._pointer_bindings_seen = None
+        self._pointer_error = ""
         self._view = DebugView.SHADED
         self._message = ""
         self._category = "General"
@@ -453,14 +459,12 @@ class SettingsPanel(Panel):
                 hovered = imgui.is_item_hovered()
                 committed = imgui.is_item_deactivated_after_edit()
                 reset = False
-                if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
                     changed = True
                     reset = True
                     overlay_scale = DEFAULT_VIEWPORT_OVERLAY_SCALE
                 if hovered:
-                    imgui.set_tooltip(
-                        t("Scale playback, tools, and context hints; right-click to reset")
-                    )
+                    imgui.set_tooltip(pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")))
                 if (changed or committed or reset) and ctx.set_viewport_overlay_scale is not None:
                     ctx.set_viewport_overlay_scale(
                         overlay_scale,
@@ -483,10 +487,12 @@ class SettingsPanel(Panel):
                         hovered = imgui.is_item_hovered()
                         committed = imgui.is_item_deactivated_after_edit()
                         reset = False
-                        if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                        if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
                             changed, relative_scale, reset = True, 1.0, True
                         if hovered:
-                            imgui.set_tooltip(t("Right-click to reset"))
+                            imgui.set_tooltip(
+                                pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset"))
+                            )
                         if (
                             changed or committed or reset
                         ) and ctx.set_viewport_capsule_scale is not None:
@@ -540,10 +546,10 @@ class SettingsPanel(Panel):
                     "%.3f m",
                 )
                 hovered = imgui.is_item_hovered()
-                if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
                     changed, step = True, DEFAULT_TRANSLATION_SNAP_M
                 if hovered:
-                    imgui.set_tooltip(t("Right-click to reset"))
+                    imgui.set_tooltip(pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")))
                 if changed:
                     ctx.gizmo.translation_snap_m = step
 
@@ -557,10 +563,10 @@ class SettingsPanel(Panel):
                     "%.1f deg",
                 )
                 hovered = imgui.is_item_hovered()
-                if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
                     changed, step = True, DEFAULT_ROTATION_SNAP_DEG
                 if hovered:
-                    imgui.set_tooltip(t("Right-click to reset"))
+                    imgui.set_tooltip(pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")))
                 if changed:
                     ctx.gizmo.rotation_snap_deg = step
 
@@ -574,10 +580,10 @@ class SettingsPanel(Panel):
                     "%.2fx",
                 )
                 hovered = imgui.is_item_hovered()
-                if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
                     changed, tick_scale = True, DEFAULT_ROTATION_TICK_SCALE
                 if hovered:
-                    imgui.set_tooltip(t("Right-click to reset"))
+                    imgui.set_tooltip(pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")))
                 if changed:
                     ctx.gizmo.rotation_tick_scale = tick_scale
                 imgui.end_table()
@@ -597,7 +603,7 @@ class SettingsPanel(Panel):
                 hovered = imgui.is_item_hovered()
                 committed = imgui.is_item_deactivated_after_edit()
                 reset = False
-                if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
                     changed, padding = True, DEFAULT_SELECTION_PADDING
                     reset = True
                 if hovered:
@@ -623,11 +629,11 @@ class SettingsPanel(Panel):
                     "%.1f px",
                 )
                 hovered = imgui.is_item_hovered()
-                if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+                if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
                     changed = True
                     radius = OUTLINE_CORNER_RADIUS_PT
                 if hovered:
-                    imgui.set_tooltip(t("Right-click to reset"))
+                    imgui.set_tooltip(pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")))
                 if changed:
                     ctx.perturb.outline_corner_radius_pt = radius
                 imgui.end_table()
@@ -730,6 +736,8 @@ class SettingsPanel(Panel):
         ):
             return
         for label, current, callback, attribute in rows:
+            if attribute == "perturb" and not ctx.session.adapter.caps.perturb:
+                continue
             imgui.table_next_column()
             changed, value = themed_checkbox(
                 f"{t(label)}###interaction_{attribute}", current, ctx.theme
@@ -777,6 +785,8 @@ class SettingsPanel(Panel):
         if not self._begin_properties("settings_interaction_shortcuts"):
             return
         for action in InputAction:
+            if action is InputAction.PERTURB and not ctx.session.adapter.caps.perturb:
+                continue
             self._property(t(input_action_name(action)))
             current = ctx.input_bindings.key_id(action)
             index = identifiers.index(current)
@@ -787,11 +797,67 @@ class SettingsPanel(Panel):
             )
             imgui.set_item_tooltip(t("A key already in use swaps the two actions"))
             if changed and ctx.set_input_binding is not None:
-                ctx.set_input_binding(action, identifiers[index])
+                try:
+                    ctx.set_input_binding(action, identifiers[index])
+                    self._pointer_error = ""
+                except ValueError as error:
+                    self._pointer_error = str(error)
         self._property("")
         if imgui.button(t("Reset shortcuts")) and ctx.reset_input_bindings is not None:
             ctx.reset_input_bindings()
         imgui.end_table()
+        self._mouse_shortcuts(ctx)
+
+    def _mouse_shortcuts(self, ctx: PanelContext) -> None:
+        t = ctx.tr
+        self._group_heading(t("Mouse gestures"))
+        if ctx.input_bindings is not self._pointer_bindings_seen:
+            self._pointer_bindings_seen = ctx.input_bindings
+            self._pointer_text = {
+                action: "; ".join(
+                    chord.identifier() for chord in ctx.input_bindings.pointer_chords(action)
+                )
+                for action in PointerAction
+            }
+        if self._begin_properties("settings_navigation_preset"):
+            self._property(t("Navigation preset"))
+            if imgui.begin_combo("##navigation_preset", t("Choose preset...")):
+                for name in NAVIGATION_PRESETS:
+                    if imgui.selectable(name)[0] and ctx.set_navigation_preset is not None:
+                        try:
+                            ctx.set_navigation_preset(name)
+                            self._pointer_error = ""
+                        except ValueError as error:
+                            self._pointer_error = str(error)
+                imgui.end_combo()
+            imgui.end_table()
+        imgui.text_wrapped(
+            t(
+                "Separate alternatives with ;. Example: alt+left; middle. Add :double for a double-click. Press Enter to apply; empty unbinds."
+            )
+        )
+        if self._begin_properties("settings_mouse_gestures"):
+            for action in PointerAction:
+                if action.value.startswith("perturb.") and not ctx.session.adapter.caps.perturb:
+                    continue
+                self._property(t(POINTER_ACTION_NAMES[action]))
+                submitted, value = imgui.input_text(
+                    f"##mouse_{action.value}",
+                    self._pointer_text[action],
+                    imgui.InputTextFlags_.enter_returns_true,
+                )
+                self._pointer_text[action] = value
+                if submitted and ctx.set_pointer_binding is not None:
+                    try:
+                        ctx.set_pointer_binding(
+                            action, tuple(part.strip() for part in value.split(";") if part.strip())
+                        )
+                        self._pointer_error = ""
+                    except ValueError as error:
+                        self._pointer_error = str(error)
+            imgui.end_table()
+        if self._pointer_error:
+            imgui.text_wrapped(self._pointer_error)
 
     def _mujoco_visuals(self, ctx: PanelContext) -> None:
         self._visual_groups(ctx)
@@ -915,10 +981,10 @@ class SettingsPanel(Panel):
                 "##bvh_depth", backend.get_bvh_depth(), 1.0, 0, 64, "%d"
             )
             hovered = imgui.is_item_hovered()
-            if hovered and imgui.is_mouse_clicked(imgui.MouseButton_.right):
+            if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
                 changed, depth = True, 0
             if hovered:
-                imgui.set_tooltip(ctx.tr("Right-click to reset"))
+                imgui.set_tooltip(pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")))
             if changed:
                 backend.set_bvh_depth(depth)
             imgui.end_table()

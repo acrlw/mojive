@@ -63,6 +63,7 @@ class ControlPanel(Panel):
             clear_tooltip=ctx.tr("Clear search"),
             state_order="ctrl / act",
             translate=ctx.tr,
+            bindings=ctx.input_bindings,
         )
         self._state_copy_buttons(ctx)
         cache_key = (session.structure_generation, self._search, self._sort_by_name)
@@ -134,15 +135,18 @@ class ControlPanel(Panel):
         imgui.set_next_item_width(-1.0)
         value = float(ctrl[address])
         initial = float(self._initial_ctrl[address]) if address < len(self._initial_ctrl) else value
+        imgui.begin_disabled(not ctx.session.adapter.caps.write_ctrl)
         edit = value_slider(
             f"##control-actuator-{address}",
             value,
             lo,
             hi,
+            bindings=ctx.input_bindings,
             initial=initial,
             fmt="%+.3f",
             more_hint="",
         )
+        imgui.end_disabled()
         if edit.changed:
             ctx.submit(cmd.SetCtrl(address, edit.value))
 

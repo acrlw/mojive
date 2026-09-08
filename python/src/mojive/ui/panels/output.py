@@ -7,8 +7,9 @@ from imgui_bundle import imgui
 from ...adapters.base import FrameNeeds
 from ..draw2d import ImguiDraw2D, text_line_y
 from ..messages import OutputMessage
+from ..pointer_bindings import PointerAction
 from ..theme import ROW_PADDING_X, ROW_PADDING_Y
-from . import Panel, PanelContext, button_row_layout, button_width, search_input
+from . import Panel, PanelContext, button_row_layout, button_width, pointer_pressed, search_input
 
 _LEVEL_COLORS = {
     "debug": (0.58, 0.62, 0.68, 1.0),
@@ -168,22 +169,24 @@ class OutputPanel(Panel):
                     f"{entry.text.replace(chr(10), '  ↵  ')}"
                 )
                 start = imgui.get_cursor_screen_pos()
-                clicked = imgui.invisible_button(
+                imgui.invisible_button(
                     f"##output-row-{entry.sequence}",
                     imgui.ImVec2(imgui.get_content_region_avail().x, row_height),
                 )
                 hovered = imgui.is_item_hovered()
                 row_lo, row_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-                if clicked:
-                    io = imgui.get_io()
-                    if io.key_shift and self._selection_anchor:
+                select = hovered and pointer_pressed(ctx, PointerAction.OUTPUT_SELECT)
+                extend = hovered and pointer_pressed(ctx, PointerAction.OUTPUT_RANGE)
+                add = hovered and pointer_pressed(ctx, PointerAction.OUTPUT_ADD)
+                if select or extend or add:
+                    if extend and self._selection_anchor:
                         by_sequence = {item.sequence: offset for offset, item in enumerate(entries)}
                         anchor = by_sequence.get(self._selection_anchor, index)
                         lo, hi = sorted((anchor, index))
                         self._selected_sequences.update(
                             item.sequence for item in entries[lo : hi + 1]
                         )
-                    elif io.key_ctrl or io.key_super:
+                    elif add:
                         if entry.sequence in self._selected_sequences:
                             self._selected_sequences.remove(entry.sequence)
                         else:
@@ -192,7 +195,9 @@ class OutputPanel(Panel):
                     else:
                         self._selected_sequences = {entry.sequence}
                         self._selection_anchor = entry.sequence
-                if imgui.begin_popup_context_item(f"##output-context-{entry.sequence}"):
+                if hovered and pointer_pressed(ctx, PointerAction.OUTPUT_CONTEXT):
+                    imgui.open_popup(f"##output-context-{entry.sequence}")
+                if imgui.begin_popup(f"##output-context-{entry.sequence}"):
                     if entry.sequence not in self._selected_sequences:
                         self._selected_sequences = {entry.sequence}
                         self._selection_anchor = entry.sequence

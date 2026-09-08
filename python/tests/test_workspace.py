@@ -3444,3 +3444,46 @@ def test_attached_skin_names_and_materials_remain_distinct() -> None:
         )
     finally:
         document.release()
+
+
+def test_component_choices_share_references_and_follow_model_replacement(monkeypatch):
+    import mojive.adapters.mujoco_adapter as adapter_module
+
+    document = workspace()
+    model_id = document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
+    source = """<mujoco model="references"><worldbody><body name="arm">
+      <joint name="hinge"/><geom size=".05"/>
+      <site name="a"/><site name="b" pos="0 0 .1"/>
+    </body></worldbody><actuator><motor name="one" joint="hinge"/>
+      <motor name="two" joint="hinge"/></actuator><tendon>
+      <spatial name="t1"><site site="a"/><site site="b"/></spatial>
+      <spatial name="t2"><site site="a"/><site site="b"/></spatial>
+    </tendon></mujoco>"""
+    assert document.set_scene_model_xml(model_id, source)
+    query = adapter_module._component_xml
+
+    def no_serialization(_spec):
+        raise AssertionError("Component counts must not serialize or compile the model")
+
+    monkeypatch.setattr(adapter_module, "_component_xml", no_serialization)
+    assert document.model_component_count(model_id, "actuator") == 2
+    assert document.model_component_count(model_id, "tendon") == 2
+    assert document.model_component_count(model_id, "missing") == 0
+    assert document.model_component_count(-1, "actuator") == 0
+    monkeypatch.setattr(adapter_module, "_component_xml", query)
+    motors = document.model_components(model_id, "actuator")
+    choices = [
+        next(field.choices for field in item.fields if field.name == "joint") for item in motors
+    ]
+    assert choices[0] == ("", "hinge")
+    assert choices[0] is choices[1]
+    tendons = document.model_components(model_id, "tendon")
+    assert tendons[0].path_presets is tendons[1].path_presets
+    assert tendons[0].path[0].fields[0].choices is tendons[1].path[0].fields[0].choices
+    assert document.set_scene_model_xml(model_id, source.replace("hinge", "pivot"))
+    assert next(
+        field.choices
+        for field in document.model_components(model_id, "actuator")[0].fields
+        if field.name == "joint"
+    ) == ("", "pivot")
+    document.release()

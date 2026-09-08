@@ -156,6 +156,7 @@ class Operation:
     paused: bool = False
     transactional: bool = False
     alias_of: str | None = None
+    version: int = 1
     validator: Any = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
@@ -181,8 +182,10 @@ class Operation:
             and self.name in {"pause", "resume", "step", "reset", "set_speed"}
         ):
             return "Physics clock control belongs to the external caller"
+        if self.name == "set_speed" and session.adapter.caps.external_clock:
+            return "Simulation speed belongs to the external clock owner"
         for capability in self.capabilities:
-            if not getattr(session.adapter.caps, capability):
+            if not session.adapter.caps.supports(capability):
                 return f"The {session.adapter.caps.name} adapter does not support {capability}"
         if self.paused and not session.paused:
             return "Pause the simulation before this operation"
@@ -202,6 +205,7 @@ class Operation:
         """Return independent copies of the installed contract without runtime availability."""
         result = {
             "name": self.name,
+            "version": self.version,
             "description": self.description,
             "scope": self.scope,
             "mutates": self.mutates,
@@ -404,7 +408,7 @@ _CATALOG = [
         handler="_set_ctrl",
         command=lambda p: cmd.SetCtrl(p["index"], p["value"]),
         mutates=True,
-        **_PHYSICS,
+        capabilities=("write_ctrl",),
     ),
     Operation(
         "set_mocap",
@@ -447,6 +451,14 @@ _CATALOG = [
         handler="_load",
         mutates=True,
         capabilities=("asset_loading",),
+    ),
+    _cmd(
+        "mujoco.set_model_source",
+        cmd.SetModelSource,
+        {"model_id": ID, "mjcf": NAME},
+        ("model_id", "mjcf"),
+        capabilities=("topology_editing", "mujoco.mjcf"),
+        paused=True,
     ),
     _cmd("reload", cmd.Reload, handler="_reload", capabilities=("reload",)),
     _cmd("new_scene", cmd.NewScene, capabilities=("scene_files",)),

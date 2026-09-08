@@ -188,6 +188,22 @@ class Viewer:
 
         self.app.set_input_binding(InputAction(action), key_id, persist=persist)
 
+    def configure_pointer_binding(
+        self, action: str, chords: tuple[str, ...], *, persist: bool = False
+    ) -> None:
+        """Map a mouse action to chords such as ``alt+left`` or ``left+right``.
+
+        Pass an empty tuple to unbind. Invalid or conflicting maps leave the
+        active configuration unchanged. Changes apply on the next input frame.
+        """
+        from .ui.pointer_bindings import PointerAction
+
+        self.app.set_pointer_binding(PointerAction(action), chords, persist=persist)
+
+    def configure_navigation_preset(self, name: str, *, persist: bool = False) -> None:
+        """Apply Mojive, Blender, Unity, Unreal, or MuJoCo camera navigation."""
+        self.app.set_navigation_preset(name, persist=persist)
+
     def set_camera(self, view) -> None:
         """Adopt a backend-neutral camera view in the interactive editor camera."""
 

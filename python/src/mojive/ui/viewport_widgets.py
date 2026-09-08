@@ -30,6 +30,7 @@ from ..curves2d import (
 from ..gizmo import ARROW_CORNER_RADIUS_PT, DIMENSION_CORNER_RADIUS_RATIO, _rounded_polygon_corners
 from .draw2d import Draw2D, text_line_y
 from .input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
+from .pointer_bindings import PointerAction
 from .theme import Theme
 
 
@@ -1621,6 +1622,33 @@ def draw_mouse_hint_glyph(
     return width + 5.0 * scale + _inline_text(draw, label_x, center_y, suffix, suffix_color)
 
 
+def pointer_tool_hint(
+    action: PointerAction, bindings: InputBindings, label: str, *, hint_id: str
+) -> ToolHint | None:
+    """Draw hints from the same resolved chord used by interaction routing."""
+    chords = bindings.pointer_chords(action)
+    chord = next(
+        (resolved for value in chords if (resolved := bindings.resolved_chord(value)) is not None),
+        None,
+    )
+    if chord is None:
+        return None
+    modifier = " + ".join(key.capitalize() for key in chord.modifiers)
+    if len(chord.buttons) <= 1:
+        control = "wheel" if chord.wheel else ("left", "right", "middle")[chord.buttons[0]]
+        return ToolHint(
+            "mouse",
+            control,
+            label,
+            "×2" if chord.clicks == 2 else "",
+            modifier=modifier,
+            hint_id=hint_id,
+        )
+    buttons = " + ".join(("LMB", "RMB", "MMB")[button] for button in chord.buttons)
+    control = f"{modifier} + {buttons}" if modifier else buttons
+    return ToolHint("key", control, label, "×2" if chord.clicks == 2 else "", hint_id=hint_id)
+
+
 @lru_cache(maxsize=64)
 def default_tool_hints(
     variant: str,
@@ -1635,53 +1663,61 @@ def default_tool_hints(
         label=labels.snap,
         hint_id="snap",
     )
-    perturb = ToolHint(
-        "perturb",
-        control=bindings.label(InputAction.PERTURB),
-        hint_id="perturb",
+    perturb = tuple(
+        hint
+        for hint in (
+            pointer_tool_hint(
+                PointerAction.PERTURB_TRANSLATE, bindings, labels.push, hint_id="perturb.translate"
+            ),
+            pointer_tool_hint(
+                PointerAction.PERTURB_ROTATE, bindings, labels.twist, hint_id="perturb.rotate"
+            ),
+        )
+        if hint is not None
+    )
+    numeric = pointer_tool_hint(
+        PointerAction.GIZMO_VALUE, bindings, labels.type_value, hint_id="gizmo.type_value"
     )
     if variant == "camera":
-        return (
-            ToolHint("mouse", "left", labels.orbit, hint_id="camera.orbit"),
-            ToolHint("mouse", "right", labels.pan, hint_id="camera.pan"),
-            ToolHint("mouse", "wheel", labels.zoom, hint_id="camera.zoom"),
-            ToolHint(
-                "key",
-                bindings.label(InputAction.FRAME_SCENE),
-                labels.frame,
-                hint_id="camera.frame",
-            ),
+        return tuple(
+            hint
+            for hint in (
+                pointer_tool_hint(
+                    PointerAction.ORBIT, bindings, labels.orbit, hint_id="camera.orbit"
+                ),
+                pointer_tool_hint(PointerAction.PAN, bindings, labels.pan, hint_id="camera.pan"),
+                pointer_tool_hint(
+                    PointerAction.DOLLY, bindings, labels.zoom, hint_id="camera.zoom"
+                ),
+                ToolHint(
+                    "key",
+                    bindings.label(InputAction.FRAME_SCENE),
+                    labels.frame,
+                    hint_id="camera.frame",
+                ),
+            )
+            if hint is not None
         )
     if variant == "dragging":
         return (snap,)
     if variant == "perturb":
-        return (perturb,)
+        return perturb
     if variant == "ready_minimal":
-        return (
+        return (numeric,) if numeric is not None else ()
+    return tuple(
+        hint
+        for hint in (
+            snap,
             ToolHint(
-                "mouse",
-                "left",
-                labels.type_value,
-                "×2",
-                hint_id="gizmo.type_value",
+                "key",
+                bindings.label(InputAction.GIZMO_SPACE),
+                labels.world_body,
+                hint_id="gizmo.space",
             ),
+            numeric,
+            *perturb,
         )
-    return (
-        snap,
-        ToolHint(
-            "key",
-            bindings.label(InputAction.GIZMO_SPACE),
-            labels.world_body,
-            hint_id="gizmo.space",
-        ),
-        ToolHint(
-            "mouse",
-            "left",
-            labels.type_value,
-            "×2",
-            hint_id="gizmo.type_value",
-        ),
-        perturb,
+        if hint is not None
     )
 
 

@@ -706,6 +706,9 @@ def test_camera_preview_copies_the_main_render_state() -> None:
         def set_flag(self, flag, value) -> None:
             self.flags[flag] = value
 
+        def set_shadow_quality(self, value) -> None:
+            self.shadow_quality = value
+
         def set_debug_view(self, value) -> None:
             self.debug_view = value
 
@@ -743,6 +746,9 @@ def test_camera_preview_copies_the_main_render_state() -> None:
         def get_flag(self, flag):
             return flag is RenderFlag.HAZE
 
+        def get_shadow_quality(self):
+            return "high"
+
         def get_debug_view(self):
             return DebugView.NORMAL
 
@@ -760,6 +766,7 @@ def test_camera_preview_copies_the_main_render_state() -> None:
     preview.update(Main(), SceneSource(), 1, SceneFrame(), CameraView(), (320, 180))
 
     assert peer.flags == {RenderFlag.HAZE: True, RenderFlag.SHADOW: False}
+    assert peer.shadow_quality == "high"
     assert peer.debug_view is DebugView.NORMAL
     assert peer.label_mode is LabelMode.BODY
     assert peer.frame_mode is FrameMode.WORLD

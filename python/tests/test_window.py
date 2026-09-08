@@ -14,7 +14,6 @@ from mojive.ui import window as window_module
 from mojive.ui.app import (
     JOINT_LIMIT_HOVER_GRACE_SECONDS,
     JOINT_LIMIT_LABEL_DELAY_SECONDS,
-    MODEL_FILTERS,
     PRECISE_GIZMO_HINT_DELAY_SECONDS,
     ViewerApp,
     _clipped_overlay_host_rect,
@@ -24,6 +23,7 @@ from mojive.ui.app import (
     _GizmoHintHoverState,
     _JointLimitHoverState,
     _middle_elide_text,
+    _model_filters,
     _prepare_modal,
     _simulation_timestep,
     _status_message_for_bar,
@@ -312,7 +312,10 @@ def test_selection_status_is_composed_with_panel_hints_but_yields_to_input(panel
     app._context_tool_hint_variant = lambda: "ready"
     app._viewport_labels = DEFAULT_VIEWPORT_LABELS
     app.input_bindings = DEFAULT_INPUT_BINDINGS
-    app.session = SimpleNamespace(can_step_back=False)
+    app.session = SimpleNamespace(
+        can_step_back=False, adapter=SimpleNamespace(caps=SimpleNamespace(perturb=True))
+    )
+    app.interactions = SimpleNamespace(perturb=True)
     app.localizer = SimpleNamespace(text=lambda value: value)
     app.tool_hints = SimpleNamespace(resolve=lambda defaults, *, surface: defaults)
 
@@ -564,9 +567,12 @@ def test_presented_capture_surface_flips_and_crops_viewport_pixels() -> None:
 
 
 def test_file_dialog_filters_translate_descriptions_without_touching_globs() -> None:
-    translated = _translated_file_filters(MODEL_FILTERS, lambda value: f"zh:{value}")
-    assert translated[::2] == [f"zh:{value}" for value in MODEL_FILTERS[::2]]
-    assert translated[1::2] == MODEL_FILTERS[1::2]
+    from mojive.adapters.base import AdapterCaps
+
+    filters = _model_filters(AdapterCaps(asset_loading=True, model_formats=(".urdf",)))
+    translated = _translated_file_filters(filters, lambda value: f"zh:{value}")
+    assert translated[::2] == [f"zh:{value}" for value in filters[::2]]
+    assert translated[1::2] == filters[1::2]
 
 
 def test_layout_settings_path_honors_exact_override(monkeypatch, tmp_path) -> None:

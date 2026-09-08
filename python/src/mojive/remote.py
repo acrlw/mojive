@@ -46,6 +46,64 @@ from .types import CameraView, Environment, Light, Material
 DEFAULT_PORT = 47650
 AUTHKEY = b"mojive-local"
 
+STREAM_PROTOCOL_VERSION = 1
+# Wire operation names are stable. Features describe behavior, never engine identity.
+_REMOTE_REQUIREMENTS = {
+    **dict.fromkeys(("pause", "play"), "clock_control"),
+    "step": "simulation",
+    **dict.fromkeys(("reset", "light", "environment", "skybox", "material", "clear_perturb"), ""),
+    "reload": "reload",
+    "keyframe": "keyframes",
+    "raycast": "raycast",
+    "visual_group": "visual_groups",
+    "pose": "write_pose",
+    "perturb": "perturb",
+    **dict.fromkeys(("qpos", "qpos_batch"), "write_qpos"),
+    "equality": "equality_constraints",
+    **dict.fromkeys(("ctrl", "ctrl_vector"), "write_ctrl"),
+    **dict.fromkeys(
+        (
+            "joint_properties",
+            "joint_advanced_properties",
+            "site_properties",
+            "geometry_properties",
+            "geometry_advanced_properties",
+            "geometry_shape",
+            "body_properties",
+        ),
+        "model_properties",
+    ),
+    **dict.fromkeys(("geometry_color", "geometry_size", "scene_camera"), ""),
+    **dict.fromkeys(
+        (
+            "add_scene_object",
+            "remove_scene_object",
+            "add_scene_light",
+            "remove_scene_light",
+            "add_scene_camera",
+            "remove_scene_camera",
+            "duplicate_scene_entity",
+            "remove_scene_entity",
+            "rename_scene_entity",
+        ),
+        "scene_authoring",
+    ),
+}
+
+
+def remote_command_versions(caps: AdapterCaps) -> tuple[tuple[str, int], ...]:
+    """Advertise only wire commands supported by this publisher's adapter."""
+    return tuple(
+        (name, 1)
+        for name, feature in _REMOTE_REQUIREMENTS.items()
+        if (not feature or caps.supports(feature))
+        and not (
+            name in {"pause", "play", "step", "reset"}
+            and caps.simulation
+            and not caps.clock_control
+        )
+    )
+
 
 def _close_connection(connection: Connection) -> None:
     """Interrupt pending TCP reads/writes before releasing the Connection's descriptor."""
@@ -82,6 +140,8 @@ class RemoteStructure:
     geometry_shape_properties: tuple[GeometryShapeProperties, ...] = ()
     joint_advanced_properties: tuple[JointAdvancedProperties, ...] = ()
     site_properties: tuple[SiteProperties, ...] = ()
+    protocol_version: int = STREAM_PROTOCOL_VERSION
+    command_versions: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -140,6 +200,7 @@ def snapshot_structure(session) -> RemoteStructure:
             for node in session.nodes
             if (properties := session.site_properties(node.node_id)) is not None
         ),
+        command_versions=remote_command_versions(session.adapter.caps),
     )
 
 
@@ -402,10 +463,35 @@ class RemoteSceneAdapter(SceneAdapterBase):
             raise
 
     def _update_capabilities(self, caps: AdapterCaps) -> None:
+        advertised = dict(self._structure.command_versions)
+        supported = dict(remote_command_versions(caps))
+        self._command_versions = {
+            name: version
+            for name, version in advertised.items()
+            if type(version) is int and supported.get(name) == version
+        }
+        writable = {feature for feature in _REMOTE_REQUIREMENTS.values() if feature}
+        gated = {
+            feature: caps.supports(feature)
+            and all(
+                name in self._command_versions
+                for name, requirement in _REMOTE_REQUIREMENTS.items()
+                if requirement == feature
+            )
+            for feature in writable
+            if feature != "simulation"
+        }
+        if caps.simulation:
+            gated["clock_control"] = caps.clock_control and all(
+                name in self._command_versions for name in ("pause", "play", "step", "reset")
+            )
+        caps = replace(caps, **gated)
         self.caps = replace(
             caps,
             name=f"remote:{caps.name}",
             asset_loading=False,
+            model_formats=(),
+            features=(),
             external_clock=True,
             state_snapshots=False,
             edit_history=False,
@@ -459,6 +545,13 @@ class RemoteSceneAdapter(SceneAdapterBase):
                 packet = pickle.loads(self._state.recv_bytes())
                 with self._lock:
                     if isinstance(packet, RemoteStructure):
+                        if (
+                            type(packet.protocol_version) is not int
+                            or packet.protocol_version != STREAM_PROTOCOL_VERSION
+                        ):
+                            raise ValueError(
+                                f"Unsupported remote stream version: {packet.protocol_version}"
+                            )
                         self._structure = packet
                         self._update_capabilities(packet.caps)
                         self._camera_slot_by_id = {
@@ -491,7 +584,7 @@ class RemoteSceneAdapter(SceneAdapterBase):
                     ):
                         self._latest = packet
                     self._lock.notify_all()
-        except (EOFError, OSError, pickle.PickleError) as exc:
+        except (EOFError, OSError, pickle.PickleError, ValueError) as exc:
             with self._lock:
                 self._error = str(exc) or type(exc).__name__
                 self._lock.notify_all()
@@ -595,6 +688,9 @@ class RemoteSceneAdapter(SceneAdapterBase):
         return self._structure.visual_groups
 
     def _send(self, op: str, **args):
+        versions = self._command_versions
+        if versions.get(op) != 1:
+            return CommandResult.bad(f"Remote publisher does not support {op} (revision 1)")
         deadline = time.monotonic() + self._timeout
         if not self._command_lock.acquire(timeout=self._timeout):
             return CommandResult.bad("remote command channel is busy; request was not sent")
@@ -602,7 +698,7 @@ class RemoteSceneAdapter(SceneAdapterBase):
             if self._command is None:
                 return CommandResult.bad("remote command channel is closed")
             pending = self._command_executor.submit(
-                self._exchange_command, self._command, {"op": op, **args}
+                self._exchange_command, self._command, {"op": op, "operation_version": 1, **args}
             )
             return pending.result(timeout=max(0.0, deadline - time.monotonic()))
         except TimeoutError:
@@ -946,9 +1042,19 @@ class RemoteSceneAdapter(SceneAdapterBase):
 
 def handle_session_command(session, message: dict):
     """Translate one remote command payload into a session command or query."""
+    if not isinstance(message, dict):
+        return CommandResult.bad("Remote command must be a mapping")
     op = message.get("op")
+    if not isinstance(op, str):
+        return CommandResult.bad("Remote command op must be a string")
+    revision = message.get("operation_version", 1)
+    if type(revision) is not int or revision != 1:
+        return CommandResult.bad(f"Unsupported revision {revision!r} of remote command {op}")
     if op == "raycast":
-        return session.query(cmd.Pick(message["origin"], message["direction"]))
+        try:
+            return session.query(cmd.Pick(message["origin"], message["direction"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            return CommandResult.bad(f"Invalid raycast arguments: {exc}")
     # Native publisher messages retain their established wire names. Their scene
     # edits share the application catalog's validation and command construction.
     from .control_errors import ControlError
@@ -977,7 +1083,13 @@ def handle_session_command(session, message: dict):
     if op in shared:
         try:
             return apply_session_operation(
-                session, shared[op], {key: value for key, value in message.items() if key != "op"}
+                session,
+                shared[op],
+                {
+                    key: value
+                    for key, value in message.items()
+                    if key not in {"op", "operation_version"}
+                },
             )
         except ControlError as exc:
             return CommandResult.bad(str(exc))
@@ -1083,9 +1195,11 @@ def handle_session_command(session, message: dict):
         ),
         "clear_perturb": lambda: cmd.ClearPerturb(),
     }
-    factory = commands.get(str(op))
-    return (
-        session.submit(factory())
-        if factory is not None
-        else CommandResult.bad(f"unknown op {op!r}")
-    )
+    factory = commands.get(op)
+    if factory is None:
+        return CommandResult.bad(f"unknown op {op!r}")
+    try:
+        command = factory()
+    except (KeyError, TypeError, ValueError) as error:
+        return CommandResult.bad(f"Invalid {op} arguments: {error}")
+    return session.submit(command)

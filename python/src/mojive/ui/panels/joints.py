@@ -9,12 +9,14 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, JointInfo, NodeType
+from ..pointer_bindings import PointerAction
 from . import (
     Panel,
     PanelContext,
     copy_state_vector,
     copyable_name_item,
     padded_selectable,
+    pointer_pressed,
     publish_focus_item_hint,
     searchable_ordered_list_header,
     value_slider,
@@ -74,6 +76,7 @@ class JointsPanel(Panel):
             clear_tooltip=ctx.tr("Clear search"),
             state_order="qpos / qvel",
             translate=ctx.tr,
+            bindings=ctx.input_bindings,
         )
         if changed or sort_changed:
             self._joint_page = 0
@@ -146,7 +149,7 @@ class JointsPanel(Panel):
             imgui.end_disabled()
             double_clicked = imgui.is_item_hovered(
                 imgui.HoveredFlags_.allow_when_disabled.value
-            ) and imgui.is_mouse_double_clicked(imgui.MouseButton_.left)
+            ) and pointer_pressed(ctx, PointerAction.PANEL_FOCUS)
             if clicked:
                 ctx.submit(cmd.SelectNode(joint_node.node_id))
             if double_clicked and ctx.focus_joint is not None:
@@ -169,6 +172,7 @@ class JointsPanel(Panel):
             value,
             lo,
             hi,
+            bindings=ctx.input_bindings,
             initial=_initial_value(self._initial_qpos, j.qpos_adr, value),
             fmt="%.4f",
             more_hint="",

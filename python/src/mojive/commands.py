@@ -123,7 +123,7 @@ class Reload(Command):
 
 @dataclass(frozen=True)
 class LoadAsset(Command):
-    """Replace the current scene with a model or workspace file."""
+    """Replace the current scene with a supported model file; use OpenScene for workspace files."""
 
     path: Path
 

@@ -983,37 +983,57 @@ def _duplicate_topology_xml(
     return root, renamed[(source_kind, name)]
 
 
-def _object_reference_names(root: ET.Element, object_type: str) -> tuple[str, ...]:
-    tags = _OBJECT_REFERENCE_TAGS.get(str(object_type).lower(), ())
-    names = tuple(dict.fromkeys(name for tag in tags for name in _named_elements(root, tag)))
-    if object_type == "body":
-        return ("world", *names)
-    return names
+class _ComponentReferences:
+    """Share immutable reference choices across one component query.
 
+    Do not retain XML across calls: authoring can mutate MjSpec in place. A
+    query-local index avoids both stale references and quadratic tree scans.
+    """
 
-def _field_choices(root: ET.Element, name: str, attributes: dict[str, str]) -> tuple[str, ...]:
-    if name == "class":
-        return tuple(
-            value
-            for element in root.iter("default")
-            if (value := str(element.attrib.get("class", "")).strip())
-        )
-    if name in {"objtype", "reftype"}:
-        return tuple(
-            object_type
-            for object_type in _OBJECT_REFERENCE_TAGS
-            if _object_reference_names(root, object_type)
-        )
-    if name == "objname":
-        return _object_reference_names(root, attributes.get("objtype", ""))
-    if name == "refname":
-        return _object_reference_names(root, attributes.get("reftype", ""))
-    target = _REFERENCE_ELEMENT.get(name)
-    return _named_elements(root, target) if target else ()
+    def __init__(self, root: ET.Element):
+        self.root = root
+        self._names: dict[str, tuple[str, ...]] = {}
+        self._objects: dict[str, tuple[str, ...]] = {}
+        self._choices: dict[tuple[str, str, str, bool], tuple[str, ...]] = {}
+
+    def names(self, tag: str) -> tuple[str, ...]:
+        if tag not in self._names:
+            self._names[tag] = _named_elements(self.root, tag)
+        return self._names[tag]
+
+    def objects(self, object_type: str) -> tuple[str, ...]:
+        if object_type not in self._objects:
+            tags = _OBJECT_REFERENCE_TAGS.get(str(object_type).lower(), ())
+            names = tuple(dict.fromkeys(name for tag in tags for name in self.names(tag)))
+            self._objects[object_type] = ("world", *names) if object_type == "body" else names
+        return self._objects[object_type]
+
+    def choices(
+        self, name: str, attributes: dict[str, str], *, optional: bool = False
+    ) -> tuple[str, ...]:
+        key = (name, attributes.get("objtype", ""), attributes.get("reftype", ""), optional)
+        if key not in self._choices:
+            if name == "class":
+                values = tuple(
+                    value
+                    for element in self.root.iter("default")
+                    if (value := str(element.attrib.get("class", "")).strip())
+                )
+            elif name in {"objtype", "reftype"}:
+                values = tuple(kind for kind in _OBJECT_REFERENCE_TAGS if self.objects(kind))
+            elif name == "objname":
+                values = self.objects(key[1])
+            elif name == "refname":
+                values = self.objects(key[2])
+            else:
+                target = _REFERENCE_ELEMENT.get(name)
+                values = self.names(target) if target else ()
+            self._choices[key] = ("", *values) if optional and values else values
+        return self._choices[key]
 
 
 def _component_fields(
-    root: ET.Element, category: str, subtype: str, attributes: dict[str, str]
+    references: _ComponentReferences, category: str, subtype: str, attributes: dict[str, str]
 ) -> tuple[ModelComponentField, ...]:
     values = {name: value for name, value in attributes.items() if name != "name"}
     curated = _COMPONENT_SUBTYPE_OPTIONAL_FIELDS.get(
@@ -1034,9 +1054,9 @@ def _component_fields(
     }
 
     def choices(name: str) -> tuple[str, ...]:
-        references = _field_choices(root, name, values)
-        if references:
-            return ("", *references)
+        options = references.choices(name, values, optional=True)
+        if options:
+            return options
         if name in tri_state:
             return ("", "false", "true", "auto")
         if name in _BOOLEAN_PROPERTY_FIELDS:
@@ -1047,12 +1067,12 @@ def _component_fields(
 
 
 def _component_path_presets(
-    root: ET.Element, category: str, subtype: str
+    references: _ComponentReferences, category: str, subtype: str
 ) -> tuple[ModelComponentPathItem, ...]:
     if category != "tendon":
         return ()
     if subtype == "fixed":
-        joints = _named_elements(root, "joint")
+        joints = references.names("joint")
         return (
             ModelComponentPathItem(
                 "joint",
@@ -1062,8 +1082,8 @@ def _component_path_presets(
                 ),
             ),
         )
-    sites = _named_elements(root, "site")
-    geoms = _named_elements(root, "geom")
+    sites = references.names("site")
+    geoms = references.names("geom")
     presets = []
     if sites:
         presets.append(
@@ -1084,14 +1104,14 @@ def _component_path_presets(
 
 
 def _component_path_fields(
-    root: ET.Element,
+    references: _ComponentReferences,
     category: str,
     subtype: str,
     child: ET.Element,
 ) -> tuple[ModelComponentField, ...]:
     values = dict(child.attrib)
     return tuple(
-        ModelComponentField(name, value, _field_choices(root, name, values))
+        ModelComponentField(name, value, references.choices(name, values))
         for name, value in values.items()
     )
 
@@ -1281,12 +1301,16 @@ class MuJoCoAdapter(SceneAdapterBase):
             )
         self.caps = AdapterCaps(
             name="mujoco",
+            backend_version=mujoco.__version__,
+            model_formats=(".xml", ".mjcf", ".urdf"),
+            features=(("mujoco.mjcf", 1), ("model.components", 1), ("model.keyframe_edit", 1)),
             simulation=True,
             external_clock=external_clock,
             clock_control=not external_clock,
             asset_loading=True,
             write_pose=True,
             write_qpos=True,
+            write_ctrl=True,
             perturb=True,
             raycast=True,
             state_snapshots=True,
@@ -2094,6 +2118,21 @@ class MuJoCoAdapter(SceneAdapterBase):
             spec.modelfiledir = str(path.parent)
         return self._replace_model_spec(model_id, spec)
 
+    def model_component_count(self, model_id: int, category: str) -> int:
+        spec = self._spec_for_model(model_id)
+        collections = {
+            "contact": ("pairs", "excludes"),
+            "actuator": ("actuators",),
+            "sensor": ("sensors",),
+            "tendon": ("tendons",),
+            "equality": ("equalities",),
+        }
+        return (
+            sum(len(getattr(spec, name)) for name in collections.get(category, ()))
+            if spec is not None
+            else 0
+        )
+
     def model_components(self, model_id: int, category: str) -> tuple[ModelComponentInfo, ...]:
         if category not in _MODEL_COMPONENT_CATEGORIES:
             return ()
@@ -2106,16 +2145,20 @@ class MuJoCoAdapter(SceneAdapterBase):
             self._component_entries.pop((int(model_id), str(category)), None)
             return ()
         entries = self._sync_model_component_ids(model_id, category, section)
+        references = _ComponentReferences(root)
+        presets = {}
         components = []
         for entry, element in zip(entries, section, strict=True):
             attributes = dict(element.attrib)
             path = tuple(
                 ModelComponentPathItem(
                     child.tag,
-                    _component_path_fields(root, category, element.tag, child),
+                    _component_path_fields(references, category, element.tag, child),
                 )
                 for child in element
             )
+            if element.tag not in presets:
+                presets[element.tag] = _component_path_presets(references, category, element.tag)
             components.append(
                 ModelComponentInfo(
                     entry.component_id,
@@ -2123,9 +2166,9 @@ class MuJoCoAdapter(SceneAdapterBase):
                     category,
                     element.tag,
                     attributes.get("name", f"{category}{entry.component_id}"),
-                    _component_fields(root, category, element.tag, attributes),
+                    _component_fields(references, category, element.tag, attributes),
                     path,
-                    _component_path_presets(root, category, element.tag),
+                    presets[element.tag],
                 )
             )
         return tuple(components)
