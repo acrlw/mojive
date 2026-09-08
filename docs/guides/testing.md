@@ -14,6 +14,8 @@ matrix; other agent guidance links here.
 | OpenGL GPU | `make gpu` | real OpenGL contexts and rendered output |
 | WebGPU | `make gpu-wgpu` | Metal, Vulkan, or DX12 backend behavior |
 | Native probe | `make native-test`, `make native-probe` | optional C++ contracts and real GPU output/lifetime checks; choose `NATIVE_BACKEND=sdl` for SDL GPU |
+| Native composition and lifecycle | `make native-composition`, `make native-windows` | texture dependencies, alpha/scissor output, repeated native surface lifecycle |
+| Native live runtime | `make native-runtime` | native MuJoCo serial/parallel comparison with bounded output queues |
 | Native bindings | `make native-bindings-test` | isolated pybind11/nanobind behavior, MuJoCo coexistence, ownership, and GIL release |
 | Golden | `make golden` | reviewed image baselines |
 | Full | `make test-all` | CPU, physics, OpenGL, and WebGPU layers |
