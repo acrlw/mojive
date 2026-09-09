@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,7 @@ from ..backend import (
 )
 from ..builder import SceneSourceBuilder
 from ..debugdraw import PRIMITIVE_MESH, DebugDraw, DrawPath, Occlusion
+from ..dependencies import lights_key
 from ..gizmo_plan import _MESHES, GizmoPlanner
 from ..mesh import builtin_mesh, gizmo_mesh
 from ..overlay import OverlayPublisher, OverlayState
@@ -47,14 +49,27 @@ class NativeTarget:
         self.handle = backend.runtime.create_target(width, height, samples, backend._scene_handle)
         self.texture = backend.runtime.target_texture(self.handle)
         self.frame = None
+        self._depth_camera = None
 
     def _read(self, product, flip, out=None):
         if self.frame is None:
             raise RuntimeError("Render a frame before requesting readback")
-        result = self.backend.runtime.read(self.frame, product)
-        if result.state != self.backend.api.ReadbackState.READY:
+        dtype, channels = self.backend._read_specs[product]
+        shape = (self.height, self.width, *channels)
+        if out is not None and (out.shape != shape or out.dtype != dtype):
+            raise ValueError(f"Expected {dtype} destination with shape {shape}")
+        if out is not None and not out.flags.writeable:
+            raise ValueError("Readback destination is read-only")
+        image = (
+            out
+            if out is not None and flip and out.flags.c_contiguous
+            else np.empty(shape, dtype=dtype)
+        )
+        state = self.backend.runtime.read_into(self.frame, product, image)
+        if state != self.backend.api.ReadbackState.READY:
             raise RuntimeError("Readback was canceled by a scene or target change")
-        image = result.image
+        if image is out:
+            return out
         return self._deliver(image, flip, out)
 
     @staticmethod
@@ -111,10 +126,10 @@ class NativeTarget:
 
     def read_depth(self, flip=True):
         depth = self.read_metric_depth(flip)
-        camera = self.backend._camera
-        if camera.orthographic:
-            return (depth - camera.near) / (camera.far - camera.near)
-        return camera.far / (camera.far - camera.near) * (1 - camera.near / depth)
+        near, far, orthographic = self._depth_camera
+        if orthographic:
+            return (depth - near) / (far - near)
+        return far / (far - near) * (1 - near / depth)
 
     def read_ids(self, flip=False):
         return self._read(self.backend.api.Product.OBJECT_ID, flip)
@@ -129,20 +144,31 @@ class NativeBackend:
     def __init__(self, width=640, height=480, samples=1):
         # Match the portable color target policy; MuJoCo may request arbitrary
         # counts (for example 24). Data products remain single-sampled.
-        samples = max(value for value in (1, 2, 4) if value <= max(1, samples))
+        samples = max(value for value in (1, 2, 4, 8) if value <= max(1, samples))
         self.device = acquire_device()
         self.api, self.runtime = self.device.api, self.device.runtime
+        self._read_specs = {
+            self.api.Product.COLOR: (np.dtype("uint8"), (3,)),
+            self.api.Product.RGBA: (np.dtype("uint8"), (4,)),
+            self.api.Product.OBJECT_ID: (np.dtype("uint32"), ()),
+            self.api.Product.SEGMENTATION: (np.dtype("int32"), (2,)),
+            self.api.Product.METRIC_DEPTH: (np.dtype("float32"), ()),
+        }
         self._data_products = {
             RenderProduct.OBJECT_ID: self.api.Product.OBJECT_ID,
             RenderProduct.SEGMENTATION: self.api.Product.SEGMENTATION,
             RenderProduct.METRIC_DEPTH: self.api.Product.METRIC_DEPTH,
         }
         self._closed = False
+        self._hot_reload = False
         self._camera = CameraView()
         self._gizmo = None
         self._gizmo_planner = GizmoPlanner()
         self._gizmo_meshes = {}
         self._builder = SceneSourceBuilder()
+        self._scene = self._builder.scene
+        self._external_scene = False
+        self._triangle_count = 0
         self._revision = 0
         self._sequence = 0
         self._uploaded = None
@@ -206,6 +232,7 @@ class NativeBackend:
             outline=True,
             gizmo=True,
             debug_draw=True,
+            pass_timing=True,
             label_modes=frozenset(LabelMode),
             frame_modes=frozenset(FrameMode),
             capture=True,
@@ -215,7 +242,7 @@ class NativeBackend:
             debug_views=frozenset(DebugView),
             notes=(
                 "Object ID and metric depth use single-sampled scene geometry",
-                "Color MSAA rounds down to 1x, 2x, or 4x",
+                "Color MSAA rounds down to 1x, 2x, 4x, or 8x",
             ),
         )
 
@@ -236,8 +263,17 @@ class NativeBackend:
         self._lighting_source = None
         self._sync_scene()
 
-    def _sync_scene(self):
-        scene = self._builder.scene
+    def set_render_scene(self, scene):
+        self._require_open()
+        # Unmanaged RenderScene callers do not advance upload revisions.
+        if scene is not self._scene or not scene.structure_revision:
+            self._uploaded = None
+        self._sync_scene(scene)
+
+    def _sync_scene(self, scene=None):
+        self._external_scene = scene is not None
+        scene = self._builder.scene if scene is None else scene
+        self._scene = scene
         structure_key = (scene.structure_revision, scene.identity_revision)
         if structure_key != self._uploaded:
             source = self.api.SceneSource()
@@ -256,12 +292,15 @@ class NativeBackend:
             )
             keys = list(dict.fromkeys(key for key, _ in scene.bucket_keys))
             self._mesh_indices = {key: index for index, key in enumerate(keys)}
+            triangle_counts = {}
             for mesh_key in keys:
                 mesh = self._source.meshes.get(mesh_key) if self._source else None
                 if mesh is None:
                     mesh = builtin_mesh(mesh_key)
+                triangle_counts[mesh_key] = len(mesh.indices) // 3
                 index = source.add_mesh(mesh.positions, mesh.normals, mesh.indices)
                 source.set_mesh_texcoords(index, mesh.uvs)
+            self._triangle_count = scene.triangle_count(triangle_counts)
             self._gizmo_meshes = {}
             for name in _MESHES:
                 mesh = (
@@ -357,8 +396,9 @@ class NativeBackend:
         self._sync_lighting()
 
     def _sync_lighting(self):
-        lights = self._builder.scene.lights
-        if lights is self._lighting_source:
+        lights = self._scene.lights
+        key = lights_key(lights)
+        if lights is self._lighting_source and key == self._lighting_key:
             return
         native = self.api.Lighting()
         native.enabled = True
@@ -399,6 +439,7 @@ class NativeBackend:
         native.skybox_texture = self._textures.get(self._source.skybox, -1) if self._source else -1
         self.runtime.set_lighting(self._scene_handle, native)
         self._lighting_source = lights
+        self._lighting_key = key
 
     def update(self, frame):
         self._require_open()
@@ -524,11 +565,17 @@ class NativeBackend:
 
     def render(self, frame=None, request=None):
         self._require_open()
+        if self._hot_reload:
+            self.device.shaders.check()
         started = time.perf_counter()
         if frame is not None:
             self.update(frame)
         elif self._render_state_dirty and self._last_frame is not None:
             self.update(self._last_frame)
+        if self._external_scene:
+            self._sync_scene(self._scene)
+        elif frame is None:
+            self._sync_lighting()
         camera = self.api.CameraView()
         camera.view = self._camera.view_matrix()
         camera.projection = self._camera.proj_matrix()
@@ -547,8 +594,17 @@ class NativeBackend:
             bool(request.products & ~RenderProduct.COLOR),
             self._data_products.get(request.products & ~RenderProduct.COLOR),
         )
-        self.stats.instances = self._builder.scene.count
+        self.target._depth_camera = (camera.near_plane, camera.far_plane, self._camera.orthographic)
+        self.stats.instances = self._scene.count
+        self.stats.triangles = self._triangle_count
         statistics = self.target.frame.statistics
+        self.stats.cpu_ms = statistics.cpu_ms
+        self.stats.gpu_ms = statistics.gpu_pass_ms
+        if self.stats.gpu_ms and not self.caps.gpu_timing:
+            self.caps = replace(self.caps, gpu_timing=True)
+        self.stats.notes["timing"] = "Native pass submission CPU time; delayed GPU samples"
+        self.stats.notes["cpu submission"] = statistics.cpu_submission
+        self.stats.notes["gpu submission"] = statistics.gpu_submission
         self.stats.draw_calls = statistics.draw_calls
         for name in ("shadow", "reflection"):
             self.stats.notes[f"{name} cache"] = (
@@ -561,7 +617,7 @@ class NativeBackend:
         self.stats.notes["culled instances"] = statistics.culled_instances
         self.stats.notes["shadow instances"] = statistics.shadow_instances
         self.stats.notes["culled shadow instances"] = statistics.culled_shadow_instances
-        self.stats.buckets = self._builder.scene.bucket_count()
+        self.stats.buckets = self._scene.bucket_count()
         self.stats.frame_cpu_ms = (time.perf_counter() - started) * 1000
         texture = self.target.texture
         return ViewportImage(texture.id, self.target.width, self.target.height, False, texture)
@@ -641,7 +697,11 @@ class NativeBackend:
         return self._flags.get(flag, False)
 
     def set_shadow_quality(self, quality):
-        self._style.shadow_quality = list(ShadowQuality).index(ShadowQuality(quality))
+        try:
+            quality = ShadowQuality(quality)
+        except ValueError:
+            return False
+        self._style.shadow_quality = list(ShadowQuality).index(quality)
         self.runtime.configure(self._scene_handle, self._style)
         return True
 
@@ -657,6 +717,8 @@ class NativeBackend:
             DebugView.DEPTH: 3,
             DebugView.OVERDRAW: 4,
             DebugView.WIREFRAME: 5,
+            DebugView.SEGMENT: 6,
+            DebugView.IDCOLOR: 7,
         }
         if view not in modes:
             return False
@@ -702,8 +764,15 @@ class NativeBackend:
 
     def create_peer(self, width, height):
         peer = NativeBackend(width, height, self.target.samples)
+        peer.enable_hot_reload(self._hot_reload)
         peer.set_shadow_quality(self.get_shadow_quality())
         return peer
+
+    def enable_hot_reload(self, on=True):
+        self._require_open()
+        self._hot_reload = bool(on)
+        if self._hot_reload:
+            self.device.shaders.enable()
 
     def capture(self, path, camera=None, size=None):
         from PIL import Image

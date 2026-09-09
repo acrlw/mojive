@@ -1,0 +1,32 @@
+# A headless Wayland compositor may expose no input seat. GLFW 3.4 must not
+# query a null seat while creating its optional keyboard-repeat timer.
+set(wayland_source "${glfw_SOURCE_DIR}/src/wl_init.c")
+file(READ "${wayland_source}" wayland_code)
+set(wayland_original "if (wl_seat_get_version(_glfw.wl.seat) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)")
+set(wayland_replacement "if (_glfw.wl.seat && wl_seat_get_version(_glfw.wl.seat) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)")
+string(FIND "${wayland_code}" "${wayland_original}" wayland_position)
+if(wayland_position LESS 0)
+    message(FATAL_ERROR "Reconcile the GLFW Wayland seat patch with updated source")
+endif()
+string(REPLACE "${wayland_original}" "${wayland_replacement}" wayland_code "${wayland_code}")
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/patched")
+file(WRITE "${CMAKE_BINARY_DIR}/patched/wl_init.c" "${wayland_code}")
+get_target_property(glfw_sources glfw SOURCES)
+list(TRANSFORM glfw_sources REPLACE "^wl_init.c$" "${CMAKE_BINARY_DIR}/patched/wl_init.c")
+set_property(TARGET glfw PROPERTY SOURCES "${glfw_sources}")
+target_include_directories(glfw PRIVATE "${glfw_SOURCE_DIR}/src")
+
+# Enter carries the current surface-local position even when no motion follows.
+# Retaining the previous window's coordinates loses the first click after focus changes.
+file(READ "${glfw_SOURCE_DIR}/src/wl_window.c" wayland_window_code)
+set(enter_original "        window->wl.hovered = GLFW_TRUE;\n        _glfwSetCursorWayland")
+set(enter_replacement "        window->wl.hovered = GLFW_TRUE;\n        window->wl.cursorPosX = wl_fixed_to_double(sx);\n        window->wl.cursorPosY = wl_fixed_to_double(sy);\n        _glfwInputCursorPos(window, window->wl.cursorPosX, window->wl.cursorPosY);\n        _glfwSetCursorWayland")
+string(FIND "${wayland_window_code}" "${enter_original}" enter_position)
+if(enter_position LESS 0)
+    message(FATAL_ERROR "Reconcile the GLFW Wayland pointer entry patch with updated source")
+endif()
+string(REPLACE "${enter_original}" "${enter_replacement}" wayland_window_code "${wayland_window_code}")
+file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/patched/wl_window.c" CONTENT "${wayland_window_code}" @ONLY)
+get_target_property(glfw_sources glfw SOURCES)
+list(TRANSFORM glfw_sources REPLACE "^wl_window.c$" "${CMAKE_BINARY_DIR}/patched/wl_window.c")
+set_property(TARGET glfw PROPERTY SOURCES "${glfw_sources}")

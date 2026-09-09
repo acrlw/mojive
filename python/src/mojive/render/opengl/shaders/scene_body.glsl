@@ -41,11 +41,6 @@ uniform sampler2D u_reflection1;
 uniform sampler2D u_reflection2;
 uniform sampler2D u_reflection3;
 
-// A small positive bias moves grazing, high-frequency surfaces toward the
-// next trilinear mip level before their texels become sub-pixel.  This avoids
-// the large moire bands produced by repeated floor textures while preserving
-// anisotropic detail along the surface.
-const float ALBEDO_MINIFICATION_LOD_BIAS = 1.0;
 uniform vec2 u_reflection_size;
 uniform int u_linear_out;
 uniform vec4 u_fog;              // start, end, fog enabled, haze density
@@ -53,10 +48,37 @@ uniform vec3 u_fog_color;
 uniform vec3 u_haze_color;
 
 
+// Use the same bounded anisotropic footprint in each graphics API. Hardware
+// anisotropy may choose different LODs even with identical mips and sampler limits.
+vec4 sampleAlbedo(vec2 uv) {
+    vec2 dimensions = vec2(textureSize(u_texture, 0));
+    vec2 dx = dFdx(uv) * dimensions;
+    vec2 dy = dFdy(uv) * dimensions;
+    // Principal axes of the pixel footprint keep the filter stable under rotation.
+    float a = dx.x * dx.x + dy.x * dy.x;
+    float b = dx.x * dx.y + dy.x * dy.y;
+    float c = dx.y * dx.y + dy.y * dy.y;
+    float discriminant = sqrt(max((a-c)*(a-c) + 4.0*b*b, 0.0));
+    float majorSquared = max(0.5 * (a+c+discriminant), 1e-12);
+    float majorLength = sqrt(majorSquared);
+    float minorLength = max(sqrt(max(0.5 * (a+c-discriminant), 0.0)), majorLength / 16.0);
+    vec2 axis = a >= c ? vec2(majorSquared-c, b) : vec2(b, majorSquared-a);
+    axis *= inversesqrt(max(dot(axis, axis), 1e-12));
+    vec2 span = axis * majorLength / dimensions;
+    float taps = ceil(clamp(majorLength / max(minorLength, 1.0), 1.0, 16.0));
+    float lod = max(log2(max(minorLength, 1e-8)) + 1.0, 0.0);
+    vec4 color = vec4(0.0);
+    for (int i = 0; i < 16; ++i) {
+        if (float(i) >= taps) break;
+        color += textureLod(u_texture, uv + span * ((float(i)+0.5)/taps-0.5), lod);
+    }
+    return color / taps;
+}
+
 void main() {
     vec4 texel = v.cube_on > 0.5
         ? texture(u_cube_texture, v.cube)
-        : texture(u_texture, v.uv, ALBEDO_MINIFICATION_LOD_BIAS);
+        : sampleAlbedo(v.uv);
     vec3 surface = v.color.rgb;
     if (u_classic_lighting != 0) {
         surface = gamma_encode(surface);

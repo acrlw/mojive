@@ -26,7 +26,7 @@ class NativeWheelHook(BuildHookInterface):
             raise RuntimeError(f"Expected one extension matching the build interpreter in {root}")
         shaders = root / "shaders"
         expected = {
-            source.stem + ".bin" for source in (Path(self.root) / "cpp/shaders").glob("[vf]s_*.sc")
+            source.stem + ".bin" for source in (Path(self.root) / "cpp/shaders").glob("[vcf]s_*.sc")
         }
         if not expected or any(not (shaders / name).is_file() for name in expected):
             raise RuntimeError("Native shaders are incomplete; run make native-python-build")

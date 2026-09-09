@@ -57,12 +57,27 @@ implementation uses `setScene()`.
 ## Local preparation
 
 ```bash
-uv sync --extra dev --extra docs --extra mujoco
+uv sync --extra dev --extra docs --extra mujoco --extra wgpu --extra native
+make setup-imgui
 make cpp-deps
 make check
 make cpp-test
 make cpp-probe
 ```
+
+The `native` extra installs CMake 3.24 or newer and Ninja into `.venv`. Make prefers
+`.venv/bin` for build tools, including recursive native Viewer builds, so an older
+system CMake does not require a manual `PATH` override.
+
+Linux native window builds need the X11, Wayland and xkbcommon development libraries and
+`wayland-scanner`. On Ubuntu 22.04, the GLFW dependencies include `libxrandr-dev`, `libxinerama-dev`,
+`libxcursor-dev`, `libxi-dev`, `libwayland-dev`, and `libxkbcommon-dev`.
+
+`make setup-imgui` installs the project's ImGui Bundle wheel with bulk drawing and
+slider/focus geometry fixes. Run it again after `uv sync` or a synchronizing
+`uv run` command (including `make docs-check`) replaces the wheel with the upstream
+release; the GPU UI tests require these fixes. The command reuses its
+cached platform wheel when the build recipe has not changed.
 
 The default Hatch wheel remains pure Python. `make native-wheel-test` explicitly builds a
 platform wheel with the native extension, compiled shaders and dependency licenses, then
@@ -74,10 +89,34 @@ available. C++ builds use fresh `output/cpp-build`, `output/cpp-core-build` and
 `output/cpp-bindings-build` directories so previous evaluation artifacts stay readable.
 The renderer is selected at the composition root; SDL comparison remains opt-in.
 
-The user deferred workflow CI. No evaluation workflow is installed by this branch. Linux
-validation will be performed on the user's Linux system; macOS verification does not establish
-Windows/Linux runtime support. Local commands and coverage are in the
+The user deferred workflow CI. No evaluation workflow is installed by this branch. Linux native
+windows support X11 and Wayland; the runtime selects the protocol reported by GLFW. All windows
+sharing a native device must use the same protocol. Offscreen-first applications infer it from
+the session environment. Local validation uses Ubuntu 22.04 x86_64 and NVIDIA Vulkan, with a
+private X11 display and a headless Weston compositor. Physical Wayland input, compositor-specific
+desktop integration, other GPU vendors, and Windows still need platform acceptance. Local commands and coverage are in the
 [native verification guide](native-probe.md) and [verification matrix](testing.md).
+
+For headless Weston acceptance, set `PYGLFW_LIBRARY` to the installed ImGui Bundle's
+`libmojive_glfw.so.3` before importing MuJoCo or pyGLFW. The project's build handles compositors
+without an input seat; an independently installed GLFW can still contain the upstream crash.
+OpenGL comparisons on Wayland also require `PYOPENGL_PLATFORM=egl` before importing PyOpenGL.
+Use `make native-windows` and `make native-viewer-test` inside the compositor's environment.
+
+## Native render diagnostics
+
+Native color targets accept 1x, 2x, 4x, and 8x MSAA. Object IDs, metric depth and segmentation
+remain single-sampled. `RenderStats.cpu_ms` and `gpu_ms` expose named native stages such as
+`shadow`, `reflection`, `color`, `scene data`, `outline`, and `debug`. CPU values measure bgfx
+submission work; GPU timestamps arrive later. The statistics notes identify their independent
+submission numbers. A cached render that issues no new draws can report an earlier submission's
+measurements. These boundaries differ from OpenGL's finer pass decomposition.
+
+Use `viewer.backend.enable_hot_reload(True)` to opt into native shader reload. Development
+builds watch `cpp/shaders` and rebuild the shader target after edits; packaged builds watch
+their `.bin` files. A reload replaces the complete program set and invalidates scene caches.
+Compile or binary-load failures log an error and preserve the last working programs. Reload is
+synchronous on the next render and can briefly pause the viewer while CMake compiles shaders.
 
 ## Dependency changes
 
@@ -126,5 +165,19 @@ Independent public Renderer instances and windows share a process-wide device wh
 separate scenes, targets and readback lifetimes. Static output reuse invalidates on geometry,
 lighting, style, camera and target changes; separately updated overlays disable color reuse.
 Native texture preparation releases the GIL and transfers immutable upload storage to bgfx.
+
+OpenGL, WebGPU and bgfx use the same bounded anisotropic footprint in their albedo shaders
+and the same linear-light area filter for 2D mip levels, including odd texture dimensions.
+Hardware anisotropy stays disabled for those 2D samplers to avoid applying the filter twice.
+On Vulkan devices with `VK_EXT_sample_locations`, native MSAA uses the reflected OpenGL
+sample positions and preserves those positions through depth transitions. Devices without
+that extension retain their hardware sample pattern.
+
+`make gpu-bgfx` exercises the shared rendering, picking, gizmo, debug drawing, physics and
+UI tests with the native backend. Tests that inspect private OpenGL or WebGPU pass objects
+remain specific to those implementations. Automated composition tests hide their windows;
+run explicit shown-window lifecycle tools on a separate display when desktop focus must
+remain uninterrupted.
+
 See the [Viewer guide (Chinese)](../how-to/native-viewer.zh.md) for public usage and the
 [acceptance record (Chinese)](../plans/native-renderer-parity.zh.md) for measured coverage and limits.

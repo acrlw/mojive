@@ -10,7 +10,7 @@ uniform usampler2D u_ids;
 #endif
 uniform ivec2 u_size;
 uniform int u_mode;      // 0 color, 1 segment, 2 object ID
-uniform int u_selected;
+uniform uint u_selected;
 
 uint fetch_id(ivec2 c) {
 #ifdef ID_MULTISAMPLE

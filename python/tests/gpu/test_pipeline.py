@@ -48,7 +48,11 @@ def gl():
 
 
 def _make_backend(backend_name: str, request, samples: int = 4):
-    """Build the backend selected by MOJIVE_BACKEND; GL stays lazy."""
+    """Build the backend selected by MOJIVE_RENDERER; GL stays lazy."""
+    if backend_name == "bgfx":
+        from mojive.render.native.backend import NativeBackend
+
+        return NativeBackend(WIDTH, HEIGHT, samples=samples)
     if backend_name == "wgpu":
         from mojive.render.webgpu.backend import WgpuBackend
 
@@ -58,7 +62,7 @@ def _make_backend(backend_name: str, request, samples: int = 4):
 
 
 def _tendon_pass(backend):
-    if backend.caps.name == "wgpu":
+    if backend.caps.name in ("wgpu", "bgfx"):
         return backend._tendons
     return backend._passes["tendon"]
 
@@ -535,22 +539,34 @@ def test_deformable_vertices_update_without_rebuilding_the_scene(backend_name, r
         backend.set_camera(adapter.camera_hint())
         backend.set_scene(source)
         key = MeshKey(MeshShape.SKIN, 0)
-        gpu_mesh = backend.meshes.get(key)
+        native = backend_name == "bgfx"
+        gpu_mesh = backend._mesh_indices[key] if native else backend.meshes.get(key)
         assert gpu_mesh is not None
 
         frame = adapter.frame(FrameNeeds(poses=True, deformables=True))
         backend.update(frame)
-        before = _vbo_bytes(backend, gpu_mesh)
+        if native:
+            backend.render()
+            before = backend.target.read_color().tobytes()
+            revision = backend._revision
+        else:
+            before = _vbo_bytes(backend, gpu_mesh)
         ranges = backend._scene.bucket_ranges
 
         joint = mujoco.mj_name2id(adapter.model, mujoco.mjtObj.mjOBJ_JOINT, "skin_tip_hinge")
         assert adapter.set_qpos(int(adapter.model.jnt_qposadr[joint]), np.deg2rad(40.0))
         frame = adapter.frame(FrameNeeds(poses=True, deformables=True))
         backend.update(frame)
-        after = _vbo_bytes(backend, gpu_mesh)
+        if native:
+            backend.render()
+            after = backend.target.read_color().tobytes()
+            assert backend._mesh_indices[key] == gpu_mesh
+            assert backend._revision == revision
+        else:
+            after = _vbo_bytes(backend, gpu_mesh)
+            assert backend.meshes.get(key) is gpu_mesh
 
         assert before != after
-        assert backend.meshes.get(key) is gpu_mesh
         assert backend._scene.bucket_ranges == ranges
         _render(backend, frame)
         assert float(backend.target.read_color()[..., :3].std()) > 8.0

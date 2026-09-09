@@ -84,6 +84,11 @@ class Rig:
         assert self.backend.render(None) is not None
         return self.backend.target.read_color(flip=True)
 
+    def assert_debug_draw_calls(self, expected):
+        # Native statistics include scene and data passes, without per-pass counters.
+        if self.backend.caps.name != "bgfx":
+            assert self.debug_pass().draw_calls == expected
+
     def debug_pass(self):
         if self.backend.caps.name == "wgpu":
             return self.backend._debug
@@ -91,7 +96,11 @@ class Rig:
 
 
 def _make_backend(backend_name: str, request, samples: int = 4):
-    """Build the backend selected by MOJIVE_BACKEND; GL stays lazy."""
+    """Build the backend selected by MOJIVE_RENDERER; GL stays lazy."""
+    if backend_name == "bgfx":
+        from mojive.render.native.backend import NativeBackend
+
+        return NativeBackend(W, H, samples=samples)
     if backend_name == "wgpu":
         from mojive.render.webgpu.backend import WgpuBackend
 
@@ -167,7 +176,7 @@ def test_ghost_draws_twice(rig):
     layer = rig.backend.debug.layer("ray", Occlusion.GHOST)
     layer.line("ray", (-2.0, 0.0, 0.0), (2.0, 0.0, 0.0), LINE_RGBA, 9.0)
     rig.draw(wall=True)
-    assert rig.debug_pass().draw_calls == 2
+    rig.assert_debug_draw_calls(2)
 
 
 @pytest.mark.parametrize("width_px", [3.0, 9.0])
@@ -217,7 +226,7 @@ def test_every_primitive_kind_reaches_the_screen(rig):
     assert draw.stats().dropped == 0
     assert lit > 2000
 
-    assert rig.debug_pass().draw_calls == 6
+    rig.assert_debug_draw_calls(6)
 
 
 def test_arrow_head_uses_the_gizmo_corner_radius(rig):
@@ -300,7 +309,7 @@ def test_ten_thousand_lines_render_without_dropping(rig):
     # No per-frame budget assertion here (unlike the opengl-only rig): the two
     # backends time frames differently; this checks correctness of the path.
     assert rig.backend.debug.stats().primitives == n
-    assert rig.debug_pass().draw_calls == 1
+    rig.assert_debug_draw_calls(1)
 
 
 def test_screen_arrows_share_g3_circular_and_sharp_styles(rig):

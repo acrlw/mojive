@@ -370,7 +370,11 @@ class OpaquePass(BasePass):
         gl.multisample = bool(ctx.flag(RenderFlag.MSAA))
 
         draw_buckets(ctx, ctx.scene.opaque_buckets)
-        ctx.opaque_depth_ready = not overdraw
+        # The wireframe geometry stage is not depth-invariant with the ID vertex
+        # program on every driver. Rebuild ID depth instead of leaving picking holes.
+        ctx.opaque_depth_ready = not (
+            overdraw or self._wireframe_on(ctx.debug_view, ctx.flag(RenderFlag.WIREFRAME, False))
+        )
 
         if target.id_layout is IdLayout.SHARED:
             target.fbo.color_mask = (_MASK_ON, _MASK_ON)

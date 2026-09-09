@@ -56,8 +56,12 @@ POINT_POS = np.array([2.5, -3.0, 4.0], np.float32)
 
 @pytest.fixture
 def backend(backend_name, request):
-    """Build the backend selected by MOJIVE_BACKEND; GL stays lazy."""
-    if backend_name == "wgpu":
+    """Build the backend selected by MOJIVE_RENDERER; GL stays lazy."""
+    if backend_name == "bgfx":
+        from mojive.render.native.backend import NativeBackend
+
+        be = NativeBackend(W, H, samples=4)
+    elif backend_name == "wgpu":
         from mojive.render.webgpu.backend import WgpuBackend
 
         be = WgpuBackend(W, H, samples=4)
@@ -71,8 +75,9 @@ def backend(backend_name, request):
     if not be.caps.shadows:
         be.release()
         pytest.skip("backend does not support shadows")
-    be.meshes.sync({GROUND: builtin_mesh(GROUND), BOX: builtin_mesh(BOX)})
-    be.textures.sync({}, None)
+    if backend_name != "bgfx":
+        be.meshes.sync({GROUND: builtin_mesh(GROUND), BOX: builtin_mesh(BOX)})
+        be.textures.sync({}, None)
     yield be
     be.release()
 
@@ -295,7 +300,7 @@ def _high_frequency(y: np.ndarray) -> float:
 
 def test_shadow_pass_actually_ran(backend):
 
-    if backend.caps.name == "wgpu":
+    if backend.caps.name != "opengl":
         # Per-pass CPU timings and the pass registry are opengl implementation
         # details; the wgpu backend reports frame_cpu_ms only.
         pytest.skip("per-pass timing table is a opengl implementation detail")
@@ -318,7 +323,7 @@ def test_shadow_cache_reuses_static_maps_and_tracks_dependencies(backend):
     backend.render()
     second = backend.target.read_color(flip=True).copy()
     assert backend.stats.notes["shadow cache"] == "reused"
-    if backend.caps.name == "wgpu":
+    if backend.caps.name != "opengl":
         assert backend.stats.draw_calls < rendered_calls
     else:
         assert "shadow" not in backend.stats.cpu_ms
@@ -484,7 +489,7 @@ def test_every_cascade_addresses_its_own_tile_and_texel(backend):
 
 def test_render_leaves_no_gl_error(backend):
 
-    if backend.caps.name == "wgpu":
+    if backend.caps.name != "opengl":
         # GL error state and backend.ctx are opengl internals; WebGPU reports
         # validation failures through device error scopes instead.
         pytest.skip("GL error state is a opengl implementation detail")

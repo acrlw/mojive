@@ -1,7 +1,34 @@
+// Use the same bounded anisotropic footprint in each graphics API. Hardware
+// anisotropy may choose different LODs even with identical mips and sampler limits.
+vec4 sampleAlbedo(vec2 uv) {
+    vec2 dimensions = vec2(textureSize(s_image, 0));
+    vec2 dx = dFdx(uv) * dimensions;
+    vec2 dy = dFdy(uv) * dimensions;
+    // Principal axes of the pixel footprint keep the filter stable under rotation.
+    float a = dx.x * dx.x + dy.x * dy.x;
+    float b = dx.x * dx.y + dy.x * dy.y;
+    float c = dx.y * dx.y + dy.y * dy.y;
+    float discriminant = sqrt(max((a-c)*(a-c) + 4.0*b*b, 0.0));
+    float majorSquared = max(0.5 * (a+c+discriminant), 1e-12);
+    float majorLength = sqrt(majorSquared);
+    float minorLength = max(sqrt(max(0.5 * (a+c-discriminant), 0.0)), majorLength / 16.0);
+    vec2 axis = a >= c ? vec2(majorSquared-c, b) : vec2(b, majorSquared-a);
+    axis *= inversesqrt(max(dot(axis, axis), 1e-12));
+    vec2 span = axis * majorLength / dimensions;
+    float taps = ceil(clamp(majorLength / max(minorLength, 1.0), 1.0, 16.0));
+    float lod = max(log2(max(minorLength, 1e-8)) + 1.0, 0.0);
+    vec4 color = vec4(0.0);
+    for (int i = 0; i < 16; ++i) {
+        if (float(i) >= taps) break;
+        color += texture2DLod(s_image, uv + span * ((float(i)+0.5)/taps-0.5), lod);
+    }
+    return color / taps;
+}
+
 void main()
 {
     if (u_reflectionConfig.x > .5 && dot(vec4(v_world, 1), u_reflectionPlane) < 0) discard;
-    vec4 texel = v_litCube.w > .5 ? textureCube(s_cube, v_litCube.xyz) : texture2DBias(s_image, v_texcoord0, 1.0);
+    vec4 texel = v_litCube.w > .5 ? textureCube(s_cube, v_litCube.xyz) : sampleAlbedo(v_texcoord0);
     vec3 surface = v_color0.rgb;
     if (u_options.y > .5) { surface = gammaEncode(surface); texel.rgb = linearToSrgb(texel.rgb); }
     vec3 albedo = surface * texel.rgb;

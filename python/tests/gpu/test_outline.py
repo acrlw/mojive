@@ -107,7 +107,11 @@ class Rig:
 
 
 def _make_backend(backend_name: str, request, samples: int = 4):
-    """Build the backend selected by MOJIVE_BACKEND; GL stays lazy."""
+    """Build the backend selected by MOJIVE_RENDERER; GL stays lazy."""
+    if backend_name == "bgfx":
+        from mojive.render.native.backend import NativeBackend
+
+        return NativeBackend(W, H, samples=samples)
     if backend_name == "wgpu":
         from mojive.render.webgpu.backend import WgpuBackend
 
@@ -201,6 +205,8 @@ def test_no_outline_without_selection(rig):
 
 
 def test_outline_color_comes_from_the_pass(rig):
+    if rig.backend.caps.name == "bgfx":
+        pytest.skip("native outline color has no private pass override")
     if not rig.backend.caps.outline:
         pytest.skip("outline unsupported by this backend")
     _set_outline_color(rig.backend, CUSTOM_COLOR)

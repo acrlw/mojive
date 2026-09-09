@@ -44,7 +44,7 @@ def native_module():
 class NativeDevice:
     """One GPU owner shared by independent renderers and windows in this process."""
 
-    def __init__(self):
+    def __init__(self, wayland=None):
         self.api = native_module()
         if not self.api.has_renderer:
             raise RuntimeError("The native extension was built without a renderer")
@@ -56,7 +56,17 @@ class NativeDevice:
                 if build
                 else str(Path(self.api.__file__).parent / "shaders")
             )
-        self.runtime = self.api.RenderRuntime(shaders)
+        if wayland is None:
+            wayland = (
+                sys.platform.startswith("linux")
+                and bool(os.environ.get("WAYLAND_DISPLAY"))
+                and (os.environ.get("XDG_SESSION_TYPE") != "x11" or not os.environ.get("DISPLAY"))
+            )
+        self.wayland = bool(wayland)
+        self.runtime = self.api.RenderRuntime(shaders, wayland=self.wayland)
+        from .programs import ShaderReload
+
+        self.shaders = ShaderReload(self.runtime, shaders)
         self.users = 0
         self._readback_thread = threading.local()
         self.readbacks = ThreadPoolExecutor(
@@ -115,10 +125,12 @@ class NativeDevice:
                     _shared = None
 
 
-def acquire_device():
+def acquire_device(*, wayland=None):
     global _shared
     with _lock:
         if _shared is None:
-            _shared = NativeDevice()
+            _shared = NativeDevice(wayland)
+        elif wayland is not None and _shared.wayland != wayland:
+            raise RuntimeError("Native windows in one process must use the same window system")
         _shared.users += 1
         return _shared

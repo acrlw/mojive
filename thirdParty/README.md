@@ -52,6 +52,45 @@ a swap chain so Viewer and offscreen textures use the same filtering. The submod
 unchanged; CMake fails if the pinned source context no longer matches. Reconcile this patch
 explicitly during a bgfx update and rerun textured tendon and image-light parity.
 
+## bgfx Vulkan peer presentation and rasterization
+
+`cpp/cmake/VulkanHeadless.cmake` preserves reset flags in the no-main-swapchain path
+and updates peer swap chains when VSync changes. Without this correction, the native
+runtime's peer windows ignore VSync requests. Both swap-chain recreation and the
+maintenance-extension path receive the same policy.
+
+`cpp/cmake/VulkanRasterization.cmake` uses bottom-left offscreen coordinates to match
+OpenGL's sample pattern and triangle boundary ownership. Mirroring sample locations
+alone leaves different coverage at exact edge ties. Swap chains retain top-left
+presentation; viewport, scissor and clear rectangles retain their public top-left
+coordinates. Pipeline caching includes the target orientation. This uses the standard
+Vulkan sample pattern and does not require programmable sample locations.
+
+Mojive converts render-target sampling at UI composition and RGB readback boundaries,
+and places directional-shadow atlas tiles according to the reported texture origin.
+Reconcile the checked replacements when updating bgfx; verify MSAA 2/4/8 color, preserved
+depth, cropped readback, asymmetric UI composition, and peer VSync on/off.
+
+## GLFW X11 visibility waits
+
+`cpp/cmake/GlfwX11.cmake` compiles a checked build-tree copy of GLFW's X11 window
+implementation. Its visibility wait polls for new socket data after checking for the
+requested event, so unrelated queued events cannot bypass the timeout indefinitely.
+The pinned submodule stays unchanged. Reconcile the patch when updating GLFW and run
+`make native-windows` on X11 to verify repeated minimize/restore and resize cycles.
+
+## GLFW Wayland initialization and Python coexistence
+
+`cpp/cmake/GlfwWayland.cmake` guards GLFW 3.4's keyboard-repeat initialization when a Wayland
+compositor exposes no input seat. The source replacement is checked and compiled from the
+build tree; the submodule stays unchanged. Run `make native-windows` inside a headless Wayland
+compositor when reconciling this patch.
+
+`tools/build_imgui.py` applies the same guard to ImGui Bundle's GLFW and enables both X11 and
+Wayland. Its Linux library uses `libmojive_glfw.so.3`, with the package's pyGLFW search path
+updated accordingly. The distinct SONAME prevents a platform-only GLFW already loaded by
+MuJoCo/pyGLFW from satisfying ImGui's dependency while missing its X11 native symbols.
+
 ## Native texture preprocessing
 
 `cpp/src/Texture.cpp` uses `bimg/3rdparty/stb/stb_image_resize2.h` from the pinned bimg

@@ -35,7 +35,9 @@ class RenderRuntime final : public Renderer {
     FrameToken renderRequested(Target, const CameraView &, RenderRequest) override;
     ReadbackTicket readback(FrameToken, Product, Region = {}) override;
     ReadbackResult poll(ReadbackTicket) override;
+    ReadbackState readInto(FrameToken, ImageView, Region = {}) override;
     FrameStats advance() override;
+    void reloadShaders() override;
     Texture targetTexture(Target) const override;
     Texture uploadTexture(Extent, std::span<const std::byte>) override;
     void destroy(Texture) override;

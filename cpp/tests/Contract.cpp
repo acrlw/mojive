@@ -172,6 +172,13 @@ int main() {
         std::memcpy(&id, result.image.pixels.data(), 4);
         check(id == 0xfedcba98 && result.frame.sequence == 8 && result.frame.cameraRevision == 23,
               "Common consumer lost identity");
+        std::array<std::byte, 4> destination{};
+        check(renderer->readInto(token, {Product::ObjectId, {1, 1}, destination}) ==
+                  ReadbackState::Ready,
+              "Synchronous delivery did not complete");
+        std::memcpy(&id, destination.data(), 4);
+        check(id == 0xfedcba98, "Synchronous delivery changed identity");
+        rejects([&] { renderer->readInto(token, {Product::ObjectId, {2, 2}, destination}); });
         renderer->resize(target, {2, 2});
         check(waitForReadback(*renderer, ticket).state == ReadbackState::Canceled,
               "Cancellation hidden by consumer");

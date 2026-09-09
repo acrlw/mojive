@@ -29,13 +29,18 @@ def _load_window_deps():
 class NativeWindow(Window):
     """Window events and ImGui stay on the UI thread; GPU work has a native owner."""
 
-    def __init__(self, config: WindowConfig | None = None, *, device: Any) -> None:
+    def __init__(
+        self, config: WindowConfig | None = None, *, device: Any = None, device_factory: Any = None
+    ) -> None:
         self._destroyed = False
         self._window = None
         self._imgui_context = None
         self._native_drop_token = 0
         self.device = device
-        self.api, self.runtime = device.api, device.runtime
+        self._device_factory = device_factory
+        self.api = self.runtime = None
+        if device is not None:
+            self.api, self.runtime = device.api, device.runtime
         self._surface = self._frame_target = None
         self._font_textures = {}
         self._viewport_textures = {}
@@ -60,6 +65,12 @@ class NativeWindow(Window):
         # runs when the last GLFW or wgpu window closes.
         _window_module._live_windows += 1
         self._counted_window = True
+        self._wayland = (
+            sys.platform.startswith("linux") and glfw.get_platform() == glfw.PLATFORM_WAYLAND
+        )
+        if self.device is None:
+            self.device = self._device_factory(wayland=self._wayland)
+            self.api, self.runtime = self.device.api, self.device.runtime
 
         glfw.window_hint(glfw.CLIENT_API, glfw.NO_API)
         glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
@@ -118,6 +129,7 @@ class NativeWindow(Window):
         io.set_ini_filename(ini)
 
         self._impl = GlfwInputAdapter(handle)
+        self._input = self._impl
         glfw.set_drop_callback(handle, self._on_file_drop)
         self._native_drop_token = native_drop.install(glfw, handle, self)
 
@@ -132,9 +144,22 @@ class NativeWindow(Window):
 
         io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
         io.backend_flags |= imgui.BackendFlags_.renderer_has_vtx_offset
+        if not self._wayland:
+            self._create_surface()
+
+    def _create_surface(self):
         handle, display = self._native_handle()
-        self._surface = self.runtime.create_surface(handle, *self.size_pixels, display)
+        self._surface = self.runtime.create_surface(
+            handle, *self.size_pixels, display, self._wayland
+        )
         self.set_vsync(self._vsync)
+
+    def show(self) -> None:
+        super().show()
+        # Wayland cannot present to an unmapped wl_surface. GLFW's show completes
+        # the initial xdg-shell configuration; hidden windows only render offscreen.
+        if self._surface is None:
+            self._create_surface()
 
     def make_current(self) -> None:
         # NO_API window: there is no GL context to make current.
@@ -150,6 +175,8 @@ class NativeWindow(Window):
             return int(glfw.get_cocoa_window(self._window)), 0
         if sys.platform == "win32":
             return int(glfw.get_win32_window(self._window)), 0
+        if self._wayland:
+            return int(glfw.get_wayland_window(self._window)), int(glfw.get_wayland_display())
         return int(glfw.get_x11_window(self._window)), int(glfw.get_x11_display())
 
     def viewport_texture_ref(self, image):
@@ -254,7 +281,8 @@ class NativeWindow(Window):
         result = None
         if min(size) > 0:
             if self._frame_size != size:
-                self.runtime.resize(self._surface, *size)
+                if self._surface is not None:
+                    self.runtime.resize(self._surface, *size)
                 if self._frame_target is None:
                     self._frame_target = self.runtime.create_target(*size)
                 else:
@@ -263,8 +291,9 @@ class NativeWindow(Window):
             packet = self._draw_packet(imgui.get_draw_data(), size)
             self._frame_token = self.runtime.render_ui(*size, *packet, self._frame_target)
             # Both submissions sample GPU textures directly. CPU readback only occurs on request.
-            vertices, indices, commands = self._present_packet(size)
-            self.runtime.render_ui(*size, vertices, indices, commands, self._surface)
+            if self._surface is not None:
+                vertices, indices, commands = self._present_packet(size)
+                self.runtime.render_ui(*size, vertices, indices, commands, self._surface)
             self.runtime.advance()
             if readback:
                 result = self.read_frame()

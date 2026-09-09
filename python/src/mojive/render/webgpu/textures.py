@@ -23,18 +23,14 @@ class TextureStore:
         self._white_cube: wgpu.GPUTextureView | None = None
         self._black_cube: wgpu.GPUTextureView | None = None
         self.revision = 0
-        # opengl 2D textures wrap (repeat_x/repeat_y = True); tiled planes and
-        # box face-axis mapping rely on uv outside [0,1] repeating.  Trilinear
-        # plus anisotropy 16.0 matches opengl (resources.py builds mipmaps with
-        # aniso 16.0); WebGPU has no mipmap generation, so _upload builds the
-        # chain on the CPU.
+        # Albedo anisotropy is evaluated in the shared shader footprint. Keep
+        # the underlying sampler trilinear so drivers do not filter it twice.
         self.sampler = device.create_sampler(
             mag_filter="linear",
             min_filter="linear",
             mipmap_filter="linear",
             address_mode_u="repeat",
             address_mode_v="repeat",
-            max_anisotropy=16,
         )
         self.cube_sampler = device.create_sampler(
             mag_filter="linear", min_filter="linear", mipmap_filter="linear"

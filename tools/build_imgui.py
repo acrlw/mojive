@@ -30,6 +30,10 @@ RESTORED_FILES = (
     "external/imgui/bindings/pybind_imgui_internal.cpp",
     "bindings/imgui_bundle/imgui/__init__.pyi",
     "bindings/imgui_bundle/imgui/internal.pyi",
+    "imgui_bundle_cmake/internal/add_glfw_submodule.cmake",
+    "external/glfw/glfw/src/wl_init.c",
+    "external/glfw/glfw/src/wl_window.c",
+    "bindings/imgui_bundle/_glfw_set_search_path.py",
 )
 
 
@@ -44,6 +48,40 @@ def patch(source: Path) -> None:
         path.write_text(content.replace(old, new, count))
 
     imgui = "external/imgui/imgui/"
+    change(
+        "external/glfw/glfw/src/wl_init.c",
+        "if (wl_seat_get_version(_glfw.wl.seat) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)",
+        "if (_glfw.wl.seat && wl_seat_get_version(_glfw.wl.seat) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)",
+    )
+    change(
+        "external/glfw/glfw/src/wl_window.c",
+        "        window->wl.hovered = GLFW_TRUE;\n        _glfwSetCursorWayland",
+        "        window->wl.hovered = GLFW_TRUE;\n"
+        "        window->wl.cursorPosX = wl_fixed_to_double(sx);\n"
+        "        window->wl.cursorPosY = wl_fixed_to_double(sy);\n"
+        "        _glfwInputCursorPos(window, window->wl.cursorPosX, window->wl.cursorPosY);\n"
+        "        _glfwSetCursorWayland",
+    )
+    change(
+        "imgui_bundle_cmake/internal/add_glfw_submodule.cmake",
+        "    set(GLFW_BUILD_WAYLAND OFF PARENT_SCOPE)",
+        "    if (UNIX AND NOT APPLE)\n        set(GLFW_BUILD_WAYLAND ON PARENT_SCOPE)\n    endif()",
+    )
+    # pyGLFW may already have loaded a platform-only libglfw.so.3 (for example
+    # through MuJoCo). A distinct SONAME keeps it from satisfying ImGui's richer
+    # native-symbol dependency accidentally.
+    change(
+        "imgui_bundle_cmake/internal/add_glfw_submodule.cmake",
+        "    install(TARGETS glfw DESTINATION imgui_bundle)",
+        "    if (UNIX AND NOT APPLE)\n"
+        "        set_target_properties(glfw PROPERTIES OUTPUT_NAME mojive_glfw)\n"
+        "    endif()\n    install(TARGETS glfw DESTINATION imgui_bundle)",
+    )
+    change(
+        "bindings/imgui_bundle/_glfw_set_search_path.py",
+        'lib_filenames = ["libglfw.so.3",',
+        'lib_filenames = ["libmojive_glfw.so.3", "libglfw.so.3",',
+    )
     change("pyproject.toml", 'version = "1.92.900"', 'version = "1.92.900+mojive.1"')
     # The bundled ndarray casters use nanobind's four-argument export API.
     change("pyproject.toml", '"nanobind>=2.4.0"', '"nanobind==2.9.2"')
@@ -186,15 +224,24 @@ def main() -> None:
             tf.extractall(build, filter="data")
     recipe = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     prepared = build / "source-patch.sha256"
+    unchanged = {}
     if not prepared.exists() or prepared.read_text().strip() != recipe:
         # Reapply changed recipes to upstream sources, including removal of old
         # patches. Keep the CMake tree and untouched sources for incremental builds.
         with tarfile.open(archive) as tf:
             for relative in RESTORED_FILES:
+                path = source / relative
+                if path.exists():
+                    unchanged[path] = (path.read_bytes(), path.stat().st_mtime_ns)
                 member = tf.extractfile(f"imgui_bundle-{VERSION}/{relative}")
-                (source / relative).write_bytes(member.read())
+                path.write_bytes(member.read())
     (source / "external/imgui/imgui/mojive_g3.h").unlink(missing_ok=True)
     patch(source)
+    # A recipe change must not rebuild every translation unit when the final
+    # patched headers are unchanged.
+    for path, (content, modified) in unchanged.items():
+        if path.read_bytes() == content:
+            os.utime(path, ns=(path.stat().st_atime_ns, modified))
     prepared.write_text(recipe + "\n")
     if args.prepare_only:
         print(source)

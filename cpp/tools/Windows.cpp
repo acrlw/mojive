@@ -60,12 +60,11 @@ int main(int argc, char **argv) {
                 glfwCreateWindow(400, 260, "Mojive peer lifecycle validation", nullptr, nullptr);
             if (!peer)
                 throw std::runtime_error("Cannot create peer window");
-            auto surface = renderer->createSurface(probe::nativeWindow(peer));
+            auto peerWindow = probe::nativeWindow(peer);
+            auto surface = renderer->createSurface(peerWindow);
             for (int frame = 0; frame < 18; ++frame) {
                 if (frame == 5) {
                     glfwSetWindowSize(peer, 360 + cycle % 4 * 37, 230 + cycle % 3 * 29);
-                    glfwPollEvents();
-                    renderer->resize(surface, probe::nativeWindow(peer).size);
                     ++resizes;
                 }
                 if (frame == 9) {
@@ -79,8 +78,15 @@ int main(int argc, char **argv) {
                 glfwPollEvents();
                 present(*renderer, {}, probe::nativeWindow(window).size, texture);
                 // A minimized or hidden platform window has no presentation demand.
-                if (!glfwGetWindowAttrib(peer, GLFW_ICONIFIED))
-                    present(*renderer, surface, probe::nativeWindow(peer).size, texture);
+                if (!glfwGetWindowAttrib(peer, GLFW_ICONIFIED)) {
+                    // X11 delivers the framebuffer resize after the window size request.
+                    auto size = probe::nativeWindow(peer).size;
+                    if (size != peerWindow.size) {
+                        renderer->resize(surface, size);
+                        peerWindow.size = size;
+                    }
+                    present(*renderer, surface, size, texture);
+                }
                 renderer->advance();
                 std::this_thread::sleep_for(std::chrono::milliseconds(8));
             }

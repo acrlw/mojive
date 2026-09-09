@@ -6,7 +6,7 @@ import moderngl
 import numpy as np
 
 from ...types import MeshData, MeshKey, MeshUpdate, TextureData, TextureType
-from ..texture import srgb_to_linear_u8
+from ..texture import mip_chain, srgb_to_linear_u8
 from .instances import GpuMesh
 
 
@@ -124,9 +124,7 @@ class TextureStore:
                 h, w = pixels.shape[0], pixels.shape[1]
                 tex = self._make_2d(w, h, comps, pixels, fmt)
                 tex.repeat_x = tex.repeat_y = True
-                tex.build_mipmaps()
                 tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
-                tex.anisotropy = 16.0
             else:
                 size = pixels.shape[1]
                 tex = self._make_cube(size, comps, pixels, fmt)
@@ -148,10 +146,20 @@ class TextureStore:
         blob = np.ascontiguousarray(pixels).tobytes()
         if fmt is not None:
             try:
-                return self.ctx.texture((w, h), comps, blob, internal_format=fmt)
+                tex = self.ctx.texture((w, h), comps, blob, internal_format=fmt)
             except Exception:
-                return self.ctx.texture((w, h), comps, srgb_to_linear_u8(pixels).tobytes())
-        return self.ctx.texture((w, h), comps, blob)
+                pixels = srgb_to_linear_u8(pixels)
+                fmt = None
+                tex = self.ctx.texture((w, h), comps, pixels.tobytes())
+        else:
+            tex = self.ctx.texture((w, h), comps, blob)
+        tex.build_mipmaps()
+        # Driver mip generation differs for odd extents. Upload the shared
+        # linear-light area filter used by the native and WebGPU backends.
+        for level, data in enumerate(mip_chain(pixels[None], srgb=fmt is not None)):
+            if level:
+                tex.write(data[0].tobytes(), level=level, alignment=1)
+        return tex
 
     def _make_cube(self, size, comps, pixels, fmt):
         blob = np.ascontiguousarray(pixels).tobytes()

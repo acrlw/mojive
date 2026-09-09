@@ -45,7 +45,8 @@ def fixture_scene(native):
     return source, transforms, camera
 
 
-def test_render_products_own_data_and_preserve_existing_conventions(native, runtime):
+@pytest.mark.parametrize("samples", [2, 4, 8])
+def test_render_products_own_data_and_preserve_existing_conventions(native, runtime, samples):
     source, transforms, camera = fixture_scene(native)
     runtime.set_scene(source)
     # Noncontiguous and Fortran arrays retain their mathematical meaning.
@@ -59,7 +60,7 @@ def test_render_products_own_data_and_preserve_existing_conventions(native, runt
         np.empty((0, 2), np.int32),
         np.empty((0, 4), np.float32),
     )
-    target = runtime.create_target(256, 256, samples=4)
+    target = runtime.create_target(256, 256, samples=samples)
     frame = runtime.render(target, camera)
     assert frame.sequence == 7 and frame.camera_revision == 9
     products = [
@@ -339,13 +340,15 @@ def test_invalid_native_visual_updates_preserve_the_scene(native, runtime):
     np.testing.assert_array_equal(expected, actual)
 
 
-def test_readback_regions_preserve_padded_rows_and_owned_results(native, runtime):
+@pytest.mark.parametrize("samples", [1, 2, 4, 8])
+def test_readback_regions_preserve_padded_rows_and_owned_results(native, runtime, samples):
     source, transforms, camera = fixture_scene(native)
     runtime.set_scene(source)
     runtime.update(transforms)
-    target = runtime.create_target(193, 137, samples=4)
+    target = runtime.create_target(193, 137, samples=samples)
     frame = runtime.render(target, camera)
     retained = []
+    rgba = runtime.read(frame, native.Product.RGBA).image
     for product in (
         native.Product.COLOR,
         native.Product.RGBA,
@@ -354,8 +357,18 @@ def test_readback_regions_preserve_padded_rows_and_owned_results(native, runtime
         native.Product.METRIC_DEPTH,
     ):
         reference = runtime.read(frame, product).image.copy()
+        if product == native.Product.COLOR:
+            # RGB compute packing must preserve every resolved byte, including
+            # partial four-pixel groups and regions whose first pixel is unaligned.
+            np.testing.assert_array_equal(reference, rgba[..., :3])
         tickets = []
-        for x, y, width, height in ((7, 9, 31, 37), (192, 136, 1, 1), (5, 6, 0, 0)):
+        for x, y, width, height in (
+            (7, 9, 31, 37),
+            (192, 136, 1, 1),
+            (5, 6, 0, 0),
+            (97, 21, 2, 13),
+            (23, 15, 3, 7),
+        ):
             region = native.Region()
             region.x, region.y, region.width, region.height = x, y, width, height
             expected = reference[
@@ -367,12 +380,51 @@ def test_readback_regions_preserve_padded_rows_and_owned_results(native, runtime
             np.testing.assert_array_equal(image, expected)
             assert image.flags.c_contiguous
             retained.append((image, expected))
+        destination = np.empty_like(reference)
+        for _ in range(3):
+            destination.fill(0)
+            assert runtime.read_into(frame, product, destination) == native.ReadbackState.READY
+            np.testing.assert_array_equal(destination, reference)
+        retained.append((destination, reference))
+        for width in (31, 32):
+            region = native.Region()
+            region.x, region.y, region.width, region.height = 7, 9, width, 37
+            expected = reference[9:46, 7 : 7 + width]
+            cropped = np.empty_like(expected)
+            assert runtime.read_into(frame, product, cropped, region) == native.ReadbackState.READY
+            np.testing.assert_array_equal(cropped, expected)
+            retained.append((cropped, expected.copy()))
     runtime.resize(target, 47, 61)
     frame = runtime.render(target, camera)
     runtime.read(frame, native.Product.COLOR)
     runtime.close()
     for image, expected in retained:
         np.testing.assert_array_equal(image, expected)
+
+
+def test_read_into_rejects_invalid_destinations_without_writing(native, runtime):
+    source, transforms, camera = fixture_scene(native)
+    runtime.set_scene(source)
+    runtime.update(transforms)
+    target = runtime.create_target(32, 24)
+    frame = runtime.render(target, camera)
+    readonly = np.full((24, 32, 3), 71, np.uint8)
+    readonly.flags.writeable = False
+    invalid = (
+        np.full((24, 32, 3), 71, np.float32),
+        np.full((32, 24, 3), 71, np.uint8),
+        np.full((24, 32, 4), 71, np.uint8),
+        np.full((24, 32), 71, np.uint8),
+        np.full((24, 64, 3), 71, np.uint8)[:, ::2],
+        readonly,
+    )
+    for destination in invalid:
+        with pytest.raises((ValueError, TypeError)):
+            runtime.read_into(frame, native.Product.COLOR, destination)
+        assert np.all(destination == 71)
+    destination = np.empty((24, 32, 3), np.uint8)
+    assert runtime.read_into(frame, native.Product.COLOR, destination) == native.ReadbackState.READY
+    np.testing.assert_array_equal(destination, runtime.read(frame, native.Product.COLOR).image)
 
 
 def test_visibility_tracks_camera_pose_and_deformed_mesh_bounds(native, runtime):

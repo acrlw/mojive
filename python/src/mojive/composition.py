@@ -667,7 +667,7 @@ def _compose(
             from .render.native.device import acquire_device
             from .ui.window_native import NativeWindow
 
-            window = NativeWindow(window_config, device=acquire_device())
+            window = NativeWindow(window_config, device_factory=acquire_device)
             fb_w, fb_h = window.size_pixels
             backend = NativeBackend(fb_w, fb_h, samples)
         elif renderer == "wgpu":

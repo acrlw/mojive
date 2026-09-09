@@ -96,10 +96,6 @@ struct Lights {
 @group(4) @binding(3) var reflection3: texture_2d<f32>;
 @group(4) @binding(4) var reflection_sampler: sampler;
 
-// Match the OpenGL albedo path: choose the next mip slightly early for
-// sub-pixel repeated textures, while anisotropy retains along-surface detail.
-const ALBEDO_MINIFICATION_LOD_BIAS: f32 = 1.0;
-
 const OPENGL_GAMMA: f32 = 2.2;
 const OPENGL_KNEE: f32 = 0.8;
 
@@ -356,17 +352,38 @@ struct SurfaceSample {
     texture_color: vec3f,
 };
 
+// Keep this footprint and mip policy aligned with the OpenGL/native albedo filter.
+fn sample_albedo(uv: vec2f) -> vec4f {
+    let dimensions = vec2f(textureDimensions(albedo_tex, 0));
+    let dx = dpdx(uv) * dimensions;
+    let dy = dpdy(uv) * dimensions;
+    let a = dx.x * dx.x + dy.x * dy.x;
+    let b = dx.x * dx.y + dy.x * dy.y;
+    let c = dx.y * dx.y + dy.y * dy.y;
+    let discriminant = sqrt(max((a-c)*(a-c) + 4.0*b*b, 0.0));
+    let major_squared = max(0.5 * (a+c+discriminant), 1e-12);
+    let major_length = sqrt(major_squared);
+    let minor_length = max(sqrt(max(0.5 * (a+c-discriminant), 0.0)), major_length / 16.0);
+    let raw_axis = select(vec2f(b, major_squared-a), vec2f(major_squared-c, b), a >= c);
+    let axis = raw_axis * inverseSqrt(max(dot(raw_axis, raw_axis), 1e-12));
+    let span = axis * major_length / dimensions;
+    let taps = ceil(clamp(major_length / max(minor_length, 1.0), 1.0, 16.0));
+    let lod = max(log2(max(minor_length, 1e-8)) + 1.0, 0.0);
+    var color = vec4f(0.0);
+    for (var i = 0; i < 16; i++) {
+        if (f32(i) >= taps) { break; }
+        color += textureSampleLevel(albedo_tex, albedo_sampler,
+            uv + span * ((f32(i)+0.5)/taps-0.5), lod);
+    }
+    return color / taps;
+}
+
 fn scene_surface(in: SceneOut) -> SurfaceSample {
     var texel: vec4f;
     if in.cube_on > 0.5 {
         texel = textureSample(cube_albedo_tex, cube_albedo_sampler, in.cube);
     } else {
-        texel = textureSampleBias(
-            albedo_tex,
-            albedo_sampler,
-            in.uv,
-            ALBEDO_MINIFICATION_LOD_BIAS,
-        );
+        texel = sample_albedo(in.uv);
     }
     var surface = in.color.rgb;
     if frame.flags.z > 0.5 {
