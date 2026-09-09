@@ -169,7 +169,7 @@ def test_slider_grab_endpoints_and_center_match_mouse_input(vertical, integer, m
         WindowConfig(width=420, height=280, docking=False, ini_path="", show_on_start=False)
     )
     queued = []
-    process_inputs = window._impl.process_inputs
+    process_inputs = window._input.process_inputs
 
     def inputs():
         process_inputs()
@@ -178,7 +178,7 @@ def test_slider_grab_endpoints_and_center_match_mouse_input(vertical, integer, m
             imgui.get_io().add_mouse_button_event(0, pressed)
         queued.clear()
 
-    monkeypatch.setattr(window._impl, "process_inputs", inputs)
+    monkeypatch.setattr(window._input, "process_inputs", inputs)
     value = 5 if integer else 0.5
     color = imgui.ImVec4(0.25, 0.9, 0.4, 1.0)
     packed = imgui.color_convert_float4_to_u32(color)
@@ -245,7 +245,7 @@ def test_tab_focus_uses_the_control_radius_and_outset(radius, height, monkeypatc
         WindowConfig(width=480, height=340, docking=False, ini_path="", show_on_start=False)
     )
     queued = []
-    process_inputs = window._impl.process_inputs
+    process_inputs = window._input.process_inputs
 
     def inputs():
         process_inputs()
@@ -253,7 +253,7 @@ def test_tab_focus_uses_the_control_radius_and_outset(radius, height, monkeypatc
             imgui.get_io().add_key_event(imgui.Key.tab, pressed)
         queued.clear()
 
-    monkeypatch.setattr(window._impl, "process_inputs", inputs)
+    monkeypatch.setattr(window._input, "process_inputs", inputs)
     focus_color = imgui.ImVec4(0.9, 0.3, 0.7, 1.0)
     packed = imgui.color_convert_float4_to_u32(focus_color)
     destination = Path("output/g3-controls")
@@ -324,14 +324,14 @@ def test_native_menu_highlight_keeps_text_padding(monkeypatch):
     window = Window(
         WindowConfig(width=440, height=320, docking=False, ini_path="", show_on_start=False)
     )
-    process_inputs = window._impl.process_inputs
+    process_inputs = window._input.process_inputs
     pointer = [-100.0, -100.0]
 
     def inputs():
         process_inputs()
         imgui.get_io().add_mouse_pos_event(*pointer)
 
-    monkeypatch.setattr(window._impl, "process_inputs", inputs)
+    monkeypatch.setattr(window._input, "process_inputs", inputs)
     bounds = {}
     color = imgui.ImVec4(0.35, 0.7, 0.5, 1.0)
     packed = imgui.color_convert_float4_to_u32(color)
@@ -433,7 +433,10 @@ def test_input_focus_follows_the_full_control_contour(control, scale, monkeypatc
             pixels = window.end_frame(readback=True)
         assert imgui.get_current_context().nav_cursor_visible
         assert len(vertices) > 8
-        boundary = smooth_rect_points(*lo, *hi, imgui.get_style().frame_rounding, smoothing=0.0)
+        rounding = (
+            (hi[1] - lo[1]) * 0.5 if control == "search" else imgui.get_style().frame_rounding
+        )
+        boundary = smooth_rect_points(*lo, *hi, rounding, smoothing=0.0)
         centerline = vertices.reshape(-1, 2, 2).mean(axis=1)
         gap = distance_to_path(centerline, boundary)
         assert gap.min() > 2.9

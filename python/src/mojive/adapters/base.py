@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import enum
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -116,6 +117,10 @@ class ActuatorInfo:
     act_count: int = 0
     gain: float = 1.0
     joint: int = -1
+    # A scene node in the current structure, or -1 when no unique target is exposed.
+    target_node_id: int = -1
+    # Unit of ctrl values; empty means unspecified. Angular controls use radians.
+    unit: str = ""
 
 
 @dataclass(frozen=True)
@@ -918,6 +923,11 @@ class SceneAdapterBase:
         """Rename a topology element by hierarchy node ID."""
         return False
 
+    @contextmanager
+    def model_edit_batch(self):
+        """Group rebuilding operations; adapters may compile once when the group ends."""
+        yield
+
     def apply_model_edit_batch(self, edits: tuple[ModelEdit, ...]) -> tuple[int, ...]:
         """Apply model-element topology edits atomically and return per-edit node IDs."""
         return ()
@@ -1413,6 +1423,7 @@ class SceneAdapter(SceneProvider, Protocol):
     def duplicate_model_element(self, node_id: int) -> int: ...
     def remove_model_element(self, node_id: int) -> bool: ...
     def rename_model_element(self, node_id: int, name: str) -> bool: ...
+    def model_edit_batch(self) -> Any: ...
     def apply_model_edit_batch(self, edits: tuple[ModelEdit, ...]) -> tuple[int, ...]: ...
     def scene_model_xml(self, model_id: int) -> str | None: ...
     def scene_model_source(self, model_id: int) -> str | None: ...

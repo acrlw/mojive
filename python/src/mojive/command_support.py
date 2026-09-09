@@ -11,6 +11,10 @@ from .adapters.base import AdapterCaps
 
 _REQUIREMENTS = {
     **dict.fromkeys(
+        (cmd.CaptureSceneSnapshot, cmd.RestoreSceneSnapshot, cmd.RemoveSceneSnapshot),
+        ("state_snapshots",),
+    ),
+    **dict.fromkeys(
         (
             cmd.Pause,
             cmd.Play,

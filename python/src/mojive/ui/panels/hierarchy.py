@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from dataclasses import replace
 from functools import lru_cache
 
@@ -17,15 +18,27 @@ from ..theme import ROW_PADDING_X, ROW_PADDING_Y
 from . import (
     Panel,
     PanelContext,
-    horizontal_wheel_scroll,
     pointer_pressed,
     publish_focus_item_hint,
     search_input,
 )
+from .filters import filter_pills
 
 _LARGE_SCENE_NODES = 2_000
 _VISIBLE_ROW_BUDGET = 512
-_TYPE_FILTERS = ("all", "link", "geom", "joint", "site", "camera", "light", "robot", "flex")
+_TYPE_FILTERS = (
+    "all",
+    "model",
+    "link",
+    "geom",
+    "joint",
+    "site",
+    "camera",
+    "light",
+    "robot",
+    "flex",
+    "skin",
+)
 _TYPE_COLUMN_WIDTH_PT = 72.0
 _VISIBILITY_COLUMN_WIDTH_PT = 24.0
 _MIN_NODE_COLUMN_WIDTH_PT = 144.0
@@ -83,6 +96,7 @@ class HierarchyPanel(Panel):
         self._roots: list[SceneNode] = []
         self._by_id: dict[int, SceneNode] = {}
         self._search_names: tuple[str, ...] = ()
+        self._type_counts: dict[str, int] = {}
         self._default_open_depth = 2
         self._row_budget = _VISIBLE_ROW_BUDGET
         self._rows_drawn = 0
@@ -177,7 +191,7 @@ class HierarchyPanel(Panel):
             available_width,
             ctx.style_scale,
         )
-        column_count = 3 if self._show_type_column else 2
+        column_count = 2
         imgui.push_style_var(
             imgui.StyleVar_.cell_padding, imgui.ImVec2(ROW_PADDING_X * ctx.style_scale, 0.0)
         )
@@ -186,12 +200,6 @@ class HierarchyPanel(Panel):
             imgui.end_child()
             return
         imgui.table_setup_column("node", imgui.TableColumnFlags_.width_stretch, 1.0)
-        if self._show_type_column:
-            imgui.table_setup_column(
-                "type",
-                imgui.TableColumnFlags_.width_fixed,
-                _TYPE_COLUMN_WIDTH_PT * ctx.style_scale,
-            )
         imgui.table_setup_column(
             "visible",
             imgui.TableColumnFlags_.width_fixed,
@@ -243,51 +251,21 @@ class HierarchyPanel(Panel):
         imgui.end_child()
 
     def _draw_type_filters(self, ctx: PanelContext) -> None:
-        style = imgui.get_style()
-        spacing = float(style.item_spacing.x)
-        padding = float(style.frame_padding.x)
-        display_labels = _TYPE_FILTERS
-        total_width = sum(imgui.calc_text_size(label).x + padding * 2.0 for label in display_labels)
-        total_width += spacing * (len(_TYPE_FILTERS) - 1)
-        height = imgui.get_frame_height() + imgui.get_style().scrollbar_size + 3.0 * ctx.style_scale
-        imgui.set_next_window_content_size(imgui.ImVec2(total_width, 0.0))
-        child_flags = imgui.ChildFlags_.none.value
-        window_flags = imgui.WindowFlags_.horizontal_scrollbar.value
-        if not imgui.begin_child(
-            "hierarchy_type_filters",
-            imgui.ImVec2(0.0, height),
-            child_flags,
-            window_flags,
-        ):
-            imgui.end_child()
-            return
-        for index, (label, display_label) in enumerate(
-            zip(_TYPE_FILTERS, display_labels, strict=True)
-        ):
-            selected = label == self._type_filter
-            imgui.push_style_color(
-                imgui.Col_.button,
-                imgui.ImVec4(*(ctx.theme.bg_frame_active if selected else ctx.theme.bg_frame)),
-            )
-            imgui.push_style_color(
-                imgui.Col_.button_hovered,
-                imgui.ImVec4(*ctx.theme.bg_frame_hovered),
-            )
-            imgui.push_style_color(
-                imgui.Col_.button_active,
-                imgui.ImVec4(*ctx.theme.bg_frame_active),
-            )
-            imgui.push_style_color(
-                imgui.Col_.text,
-                imgui.ImVec4(*(ctx.theme.primary_bright if selected else ctx.theme.text_disabled)),
-            )
-            if imgui.button(f"{display_label}##hierarchy-type-{label}"):
-                self._type_filter = label
-            imgui.pop_style_color(4)
-            if index + 1 < len(_TYPE_FILTERS):
-                imgui.same_line()
-        horizontal_wheel_scroll(step=56.0 * ctx.style_scale)
-        imgui.end_child()
+        items = tuple(
+            (kind, f"{kind}  {self._type_counts.get(kind, 0)}", "")
+            for kind in _TYPE_FILTERS
+            if kind == "all" or self._type_counts.get(kind, 0) or kind == self._type_filter
+        )
+        colors = {kind: ctx.theme.node_color(kind) for kind, _, _ in items}
+        colors.update(
+            all=ctx.theme.primary,
+            joint=ctx.theme.accent_purple_bright,
+            flex=ctx.theme.info,
+            skin=ctx.theme.node_color("site"),
+        )
+        clicked = filter_pills(ctx, "hierarchy-type", items, {self._type_filter}, colors=colors)
+        if clicked is not None:
+            self._type_filter = "all" if clicked == self._type_filter else clicked
 
     def _refresh(self, ctx: PanelContext) -> None:
         gen = ctx.session.structure_generation
@@ -296,6 +274,8 @@ class HierarchyPanel(Panel):
         self._cache_generation = gen
         nodes = ctx.session.nodes
         self._by_id = {n.node_id: n for n in nodes}
+        self._type_counts = dict(Counter(node.type.value for node in nodes))
+        self._type_counts["all"] = len(nodes)
         self._batch_selected.intersection_update(self._by_id)
         self._roots = [n for n in nodes if n.parent < 0 or n.parent not in self._by_id]
         self._search_names = tuple(node.name.casefold() for node in nodes)
@@ -384,14 +364,20 @@ class HierarchyPanel(Panel):
                 ctx.theme.text,
             )
         text_color = ctx.theme.text if node.visible else ctx.theme.text_disabled
-        draw.text(
-            (
-                row_start.x + indent + 20.0 * ctx.style_scale,
-                text_y,
-            ),
-            text_color,
-            name,
+        name_x = row_start.x + indent + 20.0 * ctx.style_scale
+        type_label = str(node.type)
+        type_width = imgui.calc_text_size(type_label).x if self._show_type_column else 0
+        type_x = row_start.x + width - type_width
+        name_end = type_x - 10 * ctx.style_scale if self._show_type_column else row_start.x + width
+        imgui.push_clip_rect(
+            (row_start.x, row_start.y), (max(row_start.x, name_end), row_start.y + row_height), True
         )
+        draw.text((name_x, text_y), text_color, name)
+        imgui.pop_clip_rect()
+        if self._show_type_column:
+            draw.text((type_x, text_y), ctx.theme.text_disabled, type_label)
+        if hovered and imgui.calc_text_size(name).x > name_end - name_x:
+            imgui.set_item_tooltip(name)
         if imgui.is_item_clicked():
             mouse_x = imgui.get_io().mouse_pos.x
             if not leaf and mouse_x <= row_start.x + indent + 16.0 * ctx.style_scale:
@@ -458,13 +444,6 @@ class HierarchyPanel(Panel):
             else:
                 imgui.text_disabled(ctx.tr("Read-only entity"))
             imgui.end_popup()
-
-        if self._show_type_column:
-            imgui.table_next_column()
-            type_pos = imgui.get_cursor_screen_pos()
-            type_label = str(node.type)
-            imgui.set_cursor_screen_pos(imgui.ImVec2(type_pos.x, text_y))
-            imgui.text_disabled(type_label)
 
         imgui.table_next_column()
         self._visibility_toggle(ctx, node, row_start.y, row_height)

@@ -38,6 +38,10 @@ class Rig:
 
         def record_drag(label, *args, **kwargs):
             result = drag(label, *args, **kwargs)
+            for index in range(3):
+                if label == f"##redesign-control-{index}-value":
+                    a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+                    self.state.rects[f"control-value-{index}"] = (a.x, a.y, b.x, b.y)
             preview = self.state.inspector
             if preview is not None:
                 for name in ("position", "rotation"):
@@ -57,6 +61,17 @@ class Rig:
                 self.state.rects[label] = (a.x, a.y, b.x, b.y)
             return result
 
+        slider = imgui.slider_float
+
+        def record_slider(label, *args, **kwargs):
+            result = slider(label, *args, **kwargs)
+            for index in range(3):
+                if label == f"##redesign-control-{index}":
+                    a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+                    self.state.rects[f"control-rail-{index}"] = (a.x, a.y, b.x, b.y)
+            return result
+
+        monkeypatch.setattr(imgui, "slider_float", record_slider)
         monkeypatch.setattr(imgui, "drag_float", record_drag)
         monkeypatch.setattr(imgui, "checkbox", record_checkbox)
         process = self.window._input.process_inputs
@@ -92,6 +107,10 @@ class Rig:
         for down in (True, False):
             self.events.append(("add_key_event", (key, down)))
             self.frame()
+
+    def control_modifier(self, down):
+        key = imgui.Key.mod_super if imgui.get_io().config_mac_osx_behaviors else imgui.Key.mod_ctrl
+        self.events.append(("add_key_event", (key, down)))
 
     def double_click(self, key):
         self.click(key)
@@ -225,21 +244,18 @@ def test_control_rail_exact_entry_zero_restore_and_readonly(rig):
         rig.events.append(("add_mouse_button_event", (0, down)))
         rig.frame()
     assert 0.8 < rig.state.controls[0] < 1.6
-    rig.click("control-restore-0", button=1)
-    rig.click("control-zero-0")
-    assert rig.state.controls[0] == 0
-    rig.click("control-restore-0")
+    rig.click("control-value-0", button=1)
     assert rig.state.controls[0] == pytest.approx(0.42)
     rig.click("readonly")
     before = rig.state.controls.copy()
-    rig.click("control-restore-1")
+    rig.click("control-value-1", button=1)
     assert rig.state.controls == before
     rig.click("readonly")
-    rig.events.append(("add_key_event", (imgui.Key.mod_ctrl, True)))
+    rig.control_modifier(True)
     rig.frame()
     rig.click("control-value-2")
     rig.key(imgui.Key.a)
-    rig.events.append(("add_key_event", (imgui.Key.mod_ctrl, False)))
+    rig.control_modifier(False)
     rig.frame()
     assert imgui.get_io().want_text_input
     rig.events.append(("add_input_characters_utf8", ("123.456",)))
@@ -254,11 +270,11 @@ def test_control_rail_exact_entry_zero_restore_and_readonly(rig):
 
 def test_transform_uses_joined_fields_and_accepts_exact_values(rig):
     rig.click("section-Inspector")
-    rig.events.append(("add_key_event", (imgui.Key.mod_ctrl, True)))
+    rig.control_modifier(True)
     rig.frame()
     rig.click("position-0")
     rig.key(imgui.Key.a)
-    rig.events.append(("add_key_event", (imgui.Key.mod_ctrl, False)))
+    rig.control_modifier(False)
     rig.frame()
     assert imgui.get_io().want_text_input
     rig.events.append(("add_input_characters_utf8", ("0.125",)))

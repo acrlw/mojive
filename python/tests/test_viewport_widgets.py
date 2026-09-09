@@ -123,7 +123,7 @@ def test_default_overlay_scale_preserves_shared_radial_steps():
     assert geometry.rotate_ring_cap == "round"
     assert geometry.state_radius - geometry.icon_radius == pytest.approx(geometry.radial_step)
     assert geometry.shell_radius - geometry.state_radius == pytest.approx(geometry.radial_step)
-    assert playback_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((222.5, 65.0))
+    assert playback_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((352.5, 65.0))
     assert tool_column_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((65.0, 287.5))
     assert OVERLAY_GEOMETRY.tool_center_step > OVERLAY_GEOMETRY.state_radius * 2.0
 
@@ -185,7 +185,9 @@ class _RecordedGlyph:
         self.polylines = []
         self.rectangles = []
 
-    def fringed_concave_fill(self, points, _color):
+    def fringed_concave_fill(self, points, _color, *, origin=None):
+        if origin is not None:
+            points = tuple((x + origin[0], y + origin[1]) for x, y in points)
         self.paths.append(tuple(points))
 
     def arrow(self, start, end, color, width, **style):
@@ -260,7 +262,7 @@ def test_frame_step_glyph_is_centered_and_fills_the_icon_bound(kind: str):
 @pytest.mark.parametrize("scale", (1.0, 3.0))
 def test_playback_visible_extents_align_across_states_and_smoothing(smoothing, scale):
     center = (73.5, 124.25)
-    for kind in ("play", "pause", "previous", "step", "reset"):
+    for kind in ("play", "pause", "previous", "step", "stop"):
         draw = _RecordedGlyph()
         draw_playback_glyph(draw, center, (1.0,) * 4, scale, kind, smoothing=smoothing)
         points = [point for path in draw.paths for point in path]
@@ -270,7 +272,7 @@ def test_playback_visible_extents_align_across_states_and_smoothing(smoothing, s
             PLAYBACK_STEP_SCALE
             if kind in ("previous", "step")
             else PLAYBACK_RESET_SCALE
-            if kind == "reset"
+            if kind == "stop"
             else 1.0
         )
         assert min(ys) == pytest.approx(center[1] - PLAYBACK_HALF_HEIGHT_PT * scale * ratio)

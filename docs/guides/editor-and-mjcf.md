@@ -22,6 +22,83 @@ Mojive. Image lights require a cube or skybox texture; export reports an error i
 dropping an invalid reference. Save `.mojive.json` when the Mojive composition itself, including model
 references and resource roots, must remain editable.
 
+## Selection and panel interaction
+
+Selecting a scene entity preserves selection feedback without enabling a transform tool.
+Use **G**, **R**, or the corresponding viewport tool to enable it; invoking the active tool
+again turns it off. Choosing another entity keeps the enabled tool. Programmatic
+`viewer.set_gizmo_mode(...)` explicitly enables the requested tool.
+
+Double-click the Inspector's name to rename an editable entity. Enter or leaving
+the field commits; Escape cancels. Renaming uses the existing authoring and Undo/Redo routes.
+Hierarchy type/count filters wrap to the available width; context actions remain capability-based.
+
+Control and Joints use one padded row per scalar value, with a thin slider and compact numeric
+entry. The fill runs from the minimum to the current value; hover and pressing change its colors.
+Right-click the numeric field to restore its initial value. Angular units appear in a joined
+trailing button: click **rad** or **deg** to change the display and input unit. Physics and public
+Python APIs continue to use radians. Actuator units appear only when declared by the adapter's
+`ActuatorInfo.unit`; unspecified controls never acquire an assumed unit. No artificial slider
+bounds are introduced for unbounded values. Very narrow panels stack their controls.
+Click a row name to select its target. Double-click focuses it and enables the applicable gizmo
+when editing is allowed. Actuator focus uses adapter-provided scene-node metadata.
+Camera and Inspector camera properties share these value controls. Numeric and unit columns
+have fixed matching widths; non-switchable units use a muted gray suffix. Wrapped controls fill
+the available row. Camera presets retain the existing grid.
+
+Inspector cameras offer **Sync view**, defaulting to the editor camera, and **Paste bookmark**
+for a copied camera bookmark. Sync applies the selected source view to the inspected camera.
+Precise gizmo input joins **deg/rad** into equal segments and joins translation values with **m**.
+Text editing keeps its caret and selection without drawing a focus outline across compound seams.
+
+The playback capsule groups previous/play-pause/next, Reset, then recording and options.
+Video recording uses the configured countdown in a compact cancelable panel below the capsule;
+the recording button pauses or resumes an active video. The options menu also offers take recording.
+
+Hierarchy type/count filters stay gray until selected, then use the corresponding palette accent
+(**all** uses Primary). Row type text is right-aligned next to visibility so each name can use the
+remaining space. Shared search fields use a capsule silhouette independently of other input fields.
+
+Output filters show colored severity icons and counts capped at 999 in matching tinted capsules.
+They toggle independently and precede Search and **Clear** on one toolbar when space allows;
+narrow panels wrap in the same order. Message text uses a common neutral color and the icon
+conveys severity. Select records and press Ctrl/Cmd+C to copy message bodies, or
+Ctrl/Cmd+Shift+C for full records. These shortcuts apply while Output has focus, without interfering with text editing.
+
+Output can collapse to a padded summary strip with severity counts and the latest matching
+record. Its arrow restores the full panel, including filters and selection.
+
+The Keyframes toolbar groups the model, take recording, video export, snapshot capture, range,
+loop and recording settings. Transport is embedded in the ruler on wide panels and wraps on narrow
+ones. **Model Keyframes** are persistent model-local keys. **Capture Snapshot** adds an independent,
+transient **Snapshots** marker containing all models' physics state (positions, velocities, controls,
+activation and mocap state). Double-click it while paused to restore that state without compilation.
+It does not capture camera navigation or renderer options. **Add Model Keyframe** in the options
+menu writes a persistent key. **Recorded Take** is a separate sequential whole-scene recording.
+Snapshot storage is bounded to 1,024 entries and 256 MiB; topology/source replacement invalidates
+old snapshots. Snapshots are not written into MJCF, saved documents, or recorded takes.
+
+## Applying model edits
+
+By default, UI edits that require rebuilt model declarations remain pending. Dimensions and names
+preview immediately; the viewport gets a yellow border and an **Apply / Discard** hint. Finish any
+number of edits, then **Apply** to build and install the final model in the background. Pending
+commands for the same property coalesce. Model placement uses the same viewport action.
+
+Failed application restores the committed document and retains the draft for correction. Workspace
+viewers record one undo entry for the whole group. Standalone adapters keep their existing history
+capabilities and still roll back a failed application. Apply or discard before simulation playback,
+Undo/Redo, saving, or replacing the document. Pending edits are temporary and are not serialized.
+
+**Settings > General > Model updates > Realtime** restores immediate model editing. Ordinary
+camera navigation, materials, joint positions, controls, and supported direct property updates stay
+interactive. Public Session commands and RPC calls remain synchronous; this preference controls
+UI authoring only.
+
+**View Camera** uses a short eased position/orientation transition. Navigation during the transition
+starts from the displayed pose. Tracking has a one-click enable switch beside its target selector;
+switching it off remembers the target for the next activation.
+
 ## Editing model topology
 
 Select a model or model element in Hierarchy. Inspector exposes bodies, geometry, joints, sites,
@@ -36,7 +113,7 @@ Undo/Redo-aware topology path and require a paused simulation.
 created earlier in the same batch. Numeric edits that do not change derived constants use narrower
 paths: joint properties and geometry contact/solver/surface properties update MjSpec and the
 compiled model without rebuilding `SceneSource`. Body inertia and geometry mass/group/fluid edits
-are buffered until **Apply**, then rebuild the model once.
+join the pending model edits after their property editor is confirmed.
 
 ## Structured model properties
 
@@ -67,7 +144,7 @@ The structured Inspector currently covers:
   present unsupported interpolation or property curves. The transport can record an in-memory
   whole-scene simulation take without recompiling MJCF, replay it with its recorded timing, seek its
   first/previous/next/last frames, and promote the current take frame to a persistent model keyframe
-  with **Capture Snapshot**. A new recording replaces the previous transient take.
+  with **Add Model Keyframe**. A new recording replaces the previous transient take.
 
 In **Keyframes**, click or drag the time ruler or empty track space to seek the recorded take.
 Dragging during replay temporarily pauses it and resumes from the released position. Hold
@@ -86,7 +163,7 @@ active. These controls use recorded samples without changing the physics or disp
 **Record Take Video** records the completed take from its first frame through its last frame,
 ignoring the selected loop for that recording. **Video Settings** controls the countdown before
 playback and the recorded hold on the final frame. The video saves automatically; its path appears
-briefly in Status and can be copied with a right-click. Pausing the video or pressing **Space**
+briefly at the viewport's lower left. Its Output entry offers **Copy path** in the context menu. Pausing the video or pressing **Space**
 pauses both playback and recording. Stop the video before scrubbing or editing take poses.
 
 The **Assets** panel is the model-level inventory; Inspector remains responsible for binding an

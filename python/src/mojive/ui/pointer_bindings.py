@@ -24,6 +24,7 @@ class PointerAction(enum.StrEnum):
     TIMELINE_RANGE = "timeline.range"
     TIMELINE_LOAD = "timeline.load"
     PANEL_FOCUS = "panel.focus"
+    NAME_EDIT = "panel.edit_name"
     COPY_NAME = "panel.copy_name"
     VALUE_RESET = "value.reset"
     VALUE_COPY = "value.copy"
@@ -137,6 +138,7 @@ POINTER_ACTION_NAMES = {
     PointerAction.TIMELINE_RANGE: "Select loop range",
     PointerAction.TIMELINE_LOAD: "Load snapshot",
     PointerAction.PANEL_FOCUS: "Focus hierarchy or joint row",
+    PointerAction.NAME_EDIT: "Edit entity name",
     PointerAction.COPY_NAME: "Copy row name",
     PointerAction.VALUE_RESET: "Reset slider value",
     PointerAction.VALUE_COPY: "Copy slider value",
@@ -177,6 +179,7 @@ DEFAULT_POINTER_BINDINGS = _bindings(
     TIMELINE_RANGE=("shift+right",),
     TIMELINE_LOAD=("left:double",),
     PANEL_FOCUS=("left:double",),
+    NAME_EDIT=("left:double",),
     COPY_NAME=("right",),
     VALUE_RESET=("right",),
     VALUE_COPY=("left:double",),
@@ -223,6 +226,8 @@ NAVIGATION_PRESETS = {
 
 
 def exclusive_group(action: PointerAction) -> str:
+    if action is PointerAction.NAME_EDIT:
+        return "entity_name"
     if action in (PointerAction.SELECT, PointerAction.FOCUS):
         return "selection"
     if action in (PointerAction.GIZMO, PointerAction.GIZMO_VALUE):

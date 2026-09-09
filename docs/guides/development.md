@@ -94,7 +94,7 @@ windows support X11 and Wayland; the runtime selects the protocol reported by GL
 sharing a native device must use the same protocol. Offscreen-first applications infer it from
 the session environment. Local validation uses Ubuntu 22.04 x86_64 and NVIDIA Vulkan, with a
 private X11 display and a headless Weston compositor. Physical Wayland input, compositor-specific
-desktop integration, other GPU vendors, and Windows still need platform acceptance. Local commands and coverage are in the
+desktop integration and other GPU vendors still need platform acceptance. Current development targets macOS and Linux; Windows is deferred. Local commands and coverage are in the
 [native verification guide](native-probe.md) and [verification matrix](testing.md).
 
 For headless Weston acceptance, set `PYGLFW_LIBRARY` to the installed ImGui Bundle's
@@ -115,8 +115,10 @@ measurements. These boundaries differ from OpenGL's finer pass decomposition.
 Use `viewer.backend.enable_hot_reload(True)` to opt into native shader reload. Development
 builds watch `cpp/shaders` and rebuild the shader target after edits; packaged builds watch
 their `.bin` files. A reload replaces the complete program set and invalidates scene caches.
-Compile or binary-load failures log an error and preserve the last working programs. Reload is
-synchronous on the next render and can briefly pause the viewer while CMake compiles shaders.
+Compilation runs on an owned worker while rendering retains the last working program set.
+A completed generation is published on a subsequent render; newer edits supersede unfinished
+generations. Compile or binary-load failures preserve working programs. Runtime teardown stops
+and joins the owned compiler process group. GPU program replacement still runs on the render owner.
 
 ## Dependency changes
 
@@ -145,7 +147,11 @@ Python calls release the GIL while waiting. Window events and ImGui stay on
 the UI thread, independently of physics and resource workers.
 
 Synchronous readback submits the copy and waits in one owner job. Asynchronous requests capture
-the submitted frame before later draws can replace it. Readback uses aligned bgfx buffers, with
+the submitted frame before later draws can replace it. Pending asynchronous waits yield to other
+accepted runtime jobs. A shared eight-slot reservation bounds public readbacks; a full asynchronous
+queue reports backpressure immediately. Canceling a public Future still drains its native ticket
+and preserves the canceled output buffer. Completion callbacks never wait for their own cleanup
+queue. Readback uses aligned bgfx buffers, with
 a GPU-only resolved color copy for MSAA targets. Row padding is removed at the owned-image
 boundary; returned NumPy arrays remain valid after reuse, resize and runtime teardown.
 
@@ -164,14 +170,28 @@ interpreter shutdown and the official 100-humanoid scene. Captures are written u
 Independent public Renderer instances and windows share a process-wide device while owning
 separate scenes, targets and readback lifetimes. Static output reuse invalidates on geometry,
 lighting, style, camera and target changes; separately updated overlays disable color reuse.
-Native texture preparation releases the GIL and transfers immutable upload storage to bgfx.
+Scene sources hold immutable shared meshes and pixel storage. Published resources must not be
+mutated; adapters replace an asset or send scene-local `MeshUpdate` data for deformation. Identity
+hits avoid content hashing; recompilers producing fresh equivalent objects use SHA-256 keys.
+Weak CPU/GPU caches plus per-scene leases reuse unchanged assets without retaining an unbounded
+history. First deformation detaches shared GPU geometry. Private `runtime.resource_stats()` counts
+actual mesh/texture uploads and bytes, separately from scene publication and dynamic instance data.
+
+The optional backend `prepare_scene(source)` hook performs CPU-only preparation on the existing
+model-loader worker; its leases survive until UI publication. Native mesh/texture preparation
+releases the GIL. GPU resource creation and atomic scene replacement remain render-owner jobs;
+large initial uploads are not yet split across a per-frame budget.
+
+Output targets lease view IDs per GPU submission instead of retaining a fixed twelve-target pool.
+Views are reused only after advancing the submitted frame. Allocation is still bounded by bgfx
+resource handles and GPU memory; it is not an unlimited-target guarantee.
 
 OpenGL, WebGPU and bgfx use the same bounded anisotropic footprint in their albedo shaders
 and the same linear-light area filter for 2D mip levels, including odd texture dimensions.
 Hardware anisotropy stays disabled for those 2D samplers to avoid applying the filter twice.
-On Vulkan devices with `VK_EXT_sample_locations`, native MSAA uses the reflected OpenGL
-sample positions and preserves those positions through depth transitions. Devices without
-that extension retain their hardware sample pattern.
+Vulkan and Metal use bottom-left rasterization for offscreen targets, including viewport, scissor
+and winding conversion. This matches OpenGL edge ownership with standard MSAA sample patterns;
+programmable sample locations are not required. Window surfaces retain presentation coordinates.
 
 `make gpu-bgfx` exercises the shared rendering, picking, gizmo, debug drawing, physics and
 UI tests with the native backend. Tests that inspect private OpenGL or WebGPU pass objects

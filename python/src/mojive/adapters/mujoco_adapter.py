@@ -8,6 +8,7 @@ import shutil
 import warnings
 import xml.etree.ElementTree as ET
 from colorsys import hsv_to_rgb
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from html import escape
@@ -1299,6 +1300,8 @@ class MuJoCoAdapter(SceneAdapterBase):
             raise RuntimeError(
                 f"MuJoCo is not installed: {_IMPORT_ERROR}. Install the [mujoco] optional dependency."
             )
+        self._model_edit_batch_depth = 0
+        self._model_edit_batch_rebuild = False
         self.caps = AdapterCaps(
             name="mujoco",
             backend_version=mujoco.__version__,
@@ -3152,7 +3155,32 @@ class MuJoCoAdapter(SceneAdapterBase):
                     ]
                 ).reshape(-1)
 
+    @contextmanager
+    def model_edit_batch(self):
+        """Keep declaration edits on MjSpec and install one final compiled model."""
+        if self._model_edit_batch_depth:
+            raise RuntimeError("Nested model rebuild batches are unsupported")
+        self._model_edit_batch_depth = 1
+        self._model_edit_batch_rebuild = True
+        try:
+            yield
+            state = self._capture_named_model_state()
+        except BaseException:
+            self._model_edit_batch_rebuild = False
+            raise
+        finally:
+            self._model_edit_batch_depth = 0
+        try:
+            if self._model_edit_batch_rebuild:
+                self._install(self._compile_composed_model())
+                self._restore_named_model_state(state)
+        finally:
+            self._model_edit_batch_rebuild = False
+
     def _compile_composed_model(self):
+        if self._model_edit_batch_depth:
+            self._model_edit_batch_rebuild = True
+            return self._m
         spec = self._composed_spec()
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Attach conflict.*")
@@ -3686,6 +3714,8 @@ class MuJoCoAdapter(SceneAdapterBase):
         mujoco.mj_forward(model, data)
 
     def _install(self, model, data=None) -> None:
+        if self._model_edit_batch_depth and model is self._m:
+            return
         # A compiled model is authoritative. Transient placement indices refer to
         # the previous model layout and must never survive an install.
         self._model_transform_preview = None
@@ -6651,14 +6681,34 @@ class MuJoCoAdapter(SceneAdapterBase):
 
     def actuators(self) -> list[ActuatorInfo]:
         m = self._m
+        nodes = self.nodes()
+        joint_nodes = {n.joint_index: n.node_id for n in nodes if n.type is NodeType.JOINT}
+        body_nodes = {
+            n.body_index: n.node_id
+            for n in nodes
+            if n.type in (NodeType.WORLD, NodeType.LINK, NodeType.ROBOT)
+        }
         out = []
         for ai in range(m.nactuator):
             joint = -1
-            if int(m.actuator_trntype[ai]) in (
+            target = -1
+            transmission = int(m.actuator_trntype[ai])
+            source = int(m.actuator_trnid[ai][0])
+            if transmission in (
                 int(mujoco.mjtTrn.mjTRN_JOINT),
                 int(mujoco.mjtTrn.mjTRN_JOINTINPARENT),
             ):
-                joint = int(m.actuator_trnid[ai][0])
+                joint = source
+                target = joint_nodes.get(joint, body_nodes.get(int(m.jnt_bodyid[joint]), -1))
+            elif transmission == int(mujoco.mjtTrn.mjTRN_BODY):
+                target = body_nodes.get(source, -1)
+            elif transmission in (
+                int(mujoco.mjtTrn.mjTRN_SITE),
+                int(mujoco.mjtTrn.mjTRN_SLIDERCRANK),
+            ):
+                target = self._site_nodes.get(
+                    source, body_nodes.get(int(m.site_bodyid[source]), -1)
+                )
             out.append(
                 ActuatorInfo(
                     actuator_id=ai,
@@ -6674,6 +6724,7 @@ class MuJoCoAdapter(SceneAdapterBase):
                     act_count=int(m.actuator_actnum[ai]),
                     gain=float(m.actuator_gainprm[ai][0]),
                     joint=joint,
+                    target_node_id=target,
                 )
             )
         return out
@@ -7712,6 +7763,9 @@ class MuJoCoAdapter(SceneAdapterBase):
             authored_size[:3] = values[:3]
             compiled_size[:3] = values[:3]
         element.size = authored_size
+        if self._model_edit_batch_depth:
+            self._mark_model_edited(model_id)
+            return True
         if node_type is NodeType.GEOM:
             self._m.geom_size[index] = compiled_size
         else:

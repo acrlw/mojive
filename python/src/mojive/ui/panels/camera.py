@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -28,8 +29,8 @@ from . import (
     button_width,
     search_input,
     segmented_control,
-    value_slider,
 )
+from .value_cards import value_card, value_rail
 
 PRESETS: tuple[tuple[str, float, float], ...] = (
     ("front", -90.0, 0.0),
@@ -91,6 +92,10 @@ class CameraPanel(Panel):
         self._bookmark_index = 0
         self._bookmark_error = ""
         self._tracking_filter = ""
+        self._tracking_target_id = None
+        self._tracking_generation = -1
+        self._angular_degrees = True
+        self._initial_distance = None
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -102,7 +107,6 @@ class CameraPanel(Panel):
             return
 
         self._source(ctx)
-        self._tracking(ctx)
         if ctx.model_camera_id >= 0 and ctx.model_camera_view is not None:
             if ctx.select_model_camera is not None and imgui.button(
                 ctx.tr("Return to Editor Camera")
@@ -111,11 +115,11 @@ class CameraPanel(Panel):
             imgui.text_disabled(ctx.tr("model camera follows scene kinematics"))
             return
 
-        self._presets(ctx, camera)
-        imgui.separator()
         self._params(ctx, camera)
-        imgui.separator()
+        if imgui.collapsing_header(ctx.tr("Presets"), imgui.TreeNodeFlags_.default_open):
+            self._presets(ctx, camera)
         self._stored_states(ctx, camera)
+        self._tracking(ctx)
 
     def _tracking(self, ctx: PanelContext) -> None:
         if ctx.tracking is None or ctx.track_node is None:
@@ -125,12 +129,29 @@ class CameraPanel(Panel):
         ):
             return
         node = ctx.session.node(ctx.tracking_node_id) if ctx.tracking_node_id is not None else None
+        generation = (ctx.session.document_id, ctx.session.adapter.structure_revision)
+        if self._tracking_generation != generation:
+            self._tracking_target_id = None
+            self._tracking_generation = generation
+        if node is not None:
+            self._tracking_target_id = node.node_id
+        remembered = (
+            ctx.session.node(self._tracking_target_id)
+            if self._tracking_target_id is not None
+            else None
+        )
+        candidate = remembered if can_track_node(remembered) else ctx.session.selected_node
+        enabled = node is not None
+        imgui.begin_disabled(not enabled and not can_track_node(candidate))
+        changed, checked = imgui.checkbox("##tracking-enabled", enabled)
+        imgui.set_item_tooltip(ctx.tr("Stop tracking" if enabled else "Resume tracking"))
+        imgui.end_disabled()
+        if changed:
+            ctx.track_node(candidate.node_id if checked else None)
+        imgui.same_line()
         current = node.name if node is not None else ctx.tr("Off")
         imgui.set_next_item_width(-1)
         if imgui.begin_combo("##tracking-target", f"{ctx.tr('Target')}: {current}"):
-            selected, _ = imgui.selectable(f"{ctx.tr('Off')}##tracking-off", node is None)
-            if selected:
-                ctx.track_node(None)
             imgui.set_next_item_width(-1)
             _, self._tracking_filter = search_input(
                 "##tracking-filter",
@@ -166,8 +187,8 @@ class CameraPanel(Panel):
         compact = imgui.get_content_region_avail().x < 240.0 * ctx.style_scale
         if imgui.begin_table("tracking_properties", 1 if compact else 2, flags):
             if not compact:
-                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.38)
-            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch, 0.62)
+                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.26)
+            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch, 0.74)
             self._property_label(ctx.tr("Axes"))
             axes = segmented_control(
                 "tracking-axes", ("X-Y", "X-Y-Z"), int(ctx.tracking.axes == "xyz"), theme=ctx.theme
@@ -177,15 +198,15 @@ class CameraPanel(Panel):
                 ctx.set_camera_tracking(replace(ctx.tracking, axes="xyz" if axes else "xy"))
             self._property_label(ctx.tr("Smoothing"))
             imgui.set_next_item_width(-1)
-            edit = value_slider(
+            edit = value_rail(
+                ctx,
                 "##tracking-smoothing",
                 ctx.tracking.smoothing,
-                0.0,
-                2.0,
-                bindings=ctx.input_bindings,
+                (0.0, 2.0),
                 initial=0.25,
-                fmt="%.2f s",
-                more_hint="none",
+                fmt="%.2f",
+                show_reset=False,
+                unit="s",
             )
             imgui.set_item_tooltip(
                 ctx.tr("Time to halve the position error. Higher is smoother; 0 follows directly.")
@@ -288,7 +309,6 @@ class CameraPanel(Panel):
         imgui.separator()
 
     def _presets(self, ctx: PanelContext, camera: Any) -> None:
-        imgui.text_disabled(ctx.tr("presets"))
         has_setter = hasattr(camera, "set_preset") or (
             hasattr(camera, "yaw") and hasattr(camera, "pitch")
         )
@@ -328,36 +348,40 @@ class CameraPanel(Panel):
             imgui.end_disabled()
         imgui.end_table()
 
-    def _params(self, ctx: PanelContext, camera: Any) -> None:
-        flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
-        compact = imgui.get_content_region_avail().x < 240.0 * ctx.style_scale
-        if not imgui.begin_table("camera_properties", 1 if compact else 2, flags):
-            return
-        if not compact:
-            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.38)
-        imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch, 0.62)
-        for attr, lo, hi, fmt, initial in PARAM_SLIDERS:
-            current = _get(camera, attr)
-            if current is None:
-                continue
-            self._property_label(ctx.tr(attr))
-            imgui.set_next_item_width(-1.0)
-            edit = value_slider(
-                f"##camera-{attr}",
-                float(current),
-                lo,
-                hi,
-                bindings=ctx.input_bindings,
-                initial=initial,
-                fmt=fmt,
-                more_hint="none",
-            )
-            if edit.changed:
-                setattr(camera, attr, edit.value)
+    def _toggle_angle_unit(self):
+        self._angular_degrees = not self._angular_degrees
 
+    def _params(self, ctx: PanelContext, camera: Any) -> None:
+        if self._initial_distance is None:
+            self._initial_distance = _get(camera, "distance")
+        for title, parameters in (("View", PARAM_SLIDERS[:3]), ("Lens", PARAM_SLIDERS[3:])):
+            if not imgui.collapsing_header(ctx.tr(title), imgui.TreeNodeFlags_.default_open):
+                continue
+            for attr, lo, hi, fmt, initial in parameters:
+                current = _get(camera, attr)
+                if current is None:
+                    continue
+                angular = attr in ("yaw", "pitch", "fov_y_deg")
+                factor = math.pi / 180.0 if angular else 1.0
+                initial = self._initial_distance if initial is None else initial
+                with value_card(ctx, f"##camera-label-{attr}", ctx.tr(attr), ""):
+                    edit = value_rail(
+                        ctx,
+                        f"##camera-{attr}",
+                        float(current) * factor,
+                        (lo * factor, hi * factor),
+                        initial=None if initial is None else initial * factor,
+                        fmt="%.3f" if angular and not self._angular_degrees else fmt.split()[0],
+                        show_reset=False,
+                        unit="rad" if angular else "m",
+                        angular_degrees=self._angular_degrees,
+                        toggle_unit=self._toggle_angle_unit,
+                    )
+                    if edit.changed:
+                        setattr(camera, attr, edit.value / factor)
         ortho = _get(camera, "orthographic")
         if ortho is not None:
-            self._property_label(ctx.tr("projection"))
+            imgui.set_next_item_width(-1.0)
             supported = ctx.backend.caps.orthographic
             imgui.begin_disabled(not supported)
             selected = segmented_control(
@@ -380,7 +404,6 @@ class CameraPanel(Panel):
                         setter(target, animate=True)
                     else:
                         camera.orthographic = target
-        imgui.end_table()
 
     @staticmethod
     def _property_label(label: str) -> None:
@@ -389,9 +412,5 @@ class CameraPanel(Panel):
         compact = imgui.table_get_column_count() == 1
         if not compact:
             imgui.align_text_to_frame_padding()
-        available = imgui.get_content_region_avail().x
-        width = imgui.calc_text_size(label).x
-        if not compact:
-            imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, available - width))
         imgui.text_disabled(label)
         imgui.table_next_column()

@@ -207,6 +207,9 @@ class WorkspaceAdapter(SceneAdapterBase):
             self._invalidate()
         return changed
 
+    def model_edit_batch(self):
+        return self.primary.model_edit_batch()
+
     def apply_model_edit_batch(self, edits: tuple[ModelEdit, ...]) -> tuple[int, ...]:
         results = self.primary.apply_model_edit_batch(edits)
         if results:

@@ -60,6 +60,9 @@ def test_search_fields_clear_and_retype_without_moving_the_text_origin(
     for _ in range(3):
         viewer.sync()
     if name == "Camera":
+        imgui.internal.set_scroll_y(window, window.scroll_max.y)
+        for _ in range(3):
+            viewer.sync()
         _click(viewer, _item_center(viewer, "begin_combo", "##tracking-target"))
         for _ in range(3):
             viewer.sync()
@@ -123,6 +126,7 @@ def test_joint_picker_fits_long_titles_and_joint_labels(viewer, monkeypatch):
 
     from mojive.tools.ui_runtime import _item_rect, _settle
 
+    viewer.set_gizmo_mode("translate")
     node = next(node for node in viewer.session.nodes if node.name == "05_multi_joint")
     viewer.session.submit(cmd.SelectNode(node.node_id))
     joints = viewer.app.gizmo.joint_choices(viewer.session)

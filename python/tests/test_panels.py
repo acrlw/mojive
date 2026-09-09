@@ -493,7 +493,7 @@ def test_settings_is_a_dockable_panel(panels: PanelSet):
 
 
 def test_viewport_chrome_uses_exact_capsule_geometry_and_spacing():
-    assert playback_size(1.0) == pytest.approx((178.0, 52.0))
+    assert playback_size(1.0) == pytest.approx((282.0, 52.0))
     assert tool_column_size(1.0) == pytest.approx((52.0, 230.0))
 
     horizontal = np.asarray(capsule_points(10.0, 20.0, 136.0, 52.0))
@@ -938,7 +938,7 @@ def test_keyframe_names_advance_without_exposing_raw_state_arrays():
 
 
 def test_keyframe_timeline_fits_isolated_and_distributed_snapshots():
-    assert fitted_timeline_range((), 4.0) == pytest.approx((3.5, 4.5))
+    assert fitted_timeline_range((), 4.0) == pytest.approx((0.0, 4.5))
     assert fitted_timeline_range((10.0,)) == pytest.approx((9.5, 10.5))
     assert fitted_timeline_range((-2.0, 8.0)) == pytest.approx((-2.8, 8.8))
 

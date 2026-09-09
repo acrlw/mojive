@@ -65,6 +65,8 @@ def _model_load_app(results, *, paused: bool = True):
 
     app = ViewerApp.__new__(ViewerApp)
     app.session = RecordingSession()
+    app.model_edits = SimpleNamespace(active=False)
+    app.live_model_updates = True
     app._model_load_executor = None
     app._model_load_future = None
     app._model_load_job = None
@@ -103,6 +105,8 @@ def test_model_load_jobs_execute_off_the_ui_thread(tmp_path) -> None:
 
     app = ViewerApp.__new__(ViewerApp)
     app.session = RecordingSession()
+    app.model_edits = SimpleNamespace(active=False)
+    app.live_model_updates = True
     app._model_load_executor = None
     app._model_load_future = None
     app._model_load_job = None
@@ -1194,5 +1198,65 @@ def test_loading_frame_does_not_pump_rpc_against_mutating_session():
     app._draw_model_loading_frame = lambda: calls.append("loading")
     app._present_frame = lambda _dt: calls.append("present")
     app._frame_index = 0
+    app.session = SimpleNamespace()
     app.frame()
     assert calls == ["loading", "present"]
+
+
+def test_transient_scene_snapshots_are_independent_of_take_and_model_keys():
+    adapter = SnapshotToyPhysics()
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+    generation = session.structure_generation
+    result = session.submit(cmd.CaptureSceneSnapshot("first"))
+    assert result.ok
+    first = result.entity_id
+    assert session.submit(cmd.Step(3))
+    session.tick(FrameNeeds.none(), wall_dt=0)
+    assert adapter.steps == 3
+    second = session.submit(cmd.CaptureSceneSnapshot("second")).entity_id
+    assert [item.name for item in session.scene_snapshots] == ["first", "second"]
+    assert session.structure_generation == generation
+    assert not session.dirty and not session.keyframes
+    assert session.submit(cmd.StartStateTakeRecording())
+    session.tick(FrameNeeds.none(), wall_dt=0.01)
+    assert not session.submit(cmd.RestoreSceneSnapshot(first)).ok
+    assert session.submit(cmd.StopStateTakeRecording())
+    times = tuple(session.state_take_times)
+    assert session.submit(cmd.RestoreSceneSnapshot(first)).ok
+    assert adapter.steps == 0
+    assert session.submit(cmd.RestoreSceneSnapshot(second)).ok
+    assert adapter.steps == 3
+    assert tuple(session.state_take_times) == times
+    assert session.submit(cmd.ClearStateTake())
+    assert len(session.scene_snapshots) == 2
+    assert session.submit(cmd.RemoveSceneSnapshot(first))
+    assert not session.submit(cmd.RestoreSceneSnapshot(first)).ok
+    assert len(session.scene_snapshots) == 1
+
+
+def test_scene_snapshot_rejects_replaced_structure_with_identical_state_shape():
+    adapter = SnapshotToyPhysics()
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+    snapshot_id = session.submit(cmd.CaptureSceneSnapshot()).entity_id
+    adapter.scene.sphere(name="new object")
+    session.tick(FrameNeeds.none(), wall_dt=0)
+    assert not session.submit(cmd.RestoreSceneSnapshot(snapshot_id)).ok
+    assert session.scene_snapshots == ()
+
+
+def test_scene_snapshot_enforces_memory_budget_and_owns_captured_arrays():
+    adapter = SnapshotToyPhysics()
+    state = adapter.capture_state()
+    adapter.capture_state = lambda: state
+    session = Session(adapter)
+    assert session.submit(cmd.Pause())
+    first = session.submit(cmd.CaptureSceneSnapshot()).entity_id
+    state.qpos[:] = 123
+    assert session.submit(cmd.RestoreSceneSnapshot(first))
+    assert adapter.steps == 0
+    session._scene_snapshot_bytes = 256 * 1024 * 1024
+    result = session.submit(cmd.CaptureSceneSnapshot())
+    assert not result.ok
+    assert len(session.scene_snapshots) == 1

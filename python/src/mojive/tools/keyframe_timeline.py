@@ -16,7 +16,7 @@ from ..adapters.base import FrameNeeds
 from ..assets import resolve
 from ..capture import CaptureSurface
 from ..recording import VideoRecorder
-from ..ui.panels.keyframes import timeline_time_to_x
+from ..ui.panels.keyframes import timeline_channel_width, timeline_time_to_x
 from .ui_runtime import _activate_panel, _click, _item_center, _item_rect, _save_window_crop
 
 
@@ -58,11 +58,18 @@ def timeline_point(viewer, time: float, row: str = "ruler") -> tuple[float, floa
     """Map time to a point in the actual ruler or recorded-take track."""
     lo, hi = _item_rect(viewer, "invisible_button", "##keyframe-dope-sheet")
     scale = viewer.window.style_scale
-    left = lo[0] + min(150 * scale, (hi[0] - lo[0]) * 0.45)
+    left = lo[0] + timeline_channel_width(hi[0] - lo[0], scale)
     panel = viewer.panels.get("Keyframes")
-    x = timeline_time_to_x(time, panel._view_start, panel._view_end, left, hi[0])
+    x = timeline_time_to_x(
+        time,
+        panel._view_start,
+        panel._view_end,
+        left,
+        hi[0] - (64 * scale if hi[0] - lo[0] >= 600 * scale else 0),
+    )
     y = lo[1] + (12 if row == "ruler" else 122) * scale
-    return x, y
+    # Native ImGui floors mouse coordinates; inject the nearest pixel to the target.
+    return round(x), round(y)
 
 
 def drag(viewer, start, end, *, button: int = 0, shift: bool = False, cancel: bool = False) -> None:
@@ -91,9 +98,14 @@ def drag(viewer, start, end, *, button: int = 0, shift: bool = False, cancel: bo
 def choose_follow(viewer, mode: str) -> None:
     """Choose the follow policy from the production dropdown."""
     label = viewer.app.localizer.text({"off": "Off", "page": "Page", "locked": "Locked"}[mode])
+    _click(viewer, _item_center(viewer, "invisible_button", "##timeline-options"))
     _click(viewer, _item_center(viewer, "begin_combo", "##timeline-follow"))
     _click(viewer, _item_center(viewer, "selectable", label))
     assert viewer.panels.get("Keyframes")._follow_mode == mode
+    io = imgui.get_io()
+    io.add_key_event(imgui.Key.escape, True)
+    viewer.sync()
+    io.add_key_event(imgui.Key.escape, False)
     viewer.sync()
 
 

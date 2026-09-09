@@ -16,6 +16,7 @@ from ..assets import resolve
 from ..composition import build
 from ..gizmo import GizmoHandle
 from .ui_runtime import (
+    _activate_panel,
     _capture_dock_tab_without_nav_cursor,
     _click,
     _dismiss_popup,
@@ -41,6 +42,7 @@ def _capture_interaction_chrome(viewer, folder: Path) -> None:
     _settle(viewer, 3)
     _save_window_crop(viewer, "Hierarchy", folder / "hierarchy-selected.png", padding=0)
     node = next(node for node in viewer.session.nodes if node.name == "05_multi_joint")
+    viewer.set_gizmo_mode("translate")
     viewer.session.submit(cmd.SelectNode(node.node_id))
     _settle(viewer, 4)
     _save_window_crop(viewer, "###viewport_joint_gizmo", folder / "joint-picker.png")
@@ -57,6 +59,44 @@ def _capture_interaction_chrome(viewer, folder: Path) -> None:
     finally:
         node.name = original_name
     _capture_dock_tab_without_nav_cursor(viewer, folder)
+    viewer.app.gizmo.enabled = False
+    viewer.session.submit(
+        cmd.SelectNode(next(n.node_id for n in viewer.session.nodes if n.name == "04_free"))
+    )
+    _park_cursor(viewer)
+    _settle(viewer, 3)
+    playback = viewer.app._playback_widget_rect
+    tools = viewer.app._tool_widget_rect
+    assert playback is not None and tools is not None
+    assert abs((playback[3] - playback[1]) - (tools[2] - tools[0])) < 0.01
+    _save_window_crop(viewer, "Viewport", folder / "viewport-selection-tools-off.png", padding=0)
+    from PIL import Image
+
+    Image.fromarray(viewer.capture_array(surface="window")).save(folder / "editor-overview.png")
+    _click(
+        viewer, _item_center(viewer, "invisible_button", "##viewport-playback-recording-options")
+    )
+    _settle(viewer, 3)
+    _save_active_popup_crop(viewer, folder / "recording-options.png")
+    _dismiss_popup(viewer)
+    viewer.start_recording(folder / "cancelled.mp4", countdown=60)
+    _settle(viewer, 3)
+    countdown = imgui.internal.find_window_by_name("##recording_countdown")
+    assert countdown.pos.y >= playback[3]
+    Image.fromarray(viewer.capture_array(surface="window")).save(folder / "recording-countdown.png")
+    viewer.stop_recording()
+    _activate_panel(viewer, "Output")
+    _click(viewer, _item_center(viewer, "button", "##output-collapse"))
+    _settle(viewer, 3)
+    _save_window_crop(viewer, "##output-summary", folder / "output-collapsed.png", padding=0)
+    _click(viewer, _item_center(viewer, "button", "##output-expand"))
+    _settle(viewer, 3)
+    _activate_panel(viewer, "Hierarchy")
+    _click(viewer, _item_center(viewer, "button", "##hierarchy-type-joint"))
+    _settle(viewer, 3)
+    _save_window_crop(viewer, "Hierarchy", folder / "hierarchy-filter-joint.png", padding=0)
+    _click(viewer, _item_center(viewer, "button", "##hierarchy-type-all"))
+    _settle(viewer, 3)
 
 
 def capture(output: Path, scale: float, language: str) -> list[dict]:
@@ -82,6 +122,29 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
     ):
         _settle(viewer, 8)
         _capture_interaction_chrome(viewer, folder)
+        from PIL import Image
+
+        from ..model_edits import model_edit_scope
+
+        pending_node = next(
+            n for n in viewer.session.nodes if n.source_editable and n.geom_index >= 0
+        )
+        with model_edit_scope(viewer.session, viewer.app._intercept_model_edit):
+            assert viewer.session.submit(
+                cmd.RenameModelElement(pending_node.node_id, "pending_entity")
+            ).ok
+        _settle(viewer, 4)
+        Image.fromarray(viewer.capture_array(surface="window")).save(
+            folder / "pending-model-edits.png"
+        )
+        _click(
+            viewer,
+            _item_center(
+                viewer, "button", viewer.app.localizer.text("Discard") + "##discard_model_edits"
+            ),
+        )
+        _settle(viewer, 2)
+        assert not viewer.app.model_edits.active
         manager = viewer.panels
         begin = manager._begin_panel_window
         target, width = "", 480.0
@@ -123,6 +186,20 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
         _dismiss_popup(viewer)
         viewer.session.submit(cmd.SelectNode(link.node_id))
 
+        for level in ("info", "warning", "error"):
+            viewer.app.output.write(f"Layout audit: {level} message", level=level)
+        model_id = viewer.session.scene_models[0].model_id
+        for index in range(3):
+            assert viewer.session.submit(cmd.Step(20))
+            viewer.sync()
+            assert viewer.session.submit(cmd.AddModelKeyframe(model_id, f"Pose {index + 1}"))
+            _settle(viewer, 2)
+        for index in range(2):
+            assert viewer.session.submit(cmd.Step(20))
+            viewer.sync()
+            assert viewer.session.submit(cmd.CaptureSceneSnapshot(f"Snapshot {index + 1}"))
+        link = next(node for node in viewer.session.nodes if node.name == "03_ball_anchor")
+        viewer.session.submit(cmd.SelectNode(link.node_id))
         cases = [("Camera", w, "") for w in (140, 180, 240, 360)]
         cases += [
             ("Settings", w, category)
@@ -130,8 +207,10 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
             for w in (360, 720, 960)
         ]
         cases += [("Inspector", w, "") for w in (180, 230, 320, 480)]
-        cases += [("Keyframes", w, "") for w in (230, 480)]
+        cases += [("Keyframes", w, "") for w in (230, 480, 1000)]
         cases += [("Output", w, "") for w in (180, 320)]
+        cases += [("Hierarchy", w, "") for w in (180, 320)]
+        cases += [("Joints", w, "") for w in (180, 320)]
         for target, width, category in cases:
             panel = manager.get(target)
             manager.open_panel(target)
@@ -149,6 +228,17 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
             _settle(viewer, 4)
             filename = f"{target.lower()}-{width}-{category.lower() or 'layout'}.png"
             _save_window_crop(viewer, target, folder / filename, padding=3.0)
+            if target == "Inspector" and width == 320:
+                point = _item_center(viewer, "invisible_button", "##entity_name_label")
+                _click(viewer, point)
+                _click(viewer, point)
+                _settle(viewer, 2)
+                assert panel._renaming
+                _save_window_crop(viewer, target, folder / "inspector-name-edit.png", padding=0)
+                imgui.get_io().add_key_event(imgui.Key.escape, True)
+                viewer.sync()
+                imgui.get_io().add_key_event(imgui.Key.escape, False)
+                _settle(viewer, 2)
             if target == "Camera":
                 labels = (
                     "##camera-projection-0",
@@ -172,7 +262,10 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
             if target == "Output":
                 rectangles = [
                     _item_rect(viewer, "input_text_with_hint", "##output-filter"),
-                    _item_rect(viewer, "combo", "##output-level"),
+                    *(
+                        _item_rect(viewer, "button", f"##output-level-{level}")
+                        for level in ("info", "warning", "error")
+                    ),
                 ]
             for lo, hi in rectangles:
                 assert lo[0] >= window.inner_clip_rect.min.x, (filename, lo)
@@ -187,7 +280,75 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
             results.append({"image": str(folder / filename), "rectangles": rectangles})
             panel.open = False
 
+        target = "Inspector"
+        manager.open_panel(target)
+        _settle(viewer, 3)
+        window = imgui.internal.find_window_by_name(target)
+        imgui.internal.focus_window(window)
+        measurements = []
+        for width in range(280, 461, 4):
+            _settle(viewer, 2)
+            rects = [
+                _item_rect(viewer, "drag_float", f"##{translate('position')}_{axis}_{link.node_id}")
+                for axis in range(3)
+            ]
+            inline_axes = abs(rects[0][0][1] - rects[2][0][1]) < 1
+            field_width = rects[0][1][0] - rects[0][0][0]
+            for lo, hi in rects:
+                assert lo[0] >= window.inner_clip_rect.min.x, (width, lo)
+                assert hi[0] <= window.inner_clip_rect.max.x, (width, hi)
+            if inline_axes:
+                assert abs((rects[2][1][0] - rects[2][0][0]) - field_width) <= 1.01
+
+            measurements.append(
+                {"panel_width": width, "field_width": field_width, "inline_axes": inline_axes}
+            )
+        results.append({"transform_width_sweep": measurements})
+        manager.get(target).open = False
+        camera_asset = folder / "inspector-camera.xml"
+        camera_asset.write_text(
+            '<mujoco><worldbody><geom type="sphere" size=".1"/>'
+            '<camera name="inspection_camera" pos="0 -3 1"/></worldbody></mujoco>'
+        )
+        assert viewer.session.submit(cmd.LoadAsset(camera_asset))
+        camera_node = next(n for n in viewer.session.nodes if n.name == "inspection_camera")
+        viewer.session.submit(cmd.SelectNode(camera_node.node_id))
+        for width in (180, 320, 480):
+            manager.open_panel(target)
+            _settle(viewer, 4)
+            imgui.internal.focus_window(window)
+            imgui.internal.set_scroll_y(window, 0)
+            _settle(viewer, 2)
+            filename = folder / f"inspector-camera-{width}.png"
+            _save_window_crop(viewer, target, filename, padding=0)
+            results.append({"image": str(filename)})
+            manager.get(target).open = False
+
         assert viewer.session.submit(cmd.LoadAsset(resolve("actuator_visuals")))
+        for width in (180, 320, 480):
+            target = "Control"
+            manager.open_panel(target)
+            _settle(viewer, 3)
+            window = imgui.internal.find_window_by_name(target)
+            if window.dock_node is not None:
+                imgui.internal.dock_context_process_undock_window(
+                    imgui.get_current_context(), window, True
+                )
+            imgui.internal.focus_window(window)
+            _settle(viewer, 4)
+            filename = folder / f"control-{width}-layout.png"
+            _save_window_crop(viewer, target, filename, padding=0)
+            panel = manager.get(target)
+            rectangles = [
+                _item_rect(viewer, "invisible_button", f"##actuator-select-{a.ctrl_address}")
+                for a, component in panel._row_cache[:2]
+                if component == 0
+            ]
+            for lo, hi in rectangles:
+                assert lo[0] >= window.inner_clip_rect.min.x
+                assert hi[0] <= window.inner_clip_rect.max.x
+            results.append({"image": str(filename), "rectangles": rectangles})
+            panel.open = False
         searches = (
             ("Hierarchy", "filter"),
             ("Joints", "joint_search"),
@@ -209,6 +370,8 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
             imgui.internal.focus_window(window)
             _settle(viewer, 4)
             if target == "Camera":
+                imgui.internal.set_scroll_y(window, window.scroll_max.y)
+                _settle(viewer, 3)
                 _click(viewer, _item_center(viewer, "begin_combo", "##tracking-target"))
             _click(viewer, _item_center(viewer, "input_text_with_hint", f"##{field}"))
             imgui.get_io().add_input_characters_utf8("123")

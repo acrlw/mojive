@@ -69,15 +69,33 @@ def _triangle_fan_indices(count: int) -> tuple[int, ...]:
 
 
 @lru_cache(maxsize=512)
-def _cached_fringe_points(points: tuple[tuple[float, float], ...], inside: bool = False):
+def _cached_fringe_points(
+    points: tuple[tuple[float, float], ...], inside: bool = False, width: float = 1.0
+):
     """Reuse both native vertex arrays and their outward miter construction."""
     fringe = _anti_alias_fringe_outer(points)
-    if inside and len(fringe) == len(points):
-        fringe = 2.0 * np.asarray(points) - fringe
+    if len(fringe) == len(points):
+        vertices = np.asarray(points)
+        fringe = vertices + (fringe - vertices) * (-width if inside else width)
     outer = tuple(map(tuple, fringe.tolist()))
     if len(outer) != len(points):
         return (), ()
     return _cached_imgui_points(points), _cached_imgui_points(outer)
+
+
+@lru_cache(maxsize=256)
+def _concave_indices(points: tuple[tuple[float, float], ...]):
+    """Triangulate immutable local paths once with ImGui's existing tessellator.
+
+    Retain only index values, never an ImGui context or draw-list allocation.
+    """
+    from imgui_bundle import imgui
+
+    scratch = imgui.ImDrawList(imgui.get_draw_list_shared_data())
+    scratch._reset_for_new_frame()
+    scratch.flags = 0
+    scratch.add_concave_poly_filled(_cached_imgui_points(points), 0xFFFFFFFF)
+    return tuple(scratch.idx_buffer)
 
 
 @runtime_checkable
@@ -129,12 +147,21 @@ class Draw2D(Protocol):
     def convex_fill(self, points, color) -> None: ...
 
     def indexed_fill(
-        self, points, indices, color, *, outline=(), hole=(), origin=None, direction=(1.0, 0.0)
+        self,
+        points,
+        indices,
+        color,
+        *,
+        outline=(),
+        hole=(),
+        origin=None,
+        direction=(1.0, 0.0),
+        fringe_width=1.0,
     ) -> None:
         """Fill triangles and optional AA contours, optionally placing a local mesh.
 
         With origin set, direction is the unit local X axis in window coordinates.
-        Placement is rigid so the antialias fringe retains its one-pixel width.
+        Placement is rigid; fringe_width is measured in logical pixels.
         """
         ...
 
@@ -144,7 +171,7 @@ class Draw2D(Protocol):
 
     def concave_fill(self, points, color) -> None: ...
 
-    def fringed_concave_fill(self, points, color) -> None:
+    def fringed_concave_fill(self, points, color, *, origin=None) -> None:
         """Concave fill with a 1 px alpha-gradient fringe instead of builtin AA."""
         ...
 
@@ -298,7 +325,16 @@ class ImguiDraw2D:
         self._dl.add_convex_poly_filled(_fill_points(points), self._u32(color))
 
     def indexed_fill(
-        self, points, indices, color, *, outline=(), hole=(), origin=None, direction=(1.0, 0.0)
+        self,
+        points,
+        indices,
+        color,
+        *,
+        outline=(),
+        hole=(),
+        origin=None,
+        direction=(1.0, 0.0),
+        fringe_width=1.0,
     ) -> None:
         """Submit precomputed triangles and antialias only the external contours."""
         if not len(indices):
@@ -328,9 +364,9 @@ class ImguiDraw2D:
             for index in indices:
                 dl.prim_write_idx(base + int(index))
         if len(outline):
-            self._write_anti_alias_fringe(outline, rgba)
+            self._write_anti_alias_fringe(outline, rgba, width=fringe_width)
         if len(hole):
-            self._write_anti_alias_fringe(hole, rgba, inside=True)
+            self._write_anti_alias_fringe(hole, rgba, inside=True, width=fringe_width)
         if origin is not None:
             # Transform the submitted range, including AA, in one native pass.
             # Local vertex and fringe caches survive movement and rotation.
@@ -353,7 +389,11 @@ class ImguiDraw2D:
     def concave_fill(self, points, color) -> None:
         self._dl.add_concave_poly_filled(_fill_points(points), self._u32(color))
 
-    def fringed_concave_fill(self, points, color) -> None:
+    def fringed_concave_fill(self, points, color, *, origin=None) -> None:
+        if origin is not None:
+            path = _clockwise_points(tuple(points))
+            self.indexed_fill(path, _concave_indices(path), color, outline=path, origin=origin)
+            return
         imgui = self._imgui
         dl = self._dl
         rgba = self._u32(color)
@@ -373,7 +413,9 @@ class ImguiDraw2D:
 
         self._write_anti_alias_fringe(outline, rgba)
 
-    def _write_anti_alias_fringe(self, outline, rgba: int, *, inside: bool = False) -> None:
+    def _write_anti_alias_fringe(
+        self, outline, rgba: int, *, inside: bool = False, width: float = 1.0
+    ) -> None:
         """Emit one alpha-gradient ring around an already solid polygon fill."""
 
         imgui = self._imgui
@@ -382,7 +424,7 @@ class ImguiDraw2D:
             return
         if not isinstance(outline, tuple):
             outline = tuple((float(point[0]), float(point[1])) for point in outline)
-        inner_points, fringe_points = _cached_fringe_points(outline, inside)
+        inner_points, fringe_points = _cached_fringe_points(outline, inside, width)
         if not inner_points:
             return
 
@@ -560,3 +602,26 @@ def ink_box(font, size: float, text: str):
         elif g is not None:
             pen += g.advance_x
     return None if x1 < x0 else (x0, y0, x1, y1)
+
+
+def fit_text(draw: Draw2D, value: str, max_width: float, *, middle: bool = False) -> str:
+    """Fit a single line with an ellipsis instead of cutting a glyph at the edge."""
+    text = " ".join(str(value).split())
+    if draw.text_size(text)[0] <= max_width:
+        return text
+
+    def elided(length):
+        if middle:
+            return (
+                f"{text[: (length + 1) // 2].rstrip()}…{text[len(text) - length // 2 :].lstrip()}"
+            )
+        return f"{text[:length].rstrip()}…"
+
+    lo, hi = 0, len(text) - 1
+    while lo < hi:
+        count = (lo + hi + 1) // 2
+        if draw.text_size(elided(count))[0] <= max_width:
+            lo = count
+        else:
+            hi = count - 1
+    return elided(lo) if lo else ""

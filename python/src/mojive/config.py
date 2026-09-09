@@ -192,6 +192,7 @@ class ViewportOverlayConfig:
     movable: bool = True
     playback_position: tuple[float, float] | None = None
     tool_position: tuple[float, float] | None = None
+    status_duration: float = 4.0
 
     @classmethod
     def from_mapping(cls, value: object) -> ViewportOverlayConfig:
@@ -207,9 +208,17 @@ class ViewportOverlayConfig:
                 return default
             return min(1.6, max(0.6, result))
 
+        try:
+            duration = float(source.get("status_duration", defaults.status_duration))
+        except (TypeError, ValueError):
+            duration = defaults.status_duration
+        if not math.isfinite(duration):
+            duration = defaults.status_duration
+        capsule_scale = scale("playback_scale", scale("tool_scale", defaults.playback_scale))
         return cls(
-            playback_scale=scale("playback_scale", defaults.playback_scale),
-            tool_scale=scale("tool_scale", defaults.tool_scale),
+            status_duration=min(5.0, max(3.0, duration)),
+            playback_scale=capsule_scale,
+            tool_scale=capsule_scale,
             movable=_bool(source.get("movable"), defaults.movable),
             playback_position=_position(source.get("playback_position")),
             tool_position=_position(source.get("tool_position")),
@@ -303,6 +312,7 @@ class ViewerConfig:
     tracking: CameraTrackingConfig = field(default_factory=CameraTrackingConfig)
     shadow_quality: ShadowQuality | str | None = None
     threaded_physics: bool = True
+    live_model_updates: bool | None = None
 
 
 __all__ = [

@@ -159,7 +159,9 @@ def test_hover_does_not_resize_the_ball():
         def circle_filled(self, *args, **kwargs) -> None:
             pass
 
-        def fringed_concave_fill(self, points, _color) -> None:
+        def fringed_concave_fill(self, points, _color, *, origin=None) -> None:
+            if origin is not None:
+                points = tuple((x + origin[0], y + origin[1]) for x, y in points)
             self.outline = np.asarray(points)
 
         def centered_label(self, *args, **kwargs) -> None:

@@ -43,6 +43,7 @@ from .adapters.base import (
 from .bounds import SceneBounds, _MeshBoundsCache, _node_local_bounds, _node_world_bounds
 from .commands import Command, CommandResult, Query
 from .history import EditHistory, EditRecord
+from .model_edits import intercept_model_edit
 from .rates import StepRate
 from .simulation import SimulationDriver
 from .types import (
@@ -95,6 +96,22 @@ class _StateTakeFrame:
 
     step: int
     state: PhysicsState
+
+
+@dataclass(frozen=True)
+class SceneSnapshotInfo:
+    """Lightweight metadata; captured arrays stay private to the owning session."""
+
+    snapshot_id: int
+    name: str
+    time: float
+
+
+@dataclass(frozen=True)
+class _SceneSnapshot:
+    info: SceneSnapshotInfo
+    frame: _StateTakeFrame
+    structure_revision: int
 
 
 @dataclass(frozen=True)
@@ -225,6 +242,8 @@ class Session:
         self._frame = SceneFrame()
         self._physics_rate = StepRate()
         self._source: SceneSource | None = None
+        self._model_edit_preview = None
+        self._preview_generation = 0
         self._mesh_bounds_cache: _MeshBoundsCache = {}
         self._scene_bounds: SceneBounds | None = None
         self._authored = AuthoredSceneOverlay()
@@ -242,6 +261,10 @@ class Session:
         self._equality_constraints: list[EqualityConstraintInfo] = []
         self._active_keyframe = -1
         self._state_take: list[_StateTakeFrame] = []
+        self._scene_snapshots: dict[int, _SceneSnapshot] = {}
+        self._scene_snapshot_info: tuple[SceneSnapshotInfo, ...] = ()
+        self._scene_snapshot_serial = 0
+        self._scene_snapshot_bytes = 0
         self._state_take_times: list[float] = []
         self._state_take_offsets: list[float] = []
         self._state_take_loop: tuple[int, int] | None = None
@@ -360,12 +383,14 @@ class Session:
     @property
     def source(self) -> SceneSource | None:
         """Return the current stable scene source."""
-        return self._source
+        preview = getattr(self, "_model_edit_preview", None)
+        return preview.source if preview is not None and preview.visible else self._source
 
     @property
     def nodes(self) -> list[SceneNode]:
         """Return hierarchy nodes for the current structure generation."""
-        return self._nodes
+        preview = getattr(self, "_model_edit_preview", None)
+        return preview.nodes if preview is not None and preview.visible else self._nodes
 
     @property
     def joints(self) -> list[JointInfo]:
@@ -493,7 +518,13 @@ class Session:
 
     def keyframe_properties(self, keyframe_id: int) -> KeyframeProperties | None:
         """Return complete editable state for one model-local keyframe."""
-        return self._adapter.keyframe_properties(keyframe_id)
+        value = self._adapter.keyframe_properties(keyframe_id)
+        preview = getattr(self, "_model_edit_preview", None)
+        return (
+            preview.properties("keyframe_properties", keyframe_id, value)
+            if preview is not None
+            else value
+        )
 
     def geometry_properties(self, node_id: int) -> GeometryProperties | None:
         """Return editable contact parameters for one model geometry."""
@@ -501,23 +532,49 @@ class Session:
 
     def joint_advanced_properties(self, joint_id: int) -> JointAdvancedProperties | None:
         """Return joint properties backed by rebuilt MuJoCo constants."""
-        return self._adapter.joint_advanced_properties(joint_id)
+        value = self._adapter.joint_advanced_properties(joint_id)
+        preview = getattr(self, "_model_edit_preview", None)
+        return (
+            preview.properties("joint_advanced_properties", joint_id, value)
+            if preview is not None
+            else value
+        )
 
     def site_properties(self, node_id: int) -> SiteProperties | None:
         """Return editable shape and endpoint properties for one model site."""
-        return self._adapter.site_properties(node_id)
+        value = self._adapter.site_properties(node_id)
+        preview = getattr(self, "_model_edit_preview", None)
+        return (
+            preview.properties("site_properties", node_id, value) if preview is not None else value
+        )
 
     def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None:
         """Return geometry properties backed by rebuilt MuJoCo constants."""
-        return self._adapter.geometry_advanced_properties(node_id)
+        value = self._adapter.geometry_advanced_properties(node_id)
+        preview = getattr(self, "_model_edit_preview", None)
+        return (
+            preview.properties("geometry_advanced_properties", node_id, value)
+            if preview is not None
+            else value
+        )
 
     def geometry_shape_properties(self, node_id: int) -> GeometryShapeProperties | None:
         """Return geometry type and model-local resource choices."""
-        return self._adapter.geometry_shape_properties(node_id)
+        value = self._adapter.geometry_shape_properties(node_id)
+        preview = getattr(self, "_model_edit_preview", None)
+        return (
+            preview.properties("geometry_shape_properties", node_id, value)
+            if preview is not None
+            else value
+        )
 
     def body_properties(self, node_id: int) -> BodyProperties | None:
         """Return editable inertial and dynamic properties for one model body."""
-        return self._adapter.body_properties(node_id)
+        value = self._adapter.body_properties(node_id)
+        preview = getattr(self, "_model_edit_preview", None)
+        return (
+            preview.properties("body_properties", node_id, value) if preview is not None else value
+        )
 
     def model_texture_names(self, model_id: int) -> tuple[str, ...]:
         """Return compiled texture names owned by one editable model."""
@@ -590,7 +647,12 @@ class Session:
     @property
     def dirty(self) -> bool:
         """Return whether the current document contains unsaved edits."""
-        return self._edit_changed or self._document_revision != self._saved_revision
+        preview = getattr(self, "_model_edit_preview", None)
+        return (
+            bool(preview is not None and preview.active)
+            or self._edit_changed
+            or self._document_revision != self._saved_revision
+        )
 
     @property
     def document_id(self) -> str:
@@ -652,10 +714,13 @@ class Session:
     @property
     def structure_generation(self) -> int:
         """Return the generation incremented after stable structure changes."""
-        return self._structure_generation
+        return self._structure_generation + getattr(self, "_preview_generation", 0)
 
     def node(self, node_id: int) -> SceneNode | None:
         """Look up a hierarchy node by node ID."""
+        preview = getattr(self, "_model_edit_preview", None)
+        if preview is not None and preview.visible:
+            return preview.by_node_id.get(int(node_id))
         return self._by_node_id.get(int(node_id))
 
     def node_local_bounds(self, node_id: int) -> CenteredBounds | None:
@@ -664,7 +729,7 @@ class Session:
         return (
             None
             if node is None
-            else _node_local_bounds(self._source, self._frame, node, self._mesh_bounds_cache)
+            else _node_local_bounds(self.source, self._frame, node, self._mesh_bounds_cache)
         )
 
     def node_world_bounds(self, node_id: int) -> CenteredBounds | None:
@@ -695,6 +760,58 @@ class Session:
                 state.mocap_quat,
             )
         )
+
+    @property
+    def scene_snapshots(self) -> tuple[SceneSnapshotInfo, ...]:
+        """Return transient state samples independently of model keys and recorded takes."""
+        return self._scene_snapshot_info
+
+    def _clear_scene_snapshots(self) -> None:
+        self._scene_snapshots.clear()
+        self._scene_snapshot_info = ()
+        self._scene_snapshot_bytes = 0
+
+    def _snapshot_command(self, command) -> CommandResult:
+        if isinstance(command, cmd.CaptureSceneSnapshot):
+            # submit() has fenced the simulation owner before copying this state.
+            state = self._adapter.capture_state()
+            if state is None:
+                return CommandResult.bad("Physics backend could not capture a scene snapshot")
+            size = self._physics_state_bytes(state)
+            if (
+                len(self._scene_snapshots) >= 1024
+                or self._scene_snapshot_bytes + size > 256 * 1024 * 1024
+            ):
+                return CommandResult.bad("Scene snapshot limit reached; remove unused snapshots")
+            self._scene_snapshot_serial += 1
+            snapshot_id = self._scene_snapshot_serial
+            info = SceneSnapshotInfo(
+                snapshot_id, command.name.strip() or f"Snapshot {snapshot_id}", float(state.time)
+            )
+            # Do not retain backend-owned buffers, even for custom adapters.
+            frame = _StateTakeFrame(self._step_counter, deepcopy(state))
+            self._scene_snapshots[snapshot_id] = _SceneSnapshot(
+                info, frame, self._adapter.structure_revision
+            )
+            self._scene_snapshot_bytes += size
+            self._scene_snapshot_info = tuple(item.info for item in self._scene_snapshots.values())
+            return CommandResult.good("Captured scene snapshot", snapshot_id)
+        snapshot = self._scene_snapshots.get(command.snapshot_id)
+        if snapshot is None:
+            return CommandResult.bad("Scene snapshot is no longer available")
+        if isinstance(command, cmd.RemoveSceneSnapshot):
+            self._scene_snapshot_bytes -= self._physics_state_bytes(snapshot.frame.state)
+            del self._scene_snapshots[command.snapshot_id]
+            self._scene_snapshot_info = tuple(item.info for item in self._scene_snapshots.values())
+            return CommandResult.good("Removed scene snapshot")
+        if self._state_take_recording or self._state_take_playing or not self._paused:
+            return CommandResult.bad("Pause simulation and recording before restoring a snapshot")
+        if snapshot.structure_revision != self._adapter.structure_revision:
+            return CommandResult.bad("Scene structure changed since this snapshot was captured")
+        result = self.restore_physics_state(deepcopy(snapshot.frame.state))
+        if result.ok:
+            self._step_counter = snapshot.frame.step
+        return result
 
     def _clear_state_take(self) -> None:
         self._state_take.clear()
@@ -1039,6 +1156,63 @@ class Session:
             self._append_frame_history()
         return self._frame
 
+    def apply_model_edits(self, commands) -> CommandResult:
+        """Apply pending model commands atomically as one undoable rebuild group."""
+        if not self.paused or self.editing:
+            return CommandResult.bad("Pause simulation and finish the active gesture before Apply")
+        history = self._adapter.caps.edit_history
+        before = None if history else self._capture_document_state()
+        if history:
+            result = self.submit(cmd.BeginEditTransaction("Apply model edits"))
+            if not result.ok:
+                return result
+        self._applying_model_edits = True
+        try:
+            # Renames come last so other queued commands keep their original node identities.
+            ordered = sorted(commands, key=lambda item: isinstance(item, cmd.RenameModelElement))
+            with self._adapter.model_edit_batch():
+                for command in ordered:
+                    result = self.submit(command)
+                    if not result.ok:
+                        raise ValueError(result.message)
+                state = self._adapter.capture_state()
+            changes_layout = any(
+                isinstance(
+                    item,
+                    (
+                        cmd.SetModelSource,
+                        cmd.AddModelElement,
+                        cmd.DuplicateModelElement,
+                        cmd.RemoveModelElement,
+                        cmd.RemoveSceneModel,
+                        cmd.ModelEditBatch,
+                        cmd.AddModelComponent,
+                        cmd.RemoveModelComponent,
+                        cmd.UpdateModelComponent,
+                    ),
+                )
+                for item in commands
+            )
+            # Raw arrays preserve renamed DOFs only when the layout stays stable.
+            # Topology edits rely on the adapter's identity-based state migration.
+            if state is not None and not changes_layout:
+                self._adapter.restore_state(state)
+            self._applying_model_edits = False
+            self._refresh_structure()
+            return (
+                self.submit(cmd.EndEditTransaction())
+                if history
+                else CommandResult.good("Applied model edits")
+            )
+        except Exception as error:
+            self._applying_model_edits = False
+            rollback = (
+                self.submit(cmd.CancelEditTransaction()).ok
+                if history
+                else self._restore_document_state(before)
+            )
+            return CommandResult.bad(str(error) if rollback else f"{error}; rollback failed")
+
     def submit(self, command: Command) -> CommandResult:
         """Apply one typed command and update edit history and status text."""
         from .command_support import unavailable_reason
@@ -1048,6 +1222,9 @@ class Session:
             if self.editing:
                 self._edit_failed = True
             return self._record_result(CommandResult.bad(reason))
+        intercepted = intercept_model_edit(self, command)
+        if intercepted is not None:
+            return self._record_result(intercepted)
         driver = self._simulation_driver
         # Camera and selection only change Session-owned state. All other
         # commands fence physics before reading history or mutating an adapter;
@@ -1104,6 +1281,28 @@ class Session:
                     )
             else:
                 self._advance_document_revision()
+        preview = getattr(self, "_model_edit_preview", None)
+        if (
+            result.ok
+            and preview is not None
+            and preview.active
+            and not preview.applying
+            and isinstance(
+                command,
+                (
+                    cmd.SetPose,
+                    cmd.SetMaterial,
+                    cmd.SetGeometryColor,
+                    cmd.SetLight,
+                    cmd.SetEnvironment,
+                    cmd.SetSceneCamera,
+                    cmd.SetGeometryProperties,
+                    cmd.SetJointProperties,
+                ),
+            )
+        ):
+            preview._adapter_revision = self._adapter.structure_revision
+            preview.refresh_preview()
         return self._record_result(result)
 
     def _capture_document_state(self) -> _DocumentState:
@@ -1239,6 +1438,7 @@ class Session:
 
         self._paused = not self._adapter.caps.simulation or self._adapter.set_paused(True)
         self._clear_state_take()
+        self._clear_scene_snapshots()
         self._clear_frame_history()
         self._step_counter = 0
         self._pending_steps = 0
@@ -1261,6 +1461,10 @@ class Session:
 
     def _dispatch(self, c: Command) -> CommandResult:
         caps = self._adapter.caps
+        if isinstance(
+            c, (cmd.CaptureSceneSnapshot, cmd.RestoreSceneSnapshot, cmd.RemoveSceneSnapshot)
+        ):
+            return self._snapshot_command(c)
         if isinstance(c, cmd.StartStateTakeRecording):
             if not caps.simulation or not caps.state_snapshots:
                 return CommandResult.bad(f"{caps.name} cannot record simulation-state takes")
@@ -3113,6 +3317,8 @@ class Session:
         return self._adapter.visual_groups() if self._adapter.caps.visual_groups else ()
 
     def _refresh_structure(self) -> None:
+        if getattr(self, "_applying_model_edits", False):
+            return
         self._mesh_bounds_cache.clear()
         self._scene_bounds = None
         self._source = self._adapter.scene_source()
@@ -3208,6 +3414,11 @@ class Session:
                 )
             if self._frame_history and signature != self._frame_history_signature:
                 self._clear_frame_history()
+        if self._scene_snapshots and any(
+            snapshot.structure_revision != self._adapter.structure_revision
+            for snapshot in self._scene_snapshots.values()
+        ):
+            self._clear_scene_snapshots()
         self._adapter_revision = self._adapter.structure_revision
         self._structure_generation += 1
         self._frame = self._adapter.frame(FrameNeeds())

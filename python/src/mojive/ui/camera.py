@@ -296,6 +296,65 @@ class ProjectionTransition:
         return True
 
 
+class CameraViewTransition:
+    """A short eased camera handoff with a non-degenerate orientation path."""
+
+    def __init__(self, start: CameraView, duration: float = 0.28):
+        self.start = start
+        self.duration = duration
+        self.elapsed = 0.0
+        self.active = True
+        self._rotation = math3d.mat3_to_quat(start.view_matrix()[:3, :3].T)
+        self._intrinsics = self._normalized_intrinsics(start)
+
+    @staticmethod
+    def _normalized_intrinsics(view):
+        if view.uses_intrinsics():
+            return (view.focal_length / view.sensor_size, view.principal_offset / view.sensor_size)
+        focal = 0.5 / np.tan(view.fov_y * 0.5)
+        return np.array((focal / view.aspect, focal)), np.zeros(2)
+
+    def advance(self, target: CameraView, dt: float) -> CameraView:
+        self.elapsed += max(0.0, dt)
+        if self.elapsed >= self.duration:
+            self.active = False
+            return target
+        if self.elapsed == 0.0:
+            return self.start.with_aspect(target.aspect)
+        t = _ease_out_cubic(self.elapsed / self.duration)
+        rotation = math3d.mat3_to_quat(target.view_matrix()[:3, :3].T)
+        dot = float(np.dot(self._rotation, rotation))
+        if dot < 0:
+            rotation = -rotation
+            dot = -dot
+        if dot > 0.9995:
+            quaternion = self._rotation * (1 - t) + rotation * t
+        else:
+            angle = np.arccos(np.clip(dot, 0.0, 1.0))
+            quaternion = (
+                self._rotation * np.sin((1 - t) * angle) + rotation * np.sin(t * angle)
+            ) / np.sin(angle)
+        basis = math3d.quat_to_mat3(quaternion)
+        start = self.start
+        eye = start.eye * (1 - t) + target.eye * t
+        distance = max(MIN_DISTANCE, start.distance() * (1 - t) + target.distance() * t)
+        focal, principal = self._normalized_intrinsics(target)
+        return replace(
+            target,
+            eye=eye,
+            target=eye - basis[:, 2] * distance,
+            up=basis[:, 1],
+            fov_y=start.fov_y * (1 - t) + target.fov_y * t,
+            near=start.near * (1 - t) + target.near * t,
+            far=start.far * (1 - t) + target.far * t,
+            ortho_height=start.ortho_height * (1 - t) + target.ortho_height * t,
+            orthographic_blend=start.projection_blend() * (1 - t) + target.projection_blend() * t,
+            focal_length=self._intrinsics[0] * (1 - t) + focal * t,
+            sensor_size=np.ones(2),
+            principal_offset=self._intrinsics[1] * (1 - t) + principal * t,
+        )
+
+
 class OrbitCamera:
     def __init__(
         self,

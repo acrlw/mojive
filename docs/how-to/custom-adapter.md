@@ -64,6 +64,12 @@ Legacy metadata names retain their constructor compatibility: `JointInfo.body` i
 is a joint index. These lookup values are distinct from selection object IDs. New extension
 names should use explicit `*_index`, `*_address`, and `object_id` terminology.
 
+`ActuatorInfo.target_node_id` optionally identifies the scene node selected/focused by the Control
+panel. Resolve it against the adapter's current `nodes()` structure and refresh it on rebuild;
+this is neither an object ID nor a physics index. The default `-1` means no target is exposed.
+Legacy joint metadata remains a fallback. MuJoCo provides joint, body, site, and slider-crank
+site targets, falling back to the owning body when a visual group hides the leaf node.
+
 ## Capability and version contracts
 
 Declare `AdapterCaps.model_formats` explicitly, for example `(".urdf",)`, together with

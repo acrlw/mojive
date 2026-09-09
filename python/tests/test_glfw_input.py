@@ -8,8 +8,8 @@ from imgui_bundle import imgui
 from mojive.ui import window as wm
 
 
-@pytest.fixture
-def adapter(monkeypatch):
+@pytest.fixture(params=[False, True], ids=["physical-modifiers", "mac-shortcut-modifiers"])
+def adapter(monkeypatch, request):
     for name in ("glfw", "imgui"):
         monkeypatch.setattr(wm, name, getattr(wm, name))
     wm._load_window_deps()
@@ -25,6 +25,7 @@ def adapter(monkeypatch):
         monkeypatch.setattr(wm.glfw, f"set_{name}_callback", lambda *_args: None)
     context = imgui.create_context()
     io = imgui.get_io()
+    io.config_mac_osx_behaviors = request.param
     io.display_size = (800, 600)
     io.delta_time = 1 / 60
     io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
@@ -60,7 +61,10 @@ def test_modifier_stays_pressed_until_both_sides_are_released(adapter, modifier)
     input, _owner = adapter
     left = getattr(wm.glfw, f"KEY_LEFT_{modifier}")
     right = getattr(wm.glfw, f"KEY_RIGHT_{modifier}")
-    attribute = "key_" + ("ctrl" if modifier == "CONTROL" else modifier.lower())
+    name = "ctrl" if modifier == "CONTROL" else modifier.lower()
+    if input.io.config_mac_osx_behaviors:
+        name = {"ctrl": "super", "super": "ctrl"}.get(name, name)
+    attribute = "key_" + name
     for key, state in ((left, wm.glfw.PRESS), (right, wm.glfw.PRESS), (left, wm.glfw.RELEASE)):
         input.keyboard_callback(None, key, 0, state, 0)
         frame()
@@ -75,7 +79,8 @@ def test_focus_loss_clears_held_input_in_the_owner(adapter):
     input.keyboard_callback(None, wm.glfw.KEY_LEFT_CONTROL, 0, wm.glfw.PRESS, 0)
     input.mouse_button_callback(None, 0, wm.glfw.PRESS, 0)
     frame()
-    assert input.io.key_ctrl and input.io.mouse_down[0]
+    control = "key_super" if input.io.config_mac_osx_behaviors else "key_ctrl"
+    assert getattr(input.io, control) and input.io.mouse_down[0]
     input.focus_callback(None, False)
     frame()
-    assert not input.io.key_ctrl and not input.io.mouse_down[0]
+    assert not getattr(input.io, control) and not input.io.mouse_down[0]

@@ -141,6 +141,7 @@ def test_missing_or_nonfinite_target_pose_is_not_replaced_with_world_origin():
 
 def _app():
     app = ViewerApp.__new__(ViewerApp)
+    app._camera_transition = None
     node = SceneNode(11, "root", NodeType.LINK, body_index=1)
     app.session = SimpleNamespace(
         nodes=[node],

@@ -356,17 +356,17 @@ def test_output_panel_filters_visible_messages(viewer):
     output.write("[mojive/ui] FILTER_KEEP", level="warning", timestamp="10:00:00")
     output.write("[mojive/window] FILTER_HIDE", level="info", timestamp="10:00:01")
     panel._filter_text = "mojive/ui"
-    panel._level_filter = 0
+    panel._levels = {"info", "warning", "error"}
     panel._filter_cache_key = None
     activate_panel(viewer, "Output")
 
     try:
         viewer.sync()
         item_rect(viewer, "input_text_with_hint", "##output-filter")
-        item_rect(viewer, "combo", "##output-level")
+        item_rect(viewer, "button", "##output-level-warning")
     finally:
         panel._filter_text = ""
-        panel._level_filter = 0
+        panel._levels = {"info", "warning", "error"}
         panel._filter_cache_key = None
         output.clear()
 
@@ -470,30 +470,18 @@ def test_hierarchy_visibility_toggle_does_not_select_the_row(viewer):
     viewer.session.submit(cmd.Select(selected_before))
 
 
-def test_hierarchy_filter_strip_accepts_the_ordinary_mouse_wheel(viewer):
+def test_hierarchy_filters_wrap_without_a_horizontal_scrollbar(viewer):
     from imgui_bundle import imgui
 
     activate_panel(viewer, "Hierarchy")
-    point = item_rect(viewer, "button", "all##hierarchy-type-all")
-    io = imgui.get_io()
-    io.add_mouse_pos_event(*point)
-    viewer.sync()
-
-    targets = []
-    original = imgui.set_scroll_x
-
-    def record(value):
-        targets.append(float(value))
-        original(value)
-
-    imgui.set_scroll_x = record
-    try:
-        io.add_mouse_wheel_event(0.0, -1.0)
-        viewer.sync()
-    finally:
-        imgui.set_scroll_x = original
-
-    assert targets and targets[-1] > 0.0
+    bounds = [
+        item_bounds(viewer, "button", f"##hierarchy-type-{kind}")
+        for kind in ("all", "link", "geom", "camera", "light")
+    ]
+    window = imgui.internal.find_window_by_name("Hierarchy")
+    assert len({row[1] for row in bounds}) > 1
+    assert all(row[2] <= window.inner_clip_rect.max.x for row in bounds)
+    assert not window.scrollbar_x
 
 
 def test_keyframe_timeline_owns_the_wheel_while_zooming(viewer):
@@ -553,29 +541,39 @@ def test_control_click_owns_status_and_right_click_copies(viewer) -> None:
         activate_panel(v, "Control")
         for _ in range(2):
             v.sync()
-        name = "hinge_drive"
-        point = item_rect(v, "text_disabled", name)
+        actuator = next(a for a in v.session.actuators if a.name == "hinge_drive")
+        slide = next(a for a in v.session.actuators if a.name == "slide_drive")
+        name = actuator.name
+        point = item_rect(v, "invisible_button", f"##actuator-select-{actuator.ctrl_address}")
         io.add_mouse_pos_event(*point)
         v.sync()
         click(v, io, point)
 
-        assert [hint.hint_id for hint in v.app._panel_status_hints] == ["panel.copy-name"]
+        assert [hint.hint_id for hint in v.app._panel_status_hints] == [
+            "panel.focus-item",
+            "panel.copy-name",
+        ]
         click(v, io, point, button=1)
         assert imgui.get_clipboard_text() == name
 
-        first = item_bounds(v, "text_disabled", "hinge_drive")
-        second = item_bounds(v, "text_disabled", "slide_drive")
+        first = item_bounds(v, "invisible_button", f"##actuator-select-{actuator.ctrl_address}")
+        second = item_bounds(v, "invisible_button", f"##actuator-select-{slide.ctrl_address}")
         gap_point = (first[0] + 2.0, (first[3] + second[1]) * 0.5)
         assert first[3] <= gap_point[1] <= second[1]
         io.add_mouse_pos_event(*gap_point)
         v.sync()
-        assert [hint.hint_id for hint in v.app._panel_status_hints] == ["panel.copy-name"]
+        assert [hint.hint_id for hint in v.app._panel_status_hints] == [
+            "panel.focus-item",
+            "panel.copy-name",
+        ]
 
         io.add_mouse_pos_event(*center(v))
         v.sync()
         assert v.app._status_panel == "Control"
         assert [hint.hint_id for hint in v.app._status_tool_hints(loading=False)] == [
-            "panel.copy-name"
+            "selection.clear",
+            "panel.focus-item",
+            "panel.copy-name",
         ]
         click(v, io, center(v))
         assert v.app._status_panel == "Viewport"
@@ -599,13 +597,14 @@ def test_control_click_owns_status_and_right_click_copies(viewer) -> None:
         v.sync()
         v.sync()
         assert [hint.hint_id for hint in v.app._status_tool_hints(loading=False)] == [
-            "panel.copy-name"
+            "panel.focus-item",
+            "panel.copy-name",
         ]
         io.add_mouse_button_event(0, False)
         v.sync()
         activate_panel(v, "Camera")
         assert v.app._status_panel == "Camera"
-        assert v.app._panel_status_hints == ()
+        assert [hint.hint_id for hint in v.app._panel_status_hints] == ["panel.copy-name"]
         activate_panel(v, "Control")
         assert v.app._status_panel == "Control"
     finally:
@@ -637,8 +636,11 @@ def test_truncated_joint_name_has_full_tooltip_and_copy_action(viewer) -> None:
         for _ in range(2):
             v.sync()
         joint = next(item for item in v.session.joints if item.name == "05_multi_revolute_z")
-        item_label = f"{joint.name}##joint-select-{joint.joint_id}"
-        point = item_rect(v, "selectable", item_label)
+        joint.name = "very_long_joint_name_with_an_extended_description_for_clipping"
+        v.app.panels.get("Joints")._search = joint.name
+        v.sync()
+        item_label = f"##joint-select-{joint.joint_id}"
+        point = item_rect(v, "invisible_button", item_label)
         io.add_mouse_pos_event(*point)
 
         def record_tooltip(text, *args, **kwargs):
@@ -678,6 +680,7 @@ def test_free_joint_row_keeps_joint_selection_and_exposes_the_transform_gizmo(vi
         width=W,
         height=H,
     )
+    v.set_gizmo_mode("translate")
     io = imgui.get_io()
     try:
         v.app.panels.open_panel("Joints")
@@ -685,7 +688,9 @@ def test_free_joint_row_keeps_joint_selection_and_exposes_the_transform_gizmo(vi
             v.sync()
         activate_panel(v, "Joints")
         joint = next(item for item in v.session.joints if item.name == "04_free_6dof")
-        point = item_rect(v, "selectable", f"{joint.name}##joint-select-{joint.joint_id}")
+        v.app.panels.get("Joints")._search = joint.name
+        v.sync()
+        point = item_rect(v, "invisible_button", f"##joint-select-{joint.joint_id}")
 
         click(v, io, point)
         for _ in range(2):
@@ -783,6 +788,7 @@ def test_double_clicking_joint_and_hierarchy_rows_focuses_the_camera(viewer) -> 
         width=W,
         height=H,
     )
+    v.set_gizmo_mode("translate")
     io = imgui.get_io()
     try:
         v.app.panels.open_panel("Joints")
@@ -790,8 +796,10 @@ def test_double_clicking_joint_and_hierarchy_rows_focuses_the_camera(viewer) -> 
             v.sync()
         activate_panel(v, "Joints")
         joint = next(item for item in v.session.joints if item.name == "01_revolute_y")
-        label = f"{joint.name}##joint-select-{joint.joint_id}"
-        point = item_rect(v, "selectable", label)
+        label = f"##joint-select-{joint.joint_id}"
+        point = item_rect(
+            v, "invisible_button" if label.startswith("##joint-select-") else "selectable", label
+        )
 
         click(v, io, point)
         assert v.app._status_panel == "Joints"
@@ -959,7 +967,7 @@ def test_material_inspector_exposes_instance_and_shared_controls(viewer):
     header = reveal_item(viewer, "collapsing_header", "material")
     click(viewer, imgui.get_io(), header)
 
-    item_rect(viewer, "input_text", "##entity_name")
+    item_rect(viewer, "invisible_button", "##entity_name_label")
     item_rect(viewer, "color_edit4", "##geometry_instance_color")
     _scroll_panel(viewer, "Inspector", -6.0)
     contact = reveal_item(viewer, "collapsing_header", "contact properties")
@@ -1726,6 +1734,9 @@ def test_font_size_is_in_layout_space(viewer):
 @pytest.fixture(scope="module")
 def free_body_viewer():
     v = build(resolve("perturb_ghost"), "mujoco", paused=True, vsync=False, width=W, height=H)
+    v.set_gizmo_mode("translate")
+    # This suite exercises immediate authoring; deferred Apply has its own interaction tests.
+    v.app.live_model_updates = True
     try:
         for _ in range(14):
             v.sync()
@@ -1935,7 +1946,7 @@ def test_gizmo_is_live_for_a_free_body(free_body_viewer):
     assert not v.app.gizmo.hovered
 
 
-def test_tool_column_hides_without_actions_and_centers_when_available(free_body_viewer):
+def test_tool_column_can_arm_before_selection_and_centers_when_available(free_body_viewer):
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
@@ -1945,7 +1956,7 @@ def test_tool_column_hides_without_actions_and_centers_when_available(free_body_
     for _ in range(3):
         v.sync()
     tools = imgui.internal.find_window_by_name("Tools###viewport_tools")
-    assert tools is None or not tools.active
+    assert tools is not None and tools.active
 
     node = next(item for item in v.session.nodes if item.posable)
     assert v.session.submit(cmd.Select(node.object_id))
@@ -2028,6 +2039,7 @@ def test_joint_gizmo_is_live_in_the_real_viewer_pipeline(workspace):
         width=W,
         height=H,
     )
+    v.set_gizmo_mode("translate")
     try:
         for _ in range(10):
             v.sync()
@@ -2078,6 +2090,7 @@ def test_joint_limit_tick_click_sets_the_endpoint_in_the_real_viewer() -> None:
         width=W,
         height=H,
     )
+    v.set_gizmo_mode("translate")
     try:
         for _ in range(10):
             v.sync()
@@ -2151,6 +2164,7 @@ def test_compact_joint_range_expands_to_a_drag_track_in_the_real_viewer(
         width=W,
         height=H,
     )
+    v.set_gizmo_mode("translate")
     io = imgui.get_io()
     try:
         for _ in range(8):
@@ -2251,6 +2265,7 @@ def test_limited_hinge_drag_keeps_feedback_and_claim_until_mouse_release() -> No
         width=W,
         height=H,
     )
+    v.set_gizmo_mode("translate")
     io = imgui.get_io()
     try:
         for _ in range(8):
@@ -2369,6 +2384,7 @@ def test_limited_slide_drag_keeps_feedback_and_claim_until_mouse_release() -> No
         width=W,
         height=H,
     )
+    v.set_gizmo_mode("translate")
     io = imgui.get_io()
     try:
         for _ in range(8):
@@ -2466,6 +2482,7 @@ def test_multi_joint_viewport_picker_selects_the_gizmo_target():
         width=W,
         height=H,
     )
+    v.set_gizmo_mode("translate")
     try:
         for _ in range(10):
             v.sync()
@@ -2489,7 +2506,15 @@ def test_multi_joint_viewport_picker_selects_the_gizmo_target():
         assert abs(picker.pos.x - (vx + vw * 0.55)) < 320.0
         assert abs(picker.pos.y - (vy + vh * 0.45)) < 240.0
         label = f"05_multi_revolute_z  (hinge)##viewport-joint-{choices[2].joint_id}"
-        click(v, imgui.get_io(), item_rect(v, "selectable", label))
+        click(
+            v,
+            imgui.get_io(),
+            item_rect(
+                v,
+                "invisible_button" if label.startswith("##joint-select-") else "selectable",
+                label,
+            ),
+        )
         for _ in range(3):
             v.sync()
 
@@ -2500,10 +2525,26 @@ def test_multi_joint_viewport_picker_selects_the_gizmo_target():
         activate_panel(v, "Joints")
         for _ in range(2):
             v.sync()
-        row_labels = [f"{joint.name}##joint-select-{joint.joint_id}" for joint in choices]
-        before_y = [item_rect(v, "selectable", label)[1] for label in row_labels]
-        click(v, imgui.get_io(), item_rect(v, "selectable", row_labels[1]))
-        after_y = [item_rect(v, "selectable", label)[1] for label in row_labels]
+        v.app.panels.get("Joints")._search = "05_multi"
+        v.sync()
+        row_labels = [f"##joint-select-{joint.joint_id}" for joint in choices]
+        before_y = [
+            item_rect(
+                v,
+                "invisible_button" if label.startswith("##joint-select-") else "selectable",
+                label,
+            )[1]
+            for label in row_labels
+        ]
+        click(v, imgui.get_io(), item_rect(v, "invisible_button", row_labels[1]))
+        after_y = [
+            item_rect(
+                v,
+                "invisible_button" if label.startswith("##joint-select-") else "selectable",
+                label,
+            )[1]
+            for label in row_labels
+        ]
         assert after_y == pytest.approx(before_y)
         assert v.session.selected_node is not None
         assert v.session.selected_node.joint_index == choices[1].joint_id

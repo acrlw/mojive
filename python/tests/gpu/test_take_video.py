@@ -12,7 +12,7 @@ from mojive import CaptureSurface, RecordingConfig, RecordingPhase, ViewerConfig
 from mojive import commands as cmd
 from mojive.assets import resolve
 from mojive.tools.keyframe_timeline import populate_take, show_timeline
-from mojive.tools.ui_runtime import _click, _item_center
+from mojive.tools.ui_runtime import _activate_panel, _click, _item_center, _item_rect
 
 pytestmark = pytest.mark.gpu
 
@@ -60,7 +60,7 @@ def test_button_rewinds_countdown_pause_tail_and_copy_saved_path(
         append(recorder, image)
 
     monkeypatch.setattr(VideoRecorder, "append", capture)
-    _click(viewer, _item_center(viewer, "button", "Record Take Video##take-video"))
+    _click(viewer, _item_center(viewer, "invisible_button", "##take-video"))
     assert viewer.recording.phase is RecordingPhase.COUNTDOWN
     assert session.state_take_cursor == 0 and not session.state_take_playing
     tick(viewer)
@@ -114,7 +114,8 @@ def test_button_rewinds_countdown_pause_tail_and_copy_saved_path(
     viewer.sync()
     status = app.output.active_status()
     assert status.level == "success" and str(path.resolve()) in status.text
-    point = _item_center(viewer, "invisible_button", "##status_message")
+    _activate_panel(viewer, "Output")
+    point = _item_center(viewer, "invisible_button", f"##output-row-{status.sequence}")
     io = imgui.get_io()
     io.add_mouse_pos_event(*point)
     viewer.sync()
@@ -122,6 +123,7 @@ def test_button_rewinds_countdown_pause_tail_and_copy_saved_path(
     viewer.sync()
     io.add_mouse_button_event(1, False)
     viewer.sync()
+    _click(viewer, _item_center(viewer, "menu_item", "Copy path"))
     assert imgui.get_clipboard_text() == str(path.resolve())
     assert app.output.active_status(now=time.monotonic() + 9) is None
     assert status in app.output.entries()
@@ -147,17 +149,21 @@ def test_countdown_cancel_and_transport_changes_end_take_video(viewer, tmp_path)
 def test_closing_video_settings_with_escape_preserves_loop_and_allows_recording(viewer):
     session = viewer.session
     assert session.submit(cmd.SetStateTakeLoop(2, 4))
-    _click(viewer, _item_center(viewer, "button", "Video Settings##take-video-settings"))
+    _click(viewer, _item_center(viewer, "invisible_button", "##timeline-options"))
     for _ in range(3):
         viewer.sync()
     io = imgui.get_io()
     for field, value in (("countdown", "2.5"), ("end_hold", "0.5")):
-        _click(viewer, _item_center(viewer, "input_float", f"##take-video-{field}"))
-        io.add_key_event(imgui.Key.mod_ctrl, True)
+        lo, hi = _item_rect(
+            viewer, "input_float", "Start delay (s)" if field == "countdown" else "End hold (s)"
+        )
+        _click(viewer, (lo[0] + 20, (lo[1] + hi[1]) * 0.5))
+        modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
+        io.add_key_event(modifier, True)
         io.add_key_event(imgui.Key.a, True)
         viewer.sync()
         io.add_key_event(imgui.Key.a, False)
-        io.add_key_event(imgui.Key.mod_ctrl, False)
+        io.add_key_event(modifier, False)
         io.add_input_characters_utf8(value)
         viewer.sync()
         io.add_key_event(imgui.Key.enter, True)
@@ -167,7 +173,7 @@ def test_closing_video_settings_with_escape_preserves_loop_and_allows_recording(
         assert getattr(viewer.app.recording_config, field) == float(value)
         assert viewer.app.localizer.preference("recording")[field] == float(value)
     # Leave the number editor before testing Escape's popup ownership.
-    _click(viewer, _item_center(viewer, "text_unformatted", "Start delay (s)"))
+    _click(viewer, _item_center(viewer, "input_float", "Start delay (s)"))
     io.add_key_event(imgui.Key.escape, True)
     viewer.sync()
     io.add_key_event(imgui.Key.escape, False)
@@ -175,7 +181,7 @@ def test_closing_video_settings_with_escape_preserves_loop_and_allows_recording(
     assert session.state_take_loop == (2, 4)
     flags = imgui.PopupFlags_.any_popup_id | imgui.PopupFlags_.any_popup_level
     assert not imgui.is_popup_open("", flags)
-    _click(viewer, _item_center(viewer, "button", "Record Take Video##take-video"))
+    _click(viewer, _item_center(viewer, "invisible_button", "##take-video"))
     assert viewer.recording.phase is RecordingPhase.COUNTDOWN
 
 

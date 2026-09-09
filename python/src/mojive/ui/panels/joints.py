@@ -9,18 +9,15 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, JointInfo, NodeType
-from ..pointer_bindings import PointerAction
 from . import (
     Panel,
     PanelContext,
+    activate_edit_gizmo,
     copy_state_vector,
-    copyable_name_item,
-    padded_selectable,
-    pointer_pressed,
     publish_focus_item_hint,
     searchable_ordered_list_header,
-    value_slider,
 )
+from .value_cards import value_card, value_rail
 
 _SCALAR_KINDS = ("hinge", "slide")
 _BROWSE_THRESHOLD = 256
@@ -36,6 +33,7 @@ class JointsPanel(Panel):
 
     def __init__(self) -> None:
         super().__init__()
+        self._angular_degrees = False
         self._initial_qpos = np.zeros(0, np.float64)
         self._snapshot_generation = -1
         self._joint_page = 0
@@ -111,11 +109,6 @@ class JointsPanel(Panel):
         self._joint_table(ctx, ordered, self._joint_nodes)
 
     def _joint_table(self, ctx: PanelContext, joints, joint_nodes) -> None:
-        flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
-        if not imgui.begin_table("joint_values", 2, flags):
-            return
-        imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.36)
-        imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch, 0.64)
         clipper = imgui.ListClipper()
         clipper.begin(len(joints))
         while clipper.step():
@@ -123,66 +116,53 @@ class JointsPanel(Panel):
                 joint = joints[index]
                 self._joint_row(ctx, joint, joint_nodes.get(joint.joint_id))
         clipper.end()
-        imgui.end_table()
 
     def _joint_row(self, ctx: PanelContext, j: JointInfo, joint_node) -> None:
         qpos = ctx.session.frame.qpos
         if qpos is None or j.qpos_adr >= len(qpos):
             return
         name = j.name or f"joint{j.joint_id}"
-        imgui.table_next_row()
-        imgui.table_next_column()
         selected_node = ctx.session.selected_node
-        selected = bool(joint_node is not None and selected_node is joint_node)
-        if joint_node is None:
-            label_width = max(1.0, imgui.get_content_region_avail().x)
-            imgui.text_disabled(name)
-        else:
-            label_width = max(1.0, imgui.get_content_region_avail().x)
-            imgui.begin_disabled(not ctx.session.paused)
-            clicked, _ = padded_selectable(
-                f"{name}##joint-select-{j.joint_id}",
-                selected,
-                imgui.SelectableFlags_.none.value,
-                imgui.ImVec2(label_width, 0.0),
-            )
-            imgui.end_disabled()
-            double_clicked = imgui.is_item_hovered(
-                imgui.HoveredFlags_.allow_when_disabled.value
-            ) and pointer_pressed(ctx, PointerAction.PANEL_FOCUS)
-            if clicked:
+        selected = joint_node is not None and selected_node is joint_node
+        detail = f"{j.type} - {j.dof} {ctx.tr('dof')}"
+        with value_card(ctx, f"##joint-select-{j.joint_id}", name, detail, selected=selected) as (
+            clicked,
+            focused,
+        ):
+            if joint_node is not None and (clicked or focused):
                 ctx.submit(cmd.SelectNode(joint_node.node_id))
-            if double_clicked and ctx.focus_joint is not None:
-                if not clicked:
-                    ctx.submit(cmd.SelectNode(joint_node.node_id))
-                ctx.focus_joint(j.joint_id)
-        copyable_name_item(ctx, name, label_width)
-        imgui.table_next_column()
-        if j.type not in _SCALAR_KINDS:
-            imgui.align_text_to_frame_padding()
-            imgui.text_disabled(f"{j.type} · {j.dof} {ctx.tr('dof')}")
-            return
+                if focused:
+                    activate_edit_gizmo(ctx, joint_node, j)
+                    if ctx.focus_joint is not None:
+                        ctx.focus_joint(j.joint_id)
+            if j.type not in _SCALAR_KINDS:
+                imgui.align_text_to_frame_padding()
+                imgui.text_disabled(ctx.tr("Edit in viewport"))
+                return
+            value = float(qpos[j.qpos_adr])
+            lo, hi = _joint_range(j)
+            imgui.begin_disabled(not ctx.session.adapter.caps.write_qpos or not ctx.session.paused)
+            edit = value_rail(
+                ctx,
+                f"##joint-qpos-{j.qpos_adr}",
+                value,
+                (lo, hi) if j.limited and hi > lo else None,
+                initial=_initial_value(self._initial_qpos, j.qpos_adr, value),
+                fmt="%.3f",
+                show_reset=False,
+                unit="rad" if j.type == "hinge" else "m",
+                angular_degrees=self._angular_degrees,
+                toggle_unit=self._toggle_angle_unit,
+            )
+            value_clicked = edit.activated
+            imgui.end_disabled()
+            if value_clicked and joint_node is not None and ctx.session.paused:
+                ctx.submit(cmd.SelectNode(joint_node.node_id))
+            if edit.changed:
+                ctx.submit(cmd.SetQpos(j.qpos_adr, edit.value))
 
-        value = float(qpos[j.qpos_adr])
-        lo, hi = _joint_range(j)
-        imgui.set_next_item_width(-1.0)
-        imgui.begin_disabled(not ctx.session.adapter.caps.write_qpos or not ctx.session.paused)
-        edit = value_slider(
-            f"##joint-qpos-{j.qpos_adr}",
-            value,
-            lo,
-            hi,
-            bindings=ctx.input_bindings,
-            initial=_initial_value(self._initial_qpos, j.qpos_adr, value),
-            fmt="%.4f",
-            more_hint="",
-        )
-        value_clicked = imgui.is_item_clicked(imgui.MouseButton_.left)
-        imgui.end_disabled()
-        if value_clicked and joint_node is not None and ctx.session.paused:
-            ctx.submit(cmd.SelectNode(joint_node.node_id))
-        if edit.changed:
-            ctx.submit(cmd.SetQpos(j.qpos_adr, edit.value))
+    def _toggle_angle_unit(self):
+        self._angular_degrees = not self._angular_degrees
 
     def _snapshot(self, ctx: PanelContext) -> None:
         gen = ctx.session.structure_generation

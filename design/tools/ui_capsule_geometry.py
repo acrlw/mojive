@@ -12,9 +12,9 @@ from mojive.curves2d import (
     smooth_capsule_points,
 )
 from mojive.ui.theme import THEME
+from mojive.ui.viewport_widgets import CAPSULE_SMOOTHING as CAPSULE_SMOOTHING
 from mojive.ui.viewport_widgets import CAPSULE_SURFACE_ALPHA
 
-CAPSULE_SMOOTHING = 0.382
 CAPSULE_OUTLINE_LABELS = ("Neutral gray", "Soft white")
 
 

@@ -1,6 +1,6 @@
 # 运行 C++ / bgfx Viewer
 
-原生后端通过现有 Python Viewer、`Renderer` 和 `SceneRenderer` 使用。bgfx 直接调用系统图形 API：macOS 使用 Metal，Windows 使用 Direct3D 12，Linux 使用 Vulkan。它不经过 wgpu，也不需要 Dawn。OpenGL 和 wgpu 后端继续保留，用于兼容现有脚本、回归对照和独立选择；开发 bgfx 功能时不必再实现一层 wgpu。
+原生后端通过现有 Python Viewer、`Renderer` 和 `SceneRenderer` 使用。bgfx 直接调用系统图形 API：本阶段验收 macOS／Metal 和 Linux／Vulkan；Windows 暂缓开发与验收。它不经过 wgpu，也不需要 Dawn。OpenGL 和 wgpu 后端继续保留，用于兼容现有脚本、回归对照和独立选择；开发 bgfx 功能时不必再实现一层 wgpu。
 
 ## 启动
 
@@ -53,9 +53,9 @@ with mojive.Renderer(model, width=640, height=480, renderer="bgfx") as renderer:
 
 `SceneRenderer(..., renderer="bgfx")`、`build(..., renderer="bgfx")` 和 `MOJIVE_RENDERER=bgfx` 同样可用。原来的 Make 场景目标使用 `BACKEND=bgfx`，同时保留上述扩展路径。
 
-RGB 为左上原点 `uint8`，metric depth 为相机前向的 `float32` 世界单位深度，object ID 为 `uint32`，分割为 `int32` 二元组。颜色 MSAA 请求向下取 1×、2× 或 4×（0 表示不抗锯齿），更大的模型请求不会导致加载失败。矩阵继续按行主序解释，平移位于 `matrix[:3, 3]`；用户不需要转置。已有 `out` 缓冲和非连续目标数组继续可用。
+RGB 为左上原点 `uint8`，metric depth 为相机前向的 `float32` 世界单位深度，object ID 为 `uint32`，分割为 `int32` 二元组。颜色 MSAA 请求向下取 1×、2×、4× 或 8×（0 表示不抗锯齿），更大的模型请求不会导致加载失败。矩阵继续按行主序解释，平移位于 `matrix[:3, 3]`；用户不需要转置。已有 `out` 缓冲和非连续目标数组继续可用。
 
-异步读取返回 `concurrent.futures.Future`，可交给 `asyncio.wrap_future()`。它保留提交时的帧，普通姿态／相机更新不会取消它；缩放、替换场景结构或释放目标会取消尚未完成的读取并报告异常。返回数组不依赖 GPU 对象寿命。Future 完成前不能修改其 `out`。
+异步读取返回 `concurrent.futures.Future`，可交给 `asyncio.wrap_future()`。它保留提交时的帧，普通姿态／相机更新不会取消它；缩放、替换场景结构或释放目标会取消尚未完成的读取并报告异常。返回数组不依赖 GPU 对象寿命。Future 完成前不能修改其 `out`。每个共享设备最多保留八个原生读回请求；异步队列满时立即报告错误，调用方应等待已有结果后重试。取消公开 Future 仍会完成内部清理，不写入被取消请求的 `out`，也不泄漏队列容量。
 
 ## 已实现的渲染能力
 
@@ -77,7 +77,7 @@ RGB 为左上原点 `uint8`，metric depth 为相机前向的 `float32` 世界�
 - 原生日志保存在有界历史中，由 Python 调用线程按游标转发到既有 Loguru／Output；worker 不回调 Python。
 - Mojive 管理的 MuJoCo 仿真使用已有并发驱动。调用者自己拥有的 `MjData` 仍需保证写入与 `update_scene()` 读取互斥。
 
-VSync 直接控制 GPU 呈现同步，不使用 sleep 模拟，也没有固定的 60 FPS 上限；节奏取决于窗口所在显示器当前启用的刷新模式。GPU 提交队列限制为一个帧，呈现表面保留两个 drawable，减少过时画面排队。bgfx 的 VSync 是共享设备策略：同一进程中只要一个窗口开启，就保持所有共享窗口同步；关闭该窗口或关闭其 VSync 请求后重新计算。`--no-vsync` 用于显式无同步运行。
+VSync 直接控制 GPU 呈现同步，不使用 sleep 模拟，也没有固定的 60 FPS 上限；节奏取决于窗口所在显示器当前启用的刷新模式。GPU 最多两个帧在途；Metal 同步呈现保留两个 drawable，关闭 VSync 时提供第三张备用图像，避免合成器占用导致完全串行等待。bgfx 的 VSync 是共享设备策略：同一进程中只要一个窗口开启，就保持所有共享窗口同步；关闭该窗口或关闭其 VSync 请求后重新计算。`--no-vsync` 用于显式无同步运行。
 
 Python 面板和用户回调仍受 GIL 约束。当前没有引入 daemon、远程 session runtime 或跨进程崩溃隔离。macOS 的原生等待会服务主线程系统队列，避免 AppKit 窗口创建与渲染线程相互等待。
 
@@ -105,11 +105,13 @@ make native-wheel-test
 
 `native-ui-parity` 检查轴球与文字在点击转场中的连续相对位置，以及中文／英文、圆角轮廓和线条的抗锯齿。`native-load-benchmark` 在独立进程中比较十种 Menagerie 机器人的首次加载与同进程重复加载，分别记录解析、资源准备、首帧提交和首帧可读取的时间；不会把解析时间当作整个等待时间，也不会把 GPU 读回时间称为实际屏幕显示时间。系统文件缓存未清除。
 
+后台加载和模型编辑在工作线程准备原生网格、内容摘要和纹理 mipmap，提交时复用准备结果。不可变网格和纹理按对象身份与内容复用 CPU／GPU 存储；重新编译只上传实际替换的资源，变形更新保持场景独立。GPU 资源提交仍在 owner 上完成，首次大资源上传还没有按帧预算分段。
+
 原生纹理使用仓库已有的 stb resize，在释放 GIL 后生成线性光 mipmap；较大的纹理集合使用有界线程池。完成的像素数据以不可变共享存储交给上传任务，避免额外复制，并保证调用方释放后 GPU 仍能读取。
 
 `native-wheel-test` 构建平台专用 wheel，安装到独立目录，移除开发环境变量后实际渲染。安装这个 wheel 后无需设置 `MOJIVE_NATIVE_BUILD`。普通 `uv build` 仍生成原有纯 Python 包；只有显式设置 `MOJIVE_NATIVE_WHEEL_BUILD` 才附带扩展、shader 和原生依赖许可证。当前 wheel 匹配构建机器的 Python ABI、架构和操作系统版本，不是跨平台通用包。
 
-本机实测为 macOS／Metal，包括 Retina 2× framebuffer 和 150% 中文 UI。Vulkan 的全部 shader 已编译为 SPIR-V；Linux／Vulkan 和 Windows／D3D12 的实际设备运行仍需在对应机器验收。Linux 窗口当前使用 X11（Wayland 桌面可经 XWayland），尚未提供原生 Wayland 窗口路径。
+本轮实测为 macOS／Metal，包括 Retina 2× framebuffer 和 150% 中文 UI。当前分支已包含 Linux／Vulkan 的 X11 和原生 Wayland 窗口、输入和安装包支持，并有前轮 Ubuntu／NVIDIA 与隔离 Weston 验收记录。本轮资源与 runtime 改动仍需在 Linux 设备复验；SPIR-V 编译不能替代设备验收。Windows 暂不纳入本阶段。
 
 ## 鼠标映射和后端能力
 

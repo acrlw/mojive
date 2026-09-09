@@ -1466,6 +1466,18 @@ def test_actuator_visual_metadata_and_controls_follow_mujoco_addresses():
         assert [item.act_count for item in actuators] == model.actuator_actnum.tolist()
         assert source.actuator_ctrl_address.tolist() == model.actuator_ctrladr.tolist()
         assert source.actuator_ctrl_range == pytest.approx(model.actuator_ctrlrange)
+        nodes = {node.node_id: node for node in a.nodes()}
+        for actuator in actuators:
+            target = nodes[actuator.target_node_id]
+            transmission = int(model.actuator_trntype[actuator.actuator_id])
+            source_id = int(model.actuator_trnid[actuator.actuator_id, 0])
+            if transmission == mujoco.mjtTrn.mjTRN_JOINT:
+                assert target.type is NodeType.JOINT and target.joint_index == source_id
+            elif transmission == mujoco.mjtTrn.mjTRN_BODY:
+                assert target.type in (NodeType.LINK, NodeType.ROBOT)
+                assert target.body_index == source_id
+            elif transmission == mujoco.mjtTrn.mjTRN_SITE:
+                assert target.type is NodeType.SITE and target.site_index == source_id
 
         frame = a.frame(FrameNeeds(poses=False, actuator=True, diagnostics=True))
         assert frame.actuator_activation.shape == (model.nactuator,)
