@@ -57,6 +57,7 @@ def _focus_app(joint: JointInfo, frame: SceneFrame) -> ViewerApp:
         joint_index=joint.joint_id,
     )
     app = object.__new__(ViewerApp)
+    app._camera_transition = None
     app.session = _FocusSession(joint, node, frame)
     app.camera = OrbitCamera(pivot=np.zeros(3), distance=3.0, yaw=0.0)
     app.camera_out = _CameraSink()
@@ -101,6 +102,7 @@ def test_joint_focus_can_avoid_an_occluder_with_a_small_nearby_turn() -> None:
     blocker = SceneNode(8, "torso", NodeType.LINK, object_id=2, body_index=2)
     target_link = SceneNode(9, "forearm", NodeType.LINK, object_id=1, body_index=1)
     app = object.__new__(ViewerApp)
+    app._camera_transition = None
     app.camera = OrbitCamera(pivot=np.zeros(3), distance=3.0, yaw=0.0)
     nearby = np.array((np.cos(np.deg2rad(15.0)), np.sin(np.deg2rad(15.0)), 0.0))
 
@@ -135,6 +137,7 @@ def test_joint_focus_does_not_cross_the_model_only_to_avoid_an_occluder() -> Non
     blocker = SceneNode(8, "torso", NodeType.LINK, object_id=2, body_index=2)
     target_link = SceneNode(9, "forearm", NodeType.LINK, object_id=1, body_index=1)
     app = object.__new__(ViewerApp)
+    app._camera_transition = None
     app.camera = OrbitCamera(pivot=np.zeros(3), distance=3.0, yaw=0.0)
 
     def query(pick):
@@ -167,6 +170,7 @@ def test_hinge_focus_prefers_an_unblocked_view_from_above() -> None:
     target = SceneNode(7, "elbow", NodeType.JOINT, body_index=1, joint_index=0)
     target_link = SceneNode(9, "forearm", NodeType.LINK, object_id=1, body_index=1)
     app = object.__new__(ViewerApp)
+    app._camera_transition = None
     app.camera = OrbitCamera(pivot=np.zeros(3), distance=3.0, yaw=0.0)
     app.session = SimpleNamespace(
         adapter=SimpleNamespace(caps=SimpleNamespace(raycast=True)),
@@ -192,6 +196,7 @@ def test_hinge_focus_keeps_the_upper_view_when_only_the_lower_view_is_clear() ->
     blocker = SceneNode(8, "torso", NodeType.LINK, object_id=2, body_index=2)
     target_link = SceneNode(9, "forearm", NodeType.LINK, object_id=1, body_index=1)
     app = object.__new__(ViewerApp)
+    app._camera_transition = None
     app.camera = OrbitCamera(pivot=np.zeros(3), distance=3.0, yaw=0.0)
 
     def query(pick):
@@ -279,6 +284,7 @@ def test_hierarchy_node_focus_preserves_azimuth_at_iso_elevation() -> None:
         bounds=lambda: (np.full(3, -2.0), np.full(3, 2.0)),
     )
     app = object.__new__(ViewerApp)
+    app._camera_transition = None
     app.session = session
     app.camera = OrbitCamera(pivot=np.zeros(3), distance=3.0, yaw=0.0)
     app.camera_out = _CameraSink()
@@ -328,6 +334,7 @@ def test_hierarchy_camera_focus_uses_the_camera_world_position() -> None:
         source=None,
     )
     app = object.__new__(ViewerApp)
+    app._camera_transition = None
     app.session = session
     app.camera = OrbitCamera(pivot=np.zeros(3), distance=3.0, yaw=0.0)
     app.camera_out = _CameraSink()
@@ -367,6 +374,7 @@ def test_joint_selection_highlights_its_renderable_parent_without_changing_targe
 
 def test_joint_focus_from_a_link_does_not_replace_its_selection() -> None:
     app = object.__new__(ViewerApp)
+    app._camera_transition = None
     joint = JointInfo(0, "elbow", "hinge", True, (-1.0, 1.0), 0, 0, 1)
     link = SceneNode(3, "forearm", NodeType.LINK, object_id=9, body_index=1)
     joint_node = SceneNode(4, "elbow", NodeType.JOINT, body_index=1, joint_index=0)
@@ -388,6 +396,7 @@ def test_joint_focus_from_a_link_does_not_replace_its_selection() -> None:
 
 def test_viewport_double_click_requires_two_complete_short_left_clicks() -> None:
     app = object.__new__(ViewerApp)
+    app._camera_transition = None
     app.router = SimpleNamespace(
         wants_camera=lambda: True,
         released=False,
@@ -420,6 +429,7 @@ def test_viewport_double_click_requires_two_complete_short_left_clicks() -> None
 
 def test_viewport_double_click_falls_back_to_generic_node_focus() -> None:
     app = object.__new__(ViewerApp)
+    app._camera_transition = None
     app.router = SimpleNamespace(
         wants_camera=lambda: True,
         released=True,
@@ -447,6 +457,7 @@ def test_viewport_double_click_falls_back_to_generic_node_focus() -> None:
 
 def test_viewport_camera_drag_breaks_a_pending_double_click() -> None:
     app = object.__new__(ViewerApp)
+    app._camera_transition = None
     app.router = SimpleNamespace(
         wants_camera=lambda: True,
         released=False,

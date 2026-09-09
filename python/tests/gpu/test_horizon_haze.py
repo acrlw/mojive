@@ -193,18 +193,23 @@ def test_interactive_viewport_does_not_composite_haze_twice(tmp_path, monkeypatc
 
         assert viewport.shape == (*target.shape[:2], 3)
         assert np.all(target[..., 3] == 255)
-        # The floor-only scene has no Tool Column. Sample a full-height strip
-        # left of the actual playback host, including the visible horizon haze.
+        # Sample a full-height strip between the tool and playback hosts,
+        # including the horizon haze without either UI overlay.
         # Host bounds include placement, per-widget scale, and AA padding.
         style_scale = viewer.window.style_scale
         point_to_pixel = target.shape[1] / viewer.app._viewport_rect[2]
         playback = imgui.internal.find_window_by_name("Playback###viewport_playback")
         assert playback is not None and playback.active
         guard = 4.0 * style_scale
-        x0 = round(guard * point_to_pixel)
+        tools = imgui.internal.find_window_by_name("Tools###viewport_tools")
+        left = guard
+        if tools is not None and tools.active:
+            left = max(left, tools.pos.x + tools.size.x - viewer.app._viewport_rect[0] + guard)
+        x0 = round(left * point_to_pixel)
         x1 = round((playback.pos.x - viewer.app._viewport_rect[0] - guard) * point_to_pixel)
         assert x1 > x0
-        y0, y1 = x0, target.shape[0] - x0
+        y0 = round(guard * point_to_pixel)
+        y1 = target.shape[0] - y0
         difference = np.max(np.abs(target[..., :3].astype(int) - clear), axis=2)
         assert np.count_nonzero(difference[y0:y1, x0:x1] > 5) > 100
         np.testing.assert_array_equal(

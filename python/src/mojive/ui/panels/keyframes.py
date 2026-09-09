@@ -12,14 +12,20 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, KeyframeInfo, KeyframeProperties
-from ...curves2d import CORNER_SMOOTHING
+from ...curves2d import CORNER_SMOOTHING, capped_polyline_points
 from ...gizmo import _rounded_polygon_corners
 from ...input import InputClaim
-from ..draw2d import ImguiDraw2D, text_line_y
+from ..draw2d import ImguiDraw2D, fit_text, text_line_y
 from ..input_bindings import DEFAULT_INPUT_BINDINGS
 from ..pointer_bindings import PointerAction
 from ..theme import with_alpha
-from ..viewport_widgets import ToolHint, draw_playback_glyph, pointer_tool_hint
+from ..viewport_widgets import (
+    ToolHint,
+    draw_expand_glyph,
+    draw_playback_glyph,
+    draw_reset_glyph,
+    pointer_tool_hint,
+)
 from . import Panel, PanelContext, begin_kv_table, button_row_layout, button_width
 
 _MIN_TIMELINE_SPAN = 1e-6
@@ -51,6 +57,21 @@ def _rounded_command_icon_path(
                 points, radius, tuple(range(len(points))), smoothing=smoothing
             ),
         )
+    )
+
+
+@lru_cache(maxsize=64)
+def _fit_corner_path(scale: float, sx: int, sy: int, smoothing: float):
+    return capped_polyline_points(
+        (
+            (sx * 2 * scale, sy * 5 * scale),
+            (sx * 6 * scale, sy * 5 * scale),
+            (sx * 6 * scale, sy * scale),
+        ),
+        1.5 * scale,
+        round_start=True,
+        round_end=True,
+        smoothing=smoothing,
     )
 
 
@@ -105,13 +126,13 @@ def fitted_timeline_range(times: tuple[float, ...], fallback: float = 0.0) -> tu
     finite = tuple(float(value) for value in times if math.isfinite(value))
     if not finite:
         center = float(fallback) if math.isfinite(fallback) else 0.0
-        return center - 0.5, center + 0.5
+        return min(0.0, center), max(1.0, center + 0.5)
     lo, hi = min(finite), max(finite)
     if hi - lo < 1e-9:
         context = max(1.0, abs(lo) * 0.1)
-        return lo - context * 0.5, hi + context * 0.5
+        return max(0.0, lo - context * 0.5) if lo >= 0 else lo - context * 0.5, hi + context * 0.5
     padding = (hi - lo) * 0.08
-    return lo - padding, hi + padding
+    return max(0.0, lo - padding) if lo >= 0 else lo - padding, hi + padding
 
 
 def nice_timeline_step(span: float, pixel_width: float, target_pixels: float = 90.0) -> float:
@@ -136,6 +157,10 @@ def zoom_timeline_range(
     new_span = min(1e12, max(_MIN_TIMELINE_SPAN, span * math.exp(-float(wheel) * 0.18)))
     new_start = float(anchor) - ratio * new_span
     return new_start, new_start + new_span
+
+
+def timeline_channel_width(available: float, scale: float) -> float:
+    return 230 * scale if available >= 600 * scale else min(150 * scale, available * 0.45)
 
 
 def timeline_time_to_x(time: float, start: float, end: float, lo: float, hi: float) -> float:
@@ -251,19 +276,21 @@ def _draw_command_icon(
 
     def rounded_fill(points, *, radius: float = 0.75) -> None:
         draw.fringed_concave_fill(
-            tuple(
-                (x + px, y + py)
-                for px, py in _rounded_command_icon_path(
-                    tuple((px * s, py * s) for px, py in points), radius * s, smoothing
-                )
+            _rounded_command_icon_path(
+                tuple((px * s, py * s) for px, py in points), radius * s, smoothing
             ),
             color,
+            origin=(x, y),
         )
 
     if kind in _COMMAND_PLAYBACK_KINDS:
         draw_playback_glyph(
             draw, center, color, s * 0.85, _COMMAND_PLAYBACK_KINDS[kind], smoothing=smoothing
         )
+    elif kind in ("loop", "reset"):
+        draw_reset_glyph(draw, center, color, s * 0.72)
+    elif kind == "options":
+        draw_expand_glyph(draw, center, color, s)
     elif kind == "record":
         draw.circle_filled((x, y), 4.5 * s, color)
     elif kind == "clear":
@@ -302,6 +329,13 @@ def _draw_command_icon(
                 (direction * 3.5, 3.5),
             )
         )
+    elif kind == "fit":
+        for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            draw.fringed_concave_fill(_fit_corner_path(s, sx, sy, smoothing), color, origin=(x, y))
+    elif kind == "follow":
+        draw.line((x - 6 * s, y), (x + 2 * s, y), color, 1.5 * s, cap="round")
+        rounded_fill(((0, -3), (4, 0), (0, 3)), radius=0.4)
+        draw.line((x + 6 * s, y - 5 * s), (x + 6 * s, y + 5 * s), color, 1.5 * s, cap="round")
     elif kind == "view":
         draw.rect(
             (x - 7.0 * s, y - 5.0 * s),
@@ -370,7 +404,7 @@ def _command_button(
         draw.text(
             (lo[0] + 31.0 * scale, text_line_y(draw, lo[1] + height * 0.5)),
             foreground,
-            label,
+            fit_text(draw, label, max(1.0, width - 37 * scale)),
         )
     imgui.set_item_tooltip(tooltip)
     return bool(clicked and enabled)
@@ -405,6 +439,7 @@ class KeyframesPanel(Panel):
         super().__init__()
         self._model_id = -1
         self._selected_id = -1
+        self._selected_snapshot = -1
         self._selection_generation = -1
         self._properties: KeyframeProperties | None = None
         self._name = ""
@@ -412,8 +447,8 @@ class KeyframesPanel(Panel):
         self._error = ""
 
         self._view_model_id = -1
-        self._view_start = -0.5
-        self._view_end = 0.5
+        self._view_start = 0.0
+        self._view_end = 1.0
         self._view_needs_fit = True
         self._playhead = 0.0
         self._seen_active_id = -2
@@ -440,33 +475,13 @@ class KeyframesPanel(Panel):
 
     def draw(self, ctx: PanelContext) -> None:
         models = tuple(ctx.session.scene_models)
-        if not models:
-            imgui.text_disabled(ctx.tr("no editable model keyframes"))
-            return
-
         model_ids = tuple(model.model_id for model in models)
         selected = ctx.session.selected_node
         if self._model_id not in model_ids:
-            preferred = selected.model_id if selected is not None else model_ids[0]
-            self._set_model(preferred if preferred in model_ids else model_ids[0])
-
-        if begin_kv_table("keyframe_model"):
-            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
-            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.align_text_to_frame_padding()
-            imgui.text_disabled(ctx.tr("model"))
-            imgui.table_next_column()
-            slot = model_ids.index(self._model_id)
-            imgui.set_next_item_width(-1.0)
-            changed, slot = imgui.combo(
-                "##keyframe-model", slot, tuple(model.name for model in models)
+            preferred = selected.model_id if selected is not None else -1
+            self._set_model(
+                preferred if preferred in model_ids else model_ids[0] if model_ids else -1
             )
-            if changed:
-                self._set_model(model_ids[slot])
-            imgui.end_table()
-
         keyframes, keyframe_by_id = self._keyframes(ctx)
         take_times = ctx.session.state_take_times
         editable = bool(
@@ -475,53 +490,88 @@ class KeyframesPanel(Panel):
             and ctx.session.adapter.caps.supports("model.keyframe_edit")
         )
         self._sync_selection(ctx, keyframe_by_id, take_times)
-        self._draw_take_transport(ctx, take_times)
-        self._draw_take_video(ctx, take_times)
-        self._draw_keyframe_toolbar(ctx, keyframes, take_times, editable)
-        self._draw_timeline_toolbar(ctx, take_times)
+        self._draw_compact_toolbar(ctx, models, keyframes, take_times, editable)
+        if imgui.get_content_region_avail().x < 600 * ctx.style_scale:
+            self._draw_transport_header(ctx, take_times)
         self._draw_dope_sheet(ctx, keyframes, keyframe_by_id, take_times, editable)
-
-        self._draw_selected(ctx, editable)
-
-    def _draw_take_transport(self, ctx: PanelContext, take_times: Sequence[float]) -> None:
-        session = ctx.session
-        supported = bool(session.adapter.caps.simulation and session.adapter.caps.state_snapshots)
-        recording = session.state_take_recording
-        playing = session.state_take_playing
-        cursor = session.state_take_cursor
-
-        scale = ctx.style_scale
-        record_label = ctx.tr("Stop Recording" if recording else "Record New Take")
-        status = self._take_status(ctx, take_times)
-        status_width = float(imgui.calc_text_size(status).x)
-        if take_times:
-            count = len(take_times)
-            status_width = max(
-                status_width,
-                imgui.calc_text_size(f"{ctx.tr('PLAY')} · {ctx.tr('frame')}: {count}/{count}").x,
-                imgui.calc_text_size(f"{ctx.tr('REC')} · {ctx.tr('Recorded frames')}: {count}").x,
+        if self._selected_snapshot >= 0:
+            snapshot = next(
+                (
+                    item
+                    for item in ctx.session.scene_snapshots
+                    if item.snapshot_id == self._selected_snapshot
+                ),
+                None,
             )
-        widths = (
-            _command_button_width(record_label, scale),
-            *(_command_button_width("", scale) for _index in range(7)),
-            status_width,
+            if snapshot is None:
+                self._selected_snapshot = -1
+            else:
+                imgui.text_disabled(f"{snapshot.name}  {snapshot.time:.3f} {ctx.tr('s')}")
+                if imgui.button(ctx.tr("Remove snapshot") + "##remove-scene-snapshot"):
+                    ctx.submit(cmd.RemoveSceneSnapshot(snapshot.snapshot_id))
+                    self._selected_snapshot = -1
+        self._draw_selected(ctx, editable)
+        self._draw_error(ctx)
+
+    def _draw_compact_toolbar(self, ctx, models, keyframes, take_times, editable):
+        scale = ctx.style_scale
+        gap = 5 * scale
+        width = max(1.0, imgui.get_content_region_avail().x)
+        height = _COMMAND_HEIGHT_PT * scale
+        labels = (
+            ctx.tr("Stop Recording" if ctx.session.state_take_recording else "Record Take"),
+            ctx.tr("Stop Video" if ctx.take_video_active else "Export Video"),
+            ctx.tr("Capture Snapshot"),
         )
-        inline = button_row_layout(
-            widths,
-            imgui.get_content_region_avail().x,
-            3.0 * scale,
-        )
+        natural = [_command_button_width(label, scale) for label in labels]
+        auxiliary_width = (130 + 28 + 92 + 28) * scale + 3 * gap
+        wide = width >= 150 * scale + sum(natural) + auxiliary_width + 4 * gap
+        narrow = width < 600 * scale
+        shown = list(labels)
+        if not wide:
+            shown[1] = ""
+        if narrow and sum(_command_button_width(label, scale) for label in shown) + 2 * gap > width:
+            shown[2] = ""
+        if narrow and sum(_command_button_width(label, scale) for label in shown) + 2 * gap > width:
+            shown[0] = ""
+        widths = [
+            min(width - height - gap, 150 * scale),
+            *[_command_button_width(label, scale) for label in shown],
+        ]
+        toolbar_right = imgui.get_cursor_pos_x() + width
+        origin = imgui.get_cursor_screen_pos()
+        options_position = (origin.x + width - height, origin.y)
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, (gap, 6 * scale))
         imgui.push_style_var(
-            imgui.StyleVar_.item_spacing,
-            imgui.ImVec2(3.0 * scale, 4.0 * scale),
+            imgui.StyleVar_.frame_padding,
+            (8 * scale, max(0, (height - imgui.get_font_size()) * 0.5)),
+        )
+        imgui.set_next_item_width(max(1, widths[0]))
+        model_ids = tuple(model.model_id for model in models)
+        slot = model_ids.index(self._model_id) if self._model_id in model_ids else 0
+        imgui.begin_disabled(not models)
+        changed, slot = imgui.combo(
+            "##keyframe-model", slot, tuple(model.name for model in models) or (ctx.tr("Scene"),)
+        )
+        imgui.end_disabled()
+        if changed:
+            self._set_model(model_ids[slot])
+        if not narrow:
+            imgui.same_line()
+        recording = ctx.session.state_take_recording
+        supported = (
+            ctx.session.adapter.caps.simulation
+            and ctx.session.adapter.caps.state_snapshots
+            and ctx.session.adapter.caps.clock_control
         )
         if _command_button(
             "##take-record",
             "stop" if recording else "record",
-            ctx.tr("Stop recording" if recording else "Record new take"),
+            labels[0],
             ctx.theme,
             scale,
-            label=record_label,
+            label=shown[0],
+            width=widths[1],
             enabled=supported and not ctx.take_video_active,
             selected=recording,
         ):
@@ -531,169 +581,218 @@ class KeyframesPanel(Panel):
             self._error = "" if result.ok else result.message
             if result.ok:
                 self._view_needs_fit = not recording
-        transport_enabled = bool(
-            supported and take_times and not recording and not ctx.take_video_active
-        )
-        item_index = 1
-        for kind, target, tooltip in (
-            ("first", 0, ctx.tr("First frame")),
-            ("previous", cursor - 1, ctx.tr("Previous frame")),
-        ):
-            if inline[item_index]:
-                imgui.same_line()
-            if _command_button(
-                f"##take-{kind}",
-                kind,
-                tooltip,
-                ctx.theme,
-                scale,
-                enabled=transport_enabled,
-            ):
-                result = ctx.submit(cmd.SeekStateTake(target))
-                self._error = "" if result.ok else result.message
-            item_index += 1
-        if inline[item_index]:
-            imgui.same_line()
+        imgui.same_line()
         if _command_button(
-            "##take-play-pause",
-            "pause" if playing else "play",
-            ctx.tr("Pause" if playing else "Replay"),
+            "##take-video",
+            "view",
+            labels[1],
             ctx.theme,
             scale,
-            enabled=transport_enabled,
-            selected=playing,
+            label=shown[1],
+            width=widths[2],
+            enabled=ctx.start_take_video is not None
+            and (ctx.take_video_active or (bool(take_times) and not recording)),
         ):
-            result = ctx.submit(cmd.PauseStateTake() if playing else cmd.PlayStateTake())
-            self._error = "" if result.ok else result.message
-        item_index += 1
-        if inline[item_index]:
-            imgui.same_line()
-        if _command_button(
-            "##take-stop",
-            "stop",
-            ctx.tr("Stop"),
-            ctx.theme,
-            scale,
-            enabled=transport_enabled,
-        ):
-            result = ctx.submit(cmd.PauseStateTake())
-            if result.ok and take_times:
-                first = session.state_take_loop[0] if session.state_take_loop else 0
-                result = ctx.submit(cmd.SeekStateTake(first))
-            self._error = "" if result.ok else result.message
-        item_index += 1
-        for kind, target, tooltip in (
-            ("next", cursor + 1, ctx.tr("Next frame")),
-            ("last", len(take_times) - 1, ctx.tr("Last frame")),
-        ):
-            if inline[item_index]:
-                imgui.same_line()
-            if _command_button(
-                f"##take-{kind}",
-                kind,
-                tooltip,
-                ctx.theme,
-                scale,
-                enabled=transport_enabled,
-            ):
-                result = ctx.submit(cmd.SeekStateTake(target))
-                self._error = "" if result.ok else result.message
-            item_index += 1
-        if inline[item_index]:
-            imgui.same_line()
-        if _command_button(
-            "##take-clear",
-            "clear",
-            ctx.tr("Clear take"),
-            ctx.theme,
-            scale,
-            enabled=transport_enabled,
-        ):
-            result = ctx.submit(cmd.ClearStateTake())
-            self._error = "" if result.ok else result.message
-            if result.ok:
-                self._view_needs_fit = True
-        item_index += 1
-
-        recording = session.state_take_recording
-        playing = session.state_take_playing
-        cursor = session.state_take_cursor
-        if cursor != self._seen_take_cursor and 0 <= cursor < len(take_times):
-            self._playhead = take_times[cursor]
-            self._seen_take_cursor = cursor
-        if inline[item_index]:
-            imgui.same_line()
-        status = self._take_status(ctx, take_times)
-        color = (
-            ctx.theme.danger
-            if recording
-            else ctx.theme.primary_bright
-            if playing
-            else ctx.theme.text_disabled
-        )
-        _toolbar_status(status, color, scale, width=status_width)
-        imgui.pop_style_var()
-
-    def _draw_take_video(self, ctx: PanelContext, take_times: Sequence[float]) -> None:
-        if ctx.start_take_video is None or ctx.recording_config is None:
-            return
-        active = ctx.take_video_active
-        label = ctx.tr("Stop Video" if active else "Record Take Video")
-        width = max(button_width(ctx.tr(text)) for text in ("Stop Video", "Record Take Video"))
-        options = ctx.tr("Video Settings")
-        available = imgui.get_content_region_avail().x
-        spacing = imgui.get_style().item_spacing.x
-        right = imgui.get_cursor_screen_pos().x + available
-        if right - imgui.get_item_rect_max().x - spacing >= width:
-            imgui.same_line()
-            available = imgui.get_content_region_avail().x
-        inline = button_row_layout(
-            (width, button_width(options)),
-            available,
-            spacing,
-        )
-        disabled = not active and (
-            not take_times
-            or ctx.session.state_take_recording
-            or (ctx.recording is not None and ctx.recording.active)
-        )
-        imgui.begin_disabled(disabled)
-        height = _COMMAND_HEIGHT_PT * ctx.style_scale
-        if imgui.button(f"{label}##take-video", imgui.ImVec2(width, height)):
             try:
-                if active:
-                    ctx.stop_recording()
-                else:
-                    ctx.start_take_video()
+                ctx.stop_recording() if ctx.take_video_active else ctx.start_take_video()
                 self._error = ""
             except (RuntimeError, ValueError) as exc:
                 self._error = str(exc)
-        imgui.end_disabled()
-        if inline[1]:
-            imgui.same_line()
-        if imgui.button(f"{options}##take-video-settings", imgui.ImVec2(0, height)):
-            imgui.open_popup("##take-video-options")
-        if imgui.begin_popup("##take-video-options"):
-            config = ctx.recording_config
-            imgui.begin_disabled(active)
-            for field, title in (("countdown", "Start delay (s)"), ("end_hold", "End hold (s)")):
-                imgui.text_unformatted(ctx.tr(title))
-                imgui.set_next_item_width(220 * ctx.style_scale)
-                changed, value = imgui.input_float(
-                    f"##take-video-{field}", getattr(config, field), 0.5, 5.0, "%.1f"
+        imgui.same_line()
+        if _command_button(
+            "##capture-snapshot",
+            "key",
+            ctx.tr("Capture complete scene state"),
+            ctx.theme,
+            scale,
+            label=shown[2],
+            width=widths[3],
+            enabled=ctx.session.adapter.caps.state_snapshots and not ctx.take_video_active,
+        ):
+            result = ctx.submit(cmd.CaptureSceneSnapshot())
+            if result.ok:
+                self._selected_snapshot = result.entity_id
+                self._selected_id = -1
+                self._view_needs_fit = True
+            self._error = "" if result.ok else result.message
+        if wide:
+            imgui.same_line(0, gap)
+            imgui.set_cursor_pos_x(toolbar_right - auxiliary_width)
+            self._draw_take_range(ctx, take_times)
+            imgui.same_line(0, gap)
+        elif not narrow:
+            imgui.same_line(0, gap)
+        else:
+            imgui.set_cursor_screen_pos(options_position)
+        if _command_button(
+            "##timeline-options", "options", ctx.tr("Timeline settings"), ctx.theme, scale
+        ):
+            imgui.open_popup("timeline-options")
+        imgui.push_style_var(imgui.StyleVar_.window_padding, (10 * scale, 8 * scale))
+        if imgui.begin_popup("timeline-options"):
+            if not wide:
+                self._draw_take_range(ctx, take_times)
+                imgui.separator()
+            if (
+                editable
+                and self._model_id >= 0
+                and imgui.menu_item(ctx.tr("Add Model Keyframe"), "", False)[0]
+            ):
+                name = unique_keyframe_name({key.name for key in keyframes})
+                ctx.submit_model_edit(
+                    cmd.AddModelKeyframe(self._model_id, name), self._snapshot_created
                 )
-                if changed:
-                    config = replace(config, **{field: value})
-                    ctx.set_recording_config(config)
-            imgui.end_disabled()
-            imgui.push_text_wrap_pos(imgui.get_cursor_pos_x() + 280 * ctx.style_scale)
-            imgui.text_wrapped(
-                ctx.tr(
-                    "Wait at the first frame, record the whole take once, then hold the final frame."
-                )
-            )
-            imgui.pop_text_wrap_pos()
+            self._draw_timeline_toolbar(ctx, take_times)
+            if ctx.recording_config is not None:
+                for field, title in (
+                    ("countdown", "Start delay (s)"),
+                    ("end_hold", "End hold (s)"),
+                ):
+                    imgui.set_next_item_width(140 * scale)
+                    changed, value = imgui.input_float(
+                        ctx.tr(title), getattr(ctx.recording_config, field), 0.5, 5.0, "%.1f"
+                    )
+                    if changed:
+                        ctx.set_recording_config(replace(ctx.recording_config, **{field: value}))
             imgui.end_popup()
+        imgui.pop_style_var(3)
+        if narrow:
+            imgui.set_cursor_screen_pos((origin.x, origin.y + 2 * height + 6 * scale))
+            imgui.dummy((0, 0))
+
+    def _draw_take_range(self, ctx, take_times):
+        scale = ctx.style_scale
+        gap = 5 * scale
+        recording = ctx.session.state_take_recording
+        imgui.begin_group()
+        loop = ctx.session.state_take_loop
+        endpoints = (
+            [take_times[loop[0]], take_times[loop[1]]]
+            if loop
+            else [take_times[0], take_times[-1]]
+            if take_times
+            else [self._view_start, self._view_end]
+        )
+        field_width = max(1.0, (130 * scale - gap) * 0.5)
+        imgui.set_next_item_width(field_width)
+        changed_start, start = imgui.drag_float(
+            "##timeline-range-start", endpoints[0], 0.01, format="%.2f"
+        )
+        imgui.set_item_tooltip(ctx.tr("Range start (s)"))
+        imgui.same_line()
+        imgui.set_next_item_width(field_width)
+        changed_end, end = imgui.drag_float(
+            "##timeline-range-end", endpoints[1], 0.01, format="%.2f"
+        )
+        imgui.set_item_tooltip(ctx.tr("Range end (s)"))
+        imgui.end_group()
+        if (
+            (changed_start or changed_end)
+            and math.isfinite(start)
+            and math.isfinite(end)
+            and end > start
+        ):
+            if len(take_times) > 1:
+                first, last = (
+                    nearest_take_frame(take_times, start),
+                    nearest_take_frame(take_times, end),
+                )
+                if first < last:
+                    ctx.submit(cmd.SetStateTakeLoop(first, last))
+            else:
+                self._view_start, self._view_end, self._view_needs_fit = start, end, False
+        imgui.same_line()
+        if _command_button(
+            "##timeline-loop",
+            "loop",
+            ctx.tr("Loop"),
+            ctx.theme,
+            scale,
+            selected=loop is not None,
+            enabled=len(take_times) > 1 and not recording,
+        ):
+            ctx.submit(
+                cmd.SetStateTakeLoop() if loop else cmd.SetStateTakeLoop(0, len(take_times) - 1)
+            )
+        imgui.same_line()
+        imgui.set_next_item_width(92 * scale)
+        if imgui.begin_combo("##timeline-take", ctx.tr("Take 1" if take_times else "No take")):
+            imgui.text_disabled(self._take_status(ctx, take_times))
+            if take_times and not recording and imgui.selectable(ctx.tr("Clear take"))[0]:
+                ctx.submit(cmd.ClearStateTake())
+            imgui.end_combo()
+
+    def _draw_transport_header(self, ctx, take_times, *, embedded=None):
+        scale = ctx.style_scale * (0.8 if embedded else 1.0)
+        if embedded:
+            imgui.set_cursor_screen_pos(
+                (embedded[0][0] + 4 * ctx.style_scale, embedded[0][1] + 2 * ctx.style_scale)
+            )
+        width = imgui.get_content_region_avail().x
+        button_width = _command_button_width("", scale)
+        enabled = (
+            bool(take_times) and not ctx.session.state_take_recording and not ctx.take_video_active
+        )
+        playing = ctx.session.state_take_playing
+        actions = (
+            (
+                "previous",
+                "first",
+                cmd.SeekStateTake(ctx.session.state_take_cursor - 1),
+                "Previous frame",
+            ),
+            (
+                "play-pause",
+                "pause" if playing else "play",
+                cmd.PauseStateTake() if playing else cmd.PlayStateTake(),
+                "Pause" if playing else "Replay",
+            ),
+            ("next", "last", cmd.SeekStateTake(ctx.session.state_take_cursor + 1), "Next frame"),
+        )
+        time_width = imgui.calc_text_size("0000.000 s").x
+        widths = (button_width, button_width, button_width, time_width, button_width, button_width)
+        inline = button_row_layout(widths, width, imgui.get_style().item_spacing.x)
+        for i, (name, icon, command, label) in enumerate(actions):
+            if inline[i]:
+                imgui.same_line()
+            if _command_button(
+                f"##take-{name}",
+                icon,
+                ctx.tr(label),
+                ctx.theme,
+                scale,
+                enabled=enabled,
+                selected=name == "play-pause" and playing,
+            ):
+                result = ctx.submit(command)
+                self._error = "" if result.ok else result.message
+        if inline[3]:
+            imgui.same_line()
+        _toolbar_status(f"{self._playhead:.3f} s", ctx.theme.text_disabled, scale, width=time_width)
+        for index, (kind, tooltip) in enumerate(
+            (("follow", "Follow playhead"), ("view", "View all")), 4
+        ):
+            if embedded:
+                imgui.set_cursor_screen_pos(
+                    (
+                        embedded[1][0] - (6 - index) * (button_width + 4 * ctx.style_scale),
+                        embedded[0][1] + 2 * ctx.style_scale,
+                    )
+                )
+            elif inline[index]:
+                imgui.same_line()
+            if _command_button(
+                "##key-" + kind,
+                "fit" if kind == "view" else kind,
+                ctx.tr(tooltip),
+                ctx.theme,
+                scale,
+                selected=kind == "follow" and self._follow_mode != "off",
+            ):
+                if kind == "view":
+                    self._view_needs_fit = True
+                else:
+                    self._set_follow_mode("page" if self._follow_mode == "off" else "off")
 
     def _draw_timeline_toolbar(self, ctx: PanelContext, take_times: Sequence[float]) -> None:
         scale = ctx.style_scale
@@ -776,85 +875,6 @@ class KeyframesPanel(Panel):
         supported = bool(session.adapter.caps.simulation and session.adapter.caps.state_snapshots)
         return ctx.tr("no recorded take" if supported else "state recording unavailable")
 
-    def _draw_keyframe_toolbar(
-        self,
-        ctx: PanelContext,
-        keyframes: tuple[KeyframeInfo, ...],
-        take_times: Sequence[float],
-        editable: bool,
-    ) -> None:
-        scale = ctx.style_scale
-        capture_label = ctx.tr("Capture Snapshot")
-        prefix = f"{ctx.tr('Snapshots')}: {len(keyframes)} · {ctx.tr('Time')}: "
-        status = f"{prefix}{self._playhead:.3f} s"
-        # Reserve the take's time width so crossing a digit boundary cannot
-        # reflow the toolbar. The frequently changing value stays last.
-        endpoints = (take_times[0], take_times[-1]) if take_times else ()
-        status_width = max(
-            float(imgui.calc_text_size(f"{prefix}{time:.3f} s").x)
-            for time in (self._playhead, *endpoints)
-        )
-        widths = (
-            _command_button_width(capture_label, scale),
-            *(_command_button_width("", scale) for _index in range(3)),
-            status_width,
-        )
-        inline = button_row_layout(
-            widths,
-            imgui.get_content_region_avail().x,
-            3.0 * scale,
-        )
-        imgui.push_style_var(
-            imgui.StyleVar_.item_spacing,
-            imgui.ImVec2(3.0 * scale, 4.0 * scale),
-        )
-        if _command_button(
-            "##capture-snapshot",
-            "key",
-            ctx.tr("Capture snapshot" if editable else "Pause to edit (Space)"),
-            ctx.theme,
-            scale,
-            label=capture_label,
-            enabled=editable,
-        ):
-            name = unique_keyframe_name({key.name for key in keyframes})
-            ctx.submit_model_edit(
-                cmd.AddModelKeyframe(self._model_id, name), self._snapshot_created
-            )
-        navigation_enabled = bool(keyframes and editable)
-        item_index = 1
-        for kind, direction, tooltip in (
-            ("key-previous", -1, ctx.tr("Previous key")),
-            ("key-next", 1, ctx.tr("Next key")),
-        ):
-            if inline[item_index]:
-                imgui.same_line()
-            if _command_button(
-                f"##{kind}",
-                kind,
-                tooltip if editable else ctx.tr("Pause to edit (Space)"),
-                ctx.theme,
-                scale,
-                enabled=navigation_enabled,
-            ):
-                self._load_neighbor(ctx, keyframes, direction)
-            item_index += 1
-        if inline[item_index]:
-            imgui.same_line()
-        if _command_button(
-            "##key-view-all",
-            "view",
-            ctx.tr("View all"),
-            ctx.theme,
-            scale,
-        ):
-            self._view_needs_fit = True
-        item_index += 1
-        if inline[item_index]:
-            imgui.same_line()
-        _toolbar_status(status, ctx.theme.text_disabled, scale, width=status_width)
-        imgui.pop_style_var()
-
     def _draw_dope_sheet(
         self,
         ctx: PanelContext,
@@ -865,14 +885,19 @@ class KeyframesPanel(Panel):
     ) -> None:
         scale = ctx.style_scale
         available = max(1.0, float(imgui.get_content_region_avail().x))
-        height = 154.0 * scale
-        channel_width = min(150.0 * scale, available * 0.45)
         ruler_height = 27.0 * scale
+        tracks = 3 if take_times else 2
+        height = max(
+            ruler_height + tracks * 20 * scale,
+            min(ruler_height + tracks * 30 * scale, imgui.get_content_region_avail().y - 8 * scale),
+        )
+        embedded = available >= 600 * scale
+        channel_width = timeline_channel_width(available, scale)
         lo_vec = imgui.get_cursor_screen_pos()
         lo = (float(lo_vec.x), float(lo_vec.y))
         hi = (lo[0] + available, lo[1] + height)
         time_lo = lo[0] + channel_width
-        time_hi = hi[0]
+        time_hi = hi[0] - (64 * scale if embedded else 0)
         time_width = max(1.0, time_hi - time_lo)
 
         flags = (
@@ -880,12 +905,14 @@ class KeyframesPanel(Panel):
             | imgui.ButtonFlags_.mouse_button_right.value
             | imgui.ButtonFlags_.mouse_button_middle.value
         )
+        if embedded:
+            imgui.set_next_item_allow_overlap()
         imgui.invisible_button("##keyframe-dope-sheet", imgui.ImVec2(available, height), flags)
         timeline_id = imgui.get_item_id()
         hovered = imgui.is_item_hovered()
         mouse = imgui.get_mouse_pos()
         mouse_xy = (float(mouse.x), float(mouse.y))
-        over_timeline = hovered and mouse_xy[0] >= time_lo
+        over_timeline = hovered and time_lo <= mouse_xy[0] <= time_hi
         ctx.status_hints = timeline_status_hints(
             ctx.tr,
             has_range=ctx.session.state_take_loop is not None,
@@ -909,7 +936,11 @@ class KeyframesPanel(Panel):
         fitted = self._view_needs_fit or self._view_model_id != self._model_id
         if fitted:
             self._view_start, self._view_end = fitted_timeline_range(
-                tuple(key.time for key in keyframes) + tuple(take_times), self._playhead
+                tuple(key.time for key in keyframes)
+                + tuple(take_times)
+                + tuple(item.time for item in ctx.session.scene_snapshots)
+                + (self._playhead,),
+                self._playhead,
             )
             self._view_model_id = self._model_id
             self._view_needs_fit = False
@@ -978,9 +1009,10 @@ class KeyframesPanel(Panel):
             )
         self._last_followed_playhead = self._playhead
 
-        row_height = (height - ruler_height) * 0.5
+        row_height = (height - ruler_height) / (3 if take_times else 2)
         marker_y = lo[1] + ruler_height + row_height * 0.5
         take_y = marker_y + row_height
+        snapshot_y = take_y + row_height if take_times else take_y
         marker_radius = 7.0 * scale
         marker_positions = {
             key.keyframe_id: timeline_time_to_x(
@@ -994,6 +1026,17 @@ class KeyframesPanel(Panel):
             )
             for key in keyframes
         }
+        snapshot_positions = {
+            item.snapshot_id: timeline_time_to_x(
+                item.time, self._view_start, self._view_end, time_lo, time_hi
+            )
+            for item in ctx.session.scene_snapshots
+        }
+        snapshot_hit = (
+            self._hit_marker(snapshot_positions, snapshot_y, marker_radius, mouse_xy)
+            if hovered
+            else -1
+        )
         hit_id = (
             self._hit_marker(marker_positions, marker_y, marker_radius, mouse_xy) if hovered else -1
         )
@@ -1005,7 +1048,25 @@ class KeyframesPanel(Panel):
             and not ctx.take_video_active
         ):
             self._pointer_chord = load_press or select_press
-            if hit_id >= 0:
+            if snapshot_hit >= 0:
+                self._selected_snapshot = snapshot_hit
+                self._selected_id = -1
+                if (
+                    load_press
+                    and ctx.session.paused
+                    and not ctx.session.state_take_playing
+                    and not ctx.session.state_take_recording
+                ):
+                    result = ctx.submit(cmd.RestoreSceneSnapshot(snapshot_hit))
+                    self._error = "" if result.ok else result.message
+                    if result.ok:
+                        self._playhead = next(
+                            item.time
+                            for item in ctx.session.scene_snapshots
+                            if item.snapshot_id == snapshot_hit
+                        )
+            elif hit_id >= 0:
+                self._selected_snapshot = -1
                 self._selected_id = hit_id
                 self._selection_generation = -1
                 marker = keyframe_by_id[hit_id]
@@ -1107,7 +1168,38 @@ class KeyframesPanel(Panel):
             take_times,
             hit_id,
         )
-        if hit_id >= 0 and hovered:
+        if embedded:
+            saved_cursor = imgui.get_cursor_screen_pos()
+            self._draw_transport_header(ctx, take_times, embedded=(lo, hi))
+            imgui.set_cursor_screen_pos(saved_cursor)
+            imgui.dummy((0, 0))
+        overlay = ImguiDraw2D()
+        imgui.push_clip_rect((time_lo, lo[1] + ruler_height), (time_hi, hi[1]), True)
+        for snapshot_id in decimated_marker_ids(
+            tuple(snapshot_positions.items()),
+            time_lo,
+            time_hi,
+            marker_radius * 1.5,
+            (self._selected_snapshot, snapshot_hit),
+        ):
+            x = snapshot_positions[snapshot_id]
+            radius = marker_radius * 0.7
+            _draw_command_icon(
+                overlay,
+                (x, snapshot_y),
+                "key",
+                ctx.theme.info if snapshot_id != self._selected_snapshot else ctx.theme.primary,
+                radius / 6,
+            )
+        imgui.pop_clip_rect()
+        if snapshot_hit >= 0 and hovered:
+            snapshot = next(
+                item for item in ctx.session.scene_snapshots if item.snapshot_id == snapshot_hit
+            )
+            imgui.set_tooltip(
+                f"{snapshot.name}  {snapshot.time:g} s\n{ctx.tr('Double-click to load')}"
+            )
+        elif hit_id >= 0 and hovered:
             key = keyframe_by_id[hit_id]
             imgui.set_tooltip(
                 f"{key.name or ctx.tr('keyframe')}  ·  {key.time:g} s\n{ctx.tr('Double-click to load')}"
@@ -1180,7 +1272,11 @@ class KeyframesPanel(Panel):
         label_width = max(1.0, time_lo - lo[0] - 2.0 * inset)
         draw_list = imgui.get_window_draw_list()
         draw_list.push_clip_rect((lo[0], ruler_bottom), (time_lo, hi[1]), True)
-        for center_y, label in ((marker_y, "Model Keyframes"), (take_y, "Recorded Take")):
+        rows = [(marker_y, "Model Keyframes")]
+        if take_times:
+            rows.append((take_y, "Recorded Take"))
+        rows.append((take_y + (take_y - marker_y) if take_times else take_y, "Snapshots"))
+        for center_y, label in rows:
             text = ctx.tr(label)
             size = imgui.calc_text_size(text, wrap_width=label_width)
             draw_list.add_text(
@@ -1225,11 +1321,7 @@ class KeyframesPanel(Panel):
             selected = key.keyframe_id == self._selected_id
             hovered = key.keyframe_id == hit_id
             fill = (
-                (0.98, 0.67, 0.24, 1.0)
-                if hovered
-                else theme.warning
-                if selected
-                else theme.text_disabled
+                (0.98, 0.67, 0.24, 1.0) if hovered else theme.warning if selected else theme.primary
             )
             points = tuple(
                 (x + px, marker_y + py)

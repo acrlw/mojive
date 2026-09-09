@@ -59,6 +59,7 @@ def test_hidpi_capsule_hosts_are_clipped_and_modal_width_tracks_layout_scale(mon
         )
         node = next(item for item in viewer.session.nodes if item.name == "02_prismatic")
         assert viewer.session.submit(cmd.Select(node.object_id))
+        viewer.set_gizmo_mode("translate")
         for _ in range(10):
             viewer.sync()
 

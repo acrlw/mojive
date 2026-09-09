@@ -29,6 +29,8 @@ if __package__:
         RECORD_GLYPH_RADIUS,
         RESET_GLYPH_SCALE,
         RedesignState,
+        _capsule,
+        _recording_menu,
         draw_expand_glyph,
         draw_recording_glyph,
         draw_redesign,
@@ -47,6 +49,8 @@ else:
         RECORD_GLYPH_RADIUS,
         RESET_GLYPH_SCALE,
         RedesignState,
+        _capsule,
+        _recording_menu,
         draw_expand_glyph,
         draw_recording_glyph,
         draw_redesign,
@@ -65,15 +69,20 @@ from mojive.ui import viewcube as view_ui
 from mojive.ui.compound_fields import draw_joined_field_frame
 from mojive.ui.draw2d import ImguiDraw2D, draw_drag_link
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
+from mojive.ui.messages import OutputBuffer
 from mojive.ui.panels import (
+    PanelContext,
     button_row_layout,
     button_width,
     search_input,
     searchable_ordered_list_header,
 )
+from mojive.ui.panels.filters import filter_pills, severity_color, severity_icon
 from mojive.ui.panels.hierarchy import disclosure_triangle
-from mojive.ui.panels.keyframes import _command_button, _draw_command_icon
+from mojive.ui.panels.keyframes import KeyframesPanel, _command_button, _draw_command_icon
+from mojive.ui.panels.output import OutputPanel
 from mojive.ui.panels.settings import settings_uses_stacked_layout
+from mojive.ui.panels.value_cards import draw_value_rail, interval_text, value_card, value_rail
 from mojive.ui.perturb import OUTLINE_CORNER_RADIUS_PT
 from mojive.ui.theme import THEME, rgb8
 from mojive.ui.viewcube import DEFAULT_SELECTION_PADDING
@@ -238,7 +247,7 @@ class ProbeState:
     imgui_example_value: float = 0.0
     imgui_example_enabled: bool = True
     capsule_smoothing: float = CAPSULE_SMOOTHING
-    capsule_outline: str = "Neutral gray"
+    capsule_outline: str = "Soft white"
     playback_smoothing: float = CAPSULE_SMOOTHING
     tool_smoothing: float = CAPSULE_SMOOTHING
     mouse_smoothing: float = CORNER_SMOOTHING
@@ -281,9 +290,12 @@ class ProbeState:
     joint_value: float = 0.0
     joint_value_unit: str = "m"
     output_filter: str = ""
-    output_level: int = 0
-    selected_output: int = 2
-    output_cleared: bool = False
+    output_panel: OutputPanel = field(default_factory=OutputPanel)
+    timeline_panel: KeyframesPanel = field(default_factory=KeyframesPanel)
+    timeline_session: object = None
+    angular_degrees: bool = False
+    output_buffer: OutputBuffer | None = None
+    diagnostic_levels: set[str] = field(default_factory=lambda: {"info", "warning", "error"})
     hinge_ctrl: float = 0.25
     slide_ctrl: float = 0.0
     weld_enabled: bool = True
@@ -447,53 +459,10 @@ def _circular_icon_button(
 
 
 def _draw_playback(draw: ImguiDraw2D, origin, scale: float, state: ProbeState) -> None:
-    draw = draw.with_corner_smoothing(state.playback_smoothing)
-    x, y = origin
-    icon_radius = float(state.overlay_icon_radius)
-    state_radius = icon_radius + float(state.overlay_radial_step)
-    capsule_radius = state_radius + float(state.overlay_radial_step)
-    assert math.isclose(state_radius - icon_radius, capsule_radius - state_radius)
-    hit_size = float(state.overlay_center_step)
-    center_step = float(state.overlay_center_step)
-    padding = end_padding(state)
-    width = (padding * 2.0 + center_step * 3.0) * scale
-    height = capsule_radius * 2.0 * scale
-    draw_capsule_shell(draw, x, y, width, height, scale, state)
-    for index, (item_id, icon, selected) in enumerate(
-        (
-            ("##probe-previous", _draw_previous_icon, False),
-            ("##probe-play", _draw_pause_icon if state.playing else _draw_play_icon, state.playing),
-            ("##probe-step", _draw_step_icon, False),
-            (
-                "##probe-reset",
-                lambda *args: _draw_reset_icon(*args, stroke_width=state.tool_stroke_width),
-                False,
-            ),
-        )
-    ):
-        center_x = x + (padding + index * center_step) * scale
-        position = (
-            center_x - hit_size * 0.5 * scale,
-            y + (capsule_radius - hit_size * 0.5) * scale,
-        )
-        clicked = _circular_icon_button(
-            draw,
-            item_id,
-            position,
-            icon,
-            selected=selected,
-            cell_size=hit_size,
-            state_radius=state_radius,
-            icon_radius=icon_radius,
-            icon_scale=scale * icon_radius / OVERLAY_ICON_RADIUS,
-            show_icon_bound=state.show_icon_bounds,
-            show_state_circle=state.show_state_circles,
-            scale=scale,
-        )
-        if clicked and index == 1:
-            state.playing = not state.playing
-        elif clicked and index == 3:
-            state.playing = False
+    state.redesign.playing = state.playing
+    _capsule(state.redesign, origin, scale, state, _circular_icon_button, False)
+    _recording_menu(state.redesign)
+    state.playing = state.redesign.playing
 
 
 def _draw_tool_icon(
@@ -526,78 +495,11 @@ def _draw_tool_icon(
 
 
 def _draw_tool_column(draw: ImguiDraw2D, origin, scale: float, state: ProbeState) -> None:
-    draw = draw.with_corner_smoothing(state.tool_smoothing)
-    x, y = origin
-    icon_radius = float(state.overlay_icon_radius)
-    state_radius = icon_radius + float(state.overlay_radial_step)
-    capsule_radius = state_radius + float(state.overlay_radial_step)
-    assert math.isclose(state_radius - icon_radius, capsule_radius - state_radius)
-    hit_size = float(state.overlay_center_step)
-    center_step = float(state.overlay_center_step)
-    group_step = center_step + float(state.tool_group_gap)
-    padding = end_padding(state)
-    centers = (
-        padding,
-        padding + center_step,
-        padding + center_step * 2.0,
-        padding + center_step * 2.0 + group_step,
-    )
-    width = capsule_radius * 2.0 * scale
-    height = (centers[-1] + padding) * scale
-    draw_capsule_shell(draw, x, y, width, height, scale, state)
-    separator = (*CONCEPT_THEME.border[:3], 0.72)
-    separator_y = y + (centers[2] + centers[3]) * 0.5 * scale
-    draw.line(
-        (
-            x + (capsule_radius - state.divider_width * 0.5) * scale,
-            separator_y,
-        ),
-        (
-            x + (capsule_radius + state.divider_width * 0.5) * scale,
-            separator_y,
-        ),
-        separator,
-        1.0 * scale,
-    )
-    for index, kind in enumerate(("move", "rotate", "frame", "snap")):
-        center_y = y + centers[index] * scale
-        position = (
-            x + (capsule_radius - hit_size * 0.5) * scale,
-            center_y - hit_size * 0.5 * scale,
-        )
-
-        def icon(target, center, color, icon_scale, surface_color, current=kind):
-            _draw_tool_icon(
-                target,
-                center,
-                color,
-                icon_scale,
-                current,
-                state.tool_stroke_width,
-                state.rotate_ring_gap_ratio,
-                state.rotate_ring_cap,
-                surface_color,
-                state.gizmo_space,
-            )
-
-        clicked = _circular_icon_button(
-            draw,
-            f"##probe-tool-{kind}",
-            position,
-            icon,
-            selected=state.active_tool == kind,
-            cell_size=hit_size,
-            state_radius=state_radius,
-            icon_radius=icon_radius * TOOL_GLYPH_SCALE,
-            icon_scale=scale * icon_radius / OVERLAY_ICON_RADIUS,
-            show_icon_bound=state.show_icon_bounds,
-            show_state_circle=state.show_state_circles,
-            scale=scale,
-        )
-        if clicked and kind == "frame":
-            state.gizmo_space = "body" if state.gizmo_space == "world" else "world"
-        elif clicked:
-            state.active_tool = kind
+    state.redesign.tool = state.active_tool
+    state.redesign.space = state.gizmo_space
+    _capsule(state.redesign, origin, scale, state, _circular_icon_button, True)
+    state.active_tool = state.redesign.tool
+    state.gizmo_space = state.redesign.space
 
 
 def _draw_inline_text(
@@ -2019,114 +1921,29 @@ def _draw_transport_button(
 
 
 def _draw_keyframes(size, scale: float, state: ProbeState) -> None:
+    """Exercise the production timeline against a real tiny simulation."""
+    from mojive import commands as cmd
+    from mojive.adapters.base import FrameNeeds
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
+    from mojive.session import Session
+
     if not imgui.begin_child("Keyframes###ProbeKeyframes", size, imgui.ChildFlags_.borders.value):
         imgui.end_child()
         return
-    imgui.text("Keyframes")
-    imgui.separator()
-    if _begin_gallery_properties("##probe-keyframe-model-row"):
-        _property_label("model")
-        imgui.set_next_item_width(-1.0)
-        imgui.combo("##probe-keyframe-model", 0, ("joint_types",))
-        imgui.end_table()
-    draw = ImguiDraw2D(imgui.get_window_draw_list(), corner_smoothing=state.playback_smoothing)
-    row_one = imgui.get_cursor_screen_pos()
-    _command_button(
-        "##probe-record",
-        "record",
-        "Record New Take",
-        CONCEPT_THEME,
-        scale,
-        label="Record New Take",
-        width=142.0 * scale,
-        smoothing=state.playback_smoothing,
-    )
-    transport_x = row_one.x + 152.0 * scale
-    for index, kind in enumerate(("first", "previous", "play", "stop", "next", "last", "clear")):
-        _draw_transport_button(
-            draw,
-            f"##probe-keyframes-take-{kind}",
-            (transport_x + index * 34 * scale, row_one.y),
-            kind,
-            scale,
-        )
-    take_status_x = transport_x + 7 * 34.0 * scale + 8.0 * scale
-    draw.text((take_status_x, row_one.y + 7.0 * scale), CONCEPT_THEME.text_disabled, "frame 86/240")
-
-    row_two_y = row_one.y + 34.0 * scale
-    imgui.set_cursor_screen_pos(imgui.ImVec2(row_one.x, row_two_y))
-    _command_button(
-        "##probe-snapshot",
-        "snapshot",
-        "Capture Snapshot",
-        CONCEPT_THEME,
-        scale,
-        label="Capture Snapshot",
-        width=142.0 * scale,
-        smoothing=state.playback_smoothing,
-    )
-    for index, kind in enumerate(("key-previous", "key-next", "view")):
-        _draw_transport_button(
-            draw,
-            f"##probe-keyframes-snapshot-{kind}",
-            (transport_x + index * 34 * scale, row_two_y),
-            kind,
-            scale,
-        )
-    draw.text(
-        (transport_x + 3 * 34.0 * scale + 8.0 * scale, row_two_y + 7.0 * scale),
-        CONCEPT_THEME.text_disabled,
-        "1.20 s · 3 snapshots",
-    )
-
-    timeline_y = row_two_y + 54 * scale
-    left = row_one.x + 128 * scale
-    right = imgui.get_window_pos().x + imgui.get_window_size().x - 18 * scale
-    imgui.set_cursor_screen_pos(imgui.ImVec2(row_one.x, timeline_y - 26.0 * scale))
-    imgui.invisible_button(
-        "##probe-keyframe-dope-sheet",
-        imgui.ImVec2(max(1.0, right - row_one.x), 132.0 * scale),
-        _flags(imgui.ButtonFlags_.mouse_button_left, imgui.ButtonFlags_.mouse_button_middle),
-    )
-    if imgui.is_item_hovered() and imgui.get_mouse_pos().x >= left:
-        imgui.set_item_key_owner(imgui.Key.mouse_wheel_y)
-    draw.text((row_one.x, timeline_y - 5 * scale), CONCEPT_THEME.text, "Model Keyframes")
-    draw.line(
-        (left, timeline_y + 4 * scale), (right, timeline_y + 4 * scale), CONCEPT_THEME.border, 1.0
-    )
-    for fraction, color in (
-        (0.28, CONCEPT_THEME.text_disabled),
-        (0.53, rgb8(225, 183, 101)),
-        (0.79, CONCEPT_THEME.text_disabled),
-    ):
-        _diamond(draw, (left + (right - left) * fraction, timeline_y + 4 * scale), 6 * scale, color)
-    playhead_x = left + (right - left) * 0.47
-    draw.line(
-        (playhead_x, timeline_y - 24 * scale),
-        (playhead_x, timeline_y + 60 * scale),
-        CONCEPT_THEME.danger,
-        2 * scale,
-    )
-    draw.text((row_one.x, timeline_y + 39 * scale), CONCEPT_THEME.text, "Recorded Take")
-    draw.line(
-        (left, timeline_y + 48 * scale),
-        (right, timeline_y + 48 * scale),
-        CONCEPT_THEME.primary_dim,
-        2 * scale,
-    )
-    selected_y = timeline_y + 76.0 * scale
-    draw.text((row_one.x, selected_y + 7.0 * scale), CONCEPT_THEME.text_disabled, "Selected")
-    draw.rect_filled(
-        (left, selected_y),
-        (right, selected_y + 28.0 * scale),
-        CONCEPT_THEME.bg_frame,
-        rounding=3.0 * scale,
-    )
-    draw.text(
-        (left + 10.0 * scale, selected_y + 7.0 * scale),
-        CONCEPT_THEME.text,
-        "key1  ·  0.90 s",
-    )
+    if state.timeline_session is None:
+        state.timeline_session = Session(MuJoCoAdapter(resolve("joint_types")))
+        session = state.timeline_session
+        session.submit(cmd.Pause())
+        for count in (0, 100, 160):
+            if count:
+                session.submit(cmd.Step(count))
+                session.tick(FrameNeeds.none(), wall_dt=0)
+            session.submit(cmd.CaptureSceneSnapshot())
+    session = state.timeline_session
+    session.tick(FrameNeeds.none(), wall_dt=min(0.05, imgui.get_io().delta_time))
+    ctx = PanelContext(session, None, theme=CONCEPT_THEME, style_scale=scale)
+    state.timeline_panel.draw(ctx)
     imgui.end_child()
 
 
@@ -2136,84 +1953,18 @@ def _draw_output(size, state: ProbeState, scale: float) -> None:
         return
     imgui.text("Output")
     imgui.separator()
-    available = imgui.get_content_region_avail().x
-    level_width = 145.0 * scale
-    imgui.set_next_item_width(max(100.0 * scale, available - level_width - 10.0 * scale))
-    _, state.output_filter = search_input(
-        "##probe-output-filter",
-        state.output_filter,
-        hint="Filter text or component...",
-        search_tooltip="Search output",
-        clear_tooltip="Clear search",
+    if state.output_buffer is None:
+        state.output_buffer = OutputBuffer()
+        for level, message in (
+            ("info", "Loaded scene.xml"),
+            ("warning", "Joint limit reached"),
+            ("error", "Model could not be compiled"),
+        ):
+            state.output_buffer.write(message, level=level, timestamp="09:44:25")
+    ctx = PanelContext(
+        None, None, theme=CONCEPT_THEME, style_scale=scale, output=state.output_buffer
     )
-    imgui.same_line()
-    imgui.set_next_item_width(level_width)
-    _, state.output_level = imgui.combo(
-        "##probe-output-level", state.output_level, ("All levels", "Warnings", "Errors")
-    )
-    rows = (
-        ()
-        if state.output_cleared
-        else (
-            ("09:44:04", "INFO", "pelvis"),
-            ("09:44:09", "INFO", "sacrum"),
-            ("09:44:13", "WARN", "femur_r limit reached"),
-            ("09:44:25", "INFO", "Loaded scene.xml"),
-            ("09:44:54", "INFO", "[mojive/ui] Loading model /assets/joint_types.xml"),
-        )
-    )
-    copy_label = "Copy all"
-    if imgui.button(copy_label):
-        imgui.set_clipboard_text(
-            "\n".join(f"{time}  [{severity}]  {text}" for time, severity, text in rows)
-        )
-    imgui.same_line()
-    if imgui.button("Clear"):
-        state.output_cleared = True
-        state.selected_output = -1
-        rows = ()
-    imgui.same_line()
-    imgui.text_disabled(f"{len(rows)} messages")
-    imgui.separator()
-    if not rows:
-        imgui.text_disabled("No messages")
-    for index, (timestamp, level, message) in enumerate(rows):
-        row_text = f"{timestamp}  [{level}]  {message}"
-        clicked, _ = imgui.selectable(
-            f"{row_text}##probe-output-{index}",
-            state.selected_output == index,
-            imgui.SelectableFlags_.none.value,
-        )
-        if clicked:
-            state.selected_output = index
-        if imgui.is_item_hovered() and imgui.is_mouse_clicked(imgui.MouseButton_.right):
-            state.selected_output = index
-        if imgui.begin_popup_context_item(f"##probe-output-context-{index}"):
-            copy_message, _ = imgui.menu_item("Copy message", "Ctrl+C", False)
-            copy_row, _ = imgui.menu_item("Copy full entry", "Ctrl+Shift+C", False)
-            copy_all, _ = imgui.menu_item("Copy all", "", False)
-            imgui.separator()
-            clear_output, _ = imgui.menu_item("Clear output", "", False)
-            if copy_message:
-                imgui.set_clipboard_text(message)
-            if copy_row:
-                imgui.set_clipboard_text(row_text)
-            if copy_all:
-                imgui.set_clipboard_text(
-                    "\n".join(f"{time}  [{severity}]  {text}" for time, severity, text in rows)
-                )
-            if clear_output:
-                state.output_cleared = True
-                state.selected_output = -1
-            imgui.end_popup()
-    io = imgui.get_io()
-    copy_shortcut = bool(io.key_ctrl or io.key_super) and imgui.is_key_pressed(imgui.Key.c, False)
-    if copy_shortcut and 0 <= state.selected_output < len(rows):
-        timestamp, level, message = rows[state.selected_output]
-        if io.key_shift:
-            imgui.set_clipboard_text(f"{timestamp}  [{level}]  {message}")
-        else:
-            imgui.set_clipboard_text(message)
+    state.output_panel.draw(ctx)
     imgui.end_child()
 
 
@@ -3774,6 +3525,118 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
     imgui.end_child()
 
 
+def _draw_diagnostic_gallery(state, scale):
+    """Inspect the production severity paths and control rows at several sizes."""
+    ctx = PanelContext(None, None, theme=CONCEPT_THEME, style_scale=scale)
+    draw = ImguiDraw2D()
+    imgui.text("Output severity · production geometry")
+    imgui.text_disabled(
+        "Info: circle + i   |   Warning: smooth triangle + !   |   Error: circle + cross"
+    )
+    imgui.spacing()
+    origin = imgui.get_cursor_screen_pos()
+    for index, level in enumerate(("info", "warning", "error")):
+        x, y = origin.x, origin.y + index * 94 * scale
+        draw.text((x, y + 28 * scale), CONCEPT_THEME.text, level.capitalize())
+        for column, size in enumerate((14, 20, 32, 56)):
+            center = (x + (170 + 128 * column) * scale, y + 32 * scale)
+            severity_icon(draw, center, size * scale, level, severity_color(ctx.theme, level))
+            draw.text(
+                (center[0] - 10 * scale, y + 67 * scale), CONCEPT_THEME.text_disabled, str(size)
+            )
+    imgui.dummy(imgui.ImVec2(720 * scale, 300 * scale))
+    imgui.text("Palette: #8AB7C0 / #C9A15C / #D06744 · warning smoothing 0.618")
+    imgui.text("Click a capsule to toggle it; log text keeps the same neutral color.")
+    clicked = filter_pills(
+        ctx,
+        "diagnostic-level",
+        (("info", "12", "info"), ("warning", "2", "warning"), ("error", "999", "error")),
+        state.diagnostic_levels,
+        compact=True,
+    )
+    if clicked is not None:
+        state.diagnostic_levels.symmetric_difference_update({clicked})
+    imgui.same_line()
+    imgui.set_next_item_width(310 * scale)
+    _, state.output_filter = search_input(
+        "##diagnostic-search", state.output_filter, hint="Filter text or component..."
+    )
+    imgui.same_line()
+    imgui.button("Clear##diagnostic-clear")
+    for level, text in (
+        ("info", "Loaded scene.xml"),
+        ("warning", "Joint limit reached"),
+        ("error", "Model could not be compiled"),
+    ):
+        if level not in state.diagnostic_levels:
+            continue
+        p = imgui.get_cursor_screen_pos()
+        size = imgui.get_font_size()
+        severity_icon(
+            draw,
+            (p.x + size * 0.5, p.y + size * 0.5),
+            size,
+            level,
+            severity_color(ctx.theme, level),
+        )
+        draw.text((p.x + size + 10 * scale, p.y), ctx.theme.text, text)
+        imgui.dummy(imgui.ImVec2(720 * scale, size + 8 * scale))
+    imgui.spacing()
+    imgui.text("Slider states: normal / hover / press")
+    for index, (label, hovered, pressed) in enumerate(
+        (("Normal", False, False), ("Hover", True, False), ("Press", True, True))
+    ):
+        if index:
+            imgui.same_line()
+        imgui.begin_group()
+        imgui.text_disabled(label)
+        pos = imgui.get_cursor_screen_pos()
+        draw_value_rail(
+            draw,
+            (pos.x + 6 * scale, pos.y + 12 * scale),
+            (pos.x + 185 * scale, pos.y + 12 * scale),
+            pos.x + 105 * scale,
+            5 * scale,
+            ctx.theme,
+            scale,
+            hovered=hovered,
+            pressed=pressed,
+        )
+        imgui.dummy((195 * scale, 30 * scale))
+        imgui.end_group()
+    imgui.text("Control / Joints · unit toggle, right-click reset · narrow reflow")
+    for index, width in enumerate((420, 180)):
+        if index:
+            imgui.same_line()
+        imgui.begin_child(f"##diagnostic-controls-{index}", (width * scale, 210 * scale))
+        with value_card(ctx, "##diagnostic-actuator", "hip_motor", interval_text((-2, 2))):
+            edit = value_rail(
+                ctx,
+                "##diagnostic-rail",
+                state.hinge_ctrl,
+                (-2, 2),
+                initial=0.42,
+                fmt="%+.3f",
+                show_reset=False,
+                unit="rad",
+                angular_degrees=state.angular_degrees,
+                toggle_unit=lambda: setattr(state, "angular_degrees", not state.angular_degrees),
+            )
+            state.hinge_ctrl = edit.value
+        with value_card(ctx, "##diagnostic-unbounded", "custom_drive", "Unlimited"):
+            edit = value_rail(
+                ctx,
+                "##diagnostic-drag",
+                state.slide_ctrl,
+                None,
+                initial=2.5,
+                fmt="%+.3f",
+                show_reset=False,
+            )
+            state.slide_ctrl = edit.value
+        imgui.end_child()
+
+
 def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
     child_flags = _flags(imgui.ChildFlags_.borders)
     window_flags = imgui.WindowFlags_.none.value
@@ -3791,6 +3654,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             "Transform gizmos",
             "Joint & helpers",
             "Status",
+            "Diagnostics",
             "Shell & settings",
             "Panels",
             "Workspaces",
@@ -4387,6 +4251,10 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             "Renderer acceptance: 3D depth, occlusion and picking stay in make gizmo / lighting tests.",
         )
 
+    elif active_tab == "Diagnostics":
+        imgui.set_cursor_screen_pos((x0 + 18 * scale, content_y))
+        _draw_diagnostic_gallery(state, scale)
+
     elif active_tab == "Status":
         imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 12.0 * scale, content_y))
         _draw_status_tab(
@@ -4662,7 +4530,7 @@ def render(
     initial_imgui_radius: float | None = None,
     redesign_language: str = "en",
     redesign_section: str = "Overview",
-    capsule_outline: str = "Neutral gray",
+    capsule_outline: str = "Soft white",
 ) -> None:
     window_width, window_height = _probe_window_size(width, height, ui_scale)
     window = Window(
@@ -4729,6 +4597,8 @@ def render(
         output.parent.mkdir(parents=True, exist_ok=True)
         image.save(output)
     finally:
+        if "state" in locals() and state.timeline_session is not None:
+            state.timeline_session.release()
         window.close()
 
 
@@ -4754,7 +4624,7 @@ def main() -> None:
     )
     parser.add_argument("--redesign-language", choices=("en", "zh"), default="en")
     parser.add_argument(
-        "--capsule-outline", choices=("neutral-gray", "soft-white"), default="neutral-gray"
+        "--capsule-outline", choices=("neutral-gray", "soft-white"), default="soft-white"
     )
     parser.add_argument(
         "--redesign-section",
@@ -4771,6 +4641,7 @@ def main() -> None:
             "gizmos",
             "helpers",
             "status",
+            "diagnostics",
             "shell",
             "panels",
             "workspaces",
@@ -4831,6 +4702,7 @@ def main() -> None:
             "gizmos": "Transform gizmos",
             "helpers": "Joint & helpers",
             "status": "Status",
+            "diagnostics": "Diagnostics",
             "shell": "Shell & settings",
             "panels": "Panels",
             "workspaces": "Workspaces",

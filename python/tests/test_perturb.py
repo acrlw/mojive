@@ -953,7 +953,7 @@ def test_frame_publishes_marks_between_tick_and_render():
 
     tree = ast.parse(APP_PATH.read_text(encoding="utf-8"))
     cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "ViewerApp")
-    fn = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "frame")
+    fn = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "_frame")
     watched = (
         "_claim_gesture",
         "_poll_camera",

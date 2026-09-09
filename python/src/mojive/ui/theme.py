@@ -88,6 +88,7 @@ ACCENT_PURPLE_BRIGHT: RGBA = rgb8(199, 180, 207)
 ACCENT_PURPLE_DIM: RGBA = rgb8(141, 120, 152)
 
 
+INFO: RGBA = rgb8(138, 183, 192)
 DANGER: RGBA = rgb8(208, 103, 68)
 WARNING: RGBA = rgb8(201, 161, 92)
 
@@ -171,6 +172,7 @@ class Theme:
     node_colors: dict[NodeType, RGBA] = field(default_factory=lambda: dict(NODE_COLORS))
     axis_colors: dict[str, RGBA] = field(default_factory=lambda: dict(AXIS_COLORS))
     entity_palette: tuple[RGBA, ...] = ENTITY_PALETTE
+    info: RGBA = INFO
 
     def node_color(self, node_type: NodeType | str) -> RGBA:
         try:

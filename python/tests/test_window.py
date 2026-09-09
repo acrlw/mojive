@@ -17,7 +17,6 @@ from mojive.ui.app import (
     PRECISE_GIZMO_HINT_DELAY_SECONDS,
     ViewerApp,
     _clipped_overlay_host_rect,
-    _compact_status_for_selection,
     _fit_image_rect,
     _FrameRateDisplay,
     _GizmoHintHoverState,
@@ -26,7 +25,6 @@ from mojive.ui.app import (
     _model_filters,
     _prepare_modal,
     _simulation_timestep,
-    _status_message_for_bar,
     _toggle_angle_input,
     _translated_file_filters,
     precise_input_status_hints,
@@ -164,35 +162,6 @@ def test_precise_gizmo_status_hint_requires_an_uninterrupted_hover_delay() -> No
     assert state.update(True, 10.0 + PRECISE_GIZMO_HINT_DELAY_SECONDS)
     assert not state.update(False, 10.0 + PRECISE_GIZMO_HINT_DELAY_SECONDS + 0.01)
     assert state.entered_at is None
-
-
-@pytest.mark.parametrize(
-    ("message", "selected", "expected"),
-    (
-        ("02_prismatic", "02_prismatic", ""),
-        ("Selected 02_prismatic", "02_prismatic", ""),
-        ("02_prismatic · +0.236 m", "02_prismatic", "+0.236 m"),
-        ("Selection cleared", "no selection", ""),
-        ("Saved viewport", "02_prismatic", "Saved viewport"),
-    ),
-)
-def test_status_removes_selection_semantics_already_shown(message, selected, expected):
-    assert _compact_status_for_selection(message, selected) == expected
-
-
-@pytest.mark.parametrize(
-    ("message", "level", "expected"),
-    (
-        ("Simulation resumed", "info", ""),
-        ("Simulation paused", "info", ""),
-        ("Stepped 1 frame(s)", "info", ""),
-        ("Saved scene.xml", "info", "Saved scene.xml"),
-        ("Viewport capture failed", "error", "Viewport capture failed"),
-        ("02_prismatic · +0.236 m", "warning", "+0.236 m"),
-    ),
-)
-def test_status_bar_keeps_only_actions_and_diagnostics(message, level, expected):
-    assert _status_message_for_bar(message, "02_prismatic", level) == expected
 
 
 def test_status_bar_uses_the_adapter_simulation_timestep() -> None:
@@ -634,7 +603,7 @@ def test_application_layout_reset_restores_viewport_capsule_positions() -> None:
     assert app.viewport_overlays.playback_position is None
     assert app.viewport_overlays.tool_position is None
     assert app.viewport_overlays.playback_scale == pytest.approx(1.2)
-    assert app.viewport_overlays.tool_scale == pytest.approx(0.9)
+    assert app.viewport_overlays.tool_scale == pytest.approx(1.2)
     assert events[1]["viewport_overlays"]["playback_position"] is None
     assert events[1]["viewport_overlays"]["tool_position"] is None
 

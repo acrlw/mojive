@@ -87,7 +87,7 @@ _CATEGORY_WIDTH_PT = 132.0
 _PAGE_MIN_WIDTH_PT = 224.0
 _COLUMN_GAP_PT = 8.0
 _CATEGORY_SEARCH_TERMS = {
-    "General": ("language", "ui font", "cjk font"),
+    "General": ("language", "ui font", "cjk font", "model realtime rebuild apply"),
     "Recording": ("video capture countdown delay seconds frame rate fps viewport layers",),
     "Interaction": (
         "gizmo",
@@ -277,6 +277,11 @@ class SettingsPanel(Panel):
         changed, index = imgui.combo("##ui_language", languages.index(current), labels)
         if changed and ctx.set_language is not None:
             ctx.set_language(languages[index].value)
+        self._property(t("Model updates"))
+        changed, value = themed_checkbox(t("Realtime"), ctx.live_model_updates, ctx.theme)
+        if changed and ctx.set_live_model_updates is not None:
+            ctx.set_live_model_updates(value)
+        imgui.set_item_tooltip(t("When disabled, model edits wait for Apply in the viewport."))
         if ctx.font_report is not None:
             self._property(t("UI font"))
             imgui.text_disabled(ctx.font_report.mono)
@@ -472,8 +477,7 @@ class SettingsPanel(Panel):
                     )
                 if ctx.viewport_overlays is not None:
                     for name, label, value in (
-                        ("playback", "Playback size", ctx.viewport_overlays.playback_scale),
-                        ("tools", "Tool column size", ctx.viewport_overlays.tool_scale),
+                        ("playback", "Capsule size", ctx.viewport_overlays.playback_scale),
                     ):
                         self._property(t(label))
                         changed, relative_scale = imgui.drag_float(
@@ -501,6 +505,18 @@ class SettingsPanel(Panel):
                                 relative_scale,
                                 persist=committed or reset,
                             )
+                    self._property(t("Status duration"))
+                    changed, duration = imgui.slider_float(
+                        "##viewport_status_duration",
+                        ctx.viewport_overlays.status_duration,
+                        3.0,
+                        5.0,
+                        "%.1f s",
+                    )
+                    if changed and ctx.set_viewport_overlays is not None:
+                        ctx.set_viewport_overlays(
+                            replace(ctx.viewport_overlays, status_duration=duration), persist=True
+                        )
                     self._property(t("Movable capsules"))
                     changed, movable = themed_checkbox(
                         "##viewport_capsules_movable",

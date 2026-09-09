@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from imgui_bundle import imgui
 
 
@@ -21,7 +23,7 @@ def draw_joined_field_frame(
     """Draw one outer rounded frame with a square badge/field join.
 
     The field surface is the complete outer silhouette.  The badge is then
-    painted over its left side with only its left corners rounded.  Keeping a
+    painted over its own side with only the external corners rounded.  Keeping a
     continuous surface below the color boundary prevents either antialiased
     edge from exposing the panel background at fractional framebuffer scales.
     """
@@ -35,8 +37,8 @@ def draw_joined_field_frame(
     y0 = min(float(badge_lo.y), float(field_lo.y))
     y1 = max(float(badge_hi.y), float(field_hi.y))
     radius = min(max(0.0, float(rounding)), max(0.0, (y1 - y0) * 0.5))
-    outer_lo = imgui.ImVec2(float(badge_lo.x), y0)
-    outer_hi = imgui.ImVec2(float(field_hi.x), y1)
+    outer_lo = imgui.ImVec2(min(float(badge_lo.x), float(field_lo.x)), y0)
+    outer_hi = imgui.ImVec2(max(float(badge_hi.x), float(field_hi.x)), y1)
     draw_list.add_rect_filled(
         outer_lo,
         outer_hi,
@@ -49,5 +51,21 @@ def draw_joined_field_frame(
         imgui.ImVec2(float(badge_hi.x), y1),
         packed(badge_color, badge_opacity),
         radius,
-        imgui.ImDrawFlags_.round_corners_left.value,
+        (
+            imgui.ImDrawFlags_.round_corners_left
+            if badge_lo.x < field_lo.x
+            else imgui.ImDrawFlags_.round_corners_right
+        ).value,
     )
+
+
+@contextmanager
+def borderless_numeric_input():
+    """Keep a compound field's editor inside its shared outer silhouette."""
+    imgui.push_style_var(imgui.StyleVar_.frame_border_size, 0.0)
+    imgui.push_style_color(imgui.Col_.nav_cursor, (0, 0, 0, 0))
+    try:
+        yield
+    finally:
+        imgui.pop_style_color()
+        imgui.pop_style_var()

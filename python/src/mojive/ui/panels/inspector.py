@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 import numpy as np
@@ -25,8 +26,10 @@ from ...adapters.base import (
 )
 from ...geometry import geometry_dimensions, geometry_size_from_dimensions
 from ...render.backend import RenderFlag
+from ...scene_state import apply_camera_bookmark
 from ...types import DEFAULT_HEADLIGHT, Environment, LightType, TextureType
-from ..compound_fields import draw_joined_field_frame
+from ..compound_fields import borderless_numeric_input, draw_joined_field_frame
+from ..draw2d import ImguiDraw2D
 from ..pointer_bindings import PointerAction
 from . import (
     Panel,
@@ -34,11 +37,13 @@ from . import (
     begin_kv_table,
     button_row_layout,
     button_width,
+    copyable_name_item,
     labeled,
     pointer_hint,
     pointer_pressed,
     segmented_control,
 )
+from .value_cards import value_card, value_rail
 
 GIZMO_REFUSAL_RUNNING = "Physics is running; pause to move things"
 GIZMO_REFUSAL_DRIVEN = "This link is joint-driven; use its joint gizmo or the Joints panel"
@@ -176,6 +181,13 @@ class InspectorPanel(Panel):
         self._edit_transaction = False
         self._model_name_source: tuple[int, int, int, str] | None = None
         self._model_name = ""
+        self._renaming = False
+        self._rename_focus = False
+        self._rename_active = False
+        self._rename_generation = -1
+        self._name_draw_frame = -1
+        self._rename_model_element = False
+        self._rename_error = ""
         self._source_model_id = -1
         self._source_text = ""
         self._source_error = ""
@@ -197,6 +209,10 @@ class InspectorPanel(Panel):
         self._model_transform_generation = -1
         self._model_transform_position = np.zeros(3, np.float32)
         self._model_transform_euler = np.zeros(3, np.float64)
+        self._camera_sync_source = -1
+        self._camera_angular_degrees = True
+        self._camera_initial_key = None
+        self._camera_initial_view = None
         self._body_property_node = -1
         self._body_property_generation = -1
         self._body_property_edit: BodyProperties | None = None
@@ -226,6 +242,10 @@ class InspectorPanel(Panel):
         )
 
     def finish_frame(self, ctx: PanelContext) -> None:
+        if self._renaming and (
+            not self.open or not self.enabled or self._name_draw_frame != imgui.get_frame_count()
+        ):
+            self._finish_name_edit(ctx)
         gizmo = ctx.gizmo
         if gizmo is not None and gizmo.model_placement_model_id >= 0:
             node = ctx.session.selected_node
@@ -254,19 +274,18 @@ class InspectorPanel(Panel):
         self._draw_component_editor(ctx)
         s = ctx.session
         node = s.selected_node
+        if self._renaming and (
+            node is None or self._model_name_source != self._name_identity(node)
+        ):
+            self._finish_name_edit(ctx)
         if node is None:
             self._transform_velocity = False
             imgui.text_disabled(ctx.tr("nothing selected"))
             imgui.set_item_tooltip(ctx.tr("click an object in the viewport or the Hierarchy panel"))
             return
 
-        color = ctx.theme.node_color(node.type)
-        imgui.text_colored(imgui.ImVec4(*color), node.name or "?")
-        imgui.same_line()
-        imgui.text_disabled(f"({node.type})")
-
-        self._identity(ctx, node)
         self._name_editor(ctx, node)
+        self._identity(ctx, node)
         if node.type is NodeType.MODEL:
             self._model(ctx, node)
             return
@@ -291,41 +310,127 @@ class InspectorPanel(Panel):
             self._site_properties(ctx, node)
         self._material(ctx, node)
 
-    def _name_editor(self, ctx: PanelContext, node: SceneNode) -> None:
-        model_element = node.source_editable and node.type not in (
-            NodeType.WORLD,
-            NodeType.MODEL,
+    @staticmethod
+    def _name_identity(node: SceneNode) -> tuple[int, int, int, str]:
+        return node.node_id, node.model_id, node.object_id, node.name
+
+    def _finish_name_edit(self, ctx: PanelContext, *, cancel: bool = False) -> None:
+        source = self._model_name_source
+        self._renaming = self._rename_focus = self._rename_active = False
+        if cancel or source is None:
+            return
+        node = ctx.session.node(source[0])
+        # A rebuild may recycle node IDs. Only commit against the structure
+        # and entity from which this edit started, including on selection blur.
+        if (
+            ctx.session.structure_generation != self._rename_generation
+            or node is None
+            or self._name_identity(node) != source
+        ):
+            return
+        value = self._model_name.strip()
+        if not value or value == node.name.removeprefix(f"opengl_{node.model_id}_"):
+            return
+        command = (
+            cmd.RenameModelElement(node.node_id, value)
+            if self._rename_model_element
+            else cmd.RenameSceneEntity(node.object_id, value)
         )
+
+        def completed(result):
+            if self._model_name_source == source:
+                self._rename_error = "" if result.ok else result.message
+
+        if self._rename_model_element:
+            ctx.submit_model_edit(command, completed)
+        else:
+            completed(ctx.submit(command))
+
+    def _name_editor(self, ctx: PanelContext, node: SceneNode) -> None:
+        self._name_draw_frame = imgui.get_frame_count()
+        model_element = node.source_editable and node.type not in (NodeType.WORLD, NodeType.MODEL)
         scene_entity = (
             node.model_id < 0
             and node.object_id > 0
             and node.type in (NodeType.LINK, NodeType.LIGHT, NodeType.CAMERA)
             and ctx.session.adapter.caps.scene_authoring
         )
-        if not model_element and not scene_entity:
-            return
-        name_source = (node.node_id, node.model_id, node.object_id, node.name)
-        if self._model_name_source != name_source:
-            self._model_name_source = name_source
-            prefix = f"opengl_{node.model_id}_"
-            self._model_name = node.name.removeprefix(prefix)
-        imgui.set_next_item_width(-80.0 * ctx.style_scale)
-        entered, self._model_name = imgui.input_text(
-            "##entity_name",
-            self._model_name,
-            imgui.InputTextFlags_.enter_returns_true.value,
+        editable = model_element or scene_entity
+        identity = self._name_identity(node)
+        if not self._renaming and self._model_name_source != identity:
+            self._model_name_source = identity
+            self._model_name = node.name.removeprefix(f"opengl_{node.model_id}_")
+            self._rename_error = ""
+        height = imgui.get_frame_height()
+        available = max(1.0, imgui.get_content_region_avail().x)
+        type_label = node.type.value
+        badge_width = imgui.calc_text_size(type_label).x + 12 * ctx.style_scale
+        inline = available > badge_width + 90 * ctx.style_scale
+        name_width = (
+            max(1.0, available - badge_width - imgui.get_style().item_spacing.x)
+            if inline
+            else available
         )
-        imgui.same_line()
-        apply = imgui.button(f"{ctx.tr('Apply')}##name")
-        value = self._model_name.strip()
-        if (entered or apply) and value:
-            command = (
-                cmd.RenameModelElement(node.node_id, value)
-                if model_element
-                else cmd.RenameSceneEntity(node.object_id, value)
+        if self._renaming:
+            if self._rename_focus:
+                imgui.set_keyboard_focus_here()
+                self._rename_focus = False
+            imgui.set_next_item_width(name_width)
+            imgui.push_style_var(imgui.StyleVar_.frame_border_size, 0.0)
+            imgui.push_style_color(imgui.Col_.border, imgui.ImVec4(0, 0, 0, 0))
+            imgui.push_style_color(imgui.Col_.nav_cursor, imgui.ImVec4(0, 0, 0, 0))
+            entered, self._model_name = imgui.input_text(
+                "##entity_name",
+                self._model_name,
+                imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.auto_select_all,
             )
-            ctx.submit(command)
-        imgui.separator()
+            active = imgui.is_item_active()
+            blur = imgui.is_item_deactivated() or (self._rename_active and not active)
+            self._rename_active = active
+            cancel = active and imgui.is_key_pressed(imgui.Key.escape, False)
+            imgui.pop_style_color(2)
+            imgui.pop_style_var()
+            if entered or blur or cancel:
+                self._finish_name_edit(ctx, cancel=cancel)
+        else:
+            origin = imgui.get_cursor_screen_pos()
+            width = name_width
+            imgui.invisible_button("##entity_name_label", imgui.ImVec2(width, height))
+            hovered = imgui.is_item_hovered()
+            if editable and hovered and pointer_pressed(ctx, PointerAction.NAME_EDIT):
+                self._renaming = self._rename_focus = True
+                self._rename_active = False
+                self._rename_generation = ctx.session.structure_generation
+                self._rename_model_element = model_element
+                self._rename_error = ""
+            draw = ImguiDraw2D()
+            imgui.push_clip_rect(origin, (origin.x + width, origin.y + height), True)
+            draw.text(
+                (
+                    origin.x + imgui.get_style().frame_padding.x,
+                    origin.y + imgui.get_style().frame_padding.y,
+                ),
+                ctx.theme.text,
+                node.name.removeprefix(f"opengl_{node.model_id}_") or "?",
+            )
+            imgui.pop_clip_rect()
+            if hovered:
+                hint = (
+                    pointer_hint(ctx, PointerAction.NAME_EDIT, ctx.tr("Rename")) if editable else ""
+                )
+                imgui.set_tooltip(node.name + ("\n" + hint if hint else ""))
+        if self._rename_error:
+            imgui.text_wrapped(self._rename_error)
+        if inline:
+            imgui.same_line()
+        imgui.push_style_var(imgui.StyleVar_.frame_rounding, height * 0.5)
+        imgui.begin_disabled()
+        imgui.push_style_var(imgui.StyleVar_.button_text_align, (0.5, 0.5))
+        imgui.push_style_var(imgui.StyleVar_.frame_padding, (0, imgui.get_style().frame_padding.y))
+        imgui.button(type_label + "##entity-type", (badge_width, height))
+        imgui.pop_style_var(2)
+        imgui.end_disabled()
+        imgui.pop_style_var()
 
     def _model(self, ctx: PanelContext, node: SceneNode) -> None:
         info = next(
@@ -392,6 +497,8 @@ class InspectorPanel(Panel):
                 ctx.report(result.message, level="error")
 
         if placement_active and gizmo is not None:
+            if not ctx.live_model_updates:
+                return
             apply = imgui.button(ctx.tr("Apply Placement"))
             imgui.set_item_tooltip(
                 ctx.tr("Preview only; applying rebuilds the composed model once.")
@@ -774,15 +881,18 @@ class InspectorPanel(Panel):
         imgui.end_popup()
 
     def _identity(self, ctx: PanelContext, node: SceneNode) -> None:
-        if begin_kv_table("insp_id"):
-            labeled(ctx.tr("node id"), str(node.node_id))
-            labeled(
-                ctx.tr("object id"),
-                str(node.object_id) if node.object_id else f"— ({ctx.tr('not pickable')})",
-            )
-            labeled(ctx.tr("body"), str(node.body_index) if node.body_index >= 0 else "—")
-            labeled(ctx.tr("posable"), ctx.tr("yes") if node.posable else ctx.tr("no"))
-            imgui.end_table()
+        text = f"{ctx.tr('node id')} {node.node_id} · {ctx.tr('object id')} {node.object_id}"
+        if node.body_index >= 0:
+            text += f" · {ctx.tr('body')} {node.body_index}"
+        if node.posable:
+            text += f" · {ctx.tr('posable')}"
+        imgui.push_font(None, imgui.get_font_size() * 0.85)
+        imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ctx.theme.text_disabled))
+        imgui.text_wrapped(text)
+        imgui.pop_style_color()
+        imgui.pop_font()
+        copyable_name_item(ctx, text, imgui.get_content_region_avail().x)
+        imgui.separator()
 
     def _transform(self, ctx: PanelContext, node: SceneNode) -> None:
         self.show_transform = imgui.collapsing_header(
@@ -863,6 +973,8 @@ class InspectorPanel(Panel):
         return self._rotation_euler.copy()
 
     def _gizmo_reason(self, ctx: PanelContext, node: SceneNode) -> None:
+        if ctx.gizmo is not None and not ctx.gizmo.enabled:
+            return
         caps = ctx.session.adapter.caps
         availability = ctx.gizmo.evaluate(ctx.session, node) if ctx.gizmo is not None else None
         reason = (
@@ -2979,72 +3091,69 @@ class InspectorPanel(Panel):
             imgui.text_disabled(ctx.tr("camera view is unavailable"))
             return
 
+        self._camera_transfer(ctx, info)
+        identity = (info.camera_id, ctx.session.structure_generation)
+        if self._camera_initial_key != identity:
+            self._camera_initial_key, self._camera_initial_view = identity, view
+        initial = self._camera_initial_view
+
         eye = np.asarray(view.eye, np.float64).copy()
         target = np.asarray(view.target, np.float64).copy()
         up = np.asarray(view.up, np.float64).copy()
         eye_changed = target_changed = up_changed = False
         fov_changed = near_changed = far_changed = ortho_changed = False
-        fov = float(np.degrees(view.fov_y))
+        fov = float(view.fov_y)
         near = float(view.near)
         far = float(view.far)
         orthographic = view.orthographic
         height_changed = False
         ortho_height = view.ortho_height
 
-        if _property_section(ctx, "camera transform") and _begin_property_table(
-            "insp_camera_transform"
-        ):
-            eye_changed, eye = _property_vector_row(
+        if _property_section(ctx, "camera transform"):
+            (eye_changed, eye), (target_changed, target), (up_changed, up) = _vector_fields(
                 ctx,
                 node,
-                "position",
-                "camera_position",
-                eye,
-                editable=True,
-                speed=0.01,
-                lo=0.0,
-                hi=0.0,
-                fmt="%.4f",
+                "insp_camera_transform",
+                (
+                    (ctx.tr("position"), eye, 0.01, "%.4f", initial.eye),
+                    (ctx.tr("target"), target, 0.01, "%.4f", initial.target),
+                    (ctx.tr("up"), up, 0.01, "%.4f", initial.up),
+                ),
             )
-            target_changed, target = _property_vector_row(
-                ctx,
-                node,
-                "target",
-                "camera_target",
-                target,
-                editable=True,
-                speed=0.01,
-                lo=0.0,
-                hi=0.0,
-                fmt="%.4f",
-            )
-            up_changed, up = _property_vector_row(
-                ctx,
-                node,
-                "up",
-                "camera_up",
-                up,
-                editable=True,
-                speed=0.01,
-                lo=0.0,
-                hi=0.0,
-                fmt="%.4f",
-                reset_values=np.array((0.0, 0.0, 1.0)),
-            )
-            imgui.end_table()
 
-        if _property_section(ctx, "camera projection") and _begin_property_table(
-            "insp_camera_projection"
-        ):
-            _property_control_row(ctx, "vertical fov")
-            fov_changed, fov = imgui.drag_float("##camera_fov", fov, 0.1, 1.0, 179.0, "%.2f deg")
-            _property_control_row(ctx, "near")
-            near_changed, near = imgui.drag_float(
-                "##camera_near", near, 0.001, 1e-5, float(view.far), "%.6f"
-            )
-            _property_control_row(ctx, "far")
-            far_changed, far = imgui.drag_float("##camera_far", far, 0.1, float(near), 1e7, "%.3f")
-            _property_control_row(ctx, "projection")
+        if _property_section(ctx, "camera projection"):
+            fields = []
+            for label, value, bounds, default, unit, fmt in (
+                (
+                    "vertical fov",
+                    fov,
+                    (np.radians(1.0), np.radians(179.0)),
+                    initial.fov_y,
+                    "rad",
+                    "%.2f",
+                ),
+                ("near", near, (1e-5, far - 1e-5), initial.near, "m", "%.5f"),
+                ("far", far, (near + 1e-5, 1e7), initial.far, "m", "%.3f"),
+            ):
+                with value_card(ctx, f"##inspector-camera-{label}-label", ctx.tr(label), ""):
+                    fields.append(
+                        value_rail(
+                            ctx,
+                            f"##inspector-camera-{label}",
+                            value,
+                            bounds,
+                            initial=default,
+                            fmt=fmt,
+                            show_reset=False,
+                            unit=unit,
+                            angular_degrees=self._camera_angular_degrees,
+                            toggle_unit=self._toggle_camera_angle_unit,
+                        )
+                    )
+            fov_changed, fov = fields[0].changed, fields[0].value
+            near_changed, near = fields[1].changed, fields[1].value
+            far_changed, far = fields[2].changed, fields[2].value
+            imgui.set_next_item_width(-1)
             projection = 1 if orthographic else 0
             supported = ctx.backend.caps.orthographic
             imgui.begin_disabled(not supported)
@@ -3064,16 +3173,18 @@ class InspectorPanel(Panel):
                 orthographic = selected_projection == 1
                 ortho_changed = True
             if orthographic:
-                _property_control_row(ctx, "ortho height")
-                height_changed, ortho_height = imgui.drag_float(
-                    "##camera_ortho_height",
-                    float(view.ortho_height),
-                    0.01,
-                    1e-4,
-                    1e6,
-                    "%.4f",
-                )
-            imgui.end_table()
+                with value_card(ctx, "##camera-ortho-height-label", ctx.tr("ortho height"), ""):
+                    height_edit = value_rail(
+                        ctx,
+                        "##camera_ortho_height",
+                        float(view.ortho_height),
+                        (1e-4, 1e6),
+                        initial=initial.ortho_height,
+                        fmt="%.4f",
+                        show_reset=False,
+                        unit="m",
+                    )
+                    height_changed, ortho_height = height_edit.changed, height_edit.value
 
         if _property_section(ctx, "camera behavior") and _begin_property_table(
             "insp_camera_behavior"
@@ -3130,7 +3241,7 @@ class InspectorPanel(Panel):
                         eye=np.asarray(eye, np.float32),
                         target=np.asarray(target, np.float32),
                         up=np.asarray(up, np.float32),
-                        fov_y=float(np.radians(fov)),
+                        fov_y=float(fov),
                         near=float(near),
                         far=max(float(far), float(near) + 1e-5),
                         orthographic=orthographic,
@@ -3138,6 +3249,67 @@ class InspectorPanel(Panel):
                     ),
                 ),
             )
+
+    def _toggle_camera_angle_unit(self):
+        self._camera_angular_degrees = not self._camera_angular_degrees
+
+    def _camera_transfer(self, ctx, camera_info):
+        sources = [(-1, ctx.tr("Editor Camera"))] + [
+            (camera.camera_id, camera.name)
+            for camera in ctx.session.cameras
+            if camera.camera_id != camera_info.camera_id
+        ]
+        ids = [item[0] for item in sources]
+        if self._camera_sync_source not in ids:
+            self._camera_sync_source = -1
+        width = imgui.get_content_region_avail().x
+        gap = imgui.get_style().item_spacing.x
+        sync_label, paste_label = ctx.tr("Sync view"), ctx.tr("Paste bookmark")
+        actions_width = button_width(sync_label) + button_width(paste_label) + gap
+        inline = width >= actions_width + 120 * ctx.style_scale + gap
+        imgui.set_next_item_width(max(1, width - actions_width - gap) if inline else -1)
+        changed, slot = imgui.combo(
+            "##camera-sync-source",
+            ids.index(self._camera_sync_source),
+            tuple(item[1] for item in sources),
+        )
+        if changed:
+            self._camera_sync_source = ids[slot]
+        if inline:
+            imgui.same_line()
+        imgui.begin_disabled(self._camera_sync_source < 0 and ctx.camera is None)
+        sync = imgui.button(sync_label + "##camera-sync")
+        imgui.end_disabled()
+        if sync:
+            source = (
+                ctx.camera.view()
+                if self._camera_sync_source < 0
+                else ctx.session.camera_view(self._camera_sync_source)
+            )
+            if source is not None:
+                self._submit_edit(ctx, cmd.SetSceneCamera(camera_info.camera_id, source))
+        if actions_width <= width:
+            imgui.same_line()
+        if imgui.button(paste_label + "##camera-paste"):
+            try:
+                bookmark = json.loads(imgui.get_clipboard_text())
+                if not isinstance(bookmark, dict):
+                    raise ValueError("The clipboard does not contain a camera bookmark")
+                source = apply_camera_bookmark(bookmark, None)
+                vectors = (source.eye, source.target, source.up)
+                if any(v.shape != (3,) or not np.isfinite(v).all() for v in vectors):
+                    raise ValueError("Camera position and direction must be finite XYZ vectors")
+                if (
+                    not np.isfinite(source.proj_matrix()).all()
+                    or not 0 < source.near < source.far
+                    or not 0 < source.fov_y < np.pi
+                    or np.linalg.norm(np.cross(source.target - source.eye, source.up)) < 1e-8
+                ):
+                    raise ValueError("Camera bookmark has an invalid projection or direction")
+                self._submit_edit(ctx, cmd.SetSceneCamera(camera_info.camera_id, source))
+            except (KeyError, TypeError, ValueError, ZeroDivisionError) as error:
+                ctx.report(str(error), level="error")
+        imgui.separator()
 
     @staticmethod
     def _entity_gizmo_lock(ctx: PanelContext, node: SceneNode) -> None:
@@ -3206,8 +3378,8 @@ def _begin_property_table(table_id: str) -> bool:
     flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
     if not imgui.begin_table(table_id, 2, flags):
         return False
-    imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.38)
-    imgui.table_setup_column("control", imgui.TableColumnFlags_.width_stretch, 0.62)
+    imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.26)
+    imgui.table_setup_column("control", imgui.TableColumnFlags_.width_stretch, 0.74)
     return True
 
 
@@ -3242,10 +3414,6 @@ def _property_control_row(
             shown = shown[:-1]
         shown = f"{shown.rstrip()}{ellipsis}" if shown else ellipsis
         width = imgui.calc_text_size(shown).x
-    # Keep the label's right edge attached to the control boundary. On narrow
-    # HiDPI panels a long label is ellipsized inside the label cell rather than
-    # being clipped at the panel's left edge or drifting into the control.
-    imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, available - width))
     imgui.text_disabled(shown)
     if (tooltip or truncated) and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
         imgui.set_tooltip(ctx.tr(tooltip) if tooltip else translated)
@@ -3370,12 +3538,11 @@ def _vector_fields(
 ) -> tuple[tuple[bool, np.ndarray], ...]:
     label_width = max(
         label_width,
-        96.0 * ctx.style_scale,
         max(imgui.calc_text_size(row[0]).x for row in rows) + 10.0 * ctx.style_scale,
     )
-    compact = imgui.get_content_region_avail().x < label_width + 3.0 * _axis_field_min_width(
-        ctx.style_scale
-    )
+    width = imgui.get_content_region_avail().x
+    minimum_axes_width = 3.0 * _axis_field_min_width(ctx.style_scale)
+    compact = width < label_width + minimum_axes_width
     flags = (
         imgui.TableFlags_.sizing_stretch_same
         | imgui.TableFlags_.no_saved_settings
@@ -3503,6 +3670,9 @@ def _axis_field(
     hi: float = 0.0,
     grouped: bool = True,
 ) -> tuple[bool, bool, float]:
+    gap = 5.0 * ctx.style_scale if grouped else 0.0
+    if grouped:
+        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + axis * gap / 3.0)
     axis_color = ctx.theme.axis_color(axis)
     color = _mix_color(ctx.theme.bg_frame, axis_color, 0.56)
     hovered_color = _mix_color(ctx.theme.bg_frame_hovered, axis_color, 0.72)
@@ -3542,16 +3712,17 @@ def _axis_field(
     if button_hovered:
         imgui.set_tooltip(ctx.tr("Click to reset to 0") if editable else ctx.tr("Read only"))
 
-    group_gap = 5.0 * ctx.style_scale if grouped and axis < 2 else 0.0
+    group_gap = (2 - axis) * gap / 3.0
     imgui.same_line(0.0, 0.0)
     imgui.set_next_item_width(max(1.0, imgui.get_content_region_avail().x - group_gap))
     imgui.push_style_color(imgui.Col_.frame_bg, transparent)
     imgui.push_style_color(imgui.Col_.frame_bg_hovered, transparent)
     imgui.push_style_color(imgui.Col_.frame_bg_active, transparent)
     imgui.begin_disabled(not editable)
-    edited, next_value = imgui.drag_float(
-        f"##{name}_{axis}_{node.node_id}", value, speed, lo, hi, fmt
-    )
+    with borderless_numeric_input():
+        edited, next_value = imgui.drag_float(
+            f"##{name}_{axis}_{node.node_id}", value, speed, lo, hi, fmt
+        )
     imgui.end_disabled()
     imgui.pop_style_color(3)
     field_hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)

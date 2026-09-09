@@ -361,8 +361,8 @@ def _capture_panel_layouts(output: Path) -> None:
                 imgui.get_io().add_mouse_pos_event(
                     *_item_center(
                         viewer,
-                        "selectable",
-                        f"02_prismatic_x##joint-select-{joint.joint_index + 1}",
+                        "invisible_button",
+                        f"##joint-select-{joint.joint_index + 1}",
                     )
                 )
             if name not in ("Settings", "Joints"):
@@ -1085,8 +1085,8 @@ def _capture_joint_gizmos(output: Path) -> None:
             _settle(viewer, 2)
             label_point = _item_center(
                 viewer,
-                "selectable",
-                f"{long_joint_name}##joint-select-{long_joint.joint_id}",
+                "invisible_button",
+                f"##joint-select-{long_joint.joint_id}",
             )
             imgui.get_io().add_mouse_pos_event(*label_point)
             viewer.sync()
@@ -1116,11 +1116,14 @@ def _capture_joint_gizmos(output: Path) -> None:
                 viewer,
                 _item_center(
                     viewer,
-                    "selectable",
-                    f"slide##joint-select-{slide_joint.joint_id}",
+                    "invisible_button",
+                    f"##joint-select-{slide_joint.joint_id}",
                 ),
             )
             assert viewer.session.selected_node is slide_joint_node
+            _settle(viewer, 3)
+            assert not viewer.app.gizmo.visible
+            viewer.set_gizmo_mode("translate")
             _settle(viewer, 3)
             assert viewer.app.gizmo.visible
             _save(viewer, output / "joints-viewport-selection.png")

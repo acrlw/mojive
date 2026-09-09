@@ -827,3 +827,38 @@ def test_camera_matrix_reuse_is_by_value_and_bounded(monkeypatch):
         CameraView(eye=[4.0, i * 0.01, 0.0]).view_matrix()
     assert _camera_view_matrix.cache_info().currsize <= 128
     _camera_view_matrix.cache_clear()
+
+
+@pytest.mark.parametrize("orthographic", (False, True))
+def test_scene_camera_transition_handles_opposite_views_roll_and_intrinsics(orthographic):
+    from dataclasses import replace
+
+    from mojive.types import CameraView
+    from mojive.ui.camera import CameraViewTransition
+
+    start = CameraView(eye=np.array((0.0, -3.0, 1.0)), target=np.zeros(3))
+    target = replace(
+        start,
+        eye=-start.eye,
+        up=np.array((1.0, 0.0, 0.0)),
+        orthographic=orthographic,
+        focal_length=np.array((0.018, 0.020)),
+        sensor_size=np.array((0.036, 0.024)),
+        principal_offset=np.array((0.002, -0.001)),
+        near=0.1,
+        far=100.0,
+    )
+    transition = CameraViewTransition(start)
+    np.testing.assert_allclose(transition.advance(target, 0).view_matrix(), start.view_matrix())
+    middle = transition.advance(target, 0.07)
+    assert not np.allclose(middle.eye, start.eye)
+    assert not np.allclose(middle.eye, target.eye)
+    assert middle.distance() > 1
+    np.testing.assert_allclose(
+        middle.view_matrix()[:3, :3] @ middle.view_matrix()[:3, :3].T, np.eye(3), atol=1e-6
+    )
+    assert np.isfinite(middle.proj_matrix()).all()
+    assert np.linalg.norm(middle.eye - start.eye) > np.linalg.norm(target.eye - start.eye) * 0.25
+    final = transition.advance(target, 0.3)
+    assert final is target and not transition.active
+    np.testing.assert_allclose(final.proj_matrix(), target.proj_matrix())

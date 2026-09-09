@@ -45,6 +45,8 @@ class PanelContext:
     request_model_asset_import: Any = None
     request_model_asset_replace: Any = None
     queue_model_edit: Any = None
+    live_model_updates: bool = False
+    set_live_model_updates: Any = None
 
     theme: Theme = THEME
     gizmo: Any = None
@@ -235,6 +237,15 @@ def publish_status_hint(ctx: PanelContext, hint: ToolHint) -> None:
         ctx.status_hints = (*ctx.status_hints, hint)
 
 
+def activate_edit_gizmo(ctx: PanelContext, node, joint=None) -> None:
+    """Explicit panel editing reveals a supported tool; plain selection stays passive."""
+    if ctx.gizmo is None or (ctx.interactions is not None and not ctx.interactions.gizmo):
+        return
+    mode = "rotate" if joint is not None and joint.type in {"hinge", "ball"} else "translate"
+    if ctx.gizmo.evaluate_mode(ctx.session, node, mode).ok:
+        ctx.gizmo.set_mode(mode)
+
+
 def publish_focus_item_hint(ctx: PanelContext) -> None:
     """Advertise the shared hierarchy/joint double-click focus gesture."""
 
@@ -270,6 +281,7 @@ class ValueEdit:
     value: float = 0.0
     copied: bool = False
     expanded: bool = False
+    activated: bool = False
 
 
 def value_slider(
@@ -287,6 +299,22 @@ def value_slider(
     if width:
         imgui.set_next_item_width(width)
     changed, new_value = imgui.slider_float(label, value, lo, hi, fmt)
+    return value_edit(
+        label,
+        value,
+        changed,
+        new_value,
+        initial=initial,
+        fmt=fmt,
+        more_hint=more_hint,
+        bindings=bindings,
+    )
+
+
+def value_edit(
+    label, value, changed, new_value, *, initial=None, fmt="%.4f", more_hint="", bindings=None
+):
+    """Apply mapped value actions to the last submitted numeric widget."""
     bindings = bindings or DEFAULT_INPUT_BINDINGS
     action = None
     if imgui.is_item_hovered():
@@ -299,7 +327,12 @@ def value_slider(
             if bindings.pointer_match(candidate, frame, press=True) is not None:
                 action = name
                 break
-    out = ValueEdit(changed=changed, value=new_value, expanded=label in _EXPANDED)
+    out = ValueEdit(
+        changed=changed,
+        value=new_value,
+        expanded=label in _EXPANDED,
+        activated=imgui.is_item_activated(),
+    )
 
     if action == "reset" and initial is not None:
         out.changed = True
@@ -356,13 +389,13 @@ def search_input(
         if active
         else (imgui.Col_.frame_bg_hovered if hovered else imgui.Col_.frame_bg)
     )
-    draw_list.add_rect_filled(lo, hi, imgui.get_color_u32(background), style.frame_rounding)
+    draw_list.add_rect_filled(lo, hi, imgui.get_color_u32(background), height * 0.5)
     if style.frame_border_size > 0.0:
         draw_list.add_rect(
             lo,
             hi,
             imgui.get_color_u32(imgui.Col_.border),
-            style.frame_rounding,
+            height * 0.5,
             thickness=style.frame_border_size,
         )
 
@@ -385,7 +418,9 @@ def search_input(
         changed, value = imgui.input_text(str_id, value)
     imgui.pop_style_var()
     imgui.pop_style_color(4)
+    imgui.push_style_var(imgui.StyleVar_.frame_rounding, height * 0.5)
     imgui.internal.render_nav_cursor(imgui.internal.ImRect(lo, hi), input_id)
+    imgui.pop_style_var()
 
     draw = ImguiDraw2D()
     color = imgui.get_style_color_vec4(imgui.Col_.text_disabled)
@@ -697,12 +732,13 @@ def segmented_control(
     width: float = 0.0,
     theme: Theme = THEME,
     icons: tuple[str, ...] | None = None,
+    joined: bool = False,
 ) -> int:
     """Keep mutually exclusive choices readable, stacking when a row cannot fit."""
 
     if not labels:
         return 0
-    spacing = imgui.get_style().item_spacing.x
+    spacing = 0.0 if joined else imgui.get_style().item_spacing.x
     available = width if width > 0.0 else imgui.get_content_region_avail().x
     available = max(1.0, float(available))
     glyph_scale = max(0.65, imgui.get_frame_height() / 24.0)
@@ -711,6 +747,8 @@ def segmented_control(
         + (20.0 * glyph_scale if icons and index < len(icons) and icons[index] else 0.0)
         for index, label in enumerate(labels)
     )
+    if joined:
+        minimum_widths = (max(minimum_widths),) * len(labels)
     required = sum(minimum_widths) + spacing * (len(labels) - 1)
     inline = required <= available
     extra = max(0.0, available - required) / len(labels)
@@ -718,7 +756,7 @@ def segmented_control(
     draw = ImguiDraw2D()
     for index, label in enumerate(labels):
         if index and inline:
-            imgui.same_line()
+            imgui.same_line(0, spacing)
         item_width = minimum_widths[index] + extra if inline else available
         is_selected = index == result
         if is_selected:
@@ -729,7 +767,51 @@ def segmented_control(
         # glyph space with leading text made ImGui center the whitespace rather than
         # the visible icon/text pair, which drifted at different fonts and UI scales.
         button_label = f"##{str_id}-{index}" if icon else f"{label}##{str_id}-{index}"
+        if joined:
+            dl = imgui.get_window_draw_list()
+            splitter = imgui.ImDrawListSplitter()
+            splitter.split(dl, 2)
+            splitter.set_current_channel(dl, 1)
+            for slot in (imgui.Col_.button, imgui.Col_.button_hovered, imgui.Col_.button_active):
+                imgui.push_style_color(slot, (0, 0, 0, 0))
+            imgui.push_style_var(imgui.StyleVar_.button_text_align, (0.5, 0.5))
         clicked = imgui.button(button_label, imgui.ImVec2(item_width, 0.0))
+        if joined:
+            imgui.pop_style_var()
+            imgui.pop_style_color(3)
+            splitter.set_current_channel(dl, 0)
+            flags = (
+                (
+                    imgui.ImDrawFlags_.round_corners_left
+                    if inline
+                    else imgui.ImDrawFlags_.round_corners_top
+                )
+                if index == 0
+                else (
+                    (
+                        imgui.ImDrawFlags_.round_corners_right
+                        if inline
+                        else imgui.ImDrawFlags_.round_corners_bottom
+                    )
+                    if index == len(labels) - 1
+                    else imgui.ImDrawFlags_.round_corners_none
+                )
+            )
+            color = (
+                theme.bg_frame_active
+                if is_selected or imgui.is_item_active()
+                else theme.bg_frame_hovered
+                if imgui.is_item_hovered()
+                else theme.bg_frame
+            )
+            dl.add_rect_filled(
+                imgui.get_item_rect_min(),
+                imgui.get_item_rect_max(),
+                imgui.color_convert_float4_to_u32(imgui.ImVec4(*color)),
+                imgui.get_style().frame_rounding,
+                flags.value,
+            )
+            splitter.merge(dl)
         item_min = imgui.get_item_rect_min()
         item_max = imgui.get_item_rect_max()
         if is_selected:
@@ -825,6 +907,8 @@ class PanelManager:
         if panel is None or not panel.enabled:
             return False
         panel.open = bool(open)
+        if open and hasattr(panel, "collapsed"):
+            panel.collapsed = False
         return True
 
     def open(self, panel_id: str) -> bool:
@@ -835,7 +919,11 @@ class PanelManager:
 
     def toggle(self, panel_id: str) -> bool:
         panel = self.get(panel_id)
-        return False if panel is None else self.set_open(panel_id, not panel.open)
+        return (
+            False
+            if panel is None
+            else self.set_open(panel_id, bool(getattr(panel, "collapsed", False)) or not panel.open)
+        )
 
     def set_enabled(self, panel_id: str, enabled: bool) -> bool:
         panel = self.get(panel_id)
@@ -885,7 +973,8 @@ class PanelManager:
         ctx.panels = self
         ctx.status_hints_by_panel.clear()
         for p in self.panels:
-            if not p.enabled or not p.open:
+            if not p.enabled or not p.open or getattr(p, "collapsed", False):
+                p.finish_frame(ctx)
                 continue
             translated = ctx.tr(p.name)
             title = p.name if translated == p.name else f"{translated}###{p.name}"

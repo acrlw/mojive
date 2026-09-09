@@ -81,7 +81,7 @@ def test_shift_right_range_drag_cancel_and_clear_do_not_pan_or_change_camera(vie
         cancel=True,
     )
     assert session.state_take_loop == expected
-    _click(viewer, _item_center(viewer, "button", "Clear range##timeline-clear-range"))
+    _click(viewer, _item_center(viewer, "invisible_button", "##timeline-loop"))
     assert session.state_take_loop is None
 
 
@@ -156,7 +156,7 @@ def test_transport_status_geometry_stays_stable_across_time_and_frame_digits(vie
         assert viewer.session.submit(cmd.SeekStateTake(index))
         rows.clear()
         viewer.sync()
-        assert len(rows) == 2
+        assert len(rows) == 1
         if baseline is None:
             baseline = rows.copy()
         assert rows == baseline

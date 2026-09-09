@@ -61,6 +61,10 @@ the local wheel. Run `make setup-imgui` again after synchronization, and launch 
 `uv run --no-sync mojive`. The patch is a source-build recipe,
 not a published binary distribution. The wheel is specific to the build host's platform and ABI.
 
+The production defaults use smoothing **0.382** for capsules, playback glyphs and tool-column
+icons, and **0.618** for the other custom corner geometry. Capsule outlines use Soft white (the theme's text color at 25% opacity). Playback and tool capsules share their thickness; their lengths follow
+the number of controls. Native ImGui frame rounding remains **4.8 logical pixels**.
+
 ## Geometry contract
 
 The reference curve is parameterized by arc length. Each corner consists of a cubic smoothstep
@@ -202,3 +206,30 @@ controls. Geometry tests verify one-sided curvature limits, dense reference appr
 exact bounds, mirror symmetry, and scale independence within tolerance. Binding tests compare
 indexed fills and antialias fringes with the Python fallback, including buffer rollover.
 Native slider and focus checks require `make setup-imgui`.
+
+### Diagnostic glyphs and compact fields
+
+Diagnostic outlines and their internal capsule strokes share the same solid width and antialias
+convention. Dots have a minimum visible radius, with separate spacing from the stem. Fixed local
+contours, triangle indices and fringe geometry are cached; movement applies a native vertex
+translation. Reset arrows reuse ImGui's tessellator once per local shape and scale. The Diagnostics
+feasibility page shows 14/20/32/56-point glyphs and normal/hover/pressed slider states.
+
+Search fields use half-height rounding independently of numeric inputs. Unit suffixes reuse the
+same joined-frame primitive as Transform axis badges, with only the external corners rounded.
+
+## Small diagnostics and compound fields
+
+Diagnostic glyphs use separate outer and inner stroke widths, capsule-ended stems, and a minimum
+visible dot size. The antialias fringe is one framebuffer pixel even at Retina scale. Contours,
+triangle indices, and fringe offsets are cached; translating an icon does not resample its curves.
+`make ui-diagnostics` renders the shared production glyphs and slider interaction states.
+
+Compound numeric fields suppress the native navigation outline while retaining text selection
+and keyboard editing. Only the outer ends are rounded; the number/unit seam stays square.
+Non-switchable units use a darker neutral suffix and readable muted text. At narrow widths,
+Transform axes and scalar controls wrap and use the complete available row.
+
+`make ui-frame-profile ARGS="--diagnostics --asset actuator_visuals --hover-gizmo"` measures
+actual widget calls independently of cProfile. Its budget applies to measured capsule drawing;
+interleaved whole-frame differences remain signed because scheduling noise can exceed that cost.

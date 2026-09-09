@@ -722,7 +722,7 @@ def test_perturbation_feedback_lands_on_the_layers_it_asks_for():
     assert record[0:3] == pytest.approx([0.1, 0.0, 0.2])
     assert record[3:6] == pytest.approx([0.5, 0.0, 0.4])
     assert record[14:17] == pytest.approx([2.0, 6.0, 0.75])
-    assert record[17] == pytest.approx(0.6)
+    assert record[17] == pytest.approx(0.618)
 
     ctrl._publish_mark(
         dd, st, (None, None), CameraView(), (0.0, 0.0, 960.0, 720.0), MarkBudget(), 1.0

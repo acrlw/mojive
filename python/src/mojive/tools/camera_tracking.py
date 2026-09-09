@@ -38,7 +38,11 @@ def exercise_controls(viewer, node_id: int, output: Path | None = None) -> None:
     viewer.session.submit(cmd.SelectNode(node_id))
     for _ in range(5):
         viewer.sync()
-    imgui.internal.focus_window(imgui.internal.find_window_by_name("Camera"))
+    window = imgui.internal.find_window_by_name("Camera")
+    imgui.internal.focus_window(window)
+    # Tracking is below the view/lens groups; exercise it at the same scroll
+    # position a user reaches in a short dock or a larger UI scale.
+    imgui.internal.set_scroll_y(window, window.scroll_max.y)
     viewer.sync()
     viewer.sync()
     label = viewer.app.localizer.text("Track selected") + "##track-selected"
@@ -62,12 +66,10 @@ def exercise_controls(viewer, node_id: int, output: Path | None = None) -> None:
     io.add_mouse_button_event(1, False)
     viewer.sync()
     assert viewer.app.camera_tracker.config.smoothing == 0.25
-    click(viewer, _item_center(viewer, "begin_combo", "##tracking-target"))
-    click(
-        viewer,
-        _item_center(viewer, "selectable", viewer.app.localizer.text("Off") + "##tracking-off"),
-    )
+    click(viewer, _item_center(viewer, "checkbox", "##tracking-enabled"))
     assert viewer.tracking_node_id is None
+    click(viewer, _item_center(viewer, "checkbox", "##tracking-enabled"))
+    assert viewer.tracking_node_id == node_id
     click(viewer, _item_center(viewer, "begin_combo", "##tracking-target"))
     node = viewer.session.node(node_id)
     click(viewer, _item_center(viewer, "selectable", f"{node.name}##tracking-{node_id}"))

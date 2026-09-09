@@ -96,3 +96,25 @@ frame loop.
 
 `index.html` and `style.css` remain a browser-readable design history. They are not the production
 theme or the current feature inventory.
+
+## Diagnostic icons and value controls
+
+Open the production severity paths and responsive rails in the workbench:
+
+```bash
+make ui-feasibility ARGS="--page geometry --geometry-tab diagnostics"
+make ui-diagnostics
+```
+
+The levels use the local palette: Info `#8AB7C0` from
+`kimi-design/mojive-ui-redesign.html`, Warning `#C9A15C` and Danger `#D06744` from
+`design/index.html` section 5.1. The warning triangle uses the shared curvature-continuous
+corner generator at smoothing 0.618. The gallery calls the same glyph and value-control
+functions as Output, Control and Joints; the workspace Output specimen also uses the
+production panel. Compact severity capsules precede Search and Clear and wrap on narrow panels.
+
+The Diagnostics page also compares normal, hover and pressed slider colors, plus joined rad/deg
+fields at wide and narrow widths. The unit button converts only presentation and input; source
+state remains in radians. Control rows use the production renderer and mapped right-click reset,
+without a separate reset button. The Panels/Workspace Keyframes specimen uses a real local
+Session with independent transient scene snapshots, rather than a painted timeline mockup.

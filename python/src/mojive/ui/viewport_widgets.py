@@ -28,10 +28,12 @@ from ..curves2d import (
     smooth_rect_points,
 )
 from ..gizmo import ARROW_CORNER_RADIUS_PT, DIMENSION_CORNER_RADIUS_RATIO, _rounded_polygon_corners
-from .draw2d import Draw2D, text_line_y
+from .draw2d import Draw2D, fit_text, text_line_y
 from .input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
 from .pointer_bindings import PointerAction
 from .theme import Theme
+
+CAPSULE_SMOOTHING = 0.382
 
 
 @dataclass(frozen=True)
@@ -91,6 +93,9 @@ class ViewportLabels:
     step: str = "Step"
     pause_to_step: str = "Pause to step"
     reset: str = "Reset"
+    record: str = "Record Take"
+    stop_recording: str = "Stop recording"
+    recording_options: str = "Recording Settings..."
     move: str = "Move"
     rotate: str = "Rotate"
     dimensions: str = "Dimensions"
@@ -661,10 +666,13 @@ class ViewportControl:
     tooltip: str = ""
 
 
-PLAYBACK_CONTROLS = tuple(ViewportControl(name) for name in ("previous", "toggle", "step", "reset"))
+PLAYBACK_CONTROLS = tuple(
+    ViewportControl(name)
+    for name in ("previous", "toggle", "step", "reset", "record", "recording-options")
+)
 TOOL_GROUPS = (
-    tuple(ViewportControl(name) for name in ("move", "rotate", "dimensions", "frame")),
-    (ViewportControl("snap"),),
+    tuple(ViewportControl(name) for name in ("move", "rotate", "dimensions")),
+    tuple(ViewportControl(name) for name in ("frame", "snap")),
 )
 
 
@@ -777,7 +785,7 @@ def viewport_chrome_scale(
 
 @lru_cache(maxsize=64)
 def capsule_points(
-    x: float, y: float, width: float, height: float, smoothing: float = CORNER_SMOOTHING
+    x: float, y: float, width: float, height: float, smoothing: float = CAPSULE_SMOOTHING
 ):
     return smooth_capsule_points(x, y, width, height, smoothing)
 
@@ -802,18 +810,25 @@ def draw_capsule(
 ) -> None:
     points = capsule_points(float(origin[0]), float(origin[1]), width, height)
     draw.convex_fill(points, (*theme.bg_child[:3], CAPSULE_SURFACE_ALPHA))
-    draw.polyline(points, theme.primary, 1.4 * scale, closed=True)
+    draw.polyline(points, (*theme.text[:3], 0.25), 1.4 * scale, closed=True)
 
 
-def playback_size(
-    scale: float,
-    controls: Sequence[ViewportControl] = PLAYBACK_CONTROLS,
-) -> tuple[float, float]:
-    if not controls:
-        return (0.0, 0.0)
+def playback_control_centers(controls: Sequence[ViewportControl] = PLAYBACK_CONTROLS):
+    """Keep group boundaries declarative when callers extend the toolbar."""
+    cursor = SHELL_RADIUS
+    centers = []
+    for index, control in enumerate(controls):
+        if index and control.name in ("reset", "record"):
+            cursor += TOOL_GROUP_GAP
+        centers.append(cursor)
+        cursor += CENTER_STEP
+    return tuple(centers)
+
+
+def playback_size(scale: float, controls: Sequence[ViewportControl] = PLAYBACK_CONTROLS):
+    centers = playback_control_centers(controls)
     return (
-        (SHELL_RADIUS * 2.0 + CENTER_STEP * max(0, len(controls) - 1)) * scale,
-        SHELL_RADIUS * 2.0 * scale,
+        ((centers[-1] + SHELL_RADIUS) * scale, SHELL_RADIUS * 2 * scale) if centers else (0.0, 0.0)
     )
 
 
@@ -864,6 +879,54 @@ def _circle_button(
     return bool(clicked and enabled)
 
 
+RESET_GLYPH_SCALE = 0.88
+
+
+@lru_cache(maxsize=64)
+def reset_glyph_path(stroke: float, smoothing: float = CORNER_SMOOTHING):
+    """Construct a counterclockwise arrow within Geometry's normalized icon circle."""
+    radius = OVERLAY_GEOMETRY.icon_radius - stroke / 2
+    angles = np.radians(np.linspace(140, -140, 65))
+    radial = np.column_stack((np.cos(angles), np.sin(angles)))
+    tangent = np.array((radial[-1, 1], -radial[-1, 0]))
+    outer, inner = (radius + stroke / 2) * radial, (radius - stroke / 2) * radial
+    head = np.array(
+        (
+            (radius + 2 * stroke) * radial[-1],
+            radius * radial[-1] + 4 * stroke * tangent,
+            (radius - 2 * stroke) * radial[-1],
+        )
+    )
+    cap = smooth_line_cap(
+        radius * radial[0], (-radial[0, 1], radial[0, 0]), stroke, smoothing=smoothing
+    )
+    outline = np.vstack((outer, head, inner[::-1], cap))
+    # The head and arc share one silhouette, rounded with the existing G3 primitive.
+    outline = smooth_polygon_corners(
+        outline, stroke * 0.28, tuple(range(len(outer), len(outer) + 3)), smoothing=smoothing
+    )
+    outline *= (
+        OVERLAY_GEOMETRY.icon_radius * RESET_GLYPH_SCALE / np.linalg.norm(outline, axis=1).max()
+    )
+    return tuple(map(tuple, outline.tolist()))
+
+
+@lru_cache(maxsize=128)
+def _scaled_reset_glyph(scale, stroke, smoothing):
+    return tuple((x * scale, y * scale) for x, y in reset_glyph_path(stroke, smoothing))
+
+
+def draw_reset_glyph(
+    draw, center, color, scale, stroke=OVERLAY_GEOMETRY.tool_stroke, *, smoothing=None
+):
+    path = _scaled_reset_glyph(
+        scale,
+        stroke,
+        getattr(draw, "corner_smoothing", CORNER_SMOOTHING) if smoothing is None else smoothing,
+    )
+    draw.fringed_concave_fill(path, color, origin=center)
+
+
 def draw_playback_glyph(
     draw: Draw2D,
     center,
@@ -871,14 +934,14 @@ def draw_playback_glyph(
     scale: float,
     kind: str,
     *,
-    smoothing: float = CORNER_SMOOTHING,
+    smoothing: float = CAPSULE_SMOOTHING,
 ) -> None:
     """Draw one normalized playback glyph for runtime and design probes."""
 
     x, y = center
     if kind in ("previous", "step"):
         scale *= PLAYBACK_STEP_SCALE
-    elif kind in ("reset", "stop"):
+    elif kind == "stop":
         scale *= PLAYBACK_RESET_SCALE
     half_height = PLAYBACK_HALF_HEIGHT_PT * scale
     if kind in ("play", "reverse", "previous", "step"):
@@ -907,7 +970,9 @@ def draw_playback_glyph(
             rounding=0.9 * scale,
             smoothing=smoothing,
         )
-    elif kind in ("reset", "stop"):
+    elif kind == "reset":
+        draw_reset_glyph(draw, center, color, scale, smoothing=smoothing)
+    elif kind == "stop":
         draw.rect_filled(
             (x - half_height, y - half_height),
             (x + half_height, y + half_height),
@@ -921,7 +986,7 @@ def draw_playback_glyph(
 def _rounded_playback_triangle(
     kind: str,
     scale: float,
-    smoothing: float = CORNER_SMOOTHING,
+    smoothing: float = CAPSULE_SMOOTHING,
 ) -> tuple[tuple[tuple[float, float], ...], float]:
     points = _rounded_polygon_corners(
         np.array(((-4.6, -8.0), (9.2, 0.0), (-4.6, 8.0))) * scale,
@@ -994,6 +1059,10 @@ def draw_playback(
     playing: bool,
     step_enabled: bool,
     previous_enabled: bool = False,
+    recording: bool = False,
+    record_enabled: bool = False,
+    record_action: str = "stop",
+    record_tooltip: str = "",
     enabled: bool = True,
     bindings: InputBindings = DEFAULT_INPUT_BINDINGS,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
@@ -1008,16 +1077,27 @@ def draw_playback(
         "previous": (_previous_icon, False, previous_enabled),
         "step": (_step_icon, False, step_enabled),
         "reset": (_reset_icon, False, True),
+        "record": (_record_icon, recording, record_enabled),
+        "recording-options": (_recording_options_icon, False, True),
         # Preserve custom registries created against the earlier control name.
         "stop": (_reset_icon, False, True),
     }
+    centers = playback_control_centers(control_specs)
     for index, control in enumerate(control_specs):
+        if index and control.name in ("reset", "record"):
+            divider_x = x + (centers[index - 1] + centers[index]) * 0.5 * scale
+            draw.line(
+                (divider_x, y + (SHELL_RADIUS - DIVIDER_WIDTH / 2) * scale),
+                (divider_x, y + (SHELL_RADIUS + DIVIDER_WIDTH / 2) * scale),
+                (*theme.text[:3], 0.18),
+                scale,
+            )
         name = control.name
         icon, selected, action_enabled = states.get(name, (control.icon, False, True))
         if icon is None:
             continue
         center = (
-            x + (SHELL_RADIUS + CENTER_STEP * index) * scale,
+            x + centers[index] * scale,
             y + SHELL_RADIUS * scale,
         )
         if _circle_button(
@@ -1029,6 +1109,7 @@ def draw_playback(
             icon,
             selected=selected,
             enabled=enabled and action_enabled,
+            payload=(recording, theme.danger, record_action),
         ):
             result = name
         tooltip = control.tooltip
@@ -1044,11 +1125,19 @@ def draw_playback(
                 if name == "step" and action_enabled
                 else labels.pause_to_step
                 if name == "step"
+                else labels.stop_recording
+                if name == "record" and recording
+                else labels.record
+                if name == "record"
+                else labels.recording_options
+                if name == "recording-options"
                 else labels.reset
                 if name in ("reset", "stop")
                 else name
             )
-        _set_viewport_tooltip(tooltip, scale)
+        _set_viewport_tooltip(
+            record_tooltip if name == "record" and record_tooltip else tooltip, scale
+        )
     return result
 
 
@@ -1234,7 +1323,7 @@ def draw_tool_glyph(
     space: str,
     geometry: OverlayGeometry = OVERLAY_GEOMETRY,
     *,
-    smoothing: float = CORNER_SMOOTHING,
+    smoothing: float = CAPSULE_SMOOTHING,
 ) -> None:
     """Draw one normalized Tool Column glyph for runtime and design probes."""
 
@@ -2039,28 +2128,6 @@ def format_simulation_metric(
     return f"{labels.time} {format_simulation_time(value)}", f"{value:.17g} s"
 
 
-def _fit_status_text(draw: Draw2D, value: str, max_width: float, *, middle: bool = False) -> str:
-    text = " ".join(str(value).split())
-    if draw.text_size(text)[0] <= max_width:
-        return text
-
-    def elided(length):
-        if middle:
-            return (
-                f"{text[: (length + 1) // 2].rstrip()}…{text[len(text) - length // 2 :].lstrip()}"
-            )
-        return f"{text[:length].rstrip()}…"
-
-    lo, hi = 0, len(text) - 1
-    while lo < hi:
-        count = (lo + hi + 1) // 2
-        if draw.text_size(elided(count))[0] <= max_width:
-            lo = count
-        else:
-            hi = count - 1
-    return elided(lo) if lo else ""
-
-
 def _status_performance_layout(
     draw: Draw2D,
     right: float,
@@ -2337,7 +2404,7 @@ def draw_status(
 
     selection_available = left_limit - cursor - 24.0 * scale
     if selection_available >= draw.text_size("…")[0]:
-        selected_shown = _fit_status_text(draw, selected, selection_available)
+        selected_shown = fit_text(draw, selected, selection_available)
         if selected_shown:
             separator()
             cursor += _inline_text(
@@ -2358,9 +2425,7 @@ def draw_status(
     if compact_status and available > 48.0 * scale:
         # A transient report remains readable without evicting every context
         # hint from a wide status bar.
-        shown = _fit_status_text(
-            draw, compact_status, min(available, width * 0.28), middle=status_path
-        )
+        shown = fit_text(draw, compact_status, min(available, width * 0.28), middle=status_path)
         shown_width, _ = draw.text_size(shown)
         status_x = performance.left - 22.0 * scale - shown_width
 
@@ -2444,3 +2509,57 @@ def draw_status(
         recording_stop_rect=recording_stop_rect,
         message_rect=(status_x, y, status_x + shown_width, y + height) if shown else None,
     )
+
+
+@lru_cache(maxsize=64)
+def expand_glyph_path(stroke: float, smoothing: float = CORNER_SMOOTHING):
+    """Join two rectangular arms, rounding every exposed corner with the shared G3 profile."""
+    offset = stroke / math.sqrt(2)
+    outline = (
+        (-4 - offset, -2),
+        (0, 2 + offset),
+        (4 + offset, -2),
+        (4, -2 - offset),
+        (0, 2 - offset),
+        (-4, -2 - offset),
+    )
+    corners = tuple(range(len(outline)))
+    path = smooth_polygon_corners(
+        outline,
+        stroke / 2,
+        corners,
+        smoothing=smoothing,
+        convex_only=False,
+        corner_radii=dict.fromkeys(corners, stroke / 2),
+    )
+    return tuple(map(tuple, path.tolist()))
+
+
+def draw_expand_glyph(draw, center, color, scale, stroke=OVERLAY_GEOMETRY.tool_stroke):
+    draw.fringed_concave_fill(
+        tuple(
+            (center[0] + x * scale, center[1] + y * scale)
+            for x, y in expand_glyph_path(stroke, draw.corner_smoothing)
+        ),
+        color,
+    )
+
+
+def draw_recording_glyph(draw, center, color, scale, *, recording=False):
+    if recording:
+        draw_playback_glyph(draw, center, color, scale, "stop", smoothing=draw.corner_smoothing)
+    else:
+        radius = 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_RESET_SCALE / math.sqrt(math.pi)
+        draw.circle_filled(center, radius * scale, color, segments=48)
+
+
+def _record_icon(draw, center, color, scale, packed):
+    _surface, (recording, accent, action) = packed
+    if recording and action in ("pause", "resume"):
+        draw_playback_glyph(draw, center, accent, scale, "pause" if action == "pause" else "play")
+    else:
+        draw_recording_glyph(draw, center, accent, scale, recording=recording)
+
+
+def _recording_options_icon(draw, center, color, scale, _packed):
+    draw_expand_glyph(draw, center, color, scale)

@@ -584,7 +584,8 @@ def verdict(paused: bool, node: SceneNode | None) -> Verdict:
 
 
 class ObjectGizmo:
-    def __init__(self, mode: str = "translate") -> None:
+    def __init__(self, mode: str = "translate", *, enabled: bool = True) -> None:
+        self.enabled = bool(enabled)
         self._mode = GizmoMode(mode)
         self._style = GizmoStyle.FLAT
         self._space = GizmoSpace.BODY
@@ -824,8 +825,20 @@ class ObjectGizmo:
         return True
 
     def set_mode(self, mode: str) -> None:
+        """Explicit programmatic tool selection also enables that tool."""
         if mode in tuple(item.value for item in GizmoMode) and not self._using:
             self._mode = GizmoMode(mode)
+            self.enabled = True
+
+    def toggle_mode(self, mode: str) -> None:
+        """Toggle an editor tool without changing scene selection."""
+        if self._using:
+            return
+        if self.enabled and self._mode.value == mode:
+            self.enabled = False
+            self.cancel()
+        else:
+            self.set_mode(mode)
 
     def set_style(self, style: str) -> None:
         if style in (GizmoStyle.FLAT.value, GizmoStyle.SOLID.value) and not self._using:
@@ -849,7 +862,7 @@ class ObjectGizmo:
         active = (
             self._model_placement_model >= 0
             and self._model_placement_session is session
-            and self._model_placement_generation == session.structure_generation
+            and self._model_placement_generation == session.adapter.structure_revision
         )
         return active and (model_id is None or self._model_placement_model == int(model_id))
 
@@ -871,7 +884,7 @@ class ObjectGizmo:
         position = np.asarray(info.position, np.float64).reshape(3).copy()
         rotation = np.asarray(info.rotation, np.float64).reshape(3, 3).copy()
         self._model_placement_model = model_id
-        self._model_placement_generation = session.structure_generation
+        self._model_placement_generation = session.adapter.structure_revision
         self._model_placement_session = session
         self._model_placement_original = (position, rotation)
         return CommandResult.good("Model placement unlocked; Apply rebuilds the composed model")
@@ -940,7 +953,7 @@ class ObjectGizmo:
             self._model_preview is not None
             and self._model_preview_session is session
             and self._model_placement_session is session
-            and self._model_placement_generation == session.structure_generation
+            and self._model_placement_generation == session.adapter.structure_revision
         )
         if preview_is_current:
             result = session.submit(ClearSceneModelTransformPreview(model_id))
@@ -1567,7 +1580,11 @@ class ObjectGizmo:
             and self.read_only_frame_available(session, node)
         )
         self._interactive = bool(interactive and not self._display_only)
-        self._visible = not yielding and (self._verdict.ok or self._display_only)
+        self._visible = (
+            (self.enabled or self.model_placement_model_id >= 0)
+            and not yielding
+            and (self._verdict.ok or self._display_only)
+        )
         if not self._visible:
             self._display_only = False
             self._clear_translation_guide(backend)
@@ -4289,7 +4306,12 @@ class ObjectGizmo:
     def evaluate(self, session: Session, node: SceneNode | None) -> Verdict:
         """Return availability for the active viewport gizmo mode."""
 
-        return self.evaluate_mode(session, node, self._mode)
+        availability = self.evaluate_mode(session, node, self._mode)
+        if not availability.ok:
+            return availability
+        if not self.enabled and self.model_placement_model_id < 0:
+            return Verdict(False, "Enable a transform tool to edit")
+        return availability
 
     def _evaluate_transform(self, session: Session, node: SceneNode | None) -> Verdict:
         """Return position/rotation availability for one scene node."""

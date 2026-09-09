@@ -120,7 +120,9 @@ class _PillowDraw2D:
     def concave_fill(self, points, color) -> None:
         self.draw.polygon(self._points(points), fill=_rgba(color))
 
-    def fringed_concave_fill(self, points, color) -> None:
+    def fringed_concave_fill(self, points, color, *, origin=None) -> None:
+        if origin is not None:
+            points = tuple((x + origin[0], y + origin[1]) for x, y in points)
         self.draw.polygon(self._points(points), fill=_rgba(color))
 
     def circle(
@@ -263,7 +265,9 @@ class _ToolShellMaskDraw2D:
     def concave_fill(self, points, _color) -> None:
         self._filled_polygon(points)
 
-    def fringed_concave_fill(self, points, _color) -> None:
+    def fringed_concave_fill(self, points, _color, *, origin=None) -> None:
+        if origin is not None:
+            points = tuple((x + origin[0], y + origin[1]) for x, y in points)
         self._filled_polygon(points)
 
     def arrow(self, start, end, color, width=2.0, **style) -> None:

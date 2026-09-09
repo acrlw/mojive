@@ -273,7 +273,7 @@ gpu:
 GPU_WGPU_FILES := python/tests/gpu/test_input_ownership.py python/tests/gpu/test_scene_renderer.py python/tests/gpu/test_renderer_api.py python/tests/gpu/test_control_rpc_capture.py python/tests/gpu/test_hidpi.py python/tests/gpu/test_horizon_haze.py python/tests/gpu/test_shading.py python/tests/gpu/test_shadows.py python/tests/gpu/test_reflection.py python/tests/gpu/test_outline.py python/tests/gpu/test_tendon.py python/tests/gpu/test_debugdraw.py python/tests/gpu/test_gizmo.py python/tests/gpu/test_pipeline.py python/tests/gpu/test_viewer_wgpu.py python/tests/gpu/test_static_viewer.py python/tests/gpu/test_model_loading.py python/tests/gpu/test_ui_interaction.py python/tests/gpu/test_ui_layout_input.py python/tests/gpu/test_wgpu_shader_reload.py
 GPU_WGPU_FILES += python/tests/gpu/test_passive.py
 GPU_WGPU_FILES += python/tests/gpu/test_camera_tracking.py python/tests/gpu/test_input_mapping.py
-GPU_WGPU_FILES += python/tests/gpu/test_keyframe_timeline.py
+GPU_WGPU_FILES += python/tests/gpu/test_keyframe_timeline.py python/tests/gpu/test_ui_refinement.py python/tests/gpu/test_ui_redesign.py python/tests/gpu/test_take_video.py python/tests/gpu/test_ui_corner_controls.py
 ## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
 gpu-wgpu:
@@ -334,6 +334,10 @@ calibrate:
 gallery:
 	$(PY) -m mojive.tools.gallery
 
+.PHONY: ui-diagnostics
+ui-diagnostics:
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab diagnostics -o output/ui-diagnostics.png $(ARGS)
+
 ui-feasibility:
 	$(PY) design/tools/render_ui_feasibility.py --interactive $(ARGS)
 
@@ -379,6 +383,7 @@ ui-gallery:
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab gizmos -o output/ui-geometry-transform-gizmos.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab helpers -o output/ui-geometry-joint-helpers.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab status -o output/ui-geometry-status.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab diagnostics -o output/ui-diagnostics.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab shell -o output/ui-geometry-shell.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab panels -o output/ui-geometry-panels.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab workspaces -o output/ui-geometry-workspaces.png

@@ -3,38 +3,44 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from functools import lru_cache
 from math import pi, sqrt
 
-import numpy as np
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
 from mojive.adapters.static import StaticSceneAdapter
-from mojive.curves2d import CORNER_SMOOTHING, smooth_line_cap, smooth_polygon_corners
 from mojive.scene import Scene
 from mojive.session import Session
 from mojive.types import MeshShape
 from mojive.ui.draw2d import ImguiDraw2D
 from mojive.ui.localization import Localizer, parse_language
-from mojive.ui.panels import PanelContext
+from mojive.ui.panels import PanelContext, search_input
 from mojive.ui.panels.inspector import InspectorPanel
+from mojive.ui.panels.value_cards import (
+    value_card,
+    value_rail,
+)
 from mojive.ui.theme import THEME
 from mojive.ui.viewport_widgets import (
     OVERLAY_GEOMETRY,
     PLAYBACK_HALF_HEIGHT_PT,
     PLAYBACK_RESET_SCALE,
     TOOL_GLYPH_SCALE,
+    draw_expand_glyph,
     draw_playback_glyph,
+    draw_recording_glyph,
+    draw_reset_glyph,
     draw_tool_glyph,
 )
+from mojive.ui.viewport_widgets import RESET_GLYPH_SCALE as RESET_GLYPH_SCALE
+from mojive.ui.viewport_widgets import expand_glyph_path as expand_glyph_path
+from mojive.ui.viewport_widgets import reset_glyph_path as reset_glyph_path
 
 if __package__:
     from .ui_capsule_geometry import capsule_layout, draw_capsule_shell
 else:
     from ui_capsule_geometry import capsule_layout, draw_capsule_shell
 
-RESET_GLYPH_SCALE = 0.88
 # Match the stop square's nominal area for comparable visual weight across recording states.
 RECORD_GLYPH_RADIUS = 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_RESET_SCALE / sqrt(pi)
 
@@ -205,86 +211,6 @@ def _button(state, key, text, size=None):
 def _hint(state, text, key=""):
     if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
         imgui.set_tooltip(state.tr(text) + (f"  [{key}]" if key else ""))
-
-
-@lru_cache(maxsize=64)
-def reset_glyph_path(stroke: float, smoothing: float = CORNER_SMOOTHING):
-    """Construct a counterclockwise arrow within Geometry's normalized icon circle."""
-    radius = OVERLAY_GEOMETRY.icon_radius - stroke / 2
-    angles = np.radians(np.linspace(140, -140, 65))
-    radial = np.column_stack((np.cos(angles), np.sin(angles)))
-    tangent = np.array((radial[-1, 1], -radial[-1, 0]))
-    outer, inner = (radius + stroke / 2) * radial, (radius - stroke / 2) * radial
-    head = np.array(
-        (
-            (radius + 2 * stroke) * radial[-1],
-            radius * radial[-1] + 4 * stroke * tangent,
-            (radius - 2 * stroke) * radial[-1],
-        )
-    )
-    cap = smooth_line_cap(
-        radius * radial[0], (-radial[0, 1], radial[0, 0]), stroke, smoothing=smoothing
-    )
-    outline = np.vstack((outer, head, inner[::-1], cap))
-    # The head and arc share one silhouette, rounded with the existing G3 primitive.
-    outline = smooth_polygon_corners(
-        outline, stroke * 0.28, tuple(range(len(outer), len(outer) + 3)), smoothing=smoothing
-    )
-    outline *= (
-        OVERLAY_GEOMETRY.icon_radius * RESET_GLYPH_SCALE / np.linalg.norm(outline, axis=1).max()
-    )
-    return tuple(map(tuple, outline.tolist()))
-
-
-def draw_reset_glyph(draw, center, color, scale, stroke=OVERLAY_GEOMETRY.tool_stroke):
-    draw.fringed_concave_fill(
-        tuple(
-            (center[0] + x * scale, center[1] + y * scale)
-            for x, y in reset_glyph_path(stroke, draw.corner_smoothing)
-        ),
-        color,
-    )
-
-
-def draw_recording_glyph(draw, center, color, scale, *, recording=False):
-    if recording:
-        draw_playback_glyph(draw, center, color, scale, "stop", smoothing=draw.corner_smoothing)
-    else:
-        draw.circle_filled(center, RECORD_GLYPH_RADIUS * scale, color)
-
-
-@lru_cache(maxsize=64)
-def expand_glyph_path(stroke: float, smoothing: float = CORNER_SMOOTHING):
-    """Join two rectangular arms, rounding every exposed corner with the shared G3 profile."""
-    offset = stroke / sqrt(2)
-    outline = (
-        (-4 - offset, -2),
-        (0, 2 + offset),
-        (4 + offset, -2),
-        (4, -2 - offset),
-        (0, 2 - offset),
-        (-4, -2 - offset),
-    )
-    corners = tuple(range(len(outline)))
-    path = smooth_polygon_corners(
-        outline,
-        stroke / 2,
-        corners,
-        smoothing=smoothing,
-        convex_only=False,
-        corner_radii=dict.fromkeys(corners, stroke / 2),
-    )
-    return tuple(map(tuple, path.tolist()))
-
-
-def draw_expand_glyph(draw, center, color, scale, stroke=OVERLAY_GEOMETRY.tool_stroke):
-    draw.fringed_concave_fill(
-        tuple(
-            (center[0] + x * scale, center[1] + y * scale)
-            for x, y in expand_glyph_path(stroke, draw.corner_smoothing)
-        ),
-        color,
-    )
 
 
 def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
@@ -667,79 +593,26 @@ CONTROL_ROWS = (
 
 def _control_row(state, index, scale):
     name, lo, hi, initial = CONTROL_ROWS[index]
-    imgui.push_id(f"redesign-control-{index}")
-    imgui.text(name)
-    imgui.same_line()
-    imgui.text_disabled(f"{lo:g} … {hi:g}" if lo is not None else state.tr("Unlimited"))
-    width = imgui.get_content_region_avail().x
-    imgui.begin_disabled(state.read_only)
-    if lo is not None:
-        # Retain native slider keyboard/navigation behavior under a thin rail.
-        for slot in (
-            imgui.Col_.frame_bg,
-            imgui.Col_.frame_bg_hovered,
-            imgui.Col_.frame_bg_active,
-            imgui.Col_.slider_grab,
-            imgui.Col_.slider_grab_active,
-        ):
-            imgui.push_style_color(slot, imgui.ImVec4(0, 0, 0, 0))
-        imgui.set_next_item_width(max(48 * scale, width - 148 * scale))
-        _, state.controls[index] = imgui.slider_float(
-            "##rail", state.controls[index], lo, hi, "", imgui.SliderFlags_.no_input
+    ctx = PanelContext(None, None, style_scale=scale)
+    with value_card(ctx, f"##redesign-control-name-{index}", name, ""):
+        imgui.begin_disabled(state.read_only)
+        edit = value_rail(
+            ctx,
+            f"##redesign-control-{index}",
+            state.controls[index],
+            (lo, hi) if lo is not None else None,
+            initial=initial,
+            fmt="%+.3f",
+            show_reset=False,
         )
-        _remember(state, f"control-rail-{index}")
-        imgui.pop_style_color(5)
-        a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        draw = ImguiDraw2D(imgui.get_window_draw_list())
-        left, right, cy = a.x + 7 * scale, b.x - 7 * scale, (a.y + b.y) / 2
-        value_x = left + (right - left) * (state.controls[index] - lo) / (hi - lo)
-        zero_x = left + (right - left) * (-lo) / (hi - lo)
-        alpha = 0.35 if state.read_only else 1
-        draw.line((left, cy), (right, cy), THEME.bg_frame_active, 4 * scale)
-        draw.line((zero_x, cy), (value_x, cy), (*THEME.primary_dim[:3], alpha), 4 * scale)
-        draw.line((zero_x, cy - 4 * scale), (zero_x, cy + 4 * scale), THEME.text_disabled, scale)
-        draw.circle_filled((value_x, cy), 5 * scale, (*THEME.primary[:3], alpha))
-        imgui.same_line()
-    imgui.set_next_item_width(100 * scale if lo is not None else width - 38 * scale)
-    _, state.controls[index] = imgui.drag_float(
-        "##value",
-        state.controls[index],
-        0.01,
-        lo or 0,
-        hi or 0,
-        "%+.3f",
-        imgui.SliderFlags_.always_clamp if lo is not None else 0,
-    )
-    _remember(state, f"control-value-{index}")
-    _hint(state, "Drag; Ctrl+click to type")
-    imgui.same_line()
-    if _button(state, f"control-restore-{index}", "", imgui.ImVec2(28 * scale, 0)):
-        state.controls[index] = initial
-    _hint(state, "Restore initial; right-click for zero")
-    a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-    draw_reset_glyph(
-        ImguiDraw2D(imgui.get_window_draw_list()),
-        ((a.x + b.x) / 2, (a.y + b.y) / 2),
-        (*THEME.text[:3], 0.35 if state.read_only else 1),
-        0.7 * scale,
-    )
-    if imgui.begin_popup_context_item("zero-or-restore"):
-        if _button(state, f"control-zero-{index}", "Set zero"):
-            state.controls[index] = 0.0
-            imgui.close_current_popup()
-        if _button(state, f"control-restore-menu-{index}", "Restore initial"):
-            state.controls[index] = initial
-            imgui.close_current_popup()
-        imgui.end_popup()
-    imgui.end_disabled()
-    imgui.separator()
-    imgui.pop_id()
+        state.controls[index] = edit.value
+        imgui.end_disabled()
 
 
 def _control(state, scale):
     imgui.set_next_item_width(-1)
-    _, state.search = imgui.input_text_with_hint(
-        "##redesign-search", state.tr("Search actuators"), state.search
+    _, state.search = search_input(
+        "##redesign-search", state.search, hint=state.tr("Search actuators")
     )
     _remember(state, "control-search")
     _, state.read_only = imgui.checkbox(

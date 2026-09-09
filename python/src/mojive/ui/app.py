@@ -33,6 +33,7 @@ from ..config import (
 from ..gizmo import GizmoMode, axis_active_color, axis_hover_color
 from ..input import InputClaim, InputContext, physical_ctrl_super
 from ..log import add_output_sink, get_logger, remove_output_sink
+from ..model_edits import MODEL_REBUILD_COMMANDS, ModelEditDraft, model_edit_scope
 from ..render.backend import FrameMode, LabelMode, RenderFlag, ShadowQuality
 from ..render.debugdraw import Occlusion
 from ..types import CameraView, Light, LightType, MeshShape, ViewportImage
@@ -46,6 +47,7 @@ from . import gestures as gs
 from .camera import (
     ISO_PITCH,
     CameraOut,
+    CameraViewTransition,
     OrbitCamera,
     ProjectionTransition,
     camera_basis,
@@ -57,7 +59,8 @@ from .camera import (
 )
 from .camera_preview import CameraPreview
 from .camera_tracking import CameraTracker, can_track_node, tracking_position
-from .draw2d import ImguiDraw2D
+from .compound_fields import borderless_numeric_input, draw_joined_field_frame
+from .draw2d import ImguiDraw2D, fit_text
 from .gizmo import JointLimitHit, ObjectGizmo, PreciseGizmoInput, node_world_pose
 from .input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
 from .layers import visible_debug_layers
@@ -392,67 +395,6 @@ def _toggle_angle_input(value: float, unit: str) -> tuple[float, str]:
     return float(np.degrees(value)), "degrees"
 
 
-def _compact_status_for_selection(message: str, selected: str) -> str:
-    """Remove selection wording already represented by the status bar's first field."""
-
-    message = " ".join(str(message).split())
-    selected = " ".join(str(selected).split())
-    if not message:
-        return ""
-    if selected == "no selection" and message.casefold() == "selection cleared":
-        return ""
-    if message.casefold() in {
-        selected.casefold(),
-        f"selected {selected}".casefold(),
-        f"{selected} selected".casefold(),
-    }:
-        return ""
-    prefix = re.match(rf"^{re.escape(selected)}\s*(?:[|:·—-]\s*)?(.*)$", message, re.I)
-    if prefix is not None:
-        remainder = prefix.group(1).strip()
-        return "" if remainder.casefold() == "selected" else remainder
-    return message
-
-
-_STATUS_ACTION_PREFIXES = (
-    "saved ",
-    "opened ",
-    "loaded ",
-    "added ",
-    "removed ",
-    "renamed ",
-    "duplicated ",
-    "imported ",
-    "applied ",
-    "undo ",
-    "redo ",
-    "recorded ",
-    "recording ",
-    "replaying ",
-    "cleared ",
-    "scene reset",
-    "scene reloaded",
-    "scene state restored",
-    "new scene",
-    "cancelled ",
-    "model placement unlocked",
-    "viewport ",
-)
-
-
-def _status_message_for_bar(message: str, selected: str, level: str) -> str:
-    """Keep only actionable results and diagnostics in the transient status slot."""
-
-    compact = _compact_status_for_selection(message, selected)
-    if not compact:
-        return ""
-    severity = str(level).casefold()
-    if severity in {"error", "warning", "success"}:
-        return compact
-    folded = compact.casefold()
-    return compact if folded.startswith(_STATUS_ACTION_PREFIXES) else ""
-
-
 def _rectangles_overlap(a, b) -> bool:
     return bool(a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3])
 
@@ -475,6 +417,11 @@ class Keys:
     gizmo_dimensions: bool = False
     gizmo_space: bool = False
     gizmo_axis: int = -1
+
+
+@dataclass(frozen=True)
+class _ApplyModelEdits:
+    commands: tuple
 
 
 @dataclass(frozen=True)
@@ -599,6 +546,13 @@ class ViewerApp:
             ),
             selection=SelectionStyle.from_mapping(self.localizer.preference("selection_style", {})),
         )
+        self.model_edits = ModelEditDraft(session)
+        self.live_model_updates = bool(
+            self.localizer.preference("live_model_updates", False)
+            if viewer_config.live_model_updates is None
+            else viewer_config.live_model_updates
+        )
+        self._apply_model_edits_requested = False
         self.interactions = viewer_config.interactions
         self._threaded_physics = viewer_config.threaded_physics
         self.selection_style = viewer_config.selection
@@ -658,7 +612,7 @@ class ViewerApp:
         self.camera_out = CameraOut(backend=backend, session=session)
         self.camera.attach(self.camera_out)
         self.camera_preview = CameraPreview()
-        self.gizmo = ObjectGizmo()
+        self.gizmo = ObjectGizmo(enabled=False)
         remember_precise = self.localizer.preference("remember_precise_input_choices", True)
         if isinstance(remember_precise, bool):
             self.gizmo.remember_precise_input_choices = remember_precise
@@ -697,6 +651,7 @@ class ViewerApp:
         self._state = gs.InputState()
         self._model_camera_id = -1
         self._model_camera_view = None
+        self._camera_transition = None
         self._model_camera_projection = ProjectionTransition()
         self._model_camera_projection_target: bool | None = None
         self._fixed_render_size: tuple[int, int] | None = None
@@ -763,6 +718,8 @@ class ViewerApp:
         self._model_load_job: _ModelLoadJob | None = None
         self._model_load_queue: list[_ModelLoadJob] = []
         self._model_load_started = 0.0
+        self._model_source_prepared = 0.0
+        self._model_prepared_resources = None
         self._model_load_completion: _ModelLoadCompletion | None = None
         self._close_after_model_load = False
         self._model_drop_notice = ""
@@ -775,6 +732,7 @@ class ViewerApp:
         self._capture_tasks: list[
             tuple[Path | None, CaptureSurface, Future, np.ndarray | None]
         ] = []
+        self._viewport_recording_mode = "video"
         self._viewport_recorder: Any | None = None
         self._viewport_recording_path: Path | None = None
         self._viewport_record_elapsed = 0.0
@@ -960,16 +918,14 @@ class ViewerApp:
         )
 
     def set_viewport_capsule_scale(self, name: str, value: float, *, persist: bool = True) -> None:
-        """Set one viewport capsule's scale independently."""
+        """Set the shared thickness of both viewport capsules."""
 
         value = float(value)
         if not np.isfinite(value):
             raise ValueError("viewport capsule scale must be finite")
         value = min(MAX_VIEWPORT_CAPSULE_SCALE, max(MIN_VIEWPORT_CAPSULE_SCALE, value))
-        if name == "playback":
-            config = replace(self.viewport_overlays, playback_scale=value)
-        elif name == "tools":
-            config = replace(self.viewport_overlays, tool_scale=value)
+        if name in ("playback", "tools"):
+            config = replace(self.viewport_overlays, playback_scale=value, tool_scale=value)
         else:
             raise ValueError(f"unknown viewport capsule: {name!r}")
         self.set_viewport_overlays(config, persist=persist)
@@ -1107,6 +1063,7 @@ class ViewerApp:
             self._model_load_future = None
             self._model_load_job = None
             self._model_load_queue.clear()
+            self._model_prepared_resources = None
         for attribute in (
             "_model_dialog",
             "_scene_dialog",
@@ -1216,12 +1173,178 @@ class ViewerApp:
             return
         self._queue_model_load("open", target)
 
+    def _pending_edits_blocked(self):
+        self.session._record_result(
+            cmd.CommandResult.bad(self.localizer.text("Apply or discard pending model edits first"))
+        )
+
+    def _intercept_model_edit(self, command):
+        draft = self.model_edits
+        if draft.applying:
+            return None
+        if isinstance(command, cmd.BeginEditTransaction) and not self.live_model_updates:
+            if draft._checkpoint is not None or self.session.editing:
+                return cmd.CommandResult.bad("An edit transaction is already active")
+            draft.begin_transaction(command.label)
+            return cmd.CommandResult.good()
+        if (
+            isinstance(command, (cmd.EndEditTransaction, cmd.CancelEditTransaction))
+            and draft._checkpoint is not None
+        ):
+            draft.end_transaction(isinstance(command, cmd.CancelEditTransaction))
+            return (
+                self.session.submit(command) if self.session.editing else cmd.CommandResult.good()
+            )
+        if draft.active and isinstance(
+            command,
+            (
+                cmd.Play,
+                cmd.Step,
+                cmd.Reset,
+                cmd.Undo,
+                cmd.Redo,
+                cmd.SaveScene,
+                cmd.NewScene,
+                cmd.OpenScene,
+                cmd.Reload,
+                cmd.LoadAsset,
+                cmd.AddSceneModel,
+            ),
+        ):
+            return cmd.CommandResult.bad(
+                self.localizer.text("Apply or discard pending model edits first")
+            )
+        if not self.live_model_updates and isinstance(command, cmd.PreviewSceneModelTransform):
+            return draft.stage(
+                cmd.SetSceneModelTransform(command.model_id, command.position, command.rotation)
+            )
+        if isinstance(command, cmd.ClearSceneModelTransformPreview) and any(
+            isinstance(item, cmd.SetSceneModelTransform) and item.model_id == command.model_id
+            for item in draft.commands
+        ):
+            # Leaving an individual placement gesture retains the document's pending preview.
+            return cmd.CommandResult.good()
+        if not self.live_model_updates and isinstance(command, cmd.SetPose):
+            node = self.session.node(command.node_id)
+            if node is not None and node.type is NodeType.MODEL:
+                return draft.stage(
+                    cmd.SetSceneModelTransform(node.model_id, command.position, command.rotation)
+                )
+        if not self.live_model_updates and isinstance(command, MODEL_REBUILD_COMMANDS):
+            node = self.session.node(getattr(command, "node_id", -1))
+            if not isinstance(command, cmd.SetGeometrySize) or (
+                node is not None and node.model_id >= 0
+            ):
+                return draft.stage(command)
+        if draft._checkpoint is not None and not self.session.editing:
+            # Only direct document writes need a physics undo snapshot during a gesture.
+            from ..session import _SCENE_EDIT_COMMANDS
+
+            if self.session.adapter.caps.edit_history and isinstance(command, _SCENE_EDIT_COMMANDS):
+                result = self.session.submit(cmd.BeginEditTransaction(draft._transaction_label))
+                if not result.ok:
+                    return result
+        return None
+
+    def set_live_model_updates(self, value: bool) -> None:
+        self.live_model_updates = bool(value)
+        self.localizer.set_preferences({"live_model_updates": self.live_model_updates})
+        if value and self.model_edits.active:
+            self._apply_model_edits_requested = True
+
+    def _start_pending_model_edits(self) -> None:
+        if not self._apply_model_edits_requested:
+            return
+        draft = self.model_edits
+        if self.session.editing or draft._checkpoint is not None:
+            return
+        self._apply_model_edits_requested = False
+        if not draft.active:
+            return
+        if not draft.compatible():
+            self._pending_edits_blocked()
+            return
+        draft.applying = True
+        self.gizmo._reset_model_placement()
+        self._model_load_queue.append(
+            _ModelLoadJob(
+                "edit",
+                self.session.asset_path or Path("Untitled"),
+                _ApplyModelEdits(tuple(draft.commands)),
+                self._finish_pending_model_edits,
+            )
+        )
+
+    def _finish_pending_model_edits(self, result) -> None:
+        if result.ok:
+            self.model_edits.clear()
+        else:
+            self.model_edits.error = result.message
+            self.model_edits.rebase_after_failure()
+
+    def _draw_pending_model_edits(self) -> None:
+        x, y, width, height = self._viewport_rect
+        scale = self.window.style_scale
+        draw = ImguiDraw2D(imgui.get_foreground_draw_list())
+        draw.rect(
+            (x + scale, y + scale),
+            (x + width - scale, y + height - scale),
+            self.theme.warning,
+            width=2.0 * scale,
+        )
+        t = self.localizer.text
+        padding = 10.0 * scale
+        available = max(1.0, width - 24.0 * scale)
+        natural = imgui.calc_text_size(t("Pending model edits")).x + 190.0 * scale
+        hint_width = min(available, natural)
+        stacked = natural > available
+        hint_height = 2 * padding + imgui.get_frame_height() * (2 if stacked else 1)
+        if stacked:
+            hint_height += imgui.get_style().item_spacing.y
+        imgui.set_next_window_pos(
+            imgui.ImVec2(x + width * 0.5, y + height - 16 * scale),
+            imgui.Cond_.always,
+            imgui.ImVec2(0.5, 1),
+        )
+        imgui.set_next_window_size(imgui.ImVec2(hint_width, hint_height))
+        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(padding, padding))
+        flags = (
+            imgui.WindowFlags_.no_decoration.value
+            | imgui.WindowFlags_.no_docking.value
+            | imgui.WindowFlags_.no_move.value
+            | imgui.WindowFlags_.no_saved_settings.value
+            | imgui.WindowFlags_.no_focus_on_appearing.value
+        )
+        visible, _ = imgui.begin(f"{t('Pending model edits')}###pending_model_edits", None, flags)
+        if visible:
+            imgui.align_text_to_frame_padding()
+            label = t("Pending model edits")
+            imgui.text(fit_text(ImguiDraw2D(), label, max(1.0, hint_width - 2 * padding)))
+            if self.model_edits.error:
+                imgui.set_item_tooltip(self.model_edits.error)
+            if not stacked:
+                imgui.same_line()
+            remaining = imgui.get_content_region_avail().x
+            button_width = max(1.0, (remaining - imgui.get_style().item_spacing.x) * 0.5)
+            if imgui.button(t("Apply") + "##apply_model_edits", imgui.ImVec2(button_width, 0)):
+                self._apply_model_edits_requested = True
+            imgui.same_line()
+            if imgui.button(t("Discard") + "##discard_model_edits", imgui.ImVec2(button_width, 0)):
+                self.model_edits.clear()
+                self.gizmo._reset_model_placement()
+                self._apply_model_edits_requested = False
+        imgui.end()
+        imgui.pop_style_var()
+
     def _queue_model_load(
         self,
         action: str,
         path: str | Path,
         position: tuple[float, float, float] | None = None,
     ) -> None:
+        if self.model_edits.active:
+            self._pending_edits_blocked()
+            return
         target = Path(path).expanduser().resolve()
         if action == "add":
             command = cmd.AddSceneModel(target, position or tuple(self.camera.pivot))
@@ -1235,6 +1358,12 @@ class ViewerApp:
 
     def _queue_model_edit(self, command, completed=None) -> None:
         """Serialize expensive UI edits with loads; notify on the UI thread."""
+        if not self.live_model_updates and isinstance(command, MODEL_REBUILD_COMMANDS):
+            result = self.model_edits.stage(command)
+            self.session._record_result(result)
+            if completed is not None:
+                completed(result)
+            return
         path = self.session.asset_path or Path("Untitled")
         self._model_load_queue.append(_ModelLoadJob("edit", path, command, completed))
 
@@ -1264,8 +1393,22 @@ class ViewerApp:
         self._model_load_job = job
         self._model_load_started = time.monotonic()
         log.info("{} {}", self._model_load_verb(job.action), job.path)
-        self._model_load_future = self._model_load_executor.submit(self.session.submit, job.command)
+        self._model_prepared_resources = None
+        self._model_source_prepared = 0.0
+        self._model_load_future = self._model_load_executor.submit(self._load_model, job.command)
         return True
+
+    def _load_model(self, command):
+        result = (
+            self.session.apply_model_edits(command.commands)
+            if isinstance(command, _ApplyModelEdits)
+            else self.session.submit(command)
+        )
+        self._model_source_prepared = time.monotonic()
+        prepare = getattr(getattr(self, "backend", None), "prepare_scene", None)
+        if result.ok and prepare is not None:
+            self._model_prepared_resources = prepare(self.session.source)
+        return result
 
     def _poll_model_load(self) -> bool:
         future = self._model_load_future
@@ -1274,7 +1417,7 @@ class ViewerApp:
             return False
         if not future.done():
             return True
-        prepared = time.monotonic()
+        prepared = getattr(self, "_model_source_prepared", 0.0) or time.monotonic()
         try:
             result = future.result()
         except Exception as exc:
@@ -1296,6 +1439,7 @@ class ViewerApp:
             )
             self._model_load_queue.clear()
             self._report_model_error(result.message)
+        self._model_prepared_resources = None
         if job.completed is not None:
             job.completed(result)
         if self._close_after_model_load:
@@ -1315,6 +1459,12 @@ class ViewerApp:
     def save_scene(
         self, path: str | Path, *, current_pose_keyframe: str | None = None
     ) -> CommandResult:
+        if self.model_edits.active:
+            result = cmd.CommandResult.bad(
+                self.localizer.text("Apply or discard pending model edits first")
+            )
+            self.session._record_result(result)
+            return result
         target = _scene_save_target(path)
         result = self.session.submit(cmd.SaveScene(target, current_pose_keyframe))
         if result.ok:
@@ -1341,6 +1491,7 @@ class ViewerApp:
         self.gizmo.cancel_model_placement(self.session)
         self._model_camera_id = -1
         self._model_camera_view = None
+        self._camera_transition = None
         self._model_camera_projection_target = None
         self._pending_node_focus_id = None
         self._pending_joint_focus_id = None
@@ -2482,6 +2633,7 @@ class ViewerApp:
                 self._request_scene_save(self.session.asset_path, pending)
             imgui.close_current_popup()
         elif discard:
+            self.model_edits.clear()
             self._pending_document_action = None
             self._execute_document_action(*pending)
             imgui.close_current_popup()
@@ -2574,6 +2726,10 @@ class ViewerApp:
             self._window_title = title
 
     def frame(self) -> None:
+        with model_edit_scope(self.session, self._intercept_model_edit):
+            self._frame()
+
+    def _frame(self) -> None:
         window = self.window
         now = time.perf_counter()
         elapsed = now - self._last_time
@@ -2591,7 +2747,8 @@ class ViewerApp:
             self._frame_index += 1
             return
         if self._rpc_service is not None:
-            self._rpc_service.pump()
+            with model_edit_scope(self.session, None):
+                self._rpc_service.pump()
         self._poll_model_dialog()
         self._poll_scene_dialog()
         self._poll_resource_dialog()
@@ -2600,6 +2757,7 @@ class ViewerApp:
         self._poll_model_asset_dialog()
         self._poll_resource_repair_dialog()
         self._poll_model_drop()
+        self._start_pending_model_edits()
         if self._start_model_load():
             self._draw_model_loading_frame()
             self._present_frame(dt)
@@ -2607,6 +2765,7 @@ class ViewerApp:
             return
         self._draw_main_menu()
         self._draw_application_status_bar()
+        self._draw_collapsed_output()
         window.begin_dockspace()
         self._begin_viewport_panel()
         self._sync_viewport_size()
@@ -3318,6 +3477,7 @@ class ViewerApp:
                 modes,
                 mode_index,
                 theme=self.theme,
+                joined=True,
             )
         else:
             next_mode = 0
@@ -3331,36 +3491,74 @@ class ViewerApp:
         input_width = max(
             72.0 * scale,
             float(imgui.get_content_region_avail().x)
-            - float(imgui.get_style().item_spacing.x)
+            - (float(imgui.get_style().item_spacing.x) if angular else 0.0)
             - unit_width,
         )
         if appearing or unit_shortcut:
             imgui.set_keyboard_focus_here()
+        draw_list = imgui.get_window_draw_list()
+        splitter = imgui.ImDrawListSplitter()
+        if not angular:
+            splitter.split(draw_list, 2)
+            splitter.set_current_channel(draw_list, 1)
+            for slot in (
+                imgui.Col_.frame_bg,
+                imgui.Col_.frame_bg_hovered,
+                imgui.Col_.frame_bg_active,
+            ):
+                imgui.push_style_color(slot, (0, 0, 0, 0))
         imgui.set_next_item_width(input_width)
-        submitted, self._precise_gizmo_value = imgui.input_double(
-            "##precise_gizmo_value",
-            self._precise_gizmo_value,
-            0.0,
-            0.0,
-            "%.6f" if edit.unit == "m" or unit == "rad" else "%.3f",
-            imgui.InputTextFlags_.enter_returns_true.value
-            | imgui.InputTextFlags_.auto_select_all.value
-            | imgui.InputTextFlags_.chars_scientific.value,
-        )
-        imgui.same_line()
+        with borderless_numeric_input():
+            submitted, self._precise_gizmo_value = imgui.input_double(
+                "##precise_gizmo_value",
+                self._precise_gizmo_value,
+                0.0,
+                0.0,
+                "%.6f" if edit.unit == "m" or unit == "rad" else "%.3f",
+                imgui.InputTextFlags_.enter_returns_true.value
+                | imgui.InputTextFlags_.auto_select_all.value
+                | imgui.InputTextFlags_.chars_scientific.value,
+            )
+        field_lo, field_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        if not angular:
+            imgui.pop_style_color(3)
+        imgui.same_line(0, imgui.get_style().item_spacing.x if angular else 0)
         if angular:
             next_unit = segmented_control(
                 "precise-gizmo-angle-unit",
-                ("°", "rad"),
+                ("deg", "rad"),
                 1 if self._precise_gizmo_angle_unit == "radians" else 0,
                 width=unit_width,
                 theme=self.theme,
+                joined=True,
             )
             if next_unit != (1 if self._precise_gizmo_angle_unit == "radians" else 0):
                 self._toggle_precise_gizmo_angle_unit()
         else:
-            imgui.align_text_to_frame_padding()
-            imgui.text(unit)
+            badge_lo = imgui.get_cursor_screen_pos()
+            imgui.dummy((unit_width, imgui.get_frame_height()))
+            badge_hi = imgui.get_item_rect_max()
+            size = imgui.calc_text_size(unit)
+            draw_list.add_text(
+                (
+                    badge_lo.x + (unit_width - size.x) * 0.5,
+                    badge_lo.y + (imgui.get_frame_height() - size.y) * 0.5,
+                ),
+                imgui.color_convert_float4_to_u32(imgui.ImVec4(*self.theme.text_disabled)),
+                unit,
+            )
+            splitter.set_current_channel(draw_list, 0)
+            draw_joined_field_frame(
+                draw_list,
+                badge_lo,
+                badge_hi,
+                field_lo,
+                field_hi,
+                badge_color=self.theme.bg_child,
+                field_color=self.theme.bg_frame,
+                rounding=imgui.get_style().frame_rounding,
+            )
+            splitter.merge(draw_list)
         if self._precise_gizmo_error:
             imgui.spacing()
             imgui.text_wrapped(self._precise_gizmo_error)
@@ -3495,6 +3693,12 @@ class ViewerApp:
     def _advance_camera(self, dt: float) -> None:
         if self._model_camera_id >= 0:
             return
+        if self._camera_transition is not None:
+            view = self._camera_transition.advance(self.camera.view(), dt)
+            self.camera_out.set_camera(view)
+            if not self._camera_transition.active:
+                self._camera_transition = None
+            return
         self.camera.advance(dt, self.camera_out)
 
     def _camera_view(self):
@@ -3517,17 +3721,28 @@ class ViewerApp:
         self.backend.set_camera(view)
         self.session.submit(cmd.SetCamera(view))
 
-    def select_model_camera(self, camera_id: int) -> None:
+    def _select_model_camera_animated(self, camera_id: int) -> None:
+        self.select_model_camera(camera_id, animate=True)
+
+    def select_model_camera(self, camera_id: int, *, animate: bool = False) -> None:
         i = int(camera_id)
         if i >= 0 and not any(c.camera_id == i for c in self.session.cameras):
             return
         self.track_node(None)
+        start = self._camera_view()
         if i < 0:
-            self._leave_model_camera(publish=True)
+            if animate:
+                self._model_camera_id = -1
+                self._model_camera_view = None
+                self._model_camera_projection_target = None
+                self._camera_transition = CameraViewTransition(start)
+            else:
+                self._leave_model_camera(publish=True)
             return
         if i != self._model_camera_id:
             self._model_camera_projection_target = None
         self._model_camera_id = i
+        self._camera_transition = CameraViewTransition(start) if animate else None
 
     def _viewing_selected_camera(self) -> bool:
         node = self.session.selected_node
@@ -3557,10 +3772,18 @@ class ViewerApp:
         if self._model_camera_projection.active:
             view = replace(view, orthographic_blend=self._model_camera_projection.value)
         self._model_camera_view = view
+        if self._camera_transition is not None:
+            view = self._camera_transition.advance(view, self._dt)
+            if not self._camera_transition.active:
+                self._camera_transition = None
         self.backend.set_camera(view)
         self.session.submit(cmd.SetCamera(view))
 
     def _leave_model_camera(self, *, publish: bool = False) -> None:
+        if self._camera_transition is not None:
+            if not publish:
+                self.camera.adopt(self._camera_view(), exact=True)
+            self._camera_transition = None
         if self._model_camera_id < 0:
             return
         # Model cameras remain scene entities; the editor orbit camera keeps its own view.
@@ -4249,6 +4472,8 @@ class ViewerApp:
                 if self.viewport_layers.viewport_ui:
                     self.view_cube.draw(overlay, self.window.style_scale)
                 self._draw_model_drop_overlay(overlay)
+                if self.viewport_layers.viewport_ui:
+                    self._draw_viewport_status(overlay)
         finally:
             imgui.pop_clip_rect()
         if not session_busy and self.viewport_layers.viewport_ui:
@@ -4329,6 +4554,8 @@ class ViewerApp:
         """Draw a movable chooser near the click that selected a multi-joint link."""
 
         if not self.session.paused:
+            return
+        if not self.gizmo.enabled:
             return
         joints = self.gizmo.joint_choices(self.session)
         node = self.session.selected_node
@@ -4557,6 +4784,32 @@ class ViewerApp:
                     playing=not paused,
                     step_enabled=paused and not take_playing,
                     previous_enabled=self.session.can_step_back,
+                    recording=self.session.state_take_recording or self.recording.active,
+                    record_action=(
+                        "pause"
+                        if self.recording.phase is RecordingPhase.RECORDING
+                        else "resume"
+                        if self.recording.phase is RecordingPhase.PAUSED
+                        else "stop"
+                    ),
+                    record_tooltip=self.localizer.text(
+                        "Pause Recording"
+                        if self.recording.phase is RecordingPhase.RECORDING
+                        else "Resume Recording"
+                        if self.recording.phase is RecordingPhase.PAUSED
+                        else "Cancel Recording"
+                        if self.recording.phase is RecordingPhase.COUNTDOWN
+                        else "Stop Recording"
+                        if self.session.state_take_recording
+                        else "Record Take"
+                        if self._viewport_recording_mode == "take"
+                        else "Record Video"
+                    ),
+                    record_enabled=self.recording.active
+                    or (
+                        self.session.adapter.caps.simulation
+                        and self.session.adapter.caps.state_snapshots
+                    ),
                     enabled=not self._scene_input_blocked()
                     and self.session.adapter.caps.clock_control,
                     bindings=self.input_bindings,
@@ -4573,6 +4826,53 @@ class ViewerApp:
                 self.session.submit(cmd.StepBack())
             elif action in ("reset", "stop"):
                 self._reset_playback()
+            elif action == "record":
+                if self.recording.active:
+                    if self.recording.phase is RecordingPhase.PAUSED:
+                        self.resume_recording()
+                    elif self.recording.phase is RecordingPhase.COUNTDOWN:
+                        self.stop_recording()
+                    else:
+                        self.pause_recording()
+                elif self.session.state_take_recording:
+                    self.session.submit(cmd.StopStateTakeRecording())
+                elif self._viewport_recording_mode == "take":
+                    self.session.submit(cmd.StartStateTakeRecording())
+                else:
+                    self._toggle_viewport_recording()
+            elif action == "recording-options":
+                imgui.open_popup("viewport-recording-options")
+            imgui.push_style_var(imgui.StyleVar_.window_padding, (10 * scale, 8 * scale))
+            imgui.push_style_var(imgui.StyleVar_.item_spacing, (8 * scale, 6 * scale))
+            imgui.push_style_var(imgui.StyleVar_.frame_padding, (8 * scale, 4 * scale))
+            if imgui.begin_popup("viewport-recording-options"):
+                t = self.localizer.text
+                caps = self.session.adapter.caps
+                if (
+                    caps.simulation
+                    and caps.state_snapshots
+                    and imgui.menu_item(
+                        t("Stop recording" if self.session.state_take_recording else "Record Take"),
+                        "",
+                        False,
+                    )[0]
+                ):
+                    self._viewport_recording_mode = "take"
+                    self.session.submit(
+                        cmd.StopStateTakeRecording()
+                        if self.session.state_take_recording
+                        else cmd.StartStateTakeRecording()
+                    )
+                if imgui.menu_item(
+                    t("Stop Recording" if self.recording.active else "Record Video"), "", False
+                )[0]:
+                    self._viewport_recording_mode = "video"
+                    self._toggle_viewport_recording()
+                if imgui.menu_item(t("Recording Settings..."), "", False)[0]:
+                    self.panels.open_panel("Settings")
+                    self.panels.get("Settings").show_category("Recording")
+                imgui.end_popup()
+            imgui.pop_style_var(3)
             self._offer_viewport_overlay_drag("playback", widget_rect)
         imgui.end()
         imgui.pop_style_var(2)
@@ -4587,16 +4887,17 @@ class ViewerApp:
         transform = self.gizmo.evaluate_mode(self.session, node, GizmoMode.TRANSLATE)
         dimensions = self.gizmo.evaluate_mode(self.session, node, GizmoMode.DIMENSIONS)
         controls_enabled = bool(
-            node is not None
-            and self.interactions.gizmo
+            self.interactions.gizmo
             and self.selection_style.gizmo
             and self.viewport_layers.gizmos
             and (self.gizmo.style == "2d" or self.backend.caps.gizmo)
         )
         enabled_controls: set[str] = set()
-        if controls_enabled and transform.ok:
+        caps = self.session.adapter.caps
+        can_arm = node is None and (caps.write_pose or caps.write_qpos or caps.scene_authoring)
+        if controls_enabled and (transform.ok or can_arm):
             enabled_controls.update(("move", "rotate", "frame"))
-        if controls_enabled and dimensions.ok:
+        if controls_enabled and (dimensions.ok or (can_arm and caps.scene_authoring)):
             enabled_controls.add("dimensions")
         if enabled_controls:
             enabled_controls.add("snap")
@@ -4656,7 +4957,7 @@ class ViewerApp:
                     (widget_rect[0], widget_rect[1]),
                     self.theme,
                     scale,
-                    mode=self.gizmo.mode,
+                    mode=self.gizmo.mode if self.gizmo.enabled else "",
                     space=self.gizmo.space,
                     snap=self._snap_latched or self.gizmo.snapping,
                     enabled=not self._scene_input_blocked(),
@@ -4674,11 +4975,11 @@ class ViewerApp:
             if action and self.viewport_chrome.dispatch("tool", action):
                 pass
             elif action == "move":
-                self.gizmo.set_mode("translate")
+                self.gizmo.toggle_mode("translate")
             elif action == "rotate":
-                self.gizmo.set_mode("rotate")
+                self.gizmo.toggle_mode("rotate")
             elif action == "dimensions":
-                self.gizmo.set_mode("dimensions")
+                self.gizmo.toggle_mode("dimensions")
             elif action == "frame":
                 self.gizmo.toggle_space()
             elif action == "snap":
@@ -4690,6 +4991,11 @@ class ViewerApp:
     def _draw_context_hint_widget(self) -> None:
         """Draw caller-defined scene hints; defaults live in the status bar."""
 
+        if self._scene_input_blocked():
+            return
+        if self.model_edits.active:
+            self._draw_pending_model_edits()
+            return
         if (
             not self.viewport_layers.viewport_ui
             or self._scene_input_blocked()
@@ -4925,6 +5231,30 @@ class ViewerApp:
         debug_primitives = int(getattr(debug, "primitives", 0))
         return bool(getattr(source, "instance_count", 0) or lights or cameras or debug_primitives)
 
+    def _draw_collapsed_output(self) -> None:
+        panel = self.panels.get("Output")
+        if panel is None or not panel.open or not panel.collapsed:
+            return
+        scale = self.window.style_scale
+        flags = (
+            imgui.WindowFlags_.no_decoration
+            | imgui.WindowFlags_.no_docking
+            | imgui.WindowFlags_.no_move
+            | imgui.WindowFlags_.no_saved_settings
+        )
+        imgui.push_style_var(imgui.StyleVar_.window_padding, (10 * scale, 8 * scale))
+        visible = imgui.internal.begin_viewport_side_bar(
+            "##output-summary",
+            imgui.get_main_viewport(),
+            imgui.Dir.down,
+            imgui.get_frame_height() + 16 * scale,
+            flags,
+        )
+        if visible:
+            panel.draw_collapsed(self._panel_context())
+        imgui.end()
+        imgui.pop_style_var()
+
     def _draw_application_status_bar(self, *, loading: bool = False) -> None:
         """Draw persistent selection, simulation, backend, and frame-rate status."""
 
@@ -4956,15 +5286,10 @@ class ViewerApp:
             origin = imgui.get_window_pos()
             size = imgui.get_window_size()
             if loading:
-                selected_name = "no selection"
-                has_selection = False
                 state = "static"
                 sim_time = 0.0
                 sim_step = 0
             else:
-                selected = self.session.selected_node
-                selected_name = selected.name if selected is not None else "no selection"
-                has_selection = selected is not None
                 caps = self.session.adapter.caps
                 state = (
                     "static"
@@ -4975,17 +5300,6 @@ class ViewerApp:
                 )
                 sim_time = float(self.session.frame.time)
                 sim_step = int(self.session.frame.step)
-            active_status = None if loading else self.output.active_status()
-            status_text = (
-                ""
-                if active_status is None
-                else _status_message_for_bar(
-                    active_status.text,
-                    selected_name,
-                    active_status.level,
-                )
-            )
-            status_text = self.localizer.text(status_text)
             recording = self.recording
             status_layout = draw_status(
                 ImguiDraw2D(),
@@ -4994,15 +5308,7 @@ class ViewerApp:
                 size.y,
                 self.theme,
                 scale,
-                selected=(
-                    ""
-                    if self._precise_gizmo_edit is not None
-                    else selected_name
-                    if has_selection
-                    else self._viewport_labels.no_selection
-                ),
-                # The precise-input title already identifies its target. Give
-                # Enter / Esc / U the reclaimed status width at extreme scale.
+                selected="",
                 state=state,
                 sim_time=sim_time,
                 step=sim_step,
@@ -5014,9 +5320,6 @@ class ViewerApp:
                 fps=self._frame_rate.value,
                 physics_hz=self.session.frame.physics_hz,
                 show_physics=self.session.adapter.caps.simulation,
-                status=status_text,
-                status_level="info" if active_status is None else active_status.level,
-                status_path=active_status is not None and active_status.copy_text is not None,
                 recording_phase=recording.phase.value,
                 recording_duration=recording.duration,
                 countdown_remaining=recording.countdown_remaining,
@@ -5045,17 +5348,6 @@ class ViewerApp:
                         else self._viewport_labels.show_time
                     )
                     imgui.set_tooltip(f"{switch} · {self._viewport_labels.copy_exact}")
-            if status_layout.message_rect is not None and active_status is not None:
-                x0, y0, x1, y1 = status_layout.message_rect
-                imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
-                imgui.invisible_button("##status_message", imgui.ImVec2(x1 - x0, y1 - y0))
-                if imgui.is_item_hovered():
-                    if self.input_bindings.pointer_match(
-                        PointerAction.STATUS_COPY, self.input_bindings.pointer_frame(), press=True
-                    ):
-                        imgui.set_clipboard_text(active_status.copy_text or active_status.text)
-                    hint = f"{self.input_bindings.pointer_label(PointerAction.STATUS_COPY)} · {self.localizer.text('Copy')}"
-                    imgui.set_tooltip(f"{active_status.text}\n{hint}")
             if status_layout.recording_pause_rect is not None and not loading:
                 x0, y0, x1, y1 = status_layout.recording_pause_rect
                 imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
@@ -5257,12 +5549,17 @@ class ViewerApp:
         if self._viewport_recording_phase is not RecordingPhase.COUNTDOWN:
             return
         recording = self.recording
-        x, y, width, height = self._viewport_rect
+        x, y, width, _height = self._viewport_rect
         scale = self.window.style_scale
+        capsule = self._playback_widget_rect
+        center_x = (capsule[0] + capsule[2]) * 0.5 if capsule else x + width * 0.5
+        top = capsule[3] + 8 * scale if capsule else y + 12 * scale
+        imgui.push_style_var(imgui.StyleVar_.window_padding, (10 * scale, 8 * scale))
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, (10 * scale, 6 * scale))
         imgui.set_next_window_pos(
-            imgui.ImVec2(x + width * 0.5, y + height * 0.3),
+            (min(x + width - 85 * scale, max(x + 85 * scale, center_x)), top),
             imgui.Cond_.always,
-            imgui.ImVec2(0.5, 0.5),
+            (0.5, 0),
         )
         flags = (
             imgui.WindowFlags_.always_auto_resize
@@ -5276,14 +5573,16 @@ class ViewerApp:
         remaining = math.ceil(recording.countdown_remaining)
         imgui.text(self.localizer.text("Recording starts in"))
         if remaining:
-            imgui.push_font(None, imgui.get_font_size() * 2.0)
+            imgui.push_font(None, imgui.get_font_size() * 1.6)
             imgui.text(f"{remaining} {self.localizer.text('s')}")
             imgui.pop_font()
         else:
             imgui.text(self.localizer.text("Close menus to begin"))
-        if imgui.button(self.localizer.text("Cancel Recording"), imgui.ImVec2(180 * scale, 0)):
+        imgui.same_line()
+        if imgui.button(self.localizer.text("Cancel")):
             self.stop_recording()
         imgui.end()
+        imgui.pop_style_var(2)
 
     def pause_recording(self) -> bool:
         """Pause an active interactive recording without finalizing its video."""
@@ -5614,8 +5913,22 @@ class ViewerApp:
         self.output.publish(
             self.session.last_message,
             level=getattr(self.session, "last_message_level", "info"),
-            duration=getattr(self.session, "last_message_duration", 5.0),
+            duration=self.viewport_overlays.status_duration,
             copy_text=getattr(self.session, "last_message_copy_text", None),
+        )
+
+    def _draw_viewport_status(self, overlay: ImguiDraw2D) -> None:
+        message = self.output.active_status()
+        if message is None:
+            return
+        x, y, width, height = self._viewport_rect
+        pad = 14.0 * self.window.style_scale
+        # One unobtrusive, clipped line never resizes the viewport or owns input.
+        text = fit_text(overlay, self.localizer.text(message.text), max(0.0, width - 2 * pad))
+        overlay.text(
+            (x + pad, y + height - pad - imgui.get_text_line_height()),
+            (*self.theme.text[:3], 0.55),
+            text,
         )
 
     def _draw_center_notice(
@@ -5778,7 +6091,7 @@ class ViewerApp:
             camera=self.camera,
             model_camera_id=self._model_camera_id,
             model_camera_view=self._model_camera_view,
-            select_model_camera=self.select_model_camera,
+            select_model_camera=self._select_model_camera_animated,
             tracking=self.camera_tracker.config,
             tracking_node_id=self.tracking_node_id,
             track_node=self.track_node,
@@ -5792,6 +6105,8 @@ class ViewerApp:
             request_model_asset_import=self._open_model_asset_import_dialog,
             request_model_asset_replace=self._open_model_asset_replace_dialog,
             queue_model_edit=self._queue_model_edit,
+            live_model_updates=self.live_model_updates,
+            set_live_model_updates=self.set_live_model_updates,
             gizmo=self.gizmo,
             view_cube=self.view_cube,
             perturb=self.perturb,
@@ -5866,10 +6181,10 @@ class ViewerApp:
                 imgui.is_mouse_down(button) for button in range(3)
             )
         if keys.gizmo_translate:
-            self.gizmo.set_mode("translate")
+            self.gizmo.toggle_mode("translate")
         if keys.gizmo_rotate:
-            self.gizmo.set_mode("rotate")
+            self.gizmo.toggle_mode("rotate")
         if keys.gizmo_dimensions:
-            self.gizmo.set_mode("dimensions")
+            self.gizmo.toggle_mode("dimensions")
         if keys.gizmo_space:
             self.gizmo.toggle_space()

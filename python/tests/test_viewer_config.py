@@ -68,7 +68,7 @@ def test_viewport_overlay_mapping_validates_scales_and_positions() -> None:
     )
 
     assert overlays.playback_scale == 0.6
-    assert overlays.tool_scale == 1.0
+    assert overlays.tool_scale == overlays.playback_scale
     assert overlays.movable is False
     assert overlays.playback_position == (0.25, 0.75)
     assert overlays.tool_position is None

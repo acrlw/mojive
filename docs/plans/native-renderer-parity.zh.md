@@ -1,5 +1,7 @@
 # 原生渲染完整性与 parity 验收
 
+> 本文记录前阶段 b50e349 的验收和性能结果；当前 macOS／Linux 范围及后续资源、读回和 Metal 修正见[原生资源与 runtime 验收](native-resource-runtime.zh.md)。历史数字和当时的平台限制保留供对照，不代表当前分支的最终验收。
+
 本轮继续在 `codex/cpp-foundation` 完成原生同步读回、可见性剔除和窗口呈现优化，并重新检查历史 UI／交互反馈。已同步 `origin/main` 的 `b4887d7`（合并提交 `c2260c8`）；可以用 `make native-viewer` 或 `make native-editor` 启动，Python API 保持兼容。
 
 最终同步 Renderer 矩阵的 63 组成对测例中，bgfx 全部快于 OpenGL；RGB／深度／分割的耗时中位比分别为 0.523／0.543／0.481。功能、模型语料及连续运动对照通过。窗口吞吐已改善，但大视口呈现的 P95 仍高于 OpenGL，模型重编译仍可能产生几十毫秒长帧，4096 份原始 G1 几何仍不是实时工作负载。因此不能宣称所有路径都更快或所有设备都已验收。Linux、Windows 和真实 120 Hz 呈现仍需要对应设备；未启动 CI、未合并 main。

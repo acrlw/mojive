@@ -14,7 +14,7 @@ from itertools import pairwise
 
 import numpy as np
 
-CORNER_SMOOTHING = 0.6
+CORNER_SMOOTHING = 0.618
 CURVE_TOLERANCE = 0.025
 _GAUSS_X, _GAUSS_W = np.polynomial.legendre.leggauss(8)
 _RAMP_QUADRATURE = tuple(

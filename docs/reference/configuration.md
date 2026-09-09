@@ -90,12 +90,14 @@ config = ViewerConfig(
     layout=LayoutConfig(path=".policy-eval-imgui.ini"),
     viewport_overlays=ViewportOverlayConfig(
         playback_scale=0.85,
-        tool_scale=0.75,
+        tool_scale=0.85,
+        status_duration=4.0,
         movable=True,
     ),
     layers=ViewportLayers(debug_3d=False),
     recording=RecordingConfig(countdown=3.0, fps=60),
     shadow_quality="high",
+    live_model_updates=False,  # UI model edits wait for the viewport Apply action.
 )
 
 viewer = build(Path("robot.xml"), config=config)
@@ -121,6 +123,9 @@ stable panel IDs through `viewer.panels.open("hierarchy")`, `close`, `enable`, o
 Explicit `ViewerConfig` values apply to that viewer instance. Changes made in Settings are stored
 as desktop preferences for later viewers created without an explicit config. Runtime
 `configure_*` calls are also instance-local unless passed `persist=True`.
+
+`ViewerConfig(live_model_updates=None)` uses the persisted editor preference, whose default is
+`False`. Set `True` for immediate UI model edits; public Session/RPC commands remain synchronous.
 
 Owned MuJoCo viewers default to `ViewerConfig(threaded_physics=True)`: physics advances on a
 worker while the main thread reads completed snapshots. Use `threaded_physics=False` for the
@@ -234,8 +239,9 @@ The equivalent API is `viewer.start_take_video("output/take.mp4", countdown=3, e
 keep calling `viewer.sync()` while `viewer.recording.active`. Take playback advances with encoded
 frames at the selected playback speed. Slow rendering or encoding can extend recording wall time
 without skipping motion or shortening the resulting video. Finished videos show their absolute
-save path in Status for eight seconds. Hover to read the full message and right-click to copy the
-path; the message also remains in Output. Other Status messages can be copied by right-clicking.
+save path in a short viewport notice using the configured 3–5 second duration. The complete
+message remains in Output: right-click it and choose **Copy path**. Select ordinary Output
+records and use Ctrl/Cmd+C to copy their message bodies.
 Use `make take-video` (or `BACKEND=wgpu`) for native controls and decoded-video acceptance.
 
 Open **View > Layers...** or **Window > Layers** to control viewport content during everyday
@@ -354,3 +360,18 @@ MOJIVE_UI_SCALE=2 uv run mojive editor
 The UI atlas uses JetBrains Mono and a CJK fallback. Mojive searches for an installed Noto Sans SC
 font and may place a checksum-verified copy in the application cache. Set `MOJIVE_CJK_FONT` when a
 specific local font is required.
+
+### Viewport chrome behavior
+
+The playback capsule and vertical tool capsule share their thickness. `playback_scale`
+is authoritative when restoring a mapping; `tool_scale` remains a compatibility input
+when `playback_scale` is absent. Changing either capsule through the viewer updates both.
+`viewport_overlays.status_duration` is clamped to 3–5 seconds (default 4) for transient
+messages at the viewport's lower left. The status bar retains running/recording state,
+contextual input hints, and the existing right-hand metrics.
+
+Selection leaves manipulation tools inactive until the user enables one. G, R and the
+corresponding tool-column buttons toggle the tool; the public `set_gizmo_mode` method
+explicitly enables the chosen mode. Entity-name editing uses the configurable
+`panel.edit_name` pointer action (double left-click by default). Enter or focus loss
+commits; Escape cancels.

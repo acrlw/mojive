@@ -117,6 +117,27 @@ class ClearStateTake(Command):
 
 
 @dataclass(frozen=True)
+class CaptureSceneSnapshot(Command):
+    """Capture all models' simulation state in a transient, scene-local snapshot."""
+
+    name: str = ""
+
+
+@dataclass(frozen=True)
+class RestoreSceneSnapshot(Command):
+    """Restore a transient snapshot against the unchanged scene structure."""
+
+    snapshot_id: int
+
+
+@dataclass(frozen=True)
+class RemoveSceneSnapshot(Command):
+    """Discard a transient snapshot without editing model keyframes."""
+
+    snapshot_id: int
+
+
+@dataclass(frozen=True)
 class Reload(Command):
     """Reload the current file-backed scene."""
 

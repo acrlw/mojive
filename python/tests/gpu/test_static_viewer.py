@@ -101,19 +101,19 @@ def test_canvas_opens_without_importing_mujoco(canvas):
 
 
 def test_inspector_name_tracks_external_rename_and_undo(canvas, monkeypatch):
-    from imgui_bundle import imgui
-
     viewer, scene = canvas
     box = scene.object("crate")
     seen = []
-    original_input = imgui.input_text
+    from mojive.ui.draw2d import ImguiDraw2D
 
-    def input_text(label, value, *args, **kwargs):
-        if label == "##entity_name":
+    original_text = ImguiDraw2D.text
+
+    def text(draw, pos, color, value, **kwargs):
+        if value in {"crate", "renamed"}:
             seen.append(value)
-        return original_input(label, value, *args, **kwargs)
+        return original_text(draw, pos, color, value, **kwargs)
 
-    monkeypatch.setattr(imgui, "input_text", input_text)
+    monkeypatch.setattr(ImguiDraw2D, "text", text)
     try:
         viewer.session.submit(cmd.Select(box.object_id))
         for _ in range(12):
@@ -686,7 +686,6 @@ def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
         original_button = imgui.button
         original_checkbox = imgui.checkbox
         original_drag_float = imgui.drag_float
-        original_text_disabled = imgui.text_disabled
 
         def remember(name):
             lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
@@ -695,9 +694,9 @@ def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
         def record_button(label, *args, **kwargs):
             result = original_button(label, *args, **kwargs)
             if label in {
-                f"X##camera_position_0_{node.node_id}",
-                f"X##camera_target_0_{node.node_id}",
-                f"X##camera_up_0_{node.node_id}",
+                f"X##position_0_{node.node_id}",
+                f"X##target_0_{node.node_id}",
+                f"X##up_0_{node.node_id}",
                 f"##camera-inspector-projection-{node.node_id}-0",
                 "View Camera",
             }:
@@ -712,46 +711,24 @@ def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
 
         def record_drag_float(label, *args, **kwargs):
             result = original_drag_float(label, *args, **kwargs)
-            if label == "##camera_fov":
+            if label == "##inspector-camera-vertical fov-value":
                 remember(label)
-            return result
-
-        def record_text_disabled(label, *args, **kwargs):
-            result = original_text_disabled(label, *args, **kwargs)
-            for semantic in ("position", "target", "up", "vertical fov"):
-                if label == semantic or (
-                    label.endswith("…") and semantic.startswith(label.removesuffix("…"))
-                ):
-                    remember(f"label:{semantic}")
-                    break
             return result
 
         monkeypatch.setattr(imgui, "button", record_button)
         monkeypatch.setattr(imgui, "checkbox", record_checkbox)
         monkeypatch.setattr(imgui, "drag_float", record_drag_float)
-        monkeypatch.setattr(imgui, "text_disabled", record_text_disabled)
         viewer.sync()
         monkeypatch.setattr(imgui, "button", original_button)
         monkeypatch.setattr(imgui, "checkbox", original_checkbox)
         monkeypatch.setattr(imgui, "drag_float", original_drag_float)
-        monkeypatch.setattr(imgui, "text_disabled", original_text_disabled)
 
-        labels = [
-            captured[f"label:{label}"] for label in ("position", "target", "up", "vertical fov")
-        ]
-        assert max(rect[2] for rect in labels) - min(rect[2] for rect in labels) <= 1.0, labels
         control_starts = [
-            captured[f"X##camera_{name}_0_{node.node_id}"][0]
-            for name in ("position", "target", "up")
+            captured[f"X##{name}_0_{node.node_id}"][0] for name in ("position", "target", "up")
         ]
-        control_starts.extend(
-            (
-                captured["##camera_fov"][0],
-                captured[f"##camera-inspector-projection-{node.node_id}-0"][0],
-            )
-        )
         assert max(control_starts) - min(control_starts) <= 1.0
         projection_y = captured[f"##camera-inspector-projection-{node.node_id}-0"][1]
+        assert captured["##inspector-camera-vertical fov-value"][1] < projection_y
         assert projection_y < captured["View Camera"][1]
         assert captured["View Camera"][1] < captured["##camera_preview_enabled"][1]
 
@@ -861,7 +838,13 @@ def test_zero_countdown_menu_recording_starts_with_a_clean_viewport(canvas, monk
         assert images
         viewer.stop_recording()
         clean = viewer.capture_array(surface=CaptureSurface.VIEWPORT)
-        np.testing.assert_array_equal(images[0], clean)
+        # The bottom status line changes from recording to the saved-file notice.
+        # All scene pixels and viewport controls above that line remain unchanged.
+        notice_height = round(
+            (imgui.get_text_line_height() + 2 * 14 * viewer.window.style_scale)
+            * imgui.get_io().display_framebuffer_scale.y
+        )
+        np.testing.assert_array_equal(images[0][:-notice_height], clean[:-notice_height])
     finally:
         viewer.stop_recording()
         viewer.configure_recording(previous)
