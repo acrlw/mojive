@@ -69,6 +69,7 @@ help:
 		'  make outline           selection and antialiased outline' \
 		'  make inspector         compact Inspector transform reference image' \
 		'  make ui-feasibility    interactive M1-M18 UI feasibility probe' \
+		'  make ui-redesign       new layout feasibility capture (--interactive via ARGS)' \
 		'  make ui-gallery        deterministic UI feasibility acceptance pages' \
 		'  make readme-media      refresh unmodified production screenshots for README' \
 		'  make tool-icons        transparent 1024px Tool Column icon sources' \
@@ -342,6 +343,10 @@ ui-runtime:
 .PHONY: ui-layout-audit
 ui-layout-audit:
 	$(PY) -m mojive.tools.ui_layout_audit $(ARGS)
+
+.PHONY: ui-redesign
+ui-redesign:
+	$(PY) design/tools/render_ui_feasibility.py --page redesign -o output/ui-redesign/overview.png $(ARGS)
 
 ## Refresh README images with unmodified production UI and renderer captures.
 readme-media:
