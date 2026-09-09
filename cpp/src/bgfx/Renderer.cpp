@@ -1,7 +1,9 @@
+#include "../Rgb.hpp"
 #include "Environment.hpp"
 #include "Lighting.hpp"
 #include "Reflections.hpp"
 #include "Shadows.hpp"
+#include "Timing.hpp"
 #include "Visibility.hpp"
 #include <algorithm>
 #include <atomic>
@@ -111,7 +113,7 @@ struct GpuTarget {
 };
 struct ReadbackSlot {
     uint64_t ticket = 0;
-    bool canceled = false;
+    bool canceled = false, gpuPacked = false, direct = false;
     uint32_t ready = 0;
     FrameToken frame;
     Product product = Product::Color;
@@ -120,12 +122,15 @@ struct ReadbackSlot {
     bgfx::TextureHandle resolved = BGFX_INVALID_HANDLE;
     uint32_t rowPitch = 0;
     std::vector<std::byte> bytes;
+    std::span<std::byte> destination;
 };
 
 class BgfxRenderer final : public Renderer {
     bool mInitialized = false;
     std::thread::id mOwner = std::this_thread::get_id();
     Capabilities mCaps;
+    std::string mShaderDirectory;
+    WindowSystem mWindowSystem = WindowSystem::Native;
     std::unordered_map<uint64_t, GpuScene> mScenes{{0, GpuScene{}}};
     uint64_t mSubmission = 0;
     uint32_t mGpuFrame = 0;
@@ -137,6 +142,12 @@ class BgfxRenderer final : public Renderer {
     uint16_t mPassCount = 0;
     bgfx::ViewId mNextSceneView = 48;
     uint32_t mMainRender = UINT32_MAX;
+    PassTiming mTiming;
+    Target mTimingTarget;
+    uint64_t mTimingSubmission = 0;
+    void timePass(bgfx::ViewId view, RenderPass pass) {
+        mTiming.record(view, mTimingTarget, mTimingSubmission, pass);
+    }
     void orderPass(bgfx::ViewId view) {
         if (!mUsedPasses[view]) {
             mUsedPasses[view] = true;
@@ -207,6 +218,7 @@ class BgfxRenderer final : public Renderer {
                 mPassOrder[count++] = id;
         bgfx::setViewOrder(0, mPassOrder.size(), mPassOrder.data());
         mGpuFrame = bgfx::frame();
+        mTiming.collect(mGpuFrame, *bgfx::getStats());
         for (auto &[stride, upload] : mInstanceUploads)
             upload.cursor = 0;
         mPendingCommands = false;
@@ -239,6 +251,12 @@ class BgfxRenderer final : public Renderer {
                         mDebugParams = BGFX_INVALID_HANDLE, mDebugDepth = BGFX_INVALID_HANDLE,
                         mDebugAtlas = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle mMaskProgram = BGFX_INVALID_HANDLE, mOutlineProgram = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle mIdentityProgram = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle mReadbackProgram = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle mReadbackImage = BGFX_INVALID_HANDLE, mReadbackRegion = BGFX_INVALID_HANDLE,
+                        mReadbackLayout = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle mUiTextureInfo = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle mIdentitySampler = BGFX_INVALID_HANDLE, mIdentitySize = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle mMaskSampler = BGFX_INVALID_HANDLE, mOutlineSize = BGFX_INVALID_HANDLE,
                         mOutlineColor = BGFX_INVALID_HANDLE;
     ReflectionUniforms mReflections;
@@ -303,7 +321,12 @@ class BgfxRenderer final : public Renderer {
     }
     bool renderShadows(GpuScene &scene, const CameraView &camera) {
         ShadowKey key{scene.geometryRevision, scene.lightingRevision, scene.style.shadowQuality,
-                      scene.style.shadows, camera.focus};
+                      scene.style.shadows,
+                      std::ranges::any_of(
+                          scene.lighting.lights,
+                          [](const Light &light) { return light.type == 0 && light.castShadow; })
+                          ? camera.focus
+                          : std::array<float, 3>{}};
         if (scene.shadowKey == key)
             return false;
         scene.shadowKey.reset();
@@ -312,6 +335,7 @@ class BgfxRenderer final : public Renderer {
         auto draw = [&](bgfx::ViewId view, const glm::mat4 &matrix, bgfx::FrameBufferHandle frame,
                         int x, int y, int pixels, const float *light) {
             orderPass(view);
+            timePass(view, RenderPass::Shadow);
             const ClipFrustum frustum(matrix);
             auto projection = matrix;
             if (!bgfx::getCaps()->homogeneousDepth)
@@ -369,7 +393,7 @@ class BgfxRenderer final : public Renderer {
         if (shadow.directionalLight >= 0)
             for (int i = 0; i < 3; ++i)
                 draw(mNextSceneView++, shadow.matrices[i], shadow.atlasFrame, (i % 2) * 2048,
-                     (i / 2) * 2048, 2048, nullptr);
+                     (bgfx::getCaps()->originBottomLeft ? 1 - i / 2 : i / 2) * 2048, 2048, nullptr);
         for (int slot = 0; slot < shadow.localCount; ++slot) {
             int base = int(shadow.localParams[slot][2]);
             for (int face = 0; face < (shadow.kinds[slot] == 2 ? 1 : 6); ++face)
@@ -459,6 +483,8 @@ class BgfxRenderer final : public Renderer {
             }
         }
         auto maskView = mNextSceneView++, compositeView = mNextSceneView++;
+        timePass(maskView, RenderPass::Outline);
+        timePass(compositeView, RenderPass::Outline);
         orderPass(maskView);
         orderPass(compositeView);
         bgfx::setViewRect(maskView, 0, 0, target.size.width, target.size.height);
@@ -503,6 +529,23 @@ class BgfxRenderer final : public Renderer {
                                                       BGFX_STATE_BLEND_INV_SRC_ALPHA,
                                                       BGFX_STATE_BLEND_ZERO, BGFX_STATE_BLEND_ONE));
         bgfx::submit(compositeView, mOutlineProgram);
+        ++mStats.drawCalls;
+    }
+    void renderIdentityColor(const GpuScene &scene, GpuTarget &target) {
+        auto pass = mNextSceneView++;
+        timePass(pass, RenderPass::Identity);
+        orderPass(pass);
+        bgfx::setViewRect(pass, 0, 0, target.size.width, target.size.height);
+        bgfx::setViewFrameBuffer(pass, target.colorFb);
+        bgfx::setViewClear(pass, BGFX_CLEAR_NONE);
+        uint32_t selected = scene.style.debugView == 6 ? scene.style.selectedId : 0;
+        const float options[] = {float(target.size.width), float(target.size.height),
+                                 float(selected & 65535), float(selected >> 16)};
+        bgfx::setUniform(mIdentitySize, options);
+        bgfx::setTexture(0, mIdentitySampler, target.data[0], sampler);
+        mEnvironment.bindSky(false);
+        bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+        bgfx::submit(pass, mIdentityProgram);
         ++mStats.drawCalls;
     }
     void renderSurfaces(GpuScene &scene, GpuTarget &target, const CameraView &camera) {
@@ -562,6 +605,7 @@ class BgfxRenderer final : public Renderer {
         if (scene.overlays.gizmos.empty())
             return;
         auto pass = mNextSceneView++;
+        timePass(pass, RenderPass::Gizmo);
         orderPass(pass);
         bgfx::setViewRect(pass, 0, 0, target.size.width, target.size.height);
         bgfx::setViewFrameBuffer(pass, target.colorFb);
@@ -600,6 +644,7 @@ class BgfxRenderer final : public Renderer {
         if (frame.debug.empty())
             return;
         auto pass = mNextSceneView++;
+        timePass(pass, RenderPass::Debug);
         orderPass(pass);
         bgfx::setViewRect(pass, 0, 0, target.size.width, target.size.height);
         bgfx::setViewFrameBuffer(pass, target.colorFb);
@@ -697,10 +742,10 @@ class BgfxRenderer final : public Renderer {
         stream.seekg(0);
         if (length <= 0 || length > std::numeric_limits<uint32_t>::max() - 1)
             throw std::runtime_error("Invalid shader size");
-        auto memory = bgfx::alloc(static_cast<uint32_t>(length) + 1);
-        stream.read(reinterpret_cast<char *>(memory->data), length);
-        memory->data[length] = 0;
-        auto handle = bgfx::createShader(memory);
+        std::vector<char> bytes(static_cast<size_t>(length) + 1);
+        if (!stream.read(bytes.data(), length))
+            throw std::runtime_error("Cannot read shader: " + file);
+        auto handle = bgfx::createShader(bgfx::copy(bytes.data(), uint32_t(bytes.size())));
         if (!bgfx::isValid(handle))
             throw std::runtime_error("Cannot create shader: " + file);
         return handle;
@@ -721,6 +766,56 @@ class BgfxRenderer final : public Renderer {
             throw std::runtime_error(std::string("Cannot link shader program: ") + fs);
         }
         return result;
+    }
+    void loadPrograms() {
+        std::vector<std::pair<bgfx::ProgramHandle *, bgfx::ProgramHandle>> replacements;
+        replacements.reserve(32);
+        auto stage = [&](bgfx::ProgramHandle &destination, const char *vs, const char *fs) {
+            replacements.emplace_back(&destination, program(mShaderDirectory, vs, fs));
+        };
+        try {
+            const char *debugNames[] = {"Line",   "Arrow",    "Point",  "Stroke", "Solid",
+                                        "Sector", "DragLink", "Screen", "Text"};
+            for (size_t i = 0; i < mDebugPrograms.size(); ++i) {
+                const auto name = std::string("debug") + debugNames[i];
+                stage(mDebugPrograms[i], ("vs_" + name).c_str(), ("fs_" + name).c_str());
+            }
+            stage(mColorProgram, "vs_scene", "fs_color");
+            const char *dataShaders[] = {"fs_data", "fs_id", "fs_segmentation", "fs_depth"};
+            for (size_t i = 0; i < mDataPrograms.size(); ++i)
+                stage(mDataPrograms[i], "vs_scene", dataShaders[i]);
+            stage(mUiProgram, "vs_ui", "fs_ui");
+            stage(mLitProgram, "vs_lit", "fs_lit");
+            stage(mWireProgram, "vs_litWire", "fs_litWire");
+            stage(mGizmoProgram, "vs_gizmo", "fs_gizmo");
+            stage(mMaskProgram, "vs_shadow", "fs_mask");
+            stage(mOutlineProgram, "vs_fullscreen", "fs_outline");
+            stage(mIdentityProgram, "vs_fullscreen", "fs_identityColor");
+            stage(mSkyProgram, "vs_sky", "fs_sky");
+            stage(mClassicSkyProgram, "vs_skyClassic", "fs_sky");
+            stage(mHazeProgram, "vs_haze", "fs_haze");
+            stage(mShadowProgram, "vs_shadow", "fs_shadow");
+            stage(mDistanceProgram, "vs_shadow", "fs_distance");
+            if ((bgfx::getCaps()->supported & BGFX_CAPS_COMPUTE) &&
+                std::endian::native == std::endian::little) {
+                auto handle =
+                    bgfx::createProgram(shader(mShaderDirectory + "/cs_readback.bin"), true);
+                if (!bgfx::isValid(handle))
+                    throw std::runtime_error("Cannot create readback conversion program");
+                replacements.emplace_back(&mReadbackProgram, handle);
+            }
+        } catch (...) {
+            for (auto [destination, handle] : replacements)
+                bgfx::destroy(handle);
+            throw;
+        }
+        // Publish only a complete program set. A compile/load failure leaves
+        // every scene and UI consumer on its previous working programs.
+        for (auto [destination, handle] : replacements) {
+            if (bgfx::isValid(*destination))
+                bgfx::destroy(*destination);
+            *destination = handle;
+        }
     }
     void releaseTarget(GpuTarget &t) {
         t.reflectionKey.reset();
@@ -743,13 +838,15 @@ class BgfxRenderer final : public Renderer {
         t.colorFb = BGFX_INVALID_HANDLE;
     }
     void allocateTarget(GpuTarget &t) {
-        uint64_t flags = BGFX_TEXTURE_RT | sampler;
+        uint64_t flags = sampler;
         t.allocatedSamples = scene(t.scene).style.msaa ? t.samples : 1;
         uint64_t msaa = t.allocatedSamples == 2    ? BGFX_TEXTURE_RT_MSAA_X2
                         : t.allocatedSamples == 4  ? BGFX_TEXTURE_RT_MSAA_X4
                         : t.allocatedSamples == 8  ? BGFX_TEXTURE_RT_MSAA_X8
                         : t.allocatedSamples == 16 ? BGFX_TEXTURE_RT_MSAA_X16
-                                                   : 0;
+                                                   : BGFX_TEXTURE_RT;
+        // RT and RT_MSAA_X* encode one field, not independent bits. OR-ing RT
+        // into MSAA_X2 requests X4, and OR-ing it into X8 requests X16.
         if (!bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA8, flags | msaa))
             throw std::runtime_error("Requested color/MSAA target unsupported");
         std::vector<bgfx::TextureHandle> orphaned;
@@ -772,8 +869,9 @@ class BgfxRenderer final : public Renderer {
             const bgfx::TextureFormat::Enum formats[] = {
                 bgfx::TextureFormat::RGBA8, bgfx::TextureFormat::RGBA16, bgfx::TextureFormat::R32F};
             for (size_t i = 0; i < t.data.size(); ++i)
-                t.data[i] = texture(formats[i], flags);
-            auto dataDepth = texture(bgfx::TextureFormat::D32F, flags | BGFX_TEXTURE_RT_WRITE_ONLY);
+                t.data[i] = texture(formats[i], flags | BGFX_TEXTURE_RT);
+            auto dataDepth = texture(bgfx::TextureFormat::D32F,
+                                     flags | BGFX_TEXTURE_RT | BGFX_TEXTURE_RT_WRITE_ONLY);
             bgfx::TextureHandle attachments[] = {t.data[0], t.data[1], t.data[2], dataDepth};
             t.dataFbs[0] = bgfx::createFrameBuffer(4, attachments, true);
             if (!bgfx::isValid(t.colorFb) || !bgfx::isValid(t.dataFbs[0]))
@@ -824,6 +922,8 @@ class BgfxRenderer final : public Renderer {
 
   public:
     void initialize(const BgfxOptions &options) {
+        mShaderDirectory = options.shaderDirectory;
+        mWindowSystem = options.window.system;
         if (runtimeActive.test_and_set())
             throw std::logic_error("Only one bgfx runtime may exist; create peer targets instead");
         bgfx::Init init;
@@ -835,6 +935,9 @@ class BgfxRenderer final : public Renderer {
         init.type = bgfx::RendererType::Vulkan;
 #endif
         init.fallback = false;
+        init.platformData.type = mWindowSystem == WindowSystem::Wayland
+                                     ? bgfx::NativeWindowHandleType::Wayland
+                                     : bgfx::NativeWindowHandleType::Default;
         init.profile = true;
         init.reset = mResetFlags;
         // Overlap CPU submission with GPU execution without an unbounded frame queue.
@@ -853,6 +956,7 @@ class BgfxRenderer final : public Renderer {
             throw std::runtime_error("Cannot initialize native renderer");
         }
         mInitialized = true;
+        bgfx::setDebug(BGFX_DEBUG_PROFILER);
         const auto *caps = bgfx::getCaps();
         mCaps.backend = bgfx::getRendererName(caps->rendererType);
         mCaps.device = std::to_string(caps->vendorId) + ":" + std::to_string(caps->deviceId);
@@ -888,12 +992,7 @@ class BgfxRenderer final : public Renderer {
             .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
             .end();
         mDebugPrograms.fill(bgfx::ProgramHandle{bgfx::kInvalidHandle});
-        const char *debugNames[] = {"Line",   "Arrow",    "Point",  "Stroke", "Solid",
-                                    "Sector", "DragLink", "Screen", "Text"};
         for (size_t i = 0; i < 9; ++i) {
-            const auto name = std::string("debug") + debugNames[i];
-            mDebugPrograms[i] =
-                program(options.shaderDirectory, ("vs_" + name).c_str(), ("fs_" + name).c_str());
             mDebugLayouts[i].begin();
             for (uint32_t col = 0; col < (debugRecordFloats[i] + 3) / 4; ++col)
                 mDebugLayouts[i].add(bgfx::Attrib::Enum(bgfx::Attrib::TexCoord0 + col), 4,
@@ -910,31 +1009,27 @@ class BgfxRenderer final : public Renderer {
         mDebugParams = bgfx::createUniform("u_debugParams", bgfx::UniformType::Vec4);
         mDebugDepth = bgfx::createUniform("u_debugDepth", bgfx::UniformType::Vec4);
         mDebugAtlas = bgfx::createUniform("s_debugAtlas", bgfx::UniformType::Sampler);
-        mColorProgram = program(options.shaderDirectory, "vs_scene", "fs_color");
-        const char *dataShaders[] = {"fs_data", "fs_id", "fs_segmentation", "fs_depth"};
-        for (size_t i = 0; i < mDataPrograms.size(); ++i)
-            mDataPrograms[i] = program(options.shaderDirectory, "vs_scene", dataShaders[i]);
-        mUiProgram = program(options.shaderDirectory, "vs_ui", "fs_ui");
+        mUiTextureInfo = bgfx::createUniform("u_uiTextureInfo", bgfx::UniformType::Vec4);
         mSurfaceLayout.begin();
         for (int i = 0; i < 8; ++i)
             mSurfaceLayout.add(bgfx::Attrib::Enum(bgfx::Attrib::TexCoord0 + i), 4,
                                bgfx::AttribType::Float);
         mSurfaceLayout.end();
-        mLitProgram = program(options.shaderDirectory, "vs_lit", "fs_lit");
-        mWireProgram = program(options.shaderDirectory, "vs_litWire", "fs_litWire");
-        mGizmoProgram = program(options.shaderDirectory, "vs_gizmo", "fs_gizmo");
         mGizmoColor = bgfx::createUniform("u_gizmoColor", bgfx::UniformType::Vec4);
         mGizmoParams = bgfx::createUniform("u_gizmoParams", bgfx::UniformType::Vec4);
-        mMaskProgram = program(options.shaderDirectory, "vs_shadow", "fs_mask");
-        mOutlineProgram = program(options.shaderDirectory, "vs_fullscreen", "fs_outline");
+        if ((bgfx::getCaps()->supported & BGFX_CAPS_COMPUTE) &&
+            std::endian::native == std::endian::little) {
+            mReadbackImage = bgfx::createUniform("s_readbackImage", bgfx::UniformType::Sampler);
+            mReadbackRegion = bgfx::createUniform("u_readbackRegion", bgfx::UniformType::Vec4);
+            mReadbackLayout = bgfx::createUniform("u_readbackLayout", bgfx::UniformType::Vec4);
+        }
+        mIdentitySampler = bgfx::createUniform("s_identity", bgfx::UniformType::Sampler);
+        mIdentitySize = bgfx::createUniform("u_identitySize", bgfx::UniformType::Vec4);
         mMaskSampler = bgfx::createUniform("s_selectionMask", bgfx::UniformType::Sampler);
         mOutlineSize = bgfx::createUniform("u_outlineSize", bgfx::UniformType::Vec4);
         mOutlineColor = bgfx::createUniform("u_outlineColor", bgfx::UniformType::Vec4);
         mReflections.initialize();
         mEnvironment.initialize();
-        mSkyProgram = program(options.shaderDirectory, "vs_sky", "fs_sky");
-        mClassicSkyProgram = program(options.shaderDirectory, "vs_skyClassic", "fs_sky");
-        mHazeProgram = program(options.shaderDirectory, "vs_haze", "fs_haze");
         mSkySampler = bgfx::createUniform("s_sky", bgfx::UniformType::Sampler);
         mSkyInverse = bgfx::createUniform("u_skyInverse", bgfx::UniformType::Mat4);
         mSkyEyeDistance = bgfx::createUniform("u_skyEyeDistance", bgfx::UniformType::Vec4);
@@ -944,8 +1039,6 @@ class BgfxRenderer final : public Renderer {
             mHazeUniforms[i] = bgfx::createUniform(hazeNames[i], bgfx::UniformType::Vec4);
         mLighting.initialize();
         mShadows.initialize();
-        mShadowProgram = program(options.shaderDirectory, "vs_shadow", "fs_shadow");
-        mDistanceProgram = program(options.shaderDirectory, "vs_shadow", "fs_distance");
         mShadowLightPosition =
             bgfx::createUniform("u_shadowLightPosition", bgfx::UniformType::Vec4);
         mCubeSampler = bgfx::createUniform("s_cube", bgfx::UniformType::Sampler);
@@ -961,6 +1054,7 @@ class BgfxRenderer final : public Renderer {
                                        bgfx::copy(&white, 4));
         bgfx::setPaletteColor(0, uint32_t{0});
         bgfx::setPaletteColor(1, 0xffffffff);
+        loadPrograms();
     }
     ~BgfxRenderer() override {
         if (!mInitialized)
@@ -977,7 +1071,7 @@ class BgfxRenderer final : public Renderer {
             releaseSlot(r);
         for (auto &[id, t] : mTextures)
             bgfx::destroy(t);
-        for (auto h : {mMaskProgram, mOutlineProgram})
+        for (auto h : {mMaskProgram, mOutlineProgram, mIdentityProgram, mReadbackProgram})
             if (bgfx::isValid(h))
                 bgfx::destroy(h);
         for (auto h : {mMaskSampler, mOutlineSize, mOutlineColor})
@@ -986,6 +1080,10 @@ class BgfxRenderer final : public Renderer {
         for (auto &[stride, upload] : mInstanceUploads)
             if (bgfx::isValid(upload.handle))
                 bgfx::destroy(upload.handle);
+        for (auto h : {mIdentitySampler, mIdentitySize, mReadbackImage, mReadbackRegion,
+                       mReadbackLayout, mUiTextureInfo})
+            if (bgfx::isValid(h))
+                bgfx::destroy(h);
         if (bgfx::isValid(mGizmoProgram))
             bgfx::destroy(mGizmoProgram);
         for (auto h : {mGizmoColor, mGizmoParams})
@@ -1161,7 +1259,7 @@ class BgfxRenderer final : public Renderer {
     }
     void configure(Scene id, const SceneStyle &style) override {
         owner();
-        if (style.debugView < 0 || style.debugView > 5 || style.shadowQuality < 0 ||
+        if (style.debugView < 0 || style.debugView > 7 || style.shadowQuality < 0 ||
             style.shadowQuality > 2)
             throw std::invalid_argument("Invalid render mode");
         for (float value : style.background)
@@ -1222,10 +1320,9 @@ class BgfxRenderer final : public Renderer {
                 extent(texture.size);
                 const auto flags =
                     (texture.srgb ? BGFX_TEXTURE_SRGB : 0) |
-                    (texture.cube
-                         ? uint64_t(BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
-                                    BGFX_SAMPLER_W_CLAMP)
-                         : uint64_t(BGFX_SAMPLER_MIN_ANISOTROPIC | BGFX_SAMPLER_MAG_ANISOTROPIC));
+                    (texture.cube ? uint64_t(BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
+                                             BGFX_SAMPLER_W_CLAMP)
+                                  : uint64_t(0));
                 // bgfx releases this immutable storage after its render thread has
                 // consumed the upload. Do not duplicate large mip chains or rely
                 // on the caller keeping its SceneSource alive.
@@ -1433,6 +1530,8 @@ class BgfxRenderer final : public Renderer {
     }
     Target createSurface(NativeWindow window) override {
         owner();
+        if (window.system != mWindowSystem)
+            throw std::invalid_argument("Native windows must use the runtime's window system");
         extent(window.size);
         if (!window.handle || !mCaps.multipleWindows)
             throw std::invalid_argument("Native surface unavailable");
@@ -1528,6 +1627,7 @@ class BgfxRenderer final : public Renderer {
         cancel(id);
         releaseTarget(t);
         mViews[t.view / 4] = false;
+        mTiming.erase(id);
         mTargets.erase(id.id);
         updateVsync();
     }
@@ -1558,6 +1658,12 @@ class BgfxRenderer final : public Renderer {
         validateCamera(camera);
         auto &t = target(id);
         auto &current = scene(t.scene);
+        const bool identityColor = request.color && current.style.debugView >= 6;
+        if (identityColor) {
+            request.sceneData = true;
+            request.dataProduct.reset();
+            dataIndex = 0;
+        }
         if (t.surface)
             throw std::invalid_argument(
                 "Render scenes to an offscreen target, then present its texture");
@@ -1579,6 +1685,8 @@ class BgfxRenderer final : public Renderer {
         if (mNextSceneView + 59 >= 250)
             flush();
         beginTarget(t);
+        mTimingTarget = id;
+        mTimingSubmission = mSubmission + 1;
         ReflectionKey reflectionKey{current.geometryRevision, current.lightingRevision,
                                     current.styleRevision,    camera.view,
                                     camera.projection,        camera.nearPlane,
@@ -1595,7 +1703,7 @@ class BgfxRenderer final : public Renderer {
         const uint8_t dataMask = dataIndex ? 1u << (dataIndex - 1) : 7;
         const bool renderData = request.sceneData && (t.cachedData & dataMask) != dataMask;
         bool shadowRendered = false;
-        if (renderColor) {
+        if (renderColor && !identityColor) {
             mLighting.prepare(current.lighting);
             shadowRendered = renderShadows(current, camera);
             if (reflectionDirty)
@@ -1613,8 +1721,9 @@ class BgfxRenderer final : public Renderer {
                 projection[8 + c] = (projection[8 + c] + projection[12 + c]) * 0.5f;
         projection = columnMajor(projection);
         for (uint16_t pass = 0; pass < 2; ++pass) {
-            if (pass ? !renderData : !renderColor)
+            if (pass ? !renderData : (!renderColor || identityColor))
                 continue;
+            timePass(t.view + pass, pass ? RenderPass::SceneData : RenderPass::Color);
             bgfx::setViewRect(t.view + pass, 0, 0, t.size.width, t.size.height);
             bgfx::setViewFrameBuffer(t.view + pass, pass ? t.dataFbs[dataIndex] : t.colorFb);
             bgfx::setViewTransform(t.view + pass, view.data(), projection.data());
@@ -1790,12 +1899,14 @@ class BgfxRenderer final : public Renderer {
                 }
             }
         };
-        for (size_t layer = 0;
-             request.color && reflectionDirty && layer < t.reflections.groups.size(); ++layer) {
+        for (size_t layer = 0; request.color && !identityColor && reflectionDirty &&
+                               layer < t.reflections.groups.size();
+             ++layer) {
             reflectionLayer = layer;
             drawCamera = t.reflections.camera(camera, layer);
             drawFrustum = ClipFrustum(drawCamera);
             colorView = mNextSceneView++;
+            timePass(colorView, RenderPass::Reflection);
             orderPass(colorView);
             auto reflectedView = columnMajor(drawCamera.view);
             bgfx::setViewRect(colorView, 0, 0, t.size.width, t.size.height);
@@ -1824,7 +1935,7 @@ class BgfxRenderer final : public Renderer {
         orderPass(t.view);
         orderPass(t.view + 1);
         for (uint16_t pass = 0; pass < 2; ++pass) {
-            if (pass ? !renderData : !renderColor)
+            if (pass ? !renderData : (!renderColor || identityColor))
                 continue;
             for (const auto &batch : current.batches) {
                 mDrawIndices.clear();
@@ -1839,12 +1950,16 @@ class BgfxRenderer final : public Renderer {
             }
         }
         if (renderColor) {
-            renderEnvironment(current, t, camera);
-            renderSurfaces(current, t, camera);
-            drawTransparent();
-            renderOutline(current, t, view, projection);
-            renderDebug(current, t, camera, view, projection);
-            renderGizmos(current, t, view, projection);
+            if (identityColor) {
+                renderIdentityColor(current, t);
+            } else {
+                renderEnvironment(current, t, camera);
+                renderSurfaces(current, t, camera);
+                drawTransparent();
+                renderOutline(current, t, view, projection);
+                renderDebug(current, t, camera, view, projection);
+                renderGizmos(current, t, view, projection);
+            }
             t.reflectionKey = reflectionKey;
             t.colorKey = cacheColor ? std::optional{reflectionKey} : std::nullopt;
         }
@@ -1859,20 +1974,26 @@ class BgfxRenderer final : public Renderer {
                                mStats.instances - before.instances,
                                mStats.uploadBytes - before.uploadBytes, -1};
         auto &stats = t.latest.statistics;
+        stats.passes = mTiming.get(id);
         stats.shadowInstances = mStats.shadowInstances - before.shadowInstances;
         stats.culledShadowInstances = mStats.culledShadowInstances - before.culledShadowInstances;
         stats.culledInstances = mStats.culledInstances - before.culledInstances;
-        if (request.color && current.style.reflections && !t.reflections.groups.empty()) {
+        if (request.color && !identityColor && current.style.reflections &&
+            !t.reflections.groups.empty()) {
             stats.reflectionRendered = renderColor && reflectionDirty;
             stats.reflectionReused = !stats.reflectionRendered;
         }
-        if (request.color && current.style.shadows) {
+        if (request.color && !identityColor && current.style.shadows) {
             stats.shadowRendered = shadowRendered;
             stats.shadowReused = !shadowRendered;
         }
         return t.latest;
     }
     ReadbackTicket readback(FrameToken frame, Product product, Region region) override {
+        return submitReadback(frame, product, region, {});
+    }
+    ReadbackTicket submitReadback(FrameToken frame, Product product, Region region,
+                                  std::span<std::byte> destination) {
         owner();
         auto &t = target(frame.target);
         if (t.surface ||
@@ -1906,8 +2027,12 @@ class BgfxRenderer final : public Renderer {
             releaseSlot(r);
         r.ticket = allocateId();
         r.canceled = false;
+        r.destination = destination;
+        r.direct = false;
         r.frame = frame;
         r.product = product;
+        r.gpuPacked = bgfx::isValid(mReadbackProgram) &&
+                      (product == Product::Color || bgfx::getCaps()->originBottomLeft);
         r.size = {region.width, region.height};
         auto source = product == Product::ObjectId       ? t.data[0]
                       : product == Product::Segmentation ? t.data[1]
@@ -1918,6 +2043,44 @@ class BgfxRenderer final : public Renderer {
         bgfx::TextureRegion src{};
         src.init(source, region.x, y, region.width, region.height);
         orderPass(t.view + 2);
+        if (r.gpuPacked) {
+            // Pack RGB and orient data products on the GPU. The CPU can hand off
+            // the owned buffer without another conversion or full-image allocation.
+            const bool rgb = product == Product::Color;
+            r.rowPitch = rgb ? ((r.size.width + 3) / 4) * 12 : r.size.width * pixelBytes(product);
+            const uint32_t size = r.rowPitch * r.size.height;
+            if (!reuse)
+                r.buffer = bgfx::createDynamicIndexBuffer(size / 4, BGFX_BUFFER_INDEX32 |
+                                                                        BGFX_BUFFER_COMPUTE_WRITE);
+            if (!bgfx::isValid(r.buffer)) {
+                r.ticket = 0;
+                throw std::runtime_error("Cannot allocate readback conversion buffer");
+            }
+            const float rectangle[] = {float(region.x), float(region.y), float(region.width),
+                                       float(region.height)};
+            const float format = rgb                                ? 0.f
+                                 : product == Product::MetricDepth  ? 2.f
+                                 : product == Product::Segmentation ? 3.f
+                                                                    : 1.f;
+            const float layout[] = {float(t.size.height),
+                                    bgfx::getCaps()->originBottomLeft ? 1.0f : 0.0f, format, 0};
+            bgfx::setUniform(mReadbackRegion, rectangle);
+            bgfx::setUniform(mReadbackLayout, layout);
+            bgfx::setTexture(0, mReadbackImage, source, sampler);
+            bgfx::setBuffer(1, r.buffer, bgfx::Access::Write);
+            const uint32_t pixelsPerGroup = rgb ? 256 : 64;
+            bgfx::dispatch(t.view + 2, mReadbackProgram,
+                           (r.size.width + pixelsPerGroup - 1) / pixelsPerGroup, r.size.height);
+            bgfx::BufferRegion dst{};
+            dst.init(r.buffer, 0, size);
+            r.direct = !destination.empty() && r.rowPitch == r.size.width * pixelBytes(product);
+            if (!r.direct)
+                r.bytes.resize(size);
+            r.ready = bgfx::read(dst, r.direct ? destination.data() : r.bytes.data());
+            t.lastReadback = mGpuFrame;
+            mPendingCommands = true;
+            return {r.ticket};
+        }
         // Buffer copies cannot source an MSAA resource. Preserve bgfx's resolved
         // color image with a GPU-only copy before transferring linear storage.
         if ((product == Product::Color || product == Product::ColorAlpha) &&
@@ -1955,6 +2118,27 @@ class BgfxRenderer final : public Renderer {
         mPendingCommands = true;
         return {r.ticket};
     }
+    ReadbackState readInto(FrameToken frame, ImageView destination, Region region) override {
+        owner();
+        const auto size = target(frame.target).size;
+        if (region.x >= size.width || region.y >= size.height)
+            throw std::invalid_argument("Readback origin exceeds target");
+        const Extent output = {region.width ? region.width : size.width - region.x,
+                               region.height ? region.height : size.height - region.y};
+        if (destination.size != output ||
+            destination.pixels.size() !=
+                size_t(output.width) * output.height * pixelBytes(destination.product))
+            throw std::invalid_argument("Readback destination has the wrong size");
+        auto ticket = submitReadback(frame, destination.product, region, destination.pixels);
+        // The caller's storage must remain alive until completion. Unlike an owned
+        // asynchronous ticket, synchronous delivery cannot time out and abandon it.
+        for (;;) {
+            advance();
+            auto result = poll(ticket);
+            if (result.state != ReadbackState::Pending)
+                return result.state;
+        }
+    }
     ReadbackResult poll(ReadbackTicket ticket) override {
         owner();
         if (!ticket.id)
@@ -1968,29 +2152,34 @@ class BgfxRenderer final : public Renderer {
         ReadbackResult result;
         result.frame = it->frame;
         result.state = it->canceled ? ReadbackState::Canceled : ReadbackState::Ready;
-        if (!it->canceled) {
+        if (!it->canceled && !it->direct) {
             auto &image = result.image;
             image.product = it->product;
             image.size = it->size;
             auto stride = pixelBytes(image.product);
-            const bool flip = bgfx::getCaps()->originBottomLeft;
+            const bool flip = !it->gpuPacked && bgfx::getCaps()->originBottomLeft;
             const bool rawWords =
-                image.product == Product::ColorAlpha || image.product == Product::MetricDepth ||
+                it->gpuPacked || image.product == Product::ColorAlpha ||
+                image.product == Product::MetricDepth ||
                 ((image.product == Product::ObjectId || image.product == Product::Segmentation) &&
                  std::endian::native == std::endian::little);
-            if (!flip && rawWords && it->rowPitch == image.size.width * stride) {
+            if (it->destination.empty() && !flip && rawWords &&
+                it->rowPitch == image.size.width * stride) {
                 image.pixels = std::move(it->bytes);
             } else {
-                image.pixels.resize(size_t(image.size.width) * image.size.height * stride);
+                auto output = it->destination;
+                if (output.empty()) {
+                    image.pixels.resize(size_t(image.size.width) * image.size.height * stride);
+                    output = image.pixels;
+                }
                 for (size_t y = 0; y < image.size.height; ++y) {
                     const size_t offset = (flip ? image.size.height - 1 - y : y) * it->rowPitch;
                     const auto *source = it->bytes.data() + offset;
-                    auto *destination = image.pixels.data() + y * image.size.width * stride;
+                    auto *destination = output.data() + y * image.size.width * stride;
                     if (rawWords) {
                         std::memcpy(destination, source, image.size.width * stride);
                     } else if (image.product == Product::Color) {
-                        for (size_t x = 0; x < image.size.width; ++x)
-                            std::memcpy(destination + x * 3, source + x * 4, 3);
+                        detail::copyRgb(destination, source, image.size.width);
                     } else if (image.product == Product::Segmentation) {
                         for (size_t x = 0; x < image.size.width; ++x) {
                             uint16_t words[4];
@@ -2009,6 +2198,7 @@ class BgfxRenderer final : public Renderer {
                 }
             }
         }
+        it->destination = {};
         it->ticket = 0;
         return result;
     }
@@ -2022,6 +2212,20 @@ class BgfxRenderer final : public Renderer {
         auto result = mStats;
         mStats = {};
         return result;
+    }
+    void reloadShaders() override {
+        owner();
+        if (mPendingCommands)
+            flush();
+        loadPrograms();
+        for (auto &[id, value] : mScenes)
+            value.shadowKey.reset();
+        for (auto &[id, value] : mTargets) {
+            value.colorKey.reset();
+            value.reflectionKey.reset();
+            value.dataKey.reset();
+            value.cachedData = 0;
+        }
     }
     Texture targetTexture(Target id) const override {
         owner();
@@ -2083,13 +2287,18 @@ class BgfxRenderer final : public Renderer {
             t.dataOnly = false;
             t.dataProduct.reset();
             t.colorKey.reset();
-            token = t.latest = {output, t.generation, 0, 0, 0, ++mSubmission};
+            token = {output, t.generation, 0, 0, 0, ++mSubmission};
         }
         if (!output.id) {
             if (mMainRender == mGpuFrame)
                 flush();
             mMainRender = mGpuFrame;
+            token.submission = ++mSubmission;
         }
+        token.statistics.passes = mTiming.get(output);
+        if (output.id)
+            target(output).latest = token;
+        mTiming.record(view, output, token.submission, RenderPass::Ui);
         orderPass(view);
         bgfx::setViewMode(view, bgfx::ViewMode::Sequential);
         bgfx::setViewRect(view, 0, 0, ui.size.width, ui.size.height);
@@ -2122,6 +2331,11 @@ class BgfxRenderer final : public Renderer {
             bgfx::setVertexBuffer(0, &vertices, command.vertexOffset,
                                   ui.vertices.size() - command.vertexOffset);
             bgfx::setIndexBuffer(&indices, command.firstIndex, command.indexCount);
+            const float textureInfo[] = {
+                bgfx::getCaps()->originBottomLeft && (command.texture.id & targetTextureBit) ? 1.f
+                                                                                             : 0.f,
+                0, 0, 0};
+            bgfx::setUniform(mUiTextureInfo, textureInfo);
             bgfx::setTexture(0, mImageSampler, textureHandle(command.texture));
             bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
                            BGFX_STATE_BLEND_FUNC_SEPARATE(

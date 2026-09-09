@@ -63,11 +63,13 @@ int main(int argc, char **argv) {
         expect(result.image, 100, 20, {0, 255, 0});
         expect(result.image, 20, 100, {0, 0, 255});
         Quad blend(texture, {128, 128}, 0x80ffffff);
-        blend.commands[0].clip = {8, 8, 120, 120};
+        blend.commands[0].clip = {8, 12, 112, 96};
         auto blended = renderer->renderUi(blend.frame(), mask);
         result = waitForReadback(*renderer, renderer->readback(blended, Product::Color));
         expect(result.image, 20, 20, {138, 12, 15});
         expect(result.image, 2, 2, {20, 25, 30});
+        expect(result.image, 20, 8, {20, 25, 30});
+        expect(result.image, 20, 100, {20, 25, 30});
         std::ofstream image(output / "composition.ppm", std::ios::binary);
         image << "P6\n128 128\n255\n";
         image.write(reinterpret_cast<const char *>(result.image.pixels.data()),

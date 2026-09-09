@@ -62,6 +62,9 @@ def gl():
 def _gl_baseline(gl):
 
     G.native().drain_errors()
+    # Tests release their framebuffers; reset ModernGL's cached binding before
+    # another constructor tries to restore a deleted framebuffer name.
+    bind_default_framebuffer(gl)
     gl.wireframe = False
     gl.front_face = "ccw"
     gl.cull_face = "back"

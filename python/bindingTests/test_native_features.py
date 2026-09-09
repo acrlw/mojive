@@ -18,6 +18,130 @@ from mojive import (
 )
 
 
+@pytest.mark.parametrize("direction", [(0, 0, 0), (0, 0, -1e-12), (0, 0, -7)])
+def test_degenerate_light_direction_matches_the_default(direction):
+    light = Light(
+        direction=np.array(direction, np.float32), cast_shadow=False, diffuse=np.ones(3, np.float32)
+    )
+    scene = Scene(lights=LightSet(lights=(light,), ambient=np.zeros(3, np.float32)))
+    scene.box(size=(0.5, 0.5, 0.5), color=(1, 1, 1, 1))
+    camera = CameraView(eye=np.array([0, 0, 4]), up=np.array([0, 1, 0]))
+    with SceneRenderer(
+        scene.source, renderer="bgfx", width=80, height=60, samples=0, camera=camera
+    ) as renderer:
+        renderer.update(scene.frame)
+        first = renderer.render()
+        scene.set_light_at(0, replace(light, direction=np.array([0, 0, -1], np.float32)))
+        renderer.update(scene.frame)
+        reference = renderer.render()
+        assert reference[30, 40, 0] > 200
+        np.testing.assert_array_equal(first, reference)
+
+
+@pytest.mark.parametrize("orthographic", [False, True])
+def test_normalized_depth_keeps_the_rendered_camera(orthographic):
+    scene = Scene()
+    scene.box(size=(0.5, 0.5, 0.5))
+    camera = CameraView(
+        eye=np.array([0, 0, 4]), up=np.array([0, 1, 0]), near=0.1, far=20, orthographic=orthographic
+    )
+    with SceneRenderer(
+        scene.source, renderer="bgfx", width=80, height=60, samples=0, camera=camera
+    ) as renderer:
+        renderer.update(scene.frame)
+        renderer.render(product=RenderProduct.METRIC_DEPTH)
+        backend = renderer._backend
+        before = backend.target.read_depth()
+        backend.set_camera(replace(camera, near=0.5, far=40, orthographic=not orthographic))
+        np.testing.assert_array_equal(before, backend.target.read_depth())
+        renderer.update(scene.frame, camera=replace(camera, near=0.5, far=40))
+        renderer.render(product=RenderProduct.METRIC_DEPTH)
+        assert abs(float(before[30, 40]) - float(backend.target.read_depth()[30, 40])) > 0.05
+
+
+def test_public_eight_sample_target_survives_toggle_resize_and_peer():
+    scene = Scene()
+    scene.box()
+    with SceneRenderer(scene.source, renderer="bgfx", width=80, height=60, samples=8) as renderer:
+        renderer.update(scene.frame)
+        backend = renderer._backend
+        assert backend.caps.msaa_samples == backend.target.samples == 8
+        first = renderer.render()
+        renderer.set_flag(RenderFlag.MSAA, False)
+        assert not np.array_equal(first, renderer.render())
+        renderer.set_flag(RenderFlag.MSAA, True)
+        np.testing.assert_array_equal(first, renderer.render())
+        renderer.resize(100, 75)
+        assert renderer.render().shape == (75, 100, 3)
+        peer = backend.create_peer(80, 60)
+        try:
+            assert peer.target.samples == 8
+            peer.set_scene(scene.source)
+            peer.update(scene.frame)
+            peer.render()
+            assert peer.target.read_rgb().shape == (60, 80, 3)
+        finally:
+            peer.release()
+
+
+def test_pass_timings_follow_independent_targets_and_delayed_frames():
+    scene = Scene()
+    box = scene.box()
+    with (
+        SceneRenderer(scene.source, renderer="bgfx", width=100, height=80, samples=0) as color,
+        SceneRenderer(scene.source, renderer="bgfx", width=100, height=80, samples=0) as depth,
+    ):
+        color_submissions, depth_submissions = set(), set()
+        seen_gpu = set()
+        for frame in range(40):
+            box.set_pose((frame * 0.001, 0, 0))
+            color.update(scene.frame)
+            depth.update(scene.frame)
+            color.render()
+            color_submissions.add(color._backend.target.frame.submission)
+            depth.render(product=RenderProduct.METRIC_DEPTH)
+            depth_submissions.add(depth._backend.target.frame.submission)
+            for renderer, expected, owned in (
+                (color, "color", color_submissions),
+                (depth, "scene data", depth_submissions),
+            ):
+                stats = renderer._backend.stats
+                if stats.cpu_ms:
+                    assert set(stats.cpu_ms) == {expected}
+                    assert stats.notes["cpu submission"] in owned
+                    assert all(np.isfinite(value) and value >= 0 for value in stats.cpu_ms.values())
+                if stats.gpu_ms:
+                    assert set(stats.gpu_ms) == {expected}
+                    assert stats.notes["gpu submission"] in owned
+                    assert all(np.isfinite(value) and value > 0 for value in stats.gpu_ms.values())
+                    seen_gpu.add(expected)
+        assert seen_gpu == {"color", "scene data"}
+        assert color._backend.caps.pass_timing and color._backend.caps.gpu_timing
+
+
+def test_ui_target_exposes_delayed_pass_timings():
+    with SceneRenderer(renderer="bgfx", width=80, height=60) as renderer:
+        runtime = renderer._backend.runtime
+        target = runtime.create_target(80, 60)
+        seen_cpu = seen_gpu = False
+        try:
+            for _ in range(24):
+                frame = runtime.render_ui(
+                    80, 60, np.empty(0, np.uint8), np.empty(0, np.uint32), [], target
+                )
+                runtime.read(frame, renderer._backend.api.Product.COLOR)
+                if frame.statistics.cpu_ms:
+                    assert set(frame.statistics.cpu_ms) == {"ui"}
+                    seen_cpu = True
+                if frame.statistics.gpu_pass_ms:
+                    assert set(frame.statistics.gpu_pass_ms) == {"ui"}
+                    assert frame.statistics.gpu_pass_ms["ui"] > 0
+                    seen_gpu = True
+            assert seen_cpu and seen_gpu
+        finally:
+            runtime.destroy(target)
+
+
 def test_static_shadow_and_reflection_cache_invalidates_on_pose_and_light_changes(tmp_path):
     light = Light(direction=np.array([0.3, 0.5, -1]), diffuse=np.array([0.8, 0.8, 0.8]))
     scene = Scene(lights=LightSet(lights=(light,)))

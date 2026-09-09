@@ -31,7 +31,6 @@ log = get_logger("window_wgpu")
 
 glfw: Any = None
 imgui: Any = None
-GlfwRenderer: Any = None
 get_glfw_present_info: Any = None
 
 
@@ -44,7 +43,7 @@ def _default_device() -> wgpu.GPUDevice:
 
 
 def _load_window_deps() -> None:
-    global glfw, imgui, GlfwRenderer, get_glfw_present_info
+    global glfw, imgui, get_glfw_present_info
     if glfw is not None:
         return
     _window_module._load_window_deps()
@@ -52,7 +51,6 @@ def _load_window_deps() -> None:
 
     glfw = _window_module.glfw
     imgui = _window_module.imgui
-    GlfwRenderer = _window_module.GlfwRenderer
     get_glfw_present_info = _get_glfw_present_info
 
 
@@ -362,6 +360,7 @@ class WgpuWindow(Window):
         io.set_ini_filename(ini)
 
         self._impl = GlfwInputAdapter(handle)
+        self._input = self._impl
         glfw.set_drop_callback(handle, self._on_file_drop)
         self._native_drop_token = native_drop.install(glfw, handle, self)
 

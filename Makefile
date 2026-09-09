@@ -1,6 +1,8 @@
 PY := .venv/bin/python
 PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
+# Keep native tools consistent with the Python development environment, including sub-makes.
+export PATH := $(abspath .venv/bin):$(PATH)
 .DEFAULT_GOAL := help
 
 .PHONY: recording-layers
@@ -44,6 +46,7 @@ help:
 		'Interactive:' \
 		'  make viewer             default MuJoCo scene' \
 		'  make native-viewer      build and launch the C++/bgfx Viewer' \
+		'  make native-wayland-viewer interactive viewer in a nested Wayland desktop' \
 		'  make native-editor      C++/bgfx scene editor' \
 		'  make native-parity      compare native/OpenGL/wgpu render products' \
 		'  make native-model-parity verify live rigid, skin, and flex scenes' \
@@ -180,7 +183,7 @@ help:
 		'BACKEND accepts opengl (OpenGL) or wgpu. Leave UI scale unset for automatic scaling.'
 
 setup:
-	uv sync --python 3.11 --extra dev --extra mujoco --extra wgpu
+	uv sync --python 3.11 --extra dev --extra mujoco --extra wgpu --extra native
 	$(MAKE) setup-imgui
 
 .PHONY: setup-imgui setup-g3 g3-ui g3-benchmark interaction-benchmark ui-corners ui-corners-gallery
@@ -274,6 +277,11 @@ GPU_WGPU_FILES += python/tests/gpu/test_keyframe_timeline.py
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
 gpu-wgpu:
 	@export MOJIVE_RENDERER=wgpu; for f in $(GPU_WGPU_FILES); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
+
+.PHONY: gpu-bgfx
+gpu-bgfx: native-python-build setup-imgui
+	@export MOJIVE_RENDERER=bgfx MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))"; \
+	for f in $(wildcard python/tests/gpu/test_*.py); do $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
 
 egl:
 	@test "$$(uname -s)" = Linux || { echo 'make egl requires Linux'; exit 2; }
@@ -786,8 +794,9 @@ NATIVE_OUTPUT ?= output/native-probe/$(NATIVE_BACKEND)
 NATIVE_BINDINGS_BUILD ?= output/cpp-bindings-build
 NATIVE_JOBS ?= 4
 NATIVE_SCENE ?= output/native-probe/humanoids100.mjvp
-NATIVE_FONT_LATIN ?= $(HOME)/Library/Caches/mojive/fonts/JetBrainsMono-Regular.ttf
-NATIVE_FONT_CJK ?= $(HOME)/Library/Caches/mojive/fonts/NotoSansSC-Regular.otf
+NATIVE_FONT_CACHE = $(shell $(PY) -c 'from mojive.ui.fonts import cache_dir; print(cache_dir())')
+NATIVE_FONT_LATIN ?= $(NATIVE_FONT_CACHE)/JetBrainsMono-Regular.ttf
+NATIVE_FONT_CJK ?= $(or $(firstword $(wildcard $(NATIVE_FONT_CACHE)/NotoSansSC-Regular.otf /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc)),$(NATIVE_FONT_CACHE)/NotoSansSC-Regular.otf)
 
 .PHONY: native-build native-test native-probe native-fixture native-gallery native-benchmark
 native-build:
@@ -870,14 +879,21 @@ cpp-python-gpu:
 native-python-build:
 	$(MAKE) cpp-python CPP_PYTHON_BGFX=ON CPP_PYTHON_BUILD=$(NATIVE_BUILD)
 
-native-viewer: native-python-build
+native-viewer: native-python-build setup-imgui
 	PYTHONPATH="$(abspath python/src)$(if $(PYTHONPATH),:$(PYTHONPATH))" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(MAKE) viewer BACKEND=bgfx
 
-native-editor: native-python-build
+native-editor: native-python-build setup-imgui
 	PYTHONPATH="$(abspath python/src)$(if $(PYTHONPATH),:$(PYTHONPATH))" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(MAKE) editor BACKEND=bgfx
 
-native-viewer-test: native-python-build
+native-viewer-test: native-python-build setup-imgui
 	PYTHONPATH="$(abspath python/src)" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_HUMANOIDS_MODEL="$(HUMANOIDS_MODEL)" $(PYTEST) -q python/bindingTests/test_native_viewer.py
+
+.PHONY: native-wayland-test native-wayland-viewer
+native-wayland-test: native-python-build setup-imgui
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) tools/run_wayland_acceptance.py --prepare $(ARGS)
+
+native-wayland-viewer: native-python-build setup-imgui
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) tools/run_wayland_viewer.py --prepare --scene "$(SCENE)" $(ARGS)
 
 # Matched visual products and native-only feature regression checks.
 .PHONY: native-parity native-features-test native-spirv
@@ -885,7 +901,7 @@ native-parity: native-python-build
 	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.native_parity --check $(ARGS)
 
 native-features-test: native-python-build
-	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PYTEST) -q python/bindingTests/test_native_features.py
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PYTEST) -q python/bindingTests/test_native_features.py python/bindingTests/test_native_shader_reload.py
 
 native-spirv: native-build
 	$(PY) tools/check_native_shaders.py --build $(NATIVE_BUILD)

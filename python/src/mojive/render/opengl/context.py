@@ -40,7 +40,14 @@ class ContextCaps:
 
 
 def attach(ctx: moderngl.Context | None = None) -> tuple[moderngl.Context, ContextCaps]:
-    gl_ctx = ctx if ctx is not None else moderngl.create_context()
+    if ctx is None:
+        # Attach a fresh wrapper to the current EGL/GLX context. Once ModernGL's
+        # default cache is populated, create_context() falls back to GLX-only
+        # detection on Linux, breaking subsequent Wayland windows.
+        moderngl.init_context()
+        gl_ctx = moderngl.get_context()
+    else:
+        gl_ctx = ctx
     return gl_ctx, probe(gl_ctx)
 
 

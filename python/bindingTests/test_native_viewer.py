@@ -14,7 +14,7 @@ from PIL import Image
 from mojive import Renderer, RenderProduct, Scene, SceneRenderer
 from mojive.adapters.static import StaticSceneAdapter
 
-OUTPUT = Path("output/native-viewer")
+OUTPUT = Path(os.environ.get("MOJIVE_NATIVE_VIEWER_OUTPUT", "output/native-viewer"))
 
 
 @pytest.fixture(autouse=True)
@@ -226,16 +226,17 @@ def test_hundred_humanoid_viewer_physics_and_rendering():
         (OUTPUT / "acceptance.json").write_text(json.dumps(report, indent=2) + "\n")
 
 
-def test_shown_scaled_window_and_cjk(monkeypatch):
+@pytest.mark.parametrize("scale", [1.5, 2.5])
+def test_shown_scaled_window_and_cjk(monkeypatch, scale):
     from mojive.composition import build
 
     monkeypatch.setenv("MOJIVE_LANGUAGE", "zh")
-    monkeypatch.setenv("MOJIVE_UI_SCALE", "1.5")
+    monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
     with build(
         Path("assets/joint_gizmo.xml"),
         renderer="bgfx",
-        width=1000,
-        height=680,
+        width=round(1000 * scale),
+        height=round(680 * scale),
         vsync=False,
         show_window=True,
     ) as viewer:
@@ -245,9 +246,10 @@ def test_shown_scaled_window_and_cjk(monkeypatch):
         width, height = viewer.window.size_pixels
         assert rgb.shape == (height, width, 3)
         assert viewer.window.shown
-        assert viewer.window.ui_scale == pytest.approx(1.5 * viewer.window.pixel_scale)
-        Image.fromarray(rgb).save(OUTPUT / "scaled-cjk.png")
-        (OUTPUT / "display-scale.json").write_text(
+        assert viewer.window.ui_scale == pytest.approx(scale * viewer.window.pixel_scale)
+        suffix = "" if scale == 1.5 else f"-{scale}"
+        Image.fromarray(rgb).save(OUTPUT / f"scaled-cjk{suffix}.png")
+        (OUTPUT / f"display-scale{suffix}.json").write_text(
             json.dumps(
                 {
                     "pixels": [width, height],
@@ -305,11 +307,14 @@ def test_async_completion_can_close_the_last_renderer():
         fresh.render()
 
 
-def test_viewer_projection_and_colors_match_opengl_after_resize():
+def test_viewer_projection_and_colors_match_opengl_after_resize(monkeypatch):
     from mojive import CameraView
     from mojive.composition import build
     from mojive.ui import window as window_module
 
+    # Fixed-size projection comparisons need a fixed layout scale. Desktop DPI can
+    # otherwise force dock panels to their minimum sizes and alter their proportions.
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
     captures = {}
     for backend in ("opengl", "bgfx"):
         with build(
@@ -438,7 +443,7 @@ def test_vsync_controls_gpu_presentation_and_survives_peer_close():
         assert all(value == (False, 3) for value in _metal_presentation(a.window))
 
 
-@pytest.mark.parametrize(("requested", "effective"), [(0, 1), (3, 2), (24, 4)])
+@pytest.mark.parametrize(("requested", "effective"), [(0, 1), (3, 2), (8, 8), (24, 8)])
 def test_mujoco_sample_requests_use_portable_color_targets(requested, effective):
     import mujoco
 

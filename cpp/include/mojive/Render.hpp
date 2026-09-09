@@ -177,6 +177,12 @@ struct Image {
     // Tightly packed, top-left origin. Integer/float values use host byte order.
     std::vector<std::byte> pixels;
 };
+struct ImageView {
+    Product product = Product::Color;
+    Extent size;
+    // Writable, tightly packed storage with the same layout as Image.
+    std::span<std::byte> pixels;
+};
 struct Scene {
     uint64_t id = 0;
     bool operator==(const Scene &) const = default;
@@ -189,6 +195,27 @@ struct RenderRequest {
     bool color = true, sceneData = true;
     std::optional<Product> dataProduct;
 };
+enum class RenderPass {
+    Shadow,
+    Reflection,
+    Color,
+    SceneData,
+    Identity,
+    Outline,
+    Debug,
+    Gizmo,
+    Ui,
+    Count
+};
+constexpr std::array<const char *, size_t(RenderPass::Count)> renderPassNames = {
+    "shadow", "reflection", "color", "scene data", "identity", "outline", "debug", "gizmo", "ui"};
+struct PassTimings {
+    bool operator==(const PassTimings &) const = default;
+    std::array<double, size_t(RenderPass::Count)> cpuMs{}, gpuMs{};
+    uint32_t cpuMask = 0, gpuMask = 0;
+    // GPU samples arrive later; retain their original target submission identity.
+    uint64_t cpuSubmission = 0, gpuSubmission = 0;
+};
 struct FrameStats {
     bool operator==(const FrameStats &) const = default;
     uint64_t drawCalls = 0, instances = 0, uploadBytes = 0;
@@ -197,6 +224,7 @@ struct FrameStats {
     bool shadowRendered = false, shadowReused = false;
     uint64_t shadowInstances = 0, culledShadowInstances = 0;
     uint64_t culledInstances = 0;
+    PassTimings passes;
 };
 struct FrameToken {
     Target target;
@@ -237,10 +265,12 @@ struct UiFrame {
     std::span<const UiCommand> commands;
 };
 
+enum class WindowSystem { Native, Wayland };
 struct NativeWindow {
     void *handle = nullptr;
     void *display = nullptr;
     Extent size;
+    WindowSystem system = WindowSystem::Native;
 };
 
 // One owner thread drives a renderer. Scene, CPU output, and UI packet types do
@@ -299,7 +329,12 @@ class Renderer {
     // retain provenance; resize/reload/destroy cancel outstanding results safely.
     virtual ReadbackTicket readback(FrameToken, Product, Region = {}) = 0;
     virtual ReadbackResult poll(ReadbackTicket) = 0;
+    // Synchronous delivery into caller-owned storage; no reference survives return.
+    virtual ReadbackState readInto(FrameToken, ImageView, Region = {});
     virtual FrameStats advance() = 0;
+    virtual void reloadShaders() {
+        throw std::logic_error("Shader reload is unavailable");
+    }
     virtual Texture targetTexture(Target) const = 0;
     virtual Texture uploadTexture(Extent, std::span<const std::byte> rgba) = 0;
     virtual void destroy(Texture) = 0;

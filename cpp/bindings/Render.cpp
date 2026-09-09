@@ -114,6 +114,24 @@ void bindRender(nb::module_ &module) {
         .def_ro("frame", &ReadbackResult::frame)
         .def_prop_ro("image", &imageArray);
     nb::class_<FrameStats>(module, "FrameStats")
+        .def_prop_ro("cpu_ms",
+                     [](const FrameStats &s) {
+                         nb::dict result;
+                         for (size_t i = 0; i < renderPassNames.size(); ++i)
+                             if (s.passes.cpuMask & (1u << i))
+                                 result[renderPassNames[i]] = s.passes.cpuMs[i];
+                         return result;
+                     })
+        .def_prop_ro("gpu_pass_ms",
+                     [](const FrameStats &s) {
+                         nb::dict result;
+                         for (size_t i = 0; i < renderPassNames.size(); ++i)
+                             if (s.passes.gpuMask & (1u << i))
+                                 result[renderPassNames[i]] = s.passes.gpuMs[i];
+                         return result;
+                     })
+        .def_prop_ro("cpu_submission", [](const FrameStats &s) { return s.passes.cpuSubmission; })
+        .def_prop_ro("gpu_submission", [](const FrameStats &s) { return s.passes.gpuSubmission; })
         .def_ro("draw_calls", &FrameStats::drawCalls)
         .def_ro("instances", &FrameStats::instances)
         .def_ro("upload_bytes", &FrameStats::uploadBytes)
@@ -374,13 +392,20 @@ void bindRender(nb::module_ &module) {
     nb::class_<RenderRuntime>(module, "RenderRuntime")
         .def(
             "__init__",
-            [](RenderRuntime *self, std::string shaders, LogOptions options) {
+            [](RenderRuntime *self, std::string shaders, LogOptions options, bool wayland) {
                 nb::gil_scoped_release release;
                 new (self) RenderRuntime(
-                    [shaders = std::move(shaders)] { return makeBgfxRenderer({{}, shaders}); },
+                    [shaders = std::move(shaders), wayland] {
+                        BgfxOptions render;
+                        render.shaderDirectory = shaders;
+                        render.window.system =
+                            wayland ? WindowSystem::Wayland : WindowSystem::Native;
+                        return makeBgfxRenderer(render);
+                    },
                     options);
             },
-            nb::arg("shader_directory"), nb::arg("log_options") = LogOptions{})
+            nb::arg("shader_directory"), nb::arg("log_options") = LogOptions{},
+            nb::arg("wayland") = false)
         .def_prop_ro("capabilities", [](const RenderRuntime &r) { return r.capabilities(); })
         .def_prop_ro("log", &RenderRuntime::log, nb::rv_policy::reference_internal)
         .def_prop_ro("closed", &RenderRuntime::closed)
@@ -516,19 +541,48 @@ void bindRender(nb::module_ &module) {
             nb::arg("frame"), nb::arg("product"), nb::arg("region") = Region{})
         .def("read", &RenderRuntime::read, nb::arg("frame"), nb::arg("product"),
              nb::arg("region") = Region{}, nb::call_guard<nb::gil_scoped_release>())
+        .def(
+            "read_into",
+            [](RenderRuntime &r, FrameToken frame, Product product,
+               nb::ndarray<nb::numpy, nb::c_contig, nb::device::cpu> output, Region region) {
+                const auto type = product == Product::MetricDepth    ? nb::dtype<float>()
+                                  : product == Product::ObjectId     ? nb::dtype<uint32_t>()
+                                  : product == Product::Segmentation ? nb::dtype<int32_t>()
+                                                                     : nb::dtype<uint8_t>();
+                const size_t channels = product == Product::Color          ? 3
+                                        : product == Product::ColorAlpha   ? 4
+                                        : product == Product::Segmentation ? 2
+                                                                           : 1;
+                if (output.dtype() != type || output.ndim() != (channels == 1 ? 2 : 3) ||
+                    (channels != 1 && output.shape(2) != channels) ||
+                    output.shape(0) > UINT32_MAX || output.shape(1) > UINT32_MAX)
+                    throw std::invalid_argument(
+                        "Readback destination has the wrong shape or dtype");
+                ImageView destination{product,
+                                      {uint32_t(output.shape(1)), uint32_t(output.shape(0))},
+                                      {static_cast<std::byte *>(output.data()), output.nbytes()}};
+                nb::gil_scoped_release release;
+                return r.readInto(frame, destination, region);
+            },
+            nb::arg("frame"), nb::arg("product"), nb::arg("out").noconvert(),
+            nb::arg("region") = Region{})
         .def("poll", &RenderRuntime::poll, nb::call_guard<nb::gil_scoped_release>())
         .def("wait", &RenderRuntime::wait, nb::call_guard<nb::gil_scoped_release>())
         .def("advance", &RenderRuntime::advance, nb::call_guard<nb::gil_scoped_release>())
+        .def("reload_shaders", &RenderRuntime::reloadShaders,
+             nb::call_guard<nb::gil_scoped_release>())
         .def(
             "create_surface",
             [](RenderRuntime &r, uintptr_t handle, uint32_t width, uint32_t height,
-               uintptr_t display) {
+               uintptr_t display, bool wayland) {
                 nb::gil_scoped_release release;
                 return r.createSurface({reinterpret_cast<void *>(handle),
                                         reinterpret_cast<void *>(display),
-                                        {width, height}});
+                                        {width, height},
+                                        wayland ? WindowSystem::Wayland : WindowSystem::Native});
             },
-            nb::arg("handle"), nb::arg("width"), nb::arg("height"), nb::arg("display") = 0)
+            nb::arg("handle"), nb::arg("width"), nb::arg("height"), nb::arg("display") = 0,
+            nb::arg("wayland") = false)
         .def("set_vsync", &RenderRuntime::setVsync, nb::call_guard<nb::gil_scoped_release>())
         .def("target_texture", &RenderRuntime::targetTexture,
              nb::call_guard<nb::gil_scoped_release>())

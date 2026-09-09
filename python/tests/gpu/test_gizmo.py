@@ -156,7 +156,11 @@ class Rig:
 
 
 def _make_backend(backend_name: str, request, samples: int = 4):
-    """Build the backend selected by MOJIVE_BACKEND; GL stays lazy."""
+    """Build the backend selected by MOJIVE_RENDERER; GL stays lazy."""
+    if backend_name == "bgfx":
+        from mojive.render.native.backend import NativeBackend
+
+        return NativeBackend(W, H, samples=samples)
     if backend_name == "wgpu":
         from mojive.render.webgpu.backend import WgpuBackend
 

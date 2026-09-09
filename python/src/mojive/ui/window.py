@@ -124,7 +124,7 @@ def resolve_context_api(requested: str) -> str:
 
 
 def _load_window_deps() -> None:
-    global glfw, imgui, GlfwRenderer
+    global glfw, imgui
     if glfw is not None:
         return
     from imgui_bundle import imgui as _imgui
@@ -132,19 +132,26 @@ def _load_window_deps() -> None:
 
     _glfw_set_search_path()
     import glfw as _glfw
-    from imgui_bundle.python_backends.glfw_backend import GlfwRenderer as _GlfwRenderer
 
-    glfw, imgui, GlfwRenderer = _glfw, _imgui, _GlfwRenderer
+    glfw, imgui = _glfw, _imgui
 
 
-def _load_gl_deps() -> None:
-    global gl
+def _load_gl_deps(context_api: str) -> None:
+    global gl, GlfwRenderer
     _load_window_deps()
     if gl is not None:
         return
+    # Select PyOpenGL's loader after GLFW selects the actual window system.
+    # ImGui Bundle's older backend otherwise forces GLX in a Wayland session.
+    if sys.platform.startswith("linux"):
+        platform = (
+            "egl" if context_api == "egl" or glfw.get_platform() == glfw.PLATFORM_WAYLAND else "glx"
+        )
+        os.environ.setdefault("PYOPENGL_PLATFORM", platform)
+    from imgui_bundle.python_backends.glfw_backend import GlfwRenderer as _GlfwRenderer
     from OpenGL import GL as _gl
 
-    gl = _gl
+    gl, GlfwRenderer = _gl, _GlfwRenderer
 
 
 @dataclass
@@ -231,7 +238,7 @@ class WindowConfig:
 
 class Window:
     def __init__(self, config: WindowConfig | None = None) -> None:
-        _load_gl_deps()
+        _load_window_deps()
         self.config = config or WindowConfig()
         configured_scale = os.environ.get("MOJIVE_UI_SCALE")
         self._scale_override = float(configured_scale) if configured_scale else self.config.ui_scale
@@ -279,6 +286,7 @@ class Window:
         self._native_drop_token = 0
 
         glfw.make_context_current(self._window)
+        _load_gl_deps(self._context_api)
         self.set_vsync(self.config.vsync)
         log.info(
             "OpenGL {}.{} core context created with GLFW {}",
@@ -306,14 +314,12 @@ class Window:
         self._ini_existed = bool(ini) and Path(ini).exists()
         io.set_ini_filename(ini)
 
-        self._impl = GlfwRenderer(self._window)
-        # imgui_bundle still passes the deprecated GLFW window argument.
-        _install_glfw_clipboard_callbacks(glfw, imgui)
-        glfw.set_mouse_button_callback(self._window, self._on_mouse_button)
+        self._impl = GlfwRenderer(self._window, attach_callbacks=False)
+        self._input = GlfwInputAdapter(self._window)
         glfw.set_drop_callback(self._window, self._on_file_drop)
         self._native_drop_token = native_drop.install(glfw, self._window, self)
 
-        self._impl.process_inputs()
+        self._input.process_inputs()
         theme_mod.apply(imgui, ui_scale=self._style_scale)
         self._applied_style_scale = self._style_scale
         self._load_fonts(io)
@@ -321,9 +327,6 @@ class Window:
         self.dockspace_id = 0
         self._layout_done = False
         self.latch = ResizeLatch()
-
-    def _on_mouse_button(self, _window: Any, button: int, action: int, _mods: int) -> None:
-        add_physical_mouse_button_event(imgui.get_io(), button, action == glfw.PRESS)
 
     def _load_fonts(self, io) -> None:
         self._font_atlas_scale = self._style_scale
@@ -496,7 +499,7 @@ class Window:
         glfw.poll_events()
         self._refresh_scales()
         self._sync_style_scale()
-        self._impl.process_inputs()
+        self._input.process_inputs()
         # NewFrame may dismiss a popup. Its closing event still belongs to UI.
         self.popup_owned_frame = bool(self._imgui_context.open_popup_stack)
         imgui.new_frame()
@@ -647,28 +650,84 @@ class Window:
         self.close()
 
 
-class GlfwInputAdapter:
-    """imgui input translation over raw GLFW callbacks for a NO_API window.
+def _glfw_key_map() -> dict[int, Any]:
+    names = [
+        "tab",
+        "backspace",
+        "enter",
+        "escape",
+        "insert",
+        "delete",
+        "space",
+        "home",
+        "end",
+        "page_up",
+        "page_down",
+        "apostrophe",
+        "comma",
+        "minus",
+        "period",
+        "slash",
+        "semicolon",
+        "equal",
+        "left_bracket",
+        "backslash",
+        "right_bracket",
+        "grave_accent",
+        "caps_lock",
+        "scroll_lock",
+        "num_lock",
+        "print_screen",
+        "pause",
+        "menu",
+        "left_shift",
+        "right_shift",
+        "left_alt",
+        "right_alt",
+        "left_super",
+        "right_super",
+    ]
+    pairs = [(name.upper(), name) for name in names]
+    pairs += [(letter.upper(), letter) for letter in "abcdefghijklmnopqrstuvwxyz"]
+    pairs += [(str(i), f"_{i}") for i in range(10)]
+    pairs += [(f"F{i}", f"f{i}") for i in range(1, 25)]
+    pairs += [(f"KP_{i}", f"keypad{i}") for i in range(10)]
+    pairs += [
+        (f"KP_{name.upper()}", f"keypad_{name}")
+        for name in ("enter", "decimal", "divide", "multiply", "subtract", "add", "equal")
+    ]
+    pairs += [(name.upper(), f"{name}_arrow") for name in ("left", "right", "up", "down")]
+    pairs += [(f"{side.upper()}_CONTROL", f"{side}_ctrl") for side in ("left", "right")]
+    return {getattr(glfw, f"KEY_{key}"): getattr(imgui.Key, name) for key, name in pairs}
 
-    imgui_bundle's GlfwRenderer couples this input half with an OpenGL
-    renderer (its __init__ creates GL device objects), so it cannot serve a
-    window without a GL context.  This adapter reuses its key table and
-    mirrors its callbacks; ``process_inputs()`` plays the same role in
-    ``begin_frame()`` as GlfwRenderer's does for the GL window.
+
+class GlfwInputAdapter:
+    """Route GLFW events to their owning ImGui context for every renderer.
+
+    GLFW polls all windows together. Callbacks must use the owner's IO even
+    when another window's context is current, and must not create GL resources.
     """
 
     def __init__(self, window: Any) -> None:
         _load_window_deps()
         self.window = window
         self.io = imgui.get_io()
-        self.key_map: dict[Any, Any] = {}
-        GlfwRenderer._map_keys(self)  # fills key_map only; no GL involved
+        self._pressed_keys: set[int] = set()
+        self.key_map = _glfw_key_map()
+        self._modifiers = (
+            (glfw.KEY_LEFT_CONTROL, glfw.KEY_RIGHT_CONTROL, imgui.Key.mod_ctrl),
+            (glfw.KEY_LEFT_SHIFT, glfw.KEY_RIGHT_SHIFT, imgui.Key.mod_shift),
+            (glfw.KEY_LEFT_ALT, glfw.KEY_RIGHT_ALT, imgui.Key.mod_alt),
+            (glfw.KEY_LEFT_SUPER, glfw.KEY_RIGHT_SUPER, imgui.Key.mod_super),
+        )
 
         glfw.set_key_callback(window, self.keyboard_callback)
         glfw.set_cursor_pos_callback(window, self.mouse_callback)
         glfw.set_mouse_button_callback(window, self.mouse_button_callback)
         glfw.set_char_callback(window, self.char_callback)
         glfw.set_scroll_callback(window, self.scroll_callback)
+        glfw.set_window_focus_callback(window, self.focus_callback)
+        glfw.set_cursor_enter_callback(window, self.cursor_enter_callback)
 
         _install_glfw_clipboard_callbacks(glfw, imgui)
         self._gui_time = None
@@ -681,28 +740,35 @@ class GlfwInputAdapter:
             return
         imgui_key = self.key_map[glfw_key]
         down = action != glfw.RELEASE
+        if down:
+            self._pressed_keys.add(glfw_key)
+        else:
+            self._pressed_keys.discard(glfw_key)
         io.add_key_event(imgui_key, down)
 
-        # Handle modifiers, since ImGui has an additional mod_ctrl / shift / etc
-        if imgui_key == imgui.Key.left_ctrl or imgui_key == imgui.Key.right_ctrl:
-            io.add_key_event(imgui.Key.mod_ctrl, down)
-        if imgui_key == imgui.Key.left_shift or imgui_key == imgui.Key.right_shift:
-            io.add_key_event(imgui.Key.mod_shift, down)
-        if imgui_key == imgui.Key.left_alt or imgui_key == imgui.Key.right_alt:
-            io.add_key_event(imgui.Key.mod_alt, down)
-        if imgui_key == imgui.Key.left_super or imgui_key == imgui.Key.right_super:
-            io.add_key_event(imgui.Key.mod_super, down)
+        # Releasing one side must preserve a modifier held on the other side.
+        for left, right, modifier in self._modifiers:
+            if glfw_key in (left, right):
+                io.add_key_event(modifier, bool(self._pressed_keys.intersection((left, right))))
 
     def char_callback(self, window: Any, char: int) -> None:
-        if 0 < char < 0x10000:
+        if 0 < char <= 0x10FFFF and not 0xD800 <= char <= 0xDFFF:
             self.io.add_input_character(char)
 
     def mouse_callback(self, *args: Any, **kwargs: Any) -> None:
-        if glfw.get_window_attrib(self.window, glfw.FOCUSED):
-            mouse_pos = glfw.get_cursor_pos(self.window)
-            self.io.add_mouse_pos_event(mouse_pos[0], mouse_pos[1])
+        mouse_pos = glfw.get_cursor_pos(self.window)
+        self.io.add_mouse_pos_event(mouse_pos[0], mouse_pos[1])
+
+    def cursor_enter_callback(self, window: Any, entered: bool) -> None:
+        if entered:
+            self.mouse_callback()
         else:
-            self.io.add_mouse_pos_event(-1, -1)
+            self.io.add_mouse_pos_event(-3.4028235e38, -3.4028235e38)
+
+    def focus_callback(self, window: Any, focused: bool) -> None:
+        if not focused:
+            self._pressed_keys.clear()
+        self.io.add_focus_event(bool(focused))
 
     def mouse_button_callback(self, window: Any, button: int, action: int, mods: int) -> None:
         add_physical_mouse_button_event(self.io, button, action == glfw.PRESS)

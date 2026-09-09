@@ -72,8 +72,15 @@ class LightingUniforms {
     void prepare(const Lighting &light) {
         for (size_t i = 0; i < light.lights.size(); ++i) {
             const auto &l = light.lights[i];
+            const double length =
+                std::hypot(double(l.direction[0]), double(l.direction[1]), double(l.direction[2]));
+            const std::array<float, 3> direction =
+                length > 1e-9 ? std::array<float, 3>{float(l.direction[0] / length),
+                                                     float(l.direction[1] / length),
+                                                     float(l.direction[2] / length)}
+                              : std::array<float, 3>{0, 0, -1};
             mLights[0][i] = {l.position[0], l.position[1], l.position[2], float(l.type)};
-            mLights[1][i] = {l.direction[0], l.direction[1], l.direction[2],
+            mLights[1][i] = {direction[0], direction[1], direction[2],
                              std::cos(std::clamp(l.cutoff, 0.f, 180.f) * 0.017453292519943295f)};
             mLights[2][i] = {linear(l.diffuse[0]), linear(l.diffuse[1]), linear(l.diffuse[2]),
                              l.exponent};

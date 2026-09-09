@@ -36,7 +36,7 @@ def test_corner_sliders_update_independently_and_keep_fractional_values(monkeypa
     try:
         probe._apply_concept_theme(window.style_scale)
         state = probe.ProbeState(page="Geometry", geometry_tab="Corners")
-        process_inputs = window._impl.process_inputs
+        process_inputs = window._input.process_inputs
         queued = []
 
         def inputs():
@@ -46,7 +46,7 @@ def test_corner_sliders_update_independently_and_keep_fractional_values(monkeypa
                 imgui.get_io().add_mouse_button_event(0, pressed)
             queued.clear()
 
-        monkeypatch.setattr(window._impl, "process_inputs", inputs)
+        monkeypatch.setattr(window._input, "process_inputs", inputs)
 
         def frame():
             window.begin_frame()

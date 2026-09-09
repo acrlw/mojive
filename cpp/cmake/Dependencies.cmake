@@ -55,6 +55,8 @@ if(MOJIVE_BUILD_BGFX)
     set(BGFX_CONFIG_RENDERER_WEBGPU OFF CACHE BOOL "" FORCE)
     set(BGFX_CONFIG_VIDEO OFF CACHE BOOL "" FORCE)
     set(BGFX_CONFIG_MULTITHREADED ON CACHE BOOL "" FORCE)
+    # This switch selects bgfx's OpenGL EGL platform. Vulkan compiles both
+    # surface implementations and selects X11/Wayland from PlatformData at runtime.
     set(BGFX_WITH_WAYLAND OFF CACHE BOOL "" FORCE)
     add_subdirectory("${bgfx_cmake_SOURCE_DIR}" "${bgfx_cmake_BINARY_DIR}" EXCLUDE_FROM_ALL)
     target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_RENDERER_WEBGPU=0)
@@ -65,6 +67,7 @@ if(MOJIVE_BUILD_BGFX)
         target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_RENDERER_DIRECT3D12=1)
     else()
         target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_RENDERER_VULKAN=1)
+        include("${CMAKE_CURRENT_LIST_DIR}/VulkanHeadless.cmake")
     endif()
 
     # The upstream shaderc target unconditionally links Tint/Dawn. Build the same
@@ -76,6 +79,13 @@ if(MOJIVE_BUILD_BGFX)
     add_executable(mojive_shaderc ${shaderc_sources})
     target_compile_definitions(mojive_shaderc PRIVATE SHADERC_CONFIG_HAS_TINT=0)
     target_link_libraries(mojive_shaderc PRIVATE bx bimg bgfx-vertexlayout glslang spirv-opt spirv-cross)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Match upstream shaderc's headers for its Linux DXC support.
+        target_include_directories(mojive_shaderc PRIVATE
+            "${BGFX_DIR}/3rdparty/directx-headers/include/directx"
+            "${BGFX_DIR}/3rdparty/directx-headers/include"
+            "${BGFX_DIR}/3rdparty/directx-headers/include/wsl/stubs")
+    endif()
 
 endif()
 if(MOJIVE_BUILD_BGFX OR MOJIVE_BUILD_SDL)
@@ -86,10 +96,14 @@ if(MOJIVE_BUILD_BGFX OR MOJIVE_BUILD_SDL)
     set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
     if(UNIX AND NOT APPLE)
-        set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
         set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
     endif()
     add_subdirectory("${glfw_SOURCE_DIR}" "${glfw_BINARY_DIR}" EXCLUDE_FROM_ALL)
+    if(UNIX AND NOT APPLE)
+        include("${CMAKE_CURRENT_LIST_DIR}/GlfwX11.cmake")
+        include("${CMAKE_CURRENT_LIST_DIR}/GlfwWayland.cmake")
+    endif()
     add_library(mojive_imgui STATIC
         "${imgui_SOURCE_DIR}/imgui.cpp" "${imgui_SOURCE_DIR}/imgui_draw.cpp"
         "${imgui_SOURCE_DIR}/imgui_widgets.cpp" "${imgui_SOURCE_DIR}/imgui_tables.cpp"

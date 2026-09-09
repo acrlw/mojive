@@ -200,8 +200,14 @@ ReadbackTicket RenderRuntime::readback(FrameToken frame, Product product, Region
 ReadbackResult RenderRuntime::poll(ReadbackTicket ticket) {
     return mImpl->invoke([&](Renderer &r) { return r.poll(ticket); });
 }
+ReadbackState RenderRuntime::readInto(FrameToken frame, ImageView destination, Region region) {
+    return mImpl->invoke([&](Renderer &r) { return r.readInto(frame, destination, region); });
+}
 FrameStats RenderRuntime::advance() {
     return mImpl->invoke([&](Renderer &r) { return r.advance(); });
+}
+void RenderRuntime::reloadShaders() {
+    mImpl->invoke([](Renderer &r) { r.reloadShaders(); });
 }
 Texture RenderRuntime::targetTexture(Target target) const {
     return mImpl->invoke([&](Renderer &r) { return r.targetTexture(target); });

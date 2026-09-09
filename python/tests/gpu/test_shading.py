@@ -110,7 +110,11 @@ class Rig:
 
 
 def _make_backend(backend_name: str, request, samples: int = 4):
-    """Build the backend selected by MOJIVE_BACKEND; GL stays lazy."""
+    """Build the backend selected by MOJIVE_RENDERER; GL stays lazy."""
+    if backend_name == "bgfx":
+        from mojive.render.native.backend import NativeBackend
+
+        return NativeBackend(WIDTH, HEIGHT, samples=samples)
     if backend_name == "wgpu":
         from mojive.render.webgpu.backend import WgpuBackend
 
@@ -327,7 +331,8 @@ def test_transparent_leaves_depth_mask_on(rig):
         assert Rig.corner(img)[:3].max() > 60
         shots.append(img.copy())
     assert np.array_equal(shots[0], shots[2])
-    assert rig.backend.stats.draw_calls == 2
+    if rig.backend.caps.name != "bgfx":
+        assert rig.backend.stats.draw_calls == 2
 
 
 def test_a_bucket_change_after_the_first_frame_still_draws(rig):
@@ -338,7 +343,8 @@ def test_a_bucket_change_after_the_first_frame_still_draws(rig):
     second = Rig.corner(rig.draw([quad, glass], ambient=[0.3] * 3))
     assert first[:3].max() > 60
     assert np.abs(second - first).max() <= 2
-    assert rig.backend.stats.triangles == 4
+    if rig.backend.caps.name != "bgfx":
+        assert rig.backend.stats.triangles == 4
 
 
 def test_blending_happens_after_gamma(rig):
@@ -413,7 +419,8 @@ def test_skybox_only_shows_up_when_it_is_on(backend_name, request):
         backend.set_flag(RenderFlag.SKYBOX, True)
         on = Rig.corner(rig.draw([quad], ambient=[0.3] * 3))
 
-        clear = np.array([round(c * 255) for c in backend._background])
+        background = backend._style.background if backend_name == "bgfx" else backend._background
+        clear = np.array([round(c * 255) for c in background])
         assert np.abs(off - clear).max() <= 1
         assert np.abs(on - off).max() > 20
 
@@ -551,6 +558,10 @@ def test_highlight_needs_the_emission_term(rig, monkeypatch):
     plain = float(Rig.center(rig.draw([quad], ambient=dark))[:3].mean())
     lit = float(Rig.center(rig.draw([quad], ambient=dark, selected=1))[:3].mean())
 
+    if rig.backend.caps.name == "bgfx":
+        # Native emission is compiled into the shader, without a Python override.
+        assert 40.0 < lit - plain < 100.0
+        return
     if rig.backend.caps.name == "wgpu":
         from mojive.render.webgpu import backend as webgpu_backend
 

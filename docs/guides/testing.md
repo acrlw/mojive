@@ -13,17 +13,19 @@ matrix; other agent guidance links here.
 | Physics | `make test-physics` | model compilation and live physics worlds |
 | OpenGL GPU | `make gpu` | real OpenGL contexts and rendered output |
 | WebGPU | `make gpu-wgpu` | Metal, Vulkan, or DX12 backend behavior |
+| Native bgfx GPU | `make gpu-bgfx` | shared renderer, interaction, capture and UI contracts with the native backend |
 | Native probe | `make native-test`, `make native-probe` | optional C++ contracts and real GPU output/lifetime checks; choose `NATIVE_BACKEND=sdl` for SDL GPU |
 | Native composition and lifecycle | `make native-composition`, `make native-windows` | texture dependencies, alpha/scissor output, repeated native surface lifecycle |
 | Native live runtime | `make native-runtime` | native MuJoCo serial/parallel comparison with bounded output queues |
 | Private native runtime | `make cpp-python-test`, `make cpp-python-gpu` | native logging, GLM compatibility, NumPy ownership, real GPU products and runtime teardown |
 | Native Viewer | `make native-viewer-test HUMANOIDS_MODEL=/path/to/100_humanoids.xml` | public Python products, independent scenes, asynchronous readback, window lifecycle and advancing dense physics |
+| Native Wayland input | `make native-wayland-test` | isolated compositor presentation, native pointer/keyboard events, focus, clipboard transfers, and external file drops across bgfx, OpenGL, and wgpu |
 | Native render parity | `make native-parity`, `make native-model-parity HUMANOIDS_MODEL=/path/to/100_humanoids.xml` | matched OpenGL/wgpu/bgfx color, depth, identity, feature effects, deformable updates and pose restoration |
 | Native motion and corpus | `make native-motion-parity`, `make native-corpus-parity MENAGERIE_ROOT=/path/to/mujoco_menagerie` | continuous close panning/orbit/zoom, object color checks, all local model loads and eight-view comparisons |
 | Native UI parity | `make native-ui-parity` | fractional axis-label motion, CJK/Latin atlas filtering and ImGui antialiasing at normal and 150% scale |
 | Native load latency | `make native-load-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie` | isolated model processes, source/resource/first-frame timings and repeated loads against OpenGL |
 | Native window cadence | `make native-window-benchmark` | real-window pan/orbit/dolly timing with VSync on/off and same-frame camera publication; run separately from other checks |
-| Native feature lifecycle | `make native-features-test` | cache invalidation, camera capture, pending readbacks and resource reuse |
+| Native feature lifecycle | `make native-features-test` | cache invalidation, frame-owned depth, light fallback, 8x color MSAA, delayed pass timing, shader reload recovery, pending readbacks and resource reuse |
 | Native distribution | `make native-spirv`, `make native-wheel-test` | Vulkan shader compilation and installed platform wheel rendering without development paths |
 | Native bindings | `make native-bindings-test` | isolated pybind11/nanobind behavior, MuJoCo coexistence, ownership, and GIL release |
 | Golden | `make golden` | reviewed image baselines |
@@ -114,6 +116,52 @@ galleries, or videos in the final response and briefly explain what they demonst
 useful before/after view or final result over a list of every diagnostic file. Show an image inline
 when useful. Sharing these results lets the user inspect the work without making their review a
 completion gate.
+
+## Isolated Wayland acceptance on Linux
+
+For a visible desktop you can operate with your own mouse and keyboard, run:
+
+```bash
+make native-wayland-viewer
+make native-wayland-viewer ARGS='--renderer opengl'
+MOJIVE_UI_SCALE=2.5 make native-wayland-viewer SCENE=joint_gizmo
+```
+
+This opens a nested Weston desktop window on the current X11 or Wayland desktop. Mojive inside
+it uses native Wayland. Move, resize, or maximize the Mojive window using its title bar, then
+exercise its viewport and controls normally. The default renderer is bgfx; `--renderer wgpu`
+is also available. Desktop dimensions can be set with `ARGS='--width 1920 --height 1200'`;
+flags after `--` are forwarded to `mojive view`. Close Mojive, close Weston, or press Ctrl+C
+in the launching terminal to stop both. Settings are isolated for each launch; logs remain in
+`output/native-wayland-viewer/`. This target intentionally opens a visible window only when
+invoked; automated agent checks should continue using the headless target below.
+
+On Ubuntu 22.04, `make native-wayland-test` prepares a private Weston 9 environment under
+`output/wayland-runtime/`. It downloads and extracts distribution packages without installing
+them system-wide. Preparation requires `curl`; compilation requires a C compiler, `pkg-config`, and the existing Wayland,
+Pixman, and xkbcommon development headers. A headless EGL compositor owns a virtual input seat;
+the viewer still receives real `wl_pointer`, `wl_keyboard`, and `wl_data_device` events.
+No window, input handle, or display connection is attached to the user's desktop.
+
+The target runs bgfx, OpenGL, and wgpu in separate processes. It checks picking, camera drag and
+zoom, pause shortcuts, paired modifier keys, focus loss, input ownership across ImGui contexts,
+simultaneous windows and peer closure,
+external Unicode clipboard transfers, and dragging a model from a path containing spaces and
+Chinese characters. Compositor captures are compared with the application's window image, so
+a valid offscreen frame with a blank presented window does not pass. Logs, JUnit results, and
+paired captures are saved to `output/native-wayland/`.
+
+Use `ARGS="--renderer bgfx"` for focused iteration, or provide `--weston-prefix /path/to/usr`
+and `--weston-source /path/to/weston-9.0.0` to reuse a matching installation. The test module uses
+Weston 9's internal backend ABI and is loaded only into the owned compositor. Input control uses
+inherited private sockets; compositor and helper processes are stopped when the run finishes.
+
+This environment validates the actual GPU when its EGL/Wayland driver supports the compositor.
+It does not measure monitor scanout latency or validate GNOME/KDE integration, input methods,
+mixed-DPI monitors, or desktop decorations. Weston 9's kiosk shell and libdecor 0.1 offset client
+content by the shadow margin; the input driver measures that offset and compares the overlapping
+visible image. A nested Weston running inside Xvfb instead uses software composition and may
+require Mesa's software Vulkan ICD; it is not a substitute for GPU performance measurements.
 
 ## Renderer performance
 

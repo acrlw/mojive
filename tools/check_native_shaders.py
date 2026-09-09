@@ -11,7 +11,7 @@ def main():
     args = parser.parse_args()
     output = args.build / "shaders-spirv"
     output.mkdir(parents=True, exist_ok=True)
-    shaders = sorted(Path("cpp/shaders").glob("[vf]s_*.sc"))
+    shaders = sorted(Path("cpp/shaders").glob("[vcf]s_*.sc"))
     for source in shaders:
         subprocess.run(
             [
@@ -21,7 +21,7 @@ def main():
                 "-o",
                 str(output / (source.stem + ".bin")),
                 "--type",
-                "vertex" if source.stem.startswith("vs_") else "fragment",
+                {"vs": "vertex", "fs": "fragment", "cs": "compute"}[source.stem[:2]],
                 "--platform",
                 "linux",
                 "-p",
