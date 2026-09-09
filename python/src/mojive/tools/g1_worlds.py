@@ -132,6 +132,22 @@ class Dance:
         return self.worlds.frame(FrameNeeds())
 
 
+def scene_camera(dance, mode):
+    """Keep overview throughput distinct from a close inspection of the same worlds."""
+    from mojive import CameraView
+
+    if mode == "overview":
+        return dance.worlds.camera_hint()
+    offsets = dance.worlds.offsets
+    center = offsets[np.argmin(np.linalg.norm(offsets, axis=1))] + np.array([0, 0, 0.8])
+    return CameraView(
+        eye=center + np.array([3, -4, 2.5]),
+        target=center,
+        near=0.01,
+        far=dance.worlds.camera_hint().far,
+    )
+
+
 def distribution(values):
     return {
         name: float(np.percentile(values, p))
@@ -184,6 +200,7 @@ def worker(args):
         ),
         "prepare_s": prepared - started,
         "mode": "independent kinematic replay",
+        "camera": args.camera,
         "mesh_ratio_requested": args.mesh_ratio,
         "mesh_error_limit": args.mesh_error,
         "mesh_error_max": max(lod_errors, default=0),
@@ -194,7 +211,7 @@ def worker(args):
         height=args.height,
         renderer=args.worker,
         samples=args.samples,
-        camera=dance.worlds.camera_hint(),
+        camera=scene_camera(dance, args.camera),
     ) as renderer:
         uploaded = time.perf_counter()
         result["renderer_setup_s"] = uploaded - prepared
@@ -216,12 +233,16 @@ def worker(args):
                     target=center,
                     far=max(50, distance * 4),
                 )
+                if args.camera == "detail":
+                    camera = scene_camera(dance, args.camera)
                 renderer.update(frame, camera=camera)
                 captures = {
                     product.name: renderer.render(product=product) for product in RenderProduct
                 }
                 visible = np.unique(captures[RenderProduct.OBJECT_ID.name])
-                if len(visible[visible > 0]) != args.count:
+                if not np.any(visible > 0):
+                    raise AssertionError("Camera must show at least one dance world")
+                if args.camera == "overview" and len(visible[visible > 0]) != args.count:
                     raise AssertionError(f"Camera does not show all {args.count} worlds: {visible}")
                 np.savez_compressed(args.output / f"capture-{t}.npz", **captures)
                 Image.fromarray(captures[RenderProduct.COLOR.name]).save(
@@ -258,6 +279,7 @@ def worker(args):
                 result["instance_upload_bytes_last"] = stats.upload_bytes
                 result["shadow_instances"] = stats.shadow_instances
                 result["culled_shadow_instances"] = stats.culled_shadow_instances
+                result["culled_instances"] = stats.culled_instances
         rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         result["peak_rss_bytes"] = rss if sys.platform == "darwin" else rss * 1024
     (args.output / "report.json").write_text(json.dumps(result, indent=2) + "\n")
@@ -312,6 +334,7 @@ def show(args):
         samples=args.samples,
         title=f"G1 dance · {args.count} independent worlds",
     ) as viewer:
+        viewer.app.camera.adopt(scene_camera(dance, args.camera))
         started = time.perf_counter()
         while viewer.is_running():
             dance.update(time.perf_counter() - started)
@@ -521,6 +544,12 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("output/g1-worlds"))
     parser.add_argument("--counts", type=int, nargs="+", default=[1024, 2048, 4096])
     parser.add_argument("--parity-counts", type=int, nargs="+", default=[1, 4, 16])
+    parser.add_argument(
+        "--camera",
+        choices=("overview", "detail"),
+        default="overview",
+        help="Camera for local rendering and viewer; detail keeps all worlds loaded",
+    )
     parser.add_argument("--spacing", type=float, default=7.0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--width", type=int, default=1280)
@@ -545,6 +574,8 @@ def main():
     parser.add_argument("--publish", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--port", type=int, default=49100, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.camera != "overview" and (args.monitor or args.publish or args.transport_only):
+        parser.error("The detail camera applies to local rendering and viewer modes")
     if args.frames < 1 or args.warmup < 0 or args.duration < 0 or args.receive_hz <= 0:
         parser.error("Frame counts, duration, and receive rate must be valid")
     if args.view:
@@ -598,6 +629,7 @@ def main():
                     "warmup",
                     "mesh-ratio",
                     "mesh-error",
+                    "camera",
                 ):
                     command += [f"--{key}", str(getattr(args, key.replace("-", "_")))]
                 if capture:

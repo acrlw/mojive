@@ -1,6 +1,8 @@
 # 原生渲染完整性与 parity 验收
 
-本轮在 `codex/cpp-foundation` 修复并验证 Python Viewer 使用的 C++ / bgfx 后端，已同步 `origin/main` 的 `b4887d7`（本地合并提交 `c2260c8`），包含跟踪坐标轴、时间线和 take 视频等更新。可以用 `make native-viewer` 启动。加载、编辑器交互和大部分图像输出已改善，但可见窗口无同步呈现仍有长帧，部分同步深度读回仍慢于 OpenGL，尚未达到所有路径都不慢于 OpenGL 的要求。Linux、Windows 和 120 Hz 实际呈现尚未完成设备验收。本轮没有启动 workflow CI，也没有合并到 main。
+本轮继续在 `codex/cpp-foundation` 完成原生同步读回、可见性剔除和窗口呈现优化，并重新检查历史 UI／交互反馈。已同步 `origin/main` 的 `b4887d7`（合并提交 `c2260c8`）；可以用 `make native-viewer` 或 `make native-editor` 启动，Python API 保持兼容。
+
+最终同步 Renderer 矩阵的 63 组成对测例中，bgfx 全部快于 OpenGL；RGB／深度／分割的耗时中位比分别为 0.523／0.543／0.481。功能、模型语料及连续运动对照通过。窗口吞吐已改善，但大视口呈现的 P95 仍高于 OpenGL，模型重编译仍可能产生几十毫秒长帧，4096 份原始 G1 几何仍不是实时工作负载。因此不能宣称所有路径都更快或所有设备都已验收。Linux、Windows 和真实 120 Hz 呈现仍需要对应设备；未启动 CI、未合并 main。
 
 ## 本轮修复的具体问题
 
@@ -9,7 +11,7 @@
 | 近景方块侧面条纹、平移闪烁，球面出现斜切暗区 | 阴影 shader 手动读取矩阵下标，经 HLSL／Metal 编译后取错深度轴，导致背光判断和 slope bias 错误。改为基向量乘矩阵，统一数学含义，并检查编译后的 Metal shader。 |
 | 实际 Viewer 与离屏对照的构图、形状不同 | Viewer 的相机默认 aspect 为 1，原生 backend 没有按目标尺寸修正。现在由目标统一计算投影，resize 同步更新，并新增真实 Viewer 宽／窄／恢复对照。 |
 | 空背景颜色不一致 | C++ 默认背景及 8-bit clear 转换与 OpenGL 不同；统一背景和舍入。材质、光照和色彩空间继续通过分对象对照检查。 |
-| 开了 VSync 仍可能撕裂，拖动排队感明显 | 原实现只在 CPU sleep，未启用 GPU 呈现同步。现在 VSync 直接传递到 GPU；删除软件刷新率缓存和 sleep，把 bgfx 提交队列限制为一帧、呈现表面保留两个 drawable。 |
+| 开了 VSync 仍可能撕裂，拖动排队感明显 | 原实现只在 CPU sleep，未启用 GPU 呈现同步。现在 VSync 直接传递到 GPU；删除软件刷新率缓存和 sleep，删除第二层 CPU 帧队列，GPU 最多两帧在途；Metal 同步呈现保留两个 drawable，关闭 VSync 时提供第三张备用图像，缓解合成器占用造成的等待。 |
 | 部分 Menagerie 文件因采样数加载失败 | 模型可请求 24 samples。Python 后端把颜色采样请求向下取可移植的 1×／2×／4×，不再因非标准或过大的请求退出。 |
 | 关闭 MSAA 开关仍然抗锯齿 | Metal 按 attachment 的采样数工作，单改 draw state 不够。切换时替换颜色目标，保持尺寸、恢复行为和已提交读回的有效性。 |
 | 全透明碰撞几何在分割图中消失 | 颜色可见性判断误用于语义输出。明确请求透明身份时包含 alpha=0 几何，颜色仍保持不可见。 |
@@ -23,6 +25,8 @@
 | 加载期间 RPC 可能访问正在修改的 Session | 把 RPC pump 放在后台编辑／加载完成检查之后，防止第二个访问入口读取中间状态。 |
 | 相机预览阴影与主视口不一致 | peer 没有继承和跟踪主视口阴影质量。创建时及每次预览更新都同步质量。 |
 | 原生同步读回及实例提交开销偏高 | 逐 draw 的 Metal staging 上传合并为按布局上传；按请求仅绘制所需数据附件；分割改为一个无损附件；NumPy 保留完成结果的所有权，避免再复制一次。无变化且无独立 overlay 时复用颜色／数据输出，并验证姿态、光照、相机、开关和 resize 失效。 |
+| 深度读回仍慢于 OpenGL | 使用 bgfx 对齐 buffer 读回，合并提交／等待为一个 owner job；MSAA 颜色先保留 resolve 结果。去掉 Metal staging texture 到 CPU 的转换，保持 ROI、精度和数组所有权。 |
+| 大场景近景仍绘制大量看不见的物体 | 颜色、语义和镜面相机分别保守剔除视锥外实例，阴影继续使用独立光源视锥。姿态、动态 mesh 和负缩放更新包围盒，不删除潜在阴影投射者。 |
 
 地板上的彩色倒影属于模型启用的平面反射，OpenGL 中也存在；本轮没有通过关闭阴影或反射来掩盖错误。所有对照使用相同模型、相机、尺寸、颜色模型及显式功能开关。
 
@@ -39,29 +43,33 @@ Python 公共 API 和行主序契约保持兼容；C++ 仍是渲染和资源基�
 
 ## 验收结果与可复现入口
 
-诊断保存在 `output/native-ui-audit/`。下面列出当前功能验收和对应证据；性能表另外标注采集阶段。
+本轮新证据位于 `output/native-refinement/`；前一阶段未受本轮修改影响的专项检查
+保留在 `output/native-ui-audit/`，在表中明确标注。性能结果使用 delivery 报告，
+中间实验不覆盖、不冒充最终结果。
 
-| 验收 | 结果与证据目录 |
+| 验收 | 结果与证据 |
 |---|---|
 | `make check` | 1,694 fast、146 integration，分层、静态检查和示例通过；`check-final.log` |
-| `make gpu`、`make gpu-wgpu` | OpenGL 443 通过／17 跳过，wgpu 360 通过／8 跳过；`gpu-opengl-latest.log`、`gpu-wgpu-latest.log` |
-| bgfx GPU 回归 | 390 通过／70 跳过；`gpu-native-final.log`。部分文件显式使用 OpenGL，跳过项包括专属其他后端的行为。 |
-| 输入映射与 UI | 三后端各 118 项通过；`pointer-final-native.log`、`pointer-final-opengl.log`、`pointer-final-wgpu.log`。 |
-| 控制与真实 Viewer 接入 | `agent-control-final.log`、`agent-viewer-final.log` 通过。 |
-| main 新功能 | 跟踪坐标轴、录制及 UI 交互 33 项通过；`main-features.log` |
-| Physics、MuJoCo audit、adapter conformance | 420 项通过、2 项跳过，audit／conformance 通过；`physics-latest.log`、`mujoco-audit-latest.log`、`conformance-latest.log` |
-| C++ CPU contracts | 5 项 CTest 通过，包含 mipmap、负缩放包围盒和保守视锥判定；`culling-build.log` |
-| 私有原生 contracts、render、feature、完整 Viewer | 39 项通过，包括 100 humanoid、关闭时未完成读回、回调关闭、移动阴影投射者和网格简化；`private-final.log` |
-| `make native-parity` | 96 组功能对照通过，含功能开启必须有实际可见贡献；`parity-culling/` |
-| `make native-model-parity` | 16 组刚体、skin、flex、100 humanoid 动态／恢复对照通过；`model-parity-culling/` |
-| `make native-motion-parity` | 204 对连续近景平移／环绕／缩放通过；`motion-culling/` |
-| `make native-ui-parity` | 100%／150% UI 的 318 对窗口图像；label 最大相对误差低于 0.000008 逻辑像素，颜色 P99 差为 0；`ui-complete/` |
-| `make native-corpus-parity` | 251 个模型 × 8 个视角，18 个空文档，26 个非独立片段；没有未通过的模型／视角；`corpus/` |
-| Vulkan shader | 43 个 shader 编译为 SPIR-V；`spirv-complete.log` |
-| 独立平台 wheel | 安装后移除开发环境变量，实际渲染并检查依赖许可证；`wheel-final.log` |
-| nanobind／pybind 共存 | 13 项通过，包含 MuJoCo 导入顺序、GIL 和数组寿命；`binding-complete.log` |
+| `make gpu`、`make gpu-wgpu` | OpenGL 443 通过／17 跳过，wgpu 360 通过／8 跳过；`gpu-opengl.log`、`gpu-wgpu.log` |
+| 最终 bgfx GPU 回归 | 390 通过／70 跳过；`gpu-delivery-isolated.log`。按仓库要求逐文件隔离；部分文件显式使用 OpenGL。 |
+| 私有原生 contracts、render、feature、完整 Viewer | 41 项通过，包含 100 humanoid、ROI 行对齐、并发 ticket、MSAA、数组／目标寿命、VSync 与实际 drawable 数量；`private-final.log` |
+| C++ CPU contracts | 5 项 CTest 通过，包含负缩放包围盒和保守视锥判定；`ctest.log` |
+| 原生 GPU probe | 最终构建通过；`probe-delivery.log` 和 `probe-delivery/` |
+| `make native-parity` | 96 组功能对照通过，含功能开启的实际可见贡献；`parity/` |
+| `make native-model-parity` | 16 组刚体、skin、flex、100 humanoid 动态／恢复对照通过；`models/` |
+| `make native-motion-parity` | 204 对连续近景平移／环绕／缩放通过；`motion/` |
+| `make native-ui-parity` | 最终 318 对窗口图像、100%／150% UI；label 相对误差低于 0.000008 逻辑像素，颜色 P99 差为 0；`ui-delivery/` |
+| 响应式 UI 清单 | 112 组中英文／窄宽／缩放布局检查；`layout/`；已查看历史问题对应代表图 |
+| `make native-corpus-parity` | 251 个模型 × 8 个视角，18 个空文档，26 个非独立片段；没有未通过的可绘制模型／视角；`corpus/` |
+| 真实 Viewer 接入 | `agent-viewer.log` 通过 |
+| nanobind／pybind 共存 | 13 项通过，包含 MuJoCo 导入顺序、GIL 和数组寿命；`bindings-final.log` |
+| 独立平台 wheel | 最终构建安装后去除开发路径并用 `python -I` 实际渲染、检查依赖许可证；`wheel-delivery.log`、`output/native-wheel/installed.json` |
+| Physics、MuJoCo audit、adapter conformance | 前阶段 420 项通过／2 跳过，audit／conformance 通过；`output/native-ui-audit/physics-latest.log` 等，本轮不修改物理实现 |
+| Vulkan shader | 前阶段 43 个 shader 编译为 SPIR-V；`output/native-ui-audit/spirv-complete.log`，本轮不修改 shader；不能替代 Vulkan 设备测试 |
 
-最新全集对照位于 `output/native-ui-audit/corpus/`，已检查全部 14 张总览图。共 2,008 个有物体视角，加上 144 个空场景背景视角，按当前颜色及深度分类身份门槛全部通过。
+最新全集对照位于 `output/native-refinement/corpus/`，已复查 assets、机械臂、四足和人形等代表性总览。
+共 2,008 个有物体视角，加上 144 个空场景背景视角，按当前颜色及深度分类身份门槛全部通过。
+`ValidationNotes.md` 保留错误单进程 GPU 调用及其原因；最终使用规定的隔离入口，不修改断言门槛。
 
 本机本地语料共发现 295 个模型文档：251 个有可绘制内容、18 个空文档（包括 `assets/empty.xml` 和只含定义的片段）、26 个不能独立编译的 include 片段。18 个空文档通过加载、组合和背景检查，但不计入机器人渲染数量；26 个片段单列为 skipped，不计作通过。这修正了先前把 269 个可加载文档统称为完整模型的口径。
 
@@ -71,104 +79,134 @@ Python 公共 API 和行主序契约保持兼容；C++ 仍是渲染和资源基�
 
 代表性文件：
 
-- `output/native-ui-audit/motion-complete/mujoco-classic-msaa4/pan-08-comparison.png`：左 OpenGL、右 bgfx，检查方块侧面。
-- `output/native-ui-audit/motion-complete/mujoco-classic-msaa4/motion.webp`：连续运动对照。
+- `output/native-refinement/motion/mujoco-classic-msaa4/pan-08-comparison.png`：左 OpenGL、右 bgfx，检查方块侧面。
+- `output/native-refinement/motion/mujoco-classic-msaa4/motion.webp`：连续运动对照。
 - `output/native-viewer/projection-bgfx-820-880.png`：窄窗口的实际投影。
-- `output/native-ui-audit/model-parity-complete/100_humanoids-shaded-1-comparison.png`：三后端大量刚体对照。
-- `output/native-ui-audit/corpus/contact-00.png` 至 `contact-13.png`：模型总览，每对左 OpenGL、右 bgfx。
+- `output/native-refinement/models/100_humanoids-shaded-1-comparison.png`：三后端大量刚体对照。
+- `output/native-refinement/corpus/contact-00.png` 至 `contact-13.png`：模型总览，每对左 OpenGL、右 bgfx。
+
+## 历史 UI 与交互问题逐项清点
+
+本次重新运行三后端 GPU 输入回归和 112 组响应式布局检查。截图位于
+`output/native-refinement/layout/`，包含中英文、100%／150% UI 缩放和窄面板。
+下表把历史反馈对应到代码行为与验证，不将旧截图或单纯编译成功当作验收。
+
+| 历史反馈 | 当前行为与验证 |
+|---|---|
+| ImGui 圆角、字体和设计规范 | 主题圆角为 4.8；JetBrains Mono 与 Noto Sans CJK。间距、行高、搜索框、badge 和折叠标题使用共用控件，未为这些布局修改第三方 ImGui 核心。 |
+| Viewport 三边黑线、浮动窗口 resize 边缘被覆盖 | 停靠内容按视口内容矩形铺满；浮动窗口保留装饰与 resize 区域。GPU 输入测试验证 splitter 不触发场景操作。 |
+| Status 的 Ctrl／Drag／Steps 不齐、Δt 左侧空白 | 统一字形基线、badge 内边距和实际文本宽度；窗口变窄时逐级折叠，保留相同分隔间距。`status.png` 与基线／窄栏 CPU 回归。 |
+| Pan 鼠标图标空白、鼠标操作写死 | 鼠标图标展示对应按键；状态提示读取统一 pointer action。时间线右拖平移、滚轮缩放有 GPU 行为回归。 |
+| Output 文字贴背景、Copy all／Clear 拥挤 | 日志行有内边距，搜索图标位于独立区域，按钮随窄窗口换行。已检查 `output-180-layout.png`、搜索输入与清除测试。 |
+| Hierarchy 贴左、展开三角视觉偏下 | 共用行内边距、抗锯齿 disclosure、光学中心；名称／类型／可见性列不互相覆盖。选中与 hover 背景保持一致。 |
+| 场景点选后 Hierarchy 留下第二个选中项 | Session 的外部单选同步清除旧批量选择；GPU 回归覆盖虚拟列表与选择状态。 |
+| 双击 focus 后取消选择 | 聚焦只改变相机；`test_joint_focus.py` 覆盖 link／joint 聚焦保留选择及双击路径。 |
+| Control／Joints 名称和背景局促 | 行高与标签 inset 统一，长名称裁剪并保留 tooltip；搜索、长列表虚拟化和选择操作由三后端回归覆盖。 |
+| Settings 左栏尺寸不一、菜单太窄、File 左空白 | 设置导航行统一；窄 Settings 切换成类别下拉框；菜单保留行高和左右 inset。已检查 `settings-360-general.png`、`menu-bar.png`、`window-menu.png`。 |
+| Inspector badge 偏心、Transform 独有背景、窄宽截断 | 共用轴输入和 section 布局；先将标签独占一行，再将 X／Y／Z 堆叠，内容高度跟随实际行数。已检查 230 宽、150% 中文的 position／rotation 完整显示。 |
+| Type value 前的 Δ 不齐 | 精确输入使用明确的 Relative／Absolute 模式控件，移除孤立 Δ。已检查 `precise-input.png`。 |
+| Keyframes 字段随意摆放 | 模型字段、录制／快照按钮、状态文本按剩余宽度布局；230 宽下工具条换行、轨道名称换行，时间线仍可操作。 |
+| Assets 展开风格不同、缺少 table | 与 Inspector 共用折叠标题与字段布局，资产表使用 Name／Type／Used 列。已检查 `search-assets.png`，三后端覆盖资产编辑行为。 |
+| View cube 文字转动抖动、圆角与字体无抗锯齿 | 标签保留小数坐标，原生 ImGui 字体 atlas 双线性采样；318 对真实窗口图像检查转场中的相对位置和边缘。 |
+
+已实际查看以上代表性截图，以及多模型人体／Go2、近景方块、G1 近景和模型总览。
+布局回归通过不等于所有屏幕配置都已人工遍历；120 Hz 和其他操作系统的设备边界见后文。
 
 ## 刷新率和交互延迟
 
-没有固定 60 FPS 上限，也没有根据显示器“最高规格”强行提交的定时器。开启 VSync 时由 GPU／系统的当前显示模式安排呈现；切换显示模式后不依赖缓存的刷新率。实际检查 CAMetalLayer 的 `displaySyncEnabled` 为开／关／开，并验证关闭同进程的另一个窗口不会丢失剩余窗口的同步策略。
+没有固定 60 FPS 上限。开启 VSync 时由 GPU／系统当前显示模式安排呈现，不按显示器宣传的最高频率在 CPU 上 sleep。手动平移、环绕和缩放取消聚焦动画，当前相机在同一帧提交给 renderer。
 
-本次系统报告 Apple M5、AG25Q380，4096×2304 像素、2048×1152 逻辑分辨率，当前为 **60 Hz**，AppKit 对唯一屏幕报告的 `maximumFramesPerSecond` 也为 60。因此不能宣称已验证 120 Hz 实际呈现。没有修改用户的系统显示设置。OpenGL 的 CPU 提交计数可能高于显示刷新率，不能据此认定显示器运行在 120 Hz。
+`RenderRuntime` 保留专用原生 owner，bgfx 在该 owner 上处理命令，删除第二层 CPU 帧队列。GPU 最多两帧在途以保留 CPU／GPU 重叠。Metal 开启 VSync 时用两个 drawable，关闭时用第三张备用图像，避免 GPU 已完成但合成器仍占用图像时完全串行等待。多窗口共享同步策略；有任一同步窗口时各 surface 都保持同步和两个 drawable。实际 Metal 属性切换、窗口 resize 和 peer 关闭由原生 Viewer 回归验证。
 
-`make native-window-benchmark` 在可见窗口中连续改变相机，验证变更在同一帧交给 renderer，同时记录每帧窗口遮挡、焦点和实际 Metal VSync 状态。这是 CPU 提交节奏，不是输入到光子的硬件延迟测量。手动平移、环绕和缩放会取消聚焦动画，直接更新相机。
+本轮显示环境为 Apple M5、1× framebuffer，系统及 AppKit 当前报告 **60 Hz**。没有改变系统显示设置。窗口 1200×800 设备像素，场景固定 1306×1036；每项平移／环绕／缩放两轮、每轮三秒，全程前台、未遮挡。表中 FPS 是六轮 CPU 提交 FPS 的均值，P95 是六轮 P95 的中位数。
 
-最后一次有状态记录的对照位于 `output/native-ui-audit/window-visible-repeat/report.json`。窗口 1200×800 逻辑像素、viewport 1306×1036 设备像素，每轮三秒，两轮平移均全程聚焦、未遮挡。关闭 VSync：
+| 关闭 VSync 的可见窗口 | 提交 FPS | 单帧 P95 | 最大单帧 |
+|---|---:|---:|---:|
+| 原生，一帧 GPU／两张 drawable 对照 | 261.85 | 8.383 ms | 17.132 ms |
+| 原生，最终两帧 GPU／三张 drawable | 371.65 | 7.239 ms | 15.500 ms |
+| OpenGL，同尺寸前台对照 | 371.36 | 4.885 ms | 9.205 ms |
 
-| 后端 | 两轮提交 FPS | 单帧 P95 |
-|---|---:|---:|
-| OpenGL | 358.2／355.1 | 5.13／5.02 ms |
-| bgfx | 173.3／172.4 | 12.95／12.50 ms |
+最终原生吞吐比一帧限制提高约 42%，与本轮 OpenGL 接近，但 P95 仍较高，不能据此宣称全部交互延迟相同。另一轮相同配置测得约 404 FPS；报告采用最终条件切换复测的 372 FPS，保留轮间波动。`output/native-refinement/window-delivery-bgfx/`、`window-focused-opengl/` 和 `PresentationExperiments.md` 包含证据和全部中间配置。
 
-**这条可见呈现路径没有达到性能要求，不能采用此前约 400 FPS 的短时结果作为稳定结论。** 早期测量没有记录遮挡状态，而 bgfx Metal 在遮挡时会改用离屏目标，不能把这类数据当作真实呈现性能。原始 `window/`、`window-complete/` 和相关异常记录保留，不覆盖或挑选有利轮次。
-
-临时 Metal 分段诊断定位到 `nextDrawable` 等待。增加呈现 drawable 到三张、增加 GPU 工作队列到两帧均没有稳定收益，已恢复一帧 GPU 工作队列和两张呈现 drawable。临时跟踪代码未进入依赖或最终构建。开启 VSync 后原生约 60.3 FPS，与本机当前 60 Hz 显示模式一致；OpenGL 约 120 次 CPU 提交不能证明 120 次物理呈现。仍需继续处理无同步呈现的尾延迟，并在实际 120 Hz 模式测量输入到呈现的延迟。
+开启 VSync 的原生约 60.18 次提交／秒，与当前显示模式一致。OpenGL 约 120.72 次 CPU 提交不能证明物理显示有 120 FPS。这些指标不是输入到光子的硬件测量。前一轮 2× framebuffer 的数据、当前较小的 653×518 viewport 和失焦轮次分开保留，不混入上表。真实 120 Hz／HiDPI 设备呈现与尾延迟仍是设备验收项。
 
 ## 模型加载速度与计时口径
 
-`make native-load-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie` 在初始化好的 Viewer 中通过实际异步加载队列加载模型。每个模型／后端使用独立进程，首轮与同进程两次重载分列；操作系统文件缓存没有清除。表中时间从请求加载到**本帧可由 GPU 读回**，不等同于物理屏幕扫描时间。读取的是已提交窗口图像，不额外调用 capture 重新渲染。
+`make native-load-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie` 在已初始化的 Viewer 中通过实际异步队列加载模型。每个模型／后端使用独立进程，首轮与同进程两次重载分列；没有清除系统文件缓存。计时从请求加载到已提交窗口图像可由 GPU 读回，不额外 capture 重绘，也不是物理屏幕扫描时间。本轮 viewport 为 522×400，原始数据与首帧图在 `output/native-refinement/loads-delivery/`。
 
-| Menagerie 模型 | OpenGL 首次 | bgfx 首次 | OpenGL 重载中位数 | bgfx 重载中位数 |
+| 模型 | OpenGL 首次 | bgfx 首次 | OpenGL 重载中位数 | bgfx 重载中位数 |
 |---|---:|---:|---:|---:|
-| ANYmal C | 794.7 ms | 431.3 ms | 263.8 ms | 310.8 ms |
-| ANYmal B | 552.3 ms | 445.7 ms | 60.4 ms | 48.9 ms |
-| Spot | 421.6 ms | 387.8 ms | 32.3 ms | 49.1 ms |
-| Go2 | 320.7 ms | 258.5 ms | 37.8 ms | 44.1 ms |
-| G1 | 204.5 ms | 149.8 ms | 54.5 ms | 46.4 ms |
-| H1 | 128.9 ms | 99.1 ms | 38.0 ms | 44.2 ms |
-| Panda | 376.7 ms | 355.7 ms | 44.6 ms | 45.8 ms |
-| FR3 | 338.4 ms | 296.7 ms | 41.3 ms | 50.4 ms |
-| UR5e | 339.0 ms | 304.8 ms | 33.0 ms | 36.3 ms |
-| Google Robot | 130.0 ms | 106.3 ms | 38.3 ms | 41.6 ms |
+| anybotics_anymal_c | 414.6 ms | 344.4 ms | 198.0 ms | 173.7 ms |
+| anybotics_anymal_b | 532.2 ms | 473.3 ms | 51.5 ms | 46.3 ms |
+| boston_dynamics_spot | 434.1 ms | 374.3 ms | 28.4 ms | 32.4 ms |
+| unitree_go2 | 270.3 ms | 233.8 ms | 27.8 ms | 37.6 ms |
+| unitree_g1 | 145.8 ms | 124.9 ms | 36.0 ms | 44.6 ms |
+| unitree_h1 | 102.3 ms | 92.8 ms | 31.6 ms | 31.3 ms |
+| franka_emika_panda | 362.1 ms | 312.0 ms | 38.9 ms | 39.3 ms |
+| franka_fr3 | 319.5 ms | 275.5 ms | 31.5 ms | 35.4 ms |
+| universal_robots_ur5e | 328.5 ms | 275.8 ms | 28.0 ms | 37.9 ms |
+| google_robot | 115.4 ms | 98.4 ms | 35.2 ms | 41.3 ms |
 
-原始数据和实际首帧图在 `output/native-ui-audit/loads/`。旧原生 ANYmal C 的独立诊断为 3.571 秒，其中 NumPy mip 处理约 2.866 秒；不是纯 GPU 同步问题。新实现资源阶段三轮中位数约 94.2 ms，OpenGL 为 209.0 ms。上表首次全部更快，但重复加载并非全部更快，ANYmal C 重载仍有约 47 ms 差距。
+旧原生 ANYmal C 的独立诊断为 3.571 秒，其中 NumPy mip 处理约 2.866 秒；最终首次为 344.4 ms、重载中位数 173.7 ms，OpenGL 为 414.6／198.0 ms。首次十个模型全部更快，重载仍并非全部更快，例如 G1 为 44.6 对 36.0 ms。计时没有把已有渲染器初始化排除后的结果称为整个进程启动速度。
 
-日志现在包含从工作开始到首帧提交的总时间，并分列 `source`、`resources`、`first frame submitted`；GPU 就绪等待另由 benchmark 报告。调用提交完成仍不代表用户已经看到屏幕像素，这一边界在文字中明确保留。
+日志包含工作开始到首帧提交的总时间，分列 source／resources／first frame submitted；GPU 就绪由 benchmark 另外记录。资源切换仍有集中上传阶段，不能把后台编译等同为零 UI 停顿。
 
 ## MS-Human-700、多模型和编辑操作
 
-通过 `make native-editor-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie` 重现：新建 workspace → 添加地面 → 添加 `ms_human_700/MS-Human-700.xml` → 点选模型。还覆盖模型放置预览／取消、快照创建／读取／删除、添加 Go2、切换模型、应用 MJCF、移除模型及 Undo／Redo。每次选择都断言 renderer `set_scene()` 次数为零，防止仅改变选择却重传全部资源。
+`make native-editor-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie` 重现：新建 workspace → 添加地面 → 添加 MS-Human-700 → 选择模型。继续覆盖模型放置预览／取消、关键帧创建／读取／删除、添加 Go2、切换模型、修改 MJCF、移除及 Undo／Redo。选择操作断言 renderer `set_scene()` 为零次，防止只改变选择却重传资源。
 
-同机、同窗口尺寸的旧组件实现对照保存在 `editor-before/`。旧实现首次点选 2,235 ms，多模型切回 2,406 ms，源码编辑后再选 2,528 ms。更新后的离屏窗口隔离测量分别约 6.9、12.8、7.5 ms（`editor-bgfx/`）；该组用于隔离编辑器工作，不代表物理呈现延迟。
+旧实现首次点选 2,235 ms，多模型切回 2,406 ms，源码编辑后再选 2,528 ms。最终可见窗口结果在 `output/native-refinement/editor-delivery-bgfx/` 和 `editor-delivery-opengl/`：
 
-实际可见窗口的更新结果在 `editor-visible-bgfx/` 和 `editor-visible-opengl/`：
-
-| 操作（到更新窗口提交） | bgfx | OpenGL |
+| 操作，到更新窗口提交 | bgfx | OpenGL |
 |---|---:|---:|
-| 首次点选 MS-Human-700 | 7.35 ms | 12.05 ms |
-| 多模型切回人体 | 12.21 ms | 9.68 ms |
-| 源码编辑后再选 | 9.22 ms | 8.98 ms |
-| 平移人体，60 帧中位数 | 6.50 ms | 6.53 ms |
-| 同步公共 API 创建快照 | 274.69 ms | 201.73 ms |
-| 同步公共 API 删除快照 | 224.43 ms | 199.96 ms |
-| 同步公共 API 应用源码 | 996.36 ms | 829.17 ms |
+| 首次点选 MS-Human-700 | 9.46 ms | 9.26 ms |
+| 重复点选，中位数 | 5.85 ms | 6.14 ms |
+| 多模型切回人体 | 7.13 ms | 8.66 ms |
+| 源码编辑后再选 | 10.83 ms | 8.64 ms |
+| 平移人体，60 帧中位数 | 4.89 ms | 5.73 ms |
+| 同步公共 API 创建快照 | 275.92 ms | 201.31 ms |
+| 同步公共 API 删除快照 | 242.24 ms | 178.73 ms |
+| 同步公共 API 应用源码 | 948.80 ms | 841.21 ms |
 
-UI 的后台编辑流程另外记录总时间和最长 UI 帧：原生创建快照 377 ms／59 ms，删除快照 330 ms／42 ms，应用源码 1,005 ms／53 ms；编译期间分别持续更新 34、34、134 帧。后台化减少了连续冻结，但仍有约 40–60 ms 的长帧，不能宣称编辑完全没有卡顿。Python 调用方的同步命令保持兼容，不把“已排队”冒充“已完成”。
+UI 的后台创建／删除快照／应用源码分别为 331／349／1002 ms，过程中更新了 54／64／361 帧；最长 UI 帧约 41／54／33 ms。连续数秒冻结已修复，但这些长帧仍需保留在性能边界中。同步 Python API 保持完成后才返回，不把“已排队”冒充“已完成”。
 
-已检查 `editor-visible-bgfx/selected-human.png` 和 `composed-models.png`。人体、肌腱、Go2、地面及各模型身份正常；source 查询的引用候选不跨调用缓存，模型替换后能刷新名字；组件 ID、字段和路径的现有编辑／保存／恢复测试保持覆盖。
+已检查人体／Go2 的组合图和组件表。Inspector 先读取声明数量，展开后才生成字段，700 项组件只提交可见行；引用候选在一次查询内复用，模型替换后重新读取，避免旧名字或跨模型引用。
 
 ## 公共 Renderer 同步输出
 
-`output/native-ui-audit/renderer-final.json` 使用公共 `update_scene()` 和 `render()`，包含 7 类工作负载、640×480／1280×720、RGB／深度／分割、4×颜色 MSAA，共 84 个隔离进程测例。每例预热 10 帧、采样 80 帧；RGB 和深度复用 `out`，分割双方都返回新数组。统计更新加同步读回总耗时，性能测试独立运行。
+`output/native-refinement/renderer-delivery.json` 使用公共 `update_scene()` 和 `render()`，包含 7 类工作负载、640×480／1280×720／1920×1080、RGB／深度／分割、4×颜色 MSAA，共 126 个隔离进程测例。每例预热 10 帧、采样 80 帧；RGB 和深度复用 `out`，分割双方都返回新数组。统计更新加 GPU 结果可读的总时间。
 
-| 输出 | bgfx／OpenGL 耗时比的中位数 | 最低～最高 | bgfx 更慢的测例 |
+| 输出 | bgfx／OpenGL 耗时比中位数 | 最低～最高 | bgfx 更慢的测例 |
 |---|---:|---:|---:|
-| RGB | 0.930 | 0.562～1.143 | 1／14 |
-| 深度 | 1.174 | 0.814～1.418 | 11／14 |
-| 分割 | 0.760 | 0.554～1.135 | 2／14 |
+| RGB | 0.523 | 0.411～0.785 | 0／21 |
+| 深度 | 0.543 | 0.387～0.915 | 0／21 |
+| 分割 | 0.481 | 0.279～0.880 | 0／21 |
 
-比值小于 1 表示原生更快。深度的主要剩余差距在 720p 同步读回：例如 dense mesh 为 OpenGL 0.810 ms、bgfx 1.044 ms。动态 1,024 物体的 720p RGB 为 1.787／2.042 ms，深度为 1.129／1.455 ms。**“每条路径都不慢于 Python OpenGL”尚未达到**，不能用编辑器或静态场景的优势代替这个结论。当前没有降低深度精度、删掉渲染效果或更改语义 ID 来换分数。
+比值小于 1 表示原生更快。静态场景可复用结果；动态场景真实更新。深度保持 R32F，分割保留两个 int32 的语义值，没有降低精度或删除效果。GPU 同步读回使用 bgfx 对齐 buffer；行 padding 在输出边界移除，返回数组独立持有结果，复用／resize／关闭不使它失效。异步请求仍先捕获提交的帧，再等待结果，不被后续绘制替换。
 
-额外的 720p 单盒诊断把原生路径拆成提交、排队读回、等待、导出 NumPy、复制到 `out` 和释放：深度等待中位数约 0.51 ms，导出数组约 0.001 ms，复制到 `out` 约 0.062 ms。绑定层导出已经不是此例的主要开销，后续优化应聚焦读回调度／GPU 就绪及调用方所需的同步边界。原始分段结果在 `readback-phases.json`；这个简单场景不替代完整矩阵。
-
-静态场景复用渲染结果，因此这里同时包含缓存收益；动态场景每帧真实更新。数据附件按请求裁剪，分割的两个 int32 由一个 RGBA16 UNORM 附件无损保留，深度仍是 R32F；缓存失效和输出数组寿命有实际 GPU 回归测试。
+早期直接从 MSAA 颜色资源复制到 buffer 的实验产生黑图，已被 GPU 回归捕获并撤回；最终版本先复制 resolve 图像再读 buffer。`ReadbackExperiments.md` 明确标记了无效实验，以上只使用修正后的最终构建。63 组优势只覆盖这份矩阵，不能外推为所有编辑、所有硬件都更快。
 
 ## 物理并行和大量刚体
 
-本轮生产 Session 的三种工作负载使用 1392×1036 viewport、VSync 关闭、目标 120 FPS、每轮三秒、每种模式三轮。结果位于 `output/native-ui-audit/physics-opengl/` 和 `physics-bgfx/`。100 humanoid（1,600 移动 body、2,700 自由度）三轮中位数：
+最终生产 Session 的 100 humanoid（1,600 移动 body、2,700 自由度）使用相同
+696×518 viewport、隐藏窗口、VSync 关闭、目标 120 FPS；每轮三秒，每种模式三轮。
+原始结果在 `output/native-refinement/physics-delivery-opengl/` 和 `physics-delivery-bgfx/`。
 
-| 后端／物理模式 | 渲染提交 FPS | 单帧工作 P95 | 物理 step/s |
+| 后端／物理模式，三轮中位数 | 渲染提交 FPS | 单帧工作 P95 | 物理 step/s |
 |---|---:|---:|---:|
-| OpenGL，串行 | 76.8 | 17.03 ms | 198.4 |
-| OpenGL，并行 | 119.7 | 10.03 ms | 199.5 |
-| bgfx，串行 | 105.5 | 12.37 ms | 198.4 |
-| bgfx，并行 | 119.7 | 5.91 ms | 199.1 |
+| OpenGL，串行 | 73.49 | 17.28 ms | 198.27 |
+| OpenGL，并行 | 119.89 | 7.42 ms | 199.49 |
+| bgfx，串行 | 105.62 | 10.64 ms | 198.62 |
+| bgfx，并行 | 119.78 | 5.59 ms | 199.30 |
 
-并行时原生单帧工作 P95 低约 41%，两者均接近 benchmark 的调度上限，不能推算无上限吞吐提升。布料压力场景的并行 P95 为 OpenGL 6.41 ms、bgfx 3.20 ms；轻量刚体为 5.92／4.79 ms。所有仿真均通过逐步串行重放比较。
+每轮仿真状态都与从相同初始状态逐步串行重放完全一致。并行原生 P95 比 OpenGL
+低约 25%，双方都接近测试调度上限；不能把 120 调度上限外推成无上限渲染吞吐。
+隐藏窗口结果用于隔离 Session／物理工作，不代表屏幕呈现延迟。
 
-物理性能采集在本轮最终读回／静态输出缓存优化之前完成；它每帧改变物理状态，不使用静态结果缓存。可见窗口和编辑操作来自后续复测。同步 Renderer 矩阵在阴影视锥剔除后重新测量；旧 `renderer-complete.json` 保留，G1 表另外给出剔除前后结果。旧报告使用不同 viewport，不能与本表直接横比。
+本轮此前还复测了轻量刚体和 cloth stress，见 `physics-opengl/`、`physics-bgfx/`。
+cloth 并行 P95 为 6.35／4.38 ms，串行为 34.70／26.77 ms，轨迹校验通过。
+该组三工作负载在最后呈现队列调整前完成；上表 100 humanoid 使用最终构建。
+前一阶段 2× framebuffer 的数字保留在 `output/native-ui-audit/`，不与本轮直接横比。
 
 ## 平台与交付边界
 
@@ -193,15 +231,10 @@ Blender / Unity / Unreal / MuJoCo 预设只调整导航组合，未声称复制�
 MuJoCo 的水平／垂直拖动算法。默认行为继续兼容；冲突配置原子拒绝。
 普通 ImGui 控件激活和平台文本编辑保留控件约定。
 
-最近一次真实窗口编辑对照在 `editor-final-bgfx/`、`editor-final-opengl/`。
-bgfx 首次点选 MS-Human-700 为 8.36 ms，多模型切回 12.44 ms，编辑后再选 6.84 ms；
-OpenGL 分别为 8.52、8.54、8.75 ms。平移 60 帧中位数为 4.89／5.56 ms。
-UI 后台创建／删除快照、源码修改仍有最高约 61 ms 的长帧，不能视为零卡顿。
-已经检查 `mouse-settings.png` 和 `component-table.png`，700 个组件只提交可见表格行。
 
 ## G1 独立 world 渲染压力
 
-数据固定为 Unitree 官方 Apache-2.0 的 `dance1_subject2.csv`，提交
+数据固定为 Unitree 官方 Apache-2.0 的 [dance1_subject2.csv](https://github.com/unitreerobotics/unitree_rl_mjlab/blob/1425b15f73bd4095f0df53709d7c389c3eb9e790/src/assets/motions/g1/dance1_subject2.csv)，提交
 `1425b15f73bd4095f0df53709d7c389c3eb9e790`，SHA-256
 `1793edcd8345fa4736676c06008186d1a3ecaaf99df0c380218eaa4e0de100ec`。
 这是 3,945 帧／30 Hz 的动作，经根旋转插值和关节运动学生成 120 Hz 姿态。
@@ -213,28 +246,40 @@ UI 后台创建／删除快照、源码修改仍有最高约 61 ms 的长帧，�
 图像已检查。GPU 测试和性能采样串行；1280×720、4× MSAA、预热 5 帧、采样 30 帧，
 每种后端独立进程。以下 FPS 包含姿态更新、renderer 更新及完整 GPU RGB 读回。
 
-| 网格质量 | world 数 | OpenGL FPS | bgfx FPS |
+最终原始精度结果在 `output/native-refinement/g1-delivery-overview/` 和
+`g1-delivery-detail/`，两组分别先通过自己的 9 组图像 parity。
+
+| world 数 | 全景 OpenGL | 全景 bgfx | 近景 OpenGL | 近景 bgfx |
+|---:|---:|---:|---:|---:|
+| 1024 | 1.880 FPS | 2.120 FPS | 1.834 FPS | 5.639 FPS |
+| 2048 | 0.944 FPS | 1.057 FPS | 0.914 FPS | 2.904 FPS |
+| 4096 | 0.472 FPS | 0.529 FPS | 0.448 FPS | 1.489 FPS |
+
+全景把整支方阵放入画面，近景只观察方阵中央，但仍保留全部 world、原始网格和潜在阴影。
+颜色、语义和反射 pass 分别使用自己的相机剔除；4096 份近景排除 284,165 个跨 pass
+的实例候选，全景排除为零。近景原生约为 OpenGL 的 3.3 倍，全景约快 12%；
+这两种不同构图的 FPS 不能互相冒充，原始精度仍不具备实时交互速度。
+
+此前的显式 LOD 验证保留如下。这些是同机前一阶段的数据，不能冒充本轮最终原始质量：
+
+| 显式网格质量 | world 数 | OpenGL FPS | bgfx FPS |
 |---|---:|---:|---:|
-| 原始 | 1024 | 1.936 | 2.177 |
-| 原始 | 2048 | 0.972 | 1.089 |
-| 原始 | 4096 | 0.487 | 0.546 |
-| 显式 LOD .01 / .05 | 1024 | 27.148 | 29.433 |
-| 显式 LOD .01 / .05 | 2048 | 13.932 | 15.122 |
-| 显式 LOD .01 / .05 | 4096 | 7.076 | 7.592 |
+| LOD .01 / .05 | 1024 | 27.148 | 29.433 |
+| LOD .01 / .05 | 2048 | 13.932 | 15.122 |
+| LOD .01 / .05 | 4096 | 7.076 | 7.592 |
 | 激进远景 LOD .001 / .2 | 1024 | 65.855 | 68.793 |
 | 激进远景 LOD .001 / .2 | 2048 | 34.978 | 36.578 |
 | 激进远景 LOD .001 / .2 | 4096 | 18.340 | 18.836 |
 
 原始机器人每份 393,270 个三角形；4096 份共有约 16.1 亿个三角形／场景 pass。
-35 份 mesh 数据共享，原始唯一网格约 10.5 MiB，原生进程峰值 RSS 约 1,014 MiB；
+35 份 mesh 数据共享，原始唯一网格约 10.5 MiB；
 最后一帧全部原生 pass 合计 181 次 draw，不能与 OpenGL 只统计颜色 bucket 的数字直接比较。
 实例化已经避免逐机器人调用 draw，但并没有减少 GPU 对三角形的处理。
 
-新增阴影视锥包围盒剔除，在 4096 份场景的最后一帧保留 283,363 个阴影实例、
-排除 146,720 个完全在各级光源视锥外的实例（约 34%）。移动和动态网格更新刷新包围盒，
-负缩放／剪切使用保守变换；颜色和反射 pass 不变。原始网格 bgfx 从此前
-1.854／0.929／0.465 FPS 提升到 2.177／1.089／0.546 FPS，约提升 17%，并超过本轮
-同精度 OpenGL。`g1-worlds-final/` 保留剔除前记录，`g1-worlds-culled/` 为更新后结果。
+阴影保持光源视锥独立剔除；全景 4096 份最后一帧保留 283,363 个阴影实例，
+排除 146,720 个完全在各级光源视锥外的实例。不能用主相机可见性删除潜在阴影投射者。
+移动和动态网格更新刷新包围盒，负缩放／剪切采用保守包围盒。原生 4096 份全景峰值
+RSS 约 1,011 MiB，近景约 900 MiB，网格仍共享。
 
 显式 LOD 使用仓库已锁定的 meshoptimizer，法线和 UV 参与误差约束。两档实际约
 20,967 和 6,327 个三角形／机器人。**激进档近景出现明显的头部轮廓、关节和表面细节损失**；
@@ -245,7 +290,7 @@ UI 后台创建／删除快照、源码修改仍有最高约 61 ms 的长帧，�
 
 ## 独立进程远程监控压力
 
-发布进程目标 120 Hz，接收目标 30 Hz，传输为 localhost TCP。
+以下为前一阶段已经完成的协议／监控验收，本轮未修改传输实现，也未重测这些数值。发布进程目标 120 Hz，接收目标 30 Hz，传输为 localhost TCP。
 纯传输测试 1024／2048／4096 个 world 的接收频率均约 29.94 Hz，快照年龄 P95 分别
 10.80／10.29／8.62 ms。4096 个 world 的每次姿态约 6.56 MiB；这不是 WAN 或训练吞吐。
 接收端使用最新快照，覆盖过时帧，不积累播放队列。纯传输证据在 `output/g1-worlds/transport-*.json`。

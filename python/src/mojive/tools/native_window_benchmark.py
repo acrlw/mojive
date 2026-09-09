@@ -67,7 +67,7 @@ def window_state_reader(window, glfw):
     return read
 
 
-def run(asset, output, backends, seconds, repeats, width, height, operations):
+def run(asset, output, backends, seconds, repeats, width, height, operations, render_size=None):
     from mojive.ui import window as window_module
 
     output.mkdir(parents=True, exist_ok=True)
@@ -83,6 +83,8 @@ def run(asset, output, backends, seconds, repeats, width, height, operations):
             show_window=True,
             config=ViewerConfig(layout=LayoutConfig(persistence=False)),
         ) as viewer:
+            if render_size is not None:
+                viewer.app.set_fixed_render_size(*render_size)
             glfw = window_module.glfw
             glfw.focus_window(viewer.window._window)
             publish = viewer.backend.set_camera
@@ -134,6 +136,8 @@ def run(asset, output, backends, seconds, repeats, width, height, operations):
                             "repeat": repeat,
                             "operation": operation,
                             "window_points": list(viewer.window.size_points),
+                            "window_pixels": list(viewer.window.size_pixels),
+                            "pixel_scale": viewer.window.pixel_scale,
                             "viewport_pixels": [
                                 viewer.backend.target.width,
                                 viewer.backend.target.height,
@@ -172,12 +176,21 @@ def main():
     parser.add_argument("--width", type=int, default=1200)
     parser.add_argument("--height", type=int, default=800)
     parser.add_argument(
+        "--render-size",
+        type=int,
+        nargs=2,
+        metavar=("WIDTH", "HEIGHT"),
+        help="Fixed scene resolution; window framebuffer stays at the display scale",
+    )
+    parser.add_argument(
         "--operations",
         nargs="+",
         choices=("pan", "orbit", "dolly"),
         default=["pan", "orbit", "dolly"],
     )
     args = parser.parse_args()
+    if args.render_size is not None and min(args.render_size) <= 0:
+        parser.error("Render dimensions must be positive")
     if args.seconds <= 0 or args.repeats <= 0:
         parser.error("Duration and repeat count must be positive")
     run(
@@ -189,6 +202,7 @@ def main():
         args.width,
         args.height,
         args.operations,
+        args.render_size,
     )
 
 

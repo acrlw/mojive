@@ -182,6 +182,24 @@ as an `out` array, so both implementations use allocating `render()` for segment
 Mojive GPU pass timers are deliberately excluded from cross-renderer ratios. Baselines are recorded
 with host and dependency versions and are not a cross-machine hard gate.
 
+For visible native-window comparisons, record actual window pixels, viewport pixels, focus,
+occlusion and Metal display-sync state. Use the same window size for both backends. To hold
+scene work constant across display scales, use:
+
+```bash
+make native-window-benchmark ARGS="--render-size 1306 1036"
+```
+
+This fixes scene resolution only; the window framebuffer still follows the attached display.
+Do not compare a 1× presentation directly with a prior 2× presentation or treat CPU submission
+rate as physical input-to-photon latency.
+
+The independent-world benchmark retains full-grid overview as its default. Use
+`make g1-worlds-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie ARGS="--camera detail"`
+to keep all worlds loaded while inspecting the center of the grid. This mode exercises camera
+visibility rejection and runs its own image parity checks before timing. It does not reduce mesh
+quality, remove offscreen shadow casters, or represent the overview workload.
+
 ## Documentation
 
 Build the user guide and generated API reference with:
