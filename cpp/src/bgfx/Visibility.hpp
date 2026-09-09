@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <mojive/Render.hpp>
 
 #include <algorithm>
@@ -39,13 +40,16 @@ class ClipFrustum {
 
   public:
     explicit ClipFrustum(const glm::mat4 &matrix) {
-        // Shadow cameras use OpenGL clip depth before the backend upload conversion.
+        // Canonical cameras use OpenGL clip depth before backend upload conversion.
         const auto rows = glm::transpose(matrix);
         for (int axis = 0; axis < 3; ++axis) {
             mPlanes[axis * 2] = rows[3] + rows[axis];
             mPlanes[axis * 2 + 1] = rows[3] - rows[axis];
         }
     }
+    explicit ClipFrustum(const CameraView &camera)
+        : ClipFrustum(glm::transpose(glm::make_mat4(camera.projection.data())) *
+                      glm::transpose(glm::make_mat4(camera.view.data()))) {}
     bool intersects(const MeshBounds &bounds) const {
         for (const auto &plane : mPlanes) {
             const glm::vec3 normal(plane);

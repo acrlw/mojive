@@ -40,6 +40,7 @@ class RenderRuntime final : public Renderer {
     Texture uploadTexture(Extent, std::span<const std::byte>) override;
     void destroy(Texture) override;
     FrameToken renderUi(const UiFrame &, Target output = {}) override;
+    ReadbackResult read(FrameToken, Product, Region = {});
     ReadbackResult wait(ReadbackTicket);
     Log &log();
     bool closed() const;

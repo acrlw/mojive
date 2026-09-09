@@ -196,6 +196,7 @@ struct FrameStats {
     bool reflectionRendered = false, reflectionReused = false;
     bool shadowRendered = false, shadowReused = false;
     uint64_t shadowInstances = 0, culledShadowInstances = 0;
+    uint64_t culledInstances = 0;
 };
 struct FrameToken {
     Target target;

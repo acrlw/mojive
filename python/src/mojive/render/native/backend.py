@@ -45,12 +45,13 @@ class NativeTarget:
         self.backend = backend
         self.width, self.height, self.samples = width, height, samples
         self.handle = backend.runtime.create_target(width, height, samples, backend._scene_handle)
+        self.texture = backend.runtime.target_texture(self.handle)
         self.frame = None
 
     def _read(self, product, flip, out=None):
         if self.frame is None:
             raise RuntimeError("Render a frame before requesting readback")
-        result = self.backend.runtime.wait(self.backend.runtime.readback(self.frame, product))
+        result = self.backend.runtime.read(self.frame, product)
         if result.state != self.backend.api.ReadbackState.READY:
             raise RuntimeError("Readback was canceled by a scene or target change")
         image = result.image
@@ -557,11 +558,12 @@ class NativeBackend:
                 if getattr(statistics, f"{name}_reused")
                 else "disabled"
             )
+        self.stats.notes["culled instances"] = statistics.culled_instances
         self.stats.notes["shadow instances"] = statistics.shadow_instances
         self.stats.notes["culled shadow instances"] = statistics.culled_shadow_instances
         self.stats.buckets = self._builder.scene.bucket_count()
         self.stats.frame_cpu_ms = (time.perf_counter() - started) * 1000
-        texture = self.runtime.target_texture(self.target.handle)
+        texture = self.target.texture
         return ViewportImage(texture.id, self.target.width, self.target.height, False, texture)
 
     def resize(self, width, height):
