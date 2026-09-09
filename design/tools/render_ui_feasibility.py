@@ -15,6 +15,43 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
+
+if __package__:
+    from .ui_capsule_geometry import (
+        CAPSULE_OUTLINE_LABELS,
+        CAPSULE_SMOOTHING,
+        capsule_outline_color,
+        draw_capsule_shell,
+        end_padding,
+        spacing_metrics,
+    )
+    from .ui_redesign import (
+        RECORD_GLYPH_RADIUS,
+        RESET_GLYPH_SCALE,
+        RedesignState,
+        draw_expand_glyph,
+        draw_recording_glyph,
+        draw_redesign,
+        draw_reset_glyph,
+    )
+else:
+    from ui_capsule_geometry import (
+        CAPSULE_OUTLINE_LABELS,
+        CAPSULE_SMOOTHING,
+        capsule_outline_color,
+        draw_capsule_shell,
+        end_padding,
+        spacing_metrics,
+    )
+    from ui_redesign import (
+        RECORD_GLYPH_RADIUS,
+        RESET_GLYPH_SCALE,
+        RedesignState,
+        draw_expand_glyph,
+        draw_recording_glyph,
+        draw_redesign,
+        draw_reset_glyph,
+    )
 from imgui_bundle import imgui
 from PIL import Image
 
@@ -44,6 +81,8 @@ from mojive.ui.viewport_widgets import (
     CAPSULE_SURFACE_ALPHA,
     DEFAULT_VIEWPORT_OVERLAY_SCALE,
     OVERLAY_GEOMETRY,
+    PLAYBACK_HALF_HEIGHT_PT,
+    PLAYBACK_RESET_SCALE,
     TOOL_GLYPH_SCALE,
     ToolHint,
     capsule_points,
@@ -194,12 +233,14 @@ GIZMO_IDENTITY_F64 = np.eye(3, dtype=np.float64)
 @dataclass
 class ProbeState:
     page: str = "Workspace"
+    redesign: RedesignState = field(default_factory=RedesignState)
     imgui_rounding: float = theme_mod.DEFAULT_CORNER_RADIUS
     imgui_example_value: float = 0.0
     imgui_example_enabled: bool = True
-    capsule_smoothing: float = CORNER_SMOOTHING
-    playback_smoothing: float = CORNER_SMOOTHING
-    tool_smoothing: float = CORNER_SMOOTHING
+    capsule_smoothing: float = CAPSULE_SMOOTHING
+    capsule_outline: str = "Neutral gray"
+    playback_smoothing: float = CAPSULE_SMOOTHING
+    tool_smoothing: float = CAPSULE_SMOOTHING
     mouse_smoothing: float = CORNER_SMOOTHING
     transform_smoothing: float = CORNER_SMOOTHING
     joint_smoothing: float = CORNER_SMOOTHING
@@ -215,6 +256,8 @@ class ProbeState:
     show_icon_bounds: bool = False
     show_state_circles: bool = False
     show_construction_notes: bool = False
+    highlight_g3: bool = False
+    optical_capsule_spacing: bool = True
     playing: bool = False
     active_tool: str = "move"
     gizmo_space: str = "world"
@@ -343,12 +386,16 @@ def _draw_previous_icon(draw: ImguiDraw2D, center, color, scale: float, _surface
     draw_playback_glyph(draw, center, color, scale, "previous", smoothing=draw.corner_smoothing)
 
 
-def _draw_reset_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=None) -> None:
-    draw_playback_glyph(draw, center, color, scale, "reset", smoothing=draw.corner_smoothing)
-
-
-def _draw_stop_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=None) -> None:
-    draw_playback_glyph(draw, center, color, scale, "stop")
+def _draw_reset_icon(
+    draw: ImguiDraw2D,
+    center,
+    color,
+    scale: float,
+    _surface=None,
+    *,
+    stroke_width: float = OVERLAY_GEOMETRY.tool_stroke,
+) -> None:
+    draw_reset_glyph(draw, center, color, scale, stroke_width)
 
 
 def _circular_icon_button(
@@ -408,20 +455,23 @@ def _draw_playback(draw: ImguiDraw2D, origin, scale: float, state: ProbeState) -
     assert math.isclose(state_radius - icon_radius, capsule_radius - state_radius)
     hit_size = float(state.overlay_center_step)
     center_step = float(state.overlay_center_step)
-    width = (capsule_radius * 2.0 + center_step * 3.0) * scale
+    padding = end_padding(state)
+    width = (padding * 2.0 + center_step * 3.0) * scale
     height = capsule_radius * 2.0 * scale
-    capsule = capsule_points(x, y, width, height, state.capsule_smoothing)
-    draw.convex_fill(capsule, (*CONCEPT_THEME.bg_child[:3], CAPSULE_SURFACE_ALPHA))
-    draw.polyline(capsule, CONCEPT_THEME.primary, 1.4 * scale, closed=True)
+    draw_capsule_shell(draw, x, y, width, height, scale, state)
     for index, (item_id, icon, selected) in enumerate(
         (
             ("##probe-previous", _draw_previous_icon, False),
             ("##probe-play", _draw_pause_icon if state.playing else _draw_play_icon, state.playing),
             ("##probe-step", _draw_step_icon, False),
-            ("##probe-reset", _draw_reset_icon, False),
+            (
+                "##probe-reset",
+                lambda *args: _draw_reset_icon(*args, stroke_width=state.tool_stroke_width),
+                False,
+            ),
         )
     ):
-        center_x = x + (capsule_radius + index * center_step) * scale
+        center_x = x + (padding + index * center_step) * scale
         position = (
             center_x - hit_size * 0.5 * scale,
             y + (capsule_radius - hit_size * 0.5) * scale,
@@ -485,17 +535,16 @@ def _draw_tool_column(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
     hit_size = float(state.overlay_center_step)
     center_step = float(state.overlay_center_step)
     group_step = center_step + float(state.tool_group_gap)
+    padding = end_padding(state)
     centers = (
-        capsule_radius,
-        capsule_radius + center_step,
-        capsule_radius + center_step * 2.0,
-        capsule_radius + center_step * 2.0 + group_step,
+        padding,
+        padding + center_step,
+        padding + center_step * 2.0,
+        padding + center_step * 2.0 + group_step,
     )
     width = capsule_radius * 2.0 * scale
-    height = (centers[-1] + capsule_radius) * scale
-    capsule = capsule_points(x, y, width, height, state.capsule_smoothing)
-    draw.convex_fill(capsule, (*CONCEPT_THEME.bg_child[:3], CAPSULE_SURFACE_ALPHA))
-    draw.polyline(capsule, CONCEPT_THEME.primary, 1.4 * scale, closed=True)
+    height = (centers[-1] + padding) * scale
+    draw_capsule_shell(draw, x, y, width, height, scale, state)
     separator = (*CONCEPT_THEME.border[:3], 0.72)
     separator_y = y + (centers[2] + centers[3]) * 0.5 * scale
     draw.line(
@@ -707,9 +756,7 @@ def _draw_hint_bar(
     x, y = origin
     width = _hint_bar_width(draw, scale, state, variant)
     height = (state.hint_control_height + state.hint_padding_y * 2.0) * scale
-    capsule = capsule_points(x, y, width, height, state.capsule_smoothing)
-    draw.convex_fill(capsule, (*CONCEPT_THEME.bg_child[:3], CAPSULE_SURFACE_ALPHA))
-    draw.polyline(capsule, CONCEPT_THEME.primary, 1.4 * scale, closed=True)
+    draw_capsule_shell(draw, x, y, width, height, scale, state)
     center_y = y + height * 0.5
     cursor = x + state.hint_padding_x * scale
     input_gap = state.hint_input_gap * scale
@@ -1925,7 +1972,7 @@ def _draw_viewport(size, scale: float, state: ProbeState) -> tuple[float, float,
         )
     shell_radius = state.overlay_icon_radius + state.overlay_radial_step * 2
     if state.show_playback:
-        playback_width = (shell_radius * 2.0 + state.overlay_center_step * 3.0) * scale
+        playback_width = (end_padding(state) * 2.0 + state.overlay_center_step * 3.0) * scale
         _draw_playback(
             draw,
             (x0 + (window_size.x - playback_width) * 0.5, y0 + 18 * scale),
@@ -3287,6 +3334,7 @@ def _geometry_values_text(state: ProbeState) -> str:
 
     values = (
         ("imgui_rounding", state.imgui_rounding),
+        ("capsule_outline", repr(state.capsule_outline)),
         ("icon_radius", state.overlay_icon_radius),
         ("radial_step", state.overlay_radial_step),
         ("center_step", state.overlay_center_step),
@@ -3351,7 +3399,7 @@ def _draw_corner_controls(position, size, state: ProbeState) -> None:
         if imgui.button("Reset corners", imgui.ImVec2(-1.0, 0.0)):
             state.imgui_rounding = theme_mod.DEFAULT_CORNER_RADIUS
             for _, name in CORNER_CONTROLS:
-                setattr(state, name, CORNER_SMOOTHING)
+                setattr(state, name, ProbeState.__dataclass_fields__[name].default)
         if imgui.button("Copy corner values", imgui.ImVec2(-1.0, 0.0)):
             imgui.set_clipboard_text(
                 f"imgui_rounding={state.imgui_rounding:.6g}\n"
@@ -3404,7 +3452,7 @@ def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                     cx - w * scale * 0.5, yy - h * scale * 0.5, w * scale, h * scale, q
                 )
                 item_draw.convex_fill(points, CONCEPT_THEME.bg_frame)
-                item_draw.polyline(points, CONCEPT_THEME.primary, 1.5 * scale, closed=True)
+                item_draw.polyline(points, capsule_outline_color(state), 1.5 * scale, closed=True)
         elif field_name == "playback_smoothing":
             for i, kind in enumerate(("play", "pause", "previous", "reset")):
                 draw_playback_glyph(
@@ -3534,6 +3582,31 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
     imgui.text_wrapped(
         "Probe-only values. Review visually, then copy accepted fields into production."
     )
+    imgui.text("Capsule outline")
+    imgui.set_next_item_width(-1.0)
+    changed, outline = imgui.combo(
+        "##capsule-outline",
+        CAPSULE_OUTLINE_LABELS.index(state.capsule_outline),
+        CAPSULE_OUTLINE_LABELS,
+    )
+    if changed:
+        state.capsule_outline = CAPSULE_OUTLINE_LABELS[outline]
+    _, state.highlight_g3 = imgui.checkbox("Highlight G3 transitions", state.highlight_g3)
+    imgui.text_wrapped(
+        "Orange: curvature ramps. Neutral outline: circular arcs and straight edges."
+    )
+    _, state.optical_capsule_spacing = imgui.checkbox(
+        "Optical end spacing", state.optical_capsule_spacing
+    )
+    radius = state.overlay_icon_radius + 2 * state.overlay_radial_step
+    minimum, mean, maximum, side = spacing_metrics(
+        radius,
+        state.overlay_icon_radius + state.overlay_radial_step,
+        state.capsule_smoothing,
+        state.optical_capsule_spacing,
+    )
+    imgui.text_wrapped(f"End center {end_padding(state):.2f} · side gap {side:.2f}")
+    imgui.text_wrapped(f"End gap min / mean / max: {minimum:.2f} / {mean:.2f} / {maximum:.2f}")
     imgui.spacing()
     flags = _flags(imgui.TableFlags_.sizing_stretch_prop, imgui.TableFlags_.pad_outer_x)
     if imgui.begin_table("##geometry-controls", 2, flags):
@@ -3669,8 +3742,9 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         imgui.set_clipboard_text(_geometry_values_text(state))
     if imgui.button("Reset production defaults", imgui.ImVec2(-1.0, 0.0)):
         state.imgui_rounding = theme_mod.DEFAULT_CORNER_RADIUS
+        state.capsule_outline = ProbeState.__dataclass_fields__["capsule_outline"].default
         for _, name in CORNER_CONTROLS:
-            setattr(state, name, CORNER_SMOOTHING)
+            setattr(state, name, ProbeState.__dataclass_fields__[name].default)
         state.overlay_icon_radius = int(OVERLAY_GEOMETRY.icon_radius)
         state.overlay_radial_step = int(OVERLAY_GEOMETRY.radial_step)
         state.overlay_center_step = int(OVERLAY_GEOMETRY.center_step)
@@ -3834,7 +3908,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         )
         imgui.pop_id()
         pb_center_y = play_origin[1] + shell_radius * playback_scale
-        pb_first_x = play_origin[0] + shell_radius * playback_scale
+        pb_first_x = play_origin[0] + end_padding(state) * playback_scale
         pb_last_x = pb_first_x + center_step * 3.0 * playback_scale
         _dimension_line(
             draw,
@@ -3898,6 +3972,78 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             note_color,
             "Play is neutral · Pause stays selected while playing.",
         )
+        draw.text(
+            (comparison_x, content_y + 400.0 * scale),
+            title_color,
+            "Reset / Record / Stop / Recording options · 2×",
+        )
+        glyph_ratio = icon_radius / OVERLAY_ICON_RADIUS
+        stop_side = 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_RESET_SCALE * glyph_ratio
+        specimen_step = min(190.0 * scale, (controls_x - comparison_x - 16.0 * scale) / 4)
+        for index, (label, measurement, icon) in enumerate(
+            (
+                (
+                    "Reset simulation",
+                    f"Envelope Ø{2 * icon_radius * RESET_GLYPH_SCALE:.2f}",
+                    lambda *args: _draw_reset_icon(*args, stroke_width=state.tool_stroke_width),
+                ),
+                (
+                    "Record Take / Video",
+                    f"Circle Ø{2 * RECORD_GLYPH_RADIUS * glyph_ratio:.2f}",
+                    lambda target, center, _color, icon_scale, _surface: draw_recording_glyph(
+                        target, center, CONCEPT_THEME.danger, icon_scale
+                    ),
+                ),
+                (
+                    "Stop recording",
+                    f"Square side {stop_side:.2f}",
+                    lambda target, center, _color, icon_scale, _surface: draw_recording_glyph(
+                        target, center, CONCEPT_THEME.danger, icon_scale, recording=True
+                    ),
+                ),
+                (
+                    "Recording options",
+                    f"G3 · stroke {state.tool_stroke_width * glyph_ratio:.2f}",
+                    lambda target, center, color, icon_scale, _surface: draw_expand_glyph(
+                        target, center, color, icon_scale, state.tool_stroke_width
+                    ),
+                ),
+            )
+        ):
+            position = (comparison_x + index * specimen_step, content_y + 438.0 * scale)
+            _circular_icon_button(
+                draw.with_corner_smoothing(state.playback_smoothing),
+                f"##geometry-recording-{index}",
+                position,
+                icon,
+                cell_size=center_step,
+                state_radius=state_radius,
+                icon_radius=icon_radius,
+                icon_scale=2.0 * scale * icon_radius / OVERLAY_ICON_RADIUS,
+                show_icon_bound=True,
+                show_state_circle=True,
+                scale=2.0 * scale,
+            )
+            draw.text((position[0], position[1] + 96.0 * scale), note_color, label)
+            draw.text((position[0], position[1] + 116.0 * scale), note_color, measurement)
+        draw.text(
+            (comparison_x, content_y + 586.0 * scale),
+            note_color,
+            "Record / Stop: equal nominal area · dimensions in logical px",
+        )
+        for label, comparison_origin_x, optical in (
+            ("Original end spacing", x0 + 54.0 * scale, False),
+            ("Optical end spacing", comparison_x, True),
+        ):
+            draw.text((comparison_origin_x, content_y + 630.0 * scale), title_color, label)
+            imgui.push_id(label)
+            _draw_playback(
+                draw,
+                (comparison_origin_x, content_y + 660.0 * scale),
+                scale * 2.0,
+                replace(product_state, optical_capsule_spacing=optical, playing=True),
+            )
+            imgui.pop_id()
 
     elif active_tab == "Tools":
         construction_state = replace(
@@ -4402,7 +4548,7 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
                 imgui.menu_item("Design probe", "", False, False)
                 imgui.end_menu()
         if imgui.begin_menu("Probe"):
-            for page in ("Workspace", "Panels", "Geometry"):
+            for page in ("Workspace", "Panels", "Geometry", "Redesign"):
                 clicked, _ = imgui.menu_item(page, "", state.page == page)
                 if clicked:
                     state.page = page
@@ -4446,6 +4592,7 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
                 ("Icon bounds", "show_icon_bounds"),
                 ("State circles", "show_state_circles"),
                 ("Geometry notes", "show_construction_notes"),
+                ("G3 transitions", "highlight_g3"),
             ):
                 value = bool(getattr(state, attribute))
                 clicked, _ = imgui.menu_item(label, "", value)
@@ -4455,6 +4602,15 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
         imgui.end_menu_bar()
 
     available = imgui.get_content_region_avail()
+    if state.page == "Redesign":
+        draw_redesign(
+            state.redesign,
+            scale,
+            state,
+            circular_button=_circular_icon_button,
+        )
+        imgui.end()
+        return
     if state.page == "Panels":
         _draw_panel_page(available, state, scale)
         imgui.end()
@@ -4504,6 +4660,9 @@ def render(
     interactive_fps: float,
     initial_smoothing: float | None = None,
     initial_imgui_radius: float | None = None,
+    redesign_language: str = "en",
+    redesign_section: str = "Overview",
+    capsule_outline: str = "Neutral gray",
 ) -> None:
     window_width, window_height = _probe_window_size(width, height, ui_scale)
     window = Window(
@@ -4527,7 +4686,10 @@ def render(
             page=initial_page,
             geometry_tab=initial_geometry_tab,
             rotate_ring_cap=initial_rotate_cap,
+            capsule_outline=capsule_outline,
         )
+        state.redesign.language = redesign_language
+        state.redesign.section = redesign_section
         if initial_smoothing is not None:
             for _, name in CORNER_CONTROLS:
                 setattr(state, name, initial_smoothing)
@@ -4541,7 +4703,7 @@ def render(
                     frame_started = time.perf_counter()
                     window.begin_frame()
                     _draw_workspace(window, state)
-                    if imgui.is_key_pressed(imgui.Key.escape, False):
+                    if state.page != "Redesign" and imgui.is_key_pressed(imgui.Key.escape, False):
                         if state.joint_value_open:
                             state.joint_value_open = False
                         elif state.value_open:
@@ -4586,9 +4748,18 @@ def main() -> None:
     )
     parser.add_argument(
         "--page",
-        choices=("workspace", "panels", "geometry"),
+        choices=("workspace", "panels", "geometry", "redesign"),
         default="workspace",
         help="Initial probe page; interactive mode can switch from the Probe menu",
+    )
+    parser.add_argument("--redesign-language", choices=("en", "zh"), default="en")
+    parser.add_argument(
+        "--capsule-outline", choices=("neutral-gray", "soft-white"), default="neutral-gray"
+    )
+    parser.add_argument(
+        "--redesign-section",
+        choices=("overview", "inspector", "control", "keys"),
+        default="overview",
     )
     parser.add_argument(
         "--geometry-tab",
@@ -4669,6 +4840,9 @@ def main() -> None:
         interactive_fps=args.fps,
         initial_smoothing=args.smoothing,
         initial_imgui_radius=args.imgui_radius,
+        redesign_language=args.redesign_language,
+        redesign_section=args.redesign_section.title(),
+        capsule_outline=args.capsule_outline.replace("-", " ").capitalize(),
     )
     print("interactive probe closed" if args.interactive else output)
 
