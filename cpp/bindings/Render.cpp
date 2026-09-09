@@ -123,7 +123,8 @@ void bindRender(nb::module_ &module) {
         .def_ro("shadow_rendered", &FrameStats::shadowRendered)
         .def_ro("shadow_reused", &FrameStats::shadowReused)
         .def_ro("shadow_instances", &FrameStats::shadowInstances)
-        .def_ro("culled_shadow_instances", &FrameStats::culledShadowInstances);
+        .def_ro("culled_shadow_instances", &FrameStats::culledShadowInstances)
+        .def_ro("culled_instances", &FrameStats::culledInstances);
     nb::class_<Capabilities>(module, "Capabilities")
         .def_ro("backend", &Capabilities::backend)
         .def_ro("device", &Capabilities::device)
@@ -513,6 +514,8 @@ void bindRender(nb::module_ &module) {
                 return r.readback(frame, product, region);
             },
             nb::arg("frame"), nb::arg("product"), nb::arg("region") = Region{})
+        .def("read", &RenderRuntime::read, nb::arg("frame"), nb::arg("product"),
+             nb::arg("region") = Region{}, nb::call_guard<nb::gil_scoped_release>())
         .def("poll", &RenderRuntime::poll, nb::call_guard<nb::gil_scoped_release>())
         .def("wait", &RenderRuntime::wait, nb::call_guard<nb::gil_scoped_release>())
         .def("advance", &RenderRuntime::advance, nb::call_guard<nb::gil_scoped_release>())

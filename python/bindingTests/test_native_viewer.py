@@ -350,7 +350,7 @@ def test_viewer_projection_and_colors_match_opengl_after_resize():
         assert np.percentile(error, 99) <= 3
 
 
-def _metal_display_sync(window):
+def _metal_presentation(window):
     import ctypes as c
 
     objc = c.CDLL("/usr/lib/libobjc.A.dylib")
@@ -376,7 +376,12 @@ def _metal_display_sync(window):
         if not value:
             return
         if "MetalLayer" in objc.object_getClassName(value).decode():
-            states.append(bool(send(value, "displaySyncEnabled", result=c.c_bool)))
+            states.append(
+                (
+                    bool(send(value, "displaySyncEnabled", result=c.c_bool)),
+                    int(send(value, "maximumDrawableCount", result=c.c_ulong)),
+                )
+            )
         for child in array(value, "sublayers"):
             layer(child)
 
@@ -406,7 +411,9 @@ def test_vsync_controls_gpu_presentation_and_survives_peer_close():
             a.window.set_vsync(enabled)
             for _ in range(3):
                 a.sync()
-            assert all(value is enabled for value in _metal_display_sync(a.window))
+            assert all(
+                value == (enabled, 2 if enabled else 3) for value in _metal_presentation(a.window)
+            )
         with build(
             Path("assets/test_scene.xml"),
             renderer="bgfx",
@@ -418,13 +425,17 @@ def test_vsync_controls_gpu_presentation_and_survives_peer_close():
             a.sync()
             b.sync()
             # bgfx shares presentation policy: a synchronized peer retains VSync.
-            assert all(_metal_display_sync(a.window)) and all(_metal_display_sync(b.window))
+            assert all(
+                value == (True, 2)
+                for window in (a.window, b.window)
+                for value in _metal_presentation(window)
+            )
         a.sync()
-        assert all(_metal_display_sync(a.window))
+        assert all(value == (True, 2) for value in _metal_presentation(a.window))
         a.window.set_vsync(False)
         for _ in range(3):
             a.sync()
-        assert not any(_metal_display_sync(a.window))
+        assert all(value == (False, 3) for value in _metal_presentation(a.window))
 
 
 @pytest.mark.parametrize(("requested", "effective"), [(0, 1), (3, 2), (24, 4)])

@@ -337,3 +337,65 @@ def test_invalid_native_visual_updates_preserve_the_scene(native, runtime):
         runtime.readback(runtime.render(target, camera), native.Product.COLOR)
     ).image
     np.testing.assert_array_equal(expected, actual)
+
+
+def test_readback_regions_preserve_padded_rows_and_owned_results(native, runtime):
+    source, transforms, camera = fixture_scene(native)
+    runtime.set_scene(source)
+    runtime.update(transforms)
+    target = runtime.create_target(193, 137, samples=4)
+    frame = runtime.render(target, camera)
+    retained = []
+    for product in (
+        native.Product.COLOR,
+        native.Product.RGBA,
+        native.Product.OBJECT_ID,
+        native.Product.SEGMENTATION,
+        native.Product.METRIC_DEPTH,
+    ):
+        reference = runtime.read(frame, product).image.copy()
+        tickets = []
+        for x, y, width, height in ((7, 9, 31, 37), (192, 136, 1, 1), (5, 6, 0, 0)):
+            region = native.Region()
+            region.x, region.y, region.width, region.height = x, y, width, height
+            expected = reference[
+                y : y + height if height else None, x : x + width if width else None
+            ]
+            tickets.append((runtime.readback(frame, product, region), expected.copy()))
+        for ticket, expected in tickets:
+            image = runtime.wait(ticket).image
+            np.testing.assert_array_equal(image, expected)
+            assert image.flags.c_contiguous
+            retained.append((image, expected))
+    runtime.resize(target, 47, 61)
+    frame = runtime.render(target, camera)
+    runtime.read(frame, native.Product.COLOR)
+    runtime.close()
+    for image, expected in retained:
+        np.testing.assert_array_equal(image, expected)
+
+
+def test_visibility_tracks_camera_pose_and_deformed_mesh_bounds(native, runtime):
+    source, transforms, camera = fixture_scene(native)
+    transforms[:2, 0, 3] = [-100, 100]
+    runtime.set_scene(source)
+    runtime.update(transforms)
+    target = runtime.create_target(193, 137)
+    frame = runtime.render(target, camera)
+    assert frame.statistics.culled_instances == 4
+    assert frame.statistics.instances == 2
+    assert set(np.unique(runtime.read(frame, native.Product.OBJECT_ID).image)) == {0, 0xFFFFFFFF}
+    camera.view = native.look_at([100, 0, 5], [100, 0, 0], [0, 1, 0])
+    frame = runtime.render(target, camera)
+    assert set(np.unique(runtime.read(frame, native.Product.OBJECT_ID).image)) == {0, 0xFEDCBA98}
+    # Deformation moves local geometry into a different world-space bound.
+    points = np.array(
+        [[99.2, -0.8, 0], [100.8, -0.8, 0], [100.8, 0.8, 0], [99.2, 0.8, 0]], np.float32
+    )
+    runtime.update_mesh(0, points, np.tile([0, 0, 1], (4, 1)))
+    frame = runtime.render(target, camera)
+    assert set(np.unique(runtime.read(frame, native.Product.OBJECT_ID).image)) == {0, 0xFFFFFFFF}
+    transforms[2, 0, 3] = 200
+    runtime.update(transforms, sequence=1)
+    frame = runtime.render(target, camera)
+    assert not runtime.read(frame, native.Product.OBJECT_ID).image.any()

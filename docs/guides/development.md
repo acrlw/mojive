@@ -98,8 +98,17 @@ outside the current roadmap. EnTT requires a demonstrated infrastructure need. G
 The optional `mojive._native` module is built separately behind the public bgfx backend.
 GLM camera calculations preserve the existing row-major contract. The native
 log supports independent cursors and optional rotating file output without changing host logging.
-An offscreen `RenderRuntime` owns one native backend thread, bounded dispatch and joined teardown;
-Python calls release the GIL while waiting. Window event handling remains a platform concern.
+`RenderRuntime` owns one native backend thread, bounded dispatch and joined teardown.
+bgfx processes commands on that owner instead of adding a second CPU frame queue; GPU execution
+remains asynchronous, with at most two frames in flight. Metal uses two presentation images
+with VSync and a third spare image without VSync to avoid compositor-owned drawable stalls.
+Python calls release the GIL while waiting. Window events and ImGui stay on
+the UI thread, independently of physics and resource workers.
+
+Synchronous readback submits the copy and waits in one owner job. Asynchronous requests capture
+the submitted frame before later draws can replace it. Readback uses aligned bgfx buffers, with
+a GPU-only resolved color copy for MSAA targets. Row padding is removed at the owned-image
+boundary; returned NumPy arrays remain valid after reuse, resize and runtime teardown.
 
 ```bash
 make cpp-python-test

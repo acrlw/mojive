@@ -294,7 +294,7 @@ class NativeWindow(Window):
     def read_frame(self):
         if self._frame_token is None:
             return None
-        result = self.runtime.wait(self.runtime.readback(self._frame_token, self.api.Product.COLOR))
+        result = self.runtime.read(self._frame_token, self.api.Product.COLOR)
         return result.image[::-1].copy() if result.state == self.api.ReadbackState.READY else None
 
     def close(self):

@@ -215,6 +215,10 @@ void RenderRuntime::destroy(Texture texture) {
 FrameToken RenderRuntime::renderUi(const UiFrame &frame, Target output) {
     return mImpl->invoke([&](Renderer &r) { return r.renderUi(frame, output); });
 }
+ReadbackResult RenderRuntime::read(FrameToken frame, Product product, Region region) {
+    return mImpl->invoke(
+        [&](Renderer &r) { return waitForReadback(r, r.readback(frame, product, region)); });
+}
 ReadbackResult RenderRuntime::wait(ReadbackTicket ticket) {
     return mImpl->invoke([&](Renderer &r) { return waitForReadback(r, ticket); });
 }
