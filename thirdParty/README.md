@@ -51,6 +51,15 @@ for an offscreen-only runtime. The patch preserves reset-selected anisotropy ind
 a swap chain so Viewer and offscreen textures use the same filtering. The submodule remains
 unchanged; CMake fails if the pinned source context no longer matches. Reconcile this patch
 explicitly during a bgfx update and rerun textured tendon and image-light parity.
+The patch also restricts `synchronizeResource` to Managed storage; Metal Shared readback buffers
+are already coherent and reject that operation under API validation.
+
+`cpp/cmake/MetalRasterization.cmake` converts offscreen viewport, scissor and winding to
+bottom-left rasterization while keeping swap-chain presentation top-left. Negative viewport
+height aligns triangle edge ownership as well as the standard MSAA sample pattern with OpenGL.
+Texture-origin metadata drives sampling and public readback conversion. Reconcile checked
+replacements during upgrades; verify exact 2/4/8x MSAA coverage, depth, ROI readback, asymmetric
+UI composition, and lifecycle with Metal API validation enabled.
 
 ## bgfx Vulkan peer presentation and rasterization
 

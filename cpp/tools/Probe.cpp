@@ -55,7 +55,7 @@ static SceneSource fixture() {
                      {{0.8f, 0.8f, 0}, {0, 0, 1}},
                      {{-0.8f, 0.8f, 0}, {0, 0, 1}}};
     mesh.indices = {0, 1, 2, 0, 2, 3};
-    source.meshes.push_back(mesh);
+    source.meshes.push_back(std::make_shared<Mesh>(mesh));
     source.instances = {{0, 0x01000001, {-1, 0x1000001}, {1, 0.2f, 0.1f, 1}},
                         {0, 0xfedcba98, {INT32_MIN, INT32_MAX}, {0.1f, 1, 0.2f, 1}},
                         {0, UINT32_MAX, {-23456789, 42}, {0.2f, 0.3f, 1, 1}}};
@@ -190,7 +190,7 @@ static void conformance(Renderer &renderer, const std::filesystem::path &output)
             "Readback backpressure not enforced");
     for (auto ticket : tickets)
         require(wait(renderer, ticket).state == ReadbackState::Ready, "Readback queue failed");
-    auto changed = source.meshes[0].vertices;
+    auto changed = source.meshes[0]->vertices;
     for (auto &v : changed)
         v.position[2] += 0.5f;
     renderer.updateMesh(0, changed);

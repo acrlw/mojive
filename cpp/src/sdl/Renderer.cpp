@@ -421,7 +421,7 @@ class SdlRenderer final : public Renderer {
         mMeshes.resize(scene.meshes.size());
         for (size_t i = 0; i < mMeshes.size(); ++i) {
             auto &m = mMeshes[i];
-            auto &s = scene.meshes[i];
+            auto &s = *scene.meshes[i];
             uploadBuffer(m.vertices, SDL_GPU_BUFFERUSAGE_VERTEX, s.vertices.data(),
                          s.vertices.size() * sizeof(Vertex));
             uploadBuffer(m.indices, SDL_GPU_BUFFERUSAGE_INDEX, s.indices.data(),
@@ -456,7 +456,7 @@ class SdlRenderer final : public Renderer {
     }
     void updateMesh(uint32_t index, std::span<const Vertex> vertices) override {
         owner();
-        if (index >= mMeshes.size() || vertices.size() != mScene.meshes[index].vertices.size())
+        if (index >= mMeshes.size() || vertices.size() != mScene.meshes[index]->vertices.size())
             throw std::invalid_argument("Invalid dynamic mesh update");
         uploadBuffer(mMeshes[index].vertices, SDL_GPU_BUFFERUSAGE_VERTEX, vertices.data(),
                      vertices.size_bytes());
@@ -609,7 +609,7 @@ class SdlRenderer final : public Renderer {
                 SDL_BindGPUVertexBuffers(pass, 0, bindings, 2);
                 SDL_GPUBufferBinding indices{m.indices.gpu, 0};
                 SDL_BindGPUIndexBuffer(pass, &indices, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-                SDL_DrawGPUIndexedPrimitives(pass, mScene.meshes[i].indices.size(),
+                SDL_DrawGPUIndexedPrimitives(pass, mScene.meshes[i]->indices.size(),
                                              m.instances.size(), 0, 0, 0);
                 offset += m.instances.size() * 80;
                 ++mStats.drawCalls;

@@ -25,7 +25,25 @@ void validateUi(const UiFrame &ui) {
     }
 }
 
-void validateScene(const SceneSource &scene) {
+void validateMesh(const Mesh &mesh) {
+    if (!mesh.texcoords.empty() && mesh.texcoords.size() != mesh.vertices.size())
+        throw std::invalid_argument("Texture coordinate count does not match vertices");
+    for (const auto &uv : mesh.texcoords)
+        for (float value : uv)
+            if (!std::isfinite(value))
+                throw std::invalid_argument("Non-finite texture coordinate");
+    if (mesh.vertices.empty() || mesh.indices.empty() || mesh.indices.size() % 3)
+        throw std::invalid_argument("Meshes require indexed triangles");
+    for (auto i : mesh.indices)
+        if (i >= mesh.vertices.size())
+            throw std::invalid_argument("Invalid vertex index");
+    for (const auto &vertex : mesh.vertices)
+        for (const auto &values : {vertex.position, vertex.normal})
+            for (float value : values)
+                if (!std::isfinite(value))
+                    throw std::invalid_argument("Non-finite mesh vertex");
+}
+void validateScene(const SceneSource &scene, bool validateGeometry) {
     if (!std::isfinite(scene.extent) || scene.extent <= 0 || !std::isfinite(scene.shadowClip) ||
         scene.shadowClip <= 0)
         throw std::invalid_argument("Scene extent and shadow clip must be positive and finite");
@@ -77,22 +95,10 @@ void validateScene(const SceneSource &scene) {
                 throw std::invalid_argument("Invalid material index");
     }
     for (const auto &mesh : scene.meshes) {
-        if (!mesh.texcoords.empty() && mesh.texcoords.size() != mesh.vertices.size())
-            throw std::invalid_argument("Texture coordinate count does not match vertices");
-        for (const auto &uv : mesh.texcoords)
-            for (float value : uv)
-                if (!std::isfinite(value))
-                    throw std::invalid_argument("Non-finite texture coordinate");
-        if (mesh.vertices.empty() || mesh.indices.empty() || mesh.indices.size() % 3)
-            throw std::invalid_argument("Meshes require indexed triangles");
-        for (auto i : mesh.indices)
-            if (i >= mesh.vertices.size())
-                throw std::invalid_argument("Invalid vertex index");
-        for (const auto &vertex : mesh.vertices)
-            for (const auto &values : {vertex.position, vertex.normal})
-                for (float value : values)
-                    if (!std::isfinite(value))
-                        throw std::invalid_argument("Non-finite mesh vertex");
+        if (!mesh)
+            throw std::invalid_argument("Missing scene mesh");
+        if (validateGeometry)
+            validateMesh(*mesh);
     }
     for (const auto &instance : scene.instances) {
         if (instance.mesh >= scene.meshes.size())

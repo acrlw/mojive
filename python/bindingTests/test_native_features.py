@@ -329,3 +329,165 @@ def test_shadow_culling_keeps_moving_casters_and_matches_opengl():
             images[backend] = rows
     for expected, actual in zip(images["opengl"], images["bgfx"], strict=True):
         assert np.abs(actual.astype(int) - expected).mean() < 0.5
+
+
+def test_many_targets_reuse_frame_views_without_cross_target_state():
+    from contextlib import ExitStack
+
+    from mojive.render.backend import RenderRequest
+
+    request = RenderRequest(RenderProduct.COLOR | RenderProduct.METRIC_DEPTH)
+    with ExitStack() as stack:
+        targets = []
+        for index in range(40):
+            scene = Scene()
+            scene.box(color=((index + 1) / 50, 0.3, 0.8, 1))
+            camera = CameraView(far=20 + index)
+            renderer = stack.enter_context(
+                SceneRenderer(
+                    scene.source, renderer="bgfx", width=40, height=30, samples=1, camera=camera
+                )
+            )
+            renderer.update(scene.frame)
+            renderer.set_debug_view("albedo")
+            renderer._backend.render(request=request)
+            targets.append(renderer)
+        # Read in reverse order after other scenes have reused the same view IDs.
+        expected = []
+        for index in reversed(range(len(targets))):
+            backend = targets[index]._backend
+            rgb = backend.target.read_rgb()
+            depth = backend.target.read_metric_depth()
+            assert depth[0, 0] == pytest.approx(20 + index)
+            assert depth[15, 20] < 10
+            expected.append(rgb)
+        assert len({image[15, 20, 0] for image in expected}) == len(targets)
+        targets[20].close()
+        targets[0].resize(53, 37)
+        for index in (1, 19, 21, 39):
+            backend = targets[index]._backend
+            backend.render(request=request)
+            np.testing.assert_array_equal(backend.target.read_rgb(), expected[39 - index])
+
+
+def test_canceled_queued_readbacks_release_capacity_and_leave_out_untouched():
+    import threading
+
+    import mujoco
+
+    from mojive import Renderer
+
+    model = mujoco.MjModel.from_xml_string(
+        '<mujoco><worldbody><geom type="box" size=".1 .1 .1"/></worldbody></mujoco>'
+    )
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    release = threading.Event()
+    started = [threading.Event(), threading.Event()]
+    with Renderer(model, width=40, height=30, renderer="bgfx") as renderer:
+        renderer.update_scene(data)
+        reference = renderer.render()
+
+        def occupy(index):
+            started[index].set()
+            release.wait(10)
+
+        workers = [renderer._backend.device.readbacks.submit(occupy, i) for i in range(2)]
+        outputs = [np.full((30, 40, 3), 17, np.uint8) for _ in range(8)]
+        try:
+            assert all(event.wait(2) for event in started)
+            futures = [renderer.render_async(out=out) for out in outputs]
+            with pytest.raises(RuntimeError, match="Readback queue is full"):
+                renderer.render_async()
+            assert all(future.cancel() for future in futures)
+        finally:
+            release.set()
+            for worker in workers:
+                worker.result(timeout=2)
+        # No private poll or cleanup call is required after cancellation.
+        np.testing.assert_array_equal(renderer.render(), reference)
+        np.testing.assert_array_equal(renderer.render_async().result(timeout=10), reference)
+        assert all(future.cancelled() for future in futures)
+        for out in outputs:
+            np.testing.assert_array_equal(out, 17)
+
+
+def test_source_recompile_reuses_assets_and_uploads_only_replacements():
+    from mojive.render.mesh import builtin_mesh
+    from mojive.types import MeshKey, MeshShape, TextureData, TextureType
+
+    scene = Scene()
+    mesh = builtin_mesh(MeshKey(MeshShape.BOX))
+    item = scene.mesh(mesh, size=(0.5, 0.5, 0.5), material=Material(texture="albedo"))
+    texture = TextureData("albedo", TextureType.TWO_D, np.full((16, 16, 3), 220, np.uint8))
+    scene.add_texture(texture)
+    with SceneRenderer(scene.source, renderer="bgfx", width=100, height=80, samples=0) as first:
+        first.update(scene.frame)
+        baseline = first.render()
+        runtime = first._backend.runtime
+        initial = runtime.resource_stats()
+        # Scene replaces arrays with fresh immutable objects, as recompilation does.
+        scene.replace_mesh(item.mesh_key, mesh)
+        scene.add_texture(texture)
+        first.set_scene(scene.source)
+        first.update(scene.frame)
+        np.testing.assert_array_equal(first.render(), baseline)
+        same = runtime.resource_stats()
+        assert (same.mesh_uploads, same.texture_uploads, same.upload_bytes) == (
+            initial.mesh_uploads,
+            initial.texture_uploads,
+            initial.upload_bytes,
+        )
+        with SceneRenderer(scene.source, renderer="bgfx", width=100, height=80, samples=0) as peer:
+            peer.update(scene.frame)
+            np.testing.assert_array_equal(peer.render(), baseline)
+            assert runtime.resource_stats().upload_bytes == initial.upload_bytes
+            scene.add_texture(
+                replace(texture, pixels=np.full((16, 16, 3), [30, 80, 240], np.uint8))
+            )
+            first.set_scene(scene.source)
+            first.update(scene.frame)
+            assert not np.array_equal(first.render(), baseline)
+            after = runtime.resource_stats()
+            assert after.mesh_uploads == initial.mesh_uploads
+            assert after.texture_uploads == initial.texture_uploads + 1
+            # Replacing one scene's material must not change its peer's pixels.
+            np.testing.assert_array_equal(peer.render(), baseline)
+        scene.replace_mesh(item.mesh_key, replace(mesh, positions=mesh.positions * 0.6))
+        first.set_scene(scene.source)
+        first.update(scene.frame)
+        first.render()
+        assert runtime.resource_stats().mesh_uploads == initial.mesh_uploads + 1
+
+
+def test_shared_geometry_deformation_is_local_and_source_restore_is_immutable():
+    from mojive.render.mesh import builtin_mesh
+    from mojive.types import MeshKey, MeshShape, MeshUpdate
+
+    scene = Scene()
+    item = scene.mesh(builtin_mesh(MeshKey(MeshShape.BOX)), size=(0.5, 0.5, 0.5))
+    source = scene.source
+    mesh = source.meshes[item.mesh_key]
+    with (
+        SceneRenderer(source, renderer="bgfx", width=100, height=80, samples=0) as first,
+        SceneRenderer(source, renderer="bgfx", width=100, height=80, samples=0) as peer,
+    ):
+        first.update(scene.frame)
+        peer.update(scene.frame)
+        baseline = first.render()
+        np.testing.assert_array_equal(peer.render(), baseline)
+        first.set_flag(RenderFlag.WIREFRAME, True)
+        peer.set_flag(RenderFlag.WIREFRAME, True)
+        wire = peer.render()
+        for scale in (0.7, 0.4):
+            first.update(
+                replace(
+                    scene.frame,
+                    mesh_updates={item.mesh_key: MeshUpdate(mesh.positions * scale, mesh.normals)},
+                )
+            )
+            assert not np.array_equal(first.render(), wire)
+            np.testing.assert_array_equal(peer.render(), wire)
+        first.set_scene(source)
+        first.update(scene.frame)
+        np.testing.assert_array_equal(first.render(), wire)

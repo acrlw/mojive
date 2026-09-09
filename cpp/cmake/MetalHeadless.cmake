@@ -20,6 +20,24 @@ string(REPLACE "m_depthClamp = m_supportsDepthClipMode" "m_samplerAnisotropy = (
             m_depthClamp = m_supportsDepthClipMode" metal_code "${metal_code}")
 string(REPLACE "uint32_t  m_reset;" "uint32_t  m_reset;
         uint32_t m_samplerAnisotropy = 1;" metal_code "${metal_code}")
+# Shared Apple-silicon readback buffers are CPU coherent after command completion.
+# Metal only permits explicit synchronization on Managed storage.
+foreach(resource IN ITEMS "buffer.m_ptr" "swapChain->m_screenshotTarget")
+    set(call "synchronizeResource(${resource});")
+    string(FIND "${metal_code}" "${call}" match)
+    if(match LESS 0)
+        message(FATAL_ERROR "Reconcile Metal readback synchronization with updated bgfx source")
+    endif()
+    if(resource STREQUAL "buffer.m_ptr")
+        set(encoder "bce")
+    else()
+        set(encoder "m_blitCommandEncoder")
+    endif()
+    string(REPLACE "${encoder}->${call}"
+        "if (${resource}->storageMode() == MTL::StorageModeManaged) ${encoder}->${call}"
+        metal_code "${metal_code}")
+endforeach()
+include("${CMAKE_CURRENT_LIST_DIR}/MetalRasterization.cmake")
 set(patched_metal "${CMAKE_BINARY_DIR}/patched/renderer_mtl.cpp")
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/patched")
 file(CONFIGURE OUTPUT "${patched_metal}" CONTENT "${metal_code}" @ONLY)

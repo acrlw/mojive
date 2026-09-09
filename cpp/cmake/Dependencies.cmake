@@ -59,7 +59,8 @@ if(MOJIVE_BUILD_BGFX)
     # surface implementations and selects X11/Wayland from PlatformData at runtime.
     set(BGFX_WITH_WAYLAND OFF CACHE BOOL "" FORCE)
     add_subdirectory("${bgfx_cmake_SOURCE_DIR}" "${bgfx_cmake_BINARY_DIR}" EXCLUDE_FROM_ALL)
-    target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_RENDERER_WEBGPU=0)
+    target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_RENDERER_WEBGPU=0
+        BGFX_CONFIG_MAX_FRAME_BUFFERS=1024 BGFX_CONFIG_MAX_TEXTURES=8192)
     if(APPLE)
         include("${CMAKE_CURRENT_LIST_DIR}/MetalHeadless.cmake")
         target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_RENDERER_METAL=1)

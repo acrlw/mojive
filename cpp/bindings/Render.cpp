@@ -6,6 +6,7 @@
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/array.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
@@ -113,6 +114,10 @@ void bindRender(nb::module_ &module) {
         .def_ro("state", &ReadbackResult::state)
         .def_ro("frame", &ReadbackResult::frame)
         .def_prop_ro("image", &imageArray);
+    nb::class_<ResourceStats>(module, "ResourceStats")
+        .def_ro("mesh_uploads", &ResourceStats::meshUploads)
+        .def_ro("texture_uploads", &ResourceStats::textureUploads)
+        .def_ro("upload_bytes", &ResourceStats::uploadBytes);
     nb::class_<FrameStats>(module, "FrameStats")
         .def_prop_ro("cpu_ms",
                      [](const FrameStats &s) {
@@ -270,8 +275,39 @@ void bindRender(nb::module_ &module) {
         .def_rw("emission", &Material::emission)
         .def_rw("specular", &Material::specular)
         .def_rw("shininess", &Material::shininess);
+    nb::class_<Mesh>(module, "PreparedMesh");
+    nb::class_<TextureSource>(module, "PreparedTexture");
+    module.def("prepare_mesh", [](Array<float, -1, 3> positions, Array<float, -1, 3> normals,
+                                  Array<uint32_t, -1> indices, Array<float, -1, 2> uv) {
+        nb::gil_scoped_release release;
+        auto mesh = std::make_shared<Mesh>();
+        mesh->vertices = vertices(positions, normals);
+        mesh->indices.assign(indices.data(), indices.data() + indices.size());
+        mesh->texcoords.resize(uv.shape(0));
+        if (uv.size())
+            std::memcpy(mesh->texcoords.data(), uv.data(), uv.size() * sizeof(float));
+        validateMesh(*mesh);
+        return std::shared_ptr<const Mesh>(std::move(mesh));
+    });
+    module.def("prepare_texture", [](Array<uint8_t, -1, -1, -1, -1> pixels, bool cube, bool srgb) {
+        if (pixels.shape(0) != (cube ? 6 : 1))
+            throw std::invalid_argument("Invalid texture face count");
+        nb::gil_scoped_release release;
+        return prepareTexture({uint32_t(pixels.shape(2)), uint32_t(pixels.shape(1))},
+                              {pixels.data(), pixels.size()}, pixels.shape(3), cube, srgb);
+    });
     nb::class_<SceneSource>(module, "SceneSource")
         .def(nb::init<>())
+        .def("add_prepared_mesh",
+             [](SceneSource &s, std::shared_ptr<const Mesh> mesh) {
+                 s.meshes.push_back(std::move(mesh));
+                 return s.meshes.size() - 1;
+             })
+        .def("add_prepared_texture",
+             [](SceneSource &s, const TextureSource &texture) {
+                 s.textures.push_back(texture);
+                 return s.textures.size() - 1;
+             })
         .def_rw("revision", &SceneSource::revision)
         .def_rw("materials", &SceneSource::materials)
         .def_rw("planar_kinds", &SceneSource::planarKinds)
@@ -339,7 +375,9 @@ void bindRender(nb::module_ &module) {
             nb::arg("indices").noconvert())
         .def("set_mesh_texcoords",
              [](SceneSource &s, size_t mesh, Array<float, -1, 2> uv) {
-                 auto &out = s.meshes.at(mesh).texcoords;
+                 auto replacement = std::make_shared<Mesh>(*s.meshes.at(mesh));
+                 s.meshes.at(mesh) = replacement;
+                 auto &out = replacement->texcoords;
                  out.resize(uv.shape(0));
                  if (!out.empty())
                      std::memcpy(out.data(), uv.data(), uv.size() * sizeof(float));
@@ -366,7 +404,7 @@ void bindRender(nb::module_ &module) {
                 if (indices.size())
                     mesh.indices.assign(indices.data(), indices.data() + indices.size());
                 auto index = s.meshes.size();
-                s.meshes.push_back(std::move(mesh));
+                s.meshes.push_back(std::make_shared<Mesh>(std::move(mesh)));
                 return index;
             },
             nb::arg("positions"), nb::arg("normals"), nb::arg("indices").noconvert())
@@ -390,6 +428,8 @@ void bindRender(nb::module_ &module) {
             nb::arg("meshes").noconvert(), nb::arg("object_ids").noconvert(),
             nb::arg("segmentation").noconvert(), nb::arg("colors"));
     nb::class_<RenderRuntime>(module, "RenderRuntime")
+        .def("resource_stats", &RenderRuntime::resourceStats,
+             nb::call_guard<nb::gil_scoped_release>())
         .def(
             "__init__",
             [](RenderRuntime *self, std::string shaders, LogOptions options, bool wayland) {

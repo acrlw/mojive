@@ -15,6 +15,7 @@
 #include <fstream>
 #include <glm/gtc/type_ptr.hpp>
 #include <limits>
+#include <map>
 #include <mojive/backends/Bgfx.hpp>
 #include <optional>
 #include <stdexcept>
@@ -51,6 +52,22 @@ struct GpuMesh {
     bgfx::DynamicVertexBufferHandle wireVertices = BGFX_INVALID_HANDLE;
     size_t vertexCount = 0;
     MeshBounds bounds;
+    std::shared_ptr<const Mesh> source;
+    std::vector<Vertex> deformed;
+    ~GpuMesh() {
+        for (auto handle : {vertices, wireVertices})
+            if (bgfx::isValid(handle))
+                bgfx::destroy(handle);
+        if (bgfx::isValid(indices))
+            bgfx::destroy(indices);
+    }
+};
+struct GpuTexture {
+    bgfx::TextureHandle handle = BGFX_INVALID_HANDLE;
+    ~GpuTexture() {
+        if (bgfx::isValid(handle))
+            bgfx::destroy(handle);
+    }
 };
 struct GpuVertex {
     Vertex vertex;
@@ -81,10 +98,11 @@ struct GpuScene {
     }
     ShadowMaps shadows;
     std::vector<bgfx::TextureHandle> textures;
+    std::vector<std::shared_ptr<GpuTexture>> textureOwners;
     std::vector<GpuBatch> batches;
     SceneSource source;
     uint64_t sequence = 0;
-    std::vector<GpuMesh> meshes;
+    std::vector<std::shared_ptr<GpuMesh>> meshes;
     std::vector<std::array<float, 40>> instances;
     std::vector<MeshBounds> worldBounds;
 };
@@ -101,6 +119,7 @@ struct GpuTarget {
     bool surface = false, colorOnly = false, dataOnly = false, vsync = false;
     std::optional<Product> dataProduct;
     uint16_t view = 0;
+    uint32_t viewFrame = UINT32_MAX;
     uint64_t generation = 1;
     uint32_t lastRender = UINT32_MAX, lastReadback = UINT32_MAX;
     FrameToken latest;
@@ -132,6 +151,14 @@ class BgfxRenderer final : public Renderer {
     std::string mShaderDirectory;
     WindowSystem mWindowSystem = WindowSystem::Native;
     std::unordered_map<uint64_t, GpuScene> mScenes{{0, GpuScene{}}};
+    std::unordered_map<const Mesh *, std::weak_ptr<GpuMesh>> mMeshCache;
+    using TextureKey = std::tuple<const void *, uint32_t, uint32_t, bool, bool, bool>;
+    struct TextureEntry {
+        std::weak_ptr<const std::vector<std::byte>> pixels;
+        std::weak_ptr<GpuTexture> gpu;
+    };
+    std::map<TextureKey, TextureEntry> mTextureCache;
+    ResourceStats mResources;
     uint64_t mSubmission = 0;
     uint32_t mGpuFrame = 0;
     // Submit presentation with its rendered frame, including when the caller pauses.
@@ -224,18 +251,30 @@ class BgfxRenderer final : public Renderer {
         mPendingCommands = false;
         mPassCount = 0;
         mNextSceneView = 48;
+        mTargetViews = 0;
         mUsedPasses.fill(false);
+    }
+    void assignTargetView(GpuTarget &target) {
+        if (target.viewFrame == mGpuFrame)
+            return;
+        // View and clear-palette slots belong to a submitted GPU frame, not to
+        // long-lived targets. Flush before reusing them for another target.
+        if (mTargetViews == 12)
+            flush();
+        target.view = mTargetViews++ * 4;
+        target.viewFrame = mGpuFrame;
     }
     void beginTarget(GpuTarget &target) {
         if (target.lastRender == mGpuFrame || target.lastReadback == mGpuFrame)
             flush();
+        assignTargetView(target);
         target.lastRender = mGpuFrame;
         mPendingCommands = true;
     }
     std::unordered_map<uint64_t, GpuTarget> mTargets;
     std::unordered_map<uint64_t, bgfx::TextureHandle> mTextures;
     std::vector<ReadbackSlot> mReadbacks;
-    std::array<bool, 12> mViews{};
+    uint16_t mTargetViews = 0;
     FrameStats mStats;
     bgfx::VertexLayout mVertices, mUiVertices, mWireVertices;
     std::vector<uint32_t> mDrawIndices;
@@ -308,16 +347,9 @@ class BgfxRenderer final : public Renderer {
         for (auto h : scene.debugBuffers)
             if (bgfx::isValid(h))
                 bgfx::destroy(h);
-        for (auto texture : scene.textures)
-            bgfx::destroy(texture);
-        for (auto &mesh : scene.meshes) {
-            if (bgfx::isValid(mesh.wireVertices))
-                bgfx::destroy(mesh.wireVertices);
-            if (bgfx::isValid(mesh.vertices))
-                bgfx::destroy(mesh.vertices);
-            if (bgfx::isValid(mesh.indices))
-                bgfx::destroy(mesh.indices);
-        }
+        scene.textures.clear();
+        scene.textureOwners.clear();
+        scene.meshes.clear();
     }
     bool renderShadows(GpuScene &scene, const CameraView &camera) {
         ShadowKey key{scene.geometryRevision, scene.lightingRevision, scene.style.shadowQuality,
@@ -372,7 +404,7 @@ class BgfxRenderer final : public Renderer {
                 for (size_t i = 0; i < count; ++i)
                     std::memcpy(buffer + i * stride, scene.instances[mDrawIndices[i]].data(),
                                 stride);
-                const auto &mesh = scene.meshes[batch.mesh];
+                const auto &mesh = *scene.meshes[batch.mesh];
                 bgfx::setVertexBuffer(0, mesh.vertices);
                 bgfx::setIndexBuffer(mesh.indices);
                 bindInstances(count, stride);
@@ -505,8 +537,8 @@ class BgfxRenderer final : public Renderer {
             auto *buffer = instanceMemory(count, stride);
             for (size_t i = 0; i < count; ++i)
                 std::memcpy(buffer + i * stride, scene.instances[mDrawIndices[i]].data(), stride);
-            bgfx::setVertexBuffer(0, scene.meshes[batch.mesh].vertices);
-            bgfx::setIndexBuffer(scene.meshes[batch.mesh].indices);
+            bgfx::setVertexBuffer(0, scene.meshes[batch.mesh]->vertices);
+            bgfx::setIndexBuffer(scene.meshes[batch.mesh]->indices);
             bindInstances(count, stride);
             bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_CULL_CW | BGFX_STATE_MSAA);
             bgfx::submit(maskView, mMaskProgram);
@@ -553,7 +585,7 @@ class BgfxRenderer final : public Renderer {
         for (const auto &batch : frame.surfaceBatches) {
             if (!batch.count || (batch.transparent && !scene.style.transparent))
                 continue;
-            auto &mesh = scene.meshes[batch.mesh];
+            auto &mesh = *scene.meshes[batch.mesh];
             bool wire = scene.style.wireframe || scene.style.debugView == 5;
             if (wire) {
                 if (!bgfx::isValid(mesh.wireVertices))
@@ -619,8 +651,8 @@ class BgfxRenderer final : public Renderer {
             const float params[] = {draw.maskRadius, bgfx::getCaps()->homogeneousDepth ? 1.f : 0.f,
                                     0, 0};
             bgfx::setUniform(mGizmoParams, params);
-            bgfx::setVertexBuffer(0, scene.meshes[draw.mesh].vertices);
-            bgfx::setIndexBuffer(scene.meshes[draw.mesh].indices);
+            bgfx::setVertexBuffer(0, scene.meshes[draw.mesh]->vertices);
+            bgfx::setIndexBuffer(scene.meshes[draw.mesh]->indices);
             uint64_t state = BGFX_STATE_WRITE_RGB |
                              BGFX_STATE_BLEND_FUNC_SEPARATE(
                                  BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA,
@@ -675,8 +707,8 @@ class BgfxRenderer final : public Renderer {
             bgfx::setUniform(mDebugViewProj, &vp[0][0]);
             bgfx::setUniform(mDebugProj, canonicalProj.data());
             if (batch.path == DebugPath::Solid) {
-                bgfx::setVertexBuffer(0, scene.meshes[batch.mesh].vertices);
-                bgfx::setIndexBuffer(scene.meshes[batch.mesh].indices);
+                bgfx::setVertexBuffer(0, scene.meshes[batch.mesh]->vertices);
+                bgfx::setIndexBuffer(scene.meshes[batch.mesh]->indices);
             } else
                 bgfx::setVertexBuffer(0, mDebugVertices, 0, vertices[path]);
             if (batch.path == DebugPath::Text)
@@ -704,14 +736,15 @@ class BgfxRenderer final : public Renderer {
         }
     }
     void updateWireMesh(GpuScene &scene, uint32_t index) {
-        auto &gpu = scene.meshes[index];
-        const auto &mesh = scene.source.meshes[index];
+        auto &gpu = *scene.meshes[index];
+        const auto &mesh = *scene.source.meshes[index];
+        const auto &vertices = gpu.deformed.empty() ? mesh.vertices : gpu.deformed;
         std::vector<WireVertex> expanded(mesh.indices.size());
         for (size_t i = 0; i < expanded.size(); ++i) {
             auto vertex = mesh.indices[i];
-            expanded[i].vertex = {mesh.vertices[vertex], mesh.texcoords.empty()
-                                                             ? std::array<float, 2>{0, 0}
-                                                             : mesh.texcoords[vertex]};
+            expanded[i].vertex = {vertices[vertex], mesh.texcoords.empty()
+                                                        ? std::array<float, 2>{0, 0}
+                                                        : mesh.texcoords[vertex]};
             expanded[i].bary = {0, 0, 0};
             expanded[i].bary[i % 3] = 1;
         }
@@ -1272,11 +1305,78 @@ class BgfxRenderer final : public Renderer {
             ++current.styleRevision;
         }
     }
+    ResourceStats resourceStats() const override {
+        owner();
+        return mResources;
+    }
+    std::shared_ptr<GpuMesh> uploadMesh(std::shared_ptr<const Mesh> input, bool cache = true) {
+        if (cache) {
+            auto found = mMeshCache.find(input.get());
+            if (found != mMeshCache.end())
+                if (auto existing = found->second.lock())
+                    return existing;
+        }
+        validateMesh(*input);
+        auto mesh = std::make_shared<GpuMesh>();
+        std::vector<GpuVertex> vertices(input->vertices.size());
+        for (size_t v = 0; v < vertices.size(); ++v)
+            vertices[v] = {input->vertices[v], input->texcoords.empty() ? std::array<float, 2>{0, 0}
+                                                                        : input->texcoords[v]};
+        mesh->vertices = bgfx::createDynamicVertexBuffer(
+            bgfx::copy(vertices.data(), vertices.size() * sizeof(GpuVertex)), mVertices);
+        mesh->indices = bgfx::createIndexBuffer(
+            bgfx::copy(input->indices.data(), input->indices.size() * sizeof(uint32_t)),
+            BGFX_BUFFER_INDEX32);
+        if (!bgfx::isValid(mesh->vertices) || !bgfx::isValid(mesh->indices))
+            throw std::runtime_error("Cannot allocate scene mesh");
+        mesh->vertexCount = input->vertices.size();
+        mesh->bounds = meshBounds(input->vertices);
+        mesh->source = std::move(input);
+        ++mResources.meshUploads;
+        mResources.uploadBytes +=
+            vertices.size() * sizeof(GpuVertex) + mesh->source->indices.size() * sizeof(uint32_t);
+        if (cache)
+            mMeshCache[mesh->source.get()] = mesh;
+        return mesh;
+    }
+    std::shared_ptr<GpuTexture> uploadSceneTexture(const TextureSource &texture) {
+        const TextureKey key{texture.rgba.get(), texture.size.width, texture.size.height,
+                             texture.mipmaps,    texture.srgb,       texture.cube};
+        auto found = mTextureCache.find(key);
+        if (found != mTextureCache.end() && found->second.pixels.lock() == texture.rgba)
+            if (auto existing = found->second.gpu.lock())
+                return existing;
+        extent(texture.size);
+        const auto flags =
+            (texture.srgb ? BGFX_TEXTURE_SRGB : 0) |
+            (texture.cube
+                 ? uint64_t(BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_W_CLAMP)
+                 : uint64_t(0));
+        auto *storage = new decltype(texture.rgba)(texture.rgba);
+        auto memory = bgfx::makeRef(
+            (*storage)->data(), (*storage)->size(),
+            [](void *, void *user) { delete static_cast<decltype(storage)>(user); }, storage);
+        auto result = std::make_shared<GpuTexture>();
+        result->handle =
+            texture.cube
+                ? bgfx::createTextureCube(texture.size.width, texture.mipmaps, 1,
+                                          bgfx::TextureFormat::RGBA8, flags, memory)
+                : bgfx::createTexture2D(texture.size.width, texture.size.height, texture.mipmaps, 1,
+                                        bgfx::TextureFormat::RGBA8, flags, memory);
+        if (!bgfx::isValid(result->handle))
+            throw std::runtime_error("Cannot allocate scene texture");
+        ++mResources.textureUploads;
+        mResources.uploadBytes += texture.rgba->size();
+        mTextureCache[key] = {texture.rgba, result};
+        return result;
+    }
     GpuScene uploadScene(const SceneSource &source) {
-        validateScene(source);
+        validateScene(source, false);
+        std::erase_if(mMeshCache, [](const auto &item) { return item.second.expired(); });
+        std::erase_if(mTextureCache, [](const auto &item) { return item.second.gpu.expired(); });
         GpuScene result;
-        // Texture pixels are upload inputs, not retained renderer state. Copy
-        // geometry for deformable/wire updates, and only texture metadata.
+        // Keep shared immutable geometry for deformation and wire expansion.
+        // Texture pixels are upload inputs; retain only their sampling metadata.
         result.source = {.revision = source.revision,
                          .meshes = source.meshes,
                          .instances = source.instances,
@@ -1298,49 +1398,12 @@ class BgfxRenderer final : public Renderer {
         result.worldBounds.resize(source.instances.size());
         result.meshes.resize(source.meshes.size());
         try {
-            for (size_t i = 0; i < source.meshes.size(); ++i) {
-                const auto &input = source.meshes[i];
-                auto &mesh = result.meshes[i];
-                std::vector<GpuVertex> vertices(input.vertices.size());
-                for (size_t v = 0; v < vertices.size(); ++v)
-                    vertices[v] = {input.vertices[v], input.texcoords.empty()
-                                                          ? std::array<float, 2>{0, 0}
-                                                          : input.texcoords[v]};
-                mesh.vertices = bgfx::createDynamicVertexBuffer(
-                    bgfx::copy(vertices.data(), vertices.size() * sizeof(GpuVertex)), mVertices);
-                mesh.indices = bgfx::createIndexBuffer(
-                    bgfx::copy(input.indices.data(), input.indices.size() * sizeof(uint32_t)),
-                    BGFX_BUFFER_INDEX32);
-                if (!bgfx::isValid(mesh.vertices) || !bgfx::isValid(mesh.indices))
-                    throw std::runtime_error("Cannot allocate scene mesh");
-                mesh.vertexCount = input.vertices.size();
-                mesh.bounds = meshBounds(input.vertices);
-            }
+            for (size_t i = 0; i < source.meshes.size(); ++i)
+                result.meshes[i] = uploadMesh(source.meshes[i]);
             for (const auto &texture : source.textures) {
-                extent(texture.size);
-                const auto flags =
-                    (texture.srgb ? BGFX_TEXTURE_SRGB : 0) |
-                    (texture.cube ? uint64_t(BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
-                                             BGFX_SAMPLER_W_CLAMP)
-                                  : uint64_t(0));
-                // bgfx releases this immutable storage after its render thread has
-                // consumed the upload. Do not duplicate large mip chains or rely
-                // on the caller keeping its SceneSource alive.
-                auto *storage = new decltype(texture.rgba)(texture.rgba);
-                auto memory = bgfx::makeRef(
-                    (*storage)->data(), (*storage)->size(),
-                    [](void *, void *user) { delete static_cast<decltype(storage)>(user); },
-                    storage);
-                auto handle =
-                    texture.cube
-                        ? bgfx::createTextureCube(texture.size.width, texture.mipmaps, 1,
-                                                  bgfx::TextureFormat::RGBA8, flags, memory)
-                        : bgfx::createTexture2D(texture.size.width, texture.size.height,
-                                                texture.mipmaps, 1, bgfx::TextureFormat::RGBA8,
-                                                flags, memory);
-                if (!bgfx::isValid(handle))
-                    throw std::runtime_error("Cannot allocate scene texture");
-                result.textures.push_back(handle);
+                auto owner = uploadSceneTexture(texture);
+                result.textures.push_back(owner->handle);
+                result.textureOwners.push_back(std::move(owner));
             }
             std::unordered_map<uint64_t, size_t> batches;
             for (uint32_t i = 0; i < source.instances.size(); ++i) {
@@ -1355,7 +1418,7 @@ class BgfxRenderer final : public Renderer {
                 auto &data = result.instances[i];
                 const auto matrix = identity();
                 std::copy(matrix.begin(), matrix.end(), data.begin());
-                result.worldBounds[i] = result.meshes[input.mesh].bounds;
+                result.worldBounds[i] = result.meshes[input.mesh]->bounds;
                 std::copy(input.color.begin(), input.color.end(), data.begin() + 16);
                 data[28] = data[29] = 1;
                 auto visual =
@@ -1467,7 +1530,7 @@ class BgfxRenderer final : public Renderer {
                           current.instances[i].begin() + 28);
             changed |= previous != current.instances[i];
             current.worldBounds[i] =
-                transformBounds(current.meshes[current.source.instances[i].mesh].bounds,
+                transformBounds(current.meshes[current.source.instances[i].mesh]->bounds,
                                 current.instances[i].data());
         }
         if (changed)
@@ -1479,7 +1542,7 @@ class BgfxRenderer final : public Renderer {
     void updateMesh(Scene id, uint32_t index, std::span<const Vertex> vertices) override {
         owner();
         auto &current = scene(id);
-        if (index >= current.meshes.size() || vertices.size() != current.meshes[index].vertexCount)
+        if (index >= current.meshes.size() || vertices.size() != current.meshes[index]->vertexCount)
             throw std::invalid_argument("Dynamic mesh topology changed");
         if (mPendingCommands)
             flush();
@@ -1489,19 +1552,28 @@ class BgfxRenderer final : public Renderer {
                     if (!std::isfinite(value))
                         throw std::invalid_argument("Non-finite dynamic mesh vertex");
         ++current.geometryRevision;
-        current.source.meshes[index].vertices.assign(vertices.begin(), vertices.end());
-        current.meshes[index].bounds = meshBounds(vertices);
+        // Dynamic vertices are scene-local. An immutable GPU mesh may also be
+        // used by a peer scene, so detach before its first deformation.
+        auto &mesh = current.meshes[index];
+        if (mesh->deformed.empty()) {
+            if (mesh.use_count() > 1)
+                mesh = uploadMesh(current.source.meshes[index], false);
+            else
+                mMeshCache.erase(mesh->source.get());
+        }
+        mesh->deformed.assign(vertices.begin(), vertices.end());
+        current.meshes[index]->bounds = meshBounds(vertices);
         for (size_t i = 0; i < current.instances.size(); ++i)
             if (current.source.instances[i].mesh == index)
                 current.worldBounds[i] =
-                    transformBounds(current.meshes[index].bounds, current.instances[i].data());
-        if (bgfx::isValid(current.meshes[index].wireVertices))
+                    transformBounds(current.meshes[index]->bounds, current.instances[i].data());
+        if (bgfx::isValid(current.meshes[index]->wireVertices))
             updateWireMesh(current, index);
         std::vector<GpuVertex> upload(vertices.size());
-        const auto &uv = current.source.meshes[index].texcoords;
+        const auto &uv = current.source.meshes[index]->texcoords;
         for (size_t i = 0; i < vertices.size(); ++i)
             upload[i] = {vertices[i], uv.empty() ? std::array<float, 2>{0, 0} : uv[i]};
-        bgfx::update(current.meshes[index].vertices, 0,
+        bgfx::update(current.meshes[index]->vertices, 0,
                      bgfx::copy(upload.data(), upload.size() * sizeof(GpuVertex)));
         mStats.uploadBytes += upload.size() * sizeof(GpuVertex);
     }
@@ -1514,16 +1586,11 @@ class BgfxRenderer final : public Renderer {
         extent(size);
         if (samples != 1 && samples != 2 && samples != 4 && samples != 8 && samples != 16)
             throw std::invalid_argument("Sample count must be 1, 2, 4, 8, or 16");
-        auto slot = std::find(mViews.begin(), mViews.end(), false);
-        if (slot == mViews.end())
-            throw std::runtime_error("Render target capacity reached");
         GpuTarget t;
         t.size = size;
         t.samples = samples;
         t.scene = sceneId;
-        t.view = std::distance(mViews.begin(), slot) * 4;
         allocateTarget(t);
-        *slot = true;
         Target id{allocateId()};
         mTargets.emplace(id.id, std::move(t));
         return id;
@@ -1535,13 +1602,9 @@ class BgfxRenderer final : public Renderer {
         extent(window.size);
         if (!window.handle || !mCaps.multipleWindows)
             throw std::invalid_argument("Native surface unavailable");
-        auto slot = std::find(mViews.begin(), mViews.end(), false);
-        if (slot == mViews.end())
-            throw std::runtime_error("Render target capacity reached");
         GpuTarget t;
         t.size = window.size;
         t.surface = true;
-        t.view = std::distance(mViews.begin(), slot) * 4;
         auto &surface = t.swapChain;
         surface.nwh = window.handle;
         surface.ndt = window.display;
@@ -1551,7 +1614,6 @@ class BgfxRenderer final : public Renderer {
         t.colorFb = bgfx::createFrameBuffer(surface);
         if (!bgfx::isValid(t.colorFb))
             throw std::runtime_error("Cannot create native surface");
-        *slot = true;
         Target id{allocateId()};
         mTargets.emplace(id.id, std::move(t));
         return id;
@@ -1626,7 +1688,6 @@ class BgfxRenderer final : public Renderer {
             flush();
         cancel(id);
         releaseTarget(t);
-        mViews[t.view / 4] = false;
         mTiming.erase(id);
         mTargets.erase(id.id);
         updateVsync();
@@ -1799,7 +1860,7 @@ class BgfxRenderer final : public Renderer {
                 }
             }
             mStats.uploadBytes += count * stride;
-            auto &mesh = current.meshes[meshIndex];
+            auto &mesh = *current.meshes[meshIndex];
             if (wire) {
                 if (!bgfx::isValid(mesh.wireVertices))
                     updateWireMesh(current, meshIndex);
@@ -2042,6 +2103,7 @@ class BgfxRenderer final : public Renderer {
             bgfx::getCaps()->originBottomLeft ? t.size.height - region.y - region.height : region.y;
         bgfx::TextureRegion src{};
         src.init(source, region.x, y, region.width, region.height);
+        assignTargetView(t);
         orderPass(t.view + 2);
         if (r.gpuPacked) {
             // Pack RGB and orient data products on the GPU. The CPU can hand off
