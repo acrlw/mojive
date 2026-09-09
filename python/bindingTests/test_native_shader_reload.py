@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -61,13 +62,24 @@ def test_source_reload_preserves_live_scenes_and_recovers_after_errors(tmp_path,
             peer.set_camera(backend._camera)
             peer.set_background((0, 0, 0, 1))
             peer.update(scene.frame)
+
+            def reloaded():
+                watcher._next_check = 0
+                image = renderer.render()
+                deadline = time.monotonic() + 20
+                while watcher._build_future is not None:
+                    assert time.monotonic() < deadline, "Shader rebuild did not complete"
+                    time.sleep(0.01)
+                    image = renderer.render()
+                return image
+
             base = renderer.render()
             shader = source / "shaders/litFragment.sh"
             original = shader.read_text()
             assert "gl_FragColor=vec4(rgb,alpha);" in original
             shader.write_text(original.replace("vec4(rgb,alpha)", "vec4(rgb.bgr,alpha)"))
             watcher._next_check = 0
-            changed = renderer.render()
+            changed = reloaded()
             np.testing.assert_array_equal(changed, base[..., ::-1])
             peer.render()
             np.testing.assert_array_equal(peer.target.read_rgb(), changed)
@@ -76,7 +88,7 @@ def test_source_reload_preserves_live_scenes_and_recovers_after_errors(tmp_path,
 
             shader.write_text("invalid shader source")
             watcher._next_check = 0
-            np.testing.assert_array_equal(renderer.render(), changed)
+            np.testing.assert_array_equal(reloaded(), changed)
             assert watcher.error
 
             shader.write_text(original)
@@ -84,12 +96,12 @@ def test_source_reload_preserves_live_scenes_and_recovers_after_errors(tmp_path,
             original_binary = binary.read_bytes()
             binary.write_bytes(b"invalid binary")
             watcher._next_check = 0
-            np.testing.assert_array_equal(renderer.render(), changed)
+            np.testing.assert_array_equal(reloaded(), changed)
             assert "shader" in watcher.error.lower()
 
             binary.write_bytes(original_binary)
             watcher._next_check = 0
-            np.testing.assert_array_equal(renderer.render(), base)
+            np.testing.assert_array_equal(reloaded(), base)
             peer.render()
             np.testing.assert_array_equal(peer.target.read_rgb(), base)
             np.testing.assert_array_equal(backend.runtime.wait(ticket).image, changed)

@@ -39,6 +39,7 @@ class RenderRuntime final : public Renderer {
     FrameStats advance() override;
     void reloadShaders() override;
     Texture targetTexture(Target) const override;
+    ResourceStats resourceStats() const override;
     Texture uploadTexture(Extent, std::span<const std::byte>) override;
     void destroy(Texture) override;
     FrameToken renderUi(const UiFrame &, Target output = {}) override;

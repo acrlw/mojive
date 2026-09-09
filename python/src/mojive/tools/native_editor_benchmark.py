@@ -42,7 +42,21 @@ def run(root: Path, output: Path, backend: str, *, show_window: bool = True, gal
 
         viewer.backend.set_scene = record_scene
 
+        def resource_stats():
+            device = getattr(viewer.backend, "device", None)
+            if device is None:
+                return {}
+            stats = device.runtime.resource_stats()
+            return {
+                key: int(getattr(stats, key))
+                for key in ("mesh_uploads", "texture_uploads", "upload_bytes")
+            }
+
+        def resource_delta(before):
+            return {key: value - before[key] for key, value in resource_stats().items()}
+
         def measure_deferred(name, command):
+            initial_resources = resource_stats()
             completed = []
             start = time.perf_counter()
             viewer.app._queue_model_edit(command, completed.append)
@@ -60,6 +74,7 @@ def run(root: Path, output: Path, backend: str, *, show_window: bool = True, gal
                 "completed_ms": (time.perf_counter() - start) * 1000,
                 "longest_ui_frame_ms": max(durations) * 1000,
                 "loading_frames": len(durations),
+                "resource_uploads": resource_delta(initial_resources),
             }
             rows.append(row)
             print(json.dumps(row), flush=True)
@@ -68,6 +83,7 @@ def run(root: Path, output: Path, backend: str, *, show_window: bool = True, gal
         def measure(name, action, *, repeats=1):
             values = []
             initial_uploads = scene_uploads
+            initial_resources = resource_stats()
             for _ in range(repeats):
                 start = time.perf_counter()
                 result = action()
@@ -85,12 +101,18 @@ def run(root: Path, output: Path, backend: str, *, show_window: bool = True, gal
             uploads = scene_uploads - initial_uploads
             if name.startswith("select_"):
                 assert uploads == 0, "Selection must not re-upload scene resources"
-            row = {"operation": name, "samples": values, "scene_uploads": uploads}
+            row = {
+                "operation": name,
+                "samples": values,
+                "scene_uploads": uploads,
+                "resource_uploads": resource_delta(initial_resources),
+            }
             rows.append(row)
             print(json.dumps(row), flush=True)
             return result
 
         def add_model(relative, position):
+            initial_resources = resource_stats()
             viewer.app._queue_model_load("add", root / relative, position)
             durations = []
             start = time.perf_counter()
@@ -106,6 +128,7 @@ def run(root: Path, output: Path, backend: str, *, show_window: bool = True, gal
                 raise RuntimeError(viewer.app._model_load_error)
             return {
                 "path": relative,
+                "resource_uploads": resource_delta(initial_resources),
                 "submitted_ms": (time.perf_counter() - start) * 1000,
                 "longest_ui_frame_ms": max(durations) * 1000,
                 "loading_frames": len(durations),

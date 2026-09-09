@@ -38,7 +38,7 @@ class RenderRuntime::Impl {
     mutable std::mutex mutex;
     std::mutex closeMutex;
     std::condition_variable ready, space;
-    std::deque<std::function<void(Renderer &)>> jobs;
+    std::deque<std::function<bool(Renderer &)>> jobs;
     std::thread worker;
     bool stopping = false;
     std::promise<void> finished;
@@ -63,7 +63,7 @@ class RenderRuntime::Impl {
                 }
                 diagnostic("Render owner started");
                 for (;;) {
-                    std::function<void(Renderer &)> job;
+                    std::function<bool(Renderer &)> job;
                     {
                         std::unique_lock lock(mutex);
                         ready.wait(lock, [this] { return stopping || !jobs.empty(); });
@@ -73,7 +73,13 @@ class RenderRuntime::Impl {
                         jobs.pop_front();
                     }
                     space.notify_one();
-                    job(*renderer);
+                    if (!job(*renderer)) {
+                        std::unique_lock lock(mutex);
+                        if (jobs.empty())
+                            ready.wait_for(lock, std::chrono::microseconds(100),
+                                           [this] { return !jobs.empty(); });
+                        jobs.push_back(std::move(job));
+                    }
                 }
                 renderer.reset();
                 diagnostic("Render owner stopped");
@@ -93,11 +99,7 @@ class RenderRuntime::Impl {
             // Diagnostics must not strand callers waiting for a native result.
         }
     }
-    template <class F> auto invoke(F &&function) {
-        using Result = std::invoke_result_t<F, Renderer &>;
-        auto task =
-            std::make_shared<std::packaged_task<Result(Renderer &)>>(std::forward<F>(function));
-        auto result = task->get_future();
+    void enqueue(std::function<bool(Renderer &)> job) {
         {
             std::unique_lock lock(mutex);
             while (!stopping && jobs.size() >= 64) {
@@ -108,10 +110,44 @@ class RenderRuntime::Impl {
             }
             if (stopping)
                 throw std::runtime_error("Render runtime is closed");
-            jobs.emplace_back([task](Renderer &renderer) { (*task)(renderer); });
+            jobs.push_back(std::move(job));
         }
         ready.notify_one();
+    }
+    template <class F> auto invoke(F &&function) {
+        using Result = std::invoke_result_t<F, Renderer &>;
+        auto task =
+            std::make_shared<std::packaged_task<Result(Renderer &)>>(std::forward<F>(function));
+        auto result = task->get_future();
+        enqueue([task](Renderer &renderer) {
+            (*task)(renderer);
+            return true;
+        });
         return receive(result);
+    }
+    ReadbackResult wait(ReadbackTicket ticket) {
+        auto promise = std::make_shared<std::promise<ReadbackResult>>();
+        auto future = promise->get_future();
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        // Pending GPU work yields to other accepted jobs. Closing still drains
+        // this continuation before destroying the backend and its readback storage.
+        enqueue([promise, ticket, deadline](Renderer &renderer) {
+            try {
+                renderer.advance();
+                auto result = renderer.poll(ticket);
+                if (result.state != ReadbackState::Pending) {
+                    promise->set_value(std::move(result));
+                    return true;
+                }
+                if (std::chrono::steady_clock::now() >= deadline)
+                    throw std::runtime_error("Readback timed out");
+                return false;
+            } catch (...) {
+                promise->set_exception(std::current_exception());
+                return true;
+            }
+        });
+        return receive(future);
     }
     void close() {
         std::unique_lock closer(closeMutex, std::defer_lock);
@@ -212,6 +248,9 @@ void RenderRuntime::reloadShaders() {
 Texture RenderRuntime::targetTexture(Target target) const {
     return mImpl->invoke([&](Renderer &r) { return r.targetTexture(target); });
 }
+ResourceStats RenderRuntime::resourceStats() const {
+    return mImpl->invoke([](Renderer &r) { return r.resourceStats(); });
+}
 Texture RenderRuntime::uploadTexture(Extent size, std::span<const std::byte> bytes) {
     return mImpl->invoke([&](Renderer &r) { return r.uploadTexture(size, bytes); });
 }
@@ -226,7 +265,7 @@ ReadbackResult RenderRuntime::read(FrameToken frame, Product product, Region reg
         [&](Renderer &r) { return waitForReadback(r, r.readback(frame, product, region)); });
 }
 ReadbackResult RenderRuntime::wait(ReadbackTicket ticket) {
-    return mImpl->invoke([&](Renderer &r) { return waitForReadback(r, ticket); });
+    return mImpl->wait(ticket);
 }
 Scene RenderRuntime::createScene(const SceneSource &source) {
     return mImpl->invoke([&](Renderer &r) { return r.createScene(source); });

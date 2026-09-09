@@ -86,7 +86,8 @@ struct SceneStyle {
 };
 struct SceneSource {
     uint64_t revision = 1;
-    std::vector<Mesh> meshes;
+    // Shared immutable geometry survives source replacement without repacking.
+    std::vector<std::shared_ptr<const Mesh>> meshes;
     std::vector<Instance> instances;
     std::vector<Material> materials;
     std::vector<TextureSource> textures;
@@ -216,6 +217,9 @@ struct PassTimings {
     // GPU samples arrive later; retain their original target submission identity.
     uint64_t cpuSubmission = 0, gpuSubmission = 0;
 };
+struct ResourceStats {
+    uint64_t meshUploads = 0, textureUploads = 0, uploadBytes = 0;
+};
 struct FrameStats {
     bool operator==(const FrameStats &) const = default;
     uint64_t drawCalls = 0, instances = 0, uploadBytes = 0;
@@ -336,6 +340,9 @@ class Renderer {
         throw std::logic_error("Shader reload is unavailable");
     }
     virtual Texture targetTexture(Target) const = 0;
+    virtual ResourceStats resourceStats() const {
+        return {};
+    }
     virtual Texture uploadTexture(Extent, std::span<const std::byte> rgba) = 0;
     virtual void destroy(Texture) = 0;
     virtual FrameToken renderUi(const UiFrame &, Target output = {}) = 0;
@@ -346,7 +353,8 @@ class Renderer {
 
 void validateCamera(const CameraView &);
 void validateUi(const UiFrame &);
-void validateScene(const SceneSource &);
+void validateMesh(const Mesh &);
+void validateScene(const SceneSource &, bool validateGeometry = true);
 void validateFrame(const SceneSource &, const SceneFrame &);
 Matrix lookAt(std::array<float, 3> eye, std::array<float, 3> target, std::array<float, 3> up);
 Matrix perspective(float fovYRadians, float aspect, float nearPlane, float farPlane);

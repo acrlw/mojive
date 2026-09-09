@@ -48,7 +48,7 @@ inline Trajectory load(const std::filesystem::path &path) {
         mesh.indices.resize(indices);
         read(mesh.vertices.data(), vertices * sizeof(Vertex));
         read(mesh.indices.data(), indices * 4);
-        result.source.meshes.push_back(std::move(mesh));
+        result.source.meshes.push_back(std::make_shared<Mesh>(std::move(mesh)));
     }
     result.source.instances.resize(instances);
     read(result.source.instances.data(), instances * sizeof(Instance));

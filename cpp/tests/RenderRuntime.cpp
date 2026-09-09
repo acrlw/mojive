@@ -16,7 +16,7 @@ struct Probe {
     std::promise<void> entered, release;
     std::shared_future<void> gate = release.get_future().share();
 };
-class TestRenderer final : public Renderer {
+class TestRenderer : public Renderer {
     Probe &mProbe;
     Capabilities mCaps;
     uint64_t mTargets = 0;
@@ -94,8 +94,39 @@ class TestRenderer final : public Renderer {
         return {};
     }
 };
+class PendingRenderer final : public TestRenderer {
+    std::atomic<bool> &mReady, &mPolled;
+
+  public:
+    PendingRenderer(Probe &probe, std::atomic<bool> &ready, std::atomic<bool> &polled)
+        : TestRenderer(probe), mReady(ready), mPolled(polled) {}
+    FrameStats advance() override {
+        return {};
+    }
+    ReadbackResult poll(ReadbackTicket) override {
+        mPolled = true;
+        return {mReady ? ReadbackState::Ready : ReadbackState::Pending, {}, {}};
+    }
+};
+static void checkPendingReadbackYields() {
+    Probe probe;
+    std::atomic<bool> ready{false}, polled{false};
+    RenderRuntime runtime([&] { return std::make_unique<PendingRenderer>(probe, ready, polled); });
+    auto reader = std::async(std::launch::async, [&] { return runtime.wait({1}); });
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!polled && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    auto peer = std::async(std::launch::async, [&] { return runtime.createTarget({8, 8}); });
+    const bool yielded = peer.wait_for(std::chrono::milliseconds(100)) == std::future_status::ready;
+    ready = true;
+    check(reader.get().state == ReadbackState::Ready, "Pending readback lost completion");
+    check(peer.get().id == 1 && yielded, "Pending readback blocked another target's work");
+    runtime.close();
+    check(probe.destroyedOnOwner, "Readback owner did not close");
+}
 int main() {
     try {
+        checkPendingReadbackYields();
         bool caught = false;
         try {
             RenderRuntime failed([]() -> std::unique_ptr<Renderer> {

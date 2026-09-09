@@ -95,8 +95,9 @@ class RecordingRenderer final : public Renderer {
 int main() {
     try {
         SceneSource scene;
-        scene.meshes = {
-            {{{{0, 0, 0}, {0, 0, 1}}, {{1, 0, 0}, {0, 0, 1}}, {{0, 1, 0}, {0, 0, 1}}}, {0, 1, 2}}};
+        auto mesh = std::make_shared<Mesh>(Mesh{
+            {{{0, 0, 0}, {0, 0, 1}}, {{1, 0, 0}, {0, 0, 1}}, {{0, 1, 0}, {0, 0, 1}}}, {0, 1, 2}});
+        scene.meshes = {mesh};
         scene.instances = {{0, 0xfedcba98, {INT32_MIN, INT32_MAX}, {1, 1, 1, 1}}};
         validateScene(scene);
         auto matrix = identity();
@@ -106,9 +107,9 @@ int main() {
         transforms[0][3] = std::numeric_limits<float>::quiet_NaN();
         rejects([&] { validateFrame(scene, {1, 8, transforms}); });
         transforms[0] = matrix;
-        scene.meshes[0].indices[0] = 3;
+        mesh->indices[0] = 3;
         rejects([&] { validateScene(scene); });
-        scene.meshes[0].indices[0] = 0;
+        mesh->indices[0] = 0;
         transforms[0][15] = 0;
         rejects([&] { validateFrame(scene, {1, 8, transforms}); });
         transforms[0] = matrix;

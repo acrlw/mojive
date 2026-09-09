@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 
-from ...types import CameraView, LightType, MeshKey, MeshShape, TextureType, ViewportImage
+from ...types import CameraView, LightType, MeshKey, MeshShape, ViewportImage
 from ..backend import (
     BackendCaps,
     DebugView,
@@ -30,7 +30,6 @@ from ..mesh import builtin_mesh, gizmo_mesh
 from ..overlay import OverlayPublisher, OverlayState
 from ..tendon import TendonPublisher, TendonScene
 from ..text import TextLayout
-from ..texture import srgb_to_linear_u8
 from .device import acquire_device
 
 _NO_VISUALS = np.empty((0, 4), np.float32)
@@ -65,7 +64,8 @@ class NativeTarget:
             if out is not None and flip and out.flags.c_contiguous
             else np.empty(shape, dtype=dtype)
         )
-        state = self.backend.runtime.read_into(self.frame, product, image)
+        with self.backend.device.readback_slot():
+            state = self.backend.runtime.read_into(self.frame, product, image)
         if state != self.backend.api.ReadbackState.READY:
             raise RuntimeError("Readback was canceled by a scene or target change")
         if image is out:
@@ -88,22 +88,53 @@ class NativeTarget:
             raise RuntimeError("Render a frame before requesting readback")
         runtime = self.backend.runtime
         api = self.backend.api
-        # Copy commands capture this frame before the next submission can replace it.
-        ticket = runtime.readback(self.frame, product)
+        # A caller may cancel its Future while the GPU still owns the staging
+        # storage. Keep the cleanup job independent and consume every ticket.
+        slots = self.backend.device.readback_slots
+        self.backend.device.acquire_readback_slot(blocking=False)
+        try:
+            ticket = runtime.readback(self.frame, product)
+        except BaseException:
+            slots.release()
+            raise
+        future = Future()
 
         def complete():
-            result = runtime.wait(ticket)
-            if result.state != api.ReadbackState.READY:
-                raise RuntimeError("Readback was canceled by a scene or target change")
-            image = result.image
-            if out is not None:
-                np.copyto(out, image if flip else image[::-1], casting="unsafe")
-                return out
-            return self._deliver(image, flip, None)
+            error = None
+            try:
+                result = runtime.wait(ticket)
+            except Exception as exc:
+                error = exc
+            finally:
+                slots.release()
+            if not future.set_running_or_notify_cancel():
+                return
+            try:
+                if error is not None:
+                    raise error
+                if result.state != api.ReadbackState.READY:
+                    raise RuntimeError("Readback was canceled by a scene or target change")
+                image = result.image
+                if out is not None:
+                    np.copyto(out, image if flip else image[::-1], casting="unsafe")
+                    image = out
+                else:
+                    image = self._deliver(image, flip, None)
+            except Exception as exc:
+                future.set_exception(exc)
+            else:
+                future.set_result(image)
 
-        future = self.backend.device.readbacks.submit(complete)
-        self.backend._pending_readbacks.add(future)
-        future.add_done_callback(self.backend._pending_readbacks.discard)
+        try:
+            cleanup = self.backend.device.readbacks.submit(complete)
+        except BaseException:
+            try:
+                runtime.wait(ticket)
+            finally:
+                slots.release()
+            raise
+        self.backend._pending_readbacks.add(cleanup)
+        cleanup.add_done_callback(self.backend._pending_readbacks.discard)
         return future
 
     def read_rgb_async(self, flip=True, out=None):
@@ -182,6 +213,7 @@ class NativeBackend:
         self._style.cull_face = True
         self._lighting_source = None
         self._textures = {}
+        self._resource_leases = []
         self._debug_view = DebugView.SHADED
         self._selected = self._outlined = 0
         self._scene_handle = None
@@ -250,6 +282,22 @@ class NativeBackend:
         if self._closed:
             raise RuntimeError("Native renderer is closed")
 
+    def prepare_scene(self, source):
+        """Prepare immutable CPU resources on a loader; return an opaque lifetime lease.
+
+        GPU state and live scene data remain on their owners. Holding this result
+        until set_scene completes also preserves reuse across source recompiles.
+        """
+        resources = self.device.resources
+        leases = [resources.mesh(mesh) for mesh in source.meshes.values()]
+        items = list(source.textures.values())
+        if len(items) > 1 and sum(texture.pixels.nbytes for texture in items) > 4 << 20:
+            with ThreadPoolExecutor(max_workers=4, thread_name_prefix="mojive-textures") as pool:
+                leases.extend(pool.map(resources.texture, items))
+        else:
+            leases.extend(map(resources.texture, items))
+        return leases
+
     def set_scene(self, source):
         self._require_open()
         self._source = source
@@ -293,13 +341,19 @@ class NativeBackend:
             keys = list(dict.fromkeys(key for key, _ in scene.bucket_keys))
             self._mesh_indices = {key: index for index, key in enumerate(keys)}
             triangle_counts = {}
+            leases = []
+
+            def add_mesh(mesh):
+                resource = self.device.resources.mesh(mesh)
+                leases.append(resource)
+                return source.add_prepared_mesh(resource.value)
+
             for mesh_key in keys:
                 mesh = self._source.meshes.get(mesh_key) if self._source else None
                 if mesh is None:
                     mesh = builtin_mesh(mesh_key)
                 triangle_counts[mesh_key] = len(mesh.indices) // 3
-                index = source.add_mesh(mesh.positions, mesh.normals, mesh.indices)
-                source.set_mesh_texcoords(index, mesh.uvs)
+                index = add_mesh(mesh)
             self._triangle_count = scene.triangle_count(triangle_counts)
             self._gizmo_meshes = {}
             for name in _MESHES:
@@ -310,22 +364,17 @@ class NativeBackend:
                     if name in {"trackball", "center"}
                     else gizmo_mesh(name)
                 )
-                self._gizmo_meshes[name] = source.add_mesh(
-                    mesh.positions, mesh.normals, mesh.indices
-                )
+                self._gizmo_meshes[name] = add_mesh(mesh)
             self._surface_meshes = {}
             for shape in (MeshShape.CAPSULE_SHAFT, MeshShape.CAPSULE_CAP):
                 key = MeshKey(shape)
                 mesh = builtin_mesh(key)
-                index = source.add_mesh(mesh.positions, mesh.normals, mesh.indices)
-                source.set_mesh_texcoords(index, mesh.uvs)
+                index = add_mesh(mesh)
                 self._surface_meshes[key] = index
             self._debug_meshes = {}
             for key in PRIMITIVE_MESH.values():
                 mesh = builtin_mesh(key)
-                self._debug_meshes[key] = source.add_mesh(
-                    mesh.positions, mesh.normals, mesh.indices
-                )
+                self._debug_meshes[key] = add_mesh(mesh)
             slots = np.array(
                 [self._mesh_indices[scene.bucket_keys[int(b)][0]] for b in scene.bucket], np.uint32
             )
@@ -333,16 +382,9 @@ class NativeBackend:
 
             def prepare(item):
                 name, texture = item
-                pixels, srgb = texture.pixels, texture.srgb
-                if srgb and pixels.shape[-1] < 3:
-                    # Match the R8/RG8 linear fallback used by the other backends.
-                    pixels = srgb_to_linear_u8(pixels)
-                    srgb = False
-                if texture.type is TextureType.TWO_D:
-                    pixels = pixels[None]
-                index = source.add_texture_pixels(
-                    np.ascontiguousarray(pixels), texture.type is not TextureType.TWO_D, srgb
-                )
+                resource = self.device.resources.texture(texture)
+                leases.append(resource)
+                index = source.add_prepared_texture(resource.value)
                 return name, index
 
             # The resizer releases the GIL; only the completed texture insertion
@@ -374,6 +416,7 @@ class NativeBackend:
             )
             source.set_visuals(scene.material, scene.cube_coef)
             self.runtime.set_scene(source, self._scene_handle)
+            self._resource_leases = leases
             self._uploaded = structure_key
             self._uploaded_visuals = None
         visual_key = (scene.pose_revision, scene.visual_revision)
@@ -639,9 +682,10 @@ class NativeBackend:
         region = self.api.Region()
         region.x, region.y = int(x), self.target.height - 1 - int(y)
         region.width = region.height = 1
-        result = self.runtime.wait(
-            self.runtime.readback(self.target.frame, self.api.Product.OBJECT_ID, region)
-        )
+        with self.device.readback_slot():
+            result = self.runtime.wait(
+                self.runtime.readback(self.target.frame, self.api.Product.OBJECT_ID, region)
+            )
         return int(result.image[0, 0]) if result.state == self.api.ReadbackState.READY else 0
 
     def highlight(self, object_id, *, xray=False, fill=True, outline=True):
@@ -816,4 +860,5 @@ class NativeBackend:
             if self._scene_handle is not None:
                 self.runtime.destroy_scene(self._scene_handle)
         finally:
+            self._resource_leases = []
             self.device.release()

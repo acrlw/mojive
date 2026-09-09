@@ -22,6 +22,11 @@ def native():
             pytest.fail(f"Expected one native extension in {root}, found {matches}")
         path = matches[0]
     os.environ["MOJIVE_NATIVE_TEST_MODULE"] = str(path.resolve())
+    existing = sys.modules.get("mojive._native")
+    if existing is not None:
+        if Path(existing.__file__).resolve() != path.resolve():
+            pytest.fail(f"Another native build is already loaded: {existing.__file__}")
+        return existing
     spec = importlib.util.spec_from_file_location("mojive._native", path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

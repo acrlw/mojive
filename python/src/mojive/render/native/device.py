@@ -9,6 +9,7 @@ import os
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 
 from ...log import get_logger
@@ -67,7 +68,11 @@ class NativeDevice:
         from .programs import ShaderReload
 
         self.shaders = ShaderReload(self.runtime, shaders)
+        from .resources import ResourceCache
+
+        self.resources = ResourceCache(self.api)
         self.users = 0
+        self.readback_slots = threading.BoundedSemaphore(8)
         self._readback_thread = threading.local()
         self.readbacks = ThreadPoolExecutor(
             max_workers=2,
@@ -77,6 +82,20 @@ class NativeDevice:
         self.textures = {}
         self._next_texture = 1
         self._log_cursor = 0
+
+    def acquire_readback_slot(self, *, blocking=True):
+        # Completion callbacks must not wait for cleanup queued behind themselves.
+        blocking = blocking and not self.in_readback_worker()
+        if not self.readback_slots.acquire(blocking=blocking):
+            raise RuntimeError("Readback queue is full; wait for a result before submitting more")
+
+    @contextmanager
+    def readback_slot(self):
+        self.acquire_readback_slot()
+        try:
+            yield
+        finally:
+            self.readback_slots.release()
 
     def _start_readback_worker(self):
         self._readback_thread.active = True
@@ -118,10 +137,12 @@ class NativeDevice:
                 try:
                     # Scene owners have drained their readbacks. Do not join user
                     # completion callbacks while holding the device registry lock.
+                    self.shaders.close()
                     self.readbacks.shutdown(wait=False)
                     self.runtime.close()
                     self.drain_logs()
                 finally:
+                    self.resources.clear()
                     _shared = None
 
 
