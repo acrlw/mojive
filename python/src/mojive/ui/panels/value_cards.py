@@ -7,7 +7,7 @@ from contextlib import contextmanager
 
 from imgui_bundle import imgui
 
-from ..compound_fields import borderless_numeric_input, draw_joined_field_frame
+from ..compound_fields import borderless_numeric_input, draw_focus_frame, draw_joined_field_frame
 from ..draw2d import ImguiDraw2D, fit_text
 from ..pointer_bindings import PointerAction
 from ..viewport_widgets import draw_reset_glyph
@@ -246,6 +246,7 @@ def _value_entry(ctx, label, value, bounds, initial, fmt, width, unit, toggle_un
             imgui.SliderFlags_.always_clamp if bounds is not None else 0,
         )
     field_lo, field_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+    field_id = imgui.get_item_id()
     hovered, active = imgui.is_item_hovered(), imgui.is_item_active()
     edit = value_edit(
         label, value, changed, current, initial=initial, fmt=fmt, bindings=ctx.input_bindings
@@ -260,6 +261,7 @@ def _value_entry(ctx, label, value, bounds, initial, fmt, width, unit, toggle_un
         imgui.push_style_color(
             imgui.Col_.text, ctx.theme.bg_popup if toggle_unit else ctx.theme.text
         )
+        imgui.push_style_color(imgui.Col_.nav_cursor, (0, 0, 0, 0))
         imgui.begin_disabled(toggle_unit is None)
         if (
             imgui.button(f"{unit}##{label}-unit", (unit_width, imgui.get_frame_height()))
@@ -269,7 +271,7 @@ def _value_entry(ctx, label, value, bounds, initial, fmt, width, unit, toggle_un
         imgui.end_disabled()
         badge_lo, badge_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         badge_hover, badge_active = imgui.is_item_hovered(), imgui.is_item_active()
-        imgui.pop_style_color(4)
+        imgui.pop_style_color(5)
         imgui.pop_style_var(2)
         if toggle_unit:
             imgui.set_item_tooltip(
@@ -300,7 +302,24 @@ def _value_entry(ctx, label, value, bounds, initial, fmt, width, unit, toggle_un
             badge_opacity=style.alpha,
             field_opacity=style.alpha,
         )
+        splitter.set_current_channel(draw_list, 1)
+        draw_focus_frame(
+            badge_lo,
+            badge_hi,
+            rounding=style.frame_rounding,
+            corners=imgui.ImDrawFlags_.round_corners_right,
+            color=ctx.theme.bg_popup if toggle_unit else None,
+        )
+        draw_focus_frame(
+            field_lo,
+            field_hi,
+            rounding=style.frame_rounding,
+            corners=imgui.ImDrawFlags_.round_corners_left,
+            item_id=field_id,
+        )
         splitter.merge(draw_list)
+    else:
+        draw_focus_frame(field_lo, field_hi, rounding=style.frame_rounding, item_id=field_id)
     return edit
 
 

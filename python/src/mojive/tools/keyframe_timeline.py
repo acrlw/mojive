@@ -65,7 +65,7 @@ def timeline_point(viewer, time: float, row: str = "ruler") -> tuple[float, floa
         panel._view_start,
         panel._view_end,
         left,
-        hi[0] - (64 * scale if hi[0] - lo[0] >= 600 * scale else 0),
+        hi[0],
     )
     y = lo[1] + (12 if row == "ruler" else 122) * scale
     # Native ImGui floors mouse coordinates; inject the nearest pixel to the target.
@@ -96,17 +96,11 @@ def drag(viewer, start, end, *, button: int = 0, shift: bool = False, cancel: bo
 
 
 def choose_follow(viewer, mode: str) -> None:
-    """Choose the follow policy from the production dropdown."""
-    label = viewer.app.localizer.text({"off": "Off", "page": "Page", "locked": "Locked"}[mode])
-    _click(viewer, _item_center(viewer, "invisible_button", "##timeline-options"))
-    _click(viewer, _item_center(viewer, "begin_combo", "##timeline-follow"))
-    _click(viewer, _item_center(viewer, "selectable", label))
+    """Choose the follow policy directly from the production toolbar."""
+    index = ("off", "page", "locked").index(mode)
+    label = viewer.app.localizer.text(("Off", "Page", "Locked")[index])
+    _click(viewer, _item_center(viewer, "button", f"{label}##timeline-follow-{index}"))
     assert viewer.panels.get("Keyframes")._follow_mode == mode
-    io = imgui.get_io()
-    io.add_key_event(imgui.Key.escape, True)
-    viewer.sync()
-    io.add_key_event(imgui.Key.escape, False)
-    viewer.sync()
 
 
 def capture_replay(viewer, output: Path) -> list[dict[str, float]]:
@@ -186,11 +180,7 @@ def main(argv: list[str] | None = None) -> int:
         assert session.submit(cmd.PauseStateTake())
         _click(
             viewer,
-            _item_center(
-                viewer,
-                "button",
-                viewer.app.localizer.text("Clear range") + "##timeline-clear-range",
-            ),
+            _item_center(viewer, "invisible_button", "##timeline-loop"),
         )
         assert session.state_take_loop is None
         assert session.submit(cmd.SeekStateTake(1720))

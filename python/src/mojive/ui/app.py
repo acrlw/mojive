@@ -60,7 +60,9 @@ from .camera import (
 from .camera_preview import CameraPreview
 from .camera_tracking import CameraTracker, can_track_node, tracking_position
 from .compound_fields import borderless_numeric_input, draw_joined_field_frame
+from .controls import action_menu_popup
 from .draw2d import ImguiDraw2D, fit_text
+from .files import message_path, reveal_path
 from .gizmo import JointLimitHit, ObjectGizmo, PreciseGizmoInput, node_world_pose
 from .input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
 from .layers import visible_debug_layers
@@ -83,6 +85,7 @@ from .perturb import (
     draw_axes as draw_perturb_axes,
 )
 from .pointer_bindings import PointerAction
+from .scene_capture import SceneCapture
 from .scene_entities import SceneEntityHelpers
 from .take_video import TakeVideo
 from .theme import THEME, Theme
@@ -612,6 +615,7 @@ class ViewerApp:
         self.camera_out = CameraOut(backend=backend, session=session)
         self.camera.attach(self.camera_out)
         self.camera_preview = CameraPreview()
+        self._scene_capture = SceneCapture()
         self.gizmo = ObjectGizmo(enabled=False)
         remember_precise = self.localizer.preference("remember_precise_input_choices", True)
         if isinstance(remember_precise, bool):
@@ -1079,6 +1083,7 @@ class ViewerApp:
             self.debug_bridge = None
         self._stop_viewport_recording(report=False)
         self._release_resource(self.camera_preview, "release", "camera preview")
+        self._release_resource(self._scene_capture, "release", "scene capture")
         self._release_resource(self.backend, "release", "render backend")
         self._release_resource(self.session, "release", "session")
         output_sink_id = getattr(self, "_output_sink_id", None)
@@ -1191,10 +1196,14 @@ class ViewerApp:
             isinstance(command, (cmd.EndEditTransaction, cmd.CancelEditTransaction))
             and draft._checkpoint is not None
         ):
-            draft.end_transaction(isinstance(command, cmd.CancelEditTransaction))
-            return (
-                self.session.submit(command) if self.session.editing else cmd.CommandResult.good()
-            )
+            editing = self.session.editing
+            result = self.session.submit(command) if editing else cmd.CommandResult.good()
+            cancelled = isinstance(command, cmd.CancelEditTransaction) or not result.ok
+            draft.end_transaction(cancelled)
+            if cancelled and editing and not self.session.editing and draft.active:
+                # The direct writes rolled back; only the draft's earlier edits survive.
+                draft.rebase_after_failure()
+            return result
         if draft.active and isinstance(
             command,
             (
@@ -1230,12 +1239,23 @@ class ViewerApp:
                 return draft.stage(
                     cmd.SetSceneModelTransform(node.model_id, command.position, command.rotation)
                 )
+            if (
+                node is not None
+                and node.model_id >= 0
+                and node.type in (NodeType.GEOM, NodeType.SITE)
+            ):
+                return draft.stage(command)
         if not self.live_model_updates and isinstance(command, MODEL_REBUILD_COMMANDS):
             node = self.session.node(getattr(command, "node_id", -1))
             if not isinstance(command, cmd.SetGeometrySize) or (
                 node is not None and node.model_id >= 0
             ):
-                return draft.stage(command)
+                result = draft.stage(command)
+                if result is not None:
+                    return result
+        if isinstance(command, cmd.SelectNode) and command.node_key:
+            # Select an element that this batch has not applied yet; the draft owns it.
+            return draft.stage(command)
         if draft._checkpoint is not None and not self.session.editing:
             # Only direct document writes need a physics undo snapshot during a gesture.
             from ..session import _SCENE_EDIT_COMMANDS
@@ -1257,12 +1277,15 @@ class ViewerApp:
             return
         draft = self.model_edits
         if self.session.editing or draft._checkpoint is not None:
+            # A gesture owns the document; apply again once it commits its transaction.
+            self._apply_model_edits_requested = False
             return
         self._apply_model_edits_requested = False
         if not draft.active:
             return
         if not draft.compatible():
-            self._pending_edits_blocked()
+            draft.error = "The scene changed; discard the pending model edits"
+            self.session._record_result(cmd.CommandResult.bad(draft.error))
             return
         draft.applying = True
         self.gizmo._reset_model_placement()
@@ -1270,7 +1293,7 @@ class ViewerApp:
             _ModelLoadJob(
                 "edit",
                 self.session.asset_path or Path("Untitled"),
-                _ApplyModelEdits(tuple(draft.commands)),
+                _ApplyModelEdits(draft.resolve_commands(self.session)),
                 self._finish_pending_model_edits,
             )
         )
@@ -1279,8 +1302,8 @@ class ViewerApp:
         if result.ok:
             self.model_edits.clear()
         else:
+            self.model_edits.applying = False
             self.model_edits.error = result.message
-            self.model_edits.rebase_after_failure()
 
     def _draw_pending_model_edits(self) -> None:
         x, y, width, height = self._viewport_rect
@@ -2334,10 +2357,11 @@ class ViewerApp:
                 cmd.AddModelElement(parent.node_id, "site", self._entity_name("site"))
             )
             if result.ok:
-                self.session.submit(
-                    cmd.SetGeometryColor(result.entity_id, self._next_entity_color())
+                self._submit_creation_style(
+                    result,
+                    cmd.SetGeometryColor(result.entity_id, self._next_entity_color()),
+                    cmd.SelectNode(result.entity_id),
                 )
-                self.session.submit(cmd.SelectNode(result.entity_id))
 
     def _add_model_primitive(self, primitive: str, base_name: str) -> None:
         parent = self._model_child_parent()
@@ -2355,10 +2379,22 @@ class ViewerApp:
                 )
             )
             if result.ok:
-                self.session.submit(
-                    cmd.SetGeometryColor(result.entity_id, self._next_entity_color())
+                self._submit_creation_style(
+                    result,
+                    cmd.SetGeometryColor(result.entity_id, self._next_entity_color()),
+                    cmd.SelectNode(result.entity_id),
                 )
-                self.session.submit(cmd.SelectNode(result.entity_id))
+
+    def _submit_creation_style(self, result, *commands) -> None:
+        """Submit the styling of a created element and select it.
+
+        A deferred edit returns a batch-local key instead of a node ID, so these
+        commands bind to the element when the pending batch applies.
+        """
+
+        key = getattr(result, "entity_key", "")
+        for command in commands:
+            self.session.submit(replace(command, node_id=-1, node_key=key) if key else command)
 
     @contextmanager
     def _entity_creation(self, label: str):
@@ -2408,10 +2444,11 @@ class ViewerApp:
                         )
                     )
                     if result.ok:
-                        self.session.submit(cmd.SetGeometryColor(result.entity_id, color))
-                        node = self.session.node(result.entity_id)
-                        if node is not None:
-                            self.session.submit(cmd.Select(node.object_id))
+                        self._submit_creation_style(
+                            result,
+                            cmd.SetGeometryColor(result.entity_id, color),
+                            cmd.SelectNode(result.entity_id),
+                        )
                         return
             position = tuple(float(value) for value in self._camera_view().target)
             size = size or ((4.0, 4.0, 0.02) if shape is MeshShape.PLANE else (0.5, 0.5, 0.5))
@@ -2462,7 +2499,7 @@ class ViewerApp:
         if node is not None:
             result = self.session.submit(cmd.DuplicateModelElement(node.node_id))
             if result.ok:
-                self.session.submit(cmd.SelectNode(result.entity_id))
+                self._submit_creation_style(result, cmd.SelectNode(result.entity_id))
             return
         object_id = self._selected_entity()
         if object_id:
@@ -2970,6 +3007,13 @@ class ViewerApp:
             if mouse_pos is not None
             else (float("inf"), float("inf"))
         )
+        status_bounds = getattr(self, "_status_path_bounds", None)
+        status_reveal = bool(
+            (getattr(io, "key_ctrl", False) or getattr(io, "key_super", False))
+            and status_bounds is not None
+            and status_bounds[0] <= cursor[0] <= status_bounds[2]
+            and status_bounds[1] <= cursor[1] <= status_bounds[3]
+        )
         overlay_config = getattr(self, "viewport_overlays", None)
         # Read the frame snapshot already returned by get_io(). This avoids a
         # second global-context query and keeps headless embedding/tests safe
@@ -2999,6 +3043,7 @@ class ViewerApp:
             or self._consume_scene_pointer_until_release
             or getattr(self, "_overlay_drag_kind", "")
             or overlay_border
+            or status_reveal
         )
 
     def _poll_input_handler(self) -> None:
@@ -3477,7 +3522,6 @@ class ViewerApp:
                 modes,
                 mode_index,
                 theme=self.theme,
-                joined=True,
             )
         else:
             next_mode = 0
@@ -3530,7 +3574,6 @@ class ViewerApp:
                 1 if self._precise_gizmo_angle_unit == "radians" else 0,
                 width=unit_width,
                 theme=self.theme,
-                joined=True,
             )
             if next_unit != (1 if self._precise_gizmo_angle_unit == "radians" else 0):
                 self._toggle_precise_gizmo_angle_unit()
@@ -4842,37 +4885,47 @@ class ViewerApp:
                     self._toggle_viewport_recording()
             elif action == "recording-options":
                 imgui.open_popup("viewport-recording-options")
-            imgui.push_style_var(imgui.StyleVar_.window_padding, (10 * scale, 8 * scale))
-            imgui.push_style_var(imgui.StyleVar_.item_spacing, (8 * scale, 6 * scale))
-            imgui.push_style_var(imgui.StyleVar_.frame_padding, (8 * scale, 4 * scale))
-            if imgui.begin_popup("viewport-recording-options"):
+            if imgui.is_popup_open("viewport-recording-options"):
                 t = self.localizer.text
                 caps = self.session.adapter.caps
-                if (
-                    caps.simulation
-                    and caps.state_snapshots
-                    and imgui.menu_item(
-                        t("Stop recording" if self.session.state_take_recording else "Record Take"),
-                        "",
-                        False,
-                    )[0]
-                ):
+                items = []
+                if caps.simulation and caps.state_snapshots:
+                    items.append(
+                        (
+                            "record-take",
+                            t(
+                                "Stop Recording"
+                                if self.session.state_take_recording
+                                else "Record Take"
+                            ),
+                            True,
+                        )
+                    )
+                items.extend(
+                    (
+                        (
+                            "record-video",
+                            t("Stop Recording" if self.recording.active else "Record Video"),
+                            True,
+                        ),
+                        None,
+                        ("recording-settings", t("Recording Settings..."), True),
+                    )
+                )
+                action = action_menu_popup("viewport-recording-options", items)
+                if action == "record-take":
                     self._viewport_recording_mode = "take"
                     self.session.submit(
                         cmd.StopStateTakeRecording()
                         if self.session.state_take_recording
                         else cmd.StartStateTakeRecording()
                     )
-                if imgui.menu_item(
-                    t("Stop Recording" if self.recording.active else "Record Video"), "", False
-                )[0]:
+                elif action == "record-video":
                     self._viewport_recording_mode = "video"
                     self._toggle_viewport_recording()
-                if imgui.menu_item(t("Recording Settings..."), "", False)[0]:
+                elif action == "recording-settings":
                     self.panels.open_panel("Settings")
                     self.panels.get("Settings").show_category("Recording")
-                imgui.end_popup()
-            imgui.pop_style_var(3)
             self._offer_viewport_overlay_drag("playback", widget_rect)
         imgui.end()
         imgui.pop_style_var(2)
@@ -5696,9 +5749,9 @@ class ViewerApp:
         self, surface: CaptureSurface, presented: np.ndarray | None, *, out=None
     ) -> np.ndarray:
         if surface is CaptureSurface.SCENE:
-            if out is not None:
-                return self.backend.target.read_rgb(flip=True, out=out)
-            image = self.backend.target.read_color(flip=True)[..., :3]
+            return self._scene_capture.read(
+                self.backend, self.session, self._camera_view(), out=out
+            )
         else:
             if presented is None:
                 raise RuntimeError("window readback did not produce an image")
@@ -5744,6 +5797,7 @@ class ViewerApp:
                 self.session.report_message(
                     f"{self.localizer.text('Saved capture to')} {path}",
                     level="success",
+                    copy_text=str(path.resolve()),
                 )
         tasks, self._capture_tasks = getattr(self, "_capture_tasks", []), []
         for path, surface, future, out in tasks:
@@ -5918,15 +5972,31 @@ class ViewerApp:
         )
 
     def _draw_viewport_status(self, overlay: ImguiDraw2D) -> None:
+        self._status_path_bounds = None
         message = self.output.active_status()
         if message is None:
             return
         x, y, width, height = self._viewport_rect
         pad = 14.0 * self.window.style_scale
-        # One unobtrusive, clipped line never resizes the viewport or owns input.
+        # File reveal is available only over the status text with the shortcut held.
         text = fit_text(overlay, self.localizer.text(message.text), max(0.0, width - 2 * pad))
+        position = (x + pad, y + height - pad - imgui.get_text_line_height())
+        size = imgui.calc_text_size(text)
+        if getattr(self, "_status_path_sequence", None) != message.sequence:
+            self._status_path_sequence = message.sequence
+            self._status_path = message_path(message.text, message.copy_text)
+        path = self._status_path
+        if path is not None:
+            self._status_path_bounds = (*position, position[0] + size.x, position[1] + size.y)
+        if path is not None and imgui.is_mouse_hovering_rect(
+            position, (position[0] + size.x, position[1] + size.y)
+        ):
+            imgui.set_tooltip(self.localizer.text("Ctrl+click to reveal file") + "\n" + str(path))
+            io = imgui.get_io()
+            if (io.key_ctrl or io.key_super) and imgui.is_mouse_clicked(0):
+                reveal_path(path)
         overlay.text(
-            (x + pad, y + height - pad - imgui.get_text_line_height()),
+            position,
             (*self.theme.text[:3], 0.55),
             text,
         )

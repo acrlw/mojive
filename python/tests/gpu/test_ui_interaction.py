@@ -604,7 +604,8 @@ def test_control_click_owns_status_and_right_click_copies(viewer) -> None:
         v.sync()
         activate_panel(v, "Camera")
         assert v.app._status_panel == "Camera"
-        assert [hint.hint_id for hint in v.app._panel_status_hints] == ["panel.copy-name"]
+        # Camera property labels are not selectable scene-object name rows.
+        assert v.app._panel_status_hints == ()
         activate_panel(v, "Control")
         assert v.app._status_panel == "Control"
     finally:

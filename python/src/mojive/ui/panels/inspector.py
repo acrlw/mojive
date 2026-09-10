@@ -28,7 +28,8 @@ from ...geometry import geometry_dimensions, geometry_size_from_dimensions
 from ...render.backend import RenderFlag
 from ...scene_state import apply_camera_bookmark
 from ...types import DEFAULT_HEADLIGHT, Environment, LightType, TextureType
-from ..compound_fields import borderless_numeric_input, draw_joined_field_frame
+from ..compound_fields import borderless_numeric_input, draw_focus_frame, draw_joined_field_frame
+from ..controls import begin_property_table, pill_label, property_row
 from ..draw2d import ImguiDraw2D
 from ..pointer_bindings import PointerAction
 from . import (
@@ -43,7 +44,8 @@ from . import (
     pointer_pressed,
     segmented_control,
 )
-from .value_cards import value_card, value_rail
+from .filters import _tint, node_filter_color
+from .value_cards import value_rail
 
 GIZMO_REFUSAL_RUNNING = "Physics is running; pause to move things"
 GIZMO_REFUSAL_DRIVEN = "This link is joint-driven; use its joint gizmo or the Joints panel"
@@ -423,14 +425,14 @@ class InspectorPanel(Panel):
             imgui.text_wrapped(self._rename_error)
         if inline:
             imgui.same_line()
-        imgui.push_style_var(imgui.StyleVar_.frame_rounding, height * 0.5)
-        imgui.begin_disabled()
-        imgui.push_style_var(imgui.StyleVar_.button_text_align, (0.5, 0.5))
-        imgui.push_style_var(imgui.StyleVar_.frame_padding, (0, imgui.get_style().frame_padding.y))
-        imgui.button(type_label + "##entity-type", (badge_width, height))
-        imgui.pop_style_var(2)
-        imgui.end_disabled()
-        imgui.pop_style_var()
+        accent = node_filter_color(ctx.theme, node.type)
+        pill_label(
+            type_label,
+            width=badge_width,
+            height=height,
+            background=_tint(ctx.theme.bg_frame, accent, 0.22),
+            color=accent,
+        )
 
     def _model(self, ctx: PanelContext, node: SceneNode) -> None:
         info = next(
@@ -3121,7 +3123,9 @@ class InspectorPanel(Panel):
                 ),
             )
 
-        if _property_section(ctx, "camera projection"):
+        if _property_section(ctx, "camera projection") and begin_property_table(
+            "inspector_camera_projection"
+        ):
             fields = []
             for label, value, bounds, default, unit, fmt in (
                 (
@@ -3135,24 +3139,25 @@ class InspectorPanel(Panel):
                 ("near", near, (1e-5, far - 1e-5), initial.near, "m", "%.5f"),
                 ("far", far, (near + 1e-5, 1e7), initial.far, "m", "%.3f"),
             ):
-                with value_card(ctx, f"##inspector-camera-{label}-label", ctx.tr(label), ""):
-                    fields.append(
-                        value_rail(
-                            ctx,
-                            f"##inspector-camera-{label}",
-                            value,
-                            bounds,
-                            initial=default,
-                            fmt=fmt,
-                            show_reset=False,
-                            unit=unit,
-                            angular_degrees=self._camera_angular_degrees,
-                            toggle_unit=self._toggle_camera_angle_unit,
-                        )
+                property_row(ctx.tr(label))
+                fields.append(
+                    value_rail(
+                        ctx,
+                        f"##inspector-camera-{label}",
+                        value,
+                        bounds,
+                        initial=default,
+                        fmt=fmt,
+                        show_reset=False,
+                        unit=unit,
+                        angular_degrees=self._camera_angular_degrees,
+                        toggle_unit=self._toggle_camera_angle_unit,
                     )
+                )
             fov_changed, fov = fields[0].changed, fields[0].value
             near_changed, near = fields[1].changed, fields[1].value
             far_changed, far = fields[2].changed, fields[2].value
+            property_row(ctx.tr("projection"))
             imgui.set_next_item_width(-1)
             projection = 1 if orthographic else 0
             supported = ctx.backend.caps.orthographic
@@ -3173,18 +3178,19 @@ class InspectorPanel(Panel):
                 orthographic = selected_projection == 1
                 ortho_changed = True
             if orthographic:
-                with value_card(ctx, "##camera-ortho-height-label", ctx.tr("ortho height"), ""):
-                    height_edit = value_rail(
-                        ctx,
-                        "##camera_ortho_height",
-                        float(view.ortho_height),
-                        (1e-4, 1e6),
-                        initial=initial.ortho_height,
-                        fmt="%.4f",
-                        show_reset=False,
-                        unit="m",
-                    )
-                    height_changed, ortho_height = height_edit.changed, height_edit.value
+                property_row(ctx.tr("ortho height"))
+                height_edit = value_rail(
+                    ctx,
+                    "##camera_ortho_height",
+                    float(view.ortho_height),
+                    (1e-4, 1e6),
+                    initial=initial.ortho_height,
+                    fmt="%.4f",
+                    show_reset=False,
+                    unit="m",
+                )
+                height_changed, ortho_height = height_edit.changed, height_edit.value
+            imgui.end_table()
 
         if _property_section(ctx, "camera behavior") and _begin_property_table(
             "insp_camera_behavior"
@@ -3375,12 +3381,7 @@ def _compact_transform(width: float, style_scale: float) -> bool:
 
 
 def _begin_property_table(table_id: str) -> bool:
-    flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
-    if not imgui.begin_table(table_id, 2, flags):
-        return False
-    imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.26)
-    imgui.table_setup_column("control", imgui.TableColumnFlags_.width_stretch, 0.74)
-    return True
+    return begin_property_table(table_id)
 
 
 def _property_section(ctx: PanelContext, label: str) -> bool:
@@ -3400,25 +3401,7 @@ def _property_control_row(
 ) -> None:
     """Advance a property table to one left-label/right-control row."""
 
-    imgui.table_next_row()
-    imgui.table_next_column()
-    imgui.align_text_to_frame_padding()
-    translated = ctx.tr(label)
-    available = imgui.get_content_region_avail().x
-    shown = translated
-    width = imgui.calc_text_size(shown).x
-    truncated = width > available
-    if truncated:
-        ellipsis = "…"
-        while shown and imgui.calc_text_size(f"{shown}{ellipsis}").x > available:
-            shown = shown[:-1]
-        shown = f"{shown.rstrip()}{ellipsis}" if shown else ellipsis
-        width = imgui.calc_text_size(shown).x
-    imgui.text_disabled(shown)
-    if (tooltip or truncated) and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-        imgui.set_tooltip(ctx.tr(tooltip) if tooltip else translated)
-    imgui.table_next_column()
-    imgui.set_next_item_width(-1.0)
+    property_row(ctx.tr(label), tooltip=ctx.tr(tooltip) if tooltip else "")
 
 
 def _property_button_row(
@@ -3527,6 +3510,19 @@ def _property_vector_row(
     return changed, out
 
 
+def vector_layout(
+    width: float, label_width: float, axes_width: float, scale: float, previous: int = -1
+) -> int:
+    """Use inline, label-above, or stacked axes, with room to expand before switching back."""
+    margin = 24.0 * scale
+    inline = label_width + axes_width
+    if width >= inline + (margin if previous > 0 else 0):
+        return 0
+    if width >= axes_width + (margin if previous == 2 else 0):
+        return 1
+    return 2
+
+
 def _vector_fields(
     ctx: PanelContext,
     node: SceneNode,
@@ -3542,7 +3538,13 @@ def _vector_fields(
     )
     width = imgui.get_content_region_avail().x
     minimum_axes_width = 3.0 * _axis_field_min_width(ctx.style_scale)
-    compact = width < label_width + minimum_axes_width
+    storage = imgui.get_state_storage()
+    layout_id = imgui.get_id(table_id + "##vector-layout")
+    layout = vector_layout(
+        width, label_width, minimum_axes_width, ctx.style_scale, storage.get_int(layout_id, -1)
+    )
+    storage.set_int(layout_id, layout)
+    compact = layout != 0
     flags = (
         imgui.TableFlags_.sizing_stretch_same
         | imgui.TableFlags_.no_saved_settings
@@ -3568,6 +3570,7 @@ def _vector_fields(
             speed=speed,
             fmt=fmt,
             compact=compact,
+            stacked=layout == 2,
             reset_values=reset_values,
         )
         for name, values, speed, fmt, reset_values in rows
@@ -3586,6 +3589,7 @@ def _vector_row(
     speed: float,
     fmt: str,
     compact: bool,
+    stacked: bool = False,
     reset_values=None,
 ) -> tuple[bool, np.ndarray]:
     out = np.asarray(values, np.float64).copy()
@@ -3607,9 +3611,6 @@ def _vector_row(
     if group_hovered:
         imgui.set_tooltip(pointer_hint(ctx, PointerAction.PROPERTY_COPY, ctx.tr("Copy XYZ")))
 
-    stacked = compact and imgui.get_content_region_avail().x < 3.0 * _axis_field_min_width(
-        ctx.style_scale
-    )
     if compact:
         imgui.table_next_row()
         imgui.table_next_column()
@@ -3652,7 +3653,7 @@ def _vector_row(
 
 
 def _axis_field_min_width(scale: float) -> float:
-    return imgui.calc_text_size("-0.000").x + 27.0 * scale + 2.0 * imgui.get_style().frame_padding.x
+    return imgui.calc_text_size("-0.000").x + 22.0 * scale + imgui.get_style().frame_padding.x
 
 
 def _axis_field(
@@ -3697,6 +3698,7 @@ def _axis_field(
     imgui.push_style_var(
         imgui.StyleVar_.frame_padding, imgui.ImVec2(0.0, imgui.get_style().frame_padding.y)
     )
+    imgui.push_style_color(imgui.Col_.nav_cursor, (0, 0, 0, 0))
     reset = imgui.button(
         f"{label}##{name}_{axis}_{node.node_id}",
         imgui.ImVec2(axis_width, 0.0),
@@ -3708,7 +3710,8 @@ def _axis_field(
     button_hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
     button_active = imgui.is_item_active()
     button_lo, button_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-    imgui.pop_style_color(4)
+    button_id = imgui.get_item_id()
+    imgui.pop_style_color(5)
     if button_hovered:
         imgui.set_tooltip(ctx.tr("Click to reset to 0") if editable else ctx.tr("Read only"))
 
@@ -3728,6 +3731,7 @@ def _axis_field(
     field_hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
     field_active = imgui.is_item_active()
     field_lo, field_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+    field_id = imgui.get_item_id()
     splitter.set_current_channel(draw_list, 0)
     draw_joined_field_frame(
         draw_list,
@@ -3754,6 +3758,22 @@ def _axis_field(
         field_opacity=float(imgui.get_style().alpha)
         * (1.0 if editable else float(imgui.get_style().disabled_alpha)),
     )
+    splitter.set_current_channel(draw_list, 1)
+    if editable:
+        draw_focus_frame(
+            button_lo,
+            button_hi,
+            rounding=imgui.get_style().frame_rounding,
+            corners=imgui.ImDrawFlags_.round_corners_left,
+            item_id=button_id,
+        )
+        draw_focus_frame(
+            field_lo,
+            field_hi,
+            rounding=imgui.get_style().frame_rounding,
+            corners=imgui.ImDrawFlags_.round_corners_right,
+            item_id=field_id,
+        )
     splitter.merge(draw_list)
     if field_hovered and pointer_pressed(ctx, PointerAction.PROPERTY_COPY):
         imgui.set_clipboard_text(fmt % value)

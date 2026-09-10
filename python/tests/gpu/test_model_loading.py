@@ -628,10 +628,12 @@ def test_model_component_inspector_tracks_structured_edits(monkeypatch):
         instance.release()
 
 
-def test_model_placement_requires_explicit_unlock_and_apply(monkeypatch):
+def test_live_model_placement_requires_explicit_unlock_and_apply(monkeypatch, tmp_path):
     monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
     instance = build_editor(vsync=False, width=1280, height=800)
     try:
+        instance.app.set_live_model_updates(True)
         assert instance.app.add_model(resolve("actuator_visuals"))
         model = next(node for node in instance.session.nodes if node.type is NodeType.MODEL)
         assert instance.session.submit(SelectNode(model.node_id))
@@ -735,13 +737,15 @@ def test_static_scene_file_menu_renders():
         instance.release()
 
 
-def test_deferred_snapshot_edit_keeps_window_alive_and_rejects_invalid_source(monkeypatch):
+def test_live_snapshot_edit_keeps_window_alive_and_rejects_invalid_source(monkeypatch, tmp_path):
     import threading
     import time
 
     from mojive import commands as cmd
 
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
     with build_editor(vsync=False, width=960, height=640, show_window=False) as instance:
+        instance.app.set_live_model_updates(True)
         added = instance.app.add_model(resolve("joint_types"))
         assert added.ok
         for _ in range(3):

@@ -150,8 +150,29 @@ def patch(source: Path) -> None:
         "        pass\n"
         "    def add_concave_poly_filled(self, points: List[ImVec2Like], col: ImU32) -> None:",
     )
-    # Focus rings expand the control's contour. Use its effective radius before
-    # adding the outset; otherwise saturated controls get a different silhouette.
+    # Preserve the original contour when an item intersects a scrolling clip.
+    # The scissor clips pixels; changing the rectangle creates false rounded ends.
+    change(
+        imgui + "imgui.cpp",
+        "    display_rect.ClipWith(window->ClipRect);",
+        "    // Retain the item contour; clipping belongs to the draw command.",
+    )
+    change(
+        imgui + "imgui.cpp",
+        "        bool fully_visible = window->ClipRect.Contains(display_rect);\n        if (!fully_visible)",
+        "        const bool extend_clip = window->ClipRect.Contains(bb) && !window->ClipRect.Contains(display_rect);\n        if (extend_clip)",
+    )
+    change(
+        imgui + "imgui.cpp",
+        "        if (!fully_visible)\n            window->DrawList->PopClipRect();",
+        "        if (extend_clip)\n            window->DrawList->PopClipRect();",
+    )
+    # Keep the focus stroke against the frame rather than floating beyond it.
+    change(
+        imgui + "imgui.cpp",
+        "        const float distance = (float)(int)(3.0f + thickness * 0.5f);",
+        "        const float distance = thickness * 0.5f + 0.5f;",
+    )
     change(
         imgui + "imgui.cpp",
         "        display_rect.Expand(ImVec2(distance, distance));",

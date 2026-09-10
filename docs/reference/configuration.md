@@ -153,6 +153,11 @@ a cylinder or cone exposes diameter and height; a capsule exposes diameter and s
 box or ellipsoid exposes three independent dimensions. Unsupported mesh data remains editable
 through its source rather than being presented as a misleading scale operation.
 
+Drag the outlined center to resize all dimensions proportionally. XY, XZ, and YZ handles resize
+their corresponding body axes; finite planes expose XY only. Cylinder, cone, and capsule radial
+handles preserve their circular section by coupling X and Y. A sphere's center and screen-facing
+ring both change its radius. Dimension gestures support snapping and Undo.
+
 Use `LayoutConfig(persistence=False)` for a deterministic default layout on every launch, or
 `LayoutConfig(reset=True)` to discard stale/off-screen docking coordinates once and then keep the
 new layout. A custom `path` isolates each embedding application from Mojive's editor layout.

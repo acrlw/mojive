@@ -235,6 +235,7 @@ def apply(imgui: Any, theme: Theme = THEME, ui_scale: float = 1.0) -> None:
     put(col.scrollbar_grab_hovered, theme.primary_dim)
     put(col.scrollbar_grab_active, theme.primary)
     put(col.check_mark, theme.primary_bright)
+    put(col.checkbox_selected_bg, theme.bg_frame_active)
     put(col.slider_grab, theme.primary_dim)
     put(col.slider_grab_active, theme.primary)
     put(col.button, theme.bg_frame)

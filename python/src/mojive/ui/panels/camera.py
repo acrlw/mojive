@@ -23,6 +23,7 @@ from ...scene_state import (
 from ...types import CameraView
 from ..camera import DEFAULT_PITCH, DEFAULT_YAW
 from ..camera_tracking import can_track_node
+from ..controls import begin_property_table, clearable_combo, property_row
 from . import (
     Panel,
     PanelContext,
@@ -30,7 +31,7 @@ from . import (
     search_input,
     segmented_control,
 )
-from .value_cards import value_card, value_rail
+from .value_cards import value_rail
 
 PRESETS: tuple[tuple[str, float, float], ...] = (
     ("front", -90.0, 0.0),
@@ -92,8 +93,6 @@ class CameraPanel(Panel):
         self._bookmark_index = 0
         self._bookmark_error = ""
         self._tracking_filter = ""
-        self._tracking_target_id = None
-        self._tracking_generation = -1
         self._angular_degrees = True
         self._initial_distance = None
 
@@ -129,69 +128,60 @@ class CameraPanel(Panel):
         ):
             return
         node = ctx.session.node(ctx.tracking_node_id) if ctx.tracking_node_id is not None else None
-        generation = (ctx.session.document_id, ctx.session.adapter.structure_revision)
-        if self._tracking_generation != generation:
-            self._tracking_target_id = None
-            self._tracking_generation = generation
-        if node is not None:
-            self._tracking_target_id = node.node_id
-        remembered = (
-            ctx.session.node(self._tracking_target_id)
-            if self._tracking_target_id is not None
-            else None
-        )
-        candidate = remembered if can_track_node(remembered) else ctx.session.selected_node
-        enabled = node is not None
-        imgui.begin_disabled(not enabled and not can_track_node(candidate))
-        changed, checked = imgui.checkbox("##tracking-enabled", enabled)
-        imgui.set_item_tooltip(ctx.tr("Stop tracking" if enabled else "Resume tracking"))
-        imgui.end_disabled()
-        if changed:
-            ctx.track_node(candidate.node_id if checked else None)
-        imgui.same_line()
-        current = node.name if node is not None else ctx.tr("Off")
-        imgui.set_next_item_width(-1)
-        if imgui.begin_combo("##tracking-target", f"{ctx.tr('Target')}: {current}"):
+        if self._begin_properties(ctx, "tracking_properties"):
+            self._property_label(ctx.tr("Target"))
+            current = node.name if node is not None else ctx.tr("Choose target")
             imgui.set_next_item_width(-1)
-            _, self._tracking_filter = search_input(
-                "##tracking-filter",
-                self._tracking_filter,
-                hint=ctx.tr("Filter targets"),
-                search_tooltip=ctx.tr("Filter targets"),
-                clear_tooltip=ctx.tr("Clear search"),
-            )
-            query = self._tracking_filter.casefold()
-            for candidate in ctx.session.nodes:
-                primary = candidate.type in (NodeType.ROBOT, NodeType.LINK) or (
-                    candidate.type is NodeType.GEOM and candidate.body_index < 0
-                )
-                if not primary and candidate.node_id != ctx.tracking_node_id:
-                    continue
-                if query not in candidate.name.casefold():
-                    continue
-                selected, _ = imgui.selectable(
-                    f"{candidate.name}##tracking-{candidate.node_id}",
-                    candidate.node_id == ctx.tracking_node_id,
-                )
-                if selected:
-                    ctx.track_node(candidate.node_id)
-            imgui.end_combo()
-        imgui.set_item_tooltip(current)
-        selected_node = ctx.session.selected_node
-        imgui.begin_disabled(not can_track_node(selected_node))
-        if imgui.button(f"{ctx.tr('Track selected')}##track-selected", imgui.ImVec2(-1, 0)):
-            ctx.track_node(selected_node.node_id)
-        imgui.end_disabled()
-
-        flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
-        compact = imgui.get_content_region_avail().x < 240.0 * ctx.style_scale
-        if imgui.begin_table("tracking_properties", 1 if compact else 2, flags):
-            if not compact:
-                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 0.26)
-            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch, 0.74)
+            imgui.set_next_window_size_constraints((240 * ctx.style_scale, 0), (10000, 10000))
+            with clearable_combo(
+                "##tracking-target",
+                current,
+                has_value=node is not None,
+                clear_tooltip=ctx.tr("Stop tracking"),
+                tooltip=node.name
+                if node is not None
+                else ctx.tr("Choose an object to start tracking."),
+            ) as (opened, cleared):
+                if cleared:
+                    ctx.track_node(None)
+                if opened:
+                    selected_node = ctx.session.selected_node
+                    imgui.begin_disabled(not can_track_node(selected_node))
+                    selected_label = ctx.tr("Use selection")
+                    if selected_node is not None:
+                        selected_label += f": {selected_node.name}"
+                    if imgui.selectable(selected_label + "##track-selected", False)[0]:
+                        ctx.track_node(selected_node.node_id)
+                    imgui.end_disabled()
+                    imgui.separator()
+                    imgui.set_next_item_width(-1)
+                    _, self._tracking_filter = search_input(
+                        "##tracking-filter",
+                        self._tracking_filter,
+                        hint=ctx.tr("Filter targets"),
+                        search_tooltip=ctx.tr("Filter targets"),
+                        clear_tooltip=ctx.tr("Clear search"),
+                    )
+                    query = self._tracking_filter.casefold()
+                    for candidate in ctx.session.nodes:
+                        primary = candidate.type in (NodeType.ROBOT, NodeType.LINK) or (
+                            candidate.type is NodeType.GEOM and candidate.body_index < 0
+                        )
+                        if not primary and candidate.node_id != ctx.tracking_node_id:
+                            continue
+                        if query not in candidate.name.casefold():
+                            continue
+                        if imgui.selectable(
+                            f"{candidate.name}##tracking-{candidate.node_id}",
+                            candidate.node_id == ctx.tracking_node_id,
+                        )[0]:
+                            ctx.track_node(candidate.node_id)
             self._property_label(ctx.tr("Axes"))
             axes = segmented_control(
-                "tracking-axes", ("X-Y", "X-Y-Z"), int(ctx.tracking.axes == "xyz"), theme=ctx.theme
+                "tracking-axes",
+                ("X-Y", "X-Y-Z"),
+                int(ctx.tracking.axes == "xyz"),
+                theme=ctx.theme,
             )
             imgui.set_item_tooltip(ctx.tr("X-Y keeps camera height. X-Y-Z also follows height."))
             if axes != int(ctx.tracking.axes == "xyz"):
@@ -357,6 +347,8 @@ class CameraPanel(Panel):
         for title, parameters in (("View", PARAM_SLIDERS[:3]), ("Lens", PARAM_SLIDERS[3:])):
             if not imgui.collapsing_header(ctx.tr(title), imgui.TreeNodeFlags_.default_open):
                 continue
+            if not self._begin_properties(ctx, f"camera_{title.lower()}"):
+                continue
             for attr, lo, hi, fmt, initial in parameters:
                 current = _get(camera, attr)
                 if current is None:
@@ -364,23 +356,29 @@ class CameraPanel(Panel):
                 angular = attr in ("yaw", "pitch", "fov_y_deg")
                 factor = math.pi / 180.0 if angular else 1.0
                 initial = self._initial_distance if initial is None else initial
-                with value_card(ctx, f"##camera-label-{attr}", ctx.tr(attr), ""):
-                    edit = value_rail(
-                        ctx,
-                        f"##camera-{attr}",
-                        float(current) * factor,
-                        (lo * factor, hi * factor),
-                        initial=None if initial is None else initial * factor,
-                        fmt="%.3f" if angular and not self._angular_degrees else fmt.split()[0],
-                        show_reset=False,
-                        unit="rad" if angular else "m",
-                        angular_degrees=self._angular_degrees,
-                        toggle_unit=self._toggle_angle_unit,
-                    )
-                    if edit.changed:
-                        setattr(camera, attr, edit.value / factor)
+                self._property_label(ctx.tr(attr))
+                edit = value_rail(
+                    ctx,
+                    f"##camera-{attr}",
+                    float(current) * factor,
+                    (lo * factor, hi * factor),
+                    initial=None if initial is None else initial * factor,
+                    fmt="%.3f" if angular and not self._angular_degrees else fmt.split()[0],
+                    show_reset=False,
+                    unit="rad" if angular else "m",
+                    angular_degrees=self._angular_degrees,
+                    toggle_unit=self._toggle_angle_unit,
+                )
+                if edit.changed:
+                    setattr(camera, attr, edit.value / factor)
+            if title == "Lens":
+                self._projection(ctx, camera)
+            imgui.end_table()
+
+    def _projection(self, ctx: PanelContext, camera: Any) -> None:
         ortho = _get(camera, "orthographic")
         if ortho is not None:
+            self._property_label(ctx.tr("projection"))
             imgui.set_next_item_width(-1.0)
             supported = ctx.backend.caps.orthographic
             imgui.begin_disabled(not supported)
@@ -406,11 +404,23 @@ class CameraPanel(Panel):
                         camera.orthographic = target
 
     @staticmethod
+    def _begin_properties(ctx, str_id):
+        labels = tuple(
+            ctx.tr(name)
+            for name in (
+                "yaw",
+                "pitch",
+                "distance",
+                "fov_y_deg",
+                "far",
+                "projection",
+                "Target",
+                "Axes",
+                "Smoothing",
+            )
+        )
+        return begin_property_table(str_id, labels=labels)
+
+    @staticmethod
     def _property_label(label: str) -> None:
-        imgui.table_next_row()
-        imgui.table_next_column()
-        compact = imgui.table_get_column_count() == 1
-        if not compact:
-            imgui.align_text_to_frame_padding()
-        imgui.text_disabled(label)
-        imgui.table_next_column()
+        property_row(label, wrap=True)

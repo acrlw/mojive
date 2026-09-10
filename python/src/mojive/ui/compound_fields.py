@@ -69,3 +69,20 @@ def borderless_numeric_input():
     finally:
         imgui.pop_style_color()
         imgui.pop_style_var()
+
+
+def draw_focus_frame(lo, hi, *, rounding: float, corners=None, item_id=None, color=None) -> None:
+    """Inset keyboard focus inside the same rounded/square contour as its field."""
+    context = imgui.get_current_context()
+    item_id = imgui.get_item_id() if item_id is None else item_id
+    if not context.nav_cursor_visible or context.nav_id != item_id:
+        return
+    if corners is None:
+        corners = imgui.ImDrawFlags_.round_corners_all
+    thickness = max(1.0, imgui.get_font_size() / 13.0)
+    inset = thickness * 0.5 + 0.5
+    radius = max(0.0, min(rounding, (hi.y - lo.y) * 0.5) - inset)
+    dl = imgui.get_window_draw_list()
+    dl.path_rect((lo.x + inset, lo.y + inset), (hi.x - inset, hi.y - inset), radius, corners)
+    packed = imgui.get_color_u32(imgui.Col_.nav_cursor if color is None else imgui.ImVec4(*color))
+    dl.path_stroke(packed, thickness, imgui.ImDrawFlags_.closed)

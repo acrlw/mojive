@@ -20,13 +20,15 @@ from ..input_bindings import DEFAULT_INPUT_BINDINGS
 from ..pointer_bindings import PointerAction
 from ..theme import with_alpha
 from ..viewport_widgets import (
+    PLAYBACK_HALF_HEIGHT_PT,
+    PLAYBACK_RESET_SCALE,
     ToolHint,
     draw_expand_glyph,
     draw_playback_glyph,
     draw_reset_glyph,
     pointer_tool_hint,
 )
-from . import Panel, PanelContext, begin_kv_table, button_row_layout, button_width
+from . import Panel, PanelContext, button_row_layout, button_width, segmented_control
 
 _MIN_TIMELINE_SPAN = 1e-6
 _COMMAND_HEIGHT_PT = 28.0
@@ -34,10 +36,8 @@ _COMMAND_ICON_PT = 16.0
 _MARKER_SPACING_FACTOR = 1.5
 _LOOP_COLOR = (0.98, 0.52, 0.18, 1.0)
 _COMMAND_PLAYBACK_KINDS = {
-    "first": "previous",
-    "previous": "reverse",
-    "next": "play",
-    "last": "step",
+    "previous": "previous",
+    "next": "step",
     "play": "play",
     "pause": "pause",
     "stop": "stop",
@@ -64,11 +64,22 @@ def _rounded_command_icon_path(
 def _fit_corner_path(scale: float, sx: int, sy: int, smoothing: float):
     return capped_polyline_points(
         (
-            (sx * 2 * scale, sy * 5 * scale),
-            (sx * 6 * scale, sy * 5 * scale),
-            (sx * 6 * scale, sy * scale),
+            (sx * 2.75 * scale, sy * 6 * scale),
+            (sx * 6 * scale, sy * 6 * scale),
+            (sx * 6 * scale, sy * 2.75 * scale),
         ),
         1.5 * scale,
+        round_start=True,
+        round_end=True,
+        smoothing=smoothing,
+    )
+
+
+@lru_cache(maxsize=128)
+def _command_stroke(points, width, scale, smoothing):
+    return capped_polyline_points(
+        tuple((x * scale, y * scale) for x, y in points),
+        width * scale,
         round_start=True,
         round_end=True,
         smoothing=smoothing,
@@ -160,7 +171,7 @@ def zoom_timeline_range(
 
 
 def timeline_channel_width(available: float, scale: float) -> float:
-    return 230 * scale if available >= 600 * scale else min(150 * scale, available * 0.45)
+    return min(150 * scale, available * 0.35)
 
 
 def timeline_time_to_x(time: float, start: float, end: float, lo: float, hi: float) -> float:
@@ -283,7 +294,23 @@ def _draw_command_icon(
             origin=(x, y),
         )
 
-    if kind in _COMMAND_PLAYBACK_KINDS:
+    def stroke(points, width):
+        draw.fringed_concave_fill(
+            _command_stroke(points, width, s, smoothing), color, origin=(x, y)
+        )
+
+    if kind in ("first", "last"):
+        direction = -1.0 if kind == "first" else 1.0
+        for offset in (-2.0, 2.5):
+            rounded_fill(
+                tuple(
+                    (direction * (px + offset), py)
+                    for px, py in ((-2.5, -4.5), (2.0, 0.0), (-2.5, 4.5))
+                ),
+                radius=0.45,
+            )
+        stroke(((direction * 6, -4.5), (direction * 6, 4.5)), 1.4)
+    elif kind in _COMMAND_PLAYBACK_KINDS:
         draw_playback_glyph(
             draw, center, color, s * 0.85, _COMMAND_PLAYBACK_KINDS[kind], smoothing=smoothing
         )
@@ -293,23 +320,12 @@ def _draw_command_icon(
         draw_expand_glyph(draw, center, color, s)
     elif kind == "record":
         draw.circle_filled((x, y), 4.5 * s, color)
+    elif kind == "add":
+        stroke(((-5, 0), (5, 0)), 1.6)
+        stroke(((0, -5), (0, 5)), 1.6)
     elif kind == "clear":
-        draw.line(
-            (x - 5.0 * s, y - 5.0 * s),
-            (x + 5.0 * s, y + 5.0 * s),
-            color,
-            1.8 * s,
-            cap="round",
-            smoothing=smoothing,
-        )
-        draw.line(
-            (x + 5.0 * s, y - 5.0 * s),
-            (x - 5.0 * s, y + 5.0 * s),
-            color,
-            1.8 * s,
-            cap="round",
-            smoothing=smoothing,
-        )
+        stroke(((-5, -5), (5, 5)), 1.8)
+        stroke(((5, -5), (-5, 5)), 1.8)
     elif kind in ("key-previous", "key-next"):
         direction = -1.0 if kind == "key-previous" else 1.0
         diamond_x = -direction * 2.5
@@ -333,9 +349,9 @@ def _draw_command_icon(
         for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
             draw.fringed_concave_fill(_fit_corner_path(s, sx, sy, smoothing), color, origin=(x, y))
     elif kind == "follow":
-        draw.line((x - 6 * s, y), (x + 2 * s, y), color, 1.5 * s, cap="round")
+        stroke(((-6, 0), (2, 0)), 1.5)
         rounded_fill(((0, -3), (4, 0), (0, 3)), radius=0.4)
-        draw.line((x + 6 * s, y - 5 * s), (x + 6 * s, y + 5 * s), color, 1.5 * s, cap="round")
+        stroke(((6, -5), (6, 5)), 1.5)
     elif kind == "view":
         draw.rect(
             (x - 7.0 * s, y - 5.0 * s),
@@ -364,6 +380,7 @@ def _command_button(
     selected: bool = False,
     smoothing: float = CORNER_SMOOTHING,
     width: float | None = None,
+    layouts: dict | None = None,
 ) -> bool:
     """Render a compact 28 pt semantic button with a vector glyph."""
 
@@ -397,15 +414,41 @@ def _command_button(
     lo = (float(origin.x), float(origin.y))
     hi = (lo[0] + width, lo[1] + height)
     draw.rect_filled(lo, hi, background, rounding=float(imgui.get_style().frame_rounding))
-    icon_center = (lo[0] + 14.0 * scale, lo[1] + height * 0.5)
+    center_y = lo[1] + height * 0.5
+    icon_center = (lo[0] + width * 0.5, center_y)
+    if label:
+        key = (imgui.get_font(), imgui.get_font_size(), kind, label, width, scale)
+        cached = layouts.get(item_id) if layouts is not None else None
+        if cached is None or cached[0] != key:
+            icon_width = {
+                "record": 9.0,
+                "stop": 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_RESET_SCALE * 0.85,
+                "view": 15.5,
+                "key": 12.0,
+            }.get(kind, _COMMAND_ICON_PT) * scale
+            gap = 7.0 * scale
+            label = fit_text(draw, label, max(1.0, width - 16 * scale - icon_width - gap))
+            ink = draw.text_ink_bounds(label) or (0.0, 0.0, *draw.text_size(label))
+            left = (width - icon_width - gap - (ink[2] - ink[0])) * 0.5
+            cached = (
+                key,
+                label,
+                left + icon_width * 0.5,
+                left + icon_width + gap - ink[0],
+                -(ink[1] + ink[3]) * 0.5,
+            )
+            if layouts is not None:
+                layouts[item_id] = cached
+        _, label, icon_x, text_x, text_y = cached
+        icon_center = (lo[0] + icon_x, center_y)
+        draw.text(
+            (lo[0] + text_x, center_y + text_y),
+            foreground,
+            label,
+            pixel_snap=False,
+        )
     icon_color = theme.danger if kind == "record" and enabled else foreground
     _draw_command_icon(draw, icon_center, kind, icon_color, scale, smoothing=smoothing)
-    if label:
-        draw.text(
-            (lo[0] + 31.0 * scale, text_line_y(draw, lo[1] + height * 0.5)),
-            foreground,
-            fit_text(draw, label, max(1.0, width - 37 * scale)),
-        )
     imgui.set_item_tooltip(tooltip)
     return bool(clicked and enabled)
 
@@ -431,13 +474,14 @@ class KeyframesPanel(Panel):
 
     id = "keyframes"
     name = "Keyframes"
-    default_open = False
+    default_open = True
     shortcut = ""
     dock_with = "Output"
 
     def __init__(self) -> None:
         super().__init__()
         self._model_id = -1
+        self._command_layouts: dict = {}
         self._selected_id = -1
         self._selected_snapshot = -1
         self._selection_generation = -1
@@ -490,10 +534,8 @@ class KeyframesPanel(Panel):
             and ctx.session.adapter.caps.supports("model.keyframe_edit")
         )
         self._sync_selection(ctx, keyframe_by_id, take_times)
-        self._draw_compact_toolbar(ctx, models, keyframes, take_times, editable)
-        if imgui.get_content_region_avail().x < 600 * ctx.style_scale:
-            self._draw_transport_header(ctx, take_times)
-        self._draw_dope_sheet(ctx, keyframes, keyframe_by_id, take_times, editable)
+        self._draw_compact_toolbar(ctx, take_times)
+        self._draw_dope_sheet(ctx, models, keyframes, keyframe_by_id, take_times, editable)
         if self._selected_snapshot >= 0:
             snapshot = next(
                 (
@@ -513,7 +555,36 @@ class KeyframesPanel(Panel):
         self._draw_selected(ctx, editable)
         self._draw_error(ctx)
 
-    def _draw_compact_toolbar(self, ctx, models, keyframes, take_times, editable):
+    def _draw_model_header(self, ctx, models, keyframes, editable, width):
+        scale = ctx.style_scale
+        gap = 5 * scale
+        icon_width = _command_button_width("", scale)
+        imgui.set_next_item_width(max(1, width - icon_width - gap))
+        model_ids = tuple(model.model_id for model in models)
+        slot = model_ids.index(self._model_id) if self._model_id in model_ids else 0
+        imgui.begin_disabled(not models)
+        changed, slot = imgui.combo(
+            "##keyframe-model", slot, tuple(model.name for model in models) or (ctx.tr("Scene"),)
+        )
+        imgui.end_disabled()
+        imgui.set_item_tooltip(models[slot].name if models else ctx.tr("Scene"))
+        if changed:
+            self._set_model(model_ids[slot])
+        imgui.same_line()
+        if _command_button(
+            "##add-model-keyframe",
+            "add",
+            ctx.tr("Add Model Keyframe"),
+            ctx.theme,
+            scale,
+            enabled=editable and self._model_id >= 0,
+        ):
+            name = unique_keyframe_name({key.name for key in keyframes})
+            ctx.submit_model_edit(
+                cmd.AddModelKeyframe(self._model_id, name), self._snapshot_created
+            )
+
+    def _draw_compact_toolbar(self, ctx, take_times):
         scale = ctx.style_scale
         gap = 5 * scale
         width = max(1.0, imgui.get_content_region_avail().x)
@@ -523,41 +594,72 @@ class KeyframesPanel(Panel):
             ctx.tr("Stop Video" if ctx.take_video_active else "Export Video"),
             ctx.tr("Capture Snapshot"),
         )
-        natural = [_command_button_width(label, scale) for label in labels]
-        auxiliary_width = (130 + 28 + 92 + 28) * scale + 3 * gap
-        wide = width >= 150 * scale + sum(natural) + auxiliary_width + 4 * gap
-        narrow = width < 600 * scale
+        icon_width = _command_button_width("", scale)
+        first, last = (
+            (take_times[0], take_times[-1]) if take_times else (self._view_start, self._view_end)
+        )
+        time_reference = f"{max(99, abs(first), abs(last)):.3f} s"
+        time_width = imgui.calc_text_size(("-" if first < 0 else "") + time_reference).x
+        transport_width = 5 * icon_width + time_width + 5 * gap
+        field_width = max(
+            56 * scale, imgui.calc_text_size(f"{max(abs(first), abs(last)):.2f}").x + 16 * scale
+        )
+        take_width = max(
+            84 * scale,
+            imgui.calc_text_size(ctx.tr("Take 1" if take_times else "No take")).x + 44 * scale,
+        )
+        range_widths = (take_width, field_width, field_width, icon_width)
+        range_width = sum(range_widths) + 3 * gap
+        follow_labels = (ctx.tr("Off"), ctx.tr("Page"), ctx.tr("Locked"))
+        follow_width = 3 * (
+            max(imgui.calc_text_size(label).x for label in follow_labels) + 16 * scale
+        )
+        follow_label_width = imgui.calc_text_size(ctx.tr("Follow")).x
+        view_width = follow_label_width + gap + follow_width + 2 * (icon_width + gap)
+        separator_width = 13 * scale
+        fixed_width = transport_width + range_width + view_width + 3 * separator_width
+        command_minimum = 3 * icon_width + 2 * gap
+        if fixed_width + command_minimum <= width:
+            caption_budget = width - fixed_width
+        elif command_minimum + transport_width + separator_width <= width:
+            caption_budget = width - transport_width - separator_width
+        else:
+            caption_budget = width
         shown = list(labels)
-        if not wide:
-            shown[1] = ""
-        if narrow and sum(_command_button_width(label, scale) for label in shown) + 2 * gap > width:
-            shown[2] = ""
-        if narrow and sum(_command_button_width(label, scale) for label in shown) + 2 * gap > width:
-            shown[0] = ""
-        widths = [
-            min(width - height - gap, 150 * scale),
-            *[_command_button_width(label, scale) for label in shown],
-        ]
-        toolbar_right = imgui.get_cursor_pos_x() + width
-        origin = imgui.get_cursor_screen_pos()
-        options_position = (origin.x + width - height, origin.y)
+        for index in (1, 2, 0):
+            total = sum(_command_button_width(label, scale) for label in shown) + 2 * gap
+            if total <= caption_budget:
+                break
+            shown[index] = ""
+        widths = [_command_button_width(label, scale) for label in shown]
+        right = imgui.get_cursor_screen_pos().x + width
+        first_group = True
+
+        def group(group_width):
+            nonlocal first_group
+            if (
+                not first_group
+                and imgui.get_item_rect_max().x + separator_width + group_width <= right
+            ):
+                imgui.same_line(0, 6 * scale)
+                pos = imgui.get_cursor_screen_pos()
+                imgui.dummy((scale, height))
+                ImguiDraw2D().line(
+                    (pos.x, pos.y + 5 * scale),
+                    (pos.x, pos.y + height - 5 * scale),
+                    (*ctx.theme.text_disabled[:3], 0.25),
+                    scale,
+                )
+                imgui.same_line(0, 6 * scale)
+            first_group = False
+            imgui.begin_group()
+
         imgui.push_style_var(imgui.StyleVar_.item_spacing, (gap, 6 * scale))
         imgui.push_style_var(
             imgui.StyleVar_.frame_padding,
             (8 * scale, max(0, (height - imgui.get_font_size()) * 0.5)),
         )
-        imgui.set_next_item_width(max(1, widths[0]))
-        model_ids = tuple(model.model_id for model in models)
-        slot = model_ids.index(self._model_id) if self._model_id in model_ids else 0
-        imgui.begin_disabled(not models)
-        changed, slot = imgui.combo(
-            "##keyframe-model", slot, tuple(model.name for model in models) or (ctx.tr("Scene"),)
-        )
-        imgui.end_disabled()
-        if changed:
-            self._set_model(model_ids[slot])
-        if not narrow:
-            imgui.same_line()
+        group(sum(widths) + 2 * gap)
         recording = ctx.session.state_take_recording
         supported = (
             ctx.session.adapter.caps.simulation
@@ -571,7 +673,8 @@ class KeyframesPanel(Panel):
             ctx.theme,
             scale,
             label=shown[0],
-            width=widths[1],
+            width=widths[0],
+            layouts=self._command_layouts,
             enabled=supported and not ctx.take_video_active,
             selected=recording,
         ):
@@ -589,7 +692,8 @@ class KeyframesPanel(Panel):
             ctx.theme,
             scale,
             label=shown[1],
-            width=widths[2],
+            width=widths[1],
+            layouts=self._command_layouts,
             enabled=ctx.start_take_video is not None
             and (ctx.take_video_active or (bool(take_times) and not recording)),
         ):
@@ -606,7 +710,8 @@ class KeyframesPanel(Panel):
             ctx.theme,
             scale,
             label=shown[2],
-            width=widths[3],
+            width=widths[2],
+            layouts=self._command_layouts,
             enabled=ctx.session.adapter.caps.state_snapshots and not ctx.take_video_active,
         ):
             result = ctx.submit(cmd.CaptureSceneSnapshot())
@@ -615,56 +720,85 @@ class KeyframesPanel(Panel):
                 self._selected_id = -1
                 self._view_needs_fit = True
             self._error = "" if result.ok else result.message
-        if wide:
+        imgui.end_group()
+        group(transport_width)
+        self._draw_transport_header(ctx, take_times, time_width)
+        imgui.end_group()
+        group(range_width)
+        self._draw_take_range(ctx, take_times, range_widths)
+        imgui.end_group()
+        group(view_width)
+        follow_inline = button_row_layout(
+            (follow_label_width, follow_width, icon_width, icon_width),
+            imgui.get_content_region_avail().x,
+            gap,
+        )
+        _toolbar_status(ctx.tr("Follow"), ctx.theme.text_disabled, scale, width=follow_label_width)
+        if follow_inline[1]:
+            imgui.same_line()
+        mode = segmented_control(
+            "timeline-follow",
+            follow_labels,
+            ("off", "page", "locked").index(self._follow_mode),
+            width=min(follow_width, imgui.get_content_region_avail().x),
+            theme=ctx.theme,
+        )
+        if ("off", "page", "locked")[mode] != self._follow_mode:
+            self._set_follow_mode(("off", "page", "locked")[mode])
+        imgui.set_item_tooltip(
+            ctx.tr(
+                "Page at the edge, or lock the playhead in place. Right-drag turns following off."
+            )
+        )
+        if follow_inline[2]:
+            imgui.same_line()
+        self._draw_view_controls(ctx)
+        if follow_inline[3]:
             imgui.same_line(0, gap)
-            imgui.set_cursor_pos_x(toolbar_right - auxiliary_width)
-            self._draw_take_range(ctx, take_times)
-            imgui.same_line(0, gap)
-        elif not narrow:
-            imgui.same_line(0, gap)
-        else:
-            imgui.set_cursor_screen_pos(options_position)
         if _command_button(
             "##timeline-options", "options", ctx.tr("Timeline settings"), ctx.theme, scale
         ):
             imgui.open_popup("timeline-options")
         imgui.push_style_var(imgui.StyleVar_.window_padding, (10 * scale, 8 * scale))
         if imgui.begin_popup("timeline-options"):
-            if not wide:
-                self._draw_take_range(ctx, take_times)
-                imgui.separator()
-            if (
-                editable
-                and self._model_id >= 0
-                and imgui.menu_item(ctx.tr("Add Model Keyframe"), "", False)[0]
-            ):
-                name = unique_keyframe_name({key.name for key in keyframes})
-                ctx.submit_model_edit(
-                    cmd.AddModelKeyframe(self._model_id, name), self._snapshot_created
-                )
-            self._draw_timeline_toolbar(ctx, take_times)
             if ctx.recording_config is not None:
-                for field, title in (
-                    ("countdown", "Start delay (s)"),
-                    ("end_hold", "End hold (s)"),
+                titles = (ctx.tr("Start delay (s)"), ctx.tr("End hold (s)"))
+                label_width = max(imgui.calc_text_size(title).x for title in titles) + 8 * scale
+                flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
+                if imgui.begin_table(
+                    "timeline_recording_settings", 2, flags, (label_width + 140 * scale, 0)
                 ):
-                    imgui.set_next_item_width(140 * scale)
-                    changed, value = imgui.input_float(
-                        ctx.tr(title), getattr(ctx.recording_config, field), 0.5, 5.0, "%.1f"
+                    imgui.table_setup_column(
+                        "label", imgui.TableColumnFlags_.width_fixed, label_width
                     )
-                    if changed:
-                        ctx.set_recording_config(replace(ctx.recording_config, **{field: value}))
+                    imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+                    for field, title in zip(("countdown", "end_hold"), titles, strict=True):
+                        imgui.table_next_row()
+                        imgui.table_next_column()
+                        imgui.align_text_to_frame_padding()
+                        imgui.text_disabled(title)
+                        imgui.table_next_column()
+                        imgui.set_next_item_width(-1)
+                        changed, value = imgui.input_float(
+                            "##timeline-" + field,
+                            getattr(ctx.recording_config, field),
+                            0.5,
+                            5.0,
+                            "%.1f",
+                        )
+                        if changed:
+                            ctx.set_recording_config(
+                                replace(ctx.recording_config, **{field: value})
+                            )
+                    imgui.end_table()
             imgui.end_popup()
+        imgui.end_group()
         imgui.pop_style_var(3)
-        if narrow:
-            imgui.set_cursor_screen_pos((origin.x, origin.y + 2 * height + 6 * scale))
-            imgui.dummy((0, 0))
 
-    def _draw_take_range(self, ctx, take_times):
+    def _draw_take_range(self, ctx, take_times, widths):
         scale = ctx.style_scale
         gap = 5 * scale
         recording = ctx.session.state_take_recording
-        imgui.begin_group()
         loop = ctx.session.state_take_loop
         endpoints = (
             [take_times[loop[0]], take_times[loop[1]]]
@@ -673,25 +807,27 @@ class KeyframesPanel(Panel):
             if take_times
             else [self._view_start, self._view_end]
         )
-        field_width = max(1.0, (130 * scale - gap) * 0.5)
-        imgui.set_next_item_width(field_width)
-        changed_start, start = imgui.drag_float(
-            "##timeline-range-start", endpoints[0], 0.01, format="%.2f"
-        )
-        imgui.set_item_tooltip(ctx.tr("Range start (s)"))
-        imgui.same_line()
-        imgui.set_next_item_width(field_width)
-        changed_end, end = imgui.drag_float(
-            "##timeline-range-end", endpoints[1], 0.01, format="%.2f"
-        )
-        imgui.set_item_tooltip(ctx.tr("Range end (s)"))
-        imgui.end_group()
-        if (
-            (changed_start or changed_end)
-            and math.isfinite(start)
-            and math.isfinite(end)
-            and end > start
+        inline = button_row_layout(widths, imgui.get_content_region_avail().x, gap)
+        imgui.set_next_item_width(widths[0])
+        if imgui.begin_combo("##timeline-take", ctx.tr("Take 1" if take_times else "No take")):
+            imgui.text_disabled(self._take_status(ctx, take_times))
+            if take_times and not recording and imgui.selectable(ctx.tr("Clear take"), False)[0]:
+                ctx.submit(cmd.ClearStateTake())
+            imgui.end_combo()
+        values, changed = [], False
+        for i, (name, title, value) in enumerate(
+            zip(("start", "end"), ("Range start (s)", "Range end (s)"), endpoints, strict=True),
+            start=1,
         ):
+            if inline[i]:
+                imgui.same_line()
+            imgui.set_next_item_width(widths[i])
+            edited, value = imgui.drag_float("##timeline-range-" + name, value, 0.01, format="%.2f")
+            imgui.set_item_tooltip(ctx.tr(title))
+            changed |= edited
+            values.append(value)
+        start, end = values
+        if changed and math.isfinite(start) and math.isfinite(end) and end > start:
             if len(take_times) > 1:
                 first, last = (
                     nearest_take_frame(take_times, start),
@@ -701,11 +837,12 @@ class KeyframesPanel(Panel):
                     ctx.submit(cmd.SetStateTakeLoop(first, last))
             else:
                 self._view_start, self._view_end, self._view_needs_fit = start, end, False
-        imgui.same_line()
+        if inline[3]:
+            imgui.same_line()
         if _command_button(
             "##timeline-loop",
             "loop",
-            ctx.tr("Loop"),
+            ctx.tr("Clear range" if loop is not None else "Loop"),
             ctx.theme,
             scale,
             selected=loop is not None,
@@ -714,20 +851,9 @@ class KeyframesPanel(Panel):
             ctx.submit(
                 cmd.SetStateTakeLoop() if loop else cmd.SetStateTakeLoop(0, len(take_times) - 1)
             )
-        imgui.same_line()
-        imgui.set_next_item_width(92 * scale)
-        if imgui.begin_combo("##timeline-take", ctx.tr("Take 1" if take_times else "No take")):
-            imgui.text_disabled(self._take_status(ctx, take_times))
-            if take_times and not recording and imgui.selectable(ctx.tr("Clear take"))[0]:
-                ctx.submit(cmd.ClearStateTake())
-            imgui.end_combo()
 
-    def _draw_transport_header(self, ctx, take_times, *, embedded=None):
-        scale = ctx.style_scale * (0.8 if embedded else 1.0)
-        if embedded:
-            imgui.set_cursor_screen_pos(
-                (embedded[0][0] + 4 * ctx.style_scale, embedded[0][1] + 2 * ctx.style_scale)
-            )
+    def _draw_transport_header(self, ctx, take_times, time_width):
+        scale = ctx.style_scale
         width = imgui.get_content_region_avail().x
         button_width = _command_button_width("", scale)
         enabled = (
@@ -735,9 +861,10 @@ class KeyframesPanel(Panel):
         )
         playing = ctx.session.state_take_playing
         actions = (
+            ("first", "first", cmd.SeekStateTake(0), "First frame"),
             (
                 "previous",
-                "first",
+                "previous",
                 cmd.SeekStateTake(ctx.session.state_take_cursor - 1),
                 "Previous frame",
             ),
@@ -747,10 +874,10 @@ class KeyframesPanel(Panel):
                 cmd.PauseStateTake() if playing else cmd.PlayStateTake(),
                 "Pause" if playing else "Replay",
             ),
-            ("next", "last", cmd.SeekStateTake(ctx.session.state_take_cursor + 1), "Next frame"),
+            ("next", "next", cmd.SeekStateTake(ctx.session.state_take_cursor + 1), "Next frame"),
+            ("last", "last", cmd.SeekStateTake(max(0, len(take_times) - 1)), "Last frame"),
         )
-        time_width = imgui.calc_text_size("0000.000 s").x
-        widths = (button_width, button_width, button_width, time_width, button_width, button_width)
+        widths = (button_width,) * len(actions) + (time_width,)
         inline = button_row_layout(widths, width, imgui.get_style().item_spacing.x)
         for i, (name, icon, command, label) in enumerate(actions):
             if inline[i]:
@@ -766,75 +893,13 @@ class KeyframesPanel(Panel):
             ):
                 result = ctx.submit(command)
                 self._error = "" if result.ok else result.message
-        if inline[3]:
+        if inline[len(actions)]:
             imgui.same_line()
         _toolbar_status(f"{self._playhead:.3f} s", ctx.theme.text_disabled, scale, width=time_width)
-        for index, (kind, tooltip) in enumerate(
-            (("follow", "Follow playhead"), ("view", "View all")), 4
-        ):
-            if embedded:
-                imgui.set_cursor_screen_pos(
-                    (
-                        embedded[1][0] - (6 - index) * (button_width + 4 * ctx.style_scale),
-                        embedded[0][1] + 2 * ctx.style_scale,
-                    )
-                )
-            elif inline[index]:
-                imgui.same_line()
-            if _command_button(
-                "##key-" + kind,
-                "fit" if kind == "view" else kind,
-                ctx.tr(tooltip),
-                ctx.theme,
-                scale,
-                selected=kind == "follow" and self._follow_mode != "off",
-            ):
-                if kind == "view":
-                    self._view_needs_fit = True
-                else:
-                    self._set_follow_mode("page" if self._follow_mode == "off" else "off")
 
-    def _draw_timeline_toolbar(self, ctx: PanelContext, take_times: Sequence[float]) -> None:
-        scale = ctx.style_scale
-        available = float(imgui.get_content_region_avail().x)
-        labels = (ctx.tr("Off"), ctx.tr("Page"), ctx.tr("Locked"))
-        modes = ("off", "page", "locked")
-        preview = f"{ctx.tr('Follow playhead')}: {labels[modes.index(self._follow_mode)]}"
-        width = min(available, max(imgui.calc_text_size(preview).x + 35 * scale, 180 * scale))
-        imgui.set_next_item_width(width)
-        if imgui.begin_combo("##timeline-follow", preview):
-            for mode, label in zip(modes, labels, strict=True):
-                selected, _ = imgui.selectable(label, self._follow_mode == mode)
-                if selected:
-                    self._set_follow_mode(mode)
-            imgui.end_combo()
-        imgui.set_item_tooltip(
-            ctx.tr(
-                "Page at the edge, or lock the playhead in place. Right-drag turns following off."
-            )
-        )
-        loop = ctx.session.state_take_loop
-        if loop is None:
-            return
-        label = f"{ctx.tr('Loop')}: {take_times[loop[0]]:g}–{take_times[loop[1]]:g} s"
-        spacing = float(imgui.get_style().item_spacing.x)
-        used = width
-        label_width = float(imgui.calc_text_size(label).x)
-        if used + spacing + label_width <= available:
-            imgui.same_line()
-            used += spacing
-        else:
-            used = 0
-        imgui.align_text_to_frame_padding()
-        imgui.push_text_wrap_pos(0.0)
-        imgui.text_colored(imgui.ImVec4(*_LOOP_COLOR), label)
-        imgui.pop_text_wrap_pos()
-        used += label_width
-        clear_label = f"{ctx.tr('Clear range')}##timeline-clear-range"
-        if used + spacing + button_width(clear_label) <= available:
-            imgui.same_line()
-        if imgui.button(clear_label):
-            ctx.submit(cmd.SetStateTakeLoop())
+    def _draw_view_controls(self, ctx):
+        if _command_button("##key-view", "fit", ctx.tr("View all"), ctx.theme, ctx.style_scale):
+            self._view_needs_fit = True
 
     def _set_follow_mode(self, mode: str) -> None:
         if mode == "locked":
@@ -878,6 +943,7 @@ class KeyframesPanel(Panel):
     def _draw_dope_sheet(
         self,
         ctx: PanelContext,
+        models,
         keyframes: tuple[KeyframeInfo, ...],
         keyframe_by_id: dict[int, KeyframeInfo],
         take_times: Sequence[float],
@@ -885,28 +951,40 @@ class KeyframesPanel(Panel):
     ) -> None:
         scale = ctx.style_scale
         available = max(1.0, float(imgui.get_content_region_avail().x))
-        ruler_height = 27.0 * scale
+        ruler_height = (_COMMAND_HEIGHT_PT + 4) * scale
         tracks = 3 if take_times else 2
         height = max(
             ruler_height + tracks * 20 * scale,
             min(ruler_height + tracks * 30 * scale, imgui.get_content_region_avail().y - 8 * scale),
         )
-        embedded = available >= 600 * scale
         channel_width = timeline_channel_width(available, scale)
         lo_vec = imgui.get_cursor_screen_pos()
         lo = (float(lo_vec.x), float(lo_vec.y))
         hi = (lo[0] + available, lo[1] + height)
         time_lo = lo[0] + channel_width
-        time_hi = hi[0] - (64 * scale if embedded else 0)
+        time_hi = hi[0]
         time_width = max(1.0, time_hi - time_lo)
+
+        draw_list = imgui.get_window_draw_list()
+        splitter = imgui.ImDrawListSplitter()
+        splitter.split(draw_list, 2)
+        splitter.set_current_channel(draw_list, 1)
+        imgui.set_cursor_screen_pos((lo[0] + 2 * scale, lo[1] + 2 * scale))
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, (5 * scale, 0))
+        imgui.push_style_var(
+            imgui.StyleVar_.frame_padding,
+            (8 * scale, max(0, (_COMMAND_HEIGHT_PT * scale - imgui.get_font_size()) * 0.5)),
+        )
+        self._draw_model_header(ctx, models, keyframes, editable, channel_width - 4 * scale)
+        imgui.pop_style_var(2)
+        imgui.set_cursor_screen_pos(lo)
+        splitter.set_current_channel(draw_list, 0)
 
         flags = (
             imgui.ButtonFlags_.mouse_button_left.value
             | imgui.ButtonFlags_.mouse_button_right.value
             | imgui.ButtonFlags_.mouse_button_middle.value
         )
-        if embedded:
-            imgui.set_next_item_allow_overlap()
         imgui.invisible_button("##keyframe-dope-sheet", imgui.ImVec2(available, height), flags)
         timeline_id = imgui.get_item_id()
         hovered = imgui.is_item_hovered()
@@ -1168,11 +1246,6 @@ class KeyframesPanel(Panel):
             take_times,
             hit_id,
         )
-        if embedded:
-            saved_cursor = imgui.get_cursor_screen_pos()
-            self._draw_transport_header(ctx, take_times, embedded=(lo, hi))
-            imgui.set_cursor_screen_pos(saved_cursor)
-            imgui.dummy((0, 0))
         overlay = ImguiDraw2D()
         imgui.push_clip_rect((time_lo, lo[1] + ruler_height), (time_hi, hi[1]), True)
         for snapshot_id in decimated_marker_ids(
@@ -1204,6 +1277,7 @@ class KeyframesPanel(Panel):
             imgui.set_tooltip(
                 f"{key.name or ctx.tr('keyframe')}  ·  {key.time:g} s\n{ctx.tr('Double-click to load')}"
             )
+        splitter.merge(draw_list)
 
     def _paint_dope_sheet(
         self,
@@ -1501,31 +1575,33 @@ class KeyframesPanel(Panel):
 
         imgui.separator()
         imgui.text_disabled(ctx.tr("selected snapshot"))
-        if begin_kv_table("keyframe_properties"):
-            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
-            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.text_disabled(ctx.tr("name"))
-            imgui.table_next_column()
-            imgui.set_next_item_width(-1.0)
-            _changed, self._name = imgui.input_text("##keyframe-name", self._name)
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.text_disabled(ctx.tr("time"))
-            imgui.table_next_column()
-            imgui.set_next_item_width(-1.0)
-            _changed, self._time = imgui.input_double(
-                "##keyframe-time", self._time, 0.0, 0.0, "%.9g"
-            )
-            imgui.end_table()
+        scale = ctx.style_scale
+        available = imgui.get_content_region_avail().x
+        gap = imgui.get_style().item_spacing.x
+        time_width = min(available, 100 * scale)
+        fields_inline = available >= 220 * scale
+        name_width = min(280 * scale, available - time_width - gap if fields_inline else available)
+        imgui.set_next_item_width(max(1, name_width))
+        _changed, self._name = imgui.input_text("##keyframe-name", self._name)
+        imgui.set_item_tooltip(ctx.tr("name"))
+        if fields_inline:
+            imgui.same_line()
+        imgui.set_next_item_width(time_width)
+        _changed, self._time = imgui.input_double("##keyframe-time", self._time, 0.0, 0.0, "%.9g s")
+        imgui.set_item_tooltip(ctx.tr("time"))
 
         dirty = self._name.strip() != properties.name or self._time != properties.time
         if not editable or not dirty or not self._name.strip():
             imgui.begin_disabled()
         action_labels = (ctx.tr("Apply"), ctx.tr("Load"), ctx.tr("Delete"))
+        action_widths = tuple(button_width(label) for label in action_labels)
+        actions_inline = (
+            fields_inline and available >= name_width + time_width + sum(action_widths) + 5 * gap
+        )
+        if actions_inline:
+            imgui.same_line()
         inline = button_row_layout(
-            tuple(button_width(label) for label in action_labels),
+            action_widths,
             imgui.get_content_region_avail().x,
             imgui.get_style().item_spacing.x,
         )
@@ -1564,6 +1640,8 @@ class KeyframesPanel(Panel):
                 imgui.set_clipboard_text(self._error)
 
     def _set_model(self, model_id: int) -> None:
+        if model_id == self._model_id:
+            return
         self._model_id = model_id
         self._keyframe_cache_key = None
         self._keyframe_cache = ()

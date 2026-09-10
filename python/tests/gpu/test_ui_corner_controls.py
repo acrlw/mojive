@@ -312,8 +312,8 @@ def test_tab_focus_uses_the_control_radius_and_outset(radius, height, monkeypatc
             # Texture-based AA emits pairs straddling the stroke centerline.
             centerline = focus.reshape(-1, 2, 2).mean(axis=1)
             gap = distance_to_path(centerline, boundary)
-            assert gap.min() > 2.9
-            assert gap.max() < 4.4
+            assert gap.min() > 0.4
+            assert gap.max() < 2.0
             seen.add(name)
         assert seen == {"button", "child"}
     finally:
@@ -439,10 +439,49 @@ def test_input_focus_follows_the_full_control_contour(control, scale, monkeypatc
         boundary = smooth_rect_points(*lo, *hi, rounding, smoothing=0.0)
         centerline = vertices.reshape(-1, 2, 2).mean(axis=1)
         gap = distance_to_path(centerline, boundary)
-        assert gap.min() > 2.9
-        assert gap.max() < 4.4
+        assert gap.min() > 0.4
+        assert gap.max() < 2.0
         destination = Path("output/g3-controls")
         destination.mkdir(parents=True, exist_ok=True)
         Image.fromarray(pixels[::-1]).save(destination / f"focus-{control}-{scale:g}x.png")
+    finally:
+        window.close()
+
+
+def test_focus_keeps_original_contour_and_child_scissor_when_partially_visible():
+    window = Window(
+        WindowConfig(width=480, height=260, docking=False, ini_path="", show_on_start=False)
+    )
+    color = (1.0, 0.1, 0.7, 1.0)
+    packed = imgui.color_convert_float4_to_u32(imgui.ImVec4(*color))
+    try:
+        for _ in range(3):
+            window.begin_frame()
+            imgui.set_next_window_pos((0, 0))
+            imgui.set_next_window_size((480, 260))
+            imgui.begin("##clipping", None, imgui.WindowFlags_.no_decoration)
+            imgui.begin_child("clip", (320, 100), imgui.ChildFlags_.borders)
+            child = imgui.internal.get_current_window()
+            clip_bottom = float(child.clip_rect.max.y)
+            imgui.set_cursor_pos((20, 72))
+            context = imgui.get_current_context()
+            context.nav_id = imgui.get_id("Clipped button")
+            context.nav_cursor_visible = True
+            imgui.push_style_color(imgui.Col_.nav_cursor, color)
+            imgui.button("Clipped button", (220, 50))
+            imgui.pop_style_color()
+            hi = imgui.get_item_rect_max()
+            focus = np.array(
+                [(v.pos.x, v.pos.y) for v in child.draw_list.vtx_buffer if v.col == packed]
+            )
+            imgui.end_child()
+            imgui.end()
+            pixels = window.end_frame(readback=True)[::-1]
+        assert hi.y > clip_bottom
+        assert len(focus) > 8
+        assert focus[:, 1].max() > hi.y
+        outside = pixels[int(np.ceil(clip_bottom)) : int(hi.y + 5), :350, :3]
+        pink = (outside[..., 0] > 200) & (outside[..., 1] < 100) & (outside[..., 2] > 100)
+        assert not pink.any()
     finally:
         window.close()

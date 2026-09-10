@@ -24,7 +24,14 @@ from ..commands import (
     SetSceneCamera,
     SetSceneModelTransform,
 )
-from ..curves2d import CORNER_SMOOTHING, arc_ribbon_mesh, smooth_affine_corners
+from ..curves2d import (
+    CORNER_SMOOTHING,
+    arc_ribbon_mesh,
+    arrow_points,
+    clip_polygon_rect,
+    smooth_affine_corners,
+    smooth_capsule_points,
+)
 from ..geometry import GeometryDimensions, geometry_dimensions, geometry_size_from_dimensions
 from ..gizmo import (
     ACTIVE_COLOR,
@@ -33,6 +40,7 @@ from ..gizmo import (
     AXIS_COLORS,
     AXIS_END,
     AXIS_HANDLES,
+    AXIS_HEAD_HALF_PT,
     AXIS_HEAD_LENGTH_PT,
     AXIS_START,
     CENTER_COLOR,
@@ -153,8 +161,8 @@ ROTATION_LINEAR_LOCK_PT = 2.0
 ROTATION_EDGE_LINEAR_ALPHA = 0.18
 SLIDE_CARDINAL_ESCAPE_PT = 8.0
 JOINT_DRAG_START_TICK_HALF_PT = 6.0
-JOINT_ROTATION_AXIS_DASH_PT = 6.0
-JOINT_ROTATION_AXIS_GAP_PT = 6.0
+JOINT_ROTATION_AXIS_DASH_PT = 5.0
+JOINT_ROTATION_AXIS_GAP_PT = 4.0
 _FULL_TURN = 2.0 * np.pi
 _JOINT_RANGE_EPSILON = 1e-9
 
@@ -473,6 +481,14 @@ class _HingeRangeProjection:
 
 
 @dataclass(frozen=True)
+class _HingeAxisProjection:
+    alpha: float
+    polygons: tuple[tuple[tuple[float, float], ...], ...]
+    hit_polygon: np.ndarray
+    occluded: tuple[np.ndarray, np.ndarray]
+
+
+@dataclass(frozen=True)
 class _JointPrecisionProjection:
     """Expanded viewport rail for a scalar range that is too small on screen."""
 
@@ -512,6 +528,7 @@ class _DimensionTarget:
     size: np.ndarray
     dimensions: GeometryDimensions
     pose_index: int
+    node_id: int
 
 
 @dataclass(frozen=True)
@@ -652,6 +669,9 @@ class ObjectGizmo:
         self._joint_selection: dict[int, int] = {}
         self._joint_structure_generation = -1
         self._active_joint: JointInfo | None = None
+        self._hinge_axis = False
+        self._hinge_axis_signature = None
+        self._hinge_axis_geometry: _HingeAxisProjection | None = None
         self._joint_range: _JointRangeState | None = None
         self._joint_limit_hits: tuple[JointLimitHit, ...] = ()
         self._joint_limit_hovered: JointLimitHit | None = None
@@ -666,6 +686,7 @@ class ObjectGizmo:
         self._start_joint_qpos = np.zeros(0, np.float64)
         self._joint_drag_origin_qpos = np.zeros(0, np.float64)
         self._dimension_start: _DimensionTarget | None = None
+        self._dimension_values = np.zeros(3, np.float64)
         self._dimension_cache_session: Session | None = None
         self._dimension_cache_generation = -1
         self._dimension_cache_node = -1
@@ -1203,7 +1224,7 @@ class ObjectGizmo:
         self._start_edit(session)
         result = session.submit(
             SetGeometrySize(
-                node.node_id,
+                target.node_id,
                 geometry_size_from_dimensions(target.shape, target.size, values),
             )
         )
@@ -1330,6 +1351,13 @@ class ObjectGizmo:
         if cached:
             self._update_joint_precision_dwell(self._hovered is not GizmoHandle.NONE, now)
             return self._hovered
+        axis_hit = False
+        if target is not None and target.joint.type == "hinge":
+            geometry = self._hinge_axis_projection(cam, rect, style_scale, pos, basis[:, 2])
+            axis_hit = (
+                geometry is not None
+                and screen_polygon_distance(cursor, geometry.hit_polygon) <= 4.0 * style_scale
+            )
         if target is not None and range_state is not None:
             self._hovered = GizmoHandle.NONE
             range_hit = False
@@ -1361,14 +1389,16 @@ class ObjectGizmo:
             # ticks. A slide endpoint spans both sides of the axis, so its two
             # outer sections own the pointer after the center section has been
             # excluded by _closest_joint_limit_hit().
-            limit_owns = limit_hit is not None and (target.joint.type == "slide" or not range_hit)
+            limit_owns = limit_hit is not None and (
+                target.joint.type == "slide" or not (range_hit or axis_hit)
+            )
             if range_hit and not limit_owns:
                 self._hovered = _joint_range_handle(range_state)
                 self._joint_limit_hovered = None
             elif limit_owns:
                 self._hovered = _joint_range_handle(range_state)
                 self._joint_limit_hovered = limit_hit
-            elif current_hit:
+            elif current_hit or axis_hit:
                 self._hovered = _joint_range_handle(range_state)
                 self._joint_limit_hovered = None
             else:
@@ -1382,12 +1412,18 @@ class ObjectGizmo:
                 if arrow_hit:
                     self._hovered = GizmoHandle.Z
             self._update_joint_precision_dwell(
-                range_hit or current_hit or limit_hit is not None or arrow_hit,
+                range_hit or current_hit or limit_hit is not None or arrow_hit or axis_hit,
                 now,
             )
             self._hover_cache_signature = signature
             return self._hovered
         self._joint_limit_hovered = None
+        if axis_hit:
+            self._hovered = GizmoHandle.ROTATE_Z
+            scale = world_scale(cam, pos, rect[3], SIZE_PT * style_scale)
+            self._axis_mask, self._plane_mask = visibility(cam, pos, basis, rect, scale)
+            self._hover_cache_signature = signature
+            return self._hovered
         self._hovered, self._axis_mask, self._plane_mask = hit_test(
             cam,
             pos,
@@ -1572,6 +1608,7 @@ class ObjectGizmo:
         interactive: bool,
     ) -> bool:
         self._joint_range = None
+        self._hinge_axis = False
         node = session.selected_node
         self._verdict = self.evaluate(session, node)
         self._display_only = bool(
@@ -1605,6 +1642,7 @@ class ObjectGizmo:
             self._drawn = False
             return False
         pos, mat = pose
+        self._hinge_axis = target is not None and target.joint.type == "hinge"
         self._joint_range = self._joint_range_state(session, target)
         mode = (
             GizmoMode.TRANSLATE
@@ -1708,6 +1746,8 @@ class ObjectGizmo:
                 phase="geometry",
                 prepared=range_projection,
             )
+        if self._hinge_axis and not self._using:
+            self._draw_rotation_axis_guide(overlay, cam, rect, style_scale)
         self._joint_precision = self._joint_precision_projection(
             rect,
             style_scale,
@@ -1883,13 +1923,22 @@ class ObjectGizmo:
             if center[2] > 0.0:
                 color = HOVER_COLOR if self._hot(GizmoHandle.SCREEN) else CENTER_COLOR
                 radius = CENTER_RADIUS * SIZE_PT * style_scale
-                if frame.mode is not GizmoMode.DIMENSIONS:
-                    overlay.circle_filled(
+                if frame.mode is GizmoMode.DIMENSIONS and frame.handle_mask == handle_mask(
+                    GizmoHandle.SCREEN
+                ):
+                    overlay.circle(
                         center[:2],
-                        radius + CONTRAST_EDGE_PT * style_scale,
-                        CONTRAST_EDGE_COLOR,
-                        segments=24,
+                        SCREEN_RING_RADIUS * SIZE_PT * style_scale,
+                        color,
+                        SCREEN_RING_WIDTH_PT * style_scale,
+                        segments=RING_SEGMENTS,
                     )
+                overlay.circle_filled(
+                    center[:2],
+                    radius + CONTRAST_EDGE_PT * style_scale,
+                    CONTRAST_EDGE_COLOR,
+                    segments=24,
+                )
                 overlay.circle_filled(center[:2], radius, color, segments=24)
 
         if GizmoHandle.ROTATE_TRACKBALL in visible:
@@ -2954,6 +3003,115 @@ class ObjectGizmo:
                 smoothing=self._frame.corner_smoothing,
             )
 
+    def _hinge_axis_projection(self, cam, rect, style_scale, origin, axis):
+        signature = (
+            self._frame.corner_smoothing,
+            _gizmo_geometry_key(cam, rect, style_scale, None, origin, axis),
+        )
+        if signature == self._hinge_axis_signature:
+            return self._hinge_axis_geometry
+        self._hinge_axis_signature = signature
+        self._hinge_axis_geometry = None
+        alpha = axis_handle_alpha(cam, origin, axis)
+        if alpha <= 0:
+            return None
+        scale = world_scale(cam, origin, rect[3], SIZE_PT * style_scale)
+        segment = _project_finite_axis_segment(cam, origin, axis, scale * 1.05, rect)
+        center = project(cam, (origin,), rect)[0]
+        if segment is None or center[2] <= 0:
+            return None
+        start, tip = segment
+        length = float(np.linalg.norm(tip - start))
+        if length < 8 * style_scale:
+            return None
+        direction = (tip - start) / length
+        side = np.array((-direction[1], direction[0]))
+        head = min(AXIS_HEAD_LENGTH_PT * style_scale, length * 0.3)
+        shaft_width = JOINT_RANGE_WIDTH_PT * style_scale
+        body_end = length - head - shaft_width
+        shape = arrow_points(
+            (0, 0),
+            (length, 0),
+            shaft_width,
+            head_length=head,
+            head_width=2 * AXIS_HEAD_HALF_PT * style_scale,
+            corner_radius=0.6 * style_scale,
+            round_tail=True,
+            smoothing=self._frame.corner_smoothing,
+        )
+
+        # The rear axis is occluded only until its ray leaves the projected disk.
+        # A center ray also handles orthographic and blended camera projections.
+        _, ray = unproject(cam, *ndc_from_viewport(*center[:2], rect))
+        view = -np.asarray(ray, np.float64)
+        facing = float(np.dot(view, axis))
+        radial = view - np.asarray(axis) * facing
+        radial /= np.linalg.norm(radial)
+        rim = project(
+            cam,
+            (
+                origin + radial * scale * JOINT_RANGE_RADIUS,
+                origin - radial * scale * JOINT_RANGE_RADIUS,
+            ),
+            rect,
+        )
+        center_t = float(np.dot(center[:2] - start, direction))
+        rim_t = (rim[:, :2] - start) @ direction
+        edge_t = float(min(rim_t) if facing > 0 else max(rim_t))
+        lo, hi = np.clip(sorted((center_t, edge_t)), 0, body_end)
+        intervals = [(0.0, lo)]
+        for value in np.arange(
+            lo, hi, (JOINT_ROTATION_AXIS_DASH_PT + JOINT_ROTATION_AXIS_GAP_PT) * style_scale
+        ):
+            intervals.append((value, min(value + JOINT_ROTATION_AXIS_DASH_PT * style_scale, hi)))
+        intervals.append((hi, length))
+        merged = []
+        for a, b in intervals:
+            if b - a <= 1e-5:
+                continue
+            if merged and a - merged[-1][1] <= 1e-5:
+                merged[-1] = (merged[-1][0], b)
+            else:
+                merged.append((a, b))
+        polygons = []
+        for a, b in merged:
+            half_width = shaft_width * 0.5
+            if b < length:
+                points = np.asarray(smooth_capsule_points(a, -half_width, b - a, shaft_width, 0))
+            else:
+                # Join a semicircular tail to the existing arrow outline. Clipping a
+                # pre-rounded arrow at its shaft origin would cut that cap in half.
+                cut = a + half_width
+                points = np.asarray(
+                    clip_polygon_rect(shape, (cut, -8 * style_scale, b, 8 * style_scale))
+                )
+                rounded = []
+                for index, point in enumerate(points):
+                    following = points[(index + 1) % len(points)]
+                    rounded.append(point)
+                    if (
+                        abs(point[0] - cut) < 1e-6
+                        and abs(following[0] - cut) < 1e-6
+                        and point[1] * following[1] < 0
+                    ):
+                        angles = np.linspace(np.pi * 0.5, np.pi * 1.5, 17)
+                        if point[1] < 0:
+                            angles = angles[::-1]
+                        rounded.extend(
+                            (cut + half_width * np.cos(t), half_width * np.sin(t))
+                            for t in angles[1:-1]
+                        )
+                points = np.asarray(rounded)
+            screen = start + points[:, :1] * direction + points[:, 1:] * side
+            polygons.append(tuple(map(tuple, screen.tolist())))
+        self._hinge_axis_geometry = _HingeAxisProjection(
+            alpha,
+            tuple(polygons),
+            start + shape[:, :1] * direction + shape[:, 1:] * side,
+            (start + lo * direction, start + hi * direction),
+        )
+        return self._hinge_axis_geometry
+
     def _draw_rotation_axis_guide(
         self,
         overlay: Draw2D,
@@ -2961,22 +3119,28 @@ class ObjectGizmo:
         rect,
         style_scale: float,
     ) -> None:
-        """Draw the finite world axis used by an active axis rotation."""
+        """Show the hinge's positive right-hand axis even before a drag begins."""
 
+        short_joint_axis = self._hinge_axis or bool(
+            self._joint_range is not None and self._joint_range.joint_type == "hinge"
+        )
         axis_index = _axis_of(self._active)
-        if axis_index < 0:
+        if axis_index < 0 and not short_joint_axis:
             return
-        origin = np.asarray(self._start_pos, np.float64)
-        axis = np.asarray(self._axis, np.float64)
+        idle = short_joint_axis and not self._using
+        origin = np.asarray(self._frame.position if idle else self._start_pos, np.float64)
+        axis = np.asarray(self._frame.rotation[:, 2] if idle else self._axis, np.float64)
+        if short_joint_axis:
+            geometry = self._hinge_axis_projection(cam, rect, style_scale, origin, axis)
+            if geometry is not None:
+                color = _with_alpha(self._hinge_range_color(), 0.82 * geometry.alpha)
+                for polygon in geometry.polygons:
+                    overlay.fringed_concave_fill(polygon, color, origin=(0.0, 0.0))
+            return
         scale = world_scale(cam, origin, rect[3], SIZE_PT * style_scale)
         if scale <= 0.0:
             return
-        short_joint_axis = bool(
-            self._joint_range is not None and self._joint_range.joint_type == "hinge"
-        )
-        if short_joint_axis:
-            extent = scale * 1.05
-        elif cam.projection_blend() >= 1.0 - 1e-6:
+        if cam.projection_blend() >= 1.0 - 1e-6:
             extent = max(
                 scale * 8.0,
                 float(cam.ortho_height) * 0.75 * np.hypot(float(cam.aspect), 1.0),
@@ -2997,35 +3161,6 @@ class ObjectGizmo:
         _fill, pressed, _dark = self._active_rotation_palette()
         color = _with_alpha(pressed, 0.82)
         width = 1.6 * style_scale
-        if short_joint_axis:
-            center = project(cam, (origin,), rect)[0]
-            camera_side = float(np.dot(np.asarray(cam.eye, np.float64) - origin, axis))
-            if center[2] > 0.0 and abs(camera_side) > 1e-9:
-                front = segment[1] if camera_side > 0.0 else segment[0]
-                back = segment[0] if camera_side > 0.0 else segment[1]
-                for dash_start, dash_end in _dashed_line_segments(
-                    center[:2],
-                    back,
-                    JOINT_ROTATION_AXIS_DASH_PT * style_scale,
-                    JOINT_ROTATION_AXIS_GAP_PT * style_scale,
-                ):
-                    overlay.line(
-                        dash_start,
-                        dash_end,
-                        color,
-                        width,
-                        cap="round",
-                        smoothing=self._frame.corner_smoothing,
-                    )
-                overlay.line(
-                    center[:2],
-                    front,
-                    color,
-                    width,
-                    cap="round",
-                    smoothing=self._frame.corner_smoothing,
-                )
-                return
         overlay.line(
             segment[0],
             segment[1],
@@ -3386,6 +3521,9 @@ class ObjectGizmo:
         self._active_joint = target.joint if target is not None else None
         if dimension_target is not None:
             self._dimension_start = dimension_target
+            self._dimension_values[: len(dimension_target.dimensions.values)] = (
+                dimension_target.dimensions.values
+            )
         if self._active_joint is not None:
             count = 4 if self._active_joint.type == "ball" else 1
             qpos = session.frame.qpos
@@ -3465,14 +3603,20 @@ class ObjectGizmo:
 
         hit = _cursor_plane(cam, rect, cursor, pos, self._plane_normal)
         if hit is None:
-            self._end()
-            return False
+            if target is None or target.joint.type != "hinge" or self._active not in ROTATE_HANDLES:
+                self._end()
+                return False
+            hit = pos + self._start_basis[:, 0]
+            self._rotation_linear = True
         if self._active in ROTATE_HANDLES:
             v = hit - pos
             n = float(np.linalg.norm(v))
             if n < 1e-9:
-                self._end()
-                return False
+                if target is None or target.joint.type != "hinge":
+                    self._end()
+                    return False
+                v, n = self._start_basis[:, 0], 1.0
+                self._rotation_linear = True
             self._rotation_start_vec[:] = self._last_rot_vec[:] = v / n
             self._prepare_rotation_drag(cam, rect)
         else:
@@ -3630,7 +3774,7 @@ class ObjectGizmo:
         handle = self._active
         self._snapping = bool(snap)
         if self._mode is GizmoMode.DIMENSIONS:
-            return self._drag_dimensions(session, cursor, snap=snap)
+            return self._drag_dimensions(session, cam, rect, cursor, snap=snap)
         pos = self._start_pos.copy()
         mat = self._start_mat
         if handle in (GizmoHandle.X, GizmoHandle.Y, GizmoHandle.Z):
@@ -3768,42 +3912,67 @@ class ObjectGizmo:
         self._label = self._format_value(pos)
         return True
 
-    def _drag_dimensions(self, session: Session, cursor, *, snap: bool) -> bool:
-        """Apply one primitive parameter while preserving its shape conventions."""
+    def _drag_dimensions(self, session: Session, cam, rect, cursor, *, snap: bool) -> bool:
+        """Resize in the body frame, keeping coupled radii and uniform proportions."""
 
-        node = session.selected_node
         target = self._dimension_start
-        axis = None if self._active is GizmoHandle.SCREEN else _axis_of(self._active)
-        mapping = None if target is None else target.dimensions.handle(axis)
-        if node is None or target is None or mapping is None:
+        if session.selected_node is None or target is None:
             self._end()
             return False
-        values = target.dimensions.array().astype(np.float64)
-        travel = float(
-            np.dot(
-                np.asarray(cursor, np.float64).reshape(2) - self._start_cursor,
-                self._axis_screen,
+        dimensions = target.dimensions
+        values = np.array(dimensions.values, np.float64)
+        if self._active is GizmoHandle.SCREEN:
+            travel = float(np.dot(np.asarray(cursor) - self._start_cursor, self._axis_screen))
+            reference = max(
+                dimensions.values[item.parameter] / item.world_to_value
+                for item in dimensions.handles
             )
-        )
-        value = float(values[mapping.parameter]) + (
-            travel * self._world_per_pt * mapping.world_to_value
-        )
-        if snap:
-            value = _snap_value(value, self.translation_snap_m)
-        value = max(value, 0.002)
-        values[mapping.parameter] = value
+            factor = 1.0 + travel * self._world_per_pt / max(reference, 1e-6)
+            if snap:
+                longest = float(values.max())
+                factor = _snap_value(longest * factor, self.translation_snap_m) / longest
+            positive = values[values > 0.0]
+            factor = max(factor, 0.002 / float(positive.min()))
+            values *= factor
+        elif self._active in PLANE_HANDLES:
+            hit = _cursor_plane(cam, rect, cursor, self._start_pos, self._plane_normal)
+            if hit is None:
+                return False
+            local = self._start_basis.T @ (hit - self._plane_start)
+            normal = _axis_of(self._active)
+            # A radial plane can address the same diameter on both axes. Average
+            # their travel so a diagonal drag does not apply that dimension twice.
+            changes = np.zeros(len(values), np.float64)
+            counts = np.zeros(len(values), np.int32)
+            for item in dimensions.handles:
+                if item.axis is not None and item.axis != normal:
+                    changes[item.parameter] += local[item.axis] * item.world_to_value
+                    counts[item.parameter] += 1
+            for index in np.flatnonzero(counts):
+                values[index] += changes[index] / counts[index]
+                if snap:
+                    values[index] = _snap_value(values[index], self.translation_snap_m)
+            np.maximum(values, 0.002, out=values)
+        else:
+            mapping = dimensions.handle(_axis_of(self._active))
+            if mapping is None:
+                self._end()
+                return False
+            travel = float(np.dot(np.asarray(cursor) - self._start_cursor, self._axis_screen))
+            values[mapping.parameter] += travel * self._world_per_pt * mapping.world_to_value
+            if snap:
+                values[mapping.parameter] = _snap_value(
+                    values[mapping.parameter], self.translation_snap_m
+                )
+            values[mapping.parameter] = max(values[mapping.parameter], 0.002)
         self._snapping = bool(snap)
-        if np.isclose(
-            value,
-            target.dimensions.values[mapping.parameter],
-            atol=1e-12,
-            rtol=0.0,
-        ):
-            self._label = self._format_dimension_value(value)
+        self._label = self._format_dimension_value(values)
+        previous = self._dimension_values[: len(values)]
+        if np.allclose(values, previous, atol=1e-12, rtol=0.0):
             return True
         result = session.submit(
             SetGeometrySize(
-                node.node_id,
+                target.node_id,
                 geometry_size_from_dimensions(target.shape, target.size, values),
             )
         )
@@ -3811,8 +3980,8 @@ class ObjectGizmo:
             self._verdict = Verdict(False, result.message)
             self._end()
             return False
+        previous[:] = values
         self._edit_started = True
-        self._label = self._format_dimension_value(value)
         return True
 
     def _drag_joint_precision(self, session, cursor, *, snap: bool) -> bool:
@@ -4010,16 +4179,31 @@ class ObjectGizmo:
         value = f"X {local[0]:+.3f}  Y {local[1]:+.3f}  Z {local[2]:+.3f} m"
         return self._with_translation_snap(value)
 
-    def _format_dimension_value(self, value: float | None = None) -> str:
+    def _format_dimension_value(self, values=None) -> str:
         target = self._dimension_start
-        axis = None if self._active is GizmoHandle.SCREEN else _axis_of(self._active)
-        mapping = None if target is None else target.dimensions.handle(axis)
-        if mapping is None:
+        if target is None:
             return ""
-        shown = (
-            float(target.dimensions.values[mapping.parameter]) if value is None else float(value)
-        )
-        label = f"{mapping.label.title()} {shown:.3f} m"
+        dimensions = target.dimensions
+        shown = dimensions.values if values is None else values
+        if self._active is GizmoHandle.SCREEN and len(shown) > 1:
+            longest = int(np.argmax(dimensions.values))
+            factor = shown[longest] / dimensions.values[longest]
+            return self._with_translation_snap(f"Scale {factor:.3f}×")
+        if self._active in PLANE_HANDLES:
+            labels = {
+                item.parameter: item.label
+                for item in dimensions.handles
+                if item.axis != _axis_of(self._active)
+            }
+            label = "  ".join(
+                f"{name.title()} {shown[index]:.3f} m" for index, name in labels.items()
+            )
+        else:
+            axis = None if self._active is GizmoHandle.SCREEN else _axis_of(self._active)
+            mapping = dimensions.handle(axis)
+            if mapping is None:
+                return ""
+            label = f"{mapping.label.title()} {shown[mapping.parameter]:.3f} m"
         return self._with_translation_snap(label)
 
     def _with_translation_snap(self, value: str) -> str:
@@ -4141,6 +4325,10 @@ class ObjectGizmo:
             and node_id == self._dimension_cache_node
         ):
             return self._dimension_cache
+        if node is not None and node.type is NodeType.LINK and node.model_id < 0:
+            children = [session.node(child) for child in node.children]
+            if len(children) == 1 and children[0] is not None and children[0].type is NodeType.GEOM:
+                node = children[0]
         if node is None or node.type not in (NodeType.GEOM, NodeType.SITE):
             result = (None, "Select an editable geometry or site")
         else:
@@ -4181,15 +4369,19 @@ class ObjectGizmo:
             if len(source.geom_source) == source.instance_count
             else first
         )
-        return _DimensionTarget(shape, size, dimensions, pose_index), ""
+        return _DimensionTarget(shape, size, dimensions, pose_index, node.node_id), ""
 
     @staticmethod
     def _dimension_handle_mask(dimensions: GeometryDimensions) -> int:
+        axes = {item.axis for item in dimensions.handles if item.axis is not None}
         return handle_mask(
+            GizmoHandle.SCREEN,
+            *(AXIS_HANDLES[axis] for axis in axes),
             *(
-                GizmoHandle.SCREEN if item.axis is None else AXIS_HANDLES[item.axis]
-                for item in dimensions.handles
-            )
+                handle
+                for normal, handle in enumerate(PLANE_HANDLES)
+                if all(axis in axes for axis in range(3) if axis != normal)
+            ),
         )
 
     @staticmethod

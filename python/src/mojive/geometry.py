@@ -21,7 +21,7 @@ class DimensionHandle:
 
 @dataclass(frozen=True)
 class GeometryDimensions:
-    """User-facing dimensions and their independent viewport handles."""
+    """Independent dimensions and their viewport axis mappings."""
 
     label: str
     values: tuple[float, ...]
@@ -35,7 +35,7 @@ class GeometryDimensions:
 
 
 def geometry_dimensions(shape: MeshShape, size) -> GeometryDimensions | None:
-    """Return conventional dimensions and independent handles for a primitive."""
+    """Return conventional dimensions and axis mappings for a primitive."""
 
     value = np.asarray(size, np.float32).reshape(3)
     if shape is MeshShape.PLANE:
@@ -75,6 +75,7 @@ def geometry_dimensions(shape: MeshShape, size) -> GeometryDimensions | None:
             (float(value[0] * 2.0), float(value[2] * 2.0)),
             (
                 DimensionHandle(0, 0, 2.0, "diameter"),
+                DimensionHandle(1, 0, 2.0, "diameter"),
                 DimensionHandle(2, 1, 2.0, "shaft length" if shaft else "height"),
             ),
         )

@@ -85,6 +85,69 @@ def test_selection_keeps_tools_off_and_tools_toggle_without_clearing_selection(v
     assert viewer.session.selected_node is node
 
 
+@pytest.mark.parametrize("part,camera_side", (("head", 0.0), ("shaft", 2.0)))
+def test_hinge_axis_hover_and_drag_use_the_ring_handle(
+    viewer, monkeypatch, tmp_path, part, camera_side
+):
+    from dataclasses import replace
+
+    import numpy as np
+
+    from mojive.gizmo import GizmoHandle, project
+    from mojive.types import CameraView
+
+    session, gizmo = viewer.session, viewer.app.gizmo
+    node = next(n for n in session.nodes if n.name == "01_revolute")
+    session.submit(cmd.SelectNode(node.node_id))
+    gizmo.set_mode("rotate")
+    _settle(viewer, 3)
+    target, _ = gizmo._joint_target(session, node)
+    pos, basis = gizmo._target_pose(session, node, target)
+    viewer.set_camera(
+        CameraView(
+            eye=pos + basis[:, 0] * 3 + basis[:, 1] * -5 + basis[:, 2] * camera_side,
+            target=pos,
+            up=basis[:, 1],
+        )
+    )
+    _settle(viewer, 3)
+    cam, rect = viewer.app._camera_view(), viewer.app._viewport_rect
+    geometry = gizmo._hinge_axis_projection(cam, rect, 1, pos, basis[:, 2])
+    center = project(cam, (pos,), rect)[0, :2]
+    direction = project(cam, (pos + basis[:, 2],), rect)[0, :2] - center
+    direction /= np.linalg.norm(direction)
+    tip = geometry.hit_polygon[np.argmax(geometry.hit_polygon @ direction)]
+    point = tip - direction * 3 if part == "head" else center * 0.6 + tip * 0.4
+    io = imgui.get_io()
+    io.add_mouse_pos_event(*point)
+    _settle(viewer, 3)
+    assert gizmo.hovered_handle is GizmoHandle.ROTATE_Z
+    viewer.capture(tmp_path / f"axis-{part}-hover.png", surface="window")
+    original = viewer.app._input_state
+    held = [True]
+    monkeypatch.setattr(viewer.app, "_input_state", lambda: replace(original(), left=held[0]))
+    before = session.frame.qpos.copy()
+    io.add_mouse_button_event(0, True)
+    viewer.sync()
+    assert gizmo.using and gizmo.active_handle is GizmoHandle.ROTATE_Z, (
+        gizmo.hovered_handle,
+        gizmo.last_verdict,
+        viewer.app._state,
+        viewer.app.router.wants_gizmo(),
+        gizmo._joint_limit_active,
+        gizmo._joint_precision_hovered,
+    )
+    np.testing.assert_allclose(session.frame.qpos, before)
+    io.add_mouse_pos_event(*(point + np.array((28, 16))))
+    _settle(viewer, 2)
+    assert not np.allclose(session.frame.qpos, before)
+    viewer.capture(tmp_path / f"axis-{part}-press.png", surface="window")
+    held[0] = False
+    io.add_mouse_button_event(0, False)
+    viewer.sync()
+    assert not gizmo.using
+
+
 @pytest.mark.parametrize("finish", ("enter", "blur", "selection", "hidden", "escape"))
 def test_name_edit_commits_on_enter_or_blur_and_preserves_entity_identity(viewer, finish):
     node = next(n for n in viewer.session.nodes if n.name == "04_free")
@@ -137,6 +200,47 @@ def test_output_toggles_and_copy_are_scoped_to_output_focus(viewer):
     io.add_key_event(imgui.Key.mod_ctrl, False)
     viewer.sync()
     assert imgui.get_clipboard_text() == "unrelated"
+
+
+def test_ctrl_click_reveals_output_and_status_paths_without_changing_scene_selection(
+    viewer, tmp_path, monkeypatch
+):
+    from mojive.ui import app as app_module
+    from mojive.ui.panels import output as output_module
+
+    path = tmp_path / "视频 with spaces.mp4"
+    path.touch()
+    revealed = []
+    monkeypatch.setattr(output_module, "reveal_path", revealed.append)
+    monkeypatch.setattr(app_module, "reveal_path", revealed.append)
+    viewer.app.output.clear()
+    entry = viewer.app.output.publish(f"Saved video to {path}", duration=None)
+    _activate_panel(viewer, "Output")
+    point = _item_center(viewer, "invisible_button", f"##output-row-{entry.sequence}")
+    _click(viewer, point)
+    assert revealed == []
+    io = imgui.get_io()
+    io.add_key_event(imgui.Key.mod_ctrl, True)
+    _click(viewer, point)
+    assert revealed == [path]
+    io.add_key_event(imgui.Key.mod_ctrl, False)
+    _settle(viewer, 2)
+    lo_x, lo_y, hi_x, hi_y = viewer.app._status_path_bounds
+    selected = viewer.session.selected
+    io.add_key_event(imgui.Key.mod_ctrl, True)
+    _click(viewer, ((lo_x + hi_x) * 0.5, (lo_y + hi_y) * 0.5))
+    io.add_key_event(imgui.Key.mod_ctrl, False)
+    viewer.sync()
+    assert revealed == [path, path]
+    assert viewer.session.selected == selected
+    _click(viewer, _item_center(viewer, "button", "##output-collapse"))
+    _settle(viewer, 2)
+    point = _item_center(viewer, "invisible_button", "##output-latest")
+    io.add_key_event(imgui.Key.mod_ctrl, True)
+    _click(viewer, point)
+    io.add_key_event(imgui.Key.mod_ctrl, False)
+    viewer.sync()
+    assert revealed == [path, path, path]
 
 
 @pytest.mark.parametrize("name", ("hinge_drive", "body_drive", "site_drive"))
@@ -237,12 +341,35 @@ def test_output_collapse_expands_the_viewport_and_restores_the_log(viewer):
     assert imgui.internal.find_window_by_name("Output").active
 
 
+def test_model_update_segments_switch_between_realtime_and_deferred(viewer):
+    panel = viewer.panels.get("Settings")
+    panel.show_category("General")
+    viewer.panels.open_panel("Settings")
+    _settle(viewer, 3)
+    _activate_panel(viewer, "Settings")
+    for index, expected in ((0, True), (1, False)):
+        label = viewer.app.localizer.text(("Realtime", "Deferred")[index])
+        _click(viewer, _item_center(viewer, "button", f"{label}##model-updates-{index}"))
+        assert viewer.app.live_model_updates is expected
+
+
 def test_viewport_recording_controls_drive_a_real_take(viewer):
     before = tuple(viewer.session.keyframes)
     _click(
         viewer, _item_center(viewer, "invisible_button", "##viewport-playback-recording-options")
     )
-    _click(viewer, _item_center(viewer, "menu_item", "Record Take"))
+    rects = [
+        _item_rect(viewer, "button", label)
+        for label in (
+            "Record Take##record-take",
+            "Record Video##record-video",
+            "Recording Settings...##recording-settings",
+        )
+    ]
+    assert [hi[0] - lo[0] for lo, hi in rects] == pytest.approx(
+        [rects[0][1][0] - rects[0][0][0]] * 3
+    )
+    _click(viewer, _item_center(viewer, "button", "Record Take##record-take"))
     _settle(viewer, 4)
     assert viewer.session.state_take_recording
     _click(viewer, _item_center(viewer, "invisible_button", "##viewport-playback-record"))
@@ -253,6 +380,10 @@ def test_viewport_recording_controls_drive_a_real_take(viewer):
         viewer, _item_center(viewer, "invisible_button", "##viewport-playback-recording-options")
     )
     assert imgui.is_popup_open("viewport-recording-options", imgui.PopupFlags_.any_popup_id)
+    _click(viewer, _item_center(viewer, "button", "Recording Settings...##recording-settings"))
+    _settle(viewer, 3)
+    assert viewer.panels.get("Settings").open
+    assert not imgui.is_popup_open("viewport-recording-options", imgui.PopupFlags_.any_popup_id)
 
 
 def test_capture_snapshot_does_not_recompile_or_modify_model_keyframes(viewer):
@@ -561,3 +692,45 @@ def test_pending_model_apply_discard_and_realtime_mode(viewer, tmp_path):
         assert session.submit(cmd.RenameModelElement(node.node_id, "live_name")).ok
     assert not app.model_edits.active
     assert session.node(node.node_id).name == "live_name"
+
+
+def test_creating_an_element_previews_geometry_styling_and_selection_before_apply(
+    viewer, monkeypatch
+):
+    import numpy as np
+
+    from mojive.model_edits import model_edit_scope
+    from mojive.types import MeshShape
+    from mojive.ui.app import ViewerApp
+
+    app, session = viewer.app, viewer.session
+    assert not app.live_model_updates
+    monkeypatch.setattr(ViewerApp, "_next_entity_color", lambda self: (1.0, 0.0, 0.0, 1.0))
+
+    with model_edit_scope(session, app._intercept_model_edit):
+        app._add_scene_object(MeshShape.PLANE, "plane")
+    # A deferred create stages the element, its styling and its selection as one edit.
+    assert app.model_edits.active, session.last_message
+    assert not app.model_edits.error
+    plane = session.selected_node
+    assert plane is not None and plane.name == "plane"
+    np.testing.assert_allclose(
+        session.source.geom_rgba[session.source.geom_node == plane.node_id], [[1.0, 0.0, 0.0, 1.0]]
+    )
+    _settle(viewer, 3)
+
+    _click(
+        viewer,
+        _item_center(viewer, "button", app.localizer.text("Apply") + "##apply_model_edits"),
+    )
+    _wait_edits(viewer)
+    assert not app.model_edits.active, (
+        app.model_edits.error,
+        session.last_message,
+        app._apply_model_edits_requested,
+    )
+    plane = next(node for node in session.nodes if node.name == "plane")
+    assert session.selected_node is plane
+    np.testing.assert_allclose(
+        session.source.geom_rgba[session.source.geom_node == plane.node_id], [[1.0, 0.0, 0.0, 1.0]]
+    )

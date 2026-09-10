@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import math
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -48,6 +49,7 @@ from mojive.ui.panels.assets import (
 )
 from mojive.ui.panels.camera import camera_preset_column_count
 from mojive.ui.panels.control import ControlPanel, filter_actuators, sort_actuators
+from mojive.ui.panels.filters import severity_meshes
 from mojive.ui.panels.help import KEYS, MOUSE_GESTURES, VALUE_GESTURES
 from mojive.ui.panels.hierarchy import (
     HierarchyPanel,
@@ -440,6 +442,133 @@ def test_output_filter_combines_text_component_and_severity():
     assert "cache detail" not in output.copy_text(filter_output_entries(entries, "", 30))
 
 
+def test_severity_glyph_marks_stay_separated_and_inside_their_frames():
+    """The Output list draws these glyphs at the font size, so small sizes must hold up."""
+
+    def bounds(points):
+        xs = [point[0] for point in points]
+        ys = [point[1] for point in points]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    def vertical_gap(first, second):
+        """Return the free space between two stacked contours, in either order."""
+
+        return max(first[1] - second[3], second[1] - first[3])
+
+    for size in (12.0, 13.0, 16.0, 24.0, 32.0, 56.0):
+        for kind in ("info", "warning", "error"):
+            ring, dot, bar = severity_meshes(size, kind)
+            ring_bounds = bounds(ring[0])
+            width = ring_bounds[2] - ring_bounds[0]
+            height = ring_bounds[3] - ring_bounds[1]
+            # Every frame carries the same stroke weight, so all three fill one box. The
+            # triangle rounds its corners, so its span lands one fringe wider at 12 px.
+            assert width == pytest.approx(size * 0.94, abs=0.16)
+            if kind == "warning":
+                # A warning sign reads as a triangle only while its sides stay equal,
+                # which puts its height near sqrt(3)/2 of its width.
+                assert height / width == pytest.approx(0.953, abs=0.02)
+            else:
+                assert height == pytest.approx(size * 0.94, abs=0.06)
+            dot_bounds, bar_bounds = bounds(dot[0]), bounds(bar[0])
+            if kind == "error":
+                # The cross spans both stems evenly and keeps a real margin to the ring.
+                assert (dot_bounds[2] - dot_bounds[0]) == pytest.approx(
+                    bar_bounds[2] - bar_bounds[0]
+                )
+                inner = bounds(ring[0][len(ring[0]) // 2 :])
+                inner_radius = (inner[2] - inner[0]) * 0.5
+                corner = math.hypot(
+                    max(abs(dot_bounds[0]), abs(dot_bounds[2])),
+                    max(abs(dot_bounds[1]), abs(dot_bounds[3])),
+                )
+                assert inner_radius - corner >= 1.0
+                continue
+            # Both marks keep a visible dot, gap and stem at every size.
+            assert vertical_gap(dot_bounds, bar_bounds) > 0.0
+            assert dot_bounds[2] - dot_bounds[0] >= 0.8
+            # The isolated dot compensates its larger antialiased edge-to-area ratio.
+            assert (dot_bounds[2] - dot_bounds[0]) / (
+                bar_bounds[2] - bar_bounds[0]
+            ) == pytest.approx(1.12)
+            assert bar_bounds[3] - bar_bounds[1] >= 1.0
+            if kind == "warning":
+                # The slanted sides taper, so the mark stays inside the triangle interior.
+                assert dot_bounds[1] > ring_bounds[1]
+                assert bar_bounds[3] < ring_bounds[3]
+                assert dot_bounds[2] - dot_bounds[0] < size * 0.5
+
+
+def test_info_and_warning_keep_opposite_mark_orientation_and_matching_proportions():
+    """Info uses i and warning uses !, each centered in its own frame's interior."""
+
+    def bounds(points):
+        xs = [point[0] for point in points]
+        ys = [point[1] for point in points]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    for size in (13.0, 16.0, 24.0, 32.0, 56.0):
+        marks = {}
+        for kind in ("info", "warning"):
+            _ring, dot, bar = severity_meshes(size, kind)
+            dot_bounds, bar_bounds = bounds(dot[0]), bounds(bar[0])
+            if kind == "info":
+                assert dot_bounds[3] < bar_bounds[1]
+            else:
+                assert bar_bounds[3] < dot_bounds[1]
+            marks[kind] = (
+                dot_bounds[2] - dot_bounds[0],
+                max(dot_bounds[1] - bar_bounds[3], bar_bounds[1] - dot_bounds[3]),
+                bar_bounds[3] - bar_bounds[1],
+                (dot_bounds[2] + dot_bounds[0]) * 0.5,
+                (bar_bounds[2] + bar_bounds[0]) * 0.5,
+            )
+            # The mark is centered horizontally in either frame.
+            assert marks[kind][3] == pytest.approx(0.0, abs=1e-6)
+            assert marks[kind][4] == pytest.approx(0.0, abs=1e-6)
+        # A small triangle scales the complete mark to clear its thicker inner boundary.
+        ratios = [marks["warning"][index] / marks["info"][index] for index in range(3)]
+        assert 0.85 <= ratios[0] <= 1.0
+        assert ratios == pytest.approx([ratios[0]] * 3)
+        assert marks["warning"][2] > marks["warning"][0] * 0.6
+
+
+@pytest.mark.parametrize("size", (12, 14, 20, 32, 56, 140))
+@pytest.mark.parametrize("kind", ("info", "warning", "error"))
+def test_severity_ink_is_centered_inside_the_stroked_frame(size, kind):
+    meshes = severity_meshes(size, kind)
+    boundary = np.asarray(meshes[0][3])
+    following = np.roll(boundary, -1, axis=0)
+    weights = boundary[:, 0] * following[:, 1] - following[:, 0] * boundary[:, 1]
+    center = (boundary.min(axis=0) + boundary.max(axis=0)) / 2
+    ink = np.concatenate([mesh[0] for mesh in meshes[1:]])
+    edges = following - boundary
+    offsets = ink[:, None, :] - boundary
+    distances = (
+        (edges[:, 0] * offsets[:, :, 1] - edges[:, 1] * offsets[:, :, 0])
+        * np.sign(weights.sum())
+        / np.linalg.norm(edges, axis=1)
+    )
+    assert distances.min() >= 0.6 - 1e-6
+    if kind == "warning":
+        sides = np.argsort(np.linalg.norm(edges, axis=1))[-3:]
+        clearance = distances[:, sides].min(axis=0)
+        np.testing.assert_allclose(clearance, [clearance[0]] * 3, atol=1e-6)
+    else:
+        # Integrate the rendered triangles rather than treating dot and stem as
+        # equal-sized boxes: their unequal ink areas otherwise shift the visual center.
+        area_sum = 0.0
+        moment = np.zeros(2)
+        for vertices, indices, *_ in meshes[1:]:
+            triangles = np.asarray(vertices)[np.asarray(indices).reshape(-1, 3)]
+            a = triangles[:, 1] - triangles[:, 0]
+            b = triangles[:, 2] - triangles[:, 0]
+            areas = abs(a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0])
+            moment += (triangles.mean(axis=1) * areas[:, None]).sum(axis=0)
+            area_sum += areas.sum()
+        np.testing.assert_allclose(moment / area_sum, center, atol=1e-6)
+
+
 def test_default_workspace_panels_do_not_expose_accidental_close_buttons(panels: PanelSet):
     fixed = {"Control", "Hierarchy", "Inspector", "Joints", "Camera", "Output"}
     assert all(not panels.get(name).closable for name in fixed)
@@ -786,9 +915,11 @@ def test_every_panel_declares_a_shortcut(panels: PanelSet):
 
 
 def test_occasional_authoring_panels_start_closed_and_use_the_window_menu(panels: PanelSet):
-    for name in ("Assets", "Keyframes", "Stats"):
+    for name in ("Assets", "Stats"):
         panel = panels.get(name)
         assert panel is not None and not panel.default_open
+    assert panels.get("Keyframes").default_open
+    assert panels.get("Output").default_open
 
 
 def test_shortcuts_are_unique(panels: PanelSet):

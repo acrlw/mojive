@@ -274,6 +274,7 @@ GPU_WGPU_FILES := python/tests/gpu/test_input_ownership.py python/tests/gpu/test
 GPU_WGPU_FILES += python/tests/gpu/test_passive.py
 GPU_WGPU_FILES += python/tests/gpu/test_camera_tracking.py python/tests/gpu/test_input_mapping.py
 GPU_WGPU_FILES += python/tests/gpu/test_keyframe_timeline.py python/tests/gpu/test_ui_refinement.py python/tests/gpu/test_ui_redesign.py python/tests/gpu/test_take_video.py python/tests/gpu/test_ui_corner_controls.py
+GPU_WGPU_FILES += python/tests/gpu/test_scene_capture.py
 ## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
 gpu-wgpu:
@@ -619,6 +620,10 @@ joint-gizmo:
 ## Fixed-body transform and sphere/box/cylinder/capsule dimension authoring acceptance.
 primitive-authoring:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
+
+.PHONY: scene-editing-audit
+scene-editing-audit:
+	$(PY) -m mojive.tools.scene_editing_audit $(ARGS)
 
 ## Material creation/copy/binding and 2D image import acceptance.
 material-authoring:

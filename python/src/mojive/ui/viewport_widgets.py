@@ -264,6 +264,10 @@ OVERLAY_CLIP_PADDING = 5.0
 # This scale changes only their authored paths; hit regions, state circles, and
 # capsule spacing continue to use the shared overlay geometry.
 TOOL_GLYPH_SCALE = 1.18
+# The open chevron uses a lighter stroke and fits within the playback glyph envelope.
+RECORDING_OPTIONS_ENVELOPE_SCALE = 1.25
+RECORDING_OPTIONS_GLYPH_SCALE = 1.00
+RECORDING_OPTIONS_STROKE_SCALE = 0.80
 _MOVE_ARROW_BASE = 6.0
 _MOVE_ARROW_TIP = 9.0
 _MOVE_ARROW_WING = (_MOVE_ARROW_TIP - _MOVE_ARROW_BASE) / math.sqrt(3.0)
@@ -813,6 +817,33 @@ def draw_capsule(
     draw.polyline(points, (*theme.text[:3], 0.25), 1.4 * scale, closed=True)
 
 
+def overlay_divider_length(width: float = DIVIDER_WIDTH, *, playback: bool) -> float:
+    """Keep the same divider-to-glyph proportion for filled playback and line tools.
+
+    Width uses the tool glyph's reference diameter. Playback's smaller filled
+    symbols use their visible height, independently of hit targets and shell size.
+    """
+    if playback:
+        return width * PLAYBACK_HALF_HEIGHT_PT / (OVERLAY_GEOMETRY.icon_radius * TOOL_GLYPH_SCALE)
+    return width
+
+
+def draw_overlay_divider(
+    draw: Draw2D,
+    center,
+    theme: Theme,
+    scale: float,
+    *,
+    playback: bool,
+    width: float = DIVIDER_WIDTH,
+) -> None:
+    """Draw the shared separator for horizontal playback and vertical tool capsules."""
+    half = overlay_divider_length(width, playback=playback) * scale * 0.5
+    dx, dy = (0.0, half) if playback else (half, 0.0)
+    x, y = center
+    draw.line((x - dx, y - dy), (x + dx, y + dy), (*theme.border[:3], 0.72), scale)
+
+
 def playback_control_centers(controls: Sequence[ViewportControl] = PLAYBACK_CONTROLS):
     """Keep group boundaries declarative when callers extend the toolbar."""
     cursor = SHELL_RADIUS
@@ -1086,11 +1117,12 @@ def draw_playback(
     for index, control in enumerate(control_specs):
         if index and control.name in ("reset", "record"):
             divider_x = x + (centers[index - 1] + centers[index]) * 0.5 * scale
-            draw.line(
-                (divider_x, y + (SHELL_RADIUS - DIVIDER_WIDTH / 2) * scale),
-                (divider_x, y + (SHELL_RADIUS + DIVIDER_WIDTH / 2) * scale),
-                (*theme.text[:3], 0.18),
+            draw_overlay_divider(
+                draw,
+                (divider_x, y + SHELL_RADIUS * scale),
+                theme,
                 scale,
+                playback=True,
             )
         name = control.name
         icon, selected, action_enabled = states.get(name, (control.icon, False, True))
@@ -1362,13 +1394,15 @@ def draw_tool_glyph(
                 path = _transform_path(local, x, y, glyph_scale)
                 draw.concave_fill(path, color)
     elif kind == "dimensions":
-        half = 2.0 * scale
+        half = 1.5 * scale
+        # The envelope contains the square's far corners, not just its center.
+        reach = math.sqrt((9.0 * glyph_scale) ** 2 - half**2) - half
         clear_radius = (
             geometry.frame_center_radius * glyph_scale
             + geometry.tool_stroke * geometry.frame_center_gap_ratio * scale
         )
         for ux, uy in _FRAME_AXES:
-            end = (x + ux * 9.0 * glyph_scale, y + uy * 9.0 * glyph_scale)
+            end = (x + ux * reach, y + uy * reach)
             start = (x + ux * clear_radius, y + uy * clear_radius)
             path = box_handle_points(
                 start,
@@ -1394,8 +1428,8 @@ def draw_tool_glyph(
                 glyph_scale,
                 geometry.tool_stroke * scale,
                 clear_radius=clear_radius,
-                base=7.6,
-                tip=10.0,
+                base=6.6,
+                tip=9.0,
                 wing=1.8,
                 corner_radius=_FRAME_ARROW_CORNER_RADIUS_PT * scale,
                 smoothing=smoothing,
@@ -1410,7 +1444,7 @@ def draw_tool_glyph(
         )
         draw.centered_label(
             "W" if space == "world" else "B",
-            (x + 5.25 * glyph_scale, y - 5.1 * glyph_scale),
+            (x + 4.6 * glyph_scale, y - 4.5 * glyph_scale),
             color,
             FRAME_LABEL_MAX_WIDTH * scale,
         )
@@ -1445,11 +1479,12 @@ def draw_tool_column(
     for previous in groups[:-1]:
         group_cursor += len(previous)
         divider_y = y + (centers[group_cursor - 1] + centers[group_cursor]) * 0.5 * scale
-        draw.line(
-            (x + (SHELL_RADIUS - DIVIDER_WIDTH * 0.5) * scale, divider_y),
-            (x + (SHELL_RADIUS + DIVIDER_WIDTH * 0.5) * scale, divider_y),
-            (*theme.border[:3], 0.72),
-            1.0 * scale,
+        draw_overlay_divider(
+            draw,
+            (x + SHELL_RADIUS * scale, divider_y),
+            theme,
+            scale,
+            playback=False,
         )
     result = ""
     for index, control in enumerate(controls):
@@ -2512,16 +2547,30 @@ def draw_status(
 
 
 @lru_cache(maxsize=64)
-def expand_glyph_path(stroke: float, smoothing: float = CORNER_SMOOTHING):
-    """Join two rectangular arms, rounding every exposed corner with the shared G3 profile."""
+def expand_glyph_path(
+    stroke: float,
+    smoothing: float = CORNER_SMOOTHING,
+    scale: float = 1.0,
+    envelope: float = 1.0,
+):
+    """Join two rectangular arms, rounding every exposed corner with the shared G3 profile.
+
+    ``scale`` magnifies the whole glyph, including the arm stroke, so an inline toolbar can
+    match the optical weight of a filled symbol without redrawing the path. ``envelope``
+    lengthens the arms at a constant stroke weight, which is how a glyph grows to fill a
+    larger state circle without turning into a heavier mark.
+    """
+    stroke *= scale
     offset = stroke / math.sqrt(2)
+    arm = 4.0 * envelope
+    rise = 2.0 * envelope
     outline = (
-        (-4 - offset, -2),
-        (0, 2 + offset),
-        (4 + offset, -2),
-        (4, -2 - offset),
-        (0, 2 - offset),
-        (-4, -2 - offset),
+        (-arm - offset, -rise),
+        (0, rise + offset),
+        (arm + offset, -rise),
+        (arm, -rise - offset),
+        (0, rise - offset),
+        (-arm, -rise - offset),
     )
     corners = tuple(range(len(outline)))
     path = smooth_polygon_corners(
@@ -2535,11 +2584,19 @@ def expand_glyph_path(stroke: float, smoothing: float = CORNER_SMOOTHING):
     return tuple(map(tuple, path.tolist()))
 
 
-def draw_expand_glyph(draw, center, color, scale, stroke=OVERLAY_GEOMETRY.tool_stroke):
+def draw_expand_glyph(
+    draw,
+    center,
+    color,
+    scale,
+    stroke=OVERLAY_GEOMETRY.tool_stroke,
+    glyph_scale: float = 1.0,
+    envelope: float = 1.0,
+):
     draw.fringed_concave_fill(
         tuple(
             (center[0] + x * scale, center[1] + y * scale)
-            for x, y in expand_glyph_path(stroke, draw.corner_smoothing)
+            for x, y in expand_glyph_path(stroke, draw.corner_smoothing, glyph_scale, envelope)
         ),
         color,
     )
@@ -2561,5 +2618,20 @@ def _record_icon(draw, center, color, scale, packed):
         draw_recording_glyph(draw, center, accent, scale, recording=recording)
 
 
+def draw_recording_options_glyph(
+    draw, center, color, scale, *, stroke=OVERLAY_GEOMETRY.tool_stroke
+):
+    """Draw the shared recording-menu chevron with rounded, joined arms."""
+    draw_expand_glyph(
+        draw,
+        center,
+        color,
+        scale,
+        stroke * RECORDING_OPTIONS_STROKE_SCALE,
+        glyph_scale=RECORDING_OPTIONS_GLYPH_SCALE,
+        envelope=RECORDING_OPTIONS_ENVELOPE_SCALE,
+    )
+
+
 def _recording_options_icon(draw, center, color, scale, _packed):
-    draw_expand_glyph(draw, center, color, scale)
+    draw_recording_options_glyph(draw, center, color, scale)
