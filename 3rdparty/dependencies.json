@@ -5,7 +5,7 @@
     "url": "https://codeload.github.com/bkaradzic/bgfx.cmake/tar.gz/297c84a6ca5a43c0840059b2169ed05ff288c42c",
     "sha256": "07aa70322e9af3ccf653b4e3823e24079229ed4beaa6b96c3e5387d58d7f299f",
     "source": "submodule",
-    "path": "thirdParty/bgfxCmake"
+    "path": "3rdparty/bgfx.cmake"
   },
   "bgfx": {
     "repo": "bkaradzic/bgfx",
@@ -13,7 +13,7 @@
     "url": "https://codeload.github.com/bkaradzic/bgfx/tar.gz/8c8b6b5692be5054e89d2a59640c50b9319c9425",
     "sha256": "4f9c24a11376a2ebb9a5192ba0c530a162736e901249ac196c80238e266aeba0",
     "source": "submodule",
-    "path": "thirdParty/bgfx"
+    "path": "3rdparty/bgfx"
   },
   "bimg": {
     "repo": "bkaradzic/bimg",
@@ -21,7 +21,7 @@
     "url": "https://codeload.github.com/bkaradzic/bimg/tar.gz/ddbeeae05779f84f97694553eb41605a60f86f0a",
     "sha256": "290f736a93960e17f26bc80179c702598231db3b0c34ac0b0f0d8a87ea1ad039",
     "source": "submodule",
-    "path": "thirdParty/bimg"
+    "path": "3rdparty/bimg"
   },
   "bx": {
     "repo": "bkaradzic/bx",
@@ -29,7 +29,7 @@
     "url": "https://codeload.github.com/bkaradzic/bx/tar.gz/98ad3bec2a7ee1a5cbabdcabc25252572dcb1d88",
     "sha256": "1c9cd3b2434904fe24b5079327999912b3ed737b106caf82f6678f1f6026568f",
     "source": "submodule",
-    "path": "thirdParty/bx"
+    "path": "3rdparty/bx"
   },
   "glfw": {
     "repo": "glfw/glfw",
@@ -37,7 +37,7 @@
     "url": "https://codeload.github.com/glfw/glfw/tar.gz/7b6aead9fb88b3623e3b3725ebb42670cbe4c579",
     "sha256": "169d49096e339caabbc12e1762273c5cb9130a535a282ba46cf5c14ab6e55694",
     "source": "submodule",
-    "path": "thirdParty/glfw"
+    "path": "3rdparty/glfw"
   },
   "imgui": {
     "repo": "ocornut/imgui",
@@ -46,7 +46,7 @@
     "url": "https://codeload.github.com/ocornut/imgui/tar.gz/b48d1afbe8ee8b238e2961dc363a949dd7304e23",
     "sha256": "747c5a465a05c4ef5b4a09e2e0e3d0ce2bc76b31420f0f5af33df470907cf893",
     "source": "vendored",
-    "path": "thirdParty/imgui"
+    "path": "3rdparty/imgui"
   },
   "sdl": {
     "repo": "libsdl-org/SDL",
@@ -62,7 +62,7 @@
     "url": "https://codeload.github.com/wjakob/nanobind/tar.gz/db4827f06f6f1680e5d4004c95fc8d69299dba8b",
     "sha256": "60c350b2d64cdf2c1d8e46433d38dba0fb69ba118f9077c1c7e74228e6dec1e0",
     "source": "submodule",
-    "path": "thirdParty/nanobind"
+    "path": "3rdparty/nanobind"
   },
   "pybind11": {
     "repo": "pybind/pybind11",
@@ -78,7 +78,7 @@
     "url": "https://codeload.github.com/Tessil/robin-map/tar.gz/4ec1bf19c6a96125ea22062f38c2cf5b958e448e",
     "sha256": "4968947bd2e908854481519ec422823af4161a286ff1e16943293b753e80cb3f",
     "source": "submodule",
-    "path": "thirdParty/robinMap"
+    "path": "3rdparty/robin-map"
   },
   "shader_glslang": {
     "repo": "KhronosGroup/glslang",
@@ -101,7 +101,7 @@
     "url": "https://codeload.github.com/g-truc/glm/tar.gz/8d1fd52e5ab5590e2c81768ace50c72bae28f2ed",
     "sha256": "36eefbae41503e6822e8d9e1b4cc85c6a6621f17676f6258aaf0a64c2de0a09c",
     "source": "submodule",
-    "path": "thirdParty/glm"
+    "path": "3rdparty/glm"
   },
   "spdlog": {
     "repo": "gabime/spdlog",
@@ -110,6 +110,6 @@
     "url": "https://codeload.github.com/gabime/spdlog/tar.gz/79524ddd08a4ec981b7fea76afd08ee05f83755d",
     "sha256": "c6dee844e35a54cc80e3ab76aae2310763e0b49c7397549dfa4d4657d9737138",
     "source": "submodule",
-    "path": "thirdParty/spdlog"
+    "path": "3rdparty/spdlog"
   }
 }

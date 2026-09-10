@@ -1,27 +1,27 @@
 [submodule "third_party/bgfx"]
-	path = thirdParty/bgfx
+	path = 3rdparty/bgfx
 	url = https://github.com/bkaradzic/bgfx.git
 [submodule "third_party/bx"]
-	path = thirdParty/bx
+	path = 3rdparty/bx
 	url = https://github.com/bkaradzic/bx.git
 [submodule "third_party/bimg"]
-	path = thirdParty/bimg
+	path = 3rdparty/bimg
 	url = https://github.com/bkaradzic/bimg.git
 [submodule "third_party/bgfx_cmake"]
-	path = thirdParty/bgfxCmake
+	path = 3rdparty/bgfx.cmake
 	url = https://github.com/bkaradzic/bgfx.cmake.git
 [submodule "third_party/glfw"]
-	path = thirdParty/glfw
+	path = 3rdparty/glfw
 	url = https://github.com/glfw/glfw.git
 [submodule "third_party/nanobind"]
-	path = thirdParty/nanobind
+	path = 3rdparty/nanobind
 	url = https://github.com/wjakob/nanobind.git
 [submodule "third_party/robin_map"]
-	path = thirdParty/robinMap
+	path = 3rdparty/robin-map
 	url = https://github.com/Tessil/robin-map.git
 [submodule "thirdParty/glm"]
-	path = thirdParty/glm
+	path = 3rdparty/glm
 	url = https://github.com/g-truc/glm.git
 [submodule "thirdParty/spdlog"]
-	path = thirdParty/spdlog
+	path = 3rdparty/spdlog
 	url = https://github.com/gabime/spdlog.git

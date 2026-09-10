@@ -6,11 +6,11 @@ The C++ build never replaces an edited ImGui tree with a fetched copy.
 
 | Source | Management | Purpose |
 |---|---|---|
-| `imgui/` | Tracked source, v1.92.9b-docking | Dear ImGui core and platform integration; owned customization history |
-| `bgfx/`, `bx/`, `bimg/`, `bgfxCmake/` | Git submodules at the tested commits | Renderer, offline shader compilation, and stb image resizing |
+| `imgui/` | Tracked source, v1.92.9b-docking | Dear ImGui core for the native gallery; owned customization history |
+| `bgfx/`, `bx/`, `bimg/`, `bgfx.cmake/` | Git submodules at the tested commits | Renderer, offline shader compilation, and stb image resizing |
 | `glfw/` | Git submodule | Native platform windows and input |
 | `glm/`, `spdlog/` | Git submodules | Private graphics math and native logging |
-| `nanobind/`, `robinMap/` | Git submodules | Python binding support |
+| `nanobind/`, `robin-map/` | Git submodules | Python binding support |
 | SDL, pybind11, separate shader tools | Optional locked downloads | Retained comparison experiments, disabled by default |
 
 After cloning, initialize only the top-level submodules:
@@ -24,6 +24,14 @@ Nested upstream submodules are not required: bgfx, bx, bimg and robin-map are su
 the top-level paths above. Do not use `--remote` for routine setup. A dependency update changes
 the submodule commit and the matching lock entry together, then runs the applicable native gates.
 Upstream licenses remain in every source directory; Mojive's license does not replace them.
+
+Upstream examples, documentation and unused platform implementations remain in the pinned
+source trees. They are not part of the Python wheel. The build disables dependency examples,
+tests and installation; `make native-python-build` builds only `_native` and its dependencies,
+including the required shader compiler and shaders. `make native-build` additionally builds
+Mojive's native acceptance tools and their ImGui/GLFW dependencies. Do not delete files inside
+a submodule to reduce runtime size: this dirties the upstream checkout without changing the
+product. Optional comparison downloads remain disabled until explicitly requested.
 
 ## ImGui customization
 
@@ -40,8 +48,29 @@ upstream archive, not from the customized working tree.
 
 UI spacing, typography and common widgets belong in Mojive's UI layer. Changes to ImGui's
 rounding geometry or internal draw paths belong here when its public customization points are
-insufficient. The baseline import does not implement continuous-curvature corners. Existing
-Python `imgui-bundle` remains independent until the native UI bridge is integrated.
+insufficient. The baseline import does not implement continuous-curvature corners.
+
+### Which ImGui the Viewer uses
+
+The Python Viewer imports `imgui_bundle.imgui` on OpenGL, wgpu and bgfx. `ui/window_native.py`
+passes its generated vertices, indices, textures and clip rectangles to the native renderer;
+bgfx does not generate widget geometry. The tracked `imgui/` tree is currently compiled into
+`mojive_imgui` for the standalone native gallery, not the Python Viewer's ImGui extension.
+
+`make setup-imgui` runs `tools/build_imgui.py`, which downloads a pinned ImGui Bundle source
+archive and builds the Mojive wheel. The recipe contains checked patches for bulk geometry
+submission, slider/focus geometry and platform support. Its source/build cache lives under
+`output/g3-ui/build`; it is not an additional dependency to commit. The package version and
+Dear ImGui core version are distinct: the current recipe uses Bundle `1.92.900`, with core
+`1.92.9`, whereas this tracked core baseline is `1.92.9b-docking`.
+
+Shared self-drawn widgets already use continuous-curvature geometry from `curves2d.py` through
+`ui/draw2d.py`. To extend it to standard ImGui widgets globally, change the core draw paths
+actually compiled into ImGui Bundle and rebuild the wheel. Reuse a reviewed core implementation
+for the native gallery after reconciling the core versions and bindings; changing only this
+tracked tree does not affect the Viewer. Fill, border and focus paths must agree, and real
+circles must retain circular geometry. This work does not require switching rendering backends
+or maintaining another independent ImGui checkout.
 
 ## bgfx Metal offscreen sampling
 

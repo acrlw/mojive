@@ -166,7 +166,7 @@ if(MOJIVE_BUILD_PYTHON)
     include(cmake/Python.cmake)
     # Reuse the MIT-licensed meshoptimizer sources pinned transitively by bgfx.
     # Geometry processing has no renderer dependency and also builds without bgfx.
-    set(meshoptimizer_dir "${CMAKE_CURRENT_SOURCE_DIR}/../thirdParty/bgfx/3rdparty/meshoptimizer/src")
+    set(meshoptimizer_dir "${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty/bgfx/3rdparty/meshoptimizer/src")
     add_library(mojive_mesh_processing STATIC src/MeshProcessing.cpp
         "${meshoptimizer_dir}/allocator.cpp" "${meshoptimizer_dir}/simplifier.cpp")
     target_include_directories(mojive_mesh_processing PRIVATE "${meshoptimizer_dir}")

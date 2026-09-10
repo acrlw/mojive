@@ -95,6 +95,6 @@ view does not create an additional approval step.
   private backends. Read `docs/guides/development.md` for naming and local build commands.
 - Mojive-owned C++ uses PascalCase types/files, camelCase functions/fields and `m` + PascalCase
   private members. Preserve upstream and standard-library spellings. Never reformat vendor code.
-- `thirdParty/imgui` is tracked, editable source; other core dependencies are pinned submodules.
+- `3rdparty/imgui` is tracked, editable source; other core dependencies are pinned submodules.
   Maintain dependency provenance and focused customization history as described in
-  `thirdParty/README.md`. Repository setup does not require workflow CI.
+  `3rdparty/README.md`. Repository setup does not require workflow CI.

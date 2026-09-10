@@ -30,7 +30,7 @@ C++ 提供舞台和基础设施，Python 负责上层业务、算法选择、工
 
 - C++：Qt 风格，`SceneFrame`、`setScene()`、`objectId`、私有成员 `mDevice`，复合文件名 `SceneStream.hpp`。不引入 Qt，不加 `Q` 前缀。
 - Python：保留当前 snake_case API，不要求用户把现有脚本改成驼峰。
-- 目录：`python/src/mojive` 放 Python 包，`python/tests` 放测试；`cpp` 放自有 C++；`thirdParty` 管理上游源码。
+- 目录：`python/src/mojive` 放 Python 包，`python/tests` 放测试；`cpp` 放自有 C++；`3rdparty` 管理上游源码。
 - 默认 C++ 后端：bgfx。标准库契约隔离后端类型，SDL 对比实现保留为可选实验。
 - ImGui：已把验证过的 docking 版本原样纳入 Git，保留许可证、上游提交、归档校验与逐文件基线。后续曲率连续圆角的修改可以在此单独提交和审查。
 - 其他核心依赖：固定提交的 Git submodule，不追踪移动分支，不在普通构建中自动升级。

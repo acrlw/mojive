@@ -123,7 +123,7 @@ Mojive 应直接复用 MuJoCo 的仿真、模型、动力学、已有数学工�
 
 主要成本是编译时间、包体、类型布局、全局状态和升级兼容性。以下规则把成本限制在使用该库的模块中：
 
-- 继续使用 `thirdParty/dependencies.json` 固定来源和提交，保留上游许可证；GLM / spdlog 首次接入时与对应实现一起加入 submodule，不先放一批未使用的依赖。
+- 继续使用 `3rdparty/dependencies.json` 固定来源和提交，保留上游许可证；GLM / spdlog 首次接入时与对应实现一起加入 submodule，不先放一批未使用的依赖。
 - 默认使用未经修改的上游代码；ImGui 的必要定制沿用已有独立修改记录。第三方 API 保持原命名，自有 C++ 继续 Qt 风格。
 - 原生依赖尽量通过模块私有构建关系接入。共享契约不传递 `glm::mat4`、`entt::registry`、`spdlog::logger` 或 bgfx handle 到 Python 公开 API。
 - 共享契约使用标准库不等于承诺跨编译器的稳定二进制 ABI。当前扩展与原生核心一起构建；将来若开放外部二进制插件，再设计版本化 ABI。

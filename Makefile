@@ -838,7 +838,7 @@ native-bindings:
 	cmake --build $(NATIVE_BINDINGS_BUILD) --parallel $(NATIVE_JOBS)
 
 native-bindings-test: native-bindings
-	PYTHONPATH="$(NATIVE_BINDINGS_BUILD)/bindings" $(PYTEST) -q python/bindingTests/test_bindings.py
+	PYTHONPATH="$(NATIVE_BINDINGS_BUILD)/bindings" $(PYTEST) -q python/binding_tests/test_bindings.py
 
 native-bindings-benchmark: native-bindings native-fixture
 	$(PY) tools/benchmark_native_bindings.py --modules "$(NATIVE_BINDINGS_BUILD)/bindings" --model "$(HUMANOIDS_MODEL)" --scene "$(NATIVE_SCENE)" $(ARGS)
@@ -874,15 +874,15 @@ CPP_PYTHON_BGFX ?= OFF
 .PHONY: cpp-python cpp-python-test
 cpp-python:
 	cmake -S cpp -B $(CPP_PYTHON_BUILD) -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_BGFX=$(CPP_PYTHON_BGFX) -DMOJIVE_BUILD_SDL=OFF -DMOJIVE_BUILD_PYTHON=ON -DPython_EXECUTABLE="$(abspath $(PY))"
-	cmake --build $(CPP_PYTHON_BUILD) --parallel $(NATIVE_JOBS)
+	cmake --build $(CPP_PYTHON_BUILD) --target _native --parallel $(NATIVE_JOBS)
 
 cpp-python-test: cpp-python
-	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(CPP_PYTHON_BUILD))" $(PYTEST) -q python/bindingTests/test_native.py python/bindingTests/test_native_mesh_processing.py
+	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(CPP_PYTHON_BUILD))" $(PYTEST) -q python/binding_tests/test_native.py python/binding_tests/test_native_mesh_processing.py
 
 .PHONY: cpp-python-gpu
 cpp-python-gpu:
 	$(MAKE) cpp-python CPP_PYTHON_BGFX=ON CPP_PYTHON_BUILD=$(NATIVE_BUILD)
-	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_NATIVE_SHADER_DIR="$(abspath $(NATIVE_BUILD)/shaders)" MOJIVE_NATIVE_SCENE="$(abspath $(NATIVE_SCENE))" $(PYTEST) -q python/bindingTests/test_native.py python/bindingTests/test_native_render.py
+	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_NATIVE_SHADER_DIR="$(abspath $(NATIVE_BUILD)/shaders)" MOJIVE_NATIVE_SCENE="$(abspath $(NATIVE_SCENE))" $(PYTEST) -q python/binding_tests/test_native.py python/binding_tests/test_native_render.py
 
 # Opt-in native development entry points use the existing Python Viewer and tools.
 .PHONY: native-python-build native-viewer native-editor native-viewer-test
@@ -896,7 +896,7 @@ native-editor: native-python-build setup-imgui
 	PYTHONPATH="$(abspath python/src)$(if $(PYTHONPATH),:$(PYTHONPATH))" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(MAKE) editor BACKEND=bgfx
 
 native-viewer-test: native-python-build setup-imgui
-	PYTHONPATH="$(abspath python/src)" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_HUMANOIDS_MODEL="$(HUMANOIDS_MODEL)" $(PYTEST) -q python/bindingTests/test_native_viewer.py
+	PYTHONPATH="$(abspath python/src)" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_HUMANOIDS_MODEL="$(HUMANOIDS_MODEL)" $(PYTEST) -q python/binding_tests/test_native_viewer.py
 
 .PHONY: native-wayland-test native-wayland-viewer
 native-wayland-test: native-python-build setup-imgui
@@ -911,7 +911,7 @@ native-parity: native-python-build
 	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.native_parity --check $(ARGS)
 
 native-features-test: native-python-build
-	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PYTEST) -q python/bindingTests/test_native_features.py python/bindingTests/test_native_shader_reload.py
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PYTEST) -q python/binding_tests/test_native_features.py python/binding_tests/test_native_shader_reload.py
 
 native-spirv: native-build
 	$(PY) tools/check_native_shaders.py --build $(NATIVE_BUILD)

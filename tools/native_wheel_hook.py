@@ -36,16 +36,16 @@ class NativeWheelHook(BuildHookInterface):
         includes[str(binaries[0])] = "mojive/" + binaries[0].name
         for name in expected:
             includes[str(shaders / name)] = "mojive/shaders/" + name
-        for name in ("bgfx", "bx", "bimg", "glm", "spdlog", "nanobind", "robinMap"):
-            directory = Path(self.root) / "thirdParty" / name
+        for name in ("bgfx", "bx", "bimg", "glm", "spdlog", "nanobind", "robin-map"):
+            directory = Path(self.root) / "3rdparty" / name
             for license in ("LICENSE", "LICENSE.txt", "LICENSE.md", "copying.txt"):
                 path = directory / license
                 if path.is_file():
-                    includes[str(path)] = "mojive/nativeLicenses/" + name + ".txt"
+                    includes[str(path)] = "mojive/native_licenses/" + name + ".txt"
                     break
-        includes[str(Path(self.root) / "thirdParty/bgfx/3rdparty/meshoptimizer/LICENSE.md")] = (
-            "mojive/nativeLicenses/meshoptimizer.txt"
+        includes[str(Path(self.root) / "3rdparty/bgfx/3rdparty/meshoptimizer/LICENSE.md")] = (
+            "mojive/native_licenses/meshoptimizer.txt"
         )
-        includes[str(Path(self.root) / "thirdParty/stbImageResizeLicense.txt")] = (
-            "mojive/nativeLicenses/stbImageResize.txt"
+        includes[str(Path(self.root) / "3rdparty/stbImageResizeLicense.txt")] = (
+            "mojive/native_licenses/stbImageResize.txt"
         )
