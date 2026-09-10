@@ -12,7 +12,7 @@ not a replacement standalone product.
 python/
   src/mojive/        Python package and compatibility facade
   tests/            Python tests, GPU tests and reviewed golden fixtures
-  bindingTests/     Optional native binding comparison tests
+  binding_tests/     Optional native binding comparison tests
 cpp/
   include/mojive/   Backend-neutral C++ contracts
   src/             Common code and private renderer adapters
@@ -20,14 +20,14 @@ cpp/
   tools/           Native acceptance fixtures and benchmarks
   tests/           C++ contract tests
   cmake/           Build integration
-thirdParty/        Vendored ImGui and pinned upstream submodules
+3rdparty/        Vendored ImGui and pinned upstream submodules
 examples/          Python usage examples
 tools/             Repository maintenance and verification scripts
 output/            Generated builds, captures and reports
 ```
 
 The root `pyproject.toml` remains the Python build entry point. Imports never contain `python`,
-`cpp`, `thirdParty`, or a backend library name. C++ headers describe Mojive's contracts rather
+`cpp`, `3rdparty`, or a backend library name. C++ headers describe Mojive's contracts rather
 than exposing bgfx handles, ImGui types, or MuJoCo-owned mutable state.
 
 ## Naming
@@ -122,7 +122,7 @@ and joins the owned compiler process group. GPU program replacement still runs o
 
 ## Dependency changes
 
-Read the repository's `thirdParty/README.md` before editing an upstream source tree.
+Read the repository's `3rdparty/README.md` before editing an upstream source tree.
 Dear ImGui is tracked directly to make custom drawing changes reviewable alongside Mojive.
 Its first import has no local behavior patches. The native library and Python `imgui-bundle`
 are separate until integration; editing the former does not change the latter's installed wheel.

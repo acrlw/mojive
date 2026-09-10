@@ -53,7 +53,7 @@ source patch or vendor-specific scene layout is required.
 ## Build and verification
 
 Install a C++20 compiler, CMake 3.24 or newer, and Ninja. Production sources come from vendored ImGui and initialized Git submodules; optional comparison
-builds download checksum-locked dependencies described in `thirdParty/dependencies.json`. The bgfx/bx/bimg versions come
+builds download checksum-locked dependencies described in `3rdparty/dependencies.json`. The bgfx/bx/bimg versions come
 from one pinned bgfx.cmake revision. Build products stay under `output/`.
 
 ```bash

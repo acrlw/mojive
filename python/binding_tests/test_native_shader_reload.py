@@ -30,7 +30,7 @@ def test_source_reload_preserves_live_scenes_and_recovers_after_errors(tmp_path,
         '-o "${CMAKE_BINARY_DIR}/shaders/fs_lit.bin" --type fragment '
         f"--platform {platform} -p {profile} "
         '--varyingdef "${CMAKE_SOURCE_DIR}/shaders/varying.def.sc" '
-        f'-i "{(root / "thirdParty/bgfx/src").as_posix()}" -O 3 VERBATIM)\n'
+        f'-i "{(root / "3rdparty/bgfx/src").as_posix()}" -O 3 VERBATIM)\n'
     )
     ninja = cmake.with_name("ninja.exe" if sys.platform == "win32" else "ninja")
     subprocess.run(

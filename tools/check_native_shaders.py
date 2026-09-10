@@ -29,7 +29,7 @@ def main():
                 "--varyingdef",
                 "cpp/shaders/varying.def.sc",
                 "-i",
-                "thirdParty/bgfx/src",
+                "3rdparty/bgfx/src",
                 "-O",
                 "3",
             ],

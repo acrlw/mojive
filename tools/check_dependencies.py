@@ -16,7 +16,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--imgui-baseline", action="store_true")
     args = parser.parse_args()
-    lock = json.loads((ROOT / "thirdParty/dependencies.json").read_text())
+    lock = json.loads((ROOT / "3rdparty/dependencies.json").read_text())
     errors = []
     checked = 0
     for name, entry in lock.items():
@@ -36,7 +36,7 @@ def main() -> None:
             errors.append(f"{name}: uncommitted upstream source changes")
         checked += 1
     if args.imgui_baseline:
-        baseline = json.loads((ROOT / "thirdParty/imguiBaseline.json").read_text())
+        baseline = json.loads((ROOT / "3rdparty/imguiBaseline.json").read_text())
         path = ROOT / lock["imgui"]["path"]
         actual = {
             p.relative_to(path).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()

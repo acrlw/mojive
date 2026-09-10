@@ -223,7 +223,7 @@ See the [remote viewing tutorial](docs/tutorials/remote-viewing.md) and
 ## Development
 
 Mojive remains a Python package: its public API lives in `python/src/mojive`, and selected native
-implementation work lives in `cpp`. Upstream sources are managed under `thirdParty`. See the
+implementation work lives in `cpp`. Upstream sources are managed under `3rdparty`. See the
 [Python/C++ development guide](docs/guides/development.md) for Qt-style C++ naming, dependency
 setup and the boundary between Python application logic and native infrastructure.
 The optional native preview now launches the existing Viewer with `make native-viewer`;
