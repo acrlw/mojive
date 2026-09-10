@@ -9,12 +9,15 @@ from itertools import pairwise
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 from imgui_bundle import imgui
 
 from .. import commands as cmd
 from ..assets import resolve
 from ..composition import build
 from ..gizmo import GizmoHandle
+from ..types import CameraView
+from .gizmo_gallery import _save as _save_gizmo_crop
 from .ui_runtime import (
     _activate_panel,
     _capture_dock_tab_without_nav_cursor,
@@ -28,6 +31,30 @@ from .ui_runtime import (
     _save_window_crop,
     _settle,
 )
+
+
+def _capture_button_focus(viewer, label, target, output):
+    native = imgui.button
+    focused = None
+
+    def focus_button(item_label, *args, **kwargs):
+        nonlocal focused
+        if item_label == label:
+            imgui.set_keyboard_focus_here()
+            imgui.get_current_context().nav_cursor_visible = True
+        result = native(item_label, *args, **kwargs)
+        if item_label == label:
+            focused = imgui.get_item_id()
+        return result
+
+    with patch.object(imgui, "button", focus_button):
+        imgui.get_io().add_key_event(imgui.Key.tab, True)
+        viewer.sync()
+        imgui.get_io().add_key_event(imgui.Key.tab, False)
+        _settle(viewer, 3)
+        assert focused is not None and imgui.get_current_context().nav_id == focused
+        assert imgui.get_current_context().nav_cursor_visible
+        _save_window_crop(viewer, target, output, padding=0)
 
 
 def _capture_interaction_chrome(viewer, folder: Path) -> None:
@@ -115,8 +142,8 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
             resolve("joint_gizmo"),
             paused=True,
             vsync=False,
-            width=1600,
-            height=1100,
+            width=round(1600 * max(1.0, scale / 1.5)),
+            height=round(1100 * max(1.0, scale / 1.5)),
             show_window=False,
         ) as viewer,
     ):
@@ -176,6 +203,22 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
         viewer.session.submit(cmd.SelectNode(hinge.node_id))
         viewer.app.gizmo.set_mode("rotate")
         _settle(viewer, 3)
+        camera = viewer.app._camera_view()
+        for azimuth in (-135, 45):
+            viewer.app.camera.look_from(azimuth, 25, viewer.app.camera_out, animate=False)
+            _settle(viewer, 3)
+            assert viewer.app.gizmo._hinge_axis and not viewer.app.gizmo.using
+            _save_gizmo_crop(viewer, hinge, folder / f"hinge-axis-idle-{azimuth}.png")
+        origin = viewer.app.gizmo._frame.position.copy()
+        basis = viewer.app.gizmo._frame.rotation.copy()
+        for angle in (0, 10, 45, 80, 90, 135):
+            radians = np.radians(angle)
+            offset = basis[:, 0] * np.sin(radians) + basis[:, 2] * np.cos(radians)
+            viewer.set_camera(CameraView(eye=origin + offset * 2, target=origin, up=basis[:, 1]))
+            _settle(viewer, 3)
+            _save_gizmo_crop(viewer, hinge, folder / f"hinge-axis-angle-{angle}.png")
+        viewer.set_camera(camera)
+        _settle(viewer, 3)
         viewer.app.gizmo._hovered = GizmoHandle.ROTATE_Z
         edit = viewer.app.gizmo.precise_input(viewer.session)
         assert edit is not None
@@ -183,6 +226,12 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
         viewer.app._begin_precise_gizmo_input(edit)
         _settle(viewer, 3)
         _save_active_popup_crop(viewer, folder / "precise-input.png")
+        for index in range(5):
+            imgui.get_io().add_key_event(imgui.Key.tab, True)
+            viewer.sync()
+            imgui.get_io().add_key_event(imgui.Key.tab, False)
+            _settle(viewer, 3)
+            _save_active_popup_crop(viewer, folder / f"precise-input-tab-{index}.png")
         _dismiss_popup(viewer)
         viewer.session.submit(cmd.SelectNode(link.node_id))
 
@@ -200,6 +249,7 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
             assert viewer.session.submit(cmd.CaptureSceneSnapshot(f"Snapshot {index + 1}"))
         link = next(node for node in viewer.session.nodes if node.name == "03_ball_anchor")
         viewer.session.submit(cmd.SelectNode(link.node_id))
+        viewer.track_node(link.node_id)
         cases = [("Camera", w, "") for w in (140, 180, 240, 360)]
         cases += [
             ("Settings", w, category)
@@ -207,7 +257,7 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
             for w in (360, 720, 960)
         ]
         cases += [("Inspector", w, "") for w in (180, 230, 320, 480)]
-        cases += [("Keyframes", w, "") for w in (230, 480, 1000)]
+        cases += [("Keyframes", w, "") for w in (230, 480, 820, 1000)]
         cases += [("Output", w, "") for w in (180, 320)]
         cases += [("Hierarchy", w, "") for w in (180, 320)]
         cases += [("Joints", w, "") for w in (180, 320)]
@@ -224,10 +274,36 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
                 )
             imgui.internal.focus_window(window)
             imgui.internal.set_scroll_y(window, 0.0)
-            _park_cursor(viewer)
+            imgui.get_io().add_mouse_pos_event(-1000, -1000)
             _settle(viewer, 4)
             filename = f"{target.lower()}-{width}-{category.lower() or 'layout'}.png"
             _save_window_crop(viewer, target, folder / filename, padding=3.0)
+            if target == "Joints" and width == 320:
+                for label, suffix in (
+                    (translate("Copy qpos"), "copy"),
+                    ("rad####joint-qpos-0-unit", "unit"),
+                ):
+                    _capture_button_focus(
+                        viewer, label, target, folder / f"joints-focus-{suffix}.png"
+                    )
+            if target == "Keyframes":
+                # The take range and three follow choices require about 900 pt in
+                # English even with icon-only commands; 820 pt exercises two rows.
+                if width >= 1000:
+                    record = _item_rect(viewer, "invisible_button", "##take-record")
+                    options = _item_rect(viewer, "invisible_button", "##timeline-options")
+                    assert abs(record[0][1] - options[0][1]) < 1, (width, record, options)
+                panel._selected_id = viewer.session.keyframes[0].keyframe_id
+                panel._selection_generation = -1
+                _settle(viewer, 3)
+                _save_window_crop(
+                    viewer, target, folder / f"keyframes-{width}-snapshot.png", padding=3.0
+                )
+                if width == 1000:
+                    _click(viewer, _item_center(viewer, "invisible_button", "##timeline-options"))
+                    _settle(viewer, 3)
+                    _save_active_popup_crop(viewer, folder / "keyframes-recording-settings.png")
+                    _dismiss_popup(viewer)
             if target == "Inspector" and width == 320:
                 point = _item_center(viewer, "invisible_button", "##entity_name_label")
                 _click(viewer, point)
@@ -278,8 +354,47 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
                 section, _ = _item_rect(viewer, "collapsing_header", translate("velocity"))
                 assert max(hi[1] for _, hi in rectangles) <= section[1]
             results.append({"image": str(folder / filename), "rectangles": rectangles})
+            if target == "Camera" and width == 360:
+                names = (
+                    "yaw",
+                    "pitch",
+                    "distance",
+                    "fov_y_deg",
+                    "far",
+                    "projection",
+                    "Target",
+                    "Axes",
+                    "Smoothing",
+                )
+                labels = {
+                    name: _item_rect(viewer, "text_disabled", translate(name)) for name in names
+                }
+                assert (
+                    max(rect[0][0] for rect in labels.values())
+                    - min(rect[0][0] for rect in labels.values())
+                    < 1
+                )
+                gaps = [
+                    labels[b][0][1] - labels[a][0][1]
+                    for a, b in (
+                        ("yaw", "pitch"),
+                        ("pitch", "distance"),
+                        ("fov_y_deg", "far"),
+                        ("far", "projection"),
+                        ("Target", "Axes"),
+                        ("Axes", "Smoothing"),
+                    )
+                ]
+                assert max(gaps) - min(gaps) < 1, gaps
+            if target == "Camera":
+                imgui.internal.set_scroll_y(window, window.scroll_max.y)
+                _settle(viewer, 3)
+                _save_window_crop(
+                    viewer, target, folder / f"camera-{width}-tracking.png", padding=0
+                )
             panel.open = False
 
+        viewer.track_node(None)
         target = "Inspector"
         manager.open_panel(target)
         _settle(viewer, 3)
@@ -321,6 +436,19 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
             _settle(viewer, 2)
             filename = folder / f"inspector-camera-{width}.png"
             _save_window_crop(viewer, target, filename, padding=0)
+            if width == 320:
+                label_rect = _item_rect(viewer, "text_disabled", translate("projection"))
+                button_rect = _item_rect(
+                    viewer, "button", f"##camera-inspector-projection-{camera_node.node_id}-0"
+                )
+                assert label_rect[1][0] < button_rect[0][0]
+                imgui.internal.set_scroll_y(
+                    window, max(0, label_rect[0][1] - window.pos.y - 90 * scale)
+                )
+                _settle(viewer, 3)
+                _save_window_crop(
+                    viewer, target, folder / "inspector-camera-projection.png", padding=0
+                )
             results.append({"image": str(filename)})
             manager.get(target).open = False
 

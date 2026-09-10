@@ -905,6 +905,7 @@ def test_app_release_is_idempotent():
     bridge = Resource()
     app.debug_bridge = bridge
     app.camera_preview = Resource()
+    app._scene_capture = Resource()
     app.backend = Resource()
     app.session = Resource()
 
@@ -914,6 +915,7 @@ def test_app_release_is_idempotent():
     assert app.debug_bridge is None
     assert bridge.calls == 1
     assert app.camera_preview.calls == 1
+    assert app._scene_capture.calls == 1
     assert app.backend.calls == 1
     assert app.session.calls == 1
 
@@ -941,12 +943,14 @@ def test_app_release_continues_after_one_resource_fails():
     app._resource_repair_dialog = None
     app.debug_bridge = FailingBridge()
     app.camera_preview = Resource()
+    app._scene_capture = Resource()
     app.backend = Resource()
     app.session = Resource()
 
     app.release()
 
     assert app.camera_preview.calls == app.backend.calls == app.session.calls == 1
+    assert app._scene_capture.calls == 1
 
 
 def test_frame_publishes_marks_between_tick_and_render():

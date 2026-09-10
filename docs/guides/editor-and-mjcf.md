@@ -80,10 +80,18 @@ old snapshots. Snapshots are not written into MJCF, saved documents, or recorded
 
 ## Applying model edits
 
-By default, UI edits that require rebuilt model declarations remain pending. Dimensions and names
-preview immediately; the viewport gets a yellow border and an **Apply / Discard** hint. Finish any
+By default, UI edits that require rebuilt model declarations remain pending. New primitive geometry,
+position, rotation, dimensions, color, and names preview immediately. Preview objects support
+selection and dimension gestures before a physics rebuild. Capsule previews keep their shaft and
+both caps joined as their radius and shaft length change. The viewport gets a yellow border and an
+**Apply / Discard** hint. Finish any
 number of edits, then **Apply** to build and install the final model in the background. Pending
 commands for the same property coalesce. Model placement uses the same viewport action.
+
+Mojive-authored scene objects remain directly editable while model declarations are pending.
+Applying a model draft preserves their appearance and selection even when hierarchy indices shift.
+`make scene-editing-audit` exercises creation, transforms, resizing, Apply/Discard, and dimension
+gestures in an editor window, writing captures and comparison results under `output/`.
 
 Failed application restores the committed document and retains the draft for correction. Workspace
 viewers record one undo entry for the whole group. Standalone adapters keep their existing history

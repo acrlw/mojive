@@ -3012,11 +3012,10 @@ class MuJoCoAdapter(SceneAdapterBase):
         lookup = "body" if element_type in ("link", "robot") else element_type
         finder = getattr(spec, lookup, None)
         element = finder(name) if finder is not None else None
-        if element is not None:
+        if element is not None and element.name == name:
             return element
-        # MuJoCo's name lookup can lag behind an in-place MjSpec rename until
-        # the corresponding collection is materialized. Batch edits must still
-        # be able to address that element by its new semantic identity.
+        # MjSpec name indices can lag behind insertion or rename, even returning
+        # another element at the old index. Verify the identity before write-back.
         collection = getattr(
             spec,
             {
@@ -6481,7 +6480,7 @@ class MuJoCoAdapter(SceneAdapterBase):
         resource = str(resource_name).strip()
         if kind not in types:
             return False
-        element = source_spec.geom(name)
+        element = self._element(model_id, "geom", name)
         if element is None:
             return False
         if kind == "mesh" and source_spec.mesh(resource) is None:

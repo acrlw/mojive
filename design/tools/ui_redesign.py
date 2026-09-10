@@ -12,6 +12,7 @@ from mojive.adapters.static import StaticSceneAdapter
 from mojive.scene import Scene
 from mojive.session import Session
 from mojive.types import MeshShape
+from mojive.ui.controls import action_menu_popup
 from mojive.ui.draw2d import ImguiDraw2D
 from mojive.ui.localization import Localizer, parse_language
 from mojive.ui.panels import PanelContext, search_input
@@ -26,9 +27,10 @@ from mojive.ui.viewport_widgets import (
     PLAYBACK_HALF_HEIGHT_PT,
     PLAYBACK_RESET_SCALE,
     TOOL_GLYPH_SCALE,
-    draw_expand_glyph,
+    draw_overlay_divider,
     draw_playback_glyph,
     draw_recording_glyph,
+    draw_recording_options_glyph,
     draw_reset_glyph,
     draw_tool_glyph,
 )
@@ -43,6 +45,7 @@ else:
 
 # Match the stop square's nominal area for comparable visual weight across recording states.
 RECORD_GLYPH_RADIUS = 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_RESET_SCALE / sqrt(pi)
+_CHINESE = Localizer(parse_language("zh"))
 
 TRANSLATIONS = {
     "Overview": "总览",
@@ -63,12 +66,9 @@ TRANSLATIONS = {
     "Play": "播放",
     "Pause": "暂停",
     "Reset simulation": "复位仿真",
-    "Record take": "录制 Take",
-    "Stop recording": "停止录制",
     "Recording options": "录制选项",
     "Take": "Take",
     "Video": "视频",
-    "Record video": "录制视频",
     "Recording settings": "录制设置",
     "Close": "关闭",
     "Frame": "帧",
@@ -180,7 +180,7 @@ class RedesignState:
     _clock: float = 0.0
 
     def tr(self, text: str) -> str:
-        return TRANSLATIONS.get(text, text) if self.language == "zh" else text
+        return (TRANSLATIONS.get(text) or _CHINESE.text(text)) if self.language == "zh" else text
 
     def rename(self) -> None:
         self.renaming = self.rename_focus = True
@@ -230,11 +230,11 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
             ("reset", "Reset simulation", ""),
             (
                 "record",
-                "Stop recording"
+                "Stop Recording"
                 if state.recording
-                else "Record take"
+                else "Record Take"
                 if state.recording_mode == "take"
-                else "Record video",
+                else "Record Video",
                 "",
             ),
             ("menu", "Recording options", ""),
@@ -254,15 +254,13 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
     state.rects["tools" if vertical else "playback"] = (x, y, x + w * scale, y + h * scale)
     for boundary in (3,) if vertical else (3, 4):
         p = (centers[boundary - 1] + centers[boundary]) / 2 * scale
-        a, b = (
-            (shell_radius - geometry.divider_width / 2) * scale,
-            (shell_radius + geometry.divider_width / 2) * scale,
-        )
-        draw.line(
-            (x + a, y + p) if vertical else (x + p, y + a),
-            (x + b, y + p) if vertical else (x + p, y + b),
-            (*THEME.border[:3], 0.72),
+        draw_overlay_divider(
+            draw,
+            (x + shell_radius * scale, y + p) if vertical else (x + p, y + shell_radius * scale),
+            THEME,
             scale,
+            playback=not vertical,
+            width=geometry.divider_width,
         )
     for index, (kind, label, key) in enumerate(items):
         cell = geometry.overlay_center_step * scale
@@ -310,7 +308,9 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                     target, center, THEME.danger, icon_scale, recording=bool(state.recording)
                 )
             elif kind == "menu":
-                draw_expand_glyph(target, center, color, icon_scale, geometry.tool_stroke_width)
+                draw_recording_options_glyph(
+                    target, center, color, icon_scale, stroke=geometry.tool_stroke_width
+                )
             else:
                 draw_playback_glyph(
                     target,
@@ -362,22 +362,21 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
 
 
 def _recording_menu(state):
-    settings = False
-    if imgui.begin_popup("redesign-recording-menu"):
-        for mode, label in (("take", "Record take"), ("video", "Record video")):
-            imgui.begin_disabled(bool(state.recording))
-            if _button(state, f"record-{mode}", label):
-                state.recording_mode = mode
-                state.recording = mode
-                imgui.close_current_popup()
-            imgui.end_disabled()
-        imgui.separator()
-        settings = _button(state, "recording-settings", "Recording settings")
+    if imgui.is_popup_open("redesign-recording-menu"):
+        items = (
+            ("record-take", state.tr("Record Take"), not bool(state.recording)),
+            ("record-video", state.tr("Record Video"), not bool(state.recording)),
+            None,
+            ("recording-settings", state.tr("Recording Settings..."), True),
+        )
+        action = action_menu_popup(
+            "redesign-recording-menu", items, on_item=lambda key: _remember(state, key)
+        )
+        if action in ("record-take", "record-video"):
+            state.recording_mode = state.recording = action.removeprefix("record-")
+        settings = action == "recording-settings"
         if settings:
-            imgui.close_current_popup()
-        imgui.end_popup()
-    if settings:
-        imgui.open_popup("redesign-recording-settings")
+            imgui.open_popup("redesign-recording-settings")
     if imgui.begin_popup("redesign-recording-settings"):
         imgui.text(state.tr("Recording settings"))
         _, state.duration = imgui.input_float(state.tr("Duration"), state.duration, 1, 5, "%.1f")

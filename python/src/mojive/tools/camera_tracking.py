@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -45,8 +46,10 @@ def exercise_controls(viewer, node_id: int, output: Path | None = None) -> None:
     imgui.internal.set_scroll_y(window, window.scroll_max.y)
     viewer.sync()
     viewer.sync()
-    label = viewer.app.localizer.text("Track selected") + "##track-selected"
-    click(viewer, _item_center(viewer, "button", label))
+    click(viewer, _item_center(viewer, "begin_combo", "##tracking-target"))
+    node = viewer.session.node(node_id)
+    label = viewer.app.localizer.text("Use selection") + f": {node.name}##track-selected"
+    click(viewer, _item_center(viewer, "selectable", label))
     assert viewer.tracking_node_id == node_id
     assert viewer.app.camera_tracker.config.axes == "xy"
     if output is not None:
@@ -66,10 +69,14 @@ def exercise_controls(viewer, node_id: int, output: Path | None = None) -> None:
     io.add_mouse_button_event(1, False)
     viewer.sync()
     assert viewer.app.camera_tracker.config.smoothing == 0.25
-    click(viewer, _item_center(viewer, "checkbox", "##tracking-enabled"))
+    viewer.configure_tracking(replace(viewer.app.camera_tracker.config, smoothing=0))
+    viewer.sync()
+    pose = viewer.session.camera
+    click(viewer, _item_center(viewer, "invisible_button", "##clear_tracking-target"))
+    assert np.allclose(viewer.session.camera.eye, pose.eye)
+    assert np.allclose(viewer.session.camera.target, pose.target)
+    assert not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id)
     assert viewer.tracking_node_id is None
-    click(viewer, _item_center(viewer, "checkbox", "##tracking-enabled"))
-    assert viewer.tracking_node_id == node_id
     click(viewer, _item_center(viewer, "begin_combo", "##tracking-target"))
     node = viewer.session.node(node_id)
     click(viewer, _item_center(viewer, "selectable", f"{node.name}##tracking-{node_id}"))

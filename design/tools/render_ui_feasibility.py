@@ -31,7 +31,6 @@ if __package__:
         RedesignState,
         _capsule,
         _recording_menu,
-        draw_expand_glyph,
         draw_recording_glyph,
         draw_redesign,
         draw_reset_glyph,
@@ -51,7 +50,6 @@ else:
         RedesignState,
         _capsule,
         _recording_menu,
-        draw_expand_glyph,
         draw_recording_glyph,
         draw_redesign,
         draw_reset_glyph,
@@ -92,6 +90,8 @@ from mojive.ui.viewport_widgets import (
     OVERLAY_GEOMETRY,
     PLAYBACK_HALF_HEIGHT_PT,
     PLAYBACK_RESET_SCALE,
+    RECORDING_OPTIONS_GLYPH_SCALE,
+    RECORDING_OPTIONS_STROKE_SCALE,
     TOOL_GLYPH_SCALE,
     ToolHint,
     capsule_points,
@@ -99,9 +99,11 @@ from mojive.ui.viewport_widgets import (
     draw_mouse_hint_glyph,
     draw_playback_glyph,
     draw_projection_label,
+    draw_recording_options_glyph,
     draw_status,
     draw_tool_glyph,
     keycap_rounding,
+    overlay_divider_length,
 )
 from mojive.ui.window import Window, WindowConfig
 
@@ -109,15 +111,38 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = ROOT / "output" / "ui-drawing-feasibility.png"
 PROBE_BASE_SIZE = (1600, 1000)
 GEOMETRY_CANVAS_SIZE = (1560.0, 900.0)
+GEOMETRY_TABS = (
+    "Corners",
+    "Playback",
+    "Tools",
+    "Hints & input",
+    "Transform gizmos",
+    "Joint & helpers",
+    "Status",
+    "Diagnostics",
+    "Shell & settings",
+    "Panels",
+    "Workspaces",
+)
 PANEL_CANVAS_SIZE = (1560.0, 900.0)
 WORKSPACE_CANVAS_SIZE = (1600.0, 960.0)
 
 
 def _probe_window_size(width: int, height: int, ui_scale: float) -> tuple[int, int]:
-    """Keep a useful logical canvas while inspecting extreme UI scales."""
+    """Keep the whole concept canvas visible while inspecting extreme UI scales.
 
-    factor = max(1.0, float(ui_scale) / 2.0)
-    return round(width * factor), round(height * factor)
+    The probe is the design reference, so a capture that clips its right-hand panels
+    misrepresents the design. Growing the window with the UI scale keeps every specimen
+    laid out at its real proportions instead of hiding it behind a scrollbar. Both factors
+    stay at 1.0 for the default scale, which already fits the base window.
+    """
+
+    scale = float(ui_scale)
+    # The geometry canvas and its right-hand experiment controls together need about 1.25x
+    # the base width, and the tallest canvas about 0.95x the base height.
+    growth = scale * 1.25 if scale > 1.0 else 1.0
+    vertical = max(1.0, scale * 0.95)
+    return round(width * growth), round(height * vertical)
 
 
 def _virtual_canvas_size(
@@ -131,6 +156,75 @@ def _virtual_canvas_size(
         max(float(available.x), logical_size[0] * scale),
         max(float(available.y), logical_size[1] * scale),
     )
+
+
+def _wrapped_tabs(
+    tabs: tuple[tuple[str, str, str], ...],
+    active: str,
+    available: float,
+    *,
+    initial: str | None = None,
+    gap: float | None = None,
+) -> str:
+    """Draw one tab row that wraps instead of clipping at large UI scales.
+
+    Native tab bars extend past the panel edge once the labels grow, which hides the
+    rightmost entries and overlaps the neighbouring content. The probe keeps the tab
+    grammar but reflows it, matching how the production panels wrap their own rows.
+    """
+
+    style = imgui.get_style()
+    spacing = style.item_spacing.x if gap is None else float(gap)
+    width = max(1.0, float(available))
+    default_focus = bool(initial) and active != initial
+    if default_focus:
+        active = str(initial)
+    padding = 10.0
+    # Every label needs its own ImGui ID, since the probe shows overlapping tab sets.
+    entries = tuple(
+        (label, f"{scope}-{index}-{slug}") for index, (label, scope, slug) in enumerate(tabs)
+    )
+    widths = tuple(
+        min(width, imgui.calc_text_size(label).x + 2.0 * style.frame_padding.x + padding)
+        for label, _ in entries
+    )
+    inline = button_row_layout(widths, width, spacing)
+    height = style.frame_padding.y * 2.0 + imgui.get_text_line_height()
+    draw = ImguiDraw2D(imgui.get_window_draw_list())
+    imgui.begin_group()
+    for index, (label, identifier) in enumerate(entries):
+        if index and inline[index]:
+            imgui.same_line(0.0, spacing)
+        selected = label == active
+        pressed = imgui.invisible_button(
+            f"##{identifier}", imgui.ImVec2(widths[index], height), imgui.ButtonFlags_.none
+        )
+        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        hovered = imgui.is_item_hovered()
+        # A passive label keeps one click meaning "select", never "toggle off".
+        color = CONCEPT_THEME.text if selected or hovered else CONCEPT_THEME.text_disabled
+        text = imgui.calc_text_size(label)
+        draw.text(
+            (
+                (lo.x + hi.x - text.x) * 0.5,
+                (lo.y + hi.y) * 0.5 - text.y * 0.5 - style.frame_padding.y * 0.5,
+            ),
+            color,
+            label,
+        )
+        if selected:
+            draw.line(
+                (lo.x, hi.y - 1.0),
+                (hi.x, hi.y - 1.0),
+                CONCEPT_THEME.primary,
+                max(1.0, style.frame_padding.y),
+            )
+        if default_focus and selected:
+            imgui.set_item_default_focus()
+        if pressed:
+            active = label
+    imgui.end_group()
+    return active
 
 
 # Start every concept session from the production palette. Geometry and state
@@ -2714,25 +2808,22 @@ def _draw_workspace_right_dock(size, state: ProbeState) -> None:
     ):
         imgui.end_child()
         return
-    if imgui.begin_tab_bar("##probe-workspace-right-tabs"):
-        for label in ("Control", "Joints", "Camera"):
-            flags = (
-                imgui.TabItemFlags_.set_selected
-                if state.workspace_right_tab == label
-                else imgui.TabItemFlags_.none
-            )
-            opened, _ = imgui.begin_tab_item(label, None, flags)
-            if not opened:
-                continue
-            state.workspace_right_tab = label
-            if label == "Control":
-                _draw_control_content(state)
-            elif label == "Joints":
-                _draw_joints_content(state)
-            else:
-                _draw_camera_content(state)
-            imgui.end_tab_item()
-        imgui.end_tab_bar()
+    active = _wrapped_tabs(
+        (
+            ("Control", "right-dock", "control"),
+            ("Joints", "right-dock", "joints"),
+            ("Camera", "right-dock", "camera"),
+        ),
+        state.workspace_right_tab,
+        imgui.get_content_region_avail().x,
+    )
+    state.workspace_right_tab = active
+    if active == "Control":
+        _draw_control_content(state)
+    elif active == "Joints":
+        _draw_joints_content(state)
+    else:
+        _draw_camera_content(state)
     imgui.end_child()
 
 
@@ -3002,14 +3093,16 @@ def _draw_workspaces_tab(available, scale: float, state: ProbeState) -> None:
     keyframe_height = min(320.0 * scale, max(240.0 * scale, available.y * 0.34))
     _draw_keyframes(imgui.ImVec2(available.x, keyframe_height), scale, state)
     imgui.text_disabled("M15 · full-width bottom dock; transport uses compact icon groups")
-    active = state.aux_tab
-    if imgui.begin_tab_bar("##probe-aux-tabs"):
-        for label in ("Output", "Plot", "Help", "Info"):
-            opened, _ = imgui.begin_tab_item(label)
-            if opened:
-                active = label
-                imgui.end_tab_item()
-        imgui.end_tab_bar()
+    active = _wrapped_tabs(
+        (
+            ("Output", "aux", "output"),
+            ("Plot", "aux", "plot"),
+            ("Help", "aux", "help"),
+            ("Info", "aux", "info"),
+        ),
+        state.aux_tab,
+        imgui.get_content_region_avail().x,
+    )
     state.aux_tab = active
     remaining = imgui.get_content_region_avail()
     if active == "Output":
@@ -3378,8 +3471,12 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         )
         _property_label("Group gap")
         state.tool_group_gap = _even_slider("##geometry-group-gap", state.tool_group_gap, 4, 24)
-        _property_label("Divider")
+        _property_label("Divider (Tools)")
         state.divider_width = _even_slider("##geometry-divider-width", state.divider_width, 10, 34)
+        imgui.set_item_tooltip(
+            f"Playback: {overlay_divider_length(state.divider_width, playback=True):.1f} pt; "
+            f"Tools: {state.divider_width:g} pt. Both use the same divider-to-glyph proportion."
+        )
         _property_label("Playback zoom")
         _, state.construction_playback_scale = imgui.slider_float(
             "##geometry-playback-zoom",
@@ -3644,29 +3741,15 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         imgui.end_child()
         return
 
-    active_tab = state.geometry_tab
-    if imgui.begin_tab_bar("##geometry-spec-tabs"):
-        for label in (
-            "Corners",
-            "Playback",
-            "Tools",
-            "Hints & input",
-            "Transform gizmos",
-            "Joint & helpers",
-            "Status",
-            "Diagnostics",
-            "Shell & settings",
-            "Panels",
-            "Workspaces",
-        ):
-            tab_flags = imgui.TabItemFlags_.none
-            if not state.geometry_tab_initialized and label == state.geometry_tab:
-                tab_flags = imgui.TabItemFlags_.set_selected
-            opened, _ = imgui.begin_tab_item(label, None, tab_flags)
-            if opened:
-                active_tab = label
-                imgui.end_tab_item()
-        imgui.end_tab_bar()
+    active_tab = _wrapped_tabs(
+        tuple(
+            (label, "geometry", label.casefold().replace(" ", "-").replace("&", "and"))
+            for label in GEOMETRY_TABS
+        ),
+        state.geometry_tab,
+        imgui.get_content_region_avail().x,
+        initial=None if state.geometry_tab_initialized else state.geometry_tab,
+    )
     state.geometry_tab = active_tab
     state.geometry_tab_initialized = True
 
@@ -3798,7 +3881,8 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             (
                 f"Bounds  icon {int(icon_radius * 2.0)} · state {int(state_radius * 2.0)} · "
                 f"shell {int(shell_radius * 2.0)} · centers {state.overlay_center_step} · "
-                f"radial {state.overlay_radial_step}"
+                f"radial {state.overlay_radial_step} · divider "
+                f"{overlay_divider_length(state.divider_width, playback=True):.1f}"
             ),
         )
 
@@ -3867,9 +3951,9 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                 ),
                 (
                     "Recording options",
-                    f"G3 · stroke {state.tool_stroke_width * glyph_ratio:.2f}",
-                    lambda target, center, color, icon_scale, _surface: draw_expand_glyph(
-                        target, center, color, icon_scale, state.tool_stroke_width
+                    f"G3 · stroke {state.tool_stroke_width * RECORDING_OPTIONS_STROKE_SCALE * RECORDING_OPTIONS_GLYPH_SCALE * glyph_ratio:.2f}",
+                    lambda target, center, color, icon_scale, surface: draw_recording_options_glyph(
+                        target, center, color, icon_scale, stroke=state.tool_stroke_width
                     ),
                 ),
             )
@@ -3985,12 +4069,14 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             shell_radius + center_step,
             shell_radius + center_step * 2.0,
             shell_radius + center_step * 2.0 + group_step,
+            shell_radius + center_step * 3.0 + group_step,
         )
         for center, (label, meaning) in zip(
             product_centers,
             (
                 ("Move", "Translate selected object"),
                 ("Rotate", "3 half-rings + screen ring"),
+                ("Scale", "Resize selected object"),
                 ("World / Body", "Switch transform frame"),
                 ("Snap", "Toggle snapping"),
             ),
@@ -4001,7 +4087,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             draw.text((labels_x, label_y + 3.0 * scale), note_color, meaning)
 
         frame_samples_x = labels_x + 214.0 * scale
-        frame_samples_y = product_tool_origin[1] + product_centers[2] * product_tool_scale
+        frame_samples_y = product_tool_origin[1] + product_centers[3] * product_tool_scale
         draw.text(
             (frame_samples_x - 12.0 * scale, frame_samples_y - 34.0 * scale),
             note_color,

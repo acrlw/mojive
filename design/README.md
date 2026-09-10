@@ -40,8 +40,10 @@ from the `Probe` menu for experiments.
 
 ## Scale and layout checks
 
-All vector paths, strokes, controls, and text follow `ui_scale`. At scales above 2×, the capture
-window expands like the production UI runtime. Workspace, panel, and geometry pages also keep a
+All vector paths, strokes, controls, and text follow `ui_scale`. At scales above 1×, the capture
+window grows so one image still shows the whole concept: the geometry canvas, the live experiment
+controls, and the workspace docks. Tab rows wrap instead of running past the panel edge, matching
+how production panels reflow their own rows. Workspace, panel, and geometry pages also keep a
 minimum logical canvas and expose scrollbars instead of compressing unrelated components until text
 overlaps.
 
@@ -49,11 +51,26 @@ Examples:
 
 ```bash
 make ui-feasibility ARGS="--ui-scale 1.5 --page workspace"
+make ui-feasibility ARGS="--ui-scale 2.5 --page geometry --geometry-tab diagnostics"
 make ui-feasibility ARGS="--ui-scale 4 --page geometry --geometry-tab helpers"
 ```
 
 `Esc` closes an open value editor first, then closes the probe. `Ctrl+C` in the terminal also exits.
 Interactive mode is paced at 30 FPS by default; pass `--fps 60` when motion needs closer inspection.
+
+On a machine with no GPU device nodes, Mesa's surfaceless EGL platform runs the same captures
+through llvmpipe:
+
+```bash
+__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json \
+EGL_PLATFORM=surfaceless LIBGL_ALWAYS_SOFTWARE=1 MOJIVE_GL=egl \
+.venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab diagnostics \
+  -o output/ui-diagnostics.png
+```
+
+`output/diagnostics/probe_render.sh` wraps that environment, and
+`output/diagnostics/severity_preview.py` rasterizes the severity glyph meshes alone at 8× so their
+small-size geometry can be reviewed without any GL context.
 
 ## Deterministic captures
 
@@ -112,6 +129,25 @@ The levels use the local palette: Info `#8AB7C0` from
 corner generator at smoothing 0.618. The gallery calls the same glyph and value-control
 functions as Output, Control and Joints; the workspace Output specimen also uses the
 production panel. Compact severity capsules precede Search and Clear and wrap on narrow panels.
+
+Every severity glyph is one box with one stroke weight: circles reach 0.94× the requested size, and
+the warning triangle spans the same box while keeping its sides equal, so all three frames carry the
+same optical weight. Info and warning draw one shared exclamation mark: the dot takes half of the
+mark height budget `0.30`, the gap `0.36` and the stem `0.42`, and the dot is the same width in both
+frames. The triangle only shortens the stem when its taper cannot clear the full mark, and the mark
+sits centered on the triangle's own box center, exactly like the circle frames center theirs.
+
+Stroke, dot, gap and stem each carry an absolute floor, because Output draws the glyph at the font
+size and a purely proportional mark fuses into a blob below roughly 16 px. The error cross keeps a
+measured margin to the ring, because a diagonal arm reaches further than its bounding box suggests.
+
+The recording-options chevron shares the playback capsule with filled symbols. Enlarging it means
+lengthening its two capsule arms, not thickening them: `draw_expand_glyph` multiplies both the arm
+stroke and the path by its glyph scale and then scales the path back out, so a scale pair cannot grow
+the envelope at a constant stroke. `RECORDING_OPTIONS_ENVELOPE_SCALE` lengthens the arms instead,
+which holds the arm at the reset arrow's 1.46 px while the drawn chevron grows from 9.64 x 5.63 to
+13.64 x 7.63 px and moves from 4.02 px to 1.78 px inside the state ring (the reset arrow reaches
+0.47 px). `make ui-feasibility ARGS="--page geometry --geometry-tab playback"` shows the balance.
 
 The Diagnostics page also compares normal, hover and pressed slider colors, plus joined rad/deg
 fields at wide and narrow widths. The unit button converts only presentation and input; source

@@ -22,7 +22,7 @@ from . import (
     publish_focus_item_hint,
     search_input,
 )
-from .filters import filter_pills
+from .filters import filter_pills, node_filter_color
 
 _LARGE_SCENE_NODES = 2_000
 _VISIBLE_ROW_BUDGET = 512
@@ -256,13 +256,7 @@ class HierarchyPanel(Panel):
             for kind in _TYPE_FILTERS
             if kind == "all" or self._type_counts.get(kind, 0) or kind == self._type_filter
         )
-        colors = {kind: ctx.theme.node_color(kind) for kind, _, _ in items}
-        colors.update(
-            all=ctx.theme.primary,
-            joint=ctx.theme.accent_purple_bright,
-            flex=ctx.theme.info,
-            skin=ctx.theme.node_color("site"),
-        )
+        colors = {kind: node_filter_color(ctx.theme, kind) for kind, _, _ in items}
         clicked = filter_pills(ctx, "hierarchy-type", items, {self._type_filter}, colors=colors)
         if clicked is not None:
             self._type_filter = "all" if clicked == self._type_filter else clicked

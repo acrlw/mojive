@@ -14,8 +14,8 @@ from mojive.types import MeshShape
         (MeshShape.BOX, (0.5, 1.0, 1.5), (1.0, 2.0, 3.0), (0, 1, 2), (2.0,) * 3),
         (MeshShape.SPHERE, (0.5, 0.5, 0.5), (0.5,), (None,), (1.0,)),
         (MeshShape.SPHERE, (0.5, 1.0, 1.5), (0.5, 1.0, 1.5), (0, 1, 2), (1.0,) * 3),
-        (MeshShape.CYLINDER, (0.5, 0.5, 1.5), (1.0, 3.0), (0, 2), (2.0, 2.0)),
-        (MeshShape.CAPSULE_SHAFT, (0.5, 0.5, 1.5), (1.0, 3.0), (0, 2), (2.0, 2.0)),
+        (MeshShape.CYLINDER, (0.5, 0.5, 1.5), (1.0, 3.0), (0, 1, 2), (2.0,) * 3),
+        (MeshShape.CAPSULE_SHAFT, (0.5, 0.5, 1.5), (1.0, 3.0), (0, 1, 2), (2.0,) * 3),
     ),
 )
 def test_geometry_dimensions_define_only_independent_primitive_parameters(

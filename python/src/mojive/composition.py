@@ -379,7 +379,7 @@ class Viewer:
         before_frame: Callable[[int, Viewer], None] | None = None,
         size: tuple[int, int] | None = None,
     ) -> Path:
-        """Render a fixed number of frames to a video file.
+        """Render a fixed number of scene-only frames to a video file.
 
         Args:
             output: Destination video path.
@@ -406,8 +406,6 @@ class Viewer:
             self.app.set_fixed_render_size(*size)
         recorder = None
         pending = deque()
-        target = None
-        async_read = None
 
         def append(image: np.ndarray) -> None:
             nonlocal recorder
@@ -421,10 +419,11 @@ class Viewer:
             for index in range(frame_count):
                 if before_frame is not None:
                     before_frame(index, self)
-                if target is None:
-                    target = self.backend.target
-                    async_read = getattr(target, "read_rgb_async", None)
                 self.sync()
+                target = self.app._scene_capture.render(
+                    self.backend, self.session, self.app._camera_view()
+                )
+                async_read = getattr(target, "read_rgb_async", None)
                 if callable(async_read):
                     pending.append(async_read(flip=True))
                     if len(pending) >= 3:

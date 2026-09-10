@@ -43,7 +43,7 @@ from .adapters.base import (
 from .bounds import SceneBounds, _MeshBoundsCache, _node_local_bounds, _node_world_bounds
 from .commands import Command, CommandResult, Query
 from .history import EditHistory, EditRecord
-from .model_edits import intercept_model_edit
+from .model_edits import _ModelEditPlan, intercept_model_edit
 from .rates import StepRate
 from .simulation import SimulationDriver
 from .types import (
@@ -131,6 +131,7 @@ class AuthoredSceneOverlay:
     environment: Environment | None = None
     materials: dict[int, Material] = field(default_factory=dict)
     geometry_colors: dict[int, np.ndarray] = field(default_factory=dict)
+    geometry_color_targets: dict[int, tuple] = field(default_factory=dict)
     cameras: dict[int, CameraView] = field(default_factory=dict)
 
     def clear(self) -> None:
@@ -140,6 +141,7 @@ class AuthoredSceneOverlay:
         self.environment = None
         self.materials.clear()
         self.geometry_colors.clear()
+        self.geometry_color_targets.clear()
         self.cameras.clear()
 
 
@@ -298,7 +300,7 @@ class Session:
         self._edit_before_revision = 0
         self._edit_label = ""
         self._edit_changed = False
-        self._edit_failed = False
+        self._edit_error = ""
         self._document_revision = 0
         self._document_id = uuid4().hex
         self._saved_revision = 0
@@ -378,6 +380,9 @@ class Session:
     @property
     def frame(self) -> SceneFrame:
         """Return the most recent dynamic frame produced by :meth:`tick`."""
+        preview = self._model_edit_preview
+        if preview is not None and preview.visible and preview.geometry is not None:
+            return preview.geometry.frame(self._frame)
         return self._frame
 
     @property
@@ -729,7 +734,7 @@ class Session:
         return (
             None
             if node is None
-            else _node_local_bounds(self.source, self._frame, node, self._mesh_bounds_cache)
+            else _node_local_bounds(self.source, self.frame, node, self._mesh_bounds_cache)
         )
 
     def node_world_bounds(self, node_id: int) -> CenteredBounds | None:
@@ -739,12 +744,15 @@ class Session:
             None
             if node is None
             else _node_world_bounds(
-                self._source, self._frame, node, self._nodes, self._mesh_bounds_cache
+                self.source, self.frame, node, self.nodes, self._mesh_bounds_cache
             )
         )
 
     def node_by_object_id(self, object_id: int) -> SceneNode | None:
         """Look up a hierarchy node by selectable object ID."""
+        preview = self._model_edit_preview
+        if preview is not None and preview.visible:
+            return preview.by_object_id.get(int(object_id))
         return self._by_object_id.get(int(object_id))
 
     @staticmethod
@@ -1119,6 +1127,8 @@ class Session:
             self._refresh_structure()
 
         self._frame = self._adapter.frame(needs)
+        if self._model_edit_preview is not None and self._model_edit_preview.geometry is not None:
+            self._model_edit_preview.geometry._base_frame = None
         self._sync_equality_state()
         self._compose_lights()
         self._compose_cameras()
@@ -1154,10 +1164,16 @@ class Session:
             self._step_counter != step_before or externally_advanced or self._frame_history_dirty
         ):
             self._append_frame_history()
-        return self._frame
+        return self.frame
 
     def apply_model_edits(self, commands) -> CommandResult:
-        """Apply pending model commands atomically as one undoable rebuild group."""
+        """Apply pending model commands atomically as one undoable rebuild group.
+
+        Accepts a pending edit plan when the batch also styles or selects the elements it
+        creates, because those commands only become addressable after the creation phase.
+        """
+
+        plan = commands if isinstance(commands, _ModelEditPlan) else _ModelEditPlan(tuple(commands))
         if not self.paused or self.editing:
             return CommandResult.bad("Pause simulation and finish the active gesture before Apply")
         history = self._adapter.caps.edit_history
@@ -1168,9 +1184,29 @@ class Session:
                 return result
         self._applying_model_edits = True
         try:
-            # Renames come last so other queued commands keep their original node identities.
-            ordered = sorted(commands, key=lambda item: isinstance(item, cmd.RenameModelElement))
+            # Creation must install nodes before dependent commands can address them.
+            # Record actual identities immediately: later creations can shift node IDs.
+            created = []
+            for command in plan.creations:
+                if plan.rebind is not None:
+                    command = plan.rebind(self, (command,))[0]
+                result = self.submit(command)
+                if not result.ok:
+                    raise ValueError(result.message)
+                self._refresh_structure(installed=True)
+                node = self.node(result.entity_id)
+                if node is None:
+                    raise ValueError("Creation did not return an installed entity")
+                created.append((node.model_id, node.type, node.name))
+            direct = plan.rebind(self, plan.direct) if plan.rebind is not None else plan.direct
+            follow_ups = plan.bind(self, tuple(created)) if plan.bind is not None else ()
             with self._adapter.model_edit_batch():
+                # All dependent writes share one rebuild. Renames retain the installed
+                # identities until the other commands have finished using them.
+                ordered = sorted(
+                    (*direct, *follow_ups),
+                    key=lambda item: isinstance(item, cmd.RenameModelElement),
+                )
                 for command in ordered:
                     result = self.submit(command)
                     if not result.ok:
@@ -1191,7 +1227,7 @@ class Session:
                         cmd.UpdateModelComponent,
                     ),
                 )
-                for item in commands
+                for item in (*plan.creations, *plan.direct)
             )
             # Raw arrays preserve renamed DOFs only when the layout stays stable.
             # Topology edits rely on the adapter's identity-based state migration.
@@ -1211,6 +1247,9 @@ class Session:
                 if history
                 else self._restore_document_state(before)
             )
+            draft = self._model_edit_preview
+            if rollback and draft is not None and draft.applying:
+                draft.rebase_after_failure()
             return CommandResult.bad(str(error) if rollback else f"{error}; rollback failed")
 
     def submit(self, command: Command) -> CommandResult:
@@ -1220,7 +1259,7 @@ class Session:
         reason = unavailable_reason(self._adapter.caps, command)
         if reason is not None:
             if self.editing:
-                self._edit_failed = True
+                self._edit_error = self._edit_error or reason
             return self._record_result(CommandResult.bad(reason))
         intercepted = intercept_model_edit(self, command)
         if intercepted is not None:
@@ -1257,10 +1296,9 @@ class Session:
         if self.editing and isinstance(
             command, (cmd.Reload, cmd.NewScene, cmd.OpenScene, cmd.LoadAsset, cmd.SaveScene)
         ):
-            self._edit_failed = True
-            return self._record_result(
-                CommandResult.bad("Finish or cancel the active edit before document operations")
-            )
+            message = "Finish or cancel the active edit before document operations"
+            self._edit_error = self._edit_error or message
+            return self._record_result(CommandResult.bad(message))
 
         scene_edit = isinstance(command, _SCENE_EDIT_COMMANDS)
         before = (
@@ -1270,7 +1308,7 @@ class Session:
         )
         result = self._dispatch(command)
         if not result.ok and scene_edit and self.editing:
-            self._edit_failed = True
+            self._edit_error = self._edit_error or result.message or "Scene edit failed"
         if result.ok and scene_edit and self._adapter.caps.scene_files:
             if self.editing:
                 self._edit_changed = True
@@ -1293,6 +1331,14 @@ class Session:
                     cmd.SetPose,
                     cmd.SetMaterial,
                     cmd.SetGeometryColor,
+                    cmd.SetGeometrySize,
+                    cmd.AddSceneObject,
+                    cmd.RemoveSceneObject,
+                    cmd.DuplicateSceneEntity,
+                    cmd.RemoveSceneEntity,
+                    cmd.RenameSceneEntity,
+                    cmd.AddSceneLight,
+                    cmd.AddSceneCamera,
                     cmd.SetLight,
                     cmd.SetEnvironment,
                     cmd.SetSceneCamera,
@@ -1332,7 +1378,7 @@ class Session:
         self._edit_before_revision = self._document_revision
         self._edit_label = str(label) or "Edit"
         self._edit_changed = False
-        self._edit_failed = False
+        self._edit_error = ""
         return CommandResult.good()
 
     def _cancel_edit(self) -> CommandResult:
@@ -1344,18 +1390,17 @@ class Session:
         self._edit_before = None
         self._edit_label = ""
         self._edit_changed = False
-        self._edit_failed = False
+        self._edit_error = ""
         return CommandResult.good("Edit cancelled")
 
     def _end_edit(self) -> CommandResult:
         if not self.editing:
             return CommandResult.bad("No edit transaction is active")
-        if self._edit_failed:
+        if self._edit_error:
+            error = self._edit_error
             result = self._cancel_edit()
             return (
-                CommandResult.bad("Edit transaction rolled back after a failed command")
-                if result.ok
-                else result
+                CommandResult.bad(f"Edit transaction rolled back: {error}") if result.ok else result
             )
         before = self._edit_before
         label = self._edit_label
@@ -1428,7 +1473,7 @@ class Session:
         self._edit_before = None
         self._edit_label = ""
         self._edit_changed = False
-        self._edit_failed = False
+        self._edit_error = ""
         self._document_revision = 0
         self._saved_revision = 0
         self._next_document_revision = 1
@@ -1458,6 +1503,24 @@ class Session:
         self._state_take_recording = False
         self._state_take_playing = False
         return True
+
+    @staticmethod
+    def _command_node_id(command, node_key: str) -> int:
+        """Return the node a command addresses.
+
+        A pending batch binds its creation keys to real node IDs before applying, so an
+        unresolved key names an element that never reached the scene and stays invalid.
+        """
+
+        return -1 if node_key else int(command.node_id)
+
+    @staticmethod
+    def _command_node_error(command, node_key: str, kind: str) -> str:
+        """Describe an unresolved command target for the status output."""
+
+        if node_key:
+            return f"pending {kind} {node_key} is unavailable"
+        return f"Unknown node_id={command.node_id}"
 
     def _dispatch(self, c: Command) -> CommandResult:
         caps = self._adapter.caps
@@ -2144,7 +2207,7 @@ class Session:
             return CommandResult.good("Removed keyframe")
 
         if isinstance(c, cmd.Select):
-            node = self._by_object_id.get(int(c.object_id))
+            node = self.node_by_object_id(c.object_id)
             if c.object_id and node is None:
                 return CommandResult.bad(f"Unknown object_id={c.object_id}")
             self._selected = int(c.object_id)
@@ -2153,9 +2216,9 @@ class Session:
             return CommandResult.good(node.name if node else "Selection cleared")
 
         if isinstance(c, cmd.SelectNode):
-            node = self.node(c.node_id)
+            node = self.node(self._command_node_id(c, c.node_key))
             if node is None:
-                return CommandResult.bad(f"Unknown node_id={c.node_id}")
+                return CommandResult.bad(self._command_node_error(c, c.node_key, "node"))
             self._selected_node_id = node.node_id
             self._selected = int(node.object_id)
             self._selection_revision += 1
@@ -3122,15 +3185,28 @@ class Session:
         if isinstance(c, cmd.SetGeometryColor):
             if self._source is None:
                 return CommandResult.bad("geometry is unavailable")
-            instances = np.flatnonzero(self._source.geom_node == int(c.node_id))
+            node_id = self._command_node_id(c, c.node_key)
+            instances = np.flatnonzero(self._source.geom_node == node_id)
             if not len(instances):
-                return CommandResult.bad(f"geometry node {c.node_id} is unavailable")
+                return CommandResult.bad(
+                    f"geometry node {c.node_id} is unavailable"
+                    if not c.node_key
+                    else f"pending geometry {c.node_key} is unavailable"
+                )
             rgba = np.asarray(c.rgba, np.float32).reshape(4).copy()
-            writeback = self._adapter.set_geometry_color(c.node_id, rgba)
+            writeback = self._adapter.set_geometry_color(node_id, rgba)
             if self._preserve_authored_override(writeback):
-                self._authored.geometry_colors[c.node_id] = rgba
+                self._authored.geometry_colors[node_id] = rgba
+                node = self.node(node_id)
+                self._authored.geometry_color_targets[node_id] = (
+                    int(self._source.geom_object_id[instances[0]]),
+                    node.model_id,
+                    node.type,
+                    node.name,
+                )
             else:
-                self._authored.geometry_colors.pop(c.node_id, None)
+                self._authored.geometry_colors.pop(node_id, None)
+                self._authored.geometry_color_targets.pop(node_id, None)
             self._source.geom_rgba[instances] = rgba
             self._structure_generation += 1
             message = "" if writeback else "edited in the viewer; adapter write-back is unavailable"
@@ -3289,10 +3365,10 @@ class Session:
 
     def bounds(self) -> Bounds:
         """Return world-space minimum/maximum bounds for finite scene geometry."""
-        if self._source is not None:
+        if self.source is not None:
             if self._scene_bounds is None:
-                self._scene_bounds = SceneBounds(self._source, self._mesh_bounds_cache)
-            bounds = self._scene_bounds.world(self._frame)
+                self._scene_bounds = SceneBounds(self.source, self._mesh_bounds_cache)
+            bounds = self._scene_bounds.world(self.frame)
             if bounds is not None:
                 return bounds
         return Bounds(np.full(3, -0.5, np.float32), np.full(3, 0.5, np.float32))
@@ -3316,8 +3392,15 @@ class Session:
         """Return numbered visual group states exposed by the adapter."""
         return self._adapter.visual_groups() if self._adapter.caps.visual_groups else ()
 
-    def _refresh_structure(self) -> None:
-        if getattr(self, "_applying_model_edits", False):
+    def _refresh_structure(self, *, installed: bool = False) -> None:
+        """Rebuild session structure from the adapter.
+
+        A rebuild batch installs one compiled model at its end, so intermediate refreshes
+        stay cheap. ``installed`` marks the point where a created element exists and the
+        commands that address it need its node ID.
+        """
+
+        if getattr(self, "_applying_model_edits", False) and not installed:
             return
         self._mesh_bounds_cache.clear()
         self._scene_bounds = None
@@ -3327,7 +3410,23 @@ class Session:
         for material_index, material in self._authored.materials.items():
             if material_index < len(self._source.materials):
                 self._source.materials[material_index] = material
-        _apply_geometry_color_overrides(self._source, self._authored.geometry_colors)
+        if self._authored.geometry_colors:
+            # Hierarchy indices can shift when model geometry is inserted before authored
+            # objects. Resolve retained colors by object identity across rebuilds and Undo.
+            by_object = dict(zip(self._source.geom_object_id, self._source.geom_node, strict=True))
+            by_name = {(n.model_id, n.type, n.name): n.node_id for n in self._source.nodes}
+            colors, targets = {}, {}
+            for node_id, color in self._authored.geometry_colors.items():
+                target = self._authored.geometry_color_targets.get(node_id)
+                if target is not None:
+                    node_id = by_object.get(target[0]) if target[0] else by_name.get(target[1:])
+                if node_id is not None:
+                    colors[node_id] = color
+                    if target is not None:
+                        targets[node_id] = target
+            self._authored.geometry_colors = colors
+            self._authored.geometry_color_targets = targets
+            _apply_geometry_color_overrides(self._source, colors)
         self._nodes = [
             replace(node, children=list(node.children)) for node in self._adapter.nodes()
         ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -26,6 +27,8 @@ class Resource:
 class App:
     def __init__(self, backend, session, bridge) -> None:
         self.backend = backend
+        self._scene_capture = SimpleNamespace(render=lambda *args: backend.target)
+        self._camera_view = lambda: None
         self.session = session
         self.bridge = bridge
         self.runs = 0

@@ -248,8 +248,10 @@ feedback. Their pixel footprint remains stable with camera distance. Axis depth 
 camera-space depth.
 
 The primitive Dimensions mode reuses the same projection, hit testing, input routing, edit
-transactions, and `Draw2D` overlay. Its square endpoints expose only independent authored
-parameters; it does not introduce transform scale or another backend render pass.
+transactions, and `Draw2D` overlay. Its square endpoints edit authored dimensions, its outlined
+center scales them proportionally, and its plane handles combine the corresponding body axes.
+Radial primitives keep X and Y coupled; a sphere uses a center and screen-facing ring for its radius.
+These gestures do not introduce transform scale or another backend render pass.
 
 Position snapping uses a projected axis ruler. Rotation snapping uses an outer tick ring. The
 default increments are 0.5 m and 5 degrees.

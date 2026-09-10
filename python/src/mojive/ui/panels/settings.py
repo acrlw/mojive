@@ -278,10 +278,18 @@ class SettingsPanel(Panel):
         if changed and ctx.set_language is not None:
             ctx.set_language(languages[index].value)
         self._property(t("Model updates"))
-        changed, value = themed_checkbox(t("Realtime"), ctx.live_model_updates, ctx.theme)
-        if changed and ctx.set_live_model_updates is not None:
-            ctx.set_live_model_updates(value)
-        imgui.set_item_tooltip(t("When disabled, model edits wait for Apply in the viewport."))
+        selected = int(not ctx.live_model_updates)
+        value = segmented_control(
+            "model-updates",
+            (t("Realtime"), t("Deferred")),
+            selected,
+            theme=ctx.theme,
+        )
+        if value != selected and ctx.set_live_model_updates is not None:
+            ctx.set_live_model_updates(value == 0)
+        imgui.set_item_tooltip(
+            t("Realtime applies each edit. Deferred edits wait for Apply in the viewport.")
+        )
         if ctx.font_report is not None:
             self._property(t("UI font"))
             imgui.text_disabled(ctx.font_report.mono)
@@ -839,7 +847,7 @@ class SettingsPanel(Panel):
             self._property(t("Navigation preset"))
             if imgui.begin_combo("##navigation_preset", t("Choose preset...")):
                 for name in NAVIGATION_PRESETS:
-                    if imgui.selectable(name)[0] and ctx.set_navigation_preset is not None:
+                    if imgui.selectable(name, False)[0] and ctx.set_navigation_preset is not None:
                         try:
                             ctx.set_navigation_preset(name)
                             self._pointer_error = ""

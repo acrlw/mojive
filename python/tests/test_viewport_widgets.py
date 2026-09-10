@@ -2,6 +2,7 @@ import math
 from dataclasses import replace
 from itertools import pairwise
 
+import numpy as np
 import pytest
 
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
@@ -35,6 +36,7 @@ from mojive.ui.viewport_widgets import (
     capsule_points,
     draw_hint,
     draw_mouse_hint_glyph,
+    draw_overlay_divider,
     draw_playback_glyph,
     draw_projection_glyph,
     draw_projection_label,
@@ -1285,3 +1287,35 @@ def test_mouse_button_geometry_is_mirrored_and_scales_without_pixel_corrections(
         closed=False,
     )
     assert_paths_close([(px / factor, py / factor) for px, py in scaled.fill], left.fill)
+
+
+@pytest.mark.parametrize("scale", (1.0, 1.5, 2.5))
+@pytest.mark.parametrize("kind", ("move", "dimensions", "frame"))
+def test_tool_arrow_and_square_ink_leaves_space_inside_the_construction_circle(kind, scale):
+    draw = _RecordedGlyph()
+    draw_tool_glyph(draw, (0, 0), (1, 1, 1, 1), scale, kind, "world")
+    points = np.asarray([point for path in draw.paths for point in path])
+    radius = OVERLAY_GEOMETRY.icon_radius * TOOL_GLYPH_SCALE * scale
+    assert np.linalg.norm(points, axis=1).max() < radius * 0.92
+
+
+@pytest.mark.parametrize("scale", (1.0, 1.5, 2.5))
+def test_capsule_dividers_share_glyph_proportion_and_stroke_style(scale):
+    from mojive.ui.theme import THEME
+
+    draw = _RecordedGlyph()
+    center = (80.25, 50.75)
+    for playback in (True, False):
+        draw_overlay_divider(draw, center, THEME, scale, playback=playback)
+    playback, tools = (entry[0] for entry in draw.lines)
+    playback_span = playback[1][1] - playback[0][1]
+    tool_span = tools[1][0] - tools[0][0]
+    assert playback_span / (2 * PLAYBACK_HALF_HEIGHT_PT * scale) == pytest.approx(
+        tool_span / (2 * OVERLAY_GEOMETRY.icon_radius * TOOL_GLYPH_SCALE * scale)
+    )
+    assert playback_span < 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_STEP_SCALE * scale
+    assert tool_span == pytest.approx(20 * scale)
+    assert playback[2:] == tools[2:]
+    for a, b, _, width in (playback, tools):
+        assert (np.asarray(a) + b) * 0.5 == pytest.approx(center)
+        assert width == pytest.approx(scale)

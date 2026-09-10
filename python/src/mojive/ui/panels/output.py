@@ -6,6 +6,7 @@ from imgui_bundle import imgui
 
 from ...adapters.base import FrameNeeds
 from ..draw2d import ImguiDraw2D, fit_text, text_line_y
+from ..files import message_path, reveal_path
 from ..messages import OutputMessage
 from ..pointer_bindings import PointerAction
 from ..theme import ROW_PADDING_X, ROW_PADDING_Y
@@ -124,7 +125,13 @@ class OutputPanel(Panel):
                         space,
                     ),
                 )
-            imgui.dummy((space, button))
+            imgui.invisible_button("##output-latest", (space, button))
+            if latest is not None and imgui.is_item_hovered():
+                path = message_path(latest.text, latest.copy_text)
+                if path is not None:
+                    imgui.set_item_tooltip(ctx.tr("Ctrl+click to reveal file"))
+                    if pointer_pressed(ctx, PointerAction.OUTPUT_ADD):
+                        reveal_path(path)
             imgui.same_line()
         if imgui.button("##output-expand", (button, button)):
             self.collapsed = False
@@ -241,7 +248,12 @@ class OutputPanel(Panel):
                 select = hovered and pointer_pressed(ctx, PointerAction.OUTPUT_SELECT)
                 extend = hovered and pointer_pressed(ctx, PointerAction.OUTPUT_RANGE)
                 add = hovered and pointer_pressed(ctx, PointerAction.OUTPUT_ADD)
-                if select or extend or add:
+                path = message_path(entry.text, entry.copy_text) if hovered else None
+                if path is not None:
+                    imgui.set_item_tooltip(ctx.tr("Ctrl+click to reveal file") + "\n" + str(path))
+                if add and path is not None:
+                    reveal_path(path)
+                elif select or extend or add:
                     if extend and self._selection_anchor:
                         by_sequence = {item.sequence: offset for offset, item in enumerate(entries)}
                         anchor = by_sequence.get(self._selection_anchor, index)

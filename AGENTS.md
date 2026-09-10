@@ -65,6 +65,12 @@ Use these names consistently:
   and reviewed golden fixtures use their existing tracked locations when their update is in scope.
 - Reuse or extend a Make target for visual acceptance of visible behavior; add a target when no
   existing one demonstrates the change.
+- Follow [implementation and collaboration standards](docs/guides/development.md#implementation-principles)
+  for ownership, command transactions, capability boundaries, reusable controls, and handoffs.
+- Basic editor interactions must work without physics capabilities. Gate backend writes at their
+  command boundary; do not reset local UI state merely because an adapter has no models or takes.
+- Fix the violated invariant before adding a fallback. Preserve failure evidence and atomicity;
+  do not hide failed writes, guess entity identities, or accept stale state without proving compatibility.
 
 ## Verification
 
@@ -87,6 +93,12 @@ view does not create an additional approval step.
 - Preserve unrelated working-tree changes.
 - Use concise imperative English commit subjects.
 - Group commits by coherent behavior.
+- Before editing or staging, inspect the working tree and distinguish existing changes from this
+  task. In shared worktrees, stage explicit reviewed paths or hunks rather than the entire tree.
+- Re-read shared files before dependent edits. Describe changed contracts, verification commands
+  and remaining work in handoffs; do not treat another agent's success report as verification.
+- Commit or publish within the user's authorization. Review the staged diff for generated output,
+  unrelated edits, dependency churn and unintended API changes before committing.
 
 ## Python and C++ development
 
@@ -95,6 +107,9 @@ view does not create an additional approval step.
   private backends. Read `docs/guides/development.md` for naming and local build commands.
 - Mojive-owned C++ uses PascalCase types/files, camelCase functions/fields and `m` + PascalCase
   private members. Preserve upstream and standard-library spellings. Never reformat vendor code.
+- Owned directories use lowercase names and underscores for multiple words, such as
+  `python/binding_tests`. Dependencies live in `3rdparty`; preserve upstream directory names
+  such as `bgfx.cmake` and `robin-map`. C++ identifier rules do not apply to directories.
 - `3rdparty/imgui` is tracked, editable source; other core dependencies are pinned submodules.
   Maintain dependency provenance and focused customization history as described in
   `3rdparty/README.md`. Repository setup does not require workflow CI.

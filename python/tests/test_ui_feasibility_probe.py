@@ -38,10 +38,33 @@ def test_shared_widget_calls_match_runtime_signatures(name, function):
 
 @pytest.mark.parametrize(
     ("scale", "expected"),
-    ((0.75, (1600, 1000)), (1.0, (1600, 1000)), (2.0, (1600, 1000)), (4.0, (3200, 2000))),
+    (
+        (0.75, (1600, 1000)),
+        (1.0, (1600, 1000)),
+        (2.0, (4000, 1900)),
+        (2.5, (5000, 2375)),
+        (4.0, (8000, 3800)),
+    ),
 )
 def test_probe_window_preserves_canvas_at_extreme_ui_scales(scale, expected):
     assert probe._probe_window_size(1600, 1000, scale) == expected
+
+
+def test_probe_window_growth_keeps_the_scaled_canvas_and_controls_visible():
+    """A capture that clips the right-hand experiment controls misstates the design."""
+
+    for scale in (1.5, 2.0, 2.5, 3.0, 4.0):
+        width, height = probe._probe_window_size(1600, 1000, scale)
+        assert width >= (probe.GEOMETRY_CANVAS_SIZE[0] + 400.0) * scale
+        assert height >= probe.GEOMETRY_CANVAS_SIZE[1] * scale
+
+
+def test_probe_tab_rows_wrap_instead_of_clipping_at_large_scales():
+    """Native tab bars run past the panel edge once their labels grow."""
+
+    source = PROBE_PATH.read_text(encoding="utf-8")
+    assert "begin_tab_bar" not in source
+    assert source.count("_wrapped_tabs(") >= 4
 
 
 def test_virtual_canvas_scrolls_instead_of_compressing_components():

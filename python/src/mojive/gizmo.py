@@ -728,6 +728,13 @@ def hit_test(
 
     if mode in (GizmoMode.TRANSLATE, GizmoMode.DIMENSIONS):
         if (
+            mode is GizmoMode.DIMENSIONS
+            and allowed_handles == handle_mask(GizmoHandle.SCREEN)
+            and abs(np.linalg.norm(p - center) - SCREEN_RING_RADIUS * SIZE_PT * style_scale)
+            <= RING_HIT_PT * style_scale
+        ):
+            return GizmoHandle.SCREEN, axis_mask, plane_mask
+        if (
             allowed(GizmoHandle.SCREEN)
             and np.linalg.norm(p - center) <= CENTER_HIT_PT * style_scale
         ):
@@ -766,9 +773,6 @@ def hit_test(
                 distance = screen_polygon_distance(p, polygon)
             if distance <= AXIS_HIT_PADDING_PT * style_scale:
                 return handle, axis_mask, plane_mask
-
-        if mode is GizmoMode.DIMENSIONS:
-            return GizmoHandle.NONE, axis_mask, plane_mask
 
         planes = [
             axis for axis in range(3) if plane_mask & (1 << axis) and allowed(PLANE_HANDLES[axis])

@@ -154,9 +154,11 @@ def test_closing_video_settings_with_escape_preserves_loop_and_allows_recording(
         viewer.sync()
     io = imgui.get_io()
     for field, value in (("countdown", "2.5"), ("end_hold", "0.5")):
-        lo, hi = _item_rect(
-            viewer, "input_float", "Start delay (s)" if field == "countdown" else "End hold (s)"
-        )
+        lo, hi = _item_rect(viewer, "input_float", "##timeline-" + field)
+        title = "Start delay (s)" if field == "countdown" else "End hold (s)"
+        label_lo, label_hi = _item_rect(viewer, "text_disabled", title)
+        assert label_hi[0] < lo[0]
+        assert label_lo[1] < hi[1] and label_hi[1] > lo[1]
         _click(viewer, (lo[0] + 20, (lo[1] + hi[1]) * 0.5))
         modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
         io.add_key_event(modifier, True)
@@ -173,7 +175,7 @@ def test_closing_video_settings_with_escape_preserves_loop_and_allows_recording(
         assert getattr(viewer.app.recording_config, field) == float(value)
         assert viewer.app.localizer.preference("recording")[field] == float(value)
     # Leave the number editor before testing Escape's popup ownership.
-    _click(viewer, _item_center(viewer, "input_float", "Start delay (s)"))
+    _click(viewer, _item_center(viewer, "text_disabled", "Start delay (s)"))
     io.add_key_event(imgui.Key.escape, True)
     viewer.sync()
     io.add_key_event(imgui.Key.escape, False)

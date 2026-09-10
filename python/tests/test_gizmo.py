@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from itertools import pairwise
+
 import numpy as np
 import pytest
 
@@ -798,6 +800,81 @@ def test_dimension_gizmo_drag_resizes_one_box_parameter_and_is_undoable() -> Non
     assert session.source.geom_size == pytest.approx(original)
 
 
+@pytest.mark.parametrize(
+    "shape,size",
+    [
+        (MeshShape.BOX, (0.4, 0.6, 0.8)),
+        (MeshShape.SPHERE, (0.4, 0.4, 0.4)),
+        (MeshShape.SPHERE, (0.4, 0.6, 0.8)),
+        (MeshShape.CYLINDER, (0.4, 0.4, 0.8)),
+        (MeshShape.CONE, (0.4, 0.4, 0.8)),
+        (MeshShape.PLANE, (0.4, 0.6, 1)),
+    ],
+)
+def test_dimension_center_scales_proportionally_returns_to_start_and_undoes(shape, size):
+    session, _ = dimension_session(shape, size=size)
+    gizmo = ObjectGizmo("dimensions")
+    cam = camera()
+    start = project(cam, (np.zeros(3),), RECT)[0, :2]
+    original = session.source.geom_size.copy()
+    assert gizmo.update_hover(session, cam, RECT, start) is GizmoHandle.SCREEN
+    assert gizmo._begin_handle(session, cam, RECT, start, GizmoHandle.SCREEN)
+    end = start + np.array((30, -30))
+    assert gizmo._drag(session, cam, RECT, end, snap=False)
+    count = 2 if shape is MeshShape.PLANE else 3
+    ratios = session.source.geom_size[0, :count] / original[0, :count]
+    assert ratios[0] > 1
+    assert ratios == pytest.approx(np.full(count, ratios[0]))
+    assert gizmo._drag(session, cam, RECT, start, snap=False)
+    assert session.source.geom_size == pytest.approx(original)
+    assert gizmo._drag(session, cam, RECT, end, snap=True)
+    ratios = session.source.geom_size[0, :count] / original[0, :count]
+    assert ratios == pytest.approx(np.full(count, ratios[0]))
+    gizmo._end(commit=True)
+    assert session.submit(cmd.Undo())
+    assert session.source.geom_size == pytest.approx(original)
+
+
+@pytest.mark.parametrize("handle", [GizmoHandle.XY, GizmoHandle.ZX, GizmoHandle.YZ])
+@pytest.mark.parametrize("shape", [MeshShape.BOX, MeshShape.SPHERE, MeshShape.CYLINDER])
+def test_dimension_plane_drag_resizes_in_the_body_frame_and_preserves_radial_constraints(
+    handle, shape
+):
+    size = (0.4, 0.4, 0.8) if shape is MeshShape.CYLINDER else (0.4, 0.6, 0.8)
+    rotation = math3d.axis_angle_to_mat3((0, 0, 1), 0.3)
+    session, _ = dimension_session(shape, size=size, rotation=rotation)
+    gizmo = ObjectGizmo("dimensions")
+    cam = camera()
+    normal = {GizmoHandle.YZ: 0, GizmoHandle.ZX: 1, GizmoHandle.XY: 2}[handle]
+    axes = [axis for axis in range(3) if axis != normal]
+    eye = np.full(3, 2.0)
+    eye[normal] = 6.0
+    cam.eye[:] = rotation @ eye
+    scale = world_scale(cam, np.zeros(3), RECT[3])
+    local_start = np.zeros(3)
+    local_start[axes] = scale * 0.31
+    local_delta = np.zeros(3)
+    local_delta[axes] = (0.12, 0.08)
+    start, end = project(
+        cam, (rotation @ local_start, rotation @ (local_start + local_delta)), RECT
+    )[:, :2]
+    assert gizmo.update_hover(session, cam, RECT, start) is handle
+    original = session.source.geom_size.copy()
+    assert gizmo._begin_handle(session, cam, RECT, start, handle)
+    assert gizmo._drag(session, cam, RECT, end, snap=False)
+    expected = np.array(size)
+    if shape is MeshShape.CYLINDER:
+        radial_axes = [axis for axis in axes if axis < 2]
+        expected[:2] += local_delta[radial_axes].mean()
+        expected[2] += local_delta[2]
+    else:
+        expected += local_delta
+    assert session.source.geom_size[0] == pytest.approx(expected, abs=5e-6)
+    gizmo._end(commit=True)
+    assert session.submit(cmd.Undo())
+    assert session.source.geom_size == pytest.approx(original)
+
+
 def test_uniform_sphere_dimension_uses_one_center_handle_and_precise_input() -> None:
     session, _node = dimension_session(MeshShape.SPHERE, size=(0.4, 0.4, 0.4))
     gizmo = ObjectGizmo("dimensions")
@@ -810,6 +887,49 @@ def test_uniform_sphere_dimension_uses_one_center_handle_and_precise_input() -> 
     assert edit.absolute_value == pytest.approx(0.4)
     assert gizmo.apply_precise_value(session, camera(), edit, 0.65, absolute=True)
     assert session.source.geom_size[0] == pytest.approx((0.65, 0.65, 0.65))
+
+
+@pytest.mark.parametrize(
+    "shape,size",
+    [
+        (MeshShape.BOX, (0.4, 0.5, 0.6)),
+        (MeshShape.SPHERE, (0.4, 0.4, 0.4)),
+        (MeshShape.SPHERE, (0.4, 0.5, 0.6)),
+        (MeshShape.CYLINDER, (0.4, 0.4, 0.6)),
+        (MeshShape.CONE, (0.4, 0.4, 0.6)),
+        (MeshShape.PLANE, (1, 1, 0.02)),
+    ],
+)
+def test_authored_primitive_parent_supports_transform_and_dimension_edits_without_physics(
+    shape, size
+):
+    from mojive.scene_queries import node_world_pose
+
+    session, geometry = dimension_session(shape, size=size)
+    owner = session.node(geometry.parent)
+    assert not session.adapter.caps.simulation
+    rotation = math3d.axis_angle_to_mat3((0, 1, 0), 0.3)
+    assert session.submit(cmd.SelectNode(owner.node_id))
+    assert session.submit(cmd.SetPose(owner.node_id, np.array((1, 2, 3)), rotation))
+    session.tick(FrameNeeds())
+    position, actual_rotation = node_world_pose(session, geometry)
+    np.testing.assert_allclose(position, (1, 2, 3))
+    np.testing.assert_allclose(actual_rotation, rotation)
+    gizmo = ObjectGizmo("dimensions")
+    assert gizmo.evaluate(session, owner).ok
+    target, _ = gizmo._dimension_target(session, owner)
+    mapping = target.dimensions.handles[0]
+    gizmo._hovered = GizmoHandle.SCREEN if mapping.axis is None else AXIS_HANDLES[mapping.axis]
+    edit = gizmo.precise_input(session)
+    assert edit is not None
+    assert gizmo.apply_precise_value(
+        session, camera(), edit, edit.absolute_value * 1.5, absolute=True
+    )
+    changed, _ = gizmo._dimension_target(session, session.selected_node)
+    assert changed.dimensions.values[0] == pytest.approx(target.dimensions.values[0] * 1.5)
+    assert session.submit(cmd.Undo())
+    restored, _ = gizmo._dimension_target(session, session.selected_node)
+    assert restored.size == pytest.approx(size)
 
 
 def test_dimension_gizmo_stays_on_geometry_pose_and_reuses_flat_overlay() -> None:
@@ -2447,7 +2567,7 @@ def test_dashed_line_segments_are_anchored_at_the_joint_plane() -> None:
     )
 
 
-def test_rotation_axis_guide_is_long_for_multi_axis_rotation_and_short_for_hinge() -> None:
+def test_multi_axis_rotation_keeps_its_long_axis_guide() -> None:
     cam = CameraView(
         eye=np.array((0.0, -5.0, 0.0)),
         target=np.zeros(3),
@@ -2457,56 +2577,125 @@ def test_rotation_axis_guide_is_long_for_multi_axis_rotation_and_short_for_hinge
     gizmo = ObjectGizmo("rotate")
     gizmo._active = GizmoHandle.ROTATE_Z
     gizmo._axis[:] = (0.0, 0.0, 1.0)
-
     overlay = RecordingDraw2D()
     gizmo._draw_rotation_axis_guide(overlay, cam, RECT, 1.0)
-    long_line = next(args for name, args, _kwargs in overlay.calls if name == "line")
-    long_length = float(np.linalg.norm(long_line[1] - long_line[0]))
-    assert long_length > RECT[3] * 0.8
-    assert np.allclose(long_line[2][:3], axis_active_color(AXIS_COLORS[2])[:3])
-
-    gizmo._joint_range = _JointRangeState("hinge", 0.0, -1.0, 1.0)
-    overlay = RecordingDraw2D()
-    gizmo._draw_rotation_axis_guide(overlay, cam, RECT, 1.0)
-    short_line = next(args for name, args, _kwargs in overlay.calls if name == "line")
-    short_length = float(np.linalg.norm(short_line[1] - short_line[0]))
-    assert short_length < long_length * 0.5
-    assert np.allclose(short_line[2][:3], ACTIVE_HANDLE_COLOR[:3])
+    line = next(args for name, args, _kwargs in overlay.calls if name == "line")
+    assert np.linalg.norm(line[1] - line[0]) > RECT[3] * 0.8
+    assert np.allclose(line[2][:3], axis_active_color(AXIS_COLORS[2])[:3])
 
 
-@pytest.mark.parametrize("camera_z", (2.0, -2.0), ids=("positive-side", "negative-side"))
-def test_hinge_rotation_axis_uses_solid_camera_side_and_dashed_back_side(
-    camera_z: float,
-) -> None:
+@pytest.mark.parametrize("camera_z", (2.0, -2.0))
+@pytest.mark.parametrize("style_scale", (1.0, 2.5))
+@pytest.mark.parametrize("orthographic", (False, True))
+def test_hinge_axis_is_one_arrow_with_gaps_only_behind_the_projected_disk(
+    camera_z, style_scale, orthographic
+):
+    from mojive.ui.gizmo import _cursor_plane
+
     cam = CameraView(
         eye=np.array((3.0, -5.0, camera_z)),
         target=np.zeros(3),
         up=np.array((0.0, 0.0, 1.0)),
         aspect=RECT[2] / RECT[3],
+        orthographic=orthographic,
+        ortho_height=4,
     )
     gizmo = ObjectGizmo("rotate")
-    gizmo._active = GizmoHandle.ROTATE_Z
-    gizmo._axis[:] = (0.0, 0.0, 1.0)
-    gizmo._joint_range = _JointRangeState("hinge", 0.0, -1.0, 1.0)
+    gizmo._hinge_axis = True
     overlay = RecordingDraw2D()
-
-    gizmo._draw_rotation_axis_guide(overlay, cam, RECT, 1.0)
-
-    lines = [(args, kwargs) for name, args, kwargs in overlay.calls if name == "line"]
-    assert len(lines) >= 3
-    dashed, solid = lines[:-1], lines[-1]
-    assert all(kwargs.get("cap") == "round" for _args, kwargs in dashed)
-    assert solid[1].get("cap") == "round"
-    assert all(args[3] == pytest.approx(solid[0][3]) for args, _kwargs in dashed)
-
+    gizmo._draw_rotation_axis_guide(overlay, cam, RECT, style_scale)
+    geometry = gizmo._hinge_axis_geometry
+    assert geometry is not None
+    assert all(name == "fringed_concave_fill" for name, _, _ in overlay.calls)
+    assert len(overlay.calls) == len(geometry.polygons)
     center = project(cam, (np.zeros(3),), RECT)[0, :2]
-    plus = project(cam, (np.array((0.0, 0.0, 1.0)),), RECT)[0, :2]
-    plus_direction = plus - center
-    expected_sign = np.sign(camera_z)
-    assert np.dot(solid[0][1] - center, plus_direction) * expected_sign > 0.0
-    for args, _kwargs in dashed:
-        midpoint = (args[0] + args[1]) * 0.5
-        assert np.dot(midpoint - center, plus_direction) * expected_sign < 0.0
+    plus = project(cam, ((0, 0, 1),), RECT)[0, :2] - center
+    direction = plus / np.linalg.norm(plus)
+    spans = sorted((min(p @ direction), max(p @ direction)) for p in geometry.polygons)
+    assert len(spans) >= 3
+    radius = world_scale(cam, np.zeros(3), RECT[3], SIZE_PT * style_scale) * RING_RADIUS
+    # Every omitted interval projects inside the disk; exposed rear portions stay solid.
+    for (_, end), (start, _) in pairwise(spans):
+        assert end < start
+        cursor = center + direction * ((end + start) * 0.5 - np.dot(center, direction))
+        plane = _cursor_plane(cam, RECT, cursor, np.zeros(3), (0, 0, 1))
+        assert np.linalg.norm(plane) <= radius + 1e-5
+        assert np.dot(cursor - center, direction) * camera_z < 0
+    tip = max(geometry.hit_polygon @ direction)
+    side = np.array((-direction[1], direction[0]))
+    # A rounded tail reaches its axial extremum on the centerline, not at the
+    # two corners of a flat cut. Check the full shaft and each separate dash.
+    for polygon in geometry.polygons:
+        polygon = np.asarray(polygon)
+        axial = polygon @ direction
+        tail = polygon[axial <= min(axial) + 1e-5]
+        assert np.max(np.abs((tail - center) @ side)) < 0.1 * style_scale
+    # The arrowhead belongs to exactly one silhouette, including its shaft join.
+    assert sum(np.max(p @ direction) > tip - 4 * style_scale for p in geometry.polygons) == 1
+    assert tip > np.dot(center, direction)
+    assert len({args[1][3] for _, args, _ in overlay.calls}) == 1
+    assert gizmo._hinge_axis_projection(cam, RECT, style_scale, np.zeros(3), (0, 0, 1)) is geometry
+
+
+@pytest.mark.physics
+@pytest.mark.parametrize("part", ("shaft", "head", "center"))
+@pytest.mark.parametrize("camera_z", (0.0, 2.0))
+def test_hinge_axis_hover_and_press_rotate_the_joint_without_a_jump(part, camera_z):
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.assets import resolve
+
+    adapter = MuJoCoAdapter(resolve("joint_types"))
+    session = Session(adapter)
+    session.submit(cmd.Pause())
+    node = next(n for n in session.nodes if n.name == "hinge_body")
+    session.submit(cmd.SelectNode(node.node_id))
+    session.tick(FrameNeeds(poses=True, qpos=True, diagnostics=True), wall_dt=0)
+    gizmo = ObjectGizmo("rotate")
+    target, _ = gizmo._joint_target(session, node)
+    pos, basis = gizmo._target_pose(session, node, target)
+    cam = CameraView(eye=pos + np.array((3.0, -5.0, camera_z)), target=pos.copy())
+    geometry = gizmo._hinge_axis_projection(cam, RECT, 1, pos, basis[:, 2])
+    center = project(cam, (pos,), RECT)[0, :2]
+    plus = project(cam, (pos + basis[:, 2],), RECT)[0, :2] - center
+    direction = plus / np.linalg.norm(plus)
+    tip = geometry.hit_polygon[np.argmax(geometry.hit_polygon @ direction)]
+    start = (
+        center
+        if part == "center"
+        else tip - direction * 2
+        if part == "head"
+        else center * 0.65 + tip * 0.35
+    )
+    assert gizmo.update_hover(session, cam, RECT, start) is GizmoHandle.ROTATE_Z
+    before = adapter.data.qpos[target.joint.qpos_adr]
+    assert gizmo._begin(session, cam, RECT, start)
+    gizmo._drag(session, cam, RECT, start, snap=False)
+    assert adapter.data.qpos[target.joint.qpos_adr] == pytest.approx(before)
+    assert gizmo._drag(session, cam, RECT, start + np.array((28.0, 16.0)), snap=False)
+    assert adapter.data.qpos[target.joint.qpos_adr] != pytest.approx(before)
+    gizmo._end()
+
+
+def test_hinge_axis_and_ring_fade_independently_at_perpendicular_extremes():
+    from mojive.gizmo import rotation_ring_alpha
+
+    gizmo = ObjectGizmo("rotate")
+    alphas = []
+    for angle in (0, 10, 45, 80, 90):
+        radians = np.radians(angle)
+        cam = CameraView(
+            eye=np.array((5 * np.sin(radians), 0, 5 * np.cos(radians))),
+            target=np.zeros(3),
+            up=np.array((0, 1, 0)),
+        )
+        geometry = gizmo._hinge_axis_projection(cam, RECT, 1, np.zeros(3), (0, 0, 1))
+        alphas.append(0 if geometry is None else geometry.alpha)
+        ring_alpha = rotation_ring_alpha(cam, np.zeros(3), (0, 0, 1))
+        if angle == 0:
+            assert geometry is None and ring_alpha == 1
+        elif angle == 90:
+            assert ring_alpha == 0 and len(geometry.polygons) == 1
+    assert alphas[0] == 0 < alphas[1] < alphas[2] == alphas[3] == alphas[4] == 1
 
 
 def test_rotation_axis_guide_fades_out_at_a_view_aligned_extreme() -> None:
@@ -4480,20 +4669,58 @@ def test_dimension_handles_round_square_corners_and_shaft_joins_and_keep_hit_reg
         assert crossings.sum() % 2 == 1
 
 
-def test_dimensions_keep_a_circular_origin_without_a_center_drag_handle():
+def test_dimensions_center_uses_the_transform_outline():
     gizmo = ObjectGizmo()
     gizmo._frame.mode = GizmoMode.DIMENSIONS
-    gizmo._frame.handle_mask = handle_mask(*AXIS_HANDLES)
+    gizmo._frame.handle_mask = handle_mask(*AXIS_HANDLES, GizmoHandle.SCREEN)
     overlay = RecordingDraw2D()
     gizmo._draw_flat(overlay, camera(), RECT, 1.0)
     circles = [args for name, args, kwargs in overlay.calls if name == "circle_filled"]
-    assert len(circles) == 1
+    assert len(circles) == 2
+    assert np.allclose(circles[0][2], CONTRAST_EDGE_COLOR)
+    assert circles[0][1] > circles[-1][1]
     assert circles[-1][1] == pytest.approx(CENTER_RADIUS * SIZE_PT)
     assert np.allclose(circles[-1][2], CENTER_COLOR)
-    assert GizmoHandle.SCREEN not in display_handles(gizmo._frame)
+    assert GizmoHandle.SCREEN in display_handles(gizmo._frame)
     fills = [args for name, args, kwargs in overlay.calls if name == "concave_fill"]
     assert len(fills) == len(AXIS_HANDLES)
     assert all(not np.allclose(args[1], CONTRAST_EDGE_COLOR) for args in fills)
+
+
+@pytest.mark.parametrize("scale", [1.0, 2.5])
+def test_sphere_dimension_ring_and_center_share_the_scalar_handle(scale):
+    gizmo = ObjectGizmo()
+    gizmo._frame.mode = GizmoMode.DIMENSIONS
+    gizmo._frame.handle_mask = handle_mask(GizmoHandle.SCREEN)
+    overlay = RecordingDraw2D()
+    gizmo._draw_flat(overlay, camera(), RECT, scale)
+    rings = [args for name, args, _ in overlay.calls if name == "circle"]
+    assert len(rings) == 1
+    center, radius = rings[0][:2]
+    assert radius == pytest.approx(SCREEN_RING_RADIUS * SIZE_PT * scale)
+    for offset in ((0, 0), (radius, 0), (-radius, 0), (0, radius)):
+        handle, _, _ = hit_test(
+            camera(),
+            np.zeros(3),
+            np.eye(3),
+            RECT,
+            tuple(np.asarray(center) + offset),
+            GizmoMode.DIMENSIONS,
+            scale,
+            handle_mask(GizmoHandle.SCREEN),
+        )
+        assert handle is GizmoHandle.SCREEN
+    handle, _, _ = hit_test(
+        camera(),
+        np.zeros(3),
+        np.eye(3),
+        RECT,
+        tuple(np.asarray(center) + np.array((radius / 2, 0))),
+        GizmoMode.DIMENSIONS,
+        scale,
+        handle_mask(GizmoHandle.SCREEN),
+    )
+    assert handle is GizmoHandle.NONE
 
 
 @pytest.mark.parametrize("span", (0.0, 0.01, 0.3, 5.0))

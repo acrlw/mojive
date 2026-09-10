@@ -25,15 +25,20 @@ class CommandResult:
     ok: bool
     message: str = ""
     entity_id: int = -1
+    entity_key: str = ""
 
     def __bool__(self) -> bool:
         return self.ok
 
     @staticmethod
-    def good(message: str = "", entity_id: int = -1) -> CommandResult:
-        """Create a successful result with an optional affected entity ID."""
+    def good(message: str = "", entity_id: int = -1, entity_key: str = "") -> CommandResult:
+        """Create a successful result with an optional affected entity reference.
 
-        return CommandResult(True, message, int(entity_id))
+        ``entity_key`` names an element that a pending edit batch creates later so a
+        follow-up command can address it before a real node ID exists.
+        """
+
+        return CommandResult(True, message, int(entity_id), str(entity_key))
 
     @staticmethod
     def bad(message: str) -> CommandResult:
@@ -412,9 +417,14 @@ class Select(Command):
 
 @dataclass(frozen=True)
 class SelectNode(Command):
-    """Select a hierarchy node directly by node ID."""
+    """Select a hierarchy node directly by node ID.
+
+    ``node_key`` addresses an element that a pending edit batch creates later and
+    takes precedence over ``node_id`` when set.
+    """
 
     node_id: int
+    node_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -458,10 +468,15 @@ class SetMaterial(Command):
 
 @dataclass(frozen=True)
 class SetGeometryColor(Command):
-    """Set an editable geometry node's linear RGBA color."""
+    """Set an editable geometry node's linear RGBA color.
+
+    ``node_key`` addresses an element that a pending edit batch creates later and
+    takes precedence over ``node_id`` when set.
+    """
 
     node_id: int
     rgba: np.ndarray
+    node_key: str = ""
 
 
 @dataclass(frozen=True)
