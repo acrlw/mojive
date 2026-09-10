@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
@@ -107,7 +108,7 @@ from .panels.inspector import gizmo_refusal_reason
 from .theme import THEME
 
 if TYPE_CHECKING:
-    from ..adapters.base import SceneNode
+    from ..adapters.base import SceneFrame, SceneNode
     from ..session import Session
 
 REASON_NO_SELECTION = "nothing selected"
@@ -4414,12 +4415,7 @@ class ObjectGizmo:
         frame = session.frame
         diagnostics = frame.diagnostics
         joint_id = target.joint.joint_id
-        if (
-            frame.qpos is None
-            or diagnostics is None
-            or not 0 <= joint_id < len(diagnostics.joint_xpos)
-            or not 0 <= joint_id < len(diagnostics.joint_xaxis)
-        ):
+        if not _joint_frame_available(frame, joint_id):
             return None
         position = np.asarray(diagnostics.joint_xpos[joint_id], np.float64).reshape(3)
         if target.joint.type == "slide":
@@ -4534,7 +4530,7 @@ class ObjectGizmo:
                 return Verdict(False, f"{session.adapter.caps.name} cannot write joint positions")
             if target is None:
                 return Verdict(False, reason or "joint gizmo is unavailable")
-            if self._target_pose(session, node, target) is None:
+            if not _joint_frame_available(session.frame, target.joint.joint_id):
                 return Verdict(False, "joint frame data is unavailable")
             result = Verdict(True)
         else:
@@ -5185,19 +5181,36 @@ def _cursor_plane(cam, rect, cursor, point, normal) -> np.ndarray | None:
     return np.asarray(origin, np.float64) + np.asarray(direction, np.float64) * t
 
 
+def _joint_frame_available(frame: SceneFrame, joint_id: int) -> bool:
+    """Check availability without constructing a pose for each tool's enabled state."""
+    diagnostics = frame.diagnostics
+    return (
+        frame.qpos is not None
+        and diagnostics is not None
+        and 0 <= joint_id < len(diagnostics.joint_xpos)
+        and joint_id < len(diagnostics.joint_xaxis)
+    )
+
+
 def _basis_from_z(axis) -> np.ndarray:
-    z = np.asarray(axis, np.float64).reshape(3)
-    length = float(np.linalg.norm(z))
+    # Scalar three-vector arithmetic avoids NumPy dispatch and must not normalize
+    # a view into the adapter's published joint-axis buffer in place.
+    zx, zy, zz = map(float, np.asarray(axis, np.float64).reshape(3))
+    length = math.hypot(zx, zy, zz)
     if length < 1e-9:
         return np.eye(3, dtype=np.float64)
-    z /= length
-    reference = np.array((0.0, 0.0, 1.0), np.float64)
-    if abs(float(np.dot(reference, z))) > 0.9:
-        reference[:] = (0.0, 1.0, 0.0)
-    x = np.cross(reference, z)
-    x /= np.linalg.norm(x)
-    y = np.cross(z, x)
-    return np.column_stack((x, y, z))
+    zx, zy, zz = zx / length, zy / length, zz / length
+    xx, xy, xz = (zz, 0.0, -zx) if abs(zz) > 0.9 else (-zy, zx, 0.0)
+    length = math.hypot(xx, xy, xz)
+    xx, xy, xz = xx / length, xy / length, xz / length
+    return np.array(
+        (
+            (xx, zy * xz - zz * xy, zx),
+            (xy, zz * xx - zx * xz, zy),
+            (xz, zx * xy - zy * xx, zz),
+        ),
+        dtype=np.float64,
+    )
 
 
 def _source_light(session: Session, node: SceneNode):

@@ -21,6 +21,7 @@ from mojive.curves2d import (
     arc_ribbon_points,
     arrow_points,
     arrow_triangles,
+    capped_polyline_points,
     smooth_affine_corners,
     smooth_capsule_points,
     smooth_line_cap,
@@ -31,7 +32,7 @@ from mojive.gizmo import GizmoMode
 from mojive.render.debugdraw import DebugDraw, Occlusion
 from mojive.types import CameraView
 from mojive.ui.draw2d import ImguiDraw2D, draw_drag_link
-from mojive.ui.gizmo import ObjectGizmo, _JointRangeState
+from mojive.ui.gizmo import ObjectGizmo, _basis_from_z, _JointRangeState
 from mojive.ui.panels.keyframes import _draw_command_icon, _rounded_command_icon_path
 from mojive.ui.viewport_widgets import (
     _draw_axis_arrow_glyph,
@@ -66,6 +67,13 @@ def main():
     parser.add_argument("--profile", action="store_true", help="Also save untimed call profiles")
     args = parser.parse_args()
     context = imgui.create_context()
+    # NewFrame initializes circle tessellation tolerances in the shared draw data.
+    io = imgui.get_io()
+    io.set_ini_filename("")
+    io.display_size = (800, 600)
+    io.backend_flags |= imgui.BackendFlags_.renderer_has_textures.value
+    imgui.new_frame()
+    imgui.end_frame()
     draw_list = imgui.ImDrawList(imgui.get_draw_list_shared_data())
     draw = ImguiDraw2D(draw_list)
     null = NullDraw()
@@ -179,6 +187,16 @@ def main():
             1024,
         ),
         "cap_static": (lambda i: smooth_line_cap((0, 0), (1, 0), 8), 1024),
+        "capped_stroke_static": (
+            lambda i: capped_polyline_points(
+                ((0.0, 0.0), (12.0, 8.0), (24.0, 0.0)),
+                3.0,
+                round_start=True,
+                round_end=True,
+            ),
+            1024,
+        ),
+        "joint_basis": (lambda i: _basis_from_z((0.6, 0.0, 0.8)), 1024),
         "cap_short_dynamic": (
             lambda i: smooth_line_cap((0, 0), (1, 0), 8, max_inset=i % 512 / 512),
             512,
