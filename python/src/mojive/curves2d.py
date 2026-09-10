@@ -617,6 +617,12 @@ def capped_polyline_points(
     """Build one non-overlapping silhouette with independent endpoint caps."""
 
     path = tuple((float(point[0]), float(point[1])) for point in points)
+    return _capped_polyline_points(path, float(width), round_start, round_end, smoothing)
+
+
+@lru_cache(maxsize=256)
+def _capped_polyline_points(path, width, round_start, round_end, smoothing):
+    """Retain the complete immutable stroke, including fitted endpoint caps."""
     left, right, _outline = polyline_ribbon(path, float(width))
     if not left:
         return ()

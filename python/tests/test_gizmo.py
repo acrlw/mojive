@@ -100,6 +100,7 @@ from mojive.ui.gizmo import (
     TRACKBALL_RAD_PER_PT,
     TRANSLATION_GUIDE_RADIUS_PT,
     ObjectGizmo,
+    _basis_from_z,
     _clip_line_to_rect,
     _clip_segment_to_rect,
     _closest_joint_limit_hit,
@@ -4804,3 +4805,18 @@ def test_tiny_hinge_complement_press_drags_without_jump_and_respects_limits(tmp_
     assert adapter.data.qpos[0] == pytest.approx(0.01)
     gizmo.interact(session, cam, RECT, moved, claimed=True, left_down=False, released=True)
     assert not gizmo.using
+
+
+@pytest.mark.parametrize("axis", [(0, 0, 2), (0, 0, -3), (2, -3, 4), (1, 2, 0), (0, 0, 0)])
+@pytest.mark.parametrize("read_only", [False, True])
+def test_joint_basis_preserves_published_axis_and_is_right_handed(axis, read_only):
+    published = np.asarray(axis, np.float64)
+    published.flags.writeable = not read_only
+    basis = _basis_from_z(published)
+    np.testing.assert_array_equal(published, axis)
+    np.testing.assert_allclose(basis.T @ basis, np.eye(3), atol=1e-14)
+    assert np.linalg.det(basis) == pytest.approx(1.0)
+    if any(axis):
+        np.testing.assert_allclose(basis[:, 2], np.asarray(axis) / np.linalg.norm(axis))
+    else:
+        np.testing.assert_array_equal(basis, np.eye(3))

@@ -536,3 +536,21 @@ def test_viewcube_submits_balls_back_to_front() -> None:
     assert labels == [
         ball.label for ball in cube.balls if ball.alpha > 0.0 and vc._label_alpha(ball, False) > 0.0
     ]
+
+
+def test_capped_stroke_cache_tracks_mutable_points_and_cap_style():
+    points = np.array(((0.0, 0.0), (20.0, 0.0)))
+    options = {"round_start": True, "round_end": True}
+    first = capped_polyline_points(points, 4.0, **options)
+    assert capped_polyline_points(points.copy(), 4.0, **options) is first
+    points[1, 0] = 40.0
+    moved = capped_polyline_points(points, 4.0, **options)
+    assert max(x for x, y in moved) == pytest.approx(max(x for x, y in first) + 20.0)
+    flat = capped_polyline_points(points, 4.0, round_start=True, round_end=False)
+    assert max(x for x, y in flat) == pytest.approx(40.0)
+    wide = capped_polyline_points(points, 8.0, **options)
+    assert max(y for x, y in wide) == pytest.approx(4.0)
+    circular = capped_polyline_points(points, 4.0, **options, smoothing=0.0)
+    assert circular != moved
+    points[1, 0] = 20.0
+    assert capped_polyline_points(points, 4.0, **options) is first
