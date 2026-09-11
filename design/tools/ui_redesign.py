@@ -42,6 +42,8 @@ if __package__:
     from .ui_capsule_geometry import capsule_layout, draw_capsule_shell
     from .ui_icon_concepts import (
         ICON_DEFAULT_PADDING,
+        ICON_ROTATE_RING_CAP,
+        ICON_ROTATE_RING_GAP_RATIO,
         ICON_STROKE,
         ICON_TUNING_DEFAULTS,
         draw_concept_icon,
@@ -50,6 +52,8 @@ else:
     from ui_capsule_geometry import capsule_layout, draw_capsule_shell
     from ui_icon_concepts import (
         ICON_DEFAULT_PADDING,
+        ICON_ROTATE_RING_CAP,
+        ICON_ROTATE_RING_GAP_RATIO,
         ICON_STROKE,
         ICON_TUNING_DEFAULTS,
         draw_concept_icon,
@@ -348,17 +352,22 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                     rotate_ring_gap_ratio=getattr(
                         geometry,
                         "rotate_ring_gap_ratio",
-                        OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
+                        ICON_ROTATE_RING_GAP_RATIO,
                     ),
                     rotate_ring_cap=getattr(
                         geometry,
                         "rotate_ring_cap",
-                        OVERLAY_GEOMETRY.rotate_ring_cap,
+                        ICON_ROTATE_RING_CAP,
                     ),
                     tuning=(
                         geometry.icon_tuning()
                         if hasattr(geometry, "icon_tuning")
                         else ICON_TUNING_DEFAULTS
+                    ),
+                    alignment=(
+                        geometry.icon_alignment_for_glyph(concept_name)
+                        if hasattr(geometry, "icon_alignment_for_glyph")
+                        else None
                     ),
                 )
             elif vertical:
@@ -541,6 +550,7 @@ def _viewport(state, scale, geometry, circular_button):
                 rotate_ring_gap_ratio=geometry.rotate_ring_gap_ratio,
                 rotate_ring_cap=geometry.rotate_ring_cap,
                 tuning=geometry.icon_tuning(),
+                alignment=geometry.icon_alignment_for_glyph(concept_name),
             )
         else:
             draw_tool_glyph(

@@ -110,7 +110,7 @@ def test_geometry_export_names_production_overlay_fields():
     assert "tool_stroke=" in values
     assert "icon_tool_move_head_scale=1.0," in values
     assert "icon_tool_scale_handle_scale=1.0," in values
-    assert "icon_key_fit_arm_length=3.0," in values
+    assert "icon_key_fit_arm_length=4.0," in values
     assert "hint_mouse_wheel_gap_ratio=" in values
 
 
@@ -126,17 +126,18 @@ def test_icon_library_export_contains_group_glyph_and_shape_controls():
     assert "icon_padding_tool_move=0.85," in values
     assert "icon_stroke_key_fit=2.1," in values
     assert "icon_tool_move_head_scale=1.2," in values
+    assert "icon_alignment_key_snapshot='circle'," in values
 
 
-def test_labelled_snapshot_preview_centers_visible_box_on_text_ink(monkeypatch):
+@pytest.mark.parametrize("alignment", ("circle", "box"))
+def test_labelled_snapshot_preview_places_the_selected_anchor_on_text_ink(monkeypatch, alignment):
     state = probe.ProbeState(preview_icon_library=True)
+    state.set_icon_alignment_for_glyph("key-snapshot", alignment)
     calls = []
-    monkeypatch.setattr(probe, "draw_concept_icon", lambda *args, **kwargs: calls.append(args))
-    metrics = probe.icon_metrics(
-        "key-snapshot",
-        padding=state.icon_padding_for_glyph("key-snapshot"),
-        stroke_width=state.icon_stroke_for_glyph("key-snapshot"),
-        tuning=state.icon_tuning(),
+    monkeypatch.setattr(
+        probe,
+        "draw_concept_icon",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
     )
 
     probe._draw_icon_library_command_icon(
@@ -149,10 +150,9 @@ def test_labelled_snapshot_preview_centers_visible_box_on_text_ink(monkeypatch):
         state=state,
     )
 
-    box_x, box_y = metrics.center_offset
-    assert calls[0][1] == pytest.approx(
-        (100.0 - box_x * 16.0 / probe.ICON_GRID, 50.0 - box_y * 16.0 / probe.ICON_GRID)
-    )
+    args, kwargs = calls[0]
+    assert args[1] == pytest.approx((100.0, 50.0))
+    assert kwargs["alignment"] == alignment
 
 
 def test_probe_geometry_defaults_follow_production_constants():
@@ -172,6 +172,18 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.icon_padding_for("Viewport tools") == 0.5
     assert state.icon_padding_for_glyph("tool-rotate") == 0.0
     assert state.icon_padding_for_glyph("playback-previous") == 4.0
+    assert state.rotate_ring_gap_ratio == 0.8
+    assert state.rotate_ring_cap == "round"
+    assert state.move_head_scale == 1.0
+    assert state.scale_handle_scale == 1.0
+    assert state.key_fit_arm_length == 4.0
+    assert state.hint_mouse_width == 14
+    assert {
+        name: state.icon_stroke_for_glyph(name) for name in probe.ICON_GLYPH_STROKE_DEFAULTS
+    } == probe.ICON_GLYPH_STROKE_DEFAULTS
+    assert {
+        name: state.icon_alignment_for_glyph(name) for name in probe.ICON_ALIGNMENT_EDITABLE_ICONS
+    } == probe.ICON_GLYPH_ALIGNMENT_DEFAULTS
     assert all(
         state.icon_padding_for(group) == 2.0
         for group in probe.ICON_GROUP_LAYOUT_DEFAULTS
@@ -325,7 +337,7 @@ def test_keyframe_context_preview_uses_icon_library_candidates(monkeypatch, kind
     assert calls[0][1]["stroke_width"] == probe.ICON_STROKE
 
 
-def test_keyframe_context_preview_uses_the_live_group_stroke(monkeypatch):
+def test_keyframe_context_preview_prefers_the_reviewed_glyph_stroke(monkeypatch):
     calls = []
     state = probe.ProbeState()
     state.set_icon_stroke_for("Keyframe transport", 2.1)
@@ -344,7 +356,18 @@ def test_keyframe_context_preview_uses_the_live_group_stroke(monkeypatch):
         state=state,
     )
 
-    assert calls[0][1]["stroke_width"] == 2.1
+    assert calls[0][1]["stroke_width"] == 2.0
+
+    state.set_icon_stroke_for_glyph("transport-previous", 2.1)
+    probe._draw_icon_library_command_icon(
+        None,
+        (10.0, 20.0),
+        "previous",
+        (1, 1, 1, 1),
+        1.0,
+        state=state,
+    )
+    assert calls[1][1]["stroke_width"] == 2.1
 
 
 def test_icon_library_reuses_production_output_severity_painter(monkeypatch):
