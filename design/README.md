@@ -50,7 +50,8 @@ Previous, Next, More, Keyframe Transport First/Last, Panel Right/Down, and Tool 
 complete visible box; Playback and Keyframe Transport Reset use the center of their circular ring;
 remaining candidates use their sampled minimum enclosing circle. Rotate defaults to frame-aligned:
 its outer-ring centerline coincides with the orange placement circle, while its row exposes both
-frame padding and the inner-ring gap/stroke ratio. Candidate main
+frame padding and the inner-ring gap/stroke ratio. The Snap row scales both terminal blocks together
+without changing the U-shaped path. Candidate main
 strokes default to one 1.75-unit weight after fitting, so a group's padding changes reach without
 making its lines heavier. Chevron ribbons and Reset arcs follow the same control. The reviewed
 Pause and First/Last bars keep their established dimensions; status severity and mouse painters
@@ -64,7 +65,8 @@ both two percent smaller than Stop. First and Last use bars exactly as tall as t
 triangles. Status mouse hints continue to use the original production painter, and all three states
 share the Left candidate's fitted outer-shell scale.
 A neutral square with the orange circle's diameter makes the shared slot center visible at every
-review size.
+review size. Both placement guides sit behind the candidate, so a glyph that reaches the boundary
+keeps its real color and stroke weight instead of being partly recolored by the guide.
 
 Use the always-visible `Icon Library preview` menu-bar switch, or `Probe > Preview Icon Library`,
 to substitute the candidates into the current Workspace, Panels, Geometry, and Redesign layouts.

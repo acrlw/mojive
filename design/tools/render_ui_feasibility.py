@@ -526,6 +526,7 @@ class ProbeState:
     rotate_ring_cap: str = ICON_ROTATE_RING_CAP
     move_head_scale: float = ICON_TUNING_DEFAULTS.move_head_scale
     scale_handle_scale: float = ICON_TUNING_DEFAULTS.scale_handle_scale
+    snap_endpoint_scale: float = ICON_TUNING_DEFAULTS.snap_endpoint_scale
     key_fit_arm_length: float = ICON_TUNING_DEFAULTS.key_fit_arm_length
     hint_control_height: int = int(OVERLAY_GEOMETRY.hint_control_height)
     hint_padding_x: int = int(OVERLAY_GEOMETRY.hint_padding_x)
@@ -589,6 +590,7 @@ class ProbeState:
         return IconTuning(
             move_head_scale=self.move_head_scale,
             scale_handle_scale=self.scale_handle_scale,
+            snap_endpoint_scale=self.snap_endpoint_scale,
             key_fit_arm_length=self.key_fit_arm_length,
         )
 
@@ -3643,6 +3645,7 @@ def _geometry_values_text(state: ProbeState) -> str:
         ("rotate_ring_cap", repr(state.rotate_ring_cap)),
         ("icon_tool_move_head_scale", state.move_head_scale),
         ("icon_tool_scale_handle_scale", state.scale_handle_scale),
+        ("icon_tool_snap_endpoint_scale", state.snap_endpoint_scale),
         ("icon_key_fit_arm_length", state.key_fit_arm_length),
         ("hint_control_height", state.hint_control_height),
         ("hint_padding_x", state.hint_padding_x),
@@ -3694,6 +3697,7 @@ def _icon_values_text(state: ProbeState) -> str:
         ("rotate_ring_cap", repr(state.rotate_ring_cap)),
         ("icon_tool_move_head_scale", state.move_head_scale),
         ("icon_tool_scale_handle_scale", state.scale_handle_scale),
+        ("icon_tool_snap_endpoint_scale", state.snap_endpoint_scale),
         ("icon_key_fit_arm_length", state.key_fit_arm_length),
         ("icon_status_mouse_width", state.hint_mouse_width),
     ]
@@ -4214,6 +4218,7 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         state.rotate_ring_cap = ICON_ROTATE_RING_CAP
         state.move_head_scale = ICON_TUNING_DEFAULTS.move_head_scale
         state.scale_handle_scale = ICON_TUNING_DEFAULTS.scale_handle_scale
+        state.snap_endpoint_scale = ICON_TUNING_DEFAULTS.snap_endpoint_scale
         state.key_fit_arm_length = ICON_TUNING_DEFAULTS.key_fit_arm_length
         state.hint_control_height = int(OVERLAY_GEOMETRY.hint_control_height)
         state.hint_padding_x = int(OVERLAY_GEOMETRY.hint_padding_x)
@@ -4415,6 +4420,23 @@ def _draw_concept_icon_specimen(
     """Draw one candidate inside the shared circular placement boundary."""
 
     guide_radius = size * ICON_BOUND_DIAMETER / ICON_GRID * 0.5
+    # Keep review guides behind the candidate. Rotate deliberately places its
+    # outer-ring centerline on the orange circle; drawing the guide afterward
+    # recolored the center of that stroke and falsely made the frame look thin.
+    # The square has exactly the orange circle's diameter.
+    draw.rect(
+        (center[0] - guide_radius, center[1] - guide_radius),
+        (center[0] + guide_radius, center[1] + guide_radius),
+        (*CONCEPT_THEME.text_disabled[:3], 0.34),
+        max(0.6, 0.72 * scale),
+    )
+    draw.circle(
+        center,
+        guide_radius,
+        (*CONCEPT_THEME.warning[:3], 0.72),
+        max(0.75, 0.9 * scale),
+        segments=max(32, round(guide_radius * 4.0)),
+    )
     if name.startswith("status-") and name.removeprefix("status-") in {
         "info",
         "warning",
@@ -4445,22 +4467,6 @@ def _draw_concept_icon_specimen(
             tuning=tuning,
             alignment=alignment,
         )
-    # Draw both placement guides last so a circular collision and a displaced
-    # axis-aligned bounding box remain visible instead of hiding below the
-    # glyph. The square has exactly the orange circle's diameter.
-    draw.rect(
-        (center[0] - guide_radius, center[1] - guide_radius),
-        (center[0] + guide_radius, center[1] + guide_radius),
-        (*CONCEPT_THEME.text_disabled[:3], 0.34),
-        max(0.6, 0.72 * scale),
-    )
-    draw.circle(
-        center,
-        guide_radius,
-        (*CONCEPT_THEME.warning[:3], 0.72),
-        max(0.75, 0.9 * scale),
-        segments=max(32, round(guide_radius * 4.0)),
-    )
 
 
 def _icon_review_metrics(
@@ -4962,6 +4968,16 @@ def _draw_icon_family_detail(
                 "%.2f × original",
                 0.05,
             )
+        elif name == "tool-snap":
+            shape_control = (
+                "Ends",
+                "##snap-endpoint-scale",
+                state.snap_endpoint_scale,
+                0.65,
+                1.50,
+                "%.2f × original",
+                0.05,
+            )
         elif name == "key-fit":
             shape_control = (
                 "Arms",
@@ -4998,6 +5014,8 @@ def _draw_icon_family_detail(
                     state.move_head_scale = value
                 elif name == "tool-scale":
                     state.scale_handle_scale = value
+                elif name == "tool-snap":
+                    state.snap_endpoint_scale = value
                 else:
                     state.key_fit_arm_length = value
         if name in ICON_ALIGNMENT_EDITABLE_ICONS:
@@ -5031,6 +5049,8 @@ def _draw_icon_family_detail(
                 state.move_head_scale = ICON_TUNING_DEFAULTS.move_head_scale
             elif name == "tool-scale":
                 state.scale_handle_scale = ICON_TUNING_DEFAULTS.scale_handle_scale
+            elif name == "tool-snap":
+                state.snap_endpoint_scale = ICON_TUNING_DEFAULTS.snap_endpoint_scale
             elif name == "key-fit":
                 state.key_fit_arm_length = ICON_TUNING_DEFAULTS.key_fit_arm_length
             padding = state.icon_padding_for_glyph(name)

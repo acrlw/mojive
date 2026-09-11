@@ -227,6 +227,7 @@ class IconTuning:
 
     move_head_scale: float = 1.0
     scale_handle_scale: float = 1.0
+    snap_endpoint_scale: float = 1.0
     key_fit_arm_length: float = 4.0
 
 
@@ -836,6 +837,56 @@ def _concept_rotate_ring_polygons(
     )
 
 
+@lru_cache(maxsize=128)
+def _circular_stroke_mesh(
+    radius: float,
+    width: float,
+    segments: int = 64,
+) -> tuple[
+    tuple[tuple[float, float], ...],
+    tuple[int, ...],
+    tuple[tuple[float, float], ...],
+    tuple[tuple[float, float], ...],
+]:
+    """Return one hollow circular stroke with explicit outer and inner AA contours."""
+
+    if radius <= 0.0 or width <= 0.0 or width >= radius * 2.0:
+        raise ValueError("circular stroke width must be positive and smaller than its diameter")
+    if segments < 8:
+        raise ValueError("circular stroke requires at least eight segments")
+    outer_radius = radius + width * 0.5
+    inner_radius = radius - width * 0.5
+    outer = tuple(
+        (
+            outer_radius * math.cos(index * math.tau / segments),
+            outer_radius * math.sin(index * math.tau / segments),
+        )
+        for index in range(segments)
+    )
+    inner = tuple(
+        (
+            inner_radius * math.cos(index * math.tau / segments),
+            inner_radius * math.sin(index * math.tau / segments),
+        )
+        for index in range(segments)
+    )
+    vertices = (*outer, *inner)
+    indices = tuple(
+        vertex
+        for index in range(segments)
+        for following in ((index + 1) % segments,)
+        for vertex in (
+            index,
+            following,
+            segments + following,
+            index,
+            segments + following,
+            segments + index,
+        )
+    )
+    return vertices, indices, outer, inner
+
+
 def _draw_tool(p: _Painter, name: str) -> None:
     if name == "tool-move":
         # Restore the original compact arrowhead proportions. The head control
@@ -876,17 +927,27 @@ def _draw_tool(p: _Painter, name: str) -> None:
             convex_only=False,
         )
     elif name == "tool-rotate":
-        # Repeat the established production construction: the screen ring uses
-        # ImGui's antialiased circle stroke. The three local half-rings use a
-        # gap-limited fringe: two opposing AA ramps may meet at the center of a
-        # knockout but must never overlap and fill it at compact sizes.
+        # Submit the outer frame and the three local half-rings as filled meshes
+        # with the same fringe budget. ImGui's stroked-circle rasterizer has a
+        # different subpixel coverage rule and made the frame read thinner at
+        # the compact Tool Column size despite an identical nominal width.
         production_scale = 0.82
         glyph_scale = production_scale * TOOL_GLYPH_SCALE
-        p.circle(0.0, 0.0, 10.0 * glyph_scale)
         rendered_gap = p.stroke * p.rotate_ring_gap_ratio
         fringe_width = min(
             ROTATE_FRINGE_MAX,
             rendered_gap * ROTATE_FRINGE_GAP_FRACTION,
+        )
+        frame = _circular_stroke_mesh(
+            10.0 * glyph_scale,
+            p.stroke_width * p.stroke_compensation,
+        )
+        p.indexed_fill(
+            frame[0],
+            frame[1],
+            outline=frame[2],
+            hole=frame[3],
+            fringe_width=fringe_width,
         )
         for ring in _concept_rotate_ring_polygons(
             p.stroke_width * p.stroke_compensation / production_scale,
@@ -992,15 +1053,18 @@ def _draw_tool(p: _Painter, name: str) -> None:
             CAPSULE_SMOOTHING,
         )
         p.polyline(path)
+        endpoint_scale = p.tuning.snap_endpoint_scale
+        endpoint_half_width = 1.35 * endpoint_scale
+        endpoint_half_height = 0.9 * endpoint_scale
         for x, y in (path[0], path[-1]):
             p.smooth_polygon(
                 (
-                    (x - 1.35, y - 0.9),
-                    (x + 1.35, y - 0.9),
-                    (x + 1.35, y + 0.9),
-                    (x - 1.35, y + 0.9),
+                    (x - endpoint_half_width, y - endpoint_half_height),
+                    (x + endpoint_half_width, y - endpoint_half_height),
+                    (x + endpoint_half_width, y + endpoint_half_height),
+                    (x - endpoint_half_width, y + endpoint_half_height),
                 ),
-                0.42,
+                0.42 * endpoint_scale,
             )
 
 
