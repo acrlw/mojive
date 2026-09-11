@@ -127,6 +127,37 @@ as desktop preferences for later viewers created without an explicit config. Run
 `ViewerConfig(live_model_updates=None)` uses the persisted editor preference, whose default is
 `False`. Set `True` for immediate UI model edits; public Session/RPC commands remain synchronous.
 
+UI colors belong to each Viewer rather than its Session, so two windows presenting the same
+scene may use different themes. `Theme` controls the native ImGui colors, semantic node and axis
+colors, and the palette assigned to newly authored objects. `ViewportChromeColors` independently
+controls the floating capsule surface, outline, divider, and the background and foreground for
+off, hover, press, on, and disabled controls. Colors are RGBA floats; `rgb8()` is a convenience
+for 8-bit RGB values.
+
+```python
+from dataclasses import replace
+
+from mojive import THEME, ViewportChromeColors, build, rgb8
+
+chrome = replace(
+    THEME.viewport,
+    surface=rgb8(25, 28, 34, 0.94),
+    outline=rgb8(115, 125, 140, 0.55),
+    hover_background=rgb8(55, 70, 88),
+    press_background=rgb8(43, 56, 72),
+    on_background=rgb8(65, 105, 145),
+    on_foreground=rgb8(240, 247, 255),
+)
+custom_theme = replace(
+    THEME,
+    viewport=chrome,
+    entity_palette=(rgb8(233, 122, 92), rgb8(94, 180, 155), rgb8(104, 145, 224)),
+)
+
+viewer = build("robot.xml", theme=custom_theme)
+viewer.set_theme(replace(custom_theme, viewport=replace(chrome, on_background=rgb8(125, 90, 190))))
+```
+
 Owned MuJoCo viewers default to `ViewerConfig(threaded_physics=True)`: physics advances on a
 worker while the main thread reads completed snapshots. Use `threaded_physics=False` for the
 serial path. This is an instance option, not a persisted desktop preference. Externally clocked

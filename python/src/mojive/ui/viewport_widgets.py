@@ -813,8 +813,8 @@ def draw_capsule(
     scale: float,
 ) -> None:
     points = capsule_points(float(origin[0]), float(origin[1]), width, height)
-    draw.convex_fill(points, (*theme.bg_child[:3], CAPSULE_SURFACE_ALPHA))
-    draw.polyline(points, (*theme.text[:3], 0.25), 1.4 * scale, closed=True)
+    draw.convex_fill(points, theme.viewport.surface)
+    draw.polyline(points, theme.viewport.outline, 1.4 * scale, closed=True)
 
 
 def overlay_divider_length(width: float = DIVIDER_WIDTH, *, playback: bool) -> float:
@@ -841,7 +841,7 @@ def draw_overlay_divider(
     half = overlay_divider_length(width, playback=playback) * scale * 0.5
     dx, dy = (0.0, half) if playback else (half, 0.0)
     x, y = center
-    draw.line((x - dx, y - dy), (x + dx, y + dy), (*theme.border[:3], 0.72), scale)
+    draw.line((x - dx, y - dy), (x + dx, y + dy), theme.viewport.divider, scale)
 
 
 def playback_control_centers(controls: Sequence[ViewportControl] = PLAYBACK_CONTROLS):
@@ -896,18 +896,31 @@ def _circle_button(
     hovered = imgui.is_item_hovered()
     active = imgui.is_item_active()
     imgui.end_disabled()
-    if enabled and (selected or hovered or active):
-        draw.circle_filled(center, STATE_RADIUS * scale, theme.bg_frame_active)
-    foreground = (
-        theme.primary_bright
-        if enabled and (selected or hovered or active)
-        else theme.text
-        if enabled
-        else theme.text_disabled
+    background, foreground = _viewport_control_colors(
+        theme, selected=selected, hovered=hovered, active=active, enabled=enabled
     )
-    surface = theme.bg_frame_active if selected or hovered or active else theme.bg_popup
+    if background[3] > 0.0:
+        draw.circle_filled(center, STATE_RADIUS * scale, background)
+    surface = background if background[3] > 0.0 else theme.viewport.surface
     icon(draw, center, foreground, scale, (surface, payload))
     return bool(clicked and enabled)
+
+
+def _viewport_control_colors(
+    theme: Theme, *, selected: bool, hovered: bool, active: bool, enabled: bool
+):
+    """Resolve one capsule control state with press taking visual precedence."""
+
+    colors = theme.viewport
+    if not enabled:
+        return colors.disabled_background, colors.disabled_foreground
+    if active:
+        return colors.press_background, colors.press_foreground
+    if selected:
+        return colors.on_background, colors.on_foreground
+    if hovered:
+        return colors.hover_background, colors.hover_foreground
+    return colors.off_background, colors.off_foreground
 
 
 RESET_GLYPH_SCALE = 0.88
@@ -1141,7 +1154,7 @@ def draw_playback(
             icon,
             selected=selected,
             enabled=enabled and action_enabled,
-            payload=(recording, theme.danger, record_action),
+            payload=(recording, theme.viewport.record, record_action),
         ):
             result = name
         tooltip = control.tooltip

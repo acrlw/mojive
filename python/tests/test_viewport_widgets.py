@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
+from mojive.ui.theme import Theme, ViewportChromeColors
 from mojive.ui.viewport_widgets import (
     _FRAME_ARROW_CORNER_RADIUS_PT,
     _MOVE_ARROW_BASE,
@@ -32,6 +33,7 @@ from mojive.ui.viewport_widgets import (
     _polygon_area,
     _rotate_visible_ring_polygons,
     _status_performance_layout,
+    _viewport_control_colors,
     _viewport_tooltip_padding,
     capsule_points,
     draw_hint,
@@ -170,6 +172,39 @@ def test_transient_chrome_tracks_large_global_ui_scale():
 def test_viewport_tooltip_padding_scales_with_chrome():
     assert _viewport_tooltip_padding(1.0) == pytest.approx((7.0, 4.0))
     assert _viewport_tooltip_padding(1.5) == pytest.approx((10.5, 6.0))
+
+
+def test_viewport_control_colors_are_independently_configurable_by_state():
+    values = tuple((index / 20, 0.1, 0.2, 1.0) for index in range(1, 11))
+    chrome = ViewportChromeColors(
+        off_background=values[0],
+        hover_background=values[1],
+        press_background=values[2],
+        on_background=values[3],
+        disabled_background=values[4],
+        off_foreground=values[5],
+        hover_foreground=values[6],
+        press_foreground=values[7],
+        on_foreground=values[8],
+        disabled_foreground=values[9],
+    )
+    theme = Theme(viewport=chrome)
+
+    assert _viewport_control_colors(
+        theme, selected=False, hovered=False, active=False, enabled=True
+    ) == (chrome.off_background, chrome.off_foreground)
+    assert _viewport_control_colors(
+        theme, selected=False, hovered=True, active=False, enabled=True
+    ) == (chrome.hover_background, chrome.hover_foreground)
+    assert _viewport_control_colors(
+        theme, selected=True, hovered=True, active=False, enabled=True
+    ) == (chrome.on_background, chrome.on_foreground)
+    assert _viewport_control_colors(
+        theme, selected=True, hovered=True, active=True, enabled=True
+    ) == (chrome.press_background, chrome.press_foreground)
+    assert _viewport_control_colors(
+        theme, selected=True, hovered=True, active=True, enabled=False
+    ) == (chrome.disabled_background, chrome.disabled_foreground)
 
 
 class _MeasuredText:

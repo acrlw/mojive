@@ -13,7 +13,6 @@ from mojive.curves2d import (
 )
 from mojive.ui.theme import THEME
 from mojive.ui.viewport_widgets import CAPSULE_SMOOTHING as CAPSULE_SMOOTHING
-from mojive.ui.viewport_widgets import CAPSULE_SURFACE_ALPHA
 
 CAPSULE_OUTLINE_LABELS = ("Neutral gray", "Soft white")
 
@@ -109,7 +108,7 @@ def g3_capsule_spans(width, height, smoothing):
 
 def draw_capsule_shell(draw, x, y, width, height, scale, geometry):
     shell = smooth_capsule_points(x, y, width, height, geometry.capsule_smoothing)
-    draw.convex_fill(shell, (*THEME.bg_child[:3], CAPSULE_SURFACE_ALPHA))
+    draw.convex_fill(shell, THEME.viewport.surface)
     draw.polyline(shell, capsule_outline_color(geometry), 1.4 * scale, closed=True)
     if geometry.highlight_g3:
         for span in g3_capsule_spans(width, height, geometry.capsule_smoothing):

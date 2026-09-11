@@ -540,6 +540,8 @@ class ViewerApp:
         self.window = window
         self.title = title
         self.theme = theme or THEME
+        if self.window is not None:
+            self.window.apply_theme(self.theme)
         self.debug_bridge = debug_bridge
         self.localizer = Localizer.load()
         explicit_config = config is not None
@@ -1019,6 +1021,7 @@ class ViewerApp:
             self._output_sink_id = add_output_sink(self.output.loguru_sink)
         if self.window is None:
             self.window = Window(WindowConfig(title=self.title))
+            self.window.apply_theme(self.theme)
         self._sync_structure()
         self._reset_source_camera()
         self.session.set_threaded_physics(self._threaded_physics)
@@ -1271,6 +1274,13 @@ class ViewerApp:
         self.localizer.set_preferences({"live_model_updates": self.live_model_updates})
         if value and self.model_edits.active:
             self._apply_model_edits_requested = True
+
+    def set_theme(self, theme: Theme) -> None:
+        """Replace this viewer's colors without changing scene or session state."""
+
+        self.theme = theme
+        if self.window is not None:
+            self.window.apply_theme(theme)
 
     def _start_pending_model_edits(self) -> None:
         if not self._apply_model_edits_requested:

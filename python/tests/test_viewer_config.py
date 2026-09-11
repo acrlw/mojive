@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from mojive import (
+    THEME,
     CameraInputConfig,
     InputClaim,
     InteractionConfig,
     LayoutConfig,
     SelectionInputConfig,
     SelectionStyle,
+    Theme,
     ViewerConfig,
+    ViewportChromeColors,
     ViewportOverlayConfig,
 )
 from mojive.composition import _viewer_layout_path
@@ -54,6 +57,16 @@ def test_top_level_config_is_immutable_and_composable() -> None:
 
     assert config.interactions.camera.fly is False
     assert config.selection.frame is True
+
+
+def test_public_theme_exposes_viewport_states_and_entity_palette() -> None:
+    chrome = ViewportChromeColors(on_background=(0.2, 0.4, 0.6, 1.0))
+    palette = ((0.8, 0.1, 0.2, 1.0),)
+    theme = Theme(viewport=chrome, entity_palette=palette)
+
+    assert theme.viewport.on_background == (0.2, 0.4, 0.6, 1.0)
+    assert theme.entity_palette == palette
+    assert THEME.viewport.surface[3] > 0.0
 
 
 def test_viewport_overlay_mapping_validates_scales_and_positions() -> None:

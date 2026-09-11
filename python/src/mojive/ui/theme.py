@@ -148,6 +148,30 @@ PERTURB_COMMANDED: RGBA = AXIS_COLORS["y"]
 
 PERTURB_ACTUAL: RGBA = AXIS_COLORS["x"]
 
+VIEWPORT_CAPSULE_SURFACE: RGBA = with_alpha(BG_CHILD, 0.92)
+VIEWPORT_CAPSULE_OUTLINE: RGBA = with_alpha(TEXT, 0.25)
+VIEWPORT_CAPSULE_DIVIDER: RGBA = with_alpha(BORDER, 0.72)
+
+
+@dataclass(frozen=True)
+class ViewportChromeColors:
+    """Colors for the floating playback and tool capsules in every input state."""
+
+    surface: RGBA = VIEWPORT_CAPSULE_SURFACE
+    outline: RGBA = VIEWPORT_CAPSULE_OUTLINE
+    divider: RGBA = VIEWPORT_CAPSULE_DIVIDER
+    off_background: RGBA = (0.0, 0.0, 0.0, 0.0)
+    hover_background: RGBA = BG_FRAME_ACTIVE
+    press_background: RGBA = BG_FRAME_ACTIVE
+    on_background: RGBA = BG_FRAME_ACTIVE
+    disabled_background: RGBA = (0.0, 0.0, 0.0, 0.0)
+    off_foreground: RGBA = TEXT
+    hover_foreground: RGBA = PRIMARY_BRIGHT
+    press_foreground: RGBA = PRIMARY_BRIGHT
+    on_foreground: RGBA = PRIMARY_BRIGHT
+    disabled_foreground: RGBA = TEXT_DISABLED
+    record: RGBA = DANGER
+
 
 @dataclass(frozen=True)
 class Theme:
@@ -173,6 +197,7 @@ class Theme:
     axis_colors: dict[str, RGBA] = field(default_factory=lambda: dict(AXIS_COLORS))
     entity_palette: tuple[RGBA, ...] = ENTITY_PALETTE
     info: RGBA = INFO
+    viewport: ViewportChromeColors = field(default_factory=ViewportChromeColors)
 
     def node_color(self, node_type: NodeType | str) -> RGBA:
         try:
@@ -208,7 +233,9 @@ def apply_corner_radius(imgui: Any, radius: float, ui_scale: float = 1.0) -> Non
     style.grab_rounding = max(0.0, float(style.frame_rounding) - 2.0)
 
 
-def apply(imgui: Any, theme: Theme = THEME, ui_scale: float = 1.0) -> None:
+def apply_colors(imgui: Any, theme: Theme = THEME) -> None:
+    """Apply theme colors without changing the window's geometry or scale."""
+
     style = imgui.get_style()
     col = imgui.Col_
     v4 = imgui.ImVec4
@@ -271,6 +298,12 @@ def apply(imgui: Any, theme: Theme = THEME, ui_scale: float = 1.0) -> None:
     put(col.nav_cursor, theme.primary)
     put(col.drag_drop_target, theme.warning)
 
+
+def apply(imgui: Any, theme: Theme = THEME, ui_scale: float = 1.0) -> None:
+    """Apply theme colors and the default Mojive ImGui geometry."""
+
+    apply_colors(imgui, theme)
+    style = imgui.get_style()
     apply_corner_radius(imgui, DEFAULT_CORNER_RADIUS)
     style.selectable_rounding = 0.0
     style.menu_item_rounding = 0.0

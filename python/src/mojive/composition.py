@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from .scene import Scene
     from .session import Session
     from .ui.app import ViewerApp
+    from .ui.theme import Theme
     from .ui.window import Window
 
 
@@ -127,6 +128,17 @@ class Viewer:
         """Return the active presentation settings for logical selection."""
 
         return self.app.selection_style
+
+    @property
+    def theme(self) -> Theme:
+        """Return the colors used by this viewer's native and custom UI."""
+
+        return self.app.theme
+
+    def set_theme(self, theme: Theme) -> None:
+        """Apply colors to this viewer while preserving its scene and layout."""
+
+        self.app.set_theme(theme)
 
     @property
     def shadow_quality(self):
@@ -468,6 +480,7 @@ def build(
     title: str = "Mojive",
     show_window: bool = True,
     config: ViewerConfig | None = None,
+    theme: Theme | None = None,
 ) -> Viewer:
     """Build an interactive viewer for a model or scene asset.
 
@@ -491,6 +504,8 @@ def build(
         show_window: Show the native window when rendering starts. Disable for
             automated UI tests and off-screen capture.
         config: Optional programmatic interaction, selection, and panel policy.
+        theme: Optional colors for this viewer's native controls, viewport capsules,
+            semantic badges, and authored-object palette.
 
     Returns:
         A composed viewer ready to run or step manually.
@@ -535,6 +550,7 @@ def build(
         title=title,
         show_window=show_window,
         viewer_config=config,
+        theme=theme,
         renderer=renderer,
     )
 
@@ -553,6 +569,7 @@ def build_workspace(
     title: str = "Mojive",
     show_window: bool = True,
     config: ViewerConfig | None = None,
+    theme: Theme | None = None,
 ) -> Viewer:
     """Build an editable workspace around a model adapter."""
     from .adapters.workspace import WorkspaceAdapter
@@ -570,6 +587,7 @@ def build_workspace(
         title=title,
         show_window=show_window,
         viewer_config=config,
+        theme=theme,
         renderer=renderer,
     )
 
@@ -586,6 +604,7 @@ def build_from_adapter(
     title: str = "Mojive",
     show_window: bool = True,
     config: ViewerConfig | None = None,
+    theme: Theme | None = None,
 ) -> Viewer:
     """Build an interactive viewer around an initialized scene adapter."""
 
@@ -600,6 +619,7 @@ def build_from_adapter(
         title=title,
         show_window=show_window,
         viewer_config=config,
+        theme=theme,
         renderer=renderer,
     )
 
@@ -634,6 +654,7 @@ def _compose(
     title: str,
     show_window: bool,
     viewer_config: ViewerConfig | None,
+    theme: Theme | None,
     renderer: str | None = None,
 ) -> Viewer:
     from . import commands as cmd
@@ -700,6 +721,7 @@ def _compose(
             title=title,
             debug_bridge=debug_bridge,
             config=viewer_config,
+            theme=theme,
         )
         if viewer_config is not None and viewer_config.layout.reset:
             app.reset_layout(persist=bool(window.config.ini_path))

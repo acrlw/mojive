@@ -1,5 +1,6 @@
 """Exercise the production corner controls through real ImGui input and rendering."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -11,6 +12,22 @@ from mojive.ui import theme
 from mojive.ui.window import Window, WindowConfig
 
 pytestmark = pytest.mark.gpu
+
+
+def test_window_applies_a_viewer_owned_theme_to_native_imgui_colors():
+    frame = (0.18, 0.31, 0.47, 1.0)
+    custom = replace(theme.THEME, bg_frame=frame)
+    window = Window(WindowConfig(docking=False, ini_path="", show_on_start=False))
+    original_rounding = imgui.get_style().frame_rounding
+    try:
+        imgui.get_style().frame_rounding = 7.0
+        window.apply_theme(custom)
+        actual = imgui.get_style_color_vec4(imgui.Col_.frame_bg)
+        assert (actual.x, actual.y, actual.z, actual.w) == pytest.approx(frame)
+        assert imgui.get_style().frame_rounding == pytest.approx(7.0)
+    finally:
+        imgui.get_style().frame_rounding = original_rounding
+        window.close()
 
 
 def test_corner_sliders_update_independently_and_keep_fractional_values(monkeypatch):
