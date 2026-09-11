@@ -32,8 +32,10 @@ if __package__:
         ICON_GROUP_BY_SLUG,
         ICON_LIBRARY_TABS,
         draw_concept_icon,
+        icon_alignment_anchor,
         icon_family,
         icon_metrics,
+        minimum_enclosing_circle,
     )
     from .ui_redesign import (
         RECORD_GLYPH_RADIUS,
@@ -61,8 +63,10 @@ else:
         ICON_GROUP_BY_SLUG,
         ICON_LIBRARY_TABS,
         draw_concept_icon,
+        icon_alignment_anchor,
         icon_family,
         icon_metrics,
+        minimum_enclosing_circle,
     )
     from ui_redesign import (
         RECORD_GLYPH_RADIUS,
@@ -3819,8 +3823,8 @@ def _draw_concept_icon_specimen(draw, center, size: float, name: str, scale: flo
     )
 
 
-def _icon_review_metrics(name: str) -> tuple[float, float, float, float, float]:
-    """Return radial, box-center, and ink-mass diagnostics on the 24-unit grid."""
+def _icon_review_metrics(name: str) -> tuple[float, float, float, float, float, float, float]:
+    """Return radial, box, bounding-circle, and ink diagnostics on the 24-unit grid."""
 
     if name.startswith("status-") and name.removeprefix("status-") in {
         "info",
@@ -3836,6 +3840,7 @@ def _icon_review_metrics(name: str) -> tuple[float, float, float, float, float]:
             float(points[:, 1].max()),
         )
         radial_extent = float(np.linalg.norm(points, axis=1).max())
+        bounding_center, _bounding_radius = minimum_enclosing_circle(points)
         ink_area = 0.0
         ink_moment = np.zeros(2, np.float64)
         for vertices, indices, _outline, _hole in meshes:
@@ -3852,12 +3857,20 @@ def _icon_review_metrics(name: str) -> tuple[float, float, float, float, float]:
             ICON_BOUND_DIAMETER * 0.5 - radial_extent,
             (bounds[0] + bounds[2]) * 0.5,
             (bounds[1] + bounds[3]) * 0.5,
+            bounding_center[0],
+            bounding_center[1],
             float(ink_center[0]),
             float(ink_center[1]),
         )
     metrics = icon_metrics(name)
     offset_x, offset_y = metrics.center_offset
-    return metrics.radial_clearance, offset_x, offset_y, *metrics.ink_center
+    return (
+        metrics.radial_clearance,
+        offset_x,
+        offset_y,
+        *metrics.bounding_center,
+        *metrics.ink_center,
+    )
 
 
 def _draw_icon_library_overview(draw, origin, scale: float) -> None:
@@ -3912,7 +3925,7 @@ def _draw_icon_family_detail(draw, origin, family: str, scale: float) -> None:
     draw.text(
         (origin[0], header_y + 24.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Orange = 24-unit placement bound · anchor = box, optical ink, or semantic hub",
+        "Orange = 24-unit placement bound · anchor = bounding circle, optical ink, semantic hub, or box",
     )
     for center_x, size in zip(centers, _ICON_REVIEW_SIZES, strict=True):
         draw.centered_label(
@@ -3943,19 +3956,14 @@ def _draw_icon_family_detail(draw, origin, family: str, scale: float) -> None:
             _draw_concept_icon_specimen(draw, (center_x, center_y), size * scale, name, scale)
 
         meta_x = origin[0] + 1160.0 * scale
-        clearance, offset_x, offset_y, ink_x, ink_y = _icon_review_metrics(name)
-        anchor = (
-            "hub"
-            if name == "tool-scale"
-            else "ink"
-            if name == "helper-camera" or name.startswith("transport-")
-            else "box"
-        )
+        clearance, offset_x, offset_y, sphere_x, sphere_y, ink_x, ink_y = _icon_review_metrics(name)
+        anchor = icon_alignment_anchor(name)
         for line, line_y in (
-            (f"{name} · pad {clearance:.2f}u", -30.0),
-            (f"box  {offset_x:+.2f},{offset_y:+.2f}u", -10.0),
-            (f"ink  {ink_x:+.2f},{ink_y:+.2f}u", 10.0),
-            (f"anchor  {anchor}", 30.0),
+            (f"{name} · pad {clearance:.2f}u", -40.0),
+            (f"box  {offset_x:+.2f},{offset_y:+.2f}u", -20.0),
+            (f"sphere  {sphere_x:+.2f},{sphere_y:+.2f}u", 0.0),
+            (f"ink  {ink_x:+.2f},{ink_y:+.2f}u", 20.0),
+            (f"anchor  {anchor}", 40.0),
         ):
             draw.text(
                 (meta_x, center_y + line_y * scale),

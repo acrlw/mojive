@@ -10,6 +10,7 @@ from design.tools.ui_icon_concepts import (
     ICON_MIN_CLEARANCE,
     draw_concept_icon,
     icon_metrics,
+    minimum_enclosing_circle,
 )
 
 from mojive.curves2d import arrow_mesh
@@ -55,7 +56,8 @@ class _RecordingDraw:
         join_radius,
         **_kwargs,
     ) -> None:
-        self.arrows.append((a, b, float(width)))
+        round_tail = bool(_kwargs.get("round_tail", False))
+        self.arrows.append((a, b, float(width), round_tail))
         dx, dy = float(b[0] - a[0]), float(b[1] - a[1])
         length = math.hypot(dx, dy)
         ux, uy = dx / length, dy / length
@@ -66,6 +68,7 @@ class _RecordingDraw:
             head_width=float(head_width),
             corner_radius=float(corner_radius),
             join_radius=float(join_radius),
+            round_tail=round_tail,
         )
         points = tuple((a[0] + x * ux - y * uy, a[1] + x * uy + y * ux) for x, y in outline)
         self.fills += 1
@@ -137,6 +140,13 @@ def test_concept_catalog_has_unique_named_members() -> None:
     assert all(icons for _family, icons in ICON_FAMILIES)
 
 
+def test_minimum_enclosing_circle_tracks_the_radial_envelope() -> None:
+    center, radius = minimum_enclosing_circle(((1.0, 0.0), (5.0, 0.0), (3.0, 2.0)))
+
+    assert center == pytest.approx((3.0, 0.0))
+    assert radius == pytest.approx(2.0)
+
+
 @pytest.mark.parametrize("name", _icons())
 def test_concept_icons_stay_inside_the_shared_canvas(name: str) -> None:
     size = 20.0
@@ -162,7 +172,8 @@ def test_concept_icon_ink_stays_inside_circular_placement_bound(name: str) -> No
     tuple(
         name
         for name in _icons()
-        if name != "tool-scale" and name != "helper-camera" and not name.startswith("transport-")
+        if name not in {"tool-scale", "tool-snap", "helper-camera"}
+        and not name.startswith(("transport-", "panel-"))
     ),
 )
 def test_concept_icon_bounds_are_centered_in_placement_circle(name: str) -> None:
@@ -260,9 +271,21 @@ def test_sort_arrow_tip_and_tail_align_with_bar_centerlines() -> None:
     assert len(draw.arrows) == 1
     stroke_top = min(a[1] for a, _b, _width in draw.lines)
     stroke_bottom = max(a[1] for a, _b, _width in draw.lines)
-    arrow_start, arrow_end, _arrow_width = draw.arrows[0]
+    arrow_start, arrow_end, _arrow_width, round_tail = draw.arrows[0]
     assert arrow_start[1] == pytest.approx(stroke_top, abs=0.01)
     assert arrow_end[1] == pytest.approx(stroke_bottom, abs=0.01)
+    assert round_tail
+
+
+@pytest.mark.parametrize(
+    "name",
+    ("tool-snap", *(name for name in _icons() if name.startswith("panel-"))),
+)
+def test_bounding_circle_anchored_icons_center_their_sphere(name: str) -> None:
+    metrics = icon_metrics(name)
+
+    assert metrics.bounding_center == pytest.approx((0.0, 0.0), abs=0.01)
+    assert metrics.bounding_radius <= ICON_BOUND_DIAMETER * 0.5 - ICON_MIN_CLEARANCE + 1e-6
 
 
 @pytest.mark.parametrize(
