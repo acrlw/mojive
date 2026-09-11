@@ -93,3 +93,32 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.tick_scale == probe.gizmo_ui.DEFAULT_ROTATION_TICK_SCALE
     assert state.selection_padding == probe.DEFAULT_SELECTION_PADDING
     assert state.corner_radius == probe.OUTLINE_CORNER_RADIUS_PT
+
+
+def test_icon_library_reuses_production_output_severity_painter(monkeypatch):
+    calls = []
+
+    class Draw:
+        def circle(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(probe, "severity_icon", lambda *args: calls.append(args))
+    monkeypatch.setattr(
+        probe,
+        "draw_concept_icon",
+        lambda *_args: pytest.fail("status icons must not use the concept duplicate"),
+    )
+
+    probe._draw_concept_icon_specimen(Draw(), (10.0, 20.0), 14.0, "status-warning", 1.0)
+
+    assert len(calls) == 1
+    assert calls[0][1:4] == ((10.0, 20.0), 14.0, "warning")
+
+
+@pytest.mark.parametrize("name", ("status-info", "status-warning", "status-error"))
+def test_production_severity_stays_centered_inside_icon_library_boundary(name):
+    clearance, center_x, center_y = probe._icon_review_metrics(name)
+
+    assert clearance >= 0.6
+    assert center_x == pytest.approx(0.0, abs=1e-6)
+    assert center_y == pytest.approx(0.0, abs=1e-6)

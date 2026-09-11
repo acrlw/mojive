@@ -36,6 +36,7 @@ nav:
       - Python and C++ development: guides/development.md
       - G3 UI corners: how-to/ui-corners.md
       - Extend UI drawing: how-to/ui-drawing.md
+      - Design UI icons: how-to/ui-icons.md
       - WebGPU backend: WGPU_BACKEND_REPORT.md
       - Native renderer probe: guides/native-probe.md
       - Native Viewer (中文): how-to/native-viewer.zh.md

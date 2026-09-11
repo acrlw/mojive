@@ -209,8 +209,9 @@ Native slider and focus checks require `make setup-imgui`.
 
 ### Diagnostic glyphs and compact fields
 
-Diagnostic outlines and their internal capsule strokes share the same solid width and antialias
-convention. Dots have a minimum visible radius, with separate spacing from the stem. Fixed local
+Diagnostic outlines and their internal marks follow the shared
+[UI icon design grid](ui-icons.md#output-severity-contract). Every authored dimension scales from
+that grid; dots use a documented optical ratio instead of an absolute pixel minimum. Fixed local
 contours, triangle indices and fringe geometry are cached; movement applies a native vertex
 translation. Reset arrows reuse ImGui's tessellator once per local shape and scale. The Diagnostics
 feasibility page shows 14/20/32/56-point glyphs and normal/hover/pressed slider states.
@@ -220,10 +221,11 @@ same joined-frame primitive as Transform axis badges, with only the external cor
 
 ## Small diagnostics and compound fields
 
-Diagnostic glyphs use separate outer and inner stroke widths, capsule-ended stems, and a minimum
-visible dot size. The antialias fringe is one framebuffer pixel even at Retina scale. Contours,
-triangle indices, and fringe offsets are cached; translating an icon does not resample its curves.
-`make ui-diagnostics` renders the shared production glyphs and slider interaction states.
+Diagnostic glyphs use separate outer and inner stroke widths, capsule-ended stems, and one
+24-unit design grid. Frame, mark, dot, gap, and safe area scale together; only the antialias fringe
+stays one framebuffer pixel wide at Retina scale. Contours, triangle indices, and fringe offsets
+are cached; translating an icon does not resample its curves. `make ui-diagnostics` renders the
+shared production glyphs, multi-size frame/mark ratios, and slider interaction states.
 
 Compound numeric fields suppress the native navigation outline while retaining text selection
 and keyboard editing. Only the outer ends are rounded; the number/unit seam stays square.
