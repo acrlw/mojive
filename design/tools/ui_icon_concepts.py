@@ -11,11 +11,21 @@ import math
 from dataclasses import dataclass
 from functools import lru_cache
 
-from mojive.curves2d import CORNER_SMOOTHING, arrow_mesh, box_handle_points, smooth_polygon_corners
+from mojive.curves2d import (
+    CORNER_SMOOTHING,
+    arrow_mesh,
+    box_handle_points,
+    polyline_ribbon,
+    smooth_polygon_corners,
+    smooth_rect_points,
+)
+from mojive.draglink2d import smooth_union
 from mojive.ui.viewport_widgets import (
+    CAPSULE_SMOOTHING,
     OVERLAY_GEOMETRY,
     TOOL_GLYPH_SCALE,
     _rotate_visible_ring_polygons,
+    _snap_glyph_shape,
 )
 
 ICON_GRID = 24.0
@@ -181,6 +191,15 @@ class _Painter:
     def polygon(self, points) -> None:
         self.draw.fringed_concave_fill(self.points(points), self.color)
 
+    def indexed_fill(self, points, indices, *, outline, hole=()) -> None:
+        self.draw.indexed_fill(
+            self.points(points),
+            indices,
+            self.color,
+            outline=self.points(outline),
+            hole=self.points(hole),
+        )
+
     def smooth_polygon(
         self,
         points,
@@ -315,22 +334,43 @@ class _Painter:
 
 
 def _triangle(p: _Painter, direction: float, *, center_x: float = 0.0, scale: float = 1.0) -> None:
-    p.polygon(
+    p.smooth_polygon(
         (
             (center_x - direction * 6.4 * scale, -6.8 * scale),
             (center_x + direction * 6.4 * scale, 0.0),
             (center_x - direction * 6.4 * scale, 6.8 * scale),
-        )
+        ),
+        1.12 * scale,
     )
 
 
+def _rounded_polyline(
+    p: _Painter,
+    points,
+    *,
+    width: float = ICON_STROKE,
+    radius: float = 0.68,
+) -> None:
+    """Fill one open centerline as a joined G3 contour."""
+
+    _left, _right, outline = polyline_ribbon(tuple(points), width)
+    p.smooth_polygon(outline, radius, convex_only=False)
+
+
+def _g3_rect(p: _Painter, x0: float, y0: float, x1: float, y1: float, radius: float) -> None:
+    p.polygon(smooth_rect_points(x0, y0, x1, y1, radius, smoothing=CORNER_SMOOTHING))
+
+
 def _chevron(p: _Painter, direction: float, x: float, *, scale: float = 1.0) -> None:
-    p.polyline(
+    _rounded_polyline(
+        p,
         (
             (x - direction * 2.6 * scale, -4.4 * scale),
             (x + direction * 2.2 * scale, 0.0),
             (x - direction * 2.6 * scale, 4.4 * scale),
-        )
+        ),
+        width=ICON_STROKE * scale,
+        radius=0.68 * scale,
     )
 
 
@@ -403,10 +443,10 @@ def _arc_arrow(
 
 def _draw_tool(p: _Painter, name: str) -> None:
     if name == "tool-move":
-        # One connected outline avoids the visible seams produced by four
-        # stroked shafts with separately filled arrowheads.
+        # Keep the accepted Icon Library candidate as one connected G3 outline;
+        # the wider central cross remains legible at the 14-point specimen.
         tip, base, wing, shaft = 8.7, 5.6, 2.65, 0.82
-        p.polygon(
+        p.smooth_polygon(
             (
                 (0.0, -tip),
                 (wing, -base),
@@ -432,16 +472,15 @@ def _draw_tool(p: _Painter, name: str) -> None:
                 (-shaft, -shaft),
                 (-shaft, -base),
                 (-wing, -base),
-            )
+            ),
+            0.42,
+            convex_only=False,
         )
     elif name == "tool-rotate":
-        # Reuse the runtime Tool Column's three-dimensional rotation grammar.
-        # Its screen ring and three cyclically occluded half-rings cannot be
-        # confused with Reset's single circular arrow. The normalization keeps
-        # the production proportions inside this library's stricter safe area.
+        # Draw the established three cyclic half-rings locally. Reset keeps the
+        # separate one-arrow grammar, and production geometry remains untouched.
         production_scale = 0.82
         glyph_scale = production_scale * TOOL_GLYPH_SCALE
-        optical_y = 0.33
         p.circle(
             0.0,
             0.0,
@@ -452,24 +491,25 @@ def _draw_tool(p: _Painter, name: str) -> None:
             OVERLAY_GEOMETRY.tool_stroke,
             OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
             OVERLAY_GEOMETRY.rotate_ring_cap,
-            CORNER_SMOOTHING,
+            CAPSULE_SMOOTHING,
         ):
             for local in ring:
-                p.polygon(tuple((x * glyph_scale, y * glyph_scale + optical_y) for x, y in local))
+                p.polygon(tuple((x * glyph_scale, y * glyph_scale) for x, y in local))
     elif name == "tool-scale":
-        # Equal 120-degree axes keep the origin and ink mass aligned. Each
-        # endpoint is joined to its shaft as one G3 contour, so compact sizes
-        # retain a legible square without an antialiased seam.
-        radius = 6.45
+        # Three equal axes use joined G3 endpoint blocks. Starting each shaft
+        # outside the center dot leaves the reviewed circular transparent shell.
+        dot_radius = 1.2
+        clear_radius = 2.85
+        reach = 6.45
         for direction in ((0.0, -1.0), (0.866025, 0.5), (-0.866025, 0.5)):
             p.box_handle(
-                (0.0, 0.0),
-                (direction[0] * radius, direction[1] * radius),
+                (direction[0] * clear_radius, direction[1] * clear_radius),
+                (direction[0] * reach, direction[1] * reach),
                 width=1.4,
                 head_size=3.5,
                 corner_radius=0.62,
             )
-        p.circle_filled(0.0, 0.0, 1.2)
+        p.circle_filled(0.0, 0.0, dot_radius)
     elif name == "tool-world":
         p.circle(0.0, 0.0, 7.8, width=1.45)
         p.line((-7.65, 0.0), (7.65, 0.0), width=1.35)
@@ -505,11 +545,25 @@ def _draw_tool(p: _Painter, name: str) -> None:
             width=1.45,
         )
     else:
-        p.line((-5.4, -6.03), (-5.4, 1.17))
-        p.arc(5.4, 180.0, 0.0, center=(0.0, 1.17))
-        p.line((5.4, 1.17), (5.4, -6.03))
-        p.rect_filled(-6.8, -7.33, -4.0, -5.53, rounding=0.45)
-        p.rect_filled(4.0, -7.33, 6.8, -5.53, rounding=0.45)
+        # Snap is the production Tool Column contour. Its U-turn is generated
+        # from the same G3 profile as Mojive capsules instead of approximating
+        # the curve with a semicircle plus independently capped stems.
+        production_scale = 0.95
+        path = _snap_glyph_shape(
+            production_scale * TOOL_GLYPH_SCALE,
+            CAPSULE_SMOOTHING,
+        )
+        p.polyline(path, width=OVERLAY_GEOMETRY.tool_stroke * production_scale)
+        for x, y in (path[0], path[-1]):
+            p.smooth_polygon(
+                (
+                    (x - 1.35, y - 0.9),
+                    (x + 1.35, y - 0.9),
+                    (x + 1.35, y + 0.9),
+                    (x - 1.35, y + 0.9),
+                ),
+                0.42,
+            )
 
 
 def _draw_transport(p: _Painter, name: str) -> None:
@@ -517,8 +571,8 @@ def _draw_transport(p: _Painter, name: str) -> None:
     if kind == "play":
         _triangle(p, 1.0)
     elif kind == "pause":
-        p.rect_filled(-5.0, -6.8, -1.5, 6.8, rounding=0.75)
-        p.rect_filled(1.5, -6.8, 5.0, 6.8, rounding=0.75)
+        _g3_rect(p, -5.0, -6.8, -1.5, 6.8, 0.92)
+        _g3_rect(p, 1.5, -6.8, 5.0, 6.8, 0.92)
     elif kind in {"previous", "next"}:
         direction = -1.0 if kind == "previous" else 1.0
         _chevron(p, direction, direction * 0.24, scale=1.18)
@@ -528,15 +582,15 @@ def _draw_transport(p: _Painter, name: str) -> None:
         # The small separation is intentional and stays symmetrical when mirrored.
         _triangle(p, direction, center_x=-direction * 1.27, scale=0.72)
         x = direction * 5.13
-        p.line((x, -5.8), (x, 5.8))
+        _g3_rect(p, x - 0.75, -5.8, x + 0.75, 5.8, 0.58)
     elif kind == "reset":
         _arc_arrow(p, 6.8, -52.0, 255.0, center=(0.0, 0.47))
     elif kind == "record":
         p.circle_filled(0.0, 0.0, 4.8)
     elif kind == "stop":
-        p.rect_filled(-4.8, -4.8, 4.8, 4.8, rounding=0.9)
+        _g3_rect(p, -4.8, -4.8, 4.8, 4.8, 1.05)
     else:
-        p.polyline(((-5.6, -2.8), (0.0, 2.8), (5.6, -2.8)))
+        _rounded_polyline(p, ((-5.6, -2.8), (0.0, 2.8), (5.6, -2.8)))
 
 
 def _diamond(p: _Painter, center=(0.0, 0.0), radius: float = 5.4, *, filled: bool) -> None:
@@ -547,9 +601,9 @@ def _diamond(p: _Painter, center=(0.0, 0.0), radius: float = 5.4, *, filled: boo
         (center[0] - radius, center[1]),
     )
     if filled:
-        p.polygon(points)
+        p.smooth_polygon(points, 0.62)
     else:
-        p.polyline(points, closed=True)
+        p.smooth_outline(points, 0.62)
 
 
 def _draw_keyframe(p: _Painter, name: str) -> None:
@@ -591,15 +645,97 @@ def _eye_points() -> tuple[tuple[float, float], ...]:
     return (*top, *bottom[1:-1])
 
 
+@lru_cache(maxsize=1)
+def _search_icon_mesh():
+    """Return one hollow lens and handle joined by a G3 smooth union."""
+
+    outer_radius = 5.55
+    inner_radius = 4.05
+    handle_half_width = 0.825
+    handle_start = 3.65
+    handle_end = 10.775
+    handle_tip = handle_end + handle_half_width
+    blend = 1.05
+
+    def field(x: float, y: float) -> float:
+        circle = math.hypot(x, y) - outer_radius
+        along = min(handle_end, max(handle_start, x))
+        handle = math.hypot(x - along, y) - handle_half_width
+        return float(smooth_union(circle, handle, blend))
+
+    count = 193
+    xs = {
+        -outer_radius + (handle_tip + outer_radius) * index / (count - 1) for index in range(count)
+    }
+    xs.update((-outer_radius, -inner_radius, inner_radius, handle_start, handle_end, handle_tip))
+    columns = []
+    for x in sorted(xs):
+        if field(x, 0.0) > 1e-7:
+            outer_y = 0.0
+        else:
+            lo, hi = 0.0, outer_radius + blend + handle_half_width
+            while field(x, hi) <= 0.0:
+                hi *= 1.5
+            for _ in range(36):
+                mid = (lo + hi) * 0.5
+                if field(x, mid) <= 0.0:
+                    lo = mid
+                else:
+                    hi = mid
+            outer_y = (lo + hi) * 0.5
+        inner_y = math.sqrt(max(0.0, inner_radius * inner_radius - x * x))
+        columns.append((x, outer_y, inner_y))
+
+    vertices = tuple(
+        point
+        for x, outer_y, inner_y in columns
+        for point in ((x, -outer_y), (x, -inner_y), (x, inner_y), (x, outer_y))
+    )
+    indices = []
+    for column in range(len(columns) - 1):
+        start = column * 4
+        following = start + 4
+        for low, high in ((0, 1), (2, 3)):
+            for triangle in (
+                (start + low, following + low, following + high),
+                (start + low, following + high, start + high),
+            ):
+                a, b, c = (vertices[index] for index in triangle)
+                twice_area = abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+                if twice_area > 1e-9:
+                    indices.extend(triangle)
+
+    outline = tuple((x, -outer_y) for x, outer_y, _inner_y in columns) + tuple(
+        (x, outer_y) for x, outer_y, _inner_y in reversed(columns[1:-1])
+    )
+    hole = tuple(
+        (
+            inner_radius * math.cos(index * math.tau / 96),
+            inner_radius * math.sin(index * math.tau / 96),
+        )
+        for index in range(96)
+    )
+
+    cosine = math.sqrt(0.5)
+
+    def place(path):
+        return tuple(
+            (-1.7 + x * cosine - y * cosine, -1.7 + x * cosine + y * cosine) for x, y in path
+        )
+
+    return place(vertices), tuple(indices), place(outline), place(hole)
+
+
 def _draw_panel(p: _Painter, name: str) -> None:
     kind = name.removeprefix("panel-")
     if kind == "search":
-        p.circle(-1.7, -1.7, 4.8)
-        p.line((1.7, 1.7), (6.5, 6.5), width=1.65)
+        vertices, indices, outline, hole = _search_icon_mesh()
+        p.indexed_fill(vertices, indices, outline=outline, hole=hole)
     elif kind == "sort":
         for y, end in ((-5.09, 2.24), (0.11, 0.04), (5.31, -2.16)):
             p.line((-6.76, y), (end, y), width=1.45)
-        p.arrow((5.54, -6.49), (5.54, 6.71), width=1.4, head_length=3.0, head_width=4.6)
+        # The arrow tip and tail align with the top and bottom bar centerlines.
+        p.arrow((5.54, -5.09), (5.54, 5.31), width=1.4, head_length=3.0, head_width=4.6)
     elif kind == "clear":
         p.line((-5.8, -5.8), (5.8, 5.8), width=1.65)
         p.line((5.8, -5.8), (-5.8, 5.8), width=1.65)
@@ -630,11 +766,14 @@ def _draw_panel(p: _Painter, name: str) -> None:
             )
     elif kind in {"perspective", "orthographic"}:
         near = 3.0 if kind == "perspective" else 6.1
-        p.polyline(((-6.8, -near), (6.8, -6.1), (6.8, 6.1), (-6.8, near)), closed=True)
+        p.smooth_outline(
+            ((-6.8, -near), (6.8, -6.1), (6.8, 6.1), (-6.8, near)),
+            0.52,
+        )
     elif kind == "right":
-        p.polygon(((-3.8, -6.2), (3.8, 0.0), (-3.8, 6.2)))
+        p.smooth_polygon(((-3.8, -6.2), (3.8, 0.0), (-3.8, 6.2)), 0.62)
     else:
-        p.polygon(((-6.2, -3.8), (0.0, 3.8), (6.2, -3.8)))
+        p.smooth_polygon(((-6.2, -3.8), (0.0, 3.8), (6.2, -3.8)), 0.62)
 
 
 def _draw_camera(p: _Painter) -> None:
@@ -642,7 +781,7 @@ def _draw_camera(p: _Painter) -> None:
 
     # The body and viewfinder form one contour, so no interior stroke crosses
     # the shell. The lens uses the geometric center of the rectangular body.
-    p.polyline(
+    p.smooth_outline(
         (
             (-7.3, -3.7),
             (-3.5, -3.7),
@@ -653,7 +792,7 @@ def _draw_camera(p: _Painter) -> None:
             (7.3, 6.0),
             (-7.3, 6.0),
         ),
-        closed=True,
+        0.48,
     )
     p.circle(0.0, 1.15, 3.05)
 
@@ -669,7 +808,7 @@ def _draw_light(p: _Painter) -> None:
         )
         for index in range(count + 1)
     )
-    p.polyline(
+    p.smooth_outline(
         (
             *arc,
             (2.8, 3.9),
@@ -681,7 +820,8 @@ def _draw_light(p: _Painter) -> None:
             (-2.5, 5.1),
             (-2.8, 3.9),
         ),
-        closed=True,
+        0.42,
+        convex_only=False,
     )
     p.line((-2.4, 5.65), (2.4, 5.65), width=1.3)
     for a, b in (
@@ -726,8 +866,8 @@ def _draw_status(p: _Painter, name: str) -> None:
         p.rect_filled(-0.9, -5.8, 0.9, -2.5, rounding=0.9)
 
 
-def draw_concept_icon(draw, center, size: float, name: str, color) -> None:
-    """Draw one candidate icon using a single proportional 24-unit master."""
+def _draw_concept_icon_raw(draw, center, size: float, name: str, color) -> None:
+    """Draw authored geometry before shared optical placement is applied."""
 
     painter = _Painter(draw, center, size, color)
     if name.startswith("tool-"):
@@ -853,6 +993,37 @@ class _MetricsDraw:
         self._add(points)
         self._add_polygon_mass(points)
 
+    def indexed_fill(
+        self,
+        points,
+        indices,
+        _color,
+        *,
+        outline=(),
+        hole=(),
+        **_kwargs,
+    ) -> None:
+        points = tuple(points)
+        self._add(tuple(outline) or points)
+        for offset in range(0, len(indices), 3):
+            triangle = tuple(points[index] for index in indices[offset : offset + 3])
+            twice_area = abs(
+                (triangle[1][0] - triangle[0][0]) * (triangle[2][1] - triangle[0][1])
+                - (triangle[1][1] - triangle[0][1]) * (triangle[2][0] - triangle[0][0])
+            )
+            if twice_area <= 1e-12:
+                continue
+            self._add_mass(
+                twice_area * 0.5,
+                (
+                    sum(point[0] for point in triangle) / 3.0,
+                    sum(point[1] for point in triangle) / 3.0,
+                ),
+            )
+
+    def concave_fill(self, points, color) -> None:
+        self.fringed_concave_fill(points, color)
+
     def circle(self, center, radius, _color, width, **_kwargs) -> None:
         radius, width = float(radius), float(width)
         self._add((center,), radius + width * 0.5)
@@ -885,6 +1056,48 @@ class _MetricsDraw:
             width * height,
             ((float(lo[0]) + float(hi[0])) * 0.5, (float(lo[1]) + float(hi[1])) * 0.5),
         )
+
+
+def _measure_raw_icon(name: str, center=(0.0, 0.0), size: float = ICON_GRID) -> IconMetrics:
+    draw = _MetricsDraw()
+    _draw_concept_icon_raw(draw, center, size, name, (1.0, 1.0, 1.0, 1.0))
+    ink_center = (
+        draw.ink_moment[0] / draw.ink_area,
+        draw.ink_moment[1] / draw.ink_area,
+    )
+    return IconMetrics(tuple(draw.bounds), draw.radial_extent, ink_center)
+
+
+@lru_cache(maxsize=64)
+def _icon_layout(name: str) -> tuple[float, tuple[float, float]]:
+    """Return the declared visual anchor and scale inside the placement bound."""
+
+    raw = _measure_raw_icon(name)
+    if name == "tool-scale":
+        # Scale rotates around its authored hub, which is the local origin.
+        offset = (0.0, 0.0)
+    elif name == "helper-camera" or name.startswith("transport-"):
+        # Directional marks and optically unbalanced helpers read from their
+        # ink mass. Their asymmetric boxes are therefore diagnostic.
+        offset = (-raw.ink_center[0], -raw.ink_center[1])
+    else:
+        offset = (-raw.center_offset[0], -raw.center_offset[1])
+    shifted = _measure_raw_icon(name, offset)
+    safe_radius = ICON_BOUND_DIAMETER * 0.5 - ICON_MIN_CLEARANCE
+    layout_scale = min(1.0, safe_radius / shifted.radial_extent)
+    return layout_scale, (offset[0] * layout_scale, offset[1] * layout_scale)
+
+
+def draw_concept_icon(draw, center, size: float, name: str, color) -> None:
+    """Draw one anchor-centered candidate from a proportional 24-unit master."""
+
+    layout_scale, offset = _icon_layout(name)
+    unit_scale = float(size) / ICON_GRID
+    adjusted_center = (
+        float(center[0]) + offset[0] * unit_scale,
+        float(center[1]) + offset[1] * unit_scale,
+    )
+    _draw_concept_icon_raw(draw, adjusted_center, size * layout_scale, name, color)
 
 
 @lru_cache(maxsize=64)

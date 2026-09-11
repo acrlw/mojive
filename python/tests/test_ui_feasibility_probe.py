@@ -76,6 +76,14 @@ def test_virtual_canvas_scrolls_instead_of_compressing_components():
     )
 
 
+def test_icon_library_canvas_reaches_the_last_row_of_the_longest_family():
+    family, icons = max(probe.ICON_FAMILIES, key=lambda item: len(item[1]))
+    required_height = 260.0 + (max(probe._ICON_REVIEW_SIZES) + 20.0) * len(icons)
+
+    assert probe._icon_library_canvas_size(family)[1] >= required_height
+    assert probe._icon_library_canvas_size("Overview") == probe.GEOMETRY_CANVAS_SIZE
+
+
 def test_geometry_export_names_production_overlay_fields():
     values = probe._geometry_values_text(probe.ProbeState())
 

@@ -3527,7 +3527,7 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
             "##geometry-ring-gap-ratio",
             state.rotate_ring_gap_ratio,
             0.25,
-            0.9,
+            1.0,
             "%.2fx",
         )
         _property_label("Ring caps")
@@ -3767,7 +3767,15 @@ def _draw_diagnostic_gallery(state, scale):
         imgui.end_child()
 
 
-_ICON_REVIEW_SIZES = (14.0, 20.0, 32.0, 56.0)
+_ICON_REVIEW_SIZES = (14.0, 24.0, 56.0, 112.0)
+
+
+def _icon_library_canvas_size(family: str) -> tuple[float, float]:
+    if family == "Overview":
+        return GEOMETRY_CANVAS_SIZE
+    rows = len(icon_family(family))
+    required_height = 260.0 + (max(_ICON_REVIEW_SIZES) + 20.0) * rows
+    return GEOMETRY_CANVAS_SIZE[0], max(GEOMETRY_CANVAS_SIZE[1], required_height)
 
 
 def _concept_icon_color(name: str):
@@ -3904,7 +3912,7 @@ def _draw_icon_family_detail(draw, origin, family: str, scale: float) -> None:
     draw.text(
         (origin[0], header_y + 24.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Orange = 24-unit placement bound · every glyph keeps measurable inner padding",
+        "Orange = 24-unit placement bound · anchor = box, optical ink, or semantic hub",
     )
     for center_x, size in zip(centers, _ICON_REVIEW_SIZES, strict=True):
         draw.centered_label(
@@ -3915,9 +3923,7 @@ def _draw_icon_family_detail(draw, origin, family: str, scale: float) -> None:
         )
 
     rows_y = header_y + 98.0 * scale
-    # Ten-row Transport must remain fully visible above the horizontal
-    # scrollbar in the standard 1600x1000 review capture.
-    row_height = 66.0 * scale
+    row_height = (max(_ICON_REVIEW_SIZES) + 20.0) * scale
     right = origin[0] + 1370.0 * scale
     for row, (label, name) in enumerate(icons):
         center_y = rows_y + row_height * row + row_height * 0.5
@@ -3938,10 +3944,18 @@ def _draw_icon_family_detail(draw, origin, family: str, scale: float) -> None:
 
         meta_x = origin[0] + 1160.0 * scale
         clearance, offset_x, offset_y, ink_x, ink_y = _icon_review_metrics(name)
+        anchor = (
+            "hub"
+            if name == "tool-scale"
+            else "ink"
+            if name == "helper-camera" or name.startswith("transport-")
+            else "box"
+        )
         for line, line_y in (
-            (f"{name} · pad {clearance:.2f}u", -20.0),
-            (f"box  {offset_x:+.2f},{offset_y:+.2f}u", 0.0),
-            (f"ink  {ink_x:+.2f},{ink_y:+.2f}u", 20.0),
+            (f"{name} · pad {clearance:.2f}u", -30.0),
+            (f"box  {offset_x:+.2f},{offset_y:+.2f}u", -10.0),
+            (f"ink  {ink_x:+.2f},{ink_y:+.2f}u", 10.0),
+            (f"anchor  {anchor}", 30.0),
         ):
             draw.text(
                 (meta_x, center_y + line_y * scale),
@@ -3960,7 +3974,7 @@ def _draw_icon_library_page(
     draw.text(
         (x0 + 42.0 * scale, y0 + 25.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Concept candidates · circular placement bound · reviewed production icons reused",
+        "Concept candidates · circular placement bound · isolated from production painters",
     )
     imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 42.0 * scale, y0 + 54.0 * scale))
     state.icon_library_tab = _wrapped_tabs(
@@ -4019,7 +4033,9 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
     canvas_width, canvas_height = _virtual_canvas_size(
         canvas_available,
         scale,
-        GEOMETRY_CANVAS_SIZE,
+        _icon_library_canvas_size(state.icon_library_tab)
+        if active_tab == "Icon library"
+        else GEOMETRY_CANVAS_SIZE,
     )
     size = imgui.ImVec2(canvas_width, canvas_height)
     x0, y0 = float(canvas_origin.x), float(canvas_origin.y)
@@ -4864,6 +4880,8 @@ def render(
     interactive_fps: float,
     initial_smoothing: float | None = None,
     initial_imgui_radius: float | None = None,
+    initial_tool_stroke: float | None = None,
+    initial_rotate_gap_ratio: float | None = None,
     redesign_language: str = "en",
     redesign_section: str = "Overview",
     capsule_outline: str = "Soft white",
@@ -4900,6 +4918,10 @@ def render(
                 setattr(state, name, initial_smoothing)
         if initial_imgui_radius is not None:
             state.imgui_rounding = initial_imgui_radius
+        if initial_tool_stroke is not None:
+            state.tool_stroke_width = initial_tool_stroke
+        if initial_rotate_gap_ratio is not None:
+            state.rotate_ring_gap_ratio = initial_rotate_gap_ratio
         if interactive:
             window.show()
             frame_period = 1.0 / interactive_fps
@@ -5000,6 +5022,18 @@ def main() -> None:
         help="Initial Rotate inner-ring cap style",
     )
     parser.add_argument(
+        "--tool-stroke",
+        type=float,
+        default=None,
+        help="Initial Tool glyph stroke, from 1.0 to 2.2 logical pixels",
+    )
+    parser.add_argument(
+        "--rotate-gap-ratio",
+        type=float,
+        default=None,
+        help=("Initial Rotate crossing gap as a stroke ratio, from 0.25 to 1.00"),
+    )
+    parser.add_argument(
         "--interactive",
         action="store_true",
         help="Open a real ImGui window and run until it is closed",
@@ -5027,6 +5061,10 @@ def main() -> None:
         parser.error("--imgui-radius must be between 0 and 16")
     if args.smoothing is not None and not 0.0 <= args.smoothing <= 1.0:
         parser.error("--smoothing must be between 0 and 1")
+    if args.tool_stroke is not None and not 1.0 <= args.tool_stroke <= 2.2:
+        parser.error("--tool-stroke must be between 1.0 and 2.2")
+    if args.rotate_gap_ratio is not None and not 0.25 <= args.rotate_gap_ratio <= 1.0:
+        parser.error("--rotate-gap-ratio must be between 0.25 and 1.00")
     if not 0.75 <= args.ui_scale <= 4.0:
         parser.error("--ui-scale must be between 0.75 and 4.0")
     if not 15.0 <= args.fps <= 240.0:
@@ -5058,6 +5096,8 @@ def main() -> None:
         interactive_fps=args.fps,
         initial_smoothing=args.smoothing,
         initial_imgui_radius=args.imgui_radius,
+        initial_tool_stroke=args.tool_stroke,
+        initial_rotate_gap_ratio=args.rotate_gap_ratio,
         redesign_language=args.redesign_language,
         redesign_section=args.redesign_section.title(),
         capsule_outline=args.capsule_outline.replace("-", " ").capitalize(),

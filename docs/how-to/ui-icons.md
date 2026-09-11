@@ -47,16 +47,18 @@ clearance and conforms to the circular placement boundary without crossing it.
 
 Use radial containment in addition to rectangular canvas containment. A camera body can fit inside
 a 24-by-24 square while its stroked corner still crosses a 24-unit circle. Likewise, a centered
-axis-aligned box does not prove that the icon looks centered. Point-symmetric and rotationally
-symmetric symbols should place their approximate ink center within 0.05 grid units of the placement
-origin. Directional symbols keep a centered alignment box and receive a visual check at every
-target size; their ink centroid is diagnostic, not a target to force to zero.
+axis-aligned box does not prove that the icon looks centered. Declare one alignment anchor for each
+construction and show it in the detail row:
 
-The Scale symbol demonstrates why both measurements are required. Its three equal axes are 120
-degrees apart, so their shared origin and ink center coincide exactly. The top square makes the
-axis-aligned box extend farther upward than downward. Translating that box to zero would move the
-actual rotation center below the placement origin and recreate the visible imbalance the metric is
-meant to catch.
+- use the stroked box center for symmetric frames and neutral silhouettes;
+- use approximate ink mass for directional transport marks and optically unbalanced helpers;
+- use a semantic hub when interaction revolves around a specific point, as Scale does.
+
+The concept library translates the declared anchor onto the orange-circle center, then uniformly
+reduces the whole master if the translated contour would violate the radial safe area. `box` and
+`ink` remain visible diagnostics. A nonzero box is expected for an optically centered Play triangle;
+a nonzero ink value is expected for a directional mark aligned by a different semantic anchor.
+This layout policy is concept-only; reviewed production painters remain their source of truth.
 
 Shaft-and-head arrows use one continuous filled outline. Do not join an independent stroked shaft
 to a filled triangle: antialiasing and cap geometry expose the seam at small sizes. Object outlines
@@ -67,10 +69,32 @@ runtime Tool Column geometry: three cyclically occluded half-rings inside a scre
 one nearly complete circular arrow. Color or a small positional change does not separate two icons
 that share the same silhouette.
 
+The Icon Library owns its Move, Rotate, and Scale candidate contours. Keep this experimental drawing
+inside `design/tools/ui_icon_concepts.py`; do not change `viewport_widgets.py` while tuning a concept
+sheet. A candidate may repeat the reviewed production construction grammar, such as Rotate's three
+cyclic half-rings, without sharing the production painter. The feasibility-only `gap / stroke`
+control keeps its full 0.25 to 1.00 review range and must not clamp production geometry.
+
 Use the shared G3 curve builders for rounded heads, boxes, and structural corners. In particular,
 `arrow_points`, `box_handle_points`, and `smooth_polygon_corners` preserve continuous curvature at
 the visible joins. Drawing a square on top of a shaft or letting round-capped cube spokes terminate
 on the outer stroke produces protrusions and seams at compact sizes.
+
+Filled triangles and diamonds are contours, not special exceptions. Run their three or four corners
+through `smooth_polygon_corners`, including transport Play, skip controls, disclosure arrows, and
+keyframe diamonds. A small radius still removes the curvature discontinuity at a nominally sharp
+tip; review the 112-point specimen to catch a raw polygon that looks acceptable only at 14 points.
+Build open transport chevrons as one filled ribbon and smooth its outer cap, inner join, and tip as a
+single contour. Use G3 rectangle paths for Pause, Stop, and skip bars instead of backend rounding.
+Snap reuses `_snap_glyph_shape` with `CAPSULE_SMOOTHING`, so its U-turn has the same G3 continuity as
+the viewport capsule instead of combining straight stems with a conventional semicircle. Its two
+reviewed endpoint blocks cover the stroke caps and use G3-smoothed corners; preserve both blocks
+when the production path is shown in a concept sheet.
+
+A magnifier is also one hollow contour. Blend the lens shell and handle field with third-order
+contact, tessellate the visible ring while retaining its circular hole, and submit it as one indexed
+mesh. Separate circle and line primitives expose a round handle cap inside the lens and cannot form
+one continuous neck.
 
 ## Keep a family visibly related
 
@@ -147,8 +171,16 @@ edge of the frame is about 4.58 grid units on each side.
 | Warning looks unrelated to information | Stem, gap, or dot was tuned separately | Generate one from the other's reflected geometry |
 | Dot disappears even though its diameter equals the stem width | Circular antialiasing removes more visible area | Apply a small grid-relative dot overshoot and inspect the target raster size |
 | Error looks heavier, then becomes stylistically thin after correction | Cross stroke width was reduced independently | Keep the shared internal stroke and shorten the diagonals |
-| Scale looks low although its bounding box is centered | Unequal axis lengths or box-only centering displaced the shared origin | Use equal 120-degree axes and verify the ink center at the placement origin |
+| Scale's hub looks displaced although its envelope is centered | A three-axis silhouette has different box, hub, and ink centers | Anchor Scale by its center dot, report the asymmetric box, and judge the 112-point specimen |
+| Scale shafts merge into the center dot | A copied three-axis sketch omitted the established transparent center shell | Start all three concept shafts outside the dot's circular clearance radius and verify the visible gap |
 | Rotate is mistaken for Reset or Refresh | Both use a circular-arrow structure | Use the three-axis Tool Column rotation rings and reserve the single arrow loop for Reset |
+| A concept experiment changes an established Tool Column icon | Candidate geometry was placed in the production painter | Keep Move, Rotate, and Scale candidate contours in the Icon Library and leave `viewport_widgets.py` untouched |
+| A triangle looks rounded only in the thumbnail | The preview hid a raw three-point polygon or an undersized corner profile | Inspect the native 112-point contour and require more than three authored boundary points |
+| Transport marks look left or right despite a centered box | Directional silhouettes have asymmetric ink mass | Align the declared optical ink anchor, retain the box diagnostic, and compare mirrored pairs |
+| Snap looks like a generic U or loses its endpoint blocks | Its stems and semicircle were authored as unrelated primitives, or the probe copied only the centerline | Reuse the production G3 snap path with `CAPSULE_SMOOTHING` and retain both G3 endpoint blocks |
+| Search handle cuts into the lens or exposes a cap | Lens and handle were submitted as separate strokes | Build one hollow G3 union mesh with a continuous outer neck and retained circular hole |
+| Sort arrow tip sits below its last bar | The full stroke envelopes were aligned instead of the semantic endpoints | Align the arrow tail and tip with the first and last bar centerlines |
+| Camera looks low despite `box +0.00,+0.00u` | The body and lens place more ink below the box center | Use its declared optical ink anchor and retain the box offset as a diagnostic |
 | Cube spokes protrude through the shell | Independently capped lines terminate on top of the outer stroke | Inset the spokes, join their center, and paint the G3 outer contour last |
 | One preview looks good but production does not | A copied demo or resized screenshot bypasses production geometry and density | Render the production painter at every target logical size and framebuffer scale |
 
@@ -161,8 +193,8 @@ the mark at 44.8% for 12, 14, 20, 32, and 56 pixels.
 
 For every icon-family change:
 
-1. Test normalized bounds at the smallest production size, the design size, and at least one large
-   diagnostic size. Include frame, mark, stroke, gap, safe area, centerline, and mirrored geometry.
+1. Test normalized bounds at 14, 24, 56, and 112 points. Include frame, mark, stroke, gap, radial
+   safe area, declared alignment anchor, box and ink diagnostics, centerline, and mirrored geometry.
 2. Render the production painter at its actual logical sizes. Do not scale down one large capture
    as a substitute.
 3. Inspect both 1x and Retina output when raster behavior or visibility is in question.
@@ -185,3 +217,8 @@ make check
 `frame diameter / mark height`; those percentages must remain stable across the displayed sizes.
 Inspect the filter pills and log rows in the same capture, because those are the production-size
 uses that expose weak dots, crowded safe areas, and mismatched weights.
+
+For the full candidate set, `make ui-icon-concepts` writes 14, 24, 56, and 112-point family pages
+under `output/ui-icon-concepts/`, plus `tools-max-gap.png` at the production 1.46-pixel stroke and
+the full `gap / stroke = 1.00` setting. The Icon Library canvas reserves enough scroll extent for
+the longest family; verify the final row is reachable in the normal 1600-by-1000 interactive window.

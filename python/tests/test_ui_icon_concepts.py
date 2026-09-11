@@ -21,6 +21,10 @@ class _RecordingDraw:
         self.radial_extent = 0.0
         self.widths: list[float] = []
         self.lines: list[tuple] = []
+        self.arrows: list[tuple] = []
+        self.circles: list[tuple] = []
+        self.filled_circles: list[tuple] = []
+        self.indexed_fills: list[tuple] = []
         self.polylines: list[tuple] = []
         self.filled_paths: list[tuple] = []
         self.fills = 0
@@ -51,6 +55,7 @@ class _RecordingDraw:
         join_radius,
         **_kwargs,
     ) -> None:
+        self.arrows.append((a, b, float(width)))
         dx, dy = float(b[0] - a[0]), float(b[1] - a[1])
         length = math.hypot(dx, dy)
         ux, uy = dx / length, dy / length
@@ -77,12 +82,33 @@ class _RecordingDraw:
         self.fills += 1
         self._add(tuple(points))
 
+    def indexed_fill(
+        self,
+        points,
+        indices,
+        _color,
+        *,
+        outline=(),
+        hole=(),
+        **_kwargs,
+    ) -> None:
+        points = tuple(points)
+        record = (points, tuple(indices), tuple(outline), tuple(hole))
+        self.indexed_fills.append(record)
+        self.fills += 1
+        self._add(record[2] or points)
+
+    def concave_fill(self, points, color) -> None:
+        self.fringed_concave_fill(points, color)
+
     def circle(self, center, radius, _color, width, **_kwargs) -> None:
         self.widths.append(float(width))
+        self.circles.append((center, float(radius), float(width)))
         pad = float(radius) + float(width) * 0.5
         self._add((center,), pad)
 
     def circle_filled(self, center, radius, _color, **_kwargs) -> None:
+        self.filled_circles.append((center, float(radius)))
         self._add((center,), float(radius))
 
     def rect(self, lo, hi, _color, width, **_kwargs) -> None:
@@ -131,7 +157,14 @@ def test_concept_icon_ink_stays_inside_circular_placement_bound(name: str) -> No
     assert draw.radial_extent <= guide_radius - ICON_MIN_CLEARANCE + 1e-6
 
 
-@pytest.mark.parametrize("name", tuple(name for name in _icons() if name != "tool-scale"))
+@pytest.mark.parametrize(
+    "name",
+    tuple(
+        name
+        for name in _icons()
+        if name != "tool-scale" and name != "helper-camera" and not name.startswith("transport-")
+    ),
+)
 def test_concept_icon_bounds_are_centered_in_placement_circle(name: str) -> None:
     draw = _render(name, ICON_GRID)
     center_x = (draw.bounds[0] + draw.bounds[2]) * 0.5
@@ -152,10 +185,26 @@ def test_body_cube_has_three_interior_edges() -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ("tool-move", "tool-rotate", "tool-scale", "tool-world", "tool-body"),
+    ("tool-move", "tool-world", "tool-body"),
 )
 def test_symmetric_tool_icons_center_their_ink_mass(name: str) -> None:
     assert icon_metrics(name).ink_center == pytest.approx((0.0, 0.0), abs=0.05)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ("tool-scale", "helper-camera", *(name for name in _icons() if name.startswith("transport-"))),
+)
+def test_optically_anchored_icons_center_their_ink_mass(name: str) -> None:
+    assert icon_metrics(name).ink_center == pytest.approx((0.0, 0.0), abs=0.05)
+
+
+@pytest.mark.parametrize("name", ("transport-play", "panel-right", "panel-down"))
+def test_filled_triangles_use_rounded_g3_contours(name: str) -> None:
+    draw = _render(name, ICON_GRID)
+
+    assert draw.filled_paths
+    assert all(len(path) > 3 for path in draw.filled_paths)
 
 
 def test_rotate_uses_axis_rings_while_reset_uses_one_arrow() -> None:
@@ -172,6 +221,63 @@ def test_scale_uses_three_integrated_box_handles() -> None:
     assert draw.fills == 3
     assert not draw.lines
     assert all(len(path) > 8 for path in draw.filled_paths)
+    assert len(draw.filled_circles) == 1
+    dot_center, dot_radius = draw.filled_circles[0]
+    assert dot_center == pytest.approx((0.0, 0.0), abs=1e-6)
+    nearest_shaft = min(
+        math.dist(dot_center, point) for path in draw.filled_paths for point in path
+    )
+    assert nearest_shaft > dot_radius
+
+
+def test_snap_uses_production_g3_u_path_with_two_rounded_end_blocks() -> None:
+    draw = _render("tool-snap", ICON_GRID)
+
+    assert len(draw.polylines) == 1
+    assert len(draw.polylines[0][0]) > 16
+    assert not draw.lines
+    assert len(draw.filled_paths) == 2
+    assert all(len(path) > 4 for path in draw.filled_paths)
+
+
+def test_search_uses_one_hollow_g3_lens_and_handle_mesh() -> None:
+    draw = _render("panel-search", ICON_GRID)
+
+    assert len(draw.indexed_fills) == 1
+    assert not draw.circles
+    assert not draw.lines
+    points, indices, outline, hole = draw.indexed_fills[0]
+    assert len(points) > 200
+    assert len(indices) > 300
+    assert len(outline) > 100
+    assert len(hole) == 96
+
+
+def test_sort_arrow_tip_and_tail_align_with_bar_centerlines() -> None:
+    draw = _render("panel-sort", ICON_GRID)
+
+    assert len(draw.lines) == 3
+    assert len(draw.arrows) == 1
+    stroke_top = min(a[1] for a, _b, _width in draw.lines)
+    stroke_bottom = max(a[1] for a, _b, _width in draw.lines)
+    arrow_start, arrow_end, _arrow_width = draw.arrows[0]
+    assert arrow_start[1] == pytest.approx(stroke_top, abs=0.01)
+    assert arrow_end[1] == pytest.approx(stroke_bottom, abs=0.01)
+
+
+@pytest.mark.parametrize(
+    "name",
+    tuple(
+        name for name in _icons() if name.startswith("transport-") and name != "transport-record"
+    ),
+)
+def test_transport_contours_do_not_use_raw_stroked_corners(name: str) -> None:
+    draw = _render(name, ICON_GRID)
+
+    assert not draw.lines
+    assert not draw.polylines
+    assert draw.filled_paths
+    assert all(len(path) > 4 for path in draw.filled_paths)
 
 
 def test_hidden_eye_uses_three_lashes_instead_of_a_slash() -> None:
@@ -184,13 +290,14 @@ def test_hidden_eye_uses_three_lashes_instead_of_a_slash() -> None:
 
 @pytest.mark.parametrize("name", _icons())
 def test_concept_icon_bounds_and_strokes_scale_as_one_master(name: str) -> None:
-    captures = tuple(_render(name, size) for size in (14.0, 20.0, 32.0, 56.0))
+    sizes = (14.0, 24.0, 56.0, 112.0)
+    captures = tuple(_render(name, size) for size in sizes)
     normalized_bounds = tuple(
         tuple(value / size for value in draw.bounds)
-        for size, draw in zip((14.0, 20.0, 32.0, 56.0), captures, strict=True)
+        for size, draw in zip(sizes, captures, strict=True)
     )
 
     for bounds in normalized_bounds[1:]:
         assert bounds == pytest.approx(normalized_bounds[0], abs=1e-6)
-    for size, draw in zip((14.0, 20.0, 32.0, 56.0), captures, strict=True):
+    for size, draw in zip(sizes, captures, strict=True):
         assert all(width / size <= 2.2 / ICON_GRID for width in draw.widths)
