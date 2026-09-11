@@ -8,6 +8,7 @@ any production glyph is replaced.
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -121,6 +122,8 @@ class IconMetrics:
     bounds: tuple[float, float, float, float]
     radial_extent: float
     ink_center: tuple[float, float]
+    bounding_center: tuple[float, float]
+    bounding_radius: float
 
     @property
     def center_offset(self) -> tuple[float, float]:
@@ -130,6 +133,58 @@ class IconMetrics:
     @property
     def radial_clearance(self) -> float:
         return ICON_BOUND_DIAMETER * 0.5 - self.radial_extent
+
+
+def minimum_enclosing_circle(points) -> tuple[tuple[float, float], float]:
+    """Return the exact smallest circle for a finite set of sampled boundary points."""
+
+    values = list(dict.fromkeys((float(x), float(y)) for x, y in points))
+    if not values:
+        return (0.0, 0.0), 0.0
+    random.Random(0).shuffle(values)
+
+    def contains(circle, point) -> bool:
+        center, radius = circle
+        return math.dist(center, point) <= radius + 1e-7
+
+    def diameter(a, b):
+        center = ((a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5)
+        return center, math.dist(a, b) * 0.5
+
+    def through_three(a, b, c):
+        cross = 2.0 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]))
+        if abs(cross) <= 1e-12:
+            candidates = (diameter(a, b), diameter(a, c), diameter(b, c))
+            return min(
+                (
+                    candidate
+                    for candidate in candidates
+                    if all(contains(candidate, p) for p in (a, b, c))
+                ),
+                key=lambda candidate: candidate[1],
+            )
+        a2 = a[0] * a[0] + a[1] * a[1]
+        b2 = b[0] * b[0] + b[1] * b[1]
+        c2 = c[0] * c[0] + c[1] * c[1]
+        center = (
+            (a2 * (b[1] - c[1]) + b2 * (c[1] - a[1]) + c2 * (a[1] - b[1])) / cross,
+            (a2 * (c[0] - b[0]) + b2 * (a[0] - c[0]) + c2 * (b[0] - a[0])) / cross,
+        )
+        return center, math.dist(center, a)
+
+    circle = (values[0], 0.0)
+    for index, point in enumerate(values):
+        if contains(circle, point):
+            continue
+        circle = (point, 0.0)
+        for second_index, second in enumerate(values[:index]):
+            if contains(circle, second):
+                continue
+            circle = diameter(point, second)
+            for third in values[:second_index]:
+                if not contains(circle, third):
+                    circle = through_three(point, second, third)
+    return circle
 
 
 class _Painter:
@@ -164,6 +219,7 @@ class _Painter:
         head_length: float = 3.0,
         head_width: float = 4.8,
         corner_radius: float = 0.45,
+        round_tail: bool = False,
     ) -> None:
         """Draw one continuous shaft-and-head silhouette."""
 
@@ -176,6 +232,7 @@ class _Painter:
             head_width=head_width * self.scale,
             corner_radius=corner_radius * self.scale,
             join_radius=corner_radius * 0.55 * self.scale,
+            round_tail=round_tail,
         )
 
     def polyline(self, points, *, closed: bool = False, width: float = ICON_STROKE) -> None:
@@ -506,8 +563,8 @@ def _draw_tool(p: _Painter, name: str) -> None:
                 (direction[0] * clear_radius, direction[1] * clear_radius),
                 (direction[0] * reach, direction[1] * reach),
                 width=1.4,
-                head_size=3.5,
-                corner_radius=0.62,
+                head_size=3.0,
+                corner_radius=0.54,
             )
         p.circle_filled(0.0, 0.0, dot_radius)
     elif name == "tool-world":
@@ -735,7 +792,14 @@ def _draw_panel(p: _Painter, name: str) -> None:
         for y, end in ((-5.09, 2.24), (0.11, 0.04), (5.31, -2.16)):
             p.line((-6.76, y), (end, y), width=1.45)
         # The arrow tip and tail align with the top and bottom bar centerlines.
-        p.arrow((5.54, -5.09), (5.54, 5.31), width=1.4, head_length=3.0, head_width=4.6)
+        p.arrow(
+            (5.54, -5.09),
+            (5.54, 5.31),
+            width=1.4,
+            head_length=3.0,
+            head_width=4.6,
+            round_tail=True,
+        )
     elif kind == "clear":
         p.line((-5.8, -5.8), (5.8, 5.8), width=1.65)
         p.line((5.8, -5.8), (-5.8, 5.8), width=1.65)
@@ -892,6 +956,7 @@ class _MetricsDraw:
     def __init__(self) -> None:
         self.bounds = [float("inf"), float("inf"), float("-inf"), float("-inf")]
         self.radial_extent = 0.0
+        self.boundary_points: list[tuple[float, float]] = []
         self.ink_area = 0.0
         self.ink_moment = [0.0, 0.0]
 
@@ -903,6 +968,16 @@ class _MetricsDraw:
             self.bounds[2] = max(self.bounds[2], x + pad)
             self.bounds[3] = max(self.bounds[3], y + pad)
             self.radial_extent = max(self.radial_extent, math.hypot(x, y) + pad)
+            if pad > 0.0:
+                self.boundary_points.extend(
+                    (
+                        x + pad * math.cos(index * math.tau / 32),
+                        y + pad * math.sin(index * math.tau / 32),
+                    )
+                    for index in range(32)
+                )
+            else:
+                self.boundary_points.append((x, y))
 
     def _add_mass(self, area: float, center) -> None:
         if area <= 0.0:
@@ -971,6 +1046,7 @@ class _MetricsDraw:
             head_width=float(head_width),
             corner_radius=float(corner_radius),
             join_radius=float(join_radius),
+            round_tail=bool(_kwargs.get("round_tail", False)),
         )
         points = tuple((a[0] + x * ux - y * uy, a[1] + x * uy + y * ux) for x, y in outline)
         self._add(points)
@@ -1065,7 +1141,10 @@ def _measure_raw_icon(name: str, center=(0.0, 0.0), size: float = ICON_GRID) -> 
         draw.ink_moment[0] / draw.ink_area,
         draw.ink_moment[1] / draw.ink_area,
     )
-    return IconMetrics(tuple(draw.bounds), draw.radial_extent, ink_center)
+    bounding_center, bounding_radius = minimum_enclosing_circle(draw.boundary_points)
+    return IconMetrics(
+        tuple(draw.bounds), draw.radial_extent, ink_center, bounding_center, bounding_radius
+    )
 
 
 @lru_cache(maxsize=64)
@@ -1073,10 +1152,15 @@ def _icon_layout(name: str) -> tuple[float, tuple[float, float]]:
     """Return the declared visual anchor and scale inside the placement bound."""
 
     raw = _measure_raw_icon(name)
-    if name == "tool-scale":
+    anchor = icon_alignment_anchor(name)
+    if anchor == "hub":
         # Scale rotates around its authored hub, which is the local origin.
         offset = (0.0, 0.0)
-    elif name == "helper-camera" or name.startswith("transport-"):
+    elif anchor == "sphere":
+        # Panel and Snap placement is defined by the actual minimum bounding
+        # circle, rather than its axis-aligned box or asymmetric ink mass.
+        offset = (-raw.bounding_center[0], -raw.bounding_center[1])
+    elif anchor == "ink":
         # Directional marks and optically unbalanced helpers read from their
         # ink mass. Their asymmetric boxes are therefore diagnostic.
         offset = (-raw.ink_center[0], -raw.ink_center[1])
@@ -1086,6 +1170,18 @@ def _icon_layout(name: str) -> tuple[float, tuple[float, float]]:
     safe_radius = ICON_BOUND_DIAMETER * 0.5 - ICON_MIN_CLEARANCE
     layout_scale = min(1.0, safe_radius / shifted.radial_extent)
     return layout_scale, (offset[0] * layout_scale, offset[1] * layout_scale)
+
+
+def icon_alignment_anchor(name: str) -> str:
+    """Return the reviewed placement anchor for one concept icon."""
+
+    if name == "tool-scale":
+        return "hub"
+    if name.startswith("panel-") or name == "tool-snap":
+        return "sphere"
+    if name == "helper-camera" or name.startswith("transport-"):
+        return "ink"
+    return "box"
 
 
 def draw_concept_icon(draw, center, size: float, name: str, color) -> None:
@@ -1110,7 +1206,10 @@ def icon_metrics(name: str) -> IconMetrics:
         draw.ink_moment[0] / draw.ink_area,
         draw.ink_moment[1] / draw.ink_area,
     )
-    return IconMetrics(tuple(draw.bounds), draw.radial_extent, ink_center)
+    bounding_center, bounding_radius = minimum_enclosing_circle(draw.boundary_points)
+    return IconMetrics(
+        tuple(draw.bounds), draw.radial_extent, ink_center, bounding_center, bounding_radius
+    )
 
 
 def icon_family(label: str):
