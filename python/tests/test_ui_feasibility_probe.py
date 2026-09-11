@@ -344,6 +344,7 @@ def test_capsule_record_and_stop_share_the_viewport_danger_color():
         ("add", 1.0, "key-add"),
         ("key", 1.0, "key-snapshot"),
         ("key", 0.2, "key-keyframe"),
+        ("key-keyframe", 0.2, "key-keyframe"),
     ),
 )
 def test_keyframe_context_preview_uses_icon_library_candidates(monkeypatch, kind, scale, expected):
@@ -359,6 +360,17 @@ def test_keyframe_context_preview_uses_icon_library_candidates(monkeypatch, kind
     assert calls[0][0][3] == expected
     assert calls[0][1]["padding"] == probe.ICON_DEFAULT_PADDING
     assert calls[0][1]["stroke_width"] == probe.ICON_STROKE
+
+
+def test_keyframe_context_preview_reports_unknown_production_icon_name() -> None:
+    with pytest.raises(ValueError, match="unknown keyframe command icon"):
+        probe._draw_icon_library_command_icon(
+            None,
+            (10.0, 20.0),
+            "missing",
+            (1, 1, 1, 1),
+            1.0,
+        )
 
 
 def test_keyframe_context_preview_prefers_the_reviewed_glyph_stroke(monkeypatch):
