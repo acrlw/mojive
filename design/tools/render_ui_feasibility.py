@@ -32,11 +32,14 @@ if __package__:
         ICON_FAMILIES,
         ICON_GRID,
         ICON_GROUP_BY_SLUG,
+        ICON_GROUP_LAYOUT_DEFAULTS,
         ICON_LIBRARY_TABS,
         ICON_MAX_PADDING,
         ICON_MIN_CLEARANCE,
+        STATUS_MOUSE_DEFAULT_WIDTH,
         draw_concept_icon,
         icon_alignment_anchor,
+        icon_component_group,
         icon_family,
         icon_metrics,
         minimum_enclosing_circle,
@@ -67,11 +70,14 @@ else:
         ICON_FAMILIES,
         ICON_GRID,
         ICON_GROUP_BY_SLUG,
+        ICON_GROUP_LAYOUT_DEFAULTS,
         ICON_LIBRARY_TABS,
         ICON_MAX_PADDING,
         ICON_MIN_CLEARANCE,
+        STATUS_MOUSE_DEFAULT_WIDTH,
         draw_concept_icon,
         icon_alignment_anchor,
+        icon_component_group,
         icon_family,
         icon_metrics,
         minimum_enclosing_circle,
@@ -137,7 +143,6 @@ from mojive.ui.viewport_widgets import (
     draw_status,
     draw_tool_glyph,
     keycap_rounding,
-    mouse_hint_colors,
     overlay_divider_length,
 )
 from mojive.ui.window import Window, WindowConfig
@@ -467,8 +472,17 @@ class ProbeState:
     visual_flags: list[bool] = field(default_factory=lambda: [True] * 27)
     overlay_icon_radius: int = int(OVERLAY_GEOMETRY.icon_radius)
     overlay_radial_step: int = int(OVERLAY_GEOMETRY.radial_step)
-    icon_radial_alignment: float = 0.0
-    icon_padding: float = ICON_DEFAULT_PADDING
+    icon_adjustment_group: str = "Viewport tools"
+    icon_radial_alignment_by_group: dict[str, float] = field(
+        default_factory=lambda: {
+            group: values[0] for group, values in ICON_GROUP_LAYOUT_DEFAULTS.items()
+        }
+    )
+    icon_padding_by_group: dict[str, float] = field(
+        default_factory=lambda: {
+            group: values[1] for group, values in ICON_GROUP_LAYOUT_DEFAULTS.items()
+        }
+    )
     overlay_center_step: int = int(OVERLAY_GEOMETRY.center_step)
     tool_group_gap: int = int(OVERLAY_GEOMETRY.tool_group_gap)
     divider_width: int = int(OVERLAY_GEOMETRY.divider_width)
@@ -492,6 +506,36 @@ class ProbeState:
     hint_mouse_wheel_width_ratio: float = OVERLAY_GEOMETRY.hint_mouse_wheel_width_ratio
     hint_mouse_wheel_height_ratio: float = OVERLAY_GEOMETRY.hint_mouse_wheel_height_ratio
     hint_mouse_wheel_gap_ratio: float = OVERLAY_GEOMETRY.hint_mouse_wheel_gap_ratio
+
+    def icon_layout_for(self, group: str) -> tuple[float, float]:
+        defaults = ICON_GROUP_LAYOUT_DEFAULTS[group]
+        return (
+            self.icon_radial_alignment_by_group.get(group, defaults[0]),
+            self.icon_padding_by_group.get(group, defaults[1]),
+        )
+
+    def set_icon_layout_for(
+        self,
+        group: str,
+        *,
+        radial_alignment: float | None = None,
+        padding: float | None = None,
+    ) -> None:
+        if radial_alignment is not None:
+            self.icon_radial_alignment_by_group[group] = float(radial_alignment)
+        if padding is not None:
+            self.icon_padding_by_group[group] = float(padding)
+
+    def concept_mouse_width(self) -> float:
+        """Return the master width that preserves the chosen status aspect ratio."""
+
+        return (
+            STATUS_MOUSE_DEFAULT_WIDTH
+            * self.hint_mouse_width
+            / OVERLAY_GEOMETRY.hint_mouse_width
+            * OVERLAY_GEOMETRY.hint_control_height
+            / self.hint_control_height
+        )
 
 
 def _apply_concept_theme(scale: float) -> None:
@@ -563,20 +607,22 @@ def _draw_concept_projection_icon(
 
 def _preview_search_input(state: ProbeState, *args, **kwargs):
     if state.preview_icon_library:
+        radial_alignment, padding = state.icon_layout_for("Panels")
         kwargs["icon_drawer"] = lambda *values: _draw_concept_control_icon(
             *values,
-            radial_alignment=state.icon_radial_alignment,
-            padding=state.icon_padding,
+            radial_alignment=radial_alignment,
+            padding=padding,
         )
     return search_input(*args, **kwargs)
 
 
 def _preview_searchable_header(state: ProbeState, *args, **kwargs):
     if state.preview_icon_library:
+        radial_alignment, padding = state.icon_layout_for("Panels")
         kwargs["icon_drawer"] = lambda *values: _draw_concept_control_icon(
             *values,
-            radial_alignment=state.icon_radial_alignment,
-            padding=state.icon_padding,
+            radial_alignment=radial_alignment,
+            padding=padding,
         )
     return searchable_ordered_list_header(*args, **kwargs)
 
@@ -614,6 +660,7 @@ def _draw_icon_library_command_icon(
     context_scale: float = 1.0,
     radial_alignment: float = 0.0,
     padding: float = ICON_DEFAULT_PADDING,
+    state: ProbeState | None = None,
 ) -> None:
     """Render one Keyframes command through its Icon Library candidate."""
 
@@ -625,6 +672,8 @@ def _draw_icon_library_command_icon(
         if kind == "key"
         else _KEYFRAME_CONCEPT_ICONS[kind]
     )
+    if state is not None:
+        radial_alignment, padding = state.icon_layout_for(icon_component_group(name))
     draw_concept_icon(
         draw,
         center,
@@ -782,6 +831,7 @@ def _concept_mouse_icon_size(
     button: str,
     padding: float,
     radial_alignment: float = 0.0,
+    mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
 ) -> float:
     """Convert the Status mouse height to the concept icon's circular size argument."""
 
@@ -789,6 +839,7 @@ def _concept_mouse_icon_size(
         f"status-mouse-{button}",
         radial_alignment=radial_alignment,
         padding=padding,
+        mouse_width=mouse_width,
     )
     master_height = metrics.bounds[3] - metrics.bounds[1]
     return float(height) * ICON_GRID / master_height
@@ -809,25 +860,31 @@ def _draw_mouse_input(
 ) -> float:
     if state.preview_icon_library:
         name = f"status-mouse-{button}"
-        icon_size = _concept_mouse_icon_size(
-            height,
-            button,
-            state.icon_padding,
-            state.icon_radial_alignment,
-        ) * scale
-        shell_color, control_color, suffix_color = mouse_hint_colors(
-            CONCEPT_THEME,
-            muted=muted,
+        radial_alignment, padding = state.icon_layout_for("Status & input")
+        mouse_width = state.concept_mouse_width()
+        icon_size = (
+            _concept_mouse_icon_size(
+                height,
+                button,
+                padding,
+                radial_alignment,
+                mouse_width,
+            )
+            * scale
         )
+        shell_color = CONCEPT_THEME.text_disabled if muted else CONCEPT_THEME.text
+        control_color = CONCEPT_THEME.bg_frame_active
+        suffix_color = CONCEPT_THEME.text_disabled if muted else CONCEPT_THEME.primary_bright
         draw_concept_icon(
             draw,
             (x + width * scale * 0.5, center_y),
             icon_size,
             name,
             shell_color,
-            radial_alignment=state.icon_radial_alignment,
-            padding=state.icon_padding,
+            radial_alignment=radial_alignment,
+            padding=padding,
             accent_color=control_color,
+            mouse_width=mouse_width,
         )
         used = width * scale
         if suffix:
@@ -1430,14 +1487,15 @@ def _draw_scene_helper(
     elif hovered:
         draw.circle_filled(center, 13.0 * scale, CONCEPT_THEME.bg_frame_hovered, segments=32)
     if state.preview_icon_library:
+        radial_alignment, padding = state.icon_layout_for("Scene helpers")
         draw_concept_icon(
             draw,
             center,
             20.0 * scale,
             "helper-camera" if kind == "camera" else "helper-light",
             color,
-            radial_alignment=state.icon_radial_alignment,
-            padding=state.icon_padding,
+            radial_alignment=radial_alignment,
+            padding=padding,
         )
     elif kind == "camera":
         _draw_camera_icon(draw, center, color, scale)
@@ -2287,8 +2345,7 @@ def _draw_keyframes(size, scale: float, state: ProbeState) -> None:
             _draw_icon_library_command_icon(
                 *args,
                 context_scale=scale,
-                radial_alignment=state.icon_radial_alignment,
-                padding=state.icon_padding,
+                state=state,
                 **kwargs,
             )
         )
@@ -2318,13 +2375,14 @@ def _draw_output(size, state: ProbeState, scale: float) -> None:
     )
     original_search = output_panel_module.search_input
     if state.preview_icon_library:
+        radial_alignment, padding = state.icon_layout_for("Panels")
         output_panel_module.search_input = lambda *args, **kwargs: search_input(
             *args,
             **kwargs,
             icon_drawer=lambda *values: _draw_concept_control_icon(
                 *values,
-                radial_alignment=state.icon_radial_alignment,
-                padding=state.icon_padding,
+                radial_alignment=radial_alignment,
+                padding=padding,
             ),
         )
     try:
@@ -2511,8 +2569,8 @@ def _draw_camera_content(state: ProbeState) -> None:
                 (
                     lambda *values: _draw_concept_projection_icon(
                         *values,
-                        radial_alignment=state.icon_radial_alignment,
-                        padding=state.icon_padding,
+                        radial_alignment=state.icon_layout_for("Panels")[0],
+                        padding=state.icon_layout_for("Panels")[1],
                     )
                 )
                 if state.preview_icon_library
@@ -2796,8 +2854,8 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
                             10.0 * scale,
                             "panel-down" if disclosure == "▾" else "panel-right",
                             CONCEPT_THEME.text,
-                            radial_alignment=state.icon_radial_alignment,
-                            padding=state.icon_padding,
+                            radial_alignment=state.icon_layout_for("Panels")[0],
+                            padding=state.icon_layout_for("Panels")[1],
                         )
                     else:
                         row_draw.fringed_concave_fill(
@@ -2859,8 +2917,8 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
                         16.0 * scale,
                         "panel-visible" if state.hierarchy_visibility[index] else "panel-hidden",
                         color,
-                        radial_alignment=state.icon_radial_alignment,
-                        padding=state.icon_padding,
+                        radial_alignment=state.icon_layout_for("Panels")[0],
+                        padding=state.icon_layout_for("Panels")[1],
                     )
                 elif state.hierarchy_visibility[index]:
                     top = tuple(
@@ -3513,6 +3571,13 @@ def _geometry_values_text(state: ProbeState) -> str:
         ("hint_mouse_wheel_height_ratio", state.hint_mouse_wheel_height_ratio),
         ("hint_mouse_wheel_gap_ratio", state.hint_mouse_wheel_gap_ratio),
     )
+    values += tuple(
+        (
+            "icon_layout_" + group.casefold().replace(" ", "_").replace("&", "and"),
+            repr(state.icon_layout_for(group)),
+        )
+        for group in ICON_GROUP_LAYOUT_DEFAULTS
+    )
     values += tuple((name, getattr(state, name)) for _, name in CORNER_CONTROLS)
     return "\n".join(f"{name}={value}," for name, value in values)
 
@@ -3615,10 +3680,10 @@ def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                         item_draw,
                         center,
                         42.0 * scale,
-                        f"transport-{kind}",
+                        f"playback-{kind}",
                         CONCEPT_THEME.text,
-                        radial_alignment=state.icon_radial_alignment,
-                        padding=state.icon_padding,
+                        radial_alignment=state.icon_layout_for("Viewport playback")[0],
+                        padding=state.icon_layout_for("Viewport playback")[1],
                     )
                 else:
                     draw_playback_glyph(
@@ -3639,8 +3704,8 @@ def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                         47.2 * scale,
                         "tool-scale" if kind == "dimensions" else f"tool-{kind}",
                         CONCEPT_THEME.text,
-                        radial_alignment=state.icon_radial_alignment,
-                        padding=state.icon_padding,
+                        radial_alignment=state.icon_layout_for("Viewport tools")[0],
+                        padding=state.icon_layout_for("Viewport tools")[1],
                     )
                 else:
                     draw_tool_glyph(
@@ -3661,8 +3726,10 @@ def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                         46.0 * scale,
                         f"status-mouse-{button}",
                         CONCEPT_THEME.text,
-                        radial_alignment=state.icon_radial_alignment,
-                        padding=state.icon_padding,
+                        radial_alignment=state.icon_layout_for("Status & input")[0],
+                        padding=state.icon_layout_for("Status & input")[1],
+                        accent_color=CONCEPT_THEME.bg_frame_active,
+                        mouse_width=state.concept_mouse_width(),
                     )
                 else:
                     draw_mouse_hint_glyph(
@@ -3756,6 +3823,21 @@ def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
         imgui.pop_id()
 
 
+def _current_icon_adjustment_group(state: ProbeState) -> str:
+    if state.icon_adjustment_group not in ICON_GROUP_LAYOUT_DEFAULTS:
+        state.icon_adjustment_group = "Viewport tools"
+    return state.icon_adjustment_group
+
+
+def _draw_icon_group_combo(item_id: str, state: ProbeState) -> str:
+    groups = tuple(ICON_GROUP_LAYOUT_DEFAULTS)
+    current = _current_icon_adjustment_group(state)
+    changed, selected = imgui.combo(item_id, groups.index(current), groups)
+    if changed:
+        state.icon_adjustment_group = groups[selected]
+    return state.icon_adjustment_group
+
+
 def _draw_geometry_controls(position, size, state: ProbeState) -> None:
     imgui.set_cursor_screen_pos(imgui.ImVec2(float(position[0]), float(position[1])))
     if not imgui.begin_child(
@@ -3810,27 +3892,35 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         state.overlay_radial_step = _even_slider(
             "##geometry-radial-step", state.overlay_radial_step, 2, 12
         )
+        _property_label("Glyph group")
+        imgui.set_next_item_width(-1.0)
+        group = _draw_icon_group_combo("##geometry-glyph-group", state)
+        radial_alignment, padding = state.icon_layout_for(group)
         _property_label("Glyph radial center")
-        _, state.icon_radial_alignment = imgui.slider_float(
+        changed, radial_alignment = imgui.slider_float(
             "##geometry-glyph-radial-center",
-            state.icon_radial_alignment,
+            radial_alignment,
             0.0,
             1.0,
             "%.2f",
         )
+        if changed:
+            state.set_icon_layout_for(group, radial_alignment=radial_alignment)
         imgui.set_item_tooltip(
             "0 = visible-box or named semantic center; 1 = minimum enclosing-circle center. "
             "This applies to Icon Library candidates in family, capsule, and UI previews."
         )
         _property_label("Glyph padding")
-        _, state.icon_padding = imgui.slider_float(
+        changed, padding = imgui.slider_float(
             "##geometry-glyph-padding",
-            state.icon_padding,
+            padding,
             ICON_MIN_CLEARANCE,
             ICON_MAX_PADDING,
             "%.2f u",
             imgui.SliderFlags_.always_clamp.value,
         )
+        if changed:
+            state.set_icon_layout_for(group, padding=padding)
         imgui.set_item_tooltip(
             "Radial clearance from the candidate to its icon slot. Rotate and the reviewed "
             "Info/Warning/Error family remain fixed."
@@ -3965,8 +4055,13 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
             setattr(state, name, ProbeState.__dataclass_fields__[name].default)
         state.overlay_icon_radius = int(OVERLAY_GEOMETRY.icon_radius)
         state.overlay_radial_step = int(OVERLAY_GEOMETRY.radial_step)
-        state.icon_radial_alignment = 0.0
-        state.icon_padding = ICON_DEFAULT_PADDING
+        state.icon_adjustment_group = "Viewport tools"
+        state.icon_radial_alignment_by_group = {
+            group: values[0] for group, values in ICON_GROUP_LAYOUT_DEFAULTS.items()
+        }
+        state.icon_padding_by_group = {
+            group: values[1] for group, values in ICON_GROUP_LAYOUT_DEFAULTS.items()
+        }
         state.overlay_center_step = int(OVERLAY_GEOMETRY.center_step)
         state.tool_group_gap = int(OVERLAY_GEOMETRY.tool_group_gap)
         state.divider_width = int(OVERLAY_GEOMETRY.divider_width)
@@ -4166,6 +4261,7 @@ def _draw_concept_icon_specimen(
     scale: float,
     radial_alignment: float = 0.0,
     padding: float = ICON_DEFAULT_PADDING,
+    mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
 ) -> None:
     """Draw one candidate inside the shared circular placement boundary."""
 
@@ -4193,6 +4289,10 @@ def _draw_concept_icon_specimen(
             _concept_icon_color(name),
             radial_alignment=radial_alignment,
             padding=padding,
+            accent_color=(
+                CONCEPT_THEME.bg_frame_active if name.startswith("status-mouse-") else None
+            ),
+            mouse_width=mouse_width,
         )
     # Draw the boundary last so any collision remains visible instead of being
     # hidden below opaque icon geometry.
@@ -4209,6 +4309,7 @@ def _icon_review_metrics(
     name: str,
     radial_alignment: float = 0.0,
     padding: float = ICON_DEFAULT_PADDING,
+    mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
 ) -> tuple[float, float, float, float, float, float, float]:
     """Return radial, box, bounding-circle, and area diagnostics on the 24-unit grid."""
 
@@ -4248,7 +4349,12 @@ def _icon_review_metrics(
             float(area_centroid[0]),
             float(area_centroid[1]),
         )
-    metrics = icon_metrics(name, radial_alignment=radial_alignment, padding=padding)
+    metrics = icon_metrics(
+        name,
+        radial_alignment=radial_alignment,
+        padding=padding,
+        mouse_width=mouse_width,
+    )
     offset_x, offset_y = metrics.center_offset
     return (
         metrics.radial_clearance,
@@ -4263,14 +4369,14 @@ def _draw_icon_library_overview(
     draw,
     origin,
     scale: float,
-    radial_alignment: float,
-    padding: float,
+    state: ProbeState,
 ) -> None:
     card_width = 468.0 * scale
     card_height = 244.0 * scale
     gap_x = 20.0 * scale
     gap_y = 18.0 * scale
     for family_index, (family, icons) in enumerate(ICON_FAMILIES):
+        radial_alignment, padding = state.icon_layout_for(family)
         column = family_index % 3
         row = family_index // 3
         x0 = origin[0] + column * (card_width + gap_x)
@@ -4308,6 +4414,7 @@ def _draw_icon_library_overview(
                 scale,
                 radial_alignment,
                 padding,
+                state.concept_mouse_width(),
             )
             draw.centered_label(
                 label,
@@ -4402,12 +4509,12 @@ def _draw_icon_context_page(
     draw,
     origin,
     scale: float,
-    radial_alignment: float,
-    padding: float,
+    state: ProbeState,
 ) -> None:
     """Review candidate alignment in Mojive's actual row and font metrics."""
 
     x0, y0 = float(origin[0]), float(origin[1])
+    radial_alignment, padding = state.icon_layout_for("Keyframes")
     draw.text((x0, y0 + 10.0 * scale), CONCEPT_THEME.text, "Alignment in UI")
     draw.text(
         (x0, y0 + 34.0 * scale),
@@ -4505,6 +4612,7 @@ def _draw_icon_context_page(
         radial_alignment,
         padding,
     )
+    helper_radial_alignment, helper_padding = state.icon_layout_for("Scene helpers")
     _draw_context_row(
         draw,
         (row_x, second_y + 162.0 * scale),
@@ -4515,8 +4623,8 @@ def _draw_icon_context_page(
         "camera0",
         "candidate · 26 pt hierarchy row",
         scale,
-        radial_alignment,
-        padding,
+        helper_radial_alignment,
+        helper_padding,
     )
     _draw_context_row(
         draw,
@@ -4528,8 +4636,8 @@ def _draw_icon_context_page(
         "light0",
         "candidate · 26 pt hierarchy row",
         scale,
-        radial_alignment,
-        padding,
+        helper_radial_alignment,
+        helper_padding,
     )
 
     note_y = second_y + 270.0 * scale
@@ -4553,6 +4661,7 @@ def _draw_icon_family_detail(
     scale: float,
     radial_alignment: float,
     padding: float,
+    mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
 ) -> None:
     icons = icon_family(family)
     centers = tuple(origin[0] + offset * scale for offset in (330.0, 535.0, 765.0, 1085.0))
@@ -4597,11 +4706,12 @@ def _draw_icon_family_detail(
                 scale,
                 radial_alignment,
                 padding,
+                mouse_width,
             )
 
         meta_x = origin[0] + 1160.0 * scale
         clearance, offset_x, offset_y, radial_x, radial_y, area_x, area_y = _icon_review_metrics(
-            name, radial_alignment, padding
+            name, radial_alignment, padding, mouse_width
         )
         anchor = icon_alignment_anchor(name)
         for line, line_y in (
@@ -4626,7 +4736,7 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     draw.text(
         (x0, y0 + 24.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Amber = icon slot · green = state circle · global Radial center and Padding apply here",
+        "Amber = icon slot · green = state circle · each component group keeps its own Radial center and Padding",
     )
 
     def preview_state(**changes):
@@ -4676,22 +4786,23 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
         CONCEPT_THEME.text_disabled,
         "Minimum enclosing-circle center after placement",
     )
+    playback_radial, playback_padding = state.icon_layout_for("Viewport playback")
     for index, name in enumerate(
         (
-            "transport-previous",
-            "transport-play",
-            "transport-pause",
-            "transport-next",
-            "transport-reset",
-            "transport-record",
-            "transport-stop",
-            "transport-more",
+            "playback-previous",
+            "playback-play",
+            "playback-pause",
+            "playback-next",
+            "playback-reset",
+            "playback-record",
+            "playback-stop",
+            "playback-more",
         )
     ):
         metrics = icon_metrics(
             name,
-            state.icon_radial_alignment,
-            state.icon_padding,
+            playback_radial,
+            playback_padding,
         )
         draw.text(
             (metrics_x, playback_y + (30.0 + index * 25.0) * scale),
@@ -4705,12 +4816,12 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     semantic_y = playback_y + 252.0 * scale
     draw.text((metrics_x, semantic_y), CONCEPT_THEME.text, "Applied semantic states")
     semantic_specs = (
-        ("Default", "transport-play", "off", False),
-        ("Hover", "transport-play", "hover", False),
-        ("Press", "transport-next", "press", False),
-        ("Selected", "transport-pause", "selected", False),
-        ("Record", "transport-record", "off", True),
-        ("Stop", "transport-stop", "selected", True),
+        ("Default", "playback-play", "off", False),
+        ("Hover", "playback-play", "hover", False),
+        ("Press", "playback-next", "press", False),
+        ("Selected", "playback-pause", "selected", False),
+        ("Record", "playback-record", "off", True),
+        ("Stop", "playback-stop", "selected", True),
     )
     for index, (label, name, interaction, danger) in enumerate(semantic_specs):
         position = (metrics_x + index * 92.0 * scale, semantic_y + 28.0 * scale)
@@ -4731,8 +4842,8 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
                 20.0 * icon_scale,
                 name,
                 THEME.viewport.record if danger else color,
-                radial_alignment=state.icon_radial_alignment,
-                padding=state.icon_padding,
+                radial_alignment=playback_radial,
+                padding=playback_padding,
             )
 
         _circular_icon_button(
@@ -4807,52 +4918,85 @@ def _draw_icon_library_page(
     draw.text(
         (x0 + 42.0 * scale, y0 + 25.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Concept candidates · circular placement bound · isolated from production painters",
+        "Candidate vectors · 24-unit circular placement bound",
     )
-    controls_x = x0 + max(620.0 * scale, available_width - 780.0 * scale)
+    controls_x = x0 + max(500.0 * scale, available_width - 960.0 * scale)
     draw.text(
         (controls_x, y0 + 17.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Radial center",
+        "Group",
     )
     imgui.set_cursor_screen_pos(
-        imgui.ImVec2(float(controls_x + 120.0 * scale), float(y0 + 8.0 * scale))
+        imgui.ImVec2(float(controls_x + 58.0 * scale), float(y0 + 8.0 * scale))
     )
-    imgui.set_next_item_width(210.0 * scale)
-    _, state.icon_radial_alignment = imgui.slider_float(
+    imgui.set_next_item_width(190.0 * scale)
+    group = _draw_icon_group_combo("##icon-library-group", state)
+    radial_alignment, padding = state.icon_layout_for(group)
+    radial_x = controls_x + 268.0 * scale
+    draw.text(
+        (radial_x, y0 + 17.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "Radial",
+    )
+    imgui.set_cursor_screen_pos(
+        imgui.ImVec2(float(radial_x + 66.0 * scale), float(y0 + 8.0 * scale))
+    )
+    imgui.set_next_item_width(130.0 * scale)
+    changed, radial_alignment = imgui.slider_float(
         "##icon-library-radial-center",
-        state.icon_radial_alignment,
+        radial_alignment,
         0.0,
         1.0,
         "%.2f",
         imgui.SliderFlags_.always_clamp.value,
     )
+    if changed:
+        state.set_icon_layout_for(group, radial_alignment=radial_alignment)
     imgui.set_item_tooltip(
         "0 = visible-box or named semantic center; 1 = minimum enclosing-circle center. "
         "Rotate remains frame-centered, and Info/Warning/Error remain locked."
     )
-    padding_x = controls_x + 370.0 * scale
+    padding_x = controls_x + 486.0 * scale
     draw.text(
         (padding_x, y0 + 17.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Glyph padding",
+        "Glyph pad",
     )
     imgui.set_cursor_screen_pos(
-        imgui.ImVec2(float(padding_x + 120.0 * scale), float(y0 + 8.0 * scale))
+        imgui.ImVec2(float(padding_x + 72.0 * scale), float(y0 + 8.0 * scale))
     )
-    imgui.set_next_item_width(210.0 * scale)
-    _, state.icon_padding = imgui.slider_float(
+    imgui.set_next_item_width(130.0 * scale)
+    changed, padding = imgui.slider_float(
         "##icon-library-padding",
-        state.icon_padding,
+        padding,
         ICON_MIN_CLEARANCE,
         ICON_MAX_PADDING,
         "%.2f u",
         imgui.SliderFlags_.always_clamp.value,
     )
+    if changed:
+        state.set_icon_layout_for(group, padding=padding)
     imgui.set_item_tooltip(
         "Radial distance between candidate geometry and the orange placement circle. "
         "Rotate and the reviewed Info/Warning/Error family remain locked."
     )
+    if group == "Status & input":
+        mouse_x = controls_x + 706.0 * scale
+        draw.text(
+            (mouse_x, y0 + 17.0 * scale),
+            CONCEPT_THEME.text_disabled,
+            "Mouse W",
+        )
+        imgui.set_cursor_screen_pos(
+            imgui.ImVec2(float(mouse_x + 80.0 * scale), float(y0 + 8.0 * scale))
+        )
+        imgui.set_next_item_width(135.0 * scale)
+        state.hint_mouse_width = _even_slider(
+            "##icon-library-mouse-width", state.hint_mouse_width, 12, 24
+        )
+        imgui.set_item_tooltip(
+            "Visible mouse width used by Status & input specimens and whole-UI previews."
+        )
     imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 42.0 * scale, y0 + 54.0 * scale))
     state.icon_library_tab = _wrapped_tabs(
         tuple(
@@ -4863,34 +5007,26 @@ def _draw_icon_library_page(
         max(1.0, available_width - 84.0 * scale),
         gap=4.0 * scale,
     )
+    if state.icon_library_tab in ICON_GROUP_LAYOUT_DEFAULTS:
+        state.icon_adjustment_group = state.icon_library_tab
     content_y = float(imgui.get_cursor_screen_pos().y) + 14.0 * scale
     content_origin = (x0 + 42.0 * scale, content_y)
     if state.icon_library_tab == "Overview":
-        _draw_icon_library_overview(
-            draw,
-            content_origin,
-            scale,
-            state.icon_radial_alignment,
-            state.icon_padding,
-        )
+        _draw_icon_library_overview(draw, content_origin, scale, state)
     elif state.icon_library_tab == "UI context":
-        _draw_icon_context_page(
-            draw,
-            content_origin,
-            scale,
-            state.icon_radial_alignment,
-            state.icon_padding,
-        )
+        _draw_icon_context_page(draw, content_origin, scale, state)
     elif state.icon_library_tab == "Capsules":
         _draw_capsule_context_page(draw, content_origin, scale, state)
     else:
+        radial_alignment, padding = state.icon_layout_for(state.icon_library_tab)
         _draw_icon_family_detail(
             draw,
             content_origin,
             state.icon_library_tab,
             scale,
-            state.icon_radial_alignment,
-            state.icon_padding,
+            radial_alignment,
+            padding,
+            state.concept_mouse_width(),
         )
 
 
@@ -5034,8 +5170,8 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             (
                 f"Bounds icon {int(icon_radius * 2.0)} · state {int(state_radius * 2.0)} · "
                 f"shell {int(shell_radius * 2.0)} · centers {state.overlay_center_step} · "
-                f"radial step {state.overlay_radial_step} · glyph radial center "
-                f"{state.icon_radial_alignment:.2f}"
+                f"radial step {state.overlay_radial_step} · playback glyph radial center "
+                f"{state.icon_layout_for('Viewport playback')[0]:.2f}"
             ),
         )
 
@@ -5478,14 +5614,15 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         for index, icon_scale in enumerate((0.75, 1.0, 1.5)):
             center = (helper_x + (48.0 + index * 98.0) * scale, content_y + 520.0 * scale)
             if state.preview_icon_library:
+                radial_alignment, padding = state.icon_layout_for("Scene helpers")
                 draw_concept_icon(
                     draw,
                     center,
                     20.0 * scale * icon_scale,
                     "helper-camera",
                     CONCEPT_THEME.text,
-                    radial_alignment=state.icon_radial_alignment,
-                    padding=state.icon_padding,
+                    radial_alignment=radial_alignment,
+                    padding=padding,
                 )
                 draw_concept_icon(
                     draw,
@@ -5493,8 +5630,8 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                     20.0 * scale * icon_scale,
                     "helper-light",
                     CONCEPT_THEME.text,
-                    radial_alignment=state.icon_radial_alignment,
-                    padding=state.icon_padding,
+                    radial_alignment=radial_alignment,
+                    padding=padding,
                 )
             else:
                 _draw_camera_icon(draw, center, CONCEPT_THEME.text, scale * icon_scale)
@@ -5859,10 +5996,22 @@ def render(
             state.rotate_ring_gap_ratio = initial_rotate_gap_ratio
         if initial_playback_zoom is not None:
             state.construction_playback_scale = initial_playback_zoom
+        initial_adjustment_group = (
+            initial_icon_group
+            if initial_icon_group in ICON_GROUP_LAYOUT_DEFAULTS
+            else {
+                "Capsules": "Viewport playback",
+                "UI context": "Keyframes",
+            }.get(initial_icon_group, state.icon_adjustment_group)
+        )
+        state.icon_adjustment_group = initial_adjustment_group
         if initial_icon_radial_alignment is not None:
-            state.icon_radial_alignment = initial_icon_radial_alignment
+            state.set_icon_layout_for(
+                initial_adjustment_group,
+                radial_alignment=initial_icon_radial_alignment,
+            )
         if initial_icon_padding is not None:
-            state.icon_padding = initial_icon_padding
+            state.set_icon_layout_for(initial_adjustment_group, padding=initial_icon_padding)
         if interactive:
             window.show()
             frame_period = 1.0 / interactive_fps
@@ -5987,8 +6136,8 @@ def main() -> None:
         type=float,
         default=None,
         help=(
-            "Initial candidate alignment, 0 for the declared center and 1 for radial center; "
-            "the former capsule option name remains an alias"
+            "Initial alignment for --icon-group, 0 for the declared center and 1 for radial "
+            "center; the former capsule option name remains an alias"
         ),
     )
     parser.add_argument(
@@ -5996,7 +6145,7 @@ def main() -> None:
         type=float,
         default=None,
         help=(
-            f"Initial radial glyph padding, from {ICON_MIN_CLEARANCE:g} "
+            f"Initial radial glyph padding for --icon-group, from {ICON_MIN_CLEARANCE:g} "
             f"to {ICON_MAX_PADDING:g} grid units"
         ),
     )
@@ -6039,10 +6188,7 @@ def main() -> None:
         parser.error("--rotate-gap-ratio must be between 0.25 and 1.00")
     if args.playback_zoom is not None and not 1.5 <= args.playback_zoom <= 4.0:
         parser.error("--playback-zoom must be between 1.5 and 4.0")
-    if (
-        args.icon_radial_alignment is not None
-        and not 0.0 <= args.icon_radial_alignment <= 1.0
-    ):
+    if args.icon_radial_alignment is not None and not 0.0 <= args.icon_radial_alignment <= 1.0:
         parser.error("--icon-radial-alignment must be between 0 and 1")
     if (
         args.icon_padding is not None

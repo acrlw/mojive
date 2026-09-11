@@ -8,11 +8,15 @@ from design.tools.ui_icon_concepts import (
     ICON_DEFAULT_PADDING,
     ICON_FAMILIES,
     ICON_GRID,
+    ICON_GROUP_LAYOUT_DEFAULTS,
     ICON_MAX_PADDING,
     ICON_MIN_CLEARANCE,
+    ICON_PADDING_BIAS,
     ROTATE_FRAME_PADDING,
+    STATUS_MOUSE_DEFAULT_WIDTH,
     draw_concept_icon,
     icon_alignment_anchor,
+    icon_component_group,
     icon_metrics,
     minimum_enclosing_circle,
 )
@@ -139,8 +143,9 @@ def _render(
     name: str,
     size: float,
     *,
-    radial_alignment: float = 0.0,
-    padding: float = ICON_DEFAULT_PADDING,
+    radial_alignment: float | None = None,
+    padding: float | None = None,
+    mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
 ) -> _RecordingDraw:
     draw = _RecordingDraw()
     draw_concept_icon(
@@ -151,6 +156,7 @@ def _render(
         (1.0, 1.0, 1.0, 1.0),
         radial_alignment=radial_alignment,
         padding=padding,
+        mouse_width=mouse_width,
     )
     return draw
 
@@ -158,7 +164,7 @@ def _render(
 def test_concept_catalog_has_unique_named_members() -> None:
     names = _icons()
 
-    assert len(ICON_FAMILIES) == 6
+    assert len(ICON_FAMILIES) == 7
     assert len(names) == len(set(names))
     assert all(icons for _family, icons in ICON_FAMILIES)
 
@@ -193,8 +199,20 @@ def test_concept_icon_geometry_stays_inside_circular_placement_bound(name: str) 
 
 @pytest.mark.parametrize("name", _icons())
 def test_default_layout_fits_candidates_to_the_reference_family_padding(name: str) -> None:
-    expected = ROTATE_FRAME_PADDING if name == "tool-rotate" else ICON_DEFAULT_PADDING
+    group = icon_component_group(name)
+    expected = (
+        ROTATE_FRAME_PADDING
+        if name == "tool-rotate"
+        else ICON_GROUP_LAYOUT_DEFAULTS[group][1] + ICON_PADDING_BIAS.get(name, 0.0)
+    )
     assert icon_metrics(name).radial_clearance == pytest.approx(expected, abs=1e-5)
+
+
+def test_component_groups_own_independent_candidate_names_and_layout_defaults() -> None:
+    assert icon_component_group("playback-play") == "Viewport playback"
+    assert icon_component_group("transport-play") == "Keyframe transport"
+    assert ICON_GROUP_LAYOUT_DEFAULTS["Viewport tools"] == (0.0, 0.5)
+    assert ICON_GROUP_LAYOUT_DEFAULTS["Viewport playback"] == (0.0, ICON_DEFAULT_PADDING)
 
 
 def test_rotate_outer_frame_matches_the_placement_circle() -> None:
@@ -234,7 +252,12 @@ def test_icon_padding_rejects_values_outside_the_review_range(padding: float) ->
 
 @pytest.mark.parametrize(
     "name",
-    tuple(name for name in _icons() if icon_alignment_anchor(name) == "box"),
+    tuple(
+        name
+        for name in _icons()
+        if icon_alignment_anchor(name) == "box"
+        and ICON_GROUP_LAYOUT_DEFAULTS[icon_component_group(name)][0] == 0.0
+    ),
 )
 def test_concept_icon_bounds_are_centered_in_placement_circle(name: str) -> None:
     draw = _render(name, ICON_GRID)
@@ -292,7 +315,9 @@ def test_symmetric_tool_icons_center_their_filled_area(name: str) -> None:
 def test_sparse_frame_tools_use_the_shared_near_boundary_envelope(name: str) -> None:
     metrics = icon_metrics(name)
 
-    assert metrics.radial_clearance == pytest.approx(ICON_DEFAULT_PADDING, abs=1e-5)
+    assert metrics.radial_clearance == pytest.approx(
+        ICON_GROUP_LAYOUT_DEFAULTS["Viewport tools"][1], abs=1e-5
+    )
 
 
 def test_camera_candidates_share_one_master_and_box_anchor() -> None:
@@ -452,14 +477,22 @@ def test_minimum_bounding_circle_is_only_a_containment_diagnostic(name: str) -> 
 
 @pytest.mark.parametrize(
     "name",
-    tuple(name for name in _icons() if icon_alignment_anchor(name) == "box"),
+    tuple(
+        name
+        for name in _icons()
+        if icon_alignment_anchor(name) == "box"
+        and ICON_GROUP_LAYOUT_DEFAULTS[icon_component_group(name)][0] == 0.0
+    ),
 )
 def test_box_anchored_icons_center_their_visible_bounds(name: str) -> None:
     assert icon_metrics(name).center_offset == pytest.approx((0.0, 0.0), abs=0.05)
 
 
-@pytest.mark.parametrize("name", tuple(name for name in _icons() if name.startswith("transport-")))
-def test_transport_icons_center_their_visible_bounds_in_capsule_cells(name: str) -> None:
+@pytest.mark.parametrize(
+    "name",
+    tuple(name for name in _icons() if name.startswith(("transport-", "playback-"))),
+)
+def test_transport_icons_center_their_visible_bounds_in_component_cells(name: str) -> None:
     assert icon_alignment_anchor(name) == "box"
     assert icon_metrics(name).center_offset == pytest.approx((0.0, 0.0), abs=0.01)
 
@@ -475,7 +508,9 @@ def test_global_radial_control_blends_from_declared_to_enclosing_circle_center()
 @pytest.mark.parametrize(
     "name",
     tuple(
-        name for name in _icons() if name.startswith("transport-") and name != "transport-record"
+        name
+        for name in _icons()
+        if name.startswith(("transport-", "playback-")) and not name.endswith("record")
     ),
 )
 def test_transport_contours_do_not_use_raw_stroked_corners(name: str) -> None:
@@ -485,6 +520,36 @@ def test_transport_contours_do_not_use_raw_stroked_corners(name: str) -> None:
     assert not draw.polylines
     assert draw.filled_paths
     assert all(len(path) > 4 for path in draw.filled_paths)
+
+
+def test_viewport_playback_chevrons_do_not_outgrow_play_or_pause() -> None:
+    heights = {
+        name: icon_metrics(name).bounds[3] - icon_metrics(name).bounds[1]
+        for name in ("playback-previous", "playback-play", "playback-pause", "playback-next")
+    }
+
+    reference = max(heights["playback-play"], heights["playback-pause"])
+    assert heights["playback-previous"] <= reference
+    assert heights["playback-next"] <= reference
+
+
+def test_keyframe_transport_chevrons_do_not_outgrow_play_or_pause() -> None:
+    heights = {
+        name: icon_metrics(name).bounds[3] - icon_metrics(name).bounds[1]
+        for name in ("transport-previous", "transport-play", "transport-pause", "transport-next")
+    }
+
+    reference = max(heights["transport-play"], heights["transport-pause"])
+    assert heights["transport-previous"] <= reference
+    assert heights["transport-next"] <= reference
+
+
+def test_status_mouse_width_is_adjustable_without_moving_its_center() -> None:
+    narrow = icon_metrics("status-mouse-left", mouse_width=9.5)
+    wide = icon_metrics("status-mouse-left", mouse_width=14.5)
+
+    assert wide.bounds[2] - wide.bounds[0] > narrow.bounds[2] - narrow.bounds[0]
+    assert wide.center_offset == pytest.approx((0.0, 0.0), abs=0.01)
 
 
 def test_hidden_eye_uses_three_lashes_instead_of_a_slash() -> None:

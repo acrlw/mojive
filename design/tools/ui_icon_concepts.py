@@ -40,12 +40,13 @@ ICON_MIN_CLEARANCE = 0.5
 ICON_DEFAULT_PADDING = 0.75
 ICON_MAX_PADDING = 4.0
 ROTATE_FRAME_PADDING = 0.0
+STATUS_MOUSE_DEFAULT_WIDTH = 11.8
 REVIEW_LOCKED_ICONS = frozenset(("status-info", "status-warning", "status-error"))
 # ``_dimensions_glyph_geometry`` narrows a source stroke to compensate for the
 # DrawList fringe. This concept-only source value makes Scale's fitted shaft
 # match Rotate's fitted ring at the shared 24-unit slot. Preserve the reviewed
 # center clearance and handle size while changing that one visible weight.
-_SCALE_CONCEPT_SOURCE_STROKE = 2.32
+_SCALE_CONCEPT_SOURCE_STROKE = 2.287
 SCALE_CONCEPT_GEOMETRY = replace(
     OVERLAY_GEOMETRY,
     tool_stroke=_SCALE_CONCEPT_SOURCE_STROKE,
@@ -69,7 +70,20 @@ ICON_FAMILIES = (
         ),
     ),
     (
-        "Transport",
+        "Viewport playback",
+        (
+            ("Previous", "playback-previous"),
+            ("Play", "playback-play"),
+            ("Pause", "playback-pause"),
+            ("Next", "playback-next"),
+            ("Reset", "playback-reset"),
+            ("Record", "playback-record"),
+            ("Stop", "playback-stop"),
+            ("More", "playback-more"),
+        ),
+    ),
+    (
+        "Keyframe transport",
         (
             ("First", "transport-first"),
             ("Previous", "transport-previous"),
@@ -130,6 +144,29 @@ ICON_FAMILIES = (
         ),
     ),
 )
+
+# Placement is owned by the component that consumes the glyph. Viewport tools
+# use their authored/semantic centers and the tight half-unit margin requested
+# for the vertical capsule. Playback and Keyframes keep the same visible-box
+# baseline, but own independent values so either component can be tuned alone.
+ICON_GROUP_LAYOUT_DEFAULTS = {
+    "Viewport tools": (0.0, 0.5),
+    "Viewport playback": (0.0, ICON_DEFAULT_PADDING),
+    "Keyframe transport": (0.0, ICON_DEFAULT_PADDING),
+    "Keyframes": (0.0, ICON_DEFAULT_PADDING),
+    "Panels": (0.0, ICON_DEFAULT_PADDING),
+    "Scene helpers": (0.0, ICON_DEFAULT_PADDING),
+    "Status & input": (0.0, ICON_DEFAULT_PADDING),
+}
+
+# Open chevrons occupy more of a circular cell than Play/Pause at the same
+# enclosing radius. Keep each correction with the component that consumes it.
+ICON_PADDING_BIAS = {
+    "playback-previous": 1.85,
+    "playback-next": 1.85,
+    "transport-previous": 1.7,
+    "transport-next": 1.7,
+}
 
 ICON_LIBRARY_TABS = (
     "Overview",
@@ -784,7 +821,7 @@ def _draw_tool(p: _Painter, name: str) -> None:
 
 
 def _draw_transport(p: _Painter, name: str) -> None:
-    kind = name.removeprefix("transport-")
+    kind = name.removeprefix("transport-").removeprefix("playback-")
     if kind == "play":
         _triangle(p, 1.0)
     elif kind == "pause":
@@ -1076,7 +1113,13 @@ def _draw_helper(p: _Painter, name: str) -> None:
         _draw_light(p)
 
 
-def _draw_status(p: _Painter, name: str, accent_color=None) -> None:
+def _draw_status(
+    p: _Painter,
+    name: str,
+    accent_color=None,
+    *,
+    mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
+) -> None:
     kind = name.removeprefix("status-")
     if kind in {"info", "warning", "error"}:
         p.circle(0.0, 0.0, 9.0, width=1.55)
@@ -1096,12 +1139,16 @@ def _draw_status(p: _Painter, name: str, accent_color=None) -> None:
         if accent_color is not None
         else p
     )
-    p.rect(-5.2, -7.8, 5.2, 7.8, rounding=4.4, width=1.45)
-    p.line((-4.9, -1.1), (4.9, -1.1), width=1.2)
+    half_width = float(mouse_width) * 0.5
+    if not 5.0 <= mouse_width <= 22.0:
+        raise ValueError("status mouse width must be between 5 and 22 grid units")
+    p.rect(-half_width, -7.8, half_width, 7.8, rounding=4.4, width=1.45)
+    p.line((-half_width + 0.3, -1.1), (half_width - 0.3, -1.1), width=1.2)
+    control_x = max(0.0, half_width - 3.7)
     if kind == "mouse-left":
-        accent.circle_filled(-2.2, -4.2, 1.25)
+        accent.circle_filled(-control_x, -4.2, 1.25)
     elif kind == "mouse-right":
-        accent.circle_filled(2.2, -4.2, 1.25)
+        accent.circle_filled(control_x, -4.2, 1.25)
     else:
         accent.rect_filled(-0.9, -5.8, 0.9, -2.5, rounding=0.9)
 
@@ -1114,13 +1161,14 @@ def _draw_concept_icon_raw(
     color,
     *,
     accent_color=None,
+    mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
 ) -> None:
     """Draw authored geometry before shared optical placement is applied."""
 
     painter = _Painter(draw, center, size, color)
     if name.startswith("tool-"):
         _draw_tool(painter, name)
-    elif name.startswith("transport-"):
+    elif name.startswith(("transport-", "playback-")):
         _draw_transport(painter, name)
     elif name.startswith("key-"):
         _draw_keyframe(painter, name)
@@ -1129,7 +1177,7 @@ def _draw_concept_icon_raw(
     elif name.startswith("helper-"):
         _draw_helper(painter, name)
     elif name.startswith("status-"):
-        _draw_status(painter, name, accent_color)
+        _draw_status(painter, name, accent_color, mouse_width=mouse_width)
     else:
         raise ValueError(f"unknown concept icon: {name!r}")
 
@@ -1318,9 +1366,22 @@ class _MetricsDraw:
         )
 
 
-def _measure_raw_icon(name: str, center=(0.0, 0.0), size: float = ICON_GRID) -> IconMetrics:
+def _measure_raw_icon(
+    name: str,
+    center=(0.0, 0.0),
+    size: float = ICON_GRID,
+    *,
+    mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
+) -> IconMetrics:
     draw = _MetricsDraw()
-    _draw_concept_icon_raw(draw, center, size, name, (1.0, 1.0, 1.0, 1.0))
+    _draw_concept_icon_raw(
+        draw,
+        center,
+        size,
+        name,
+        (1.0, 1.0, 1.0, 1.0),
+        mouse_width=mouse_width,
+    )
     area_centroid = (
         draw.area_moment[0] / draw.filled_area,
         draw.area_moment[1] / draw.filled_area,
@@ -1335,11 +1396,17 @@ def _measure_raw_icon(name: str, center=(0.0, 0.0), size: float = ICON_GRID) -> 
 def _icon_layout(
     name: str,
     radial_alignment: float | None = None,
-    padding: float = ICON_DEFAULT_PADDING,
+    padding: float | None = None,
+    mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
 ) -> tuple[float, tuple[float, float]]:
     """Return the declared placement anchor and scale at the requested radial padding."""
 
-    raw = _measure_raw_icon(name)
+    raw = _measure_raw_icon(name, mouse_width=mouse_width)
+    default_radial, default_padding = ICON_GROUP_LAYOUT_DEFAULTS[icon_component_group(name)]
+    if radial_alignment is None:
+        radial_alignment = default_radial
+    if padding is None:
+        padding = default_padding
     if name in REVIEW_LOCKED_ICONS:
         radial_alignment = 0.0
         padding = ICON_DEFAULT_PADDING
@@ -1353,15 +1420,14 @@ def _icon_layout(
     else:
         base_offset = (-raw.center_offset[0], -raw.center_offset[1])
     radial_offset = (-raw.bounding_center[0], -raw.bounding_center[1])
-    amount = 0.0 if radial_alignment is None else radial_alignment
-    amount = min(1.0, max(0.0, float(amount)))
+    amount = min(1.0, max(0.0, float(radial_alignment)))
     offset = (
         base_offset[0] + (radial_offset[0] - base_offset[0]) * amount,
         base_offset[1] + (radial_offset[1] - base_offset[1]) * amount,
     )
     # Measure after placement so centering happens before the complete master
     # is fitted. Scaling first would preserve each source contour's old drift.
-    shifted = _measure_raw_icon(name, offset)
+    shifted = _measure_raw_icon(name, offset, mouse_width=mouse_width)
     padding = float(padding)
     if not ICON_MIN_CLEARANCE <= padding <= ICON_MAX_PADDING:
         raise ValueError(
@@ -1369,7 +1435,11 @@ def _icon_layout(
         )
     # Rotate's outer screen ring is itself the slot frame. Keep its visible
     # outside diameter on the orange guide while scaling all inner rings with it.
-    target_padding = ROTATE_FRAME_PADDING if name == "tool-rotate" else padding
+    target_padding = (
+        ROTATE_FRAME_PADDING
+        if name == "tool-rotate"
+        else padding + ICON_PADDING_BIAS.get(name, 0.0)
+    )
     safe_radius = ICON_BOUND_DIAMETER * 0.5 - target_padding
     layout_scale = safe_radius / shifted.radial_extent
     return layout_scale, (offset[0] * layout_scale, offset[1] * layout_scale)
@@ -1393,12 +1463,13 @@ def draw_concept_icon(
     color,
     *,
     radial_alignment: float | None = None,
-    padding: float = ICON_DEFAULT_PADDING,
+    padding: float | None = None,
     accent_color=None,
+    mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
 ) -> None:
     """Draw one anchor-centered candidate fitted to a padded circular slot."""
 
-    layout_scale, offset = _icon_layout(name, radial_alignment, padding)
+    layout_scale, offset = _icon_layout(name, radial_alignment, padding, mouse_width)
     unit_scale = float(size) / ICON_GRID
     adjusted_center = (
         float(center[0]) + offset[0] * unit_scale,
@@ -1411,6 +1482,7 @@ def draw_concept_icon(
         name,
         color,
         accent_color=accent_color,
+        mouse_width=mouse_width,
     )
 
 
@@ -1418,7 +1490,8 @@ def draw_concept_icon(
 def icon_metrics(
     name: str,
     radial_alignment: float | None = None,
-    padding: float = ICON_DEFAULT_PADDING,
+    padding: float | None = None,
+    mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
 ) -> IconMetrics:
     """Return placement and optical measurements for one 24-unit candidate."""
 
@@ -1431,6 +1504,7 @@ def icon_metrics(
         (1.0, 1.0, 1.0, 1.0),
         radial_alignment=radial_alignment,
         padding=padding,
+        mouse_width=mouse_width,
     )
     area_centroid = (
         draw.area_moment[0] / draw.filled_area,
@@ -1446,3 +1520,23 @@ def icon_family(label: str):
     """Return one family by its user-facing label."""
 
     return next(icons for family, icons in ICON_FAMILIES if family == label)
+
+
+def icon_component_group(name: str) -> str:
+    """Return the actual UI component group that owns one candidate."""
+
+    if name.startswith("tool-"):
+        return "Viewport tools"
+    if name.startswith("playback-"):
+        return "Viewport playback"
+    if name.startswith("transport-"):
+        return "Keyframe transport"
+    if name.startswith("key-"):
+        return "Keyframes"
+    if name.startswith("panel-"):
+        return "Panels"
+    if name.startswith("helper-"):
+        return "Scene helpers"
+    if name.startswith("status-"):
+        return "Status & input"
+    raise ValueError(f"unknown concept icon: {name!r}")
