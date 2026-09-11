@@ -42,6 +42,7 @@ ICON_MIN_CLEARANCE = 0.5
 ICON_DEFAULT_PADDING = 0.75
 ICON_MAX_PADDING = 4.0
 ROTATE_FRAME_PADDING = 0.0
+MORE_ARM_RATIO = 0.94
 STATUS_MOUSE_DEFAULT_WIDTH = OVERLAY_GEOMETRY.hint_mouse_width
 REVIEW_LOCKED_ICONS = frozenset(("status-info", "status-warning", "status-error"))
 BOX_CENTERED_ICONS = frozenset(
@@ -55,6 +56,8 @@ BOX_CENTERED_ICONS = frozenset(
         "transport-next",
         "transport-last",
         "transport-more",
+        "panel-right",
+        "panel-down",
     )
 )
 RING_CENTERED_ICONS = frozenset(("playback-reset", "transport-reset"))
@@ -181,10 +184,21 @@ ICON_PADDING_BIAS = {
     "playback-next": 1.85,
     # A circular Record mark otherwise fills the complete circular envelope and
     # looks much larger than the diagonally constrained Stop square.
-    "playback-record": 3.30,
-    "transport-record": 3.30,
+    "playback-record": 3.08,
+    "transport-record": 3.08,
     "transport-previous": 1.7,
     "transport-next": 1.7,
+}
+
+# Closely related marks share one fitted master so their authored dimensions
+# remain comparable after placement. More is a shorter, rotated Previous at the
+# same stroke scale. All mouse states reuse the Left shell scale because their
+# production outer rectangle has one fixed size.
+ICON_LAYOUT_REFERENCES = {
+    "playback-more": "playback-previous",
+    "transport-more": "transport-previous",
+    "status-mouse-right": "status-mouse-left",
+    "status-mouse-wheel": "status-mouse-left",
 }
 
 ICON_LIBRARY_TABS = (
@@ -511,6 +525,7 @@ class _Painter:
         *,
         rounding: float = 0.0,
         width: float = ICON_STROKE,
+        smoothing: float | None = None,
     ) -> None:
         self.draw.rect(
             self.point(x0, y0),
@@ -518,6 +533,7 @@ class _Painter:
             self.color,
             width * self.scale,
             rounding=rounding * self.scale,
+            smoothing=smoothing,
         )
 
     def rect_filled(
@@ -605,55 +621,6 @@ def _g3_rect(p: _Painter, x0: float, y0: float, x1: float, y1: float, radius: fl
     p.polygon(smooth_rect_points(x0, y0, x1, y1, radius, smoothing=CORNER_SMOOTHING))
 
 
-def _filled_ring(
-    p: _Painter,
-    radius: float,
-    width: float,
-    *,
-    fringe_width: float = 1.0,
-    segments: int = 64,
-) -> None:
-    """Draw an annulus through the same filled-mesh path as the inner Rotate rings."""
-
-    outer_radius = radius + width * 0.5
-    inner_radius = radius - width * 0.5
-    outer = tuple(
-        (
-            outer_radius * math.cos(index * math.tau / segments),
-            outer_radius * math.sin(index * math.tau / segments),
-        )
-        for index in range(segments)
-    )
-    inner = tuple(
-        (
-            inner_radius * math.cos(index * math.tau / segments),
-            inner_radius * math.sin(index * math.tau / segments),
-        )
-        for index in range(segments)
-    )
-    points = outer + inner
-    indices = []
-    for index in range(segments):
-        following = (index + 1) % segments
-        indices.extend((index, following, segments + following))
-        indices.extend((index, segments + following, segments + index))
-    p.indexed_fill(
-        points,
-        tuple(indices),
-        outline=outer,
-        hole=inner,
-        fringe_width=fringe_width,
-    )
-
-
-def _rotate_fringe_width(p: _Painter, ring_width: float, gap: float) -> float:
-    """Keep two AA ramps from consuming a subpixel Rotate crossing gap."""
-
-    stroke_pixels = ring_width * p.scale
-    gap_pixels = gap * p.scale
-    return min(1.0, stroke_pixels * 0.5, gap_pixels * (3.0 / 8.0))
-
-
 def _chevron_centerline(
     direction: float, x: float, scale: float = 1.0
 ) -> tuple[tuple[float, float], ...]:
@@ -675,6 +642,13 @@ def _chevron(p: _Painter, direction: float, x: float, *, scale: float = 1.0) -> 
         width=ICON_STROKE * scale,
         radius=0.68 * scale,
     )
+
+
+def _more_centerline(scale: float = 1.0) -> tuple[tuple[float, float], ...]:
+    """Rotate a slightly shorter Previous centerline 90 degrees counterclockwise."""
+
+    previous = _chevron_centerline(-1.0, 0.0, scale * MORE_ARM_RATIO)
+    return tuple((y, -x) for x, y in previous)
 
 
 def _arc_arrow(
@@ -780,19 +754,14 @@ def _draw_tool(p: _Painter, name: str) -> None:
             convex_only=False,
         )
     elif name == "tool-rotate":
-        # Draw the established three cyclic half-rings locally. Reset keeps the
-        # separate one-arrow grammar, and production geometry remains untouched.
+        # Repeat the established production construction: the screen ring uses
+        # ImGui's antialiased circle stroke, while the three local half-rings use
+        # the normal one-pixel filled-contour fringe. A reduced subpixel fringe
+        # makes these narrow curves visibly stair-step at the 14-point size.
         production_scale = 0.82
         glyph_scale = production_scale * TOOL_GLYPH_SCALE
         ring_width = OVERLAY_GEOMETRY.tool_stroke * production_scale
-        ring_gap = OVERLAY_GEOMETRY.rotate_ring_gap * production_scale
-        fringe_width = _rotate_fringe_width(p, ring_width, ring_gap)
-        _filled_ring(
-            p,
-            10.0 * glyph_scale,
-            ring_width,
-            fringe_width=fringe_width,
-        )
+        p.circle(0.0, 0.0, 10.0 * glyph_scale, width=ring_width)
         for ring in _rotate_visible_ring_polygons(
             OVERLAY_GEOMETRY.tool_stroke,
             OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
@@ -800,10 +769,7 @@ def _draw_tool(p: _Painter, name: str) -> None:
             CAPSULE_SMOOTHING,
         ):
             for local in ring:
-                p.polygon(
-                    tuple((x * glyph_scale, y * glyph_scale) for x, y in local),
-                    fringe_width=fringe_width,
-                )
+                p.polygon(tuple((x * glyph_scale, y * glyph_scale) for x, y in local))
     elif name == "tool-scale":
         # Keep the accepted viewport Scale glyph as the source of truth. It
         # supplies the original reach, center clearance, joined G3 shafts and
@@ -908,7 +874,12 @@ def _draw_transport(p: _Painter, name: str) -> None:
     elif kind == "stop":
         _g3_rect(p, -4.8, -4.8, 4.8, 4.8, 1.05)
     elif kind == "more":
-        _rounded_polyline(p, ((-5.6, -2.8), (0.0, 2.8), (5.6, -2.8)))
+        _rounded_polyline(
+            p,
+            _more_centerline(1.18),
+            width=ICON_STROKE * 1.18,
+            radius=0.68 * 1.18,
+        )
     else:
         raise ValueError(f"unknown transport icon: {name!r}")
 
@@ -944,15 +915,22 @@ def _draw_keyframe(p: _Painter, name: str) -> None:
         _diamond(p, center=(-direction * 3.2, 0.0), radius=3.5, filled=True)
     elif kind == "fit":
         for sx, sy in ((-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)):
-            p.polyline(
+            _rounded_polyline(
+                p,
                 (
                     (sx * 3.5, sy * 6.5),
                     (sx * 6.5, sy * 6.5),
                     (sx * 6.5, sy * 3.5),
-                )
+                ),
             )
     elif kind == "follow":
-        p.arrow((-7.38, 0.0), (4.42, 0.0), head_length=3.2, head_width=5.0)
+        p.arrow(
+            (-7.38, 0.0),
+            (4.42, 0.0),
+            head_length=3.2,
+            head_width=5.0,
+            round_tail=True,
+        )
         p.line((6.62, -5.8), (6.62, 5.8))
     else:
         p.rect(-7.5, -5.1, 7.5, 5.1, rounding=1.8)
@@ -1207,8 +1185,8 @@ def _draw_status(
     )
     width = float(mouse_width)
     half_width = width * 0.5
-    if not 5.0 <= mouse_width <= 22.0:
-        raise ValueError("status mouse width must be between 5 and 22 grid units")
+    if not 5.0 <= mouse_width <= 24.0:
+        raise ValueError("status mouse width must be between 5 and 24 grid units")
     height = OVERLAY_GEOMETRY.hint_control_height
     top = -height * 0.5
     outline_width = OVERLAY_GEOMETRY.hint_mouse_stroke
@@ -1225,7 +1203,15 @@ def _draw_status(
     )
     if button_geometry is None:
         radius = min(width * 0.22, height * 0.18)
-        p.rect(-half_width, top, half_width, -top, rounding=radius, width=outline_width)
+        p.rect(
+            -half_width,
+            top,
+            half_width,
+            -top,
+            rounding=radius,
+            width=outline_width,
+            smoothing=CAPSULE_SMOOTHING,
+        )
     else:
         p.polyline(button_geometry.visible_shell, width=outline_width, cap="butt")
         accent.convex_polygon(button_geometry.fill)
@@ -1370,12 +1356,25 @@ class _MetricsDraw:
         radius = float(radius)
         self._add((center,), radius)
 
-    def rect(self, lo, hi, _color, width, **_kwargs) -> None:
+    def rect(self, lo, hi, _color, width, **kwargs) -> None:
         width = float(width)
-        self._add(
-            ((lo[0], lo[1]), (hi[0], lo[1]), (hi[0], hi[1]), (lo[0], hi[1])),
-            width * 0.5,
-        )
+        rounding = float(kwargs.get("rounding", 0.0))
+        if rounding > 0.0:
+            points = smooth_rect_points(
+                float(lo[0]),
+                float(lo[1]),
+                float(hi[0]),
+                float(hi[1]),
+                rounding,
+                smoothing=(
+                    CORNER_SMOOTHING
+                    if kwargs.get("smoothing") is None
+                    else float(kwargs["smoothing"])
+                ),
+            )
+        else:
+            points = ((lo[0], lo[1]), (hi[0], lo[1]), (hi[0], hi[1]), (lo[0], hi[1]))
+        self._add(points, width * 0.5)
 
     def rect_filled(self, lo, hi, _color, **_kwargs) -> None:
         self._add(((lo[0], lo[1]), (hi[0], lo[1]), (hi[0], hi[1]), (lo[0], hi[1])))
@@ -1434,14 +1433,21 @@ def _icon_layout(
         )
     # Rotate's outer screen ring is itself the slot frame. Keep its visible
     # outside diameter on the orange guide while scaling all inner rings with it.
+    reference_name = ICON_LAYOUT_REFERENCES.get(name, name)
     target_padding = (
         ROTATE_FRAME_PADDING
         if name == "tool-rotate"
-        else padding + ICON_PADDING_BIAS.get(name, 0.0)
+        else padding + ICON_PADDING_BIAS.get(reference_name, 0.0)
     )
     safe_radius = ICON_BOUND_DIAMETER * 0.5 - target_padding
-    shifted = _measure_raw_icon(name, offset, mouse_width=mouse_width)
-    layout_scale = safe_radius / shifted.origin_extent
+    reference_raw = _measure_raw_icon(reference_name, mouse_width=mouse_width)
+    reference_center = _alignment_center(reference_name, reference_raw)
+    reference_shifted = _measure_raw_icon(
+        reference_name,
+        (-reference_center[0], -reference_center[1]),
+        mouse_width=mouse_width,
+    )
+    layout_scale = safe_radius / reference_shifted.origin_extent
     return layout_scale, (offset[0] * layout_scale, offset[1] * layout_scale)
 
 

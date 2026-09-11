@@ -11,9 +11,11 @@ from design.tools.ui_icon_concepts import (
     ICON_FAMILIES,
     ICON_GRID,
     ICON_GROUP_LAYOUT_DEFAULTS,
+    ICON_LAYOUT_REFERENCES,
     ICON_MAX_PADDING,
     ICON_MIN_CLEARANCE,
     ICON_PADDING_BIAS,
+    MORE_ARM_RATIO,
     RESET_RING_CENTER,
     RING_CENTERED_ICONS,
     ROTATE_FRAME_PADDING,
@@ -25,7 +27,7 @@ from design.tools.ui_icon_concepts import (
     icon_metrics,
 )
 
-from mojive.curves2d import arrow_mesh
+from mojive.curves2d import CORNER_SMOOTHING, arrow_mesh, smooth_rect_points
 from mojive.ui.viewport_widgets import (
     CAPSULE_SMOOTHING,
     OVERLAY_GEOMETRY,
@@ -143,9 +145,25 @@ class _RecordingDraw:
         self.solid_colors.append(_color)
         self._add((center,), float(radius))
 
-    def rect(self, lo, hi, _color, width, **_kwargs) -> None:
+    def rect(self, lo, hi, _color, width, **kwargs) -> None:
         self.widths.append(float(width))
-        self._add((lo, hi), float(width) * 0.5)
+        rounding = float(kwargs.get("rounding", 0.0))
+        if rounding > 0.0:
+            points = smooth_rect_points(
+                float(lo[0]),
+                float(lo[1]),
+                float(hi[0]),
+                float(hi[1]),
+                rounding,
+                smoothing=(
+                    CORNER_SMOOTHING
+                    if kwargs.get("smoothing") is None
+                    else float(kwargs["smoothing"])
+                ),
+            )
+        else:
+            points = (lo, hi)
+        self._add(points, float(width) * 0.5)
 
     def rect_filled(self, lo, hi, _color, **_kwargs) -> None:
         self.solid_colors.append(_color)
@@ -207,6 +225,12 @@ def test_concept_icon_geometry_stays_inside_circular_placement_bound(name: str) 
 
 @pytest.mark.parametrize("name", _icons())
 def test_default_layout_fits_candidates_to_the_reference_family_padding(name: str) -> None:
+    if name in ICON_LAYOUT_REFERENCES:
+        reference = ICON_LAYOUT_REFERENCES[name]
+        assert icon_concepts._icon_layout(name)[0] == pytest.approx(
+            icon_concepts._icon_layout(reference)[0], abs=1e-6
+        )
+        return
     group = icon_component_group(name)
     expected = (
         ROTATE_FRAME_PADDING
@@ -234,6 +258,8 @@ def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
         "transport-next",
         "transport-last",
         "transport-more",
+        "panel-right",
+        "panel-down",
     } == BOX_CENTERED_ICONS
     assert {"playback-reset", "transport-reset"} == RING_CENTERED_ICONS
     assert all(
@@ -419,21 +445,18 @@ def test_rotate_uses_axis_rings_while_reset_uses_one_arrow() -> None:
     reset = _render("transport-reset", ICON_GRID)
 
     assert rotate.fills >= 3
-    assert len(rotate.indexed_fills) == rotate.fills
-    assert not rotate.circles
-    assert len(set(rotate.indexed_fringe_widths)) == 1
+    assert len(rotate.circles) == 1
+    assert rotate.filled_paths
+    assert not rotate.indexed_fills
     assert reset.fills == 1
 
 
-def test_rotate_antialias_fringe_scales_until_crossing_gaps_can_hold_one_pixel() -> None:
-    widths = []
+def test_rotate_uses_native_circle_and_standard_filled_contour_antialiasing() -> None:
     for size in (14.0, 24.0, 56.0, 112.0):
         draw = _render("tool-rotate", size)
-        assert len(set(draw.indexed_fringe_widths)) == 1
-        widths.append(draw.indexed_fringe_widths[0])
-
-    assert widths[0] < widths[1] < widths[2] < widths[3]
-    assert widths[3] == pytest.approx(1.0, abs=0.002)
+        assert len(draw.circles) == 1
+        assert draw.filled_paths
+        assert not draw.indexed_fringe_widths
 
 
 def test_scale_uses_three_integrated_box_handles() -> None:
@@ -454,10 +477,7 @@ def test_scale_shaft_matches_the_fitted_rotate_ring_weight() -> None:
     scale = _render("tool-scale", ICON_GRID)
     rotate = _render("tool-rotate", ICON_GRID)
     scale_shaft_width = math.dist(scale.filled_paths[0][0], scale.filled_paths[0][-1])
-    _points, _indices, outer, inner = rotate.indexed_fills[0]
-    rotate_ring_width = sum(math.hypot(*point) for point in outer) / len(outer) - sum(
-        math.hypot(*point) for point in inner
-    ) / len(inner)
+    _center, _radius, rotate_ring_width = rotate.circles[0]
 
     assert scale_shaft_width == pytest.approx(rotate_ring_width, rel=0.02)
 
@@ -540,10 +560,34 @@ def test_transport_chevron_tip_is_a_right_angle(direction: float) -> None:
 
 
 def test_playback_and_transport_more_share_one_completed_shape() -> None:
-    assert (
-        _render("playback-more", ICON_GRID).__dict__
-        == _render("transport-more", ICON_GRID).__dict__
+    playback = _RecordingDraw()
+    transport = _RecordingDraw()
+    icon_concepts._draw_concept_icon_raw(
+        playback, (0.0, 0.0), ICON_GRID, "playback-more", (1.0, 1.0, 1.0, 1.0)
     )
+    icon_concepts._draw_concept_icon_raw(
+        transport, (0.0, 0.0), ICON_GRID, "transport-more", (1.0, 1.0, 1.0, 1.0)
+    )
+
+    assert playback.__dict__ == transport.__dict__
+
+
+def test_more_is_a_shorter_counterclockwise_rotation_of_previous() -> None:
+    previous = icon_concepts._chevron_centerline(-1.0, 0.0, 1.18)
+    more = icon_concepts._more_centerline(1.18)
+    rotated = tuple((y, -x) for x, y in previous)
+
+    for point, reference in zip(more, rotated, strict=True):
+        assert point == pytest.approx(
+            (reference[0] * MORE_ARM_RATIO, reference[1] * MORE_ARM_RATIO), abs=1e-6
+        )
+    previous_arm = math.dist(previous[0], previous[1])
+    more_arm = math.dist(more[0], more[1])
+    assert more_arm == pytest.approx(previous_arm * MORE_ARM_RATIO, abs=1e-6)
+    first = (more[0][0] - more[1][0], more[0][1] - more[1][1])
+    second = (more[2][0] - more[1][0], more[2][1] - more[1][1])
+    dot = sum(a * b for a, b in zip(first, second, strict=True))
+    assert dot == pytest.approx(0.0, abs=1e-6)
 
 
 @pytest.mark.parametrize("name", ("transport-first", "transport-last"))
@@ -601,7 +645,19 @@ def test_record_is_slightly_smaller_than_stop(prefix: str) -> None:
     record_width = record.bounds[2] - record.bounds[0]
     stop_width = stop.bounds[2] - stop.bounds[0]
 
-    assert 0.9 * stop_width < record_width < stop_width
+    assert record_width / stop_width == pytest.approx(0.98, abs=0.001)
+
+
+@pytest.mark.parametrize("mouse_width", (12.0, STATUS_MOUSE_DEFAULT_WIDTH, 24.0))
+def test_status_mouse_states_share_one_outer_shell_size(mouse_width: float) -> None:
+    bounds = [
+        icon_metrics(f"status-mouse-{state}", mouse_width=mouse_width).bounds
+        for state in ("left", "right", "wheel")
+    ]
+    sizes = [(x1 - x0, y1 - y0) for x0, y0, x1, y1 in bounds]
+
+    for size in sizes[1:]:
+        assert size == pytest.approx(sizes[0], abs=0.01)
 
 
 def test_status_mouse_width_is_adjustable_without_moving_its_center() -> None:
@@ -610,6 +666,10 @@ def test_status_mouse_width_is_adjustable_without_moving_its_center() -> None:
 
     assert wide.bounds[2] - wide.bounds[0] > narrow.bounds[2] - narrow.bounds[0]
     assert wide.enclosing_center == pytest.approx((0.0, 0.0), abs=0.01)
+
+
+def test_status_mouse_accepts_the_complete_interactive_slider_range() -> None:
+    assert icon_metrics("status-mouse-left", mouse_width=24.0).bounds[0] < 0.0
 
 
 @pytest.mark.parametrize("name", tuple(sorted(RING_CENTERED_ICONS)))
@@ -625,6 +685,21 @@ def test_hidden_eye_uses_three_lashes_instead_of_a_slash() -> None:
 
     assert len(hidden.lines) == 3
     assert not visible.lines
+
+
+def test_key_fit_uses_four_joined_g3_corner_contours() -> None:
+    draw = _render("key-fit", ICON_GRID)
+
+    assert len(draw.filled_paths) == 4
+    assert not draw.polylines
+    assert all(len(path) > 6 for path in draw.filled_paths)
+
+
+def test_key_follow_arrow_has_a_round_tail() -> None:
+    draw = _render("key-follow", ICON_GRID)
+
+    assert len(draw.arrows) == 1
+    assert draw.arrows[0][3]
 
 
 @pytest.mark.parametrize("name", _icons())
