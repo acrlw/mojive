@@ -221,8 +221,10 @@ class _RecordedGlyph:
         self.filled_circles = []
         self.polylines = []
         self.rectangles = []
+        self.path_origins = []
 
     def fringed_concave_fill(self, points, _color, *, origin=None):
+        self.path_origins.append(origin)
         if origin is not None:
             points = tuple((x + origin[0], y + origin[1]) for x, y in points)
         self.paths.append(tuple(points))
@@ -233,6 +235,7 @@ class _RecordedGlyph:
         self.fringed_concave_fill(arrow_points(start, end, width, **style), color)
 
     def concave_fill(self, points, _color):
+        self.path_origins.append(None)
         self.paths.append(tuple(points))
 
     def circle_filled(self, *args, **kwargs):
@@ -479,6 +482,7 @@ def test_rotate_glyph_uses_antialiased_transparent_knockout_breaks():
     # Each authored half-ring is behind at one crossing and in front at the
     # other, so all three split into two antialiased filled silhouettes.
     assert len(draw.paths) == 6
+    assert draw.path_origins == [(20.0, 30.0)] * 6
     assert not draw.polylines
     assert len(draw.circles) == 1
     assert not draw.filled_circles

@@ -35,36 +35,60 @@ The antialias fringe is different from authored geometry. `ImguiDraw2D` keeps th
 framebuffer pixel wide so an edge remains smooth at each display density. Do not feed the fringe
 width back into the icon's frame, mark, or spacing dimensions.
 
-### Separate placement bounds from ink bounds
+### Separate placement bounds from geometry diagnostics
 
 The Icon library uses a circular 24-unit placement boundary, drawn in orange after the glyph so a
-collision cannot hide beneath opaque ink. The circle describes the slot used by layout; it is not a
-target that every silhouette should fill. Candidate ink, including half of every outline stroke,
-keeps at least 1.5 grid units of radial clearance. Detail rows report radial `pad`, the
-axis-aligned `box` center, the minimum enclosing `sphere` center of the sampled contour, and the
-approximate `ink` mass center. A reviewed production icon can retain its existing optical envelope:
+collision cannot hide beneath the visible mark. The circle describes the slot used by layout; it is
+not a target that every silhouette should fill. Candidate geometry, including half of every outline
+stroke, keeps at least 1.5 grid units of radial clearance. Detail rows report radial `pad`, the
+axis-aligned `box` center, the minimum enclosing `radial` center of the sampled contour, and the
+approximate filled `area` centroid. The latter two are diagnostics, not placement rules. A reviewed
+production icon can retain its existing optical envelope:
 Output's circular severity frame has 0.72 units of radial clearance and conforms to the circular
 placement boundary without crossing it.
 
 Use radial containment in addition to rectangular canvas containment. A camera body can fit inside
 a 24-by-24 square while its stroked corner still crosses a 24-unit circle. Likewise, a centered
-axis-aligned box does not prove that the icon looks centered. Declare one alignment anchor for each
-construction and show it in the detail row:
+axis-aligned box does not prove that the icon looks centered. Start from one reproducible placement
+anchor and show it in the detail row:
 
-- use the stroked box center for symmetric frames and neutral silhouettes;
-- use the minimum enclosing circle center for Keyframe compounds and nondirectional Panel marks
-  whose radial envelope is displaced despite a centered axis-aligned box;
-- use the stroked box for Transport and disclosure marks, where area-centroid or circumcircle
-  centering visibly pushes a triangle or chevron toward its point;
-- use approximate ink mass for optically unbalanced helpers;
+- use the stroked box center for ordinary silhouettes, including asymmetric compounds and
+  directional marks;
 - use a semantic hub or arc center when interaction revolves around that point, as Scale and Snap do.
 
 The concept library translates the declared anchor onto the orange-circle center, then uniformly
 reduces the whole master if the translated contour would violate the radial safe area. `box`,
-`sphere`, and `ink` remain visible diagnostics. A nonzero box is expected for a circle-centered
-Search contour, while nonzero sphere and ink values are expected for envelope-centered Transport
-marks. Snap places the center of its authored lower G3 arc at the placement origin. This layout
-policy is concept-only; reviewed production painters remain their source of truth.
+`radial`, and `area` remain visible diagnostics. Do not automatically translate a glyph until its
+radial or area diagnostic reaches zero: asymmetric triangles, magnifiers, cameras, and compound
+keyframe marks can move visibly toward their heavier side. Snap places the center of its authored
+lower G3 arc at the placement origin. This layout policy is concept-only; reviewed production
+painters remain their source of truth.
+
+[Apple's icon guidance](https://developer.apple.com/design/human-interface-guidelines/icons)
+requires consistency in size, detail, stroke weight, and perspective. It also permits small
+per-icon adjustments when strict geometric centering looks visually off. Apple does not prescribe
+an area-centroid or minimum-enclosing-circle placement algorithm. Treat any optical translation as
+a small, reviewed exception from the geometric baseline and record the reason; never infer it from
+one automatic metric.
+
+Mojive's three geometry measurements answer different questions:
+
+- `box` is the midpoint between the minimum and maximum visible x/y coordinates. It is the default
+  placement baseline because it makes the visible extents equal on opposite sides of the slot.
+- `radial` is the center of the smallest circle containing the sampled visible boundary. It is useful
+  for detecting a corner that approaches the orange guide, but an asymmetric contour can move toward
+  its point when this center is used for placement.
+- `area` is an approximate centroid of authored filled primitives,
+  $C = \sum_i A_i C_i / \sum_i A_i$. Stroke ribbons, annuli, and round caps contribute their
+  estimated areas. Overlapping primitives may be counted more than once, and the result does not
+  model raster antialiasing or human perception.
+
+Optical correction therefore uses the rendered UI as evidence. Align the icon slot to the current
+font's baseline and cap-height guides, inspect the real row height and target sizes at 1x and 2x,
+and compare related or mirrored icons. If the geometric baseline still looks displaced, record the
+smallest explicit grid-relative offset that fixes the family in those contexts. Keep the before and
+after capture in the review output. Do not accept a correction merely because `area` or `radial`
+becomes zero.
 
 Shaft-and-head arrows use one continuous filled outline. Do not join an independent stroked shaft
 to a filled triangle: antialiasing and cap geometry expose the seam at small sizes. Object outlines
@@ -110,8 +134,8 @@ independently. For example, Mojive's warning mark is the vertical reflection of 
 mark; both therefore keep the same stem, dot, gap, and centerline.
 
 Center the visible silhouette according to the family's declared alignment box. Area-centroid
-centering is unsuitable for a stem plus dot: the stem carries much more area, so centering its ink
-mass moves the visible bounding box toward the dot. For the severity family, the combined mark
+centering is unsuitable for a stem plus dot: the stem carries much more area, so centering the
+filled area moves the visible bounding box toward the dot. For the severity family, the combined mark
 bounds and the circular frame share one center.
 
 Mathematical equality may still look unequal after rasterization. A small filled circle loses
@@ -120,7 +144,7 @@ A modest, documented optical overshoot is valid. Keep it as a ratio on the desig
 the smallest production size, and apply the same correction to mirrored members. Avoid large
 per-glyph compensation that creates a different visual language.
 
-Diagonal marks carry more ink because two strokes overlap and project onto both axes. Preserve the
+Diagonal marks carry more visible area because two strokes overlap and project onto both axes. Preserve the
 family's internal stroke width and adjust the diagonal length to balance weight. Do not make the
 cross thinner than the information and warning stems merely to reduce its area.
 
@@ -173,26 +197,27 @@ edge of the frame is about 4.58 grid units on each side.
 | Symptom | Cause | Required correction |
 | --- | --- | --- |
 | Small mark nearly touches its frame while the large mark has ample space | One or more dimensions use an absolute pixel minimum | Return every dimension to the common grid, or define and verify a complete optical master |
-| `i` or `!` looks vertically displaced despite a centered area centroid | Unequal stem and dot areas skew ink-mass centering | Center the combined visible bounds or use a documented optical alignment box |
+| `i` or `!` looks vertically displaced despite a centered area centroid | Unequal stem and dot areas skew area-centroid alignment | Center the combined visible bounds or use a documented optical alignment box |
 | Warning looks unrelated to information | Stem, gap, or dot was tuned separately | Generate one from the other's reflected geometry |
 | Dot disappears even though its diameter equals the stem width | Circular antialiasing removes more visible area | Apply a small grid-relative dot overshoot and inspect the target raster size |
 | Error looks heavier, then becomes stylistically thin after correction | Cross stroke width was reduced independently | Keep the shared internal stroke and shorten the diagonals |
-| Scale's hub looks displaced although its envelope is centered | A three-axis silhouette has different box, hub, and ink centers | Anchor Scale by its center dot, report the asymmetric box, and judge the 112-point specimen |
+| Scale's hub looks displaced although its envelope is centered | A three-axis silhouette has different box, hub, and area centers | Anchor Scale by its center dot, report the asymmetric box, and judge the 112-point specimen |
 | Scale endpoints overpower the center hub | Endpoint blocks were sized independently of the shaft and dot | Keep the G3 blocks close to the hub diameter and compare their area with the hub at 112 points |
 | Scale shafts merge into the center dot | A copied three-axis sketch omitted the established transparent center shell | Start all three concept shafts outside the dot's circular clearance radius and verify the visible gap |
 | Rotate is mistaken for Reset or Refresh | Both use a circular-arrow structure | Use the three-axis Tool Column rotation rings and reserve the single arrow loop for Reset |
+| Rotate is clean in a large Pillow export but breaks in the live ImGui UI | Ear clipping runs after narrow concave contours are translated to large screen coordinates and loses precision | Triangulate the contour around its local origin, then translate the completed mesh during submission; verify the actual target-size ImGui capture |
 | A concept experiment changes an established Tool Column icon | Candidate geometry was placed in the production painter | Keep Move, Rotate, and Scale candidate contours in the Icon Library and leave `viewport_widgets.py` untouched |
 | A triangle looks rounded only in the thumbnail | The preview hid a raw three-point polygon or an undersized corner profile | Inspect the native 112-point contour and require more than three authored boundary points |
-| Transport marks move toward their point although ink mass is centered | Area-centroid alignment overcorrected directional silhouettes | Center their stroked envelope box and compare mirrored pairs at 112 points |
+| Transport marks move toward their point although area is centered | Area-centroid alignment overcorrected directional silhouettes | Center their stroked envelope box and compare mirrored pairs at 112 points |
 | Snap looks like a generic U or loses its endpoint blocks | Its stems and semicircle were authored as unrelated primitives, or the probe copied only the centerline | Reuse the production G3 snap path with `CAPSULE_SMOOTHING` and retain both G3 endpoint blocks |
 | Snap sits low after its enclosing circle is centered | Its open U silhouette makes the minimum enclosing circle a misleading anchor | Place the authored lower-arc center at the orange-circle center and report `anchor arc` |
 | A disclosure triangle moves toward its point | Circumcircle centering was applied to a directional triangle | Center its stroked envelope box; reserve sphere centering for nondirectional radial compounds |
-| A compound Keyframe icon looks low or right despite `box +0.00` | Its camera housing or terminal bar displaces the radial envelope | Center the sampled contour's minimum enclosing circle and compare the 112-point specimen |
+| A compound icon looks low or right despite `box +0.00` | Its visual weight is asymmetric | Keep the geometric baseline, compare the family at target sizes, then add only a small reviewed optical adjustment if needed |
 | Search handle cuts into the lens or exposes a cap | Lens and handle were submitted as separate strokes | Build one hollow G3 union mesh with a continuous outer neck and retained circular hole |
 | Search lens grows spikes or leaks white flecks into its hollow center | Near-duplicate outer columns or independently sampled fill and hole-fringe boundaries destabilize antialiasing | Use one monotonic x-grid, replace its nearest samples at the hole endpoints, and derive the hole fringe from the strip's exact inner vertices |
 | Sort arrow tip does not meet the visible bottom of its last bar | The arrow endpoint was aligned to the bar centerline | Align the head tip with the lower stroked edge while keeping the round tail on the top centerline |
 | Sort arrow has a flat exposed tail | The shared arrow mesh kept its default butt tail | Enable its G3 round-tail contour while retaining the integrated head and shaft |
-| Camera looks low despite `box +0.00,+0.00u` | The body and lens place more ink below the box center | Use its declared optical ink anchor and retain the box offset as a diagnostic |
+| An `area` or `radial` diagnostic is nonzero | Asymmetric visible geometry shifts the corresponding mathematical center | Do not treat the diagnostic as a failed alignment test; judge the box baseline and add a small explicit optical adjustment only after target-size review |
 | Cube spokes protrude through the shell | Independently capped lines terminate on top of the outer stroke | Inset the spokes, join their center, and paint the G3 outer contour last |
 | One preview looks good but production does not | A copied demo or resized screenshot bypasses production geometry and density | Render the production painter at every target logical size and framebuffer scale |
 
@@ -206,7 +231,7 @@ the mark at 44.8% for 12, 14, 20, 32, and 56 pixels.
 For every icon-family change:
 
 1. Test normalized bounds at 14, 24, 56, and 112 points. Include frame, mark, stroke, gap, radial
-   safe area, declared alignment anchor, box, bounding-circle and ink diagnostics, centerline, and
+   safe area, declared alignment anchor, box, bounding-circle and area diagnostics, centerline, and
    mirrored geometry.
 2. Render the production painter at its actual logical sizes. Do not scale down one large capture
    as a substitute.

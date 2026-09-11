@@ -1403,8 +1403,11 @@ def draw_tool_glyph(
             smoothing,
         ):
             for local in ring:
-                path = _transform_path(local, x, y, glyph_scale)
-                draw.concave_fill(path, color)
+                path = tuple((px * glyph_scale, py * glyph_scale) for px, py in local)
+                # Triangulate around the local origin, then translate the
+                # complete mesh. ImGui's ear clipping loses precision on the
+                # narrow knockout contours after large screen translations.
+                draw.fringed_concave_fill(path, color, origin=(x, y))
     elif kind == "dimensions":
         half = 1.5 * scale
         # The envelope contains the square's far corners, not just its center.

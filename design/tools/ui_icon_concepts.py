@@ -31,7 +31,7 @@ from mojive.ui.viewport_widgets import (
 
 ICON_GRID = 24.0
 ICON_STROKE = 1.5
-# Match the complete circular placement boundary used by Diagnostics. Glyph ink
+# Match the complete circular placement boundary used by Diagnostics. Visible geometry
 # stays inside this guide and keeps its own optical padding within the circle.
 ICON_BOUND_DIAMETER = ICON_GRID
 ICON_MIN_CLEARANCE = 1.5
@@ -111,7 +111,7 @@ ICON_FAMILIES = (
     ),
 )
 
-ICON_LIBRARY_TABS = ("Overview", *(label for label, _icons in ICON_FAMILIES))
+ICON_LIBRARY_TABS = ("Overview", "UI context", *(label for label, _icons in ICON_FAMILIES))
 ICON_GROUP_BY_SLUG = {
     label.casefold().replace(" ", "-").replace("&", "and"): label for label in ICON_LIBRARY_TABS
 }
@@ -121,7 +121,7 @@ ICON_GROUP_BY_SLUG = {
 class IconMetrics:
     bounds: tuple[float, float, float, float]
     radial_extent: float
-    ink_center: tuple[float, float]
+    area_centroid: tuple[float, float]
     bounding_center: tuple[float, float]
     bounding_radius: float
 
@@ -962,14 +962,14 @@ def _draw_concept_icon_raw(draw, center, size: float, name: str, color) -> None:
 
 
 class _MetricsDraw:
-    """Measure bounds and approximate ink mass from the authored primitives."""
+    """Measure bounds and approximate filled area from authored primitives."""
 
     def __init__(self) -> None:
         self.bounds = [float("inf"), float("inf"), float("-inf"), float("-inf")]
         self.radial_extent = 0.0
         self.boundary_points: list[tuple[float, float]] = []
-        self.ink_area = 0.0
-        self.ink_moment = [0.0, 0.0]
+        self.filled_area = 0.0
+        self.area_moment = [0.0, 0.0]
 
     def _add(self, points, pad: float = 0.0) -> None:
         for raw_x, raw_y in points:
@@ -993,9 +993,9 @@ class _MetricsDraw:
     def _add_mass(self, area: float, center) -> None:
         if area <= 0.0:
             return
-        self.ink_area += area
-        self.ink_moment[0] += area * float(center[0])
-        self.ink_moment[1] += area * float(center[1])
+        self.filled_area += area
+        self.area_moment[0] += area * float(center[0])
+        self.area_moment[1] += area * float(center[1])
 
     def _add_polygon_mass(self, points) -> None:
         path = tuple((float(point[0]), float(point[1])) for point in points)
@@ -1148,33 +1148,25 @@ class _MetricsDraw:
 def _measure_raw_icon(name: str, center=(0.0, 0.0), size: float = ICON_GRID) -> IconMetrics:
     draw = _MetricsDraw()
     _draw_concept_icon_raw(draw, center, size, name, (1.0, 1.0, 1.0, 1.0))
-    ink_center = (
-        draw.ink_moment[0] / draw.ink_area,
-        draw.ink_moment[1] / draw.ink_area,
+    area_centroid = (
+        draw.area_moment[0] / draw.filled_area,
+        draw.area_moment[1] / draw.filled_area,
     )
     bounding_center, bounding_radius = minimum_enclosing_circle(draw.boundary_points)
     return IconMetrics(
-        tuple(draw.bounds), draw.radial_extent, ink_center, bounding_center, bounding_radius
+        tuple(draw.bounds), draw.radial_extent, area_centroid, bounding_center, bounding_radius
     )
 
 
 @lru_cache(maxsize=64)
 def _icon_layout(name: str) -> tuple[float, tuple[float, float]]:
-    """Return the declared visual anchor and scale inside the placement bound."""
+    """Return the declared placement anchor and scale inside the shared bound."""
 
     raw = _measure_raw_icon(name)
     anchor = icon_alignment_anchor(name)
     if anchor in {"hub", "arc"}:
         # Scale's hub and Snap's lower-arc center are authored at the origin.
         offset = (0.0, 0.0)
-    elif anchor == "sphere":
-        # Compound Keyframe and nondirectional Panel marks use the actual
-        # minimum bounding circle instead of an asymmetric box or ink mass.
-        offset = (-raw.bounding_center[0], -raw.bounding_center[1])
-    elif anchor == "ink":
-        # Optically unbalanced helpers read from their ink mass. Their
-        # asymmetric boxes are therefore diagnostic.
-        offset = (-raw.ink_center[0], -raw.ink_center[1])
     else:
         offset = (-raw.center_offset[0], -raw.center_offset[1])
     shifted = _measure_raw_icon(name, offset)
@@ -1190,12 +1182,6 @@ def icon_alignment_anchor(name: str) -> str:
         return "hub"
     if name == "tool-snap":
         return "arc"
-    if name.startswith("key-") or (
-        name.startswith("panel-") and name not in {"panel-right", "panel-down"}
-    ):
-        return "sphere"
-    if name == "helper-camera":
-        return "ink"
     return "box"
 
 
@@ -1217,13 +1203,13 @@ def icon_metrics(name: str) -> IconMetrics:
 
     draw = _MetricsDraw()
     draw_concept_icon(draw, (0.0, 0.0), ICON_GRID, name, (1.0, 1.0, 1.0, 1.0))
-    ink_center = (
-        draw.ink_moment[0] / draw.ink_area,
-        draw.ink_moment[1] / draw.ink_area,
+    area_centroid = (
+        draw.area_moment[0] / draw.filled_area,
+        draw.area_moment[1] / draw.filled_area,
     )
     bounding_center, bounding_radius = minimum_enclosing_circle(draw.boundary_points)
     return IconMetrics(
-        tuple(draw.bounds), draw.radial_extent, ink_center, bounding_center, bounding_radius
+        tuple(draw.bounds), draw.radial_extent, area_centroid, bounding_center, bounding_radius
     )
 
 
