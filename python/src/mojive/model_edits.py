@@ -230,6 +230,12 @@ class ModelEditDraft:
             size = np.asarray(command.size)
             if size.shape != (3,) or not np.isfinite(size).all() or np.any(size <= 0):
                 return cmd.CommandResult.bad("Geometry size must contain three positive values")
+        if isinstance(command, cmd.AddModelKeyframe):
+            name = str(command.name).strip()
+            if not name:
+                return cmd.CommandResult.bad("Keyframe name cannot be empty")
+            if name in self.model_keyframe_names(command.model_id):
+                return cmd.CommandResult.bad(f"Keyframe {name} already exists")
         if isinstance(command, cmd.RenameModelElement):
             name = command.name.strip()
             node = self.session.node(command.node_id)
@@ -282,6 +288,23 @@ class ModelEditDraft:
         return cmd.CommandResult.good(
             "", entity_id=creation.node_id if creation else -1, entity_key=created
         )
+
+    def model_keyframe_names(self, model_id: int) -> set[str]:
+        """Return compiled and pending names reserved by one model edit batch."""
+
+        target = int(model_id)
+        names = {
+            keyframe.name for keyframe in self.session.keyframes if int(keyframe.model_id) == target
+        }
+        for command in self.commands:
+            if (
+                isinstance(command, (cmd.AddModelKeyframe, cmd.SetModelKeyframe))
+                and int(command.model_id) == target
+            ):
+                name = str(command.name).strip()
+                if name:
+                    names.add(name)
+        return names
 
     def creation_for_node(self, node_id):
         return next((item for item in self._creations.values() if item.node_id == node_id), None)

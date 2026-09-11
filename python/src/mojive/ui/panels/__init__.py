@@ -56,6 +56,7 @@ class PanelContext:
     request_model_asset_import: Any = None
     request_model_asset_replace: Any = None
     queue_model_edit: Any = None
+    model_keyframe_names: Any = None
     live_model_updates: bool = False
     set_live_model_updates: Any = None
 

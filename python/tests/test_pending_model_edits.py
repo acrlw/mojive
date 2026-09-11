@@ -65,6 +65,26 @@ def test_staging_coalesces_without_physics_writes_and_apply_has_one_undo(scene, 
     assert not session.submit(cmd.Undo()).ok
 
 
+def test_pending_model_keyframes_reserve_generated_names_until_apply(scene):
+    from mojive.ui.panels.keyframes import unique_keyframe_name
+
+    session, _adapter, draft = scene
+    first = unique_keyframe_name(draft.model_keyframe_names(0))
+    assert first == "key1"
+    assert draft.stage(cmd.AddModelKeyframe(0, first)).ok
+
+    second = unique_keyframe_name(draft.model_keyframe_names(0))
+    assert second == "key2"
+    assert draft.stage(cmd.AddModelKeyframe(0, second)).ok
+    duplicate = draft.stage(cmd.AddModelKeyframe(0, first))
+    assert not duplicate.ok and "already exists" in duplicate.message
+
+    draft.applying = True
+    result = session.apply_model_edits(draft.resolve_commands(session))
+    assert result.ok, result.message
+    assert [key.name for key in session.keyframes] == ["key1", "key2"]
+
+
 def test_failed_compile_rolls_back_and_can_be_corrected(scene):
     session, adapter, draft = scene
     box = next(n for n in session.nodes if n.name == "box")

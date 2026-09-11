@@ -6175,6 +6175,7 @@ class ViewerApp:
             request_model_asset_import=self._open_model_asset_import_dialog,
             request_model_asset_replace=self._open_model_asset_replace_dialog,
             queue_model_edit=self._queue_model_edit,
+            model_keyframe_names=self.model_edits.model_keyframe_names,
             live_model_updates=self.live_model_updates,
             set_live_model_updates=self.set_live_model_updates,
             gizmo=self.gizmo,

@@ -120,11 +120,21 @@ def test_take_menu_opens_and_clears_recording_without_a_binding_error(viewer):
     assert not viewer.session.state_take_times
 
 
-def test_toolbar_adds_a_model_keyframe_to_the_pending_edit(viewer):
+def test_toolbar_reserves_pending_keyframe_names_and_applies_the_batch(viewer):
     before = tuple(viewer.session.keyframes)
-    _click(viewer, _item_center(viewer, "invisible_button", "##add-model-keyframe"))
-    assert viewer.app.model_edits.active
+    button = _item_center(viewer, "invisible_button", "##add-model-keyframe")
+    _click(viewer, button)
+    _click(viewer, button)
+    draft = viewer.app.model_edits
+    assert draft.active
     assert tuple(viewer.session.keyframes) == before
+    assert [command.name for command in draft.commands] == ["key1", "key2"]
+
+    draft.applying = True
+    result = viewer.session.apply_model_edits(draft.resolve_commands(viewer.session))
+    assert result.ok, result.message
+    draft.clear()
+    assert [key.name for key in viewer.session.keyframes][-2:] == ["key1", "key2"]
 
 
 def test_model_selector_uses_the_lane_header_without_scrubbing_the_take(viewer):

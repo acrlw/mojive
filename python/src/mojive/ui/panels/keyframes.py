@@ -579,7 +579,12 @@ class KeyframesPanel(Panel):
             scale,
             enabled=editable and self._model_id >= 0,
         ):
-            name = unique_keyframe_name({key.name for key in keyframes})
+            existing = (
+                ctx.model_keyframe_names(self._model_id)
+                if ctx.model_keyframe_names is not None
+                else {key.name for key in keyframes}
+            )
+            name = unique_keyframe_name(existing)
             ctx.submit_model_edit(
                 cmd.AddModelKeyframe(self._model_id, name), self._snapshot_created
             )
