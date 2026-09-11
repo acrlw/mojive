@@ -110,6 +110,7 @@ def test_geometry_export_names_production_overlay_fields():
     assert "tool_stroke=" in values
     assert "icon_tool_move_head_scale=1.0," in values
     assert "icon_tool_scale_handle_scale=1.0," in values
+    assert "icon_tool_snap_endpoint_scale=1.0," in values
     assert "icon_key_fit_arm_length=4.0," in values
     assert "hint_mouse_wheel_gap_ratio=" in values
 
@@ -126,6 +127,7 @@ def test_icon_library_export_contains_group_glyph_and_shape_controls():
     assert "icon_padding_tool_move=0.85," in values
     assert "icon_stroke_key_fit=2.1," in values
     assert "icon_tool_move_head_scale=1.2," in values
+    assert "icon_tool_snap_endpoint_scale=1.0," in values
     assert "icon_alignment_key_snapshot='box'," in values
 
 
@@ -176,6 +178,7 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.rotate_ring_cap == "round"
     assert state.move_head_scale == 1.0
     assert state.scale_handle_scale == 1.0
+    assert state.snap_endpoint_scale == 1.0
     assert state.key_fit_arm_length == 4.0
     assert state.hint_mouse_width == 14
     assert {
@@ -300,6 +303,27 @@ def test_icon_specimen_square_matches_orange_circle_diameter(monkeypatch) -> Non
     assert center == (20.0, 30.0)
     assert hi[0] - lo[0] == pytest.approx(2.0 * radius)
     assert hi[1] - lo[1] == pytest.approx(2.0 * radius)
+
+
+def test_icon_specimen_draws_reference_guides_behind_the_candidate(monkeypatch) -> None:
+    events = []
+
+    class Draw:
+        def rect(self, *_args, **_kwargs):
+            events.append("square")
+
+        def circle(self, *_args, **_kwargs):
+            events.append("circle")
+
+    monkeypatch.setattr(
+        probe,
+        "draw_concept_icon",
+        lambda *_args, **_kwargs: events.append("glyph"),
+    )
+
+    probe._draw_concept_icon_specimen(Draw(), (20.0, 30.0), 112.0, "tool-rotate", 1.0)
+
+    assert events == ["square", "circle", "glyph"]
 
 
 def test_capsule_record_and_stop_share_the_viewport_danger_color():

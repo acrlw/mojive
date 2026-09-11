@@ -219,6 +219,17 @@ def _render(
     return draw
 
 
+def _annulus_radii(record) -> tuple[float, float]:
+    _points, _indices, outer, inner = record
+    center = (
+        sum(point[0] for point in outer) / len(outer),
+        sum(point[1] for point in outer) / len(outer),
+    )
+    outer_radius = sum(math.dist(center, point) for point in outer) / len(outer)
+    inner_radius = sum(math.dist(center, point) for point in inner) / len(inner)
+    return outer_radius, inner_radius
+
+
 def test_concept_catalog_has_unique_named_members() -> None:
     names = _icons()
 
@@ -383,9 +394,12 @@ def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
 def test_rotate_outer_frame_matches_the_placement_circle() -> None:
     metrics = icon_metrics("tool-rotate")
     draw = _render("tool-rotate", ICON_GRID)
-    _center, ring_radius, ring_width = draw.circles[0]
+    outer_radius, inner_radius = _annulus_radii(draw.indexed_fills[0])
+    ring_radius = (outer_radius + inner_radius) * 0.5
+    ring_width = outer_radius - inner_radius
 
     assert metrics.enclosing_center == pytest.approx((0.0, 0.0), abs=1e-6)
+    assert not draw.circles
     assert ring_radius == pytest.approx(ICON_BOUND_DIAMETER * 0.5, abs=1e-6)
     assert ring_width == pytest.approx(ICON_STROKE, abs=1e-6)
     assert metrics.circular_clearance == pytest.approx(-ROTATE_FRAME_STROKE_OVERSHOOT, abs=1e-5)
@@ -394,7 +408,8 @@ def test_rotate_outer_frame_matches_the_placement_circle() -> None:
 def test_rotate_padding_insets_the_outer_frame_centerline() -> None:
     adjusted = _render("tool-rotate", ICON_GRID, padding=ICON_MAX_PADDING)
     metrics = icon_metrics("tool-rotate", padding=ICON_MAX_PADDING)
-    _center, ring_radius, _ring_width = adjusted.circles[0]
+    outer_radius, inner_radius = _annulus_radii(adjusted.indexed_fills[0])
+    ring_radius = (outer_radius + inner_radius) * 0.5
 
     assert ring_radius == pytest.approx(ICON_BOUND_DIAMETER * 0.5 - ICON_MAX_PADDING, abs=1e-6)
     assert metrics.circular_clearance == pytest.approx(
@@ -402,12 +417,23 @@ def test_rotate_padding_insets_the_outer_frame_centerline() -> None:
     )
 
 
+@pytest.mark.parametrize("stroke_width", (ICON_MIN_STROKE, ICON_STROKE, ICON_MAX_STROKE))
+def test_rotate_outer_mesh_keeps_the_requested_visible_weight(stroke_width: float) -> None:
+    draw = _render("tool-rotate", ICON_GRID, stroke_width=stroke_width)
+    outer_radius, inner_radius = _annulus_radii(draw.indexed_fills[0])
+
+    assert outer_radius - inner_radius == pytest.approx(stroke_width, abs=1e-6)
+    assert draw.indexed_fringe_widths == pytest.approx(
+        [draw.indexed_fringe_widths[0]] * len(draw.indexed_fringe_widths), abs=1e-9
+    )
+
+
 def test_rotate_gap_ratio_changes_only_the_inner_ring_construction() -> None:
     compact = _render("tool-rotate", ICON_GRID, rotate_ring_gap_ratio=0.25)
     open_gap = _render("tool-rotate", ICON_GRID, rotate_ring_gap_ratio=1.0)
 
-    assert compact.circles == open_gap.circles
-    assert compact.indexed_fills != open_gap.indexed_fills
+    assert compact.indexed_fills[0] == open_gap.indexed_fills[0]
+    assert compact.indexed_fills[1:] != open_gap.indexed_fills[1:]
 
 
 @pytest.mark.parametrize("padding", (ICON_MIN_CLEARANCE, ICON_DEFAULT_PADDING, ICON_MAX_PADDING))
@@ -443,7 +469,6 @@ def test_layout_keeps_the_canonical_stroke_independent_of_icon_fit(padding: floa
 @pytest.mark.parametrize(
     "name",
     (
-        "tool-rotate",
         "tool-world",
         "tool-body",
         "tool-snap",
@@ -698,6 +723,11 @@ def test_panel_disclosures_use_equilateral_triangles_and_circle_anchors(name: st
             IconTuning(scale_handle_scale=1.3),
         ),
         (
+            "tool-snap",
+            ICON_TUNING_DEFAULTS,
+            IconTuning(snap_endpoint_scale=1.3),
+        ),
+        (
             "key-fit",
             ICON_TUNING_DEFAULTS,
             IconTuning(key_fit_arm_length=5.0),
@@ -721,7 +751,7 @@ def test_rotate_uses_axis_rings_while_reset_uses_one_arrow() -> None:
     reset = _render("transport-reset", ICON_GRID)
 
     assert rotate.fills >= 3
-    assert len(rotate.circles) == 1
+    assert not rotate.circles
     assert rotate.indexed_fills
     assert reset.fills == 1
 
@@ -736,7 +766,7 @@ def test_rotate_scales_inner_ring_antialiasing_with_the_rendered_gap() -> None:
             rendered_gap * ROTATE_FRINGE_GAP_FRACTION,
         )
 
-        assert len(draw.circles) == 1
+        assert not draw.circles
         assert draw.indexed_fringe_widths
         assert draw.indexed_fringe_widths == pytest.approx(
             [expected_fringe] * len(draw.indexed_fringe_widths), abs=1e-9
@@ -772,7 +802,8 @@ def test_scale_shaft_matches_the_fitted_rotate_ring_weight() -> None:
     scale = _render("tool-scale", ICON_GRID)
     rotate = _render("tool-rotate", ICON_GRID)
     scale_shaft_width = math.dist(scale.filled_paths[0][0], scale.filled_paths[0][-1])
-    _center, _radius, rotate_ring_width = rotate.circles[0]
+    outer_radius, inner_radius = _annulus_radii(rotate.indexed_fills[0])
+    rotate_ring_width = outer_radius - inner_radius
 
     assert scale_shaft_width == pytest.approx(rotate_ring_width, rel=0.02)
 
