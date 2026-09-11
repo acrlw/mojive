@@ -11,7 +11,12 @@ import math
 from dataclasses import dataclass
 from functools import lru_cache
 
-from mojive.curves2d import arrow_mesh
+from mojive.curves2d import CORNER_SMOOTHING, arrow_mesh, box_handle_points, smooth_polygon_corners
+from mojive.ui.viewport_widgets import (
+    OVERLAY_GEOMETRY,
+    TOOL_GLYPH_SCALE,
+    _rotate_visible_ring_polygons,
+)
 
 ICON_GRID = 24.0
 ICON_STROKE = 1.5
@@ -105,6 +110,7 @@ ICON_GROUP_BY_SLUG = {
 class IconMetrics:
     bounds: tuple[float, float, float, float]
     radial_extent: float
+    ink_center: tuple[float, float]
 
     @property
     def center_offset(self) -> tuple[float, float]:
@@ -174,6 +180,70 @@ class _Painter:
 
     def polygon(self, points) -> None:
         self.draw.fringed_concave_fill(self.points(points), self.color)
+
+    def smooth_polygon(
+        self,
+        points,
+        radius: float,
+        *,
+        corners: tuple[int, ...] | None = None,
+        convex_only: bool = True,
+    ) -> None:
+        """Fill one contour with G3-continuous selected corners."""
+
+        source = tuple(points)
+        selected = tuple(range(len(source))) if corners is None else corners
+        path = smooth_polygon_corners(
+            source,
+            radius,
+            selected,
+            smoothing=CORNER_SMOOTHING,
+            convex_only=convex_only,
+        )
+        self.polygon(path)
+
+    def smooth_outline(
+        self,
+        points,
+        radius: float,
+        *,
+        corners: tuple[int, ...] | None = None,
+        convex_only: bool = True,
+        width: float = ICON_STROKE,
+    ) -> None:
+        """Stroke one closed contour with G3-continuous selected corners."""
+
+        source = tuple(points)
+        selected = tuple(range(len(source))) if corners is None else corners
+        path = smooth_polygon_corners(
+            source,
+            radius,
+            selected,
+            smoothing=CORNER_SMOOTHING,
+            convex_only=convex_only,
+        )
+        self.polyline(path, closed=True, width=width)
+
+    def box_handle(
+        self,
+        start,
+        end,
+        *,
+        width: float,
+        head_size: float,
+        corner_radius: float,
+    ) -> None:
+        """Draw one shaft and square endpoint as a shared G3 contour."""
+
+        path = box_handle_points(
+            start,
+            end,
+            width,
+            head_size,
+            corner_radius=corner_radius,
+            smoothing=CORNER_SMOOTHING,
+        )
+        self.polygon(path)
 
     def circle(self, x: float, y: float, radius: float, *, width: float = ICON_STROKE) -> None:
         self.draw.circle(
@@ -271,6 +341,9 @@ def _arc_arrow(
     end_degrees: float,
     *,
     center=(0.0, 0.0),
+    stroke: float = ICON_STROKE,
+    head_length: float = 3.0,
+    head_half_width: float = 2.4,
 ) -> None:
     """Draw a circular arrow as one joined ribbon instead of two shapes."""
 
@@ -280,7 +353,7 @@ def _arc_arrow(
         math.radians(start_degrees + (end_degrees - start_degrees) * index / count)
         for index in range(count + 1)
     )
-    half_width = ICON_STROKE * 0.5
+    half_width = stroke * 0.5
     outer = tuple(
         (
             center[0] + (radius + half_width) * math.cos(angle),
@@ -303,10 +376,23 @@ def _arc_arrow(
     tangent = (-math.sin(end_angle) * direction, math.cos(end_angle) * direction)
     normal = (math.cos(end_angle), math.sin(end_angle))
     base_center = (end[0] - tangent[0] * 0.8, end[1] - tangent[1] * 0.8)
-    base_outer = (base_center[0] + normal[0] * 2.4, base_center[1] + normal[1] * 2.4)
-    base_inner = (base_center[0] - normal[0] * 2.4, base_center[1] - normal[1] * 2.4)
-    tip = (end[0] + tangent[0] * 3.0, end[1] + tangent[1] * 3.0)
-    p.polygon((*outer, base_outer, tip, base_inner, *inner))
+    base_outer = (
+        base_center[0] + normal[0] * head_half_width,
+        base_center[1] + normal[1] * head_half_width,
+    )
+    base_inner = (
+        base_center[0] - normal[0] * head_half_width,
+        base_center[1] - normal[1] * head_half_width,
+    )
+    tip = (end[0] + tangent[0] * head_length, end[1] + tangent[1] * head_length)
+    outline = (*outer, base_outer, tip, base_inner, *inner)
+    head_start = len(outer)
+    p.smooth_polygon(
+        outline,
+        0.42,
+        corners=(head_start, head_start + 1, head_start + 2),
+        convex_only=False,
+    )
     start_angle = angles[0]
     p.circle_filled(
         center[0] + radius * math.cos(start_angle),
@@ -349,19 +435,41 @@ def _draw_tool(p: _Painter, name: str) -> None:
             )
         )
     elif name == "tool-rotate":
-        _arc_arrow(p, 6.9, -42.0, 265.0, center=(0.0, 0.8))
+        # Reuse the runtime Tool Column's three-dimensional rotation grammar.
+        # Its screen ring and three cyclically occluded half-rings cannot be
+        # confused with Reset's single circular arrow. The normalization keeps
+        # the production proportions inside this library's stricter safe area.
+        production_scale = 0.82
+        glyph_scale = production_scale * TOOL_GLYPH_SCALE
+        optical_y = 0.33
+        p.circle(
+            0.0,
+            0.0,
+            10.0 * glyph_scale,
+            width=OVERLAY_GEOMETRY.tool_stroke * production_scale,
+        )
+        for ring in _rotate_visible_ring_polygons(
+            OVERLAY_GEOMETRY.tool_stroke,
+            OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
+            OVERLAY_GEOMETRY.rotate_ring_cap,
+            CORNER_SMOOTHING,
+        ):
+            for local in ring:
+                p.polygon(tuple((x * glyph_scale, y * glyph_scale + optical_y) for x, y in local))
     elif name == "tool-scale":
-        center = (0.0, 1.0)
-        for end in ((0.0, -5.9), (-6.0, 5.9), (6.0, 5.9)):
-            p.line(center, end, width=1.45)
-            p.rect_filled(
-                end[0] - 1.35,
-                end[1] - 1.35,
-                end[0] + 1.35,
-                end[1] + 1.35,
-                rounding=0.48,
+        # Equal 120-degree axes keep the origin and ink mass aligned. Each
+        # endpoint is joined to its shaft as one G3 contour, so compact sizes
+        # retain a legible square without an antialiased seam.
+        radius = 6.45
+        for direction in ((0.0, -1.0), (0.866025, 0.5), (-0.866025, 0.5)):
+            p.box_handle(
+                (0.0, 0.0),
+                (direction[0] * radius, direction[1] * radius),
+                width=1.4,
+                head_size=3.5,
+                corner_radius=0.62,
             )
-        p.circle_filled(*center, 1.15)
+        p.circle_filled(0.0, 0.0, 1.2)
     elif name == "tool-world":
         p.circle(0.0, 0.0, 7.8, width=1.45)
         p.line((-7.65, 0.0), (7.65, 0.0), width=1.35)
@@ -377,13 +485,25 @@ def _draw_tool(p: _Painter, name: str) -> None:
         bottom = (0.0, 7.7)
         lower_left = (-6.7, 3.85)
         lower_right = (6.7, 3.85)
-        p.polyline((top, right, lower_right, bottom, lower_left, left), closed=True)
         # A cube has three visible faces: the center joins the two rear side
         # corners and the lower vertex. The former top-to-center edge invented
-        # a fourth face.
-        p.line(left, (0.0, 0.0), width=1.45)
-        p.line(right, (0.0, 0.0), width=1.45)
-        p.line((0.0, 0.0), bottom, width=1.45)
+        # a fourth face. Inset the spoke ends below the outer stroke and paint
+        # the G3 shell last so no round cap protrudes through a cube vertex.
+        junction = (0.0, 0.0)
+        inset = 0.72
+        for endpoint in (left, right, bottom):
+            length = math.hypot(endpoint[0], endpoint[1])
+            end = (
+                endpoint[0] * (length - inset) / length,
+                endpoint[1] * (length - inset) / length,
+            )
+            p.line(junction, end, width=1.4)
+        p.circle_filled(*junction, 0.7)
+        p.smooth_outline(
+            (top, right, lower_right, bottom, lower_left, left),
+            0.5,
+            width=1.45,
+        )
     else:
         p.line((-5.4, -6.03), (-5.4, 1.17))
         p.arc(5.4, 180.0, 0.0, center=(0.0, 1.17))
@@ -410,7 +530,7 @@ def _draw_transport(p: _Painter, name: str) -> None:
         x = direction * 5.13
         p.line((x, -5.8), (x, 5.8))
     elif kind == "reset":
-        _arc_arrow(p, 6.8, -52.0, 255.0, center=(0.0, 0.6))
+        _arc_arrow(p, 6.8, -52.0, 255.0, center=(0.0, 0.47))
     elif kind == "record":
         p.circle_filled(0.0, 0.0, 4.8)
     elif kind == "stop":
@@ -483,11 +603,31 @@ def _draw_panel(p: _Painter, name: str) -> None:
     elif kind == "clear":
         p.line((-5.8, -5.8), (5.8, 5.8), width=1.65)
         p.line((5.8, -5.8), (-5.8, 5.8), width=1.65)
-    elif kind in {"visible", "hidden"}:
+    elif kind == "visible":
         p.polyline(_eye_points(), closed=True, width=1.45)
         p.circle_filled(0.0, 0.0, 2.05)
-        if kind == "hidden":
-            p.line((-6.6, -6.6), (6.6, 6.6), width=1.65)
+    elif kind == "hidden":
+        # Match Mojive's hierarchy toggle: a closed curved lid with three
+        # lashes. Its visible bounds are shifted onto the shared icon center.
+        radius_x = 8.0
+        lid_height = 3.2
+        offset_y = -2.85
+        lid = tuple(
+            (
+                -radius_x + radius_x * 2.0 * index / 8.0,
+                offset_y + math.sin(math.pi * index / 8.0) * lid_height,
+            )
+            for index in range(9)
+        )
+        p.polyline(lid, width=1.45)
+        for offset in (-0.52, 0.0, 0.52):
+            lash_x = radius_x * offset
+            lash_y = offset_y + lid_height * math.sqrt(max(0.0, 1.0 - offset**2))
+            p.line(
+                (lash_x, lash_y),
+                (lash_x + offset * 1.95, lash_y + 2.65),
+                width=1.15,
+            )
     elif kind in {"perspective", "orthographic"}:
         near = 3.0 if kind == "perspective" else 6.1
         p.polyline(((-6.8, -near), (6.8, -6.1), (6.8, 6.1), (-6.8, near)), closed=True)
@@ -607,11 +747,13 @@ def draw_concept_icon(draw, center, size: float, name: str, color) -> None:
 
 
 class _MetricsDraw:
-    """Measure authored ink from the same primitives used by the review renderer."""
+    """Measure bounds and approximate ink mass from the authored primitives."""
 
     def __init__(self) -> None:
         self.bounds = [float("inf"), float("inf"), float("-inf"), float("-inf")]
         self.radial_extent = 0.0
+        self.ink_area = 0.0
+        self.ink_moment = [0.0, 0.0]
 
     def _add(self, points, pad: float = 0.0) -> None:
         for raw_x, raw_y in points:
@@ -622,8 +764,49 @@ class _MetricsDraw:
             self.bounds[3] = max(self.bounds[3], y + pad)
             self.radial_extent = max(self.radial_extent, math.hypot(x, y) + pad)
 
+    def _add_mass(self, area: float, center) -> None:
+        if area <= 0.0:
+            return
+        self.ink_area += area
+        self.ink_moment[0] += area * float(center[0])
+        self.ink_moment[1] += area * float(center[1])
+
+    def _add_polygon_mass(self, points) -> None:
+        path = tuple((float(point[0]), float(point[1])) for point in points)
+        if len(path) < 3:
+            return
+        twice_area = 0.0
+        moment_x = 0.0
+        moment_y = 0.0
+        for current, following in zip(path, (*path[1:], path[0]), strict=True):
+            cross = current[0] * following[1] - following[0] * current[1]
+            twice_area += cross
+            moment_x += (current[0] + following[0]) * cross
+            moment_y += (current[1] + following[1]) * cross
+        if abs(twice_area) <= 1e-9:
+            return
+        area = abs(twice_area) * 0.5
+        center = (moment_x / (3.0 * twice_area), moment_y / (3.0 * twice_area))
+        self._add_mass(area, center)
+
+    def _add_stroke_mass(self, points, width: float, *, closed: bool, round_caps: bool) -> None:
+        path = tuple((float(point[0]), float(point[1])) for point in points)
+        if len(path) < 2 or width <= 0.0:
+            return
+        following = (*path[1:], path[0]) if closed else path[1:]
+        starts = path if closed else path[:-1]
+        for start, end in zip(starts, following, strict=True):
+            length = math.dist(start, end)
+            self._add_mass(length * width, ((start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5))
+        if round_caps:
+            cap_area = math.pi * (width * 0.5) ** 2 * 0.5
+            self._add_mass(cap_area, path[0])
+            self._add_mass(cap_area, path[-1])
+
     def line(self, a, b, _color, width, **_kwargs) -> None:
-        self._add((a, b), float(width) * 0.5)
+        width = float(width)
+        self._add((a, b), width * 0.5)
+        self._add_stroke_mass((a, b), width, closed=False, round_caps=True)
 
     def arrow(
         self,
@@ -649,34 +832,72 @@ class _MetricsDraw:
             corner_radius=float(corner_radius),
             join_radius=float(join_radius),
         )
-        self._add(tuple((a[0] + x * ux - y * uy, a[1] + x * uy + y * ux) for x, y in outline))
+        points = tuple((a[0] + x * ux - y * uy, a[1] + x * uy + y * ux) for x, y in outline)
+        self._add(points)
+        self._add_polygon_mass(points)
 
-    def polyline(self, points, _color, width, **_kwargs) -> None:
-        self._add(tuple(points), float(width) * 0.5)
+    def polyline(self, points, _color, width, **kwargs) -> None:
+        points = tuple(points)
+        width = float(width)
+        closed = bool(kwargs.get("closed", False))
+        self._add(points, width * 0.5)
+        self._add_stroke_mass(
+            points,
+            width,
+            closed=closed,
+            round_caps=not closed and kwargs.get("cap", "butt") != "butt",
+        )
 
     def fringed_concave_fill(self, points, _color, **_kwargs) -> None:
-        self._add(tuple(points))
+        points = tuple(points)
+        self._add(points)
+        self._add_polygon_mass(points)
 
     def circle(self, center, radius, _color, width, **_kwargs) -> None:
-        self._add((center,), float(radius) + float(width) * 0.5)
+        radius, width = float(radius), float(width)
+        self._add((center,), radius + width * 0.5)
+        outer = radius + width * 0.5
+        inner = max(0.0, radius - width * 0.5)
+        self._add_mass(math.pi * (outer * outer - inner * inner), center)
 
     def circle_filled(self, center, radius, _color, **_kwargs) -> None:
-        self._add((center,), float(radius))
+        radius = float(radius)
+        self._add((center,), radius)
+        self._add_mass(math.pi * radius * radius, center)
 
     def rect(self, lo, hi, _color, width, **_kwargs) -> None:
-        self._add((lo, hi), float(width) * 0.5)
+        width = float(width)
+        self._add((lo, hi), width * 0.5)
+        outer_width = abs(float(hi[0]) - float(lo[0])) + width
+        outer_height = abs(float(hi[1]) - float(lo[1])) + width
+        inner_width = max(0.0, outer_width - 2.0 * width)
+        inner_height = max(0.0, outer_height - 2.0 * width)
+        self._add_mass(
+            outer_width * outer_height - inner_width * inner_height,
+            ((float(lo[0]) + float(hi[0])) * 0.5, (float(lo[1]) + float(hi[1])) * 0.5),
+        )
 
     def rect_filled(self, lo, hi, _color, **_kwargs) -> None:
         self._add((lo, hi))
+        width = abs(float(hi[0]) - float(lo[0]))
+        height = abs(float(hi[1]) - float(lo[1]))
+        self._add_mass(
+            width * height,
+            ((float(lo[0]) + float(hi[0])) * 0.5, (float(lo[1]) + float(hi[1])) * 0.5),
+        )
 
 
 @lru_cache(maxsize=64)
 def icon_metrics(name: str) -> IconMetrics:
-    """Return 24-unit authored bounds and radial clearance for one candidate."""
+    """Return placement and optical measurements for one 24-unit candidate."""
 
     draw = _MetricsDraw()
     draw_concept_icon(draw, (0.0, 0.0), ICON_GRID, name, (1.0, 1.0, 1.0, 1.0))
-    return IconMetrics(tuple(draw.bounds), draw.radial_extent)
+    ink_center = (
+        draw.ink_moment[0] / draw.ink_area,
+        draw.ink_moment[1] / draw.ink_area,
+    )
+    return IconMetrics(tuple(draw.bounds), draw.radial_extent, ink_center)
 
 
 def icon_family(label: str):

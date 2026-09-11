@@ -9,6 +9,7 @@ from design.tools.ui_icon_concepts import (
     ICON_GRID,
     ICON_MIN_CLEARANCE,
     draw_concept_icon,
+    icon_metrics,
 )
 
 from mojive.curves2d import arrow_mesh
@@ -20,6 +21,8 @@ class _RecordingDraw:
         self.radial_extent = 0.0
         self.widths: list[float] = []
         self.lines: list[tuple] = []
+        self.polylines: list[tuple] = []
+        self.filled_paths: list[tuple] = []
         self.fills = 0
 
     def _add(self, points, pad: float = 0.0) -> None:
@@ -64,10 +67,13 @@ class _RecordingDraw:
         self._add(points)
 
     def polyline(self, points, _color, width, **_kwargs) -> None:
+        points = tuple(points)
+        self.polylines.append((points, float(width), _kwargs))
         self.widths.append(float(width))
-        self._add(tuple(points), float(width) * 0.5)
+        self._add(points, float(width) * 0.5)
 
     def fringed_concave_fill(self, points, _color, **_kwargs) -> None:
+        self.filled_paths.append(tuple(points))
         self.fills += 1
         self._add(tuple(points))
 
@@ -125,7 +131,7 @@ def test_concept_icon_ink_stays_inside_circular_placement_bound(name: str) -> No
     assert draw.radial_extent <= guide_radius - ICON_MIN_CLEARANCE + 1e-6
 
 
-@pytest.mark.parametrize("name", _icons())
+@pytest.mark.parametrize("name", tuple(name for name in _icons() if name != "tool-scale"))
 def test_concept_icon_bounds_are_centered_in_placement_circle(name: str) -> None:
     draw = _render(name, ICON_GRID)
     center_x = (draw.bounds[0] + draw.bounds[2]) * 0.5
@@ -139,6 +145,41 @@ def test_body_cube_has_three_interior_edges() -> None:
     draw = _render("tool-body", ICON_GRID)
 
     assert len(draw.lines) == 3
+    assert any(
+        options.get("closed") and len(points) > 6 for points, _width, options in draw.polylines
+    )
+
+
+@pytest.mark.parametrize(
+    "name",
+    ("tool-move", "tool-rotate", "tool-scale", "tool-world", "tool-body"),
+)
+def test_symmetric_tool_icons_center_their_ink_mass(name: str) -> None:
+    assert icon_metrics(name).ink_center == pytest.approx((0.0, 0.0), abs=0.05)
+
+
+def test_rotate_uses_axis_rings_while_reset_uses_one_arrow() -> None:
+    rotate = _render("tool-rotate", ICON_GRID)
+    reset = _render("transport-reset", ICON_GRID)
+
+    assert rotate.fills >= 3
+    assert reset.fills == 1
+
+
+def test_scale_uses_three_integrated_box_handles() -> None:
+    draw = _render("tool-scale", ICON_GRID)
+
+    assert draw.fills == 3
+    assert not draw.lines
+    assert all(len(path) > 8 for path in draw.filled_paths)
+
+
+def test_hidden_eye_uses_three_lashes_instead_of_a_slash() -> None:
+    hidden = _render("panel-hidden", ICON_GRID)
+    visible = _render("panel-visible", ICON_GRID)
+
+    assert len(hidden.lines) == 3
+    assert not visible.lines
 
 
 @pytest.mark.parametrize("name", _icons())

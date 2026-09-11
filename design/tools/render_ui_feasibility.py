@@ -3811,8 +3811,8 @@ def _draw_concept_icon_specimen(draw, center, size: float, name: str, scale: flo
     )
 
 
-def _icon_review_metrics(name: str) -> tuple[float, float, float]:
-    """Return radial clearance and bounding-box center offset on the 24-unit grid."""
+def _icon_review_metrics(name: str) -> tuple[float, float, float, float, float]:
+    """Return radial, box-center, and ink-mass diagnostics on the 24-unit grid."""
 
     if name.startswith("status-") and name.removeprefix("status-") in {
         "info",
@@ -3828,14 +3828,28 @@ def _icon_review_metrics(name: str) -> tuple[float, float, float]:
             float(points[:, 1].max()),
         )
         radial_extent = float(np.linalg.norm(points, axis=1).max())
+        ink_area = 0.0
+        ink_moment = np.zeros(2, np.float64)
+        for vertices, indices, _outline, _hole in meshes:
+            vertices = np.asarray(vertices, np.float64)
+            for offset in range(0, len(indices), 3):
+                triangle = vertices[np.asarray(indices[offset : offset + 3])]
+                first = triangle[1] - triangle[0]
+                second = triangle[2] - triangle[0]
+                area = abs(float(first[0] * second[1] - first[1] * second[0])) * 0.5
+                ink_area += area
+                ink_moment += area * triangle.mean(axis=0)
+        ink_center = ink_moment / ink_area
         return (
             ICON_BOUND_DIAMETER * 0.5 - radial_extent,
             (bounds[0] + bounds[2]) * 0.5,
             (bounds[1] + bounds[3]) * 0.5,
+            float(ink_center[0]),
+            float(ink_center[1]),
         )
     metrics = icon_metrics(name)
     offset_x, offset_y = metrics.center_offset
-    return metrics.radial_clearance, offset_x, offset_y
+    return metrics.radial_clearance, offset_x, offset_y, *metrics.ink_center
 
 
 def _draw_icon_library_overview(draw, origin, scale: float) -> None:
@@ -3884,7 +3898,6 @@ def _draw_icon_library_overview(draw, origin, scale: float) -> None:
 
 def _draw_icon_family_detail(draw, origin, family: str, scale: float) -> None:
     icons = icon_family(family)
-    label_width = 230.0 * scale
     centers = tuple(origin[0] + offset * scale for offset in (330.0, 535.0, 765.0, 1085.0))
     header_y = origin[1] + 10.0 * scale
     draw.text((origin[0], header_y), CONCEPT_THEME.text, family)
@@ -3923,18 +3936,18 @@ def _draw_icon_family_detail(draw, origin, family: str, scale: float) -> None:
         for center_x, size in zip(centers, _ICON_REVIEW_SIZES, strict=True):
             _draw_concept_icon_specimen(draw, (center_x, center_y), size * scale, name, scale)
 
-        meta_x = origin[0] + label_width + 1000.0 * scale
-        clearance, offset_x, offset_y = _icon_review_metrics(name)
-        draw.text(
-            (meta_x, center_y - 13.0 * scale),
-            CONCEPT_THEME.text_disabled,
-            name,
-        )
-        draw.text(
-            (meta_x, center_y + 7.0 * scale),
-            CONCEPT_THEME.text_disabled,
-            f"pad {clearance:.2f}u · center {offset_x:+.2f},{offset_y:+.2f}u",
-        )
+        meta_x = origin[0] + 1160.0 * scale
+        clearance, offset_x, offset_y, ink_x, ink_y = _icon_review_metrics(name)
+        for line, line_y in (
+            (f"{name} · pad {clearance:.2f}u", -20.0),
+            (f"box  {offset_x:+.2f},{offset_y:+.2f}u", 0.0),
+            (f"ink  {ink_x:+.2f},{ink_y:+.2f}u", 20.0),
+        ):
+            draw.text(
+                (meta_x, center_y + line_y * scale),
+                CONCEPT_THEME.text_disabled,
+                line,
+            )
 
 
 def _draw_icon_library_page(
