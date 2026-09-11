@@ -28,6 +28,8 @@ from mojive.ui.viewport_widgets import (
     _dimensions_glyph_geometry,
     _rotate_visible_ring_polygons,
     _snap_glyph_shape,
+    mouse_button_geometry,
+    mouse_wheel_geometry,
 )
 
 ICON_GRID = 24.0
@@ -40,8 +42,23 @@ ICON_MIN_CLEARANCE = 0.5
 ICON_DEFAULT_PADDING = 0.75
 ICON_MAX_PADDING = 4.0
 ROTATE_FRAME_PADDING = 0.0
-STATUS_MOUSE_DEFAULT_WIDTH = 11.8
+STATUS_MOUSE_DEFAULT_WIDTH = OVERLAY_GEOMETRY.hint_mouse_width
 REVIEW_LOCKED_ICONS = frozenset(("status-info", "status-warning", "status-error"))
+BOX_CENTERED_ICONS = frozenset(
+    (
+        "tool-snap",
+        "playback-previous",
+        "playback-next",
+        "playback-more",
+        "transport-first",
+        "transport-previous",
+        "transport-next",
+        "transport-last",
+        "transport-more",
+    )
+)
+RING_CENTERED_ICONS = frozenset(("playback-reset", "transport-reset"))
+RESET_RING_CENTER = (0.0, 0.47)
 # ``_dimensions_glyph_geometry`` narrows a source stroke to compensate for the
 # DrawList fringe. This concept-only source value makes Scale's fitted shaft
 # match Rotate's fitted ring at the shared 24-unit slot. Preserve the reviewed
@@ -145,8 +162,8 @@ ICON_FAMILIES = (
     ),
 )
 
-# Every group uses the same minimum enclosing-circle placement. Groups own only
-# their circular padding so component sizing can still be tuned independently.
+# Every group owns circular padding so component sizing can be tuned independently.
+# Placement follows the explicit geometric anchor declared below.
 ICON_GROUP_LAYOUT_DEFAULTS = {
     "Viewport tools": 0.5,
     "Viewport playback": ICON_DEFAULT_PADDING,
@@ -186,6 +203,7 @@ class IconMetrics:
     bounds: tuple[float, float, float, float]
     enclosing_center: tuple[float, float]
     enclosing_radius: float
+    origin_extent: float
 
     @property
     def center_offset(self) -> tuple[float, float]:
@@ -194,7 +212,7 @@ class IconMetrics:
 
     @property
     def circular_clearance(self) -> float:
-        return ICON_BOUND_DIAMETER * 0.5 - self.enclosing_radius
+        return ICON_BOUND_DIAMETER * 0.5 - self.origin_extent
 
 
 def _signed_polygon_area(points: tuple[tuple[float, float], ...]) -> float:
@@ -349,15 +367,25 @@ class _Painter:
             round_tail=round_tail,
         )
 
-    def polyline(self, points, *, closed: bool = False, width: float = ICON_STROKE) -> None:
+    def polyline(
+        self,
+        points,
+        *,
+        closed: bool = False,
+        width: float = ICON_STROKE,
+        cap: str | None = None,
+    ) -> None:
         path = self.points(points)
         self.draw.polyline(
             path,
             self.color,
             width * self.scale,
             closed=closed,
-            cap="butt" if closed else "round",
+            cap=cap or ("butt" if closed else "round"),
         )
+
+    def convex_polygon(self, points) -> None:
+        self.draw.convex_fill(self.points(points), self.color)
 
     def polygon(self, points, *, fringe_width: float | None = None) -> None:
         if fringe_width is None:
@@ -879,8 +907,10 @@ def _draw_transport(p: _Painter, name: str) -> None:
         p.circle_filled(0.0, 0.0, 4.8)
     elif kind == "stop":
         _g3_rect(p, -4.8, -4.8, 4.8, 4.8, 1.05)
-    else:
+    elif kind == "more":
         _rounded_polyline(p, ((-5.6, -2.8), (0.0, 2.8), (5.6, -2.8)))
+    else:
+        raise ValueError(f"unknown transport icon: {name!r}")
 
 
 def _diamond(p: _Painter, center=(0.0, 0.0), radius: float = 5.4, *, filled: bool) -> None:
@@ -1175,18 +1205,47 @@ def _draw_status(
         if accent_color is not None
         else p
     )
-    half_width = float(mouse_width) * 0.5
+    width = float(mouse_width)
+    half_width = width * 0.5
     if not 5.0 <= mouse_width <= 22.0:
         raise ValueError("status mouse width must be between 5 and 22 grid units")
-    p.rect(-half_width, -7.8, half_width, 7.8, rounding=4.4, width=1.45)
-    p.line((-half_width + 0.3, -1.1), (half_width - 0.3, -1.1), width=1.2)
-    control_x = max(0.0, half_width - 3.7)
-    if kind == "mouse-left":
-        accent.circle_filled(-control_x, -4.2, 1.25)
-    elif kind == "mouse-right":
-        accent.circle_filled(control_x, -4.2, 1.25)
+    height = OVERLAY_GEOMETRY.hint_control_height
+    top = -height * 0.5
+    outline_width = OVERLAY_GEOMETRY.hint_mouse_stroke
+    button = kind.removeprefix("mouse-")
+    button_geometry = mouse_button_geometry(
+        -half_width,
+        top,
+        width,
+        height,
+        button,
+        outline_width=outline_width,
+        geometry=OVERLAY_GEOMETRY,
+        smoothing=CAPSULE_SMOOTHING,
+    )
+    if button_geometry is None:
+        radius = min(width * 0.22, height * 0.18)
+        p.rect(-half_width, top, half_width, -top, rounding=radius, width=outline_width)
     else:
-        accent.rect_filled(-0.9, -5.8, 0.9, -2.5, rounding=0.9)
+        p.polyline(button_geometry.visible_shell, width=outline_width, cap="butt")
+        accent.convex_polygon(button_geometry.fill)
+    if button == "wheel":
+        wheel = mouse_wheel_geometry(
+            -half_width,
+            top,
+            width,
+            height,
+            outline_width=outline_width,
+            pixel_size=1.0,
+            geometry=OVERLAY_GEOMETRY,
+        )
+        accent.rect_filled(
+            wheel.lo[0],
+            wheel.lo[1],
+            wheel.hi[0],
+            wheel.hi[1],
+            rounding=wheel.rounding,
+        )
 
 
 def _draw_concept_icon_raw(
@@ -1284,6 +1343,9 @@ class _MetricsDraw:
         points = tuple(points)
         self._add(points)
 
+    def convex_fill(self, points, _color, **_kwargs) -> None:
+        self._add(tuple(points))
+
     def indexed_fill(
         self,
         points,
@@ -1336,7 +1398,17 @@ def _measure_raw_icon(
         mouse_width=mouse_width,
     )
     enclosing_center, enclosing_radius = minimum_enclosing_circle(draw.boundary_points)
-    return IconMetrics(tuple(draw.bounds), enclosing_center, enclosing_radius)
+    origin_extent = max(math.hypot(x, y) for x, y in draw.boundary_points)
+    return IconMetrics(tuple(draw.bounds), enclosing_center, enclosing_radius, origin_extent)
+
+
+def _alignment_center(name: str, metrics: IconMetrics) -> tuple[float, float]:
+    anchor = icon_alignment_anchor(name)
+    if anchor == "box":
+        return metrics.center_offset
+    if anchor == "ring":
+        return RESET_RING_CENTER
+    return metrics.enclosing_center
 
 
 @lru_cache(maxsize=256)
@@ -1345,7 +1417,7 @@ def _icon_layout(
     padding: float | None = None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
 ) -> tuple[float, tuple[float, float]]:
-    """Center the minimum enclosing circle and fit it to the requested padding."""
+    """Center the declared anchor and fit every visible point to the requested padding."""
 
     raw = _measure_raw_icon(name, mouse_width=mouse_width)
     default_padding = ICON_GROUP_LAYOUT_DEFAULTS[icon_component_group(name)]
@@ -1353,7 +1425,8 @@ def _icon_layout(
         padding = default_padding
     if name in REVIEW_LOCKED_ICONS:
         padding = ICON_DEFAULT_PADDING
-    offset = (-raw.enclosing_center[0], -raw.enclosing_center[1])
+    anchor_center = _alignment_center(name, raw)
+    offset = (-anchor_center[0], -anchor_center[1])
     padding = float(padding)
     if not ICON_MIN_CLEARANCE <= padding <= ICON_MAX_PADDING:
         raise ValueError(
@@ -1367,15 +1440,36 @@ def _icon_layout(
         else padding + ICON_PADDING_BIAS.get(name, 0.0)
     )
     safe_radius = ICON_BOUND_DIAMETER * 0.5 - target_padding
-    layout_scale = safe_radius / raw.enclosing_radius
+    shifted = _measure_raw_icon(name, offset, mouse_width=mouse_width)
+    layout_scale = safe_radius / shifted.origin_extent
     return layout_scale, (offset[0] * layout_scale, offset[1] * layout_scale)
 
 
 def icon_alignment_anchor(name: str) -> str:
-    """Return the single placement anchor used by every concept icon."""
+    """Return the explicit geometric placement anchor for one concept icon."""
 
     icon_component_group(name)
+    if name in BOX_CENTERED_ICONS:
+        return "box"
+    if name in RING_CENTERED_ICONS:
+        return "ring"
     return "circle"
+
+
+def icon_alignment_center(
+    name: str,
+    padding: float | None = None,
+    mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
+) -> tuple[float, float]:
+    """Return the declared anchor center after candidate placement."""
+
+    raw = _measure_raw_icon(name, mouse_width=mouse_width)
+    source_center = _alignment_center(name, raw)
+    layout_scale, offset = _icon_layout(name, padding, mouse_width)
+    return (
+        source_center[0] * layout_scale + offset[0],
+        source_center[1] * layout_scale + offset[1],
+    )
 
 
 def draw_concept_icon(
@@ -1389,7 +1483,7 @@ def draw_concept_icon(
     accent_color=None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
 ) -> None:
-    """Draw one minimum-circle-centered candidate fitted to a padded circular slot."""
+    """Draw one declared-anchor candidate fitted to a padded circular slot."""
 
     layout_scale, offset = _icon_layout(name, padding, mouse_width)
     unit_scale = float(size) / ICON_GRID
@@ -1427,7 +1521,8 @@ def icon_metrics(
         mouse_width=mouse_width,
     )
     enclosing_center, enclosing_radius = minimum_enclosing_circle(draw.boundary_points)
-    return IconMetrics(tuple(draw.bounds), enclosing_center, enclosing_radius)
+    origin_extent = max(math.hypot(x, y) for x, y in draw.boundary_points)
+    return IconMetrics(tuple(draw.bounds), enclosing_center, enclosing_radius, origin_extent)
 
 
 def icon_family(label: str):

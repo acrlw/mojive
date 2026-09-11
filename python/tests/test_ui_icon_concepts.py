@@ -5,6 +5,7 @@ import math
 import pytest
 from design.tools import ui_icon_concepts as icon_concepts
 from design.tools.ui_icon_concepts import (
+    BOX_CENTERED_ICONS,
     ICON_BOUND_DIAMETER,
     ICON_DEFAULT_PADDING,
     ICON_FAMILIES,
@@ -13,15 +14,23 @@ from design.tools.ui_icon_concepts import (
     ICON_MAX_PADDING,
     ICON_MIN_CLEARANCE,
     ICON_PADDING_BIAS,
+    RESET_RING_CENTER,
+    RING_CENTERED_ICONS,
     ROTATE_FRAME_PADDING,
     STATUS_MOUSE_DEFAULT_WIDTH,
     draw_concept_icon,
     icon_alignment_anchor,
+    icon_alignment_center,
     icon_component_group,
     icon_metrics,
 )
 
 from mojive.curves2d import arrow_mesh
+from mojive.ui.viewport_widgets import (
+    CAPSULE_SMOOTHING,
+    OVERLAY_GEOMETRY,
+    mouse_button_geometry,
+)
 
 
 class _RecordingDraw:
@@ -38,6 +47,7 @@ class _RecordingDraw:
         self.indexed_fringe_widths: list[float] = []
         self.polylines: list[tuple] = []
         self.filled_paths: list[tuple] = []
+        self.convex_paths: list[tuple] = []
         self.fills = 0
 
     def _add(self, points, pad: float = 0.0) -> None:
@@ -94,6 +104,13 @@ class _RecordingDraw:
         self.filled_paths.append(tuple(points))
         self.fills += 1
         self._add(tuple(points))
+
+    def convex_fill(self, points, color, **_kwargs) -> None:
+        points = tuple(points)
+        self.convex_paths.append(points)
+        self.solid_colors.append(color)
+        self.fills += 1
+        self._add(points)
 
     def indexed_fill(
         self,
@@ -206,9 +223,30 @@ def test_component_groups_own_independent_candidate_names_and_layout_defaults() 
     assert ICON_GROUP_LAYOUT_DEFAULTS["Viewport playback"] == ICON_DEFAULT_PADDING
 
 
-@pytest.mark.parametrize("name", _icons())
-def test_all_concept_icons_use_the_minimum_circle_anchor(name: str) -> None:
-    assert icon_alignment_anchor(name) == "circle"
+def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
+    assert {
+        "tool-snap",
+        "playback-previous",
+        "playback-next",
+        "playback-more",
+        "transport-first",
+        "transport-previous",
+        "transport-next",
+        "transport-last",
+        "transport-more",
+    } == BOX_CENTERED_ICONS
+    assert {"playback-reset", "transport-reset"} == RING_CENTERED_ICONS
+    assert all(
+        icon_alignment_anchor(name)
+        == (
+            "box"
+            if name in BOX_CENTERED_ICONS
+            else "ring"
+            if name in RING_CENTERED_ICONS
+            else "circle"
+        )
+        for name in _icons()
+    )
 
 
 def test_rotate_outer_frame_matches_the_placement_circle() -> None:
@@ -247,7 +285,19 @@ def test_icon_padding_rejects_values_outside_the_review_range(padding: float) ->
 
 
 @pytest.mark.parametrize("name", _icons())
-def test_concept_icons_center_their_minimum_enclosing_circle(name: str) -> None:
+def test_concept_icons_center_their_declared_anchor(name: str) -> None:
+    assert icon_alignment_center(name) == pytest.approx((0.0, 0.0), abs=0.01)
+
+
+@pytest.mark.parametrize("name", tuple(sorted(BOX_CENTERED_ICONS)))
+def test_box_anchored_icons_center_their_complete_visible_bounds(name: str) -> None:
+    assert icon_metrics(name).center_offset == pytest.approx((0.0, 0.0), abs=0.01)
+
+
+@pytest.mark.parametrize(
+    "name", tuple(name for name in _icons() if icon_alignment_anchor(name) == "circle")
+)
+def test_circle_anchored_icons_center_their_minimum_enclosing_circle(name: str) -> None:
     assert icon_metrics(name).enclosing_center == pytest.approx((0.0, 0.0), abs=0.01)
 
 
@@ -319,6 +369,34 @@ def test_mouse_candidates_apply_the_control_accent(name: str) -> None:
     )
 
     assert draw.solid_colors == [accent]
+
+
+@pytest.mark.parametrize("button", ("left", "right"))
+def test_mouse_candidates_reuse_the_original_knockout_geometry(button: str) -> None:
+    draw = _RecordingDraw()
+    painter = icon_concepts._Painter(draw, (0.0, 0.0), ICON_GRID, (1.0, 1.0, 1.0, 1.0))
+    icon_concepts._draw_status(
+        painter,
+        f"status-mouse-{button}",
+        (0.2, 0.3, 0.4, 1.0),
+        mouse_width=OVERLAY_GEOMETRY.hint_mouse_width,
+    )
+    expected = mouse_button_geometry(
+        -OVERLAY_GEOMETRY.hint_mouse_width * 0.5,
+        -OVERLAY_GEOMETRY.hint_control_height * 0.5,
+        OVERLAY_GEOMETRY.hint_mouse_width,
+        OVERLAY_GEOMETRY.hint_control_height,
+        button,
+        outline_width=OVERLAY_GEOMETRY.hint_mouse_stroke,
+        geometry=OVERLAY_GEOMETRY,
+        smoothing=CAPSULE_SMOOTHING,
+    )
+
+    assert expected is not None
+    assert draw.polylines[0][0] == expected.visible_shell
+    assert draw.convex_paths == [expected.fill]
+    assert not draw.lines
+    assert not draw.filled_circles
 
 
 def test_scale_centers_its_minimum_enclosing_circle() -> None:
@@ -393,7 +471,7 @@ def test_snap_uses_production_g3_u_path_with_two_rounded_end_blocks() -> None:
     assert not draw.lines
     assert len(draw.filled_paths) == 2
     assert all(len(path) > 4 for path in draw.filled_paths)
-    assert icon_alignment_anchor("tool-snap") == "circle"
+    assert icon_alignment_anchor("tool-snap") == "box"
 
 
 def test_search_uses_one_hollow_g3_lens_and_handle_mesh() -> None:
@@ -461,6 +539,13 @@ def test_transport_chevron_tip_is_a_right_angle(direction: float) -> None:
     assert vertex_angle(chevron, chevron_tip) == pytest.approx(90.0, abs=1e-6)
 
 
+def test_playback_and_transport_more_share_one_completed_shape() -> None:
+    assert (
+        _render("playback-more", ICON_GRID).__dict__
+        == _render("transport-more", ICON_GRID).__dict__
+    )
+
+
 @pytest.mark.parametrize("name", ("transport-first", "transport-last"))
 def test_transport_end_bar_matches_its_triangle_height(name: str) -> None:
     draw = _render(name, ICON_GRID)
@@ -525,6 +610,13 @@ def test_status_mouse_width_is_adjustable_without_moving_its_center() -> None:
 
     assert wide.bounds[2] - wide.bounds[0] > narrow.bounds[2] - narrow.bounds[0]
     assert wide.enclosing_center == pytest.approx((0.0, 0.0), abs=0.01)
+
+
+@pytest.mark.parametrize("name", tuple(sorted(RING_CENTERED_ICONS)))
+def test_reset_icons_center_their_authored_ring(name: str) -> None:
+    assert RESET_RING_CENTER == (0.0, 0.47)
+    assert icon_alignment_anchor(name) == "ring"
+    assert icon_alignment_center(name) == pytest.approx((0.0, 0.0), abs=1e-6)
 
 
 def test_hidden_eye_uses_three_lashes_instead_of_a_slash() -> None:

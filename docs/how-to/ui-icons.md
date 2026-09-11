@@ -39,7 +39,7 @@ documented fraction of the rendered gap until the gap can contain the normal one
 preserves the authored stroke and gap ratios instead of changing either geometry value at small
 sizes.
 
-### Use one minimum enclosing-circle center
+### Use explicit geometric centers
 
 The Icon library uses a circular 24-unit placement boundary, drawn in orange after the glyph so a
 collision cannot hide beneath the visible mark. The circle describes the slot used by layout and
@@ -51,33 +51,39 @@ with `Glyph padding`, which adjusts candidate clearance from 0.50 to 4.00 units.
 consumer keeps an independent value: Viewport tools, Viewport playback, Keyframe
 transport, Keyframes actions, Panels, Scene helpers, and Status & input. Family sheets, capsule
 specimens, and the whole-UI preview resolve the value for the component they are showing. Viewport
-tools default to padding 0.50; the other groups keep their own defaults. Rotate is the frame-aligned
-exception: its outer screen ring reaches the
-orange placement circle, while the three inner rings follow the same complete-master scale.
+tools default to padding 0.50; the other groups keep their own defaults. Rotate is frame-aligned:
+its outer screen ring reaches the orange placement circle, while the three inner rings follow the
+same complete-master scale.
 Output's mature Info, Warning, and Error painters are also locked; the review control does not
-change their geometry, size, or placement. Detail rows report `pad`, the minimum enclosing `circle`
-center, and the axis-aligned `box` center as a secondary diagnostic.
+change their geometry, size, or placement. Detail rows report `pad`, the declared anchor at
+`0.00, 0.00`, and either the axis-aligned box or minimum enclosing circle as a secondary diagnostic.
 
 Viewport Playback Play is an equilateral G3 triangle. Previous and Next retain their original
-90-degree chevrons, while Pause retains its original twin bars. Every candidate is translated so
-the sampled minimum enclosing-circle center coincides with the component slot center. Each specimen
-also draws a neutral square whose width and height equal the orange circle's diameter, exposing the
-shared center at 14, 24, 56, and 112 points. Playback and Keyframe Transport Record use the same
-explicit smaller scale so their visible diameter stays slightly below the corresponding Stop width.
-Keyframe Transport First and Last make their bar exactly as tall as the final rounded triangle.
+90-degree chevrons, while Pause retains its original twin bars. Playback More and Keyframe Transport
+More call the same contour with the same size parameters. Each specimen also draws a neutral square
+whose width and height equal the orange circle's diameter, exposing the shared slot center at 14,
+24, 56, and 112 points. Playback and Keyframe Transport Record use the same explicit smaller scale
+so their visible diameter stays slightly below the corresponding Stop width. Keyframe Transport
+First and Last make their bar exactly as tall as the final rounded triangle.
 
 Use circular containment in addition to rectangular canvas containment. A camera body can fit inside
 a 24-by-24 square while its stroked corner still crosses a 24-unit circle. Likewise, a centered
-axis-aligned box does not prove that the icon looks centered. The concept library samples the full
-visible boundary, including half of each outline stroke, computes its minimum enclosing circle,
-translates that circle center onto the orange-circle center, and uniformly scales the complete
-master until its circle reaches the requested padding. Stroke, gaps, dots, corner profiles, and
-antialias-gap limits therefore keep their authored ratios. This one rule also applies to Scale,
-Snap, directional marks, Playback, and Keyframe Transport. The box center remains visible only to
-explain asymmetric extents; it does not move the glyph. Align the icon slot to the current font's
-baseline and cap-height guides, inspect the real row height at 1x and 2x, and compare related or
-mirrored icons. If a glyph still looks displaced, correct its authored geometry and recompute the
-same minimum enclosing circle. Keep the before and after capture in the review output.
+axis-aligned box does not prove that every icon looks centered. Placement therefore follows one
+declared geometric feature per silhouette:
+
+- Previous, Next, More, Keyframe Transport First/Last, and Tool Snap center their complete visible
+  axis-aligned box;
+- Playback and Keyframe Transport Reset place the center of the authored circular ring on the slot;
+- all remaining candidates center their sampled minimum enclosing circle.
+
+The concept library samples the full visible boundary, including half of each outline stroke,
+translates the declared center onto the orange-circle center, and uniformly scales the complete
+master until every visible point reaches no further than the requested padding. Stroke, gaps, dots,
+corner profiles, and antialias-gap limits therefore keep their authored ratios. Align the icon slot
+to the current font's baseline and cap-height guides, inspect the real row height at 1x and 2x, and
+compare related or mirrored icons. If a glyph still looks displaced, correct its authored geometry
+or its documented anchor, then rerun every target size. Keep the before and after capture in the
+review output.
 
 Apply interaction color at the control boundary rather than baking it into the icon master. Capsule
 controls use `viewport.off_foreground` at rest, `hover_foreground` on hover,
@@ -86,10 +92,11 @@ three to Primary Bright. Record and Stop are one semantic recording action and a
 `viewport.record` (Danger red), including selected and pressed states. Disabled alpha attenuates the
 resolved semantic color after this mapping.
 
-Mouse candidates preserve the Status visual grammar: the shell uses the status text color and the
-button or wheel uses the neutral active-frame gray. Muted rows use Text Disabled for the shell.
-`Mouse W` changes the candidate aspect ratio and the consumed Status layout width together, while
-height remains tied to the existing hint control height.
+Mouse hints use the original production `draw_mouse_hint_glyph` geometry in the family sheet and in
+whole-UI previews. The shell, true knockout around the selected button, control fill, wheel, muted
+state, and suffix colors therefore remain identical to Status. `Mouse W` changes the original
+hint's aspect ratio and consumed Status layout width together, while height remains tied to the
+existing hint control height.
 
 Shaft-and-head arrows use one continuous filled outline. Do not join an independent stroked shaft
 to a filled triangle: antialiasing and cap geometry expose the seam at small sizes. Object outlines
@@ -198,12 +205,12 @@ edge of the frame is about 4.58 grid units on each side.
 | Symptom | Cause | Required correction |
 | --- | --- | --- |
 | Small mark nearly touches its frame while the large mark has ample space | One or more dimensions use an absolute pixel minimum | Return every dimension to the common grid, or define and verify a complete optical master |
-| A glyph becomes larger but remains visibly off-center | The old box, hub, or source-coordinate anchor was preserved during fitting | Center the sampled minimum enclosing circle first, then apply one complete-master scale |
+| A glyph becomes larger but remains visibly off-center | Its declared geometric anchor was not moved with the complete master | Translate the declared box, ring, or minimum-circle center first, then apply one complete-master scale |
 | `i` or `!` looks vertically displaced despite a centered area centroid | Unequal stem and dot areas skew area-centroid alignment | Center the combined visible bounds or use a documented optical alignment box |
 | Warning looks unrelated to information | Stem, gap, or dot was tuned separately | Generate one from the other's reflected geometry |
 | Dot disappears even though its diameter equals the stem width | Circular antialiasing removes more visible area | Apply a small grid-relative dot overshoot and inspect the target raster size |
 | Error looks heavier, then becomes stylistically thin after correction | Cross stroke width was reduced independently | Keep the shared internal stroke and shorten the diagonals |
-| Scale remains displaced after it is enlarged | A separate hub anchor bypassed the shared placement rule | Center its minimum enclosing circle like every other candidate |
+| Scale remains displaced after it is enlarged | Its source origin was preserved instead of its declared minimum-circle center | Center the sampled minimum enclosing circle before fitting the complete master |
 | Scale endpoints overpower the center hub | Endpoint blocks were sized independently of the shaft and dot | Keep the G3 blocks close to the hub diameter and compare their area with the hub at 112 points |
 | Scale shafts merge into the center dot | A copied three-axis sketch omitted the established transparent center shell | Start all three concept shafts outside the dot's circular clearance radius and verify the visible gap |
 | Rotate is mistaken for Reset or Refresh | Both use a circular-arrow structure | Use the three-axis Tool Column rotation rings and reserve the single arrow loop for Reset |
@@ -211,15 +218,17 @@ edge of the frame is about 4.58 grid units on each side.
 | Rotate's inner rings look thicker and their gaps close only at small sizes | A fixed one-pixel fill fringe is larger than the proportionally scaled stroke and knockout gap | Submit all four rings through one filled-mesh path and scale their shared fringe against the rendered gap until the normal one-pixel fringe fits |
 | A concept experiment changes an established Tool Column icon | Candidate geometry was placed in the production painter | Keep Move, Rotate, and Scale candidate contours in the Icon Library and leave `viewport_widgets.py` untouched |
 | A triangle looks rounded only in the thumbnail | The preview hid a raw three-point polygon or an undersized corner profile | Inspect the native 112-point contour and require more than three authored boundary points |
-| Transport marks use different placement rules | Legacy box or authored-origin offsets remain in individual painters | Remove the local offset and center each completed contour by its minimum enclosing circle |
+| Playback and Transport More do not match | Separate painters or size adjustments have drifted | Route both names through the same completed contour and padding contract |
+| Directional edge marks drift toward their open side | A minimum enclosing circle was used for a silhouette whose opposing terminals define the layout | Center the completed visible box for Previous, Next, More, First, and Last |
 | Snap looks like a generic U or loses its endpoint blocks | Its stems and semicircle were authored as unrelated primitives, or the probe copied only the centerline | Reuse the production G3 snap path with `CAPSULE_SMOOTHING` and retain both G3 endpoint blocks |
-| Snap sits low after its enclosing circle is centered | Its authored U geometry is vertically unbalanced | Correct the source contour, then recompute the same minimum enclosing circle |
-| A compound icon looks low or right despite `circle +0.00` | Its authored geometry is asymmetric | Correct the source geometry, then rerun the same circle placement at every target size |
+| Snap sits low despite symmetric endpoints | Its open U was centered by a circle unrelated to its visible terminals | Center the complete visible box while preserving the production G3 contour |
+| Reset's ring drifts behind its arrowhead | The complete arrow silhouette was centered instead of the circular body | Place the authored ring center on the slot and let the arrowhead extend naturally |
+| A compound icon looks low or right despite a zero diagnostic | The wrong geometric feature was declared as its anchor | Choose the visible box, authored ring, or minimum enclosing circle from the actual silhouette |
 | Search handle cuts into the lens or exposes a cap | Lens and handle were submitted as separate strokes | Build one hollow G3 union mesh with a continuous outer neck and retained circular hole |
 | Search lens grows spikes or leaks white flecks into its hollow center | Near-duplicate outer columns or independently sampled fill and hole-fringe boundaries destabilize antialiasing | Use one monotonic x-grid, replace its nearest samples at the hole endpoints, and derive the hole fringe from the strip's exact inner vertices |
 | Sort arrow tip does not meet the visible bottom of its last bar | The arrow endpoint was aligned to the bar centerline | Align the head tip with the lower stroked edge while keeping the round tail on the top centerline |
 | Sort arrow has a flat exposed tail | The shared arrow mesh kept its default butt tail | Enable its G3 round-tail contour while retaining the integrated head and shaft |
-| Replacement mouse glyph is much smaller than the original Status hint | The adapter passed the original mouse width as the candidate's complete circular size even though the mouse contour occupies only part of that circle | Measure the candidate master bounds and solve its circular size from the original control height; preserve the original layout width |
+| Mouse hints change shape or color when Icon Library preview is enabled | A separate concept painter replaced the reviewed Status control | Keep `draw_mouse_hint_glyph`, its true knockout, and its theme color resolver in both modes |
 | Cube spokes protrude through the shell | Independently capped lines terminate on top of the outer stroke | Inset the spokes, join their center, and paint the G3 outer contour last |
 | One preview looks good but production does not | A copied demo or resized screenshot bypasses production geometry and density | Render the production painter at every target logical size and framebuffer scale |
 
@@ -233,7 +242,8 @@ the mark at 44.8% for 12, 14, 20, 32, and 56 pixels.
 For every icon-family change:
 
 1. Test normalized bounds at 14, 24, 56, and 112 points. Include frame, mark, stroke, gap, circular
-   safe area, minimum enclosing-circle center, box diagnostics, centerline, and mirrored geometry.
+   safe area, declared anchor center, box and minimum-circle diagnostics, centerline, and mirrored
+   geometry.
 2. Render the production painter at its actual logical sizes. Do not scale down one large capture
    as a substitute.
 3. Inspect both 1x and Retina output when raster behavior or visibility is in question.
@@ -271,9 +281,9 @@ It also writes `context-workspace.png`,
 `context-panels.png`, `context-hints.png`, `context-hints-hidpi.png`, `context-keyframes.png`, and
 `context-redesign.png` with the same candidates placed in real feasibility controls. Pass
 `--icon-padding` after `--icon-group` for deterministic non-default captures of that group. In
-interactive mode, use the Icon Library's group selector, `Glyph padding`, and Status `Mouse W`
-controls to compare placement and
-0.50–4.00 grid-unit clearances, and use the always-visible `Icon Library preview` menu-bar switch,
+interactive mode, use the Icon Library's group selector and `Glyph padding` to compare placement and
+0.50–4.00 grid-unit clearances. Status `Mouse W` adjusts the original mouse-hint aspect ratio. Use
+the always-visible `Icon Library preview` menu-bar switch,
 or the matching item under `Probe`, to apply or remove that substitution across every feasibility
 page. The Icon Library canvas reserves enough scroll extent for the longest family; verify the final
 row is reachable in the normal 1600-by-1000 interactive window.
