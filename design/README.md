@@ -42,7 +42,9 @@ values for each actual component group; the Status group also exposes mouse widt
 capsule specimens, and the whole-UI preview resolve the values for the component they show. Each
 detail row reports radial padding and bounding-box center offset. Rotate stays frame-aligned, and
 the reviewed Output Info, Warning, and Error icons stay on their production painter and ignore both
-controls.
+controls. Playback Play stays on its authored origin; selected playback controls and every
+Keyframe transport mark are locked to their complete stroked bounding-box center. A neutral square
+with the orange circle's diameter makes that box alignment visible at every review size.
 
 Use the always-visible `Icon Library preview` menu-bar switch, or `Probe > Preview Icon Library`,
 to substitute the candidates into the current Workspace, Panels, Geometry, and Redesign layouts.

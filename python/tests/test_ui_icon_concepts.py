@@ -7,6 +7,7 @@ from design.tools.ui_icon_concepts import (
     ICON_BOUND_DIAMETER,
     ICON_DEFAULT_PADDING,
     ICON_FAMILIES,
+    ICON_FIXED_ALIGNMENT,
     ICON_GRID,
     ICON_GROUP_LAYOUT_DEFAULTS,
     ICON_MAX_PADDING,
@@ -213,6 +214,17 @@ def test_component_groups_own_independent_candidate_names_and_layout_defaults() 
     assert icon_component_group("transport-play") == "Keyframe transport"
     assert ICON_GROUP_LAYOUT_DEFAULTS["Viewport tools"] == (0.0, 0.5)
     assert ICON_GROUP_LAYOUT_DEFAULTS["Viewport playback"] == (0.0, ICON_DEFAULT_PADDING)
+
+
+def test_component_contract_fixes_playback_and_keyframe_transport_alignment() -> None:
+    assert ICON_FIXED_ALIGNMENT["playback-play"] == "origin"
+    assert ICON_FIXED_ALIGNMENT["playback-previous"] == "box"
+    assert ICON_FIXED_ALIGNMENT["playback-pause"] == "box"
+    assert ICON_FIXED_ALIGNMENT["playback-next"] == "box"
+    assert ICON_FIXED_ALIGNMENT["playback-more"] == "box"
+    assert all(
+        ICON_FIXED_ALIGNMENT[name] == "box" for name in _icons() if name.startswith("transport-")
+    )
 
 
 def test_rotate_outer_frame_matches_the_placement_circle() -> None:
@@ -488,18 +500,26 @@ def test_box_anchored_icons_center_their_visible_bounds(name: str) -> None:
     assert icon_metrics(name).center_offset == pytest.approx((0.0, 0.0), abs=0.05)
 
 
-@pytest.mark.parametrize(
-    "name",
-    tuple(name for name in _icons() if name.startswith(("transport-", "playback-"))),
-)
+@pytest.mark.parametrize("name", tuple(ICON_FIXED_ALIGNMENT))
 def test_transport_icons_center_their_visible_bounds_in_component_cells(name: str) -> None:
-    assert icon_alignment_anchor(name) == "box"
+    if name == "playback-play":
+        assert icon_alignment_anchor(name) == "origin"
+    else:
+        assert icon_alignment_anchor(name) == "box"
     assert icon_metrics(name).center_offset == pytest.approx((0.0, 0.0), abs=0.01)
 
 
-def test_global_radial_control_blends_from_declared_to_enclosing_circle_center() -> None:
-    box = icon_metrics("transport-play", 0.0)
-    radial = icon_metrics("transport-play", 1.0)
+@pytest.mark.parametrize("name", tuple(ICON_FIXED_ALIGNMENT))
+def test_fixed_component_alignment_ignores_radial_control(name: str) -> None:
+    baseline = _render(name, ICON_GRID, radial_alignment=0.0)
+    adjusted = _render(name, ICON_GRID, radial_alignment=1.0)
+
+    assert adjusted.__dict__ == baseline.__dict__
+
+
+def test_radial_control_still_blends_adjustable_icons() -> None:
+    box = icon_metrics("panel-search", 0.0)
+    radial = icon_metrics("panel-search", 1.0)
 
     assert box.center_offset == pytest.approx((0.0, 0.0), abs=0.01)
     assert radial.bounding_center == pytest.approx((0.0, 0.0), abs=0.01)
@@ -542,6 +562,15 @@ def test_keyframe_transport_chevrons_do_not_outgrow_play_or_pause() -> None:
     reference = max(heights["transport-play"], heights["transport-pause"])
     assert heights["transport-previous"] <= reference
     assert heights["transport-next"] <= reference
+
+
+def test_playback_record_is_slightly_smaller_than_stop() -> None:
+    record = icon_metrics("playback-record")
+    stop = icon_metrics("playback-stop")
+    record_width = record.bounds[2] - record.bounds[0]
+    stop_width = stop.bounds[2] - stop.bounds[0]
+
+    assert 0.9 * stop_width < record_width < stop_width
 
 
 def test_status_mouse_width_is_adjustable_without_moving_its_center() -> None:

@@ -164,8 +164,29 @@ ICON_GROUP_LAYOUT_DEFAULTS = {
 ICON_PADDING_BIAS = {
     "playback-previous": 1.85,
     "playback-next": 1.85,
+    # A circular Record mark otherwise fills the complete radial envelope and
+    # looks much larger than the diagonally constrained Stop square.
+    "playback-record": 3.30,
     "transport-previous": 1.7,
     "transport-next": 1.7,
+}
+
+# These placement rules are part of the component contract, rather than an
+# optical experiment. Play keeps its authored origin on the cell center. The
+# listed playback controls and every Keyframe transport mark center their
+# complete stroked bounding box and therefore ignore the Radial control.
+ICON_FIXED_ALIGNMENT = {
+    "playback-play": "origin",
+    "playback-previous": "box",
+    "playback-pause": "box",
+    "playback-next": "box",
+    "playback-more": "box",
+    **{
+        name: "box"
+        for family, icons in ICON_FAMILIES
+        for _label, name in icons
+        if family == "Keyframe transport"
+    },
 }
 
 ICON_LIBRARY_TABS = (
@@ -823,7 +844,10 @@ def _draw_tool(p: _Painter, name: str) -> None:
 def _draw_transport(p: _Painter, name: str) -> None:
     kind = name.removeprefix("transport-").removeprefix("playback-")
     if kind == "play":
-        _triangle(p, 1.0)
+        # The G3 tip trims about one grid unit more than the flat rear edge.
+        # Author Playback Play half a unit to the right so its visible box is
+        # centered when its origin is placed directly on the capsule cell.
+        _triangle(p, 1.0, center_x=0.4913 if name == "playback-play" else 0.0)
     elif kind == "pause":
         _g3_rect(p, -5.0, -6.8, -1.5, 6.8, 0.92)
         _g3_rect(p, 1.5, -6.8, 5.0, 6.8, 0.92)
@@ -1413,18 +1437,22 @@ def _icon_layout(
     elif name == "tool-rotate":
         radial_alignment = 0.0
     anchor = icon_alignment_anchor(name)
-    if anchor in {"arc", "hub"}:
+    if anchor in {"arc", "hub", "origin"}:
         # Snap's lower-arc center and Scale's three-axis hub are authored at
-        # the origin. Their semantic control center takes priority over a box.
+        # the origin. Playback Play also keeps its authored origin on the cell
+        # center. These declared centers take priority over a box.
         base_offset = (0.0, 0.0)
     else:
         base_offset = (-raw.center_offset[0], -raw.center_offset[1])
-    radial_offset = (-raw.bounding_center[0], -raw.bounding_center[1])
-    amount = min(1.0, max(0.0, float(radial_alignment)))
-    offset = (
-        base_offset[0] + (radial_offset[0] - base_offset[0]) * amount,
-        base_offset[1] + (radial_offset[1] - base_offset[1]) * amount,
-    )
+    if name in ICON_FIXED_ALIGNMENT:
+        offset = base_offset
+    else:
+        radial_offset = (-raw.bounding_center[0], -raw.bounding_center[1])
+        amount = min(1.0, max(0.0, float(radial_alignment)))
+        offset = (
+            base_offset[0] + (radial_offset[0] - base_offset[0]) * amount,
+            base_offset[1] + (radial_offset[1] - base_offset[1]) * amount,
+        )
     # Measure after placement so centering happens before the complete master
     # is fitted. Scaling first would preserve each source contour's old drift.
     shifted = _measure_raw_icon(name, offset, mouse_width=mouse_width)
@@ -1448,6 +1476,8 @@ def _icon_layout(
 def icon_alignment_anchor(name: str) -> str:
     """Return the reviewed placement anchor for one concept icon."""
 
+    if name in ICON_FIXED_ALIGNMENT:
+        return ICON_FIXED_ALIGNMENT[name]
     if name == "tool-snap":
         return "arc"
     if name == "tool-scale":
