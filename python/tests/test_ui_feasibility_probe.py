@@ -103,7 +103,8 @@ def test_geometry_export_names_production_overlay_fields():
     values = probe._geometry_values_text(probe.ProbeState())
 
     assert "icon_radius=10," in values
-    assert f"icon_stroke={probe.ICON_STROKE}," in values
+    assert f"icon_stroke_viewport_tools={probe.ICON_STROKE}," in values
+    assert f"icon_stroke_viewport_playback={probe.ICON_STROKE}," in values
     assert "icon_padding_viewport_tools=0.5," in values
     assert "icon_padding_viewport_playback=2.0," in values
     assert "tool_stroke=" in values
@@ -120,8 +121,13 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.selection_padding == probe.DEFAULT_SELECTION_PADDING
     assert state.corner_radius == probe.OUTLINE_CORNER_RADIUS_PT
     assert not state.preview_icon_library
-    assert state.icon_stroke_width == probe.ICON_STROKE
+    assert all(
+        state.icon_stroke_for(group) == probe.ICON_STROKE
+        for group in probe.ICON_GROUP_STROKE_DEFAULTS
+    )
     assert state.icon_padding_for("Viewport tools") == 0.5
+    assert state.icon_padding_for_glyph("tool-rotate") == 0.0
+    assert state.icon_padding_for_glyph("playback-previous") == 4.0
     assert all(
         state.icon_padding_for(group) == 2.0
         for group in probe.ICON_GROUP_LAYOUT_DEFAULTS
@@ -133,9 +139,16 @@ def test_icon_layout_controls_are_stored_per_actual_component_group() -> None:
     state = probe.ProbeState()
 
     state.set_icon_padding_for("Viewport tools", 1.2)
+    state.set_icon_stroke_for("Viewport tools", 2.0)
+    state.set_icon_padding_for_glyph("tool-world", 0.8)
+    state.set_icon_stroke_for_glyph("tool-world", 1.6)
 
     assert state.icon_padding_for("Viewport tools") == 1.2
     assert state.icon_padding_for("Viewport playback") == probe.ICON_DEFAULT_PADDING
+    assert state.icon_stroke_for("Viewport tools") == 2.0
+    assert state.icon_stroke_for("Viewport playback") == probe.ICON_STROKE
+    assert state.icon_padding_for_glyph("tool-world") == 0.8
+    assert state.icon_stroke_for_glyph("tool-world") == 1.6
 
 
 @pytest.mark.parametrize("muted", (False, True))
@@ -268,9 +281,10 @@ def test_keyframe_context_preview_uses_icon_library_candidates(monkeypatch, kind
     assert calls[0][1]["stroke_width"] == probe.ICON_STROKE
 
 
-def test_keyframe_context_preview_uses_the_live_shared_stroke(monkeypatch):
+def test_keyframe_context_preview_uses_the_live_group_stroke(monkeypatch):
     calls = []
-    state = probe.ProbeState(icon_stroke_width=2.1)
+    state = probe.ProbeState()
+    state.set_icon_stroke_for("Keyframe transport", 2.1)
     monkeypatch.setattr(
         probe,
         "draw_concept_icon",

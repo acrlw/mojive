@@ -44,14 +44,16 @@ sizes.
 The Icon library uses a circular 24-unit placement boundary, drawn in orange after the glyph so a
 collision cannot hide beneath the visible mark. The circle describes the slot used by layout and
 provides one adjustable size envelope for the candidate set. Candidate geometry includes half of
-every outline stroke. The Icon Library header exposes a component-group selector
-with `Glyph padding`, which adjusts candidate clearance from 0.50 to 4.00 units. Each actual
-consumer keeps an independent value: Viewport tools, Viewport playback, Keyframe
-transport, Keyframes actions, Panels, Scene helpers, and Status & input. Family sheets, capsule
-specimens, and the whole-UI preview resolve the value for the component they are showing. Viewport
-tools default to padding 0.50; every other group defaults to 2.00. Rotate is frame-aligned:
-its outer screen-ring centerline coincides with the orange placement circle, while half of its
-stroke sits on each side and the three inner rings keep the same visible width.
+every outline stroke. The Icon Library header exposes a component-group selector with `Glyph
+padding` and `Glyph stroke` defaults. Each actual consumer keeps independent values: Viewport
+tools, Viewport playback, Keyframe transport, Keyframes actions, Panels, Scene helpers, and Status
+& input. Group sliders commit on release to avoid rebuilding every glyph during a drag. Each
+family row provides live per-glyph padding and stroke overrides plus a reset button; family sheets,
+capsule specimens, and the whole-UI preview resolve the same overrides. Viewport tools default to
+padding 0.50; every other group defaults to 2.00. Playback Previous, Next, and More use 4.00 so the
+directional marks remain smaller than Play. Rotate defaults to frame-aligned: its outer screen-ring
+centerline coincides with the orange placement circle, while its row can adjust frame padding and
+the inner-ring gap/stroke ratio. Half of the outer stroke sits on each side of its centerline.
 Output's mature Info, Warning, and Error painters are also locked; the review control does not
 change their geometry, size, or placement. Detail rows report `pad`, the declared anchor at
 `0.00, 0.00`, and either the axis-aligned box or minimum enclosing circle as a secondary diagnostic.
@@ -59,8 +61,8 @@ change their geometry, size, or placement. Detail rows report `pad`, the declare
 Viewport Playback Play is an equilateral G3 triangle. Previous and Next retain their original
 90-degree chevrons, while Pause retains its original twin bars. Both More names call one contour:
 rotate Previous counterclockwise by 90 degrees, shorten its arms to 94 percent, and keep the source
-stroke plus each component's Previous layout scale. The adjacent `Glyph stroke` control sets one
-1.00-to-2.50-unit final visual weight, defaulting to 1.75 units. It applies equally to explicit
+stroke plus each component's Previous layout scale. Glyph stroke controls cover a
+1.00-to-2.50-unit final visual weight, defaulting to 1.75 units per component group. They apply to explicit
 outlines, chevron ribbons, Reset arcs, and tool shafts. Reviewed Pause and First/Last bars keep their
 authored widths. Each specimen also draws a neutral square whose
 width and height equal the orange circle's diameter, exposing the shared slot center at 14, 24, 56,
@@ -290,9 +292,9 @@ It also writes `context-workspace.png`,
 `context-panels.png`, `context-hints.png`, `context-hints-hidpi.png`, `context-keyframes.png`, and
 `context-redesign.png` with the same candidates placed in real feasibility controls. Pass
 `--icon-padding` after `--icon-group` for deterministic non-default captures of that group, and use
-`--icon-stroke` for a deterministic shared weight. In interactive mode, use the Icon Library's group
-selector, `Glyph padding`, and `Glyph stroke` to compare placement and
-0.50–4.00 grid-unit clearances. Status `Mouse W` adjusts the original mouse-hint aspect ratio. Use
+`--icon-stroke` for the selected group's deterministic default weight. In interactive mode, use the
+Icon Library's group selector for group defaults and the controls beside each glyph for live
+padding and stroke tuning. Status `Mouse W` adjusts the original mouse-hint aspect ratio. Use
 the always-visible `Icon Library preview` menu-bar switch,
 or the matching item under `Probe`, to apply or remove that substitution across every feasibility
 page. The Icon Library canvas reserves enough scroll extent for the longest family; verify the final

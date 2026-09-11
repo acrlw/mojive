@@ -37,17 +37,20 @@ The `Icon library` tab is a concept-only review surface. Its Overview and family
 Viewport tools, Viewport playback, Keyframe transport, Keyframes actions, Panels, Scene helpers,
 and Status & input candidates on one
 24-unit grid at 14, 24, 56, and 112 pt. The orange circle is the complete 24-unit circular placement
-boundary, matching Diagnostics. The header keeps an independent `Glyph padding` value for each
-actual component group and one shared `Glyph stroke` control. Viewport tools default to `0.5u`
-padding; every other component group defaults to `2.0u`. The Status group also exposes mouse width.
+boundary, matching Diagnostics. The header keeps independent `Glyph padding` and `Glyph stroke`
+defaults for each actual component group. Group edits apply on release so dragging never rebuilds
+an entire family every frame. Every family row also exposes live per-glyph padding and stroke
+overrides plus a reset button. Viewport tools default to `0.5u` padding; every other component
+group defaults to `2.0u`. Playback Previous, Next, and More override that default with `4.0u`.
+The Status group also exposes mouse width.
 Family sheets,
 capsule specimens, and the whole-UI preview resolve the values for the component they show. Each
 detail row reports circular padding, its declared placement anchor, and one secondary diagnostic.
 Previous, Next, More, Keyframe Transport First/Last, Panel Right/Down, and Tool Snap use their
 complete visible box; Playback and Keyframe Transport Reset use the center of their circular ring;
-remaining candidates use their sampled minimum enclosing circle. Rotate stays frame-aligned: its
-outer-ring centerline coincides with the orange placement circle, matching the production Tool
-Column construction instead of shrinking the complete stroke inside the guide. Candidate main
+remaining candidates use their sampled minimum enclosing circle. Rotate defaults to frame-aligned:
+its outer-ring centerline coincides with the orange placement circle, while its row exposes both
+frame padding and the inner-ring gap/stroke ratio. Candidate main
 strokes default to one 1.75-unit weight after fitting, so a group's padding changes reach without
 making its lines heavier. Chevron ribbons and Reset arcs follow the same control. The reviewed
 Pause and First/Last bars keep their established dimensions; status severity and mouse painters
