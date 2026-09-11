@@ -343,12 +343,13 @@ ui-diagnostics:
 .PHONY: ui-icon-concepts
 ui-icon-concepts:
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group overview -o output/ui-icon-concepts/overview.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group viewport-tools -o output/ui-icon-concepts/viewport-tools.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group transport -o output/ui-icon-concepts/transport.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group keyframes -o output/ui-icon-concepts/keyframes.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group panels -o output/ui-icon-concepts/panels.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group scene-helpers -o output/ui-icon-concepts/scene-helpers.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group status-and-input -o output/ui-icon-concepts/status-input.png
+	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group viewport-tools -o output/ui-icon-concepts/viewport-tools.png
+	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group transport -o output/ui-icon-concepts/transport.png
+	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group keyframes -o output/ui-icon-concepts/keyframes.png
+	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group panels -o output/ui-icon-concepts/panels.png
+	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group scene-helpers -o output/ui-icon-concepts/scene-helpers.png
+	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group status-and-input -o output/ui-icon-concepts/status-input.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab tools --tool-stroke 1.46 --rotate-gap-ratio 1.0 -o output/ui-icon-concepts/tools-max-gap.png
 
 ui-feasibility:
 	$(PY) design/tools/render_ui_feasibility.py --interactive $(ARGS)
