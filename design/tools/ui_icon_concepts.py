@@ -724,9 +724,16 @@ def _search_icon_mesh():
     # handle landmarks. Those tiny edges destabilize fringe normals and appear
     # as spikes on the 112-point lens even when the implicit field is smooth.
     count = 257
-    xs = tuple(
+    xs = [
         -outer_radius + (handle_tip + outer_radius) * index / (count - 1) for index in range(count)
-    )
+    ]
+    # The fill strips and hole fringe must meet at the same two axis points.
+    # Replace the nearest uniform columns instead of adding almost coincident
+    # landmarks, which would recreate unstable fringe normals.
+    for landmark in (-inner_radius, inner_radius):
+        nearest = min(range(len(xs)), key=lambda index: abs(xs[index] - landmark))
+        xs[nearest] = landmark
+    xs = tuple(sorted(set(xs)))
     columns = []
     for x in xs:
         if field(x, 0.0) > 1e-7:
@@ -767,12 +774,13 @@ def _search_icon_mesh():
     outline = tuple((x, -outer_y) for x, outer_y, _inner_y in columns) + tuple(
         (x, outer_y) for x, outer_y, _inner_y in reversed(columns[1:-1])
     )
-    hole = tuple(
-        (
-            inner_radius * math.cos(index * math.tau / 96),
-            inner_radius * math.sin(index * math.tau / 96),
-        )
-        for index in range(96)
+    hole_columns = tuple(
+        (x, inner_y) for x, _outer_y, inner_y in columns if -inner_radius <= x <= inner_radius
+    )
+    # Reuse the strip's inner vertices for AA. An independently sampled circle
+    # leaves subpixel wedges of the opaque fill exposed inside the hole.
+    hole = tuple((x, -inner_y) for x, inner_y in hole_columns) + tuple(
+        (x, inner_y) for x, inner_y in reversed(hole_columns[1:-1])
     )
 
     cosine = math.sqrt(0.5)

@@ -265,12 +265,18 @@ def test_search_uses_one_hollow_g3_lens_and_handle_mesh() -> None:
     assert len(points) > 200
     assert len(indices) > 300
     assert len(outline) > 100
-    assert len(hole) == 96
+    assert len(hole) > 100
+    assert set(hole).issubset(set(points))
     edge_lengths = tuple(
         math.dist(current, following)
         for current, following in zip(outline, (*outline[1:], outline[0]), strict=True)
     )
+    hole_edge_lengths = tuple(
+        math.dist(current, following)
+        for current, following in zip(hole, (*hole[1:], hole[0]), strict=True)
+    )
     assert min(edge_lengths) > 0.02
+    assert min(hole_edge_lengths) > 0.02
 
 
 def test_sort_arrow_tail_and_tip_align_with_visible_bar_extents() -> None:
