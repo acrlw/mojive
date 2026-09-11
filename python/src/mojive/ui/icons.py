@@ -171,8 +171,6 @@ ICON_GROUP_LAYOUT_DEFAULTS = {
 }
 ICON_GLYPH_PADDING_DEFAULTS = {
     "tool-rotate": ROTATE_FRAME_PADDING,
-    "helper-camera": 0.5,
-    "helper-light": 0.5,
     "playback-previous": 4.0,
     "playback-next": 4.0,
     "playback-more": 4.0,
@@ -187,15 +185,26 @@ ICON_GLYPH_PADDING_DEFAULTS = {
     "key-previous": 4.0,
     "key-next": 4.0,
     "key-snapshot": 0.5,
+    "panel-search": 4.0,
+    "panel-sort": 4.0,
+    "panel-clear": 4.0,
+    "panel-visible": 4.0,
+    "panel-hidden": 4.0,
+    "panel-perspective": 4.0,
+    "panel-orthographic": 4.0,
+    "panel-right": 3.0,
+    "panel-down": 3.0,
+    "helper-camera": 0.5,
+    "helper-light": 0.5,
 }
 ICON_GROUP_STROKE_DEFAULTS = dict.fromkeys(ICON_GROUP_LAYOUT_DEFAULTS, ICON_STROKE)
 ICON_GLYPH_STROKE_DEFAULTS = {
-    "tool-move": 1.2,
-    "tool-rotate": 1.2,
-    "tool-scale": 1.2,
-    "tool-world": 1.25,
-    "tool-body": 1.25,
-    "tool-snap": 1.0,
+    "tool-move": 1.1,
+    "tool-rotate": 1.1,
+    "tool-scale": 1.1,
+    "tool-world": 1.1,
+    "tool-body": 1.1,
+    "tool-snap": 1.1,
     "playback-previous": 2.0,
     "playback-next": 2.0,
     "playback-reset": 1.25,
@@ -205,17 +214,21 @@ ICON_GLYPH_STROKE_DEFAULTS = {
     "transport-reset": 1.25,
     "transport-more": 2.0,
     "key-snapshot": 1.5,
-    "key-keyframe": 1.75,
+    "key-keyframe": 1.5,
+    "key-add": 1.5,
+    "key-clear": 1.5,
     "key-previous": 1.5,
     "key-next": 1.5,
     "key-fit": 1.25,
     "key-follow": 1.5,
     "key-view": 1.5,
-    "panel-search": 1.25,
-    "panel-sort": 1.25,
-    "panel-clear": 1.5,
-    "panel-visible": 1.25,
-    "panel-hidden": 1.25,
+    "panel-search": 1.0,
+    "panel-sort": 1.0,
+    "panel-clear": 1.0,
+    "panel-visible": 1.0,
+    "panel-hidden": 1.0,
+    "panel-perspective": 1.0,
+    "panel-orthographic": 1.0,
     "helper-camera": 1.5,
     "helper-light": 1.5,
 }
@@ -225,9 +238,9 @@ ICON_GLYPH_STROKE_DEFAULTS = {
 class IconTuning:
     """Authored shape controls that are independent of fit and stroke."""
 
-    move_head_scale: float = 1.0
-    scale_handle_scale: float = 1.0
-    snap_endpoint_scale: float = 1.0
+    move_head_scale: float = 0.85
+    scale_handle_scale: float = 1.15
+    snap_endpoint_scale: float = 1.3
     key_fit_arm_length: float = 4.0
 
 
