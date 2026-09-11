@@ -99,6 +99,8 @@ from mojive.ui.panels import (
     search_input,
     searchable_ordered_list_header,
 )
+from mojive.ui.panels import keyframes as keyframes_panel_module
+from mojive.ui.panels import output as output_panel_module
 from mojive.ui.panels.filters import filter_pills, severity_color, severity_icon, severity_meshes
 from mojive.ui.panels.hierarchy import disclosure_triangle
 from mojive.ui.panels.keyframes import KeyframesPanel, _command_button, _draw_command_icon
@@ -377,6 +379,7 @@ class ProbeState:
     geometry_tab: str = "Playback"
     geometry_tab_initialized: bool = False
     icon_library_tab: str = "Overview"
+    preview_icon_library: bool = False
     show_playback: bool = True
     show_tool_column: bool = True
     show_joint_gizmos: bool = True
@@ -499,6 +502,74 @@ def _flags(*values) -> int:
     for value in values:
         result |= int(value.value if hasattr(value, "value") else value)
     return result
+
+
+def _draw_concept_control_icon(draw, center, size: float, kind: str, color) -> None:
+    """Adapt Icon Library panel candidates to the shared control callback."""
+
+    draw_concept_icon(draw, center, size, f"panel-{kind}", color)
+
+
+def _draw_concept_projection_icon(draw, center, size: float, kind: str, color) -> None:
+    name = "panel-perspective" if kind == "persp" else "panel-orthographic"
+    draw_concept_icon(draw, center, size, name, color)
+
+
+def _preview_search_input(state: ProbeState, *args, **kwargs):
+    if state.preview_icon_library:
+        kwargs["icon_drawer"] = _draw_concept_control_icon
+    return search_input(*args, **kwargs)
+
+
+def _preview_searchable_header(state: ProbeState, *args, **kwargs):
+    if state.preview_icon_library:
+        kwargs["icon_drawer"] = _draw_concept_control_icon
+    return searchable_ordered_list_header(*args, **kwargs)
+
+
+_KEYFRAME_CONCEPT_ICONS = {
+    "first": "transport-first",
+    "last": "transport-last",
+    "previous": "transport-previous",
+    "next": "transport-next",
+    "play": "transport-play",
+    "pause": "transport-pause",
+    "stop": "transport-stop",
+    "loop": "transport-reset",
+    "reset": "transport-reset",
+    "options": "transport-more",
+    "record": "transport-record",
+    "add": "key-add",
+    "clear": "key-clear",
+    "key-previous": "key-previous",
+    "key-next": "key-next",
+    "fit": "key-fit",
+    "follow": "key-follow",
+    "view": "key-view",
+}
+
+
+def _draw_icon_library_command_icon(
+    draw,
+    center,
+    kind: str,
+    color,
+    scale: float,
+    *,
+    smoothing: float = CORNER_SMOOTHING,
+    context_scale: float = 1.0,
+) -> None:
+    """Render one Keyframes command through its Icon Library candidate."""
+
+    del smoothing
+    name = (
+        "key-keyframe"
+        if kind == "key" and scale < context_scale * 0.9
+        else "key-snapshot"
+        if kind == "key"
+        else _KEYFRAME_CONCEPT_ICONS[kind]
+    )
+    draw_concept_icon(draw, center, 16.0 * float(scale), name, color)
 
 
 def _draw_play_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=None) -> None:
@@ -645,6 +716,26 @@ def _draw_mouse_input(
     suffix: str,
     state: ProbeState,
 ) -> float:
+    if state.preview_icon_library:
+        icon_size = min(width, height) * scale
+        draw_concept_icon(
+            draw,
+            (x + width * scale * 0.5, center_y),
+            icon_size,
+            f"status-mouse-{button}",
+            CONCEPT_THEME.text,
+        )
+        used = width * scale
+        if suffix:
+            used += 5.0 * scale
+            used += _draw_inline_text(
+                draw,
+                x + used,
+                center_y,
+                suffix,
+                CONCEPT_THEME.text,
+            )
+        return used
     return draw_mouse_hint_glyph(
         draw,
         x,
@@ -1233,7 +1324,15 @@ def _draw_scene_helper(
         draw.circle_filled(center, 13.0 * scale, CONCEPT_THEME.bg_frame_active, segments=32)
     elif hovered:
         draw.circle_filled(center, 13.0 * scale, CONCEPT_THEME.bg_frame_hovered, segments=32)
-    if kind == "camera":
+    if state.preview_icon_library:
+        draw_concept_icon(
+            draw,
+            center,
+            20.0 * scale,
+            "helper-camera" if kind == "camera" else "helper-light",
+            color,
+        )
+    elif kind == "camera":
         _draw_camera_icon(draw, center, color, scale)
     else:
         _draw_light_icon(draw, center, color, scale)
@@ -1486,6 +1585,7 @@ def _draw_segmented(
     *,
     width: float = 82.0,
     icons: tuple[str, ...] | None = None,
+    icon_drawer=None,
 ) -> int:
     result = selected
     draw = ImguiDraw2D()
@@ -1505,17 +1605,28 @@ def _draw_segmented(
         if index == selected:
             imgui.pop_style_color(2)
         if icon:
-            glyph_scale = max(0.65, imgui.get_frame_height() / 24.0)
             color = CONCEPT_THEME.primary_bright if index == selected else CONCEPT_THEME.text
-            draw_projection_label(
-                draw,
-                (item_min.x, item_min.y),
-                (item_max.x, item_max.y),
-                color,
-                glyph_scale,
-                icon,
-                label,
-            )
+            if icon_drawer is not None:
+                height = item_max.y - item_min.y
+                icon_size = height * 0.64
+                center = (item_min.x + height * 0.5, (item_min.y + item_max.y) * 0.5)
+                icon_drawer(draw, center, icon_size, icon, color)
+                draw.text(
+                    (item_min.x + height, text_line_y(draw, center[1])),
+                    color,
+                    label,
+                )
+            else:
+                glyph_scale = max(0.65, imgui.get_frame_height() / 24.0)
+                draw_projection_label(
+                    draw,
+                    (item_min.x, item_min.y),
+                    (item_max.x, item_max.y),
+                    color,
+                    glyph_scale,
+                    icon,
+                    label,
+                )
     imgui.pop_style_var()
     return result
 
@@ -1819,7 +1930,8 @@ def _draw_settings(size, state: ProbeState, scale: float) -> None:
         imgui.end_child()
         return
     imgui.set_next_item_width(-1.0)
-    _, state.settings_filter = search_input(
+    _, state.settings_filter = _preview_search_input(
+        state,
         "##probe-settings-filter",
         state.settings_filter,
         search_tooltip="Search settings",
@@ -2062,7 +2174,15 @@ def _draw_keyframes(size, scale: float, state: ProbeState) -> None:
     session = state.timeline_session
     session.tick(FrameNeeds.none(), wall_dt=min(0.05, imgui.get_io().delta_time))
     ctx = PanelContext(session, None, theme=CONCEPT_THEME, style_scale=scale)
-    state.timeline_panel.draw(ctx)
+    original_icon = keyframes_panel_module._draw_command_icon
+    if state.preview_icon_library:
+        keyframes_panel_module._draw_command_icon = lambda *args, **kwargs: (
+            _draw_icon_library_command_icon(*args, **kwargs, context_scale=scale)
+        )
+    try:
+        state.timeline_panel.draw(ctx)
+    finally:
+        keyframes_panel_module._draw_command_icon = original_icon
     imgui.end_child()
 
 
@@ -2083,7 +2203,17 @@ def _draw_output(size, state: ProbeState, scale: float) -> None:
     ctx = PanelContext(
         None, None, theme=CONCEPT_THEME, style_scale=scale, output=state.output_buffer
     )
-    state.output_panel.draw(ctx)
+    original_search = output_panel_module.search_input
+    if state.preview_icon_library:
+        output_panel_module.search_input = lambda *args, **kwargs: search_input(
+            *args,
+            **kwargs,
+            icon_drawer=_draw_concept_control_icon,
+        )
+    try:
+        state.output_panel.draw(ctx)
+    finally:
+        output_panel_module.search_input = original_search
     imgui.end_child()
 
 
@@ -2109,6 +2239,7 @@ def _begin_gallery_properties(item_id: str) -> bool:
 
 
 def _draw_search_header(
+    state: ProbeState,
     item_id: str,
     hint: str,
     value: str,
@@ -2118,7 +2249,8 @@ def _draw_search_header(
 ) -> tuple[str, bool]:
     """Use the production searchable-list header with specimen state."""
 
-    _changed, value, _sort_changed, sort_by_name = searchable_ordered_list_header(
+    _changed, value, _sort_changed, sort_by_name = _preview_searchable_header(
+        state,
         f"##{item_id}",
         value,
         sort_by_name,
@@ -2147,6 +2279,7 @@ def _draw_copy_buttons(item_id: str, labels: tuple[str, str]) -> None:
 def _draw_control_content(state: ProbeState) -> None:
     if imgui.collapsing_header("actuators", imgui.TreeNodeFlags_.default_open.value):
         state.control_filter, state.control_sort_by_name = _draw_search_header(
+            state,
             "probe-actuator",
             "Search actuators",
             state.control_filter,
@@ -2190,6 +2323,7 @@ def _draw_control_gallery(size, state: ProbeState) -> None:
 
 def _draw_joints_content(state: ProbeState) -> None:
     state.joint_filter, state.joint_sort_by_name = _draw_search_header(
+        state,
         "probe-joint",
         "Search joints",
         state.joint_filter,
@@ -2256,6 +2390,7 @@ def _draw_camera_content(state: ProbeState) -> None:
             state.camera_projection,
             width=segment_width,
             icons=("persp", "ortho"),
+            icon_drawer=_draw_concept_projection_icon if state.preview_icon_library else None,
         )
         imgui.end_table()
     if imgui.collapsing_header("camera bookmarks"):
@@ -2439,7 +2574,8 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
     opened = _begin_gallery_panel("Hierarchy", "ProbeHierarchy", size)
     if opened:
         imgui.set_next_item_width(-1.0)
-        _changed, state.hierarchy_filter = search_input(
+        _changed, state.hierarchy_filter = _preview_search_input(
+            state,
             "##probe-hierarchy-filter",
             state.hierarchy_filter,
             hint="Search hierarchy",
@@ -2526,15 +2662,24 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
                         if ink is not None
                         else (lo.y + hi.y) * 0.5
                     )
-                    row_draw.fringed_concave_fill(
-                        disclosure_triangle(
+                    if state.preview_icon_library:
+                        draw_concept_icon(
+                            row_draw,
                             (node_x + 5 * scale, center_y),
-                            4 * scale,
-                            opened=disclosure == "▾",
-                            smoothing=state.tool_smoothing,
-                        ),
-                        CONCEPT_THEME.text,
-                    )
+                            10.0 * scale,
+                            "panel-down" if disclosure == "▾" else "panel-right",
+                            CONCEPT_THEME.text,
+                        )
+                    else:
+                        row_draw.fringed_concave_fill(
+                            disclosure_triangle(
+                                (node_x + 5 * scale, center_y),
+                                4 * scale,
+                                opened=disclosure == "▾",
+                                smoothing=state.tool_smoothing,
+                            ),
+                            CONCEPT_THEME.text,
+                        )
                 row_draw.text(
                     (node_x + 18.0 * scale, text_y),
                     CONCEPT_THEME.text,
@@ -2578,7 +2723,15 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
                     if state.hierarchy_visibility[index]
                     else CONCEPT_THEME.text_disabled
                 )
-                if state.hierarchy_visibility[index]:
+                if state.preview_icon_library:
+                    draw_concept_icon(
+                        row_draw,
+                        center,
+                        16.0 * scale,
+                        "panel-visible" if state.hierarchy_visibility[index] else "panel-hidden",
+                        color,
+                    )
+                elif state.hierarchy_visibility[index]:
                     top = tuple(
                         (
                             center[0] - radius_x + radius_x * 2.0 * point / 8.0,
@@ -2646,7 +2799,8 @@ def _draw_assets_gallery(size, state: ProbeState) -> None:
         imgui.collapsing_header("New material")
         imgui.separator()
         imgui.set_next_item_width(-1.0)
-        _changed, state.asset_filter = search_input(
+        _changed, state.asset_filter = _preview_search_input(
+            state,
             "##probe-asset-filter",
             state.asset_filter,
             hint="Filter assets...",
@@ -3324,37 +3478,66 @@ def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                 item_draw.polyline(points, capsule_outline_color(state), 1.5 * scale, closed=True)
         elif field_name == "playback_smoothing":
             for i, kind in enumerate(("play", "pause", "previous", "reset")):
-                draw_playback_glyph(
-                    item_draw,
-                    (cx + (i - 1.5) * 76 * scale, cy),
-                    CONCEPT_THEME.text,
-                    2.1 * scale,
-                    kind,
-                    smoothing=q,
-                )
+                center = (cx + (i - 1.5) * 76 * scale, cy)
+                if state.preview_icon_library:
+                    draw_concept_icon(
+                        item_draw,
+                        center,
+                        42.0 * scale,
+                        f"transport-{kind}",
+                        CONCEPT_THEME.text,
+                    )
+                else:
+                    draw_playback_glyph(
+                        item_draw,
+                        center,
+                        CONCEPT_THEME.text,
+                        2.1 * scale,
+                        kind,
+                        smoothing=q,
+                    )
         elif field_name == "tool_smoothing":
             for i, kind in enumerate(("move", "rotate", "dimensions", "snap")):
-                draw_tool_glyph(
-                    item_draw,
-                    (cx + (i - 1.5) * 82 * scale, cy),
-                    CONCEPT_THEME.text,
-                    2.0 * scale,
-                    kind,
-                    "world",
-                    smoothing=q,
-                )
+                center = (cx + (i - 1.5) * 82 * scale, cy)
+                if state.preview_icon_library:
+                    draw_concept_icon(
+                        item_draw,
+                        center,
+                        47.2 * scale,
+                        "tool-scale" if kind == "dimensions" else f"tool-{kind}",
+                        CONCEPT_THEME.text,
+                    )
+                else:
+                    draw_tool_glyph(
+                        item_draw,
+                        center,
+                        CONCEPT_THEME.text,
+                        2.0 * scale,
+                        kind,
+                        "world",
+                        smoothing=q,
+                    )
         elif field_name == "mouse_smoothing":
             for i, button in enumerate(("left", "right", "wheel")):
-                draw_mouse_hint_glyph(
-                    item_draw,
-                    cx + (i - 1) * 98 * scale - 24 * scale,
-                    cy,
-                    button,
-                    "",
-                    CONCEPT_THEME,
-                    3.2 * scale,
-                    smoothing=q,
-                )
+                if state.preview_icon_library:
+                    draw_concept_icon(
+                        item_draw,
+                        (cx + (i - 1) * 98 * scale, cy),
+                        46.0 * scale,
+                        f"status-mouse-{button}",
+                        CONCEPT_THEME.text,
+                    )
+                else:
+                    draw_mouse_hint_glyph(
+                        item_draw,
+                        cx + (i - 1) * 98 * scale - 24 * scale,
+                        cy,
+                        button,
+                        "",
+                        CONCEPT_THEME,
+                        3.2 * scale,
+                        smoothing=q,
+                    )
         elif field_name == "transform_smoothing":
             for i, mode in enumerate(("translate", "dimensions")):
                 _draw_transform_gizmo(
@@ -3692,8 +3875,8 @@ def _draw_diagnostic_gallery(state, scale):
         state.diagnostic_levels.symmetric_difference_update({clicked})
     imgui.same_line()
     imgui.set_next_item_width(310 * scale)
-    _, state.output_filter = search_input(
-        "##diagnostic-search", state.output_filter, hint="Filter text or component..."
+    _, state.output_filter = _preview_search_input(
+        state, "##diagnostic-search", state.output_filter, hint="Filter text or component..."
     )
     imgui.same_line()
     imgui.button("Clear##diagnostic-clear")
@@ -4804,13 +4987,29 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         )
         for index, icon_scale in enumerate((0.75, 1.0, 1.5)):
             center = (helper_x + (48.0 + index * 98.0) * scale, content_y + 520.0 * scale)
-            _draw_camera_icon(draw, center, CONCEPT_THEME.text, scale * icon_scale)
-            _draw_light_icon(
-                draw,
-                (center[0] + 40.0 * scale, center[1]),
-                CONCEPT_THEME.text,
-                scale * icon_scale,
-            )
+            if state.preview_icon_library:
+                draw_concept_icon(
+                    draw,
+                    center,
+                    20.0 * scale * icon_scale,
+                    "helper-camera",
+                    CONCEPT_THEME.text,
+                )
+                draw_concept_icon(
+                    draw,
+                    (center[0] + 40.0 * scale, center[1]),
+                    20.0 * scale * icon_scale,
+                    "helper-light",
+                    CONCEPT_THEME.text,
+                )
+            else:
+                _draw_camera_icon(draw, center, CONCEPT_THEME.text, scale * icon_scale)
+                _draw_light_icon(
+                    draw,
+                    (center[0] + 40.0 * scale, center[1]),
+                    CONCEPT_THEME.text,
+                    scale * icon_scale,
+                )
             draw.text(
                 (center[0] - 12.0 * scale, center[1] + 28.0 * scale),
                 note_color,
@@ -4992,6 +5191,15 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
                 if clicked:
                     state.page = page
             imgui.separator()
+            clicked, _ = imgui.menu_item(
+                "Preview Icon Library",
+                "",
+                state.preview_icon_library,
+            )
+            if clicked:
+                state.preview_icon_library = not state.preview_icon_library
+            imgui.set_item_tooltip("Use Icon Library candidates in the actual feasibility layouts")
+            imgui.separator()
             _, state.imgui_rounding = imgui.slider_float(
                 "ImGui corner radius",
                 state.imgui_rounding,
@@ -5038,6 +5246,14 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
                 if clicked:
                     setattr(state, attribute, not value)
             imgui.end_menu()
+        clicked, _ = imgui.menu_item(
+            "Icon Library preview",
+            "",
+            state.preview_icon_library,
+        )
+        if clicked:
+            state.preview_icon_library = not state.preview_icon_library
+        imgui.set_item_tooltip("Substitute candidates throughout the current page")
         imgui.end_menu_bar()
 
     available = imgui.get_content_region_avail()
@@ -5105,6 +5321,7 @@ def render(
     redesign_language: str = "en",
     redesign_section: str = "Overview",
     capsule_outline: str = "Soft white",
+    preview_icon_library: bool = False,
 ) -> None:
     window_width, window_height = _probe_window_size(width, height, ui_scale)
     window = Window(
@@ -5130,6 +5347,7 @@ def render(
             icon_library_tab=initial_icon_group,
             rotate_ring_cap=initial_rotate_cap,
             capsule_outline=capsule_outline,
+            preview_icon_library=preview_icon_library,
         )
         state.redesign.language = redesign_language
         state.redesign.section = redesign_section
@@ -5259,6 +5477,11 @@ def main() -> None:
         help="Open a real ImGui window and run until it is closed",
     )
     parser.add_argument(
+        "--preview-icon-library",
+        action="store_true",
+        help="Use Icon Library candidates throughout the selected feasibility page",
+    )
+    parser.add_argument(
         "--fps",
         type=float,
         default=30.0,
@@ -5321,6 +5544,7 @@ def main() -> None:
         redesign_language=args.redesign_language,
         redesign_section=args.redesign_section.title(),
         capsule_outline=args.capsule_outline.replace("-", " ").capitalize(),
+        preview_icon_library=args.preview_icon_library,
     )
     print("interactive probe closed" if args.interactive else output)
 

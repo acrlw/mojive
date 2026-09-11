@@ -25,6 +25,7 @@ from mojive.ui.viewport_widgets import (
     CAPSULE_SMOOTHING,
     OVERLAY_GEOMETRY,
     TOOL_GLYPH_SCALE,
+    _dimensions_glyph_geometry,
     _rotate_visible_ring_polygons,
     _snap_glyph_shape,
 )
@@ -553,35 +554,35 @@ def _draw_tool(p: _Painter, name: str) -> None:
             for local in ring:
                 p.polygon(tuple((x * glyph_scale, y * glyph_scale) for x, y in local))
     elif name == "tool-scale":
-        # Three equal axes use joined G3 endpoint blocks. Starting each shaft
-        # outside the center dot leaves the reviewed circular transparent shell.
-        dot_radius = 1.2
-        clear_radius = 2.85
-        reach = 6.45
-        for direction in ((0.0, -1.0), (0.866025, 0.5), (-0.866025, 0.5)):
-            p.box_handle(
-                (direction[0] * clear_radius, direction[1] * clear_radius),
-                (direction[0] * reach, direction[1] * reach),
-                width=1.4,
-                head_size=2.4,
-                corner_radius=0.45,
-            )
+        # Keep the accepted viewport Scale glyph as the source of truth. It
+        # supplies the original reach, center clearance, joined G3 shafts and
+        # endpoint blocks instead of maintaining a second approximation here.
+        paths, dot_radius = _dimensions_glyph_geometry(
+            (0.0, 0.0),
+            1.0,
+            OVERLAY_GEOMETRY,
+            smoothing=CAPSULE_SMOOTHING,
+        )
+        for path in paths:
+            p.polygon(path)
         p.circle_filled(0.0, 0.0, dot_radius)
     elif name == "tool-world":
-        p.circle(0.0, 0.0, 7.8, width=1.45)
-        p.line((-7.65, 0.0), (7.65, 0.0), width=1.35)
+        # Sparse stroked symbols need a larger authored envelope than solid
+        # tools to carry comparable visual weight in the same 24-unit slot.
+        p.circle(0.0, 0.0, 8.75, width=1.45)
+        p.line((-8.58, 0.0), (8.58, 0.0), width=1.35)
         ellipse = tuple(
-            (3.15 * math.cos(index * math.tau / 32), 7.65 * math.sin(index * math.tau / 32))
+            (3.53 * math.cos(index * math.tau / 32), 8.58 * math.sin(index * math.tau / 32))
             for index in range(32)
         )
         p.polyline(ellipse, closed=True, width=1.35)
     elif name == "tool-body":
-        top = (0.0, -7.7)
-        left = (-6.7, -3.85)
-        right = (6.7, -3.85)
-        bottom = (0.0, 7.7)
-        lower_left = (-6.7, 3.85)
-        lower_right = (6.7, 3.85)
+        top = (0.0, -8.62)
+        left = (-7.50, -4.31)
+        right = (7.50, -4.31)
+        bottom = (0.0, 8.62)
+        lower_left = (-7.50, 4.31)
+        lower_right = (7.50, 4.31)
         # A cube has three visible faces: the center joins the two rear side
         # corners and the lower vertex. The former top-to-center edge invented
         # a fourth face. Inset the spoke ends below the outer stroke and paint

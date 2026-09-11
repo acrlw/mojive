@@ -198,6 +198,13 @@ def test_symmetric_tool_icons_center_their_filled_area(name: str) -> None:
     assert icon_metrics(name).area_centroid == pytest.approx((0.0, 0.0), abs=0.05)
 
 
+@pytest.mark.parametrize("name", ("tool-world", "tool-body"))
+def test_sparse_frame_tools_use_the_reviewed_larger_envelope(name: str) -> None:
+    metrics = icon_metrics(name)
+
+    assert 2.0 <= metrics.radial_clearance <= 3.0
+
+
 def test_camera_candidates_share_one_master_and_box_anchor() -> None:
     snapshot = _render("key-snapshot", ICON_GRID)
     helper = _render("helper-camera", ICON_GRID)
