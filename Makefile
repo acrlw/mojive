@@ -344,7 +344,7 @@ ui-diagnostics:
 ui-icon-concepts:
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group overview -o output/ui-icon-concepts/overview.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group viewport-tools -o output/ui-icon-concepts/viewport-tools.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group transport -o output/ui-icon-concepts/transport.png
+	$(PY) design/tools/render_ui_feasibility.py --height 1800 --page geometry --geometry-tab icons --icon-group transport -o output/ui-icon-concepts/transport.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group keyframes -o output/ui-icon-concepts/keyframes.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group panels -o output/ui-icon-concepts/panels.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group scene-helpers -o output/ui-icon-concepts/scene-helpers.png
