@@ -35,7 +35,10 @@ if __package__:
         ICON_GROUP_LAYOUT_DEFAULTS,
         ICON_LIBRARY_TABS,
         ICON_MAX_PADDING,
+        ICON_MAX_STROKE,
         ICON_MIN_CLEARANCE,
+        ICON_MIN_STROKE,
+        ICON_STROKE,
         ROTATE_FRAME_PADDING,
         STATUS_MOUSE_DEFAULT_WIDTH,
         draw_concept_icon,
@@ -75,7 +78,10 @@ else:
         ICON_GROUP_LAYOUT_DEFAULTS,
         ICON_LIBRARY_TABS,
         ICON_MAX_PADDING,
+        ICON_MAX_STROKE,
         ICON_MIN_CLEARANCE,
+        ICON_MIN_STROKE,
+        ICON_STROKE,
         ROTATE_FRAME_PADDING,
         STATUS_MOUSE_DEFAULT_WIDTH,
         draw_concept_icon,
@@ -480,6 +486,7 @@ class ProbeState:
     icon_padding_by_group: dict[str, float] = field(
         default_factory=lambda: dict(ICON_GROUP_LAYOUT_DEFAULTS)
     )
+    icon_stroke_width: float = ICON_STROKE
     overlay_center_step: int = int(OVERLAY_GEOMETRY.center_step)
     tool_group_gap: int = int(OVERLAY_GEOMETRY.tool_group_gap)
     divider_width: int = int(OVERLAY_GEOMETRY.divider_width)
@@ -552,6 +559,7 @@ def _draw_concept_control_icon(
     color,
     *,
     padding: float = ICON_DEFAULT_PADDING,
+    stroke_width: float = ICON_STROKE,
 ) -> None:
     """Adapt Icon Library panel candidates to the shared control callback."""
 
@@ -562,6 +570,7 @@ def _draw_concept_control_icon(
         f"panel-{kind}",
         color,
         padding=padding,
+        stroke_width=stroke_width,
     )
 
 
@@ -573,6 +582,7 @@ def _draw_concept_projection_icon(
     color,
     *,
     padding: float = ICON_DEFAULT_PADDING,
+    stroke_width: float = ICON_STROKE,
 ) -> None:
     name = "panel-perspective" if kind == "persp" else "panel-orthographic"
     draw_concept_icon(
@@ -582,6 +592,7 @@ def _draw_concept_projection_icon(
         name,
         color,
         padding=padding,
+        stroke_width=stroke_width,
     )
 
 
@@ -591,6 +602,7 @@ def _preview_search_input(state: ProbeState, *args, **kwargs):
         kwargs["icon_drawer"] = lambda *values: _draw_concept_control_icon(
             *values,
             padding=padding,
+            stroke_width=state.icon_stroke_width,
         )
     return search_input(*args, **kwargs)
 
@@ -601,6 +613,7 @@ def _preview_searchable_header(state: ProbeState, *args, **kwargs):
         kwargs["icon_drawer"] = lambda *values: _draw_concept_control_icon(
             *values,
             padding=padding,
+            stroke_width=state.icon_stroke_width,
         )
     return searchable_ordered_list_header(*args, **kwargs)
 
@@ -651,6 +664,9 @@ def _draw_icon_library_command_icon(
     )
     if state is not None:
         padding = state.icon_padding_for(icon_component_group(name))
+        stroke_width = state.icon_stroke_width
+    else:
+        stroke_width = ICON_STROKE
     draw_concept_icon(
         draw,
         center,
@@ -658,6 +674,7 @@ def _draw_icon_library_command_icon(
         name,
         color,
         padding=padding,
+        stroke_width=stroke_width,
     )
 
 
@@ -1413,6 +1430,7 @@ def _draw_scene_helper(
             "helper-camera" if kind == "camera" else "helper-light",
             color,
             padding=padding,
+            stroke_width=state.icon_stroke_width,
         )
     elif kind == "camera":
         _draw_camera_icon(draw, center, color, scale)
@@ -2299,6 +2317,7 @@ def _draw_output(size, state: ProbeState, scale: float) -> None:
             icon_drawer=lambda *values: _draw_concept_control_icon(
                 *values,
                 padding=padding,
+                stroke_width=state.icon_stroke_width,
             ),
         )
     try:
@@ -2486,6 +2505,7 @@ def _draw_camera_content(state: ProbeState) -> None:
                     lambda *values: _draw_concept_projection_icon(
                         *values,
                         padding=state.icon_padding_for("Panels"),
+                        stroke_width=state.icon_stroke_width,
                     )
                 )
                 if state.preview_icon_library
@@ -2770,6 +2790,7 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
                             "panel-down" if disclosure == "▾" else "panel-right",
                             CONCEPT_THEME.text,
                             padding=state.icon_padding_for("Panels"),
+                            stroke_width=state.icon_stroke_width,
                         )
                     else:
                         row_draw.fringed_concave_fill(
@@ -2832,6 +2853,7 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
                         "panel-visible" if state.hierarchy_visibility[index] else "panel-hidden",
                         color,
                         padding=state.icon_padding_for("Panels"),
+                        stroke_width=state.icon_stroke_width,
                     )
                 elif state.hierarchy_visibility[index]:
                     top = tuple(
@@ -3460,6 +3482,7 @@ def _geometry_values_text(state: ProbeState) -> str:
     values = (
         ("imgui_rounding", state.imgui_rounding),
         ("capsule_outline", repr(state.capsule_outline)),
+        ("icon_stroke", state.icon_stroke_width),
         ("icon_radius", state.overlay_icon_radius),
         ("radial_step", state.overlay_radial_step),
         ("center_step", state.overlay_center_step),
@@ -3596,6 +3619,7 @@ def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                         f"playback-{kind}",
                         CONCEPT_THEME.text,
                         padding=state.icon_padding_for("Viewport playback"),
+                        stroke_width=state.icon_stroke_width,
                     )
                 else:
                     draw_playback_glyph(
@@ -3617,6 +3641,7 @@ def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                         "tool-scale" if kind == "dimensions" else f"tool-{kind}",
                         CONCEPT_THEME.text,
                         padding=state.icon_padding_for("Viewport tools"),
+                        stroke_width=state.icon_stroke_width,
                     )
                 else:
                     draw_tool_glyph(
@@ -3809,6 +3834,19 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
             "Circular clearance from the candidate to its icon slot. Rotate and the reviewed "
             "Info/Warning/Error family remain fixed."
         )
+        _property_label("Glyph stroke")
+        _, state.icon_stroke_width = imgui.slider_float(
+            "##geometry-glyph-stroke",
+            state.icon_stroke_width,
+            ICON_MIN_STROKE,
+            ICON_MAX_STROKE,
+            "%.2f u",
+            imgui.SliderFlags_.always_clamp.value,
+        )
+        imgui.set_item_tooltip(
+            "Shared visual weight for ordinary strokes, chevrons, Reset arcs, and tool shafts. "
+            "Reviewed Pause, First/Last, severity, and mouse geometry remain locked."
+        )
         _property_label("Center step")
         state.overlay_center_step = _even_slider(
             "##geometry-center-step", state.overlay_center_step, 24, 52
@@ -3941,6 +3979,7 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         state.overlay_radial_step = int(OVERLAY_GEOMETRY.radial_step)
         state.icon_adjustment_group = "Viewport tools"
         state.icon_padding_by_group = dict(ICON_GROUP_LAYOUT_DEFAULTS)
+        state.icon_stroke_width = ICON_STROKE
         state.overlay_center_step = int(OVERLAY_GEOMETRY.center_step)
         state.tool_group_gap = int(OVERLAY_GEOMETRY.tool_group_gap)
         state.divider_width = int(OVERLAY_GEOMETRY.divider_width)
@@ -4140,6 +4179,7 @@ def _draw_concept_icon_specimen(
     scale: float,
     padding: float = ICON_DEFAULT_PADDING,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
+    stroke_width: float = ICON_STROKE,
 ) -> None:
     """Draw one candidate inside the shared circular placement boundary."""
 
@@ -4168,6 +4208,7 @@ def _draw_concept_icon_specimen(
             padding=padding,
             accent_color=(CONCEPT_THEME.primary if name.startswith("status-mouse-") else None),
             mouse_width=mouse_width,
+            stroke_width=stroke_width,
         )
     # Draw both placement guides last so a circular collision and a displaced
     # axis-aligned bounding box remain visible instead of hiding below the
@@ -4191,6 +4232,7 @@ def _icon_review_metrics(
     name: str,
     padding: float = ICON_DEFAULT_PADDING,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
+    stroke_width: float = ICON_STROKE,
 ) -> tuple[float, float, float, float, float]:
     """Return circle clearance plus enclosing-circle and box centers."""
 
@@ -4219,6 +4261,7 @@ def _icon_review_metrics(
         name,
         padding=padding,
         mouse_width=mouse_width,
+        stroke_width=stroke_width,
     )
     box_x, box_y = metrics.center_offset
     return (
@@ -4279,6 +4322,7 @@ def _draw_icon_library_overview(
                 scale,
                 padding,
                 state.concept_mouse_width(),
+                state.icon_stroke_width,
             )
             draw.centered_label(
                 label,
@@ -4299,6 +4343,7 @@ def _draw_context_row(
     detail: str,
     scale: float,
     padding: float,
+    stroke_width: float = ICON_STROKE,
     *,
     production_kind: str | None = None,
 ) -> None:
@@ -4348,6 +4393,7 @@ def _draw_context_row(
             icon_name,
             CONCEPT_THEME.text,
             padding=padding,
+            stroke_width=stroke_width,
         )
     else:
         _draw_command_icon(draw, icon_center, production_kind, CONCEPT_THEME.text, scale)
@@ -4421,6 +4467,7 @@ def _draw_icon_context_page(
             "key-snapshot",
             CONCEPT_THEME.text,
             padding=sample_padding,
+            stroke_width=state.icon_stroke_width,
         )
         draw.circle(
             center,
@@ -4456,6 +4503,7 @@ def _draw_icon_context_page(
         "production · 28 pt row / 16 pt slot",
         scale,
         padding,
+        state.icon_stroke_width,
         production_kind="key",
     )
     _draw_context_row(
@@ -4469,6 +4517,7 @@ def _draw_icon_context_page(
         "candidate · circle anchor",
         scale,
         padding,
+        state.icon_stroke_width,
     )
     helper_padding = state.icon_padding_for("Scene helpers")
     _draw_context_row(
@@ -4482,6 +4531,7 @@ def _draw_icon_context_page(
         "candidate · 26 pt hierarchy row",
         scale,
         helper_padding,
+        state.icon_stroke_width,
     )
     _draw_context_row(
         draw,
@@ -4494,6 +4544,7 @@ def _draw_icon_context_page(
         "candidate · 26 pt hierarchy row",
         scale,
         helper_padding,
+        state.icon_stroke_width,
     )
 
     note_y = second_y + 270.0 * scale
@@ -4517,6 +4568,7 @@ def _draw_icon_family_detail(
     scale: float,
     padding: float,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
+    stroke_width: float = ICON_STROKE,
 ) -> None:
     icons = icon_family(family)
     centers = tuple(origin[0] + offset * scale for offset in (330.0, 535.0, 765.0, 1085.0))
@@ -4561,14 +4613,17 @@ def _draw_icon_family_detail(
                 scale,
                 padding,
                 mouse_width,
+                stroke_width,
             )
 
         meta_x = origin[0] + 1160.0 * scale
         clearance, circle_x, circle_y, box_x, box_y = _icon_review_metrics(
-            name, padding, mouse_width
+            name, padding, mouse_width, stroke_width
         )
         anchor = icon_alignment_anchor(name)
-        anchor_x, anchor_y = icon_alignment_center(name, padding, mouse_width)
+        anchor_x, anchor_y = icon_alignment_center(
+            name, padding, mouse_width, stroke_width
+        )
         diagnostic_label, diagnostic_x, diagnostic_y = (
             ("box", box_x, box_y) if anchor == "circle" else ("circle", circle_x, circle_y)
         )
@@ -4659,7 +4714,11 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
         )
     ):
         anchor = icon_alignment_anchor(name)
-        anchor_center = icon_alignment_center(name, playback_padding)
+        anchor_center = icon_alignment_center(
+            name,
+            playback_padding,
+            stroke_width=state.icon_stroke_width,
+        )
         draw.text(
             (metrics_x, playback_y + (30.0 + index * 25.0) * scale),
             CONCEPT_THEME.text_disabled,
@@ -4696,6 +4755,7 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
                 name,
                 THEME.viewport.record if danger else color,
                 padding=playback_padding,
+                stroke_width=state.icon_stroke_width,
             )
 
         _circular_icon_button(
@@ -4772,7 +4832,7 @@ def _draw_icon_library_page(
         CONCEPT_THEME.text_disabled,
         "Candidate vectors · 24-unit circular placement bound",
     )
-    controls_x = x0 + max(620.0 * scale, available_width - 710.0 * scale)
+    controls_x = x0 + max(450.0 * scale, available_width - 940.0 * scale)
     draw.text(
         (controls_x, y0 + 17.0 * scale),
         CONCEPT_THEME.text_disabled,
@@ -4808,8 +4868,30 @@ def _draw_icon_library_page(
         "Circular clearance between candidate geometry and the orange placement circle. "
         "Rotate and the reviewed Info/Warning/Error family remain locked."
     )
+    stroke_x = controls_x + 488.0 * scale
+    draw.text(
+        (stroke_x, y0 + 17.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "Glyph stroke",
+    )
+    imgui.set_cursor_screen_pos(
+        imgui.ImVec2(float(stroke_x + 90.0 * scale), float(y0 + 8.0 * scale))
+    )
+    imgui.set_next_item_width(122.0 * scale)
+    _, state.icon_stroke_width = imgui.slider_float(
+        "##icon-library-stroke",
+        state.icon_stroke_width,
+        ICON_MIN_STROKE,
+        ICON_MAX_STROKE,
+        "%.2f u",
+        imgui.SliderFlags_.always_clamp.value,
+    )
+    imgui.set_item_tooltip(
+        "One final visual weight for ordinary strokes, chevrons, Reset arcs, and tool shafts. "
+        "Reviewed Pause, First/Last, severity, and mouse geometry stay unchanged."
+    )
     if group == "Status & input":
-        mouse_x = controls_x + 488.0 * scale
+        mouse_x = controls_x + 718.0 * scale
         draw.text(
             (mouse_x, y0 + 17.0 * scale),
             CONCEPT_THEME.text_disabled,
@@ -4854,6 +4936,7 @@ def _draw_icon_library_page(
             scale,
             padding,
             state.concept_mouse_width(),
+            state.icon_stroke_width,
         )
 
 
@@ -5449,6 +5532,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                     "helper-camera",
                     CONCEPT_THEME.text,
                     padding=padding,
+                    stroke_width=state.icon_stroke_width,
                 )
                 draw_concept_icon(
                     draw,
@@ -5457,6 +5541,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                     "helper-light",
                     CONCEPT_THEME.text,
                     padding=padding,
+                    stroke_width=state.icon_stroke_width,
                 )
             else:
                 _draw_camera_icon(draw, center, CONCEPT_THEME.text, scale * icon_scale)
@@ -5776,6 +5861,7 @@ def render(
     initial_rotate_gap_ratio: float | None = None,
     initial_playback_zoom: float | None = None,
     initial_icon_padding: float | None = None,
+    initial_icon_stroke: float | None = None,
     redesign_language: str = "en",
     redesign_section: str = "Overview",
     capsule_outline: str = "Soft white",
@@ -5831,6 +5917,8 @@ def render(
         state.icon_adjustment_group = initial_adjustment_group
         if initial_icon_padding is not None:
             state.set_icon_padding_for(initial_adjustment_group, initial_icon_padding)
+        if initial_icon_stroke is not None:
+            state.icon_stroke_width = initial_icon_stroke
         if interactive:
             window.show()
             frame_period = 1.0 / interactive_fps
@@ -5958,6 +6046,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--icon-stroke",
+        type=float,
+        default=None,
+        help=(
+            f"Initial shared Icon Library stroke, from {ICON_MIN_STROKE:g} "
+            f"to {ICON_MAX_STROKE:g} grid units"
+        ),
+    )
+    parser.add_argument(
         "--interactive",
         action="store_true",
         help="Open a real ImGui window and run until it is closed",
@@ -6003,6 +6100,13 @@ def main() -> None:
         parser.error(
             f"--icon-padding must be between {ICON_MIN_CLEARANCE:g} and {ICON_MAX_PADDING:g}"
         )
+    if (
+        args.icon_stroke is not None
+        and not ICON_MIN_STROKE <= args.icon_stroke <= ICON_MAX_STROKE
+    ):
+        parser.error(
+            f"--icon-stroke must be between {ICON_MIN_STROKE:g} and {ICON_MAX_STROKE:g}"
+        )
     if not 0.75 <= args.ui_scale <= 4.0:
         parser.error("--ui-scale must be between 0.75 and 4.0")
     if not 15.0 <= args.fps <= 240.0:
@@ -6038,6 +6142,7 @@ def main() -> None:
         initial_rotate_gap_ratio=args.rotate_gap_ratio,
         initial_playback_zoom=args.playback_zoom,
         initial_icon_padding=args.icon_padding,
+        initial_icon_stroke=args.icon_stroke,
         redesign_language=args.redesign_language,
         redesign_section=args.redesign_section.title(),
         capsule_outline=args.capsule_outline.replace("-", " ").capitalize(),

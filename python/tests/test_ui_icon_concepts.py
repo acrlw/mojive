@@ -13,11 +13,13 @@ from design.tools.ui_icon_concepts import (
     ICON_GROUP_LAYOUT_DEFAULTS,
     ICON_LAYOUT_REFERENCES,
     ICON_MAX_PADDING,
+    ICON_MAX_STROKE,
     ICON_MIN_CLEARANCE,
-    ICON_PADDING_BIAS,
+    ICON_MIN_STROKE,
     ICON_STROKE,
     MORE_ARM_RATIO,
     RESET_RING_CENTER,
+    REVIEW_LOCKED_PADDING,
     RING_CENTERED_ICONS,
     ROTATE_FRAME_STROKE_OVERSHOOT,
     STATUS_MOUSE_DEFAULT_WIDTH,
@@ -182,6 +184,7 @@ def _render(
     *,
     padding: float | None = None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
+    stroke_width: float = ICON_STROKE,
 ) -> _RecordingDraw:
     draw = _RecordingDraw()
     draw_concept_icon(
@@ -192,6 +195,7 @@ def _render(
         (1.0, 1.0, 1.0, 1.0),
         padding=padding,
         mouse_width=mouse_width,
+        stroke_width=stroke_width,
     )
     return draw
 
@@ -242,7 +246,9 @@ def test_default_layout_fits_candidates_to_the_reference_family_padding(name: st
     expected = (
         -ROTATE_FRAME_STROKE_OVERSHOOT
         if name == "tool-rotate"
-        else ICON_GROUP_LAYOUT_DEFAULTS[group] + ICON_PADDING_BIAS.get(name, 0.0)
+        else REVIEW_LOCKED_PADDING
+        if name in icon_concepts.REVIEW_LOCKED_ICONS
+        else ICON_GROUP_LAYOUT_DEFAULTS[group]
     )
     assert icon_metrics(name).circular_clearance == pytest.approx(expected, abs=1e-5)
 
@@ -251,7 +257,12 @@ def test_component_groups_own_independent_candidate_names_and_layout_defaults() 
     assert icon_component_group("playback-play") == "Viewport playback"
     assert icon_component_group("transport-play") == "Keyframe transport"
     assert ICON_GROUP_LAYOUT_DEFAULTS["Viewport tools"] == 0.5
-    assert ICON_GROUP_LAYOUT_DEFAULTS["Viewport playback"] == ICON_DEFAULT_PADDING
+    assert ICON_DEFAULT_PADDING == 2.0
+    assert all(
+        padding == ICON_DEFAULT_PADDING
+        for group, padding in ICON_GROUP_LAYOUT_DEFAULTS.items()
+        if group != "Viewport tools"
+    )
 
 
 def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
@@ -310,7 +321,12 @@ def test_icon_padding_control_sets_the_circular_clearance(padding: float) -> Non
 @pytest.mark.parametrize("name", ("status-info", "status-warning", "status-error"))
 def test_reviewed_severity_geometry_ignores_candidate_layout_controls(name: str) -> None:
     baseline = _render(name, ICON_GRID)
-    adjusted = _render(name, ICON_GRID, padding=ICON_MAX_PADDING)
+    adjusted = _render(
+        name,
+        ICON_GRID,
+        padding=ICON_MAX_PADDING,
+        stroke_width=ICON_MAX_STROKE,
+    )
 
     assert adjusted.__dict__ == baseline.__dict__
 
@@ -351,10 +367,66 @@ def test_main_stroked_candidates_share_the_canonical_visible_weight(name: str) -
     assert max(draw.widths) == pytest.approx(ICON_STROKE, abs=1e-6)
 
 
+@pytest.mark.parametrize("stroke_width", (ICON_MIN_STROKE, ICON_STROKE, ICON_MAX_STROKE))
+def test_configurable_strokes_keep_the_requested_final_visible_weight(
+    stroke_width: float,
+) -> None:
+    draw = _render("tool-world", ICON_GRID, stroke_width=stroke_width)
+
+    assert draw.widths
+    assert max(draw.widths) == pytest.approx(stroke_width, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("name", "expected_width"),
+    (
+        ("playback-pause", 3.5),
+        ("transport-pause", 3.5),
+        ("transport-first", 1.5),
+        ("transport-last", 1.5),
+    ),
+)
+def test_reviewed_transport_bars_keep_their_authored_width(
+    name: str, expected_width: float
+) -> None:
+    draw = _RecordingDraw()
+    icon_concepts._draw_concept_icon_raw(
+        draw,
+        (0.0, 0.0),
+        ICON_GRID,
+        name,
+        (1.0, 1.0, 1.0, 1.0),
+        stroke_width=ICON_MAX_STROKE,
+    )
+    bars = draw.filled_paths if name.endswith("pause") else draw.filled_paths[1:]
+
+    assert bars
+    for bar in bars:
+        width = max(x for x, _y in bar) - min(x for x, _y in bar)
+        assert width == pytest.approx(expected_width, abs=1e-6)
+
+
+@pytest.mark.parametrize("name", ("playback-reset", "transport-reset"))
+@pytest.mark.parametrize("stroke_width", (ICON_MIN_STROKE, ICON_STROKE, ICON_MAX_STROKE))
+def test_reset_arc_uses_the_shared_visible_stroke(name: str, stroke_width: float) -> None:
+    draw = _render(name, ICON_GRID, stroke_width=stroke_width)
+    outline = draw.filled_paths[0]
+    outer_radius = math.hypot(*outline[0])
+    inner_radius = math.hypot(*outline[-1])
+
+    assert outer_radius - inner_radius == pytest.approx(stroke_width, abs=1e-6)
+
+
 @pytest.mark.parametrize("padding", (ICON_MIN_CLEARANCE - 0.01, ICON_MAX_PADDING + 0.01))
 def test_icon_padding_rejects_values_outside_the_review_range(padding: float) -> None:
     with pytest.raises(ValueError, match="icon padding"):
         _render("panel-right", ICON_GRID, padding=padding)
+
+
+@pytest.mark.parametrize("stroke_width", (ICON_MIN_STROKE - 0.01, ICON_MAX_STROKE + 0.01))
+def test_icon_stroke_rejects_values_outside_the_review_range(stroke_width: float) -> None:
+    with pytest.raises(ValueError, match="icon stroke"):
+        _render("panel-right", ICON_GRID, stroke_width=stroke_width)
 
 
 @pytest.mark.parametrize("name", _icons())
@@ -663,26 +735,14 @@ def test_transport_contours_do_not_use_raw_stroked_corners(name: str) -> None:
     assert all(len(path) > 4 for path in draw.filled_paths)
 
 
-def test_viewport_playback_chevrons_do_not_outgrow_play_or_pause() -> None:
-    heights = {
-        name: icon_metrics(name).bounds[3] - icon_metrics(name).bounds[1]
-        for name in ("playback-previous", "playback-play", "playback-pause", "playback-next")
-    }
+@pytest.mark.parametrize("prefix", ("playback", "transport"))
+def test_directional_playback_marks_share_the_component_padding(prefix: str) -> None:
+    clearances = tuple(
+        icon_metrics(f"{prefix}-{kind}").circular_clearance
+        for kind in ("previous", "play", "pause", "next")
+    )
 
-    reference = max(heights["playback-play"], heights["playback-pause"])
-    assert heights["playback-previous"] <= reference
-    assert heights["playback-next"] <= reference
-
-
-def test_keyframe_transport_chevrons_do_not_outgrow_play_or_pause() -> None:
-    heights = {
-        name: icon_metrics(name).bounds[3] - icon_metrics(name).bounds[1]
-        for name in ("transport-previous", "transport-play", "transport-pause", "transport-next")
-    }
-
-    reference = max(heights["transport-play"], heights["transport-pause"])
-    assert heights["transport-previous"] <= reference
-    assert heights["transport-next"] <= reference
+    assert clearances == pytest.approx((ICON_DEFAULT_PADDING,) * 4, abs=1e-5)
 
 
 @pytest.mark.parametrize("prefix", ("playback", "transport"))
@@ -717,6 +777,14 @@ def test_status_mouse_width_is_adjustable_without_moving_its_center() -> None:
 
 def test_status_mouse_accepts_the_complete_interactive_slider_range() -> None:
     assert icon_metrics("status-mouse-left", mouse_width=24.0).bounds[0] < 0.0
+
+
+@pytest.mark.parametrize("name", ("status-mouse-left", "status-mouse-right", "status-mouse-wheel"))
+def test_original_mouse_geometry_ignores_the_shared_stroke_control(name: str) -> None:
+    thin = _render(name, ICON_GRID, stroke_width=ICON_MIN_STROKE)
+    heavy = _render(name, ICON_GRID, stroke_width=ICON_MAX_STROKE)
+
+    assert heavy.__dict__ == thin.__dict__
 
 
 @pytest.mark.parametrize("name", tuple(sorted(RING_CENTERED_ICONS)))

@@ -103,8 +103,9 @@ def test_geometry_export_names_production_overlay_fields():
     values = probe._geometry_values_text(probe.ProbeState())
 
     assert "icon_radius=10," in values
+    assert f"icon_stroke={probe.ICON_STROKE}," in values
     assert "icon_padding_viewport_tools=0.5," in values
-    assert "icon_padding_viewport_playback=0.75," in values
+    assert "icon_padding_viewport_playback=2.0," in values
     assert "tool_stroke=" in values
     assert "hint_mouse_wheel_gap_ratio=" in values
 
@@ -119,9 +120,13 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.selection_padding == probe.DEFAULT_SELECTION_PADDING
     assert state.corner_radius == probe.OUTLINE_CORNER_RADIUS_PT
     assert not state.preview_icon_library
+    assert state.icon_stroke_width == probe.ICON_STROKE
     assert state.icon_padding_for("Viewport tools") == 0.5
-    assert state.icon_padding_for("Viewport playback") == probe.ICON_DEFAULT_PADDING
-    assert state.icon_padding_for("Keyframe transport") == probe.ICON_DEFAULT_PADDING
+    assert all(
+        state.icon_padding_for(group) == 2.0
+        for group in probe.ICON_GROUP_LAYOUT_DEFAULTS
+        if group != "Viewport tools"
+    )
 
 
 def test_icon_layout_controls_are_stored_per_actual_component_group() -> None:
@@ -205,6 +210,7 @@ def test_status_mouse_family_specimen_uses_original_control_color(monkeypatch) -
 
     assert calls[0][0][4] == probe.CONCEPT_THEME.text
     assert calls[0][1]["accent_color"] == probe.CONCEPT_THEME.primary
+    assert calls[0][1]["stroke_width"] == probe.ICON_STROKE
 
 
 def test_icon_specimen_square_matches_orange_circle_diameter(monkeypatch) -> None:
@@ -259,6 +265,28 @@ def test_keyframe_context_preview_uses_icon_library_candidates(monkeypatch, kind
 
     assert calls[0][0][3] == expected
     assert calls[0][1]["padding"] == probe.ICON_DEFAULT_PADDING
+    assert calls[0][1]["stroke_width"] == probe.ICON_STROKE
+
+
+def test_keyframe_context_preview_uses_the_live_shared_stroke(monkeypatch):
+    calls = []
+    state = probe.ProbeState(icon_stroke_width=2.1)
+    monkeypatch.setattr(
+        probe,
+        "draw_concept_icon",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    probe._draw_icon_library_command_icon(
+        None,
+        (10.0, 20.0),
+        "previous",
+        (1, 1, 1, 1),
+        1.0,
+        state=state,
+    )
+
+    assert calls[0][1]["stroke_width"] == 2.1
 
 
 def test_icon_library_reuses_production_output_severity_painter(monkeypatch):

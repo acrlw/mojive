@@ -40,10 +40,10 @@ from mojive.ui.viewport_widgets import reset_glyph_path as reset_glyph_path
 
 if __package__:
     from .ui_capsule_geometry import capsule_layout, draw_capsule_shell
-    from .ui_icon_concepts import ICON_DEFAULT_PADDING, draw_concept_icon
+    from .ui_icon_concepts import ICON_DEFAULT_PADDING, ICON_STROKE, draw_concept_icon
 else:
     from ui_capsule_geometry import capsule_layout, draw_capsule_shell
-    from ui_icon_concepts import ICON_DEFAULT_PADDING, draw_concept_icon
+    from ui_icon_concepts import ICON_DEFAULT_PADDING, ICON_STROKE, draw_concept_icon
 
 # Match the stop square's nominal area for comparable visual weight across recording states.
 RECORD_GLYPH_RADIUS = 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_RESET_SCALE / sqrt(pi)
@@ -324,6 +324,7 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                     padding = geometry.icon_padding_for(group)
                 else:
                     padding = getattr(geometry, "icon_padding", ICON_DEFAULT_PADDING)
+                stroke_width = getattr(geometry, "icon_stroke_width", ICON_STROKE)
                 draw_concept_icon(
                     target,
                     center,
@@ -331,6 +332,7 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                     concept_name,
                     color,
                     padding=padding,
+                    stroke_width=stroke_width,
                 )
             elif vertical:
                 draw_tool_glyph(
