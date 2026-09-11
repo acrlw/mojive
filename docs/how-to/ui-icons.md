@@ -59,12 +59,13 @@ change their geometry, size, or placement. Detail rows report `pad`, the declare
 `0.00, 0.00`, and either the axis-aligned box or minimum enclosing circle as a secondary diagnostic.
 
 Viewport Playback Play is an equilateral G3 triangle. Previous and Next retain their original
-90-degree chevrons, while Pause retains its original twin bars. Playback More and Keyframe Transport
-More call the same contour with the same size parameters. Each specimen also draws a neutral square
-whose width and height equal the orange circle's diameter, exposing the shared slot center at 14,
-24, 56, and 112 points. Playback and Keyframe Transport Record use the same explicit smaller scale
-so their visible diameter stays slightly below the corresponding Stop width. Keyframe Transport
-First and Last make their bar exactly as tall as the final rounded triangle.
+90-degree chevrons, while Pause retains its original twin bars. Both More names call one contour:
+rotate Previous counterclockwise by 90 degrees, shorten its arms to 94 percent, and keep the source
+stroke plus each component's Previous layout scale. Each specimen also draws a neutral square whose
+width and height equal the orange circle's diameter, exposing the shared slot center at 14, 24, 56,
+and 112 points. Playback and Keyframe Transport Record have a measured visible width of 98 percent
+of the corresponding Stop width. Keyframe Transport First and Last make their bar exactly as tall
+as the final rounded triangle.
 
 Use circular containment in addition to rectangular canvas containment. A camera body can fit inside
 a 24-by-24 square while its stroked corner still crosses a 24-unit circle. Likewise, a centered
@@ -124,6 +125,8 @@ keyframe diamonds. A small radius still removes the curvature discontinuity at a
 tip; review the 112-point specimen to catch a raw polygon that looks acceptable only at 14 points.
 Build open transport chevrons as one filled ribbon and smooth its outer cap, inner join, and tip as a
 single contour. Use G3 rectangle paths for Pause, Stop, and skip bars instead of backend rounding.
+Build each Keyframe Fit corner the same way, and keep Follow's shaft and head in one arrow mesh with
+a round tail.
 Snap reuses `_snap_glyph_shape` with `CAPSULE_SMOOTHING`, so its U-turn has the same G3 continuity as
 the viewport capsule instead of combining straight stems with a conventional semicircle. Its two
 reviewed endpoint blocks cover the stroke caps and use G3-smoothed corners; preserve both blocks
@@ -215,11 +218,12 @@ edge of the frame is about 4.58 grid units on each side.
 | Scale shafts merge into the center dot | A copied three-axis sketch omitted the established transparent center shell | Start all three concept shafts outside the dot's circular clearance radius and verify the visible gap |
 | Rotate is mistaken for Reset or Refresh | Both use a circular-arrow structure | Use the three-axis Tool Column rotation rings and reserve the single arrow loop for Reset |
 | Rotate is clean in a large Pillow export but breaks in the live ImGui UI | Ear clipping runs after narrow concave contours are translated to large screen coordinates and loses precision | Triangulate the contour around its local origin, then translate the completed mesh during submission; verify the actual target-size ImGui capture |
-| Rotate's inner rings look thicker and their gaps close only at small sizes | A fixed one-pixel fill fringe is larger than the proportionally scaled stroke and knockout gap | Submit all four rings through one filled-mesh path and scale their shared fringe against the rendered gap until the normal one-pixel fringe fits |
+| Rotate has visibly different stair stepping from neighboring small glyphs | A custom subpixel fill fringe replaced the established production AA paths | Use ImGui's antialiased circle stroke for the outer ring and the standard one-pixel filled-contour fringe for the local inner rings |
 | A concept experiment changes an established Tool Column icon | Candidate geometry was placed in the production painter | Keep Move, Rotate, and Scale candidate contours in the Icon Library and leave `viewport_widgets.py` untouched |
 | A triangle looks rounded only in the thumbnail | The preview hid a raw three-point polygon or an undersized corner profile | Inspect the native 112-point contour and require more than three authored boundary points |
-| Playback and Transport More do not match | Separate painters or size adjustments have drifted | Route both names through the same completed contour and padding contract |
-| Directional edge marks drift toward their open side | A minimum enclosing circle was used for a silhouette whose opposing terminals define the layout | Center the completed visible box for Previous, Next, More, First, and Last |
+| Playback and Transport More do not match | Separate painters or size adjustments have drifted | Rotate the shared Previous construction and reuse the corresponding Previous layout scale |
+| Directional edge marks drift toward their open side | A minimum enclosing circle was used for a silhouette whose opposing terminals define the layout | Center the completed visible box for Previous, Next, More, First, Last, Panel Right, and Panel Down |
+| Mouse Wheel has a smaller shell than Left and Right | Each state was independently fitted even though production uses one shell size | Fit all three states from the Left outer-shell master and preserve the adjustable source width |
 | Snap looks like a generic U or loses its endpoint blocks | Its stems and semicircle were authored as unrelated primitives, or the probe copied only the centerline | Reuse the production G3 snap path with `CAPSULE_SMOOTHING` and retain both G3 endpoint blocks |
 | Snap sits low despite symmetric endpoints | Its open U was centered by a circle unrelated to its visible terminals | Center the complete visible box while preserving the production G3 contour |
 | Reset's ring drifts behind its arrowhead | The complete arrow silhouette was centered instead of the circular body | Place the authored ring center on the slot and let the arrowhead extend naturally |
