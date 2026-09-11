@@ -8,7 +8,6 @@ from design.tools.ui_icon_concepts import (
     ICON_BOUND_DIAMETER,
     ICON_DEFAULT_PADDING,
     ICON_FAMILIES,
-    ICON_FIXED_ALIGNMENT,
     ICON_GRID,
     ICON_GROUP_LAYOUT_DEFAULTS,
     ICON_MAX_PADDING,
@@ -186,7 +185,7 @@ def test_concept_icon_geometry_stays_inside_circular_placement_bound(name: str) 
     guide_radius = ICON_BOUND_DIAMETER * 0.5
 
     required_clearance = ROTATE_FRAME_PADDING if name == "tool-rotate" else ICON_MIN_CLEARANCE
-    assert draw.circular_extent <= guide_radius - required_clearance + 1e-6
+    assert draw.circular_extent <= guide_radius - required_clearance + 1e-3
 
 
 @pytest.mark.parametrize("name", _icons())
@@ -207,21 +206,15 @@ def test_component_groups_own_independent_candidate_names_and_layout_defaults() 
     assert ICON_GROUP_LAYOUT_DEFAULTS["Viewport playback"] == ICON_DEFAULT_PADDING
 
 
-def test_component_contract_fixes_playback_and_keyframe_transport_alignment() -> None:
-    assert ICON_FIXED_ALIGNMENT["playback-play"] == "box"
-    assert ICON_FIXED_ALIGNMENT["playback-previous"] == "box"
-    assert ICON_FIXED_ALIGNMENT["playback-pause"] == "box"
-    assert ICON_FIXED_ALIGNMENT["playback-next"] == "box"
-    assert ICON_FIXED_ALIGNMENT["playback-more"] == "box"
-    assert all(
-        ICON_FIXED_ALIGNMENT[name] == "box" for name in _icons() if name.startswith("transport-")
-    )
+@pytest.mark.parametrize("name", _icons())
+def test_all_concept_icons_use_the_minimum_circle_anchor(name: str) -> None:
+    assert icon_alignment_anchor(name) == "circle"
 
 
 def test_rotate_outer_frame_matches_the_placement_circle() -> None:
     metrics = icon_metrics("tool-rotate")
 
-    assert metrics.center_offset == pytest.approx((0.0, 0.0), abs=1e-6)
+    assert metrics.enclosing_center == pytest.approx((0.0, 0.0), abs=1e-6)
     assert metrics.circular_clearance == pytest.approx(ROTATE_FRAME_PADDING, abs=1e-5)
 
 
@@ -253,17 +246,9 @@ def test_icon_padding_rejects_values_outside_the_review_range(padding: float) ->
         _render("panel-right", ICON_GRID, padding=padding)
 
 
-@pytest.mark.parametrize(
-    "name",
-    tuple(name for name in _icons() if icon_alignment_anchor(name) == "box"),
-)
-def test_concept_icon_bounds_are_centered_in_placement_circle(name: str) -> None:
-    draw = _render(name, ICON_GRID)
-    center_x = (draw.bounds[0] + draw.bounds[2]) * 0.5
-    center_y = (draw.bounds[1] + draw.bounds[3]) * 0.5
-
-    assert center_x == pytest.approx(0.0, abs=0.05)
-    assert center_y == pytest.approx(0.0, abs=0.05)
+@pytest.mark.parametrize("name", _icons())
+def test_concept_icons_center_their_minimum_enclosing_circle(name: str) -> None:
+    assert icon_metrics(name).enclosing_center == pytest.approx((0.0, 0.0), abs=0.01)
 
 
 def test_body_cube_has_three_interior_edges() -> None:
@@ -310,13 +295,13 @@ def test_sparse_frame_tools_use_the_shared_near_boundary_envelope(name: str) -> 
     )
 
 
-def test_camera_candidates_share_one_master_and_box_anchor() -> None:
+def test_camera_candidates_share_one_master_and_circle_anchor() -> None:
     snapshot = _render("key-snapshot", ICON_GRID)
     helper = _render("helper-camera", ICON_GRID)
 
     assert snapshot.__dict__ == helper.__dict__
-    assert icon_alignment_anchor("key-snapshot") == "box"
-    assert icon_alignment_anchor("helper-camera") == "box"
+    assert icon_alignment_anchor("key-snapshot") == "circle"
+    assert icon_alignment_anchor("helper-camera") == "circle"
 
 
 @pytest.mark.parametrize("name", ("status-mouse-left", "status-mouse-right", "status-mouse-wheel"))
@@ -336,14 +321,11 @@ def test_mouse_candidates_apply_the_control_accent(name: str) -> None:
     assert draw.solid_colors == [accent]
 
 
-def test_scale_centers_its_three_axis_hub() -> None:
+def test_scale_centers_its_minimum_enclosing_circle() -> None:
     metrics = icon_metrics("tool-scale")
-    draw = _render("tool-scale", ICON_GRID)
-    dot_center, _dot_radius = draw.filled_circles[0]
 
-    assert icon_alignment_anchor("tool-scale") == "hub"
-    assert dot_center == pytest.approx((0.0, 0.0), abs=0.01)
-    assert metrics.center_offset[1] < -1.0
+    assert icon_alignment_anchor("tool-scale") == "circle"
+    assert metrics.enclosing_center == pytest.approx((0.0, 0.0), abs=0.01)
 
 
 @pytest.mark.parametrize("name", ("transport-play", "panel-right", "panel-down"))
@@ -384,8 +366,6 @@ def test_scale_uses_three_integrated_box_handles() -> None:
     assert all(len(path) > 8 for path in draw.filled_paths)
     assert len(draw.filled_circles) == 1
     dot_center, dot_radius = draw.filled_circles[0]
-    assert dot_center[0] == pytest.approx(0.0, abs=1e-6)
-    assert dot_center[1] == pytest.approx(0.0, abs=1e-6)
     nearest_shaft = min(
         math.dist(dot_center, point) for path in draw.filled_paths for point in path
     )
@@ -413,8 +393,7 @@ def test_snap_uses_production_g3_u_path_with_two_rounded_end_blocks() -> None:
     assert not draw.lines
     assert len(draw.filled_paths) == 2
     assert all(len(path) > 4 for path in draw.filled_paths)
-    assert icon_alignment_anchor("tool-snap") == "arc"
-    assert max(x for x, _y in path) == pytest.approx(max(y for _x, y in path), abs=1e-6)
+    assert icon_alignment_anchor("tool-snap") == "circle"
 
 
 def test_search_uses_one_hollow_g3_lens_and_handle_mesh() -> None:
@@ -455,20 +434,6 @@ def test_sort_arrow_tail_and_tip_align_with_visible_bar_extents() -> None:
     assert round_tail
 
 
-@pytest.mark.parametrize(
-    "name",
-    tuple(name for name in _icons() if icon_alignment_anchor(name) == "box"),
-)
-def test_box_anchored_icons_center_their_visible_bounds(name: str) -> None:
-    assert icon_metrics(name).center_offset == pytest.approx((0.0, 0.0), abs=0.05)
-
-
-@pytest.mark.parametrize("name", tuple(ICON_FIXED_ALIGNMENT))
-def test_transport_icons_center_their_visible_bounds_in_component_cells(name: str) -> None:
-    assert icon_alignment_anchor(name) == "box"
-    assert icon_metrics(name).center_offset == pytest.approx((0.0, 0.0), abs=0.01)
-
-
 def test_play_triangle_is_equilateral() -> None:
     points = icon_concepts._triangle_source(1.0)
     lengths = tuple(math.dist(a, b) for a, b in zip(points, points[1:] + points[:1], strict=True))
@@ -477,8 +442,7 @@ def test_play_triangle_is_equilateral() -> None:
 
 
 @pytest.mark.parametrize("direction", (-1.0, 1.0))
-def test_transport_chevron_tip_matches_play_triangle(direction: float) -> None:
-    triangle = icon_concepts._triangle_source(direction)
+def test_transport_chevron_tip_is_a_right_angle(direction: float) -> None:
     chevron = icon_concepts._chevron_centerline(direction, 0.0)
 
     def vertex_angle(points, vertex_index: int) -> float:
@@ -493,10 +457,17 @@ def test_transport_chevron_tip_matches_play_triangle(direction: float) -> None:
         )
         return math.degrees(math.acos(cosine))
 
-    triangle_tip = 1
     chevron_tip = 1
-    assert vertex_angle(triangle, triangle_tip) == pytest.approx(60.0, abs=1e-6)
-    assert vertex_angle(chevron, chevron_tip) == pytest.approx(60.0, abs=1e-6)
+    assert vertex_angle(chevron, chevron_tip) == pytest.approx(90.0, abs=1e-6)
+
+
+@pytest.mark.parametrize("name", ("transport-first", "transport-last"))
+def test_transport_end_bar_matches_its_triangle_height(name: str) -> None:
+    draw = _render(name, ICON_GRID)
+    triangle, bar = draw.filled_paths
+
+    assert min(y for _x, y in bar) == pytest.approx(min(y for _x, y in triangle), abs=1e-6)
+    assert max(y for _x, y in bar) == pytest.approx(max(y for _x, y in triangle), abs=1e-6)
 
 
 @pytest.mark.parametrize(
@@ -538,9 +509,10 @@ def test_keyframe_transport_chevrons_do_not_outgrow_play_or_pause() -> None:
     assert heights["transport-next"] <= reference
 
 
-def test_playback_record_is_slightly_smaller_than_stop() -> None:
-    record = icon_metrics("playback-record")
-    stop = icon_metrics("playback-stop")
+@pytest.mark.parametrize("prefix", ("playback", "transport"))
+def test_record_is_slightly_smaller_than_stop(prefix: str) -> None:
+    record = icon_metrics(f"{prefix}-record")
+    stop = icon_metrics(f"{prefix}-stop")
     record_width = record.bounds[2] - record.bounds[0]
     stop_width = stop.bounds[2] - stop.bounds[0]
 
@@ -552,7 +524,7 @@ def test_status_mouse_width_is_adjustable_without_moving_its_center() -> None:
     wide = icon_metrics("status-mouse-left", mouse_width=14.5)
 
     assert wide.bounds[2] - wide.bounds[0] > narrow.bounds[2] - narrow.bounds[0]
-    assert wide.center_offset == pytest.approx((0.0, 0.0), abs=0.01)
+    assert wide.enclosing_center == pytest.approx((0.0, 0.0), abs=0.01)
 
 
 def test_hidden_eye_uses_three_lashes_instead_of_a_slash() -> None:

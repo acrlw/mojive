@@ -38,10 +38,10 @@ if __package__:
         ICON_MIN_CLEARANCE,
         STATUS_MOUSE_DEFAULT_WIDTH,
         draw_concept_icon,
-        icon_alignment_anchor,
         icon_component_group,
         icon_family,
         icon_metrics,
+        minimum_enclosing_circle,
     )
     from .ui_redesign import (
         RECORD_GLYPH_RADIUS,
@@ -75,10 +75,10 @@ else:
         ICON_MIN_CLEARANCE,
         STATUS_MOUSE_DEFAULT_WIDTH,
         draw_concept_icon,
-        icon_alignment_anchor,
         icon_component_group,
         icon_family,
         icon_metrics,
+        minimum_enclosing_circle,
     )
     from ui_redesign import (
         RECORD_GLYPH_RADIUS,
@@ -4253,8 +4253,8 @@ def _icon_review_metrics(
     name: str,
     padding: float = ICON_DEFAULT_PADDING,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
-) -> tuple[float, float, float]:
-    """Return circular clearance and the visible-box center on the 24-unit grid."""
+) -> tuple[float, float, float, float, float]:
+    """Return circle clearance plus enclosing-circle and box centers."""
 
     if name.startswith("status-") and name.removeprefix("status-") in {
         "info",
@@ -4269,9 +4269,11 @@ def _icon_review_metrics(
             float(points[:, 0].max()),
             float(points[:, 1].max()),
         )
-        circular_extent = float(np.linalg.norm(points, axis=1).max())
+        enclosing_center, enclosing_radius = minimum_enclosing_circle(points)
         return (
-            ICON_BOUND_DIAMETER * 0.5 - circular_extent,
+            ICON_BOUND_DIAMETER * 0.5 - enclosing_radius,
+            enclosing_center[0],
+            enclosing_center[1],
             (bounds[0] + bounds[2]) * 0.5,
             (bounds[1] + bounds[3]) * 0.5,
         )
@@ -4280,8 +4282,14 @@ def _icon_review_metrics(
         padding=padding,
         mouse_width=mouse_width,
     )
-    offset_x, offset_y = metrics.center_offset
-    return metrics.circular_clearance, offset_x, offset_y
+    box_x, box_y = metrics.center_offset
+    return (
+        metrics.circular_clearance,
+        metrics.enclosing_center[0],
+        metrics.enclosing_center[1],
+        box_x,
+        box_y,
+    )
 
 
 def _draw_icon_library_overview(
@@ -4455,12 +4463,12 @@ def _draw_icon_context_page(
     draw.text(
         (x0 + 10.0 * scale, first_y + 14.0 * scale),
         CONCEPT_THEME.text,
-        "Camera master · one geometric center",
+        "Camera master · one minimum enclosing-circle center",
     )
     draw.text(
         (x0 + 10.0 * scale, first_y + 38.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "key-snapshot and helper-camera call the same contour and use the same visible-box center.",
+        "key-snapshot and helper-camera call the same contour and use the same circle center.",
     )
     samples = (
         ("Keyframes", state.icon_padding_for("Keyframes")),
@@ -4520,7 +4528,7 @@ def _draw_icon_context_page(
         16.0,
         "key-snapshot",
         "Capture snapshot",
-        "candidate · box anchor",
+        "candidate · circle anchor",
         scale,
         padding,
     )
@@ -4555,12 +4563,12 @@ def _draw_icon_context_page(
     draw.text(
         (x0, note_y + 24.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "First align the slot center to the H cap-height center and text baseline. Add a small explicit offset only when the rendered row still looks unbalanced.",
+        "First align the slot center to the H cap-height center and text baseline, then center the glyph's minimum enclosing circle.",
     )
     draw.text(
         (x0, note_y + 48.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Placement uses fixed geometry only: visible-box center or the documented Snap, Scale, and Rotate semantic center.",
+        "Every Icon Library glyph uses the same minimum enclosing-circle placement rule.",
     )
 
 
@@ -4579,7 +4587,7 @@ def _draw_icon_family_detail(
     draw.text(
         (origin[0], header_y + 24.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Orange circle and gray square share one center · box center · Snap arc · Scale hub",
+        "Orange circle and gray square share one center · minimum enclosing-circle placement",
     )
     for center_x, size in zip(centers, _ICON_REVIEW_SIZES, strict=True):
         draw.centered_label(
@@ -4618,12 +4626,13 @@ def _draw_icon_family_detail(
             )
 
         meta_x = origin[0] + 1160.0 * scale
-        clearance, offset_x, offset_y = _icon_review_metrics(name, padding, mouse_width)
-        anchor = icon_alignment_anchor(name)
+        clearance, circle_x, circle_y, box_x, box_y = _icon_review_metrics(
+            name, padding, mouse_width
+        )
         for line, line_y in (
             (f"{name} · pad {clearance:.2f}u", -20.0),
-            (f"box  {offset_x:+.2f},{offset_y:+.2f}u", 0.0),
-            (f"anchor  {anchor}", 20.0),
+            (f"circle  {circle_x:+.2f},{circle_y:+.2f}u", 0.0),
+            (f"box  {box_x:+.2f},{box_y:+.2f}u", 20.0),
         ):
             draw.text(
                 (meta_x, center_y + line_y * scale),
@@ -4688,7 +4697,7 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     draw.text(
         (metrics_x, playback_y - 4.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Visible-box center after placement; every value must be 0.00, 0.00",
+        "Minimum enclosing-circle center after placement; every value must be 0.00, 0.00",
     )
     playback_padding = state.icon_padding_for("Viewport playback")
     for index, name in enumerate(
@@ -4707,7 +4716,10 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
         draw.text(
             (metrics_x, playback_y + (30.0 + index * 25.0) * scale),
             CONCEPT_THEME.text_disabled,
-            (f"{name:<20} box {metrics.center_offset[0]:+0.2f}, {metrics.center_offset[1]:+0.2f}u"),
+            (
+                f"{name:<20} circle {metrics.enclosing_center[0]:+0.2f}, "
+                f"{metrics.enclosing_center[1]:+0.2f}u"
+            ),
         )
 
     semantic_y = playback_y + 252.0 * scale
@@ -4800,7 +4812,7 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     draw.text(
         (metrics_x, tools_y + 80.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Capsule cell and state-circle centers coincide; fixed playback marks keep their contract.",
+        "Capsule cell, state circle, and glyph minimum-circle centers coincide.",
     )
 
 
