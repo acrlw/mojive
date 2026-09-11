@@ -563,8 +563,8 @@ def _draw_tool(p: _Painter, name: str) -> None:
                 (direction[0] * clear_radius, direction[1] * clear_radius),
                 (direction[0] * reach, direction[1] * reach),
                 width=1.4,
-                head_size=3.0,
-                corner_radius=0.54,
+                head_size=2.4,
+                corner_radius=0.45,
             )
         p.circle_filled(0.0, 0.0, dot_radius)
     elif name == "tool-world":
@@ -720,13 +720,15 @@ def _search_icon_mesh():
         handle = math.hypot(x - along, y) - handle_half_width
         return float(smooth_union(circle, handle, blend))
 
-    count = 193
-    xs = {
+    # A uniform parameter avoids near-duplicate strip columns at the circle and
+    # handle landmarks. Those tiny edges destabilize fringe normals and appear
+    # as spikes on the 112-point lens even when the implicit field is smooth.
+    count = 257
+    xs = tuple(
         -outer_radius + (handle_tip + outer_radius) * index / (count - 1) for index in range(count)
-    }
-    xs.update((-outer_radius, -inner_radius, inner_radius, handle_start, handle_end, handle_tip))
+    )
     columns = []
-    for x in sorted(xs):
+    for x in xs:
         if field(x, 0.0) > 1e-7:
             outer_y = 0.0
         else:
@@ -791,10 +793,11 @@ def _draw_panel(p: _Painter, name: str) -> None:
     elif kind == "sort":
         for y, end in ((-5.09, 2.24), (0.11, 0.04), (5.31, -2.16)):
             p.line((-6.76, y), (end, y), width=1.45)
-        # The arrow tip and tail align with the top and bottom bar centerlines.
+        # The round tail aligns with the top bar centerline; the head tip aligns
+        # with the visible lower edge of the bottom bar.
         p.arrow(
             (5.54, -5.09),
-            (5.54, 5.31),
+            (5.54, 5.31 + 1.45 * 0.5),
             width=1.4,
             head_length=3.0,
             head_width=4.6,
@@ -1153,16 +1156,16 @@ def _icon_layout(name: str) -> tuple[float, tuple[float, float]]:
 
     raw = _measure_raw_icon(name)
     anchor = icon_alignment_anchor(name)
-    if anchor == "hub":
-        # Scale rotates around its authored hub, which is the local origin.
+    if anchor in {"hub", "arc"}:
+        # Scale's hub and Snap's lower-arc center are authored at the origin.
         offset = (0.0, 0.0)
     elif anchor == "sphere":
-        # Panel and Snap placement is defined by the actual minimum bounding
-        # circle, rather than its axis-aligned box or asymmetric ink mass.
+        # Compound Keyframe and nondirectional Panel marks use the actual
+        # minimum bounding circle instead of an asymmetric box or ink mass.
         offset = (-raw.bounding_center[0], -raw.bounding_center[1])
     elif anchor == "ink":
-        # Directional marks and optically unbalanced helpers read from their
-        # ink mass. Their asymmetric boxes are therefore diagnostic.
+        # Optically unbalanced helpers read from their ink mass. Their
+        # asymmetric boxes are therefore diagnostic.
         offset = (-raw.ink_center[0], -raw.ink_center[1])
     else:
         offset = (-raw.center_offset[0], -raw.center_offset[1])
@@ -1177,9 +1180,13 @@ def icon_alignment_anchor(name: str) -> str:
 
     if name == "tool-scale":
         return "hub"
-    if name.startswith("panel-") or name == "tool-snap":
+    if name == "tool-snap":
+        return "arc"
+    if name.startswith("key-") or (
+        name.startswith("panel-") and name not in {"panel-right", "panel-down"}
+    ):
         return "sphere"
-    if name == "helper-camera" or name.startswith("transport-"):
+    if name == "helper-camera":
         return "ink"
     return "box"
 
